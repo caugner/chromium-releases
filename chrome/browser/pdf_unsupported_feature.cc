@@ -8,17 +8,17 @@
 #include "base/values.h"
 #include "base/version.h"
 #include "chrome/browser/metrics/user_metrics.h"
-#include "chrome/browser/plugin_service.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/renderer_host/render_process_host.h"
-#include "chrome/browser/renderer_host/render_view_host.h"
-#include "chrome/browser/tab_contents/infobar_delegate.h"
-#include "chrome/browser/tab_contents/interstitial_page.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/tab_contents/confirm_infobar_delegate.h"
 #include "chrome/common/jstemplate_builder.h"
 #include "chrome/common/pepper_plugin_registry.h"
 #include "chrome/common/pref_names.h"
+#include "content/browser/plugin_service.h"
+#include "content/browser/renderer_host/render_process_host.h"
+#include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/tab_contents/interstitial_page.h"
+#include "content/browser/tab_contents/tab_contents.h"
 #include "grit/browser_resources.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -31,10 +31,13 @@ using webkit::npapi::PluginGroup;
 using webkit::npapi::PluginList;
 using webkit::npapi::WebPluginInfo;
 
+namespace {
+
 // Only launch Adobe Reader X or later.
 static const uint16 kMinReaderVersionToUse = 10;
 
-namespace {
+static const char kReaderUpdateUrl[] =
+    "http://www.adobe.com/go/getreader_chrome";
 
 // The info bar delegate used to ask the user if they want to use Adobe Reader
 // by default.  We want the infobar to have [No][Yes], so we swap the text on
@@ -121,7 +124,7 @@ class PDFEnableAdobeReaderConfirmInfoBarDelegate
 
 // Launch the url to get the latest Adbobe Reader installer.
 void OpenReaderUpdateURL(TabContents* tab) {
-  tab->OpenURL(GURL(PluginGroup::kAdobeReaderUpdateURL), GURL(), CURRENT_TAB,
+  tab->OpenURL(GURL(kReaderUpdateUrl), GURL(), CURRENT_TAB,
                PageTransition::LINK);
 }
 

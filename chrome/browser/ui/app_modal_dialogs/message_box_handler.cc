@@ -9,18 +9,18 @@
 #include "build/build_config.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/app_modal_dialogs/app_modal_dialog_queue.h"
 #include "chrome/browser/ui/app_modal_dialogs/js_modal_dialog.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "gfx/font.h"
+#include "content/browser/tab_contents/tab_contents.h"
 #include "googleurl/src/gurl.h"
 #include "grit/generated_resources.h"
 #include "grit/chromium_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/message_box_flags.h"
 #include "ui/base/text/text_elider.h"
+#include "ui/gfx/font.h"
 
 static std::wstring GetTitle(Profile* profile,
                              bool is_alert,
@@ -47,8 +47,7 @@ static std::wstring GetTitle(Profile* profile,
   // TODO(brettw) it should be easier than this to do the correct language
   // handling without getting the accept language from the profile.
   string16 base_address = ui::ElideUrl(frame_url.GetOrigin(),
-      gfx::Font(), 0,
-      UTF8ToWide(profile->GetPrefs()->GetString(prefs::kAcceptLanguages)));
+      gfx::Font(), 0, profile->GetPrefs()->GetString(prefs::kAcceptLanguages));
 
   // Force URL to have LTR directionality.
   base_address = base::i18n::GetDisplayStringInLTRDirectionality(

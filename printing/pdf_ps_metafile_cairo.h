@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,8 @@
 #include <string>
 
 #include "base/basictypes.h"
+#include "base/gtest_prod_util.h"
+#include "printing/native_metafile_linux.h"
 
 typedef struct _cairo_surface cairo_surface_t;
 typedef struct _cairo cairo_t;
@@ -22,73 +24,58 @@ namespace printing {
 
 // This class uses Cairo graphics library to generate PostScript/PDF stream
 // and stores rendering results in a string buffer.
-class PdfPsMetafile {
+class PdfPsMetafile : public NativeMetafile  {
  public:
-  enum FileFormat {
-    PDF,
-    PS,
-  };
-
-  PdfPsMetafile();
-
-  // In the renderer process, callers should also call Init(void) to see if the
-  // metafile can obtain all necessary rendering resources.
-  // In the browser process, callers should also call Init(const void*, uint32)
-  // to initialize the buffer |data_| to use SaveTo().
-  explicit PdfPsMetafile(const FileFormat& format);
-
-  ~PdfPsMetafile();
+  virtual ~PdfPsMetafile();
 
   // Initializes to a fresh new metafile. Returns true on success.
   // Note: Only call in the renderer to allocate rendering resources.
-  bool Init();
+  virtual bool Init();
 
-  // Initializes a copy of metafile from PDF/PS stream data.
+  // Initializes a copy of metafile from PDF stream data.
   // Returns true on success.
-  // |src_buffer| should point to the shared memory which stores PDF/PS
+  // |src_buffer| should point to the shared memory which stores PDF
   // contents generated in the renderer.
   // Note: Only call in the browser to initialize |data_|.
-  bool Init(const void* src_buffer, uint32 src_buffer_size);
+  virtual bool Init(const void* src_buffer, uint32 src_buffer_size);
 
-  // Sets raw PS/PDF data for the document. This is used when a cairo drawing
+  // Sets raw PDF data for the document. This is used when a cairo drawing
   // surface has already been created. This method will cause all subsequent
   // drawing on the surface to be discarded (in Close()). If Init() has not yet
   // been called this method simply calls the second version of Init.
-  bool SetRawData(const void* src_buffer, uint32 src_buffer_size);
-
-  FileFormat GetFileFormat() const { return format_; }
+  virtual bool SetRawData(const void* src_buffer, uint32 src_buffer_size);
 
   // Prepares a new cairo surface/context for rendering a new page.
   // The unit is in point (=1/72 in).
   // Returns NULL when failed.
-  cairo_t* StartPage(double width_in_points,
-                     double height_in_points,
-                     double margin_top_in_points,
-                     double margin_right_in_points,
-                     double margin_bottom_in_points,
-                     double margin_left_in_points);
+  virtual cairo_t* StartPage(double width_in_points,
+                             double height_in_points,
+                             double margin_top_in_points,
+                             double margin_right_in_points,
+                             double margin_bottom_in_points,
+                             double margin_left_in_points);
 
   // Destroys the surface and the context used in rendering current page.
   // The results of current page will be appended into buffer |data_|.
   // Returns true on success.
-  bool FinishPage();
+  virtual bool FinishPage();
 
-  // Closes resulting PDF/PS file. No further rendering is allowed.
-  void Close();
+  // Closes resulting PDF file. No further rendering is allowed.
+  virtual void Close();
 
-  // Returns size of PDF/PS contents stored in buffer |data_|.
-  // This function should ONLY be called after PDF/PS file is closed.
-  uint32 GetDataSize() const;
+  // Returns size of PDF contents stored in buffer |data_|.
+  // This function should ONLY be called after PDF file is closed.
+  virtual uint32 GetDataSize() const;
 
-  // Copies PDF/PS contents stored in buffer |data_| into |dst_buffer|.
-  // This function should ONLY be called after PDF/PS file is closed.
+  // Copies PDF contents stored in buffer |data_| into |dst_buffer|.
+  // This function should ONLY be called after PDF file is closed.
   // Returns true only when success.
-  bool GetData(void* dst_buffer, uint32 dst_buffer_size) const;
+  virtual bool GetData(void* dst_buffer, uint32 dst_buffer_size) const;
 
-  // Saves PDF/PS contents stored in buffer |data_| into the file
+  // Saves PDF contents stored in buffer |data_| into the file
   // associated with |fd|.
-  // This function should ONLY be called after PDF/PS file is closed.
-  bool SaveTo(const base::FileDescriptor& fd) const;
+  // This function should ONLY be called after PDF file is closed.
+  virtual bool SaveTo(const base::FileDescriptor& fd) const;
 
   // The hardcoded margins, in points. These values are based on 72 dpi,
   // with 0.25 margins on top, left, and right, and 0.56 on bottom.
@@ -98,22 +85,26 @@ class PdfPsMetafile {
   static const double kLeftMarginInInch;
 
   // Returns the PdfPsMetafile object that owns the given context. Returns NULL
-  // if the context was not created by a PdfPdMetafile object.
+  // if the context was not created by a PdfPsMetafile object.
   static PdfPsMetafile* FromCairoContext(cairo_t* context);
 
+ protected:
+  PdfPsMetafile();
+
  private:
+  friend class NativeMetafileFactory;
+  FRIEND_TEST_ALL_PREFIXES(PdfPsTest, Pdf);
+
   // Cleans up all resources.
   void CleanUpAll();
 
-  FileFormat format_;
-
-  // Cairo surface and context for entire PDF/PS file.
+  // Cairo surface and context for entire PDF file.
   cairo_surface_t* surface_;
   cairo_t* context_;
 
-  // Buffer stores PDF/PS contents for entire PDF/PS file.
+  // Buffer stores PDF contents for entire PDF file.
   std::string data_;
-  // Buffer stores raw PDF/PS contents set by SetRawPageData.
+  // Buffer stores raw PDF contents set by SetRawPageData.
   std::string raw_override_data_;
 
   DISALLOW_COPY_AND_ASSIGN(PdfPsMetafile);

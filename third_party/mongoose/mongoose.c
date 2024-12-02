@@ -99,7 +99,9 @@ typedef long off_t;
 #define DIRSEP      '\\'
 #define IS_DIRSEP_CHAR(c) ((c) == '/' || (c) == '\\')
 #define O_NONBLOCK    0
+#if !defined(_MSC_VER) || _MSC_VER < 1600
 #define EWOULDBLOCK   WSAEWOULDBLOCK
+#endif
 #define _POSIX_
 #define UINT64_FMT    "I64"
 
@@ -4477,10 +4479,10 @@ get_socket(struct mg_context *ctx, struct socket *sp)
   ctx->num_idle++;
   while (ctx->sq_head == ctx->sq_tail) {
     ts.tv_nsec = 0;
-#ifdef OS_POSIX
-    ts.tv_sec = time(NULL) + atoi(ctx->options[OPT_IDLE_TIME]) + 1;
-#elif _WIN32
+#ifdef _WIN32
     ts.tv_sec = (long) (time(NULL) + atoi(ctx->options[OPT_IDLE_TIME]) + 1);
+#else
+    ts.tv_sec = time(NULL) + atoi(ctx->options[OPT_IDLE_TIME]) + 1;
 #endif
     if (pthread_cond_timedwait(&ctx->empty_cond,
         &ctx->thr_mutex, &ts) != 0) {
@@ -4543,12 +4545,12 @@ worker_thread(struct mg_context *ctx)
   }
 
   /* Signal master that we're done with connection and exiting */
-  pthread_mutex_lock(&conn.ctx->thr_mutex);
-  conn.ctx->num_threads--;
-  conn.ctx->num_idle--;
-  pthread_cond_signal(&conn.ctx->thr_cond);
-  assert(conn.ctx->num_threads >= 0);
-  pthread_mutex_unlock(&conn.ctx->thr_mutex);
+  pthread_mutex_lock(&ctx->thr_mutex);
+  ctx->num_threads--;
+  ctx->num_idle--;
+  pthread_cond_signal(&ctx->thr_cond);
+  assert(ctx->num_threads >= 0);
+  pthread_mutex_unlock(&ctx->thr_mutex);
 
   DEBUG_TRACE((DEBUG_MGS_PREFIX "%s: thread %p exiting",
       __func__, (void *) pthread_self()));
@@ -4745,4 +4747,3 @@ mg_start(void)
 
   return (ctx);
 }
-

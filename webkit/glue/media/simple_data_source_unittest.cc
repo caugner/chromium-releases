@@ -32,20 +32,20 @@ using WebKit::WebURLLoader;
 using WebKit::WebURLRequest;
 using WebKit::WebURLResponse;
 
-namespace {
-
-const int kDataSize = 1024;
-const char kHttpUrl[] = "http://test";
-const char kHttpsUrl[] = "https://test";
-const char kFileUrl[] = "file://test";
-const char kDataUrl[] =
-    "data:text/plain;base64,YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXoK";
-const char kDataUrlDecoded[] = "abcdefghijklmnopqrstuvwxyz";
-const char kInvalidUrl[] = "whatever://test";
-
-}  // namespace
-
 namespace webkit_glue {
+
+static const int kDataSize = 1024;
+static const char kHttpUrl[] = "http://test";
+static const char kHttpsUrl[] = "https://test";
+static const char kFileUrl[] = "file://test";
+static const char kDataUrl[] =
+    "data:text/plain;base64,YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXoK";
+static const char kDataUrlDecoded[] = "abcdefghijklmnopqrstuvwxyz";
+static const char kInvalidUrl[] = "whatever://test";
+static const char kHttpRedirectToSameDomainUrl1[] = "http://test/ing";
+static const char kHttpRedirectToSameDomainUrl2[] = "http://test/ing2";
+static const char kHttpRedirectToDifferentDomainUrl1[] = "http://test2";
+static const char kHttpRedirectToDifferentDomainUrl2[] = "http://test2/ing";
 
 class SimpleDataSourceTest : public testing::Test {
  public:
@@ -110,6 +110,16 @@ class SimpleDataSourceTest : public testing::Test {
     data_source_->didFail(NULL, error);
 
     // Let the tasks to be executed.
+    MessageLoop::current()->RunAllPending();
+  }
+
+  void Redirect(const char* url) {
+    GURL redirectUrl(url);
+    WebKit::WebURLRequest newRequest(redirectUrl);
+    WebKit::WebURLResponse redirectResponse(gurl_);
+
+    data_source_->willSendRequest(url_loader_, newRequest, redirectResponse);
+
     MessageLoop::current()->RunAllPending();
   }
 
@@ -210,6 +220,47 @@ TEST_F(SimpleDataSourceTest, AsyncRead) {
   InitializeDataSource(kFileUrl, media::NewExpectedCallback());
   RequestSucceeded(true);
   AsyncRead();
+  DestroyDataSource();
+}
+
+// NOTE: This test will need to be reworked a little once
+// http://code.google.com/p/chromium/issues/detail?id=72578
+// is fixed.
+TEST_F(SimpleDataSourceTest, HasSingleOrigin) {
+  // Make sure no redirect case works as expected.
+  InitializeDataSource(kHttpUrl, media::NewExpectedCallback());
+  RequestSucceeded(false);
+  EXPECT_TRUE(data_source_->HasSingleOrigin());
+  DestroyDataSource();
+
+  // Test redirect to the same domain.
+  InitializeDataSource(kHttpUrl, media::NewExpectedCallback());
+  Redirect(kHttpRedirectToSameDomainUrl1);
+  RequestSucceeded(false);
+  EXPECT_TRUE(data_source_->HasSingleOrigin());
+  DestroyDataSource();
+
+  // Test redirect twice to the same domain.
+  InitializeDataSource(kHttpUrl, media::NewExpectedCallback());
+  Redirect(kHttpRedirectToSameDomainUrl1);
+  Redirect(kHttpRedirectToSameDomainUrl2);
+  RequestSucceeded(false);
+  EXPECT_TRUE(data_source_->HasSingleOrigin());
+  DestroyDataSource();
+
+  // Test redirect to a different domain.
+  InitializeDataSource(kHttpUrl, media::NewExpectedCallback());
+  Redirect(kHttpRedirectToDifferentDomainUrl1);
+  RequestSucceeded(false);
+  EXPECT_FALSE(data_source_->HasSingleOrigin());
+  DestroyDataSource();
+
+  // Test redirect to the same domain and then to a different domain.
+  InitializeDataSource(kHttpUrl, media::NewExpectedCallback());
+  Redirect(kHttpRedirectToSameDomainUrl1);
+  Redirect(kHttpRedirectToDifferentDomainUrl1);
+  RequestSucceeded(false);
+  EXPECT_FALSE(data_source_->HasSingleOrigin());
   DestroyDataSource();
 }
 

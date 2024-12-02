@@ -10,12 +10,26 @@
   width: 12em;
 }
 
-#font-settings > section > .font-sample-div {
-  height: 90px;
+#font-settings > section {
   overflow: hidden;
-  position: absolute;
+}
+
+#font-settings > section > .font-sample-div {
+  height: 70px;
+  overflow: hidden;
+  width: 300px;
 }
 
 .font-settings-huge {
   float: right;
+}
+
+#minimum-font-sample {
+  height: 35px;
+  overflow: hidden;
+  width: 300px;
+}
+
+#font-settings input[type="range"] {
+  width: 100%;
 }

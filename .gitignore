@@ -1,6 +1,7 @@
 *.Makefile
 *.mk
 *.ncb
+*.ninja
 *.pyc
 *.rules
 *.scons
@@ -33,6 +34,7 @@ v8.log
 /build/util/support
 # The Chrome OS build creates a /c symlink due to http://crbug.com/54866.
 /c
+/ceee/internal/
 /chrome/Debug
 /chrome/Hammer
 /chrome/Release
@@ -58,11 +60,15 @@ v8.log
 /googleurl
 /gpu/gles2_conform_test
 /native_client
+/net/Debug
+/net/Release
+/ninja
 /out
 /out_*
 /rlz
 /sdch/open-vcdiff
 /seccompsandbox
+/testing/gmock
 /testing/gtest
 /testserver.log
 /third_party/GTM
@@ -75,6 +81,7 @@ v8.log
 /third_party/cros
 /third_party/cygwin
 /third_party/directxsdk
+/third_party/drmemory
 /third_party/flac
 /third_party/ffmpeg
 /third_party/gles2_conform
@@ -100,14 +107,17 @@ v8.log
 /third_party/platformsdk_win7
 /third_party/ppapi
 /third_party/pthreads-win32
+/third_party/pylib
 /third_party/python_24
 /third_party/python_26
 /third_party/pywebsocket
 /third_party/safe_browsing/testing
+/third_party/scons
 /third_party/skia
 /third_party/speex
 /third_party/swig
 /third_party/valgrind
+/third_party/webdriver/python
 /third_party/xdg-utils
 /third_party/xulrunner-sdk
 /third_party/yasm/binaries
@@ -119,7 +129,6 @@ v8.log
 /tools/page_cycler/acid3
 /tools/tryserver
 /v8
-/valgrind.tmp
 /webkit/Debug
 /webkit/Release
 /webkit/data/bmp_decoder

@@ -10,9 +10,10 @@
 #include <vector>
 
 #include "chrome/browser/extensions/extension_function_dispatcher.h"
-#include "chrome/browser/renderer_host/render_view_host_delegate.h"
 #include "chrome/browser/tab_contents/render_view_host_delegate_helper.h"
+#include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
+#include "content/browser/renderer_host/render_view_host_delegate.h"
 
 class Balloon;
 class Browser;
@@ -59,7 +60,7 @@ class BalloonHost : public RenderViewHostDelegate,
   virtual int GetBrowserWindowID() const;
   virtual ViewType::Type GetRenderViewType() const;
   virtual RenderViewHostDelegate::View* GetViewDelegate();
-  virtual void ProcessDOMUIMessage(const ViewHostMsg_DomMessage_Params& params);
+  virtual void ProcessWebUIMessage(const ViewHostMsg_DomMessage_Params& params);
 
   // NotificationObserver override.
   virtual void Observe(NotificationType type,
@@ -71,11 +72,9 @@ class BalloonHost : public RenderViewHostDelegate,
   // windows are currently implemented.
   virtual void CreateNewWindow(
       int route_id,
-      WindowContainerType window_container_type,
-      const string16& frame_name);
+      const ViewHostMsg_CreateWindow_Params& params);
   virtual void CreateNewWidget(int route_id, WebKit::WebPopupType popup_type) {}
-  virtual void CreateNewFullscreenWidget(
-      int route_id, WebKit::WebPopupType popup_type) {}
+  virtual void CreateNewFullscreenWidget(int route_id) {}
   virtual void ShowCreatedWindow(int route_id,
                                  WindowOpenDisposition disposition,
                                  const gfx::Rect& initial_pos,
@@ -113,8 +112,8 @@ class BalloonHost : public RenderViewHostDelegate,
   virtual void UpdatePreferredSize(const gfx::Size& pref_size);
   virtual RendererPreferences GetRendererPrefs(Profile* profile) const;
 
-  // Enable DOM UI. This has to be called before renderer is created.
-  void EnableDOMUI();
+  // Enable Web UI. This has to be called before renderer is created.
+  void EnableWebUI();
 
   virtual void UpdateInspectorSetting(const std::string& key,
                                       const std::string& value);
@@ -155,8 +154,8 @@ class BalloonHost : public RenderViewHostDelegate,
   // rendering a page from an extension.
   scoped_ptr<ExtensionFunctionDispatcher> extension_function_dispatcher_;
 
-  // A flag to enable DOM UI.
-  bool enable_dom_ui_;
+  // A flag to enable Web UI.
+  bool enable_web_ui_;
 
   NotificationRegistrar registrar_;
 };

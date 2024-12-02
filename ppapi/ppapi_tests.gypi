@@ -190,6 +190,8 @@
         'tests/test_file_io.h',
         'tests/test_file_ref.cc',
         'tests/test_file_ref.h',
+        'tests/test_file_system.cc',
+        'tests/test_file_system.h',
         'tests/test_graphics_2d.cc',
         'tests/test_graphics_2d.h',
         'tests/test_image_data.cc',
@@ -267,8 +269,16 @@
       'sources': [
         'proxy/run_all_unittests.cc',
 
+        'proxy/host_dispatcher_unittest.cc',
+        'proxy/mock_resource.cc',
+        'proxy/mock_resource.h',
+        'proxy/plugin_dispatcher_unittest.cc',
+        'proxy/plugin_resource_tracker_unittest.cc',
         'proxy/plugin_var_tracker_unittest.cc',
+        'proxy/ppapi_proxy_test.cc',
+        'proxy/ppapi_proxy_test.h',
+        'proxy/serialized_var_unittest.cc',
       ],
-    },    
+    },
   ],
 }

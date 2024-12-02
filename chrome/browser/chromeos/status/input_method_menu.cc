@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,8 +18,8 @@
 #include "chrome/browser/chromeos/language_preferences.h"
 #include "chrome/browser/metrics/user_metrics.h"
 #include "chrome/browser/prefs/pref_service.h"
-#include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
+#include "content/common/notification_service.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -87,6 +87,7 @@ const struct {
   { "xkb:us:dvorak:eng", "DV" },
   { "xkb:us:intl:eng", "INTL" },
   { "xkb:us:colemak:eng", "CO" },
+  { "xkb:de:neo:ger", "NEO" },
   // To distinguish from "xkb:jp::jpn"
   { "mozc", "\xe3\x81\x82" },  // U+3042, Japanese Hiragana letter A in UTF-8.
   { "mozc-dv", "\xe3\x81\x82" },
@@ -135,26 +136,15 @@ InputMethodMenu::InputMethodMenu(PrefService* pref_service,
          !input_method_descriptors_->empty());
 
   // Sync current and previous input methods on Chrome prefs with ibus-daemon.
-  // InputMethodChanged() will be called soon and the indicator will be updated.
-  InputMethodLibrary* library = CrosLibrary::Get()->GetInputMethodLibrary();
-  if (pref_service && (screen_mode_ == StatusAreaHost::kBrowserMode)) {
+  if (pref_service_ && (screen_mode_ == StatusAreaHost::kBrowserMode)) {
     previous_input_method_pref_.Init(
         prefs::kLanguagePreviousInputMethod, pref_service, this);
-    const std::string previous_input_method_id =
-        previous_input_method_pref_.GetValue();
-    if (!previous_input_method_id.empty()) {
-      library->ChangeInputMethod(previous_input_method_id);
-    }
-
     current_input_method_pref_.Init(
         prefs::kLanguageCurrentInputMethod, pref_service, this);
-    const std::string current_input_method_id =
-        current_input_method_pref_.GetValue();
-    if (!current_input_method_id.empty()) {
-      library->ChangeInputMethod(current_input_method_id);
-    }
   }
-  library->AddObserver(this);
+
+  InputMethodLibrary* library = CrosLibrary::Get()->GetInputMethodLibrary();
+  library->AddObserver(this);  // FirstObserverIsAdded() might be called back.
 
   if (screen_mode_ == StatusAreaHost::kLoginMode) {
     // This button is for the login screen.
@@ -174,7 +164,7 @@ InputMethodMenu::~InputMethodMenu() {
 // ui::MenuModel implementation:
 
 int InputMethodMenu::GetCommandIdAt(int index) const {
-  return 0;  // dummy
+  return index;
 }
 
 bool InputMethodMenu::IsItemDynamicAt(int index) const {
@@ -329,6 +319,8 @@ void InputMethodMenu::ActivatedAt(int index) {
         = input_method_descriptors_->at(index);
     CrosLibrary::Get()->GetInputMethodLibrary()->ChangeInputMethod(
         input_method.id);
+    UserMetrics::RecordAction(
+        UserMetricsAction("LanguageMenuButton_InputMethodChanged"));
     return;
   }
 
@@ -376,12 +368,10 @@ void InputMethodMenu::RunMenu(
 
 void InputMethodMenu::InputMethodChanged(
     InputMethodLibrary* obj,
-    const InputMethodDescriptor& previous_input_method,
     const InputMethodDescriptor& current_input_method,
     size_t num_active_input_methods) {
-  UserMetrics::RecordAction(
-      UserMetricsAction("LanguageMenuButton_InputMethodChanged"));
   UpdateUIFromInputMethod(current_input_method, num_active_input_methods);
+  PrepareMenu();
 }
 
 void InputMethodMenu::PreferenceUpdateNeeded(
@@ -403,8 +393,36 @@ void InputMethodMenu::PreferenceUpdateNeeded(
   }
 }
 
+void InputMethodMenu::FirstObserverIsAdded(InputMethodLibrary* obj) {
+  // NOTICE: Since this function might be called from the constructor of this
+  // class, it's better to avoid calling virtual functions.
+
+  if (pref_service_ && (screen_mode_ == StatusAreaHost::kBrowserMode)) {
+    // Get the input method name in the Preferences file which was in use last
+    // time, and switch to the method. We remember two input method names in the
+    // preference so that the Control+space hot-key could work fine from the
+    // beginning. InputMethodChanged() will be called soon and the indicator
+    // will be updated.
+    InputMethodLibrary* library = CrosLibrary::Get()->GetInputMethodLibrary();
+    const std::string previous_input_method_id =
+        previous_input_method_pref_.GetValue();
+    if (!previous_input_method_id.empty()) {
+      library->ChangeInputMethod(previous_input_method_id);
+    }
+    const std::string current_input_method_id =
+        current_input_method_pref_.GetValue();
+    if (!current_input_method_id.empty()) {
+      library->ChangeInputMethod(current_input_method_id);
+    }
+  }
+}
+
 void InputMethodMenu::PrepareForMenuOpen() {
   UserMetrics::RecordAction(UserMetricsAction("LanguageMenuButton_Open"));
+  PrepareMenu();
+}
+
+void InputMethodMenu::PrepareMenu() {
   input_method_descriptors_.reset(CrosLibrary::Get()->GetInputMethodLibrary()->
                                   GetActiveInputMethods());
   RebuildModel();
@@ -530,8 +548,8 @@ std::wstring InputMethodMenu::GetTextForIndicator(
     }
   }
 
-  // Display the keyboard layout name when using ibus-xkb.
-  if (text.empty()) {
+  // Display the keyboard layout name when using a keyboard layout.
+  if (text.empty() && input_method::IsKeyboardLayout(input_method.id)) {
     const size_t kMaxKeyboardLayoutNameLen = 2;
     const std::wstring keyboard_layout = UTF8ToWide(
         input_method::GetKeyboardLayoutName(input_method.id));

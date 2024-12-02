@@ -6,9 +6,9 @@
 #include "chrome/browser/debugger/devtools_client_host.h"
 #include "chrome/browser/debugger/devtools_manager.h"
 #include "chrome/browser/debugger/devtools_window.h"
-#include "chrome/browser/renderer_host/test/test_render_view_host.h"
-#include "testing/gtest/include/gtest/gtest.h"
 #include "chrome/common/render_messages.h"
+#include "content/browser/renderer_host/test_render_view_host.h"
+#include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
 
@@ -40,6 +40,9 @@ class TestDevToolsClientHost : public DevToolsClientHost {
     last_sent_message = &message;
   }
 
+  virtual void TabReplaced(TabContentsWrapper* new_tab) {
+  }
+
   static void ResetCounters() {
     close_counter = 0;
   }
@@ -50,6 +53,8 @@ class TestDevToolsClientHost : public DevToolsClientHost {
 
  private:
   bool closed_;
+
+  virtual void FrameNavigating(const std::string& url) {}
 
   DISALLOW_COPY_AND_ASSIGN(TestDevToolsClientHost);
 };

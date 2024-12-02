@@ -5,16 +5,16 @@
 #include "base/command_line.h"
 #include "base/message_loop_proxy.h"
 #include "base/ref_counted.h"
-#include "base/threading/thread.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/threading/thread.h"
 #include "chrome/common/net/url_request_context_getter.h"
-#include "chrome/service/service_process.h"
 #include "chrome/service/cloud_print/cloud_print_url_fetcher.h"
+#include "chrome/service/service_process.h"
 #include "googleurl/src/gurl.h"
 #include "net/test/test_server.h"
 #include "net/url_request/url_request_status.h"
+#include "net/url_request/url_request_test_util.h"
 #include "net/url_request/url_request_throttler_manager.h"
-#include "net/url_request/url_request_unittest.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using base::Time;
@@ -192,7 +192,7 @@ void CloudPrintURLFetcherTest::CreateFetcher(const GURL& url, int max_retries) {
   fetcher_ = new TestCloudPrintURLFetcher(io_message_loop_proxy());
   max_retries_ = max_retries;
   start_time_ = Time::Now();
-  fetcher_->StartGetRequest(url, this, "", max_retries_);
+  fetcher_->StartGetRequest(url, this, "", max_retries_, std::string());
 }
 
 CloudPrintURLFetcher::ResponseAction
@@ -264,7 +264,7 @@ CloudPrintURLFetcherOverloadTest::HandleRawData(const URLFetcher* source,
   const TimeDelta one_second = TimeDelta::FromMilliseconds(1000);
   response_count_++;
   if (response_count_ < 20) {
-    fetcher_->StartGetRequest(url, this, "", max_retries_);
+    fetcher_->StartGetRequest(url, this, "", max_retries_, std::string());
   } else {
     // We have already sent 20 requests continuously. And we expect that
     // it takes more than 1 second due to the overload protection settings.

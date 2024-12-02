@@ -8,13 +8,13 @@
 #include "base/logging.h"
 #include "base/task.h"
 #include "base/time.h"
-#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/password_manager/password_store.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/glue/password_change_processor.h"
 #include "chrome/browser/sync/glue/password_model_associator.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_factory.h"
+#include "content/browser/browser_thread.h"
 
 namespace browser_sync {
 
@@ -43,6 +43,16 @@ void PasswordDataTypeController::Start(StartCallback* start_callback) {
     return;
   }
 
+  password_store_ = profile_->GetPasswordStore(Profile::EXPLICIT_ACCESS);
+  if (!password_store_.get()) {
+    LOG(ERROR) << "PasswordStore not initialized, password datatype controller"
+        << " aborting.";
+    state_ = NOT_RUNNING;
+    start_callback->Run(ABORTED);
+    delete start_callback;
+    return;
+  }
+
   if (!sync_service_->IsCryptographerReady()) {
     start_callback->Run(NEEDS_CRYPTO);
     delete start_callback;
@@ -50,10 +60,7 @@ void PasswordDataTypeController::Start(StartCallback* start_callback) {
   }
 
   start_callback_.reset(start_callback);
-
   set_state(ASSOCIATING);
-  password_store_ = profile_->GetPasswordStore(Profile::EXPLICIT_ACCESS);
-  DCHECK(password_store_.get());
   password_store_->ScheduleTask(
       NewRunnableMethod(this, &PasswordDataTypeController::StartImpl));
 }

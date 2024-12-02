@@ -8,6 +8,10 @@
 #include "../common/buffer.h"
 #include "../common/constants.h"
 
+namespace base {
+class SharedMemory;
+}
+
 namespace gpu {
 
 // Common interface for CommandBuffer implementations.
@@ -55,6 +59,9 @@ class CommandBuffer {
   // Initialize the command buffer with the given size.
   virtual bool Initialize(int32 size) = 0;
 
+  // Initialize the command buffer using the given preallocated buffer.
+  virtual bool Initialize(base::SharedMemory* buffer, int32 size) = 0;
+
   // Gets the ring buffer for the command buffer.
   virtual Buffer GetRingBuffer() = 0;
 
@@ -79,6 +86,12 @@ class CommandBuffer {
   // Create a transfer buffer and return a handle that uniquely
   // identifies it or -1 on error.
   virtual int32 CreateTransferBuffer(size_t size) = 0;
+
+  // Register an existing shared memory object and get an ID that can be used
+  // to identify it in the command buffer. Callee dups the handle until
+  // DestroyTransferBuffer is called.
+  virtual int32 RegisterTransferBuffer(base::SharedMemory* shared_memory,
+                                       size_t size) = 0;
 
   // Destroy a transfer buffer and recycle the handle.
   virtual void DestroyTransferBuffer(int32 id) = 0;

@@ -3,11 +3,10 @@
 // found in the LICENSE file.
 
 #include "chrome/browser/geolocation/geolocation_exceptions_table_model.h"
-
-#include "chrome/browser/browser_thread.h"
-#include "chrome/browser/renderer_host/test/test_render_view_host.h"
 #include "chrome/common/content_settings_helper.h"
 #include "chrome/test/testing_profile.h"
+#include "content/browser/browser_thread.h"
+#include "content/browser/renderer_host/test_render_view_host.h"
 #include "grit/generated_resources.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -15,7 +14,6 @@ namespace {
 const GURL kUrl0("http://www.example.com");
 const GURL kUrl1("http://www.example1.com");
 const GURL kUrl2("http://www.example2.com");
-}  // namespace
 
 class GeolocationExceptionsTableModelTest : public RenderViewHostTestHarness {
  public:
@@ -141,3 +139,5 @@ TEST_F(GeolocationExceptionsTableModelTest, GetText) {
   EXPECT_NE(string16::npos,
             text.find(content_settings_helper::OriginToString16(kUrl2)));
 }
+
+}  // namespace

@@ -6,7 +6,7 @@
 #define CHROME_BROWSER_EXTENSIONS_EXTENSION_INFOBAR_DELEGATE_H_
 #pragma once
 
-#include "chrome/browser/tab_contents/infobar_delegate.h"
+#include "chrome/browser/tab_contents/confirm_infobar_delegate.h"
 
 class Browser;
 class Extension;
@@ -31,12 +31,13 @@ class ExtensionInfoBarDelegate : public InfoBarDelegate,
                            TabContents* contents,
                            const Extension* extension,
                            const GURL& url);
+
   const Extension* extension() { return extension_; }
   ExtensionHost* extension_host() { return extension_host_.get(); }
 
   void set_observer(DelegateObserver* observer) { observer_ = observer; }
 
-  bool closing() { return closing_; }
+  bool closing() const { return closing_; }
 
  private:
   virtual ~ExtensionInfoBarDelegate();

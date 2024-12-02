@@ -10,8 +10,8 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/download/save_package.h"
 #include "chrome/browser/net/url_request_mock_http_job.h"
-#include "chrome/browser/renderer_host/test/test_render_view_host.h"
-#include "chrome/browser/tab_contents/test_tab_contents.h"
+#include "content/browser/renderer_host/test_render_view_host.h"
+#include "content/browser/tab_contents/test_tab_contents.h"
 #include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -30,8 +30,10 @@ namespace {
 // This constant copied from save_package.cc.
 #if defined(OS_WIN)
 const uint32 kMaxFilePathLength = MAX_PATH - 1;
+const uint32 kMaxFileNameLength = MAX_PATH - 1;
 #elif defined(OS_POSIX)
 const uint32 kMaxFilePathLength = PATH_MAX - 1;
+const uint32 kMaxFileNameLength = NAME_MAX;
 #endif
 
 // Used to make long filenames.
@@ -209,6 +211,23 @@ TEST_F(SavePackageTest, TestLongSavePackageFilename) {
   EXPECT_NE(filename, filename2);
 }
 
+TEST_F(SavePackageTest, TestLongSafePureFilename) {
+  const FilePath save_dir(FPL("test_dir"));
+  const FilePath::StringType ext(FPL_HTML_EXTENSION);
+  FilePath::StringType filename =
+#if defined(OS_WIN)
+      ASCIIToWide(long_file_name);
+#else
+      long_file_name;
+#endif
+
+  // Test that the filename + extension doesn't exceed kMaxFileNameLength
+  uint32 max_path = SavePackage::GetMaxPathLengthForDirectory(save_dir);
+  ASSERT_TRUE(SavePackage::GetSafePureFileName(save_dir, ext, max_path,
+                                               &filename));
+  EXPECT_TRUE(filename.length() <= kMaxFileNameLength-ext.length());
+}
+
 static const struct {
   const FilePath::CharType* page_title;
   const FilePath::CharType* expected_name;
@@ -332,7 +351,7 @@ static const struct SuggestedSaveNameTestCase {
 TEST_F(SavePackageTest, TestSuggestedSaveNames) {
   for (size_t i = 0; i < arraysize(kSuggestedSaveNames); ++i) {
     scoped_refptr<SavePackage> save_package(
-        new SavePackage(NULL, FilePath(), FilePath()));
+        new SavePackage(contents(), FilePath(), FilePath()));
     save_package->page_url_ = GURL(kSuggestedSaveNames[i].page_url);
     save_package->title_ = kSuggestedSaveNames[i].page_title;
 
@@ -369,4 +388,3 @@ TEST_F(SavePackageTest, TestGetUrlToBeSavedViewSource) {
   EXPECT_EQ(actual_url, GetUrlToBeSaved());
   EXPECT_EQ(view_source_url, contents()->GetURL());
 }
-

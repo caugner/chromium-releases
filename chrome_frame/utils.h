@@ -6,9 +6,9 @@
 #define CHROME_FRAME_UTILS_H_
 
 #include <OAidl.h>
+#include <objidl.h>
 #include <windows.h>
 #include <wininet.h>
-
 #include <string>
 #include <vector>
 
@@ -18,11 +18,12 @@
 #include "base/synchronization/lock.h"
 #include "base/threading/thread.h"
 #include "base/win/scoped_comptr.h"
-#include "gfx/rect.h"
 #include "googleurl/src/gurl.h"
+#include "ui/gfx/rect.h"
 
 class FilePath;
 interface IBrowserService;
+interface IWebBrowser2;
 
 // utils.h : Various utility functions and classes
 
@@ -302,7 +303,7 @@ HRESULT DoQueryService(const IID& service_id, IUnknown* unk, T** service) {
 // |headers| can be NULL.
 HRESULT NavigateBrowserToMoniker(IUnknown* browser, IMoniker* moniker,
                                  const wchar_t* headers, IBindCtx* bind_ctx,
-                                 const wchar_t* fragment);
+                                 const wchar_t* fragment, IStream* post_data);
 
 // Raises a flag on the current thread (using TLS) to indicate that an
 // in-progress navigation should be rendered in chrome frame.
@@ -456,6 +457,15 @@ extern base::Lock g_ChromeFrameHistogramLock;
 // NOTE: Since the message is sent synchronously, the handler should only
 // start asynchronous operations in order to not block the sender unnecessarily.
 #define WM_DOWNLOAD_IN_HOST (WM_APP + 2)
+
+// This structure contains the parameters sent over to initiate a download
+// request in the host browser.
+struct DownloadInHostParams {
+  base::win::ScopedComPtr<IBindCtx> bind_ctx;
+  base::win::ScopedComPtr<IMoniker> moniker;
+  base::win::ScopedComPtr<IStream> post_data;
+  std::string request_headers;
+};
 
 // Maps the InternetCookieState enum to the corresponding CookieAction values
 // used for IE privacy stuff.
@@ -614,5 +624,15 @@ bool CheckXUaCompatibleDirective(const std::string& directive,
 
 // Returns the version of the current module as a string.
 std::wstring GetCurrentModuleVersion();
+
+// Returns true if ChromeFrame is the currently loaded document.
+bool IsChromeFrameDocument(IWebBrowser2* web_browser);
+
+// Increases the wininet connection limit for HTTP 1.0/1.1 connections to the
+// value passed in. This is only done if the existing connection limit is
+// lesser than the connection limit passed in. This function attempts to
+// increase the connection count once per process.
+// Returns true on success.
+bool IncreaseWinInetConnections(DWORD connections);
 
 #endif  // CHROME_FRAME_UTILS_H_

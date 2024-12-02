@@ -12,11 +12,11 @@
 #include "chrome/browser/ui/gtk/accelerators_gtk.h"
 #include "chrome/browser/ui/gtk/menu_gtk.h"
 #include "chrome/browser/ui/tabs/tab_menu_model.h"
-#include "gfx/path.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/dragdrop/gtk_dnd_util.h"
 #include "ui/base/models/accelerator_gtk.h"
+#include "ui/gfx/path.h"
 
 namespace {
 
@@ -42,8 +42,8 @@ class TabGtk::ContextMenuController : public ui::SimpleMenuModel::Delegate,
 
   virtual ~ContextMenuController() {}
 
-  void RunMenu() {
-    menu_->PopupAsContext(gtk_get_current_event_time());
+  void RunMenu(const gfx::Point& point, guint32 event_time) {
+    menu_->PopupAsContext(point, event_time);
   }
 
   void Cancel() {
@@ -189,8 +189,11 @@ gboolean TabGtk::OnButtonPressEvent(GtkWidget* widget, GdkEventButton* event) {
   } else if (event->button == 3) {
     // Only show the context menu if the left mouse button isn't down (i.e.,
     // the user might want to drag instead).
-    if (!last_mouse_down_)
-      ShowContextMenu();
+    if (!last_mouse_down_) {
+      menu_controller_.reset(new ContextMenuController(this));
+      menu_controller_->RunMenu(gfx::Point(event->x_root, event->y_root),
+                                event->time);
+    }
   }
 
   return TRUE;
@@ -250,6 +253,7 @@ gboolean TabGtk::OnDragButtonReleased(GtkWidget* widget,
 
 void TabGtk::OnDragBegin(GtkWidget* widget, GdkDragContext* context) {
   GdkPixbuf* pixbuf = gdk_pixbuf_new(GDK_COLORSPACE_RGB, TRUE, 8, 1, 1);
+  gdk_pixbuf_fill(pixbuf, 0);
   gtk_drag_set_icon_pixbuf(context, pixbuf, 0, 0);
   g_object_unref(pixbuf);
 }
@@ -324,11 +328,6 @@ void TabGtk::SetBounds(const gfx::Rect& bounds) {
 
 ///////////////////////////////////////////////////////////////////////////////
 // TabGtk, private:
-
-void TabGtk::ShowContextMenu() {
-  menu_controller_.reset(new ContextMenuController(this));
-  menu_controller_->RunMenu();
-}
 
 void TabGtk::ContextMenuClosed() {
   delegate()->StopAllHighlighting();

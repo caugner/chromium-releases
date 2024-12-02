@@ -12,8 +12,8 @@
 
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "gfx/insets.h"
 #include "ui/base/keycodes/keyboard_codes.h"
+#include "ui/gfx/insets.h"
 #include "views/controls/native/native_view_host.h"
 #include "views/controls/textfield/native_textfield_wrapper.h"
 #include "views/widget/widget.h"
@@ -21,12 +21,12 @@
 #if defined(OS_LINUX)
 #include "ui/base/keycodes/keyboard_code_conversion_gtk.h"
 #elif defined(OS_WIN)
-#include "app/win/win_util.h"
 #include "base/win/win_util.h"
 // TODO(beng): this should be removed when the OS_WIN hack from
 // ViewHierarchyChanged is removed.
 #include "views/controls/textfield/native_textfield_win.h"
 #include "views/controls/textfield/native_textfield_views.h"
+#include "views/events/event_utils_win.h"
 #endif
 
 namespace views {
@@ -265,19 +265,17 @@ bool Textfield::IsIMEComposing() const {
 
 void Textfield::GetSelectedRange(TextRange* range) const {
   DCHECK(native_wrapper_);
-  if (native_wrapper_)
-    native_wrapper_->GetSelectedRange(range);
+  native_wrapper_->GetSelectedRange(range);
 }
 
 void Textfield::SelectRange(const TextRange& range) {
   DCHECK(native_wrapper_);
-  if (native_wrapper_)
-    native_wrapper_->SelectRange(range);
+  native_wrapper_->SelectRange(range);
 }
 
 size_t Textfield::GetCursorPosition() const {
   DCHECK(native_wrapper_);
-  return native_wrapper_ ? native_wrapper_->GetCursorPosition() : 0;
+  return native_wrapper_->GetCursorPosition();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -285,7 +283,7 @@ size_t Textfield::GetCursorPosition() const {
 
 void Textfield::Layout() {
   if (native_wrapper_) {
-    native_wrapper_->GetView()->SetBounds(GetLocalBounds(true));
+    native_wrapper_->GetView()->SetBoundsRect(GetLocalBounds());
     native_wrapper_->GetView()->Layout();
   }
 }
@@ -310,7 +308,7 @@ void Textfield::AboutToRequestFocusFromTabTraversal(bool reverse) {
 bool Textfield::SkipDefaultKeyEventProcessing(const KeyEvent& e) {
   // TODO(hamaji): Figure out which keyboard combinations we need to add here,
   //               similar to LocationBarView::SkipDefaultKeyEventProcessing.
-  ui::KeyboardCode key = e.GetKeyCode();
+  ui::KeyboardCode key = e.key_code();
   if (key == ui::VKEY_BACK)
     return true;  // We'll handle BackSpace ourselves.
 
@@ -318,15 +316,20 @@ bool Textfield::SkipDefaultKeyEventProcessing(const KeyEvent& e) {
   // We don't translate accelerators for ALT + NumPad digit on Windows, they are
   // used for entering special characters.  We do translate alt-home.
   if (e.IsAltDown() && (key != ui::VKEY_HOME) &&
-      app::win::IsNumPadDigit(key, e.IsExtendedKey()))
+      NativeTextfieldWin::IsNumPadDigit(key, IsExtendedKey(e)))
     return true;
 #endif
   return false;
 }
 
-void Textfield::PaintFocusBorder(gfx::Canvas* canvas) {
+void Textfield::OnPaintBackground(gfx::Canvas* canvas) {
+  // Overridden to be public - gtk_views_entry.cc wants to call it.
+  View::OnPaintBackground(canvas);
+}
+
+void Textfield::OnPaintFocusBorder(gfx::Canvas* canvas) {
   if (NativeViewHost::kRenderNativeControlFocus)
-    View::PaintFocusBorder(canvas);
+    View::OnPaintFocusBorder(canvas);
 }
 
 bool Textfield::OnKeyPressed(const views::KeyEvent& e) {
@@ -337,19 +340,22 @@ bool Textfield::OnKeyReleased(const views::KeyEvent& e) {
   return native_wrapper_ && native_wrapper_->HandleKeyReleased(e);
 }
 
-void Textfield::WillGainFocus() {
+void Textfield::OnFocus() {
   if (native_wrapper_)
-    native_wrapper_->HandleWillGainFocus();
+    native_wrapper_->HandleFocus();
+
+  // Forward the focus to the wrapper if it exists.
+  if (!native_wrapper_ || !native_wrapper_->SetFocus()) {
+    // If there is no wrapper or the wrapper didn't take focus, call
+    // View::Focus to clear the native focus so that we still get
+    // keyboard messages.
+    View::OnFocus();
+  }
 }
 
-void Textfield::DidGainFocus() {
+void Textfield::OnBlur() {
   if (native_wrapper_)
-    native_wrapper_->HandleDidGainFocus();
-}
-
-void Textfield::WillLoseFocus() {
-  if (native_wrapper_)
-    native_wrapper_->HandleWillLoseFocus();
+    native_wrapper_->HandleBlur();
 }
 
 AccessibilityTypes::Role Textfield::GetAccessibleRole() {
@@ -365,6 +371,14 @@ AccessibilityTypes::State Textfield::GetAccessibleState() {
   return state;
 }
 
+void Textfield::GetSelectionBounds(int* start_index, int* end_index) {
+  DCHECK(native_wrapper_);
+  TextRange range;
+  native_wrapper_->GetSelectedRange(&range);
+  *start_index = range.start();
+  *end_index = range.end();
+}
+
 string16 Textfield::GetAccessibleValue() {
   if (!text_.empty())
     return text_;
@@ -375,16 +389,6 @@ void Textfield::SetEnabled(bool enabled) {
   View::SetEnabled(enabled);
   if (native_wrapper_)
     native_wrapper_->UpdateEnabled();
-}
-
-void Textfield::Focus() {
-  // Forward the focus to the wrapper if it exists.
-  if (!native_wrapper_ || !native_wrapper_->SetFocus()) {
-    // If there is no wrapper or the wrapper din't take focus, call
-    // View::Focus to clear the native focus so that we still get
-    // keyboard messages.
-    View::Focus();
-  }
 }
 
 void Textfield::ViewHierarchyChanged(bool is_add, View* parent, View* child) {

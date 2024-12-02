@@ -7,14 +7,14 @@
 #include "base/command_line.h"
 #include "base/message_loop.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/file_system/file_system_dispatcher.h"
-#include "chrome/common/file_system/webfilesystem_callback_dispatcher.h"
 #include "chrome/common/webmessageportchannel_impl.h"
 #include "chrome/common/worker_messages.h"
 #include "chrome/renderer/webworker_proxy.h"
 #include "chrome/worker/webworker_stub_base.h"
 #include "chrome/worker/worker_thread.h"
 #include "chrome/worker/worker_webapplicationcachehost_impl.h"
+#include "content/common/file_system/file_system_dispatcher.h"
+#include "content/common/file_system/webfilesystem_callback_dispatcher.h"
 #include "ipc/ipc_logging.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFileSystemCallbacks.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
@@ -156,10 +156,18 @@ bool WebWorkerClientProxy::allowDatabase(WebFrame* frame,
 void WebWorkerClientProxy::openFileSystem(
     WebKit::WebFileSystem::Type type,
     long long size,
+    bool create,
     WebKit::WebFileSystemCallbacks* callbacks) {
   ChildThread::current()->file_system_dispatcher()->OpenFileSystem(
       stub_->url().GetOrigin(), static_cast<fileapi::FileSystemType>(type),
-      size, true /* create */, new WebFileSystemCallbackDispatcher(callbacks));
+      size, create, new WebFileSystemCallbackDispatcher(callbacks));
+}
+
+void WebWorkerClientProxy::openFileSystem(
+    WebKit::WebFileSystem::Type type,
+    long long size,
+    WebKit::WebFileSystemCallbacks* callbacks) {
+  openFileSystem(type, size, true, callbacks);
 }
 
 bool WebWorkerClientProxy::Send(IPC::Message* message) {

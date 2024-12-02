@@ -13,19 +13,19 @@
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_switches.h"
-#include "gfx/insets.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "net/url_request/url_request_context.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/insets.h"
 #include "views/background.h"
 #include "views/controls/button/checkbox.h"
 #include "views/controls/label.h"
 #include "views/controls/separator.h"
 #include "views/controls/throbber.h"
-#include "views/grid_layout.h"
-#include "views/standard_layout.h"
+#include "views/layout/grid_layout.h"
+#include "views/layout/layout_constants.h"
 #include "views/widget/widget.h"
 #include "views/window/dialog_client_view.h"
 #include "views/window/window.h"
@@ -129,10 +129,10 @@ void ClearServerDataView::InitControlLayout() {
   column_set = layout->AddColumnSet(three_column_set_id);
   column_set->AddColumn(GridLayout::FILL, GridLayout::CENTER, 0,
                         GridLayout::USE_PREF, 0, 0);
-  column_set->AddPaddingColumn(0, kRelatedControlHorizontalSpacing);
+  column_set->AddPaddingColumn(0, views::kRelatedControlHorizontalSpacing);
   column_set->AddColumn(GridLayout::FILL, GridLayout::CENTER, 1,
                         GridLayout::USE_PREF, 0, 0);
-  column_set->AddPaddingColumn(0, kRelatedControlHorizontalSpacing);
+  column_set->AddPaddingColumn(0, views::kRelatedControlHorizontalSpacing);
   column_set->AddColumn(GridLayout::FILL, GridLayout::CENTER, 1,
                         GridLayout::USE_PREF, 0, 0);
 
@@ -143,7 +143,7 @@ void ClearServerDataView::InitControlLayout() {
 
   layout->StartRow(0, left_aligned_column_set_id);
   layout->AddView(flash_link_);
-  layout->AddPaddingRow(0, kPanelVertMargin);
+  layout->AddPaddingRow(0, views::kPanelVertMargin);
 
   AddWrappingLabelRow(layout, chrome_sync_title_label_,
                       centered_column_set_id, true);
@@ -157,7 +157,7 @@ void ClearServerDataView::InitControlLayout() {
                   GridLayout::LEADING, GridLayout::CENTER);
   layout->AddView(throbber_, 1, 1,
                   GridLayout::TRAILING, GridLayout::CENTER);
-  layout->AddPaddingRow(0, kPanelVertMargin);
+  layout->AddPaddingRow(0, views::kPanelVertMargin);
 
   AddWrappingLabelRow(layout, dashboard_label_, centered_column_set_id, true);
 
@@ -206,8 +206,9 @@ void ClearServerDataView::AddWrappingLabelRow(views::GridLayout* layout,
 
 void ClearServerDataView::AddSpacing(views::GridLayout* layout,
                                      bool related_follows) {
-  layout->AddPaddingRow(0, related_follows ? kRelatedControlVerticalSpacing
-                                           : kUnrelatedControlVerticalSpacing);
+  layout->AddPaddingRow(
+      0, related_follows ? views::kRelatedControlVerticalSpacing
+                         : views::kUnrelatedControlVerticalSpacing);
 }
 
 gfx::Size ClearServerDataView::GetPreferredSize() {

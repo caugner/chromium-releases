@@ -4,7 +4,7 @@
 
 #include "views/controls/menu/submenu_view.h"
 
-#include "gfx/canvas.h"
+#include "ui/gfx/canvas.h"
 #include "views/controls/menu/menu_config.h"
 #include "views/controls/menu/menu_controller.h"
 #include "views/controls/menu/menu_host.h"
@@ -47,7 +47,7 @@ SubmenuView::~SubmenuView() {
 
 int SubmenuView::GetMenuItemCount() {
   int count = 0;
-  for (int i = 0; i < GetChildViewCount(); ++i) {
+  for (int i = 0; i < child_count(); ++i) {
     if (GetChildViewAt(i)->GetID() == MenuItemView::kMenuItemViewID)
       count++;
   }
@@ -55,7 +55,7 @@ int SubmenuView::GetMenuItemCount() {
 }
 
 MenuItemView* SubmenuView::GetMenuItemAt(int index) {
-  for (int i = 0, count = 0; i < GetChildViewCount(); ++i) {
+  for (int i = 0, count = 0; i < child_count(); ++i) {
     if (GetChildViewAt(i)->GetID() == MenuItemView::kMenuItemViewID &&
         count++ == index) {
       return static_cast<MenuItemView*>(GetChildViewAt(i));
@@ -67,24 +67,23 @@ MenuItemView* SubmenuView::GetMenuItemAt(int index) {
 
 void SubmenuView::Layout() {
   // We're in a ScrollView, and need to set our width/height ourselves.
-  View* parent = GetParent();
-  if (!parent)
+  if (!parent())
     return;
 
   // Use our current y, unless it means part of the menu isn't visible anymore.
   int pref_height = GetPreferredSize().height();
   int new_y;
-  if (pref_height > parent->height())
-    new_y = std::max(parent->height() - pref_height, y());
+  if (pref_height > parent()->height())
+    new_y = std::max(parent()->height() - pref_height, y());
   else
     new_y = 0;
-  SetBounds(x(), new_y, parent->width(), pref_height);
+  SetBounds(x(), new_y, parent()->width(), pref_height);
 
   gfx::Insets insets = GetInsets();
   int x = insets.left();
   int y = insets.top();
   int menu_item_width = width() - insets.width();
-  for (int i = 0; i < GetChildViewCount(); ++i) {
+  for (int i = 0; i < child_count(); ++i) {
     View* child = GetChildViewAt(i);
     if (child->IsVisible()) {
       gfx::Size child_pref_size = child->GetPreferredSize();
@@ -95,13 +94,13 @@ void SubmenuView::Layout() {
 }
 
 gfx::Size SubmenuView::GetPreferredSize() {
-  if (GetChildViewCount() == 0)
+  if (!has_children())
     return gfx::Size();
 
   max_accelerator_width_ = 0;
   int max_width = 0;
   int height = 0;
-  for (int i = 0; i < GetChildViewCount(); ++i) {
+  for (int i = 0; i < child_count(); ++i) {
     View* child = GetChildViewAt(i);
     gfx::Size child_pref_size = child->IsVisible() ?
         child->GetPreferredSize() : gfx::Size();
@@ -122,8 +121,7 @@ gfx::Size SubmenuView::GetPreferredSize() {
                    height + insets.height());
 }
 
-void SubmenuView::DidChangeBounds(const gfx::Rect& previous,
-                                  const gfx::Rect& current) {
+void SubmenuView::OnBoundsChanged() {
   SchedulePaint();
 }
 
@@ -196,12 +194,8 @@ bool SubmenuView::OnMouseWheel(const MouseWheelEvent& e) {
 
   // If the first item isn't entirely visible, make it visible, otherwise make
   // the next/previous one entirely visible.
-#if defined(OS_WIN)
-  int delta = abs(e.GetOffset() / WHEEL_DELTA);
-#elif defined(OS_LINUX)
-  int delta = abs(e.GetOffset());
-#endif
-  for (bool scroll_up = (e.GetOffset() > 0); delta != 0; --delta) {
+  int delta = abs(e.offset() / MouseWheelEvent::kWheelDelta);
+  for (bool scroll_up = (e.offset() > 0); delta != 0; --delta) {
     int scroll_target;
     if (scroll_up) {
       if (GetMenuItemAt(first_vis_index)->y() == vis_bounds.y()) {
@@ -247,7 +241,7 @@ void SubmenuView::ShowAt(gfx::NativeWindow parent,
   GetScrollViewContainer();
   // Make sure the first row is visible.
   ScrollRectToVisible(gfx::Rect(gfx::Point(), gfx::Size(1, 1)));
-  host_->Init(parent, bounds, scroll_view_container_, do_capture);
+  host_->InitMenuHost(parent, bounds, scroll_view_container_, do_capture);
 
   GetScrollViewContainer()->NotifyAccessibilityEvent(
       AccessibilityTypes::EVENT_MENUSTART);
@@ -353,7 +347,7 @@ void SubmenuView::SchedulePaintForDropIndicator(
   if (position == MenuDelegate::DROP_ON) {
     item->SchedulePaint();
   } else if (position != MenuDelegate::DROP_NONE) {
-    SchedulePaint(CalculateDropIndicatorBounds(item, position), false);
+    SchedulePaintInRect(CalculateDropIndicatorBounds(item, position));
   }
 }
 

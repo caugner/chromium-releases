@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,21 +15,21 @@
 #include <algorithm>
 
 #include "base/utf_string_conversions.h"
-#include "gfx/canvas_skia.h"
-#include "gfx/font.h"
 #include "grit/app_strings.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/font.h"
 #include "views/controls/button/native_button.h"
-#include "views/standard_layout.h"
+#include "views/layout/layout_constants.h"
 #include "views/window/dialog_delegate.h"
 #include "views/window/window.h"
 
 #if defined(OS_WIN)
-#include "gfx/native_theme_win.h"
+#include "ui/gfx/native_theme_win.h"
 #else
-#include "gfx/skia_utils_gtk.h"
+#include "ui/gfx/skia_utils_gtk.h"
 #include "views/window/hit_test.h"
 #include "views/widget/widget.h"
 #endif
@@ -79,7 +79,7 @@ class DialogButton : public NativeButton {
 
   // Overridden to forward to the delegate.
   virtual bool AcceleratorPressed(const Accelerator& accelerator) {
-    if (!owner_->GetDelegate()->AsDialogDelegate()->
+    if (!owner_->window_delegate()->AsDialogDelegate()->
         AreAcceleratorsEnabled(type_)) {
       return false;
     }
@@ -115,7 +115,7 @@ DialogClientView::DialogClientView(Window* owner, View* contents_view)
       default_button_(NULL),
       extra_view_(NULL),
       size_extra_view_height_to_buttons_(false),
-      accepted_(false),
+      notified_delegate_(false),
       listening_to_focus_(false),
       saved_focus_manager_(NULL),
       bottom_view_(NULL) {
@@ -225,13 +225,13 @@ void DialogClientView::UpdateDialogButtons() {
 }
 
 void DialogClientView::AcceptWindow() {
-  if (accepted_) {
-    // We should only get into AcceptWindow once.
-    NOTREACHED();
+  if (notified_delegate_) {
+    // Only notify the delegate once. See comment in header above
+    // notified_delegate_ for details.
     return;
   }
   if (GetDialogDelegate()->Accept(false)) {
-    accepted_ = true;
+    notified_delegate_ = true;
     Close();
   }
 }
@@ -267,16 +267,19 @@ void DialogClientView::NativeViewHierarchyChanged(bool attached,
 ///////////////////////////////////////////////////////////////////////////////
 // DialogClientView, ClientView overrides:
 
-bool DialogClientView::CanClose() const {
-  if (!accepted_) {
-    DialogDelegate* dd = GetDialogDelegate();
-    int buttons = dd->GetDialogButtons();
-    if (buttons & MessageBoxFlags::DIALOGBUTTON_CANCEL)
-      return dd->Cancel();
-    if (buttons & MessageBoxFlags::DIALOGBUTTON_OK)
-      return dd->Accept(true);
-  }
-  return true;
+bool DialogClientView::CanClose() {
+  if (notified_delegate_)
+    return true;
+
+  DialogDelegate* dd = GetDialogDelegate();
+  int buttons = dd->GetDialogButtons();
+  bool close = true;
+  if (buttons & MessageBoxFlags::DIALOGBUTTON_CANCEL)
+    close = dd->Cancel();
+  else if (buttons & MessageBoxFlags::DIALOGBUTTON_OK)
+    close = dd->Accept(true);
+  notified_delegate_ = close;
+  return close;
 }
 
 void DialogClientView::WindowClosing() {
@@ -285,7 +288,6 @@ void DialogClientView::WindowClosing() {
     if (saved_focus_manager_)
        saved_focus_manager_->RemoveFocusChangeListener(this);
   }
-  ClientView::WindowClosing();
 }
 
 int DialogClientView::NonClientHitTest(const gfx::Point& point) {
@@ -294,10 +296,14 @@ int DialogClientView::NonClientHitTest(const gfx::Point& point) {
   return ClientView::NonClientHitTest(point);
 }
 
+DialogClientView* DialogClientView::AsDialogClientView() {
+  return this;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // DialogClientView, View overrides:
 
-void DialogClientView::Paint(gfx::Canvas* canvas) {
+void DialogClientView::OnPaint(gfx::Canvas* canvas) {
 #if defined(OS_WIN)
   FillViewWithSysColor(canvas, this, GetSysColor(COLOR_3DFACE));
 #else
@@ -321,7 +327,7 @@ void DialogClientView::Layout() {
   if (has_dialog_buttons())
     LayoutDialogButtons();
   if (bottom_view_) {
-    gfx::Rect bounds = GetLocalBounds(false);
+    gfx::Rect bounds = GetContentsBounds();
     gfx::Size pref = bottom_view_->GetPreferredSize();
     bottom_view_->SetBounds(bounds.x(),
         bounds.bottom() - pref.height() - kButtonVEdgeMargin,
@@ -418,8 +424,8 @@ void DialogClientView::ButtonPressed(
 // DialogClientView, private:
 
 void DialogClientView::PaintSizeBox(gfx::Canvas* canvas) {
-  if (window()->GetDelegate()->CanResize() ||
-      window()->GetDelegate()->CanMaximize()) {
+  if (window()->window_delegate()->CanResize() ||
+      window()->window_delegate()->CanMaximize()) {
 #if defined(OS_WIN)
     HDC dc = canvas->BeginPlatformPaint();
     SIZE gripper_size = { 0, 0 };
@@ -431,7 +437,7 @@ void DialogClientView::PaintSizeBox(gfx::Canvas* canvas) {
     //             a theme-supplied gripper. We should probably improvise
     //             something, which would also require changing |gripper_size|
     //             to have different default values, too...
-    size_box_bounds_ = GetLocalBounds(false);
+    size_box_bounds_ = GetContentsBounds();
     size_box_bounds_.set_x(size_box_bounds_.right() - gripper_size.cx);
     size_box_bounds_.set_y(size_box_bounds_.bottom() - gripper_size.cy);
     RECT native_bounds = size_box_bounds_.ToRECT();
@@ -465,7 +471,7 @@ int DialogClientView::GetButtonsHeight() const {
 }
 
 void DialogClientView::LayoutDialogButtons() {
-  gfx::Rect lb = GetLocalBounds(false);
+  gfx::Rect lb = GetContentsBounds();
   gfx::Rect extra_bounds;
   int bottom_y = lb.bottom() - kButtonVEdgeMargin;
   int button_height = 0;
@@ -507,14 +513,14 @@ void DialogClientView::LayoutDialogButtons() {
     int height = size_extra_view_height_to_buttons_ ?
         std::max(ps.height(), button_height) : ps.height();
     extra_bounds.set_height(height);
-    extra_view_->SetBounds(extra_bounds);
+    extra_view_->SetBoundsRect(extra_bounds);
   }
 }
 
 void DialogClientView::LayoutContentsView() {
-  gfx::Rect lb = GetLocalBounds(false);
+  gfx::Rect lb = GetContentsBounds();
   lb.set_height(std::max(0, lb.height() - GetButtonsHeight()));
-  contents_view()->SetBounds(lb);
+  contents_view()->SetBoundsRect(lb);
   contents_view()->Layout();
 }
 
@@ -530,9 +536,7 @@ void DialogClientView::CreateExtraView() {
 }
 
 DialogDelegate* DialogClientView::GetDialogDelegate() const {
-  DialogDelegate* dd = window()->GetDelegate()->AsDialogDelegate();
-  DCHECK(dd);
-  return dd;
+  return window()->window_delegate()->AsDialogDelegate();
 }
 
 void DialogClientView::Close() {

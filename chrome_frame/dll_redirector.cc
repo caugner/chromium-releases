@@ -18,6 +18,7 @@
 #include "base/sys_info.h"
 #include "base/utf_string_conversions.h"
 #include "base/version.h"
+#include "base/win/windows_version.h"
 #include "chrome_frame/utils.h"
 
 const wchar_t kSharedMemoryName[] = L"ChromeFrameVersionBeacon_";
@@ -30,6 +31,7 @@ DllRedirector::DllRedirector() : first_module_handle_(NULL) {
   std::wstring beacon_name(kSharedMemoryName);
   beacon_name += GetHostProcessName(false);
   shared_memory_.reset(new base::SharedMemory(beacon_name));
+  shared_memory_name_ = WideToUTF8(beacon_name);
 }
 
 DllRedirector::DllRedirector(const char* shared_memory_name)
@@ -131,7 +133,10 @@ bool DllRedirector::RegisterAsFirstCFModule() {
 
   bool lock_acquired = false;
   CSecurityAttributes sec_attr;
-  if (BuildSecurityAttributesForLock(&sec_attr)) {
+  if (base::win::GetVersion() >= base::win::VERSION_VISTA &&
+      BuildSecurityAttributesForLock(&sec_attr)) {
+    // On vista and above, we need to explicitly allow low integrity access
+    // to our objects. On XP, we don't bother.
     lock_acquired = shared_memory_->Lock(kSharedMemoryLockTimeoutMs, &sec_attr);
   } else {
     lock_acquired = shared_memory_->Lock(kSharedMemoryLockTimeoutMs, NULL);
@@ -273,11 +278,15 @@ HMODULE DllRedirector::LoadVersionedModule(Version* version) {
   DCHECK(version);
 
   FilePath module_path;
-  PathService::Get(base::DIR_MODULE, &module_path);
+  PathService::Get(base::FILE_MODULE, &module_path);
   DCHECK(!module_path.empty());
 
+  // For a module located in
+  // Foo\XXXXXXXXX\<module>.dll, load
+  // Foo\<version>\<module>.dll:
   FilePath module_name = module_path.BaseName();
   module_path = module_path.DirName()
+                           .DirName()
                            .Append(ASCIIToWide(version->GetString()))
                            .Append(module_name);
 

@@ -24,6 +24,11 @@
           'app/hard_error_handler_win.cc',
           'app/hard_error_handler_win.h',
           'app/scoped_ole_initializer.h',
+          # TODO(bradnelson): once automatic generation of 64 bit targets on
+          # Windows is ready, take this out and add a dependency on
+          # content_common.gypi.
+          '../content/common/content_switches.cc',
+          '../content/common/content_switches.h',
         ],
         'mac_bundle_resources': [
           'app/app-Info.plist',
@@ -222,8 +227,9 @@
             'installer_util',
           ],
           'sources': [
-            'app/chrome_main.cc',
             'app/chrome_dll_resource.h',
+            'app/chrome_main.cc',
+            'app/chrome_main_posix.cc',
           ],
         }],
         ['OS=="mac"', {
@@ -447,6 +453,7 @@
             '../breakpad/breakpad.gyp:breakpad_sender',
             '../sandbox/sandbox.gyp:sandbox',
             'app/locales/locales.gyp:*',
+            'app/policy/cloud_policy_codegen.gyp:policy',
           ],
           'msvs_settings': {
             'VCLinkerTool': {
@@ -490,8 +497,9 @@
             # which contains all of the library code with Chromium
             # functionality.
             'chrome_dll_nacl_win64',
-            'installer_util_nacl_win64',
             'common_constants_win64',
+            'installer_util_nacl_win64',
+            'app/policy/cloud_policy_codegen.gyp:policy_win64',
             '../breakpad/breakpad.gyp:breakpad_handler_win64',
             '../breakpad/breakpad.gyp:breakpad_sender_win64',
             '../base/base.gyp:base_nacl_win64',

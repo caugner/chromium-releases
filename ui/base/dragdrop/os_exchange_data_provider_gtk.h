@@ -11,11 +11,12 @@
 #include <set>
 #include <string>
 
+#include "base/file_path.h"
 #include "base/pickle.h"
 #include "base/string16.h"
-#include "gfx/point.h"
 #include "googleurl/src/gurl.h"
 #include "ui/base/dragdrop/os_exchange_data.h"
+#include "ui/gfx/point.h"
 
 namespace ui {
 
@@ -57,14 +58,14 @@ class OSExchangeDataProviderGtk : public OSExchangeData::Provider {
                               GtkSelectionData* selection) const;
 
   // Provider methods.
-  virtual void SetString(const std::wstring& data);
-  virtual void SetURL(const GURL& url, const std::wstring& title);
-  virtual void SetFilename(const std::wstring& full_path);
+  virtual void SetString(const string16& data);
+  virtual void SetURL(const GURL& url, const string16& title);
+  virtual void SetFilename(const FilePath& path);
   virtual void SetPickledData(OSExchangeData::CustomFormat format,
                               const Pickle& data);
-  virtual bool GetString(std::wstring* data) const;
-  virtual bool GetURLAndTitle(GURL* url, std::wstring* title) const;
-  virtual bool GetFilename(std::wstring* full_path) const;
+  virtual bool GetString(string16* data) const;
+  virtual bool GetURLAndTitle(GURL* url, string16* title) const;
+  virtual bool GetFilename(FilePath* path) const;
   virtual bool GetPickledData(OSExchangeData::CustomFormat format,
                               Pickle* data) const;
   virtual bool HasString() const;
@@ -103,7 +104,7 @@ class OSExchangeDataProviderGtk : public OSExchangeData::Provider {
   string16 title_;
 
   // File name.
-  std::string filename_;
+  FilePath filename_;
 
   // PICKLED_DATA contents.
   PickleData pickle_data_;

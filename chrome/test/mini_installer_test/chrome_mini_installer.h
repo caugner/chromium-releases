@@ -16,8 +16,7 @@ class FilePath;
 // This class has methods to install and uninstall Chrome mini installer.
 class ChromeMiniInstaller {
  public:
-  explicit ChromeMiniInstaller(const std::wstring& install_type,
-                               bool is_chrome_frame);
+  ChromeMiniInstaller(const std::wstring& install_type, bool is_chrome_frame);
 
   ~ChromeMiniInstaller() {}
 
@@ -37,8 +36,11 @@ class ChromeMiniInstaller {
   void Install();
 
   // This method will first install the full installer and
-  // then over installs with diff installer.
-  void OverInstallOnFullInstaller(const std::wstring& install_type);
+  // then over installs with diff installer. If |should_start_ie| is true,
+  // start IE browser before launch installer, and leave the process running
+  // through the installtions.
+  void OverInstallOnFullInstaller(const std::wstring& install_type,
+                                  bool should_start_ie);
 
   // Installs Google Chrome through meta installer.
   void InstallMetaInstaller();
@@ -55,6 +57,10 @@ class ChromeMiniInstaller {
 
   // Uninstalls Chrome.
   void UnInstall();
+
+  // This method uninstalls Chrome Frame without closing IE browser first.
+  // IE browser should be running before this method is called.
+  void UnInstallChromeFrameWithIERunning();
 
   // This method will perform a over install
   void OverInstall();
@@ -113,9 +119,16 @@ class ChromeMiniInstaller {
   // This method verifies if Chrome/Chrome Frame installed correctly.
   void VerifyInstall(bool over_install);
 
+  // This method verifies installation of Chrome/Chrome Frame via machine
+  // introspection.
+  void VerifyMachineState();
+
   // This method will verify if ChromeFrame got successfully installed on the
   // machine.
   void VerifyChromeFrameInstall();
+
+  // Launch IE with |navigate_url|.
+  void LaunchIE(const std::wstring& navigate_url);
 
   // Launches the chrome installer and waits for it to end.
   void LaunchInstaller(const std::wstring& install_path,

@@ -1,17 +1,37 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "printing/printing_context_cairo.h"
 
-#include <gtk/gtk.h>
-#include <gtk/gtkprintunixdialog.h>
+#include "base/logging.h"
+#include "printing/units.h"
+
+#if defined(OS_CHROMEOS)
 #include <unicode/ulocdata.h>
 
-#include "base/logging.h"
 #include "printing/native_metafile.h"
+#include "printing/pdf_ps_metafile_cairo.h"
+#else
+#include <gtk/gtk.h>
+#include <gtk/gtkprintunixdialog.h>
+
 #include "printing/print_settings_initializer_gtk.h"
-#include "printing/units.h"
+#endif  // defined(OS_CHROMEOS)
+
+#if !defined(OS_CHROMEOS)
+namespace {
+  // Function pointer for creating print dialogs.
+  static void* (*create_dialog_func_)(
+      printing::PrintingContext::PrintSettingsCallback* callback,
+      printing::PrintingContextCairo* context) = NULL;
+  // Function pointer for printing documents.
+  static void (*print_document_func_)(
+      void* print_dialog,
+      const printing::NativeMetafile* metafile,
+      const string16& document_name) = NULL;
+}  // namespace
+#endif  // !defined(OS_CHROMEOS)
 
 namespace printing {
 
@@ -20,21 +40,52 @@ namespace printing {
   return static_cast<PrintingContext*>(new PrintingContextCairo(app_locale));
 }
 
-  PrintingContextCairo::PrintingContextCairo(const std::string& app_locale)
-      : PrintingContext(app_locale) {
+PrintingContextCairo::PrintingContextCairo(const std::string& app_locale)
+#if defined(OS_CHROMEOS)
+    : PrintingContext(app_locale) {
+#else
+    : PrintingContext(app_locale),
+      print_dialog_(NULL) {
+#endif
 }
 
 PrintingContextCairo::~PrintingContextCairo() {
   ReleaseContext();
 }
 
+#if !defined(OS_CHROMEOS)
+// static
+void PrintingContextCairo::SetPrintingFunctions(
+    void* (*create_dialog_func)(PrintSettingsCallback* callback,
+                                PrintingContextCairo* context),
+    void (*print_document_func)(void* print_dialog,
+                                const NativeMetafile* metafile,
+                                const string16& document_name)) {
+  DCHECK(create_dialog_func);
+  DCHECK(print_document_func);
+  DCHECK(!create_dialog_func_);
+  DCHECK(!print_document_func_);
+  create_dialog_func_ = create_dialog_func;
+  print_document_func_ = print_document_func;
+}
+
+void PrintingContextCairo::PrintDocument(const NativeMetafile* metafile) {
+  DCHECK(print_dialog_);
+  DCHECK(metafile);
+  print_document_func_(print_dialog_, metafile, document_name_);
+}
+#endif  // !defined(OS_CHROMEOS)
+
 void PrintingContextCairo::AskUserForSettings(
     gfx::NativeView parent_view,
     int max_pages,
     bool has_selection,
     PrintSettingsCallback* callback) {
-  NOTIMPLEMENTED();
+#if defined(OS_CHROMEOS)
   callback->Run(OK);
+#else
+  print_dialog_ = create_dialog_func_(callback, this);
+#endif  // defined(OS_CHROMEOS)
 }
 
 PrintingContext::Result PrintingContextCairo::UseDefaultSettings() {
@@ -70,12 +121,12 @@ PrintingContext::Result PrintingContextCairo::UseDefaultSettings() {
 
   physical_size_device_units.SetSize(width, height);
   printable_area_device_units.SetRect(
-      static_cast<int>(NativeMetafile::kLeftMarginInInch * dpi),
-      static_cast<int>(NativeMetafile::kTopMarginInInch * dpi),
-      width - (NativeMetafile::kLeftMarginInInch +
-          NativeMetafile::kRightMarginInInch) * dpi,
-      height - (NativeMetafile::kTopMarginInInch +
-          NativeMetafile::kBottomMarginInInch) * dpi);
+      static_cast<int>(PdfPsMetafile::kLeftMarginInInch * dpi),
+      static_cast<int>(PdfPsMetafile::kTopMarginInInch * dpi),
+      width - (PdfPsMetafile::kLeftMarginInInch +
+          PdfPsMetafile::kRightMarginInInch) * dpi,
+      height - (PdfPsMetafile::kTopMarginInInch +
+          PdfPsMetafile::kBottomMarginInInch) * dpi);
 
   settings_.set_dpi(dpi);
   settings_.SetPrinterPrintableArea(physical_size_device_units,
@@ -100,24 +151,36 @@ PrintingContext::Result PrintingContextCairo::UseDefaultSettings() {
   return OK;
 }
 
-PrintingContext::Result PrintingContextCairo::InitWithSettings(
-    const PrintSettings& settings) {
+PrintingContext::Result PrintingContextCairo::UpdatePrintSettings(
+    const PageRanges& ranges) {
   DCHECK(!in_print_job_);
 
-  settings_ = settings;
+  settings_.ranges = ranges;
 
   NOTIMPLEMENTED();
 
   return FAILED;
 }
 
+PrintingContext::Result PrintingContextCairo::InitWithSettings(
+    const PrintSettings& settings) {
+  DCHECK(!in_print_job_);
+
+  settings_ = settings;
+
+  return OK;
+}
+
 PrintingContext::Result PrintingContextCairo::NewDocument(
     const string16& document_name) {
   DCHECK(!in_print_job_);
+  in_print_job_ = true;
 
-  NOTIMPLEMENTED();
+#if !defined(OS_CHROMEOS)
+  document_name_ = document_name;
+#endif  // !defined(OS_CHROMEOS)
 
-  return FAILED;
+  return OK;
 }
 
 PrintingContext::Result PrintingContextCairo::NewPage() {
@@ -125,9 +188,9 @@ PrintingContext::Result PrintingContextCairo::NewPage() {
     return CANCEL;
   DCHECK(in_print_job_);
 
-  NOTIMPLEMENTED();
+  // Intentional No-op.
 
-  return FAILED;
+  return OK;
 }
 
 PrintingContext::Result PrintingContextCairo::PageDone() {
@@ -135,9 +198,9 @@ PrintingContext::Result PrintingContextCairo::PageDone() {
     return CANCEL;
   DCHECK(in_print_job_);
 
-  NOTIMPLEMENTED();
+  // Intentional No-op.
 
-  return FAILED;
+  return OK;
 }
 
 PrintingContext::Result PrintingContextCairo::DocumentDone() {
@@ -145,28 +208,21 @@ PrintingContext::Result PrintingContextCairo::DocumentDone() {
     return CANCEL;
   DCHECK(in_print_job_);
 
-  NOTIMPLEMENTED();
-
   ResetSettings();
-  return FAILED;
+  return OK;
 }
 
 void PrintingContextCairo::Cancel() {
   abort_printing_ = true;
   in_print_job_ = false;
-
-  NOTIMPLEMENTED();
-}
-
-void PrintingContextCairo::DismissDialog() {
-  NOTIMPLEMENTED();
 }
 
 void PrintingContextCairo::ReleaseContext() {
-  // Nothing to do yet.
+  // Intentional No-op.
 }
 
 gfx::NativeDrawingContext PrintingContextCairo::context() const {
+  // Intentional No-op.
   return NULL;
 }
 

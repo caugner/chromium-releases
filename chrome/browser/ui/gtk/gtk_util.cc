@@ -24,12 +24,12 @@
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_window.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/renderer_host/render_view_host.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/gtk/cairo_cached_surface.h"
 #include "chrome/browser/ui/gtk/gtk_theme_provider.h"
 #include "chrome/common/renderer_preferences.h"
-#include "gfx/gtk_util.h"
+#include "content/browser/disposition_utils.h"
+#include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/tab_contents/tab_contents.h"
 #include "googleurl/src/gurl.h"
 #include "grit/theme_resources.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -37,11 +37,11 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/x/x11_util.h"
+#include "ui/gfx/gtk_util.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/frame/browser_view.h"
 #include "chrome/browser/chromeos/native_dialog_window.h"
-#include "chrome/browser/chromeos/options/options_window_view.h"
 #include "views/window/window.h"
 #else
 #include "chrome/browser/ui/gtk/browser_window_gtk.h"
@@ -55,6 +55,12 @@ using WebKit::WebDragOperationLink;
 using WebKit::WebDragOperationMove;
 
 namespace {
+
+#if defined(GOOGLE_CHROME_BUILD)
+static const char* kIconName = "google-chrome";
+#else
+static const char* kIconName = "chromium-browser";
+#endif
 
 const char kBoldLabelMarkup[] = "<span weight='bold'>%s</span>";
 
@@ -182,14 +188,12 @@ GtkWidget* GetBrowserWindowFocusedWidget(BrowserWindow* window) {
 namespace event_utils {
 
 WindowOpenDisposition DispositionFromEventFlags(guint event_flags) {
-  if ((event_flags & GDK_BUTTON2_MASK) || (event_flags & GDK_CONTROL_MASK)) {
-    return (event_flags & GDK_SHIFT_MASK) ?
-        NEW_FOREGROUND_TAB : NEW_BACKGROUND_TAB;
-  }
-
-  if (event_flags & GDK_SHIFT_MASK)
-    return NEW_WINDOW;
-  return false /*event.IsAltDown()*/ ? SAVE_TO_DISK : CURRENT_TAB;
+  return disposition_utils::DispositionFromClick(
+      event_flags & GDK_BUTTON2_MASK,
+      event_flags & GDK_MOD1_MASK,
+      event_flags & GDK_CONTROL_MASK,
+      event_flags & GDK_META_MASK,
+      event_flags & GDK_SHIFT_MASK);
 }
 
 }  // namespace event_utils
@@ -472,7 +476,7 @@ gfx::Point GetWidgetScreenPosition(GtkWidget* widget) {
   gint x, y;
   gdk_window_get_origin(widget->window, &x, &y);
 
-  if (!GTK_IS_WINDOW(widget)) {
+  if (GTK_WIDGET_NO_WINDOW(widget)) {
     x += widget->allocation.x;
     y += widget->allocation.y;
   }
@@ -548,7 +552,7 @@ bool IsScreenComposited() {
 
 void EnumerateTopLevelWindows(ui::EnumerateWindowsDelegate* delegate) {
   std::vector<XID> stack;
-  if (!ui::GetXWindowStack(&stack)) {
+  if (!ui::GetXWindowStack(ui::GetX11RootWindow(), &stack)) {
     // Window Manager doesn't support _NET_CLIENT_LIST_STACKING, so fall back
     // to old school enumeration of all X windows.  Some WMs parent 'top-level'
     // windows in unnamed actual top-level windows (ion WM), so extend the
@@ -611,10 +615,24 @@ void SetWindowIcon(GtkWindow* window) {
   g_list_free(icon_list);
 }
 
-void SetDefaultWindowIcon() {
-  GList* icon_list = GetIconList();
-  gtk_window_set_default_icon_list(icon_list);
-  g_list_free(icon_list);
+void SetDefaultWindowIcon(GtkWindow* window) {
+  GtkIconTheme* theme =
+      gtk_icon_theme_get_for_screen(gtk_widget_get_screen(GTK_WIDGET(window)));
+
+  if (gtk_icon_theme_has_icon(theme, kIconName)) {
+    gtk_window_set_default_icon_name(kIconName);
+    // Sometimes the WM fails to update the icon when we tell it to. The above
+    // line should be enough to update all existing windows, but it can fail,
+    // e.g. with Lucid/metacity. The following line seems to fix the common
+    // case where the first window created doesn't have an icon.
+    gtk_window_set_icon_name(window, kIconName);
+  } else {
+    GList* icon_list = GetIconList();
+    gtk_window_set_default_icon_list(icon_list);
+    // Same logic applies here.
+    gtk_window_set_icon_list(window, icon_list);
+    g_list_free(icon_list);
+  }
 }
 
 GtkWidget* AddButtonToDialog(GtkWidget* dialog, const gchar* text,
@@ -965,8 +983,8 @@ bool URLFromPrimarySelection(Profile* profile, GURL* url) {
   // Use autocomplete to clean up the text, going so far as to turn it into
   // a search query if necessary.
   AutocompleteMatch match;
-  profile->GetAutocompleteClassifier()->Classify(UTF8ToWide(selection_text),
-      std::wstring(), false, &match, NULL);
+  profile->GetAutocompleteClassifier()->Classify(UTF8ToUTF16(selection_text),
+      string16(), false, &match, NULL);
   g_free(selection_text);
   if (!match.destination_url.is_valid())
     return false;
@@ -1006,10 +1024,36 @@ void GetTextColors(GdkColor* normal_base,
 
 #if defined(OS_CHROMEOS)
 
+GtkWindow* GetLastActiveBrowserWindow() {
+  if (Browser* b = BrowserList::GetLastActive()) {
+    if (b->type() != Browser::TYPE_NORMAL) {
+      b = BrowserList::FindBrowserWithType(b->profile(),
+                                           Browser::TYPE_NORMAL,
+                                           true);
+    }
+
+    if (b)
+      return GTK_WINDOW(b->window()->GetNativeHandle());
+  }
+
+  return NULL;
+}
+
+int GetNativeDialogFlags(GtkWindow* dialog) {
+  int flags = chromeos::DIALOG_FLAG_DEFAULT;
+
+  if (gtk_window_get_resizable(dialog))
+    flags |= chromeos::DIALOG_FLAG_RESIZEABLE;
+  if (gtk_window_get_modal(dialog))
+    flags |= chromeos::DIALOG_FLAG_MODAL;
+
+  return flags;
+}
+
 GtkWindow* GetDialogTransientParent(GtkWindow* dialog) {
   GtkWindow* parent = gtk_window_get_transient_for(dialog);
   if (!parent)
-    parent = chromeos::GetOptionsViewParent();
+    parent = GetLastActiveBrowserWindow();
 
   return parent;
 }
@@ -1025,9 +1069,7 @@ void ShowDialog(GtkWidget* dialog) {
 
   chromeos::ShowNativeDialog(GetDialogTransientParent(GTK_WINDOW(dialog)),
       dialog,
-      gtk_window_get_resizable(GTK_WINDOW(dialog)) ?
-          chromeos::DIALOG_FLAG_RESIZEABLE :
-          chromeos::DIALOG_FLAG_DEFAULT,
+      GetNativeDialogFlags(GTK_WINDOW(dialog)),
       gfx::Size(width, height),
       gfx::Size());
 }
@@ -1049,14 +1091,14 @@ void ShowDialogWithLocalizedSize(GtkWidget* dialog,
       gfx::Size());
 }
 
-void ShowModalDialogWithMinLocalizedWidth(GtkWidget* dialog,
-                                          int width_id) {
+void ShowDialogWithMinLocalizedWidth(GtkWidget* dialog,
+                                     int width_id) {
   int width = (width_id == -1) ? 0 :
       views::Window::GetLocalizedContentsWidth(width_id);
 
   chromeos::ShowNativeDialog(GetDialogTransientParent(GTK_WINDOW(dialog)),
       dialog,
-      chromeos::DIALOG_FLAG_MODAL,
+      GetNativeDialogFlags(GTK_WINDOW(dialog)),
       gfx::Size(),
       gfx::Size(width, 0));
 }
@@ -1097,8 +1139,8 @@ void ShowDialogWithLocalizedSize(GtkWidget* dialog,
   gtk_widget_show_all(dialog);
 }
 
-void ShowModalDialogWithMinLocalizedWidth(GtkWidget* dialog,
-                                          int width_id) {
+void ShowDialogWithMinLocalizedWidth(GtkWidget* dialog,
+                                     int width_id) {
   gtk_widget_show_all(dialog);
 
   // Suggest a minimum size.
@@ -1155,6 +1197,7 @@ void SetGtkFont(const std::string& font_name) {
 
 void SetLabelWidth(GtkWidget* label, int pixel_width) {
   gtk_label_set_line_wrap(GTK_LABEL(label), TRUE);
+  gtk_misc_set_alignment(GTK_MISC(label), 0, 0.5);
 
   // Do the simple thing in LTR because the bug only affects right-aligned
   // text. Also, when using the workaround, the label tries to maintain

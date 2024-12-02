@@ -13,10 +13,10 @@
 #include "base/string_number_conversions.h"
 #include "base/timer.h"
 #include "base/values.h"
-#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/net/predictor_api.h"
 #include "chrome/browser/net/url_info.h"
 #include "chrome/common/net/predictor_common.h"
+#include "content/browser/browser_thread.h"
 #include "net/base/address_list.h"
 #include "net/base/mock_host_resolver.h"
 #include "net/base/winsock_init.h"
@@ -339,7 +339,7 @@ static bool GetDataFromSerialization(const GURL& motivation,
   for (size_t i = 0; i < subresource_list->GetSize();) {
     std::string url_spec;
     EXPECT_TRUE(subresource_list->GetString(i++, &url_spec));
-    EXPECT_TRUE(subresource_list->GetReal(i++, use_rate));
+    EXPECT_TRUE(subresource_list->GetDouble(i++, use_rate));
     if (subresource == GURL(url_spec)) {
       return true;
     }

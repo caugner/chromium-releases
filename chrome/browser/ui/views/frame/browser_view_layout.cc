@@ -8,7 +8,7 @@
 #include "chrome/browser/ui/find_bar/find_bar.h"
 #include "chrome/browser/ui/find_bar/find_bar_controller.h"
 #include "chrome/browser/ui/view_ids.h"
-#include "chrome/browser/ui/views/bookmark_bar_view.h"
+#include "chrome/browser/ui/views/bookmarks/bookmark_bar_view.h"
 #include "chrome/browser/ui/views/download_shelf_view.h"
 #include "chrome/browser/ui/views/frame/browser_frame.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
@@ -17,7 +17,9 @@
 #include "chrome/browser/ui/views/tabs/side_tab_strip.h"
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
 #include "chrome/browser/ui/views/toolbar_view.h"
-#include "gfx/scrollbar_size.h"
+#include "ui/gfx/point.h"
+#include "ui/gfx/scrollbar_size.h"
+#include "ui/gfx/size.h"
 #include "views/controls/single_split_view.h"
 #include "views/window/window.h"
 
@@ -51,6 +53,9 @@ BrowserViewLayout::BrowserViewLayout()
       active_bookmark_bar_(NULL),
       browser_view_(NULL),
       find_bar_y_(0) {
+}
+
+BrowserViewLayout::~BrowserViewLayout() {
 }
 
 gfx::Size BrowserViewLayout::GetMinimumSize() {
@@ -130,7 +135,7 @@ int BrowserViewLayout::NonClientHitTest(
   // area of the window. So we need to treat hit-tests in these regions as
   // hit-tests of the titlebar.
 
-  views::View* parent = browser_view_->GetParent();
+  views::View* parent = browser_view_->parent();
 
   gfx::Point point_in_browser_view_coords(point);
   views::View::ConvertPointToView(
@@ -243,11 +248,11 @@ void BrowserViewLayout::ViewRemoved(views::View* host, views::View* view) {
 }
 
 void BrowserViewLayout::Layout(views::View* host) {
-  vertical_layout_rect_ = browser_view_->GetLocalBounds(true);
+  vertical_layout_rect_ = browser_view_->GetLocalBounds();
   int top = LayoutTabStrip();
   if (browser_view_->IsTabStripVisible() && !browser_view_->UseVerticalTabs()) {
     tabstrip_->SetBackgroundOffset(gfx::Point(
-        tabstrip_->MirroredX() + browser_view_->MirroredX(),
+        tabstrip_->GetMirroredX() + browser_view_->GetMirroredX(),
         browser_view_->frame()->GetHorizontalTabStripVerticalOffset(false)));
   }
   top = LayoutToolbar(top);
@@ -294,7 +299,7 @@ int BrowserViewLayout::LayoutTabStrip() {
   gfx::Rect tabstrip_bounds(
       browser_view_->frame()->GetBoundsForTabStrip(tabstrip_));
   gfx::Point tabstrip_origin(tabstrip_bounds.origin());
-  views::View::ConvertPointToView(browser_view_->GetParent(), browser_view_,
+  views::View::ConvertPointToView(browser_view_->parent(), browser_view_,
                                   &tabstrip_origin);
   tabstrip_bounds.set_origin(tabstrip_origin);
 
@@ -302,7 +307,7 @@ int BrowserViewLayout::LayoutTabStrip() {
     vertical_layout_rect_.Inset(tabstrip_bounds.width(), 0, 0, 0);
 
   tabstrip_->SetVisible(true);
-  tabstrip_->SetBounds(tabstrip_bounds);
+  tabstrip_->SetBoundsRect(tabstrip_bounds);
   return browser_view_->UseVerticalTabs() ?
       tabstrip_bounds.y() : tabstrip_bounds.bottom();
 }
@@ -378,7 +383,7 @@ void BrowserViewLayout::UpdateReservedContentsRect(
   gfx::Point resize_corner_origin(browser_reserved_rect.origin());
   // Convert |resize_corner_origin| from browser_view_ to source's parent
   // coordinates.
-  views::View::ConvertPointToView(browser_view_, source->GetParent(),
+  views::View::ConvertPointToView(browser_view_, source->parent(),
                                   &resize_corner_origin);
   // Create |reserved_rect| in source's parent coordinates.
   gfx::Rect reserved_rect(resize_corner_origin, browser_reserved_rect.size());
@@ -443,7 +448,7 @@ void BrowserViewLayout::LayoutTabContents(int top, int bottom) {
       !browser_view_->frame_->GetWindow()->IsFullscreen()) {
     gfx::Size resize_corner_size = browser_view_->GetResizeCornerSize();
     if (!resize_corner_size.IsEmpty()) {
-      gfx::Rect bounds = browser_view_->GetLocalBounds(false);
+      gfx::Rect bounds = browser_view_->GetContentsBounds();
       gfx::Point resize_corner_origin(
           bounds.right() - resize_corner_size.width(),
           bounds.bottom() - resize_corner_size.height());
@@ -468,9 +473,9 @@ void BrowserViewLayout::LayoutTabContents(int top, int bottom) {
                              contents_split_offset);
 
   // Now it's safe to actually resize all contents views in the hierarchy.
-  contents_split_->SetBounds(contents_split_bounds);
+  contents_split_->SetBoundsRect(contents_split_bounds);
   if (sidebar_split)
-    sidebar_split->SetBounds(sidebar_split_bounds);
+    sidebar_split->SetBoundsRect(sidebar_split_bounds);
 }
 
 int BrowserViewLayout::GetTopMarginForActiveContent() {

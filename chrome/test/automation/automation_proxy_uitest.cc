@@ -34,8 +34,7 @@
 #include "chrome/test/automation/window_proxy.h"
 #include "chrome/test/ui_test_utils.h"
 #include "chrome/test/ui/ui_test.h"
-#include "gfx/codec/png_codec.h"
-#include "gfx/rect.h"
+#include "net/base/host_port_pair.h"
 #include "net/base/net_util.h"
 #include "net/test/test_server.h"
 #define GMOCK_MUTANT_INCLUDE_LATE_OBJECT_BINDING
@@ -43,7 +42,8 @@
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/message_box_flags.h"
 #include "ui/base/ui_base_switches.h"
-#include "views/event.h"
+#include "ui/gfx/codec/png_codec.h"
+#include "ui/gfx/rect.h"
 
 using ui_test_utils::TimedMessageLoopRunner;
 using testing::CreateFunctor;
@@ -68,6 +68,10 @@ class ExternalTabUITestMockLauncher : public ProxyLauncher {
   void InitializeConnection(const LaunchState& state,
                             bool wait_for_initial_loads) {
     LaunchBrowserAndServer(state, wait_for_initial_loads);
+  }
+
+  void TerminateConnection() {
+    CloseBrowserAndServer();
   }
 
   std::string PrefixedChannelID() const {
@@ -187,8 +191,7 @@ TEST_F(AutomationProxyVisibleTest, MAYBE_WindowGetViewBounds) {
     start.y = bounds.y() + bounds.height() / 2;
     end.x = start.x + 2 * bounds.width() / 3;
     end.y = start.y;
-    ASSERT_TRUE(browser->SimulateDrag(start, end,
-                                      views::Event::EF_LEFT_BUTTON_DOWN));
+    ASSERT_TRUE(browser->SimulateDrag(start, end, ui::EF_LEFT_BUTTON_DOWN));
 
     // Check to see that the drag event successfully swapped the two tabs.
     tab1 = browser->GetTab(0);
@@ -287,8 +290,7 @@ TEST_F(AutomationProxyTest, GetTab) {
     ASSERT_TRUE(tab.get());
     std::wstring title;
     ASSERT_TRUE(tab->GetTabTitle(&title));
-    // BUG [634097] : expected title should be "about:blank"
-    ASSERT_STREQ(L"", title.c_str());
+    ASSERT_STREQ(L"about:blank", title.c_str());
   }
 
   {
@@ -309,8 +311,7 @@ TEST_F(AutomationProxyTest, NavigateToURL) {
 
   std::wstring title;
   ASSERT_TRUE(tab->GetTabTitle(&title));
-  // BUG [634097] : expected title should be "about:blank"
-  ASSERT_STREQ(L"", title.c_str());
+  ASSERT_STREQ(L"about:blank", title.c_str());
 
   FilePath filename(test_data_directory_);
   filename = filename.AppendASCII("title2.html");
@@ -331,12 +332,11 @@ TEST_F(AutomationProxyTest, GoBackForward) {
 
   std::wstring title;
   ASSERT_TRUE(tab->GetTabTitle(&title));
-  // BUG [634097] : expected title should be "about:blank"
-  ASSERT_STREQ(L"", title.c_str());
+  ASSERT_STREQ(L"about:blank", title.c_str());
 
   ASSERT_FALSE(tab->GoBack());
   ASSERT_TRUE(tab->GetTabTitle(&title));
-  ASSERT_STREQ(L"", title.c_str());
+  ASSERT_STREQ(L"about:blank", title.c_str());
 
   FilePath filename(test_data_directory_);
   filename = filename.AppendASCII("title2.html");
@@ -346,8 +346,7 @@ TEST_F(AutomationProxyTest, GoBackForward) {
 
   ASSERT_TRUE(tab->GoBack());
   ASSERT_TRUE(tab->GetTabTitle(&title));
-  // BUG [634097] : expected title should be "about:blank"
-  ASSERT_STREQ(L"", title.c_str());
+  ASSERT_STREQ(L"about:blank", title.c_str());
 
   ASSERT_TRUE(tab->GoForward());
   ASSERT_TRUE(tab->GetTabTitle(&title));
@@ -638,7 +637,8 @@ TEST_F(AutomationProxyTest3, FrameDocumentCanBeAccessed) {
   ASSERT_EQ(L"DIV", actual);
 }
 
-TEST_F(AutomationProxyTest, BlockedPopupTest) {
+// Flaky, http://crbug.com/70937
+TEST_F(AutomationProxyTest, FLAKY_BlockedPopupTest) {
   scoped_refptr<BrowserProxy> window(automation()->GetBrowserWindow(0));
   ASSERT_TRUE(window.get());
 
@@ -698,7 +698,8 @@ void ExternalTabUITestMockClient::ReplyEnd(const net::URLRequestStatus& status,
 
 void ExternalTabUITestMockClient::Reply404(int tab_handle, int request_id) {
   const AutomationURLResponse notfound("", "HTTP/1.1 404\r\n\r\n", 0,
-                                       base::Time(), "", 0);
+                                       base::Time(), "", 0,
+                                       net::HostPortPair());
   ReplyStarted(&notfound, tab_handle, request_id);
   ReplyEOF(tab_handle, request_id);
 }
@@ -763,7 +764,8 @@ const AutomationURLResponse ExternalTabUITestMockClient::http_200(
     0,
     base::Time(),
     "",
-    0);
+    0,
+    net::HostPortPair());
 
 bool ExternalTabUITestMockClient::OnMessageReceived(const IPC::Message& msg) {
   bool handled = true;
@@ -1384,8 +1386,8 @@ TEST_F(AutomationProxyTest, AutocompleteGetSetText) {
       browser->GetAutocompleteEdit());
   ASSERT_TRUE(edit.get());
   EXPECT_TRUE(edit->is_valid());
-  const std::wstring text_to_set = L"Lollerskates";
-  std::wstring actual_text;
+  const string16 text_to_set = ASCIIToUTF16("Lollerskates");
+  string16 actual_text;
   EXPECT_TRUE(edit->SetText(text_to_set));
   EXPECT_TRUE(edit->GetText(&actual_text));
   EXPECT_EQ(text_to_set, actual_text);
@@ -1409,9 +1411,9 @@ TEST_F(AutomationProxyTest, AutocompleteParallelProxy) {
   ASSERT_TRUE(edit2.get());
   EXPECT_TRUE(browser2->GetTab(0)->WaitForTabToBeRestored(
       TestTimeouts::action_max_timeout_ms()));
-  const std::wstring text_to_set1 = L"Lollerskates";
-  const std::wstring text_to_set2 = L"Roflcopter";
-  std::wstring actual_text1, actual_text2;
+  const string16 text_to_set1 = ASCIIToUTF16("Lollerskates");
+  const string16 text_to_set2 = ASCIIToUTF16("Roflcopter");
+  string16 actual_text1, actual_text2;
   EXPECT_TRUE(edit1->SetText(text_to_set1));
   EXPECT_TRUE(edit2->SetText(text_to_set2));
   EXPECT_TRUE(edit1->GetText(&actual_text1));
@@ -1438,7 +1440,7 @@ TEST_F(AutomationProxyVisibleTest, AutocompleteMatchesTest) {
   EXPECT_TRUE(edit->is_valid());
   EXPECT_TRUE(browser->ApplyAccelerator(IDC_FOCUS_LOCATION));
   ASSERT_TRUE(edit->WaitForFocus());
-  EXPECT_TRUE(edit->SetText(L"Roflcopter"));
+  EXPECT_TRUE(edit->SetText(ASCIIToUTF16("Roflcopter")));
   EXPECT_TRUE(edit->WaitForQuery(TestTimeouts::action_max_timeout_ms()));
   bool query_in_progress;
   EXPECT_TRUE(edit->IsQueryInProgress(&query_in_progress));
@@ -1513,7 +1515,8 @@ TEST_F(AutomationProxyTest, FLAKY_AppModalDialogTest) {
   EXPECT_FALSE(modal_dialog_showing);
   int result = -1;
   EXPECT_TRUE(tab->ExecuteAndExtractInt(
-      L"", L"window.domAutomationController.send(result);", &result));
+      std::wstring(),
+      L"window.domAutomationController.send(result);", &result));
   EXPECT_EQ(0, result);
 
   // Try again.
@@ -1533,7 +1536,8 @@ TEST_F(AutomationProxyTest, FLAKY_AppModalDialogTest) {
                                                      &button));
   EXPECT_FALSE(modal_dialog_showing);
   EXPECT_TRUE(tab->ExecuteAndExtractInt(
-      L"", L"window.domAutomationController.send(result);", &result));
+      std::wstring(),
+      L"window.domAutomationController.send(result);", &result));
   EXPECT_EQ(1, result);
 }
 

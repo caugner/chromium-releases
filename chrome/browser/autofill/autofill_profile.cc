@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,9 +11,9 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/autofill/address.h"
 #include "chrome/browser/autofill/autofill_manager.h"
+#include "chrome/browser/autofill/autofill_type.h"
 #include "chrome/browser/autofill/contact_info.h"
 #include "chrome/browser/autofill/fax_number.h"
-#include "chrome/browser/autofill/home_address.h"
 #include "chrome/browser/autofill/home_phone_number.h"
 #include "chrome/common/guid.h"
 #include "grit/generated_resources.h"
@@ -21,55 +21,15 @@
 
 namespace {
 
-void InitPersonalInfo(FormGroupMap* personal_info) {
-  (*personal_info)[AutoFillType::CONTACT_INFO] = new ContactInfo();
-  (*personal_info)[AutoFillType::PHONE_HOME] = new HomePhoneNumber();
-  (*personal_info)[AutoFillType::PHONE_FAX] = new FaxNumber();
-  (*personal_info)[AutoFillType::ADDRESS_HOME] = new HomeAddress();
-}
-
-// Maps |field_type| to a field type that can be directly stored in a profile
-// (in the sense that it makes sense to call |AutoFillProfile::SetInfo()| with
-// the returned field type as the first parameter.
-AutoFillFieldType GetEquivalentFieldType(AutoFillFieldType field_type) {
-  // When billing information is requested from the profile we map to the
-  // home address equivalents.
-  switch (field_type) {
-    case ADDRESS_BILLING_LINE1:
-      return ADDRESS_HOME_LINE1;
-
-    case ADDRESS_BILLING_LINE2:
-      return ADDRESS_HOME_LINE2;
-
-    case ADDRESS_BILLING_APT_NUM:
-      return ADDRESS_HOME_APT_NUM;
-
-    case ADDRESS_BILLING_CITY:
-      return ADDRESS_HOME_CITY;
-
-    case ADDRESS_BILLING_STATE:
-      return ADDRESS_HOME_STATE;
-
-    case ADDRESS_BILLING_ZIP:
-      return ADDRESS_HOME_ZIP;
-
-    case ADDRESS_BILLING_COUNTRY:
-      return ADDRESS_HOME_COUNTRY;
-
-    default:
-      return field_type;
-  }
-}
-
-// Like |GetEquivalentFieldType()| above, but also returns |NAME_FULL| for
-// first, middle, and last name field types.
-AutoFillFieldType GetEquivalentFieldTypeCollapsingNames(
-    AutoFillFieldType field_type) {
+// Like |AutofillType::GetEquivalentFieldType()|, but also returns |NAME_FULL|
+// for first, middle, and last name field types.
+AutofillFieldType GetEquivalentFieldTypeCollapsingNames(
+    AutofillFieldType field_type) {
   if (field_type == NAME_FIRST || field_type == NAME_MIDDLE ||
       field_type == NAME_LAST)
     return NAME_FULL;
 
-  return GetEquivalentFieldType(field_type);
+  return AutofillType::GetEquivalentFieldType(field_type);
 }
 
 // Fills |distinguishing_fields| with a list of fields to use when creating
@@ -80,10 +40,10 @@ AutoFillFieldType GetEquivalentFieldTypeCollapsingNames(
 // |UNKNOWN_TYPE| by convention. The resulting list of fields is sorted in
 // decreasing order of importance.
 void GetFieldsForDistinguishingProfiles(
-    const std::vector<AutoFillFieldType>* suggested_fields,
-    AutoFillFieldType excluded_field,
-    std::vector<AutoFillFieldType>* distinguishing_fields) {
-  static const AutoFillFieldType kDefaultDistinguishingFields[] = {
+    const std::vector<AutofillFieldType>* suggested_fields,
+    AutofillFieldType excluded_field,
+    std::vector<AutofillFieldType>* distinguishing_fields) {
+  static const AutofillFieldType kDefaultDistinguishingFields[] = {
     NAME_FULL,
     ADDRESS_HOME_LINE1,
     ADDRESS_HOME_CITY,
@@ -106,15 +66,15 @@ void GetFieldsForDistinguishingProfiles(
 
   // Keep track of which fields we've seen so that we avoid duplicate entries.
   // Always ignore fields of unknown type and the excluded field.
-  std::set<AutoFillFieldType> seen_fields;
+  std::set<AutofillFieldType> seen_fields;
   seen_fields.insert(UNKNOWN_TYPE);
   seen_fields.insert(GetEquivalentFieldTypeCollapsingNames(excluded_field));
 
   distinguishing_fields->clear();
-  for (std::vector<AutoFillFieldType>::const_iterator it =
+  for (std::vector<AutofillFieldType>::const_iterator it =
            suggested_fields->begin();
        it != suggested_fields->end(); ++it) {
-    AutoFillFieldType suggested_type =
+    AutofillFieldType suggested_type =
         GetEquivalentFieldTypeCollapsingNames(*it);
     if (seen_fields.insert(suggested_type).second)
       distinguishing_fields->push_back(suggested_type);
@@ -126,7 +86,7 @@ void GetFieldsForDistinguishingProfiles(
   // distinguish between profiles that are identical except for the name.
   if (excluded_field != NAME_FULL &&
       GetEquivalentFieldTypeCollapsingNames(excluded_field) == NAME_FULL) {
-    for (std::vector<AutoFillFieldType>::const_iterator it =
+    for (std::vector<AutofillFieldType>::const_iterator it =
              suggested_fields->begin();
          it != suggested_fields->end(); ++it) {
       if (*it != excluded_field &&
@@ -181,8 +141,10 @@ void AutoFillProfile::GetAvailableFieldTypes(
   }
 }
 
-string16 AutoFillProfile::GetFieldText(const AutoFillType& type) const {
-  AutoFillType return_type(GetEquivalentFieldType(type.field_type()));
+string16 AutoFillProfile::GetFieldText(const AutofillType& type) const {
+  AutofillType return_type(
+      AutofillType::GetEquivalentFieldType(type.field_type()));
+
   FormGroupMap::const_iterator iter = personal_info_.find(return_type.group());
   if (iter == personal_info_.end() || iter->second == NULL)
     return string16();
@@ -191,7 +153,7 @@ string16 AutoFillProfile::GetFieldText(const AutoFillType& type) const {
 }
 
 void AutoFillProfile::FindInfoMatches(
-    const AutoFillType& type,
+    const AutofillType& type,
     const string16& info,
     std::vector<string16>* matched_text) const {
   if (matched_text == NULL) {
@@ -215,7 +177,7 @@ void AutoFillProfile::FindInfoMatches(
   }
 }
 
-void AutoFillProfile::SetInfo(const AutoFillType& type, const string16& value) {
+void AutoFillProfile::SetInfo(const AutofillType& type, const string16& value) {
   FormGroupMap::const_iterator iter = personal_info_.find(type.group());
   if (iter == personal_info_.end() || iter->second == NULL)
     return;
@@ -229,6 +191,22 @@ FormGroup* AutoFillProfile::Clone() const {
 
 const string16 AutoFillProfile::Label() const {
   return label_;
+}
+
+const std::string AutoFillProfile::CountryCode() const {
+  FormGroup* form_group =
+      personal_info_.find(AutofillType::ADDRESS_HOME)->second;
+  DCHECK(form_group);
+  Address* address = static_cast<Address*>(form_group);
+  return address->country_code();
+}
+
+void AutoFillProfile::SetCountryCode(const std::string& country_code) {
+  FormGroup* form_group =
+      personal_info_.find(AutofillType::ADDRESS_HOME)->second;
+  DCHECK(form_group);
+  Address* address = static_cast<Address*>(form_group);
+  address->set_country_code(country_code);
 }
 
 // static
@@ -245,7 +223,7 @@ bool AutoFillProfile::AdjustInferredLabels(
   for (size_t i = 0; i < profiles->size(); ++i) {
     if ((*profiles)[i]->Label() != created_labels[i]) {
       updated_labels = true;
-      (*profiles)[i]->set_label(created_labels[i]);
+      (*profiles)[i]->label_ = created_labels[i];
     }
   }
   return updated_labels;
@@ -254,14 +232,14 @@ bool AutoFillProfile::AdjustInferredLabels(
 // static
 void AutoFillProfile::CreateInferredLabels(
     const std::vector<AutoFillProfile*>* profiles,
-    const std::vector<AutoFillFieldType>* suggested_fields,
-    AutoFillFieldType excluded_field,
+    const std::vector<AutofillFieldType>* suggested_fields,
+    AutofillFieldType excluded_field,
     size_t minimal_fields_shown,
     std::vector<string16>* created_labels) {
   DCHECK(profiles);
   DCHECK(created_labels);
 
-  std::vector<AutoFillFieldType> fields_to_use;
+  std::vector<AutofillFieldType> fields_to_use;
   GetFieldsForDistinguishingProfiles(suggested_fields, excluded_field,
                                      &fields_to_use);
 
@@ -322,7 +300,7 @@ void AutoFillProfile::operator=(const AutoFillProfile& source) {
 int AutoFillProfile::Compare(const AutoFillProfile& profile) const {
   // The following AutoFill field types are the only types we store in the WebDB
   // so far, so we're only concerned with matching these types in the profile.
-  const AutoFillFieldType types[] = { NAME_FIRST,
+  const AutofillFieldType types[] = { NAME_FIRST,
                                       NAME_MIDDLE,
                                       NAME_LAST,
                                       EMAIL_ADDRESS,
@@ -337,8 +315,8 @@ int AutoFillProfile::Compare(const AutoFillProfile& profile) const {
                                       PHONE_FAX_NUMBER };
 
   for (size_t index = 0; index < arraysize(types); ++index) {
-    int comparison = GetFieldText(AutoFillType(types[index])).compare(
-        profile.GetFieldText(AutoFillType(types[index])));
+    int comparison = GetFieldText(AutofillType(types[index])).compare(
+        profile.GetFieldText(AutofillType(types[index])));
     if (comparison != 0)
       return comparison;
   }
@@ -347,10 +325,7 @@ int AutoFillProfile::Compare(const AutoFillProfile& profile) const {
 }
 
 bool AutoFillProfile::operator==(const AutoFillProfile& profile) const {
-  if (label_ != profile.label_ || guid_ != profile.guid_)
-    return false;
-
-  return Compare(profile) == 0;
+  return guid_ == profile.guid_ && Compare(profile) == 0;
 }
 
 bool AutoFillProfile::operator!=(const AutoFillProfile& profile) const {
@@ -358,25 +333,25 @@ bool AutoFillProfile::operator!=(const AutoFillProfile& profile) const {
 }
 
 const string16 AutoFillProfile::PrimaryValue() const {
-  return GetFieldText(AutoFillType(NAME_FULL)) +
-         GetFieldText(AutoFillType(ADDRESS_HOME_LINE1)) +
-         GetFieldText(AutoFillType(ADDRESS_HOME_LINE2)) +
-         GetFieldText(AutoFillType(EMAIL_ADDRESS));
+  return GetFieldText(AutofillType(NAME_FULL)) +
+         GetFieldText(AutofillType(ADDRESS_HOME_LINE1)) +
+         GetFieldText(AutofillType(ADDRESS_HOME_LINE2)) +
+         GetFieldText(AutofillType(EMAIL_ADDRESS));
 }
 
 string16 AutoFillProfile::ConstructInferredLabel(
-    const std::vector<AutoFillFieldType>& included_fields,
+    const std::vector<AutofillFieldType>& included_fields,
     size_t num_fields_to_use) const {
   const string16 separator =
       l10n_util::GetStringUTF16(IDS_AUTOFILL_DIALOG_ADDRESS_SUMMARY_SEPARATOR);
 
   string16 label;
   size_t num_fields_used = 0;
-  for (std::vector<AutoFillFieldType>::const_iterator it =
+  for (std::vector<AutofillFieldType>::const_iterator it =
            included_fields.begin();
        it != included_fields.end() && num_fields_used < num_fields_to_use;
        ++it) {
-    string16 field = GetFieldText(AutoFillType(*it));
+    string16 field = GetFieldText(AutofillType(*it));
     if (field.empty())
       continue;
 
@@ -398,14 +373,14 @@ string16 AutoFillProfile::ConstructInferredLabel(
 void AutoFillProfile::CreateDifferentiatingLabels(
     const std::vector<AutoFillProfile*>& profiles,
     const std::list<size_t>& indices,
-    const std::vector<AutoFillFieldType>& fields,
+    const std::vector<AutofillFieldType>& fields,
     size_t num_fields_to_include,
     std::vector<string16>* created_labels) {
   // For efficiency, we first construct a map of fields to their text values and
   // each value's frequency.
-  std::map<AutoFillFieldType,
+  std::map<AutofillFieldType,
            std::map<string16, size_t> > field_text_frequencies_by_field;
-  for (std::vector<AutoFillFieldType>::const_iterator field = fields.begin();
+  for (std::vector<AutofillFieldType>::const_iterator field = fields.begin();
        field != fields.end(); ++field) {
     std::map<string16, size_t>& field_text_frequencies =
         field_text_frequencies_by_field[*field];
@@ -413,7 +388,7 @@ void AutoFillProfile::CreateDifferentiatingLabels(
     for (std::list<size_t>::const_iterator it = indices.begin();
          it != indices.end(); ++it) {
       const AutoFillProfile* profile = profiles[*it];
-      string16 field_text = profile->GetFieldText(AutoFillType(*field));
+      string16 field_text = profile->GetFieldText(AutofillType(*field));
 
       // If this label is not already in the map, add it with frequency 0.
       if (!field_text_frequencies.count(field_text))
@@ -435,12 +410,12 @@ void AutoFillProfile::CreateDifferentiatingLabels(
        it != indices.end(); ++it) {
     const AutoFillProfile* profile = profiles[*it];
 
-    std::vector<AutoFillFieldType> label_fields;
+    std::vector<AutofillFieldType> label_fields;
     bool found_differentiating_field = false;
-    for (std::vector<AutoFillFieldType>::const_iterator field = fields.begin();
+    for (std::vector<AutofillFieldType>::const_iterator field = fields.begin();
          field != fields.end(); ++field) {
       // Skip over empty fields.
-      string16 field_text = profile->GetFieldText(AutoFillType(*field));
+      string16 field_text = profile->GetFieldText(AutofillType(*field));
       if (field_text.empty())
         continue;
 
@@ -471,6 +446,14 @@ void AutoFillProfile::CreateDifferentiatingLabels(
   }
 }
 
+// static
+void AutoFillProfile::InitPersonalInfo(FormGroupMap* personal_info) {
+  (*personal_info)[AutofillType::CONTACT_INFO] = new ContactInfo();
+  (*personal_info)[AutofillType::PHONE_HOME] = new HomePhoneNumber();
+  (*personal_info)[AutofillType::PHONE_FAX] = new FaxNumber();
+  (*personal_info)[AutofillType::ADDRESS_HOME] = new Address();
+}
+
 // So we can compare AutoFillProfiles with EXPECT_EQ().
 std::ostream& operator<<(std::ostream& os, const AutoFillProfile& profile) {
   return os
@@ -478,31 +461,31 @@ std::ostream& operator<<(std::ostream& os, const AutoFillProfile& profile) {
       << " "
       << profile.guid()
       << " "
-      << UTF16ToUTF8(profile.GetFieldText(AutoFillType(NAME_FIRST)))
+      << UTF16ToUTF8(profile.GetFieldText(AutofillType(NAME_FIRST)))
       << " "
-      << UTF16ToUTF8(profile.GetFieldText(AutoFillType(NAME_MIDDLE)))
+      << UTF16ToUTF8(profile.GetFieldText(AutofillType(NAME_MIDDLE)))
       << " "
-      << UTF16ToUTF8(profile.GetFieldText(AutoFillType(NAME_LAST)))
+      << UTF16ToUTF8(profile.GetFieldText(AutofillType(NAME_LAST)))
       << " "
-      << UTF16ToUTF8(profile.GetFieldText(AutoFillType(EMAIL_ADDRESS)))
+      << UTF16ToUTF8(profile.GetFieldText(AutofillType(EMAIL_ADDRESS)))
       << " "
-      << UTF16ToUTF8(profile.GetFieldText(AutoFillType(COMPANY_NAME)))
+      << UTF16ToUTF8(profile.GetFieldText(AutofillType(COMPANY_NAME)))
       << " "
-      << UTF16ToUTF8(profile.GetFieldText(AutoFillType(ADDRESS_HOME_LINE1)))
+      << UTF16ToUTF8(profile.GetFieldText(AutofillType(ADDRESS_HOME_LINE1)))
       << " "
-      << UTF16ToUTF8(profile.GetFieldText(AutoFillType(ADDRESS_HOME_LINE2)))
+      << UTF16ToUTF8(profile.GetFieldText(AutofillType(ADDRESS_HOME_LINE2)))
       << " "
-      << UTF16ToUTF8(profile.GetFieldText(AutoFillType(ADDRESS_HOME_CITY)))
+      << UTF16ToUTF8(profile.GetFieldText(AutofillType(ADDRESS_HOME_CITY)))
       << " "
-      << UTF16ToUTF8(profile.GetFieldText(AutoFillType(ADDRESS_HOME_STATE)))
+      << UTF16ToUTF8(profile.GetFieldText(AutofillType(ADDRESS_HOME_STATE)))
       << " "
-      << UTF16ToUTF8(profile.GetFieldText(AutoFillType(ADDRESS_HOME_ZIP)))
+      << UTF16ToUTF8(profile.GetFieldText(AutofillType(ADDRESS_HOME_ZIP)))
       << " "
-      << UTF16ToUTF8(profile.GetFieldText(AutoFillType(ADDRESS_HOME_COUNTRY)))
+      << UTF16ToUTF8(profile.GetFieldText(AutofillType(ADDRESS_HOME_COUNTRY)))
       << " "
-      << UTF16ToUTF8(profile.GetFieldText(AutoFillType(
+      << UTF16ToUTF8(profile.GetFieldText(AutofillType(
              PHONE_HOME_WHOLE_NUMBER)))
       << " "
-      << UTF16ToUTF8(profile.GetFieldText(AutoFillType(
+      << UTF16ToUTF8(profile.GetFieldText(AutofillType(
              PHONE_FAX_WHOLE_NUMBER)));
 }

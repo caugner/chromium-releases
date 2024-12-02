@@ -6,7 +6,7 @@
 
 #include "base/logging.h"
 #include "base/utf_string_conversions.h"
-#include "gfx/font.h"
+#include "ui/gfx/font.h"
 #include "views/focus/focus_manager.h"
 #include "views/screen.h"
 #include "views/widget/root_view.h"
@@ -86,7 +86,7 @@ bool TooltipManagerGtk::ShowTooltip(int x, int y, bool for_keyboard,
     view_loc.SetPoint(view->width() / 2, view->height() / 2);
   } else if (!for_keyboard) {
     RootView* root_view = widget_->GetRootView();
-    view = root_view->GetViewForPoint(gfx::Point(x, y));
+    view = root_view->GetEventHandlerForPoint(gfx::Point(x, y));
     view_loc.SetPoint(x, y);
     View::ConvertPointFromWidget(view, &view_loc);
   } else {

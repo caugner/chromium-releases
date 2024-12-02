@@ -36,7 +36,7 @@ class Throbber : public View {
 
   // overridden from View
   virtual gfx::Size GetPreferredSize();
-  virtual void Paint(gfx::Canvas* canvas);
+  virtual void OnPaint(gfx::Canvas* canvas);
 
  protected:
   // Specifies whether the throbber is currently animating or not
@@ -63,6 +63,7 @@ class SmoothedThrobber : public Throbber {
  public:
   SmoothedThrobber(int frame_delay_ms);
   SmoothedThrobber(int frame_delay_ms, SkBitmap* frames);
+  virtual ~SmoothedThrobber();
 
   virtual void Start();
   virtual void Stop();
@@ -105,7 +106,7 @@ class CheckmarkThrobber : public Throbber {
   void SetChecked(bool checked);
 
   // Overridden from Throbber:
-  virtual void Paint(gfx::Canvas* canvas);
+  virtual void OnPaint(gfx::Canvas* canvas);
 
  private:
   static const int kFrameTimeMs = 30;

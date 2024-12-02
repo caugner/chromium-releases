@@ -11,10 +11,10 @@
 #include "chrome/common/content_settings.h"
 #include "chrome/common/navigation_types.h"
 #include "chrome/test/automation/autocomplete_edit_proxy.h"
-#include "gfx/rect.h"
 #include "googleurl/src/gurl.h"
 #include "ipc/ipc_message_macros.h"
 #include "net/url_request/url_request_status.h"
+#include "ui/gfx/rect.h"
 
 
 
@@ -533,8 +533,8 @@ IPC_MESSAGE_ROUTED3(AutomationMsg_OpenURL,
 //   - int: handle of the tab
 // Response:
 //  - bool: whether the operation was successful.
-IPC_SYNC_MESSAGE_CONTROL1_0(AutomationMsg_WaitForTabToBeRestored,
-                            int)
+IPC_SYNC_MESSAGE_CONTROL1_1(AutomationMsg_WaitForTabToBeRestored,
+                            int, bool)
 
 // This message is an outgoing message from Chrome to an external host.
 // It is a notification that a navigation happened
@@ -653,7 +653,7 @@ IPC_SYNC_MESSAGE_CONTROL4_1(AutomationMsg_SavePage,
 IPC_SYNC_MESSAGE_CONTROL1_2(AutomationMsg_AutocompleteEditGetText,
                             int /* autocomplete edit handle */,
                             bool /* the requested autocomplete edit exists */,
-                            std::wstring /* omnibox text */)
+                            string16 /* omnibox text */)
 
 // This message sets the text being displayed in the AutocompleteEdit.  The
 // first parameter is the handle to the omnibox and the second parameter is
@@ -662,7 +662,7 @@ IPC_SYNC_MESSAGE_CONTROL1_2(AutomationMsg_AutocompleteEditGetText,
 // completed.
 IPC_SYNC_MESSAGE_CONTROL2_1(AutomationMsg_AutocompleteEditSetText,
                             int /* autocomplete edit handle */,
-                            std::wstring /* text to set */,
+                            string16 /* text to set */,
                             bool /* the requested autocomplete edit exists */)
 
 // This message requests if a query to a autocomplete provider is still in
@@ -755,14 +755,14 @@ IPC_SYNC_MESSAGE_CONTROL1_2(AutomationMsg_BookmarkBarVisibility,
 // returns -1 if an error occurred.
 IPC_SYNC_MESSAGE_CONTROL1_1(AutomationMsg_GetInfoBarCount,
                             int /* tab_handle */,
-                            int /* info bar count */)
+                            size_t /* info bar count */)
 
 // This message triggers the action associated with the "accept" button in
 // the info-bar at the specified index.  If |wait for navigation| is true, it
 // won't return until a navigation has occurred.
 IPC_SYNC_MESSAGE_CONTROL3_1(AutomationMsg_ClickInfoBarAccept,
                             int /* tab_handle */,
-                            int /* info bar index */,
+                            size_t /* info bar index */,
                             bool /* wait for navigation */,
 // This line blank on purpose, see comment atop file about __LINE__.
                             /* navigation result */
@@ -1414,7 +1414,7 @@ IPC_SYNC_MESSAGE_CONTROL2_1(AutomationMsg_WaitForTabCountToBecome,
 // Waits for the infobar count to reach given number.
 IPC_SYNC_MESSAGE_CONTROL2_1(AutomationMsg_WaitForInfoBarCount,
                             int /* tab handle */,
-                            int /* target count */,
+                            size_t /* target count */,
                             bool /* success */)
 
 // Waits for the autocomplete edit to receive focus.
@@ -1441,7 +1441,18 @@ IPC_SYNC_MESSAGE_CONTROL2_1(AutomationMsg_CaptureEntirePageAsPNG,
 
 // Notify the JavaScript engine in the render to change its parameters
 // while performing stress testing.
-IPC_MESSAGE_ROUTED3(AutomationMsg_JavaScriptStressTestControl,
-                    int /* tab handle */,
-                    int /* command */,
-                    int /* type or run */)
+IPC_MESSAGE_CONTROL3(AutomationMsg_JavaScriptStressTestControl,
+                     int /* tab handle */,
+                     int /* command */,
+                     int /* type or run */)
+
+// This message posts a task to the PROCESS_LAUNCHER thread. Once processed
+// the response is sent back. This is useful when you want to make sure all
+// changes to the number of processes have completed.
+IPC_SYNC_MESSAGE_CONTROL0_0(AutomationMsg_WaitForProcessLauncherThreadToGoIdle)
+
+// Gets a handle of the browser that owns the given tab.
+IPC_SYNC_MESSAGE_CONTROL1_2(AutomationMsg_GetParentBrowserOfTab,
+                            int /* tab handle */,
+                            int /* browser handle */,
+                            bool /* success */)

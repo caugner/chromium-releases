@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebNotificationPermissionCallback.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityOrigin.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebTextDirection.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebURL.h"
 
 using WebKit::WebNotification;
@@ -18,12 +19,23 @@ using WebKit::WebNotificationPresenter;
 using WebKit::WebNotificationPermissionCallback;
 using WebKit::WebSecurityOrigin;
 using WebKit::WebString;
+using WebKit::WebTextDirectionRightToLeft;
 using WebKit::WebURL;
 
 namespace {
 void DeferredDisplayDispatch(WebNotification notification) {
   notification.dispatchDisplayEvent();
 }
+}
+
+TestNotificationPresenter::TestNotificationPresenter(TestShell* shell)
+    : shell_(shell) {
+}
+
+TestNotificationPresenter::~TestNotificationPresenter() {}
+
+void TestNotificationPresenter::Reset() {
+  allowed_origins_.clear();
 }
 
 void TestNotificationPresenter::grantPermission(const std::string& origin) {
@@ -50,7 +62,8 @@ bool TestNotificationPresenter::show(const WebNotification& notification) {
            notification.url().spec().data());
   } else {
     printf("DESKTOP NOTIFICATION:%s icon %s, title %s, text %s\n",
-           notification.dir() == "rtl" ? "(RTL)" : "",
+           notification.direction() == WebTextDirectionRightToLeft ? "(RTL)" :
+               "",
            notification.iconURL().isEmpty() ? "" :
                notification.iconURL().spec().data(),
            notification.title().isEmpty() ? "" :

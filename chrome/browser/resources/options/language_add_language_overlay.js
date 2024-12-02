@@ -1,12 +1,11 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 ///////////////////////////////////////////////////////////////////////////////
 // AddLanguageOverlay class:
 
-cr.define('options.language', function() {
-
+cr.define('options', function() {
   const OptionsPage = options.OptionsPage;
 
   /**
@@ -14,7 +13,7 @@ cr.define('options.language', function() {
    * @constructor
    */
   function AddLanguageOverlay() {
-    OptionsPage.call(this, 'addLanguageOverlay',
+    OptionsPage.call(this, 'addLanguage',
                      localStrings.getString('add_button'),
                      'add-language-overlay-page');
   }
@@ -35,7 +34,7 @@ cr.define('options.language', function() {
 
       // Set up the cancel button.
       $('add-language-overlay-cancel-button').onclick = function(e) {
-        OptionsPage.clearOverlays();
+        OptionsPage.closeOverlay();
       };
 
       // Create the language list with which users can add a language.

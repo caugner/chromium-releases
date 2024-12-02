@@ -201,8 +201,9 @@ const int Extension::kSidebarIconMaxSize = 16;
 
 // Explicit permissions -- permission declaration required.
 const char Extension::kBackgroundPermission[] = "background";
-const char Extension::kContextMenusPermission[] = "contextMenus";
 const char Extension::kBookmarkPermission[] = "bookmarks";
+const char Extension::kContextMenusPermission[] = "contextMenus";
+const char Extension::kContentSettingsPermission[] = "contentSettings";
 const char Extension::kCookiePermission[] = "cookies";
 const char Extension::kExperimentalPermission[] = "experimental";
 const char Extension::kGeolocationPermission[] = "geolocation";
@@ -221,6 +222,7 @@ const char Extension::kWebstorePrivatePermission[] = "webstorePrivate";
 const Extension::Permission Extension::kPermissions[] = {
   { kBackgroundPermission, 0 },
   { kBookmarkPermission, IDS_EXTENSION_PROMPT_WARNING_BOOKMARKS },
+  { kContentSettingsPermission, 0 },
   { kContextMenusPermission, 0 },
   { kCookiePermission, 0 },
   { kExperimentalPermission, 0 },
@@ -266,9 +268,11 @@ scoped_refptr<Extension> Extension::Create(const FilePath& path,
                                            Location location,
                                            const DictionaryValue& value,
                                            bool require_key,
+                                           bool strict_error_checks,
                                            std::string* error) {
   scoped_refptr<Extension> extension = new Extension(path, location);
-  if (!extension->InitFromValue(value, require_key, error))
+
+  if (!extension->InitFromValue(value, require_key, strict_error_checks, error))
     return NULL;
   return extension;
 }
@@ -347,7 +351,7 @@ bool Extension::IsElevatedHostList(
                       old_hosts_set.begin(), old_hosts_set.end(),
                       std::inserter(new_hosts_only, new_hosts_only.begin()));
 
-  return new_hosts_only.size() > 0;
+  return !new_hosts_only.empty();
 }
 
 // static
@@ -513,7 +517,9 @@ bool Extension::GenerateId(const std::string& input, std::string* output) {
 // Helper method that loads a UserScript object from a dictionary in the
 // content_script list of the manifest.
 bool Extension::LoadUserScriptHelper(const DictionaryValue* content_script,
-                                     int definition_index, std::string* error,
+                                     int definition_index,
+                                     URLPattern::ParseOption parse_strictness,
+                                     std::string* error,
                                      UserScript* result) {
   // run_at
   if (content_script->HasKey(keys::kRunAt)) {
@@ -564,8 +570,11 @@ bool Extension::LoadUserScriptHelper(const DictionaryValue* content_script,
   for (size_t j = 0; j < matches->GetSize(); ++j) {
     std::string match_str;
     if (!matches->GetString(j, &match_str)) {
-      *error = ExtensionErrorUtils::FormatErrorMessage(errors::kInvalidMatch,
-          base::IntToString(definition_index), base::IntToString(j));
+      *error = ExtensionErrorUtils::FormatErrorMessage(
+          errors::kInvalidMatch,
+          base::IntToString(definition_index),
+          base::IntToString(j),
+          errors::kExpectString);
       return false;
     }
 
@@ -573,9 +582,14 @@ bool Extension::LoadUserScriptHelper(const DictionaryValue* content_script,
     if (CanExecuteScriptEverywhere())
       pattern.set_valid_schemes(URLPattern::SCHEME_ALL);
 
-    if (URLPattern::PARSE_SUCCESS != pattern.Parse(match_str)) {
-      *error = ExtensionErrorUtils::FormatErrorMessage(errors::kInvalidMatch,
-          base::IntToString(definition_index), base::IntToString(j));
+    URLPattern::ParseResult parse_result = pattern.Parse(match_str,
+                                                         parse_strictness);
+    if (parse_result != URLPattern::PARSE_SUCCESS) {
+      *error = ExtensionErrorUtils::FormatErrorMessage(
+          errors::kInvalidMatch,
+          base::IntToString(definition_index),
+          base::IntToString(j),
+          URLPattern::GetParseResultString(parse_result));
       return false;
     }
 
@@ -835,19 +849,20 @@ ExtensionSidebarDefaults* Extension::LoadExtensionSidebarDefaults(
   }
   result->set_default_title(default_title);
 
-  // Read sidebar's |default_url| (optional).
-  std::string default_url;
-  if (extension_sidebar->HasKey(keys::kSidebarDefaultUrl)) {
-    if (!extension_sidebar->GetString(keys::kSidebarDefaultUrl, &default_url) ||
-        default_url.empty()) {
-      *error = errors::kInvalidSidebarDefaultUrl;
+  // Read sidebar's |default_page| (optional).
+  std::string default_page;
+  if (extension_sidebar->HasKey(keys::kSidebarDefaultPage)) {
+    if (!extension_sidebar->GetString(keys::kSidebarDefaultPage,
+                                      &default_page) ||
+        default_page.empty()) {
+      *error = errors::kInvalidSidebarDefaultPage;
       return NULL;
     }
-    GURL resolved_url = extension_sidebar_utils::ResolveAndVerifyUrl(
-        default_url, this, error);
-    if (!resolved_url.is_valid())
+    GURL url = extension_sidebar_utils::ResolveRelativePath(
+        default_page, this, error);
+    if (!url.is_valid())
       return NULL;
-    result->set_default_url(resolved_url);
+    result->set_default_page(url);
   }
 
   return result.release();
@@ -875,6 +890,7 @@ bool Extension::LoadExtent(const DictionaryValue* manifest,
                            ExtensionExtent* extent,
                            const char* list_error,
                            const char* value_error,
+                           URLPattern::ParseOption parse_strictness,
                            std::string* error) {
   Value* temp = NULL;
   if (!manifest->Get(key, &temp))
@@ -890,37 +906,55 @@ bool Extension::LoadExtent(const DictionaryValue* manifest,
     std::string pattern_string;
     if (!pattern_list->GetString(i, &pattern_string)) {
       *error = ExtensionErrorUtils::FormatErrorMessage(value_error,
-                                                       base::UintToString(i));
+                                                       base::UintToString(i),
+                                                       errors::kExpectString);
       return false;
     }
 
     URLPattern pattern(kValidWebExtentSchemes);
-    URLPattern::ParseResult result = pattern.Parse(pattern_string);
-    if (result == URLPattern::PARSE_ERROR_EMPTY_PATH) {
+    URLPattern::ParseResult parse_result = pattern.Parse(pattern_string,
+                                                         parse_strictness);
+    if (parse_result == URLPattern::PARSE_ERROR_EMPTY_PATH) {
       pattern_string += "/";
-      result = pattern.Parse(pattern_string);
+      parse_result = pattern.Parse(pattern_string, parse_strictness);
     }
-    if (URLPattern::PARSE_SUCCESS != result) {
-      *error = ExtensionErrorUtils::FormatErrorMessage(value_error,
-                                                       base::UintToString(i));
+
+    if (parse_result != URLPattern::PARSE_SUCCESS) {
+      *error = ExtensionErrorUtils::FormatErrorMessage(
+          value_error,
+          base::UintToString(i),
+          URLPattern::GetParseResultString(parse_result));
       return false;
     }
 
-    // Do not allow authors to claim "<all_urls>". That would make no sense.
+    // Do not allow authors to claim "<all_urls>".
     if (pattern.match_all_urls()) {
-      *error = ExtensionErrorUtils::FormatErrorMessage(value_error,
-                                                       base::UintToString(i));
+      *error = ExtensionErrorUtils::FormatErrorMessage(
+          value_error,
+          base::UintToString(i),
+          errors::kCannotClaimAllURLsInExtent);
+      return false;
+    }
+
+    // Do not allow authors to claim "*" for host.
+    if (pattern.host().empty()) {
+      *error = ExtensionErrorUtils::FormatErrorMessage(
+          value_error,
+          base::UintToString(i),
+          errors::kCannotClaimAllHostsInExtent);
       return false;
     }
 
     // We do not allow authors to put wildcards in their paths. Instead, we
     // imply one at the end.
     if (pattern.path().find('*') != std::string::npos) {
-      *error = ExtensionErrorUtils::FormatErrorMessage(value_error,
-                                                       base::UintToString(i));
+      *error = ExtensionErrorUtils::FormatErrorMessage(
+          value_error,
+          base::UintToString(i),
+          errors::kNoWildCardsInPaths);
       return false;
     }
-    pattern.set_path(pattern.path() + '*');
+    pattern.SetPath(pattern.path() + '*');
 
     extent->AddPattern(pattern);
   }
@@ -982,7 +1016,7 @@ bool Extension::LoadLaunchURL(const DictionaryValue* manifest,
       return false;
     }
     pattern.set_host(launch_url.host());
-    pattern.set_path("/*");
+    pattern.SetPath("/*");
     extent_.AddPattern(pattern);
   }
 
@@ -990,15 +1024,32 @@ bool Extension::LoadLaunchURL(const DictionaryValue* manifest,
   // process isolation, we must insert any provided value into the component
   // app's launch url and web extent.
   if (id() == extension_misc::kWebStoreAppId) {
-    GURL gallery_url(CommandLine::ForCurrentProcess()->
-        GetSwitchValueASCII(switches::kAppsGalleryURL));
-    if (gallery_url.is_valid()) {
-      launch_web_url_ = gallery_url.spec();
+    std::string gallery_url_str = CommandLine::ForCurrentProcess()->
+        GetSwitchValueASCII(switches::kAppsGalleryURL);
 
-      URLPattern pattern(URLPattern::SCHEME_HTTP | URLPattern::SCHEME_HTTPS);
-      pattern.Parse(gallery_url.spec());
-      pattern.set_path(pattern.path() + '*');
-      extent_.AddPattern(pattern);
+    // Empty string means option was not used.
+    if (!gallery_url_str.empty()) {
+      GURL gallery_url(gallery_url_str);
+      if (!gallery_url.is_valid()) {
+        LOG(WARNING) << "Invalid url given in switch "
+                     << switches::kAppsGalleryURL;
+      } else {
+        if (gallery_url.has_port()) {
+          LOG(WARNING) << "URLs passed to switch " << switches::kAppsGalleryURL
+                       << " should not contain a port.  Removing it.";
+
+          GURL::Replacements remove_port;
+          remove_port.ClearPort();
+          gallery_url = gallery_url.ReplaceComponents(remove_port);
+        }
+
+        launch_web_url_ = gallery_url.spec();
+
+        URLPattern pattern(kValidWebExtentSchemes);
+        pattern.Parse(gallery_url.spec(), URLPattern::PARSE_STRICT);
+        pattern.SetPath(pattern.path() + '*');
+        extent_.AddPattern(pattern);
+      }
     }
   }
 
@@ -1243,8 +1294,7 @@ void Extension::DecodeIconFromPath(const FilePath& icon_path,
 
   std::string file_contents;
   if (!file_util::ReadFileToString(icon_path, &file_contents)) {
-    LOG(ERROR) << "Could not read icon file: "
-               << WideToUTF8(icon_path.ToWStringHack());
+    LOG(ERROR) << "Could not read icon file: " << icon_path.LossyDisplayName();
     return;
   }
 
@@ -1256,7 +1306,7 @@ void Extension::DecodeIconFromPath(const FilePath& icon_path,
   *decoded = decoder.Decode(data, file_contents.length());
   if (decoded->empty()) {
     LOG(ERROR) << "Could not decode icon file: "
-               << WideToUTF8(icon_path.ToWStringHack());
+               << icon_path.LossyDisplayName();
     return;
   }
 
@@ -1276,7 +1326,12 @@ GURL Extension::GetBaseURLFromExtensionId(const std::string& extension_id) {
 }
 
 bool Extension::InitFromValue(const DictionaryValue& source, bool require_key,
-                              std::string* error) {
+                              bool strict_error_checks, std::string* error) {
+  // When strict error checks are enabled, make URL pattern parsing strict.
+  URLPattern::ParseOption parse_strictness =
+      (strict_error_checks ? URLPattern::PARSE_STRICT
+                           : URLPattern::PARSE_LENIENT);
+
   if (source.HasKey(keys::kPublicKey)) {
     std::string public_key_bytes;
     if (!source.GetString(keys::kPublicKey,
@@ -1305,8 +1360,7 @@ bool Extension::InitFromValue(const DictionaryValue& source, bool require_key,
   manifest_value_.reset(source.DeepCopy());
 
   // Initialize the URL.
-  extension_url_ =
-      Extension::GetBaseURLFromExtensionId(id());
+  extension_url_ = Extension::GetBaseURLFromExtensionId(id());
 
   // Initialize version.
   std::string version_str;
@@ -1433,7 +1487,7 @@ bool Extension::InitFromValue(const DictionaryValue& source, bool require_key,
           return false;
         }
 
-        if (icon_path.size() > 0 && icon_path[0] == '/')
+        if (!icon_path.empty() && icon_path[0] == '/')
           icon_path = icon_path.substr(1);
 
         if (icon_path.empty()) {
@@ -1492,7 +1546,7 @@ bool Extension::InitFromValue(const DictionaryValue& source, bool require_key,
             ((color_list->GetSize() != 3) &&
              ((color_list->GetSize() != 4) ||
               // For RGBA, the fourth item must be a real or int alpha value
-              (!color_list->GetReal(3, &alpha) &&
+              (!color_list->GetDouble(3, &alpha) &&
                !color_list->GetInteger(3, &alpha_int)))) ||
             // For both RGB and RGBA, the first three items must be ints (R,G,B)
             !color_list->GetInteger(0, &color) ||
@@ -1515,9 +1569,9 @@ bool Extension::InitFromValue(const DictionaryValue& source, bool require_key,
         int vi;
         if (!tints_value->GetListWithoutPathExpansion(*iter, &tint_list) ||
             tint_list->GetSize() != 3 ||
-            !(tint_list->GetReal(0, &v) || tint_list->GetInteger(0, &vi)) ||
-            !(tint_list->GetReal(1, &v) || tint_list->GetInteger(1, &vi)) ||
-            !(tint_list->GetReal(2, &v) || tint_list->GetInteger(2, &vi))) {
+            !(tint_list->GetDouble(0, &v) || tint_list->GetInteger(0, &vi)) ||
+            !(tint_list->GetDouble(1, &v) || tint_list->GetInteger(1, &vi)) ||
+            !(tint_list->GetDouble(2, &v) || tint_list->GetInteger(2, &vi))) {
           *error = errors::kInvalidThemeTints;
           return false;
         }
@@ -1645,7 +1699,8 @@ bool Extension::InitFromValue(const DictionaryValue& source, bool require_key,
       }
 
       UserScript script;
-      if (!LoadUserScriptHelper(content_script, i, error, &script))
+      if (!LoadUserScriptHelper(content_script, i, parse_strictness, error,
+                                &script))
         return false;  // Failed to parse script context definition.
       script.set_extension_id(id());
       if (converted_from_user_script_) {
@@ -1713,7 +1768,8 @@ bool Extension::InitFromValue(const DictionaryValue& source, bool require_key,
   if (!LoadIsApp(manifest_value_.get(), error) ||
       !LoadExtent(manifest_value_.get(), keys::kWebURLs,
                   &extent_,
-                  errors::kInvalidWebURLs, errors::kInvalidWebURL, error) ||
+                  errors::kInvalidWebURLs, errors::kInvalidWebURL,
+                  parse_strictness, error) ||
       !EnsureNotHybridApp(manifest_value_.get(), error) ||
       !LoadLaunchURL(manifest_value_.get(), error) ||
       !LoadLaunchContainer(manifest_value_.get(), error)) {
@@ -1809,8 +1865,9 @@ bool Extension::InitFromValue(const DictionaryValue& source, bool require_key,
       URLPattern pattern = URLPattern(CanExecuteScriptEverywhere() ?
           URLPattern::SCHEME_ALL : kValidHostPermissionSchemes);
 
-
-      if (URLPattern::PARSE_SUCCESS == pattern.Parse(permission_str)) {
+      URLPattern::ParseResult parse_result = pattern.Parse(permission_str,
+                                                           parse_strictness);
+      if (parse_result == URLPattern::PARSE_SUCCESS) {
         if (!CanSpecifyHostPermission(pattern)) {
           *error = ExtensionErrorUtils::FormatErrorMessage(
               errors::kInvalidPermissionScheme, base::IntToString(i));
@@ -1819,7 +1876,7 @@ bool Extension::InitFromValue(const DictionaryValue& source, bool require_key,
 
         // The path component is not used for host permissions, so we force it
         // to match all paths.
-        pattern.set_path("/*");
+        pattern.SetPath("/*");
 
         host_permissions_.push_back(pattern);
       }
@@ -1829,6 +1886,10 @@ bool Extension::InitFromValue(const DictionaryValue& source, bool require_key,
       // backwards compatability (http://crbug.com/42742).
       // TODO(jstritar): We can improve error messages by adding better
       // validation of API permissions here.
+      // TODO(skerner): Consider showing the reason |permission_str| is not
+      // a valid URL pattern if it is almost valid.  For example, if it has
+      // a valid scheme, and failed to parse because it has a port, show an
+      // error.
     }
   }
 
@@ -1898,6 +1959,22 @@ bool Extension::InitFromValue(const DictionaryValue& source, bool require_key,
       return false;
     }
     devtools_url_ = GetResourceURL(devtools_str);
+  }
+
+  // Initialize sidebar action (optional).
+  if (source.HasKey(keys::kSidebar)) {
+    DictionaryValue* sidebar_value;
+    if (!source.GetDictionary(keys::kSidebar, &sidebar_value)) {
+      *error = errors::kInvalidSidebar;
+      return false;
+    }
+    if (!HasApiPermission(Extension::kExperimentalPermission)) {
+      *error = errors::kSidebarExperimental;
+      return false;
+    }
+    sidebar_defaults_.reset(LoadExtensionSidebarDefaults(sidebar_value, error));
+    if (!sidebar_defaults_.get())
+      return false;  // Failed to parse sidebar definition.
   }
 
   // Initialize text-to-speech voices (optional).
@@ -1978,23 +2055,6 @@ bool Extension::InitFromValue(const DictionaryValue& source, bool require_key,
   }
 
   InitEffectiveHostPermissions();
-
-  // Initialize sidebar action (optional). It has to be done after host
-  // permissions are initialized to verify default sidebar url.
-  if (source.HasKey(keys::kSidebar)) {
-    DictionaryValue* sidebar_value;
-    if (!source.GetDictionary(keys::kSidebar, &sidebar_value)) {
-      *error = errors::kInvalidSidebar;
-      return false;
-    }
-    if (!HasApiPermission(Extension::kExperimentalPermission)) {
-      *error = errors::kSidebarExperimental;
-      return false;
-    }
-    sidebar_defaults_.reset(LoadExtensionSidebarDefaults(sidebar_value, error));
-    if (!sidebar_defaults_.get())
-      return false;  // Failed to parse sidebar definition.
-  }
 
   // Although |source| is passed in as a const, it's still possible to modify
   // it.  This is dangerous since the utility process re-uses |source| after
@@ -2319,7 +2379,7 @@ bool Extension::HasEffectiveAccessToAllHosts() const {
 }
 
 bool Extension::HasFullPermissions() const {
-  return plugins().size() > 0;
+  return !plugins().empty();
 }
 
 bool Extension::ShowConfigureContextMenus() const {
@@ -2356,9 +2416,41 @@ bool Extension::CanExecuteScriptEverywhere() const {
   return false;
 }
 
+bool Extension::CanCaptureVisiblePage(const GURL& page_url,
+                                      std::string *error) const {
+  if (HasHostPermission(page_url) || page_url.GetOrigin() == url())
+    return true;
+
+  if (error) {
+    *error = ExtensionErrorUtils::FormatErrorMessage(errors::kCannotAccessPage,
+                                                     page_url.spec());
+  }
+  return false;
+}
+
 bool Extension::UpdatesFromGallery() const {
   return update_url() == GalleryUpdateUrl(false) ||
          update_url() == GalleryUpdateUrl(true);
+}
+
+bool Extension::OverlapsWithOrigin(const GURL& origin) const {
+  if (url() == origin)
+    return true;
+
+  if (web_extent().is_empty())
+    return false;
+
+  // Note: patterns and extents ignore port numbers.
+  URLPattern origin_only_pattern(kValidWebExtentSchemes);
+  if (!origin_only_pattern.SetScheme(origin.scheme()))
+    return false;
+  origin_only_pattern.set_host(origin.host());
+  origin_only_pattern.SetPath("/*");
+
+  ExtensionExtent origin_only_pattern_list;
+  origin_only_pattern_list.AddPattern(origin_only_pattern);
+
+  return web_extent().OverlapsWith(origin_only_pattern_list);
 }
 
 ExtensionInfo::ExtensionInfo(const DictionaryValue* manifest,

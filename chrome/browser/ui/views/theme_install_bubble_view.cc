@@ -5,12 +5,12 @@
 #include "chrome/browser/ui/views/theme_install_bubble_view.h"
 
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/notification_service.h"
-#include "gfx/canvas_skia.h"
+#include "content/browser/tab_contents/tab_contents.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/canvas_skia.h"
 #include "views/widget/widget.h"
 
 namespace {
@@ -112,7 +112,7 @@ void ThemeInstallBubbleView::Reposition() {
   popup_->SetBounds(gfx::Rect(x, y, size.width(), size.height()));
 }
 
-void ThemeInstallBubbleView::Paint(gfx::Canvas* canvas) {
+void ThemeInstallBubbleView::OnPaint(gfx::Canvas* canvas) {
   SkScalar rad[8];
   for (int i = 0; i < 8; ++i)
     rad[i] = SkIntToScalar(kBubbleCornerRadius);
@@ -132,7 +132,7 @@ void ThemeInstallBubbleView::Paint(gfx::Canvas* canvas) {
 
   int text_width = views::Label::font().GetStringWidth(text_);
   gfx::Rect body_bounds(kTextHorizPadding / 2, 0, text_width, height());
-  body_bounds.set_x(MirroredLeftPointForRect(body_bounds));
+  body_bounds.set_x(GetMirroredXForRect(body_bounds));
 
   SkColor text_color = SK_ColorWHITE;
   canvas->DrawStringInt(text_,

@@ -9,12 +9,12 @@
 #include "base/logging.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "gfx/canvas_skia.h"
-#include "gfx/color_utils.h"
-#include "gfx/font.h"
-#include "gfx/insets.h"
 #include "third_party/skia/include/effects/SkGradientShader.h"
 #include "third_party/skia/include/effects/SkBlurMaskFilter.h"
+#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/color_utils.h"
+#include "ui/gfx/font.h"
+#include "ui/gfx/insets.h"
 #include "views/background.h"
 #include "views/border.h"
 #include "views/painter.h"
@@ -142,7 +142,7 @@ gfx::Size ProgressBar::GetPreferredSize() {
   return gfx::Size(100, 16);
 }
 
-void ProgressBar::Paint(gfx::Canvas* canvas) {
+void ProgressBar::OnPaint(gfx::Canvas* canvas) {
 #if defined(OS_CHROMEOS)
   const SkColor background_colors[] = {
     SkColorSetRGB(0xBB, 0xBB, 0xBB),

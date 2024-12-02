@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,11 +19,11 @@
 #include "chrome/common/notification_registrar.h"
 #include "chrome/common/notification_source.h"
 #include "chrome/common/notification_type.h"
-#include "gfx/canvas_skia_paint.h"
-#include "gfx/rect.h"
-#include "gfx/size.h"
 #include "skia/ext/skia_utils_mac.h"
 #import "third_party/GTM/AppKit/GTMNSAnimation+Duration.h"
+#include "ui/gfx/canvas_skia_paint.h"
+#include "ui/gfx/rect.h"
+#include "ui/gfx/size.h"
 
 NSString* const kBrowserActionButtonUpdatedNotification =
     @"BrowserActionButtonUpdatedNotification";

@@ -10,6 +10,7 @@
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "base/sys_string_conversions.h"
+#include "base/test/test_file_util.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "googleurl/src/gurl.h"
@@ -517,7 +518,7 @@ TEST(NetUtilTest, FileURLConversion) {
 
     // Back to the filename.
     EXPECT_TRUE(net::FileURLToFilePath(file_url, &output));
-    EXPECT_EQ(round_trip_cases[i].file, output.ToWStringHack());
+    EXPECT_EQ(round_trip_cases[i].file, file_util::FilePathAsWString(output));
   }
 
   // Test that various file: URLs get decoded into the correct file type
@@ -556,7 +557,7 @@ TEST(NetUtilTest, FileURLConversion) {
   };
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(url_cases); i++) {
     net::FileURLToFilePath(GURL(url_cases[i].url), &output);
-    EXPECT_EQ(url_cases[i].file, output.ToWStringHack());
+    EXPECT_EQ(url_cases[i].file, file_util::FilePathAsWString(output));
   }
 
   // Unfortunately, UTF8ToWide discards invalid UTF8 input.
@@ -1098,7 +1099,12 @@ TEST(NetUtilTest, GetSuggestedFilename) {
      "Content-disposition: attachment; filename=\"../test.html\"",
      "",
      L"",
-     L"test.html"},
+     L"_test.html"},
+    {"http://www.google.com/",
+     "Content-disposition: attachment; filename=\"..\\test.html\"",
+     "",
+     L"",
+     L"_test.html"},
     {"http://www.google.com/",
      "Content-disposition: attachment; filename=\"..\"",
      "",
@@ -1214,21 +1220,12 @@ TEST(NetUtilTest, GetSuggestedFilename) {
 #endif
   };
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(test_cases); ++i) {
-#if defined(OS_WIN)
-    FilePath default_name(test_cases[i].default_filename);
-#else
-    FilePath default_name(
-        base::SysWideToNativeMB(test_cases[i].default_filename));
-#endif
-    FilePath filename = net::GetSuggestedFilename(
+    std::wstring default_name = test_cases[i].default_filename;
+    string16 filename = net::GetSuggestedFilename(
         GURL(test_cases[i].url), test_cases[i].content_disp_header,
-        test_cases[i].referrer_charset, default_name);
-#if defined(OS_WIN)
-    EXPECT_EQ(std::wstring(test_cases[i].expected_filename), filename.value())
-#else
-    EXPECT_EQ(base::SysWideToNativeMB(test_cases[i].expected_filename),
-              filename.value())
-#endif
+        test_cases[i].referrer_charset, WideToUTF16(default_name));
+    EXPECT_EQ(std::wstring(test_cases[i].expected_filename),
+              UTF16ToWide(filename))
       << "Iteration " << i << ": " << test_cases[i].url;
   }
 }

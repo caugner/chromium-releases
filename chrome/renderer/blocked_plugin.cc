@@ -13,6 +13,7 @@
 #include "grit/generated_resources.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebContextMenuData.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebData.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebElement.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebMenuItemInfo.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPluginContainer.h"
@@ -60,7 +61,8 @@ BlockedPlugin::BlockedPlugin(RenderView* render_view,
     : RenderViewObserver(render_view),
       frame_(frame),
       plugin_params_(params),
-      is_blocked_for_prerendering_(is_blocked_for_prerendering) {
+      is_blocked_for_prerendering_(is_blocked_for_prerendering),
+      hidden_(false) {
   const base::StringPiece template_html(
       ResourceBundle::GetSharedInstance().GetRawDataResource(template_id));
 
@@ -71,6 +73,7 @@ BlockedPlugin::BlockedPlugin(RenderView* render_view,
   values.SetString("message", message);
   name_ = info.GetGroupName();
   values.SetString("name", name_);
+  values.SetString("hide", l10n_util::GetStringUTF8(IDS_PLUGIN_HIDE));
 
   // "t" is the id of the templates root node.
   std::string html_data = jstemplate_builder::GetTemplatesHtml(
@@ -146,7 +149,9 @@ bool BlockedPlugin::OnMessageReceived(const IPC::Message& message) {
   return false;
 }
 
-void BlockedPlugin::OnMenuItemSelected(unsigned id) {
+void BlockedPlugin::OnMenuItemSelected(
+    const webkit_glue::CustomContextMenuContext& /* ignored */,
+    unsigned id) {
   if (id == kMenuActionLoad) {
     LoadPlugin();
   } else if (id == kMenuActionRemove) {
@@ -156,6 +161,10 @@ void BlockedPlugin::OnMenuItemSelected(unsigned id) {
 
 void BlockedPlugin::LoadPlugin() {
   CHECK(plugin_);
+  // This is not strictly necessary but is an important defense in case the
+  // event propagation changes between "close" vs. "click-to-play".
+  if (hidden_)
+    return;
   WebPluginContainer* container = plugin_->container();
   WebPlugin* new_plugin =
       render_view()->CreatePluginNoCheck(frame_, plugin_params_);
@@ -179,6 +188,7 @@ void BlockedPlugin::Hide(const CppArgumentList& args, CppVariant* result) {
 
 void BlockedPlugin::HidePlugin() {
   CHECK(plugin_);
+  hidden_ = true;
   WebPluginContainer* container = plugin_->container();
   WebElement element = container->element();
   element.setAttribute("style", "display: none;");

@@ -2,18 +2,17 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/dom_ui/constrained_html_ui.h"
+#include "chrome/browser/ui/webui/constrained_html_ui.h"
 
-#include "chrome/browser/dom_ui/html_dialog_tab_contents_delegate.h"
-#include "chrome/browser/dom_ui/html_dialog_ui.h"
-#include "chrome/browser/renderer_host/render_view_host.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/gtk/constrained_window_gtk.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/gtk/tab_contents_container_gtk.h"
-#include "chrome/common/notification_source.h"
-#include "gfx/rect.h"
-#include "ipc/ipc_message.h"
+#include "chrome/browser/ui/webui/html_dialog_tab_contents_delegate.h"
+#include "chrome/browser/ui/webui/html_dialog_ui.h"
+#include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/tab_contents/tab_contents.h"
+#include "content/common/notification_source.h"
+#include "ui/gfx/rect.h"
 
 class ConstrainedHtmlDelegateGtk : public ConstrainedWindowGtkDelegate,
                                    public HtmlDialogTabContentsDelegate,
@@ -27,6 +26,9 @@ class ConstrainedHtmlDelegateGtk : public ConstrainedWindowGtkDelegate,
   // ConstrainedWindowGtkDelegate ----------------------------------------------
   virtual GtkWidget* GetWidgetRoot() {
     return tab_contents_container_.widget();
+  }
+  virtual GtkWidget* GetFocusWidget() {
+    return tab_contents_.GetContentNativeView();
   }
   virtual void DeleteDelegate() {
     html_delegate_->OnDialogClosed("");
@@ -56,7 +58,7 @@ class ConstrainedHtmlDelegateGtk : public ConstrainedWindowGtkDelegate,
   HtmlDialogUIDelegate* html_delegate_;
 
   // The constrained window that owns |this|. It's saved here because it needs
-  // to be closed in response to the DOMUI OnDialogClose callback.
+  // to be closed in response to the WebUI OnDialogClose callback.
   ConstrainedWindow* window_;
 };
 

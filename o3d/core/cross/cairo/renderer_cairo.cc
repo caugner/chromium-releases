@@ -32,23 +32,42 @@
 // Renderer that is using 2D Library Cairo.
 
 #include "core/cross/cairo/renderer_cairo.h"
+
+#if defined(OS_LINUX)
 #include <cairo-xlib.h>
+#elif defined(OS_MACOSX)
+#include <cairo-quartz.h>
+#elif defined(OS_WIN)
+#include <cairo-win32.h>
+#endif
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
 #include "core/cross/cairo/layer.h"
 #include "core/cross/cairo/texture_cairo.h"
 
 namespace o3d {
 
-Renderer* Renderer::CreateDefaultRenderer(ServiceLocator* service_locator) {
+// This is a factory function for creating 2D Renderer objects.
+Renderer* Renderer::Create2DRenderer(ServiceLocator* service_locator) {
   return o2d::RendererCairo::CreateDefault(service_locator);
 }
 
 namespace o2d {
 
 RendererCairo::RendererCairo(ServiceLocator* service_locator)
-    : Renderer(service_locator), display_(NULL), main_surface_(NULL) {
+    : Renderer(service_locator),
+#if defined(OS_LINUX)
+      display_(NULL),
+      window_(0),
+#elif defined(OS_MACOSX)
+      mac_cg_context_ref_(0),
+#elif defined(OS_WIN)
+      hwnd_(NULL),
+#endif
+      main_surface_(NULL) {
   // Don't need to do anything.
 }
 
@@ -64,12 +83,16 @@ RendererCairo* RendererCairo::CreateDefault(ServiceLocator* service_locator) {
 void RendererCairo::Destroy() {
   DLOG(INFO) << "To Destroy";
 
-  if (main_surface_ != NULL) {
-    cairo_surface_destroy(main_surface_);
-    main_surface_= NULL;
-  }
+  DestroyCairoSurface();
 
+#if defined(OS_LINUX)
   display_ = NULL;
+  window_ = 0;
+#elif defined(OS_MACOSX)
+  mac_cg_context_ref_ = 0;
+#elif defined(OS_WIN)
+  hwnd_ = NULL;
+#endif
 }
 
 // Comparison predicate for STL sort.
@@ -78,6 +101,11 @@ bool LayerZValueLessThan(const Layer* first, const Layer* second) {
 }
 
 void RendererCairo::Paint() {
+  if (!main_surface_) {
+    DLOG(INFO) << "No target surface, cannot paint";
+    return;
+  }
+
   // TODO(tschmelcher): Don't keep creating and destroying the drawing context.
   cairo_t* current_drawing = cairo_create(main_surface_);
 
@@ -92,9 +120,6 @@ void RendererCairo::Paint() {
   // TODO(tschmelcher): Only sort when changes are made.
   layer_list_.sort(LayerZValueLessThan);
 
-  // Paint the background.
-  PaintBackground(current_drawing);
-
   // Core process of painting.
   for (LayerList::iterator i = layer_list_.begin();
        i != layer_list_.end(); i++) {
@@ -106,13 +131,15 @@ void RendererCairo::Paint() {
     // Save the current drawing state.
     cairo_save(current_drawing);
 
-    // Clip the region outside the current Layer.
-    cairo_rectangle(current_drawing,
-                    cur->x(),
-                    cur->y(),
-                    cur->width(),
-                    cur->height());
-    cairo_clip(current_drawing);
+    if (!cur->everywhere()) {
+      // Clip the region outside the current Layer.
+      cairo_rectangle(current_drawing,
+                      cur->x(),
+                      cur->y(),
+                      cur->width(),
+                      cur->height());
+      cairo_clip(current_drawing);
+    }
 
     // Clip the regions within other Layers that will obscure this one.
     LayerList::iterator start_mask_it = i;
@@ -174,28 +201,20 @@ void RendererCairo::Paint() {
   cairo_destroy(current_drawing);
 }
 
-void RendererCairo::PaintBackground(cairo_t* cr) {
-  cairo_save(cr);
-  ClipArea(cr, layer_list_.begin());
-
-  cairo_rectangle(cr, 0, 0, display_width(), display_height());
-  cairo_set_source_rgb(cr, 0.0, 0.0, 0.0);
-  cairo_fill(cr);
-  cairo_restore(cr);
-}
-
 void RendererCairo::ClipArea(cairo_t* cr,  LayerList::iterator it) {
   for (LayerList::iterator i = it; i != layer_list_.end(); i++) {
     // Preparing and updating the Layer.
     Layer* cur = *i;
     if (!cur->ShouldClip()) continue;
 
-    cairo_rectangle(cr, 0, 0, display_width(), display_height());
-    cairo_rectangle(cr,
-                    cur->x(),
-                    cur->y(),
-                    cur->width(),
-                    cur->height());
+    if (!cur->everywhere()) {
+      cairo_rectangle(cr, 0, 0, display_width(), display_height());
+      cairo_rectangle(cr,
+                      cur->x(),
+                      cur->y(),
+                      cur->width(),
+                      cur->height());
+    }
     cairo_clip(cr);
   }
 }
@@ -209,9 +228,75 @@ void RendererCairo::RemoveLayer(Layer* image) {
 }
 
 void RendererCairo::InitCommon() {
-  main_surface_ = cairo_xlib_surface_create(display_, window_,
+  CreateCairoSurface();
+}
+
+void RendererCairo::CreateCairoSurface() {
+#if defined(OS_LINUX)
+  main_surface_ = cairo_xlib_surface_create(display_,
+                                            window_,
                                             XDefaultVisual(display_, 0),
-                                            display_width(), display_height());
+                                            display_width(),
+                                            display_height());
+#elif defined(OS_MACOSX)
+  if (!mac_cg_context_ref_) {
+    // Can't create the surface until we get a valid CGContextRef. If we don't
+    // have one it may be because we haven't yet gotten one from
+    // HandleCocoaEvent() in main_mac.mm, or we may have initialized with a
+    // drawing model other than Core Graphics (in which case we are never going
+    // to get one and rendering won't work).
+    // TODO(tschmelcher): Support the other drawing models too.
+    DLOG(INFO) << "No CGContextRef, cannot initialize yet";
+    return;
+  }
+  // Save a pristine CG graphics state.
+  CGContextSaveGState(mac_cg_context_ref_);
+  // Transform the coordinate space to match Cairo's conventions.
+  CGContextTranslateCTM(mac_cg_context_ref_, 0.0, display_height());
+  CGContextScaleCTM(mac_cg_context_ref_, 1.0, -1.0);
+  main_surface_ = cairo_quartz_surface_create_for_cg_context(
+      mac_cg_context_ref_,
+      display_width(),
+      display_height());
+#elif defined(OS_WIN)
+  HDC hdc = GetDC(hwnd_);
+  if (display_width() > 0 && display_height() > 0) {
+    RECT rect;
+    GetClipBox(hdc, &rect);
+    if (rect.right - rect.left != display_width() ||
+        rect.bottom - rect.top != display_height()) {
+      // The hdc doesn't have the right clip box.
+      // Need to reset the clip box on hdc.
+      DLOG(WARNING) << "CreateCairoSurface clip box (" << rect.left << ","
+                    << rect.top << "," << rect.right << "," << rect.bottom
+                    << ") doesn't match the image size " << display_width()
+                    << "x" << display_height();
+      HRGN hRegion = CreateRectRgn(0, 0, display_width(), display_height());
+      int result = SelectClipRgn(hdc, hRegion);
+      if (result == ERROR) {
+        LOG(ERROR) << "CreateCairoSurface SelectClipRgn returns ERROR";
+      } else if (result == NULLREGION) {
+        // This should not happen since the ShowWindow is called.
+        LOG(ERROR) << "CreateCairoSurface SelectClipRgn returns NULLREGION";
+      }
+      DeleteObject(hRegion);
+    }
+  }
+
+  main_surface_ = cairo_win32_surface_create(hdc);
+  ReleaseDC(hwnd_, hdc);
+#endif
+}
+
+void RendererCairo::DestroyCairoSurface() {
+  if (main_surface_ != NULL) {
+    cairo_surface_destroy(main_surface_);
+    main_surface_= NULL;
+#ifdef OS_MACOSX
+    // Get back the pristine CG state.
+    CGContextRestoreGState(mac_cg_context_ref_);
+#endif
+  }
 }
 
 void RendererCairo::UninitCommon() {
@@ -221,21 +306,49 @@ void RendererCairo::UninitCommon() {
 Renderer::InitStatus RendererCairo::InitPlatformSpecific(
     const DisplayWindow& display_window,
     bool off_screen) {
+#if defined(OS_LINUX)
   const DisplayWindowLinux &display_platform =
       static_cast<const DisplayWindowLinux&>(display_window);
   display_ = display_platform.display();
   window_ = display_platform.window();
+#elif defined(OS_MACOSX)
+  const DisplayWindowMac &display_platform =
+      static_cast<const DisplayWindowMac&>(display_window);
+  mac_cg_context_ref_ = display_platform.cg_context_ref();
+#elif defined(OS_WIN)
+  const DisplayWindowWindows &display_platform =
+      static_cast<const DisplayWindowWindows&>(display_window);
+  hwnd_ = display_platform.hwnd();
+  if (NULL == hwnd_) {
+    return INITIALIZATION_ERROR;
+  }
+#endif
 
   return SUCCESS;
 }
+
+#ifdef OS_MACOSX
+bool RendererCairo::ChangeDisplayWindow(const DisplayWindow& display_window) {
+  const DisplayWindowMac &display_platform =
+      static_cast<const DisplayWindowMac&>(display_window);
+  DestroyCairoSurface();
+  mac_cg_context_ref_ = display_platform.cg_context_ref();
+  CreateCairoSurface();
+}
+#endif
 
 // Handles the plugin resize event.
 void RendererCairo::Resize(int width, int height) {
   DLOG(INFO) << "To Resize " << width << " x " << height;
   SetClientSize(width, height);
 
+#if defined(OS_LINUX)
   // Resize the mainSurface and buffer
   cairo_xlib_surface_set_size(main_surface_, width, height);
+#elif defined(OS_MACOSX) || defined(OS_WIN)
+  DestroyCairoSurface();
+  CreateCairoSurface();
+#endif
 }
 
 // The platform specific part of BeginDraw.

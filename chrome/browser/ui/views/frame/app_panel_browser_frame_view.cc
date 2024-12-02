@@ -6,18 +6,18 @@
 
 #include "base/compiler_specific.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/views/frame/browser_frame.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
-#include "gfx/canvas.h"
-#include "gfx/font.h"
-#include "gfx/path.h"
+#include "content/browser/tab_contents/tab_contents.h"
 #include "grit/app_resources.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/canvas.h"
+#include "ui/gfx/font.h"
+#include "ui/gfx/path.h"
 #include "views/controls/button/image_button.h"
 #include "views/window/window.h"
 #include "views/window/window_resources.h"
@@ -89,7 +89,7 @@ AppPanelBrowserFrameView::~AppPanelBrowserFrameView() {
 // AppPanelBrowserFrameView, BrowserNonClientFrameView implementation:
 
 gfx::Rect AppPanelBrowserFrameView::GetBoundsForTabStrip(
-    BaseTabStrip* tabstrip) const {
+    views::View* tabstrip) const {
   // App panels never show a tab strip.
   NOTREACHED();
   return gfx::Rect();
@@ -147,7 +147,7 @@ int AppPanelBrowserFrameView::NonClientHitTest(const gfx::Point& point) {
     return HTNOWHERE;
 
   int frame_component =
-      frame_->GetWindow()->GetClientView()->NonClientHitTest(point);
+      frame_->GetWindow()->client_view()->NonClientHitTest(point);
 
   // See if we're in the sysmenu region.  (We check the ClientView first to be
   // consistent with OpaqueBrowserFrameView; it's not really necessary here.)
@@ -156,7 +156,7 @@ int AppPanelBrowserFrameView::NonClientHitTest(const gfx::Point& point) {
   // of Fitts' Law.
   if (frame_->GetWindow()->IsMaximized())
     sysmenu_rect.SetRect(0, 0, sysmenu_rect.right(), sysmenu_rect.bottom());
-  sysmenu_rect.set_x(MirroredLeftPointForRect(sysmenu_rect));
+  sysmenu_rect.set_x(GetMirroredXForRect(sysmenu_rect));
   if (sysmenu_rect.Contains(point))
     return (frame_component == HTCLIENT) ? HTCLIENT : HTSYSMENU;
 
@@ -165,13 +165,13 @@ int AppPanelBrowserFrameView::NonClientHitTest(const gfx::Point& point) {
 
   // Then see if the point is within any of the window controls.
   if (close_button_->IsVisible() &&
-      close_button_->GetBounds(APPLY_MIRRORING_TRANSFORMATION).Contains(point))
+      close_button_->GetMirroredBounds().Contains(point))
     return HTCLOSE;
 
   int window_component = GetHTComponentForFrame(point,
       NonClientBorderThickness(), NonClientBorderThickness(),
       kResizeAreaCornerSize, kResizeAreaCornerSize,
-      frame_->GetWindow()->GetDelegate()->CanResize());
+      frame_->GetWindow()->window_delegate()->CanResize());
   // Fall back to the caption if no other component matches.
   return (window_component == HTNOWHERE) ? HTCAPTION : window_component;
 }
@@ -213,7 +213,7 @@ void AppPanelBrowserFrameView::ResetWindowControls() {
 ///////////////////////////////////////////////////////////////////////////////
 // AppPanelBrowserFrameView, views::View overrides:
 
-void AppPanelBrowserFrameView::Paint(gfx::Canvas* canvas) {
+void AppPanelBrowserFrameView::OnPaint(gfx::Canvas* canvas) {
   views::Window* window = frame_->GetWindow();
   if (window->IsMaximized())
     PaintMaximizedFrameBorder(canvas);
@@ -251,7 +251,7 @@ bool AppPanelBrowserFrameView::ShouldTabIconViewAnimate() const {
 }
 
 SkBitmap AppPanelBrowserFrameView::GetFavIconForTabIconView() {
-  return frame_->GetWindow()->GetDelegate()->GetWindowIcon();
+  return frame_->GetWindow()->window_delegate()->GetWindowIcon();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -396,15 +396,15 @@ void AppPanelBrowserFrameView::PaintMaximizedFrameBorder(gfx::Canvas* canvas) {
   SkBitmap* titlebar_bottom = rb.GetBitmapNamed(IDR_APP_TOP_CENTER);
   int edge_height = titlebar_bottom->height() - kClientEdgeThickness;
   canvas->TileImageInt(*titlebar_bottom, 0,
-                       frame_->GetWindow()->GetClientView()->y() - edge_height,
+                       frame_->GetWindow()->client_view()->y() - edge_height,
                        width(), edge_height);
 }
 
 void AppPanelBrowserFrameView::PaintTitleBar(gfx::Canvas* canvas) {
   // The window icon is painted by the TabIconView.
-  views::WindowDelegate* d = frame_->GetWindow()->GetDelegate();
+  views::WindowDelegate* d = frame_->GetWindow()->window_delegate();
   canvas->DrawStringInt(d->GetWindowTitle(), BrowserFrame::GetTitleFont(),
-      SK_ColorBLACK, MirroredLeftPointForRect(title_bounds_), title_bounds_.y(),
+      SK_ColorBLACK, GetMirroredXForRect(title_bounds_), title_bounds_.y(),
       title_bounds_.width(), title_bounds_.height());
 }
 
@@ -481,7 +481,7 @@ void AppPanelBrowserFrameView::LayoutWindowControls() {
 void AppPanelBrowserFrameView::LayoutTitleBar() {
   // Size the icon first; the window title is based on the icon position.
   gfx::Rect icon_bounds(IconBounds());
-  window_icon_->SetBounds(icon_bounds);
+  window_icon_->SetBoundsRect(icon_bounds);
 
   // Size the title.
   int title_x = icon_bounds.right() + kIconTitleSpacing;

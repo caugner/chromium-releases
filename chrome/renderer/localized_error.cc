@@ -36,9 +36,11 @@ enum NAV_SUGGESTIONS {
   SUGGEST_NONE     = 0,
   SUGGEST_RELOAD   = 1 << 0,
   SUGGEST_HOSTNAME = 1 << 1,
-  SUGGEST_FIREWALL_CONFIG = 1 << 2,
-  SUGGEST_PROXY_CONFIG = 1 << 3,
-  SUGGEST_LEARNMORE = 1 << 4,
+  SUGGEST_CHECK_CONNECTION = 1 << 2,
+  SUGGEST_DNS_CONFIG = 1 << 3,
+  SUGGEST_FIREWALL_CONFIG = 1 << 4,
+  SUGGEST_PROXY_CONFIG = 1 << 5,
+  SUGGEST_LEARNMORE = 1 << 6,
 };
 
 struct LocalizedErrorMap {
@@ -65,19 +67,41 @@ const LocalizedErrorMap net_error_options[] = {
    IDS_ERRORPAGES_DETAILS_TIMED_OUT,
    SUGGEST_RELOAD,
   },
+  {net::ERR_CONNECTION_CLOSED,
+   IDS_ERRORPAGES_TITLE_NOT_AVAILABLE,
+   IDS_ERRORPAGES_HEADING_NOT_AVAILABLE,
+   IDS_ERRORPAGES_SUMMARY_NOT_AVAILABLE,
+   IDS_ERRORPAGES_DETAILS_CONNECTION_CLOSED,
+   SUGGEST_RELOAD,
+  },
+  {net::ERR_CONNECTION_RESET,
+   IDS_ERRORPAGES_TITLE_NOT_AVAILABLE,
+   IDS_ERRORPAGES_HEADING_NOT_AVAILABLE,
+   IDS_ERRORPAGES_SUMMARY_NOT_AVAILABLE,
+   IDS_ERRORPAGES_DETAILS_CONNECTION_RESET,
+   SUGGEST_RELOAD,
+  },
+  {net::ERR_CONNECTION_REFUSED,
+   IDS_ERRORPAGES_TITLE_NOT_AVAILABLE,
+   IDS_ERRORPAGES_HEADING_NOT_AVAILABLE,
+   IDS_ERRORPAGES_SUMMARY_NOT_AVAILABLE,
+   IDS_ERRORPAGES_DETAILS_CONNECTION_REFUSED,
+   SUGGEST_RELOAD,
+  },
   {net::ERR_CONNECTION_FAILED,
    IDS_ERRORPAGES_TITLE_NOT_AVAILABLE,
    IDS_ERRORPAGES_HEADING_NOT_AVAILABLE,
    IDS_ERRORPAGES_SUMMARY_NOT_AVAILABLE,
-   IDS_ERRORPAGES_DETAILS_CONNECT_FAILED,
+   IDS_ERRORPAGES_DETAILS_CONNECTION_FAILED,
    SUGGEST_RELOAD,
   },
   {net::ERR_NAME_NOT_RESOLVED,
    IDS_ERRORPAGES_TITLE_NOT_AVAILABLE,
    IDS_ERRORPAGES_HEADING_NOT_AVAILABLE,
-   IDS_ERRORPAGES_SUMMARY_NOT_AVAILABLE,
+   IDS_ERRORPAGES_SUMMARY_NAME_NOT_RESOLVED,
    IDS_ERRORPAGES_DETAILS_NAME_NOT_RESOLVED,
-   SUGGEST_RELOAD,
+   SUGGEST_RELOAD | SUGGEST_CHECK_CONNECTION | SUGGEST_DNS_CONFIG |
+   SUGGEST_FIREWALL_CONFIG | SUGGEST_PROXY_CONFIG,
   },
   {net::ERR_ADDRESS_UNREACHABLE,
    IDS_ERRORPAGES_TITLE_NOT_AVAILABLE,
@@ -114,6 +138,13 @@ const LocalizedErrorMap net_error_options[] = {
    IDS_ERRORPAGES_DETAILS_FILE_NOT_FOUND,
    SUGGEST_NONE,
   },
+  {net::ERR_CACHE_MISS,
+   IDS_ERRORPAGES_TITLE_LOAD_FAILED,
+   IDS_ERRORPAGES_HEADING_CACHE_MISS,
+   IDS_ERRORPAGES_SUMMARY_CACHE_MISS,
+   IDS_ERRORPAGES_DETAILS_CACHE_MISS,
+   SUGGEST_RELOAD,
+  },
   {net::ERR_CACHE_READ_FAILURE,
    IDS_ERRORPAGES_TITLE_LOAD_FAILED,
    IDS_ERRORPAGES_HEADING_CACHE_READ_FAILURE,
@@ -134,6 +165,13 @@ const LocalizedErrorMap net_error_options[] = {
    IDS_ERRORPAGES_SUMMARY_TOO_MANY_REDIRECTS,
    IDS_ERRORPAGES_DETAILS_TOO_MANY_REDIRECTS,
    SUGGEST_RELOAD | SUGGEST_LEARNMORE,
+  },
+  {net::ERR_EMPTY_RESPONSE,
+   IDS_ERRORPAGES_TITLE_LOAD_FAILED,
+   IDS_ERRORPAGES_HEADING_EMPTY_RESPONSE,
+   IDS_ERRORPAGES_SUMMARY_EMPTY_RESPONSE,
+   IDS_ERRORPAGES_DETAILS_EMPTY_RESPONSE,
+   SUGGEST_RELOAD,
   },
   {net::ERR_SSL_PROTOCOL_ERROR,
    IDS_ERRORPAGES_TITLE_LOAD_FAILED,
@@ -355,20 +393,23 @@ void LocalizedError::GetStrings(const WebKit::WebURLError& error,
         l10n_util::GetStringUTF16(IDS_ERRORPAGES_SUGGESTION_HEADING));
   }
 
-  string16 failed_url(ASCIIToUTF16(error.unreachableURL.spec()));
+  const GURL failed_url = error.unreachableURL;
+  string16 failed_url_string(ASCIIToUTF16(failed_url.spec()));
   // URLs are always LTR.
   if (rtl)
-    base::i18n::WrapStringWithLTRFormatting(&failed_url);
+    base::i18n::WrapStringWithLTRFormatting(&failed_url_string);
   error_strings->SetString("title",
-      l10n_util::GetStringFUTF16(options.title_resource_id, failed_url));
+      l10n_util::GetStringFUTF16(options.title_resource_id, failed_url_string));
   error_strings->SetString("heading",
       l10n_util::GetStringUTF16(options.heading_resource_id));
 
   DictionaryValue* summary = new DictionaryValue;
   summary->SetString("msg",
       l10n_util::GetStringUTF16(options.summary_resource_id));
-  // TODO(tc): we want the unicode url here since it's being displayed
-  summary->SetString("failedUrl", failed_url);
+  // TODO(tc): We want the unicode url and host here since they're being
+  //           displayed.
+  summary->SetString("failedUrl", failed_url_string);
+  summary->SetString("hostName", failed_url.host());
   summary->SetString("productName",
                      l10n_util::GetStringUTF16(IDS_PRODUCT_NAME));
   error_strings->Set("summary", summary);
@@ -413,13 +454,12 @@ void LocalizedError::GetStrings(const WebKit::WebURLError& error,
     DictionaryValue* suggest_reload = new DictionaryValue;
     suggest_reload->SetString("msg",
         l10n_util::GetStringUTF16(IDS_ERRORPAGES_SUGGESTION_RELOAD));
-    suggest_reload->SetString("reloadUrl", failed_url);
+    suggest_reload->SetString("reloadUrl", failed_url_string);
     error_strings->Set("suggestionsReload", suggest_reload);
   }
 
   if (options.suggestions & SUGGEST_HOSTNAME) {
     // Only show the "Go to hostname" suggestion if the failed_url has a path.
-    const GURL& failed_url = error.unreachableURL;
     if (std::string() == failed_url.path()) {
       DictionaryValue* suggest_home_page = new DictionaryValue;
       suggest_home_page->SetString("suggestionsHomepageMsg",
@@ -433,6 +473,33 @@ void LocalizedError::GetStrings(const WebKit::WebURLError& error,
       suggest_home_page->SetString("hostName", failed_url.host());
       error_strings->Set("suggestionsHomepage", suggest_home_page);
     }
+  }
+
+  if (options.suggestions & SUGGEST_CHECK_CONNECTION) {
+    DictionaryValue* suggest_check_connection = new DictionaryValue;
+    suggest_check_connection->SetString("msg",
+        l10n_util::GetStringUTF16(IDS_ERRORPAGES_SUGGESTION_CHECK_CONNECTION));
+    error_strings->Set("suggestionsCheckConnection", suggest_check_connection);
+  }
+
+  if (options.suggestions & SUGGEST_DNS_CONFIG) {
+    DictionaryValue* suggest_dns_config = new DictionaryValue;
+    suggest_dns_config->SetString("msg",
+        l10n_util::GetStringUTF16(IDS_ERRORPAGES_SUGGESTION_DNS_CONFIG));
+    error_strings->Set("suggestionsDNSConfig", suggest_dns_config);
+
+    DictionaryValue* suggest_dns_prefetch = new DictionaryValue;
+    suggest_dns_prefetch->SetString("msg",
+        l10n_util::GetStringUTF16(IDS_ERRORPAGES_SUGGESTION_DNS_PREFETCH));
+    suggest_dns_prefetch->SetString("settingsTitle",
+        l10n_util::GetStringUTF16(IDS_SETTINGS_TITLE));
+    suggest_dns_prefetch->SetString("advancedTitle",
+        l10n_util::GetStringUTF16(IDS_OPTIONS_ADVANCED_TAB_LABEL));
+    suggest_dns_prefetch->SetString(
+        "noPrefetchTitle",
+        l10n_util::GetStringUTF16(
+            IDS_NETWORK_DNS_PREFETCH_ENABLED_DESCRIPTION));
+    error_strings->Set("suggestionsDisableDNSPrefetch", suggest_dns_prefetch);
   }
 
   if (options.suggestions & SUGGEST_FIREWALL_CONFIG) {

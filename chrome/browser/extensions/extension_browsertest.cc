@@ -121,6 +121,11 @@ FilePath ExtensionBrowserTest::PackExtension(const FilePath& dir_path) {
     return FilePath();
   }
 
+  if (!file_util::PathExists(dir_path)) {
+    ADD_FAILURE() << "Extension dir not found: " << dir_path.value();
+    return FilePath();
+  }
+
   scoped_ptr<ExtensionCreator> creator(new ExtensionCreator());
   if (!creator->Run(dir_path,
                     crx_path,
@@ -151,7 +156,7 @@ class MockAbortExtensionInstallUI : public ExtensionInstallUI {
   virtual void ConfirmUninstall(Delegate* delegate,
                                 const Extension* extension) {}
 
-  virtual void OnInstallSuccess(const Extension* extension) {}
+  virtual void OnInstallSuccess(const Extension* extension, SkBitmap* icon) {}
 
   virtual void OnInstallFailure(const std::string& error) {}
 };

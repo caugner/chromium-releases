@@ -78,11 +78,11 @@ WorkItem* WorkItemList::AddCopyTreeWorkItem(
     const std::wstring& temp_dir,
     CopyOverWriteOption overwrite_option,
     const std::wstring& alternative_path) {
-  WorkItem* item = WorkItem::CreateCopyTreeWorkItem(source_path,
-                                                    dest_path,
-                                                    temp_dir,
+  WorkItem* item = WorkItem::CreateCopyTreeWorkItem(FilePath(source_path),
+                                                    FilePath(dest_path),
+                                                    FilePath(temp_dir),
                                                     overwrite_option,
-                                                    alternative_path);
+                                                    FilePath(alternative_path));
   AddWorkItem(item);
   return item;
 }
@@ -94,7 +94,7 @@ WorkItem* WorkItemList::AddCreateDirWorkItem(const FilePath& path) {
 }
 
 WorkItem* WorkItemList::AddCreateRegKeyWorkItem(HKEY predefined_root,
-                                           const std::wstring& path) {
+                                                const std::wstring& path) {
   WorkItem* item = WorkItem::CreateCreateRegKeyWorkItem(predefined_root, path);
   AddWorkItem(item);
   return item;
@@ -119,22 +119,26 @@ WorkItem* WorkItemList::AddDeleteRegValueWorkItem(
 
 WorkItem* WorkItemList::AddDeleteTreeWorkItem(
     const FilePath& root_path,
+    const FilePath& temp_path,
     const std::vector<FilePath>& key_paths) {
-  WorkItem* item = WorkItem::CreateDeleteTreeWorkItem(root_path, key_paths);
+  WorkItem* item = WorkItem::CreateDeleteTreeWorkItem(root_path, temp_path,
+                                                      key_paths);
   AddWorkItem(item);
   return item;
 }
 
-WorkItem* WorkItemList::AddDeleteTreeWorkItem(const FilePath& root_path) {
+WorkItem* WorkItemList::AddDeleteTreeWorkItem(const FilePath& root_path,
+                                              const FilePath& temp_path) {
   std::vector<FilePath> no_key_files;
-  return AddDeleteTreeWorkItem(root_path, no_key_files);
+  return AddDeleteTreeWorkItem(root_path, temp_path, no_key_files);
 }
 
 WorkItem* WorkItemList::AddMoveTreeWorkItem(const std::wstring& source_path,
                                             const std::wstring& dest_path,
                                             const std::wstring& temp_dir) {
-  WorkItem* item = WorkItem::CreateMoveTreeWorkItem(source_path, dest_path,
-                                                    temp_dir);
+  WorkItem* item = WorkItem::CreateMoveTreeWorkItem(FilePath(source_path),
+                                                    FilePath(dest_path),
+                                                    FilePath(temp_dir));
   AddWorkItem(item);
   return item;
 }
@@ -202,8 +206,10 @@ bool NoRollbackWorkItemList::Do() {
     WorkItem* work_item = list_.front();
     list_.pop_front();
     executed_list_.push_front(work_item);
+    work_item->set_ignore_failure(true);
     if (!work_item->Do()) {
-      LOG(ERROR) << "NoRollbackWorkItemList: item execution failed.";
+      LOG(ERROR) << "NoRollbackWorkItemList: item execution failed "
+                 << work_item->log_message();
       result = false;
     }
   }
@@ -218,4 +224,3 @@ bool NoRollbackWorkItemList::Do() {
 void NoRollbackWorkItemList::Rollback() {
   NOTREACHED() << "Can't rollback a NoRollbackWorkItemList";
 }
-

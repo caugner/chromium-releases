@@ -9,7 +9,7 @@
 #include "base/string16.h"
 #include "chrome/browser/ui/find_bar/find_notification_details.h"
 #include "chrome/browser/ui/views/dropdown_bar_view.h"
-#include "gfx/size.h"
+#include "ui/gfx/size.h"
 #include "views/controls/button/button.h"
 #include "views/controls/textfield/textfield.h"
 
@@ -65,7 +65,7 @@ class FindBarView : public DropdownBarView,
   virtual void SetFocusAndSelection(bool select_all);
 
   // Overridden from views::View:
-  virtual void Paint(gfx::Canvas* canvas);
+  virtual void OnPaint(gfx::Canvas* canvas);
   virtual void Layout();
   virtual gfx::Size GetPreferredSize();
   virtual void ViewHierarchyChanged(bool is_add,

@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,14 +19,16 @@
 #include "base/sys_string_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "build/build_config.h"
-#include "chrome/browser/browser_thread.h"
+#include "chrome/browser/extensions/extension_pref_store.h"
 #include "chrome/browser/policy/configuration_policy_pref_store.h"
 #include "chrome/browser/prefs/command_line_pref_store.h"
 #include "chrome/browser/prefs/default_pref_store.h"
+#include "chrome/browser/prefs/overlay_persistent_pref_store.h"
 #include "chrome/browser/prefs/pref_notifier_impl.h"
 #include "chrome/browser/prefs/pref_value_store.h"
 #include "chrome/common/json_pref_store.h"
 #include "chrome/common/notification_service.h"
+#include "content/browser/browser_thread.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -54,10 +56,10 @@ Value* CreateLocaleDefaultValue(Value::ValueType type, int message_id) {
       return Value::CreateIntegerValue(val);
     }
 
-    case Value::TYPE_REAL: {
+    case Value::TYPE_DOUBLE: {
       double val;
       base::StringToDouble(resource_string, &val);
-      return Value::CreateRealValue(val);
+      return Value::CreateDoubleValue(val);
     }
 
     case Value::TYPE_STRING: {
@@ -102,41 +104,72 @@ PrefService* PrefService::CreatePrefService(const FilePath& pref_filename,
   }
 #endif
 
-  ConfigurationPolicyPrefStore* managed =
+  ConfigurationPolicyPrefStore* managed_platform =
       ConfigurationPolicyPrefStore::CreateManagedPlatformPolicyPrefStore();
-  ConfigurationPolicyPrefStore* device_management =
-      ConfigurationPolicyPrefStore::CreateDeviceManagementPolicyPrefStore(
-          profile);
+  ConfigurationPolicyPrefStore* managed_cloud =
+      ConfigurationPolicyPrefStore::CreateManagedCloudPolicyPrefStore(profile);
   CommandLinePrefStore* command_line =
       new CommandLinePrefStore(CommandLine::ForCurrentProcess());
   JsonPrefStore* user = new JsonPrefStore(
       pref_filename,
       BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE));
-  ConfigurationPolicyPrefStore* recommended =
-      ConfigurationPolicyPrefStore::CreateRecommendedPolicyPrefStore();
+  ConfigurationPolicyPrefStore* recommended_platform =
+      ConfigurationPolicyPrefStore::CreateRecommendedPlatformPolicyPrefStore();
+  ConfigurationPolicyPrefStore* recommended_cloud =
+      ConfigurationPolicyPrefStore::CreateRecommendedCloudPolicyPrefStore(
+          profile);
+  DefaultPrefStore* default_pref_store = new DefaultPrefStore();
 
-  return new PrefService(managed, device_management, extension_prefs,
-                         command_line, user, recommended);
+  return new PrefService(managed_platform, managed_cloud, extension_prefs,
+                         command_line, user, recommended_platform,
+                         recommended_cloud, default_pref_store);
+}
+
+PrefService* PrefService::CreateIncognitoPrefService(
+    PrefStore* incognito_extension_prefs) {
+  return new PrefService(*this, incognito_extension_prefs);
 }
 
 PrefService::PrefService(PrefStore* managed_platform_prefs,
-                         PrefStore* device_management_prefs,
+                         PrefStore* managed_cloud_prefs,
                          PrefStore* extension_prefs,
                          PrefStore* command_line_prefs,
                          PersistentPrefStore* user_prefs,
-                         PrefStore* recommended_prefs)
-    : user_pref_store_(user_prefs) {
+                         PrefStore* recommended_platform_prefs,
+                         PrefStore* recommended_cloud_prefs,
+                         DefaultPrefStore* default_store)
+    : user_pref_store_(user_prefs),
+      default_store_(default_store) {
   pref_notifier_.reset(new PrefNotifierImpl(this));
-  default_store_ = new DefaultPrefStore();
-  pref_value_store_ =
+  pref_value_store_.reset(
       new PrefValueStore(managed_platform_prefs,
-                         device_management_prefs,
+                         managed_cloud_prefs,
                          extension_prefs,
                          command_line_prefs,
                          user_pref_store_,
-                         recommended_prefs,
-                         default_store_,
-                         pref_notifier_.get());
+                         recommended_platform_prefs,
+                         recommended_cloud_prefs,
+                         default_store,
+                         pref_notifier_.get()));
+  InitFromStorage();
+}
+
+PrefService::PrefService(const PrefService& original,
+                         PrefStore* incognito_extension_prefs)
+      : user_pref_store_(
+            new OverlayPersistentPrefStore(original.user_pref_store_.get())),
+        default_store_(original.default_store_.get()){
+  pref_notifier_.reset(new PrefNotifierImpl(this));
+  pref_value_store_.reset(original.pref_value_store_->CloneAndSpecialize(
+      NULL, // managed_platform_prefs
+      NULL, // managed_cloud_prefs
+      incognito_extension_prefs,
+      NULL, // command_line_prefs
+      user_pref_store_.get(),
+      NULL, // recommended_platform_prefs
+      NULL, // recommended_cloud_prefs
+      default_store_.get(),
+      pref_notifier_.get()));
   InitFromStorage();
 }
 
@@ -144,6 +177,11 @@ PrefService::~PrefService() {
   DCHECK(CalledOnValidThread());
   STLDeleteContainerPointers(prefs_.begin(), prefs_.end());
   prefs_.clear();
+
+  // Reset pointers so accesses after destruction reliably crash.
+  pref_value_store_.reset();
+  user_pref_store_ = NULL;
+  default_store_ = NULL;
 }
 
 void PrefService::InitFromStorage() {
@@ -195,8 +233,8 @@ void PrefService::RegisterIntegerPref(const char* path, int default_value) {
   RegisterPreference(path, Value::CreateIntegerValue(default_value));
 }
 
-void PrefService::RegisterRealPref(const char* path, double default_value) {
-  RegisterPreference(path, Value::CreateRealValue(default_value));
+void PrefService::RegisterDoublePref(const char* path, double default_value) {
+  RegisterPreference(path, Value::CreateDoubleValue(default_value));
 }
 
 void PrefService::RegisterStringPref(const char* path,
@@ -213,8 +251,17 @@ void PrefService::RegisterListPref(const char* path) {
   RegisterPreference(path, new ListValue());
 }
 
+void PrefService::RegisterListPref(const char* path, ListValue* default_value) {
+  RegisterPreference(path, default_value);
+}
+
 void PrefService::RegisterDictionaryPref(const char* path) {
   RegisterPreference(path, new DictionaryValue());
+}
+
+void PrefService::RegisterDictionaryPref(const char* path,
+                                         DictionaryValue* default_value) {
+  RegisterPreference(path, default_value);
 }
 
 void PrefService::RegisterLocalizedBooleanPref(const char* path,
@@ -231,11 +278,11 @@ void PrefService::RegisterLocalizedIntegerPref(const char* path,
       CreateLocaleDefaultValue(Value::TYPE_INTEGER, locale_default_message_id));
 }
 
-void PrefService::RegisterLocalizedRealPref(const char* path,
-                                            int locale_default_message_id) {
+void PrefService::RegisterLocalizedDoublePref(const char* path,
+                                              int locale_default_message_id) {
   RegisterPreference(
       path,
-      CreateLocaleDefaultValue(Value::TYPE_REAL, locale_default_message_id));
+      CreateLocaleDefaultValue(Value::TYPE_DOUBLE, locale_default_message_id));
 }
 
 void PrefService::RegisterLocalizedStringPref(const char* path,
@@ -275,7 +322,7 @@ int PrefService::GetInteger(const char* path) const {
   return result;
 }
 
-double PrefService::GetReal(const char* path) const {
+double PrefService::GetDouble(const char* path) const {
   DCHECK(CalledOnValidThread());
 
   double result = 0.0;
@@ -285,7 +332,7 @@ double PrefService::GetReal(const char* path) const {
     NOTREACHED() << "Trying to read an unregistered pref: " << path;
     return result;
   }
-  bool rv = pref->GetValue()->GetAsReal(&result);
+  bool rv = pref->GetValue()->GetAsDouble(&result);
   DCHECK(rv);
   return result;
 }
@@ -308,32 +355,47 @@ std::string PrefService::GetString(const char* path) const {
 FilePath PrefService::GetFilePath(const char* path) const {
   DCHECK(CalledOnValidThread());
 
-  FilePath::StringType result;
+  FilePath result;
 
   const Preference* pref = FindPreference(path);
   if (!pref) {
     NOTREACHED() << "Trying to read an unregistered pref: " << path;
     return FilePath(result);
   }
-  bool rv = pref->GetValue()->GetAsString(&result);
+  bool rv = pref->GetValue()->GetAsFilePath(&result);
   DCHECK(rv);
-#if defined(OS_POSIX)
-  // We store filepaths as UTF8, so convert it back to the system type.
-  result = base::SysWideToNativeMB(UTF8ToWide(result));
-#endif
-  return FilePath(result);
+  return result;
 }
 
 bool PrefService::HasPrefPath(const char* path) const {
-  return pref_value_store_->HasPrefPath(path);
+  const Preference* pref = FindPreference(path);
+  return pref && !pref->IsDefaultValue();
+}
+
+DictionaryValue* PrefService::GetPreferenceValues() const {
+  DCHECK(CalledOnValidThread());
+  DictionaryValue* out = new DictionaryValue;
+  DefaultPrefStore::const_iterator i = default_store_->begin();
+  for (; i != default_store_->end(); ++i) {
+    const Value* value = FindPreference(i->first.c_str())->GetValue();
+    out->Set(i->first, value->DeepCopy());
+  }
+  return out;
 }
 
 const PrefService::Preference* PrefService::FindPreference(
     const char* pref_name) const {
   DCHECK(CalledOnValidThread());
-  Preference p(this, pref_name);
+  Preference p(this, pref_name, Value::TYPE_NULL);
   PreferenceSet::const_iterator it = prefs_.find(&p);
-  return it == prefs_.end() ? NULL : *it;
+  if (it != prefs_.end())
+    return *it;
+  const Value::ValueType type = default_store_->GetType(pref_name);
+  if (type == Value::TYPE_NULL)
+    return NULL;
+  Preference* new_pref = new Preference(this, pref_name, type);
+  prefs_.insert(new_pref);
+  return new_pref;
 }
 
 bool PrefService::ReadOnly() const {
@@ -346,10 +408,7 @@ PrefNotifier* PrefService::pref_notifier() const {
 
 bool PrefService::IsManagedPreference(const char* pref_name) const {
   const Preference* pref = FindPreference(pref_name);
-  if (pref && pref->IsManaged()) {
-    return true;
-  }
-  return false;
+  return pref && pref->IsManaged();
 }
 
 const DictionaryValue* PrefService::GetDictionary(const char* path) const {
@@ -361,8 +420,10 @@ const DictionaryValue* PrefService::GetDictionary(const char* path) const {
     return NULL;
   }
   const Value* value = pref->GetValue();
-  if (value->GetType() == Value::TYPE_NULL)
+  if (value->GetType() != Value::TYPE_DICTIONARY) {
+    NOTREACHED();
     return NULL;
+  }
   return static_cast<const DictionaryValue*>(value);
 }
 
@@ -375,8 +436,10 @@ const ListValue* PrefService::GetList(const char* path) const {
     return NULL;
   }
   const Value* value = pref->GetValue();
-  if (value->GetType() == Value::TYPE_NULL)
+  if (value->GetType() != Value::TYPE_LIST) {
+    NOTREACHED();
     return NULL;
+  }
   return static_cast<const ListValue*>(value);
 }
 
@@ -405,18 +468,8 @@ void PrefService::RegisterPreference(const char* path, Value* default_value) {
   DCHECK(orig_type != Value::TYPE_NULL && orig_type != Value::TYPE_BINARY) <<
          "invalid preference type: " << orig_type;
 
-  // We set the default value of dictionaries and lists to be null so it's
-  // easier for callers to check for empty dict/list prefs. The PrefValueStore
-  // accepts ownership of the value (null or default_value).
-  if (Value::TYPE_LIST == orig_type || Value::TYPE_DICTIONARY == orig_type) {
-    default_store_->SetDefaultValue(path, Value::CreateNullValue());
-  } else {
-    // Hand off ownership.
-    default_store_->SetDefaultValue(path, scoped_value.release());
-  }
-
-  pref_value_store_->RegisterPreferenceType(path, orig_type);
-  prefs_.insert(new Preference(this, path));
+  // Hand off ownership.
+  default_store_->SetDefaultValue(path, scoped_value.release());
 }
 
 void PrefService::ClearPref(const char* path) {
@@ -439,13 +492,7 @@ void PrefService::Set(const char* path, const Value& value) {
     return;
   }
 
-  // Allow dictionary and list types to be set to null, which removes their
-  // user values.
-  if (value.GetType() == Value::TYPE_NULL &&
-      (pref->GetType() == Value::TYPE_DICTIONARY ||
-       pref->GetType() == Value::TYPE_LIST)) {
-    user_pref_store_->RemoveValue(path);
-  } else if (pref->GetType() != value.GetType()) {
+  if (pref->GetType() != value.GetType()) {
     NOTREACHED() << "Trying to set pref " << path
                  << " of type " << pref->GetType()
                  << " to value of type " << value.GetType();
@@ -462,8 +509,8 @@ void PrefService::SetInteger(const char* path, int value) {
   SetUserPrefValue(path, Value::CreateIntegerValue(value));
 }
 
-void PrefService::SetReal(const char* path, double value) {
-  SetUserPrefValue(path, Value::CreateRealValue(value));
+void PrefService::SetDouble(const char* path, double value) {
+  SetUserPrefValue(path, Value::CreateDoubleValue(value));
 }
 
 void PrefService::SetString(const char* path, const std::string& value) {
@@ -471,16 +518,7 @@ void PrefService::SetString(const char* path, const std::string& value) {
 }
 
 void PrefService::SetFilePath(const char* path, const FilePath& value) {
-#if defined(OS_POSIX)
-  // Value::SetString only knows about UTF8 strings, so convert the path from
-  // the system native value to UTF8.
-  std::string path_utf8 = WideToUTF8(base::SysNativeMBToWide(value.value()));
-  Value* new_value = Value::CreateStringValue(path_utf8);
-#else
-  Value* new_value = Value::CreateStringValue(value.value());
-#endif
-
-  SetUserPrefValue(path, new_value);
+  SetUserPrefValue(path, Value::CreateFilePathValue(value));
 }
 
 void PrefService::SetInt64(const char* path, int64 value) {
@@ -511,6 +549,8 @@ void PrefService::RegisterInt64Pref(const char* path, int64 default_value) {
 
 DictionaryValue* PrefService::GetMutableDictionary(const char* path) {
   DCHECK(CalledOnValidThread());
+  DLOG_IF(WARNING, IsManagedPreference(path)) <<
+      "Attempt to change managed preference " << path;
 
   const Preference* pref = FindPreference(path);
   if (!pref) {
@@ -539,6 +579,8 @@ DictionaryValue* PrefService::GetMutableDictionary(const char* path) {
 
 ListValue* PrefService::GetMutableList(const char* path) {
   DCHECK(CalledOnValidThread());
+  DLOG_IF(WARNING, IsManagedPreference(path)) <<
+      "Attempt to change managed preference " << path;
 
   const Preference* pref = FindPreference(path);
   if (!pref) {
@@ -565,8 +607,14 @@ ListValue* PrefService::GetMutableList(const char* path) {
   return list;
 }
 
+void PrefService::ReportValueChanged(const std::string& key) {
+  user_pref_store_->ReportValueChanged(key);
+}
+
 void PrefService::SetUserPrefValue(const char* path, Value* new_value) {
   DCHECK(CalledOnValidThread());
+  DLOG_IF(WARNING, IsManagedPreference(path)) <<
+      "Attempt to change managed preference " << path;
 
   const Preference* pref = FindPreference(path);
   if (!pref) {
@@ -587,15 +635,17 @@ void PrefService::SetUserPrefValue(const char* path, Value* new_value) {
 // PrefService::Preference
 
 PrefService::Preference::Preference(const PrefService* service,
-                                    const char* name)
+                                    const char* name,
+                                    Value::ValueType type)
       : name_(name),
+        type_(type),
         pref_service_(service) {
   DCHECK(name);
   DCHECK(service);
 }
 
 Value::ValueType PrefService::Preference::GetType() const {
-  return pref_service_->pref_value_store_->GetRegisteredType(name_);
+  return type_;
 }
 
 const Value* PrefService::Preference::GetValue() const {
@@ -603,8 +653,10 @@ const Value* PrefService::Preference::GetValue() const {
       "Must register pref before getting its value";
 
   Value* found_value = NULL;
-  if (pref_service_->pref_value_store_->GetValue(name_, &found_value))
+  if (pref_value_store()->GetValue(name_, type_, &found_value)) {
+    DCHECK(found_value->IsType(type_));
     return found_value;
+  }
 
   // Every registered preference has at least a default value.
   NOTREACHED() << "no valid value found for registered pref " << name_;
@@ -612,37 +664,33 @@ const Value* PrefService::Preference::GetValue() const {
 }
 
 bool PrefService::Preference::IsManaged() const {
-  PrefValueStore* pref_value_store = pref_service_->pref_value_store_;
-  return pref_value_store->PrefValueInManagedPlatformStore(name_.c_str()) ||
-      pref_value_store->PrefValueInDeviceManagementStore(name_.c_str());
+  return pref_value_store()->PrefValueInManagedStore(name_.c_str());
 }
 
 bool PrefService::Preference::HasExtensionSetting() const {
-  return pref_service_->pref_value_store_->
-      PrefValueInExtensionStore(name_.c_str());
+  return pref_value_store()->PrefValueInExtensionStore(name_.c_str());
 }
 
 bool PrefService::Preference::HasUserSetting() const {
-  return pref_service_->pref_value_store_->
-      PrefValueInUserStore(name_.c_str());
+  return pref_value_store()->PrefValueInUserStore(name_.c_str());
 }
 
 bool PrefService::Preference::IsExtensionControlled() const {
-  return pref_service_->pref_value_store_->
-      PrefValueFromExtensionStore(name_.c_str());
+  return pref_value_store()->PrefValueFromExtensionStore(name_.c_str());
 }
 
 bool PrefService::Preference::IsUserControlled() const {
-  return pref_service_->pref_value_store_->
-      PrefValueFromUserStore(name_.c_str());
+  return pref_value_store()->PrefValueFromUserStore(name_.c_str());
 }
 
 bool PrefService::Preference::IsDefaultValue() const {
-  return pref_service_->pref_value_store_->
-      PrefValueFromDefaultStore(name_.c_str());
+  return pref_value_store()->PrefValueFromDefaultStore(name_.c_str());
 }
 
 bool PrefService::Preference::IsUserModifiable() const {
-  return pref_service_->pref_value_store_->
-      PrefValueUserModifiable(name_.c_str());
+  return pref_value_store()->PrefValueUserModifiable(name_.c_str());
+}
+
+bool PrefService::Preference::IsExtensionModifiable() const {
+  return pref_value_store()->PrefValueExtensionModifiable(name_.c_str());
 }

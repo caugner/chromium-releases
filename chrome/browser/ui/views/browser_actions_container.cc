@@ -13,9 +13,6 @@
 #include "chrome/browser/extensions/extension_tabs_module.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/renderer_host/render_view_host.h"
-#include "chrome/browser/renderer_host/render_widget_host_view.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/themes/browser_theme_provider.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/view_ids.h"
@@ -28,8 +25,9 @@
 #include "chrome/common/notification_source.h"
 #include "chrome/common/notification_type.h"
 #include "chrome/common/pref_names.h"
-#include "gfx/canvas.h"
-#include "gfx/canvas_skia.h"
+#include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/renderer_host/render_widget_host_view.h"
+#include "content/browser/tab_contents/tab_contents.h"
 #include "grit/app_resources.h"
 #include "grit/generated_resources.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -38,10 +36,13 @@
 #include "ui/base/animation/slide_animation.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/canvas.h"
+#include "ui/gfx/canvas_skia.h"
 #include "views/controls/button/menu_button.h"
 #include "views/controls/button/text_button.h"
 #include "views/controls/menu/menu_2.h"
 #include "views/drag_utils.h"
+#include "views/metrics.h"
 #include "views/window/window.h"
 
 #include "grit/theme_resources.h"
@@ -170,7 +171,7 @@ void BrowserActionButton::UpdateState() {
     name = UTF8ToUTF16(extension()->name());
   SetTooltipText(UTF16ToWideHack(name));
   SetAccessibleName(name);
-  GetParent()->SchedulePaint();
+  parent()->SchedulePaint();
 }
 
 void BrowserActionButton::Observe(NotificationType type,
@@ -505,19 +506,18 @@ void BrowserActionsContainer::OnBrowserActionExecuted(
   // We can get the execute event for browser actions that are not visible,
   // since buttons can be activated from the overflow menu (chevron). In that
   // case we show the popup as originating from the chevron.
-  View* reference_view = button->GetParent()->IsVisible() ? button : chevron_;
+  View* reference_view = button->parent()->IsVisible() ? button : chevron_;
   gfx::Point origin;
   View::ConvertPointToScreen(reference_view, &origin);
   gfx::Rect rect = reference_view->bounds();
   rect.set_origin(origin);
 
-  gfx::NativeWindow frame_window = browser_->window()->GetNativeHandle();
   BubbleBorder::ArrowLocation arrow_location = base::i18n::IsRTL() ?
       BubbleBorder::TOP_LEFT : BubbleBorder::TOP_RIGHT;
 
-  popup_ = ExtensionPopup::Show(button->GetPopupUrl(), browser_,
-      browser_->profile(), frame_window, rect, arrow_location, true,
-      inspect_with_devtools, ExtensionPopup::BUBBLE_CHROME, this);
+  popup_ = ExtensionPopup::Show(button->GetPopupUrl(), browser_, rect,
+                                arrow_location, inspect_with_devtools,
+                                this);
   popup_button_ = button;
   popup_button_->SetButtonPushed();
 }
@@ -576,7 +576,7 @@ void BrowserActionsContainer::Layout() {
   }
 }
 
-void BrowserActionsContainer::Paint(gfx::Canvas* canvas) {
+void BrowserActionsContainer::OnPaint(gfx::Canvas* canvas) {
   // TODO(sky/glen): Instead of using a drop indicator, animate the icons while
   // dragging (like we do for tab dragging).
   if (drop_indicator_position_ > -1) {
@@ -634,7 +634,7 @@ void BrowserActionsContainer::OnDragEntered(
 int BrowserActionsContainer::OnDragUpdated(
     const views::DropTargetEvent& event) {
   // First check if we are above the chevron (overflow) menu.
-  if (GetViewForPoint(event.location()) == chevron_) {
+  if (GetEventHandlerForPoint(event.location()) == chevron_) {
     if (show_menu_task_factory_.empty() && !overflow_menu_)
       StartShowFolderDropMenuTimer();
     return ui::DragDropTypes::DRAG_MOVE;
@@ -699,7 +699,7 @@ void BrowserActionsContainer::OnDragExited() {
 int BrowserActionsContainer::OnPerformDrop(
     const views::DropTargetEvent& event) {
   BrowserActionDragData data;
-  if (!data.Read(event.GetData()))
+  if (!data.Read(event.data()))
     return ui::DragDropTypes::DRAG_NONE;
 
   // Make sure we have the same view as we started with.
@@ -709,8 +709,7 @@ int BrowserActionsContainer::OnPerformDrop(
 
   size_t i = 0;
   for (; i < browser_action_views_.size(); ++i) {
-    int view_x =
-        browser_action_views_[i]->GetBounds(APPLY_MIRRORING_TRANSFORMATION).x();
+    int view_x = browser_action_views_[i]->GetMirroredBounds().x();
     if (!browser_action_views_[i]->IsVisible() ||
         (base::i18n::IsRTL() ? (view_x < drop_indicator_position_) :
             (view_x >= drop_indicator_position_))) {
@@ -755,9 +754,9 @@ void BrowserActionsContainer::RunMenu(View* source, const gfx::Point& pt) {
   }
 }
 
-void BrowserActionsContainer::WriteDragData(View* sender,
-                                            const gfx::Point& press_pt,
-                                            OSExchangeData* data) {
+void BrowserActionsContainer::WriteDragDataForView(View* sender,
+                                                   const gfx::Point& press_pt,
+                                                   OSExchangeData* data) {
   DCHECK(data);
 
   for (size_t i = 0; i < browser_action_views_.size(); ++i) {
@@ -778,14 +777,14 @@ void BrowserActionsContainer::WriteDragData(View* sender,
   }
 }
 
-int BrowserActionsContainer::GetDragOperations(View* sender,
-                                               const gfx::Point& p) {
+int BrowserActionsContainer::GetDragOperationsForView(View* sender,
+                                                      const gfx::Point& p) {
   return ui::DragDropTypes::DRAG_MOVE;
 }
 
-bool BrowserActionsContainer::CanStartDrag(View* sender,
-                                           const gfx::Point& press_pt,
-                                           const gfx::Point& p) {
+bool BrowserActionsContainer::CanStartDragForView(View* sender,
+                                                  const gfx::Point& press_pt,
+                                                  const gfx::Point& p) {
   return true;
 }
 
@@ -913,7 +912,7 @@ void BrowserActionsContainer::BrowserActionAdded(const Extension* extension,
     index = model_->OriginalIndexToIncognito(index);
   BrowserActionView* view = new BrowserActionView(extension, this);
   browser_action_views_.insert(browser_action_views_.begin() + index, view);
-  AddChildView(index, view);
+  AddChildViewAt(view, index);
 
   // If we are still initializing the container, don't bother animating.
   if (!model_->extensions_initialized())
@@ -1013,7 +1012,7 @@ void BrowserActionsContainer::StopShowFolderDropMenuTimer() {
 }
 
 void BrowserActionsContainer::StartShowFolderDropMenuTimer() {
-  int delay = View::GetMenuShowDelay();
+  int delay = views::GetMenuShowDelay();
   MessageLoop::current()->PostDelayedTask(FROM_HERE,
       show_menu_task_factory_.NewRunnableMethod(
           &BrowserActionsContainer::ShowDropFolder),

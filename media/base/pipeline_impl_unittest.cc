@@ -1,5 +1,4 @@
-
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +6,6 @@
 
 #include "base/callback.h"
 #include "base/stl_util-inl.h"
-#include "media/base/clock_impl.h"
 #include "media/base/pipeline_impl.h"
 #include "media/base/media_format.h"
 #include "media/base/filters.h"
@@ -17,6 +15,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 using ::testing::_;
+using ::testing::DeleteArg;
 using ::testing::InSequence;
 using ::testing::Invoke;
 using ::testing::Mock;
@@ -25,17 +24,13 @@ using ::testing::Return;
 using ::testing::ReturnRef;
 using ::testing::StrictMock;
 
-namespace {
+namespace media {
 
 // Total bytes of the data source.
-const int kTotalBytes = 1024;
+static const int kTotalBytes = 1024;
 
 // Buffered bytes of the data source.
-const int kBufferedBytes = 1024;
-
-}  // namespace
-
-namespace media {
+static const int kBufferedBytes = 1024;
 
 // Used for setting expectations on pipeline callbacks.  Using a StrictMock
 // also lets us test for missing callbacks.
@@ -148,8 +143,9 @@ class PipelineImplTest : public ::testing::Test {
 
   // Sets up expectations to allow the video decoder to initialize.
   void InitializeVideoDecoder(MockDemuxerStream* stream) {
-    EXPECT_CALL(*mocks_->video_decoder(), Initialize(stream, NotNull()))
-        .WillOnce(Invoke(&RunFilterCallback));
+    EXPECT_CALL(*mocks_->video_decoder(),
+                Initialize(stream, NotNull(), NotNull()))
+        .WillOnce(DoAll(Invoke(&RunFilterCallback3), DeleteArg<2>()));
     EXPECT_CALL(*mocks_->video_decoder(), SetPlaybackRate(0.0f));
     EXPECT_CALL(*mocks_->video_decoder(), Seek(base::TimeDelta(), NotNull()))
         .WillOnce(Invoke(&RunFilterCallback));
@@ -159,8 +155,9 @@ class PipelineImplTest : public ::testing::Test {
 
   // Sets up expectations to allow the audio decoder to initialize.
   void InitializeAudioDecoder(MockDemuxerStream* stream) {
-    EXPECT_CALL(*mocks_->audio_decoder(), Initialize(stream, NotNull()))
-        .WillOnce(Invoke(&RunFilterCallback));
+    EXPECT_CALL(*mocks_->audio_decoder(),
+                Initialize(stream, NotNull(), NotNull()))
+        .WillOnce(DoAll(Invoke(&RunFilterCallback3), DeleteArg<2>()));
     EXPECT_CALL(*mocks_->audio_decoder(), SetPlaybackRate(0.0f));
     EXPECT_CALL(*mocks_->audio_decoder(), Seek(base::TimeDelta(), NotNull()))
         .WillOnce(Invoke(&RunFilterCallback));
@@ -171,8 +168,8 @@ class PipelineImplTest : public ::testing::Test {
   // Sets up expectations to allow the video renderer to initialize.
   void InitializeVideoRenderer() {
     EXPECT_CALL(*mocks_->video_renderer(),
-                Initialize(mocks_->video_decoder(), NotNull()))
-        .WillOnce(Invoke(&RunFilterCallback));
+                Initialize(mocks_->video_decoder(), NotNull(), NotNull()))
+        .WillOnce(DoAll(Invoke(&RunFilterCallback3), DeleteArg<2>()));
     EXPECT_CALL(*mocks_->video_renderer(), SetPlaybackRate(0.0f));
     EXPECT_CALL(*mocks_->video_renderer(), Seek(base::TimeDelta(), NotNull()))
         .WillOnce(Invoke(&RunFilterCallback));
@@ -755,8 +752,8 @@ TEST_F(PipelineImplTest, AudioStreamShorterThanVideo) {
   FilterHost* host = pipeline_;
 
   // Replace the clock so we can simulate wallclock time advancing w/o using
-  // Sleep.
-  pipeline_->clock_.reset(new ClockImpl(&StaticClockFunction));
+  // Sleep().
+  pipeline_->SetClockForTesting(new Clock(&StaticClockFunction));
 
   EXPECT_EQ(0, host->GetTime().ToInternalValue());
 

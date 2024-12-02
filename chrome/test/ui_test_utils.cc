@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,27 +24,31 @@
 #include "chrome/browser/download/download_item.h"
 #include "chrome/browser/download/download_manager.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/renderer_host/render_process_host.h"
-#include "chrome/browser/renderer_host/render_view_host.h"
-#include "chrome/browser/tab_contents/navigation_controller.h"
-#include "chrome/browser/tab_contents/navigation_entry.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tab_contents/thumbnail_generator.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/find_bar/find_notification_details.h"
+#include "chrome/browser/ui/find_bar/find_tab_helper.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension_action.h"
 #include "chrome/common/notification_type.h"
 #include "chrome/test/automation/javascript_execution_controller.h"
 #include "chrome/test/bookmark_load_observer.h"
-#if defined(TOOLKIT_VIEWS)
-#include "views/focus/accelerator_handler.h"
-#endif
-#include "gfx/size.h"
+#include "content/browser/renderer_host/render_process_host.h"
+#include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/tab_contents/navigation_controller.h"
+#include "content/browser/tab_contents/navigation_entry.h"
+#include "content/browser/tab_contents/tab_contents.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/net_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkColor.h"
+#include "ui/gfx/size.h"
+
+#if defined(TOOLKIT_VIEWS)
+#include "views/focus/accelerator_handler.h"
+#endif
 
 namespace ui_test_utils {
 
@@ -223,13 +227,14 @@ class DownloadsCompleteObserver : public DownloadManager::Observer,
 
 class FindInPageNotificationObserver : public NotificationObserver {
  public:
-  explicit FindInPageNotificationObserver(TabContents* parent_tab)
+  explicit FindInPageNotificationObserver(TabContentsWrapper* parent_tab)
       : parent_tab_(parent_tab),
         active_match_ordinal_(-1),
         number_of_matches_(0) {
-    current_find_request_id_ = parent_tab->current_find_request_id();
+    current_find_request_id_ =
+        parent_tab->find_tab_helper()->current_find_request_id();
     registrar_.Add(this, NotificationType::FIND_RESULT_AVAILABLE,
-                   Source<TabContents>(parent_tab_));
+                   Source<TabContents>(parent_tab_->tab_contents()));
     ui_test_utils::RunMessageLoop();
   }
 
@@ -260,7 +265,7 @@ class FindInPageNotificationObserver : public NotificationObserver {
 
  private:
   NotificationRegistrar registrar_;
-  TabContents* parent_tab_;
+  TabContentsWrapper* parent_tab_;
   // We will at some point (before final update) be notified of the ordinal and
   // we need to preserve it so we can send it later.
   int active_match_ordinal_;
@@ -284,7 +289,8 @@ class InProcessJavaScriptExecutionController
   // Executes |script| and sets the JSON response |json|.
   virtual bool ExecuteJavaScriptAndGetJSON(const std::string& script,
                                            std::string* json) {
-    render_view_host_->ExecuteJavascriptInWebFrame(L"", UTF8ToWide(script));
+    render_view_host_->ExecuteJavascriptInWebFrame(string16(),
+                                                   UTF8ToUTF16(script));
     DOMOperationObserver dom_op_observer(render_view_host_);
     return dom_op_observer.GetResponse(json);
   }
@@ -319,7 +325,8 @@ bool ExecuteJavaScriptHelper(RenderViewHost* render_view_host,
   //                automation id.
   std::wstring script = L"window.domAutomationController.setAutomationId(0);" +
       original_script;
-  render_view_host->ExecuteJavascriptInWebFrame(frame_xpath, script);
+  render_view_host->ExecuteJavascriptInWebFrame(WideToUTF16Hack(frame_xpath),
+                                                WideToUTF16Hack(script));
   DOMOperationObserver dom_op_observer(render_view_host);
   std::string json;
   if (!dom_op_observer.GetResponse(&json))
@@ -377,7 +384,7 @@ bool GetCurrentTabTitle(const Browser* browser, string16* title) {
   NavigationEntry* last_entry = tab_contents->controller().GetActiveEntry();
   if (!last_entry)
     return false;
-  title->assign(last_entry->title());
+  title->assign(last_entry->GetTitleForDisplay(""));
   return true;
 }
 
@@ -612,10 +619,10 @@ void CrashTab(TabContents* tab) {
                   Source<RenderProcessHost>(rph));
 }
 
-void WaitForFocusChange(RenderViewHost* rvh) {
+void WaitForFocusChange(TabContents* tab_contents) {
   TestNotificationObserver observer;
   RegisterAndWait(&observer, NotificationType::FOCUS_CHANGED_IN_PAGE,
-                  Source<RenderViewHost>(rvh));
+                  Source<TabContents>(tab_contents));
 }
 
 void WaitForFocusInBrowser(Browser* browser) {
@@ -624,9 +631,10 @@ void WaitForFocusInBrowser(Browser* browser) {
                   Source<Browser>(browser));
 }
 
-int FindInPage(TabContents* tab_contents, const string16& search_string,
+int FindInPage(TabContentsWrapper* tab_contents, const string16& search_string,
                bool forward, bool match_case, int* ordinal) {
-  tab_contents->StartFinding(search_string, forward, match_case);
+  tab_contents->
+      find_tab_helper()->StartFinding(search_string, forward, match_case);
   FindInPageNotificationObserver observer(tab_contents);
   if (ordinal)
     *ordinal = observer.active_match_ordinal();
@@ -868,6 +876,20 @@ TestWebSocketServer::~TestWebSocketServer() {
   base::LaunchApp(*cmd_line.get(), true, false, NULL);
 }
 
+TestNotificationObserver::TestNotificationObserver()
+    : source_(NotificationService::AllSources()) {
+}
+
+TestNotificationObserver::~TestNotificationObserver() {}
+
+void TestNotificationObserver::Observe(NotificationType type,
+                                       const NotificationSource& source,
+                                       const NotificationDetails& details) {
+  source_ = source;
+  details_ = details;
+  MessageLoopForUI::current()->Quit();
+}
+
 WindowedNotificationObserver::WindowedNotificationObserver(
     NotificationType notification_type,
     const NotificationSource& source)
@@ -876,6 +898,8 @@ WindowedNotificationObserver::WindowedNotificationObserver(
       waiting_for_(source) {
   registrar_.Add(this, notification_type, waiting_for_);
 }
+
+WindowedNotificationObserver::~WindowedNotificationObserver() {}
 
 void WindowedNotificationObserver::Wait() {
   if (waiting_for_ == NotificationService::AllSources()) {
@@ -920,6 +944,8 @@ DOMMessageQueue::DOMMessageQueue() {
   registrar_.Add(this, NotificationType::DOM_OPERATION_RESPONSE,
                  NotificationService::AllSources());
 }
+
+DOMMessageQueue::~DOMMessageQueue() {}
 
 void DOMMessageQueue::Observe(NotificationType type,
                               const NotificationSource& source,

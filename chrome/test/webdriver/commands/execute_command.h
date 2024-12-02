@@ -12,6 +12,8 @@
 
 namespace webdriver {
 
+class Response;
+
 // Inject a snippet of javascript into the page and return its result.
 // WebElements that should be passed to the script as an argument should be
 // specified in the arguments array as WebElement JSON arguments. Likewise,
@@ -21,20 +23,14 @@ namespace webdriver {
 class ExecuteCommand : public WebDriverCommand {
  public:
   ExecuteCommand(const std::vector<std::string>& path_segments,
-                 const DictionaryValue* const parameters)
-      : WebDriverCommand(path_segments, parameters) {}
-  virtual ~ExecuteCommand() {}
+                 const DictionaryValue* const parameters);
+  virtual ~ExecuteCommand();
 
-  virtual bool Init(Response* const response);
-
-  virtual bool DoesPost() { return true; }
+  virtual bool DoesPost();
   virtual void ExecutePost(Response* const response);
 
  private:
-  string16 script_;
-  bool has_args_;
-  std::string args_;
-  virtual bool RequiresValidTab() { return true; }
+  virtual bool RequiresValidTab();
 
   DISALLOW_COPY_AND_ASSIGN(ExecuteCommand);
 };

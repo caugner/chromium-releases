@@ -7,13 +7,15 @@
 #include "base/logging.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/chromeos/login/rounded_view.h"
-#include "gfx/canvas.h"
-#include "gfx/canvas_skia.h"
-#include "gfx/gtk_util.h"
-#include "gfx/rect.h"
+#include "grit/generated_resources.h"
 #include "third_party/skia/include/core/SkColorShader.h"
 #include "third_party/skia/include/core/SkComposeShader.h"
 #include "third_party/skia/include/effects/SkGradientShader.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/gfx/canvas.h"
+#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/gtk_util.h"
+#include "ui/gfx/rect.h"
 
 namespace chromeos {
 
@@ -70,32 +72,33 @@ class HalfRoundedView : public RoundedView<C> {
 };
 
 }  // namespace
+
 UsernameView::UsernameView(const std::wstring& username, bool use_small_shape)
-    : views::Label(username),
-      use_small_shape_(use_small_shape) {
+    : views::Label(username.empty()
+          ? UTF16ToWide(l10n_util::GetStringUTF16(IDS_GUEST)) : username),
+      use_small_shape_(use_small_shape),
+      is_guest_(username.empty()) {
 }
 
-void UsernameView::Paint(gfx::Canvas* canvas) {
-  gfx::Rect bounds = GetLocalBounds(false);
-  if (!text_image_.get())
+void UsernameView::OnPaint(gfx::Canvas* canvas) {
+  gfx::Rect bounds = GetContentsBounds();
+  if (text_image_ == NULL)
     PaintUsername(bounds);
+  DCHECK(text_image_ != NULL);
   DCHECK(bounds.size() ==
          gfx::Size(text_image_->width(), text_image_->height()));
-
   canvas->DrawBitmapInt(*text_image_, bounds.x(), bounds.y());
 }
 
 // static
 UsernameView* UsernameView::CreateShapedUsernameView(
-    const std::wstring& username,
-    bool use_small_shape) {
+    const std::wstring& username, bool use_small_shape) {
   return new HalfRoundedView<UsernameView>(username, use_small_shape);
 }
 
 gfx::NativeCursor UsernameView::GetCursorForPoint(
-    views::Event::EventType event_type,
+    ui::EventType event_type,
     const gfx::Point& p) {
-
   return use_small_shape_ ? gfx::GetCursor(GDK_HAND2) : NULL;
 }
 
@@ -163,7 +166,7 @@ void UsernameView::PaintUsername(const gfx::Rect& bounds) {
   text_image_.reset(new SkBitmap(canvas.ExtractBitmap()));
 
   if (use_fading_for_text) {
-    // Fade out only the text in the end. Use regualar background.
+    // Fade out only the text in the end. Use regular background.
     canvas.drawColor(kLabelBackgoundColor, SkXfermode::kSrc_Mode);
     SkShader* image_shader = SkShader::CreateBitmapShader(
         *text_image_,
@@ -179,6 +182,14 @@ void UsernameView::PaintUsername(const gfx::Rect& bounds) {
     paint.setShader(composite_shader)->unref();
     canvas.drawPaint(paint);
     text_image_.reset(new SkBitmap(canvas.ExtractBitmap()));
+  }
+}
+
+void UsernameView::OnLocaleChanged() {
+  if (is_guest_) {
+    SetText(UTF16ToWide(l10n_util::GetStringUTF16(IDS_GUEST)));
+    text_image_.reset();
+    SchedulePaint();
   }
 }
 

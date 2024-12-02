@@ -9,7 +9,7 @@
 #include <string>
 
 #include "base/time.h"
-#include "gfx/font.h"
+#include "ui/gfx/font.h"
 #include "views/background.h"
 #include "views/controls/button/text_button.h"
 
@@ -46,8 +46,8 @@ class MenuButton : public TextButton {
   virtual bool Activate();
 
   // Overridden to take into account the potential use of a drop marker.
-  virtual gfx::Size GetPreferredSize();
-  virtual void Paint(gfx::Canvas* canvas, bool for_drag);
+  virtual gfx::Size GetPreferredSize() OVERRIDE;
+  virtual void PaintButton(gfx::Canvas* canvas, PaintButtonMode mode) OVERRIDE;
 
   // These methods are overriden to implement a simple push button
   // behavior.

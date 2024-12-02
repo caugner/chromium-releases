@@ -6,18 +6,18 @@
 
 #include "base/message_loop.h"
 #include "base/string_split.h"
-#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/policy/device_management_backend_impl.h"
 #include "chrome/browser/policy/device_management_backend_mock.h"
 #include "chrome/browser/policy/device_management_service.h"
 #include "chrome/browser/policy/proto/device_management_constants.h"
 #include "chrome/common/net/test_url_fetcher_factory.h"
 #include "chrome/test/test_url_request_context_getter.h"
+#include "content/browser/browser_thread.h"
 #include "net/base/escape.h"
 #include "net/url_request/url_request_status.h"
-#include "net/url_request/url_request_unittest.h"
-#include "testing/gtest/include/gtest/gtest.h"
+#include "net/url_request/url_request_test_util.h"
 #include "testing/gmock/include/gmock/gmock.h"
+#include "testing/gtest/include/gtest/gtest.h"
 
 using testing::_;
 
@@ -480,6 +480,24 @@ TEST_F(DeviceManagementServiceTest, JobQueueing) {
                                           200,
                                           ResponseCookies(),
                                           response_data);
+}
+
+TEST_F(DeviceManagementServiceTest, CancelRequestAfterShutdown) {
+  DevicePolicyResponseDelegateMock mock;
+  EXPECT_CALL(mock, HandlePolicyResponse(_)).Times(0);
+  em::DevicePolicyRequest request;
+  request.set_policy_scope(kChromePolicyScope);
+  em::DevicePolicySettingRequest* setting_request =
+      request.add_setting_request();
+  setting_request->set_key(kChromeDevicePolicySettingKey);
+  setting_request->set_watermark("stale");
+  backend_->ProcessPolicyRequest(kDMToken, kDeviceId, request, &mock);
+  TestURLFetcher* fetcher = factory_.GetFetcherByID(0);
+  ASSERT_TRUE(fetcher);
+
+  // Shutdown the service and cancel the job afterwards.
+  service_->Shutdown();
+  backend_.reset();
 }
 
 }  // namespace policy

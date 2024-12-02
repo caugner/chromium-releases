@@ -65,6 +65,12 @@ void RunFilterCallback(::testing::Unused, FilterCallback* callback) {
   delete callback;
 }
 
+void RunFilterCallback3(::testing::Unused, FilterCallback* callback,
+                        ::testing::Unused) {
+  callback->Run();
+  delete callback;
+}
+
 void DestroyFilterCallback(::testing::Unused, FilterCallback* callback) {
   delete callback;
 }
@@ -78,5 +84,9 @@ MockFilter::MockFilter() {
 }
 
 MockFilter::~MockFilter() {}
+
+MockStatisticsCallback::MockStatisticsCallback() {}
+
+MockStatisticsCallback::~MockStatisticsCallback() {}
 
 }  // namespace media

@@ -36,23 +36,26 @@ class Profile;
 
   scoped_nsobject<NSString> title_;
   scoped_nsobject<NSString> warnings_;
+  scoped_nsobject<NSString> button_;
+  scoped_nsobject<NSString> subtitle_;
   SkBitmap icon_;
 }
 
-@property (nonatomic, readonly) NSImageView* iconView;
-@property (nonatomic, readonly) NSTextField* titleField;
-@property (nonatomic, readonly) NSTextField* subtitleField;
-@property (nonatomic, readonly) NSTextField* warningsField;
-@property (nonatomic, readonly) NSBox* warningsBox;
-@property (nonatomic, readonly) NSButton* cancelButton;
-@property (nonatomic, readonly) NSButton* okButton;
+@property(nonatomic, readonly) NSImageView* iconView;
+@property(nonatomic, readonly) NSTextField* titleField;
+@property(nonatomic, readonly) NSTextField* subtitleField;
+@property(nonatomic, readonly) NSTextField* warningsField;
+@property(nonatomic, readonly) NSBox* warningsBox;
+@property(nonatomic, readonly) NSButton* cancelButton;
+@property(nonatomic, readonly) NSButton* okButton;
 
 - (id)initWithParentWindow:(NSWindow*)window
                    profile:(Profile*)profile
                  extension:(const Extension*)extension
                   delegate:(ExtensionInstallUI::Delegate*)delegate
                       icon:(SkBitmap*)bitmap
-                  warnings:(const std::vector<string16>&)warnings;
+                  warnings:(const std::vector<string16>&)warnings
+                      type:(ExtensionInstallUI::PromptType)type;
 - (void)runAsModalSheet;
 - (IBAction)cancel:(id)sender;
 - (IBAction)ok:(id)sender;

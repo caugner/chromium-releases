@@ -5,14 +5,14 @@
 #include "chrome/browser/ui/views/location_bar/icon_label_bubble_view.h"
 
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
-#include "gfx/canvas.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/canvas.h"
 #include "views/controls/image_view.h"
 #include "views/controls/label.h"
 
 // Amount of padding at the edges of the bubble.
-static const int kBubbleOuterPadding =
-    LocationBarView::kEdgeItemPadding - LocationBarView::kBubblePadding;
+static const int kBubbleOuterPadding = LocationBarView::kEdgeItemPadding -
+    LocationBarView::kBubbleHorizontalPadding;
 
 // Amount of padding after the label.
 static const int kLabelPadding = 5;
@@ -46,7 +46,7 @@ void IconLabelBubbleView::SetImage(const SkBitmap& bitmap) {
   image_->SetImage(bitmap);
 }
 
-void IconLabelBubbleView::Paint(gfx::Canvas* canvas) {
+void IconLabelBubbleView::OnPaint(gfx::Canvas* canvas) {
   background_painter_.Paint(width(), height(), canvas);
 }
 

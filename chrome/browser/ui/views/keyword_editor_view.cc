@@ -13,22 +13,22 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_model.h"
-#include "chrome/browser/search_engines/template_url_table_model.h"
+#include "chrome/browser/ui/search_engines/template_url_table_model.h"
 #include "chrome/browser/ui/views/browser_dialogs.h"
 #include "chrome/browser/ui/views/first_run_search_engine_view.h"
 #include "chrome/common/pref_names.h"
-#include "gfx/point.h"
 #include "googleurl/src/gurl.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/gfx/point.h"
 #include "views/background.h"
-#include "views/grid_layout.h"
 #include "views/controls/button/native_button.h"
 #include "views/controls/table/table_view.h"
 #include "views/controls/textfield/textfield.h"
-#include "views/standard_layout.h"
+#include "views/layout/grid_layout.h"
+#include "views/layout/layout_constants.h"
 #include "views/widget/widget.h"
 #include "views/window/dialog_delegate.h"
 #include "views/window/window.h"
@@ -194,9 +194,9 @@ void KeywordEditorView::Init() {
 }
 
 void KeywordEditorView::InitLayoutManager() {
-  const int related_x = kRelatedControlHorizontalSpacing;
-  const int related_y = kRelatedControlVerticalSpacing;
-  const int unrelated_y = kUnrelatedControlVerticalSpacing;
+  const int related_x = views::kRelatedControlHorizontalSpacing;
+  const int related_y = views::kRelatedControlVerticalSpacing;
+  const int unrelated_y = views::kUnrelatedControlVerticalSpacing;
 
   GridLayout* contents_layout = GridLayout::CreatePanel(this);
   SetLayoutManager(contents_layout);
@@ -258,9 +258,9 @@ void KeywordEditorView::OnDoubleClick() {
   if (edit_button_->IsEnabled()) {
     DWORD pos = GetMessagePos();
     gfx::Point cursor_point(pos);
-    views::MouseEvent event(views::Event::ET_MOUSE_RELEASED,
+    views::MouseEvent event(ui::ET_MOUSE_RELEASED,
                             cursor_point.x(), cursor_point.y(),
-                            views::Event::EF_LEFT_BUTTON_DOWN);
+                            ui::EF_LEFT_BUTTON_DOWN);
     ButtonPressed(edit_button_, event);
   }
 }

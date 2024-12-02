@@ -12,7 +12,7 @@
 		</object>
 		<object class="NSMutableArray" key="IBDocument.EditedObjectIDs">
 			<bool key="EncodedWithXMLCoder">YES</bool>
-			<integer value="825"/>
+			<integer value="367"/>
 		</object>
 		<object class="NSArray" key="IBDocument.PluginDependencies">
 			<bool key="EncodedWithXMLCoder">YES</bool>
@@ -57,6 +57,30 @@
 							<int key="NSvFlags">301</int>
 							<object class="NSMutableArray" key="NSSubviews">
 								<bool key="EncodedWithXMLCoder">YES</bool>
+								<object class="NSButton" id="476113060">
+									<reference key="NSNextResponder" ref="926910107"/>
+									<int key="NSvFlags">268</int>
+									<string key="NSFrame">{{7, 113}, {96, 32}}</string>
+									<reference key="NSSuperview" ref="926910107"/>
+									<bool key="NSEnabled">YES</bool>
+									<object class="NSButtonCell" key="NSCell" id="607686812">
+										<int key="NSCellFlags">67239424</int>
+										<int key="NSCellFlags2">134217728</int>
+										<string key="NSContents">^IDS_SPEECH_INPUT_MIC_SETTINGS</string>
+										<object class="NSFont" key="NSSupport" id="487155245">
+											<string key="NSName">LucidaGrande</string>
+											<double key="NSSize">13</double>
+											<int key="NSfFlags">1044</int>
+										</object>
+										<reference key="NSControlView" ref="476113060"/>
+										<int key="NSButtonFlags">-2046672641</int>
+										<int key="NSButtonFlags2">134</int>
+										<string key="NSAlternateContents"/>
+										<string key="NSKeyEquivalent"/>
+										<int key="NSPeriodicDelay">200</int>
+										<int key="NSPeriodicInterval">25</int>
+									</object>
+								</object>
 								<object class="NSButton" id="1038338233">
 									<reference key="NSNextResponder" ref="926910107"/>
 									<int key="NSvFlags">268</int>
@@ -67,11 +91,7 @@
 										<int key="NSCellFlags">67239424</int>
 										<int key="NSCellFlags2">134217728</int>
 										<string key="NSContents">^IDS_SPEECH_INPUT_TRY_AGAIN</string>
-										<object class="NSFont" key="NSSupport" id="487155245">
-											<string key="NSName">LucidaGrande</string>
-											<double key="NSSize">13</double>
-											<int key="NSfFlags">1044</int>
-										</object>
+										<reference key="NSSupport" ref="487155245"/>
 										<reference key="NSControlView" ref="1038338233"/>
 										<int key="NSButtonFlags">-2038284033</int>
 										<int key="NSButtonFlags2">129</int>
@@ -272,6 +292,22 @@
 					</object>
 					<int key="connectionID">841</int>
 				</object>
+				<object class="IBConnectionRecord">
+					<object class="IBActionConnection" key="connection">
+						<string key="label">micSettings:</string>
+						<reference key="source" ref="1021"/>
+						<reference key="destination" ref="476113060"/>
+					</object>
+					<int key="connectionID">844</int>
+				</object>
+				<object class="IBConnectionRecord">
+					<object class="IBOutletConnection" key="connection">
+						<string key="label">micSettingsButton_</string>
+						<reference key="source" ref="1021"/>
+						<reference key="destination" ref="476113060"/>
+					</object>
+					<int key="connectionID">845</int>
+				</object>
 			</object>
 			<object class="IBMutableOrderedSet" key="objectRecords">
 				<object class="NSArray" key="orderedObjects">
@@ -337,6 +373,7 @@
 							<reference ref="793691203"/>
 							<reference ref="789820196"/>
 							<reference ref="1038338233"/>
+							<reference ref="476113060"/>
 						</object>
 						<reference key="parent" ref="414427165"/>
 					</object>
@@ -396,6 +433,20 @@
 						<reference key="object" ref="84459405"/>
 						<reference key="parent" ref="1038338233"/>
 					</object>
+					<object class="IBObjectRecord">
+						<int key="objectID">842</int>
+						<reference key="object" ref="476113060"/>
+						<object class="NSMutableArray" key="children">
+							<bool key="EncodedWithXMLCoder">YES</bool>
+							<reference ref="607686812"/>
+						</object>
+						<reference key="parent" ref="926910107"/>
+					</object>
+					<object class="IBObjectRecord">
+						<int key="objectID">843</int>
+						<reference key="object" ref="607686812"/>
+						<reference key="parent" ref="476113060"/>
+					</object>
 				</object>
 			</object>
 			<object class="NSMutableDictionary" key="flattenedProperties">
@@ -419,13 +470,16 @@
 					<string>825.IBPluginDependency</string>
 					<string>838.IBPluginDependency</string>
 					<string>839.IBPluginDependency</string>
+					<string>842.IBPluginDependency</string>
+					<string>843.CustomClassName</string>
+					<string>843.IBPluginDependency</string>
 				</object>
 				<object class="NSMutableArray" key="dict.values">
 					<bool key="EncodedWithXMLCoder">YES</bool>
 					<string>com.apple.InterfaceBuilder.CocoaPlugin</string>
-					<string>{{593, 566}, {190, 190}}</string>
+					<string>{{541, 417}, {190, 190}}</string>
 					<string>com.apple.InterfaceBuilder.CocoaPlugin</string>
-					<string>{{593, 566}, {190, 190}}</string>
+					<string>{{541, 417}, {190, 190}}</string>
 					<boolean value="NO"/>
 					<string>{{11, 666}, {480, 270}}</string>
 					<string>{3.40282e+38, 3.40282e+38}</string>
@@ -438,6 +492,9 @@
 					<string>com.apple.InterfaceBuilder.CocoaPlugin</string>
 					<string>com.apple.InterfaceBuilder.CocoaPlugin</string>
 					<string>com.apple.InterfaceBuilder.CocoaPlugin</string>
+					<string>com.apple.InterfaceBuilder.CocoaPlugin</string>
+					<string>com.apple.InterfaceBuilder.CocoaPlugin</string>
+					<string>HyperlinkButtonCell</string>
 					<string>com.apple.InterfaceBuilder.CocoaPlugin</string>
 				</object>
 			</object>
@@ -457,7 +514,7 @@
 				</object>
 			</object>
 			<nil key="sourceID"/>
-			<int key="maxID">841</int>
+			<int key="maxID">845</int>
 		</object>
 		<object class="IBClassDescriber" key="IBDocument.Classes">
 			<object class="NSMutableArray" key="referencedPartialClassDescriptions">
@@ -537,6 +594,14 @@
 					</object>
 				</object>
 				<object class="IBPartialClassDescription">
+					<string key="className">HyperlinkButtonCell</string>
+					<string key="superclassName">NSButtonCell</string>
+					<object class="IBClassDescriptionSource" key="sourceIdentifier">
+						<string key="majorKey">IBProjectSource</string>
+						<string key="minorKey">browser/ui/cocoa/hyperlink_button_cell.h</string>
+					</object>
+				</object>
+				<object class="IBPartialClassDescription">
 					<string key="className">InfoBubbleView</string>
 					<string key="superclassName">NSView</string>
 					<object class="IBClassDescriptionSource" key="sourceIdentifier">
@@ -577,7 +642,7 @@
 					<string key="className">NSObject</string>
 					<object class="IBClassDescriptionSource" key="sourceIdentifier">
 						<string key="majorKey">IBProjectSource</string>
-						<string key="minorKey">browser/ui/cocoa/tab_strip_model_observer_bridge.h</string>
+						<string key="minorKey">browser/ui/cocoa/tabs/tab_strip_model_observer_bridge.h</string>
 					</object>
 				</object>
 				<object class="IBPartialClassDescription">
@@ -616,10 +681,12 @@
 						<object class="NSArray" key="dict.sortedKeys">
 							<bool key="EncodedWithXMLCoder">YES</bool>
 							<string>cancel:</string>
+							<string>micSettings:</string>
 							<string>tryAgain:</string>
 						</object>
 						<object class="NSMutableArray" key="dict.values">
 							<bool key="EncodedWithXMLCoder">YES</bool>
+							<string>id</string>
 							<string>id</string>
 							<string>id</string>
 						</object>
@@ -631,6 +698,7 @@
 							<string>cancelButton_</string>
 							<string>iconImage_</string>
 							<string>instructionLabel_</string>
+							<string>micSettingsButton_</string>
 							<string>tryAgainButton_</string>
 						</object>
 						<object class="NSMutableArray" key="dict.values">
@@ -638,6 +706,7 @@
 							<string>NSButton</string>
 							<string>NSImageView</string>
 							<string>NSTextField</string>
+							<string>NSButton</string>
 							<string>NSButton</string>
 						</object>
 					</object>
@@ -649,6 +718,10 @@
 				<object class="IBPartialClassDescription">
 					<string key="className">SpeechInputWindowController</string>
 					<string key="superclassName">BaseBubbleController</string>
+					<object class="NSMutableDictionary" key="outlets">
+						<string key="NS.key.0">myOutlet1</string>
+						<string key="NS.object.0">id</string>
+					</object>
 					<object class="IBClassDescriptionSource" key="sourceIdentifier">
 						<string key="majorKey">IBUserSource</string>
 						<string key="minorKey"/>
@@ -1363,7 +1436,7 @@
 		<int key="IBDocument.defaultPropertyAccessControl">3</int>
 		<object class="NSMutableDictionary" key="IBDocument.LastKnownImageSizes">
 			<string key="NS.key.0">speech_input_recording</string>
-			<string key="NS.object.0">{51, 51}</string>
+			<string key="NS.object.0">{128, 128}</string>
 		</object>
 	</data>
 </archive>

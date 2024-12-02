@@ -7,7 +7,6 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
-#include "base/mac/mac_util.h"
 #include "base/sys_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
@@ -18,7 +17,6 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sidebar/sidebar_container.h"
 #include "chrome/browser/sidebar/sidebar_manager.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
@@ -28,12 +26,12 @@
 #import "chrome/browser/ui/cocoa/content_settings/collected_cookies_mac.h"
 #import "chrome/browser/ui/cocoa/download/download_shelf_controller.h"
 #import "chrome/browser/ui/cocoa/html_dialog_window_controller.h"
-#import "chrome/browser/ui/cocoa/importer/import_settings_dialog.h"
+#import "chrome/browser/ui/cocoa/importer/import_dialog_cocoa.h"
 #import "chrome/browser/ui/cocoa/location_bar/location_bar_view_mac.h"
+#import "chrome/browser/ui/cocoa/nsmenuitem_additions.h"
 #import "chrome/browser/ui/cocoa/options/content_settings_dialog_controller.h"
 #import "chrome/browser/ui/cocoa/options/edit_search_engine_cocoa_controller.h"
 #import "chrome/browser/ui/cocoa/options/keyword_editor_cocoa_controller.h"
-#import "chrome/browser/ui/cocoa/nsmenuitem_additions.h"
 #include "chrome/browser/ui/cocoa/repost_form_warning_mac.h"
 #include "chrome/browser/ui/cocoa/restart_browser.h"
 #include "chrome/browser/ui/cocoa/status_bubble_mac.h"
@@ -44,10 +42,11 @@
 #include "chrome/common/native_web_keyboard_event.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
-#include "gfx/rect.h"
+#include "content/browser/tab_contents/tab_contents.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util_mac.h"
+#include "ui/gfx/rect.h"
 
 BrowserWindowCocoa::BrowserWindowCocoa(Browser* browser,
                                        BrowserWindowController* controller,
@@ -78,6 +77,7 @@ void BrowserWindowCocoa::Show() {
 }
 
 void BrowserWindowCocoa::SetBounds(const gfx::Rect& bounds) {
+  SetFullscreen(false);
   NSRect cocoa_bounds = NSMakeRect(bounds.x(), 0, bounds.width(),
                                    bounds.height());
   // Flip coordinates based on the primary screen.
@@ -201,6 +201,10 @@ gfx::Rect BrowserWindowCocoa::GetRestoredBounds() const {
   return bounds;
 }
 
+gfx::Rect BrowserWindowCocoa::GetBounds() const {
+  return GetRestoredBounds();
+}
+
 bool BrowserWindowCocoa::IsMaximized() const {
   return [window() isZoomed];
 }
@@ -300,13 +304,13 @@ void BrowserWindowCocoa::AddFindBar(
   return [controller_ addFindBar:find_bar_cocoa_controller];
 }
 
-views::Window* BrowserWindowCocoa::ShowAboutChromeDialog() {
-  NOTIMPLEMENTED();
-  return NULL;
+void BrowserWindowCocoa::ShowAboutChromeDialog() {
+  // Go through AppController's implementation to bring up the branded panel.
+  [[NSApp delegate] orderFrontStandardAboutPanel:nil];
 }
 
 void BrowserWindowCocoa::ShowUpdateChromeDialog() {
-  restart_browser::RequestRestart(nil);
+  restart_browser::RequestRestart(window());
 }
 
 void BrowserWindowCocoa::ShowTaskManager() {
@@ -338,7 +342,7 @@ void BrowserWindowCocoa::ShowClearBrowsingDataDialog() {
 }
 
 void BrowserWindowCocoa::ShowImportDialog() {
-  [ImportSettingsDialogController
+  [ImportDialogController
           showImportSettingsDialogForProfile:browser_->profile()];
 }
 
@@ -432,7 +436,7 @@ bool BrowserWindowCocoa::PreHandleKeyboardEvent(
   if (id == -1)
     return false;
 
-  if (browser_->IsReservedCommand(id))
+  if (browser_->IsReservedCommandOrKey(id, event))
     return HandleKeyboardEventInternal(event.os_event);
 
   DCHECK(is_keyboard_shortcut != NULL);
@@ -491,7 +495,7 @@ int BrowserWindowCocoa::GetCommandId(const NativeWebKeyboardEvent& event) {
 
   // "Close window" doesn't use the |commandDispatch:| mechanism. Menu items
   // that do not correspond to IDC_ constants need no special treatment however,
-  // as they can't be blacklisted in |Browser::IsReservedCommand()| anyhow.
+  // as they can't be blacklisted in |Browser::IsReservedCommandOrKey()| anyhow.
   if (item && [item action] == @selector(performClose:))
     return IDC_CLOSE_WINDOW;
 
@@ -602,13 +606,6 @@ gfx::Rect BrowserWindowCocoa::GetInstantBounds() {
   gfx::Rect bounds(NSRectToCGRect(frame));
   bounds.set_y(NSHeight(monitorFrame) - bounds.y() - bounds.height());
   return bounds;
-}
-
-gfx::Rect BrowserWindowCocoa::GrabWindowSnapshot(std::vector<unsigned char>*
-                                                 png_representation) {
-  int width = 0, height = 0;
-  base::mac::GrabWindowSnapshot(window(), png_representation, &width, &height);
-  return gfx::Rect(width, height);
 }
 
 void BrowserWindowCocoa::Observe(NotificationType type,

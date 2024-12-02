@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,16 +9,17 @@
 #include <string>
 #include <vector>
 
-#include "chrome/browser/renderer_host/render_view_host_delegate.h"
 #include "chrome/browser/tab_contents/render_view_host_delegate_helper.h"
 #include "chrome/browser/ui/app_modal_dialogs/js_modal_dialog.h"
 #include "chrome/common/notification_registrar.h"
 #include "chrome/common/view_types.h"
 #include "chrome/common/window_container_type.h"
+#include "content/browser/renderer_host/render_view_host_delegate.h"
 #include "webkit/glue/window_open_disposition.h"
 
 class TabContents;
 struct WebPreferences;
+class DesktopNotificationHandler;
 
 namespace gfx {
 class Rect;
@@ -66,7 +67,7 @@ class BackgroundContents : public RenderViewHostDelegate,
   virtual void DidNavigate(RenderViewHost* render_view_host,
                            const ViewHostMsg_FrameNavigate_Params& params);
   virtual WebPreferences GetWebkitPrefs();
-  virtual void ProcessDOMUIMessage(const ViewHostMsg_DomMessage_Params& params);
+  virtual void ProcessWebUIMessage(const ViewHostMsg_DomMessage_Params& params);
   virtual void RunJavaScriptMessage(const std::wstring& message,
                                     const std::wstring& default_prompt,
                                     const GURL& frame_url,
@@ -78,15 +79,14 @@ class BackgroundContents : public RenderViewHostDelegate,
   virtual void RenderViewGone(RenderViewHost* rvh,
                               base::TerminationStatus status,
                               int error_code);
+  virtual bool OnMessageReceived(const IPC::Message& message);
 
   // RenderViewHostDelegate::View
   virtual void CreateNewWindow(
       int route_id,
-      WindowContainerType window_container_type,
-      const string16& frame_name);
+      const ViewHostMsg_CreateWindow_Params& params);
   virtual void CreateNewWidget(int route_id, WebKit::WebPopupType popup_type);
-  virtual void CreateNewFullscreenWidget(
-      int route_id, WebKit::WebPopupType popup_type);
+  virtual void CreateNewFullscreenWidget(int route_id);
   virtual void ShowCreatedWindow(int route_id,
                                  WindowOpenDisposition disposition,
                                  const gfx::Rect& initial_pos,
@@ -164,6 +164,9 @@ class BackgroundContents : public RenderViewHostDelegate,
   GURL url_;
 
   NotificationRegistrar registrar_;
+
+  // Handles desktop notification IPCs.
+  scoped_ptr<DesktopNotificationHandler> desktop_notification_handler_;
 
   DISALLOW_COPY_AND_ASSIGN(BackgroundContents);
 };

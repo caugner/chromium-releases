@@ -16,14 +16,14 @@ function finalTransactionAborted()
 function employeeNotFound()
 {
   debug('Employee not found.');
-  shouldBe("event.result", "undefined");
+  shouldBe("event.target.result", "undefined");
 }
 
 function newTransactionAborted()
 {
   debug('The transaction was aborted.');
 
-  var finalTransaction = db.transaction({objectStoreNames: [], mode: IDBTransaction.READ_ONLY});
+  var finalTransaction = db.transaction([], IDBTransaction.READ_ONLY);
   finalTransaction.oncomplete = finalTransactionCompleted;
   finalTransaction.onabort = finalTransactionAborted;
 
@@ -45,7 +45,7 @@ function employeeAdded()
 function onSetVersionComplete()
 {
   debug('Creating new transaction.');
-  var newTransaction = db.transaction({objectStoreNames: [], mode: IDBTransaction.READ_WRITE});
+  var newTransaction = db.transaction([], IDBTransaction.READ_WRITE);
   newTransaction.oncomplete = newTransactionCompleted;
   newTransaction.onabort = newTransactionAborted;
 
@@ -60,21 +60,21 @@ function onSetVersionComplete()
 function onSetVersion()
 {
   // We are now in a set version transaction.
-  var setVersionTransaction = event.result;
+  var setVersionTransaction = event.target.result;
   setVersionTransaction.oncomplete = onSetVersionComplete;
   setVersionTransaction.onerror = unexpectedErrorCallback;
 
   debug('Creating object store.');
   deleteAllObjectStores(db);
-  var objectStore = db.createObjectStore('employees', {keyPath: 'id'});
+  db.createObjectStore('employees', {keyPath: 'id'});
 }
 
 function setVersion()
 {
-  window.db = event.result;
-  var result = db.setVersion('1.0');
-  result.onsuccess = onSetVersion;
-  result.onerror = unexpectedErrorCallback;
+  window.db = event.target.result;
+  var request = db.setVersion('1.0');
+  request.onsuccess = onSetVersion;
+  request.onerror = unexpectedErrorCallback;
 }
 
 function test()
@@ -87,7 +87,7 @@ function test()
   }
 
   debug('Connecting to indexedDB.');
-  var result = indexedDB.open('name');
-  result.onsuccess = setVersion;
-  result.onerror = unexpectedErrorCallback;
+  var request = indexedDB.open('name');
+  request.onsuccess = setVersion;
+  request.onerror = unexpectedErrorCallback;
 }

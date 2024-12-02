@@ -489,7 +489,7 @@ STDAPI CustomRegistration(UINT reg_flags, BOOL reg, bool is_system) {
   UINT flags = reg_flags;
 
   if (reg && (flags & (ACTIVEDOC | ACTIVEX)))
-    flags |= (TYPELIB |GCF_PROTOCOL);
+    flags |= (TYPELIB | GCF_PROTOCOL);
 
   HRESULT hr = S_OK;
 
@@ -511,8 +511,14 @@ STDAPI CustomRegistration(UINT reg_flags, BOOL reg, bool is_system) {
     // _AtlModule.UpdateRegistryFromResourceS(IDR_CHROMEFRAME_ACTIVEX, reg)
     // because there is specific OLEMISC replacement.
     hr = ChromeFrameActivex::UpdateRegistry(reg);
-    // TODO(amit): Move elevation policy registration from ActiveX rgs
-    // into a separate rgs.
+  }
+
+  // Register the elevation policy.  We do this only for developer convenience
+  // as the installer is really responsible for doing this.
+  // Because of that, we do not unregister this policy and just leave that up
+  // to the installer.
+  if (hr == S_OK && (flags & (ACTIVEDOC | ACTIVEX)) && reg) {
+    _AtlModule.UpdateRegistryFromResourceS(IDR_CHROMEFRAME_ELEVATION, reg);
     RefreshElevationPolicy();
   }
 
@@ -542,6 +548,19 @@ STDAPI CustomRegistration(UINT reg_flags, BOOL reg, bool is_system) {
   }
 
   if ((hr == S_OK) && (flags & TYPELIB)) {
+    if (reg && !is_system) {
+      // Enables the RegisterTypeLib Function function to override default
+      // registry mappings under Windows Vista Service Pack 1 (SP1),
+      // Windows Server 2008, and later operating system versions
+      typedef void (WINAPI* OaEnablePerUserTypeLibReg)(void);
+      OaEnablePerUserTypeLibReg per_user_typelib_func =
+          reinterpret_cast<OaEnablePerUserTypeLibReg>(
+              GetProcAddress(GetModuleHandle(L"oleaut32.dll"),
+                             "OaEnablePerUserTLibRegistration"));
+      if (per_user_typelib_func) {
+        (*per_user_typelib_func)();
+      }
+    }
     hr = (reg)?
         UtilRegisterTypeLib(_AtlComModule.m_hInstTypeLib, NULL, !is_system) :
         UtilUnRegisterTypeLib(_AtlComModule.m_hInstTypeLib, NULL, !is_system);
@@ -618,7 +637,7 @@ STDAPI DllUnregisterUserServer() {
 STDAPI RegisterNPAPIPlugin() {
   HRESULT hr = _AtlModule.UpdateRegistryFromResourceS(IDR_CHROMEFRAME_NPAPI,
                                                       TRUE);
-  if (SUCCEEDED(hr)) {
+  if (SUCCEEDED(hr) && _AtlModule.do_system_registration_) {
     if (!UtilChangePersistentNPAPIMarker(true)) {
       hr = E_FAIL;
     }
@@ -631,12 +650,22 @@ STDAPI RegisterNPAPIPlugin() {
 STDAPI UnregisterNPAPIPlugin() {
   HRESULT hr = _AtlModule.UpdateRegistryFromResourceS(IDR_CHROMEFRAME_NPAPI,
                                                       FALSE);
-  if (SUCCEEDED(hr)) {
+  if (SUCCEEDED(hr) && _AtlModule.do_system_registration_) {
     if (!UtilChangePersistentNPAPIMarker(false)) {
       hr = E_FAIL;
     }
   }
   return hr;
+}
+
+STDAPI RegisterNPAPIUserPlugin() {
+  _AtlModule.do_system_registration_ = false;
+  return RegisterNPAPIPlugin();
+}
+
+STDAPI UnregisterNPAPIUserPlugin() {
+  _AtlModule.do_system_registration_ = false;
+  return UnregisterNPAPIPlugin();
 }
 
 class SecurityDescBackup {

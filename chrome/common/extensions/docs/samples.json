@@ -41,7 +41,7 @@
     "chrome.experimental.infobars.show": "experimental.infobars.html#method-show", 
     "chrome.experimental.processes.getProcessIdForTab": "experimental.processes.html#method-getProcessIdForTab", 
     "chrome.experimental.processes.onUpdated": "experimental.processes.html#event-onUpdated", 
-    "chrome.experimental.proxy.useCustomProxySettings": "experimental.proxy.html#method-useCustomProxySettings", 
+    "chrome.experimental.proxy.onProxyError": "experimental.proxy.html#event-onProxyError", 
     "chrome.experimental.sidebar.collapse": "experimental.sidebar.html#method-collapse", 
     "chrome.experimental.sidebar.expand": "experimental.sidebar.html#method-expand", 
     "chrome.experimental.sidebar.getState": "experimental.sidebar.html#method-getState", 
@@ -52,12 +52,19 @@
     "chrome.experimental.sidebar.setIcon": "experimental.sidebar.html#method-setIcon", 
     "chrome.experimental.sidebar.setTitle": "experimental.sidebar.html#method-setTitle", 
     "chrome.experimental.sidebar.show": "experimental.sidebar.html#method-show", 
+    "chrome.experimental.tts.isSpeaking": "experimental.tts.html#method-isSpeaking", 
+    "chrome.experimental.tts.onSpeak": "experimental.tts.html#event-onSpeak", 
+    "chrome.experimental.tts.onStop": "experimental.tts.html#event-onStop", 
+    "chrome.experimental.tts.speak": "experimental.tts.html#method-speak", 
+    "chrome.experimental.tts.speakCompleted": "experimental.tts.html#method-speakCompleted", 
+    "chrome.experimental.tts.stop": "experimental.tts.html#method-stop", 
     "chrome.experimental.webNavigation.onBeforeNavigate": "experimental.webNavigation.html#event-onBeforeNavigate", 
     "chrome.experimental.webNavigation.onBeforeRetarget": "experimental.webNavigation.html#event-onBeforeRetarget", 
     "chrome.experimental.webNavigation.onCommitted": "experimental.webNavigation.html#event-onCommitted", 
     "chrome.experimental.webNavigation.onCompleted": "experimental.webNavigation.html#event-onCompleted", 
     "chrome.experimental.webNavigation.onDOMContentLoaded": "experimental.webNavigation.html#event-onDOMContentLoaded", 
     "chrome.experimental.webNavigation.onErrorOccurred": "experimental.webNavigation.html#event-onErrorOccurred", 
+    "chrome.experimental.webRequest.addEventListener": "experimental.webRequest.html#method-addEventListener", 
     "chrome.experimental.webRequest.onBeforeRedirect": "experimental.webRequest.html#event-onBeforeRedirect", 
     "chrome.experimental.webRequest.onBeforeRequest": "experimental.webRequest.html#event-onBeforeRequest", 
     "chrome.experimental.webRequest.onCompleted": "experimental.webRequest.html#event-onCompleted", 
@@ -432,7 +439,7 @@
         "background.html", 
         "manifest.json"
       ], 
-      "source_hash": "37dd43080094bbe459b0429f1a2b995c33bab7c3", 
+      "source_hash": "8f9a8a4bf21102b26fa626626374cb200b2bcac0", 
       "zip_path": "examples/extensions/chrome_search.zip"
     }, 
     {
@@ -1065,7 +1072,7 @@
         "manifest.json", 
         "popup.html"
       ], 
-      "source_hash": "4f7509c56c2943cf8aedf1ee0b4b4a7d1e49f7d3", 
+      "source_hash": "5fd4c8e159a36d2462e9691db12d77a27684d6b7", 
       "zip_path": "examples/api/bookmarks/basic.zip"
     }, 
     {

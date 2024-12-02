@@ -8,8 +8,8 @@
 #include "base/logging.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/ui/gtk/menu_gtk.h"
-#include "gfx/gtk_util.h"
 #include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/gfx/gtk_util.h"
 
 StatusIconGtk::StatusIconGtk() {
   icon_ = gtk_status_icon_new();
@@ -41,6 +41,12 @@ void StatusIconGtk::SetPressedImage(const SkBitmap& image) {
 
 void StatusIconGtk::SetToolTip(const string16& tool_tip) {
   gtk_status_icon_set_tooltip(icon_, UTF16ToUTF8(tool_tip).c_str());
+}
+
+void StatusIconGtk::DisplayBalloon(const string16& title,
+                                   const string16& contents) {
+  // TODO(atwilson): Figure out the right thing to do here.
+  // http://crbug.com/74970
 }
 
 void StatusIconGtk::OnClick(GtkWidget* widget) {

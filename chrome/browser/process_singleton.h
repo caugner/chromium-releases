@@ -16,7 +16,7 @@
 #include "base/logging.h"
 #include "base/ref_counted.h"
 #include "base/threading/non_thread_safe.h"
-#include "gfx/native_widget_types.h"
+#include "ui/gfx/native_widget_types.h"
 
 #if defined(OS_POSIX)
 #include "base/file_path.h"
@@ -77,6 +77,16 @@ class ProcessSingleton : public base::NonThreadSafe {
       const CommandLine& command_line,
       int timeout_seconds);
 #endif  // defined(OS_LINUX)
+
+#if defined(OS_WIN)
+  // Used in specific cases to let us know that there is an existing instance
+  // of Chrome running with this profile. In general, you should not use this
+  // function. Instead consider using NotifyOtherProcessOrCreate().
+  // For non profile-specific method, use Upgrade::IsBrowserAlreadyRunning().
+  bool FoundOtherProcessWindow() const {
+      return (NULL != remote_window_);
+  }
+#endif  // defined(OS_WIN)
 
   // Sets ourself up as the singleton instance.  Returns true on success.  If
   // false is returned, we are not the singleton instance and the caller must

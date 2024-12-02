@@ -10,9 +10,9 @@
 
 // TODO(avi): remove when not needed
 #include "base/utf_string_conversions.h"
-#include "gfx/font.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkColor.h"
+#include "ui/gfx/font.h"
 #include "views/border.h"
 #include "views/controls/button/custom_button.h"
 
@@ -148,14 +148,19 @@ class TextButton : public CustomButton {
   void SetHighlightColor(SkColor color);
   void SetHoverColor(SkColor color);
   void SetTextHaloColor(SkColor color);
+  // The shadow color used is determined by whether the widget is active or
+  // inactive. Both possible colors are set in this method, and the
+  // appropriate one is chosen during Paint.
+  void SetTextShadowColors(SkColor active_color, SkColor inactive_color);
   void SetNormalHasBorder(bool normal_has_border);
   // Sets whether or not to show the hot and pushed states for the button icon
   // (if present) in addition to the normal state.  Defaults to true.
   void SetShowMultipleIconStates(bool show_multiple_icon_states);
 
-  // Paint the button into the specified canvas. If |for_drag| is true, the
+  // Paint the button into the specified canvas. If |mode| is |PB_FOR_DRAG|, the
   // function paints a drag image representation into the canvas.
-  virtual void Paint(gfx::Canvas* canvas, bool for_drag);
+  enum PaintButtonMode { PB_NORMAL, PB_FOR_DRAG };
+  virtual void PaintButton(gfx::Canvas* canvas, PaintButtonMode mode);
 
   // Overridden from View:
   virtual gfx::Size GetPreferredSize();
@@ -174,13 +179,12 @@ class TextButton : public CustomButton {
  protected:
   SkBitmap icon() const { return icon_; }
 
-  virtual void Paint(gfx::Canvas* canvas);
+  virtual void OnPaint(gfx::Canvas* canvas);
 
   // Called when enabled or disabled state changes, or the colors for those
   // states change.
   virtual void UpdateColor();
 
- private:
   // Updates text_size_ and max_text_size_ from the current text/font. This is
   // invoked when the font or text changes.
   void UpdateTextSize();
@@ -188,6 +192,7 @@ class TextButton : public CustomButton {
   // The text string that is displayed in the button.
   string16 text_;
 
+ private:
   // The size of the text string.
   gfx::Size text_size_;
 
@@ -216,6 +221,11 @@ class TextButton : public CustomButton {
   // An optional halo around text.
   SkColor text_halo_color_;
   bool has_text_halo_;
+
+  // Optional shadow text colors for active and inactive widget states.
+  SkColor active_text_shadow_color_;
+  SkColor inactive_text_shadow_color_;
+  bool has_shadow_;
 
   // An icon displayed with the text.
   SkBitmap icon_;

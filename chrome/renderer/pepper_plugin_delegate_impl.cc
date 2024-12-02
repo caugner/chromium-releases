@@ -14,10 +14,8 @@
 #include "base/string_split.h"
 #include "base/task.h"
 #include "base/time.h"
-#include "base/utf_string_conversions.h"
-#include "chrome/common/child_thread.h"
-#include "chrome/common/file_system/file_system_dispatcher.h"
 #include "chrome/common/pepper_file_messages.h"
+#include "chrome/common/pepper_messages.h"
 #include "chrome/common/pepper_plugin_registry.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/render_messages_params.h"
@@ -30,26 +28,33 @@
 #include "chrome/renderer/render_view.h"
 #include "chrome/renderer/webgraphicscontext3d_command_buffer_impl.h"
 #include "chrome/renderer/webplugin_delegate_proxy.h"
-#include "gfx/size.h"
+#include "content/common/child_thread.h"
+#include "content/common/file_system/file_system_dispatcher.h"
 #include "grit/locale_settings.h"
 #include "ipc/ipc_channel_handle.h"
 #include "ppapi/c/dev/pp_video_dev.h"
+#include "ppapi/c/pp_errors.h"
 #include "ppapi/c/private/ppb_flash.h"
+#include "ppapi/c/private/ppb_flash_net_connector.h"
 #include "ppapi/proxy/host_dispatcher.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFileChooserCompletion.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFileChooserParams.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPluginContainer.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebScreenInfo.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/gfx/size.h"
 #include "webkit/fileapi/file_system_callback_dispatcher.h"
+#include "webkit/glue/context_menu.h"
 #include "webkit/plugins/npapi/webplugin.h"
+#include "webkit/plugins/ppapi/file_path.h"
 #include "webkit/plugins/ppapi/ppb_file_io_impl.h"
 #include "webkit/plugins/ppapi/plugin_module.h"
 #include "webkit/plugins/ppapi/ppapi_plugin_instance.h"
 #include "webkit/plugins/ppapi/ppb_flash_impl.h"
+#include "webkit/plugins/ppapi/ppb_flash_net_connector_impl.h"
 
 #if defined(OS_MACOSX)
-#include "chrome/common/render_messages.h"
 #include "chrome/renderer/render_thread.h"
 #endif
 
@@ -363,12 +368,6 @@ bool DispatcherWrapper::Init(
     dispatcher_.reset();
     return false;
   }
-
-  if (!dispatcher_->InitializeModule()) {
-    // TODO(brettw) does the module get unloaded in this case?
-    dispatcher_.reset();
-    return false;
-  }
   return true;
 }
 
@@ -376,6 +375,8 @@ bool DispatcherWrapper::Init(
 
 PepperPluginDelegateImpl::PepperPluginDelegateImpl(RenderView* render_view)
     : render_view_(render_view),
+      has_saved_context_menu_action_(false),
+      saved_context_menu_action_(0),
       id_generator_(0) {
 }
 
@@ -386,13 +387,16 @@ scoped_refptr<webkit::ppapi::PluginModule>
 PepperPluginDelegateImpl::CreatePepperPlugin(const FilePath& path) {
   // See if a module has already been loaded for this plugin.
   scoped_refptr<webkit::ppapi::PluginModule> module =
-      PepperPluginRegistry::GetInstance()->GetModule(path);
+      PepperPluginRegistry::GetInstance()->GetLiveModule(path);
   if (module)
     return module;
 
   // In-process plugins will have always been created up-front to avoid the
-  // sandbox restrictions.
-  if (!PepperPluginRegistry::GetInstance()->RunOutOfProcessForPlugin(path))
+  // sandbox restrictions. So gettin here implies it doesn't exist or should
+  // be out of process.
+  const PepperPluginInfo* info =
+      PepperPluginRegistry::GetInstance()->GetInfoForPlugin(path);
+  if (!info || !info->is_out_of_process)
     return module;  // Return the NULL module.
 
   // Out of process: have the browser start the plugin process for us.
@@ -408,7 +412,8 @@ PepperPluginDelegateImpl::CreatePepperPlugin(const FilePath& path) {
   // Create a new HostDispatcher for the proxying, and hook it to a new
   // PluginModule. Note that AddLiveModule must be called before any early
   // returns since the module's destructor will remove itself.
-  module = new webkit::ppapi::PluginModule(PepperPluginRegistry::GetInstance());
+  module = new webkit::ppapi::PluginModule(info->name,
+                                           PepperPluginRegistry::GetInstance());
   PepperPluginRegistry::GetInstance()->AddLiveModule(path, module);
   scoped_ptr<DispatcherWrapper> dispatcher(new DispatcherWrapper);
   if (!dispatcher->Init(
@@ -686,31 +691,14 @@ bool PepperPluginDelegateImpl::ReadDirectory(
   return file_system_dispatcher->ReadDirectory(directory_path, dispatcher);
 }
 
-FilePath GetModuleLocalFilePath(const std::string& module_name,
-                                const FilePath& path) {
-#if defined(OS_WIN)
-  FilePath full_path(UTF8ToUTF16(module_name));
-#else
-  FilePath full_path(module_name);
-#endif
-  full_path = full_path.Append(path);
-  return full_path;
-}
-
-base::PlatformFileError PepperPluginDelegateImpl::OpenModuleLocalFile(
-    const std::string& module_name,
-    const FilePath& path,
+base::PlatformFileError PepperPluginDelegateImpl::OpenFile(
+    const webkit::ppapi::PepperFilePath& path,
     int flags,
     base::PlatformFile* file) {
-  FilePath full_path = GetModuleLocalFilePath(module_name, path);
-  if (full_path.empty()) {
-    *file = base::kInvalidPlatformFileValue;
-    return base::PLATFORM_FILE_ERROR_ACCESS_DENIED;
-  }
   IPC::PlatformFileForTransit transit_file;
   base::PlatformFileError error;
   IPC::Message* msg = new PepperFileMsg_OpenFile(
-      full_path, flags, &error, &transit_file);
+      path, flags, &error, &transit_file);
   if (!render_view_->Send(msg)) {
     *file = base::kInvalidPlatformFileValue;
     return base::PLATFORM_FILE_ERROR_FAILED;
@@ -719,86 +707,53 @@ base::PlatformFileError PepperPluginDelegateImpl::OpenModuleLocalFile(
   return error;
 }
 
-base::PlatformFileError PepperPluginDelegateImpl::RenameModuleLocalFile(
-    const std::string& module_name,
-    const FilePath& path_from,
-    const FilePath& path_to) {
-  FilePath full_path_from = GetModuleLocalFilePath(module_name, path_from);
-  FilePath full_path_to = GetModuleLocalFilePath(module_name, path_to);
-  if (full_path_from.empty() || full_path_to.empty()) {
-    return base::PLATFORM_FILE_ERROR_ACCESS_DENIED;
-  }
+base::PlatformFileError PepperPluginDelegateImpl::RenameFile(
+    const webkit::ppapi::PepperFilePath& from_path,
+    const webkit::ppapi::PepperFilePath& to_path) {
   base::PlatformFileError error;
-  IPC::Message* msg = new PepperFileMsg_RenameFile(
-      full_path_from, full_path_to, &error);
-  if (!render_view_->Send(msg)) {
+  IPC::Message* msg = new PepperFileMsg_RenameFile(from_path, to_path, &error);
+  if (!render_view_->Send(msg))
     return base::PLATFORM_FILE_ERROR_FAILED;
-  }
   return error;
 }
 
-base::PlatformFileError PepperPluginDelegateImpl::DeleteModuleLocalFileOrDir(
-    const std::string& module_name,
-    const FilePath& path,
+base::PlatformFileError PepperPluginDelegateImpl::DeleteFileOrDir(
+    const webkit::ppapi::PepperFilePath& path,
     bool recursive) {
-  FilePath full_path = GetModuleLocalFilePath(module_name, path);
-  if (full_path.empty()) {
-    return base::PLATFORM_FILE_ERROR_ACCESS_DENIED;
-  }
   base::PlatformFileError error;
   IPC::Message* msg = new PepperFileMsg_DeleteFileOrDir(
-      full_path, recursive, &error);
-  if (!render_view_->Send(msg)) {
+      path, recursive, &error);
+  if (!render_view_->Send(msg))
     return base::PLATFORM_FILE_ERROR_FAILED;
-  }
   return error;
 }
 
-base::PlatformFileError PepperPluginDelegateImpl::CreateModuleLocalDir(
-    const std::string& module_name,
-    const FilePath& path) {
-  FilePath full_path = GetModuleLocalFilePath(module_name, path);
-  if (full_path.empty()) {
-    return base::PLATFORM_FILE_ERROR_ACCESS_DENIED;
-  }
+base::PlatformFileError PepperPluginDelegateImpl::CreateDir(
+    const webkit::ppapi::PepperFilePath& path) {
   base::PlatformFileError error;
-  IPC::Message* msg = new PepperFileMsg_CreateDir(full_path, &error);
-  if (!render_view_->Send(msg)) {
+  IPC::Message* msg = new PepperFileMsg_CreateDir(path, &error);
+  if (!render_view_->Send(msg))
     return base::PLATFORM_FILE_ERROR_FAILED;
-  }
   return error;
 }
 
-base::PlatformFileError PepperPluginDelegateImpl::QueryModuleLocalFile(
-    const std::string& module_name,
-    const FilePath& path,
+base::PlatformFileError PepperPluginDelegateImpl::QueryFile(
+    const webkit::ppapi::PepperFilePath& path,
     base::PlatformFileInfo* info) {
-  FilePath full_path = GetModuleLocalFilePath(module_name, path);
-  if (full_path.empty()) {
-    return base::PLATFORM_FILE_ERROR_ACCESS_DENIED;
-  }
   base::PlatformFileError error;
-  IPC::Message* msg = new PepperFileMsg_QueryFile(full_path, info, &error);
-  if (!render_view_->Send(msg)) {
+  IPC::Message* msg = new PepperFileMsg_QueryFile(path, info, &error);
+  if (!render_view_->Send(msg))
     return base::PLATFORM_FILE_ERROR_FAILED;
-  }
   return error;
 }
 
-base::PlatformFileError PepperPluginDelegateImpl::GetModuleLocalDirContents(
-      const std::string& module_name,
-      const FilePath& path,
-      webkit::ppapi::DirContents* contents) {
-  FilePath full_path = GetModuleLocalFilePath(module_name, path);
-  if (full_path.empty()) {
-    return base::PLATFORM_FILE_ERROR_ACCESS_DENIED;
-  }
+base::PlatformFileError PepperPluginDelegateImpl::GetDirContents(
+    const webkit::ppapi::PepperFilePath& path,
+    webkit::ppapi::DirContents* contents) {
   base::PlatformFileError error;
-  IPC::Message* msg =
-      new PepperFileMsg_GetDirContents(full_path, contents, &error);
-  if (!render_view_->Send(msg)) {
+  IPC::Message* msg = new PepperFileMsg_GetDirContents(path, contents, &error);
+  if (!render_view_->Send(msg))
     return base::PLATFORM_FILE_ERROR_FAILED;
-  }
   return error;
 }
 
@@ -814,12 +769,14 @@ int32_t PepperPluginDelegateImpl::ConnectTcp(
   int request_id = pending_connect_tcps_.Add(
       new scoped_refptr<webkit::ppapi::PPB_Flash_NetConnector_Impl>(connector));
   IPC::Message* msg =
-      new ViewHostMsg_PepperConnectTcp(render_view_->routing_id(),
-                                       request_id,
-                                       std::string(host),
-                                       port);
-  if (!render_view_->Send(msg))
+      new PepperMsg_ConnectTcp(render_view_->routing_id(),
+                               request_id,
+                               std::string(host),
+                               port);
+  if (!render_view_->Send(msg)) {
+    pending_connect_tcps_.Remove(request_id);
     return PP_ERROR_FAILED;
+  }
 
   return PP_ERROR_WOULDBLOCK;
 }
@@ -830,11 +787,13 @@ int32_t PepperPluginDelegateImpl::ConnectTcpAddress(
   int request_id = pending_connect_tcps_.Add(
       new scoped_refptr<webkit::ppapi::PPB_Flash_NetConnector_Impl>(connector));
   IPC::Message* msg =
-      new ViewHostMsg_PepperConnectTcpAddress(render_view_->routing_id(),
-                                              request_id,
-                                              *addr);
-  if (!render_view_->Send(msg))
+      new PepperMsg_ConnectTcpAddress(render_view_->routing_id(),
+                                      request_id,
+                                      *addr);
+  if (!render_view_->Send(msg)) {
+    pending_connect_tcps_.Remove(request_id);
     return PP_ERROR_FAILED;
+  }
 
   return PP_ERROR_WOULDBLOCK;
 }
@@ -851,10 +810,67 @@ void PepperPluginDelegateImpl::OnConnectTcpACK(
   connector->CompleteConnectTcp(socket, local_addr, remote_addr);
 }
 
+int32_t PepperPluginDelegateImpl::ShowContextMenu(
+    webkit::ppapi::PPB_Flash_Menu_Impl* menu,
+    const gfx::Point& position) {
+  int request_id = pending_context_menus_.Add(
+      new scoped_refptr<webkit::ppapi::PPB_Flash_Menu_Impl>(menu));
+
+  ContextMenuParams params;
+  params.x = position.x();
+  params.y = position.y();
+  params.custom_context.is_pepper_menu = true;
+  params.custom_context.request_id = request_id;
+  params.custom_items = menu->menu_data();
+
+  IPC::Message* msg = new ViewHostMsg_ContextMenu(render_view_->routing_id(),
+                                                  params);
+  if (!render_view_->Send(msg)) {
+    pending_context_menus_.Remove(request_id);
+    return PP_ERROR_FAILED;
+  }
+
+  return PP_ERROR_WOULDBLOCK;
+}
+
+void PepperPluginDelegateImpl::OnContextMenuClosed(
+    const webkit_glue::CustomContextMenuContext& custom_context) {
+  int request_id = custom_context.request_id;
+  scoped_refptr<webkit::ppapi::PPB_Flash_Menu_Impl> menu =
+      *pending_context_menus_.Lookup(request_id);
+  if (!menu) {
+    NOTREACHED() << "CompleteShowContextMenu() called twice for the same menu.";
+    return;
+  }
+  pending_context_menus_.Remove(request_id);
+
+  if (has_saved_context_menu_action_) {
+    menu->CompleteShow(PP_OK, saved_context_menu_action_);
+    has_saved_context_menu_action_ = false;
+    saved_context_menu_action_ = 0;
+  } else {
+    menu->CompleteShow(PP_ERROR_USERCANCEL, 0);
+  }
+}
+
+void PepperPluginDelegateImpl::OnCustomContextMenuAction(
+    const webkit_glue::CustomContextMenuContext& custom_context,
+    unsigned action) {
+  // Just save the action.
+  DCHECK(!has_saved_context_menu_action_);
+  has_saved_context_menu_action_ = true;
+  saved_context_menu_action_ = action;
+}
+
 webkit::ppapi::FullscreenContainer*
 PepperPluginDelegateImpl::CreateFullscreenContainer(
     webkit::ppapi::PluginInstance* instance) {
   return render_view_->CreatePepperFullscreenContainer(instance);
+}
+
+gfx::Size PepperPluginDelegateImpl::GetScreenSize() {
+  WebKit::WebScreenInfo info = render_view_->screenInfo();
+  return gfx::Size(info.rect.width, info.rect.height);
 }
 
 std::string PepperPluginDelegateImpl::GetDefaultEncoding() {
@@ -895,4 +911,8 @@ void PepperPluginDelegateImpl::SetContentRestriction(int restrictions) {
 void PepperPluginDelegateImpl::HasUnsupportedFeature() {
   render_view_->Send(new ViewHostMsg_PDFHasUnsupportedFeature(
       render_view_->routing_id()));
+}
+
+P2PSocketDispatcher* PepperPluginDelegateImpl::GetP2PSocketDispatcher() {
+  return render_view_->p2p_socket_dispatcher();
 }

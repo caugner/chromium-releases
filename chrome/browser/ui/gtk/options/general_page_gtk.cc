@@ -10,6 +10,7 @@
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/custom_home_pages_table_model.h"
 #include "chrome/browser/instant/instant_confirm_dialog.h"
 #include "chrome/browser/instant/instant_controller.h"
@@ -19,7 +20,6 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_model.h"
-#include "chrome/browser/ui/gtk/accessible_widget_helper_gtk.h"
 #include "chrome/browser/ui/gtk/gtk_chrome_link_button.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/gtk/keyword_editor_view.h"
@@ -29,10 +29,10 @@
 #include "chrome/browser/ui/options/show_options_url.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "gfx/gtk_util.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/gfx/gtk_util.h"
 
 namespace {
 
@@ -81,7 +81,6 @@ GeneralPageGtk::GeneralPageGtk(Profile* profile)
   scoped_ptr<OptionsLayoutBuilderGtk>
     options_builder(OptionsLayoutBuilderGtk::CreateOptionallyCompactLayout());
   page_ = options_builder->get_page_widget();
-  accessible_widget_helper_.reset(new AccessibleWidgetHelper(page_, profile));
 
   options_builder->AddWidget(managed_prefs_banner_.banner_widget(), false);
   options_builder->AddOptionGroup(
@@ -107,6 +106,10 @@ GeneralPageGtk::GeneralPageGtk(Profile* profile)
       profile->GetPrefs(), this);
   homepage_.Init(prefs::kHomePage, profile->GetPrefs(), this);
   show_home_button_.Init(prefs::kShowHomeButton, profile->GetPrefs(), this);
+
+  default_browser_policy_.Init(prefs::kDefaultBrowserSettingEnabled,
+                               g_browser_process->local_state(),
+                               this);
 
   instant_.Init(prefs::kInstantEnabled, profile->GetPrefs(), this);
 
@@ -201,6 +204,15 @@ void GeneralPageGtk::NotifyPrefChanged(const std::string* pref_name) {
       instant_checkbox_) {
     gtk_toggle_button_set_active(
         GTK_TOGGLE_BUTTON(instant_checkbox_), instant_.GetValue());
+  }
+
+  if (!pref_name || *pref_name == prefs::kDefaultBrowserSettingEnabled) {
+    // If the option is managed the UI is uncondionally disabled otherwise we
+    // restart the standard button enabling logic.
+    if (default_browser_policy_.IsManaged())
+      gtk_widget_set_sensitive(default_browser_use_as_default_button_, false);
+    else
+      default_browser_worker_->StartCheckDefaultBrowser();
   }
 
   initializing_ = false;
@@ -367,8 +379,6 @@ GtkWidget* GeneralPageGtk::InitDefaultSearchGroup() {
                    G_CALLBACK(OnDefaultSearchEngineChangedThunk), this);
   gtk_container_add(GTK_CONTAINER(search_hbox),
                     default_search_engine_combobox_);
-  accessible_widget_helper_->SetWidgetName(
-      default_search_engine_combobox_, IDS_OPTIONS_DEFAULTSEARCH_GROUP_NAME);
 
   GtkCellRenderer* renderer = gtk_cell_renderer_text_new();
   gtk_cell_layout_pack_start(GTK_CELL_LAYOUT(default_search_engine_combobox_),
@@ -788,7 +798,8 @@ void GeneralPageGtk::SetDefaultBrowserUIState(
   }
 
   gtk_widget_set_sensitive(default_browser_use_as_default_button_,
-                           state == ShellIntegration::STATE_NOT_DEFAULT);
+                           state == ShellIntegration::STATE_NOT_DEFAULT &&
+                               !default_browser_policy_.IsManaged());
 }
 
 void GeneralPageGtk::OnInstantLabelSizeAllocate(GtkWidget* sender,

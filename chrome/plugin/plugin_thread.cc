@@ -19,7 +19,6 @@
 #include "base/lazy_instance.h"
 #include "base/process_util.h"
 #include "base/threading/thread_local.h"
-#include "chrome/common/child_process.h"
 #include "chrome/common/chrome_plugin_lib.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/plugin_messages.h"
@@ -27,6 +26,7 @@
 #include "chrome/plugin/chrome_plugin_host.h"
 #include "chrome/plugin/npobject_util.h"
 #include "chrome/renderer/render_thread.h"
+#include "content/common/child_process.h"
 #include "ipc/ipc_channel_handle.h"
 #include "net/base/net_errors.h"
 #include "webkit/glue/webkit_glue.h"
@@ -34,7 +34,7 @@
 #include "webkit/plugins/npapi/webplugin_delegate_impl.h"
 
 #if defined(TOOLKIT_USES_GTK)
-#include "gfx/gtk_util.h"
+#include "ui/gfx/gtk_util.h"
 #endif
 
 #if defined(USE_X11)
@@ -204,7 +204,8 @@ bool GetPluginFinderURL(std::string* plugin_finder_url) {
 
   plugin_thread->Send(
       new PluginProcessHostMsg_GetPluginFinderUrl(plugin_finder_url));
-  DCHECK(!plugin_finder_url->empty());
+  // If we get an empty string back this means the plugin finder has been
+  // disabled.
   return true;
 }
 

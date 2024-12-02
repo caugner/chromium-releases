@@ -8,10 +8,12 @@
 #include "base/task.h"
 #include "chrome/common/gpu_messages.h"
 #include "chrome/common/plugin_messages.h"
+#include "chrome/common/render_messages.h"
 #include "chrome/renderer/command_buffer_proxy.h"
 #include "chrome/renderer/plugin_channel_host.h"
-#include "gfx/size.h"
+#include "chrome/renderer/render_thread.h"
 #include "gpu/command_buffer/common/cmd_buffer_common.h"
+#include "ui/gfx/size.h"
 
 using gpu::Buffer;
 
@@ -54,30 +56,78 @@ void CommandBufferProxy::OnChannelError() {
   // When the client sees that the context is lost, they should delete this
   // CommandBufferProxy and create a new one.
   last_state_.error = gpu::error::kLostContext;
+
+  if (channel_error_callback_.get())
+    channel_error_callback_->Run();
+}
+
+void CommandBufferProxy::SetChannelErrorCallback(Callback0::Type* callback) {
+  channel_error_callback_.reset(callback);
 }
 
 bool CommandBufferProxy::Initialize(int32 size) {
   DCHECK(!ring_buffer_.get());
 
-  // Initialize the service. Assuming we are sandboxed, the GPU
-  // process is responsible for duplicating the handle. This might not be true
-  // for NaCl.
-  base::SharedMemoryHandle handle;
-  if (Send(new GpuCommandBufferMsg_Initialize(route_id_, size, &handle)) &&
-      base::SharedMemory::IsHandleValid(handle)) {
-    ring_buffer_.reset(new base::SharedMemory(handle, false));
-    if (ring_buffer_->Map(size)) {
-      num_entries_ = size / sizeof(gpu::CommandBufferEntry);
-      return true;
-    }
+  RenderThread* render_thread = RenderThread::current();
+  if (!render_thread)
+    return false;
 
-    ring_buffer_.reset();
+  base::SharedMemoryHandle handle;
+  if (!render_thread->Send(new ViewHostMsg_AllocateSharedMemoryBuffer(
+      size,
+      &handle))) {
+    return false;
   }
 
-  return false;
+  if (!base::SharedMemory::IsHandleValid(handle))
+    return false;
+
+#if defined(OS_POSIX)
+  handle.auto_close = false;
+#endif
+
+  // Take ownership of shared memory. This will close the handle if Send below
+  // fails. Otherwise, callee takes ownership before this variable
+  // goes out of scope.
+  base::SharedMemory shared_memory(handle, false);
+
+  return Initialize(&shared_memory, size);
+}
+
+bool CommandBufferProxy::Initialize(base::SharedMemory* buffer, int32 size) {
+  bool result;
+  if (!Send(new GpuCommandBufferMsg_Initialize(route_id_,
+                                               buffer->handle(),
+                                               size,
+                                               &result))) {
+    LOG(ERROR) << "Could not send GpuCommandBufferMsg_Initialize.";
+    return false;
+  }
+
+  if (!result) {
+    LOG(ERROR) << "Failed to initialize command buffer service.";
+    return false;
+  }
+
+  base::SharedMemoryHandle handle;
+  if (!buffer->GiveToProcess(base::GetCurrentProcessHandle(), &handle)) {
+    LOG(ERROR) << "Failed to duplicate command buffer handle.";
+    return false;
+  }
+
+  ring_buffer_.reset(new base::SharedMemory(handle, false));
+  if (!ring_buffer_->Map(size)) {
+    LOG(ERROR) << "Failed to map shared memory for command buffer.";
+    ring_buffer_.reset();
+    return false;
+  }
+
+  num_entries_ = size / sizeof(gpu::CommandBufferEntry);
+  return true;
 }
 
 Buffer CommandBufferProxy::GetRingBuffer() {
+  DCHECK(ring_buffer_.get());
   // Return locally cached ring buffer.
   Buffer buffer;
   buffer.ptr = ring_buffer_->memory();
@@ -115,30 +165,73 @@ void CommandBufferProxy::SetGetOffset(int32 get_offset) {
 }
 
 int32 CommandBufferProxy::CreateTransferBuffer(size_t size) {
-  if (last_state_.error == gpu::error::kNoError) {
-    int32 id;
-    if (Send(new GpuCommandBufferMsg_CreateTransferBuffer(route_id_,
-                                                          size,
-                                                          &id))) {
-      return id;
-    }
+  if (last_state_.error != gpu::error::kNoError)
+    return -1;
+
+  RenderThread* render_thread = RenderThread::current();
+  if (!render_thread)
+    return -1;
+
+  base::SharedMemoryHandle handle;
+  if (!render_thread->Send(new ViewHostMsg_AllocateSharedMemoryBuffer(
+      size,
+      &handle))) {
+    return -1;
   }
 
-  return -1;
+  if (!base::SharedMemory::IsHandleValid(handle))
+    return -1;
+
+  // Handle is closed by the SharedMemory object below. This stops
+  // base::FileDescriptor from closing it as well.
+#if defined(OS_POSIX)
+  handle.auto_close = false;
+#endif
+
+  // Take ownership of shared memory. This will close the handle if Send below
+  // fails. Otherwise, callee takes ownership before this variable
+  // goes out of scope by duping the handle.
+  base::SharedMemory shared_memory(handle, false);
+
+  int32 id;
+  if (!Send(new GpuCommandBufferMsg_RegisterTransferBuffer(route_id_,
+                                                           handle,
+                                                           size,
+                                                           &id))) {
+    return -1;
+  }
+
+  return id;
+}
+
+int32 CommandBufferProxy::RegisterTransferBuffer(
+    base::SharedMemory* shared_memory,
+    size_t size) {
+  if (last_state_.error != gpu::error::kNoError)
+    return -1;
+
+  int32 id;
+  if (!Send(new GpuCommandBufferMsg_RegisterTransferBuffer(
+      route_id_,
+      shared_memory->handle(),  // Returns FileDescriptor with auto_close off.
+      size,
+      &id))) {
+    return -1;
+  }
+
+  return id;
 }
 
 void CommandBufferProxy::DestroyTransferBuffer(int32 id) {
   if (last_state_.error != gpu::error::kNoError)
     return;
 
-  // Remove the transfer buffer from the client side4 cache.
+  // Remove the transfer buffer from the client side cache.
   TransferBufferMap::iterator it = transfer_buffers_.find(id);
-  DCHECK(it != transfer_buffers_.end());
-
-  // Delete the shared memory object, closing the handle in this process.
-  delete it->second.shared_memory;
-
-  transfer_buffers_.erase(it);
+  if (it != transfer_buffers_.end()) {
+    delete it->second.shared_memory;
+    transfer_buffers_.erase(it);
+  }
 
   Send(new GpuCommandBufferMsg_DestroyTransferBuffer(route_id_, id));
 }

@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,18 +14,15 @@
 #include "views/controls/table/table_view.h"
 #include "views/controls/table/table_view_observer.h"
 #include "views/examples/example_base.h"
-#include "views/fill_layout.h"
-
-using ui::TableModel;
-using ui::TableModelObserver; // TODO(beng): remove these
+#include "views/layout/fill_layout.h"
+#include "views/layout/grid_layout.h"
 
 namespace examples {
 
-class TableExample
-    : public ExampleBase,
-      public TableModel,
-      public views::ButtonListener,
-      public views::TableViewObserver {
+class TableExample : public ExampleBase,
+                     public ui::TableModel,
+                     public views::ButtonListener,
+                     public views::TableViewObserver {
  public:
   explicit TableExample(ExamplesMain* main) : ExampleBase(main) {
   }
@@ -95,7 +92,7 @@ class TableExample
     layout->AddView(column4_visible_checkbox_);
   }
 
-  // TableModel implementation:
+  // Overridden from ui::TableModel:
   virtual int RowCount() {
     return 10;
   }
@@ -115,10 +112,10 @@ class TableExample
     return row % 2 ? icon1 : icon2;
   }
 
-  virtual void SetObserver(TableModelObserver* observer) {
+  virtual void SetObserver(ui::TableModelObserver* observer) {
   }
 
-  // TableViewObserver implementation:
+  // Overridden from views::TableViewObserver:
   virtual void OnSelectionChanged() {
     PrintStatus(L"Selection changed");
   }

@@ -23,11 +23,11 @@
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/tab_contents/page_navigator.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
+#include "content/browser/tab_contents/page_navigator.h"
+#include "content/browser/tab_contents/tab_contents.h"
 #include "grit/app_strings.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -35,12 +35,12 @@
 #include "ui/base/dragdrop/drag_drop_types.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/tree_node_iterator.h"
-#include "views/event.h"
 
 #if defined(TOOLKIT_VIEWS)
 #include "ui/base/dragdrop/os_exchange_data.h"
 #include "views/drag_utils.h"
-#include "views/widget/root_view.h"
+#include "views/events/event.h"
+#include "views/widget/native_widget.h"
 #include "views/widget/widget.h"
 #elif defined(TOOLKIT_GTK)
 #include "chrome/browser/ui/gtk/custom_drag.h"
@@ -227,6 +227,7 @@ int BookmarkDragOperation(const BookmarkNode* node) {
   return ui::DragDropTypes::DRAG_COPY | ui::DragDropTypes::DRAG_MOVE;
 }
 
+#if defined(TOOLKIT_VIEWS)
 int BookmarkDropOperation(Profile* profile,
                           const views::DropTargetEvent& event,
                           const BookmarkNodeData& data,
@@ -244,9 +245,10 @@ int BookmarkDropOperation(Profile* profile,
     return ui::DragDropTypes::DRAG_MOVE;
   }
   // User is dragging from another app, copy.
-  return PreferredDropOperation(event.GetSourceOperations(),
+  return PreferredDropOperation(event.source_operations(),
       ui::DragDropTypes::DRAG_COPY | ui::DragDropTypes::DRAG_LINK);
 }
+#endif  // defined(TOOLKIT_VIEWS)
 
 int PerformBookmarkDrop(Profile* profile,
                         const BookmarkNodeData& data,
@@ -329,16 +331,17 @@ void DragBookmarks(Profile* profile,
   BookmarkNodeData drag_data(nodes);
   drag_data.Write(profile, &data);
 
-  views::RootView* root_view =
-      views::Widget::GetWidgetFromNativeView(view)->GetRootView();
-
   // Allow nested message loop so we get DnD events as we drag this around.
   bool was_nested = MessageLoop::current()->IsNested();
   MessageLoop::current()->SetNestableTasksAllowed(true);
 
-  root_view->StartDragForViewFromMouseEvent(NULL, data,
-      ui::DragDropTypes::DRAG_COPY | ui::DragDropTypes::DRAG_MOVE |
-      ui::DragDropTypes::DRAG_LINK);
+  views::NativeWidget* native_widget =
+      views::NativeWidget::GetNativeWidgetForNativeView(view);
+  if (native_widget) {
+    native_widget->GetWidget()->RunShellDrag(NULL, data,
+        ui::DragDropTypes::DRAG_COPY | ui::DragDropTypes::DRAG_MOVE |
+        ui::DragDropTypes::DRAG_LINK);
+  }
 
   MessageLoop::current()->SetNestableTasksAllowed(was_nested);
 #elif defined(OS_MACOSX)
@@ -430,8 +433,7 @@ bool CanPasteFromClipboard(const BookmarkNode* node) {
 
 string16 GetNameForURL(const GURL& url) {
   if (url.is_valid()) {
-    return WideToUTF16(net::GetSuggestedFilename(
-        url, std::string(), std::string(), FilePath()).ToWStringHack());
+    return net::GetSuggestedFilename(url, "", "", string16());
   } else {
     return l10n_util::GetStringUTF16(IDS_APP_UNTITLED_SHORTCUT_FILE_NAME);
   }
@@ -494,6 +496,12 @@ void GetMostRecentlyAddedEntries(BookmarkModel* model,
     }
   }
 }
+
+TitleMatch::TitleMatch()
+    : node(NULL) {
+}
+
+TitleMatch::~TitleMatch() {}
 
 bool MoreRecentlyAdded(const BookmarkNode* n1, const BookmarkNode* n2) {
   return n1->date_added() > n2->date_added();

@@ -4,6 +4,11 @@
 
 #include "base/message_loop.h"
 
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
+#include <gdk/gdk.h>
+#include <gdk/gdkx.h>
+#endif
+
 #include <algorithm>
 
 #include "base/compiler_specific.h"
@@ -284,6 +289,12 @@ void MessageLoop::AddTaskObserver(TaskObserver* task_observer) {
 void MessageLoop::RemoveTaskObserver(TaskObserver* task_observer) {
   DCHECK_EQ(this, current());
   task_observers_.RemoveObserver(task_observer);
+}
+
+void MessageLoop::AssertIdle() const {
+  // We only check |incoming_queue_|, since we don't want to lock |work_queue_|.
+  base::AutoLock lock(incoming_queue_lock_);
+  DCHECK(incoming_queue_.empty());
 }
 
 //------------------------------------------------------------------------------
@@ -657,6 +668,12 @@ void MessageLoopForUI::DidProcessMessage(const MSG& message) {
   pump_win()->DidProcessMessage(message);
 }
 #endif  // defined(OS_WIN)
+
+#if defined(USE_X11)
+Display* MessageLoopForUI::GetDisplay() {
+  return gdk_x11_get_default_xdisplay();
+}
+#endif  // defined(USE_X11)
 
 #if !defined(OS_MACOSX) && !defined(OS_NACL)
 void MessageLoopForUI::AddObserver(Observer* observer) {

@@ -8,14 +8,12 @@
 
 #include "base/command_line.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/tabs/tab_controller.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_switches.h"
-#include "gfx/canvas_skia.h"
-#include "gfx/favicon_size.h"
-#include "gfx/font.h"
+#include "content/browser/tab_contents/tab_contents.h"
 #include "grit/app_resources.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -24,6 +22,9 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/theme_provider.h"
+#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/favicon_size.h"
+#include "ui/gfx/font.h"
 #include "views/controls/button/image_button.h"
 
 // How long the pulse throb takes.
@@ -58,17 +59,38 @@ class TabCloseButton : public views::ImageButton {
   // fire before Enter events, so this works.
   virtual void OnMouseEntered(const views::MouseEvent& event) {
     CustomButton::OnMouseEntered(event);
-    GetParent()->OnMouseEntered(event);
+    parent()->OnMouseEntered(event);
   }
 
   virtual void OnMouseExited(const views::MouseEvent& event) {
     CustomButton::OnMouseExited(event);
-    GetParent()->OnMouseExited(event);
+    parent()->OnMouseExited(event);
   }
 
  private:
   DISALLOW_COPY_AND_ASSIGN(TabCloseButton);
 };
+
+// Draws the icon image at the center of |bounds|.
+void DrawIconCenter(gfx::Canvas* canvas,
+                    const SkBitmap& image,
+                    int image_offset,
+                    int icon_width,
+                    int icon_height,
+                    const gfx::Rect& bounds,
+                    bool filter) {
+  // Center the image within bounds.
+  int dst_x = bounds.x() - (icon_width - bounds.width()) / 2;
+  int dst_y = bounds.y() - (icon_height - bounds.height()) / 2;
+  // NOTE: the clipping is a work around for 69528, it shouldn't be necessary.
+  canvas->Save();
+  canvas->ClipRectInt(dst_x, dst_y, icon_width, icon_height);
+  canvas->DrawBitmapInt(image,
+                        image_offset, 0, icon_width, icon_height,
+                        dst_x, dst_y, icon_width, icon_height,
+                        filter);
+  canvas->Restore();
+}
 
 }  // namespace
 
@@ -120,11 +142,11 @@ BaseTab::BaseTab(TabController* controller)
     : controller_(controller),
       closing_(false),
       dragging_(false),
-      loading_animation_frame_(0),
-      throbber_disabled_(false),
-      theme_provider_(NULL),
       fav_icon_hiding_offset_(0),
-      should_display_crashed_favicon_(false) {
+      loading_animation_frame_(0),
+      should_display_crashed_favicon_(false),
+      throbber_disabled_(false),
+      theme_provider_(NULL) {
   BaseTab::InitResources();
 
   SetID(VIEW_ID_TAB);
@@ -154,12 +176,36 @@ BaseTab::~BaseTab() {
 }
 
 void BaseTab::SetData(const TabRendererData& data) {
+  if (data_.Equals(data))
+    return;
+
   TabRendererData old(data_);
   data_ = data;
 
-  if (data_.crashed) {
-    if (!should_display_crashed_favicon_ && !IsPerformingCrashAnimation())
-      StartCrashAnimation();
+  if (data_.IsCrashed()) {
+    if (!should_display_crashed_favicon_ && !IsPerformingCrashAnimation()) {
+      // When --reload-killed-tabs is specified, then the idea is that
+      // when tab is killed, the tab has no visual indication that it
+      // died and should reload when the tab is next focused without
+      // the user seeing the killed tab page.
+      //
+      // The only exception to this is when the tab is in the
+      // foreground (i.e. when it's the selected tab), because we
+      // don't want to go into an infinite loop reloading a page that
+      // will constantly get killed, or if it's the only tab.  So this
+      // code makes it so that the favicon will only be shown for
+      // killed tabs when the tab is currently selected.
+      if (CommandLine::ForCurrentProcess()->
+          HasSwitch(switches::kReloadKilledTabs) && !IsSelected()) {
+        // If we're reloading killed tabs, we don't want to display
+        // the crashed animation at all if the process was killed and
+        // the tab wasn't the current tab.
+        if (data_.crashed_status != base::TERMINATION_STATUS_PROCESS_WAS_KILLED)
+          StartCrashAnimation();
+      } else {
+        StartCrashAnimation();
+      }
+    }
   } else {
     if (IsPerformingCrashAnimation())
       StopCrashAnimation();
@@ -172,6 +218,7 @@ void BaseTab::SetData(const TabRendererData& data) {
   DataChanged(old);
 
   Layout();
+  SchedulePaint();
 }
 
 void BaseTab::UpdateLoadingAnimation(TabRendererData::NetworkState state) {
@@ -294,7 +341,7 @@ bool BaseTab::GetTooltipText(const gfx::Point& p, std::wstring* tooltip) {
     return false;
 
   // Only show the tooltip if the title is truncated.
-  if (font_->GetStringWidth(data_.title) > title_bounds().width()) {
+  if (font_->GetStringWidth(data_.title) > GetTitleBounds().width()) {
     *tooltip = UTF16ToWide(data_.title);
     return true;
   }
@@ -345,50 +392,48 @@ void BaseTab::AdvanceLoadingAnimation(TabRendererData::NetworkState old_state,
   } else {
     loading_animation_frame_ = 0;
   }
-  SchedulePaint();
+  ScheduleIconPaint();
 }
 
-void BaseTab::PaintIcon(gfx::Canvas* canvas, int x, int y) {
-  if (base::i18n::IsRTL()) {
-    x = width() - x -
-        (data().favicon.isNull() ? kFavIconSize : data().favicon.width());
-  }
+void BaseTab::PaintIcon(gfx::Canvas* canvas) {
+  gfx::Rect bounds = GetIconBounds();
+  if (bounds.IsEmpty())
+    return;
 
-  int favicon_x = x;
-  if (!data().favicon.isNull() && data().favicon.width() != kFavIconSize)
-    favicon_x += (data().favicon.width() - kFavIconSize) / 2;
+  // The size of bounds has to be kFavIconSize x kFavIconSize.
+  DCHECK_EQ(kFavIconSize, bounds.width());
+  DCHECK_EQ(kFavIconSize, bounds.height());
+
+  bounds.set_x(GetMirroredXForRect(bounds));
 
   if (data().network_state != TabRendererData::NETWORK_STATE_NONE) {
     ui::ThemeProvider* tp = GetThemeProvider();
     SkBitmap frames(*tp->GetBitmapNamed(
         (data().network_state == TabRendererData::NETWORK_STATE_WAITING) ?
         IDR_THROBBER_WAITING : IDR_THROBBER));
-    int image_size = frames.height();
-    int image_offset = loading_animation_frame_ * image_size;
-    int dst_y = (height() - image_size) / 2;
-    canvas->DrawBitmapInt(frames, image_offset, 0, image_size,
-                          image_size, favicon_x, dst_y, image_size, image_size,
-                          false);
+
+    int icon_size = frames.height();
+    int image_offset = loading_animation_frame_ * icon_size;
+    DrawIconCenter(canvas, frames, image_offset,
+                   icon_size, icon_size, bounds, false);
   } else {
     canvas->Save();
     canvas->ClipRectInt(0, 0, width(), height());
     if (should_display_crashed_favicon_) {
       ResourceBundle& rb = ResourceBundle::GetSharedInstance();
       SkBitmap crashed_fav_icon(*rb.GetBitmapNamed(IDR_SAD_FAVICON));
-      canvas->DrawBitmapInt(crashed_fav_icon, 0, 0, crashed_fav_icon.width(),
-          crashed_fav_icon.height(), favicon_x,
-          (height() - crashed_fav_icon.height()) / 2 + fav_icon_hiding_offset_,
-          kFavIconSize, kFavIconSize, true);
+      bounds.set_y(bounds.y() + fav_icon_hiding_offset_);
+      DrawIconCenter(canvas, crashed_fav_icon, 0,
+                     crashed_fav_icon.width(),
+                     crashed_fav_icon.height(), bounds, true);
     } else {
       if (!data().favicon.isNull()) {
         // TODO(pkasting): Use code in tab_icon_view.cc:PaintIcon() (or switch
         // to using that class to render the favicon).
-        int size = data().favicon.width();
-        canvas->DrawBitmapInt(data().favicon, 0, 0,
-                              data().favicon.width(),
-                              data().favicon.height(),
-                              x, y + fav_icon_hiding_offset_, size, size,
-                              true);
+        DrawIconCenter(canvas, data().favicon, 0,
+                       data().favicon.width(),
+                       data().favicon.height(),
+                       bounds, true);
       }
     }
     canvas->Restore();
@@ -401,14 +446,14 @@ void BaseTab::PaintTitle(gfx::Canvas* canvas, SkColor title_color) {
   if (title.empty()) {
     title = data().loading ?
         l10n_util::GetStringUTF16(IDS_TAB_LOADING_TITLE) :
-        TabContents::GetDefaultTitle();
+        TabContentsWrapper::GetDefaultTitle();
   } else {
     Browser::FormatTitleForDisplay(&title);
   }
-
+  const gfx::Rect& title_bounds = GetTitleBounds();
   canvas->DrawStringInt(title, *font_, title_color,
-                        title_bounds().x(), title_bounds().y(),
-                        title_bounds().width(), title_bounds().height());
+                        title_bounds.x(), title_bounds.y(),
+                        title_bounds.width(), title_bounds.height());
 }
 
 void BaseTab::AnimationProgressed(const ui::Animation* animation) {
@@ -428,16 +473,28 @@ void BaseTab::ButtonPressed(views::Button* sender, const views::Event& event) {
   controller()->CloseTab(this);
 }
 
-void BaseTab::ShowContextMenu(views::View* source,
-                              const gfx::Point& p,
-                              bool is_mouse_gesture) {
+void BaseTab::ShowContextMenuForView(views::View* source,
+                                     const gfx::Point& p,
+                                     bool is_mouse_gesture) {
   if (controller())
-    controller()->ShowContextMenu(this, p);
+    controller()->ShowContextMenuForTab(this, p);
+}
+
+int BaseTab::loading_animation_frame() const {
+  return loading_animation_frame_;
+}
+
+bool BaseTab::should_display_crashed_favicon() const {
+  return should_display_crashed_favicon_;
+}
+
+int BaseTab::fav_icon_hiding_offset() const {
+  return fav_icon_hiding_offset_;
 }
 
 void BaseTab::SetFavIconHidingOffset(int offset) {
   fav_icon_hiding_offset_ = offset;
-  SchedulePaint();
+  ScheduleIconPaint();
 }
 
 void BaseTab::DisplayCrashedFavIcon() {
@@ -463,6 +520,19 @@ void BaseTab::StopCrashAnimation() {
 
 bool BaseTab::IsPerformingCrashAnimation() const {
   return crash_animation_.get() && crash_animation_->is_animating();
+}
+
+void BaseTab::ScheduleIconPaint() {
+  gfx::Rect bounds = GetIconBounds();
+  if (bounds.IsEmpty())
+    return;
+
+  // Extends the area to the bottom when sad_favicon is
+  // animating.
+  if (IsPerformingCrashAnimation())
+    bounds.set_height(height() - bounds.y());
+  bounds.set_x(GetMirroredXForRect(bounds));
+  SchedulePaintInRect(bounds);
 }
 
 // static

@@ -8,7 +8,7 @@
 #include "ui/base/resource/resource_bundle.h"
 
 #if defined(OS_LINUX)
-#include "gfx/gtk_util.h"
+#include "ui/gfx/gtk_util.h"
 #endif
 
 namespace views {
@@ -34,7 +34,7 @@ std::string ResizeArea::GetClassName() const {
   return kViewClassName;
 }
 
-gfx::NativeCursor ResizeArea::GetCursorForPoint(Event::EventType event_type,
+gfx::NativeCursor ResizeArea::GetCursorForPoint(ui::EventType event_type,
                                                 const gfx::Point& p) {
   if (!enabled_)
     return NULL;

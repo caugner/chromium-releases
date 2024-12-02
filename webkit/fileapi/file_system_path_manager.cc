@@ -4,12 +4,12 @@
 
 #include "webkit/fileapi/file_system_path_manager.h"
 
-#include "base/file_util.h"
 #include "base/rand_util.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/message_loop_proxy.h"
 #include "base/scoped_callback_factory.h"
+#include "base/scoped_ptr.h"
 #include "base/stringprintf.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
@@ -19,7 +19,7 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityOrigin.h"
 #include "webkit/glue/webkit_glue.h"
 
-// We use some of WebKit types for conversions between storage identifiers
+// We use some of WebKit types for conversions between origin identifiers
 // and origin URLs.
 using WebKit::WebFileSystem;
 using WebKit::WebSecurityOrigin;
@@ -198,29 +198,21 @@ void FileSystemPathManager::GetFileSystemRootPath(
     return;
   }
 
-  if (type != fileapi::kFileSystemTypeTemporary &&
-      type != fileapi::kFileSystemTypePersistent) {
-    LOG(WARNING) << "Unknown filesystem type is requested:" << type;
+  std::string origin_identifier = GetOriginIdentifierFromURL(origin_url);
+  FilePath origin_base_path = GetFileSystemBaseDirectoryForOriginAndType(
+      base_path(), origin_identifier, type);
+  if (origin_base_path.empty()) {
     callback->Run(false, FilePath(), std::string());
     return;
   }
 
-  std::string storage_identifier = GetStorageIdentifierFromURL(origin_url);
-
-  std::string type_string;
-  if (type == fileapi::kFileSystemTypeTemporary)
-    type_string = kTemporaryName;
-  else if (type == fileapi::kFileSystemTypePersistent)
-    type_string = kPersistentName;
+  std::string type_string = GetFileSystemTypeString(type);
   DCHECK(!type_string.empty());
-
-  FilePath origin_base_path = base_path_.AppendASCII(storage_identifier)
-                                        .AppendASCII(type_string);
-  std::string name = storage_identifier + ":" + type_string;
 
   scoped_refptr<GetFileSystemRootPathTask> task(
       new GetFileSystemRootPathTask(file_message_loop_,
-                                    name, callback.release()));
+                                    origin_identifier + ":" + type_string,
+                                    callback.release()));
   task->Start(origin_url, origin_base_path, create);
 }
 
@@ -288,9 +280,17 @@ bool FileSystemPathManager::CrackFileSystemPath(
   return true;
 }
 
-bool FileSystemPathManager::IsRestrictedFileName(
-    const FilePath& filename) const {
-  if (filename.value().size() == 0)
+bool FileSystemPathManager::IsAllowedScheme(const GURL& url) const {
+  // Basically we only accept http or https. We allow file:// URLs
+  // only if --allow-file-access-from-files flag is given.
+  return url.SchemeIs("http") || url.SchemeIs("https") ||
+         url.SchemeIs(kExtensionScheme) ||
+         (url.SchemeIsFile() && allow_file_access_from_files_);
+}
+
+// static
+bool FileSystemPathManager::IsRestrictedFileName(const FilePath& filename) {
+  if (filename.value().empty())
     return false;
 
   if (IsWhitespace(filename.value()[filename.value().size() - 1]) ||
@@ -318,19 +318,58 @@ bool FileSystemPathManager::IsRestrictedFileName(
   return false;
 }
 
-bool FileSystemPathManager::IsAllowedScheme(const GURL& url) const {
-  // Basically we only accept http or https. We allow file:// URLs
-  // only if --allow-file-access-from-files flag is given.
-  return url.SchemeIs("http") || url.SchemeIs("https") ||
-         url.SchemeIs(kExtensionScheme) ||
-         (url.SchemeIsFile() && allow_file_access_from_files_);
+// static
+std::string FileSystemPathManager::GetFileSystemTypeString(
+    fileapi::FileSystemType type) {
+  if (type == fileapi::kFileSystemTypeTemporary)
+    return fileapi::FileSystemPathManager::kTemporaryName;
+  else if (type == fileapi::kFileSystemTypePersistent)
+    return fileapi::FileSystemPathManager::kPersistentName;
+  return std::string();
 }
 
-std::string FileSystemPathManager::GetStorageIdentifierFromURL(
+// static
+std::string FileSystemPathManager::GetOriginIdentifierFromURL(
     const GURL& url) {
   WebKit::WebSecurityOrigin web_security_origin =
       WebKit::WebSecurityOrigin::createFromString(UTF8ToUTF16(url.spec()));
   return web_security_origin.databaseIdentifier().utf8();
+}
+
+// static
+FilePath FileSystemPathManager::GetFileSystemBaseDirectoryForOriginAndType(
+    const FilePath& base_path, const std::string& origin_identifier,
+    fileapi::FileSystemType type) {
+  if (origin_identifier.empty())
+    return FilePath();
+  std::string type_string = GetFileSystemTypeString(type);
+  if (type_string.empty()) {
+    LOG(WARNING) << "Unknown filesystem type is requested:" << type;
+    return FilePath();
+  }
+  return base_path.AppendASCII(origin_identifier)
+                  .AppendASCII(type_string);
+}
+
+FileSystemPathManager::OriginEnumerator::OriginEnumerator(
+    const FilePath& base_path)
+    : enumerator_(base_path, false /* recursive */,
+                  file_util::FileEnumerator::DIRECTORIES) {
+}
+
+std::string FileSystemPathManager::OriginEnumerator::Next() {
+  current_ = enumerator_.Next();
+  return FilePathStringToASCII(current_.BaseName().value());
+}
+
+bool FileSystemPathManager::OriginEnumerator::HasTemporary() {
+  return !current_.empty() && file_util::DirectoryExists(current_.AppendASCII(
+      FileSystemPathManager::kTemporaryName));
+}
+
+bool FileSystemPathManager::OriginEnumerator::HasPersistent() {
+  return !current_.empty() && file_util::DirectoryExists(current_.AppendASCII(
+      FileSystemPathManager::kPersistentName));
 }
 
 }  // namespace fileapi

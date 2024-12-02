@@ -24,7 +24,6 @@
 #include "base/win/scoped_comptr.h"
 #include "base/win/scoped_variant.h"
 #include "grit/chrome_frame_resources.h"
-#include "ceee/ie/common/ceee_util.h"
 #include "chrome/common/url_constants.h"
 #include "chrome_frame/chrome_frame_plugin.h"
 #include "chrome_frame/com_message_event.h"
@@ -148,6 +147,18 @@ class ATL_NO_VTABLE ProxyDIChromeFrameEvents
 };
 
 extern bool g_first_launch_by_process_;
+
+namespace chrome_frame {
+// Implemented outside this file so that the header doesn't include
+// automation_messages.h.
+std::string ActiveXCreateUrl(const GURL& parsed_url,
+                             const AttachExternalTabParams& params);
+int GetDisposition(const AttachExternalTabParams& params);
+void GetMiniContextMenuData(UINT cmd,
+                            const MiniContextMenuParams& params,
+                            GURL* referrer,
+                            GURL* url);
+}  // namespace chrome_frame
 
 // Common implementation for ActiveX and Active Document
 template <class T, const CLSID& class_id>
@@ -358,10 +369,8 @@ END_MSG_MAP()
         case IDS_CONTENT_CONTEXT_SAVEVIDEOAS:
         case IDS_CONTENT_CONTEXT_SAVEIMAGEAS:
         case IDS_CONTENT_CONTEXT_SAVELINKAS: {
-          const GURL& referrer = params.frame_url.is_empty() ?
-              params.page_url : params.frame_url;
-          const GURL& url = (cmd == IDS_CONTENT_CONTEXT_SAVELINKAS ?
-              params.link_url : params.src_url);
+          GURL referrer, url;
+          chrome_frame::GetMiniContextMenuData(cmd, params, &referrer, &url);
           DoFileDownloadInIE(UTF8ToWide(url.spec()).c_str());
           return true;
         }
@@ -398,12 +407,7 @@ END_MSG_MAP()
                  (lstrcmpi(profile_name.c_str(), kRundllProfileName) == 0);
     // Browsers without IDeleteBrowsingHistory in non-priv mode
     // have their profiles moved into "Temporary Internet Files".
-    //
-    // If CEEE is registered, we must have a persistent profile. We
-    // considered checking if e.g. ceee_ie.dll is loaded in the process
-    // but this gets into edge cases when the user enables the CEEE add-on
-    // after CF is first loaded.
-    if (is_IE && GetIEVersion() < IE_8 && !ceee_util::IsIeCeeeRegistered()) {
+    if (is_IE && GetIEVersion() < IE_8) {
       *profile_path = GetIETemporaryFilesFolder();
       *profile_path = profile_path->Append(L"Google Chrome Frame");
     } else {
@@ -460,20 +464,20 @@ END_MSG_MAP()
   // There's room for improvement here and also see todo below.
   LPARAM OnDownloadRequestInHost(UINT message, WPARAM wparam, LPARAM lparam,
                                  BOOL& handled) {
-    base::win::ScopedComPtr<IMoniker> moniker(
-        reinterpret_cast<IMoniker*>(lparam));
-    DCHECK(moniker);
-    base::win::ScopedComPtr<IBindCtx> bind_context(
-        reinterpret_cast<IBindCtx*>(wparam));
-
+    DownloadInHostParams* download_params =
+        reinterpret_cast<DownloadInHostParams*>(wparam);
+    DCHECK(download_params);
     // TODO(tommi): It looks like we might have to switch the request object
     // into a pass-through request object and serve up any thus far received
     // content and headers to IE in order to prevent what can currently happen
     // which is reissuing requests and turning POST into GET.
-    if (moniker) {
-      NavigateBrowserToMoniker(doc_site_, moniker, NULL, bind_context, NULL);
+    if (download_params->moniker) {
+      NavigateBrowserToMoniker(
+          doc_site_, download_params->moniker,
+          UTF8ToWide(download_params->request_headers).c_str(),
+          download_params->bind_ctx, NULL, download_params->post_data);
     }
-
+    delete download_params;
     return TRUE;
   }
 
@@ -498,17 +502,8 @@ END_MSG_MAP()
       parsed_url = parsed_url.ReplaceComponents(r);
     }
 
-    std::string url = base::StringPrintf(
-        "%hs?attach_external_tab&%I64u&%d&%d&%d&%d&%d&%hs",
-        parsed_url.GetOrigin().spec().c_str(),
-        params.cookie,
-        params.disposition,
-        params.dimensions.x(),
-        params.dimensions.y(),
-        params.dimensions.width(),
-        params.dimensions.height(),
-        params.profile_name.c_str());
-    HostNavigate(GURL(url), GURL(), params.disposition);
+    std::string url = chrome_frame::ActiveXCreateUrl(parsed_url, params);
+    HostNavigate(GURL(url), GURL(), chrome_frame::GetDisposition(params));
   }
 
   virtual void OnHandleContextMenu(HANDLE menu_handle,
@@ -786,7 +781,7 @@ END_MSG_MAP()
       return hr;
 
     DCHECK(handlers != NULL);
-    std::remove(handlers->begin(), handlers->end(), listener);
+    handlers->erase(base::win::ScopedComPtr<IDispatch>(listener));
 
     return hr;
   }
@@ -1035,7 +1030,8 @@ END_MSG_MAP()
       RECT dummy_pos_rect = {0};
       RECT dummy_clip_rect = {0};
       OLEINPLACEFRAMEINFO dummy_frame_info = {0};
-      if (FAILED(m_spInPlaceSite->GetWindowContext(in_place_frame_.Receive(),
+      if (!m_spInPlaceSite ||
+          FAILED(m_spInPlaceSite->GetWindowContext(in_place_frame_.Receive(),
                                                    dummy_ui_window.Receive(),
                                                    &dummy_pos_rect,
                                                    &dummy_clip_rect,

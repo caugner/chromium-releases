@@ -9,12 +9,12 @@
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_model.h"
-#include "gfx/canvas.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/canvas.h"
 #include "views/controls/label.h"
 
 // Amount of space to offset the tab image from the top of the view by.
@@ -48,7 +48,7 @@ void KeywordHintView::SetColor(const SkColor& color) {
   trailing_label_->SetColor(color);
 }
 
-void KeywordHintView::SetKeyword(const std::wstring& keyword) {
+void KeywordHintView::SetKeyword(const string16& keyword) {
   keyword_ = keyword;
   if (keyword_.empty())
     return;
@@ -59,7 +59,7 @@ void KeywordHintView::SetKeyword(const std::wstring& keyword) {
   std::vector<size_t> content_param_offsets;
   bool is_extension_keyword;
   string16 short_name = profile_->GetTemplateURLModel()->
-      GetKeywordShortName(WideToUTF16Hack(keyword), &is_extension_keyword);
+      GetKeywordShortName(keyword, &is_extension_keyword);
   int message_id = is_extension_keyword ?
       IDS_OMNIBOX_EXTENSION_KEYWORD_HINT : IDS_OMNIBOX_KEYWORD_HINT;
   const std::wstring keyword_hint =
@@ -79,7 +79,7 @@ void KeywordHintView::SetKeyword(const std::wstring& keyword) {
   }
 }
 
-void KeywordHintView::Paint(gfx::Canvas* canvas) {
+void KeywordHintView::OnPaint(gfx::Canvas* canvas) {
   int image_x = leading_label_->IsVisible() ? leading_label_->width() : 0;
 
   // Since we paint the button image directly on the canvas (instead of using a
@@ -89,7 +89,7 @@ void KeywordHintView::Paint(gfx::Canvas* canvas) {
                               kTabImageYOffset,
                               kTabButtonBitmap->width(),
                               kTabButtonBitmap->height());
-  tab_button_bounds.set_x(MirroredLeftPointForRect(tab_button_bounds));
+  tab_button_bounds.set_x(GetMirroredXForRect(tab_button_bounds));
   canvas->DrawBitmapInt(*kTabButtonBitmap,
                         tab_button_bounds.x(),
                         tab_button_bounds.y());

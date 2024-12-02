@@ -35,7 +35,8 @@ void SetTouchDeviceList(std::vector<unsigned int>& devices);
 // for the window that is receiving these messages for accelerator processing.
 class AcceleratorHandler : public MessageLoopForUI::Dispatcher {
  public:
-   AcceleratorHandler();
+  AcceleratorHandler();
+
   // Dispatcher method. This returns true if an accelerator was processed by the
   // focus manager
 #if defined(OS_WIN)
@@ -43,7 +44,7 @@ class AcceleratorHandler : public MessageLoopForUI::Dispatcher {
 #else
   virtual bool Dispatch(GdkEvent* event);
 #if defined(TOUCH_UI)
-  virtual MessagePumpGlibXDispatcher::DispatchStatus Dispatch(XEvent* xev);
+  virtual MessagePumpGlibXDispatcher::DispatchStatus DispatchX(XEvent* xev);
 #endif
 #endif
 

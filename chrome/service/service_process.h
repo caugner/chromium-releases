@@ -18,6 +18,8 @@
 
 class ServiceProcessPrefs;
 class ServiceIPCServer;
+class CommandLine;
+class ServiceURLRequestContextGetter;
 
 namespace net {
 class NetworkChangeNotifier;
@@ -34,7 +36,8 @@ class ServiceProcess : public CloudPrintProxy::Client,
   ~ServiceProcess();
 
   // Initialize the ServiceProcess with the message loop that it should run on.
-  bool Initialize(MessageLoop* message_loop, const CommandLine& command_line);
+  bool Initialize(MessageLoopForUI* message_loop,
+                  const CommandLine& command_line);
   bool Teardown();
   // TODO(sanjeevr): Change various parts of the code such as
   // net::ProxyService::CreateSystemProxyConfigService to take in
@@ -86,8 +89,8 @@ class ServiceProcess : public CloudPrintProxy::Client,
   virtual void OnCloudPrintProxyDisabled(bool persist_state);
 
   // ChromotingHostManager::Observer interface.
-  virtual void OnRemotingHostEnabled();
-  virtual void OnRemotingHostDisabled();
+  virtual void OnChromotingHostEnabled();
+  virtual void OnChromotingHostDisabled();
 
 #if defined(ENABLE_REMOTING)
   // Return the reference to the chromoting host only if it has started.
@@ -95,6 +98,8 @@ class ServiceProcess : public CloudPrintProxy::Client,
     return remoting_host_manager_;
   }
 #endif
+
+  ServiceURLRequestContextGetter* GetServiceURLRequestContextGetter();
 
  private:
   // Schedule a call to ShutdownIfNeeded.
@@ -127,6 +132,8 @@ class ServiceProcess : public CloudPrintProxy::Client,
 
   // Speficies whether a product update is available.
   bool update_available_;
+
+  scoped_refptr<ServiceURLRequestContextGetter> request_context_getter_;
 
 #if defined(ENABLE_REMOTING)
   scoped_refptr<remoting::ChromotingHostManager> remoting_host_manager_;

@@ -7,9 +7,9 @@
 #include <uxtheme.h>
 #include <Vssym32.h>
 
-#include "gfx/canvas_skia.h"
-#include "gfx/native_theme_win.h"
 #include "grit/app_strings.h"
+#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/native_theme_win.h"
 #include "views/controls/menu/menu_config.h"
 #include "views/controls/menu/submenu_view.h"
 
@@ -17,7 +17,7 @@ using gfx::NativeTheme;
 
 namespace views {
 
-gfx::Size MenuItemView::GetPreferredSize() {
+gfx::Size MenuItemView::CalculatePreferredSize() {
   const gfx::Font& font = MenuConfig::instance().font;
   return gfx::Size(
       font.GetStringWidth(title_) + label_start_ + item_right_margin_ +
@@ -25,12 +25,12 @@ gfx::Size MenuItemView::GetPreferredSize() {
       font.GetHeight() + GetBottomMargin() + GetTopMargin());
 }
 
-void MenuItemView::Paint(gfx::Canvas* canvas, bool for_drag) {
+void MenuItemView::PaintButton(gfx::Canvas* canvas, PaintButtonMode mode) {
   const MenuConfig& config = MenuConfig::instance();
   bool render_selection =
-      (!for_drag && IsSelected() &&
+      (mode == PB_NORMAL && IsSelected() &&
        parent_menu_item_->GetSubmenu()->GetShowSelection(this) &&
-       GetChildViewCount() == 0);
+       !has_children());
   int state = render_selection ? MPI_HOT :
                                  (IsEnabled() ? MPI_NORMAL : MPI_DISABLED);
   HDC dc = canvas->BeginPlatformPaint();
@@ -44,7 +44,7 @@ void MenuItemView::Paint(gfx::Canvas* canvas, bool for_drag) {
   }
 
   // The gutter is rendered before the background.
-  if (config.render_gutter && !for_drag) {
+  if (config.render_gutter && mode == PB_NORMAL) {
     gfx::Rect gutter_bounds(label_start_ - config.gutter_to_label -
                             config.gutter_width, 0, config.gutter_width,
                             height());
@@ -55,7 +55,7 @@ void MenuItemView::Paint(gfx::Canvas* canvas, bool for_drag) {
   }
 
   // Render the background.
-  if (!for_drag) {
+  if (mode == PB_NORMAL) {
     gfx::Rect item_bounds(0, 0, width(), height());
     AdjustBoundsForRTLUI(&item_bounds);
     RECT item_rect = item_bounds.ToRECT();
@@ -88,8 +88,8 @@ void MenuItemView::Paint(gfx::Canvas* canvas, bool for_drag) {
   int accel_width = parent_menu_item_->GetSubmenu()->max_accelerator_width();
   int width = this->width() - item_right_margin_ - label_start_ - accel_width;
   gfx::Rect text_bounds(label_start_, top_margin, width, font.GetHeight());
-  text_bounds.set_x(MirroredLeftPointForRect(text_bounds));
-  if (for_drag) {
+  text_bounds.set_x(GetMirroredXForRect(text_bounds));
+  if (mode == PB_FOR_DRAG) {
     // With different themes, it's difficult to tell what the correct
     // foreground and background colors are for the text to draw the correct
     // halo. Instead, just draw black on white, which will look good in most
@@ -113,7 +113,7 @@ void MenuItemView::Paint(gfx::Canvas* canvas, bool for_drag) {
                           bottom_margin - icon_.height()) / 2,
                           icon_.width(),
                           icon_.height());
-    icon_bounds.set_x(MirroredLeftPointForRect(icon_bounds));
+    icon_bounds.set_x(GetMirroredXForRect(icon_bounds));
     canvas->DrawBitmapInt(icon_, icon_bounds.x(), icon_bounds.y());
   }
 

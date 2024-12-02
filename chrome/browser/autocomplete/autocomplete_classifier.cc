@@ -9,14 +9,14 @@
 #include "googleurl/src/gurl.h"
 
 AutocompleteClassifier::AutocompleteClassifier(Profile* profile)
-    : controller_(new AutocompleteController(profile)) {
+    : controller_(new AutocompleteController(profile, NULL)) {
 }
 
 AutocompleteClassifier::~AutocompleteClassifier() {
 }
 
-void AutocompleteClassifier::Classify(const std::wstring& text,
-                                      const std::wstring& desired_tld,
+void AutocompleteClassifier::Classify(const string16& text,
+                                      const string16& desired_tld,
                                       bool allow_exact_keyword_match,
                                       AutocompleteMatch* match,
                                       GURL* alternate_nav_url) {

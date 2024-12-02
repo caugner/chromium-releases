@@ -14,11 +14,11 @@
 #include "base/string_util.h"
 #include "base/sys_string_conversions.h"
 #include "base/utf_string_conversions.h"
-#include "gfx/font.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/escape.h"
 #include "net/base/net_util.h"
 #include "net/base/registry_controlled_domain.h"
+#include "ui/gfx/font.h"
 
 namespace ui {
 
@@ -62,11 +62,11 @@ string16 CutString(const string16& text,
 string16 ElideUrl(const GURL& url,
                   const gfx::Font& font,
                   int available_pixel_width,
-                  const std::wstring& languages) {
+                  const std::string& languages) {
   // Get a formatted string and corresponding parsing of the url.
   url_parse::Parsed parsed;
-  string16 url_string = net::FormatUrl(url, WideToUTF8(languages),
-      net::kFormatUrlOmitAll, UnescapeRule::SPACES, &parsed, NULL, NULL);
+  string16 url_string = net::FormatUrl(url, languages, net::kFormatUrlOmitAll,
+      UnescapeRule::SPACES, &parsed, NULL, NULL);
   if (available_pixel_width <= 0)
     return url_string;
 
@@ -388,15 +388,14 @@ string16 ElideText(const string16& text,
   return CutString(text, lo, elide_in_middle, true);
 }
 
-// TODO(viettrungluu): convert |languages| to an |std::string|.
 SortedDisplayURL::SortedDisplayURL(const GURL& url,
-                                   const std::wstring& languages) {
+                                   const std::string& languages) {
   std::wstring host;
-  net::AppendFormattedHost(url, languages, &host, NULL, NULL);
+  net::AppendFormattedHost(url, UTF8ToWide(languages), &host, NULL, NULL);
   sort_host_ = WideToUTF16Hack(host);
   string16 host_minus_www = net::StripWWW(WideToUTF16Hack(host));
   url_parse::Parsed parsed;
-  display_url_ = net::FormatUrl(url, WideToUTF8(languages),
+  display_url_ = net::FormatUrl(url, languages,
       net::kFormatUrlOmitAll, UnescapeRule::SPACES, &parsed, &prefix_end_,
       NULL);
   if (sort_host_.length() > host_minus_www.length()) {
@@ -461,7 +460,7 @@ string16 SortedDisplayURL::AfterHost() const {
   return display_url_.substr(slash_index + sort_host_.length());
 }
 
-bool ElideString(const std::wstring& input, int max_len, std::wstring* output) {
+bool ElideString(const string16& input, int max_len, string16* output) {
   DCHECK_GE(max_len, 0);
   if (static_cast<int>(input.length()) <= max_len) {
     output->assign(input);
@@ -479,17 +478,17 @@ bool ElideString(const std::wstring& input, int max_len, std::wstring* output) {
       output->assign(input.substr(0, 2));
       break;
     case 3:
-      output->assign(input.substr(0, 1) + L"." +
+      output->assign(input.substr(0, 1) + ASCIIToUTF16(".") +
                      input.substr(input.length() - 1));
       break;
     case 4:
-      output->assign(input.substr(0, 1) + L".." +
+      output->assign(input.substr(0, 1) + ASCIIToUTF16("..") +
                      input.substr(input.length() - 1));
       break;
     default: {
       int rstr_len = (max_len - 3) / 2;
       int lstr_len = rstr_len + ((max_len - 3) % 2);
-      output->assign(input.substr(0, lstr_len) + L"..." +
+      output->assign(input.substr(0, lstr_len) + ASCIIToUTF16("...") +
                      input.substr(input.length() - rstr_len));
       break;
     }

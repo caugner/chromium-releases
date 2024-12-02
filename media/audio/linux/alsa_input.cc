@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,22 +7,17 @@
 #include "base/basictypes.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
-#include "base/scoped_ptr.h"
 #include "base/time.h"
 #include "media/audio/linux/alsa_util.h"
 #include "media/audio/linux/alsa_wrapper.h"
 
-namespace {
-
-const int kNumPacketsInRingBuffer = 3;
+static const int kNumPacketsInRingBuffer = 3;
 
 // If a read failed with no audio data, try again after this duration.
-const int kNoAudioReadAgainTimeoutMs = 20;
+static const int kNoAudioReadAgainTimeoutMs = 20;
 
-const char kDefaultDevice1[] = "default";
-const char kDefaultDevice2[] = "plug:default";
-
-}  // namespace
+static const char kDefaultDevice1[] = "default";
+static const char kDefaultDevice2[] = "plug:default";
 
 const char* AlsaPcmInputStream::kAutoSelectDevice = "";
 
@@ -193,6 +188,8 @@ void AlsaPcmInputStream::Stop() {
 }
 
 void AlsaPcmInputStream::Close() {
+  scoped_ptr<AlsaPcmInputStream> self_deleter(this);
+
   // Check in case we were already closed or not initialized yet.
   if (!device_handle_ || !callback_)
     return;

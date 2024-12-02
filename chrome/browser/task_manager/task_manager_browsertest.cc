@@ -16,8 +16,7 @@
 #include "chrome/browser/notifications/notification_test_util.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/tab_contents/infobar_delegate.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/tab_contents/confirm_infobar_delegate.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_navigator.h"
@@ -26,6 +25,7 @@
 #include "chrome/common/page_transition_types.h"
 #include "chrome/test/in_process_browser_test.h"
 #include "chrome/test/ui_test_utils.h"
+#include "content/browser/tab_contents/tab_contents.h"
 #include "grit/generated_resources.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -385,7 +385,7 @@ IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest,
   // manager is still visible. Make sure we don't crash and the extension
   // gets reloaded and noticed in the task manager.
   TabContents* current_tab = browser()->GetSelectedTabContents();
-  ASSERT_EQ(1, current_tab->infobar_delegate_count());
+  ASSERT_EQ(1U, current_tab->infobar_count());
   ConfirmInfoBarDelegate* delegate =
       current_tab->GetInfoBarDelegateAt(0)->AsConfirmInfoBarDelegate();
   ASSERT_TRUE(delegate);

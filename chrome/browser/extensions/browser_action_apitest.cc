@@ -15,13 +15,13 @@
 #include "chrome/browser/extensions/extension_tabs_module.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/extensions/extension_action.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/ui_test_utils.h"
-#include "gfx/rect.h"
-#include "gfx/size.h"
+#include "content/browser/tab_contents/tab_contents.h"
+#include "ui/gfx/rect.h"
+#include "ui/gfx/size.h"
 
 class BrowserActionApiTest : public ExtensionApiTest {
  public:
@@ -114,7 +114,9 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, DynamicBrowserAction) {
   // TODO(aa): Would be nice here to actually compare that the pixels change.
 }
 
-IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, TabSpecificBrowserActionState) {
+// This test is flaky as per http://crbug.com/74557.
+IN_PROC_BROWSER_TEST_F(BrowserActionApiTest,
+                       FLAKY_TabSpecificBrowserActionState) {
   ASSERT_TRUE(RunExtensionTest("browser_action/tab_specific_state")) <<
       message_;
   const Extension* extension = GetSingleLoadedExtension();
@@ -143,7 +145,14 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, TabSpecificBrowserActionState) {
   EXPECT_EQ("hi!", GetBrowserActionsBar().GetTooltip(0));
 }
 
-IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, BrowserActionPopup) {
+// http://code.google.com/p/chromium/issues/detail?id=70829
+// Only mac is okay.
+#if !defined(OS_MACOSX)
+#define MAYBE_BrowserActionPopup DISABLED_BrowserActionPopup
+#else
+#define MAYBE_BrowserActionPopup BrowserActionPopup
+#endif
+IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, MAYBE_BrowserActionPopup) {
   ASSERT_TRUE(LoadExtension(test_data_dir_.AppendASCII(
       "browser_action/popup")));
   BrowserActionTestUtil actions_bar = GetBrowserActionsBar();

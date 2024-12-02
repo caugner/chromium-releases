@@ -8,14 +8,14 @@
 #include "base/shared_memory.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/common/autofill_messages.h"
 #include "chrome/common/content_settings.h"
 #include "chrome/common/native_web_keyboard_event.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/render_messages_params.h"
-#include "chrome/renderer/autofill_helper.h"
+#include "chrome/renderer/autofill/autofill_agent.h"
 #include "chrome/renderer/print_web_view_helper.h"
 #include "chrome/test/render_view_test.h"
-#include "gfx/codec/jpeg_codec.h"
 #include "net/base/net_errors.h"
 #include "printing/image.h"
 #include "printing/native_metafile.h"
@@ -26,6 +26,7 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebURLError.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "ui/base/keycodes/keyboard_codes.h"
+#include "ui/gfx/codec/jpeg_codec.h"
 #include "webkit/glue/form_data.h"
 #include "webkit/glue/form_field.h"
 #include "webkit/glue/web_io_operators.h"
@@ -39,16 +40,8 @@ using WebKit::WebURLError;
 using webkit_glue::FormData;
 using webkit_glue::FormField;
 
-namespace {
-
-// TODO(isherman): Pull this as a named constant from WebKit
-const int kDefaultMaxLength = 0x80000;
-
-}  // namespace
-
-// TODO(jknotten). Fix http://code.google.com/p/chromium/issues/detail?id=70408
 // Test that we get form state change notifications when input fields change.
-TEST_F(RenderViewTest, DISABLED_OnNavStateChanged) {
+TEST_F(RenderViewTest, OnNavStateChanged) {
   // Don't want any delay for form state sync changes. This will still post a
   // message so updates will get coalesced, but as soon as we spin the message
   // loop, it will generate an update.
@@ -401,7 +394,7 @@ TEST_F(RenderViewTest, OnSetTextDirection) {
 TEST_F(RenderViewTest, OnPrintPages) {
   // Lets simulate a print pages with Hello world.
   LoadHTML("<body><p>Hello World!</p></body>");
-  view_->OnPrintPages();
+  view_->print_helper_->OnPrintPages();
 
   VerifyPageCount(1);
   VerifyPagesPrinted();
@@ -443,7 +436,7 @@ TEST_F(RenderViewTest, PrintWithIframe) {
             view_->webview()->mainFrame());
 
   // Initiate printing.
-  view_->OnPrintPages();
+  view_->print_helper_->OnPrintPages();
 
   // Verify output through MockPrinter.
   const MockPrinter* printer(render_thread_.printer());
@@ -514,7 +507,7 @@ TEST_F(RenderViewTest, MAYBE_PrintLayoutTest) {
   for (size_t i = 0; i < arraysize(kTestPages); ++i) {
     // Load an HTML page and print it.
     LoadHTML(kTestPages[i].page);
-    view_->OnPrintPages();
+    view_->print_helper_->OnPrintPages();
 
     // MockRenderThread::Send() just calls MockRenderThread::OnMsgReceived().
     // So, all IPC messages sent in the above RenderView::OnPrintPages() call
@@ -1023,15 +1016,20 @@ TEST_F(RenderViewTest, SendForms) {
            "  <input type=\"text\" id=\"firstname\"/>"
            "  <input type=\"text\" id=\"middlename\" autoComplete=\"off\"/>"
            "  <input type=\"hidden\" id=\"lastname\"/>"
+           "  <select id=\"state\"/>"
+           "    <option>?</option>"
+           "    <option>California</option>"
+           "    <option>Texas</option>"
+           "  </select>"
            "</form>");
 
   // Verify that "FormsSeen" sends the expected number of fields.
   ProcessPendingMessages();
   const IPC::Message* message = render_thread_.sink().GetFirstMessageMatching(
-      ViewHostMsg_FormsSeen::ID);
+      AutoFillHostMsg_FormsSeen::ID);
   ASSERT_NE(static_cast<IPC::Message*>(NULL), message);
-  ViewHostMsg_FormsSeen::Param params;
-  ViewHostMsg_FormsSeen::Read(message, &params);
+  AutoFillHostMsg_FormsSeen::Param params;
+  AutoFillHostMsg_FormsSeen::Read(message, &params);
   const std::vector<FormData>& forms = params.a;
   ASSERT_EQ(1UL, forms.size());
   ASSERT_EQ(3UL, forms[0].fields.size());
@@ -1040,20 +1038,20 @@ TEST_F(RenderViewTest, SendForms) {
                 ASCIIToUTF16("firstname"),
                 string16(),
                 ASCIIToUTF16("text"),
-                kDefaultMaxLength,
+                WebInputElement::defaultMaxLength(),
                 false))) << forms[0].fields[0];
   EXPECT_TRUE(forms[0].fields[1].StrictlyEqualsHack(
       FormField(string16(),
                 ASCIIToUTF16("middlename"),
                 string16(),
                 ASCIIToUTF16("text"),
-                kDefaultMaxLength,
+                WebInputElement::defaultMaxLength(),
                 false))) << forms[0].fields[1];
   EXPECT_TRUE(forms[0].fields[2].StrictlyEqualsHack(
       FormField(string16(),
-                ASCIIToUTF16("lastname"),
-                string16(),
-                ASCIIToUTF16("hidden"),
+                ASCIIToUTF16("state"),
+                ASCIIToUTF16("?"),
+                ASCIIToUTF16("select-one"),
                 0,
                 false))) << forms[0].fields[2];
 
@@ -1066,8 +1064,8 @@ TEST_F(RenderViewTest, SendForms) {
 
   // Accept suggestion that contains a label.  Labeled items indicate AutoFill
   // as opposed to Autocomplete.  We're testing this distinction below with
-  // the |ViewHostMsg_FillAutoFillFormData::ID| message.
-  autofill_helper_->didAcceptAutoFillSuggestion(
+  // the |AutoFillHostMsg_FillAutoFillFormData::ID| message.
+  autofill_agent_->didAcceptAutoFillSuggestion(
       firstname,
       WebKit::WebString::fromUTF8("Johnny"),
       WebKit::WebString::fromUTF8("Home"),
@@ -1076,10 +1074,10 @@ TEST_F(RenderViewTest, SendForms) {
 
   ProcessPendingMessages();
   const IPC::Message* message2 = render_thread_.sink().GetUniqueMessageMatching(
-      ViewHostMsg_FillAutoFillFormData::ID);
+      AutoFillHostMsg_FillAutoFillFormData::ID);
   ASSERT_NE(static_cast<IPC::Message*>(NULL), message2);
-  ViewHostMsg_FillAutoFillFormData::Param params2;
-  ViewHostMsg_FillAutoFillFormData::Read(message2, &params2);
+  AutoFillHostMsg_FillAutoFillFormData::Param params2;
+  AutoFillHostMsg_FillAutoFillFormData::Read(message2, &params2);
   const FormData& form2 = params2.b;
   ASSERT_EQ(3UL, form2.fields.size());
   EXPECT_TRUE(form2.fields[0].StrictlyEqualsHack(
@@ -1087,20 +1085,20 @@ TEST_F(RenderViewTest, SendForms) {
                 ASCIIToUTF16("firstname"),
                 string16(),
                 ASCIIToUTF16("text"),
-                kDefaultMaxLength,
+                WebInputElement::defaultMaxLength(),
                 false))) << form2.fields[0];
   EXPECT_TRUE(form2.fields[1].StrictlyEqualsHack(
       FormField(string16(),
                 ASCIIToUTF16("middlename"),
                 string16(),
                 ASCIIToUTF16("text"),
-                kDefaultMaxLength,
+                WebInputElement::defaultMaxLength(),
                 false))) << form2.fields[1];
   EXPECT_TRUE(form2.fields[2].StrictlyEqualsHack(
       FormField(string16(),
-                ASCIIToUTF16("lastname"),
-                string16(),
-                ASCIIToUTF16("hidden"),
+                ASCIIToUTF16("state"),
+                ASCIIToUTF16("?"),
+                ASCIIToUTF16("select-one"),
                 0,
                 false))) << form2.fields[2];
 }
@@ -1116,30 +1114,11 @@ TEST_F(RenderViewTest, FillFormElement) {
            "  <input type=\"text\" id=\"middlename\"/>"
            "</form>");
 
-  // Verify that "FormsSeen" sends the expected number of fields.
+  // Verify that "FormsSeen" isn't sent, as there are too few fields.
   ProcessPendingMessages();
   const IPC::Message* message = render_thread_.sink().GetFirstMessageMatching(
-      ViewHostMsg_FormsSeen::ID);
-  ASSERT_NE(static_cast<IPC::Message*>(NULL), message);
-  ViewHostMsg_FormsSeen::Param params;
-  ViewHostMsg_FormsSeen::Read(message, &params);
-  const std::vector<FormData>& forms = params.a;
-  ASSERT_EQ(1UL, forms.size());
-  ASSERT_EQ(2UL, forms[0].fields.size());
-  EXPECT_TRUE(forms[0].fields[0].StrictlyEqualsHack(
-      FormField(string16(),
-                ASCIIToUTF16("firstname"),
-                string16(),
-                ASCIIToUTF16("text"),
-                kDefaultMaxLength,
-                false))) << forms[0].fields[0];
-  EXPECT_TRUE(forms[0].fields[1].StrictlyEqualsHack(
-      FormField(string16(),
-                ASCIIToUTF16("middlename"),
-                string16(),
-                ASCIIToUTF16("text"),
-                kDefaultMaxLength,
-                false))) << forms[0].fields[1];
+      AutoFillHostMsg_FormsSeen::ID);
+  ASSERT_EQ(static_cast<IPC::Message*>(NULL), message);
 
   // Verify that |didAcceptAutoFillSuggestion()| sets the value of the expected
   // field.
@@ -1153,16 +1132,15 @@ TEST_F(RenderViewTest, FillFormElement) {
 
   // Accept a suggestion in a form that has been auto-filled.  This triggers
   // the direct filling of the firstname element with value parameter.
-  autofill_helper_->didAcceptAutoFillSuggestion(
-      firstname,
-      WebKit::WebString::fromUTF8("David"),
-      WebKit::WebString(),
-      0,
-      0);
+  autofill_agent_->didAcceptAutoFillSuggestion(firstname,
+                                               WebString::fromUTF8("David"),
+                                               WebString(),
+                                               0,
+                                               0);
 
   ProcessPendingMessages();
   const IPC::Message* message2 = render_thread_.sink().GetUniqueMessageMatching(
-      ViewHostMsg_FillAutoFillFormData::ID);
+      AutoFillHostMsg_FillAutoFillFormData::ID);
 
   // No message should be sent in this case.  |firstname| is filled directly.
   ASSERT_EQ(static_cast<IPC::Message*>(NULL), message2);

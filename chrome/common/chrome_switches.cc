@@ -1,11 +1,10 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/common/chrome_switches.h"
 
 #include "base/base_switches.h"
-#include "base/command_line.h"
 
 namespace switches {
 
@@ -17,10 +16,6 @@ namespace switches {
 // Activate (make foreground) myself on launch.  Helpful when Chrome
 // is launched on the command line (e.g. by Selenium).  Only needed on Mac.
 const char kActivateOnLaunch[]              = "activate-on-launch";
-
-// By default, file:// URIs cannot read other file:// URIs. This is an
-// override for developers who need the old behavior for testing.
-const char kAllowFileAccessFromFiles[]      = "allow-file-access-from-files";
 
 // On ChromeOS, file:// access is disabled except for certain whitelisted
 // directories. This switch re-enables file:// for testing.
@@ -35,13 +30,14 @@ const char kAllowOutdatedPlugins[]          = "allow-outdated-plugins";
 // connections.
 const char kAllowSSLMITMProxies[]           = "allow-ssl-mitm-proxies";
 
-// Allows debugging of sandboxed processes (see zygote_main_linux.cc).
-const char kAllowSandboxDebugging[]         = "allow-sandbox-debugging";
-
 // Allows injecting extensions and user scripts on the extensions
 // gallery site. Normally prevented for security reasons, but can be
 // useful for automation testing of the gallery.
 const char kAllowScriptingGallery[]         = "allow-scripting-gallery";
+
+// This prevents Chrome from requiring authorization to run certain widely
+// installed but less commonly used plug-ins.
+const char kAlwaysAuthorizePlugins[]        = "always-authorize-plugins";
 
 // Enable web inspector for all windows, even if they're part of the browser.
 // Allows us to use our dev tools to debug browser windows itself.
@@ -116,6 +112,14 @@ const char kChromeVersion[]                 = "chrome-version";
 // The unique id to be used for this cloud print proxy instance.
 const char kCloudPrintProxyId[]             = "cloud-print-proxy-id";
 
+// Tells chrome to display the cloud print dialog and upload the
+// specified file for printing.
+const char kCloudPrintFile[]                = "cloud-print-file";
+
+// Used with kCloudPrintFile to specify a title for the resulting print
+// job.
+const char kCloudPrintJobTitle[]            = "cloud-print-job-title";
+
 // The URL of the cloud print service to use, overrides any value
 // stored in preferences, and the default.  Only used if the cloud
 // print service has been enabled (see enable-cloud-print).
@@ -138,6 +142,10 @@ const char kDebugPrint[]                    = "debug-print";
 // device management backend.
 const char kDeviceManagementUrl[]           = "device-management-url";
 
+// Specifies the directory in which to store the shared device policy cache
+// file. If not specified, device policy will be disabled.
+const char kDevicePolicyCacheDir[]          = "device-policy-cache-dir";
+
 // Triggers a pletora of diagnostic modes.
 const char kDiagnostics[]                   = "diagnostics";
 
@@ -150,6 +158,9 @@ const char kDisable3DAPIs[]                 = "disable-3d-apis";
 // Disables accelerated compositing.
 const char kDisableAcceleratedCompositing[] =
     "disable-accelerated-compositing";
+
+// Disables the hardware acceleration of 3D CSS and animation.
+const char kDisableAcceleratedLayers[]      = "disable-accelerated-layers";
 
 // Disables GPU accelerated video display.
 const char kDisableAcceleratedVideo[]       = "disable-accelerated-video";
@@ -183,18 +194,17 @@ const char kDisableBackgroundMode[] = "disable-background-mode";
 // in the measurements.
 const char kDisableBackgroundNetworking[] = "disable-background-networking";
 
-// Disable limits on the number of backing stores. Can prevent blinking for
-// users with many windows/tabs and lots of memory.
-const char kDisableBackingStoreLimit[]      = "disable-backing-store-limit";
+// Disable the Confirm to Quit experiment (Mac only).
+const char kDisableConfirmToQuit[]          = "disable-confirm-to-quit";
+
+// Disables blocked content warning animation. Currently shows animation for
+// blocked pop-ups only.
+const char kDisableBlockContentAnimation[]  =
+    "disable-blocked-content-animation";
 
 // Disables establishing a backup TCP connection if a specified timeout is
 // exceeded.
 const char kDisableConnectBackupJobs[]      = "disable-connect-backup-jobs";
-
-// Disable requests that webkit labels TargetIsPrefetch.  As of
-// writing only <link rel=prefetch...> but also eventually
-// Link: headers.
-const char kDisableContentPrefetch[]        = "disable-content-prefetch";
 
 // Disables the custom JumpList on Windows 7.
 const char kDisableCustomJumpList[]         = "disable-custom-jumplist";
@@ -228,21 +238,17 @@ const char kDisableExtensions[]             = "disable-extensions";
 const char kDisableExtensionsFileAccessCheck[] =
     "disable-extensions-file-access-check";
 
-// Disable FileSystem API.
-const char kDisableFileSystem[]             = "disable-file-system";
-
 // Disables the sandbox for the built-in flash player.
 const char kDisableFlashSandbox[]           = "disable-flash-sandbox";
 
 // Suppresses support for the Geolocation javascript API.
 const char kDisableGeolocation[]            = "disable-geolocation";
 
+// Disable GL multisampling.
+const char kDisableGLMultisampling[]        = "disable-gl-multisampling";
+
 // Disable the GLSL translator.
 const char kDisableGLSLTranslator[]         = "disable-glsl-translator";
-
-// Disable the thread that crashes the GPU process if it stops responding to
-// messages.
-const char kDisableGpuWatchdog[]            = "disable-gpu-watchdog";
 
 // Suppresses hang monitor dialogs in renderer processes.  This may allow slow
 // unload handlers on a page to prevent the tab from closing, but the Task
@@ -254,6 +260,9 @@ const char kDisableHistoryQuickProvider[]   = "disable-history-quick-provider";
 
 // Disable the use of the HistoryURLProvider for autocomplete results.
 const char kDisableHistoryURLProvider[]   = "disable-history-url-provider";
+
+// Disable the Indexed Database API.
+const char kDisableIndexedDatabase[]         = "disable-indexed-database";
 
 // Disables HTML5 Forms interactive validation.
 const char kDisableInteractiveFormValidation[] =
@@ -280,19 +289,9 @@ const char kDisableJava[]                   = "disable-java";
 // Disable LocalStorage.
 const char kDisableLocalStorage[]           = "disable-local-storage";
 
-// Force logging to be disabled.  Logging is enabled by default in debug
-// builds.
-const char kDisableLogging[]                = "disable-logging";
-
 // Whether we should prevent the new tab page from showing the first run
 // notification.
 const char kDisableNewTabFirstRun[]         = "disable-new-tab-first-run";
-
-// Prevent plugins from running.
-const char kDisablePlugins[]                = "disable-plugins";
-
-// Disable pop-up blocking.
-const char kDisablePopupBlocking[]          = "disable-popup-blocking";
 
 // Normally when the user attempts to navigate to a page that was the result of
 // a post we prompt to make sure they want to. This switch may be used to
@@ -344,8 +343,13 @@ const char kDisableSyncBookmarks[]          = "disable-sync-bookmarks";
 // Disable syncing of extensions.
 const char kDisableSyncExtensions[]         = "disable-sync-extensions";
 
+#if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_CHROMEOS)
+// Enable syncing browser passwords.
+const char kEnableSyncPasswords[]           = "enable-sync-passwords";
+#else
 // Disable syncing browser passwords.
 const char kDisableSyncPasswords[]          = "disable-sync-passwords";
+#endif
 
 // Disable syncing of preferences.
 const char kDisableSyncPreferences[]        = "disable-sync-preferences";
@@ -353,7 +357,7 @@ const char kDisableSyncPreferences[]        = "disable-sync-preferences";
 // Disable syncing of themes.
 const char kDisableSyncThemes[]             = "disable-sync-themes";
 
-// Disable tabbed options, i.e., DOMUI version of options window.
+// Disable tabbed options, i.e., WebUI version of options window.
 const char kDisableTabbedOptions[]           = "disable-tabbed-options";
 
 // TabCloseableStateWatcher disallows closing of tabs and browsers under certain
@@ -374,8 +378,8 @@ const char kDisableWebResources[]           = "disable-web-resources";
 // Don't enforce the same-origin policy.  (Used by people testing their sites.)
 const char kDisableWebSecurity[]            = "disable-web-security";
 
-// Disable Web Sockets support.
-const char kDisableWebSockets[]             = "disable-web-sockets";
+// Disable WebKit's XSSAuditor.  The XSSAuditor mitigates reflective XSS.
+const char kDisableXSSAuditor[]             = "disable-xss-auditor";
 
 // Use a specific disk cache location, rather than one derived from the
 // UserDatadir.
@@ -409,9 +413,6 @@ extern const char kLogNetLog[]              = "log-net-log";
 // Enable gpu-accelerated 2d canvas.
 const char kEnableAccelerated2dCanvas[]     = "enable-accelerated-2d-canvas";
 
-// Enables the hardware acceleration of 3D CSS and animation.
-const char kEnableAcceleratedLayers[]       = "enable-accelerated-layers";
-
 // Enables the hardware acceleration of plugins.
 const char kEnableAcceleratedPlugins[]       = "enable-accelerated-plugins";
 
@@ -426,19 +427,19 @@ const char kEnableAeroPeekTabs[]            = "enable-aero-peek-tabs";
 // for more background.
 const char kEnableAuthNegotiatePort[]       = "enable-auth-negotiate-port";
 
-// Enables the benchmarking extensions.
-const char kEnableBenchmarking[]            = "enable-benchmarking";
-
-// Enables blocked content warning animation. Currently shows animation for
-// blocked pop-ups only.
-const char kEnableBlockContentAnimation[] = "enable-blocked-content-animation";
-
 // In the browser process this switch is used to enable or disable the
 // client-side phishing detection.  In the renderer this switch is only enabled
 // if this switch is enabled in the browser and the user has opted in to UMA
 // stats and SafeBrowsing is enabled in the preferences.
 const char kEnableClientSidePhishingDetection[] =
     "enable-client-side-phishing-detection";
+
+// At this point, even if client-side phishing detection is enabled we will not,
+// by default, display an interstitial if we detected a phishing site.  Once
+// we are confident that the false-positive rate is as low as expected we can
+// remove this flag.
+const char kEnableClientSidePhishingInterstitial[] =
+    "enable-client-side-phishing-interstitial";
 
 // This flag enables UI for clearing server data.  Temporarily in place
 // until there's a server endpoint deployed.
@@ -454,17 +455,12 @@ const char kEnableCloudPrintProxy[]         = "enable-cloud-print-proxy";
 // Enables the Cloud Print dialog hosting code.
 const char kEnableCloudPrint[]              = "enable-cloud-print";
 
-// Enable the Confirm to Quit experiment.
-const char kEnableConfirmToQuit[]           = "enable-confirm-to-quit";
+// Enables compositing to texture instead of display.
+const char kEnableCompositeToTexture[]      = "enable-composite-to-texture";
 
 // Enables establishing a backup TCP connection if a specified timeout is
 // exceeded.
 const char kEnableConnectBackupJobs[]       = "enable-connect-backup-jobs";
-
-// Enable requests that webkit labels TargetIsPrefetch.  As of
-// writing only <link rel=prefetch...> but also eventually
-// Link: headers.
-const char kEnableContentPrefetch[]         = "enable-content-prefetch";
 
 // Enables web developers to create apps for Chrome without using crx packages.
 const char kEnableCrxlessWebApps[]          = "enable-crxless-web-apps";
@@ -493,6 +489,12 @@ const char kEnableFastback[]                = "enable-fastback";
 // testing, for example page cycler and layout tests.  See bug 1157243.
 const char kEnableFileCookies[]             = "enable-file-cookies";
 
+// Enable the use of the HistoryQuickProvider for autocomplete results.
+const char kEnableHistoryQuickProvider[]    = "enable-history-quick-provider";
+
+// Enable the JavaScript Full Screen API.
+const char kEnableFullScreen[]              = "enable-fullscreen";
+
 // Enable the in-browser thumbnailing, which is more efficient than the
 // in-renderer thumbnailing, as we can use more information to determine
 // if we need to update thumbnails.
@@ -504,40 +506,18 @@ const char kEnableInBrowserThumbnailing[]   = "enable-in-browser-thumbnailing";
 // This flag overrides "disable-ipv6" which appears elswhere in this file.
 const char kEnableIPv6[]                    = "enable-ipv6";
 
-// Enable IndexedDB.
-const char kEnableIndexedDatabase[]         = "enable-indexed-database";
-
-// Enable the GPU plugin and Pepper 3D rendering.
-const char kEnableGPUPlugin[]               = "enable-gpu-plugin";
-
-// Force logging to be enabled.  Logging is disabled by default in release
-// builds.
-const char kEnableLogging[]                 = "enable-logging";
+// Enable experimental JavaScript I18N API.
+const char kEnableJavaScriptI18NAPI[]       = "enable-javascript-i18n-api";
 
 // Allows reporting memory info (JS heap size) to page.
 const char kEnableMemoryInfo[]              = "enable-memory-info";
 
-// On Windows, converts the page to the currently-installed monitor profile.
-// This does NOT enable color management for images. The source is still
-// assumed to be sRGB.
-const char kEnableMonitorProfile[]          = "enable-monitor-profile";
-
 // Runs the Native Client inside the renderer process and enables GPU plugin
-// (internally adds kInternalNaCl and lEnableGpuPlugin to the command line).
+// (internally adds lEnableGpuPlugin to the command line).
 const char kEnableNaCl[]                    = "enable-nacl";
 
 // Enables debugging via RSP over a socket.
 const char kEnableNaClDebug[]               = "enable-nacl-debug";
-
-// Enable Native Web Worker support.
-const char kEnableNativeWebWorkers[]        = "enable-native-web-workers";
-
-// Is InstantController::PREDICTIVE_TYPE enabled?
-const char kEnablePredictiveInstant[]       = "enable-predictive-instant";
-
-// Is InstantController::PREDICTIVE_NO_AUTO_COMPLETE_TYPE enabled?
-const char kEnablePredictiveNoAutoCompleteInstant[] =
-    "enable-predictive-no-auto-complete-instant";
 
 // This applies only when the process type is "service". Enables the
 // Chromoting Host Process within the service process.
@@ -547,14 +527,11 @@ const char kEnableRemoting[]                = "enable-remoting";
 const char kEnableResourceContentSettings[] =
     "enable-resource-content-settings";
 
-// Enable speculative prerendering of pages.
-const char kEnablePagePrerender[]           = "enable-page-prerender";
+// Enable Pepper and JavaScript P2P API.
+const char kEnableP2PApi[]                  = "enable-p2papi";
 
 // Enable speculative TCP/IP preconnection.
 const char kEnablePreconnect[]              = "enable-preconnect";
-
-// Enable caching of pre-parsed JS script data.  See http://crbug.com/32407.
-const char kEnablePreparsedJsCaching[]      = "enable-preparsed-js-caching";
 
 // Enable print preview (work in progress).
 const char kEnablePrintPreview[]            = "enable-print-preview";
@@ -565,12 +542,6 @@ const char kEnableSearchProviderApiV2[]     = "enable-search-provider-api-v2";
 
 // Enables 0-RTT HTTPS handshakes.
 const char kEnableSnapStart[]               = "enable-snap-start";
-
-// Enables speech input.
-const char kEnableSpeechInput[]             = "enable-speech-input";
-
-// Enables StatsTable, logging statistics to a global named shared memory table.
-const char kEnableStatsTable[]              = "enable-stats-table";
 
 // Enable syncing browser data to a Google Account.
 const char kEnableSync[]                    = "enable-sync";
@@ -590,9 +561,6 @@ const char kEnableTcpFastOpen[]             = "enable-tcp-fastopen";
 
 // Whether or not the touch events API is exposed.
 const char kEnableTouch[]                   = "enable-touch";
-
-// Is verbatim instant enabled?
-const char kEnableVerbatimInstant[]         = "enable-verbatim-instant";
 
 // Enables the option to show tabs as a vertical stack down the side of the
 // browser window.
@@ -614,16 +582,6 @@ const char kEnableWatchdog[]                = "enable-watchdog";
 
 // Enable web audio API.
 const char kEnableWebAudio[]                = "enable-webaudio";
-
-// Disable WebKit's XSSAuditor.  The XSSAuditor mitigates reflective XSS.
-const char kEnableXSSAuditor[]              = "enable-xss-auditor";
-
-// Enables experimental features for the geolocation API.
-// Current features:
-// - CoreLocation support for Mac OS X 10.6
-// - Gateway location for Linux and Windows
-// - Location platform support for Windows 7
-const char kExperimentalLocationFeatures[]  = "experimental-location-features";
 
 // Enables experimental features for Spellchecker. Right now, the first
 // experimental feature is auto spell correct, which corrects words which are
@@ -659,6 +617,9 @@ const char kFeedbackServer[]                = "feedback-server";
 // gracefully.
 const char kFileDescriptorLimit[]           = "file-descriptor-limit";
 
+// If true opening a url from the omnibox attepts to focus an existing tab.
+const char kFocusExistingTabOnOpen[]        = "focus-existing-tab-on-open";
+
 // Display the First Run experience when the browser is started, regardless of
 // whether or not it's actually the first run.
 const char kFirstRun[]                      = "first-run";
@@ -683,16 +644,6 @@ const char kForceFieldTestNameAndValue[]    = "force-fieldtest";
 // a screen reader is detected. The disable-renderer-accessibility switch
 // overrides this if present.
 const char kForceRendererAccessibility[]   = "force-renderer-accessibility";
-
-// Extra command line options for launching the GPU process (normally used
-// for debugging). Use like renderer-cmd-prefix.
-const char kGpuLauncher[]                   = "gpu-launcher";
-
-// Makes this process a GPU sub-process.
-const char kGpuProcess[]                    = "gpu-process";
-
-// Causes the GPU process to display a dialog on launch.
-const char kGpuStartupDialog[]              = "gpu-startup-dialog";
 
 // Specifies a custom name for the GSSAPI library to load.
 const char kGSSAPILibraryName[]             = "gssapi-library-name";
@@ -756,17 +707,9 @@ const char kInProcessWebGL[]                = "in-process-webgl";
 // Causes the browser to launch directly in incognito mode.
 const char kIncognito[]                     = "incognito";
 
-// Whether the search provider suggestion should be autocompleted immediately
-// when instant is enabled.
-const char kInstantAutocompleteImmediately[]  =
-    "instant-autocomplete-immediately";
-
 // URL to use for instant. If specified this overrides the url from the
 // TemplateURL.
 const char kInstantURL[]                    = "instant-url";
-
-// Runs the Native Client inside the renderer process.
-const char kInternalNaCl[]                  = "internal-nacl";
 
 // Runs a trusted Pepper plugin inside the renderer process.
 const char kInternalPepper[]                = "internal-pepper";
@@ -782,19 +725,6 @@ const char kLoadExtension[]                 = "load-extension";
 
 // Uninstall an extension with the specified extension id.
 const char kUninstallExtension[]            = "uninstall-extension";
-
-// Load an NPAPI plugin from the specified path.
-const char kLoadPlugin[]                    = "load-plugin";
-
-// Load NPAPI plugins from the specified directory.
-const char kExtraPluginDir[]                = "extra-plugin-dir";
-
-// Make plugin processes log their sent and received messages to VLOG(1).
-const char kLogPluginMessages[]             = "log-plugin-messages";
-
-// Sets the minimum log level. Valid values are from 0 to 3:
-// INFO = 0, WARNING = 1, LOG_ERROR = 2, LOG_FATAL = 3.
-const char kLoggingLevel[]                  = "log-level";
 
 // Make Chrome default browser
 const char kMakeDefaultBrowser[]            = "make-default-browser";
@@ -820,6 +750,9 @@ const char kMetricsRecordingOnly[]          = "metrics-recording-only";
 
 // The minimum version of Flash that implements the NPP_ClearSiteData API.
 const char kMinClearSiteDataFlashVersion[]  = "min-clearsitedata-flash-version";
+
+// Enables multiprofile Chrome.
+const char kMultiProfiles[]                 = "multi-profiles";
 
 // Sets the default IP address (interface) for the stub (normally 127.0.0.1).
 const char kNaClDebugIP[]                   = "nacl-debug-ip";
@@ -855,9 +788,6 @@ const char kNoExperiments[]                 = "no-experiments";
 // you're for some reason tempted to pass them both.
 const char kNoFirstRun[]                    = "no-first-run";
 
-// Don't Sandbox the GPU process, does not affect other sandboxed processes.
-const char kNoGpuSandbox[]                  = "no-gpu-sandbox";
-
 // Support a separate switch that enables the v8 playback extension.
 // The extension causes javascript calls to Date.now() and Math.random()
 // to return consistent values, such that subsequent loads of the same
@@ -872,11 +802,13 @@ const char kNoPings[]                       = "no-pings";
 // other proxy server flags that are passed.
 const char kNoProxyServer[]                 = "no-proxy-server";
 
-// Don't send HTTP-Referer headers.
-const char kNoReferrers[]                   = "no-referrers";
-
 // Disables the sandbox for all process types that are normally sandboxed.
 const char kNoSandbox[]                     = "no-sandbox";
+
+// Disables the service process from adding itself as an autorun process. This
+// does not delete existing autorun registrations, it just prevents the service
+// from registering a new one.
+const char kNoServiceAutorun[]               = "no-service-autorun";
 
 // Does not automatically open a browser window on startup (used when launching
 // Chrome for the purpose of hosting background apps).
@@ -913,50 +845,21 @@ const char kPlaybackMode[]                  = "playback-mode";
 // specifically) will store its state.
 const char kPluginDataDir[]                 = "plugin-data-dir";
 
-// Specifies a command that should be used to launch the plugin process.  Useful
-// for running the plugin process through purify or quantify.  Ex:
-//   --plugin-launcher="path\to\purify /Run=yes"
-const char kPluginLauncher[]                = "plugin-launcher";
-
-// Tells the plugin process the path of the plugin to load
-const char kPluginPath[]                    = "plugin-path";
-
-// Causes the process to run as a plugin subprocess.
-const char kPluginProcess[]                 = "plugin";
-
-// Causes the plugin process to display a dialog on launch.
-const char kPluginStartupDialog[]           = "plugin-startup-dialog";
-
-// Runs PPAPI (Pepper) plugins out-of-process.
-const char kPpapiOutOfProcess[]             = "ppapi-out-of-process";
-
-// Like kPluginLauncher for PPAPI plugins.
-const char kPpapiPluginLauncher[]           = "ppapi-plugin-launcher";
-
-// Argument to the process type that indicates a PPAPI plugin process type.
-const char kPpapiPluginProcess[]            = "ppapi";
-
-// Causes the PPAPI sub process to display a dialog on launch.
-const char kPpapiStartupDialog[]            = "ppapi-startup-dialog";
+// Controls speculative prerendering of pages, and content prefetching.  Both
+// are dispatched from <link rel=prefetch href=...> elements.
+const char kPrerender[]                     = "prerender";
+// These are the values the switch may have, as in "--prerender=auto".
+//   auto: Allow field trial selection in both prerender and prefetch.
+const char kPrerenderSwitchValueAuto[]      = "auto";
+//   disabled: No prerendering or prefetching.
+const char kPrerenderSwitchValueDisabled[]  = "disabled";
+//   enabled: Both prerendering and prefetching.
+const char kPrerenderSwitchValueEnabled[]   = "enabled";
+//   prefetch_only: No prerendering, but enable prefetching.
+const char kPrerenderSwitchValuePrefetchOnly[] = "prefetch_only";
 
 // Prints the pages on the screen.
 const char kPrint[]                         = "print";
-
-// Runs a single process for each site (i.e., group of pages from the same
-// registered domain) the user visits.  We default to using a renderer process
-// for each site instance (i.e., group of pages from the same registered
-// domain with script connections to each other).
-const char kProcessPerSite[]                = "process-per-site";
-
-// Runs each set of script-connected tabs (i.e., a BrowsingInstance) in its own
-// renderer process.  We default to using a renderer process for each
-// site instance (i.e., group of pages from the same registered domain with
-// script connections to each other).
-const char kProcessPerTab[]                 = "process-per-tab";
-
-// The value of this switch determines whether the process is started as a
-// renderer or plugin host.  If it's empty, it's the browser.
-const char kProcessType[]                   = "type";
 
 // Output the product version information and quit. Used as an internal api to
 // detect the installed version of Chrome on Linux.
@@ -964,6 +867,26 @@ const char kProductVersion[]                = "product-version";
 
 // Causes the process to run as a profile import subprocess.
 const char kProfileImportProcess[]          = "profile-import";
+
+// Starts the sampling based profiler for the browser process at
+// startup. This will only work if chrome has been built with
+// the gyp variable profiling=1. The output will go to the value
+// of kProfilingFile.
+const char kProfilingAtStart[]              = "profiling-at-start";
+
+// Specifies a location for profiling output. This will only work if chrome
+// has been built with the gyp variable profiling=1.
+//   {pid} if present will be replaced by the pid of the process.
+//   {count} if present will be incremented each time a profile is generated
+//           for this process.
+// The default is chrome-profile-{pid}.
+const char kProfilingFile[]                 = "profiling-file";
+
+// Controls whether profile data is periodically flushed to a file.
+// Normally the data gets written on exit but cases exist where chrome
+// doesn't exit cleanly (especially when using single-process).
+// A time in seconds can be specified.
+const char kProfilingFlush[]                = "profiling-flush";
 
 // Force proxy auto-detection.
 const char kProxyAutoDetect[]               = "proxy-auto-detect";
@@ -995,9 +918,6 @@ const char kPurgeMemoryButton[]             = "purge-memory-button";
 // See also kPlaybackMode.
 const char kRecordMode[]                    = "record-mode";
 
-// Register pepper plugins that should be loaded into the renderer.
-const char kRegisterPepperPlugins[]         = "register-pepper-plugins";
-
 // Reload pages that have been killed when they are next focused by the user.
 const char kReloadKilledTabs[]              = "reload-killed-tabs";
 
@@ -1015,27 +935,11 @@ const char kRendererAssertTest[]            = "renderer-assert-test";
 const char kRendererCheckFalseTest[]        = "renderer-check-false-test";
 #endif
 
-// On POSIX only: the contents of this flag are prepended to the renderer
-// command line. Useful values might be "valgrind" or "xterm -e gdb --args".
-const char kRendererCmdPrefix[]             = "renderer-cmd-prefix";
-
-// Causes the renderer process to crash on launch.
-const char kRendererCrashTest[]             = "renderer-crash-test";
-
-// Causes the process to run as renderer instead of as browser.
-const char kRendererProcess[]               = "renderer";
-
-// Causes the renderer process to display a dialog on launch.
-const char kRendererStartupDialog[]         = "renderer-startup-dialog";
-
 // Indicates the last session should be restored on startup. This overrides
 // the preferences value and is primarily intended for testing. The value of
 // this switch is the number of tabs to wait until loaded before
 // 'load completed' is sent to the ui_test.
 const char kRestoreLastSession[]            = "restore-last-session";
-
-// Runs the plugin processes inside the sandbox.
-const char kSafePlugins[]                   = "safe-plugins";
 
 // URL prefix used by safebrowsing to fetch hash, download data and
 // report malware.
@@ -1052,6 +956,13 @@ const char kSbDisableAutoUpdate[] = "safebrowsing-disable-auto-update";
 // If present, safebrowsing checks download url and download content's hash
 // to make sure the content are not malicious.
 const char kSbEnableDownloadProtection[] = "safebrowsing-download-protection";
+
+// This flag is used together with kSbEnableDownloadProtection. When that flag
+// is present but this flag is absent, we won't show the warning ui. The purpose
+// of this flag is to make sure we roll out download url detection smoothly.
+// We will remove this flag once we verify that the download url detection works
+// as expectecd according to UMA reports.
+const char kSbEnableDownloadWarningUI[] = "safebrowsing-download-warning-ui";
 
 // Enable support for SDCH filtering (dictionary based expansion of content).
 // Optional argument is *the* only domain name that will have SDCH suppport.
@@ -1077,6 +988,13 @@ const char kShowIcons[]                     = "show-icons";
 // layer compositing.
 const char kShowCompositedLayerBorders[]    = "show-composited-layer-borders";
 
+// Draws a textual dump of the compositor layer tree to help debug and study
+// layer compositing.
+const char kShowCompositedLayerTree[]       = "show-composited-layer-tree";
+
+// Draws a FPS indicator
+const char kShowFPSCounter[]                = "show-fps-counter";
+
 // Visibly render a border around paint rects in the web page to help debug
 // and study painting behavior.
 const char kShowPaintRects[]                = "show-paint-rects";
@@ -1092,9 +1010,6 @@ const char kSilentDumpOnDCHECK[]            = "silent-dump-on-dcheck";
 // TODO(scherkus): remove --simple-data-source when our media resource loading
 // is cleaned up and playback testing completed.
 const char kSimpleDataSource[]              = "simple-data-source";
-
-// Runs the renderer and plugins in the same process as the browser
-const char kSingleProcess[]                 = "single-process";
 
 // Start the browser maximized, regardless of any previous settings.
 const char kStartMaximized[]                = "start-maximized";
@@ -1125,11 +1040,11 @@ const char kSyncServiceURL[]                = "sync-url";
 // Try to connect to XMPP using SSLTCP first (for testing).
 const char kSyncTrySsltcpFirstForXmpp[]     = "sync-try-ssltcp-first-for-xmpp";
 
+// Use new experimental SyncerThread implementation and friends.
+const char kNewSyncerThread[]           = "new-syncer-thread";
+
 // Pass the name of the current running automated test to Chrome.
 const char kTestName[]                      = "test-name";
-
-// Runs the security test for the renderer sandbox.
-const char kTestSandbox[]                   = "test-sandbox";
 
 // Runs the security test for the NaCl loader sandbox.
 const char kTestNaClSandbox[]               = "test-nacl-sandbox";
@@ -1165,23 +1080,6 @@ const char kMaxSpdySessionsPerDomain[]      = "max-spdy-sessions-per-domain";
 // Set the maximum concurrent streams over a SPDY session.
 const char kMaxSpdyConcurrentStreams[]      = "max-spdy-concurrent-streams";
 
-// Grant unlimited quota to store files to this process.
-// Used for testing Pepper's FileRef/FileIO/FileSystem implementations.
-// DO NOT USE FOR OTHER PURPOSES.
-// TODO(dumi): remove the switch when we have a real quota implementation.
-const char kUnlimitedQuotaForFiles[]        = "unlimited-quota-for-files";
-
-// This is for testing IndexedDB and will give any website you visit unlimited
-// quota in IndexedDB. This should only be used for development and not general
-// browsing. It is ignored in single process mode.
-const char kUnlimitedQuotaForIndexedDB[]    = "unlimited-quota-for-indexeddb";
-
-// Use the low fragmentation heap for the CRT.
-const char kUseLowFragHeapCrt[]             = "use-lf-heap";
-
-// A string used to override the default user agent with a custom one.
-const char kUserAgent[]                     = "user-agent";
-
 // Specifies the user data directory, which is where the browser will look
 // for all of its state.
 const char kUserDataDir[]                   = "user-data-dir";
@@ -1204,30 +1102,9 @@ const char kUtilityProcessAllowedDir[]      = "utility-allowed-dir";
 // Print version information and quit.
 const char kVersion[]                       = "version";
 
-// Will add kWaitForDebugger to every child processes. If a value is passed, it
-// will be used as a filter to determine if the child process should have the
-// kWaitForDebugger flag passed on or not.
-const char kWaitForDebuggerChildren[]       = "wait-for-debugger-children";
-
-// Causes the worker process allocation to use as many processes as cores.
-const char kWebWorkerProcessPerCore[]       = "web-worker-process-per-core";
-
-// Causes workers to run together in one process, depending on their domains.
-// Note this is duplicated in webworkerclient_impl.cc
-const char kWebWorkerShareProcesses[]       = "web-worker-share-processes";
-
 // Use WinHTTP to fetch and evaluate PAC scripts. Otherwise the default is
 // to use Chromium's network stack to fetch, and V8 to evaluate.
 const char kWinHttpProxyResolver[]          = "winhttp-proxy-resolver";
-
-// Causes the process to run as a worker subprocess.
-const char kWorkerProcess[]                 = "worker";
-
-// The prefix used when starting the zygote process. (i.e. 'gdb --args')
-const char kZygoteCmdPrefix[]               = "zygote-cmd-prefix";
-
-// Causes the process to run as a renderer zygote.
-const char kZygoteProcess[]                 = "zygote";
 
 #if defined(OS_CHROMEOS)
 // Enable the redirection of viewable document requests to the Google
@@ -1292,8 +1169,8 @@ const char kCompressSystemFeedback[]        = "compress-sys-feedback";
 // switch separates chrome code from the rest of ChromeOS.
 const char kForceStubLibcros[]              = "force-stub-libcros";
 
-// Enables DOMUI menu.
-const char kEnableDOMUIMenu[]               = "enable-domui-menu";
+// Enables WebUI menu.
+const char kEnableWebUIMenu[]               = "enable-webui-menu";
 
 // Enables Media Player.
 const char kEnableMediaPlayer[]             = "enable-media-player";
@@ -1324,27 +1201,21 @@ const char kEnableCrashReporter[]           = "enable-crash-reporter";
 // This switch is used during automated testing.
 const char kNoProcessSingletonDialog[]      = "no-process-singleton-dialog";
 
-#if !defined(OS_MACOSX)
+#if !defined(OS_MACOSX) && !defined(OS_CHROMEOS)
 // Specifies which password store to use (detect, default, gnome, kwallet).
 const char kPasswordStore[]                 = "password-store";
 #endif
 #endif
 
-#if defined(OS_MACOSX)
-// Temporary flag to disable hole punching for accelerated surfaces. This is
-// here to aid debugging eventual problems, it can be removed once hole punching
-// has been out there for a few dev channel releases without problems.
-const char kDisableHolePunching[]           = "disable-hole-punching";
-
-// Enables the tabs expose feature ( http://crbug.com/50307 ).
-const char kEnableExposeForTabs[] = "enable-expose-for-tabs";
-
-// Cause the OS X sandbox write to syslog every time an access to a resource
-// is denied by the sandbox.
-const char kEnableSandboxLogging[]          = "enable-sandbox-logging";
-#else
+#if !defined(OS_MACOSX)
 // Enable Kiosk mode.
 const char kKioskMode[]                     = "kiosk";
+#endif
+
+// Enables debug paint in views framework. Enabling this causes the damaged
+// region being painted to flash in red.
+#if defined(TOOLKIT_VIEWS)
+const char kDebugViewsPaint[]               = "debug-views-paint";
 #endif
 
 #ifndef NDEBUG
@@ -1365,24 +1236,12 @@ const char kWebSocketLiveExperimentHost[]   = "websocket-live-experiment-host";
 #endif
 
 #if defined(HAVE_XINPUT2)
+// Tells chrome to interpret events from these devices as touch events. Only
+// available with XInput 2 (i.e. X server 1.8 or above). The id's of the devices
+// can be retrieved from 'xinput list'.
 const char kTouchDevices[]                  = "touch-devices";
 #endif
 
-
-// SeccompSandboxEnabled() controls whether we are using Seccomp.
-// It is currently off by default on all platforms.
-// TODO(evan): unify all of these once we turn the seccomp sandbox always
-// on.  Also remove the #include of command_line.h above.
-
-// Disable the seccomp sandbox (Linux only)
-const char kDisableSeccompSandbox[]         = "disable-seccomp-sandbox";
-// Enable the seccomp sandbox (Linux only)
-const char kEnableSeccompSandbox[]          = "enable-seccomp-sandbox";
-
-bool SeccompSandboxEnabled() {
-  return CommandLine::ForCurrentProcess()->HasSwitch(
-             switches::kEnableSeccompSandbox);
-}
 
 // -----------------------------------------------------------------------------
 // DO NOT ADD YOUR CRAP TO THE BOTTOM OF THIS FILE.

@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,13 +11,13 @@
 
 #include "base/gtest_prod_util.h"
 #include "base/time.h"
-#include "chrome/browser/dom_ui/html_dialog_ui.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/sync_setup_wizard.h"
 #include "chrome/browser/sync/syncable/model_type.h"
-#include "gfx/native_widget_types.h"
+#include "chrome/browser/ui/webui/html_dialog_ui.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/gfx/native_widget_types.h"
 
 class FlowHandler;
 class SyncSetupFlowContainer;
@@ -26,6 +26,9 @@ class SyncSetupFlowContainer;
 // This can be stored or passed around when the configuration is managed
 // by multiple stages of the wizard.
 struct SyncConfiguration {
+  SyncConfiguration();
+  ~SyncConfiguration();
+
   bool sync_everything;
   syncable::ModelTypeSet data_types;
   bool use_secondary_passphrase;
@@ -75,8 +78,8 @@ class SyncSetupFlow : public HtmlDialogUIDelegate {
   virtual GURL GetDialogContentURL() const;
 
   // HtmlDialogUIDelegate implementation.
-  virtual void GetDOMMessageHandlers(
-      std::vector<DOMMessageHandler*>* handlers) const;
+  virtual void GetWebUIMessageHandlers(
+      std::vector<WebUIMessageHandler*>* handlers) const;
 
   // HtmlDialogUIDelegate implementation.
   // Get the size of the dialog.
@@ -110,6 +113,9 @@ class SyncSetupFlow : public HtmlDialogUIDelegate {
   // The 'passphrase' screen is used when the user is prompted to enter
   // an existing passphrase.
   void OnPassphraseEntry(const std::string& passphrase);
+
+  // The user canceled the passphrase entry without supplying a passphrase.
+  void OnPassphraseCancel();
 
   // The 'first passphrase' screen is for users migrating from a build
   // without passwords, who are prompted to make a passphrase choice.
@@ -156,7 +162,7 @@ class SyncSetupFlow : public HtmlDialogUIDelegate {
   FlowHandler* flow_handler_;
   mutable bool owns_flow_handler_;
 
-  // We need this to write the sentinel "setup completed" pref.
+  // We need this to propagate back all user settings changes.
   ProfileSyncService* service_;
 
   // Currently used only on OS X
@@ -186,20 +192,21 @@ class SyncSetupFlowContainer {
 };
 
 // The FlowHandler connects the state machine to the dialog backing HTML and
-// JS namespace by implementing DOMMessageHandler and being invoked by the
+// JS namespace by implementing WebUIMessageHandler and being invoked by the
 // SyncSetupFlow.  Exposed here to facilitate testing.
-class FlowHandler : public DOMMessageHandler {
+class FlowHandler : public WebUIMessageHandler {
  public:
   FlowHandler()  {}
   virtual ~FlowHandler() {}
 
-  // DOMMessageHandler implementation.
+  // WebUIMessageHandler implementation.
   virtual void RegisterMessages();
 
   // Callbacks from the page.
   void HandleSubmitAuth(const ListValue* args);
   void HandleConfigure(const ListValue* args);
   void HandlePassphraseEntry(const ListValue* args);
+  void HandlePassphraseCancel(const ListValue* args);
   void HandleFirstPassphrase(const ListValue* args);
   void HandleGoToDashboard(const ListValue* args);
 

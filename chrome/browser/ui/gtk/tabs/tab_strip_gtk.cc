@@ -13,7 +13,6 @@
 #include "chrome/browser/autocomplete/autocomplete_classifier.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tabs/tab_strip_model_delegate.h"
 #include "chrome/browser/themes/browser_theme_provider.h"
 #include "chrome/browser/ui/browser.h"
@@ -24,16 +23,17 @@
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/gtk/tabs/dragged_tab_controller_gtk.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
-#include "chrome/common/notification_service.h"
-#include "chrome/common/notification_type.h"
-#include "gfx/gtk_util.h"
-#include "gfx/point.h"
+#include "content/browser/tab_contents/tab_contents.h"
+#include "content/common/notification_service.h"
+#include "content/common/notification_type.h"
 #include "grit/app_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/animation/animation_delegate.h"
 #include "ui/base/animation/slide_animation.h"
 #include "ui/base/dragdrop/gtk_dnd_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/gtk_util.h"
+#include "ui/gfx/point.h"
 
 namespace {
 
@@ -1228,6 +1228,9 @@ void TabStripGtk::DidProcessEvent(GdkEvent* event) {
   }
 }
 
+///////////////////////////////////////////////////////////////////////////////
+// TabStripGtk, NotificationObserver implementation:
+
 void TabStripGtk::Observe(NotificationType type,
                           const NotificationSource& source,
                           const NotificationDetails& details) {
@@ -1631,7 +1634,7 @@ bool TabStripGtk::CompleteDrop(guchar* data, bool is_plain_text) {
   if (is_plain_text) {
     AutocompleteMatch match;
     model_->profile()->GetAutocompleteClassifier()->Classify(
-        UTF8ToWide(reinterpret_cast<char*>(data)), std::wstring(), false,
+        UTF8ToUTF16(reinterpret_cast<char*>(data)), string16(), false,
         &match, NULL);
     url = match.destination_url;
   } else {

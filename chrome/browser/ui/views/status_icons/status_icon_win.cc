@@ -5,9 +5,9 @@
 #include "chrome/browser/ui/views/status_icons/status_icon_win.h"
 
 #include "base/sys_string_conversions.h"
-#include "gfx/icon_util.h"
-#include "gfx/point.h"
 #include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/gfx/icon_util.h"
+#include "ui/gfx/point.h"
 #include "views/controls/menu/menu_2.h"
 
 StatusIconWin::StatusIconWin(UINT id, HWND window, UINT message)
@@ -79,10 +79,18 @@ void StatusIconWin::SetToolTip(const string16& tool_tip) {
     LOG(WARNING) << "Unable to set tooltip for status tray icon";
 }
 
-void StatusIconWin::InitIconData(NOTIFYICONDATA* icon_data) {
-  icon_data->cbSize = sizeof(icon_data);
-  icon_data->hWnd = window_;
-  icon_data->uID = icon_id_;
+void StatusIconWin::DisplayBalloon(const string16& title,
+                                   const string16& contents) {
+  NOTIFYICONDATA icon_data;
+  InitIconData(&icon_data);
+  icon_data.uFlags = NIF_INFO;
+  icon_data.dwInfoFlags = NIIF_INFO;
+  wcscpy_s(icon_data.szInfoTitle, title.c_str());
+  wcscpy_s(icon_data.szInfo, contents.c_str());
+  icon_data.uTimeout = 0;
+  BOOL result = Shell_NotifyIcon(NIM_MODIFY, &icon_data);
+  if (!result)
+    LOG(WARNING) << "Unable to create status tray balloon.";
 }
 
 void StatusIconWin::UpdatePlatformContextMenu(ui::MenuModel* menu) {
@@ -110,4 +118,10 @@ void StatusIconWin::HandleClickEvent(int x, int y, bool left_mouse_click) {
     SetForegroundWindow(window_);
     context_menu_->RunContextMenuAt(gfx::Point(x, y));
   }
+}
+
+void StatusIconWin::InitIconData(NOTIFYICONDATA* icon_data) {
+  icon_data->cbSize = sizeof(NOTIFYICONDATA);
+  icon_data->hWnd = window_;
+  icon_data->uID = icon_id_;
 }

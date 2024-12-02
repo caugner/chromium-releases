@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,16 +9,19 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/compiler_specific.h"
 #include "chrome/browser/browser_process_impl.h"
-#include "chrome/browser/importer/importer.h"
+#include "chrome/browser/importer/importer_observer.h"
 #include "chrome/common/result_codes.h"
-#include "gfx/native_widget_types.h"
 #include "googleurl/src/gurl.h"
+#include "ui/gfx/native_widget_types.h"
 
 class CommandLine;
 class FilePath;
 class Profile;
 class ProcessSingleton;
+class ImporterHost;
+class ImporterList;
 
 // This class contains the chrome first-run installation actions needed to
 // fully test the custom installer. It also contains the opposite actions to
@@ -32,11 +35,11 @@ class ProcessSingleton;
 class FirstRun {
  public:
   // There are three types of possible first run bubbles:
-  typedef enum {
+  enum BubbleType {
     LARGE_BUBBLE,      // The normal bubble, with search engine choice
     OEM_BUBBLE,        // Smaller bubble for OEM builds
     MINIMAL_BUBBLE     // Minimal bubble shown after search engine dialog
-  } BubbleType;
+  };
 
   // See ProcessMasterPreferences for more info about this structure.
   struct MasterPrefs {
@@ -122,6 +125,7 @@ class FirstRun {
   // success.
   static bool ImportSettings(Profile* profile,
                              scoped_refptr<ImporterHost> importer_host,
+                             scoped_refptr<ImporterList> importer_list,
                              int items_to_import);
 
   // Sets the kShouldShowFirstRunBubble local state pref so that the browser
@@ -241,7 +245,10 @@ class Upgrade {
   // above for the possible outcomes of the function. This is an experimental,
   // non-localized dialog.
   // |version| can be 0, 1 or 2 and selects what strings to present.
-  static TryResult ShowTryChromeDialog(size_t version);
+  // |process_singleton| needs to be valid and it will be locked while
+  // the dialog is shown.
+  static TryResult ShowTryChromeDialog(size_t version,
+                                       ProcessSingleton* process_singleton);
 #endif  // OS_WIN
 
   // Launches chrome again simulating a 'user' launch. If chrome could not
@@ -296,19 +303,23 @@ class FirstRunBrowserProcess : public BrowserProcessImpl {
 // the import operation. It differs from ImportProcessRunner in that this
 // class executes in the context of importing child process.
 // The values that it handles are meant to be used as the process exit code.
-class FirstRunImportObserver : public ImportObserver {
+class FirstRunImportObserver : public ImporterObserver {
  public:
   FirstRunImportObserver();
 
   int import_result() const;
-  virtual void ImportCanceled();
-  virtual void ImportComplete();
   void RunLoop();
 
  private:
   void Finish();
+
+  // ImporterObserver:
+  virtual void ImportCompleted() OVERRIDE;
+  virtual void ImportCanceled() OVERRIDE;
+
   bool loop_running_;
   int import_result_;
+
   DISALLOW_COPY_AND_ASSIGN(FirstRunImportObserver);
 };
 

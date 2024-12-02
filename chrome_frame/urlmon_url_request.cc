@@ -21,9 +21,10 @@
 #include "chrome_frame/urlmon_url_request_private.h"
 #include "chrome_frame/urlmon_upload_data_stream.h"
 #include "chrome_frame/utils.h"
+#include "chrome/common/automation_messages.h"
 #include "net/base/load_flags.h"
-#include "net/http/http_util.h"
 #include "net/http/http_response_headers.h"
+#include "net/http/http_util.h"
 
 UrlmonUrlRequest::UrlmonUrlRequest()
     : pending_read_size_(0),
@@ -51,6 +52,10 @@ bool UrlmonUrlRequest::Start() {
   DCHECK(thread_ == 0 || thread_ == base::PlatformThread::CurrentId());
   thread_ = base::PlatformThread::CurrentId();
   status_.Start();
+  // Initialize the net::HostPortPair structure from the url initially. We may
+  // not receive the ip address of the host if the request is satisfied from
+  // the cache.
+  socket_address_ = net::HostPortPair::FromURL(GURL(url()));
   // The UrlmonUrlRequest instance can get destroyed in the context of
   // StartAsyncDownload if BindToStorage finishes synchronously with an error.
   // Grab a reference to protect against this.
@@ -162,7 +167,8 @@ void UrlmonUrlRequest::TerminateBind(TerminateBindCallback* callback) {
   cleanup_transaction_ = false;
   if (status_.get_state() == Status::DONE) {
     // Binding is stopped. Note result could be an error.
-    callback->Run(moniker_, bind_context_);
+    callback->Run(moniker_, bind_context_, upload_data_,
+                  request_headers_.c_str());
     delete callback;
   } else {
     // WORKING (ABORTING?). Save the callback.
@@ -281,6 +287,13 @@ STDMETHODIMP UrlmonUrlRequest::OnProgress(ULONG progress, ULONG max_progress,
   }
 
   switch (status_code) {
+    case BINDSTATUS_CONNECTING: {
+      if (status_text) {
+        socket_address_.set_host(WideToUTF8(status_text));
+      }
+      break;
+    }
+
     case BINDSTATUS_REDIRECTING: {
       // If we receive a redirect for the initial pending request initiated
       // when our document loads we should stash it away and inform Chrome
@@ -288,7 +301,7 @@ STDMETHODIMP UrlmonUrlRequest::OnProgress(ULONG progress, ULONG max_progress,
       ScopedComPtr<BindContextInfo> info;
       BindContextInfo::FromBindContext(bind_context_, info.Receive());
       DCHECK(info);
-      GURL previously_redirected(info ? info->url() : std::wstring());
+      GURL previously_redirected(info ? info->GetUrl() : std::wstring());
       if (GURL(status_text) != previously_redirected) {
         DVLOG(1) << __FUNCTION__ << me() << "redirect from " << url()
                  << " to " << status_text;
@@ -355,7 +368,8 @@ STDMETHODIMP UrlmonUrlRequest::OnStopBinding(HRESULT result, LPCWSTR error) {
 
   if (result == INET_E_TERMINATED_BIND) {
     if (terminate_requested()) {
-      terminate_bind_callback_->Run(moniker_, bind_context_);
+      terminate_bind_callback_->Run(moniker_, bind_context_, upload_data_,
+                                    request_headers_.c_str());
     } else {
       cleanup_transaction_ = true;
     }
@@ -437,7 +451,6 @@ STDMETHODIMP UrlmonUrlRequest::GetBindInfo(DWORD* bind_flags,
   if (load_flags_ & net::LOAD_BYPASS_CACHE)
     *bind_flags |= BINDF_GETNEWESTVERSION;
 
-
   if (LowerCaseEqualsASCII(method(), "get")) {
     bind_info->dwBindVerb = BINDVERB_GET;
   } else if (LowerCaseEqualsASCII(method(), "post")) {
@@ -471,6 +484,9 @@ STDMETHODIMP UrlmonUrlRequest::GetBindInfo(DWORD* bind_flags,
 
     if (get_upload_data(&bind_info->stgmedData.pstm) == S_OK) {
       bind_info->stgmedData.tymed = TYMED_ISTREAM;
+#pragma warning(disable:4244)
+      bind_info->cbstgmedData = post_data_len();
+#pragma warning(default:4244)
       DVLOG(1) << __FUNCTION__ << me() << method()
                << " request with " << base::Int64ToString(post_data_len())
                << " bytes. url=" << url();
@@ -567,11 +583,9 @@ STDMETHODIMP UrlmonUrlRequest::BeginningTransaction(const wchar_t* url,
 
   std::string new_headers;
   if (post_data_len() > 0) {
-    // Tack on the Content-Length header since when using an IStream type
-    // STGMEDIUM, it looks like it doesn't get set for us :(
-    new_headers = base::StringPrintf(
-        "Content-Length: %s\r\n",
-        base::Int64ToString(post_data_len()).c_str());
+    if (is_chunked_upload()) {
+      new_headers = base::StringPrintf("Transfer-Encoding: chunked\r\n");
+    }
   }
 
   if (!extra_headers().empty()) {
@@ -607,7 +621,7 @@ STDMETHODIMP UrlmonUrlRequest::BeginningTransaction(const wchar_t* url,
                 new_headers.size());
     }
   }
-
+  request_headers_ = new_headers;
   return hr;
 }
 
@@ -661,7 +675,8 @@ STDMETHODIMP UrlmonUrlRequest::OnResponse(DWORD dwResponseCode,
                     0,                    // size
                     base::Time(),         // last_modified
                     status_.get_redirection().utf8_url,
-                    status_.get_redirection().http_code);
+                    status_.get_redirection().http_code,
+                    socket_address_);
   return S_OK;
 }
 
@@ -1055,15 +1070,19 @@ void UrlmonUrlRequestManager::DownloadRequestInHost(int request_id) {
 }
 
 void UrlmonUrlRequestManager::BindTerminated(IMoniker* moniker,
-                                             IBindCtx* bind_ctx) {
-  // We use SendMessage and not PostMessage to make sure that if the
-  // notification window does not handle the message we won't leak
-  // the moniker.
-  ::SendMessage(notification_window_, WM_DOWNLOAD_IN_HOST,
-        reinterpret_cast<WPARAM>(bind_ctx),
-        reinterpret_cast<LPARAM>(moniker));
+                                             IBindCtx* bind_ctx,
+                                             IStream* post_data,
+                                             const char* request_headers) {
+  DownloadInHostParams* download_params = new DownloadInHostParams;
+  download_params->bind_ctx = bind_ctx;
+  download_params->moniker = moniker;
+  download_params->post_data = post_data;
+  if (request_headers) {
+    download_params->request_headers = request_headers;
+  }
+  ::PostMessage(notification_window_, WM_DOWNLOAD_IN_HOST,
+        reinterpret_cast<WPARAM>(download_params), 0);
 }
-
 
 void UrlmonUrlRequestManager::GetCookiesForUrl(const GURL& url, int cookie_id) {
   DWORD cookie_size = 0;
@@ -1153,13 +1172,13 @@ void UrlmonUrlRequestManager::StopAll() {
 void UrlmonUrlRequestManager::OnResponseStarted(int request_id,
     const char* mime_type, const char* headers, int size,
     base::Time last_modified, const std::string& redirect_url,
-    int redirect_status) {
+    int redirect_status, const net::HostPortPair& socket_address) {
   DCHECK_NE(request_id, -1);
   DVLOG(1) << __FUNCTION__;
   DCHECK(LookupRequest(request_id) != NULL);
   ++calling_delegate_;
   delegate_->OnResponseStarted(request_id, mime_type, headers, size,
-      last_modified, redirect_url, redirect_status);
+      last_modified, redirect_url, redirect_status, socket_address);
   --calling_delegate_;
 }
 
@@ -1223,7 +1242,7 @@ void UrlmonUrlRequestManager::AddPrivacyDataForUrl(
 
   bool fire_privacy_event = false;
 
-  if (privacy_info_.privacy_records.size() == 0)
+  if (privacy_info_.privacy_records.empty())
     flags |= PRIVACY_URLISTOPLEVEL;
 
   if (!privacy_info_.privacy_impacted) {

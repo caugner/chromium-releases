@@ -24,6 +24,7 @@ class Clipboard;
 namespace views {
 
 class View;
+class Window;
 
 // ViewsDelegate is an interface implemented by an object using the views
 // framework. It is used to obtain various high level application utilities
@@ -40,24 +41,36 @@ class ViewsDelegate {
 
   // Saves the position, size and maximized state for the window with the
   // specified name.
-  virtual void SaveWindowPlacement(const std::wstring& window_name,
+  virtual void SaveWindowPlacement(views::Window* window,
+                                   const std::wstring& window_name,
                                    const gfx::Rect& bounds,
                                    bool maximized) = 0;
 
   // Retrieves the saved position and size for the window with the specified
   // name.
-  virtual bool GetSavedWindowBounds(const std::wstring& window_name,
+  virtual bool GetSavedWindowBounds(views::Window* window,
+                                    const std::wstring& window_name,
                                     gfx::Rect* bounds) const = 0;
 
   // Retrieves the saved maximized state for the window with the specified
   // name.
-  virtual bool GetSavedMaximizedState(const std::wstring& window_name,
+  virtual bool GetSavedMaximizedState(views::Window* window,
+                                      const std::wstring& window_name,
                                       bool* maximized) const = 0;
 
   // Notify the delegate that an accessibility event has happened in
   // a particular view.
   virtual void NotifyAccessibilityEvent(
       views::View* view, AccessibilityTypes::Event event_type) = 0;
+
+  // For accessibility, notify the delegate that a menu item was focused
+  // so that alternate feedback (speech / magnified text) can be provided.
+  virtual void NotifyMenuItemFocused(
+      const std::wstring& menu_name,
+      const std::wstring& menu_item_name,
+      int item_index,
+      int item_count,
+      bool has_submenu) = 0;
 
 #if defined(OS_WIN)
   // Retrieves the default window icon to use for windows if none is specified.

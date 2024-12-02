@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,15 +13,9 @@
 #include "chrome/browser/debugger/devtools_manager.h"
 #include "chrome/browser/debugger/devtools_window.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/in_process_webkit/session_storage_namespace.h"
 #include "chrome/browser/load_notification_details.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/renderer_host/render_view_host.h"
-#include "chrome/browser/tab_contents/navigation_controller.h"
-#include "chrome/browser/tab_contents/navigation_entry.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
-#include "chrome/browser/tab_contents/tab_contents_view.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/themes/browser_theme_provider.h"
 #include "chrome/browser/ui/browser.h"
@@ -31,6 +25,12 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
+#include "content/browser/in_process_webkit/session_storage_namespace.h"
+#include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/tab_contents/navigation_controller.h"
+#include "content/browser/tab_contents/navigation_entry.h"
+#include "content/browser/tab_contents/tab_contents.h"
+#include "content/browser/tab_contents/tab_contents_view.h"
 #include "grit/generated_resources.h"
 
 const char DevToolsWindow::kDevToolsApp[] = "DevToolsApp";
@@ -69,7 +69,7 @@ DevToolsWindow::DevToolsWindow(Profile* profile,
   tab_contents_ =
       Browser::TabContentsFactory(profile, NULL, MSG_ROUTING_NONE, NULL, NULL);
   tab_contents_->tab_contents()->
-      render_view_host()->AllowBindings(BindingsPolicy::DOM_UI);
+      render_view_host()->AllowBindings(BindingsPolicy::WEB_UI);
   tab_contents_->controller().LoadURL(
       GetDevToolsUrl(), GURL(), PageTransition::START_PAGE);
 
@@ -126,12 +126,18 @@ void DevToolsWindow::InspectedTabClosing() {
   }
 }
 
+void DevToolsWindow::TabReplaced(TabContentsWrapper* new_tab) {
+  DCHECK_EQ(profile_, new_tab->profile());
+  inspected_tab_ = new_tab->tab_contents();
+}
+
 void DevToolsWindow::Show(DevToolsToggleAction action) {
   if (docked_) {
     Browser* inspected_browser;
     int inspected_tab_index;
     // Tell inspected browser to update splitter and switch to inspected panel.
-    if (FindInspectedBrowserAndTabIndex(&inspected_browser,
+    if (!IsInspectedBrowserPopup() &&
+        FindInspectedBrowserAndTabIndex(&inspected_browser,
                                         &inspected_tab_index)) {
       BrowserWindow* inspected_window = inspected_browser->window();
       tab_contents_->tab_contents()->set_delegate(this);
@@ -181,7 +187,7 @@ void DevToolsWindow::Activate() {
 void DevToolsWindow::SetDocked(bool docked) {
   if (docked_ == docked)
     return;
-  if (docked && !GetInspectedBrowserWindow()) {
+  if (docked && (!GetInspectedBrowserWindow() || IsInspectedBrowserPopup())) {
     // Cannot dock, avoid window flashing due to close-reopen cycle.
     return;
   }
@@ -216,7 +222,7 @@ void DevToolsWindow::CreateDevToolsBrowser() {
   wp_key.append("_");
   wp_key.append(kDevToolsApp);
 
-  PrefService* prefs = g_browser_process->local_state();
+  PrefService* prefs = profile_->GetPrefs();
   if (!prefs->FindPreference(wp_key.c_str())) {
     prefs->RegisterDictionaryPref(wp_key.c_str());
   }
@@ -260,18 +266,27 @@ BrowserWindow* DevToolsWindow::GetInspectedBrowserWindow() {
       browser->window() : NULL;
 }
 
+bool DevToolsWindow::IsInspectedBrowserPopup() {
+  Browser* browser = NULL;
+  int tab;
+  if (!FindInspectedBrowserAndTabIndex(&browser, &tab))
+    return false;
+
+  return (browser->type() & Browser::TYPE_POPUP) != 0;
+}
+
 void DevToolsWindow::SetAttachedWindow() {
-  tab_contents_->render_view_host()->
-      ExecuteJavascriptInWebFrame(
-          L"", docked_ ? L"WebInspector.setAttachedWindow(true);" :
-                         L"WebInspector.setAttachedWindow(false);");
+  tab_contents_->render_view_host()->ExecuteJavascriptInWebFrame(
+      string16(),
+      docked_ ? ASCIIToUTF16("WebInspector.setAttachedWindow(true);")
+              : ASCIIToUTF16("WebInspector.setAttachedWindow(false);"));
 }
 
 
 void DevToolsWindow::AddDevToolsExtensionsToClient() {
   if (inspected_tab_) {
     FundamentalValue tabId(inspected_tab_->controller().session_id().id());
-    CallClientFunction(L"WebInspector.setInspectedTabId", tabId);
+    CallClientFunction(ASCIIToUTF16("WebInspector.setInspectedTabId"), tabId);
   }
   ListValue results;
   const ExtensionService* extension_service =
@@ -291,16 +306,17 @@ void DevToolsWindow::AddDevToolsExtensionsToClient() {
         new StringValue((*extension)->devtools_url().spec()));
     results.Append(extension_info);
   }
-  CallClientFunction(L"WebInspector.addExtensions", results);
+  CallClientFunction(ASCIIToUTF16("WebInspector.addExtensions"), results);
 }
 
-void DevToolsWindow::CallClientFunction(const std::wstring& function_name,
-                                         const Value& arg) {
+void DevToolsWindow::CallClientFunction(const string16& function_name,
+                                        const Value& arg) {
   std::string json;
   base::JSONWriter::Write(&arg, false, &json);
-  std::wstring javascript = function_name + L"(" + UTF8ToWide(json) + L");";
+  string16 javascript = function_name + char16('(') + UTF8ToUTF16(json) +
+      ASCIIToUTF16(");");
   tab_contents_->render_view_host()->
-      ExecuteJavascriptInWebFrame(L"", javascript);
+      ExecuteJavascriptInWebFrame(string16(), javascript);
 }
 
 void DevToolsWindow::Observe(NotificationType type,
@@ -337,13 +353,12 @@ void DevToolsWindow::DoAction() {
   // TODO: these messages should be pushed through the WebKit API instead.
   switch (action_on_load_) {
     case DEVTOOLS_TOGGLE_ACTION_SHOW_CONSOLE:
-      tab_contents_->render_view_host()->
-          ExecuteJavascriptInWebFrame(L"", L"WebInspector.showConsole();");
+      tab_contents_->render_view_host()->ExecuteJavascriptInWebFrame(
+          string16(), ASCIIToUTF16("WebInspector.showConsole();"));
       break;
     case DEVTOOLS_TOGGLE_ACTION_INSPECT:
-      tab_contents_->render_view_host()->
-          ExecuteJavascriptInWebFrame(
-              L"", L"WebInspector.toggleSearchingForNode();");
+      tab_contents_->render_view_host()->ExecuteJavascriptInWebFrame(
+          string16(), ASCIIToUTF16("WebInspector.toggleSearchingForNode();"));
     case DEVTOOLS_TOGGLE_ACTION_NONE:
       // Do nothing.
       break;
@@ -392,7 +407,7 @@ void DevToolsWindow::UpdateTheme() {
       SkColorToRGBAString(color_toolbar).c_str(),
       SkColorToRGBAString(color_tab_text).c_str());
   tab_contents_->render_view_host()->
-      ExecuteJavascriptInWebFrame(L"", UTF8ToWide(command));
+      ExecuteJavascriptInWebFrame(string16(), UTF8ToUTF16(command));
 }
 
 void DevToolsWindow::AddNewContents(TabContents* source,

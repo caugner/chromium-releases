@@ -18,7 +18,7 @@ cr.define('options.proxyexceptions', function() {
   ProxyExceptions.prototype = {
     __proto__: List.prototype,
 
-    pref: 'cros.proxy.ignorelist',
+    pref: 'cros.session.proxy.ignorelist',
 
     /** @inheritDoc */
     decorate: function() {
@@ -92,7 +92,7 @@ cr.define('options.proxyexceptions', function() {
      * Updates backend.
      */
     updateBackend_: function() {
-      Preferences.setObjectPref(this.pref, this.dataModel.slice());
+      Preferences.setListPref(this.pref, this.dataModel.slice());
     }
   };
 

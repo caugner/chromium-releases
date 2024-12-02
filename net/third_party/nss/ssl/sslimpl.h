@@ -39,7 +39,7 @@
  * the terms of any one of the MPL, the GPL or the LGPL.
  *
  * ***** END LICENSE BLOCK ***** */
-/* $Id: sslimpl.h,v 1.77 2010/02/10 00:33:50 wtc%google.com Exp $ */
+/* $Id: sslimpl.h,v 1.77.2.1 2010/07/31 04:33:52 wtc%google.com Exp $ */
 
 #ifndef __sslimpl_h_
 #define __sslimpl_h_
@@ -473,6 +473,16 @@ typedef SECStatus (*SSLCompressor)(void *               context,
                                    int                  inlen);
 typedef SECStatus (*SSLDestroy)(void *context, PRBool freeit);
 
+#ifdef NSS_PLATFORM_CLIENT_AUTH
+#if defined(XP_WIN32)
+typedef PCERT_KEY_CONTEXT PlatformKey;
+#elif defined(XP_MACOSX)
+typedef SecKeyRef PlatformKey;
+#else
+typedef void *PlatformKey;
+#endif
+#endif
+
 
 
 /*
@@ -834,15 +844,6 @@ const ssl3CipherSuiteDef *suite_def;
     PRBool                nextProtoNego;/* Our peer has sent this extension */
 } SSL3HandshakeState;
 
-#ifdef NSS_PLATFORM_CLIENT_AUTH
-#if defined(XP_WIN32)
-typedef PCERT_KEY_CONTEXT PlatformKey;
-#elif defined(XP_MACOSX)
-typedef SecKeyRef PlatformKey;
-#else
-typedef void *PlatformKey;
-#endif
-#endif
 
 
 /*

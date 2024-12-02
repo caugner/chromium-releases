@@ -6,8 +6,8 @@
 
 #include "base/logging.h"
 #include "base/utf_string_conversions.h"
-#include "gfx/canvas.h"
-#include "gfx/insets.h"
+#include "ui/gfx/canvas.h"
+#include "ui/gfx/insets.h"
 
 namespace views {
 
@@ -103,8 +103,8 @@ gfx::Point ImageView::ComputeImageOrigin(const gfx::Size& image_size) const {
   return gfx::Point(x, y);
 }
 
-void ImageView::Paint(gfx::Canvas* canvas) {
-  View::Paint(canvas);
+void ImageView::OnPaint(gfx::Canvas* canvas) {
+  View::OnPaint(canvas);
 
   if (image_.empty())
     return;

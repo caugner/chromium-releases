@@ -93,11 +93,28 @@ AutomatedUITestBase.CloseTab
 
 # See http://crbug.com/57717
 ResourceDispatcherTest.CrossSiteFailedRequest
+ResourceDispatcherTest.RespectNoSniffDirective
+
+# Valgrind internal error: received SIGSERV. http://crbug.com/51716
+AutomatedUITestBase.Navigate
+AutomationProxyTest.AcceleratorDownloads
+AutomationProxyTest2.GetActiveTabIndex
+AutomationProxyTest5.TestLifetimeOfDomAutomationController
+ErrorPageTest.IFrameDNSError_Basic
+IFrameTest.Crash
+MetricsServiceTest.CrashRenderers
+PPAPITest.Buffer
+PPAPITest.FileIO
+PreferenceServiceTest.PreservedWindowPlacementIsLoaded
 
 # Valgrind dies on assertion, see http://crbug.com/58145
+AutomatedUITestBase.Home
 AutomationProxyTest.GetTabCount
-SunSpiderTest.Perf
+AutomationProxyTest3.FrameDocumentCanBeAccessed
 DromaeoTest.DOMCorePerf
+LoginPromptTest.CancelRedundantAuths
+MetricsServiceTest.CloseRenderersNormally
+SunSpiderTest.Perf
 
 # Can't load a nib under Valgrind, see http://crbug.com/58124
 ImagesTest.AnimatedGIFs
@@ -117,3 +134,10 @@ DOMStorageTest.RootLayoutTests
 
 # Hangs, see http://crbug.com/63514
 ErrorPageTest.Page404_GoBack
+
+# Hangs, see http://crbug.com/66414
+# > connect /var/tmp/ChromeTestingInterface: Connection refused
+NamedInterfaceTest.BasicNamedInterface
+
+# Fails a Check most of the time, see http://crbug.com/74473
+UILayoutTest.MediaUILayoutTest

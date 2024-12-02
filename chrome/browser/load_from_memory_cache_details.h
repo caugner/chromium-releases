@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,32 +13,18 @@ class LoadFromMemoryCacheDetails {
  public:
    LoadFromMemoryCacheDetails(
        const GURL& url,
-       const std::string& frame_origin,
-       const std::string& main_frame_origin,
        int pid,
        int cert_id,
-       int cert_status)
-       : url_(url),
-         frame_origin_(frame_origin),
-         main_frame_origin_(main_frame_origin),
-         pid_(pid),
-         cert_id_(cert_id),
-         cert_status_(cert_status)
-  { }
-
-  ~LoadFromMemoryCacheDetails() { }
+       int cert_status);
+  ~LoadFromMemoryCacheDetails();
 
   const GURL& url() const { return url_; }
-  const std::string& frame_origin() const { return frame_origin_; }
-  const std::string& main_frame_origin() const { return main_frame_origin_; }
   int pid() const { return pid_; }
   int ssl_cert_id() const { return cert_id_; }
   int ssl_cert_status() const { return cert_status_; }
 
  private:
   GURL url_;
-  std::string frame_origin_;
-  std::string main_frame_origin_;
   int pid_;
   int cert_id_;
   int cert_status_;

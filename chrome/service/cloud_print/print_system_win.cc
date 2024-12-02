@@ -6,18 +6,22 @@
 
 #include <objidl.h>
 #include <winspool.h>
+#if defined(_WIN32_WINNT)
+#undef _WIN32_WINNT
+#endif  // defined(_WIN32_WINNT)
+#define _WIN32_WINNT _WIN32_WINNT_WIN7
+#include <xpsprint.h>
 
 #include "base/file_path.h"
+#include "base/file_util.h"
 #include "base/scoped_ptr.h"
 #include "base/utf_string_conversions.h"
 #include "base/win/object_watcher.h"
 #include "base/win/scoped_bstr.h"
 #include "base/win/scoped_comptr.h"
 #include "base/win/scoped_hdc.h"
-#include "chrome/service/cloud_print/cloud_print_consts.h"
 #include "chrome/service/service_process.h"
 #include "chrome/service/service_utility_process_host.h"
-#include "gfx/rect.h"
 #include "grit/generated_resources.h"
 #include "printing/backend/print_backend.h"
 #include "printing/backend/print_backend_consts.h"
@@ -25,6 +29,7 @@
 #include "printing/native_metafile.h"
 #include "printing/page_range.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/gfx/rect.h"
 
 using base::win::ScopedBstr;
 using base::win::ScopedComPtr;
@@ -250,7 +255,8 @@ class PrintSystemWin : public PrintSystem {
   // PrintSystem implementation.
   virtual PrintSystemResult Init();
 
-  virtual void EnumeratePrinters(printing::PrinterList* printer_list);
+  virtual PrintSystem::PrintSystemResult EnumeratePrinters(
+      printing::PrinterList* printer_list);
 
   virtual void GetPrinterCapsAndDefaults(
       const std::string& printer_name,
@@ -365,10 +371,15 @@ class PrintSystemWin : public PrintSystem {
    private:
     // We use a Core class because we want a separate RefCountedThreadSafe
     // implementation for ServiceUtilityProcessHost::Client.
-    class Core : public ServiceUtilityProcessHost::Client {
+    class Core : public ServiceUtilityProcessHost::Client,
+                 public base::win::ObjectWatcher::Delegate {
      public:
       Core()
-          : last_page_printed_(-1), job_id_(-1), delegate_(NULL), saved_dc_(0) {
+          : last_page_printed_(-1),
+            job_id_(-1),
+            delegate_(NULL),
+            saved_dc_(0),
+            should_couninit_(false) {
       }
       ~Core() {
       }
@@ -384,47 +395,54 @@ class PrintSystemWin : public PrintSystem {
           return false;
         }
         last_page_printed_ = -1;
-        // We only support PDFs for now.
-        if (print_data_mime_type != "application/pdf") {
+        // We only support PDF and XPS documents for now.
+        if (print_data_mime_type == "application/pdf") {
+          DevMode pt_dev_mode;
+          HRESULT hr = PrintTicketToDevMode(printer_name, print_ticket,
+                                            &pt_dev_mode);
+          if (FAILED(hr)) {
+            NOTREACHED();
+            return false;
+          }
+
+          HDC dc = CreateDC(L"WINSPOOL", UTF8ToWide(printer_name).c_str(),
+                            NULL, pt_dev_mode.dm_);
+          if (!dc) {
+            NOTREACHED();
+            return false;
+          }
+          hr = E_FAIL;
+          DOCINFO di = {0};
+          di.cbSize = sizeof(DOCINFO);
+          std::wstring doc_name = UTF8ToWide(job_title);
+          di.lpszDocName = doc_name.c_str();
+          job_id_ = StartDoc(dc, &di);
+          if (job_id_ <= 0)
+            return false;
+
+          printer_dc_.Set(dc);
+          int printer_dpi = ::GetDeviceCaps(printer_dc_.Get(), LOGPIXELSX);
+          saved_dc_ = SaveDC(printer_dc_.Get());
+          SetGraphicsMode(printer_dc_.Get(), GM_ADVANCED);
+          XFORM xform = {0};
+          xform.eM11 = xform.eM22 = static_cast<float>(printer_dpi) /
+              static_cast<float>(GetDeviceCaps(GetDC(NULL), LOGPIXELSX));
+          ModifyWorldTransform(printer_dc_.Get(), &xform, MWT_LEFTMULTIPLY);
+          print_data_file_path_ = print_data_file_path;
+          delegate_ = delegate;
+          RenderNextPDFPages();
+        } else if (print_data_mime_type == "application/vnd.ms-xpsdocument") {
+          bool ret = PrintXPSDocument(printer_name,
+                                      job_title,
+                                      print_data_file_path,
+                                      print_ticket);
+          if (ret)
+            delegate_ = delegate;
+          return ret;
+        } else {
           NOTREACHED();
           return false;
         }
-
-        DevMode pt_dev_mode;
-        HRESULT hr = PrintTicketToDevMode(printer_name, print_ticket,
-                                          &pt_dev_mode);
-        if (FAILED(hr)) {
-          NOTREACHED();
-          return false;
-        }
-
-        HDC dc = CreateDC(L"WINSPOOL", UTF8ToWide(printer_name).c_str(),
-                          NULL, pt_dev_mode.dm_);
-        if (!dc) {
-          NOTREACHED();
-          return false;
-        }
-        hr = E_FAIL;
-        DOCINFO di = {0};
-        di.cbSize = sizeof(DOCINFO);
-        std::wstring doc_name = UTF8ToWide(job_title);
-        di.lpszDocName = doc_name.c_str();
-        job_id_ = StartDoc(dc, &di);
-        if (job_id_ <= 0)
-          return false;
-
-        printer_dc_.Set(dc);
-
-        int printer_dpi = ::GetDeviceCaps(printer_dc_.Get(), LOGPIXELSX);
-        saved_dc_ = SaveDC(printer_dc_.Get());
-        SetGraphicsMode(printer_dc_.Get(), GM_ADVANCED);
-        XFORM xform = {0};
-        xform.eM11 = xform.eM22 = static_cast<float>(printer_dpi) /
-            static_cast<float>(GetDeviceCaps(GetDC(NULL), LOGPIXELSX));
-        ModifyWorldTransform(printer_dc_.Get(), &xform, MWT_LEFTMULTIPLY);
-        print_data_file_path_ = print_data_file_path;
-        delegate_ = delegate;
-        RenderNextPDFPages();
         return true;
       }
 
@@ -441,6 +459,38 @@ class PrintSystemWin : public PrintSystem {
         else
           RenderNextPDFPages();
       }
+
+      // base::win::ObjectWatcher::Delegate inplementation.
+      virtual void OnObjectSignaled(HANDLE object) {
+        DCHECK(xps_print_job_);
+        DCHECK(object == job_progress_event_.Get());
+        ResetEvent(job_progress_event_.Get());
+        if (!delegate_)
+          return;
+        XPS_JOB_STATUS job_status = {0};
+        xps_print_job_->GetJobStatus(&job_status);
+        bool done = false;
+        if ((job_status.completion == XPS_JOB_CANCELLED) ||
+            (job_status.completion == XPS_JOB_FAILED)) {
+          delegate_->OnJobSpoolFailed();
+          done = true;
+        } else if (job_status.jobId ||
+                   (job_status.completion == XPS_JOB_COMPLETED)) {
+          // Note: In the case of the XPS document being printed to the
+          // Microsoft XPS Document Writer, it seems to skip spooling the job
+          // and goes to the completed state without ever assigning a job id.
+          delegate_->OnJobSpoolSucceeded(job_status.jobId);
+          done = true;
+        } else {
+          job_progress_watcher_.StopWatching();
+          job_progress_watcher_.StartWatching(job_progress_event_.Get(), this);
+        }
+        if (done && should_couninit_) {
+          CoUninitialize();
+          should_couninit_ = false;
+        }
+      }
+
       virtual void OnRenderPDFPagesToMetafileFailed() {
         PrintJobDone();
       }
@@ -502,6 +552,67 @@ class PrintSystemWin : public PrintSystem {
           utility_host.release();
         }
       }
+      bool PrintXPSDocument(const std::string& printer_name,
+                            const std::string& job_title,
+                            const FilePath& print_data_file_path,
+                            const std::string& print_ticket) {
+        if (!printing::XPSPrintModule::Init())
+          return false;
+        job_progress_event_.Set(CreateEvent(NULL, TRUE, FALSE, NULL));
+        if (!job_progress_event_.Get())
+          return false;
+        should_couninit_ = SUCCEEDED(CoInitializeEx(NULL,
+                                                    COINIT_MULTITHREADED));
+        ScopedComPtr<IXpsPrintJobStream> doc_stream;
+        ScopedComPtr<IXpsPrintJobStream> print_ticket_stream;
+        bool ret = false;
+        // Use nested SUCCEEDED checks because we want a common return point.
+        if (SUCCEEDED(printing::XPSPrintModule::StartXpsPrintJob(
+                UTF8ToWide(printer_name).c_str(),
+                UTF8ToWide(job_title).c_str(),
+                NULL,
+                job_progress_event_.Get(),
+                NULL,
+                NULL,
+                NULL,
+                xps_print_job_.Receive(),
+                doc_stream.Receive(),
+                print_ticket_stream.Receive()))) {
+          ULONG bytes_written = 0;
+          if (SUCCEEDED(print_ticket_stream->Write(print_ticket.c_str(),
+                                                   print_ticket.length(),
+                                                   &bytes_written))) {
+            DCHECK(bytes_written == print_ticket.length());
+            if (SUCCEEDED(print_ticket_stream->Close())) {
+              std::string document_data;
+              file_util::ReadFileToString(print_data_file_path, &document_data);
+              bytes_written = 0;
+              if (SUCCEEDED(doc_stream->Write(document_data.c_str(),
+                                              document_data.length(),
+                                              &bytes_written))) {
+                DCHECK(bytes_written == document_data.length());
+                if (SUCCEEDED(doc_stream->Close())) {
+                  job_progress_watcher_.StartWatching(job_progress_event_.Get(),
+                                                      this);
+                  ret = true;
+                }
+              }
+            }
+          }
+        }
+        if (!ret) {
+          if (xps_print_job_) {
+            xps_print_job_->Cancel();
+            xps_print_job_.Release();
+          }
+          if (should_couninit_) {
+            CoUninitialize();
+            should_couninit_ = false;
+          }
+        }
+        return ret;
+      }
+
       // Some Cairo-generated PDFs from Chrome OS result in huge metafiles.
       // So the PageCountPerBatch is set to 1 for now.
       // TODO(sanjeevr): Figure out a smarter way to determine the pages per
@@ -514,6 +625,10 @@ class PrintSystemWin : public PrintSystem {
       int saved_dc_;
       base::win::ScopedHDC printer_dc_;
       FilePath print_data_file_path_;
+      base::win::ScopedHandle job_progress_event_;
+      base::win::ObjectWatcher job_progress_watcher_;
+      ScopedComPtr<IXpsPrintJob> xps_print_job_;
+      bool should_couninit_;
       DISALLOW_COPY_AND_ASSIGN(JobSpoolerWin::Core);
     };
     scoped_refptr<Core> core_;
@@ -587,6 +702,8 @@ class PrintSystemWin : public PrintSystem {
   virtual PrintSystem::PrinterWatcher* CreatePrinterWatcher(
       const std::string& printer_name);
   virtual PrintSystem::JobSpooler* CreateJobSpooler();
+  virtual std::string GetSupportedMimeTypes();
+
 
  private:
   scoped_refptr<printing::PrintBackend> print_backend_;
@@ -605,8 +722,10 @@ PrintSystem::PrintSystemResult PrintSystemWin::Init() {
   return PrintSystemResult(true, std::string());
 }
 
-void PrintSystemWin::EnumeratePrinters(printing::PrinterList* printer_list) {
-  print_backend_->EnumeratePrinters(printer_list);
+PrintSystem::PrintSystemResult PrintSystemWin::EnumeratePrinters(
+    printing::PrinterList* printer_list) {
+  bool ret = print_backend_->EnumeratePrinters(printer_list);
+  return PrintSystemResult(ret, std::string());
 }
 
 void PrintSystemWin::GetPrinterCapsAndDefaults(
@@ -665,8 +784,8 @@ bool PrintSystemWin::ValidatePrintTicket(
 }
 
 bool PrintSystemWin::GetJobDetails(const std::string& printer_name,
-                                       PlatformJobId job_id,
-                                       PrintJobDetails *job_details) {
+                                   PlatformJobId job_id,
+                                   PrintJobDetails *job_details) {
   DCHECK(job_details);
   HANDLE printer_handle = NULL;
   std::wstring printer_name_wide = UTF8ToWide(printer_name);
@@ -724,6 +843,13 @@ PrintSystem::JobSpooler*
 PrintSystemWin::CreateJobSpooler() {
   return new JobSpoolerWin();
 }
+
+std::string PrintSystemWin::GetSupportedMimeTypes() {
+  if (printing::XPSPrintModule::Init())
+    return "application/vnd.ms-xpsdocument,application/pdf";
+  return "application/pdf";
+}
+
 
 std::string PrintSystem::GenerateProxyId() {
   GUID proxy_id = {0};

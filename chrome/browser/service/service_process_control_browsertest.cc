@@ -25,6 +25,13 @@ class ServiceProcessControlBrowserTest
     ServiceProcessControlManager::GetInstance()->Shutdown();
   }
 
+#if defined(OS_MACOSX)
+  virtual void TearDown() {
+    // ForceServiceProcessShutdown removes the process from launchd on Mac.
+    ForceServiceProcessShutdown("", 0);
+  }
+#endif  // OS_MACOSX
+
  protected:
   void LaunchServiceProcessControl() {
     ServiceProcessControl* process =
@@ -71,7 +78,8 @@ class ServiceProcessControlBrowserTest
   }
 
   void ProcessControlLaunched() {
-    base::ProcessId service_pid = GetServiceProcessPid();
+    base::ProcessId service_pid;
+    EXPECT_TRUE(GetServiceProcessData(NULL, &service_pid));
     EXPECT_NE(static_cast<base::ProcessId>(0), service_pid);
     EXPECT_TRUE(base::OpenProcessHandleWithAccess(
         service_pid,
@@ -96,7 +104,6 @@ class ServiceProcessControlBrowserTest
   base::ProcessHandle service_process_handle_;
 };
 
-#if defined(OS_WIN)
 // They way that the IPC is implemented only works on windows. This has to
 // change when we implement a different scheme for IPC.
 // Times out flakily, http://crbug.com/70076.
@@ -186,23 +193,28 @@ IN_PROC_BROWSER_TEST_F(ServiceProcessControlBrowserTest, DieOnDisconnect) {
   WaitForShutdown();
 }
 
-IN_PROC_BROWSER_TEST_F(ServiceProcessControlBrowserTest, ForceShutdown) {
+//http://code.google.com/p/chromium/issues/detail?id=70793
+IN_PROC_BROWSER_TEST_F(ServiceProcessControlBrowserTest,
+                       DISABLED_ForceShutdown) {
   // Launch the service process.
   LaunchServiceProcessControl();
   // Make sure we are connected to the service process.
   EXPECT_TRUE(process()->is_connected());
+  base::ProcessId service_pid;
+  EXPECT_TRUE(GetServiceProcessData(NULL, &service_pid));
+  EXPECT_NE(static_cast<base::ProcessId>(0), service_pid);
   chrome::VersionInfo version_info;
-  ForceServiceProcessShutdown(version_info.Version());
+  ForceServiceProcessShutdown(version_info.Version(), service_pid);
   WaitForShutdown();
 }
 
 IN_PROC_BROWSER_TEST_F(ServiceProcessControlBrowserTest, CheckPid) {
-  EXPECT_EQ(0, GetServiceProcessPid());
+  base::ProcessId service_pid;
+  EXPECT_FALSE(GetServiceProcessData(NULL, &service_pid));
   // Launch the service process.
   LaunchServiceProcessControl();
-  EXPECT_NE(static_cast<base::ProcessId>(0), GetServiceProcessPid());
+  EXPECT_TRUE(GetServiceProcessData(NULL, &service_pid));
+  EXPECT_NE(static_cast<base::ProcessId>(0), service_pid);
 }
-
-#endif
 
 DISABLE_RUNNABLE_METHOD_REFCOUNT(ServiceProcessControlBrowserTest);

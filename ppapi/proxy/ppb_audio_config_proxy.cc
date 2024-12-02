@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,10 +14,10 @@ namespace proxy {
 
 class AudioConfig : public PluginResource {
  public:
-  AudioConfig(PP_Instance instance,
+  AudioConfig(const HostResource& resource,
               PP_AudioSampleRate sample_rate,
               uint32_t sample_frame_count)
-      : PluginResource(instance),
+      : PluginResource(resource),
         sample_rate_(sample_rate),
         sample_frame_count_(sample_frame_count) {
   }
@@ -41,19 +41,18 @@ namespace {
 PP_Resource CreateStereo16bit(PP_Instance instance,
                               PP_AudioSampleRate sample_rate,
                               uint32_t sample_frame_count) {
-  PP_Resource result = 0;
+  HostResource resource;
   PluginDispatcher::GetForInstance(instance)->Send(
       new PpapiHostMsg_PPBAudioConfig_Create(
           INTERFACE_ID_PPB_AUDIO_CONFIG, instance,
           static_cast<int32_t>(sample_rate), sample_frame_count,
-          &result));
-  if (!result)
+          &resource));
+  if (resource.is_null())
     return 0;
 
   linked_ptr<AudioConfig> object(
-      new AudioConfig(instance, sample_rate, sample_frame_count));
-  PluginResourceTracker::GetInstance()->AddResource(result, object);
-  return result;
+      new AudioConfig(resource, sample_rate, sample_frame_count));
+  return PluginResourceTracker::GetInstance()->AddResource(object);
 }
 
 uint32_t RecommendSampleFrameCount(PP_AudioSampleRate sample_rate,
@@ -96,6 +95,11 @@ const PPB_AudioConfig audio_config_interface = {
   &GetSampleFrameCount
 };
 
+InterfaceProxy* CreateAudioConfigProxy(Dispatcher* dispatcher,
+                                       const void* target_interface) {
+  return new PPB_AudioConfig_Proxy(dispatcher, target_interface);
+}
+
 }  // namespace
 
 PPB_AudioConfig_Proxy::PPB_AudioConfig_Proxy(Dispatcher* dispatcher,
@@ -106,12 +110,16 @@ PPB_AudioConfig_Proxy::PPB_AudioConfig_Proxy(Dispatcher* dispatcher,
 PPB_AudioConfig_Proxy::~PPB_AudioConfig_Proxy() {
 }
 
-const void* PPB_AudioConfig_Proxy::GetSourceInterface() const {
-  return &audio_config_interface;
-}
-
-InterfaceID PPB_AudioConfig_Proxy::GetInterfaceId() const {
-  return INTERFACE_ID_PPB_AUDIO_CONFIG;
+// static
+const InterfaceProxy::Info* PPB_AudioConfig_Proxy::GetInfo() {
+  static const Info info = {
+    &audio_config_interface,
+    PPB_AUDIO_CONFIG_INTERFACE,
+    INTERFACE_ID_PPB_AUDIO_CONFIG,
+    false,
+    &CreateAudioConfigProxy,
+  };
+  return &info;
 }
 
 bool PPB_AudioConfig_Proxy::OnMessageReceived(const IPC::Message& msg) {
@@ -129,10 +137,11 @@ bool PPB_AudioConfig_Proxy::OnMessageReceived(const IPC::Message& msg) {
 void PPB_AudioConfig_Proxy::OnMsgCreateStereo16Bit(PP_Instance instance,
                                                    int32_t sample_rate,
                                                    uint32_t sample_frame_count,
-                                                   PP_Resource* result) {
-  *result = ppb_audio_config_target()->CreateStereo16Bit(
-      instance, static_cast<PP_AudioSampleRate>(sample_rate),
-      sample_frame_count);
+                                                   HostResource* result) {
+  result->SetHostResource(instance,
+      ppb_audio_config_target()->CreateStereo16Bit(
+          instance, static_cast<PP_AudioSampleRate>(sample_rate),
+          sample_frame_count));
 }
 
 void PPB_AudioConfig_Proxy::OnMsgRecommendSampleFrameCount(

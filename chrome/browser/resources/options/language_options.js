@@ -6,10 +6,8 @@
 // in js/cr/ui/notification.js .
 
 cr.define('options', function() {
-
   const OptionsPage = options.OptionsPage;
-  const AddLanguageOverlay = options.language.AddLanguageOverlay;
-  const LanguageList = options.language.LanguageList;
+  const LanguageList = options.LanguageList;
 
   // Some input methods like Chinese Pinyin have config pages.
   // This is the map of the input method names to their config page names.
@@ -30,7 +28,7 @@ cr.define('options', function() {
    * @constructor
    */
   function LanguageOptions(model) {
-    OptionsPage.call(this, 'language', localStrings.getString('languagePage'),
+    OptionsPage.call(this, 'languages', templateData.languagePageTabTitle,
                      'languagePage');
   }
 
@@ -74,15 +72,12 @@ cr.define('options', function() {
           var addLanguageCode = match[1];
           $('language-options-list').addLanguage(addLanguageCode);
         } else {
-          OptionsPage.showOverlay('addLanguageOverlay');
+          OptionsPage.navigateToPage('addLanguage');
         }
       };
       // Set up remove button.
       $('language-options-remove-button').addEventListener('click',
           this.handleRemoveButtonClick_.bind(this));
-
-      // Setup add language overlay page.
-      OptionsPage.registerOverlay(AddLanguageOverlay.getInstance());
 
       if (cr.isChromeOS) {
         // Listen to user clicks on the add language list.
@@ -136,7 +131,10 @@ cr.define('options', function() {
                                this.handleCheckboxClick_.bind(this));
         var label = document.createElement('label');
         label.appendChild(input);
-        label.appendChild(document.createTextNode(inputMethod.displayName));
+        // Adding a space between the checkbox and the text. This is a bit
+        // dirty, but we rely on a space character for all other checkboxes.
+        label.appendChild(document.createTextNode(
+            ' ' + inputMethod.displayName));
         label.style.display = 'none';
         label.languageCodeSet = inputMethod.languageCodeSet;
         // Add the configure button if the config page is present for this
@@ -170,7 +168,7 @@ cr.define('options', function() {
         // as checkbox click.
         e.preventDefault();
         chrome.send('inputMethodOptionsOpen', [inputMethodId]);
-        OptionsPage.showPageByName(pageName);
+        OptionsPage.navigateToPage(pageName);
       }
       return button;
     },
@@ -521,7 +519,7 @@ cr.define('options', function() {
         this.updateCheckboxesFromPreloadEngines_();
         this.savePreloadEnginesPref_();
       }
-      OptionsPage.clearOverlays();
+      OptionsPage.closeOverlay();
     },
 
     /**
@@ -533,7 +531,7 @@ cr.define('options', function() {
       if (selectedIndex >= 0) {
         var selection = languagesSelect.options[selectedIndex];
         $('language-options-list').addLanguage(String(selection.value));
-        OptionsPage.clearOverlays();
+        OptionsPage.closeOverlay();
       }
     },
 
@@ -790,5 +788,4 @@ cr.define('options', function() {
   return {
     LanguageOptions: LanguageOptions
   };
-
 });

@@ -55,10 +55,10 @@ class ConnectionToClient :
 
   virtual ~ConnectionToClient();
 
-  virtual void Init(protocol::Session* session);
+  virtual void Init(Session* session);
 
   // Returns the connection in use.
-  virtual protocol::Session* session();
+  virtual Session* session();
 
   // Disconnect the client connection. This method is allowed to be called
   // more than once and calls after the first one will be ignored.
@@ -72,21 +72,25 @@ class ConnectionToClient :
   // Return pointer to ClientStub.
   virtual ClientStub* client_stub();
 
- protected:
-  // Protected constructor used by unit test.
-  ConnectionToClient();
+  // Called when the host accepts the client authentication.
+  void OnClientAuthenticated();
 
  private:
   // Callback for protocol Session.
-  void OnSessionStateChange(protocol::Session::State state);
+  void OnSessionStateChange(Session::State state);
 
   // Process a libjingle state change event on the |loop_|.
-  void StateChangeTask(protocol::Session::State state);
+  void StateChangeTask(Session::State state);
 
   void OnClosed();
 
+  // Initially false, this is set to true once the client has authenticated
+  // properly. When this is false, many client messages (like input events)
+  // will be ignored.
+  bool client_authenticated_;
+
   // The libjingle channel used to send and receive data from the remote client.
-  scoped_refptr<protocol::Session> session_;
+  scoped_refptr<Session> session_;
 
   scoped_ptr<VideoWriter> video_writer_;
 

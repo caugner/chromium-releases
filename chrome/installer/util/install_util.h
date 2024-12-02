@@ -16,12 +16,11 @@
 
 #include "base/basictypes.h"
 #include "base/command_line.h"
-#include "base/version.h"
-#include "chrome/installer/util/master_preferences.h"
+#include "chrome/installer/util/browser_distribution.h"
 #include "chrome/installer/util/util_constants.h"
 
+class Version;
 class WorkItemList;
-class BrowserDistribution;
 
 namespace base {
 namespace win {
@@ -40,8 +39,9 @@ class InstallUtil {
   // Reads the uninstall command for Chromium from registry and returns it.
   // If system_install is true the command is read from HKLM, otherwise
   // from HKCU.
-  static std::wstring GetChromeUninstallCmd(bool system_install,
-                                            BrowserDistribution* dist);
+  static CommandLine GetChromeUninstallCmd(
+      bool system_install,
+      BrowserDistribution::Type distribution_type);
 
   // Find the version of Chrome installed on the system by checking the
   // Google Update registry key. Returns the version or NULL if no version is
@@ -106,6 +106,11 @@ class InstallUtil {
 
   // Returns zero on install success, or an InstallStatus value otherwise.
   static int GetInstallReturnCode(installer::InstallStatus install_status);
+
+  // Composes |exe_path| and |arguments| into |command_line|.
+  static void MakeUninstallCommand(const std::wstring& exe_path,
+                                   const std::wstring& arguments,
+                                   CommandLine* command_line);
 
   // Returns a string in the form YYYYMMDD of the current date.
   static std::wstring GetCurrentDate();

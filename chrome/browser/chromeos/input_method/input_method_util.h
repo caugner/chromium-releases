@@ -71,9 +71,9 @@ std::string GetLanguageCodeFromDescriptor(
 // Examples:
 //
 // "xkb:us::eng"       => "us"
-// "xkb:us:dvorak:eng" => "us"
+// "xkb:us:dvorak:eng" => "us(dvorak)"
 // "xkb:gb::eng"       => "gb"
-// "pinyin"            => ""
+// "pinyin"            => "us" (because Pinyin uses US keyboard layout)
 std::string GetKeyboardLayoutName(const std::string& input_method_id);
 
 // Gets the ID for the keyboard overlay from the given input method ID.
@@ -95,10 +95,17 @@ std::string GetLanguageCodeFromInputMethodId(
     const std::string& input_method_id);
 
 // Converts an input method ID to a display name of the IME. Returns
-// "USA" (US keyboard) when |input_method_id| is unknown.
+// an empty strng when |input_method_id| is unknown.
 // Examples: "pinyin" => "Pinyin"
 //           "m17n:ar:kbd" => "kbd (m17n)"
 std::string GetInputMethodDisplayNameFromId(const std::string& input_method_id);
+
+// Converts an input method ID to an input method descriptor. Returns NULL
+// when |input_method_id| is unknown.
+// Example: "pinyin" => { id: "pinyin", display_name: "Pinyin",
+//                        keyboard_layout: "us", language_code: "zh" }
+const chromeos::InputMethodDescriptor* GetInputMethodDescriptorFromId(
+    const std::string& input_method_id);
 
 // Converts a language code to a language display name, using the
 // current application locale. MaybeRewriteLanguageName() is called
@@ -117,24 +124,40 @@ string16 GetLanguageNativeDisplayNameFromCode(const std::string& language_code);
 // using the unicode string comparator. Uses unstable sorting.
 void SortLanguageCodesByNames(std::vector<std::string>* language_codes);
 
-// Sorts the given input method ids by their corresponding language names,
-// using the unicode string comparator. Uses stable sorting.
-void SortInputMethodIdsByNames(std::vector<std::string>* input_method_ids);
-
+// Used for EnableInputMethods() etc.
 enum InputMethodType {
   kKeyboardLayoutsOnly,
   kAllInputMethods,
 };
 
-// Gets input method ids that belong to |language_code|.
+// Gets input method IDs that belong to |language_code|.
 // If |type| is |kKeyboardLayoutsOnly|, the function does not return input
 // methods that are not for keybord layout switching. Returns true on success.
-// Note that the function might return false if ibus-daemon is not running, or
-// |language_code| is unknown.
+// Note that the function might return false or |language_code| is unknown.
+//
+// The retured input method IDs are sorted by populalirty per
+// chromeos/platform/assets/input_methods/whitelist.txt in production.
+// For testing with the stub libcros, the list in
+// GetInputMethodDescriptorsForTesting() in input_method_library.cc will
+// be used.
 bool GetInputMethodIdsFromLanguageCode(
     const std::string& language_code,
     InputMethodType type,
     std::vector<std::string>* out_input_method_ids);
+
+// Gets the input method IDs suitable for the first user login, based on
+// the given language code (UI language), and the descriptor of the
+// current input method.
+void GetFirstLoginInputMethodIds(
+    const std::string& language_code,
+    const InputMethodDescriptor& current_input_method,
+    std::vector<std::string>* out_input_method_ids);
+
+// Gets the language codes associated with the given input method IDs.
+// The returned language codes won't have duplicates.
+void GetLanguageCodesFromInputMethodIds(
+    const std::vector<std::string>& input_method_ids,
+    std::vector<std::string>* out_language_codes);
 
 // Enables input methods (e.g. Chinese, Japanese) and keyboard layouts (e.g.
 // US qwerty, US dvorak, French azerty) that are necessary for the language code
@@ -146,14 +169,24 @@ bool GetInputMethodIdsFromLanguageCode(
 // are enabled. If it's kKeyboardLayoutsOnly, only keyboard layouts are enabled.
 // For example, for Japanese, xkb:jp::jpn is enabled when kKeyboardLayoutsOnly,
 // and xkb:jp::jpn, mozc, mozc-jp, mozc-dv are enabled when kAllInputMethods.
+//
+// Note that this function does not save the input methods in the user's
+// preferences, as this function is designed for the login screen and the
+// screen locker, where we shouldn't change the user's preferences.
 void EnableInputMethods(const std::string& language_code, InputMethodType type,
                         const std::string& initial_input_method_id);
 
+// Returns the input method ID of the hardware keyboard.
+std::string GetHardwareInputMethodId();
 
-// DO NOT USE Functions below. These are only exported for unit tests.
-void SortInputMethodIdsByNamesInternal(
-    const std::map<std::string, std::string>& id_to_language_code_map,
-    std::vector<std::string>* input_method_ids);
+// Returns the fallback input method descriptor (the very basic US
+// keyboard). This function is mostly used for testing, but may be used
+// as the fallback, when there is no other choice.
+InputMethodDescriptor GetFallbackInputMethodDescriptor();
+
+// This function should be called when Chrome's application locale is
+// changed, so that the internal maps of this library is reloaded.
+void OnLocaleChanged();
 
 bool GetInputMethodIdsFromLanguageCodeInternal(
     const std::multimap<std::string, std::string>& language_code_to_ids,
@@ -161,7 +194,7 @@ bool GetInputMethodIdsFromLanguageCodeInternal(
     InputMethodType type,
     std::vector<std::string>* out_input_method_ids);
 
-void OnLocaleChanged();
+void ReloadInternalMaps();
 
 }  // namespace input_method
 }  // namespace chromeos

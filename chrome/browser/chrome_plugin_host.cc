@@ -20,14 +20,10 @@
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_list.h"
-#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/chrome_plugin_browsing_context.h"
-#include "chrome/browser/dom_ui/html_dialog_ui.h"
 #include "chrome/browser/gears_integration.h"
-#include "chrome/browser/plugin_process_host.h"
-#include "chrome/browser/plugin_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/renderer_host/render_process_host.h"
+#include "chrome/browser/ui/webui/html_dialog_ui.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_counters.h"
 #include "chrome/common/chrome_paths.h"
@@ -39,6 +35,10 @@
 #include "chrome/common/notification_service.h"
 #include "chrome/common/plugin_messages.h"
 #include "chrome/common/render_messages.h"
+#include "content/browser/browser_thread.h"
+#include "content/browser/plugin_process_host.h"
+#include "content/browser/plugin_service.h"
+#include "content/browser/renderer_host/render_process_host.h"
 #include "net/base/cookie_monster.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
@@ -318,8 +318,8 @@ class ModelessHtmlDialogDelegate : public HtmlDialogUIDelegate {
   virtual bool IsDialogModal() const { return false; }
   virtual std::wstring GetDialogTitle() const { return L"Gears"; }
   virtual GURL GetDialogContentURL() const { return params_.url; }
-  virtual void GetDOMMessageHandlers(
-      std::vector<DOMMessageHandler*>* handlers) const {}
+  virtual void GetWebUIMessageHandlers(
+      std::vector<WebUIMessageHandler*>* handlers) const {}
   virtual void GetDialogSize(gfx::Size* size) const {
     size->set_width(params_.width);
     size->set_height(params_.height);
@@ -464,8 +464,14 @@ int STDCALL CPB_GetBrowsingContextInfo(
     if (!service)
       return CPERR_FAILURE;
     FilePath path = service->GetChromePluginDataDir();
-    std::string retval = WideToUTF8(
-        path.Append(chrome::kChromePluginDataDirname).ToWStringHack());
+    // This is wrong -- we can't in general stuff a path through a std::string.
+    // But this code is Gears-specific, so Windows-only anyway for now.
+    std::string retval;
+#if defined(OS_WIN)
+    retval = WideToUTF8(path.Append(chrome::kChromePluginDataDirname).value());
+#else
+    NOTREACHED();
+#endif
     *static_cast<char**>(buf) = CPB_StringDup(CPB_Alloc, retval);
     return CPERR_SUCCESS;
     }
@@ -696,7 +702,7 @@ CPBool STDCALL CPB_IsPluginProcessRunning(CPID id) {
   PluginService* service = PluginService::GetInstance();
   if (!service)
     return false;
-  PluginProcessHost *host = service->FindPluginProcess(plugin->filename());
+  PluginProcessHost *host = service->FindNpapiPluginProcess(plugin->filename());
   return host ? true : false;
 }
 
@@ -714,7 +720,7 @@ CPError STDCALL CPB_SendMessage(CPID id, const void *data, uint32 data_len) {
   if (!service)
     return CPERR_FAILURE;
   PluginProcessHost *host =
-  service->FindOrStartPluginProcess(plugin->filename());
+  service->FindOrStartNpapiPluginProcess(plugin->filename());
   if (!host)
     return CPERR_FAILURE;
 

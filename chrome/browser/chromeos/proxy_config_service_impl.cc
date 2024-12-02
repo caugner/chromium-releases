@@ -9,9 +9,9 @@
 #include "base/logging.h"
 #include "base/string_util.h"
 #include "base/task.h"
-#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/common/json_value_serializer.h"
+#include "content/browser/browser_thread.h"
 
 namespace chromeos {
 
@@ -217,6 +217,48 @@ void ProxyConfigServiceImpl::ProxyConfig::ToNetProxyConfig(
   }
 }
 
+bool ProxyConfigServiceImpl::ProxyConfig::CanBeWrittenByUser(
+    bool user_is_owner, const std::string& scheme) {
+  // Setting can only be written by user if user is owner and setting is not
+  // from policy.
+  Setting* setting = NULL;
+  switch (mode) {
+    case MODE_DIRECT:
+    case MODE_AUTO_DETECT:
+    case MODE_PAC_SCRIPT:
+      setting = &automatic_proxy;
+      break;
+    case MODE_SINGLE_PROXY:
+      setting = &single_proxy;
+      break;
+    case MODE_PROXY_PER_SCHEME:
+      setting = MapSchemeToProxy(scheme);
+      break;
+    default:
+      break;
+  }
+  if (!setting) {
+    NOTREACHED() << "Unrecognized proxy config mode";
+    return false;
+  }
+  return setting->CanBeWrittenByUser(user_is_owner);
+}
+
+ProxyConfigServiceImpl::ProxyConfig::ManualProxy*
+    ProxyConfigServiceImpl::ProxyConfig::MapSchemeToProxy(
+        const std::string& scheme) {
+  if (scheme == "http")
+    return &http_proxy;
+  if (scheme == "https")
+    return &https_proxy;
+  if (scheme == "ftp")
+    return &ftp_proxy;
+  if (scheme == "socks")
+    return &socks_proxy;
+  NOTREACHED() << "Invalid scheme: " << scheme;
+  return NULL;
+}
+
 bool ProxyConfigServiceImpl::ProxyConfig::Serialize(std::string* output) {
   scoped_ptr<DictionaryValue> dict(new DictionaryValue);
   dict->SetInteger(kMode, mode);
@@ -350,6 +392,7 @@ bool ProxyConfigServiceImpl::ProxyConfig::DecodeManualProxy(
 ProxyConfigServiceImpl::ProxyConfigServiceImpl()
     : can_post_task_(false),
       has_config_(false),
+      persist_to_device_(true),
       persist_to_device_pending_(false) {
   // Start async fetch of proxy config from settings persisted on device.
   // TODO(kuan): retrieve config from policy and owner and merge them
@@ -373,6 +416,7 @@ ProxyConfigServiceImpl::ProxyConfigServiceImpl()
 ProxyConfigServiceImpl::ProxyConfigServiceImpl(const ProxyConfig& init_config)
     : can_post_task_(true),
       has_config_(true),
+      persist_to_device_(false),
       persist_to_device_pending_(false) {
   reference_config_ = init_config;
   // Update the IO-accessible copy in |cached_config_| as well.
@@ -393,7 +437,7 @@ bool ProxyConfigServiceImpl::UISetProxyConfigToDirect() {
   // Should be called from UI thread.
   CheckCurrentlyOnUIThread();
   reference_config_.mode = ProxyConfig::MODE_DIRECT;
-  OnUISetProxyConfig(true);
+  OnUISetProxyConfig(persist_to_device_);
   return true;
 }
 
@@ -401,7 +445,7 @@ bool ProxyConfigServiceImpl::UISetProxyConfigToAutoDetect() {
   // Should be called from UI thread.
   CheckCurrentlyOnUIThread();
   reference_config_.mode = ProxyConfig::MODE_AUTO_DETECT;
-  OnUISetProxyConfig(true);
+  OnUISetProxyConfig(persist_to_device_);
   return true;
 }
 
@@ -410,7 +454,7 @@ bool ProxyConfigServiceImpl::UISetProxyConfigToPACScript(const GURL& pac_url) {
   CheckCurrentlyOnUIThread();
   reference_config_.mode = ProxyConfig::MODE_PAC_SCRIPT;
   reference_config_.automatic_proxy.pac_url = pac_url;
-  OnUISetProxyConfig(true);
+  OnUISetProxyConfig(persist_to_device_);
   return true;
 }
 
@@ -420,7 +464,7 @@ bool ProxyConfigServiceImpl::UISetProxyConfigToSingleProxy(
   CheckCurrentlyOnUIThread();
   reference_config_.mode = ProxyConfig::MODE_SINGLE_PROXY;
   reference_config_.single_proxy.server = server;
-  OnUISetProxyConfig(true);
+  OnUISetProxyConfig(persist_to_device_);
   return true;
 }
 
@@ -428,22 +472,14 @@ bool ProxyConfigServiceImpl::UISetProxyConfigToProxyPerScheme(
     const std::string& scheme, const net::ProxyServer& server) {
   // Should be called from UI thread.
   CheckCurrentlyOnUIThread();
-  ProxyConfig::ManualProxy* proxy = NULL;
-  if (scheme == "http")
-    proxy = &reference_config_.http_proxy;
-  else if (scheme == "https")
-    proxy = &reference_config_.https_proxy;
-  else if (scheme == "ftp")
-    proxy = &reference_config_.ftp_proxy;
-  else if (scheme == "socks")
-    proxy = &reference_config_.socks_proxy;
+  ProxyConfig::ManualProxy* proxy = reference_config_.MapSchemeToProxy(scheme);
   if (!proxy) {
     NOTREACHED() << "Cannot set proxy: invalid scheme [" << scheme << "]";
     return false;
   }
   reference_config_.mode = ProxyConfig::MODE_PROXY_PER_SCHEME;
   proxy->server = server;
-  OnUISetProxyConfig(true);
+  OnUISetProxyConfig(persist_to_device_);
   return true;
 }
 
@@ -460,7 +496,7 @@ bool ProxyConfigServiceImpl::UISetProxyConfigBypassRules(
     return false;
   }
   reference_config_.bypass_rules = bypass_rules;
-  OnUISetProxyConfig(true);
+  OnUISetProxyConfig(persist_to_device_);
   return true;
 }
 

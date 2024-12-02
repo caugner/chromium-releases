@@ -6,7 +6,7 @@
 
 #include "views/controls/slider/native_slider_gtk.h"
 
-#include "gfx/gtk_util.h"
+#include "ui/gfx/gtk_util.h"
 #include "views/controls/slider/slider.h"
 
 namespace views {
@@ -43,7 +43,7 @@ void NativeSliderGtk::SetValue(double value) {
 }
 
 void NativeSliderGtk::SetFocus() {
-  Focus();
+  OnFocus();
 }
 
 gfx::Size NativeSliderGtk::GetPreferredSize() {

@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,16 +9,18 @@
 #include "base/command_line.h"
 #include "base/synchronization/lock.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/password_manager/password_manager.h"
-#include "chrome/browser/renderer_host/render_process_host.h"
-#include "chrome/browser/renderer_host/resource_dispatcher_host.h"
-#include "chrome/browser/renderer_host/resource_dispatcher_host_request_info.h"
-#include "chrome/browser/tab_contents/constrained_window.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tab_contents/tab_util.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/notification_service.h"
+#include "content/browser/browser_thread.h"
+#include "content/browser/renderer_host/render_process_host.h"
+#include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/renderer_host/render_view_host_delegate.h"
+#include "content/browser/renderer_host/resource_dispatcher_host.h"
+#include "content/browser/renderer_host/resource_dispatcher_host_request_info.h"
+#include "content/browser/tab_contents/constrained_window.h"
+#include "content/browser/tab_contents/tab_contents.h"
 #include "grit/generated_resources.h"
 #include "net/base/auth.h"
 #include "net/base/net_util.h"
@@ -113,8 +115,17 @@ TabContents* LoginHandler::GetTabContentsForLogin() const {
                                       tab_contents_id_);
 }
 
-void LoginHandler::SetAuth(const std::wstring& username,
-                           const std::wstring& password) {
+RenderViewHostDelegate* LoginHandler::GetRenderViewHostDelegate() const {
+  RenderViewHost* rvh = RenderViewHost::FromID(render_process_host_id_,
+                                               tab_contents_id_);
+  if (!rvh)
+    return NULL;
+
+  return rvh->delegate();
+}
+
+void LoginHandler::SetAuth(const string16& username,
+                           const string16& password) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   if (TestAndSetAuthHandled())
@@ -122,8 +133,8 @@ void LoginHandler::SetAuth(const std::wstring& username,
 
   // Tell the password manager the credentials were submitted / accepted.
   if (password_manager_) {
-    password_form_.username_value = WideToUTF16Hack(username);
-    password_form_.password_value = WideToUTF16Hack(password);
+    password_form_.username_value = username;
+    password_form_.password_value = password;
     password_manager_->ProvisionallySavePassword(password_form_);
   }
 
@@ -250,12 +261,13 @@ void LoginHandler::NotifyAuthNeeded() {
   if (WasAuthHandled())
     return;
 
-  TabContents* requesting_contents = GetTabContentsForLogin();
-  if (!requesting_contents)
-    return;
-
   NotificationService* service = NotificationService::current();
-  NavigationController* controller = &requesting_contents->controller();
+  NavigationController* controller = NULL;
+
+  TabContents* requesting_contents = GetTabContentsForLogin();
+  if (requesting_contents)
+    controller = &requesting_contents->controller();
+
   LoginNotificationDetails details(this);
 
   service->Notify(NotificationType::AUTH_NEEDED,
@@ -267,12 +279,13 @@ void LoginHandler::NotifyAuthCancelled() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(WasAuthHandled());
 
-  TabContents* requesting_contents = GetTabContentsForLogin();
-  if (!requesting_contents)
-    return;
-
   NotificationService* service = NotificationService::current();
-  NavigationController* controller = &requesting_contents->controller();
+  NavigationController* controller = NULL;
+
+  TabContents* requesting_contents = GetTabContentsForLogin();
+  if (requesting_contents)
+    controller = &requesting_contents->controller();
+
   LoginNotificationDetails details(this);
 
   service->Notify(NotificationType::AUTH_CANCELLED,
@@ -280,8 +293,8 @@ void LoginHandler::NotifyAuthCancelled() {
                   Details<LoginNotificationDetails>(&details));
 }
 
-void LoginHandler::NotifyAuthSupplied(const std::wstring& username,
-                                      const std::wstring& password) {
+void LoginHandler::NotifyAuthSupplied(const string16& username,
+                                      const string16& password) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(WasAuthHandled());
 
@@ -332,12 +345,12 @@ bool LoginHandler::TestAndSetAuthHandled() {
 }
 
 // Calls SetAuth from the IO loop.
-void LoginHandler::SetAuthDeferred(const std::wstring& username,
-                                   const std::wstring& password) {
+void LoginHandler::SetAuthDeferred(const string16& username,
+                                   const string16& password) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
   if (request_) {
-    request_->SetAuth(WideToUTF16Hack(username), WideToUTF16Hack(password));
+    request_->SetAuth(username, password);
     ResetLoginHandlerForRequest(request_);
   }
 }
@@ -390,12 +403,11 @@ class LoginDialogTask : public Task {
     }
 
     // Tell the password manager to look for saved passwords.
-    TabContentsWrapper** wrapper =
-        TabContentsWrapper::property_accessor()->GetProperty(
-            parent_contents->property_bag());
+    TabContentsWrapper* wrapper =
+        TabContentsWrapper::GetCurrentWrapperForContents(parent_contents);
     if (!wrapper)
       return;
-    PasswordManager* password_manager = (*wrapper)->GetPasswordManager();
+    PasswordManager* password_manager = wrapper->password_manager();
     std::vector<PasswordForm> v;
     MakeInputForPasswordManager(&v);
     password_manager->OnPasswordFormsFound(v);
@@ -409,8 +421,7 @@ class LoginDialogTask : public Task {
         l10n_util::GetStringFUTF16(IDS_LOGIN_DIALOG_DESCRIPTION,
                                    host_and_port_hack16,
                                    realm_hack16);
-    handler_->BuildViewForPasswordManager(password_manager,
-                                          UTF16ToWideHack(explanation));
+    handler_->BuildViewForPasswordManager(password_manager, explanation);
   }
 
  private:

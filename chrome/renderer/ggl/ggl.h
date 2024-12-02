@@ -12,11 +12,12 @@
 #pragma once
 
 #include "base/callback.h"
-#include "gfx/native_widget_types.h"
-#include "gfx/size.h"
+#include "ui/gfx/native_widget_types.h"
+#include "ui/gfx/size.h"
 
 class GpuChannelHost;
 class MessageLoop;
+class CommandBufferProxy;
 
 namespace gpu {
 namespace gles2 {
@@ -80,7 +81,6 @@ bool Terminate();
 // TODO(kbr): clean up the arguments to this function and make them
 // more cross-platform.
 Context* CreateViewContext(GpuChannelHost* channel,
-                           gfx::NativeViewId view,
                            int render_view_id,
                            const char* allowed_extensions,
                            const int32* attrib_list);
@@ -128,6 +128,8 @@ void DeleteParentTexture(Context* context, uint32 texture);
 // service side.
 void SetSwapBuffersCallback(Context* context, Callback0::Type* callback);
 
+void SetContextLostCallback(Context* context, Callback0::Type* callback);
+
 // Set the current GGL context for the calling thread.
 bool MakeCurrent(Context* context);
 
@@ -165,6 +167,8 @@ Error GetError(Context* context);
 // Return true if GPU process reported context lost or there was a problem
 // communicating with the GPU process.
 bool IsCommandBufferContextLost(Context* context);
+
+CommandBufferProxy* GetCommandBufferProxy(Context* context);
 
 }  // namespace ggl
 

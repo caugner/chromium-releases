@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,9 +21,11 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 
-class AutoFillHelper;
+namespace autofill {
+class AutoFillAgent;
+class PasswordAutofillManager;
+}
 class MockRenderProcess;
-class PasswordAutocompleteManager;
 
 class RenderViewTest : public testing::Test {
  public:
@@ -102,8 +104,8 @@ class RenderViewTest : public testing::Test {
   scoped_ptr<CommandLine> command_line_;
   scoped_ptr<SandboxInitWrapper> sandbox_init_wrapper_;
 
-  PasswordAutocompleteManager* password_autocomplete_;
-  AutoFillHelper* autofill_helper_;
+  autofill::PasswordAutofillManager* password_autofill_;
+  autofill::AutoFillAgent* autofill_agent_;
 };
 
 #endif  // CHROME_TEST_RENDER_VIEW_TEST_H_

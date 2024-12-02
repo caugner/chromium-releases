@@ -4,15 +4,15 @@
 
 #include "views/controls/menu/menu_separator.h"
 
-#include "gfx/canvas.h"
 #include "third_party/skia/include/core/SkColor.h"
+#include "ui/gfx/canvas.h"
 #include "views/controls/menu/menu_config.h"
 
 namespace views {
 
 static const SkColor kSeparatorColor = SkColorSetARGB(50, 00, 00, 00);
 
-void MenuSeparator::Paint(gfx::Canvas* canvas) {
+void MenuSeparator::OnPaint(gfx::Canvas* canvas) {
   canvas->DrawLineInt(kSeparatorColor, 0, height() / 2, width(), height() / 2);
 }
 

@@ -9,7 +9,7 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "gfx/font.h"
+#include "ui/gfx/font.h"
 #include "views/view.h"
 
 class SkBitmap;
@@ -25,7 +25,7 @@ class OobeProgressBar : public views::View {
   explicit OobeProgressBar(const std::vector<int>& steps);
 
   // Overridden from View:
-  virtual void Paint(gfx::Canvas* canvas);
+  virtual void OnPaint(gfx::Canvas* canvas);
 
   // Set the current step for the progress bar. Must be one of the steps
   // passed in the constructor.

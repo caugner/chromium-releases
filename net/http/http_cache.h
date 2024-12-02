@@ -46,12 +46,12 @@ class DnsCertProvenanceChecker;
 class DnsRRResolver;
 class HostResolver;
 class HttpAuthHandlerFactory;
-class HttpNetworkDelegate;
 class HttpNetworkSession;
 struct HttpRequestInfo;
 class HttpResponseInfo;
 class IOBuffer;
 class NetLog;
+class NetworkDelegate;
 class ProxyService;
 class SSLConfigService;
 class ViewCacheHelper;
@@ -124,14 +124,14 @@ class HttpCache : public HttpTransactionFactory,
             ProxyService* proxy_service,
             SSLConfigService* ssl_config_service,
             HttpAuthHandlerFactory* http_auth_handler_factory,
-            HttpNetworkDelegate* network_delegate,
+            NetworkDelegate* network_delegate,
             NetLog* net_log,
             BackendFactory* backend_factory);
 
   // The disk cache is initialized lazily (by CreateTransaction) in  this case.
   // Provide an existing HttpNetworkSession, the cache can construct a
   // network layer with a shared HttpNetworkSession in order for multiple
-  // network layers to share information (e.g. authenication data). The
+  // network layers to share information (e.g. authentication data). The
   // HttpCache takes ownership of the |backend_factory|.
   HttpCache(HttpNetworkSession* session, BackendFactory* backend_factory);
 
@@ -176,7 +176,7 @@ class HttpCache : public HttpTransactionFactory,
   // Close currently active sockets so that fresh page loads will not use any
   // recycled connections.  For sockets currently in use, they may not close
   // immediately, but they will not be reusable. This is for debugging.
-  void CloseCurrentConnections();
+  void CloseAllConnections();
 
   // HttpTransactionFactory implementation:
   virtual int CreateTransaction(scoped_ptr<HttpTransaction>* trans);
@@ -356,9 +356,9 @@ class HttpCache : public HttpTransactionFactory,
 
   Mode mode_;
 
-  scoped_ptr<SSLHostInfoFactoryAdaptor> ssl_host_info_factory_;
+  const scoped_ptr<SSLHostInfoFactoryAdaptor> ssl_host_info_factory_;
 
-  scoped_ptr<HttpTransactionFactory> network_layer_;
+  const scoped_ptr<HttpTransactionFactory> network_layer_;
   scoped_ptr<disk_cache::Backend> disk_cache_;
 
   // The set of active entries indexed by cache key.

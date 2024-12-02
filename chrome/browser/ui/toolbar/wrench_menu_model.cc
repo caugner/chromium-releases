@@ -20,7 +20,6 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/sync_ui_util.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/toolbar/encoding_menu_controller.h"
@@ -30,6 +29,8 @@
 #include "chrome/common/notification_source.h"
 #include "chrome/common/notification_type.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/common/profiling.h"
+#include "content/browser/tab_contents/tab_contents.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -184,6 +185,11 @@ void ToolsMenuModel::Build(Browser* browser) {
     AddItemWithStringId(IDC_DEV_TOOLS, IDS_DEV_TOOLS);
     AddItemWithStringId(IDC_DEV_TOOLS_CONSOLE, IDS_DEV_TOOLS_CONSOLE);
   }
+
+#if defined(ENABLE_PROFILING) && !defined(NO_TCMALLOC)
+  AddSeparator();
+  AddCheckItemWithStringId(IDC_PROFILING_ENABLED, IDS_PROFILING_ENABLED);
+#endif
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -258,20 +264,14 @@ void WrenchMenuModel::ExecuteCommand(int command_id) {
 bool WrenchMenuModel::IsCommandIdChecked(int command_id) const {
   if (command_id == IDC_SHOW_BOOKMARK_BAR) {
     return browser_->profile()->GetPrefs()->GetBoolean(prefs::kShowBookmarkBar);
+  } else if (command_id == IDC_PROFILING_ENABLED) {
+    return Profiling::BeingProfiled();
   }
 
   return false;
 }
 
 bool WrenchMenuModel::IsCommandIdEnabled(int command_id) const {
-#if defined(OS_CHROMEOS)
-  // Special case because IDC_NEW_WINDOW item should be disabled in BWSI mode,
-  // but accelerator should work.
-  if (command_id == IDC_NEW_WINDOW &&
-      CommandLine::ForCurrentProcess()->HasSwitch(switches::kGuestSession))
-    return false;
-#endif
-
   return browser_->command_updater()->IsCommandEnabled(command_id);
 }
 
@@ -351,8 +351,12 @@ WrenchMenuModel::WrenchMenuModel()
 void WrenchMenuModel::Build() {
   AddItemWithStringId(IDC_NEW_TAB, IDS_NEW_TAB);
   AddItemWithStringId(IDC_NEW_WINDOW, IDS_NEW_WINDOW);
-  AddItemWithStringId(IDC_NEW_INCOGNITO_WINDOW,
-                             IDS_NEW_INCOGNITO_WINDOW);
+#if defined(OS_CHROMEOS)
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kGuestSession))
+    AddItemWithStringId(IDC_NEW_INCOGNITO_WINDOW, IDS_NEW_INCOGNITO_WINDOW);
+#else
+  AddItemWithStringId(IDC_NEW_INCOGNITO_WINDOW, IDS_NEW_INCOGNITO_WINDOW);
+#endif
 
   AddSeparator();
 #if defined(OS_MACOSX) || (defined(OS_LINUX) && !defined(TOOLKIT_VIEWS))
@@ -423,11 +427,7 @@ void WrenchMenuModel::Build() {
 #else
   const string16 product_name = l10n_util::GetStringUTF16(IDS_PRODUCT_NAME);
 #endif
-  // On Mac, there is no About item.
-  if (browser_defaults::kShowAboutMenuItem) {
-    AddItem(IDC_ABOUT, l10n_util::GetStringFUTF16(
-        IDS_ABOUT, product_name));
-  }
+  AddItem(IDC_ABOUT, l10n_util::GetStringFUTF16(IDS_ABOUT, product_name));
   string16 num_background_pages = base::FormatNumber(
       BackgroundPageTracker::GetInstance()->GetBackgroundPageCount());
   AddItem(IDC_VIEW_BACKGROUND_PAGES, l10n_util::GetStringFUTF16(

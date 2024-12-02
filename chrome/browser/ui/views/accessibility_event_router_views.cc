@@ -13,18 +13,18 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "chrome/common/notification_type.h"
+#include "ui/base/models/combobox_model.h"
 #include "views/accessibility/accessibility_types.h"
 #include "views/controls/button/custom_button.h"
 #include "views/controls/button/menu_button.h"
 #include "views/controls/button/native_button.h"
+#include "views/controls/combobox/combobox.h"
 #include "views/controls/link.h"
 #include "views/controls/menu/menu_item_view.h"
 #include "views/controls/menu/submenu_view.h"
+#include "views/controls/textfield/textfield.h"
 #include "views/view.h"
-
-#if defined(OS_WIN)
-#include "chrome/browser/autocomplete/autocomplete_edit_view_win.h"
-#endif
+#include "views/window/window.h"
 
 using views::FocusManager;
 
@@ -39,35 +39,6 @@ AccessibilityEventRouterViews::~AccessibilityEventRouterViews() {
 // static
 AccessibilityEventRouterViews* AccessibilityEventRouterViews::GetInstance() {
   return Singleton<AccessibilityEventRouterViews>::get();
-}
-
-bool AccessibilityEventRouterViews::AddViewTree(
-    views::View* view, Profile* profile) {
-  if (view_tree_profile_map_[view] != NULL)
-    return false;
-
-  view_tree_profile_map_[view] = profile;
-  return true;
-}
-
-void AccessibilityEventRouterViews::RemoveViewTree(views::View* view) {
-  DCHECK(view_tree_profile_map_.find(view) !=
-         view_tree_profile_map_.end());
-  view_tree_profile_map_.erase(view);
-}
-
-void AccessibilityEventRouterViews::IgnoreView(views::View* view) {
-  view_info_map_[view].ignore = true;
-}
-
-void AccessibilityEventRouterViews::SetViewName(
-    views::View* view, std::string name) {
-  view_info_map_[view].name = name;
-}
-
-void AccessibilityEventRouterViews::RemoveView(views::View* view) {
-  DCHECK(view_info_map_.find(view) != view_info_map_.end());
-  view_info_map_.erase(view);
 }
 
 void AccessibilityEventRouterViews::HandleAccessibilityEvent(
@@ -111,84 +82,67 @@ void AccessibilityEventRouterViews::HandleAccessibilityEvent(
   }
 }
 
+void AccessibilityEventRouterViews::HandleMenuItemFocused(
+    const std::wstring& menu_name,
+    const std::wstring& menu_item_name,
+    int item_index,
+    int item_count,
+    bool has_submenu) {
+  if (!ExtensionAccessibilityEventRouter::GetInstance()->
+      IsAccessibilityEnabled()) {
+    return;
+  }
+
+  if (!most_recent_profile_)
+    return;
+
+  AccessibilityMenuItemInfo info(
+      most_recent_profile_,
+      WideToUTF8(menu_item_name),
+      has_submenu,
+      item_index,
+      item_count);
+  SendAccessibilityNotification(
+      NotificationType::ACCESSIBILITY_CONTROL_FOCUSED, &info);
+}
+
 //
 // Private methods
 //
 
-void AccessibilityEventRouterViews::FindView(
-    views::View* view, Profile** profile, bool* is_accessible) {
-  *is_accessible = false;
-
-  // First see if it's a descendant of an accessible view.
-  for (base::hash_map<views::View*, Profile*>::const_iterator iter =
-           view_tree_profile_map_.begin();
-       iter != view_tree_profile_map_.end();
-       ++iter) {
-    if (iter->first->IsParentOf(view)) {
-      *is_accessible = true;
-      if (profile)
-        *profile = iter->second;
-      break;
-    }
-  }
-
-  if (!*is_accessible)
-    return;
-
-  // Now make sure it's not marked as a widget to be ignored.
-  base::hash_map<views::View*, ViewInfo>::const_iterator iter =
-      view_info_map_.find(view);
-  if (iter != view_info_map_.end() && iter->second.ignore)
-    *is_accessible = false;
-}
-
 std::string AccessibilityEventRouterViews::GetViewName(views::View* view) {
-  std::string name;
-
-  // First see if we have a name registered for this view.
-  base::hash_map<views::View*, ViewInfo>::const_iterator iter =
-      view_info_map_.find(view);
-  if (iter != view_info_map_.end())
-    name = iter->second.name;
-
-  // Otherwise ask the view for its accessible name.
-  if (name.empty()) {
-    string16 wname;
-    view->GetAccessibleName(&wname);
-    name = UTF16ToUTF8(wname);
-  }
-
-  return name;
+  string16 wname;
+  view->GetAccessibleName(&wname);
+  return UTF16ToUTF8(wname);
 }
 
 void AccessibilityEventRouterViews::DispatchAccessibilityNotification(
     views::View* view, NotificationType type) {
+  // Get the profile associated with this view. If it's not found, use
+  // the most recent profile where accessibility events were sent, or
+  // the default profile.
   Profile* profile = NULL;
-  bool is_accessible;
-  FindView(view, &profile, &is_accessible);
-
-  // Special case: a menu isn't associated with any particular top-level
-  // window, so menu events get routed to the profile of the most recent
-  // event that was associated with a window, which should be the window
-  // that triggered opening the menu.
-  bool is_menu_event = IsMenuEvent(view, type);
-  if (is_menu_event && !profile && most_recent_profile_) {
+  views::Window* window = view->GetWindow();
+  if (window) {
+    profile = reinterpret_cast<Profile*>(window->GetNativeWindowProperty(
+        Profile::kProfileKey));
+  }
+  if (!profile)
     profile = most_recent_profile_;
-    is_accessible = true;
+  if (!profile)
+    profile = g_browser_process->profile_manager()->GetDefaultProfile();
+  if (!profile) {
+    NOTREACHED();
+    return;
   }
 
-  if (!is_accessible)
-    return;
-
   most_recent_profile_ = profile;
-
   std::string class_name = view->GetClassName();
-
   if (class_name == views::MenuButton::kViewClassName ||
       type == NotificationType::ACCESSIBILITY_MENU_OPENED ||
       type == NotificationType::ACCESSIBILITY_MENU_CLOSED) {
     SendMenuNotification(view, type, profile);
-  } else if (is_menu_event) {
+  } else if (IsMenuEvent(view, type)) {
     SendMenuItemNotification(view, type, profile);
   } else if (class_name == views::CustomButton::kViewClassName ||
              class_name == views::NativeButton::kViewClassName ||
@@ -198,8 +152,10 @@ void AccessibilityEventRouterViews::DispatchAccessibilityNotification(
     SendLinkNotification(view, type, profile);
   } else if (class_name == LocationBarView::kViewClassName) {
     SendLocationBarNotification(view, type, profile);
-  } else {
-    class_name += " ";
+  } else if (class_name == views::Textfield::kViewClassName) {
+    SendTextfieldNotification(view, type, profile);
+  } else if (class_name == views::Combobox::kViewClassName) {
+    SendComboboxNotification(view, type, profile);
   }
 }
 
@@ -232,10 +188,10 @@ void AccessibilityEventRouterViews::SendMenuItemNotification(
   if (view->GetClassName() == views::MenuItemView::kViewClassName)
     has_submenu = static_cast<views::MenuItemView*>(view)->HasSubmenu();
 
-  views::View* parent_menu = view->GetParent();
+  views::View* parent_menu = view->parent();
   while (parent_menu != NULL && parent_menu->GetClassName() !=
          views::SubmenuView::kViewClassName) {
-    parent_menu = parent_menu->GetParent();
+    parent_menu = parent_menu->parent();
   }
   if (parent_menu) {
     count = 0;
@@ -248,7 +204,7 @@ void AccessibilityEventRouterViews::SendMenuItemNotification(
 
 void AccessibilityEventRouterViews::RecursiveGetMenuItemIndexAndCount(
     views::View* menu, views::View* item, int* index, int* count) {
-  for (int i = 0; i < menu->GetChildViewCount(); ++i) {
+  for (int i = 0; i < menu->child_count(); ++i) {
     views::View* child = menu->GetChildViewAt(i);
     int previous_count = *count;
     RecursiveGetMenuItemIndexAndCount(child, item, index, count);
@@ -277,7 +233,7 @@ bool AccessibilityEventRouterViews::IsMenuEvent(
         role == AccessibilityTypes::ROLE_MENUPOPUP) {
       return true;
     }
-    view = view->GetParent();
+    view = view->parent();
   }
 
   return false;
@@ -285,21 +241,39 @@ bool AccessibilityEventRouterViews::IsMenuEvent(
 
 void AccessibilityEventRouterViews::SendLocationBarNotification(
     views::View* view, NotificationType type, Profile* profile) {
-#if defined(OS_WIN)
-  // This particular method isn't needed on Linux/Views, we get text
-  // notifications directly from GTK.
   std::string name = GetViewName(view);
   LocationBarView* location_bar = static_cast<LocationBarView*>(view);
-  AutocompleteEditViewWin* location_entry =
-      static_cast<AutocompleteEditViewWin*>(location_bar->location_entry());
-
-  std::string value = WideToUTF8(location_entry->GetText());
-  std::wstring::size_type selection_start;
-  std::wstring::size_type selection_end;
-  location_entry->GetSelectionBounds(&selection_start, &selection_end);
-
+  int start_index = -1;
+  int end_index = -1;
+  location_bar->GetSelectionBounds(&start_index, &end_index);
   AccessibilityTextBoxInfo info(profile, name, false);
-  info.SetValue(value, selection_start, selection_end);
+  std::string value = UTF16ToUTF8(location_bar->GetAccessibleValue());
+  info.SetValue(value, start_index, end_index);
   SendAccessibilityNotification(type, &info);
-#endif
+}
+
+void AccessibilityEventRouterViews::SendTextfieldNotification(
+    views::View* view, NotificationType type, Profile* profile) {
+  std::string name = GetViewName(view);
+  views::Textfield* textfield = static_cast<views::Textfield*>(view);
+  int start_index = -1;
+  int end_index = -1;
+  textfield->GetSelectionBounds(&start_index, &end_index);
+  bool password = textfield->IsPassword();
+  AccessibilityTextBoxInfo info(profile, name, password);
+  std::string value = UTF16ToUTF8(textfield->GetAccessibleValue());
+  info.SetValue(value, start_index, end_index);
+  SendAccessibilityNotification(type, &info);
+}
+
+void AccessibilityEventRouterViews::SendComboboxNotification(
+    views::View* view, NotificationType type, Profile* profile) {
+  std::string name = GetViewName(view);
+  views::Combobox* combobox = static_cast<views::Combobox*>(view);
+  std::string value = UTF16ToUTF8(combobox->GetAccessibleValue());
+  int selected_item = combobox->selected_item();
+  int item_count = combobox->model()->GetItemCount();
+  AccessibilityComboBoxInfo info(
+      profile, name, value, selected_item, item_count);
+  SendAccessibilityNotification(type, &info);
 }

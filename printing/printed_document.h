@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,10 +11,9 @@
 #include "base/scoped_ptr.h"
 #include "base/string16.h"
 #include "base/synchronization/lock.h"
-#include "gfx/native_widget_types.h"
 #include "googleurl/src/gurl.h"
 #include "printing/print_settings.h"
-#include "printing/native_metafile.h"
+#include "ui/gfx/native_widget_types.h"
 
 class FilePath;
 class MessageLoop;
@@ -25,8 +24,10 @@ class Font;
 
 namespace printing {
 
+class NativeMetafile;
 class PrintedPage;
 class PrintedPagesSource;
+class PrintingContext;
 
 // A collection of rendered pages. The settings are immutable. If the print
 // settings are changed, a new PrintedDocument must be created.
@@ -55,8 +56,13 @@ class PrintedDocument : public base::RefCountedThreadSafe<PrintedDocument> {
 
   // Draws the page in the context.
   // Note: locks for a short amount of time in debug only.
+#if defined(OS_WIN) || defined(OS_MACOSX)
   void RenderPrintedPage(const PrintedPage& page,
                          gfx::NativeDrawingContext context) const;
+#elif defined(OS_POSIX)
+  void RenderPrintedPage(const PrintedPage& page,
+                         PrintingContext* context) const;
+#endif
 
   // Returns true if all the necessary pages for the settings are already
   // rendered.
@@ -133,6 +139,11 @@ class PrintedDocument : public base::RefCountedThreadSafe<PrintedDocument> {
 
     // Shrink done in comparison to desired_dpi.
     double shrink_factor;
+
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
+    // Page number of the first page.
+    int first_page;
+#endif
   };
 
   // Contains all the immutable stuff. All this stuff can be accessed without

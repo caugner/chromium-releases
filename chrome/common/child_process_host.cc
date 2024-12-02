@@ -12,7 +12,7 @@
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths_internal.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/plugin_messages.h"
+#include "content/common/child_process_messages.h"
 #include "ipc/ipc_logging.h"
 
 #if defined(OS_LINUX)
@@ -129,10 +129,10 @@ bool ChildProcessHost::CreateChannel() {
   // Make sure these messages get sent first.
 #if defined(IPC_MESSAGE_LOG_ENABLED)
   bool enabled = IPC::Logging::GetInstance()->Enabled();
-  Send(new PluginProcessMsg_SetIPCLoggingEnabled(enabled));
+  Send(new ChildProcessMsg_SetIPCLoggingEnabled(enabled));
 #endif
 
-  Send(new PluginProcessMsg_AskBeforeShutdown());
+  Send(new ChildProcessMsg_AskBeforeShutdown());
 
   opening_channel_ = true;
 
@@ -141,6 +141,16 @@ bool ChildProcessHost::CreateChannel() {
 
 void ChildProcessHost::InstanceCreated() {
   Notify(NotificationType::CHILD_INSTANCE_CREATED);
+}
+
+bool ChildProcessHost::OnMessageReceived(const IPC::Message& msg) {
+  return false;
+}
+
+void ChildProcessHost::OnChannelConnected(int32 peer_pid) {
+}
+
+void ChildProcessHost::OnChannelError() {
 }
 
 bool ChildProcessHost::Send(IPC::Message* message) {
@@ -153,6 +163,12 @@ bool ChildProcessHost::Send(IPC::Message* message) {
 
 void ChildProcessHost::OnChildDied() {
   delete this;
+}
+
+void ChildProcessHost::ShutdownStarted() {
+}
+
+void ChildProcessHost::Notify(NotificationType type) {
 }
 
 ChildProcessHost::ListenerHook::ListenerHook(ChildProcessHost* host)
@@ -180,9 +196,9 @@ bool ChildProcessHost::ListenerHook::OnMessageReceived(
     }
   }
 
-  if (!handled && msg.type() == PluginProcessHostMsg_ShutdownRequest::ID) {
+  if (!handled && msg.type() == ChildProcessHostMsg_ShutdownRequest::ID) {
     if (host_->CanShutdown())
-      host_->Send(new PluginProcessMsg_Shutdown());
+      host_->Send(new ChildProcessMsg_Shutdown());
     handled = true;
   }
 
@@ -218,5 +234,5 @@ void ChildProcessHost::ListenerHook::OnChannelError() {
 }
 
 void ChildProcessHost::ForceShutdown() {
-  Send(new PluginProcessMsg_Shutdown());
+  Send(new ChildProcessMsg_Shutdown());
 }

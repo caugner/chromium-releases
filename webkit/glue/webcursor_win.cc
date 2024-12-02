@@ -1,13 +1,13 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/logging.h"
 #include "base/pickle.h"
-#include "gfx/gdi_util.h"
 #include "grit/webkit_resources.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebCursorInfo.h"
+#include "ui/gfx/gdi_util.h"
 #include "webkit/glue/webcursor.h"
 
 using WebKit::WebCursorInfo;
@@ -96,6 +96,11 @@ static LPCWSTR ToCursorID(WebCursorInfo::Type type) {
       return MAKEINTRESOURCE(IDC_ZOOMIN);
     case WebCursorInfo::TypeZoomOut:
       return MAKEINTRESOURCE(IDC_ZOOMOUT);
+    // TODO(avi): get cursor images for grab/grabbing
+    // http://crbug.com/74699
+    case WebCursorInfo::TypeGrab:
+    case WebCursorInfo::TypeGrabbing:
+      return IDC_ARROW;
   }
   NOTREACHED();
   return NULL;

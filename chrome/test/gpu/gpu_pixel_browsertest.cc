@@ -14,25 +14,26 @@
 #include "base/path_service.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
+#include "chrome/browser/gpu_data_manager.h"
+#include "chrome/browser/gpu_process_host_ui_shim.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/gpu_process_host.h"
-#include "chrome/browser/gpu_process_host_ui_shim.h"
-#include "chrome/browser/renderer_host/render_view_host.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/gpu_info.h"
 #include "chrome/test/in_process_browser_test.h"
 #include "chrome/test/test_launcher_utils.h"
 #include "chrome/test/ui_test_utils.h"
-#include "gfx/codec/png_codec.h"
-#include "gfx/size.h"
+#include "content/browser/gpu_process_host.h"
+#include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/tab_contents/tab_contents.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/net_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkColor.h"
+#include "ui/gfx/codec/png_codec.h"
+#include "ui/gfx/size.h"
 
 namespace {
 
@@ -90,13 +91,17 @@ class GPUInfoCollectedObserver {
   explicit GPUInfoCollectedObserver(GpuProcessHostUIShim* gpu_host_shim)
       : gpu_host_shim_(gpu_host_shim),
         gpu_info_collected_(false) {
-    gpu_host_shim_->set_gpu_info_collected_callback(
-        NewCallback(this, &GPUInfoCollectedObserver::OnGpuInfoCollected));
+    gpu_info_update_callback_ =
+        NewCallback(this, &GPUInfoCollectedObserver::OnGpuInfoCollected);
+    GpuDataManager::GetInstance()->
+        AddGpuInfoUpdateCallback(gpu_info_update_callback_);
   }
 
   void OnGpuInfoCollected() {
     gpu_info_collected_ = true;
-    gpu_host_shim_->set_gpu_info_collected_callback(NULL);
+    GpuDataManager::GetInstance()->
+        RemoveGpuInfoUpdateCallback(gpu_info_update_callback_);
+    delete gpu_info_update_callback_;
     MessageLoopForUI::current()->Quit();
   }
 
@@ -104,6 +109,7 @@ class GPUInfoCollectedObserver {
 
  private:
   GpuProcessHostUIShim* gpu_host_shim_;
+  Callback0::Type* gpu_info_update_callback_;
   bool gpu_info_collected_;
 };
 
@@ -112,13 +118,13 @@ class GPUInfoCollectedObserver {
 // will return false if we are running in a virtualized environment.
 bool CollectGPUInfo(GPUInfo* client_info) {
   CHECK(client_info);
-  GpuProcessHostUIShim* gpu_host_shim = GpuProcessHostUIShim::GetInstance();
+  GpuProcessHostUIShim* gpu_host_shim = GpuProcessHostUIShim::GetForRenderer(0);
   if (!gpu_host_shim)
     return false;
   GPUInfo info = gpu_host_shim->gpu_info();
-  if (info.progress() == GPUInfo::kUninitialized) {
+  if (info.level() == GPUInfo::kUninitialized) {
     GPUInfoCollectedObserver observer(gpu_host_shim);
-    gpu_host_shim->CollectGraphicsInfoAsynchronously();
+    gpu_host_shim->CollectGpuInfoAsynchronously(GPUInfo::kPartial);
     ui_test_utils::RunMessageLoop();
     if (!observer.gpu_info_collected())
       return false;

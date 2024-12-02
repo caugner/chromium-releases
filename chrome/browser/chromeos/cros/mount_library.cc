@@ -6,8 +6,8 @@
 
 #include "base/message_loop.h"
 #include "base/string_util.h"
-#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
+#include "content/browser/browser_thread.h"
 
 namespace chromeos {
 
@@ -37,6 +37,10 @@ class MountLibraryImpl : public MountLibrary {
 
   bool MountPath(const char* device_path) {
     return MountDevicePath(device_path);
+  }
+
+  bool IsBootPath(const char* device_path) {
+    return IsBootDevicePath(device_path);
   }
 
   const DiskVector& disks() const { return disks_; }
@@ -124,6 +128,7 @@ class MountLibraryStubImpl : public MountLibrary {
   virtual void RemoveObserver(Observer* observer) {}
   virtual const DiskVector& disks() const { return disks_; }
   virtual bool MountPath(const char* device_path) { return false; }
+  virtual bool IsBootPath(const char* device_path) { return true; }
 
  private:
   // The list of disks found.

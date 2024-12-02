@@ -6,6 +6,7 @@
 obj:*/ld-2*
 obj:*/libpthread-*
 obj:*/libfreetype*
+obj:*/libdbus*
 
 # we ignore the whole NSS library for now since
 # its instrumentation is very slow.
@@ -14,7 +15,7 @@ obj:*/libnss*
 obj:*/nss/*
 
 # ignore pulseaudio - We don't have symbols there and it can be slow otherwise
-obj:*/libpulse.so*
+obj:*/libpulse*.so*
 
 # ignore this standard stuff
 fun:clone
@@ -25,6 +26,7 @@ fun_r:_pthread_free_pthread_onstack
 fun_r:random_r
 fun_r:random
 fun_r:rand
+fun_r:srand
 fun:__lll_mutex_unlock_wake
 fun:__cxa_atexit
 fun:__new_exitfn
@@ -118,11 +120,29 @@ fun_r:*BrowserThread*CurrentlyOn*
 
 # zlib is smarter than we are, see http://www.zlib.net/zlib_faq.html#faq36
 fun_r:inflate
+# zlib-related reports, not investigated yet. See http://crbug.com/70932
+fun_r:*remoting*CompressorZlib*Process*
 
 # X11 reads the _XErrorFunction callback in a racey way, see
 # http://crbug.com/65278
 fun:XSetErrorHandler
 
+fun:*IPC*Logging*Enable*
+fun:*IPC*Logging*Disable*
+
 # TSan doesn't support lockf and hence shared memory locks in this function;
 # http://crbug.com/45083
 fun_r:*base*StatsTable*AddCounter*
+
+# TSan doesn't understand internal libc locks, see http://crbug.com/71435
+fun_r:mbsrtowcs
+
+# gethostbyname2_r is thread-safe, however ThreadSanitizer reports races inside it and
+# (sometimes) in __nss_* functions below it.
+# This may be related to
+# https://bugs.launchpad.net/ubuntu/+source/glibc/+bug/59449
+fun_r:gethostbyname2_r*
+
+# Strange reports below _IO_getline, every time in "Concurrent access".
+# Probably the reports are there since we're missing the libc internal locks
+fun_r:_IO_getline*

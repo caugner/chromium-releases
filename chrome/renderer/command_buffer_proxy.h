@@ -45,12 +45,15 @@ class CommandBufferProxy : public gpu::CommandBuffer,
 
   // CommandBuffer implementation:
   virtual bool Initialize(int32 size);
+  virtual bool Initialize(base::SharedMemory* buffer, int32 size);
   virtual gpu::Buffer GetRingBuffer();
   virtual State GetState();
   virtual void Flush(int32 put_offset);
   virtual State FlushSync(int32 put_offset);
   virtual void SetGetOffset(int32 get_offset);
   virtual int32 CreateTransferBuffer(size_t size);
+  virtual int32 RegisterTransferBuffer(base::SharedMemory* shared_memory,
+                                       size_t size);
   virtual void DestroyTransferBuffer(int32 id);
   virtual gpu::Buffer GetTransferBuffer(int32 handle);
   virtual void SetToken(int32 token);
@@ -60,6 +63,7 @@ class CommandBufferProxy : public gpu::CommandBuffer,
   // Set a callback that will be invoked when the SwapBuffers call has been
   // issued.
   void SetSwapBuffersCallback(Callback0::Type* callback);
+  void SetChannelErrorCallback(Callback0::Type* callback);
 
   // Asynchronously resizes an offscreen frame buffer.
   void ResizeOffscreenFrameBuffer(const gfx::Size& size);
@@ -117,6 +121,7 @@ class CommandBufferProxy : public gpu::CommandBuffer,
   scoped_ptr<Task> notify_repaint_task_;
 
   scoped_ptr<Callback0::Type> swap_buffers_callback_;
+  scoped_ptr<Callback0::Type> channel_error_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(CommandBufferProxy);
 };

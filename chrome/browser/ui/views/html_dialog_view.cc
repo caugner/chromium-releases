@@ -6,9 +6,10 @@
 
 #include <vector>
 
-#include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/views/window.h"
 #include "chrome/common/native_web_keyboard_event.h"
+#include "content/browser/tab_contents/tab_contents.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "views/widget/root_view.h"
 #include "views/widget/widget.h"
@@ -21,13 +22,14 @@
 namespace browser {
 
 // Declared in browser_dialogs.h so that others don't need to depend on our .h.
-void ShowHtmlDialogView(gfx::NativeWindow parent, Profile* profile,
-                        HtmlDialogUIDelegate* delegate) {
+gfx::NativeWindow ShowHtmlDialog(gfx::NativeWindow parent, Profile* profile,
+                                 HtmlDialogUIDelegate* delegate) {
   HtmlDialogView* html_view =
       new HtmlDialogView(profile, delegate);
   browser::CreateViewsWindow(parent, gfx::Rect(), html_view);
   html_view->InitDialog();
   html_view->window()->Show();
+  return html_view->window()->GetNativeWindow();
 }
 
 }  // namespace browser
@@ -118,10 +120,10 @@ GURL HtmlDialogView::GetDialogContentURL() const {
   return GURL();
 }
 
-void HtmlDialogView::GetDOMMessageHandlers(
-    std::vector<DOMMessageHandler*>* handlers) const {
+void HtmlDialogView::GetWebUIMessageHandlers(
+    std::vector<WebUIMessageHandler*>* handlers) const {
   if (delegate_)
-    delegate_->GetDOMMessageHandlers(handlers);
+    delegate_->GetWebUIMessageHandlers(handlers);
 }
 
 void HtmlDialogView::GetDialogSize(gfx::Size* size) const {

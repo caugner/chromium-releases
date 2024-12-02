@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,11 +15,13 @@
 #include <vector>
 
 #include "base/message_loop.h"
+#include "base/scoped_ptr.h"
 #include "base/scoped_vector.h"
 #include "base/win/scoped_comptr.h"
 #include "ui/base/win/window_impl.h"
 #include "views/focus/focus_manager.h"
-#include "views/layout_manager.h"
+#include "views/layout/layout_manager.h"
+#include "views/widget/native_widget.h"
 #include "views/widget/widget.h"
 
 namespace ui {
@@ -33,12 +35,14 @@ class Rect;
 
 namespace views {
 
-class DefaultThemeProvider;
 class DropTargetWin;
-class FocusSearch;
 class RootView;
 class TooltipManagerWin;
 class Window;
+
+namespace internal {
+class NativeWidgetDelegate;
+}
 
 RootView* GetRootViewForHWND(HWND hwnd);
 
@@ -76,8 +80,8 @@ const int WM_NCUAHDRAWFRAME = 0xAF;
 ///////////////////////////////////////////////////////////////////////////////
 class WidgetWin : public ui::WindowImpl,
                   public Widget,
-                  public MessageLoopForUI::Observer,
-                  public FocusTraversable {
+                  public NativeWidget,
+                  public MessageLoopForUI::Observer {
  public:
   WidgetWin();
   virtual ~WidgetWin();
@@ -85,15 +89,13 @@ class WidgetWin : public ui::WindowImpl,
   // Returns the Widget associated with the specified HWND (if any).
   static WidgetWin* GetWidget(HWND hwnd);
 
-  // Returns the root Widget associated with the specified HWND (if any).
-  static WidgetWin* GetRootWidget(HWND hwnd);
+  // Returns true if we are on Windows Vista or greater and composition is
+  // enabled.
+  static bool IsAeroGlassEnabled();
 
   void set_delete_on_destroy(bool delete_on_destroy) {
     delete_on_destroy_ = delete_on_destroy;
   }
-
-  // See description of use_layered_buffer_ for details.
-  void SetUseLayeredBuffer(bool use_layered_buffer);
 
   // Disable Layered Window updates by setting to false.
   void set_can_update_layered_window(bool can_update_layered_window) {
@@ -115,143 +117,16 @@ class WidgetWin : public ui::WindowImpl,
   // Clear a view that has recently been removed on a hierarchy change.
   void ClearAccessibilityViewEvent(View* view);
 
-  BEGIN_MSG_MAP_EX(WidgetWin)
-    // Range handlers must go first!
-    MESSAGE_RANGE_HANDLER_EX(WM_MOUSEFIRST, WM_MOUSELAST, OnMouseRange)
-    MESSAGE_RANGE_HANDLER_EX(WM_NCMOUSEMOVE, WM_NCMOUSEMOVE, OnMouseRange)
-
-    // Reflected message handler
-    MESSAGE_HANDLER_EX(kReflectedMessage, OnReflectedMessage)
-
-    // CustomFrameWindow hacks
-    MESSAGE_HANDLER_EX(WM_NCUAHDRAWCAPTION, OnNCUAHDrawCaption)
-    MESSAGE_HANDLER_EX(WM_NCUAHDRAWFRAME, OnNCUAHDrawFrame)
-
-    // Vista and newer
-    MESSAGE_HANDLER_EX(WM_DWMCOMPOSITIONCHANGED, OnDwmCompositionChanged)
-
-    // Non-atlcrack.h handlers
-    MESSAGE_HANDLER_EX(WM_GETOBJECT, OnGetObject)
-    MESSAGE_HANDLER_EX(WM_NCMOUSELEAVE, OnNCMouseLeave)
-    MESSAGE_HANDLER_EX(WM_MOUSELEAVE, OnMouseLeave)
-    MESSAGE_HANDLER_EX(WM_MOUSEWHEEL, OnMouseWheel)
-
-    // This list is in _ALPHABETICAL_ order! OR I WILL HURT YOU.
-    MSG_WM_ACTIVATE(OnActivate)
-    MSG_WM_ACTIVATEAPP(OnActivateApp)
-    MSG_WM_APPCOMMAND(OnAppCommand)
-    MSG_WM_CANCELMODE(OnCancelMode)
-    MSG_WM_CAPTURECHANGED(OnCaptureChanged)
-    MSG_WM_CLOSE(OnClose)
-    MSG_WM_COMMAND(OnCommand)
-    MSG_WM_CREATE(OnCreate)
-    MSG_WM_DESTROY(OnDestroy)
-    MSG_WM_DISPLAYCHANGE(OnDisplayChange)
-    MSG_WM_ERASEBKGND(OnEraseBkgnd)
-    MSG_WM_ENDSESSION(OnEndSession)
-    MSG_WM_ENTERSIZEMOVE(OnEnterSizeMove)
-    MSG_WM_EXITMENULOOP(OnExitMenuLoop)
-    MSG_WM_EXITSIZEMOVE(OnExitSizeMove)
-    MSG_WM_GETMINMAXINFO(OnGetMinMaxInfo)
-    MSG_WM_HSCROLL(OnHScroll)
-    MSG_WM_INITMENU(OnInitMenu)
-    MSG_WM_INITMENUPOPUP(OnInitMenuPopup)
-    MSG_WM_KEYDOWN(OnKeyDown)
-    MSG_WM_KEYUP(OnKeyUp)
-    MSG_WM_KILLFOCUS(OnKillFocus)
-    MSG_WM_SYSKEYDOWN(OnKeyDown)
-    MSG_WM_SYSKEYUP(OnKeyUp)
-    MSG_WM_LBUTTONDBLCLK(OnLButtonDblClk)
-    MSG_WM_LBUTTONDOWN(OnLButtonDown)
-    MSG_WM_LBUTTONUP(OnLButtonUp)
-    MSG_WM_MBUTTONDOWN(OnMButtonDown)
-    MSG_WM_MBUTTONUP(OnMButtonUp)
-    MSG_WM_MBUTTONDBLCLK(OnMButtonDblClk)
-    MSG_WM_MOUSEACTIVATE(OnMouseActivate)
-    MSG_WM_MOUSEMOVE(OnMouseMove)
-    MSG_WM_MOVE(OnMove)
-    MSG_WM_MOVING(OnMoving)
-    MSG_WM_NCACTIVATE(OnNCActivate)
-    MSG_WM_NCCALCSIZE(OnNCCalcSize)
-    MSG_WM_NCHITTEST(OnNCHitTest)
-    MSG_WM_NCMOUSEMOVE(OnNCMouseMove)
-    MSG_WM_NCLBUTTONDBLCLK(OnNCLButtonDblClk)
-    MSG_WM_NCLBUTTONDOWN(OnNCLButtonDown)
-    MSG_WM_NCLBUTTONUP(OnNCLButtonUp)
-    MSG_WM_NCMBUTTONDBLCLK(OnNCMButtonDblClk)
-    MSG_WM_NCMBUTTONDOWN(OnNCMButtonDown)
-    MSG_WM_NCMBUTTONUP(OnNCMButtonUp)
-    MSG_WM_NCPAINT(OnNCPaint)
-    MSG_WM_NCRBUTTONDBLCLK(OnNCRButtonDblClk)
-    MSG_WM_NCRBUTTONDOWN(OnNCRButtonDown)
-    MSG_WM_NCRBUTTONUP(OnNCRButtonUp)
-    MSG_WM_NOTIFY(OnNotify)
-    MSG_WM_PAINT(OnPaint)
-    MSG_WM_POWERBROADCAST(OnPowerBroadcast)
-    MSG_WM_RBUTTONDBLCLK(OnRButtonDblClk)
-    MSG_WM_RBUTTONDOWN(OnRButtonDown)
-    MSG_WM_RBUTTONUP(OnRButtonUp)
-    MSG_WM_SETFOCUS(OnSetFocus)
-    MSG_WM_SETICON(OnSetIcon)
-    MSG_WM_SETTEXT(OnSetText)
-    MSG_WM_SETTINGCHANGE(OnSettingChange)
-    MSG_WM_SIZE(OnSize)
-    MSG_WM_SYSCOMMAND(OnSysCommand)
-    MSG_WM_THEMECHANGED(OnThemeChanged)
-    MSG_WM_VSCROLL(OnVScroll)
-    MSG_WM_WINDOWPOSCHANGING(OnWindowPosChanging)
-    MSG_WM_WINDOWPOSCHANGED(OnWindowPosChanged)
-  END_MSG_MAP()
-
   // Overridden from Widget:
-  virtual void Init(gfx::NativeView parent, const gfx::Rect& bounds);
-  virtual void InitWithWidget(Widget* parent, const gfx::Rect& bounds);
-  virtual WidgetDelegate* GetWidgetDelegate();
-  virtual void SetWidgetDelegate(WidgetDelegate* delegate);
-  virtual void SetContentsView(View* view);
-  virtual void GetBounds(gfx::Rect* out, bool including_frame) const;
-  virtual void SetBounds(const gfx::Rect& bounds);
-  virtual void MoveAbove(Widget* other);
-  virtual void SetShape(gfx::NativeRegion region);
-  virtual void Close();
-  virtual void CloseNow();
-  virtual void Show();
-  virtual void Hide();
-  virtual gfx::NativeView GetNativeView() const;
-  virtual void PaintNow(const gfx::Rect& update_rect);
-  virtual void SetOpacity(unsigned char opacity);
-  virtual void SetAlwaysOnTop(bool on_top);
-  virtual RootView* GetRootView();
-  virtual Widget* GetRootWidget() const;
-  virtual bool IsVisible() const;
-  virtual bool IsActive() const;
-  virtual bool IsAccessibleWidget() const;
-  virtual TooltipManager* GetTooltipManager();
-  virtual void GenerateMousePressedForView(View* view,
-                                           const gfx::Point& point);
-  virtual bool GetAccelerator(int cmd_id, ui::Accelerator* accelerator);
-  virtual Window* GetWindow();
-  virtual const Window* GetWindow() const;
-  virtual void SetNativeWindowProperty(const char* name, void* value);
-  virtual void* GetNativeWindowProperty(const char* name);
-  virtual ThemeProvider* GetThemeProvider() const;
-  virtual ThemeProvider* GetDefaultThemeProvider() const;
-  virtual FocusManager* GetFocusManager();
+  virtual void Init(gfx::NativeView parent, const gfx::Rect& bounds) OVERRIDE;
+  virtual void InitWithWidget(Widget* parent, const gfx::Rect& bounds) OVERRIDE;
+  virtual gfx::NativeView GetNativeView() const OVERRIDE;
+  virtual bool GetAccelerator(int cmd_id,
+                              ui::Accelerator* accelerator) OVERRIDE;
+  virtual Window* GetWindow() OVERRIDE;
+  virtual const Window* GetWindow() const OVERRIDE;
   virtual void ViewHierarchyChanged(bool is_add, View *parent,
-                                    View *child);
-  virtual bool ContainsNativeView(gfx::NativeView native_view);
-
-  // Overridden from MessageLoop::Observer:
-  void WillProcessMessage(const MSG& msg);
-  virtual void DidProcessMessage(const MSG& msg);
-
-  // Overridden from FocusTraversable:
-  virtual FocusSearch* GetFocusSearch();
-  virtual FocusTraversable* GetFocusTraversableParent();
-  virtual View* GetFocusTraversableParentView();
-
-  void SetFocusTraversableParent(FocusTraversable* parent);
-  void SetFocusTraversableParentView(View* parent_view);
+                                    View *child) OVERRIDE;
 
   BOOL IsWindow() const {
     return ::IsWindow(GetNativeView());
@@ -322,12 +197,119 @@ class WidgetWin : public ui::WindowImpl,
     last_mouse_event_was_move_ = false;
   }
 
- protected:
-  // Overridden from WindowImpl:
-  virtual HICON GetDefaultWindowIcon() const;
-  virtual LRESULT OnWndProc(UINT message, WPARAM w_param, LPARAM l_param);
+  // Overridden from NativeWidget:
+  virtual Widget* GetWidget() OVERRIDE;
+  virtual void SetNativeWindowProperty(const char* name, void* value) OVERRIDE;
+  virtual void* GetNativeWindowProperty(const char* name) OVERRIDE;
+  virtual TooltipManager* GetTooltipManager() const OVERRIDE;
+  virtual gfx::Rect GetWindowScreenBounds() const OVERRIDE;
+  virtual gfx::Rect GetClientAreaScreenBounds() const OVERRIDE;
+  virtual void SetBounds(const gfx::Rect& bounds) OVERRIDE;
+  virtual void MoveAbove(Widget* widget) OVERRIDE;
+  virtual void SetShape(gfx::NativeRegion shape) OVERRIDE;
+  virtual void Close() OVERRIDE;
+  virtual void CloseNow() OVERRIDE;
+  virtual void Show() OVERRIDE;
+  virtual void Hide() OVERRIDE;
+  virtual void SetOpacity(unsigned char opacity) OVERRIDE;
+  virtual void SetAlwaysOnTop(bool on_top) OVERRIDE;
+  virtual bool IsVisible() const OVERRIDE;
+  virtual bool IsActive() const OVERRIDE;
+  virtual bool IsAccessibleWidget() const OVERRIDE;
+  virtual bool ContainsNativeView(gfx::NativeView native_view) const OVERRIDE;
+  virtual void RunShellDrag(View* view,
+                            const ui::OSExchangeData& data,
+                            int operation) OVERRIDE;
+  virtual void SchedulePaintInRect(const gfx::Rect& rect) OVERRIDE;
+  virtual void SetCursor(gfx::NativeCursor cursor) OVERRIDE;
 
-  // Message Handlers
+ protected:
+  // Overridden from MessageLoop::Observer:
+  void WillProcessMessage(const MSG& msg) OVERRIDE;
+  virtual void DidProcessMessage(const MSG& msg) OVERRIDE;
+
+  // Overridden from WindowImpl:
+  virtual HICON GetDefaultWindowIcon() const OVERRIDE;
+  virtual LRESULT OnWndProc(UINT message,
+                            WPARAM w_param,
+                            LPARAM l_param) OVERRIDE;
+
+  // Message Handlers ----------------------------------------------------------
+
+  BEGIN_MSG_MAP_EX(WidgetWin)
+    // Range handlers must go first!
+    MESSAGE_RANGE_HANDLER_EX(WM_MOUSEFIRST, WM_MOUSELAST, OnMouseRange)
+    MESSAGE_RANGE_HANDLER_EX(WM_NCMOUSEMOVE, WM_NCXBUTTONDBLCLK, OnNCMouseRange)
+
+    // Reflected message handler
+    MESSAGE_HANDLER_EX(kReflectedMessage, OnReflectedMessage)
+
+    // CustomFrameWindow hacks
+    MESSAGE_HANDLER_EX(WM_NCUAHDRAWCAPTION, OnNCUAHDrawCaption)
+    MESSAGE_HANDLER_EX(WM_NCUAHDRAWFRAME, OnNCUAHDrawFrame)
+
+    // Vista and newer
+    MESSAGE_HANDLER_EX(WM_DWMCOMPOSITIONCHANGED, OnDwmCompositionChanged)
+
+    // Non-atlcrack.h handlers
+    MESSAGE_HANDLER_EX(WM_GETOBJECT, OnGetObject)
+
+    // Mouse events.
+    MESSAGE_HANDLER_EX(WM_MOUSEACTIVATE, OnMouseActivate)
+    MESSAGE_HANDLER_EX(WM_MOUSELEAVE, OnMouseLeave)
+    MESSAGE_HANDLER_EX(WM_MOUSEMOVE, OnMouseMove)
+    MESSAGE_HANDLER_EX(WM_MOUSEWHEEL, OnMouseWheel)
+    MESSAGE_HANDLER_EX(WM_NCMOUSELEAVE, OnNCMouseLeave)
+    MESSAGE_HANDLER_EX(WM_NCMOUSEMOVE, OnNCMouseMove)
+
+    // Key events.
+    MESSAGE_HANDLER_EX(WM_KEYDOWN, OnKeyDown)
+    MESSAGE_HANDLER_EX(WM_KEYUP, OnKeyUp)
+    MESSAGE_HANDLER_EX(WM_SYSKEYDOWN, OnKeyDown);
+    MESSAGE_HANDLER_EX(WM_SYSKEYUP, OnKeyUp);
+
+    // This list is in _ALPHABETICAL_ order! OR I WILL HURT YOU.
+    MSG_WM_ACTIVATE(OnActivate)
+    MSG_WM_ACTIVATEAPP(OnActivateApp)
+    MSG_WM_APPCOMMAND(OnAppCommand)
+    MSG_WM_CANCELMODE(OnCancelMode)
+    MSG_WM_CAPTURECHANGED(OnCaptureChanged)
+    MSG_WM_CLOSE(OnClose)
+    MSG_WM_COMMAND(OnCommand)
+    MSG_WM_CREATE(OnCreate)
+    MSG_WM_DESTROY(OnDestroy)
+    MSG_WM_DISPLAYCHANGE(OnDisplayChange)
+    MSG_WM_ERASEBKGND(OnEraseBkgnd)
+    MSG_WM_ENDSESSION(OnEndSession)
+    MSG_WM_ENTERSIZEMOVE(OnEnterSizeMove)
+    MSG_WM_EXITMENULOOP(OnExitMenuLoop)
+    MSG_WM_EXITSIZEMOVE(OnExitSizeMove)
+    MSG_WM_GETMINMAXINFO(OnGetMinMaxInfo)
+    MSG_WM_HSCROLL(OnHScroll)
+    MSG_WM_INITMENU(OnInitMenu)
+    MSG_WM_INITMENUPOPUP(OnInitMenuPopup)
+    MSG_WM_KILLFOCUS(OnKillFocus)
+    MSG_WM_MOVE(OnMove)
+    MSG_WM_MOVING(OnMoving)
+    MSG_WM_NCACTIVATE(OnNCActivate)
+    MSG_WM_NCCALCSIZE(OnNCCalcSize)
+    MSG_WM_NCHITTEST(OnNCHitTest)
+    MSG_WM_NCPAINT(OnNCPaint)
+    MSG_WM_NOTIFY(OnNotify)
+    MSG_WM_PAINT(OnPaint)
+    MSG_WM_POWERBROADCAST(OnPowerBroadcast)
+    MSG_WM_SETFOCUS(OnSetFocus)
+    MSG_WM_SETICON(OnSetIcon)
+    MSG_WM_SETTEXT(OnSetText)
+    MSG_WM_SETTINGCHANGE(OnSettingChange)
+    MSG_WM_SIZE(OnSize)
+    MSG_WM_SYSCOMMAND(OnSysCommand)
+    MSG_WM_THEMECHANGED(OnThemeChanged)
+    MSG_WM_VSCROLL(OnVScroll)
+    MSG_WM_WINDOWPOSCHANGING(OnWindowPosChanging)
+    MSG_WM_WINDOWPOSCHANGED(OnWindowPosChanged)
+  END_MSG_MAP()
+
   // These are all virtual so that specialized Widgets can modify or augment
   // processing.
   // This list is in _ALPHABETICAL_ order!
@@ -362,37 +344,23 @@ class WidgetWin : public ui::WindowImpl,
   virtual void OnHScroll(int scroll_type, short position, HWND scrollbar);
   virtual void OnInitMenu(HMENU menu);
   virtual void OnInitMenuPopup(HMENU menu, UINT position, BOOL is_system_menu);
-  virtual void OnKeyDown(TCHAR c, UINT rep_cnt, UINT flags);
-  virtual void OnKeyUp(TCHAR c, UINT rep_cnt, UINT flags);
+  virtual LRESULT OnKeyDown(UINT message, WPARAM w_param, LPARAM l_param);
+  virtual LRESULT OnKeyUp(UINT message, WPARAM w_param, LPARAM l_param);
   virtual void OnKillFocus(HWND focused_window);
-  virtual void OnLButtonDblClk(UINT flags, const CPoint& point);
-  virtual void OnLButtonDown(UINT flags, const CPoint& point);
-  virtual void OnLButtonUp(UINT flags, const CPoint& point);
-  virtual void OnMButtonDblClk(UINT flags, const CPoint& point);
-  virtual void OnMButtonDown(UINT flags, const CPoint& point);
-  virtual void OnMButtonUp(UINT flags, const CPoint& point);
-  virtual LRESULT OnMouseActivate(HWND window, UINT hittest_code, UINT message);
-  virtual void OnMouseMove(UINT flags, const CPoint& point);
+  virtual LRESULT OnMouseActivate(UINT message, WPARAM w_param, LPARAM l_param);
   virtual LRESULT OnMouseLeave(UINT message, WPARAM w_param, LPARAM l_param);
+  virtual LRESULT OnMouseMove(UINT message, WPARAM w_param, LPARAM l_param);
+  virtual LRESULT OnMouseRange(UINT message, WPARAM w_param, LPARAM l_param);
   virtual LRESULT OnMouseWheel(UINT message, WPARAM w_param, LPARAM l_param);
   virtual void OnMove(const CPoint& point);
   virtual void OnMoving(UINT param, LPRECT new_bounds);
-  virtual LRESULT OnMouseRange(UINT msg, WPARAM w_param, LPARAM l_param);
   virtual LRESULT OnNCActivate(BOOL active);
   virtual LRESULT OnNCCalcSize(BOOL w_param, LPARAM l_param);
   virtual LRESULT OnNCHitTest(const CPoint& pt);
-  virtual void OnNCLButtonDblClk(UINT flags, const CPoint& point);
-  virtual void OnNCLButtonDown(UINT flags, const CPoint& point);
-  virtual void OnNCLButtonUp(UINT flags, const CPoint& point);
-  virtual void OnNCMButtonDblClk(UINT flags, const CPoint& point);
-  virtual void OnNCMButtonDown(UINT flags, const CPoint& point);
-  virtual void OnNCMButtonUp(UINT flags, const CPoint& point);
-  virtual LRESULT OnNCMouseLeave(UINT uMsg, WPARAM w_param, LPARAM l_param);
-  virtual LRESULT OnNCMouseMove(UINT flags, const CPoint& point);
+  virtual LRESULT OnNCMouseLeave(UINT message, WPARAM w_param, LPARAM l_param);
+  virtual LRESULT OnNCMouseMove(UINT message, WPARAM w_param, LPARAM l_param);
+  virtual LRESULT OnNCMouseRange(UINT message, WPARAM w_param, LPARAM l_param);
   virtual void OnNCPaint(HRGN rgn);
-  virtual void OnNCRButtonDblClk(UINT flags, const CPoint& point);
-  virtual void OnNCRButtonDown(UINT flags, const CPoint& point);
-  virtual void OnNCRButtonUp(UINT flags, const CPoint& point);
   virtual LRESULT OnNCUAHDrawCaption(UINT msg,
                                      WPARAM w_param,
                                      LPARAM l_param);
@@ -400,9 +368,6 @@ class WidgetWin : public ui::WindowImpl,
   virtual LRESULT OnNotify(int w_param, NMHDR* l_param);
   virtual void OnPaint(HDC dc);
   virtual LRESULT OnPowerBroadcast(DWORD power_event, DWORD data);
-  virtual void OnRButtonDblClk(UINT flags, const CPoint& point);
-  virtual void OnRButtonDown(UINT flags, const CPoint& point);
-  virtual void OnRButtonUp(UINT flags, const CPoint& point);
   virtual LRESULT OnReflectedMessage(UINT msg, WPARAM w_param, LPARAM l_param);
   virtual void OnSetFocus(HWND focused_window);
   virtual LRESULT OnSetIcon(UINT size_type, HICON new_icon);
@@ -415,12 +380,9 @@ class WidgetWin : public ui::WindowImpl,
   virtual void OnWindowPosChanging(WINDOWPOS* window_pos);
   virtual void OnWindowPosChanged(WINDOWPOS* window_pos);
 
-  // deletes this window as it is destroyed, override to provide different
+  // Deletes this window as it is destroyed, override to provide different
   // behavior.
   virtual void OnFinalMessage(HWND window);
-
-  // Returns the size that the RootView should be set to in LayoutRootView().
-  virtual gfx::Size GetRootViewSize() const;
 
   // Start tracking all mouse events so that this window gets sent mouse leave
   // messages too.
@@ -429,32 +391,17 @@ class WidgetWin : public ui::WindowImpl,
   // Actually handle mouse events. These functions are called by subclasses who
   // override the message handlers above to do the actual real work of handling
   // the event in the View system.
-  bool ProcessMousePressed(const CPoint& point,
-                           UINT flags,
-                           bool dbl_click,
-                           bool non_client);
-  void ProcessMouseDragged(const CPoint& point, UINT flags);
-  void ProcessMouseReleased(const CPoint& point, UINT flags);
-  void ProcessMouseMoved(const CPoint& point, UINT flags, bool is_nonclient);
+  bool ProcessMousePressed(UINT message, WPARAM w_param, LPARAM l_param);
+  bool ProcessMouseReleased(UINT message, WPARAM w_param, LPARAM l_param);
+  bool ProcessMouseMoved(UINT message, WPARAM w_param, LPARAM l_param);
   void ProcessMouseExited();
 
-  // Lays out the root view to fit the appropriate area within the widget.
-  // Called when the window size or non client metrics change.
-  void LayoutRootView();
-
-  // Called when a MSAA screen reader cleint is detected.
+  // Called when a MSAA screen reader client is detected.
   virtual void OnScreenReaderDetected();
 
   // Returns whether capture should be released on mouse release. The default
   // is true.
   virtual bool ReleaseCaptureOnMouseReleased();
-
-  // Creates the RootView to be used within this Widget. Can be overridden to
-  // create specialized RootView implementations.
-  virtual RootView* CreateRootView();
-
-  // Returns true if this WidgetWin is opaque.
-  bool opaque() const { return opaque_; }
 
   // The TooltipManager.
   // WARNING: RootView's destructor calls into the TooltipManager. As such, this
@@ -462,17 +409,6 @@ class WidgetWin : public ui::WindowImpl,
   scoped_ptr<TooltipManagerWin> tooltip_manager_;
 
   scoped_refptr<DropTargetWin> drop_target_;
-
-  // The focus manager keeping track of focus for this Widget and any of its
-  // children.  NULL for non top-level widgets.
-  // WARNING: RootView's destructor calls into the FocusManager. As such, this
-  // must be destroyed AFTER root_view_.
-  scoped_ptr<FocusManager> focus_manager_;
-
-  // The root of the View hierarchy attached to this window.
-  // WARNING: see warning in tooltip_manager_ for ordering dependencies with
-  // this and tooltip_manager_.
-  scoped_ptr<RootView> root_view_;
 
   // Whether or not we have capture the mouse.
   bool has_capture_;
@@ -490,21 +426,6 @@ class WidgetWin : public ui::WindowImpl,
   // first ancestor that is a Window.
   static Window* GetWindowImpl(HWND hwnd);
 
-  // Resize the bitmap used to contain the contents of the layered window. This
-  // recreates the entire bitmap.
-  void SizeContents(const gfx::Size& window_size);
-
-  // Paint into a DIB and then update the layered window with its contents.
-  void PaintLayeredWindow();
-
-  // In layered mode, update the layered window. |dib_dc| represents a handle
-  // to a device context that contains the contents of the window.
-  void UpdateWindowFromContents(HDC dib_dc);
-
-  // Invoked from WM_DESTROY. Does appropriate cleanup and invokes OnDestroy
-  // so that subclasses can do any cleanup they need to.
-  // void OnDestroyImpl();
-
   // Returns the RootView that contains the focused view, or NULL if there is no
   // focused view.
   RootView* GetFocusedViewRootView();
@@ -513,6 +434,24 @@ class WidgetWin : public ui::WindowImpl,
   // windows procedure.
   static void PostProcessActivateMessage(WidgetWin* widget,
                                          int activation_state);
+
+  // Fills out a MSG struct with the supplied values.
+  void MakeMSG(MSG* msg, UINT message, WPARAM w_param, LPARAM l_param,
+               DWORD time = 0, LONG x = 0, LONG y = 0) const;
+
+  // Synchronously paints the invalid contents of the Widget.
+  void RedrawInvalidRect();
+
+  // Synchronously updates the invalid contents of the Widget. Valid for
+  // layered windows only.
+  void RedrawLayeredWindowContents();
+
+  // Responds to the client area changing size, either at window creation time
+  // or subsequently.
+  void ClientAreaSizeChanged();
+
+  // A delegate implementation that handles events received here.
+  internal::NativeWidgetDelegate* delegate_;
 
   // The following factory is used for calls to close the WidgetWin
   // instance.
@@ -523,18 +462,14 @@ class WidgetWin : public ui::WindowImpl,
   // used when tracking is canceled.
   DWORD active_mouse_tracking_flags_;
 
-  bool opaque_;
-
-  // Should we keep an offscreen buffer? This is initially true and if the
-  // window has WS_EX_LAYERED then it remains true. You can set this to false
-  // at any time to ditch the buffer, and similarly set back to true to force
-  // creation of the buffer.
+  // Should we keep an off-screen buffer? This is false by default, set to true
+  // when WS_EX_LAYERED is specified before the native window is created.
   //
   // NOTE: this is intended to be used with a layered window (a window with an
   // extended window style of WS_EX_LAYERED). If you are using a layered window
   // and NOT changing the layered alpha or anything else, then leave this value
   // alone. OTOH if you are invoking SetLayeredWindowAttributes then you'll
-  // must likely want to set this to false, or after changing the alpha toggle
+  // most likely want to set this to false, or after changing the alpha toggle
   // the extended style bit to false than back to true. See MSDN for more
   // details.
   bool use_layered_buffer_;
@@ -544,7 +479,12 @@ class WidgetWin : public ui::WindowImpl,
 
   // A canvas that contains the window contents in the case of a layered
   // window.
-  scoped_ptr<gfx::CanvasSkia> contents_;
+  scoped_ptr<gfx::CanvasSkia> layered_window_contents_;
+
+  // We must track the invalid rect for a layered window ourselves, since
+  // Windows will not do this properly with InvalidateRect()/GetUpdateRect().
+  // (In fact, it'll return misleading information from GetUpdateRect()).
+  gfx::Rect layered_window_invalid_rect_;
 
   // Whether or not the window should delete itself when it is destroyed.
   // Set this to false via its setter for stack allocated instances.
@@ -561,7 +501,7 @@ class WidgetWin : public ui::WindowImpl,
   // If true, the last event was a mouse move event.
   bool last_mouse_event_was_move_;
 
-  // Coordinates of the last mouse move event, in screen coordinates.
+  // Coordinates of the last mouse move event.
   int last_mouse_move_x_;
   int last_mouse_move_y_;
 
@@ -571,12 +511,6 @@ class WidgetWin : public ui::WindowImpl,
 
   // Instance of accessibility information and handling for MSAA root
   base::win::ScopedComPtr<IAccessible> accessibility_root_;
-
-  scoped_ptr<DefaultThemeProvider> default_theme_provider_;
-
-  // Non owned pointer to optional delegate.  May be NULL if no delegate is
-  // being used.
-  WidgetDelegate* delegate_;
 
   // Value determines whether the Widget is customized for accessibility.
   static bool screen_reader_active_;
@@ -591,6 +525,10 @@ class WidgetWin : public ui::WindowImpl,
   // The current position of the view events vector.  When incrementing,
   // we always mod this value with the max view events above .
   int accessibility_view_events_index_;
+
+  // The last cursor that was active before the current one was selected. Saved
+  // so that we can restore it.
+  gfx::NativeCursor previous_cursor_;
 
   ViewProps props_;
 

@@ -87,7 +87,7 @@ void PpapiUnittest::SetUp() {
   delegate_.reset(new MockPluginDelegate);
 
   // Initialize the mock module.
-  module_ = new PluginModule(this);
+  module_ = new PluginModule("Mock plugin", this);
   PluginModule::EntryPoints entry_points;
   entry_points.get_interface = &MockGetInterface;
   entry_points.initialize_module = &MockInitializeModule;
@@ -117,7 +117,7 @@ void PpapiUnittest::ShutdownModule() {
   module_ = NULL;
 }
 
-void PpapiUnittest::PluginModuleDestroyed(PluginModule* destroyed_module) {
+void PpapiUnittest::PluginModuleDead(PluginModule* /* dead_module */) {
   // Nothing needed (this is necessary to make the module compile).
 }
 

@@ -13,9 +13,9 @@
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/stl_util-inl.h"
+#include "base/string_number_conversions.h"
 #include "base/string_split.h"
 #include "base/string_util.h"
-#include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/history/history_types.h"
@@ -31,18 +31,6 @@
 #include "grit/generated_resources.h"
 #include "net/base/data_url.h"
 #include "webkit/glue/password_form.h"
-
-using base::Time;
-using importer::BOOKMARKS_HTML;
-using importer::FAVORITES;
-using importer::HISTORY;
-using importer::HOME_PAGE;
-using importer::PASSWORDS;
-using importer::ProfileInfo;
-using importer::SEARCH_ENGINES;
-using webkit_glue::PasswordForm;
-
-// Firefox2Importer.
 
 Firefox2Importer::Firefox2Importer() : parsing_bookmarks_html_file_(false) {
 }
@@ -120,7 +108,7 @@ void Firefox2Importer::LoadDefaultBookmarks(const FilePath& app_path,
     std::wstring title;
     GURL url, favicon;
     std::wstring shortcut;
-    Time add_date;
+    base::Time add_date;
     std::wstring post_data;
     if (ParseBookmarkFromLine(line, charset, &title, &url,
                               &favicon, &shortcut, &add_date,
@@ -165,6 +153,8 @@ void Firefox2Importer::ImportBookmarksFile(
   std::vector<ProfileWriter::BookmarkEntry> toolbar_bookmarks;
   std::wstring last_folder = first_folder_name;
   bool last_folder_on_toolbar = false;
+  bool last_folder_is_empty = true;
+  base::Time last_folder_add_date;
   std::vector<std::wstring> path;
   size_t toolbar_folder = 0;
   std::string charset;
@@ -179,23 +169,31 @@ void Firefox2Importer::ImportBookmarksFile(
 
     // Get the folder name.
     if (ParseFolderNameFromLine(line, charset, &last_folder,
-                                &last_folder_on_toolbar))
+                                &last_folder_on_toolbar,
+                                &last_folder_add_date))
       continue;
 
     // Get the bookmark entry.
     std::wstring title, shortcut;
     GURL url, favicon;
-    Time add_date;
+    base::Time add_date;
     std::wstring post_data;
+    bool is_bookmark;
     // TODO(jcampan): http://b/issue?id=1196285 we do not support POST based
     //                keywords yet.
-    if (ParseBookmarkFromLine(line, charset, &title,
-                              &url, &favicon, &shortcut, &add_date,
-                              &post_data) &&
+    is_bookmark = ParseBookmarkFromLine(line, charset, &title,
+                                        &url, &favicon, &shortcut, &add_date,
+                                        &post_data) ||
+        ParseMinimumBookmarkFromLine(line, charset, &title, &url);
+
+    if (is_bookmark)
+      last_folder_is_empty = false;
+
+    if (is_bookmark &&
         post_data.empty() &&
         CanImportURL(GURL(url)) &&
         default_urls.find(url) == default_urls.end()) {
-      if (toolbar_folder > path.size() && path.size() > 0) {
+      if (toolbar_folder > path.size() && !path.empty()) {
         NOTREACHED();  // error in parsing.
         break;
       }
@@ -235,15 +233,44 @@ void Firefox2Importer::ImportBookmarksFile(
     }
 
     // Bookmarks in sub-folder are encapsulated with <DL> tag.
-    if (StartsWithASCII(line, "<DL>", true)) {
+    if (StartsWithASCII(line, "<DL>", false)) {
       path.push_back(last_folder);
       last_folder.clear();
       if (last_folder_on_toolbar && !toolbar_folder)
         toolbar_folder = path.size();
-    } else if (StartsWithASCII(line, "</DL>", true)) {
+
+      // Mark next folder empty as initial state.
+      last_folder_is_empty = true;
+    } else if (StartsWithASCII(line, "</DL>", false)) {
       if (path.empty())
         break;  // Mismatch <DL>.
+
+      std::wstring folder_title = path.back();
       path.pop_back();
+
+      if (last_folder_is_empty) {
+        // Empty folder should be added explicitly.
+        ProfileWriter::BookmarkEntry entry;
+        entry.is_folder = true;
+        entry.creation_time = last_folder_add_date;
+        entry.title = folder_title;
+        if (import_to_bookmark_bar && toolbar_folder) {
+          // Flatten the folder in toolbar.
+          entry.in_toolbar = true;
+          entry.path.assign(path.begin() + toolbar_folder, path.end());
+          toolbar_bookmarks.push_back(entry);
+        } else {
+          // Insert the folder into the "Imported from Firefox" folder.
+          entry.path.assign(path.begin(), path.end());
+          if (import_to_bookmark_bar)
+            entry.path.erase(entry.path.begin());
+          bookmarks->push_back(entry);
+        }
+
+        // Parent folder include current one, so it's not empty.
+        last_folder_is_empty = false;
+      }
+
       if (toolbar_folder > path.size())
         toolbar_folder = 0;
     }
@@ -298,10 +325,8 @@ void Firefox2Importer::ImportBookmarks() {
 void Firefox2Importer::ImportPasswords() {
   // Initializes NSS3.
   NSSDecryptor decryptor;
-  if (!decryptor.Init(source_path_.ToWStringHack(),
-                      source_path_.ToWStringHack()) &&
-      !decryptor.Init(app_path_.ToWStringHack(),
-                      source_path_.ToWStringHack())) {
+  if (!decryptor.Init(source_path_, source_path_) &&
+      !decryptor.Init(app_path_, source_path_)) {
     return;
   }
 
@@ -314,7 +339,7 @@ void Firefox2Importer::ImportPasswords() {
 
   std::string content;
   file_util::ReadFileToString(file, &content);
-  std::vector<PasswordForm> forms;
+  std::vector<webkit_glue::PasswordForm> forms;
   decryptor.ParseSignons(content, &forms);
 
   if (!cancelled()) {
@@ -365,8 +390,9 @@ void Firefox2Importer::GetSearchEnginesXMLFiles(
 bool Firefox2Importer::ParseCharsetFromLine(const std::string& line,
                                             std::string* charset) {
   const char kCharset[] = "charset=";
-  if (StartsWithASCII(line, "<META", true) &&
-      line.find("CONTENT=\"") != std::string::npos) {
+  if (StartsWithASCII(line, "<META", false) &&
+      (line.find("CONTENT=\"") != std::string::npos ||
+          line.find("content=\"") != std::string::npos)) {
     size_t begin = line.find(kCharset);
     if (begin == std::string::npos)
       return false;
@@ -382,10 +408,12 @@ bool Firefox2Importer::ParseCharsetFromLine(const std::string& line,
 bool Firefox2Importer::ParseFolderNameFromLine(const std::string& line,
                                                const std::string& charset,
                                                std::wstring* folder_name,
-                                               bool* is_toolbar_folder) {
+                                               bool* is_toolbar_folder,
+                                               base::Time* add_date) {
   const char kFolderOpen[] = "<DT><H3";
   const char kFolderClose[] = "</H3>";
   const char kToolbarFolderAttribute[] = "PERSONAL_TOOLBAR_FOLDER";
+  const char kAddDateAttribute[] = "ADD_DATE";
 
   if (!StartsWithASCII(line, kFolderOpen, true))
     return false;
@@ -403,6 +431,16 @@ bool Firefox2Importer::ParseFolderNameFromLine(const std::string& line,
   std::string attribute_list = line.substr(arraysize(kFolderOpen),
       tag_end - arraysize(kFolderOpen) - 1);
   std::string value;
+
+  // Add date
+  if (GetAttribute(attribute_list, kAddDateAttribute, &value)) {
+    int64 time;
+    base::StringToInt64(value, &time);
+    // Upper bound it at 32 bits.
+    if (0 < time && time < (1LL << 32))
+      *add_date = base::Time::FromTimeT(time);
+  }
+
   if (GetAttribute(attribute_list, kToolbarFolderAttribute, &value) &&
       LowerCaseEqualsASCII(value, "true"))
     *is_toolbar_folder = true;
@@ -419,7 +457,7 @@ bool Firefox2Importer::ParseBookmarkFromLine(const std::string& line,
                                              GURL* url,
                                              GURL* favicon,
                                              std::wstring* shortcut,
-                                             Time* add_date,
+                                             base::Time* add_date,
                                              std::wstring* post_data) {
   const char kItemOpen[] = "<DT><A";
   const char kItemClose[] = "</A>";
@@ -435,7 +473,7 @@ bool Firefox2Importer::ParseBookmarkFromLine(const std::string& line,
   *favicon = GURL();
   shortcut->clear();
   post_data->clear();
-  *add_date = Time();
+  *add_date = base::Time();
 
   if (!StartsWithASCII(line, kItemOpen, true))
     return false;
@@ -489,7 +527,7 @@ bool Firefox2Importer::ParseBookmarkFromLine(const std::string& line,
     base::StringToInt64(value, &time);
     // Upper bound it at 32 bits.
     if (0 < time && time < (1LL << 32))
-      *add_date = Time::FromTimeT(time);
+      *add_date = base::Time::FromTimeT(time);
   }
 
   // Post data.
@@ -497,6 +535,58 @@ bool Firefox2Importer::ParseBookmarkFromLine(const std::string& line,
     base::CodepageToWide(value, charset.c_str(),
                          base::OnStringConversionError::SKIP, post_data);
     HTMLUnescape(post_data);
+  }
+
+  return true;
+}
+
+// static
+bool Firefox2Importer::ParseMinimumBookmarkFromLine(const std::string& line,
+                                                    const std::string& charset,
+                                                    std::wstring* title,
+                                                    GURL* url) {
+  const char kItemOpen[] = "<DT><A";
+  const char kItemClose[] = "</";
+  const char kHrefAttributeUpper[] = "HREF";
+  const char kHrefAttributeLower[] = "href";
+
+  title->clear();
+  *url = GURL();
+
+  // Case-insensitive check of open tag.
+  if (!StartsWithASCII(line, kItemOpen, false))
+    return false;
+
+  // Find any close tag.
+  size_t end = line.find(kItemClose);
+  size_t tag_end = line.rfind('>', end) + 1;
+  if (end == std::string::npos || tag_end < arraysize(kItemOpen))
+    return false;  // No end tag or start tag is broken.
+
+  std::string attribute_list = line.substr(arraysize(kItemOpen),
+      tag_end - arraysize(kItemOpen) - 1);
+
+  // Title
+  base::CodepageToWide(line.substr(tag_end, end - tag_end), charset.c_str(),
+                       base::OnStringConversionError::SKIP, title);
+  HTMLUnescape(title);
+
+  // URL
+  std::string value;
+  if (GetAttribute(attribute_list, kHrefAttributeUpper, &value) ||
+      GetAttribute(attribute_list, kHrefAttributeLower, &value)) {
+    if (charset.length() != 0) {
+      std::wstring w_url;
+      base::CodepageToWide(value, charset.c_str(),
+                           base::OnStringConversionError::SKIP, &w_url);
+      HTMLUnescape(&w_url);
+
+      string16 url16 = WideToUTF16Hack(w_url);
+
+      *url = GURL(url16);
+    } else {
+      *url = GURL(value);
+    }
   }
 
   return true;

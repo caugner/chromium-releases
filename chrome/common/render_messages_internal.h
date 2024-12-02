@@ -10,7 +10,6 @@
 #include "build/build_config.h"
 
 #include "base/file_path.h"
-#include "base/file_util_proxy.h"
 #include "base/nullable_string16.h"
 #include "base/platform_file.h"
 #include "base/sync_socket.h"
@@ -28,8 +27,6 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebMediaPlayerAction.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebScreenInfo.h"
 #include "webkit/glue/context_menu.h"
-#include "webkit/glue/form_data.h"
-#include "webkit/glue/password_form_dom_manager.h"
 #include "webkit/glue/webdropdata.h"
 #include "webkit/plugins/npapi/webplugininfo.h"
 
@@ -51,7 +48,6 @@ typedef std::map<std::string, std::string> SubstitutionMap;
 
 class Value;
 class GPUInfo;
-struct PP_Flash_NetAddress;
 class SkBitmap;
 struct ThumbnailScore;
 class WebCursor;
@@ -111,7 +107,7 @@ IPC_MESSAGE_CONTROL3(ViewMsg_SetCacheCapacities,
                      size_t /* max_dead_capacity */,
                      size_t /* capacity */)
 
-// Tells the renderer to cleat the cache.
+// Tells the renderer to clear the cache.
 IPC_MESSAGE_CONTROL0(ViewMsg_ClearCache)
 
 // Reply in response to ViewHostMsg_ShowView or ViewHostMsg_ShowWidget.
@@ -131,6 +127,11 @@ IPC_MESSAGE_ROUTED2(ViewMsg_MediaPlayerActionAt,
                     WebKit::WebMediaPlayerAction)
 
 IPC_MESSAGE_ROUTED0(ViewMsg_PrintNodeUnderContextMenu)
+
+// Tells the renderer to print the print preview tab's PDF plugin without
+// showing the print dialog.
+IPC_MESSAGE_ROUTED1(ViewMsg_PrintForPrintPreview,
+                    DictionaryValue /* settings*/)
 
 // Tells the render view to close.
 IPC_MESSAGE_ROUTED0(ViewMsg_Close)
@@ -277,6 +278,10 @@ IPC_MESSAGE_ROUTED0(ViewMsg_ToggleSpellCheck)
 IPC_MESSAGE_ROUTED0(ViewMsg_Delete)
 IPC_MESSAGE_ROUTED0(ViewMsg_SelectAll)
 IPC_MESSAGE_ROUTED1(ViewMsg_ToggleSpellPanel, bool)
+IPC_MESSAGE_ROUTED3(ViewMsg_SpellChecker_RespondTextCheck,
+                    int        /* request identifier given by WebKit */,
+                    int        /* document tag */,
+                    std::vector<WebKit::WebTextCheckingResult>)
 
 // This message tells the renderer to advance to the next misspelling. It is
 // sent when the user clicks the "Find Next" button on the spelling panel.
@@ -318,51 +323,6 @@ IPC_MESSAGE_ROUTED3(ViewMsg_Find,
 IPC_MESSAGE_ROUTED2(ViewMsg_ExecuteCodeFinished,
                     int, /* request id */
                     bool /* whether the script ran successfully */)
-
-// Sent when the headers are available for a resource request.
-IPC_MESSAGE_ROUTED2(ViewMsg_Resource_ReceivedResponse,
-                    int /* request_id */,
-                    ResourceResponseHead)
-
-// Sent when cached metadata from a resource request is ready.
-IPC_MESSAGE_ROUTED2(ViewMsg_Resource_ReceivedCachedMetadata,
-                    int /* request_id */,
-                    std::vector<char> /* data */)
-
-// Sent as upload progress is being made.
-IPC_MESSAGE_ROUTED3(ViewMsg_Resource_UploadProgress,
-                    int /* request_id */,
-                    int64 /* position */,
-                    int64 /* size */)
-
-// Sent when the request has been redirected.  The receiver is expected to
-// respond with either a FollowRedirect message (if the redirect is to be
-// followed) or a CancelRequest message (if it should not be followed).
-IPC_MESSAGE_ROUTED3(ViewMsg_Resource_ReceivedRedirect,
-                    int /* request_id */,
-                    GURL /* new_url */,
-                    ResourceResponseHead)
-
-// Sent when some data from a resource request is ready. The handle should
-// already be mapped into the process that receives this message.
-IPC_MESSAGE_ROUTED3(ViewMsg_Resource_DataReceived,
-                    int /* request_id */,
-                    base::SharedMemoryHandle /* data */,
-                    int /* data_len */)
-
-// Sent when some data from a resource request has been downloaded to
-// file. This is only called in the 'download_to_file' case and replaces
-// ViewMsg_Resource_DataReceived in the call sequence in that case.
-IPC_MESSAGE_ROUTED2(ViewMsg_Resource_DataDownloaded,
-                    int /* request_id */,
-                    int /* data_len */)
-
-// Sent when the request has been completed.
-IPC_MESSAGE_ROUTED4(ViewMsg_Resource_RequestComplete,
-                    int /* request_id */,
-                    net::URLRequestStatus /* status */,
-                    std::string /* security info */,
-                    base::Time /* completion_time */)
 
 // Sent when user prompting is required before a ViewHostMsg_GetCookies
 // message can complete.  This message indicates that the renderer should
@@ -467,15 +427,6 @@ IPC_MESSAGE_ROUTED0(ViewMsg_ResetPageEncodingToDefault)
 IPC_MESSAGE_ROUTED1(ViewMsg_ReservePageIDRange,
                     int  /* size_of_range */)
 
-// Fill a form with data and optionally submit it
-IPC_MESSAGE_ROUTED1(ViewMsg_FormFill,
-                    webkit_glue::FormData /* form */)
-
-// Fill a password form and prepare field autocomplete for multiple
-// matching logins.
-IPC_MESSAGE_ROUTED1(ViewMsg_FillPasswordForm,
-                    webkit_glue::PasswordFormFillData)
-
 // D&d drop target messages.
 IPC_MESSAGE_ROUTED4(ViewMsg_DragTargetDragEnter,
                     WebDropData /* drop_data */,
@@ -508,9 +459,9 @@ IPC_MESSAGE_ROUTED0(ViewMsg_DragSourceSystemDragEnded)
 IPC_MESSAGE_ROUTED1(ViewMsg_AllowBindings,
                     int /* enabled_bindings_flags */)
 
-// Tell the renderer to add a property to the DOMUI binding object.  This
-// only works if we allowed DOMUI bindings.
-IPC_MESSAGE_ROUTED2(ViewMsg_SetDOMUIProperty,
+// Tell the renderer to add a property to the WebUI binding object.  This
+// only works if we allowed WebUI bindings.
+IPC_MESSAGE_ROUTED2(ViewMsg_SetWebUIProperty,
                     std::string /* property_name */,
                     std::string /* property_value_json */)
 
@@ -656,9 +607,10 @@ IPC_MESSAGE_ROUTED3(ViewMsg_HandleMessageFromExternalHost,
 IPC_MESSAGE_ROUTED0(ViewMsg_DisassociateFromPopupCount)
 
 // The browser sends this to a renderer process in response to a
-// ViewHostMsg_EstablishGpuChannel message.
-IPC_MESSAGE_CONTROL2(ViewMsg_GpuChannelEstablished,
+// GpuHostMsg_EstablishGpuChannel message.
+IPC_MESSAGE_CONTROL3(ViewMsg_GpuChannelEstablished,
                      IPC::ChannelHandle /* handle to channel */,
+                     base::ProcessHandle /* renderer_process_for_gpu */,
                      GPUInfo /* stats about GPU process*/)
 
 // Notifies the renderer of the appcache that has been selected for a
@@ -700,21 +652,6 @@ IPC_MESSAGE_CONTROL3(AppCacheMsg_LogMessage,
 IPC_MESSAGE_CONTROL2(AppCacheMsg_ContentBlocked,
                      int /* host_id */,
                      GURL /* manifest_url */)
-
-// Reply to the ViewHostMsg_QueryFormFieldAutoFill message with the
-// AutoFill suggestions.
-IPC_MESSAGE_ROUTED5(ViewMsg_AutoFillSuggestionsReturned,
-                    int /* id of the request message */,
-                    std::vector<string16> /* names */,
-                    std::vector<string16> /* labels */,
-                    std::vector<string16> /* icons */,
-                    std::vector<int> /* unique_ids */)
-
-// Reply to the ViewHostMsg_FillAutoFillFormData message with the
-// AutoFill form data.
-IPC_MESSAGE_ROUTED2(ViewMsg_AutoFillFormDataFilled,
-                    int /* id of the request message */,
-                    webkit_glue::FormData /* form data */)
 
 // Sent by the Browser process to alert a window about whether a it should
 // allow a scripted window.close(). The renderer assumes every new window is a
@@ -928,39 +865,6 @@ IPC_MESSAGE_ROUTED1(ViewMsg_NotifyRenderViewType,
 IPC_MESSAGE_ROUTED1(ViewMsg_ExecuteCode,
                     ViewMsg_ExecuteCode_Params)
 
-#if defined(IPC_MESSAGE_LOG_ENABLED)
-// Tell the renderer process to begin or end IPC message logging.
-IPC_MESSAGE_CONTROL1(ViewMsg_SetIPCLoggingEnabled,
-                     bool /* on or off */)
-#endif
-
-// Socket Stream messages:
-// These are messages from the browser to the SocketStreamHandle on
-// a renderer.
-
-// A |socket_id| is assigned by ViewHostMsg_SocketStream_Connect.
-// The Socket Stream is connected. The SocketStreamHandle should keep track
-// of how much it has pending (how much it has requested to be sent) and
-// shouldn't go over |max_pending_send_allowed| bytes.
-IPC_MESSAGE_CONTROL2(ViewMsg_SocketStream_Connected,
-                     int /* socket_id */,
-                     int /* max_pending_send_allowed */)
-
-// |data| is received on the Socket Stream.
-IPC_MESSAGE_CONTROL2(ViewMsg_SocketStream_ReceivedData,
-                     int /* socket_id */,
-                     std::vector<char> /* data */)
-
-// |amount_sent| bytes of data requested by
-// ViewHostMsg_SocketStream_SendData has been sent on the Socket Stream.
-IPC_MESSAGE_CONTROL2(ViewMsg_SocketStream_SentData,
-                     int /* socket_id */,
-                     int /* amount_sent */)
-
-// The Socket Stream is closed.
-IPC_MESSAGE_CONTROL1(ViewMsg_SocketStream_Closed,
-                     int /* socket_id */)
-
 // SpellChecker messages.
 
 // Passes some initialization params to the renderer's spellchecker. This can
@@ -982,7 +886,8 @@ IPC_MESSAGE_CONTROL1(ViewMsg_SpellChecker_EnableAutoSpellCorrect,
                      bool /* enable */)
 
 // Executes custom context menu action that was provided from WebKit.
-IPC_MESSAGE_ROUTED1(ViewMsg_CustomContextMenuAction,
+IPC_MESSAGE_ROUTED2(ViewMsg_CustomContextMenuAction,
+                    webkit_glue::CustomContextMenuContext /* custom_context */,
                     unsigned /* action */)
 
 // Tells the renderer to translate the page contents from one language to
@@ -1036,32 +941,6 @@ IPC_MESSAGE_ROUTED0(ViewMsg_AccessibilityNotifications_ACK)
 IPC_MESSAGE_ROUTED1(ViewMsg_DeviceOrientationUpdated,
                     ViewMsg_DeviceOrientationUpdated_Params)
 
-// WebFrameClient::openFileSystem response messages.
-IPC_MESSAGE_CONTROL4(ViewMsg_OpenFileSystemRequest_Complete,
-                     int /* request_id */,
-                     bool /* accepted */,
-                     std::string /* name */,
-                     FilePath /* root_path */)
-
-// WebFileSystem response messages.
-IPC_MESSAGE_CONTROL1(ViewMsg_FileSystem_DidSucceed,
-                     int /* request_id */)
-IPC_MESSAGE_CONTROL2(ViewMsg_FileSystem_DidReadMetadata,
-                     int /* request_id */,
-                     base::PlatformFileInfo)
-IPC_MESSAGE_CONTROL3(ViewMsg_FileSystem_DidReadDirectory,
-                     int /* request_id */,
-                     std::vector<base::FileUtilProxy::Entry> /* entries */,
-                     bool /* has_more */)
-
-IPC_MESSAGE_CONTROL3(ViewMsg_FileSystem_DidWrite,
-                     int /* request_id */,
-                     int64 /* byte count */,
-                     bool /* complete */)
-IPC_MESSAGE_CONTROL2(ViewMsg_FileSystem_DidFail,
-                     int /* request_id */,
-                     base::PlatformFileError /* error_code */)
-
 // The response to ViewHostMsg_AsyncOpenFile.
 IPC_MESSAGE_ROUTED3(ViewMsg_AsyncOpenFile_ACK,
                     base::PlatformFileError /* error_code */,
@@ -1074,24 +953,26 @@ IPC_MESSAGE_ROUTED3(ViewMsg_AsyncOpenFile_ACK,
 IPC_MESSAGE_CONTROL1(ViewMsg_SetPhishingModel,
                      IPC::PlatformFileForTransit /* model_file */)
 
+// Request a DOM tree when a malware interstitial is shown.
+IPC_MESSAGE_ROUTED0(ViewMsg_GetMalwareDOMDetails)
+
+// Tells the renderer to begin phishing detection for the given toplevel URL
+// which it has started loading.
+IPC_MESSAGE_ROUTED1(ViewMsg_StartPhishingDetection, GURL)
+
 // External popup menus.
 IPC_MESSAGE_ROUTED1(ViewMsg_SelectPopupMenuItem,
                     int /* selected index, -1 means no selection */)
 
-// Indicate whether speech input API is enabled or not.
-IPC_MESSAGE_CONTROL1(ViewMsg_SpeechInput_SetFeatureEnabled,
-                     bool /* enabled */)
-
-// The response to ViewHostMsg_PepperConnectTcp(Address).
-IPC_MESSAGE_ROUTED4(ViewMsg_PepperConnectTcpACK,
-                    int /* request_id */,
-                    IPC::PlatformFileForTransit /* socket */,
-                    PP_Flash_NetAddress /* local_addr */,
-                    PP_Flash_NetAddress /* remote_addr */)
-
 // Sent in response to a ViewHostMsg_ContextMenu to let the renderer know that
 // the menu has been closed.
-IPC_MESSAGE_ROUTED0(ViewMsg_ContextMenuClosed)
+IPC_MESSAGE_ROUTED1(ViewMsg_ContextMenuClosed,
+                    webkit_glue::CustomContextMenuContext /* custom_context */)
+
+// Tells the renderer that the network state has changed and that
+// window.navigator.onLine should be updated for all WebViews.
+IPC_MESSAGE_ROUTED1(ViewMsg_NetworkStateChanged,
+                    bool /* online */)
 
 //-----------------------------------------------------------------------------
 // TabContents messages
@@ -1115,9 +996,8 @@ IPC_SYNC_MESSAGE_CONTROL2_1(ViewHostMsg_CreateWidget,
 
 // Similar to ViewHostMsg_CreateWidget except the widget is a full screen
 // window.
-IPC_SYNC_MESSAGE_CONTROL2_1(ViewHostMsg_CreateFullscreenWidget,
+IPC_SYNC_MESSAGE_CONTROL1_1(ViewHostMsg_CreateFullscreenWidget,
                             int /* opener_id */,
-                            WebKit::WebPopupType /* popup type */,
                             int /* route_id */)
 
 // These three messages are sent to the parent RenderViewHost to display the
@@ -1240,10 +1120,8 @@ IPC_MESSAGE_ROUTED1(ViewHostMsg_DocumentOnLoadCompletedInMainFrame,
 // The security info is non empty if the resource was originally loaded over
 // a secure connection.
 // Note: May only be sent once per URL per frame per committed load.
-IPC_MESSAGE_ROUTED4(ViewHostMsg_DidLoadResourceFromMemoryCache,
+IPC_MESSAGE_ROUTED2(ViewHostMsg_DidLoadResourceFromMemoryCache,
                     GURL /* url */,
-                    std::string  /* frame_origin */,
-                    std::string  /* main_frame_origin */,
                     std::string  /* security info */)
 
 // Sent when the renderer displays insecure content in a secure page.
@@ -1322,28 +1200,6 @@ IPC_MESSAGE_ROUTED5(ViewHostMsg_Find_Reply,
                     gfx::Rect /* selection_rect */,
                     int /* active_match_ordinal */,
                     bool /* final_update */)
-
-// Makes a resource request via the browser.
-IPC_MESSAGE_ROUTED2(ViewHostMsg_RequestResource,
-                    int /* request_id */,
-                    ViewHostMsg_Resource_Request)
-
-// Cancels a resource request with the ID given as the parameter.
-IPC_MESSAGE_ROUTED1(ViewHostMsg_CancelRequest,
-                    int /* request_id */)
-
-// Follows a redirect that occured for the resource request with the ID given
-// as the parameter.
-IPC_MESSAGE_ROUTED3(ViewHostMsg_FollowRedirect,
-                    int /* request_id */,
-                    bool /* has_new_first_party_for_cookies */,
-                    GURL /* new_first_party_for_cookies */)
-
-// Makes a synchronous resource request via the browser.
-IPC_SYNC_MESSAGE_ROUTED2_1(ViewHostMsg_SyncLoad,
-                           int /* request_id */,
-                           ViewHostMsg_Resource_Request,
-                           SyncLoadResult)
 
 // Used to set a cookie. The cookie is set asynchronously, but will be
 // available to a subsequent ViewHostMsg_GetCookies request.
@@ -1536,7 +1392,7 @@ IPC_MESSAGE_ROUTED2(ViewHostMsg_DomOperationResponse,
 
 // A message from HTML-based UI.  When (trusted) Javascript calls
 // send(message, args), this message is sent to the browser.
-IPC_MESSAGE_ROUTED3(ViewHostMsg_DOMUISend,
+IPC_MESSAGE_ROUTED3(ViewHostMsg_WebUISend,
                     GURL /* source_url */,
                     std::string  /* message */,
                     std::string  /* args (as a JSON string) */)
@@ -1566,17 +1422,6 @@ IPC_SYNC_MESSAGE_CONTROL1_2(ViewHostMsg_OpenChannelToPepperPlugin,
                             FilePath /* path */,
                             base::ProcessHandle /* plugin_process_handle */,
                             IPC::ChannelHandle /* handle to channel */)
-
-// A renderer sends this to the browser process when it wants to
-// create connect to the GPU.  The browser will create the GPU process if
-// necessary, and will return a handle to the channel via
-// a GpuChannelEstablished message.
-IPC_MESSAGE_CONTROL0(ViewHostMsg_EstablishGpuChannel)
-
-// A renderer sends this to the browser process to provide a synchronization
-// point for GPU operations, in particular to make sure the GPU channel has
-// been established.
-IPC_SYNC_MESSAGE_CONTROL0_0(ViewHostMsg_SynchronizeGpu)
 
 // A renderer sends this to the browser process when it wants to start
 // a new instance of the Native Client process. The browser will launch
@@ -1684,25 +1529,6 @@ IPC_MESSAGE_ROUTED1(ViewHostMsg_SelectionChanged,
 IPC_MESSAGE_ROUTED1(ViewHostMsg_RunFileChooser,
                     ViewHostMsg_RunFileChooser_Params)
 
-// Notification that forms have been seen that are candidates for
-// filling/submitting by the AutoFillManager.
-IPC_MESSAGE_ROUTED1(ViewHostMsg_FormsSeen,
-                    std::vector<webkit_glue::FormData> /* forms */)
-
-// Notification that password forms have been seen that are candidates for
-// filling/submitting by the password manager.
-IPC_MESSAGE_ROUTED1(ViewHostMsg_PasswordFormsFound,
-                    std::vector<webkit_glue::PasswordForm> /* forms */)
-
-// Notification that initial layout has occurred and the following password
-// forms are visible on the page (e.g. not set to display:none.)
-IPC_MESSAGE_ROUTED1(ViewHostMsg_PasswordFormsVisible,
-                    std::vector<webkit_glue::PasswordForm> /* forms */)
-
-// Notification that a form has been submitted.  The user hit the button.
-IPC_MESSAGE_ROUTED1(ViewHostMsg_FormSubmitted,
-                    webkit_glue::FormData /* form */)
-
 // Used to tell the parent the user started dragging in the content area. The
 // WebDropData struct contains contextual information about the pieces of the
 // page the user dragged. The parent uses this notification to initiate a
@@ -1760,6 +1586,13 @@ IPC_MESSAGE_ROUTED1(ViewHostMsg_DidPrintPage,
 // The renderer wants to know the default print settings.
 IPC_SYNC_MESSAGE_ROUTED0_1(ViewHostMsg_GetDefaultPrintSettings,
                            ViewMsg_Print_Params /* default_settings */)
+
+// The renderer wants to update the current print settings with new
+// |job_settings|.
+IPC_SYNC_MESSAGE_ROUTED2_1(ViewHostMsg_UpdatePrintSettings,
+                           int /* document_cookie */,
+                           DictionaryValue /* job_settings */,
+                           ViewMsg_Print_Params /* current_settings */)
 
 // It's the renderer that controls the printing process when it is generated
 // by javascript. This step is about showing UI to the user to select the
@@ -1910,32 +1743,14 @@ IPC_MESSAGE_ROUTED4(ViewHostMsg_DidDownloadFavIcon,
 IPC_SYNC_MESSAGE_CONTROL0_1(ViewHostMsg_GetCPBrowsingContext,
                             uint32 /* context */)
 
-// Sent when the renderer process is done processing a DataReceived
-// message.
-IPC_MESSAGE_ROUTED1(ViewHostMsg_DataReceived_ACK,
-                    int /* request_id */)
-
 IPC_MESSAGE_CONTROL1(ViewHostMsg_RevealFolderInOS,
                      FilePath /* path */)
-
-// Sent when the renderer has processed a DataDownloaded message.
-IPC_MESSAGE_ROUTED1(ViewHostMsg_DataDownloaded_ACK,
-                    int /* request_id */)
-
-// Sent when the renderer process deletes a resource loader.
-IPC_MESSAGE_CONTROL1(ViewHostMsg_ReleaseDownloadedFile,
-                     int /* request_id */)
 
 // Sent when a provisional load on the main frame redirects.
 IPC_MESSAGE_ROUTED3(ViewHostMsg_DidRedirectProvisionalLoad,
                     int /* page_id */,
                     GURL /* last url */,
                     GURL /* url redirected to */)
-
-// Sent by the renderer process to acknowledge receipt of a
-// UploadProgress message.
-IPC_MESSAGE_ROUTED1(ViewHostMsg_UploadProgress_ACK,
-                    int /* request_id */)
 
 // Sent when the renderer changes the zoom level for a particular url, so the
 // browser can update its records.  If remember is true, then url is used to
@@ -1964,13 +1779,11 @@ IPC_MESSAGE_CONTROL1(ViewHostMsg_TempFileForPrintingWritten,
                      int /* fd in browser */)
 #endif
 
-#if defined(OS_POSIX)
 // Asks the browser to create a block of shared memory for the renderer to
 // fill in and pass back to the browser.
 IPC_SYNC_MESSAGE_CONTROL1_1(ViewHostMsg_AllocateSharedMemoryBuffer,
                            uint32 /* buffer size */,
                            base::SharedMemoryHandle /* browser handle */)
-#endif
 
 // Provide the browser process with information about the WebCore resource
 // cache.
@@ -2047,35 +1860,6 @@ IPC_SYNC_MESSAGE_CONTROL1_1(AppCacheMsg_GetResourceList,
                             std::vector<appcache::AppCacheResourceInfo>
                             /* resources out */)
 
-// Queries the browser for AutoFill suggestions for a form input field.
-IPC_MESSAGE_ROUTED3(ViewHostMsg_QueryFormFieldAutoFill,
-                    int /* id of this message */,
-                    webkit_glue::FormData /* the form */,
-                    webkit_glue::FormField /* the form field */)
-
-// Sent when the popup with AutoFill suggestions for a form is shown.
-IPC_MESSAGE_ROUTED0(ViewHostMsg_DidShowAutoFillSuggestions)
-
-// Instructs the browser to fill in the values for a form using AutoFill
-// profile data.
-IPC_MESSAGE_ROUTED4(ViewHostMsg_FillAutoFillFormData,
-                    int /* id of this message */,
-                    webkit_glue::FormData /* the form  */,
-                    webkit_glue::FormField /* the form field  */,
-                    int /* profile unique ID */)
-
-// Sent when a form is previewed or filled with AutoFill suggestions.
-IPC_MESSAGE_ROUTED0(ViewHostMsg_DidFillAutoFillFormData)
-
-// Instructs the browser to remove the specified Autocomplete entry from the
-// database.
-IPC_MESSAGE_ROUTED2(ViewHostMsg_RemoveAutocompleteEntry,
-                    string16 /* field name */,
-                    string16 /* value */)
-
-// Instructs the browser to show the AutoFill dialog.
-IPC_MESSAGE_ROUTED0(ViewHostMsg_ShowAutoFillDialog)
-
 // Get the list of proxies to use for |url|, as a semicolon delimited list
 // of "<TYPE> <HOST>:<PORT>" | "DIRECT". See also
 // PluginProcessHostMsg_ResolveProxy which does the same thing.
@@ -2138,6 +1922,14 @@ IPC_MESSAGE_CONTROL2(ViewHostMsg_ExtensionAddListener,
 IPC_MESSAGE_CONTROL2(ViewHostMsg_ExtensionRemoveListener,
                      std::string /* extension_id */,
                      std::string /* name */)
+
+// Message sent from renderer to the browser to update the state of a command.
+// The |command| parameter is a RenderViewCommand. The |checked_state| parameter
+// is a CommandCheckedState.
+IPC_MESSAGE_ROUTED3(ViewHostMsg_CommandStateChanged,
+                    int /* command */,
+                    bool /* is_enabled */,
+                    int /* checked_state */)
 
 #if defined(OS_MACOSX)
 // On OSX, we cannot allocated shared memory from within the sandbox, so
@@ -2255,7 +2047,7 @@ IPC_MESSAGE_CONTROL1(ViewHostMsg_DocumentDetached,
 IPC_MESSAGE_ROUTED1(ViewHostMsg_ShowDesktopNotification,
                     ViewHostMsg_ShowNotification_Params)
 IPC_MESSAGE_ROUTED1(ViewHostMsg_CancelDesktopNotification,
-                    int /* notification_id */ )
+                    int /* notification_id */)
 IPC_MESSAGE_ROUTED2(ViewHostMsg_RequestNotificationPermission,
                     GURL /* origin */,
                     int /* callback_context */)
@@ -2312,6 +2104,10 @@ IPC_MESSAGE_ROUTED1(
     ViewHostMsg_AccessibilityNotifications,
     std::vector<ViewHostMsg_AccessibilityNotification_Params>)
 
+// Send part of the DOM to the browser, to be used in a malware report.
+IPC_MESSAGE_ROUTED1(ViewHostMsg_MalwareDOMDetails,
+                    ViewHostMsg_MalwareDOMDetails_Params)
+
 // Message sent from the renderer to the browser to request that the browser
 // close all sockets.  Used for debugging/testing.
 IPC_MESSAGE_CONTROL0(ViewHostMsg_CloseCurrentConnections)
@@ -2323,8 +2119,12 @@ IPC_MESSAGE_CONTROL1(ViewHostMsg_SetCacheMode,
 
 // Message sent from the renderer to the browser to request that the browser
 // clear the cache.  Used for debugging/testing.
-IPC_SYNC_MESSAGE_CONTROL0_1(ViewHostMsg_ClearCache,
-                            int /* result */)
+// |preserve_ssl_host_info| controls whether clearing the cache will preserve
+// persisted SSL information stored in the cache.
+// |result| is the returned status from the operation.
+IPC_SYNC_MESSAGE_CONTROL1_1(ViewHostMsg_ClearCache,
+                            bool /* preserve_ssl_host_info */,
+                            int  /* result */)
 
 // Message sent from the renderer to the browser to request that the browser
 // enable or disable spdy.  Used for debugging/testing/benchmarking.
@@ -2362,39 +2162,6 @@ IPC_MESSAGE_ROUTED4(ViewHostMsg_PageTranslated,
                     TranslateErrors::Type /* the error type if available */)
 
 //---------------------------------------------------------------------------
-// Socket Stream messages:
-// These are messages from the SocketStreamHandle to the browser.
-
-// Open new Socket Stream for the |socket_url| identified by |socket_id|
-// in the renderer process.
-// The browser starts connecting asynchronously.
-// Once Socket Stream connection is established, the browser will send
-// ViewMsg_SocketStream_Connected back.
-IPC_MESSAGE_CONTROL2(ViewHostMsg_SocketStream_Connect,
-                     GURL /* socket_url */,
-                     int /* socket_id */)
-
-// Request to send data on the Socket Stream.
-// SocketStreamHandle can send data at most |max_pending_send_allowed| bytes,
-// which is given by ViewMsg_SocketStream_Connected at any time.
-// The number of pending bytes can be tracked by size of |data| sent
-// and |amount_sent| parameter of ViewMsg_SocketStream_DataSent.
-// That is, the following constraints is applied:
-//  (accumulated total of |data|) - (accumulated total of |amount_sent|)
-// <= |max_pending_send_allowed|
-// If the SocketStreamHandle ever tries to exceed the
-// |max_pending_send_allowed|, the connection will be closed.
-IPC_MESSAGE_CONTROL2(ViewHostMsg_SocketStream_SendData,
-                     int /* socket_id */,
-                     std::vector<char> /* data */)
-
-// Request to close the Socket Stream.
-// The browser will send ViewMsg_SocketStream_Closed back when the Socket
-// Stream is completely closed.
-IPC_MESSAGE_CONTROL1(ViewHostMsg_SocketStream_Close,
-                     int /* socket_id */)
-
-//---------------------------------------------------------------------------
 // Request for cryptographic operation messages:
 // These are messages from the renderer to the browser to perform a
 // cryptographic operation.
@@ -2422,6 +2189,12 @@ IPC_SYNC_MESSAGE_CONTROL1_1(
     ViewHostMsg_SpellChecker_PlatformFillSuggestionList,
     string16 /* word */,
     std::vector<string16> /* suggestions */)
+
+IPC_MESSAGE_CONTROL4(ViewHostMsg_SpellChecker_PlatformRequestTextCheck,
+                     int /* route_id for response */,
+                     int /* request identifier given by WebKit */,
+                     int /* document tag */,
+                     string16 /* sentence */)
 
 //---------------------------------------------------------------------------
 // Geolocation services messages
@@ -2477,85 +2250,6 @@ IPC_MESSAGE_CONTROL1(ViewHostMsg_DeviceOrientation_StopUpdating,
                      int /* render_view_id */)
 
 //---------------------------------------------------------------------------
-// FileSystem API messages
-// These are messages sent from the renderer to the browser process.
-
-// WebFrameClient::openFileSystem() message.
-IPC_MESSAGE_CONTROL5(ViewHostMsg_OpenFileSystemRequest,
-                     int /* request_id */,
-                     GURL /* origin_url */,
-                     fileapi::FileSystemType /* type */,
-                     int64 /* requested_size */,
-                     bool /* create */)
-
-// WebFileSystem::move() message.
-IPC_MESSAGE_CONTROL3(ViewHostMsg_FileSystem_Move,
-                     int /* request_id */,
-                     FilePath /* src path */,
-                     FilePath /* dest path */)
-
-// WebFileSystem::copy() message.
-IPC_MESSAGE_CONTROL3(ViewHostMsg_FileSystem_Copy,
-                     int /* request_id */,
-                     FilePath /* src path */,
-                     FilePath /* dest path */)
-
-// WebFileSystem::remove() message.
-IPC_MESSAGE_CONTROL3(ViewHostMsg_FileSystem_Remove,
-                     int /* request_id */,
-                     FilePath /* path */,
-                     bool /* recursive */)
-
-// WebFileSystem::readMetadata() message.
-IPC_MESSAGE_CONTROL2(ViewHostMsg_FileSystem_ReadMetadata,
-                     int /* request_id */,
-                     FilePath /* path */)
-
-// WebFileSystem::create() message.
-IPC_MESSAGE_CONTROL5(ViewHostMsg_FileSystem_Create,
-                     int /* request_id */,
-                     FilePath /* path */,
-                     bool /* exclusive */,
-                     bool /* is_directory */,
-                     bool /* recursive */)
-
-// WebFileSystem::exists() messages.
-IPC_MESSAGE_CONTROL3(ViewHostMsg_FileSystem_Exists,
-                     int /* request_id */,
-                     FilePath /* path */,
-                     bool /* is_directory */)
-
-// WebFileSystem::readDirectory() message.
-IPC_MESSAGE_CONTROL2(ViewHostMsg_FileSystem_ReadDirectory,
-                     int /* request_id */,
-                     FilePath /* path */)
-
-// WebFileWriter::write() message.
-IPC_MESSAGE_CONTROL4(ViewHostMsg_FileSystem_Write,
-                     int /* request id */,
-                     FilePath /* file path */,
-                     GURL /* blob URL */,
-                     int64 /* position */)
-
-// WebFileWriter::truncate() message.
-IPC_MESSAGE_CONTROL3(ViewHostMsg_FileSystem_Truncate,
-                     int /* request id */,
-                     FilePath /* file path */,
-                     int64 /* length */)
-
-// Pepper's Touch() message.
-IPC_MESSAGE_CONTROL4(ViewHostMsg_FileSystem_TouchFile,
-                     int /* request_id */,
-                     FilePath /* path */,
-                     base::Time /* last_access_time */,
-                     base::Time /* last_modified_time */)
-
-// WebFileWriter::cancel() message.
-IPC_MESSAGE_CONTROL2(ViewHostMsg_FileSystem_CancelWrite,
-                     int /* request id */,
-                     int /* id of request to cancel */)
-
-//---------------------------------------------------------------------------
 // Blob messages:
 
 // Registers a blob URL referring to the specified blob data.
@@ -2582,13 +2276,6 @@ IPC_MESSAGE_ROUTED2(ViewHostMsg_InstantSupportDetermined,
                     int32 /* page_id */,
                     bool  /* result */)
 
-// Client-Side Phishing Detector ---------------------------------------------
-// Inform the browser that the current URL is phishing according to the
-// client-side phishing detector.
-IPC_MESSAGE_ROUTED2(ViewHostMsg_DetectedPhishingSite,
-                    GURL /* phishing_url */,
-                    double /* phishing_score */)
-
 // Response from ViewMsg_ScriptEvalRequest. The ID is the parameter supplied
 // to ViewMsg_ScriptEvalRequest. The result has the value returned by the
 // script as it's only element, one of Null, Boolean, Integer, Real, Date, or
@@ -2604,19 +2291,6 @@ IPC_MESSAGE_ROUTED1(ViewHostMsg_UpdateContentRestrictions,
 // The currently displayed PDF has an unsupported feature.
 IPC_MESSAGE_ROUTED0(ViewHostMsg_PDFHasUnsupportedFeature)
 
-// Pepper-related messages -----------------------------------------------------
-
-IPC_MESSAGE_CONTROL4(ViewHostMsg_PepperConnectTcp,
-                     int /* routing_id */,
-                     int /* request_id */,
-                     std::string /* host */,
-                     uint16 /* port */)
-
-IPC_MESSAGE_CONTROL3(ViewHostMsg_PepperConnectTcpAddress,
-                     int /* routing_id */,
-                     int /* request_id */,
-                     PP_Flash_NetAddress /* addr */)
-
 // JavaScript related messages -----------------------------------------------
 
 // Notify the JavaScript engine in the render to change its parameters
@@ -2624,3 +2298,9 @@ IPC_MESSAGE_CONTROL3(ViewHostMsg_PepperConnectTcpAddress,
 IPC_MESSAGE_ROUTED2(ViewMsg_JavaScriptStressTestControl,
                     int /* cmd */,
                     int /* param */)
+
+// Register a new handler for URL requests with the given scheme.
+IPC_MESSAGE_ROUTED3(ViewHostMsg_RegisterProtocolHandler,
+                    std::string /* scheme */,
+                    GURL /* url */,
+                    string16 /* title */)

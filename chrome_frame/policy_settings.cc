@@ -10,8 +10,8 @@
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "base/win/registry.h"
-#include "chrome/common/policy_constants.h"
 #include "chrome_frame/utils.h"
+#include "policy/policy_constants.h"
 
 namespace {
 
@@ -110,7 +110,7 @@ void PolicySettings::ReadContentTypeSetting(
   sub_key += ASCIIToWide(policy::key::kChromeFrameContentTypes);
 
   content_type_list->clear();
-  for (int i = 0; i < arraysize(kRootKeys) && content_type_list->size() == 0;
+  for (int i = 0; i < arraysize(kRootKeys) && content_type_list->empty();
        ++i) {
     EnumerateKeyValues(kRootKeys[i], sub_key.c_str(), content_type_list);
   }

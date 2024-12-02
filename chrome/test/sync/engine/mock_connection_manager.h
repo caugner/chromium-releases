@@ -17,6 +17,7 @@
 #include "base/scoped_vector.h"
 #include "chrome/browser/sync/engine/net/server_connection_manager.h"
 #include "chrome/browser/sync/protocol/sync.pb.h"
+#include "chrome/browser/sync/sessions/session_state.h"
 #include "chrome/browser/sync/syncable/directory_manager.h"
 #include "chrome/browser/sync/syncable/model_type.h"
 
@@ -43,9 +44,10 @@ class MockConnectionManager : public browser_sync::ServerConnectionManager {
   virtual ~MockConnectionManager();
 
   // Overridden ServerConnectionManager functions.
-  virtual bool PostBufferToPath(const PostBufferParams*,
-      const string& path,
-      const string& auth_token,
+  virtual bool PostBufferToPath(
+      const PostBufferParams*,
+      const std::string& path,
+      const std::string& auth_token,
       browser_sync::ScopedServerStatusWatcher* watcher);
 
   virtual bool IsServerReachable();
@@ -57,7 +59,7 @@ class MockConnectionManager : public browser_sync::ServerConnectionManager {
 
   // Set this if you want commit to perform commit time rename. Will request
   // that the client renames all commited entries, prepending this string.
-  void SetCommitTimeRename(string prepend);
+  void SetCommitTimeRename(std::string prepend);
 
   // Generic versions of AddUpdate functions. Tests using these function should
   // compile for both the int64 and string id based versions of the server.
@@ -66,34 +68,34 @@ class MockConnectionManager : public browser_sync::ServerConnectionManager {
   // sync, using SetLastXXX() methods and/or GetMutableLastUpdate().
   sync_pb::SyncEntity* AddUpdateDirectory(syncable::Id id,
                                           syncable::Id parent_id,
-                                          string name,
+                                          std::string name,
                                           int64 version,
                                           int64 sync_ts);
   sync_pb::SyncEntity* AddUpdateBookmark(syncable::Id id,
                                          syncable::Id parent_id,
-                                         string name,
+                                         std::string name,
                                          int64 version,
                                          int64 sync_ts);
   // Versions of the AddUpdate functions that accept integer IDs.
   sync_pb::SyncEntity* AddUpdateDirectory(int id,
                                           int parent_id,
-                                          string name,
+                                          std::string name,
                                           int64 version,
                                           int64 sync_ts);
   sync_pb::SyncEntity* AddUpdateBookmark(int id,
                                          int parent_id,
-                                         string name,
+                                         std::string name,
                                          int64 version,
                                          int64 sync_ts);
   // New protocol versions of the AddUpdate functions.
-  sync_pb::SyncEntity* AddUpdateDirectory(string id,
-                                          string parent_id,
-                                          string name,
+  sync_pb::SyncEntity* AddUpdateDirectory(std::string id,
+                                          std::string parent_id,
+                                          std::string name,
                                           int64 version,
                                           int64 sync_ts);
-  sync_pb::SyncEntity* AddUpdateBookmark(string id,
-                                         string parent_id,
-                                         string name,
+  sync_pb::SyncEntity* AddUpdateBookmark(std::string id,
+                                         std::string parent_id,
+                                         std::string name,
                                          int64 version,
                                          int64 sync_ts);
 
@@ -108,10 +110,10 @@ class MockConnectionManager : public browser_sync::ServerConnectionManager {
   void AddUpdateTombstone(const syncable::Id& id);
 
   void SetLastUpdateDeleted();
-  void SetLastUpdateServerTag(const string& tag);
-  void SetLastUpdateClientTag(const string& tag);
-  void SetLastUpdateOriginatorFields(const string& client_id,
-                                     const string& entry_id);
+  void SetLastUpdateServerTag(const std::string& tag);
+  void SetLastUpdateClientTag(const std::string& tag);
+  void SetLastUpdateOriginatorFields(const std::string& client_id,
+                                     const std::string& entry_id);
   void SetLastUpdatePosition(int64 position_in_parent);
   void SetNewTimestamp(int ts);
   void SetChangesRemaining(int64 count);
@@ -188,7 +190,7 @@ class MockConnectionManager : public browser_sync::ServerConnectionManager {
     use_legacy_bookmarks_protocol_ = value;
   }
 
-  void set_store_birthday(string new_birthday) {
+  void set_store_birthday(std::string new_birthday) {
     // Multiple threads can set store_birthday_ in our tests, need to lock it to
     // ensure atomic read/writes and avoid race conditions.
     base::AutoLock lock(store_birthday_lock_);
@@ -212,6 +214,11 @@ class MockConnectionManager : public browser_sync::ServerConnectionManager {
     expected_filter_ = expected_filter;
   }
 
+  void ExpectGetUpdatesRequestPayloads(
+      const browser_sync::sessions::TypePayloadMap& payloads) {
+    expected_payloads_ = payloads;
+  }
+
   void SetServerReachable();
 
   void SetServerNotReachable();
@@ -228,10 +235,11 @@ class MockConnectionManager : public browser_sync::ServerConnectionManager {
 
  private:
   sync_pb::SyncEntity* AddUpdateFull(syncable::Id id, syncable::Id parentid,
-                                     string name, int64 version,
+                                     std::string name, int64 version,
                                      int64 sync_ts,
                                      bool is_dir);
-  sync_pb::SyncEntity* AddUpdateFull(string id, string parentid, string name,
+  sync_pb::SyncEntity* AddUpdateFull(std::string id,
+                                     std::string parentid, std::string name,
                                      int64 version, int64 sync_ts,
                                      bool is_dir);
   // Functions to handle the various types of server request.
@@ -269,6 +277,11 @@ class MockConnectionManager : public browser_sync::ServerConnectionManager {
           sync_pb::DataTypeProgressMarker>& filter,
       syncable::ModelType value);
 
+  sync_pb::DataTypeProgressMarker const* GetProgressMarkerForType(
+      const google::protobuf::RepeatedPtrField<
+          sync_pb::DataTypeProgressMarker>& filter,
+      syncable::ModelType value);
+
   // All IDs that have been committed.
   std::vector<syncable::Id> committed_ids_;
 
@@ -284,11 +297,11 @@ class MockConnectionManager : public browser_sync::ServerConnectionManager {
   int next_new_id_;
 
   // The store birthday we send to the client.
-  string store_birthday_;
+  std::string store_birthday_;
   base::Lock store_birthday_lock_;
   bool store_birthday_sent_;
   bool client_stuck_;
-  string commit_time_rename_prepended_string_;
+  std::string commit_time_rename_prepended_string_;
 
   // Fail on the next call to PostBufferToPath().
   bool fail_next_postbuffer_;
@@ -336,6 +349,8 @@ class MockConnectionManager : public browser_sync::ServerConnectionManager {
   bool use_legacy_bookmarks_protocol_;
 
   std::bitset<syncable::MODEL_TYPE_COUNT> expected_filter_;
+
+  browser_sync::sessions::TypePayloadMap expected_payloads_;
 
   int num_get_updates_requests_;
 

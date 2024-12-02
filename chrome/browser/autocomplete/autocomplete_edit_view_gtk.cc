@@ -21,33 +21,34 @@
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/instant/instant_controller.h"
 #include "chrome/browser/platform_util.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/gtk/view_id_util.h"
 #include "chrome/browser/ui/toolbar/toolbar_model.h"
 #include "chrome/common/notification_service.h"
-#include "gfx/color_utils.h"
-#include "gfx/font.h"
-#include "gfx/gtk_util.h"
-#include "gfx/skia_utils_gtk.h"
+#include "content/browser/tab_contents/tab_contents.h"
 #include "googleurl/src/gurl.h"
 #include "grit/generated_resources.h"
 #include "net/base/escape.h"
 #include "third_party/undoview/undo_view.h"
 #include "ui/base/animation/multi_animation.h"
+#include "ui/base/dragdrop/drag_drop_types.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/color_utils.h"
+#include "ui/gfx/font.h"
+#include "ui/gfx/gtk_util.h"
+#include "ui/gfx/skia_utils_gtk.h"
 
 #if defined(TOOLKIT_VIEWS)
 #include "chrome/browser/autocomplete/autocomplete_edit_view_views.h"
-#include "chrome/browser/ui/gtk/accessible_widget_helper_gtk.h"
 #include "chrome/browser/ui/views/autocomplete/autocomplete_popup_contents_view.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "views/controls/textfield/native_textfield_views.h"
+#include "views/events/event.h"
 #else
 #include "chrome/browser/autocomplete/autocomplete_popup_view_gtk.h"
 #include "chrome/browser/ui/gtk/gtk_theme_provider.h"
 #include "chrome/browser/ui/gtk/location_bar_view_gtk.h"
-#include "views/controls/native/native_view_host.h"
 #endif
 
 namespace {
@@ -61,8 +62,18 @@ const char kSecurityErrorSchemeColor[] = "#a20000";
 const double kStrikethroughStrokeRed = 162.0 / 256.0;
 const double kStrikethroughStrokeWidth = 2.0;
 
-size_t GetUTF8Offset(const std::wstring& wide_text, size_t wide_text_offset) {
-  return WideToUTF8(wide_text.substr(0, wide_text_offset)).size();
+size_t GetUTF8Offset(const string16& text, size_t text_offset) {
+  return UTF16ToUTF8(text.substr(0, text_offset)).size();
+}
+
+// A helper method for determining a valid drag operation given the allowed
+// operation.  We prefer copy over link.
+int CopyOrLinkDragOperation(int drag_operation) {
+  if (drag_operation & ui::DragDropTypes::DRAG_COPY)
+    return ui::DragDropTypes::DRAG_COPY;
+  if (drag_operation & ui::DragDropTypes::DRAG_LINK)
+    return ui::DragDropTypes::DRAG_LINK;
+  return ui::DragDropTypes::DRAG_NONE;
 }
 
 // Stores GTK+-specific state so it can be restored after switching tabs.
@@ -146,7 +157,7 @@ AutocompleteEditViewGtk::AutocompleteEditViewGtk(
     CommandUpdater* command_updater,
     bool popup_window_mode,
 #if defined(TOOLKIT_VIEWS)
-    const views::View* location_bar)
+    views::View* location_bar)
 #else
     GtkWidget* location_bar)
 #endif
@@ -161,13 +172,6 @@ AutocompleteEditViewGtk::AutocompleteEditViewGtk(
       instant_view_(NULL),
       instant_mark_(NULL),
       model_(new AutocompleteEditModel(this, controller, profile)),
-#if defined(TOOLKIT_VIEWS)
-      popup_view_(new AutocompletePopupContentsView(
-          gfx::Font(), this, model_.get(), profile, location_bar)),
-#else
-      popup_view_(new AutocompletePopupViewGtk(this, model_.get(), profile,
-                                               location_bar)),
-#endif
       controller_(controller),
       toolbar_model_(toolbar_model),
       command_updater_(command_updater),
@@ -179,7 +183,9 @@ AutocompleteEditViewGtk::AutocompleteEditViewGtk(
       text_selected_during_click_(false),
       text_view_focused_before_button_press_(false),
 #endif
-#if !defined(TOOLKIT_VIEWS)
+#if defined(TOOLKIT_VIEWS)
+      location_bar_view_(location_bar),
+#else
       theme_provider_(GtkThemeProvider::GetFrom(profile)),
 #endif
       enter_was_pressed_(false),
@@ -191,11 +197,18 @@ AutocompleteEditViewGtk::AutocompleteEditViewGtk(
       delete_at_end_pressed_(false),
       handling_key_press_(false),
       content_maybe_changed_by_key_press_(false),
+      update_popup_without_focus_(false),
 #if GTK_CHECK_VERSION(2, 20, 0)
       preedit_size_before_change_(0),
 #endif
       going_to_focus_(NULL) {
-  model_->SetPopupModel(popup_view_->GetModel());
+  popup_view_.reset(
+#if defined(TOOLKIT_VIEWS)
+      new AutocompletePopupContentsView
+#else
+      new AutocompletePopupViewGtk
+#endif
+          (GetFont(), this, model_.get(), profile, location_bar));
 }
 
 AutocompleteEditViewGtk::~AutocompleteEditViewGtk() {
@@ -342,6 +355,8 @@ void AutocompleteEditViewGtk::Init() {
                          G_CALLBACK(&HandleUndoRedoAfterThunk), this);
   g_signal_connect_after(text_view_, "redo",
                          G_CALLBACK(&HandleUndoRedoAfterThunk), this);
+  g_signal_connect(text_view_, "destroy",
+                   G_CALLBACK(&gtk_widget_destroyed), &text_view_);
 
   // Setup for the Instant suggestion text view.
   // GtkLabel is used instead of GtkTextView to get transparent background.
@@ -418,18 +433,13 @@ void AutocompleteEditViewGtk::HandleHierarchyChanged(
 }
 
 void AutocompleteEditViewGtk::SetFocus() {
+  DCHECK(text_view_);
   gtk_widget_grab_focus(text_view_);
 }
 
 int AutocompleteEditViewGtk::WidthOfTextAfterCursor() {
   // Not used.
   return -1;
-}
-
-gfx::Font AutocompleteEditViewGtk::GetFont() {
-  GtkRcStyle* rc_style = gtk_widget_get_modifier_style(text_view_);
-  return gfx::Font((rc_style && rc_style->font_desc) ?
-                   rc_style->font_desc : text_view_->style->font_desc);
 }
 
 AutocompleteEditModel* AutocompleteEditViewGtk::model() {
@@ -456,7 +466,7 @@ void AutocompleteEditViewGtk::SaveStateToTab(TabContents* tab) {
 void AutocompleteEditViewGtk::Update(const TabContents* contents) {
   // NOTE: We're getting the URL text here from the ToolbarModel.
   bool visibly_changed_permanent_text =
-      model_->UpdatePermanentText(toolbar_model_->GetText());
+      model_->UpdatePermanentText(WideToUTF16Hack(toolbar_model_->GetText()));
 
   ToolbarModel::SecurityLevel security_level =
         toolbar_model_->GetSecurityLevel();
@@ -490,7 +500,7 @@ void AutocompleteEditViewGtk::OpenURL(const GURL& url,
                                       PageTransition::Type transition,
                                       const GURL& alternate_nav_url,
                                       size_t selected_line,
-                                      const std::wstring& keyword) {
+                                      const string16& keyword) {
   if (!url.is_valid())
     return;
 
@@ -498,11 +508,11 @@ void AutocompleteEditViewGtk::OpenURL(const GURL& url,
                   selected_line, keyword);
 }
 
-std::wstring AutocompleteEditViewGtk::GetText() const {
+string16 AutocompleteEditViewGtk::GetText() const {
   GtkTextIter start, end;
   GetTextBufferBounds(&start, &end);
   gchar* utf8 = gtk_text_buffer_get_text(text_buffer_, &start, &end, false);
-  std::wstring out(UTF8ToWide(utf8));
+  string16 out(UTF8ToUTF16(utf8));
   g_free(utf8);
 
 #if GTK_CHECK_VERSION(2, 20, 0)
@@ -528,12 +538,12 @@ int AutocompleteEditViewGtk::GetIcon() const {
       toolbar_model_->GetIcon();
 }
 
-void AutocompleteEditViewGtk::SetUserText(const std::wstring& text) {
+void AutocompleteEditViewGtk::SetUserText(const string16& text) {
   SetUserText(text, text, true);
 }
 
-void AutocompleteEditViewGtk::SetUserText(const std::wstring& text,
-                                          const std::wstring& display_text,
+void AutocompleteEditViewGtk::SetUserText(const string16& text,
+                                          const string16& display_text,
                                           bool update_popup) {
   model_->SetUserText(text);
   // TODO(deanm): something about selection / focus change here.
@@ -543,17 +553,17 @@ void AutocompleteEditViewGtk::SetUserText(const std::wstring& text,
   TextChanged();
 }
 
-void AutocompleteEditViewGtk::SetWindowTextAndCaretPos(const std::wstring& text,
+void AutocompleteEditViewGtk::SetWindowTextAndCaretPos(const string16& text,
                                                        size_t caret_pos) {
   CharRange range(static_cast<int>(caret_pos), static_cast<int>(caret_pos));
   SetTextAndSelectedRange(text, range);
 }
 
 void AutocompleteEditViewGtk::SetForcedQuery() {
-  const std::wstring current_text(GetText());
-  const size_t start = current_text.find_first_not_of(kWhitespaceWide);
-  if (start == std::wstring::npos || (current_text[start] != '?')) {
-    SetUserText(L"?");
+  const string16 current_text(GetText());
+  const size_t start = current_text.find_first_not_of(kWhitespaceUTF16);
+  if (start == string16::npos || (current_text[start] != '?')) {
+    SetUserText(ASCIIToUTF16("?"));
   } else {
     StartUpdatingHighlightedText();
     SetSelectedRange(CharRange(current_text.size(), start + 1));
@@ -577,8 +587,8 @@ bool AutocompleteEditViewGtk::DeleteAtEndPressed() {
   return delete_at_end_pressed_;
 }
 
-void AutocompleteEditViewGtk::GetSelectionBounds(std::wstring::size_type* start,
-                                                 std::wstring::size_type* end) {
+void AutocompleteEditViewGtk::GetSelectionBounds(string16::size_type* start,
+                                                 string16::size_type* end) {
   CharRange selection = GetSelection();
   *start = static_cast<size_t>(selection.cp_min);
   *end = static_cast<size_t>(selection.cp_max);
@@ -599,7 +609,7 @@ void AutocompleteEditViewGtk::RevertAll() {
 
 void AutocompleteEditViewGtk::UpdatePopup() {
   model_->SetInputInProgress(true);
-  if (!model_->has_focus())
+  if (!update_popup_without_focus_ && !model_->has_focus())
     return;
 
   // Don't inline autocomplete when the caret/selection isn't at the end of
@@ -611,14 +621,11 @@ void AutocompleteEditViewGtk::UpdatePopup() {
 }
 
 void AutocompleteEditViewGtk::ClosePopup() {
-  if (popup_view_->GetModel()->IsOpen())
-    controller_->OnAutocompleteWillClosePopup();
-
-  popup_view_->GetModel()->StopAutocomplete();
+  model_->StopAutocomplete();
 }
 
 void AutocompleteEditViewGtk::OnTemporaryTextMaybeChanged(
-    const std::wstring& display_text,
+    const string16& display_text,
     bool save_original_selection) {
   if (save_original_selection)
     saved_temporary_selection_ = GetSelection();
@@ -630,7 +637,7 @@ void AutocompleteEditViewGtk::OnTemporaryTextMaybeChanged(
 }
 
 bool AutocompleteEditViewGtk::OnInlineAutocompleteTextMaybeChanged(
-    const std::wstring& display_text,
+    const string16& display_text,
     size_t user_text_length) {
   if (display_text == GetText())
     return false;
@@ -702,7 +709,7 @@ bool AutocompleteEditViewGtk::OnAfterPossibleChange() {
   bool at_end_of_edit = (new_sel.cp_min == length && new_sel.cp_max == length);
 
   // See if the text or selection have changed since OnBeforePossibleChange().
-  std::wstring new_text(GetText());
+  string16 new_text(GetText());
   text_changed_ = (new_text != text_before_change_);
 #if GTK_CHECK_VERSION(2, 20, 0)
   text_changed_ =
@@ -739,7 +746,7 @@ bool AutocompleteEditViewGtk::OnAfterPossibleChange() {
     EmphasizeURLComponents();
   } else if (delete_was_pressed_ && at_end_of_edit) {
     delete_at_end_pressed_ = true;
-    controller_->OnChanged();
+    model_->OnChanged();
   }
   delete_was_pressed_ = false;
 
@@ -765,8 +772,7 @@ void AutocompleteEditViewGtk::SetInstantSuggestion(const string16& suggestion) {
     gtk_widget_hide(instant_view_);
     return;
   }
-  if (InstantController::IsEnabled(model_->profile(),
-                                   InstantController::PREDICTIVE_TYPE)
+  if (InstantController::IsEnabled(model_->profile())
 #if GTK_CHECK_VERSION(2, 20, 0)
       && preedit_.empty()
 #endif
@@ -780,7 +786,19 @@ void AutocompleteEditViewGtk::SetInstantSuggestion(const string16& suggestion) {
   UpdateInstantViewColors();
 }
 
+string16 AutocompleteEditViewGtk::GetInstantSuggestion() const {
+  const gchar* suggestion = gtk_label_get_text(GTK_LABEL(instant_view_));
+  return suggestion ? UTF8ToUTF16(suggestion) : string16();
+}
+
 int AutocompleteEditViewGtk::TextWidth() const {
+  // TextWidth may be called after gtk widget tree is destroyed but
+  // before AutocompleteEditViewGtk gets deleted.  This is a safe guard
+  // to avoid accessing |text_view_| that has already been destroyed.
+  // See crbug.com/70192.
+  if (!text_view_)
+    return 0;
+
   int horizontal_border_size =
       gtk_text_view_get_border_window_size(GTK_TEXT_VIEW(text_view_),
                                            GTK_TEXT_WINDOW_LEFT) +
@@ -835,17 +853,25 @@ views::View* AutocompleteEditViewGtk::AddToView(views::View* parent) {
   return host;
 }
 
-bool AutocompleteEditViewGtk::CommitInstantSuggestion(
-    const std::wstring& typed_text,
-    const std::wstring& suggestion) {
-  return CommitInstantSuggestion();
-}
+int AutocompleteEditViewGtk::OnPerformDrop(
+    const views::DropTargetEvent& event) {
+  string16 text;
+  const ui::OSExchangeData& data = event.data();
+  if (data.HasURL()) {
+    GURL url;
+    string16 title;
+    if (data.GetURLAndTitle(&url, &title))
+      text = UTF8ToUTF16(url.spec());
+  } else {
+    string16 data_string;
+    if (data.GetString(&data_string))
+      text = CollapseWhitespace(data_string, true);
+  }
 
-void AutocompleteEditViewGtk::EnableAccessibility() {
-  accessible_widget_helper_.reset(
-      new AccessibleWidgetHelper(text_view(), model_->profile()));
-  accessible_widget_helper_->SetWidgetName(
-      text_view(), l10n_util::GetStringUTF8(IDS_ACCNAME_LOCATION));
+  if (!text.empty() && OnPerformDropImpl(text))
+    return CopyOrLinkDragOperation(event.source_operations());
+
+  return ui::DragDropTypes::DRAG_NONE;
 }
 
 // static
@@ -855,7 +881,7 @@ AutocompleteEditView* AutocompleteEditViewGtk::Create(
     Profile* profile,
     CommandUpdater* command_updater,
     bool popup_window_mode,
-    const views::View* location_bar) {
+    views::View* location_bar) {
   if (views::NativeTextfieldViews::IsTextfieldViewsEnabled()) {
     AutocompleteEditViewViews* autocomplete =
         new AutocompleteEditViewViews(controller,
@@ -884,8 +910,6 @@ AutocompleteEditView* AutocompleteEditViewGtk::Create(
   // necessary.
   gtk_widget_hide(autocomplete->GetNativeView());
 
-  autocomplete->EnableAccessibility();
-
   return autocomplete;
 }
 #endif
@@ -899,7 +923,7 @@ void AutocompleteEditViewGtk::Observe(NotificationType type,
 }
 
 void AutocompleteEditViewGtk::AnimationEnded(const ui::Animation* animation) {
-  controller_->OnCommitSuggestedText(GetText());
+  model_->CommitSuggestedText(false);
 }
 
 void AutocompleteEditViewGtk::AnimationProgressed(
@@ -913,12 +937,13 @@ void AutocompleteEditViewGtk::AnimationCanceled(
 }
 
 void AutocompleteEditViewGtk::SetBaseColor() {
+  DCHECK(text_view_);
+
 #if defined(TOOLKIT_VIEWS)
   bool use_gtk = false;
 #else
   bool use_gtk = theme_provider_->UseGtkTheme();
 #endif
-
   if (use_gtk) {
     gtk_widget_modify_cursor(text_view_, NULL, NULL);
     gtk_widget_modify_base(text_view_, GTK_STATE_NORMAL, NULL);
@@ -977,15 +1002,8 @@ void AutocompleteEditViewGtk::SetBaseColor() {
 #endif
 
     // Until we switch to vector graphics, force the font size.
-    gtk_util::ForceFontSizePixels(text_view_,
-        popup_window_mode_ ?
-        browser_defaults::kAutocompleteEditFontPixelSizeInPopup :
-        browser_defaults::kAutocompleteEditFontPixelSize);
-
-    gtk_util::ForceFontSizePixels(instant_view_,
-        popup_window_mode_ ?
-        browser_defaults::kAutocompleteEditFontPixelSizeInPopup :
-        browser_defaults::kAutocompleteEditFontPixelSize);
+    gtk_util::ForceFontSizePixels(text_view_, GetFont().GetFontSize());
+    gtk_util::ForceFontSizePixels(instant_view_, GetFont().GetFontSize());
 
     g_object_set(faded_text_tag_, "foreground", kTextBaseColor, NULL);
     g_object_set(normal_text_tag_, "foreground", "#000000", NULL);
@@ -1185,9 +1203,8 @@ gboolean AutocompleteEditViewGtk::HandleKeyPress(GtkWidget* widget,
     // If shift+del didn't change the text, we let this delete an entry from
     // the popup.  We can't check to see if the IME handled it because even if
     // nothing is selected, the IME or the TextView still report handling it.
-    AutocompletePopupModel* popup_model = popup_view_->GetModel();
-    if (popup_model->IsOpen())
-      popup_model->TryDeletingCurrentItem();
+    if (model_->popup_model()->IsOpen())
+      model_->popup_model()->TryDeletingCurrentItem();
   }
 
   // Set |enter_was_pressed_| to false, to make sure OnAfterPossibleChange() can
@@ -1203,6 +1220,11 @@ gboolean AutocompleteEditViewGtk::HandleKeyPress(GtkWidget* widget,
         g_signal_lookup("key-press-event", GTK_TYPE_WIDGET);
     g_signal_stop_emission(widget, signal_id, 0);
   }
+
+#if defined(TOOLKIT_VIEWS)
+  location_bar_view_->NotifyAccessibilityEvent(
+      AccessibilityTypes::EVENT_TEXT_CHANGED);
+#endif
 
   return result;
 }
@@ -1234,6 +1256,8 @@ gboolean AutocompleteEditViewGtk::HandleViewButtonPress(GtkWidget* sender,
   if (event->type != GDK_BUTTON_PRESS)
     return FALSE;
 
+  DCHECK(text_view_);
+
   if (event->button == 1) {
 #if defined(OS_CHROMEOS)
     // When the first button is pressed, track some stuff that will help us
@@ -1260,6 +1284,8 @@ gboolean AutocompleteEditViewGtk::HandleViewButtonRelease(
     GtkWidget* sender, GdkEventButton* event) {
   if (event->button != 1)
     return FALSE;
+
+  DCHECK(text_view_);
 
 #if defined(OS_CHROMEOS)
   button_1_pressed_ = false;
@@ -1294,6 +1320,9 @@ gboolean AutocompleteEditViewGtk::HandleViewButtonRelease(
 
 gboolean AutocompleteEditViewGtk::HandleViewFocusIn(GtkWidget* sender,
                                                     GdkEventFocus* event) {
+  DCHECK(text_view_);
+  update_popup_without_focus_ = false;
+
   GdkModifierType modifiers;
   gdk_window_get_pointer(text_view_->window, NULL, NULL, &modifiers);
   model_->OnSetFocus((modifiers & GDK_CONTROL_MASK) != 0);
@@ -1312,13 +1341,14 @@ gboolean AutocompleteEditViewGtk::HandleViewFocusIn(GtkWidget* sender,
 
 gboolean AutocompleteEditViewGtk::HandleViewFocusOut(GtkWidget* sender,
                                                      GdkEventFocus* event) {
+  DCHECK(text_view_);
   GtkWidget* view_getting_focus = NULL;
   GtkWindow* toplevel = platform_util::GetTopLevel(sender);
   if (gtk_window_is_active(toplevel))
     view_getting_focus = going_to_focus_;
 
   // This must be invoked before ClosePopup.
-  controller_->OnAutocompleteLosingFocus(view_getting_focus);
+  model_->OnWillKillFocus(view_getting_focus);
 
   // Close the popup.
   ClosePopup();
@@ -1338,6 +1368,7 @@ void AutocompleteEditViewGtk::HandleViewMoveCursor(
     GtkMovementStep step,
     gint count,
     gboolean extend_selection) {
+  DCHECK(text_view_);
   GtkTextIter sel_start, sel_end;
   gboolean has_selection =
       gtk_text_buffer_get_selection_bounds(text_buffer_, &sel_start, &sel_end);
@@ -1345,9 +1376,6 @@ void AutocompleteEditViewGtk::HandleViewMoveCursor(
 
   if (step == GTK_MOVEMENT_VISUAL_POSITIONS && !extend_selection &&
       (count == 1 || count == -1)) {
-    gint cursor_pos;
-    g_object_get(G_OBJECT(text_buffer_), "cursor-position", &cursor_pos, NULL);
-
     // We need to take the content direction into account when handling cursor
     // movement, because the behavior of Left and Right key will be inverted if
     // the direction is RTL. Although we should check the direction around the
@@ -1370,8 +1398,8 @@ void AutocompleteEditViewGtk::HandleViewMoveCursor(
           text_buffer_, count == count_towards_end ? &sel_end : &sel_start);
       OnAfterPossibleChange();
       handled = true;
-    } else if (count == count_towards_end && cursor_pos == GetTextLength()) {
-      handled = controller_->OnCommitSuggestedText(GetText());
+    } else if (count == count_towards_end && !IsCaretAtEnd()) {
+      handled = model_->CommitSuggestedText(true);
     }
   } else if (step == GTK_MOVEMENT_PAGES) {  // Page up and down.
     // Multiply by count for the direction (if we move too much that's ok).
@@ -1410,6 +1438,15 @@ void AutocompleteEditViewGtk::HandleViewSizeRequest(GtkWidget* sender,
   req->width = 1;
 }
 
+void AutocompleteEditViewGtk::HandlePopupMenuDeactivate(GtkWidget* sender) {
+  // When the context menu appears, |text_view_|'s focus is lost. After an item
+  // is activated, the focus comes back to |text_view_|, but only after the
+  // check in UpdatePopup(). We set this flag to make UpdatePopup() aware that
+  // it will be receiving focus again.
+  if (!model_->has_focus())
+    update_popup_without_focus_ = true;
+}
+
 void AutocompleteEditViewGtk::HandlePopulatePopup(GtkWidget* sender,
                                                   GtkMenu* menu) {
   GtkWidget* separator = gtk_separator_menu_item_new();
@@ -1433,7 +1470,7 @@ void AutocompleteEditViewGtk::HandlePopulatePopup(GtkWidget* sender,
   // back after shutdown, and similar issues.
   GtkClipboard* x_clipboard = gtk_clipboard_get(GDK_SELECTION_CLIPBOARD);
   gchar* text = gtk_clipboard_wait_for_text(x_clipboard);
-  std::wstring text_wstr = UTF8ToWide(text);
+  string16 text_wstr = UTF8ToUTF16(text ? text : "");
   g_free(text);
 
   // Paste and Go menu item.
@@ -1447,6 +1484,9 @@ void AutocompleteEditViewGtk::HandlePopulatePopup(GtkWidget* sender,
   gtk_widget_set_sensitive(paste_go_menuitem,
                            model_->CanPasteAndGo(text_wstr));
   gtk_widget_show(paste_go_menuitem);
+
+  g_signal_connect(menu, "deactivate",
+                   G_CALLBACK(HandlePopupMenuDeactivateThunk), this);
 }
 
 void AutocompleteEditViewGtk::HandleEditSearchEngines(GtkWidget* sender) {
@@ -1515,6 +1555,8 @@ void AutocompleteEditViewGtk::HandleMarkSetAfter(GtkTextBuffer* buffer,
 void AutocompleteEditViewGtk::HandleDragDataReceived(
     GtkWidget* sender, GdkDragContext* context, gint x, gint y,
     GtkSelectionData* selection_data, guint target_type, guint time) {
+  DCHECK(text_view_);
+
   // Reset |paste_clipboard_requested_| to make sure we won't misinterpret this
   // drop action as a paste action.
   paste_clipboard_requested_ = false;
@@ -1528,10 +1570,9 @@ void AutocompleteEditViewGtk::HandleDragDataReceived(
   if (!text)
     return;
 
-  std::wstring possible_url = UTF8ToWide(reinterpret_cast<char*>(text));
+  string16 possible_url = UTF8ToUTF16(reinterpret_cast<char*>(text));
   g_free(text);
-  if (model_->CanPasteAndGo(CollapseWhitespace(possible_url, true))) {
-    model_->PasteAndGo();
+  if (OnPerformDropImpl(possible_url)) {
     gtk_drag_finish(context, TRUE, TRUE, time);
 
     static guint signal_id =
@@ -1546,6 +1587,7 @@ void AutocompleteEditViewGtk::HandleDragDataGet(
     GtkSelectionData* selection_data,
     guint target_type,
     guint time) {
+  DCHECK(text_view_);
   // If GTK put the normal textual version of the selection in our drag data,
   // put our doctored selection that might have the 'http://' prefix. Also, GTK
   // is confused about signedness of its datatypes, leading to the weird switch
@@ -1609,6 +1651,8 @@ void AutocompleteEditViewGtk::HandleBackSpace(GtkWidget* sender) {
   if (model_->is_keyword_hint() || model_->keyword().empty())
     return;  // Propgate into GtkTextView.
 
+  DCHECK(text_view_);
+
   GtkTextIter sel_start, sel_end;
   // Checks if there is some text selected.
   if (gtk_text_buffer_get_selection_bounds(text_buffer_, &sel_start, &sel_end))
@@ -1639,14 +1683,28 @@ void AutocompleteEditViewGtk::HandleViewMoveFocus(GtkWidget* widget,
   bool handled = false;
 
   // Trigger Tab to search behavior only when Tab key is pressed.
-  if (model_->is_keyword_hint()) {
+  if (model_->is_keyword_hint())
     handled = model_->AcceptKeyword();
-  } else if (GTK_WIDGET_VISIBLE(instant_view_)) {
-    controller_->OnCommitSuggestedText(GetText());
+
+#if GTK_CHECK_VERSION(2, 20, 0)
+  if (!handled && !preedit_.empty())
     handled = true;
-  } else {
-    handled = controller_->AcceptCurrentInstantPreview();
+#endif
+
+  if (!handled && GTK_WIDGET_VISIBLE(instant_view_))
+    handled = model_->CommitSuggestedText(true);
+
+  if (!handled) {
+    if (!IsCaretAtEnd()) {
+      OnBeforePossibleChange();
+      PlaceCaretAt(GetTextLength());
+      OnAfterPossibleChange();
+      handled = true;
+    }
   }
+
+  if (!handled)
+    handled = model_->AcceptCurrentInstantPreview();
 
   if (handled) {
     static guint signal_id = g_signal_lookup("move-focus", GTK_TYPE_WIDGET);
@@ -1663,6 +1721,8 @@ void AutocompleteEditViewGtk::HandleCutClipboard(GtkWidget* sender) {
 }
 
 void AutocompleteEditViewGtk::HandleCopyOrCutClipboard(bool copy) {
+  DCHECK(text_view_);
+
   // On copy or cut, we manually update the PRIMARY selection to contain the
   // highlighted text.  This matches Firefox -- we highlight the URL but don't
   // update PRIMARY on Ctrl-L, so Ctrl-L, Ctrl-C and then middle-click is a
@@ -1677,15 +1737,14 @@ void AutocompleteEditViewGtk::HandleCopyOrCutClipboard(bool copy) {
 
   CharRange selection = GetSelection();
   GURL url;
-  std::wstring text(UTF8ToWide(GetSelectedText()));
+  string16 text(UTF8ToUTF16(GetSelectedText()));
   bool write_url;
   model_->AdjustTextForCopy(selection.selection_min(), IsSelectAll(), &text,
                             &url, &write_url);
 
   if (write_url) {
-    string16 text16(WideToUTF16(text));
     BookmarkNodeData data;
-    data.ReadFromTuple(url, text16);
+    data.ReadFromTuple(url, text);
     data.WriteToClipboard(NULL);
 
     // Stop propagating the signal.
@@ -1697,11 +1756,51 @@ void AutocompleteEditViewGtk::HandleCopyOrCutClipboard(bool copy) {
                            copy ? copy_signal_id : cut_signal_id,
                            0);
 
-    if (!copy)
+    if (!copy && gtk_text_view_get_editable(GTK_TEXT_VIEW(text_view_)))
       gtk_text_buffer_delete_selection(text_buffer_, true, true);
   }
 
-  OwnPrimarySelection(WideToUTF8(text));
+  OwnPrimarySelection(UTF16ToUTF8(text));
+}
+
+bool AutocompleteEditViewGtk::OnPerformDropImpl(const string16& text) {
+  if (model_->CanPasteAndGo(CollapseWhitespace(text, true))) {
+    model_->PasteAndGo();
+    return true;
+  }
+
+  return false;
+}
+
+gfx::Font AutocompleteEditViewGtk::GetFont() {
+#if defined(TOOLKIT_VIEWS)
+  bool use_gtk = false;
+#else
+  bool use_gtk = theme_provider_->UseGtkTheme();
+#endif
+
+  if (use_gtk) {
+    // If we haven't initialized the text view yet, just create a temporary one
+    // whose style we can grab.
+    GtkWidget* widget = text_view_ ? text_view_ : gtk_text_view_new();
+    GtkRcStyle* rc_style = gtk_widget_get_modifier_style(widget);
+    gfx::Font font((rc_style && rc_style->font_desc) ?
+                   rc_style->font_desc :
+                   widget->style->font_desc);
+    if (!text_view_)
+      g_object_unref(g_object_ref_sink(widget));
+
+    // Scaling the font down for popup windows doesn't help here, since we just
+    // use the normal unforced font size when using the GTK theme.
+    return font;
+  } else {
+    return gfx::Font(
+        ResourceBundle::GetSharedInstance().GetFont(ResourceBundle::BaseFont).
+            GetFontName(),
+        popup_window_mode_ ?
+            browser_defaults::kAutocompleteEditFontPixelSizeInPopup :
+            browser_defaults::kAutocompleteEditFontPixelSize);
+  }
 }
 
 void AutocompleteEditViewGtk::OwnPrimarySelection(const std::string& text) {
@@ -1753,6 +1852,7 @@ gboolean AutocompleteEditViewGtk::HandleExposeEvent(GtkWidget* sender,
                                                     GdkEventExpose* expose) {
   if (strikethrough_.cp_min >= strikethrough_.cp_max)
     return FALSE;
+  DCHECK(text_view_);
 
   gfx::Rect expose_rect(expose->area);
 
@@ -1824,7 +1924,8 @@ void AutocompleteEditViewGtk::FinishUpdatingHighlightedText() {
   g_signal_handler_unblock(text_buffer_, mark_set_handler_id2_);
 }
 
-AutocompleteEditViewGtk::CharRange AutocompleteEditViewGtk::GetSelection() {
+AutocompleteEditViewGtk::CharRange
+  AutocompleteEditViewGtk::GetSelection() const {
   // You can not just use get_selection_bounds here, since the order will be
   // ascending, and you don't know where the user's start and end of the
   // selection was (if the selection was forwards or backwards).  Get the
@@ -1873,6 +1974,18 @@ int AutocompleteEditViewGtk::GetTextLength() const {
 #endif
 }
 
+void AutocompleteEditViewGtk::PlaceCaretAt(int pos) {
+  GtkTextIter cursor;
+  gtk_text_buffer_get_iter_at_offset(text_buffer_, &cursor, pos);
+  gtk_text_buffer_place_cursor(text_buffer_, &cursor);
+}
+
+bool AutocompleteEditViewGtk::IsCaretAtEnd() const {
+  const CharRange selection = GetSelection();
+  return selection.cp_min == selection.cp_max &&
+      selection.cp_min == GetTextLength();
+}
+
 void AutocompleteEditViewGtk::EmphasizeURLComponents() {
 #if GTK_CHECK_VERSION(2, 20, 0)
   // We can't change the text style easily, if the preedit string (the text
@@ -1892,7 +2005,7 @@ void AutocompleteEditViewGtk::EmphasizeURLComponents() {
   // be treated as a search or a navigation, and is the same method the Paste
   // And Go system uses.
   url_parse::Component scheme, host;
-  std::wstring text(GetText());
+  string16 text(GetText());
   AutocompleteInput::ParseForEmphasizeComponents(
       text, model_->GetDesiredTLD(), &scheme, &host);
   const bool emphasize = model_->CurrentTextIsURL() && (host.len > 0);
@@ -1948,23 +2061,15 @@ void AutocompleteEditViewGtk::StopAnimation() {
   UpdateInstantViewColors();
 }
 
-bool AutocompleteEditViewGtk::CommitInstantSuggestion() {
-  const gchar* suggestion = gtk_label_get_text(GTK_LABEL(instant_view_));
-  if (!suggestion || !*suggestion)
-    return false;
-
-  model()->FinalizeInstantQuery(GetText(),
-                                UTF8ToWide(suggestion));
-  return true;
-}
-
 void AutocompleteEditViewGtk::TextChanged() {
   EmphasizeURLComponents();
-  controller_->OnChanged();
+  model_->OnChanged();
 }
 
 void AutocompleteEditViewGtk::SavePrimarySelection(
     const std::string& selected_text) {
+  DCHECK(text_view_);
+
   GtkClipboard* clipboard =
       gtk_widget_get_clipboard(text_view_, GDK_SELECTION_PRIMARY);
   DCHECK(clipboard);
@@ -1975,10 +2080,10 @@ void AutocompleteEditViewGtk::SavePrimarySelection(
       clipboard, selected_text.data(), selected_text.size());
 }
 
-void AutocompleteEditViewGtk::SetTextAndSelectedRange(const std::wstring& text,
+void AutocompleteEditViewGtk::SetTextAndSelectedRange(const string16& text,
                                                       const CharRange& range) {
   if (text != GetText()) {
-    std::string utf8 = WideToUTF8(text);
+    std::string utf8 = UTF16ToUTF8(text);
     gtk_text_buffer_set_text(text_buffer_, utf8.data(), utf8.length());
   }
   SetSelectedRange(range);
@@ -1997,6 +2102,8 @@ void AutocompleteEditViewGtk::SetSelectedRange(const CharRange& range) {
 }
 
 void AutocompleteEditViewGtk::AdjustTextJustification() {
+  DCHECK(text_view_);
+
   PangoDirection content_dir = GetContentDirection();
 
   // Use keymap direction if content does not have strong direction.
@@ -2144,7 +2251,7 @@ std::string AutocompleteEditViewGtk::GetSelectedText() const {
 }
 
 void AutocompleteEditViewGtk::UpdatePrimarySelectionIfValidURL() {
-  std::wstring text = UTF8ToWide(GetSelectedText());
+  string16 text = UTF8ToUTF16(GetSelectedText());
 
   if (text.empty())
     return;
@@ -2156,7 +2263,7 @@ void AutocompleteEditViewGtk::UpdatePrimarySelectionIfValidURL() {
   model_->AdjustTextForCopy(selection.selection_min(), IsSelectAll(), &text,
                             &url, &write_url);
   if (write_url) {
-    selected_text_ = WideToUTF8(text);
+    selected_text_ = UTF16ToUTF8(text);
     OwnPrimarySelection(selected_text_);
   }
 }
@@ -2174,7 +2281,7 @@ void AutocompleteEditViewGtk::HandlePreeditChanged(GtkWidget* sender,
     // delete the selection range here explicitly. See http://crbug.com/18808.
     if (preedit_.empty())
       gtk_text_buffer_delete_selection(text_buffer_, false, true);
-    preedit_ = UTF8ToWide(preedit);
+    preedit_ = UTF8ToUTF16(preedit);
   } else {
     preedit_.clear();
   }

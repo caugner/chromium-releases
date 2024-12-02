@@ -15,12 +15,6 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/renderer_host/render_process_host.h"
-#include "chrome/browser/renderer_host/render_view_host.h"
-#include "chrome/browser/tab_contents/language_state.h"
-#include "chrome/browser/tab_contents/navigation_controller.h"
-#include "chrome/browser/tab_contents/navigation_entry.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tab_contents/tab_util.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/translate/page_translated_details.h"
@@ -36,6 +30,12 @@
 #include "chrome/common/render_messages.h"
 #include "chrome/common/translate_errors.h"
 #include "chrome/common/url_constants.h"
+#include "content/browser/renderer_host/render_process_host.h"
+#include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/tab_contents/language_state.h"
+#include "content/browser/tab_contents/navigation_controller.h"
+#include "content/browser/tab_contents/navigation_entry.h"
+#include "content/browser/tab_contents/tab_contents.h"
 #include "grit/browser_resources.h"
 #include "net/base/escape.h"
 #include "net/url_request/url_request_status.h"
@@ -355,7 +355,7 @@ TranslateManager::TranslateManager()
 
 void TranslateManager::InitiateTranslation(TabContents* tab,
                                            const std::string& page_lang) {
-  PrefService* prefs = tab->profile()->GetPrefs();
+  PrefService* prefs = tab->profile()->GetOriginalProfile()->GetPrefs();
   if (!prefs->GetBoolean(prefs::kEnableTranslate))
     return;
 
@@ -518,7 +518,7 @@ void TranslateManager::DoTranslatePage(TabContents* tab,
 
   // Ideally we'd have a better way to uniquely identify form control elements,
   // but we don't have that yet.  So before start translation, we clear the
-  // current form and re-parse it in AutoFillManager first to get the new
+  // current form and re-parse it in AutofillManager first to get the new
   // labels.
   tab->autofill_manager()->Reset();
 }
@@ -548,7 +548,7 @@ void TranslateManager::PageTranslated(TabContents* tab,
 
 bool TranslateManager::IsAcceptLanguage(TabContents* tab,
                                         const std::string& language) {
-  PrefService* pref_service = tab->profile()->GetPrefs();
+  PrefService* pref_service = tab->profile()->GetOriginalProfile()->GetPrefs();
   PrefServiceLanguagesMap::const_iterator iter =
       accept_languages_.find(pref_service);
   if (iter == accept_languages_.end()) {
@@ -631,7 +631,7 @@ std::string TranslateManager::GetTargetLanguage() {
 // static
 TranslateInfoBarDelegate* TranslateManager::GetTranslateInfoBarDelegate(
     TabContents* tab) {
-  for (int i = 0; i < tab->infobar_delegate_count(); ++i) {
+  for (size_t i = 0; i < tab->infobar_count(); ++i) {
     TranslateInfoBarDelegate* delegate =
         tab->GetInfoBarDelegateAt(i)->AsTranslateInfoBarDelegate();
     if (delegate)

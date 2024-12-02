@@ -9,10 +9,10 @@
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/dropdown_bar_view.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
-#include "gfx/path.h"
-#include "gfx/scrollbar_size.h"
 #include "ui/base/animation/slide_animation.h"
 #include "ui/base/keycodes/keyboard_codes.h"
+#include "ui/gfx/path.h"
+#include "ui/gfx/scrollbar_size.h"
 #include "views/focus/external_focus_tracker.h"
 #include "views/focus/view_storage.h"
 #include "views/widget/widget.h"
@@ -43,7 +43,9 @@ bool DropdownBarHost::disable_animations_during_testing_ = false;
 
 DropdownBarHost::DropdownBarHost(BrowserView* browser_view)
     : browser_view_(browser_view),
+      view_(NULL),
       animation_offset_(0),
+      focus_manager_(NULL),
       esc_accel_target_registered_(false),
       is_visible_(false) {
 }
@@ -131,8 +133,8 @@ void DropdownBarHost::FocusWillChange(views::View* focused_before,
                                       views::View* focused_now) {
   // First we need to determine if one or both of the views passed in are child
   // views of our view.
-  bool our_view_before = focused_before && view_->IsParentOf(focused_before);
-  bool our_view_now = focused_now && view_->IsParentOf(focused_now);
+  bool our_view_before = focused_before && view_->Contains(focused_before);
+  bool our_view_now = focused_now && view_->Contains(focused_now);
 
   // When both our_view_before and our_view_now are false, it means focus is
   // changing hands elsewhere in the application (and we shouldn't do anything).

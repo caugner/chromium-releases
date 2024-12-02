@@ -89,7 +89,9 @@ def _CheckSubversionConfig(input_api, output_api):
   error_msg = (
       'Please look at http://dev.chromium.org/developers/coding-style to\n'
       'configure your subversion configuration file. This enables automatic\n'
-      'properties to simplify the project maintenance.')
+      'properties to simplify the project maintenance.\n'
+      'Pro-tip: just download and install\n'
+      'http://src.chromium.org/viewvc/chrome/trunk/tools/build/slave/config\n')
 
   try:
     lines = open(path, 'r').read().splitlines()
@@ -99,13 +101,13 @@ def _CheckSubversionConfig(input_api, output_api):
         not '*.pdf = svn:mime-type=application/pdf' in lines or
         not 'enable-auto-props = yes' in lines):
       return [
-          output_api.PresubmitError(
+          output_api.PresubmitNotifyResult(
               'It looks like you have not configured your subversion config '
-              'file.\n' + error_msg)
+              'file or it is not up-to-date.\n' + error_msg)
       ]
   except (OSError, IOError):
     return [
-        output_api.PresubmitError(
+        output_api.PresubmitNotifyResult(
             'Can\'t find your subversion config file.\n' + error_msg)
     ]
   return []

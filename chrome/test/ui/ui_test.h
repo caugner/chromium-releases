@@ -48,24 +48,6 @@ class TabProxy;
 // If using gtest, you probably want to inherit from UITest (declared below)
 // rather than UITestBase.
 class UITestBase {
- protected:
-  // String to display when a test fails because the crash service isn't
-  // running.
-  static const wchar_t kFailedNoCrashService[];
-
-  // Constructor
-  UITestBase();
-  explicit UITestBase(MessageLoop::Type msg_loop_type);
-
-  virtual ~UITestBase();
-
-  // Starts the browser using the arguments in launch_arguments_, and
-  // sets up member variables.
-  virtual void SetUp();
-
-  // Closes the browser window.
-  virtual void TearDown();
-
  public:
   // ********* Utility functions *********
 
@@ -106,14 +88,6 @@ class UITestBase {
 
   // Exits out browser instance.
   void QuitBrowser();
-
-  // Terminates the browser, simulates end of session.
-  void TerminateBrowser();
-
-  // Tells the browser to navigate to the given URL in the active tab
-  // of the first app window.
-  // Does not wait for the navigation to complete to return.
-  void NavigateToURLAsync(const GURL& url);
 
   // Tells the browser to navigate to the given URL in the active tab
   // of the first app window.
@@ -272,7 +246,7 @@ class UITestBase {
 
   // Sets the shutdown type, which defaults to WINDOW_CLOSE.
   void set_shutdown_type(ProxyLauncher::ShutdownType value) {
-    shutdown_type_ = value;
+    launcher_->set_shutdown_type(value);
   }
 
   // Get the number of crash dumps we've logged since the test started.
@@ -282,6 +256,22 @@ class UITestBase {
   void SetBrowserDirectory(const FilePath& dir);
 
  protected:
+  // String to display when a test fails because the crash service isn't
+  // running.
+  static const wchar_t kFailedNoCrashService[];
+
+  UITestBase();
+  explicit UITestBase(MessageLoop::Type msg_loop_type);
+
+  virtual ~UITestBase();
+
+  // Starts the browser using the arguments in launch_arguments_, and
+  // sets up member variables.
+  virtual void SetUp();
+
+  // Closes the browser window.
+  virtual void TearDown();
+
   AutomationProxy* automation() const {
     return launcher_->automation();
   }
@@ -294,9 +284,7 @@ class UITestBase {
     return state;
   }
 
-  virtual bool ShouldFilterInet() {
-    return true;
-  }
+  virtual bool ShouldFilterInet();
 
   // Extra command-line switches that need to be passed to the browser are
   // added in this function. Add new command-line switches here.
@@ -371,9 +359,6 @@ class UITestBase {
   // PID file for websocket server.
   FilePath websocket_pid_file_;
 
-  // The method for shutting down the browser. Used in ShutdownTest.
-  ProxyLauncher::ShutdownType shutdown_type_;
-
  private:
   // Time the test was started (so we can check for new crash dumps)
   base::Time test_start_time_;
@@ -385,6 +370,7 @@ class UITest : public UITestBase, public PlatformTest {
   explicit UITest(MessageLoop::Type msg_loop_type)
     : UITestBase(), PlatformTest(), message_loop_(msg_loop_type) {
   }
+
   virtual void SetUp();
   virtual void TearDown();
 
@@ -400,7 +386,7 @@ class UITest : public UITestBase, public PlatformTest {
 
   // Count the number of active browser processes launched by this test.
   // The count includes browser sub-processes.
-  int GetBrowserProcessCount();
+  bool GetBrowserProcessCount(int* count) WARN_UNUSED_RESULT;
 
   // Returns a copy of local state preferences. The caller is responsible for
   // deleting the returned object. Returns NULL if there is an error.
@@ -485,6 +471,16 @@ class UITest : public UITestBase, public PlatformTest {
   // out (return false) if the window doesn't appear within a specific time.
   bool WaitForFindWindowVisibilityChange(BrowserProxy* browser,
                                          bool wait_for_open);
+
+  // Terminates the browser, simulates end of session.
+  void TerminateBrowser();
+
+  // Tells the browser to navigate to the given URL in the active tab
+  // of the first app window.
+  // Does not wait for the navigation to complete to return.
+  // To avoid intermittent test failures, use NavigateToURL instead, if
+  // possible.
+  void NavigateToURLAsync(const GURL& url);
 
  private:
   // Waits for download shelf visibility or invisibility.

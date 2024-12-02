@@ -21,6 +21,40 @@ class Dispatcher;
 class InterfaceProxy : public IPC::Channel::Listener,
                        public IPC::Message::Sender {
  public:
+  // Factory function type for interfaces. Ownership of the returned pointer
+  // is transferred to the caller.
+  typedef InterfaceProxy* (*Factory)(Dispatcher* dispatcher,
+                                     const void* target_interface);
+
+  // Information about the interface. Each interface has a static function to
+  // return its info, which allows either construction on the target side, and
+  // getting the proxied interface on the source side (see dispatcher.h for
+  // terminology).
+  struct Info {
+    const void* interface;
+
+    const char* name;
+    InterfaceID id;
+
+    bool is_trusted;
+
+    InterfaceProxy::Factory create_proxy;
+  };
+
+  virtual ~InterfaceProxy();
+
+  // The actual implementation of the given interface in the current process.
+  const void* target_interface() const { return target_interface_; }
+
+  Dispatcher* dispatcher() const { return dispatcher_; }
+
+  // IPC::Message::Sender implementation.
+  virtual bool Send(IPC::Message* msg);
+
+  // Sub-classes must implement IPC::Channel::Listener which contains this:
+  //virtual bool OnMessageReceived(const IPC::Message& msg);
+
+ protected:
   // Creates the given interface associated with the given dispatcher. The
   // dispatcher manages our lifetime.
   //
@@ -28,40 +62,8 @@ class InterfaceProxy : public IPC::Channel::Listener,
   // target proxy (see dispatcher.h for a definition).  In this case, the proxy
   // will interpret this pointer to the actual implementation of the interface
   // in the local process.
-  //
-  // If the target interface is NULL, this proxy will be a "source" interface.
   InterfaceProxy(Dispatcher* dispatcher, const void* target_interface);
-  virtual ~InterfaceProxy();
 
-  // See dispatcher.h for definitions of source and target.
-  bool is_source_proxy() const { return !target_interface_; }
-  bool is_target_proxy() const { return !!target_interface_; }
-
-  // When this proxy is the "target" of the IPC communication (see
-  // dispatcher.h), this target_interface pointer will indicate the local
-  // side's interface pointer. This contains the functions that actually
-  // implement the proxied interface.
-  //
-  // This will be NULL when this proxy is a source proxy.
-  const void* target_interface() const { return target_interface_; }
-
-  Dispatcher* dispatcher() { return dispatcher_; }
-
-  // IPC::Message::Sender implementation.
-  virtual bool Send(IPC::Message* msg);
-
-  // Returns the local implementation of the interface that will proxy it to
-  // the remote side. This is used on the source side only (see dispatcher.h).
-  virtual const void* GetSourceInterface() const = 0;
-
-  // Returns the interface ID associated with this proxy. Implemented by each
-  // derived class to identify itself.
-  virtual InterfaceID GetInterfaceId() const = 0;
-
-  // Sub-classes must implement IPC::Channel::Listener which contains this:
-  //virtual bool OnMessageReceived(const IPC::Message& msg);
-
- protected:
   uint32 SendCallback(PP_CompletionCallback callback);
   PP_CompletionCallback ReceiveCallback(uint32 serialized_callback);
 

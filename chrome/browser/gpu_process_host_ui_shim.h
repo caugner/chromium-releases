@@ -11,33 +11,68 @@
 // portion of this class, the GpuProcessHost, is responsible for
 // shuttling messages between the browser and GPU processes.
 
+#include <map>
+#include <queue>
+
 #include "base/callback.h"
+#include "base/linked_ptr.h"
+#include "base/process.h"
 #include "base/scoped_ptr.h"
 #include "base/singleton.h"
 #include "base/threading/non_thread_safe.h"
+#include "chrome/common/gpu_feature_flags.h"
 #include "chrome/common/gpu_info.h"
-#include "chrome/common/message_router.h"
-#include "ipc/ipc_channel.h"
-#include "gfx/native_widget_types.h"
+#include "content/common/message_router.h"
+#include "ui/gfx/native_widget_types.h"
 
 namespace gfx {
 class Size;
 }
 
+class GpuDataManager;
+struct GPUCreateCommandBufferConfig;
+class GPUInfo;
 struct GpuHostMsg_AcceleratedSurfaceSetIOSurface_Params;
 struct GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params;
 
-class GpuProcessHostUIShim : public IPC::Channel::Sender,
-                             public IPC::Channel::Listener,
-                             public base::NonThreadSafe {
- public:
-  // Getter for the singleton. This will return NULL on failure.
-  static GpuProcessHostUIShim* GetInstance();
+namespace IPC {
+struct ChannelHandle;
+class Message;
+}
 
-  int32 GetNextRoutingId();
+class GpuProcessHostUIShim
+    : public IPC::Channel::Listener,
+      public IPC::Channel::Sender,
+      public base::NonThreadSafe {
+ public:
+  // Creates a new GpuProcessHostUIShim or gets one for a particular
+  // renderer process, resulting in the launching of a GPU process if required.
+  // Returns null on failure. It is not safe to store the pointer once control
+  // has returned to the message loop as it can be destroyed. Instead store the
+  // associated GPU host ID. A renderer ID of zero means the browser process.
+  static GpuProcessHostUIShim* GetForRenderer(int renderer_id);
+
+  // Destroy the GpuProcessHostUIShim with the given host ID. This can only
+  // be called on the UI thread. Only the GpuProcessHost should destroy the
+  // UI shim.
+  static void Destroy(int host_id);
+
+  // The GPU process is launched asynchronously. If it launches successfully,
+  // this function is called on the UI thread with the process handle. On
+  // Windows, the UI shim takes ownership of the handle.
+  static void NotifyGpuProcessLaunched(int host_id,
+                                       base::ProcessHandle gpu_process);
+
+  static GpuProcessHostUIShim* FromID(int host_id);
+  int host_id() const { return host_id_; }
 
   // IPC::Channel::Sender implementation.
   virtual bool Send(IPC::Message* msg);
+
+  // Sends outstanding replies. This is only called
+  // in error situations like the GPU process crashing -- but is necessary
+  // to prevent the blocked clients from hanging.
+  void SendOutstandingReplies();
 
   // IPC::Channel::Listener implementation.
   // The GpuProcessHost causes this to be called on the UI thread to
@@ -45,13 +80,41 @@ class GpuProcessHostUIShim : public IPC::Channel::Sender,
   // actually received on the IO thread.
   virtual bool OnMessageReceived(const IPC::Message& message);
 
-  // See documentation on MessageRouter for AddRoute and RemoveRoute
-  void AddRoute(int32 routing_id, IPC::Channel::Listener* listener);
-  void RemoveRoute(int32 routing_id);
+  typedef Callback3<const IPC::ChannelHandle&,
+                    base::ProcessHandle,
+                    const GPUInfo&>::Type
+    EstablishChannelCallback;
+
+  // Tells the GPU process to create a new channel for communication with a
+  // renderer. Once the GPU process responds asynchronously with the IPC handle
+  // and GPUInfo, we call the callback.
+  void EstablishGpuChannel(
+      int renderer_id, EstablishChannelCallback* callback);
+
+  typedef Callback0::Type SynchronizeCallback;
+
+  // Sends a reply message later when the next GpuHostMsg_SynchronizeReply comes
+  // in.
+  void Synchronize(SynchronizeCallback* callback);
+
+  typedef Callback1<int32>::Type CreateCommandBufferCallback;
+
+  // Tells the GPU process to create a new command buffer that draws into the
+  // window associated with the given renderer.
+  void CreateViewCommandBuffer(
+      int32 render_view_id,
+      int32 renderer_id,
+      const GPUCreateCommandBufferConfig& init_params,
+      CreateCommandBufferCallback* callback);
+
+#if defined(OS_MACOSX)
+  // Notify the GPU process that an accelerated surface was destroyed.
+  void DidDestroyAcceleratedSurface(int renderer_id, int32 renderer_route_id);
+#endif
 
   // Sends a message to the browser process to collect the information from the
   // graphics card.
-  void CollectGraphicsInfoAsynchronously();
+  void CollectGpuInfoAsynchronously(GPUInfo::Level level);
 
   // Tells the GPU process to crash. Useful for testing.
   void SendAboutGpuCrash();
@@ -63,26 +126,27 @@ class GpuProcessHostUIShim : public IPC::Channel::Sender,
   // Return all known information about the GPU.
   const GPUInfo& gpu_info() const;
 
-  // Used only in testing. Sets a callback to invoke when GPU info is collected,
-  // regardless of whether it has been collected already or if it is partial
-  // or complete info. Set to NULL when the callback should no longer be called.
-  void set_gpu_info_collected_callback(Callback0::Type* callback) {
-    gpu_info_collected_callback_.reset(callback);
-  }
+  // Can be called directly from the UI thread to log a message.
+  void AddCustomLogMessage(int level, const std::string& header,
+      const std::string& message);
 
  private:
-  friend struct DefaultSingletonTraits<GpuProcessHostUIShim>;
-
   GpuProcessHostUIShim();
   virtual ~GpuProcessHostUIShim();
 
   // Message handlers.
-  void OnGraphicsInfoCollected(const GPUInfo& gpu_info);
   bool OnControlMessageReceived(const IPC::Message& message);
 
+  void OnChannelEstablished(const IPC::ChannelHandle& channel_handle,
+                            const GPUInfo& gpu_info);
+  void OnCommandBufferCreated(const int32 route_id);
+  void OnDestroyCommandBuffer(gfx::PluginWindowHandle window,
+                              int32 renderer_id, int32 render_view_id);
+  void OnGraphicsInfoCollected(const GPUInfo& gpu_info);
+  void OnLogMessage(int level, const std::string& header,
+      const std::string& message);
+  void OnSynchronizeReply();
 #if defined(OS_LINUX)
-  void OnGetViewXID(gfx::NativeViewId id, IPC::Message* reply_msg);
-  void OnReleaseXID(unsigned long xid);
   void OnResizeXID(unsigned long xid, gfx::Size size, IPC::Message* reply_msg);
 #elif defined(OS_MACOSX)
   void OnAcceleratedSurfaceSetIOSurface(
@@ -90,21 +154,38 @@ class GpuProcessHostUIShim : public IPC::Channel::Sender,
   void OnAcceleratedSurfaceBuffersSwapped(
       const GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params& params);
 #elif defined(OS_WIN)
-  void OnGetCompositorHostWindow(int renderer_id,
-                                 int render_view_id,
-                                 IPC::Message* reply_message);
   void OnScheduleComposite(int32 renderer_id, int32 render_view_id);
 #endif
 
-  int last_routing_id_;
+  // The serial number of the GpuProcessHost / GpuProcessHostUIShim pair.
+  int host_id_;
 
-  GPUInfo gpu_info_;
+  // The handle for the GPU process or null if it is not known to be launched.
+  base::ProcessHandle gpu_process_;
 
-  MessageRouter router_;
+  // Cached pointer to the singleton for efficiency purpose.
+  GpuDataManager* gpu_data_manager_;
 
-  // Used only in testing. If set, the callback is invoked when the GPU info
-  // has been collected.
-  scoped_ptr<Callback0::Type> gpu_info_collected_callback_;
+  // These are the channel requests that we have already sent to
+  // the GPU process, but haven't heard back about yet.
+  std::queue<linked_ptr<EstablishChannelCallback> > channel_requests_;
+
+  // The pending synchronization requests we need to reply to.
+  std::queue<linked_ptr<SynchronizeCallback> > synchronize_requests_;
+
+  // The pending create command buffer requests we need to reply to.
+  std::queue<linked_ptr<CreateCommandBufferCallback> >
+      create_command_buffer_requests_;
+
+  typedef std::pair<int32 /* renderer_id */,
+                    int32 /* render_view_id */> ViewID;
+
+  // Encapsulates surfaces that we acquire when creating view command buffers.
+  // We assume that a render view has at most 1 such surface associated
+  // with it.
+  class ViewSurface;
+  std::map<ViewID, linked_ptr<ViewSurface> > acquired_surfaces_;
+
 };
 
 #endif  // CHROME_BROWSER_GPU_PROCESS_HOST_UI_SHIM_H_

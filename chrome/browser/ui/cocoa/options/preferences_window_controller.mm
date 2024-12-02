@@ -6,7 +6,6 @@
 
 #include <algorithm>
 
-#include "ui/base/l10n/l10n_util.h"
 #include "base/logging.h"
 #include "base/mac/mac_util.h"
 #include "base/mac/scoped_aedesc.h"
@@ -30,16 +29,14 @@
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/renderer_host/resource_dispatcher_host.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/shell_integration.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/sync_ui_util.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #import "chrome/browser/ui/cocoa/clear_browsing_data_controller.h"
-#import "chrome/browser/ui/cocoa/importer/import_settings_dialog.h"
+#import "chrome/browser/ui/cocoa/importer/import_dialog_cocoa.h"
 #import "chrome/browser/ui/cocoa/l10n_util.h"
 #import "chrome/browser/ui/cocoa/options/content_settings_dialog_controller.h"
 #import "chrome/browser/ui/cocoa/options/custom_home_pages_model.h"
@@ -57,14 +54,18 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/installer/util/google_update_settings.h"
+#include "content/browser/renderer_host/resource_dispatcher_host.h"
+#include "content/browser/tab_contents/tab_contents.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "grit/theme_resources.h"
 #import "third_party/GTM/AppKit/GTMNSAnimation+Duration.h"
 #import "third_party/GTM/AppKit/GTMUILocalizerAndLayoutTweaker.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/image.h"
 
 namespace {
 
@@ -406,6 +407,7 @@ CGFloat AutoSizeUnderTheHoodContent(NSView* view,
 
 // KVC getter methods.
 - (BOOL)fileHandlerUIEnabled;
+- (BOOL)canChangeDefaultBrowser;
 @end
 
 namespace PreferencesWindowControllerInternal {
@@ -482,6 +484,7 @@ class ManagedPrefsBannerState : public policy::ManagedPrefsBannerBase {
 @synthesize dnsPrefetchEnabled = dnsPrefetchEnabled_;
 @synthesize safeBrowsingEnabled = safeBrowsingEnabled_;
 @synthesize metricsReportingEnabled = metricsReportingEnabled_;
+@synthesize downloadLocationEnabled = downloadLocationEnabled_;
 @synthesize proxiesConfigureButtonEnabled = proxiesConfigureButtonEnabled_;
 
 - (id)initWithProfile:(Profile*)profile initialPage:(OptionsPage)initialPage {
@@ -569,6 +572,7 @@ class ManagedPrefsBannerState : public policy::ManagedPrefsBannerBase {
     [self setDnsPrefetchEnabled:!dnsPrefetch_.IsManaged()];
     [self setSafeBrowsingEnabled:!safeBrowsing_.IsManaged()];
     [self setMetricsReportingEnabled:!metricsReporting_.IsManaged()];
+    [self setDownloadLocationEnabled:!defaultDownloadLocation_.IsManaged()];
     proxyPrefs_.reset(
         PrefSetObserver::CreateProxyPrefSetObserver(prefs_, observer_.get()));
     [self setProxiesConfigureButtonEnabled:!proxyPrefs_->IsManaged()];
@@ -775,7 +779,7 @@ class ManagedPrefsBannerState : public policy::ManagedPrefsBannerBase {
   if (g_browser_process && g_browser_process->local_state()) {
     sizeSaver_.reset([[WindowSizeAutosaver alloc]
        initWithWindow:[self window]
-          prefService:g_browser_process->local_state()
+          prefService:profile_->GetPrefs()
                  path:prefs::kPreferencesWindowPlacement]);
   }
 
@@ -831,6 +835,8 @@ class ManagedPrefsBannerState : public policy::ManagedPrefsBannerBase {
 - (void)registerPrefObservers {
   if (!prefs_) return;
 
+  PrefService* local = g_browser_process->local_state();
+
   // Basics panel
   registrar_.Init(prefs_);
   registrar_.Add(prefs::kURLsToRestoreOnStartup, observer_.get());
@@ -840,6 +846,8 @@ class ManagedPrefsBannerState : public policy::ManagedPrefsBannerBase {
   homepage_.Init(prefs::kHomePage, prefs_, observer_.get());
   showHomeButton_.Init(prefs::kShowHomeButton, prefs_, observer_.get());
   instantEnabled_.Init(prefs::kInstantEnabled, prefs_, observer_.get());
+  default_browser_policy_.Init(prefs::kDefaultBrowserSettingEnabled,
+                               local, observer_.get());
 
   // Personal Stuff panel
   askSavePasswords_.Init(prefs::kPasswordManagerEnabled,
@@ -858,12 +866,6 @@ class ManagedPrefsBannerState : public policy::ManagedPrefsBannerBase {
   translateEnabled_.Init(prefs::kEnableTranslate, prefs_, observer_.get());
   tabsToLinks_.Init(prefs::kWebkitTabsToLinks, prefs_, observer_.get());
 
-  // During unit tests, there is no local state object, so we fall back to
-  // the prefs object (where we've explicitly registered this pref so we
-  // know it's there).
-  PrefService* local = g_browser_process->local_state();
-  if (!local)
-    local = prefs_;
   metricsReporting_.Init(prefs::kMetricsReportingEnabled,
                          local, observer_.get());
   defaultDownloadLocation_.Init(prefs::kDownloadDefaultDirectory, prefs_,
@@ -911,7 +913,7 @@ class ManagedPrefsBannerState : public policy::ManagedPrefsBannerBase {
     paths = [paths setByAddingObject:@"homepageURL"];
   } else if ([key isEqualToString:@"hompageURL"]) {
     paths = [paths setByAddingObject:@"newTabPageIsHomePageIndex"];
-  } else if ([key isEqualToString:@"isDefaultBrowser"]) {
+  } else if ([key isEqualToString:@"canChangeDefaultBrowser"]) {
     paths = [paths setByAddingObject:@"defaultBrowser"];
   } else if ([key isEqualToString:@"defaultBrowserTextColor"]) {
     paths = [paths setByAddingObject:@"defaultBrowser"];
@@ -978,6 +980,9 @@ class ManagedPrefsBannerState : public policy::ManagedPrefsBannerBase {
     [self setShowHomeButtonEnabled:!showHomeButton_.IsManaged()];
   } else if (*prefName == prefs::kInstantEnabled) {
     [self configureInstant];
+  } else if (*prefName == prefs::kDefaultBrowserSettingEnabled) {
+    [self willChangeValueForKey:@"defaultBrowser"];
+    [self didChangeValueForKey:@"defaultBrowser"];
   }
 }
 
@@ -1264,15 +1269,19 @@ enum { kHomepageNewTabPage, kHomepageURL };
   [self didChangeValueForKey:@"defaultBrowser"];
 }
 
-// Returns the Chromium default browser state.
-- (ShellIntegration::DefaultBrowserState)isDefaultBrowser {
-  return ShellIntegration::IsDefaultBrowser();
+// Returns the Chromium default browser state and whether this is user
+// controlled or locked by a policy.
+- (BOOL)canChangeDefaultBrowser {
+  return !default_browser_policy_.IsManaged() &&
+         ShellIntegration::IsDefaultBrowser() !=
+             ShellIntegration::IS_DEFAULT_BROWSER;
 }
 
 // Returns the text color of the "chromium is your default browser" text (green
 // for yes, red for no).
 - (NSColor*)defaultBrowserTextColor {
-  ShellIntegration::DefaultBrowserState state = [self isDefaultBrowser];
+  ShellIntegration::DefaultBrowserState state =
+      ShellIntegration::IsDefaultBrowser();
   return (state == ShellIntegration::IS_DEFAULT_BROWSER) ?
     [NSColor colorWithCalibratedRed:0.0 green:135.0/255.0 blue:0 alpha:1.0] :
     [NSColor colorWithCalibratedRed:135.0/255.0 green:0 blue:0 alpha:1.0];
@@ -1281,7 +1290,8 @@ enum { kHomepageNewTabPage, kHomepageURL };
 // Returns the text for the "chromium is your default browser" string dependent
 // on if Chromium actually is or not.
 - (NSString*)defaultBrowserText {
-  ShellIntegration::DefaultBrowserState state = [self isDefaultBrowser];
+  ShellIntegration::DefaultBrowserState state =
+      ShellIntegration::IsDefaultBrowser();
   int stringId;
   if (state == ShellIntegration::IS_DEFAULT_BROWSER)
     stringId = IDS_OPTIONS_DEFAULTBROWSER_DEFAULT;
@@ -1350,7 +1360,7 @@ const int kDisabledIndex = 1;
 // Called to import data from other browsers (Safari, Firefox, etc).
 - (IBAction)importData:(id)sender {
   UserMetrics::RecordAction(UserMetricsAction("Import_ShowDlg"), profile_);
-  [ImportSettingsDialogController showImportSettingsDialogForProfile:profile_];
+  [ImportDialogController showImportSettingsDialogForProfile:profile_];
 }
 
 - (IBAction)resetThemeToDefault:(id)sender {
@@ -1492,6 +1502,7 @@ const int kDisabledIndex = 1;
     [self setMetricsReportingEnabled:!metricsReporting_.IsManaged()];
   }
   else if (*prefName == prefs::kDownloadDefaultDirectory) {
+    [self setDownloadLocationEnabled:!defaultDownloadLocation_.IsManaged()];
     // Poke KVO.
     [self willChangeValueForKey:@"defaultDownloadLocation"];
     [self didChangeValueForKey:@"defaultDownloadLocation"];
@@ -2051,15 +2062,9 @@ const int kDisabledIndex = 1;
 - (void)initBannerStateForPage:(OptionsPage)page {
   page = [self normalizePage:page];
 
-  // During unit tests, there is no local state object, so we fall back to
-  // the prefs object (where we've explicitly registered this pref so we
-  // know it's there).
-  PrefService* local = g_browser_process->local_state();
-  if (!local)
-    local = prefs_;
   bannerState_.reset(
       new PreferencesWindowControllerInternal::ManagedPrefsBannerState(
-          self, page, local, prefs_));
+          self, page, g_browser_process->local_state(), prefs_));
 }
 
 - (void)switchToPage:(OptionsPage)page animate:(BOOL)animate {

@@ -24,7 +24,7 @@ class TestWebKitClient : public webkit_glue::WebKitClientImpl {
   virtual ~TestWebKitClient();
 
   virtual WebKit::WebMimeRegistry* mimeRegistry();
-  WebKit::WebClipboard* clipboard();
+  virtual WebKit::WebClipboard* clipboard();
   virtual WebKit::WebFileUtilities* fileUtilities();
   virtual WebKit::WebSandboxSupport* sandboxSupport();
   virtual WebKit::WebCookieJar* cookieJar();
@@ -58,7 +58,7 @@ class TestWebKitClient : public webkit_glue::WebKitClientImpl {
   virtual WebKit::WebStorageNamespace* createLocalStorageNamespace(
       const WebKit::WebString& path, unsigned quota);
 
-  void dispatchStorageEvent(const WebKit::WebString& key,
+  virtual void dispatchStorageEvent(const WebKit::WebString& key,
       const WebKit::WebString& old_value, const WebKit::WebString& new_value,
       const WebKit::WebString& origin, const WebKit::WebURL& url,
       bool is_local_storage);
@@ -67,6 +67,10 @@ class TestWebKitClient : public webkit_glue::WebKitClientImpl {
       const WebKit::WebVector<WebKit::WebSerializedScriptValue>& values,
       const WebKit::WebString& keyPath,
       WebKit::WebVector<WebKit::WebIDBKey>& keys_out);
+  virtual WebKit::WebSerializedScriptValue injectIDBKeyIntoSerializedValue(
+      const WebKit::WebIDBKey& key,
+      const WebKit::WebSerializedScriptValue& value,
+      const WebKit::WebString& keyPath);
 
 #if defined(OS_WIN) || defined(OS_MACOSX)
   void SetThemeEngine(WebKit::WebThemeEngine* engine);

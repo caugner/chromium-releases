@@ -9,7 +9,6 @@
 
 #include <set>
 
-#include "app/win/win_util.h"
 #include "chrome/browser/accessibility/browser_accessibility_state.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/browser_list.h"
@@ -18,11 +17,12 @@
 #include "chrome/browser/ui/views/frame/browser_root_view.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/frame/glass_browser_frame_view.h"
-#include "gfx/font.h"
 #include "grit/theme_resources.h"
-#include "ui/base/win/hwnd_util.h"
+#include "ui/gfx/font.h"
 #include "views/screen.h"
+#include "views/widget/widget_win.h"
 #include "views/window/window_delegate.h"
+#include "views/window/window_win.h"
 
 // static
 static const int kClientEdgeThickness = 3;
@@ -35,13 +35,14 @@ static const int kDWMFrameTopOffset = 3;
 BrowserFrame* BrowserFrame::Create(BrowserView* browser_view,
                                    Profile* profile) {
   BrowserFrameWin* frame = new BrowserFrameWin(browser_view, profile);
-  frame->Init();
+  frame->InitBrowserFrame();
   return frame;
 }
 
 // static
 const gfx::Font& BrowserFrame::GetTitleFont() {
-  static gfx::Font* title_font = new gfx::Font(app::win::GetWindowTitleFont());
+  static gfx::Font* title_font =
+      new gfx::Font(views::WindowWin::GetWindowTitleFont());
   return *title_font;
 }
 
@@ -55,12 +56,12 @@ BrowserFrameWin::BrowserFrameWin(BrowserView* browser_view, Profile* profile)
       frame_initialized_(false),
       profile_(profile) {
   browser_view_->set_frame(this);
-  GetNonClientView()->SetFrameView(CreateFrameViewForWindow());
+  non_client_view()->SetFrameView(CreateFrameViewForWindow());
   // Don't focus anything on creation, selecting a tab will set the focus.
   set_focus_on_creation(false);
 }
 
-void BrowserFrameWin::Init() {
+void BrowserFrameWin::InitBrowserFrame() {
   WindowWin::Init(NULL, gfx::Rect());
 }
 
@@ -83,7 +84,7 @@ int BrowserFrameWin::GetMinimizeButtonOffset() const {
   return minimize_button_corner.x;
 }
 
-gfx::Rect BrowserFrameWin::GetBoundsForTabStrip(BaseTabStrip* tabstrip) const {
+gfx::Rect BrowserFrameWin::GetBoundsForTabStrip(views::View* tabstrip) const {
   return browser_frame_view_->GetBoundsForTabStrip(tabstrip);
 }
 
@@ -109,7 +110,8 @@ bool BrowserFrameWin::AlwaysUseNativeFrame() const {
   // We don't theme popup or app windows, so regardless of whether or not a
   // theme is active for normal browser windows, we don't want to use the custom
   // frame for popups/apps.
-  if (!browser_view_->IsBrowserTypeNormal() && ui::ShouldUseVistaFrame())
+  if (!browser_view_->IsBrowserTypeNormal() &&
+      views::WidgetWin::IsAeroGlassEnabled())
     return true;
 
   // Otherwise, we use the native frame when we're told we should by the theme
@@ -122,7 +124,7 @@ views::View* BrowserFrameWin::GetFrameView() const {
 }
 
 void BrowserFrameWin::TabStripDisplayModeChanged() {
-  if (GetRootView()->GetChildViewCount() > 0) {
+  if (GetRootView()->has_children()) {
     // Make sure the child of the root view gets Layout again.
     GetRootView()->GetChildViewAt(0)->InvalidateLayout();
   }
@@ -137,7 +139,7 @@ void BrowserFrameWin::TabStripDisplayModeChanged() {
 gfx::Insets BrowserFrameWin::GetClientAreaInsets() const {
   // Use the default client insets for an opaque frame or a glass popup/app
   // frame.
-  if (!GetNonClientView()->UseNativeFrame() ||
+  if (!non_client_view()->UseNativeFrame() ||
       !browser_view_->IsBrowserTypeNormal()) {
     return WindowWin::GetClientAreaInsets();
   }
@@ -166,7 +168,7 @@ void BrowserFrameWin::OnEnterSizeMove() {
 }
 
 void BrowserFrameWin::OnExitSizeMove() {
-  WidgetWin::OnExitSizeMove();
+  views::WidgetWin::OnExitSizeMove();
 }
 
 void BrowserFrameWin::OnInitMenuPopup(HMENU menu, UINT position,
@@ -174,8 +176,9 @@ void BrowserFrameWin::OnInitMenuPopup(HMENU menu, UINT position,
   browser_view_->PrepareToRunSystemMenu(menu);
 }
 
-LRESULT BrowserFrameWin::OnMouseActivate(HWND window, UINT hittest_code,
-                                         UINT message) {
+LRESULT BrowserFrameWin::OnMouseActivate(UINT message,
+                                         WPARAM w_param,
+                                         LPARAM l_param) {
   return browser_view_->ActivateAppModalDialog() ? MA_NOACTIVATEANDEAT
                                                  : MA_ACTIVATE;
 }
@@ -198,7 +201,7 @@ LRESULT BrowserFrameWin::OnNCActivate(BOOL active) {
 
 LRESULT BrowserFrameWin::OnNCHitTest(const CPoint& pt) {
   // Only do DWM hit-testing when we are using the native frame.
-  if (GetNonClientView()->UseNativeFrame()) {
+  if (non_client_view()->UseNativeFrame()) {
     LRESULT result;
     if (DwmDefWindowProc(GetNativeView(), WM_NCHITTEST, 0,
                          MAKELPARAM(pt.x, pt.y), &result)) {
@@ -222,16 +225,12 @@ void BrowserFrameWin::OnWindowPosChanged(WINDOWPOS* window_pos) {
   // SWP_SHOWWINDOW, however callers typically are careful about not specifying
   // this flag unless necessary to avoid flicker.
   if (window_pos->flags & SWP_SHOWWINDOW) {
-    GetNonClientView()->Layout();
-    GetNonClientView()->SchedulePaint();
+    non_client_view()->Layout();
+    non_client_view()->SchedulePaint();
   }
 }
 
 ThemeProvider* BrowserFrameWin::GetThemeProvider() const {
-  return profile_->GetThemeProvider();
-}
-
-ThemeProvider* BrowserFrameWin::GetDefaultThemeProvider() const {
   return profile_->GetThemeProvider();
 }
 
@@ -285,7 +284,7 @@ views::RootView* BrowserFrameWin::CreateRootView() {
 
 void BrowserFrameWin::UpdateDWMFrame() {
   // Nothing to do yet, or we're not showing a DWM frame.
-  if (!GetClientView() || !AlwaysUseNativeFrame())
+  if (!client_view() || !AlwaysUseNativeFrame())
     return;
 
   MARGINS margins = { 0 };

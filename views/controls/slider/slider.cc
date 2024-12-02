@@ -57,7 +57,7 @@ void Slider::SetValue(double value) {
 
 void Slider::Layout() {
   if (native_wrapper_) {
-    native_wrapper_->GetView()->SetBounds(GetLocalBounds(true));
+    native_wrapper_->GetView()->SetBoundsRect(GetLocalBounds());
     native_wrapper_->GetView()->Layout();
   }
 }
@@ -74,20 +74,20 @@ void Slider::SetEnabled(bool enabled) {
     native_wrapper_->UpdateEnabled();
 }
 
-void Slider::Focus() {
+void Slider::OnFocus() {
   if (native_wrapper_) {
     // Forward the focus to the wrapper if it exists.
     native_wrapper_->SetFocus();
   } else {
     // If there is no wrapper, cause the RootView to be focused so that we still
     // get keyboard messages.
-    View::Focus();
+    View::OnFocus();
   }
 }
 
-void Slider::PaintFocusBorder(gfx::Canvas* canvas) {
+void Slider::OnPaintFocusBorder(gfx::Canvas* canvas) {
   if (NativeViewHost::kRenderNativeControlFocus)
-    View::PaintFocusBorder(canvas);
+    View::OnPaintFocusBorder(canvas);
 }
 
 void Slider::ViewHierarchyChanged(bool is_add, View* parent, View* child) {

@@ -12,12 +12,12 @@
 
 #include "base/logging.h"
 #include "base/scoped_ptr.h"
-#include "gfx/native_theme_win.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/keycodes/keyboard_code_conversion_win.h"
 #include "ui/base/l10n/l10n_util_win.h"
 #include "ui/base/view_prop.h"
 #include "ui/base/win/hwnd_util.h"
+#include "ui/gfx/native_theme_win.h"
 #include "views/background.h"
 #include "views/border.h"
 #include "views/controls/native/native_view_host.h"
@@ -146,7 +146,7 @@ class NativeControlContainer : public CWindowImpl<NativeControlContainer,
         if (brush)
           return reinterpret_cast<LRESULT>(brush);
       }
-      ancestor = ancestor->GetParent();
+      ancestor = ancestor->parent();
     }
 
     // COLOR_BTNFACE is the default for dialog box backgrounds.
@@ -223,7 +223,7 @@ void NativeControl::Layout() {
     ValidateNativeControl();
 
   if (hwnd_view_) {
-    gfx::Rect lb = GetLocalBounds(false);
+    gfx::Rect lb = GetLocalBounds();
 
     int x = lb.x();
     int y = lb.y();
@@ -277,7 +277,7 @@ void NativeControl::OnContextMenu(const POINT& location) {
     ShowContextMenu(gfx::Point(location), true);
 }
 
-void NativeControl::Focus() {
+void NativeControl::OnFocus() {
   if (container_) {
     DCHECK(container_->GetControl());
     ::SetFocus(container_->GetControl());
@@ -318,7 +318,7 @@ void NativeControl::SetEnabled(bool enabled) {
   }
 }
 
-void NativeControl::Paint(gfx::Canvas* canvas) {
+void NativeControl::OnPaint(gfx::Canvas* canvas) {
 }
 
 void NativeControl::VisibilityChanged(View* starting_from, bool is_visible) {

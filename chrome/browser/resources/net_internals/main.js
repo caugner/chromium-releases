@@ -75,15 +75,24 @@ function onLoaded() {
   // captured data.
   var dataView = new DataView('dataTabContent', 'exportedDataText',
                               'exportToText', 'securityStrippingCheckbox',
-                              'byteLoggingCheckbox',
-                              'passivelyCapturedCount',
-                              'activelyCapturedCount',
-                              'dataViewDeleteAll');
+                              'byteLoggingCheckbox', 'passivelyCapturedCount',
+                              'activelyCapturedCount', 'dataViewDeleteAll',
+                              'dataViewDumpDataDiv', 'dataViewLoadDataDiv',
+                              'dataViewLoadLogFile',
+                              'dataViewCapturingTextSpan',
+                              'dataViewLoggingTextSpan');
 
   // Create a view which will display the results and controls for connection
   // tests.
   var testView = new TestView('testTabContent', 'testUrlInput',
                               'connectionTestsForm', 'testSummary');
+
+  // Create a view which allows the user to query and alter the HSTS database.
+  var hstsView = new HSTSView('hstsTabContent',
+                              'hstsQueryInput', 'hstsQueryForm',
+                              'hstsQueryOutput',
+                              'hstsAddInput', 'hstsAddForm', 'hstsCheckInput',
+                              'hstsDeleteInput', 'hstsDeleteForm');
 
   var httpCacheView = new HttpCacheView('httpCacheTabContent',
                                         'httpCacheStats');
@@ -93,10 +102,15 @@ function onLoaded() {
                                     'socketPoolGroupsDiv');
 
   var spdyView = new SpdyView('spdyTabContent',
+                              'spdyEnabledSpan',
+                              'spdyUseAlternateProtocolSpan',
+                              'spdyForceAlwaysSpan',
+                              'spdyForceOverSslSpan',
+                              'spdyNextProtocolsSpan',
+                              'spdyAlternateProtocolMappingsDiv',
                               'spdySessionNoneSpan',
                               'spdySessionLinkSpan',
                               'spdySessionDiv');
-
 
   var serviceView;
   if (g_browser.isPlatformWindows()) {
@@ -108,6 +122,7 @@ function onLoaded() {
 
   // Create a view which lets you tab between the different sub-views.
   var categoryTabSwitcher = new TabSwitcherView('categoryTabHandles');
+  g_browser.setTabSwitcher(categoryTabSwitcher);
 
   // Populate the main tabs.
   categoryTabSwitcher.addTab('eventsTab', eventsView, false);
@@ -120,6 +135,7 @@ function onLoaded() {
   if (g_browser.isPlatformWindows())
     categoryTabSwitcher.addTab('serviceProvidersTab', serviceView, false);
   categoryTabSwitcher.addTab('testTab', testView, false);
+  categoryTabSwitcher.addTab('hstsTab', hstsView, false);
 
   // Build a map from the anchor name of each tab handle to its "tab ID".
   // We will consider navigations to the #hash as a switch tab request.
@@ -144,6 +160,9 @@ function onLoaded() {
   // Select the initial view based on the current URL.
   window.onhashchange();
 
+  // Inform observers a log file is not currently being displayed.
+  g_browser.setIsViewingLogFile_(false);
+
   // Tell the browser that we are ready to start receiving log events.
   g_browser.sendReady();
 }
@@ -158,6 +177,7 @@ function BrowserBridge() {
   // List of observers for various bits of browser state.
   this.logObservers_ = [];
   this.connectionTestsObservers_ = [];
+  this.hstsObservers_ = [];
 
   this.pollableDataHelpers_ = {};
   this.pollableDataHelpers_.proxySettings =
@@ -178,6 +198,13 @@ function BrowserBridge() {
   this.pollableDataHelpers_.spdySessionInfo =
       new PollableDataHelper('onSpdySessionInfoChanged',
                              this.sendGetSpdySessionInfo.bind(this));
+  this.pollableDataHelpers_.spdyStatus =
+      new PollableDataHelper('onSpdyStatusChanged',
+                             this.sendGetSpdyStatus.bind(this));
+  this.pollableDataHelpers_.spdyAlternateProtocolMappings =
+      new PollableDataHelper('onSpdyAlternateProtocolMappingsChanged',
+                             this.sendGetSpdyAlternateProtocolMappings.bind(
+                                 this));
   if (this.isPlatformWindows()) {
     this.pollableDataHelpers_.serviceProviders =
         new PollableDataHelper('onServiceProvidersChanged',
@@ -191,6 +218,11 @@ function BrowserBridge() {
   // Next unique id to be assigned to a log entry without a source.
   // Needed to simplify deletion, identify associated GUI elements, etc.
   this.nextSourcelessEventId_ = -1;
+
+  // True when viewing a log file rather than actively logged events.
+  // When viewing a log file, all tabs are hidden except the event view,
+  // and all received events are ignored.
+  this.isViewingLogFile_ = false;
 }
 
 /*
@@ -278,6 +310,18 @@ BrowserBridge.prototype.sendStartConnectionTests = function(url) {
   chrome.send('startConnectionTests', [url]);
 };
 
+BrowserBridge.prototype.sendHSTSQuery = function(domain) {
+  chrome.send('hstsQuery', [domain]);
+};
+
+BrowserBridge.prototype.sendHSTSAdd = function(domain, include_subdomains) {
+  chrome.send('hstsAdd', [domain, include_subdomains]);
+};
+
+BrowserBridge.prototype.sendHSTSDelete = function(domain) {
+  chrome.send('hstsDelete', [domain]);
+};
+
 BrowserBridge.prototype.sendGetHttpCacheInfo = function() {
   chrome.send('getHttpCacheInfo');
 };
@@ -288,6 +332,14 @@ BrowserBridge.prototype.sendGetSocketPoolInfo = function() {
 
 BrowserBridge.prototype.sendGetSpdySessionInfo = function() {
   chrome.send('getSpdySessionInfo');
+};
+
+BrowserBridge.prototype.sendGetSpdyStatus = function() {
+  chrome.send('getSpdyStatus');
+};
+
+BrowserBridge.prototype.sendGetSpdyAlternateProtocolMappings = function() {
+  chrome.send('getSpdyAlternateProtocolMappings');
 };
 
 BrowserBridge.prototype.sendGetServiceProviders = function() {
@@ -302,23 +354,19 @@ BrowserBridge.prototype.setLogLevel = function(logLevel) {
   chrome.send('setLogLevel', ['' + logLevel]);
 }
 
+BrowserBridge.prototype.loadLogFile = function() {
+  chrome.send('loadLogFile');
+}
+
 //------------------------------------------------------------------------------
 // Messages received from the browser
 //------------------------------------------------------------------------------
 
 BrowserBridge.prototype.receivedLogEntries = function(logEntries) {
-  for (var e = 0; e < logEntries.length; ++e) {
-    var logEntry = logEntries[e];
-
-    // Assign unique ID, if needed.
-    if (logEntry.source.id == 0) {
-      logEntry.source.id = this.nextSourcelessEventId_;
-      --this.nextSourcelessEventId_;
-    }
-    this.capturedEvents_.push(logEntry);
-    for (var i = 0; i < this.logObservers_.length; ++i)
-      this.logObservers_[i].onLogEntryAdded(logEntry);
-  }
+  // Does nothing if viewing a log file.
+  if (this.isViewingLogFile_)
+    return;
+  this.addLogEntries(logEntries);
 };
 
 BrowserBridge.prototype.receivedLogEventTypeConstants = function(constantsMap) {
@@ -383,6 +431,16 @@ BrowserBridge.prototype.receivedSpdySessionInfo = function(spdySessionInfo) {
   this.pollableDataHelpers_.spdySessionInfo.update(spdySessionInfo);
 };
 
+BrowserBridge.prototype.receivedSpdyStatus = function(spdyStatus) {
+  this.pollableDataHelpers_.spdyStatus.update(spdyStatus);
+};
+
+BrowserBridge.prototype.receivedSpdyAlternateProtocolMappings =
+    function(spdyAlternateProtocolMappings) {
+  this.pollableDataHelpers_.spdyAlternateProtocolMappings.update(
+      spdyAlternateProtocolMappings);
+};
+
 BrowserBridge.prototype.receivedServiceProviders = function(serviceProviders) {
   this.pollableDataHelpers_.serviceProviders.update(serviceProviders);
 };
@@ -435,11 +493,98 @@ BrowserBridge.prototype.receivedCompletedConnectionTestSuite = function() {
     this.connectionTestsObservers_[i].onCompletedConnectionTestSuite();
 };
 
+BrowserBridge.prototype.receivedHSTSResult = function(info) {
+  for (var i = 0; i < this.hstsObservers_.length; ++i)
+    this.hstsObservers_[i].onHSTSQueryResult(info);
+};
+
 BrowserBridge.prototype.receivedHttpCacheInfo = function(info) {
   this.pollableDataHelpers_.httpCacheInfo.update(info);
 };
 
+BrowserBridge.prototype.loadedLogFile = function(logFileContents) {
+  var match;
+  // Replace carriage returns with linebreaks and then split around linebreaks.
+  var lines = logFileContents.replace(/\r/g, '\n').split('\n');
+  var entries = [];
+  var numInvalidLines = 0;
+
+  for (var i = 0; i < lines.length; ++i) {
+    if (lines[i].trim().length == 0)
+      continue;
+    // Parse all valid lines, skipping any others.
+    try {
+      var entry = JSON.parse(lines[i]);
+      if (entry &&
+          typeof(entry) == 'object' &&
+          entry.phase != undefined &&
+          entry.source != undefined &&
+          entry.time != undefined &&
+          entry.type != undefined) {
+        entries.push(entry);
+        continue;
+      }
+    } catch (err) {
+    }
+    ++numInvalidLines;
+    console.log('Unable to parse log line: ' + lines[i]);
+  }
+
+  if (entries.length == 0) {
+    window.alert('Loading log file failed.');
+    return;
+  }
+
+  this.deleteAllEvents();
+
+  this.setIsViewingLogFile_(true);
+
+  var validEntries = [];
+  for (var i = 0; i < entries.length; ++i) {
+    entries[i].wasPassivelyCaptured = true;
+    if (LogEventType[entries[i].type] != undefined &&
+        LogSourceType[entries[i].source.type] != undefined &&
+        LogEventPhase[entries[i].phase] != undefined) {
+      entries[i].type = LogEventType[entries[i].type];
+      entries[i].source.type = LogSourceType[entries[i].source.type];
+      entries[i].phase = LogEventPhase[entries[i].phase];
+      validEntries.push(entries[i]);
+    } else {
+      // TODO(mmenke):  Do something reasonable when the event type isn't
+      //                found, which could happen when event types are
+      //                removed or added between versions.  Could also happen
+      //                with source types, but less likely.
+      console.log(
+        'Unrecognized values in log entry: ' + JSON.stringify(entry));
+    }
+  }
+
+  this.numPassivelyCapturedEvents_ = validEntries.length;
+  this.addLogEntries(validEntries);
+
+  var numInvalidEntries = entries.length - validEntries.length;
+  if (numInvalidEntries > 0 || numInvalidLines > 0) {
+    window.alert(
+      numInvalidLines.toString() +
+      ' could not be parsed as JSON strings, and ' +
+      numInvalidEntries.toString() +
+      ' entries don\'t have valid data.\n\n' +
+      'Unparseable lines may indicate log file corruption.\n' +
+      'Entries with invalid data may be caused by version differences.\n\n' +
+      'See console for more information.');
+  }
+}
+
 //------------------------------------------------------------------------------
+
+/**
+ * Sets the |categoryTabSwitcher_| of BrowserBridge.  Since views depend on
+ * g_browser being initialized, have to have a BrowserBridge prior to tab
+ * construction.
+ */
+BrowserBridge.prototype.setTabSwitcher = function(categoryTabSwitcher) {
+  this.categoryTabSwitcher_ = categoryTabSwitcher;
+};
 
 /**
  * Adds a listener of log entries. |observer| will be called back when new log
@@ -520,6 +665,28 @@ BrowserBridge.prototype.addSpdySessionInfoObserver = function(observer) {
 };
 
 /**
+ * Adds a listener of the SPDY status. |observer| will be called back
+ * when data is received, through:
+ *
+ *   observer.onSpdyStatusChanged(spdyStatus)
+ */
+BrowserBridge.prototype.addSpdyStatusObserver = function(observer) {
+  this.pollableDataHelpers_.spdyStatus.addObserver(observer);
+};
+
+/**
+ * Adds a listener of the AlternateProtocolMappings. |observer| will be called
+ * back when data is received, through:
+ *
+ *   observer.onSpdyAlternateProtocolMappingsChanged(
+ *       spdyAlternateProtocolMappings)
+ */
+BrowserBridge.prototype.addSpdyAlternateProtocolMappingsObserver =
+    function(observer) {
+  this.pollableDataHelpers_.spdyAlternateProtocolMappings.addObserver(observer);
+};
+
+/**
  * Adds a listener of the service providers info. |observer| will be called
  * back when data is received, through:
  *
@@ -550,6 +717,16 @@ BrowserBridge.prototype.addConnectionTestsObserver = function(observer) {
  */
 BrowserBridge.prototype.addHttpCacheInfoObserver = function(observer) {
   this.pollableDataHelpers_.httpCacheInfo.addObserver(observer);
+};
+
+/**
+ * Adds a listener for the results of HSTS (HTTPS Strict Transport Security)
+ * queries. The observer will be called back with:
+ *
+ *   observer.onHSTSQueryResult(result);
+ */
+BrowserBridge.prototype.addHSTSObserver = function(observer) {
+  this.hstsObservers_.push(observer);
 };
 
 /**
@@ -592,6 +769,25 @@ BrowserBridge.prototype.getNumPassivelyCapturedEvents = function() {
 };
 
 /**
+ * Sends each entry to all log observers, and updates |capturedEvents_|.
+ * Also assigns unique ids to log entries without a source.
+ */
+BrowserBridge.prototype.addLogEntries = function(logEntries) {
+  for (var e = 0; e < logEntries.length; ++e) {
+    var logEntry = logEntries[e];
+
+    // Assign unique ID, if needed.
+    if (logEntry.source.id == 0) {
+      logEntry.source.id = this.nextSourcelessEventId_;
+      --this.nextSourcelessEventId_;
+    }
+    this.capturedEvents_.push(logEntry);
+    for (var i = 0; i < this.logObservers_.length; ++i)
+      this.logObservers_[i].onLogEntryAdded(logEntry);
+  }
+};
+
+/**
  * Deletes captured events with source IDs in |sourceIds|.
  */
 BrowserBridge.prototype.deleteEventsBySourceId = function(sourceIds) {
@@ -623,6 +819,39 @@ BrowserBridge.prototype.deleteAllEvents = function() {
   this.numPassivelyCapturedEvents_ = 0;
   for (var i = 0; i < this.logObservers_.length; ++i)
     this.logObservers_[i].onAllLogEntriesDeleted();
+};
+
+/**
+ * Informs log observers whether or not future events will be from a log file.
+ * Hides all tabs except the events and data tabs when viewing a log file, shows
+ * them all otherwise.
+ */
+BrowserBridge.prototype.setIsViewingLogFile_ = function(isViewingLogFile) {
+  this.isViewingLogFile_ = isViewingLogFile;
+  var tabIds = this.categoryTabSwitcher_.getAllTabIds();
+
+  for (var i = 0; i < this.logObservers_.length; ++i)
+    this.logObservers_[i].onSetIsViewingLogFile(isViewingLogFile);
+
+  // Shows/hides tabs not used when viewing a log file.
+  for (var i = 0; i < tabIds.length; ++i) {
+    if (tabIds[i] == 'eventsTab' || tabIds[i] == 'dataTab')
+      continue;
+    this.categoryTabSwitcher_.showTabHandleNode(tabIds[i], !isViewingLogFile);
+  }
+
+  if (isViewingLogFile) {
+    var activeTab = this.categoryTabSwitcher_.findActiveTab();
+    if (activeTab.id != 'eventsTab')
+      this.categoryTabSwitcher_.switchToTab('dataTab', null);
+  }
+};
+
+/**
+ * Returns true if a log file is currently being viewed.
+ */
+BrowserBridge.prototype.isViewingLogFile = function() {
+  return this.isViewingLogFile_;
 };
 
 /**

@@ -3,9 +3,9 @@
 // found in the LICENSE file.
 
 #include "chrome/browser/chromeos/views/dropdown_button.h"
-#include "gfx/canvas_skia.h"
 #include "grit/theme_resources.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/canvas_skia.h"
 
 namespace {
 // Asset icon particularities makes us offset focus frame.
@@ -63,11 +63,16 @@ DropDownButton::DropDownButton(views::ButtonListener* listener,
 DropDownButton::~DropDownButton() {
 }
 
-void DropDownButton::PaintFocusBorder(gfx::Canvas* canvas) {
+void DropDownButton::OnPaintFocusBorder(gfx::Canvas* canvas) {
   if (HasFocus() && (IsFocusable() || IsAccessibilityFocusableInRootView()))
     canvas->DrawFocusRect(kFocusFrameLeftOffset, kFocusFrameTopOffset,
                           width() - kFocusFrameRightOffset,
                           height() - kFocusFrameBottomOffset);
+}
+
+void DropDownButton::SetText(const std::wstring& text) {
+  text_ = WideToUTF16Hack(text);
+  UpdateTextSize();
 }
 
 }  // namespace chromeos

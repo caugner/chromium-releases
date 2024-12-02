@@ -16,7 +16,6 @@
 #include "base/metrics/field_trial.h"
 #include "base/metrics/stats_table.h"
 #include "base/process_util.h"
-#include "base/scoped_callback_factory.h"
 #include "base/shared_memory.h"
 #include "base/string_util.h"
 #include "base/task.h"
@@ -30,7 +29,9 @@
 #include "chrome/common/db_message_filter.h"
 #include "chrome/common/dom_storage_messages.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/extension_localization_peer.h"
 #include "chrome/common/extensions/extension_set.h"
+#include "chrome/common/gpu_messages.h"
 #include "chrome/common/plugin_messages.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/render_messages_params.h"
@@ -38,13 +39,6 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/common/web_database_observer_impl.h"
 #include "chrome/plugin/npobject_util.h"
-// TODO(port)
-#if defined(OS_WIN)
-#include "chrome/plugin/plugin_channel.h"
-#else
-#include "base/scoped_handle.h"
-#include "chrome/plugin/plugin_channel_base.h"
-#endif
 #include "chrome/renderer/automation/dom_automation_v8_extension.h"
 #include "chrome/renderer/cookie_message_filter.h"
 #include "chrome/renderer/devtools_agent_filter.h"
@@ -68,14 +62,16 @@
 #include "chrome/renderer/renderer_webidbfactory_impl.h"
 #include "chrome/renderer/renderer_webkitclient_impl.h"
 #include "chrome/renderer/safe_browsing/phishing_classifier_delegate.h"
-#include "chrome/renderer/safe_browsing/scorer.h"
 #include "chrome/renderer/search_extension.h"
 #include "chrome/renderer/searchbox_extension.h"
+#include "chrome/renderer/security_filter_peer.h"
 #include "chrome/renderer/spellchecker/spellcheck.h"
 #include "chrome/renderer/user_script_slave.h"
+#include "content/common/resource_dispatcher.h"
+#include "content/common/resource_messages.h"
 #include "ipc/ipc_channel_handle.h"
-#include "ipc/ipc_message.h"
 #include "ipc/ipc_platform_file.h"
+#include "net/base/net_errors.h"
 #include "net/base/net_util.h"
 #include "third_party/sqlite/sqlite3.h"
 #include "third_party/tcmalloc/chromium/src/google/malloc_extension.h"
@@ -96,7 +92,16 @@
 #include "webkit/extensions/v8/benchmarking_extension.h"
 #include "webkit/extensions/v8/gears_extension.h"
 #include "webkit/extensions/v8/playback_extension.h"
+#include "webkit/glue/webkit_glue.h"
 #include "v8/include/v8.h"
+
+// TODO(port)
+#if defined(OS_WIN)
+#include "chrome/plugin/plugin_channel.h"
+#else
+#include "base/scoped_handle.h"
+#include "chrome/plugin/plugin_channel_base.h"
+#endif
 
 #if defined(OS_WIN)
 #include <windows.h>
@@ -216,24 +221,38 @@ class RenderViewZoomer : public RenderViewVisitor {
   DISALLOW_COPY_AND_ASSIGN(RenderViewZoomer);
 };
 
-class RenderViewPhishingScorerSetter : public RenderViewVisitor {
+class RenderResourceObserver : public ResourceDispatcher::Observer {
  public:
-  explicit RenderViewPhishingScorerSetter(const safe_browsing::Scorer* scorer)
-      : scorer_(scorer) {
+  RenderResourceObserver() {
   }
 
-  virtual bool Visit(RenderView* render_view) {
-    safe_browsing::PhishingClassifierDelegate* delegate =
-        render_view->phishing_classifier_delegate();
-    if (delegate)
-      delegate->SetPhishingScorer(scorer_);
-    return true;
+  virtual webkit_glue::ResourceLoaderBridge::Peer* OnRequestComplete(
+      webkit_glue::ResourceLoaderBridge::Peer* current_peer,
+      ResourceType::Type resource_type,
+      const net::URLRequestStatus& status) {
+    // Update the browser about our cache.
+    RenderThread::current()->InformHostOfCacheStatsLater();
+
+    if (status.status() != net::URLRequestStatus::CANCELED ||
+        status.os_error() == net::ERR_ABORTED) {
+      return NULL;
+    }
+
+    // Resource canceled with a specific error are filtered.
+    return SecurityFilterPeer::CreateSecurityFilterPeerForDeniedRequest(
+        resource_type, current_peer, status.os_error());
+  }
+
+  virtual webkit_glue::ResourceLoaderBridge::Peer* OnReceivedResponse(
+      webkit_glue::ResourceLoaderBridge::Peer* current_peer,
+      const std::string& mime_type,
+      const GURL& url) {
+    return ExtensionLocalizationPeer::CreateExtensionLocalizationPeer(
+        current_peer, RenderThread::current(), mime_type, url);
   }
 
  private:
-  const safe_browsing::Scorer* scorer_;
-
-  DISALLOW_COPY_AND_ASSIGN(RenderViewPhishingScorerSetter);
+  DISALLOW_COPY_AND_ASSIGN(RenderResourceObserver);
 };
 
 }  // namespace
@@ -266,7 +285,6 @@ void RenderThread::Init() {
   is_extension_process_ = type_str == switches::kExtensionProcess ||
       CommandLine::ForCurrentProcess()->HasSwitch(switches::kSingleProcess);
   is_incognito_process_ = false;
-  is_speech_input_enabled_ = false;
   suspend_webkit_shared_timer_ = true;
   notify_webkit_of_modal_loop_ = true;
   plugin_refresh_allowed_ = true;
@@ -276,7 +294,8 @@ void RenderThread::Init() {
   idle_notification_delay_in_s_ = is_extension_process_ ?
       kInitialExtensionIdleHandlerDelayS : kInitialIdleHandlerDelayS;
   task_factory_.reset(new ScopedRunnableMethodFactory<RenderThread>(this));
-  callback_factory_.reset(new base::ScopedCallbackFactory<RenderThread>(this));
+
+  resource_dispatcher()->set_observer(new RenderResourceObserver());
 
   visited_link_slave_.reset(new VisitedLinkSlave());
   user_script_slave_.reset(new UserScriptSlave(&extensions_));
@@ -376,7 +395,7 @@ bool RenderThread::Send(IPC::Message* msg) {
         case ViewHostMsg_GetRawCookies::ID:
         case ViewHostMsg_CookiesEnabled::ID:
         case DOMStorageHostMsg_SetItem::ID:
-        case ViewHostMsg_SyncLoad::ID:
+        case ResourceHostMsg_SyncLoad::ID:
         case DatabaseHostMsg_Allow::ID:
           may_show_cookie_prompt = true;
           pumping_events = true;
@@ -654,10 +673,6 @@ bool RenderThread::OnControlMessageReceived(const IPC::Message& msg) {
                         OnExtensionSetHostPermissions)
     IPC_MESSAGE_HANDLER(DOMStorageMsg_Event,
                         OnDOMStorageEvent)
-#if defined(IPC_MESSAGE_LOG_ENABLED)
-    IPC_MESSAGE_HANDLER(ViewMsg_SetIPCLoggingEnabled,
-                        OnSetIPCLoggingEnabled)
-#endif
     IPC_MESSAGE_HANDLER(ViewMsg_SpellChecker_Init,
                         OnInitSpellChecker)
     IPC_MESSAGE_HANDLER(ViewMsg_SpellChecker_WordAdded,
@@ -666,16 +681,9 @@ bool RenderThread::OnControlMessageReceived(const IPC::Message& msg) {
                         OnSpellCheckEnableAutoSpellCorrect)
     IPC_MESSAGE_HANDLER(ViewMsg_GpuChannelEstablished, OnGpuChannelEstablished)
     IPC_MESSAGE_HANDLER(ViewMsg_SetPhishingModel, OnSetPhishingModel)
-    IPC_MESSAGE_HANDLER(ViewMsg_SpeechInput_SetFeatureEnabled,
-                        OnSetSpeechInputEnabled)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
-}
-
-void RenderThread::OnSetSpeechInputEnabled(bool enabled) {
-  DCHECK(!webkit_client_.get());
-  is_speech_input_enabled_ = enabled;
 }
 
 void RenderThread::OnSetNextPageID(int32 next_page_id) {
@@ -790,9 +798,9 @@ void RenderThread::SetCacheMode(bool enabled) {
   Send(new ViewHostMsg_SetCacheMode(enabled));
 }
 
-void RenderThread::ClearCache() {
+void RenderThread::ClearCache(bool preserve_ssl_host_info) {
   int rv;
-  Send(new ViewHostMsg_ClearCache(&rv));
+  Send(new ViewHostMsg_ClearCache(preserve_ssl_host_info, &rv));
 }
 
 void RenderThread::EnableSpdy(bool enable) {
@@ -827,12 +835,12 @@ void RenderThread::EstablishGpuChannel() {
     gpu_channel_ = new GpuChannelHost;
 
   // Ask the browser for the channel name.
-  Send(new ViewHostMsg_EstablishGpuChannel());
+  Send(new GpuHostMsg_EstablishGpuChannel());
 }
 
 GpuChannelHost* RenderThread::EstablishGpuChannelSync() {
   EstablishGpuChannel();
-  Send(new ViewHostMsg_SynchronizeGpu());
+  Send(new GpuHostMsg_SynchronizeGpu());
   return GetGpuChannel();
 }
 
@@ -886,6 +894,9 @@ void RenderThread::EnsureWebKitInitialized() {
   WebScriptController::enableV8SingleThreadMode();
 
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+
+  webkit_glue::EnableWebCoreLogChannels(
+      command_line.GetSwitchValueASCII(switches::kWebCoreLogChannels));
 
   // chrome: pages should not be accessible by normal content, and should
   // also be unable to script anything but themselves (to help limit the damage
@@ -954,7 +965,7 @@ void RenderThread::EnsureWebKitInitialized() {
       !command_line.HasSwitch(switches::kDisableSessionStorage));
 
   WebRuntimeFeatures::enableIndexedDatabase(
-      command_line.HasSwitch(switches::kEnableIndexedDatabase));
+      !command_line.HasSwitch(switches::kDisableIndexedDatabase));
 
   WebRuntimeFeatures::enableGeolocation(
       !command_line.HasSwitch(switches::kDisableGeolocation));
@@ -977,10 +988,14 @@ void RenderThread::EnsureWebKitInitialized() {
   WebRuntimeFeatures::enableDeviceOrientation(
       !command_line.HasSwitch(switches::kDisableDeviceOrientation));
 
-  WebRuntimeFeatures::enableSpeechInput(is_speech_input_enabled_);
+  WebRuntimeFeatures::enableSpeechInput(
+      !command_line.HasSwitch(switches::kDisableSpeechInput));
 
   WebRuntimeFeatures::enableFileSystem(
       !command_line.HasSwitch(switches::kDisableFileSystem));
+
+  WebRuntimeFeatures::enableJavaScriptI18NAPI(
+      command_line.HasSwitch(switches::kEnableJavaScriptI18NAPI));
 }
 
 void RenderThread::IdleHandler() {
@@ -1100,12 +1115,14 @@ void RenderThread::OnSetIsIncognitoProcess(bool is_incognito_process) {
 }
 
 void RenderThread::OnGpuChannelEstablished(
-    const IPC::ChannelHandle& channel_handle, const GPUInfo& gpu_info) {
+    const IPC::ChannelHandle& channel_handle,
+    base::ProcessHandle renderer_process_for_gpu,
+    const GPUInfo& gpu_info) {
   gpu_channel_->set_gpu_info(gpu_info);
 
-  if (channel_handle.name.size() != 0) {
+  if (!channel_handle.name.empty()) {
     // Connect to the GPU process if a channel name was received.
-    gpu_channel_->Connect(channel_handle);
+    gpu_channel_->Connect(channel_handle, renderer_process_for_gpu);
   } else {
     // Otherwise cancel the connection.
     gpu_channel_ = NULL;
@@ -1113,20 +1130,7 @@ void RenderThread::OnGpuChannelEstablished(
 }
 
 void RenderThread::OnSetPhishingModel(IPC::PlatformFileForTransit model_file) {
-  safe_browsing::Scorer::CreateFromFile(
-      IPC::PlatformFileForTransitToPlatformFile(model_file),
-      GetFileThreadMessageLoopProxy(),
-      callback_factory_->NewCallback(&RenderThread::PhishingScorerCreated));
-}
-
-void RenderThread::PhishingScorerCreated(safe_browsing::Scorer* scorer) {
-  if (!scorer) {
-    DLOG(ERROR) << "Unable to create a PhishingScorer - corrupt model?";
-    return;
-  }
-  phishing_scorer_.reset(scorer);
-  RenderViewPhishingScorerSetter setter(phishing_scorer_.get());
-  RenderView::ForEach(&setter);
+  safe_browsing::PhishingClassifierDelegate::SetPhishingModel(model_file);
 }
 
 scoped_refptr<base::MessageLoopProxy>

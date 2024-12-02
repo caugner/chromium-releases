@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -9,7 +9,7 @@
 #include "base/compiler_specific.h"
 #include "base/stl_util-inl.h"
 #include "base/synchronization/condition_variable.h"
-#include "media/base/clock_impl.h"
+#include "media/base/clock.h"
 #include "media/base/filter_collection.h"
 #include "media/base/media_format.h"
 #include "media/base/pipeline_impl.h"
@@ -27,7 +27,7 @@ class PipelineImpl::PipelineInitState {
 
 PipelineImpl::PipelineImpl(MessageLoop* message_loop)
     : message_loop_(message_loop),
-      clock_(new ClockImpl(&base::Time::Now)),
+      clock_(new Clock(&base::Time::Now)),
       waiting_for_clock_update_(false),
       state_(kCreated),
       current_bytes_(0) {
@@ -272,6 +272,15 @@ bool PipelineImpl::IsLoaded() const {
 PipelineError PipelineImpl::GetError() const {
   base::AutoLock auto_lock(lock_);
   return error_;
+}
+
+PipelineStatistics PipelineImpl::GetStatistics() const {
+  base::AutoLock auto_lock(lock_);
+  return statistics_;
+}
+
+void PipelineImpl::SetClockForTesting(Clock* clock) {
+  clock_.reset(clock);
 }
 
 void PipelineImpl::SetCurrentReadPosition(int64 offset) {
@@ -528,6 +537,15 @@ void PipelineImpl::OnFilterStateTransition() {
 void PipelineImpl::OnTeardownStateTransition() {
   message_loop_->PostTask(FROM_HERE,
       NewRunnableMethod(this, &PipelineImpl::TeardownStateTransitionTask));
+}
+
+// Called from any thread.
+void PipelineImpl::OnUpdateStatistics(const PipelineStatistics& stats) {
+  base::AutoLock auto_lock(lock_);
+  statistics_.audio_bytes_decoded += stats.audio_bytes_decoded;
+  statistics_.video_bytes_decoded += stats.video_bytes_decoded;
+  statistics_.video_frames_decoded += stats.video_frames_decoded;
+  statistics_.video_frames_dropped += stats.video_frames_dropped;
 }
 
 void PipelineImpl::StartTask(FilterCollection* filter_collection,
@@ -1074,7 +1092,8 @@ bool PipelineImpl::InitializeAudioDecoder(
   pipeline_init_state_->audio_decoder_ = audio_decoder;
   audio_decoder->Initialize(
       stream,
-      NewCallback(this, &PipelineImpl::OnFilterInitialize));
+      NewCallback(this, &PipelineImpl::OnFilterInitialize),
+      NewCallback(this, &PipelineImpl::OnUpdateStatistics));
   return true;
 }
 
@@ -1103,7 +1122,8 @@ bool PipelineImpl::InitializeVideoDecoder(
   pipeline_init_state_->video_decoder_ = video_decoder;
   video_decoder->Initialize(
       stream,
-      NewCallback(this, &PipelineImpl::OnFilterInitialize));
+      NewCallback(this, &PipelineImpl::OnFilterInitialize),
+      NewCallback(this, &PipelineImpl::OnUpdateStatistics));
   return true;
 }
 
@@ -1147,7 +1167,9 @@ bool PipelineImpl::InitializeVideoRenderer(
     return false;
 
   video_renderer_->Initialize(
-      decoder, NewCallback(this, &PipelineImpl::OnFilterInitialize));
+      decoder,
+      NewCallback(this, &PipelineImpl::OnFilterInitialize),
+      NewCallback(this, &PipelineImpl::OnUpdateStatistics));
   return true;
 }
 

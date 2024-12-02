@@ -9,9 +9,9 @@
 
 #include "base/logging.h"
 #include "base/utf_string_conversions.h"
-#include "gfx/gtk_util.h"
-#include "gfx/insets.h"
-#include "gfx/skia_utils_gtk.h"
+#include "ui/gfx/gtk_util.h"
+#include "ui/gfx/insets.h"
+#include "ui/gfx/skia_utils_gtk.h"
 #include "views/controls/textfield/gtk_views_entry.h"
 #include "views/controls/textfield/gtk_views_textview.h"
 #include "views/controls/textfield/native_textfield_views.h"
@@ -327,7 +327,7 @@ void NativeTextfieldGtk::UpdateVerticalMargins() {
 }
 
 bool NativeTextfieldGtk::SetFocus() {
-  Focus();
+  OnFocus();
   return true;
 }
 
@@ -344,7 +344,11 @@ bool NativeTextfieldGtk::IsIMEComposing() const {
 }
 
 void NativeTextfieldGtk::GetSelectedRange(TextRange* range) const {
-  NOTREACHED();
+  gint start_pos;
+  gint end_pos;
+  gtk_editable_get_selection_bounds(
+      GTK_EDITABLE(native_view()), &start_pos, &end_pos);
+  range->SetRange(start_pos, end_pos);
 }
 
 void NativeTextfieldGtk::SelectRange(const TextRange& range) {
@@ -364,13 +368,10 @@ bool NativeTextfieldGtk::HandleKeyReleased(const views::KeyEvent& e) {
   return false;
 }
 
-void NativeTextfieldGtk::HandleWillGainFocus() {
+void NativeTextfieldGtk::HandleFocus() {
 }
 
-void NativeTextfieldGtk::HandleDidGainFocus() {
-}
-
-void NativeTextfieldGtk::HandleWillLoseFocus() {
+void NativeTextfieldGtk::HandleBlur() {
 }
 
 // static
@@ -384,7 +385,7 @@ gboolean NativeTextfieldGtk::OnKeyPressEventHandler(
 gboolean NativeTextfieldGtk::OnKeyPressEvent(GdkEventKey* event) {
   Textfield::Controller* controller = textfield_->GetController();
   if (controller) {
-    KeyEvent key_event(event);
+    KeyEvent key_event(reinterpret_cast<GdkEvent*>(event));
     return controller->HandleKeyEvent(textfield_, key_event);
   }
   return false;
@@ -407,7 +408,7 @@ gboolean NativeTextfieldGtk::OnActivate() {
 
   Textfield::Controller* controller = textfield_->GetController();
   if (controller) {
-    KeyEvent views_key_event(key_event);
+    KeyEvent views_key_event(event);
     handled = controller->HandleKeyEvent(textfield_, views_key_event);
   }
 
@@ -430,6 +431,35 @@ gboolean NativeTextfieldGtk::OnChanged() {
   Textfield::Controller* controller = textfield_->GetController();
   if (controller)
     controller->ContentsChanged(textfield_, GetText());
+  textfield_->NotifyAccessibilityEvent(AccessibilityTypes::EVENT_TEXT_CHANGED);
+  return false;
+}
+
+// static
+gboolean NativeTextfieldGtk::OnMoveCursorHandler(
+    GtkWidget* widget,
+    GtkMovementStep step,
+    gint count,
+    gboolean extend_selection,
+    NativeTextfieldGtk* textfield) {
+  return textfield->OnMoveCursor();
+}
+
+gboolean NativeTextfieldGtk::OnMoveCursor() {
+  textfield_->NotifyAccessibilityEvent(AccessibilityTypes::EVENT_TEXT_CHANGED);
+  return false;
+}
+
+// static
+gboolean NativeTextfieldGtk::OnMouseUpHandler(
+    GtkWidget* widget,
+    GdkEvent* event,
+    NativeTextfieldGtk* textfield) {
+  return textfield->OnMouseUp();
+}
+
+gboolean NativeTextfieldGtk::OnMouseUp() {
+  textfield_->NotifyAccessibilityEvent(AccessibilityTypes::EVENT_TEXT_CHANGED);
   return false;
 }
 
@@ -465,6 +495,10 @@ void NativeTextfieldGtk::NativeControlCreated(GtkWidget* widget) {
     g_signal_connect(widget, "changed",
                      G_CALLBACK(OnChangedHandler), this);
   }
+  g_signal_connect_after(widget, "move-cursor",
+                         G_CALLBACK(OnMoveCursorHandler), this);
+  g_signal_connect_after(widget, "button-release-event",
+                         G_CALLBACK(OnMouseUpHandler), this);
   g_signal_connect_after(widget, "key-press-event",
                          G_CALLBACK(OnKeyPressEventHandler), this);
   // In order to properly trigger Accelerators bound to VKEY_RETURN, we need to

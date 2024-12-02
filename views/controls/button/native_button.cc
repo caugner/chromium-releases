@@ -9,7 +9,7 @@
 #include "views/controls/native/native_view_host.h"
 
 #if defined(OS_WIN)
-#include "gfx/platform_font_win.h"
+#include "ui/gfx/platform_font_win.h"
 #elif defined(OS_LINUX)
 #include <gdk/gdkkeysyms.h>
 #include "views/screen.h"
@@ -116,9 +116,9 @@ void NativeButton::ButtonPressed() {
   gfx::Point cursor_point = Screen::GetCursorScreenPoint();
 #endif
 
-  views::MouseEvent event(views::Event::ET_MOUSE_RELEASED,
+  views::MouseEvent event(ui::ET_MOUSE_RELEASED,
                           cursor_point.x(), cursor_point.y(),
-                          views::Event::EF_LEFT_BUTTON_DOWN);
+                          ui::EF_LEFT_BUTTON_DOWN);
   NotifyClick(event);
 }
 
@@ -192,27 +192,27 @@ bool NativeButton::AcceleratorPressed(const Accelerator& accelerator) {
 #elif defined(OS_LINUX)
     gfx::Point cursor_point = Screen::GetCursorScreenPoint();
 #endif
-    views::MouseEvent event(views::Event::ET_MOUSE_RELEASED,
+    views::MouseEvent event(ui::ET_MOUSE_RELEASED,
                             cursor_point.x(), cursor_point.y(),
-                            views::Event::EF_LEFT_BUTTON_DOWN);
+                            ui::EF_LEFT_BUTTON_DOWN);
     NotifyClick(event);
     return true;
   }
   return false;
 }
 
-void NativeButton::Focus() {
+void NativeButton::OnFocus() {
   // Forward the focus to the wrapper.
   if (native_wrapper_)
     native_wrapper_->SetFocus();
   else
-    Button::Focus();  // Will focus the RootView window (so we still get
-                      // keyboard messages).
+    Button::OnFocus();  // Will focus the RootView window (so we still get
+                        // keyboard messages).
 }
 
-void NativeButton::PaintFocusBorder(gfx::Canvas* canvas) {
+void NativeButton::OnPaintFocusBorder(gfx::Canvas* canvas) {
   if (NativeViewHost::kRenderNativeControlFocus)
-    View::PaintFocusBorder(canvas);
+    View::OnPaintFocusBorder(canvas);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

@@ -52,6 +52,7 @@
 //           <url>,<weight> where weight is an integer indicating the number of
 //           unique views for the URL.
 
+#include <algorithm>
 #include <fstream>
 #include <vector>
 
@@ -238,7 +239,7 @@ void CalculateBloomFilterFalsePositives(
 
   // Read in data file line at a time.
   FilePath url_file = data_dir.Append(FILE_PATH_LITERAL("urls"));
-  std::ifstream url_stream(WideToASCII(url_file.ToWStringHack()).c_str());
+  std::ifstream url_stream(url_file.value().c_str());
 
   // Keep track of stats
   int hits = 0;
@@ -380,4 +381,3 @@ TEST(SafeBrowsingBloomFilter, HashTime) {
             << ", per-check (us): "        << time_per_check
             << std::endl;
 }
-

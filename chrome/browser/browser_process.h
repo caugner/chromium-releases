@@ -23,9 +23,11 @@ namespace safe_browsing {
 class ClientSideDetectionService;
 }
 
+class ChromeNetLog;
 class DevToolsManager;
 class DownloadRequestLimiter;
 class DownloadStatusUpdater;
+class ExtensionEventRouterForwarder;
 class GoogleURLTracker;
 class IconManager;
 class IntranetRedirectDetector;
@@ -38,6 +40,7 @@ class ResourceDispatcherHost;
 class SidebarManager;
 class TabCloseableStateWatcher;
 class ThumbnailGenerator;
+class WatchDogThread;
 
 namespace base {
 class Thread;
@@ -50,7 +53,7 @@ class PrintPreviewTabController;
 }
 
 namespace policy {
-class ConfigurationPolicyProviderKeeper;
+class BrowserPolicyConnector;
 }
 
 namespace ui {
@@ -79,6 +82,8 @@ class BrowserProcess {
   virtual DevToolsManager* devtools_manager() = 0;
   virtual SidebarManager* sidebar_manager() = 0;
   virtual ui::Clipboard* clipboard() = 0;
+  virtual ExtensionEventRouterForwarder*
+      extension_event_router_forwarder() = 0;
 
   // Returns the manager for desktop notifications.
   virtual NotificationUIManager* notification_ui_manager() = 0;
@@ -114,8 +119,10 @@ class BrowserProcess {
   virtual base::Thread* background_x11_thread() = 0;
 #endif
 
-  virtual policy::ConfigurationPolicyProviderKeeper*
-      configuration_policy_provider_keeper() = 0;
+  // Returns the thread that is used for health check of all browser threads.
+  virtual WatchDogThread* watchdog_thread() = 0;
+
+  virtual policy::BrowserPolicyConnector* browser_policy_connector() = 0;
 
   virtual IconManager* icon_manager() = 0;
 
@@ -123,7 +130,12 @@ class BrowserProcess {
 
   virtual AutomationProviderList* InitAutomationProviderList() = 0;
 
-  virtual void InitDebuggerWrapper(int port, bool useHttp) = 0;
+  virtual void InitDevToolsHttpProtocolHandler(
+      const std::string& ip,
+      int port,
+      const std::string& frontend_url) = 0;
+
+  virtual void InitDevToolsLegacyProtocolHandler(int port) = 0;
 
   virtual unsigned int AddRefModule() = 0;
   virtual unsigned int ReleaseModule() = 0;
@@ -160,6 +172,10 @@ class BrowserProcess {
   virtual safe_browsing::ClientSideDetectionService*
       safe_browsing_detection_service() = 0;
 
+  // Returns the state of the disable plugin finder policy. Callable only on
+  // the IO thread.
+  virtual bool plugin_finder_disabled() const = 0;
+
   // Trigger an asynchronous check to see if we have the inspector's files on
   // disk.
   virtual void CheckForInspectorFiles() = 0;
@@ -179,6 +195,8 @@ class BrowserProcess {
   // call this function before we have a definite answer from the disk. In that
   // case, we default to returning true.
   virtual bool have_inspector_files() const = 0;
+
+  virtual ChromeNetLog* net_log() = 0;
 
 #if defined(IPC_MESSAGE_LOG_ENABLED)
   // Enable or disable IPC logging for the browser, all processes

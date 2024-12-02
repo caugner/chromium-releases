@@ -13,7 +13,6 @@
       'command_buffer/client/gles2_c_lib_autogen.h',
       'command_buffer/client/gles2_lib.h',
       'command_buffer/client/gles2_lib.cc',
-	  
     ],
     # These are defined here because we need to build this library twice. Once
     # with without support for client side arrays and once with for pepper and
@@ -92,7 +91,7 @@
       'target_name': 'gles2_implementation_client_side_arrays',
       'type': 'static_library',
       'defines': [
-        'GL_SUPPORT_CLIENT_SIDE_ARRAYS=1',
+        'GLES2_SUPPORT_CLIENT_SIDE_ARRAYS=1'
       ],
       'dependencies': [
         'gles2_cmd_helper',
@@ -166,7 +165,7 @@
         'command_buffer_common',
         '../app/app.gyp:app_base',
         '../base/base.gyp:base',
-        '../gfx/gfx.gyp:gfx',
+        '../ui/gfx/gfx.gyp:gfx',
         '../third_party/angle/src/build_angle.gyp:translator_glsl',
       ],
       'sources': [
@@ -219,26 +218,6 @@
             '../build/linux/system.gyp:gtk',
           ],
         }],
-      ],
-    },
-    {
-      'target_name': 'gpu_plugin',
-      'type': 'static_library',
-      'dependencies': [
-        '../base/base.gyp:base',
-        'command_buffer_service',
-      ],
-      'include_dirs': [
-        '..',
-      ],
-      'all_dependent_settings': {
-        'include_dirs': [
-          '..',
-        ],
-      },
-      'sources': [
-        'gpu_plugin/gpu_plugin.cc',
-        'gpu_plugin/gpu_plugin.h',
       ],
     },
     {
@@ -321,6 +300,8 @@
       'sources': [
         'command_buffer/common/gl_mock.h',
         'command_buffer/common/gl_mock.cc',
+        'command_buffer/service/gles2_cmd_decoder_mock.cc',
+        'command_buffer/service/gles2_cmd_decoder_mock.cc',
       ],
     },
     {
@@ -328,7 +309,7 @@
       'type': 'static_library',
       'dependencies': [
         'command_buffer_client',
-        'gles2_c_lib_nocheck',
+        'gles2_c_lib',
       ],
       'sources': [
         'command_buffer/client/gles2_demo_c.h',
@@ -359,6 +340,21 @@
         'pgl/pgl_proc_address.cc',
         'pgl/pgl.cc',
         'pgl/pgl.h',
+      ],
+    },
+    {
+      'target_name': 'gpu_ipc',
+      'type': 'static_library',
+      'dependencies': [
+        'command_buffer_client',
+        'gles2_c_lib',
+      ],
+      'include_dirs': [
+        '..',
+      ],
+      'sources': [
+        'ipc/gpu_command_buffer_traits.cc',
+        'ipc/gpu_command_buffer_traits.h',
       ],
     },
   ],

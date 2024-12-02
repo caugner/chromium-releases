@@ -5,6 +5,7 @@
 #include "chrome/browser/profiles/profile_impl.h"
 
 #include "base/command_line.h"
+#include "base/compiler_specific.h"
 #include "base/environment.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
@@ -13,7 +14,6 @@
 #include "base/scoped_ptr.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
-#include "chrome/browser/appcache/chrome_appcache_service.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier.h"
 #include "chrome/browser/autofill/personal_data_manager.h"
 #include "chrome/browser/background_contents_service.h"
@@ -22,11 +22,9 @@
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_signin.h"
-#include "chrome/browser/browser_thread.h"
-#include "chrome/browser/chrome_blob_storage_context.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
+#include "chrome/browser/custom_handlers/protocol_handler_registry.h"
 #include "chrome/browser/defaults.h"
-#include "chrome/browser/dom_ui/ntp_resource_cache.h"
 #include "chrome/browser/download/download_manager.h"
 #include "chrome/browser/extensions/default_apps.h"
 #include "chrome/browser/extensions/extension_devtools_manager.h"
@@ -37,15 +35,12 @@
 #include "chrome/browser/extensions/extension_pref_store.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_special_storage_policy.h"
 #include "chrome/browser/extensions/user_script_master.h"
 #include "chrome/browser/favicon_service.h"
-#include "chrome/browser/file_system/browser_file_system_helper.h"
 #include "chrome/browser/geolocation/geolocation_content_settings_map.h"
-#include "chrome/browser/geolocation/geolocation_permission_context.h"
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/history/top_sites.h"
-#include "chrome/browser/host_zoom_map.h"
-#include "chrome/browser/in_process_webkit/webkit_context.h"
 #include "chrome/browser/instant/instant_controller.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
 #include "chrome/browser/net/gaia/token_service.h"
@@ -56,13 +51,12 @@
 #include "chrome/browser/password_manager/password_store_default.h"
 #include "chrome/browser/policy/configuration_policy_pref_store.h"
 #include "chrome/browser/policy/configuration_policy_provider.h"
-#include "chrome/browser/policy/profile_policy_context.h"
+#include "chrome/browser/policy/profile_policy_connector.h"
 #include "chrome/browser/prefs/browser_prefs.h"
 #include "chrome/browser/prefs/pref_value_store.h"
 #include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/printing/cloud_print/cloud_print_proxy_service.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/browser/search_engines/template_url_fetcher.h"
 #include "chrome/browser/search_engines/template_url_model.h"
 #include "chrome/browser/sessions/session_service.h"
@@ -76,10 +70,13 @@
 #include "chrome/browser/themes/browser_theme_provider.h"
 #include "chrome/browser/transport_security_persister.h"
 #include "chrome/browser/ui/find_bar/find_bar_state.h"
+#include "chrome/browser/ui/webui/chrome_url_data_manager.h"
+#include "chrome/browser/ui/webui/extension_icon_source.h"
+#include "chrome/browser/ui/webui/ntp_resource_cache.h"
 #include "chrome/browser/user_style_sheet_watcher.h"
 #include "chrome/browser/visitedlink/visitedlink_event_listener.h"
 #include "chrome/browser/visitedlink/visitedlink_master.h"
-#include "chrome/browser/web_resource/web_resource_service.h"
+#include "chrome/browser/web_resource/promo_resource_service.h"
 #include "chrome/browser/webdata/web_data_service.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
@@ -89,6 +86,14 @@
 #include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
+#include "content/browser/appcache/chrome_appcache_service.h"
+#include "content/browser/browser_thread.h"
+#include "content/browser/chrome_blob_storage_context.h"
+#include "content/browser/file_system/browser_file_system_helper.h"
+#include "content/browser/geolocation/geolocation_permission_context.h"
+#include "content/browser/host_zoom_map.h"
+#include "content/browser/in_process_webkit/webkit_context.h"
+#include "content/browser/renderer_host/render_process_host.h"
 #include "grit/browser_resources.h"
 #include "grit/locale_settings.h"
 #include "net/base/transport_security_state.h"
@@ -119,6 +124,8 @@
 #endif
 
 #if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/locale_change_guard.h"
+#include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/preferences.h"
 #endif
 
@@ -126,11 +133,6 @@ using base::Time;
 using base::TimeDelta;
 
 namespace {
-
-void CleanupRequestContext(ChromeURLRequestContextGetter* context) {
-  if (context)
-    context->CleanupOnUIThread();
-}
 
 // Delay, in milliseconds, before we explicitly create the SessionService.
 static const int kCreateSessionServiceDelayMS = 500;
@@ -247,9 +249,7 @@ ProfileImpl::ProfileImpl(const FilePath& path)
     : path_(path),
       visited_link_event_listener_(new VisitedLinkEventListener()),
       extension_devtools_manager_(NULL),
-      request_context_(NULL),
-      media_request_context_(NULL),
-      extensions_request_context_(NULL),
+      ALLOW_THIS_IN_INITIALIZER_LIST(io_data_(this)),
       host_content_settings_map_(NULL),
       host_zoom_map_(NULL),
       history_service_created_(false),
@@ -298,11 +298,6 @@ ProfileImpl::ProfileImpl(const FilePath& path)
   ssl_config_service_manager_.reset(
       SSLConfigServiceManager::CreateDefaultManager(this));
 
-#if defined(OS_CHROMEOS)
-  chromeos_preferences_.reset(new chromeos::Preferences());
-  chromeos_preferences_->Init(prefs);
-#endif
-
   pinned_tab_service_.reset(new PinnedTabService(this));
 
   // Initialize the BackgroundModeManager - this has to be done here before
@@ -320,7 +315,7 @@ ProfileImpl::ProfileImpl(const FilePath& path)
 
   extension_info_map_ = new ExtensionInfoMap();
 
-  GetPolicyContext()->Initialize();
+  InitRegisteredProtocolHandlers();
 
   clear_local_state_on_exit_ = prefs->GetBoolean(prefs::kClearSiteDataOnExit);
 
@@ -329,6 +324,31 @@ ProfileImpl::ProfileImpl(const FilePath& path)
                                  new ProfileSizeTask(path_), 112000);
 
   InstantController::RecordMetrics(this);
+
+  FilePath cookie_path = GetPath();
+  cookie_path = cookie_path.Append(chrome::kCookieFilename);
+  FilePath cache_path = base_cache_path_;
+  int cache_max_size;
+  GetCacheParameters(kNormalContext, &cache_path, &cache_max_size);
+  cache_path = GetCachePath(cache_path);
+
+  FilePath media_cache_path = base_cache_path_;
+  int media_cache_max_size;
+  GetCacheParameters(kMediaContext, &media_cache_path, &media_cache_max_size);
+  media_cache_path = GetMediaCachePath(media_cache_path);
+
+  FilePath extensions_cookie_path = GetPath();
+  extensions_cookie_path =
+      extensions_cookie_path.Append(chrome::kExtensionsCookieFilename);
+
+  // Make sure we initialize the ProfileIOData after everything else has been
+  // initialized that we might be reading from the IO thread.
+  io_data_.Init(cookie_path, cache_path, cache_max_size,
+                media_cache_path, media_cache_max_size, extensions_cookie_path);
+
+  // Initialize the ProfilePolicyConnector after |io_data_| since it requires
+  // the URLRequestContextGetter to be initialized.
+  GetPolicyConnector()->Initialize();
 }
 
 void ProfileImpl::InitExtensions() {
@@ -352,12 +372,16 @@ void ProfileImpl::InitExtensions() {
                         // since it isn't used anymore.
   user_script_master_ = new UserScriptMaster(script_dir, this);
 
+  bool autoupdate_enabled = true;
+#if defined(OS_CHROMEOS)
+  autoupdate_enabled = !command_line->HasSwitch(switches::kGuestSession);
+#endif
   extensions_service_ = new ExtensionService(
       this,
       CommandLine::ForCurrentProcess(),
       GetPath().AppendASCII(ExtensionService::kInstallDirectoryName),
       extension_prefs_.get(),
-      true);
+      autoupdate_enabled);
 
   RegisterComponentExtensions();
   extensions_service_->Init();
@@ -368,10 +392,21 @@ void ProfileImpl::InitExtensions() {
     FilePath path = command_line->GetSwitchValuePath(switches::kLoadExtension);
     extensions_service_->LoadExtension(path);
   }
+
+  // Make the chrome://extension-icon/ resource is available.
+  ExtensionIconSource* icon_source = new ExtensionIconSource(this);
+  GetChromeURLDataManager()->AddDataSource(icon_source);
 }
 
 void ProfileImpl::RegisterComponentExtensions() {
   // Register the component extensions.
+  //
+  // Component extension manifest must contain a 'key' property with a unique
+  // public key, serialized in base64. You can create a suitable value with the
+  // following commands on a unixy system:
+  //
+  //   ssh-keygen -t rsa -b 1024 -N '' -f /tmp/key.pem
+  //   rsa -pubout -outform DER < /tmp/key.pem 2>/dev/null | base64 -w 0
   typedef std::list<std::pair<FilePath::StringType, int> >
       ComponentExtensionList;
   ComponentExtensionList component_extensions;
@@ -381,6 +416,12 @@ void ProfileImpl::RegisterComponentExtensions() {
       FILE_PATH_LITERAL("bookmark_manager"),
       IDR_BOOKMARKS_MANIFEST));
 
+#if defined(FILE_MANAGER_EXTENSION)
+  component_extensions.push_back(std::make_pair(
+      FILE_PATH_LITERAL("file_manager"),
+      IDR_FILEMANAGER_MANIFEST));
+#endif
+
 #if defined(TOUCH_UI)
   component_extensions.push_back(std::make_pair(
       FILE_PATH_LITERAL("keyboard"),
@@ -388,14 +429,21 @@ void ProfileImpl::RegisterComponentExtensions() {
 #endif
 
 #if defined(OS_CHROMEOS)
+  component_extensions.push_back(std::make_pair(
+      FILE_PATH_LITERAL("/usr/share/chromeos-assets/mobile"),
+      IDR_MOBILE_MANIFEST));
+
+#if defined(OFFICIAL_BUILD)
   if (browser_defaults::enable_help_app) {
     component_extensions.push_back(std::make_pair(
         FILE_PATH_LITERAL("/usr/share/chromeos-assets/helpapp"),
         IDR_HELP_MANIFEST));
   }
+
   component_extensions.push_back(std::make_pair(
-      FILE_PATH_LITERAL("/usr/share/chromeos-assets/mobile"),
-      IDR_MOBILE_MANIFEST));
+      FILE_PATH_LITERAL("/usr/share/chromeos-assets/getstarted"),
+      IDR_GETSTARTED_MANIFEST));
+#endif
 #endif
 
   // Web Store.
@@ -450,12 +498,19 @@ void ProfileImpl::InstallDefaultApps() {
   }
 }
 
-void ProfileImpl::InitWebResources() {
-  if (web_resource_service_)
+void ProfileImpl::InitPromoResources() {
+  if (promo_resource_service_)
     return;
 
-  web_resource_service_ = new WebResourceService(this);
-  web_resource_service_->StartAfterDelay();
+  promo_resource_service_ = new PromoResourceService(this);
+  promo_resource_service_->StartAfterDelay();
+}
+
+void ProfileImpl::InitRegisteredProtocolHandlers() {
+  if (protocol_handler_registry_)
+    return;
+  protocol_handler_registry_ = new ProtocolHandlerRegistry(this);
+  protocol_handler_registry_->Load();
 }
 
 NTPResourceCache* ProfileImpl::GetNTPResourceCache() {
@@ -478,7 +533,7 @@ ProfileImpl::~ProfileImpl() {
       Source<Profile>(this),
       NotificationService::NoDetails());
 
-  GetPolicyContext()->Shutdown();
+  GetPolicyConnector()->Shutdown();
 
   tab_restore_service_ = NULL;
 
@@ -526,12 +581,10 @@ ProfileImpl::~ProfileImpl() {
   if (spellcheck_host_.get())
     spellcheck_host_->UnsetObserver();
 
-  if (default_request_context_ == request_context_)
+  if (io_data_.HasMainRequestContext() &&
+      default_request_context_ == GetRequestContext()) {
     default_request_context_ = NULL;
-
-  CleanupRequestContext(request_context_);
-  CleanupRequestContext(media_request_context_);
-  CleanupRequestContext(extensions_request_context_);
+  }
 
   // HistoryService may call into the BookmarkModel, as such we need to
   // delete HistoryService before the BookmarkModel. The destructor for
@@ -600,11 +653,13 @@ ChromeAppCacheService* ProfileImpl::GetAppCacheService() {
     appcache_service_ = new ChromeAppCacheService;
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
-        NewRunnableMethod(appcache_service_.get(),
-                          &ChromeAppCacheService::InitializeOnIOThread,
-                          GetPath(), IsOffTheRecord(),
-                          make_scoped_refptr(GetHostContentSettingsMap()),
-                          clear_local_state_on_exit_));
+        NewRunnableMethod(
+            appcache_service_.get(),
+            &ChromeAppCacheService::InitializeOnIOThread,
+            GetPath(), IsOffTheRecord(),
+            make_scoped_refptr(GetHostContentSettingsMap()),
+            make_scoped_refptr(GetExtensionSpecialStoragePolicy()),
+            clear_local_state_on_exit_));
   }
   return appcache_service_;
 }
@@ -612,7 +667,7 @@ ChromeAppCacheService* ProfileImpl::GetAppCacheService() {
 webkit_database::DatabaseTracker* ProfileImpl::GetDatabaseTracker() {
   if (!db_tracker_) {
     db_tracker_ = new webkit_database::DatabaseTracker(
-        GetPath(), IsOffTheRecord());
+        GetPath(), IsOffTheRecord(), GetExtensionSpecialStoragePolicy());
   }
   return db_tracker_;
 }
@@ -663,6 +718,13 @@ ExtensionEventRouter* ProfileImpl::GetExtensionEventRouter() {
   return extension_event_router_.get();
 }
 
+ExtensionSpecialStoragePolicy*
+    ProfileImpl::GetExtensionSpecialStoragePolicy() {
+  if (!extension_special_storage_policy_.get())
+    extension_special_storage_policy_ = new ExtensionSpecialStoragePolicy();
+  return extension_special_storage_policy_.get();
+}
+
 SSLHostState* ProfileImpl::GetSSLHostState() {
   if (!ssl_host_state_.get())
     ssl_host_state_.reset(new SSLHostState());
@@ -686,15 +748,20 @@ net::TransportSecurityState*
 
 PrefService* ProfileImpl::GetPrefs() {
   if (!prefs_.get()) {
-    ExtensionPrefStore* extension_pref_store = new ExtensionPrefStore;
-    prefs_.reset(PrefService::CreatePrefService(GetPrefFilePath(),
-                                                extension_pref_store,
-                                                GetOriginalProfile()));
+    prefs_.reset(PrefService::CreatePrefService(
+        GetPrefFilePath(),
+        new ExtensionPrefStore(GetExtensionPrefValueMap(), false),
+        GetOriginalProfile()));
 
     // The Profile class and ProfileManager class may read some prefs so
     // register known prefs as soon as possible.
     Profile::RegisterUserPrefs(prefs_.get());
     browser::RegisterUserPrefs(prefs_.get());
+    // TODO(mirandac): remove migration code after 6 months (crbug.com/69995).
+    if (g_browser_process->local_state()) {
+      browser::MigrateBrowserPrefs(prefs_.get(),
+                                   g_browser_process->local_state());
+    }
 
     // The last session exited cleanly if there is no pref for
     // kSessionExitedCleanly or the value for kSessionExitedCleanly is true.
@@ -710,13 +777,23 @@ PrefService* ProfileImpl::GetPrefs() {
     extension_prefs_.reset(new ExtensionPrefs(
         prefs_.get(),
         GetPath().AppendASCII(ExtensionService::kInstallDirectoryName),
-        extension_pref_store));
+        GetExtensionPrefValueMap()));
 
     DCHECK(!net_pref_observer_.get());
     net_pref_observer_.reset(new NetPrefObserver(prefs_.get()));
   }
 
   return prefs_.get();
+}
+
+PrefService* ProfileImpl::GetOffTheRecordPrefs() {
+  if (!otr_prefs_.get()) {
+    // The new ExtensionPrefStore is ref_counted and the new PrefService
+    // stores a reference so that we do not leak memory here.
+    otr_prefs_.reset(GetPrefs()->CreateIncognitoPrefService(
+        new ExtensionPrefStore(GetExtensionPrefValueMap(), true)));
+  }
+  return otr_prefs_.get();
 }
 
 FilePath ProfileImpl::GetPrefFilePath() {
@@ -726,47 +803,26 @@ FilePath ProfileImpl::GetPrefFilePath() {
 }
 
 URLRequestContextGetter* ProfileImpl::GetRequestContext() {
-  if (!request_context_) {
-    FilePath cookie_path = GetPath();
-    cookie_path = cookie_path.Append(chrome::kCookieFilename);
-    FilePath cache_path = base_cache_path_;
-    int max_size;
-    GetCacheParameters(kNormalContext, &cache_path, &max_size);
-
-    cache_path = GetCachePath(cache_path);
-    request_context_ = ChromeURLRequestContextGetter::CreateOriginal(
-        this, cookie_path, cache_path, max_size);
-
-    // The first request context is always a normal (non-OTR) request context.
-    // Even when Chromium is started in OTR mode, a normal profile is always
-    // created first.
-    if (!default_request_context_) {
-      default_request_context_ = request_context_;
-      request_context_->set_is_main(true);
-      // TODO(eroman): this isn't terribly useful anymore now that the
-      // net::URLRequestContext is constructed by the IO thread...
-      NotificationService::current()->Notify(
-          NotificationType::DEFAULT_REQUEST_CONTEXT_AVAILABLE,
-          NotificationService::AllSources(), NotificationService::NoDetails());
-    }
+  URLRequestContextGetter* request_context =
+      io_data_.GetMainRequestContextGetter();
+  // The first request context is always a normal (non-OTR) request context.
+  // Even when Chromium is started in OTR mode, a normal profile is always
+  // created first.
+  if (!default_request_context_) {
+    default_request_context_ = request_context;
+    request_context->set_is_main(true);
+    // TODO(eroman): this isn't terribly useful anymore now that the
+    // net::URLRequestContext is constructed by the IO thread...
+    NotificationService::current()->Notify(
+        NotificationType::DEFAULT_REQUEST_CONTEXT_AVAILABLE,
+        NotificationService::AllSources(), NotificationService::NoDetails());
   }
 
-  return request_context_;
+  return request_context;
 }
 
 URLRequestContextGetter* ProfileImpl::GetRequestContextForMedia() {
-  if (!media_request_context_) {
-    FilePath cache_path = base_cache_path_;
-    int max_size;
-    GetCacheParameters(kMediaContext, &cache_path, &max_size);
-
-    cache_path = GetMediaCachePath(cache_path);
-    media_request_context_ =
-        ChromeURLRequestContextGetter::CreateOriginalForMedia(
-            this, cache_path, max_size);
-  }
-
-  return media_request_context_;
+  return io_data_.GetMediaRequestContextGetter();
 }
 
 FaviconService* ProfileImpl::GetFaviconService(ServiceAccessType sat) {
@@ -779,16 +835,7 @@ FaviconService* ProfileImpl::GetFaviconService(ServiceAccessType sat) {
 }
 
 URLRequestContextGetter* ProfileImpl::GetRequestContextForExtensions() {
-  if (!extensions_request_context_) {
-    FilePath cookie_path = GetPath();
-    cookie_path = cookie_path.Append(chrome::kExtensionsCookieFilename);
-
-    extensions_request_context_ =
-        ChromeURLRequestContextGetter::CreateOriginalForExtensions(
-            this, cookie_path);
-  }
-
-  return extensions_request_context_;
+  return io_data_.GetExtensionsRequestContextGetter();
 }
 
 void ProfileImpl::RegisterExtensionWithRequestContexts(
@@ -1031,10 +1078,10 @@ PersonalDataManager* ProfileImpl::GetPersonalDataManager() {
   return personal_data_manager_.get();
 }
 
-fileapi::SandboxedFileSystemContext* ProfileImpl::GetFileSystemContext() {
+fileapi::FileSystemContext* ProfileImpl::GetFileSystemContext() {
   if (!file_system_context_.get())
     file_system_context_ = CreateFileSystemContext(
-        GetPath(), IsOffTheRecord());
+        GetPath(), IsOffTheRecord(), GetExtensionSpecialStoragePolicy());
   DCHECK(file_system_context_.get());
   return file_system_context_.get();
 }
@@ -1124,6 +1171,10 @@ BookmarkModel* ProfileImpl::GetBookmarkModel() {
   return bookmark_bar_model_.get();
 }
 
+ProtocolHandlerRegistry* ProfileImpl::GetProtocolHandlerRegistry() {
+  return protocol_handler_registry_.get();
+}
+
 bool ProfileImpl::IsSameProfile(Profile* profile) {
   if (profile == static_cast<Profile*>(this))
     return true;
@@ -1197,6 +1248,12 @@ void ProfileImpl::SpellCheckHostInitialized() {
   NotificationService::current()->Notify(
       NotificationType::SPELLCHECK_HOST_REINITIALIZED,
           Source<Profile>(this), NotificationService::NoDetails());
+}
+
+ExtensionPrefValueMap* ProfileImpl::GetExtensionPrefValueMap() {
+  if (!extension_pref_value_map_.get())
+    extension_pref_value_map_.reset(new ExtensionPrefValueMap);
+  return extension_pref_value_map_.get();
 }
 
 WebKitContext* ProfileImpl::GetWebKitContext() {
@@ -1339,11 +1396,17 @@ ExtensionInfoMap* ProfileImpl::GetExtensionInfoMap() {
   return extension_info_map_.get();
 }
 
-policy::ProfilePolicyContext* ProfileImpl::GetPolicyContext() {
-  if (!profile_policy_context_.get())
-    profile_policy_context_.reset(new policy::ProfilePolicyContext(this));
+policy::ProfilePolicyConnector* ProfileImpl::GetPolicyConnector() {
+  if (!profile_policy_connector_.get())
+    profile_policy_connector_.reset(new policy::ProfilePolicyConnector(this));
 
-  return profile_policy_context_.get();
+  return profile_policy_connector_.get();
+}
+
+ChromeURLDataManager* ProfileImpl::GetChromeURLDataManager() {
+  if (!chrome_url_data_manager_.get())
+    chrome_url_data_manager_.reset(new ChromeURLDataManager(this));
+  return chrome_url_data_manager_.get();
 }
 
 PromoCounter* ProfileImpl::GetInstantPromoCounter() {
@@ -1369,28 +1432,82 @@ PromoCounter* ProfileImpl::GetInstantPromoCounter() {
 }
 
 #if defined(OS_CHROMEOS)
-void ProfileImpl::ChangeApplicationLocale(
-    const std::string& locale, bool keep_local) {
-  if (locale.empty()) {
+void ProfileImpl::ChangeAppLocale(
+    const std::string& new_locale, AppLocaleChangedVia via) {
+  if (new_locale.empty()) {
     NOTREACHED();
     return;
   }
-  if (keep_local) {
-    GetPrefs()->SetString(prefs::kApplicationLocaleOverride, locale);
-  } else {
-    GetPrefs()->SetString(prefs::kApplicationLocale, locale);
-    GetPrefs()->ClearPref(prefs::kApplicationLocaleOverride);
+  PrefService* local_state = g_browser_process->local_state();
+  DCHECK(local_state);
+  if (local_state->IsManagedPreference(prefs::kApplicationLocale))
+    return;
+  std::string pref_locale = GetPrefs()->GetString(prefs::kApplicationLocale);
+  bool do_update_pref = true;
+  switch (via) {
+    case APP_LOCALE_CHANGED_VIA_SETTINGS:
+    case APP_LOCALE_CHANGED_VIA_REVERT: {
+      // We keep kApplicationLocaleBackup value as a reference.  In case value
+      // of kApplicationLocale preference would change due to sync from other
+      // device then kApplicationLocaleBackup value will trigger and allow us to
+      // show notification about automatic locale change in LocaleChangeGuard.
+      GetPrefs()->SetString(prefs::kApplicationLocaleBackup, new_locale);
+      GetPrefs()->ClearPref(prefs::kApplicationLocaleAccepted);
+      // We maintain kApplicationLocale property in both a global storage
+      // and user's profile.  Global property determines locale of login screen,
+      // while user's profile determines his personal locale preference.
+      break;
+    }
+    case APP_LOCALE_CHANGED_VIA_LOGIN: {
+      if (!pref_locale.empty()) {
+        DCHECK(pref_locale == new_locale);
+        std::string accepted_locale =
+            GetPrefs()->GetString(prefs::kApplicationLocaleAccepted);
+        if (accepted_locale == new_locale) {
+          // If locale is accepted then we do not want to show LocaleChange
+          // notification.  This notification is triggered by different values
+          // of kApplicationLocaleBackup and kApplicationLocale preferences,
+          // so make them identical.
+          GetPrefs()->SetString(prefs::kApplicationLocaleBackup, new_locale);
+        } else {
+          // Back up locale of login screen.
+          GetPrefs()->SetString(prefs::kApplicationLocaleBackup,
+                                g_browser_process->GetApplicationLocale());
+        }
+      } else {
+        std::string cur_locale = g_browser_process->GetApplicationLocale();
+        std::string backup_locale =
+            GetPrefs()->GetString(prefs::kApplicationLocaleBackup);
+        // Profile synchronization takes time and is not completed at that
+        // moment at first login.  So we initialize locale preference in steps:
+        // (1) first save it to temporary backup;
+        // (2) on next login we assume that synchronization is already completed
+        //     and we may finalize initialization.
+        GetPrefs()->SetString(prefs::kApplicationLocaleBackup, cur_locale);
+        if (!backup_locale.empty())
+          GetPrefs()->SetString(prefs::kApplicationLocale, backup_locale);
+        do_update_pref = false;
+      }
+      break;
+    }
+    case APP_LOCALE_CHANGED_VIA_UNKNOWN:
+    default: {
+      NOTREACHED();
+      break;
+    }
   }
-  GetPrefs()->SetString(prefs::kApplicationLocaleBackup, locale);
-  GetPrefs()->ClearPref(prefs::kApplicationLocaleAccepted);
-  // We maintain kApplicationLocale property in both a global storage
-  // and user's profile.  Global property determines locale of login screen,
-  // while user's profile determines his personal locale preference.
-  g_browser_process->local_state()->SetString(
-      prefs::kApplicationLocale, locale);
+  if (do_update_pref)
+    GetPrefs()->SetString(prefs::kApplicationLocale, new_locale);
+  if (chromeos::UserManager::Get()->current_user_is_owner())
+    local_state->SetString(prefs::kOwnerLocale, new_locale);
+  local_state->SetString(prefs::kApplicationLocale, new_locale);
 
-  GetPrefs()->SavePersistentPrefs();
-  g_browser_process->local_state()->SavePersistentPrefs();
+  GetPrefs()->ScheduleSavePersistentPrefs();
+  local_state->ScheduleSavePersistentPrefs();
+}
+
+void ProfileImpl::OnLogin() {
+  locale_change_guard_.reset(new chromeos::LocaleChangeGuard(this));
 }
 
 chromeos::ProxyConfigServiceImpl*
@@ -1407,6 +1524,11 @@ void ProfileImpl::SetupChromeOSEnterpriseExtensionObserver() {
   chromeos_enterprise_extension_observer_.reset(
       new chromeos::EnterpriseExtensionObserver(this));
 }
+
+void ProfileImpl::InitChromeOSPreferences() {
+  chromeos_preferences_.reset(new chromeos::Preferences());
+  chromeos_preferences_->Init(GetPrefs());
+}
 #endif  // defined(OS_CHROMEOS)
 
 PrefProxyConfigTracker* ProfileImpl::GetProxyConfigTracker() {
@@ -1416,11 +1538,10 @@ PrefProxyConfigTracker* ProfileImpl::GetProxyConfigTracker() {
   return pref_proxy_config_tracker_;
 }
 
-PrerenderManager* ProfileImpl::GetPrerenderManager() {
-  CommandLine* cl = CommandLine::ForCurrentProcess();
-  if (!cl->HasSwitch(switches::kEnablePagePrerender))
+prerender::PrerenderManager* ProfileImpl::GetPrerenderManager() {
+  if (!prerender::PrerenderManager::IsPrerenderingEnabled())
     return NULL;
   if (!prerender_manager_)
-    prerender_manager_ = new PrerenderManager(this);
+    prerender_manager_ = new prerender::PrerenderManager(this);
   return prerender_manager_;
 }

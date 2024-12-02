@@ -138,6 +138,9 @@ class DownloadsTest(pyauto.PyUITest):
     # Trigger download and wait in new incognito window.
     self.DownloadAndWaitForStart(file_url, 1)
     self.WaitForAllDownloadsToComplete(1)
+    # Remove next line when WaitForAllDownloadsToComplete can reliably wait
+    # for downloads in incognito window. crbug.com/69738
+    self.WaitForDownloadToComplete(downloaded_pkg)
     incognito_downloads = self.GetDownloadsInfo(1).Downloads()
 
     # Verify that download info exists in the correct profile.
@@ -323,21 +326,6 @@ class DownloadsTest(pyauto.PyUITest):
     # It might take a while for the download to kick in, hold on until then.
     self.assertTrue(self.WaitUntil(
         lambda: len(self.GetDownloadsInfo().Downloads()) == num_downloads + 1))
-
-  def testNoUnsafeDownloadsOnRestart(self):
-    """Verify that unsafe file should not show up on session restart."""
-    file_path = self._GetDangerousDownload()
-    downloaded_pkg = os.path.join(self.GetDownloadDirectory().value(),
-                                  os.path.basename(file_path))
-    self._ClearLocalDownloadState(downloaded_pkg)
-    self._TriggerUnsafeDownload(os.path.basename(file_path))
-    self.assertTrue(self.IsDownloadShelfVisible())
-    # Restart the browser and assert that the download was removed.
-    self.RestartBrowser(clear_profile=False)
-    self.assertFalse(os.path.exists(downloaded_pkg))
-    self.assertFalse(self.IsDownloadShelfVisible())
-    self.NavigateToURL("chrome://downloads")
-    self.assertFalse(self.GetDownloadsInfo().Downloads())
 
   def testPauseAndResume(self):
     """Verify that pause and resume work while downloading a file.

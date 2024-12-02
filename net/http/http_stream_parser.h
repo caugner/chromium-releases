@@ -26,7 +26,7 @@ class IOBuffer;
 class SSLCertRequestInfo;
 class SSLInfo;
 
-class HttpStreamParser {
+class HttpStreamParser  : public ChunkCallback {
  public:
   // Any data in |read_buffer| will be used before reading from the socket
   // and any data left over after parsing the stream will be put into
@@ -70,6 +70,9 @@ class HttpStreamParser {
   void GetSSLInfo(SSLInfo* ssl_info);
 
   void GetSSLCertRequestInfo(SSLCertRequestInfo* cert_request_info);
+
+  // ChunkCallback methods.
+  virtual void OnChunkAvailable();
 
  private:
   // FOO_COMPLETE states implement the second half of potentially asynchronous
@@ -185,6 +188,13 @@ class HttpStreamParser {
 
   // Callback to be used when doing IO.
   CompletionCallbackImpl<HttpStreamParser> io_callback_;
+
+  // Stores an encoded chunk for chunked uploads.
+  // Note: This should perhaps be improved to not create copies of the data.
+  scoped_refptr<IOBuffer> chunk_buf_;
+  size_t chunk_length_;
+  size_t chunk_length_without_encoding_;
+  bool sent_last_chunk_;
 
   DISALLOW_COPY_AND_ASSIGN(HttpStreamParser);
 };

@@ -18,14 +18,9 @@ class KeyboardLibrary {
  public:
   virtual ~KeyboardLibrary() {}
 
-  // Returns the hardware layout name like "xkb:us::eng". On error, returns "".
-  virtual std::string GetHardwareKeyboardLayoutName() const = 0;
-
-  // Returns the current layout name like "us". On error, returns "".
-  virtual std::string GetCurrentKeyboardLayoutName() const = 0;
-
   // Sets the current keyboard layout to |layout_name|.  Returns true on
-  // success.
+  // success. |layout_name| should look like XKB layout like "us" and
+  // "us(dvorak)".
   virtual bool SetCurrentKeyboardLayoutByName(
       const std::string& layout_name) = 0;
 

@@ -1,12 +1,12 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
-
-#include "chrome/test/live_sync/live_bookmarks_sync_test.h"
 
 #include "base/rand_util.h"
 #include "base/stringprintf.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/sync/profile_sync_service_harness.h"
+#include "chrome/test/live_sync/live_bookmarks_sync_test.h"
 
 const std::string kGenericURL = "http://www.host.ext:1234/path/filename";
 const std::wstring kGenericURLTitle = L"URL Title";
@@ -904,7 +904,9 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest, SC_HoistBMs10LevelUp) {
 }
 
 // Test Scribe ID - 371968.
-IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest, SC_SinkBMs10LevelDown) {
+// TODO(rsimha): Enable after http://crbug.com/74853 is fixed.
+IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
+                       FAILS_SC_SinkBMs10LevelDown) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
   ASSERT_TRUE(AllModelsMatchVerifier());
 
@@ -1082,7 +1084,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
     const BookmarkNode* folder = AddGroup(0, i, title);
     ASSERT_TRUE(folder != NULL);
     for (int j = 0; j < 10; ++j) {
-      std::wstring title = IndexedURLTitle(j);
+      std::wstring title = IndexedURLTitle(1000 * i + j);
       GURL url = GURL(IndexedURL(j));
       ASSERT_TRUE(AddURL(0, folder, j, title, url) != NULL);
     }

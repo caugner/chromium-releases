@@ -20,6 +20,7 @@ ChromotingHostManager::ChromotingHostManager(Observer* observer)
 }
 
 void ChromotingHostManager::Initialize(
+    MessageLoopForUI* main_message_loop,
     base::MessageLoopProxy* file_message_loop) {
   FilePath user_data_dir;
   PathService::Get(chrome::DIR_USER_DATA, &user_data_dir);
@@ -31,6 +32,7 @@ void ChromotingHostManager::Initialize(
     VLOG(1) << "Failed to read chromoting config file.";
   }
 
+  main_message_loop_ = main_message_loop;
   chromoting_config_ = config;
 
   if (!IsConfigInitialized()) {
@@ -38,12 +40,22 @@ void ChromotingHostManager::Initialize(
   }
 
   if (IsEnabled()) {
+    // TODO(wez): Need to callback the Observer so that ServiceProcess
+    // knows to stay alive to service Chromoting requests.
+    // This will go away once we have a more consistent model for the
+    // service process internals.
+    observer_->OnChromotingHostEnabled();
     Start();
   }
 }
 
-void ChromotingHostManager::Teardown() {
-  Stop();
+void ChromotingHostManager::Teardown(Task* done_task) {
+  Stop(done_task);
+}
+
+ChromotingHostManager::~ChromotingHostManager() {
+  DCHECK(!chromoting_host_);
+  DCHECK(!chromoting_context_.get());
 }
 
 bool ChromotingHostManager::IsConfigInitialized() {
@@ -94,12 +106,16 @@ void ChromotingHostManager::Enable() {
 }
 
 void ChromotingHostManager::Disable() {
-  if (IsEnabled()) {
-    SetEnabled(false);
-    observer_->OnChromotingHostDisabled();
-  }
+  if (!IsEnabled())
+    return;
 
-  Stop();
+  SetEnabled(false);
+
+  // TODO(hclam): Immediately reporting will cause threading problems
+  // ServiceProcess thinks we can shutdown safely.
+  observer_->OnChromotingHostDisabled();
+
+  Stop(NULL);
 }
 
 void ChromotingHostManager::GetHostInfo(ChromotingHostInfo* host_info) {
@@ -118,17 +134,18 @@ void ChromotingHostManager::GetHostInfo(ChromotingHostInfo* host_info) {
                                 &host_info->login);
 }
 
-void ChromotingHostManager::Stop() {
+void ChromotingHostManager::Stop(Task* done_task) {
   // Stop the host if it is started.
   if (chromoting_host_) {
-    // Shutdown the chromoting host asynchronously. This will signal the host to
-    // shutdown, we'll actually wait for all threads to stop when we destroy
-    // the chromoting context.
-    chromoting_host_->Shutdown();
-    chromoting_host_ = NULL;
+    // Save the shutdown task, it will be executed when chromoting host
+    // is stopped.
+    shutdown_task_.reset(done_task);
 
-    chromoting_context_->Stop();
-    chromoting_context_.reset();
+    // Shutdown the chromoting host asynchronously.
+    chromoting_host_->Shutdown();
+  } else if (done_task) {
+    done_task->Run();
+    delete done_task;
   }
 }
 
@@ -153,7 +170,8 @@ void ChromotingHostManager::Start() {
     return;
 
   // Start the chromoting context first.
-  chromoting_context_.reset(new remoting::ChromotingHostContext());
+  chromoting_context_.reset(
+      new remoting::ChromotingHostContext(main_message_loop_));
   chromoting_context_->Start();
 
   // Create a chromoting host object.
@@ -168,6 +186,19 @@ void ChromotingHostManager::Start() {
 }
 
 void ChromotingHostManager::OnShutdown() {
+  if (MessageLoop::current() != main_message_loop_) {
+    main_message_loop_->PostTask(FROM_HERE,
+        NewRunnableMethod(this, &ChromotingHostManager::OnShutdown));
+    return;
+  }
+  chromoting_context_->Stop();
+  chromoting_context_.reset();
+  chromoting_host_ = NULL;
+
+  if (shutdown_task_.get()) {
+    shutdown_task_->Run();
+    shutdown_task_.reset();
+  }
 }
 
 }  // namespace remoting

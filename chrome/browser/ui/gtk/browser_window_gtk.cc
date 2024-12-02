@@ -24,22 +24,21 @@
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/debugger/devtools_window.h"
-#include "chrome/browser/dom_ui/bug_report_ui.h"
 #include "chrome/browser/download/download_item_model.h"
 #include "chrome/browser/download/download_manager.h"
 #include "chrome/browser/page_info_window.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
-#include "chrome/browser/tab_contents/tab_contents_view.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/themes/browser_theme_provider.h"
 #include "chrome/browser/ui/app_modal_dialogs/app_modal_dialog_queue.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/find_bar/find_bar_controller.h"
+#include "chrome/browser/ui/find_bar/find_tab_helper.h"
 #include "chrome/browser/ui/gtk/about_chrome_dialog.h"
 #include "chrome/browser/ui/gtk/accelerators_gtk.h"
-#include "chrome/browser/ui/gtk/bookmark_bar_gtk.h"
+#include "chrome/browser/ui/gtk/bookmarks/bookmark_bar_gtk.h"
 #include "chrome/browser/ui/gtk/browser_titlebar.h"
 #include "chrome/browser/ui/gtk/browser_toolbar_gtk.h"
 #include "chrome/browser/ui/gtk/cairo_cached_surface.h"
@@ -54,11 +53,10 @@
 #include "chrome/browser/ui/gtk/gtk_floating_container.h"
 #include "chrome/browser/ui/gtk/gtk_theme_provider.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
-#include "chrome/browser/ui/gtk/html_dialog_gtk.h"
-#include "chrome/browser/ui/gtk/import_dialog_gtk.h"
+#include "chrome/browser/ui/gtk/importer/import_dialog_gtk.h"
 #include "chrome/browser/ui/gtk/info_bubble_gtk.h"
-#include "chrome/browser/ui/gtk/infobar_container_gtk.h"
-#include "chrome/browser/ui/gtk/infobar_gtk.h"
+#include "chrome/browser/ui/gtk/infobars/infobar_container_gtk.h"
+#include "chrome/browser/ui/gtk/infobars/infobar_gtk.h"
 #include "chrome/browser/ui/gtk/keyword_editor_view.h"
 #include "chrome/browser/ui/gtk/location_bar_view_gtk.h"
 #include "chrome/browser/ui/gtk/nine_box.h"
@@ -73,20 +71,23 @@
 #include "chrome/browser/ui/gtk/update_recommended_dialog.h"
 #include "chrome/browser/ui/omnibox/location_bar.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/webui/bug_report_ui.h"
 #include "chrome/browser/ui/window_sizer.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/native_web_keyboard_event.h"
-#include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
-#include "gfx/gtk_util.h"
-#include "gfx/rect.h"
-#include "gfx/skia_utils_gtk.h"
+#include "content/browser/tab_contents/tab_contents.h"
+#include "content/browser/tab_contents/tab_contents_view.h"
+#include "content/common/notification_service.h"
 #include "grit/app_resources.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/gfx/gtk_util.h"
+#include "ui/gfx/rect.h"
+#include "ui/gfx/skia_utils_gtk.h"
 
 namespace {
 
@@ -127,47 +128,6 @@ const int kCustomFrameBackgroundVerticalOffset = 15;
 // The timeout in milliseconds before we'll get the true window position with
 // gtk_window_get_position() after the last GTK configure-event signal.
 const int kDebounceTimeoutMilliseconds = 100;
-
-gboolean MainWindowConfigured(GtkWindow* window, GdkEventConfigure* event,
-                              BrowserWindowGtk* browser_win) {
-  gfx::Rect bounds = gfx::Rect(event->x, event->y, event->width, event->height);
-  browser_win->OnBoundsChanged(bounds);
-  return FALSE;
-}
-
-gboolean MainWindowStateChanged(GtkWindow* window, GdkEventWindowState* event,
-                                BrowserWindowGtk* browser_win) {
-  browser_win->OnStateChanged(event->new_window_state, event->changed_mask);
-  return FALSE;
-}
-
-// Callback for the delete event.  This event is fired when the user tries to
-// close the window (e.g., clicking on the X in the window manager title bar).
-gboolean MainWindowDeleteEvent(GtkWidget* widget, GdkEvent* event,
-                               BrowserWindowGtk* window) {
-  window->Close();
-
-  // Return true to prevent the gtk window from being destroyed.  Close will
-  // destroy it for us.
-  return TRUE;
-}
-
-void MainWindowDestroy(GtkWidget* widget, BrowserWindowGtk* window) {
-  // BUG 8712. When we gtk_widget_destroy() in Close(), this will emit the
-  // signal right away, and we will be here (while Close() is still in the
-  // call stack).  In order to not reenter Close(), and to also follow the
-  // expectations of BrowserList, we should run the BrowserWindowGtk destructor
-  // not now, but after the run loop goes back to process messages.  Otherwise
-  // we will remove ourself from BrowserList while it's being iterated.
-  // Additionally, now that we know the window is gone, we need to make sure to
-  // set window_ to NULL, otherwise we will try to close the window again when
-  // we call Close() in the destructor.
-  //
-  // We don't want to use DeleteSoon() here since it won't work on a nested pump
-  // (like in UI tests).
-  MessageLoop::current()->PostTask(FROM_HERE,
-                                   new DeleteTask<BrowserWindowGtk>(window));
-}
 
 // Using gtk_window_get_position/size creates a race condition, so only use
 // this to get the initial bounds.  After window creation, we pick up the
@@ -623,6 +583,8 @@ void BrowserWindowGtk::SetBoundsImpl(const gfx::Rect& bounds,
 }
 
 void BrowserWindowGtk::SetBounds(const gfx::Rect& bounds) {
+  if (IsFullscreen())
+    SetFullscreen(false);
   SetBoundsImpl(bounds, true, true);
 }
 
@@ -763,6 +725,10 @@ gfx::Rect BrowserWindowGtk::GetRestoredBounds() const {
   return restored_bounds_;
 }
 
+gfx::Rect BrowserWindowGtk::GetBounds() const {
+  return bounds_;
+}
+
 bool BrowserWindowGtk::IsMaximized() const {
   return (state_ & GDK_WINDOW_STATE_MAXIMIZED);
 }
@@ -872,9 +838,8 @@ void BrowserWindowGtk::ToggleBookmarkBar() {
   bookmark_utils::ToggleWhenVisible(browser_->profile());
 }
 
-views::Window* BrowserWindowGtk::ShowAboutChromeDialog() {
+void BrowserWindowGtk::ShowAboutChromeDialog() {
   ShowAboutDialogForProfile(window_, browser_->profile());
-  return NULL;
 }
 
 void BrowserWindowGtk::ShowUpdateChromeDialog() {
@@ -882,13 +847,11 @@ void BrowserWindowGtk::ShowUpdateChromeDialog() {
 }
 
 void BrowserWindowGtk::ShowTaskManager() {
-  TaskManagerGtk::Show();
+  TaskManagerGtk::Show(false);
 }
 
 void BrowserWindowGtk::ShowBackgroundPages() {
-  // TODO(atwilson): Support highlighting background resources.
-  // (http://crbug.com/71490)
-  TaskManagerGtk::Show();
+  TaskManagerGtk::Show(true);
 }
 
 void BrowserWindowGtk::ShowBookmarkBubble(const GURL& url,
@@ -956,7 +919,7 @@ void BrowserWindowGtk::ShowThemeInstallBubble() {
 
 void BrowserWindowGtk::ShowHTMLDialog(HtmlDialogUIDelegate* delegate,
                                       gfx::NativeWindow parent_window) {
-  HtmlDialogGtk::ShowHtmlDialogGtk(browser_.get(), delegate, parent_window);
+  browser::ShowHtmlDialog(parent_window, browser_->profile(), delegate);
 }
 
 void BrowserWindowGtk::UserChangedTheme() {
@@ -1040,7 +1003,7 @@ bool BrowserWindowGtk::PreHandleKeyboardEvent(
     return false;
 
   // Executing the command may cause |this| object to be destroyed.
-  if (browser_->IsReservedCommand(id) && !event.match_edit_command)
+  if (browser_->IsReservedCommandOrKey(id, event) && !event.match_edit_command)
     return browser_->ExecuteCommandIfEnabled(id);
 
   // The |event| is a keyboard shortcut.
@@ -1125,12 +1088,6 @@ gfx::Rect BrowserWindowGtk::GetInstantBounds() {
   return gtk_util::GetWidgetScreenBounds(contents_container_->widget());
 }
 
-gfx::Rect BrowserWindowGtk::GrabWindowSnapshot(std::vector<unsigned char>*
-                                               png_representation) {
-  ui::GrabWindowSnapshot(window_, png_representation);
-  return bounds_;
-}
-
 void BrowserWindowGtk::ConfirmBrowserCloseWithPendingDownloads() {
   new DownloadInProgressDialogGtk(browser());
 }
@@ -1172,7 +1129,8 @@ void BrowserWindowGtk::TabSelectedAt(TabContentsWrapper* old_contents,
                                      TabContentsWrapper* new_contents,
                                      int index,
                                      bool user_gesture) {
-  DCHECK(old_contents != new_contents);
+  if (old_contents == new_contents)
+    return;
 
   if (old_contents && !old_contents->tab_contents()->is_being_destroyed())
     old_contents->view()->StoreFocus();
@@ -1188,7 +1146,7 @@ void BrowserWindowGtk::TabSelectedAt(TabContentsWrapper* old_contents,
   // we are the active browser before calling RestoreFocus().
   if (!browser_->tabstrip_model()->closing_all()) {
     new_contents->view()->RestoreFocus();
-    if (new_contents->tab_contents()->find_ui_active())
+    if (new_contents->find_tab_helper()->find_ui_active())
       browser_->GetFindBarController()->find_bar()->SetFocusAndSelection();
   }
 
@@ -1279,8 +1237,8 @@ void BrowserWindowGtk::UpdateDevToolsForContents(TabContents* contents) {
   } else if (should_hide) {
     // Store split offset when hiding devtools window only.
     gint divider_offset = gtk_paned_get_position(GTK_PANED(contents_split_));
-    g_browser_process->local_state()->SetInteger(
-        prefs::kDevToolsSplitLocation, divider_offset);
+    browser_->profile()->GetPrefs()->
+        SetInteger(prefs::kDevToolsSplitLocation, divider_offset);
     gtk_widget_hide(devtools_container_->widget());
   }
 }
@@ -1289,7 +1247,16 @@ void BrowserWindowGtk::DestroyBrowser() {
   browser_.reset();
 }
 
-void BrowserWindowGtk::OnBoundsChanged(const gfx::Rect& bounds) {
+gboolean BrowserWindowGtk::OnConfigure(GtkWidget* widget,
+                                       GdkEventConfigure* event) {
+  gfx::Rect bounds(event->x, event->y, event->width, event->height);
+
+  // When the window moves, we'll get multiple configure-event signals. We can
+  // also get events when the bounds haven't changed, but the window's stacking
+  // has, which we aren't interested in. http://crbug.com/70125
+  if (bounds == bounds_)
+    return FALSE;
+
   GetLocationBar()->location_entry()->ClosePopup();
 
   TabContents* tab_contents = GetDisplayedTabContents();
@@ -1306,8 +1273,7 @@ void BrowserWindowGtk::OnBoundsChanged(const gfx::Rect& bounds) {
   // handler below, after the window state has been updated.
   bounds_ = bounds;
 
-  // When a window is moved or resized, GTK will call MainWindowConfigured()
-  // above.  The GdkEventConfigure* that it gets doesn't have quite the right
+  // The GdkEventConfigure* we get here doesn't have quite the right
   // coordinates though (they're relative to the drawable window area, rather
   // than any window manager decorations, if enabled), so we need to call
   // gtk_window_get_position() to get the right values.  (Otherwise session
@@ -1321,6 +1287,8 @@ void BrowserWindowGtk::OnBoundsChanged(const gfx::Rect& bounds) {
   window_configure_debounce_timer_.Start(base::TimeDelta::FromMilliseconds(
       kDebounceTimeoutMilliseconds), this,
       &BrowserWindowGtk::OnDebouncedBoundsChanged);
+
+  return FALSE;
 }
 
 void BrowserWindowGtk::OnDebouncedBoundsChanged() {
@@ -1333,12 +1301,12 @@ void BrowserWindowGtk::OnDebouncedBoundsChanged() {
   SaveWindowPosition();
 }
 
-void BrowserWindowGtk::OnStateChanged(GdkWindowState state,
-                                      GdkWindowState changed_mask) {
-  state_ = state;
+gboolean BrowserWindowGtk::OnWindowState(GtkWidget* sender,
+                                         GdkEventWindowState* event) {
+  state_ = event->new_window_state;
 
-  if (changed_mask & GDK_WINDOW_STATE_FULLSCREEN) {
-    bool is_fullscreen = state & GDK_WINDOW_STATE_FULLSCREEN;
+  if (event->changed_mask & GDK_WINDOW_STATE_FULLSCREEN) {
+    bool is_fullscreen = state_ & GDK_WINDOW_STATE_FULLSCREEN;
     browser_->UpdateCommandsForFullscreenMode(is_fullscreen);
     if (is_fullscreen) {
       UpdateCustomFrame();
@@ -1362,6 +1330,35 @@ void BrowserWindowGtk::OnStateChanged(GdkWindowState state,
 
   UpdateWindowShape(bounds_.width(), bounds_.height());
   SaveWindowPosition();
+  return FALSE;
+}
+
+// Callback for the delete event.  This event is fired when the user tries to
+// close the window (e.g., clicking on the X in the window manager title bar).
+gboolean BrowserWindowGtk::OnMainWindowDeleteEvent(GtkWidget* widget,
+                                                   GdkEvent* event) {
+  Close();
+
+  // Return true to prevent the gtk window from being destroyed.  Close will
+  // destroy it for us.
+  return TRUE;
+}
+
+void BrowserWindowGtk::OnMainWindowDestroy(GtkWidget* widget) {
+  // BUG 8712. When we gtk_widget_destroy() in Close(), this will emit the
+  // signal right away, and we will be here (while Close() is still in the
+  // call stack).  In order to not reenter Close(), and to also follow the
+  // expectations of BrowserList, we should run the BrowserWindowGtk destructor
+  // not now, but after the run loop goes back to process messages.  Otherwise
+  // we will remove ourself from BrowserList while it's being iterated.
+  // Additionally, now that we know the window is gone, we need to make sure to
+  // set window_ to NULL, otherwise we will try to close the window again when
+  // we call Close() in the destructor.
+  //
+  // We don't want to use DeleteSoon() here since it won't work on a nested pump
+  // (like in UI tests).
+  MessageLoop::current()->PostTask(FROM_HERE,
+                                   new DeleteTask<BrowserWindowGtk>(this));
 }
 
 void BrowserWindowGtk::UnMaximize() {
@@ -1499,13 +1496,13 @@ void BrowserWindowGtk::SetGeometryHints() {
 
 void BrowserWindowGtk::ConnectHandlersToSignals() {
   g_signal_connect(window_, "delete-event",
-                   G_CALLBACK(MainWindowDeleteEvent), this);
+                   G_CALLBACK(OnMainWindowDeleteEventThunk), this);
   g_signal_connect(window_, "destroy",
-                   G_CALLBACK(MainWindowDestroy), this);
+                   G_CALLBACK(OnMainWindowDestroyThunk), this);
   g_signal_connect(window_, "configure-event",
-                   G_CALLBACK(MainWindowConfigured), this);
+                   G_CALLBACK(OnConfigureThunk), this);
   g_signal_connect(window_, "window-state-event",
-                   G_CALLBACK(MainWindowStateChanged), this);
+                   G_CALLBACK(OnWindowStateThunk), this);
   g_signal_connect(window_, "map",
                    G_CALLBACK(MainWindowMapped), NULL);
   g_signal_connect(window_, "unmap",
@@ -1603,8 +1600,8 @@ void BrowserWindowGtk::InitWidgets() {
                   FALSE, TRUE);
   gtk_box_pack_end(GTK_BOX(render_area_vbox_), contents_split_, TRUE, TRUE, 0);
   // Restore split offset.
-  int split_offset = g_browser_process->local_state()->GetInteger(
-      prefs::kDevToolsSplitLocation);
+  int split_offset = browser_->profile()->GetPrefs()->
+      GetInteger(prefs::kDevToolsSplitLocation);
   if (split_offset != -1) {
     if (split_offset < kMinDevToolsHeight)
       split_offset = kMinDevToolsHeight;
@@ -1646,6 +1643,14 @@ void BrowserWindowGtk::InitWidgets() {
   // Note that calling this the first time is necessary to get the
   // proper control layout.
   UpdateCustomFrame();
+
+  // We have to call this after the first window is created, but after that only
+  // when the theme changes.
+  static bool default_icon_set = false;
+  if (!default_icon_set) {
+    gtk_util::SetDefaultWindowIcon(window_);
+    default_icon_set = true;
+  }
 
   gtk_container_add(GTK_CONTAINER(window_), window_container_);
   gtk_widget_show(window_container_);
@@ -1764,13 +1769,13 @@ void BrowserWindowGtk::SaveWindowPosition() {
   // We also need to save the placement for startup.
   // This is a web of calls between views and delegates on Windows, but the
   // crux of the logic follows.  See also cocoa/browser_window_controller.mm.
-  if (!g_browser_process->local_state())
+  if (!browser_->profile()->GetPrefs())
     return;
 
   std::string window_name = browser_->GetWindowPlacementKey();
   DictionaryValue* window_preferences =
-      g_browser_process->local_state()->GetMutableDictionary(
-          window_name.c_str());
+      browser_->profile()->GetPrefs()->
+          GetMutableDictionary(window_name.c_str());
   // Note that we store left/top for consistency with Windows, but that we
   // *don't* obey them; we only use them for computing width/height.  See
   // comments in SetGeometryHints().
@@ -2061,7 +2066,7 @@ gboolean BrowserWindowGtk::OnButtonPressEvent(GtkWidget* widget,
     return TRUE;
   } else if (event->button == 3) {
     if (has_hit_titlebar) {
-      titlebar_->ShowContextMenu();
+      titlebar_->ShowContextMenu(event);
       return TRUE;
     }
   }

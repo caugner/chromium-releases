@@ -35,7 +35,6 @@
 #if defined(OS_WIN)
 #include <windows.h>
 
-#include "webkit/tools/test_shell/drag_delegate.h"
 #include "webkit/tools/test_shell/drop_delegate.h"
 #endif
 
@@ -138,8 +137,6 @@ class TestWebViewDelegate : public WebKit::WebViewClient,
   virtual void navigateBackForwardSoon(int offset);
   virtual int historyBackListCount();
   virtual int historyForwardListCount();
-  virtual void focusAccessibilityObject(
-      const WebKit::WebAccessibilityObject& object);
   virtual WebKit::WebNotificationPresenter* notificationPresenter();
   virtual WebKit::WebGeolocationClient* geolocationClient();
   virtual WebKit::WebDeviceOrientationClient* deviceOrientationClient();
@@ -226,18 +223,10 @@ class TestWebViewDelegate : public WebKit::WebViewClient,
   virtual void didFailResourceLoad(
       WebKit::WebFrame*, unsigned identifier, const WebKit::WebURLError&);
   virtual void didDisplayInsecureContent(WebKit::WebFrame* frame);
-
-  // We have two didRunInsecureContent's with the same name. That's because
-  // we're in the process of adding an argument and one of them will be correct.
-  // Once the WebKit change is in, the first should be removed the the second
-  // should be tagged with OVERRIDE.
-  virtual void didRunInsecureContent(
-      WebKit::WebFrame* frame, const WebKit::WebSecurityOrigin& origin);
   virtual void didRunInsecureContent(
       WebKit::WebFrame* frame,
       const WebKit::WebSecurityOrigin& origin,
       const WebKit::WebURL& target_url);
-
   virtual bool allowScript(WebKit::WebFrame* frame, bool enabled_per_settings);
   virtual void openFileSystem(
       WebKit::WebFrame* frame,
@@ -276,7 +265,6 @@ class TestWebViewDelegate : public WebKit::WebViewClient,
   WebKit::WebFrame* top_loading_frame() { return top_loading_frame_; }
 #if defined(OS_WIN)
   IDropTarget* drop_delegate() { return drop_delegate_.get(); }
-  IDropSource* drag_delegate() { return drag_delegate_.get(); }
 #endif
   const CapturedContextMenuEvents& captured_context_menu_events() const {
     return captured_context_menu_events_;
@@ -427,7 +415,6 @@ class TestWebViewDelegate : public WebKit::WebViewClient,
 
 #if defined(OS_WIN)
   // Classes needed by drag and drop.
-  scoped_refptr<TestDragDelegate> drag_delegate_;
   scoped_refptr<TestDropDelegate> drop_delegate_;
 #endif
 

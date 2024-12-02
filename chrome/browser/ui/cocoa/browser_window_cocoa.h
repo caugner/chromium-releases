@@ -49,6 +49,7 @@ class BrowserWindowCocoa : public BrowserWindow,
   virtual void UpdateLoadingAnimations(bool should_animate);
   virtual void SetStarredState(bool is_starred);
   virtual gfx::Rect GetRestoredBounds() const;
+  virtual gfx::Rect GetBounds() const;
   virtual bool IsMaximized() const;
   virtual void SetFullscreen(bool fullscreen);
   virtual bool IsFullscreen() const;
@@ -70,7 +71,7 @@ class BrowserWindowCocoa : public BrowserWindow,
   virtual void ConfirmAddSearchProvider(const TemplateURL* template_url,
                                         Profile* profile);
   virtual void ToggleBookmarkBar();
-  virtual views::Window* ShowAboutChromeDialog();
+  virtual void ShowAboutChromeDialog();
   virtual void ShowUpdateChromeDialog();
   virtual void ShowTaskManager();
   virtual void ShowBackgroundPages();
@@ -113,9 +114,6 @@ class BrowserWindowCocoa : public BrowserWindow,
   virtual void ShowInstant(TabContents* preview_contents);
   virtual void HideInstant(bool instant_is_active);
   virtual gfx::Rect GetInstantBounds();
-
-  virtual gfx::Rect GrabWindowSnapshot(std::vector<unsigned char>*
-                                       png_representation);
 
   // Overridden from NotificationObserver
   virtual void Observe(NotificationType type,

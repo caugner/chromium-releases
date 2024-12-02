@@ -21,11 +21,11 @@
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/automation/window_proxy.h"
 #include "chrome/test/ui/ui_test.h"
-#include "gfx/native_widget_types.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "net/base/net_util.h"
 #include "net/test/test_server.h"
+#include "ui/gfx/native_widget_types.h"
 
 namespace {
 
@@ -102,7 +102,8 @@ TEST_F(BrowserTest, NullOpenerRedirectForksProcess) {
   tab->NavigateToURL(net::FilePathToFileURL(test_file));
   int orig_tab_count = -1;
   ASSERT_TRUE(window->GetTabCount(&orig_tab_count));
-  int orig_process_count = GetBrowserProcessCount();
+  int orig_process_count = 0;
+  ASSERT_TRUE(GetBrowserProcessCount(&orig_process_count));
   ASSERT_GE(orig_process_count, 1);
 
   // Use JavaScript URL to "fork" a new tab, just like Gmail.  (Open tab to a
@@ -115,7 +116,9 @@ TEST_F(BrowserTest, NullOpenerRedirectForksProcess) {
   // process for it.
   ASSERT_TRUE(tab->NavigateToURLAsync(fork_url));
   PlatformThread::Sleep(TestTimeouts::action_timeout_ms());
-  ASSERT_EQ(orig_process_count + 1, GetBrowserProcessCount());
+  int process_count = 0;
+  ASSERT_TRUE(GetBrowserProcessCount(&process_count));
+  ASSERT_EQ(orig_process_count + 1, process_count);
   int new_tab_count = -1;
   ASSERT_TRUE(window->GetTabCount(&new_tab_count));
   ASSERT_EQ(orig_tab_count + 1, new_tab_count);
@@ -154,7 +157,8 @@ TEST_F(BrowserTest, MAYBE_OtherRedirectsDontForkProcess) {
             tab->NavigateToURL(net::FilePathToFileURL(test_file)));
   int orig_tab_count = -1;
   ASSERT_TRUE(window->GetTabCount(&orig_tab_count));
-  int orig_process_count = GetBrowserProcessCount();
+  int orig_process_count = 0;
+  ASSERT_TRUE(GetBrowserProcessCount(&orig_process_count));
   ASSERT_GE(orig_process_count, 1);
 
   // Use JavaScript URL to almost fork a new tab, but not quite.  (Leave the
@@ -168,7 +172,9 @@ TEST_F(BrowserTest, MAYBE_OtherRedirectsDontForkProcess) {
   // Make sure that a new tab but not new process has been created.
   ASSERT_TRUE(tab->NavigateToURLAsync(dont_fork_url));
   base::PlatformThread::Sleep(TestTimeouts::action_timeout_ms());
-  ASSERT_EQ(orig_process_count, GetBrowserProcessCount());
+  int process_count = 0;
+  ASSERT_TRUE(GetBrowserProcessCount(&process_count));
+  ASSERT_EQ(orig_process_count, process_count);
   int new_tab_count = -1;
   ASSERT_TRUE(window->GetTabCount(&new_tab_count));
   ASSERT_EQ(orig_tab_count + 1, new_tab_count);
@@ -183,7 +189,8 @@ TEST_F(BrowserTest, MAYBE_OtherRedirectsDontForkProcess) {
   // Make sure that no new process has been created.
   ASSERT_TRUE(tab->NavigateToURLAsync(dont_fork_url2));
   base::PlatformThread::Sleep(TestTimeouts::action_timeout_ms());
-  ASSERT_EQ(orig_process_count, GetBrowserProcessCount());
+  ASSERT_TRUE(GetBrowserProcessCount(&process_count));
+  ASSERT_EQ(orig_process_count, process_count);
 }
 
 TEST_F(VisibleBrowserTest, WindowOpenClose) {
@@ -203,6 +210,7 @@ class ShowModalDialogTest : public UITest {
 };
 
 // Flakiness returned. Re-opened crbug.com/17806
+// TODO(estade): remove flaky label if prospective fix works.
 TEST_F(ShowModalDialogTest, FLAKY_BasicTest) {
   FilePath test_file(test_data_directory_);
   test_file = test_file.AppendASCII("showmodaldialog.html");
@@ -210,11 +218,7 @@ TEST_F(ShowModalDialogTest, FLAKY_BasicTest) {
   // This navigation should show a modal dialog that will be immediately
   // closed, but the fact that it was shown should be recorded.
   NavigateToURL(net::FilePathToFileURL(test_file));
-
-  // At this point the modal dialog should not be showing.
-  int window_count = 0;
-  EXPECT_TRUE(automation()->GetBrowserWindowCount(&window_count));
-  EXPECT_EQ(1, window_count);
+  ASSERT_TRUE(automation()->WaitForWindowCountToBecome(1));
 
   // Verify that we set a mark on successful dialog show.
   scoped_refptr<BrowserProxy> browser = automation()->GetBrowserWindow(0);

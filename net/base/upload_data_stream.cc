@@ -12,6 +12,8 @@
 
 namespace net {
 
+bool UploadDataStream::merge_chunks_ = true;
+
 UploadDataStream::~UploadDataStream() {
 }
 
@@ -26,13 +28,15 @@ UploadDataStream* UploadDataStream::Create(UploadData* data, int* error_code) {
   return stream.release();
 }
 
-void UploadDataStream::DidConsume(size_t num_bytes) {
+void UploadDataStream::MarkConsumedAndFillBuffer(size_t num_bytes) {
   DCHECK_LE(num_bytes, buf_len_);
   DCHECK(!eof_);
 
-  buf_len_ -= num_bytes;
-  if (buf_len_)
-    memmove(buf_->data(), buf_->data() + num_bytes, buf_len_);
+  if (num_bytes) {
+    buf_len_ -= num_bytes;
+    if (buf_len_)
+      memmove(buf_->data(), buf_->data() + num_bytes, buf_len_);
+  }
 
   FillBuf();
 
@@ -43,32 +47,37 @@ UploadDataStream::UploadDataStream(UploadData* data)
     : data_(data),
       buf_(new IOBuffer(kBufSize)),
       buf_len_(0),
-      next_element_(data->elements()->begin()),
+      next_element_(0),
       next_element_offset_(0),
       next_element_remaining_(0),
-      total_size_(data->GetContentLength()),
+      total_size_(data->is_chunked() ? 0 : data->GetContentLength()),
       current_position_(0),
       eof_(false) {
 }
 
 int UploadDataStream::FillBuf() {
-  std::vector<UploadData::Element>::iterator end =
-      data_->elements()->end();
+  std::vector<UploadData::Element>& elements = *data_->elements();
 
-  while (buf_len_ < kBufSize && next_element_ != end) {
+  while (buf_len_ < kBufSize && next_element_ < elements.size()) {
     bool advance_to_next_element = false;
 
-    UploadData::Element& element = *next_element_;
+    UploadData::Element& element = elements[next_element_];
 
     size_t size_remaining = kBufSize - buf_len_;
-    if (element.type() == UploadData::TYPE_BYTES) {
+    if (element.type() == UploadData::TYPE_BYTES ||
+        element.type() == UploadData::TYPE_CHUNK) {
       const std::vector<char>& d = element.bytes();
       size_t count = d.size() - next_element_offset_;
 
       size_t bytes_copied = std::min(count, size_remaining);
 
-      memcpy(buf_->data() + buf_len_, &d[next_element_offset_], bytes_copied);
-      buf_len_ += bytes_copied;
+      // Check if we have anything to copy first, because we are getting the
+      // address of an element in |d| and that will throw an exception if |d|
+      // is an empty vector.
+      if (bytes_copied) {
+        memcpy(buf_->data() + buf_len_, &d[next_element_offset_], bytes_copied);
+        buf_len_ += bytes_copied;
+      }
 
       if (bytes_copied == count) {
         advance_to_next_element = true;
@@ -124,12 +133,28 @@ int UploadDataStream::FillBuf() {
       next_element_remaining_ = 0;
       next_element_stream_.reset();
     }
+
+    if (is_chunked() && !merge_chunks_)
+      break;
   }
 
-  if (next_element_ == end && !buf_len_)
-    eof_ = true;
+  if (next_element_ == elements.size() && !buf_len_) {
+    if (!data_->is_chunked() ||
+        (!elements.empty() && elements.back().is_last_chunk())) {
+      eof_ = true;
+    }
+  }
 
   return OK;
+}
+
+bool UploadDataStream::IsOnLastChunk() const {
+  const std::vector<UploadData::Element>& elements = *data_->elements();
+  DCHECK(data_->is_chunked());
+  return (eof_ ||
+          (!elements.empty() &&
+           next_element_ == elements.size() &&
+           elements.back().is_last_chunk()));
 }
 
 }  // namespace net

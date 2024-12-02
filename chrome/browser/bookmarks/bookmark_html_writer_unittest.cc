@@ -14,13 +14,14 @@
 #include "base/i18n/time_formatting.h"
 #include "chrome/browser/bookmarks/bookmark_html_writer.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
-#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/importer/firefox2_importer.h"
+#include "chrome/test/testing_browser_process_test.h"
 #include "chrome/test/testing_profile.h"
-#include "gfx/codec/png_codec.h"
+#include "content/browser/browser_thread.h"
 #include "grit/generated_resources.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/gfx/codec/png_codec.h"
 
 namespace {
 
@@ -39,7 +40,7 @@ void MakeTestSkBitmap(int w, int h, SkBitmap* bmp) {
 
 }  // namespace
 
-class BookmarkHTMLWriterTest : public testing::Test {
+class BookmarkHTMLWriterTest : public TestingBrowserProcessTest {
  protected:
   virtual void SetUp() {
     ASSERT_TRUE(PathService::Get(base::DIR_TEMP, &path_));

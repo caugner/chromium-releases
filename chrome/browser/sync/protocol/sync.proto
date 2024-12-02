@@ -4,12 +4,17 @@
 //
 // Sync protocol for communication between sync client and server.
 
+// Update proto_value_conversions{.h,.cc,_unittest.cc} if you change
+// any fields in this file.
+
 syntax = "proto2";
 
 option optimize_for = LITE_RUNTIME;
 option retain_unknown_fields = true;
 
 package sync_pb;
+
+import "encryption.proto";
 
 // Used for inspecting how long we spent performing operations in different
 // backends. All times must be in millis.
@@ -23,6 +28,13 @@ message ProfilingData {
 }
 
 message EntitySpecifics {
+  // If a datatype is encrypted, this field will contain the encrypted
+  // original EntitySpecifics. The extension for the datatype will continue
+  // to exist, but contain only the default values.
+  // Note that currently passwords employ their own legacy encryption scheme and
+  // do not use this field.
+  optional EncryptedData encrypted = 1;
+
   // To add new datatype-specific fields to the protocol, extend
   // EntitySpecifics.  First, pick a non-colliding tag number by
   // picking a revision number of one of your past commits
@@ -263,7 +275,7 @@ message GetUpdatesCallerInfo {
                                   // continuation of a previous update.
     CLEAR_PRIVATE_DATA = 6;       // Source is a call to remove all private data                                  
   }
-  
+
   required GetUpdatesSource source = 1;
 
   // True only if notifications were enabled for this GetUpdateMessage.
@@ -306,6 +318,11 @@ message DataTypeProgressMarker {
   // will perform a get updates operation as normal from the indicated
   // timestamp, and return only an opaque progress token.
   optional int64 timestamp_token_for_migration = 3;
+
+  // An opaque-to-the-client string of bytes, received through a notification,
+  // that the server may interpret as a hint about the location of the latest
+  // version of the data for this type.
+  optional string notification_hint = 4;
 }
 
 message GetUpdatesMessage {
@@ -363,7 +380,7 @@ message ClearUserDataResponse {
 
 message ClientToServerMessage {
   required string share = 1;
-  optional int32 protocol_version = 2 [default = 25];
+  optional int32 protocol_version = 2 [default = 26];
   enum Contents {
     COMMIT = 1;
     GET_UPDATES = 2;

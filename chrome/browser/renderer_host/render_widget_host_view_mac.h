@@ -15,10 +15,10 @@
 #include "base/time.h"
 #include "chrome/browser/accessibility/browser_accessibility_delegate_mac.h"
 #include "chrome/browser/accessibility/browser_accessibility_manager.h"
-#include "chrome/browser/renderer_host/accelerated_surface_container_manager_mac.h"
-#include "chrome/browser/renderer_host/render_widget_host_view.h"
 #include "chrome/browser/ui/cocoa/base_view.h"
 #include "chrome/common/edit_command.h"
+#include "content/browser/renderer_host/accelerated_surface_container_manager_mac.h"
+#include "content/browser/renderer_host/render_widget_host_view.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebCompositionUnderline.h"
 #include "webkit/glue/webcursor.h"
 
@@ -182,7 +182,7 @@ class RenderWidgetHostViewMac : public RenderWidgetHostView {
   // Implementation of RenderWidgetHostView:
   virtual void InitAsPopup(RenderWidgetHostView* parent_host_view,
                            const gfx::Rect& pos);
-  virtual void InitAsFullscreen(RenderWidgetHostView* parent_host_view);
+  virtual void InitAsFullscreen();
   virtual RenderWidgetHost* GetRenderWidgetHost() const;
   virtual void DidBecomeSelected();
   virtual void WasHidden();
@@ -213,7 +213,8 @@ class RenderWidgetHostViewMac : public RenderWidgetHostView {
   virtual void SelectionChanged(const std::string& text);
   virtual BackingStore* AllocBackingStore(const gfx::Size& size);
   virtual void SetTakesFocusOnlyOnMouseDown(bool flag);
-  virtual gfx::Rect GetWindowRect();
+  // See comment in RenderWidgetHostView!
+  virtual gfx::Rect GetViewCocoaBounds() const;
   virtual gfx::Rect GetRootWindowRect();
   virtual void SetActive(bool active);
   virtual void SetWindowVisibility(bool visible);
@@ -257,10 +258,15 @@ class RenderWidgetHostViewMac : public RenderWidgetHostView {
   virtual void AcceleratedSurfaceBuffersSwapped(
       gfx::PluginWindowHandle window,
       uint64 surface_id,
-      int32 renderer_id,
+      int renderer_id,
       int32 route_id,
+      int gpu_host_id,
       uint64 swap_buffers_count);
   virtual void GpuRenderingStateDidChange();
+
+  virtual gfx::PluginWindowHandle AcquireCompositingSurface();
+  virtual void ReleaseCompositingSurface(gfx::PluginWindowHandle surface);
+
   void DrawAcceleratedSurfaceInstance(
       CGLContextObj context,
       gfx::PluginWindowHandle plugin_handle,
@@ -292,6 +298,7 @@ class RenderWidgetHostViewMac : public RenderWidgetHostView {
   // process a notion of how quickly the browser is able to keep up with it.
   void AcknowledgeSwapBuffers(int renderer_id,
                               int32 route_id,
+                              int gpu_host_id,
                               uint64 swap_buffers_count);
 
   // These member variables should be private, but the associated ObjC class

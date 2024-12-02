@@ -5,6 +5,7 @@
 #include "base/basictypes.h"
 #include "chrome/browser/sync/sync_ui_util.h"
 #include "chrome/browser/sync/profile_sync_service_mock.h"
+#include "content/browser/browser_thread.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gmock/include/gmock/gmock-actions.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -12,6 +13,8 @@
 using ::testing::Return;
 using ::testing::NiceMock;
 TEST(SyncUIUtilTest, ConstructAboutInformationWithUnrecoverableErrorTest) {
+  MessageLoopForUI message_loop;
+  BrowserThread ui_thread(BrowserThread::UI, &message_loop);
   NiceMock<ProfileSyncServiceMock> service;
   DictionaryValue strings;
 

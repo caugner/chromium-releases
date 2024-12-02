@@ -5,10 +5,10 @@
 #include "views/controls/menu/menu_item_view.h"
 
 #include "base/utf_string_conversions.h"
-#include "gfx/canvas.h"
 #include "grit/app_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/menu_model.h"
+#include "ui/gfx/canvas.h"
 #include "views/controls/button/text_button.h"
 #include "views/controls/button/menu_button.h"
 #include "views/controls/menu/menu_config.h"
@@ -39,6 +39,11 @@ class EmptyMenuMenuItem : public MenuItemView {
     // Set this so that we're not identified as a normal menu item.
     SetID(kEmptyMenuItemViewID);
     SetEnabled(false);
+  }
+
+  virtual bool GetTooltipText(const gfx::Point& p, std::wstring* tooltip) {
+    // Empty menu items shouldn't have a tooltip.
+    return false;
   }
 
  private:
@@ -99,7 +104,16 @@ MenuItemView::~MenuItemView() {
 
 bool MenuItemView::GetTooltipText(const gfx::Point& p, std::wstring* tooltip) {
   *tooltip = UTF16ToWideHack(tooltip_);
-  return !tooltip_.empty();
+  if (!tooltip->empty())
+    return true;
+  if (GetType() != SEPARATOR) {
+    gfx::Point location(p);
+    ConvertPointToScreen(this, &location);
+    *tooltip = GetDelegate()->GetTooltipText(command_, location);
+    if (!tooltip->empty())
+      return true;
+  }
+  return false;
 }
 
 AccessibilityTypes::Role MenuItemView::GetAccessibleRole() {
@@ -304,9 +318,18 @@ SubmenuView* MenuItemView::CreateSubmenu() {
   return submenu_;
 }
 
+bool MenuItemView::HasSubmenu() const {
+  return (submenu_ != NULL);
+}
+
+SubmenuView* MenuItemView::GetSubmenu() const {
+  return submenu_;
+}
+
 void MenuItemView::SetTitle(const std::wstring& title) {
   title_ = WideToUTF16Hack(title);
   SetAccessibleName(GetAccessibleNameForMenuItem(title_, GetAcceleratorText()));
+  pref_size_.SetSize(0, 0);  // Triggers preferred size recalculation.
 }
 
 void MenuItemView::SetSelected(bool selected) {
@@ -331,8 +354,14 @@ void MenuItemView::SetIcon(const SkBitmap& icon) {
   SchedulePaint();
 }
 
-void MenuItemView::Paint(gfx::Canvas* canvas) {
-  Paint(canvas, false);
+void MenuItemView::OnPaint(gfx::Canvas* canvas) {
+  PaintButton(canvas, PB_NORMAL);
+}
+
+gfx::Size MenuItemView::GetPreferredSize() {
+  if (pref_size_.IsEmpty())
+    pref_size_ = CalculatePreferredSize();
+  return pref_size_;
 }
 
 MenuController* MenuItemView::GetMenuController() {
@@ -379,7 +408,7 @@ MenuItemView* MenuItemView::GetMenuItemByID(int id) {
     return this;
   if (!HasSubmenu())
     return NULL;
-  for (int i = 0; i < GetSubmenu()->GetChildViewCount(); ++i) {
+  for (int i = 0; i < GetSubmenu()->child_count(); ++i) {
     View* child = GetSubmenu()->GetChildViewAt(i);
     if (child->GetID() == MenuItemView::kMenuItemViewID) {
       MenuItemView* result = static_cast<MenuItemView*>(child)->
@@ -414,13 +443,13 @@ void MenuItemView::ChildrenChanged() {
 }
 
 void MenuItemView::Layout() {
-  int child_count = GetChildViewCount();
-  if (child_count == 0)
+  if (!has_children())
     return;
 
-  // Child views are layed out right aligned and given the full height. To right
+  // Child views are laid out right aligned and given the full height. To right
   // align start with the last view and progress to the first.
-  for (int i = child_count - 1, x = width() - item_right_margin_; i >= 0; --i) {
+  for (int i = child_count() - 1, x = width() - item_right_margin_; i >= 0;
+       --i) {
     View* child = GetChildViewAt(i);
     int width = child->GetPreferredSize().width();
     child->SetBounds(x - width, 0, width, height());
@@ -560,8 +589,8 @@ int MenuItemView::GetDrawStringFlags() {
 
 void MenuItemView::AddEmptyMenus() {
   DCHECK(HasSubmenu());
-  if (submenu_->GetChildViewCount() == 0) {
-    submenu_->AddChildView(0, new EmptyMenuMenuItem(this));
+  if (!submenu_->has_children()) {
+    submenu_->AddChildViewAt(new EmptyMenuMenuItem(this), 0);
   } else {
     for (int i = 0, item_count = submenu_->GetMenuItemCount(); i < item_count;
          ++i) {
@@ -576,7 +605,7 @@ void MenuItemView::RemoveEmptyMenus() {
   DCHECK(HasSubmenu());
   // Iterate backwards as we may end up removing views, which alters the child
   // view count.
-  for (int i = submenu_->GetChildViewCount() - 1; i >= 0; --i) {
+  for (int i = submenu_->child_count() - 1; i >= 0; --i) {
     View* child = submenu_->GetChildViewAt(i);
     if (child->GetID() == MenuItemView::kMenuItemViewID) {
       MenuItemView* menu_item = static_cast<MenuItemView*>(child);
@@ -589,7 +618,7 @@ void MenuItemView::RemoveEmptyMenus() {
 }
 
 void MenuItemView::AdjustBoundsForRTLUI(gfx::Rect* rect) const {
-  rect->set_x(MirroredLeftPointForRect(*rect));
+  rect->set_x(GetMirroredXForRect(*rect));
 }
 
 void MenuItemView::PaintAccelerator(gfx::Canvas* canvas) {
@@ -603,7 +632,7 @@ void MenuItemView::PaintAccelerator(gfx::Canvas* canvas) {
       parent_menu_item_->GetSubmenu()->max_accelerator_width();
   gfx::Rect accel_bounds(width() - item_right_margin_ - max_accel_width,
                          GetTopMargin(), max_accel_width, available_height);
-  accel_bounds.set_x(MirroredLeftPointForRect(accel_bounds));
+  accel_bounds.set_x(GetMirroredXForRect(accel_bounds));
   int flags = GetRootMenuItem()->GetDrawStringFlags() |
       gfx::Canvas::TEXT_VALIGN_MIDDLE;
   flags &= ~(gfx::Canvas::TEXT_ALIGN_RIGHT | gfx::Canvas::TEXT_ALIGN_LEFT);
@@ -643,12 +672,11 @@ int MenuItemView::GetBottomMargin() {
 }
 
 int MenuItemView::GetChildPreferredWidth() {
-  int child_count = GetChildViewCount();
-  if (child_count == 0)
+  if (!has_children())
     return 0;
 
   int width = 0;
-  for (int i = 0; i < child_count; ++i) {
+  for (int i = 0; i < child_count(); ++i) {
     if (i)
       width += kChildXPadding;
     width += GetChildViewAt(i)->GetPreferredSize().width();
