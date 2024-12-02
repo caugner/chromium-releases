@@ -15,6 +15,7 @@
 #include "chromeos/ime/input_method_manager.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_utils.h"
+#include "extensions/browser/process_manager.h"
 #include "extensions/common/manifest_handlers/background_info.h"
 #include "ui/base/ime/chromeos/ime_bridge.h"
 #include "ui/base/ime/chromeos/mock_ime_candidate_window_handler.h"
@@ -65,17 +66,6 @@ class InputMethodEngineBrowserTest
     extension_ = LoadExtensionWithType("input_ime", GetParam());
     ASSERT_TRUE(extension_);
     ASSERT_TRUE(ime_ready_listener.WaitUntilSatisfied());
-
-    // Make sure ComponentExtensionIMEManager is initialized.
-    // ComponentExtensionIMEManagerImpl::InitializeAsync posts
-    // ReadComponentExtensionsInfo to the FILE thread for the
-    // initialization.  If it is never initialized for some reasons,
-    // the test is timed out and failed.
-    ComponentExtensionIMEManager* ceimm =
-        InputMethodManager::Get()->GetComponentExtensionIMEManager();
-    while (!ceimm->IsInitialized()) {
-      content::RunAllPendingInMessageLoop(content::BrowserThread::FILE);
-    }
 
     // Extension IMEs are not enabled by default.
     std::vector<std::string> extension_ime_ids;
@@ -172,7 +162,7 @@ IN_PROC_BROWSER_TEST_P(InputMethodEngineBrowserTest,
 
   // onActivate event should be fired if Enable function is called.
   ExtensionTestMessageListener activated_listener("onActivate", false);
-  engine_handler->Enable();
+  engine_handler->Enable("IdentityIME");
   ASSERT_TRUE(activated_listener.WaitUntilSatisfied());
   ASSERT_TRUE(activated_listener.was_satisfied());
 
@@ -187,7 +177,7 @@ IN_PROC_BROWSER_TEST_P(InputMethodEngineBrowserTest,
   // onKeyEvent should be fired if ProcessKeyEvent is called.
   KeyEventDoneCallback callback(false);  // EchoBackIME doesn't consume keys.
   ExtensionTestMessageListener keyevent_listener("onKeyEvent", false);
-  ui::KeyEvent key_event(ui::ET_KEY_PRESSED, ui::VKEY_A, ui::EF_NONE, false);
+  ui::KeyEvent key_event(ui::ET_KEY_PRESSED, ui::VKEY_A, ui::EF_NONE);
   engine_handler->ProcessKeyEvent(key_event,
                                   base::Bind(&KeyEventDoneCallback::Run,
                                              base::Unretained(&callback)));
@@ -250,12 +240,13 @@ IN_PROC_BROWSER_TEST_P(InputMethodEngineBrowserTest,
       IMEBridge::Get()->GetCurrentEngineHandler();
   ASSERT_TRUE(engine_handler);
 
-  extensions::ExtensionHost* host = FindHostWithPath(
-      extensions::ExtensionSystem::Get(profile())->process_manager(),
-      extensions::BackgroundInfo::GetBackgroundURL(extension_).path(),
-      1);
+  extensions::ExtensionHost* host =
+      extensions::ExtensionSystem::Get(profile())
+          ->process_manager()
+          ->GetBackgroundHostForExtension(extension_->id());
+  ASSERT_TRUE(host);
 
-  engine_handler->Enable();
+  engine_handler->Enable("APIArgumentIME");
   IMEEngineHandlerInterface::InputContext context(ui::TEXT_INPUT_TYPE_TEXT,
                                                   ui::TEXT_INPUT_MODE_DEFAULT);
   engine_handler->FocusIn(context);
@@ -268,7 +259,7 @@ IN_PROC_BROWSER_TEST_P(InputMethodEngineBrowserTest,
     ExtensionTestMessageListener keyevent_listener(expected_value, false);
 
     ui::KeyEvent key_event(
-        ui::ET_KEY_PRESSED, ui::VKEY_A, "KeyA", ui::EF_NONE, false);
+        ui::ET_KEY_PRESSED, ui::VKEY_A, "KeyA", ui::EF_NONE);
     engine_handler->ProcessKeyEvent(key_event,
                                     base::Bind(&KeyEventDoneCallback::Run,
                                                base::Unretained(&callback)));
@@ -286,8 +277,7 @@ IN_PROC_BROWSER_TEST_P(InputMethodEngineBrowserTest,
     ui::KeyEvent key_event(ui::ET_KEY_PRESSED,
                            ui::VKEY_A,
                            "KeyA",
-                           ui::EF_CONTROL_DOWN,
-                           false);
+                           ui::EF_CONTROL_DOWN);
     engine_handler->ProcessKeyEvent(key_event,
                                     base::Bind(&KeyEventDoneCallback::Run,
                                                base::Unretained(&callback)));
@@ -305,8 +295,7 @@ IN_PROC_BROWSER_TEST_P(InputMethodEngineBrowserTest,
     ui::KeyEvent key_event(ui::ET_KEY_PRESSED,
                            ui::VKEY_A,
                            "KeyA",
-                           ui::EF_ALT_DOWN,
-                           false);
+                           ui::EF_ALT_DOWN);
     engine_handler->ProcessKeyEvent(key_event,
                                     base::Bind(&KeyEventDoneCallback::Run,
                                                base::Unretained(&callback)));
@@ -324,8 +313,7 @@ IN_PROC_BROWSER_TEST_P(InputMethodEngineBrowserTest,
     ui::KeyEvent key_event(ui::ET_KEY_PRESSED,
                            ui::VKEY_A,
                            "KeyA",
-                           ui::EF_SHIFT_DOWN,
-                           false);
+                           ui::EF_SHIFT_DOWN);
     engine_handler->ProcessKeyEvent(key_event,
                                     base::Bind(&KeyEventDoneCallback::Run,
                                                base::Unretained(&callback)));
@@ -343,8 +331,7 @@ IN_PROC_BROWSER_TEST_P(InputMethodEngineBrowserTest,
     ui::KeyEvent key_event(ui::ET_KEY_PRESSED,
                            ui::VKEY_A,
                            "KeyA",
-                           ui::EF_CAPS_LOCK_DOWN,
-                           false);
+                           ui::EF_CAPS_LOCK_DOWN);
     engine_handler->ProcessKeyEvent(key_event,
                                     base::Bind(&KeyEventDoneCallback::Run,
                                                base::Unretained(&callback)));
@@ -362,8 +349,7 @@ IN_PROC_BROWSER_TEST_P(InputMethodEngineBrowserTest,
     ui::KeyEvent key_event(ui::ET_KEY_PRESSED,
                            ui::VKEY_A,
                            "KeyA",
-                           ui::EF_ALT_DOWN | ui::EF_CONTROL_DOWN,
-                           false);
+                           ui::EF_ALT_DOWN | ui::EF_CONTROL_DOWN);
     engine_handler->ProcessKeyEvent(key_event,
                                     base::Bind(&KeyEventDoneCallback::Run,
                                                base::Unretained(&callback)));
@@ -381,8 +367,7 @@ IN_PROC_BROWSER_TEST_P(InputMethodEngineBrowserTest,
     ui::KeyEvent key_event(ui::ET_KEY_PRESSED,
                            ui::VKEY_A,
                            "KeyA",
-                           ui::EF_SHIFT_DOWN | ui::EF_CAPS_LOCK_DOWN,
-                           false);
+                           ui::EF_SHIFT_DOWN | ui::EF_CAPS_LOCK_DOWN);
     engine_handler->ProcessKeyEvent(key_event,
                                     base::Bind(&KeyEventDoneCallback::Run,
                                                base::Unretained(&callback)));

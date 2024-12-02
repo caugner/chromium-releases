@@ -24,8 +24,6 @@
 #include "build/build_config.h"
 #include "chrome/browser/component_updater/component_updater_service.h"
 #include "chrome/browser/component_updater/default_component_installer.h"
-#include "chrome/browser/plugins/plugin_prefs.h"
-#include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/widevine_cdm_constants.h"
@@ -128,7 +126,9 @@ bool MakeWidevineCdmPluginInfo(
   plugin_info->is_out_of_process = true;
   plugin_info->path = path;
   plugin_info->name = kWidevineCdmDisplayName;
-  plugin_info->description = kWidevineCdmDescription;
+  plugin_info->description = kWidevineCdmDescription +
+                             std::string(" (version: ") + version.GetString() +
+                             ")";
   plugin_info->version = version.GetString();
   content::WebPluginMimeType widevine_cdm_mime_type(
       kWidevineCdmPluginMimeType,

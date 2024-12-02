@@ -6,6 +6,7 @@
 
 #include "android_webview/browser/browser_view_renderer_client.h"
 #include "android_webview/browser/shared_renderer_state.h"
+#include "android_webview/common/aw_switches.h"
 #include "android_webview/public/browser/draw_gl.h"
 #include "base/android/jni_android.h"
 #include "base/auto_reset.h"
@@ -73,7 +74,17 @@ class TracedValue : public base::debug::ConvertableToTraceFormat {
 }  // namespace
 
 // static
-void BrowserViewRenderer::CalculateTileMemoryPolicy() {
+void BrowserViewRenderer::CalculateTileMemoryPolicy(bool use_zero_copy) {
+  if (!use_zero_copy) {
+    // Use chrome's default tile size, which varies from 256 to 512.
+    // Be conservative here and use the smallest tile size possible.
+    g_tile_area = 256 * 256;
+
+    // Also use a high tile limit since there are no file descriptor issues.
+    GlobalTileManager::GetInstance()->SetTileLimit(1000);
+    return;
+  }
+
   CommandLine* cl = CommandLine::ForCurrentProcess();
   const char kDefaultTileSize[] = "384";
 
@@ -126,8 +137,7 @@ BrowserViewRenderer::~BrowserViewRenderer() {
   // policy should have already been updated.
 }
 
-// This function updates the cached memory policy in shared renderer state, as
-// well as the tile resource allocation in GlobalTileManager.
+// This function updates the resource allocation in GlobalTileManager.
 void BrowserViewRenderer::TrimMemory(const int level, const bool visible) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   // Constants from Android ComponentCallbacks2.
@@ -192,8 +202,6 @@ void BrowserViewRenderer::RequestMemoryPolicy(
 
 void BrowserViewRenderer::SetNumTiles(size_t num_tiles,
                                       bool effective_immediately) {
-  if (num_tiles == num_tiles_)
-    return;
   num_tiles_ = num_tiles;
 
   memory_policy_.num_resources_limit = num_tiles_;
@@ -223,8 +231,11 @@ bool BrowserViewRenderer::OnDraw(jobject java_canvas,
   if (clear_view_)
     return false;
 
-  if (is_hardware_canvas && attached_to_window_)
+  if (is_hardware_canvas && attached_to_window_ &&
+      !switches::ForceAuxiliaryBitmap()) {
     return OnDrawHardware(java_canvas);
+  }
+
   // Perform a software draw
   return OnDrawSoftware(java_canvas);
 }
@@ -232,6 +243,11 @@ bool BrowserViewRenderer::OnDraw(jobject java_canvas,
 bool BrowserViewRenderer::OnDrawHardware(jobject java_canvas) {
   if (!compositor_)
     return false;
+
+  if (last_on_draw_global_visible_rect_.IsEmpty()) {
+    shared_renderer_state_->SetForceInvalidateOnNextDrawGL(true);
+    return client_->RequestDrawGL(java_canvas, false);
+  }
 
   if (!hardware_enabled_) {
     hardware_enabled_ = compositor_->InitializeHwDraw();
@@ -255,14 +271,29 @@ bool BrowserViewRenderer::OnDrawHardware(jobject java_canvas) {
   draw_gl_input->width = width_;
   draw_gl_input->height = height_;
 
-  gfx::Transform transform;
+  parent_draw_constraints_ = shared_renderer_state_->ParentDrawConstraints();
   gfx::Size surface_size(width_, height_);
   gfx::Rect viewport(surface_size);
-  // TODO(boliu): Should really be |last_on_draw_global_visible_rect_|.
-  // See crbug.com/372073.
   gfx::Rect clip = viewport;
-  scoped_ptr<cc::CompositorFrame> frame = compositor_->DemandDrawHw(
-      surface_size, transform, viewport, clip);
+  gfx::Transform transform_for_tile_priority =
+      parent_draw_constraints_.transform;
+
+  // If the WebView is on a layer, WebView does not know what transform is
+  // applied onto the layer so global visible rect does not make sense here.
+  // In this case, just use the surface rect for tiling.
+  gfx::Rect viewport_rect_for_tile_priority;
+  if (parent_draw_constraints_.is_layer)
+    viewport_rect_for_tile_priority = parent_draw_constraints_.surface_rect;
+  else
+    viewport_rect_for_tile_priority = last_on_draw_global_visible_rect_;
+
+  scoped_ptr<cc::CompositorFrame> frame =
+      compositor_->DemandDrawHw(surface_size,
+                                gfx::Transform(),
+                                viewport,
+                                clip,
+                                viewport_rect_for_tile_priority,
+                                transform_for_tile_priority);
   if (!frame.get())
     return false;
 
@@ -273,6 +304,17 @@ bool BrowserViewRenderer::OnDrawHardware(jobject java_canvas) {
   shared_renderer_state_->SetDrawGLInput(draw_gl_input.Pass());
   DidComposite();
   return client_->RequestDrawGL(java_canvas, false);
+}
+
+void BrowserViewRenderer::UpdateParentDrawConstraints() {
+  // Post an invalidate if the parent draw constraints are stale and there is
+  // no pending invalidate.
+  if (shared_renderer_state_->NeedsForceInvalidateOnNextDrawGL() ||
+      !parent_draw_constraints_.Equals(
+        shared_renderer_state_->ParentDrawConstraints())) {
+    shared_renderer_state_->SetForceInvalidateOnNextDrawGL(false);
+    EnsureContinuousInvalidation(true);
+  }
 }
 
 void BrowserViewRenderer::ReturnUnusedResource(scoped_ptr<DrawGLInput> input) {
@@ -323,7 +365,9 @@ skia::RefPtr<SkPicture> BrowserViewRenderer::CapturePicture(int width,
 
   // Return empty Picture objects for empty SkPictures.
   if (width <= 0 || height <= 0) {
-    return skia::AdoptRef(new SkPicture);
+    SkPictureRecorder emptyRecorder;
+    emptyRecorder.beginRecording(0, 0);
+    return skia::AdoptRef(emptyRecorder.endRecording());
   }
 
   // Reset scroll back to the origin, will go back to the old
@@ -678,6 +722,9 @@ void BrowserViewRenderer::PostFallbackTick() {
         FROM_HERE,
         fallback_tick_fired_.callback(),
         base::TimeDelta::FromMilliseconds(kFallbackTickTimeoutInMilliseconds));
+  } else {
+    // Pretend we just composited to unblock further invalidates.
+    DidComposite();
   }
 }
 
@@ -690,8 +737,12 @@ void BrowserViewRenderer::FallbackTickFired() {
   // This should only be called if OnDraw or DrawGL did not come in time, which
   // means block_invalidates_ must still be true.
   DCHECK(block_invalidates_);
-  if (compositor_needs_continuous_invalidate_ && compositor_)
+  if (compositor_needs_continuous_invalidate_ && compositor_) {
     ForceFakeCompositeSW();
+  } else {
+    // Pretend we just composited to unblock further invalidates.
+    DidComposite();
+  }
 }
 
 void BrowserViewRenderer::ForceFakeCompositeSW() {

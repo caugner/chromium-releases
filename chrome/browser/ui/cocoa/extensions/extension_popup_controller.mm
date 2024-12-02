@@ -12,6 +12,7 @@
 #include "chrome/browser/extensions/extension_view_host.h"
 #include "chrome/browser/extensions/extension_view_host_factory.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/common/url_constants.h"
 #include "chrome/browser/ui/browser.h"
 #import "chrome/browser/ui/cocoa/browser_window_cocoa.h"
 #import "chrome/browser/ui/cocoa/extensions/extension_view_mac.h"
@@ -26,6 +27,7 @@
 
 using content::BrowserContext;
 using content::RenderViewHost;
+using content::WebContents;
 
 namespace {
 // The duration for any animations that might be invoked by this controller.
@@ -59,6 +61,10 @@ CGFloat Clamp(CGFloat value, CGFloat min, CGFloat max) {
 
 // Called when the extension view is shown.
 - (void)onViewDidShow;
+
+// Called when the window moves or resizes. Notifies the extension.
+- (void)onWindowChanged;
+
 @end
 
 class ExtensionPopupContainer : public ExtensionViewMac::Container {
@@ -86,7 +92,7 @@ class DevtoolsNotificationBridge : public content::NotificationObserver {
  public:
   explicit DevtoolsNotificationBridge(ExtensionPopupController* controller)
     : controller_(controller),
-      render_view_host_([controller_ extensionViewHost]->render_view_host()),
+      web_contents_([controller_ extensionViewHost]->host_contents()),
       devtools_callback_(base::Bind(
           &DevtoolsNotificationBridge::OnDevToolsStateChanged,
           base::Unretained(this))) {
@@ -101,7 +107,7 @@ class DevtoolsNotificationBridge : public content::NotificationObserver {
 
   void OnDevToolsStateChanged(content::DevToolsAgentHost* agent_host,
                               bool attached) {
-    if (agent_host->GetRenderViewHost() != render_view_host_)
+    if (agent_host->GetWebContents() != web_contents_)
       return;
 
     if (attached) {
@@ -121,7 +127,7 @@ class DevtoolsNotificationBridge : public content::NotificationObserver {
       const content::NotificationSource& source,
       const content::NotificationDetails& details) OVERRIDE {
     switch (type) {
-      case chrome::NOTIFICATION_EXTENSION_HOST_DID_STOP_LOADING: {
+      case extensions::NOTIFICATION_EXTENSION_HOST_DID_STOP_LOADING: {
         if (content::Details<extensions::ExtensionViewHost>(
                 [controller_ extensionViewHost]) == details) {
           [controller_ showDevTools];
@@ -137,10 +143,10 @@ class DevtoolsNotificationBridge : public content::NotificationObserver {
 
  private:
   ExtensionPopupController* controller_;
-  // RenderViewHost for controller. Hold onto this separately because we need to
+  // WebContents for controller. Hold onto this separately because we need to
   // know what it is for notifications, but our ExtensionViewHost may not be
   // valid.
-  RenderViewHost* render_view_host_;
+  WebContents* web_contents_;
   base::Callback<void(content::DevToolsAgentHost*, bool)> devtools_callback_;
 };
 
@@ -170,9 +176,10 @@ class DevtoolsNotificationBridge : public content::NotificationObserver {
     InfoBubbleView* view = self.bubble;
     [view setArrowLocation:arrowLocation];
 
-    extensionView_ = host->view()->native_view();
+    extensionView_ = host->view()->GetNativeView();
     container_.reset(new ExtensionPopupContainer(self));
-    host->view()->set_container(container_.get());
+    static_cast<ExtensionViewMac*>(host->view())
+        ->set_container(container_.get());
 
     NSNotificationCenter* center = [NSNotificationCenter defaultCenter];
     [center addObserver:self
@@ -188,7 +195,7 @@ class DevtoolsNotificationBridge : public content::NotificationObserver {
       // Listen for the extension to finish loading so the dev tools can be
       // opened.
       registrar_->Add(notificationBridge_.get(),
-                      chrome::NOTIFICATION_EXTENSION_HOST_DID_STOP_LOADING,
+                      extensions::NOTIFICATION_EXTENSION_HOST_DID_STOP_LOADING,
                       content::Source<BrowserContext>(host->browser_context()));
     }
   }
@@ -201,7 +208,7 @@ class DevtoolsNotificationBridge : public content::NotificationObserver {
 }
 
 - (void)showDevTools {
-  DevToolsWindow::OpenDevToolsWindow(host_->render_view_host());
+  DevToolsWindow::OpenDevToolsWindow(host_->host_contents());
 }
 
 - (void)close {
@@ -223,7 +230,7 @@ class DevtoolsNotificationBridge : public content::NotificationObserver {
   if (gPopup == self)
     gPopup = nil;
   if (host_->view())
-    host_->view()->set_container(NULL);
+    static_cast<ExtensionViewMac*>(host_->view())->set_container(NULL);
   host_.reset();
 }
 
@@ -273,6 +280,20 @@ class DevtoolsNotificationBridge : public content::NotificationObserver {
   DCHECK(browser);
   if (!browser)
     return nil;
+
+  // If we click the browser/page action again, we should close the popup.
+  // Make Mac behavior the same with Windows and others.
+  if (gPopup) {
+    std::string extension_id = url.host();
+    if (url.SchemeIs(content::kChromeUIScheme) &&
+        url.host() == chrome::kChromeUIExtensionInfoHost)
+      extension_id = url.path().substr(1);
+    extensions::ExtensionViewHost* host = [gPopup extensionViewHost];
+    if (extension_id == host->extension_id()) {
+      [gPopup close];
+      return nil;
+    }
+  }
 
   extensions::ExtensionViewHost* host =
       extensions::ExtensionViewHostFactory::CreatePopupHost(url, browser);
@@ -382,16 +403,20 @@ class DevtoolsNotificationBridge : public content::NotificationObserver {
   [self onSizeChanged:pendingSize_];
 }
 
-- (void)windowDidResize:(NSNotification*)notification {
+- (void)onWindowChanged {
+  ExtensionViewMac* extensionView =
+      static_cast<ExtensionViewMac*>(host_->view());
   // Let the extension view know, so that it can tell plugins.
-  if (host_->view())
-    host_->view()->WindowFrameChanged();
+  if (extensionView)
+    extensionView->WindowFrameChanged();
+}
+
+- (void)windowDidResize:(NSNotification*)notification {
+  [self onWindowChanged];
 }
 
 - (void)windowDidMove:(NSNotification*)notification {
-  // Let the extension view know, so that it can tell plugins.
-  if (host_->view())
-    host_->view()->WindowFrameChanged();
+  [self onWindowChanged];
 }
 
 // Private (TestingAPI)

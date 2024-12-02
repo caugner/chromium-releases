@@ -2,16 +2,17 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/media/desktop_media_picker.h"
+#include "chrome/browser/ui/views/desktop_media_picker_views.h"
 
 #include "base/callback.h"
 #include "chrome/browser/media/desktop_media_list.h"
-#include "chrome/browser/media/desktop_media_list_observer.h"
 #include "chrome/browser/ui/ash/ash_util.h"
 #include "chrome/browser/ui/views/constrained_window_views.h"
+#include "chrome/grit/generated_resources.h"
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/browser_thread.h"
-#include "grit/generated_resources.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_delegate.h"
 #include "ui/aura/window_tree_host.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/events/event_constants.h"
@@ -23,11 +24,9 @@
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/controls/scroll_view.h"
-#include "ui/views/layout/box_layout.h"
 #include "ui/views/layout/layout_constants.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/window/dialog_client_view.h"
-#include "ui/views/window/dialog_delegate.h"
 #include "ui/wm/core/shadow_types.h"
 
 using content::DesktopMediaID;
@@ -49,12 +48,12 @@ const int kDesktopMediaSourceViewGroupId = 1;
 const char kDesktopMediaSourceViewClassName[] =
     "DesktopMediaPicker_DesktopMediaSourceView";
 
-content::DesktopMediaID::Id AcceleratedWidgetToDesktopMediaId(
+DesktopMediaID::Id AcceleratedWidgetToDesktopMediaId(
     gfx::AcceleratedWidget accelerated_widget) {
 #if defined(OS_WIN)
-  return reinterpret_cast<content::DesktopMediaID::Id>(accelerated_widget);
+  return reinterpret_cast<DesktopMediaID::Id>(accelerated_widget);
 #else
-  return static_cast<content::DesktopMediaID::Id>(accelerated_widget);
+  return static_cast<DesktopMediaID::Id>(accelerated_widget);
 #endif
 }
 
@@ -62,169 +61,7 @@ int GetMediaListViewHeightForRows(size_t rows) {
   return kListItemHeight * rows;
 }
 
-class DesktopMediaListView;
-class DesktopMediaPickerDialogView;
-class DesktopMediaPickerViews;
-
-// View used for each item in DesktopMediaListView. Shows a single desktop media
-// source as a thumbnail with the title under it.
-class DesktopMediaSourceView : public views::View {
- public:
-  DesktopMediaSourceView(DesktopMediaListView* parent,
-                         DesktopMediaID source_id);
-  virtual ~DesktopMediaSourceView();
-
-  // Updates thumbnail and title from |source|.
-  void SetName(const base::string16& name);
-  void SetThumbnail(const gfx::ImageSkia& thumbnail);
-
-  // Id for the source shown by this View.
-  const DesktopMediaID& source_id() const {
-    return source_id_;
-  }
-
-  // Returns true if the source is selected.
-  bool is_selected() const { return selected_; }
-
-  // Updates selection state of the element. If |selected| is true then also
-  // calls SetSelected(false) for the source view that was selected before that
-  // (if any).
-  void SetSelected(bool selected);
-
-  // views::View interface.
-  virtual const char* GetClassName() const OVERRIDE;
-  virtual void Layout() OVERRIDE;
-  virtual views::View* GetSelectedViewForGroup(int group) OVERRIDE;
-  virtual bool IsGroupFocusTraversable() const OVERRIDE;
-  virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
-  virtual void OnFocus() OVERRIDE;
-  virtual void OnBlur() OVERRIDE;
-  virtual bool OnMousePressed(const ui::MouseEvent& event) OVERRIDE;
-  virtual void OnGestureEvent(ui::GestureEvent* event) OVERRIDE;
-
- private:
-  DesktopMediaListView* parent_;
-  DesktopMediaID source_id_;
-
-  views::ImageView* image_view_;
-  views::Label* label_;
-
-  bool selected_;
-
-  DISALLOW_COPY_AND_ASSIGN(DesktopMediaSourceView);
-};
-
-// View that shows list of desktop media sources available from
-// DesktopMediaList.
-class DesktopMediaListView : public views::View,
-                             public DesktopMediaListObserver {
- public:
-  DesktopMediaListView(DesktopMediaPickerDialogView* parent,
-                       scoped_ptr<DesktopMediaList> media_list);
-  virtual ~DesktopMediaListView();
-
-  void StartUpdating(content::DesktopMediaID::Id dialog_window_id);
-
-  // Called by DesktopMediaSourceView when selection has changed.
-  void OnSelectionChanged();
-
-  // Called by DesktopMediaSourceView when a source has been double-clicked.
-  void OnDoubleClick();
-
-  // Returns currently selected source.
-  DesktopMediaSourceView* GetSelection();
-
-  // views::View overrides.
-  virtual gfx::Size GetPreferredSize() const OVERRIDE;
-  virtual void Layout() OVERRIDE;
-  virtual bool OnKeyPressed(const ui::KeyEvent& event) OVERRIDE;
-
- private:
-  // DesktopMediaList::Observer interface
-  virtual void OnSourceAdded(int index) OVERRIDE;
-  virtual void OnSourceRemoved(int index) OVERRIDE;
-  virtual void OnSourceMoved(int old_index, int new_index) OVERRIDE;
-  virtual void OnSourceNameChanged(int index) OVERRIDE;
-  virtual void OnSourceThumbnailChanged(int index) OVERRIDE;
-
-  DesktopMediaPickerDialogView* parent_;
-  scoped_ptr<DesktopMediaList> media_list_;
-
-  DISALLOW_COPY_AND_ASSIGN(DesktopMediaListView);
-};
-
-// Dialog view used for DesktopMediaPickerViews.
-class DesktopMediaPickerDialogView : public views::DialogDelegateView {
- public:
-  DesktopMediaPickerDialogView(content::WebContents* parent_web_contents,
-                               gfx::NativeWindow context,
-                               gfx::NativeWindow parent_window,
-                               DesktopMediaPickerViews* parent,
-                               const base::string16& app_name,
-                               const base::string16& target_name,
-                               scoped_ptr<DesktopMediaList> media_list);
-  virtual ~DesktopMediaPickerDialogView();
-
-  // Called by parent (DesktopMediaPickerViews) when it's destroyed.
-  void DetachParent();
-
-  // Called by DesktopMediaListView.
-  void OnSelectionChanged();
-  void OnDoubleClick();
-
-  // views::View overrides.
-  virtual gfx::Size GetPreferredSize() const OVERRIDE;
-  virtual void Layout() OVERRIDE;
-
-  // views::DialogDelegateView overrides.
-  virtual ui::ModalType GetModalType() const OVERRIDE;
-  virtual base::string16 GetWindowTitle() const OVERRIDE;
-  virtual bool IsDialogButtonEnabled(ui::DialogButton button) const OVERRIDE;
-  virtual base::string16 GetDialogButtonLabel(
-      ui::DialogButton button) const OVERRIDE;
-  virtual bool Accept() OVERRIDE;
-  virtual void DeleteDelegate() OVERRIDE;
-
-  void OnMediaListRowsChanged();
-
- private:
-  DesktopMediaPickerViews* parent_;
-  base::string16 app_name_;
-
-  views::Label* label_;
-  views::ScrollView* scroll_view_;
-  DesktopMediaListView* list_view_;
-
-  DISALLOW_COPY_AND_ASSIGN(DesktopMediaPickerDialogView);
-};
-
-// Implementation of DesktopMediaPicker for Views.
-class DesktopMediaPickerViews : public DesktopMediaPicker {
- public:
-  DesktopMediaPickerViews();
-  virtual ~DesktopMediaPickerViews();
-
-  void NotifyDialogResult(DesktopMediaID source);
-
-  // DesktopMediaPicker overrides.
-  virtual void Show(content::WebContents* web_contents,
-                    gfx::NativeWindow context,
-                    gfx::NativeWindow parent,
-                    const base::string16& app_name,
-                    const base::string16& target_name,
-                    scoped_ptr<DesktopMediaList> media_list,
-                    const DoneCallback& done_callback) OVERRIDE;
-
- private:
-  DoneCallback callback_;
-
-  // The |dialog_| is owned by the corresponding views::Widget instance.
-  // When DesktopMediaPickerViews is destroyed the |dialog_| is destroyed
-  // asynchronously by closing the widget.
-  DesktopMediaPickerDialogView* dialog_;
-
-  DISALLOW_COPY_AND_ASSIGN(DesktopMediaPickerViews);
-};
+}  // namespace
 
 DesktopMediaSourceView::DesktopMediaSourceView(
     DesktopMediaListView* parent,
@@ -370,8 +207,7 @@ DesktopMediaListView::DesktopMediaListView(
 
 DesktopMediaListView::~DesktopMediaListView() {}
 
-void DesktopMediaListView::StartUpdating(
-    content::DesktopMediaID::Id dialog_window_id) {
+void DesktopMediaListView::StartUpdating(DesktopMediaID::Id dialog_window_id) {
   media_list_->SetViewDialogWindowId(dialog_window_id);
   media_list_->StartUpdating(this);
 }
@@ -524,7 +360,6 @@ void DesktopMediaListView::OnSourceThumbnailChanged(int index) {
 DesktopMediaPickerDialogView::DesktopMediaPickerDialogView(
     content::WebContents* parent_web_contents,
     gfx::NativeWindow context,
-    gfx::NativeWindow parent_window,
     DesktopMediaPickerViews* parent,
     const base::string16& app_name,
     const base::string16& target_name,
@@ -550,30 +385,29 @@ DesktopMediaPickerDialogView::DesktopMediaPickerDialogView(
       GetMediaListViewHeightForRows(1), GetMediaListViewHeightForRows(2));
   AddChildView(scroll_view_);
 
-  // If |parent_web_contents| is set, the picker will be shown modal to the
-  // web contents. Otherwise, a new dialog widget inside |parent_window| will be
-  // created for the picker. Note that |parent_window| may also be NULL if
-  // parent web contents is not set. In this case the picker will be parented
-  // by a root window.
+  // If |parent_web_contents| is set and it's not a background page then the
+  // picker will be shown modal to the web contents. Otherwise the picker is
+  // shown in a separate window.
   views::Widget* widget = NULL;
-  if (parent_web_contents)
+  bool modal_dialog =
+      parent_web_contents &&
+      !parent_web_contents->GetDelegate()->IsNeverVisible(parent_web_contents);
+  if (modal_dialog) {
     widget = CreateWebModalDialogViews(this, parent_web_contents);
-  else
-    widget = DialogDelegate::CreateDialogWidget(this, context, parent_window);
+  } else {
+    widget = DialogDelegate::CreateDialogWidget(this, context, NULL);
+  }
 
-  // DesktopMediaList needs to know the ID of the picker window which
-  // matches the ID it gets from the OS. Depending on the OS and configuration
-  // we get this ID differently.
-  content::DesktopMediaID::Id dialog_window_id = 0;
-
-  // If there is |parent_window| or |parent_web_contents|, the picker window
-  // is embedded in the parent and does not have its own native window id, so we
-  // do not filter in that case.
-  if (!parent_window && !parent_web_contents) {
+  // If the picker is not modal to the calling web contents then it is displayed
+  // in its own top-level window, so in that case it needs to be filtered out of
+  // the list of top-level windows available for capture, and to achieve that
+  // the Id is passed to DesktopMediaList.
+  DesktopMediaID::Id dialog_window_id = 0;
+  if (!modal_dialog) {
 #if defined(USE_ASH)
     if (chrome::IsNativeWindowInAsh(widget->GetNativeWindow())) {
-      dialog_window_id = content::DesktopMediaID::RegisterAuraWindow(
-          widget->GetNativeWindow()).id;
+      dialog_window_id =
+          DesktopMediaID::RegisterAuraWindow(widget->GetNativeWindow()).id;
       DCHECK_NE(dialog_window_id, 0);
     }
 #endif
@@ -586,7 +420,7 @@ DesktopMediaPickerDialogView::DesktopMediaPickerDialogView(
 
   list_view_->StartUpdating(dialog_window_id);
 
-  if (parent_web_contents) {
+  if (modal_dialog) {
     web_modal::WebContentsModalDialogManager* manager =
         web_modal::WebContentsModalDialogManager::FromWebContents(
             parent_web_contents);
@@ -694,6 +528,14 @@ void DesktopMediaPickerDialogView::OnMediaListRowsChanged() {
   GetWidget()->CenterWindow(gfx::Size(widget_bound.width(), new_height));
 }
 
+DesktopMediaSourceView*
+DesktopMediaPickerDialogView::GetMediaSourceViewForTesting(int index) const {
+  if (list_view_->child_count() <= index)
+    return NULL;
+
+  return reinterpret_cast<DesktopMediaSourceView*>(list_view_->child_at(index));
+}
+
 DesktopMediaPickerViews::DesktopMediaPickerViews() : dialog_(NULL) {
 }
 
@@ -713,8 +555,7 @@ void DesktopMediaPickerViews::Show(content::WebContents* web_contents,
                                    const DoneCallback& done_callback) {
   callback_ = done_callback;
   dialog_ = new DesktopMediaPickerDialogView(
-      web_contents, context, parent, this, app_name, target_name,
-      media_list.Pass());
+      web_contents, context, this, app_name, target_name, media_list.Pass());
 }
 
 void DesktopMediaPickerViews::NotifyDialogResult(DesktopMediaID source) {
@@ -731,8 +572,6 @@ void DesktopMediaPickerViews::NotifyDialogResult(DesktopMediaID source) {
       base::Bind(callback_, source));
   callback_.Reset();
 }
-
-}  // namespace
 
 // static
 scoped_ptr<DesktopMediaPicker> DesktopMediaPicker::Create() {

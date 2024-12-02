@@ -4,7 +4,6 @@
 
 #include "chrome/browser/ui/views/tab_contents/chrome_web_contents_view_delegate_views.h"
 
-#include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/ui/aura/tab_contents/web_drag_bookmark_handler_aura.h"
 #include "chrome/browser/ui/sad_tab_helper.h"
 #include "chrome/browser/ui/tab_contents/chrome_web_contents_view_delegate.h"
