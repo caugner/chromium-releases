@@ -7,79 +7,87 @@
 <script src="resources/utils.js"></script>
 <script>
 
-var expectations = [
-  [ MOJOM_ACTION_PLAY, true ],
-  [ MOJOM_ACTION_PAUSE, true ],
-  [ MOJOM_ACTION_PLAY_PAUSE, true ],
-  [ MOJOM_ACTION_PREVIOUS_TRACK, true ],
-  [ MOJOM_ACTION_NEXT_TRACK, true ],
-  [ MOJOM_ACTION_SEEK_FORWARD, true ],
-  [ MOJOM_ACTION_SEEK_BACKWARD, true ],
-  [ MOJOM_ACTION_PLAY, false ],
-  [ MOJOM_ACTION_PLAY, true ],
-  [ MOJOM_ACTION_PAUSE, false ],
-  [ MOJOM_ACTION_PAUSE, true ],
-  [ MOJOM_ACTION_PLAY_PAUSE, false ],
-  [ MOJOM_ACTION_PLAY_PAUSE, true ],
-  [ MOJOM_ACTION_PREVIOUS_TRACK, false ],
-  [ MOJOM_ACTION_PREVIOUS_TRACK, true ],
-  [ MOJOM_ACTION_NEXT_TRACK, false ],
-  [ MOJOM_ACTION_NEXT_TRACK, true ],
-  [ MOJOM_ACTION_SEEK_FORWARD, false ],
-  [ MOJOM_ACTION_SEEK_FORWARD, true ],
-  [ MOJOM_ACTION_SEEK_BACKWARD, false ],
-  [ MOJOM_ACTION_SEEK_BACKWARD, true ],
-  [ MOJOM_ACTION_PLAY, false ],
-  [ MOJOM_ACTION_PAUSE, false ],
-  [ MOJOM_ACTION_PLAY_PAUSE, false ],
-  [ MOJOM_ACTION_PREVIOUS_TRACK, false ],
-  [ MOJOM_ACTION_NEXT_TRACK, false ],
-  [ MOJOM_ACTION_SEEK_FORWARD, false ],
-  [ MOJOM_ACTION_SEEK_BACKWARD, false ],
-];
+var expectations;
 
 var nextExpectation = 0;
+
+// Delay the initialization since the initialization of MediaSessionAction is delayed.
+function getExpectations() {
+  if (!expectations) {
+    expectations = [
+      [ MediaSessionAction.PLAY, true ],
+      [ MediaSessionAction.PAUSE, true ],
+      [ MediaSessionAction.PREVIOUS_TRACK, true ],
+      [ MediaSessionAction.NEXT_TRACK, true ],
+      [ MediaSessionAction.SEEK_BACKWARD, true ],
+      [ MediaSessionAction.SEEK_FORWARD, true ],
+      [ MediaSessionAction.PLAY, false ],
+      [ MediaSessionAction.PAUSE, false ],
+      [ MediaSessionAction.PREVIOUS_TRACK, false ],
+      [ MediaSessionAction.NEXT_TRACK, false ],
+      [ MediaSessionAction.SEEK_BACKWARD, false ],
+      [ MediaSessionAction.SEEK_FORWARD, false ],
+      [ MediaSessionAction.PLAY, true ],
+      [ MediaSessionAction.PAUSE, true ],
+      [ MediaSessionAction.PREVIOUS_TRACK, true ],
+      [ MediaSessionAction.NEXT_TRACK, true ],
+      [ MediaSessionAction.SEEK_BACKWARD, true ],
+      [ MediaSessionAction.SEEK_FORWARD, true ],
+    ];
+  }
+  return expectations;
+}
 
 async_test(function(t) {
   mediaSessionServiceMock.then(m => {
     m.setEnableDisableActionCallback(t.step_func(function(action, isEnabled) {
-      var expectedAction = expectations[nextExpectation][0];
-      var expectedIsEnabled = expectations[nextExpectation][1];
+      var expectedAction = getExpectations()[nextExpectation][0];
+      var expectedIsEnabled = getExpectations()[nextExpectation][1];
       assert_equals(expectedAction, action);
       assert_equals(expectedIsEnabled, isEnabled);
-      if (++nextExpectation >= expectations.length)
+      if (++nextExpectation >= getExpectations().length)
         t.done();
     }));
 
-    // Setting handlers
-    window.navigator.mediaSession.onresize = _ => {};  // Unknown event.
-    window.navigator.mediaSession.onplay = _ => {};
-    window.navigator.mediaSession.onpause = _ => {};
-    window.navigator.mediaSession.onplaypause = _ => {};
-    window.navigator.mediaSession.onprevioustrack = _ => {};
-    window.navigator.mediaSession.onnexttrack = _ => {};
-    window.navigator.mediaSession.onseekforward = _ => {};
-    window.navigator.mediaSession.onseekbackward = _ => {};
+    // Setting handlers should notify the service.
+    window.navigator.mediaSession.setActionHandler("play", _ => {});
+    window.navigator.mediaSession.setActionHandler("pause", _ => {});
+    window.navigator.mediaSession.setActionHandler("previoustrack", _ => {});
+    window.navigator.mediaSession.setActionHandler("nexttrack", _ => {});
+    window.navigator.mediaSession.setActionHandler("seekbackward", _ => {});
+    window.navigator.mediaSession.setActionHandler("seekforward", _ => {});
 
-    // Resetting handlers
-    window.navigator.mediaSession.onresize = _ => {};  // Unknown event.
-    window.navigator.mediaSession.onplay = _ => {};
-    window.navigator.mediaSession.onpause = _ => {};
-    window.navigator.mediaSession.onplaypause = _ => {};
-    window.navigator.mediaSession.onprevioustrack = _ => {};
-    window.navigator.mediaSession.onnexttrack = _ => {};
-    window.navigator.mediaSession.onseekforward = _ => {};
-    window.navigator.mediaSession.onseekbackward = _ => {};
+    // Setting handlers again should not notify the service.
+    window.navigator.mediaSession.setActionHandler("play", _ => {});
+    window.navigator.mediaSession.setActionHandler("pause", _ => {});
+    window.navigator.mediaSession.setActionHandler("previoustrack", _ => {});
+    window.navigator.mediaSession.setActionHandler("nexttrack", _ => {});
+    window.navigator.mediaSession.setActionHandler("seekbackward", _ => {});
+    window.navigator.mediaSession.setActionHandler("seekforward", _ => {});
 
-    // Unsetting handlers
-    window.navigator.mediaSession.onresize = null;  // Unknown event.
-    window.navigator.mediaSession.onplay = null;
-    window.navigator.mediaSession.onpause = null;
-    window.navigator.mediaSession.onplaypause = null;
-    window.navigator.mediaSession.onprevioustrack = null;
-    window.navigator.mediaSession.onnexttrack = null;
-    window.navigator.mediaSession.onseekforward = null;
-    window.navigator.mediaSession.onseekbackward = null;
+    // Unsetting handlers should notify the service.
+    window.navigator.mediaSession.setActionHandler("play", null);
+    window.navigator.mediaSession.setActionHandler("pause", null);
+    window.navigator.mediaSession.setActionHandler("previoustrack", null);
+    window.navigator.mediaSession.setActionHandler("nexttrack", null);
+    window.navigator.mediaSession.setActionHandler("seekbackward", null);
+    window.navigator.mediaSession.setActionHandler("seekforward", null);
+
+    // Unsetting handlers should not notify the service.
+    window.navigator.mediaSession.setActionHandler("play", null);
+    window.navigator.mediaSession.setActionHandler("pause", null);
+    window.navigator.mediaSession.setActionHandler("previoustrack", null);
+    window.navigator.mediaSession.setActionHandler("nexttrack", null);
+    window.navigator.mediaSession.setActionHandler("seekbackward", null);
+    window.navigator.mediaSession.setActionHandler("seekforward", null);
+
+    // Setting handlers again should notify the service.
+    window.navigator.mediaSession.setActionHandler("play", _ => {});
+    window.navigator.mediaSession.setActionHandler("pause", _ => {});
+    window.navigator.mediaSession.setActionHandler("previoustrack", _ => {});
+    window.navigator.mediaSession.setActionHandler("nexttrack", _ => {});
+    window.navigator.mediaSession.setActionHandler("seekbackward", _ => {});
+    window.navigator.mediaSession.setActionHandler("seekforward", _ => {});
   });
 }, "test that setting event handler notifies the mojo service");
 

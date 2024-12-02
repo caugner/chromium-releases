@@ -4,7 +4,6 @@
 
 #include <stddef.h>
 
-#include "ash/aura/wm_window_aura.h"
 #include "ash/common/shelf/shelf_widget.h"
 #include "ash/common/shelf/wm_shelf.h"
 #include "ash/common/test/test_session_state_delegate.h"
@@ -14,6 +13,7 @@
 #include "ash/common/wm/window_state.h"
 #include "ash/common/wm/wm_event.h"
 #include "ash/common/wm_shell.h"
+#include "ash/common/wm_window.h"
 #include "ash/content/shell_content_state.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/shell.h"
@@ -57,9 +57,12 @@
 
 namespace {
 
-const char kAAccountIdString[] = "{\"email\":\"A\",\"gaia_id\":\"\"}";
-const char kBAccountIdString[] = "{\"email\":\"B\",\"gaia_id\":\"\"}";
-const char kArrowBAccountIdString[] = "->{\"email\":\"B\",\"gaia_id\":\"\"}";
+const char kAAccountIdString[] =
+    "{\"account_type\":\"unknown\",\"email\":\"A\"}";
+const char kBAccountIdString[] =
+    "{\"account_type\":\"unknown\",\"email\":\"B\"}";
+const char kArrowBAccountIdString[] =
+    "->{\"account_type\":\"unknown\",\"email\":\"B\"}";
 
 // TOOD(beng): This implementation seems only superficially different to the
 //             production impl. Evaluate whether or not we can just use that
@@ -115,7 +118,7 @@ class TestShellDelegateChromeOS : public ash::test::TestShellDelegate {
 
   bool CanShowWindowForUser(ash::WmWindow* window) const override {
     return ::CanShowWindowForUser(
-        ash::WmWindowAura::GetAuraWindow(window),
+        ash::WmWindow::GetAuraWindow(window),
         base::Bind(&ash::ShellContentState::GetActiveBrowserContext,
                    base::Unretained(ash::ShellContentState::GetInstance())));
   }
@@ -1517,7 +1520,7 @@ TEST_F(MultiUserWindowManagerChromeOSTest, WindowsOrderPreservedTests) {
   activation_client->ActivateWindow(window(0));
   EXPECT_EQ(wm::GetActiveWindow(), window(0));
 
-  aura::Window::Windows mru_list = WmWindowAura::ToAuraWindows(
+  aura::Window::Windows mru_list = WmWindow::ToAuraWindows(
       WmShell::Get()->mru_window_tracker()->BuildMruWindowList());
   EXPECT_EQ(mru_list[0], window(0));
   EXPECT_EQ(mru_list[1], window(1));
@@ -1533,7 +1536,7 @@ TEST_F(MultiUserWindowManagerChromeOSTest, WindowsOrderPreservedTests) {
   EXPECT_EQ("S[A], S[A], S[A]", GetStatus());
   EXPECT_EQ(wm::GetActiveWindow(), window(0));
 
-  mru_list = WmWindowAura::ToAuraWindows(
+  mru_list = WmWindow::ToAuraWindows(
       WmShell::Get()->mru_window_tracker()->BuildMruWindowList());
   EXPECT_EQ(mru_list[0], window(0));
   EXPECT_EQ(mru_list[1], window(1));
