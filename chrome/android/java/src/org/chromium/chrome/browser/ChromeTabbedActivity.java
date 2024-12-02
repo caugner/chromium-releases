@@ -56,12 +56,13 @@ import org.chromium.chrome.browser.customtabs.CustomTabActivity;
 import org.chromium.chrome.browser.customtabs.CustomTabIntentDataProvider;
 import org.chromium.chrome.browser.device.DeviceClassManager;
 import org.chromium.chrome.browser.document.ChromeLauncherActivity;
-import org.chromium.chrome.browser.document.DocumentUma;
+import org.chromium.chrome.browser.download.DownloadActivity;
 import org.chromium.chrome.browser.firstrun.FirstRunActivity;
 import org.chromium.chrome.browser.firstrun.FirstRunFlowSequencer;
 import org.chromium.chrome.browser.firstrun.FirstRunSignInProcessor;
 import org.chromium.chrome.browser.firstrun.FirstRunStatus;
 import org.chromium.chrome.browser.incognito.IncognitoNotificationManager;
+import org.chromium.chrome.browser.infobar.DataReductionPromoInfoBar;
 import org.chromium.chrome.browser.metrics.ActivityStopMetrics;
 import org.chromium.chrome.browser.metrics.LaunchMetrics;
 import org.chromium.chrome.browser.metrics.StartupMetrics;
@@ -378,10 +379,6 @@ public class ChromeTabbedActivity extends ChromeActivity implements OverviewMode
         if (getActivityTab() == null) mLayoutManager.showOverview(false);
 
         resetSavedInstanceState();
-
-        if (FeatureUtilities.isDocumentModeEligible(this)) {
-            DocumentUma.recordInDocumentMode(false);
-        }
     }
 
     @Override
@@ -524,7 +521,7 @@ public class ChromeTabbedActivity extends ChromeActivity implements OverviewMode
             if (isTablet()) {
                 EmptyBackgroundViewWrapper bgViewWrapper = new EmptyBackgroundViewWrapper(
                         getTabModelSelector(), getTabCreator(false), ChromeTabbedActivity.this,
-                        getAppMenuHandler(), mLayoutManager);
+                        getAppMenuHandler(), getSnackbarManager(), mLayoutManager);
                 bgViewWrapper.initialize();
             }
 
@@ -754,9 +751,11 @@ public class ChromeTabbedActivity extends ChromeActivity implements OverviewMode
                     if (currentTab != null) {
                         currentTab.getTabRedirectHandler().updateIntent(intent);
                         int transitionType = PageTransition.LINK | PageTransition.FROM_API;
-                        LoadUrlParams loadUrlParams = new LoadUrlParams(url, transitionType);
+                        LoadUrlParams loadUrlParams = new LoadUrlParams(url);
                         loadUrlParams.setIntentReceivedTimestamp(mIntentHandlingTimeMs);
                         loadUrlParams.setHasUserGesture(hasUserGesture);
+                        loadUrlParams.setTransitionType(IntentHandler.getTransitionTypeFromIntent(
+                                getApplicationContext(), intent, transitionType));
                         currentTab.loadUrl(loadUrlParams);
                         RecordUserAction.record("MobileTabClobbered");
                     } else {
@@ -772,8 +771,12 @@ public class ChromeTabbedActivity extends ChromeActivity implements OverviewMode
                     break;
                 case OPEN_NEW_INCOGNITO_TAB:
                     if (url == null || url.equals(UrlConstants.NTP_URL)) {
-                        if (fromLauncherShortcut) recordLauncherShortcutAction(true);
-                        if (TextUtils.equals(externalAppId, getPackageName())) {
+                        TabLaunchType launchType;
+                        if (fromLauncherShortcut) {
+                            getTabCreator(true).launchUrl(
+                                    UrlConstants.NTP_URL, TabLaunchType.FROM_EXTERNAL_APP);
+                            recordLauncherShortcutAction(true);
+                        } else if (TextUtils.equals(externalAppId, getPackageName())) {
                             // Used by the Account management screen to open a new incognito tab.
                             // Account management screen collects its metrics separately.
                             getTabCreator(true).launchUrl(
@@ -1006,6 +1009,15 @@ public class ChromeTabbedActivity extends ChromeActivity implements OverviewMode
                     mIsFirstPageLoadStart = false;
                 }
             }
+
+            @Override
+            public void onDidNavigateMainFrame(Tab tab, String url, String baseUrl,
+                    boolean isNavigationToDifferentPage, boolean isFragmentNavigation,
+                    int statusCode) {
+                DataReductionPromoInfoBar.maybeLaunchPromoInfoBar(ChromeTabbedActivity.this,
+                        tab.getWebContents(), url, tab.isShowingErrorPage(), isFragmentNavigation,
+                        statusCode);
+            }
         };
 
         if (startIncognito) mTabModelSelectorImpl.selectModel(true);
@@ -1023,24 +1035,16 @@ public class ChromeTabbedActivity extends ChromeActivity implements OverviewMode
         if (id == R.id.move_to_other_window_menu_id) {
             if (currentTab != null) moveTabToOtherWindow(currentTab);
         } else if (id == R.id.new_tab_menu_id) {
-            Tab launchedTab = getTabCreator(false).launchUrl(
-                    UrlConstants.NTP_URL, TabLaunchType.FROM_CHROME_UI);
             RecordUserAction.record("MobileMenuNewTab");
             RecordUserAction.record("MobileNewTabOpened");
-            if (isTablet() && !fromMenu && !launchedTab.isHidden()) {
-                getToolbarManager().setUrlBarFocus(true);
-            }
+            getTabCreator(false).launchUrl(UrlConstants.NTP_URL, TabLaunchType.FROM_CHROME_UI);
         } else if (id == R.id.new_incognito_tab_menu_id) {
             if (PrefServiceBridge.getInstance().isIncognitoModeEnabled()) {
                 // This action must be recorded before opening the incognito tab since UMA actions
                 // are dropped when an incognito tab is open.
                 RecordUserAction.record("MobileMenuNewIncognitoTab");
                 RecordUserAction.record("MobileNewTabOpened");
-                Tab launchedTab = getTabCreator(true).launchUrl(
-                        UrlConstants.NTP_URL, TabLaunchType.FROM_CHROME_UI);
-                if (isTablet() && !fromMenu && !launchedTab.isHidden()) {
-                    getToolbarManager().setUrlBarFocus(true);
-                }
+                getTabCreator(true).launchUrl(UrlConstants.NTP_URL, TabLaunchType.FROM_CHROME_UI);
             }
         } else if (id == R.id.all_bookmarks_menu_id) {
             if (currentTab != null) {
@@ -1085,6 +1089,8 @@ public class ChromeTabbedActivity extends ChromeActivity implements OverviewMode
             if (isUrlBarVisible) {
                 getToolbarManager().setUrlBarFocus(true);
             }
+        } else if (id == R.id.downloads_menu_id) {
+            DownloadActivity.launch(this);
         } else {
             return super.onMenuOrKeyboardAction(id, fromMenu);
         }
@@ -1114,13 +1120,11 @@ public class ChromeTabbedActivity extends ChromeActivity implements OverviewMode
         Intent intent = new Intent(this, targetActivity);
         MultiWindowUtils.setOpenInOtherWindowIntentExtras(intent, this, targetActivity);
 
-        tab.detachAndStartReparenting(intent, null, null);
+        tab.detachAndStartReparenting(intent, null, null, true);
     }
 
     @Override
     public boolean handleBackPressed() {
-        RecordUserAction.record("SystemBack");
-
         if (!mUIInitialized) return false;
         final Tab currentTab = getActivityTab();
 
@@ -1255,7 +1259,13 @@ public class ChromeTabbedActivity extends ChromeActivity implements OverviewMode
             // the back button to close these tabs and restore selection to the previous tab.
             boolean isIncognito = IntentUtils.safeGetBooleanExtra(intent,
                     IntentHandler.EXTRA_OPEN_NEW_INCOGNITO_TAB, false);
-            return getTabCreator(isIncognito).launchUrl(url, TabLaunchType.FROM_LINK, intent,
+            boolean fromLauncherShortcut = IntentUtils.safeGetBooleanExtra(
+                    intent, IntentHandler.EXTRA_INVOKED_FROM_SHORTCUT, false);
+            return getTabCreator(isIncognito).launchUrl(
+                    url,
+                    fromLauncherShortcut ? TabLaunchType.FROM_EXTERNAL_APP
+                            : TabLaunchType.FROM_LINK,
+                    intent,
                     mIntentHandlingTimeMs);
         } else {
             return getTabCreator(false).launchUrlFromExternalApp(url, referer, headers,

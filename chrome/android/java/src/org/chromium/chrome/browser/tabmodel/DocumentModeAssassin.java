@@ -24,7 +24,6 @@ import org.chromium.chrome.browser.document.DocumentActivity;
 import org.chromium.chrome.browser.document.DocumentUtils;
 import org.chromium.chrome.browser.document.IncognitoDocumentActivity;
 import org.chromium.chrome.browser.incognito.IncognitoNotificationManager;
-import org.chromium.chrome.browser.preferences.DocumentModeManager;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.TabPersistentStore.TabModelMetadata;
 import org.chromium.chrome.browser.tabmodel.document.ActivityDelegate;
@@ -105,6 +104,10 @@ public class DocumentModeAssassin {
     /** Which TabModelSelectorImpl to copy files into during migration. */
     private static final int TAB_MODEL_INDEX = 0;
 
+    /** SharedPreference values to determine whether user had document mode turned on. */
+    private static final String OPT_OUT_STATE = "opt_out_state";
+    private static final int OPTED_OUT_OF_DOCUMENT_MODE = 2;
+
     /** Creates and holds the Singleton. */
     private static class LazyHolder {
         private static final DocumentModeAssassin INSTANCE = new DocumentModeAssassin();
@@ -116,11 +119,10 @@ public class DocumentModeAssassin {
     }
 
     /** IDs of Tabs that have had their TabState files copied between directories successfully. */
-    private final Set<Integer> mMigratedTabIds = new HashSet<Integer>();
+    private final Set<Integer> mMigratedTabIds = new HashSet<>();
 
     /** Observers of the migration pipeline. */
-    private final ObserverList<DocumentModeAssassinObserver> mObservers =
-            new ObserverList<DocumentModeAssassinObserver>();
+    private final ObserverList<DocumentModeAssassinObserver> mObservers = new ObserverList<>();
 
     /** Current stage of the migration. */
     private int mStage = STAGE_UNINITIALIZED;
@@ -339,8 +341,16 @@ public class DocumentModeAssassin {
             @Override
             protected Boolean doInBackground(Void... params) {
                 if (mSerializedMetadata != null) {
-                    File tabbedDirectory = getTabbedDataDirectory();
-                    TabPersistentStore.saveListToFile(tabbedDirectory, mSerializedMetadata);
+                    // If an old tab state file still exists when we run migration in TPS, then it
+                    // will overwrite the new tab state file that our document tabs migrated to.
+                    File oldMetadataFile = new File(
+                            getTabbedDataDirectory(), TabPersistentStore.SAVED_STATE_FILE);
+                    if (oldMetadataFile.exists() && !oldMetadataFile.delete()) {
+                        Log.e(TAG, "Failed to delete old tab state file: " + oldMetadataFile);
+                    }
+
+                    TabPersistentStore.saveListToFile(
+                            getTabbedDataDirectory(), TAB_MODEL_INDEX, mSerializedMetadata);
                     return true;
                 } else {
                     return false;
@@ -364,8 +374,7 @@ public class DocumentModeAssassin {
         // Record that the user has opted-out of document mode now that their data has been
         // safely copied to the other directory.
         Log.d(TAG, "Setting tabbed mode preference.");
-        DocumentModeManager.getInstance(getContext()).setOptedOutState(
-                DocumentModeManager.OPTED_OUT_OF_DOCUMENT_MODE);
+        clearOptedOutState();
         TabSwitcherCallout.setIsTabSwitcherCalloutNecessary(getContext(), true);
 
         // Remove all the {@link DocumentActivity} tasks from Android's Recents list.  Users
@@ -541,8 +550,19 @@ public class DocumentModeAssassin {
         return new StorageDelegate().getStateDirectory();
     }
 
-    /** @return Where tabbed mode data is stored for the main {@link TabModelImpl}. */
+    /** @return Where tabbed mode data is stored. */
     protected File getTabbedDataDirectory() {
-        return TabPersistentStore.getOrCreateSelectorStateDirectory(TAB_MODEL_INDEX);
+        return TabPersistentStore.getOrCreateStateDirectory();
+    }
+
+    /** @return True if the user is not in document mode. */
+    public static boolean isOptedOutOfDocumentMode() {
+        return ContextUtils.getAppSharedPreferences().getInt(
+                OPT_OUT_STATE, OPTED_OUT_OF_DOCUMENT_MODE) == OPTED_OUT_OF_DOCUMENT_MODE;
+    }
+
+    /** Clears the opt out preference so that user doesn't migrate again. */
+    private void clearOptedOutState() {
+        ContextUtils.getAppSharedPreferences().edit().remove(OPT_OUT_STATE).apply();
     }
 }

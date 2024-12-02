@@ -1,25 +1,25 @@
 <!doctype html>
 <meta charset=utf-8>
 <link rel=help href=https://dom.spec.whatwg.org/#interface-htmlcollection>
-<script src=../../../../resources/testharness.js></script>
-<script src=../../../../resources/testharnessreport.js></script>
+<script src=/resources/testharness.js></script>
+<script src=/resources/testharnessreport.js></script>
 
 <div id=log></div>
 
-<!--  with no attribute  -->
+<!-- with no attribute -->
 <span></span>
 
-<!--  with `id` attribute  -->
+<!-- with `id` attribute -->
 <span id=''></span>
 <span id='some-id'></span>
-<span id='some-id'></span><!--  to ensure no duplicates  -->
+<span id='some-id'></span><!-- to ensure no duplicates -->
 
-<!--  with `name` attribute  -->
+<!-- with `name` attribute -->
 <span name=''></span>
 <span name='some-name'></span>
-<span name='some-name'></span><!--  to ensure no duplicates  -->
+<span name='some-name'></span><!-- to ensure no duplicates -->
 
-<!--  with `name` and `id` attribute  -->
+<!-- with `name` and `id` attribute -->
 <span id='another-id' name='another-name'></span>
 
 <script>
