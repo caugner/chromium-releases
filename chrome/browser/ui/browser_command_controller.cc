@@ -38,10 +38,12 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/commander/commander.h"
+#include "chrome/browser/ui/managed_ui.h"
 #include "chrome/browser/ui/page_info/page_info_dialog.h"
 #include "chrome/browser/ui/passwords/ui_utils.h"
 #include "chrome/browser/ui/side_panel/side_panel_entry_id.h"
-#include "chrome/browser/ui/side_panel/side_panel_open_trigger.h"
+#include "chrome/browser/ui/side_panel/side_panel_enums.h"
+#include "chrome/browser/ui/side_panel/side_panel_ui.h"
 #include "chrome/browser/ui/singleton_tabs.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_user_gesture_details.h"
@@ -79,6 +81,7 @@
 #include "content/public/common/profiling.h"
 #include "content/public/common/url_constants.h"
 #include "extensions/browser/extension_system.h"
+#include "extensions/common/extension_urls.h"
 #include "printing/buildflags/buildflags.h"
 #include "ui/base/ui_base_features.h"
 #include "ui/events/keycodes/keyboard_codes.h"
@@ -108,6 +111,12 @@
 #include "chrome/browser/ui/browser_commands_chromeos.h"
 #include "components/session_manager/core/session_manager.h"
 #include "components/user_manager/user_manager.h"
+#endif
+
+// TODO(crbug.com/1424800): Remove once the restore issue has been resolved.
+#if BUILDFLAG(IS_CHROMEOS_LACROS)
+#undef ENABLED_VLOG_LEVEL
+#define ENABLED_VLOG_LEVEL 1
 #endif
 
 #if BUILDFLAG(IS_LINUX)
@@ -238,8 +247,11 @@ BrowserCommandController::BrowserCommandController(Browser* browser)
       TabRestoreServiceFactory::GetForProfile(profile());
   if (tab_restore_service) {
     tab_restore_service->AddObserver(this);
-    if (!tab_restore_service->IsLoaded())
+    if (!tab_restore_service->IsLoaded()) {
+      VLOG(1) << "BrowserCommandController::BrowserCommandController, loading "
+                 "tabs from last session.";
       tab_restore_service->LoadTabsFromLastSession();
+    }
   }
 }
 
@@ -514,7 +526,6 @@ bool BrowserCommandController::ExecuteCommandWithDisposition(
       break;
     case IDC_RESTORE_TAB:
       RestoreTab(browser_);
-      browser_->window()->OnTabRestored(IDC_RESTORE_TAB);
       break;
     case IDC_SHOW_AS_TAB:
       ConvertPopupToTabbedBrowser(browser_);
@@ -560,6 +571,9 @@ bool BrowserCommandController::ExecuteCommandWithDisposition(
     case IDC_RESTORE_WINDOW:
       browser_->window()->Restore();
       break;
+#endif
+
+#if BUILDFLAG(IS_LINUX)
     case IDC_USE_SYSTEM_TITLE_BAR: {
       PrefService* prefs = profile()->GetPrefs();
       prefs->SetBoolean(prefs::kUseCustomChromeFrame,
@@ -615,6 +629,9 @@ bool BrowserCommandController::ExecuteCommandWithDisposition(
       break;
     case IDC_SAVE_IBAN_FOR_PAGE:
       SaveIBAN(browser_);
+      break;
+    case IDC_AUTOFILL_MANDATORY_REAUTH:
+      ShowMandatoryReauthOptInPrompt(browser_);
       break;
     case IDC_MIGRATE_LOCAL_CREDIT_CARD_FOR_PAGE:
       MigrateLocalCards(browser_);
@@ -777,7 +794,14 @@ bool BrowserCommandController::ExecuteCommandWithDisposition(
     case IDC_FEEDBACK:
       OpenFeedbackDialog(browser_, kFeedbackSourceBrowserCommand);
       break;
+    case IDC_SHOW_SEARCH_COMPANION:
+      SidePanelUI::GetSidePanelUIForBrowser(browser_)->Show(
+          SidePanelEntryId::kSearchCompanion, SidePanelOpenTrigger::kAppMenu);
+      break;
 #endif
+    case IDC_SHOW_CHROME_LABS:
+      window()->ShowChromeLabs();
+      break;
     case IDC_SHOW_BOOKMARK_BAR:
       ToggleBookmarkBar(browser_);
       break;
@@ -794,8 +818,8 @@ bool BrowserCommandController::ExecuteCommandWithDisposition(
       ShowBookmarkManager(browser_->GetBrowserForOpeningWebUi());
       break;
     case IDC_SHOW_BOOKMARK_SIDE_PANEL:
-      browser_->window()->ShowSidePanel(SidePanelEntryId::kBookmarks,
-                                        SidePanelOpenTrigger::kAppMenu);
+      SidePanelUI::GetSidePanelUIForBrowser(browser_)->Show(
+          SidePanelEntryId::kBookmarks, SidePanelOpenTrigger::kAppMenu);
       break;
     case IDC_SHOW_APP_MENU:
       base::RecordAction(base::UserMetricsAction("Accel_Show_App_Menu"));
@@ -821,7 +845,7 @@ bool BrowserCommandController::ExecuteCommandWithDisposition(
     case IDC_EXTENSIONS_SUBMENU_VISIT_CHROME_WEB_STORE:
       CHECK(base::FeatureList::IsEnabled(features::kExtensionsMenuInAppMenu) ||
             features::IsChromeRefresh2023());
-      ShowWebStoreFromAppMenu(browser_);
+      ShowWebStore(browser_, extension_urls::kAppMenuUtmSource);
       break;
     case IDC_PERFORMANCE:
       ShowSettingsSubPage(browser_->GetBrowserForOpeningWebUi(),
@@ -937,7 +961,7 @@ bool BrowserCommandController::ExecuteCommandWithDisposition(
       CloseOtherTabs(browser_);
       break;
     case IDC_SHOW_MANAGEMENT_PAGE: {
-      ShowSingletonTab(browser_, GURL(kChromeUIManagementURL));
+      ShowSingletonTab(browser_, GetManagedUiMenuLinkUrl(profile()));
       break;
     }
     case IDC_MUTE_TARGET_SITE:
@@ -1004,8 +1028,8 @@ bool BrowserCommandController::ExecuteCommandWithDisposition(
       break;
 
     case IDC_READING_LIST_MENU_SHOW_UI:
-      browser_->window()->ShowSidePanel(SidePanelEntryId::kReadingList,
-                                        SidePanelOpenTrigger::kAppMenu);
+      SidePanelUI::GetSidePanelUIForBrowser(browser_)->Show(
+          SidePanelEntryId::kReadingList, SidePanelOpenTrigger::kAppMenu);
       break;
 
     default:
@@ -1155,6 +1179,8 @@ void BrowserCommandController::InitCommandState() {
   command_updater_.UpdateCommandEnabled(IDC_MINIMIZE_WINDOW, true);
   command_updater_.UpdateCommandEnabled(IDC_MAXIMIZE_WINDOW, true);
   command_updater_.UpdateCommandEnabled(IDC_RESTORE_WINDOW, true);
+#endif
+#if BUILDFLAG(IS_LINUX)
   bool use_system_title_bar = true;
 #if BUILDFLAG(IS_OZONE)
   use_system_title_bar = ui::OzonePlatform::GetInstance()
@@ -1187,7 +1213,8 @@ void BrowserCommandController::InitCommandState() {
       IDC_SHOW_HISTORY, (!guest_session && !profile()->IsSystemProfile()));
   command_updater_.UpdateCommandEnabled(IDC_SHOW_DOWNLOADS, true);
   command_updater_.UpdateCommandEnabled(IDC_FIND_AND_EDIT_MENU, true);
-  command_updater_.UpdateCommandEnabled(IDC_AUTOFILL_MENU, !guest_session);
+  command_updater_.UpdateCommandEnabled(IDC_PASSWORDS_AND_AUTOFILL_MENU,
+                                        !guest_session);
   command_updater_.UpdateCommandEnabled(IDC_SHOW_PASSWORD_MANAGER,
                                         !guest_session);
   command_updater_.UpdateCommandEnabled(IDC_SHOW_PAYMENT_METHODS,
@@ -1304,6 +1331,9 @@ void BrowserCommandController::InitCommandState() {
 
   if (features::IsChromeRefresh2023()) {
     if (browser_->is_type_normal()) {
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
+      command_updater_.UpdateCommandEnabled(IDC_SHOW_SEARCH_COMPANION, true);
+#endif
       command_updater_.UpdateCommandEnabled(IDC_SHOW_BOOKMARK_SIDE_PANEL, true);
       // Reading list commands.
       command_updater_.UpdateCommandEnabled(IDC_READING_LIST_MENU, true);
@@ -1311,6 +1341,9 @@ void BrowserCommandController::InitCommandState() {
                                             true);
       command_updater_.UpdateCommandEnabled(IDC_READING_LIST_MENU_SHOW_UI,
                                             true);
+    }
+    if (base::FeatureList::IsEnabled(features::kChromeLabs)) {
+      command_updater_.UpdateCommandEnabled(IDC_SHOW_CHROME_LABS, true);
     }
   }
 
