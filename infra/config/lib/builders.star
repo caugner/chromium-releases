@@ -30,7 +30,6 @@ load("./args.star", "args")
 load("./branches.star", "branches")
 load("./bootstrap.star", "register_bootstrap")
 load("./builder_config.star", "builder_config", "register_builder_config")
-load("./listify.star", "listify")
 
 ################################################################################
 # Constants for use with the builder function                                  #
@@ -184,17 +183,27 @@ xcode = struct(
     x12d4e = xcode_enum("12d4e"),
     # Xcode 12.5. Requires Mac11+ OS.
     x12e262 = xcode_enum("12e262"),
-    # in use by ios-webkit-tot
-    x12e262wk = xcode_enum("12e262wk"),
     # Default Xcode 13 for chromium iOS (release candidate).
     x13main = xcode_enum("13a233"),
     # Xcode 13.0 latest beta (release candidate).
     x13latestbeta = xcode_enum("13a233"),
+    # in use by ios-webkit-tot
+    x13wk = xcode_enum("13a1030dwk"),
 )
 
 # Git revision of the compilator_watcher luciexe sub_build binary for chromium
 # orchestrators to use
 compilator_watcher_git_revision = "d5bee0e7798a40c3c6261c3dbc14becf1fbb693f"
+
+def builder_url(bucket, builder, project = None):
+    """A simple utility for constructing the milo URL for a builder."""
+    project = project or settings.project
+    url = "https://ci.chromium.org/p/%s/builders/%s/%s" % (
+        project,
+        bucket,
+        builder,
+    )
+    return url
 
 ################################################################################
 # Implementation details                                                       #
@@ -330,8 +339,6 @@ defaults = args.defaults(
     auto_builder_dimension = args.COMPUTE,
     builder_group = None,
     builderless = args.COMPUTE,
-    configure_kitchen = False,
-    kitchen_emulate_gce = False,
     cores = None,
     cpu = None,
     fully_qualified_builder_dimension = False,
@@ -367,6 +374,7 @@ defaults = args.defaults(
     # unnecessarily make wrapper functions
     bucket = args.COMPUTE,
     executable = args.COMPUTE,
+    notifies = None,
     triggered_by = args.COMPUTE,
 )
 
@@ -376,6 +384,7 @@ def builder(
         branch_selector = branches.MAIN,
         bucket = args.DEFAULT,
         executable = args.DEFAULT,
+        notifies = None,
         triggered_by = args.DEFAULT,
         os = args.DEFAULT,
         builderless = args.DEFAULT,
@@ -383,7 +392,7 @@ def builder(
         fully_qualified_builder_dimension = args.DEFAULT,
         cores = args.DEFAULT,
         cpu = args.DEFAULT,
-        bootstrap = False,
+        bootstrap = True,
         builder_group = args.DEFAULT,
         builder_spec = None,
         mirrors = None,
@@ -394,8 +403,6 @@ def builder(
         console_view_entry = None,
         list_view = args.DEFAULT,
         project_trigger_overrides = args.DEFAULT,
-        configure_kitchen = args.DEFAULT,
-        kitchen_emulate_gce = args.DEFAULT,
         goma_backend = args.DEFAULT,
         goma_debug = args.DEFAULT,
         goma_enable_ats = args.DEFAULT,
@@ -440,6 +447,9 @@ def builder(
             (may be specified by module-level default).
         executable: an executable to run, e.g. a luci.recipe(...). Required (may
             be specified by module-level default).
+        notifies: A string or list of strings with notifiers that will be
+            triggered for builds of the builder. Supports a module-level default
+            that will be merged with the provided values.
         triggered_by: an optional poller or builder that triggers the builder or
             a list of pollers and/or builders that trigger the builder. Supports
             a module-level default.
@@ -509,12 +519,6 @@ def builder(
             When this builder triggers another builder, if the BotSpec for that
             builder has a LUCI project that is a key in this mapping, the
             corresponding value will be used instead.
-        configure_kitchen: a boolean indicating whether to configure kitchen. If
-            True, emits a property to set the 'git_auth' and 'devshell' fields
-            of the '$kitchen' property. By default, considered False.
-        kitchen_emulate_gce: a boolean indicating whether to set 'emulate_gce'
-            of the '$kitchen' property. This is effective only when
-            configure_kitchen is True. By default, considered False.
         goma_backend: a member of the `goma.backend` enum indicating the goma
             backend the builder should use. Will be incorporated into the
             '$build/goma' property. By default, considered None.
@@ -599,9 +603,6 @@ def builder(
     if "sheriff_rotations" in properties:
         fail('Setting "sheriff_rotations" property is not supported: ' +
              "use sheriff_rotations instead")
-    if "$kitchen" in properties:
-        fail('Setting "$kitchen" property is not supported: ' +
-             "use configure_kitchen instead")
     if "$build/goma" in properties:
         fail('Setting "$build/goma" property is not supported: ' +
              "use goma_backend, goma_dbug, goma_enable_ats and goma_jobs instead")
@@ -660,7 +661,7 @@ def builder(
     if pool:
         dimensions["pool"] = pool
 
-    sheriff_rotations = listify(defaults.sheriff_rotations.get(), sheriff_rotations)
+    sheriff_rotations = defaults.get_value("sheriff_rotations", sheriff_rotations, merge = args.MERGE_LIST)
     if sheriff_rotations:
         properties["sheriff_rotations"] = sheriff_rotations
 
@@ -672,15 +673,6 @@ def builder(
             ssd = False
     if ssd != None:
         dimensions["ssd"] = str(int(ssd))
-
-    configure_kitchen = defaults.get_value("configure_kitchen", configure_kitchen)
-    if configure_kitchen:
-        properties["$kitchen"] = {
-            "devshell": True,
-            "git_auth": True,
-        }
-        if defaults.get_value("kitchen_emulate_gce", kitchen_emulate_gce):
-            properties["$kitchen"]["emulate_gce"] = True
 
     chromium_tests = _chromium_tests_property(
         project_trigger_overrides = project_trigger_overrides,
@@ -757,6 +749,8 @@ def builder(
         if triggered_by != args.DEFAULT:
             fail("triggered testers cannot specify triggered_by")
         triggered_by = [builder_spec.parent]
+
+    kwargs["notifies"] = defaults.get_value("notifies", notifies, merge = args.MERGE_LIST)
 
     triggered_by = defaults.get_value("triggered_by", triggered_by)
     if triggered_by != args.COMPUTE:

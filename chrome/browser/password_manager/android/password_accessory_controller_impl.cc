@@ -64,7 +64,7 @@ using password_manager::UiCredential;
 using BlocklistedStatus =
     password_manager::OriginCredentialStore::BlocklistedStatus;
 using FillingSource = ManualFillingController::FillingSource;
-using IsPslMatch = autofill::UserInfo::IsPslMatch;
+using IsExactMatch = autofill::UserInfo::IsExactMatch;
 
 namespace {
 
@@ -72,8 +72,10 @@ autofill::UserInfo TranslateCredentials(bool current_field_is_password,
                                         const url::Origin& frame_origin,
                                         const UiCredential& credential) {
   DCHECK(!credential.origin().opaque());
-  UserInfo user_info(credential.origin().Serialize(),
-                     credential.is_public_suffix_match());
+  UserInfo user_info(
+      credential.origin().Serialize(),
+      IsExactMatch(!credential.is_public_suffix_match().value() &&
+                   !credential.is_affiliation_based_match().value()));
 
   std::u16string username = GetDisplayUsername(credential);
   user_info.add_field(
@@ -500,6 +502,13 @@ void PasswordAccessoryControllerImpl::ShowAllPasswords() {
   if (all_passords_bottom_sheet_controller_ || !last_focused_field_info_) {
     return;
   }
+
+  // AllPasswordsBottomSheetController assumes that the focused frame has a live
+  // RenderFrame so that it can use the password manager driver.
+  // TODO(https://crbug.com/1286779): Investigate if focused frame really needs
+  // to return RenderFrameHosts with non-live RenderFrames.
+  if (!web_contents_->GetFocusedFrame()->IsRenderFrameLive())
+    return;
 
   // We can use |base::Unretained| safely because at the time of calling
   // |AllPasswordsSheetDismissed| we are sure that this controller is alive as

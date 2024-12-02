@@ -80,7 +80,7 @@ const base::Feature kReadLaterNewBadgePromo{"ReadLaterNewBadgePromo",
                                             base::FEATURE_DISABLED_BY_DEFAULT};
 
 const base::Feature kReadLaterAddFromDialog{"ReadLaterAddFromDialog",
-                                            base::FEATURE_DISABLED_BY_DEFAULT};
+                                            base::FEATURE_ENABLED_BY_DEFAULT};
 
 #if BUILDFLAG(ENABLE_SIDE_SEARCH)
 // Enables the side search feature for Google Search. Presents recent Google
@@ -98,6 +98,9 @@ const base::Feature kSideSearchStatePerTab{"SideSearchStatePerTab",
                                            base::FEATURE_DISABLED_BY_DEFAULT};
 #endif  // BUILDFLAG(ENABLE_SIDE_SEARCH)
 
+const base::Feature kSidePanelBorder{"SidePanelBorder",
+                                     base::FEATURE_DISABLED_BY_DEFAULT};
+
 const base::Feature kSidePanelDragAndDrop{"SidePanelDragAndDrop",
                                           base::FEATURE_DISABLED_BY_DEFAULT};
 
@@ -110,6 +113,9 @@ const char kMinimumTabWidthFeatureParameterName[] = "minTabWidth";
 // scrollable-tabstrip is enabled. https://crbug.com/1116118
 const base::Feature kScrollableTabStripButtons{
     "ScrollableTabStripButtons", base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kForceDisableStackedTabs{"ForceDisableStackedTabs",
+                                             base::FEATURE_ENABLED_BY_DEFAULT};
 
 #if !defined(ANDROID)
 // Changes the layout of the chrome://settings page to only show one section at
@@ -130,11 +136,6 @@ const base::Feature kTabGroupsAutoCreate{"TabGroupsAutoCreate",
 // Enables tabs to be frozen when collapsed. https://crbug.com/1110108
 const base::Feature kTabGroupsCollapseFreezing{
     "TabGroupsCollapseFreezing", base::FEATURE_ENABLED_BY_DEFAULT};
-
-// Enables the feedback through the tab group editor bubble.
-// https://crbug.com/1067062
-const base::Feature kTabGroupsFeedback{"TabGroupsFeedback",
-                                       base::FEATURE_ENABLED_BY_DEFAULT};
 
 // Directly controls the "new" badge (as opposed to old "master switch"; see
 // https://crbug.com/1169907 for master switch deprecation and
@@ -175,27 +176,24 @@ const base::Feature kTabRestoreSubMenus{"TabRestoreSubMenus",
 const base::Feature kTabSearchChevronIcon{"TabSearchChevronIcon",
                                           base::FEATURE_DISABLED_BY_DEFAULT};
 
-// Controls whether or not feature parameters should be used for Tab Search's
-// fuzzy search or if default values should be used.
-const base::Feature kTabSearchFuzzySearch{"kTabSearchFuzzySearch",
-                                          base::FEATURE_DISABLED_BY_DEFAULT};
-
 // Enables the tab search submit feedback button.
 const base::Feature kTabSearchFeedback{"TabSearchFeedback",
                                        base::FEATURE_DISABLED_BY_DEFAULT};
 
-// Controls feature parameters for Tab Search's `Recently Closed` entries.
-const base::Feature kTabSearchRecentlyClosed{"TabSearchRecentlyClosed",
-                                             base::FEATURE_ENABLED_BY_DEFAULT};
+// Controls whether or not to use fuzzy search for tab search.
+const base::Feature kTabSearchFuzzySearch{"TabSearchFuzzySearch",
+                                          base::FEATURE_DISABLED_BY_DEFAULT};
+
+const char kTabSearchSearchThresholdName[] = "TabSearchSearchThreshold";
 
 const base::FeatureParam<bool> kTabSearchSearchIgnoreLocation{
-    &kTabSearchFuzzySearch, "TabSearchSearchIgnoreLocation", true};
+    &kTabSearchFuzzySearch, "TabSearchSearchIgnoreLocation", false};
 
 const base::FeatureParam<int> kTabSearchSearchDistance{
     &kTabSearchFuzzySearch, "TabSearchSearchDistance", 200};
 
 const base::FeatureParam<double> kTabSearchSearchThreshold{
-    &kTabSearchFuzzySearch, "TabSearchSearchThreshold", 0.0};
+    &kTabSearchFuzzySearch, kTabSearchSearchThresholdName, 0.6};
 
 const base::FeatureParam<double> kTabSearchTitleWeight{
     &kTabSearchFuzzySearch, "TabSearchTitleWeight", 2.0};
@@ -209,6 +207,10 @@ const base::FeatureParam<double> kTabSearchGroupTitleWeight{
 const base::FeatureParam<bool> kTabSearchMoveActiveTabToBottom{
     &kTabSearchFuzzySearch, "TabSearchMoveActiveTabToBottom", true};
 
+// Controls feature parameters for Tab Search's `Recently Closed` entries.
+const base::Feature kTabSearchRecentlyClosed{"TabSearchRecentlyClosed",
+                                             base::FEATURE_ENABLED_BY_DEFAULT};
+
 const base::FeatureParam<int> kTabSearchRecentlyClosedDefaultItemDisplayCount{
     &kTabSearchRecentlyClosed, "TabSearchRecentlyClosedDefaultItemDisplayCount",
     8};
@@ -218,9 +220,6 @@ const base::FeatureParam<int> kTabSearchRecentlyClosedTabCountThreshold{
 
 const base::Feature kToolbarUseHardwareBitmapDraw{
     "ToolbarUseHardwareBitmapDraw", base::FEATURE_DISABLED_BY_DEFAULT};
-
-const base::Feature kUseRelaunchToUpdateString{
-    "UseRelaunchToUpdateString", base::FEATURE_ENABLED_BY_DEFAULT};
 
 // This enables enables persistence of a WebContents in a 1-to-1 association
 // with the current Profile for WebUI bubbles. See https://crbug.com/1177048.

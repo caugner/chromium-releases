@@ -204,9 +204,7 @@ PaymentAppServiceBridge::PaymentAppServiceBridge(
     base::OnceClosure done_creating_payment_apps_callback,
     base::RepeatingClosure set_can_make_payment_even_without_apps_callback)
     : number_of_pending_factories_(number_of_factories),
-      frame_routing_id_(content::GlobalRenderFrameHostId(
-          render_frame_host->GetProcess()->GetID(),
-          render_frame_host->GetRoutingID())),
+      frame_routing_id_(render_frame_host->GetGlobalId()),
       top_origin_(top_origin),
       frame_origin_(url_formatter::FormatUrlForSecurityDisplay(
           render_frame_host->GetLastCommittedURL())),
@@ -273,7 +271,12 @@ PaymentAppServiceBridge::CreateInternalAuthenticator() const {
   // displays the top-level origin in its UI before the user can click on the
   // [Verify] button to invoke this authenticator.
   auto* rfh = content::RenderFrameHost::FromID(frame_routing_id_);
-  return rfh && rfh->IsActive()
+  // Lifetime of the created authenticator is externally managed by the
+  // authenticator factory, but is generally tied to the RenderFrame by
+  // listening for `RenderFrameDeleted()`. Check `IsRenderFrameLive()` as a
+  // safety precaution to ensure that `RenderFrameDeleted()` will be called at
+  // some point.
+  return rfh && rfh->IsActive() && rfh->IsRenderFrameLive()
              ? std::make_unique<InternalAuthenticatorAndroid>(rfh)
              : nullptr;
 }

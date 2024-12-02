@@ -191,4 +191,15 @@ std::string RunOnOsLoginModeToString(RunOnOsLoginMode mode) {
   }
 }
 
+const char* IconsDownloadedResultToString(IconsDownloadedResult result) {
+  switch (result) {
+    case IconsDownloadedResult::kCompleted:
+      return "Completed";
+    case IconsDownloadedResult::kPrimaryPageChanged:
+      return "PrimaryPageChanged";
+    case IconsDownloadedResult::kAbortedDueToFailure:
+      return "AbortedDueToFailure";
+  }
+}
+
 }  // namespace web_app

@@ -16,10 +16,10 @@
 #include "base/metrics/histogram_macros_local.h"
 #include "base/notreached.h"
 #include "base/rand_util.h"
-#include "base/sequenced_task_runner.h"
 #include "base/task/post_task.h"
+#include "base/task/sequenced_task_runner.h"
+#include "base/task/task_runner_util.h"
 #include "base/task/thread_pool.h"
-#include "base/task_runner_util.h"
 #include "base/time/default_clock.h"
 #include "build/build_config.h"
 #include "components/optimization_guide/core/bloom_filter.h"
@@ -274,9 +274,9 @@ HintsManager::HintsManager(
     bool is_off_the_record,
     const std::string& application_locale,
     PrefService* pref_service,
-    optimization_guide::OptimizationGuideStore* hint_store,
-    optimization_guide::TopHostProvider* top_host_provider,
-    optimization_guide::TabUrlProvider* tab_url_provider,
+    base::WeakPtr<OptimizationGuideStore> hint_store,
+    TopHostProvider* top_host_provider,
+    TabUrlProvider* tab_url_provider,
     scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
     network::NetworkConnectionTracker* network_connection_tracker,
     std::unique_ptr<optimization_guide::PushNotificationManager>
@@ -717,7 +717,8 @@ void HintsManager::FetchHintsForActiveTabs() {
 
   batch_update_hints_fetcher_->FetchOptimizationGuideServiceHints(
       top_hosts, active_tab_urls_to_refresh, registered_optimization_types_,
-      optimization_guide::proto::CONTEXT_BATCH_UPDATE, application_locale_,
+      optimization_guide::proto::CONTEXT_BATCH_UPDATE_ACTIVE_TABS,
+      application_locale_,
       base::BindOnce(&HintsManager::OnHintsForActiveTabsFetched,
                      weak_ptr_factory_.GetWeakPtr(), top_hosts_set,
                      base::flat_set<GURL>(active_tab_urls_to_refresh.begin(),
@@ -848,7 +849,8 @@ void HintsManager::LoadHintForHost(const std::string& host,
                                              std::move(callback)));
 }
 
-void HintsManager::FetchHintsForURLs(std::vector<GURL> target_urls) {
+void HintsManager::FetchHintsForURLs(std::vector<GURL> target_urls,
+                                     proto::RequestContext request_context) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   // Collect hosts, stripping duplicates, but preserving the ordering.
@@ -871,7 +873,7 @@ void HintsManager::FetchHintsForURLs(std::vector<GURL> target_urls) {
   // returned, we pass this through to the page navigation callback.
   batch_update_hints_fetcher_->FetchOptimizationGuideServiceHints(
       target_hosts.vector(), target_urls, registered_optimization_types_,
-      optimization_guide::proto::CONTEXT_BATCH_UPDATE, application_locale_,
+      request_context, application_locale_,
       base::BindOnce(&HintsManager::OnPageNavigationHintsFetched,
                      weak_ptr_factory_.GetWeakPtr(), nullptr, absl::nullopt,
                      target_urls, target_hosts.set()));
@@ -1372,7 +1374,7 @@ void HintsManager::OnDeferredStartup() {
     InitiateHintsFetchScheduling();
 }
 
-optimization_guide::OptimizationGuideStore* HintsManager::hint_store() {
+base::WeakPtr<OptimizationGuideStore> HintsManager::hint_store() {
   return hint_cache_->hint_store();
 }
 

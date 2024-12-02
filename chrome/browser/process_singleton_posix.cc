@@ -74,14 +74,14 @@
 #include "base/posix/eintr_wrapper.h"
 #include "base/posix/safe_strerror.h"
 #include "base/rand_util.h"
-#include "base/sequenced_task_runner_helpers.h"
-#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task/sequenced_task_runner_helpers.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/platform_thread.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
@@ -217,7 +217,7 @@ ssize_t ReadFromSocket(int fd,
                        char* buf,
                        size_t bufsize,
                        const base::TimeDelta& timeout) {
-  if (timeout > base::TimeDelta()) {
+  if (timeout.is_positive()) {
     int rv = WaitSocketForRead(fd, timeout);
     if (rv <= 0)
       return rv;

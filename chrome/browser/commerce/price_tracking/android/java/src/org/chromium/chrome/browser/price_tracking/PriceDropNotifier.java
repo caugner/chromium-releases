@@ -89,8 +89,8 @@ public class PriceDropNotifier {
     }
 
     private final Context mContext;
-    private final ImageFetcher mImageFetcher;
-    private final NotificationWrapperBuilder mNotificationBuilder;
+    private ImageFetcher mImageFetcher;
+    private final NotificationBuilderFactory mNotificationBuilderFactory;
     private final NotificationManagerProxy mNotificationManagerProxy;
     private final PriceDropNotificationManager mPriceDropNotificationManager;
 
@@ -99,25 +99,27 @@ public class PriceDropNotifier {
      * @param context The Android context.
      */
     public static PriceDropNotifier create(Context context) {
-        ImageFetcher imageFetcher =
-                ImageFetcherFactory.createImageFetcher(ImageFetcherConfig.NETWORK_ONLY,
-                        Profile.getLastUsedRegularProfile().getProfileKey());
-        NotificationWrapperBuilder notificationBuilder =
-                NotificationWrapperBuilderFactory.createNotificationWrapperBuilder(
+        NotificationBuilderFactory notificationBuilderFactory = ()
+                -> NotificationWrapperBuilderFactory.createNotificationWrapperBuilder(
                         ChannelId.PRICE_DROP,
                         new NotificationMetadata(SystemNotificationType.PRICE_DROP_ALERTS,
                                 NOTIFICATION_TAG, NOTIFICATION_ID));
-        return new PriceDropNotifier(context, imageFetcher, notificationBuilder,
-                new NotificationManagerProxyImpl(context));
+        return new PriceDropNotifier(
+                context, notificationBuilderFactory, new NotificationManagerProxyImpl(context));
+    }
+
+    /**
+     * Factory interface to create {@link NotificationWrapperBuilder}.
+     */
+    interface NotificationBuilderFactory {
+        NotificationWrapperBuilder createNotificationBuilder();
     }
 
     @VisibleForTesting
-    PriceDropNotifier(Context context, ImageFetcher imageFetcher,
-            NotificationWrapperBuilder notificationBuilder,
+    PriceDropNotifier(Context context, NotificationBuilderFactory notificationBuilderFactory,
             NotificationManagerProxy notificationManager) {
         mContext = context;
-        mImageFetcher = imageFetcher;
-        mNotificationBuilder = notificationBuilder;
+        mNotificationBuilderFactory = notificationBuilderFactory;
         mNotificationManagerProxy = notificationManager;
         mPriceDropNotificationManager =
                 new PriceDropNotificationManager(mContext, mNotificationManagerProxy);
@@ -131,6 +133,15 @@ public class PriceDropNotifier {
         maybeFetchIcon(notificationData, bitmap -> { showWithIcon(notificationData, bitmap); });
     }
 
+    @VisibleForTesting
+    protected ImageFetcher getImageFetcher() {
+        if (mImageFetcher == null) {
+            mImageFetcher = ImageFetcherFactory.createImageFetcher(ImageFetcherConfig.NETWORK_ONLY,
+                    Profile.getLastUsedRegularProfile().getProfileKey());
+        }
+        return mImageFetcher;
+    }
+
     private void maybeFetchIcon(
             final NotificationData notificationData, Callback<Bitmap> callback) {
         if (notificationData.iconUrl == null) {
@@ -140,28 +151,30 @@ public class PriceDropNotifier {
 
         ImageFetcher.Params params = ImageFetcher.Params.create(
                 notificationData.iconUrl, ImageFetcher.PRICE_DROP_NOTIFICATION);
-        mImageFetcher.fetchImage(params, bitmap -> { callback.onResult(bitmap); });
+        getImageFetcher().fetchImage(params, bitmap -> { callback.onResult(bitmap); });
     }
 
     private void showWithIcon(NotificationData notificationData, @Nullable Bitmap icon) {
+        NotificationWrapperBuilder notificationBuilder =
+                mNotificationBuilderFactory.createNotificationBuilder();
         if (icon != null) {
             // Both the large icon and the expanded view use the bitmap fetched from icon URL.
-            mNotificationBuilder.setLargeIcon(icon);
-            mNotificationBuilder.setBigPictureStyle(icon, notificationData.text);
+            notificationBuilder.setLargeIcon(icon);
+            notificationBuilder.setBigPictureStyle(icon, notificationData.text);
         }
-        mNotificationBuilder.setContentTitle(notificationData.title);
-        mNotificationBuilder.setContentText(notificationData.text);
-        mNotificationBuilder.setContentIntent(createContentIntent(notificationData.destinationUrl));
-        mNotificationBuilder.setSmallIcon(R.drawable.ic_chrome);
+        notificationBuilder.setContentTitle(notificationData.title);
+        notificationBuilder.setContentText(notificationData.text);
+        notificationBuilder.setContentIntent(createContentIntent(notificationData.destinationUrl));
+        notificationBuilder.setSmallIcon(R.drawable.ic_chrome);
         if (notificationData.actions != null) {
             for (ActionData action : notificationData.actions) {
                 PendingIntentProvider actionClickIntentProvider = createClickIntent(
                         action.actionId, notificationData.destinationUrl, notificationData.offerId);
-                mNotificationBuilder.addAction(0, action.text, actionClickIntentProvider,
+                notificationBuilder.addAction(0, action.text, actionClickIntentProvider,
                         actionIdToUmaActionType(action.actionId));
             }
         }
-        NotificationWrapper notificationWrapper = mNotificationBuilder.buildNotificationWrapper();
+        NotificationWrapper notificationWrapper = notificationBuilder.buildNotificationWrapper();
         mNotificationManagerProxy.notify(notificationWrapper);
         mPriceDropNotificationManager.onNotificationPosted(notificationWrapper.getNotification());
     }

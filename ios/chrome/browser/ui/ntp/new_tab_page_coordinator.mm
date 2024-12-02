@@ -34,6 +34,7 @@
 #import "ios/chrome/browser/ui/content_suggestions/content_suggestions_header_view_controller.h"
 #import "ios/chrome/browser/ui/content_suggestions/discover_feed_metrics_recorder.h"
 #import "ios/chrome/browser/ui/content_suggestions/ntp_home_mediator.h"
+#import "ios/chrome/browser/ui/content_suggestions/ntp_home_metrics.h"
 #import "ios/chrome/browser/ui/context_menu/link_preview/link_preview_coordinator.h"
 #import "ios/chrome/browser/ui/main/scene_state.h"
 #import "ios/chrome/browser/ui/main/scene_state_browser_agent.h"
@@ -230,6 +231,9 @@ const base::Feature kUpdateNTPForFeedFix{"UpdateNTPForFeedFix",
                                   self.browser, self.webState)
       voiceSearchAvailability:&_voiceSearchAvailability];
   self.ntpMediator.browser = self.browser;
+  self.ntpMediator.NTPMetrics = [[NTPHomeMetrics alloc]
+      initWithBrowserState:self.browser->GetBrowserState()];
+  self.ntpMediator.NTPMetrics.webState = self.webState;
 
   self.contentSuggestionsCoordinator = [[ContentSuggestionsCoordinator alloc]
       initWithBaseViewController:nil
@@ -355,6 +359,8 @@ const base::Feature kUpdateNTPForFeedFix{"UpdateNTPForFeedFix",
   self.ntpViewController.contentSuggestionsViewController =
       self.contentSuggestionsCoordinator.viewController;
   self.ntpViewController.panGestureHandler = self.panGestureHandler;
+  self.ntpViewController.feedVisible =
+      [self shouldFeedBeVisible] && self.discoverFeedViewController;
   self.ntpMediator.ntpViewController = self.ntpViewController;
 
   self.discoverFeedWrapperViewController =
@@ -414,6 +420,14 @@ const base::Feature kUpdateNTPForFeedFix{"UpdateNTPForFeedFix",
 }
 
 #pragma mark - Public Methods
+
+- (void)setWebState:(web::WebState*)webState {
+  if (_webState == webState) {
+    return;
+  }
+  self.ntpMediator.webState = webState;
+  _webState = webState;
+}
 
 - (void)dismissModals {
   [self.contentSuggestionsCoordinator dismissModals];
@@ -497,11 +511,12 @@ const base::Feature kUpdateNTPForFeedFix{"UpdateNTPForFeedFix",
 - (void)updateDiscoverFeedLayout {
   // If this coordinator has not finished [self start], the below will start
   // viewDidLoad before the UI is ready, failing DCHECKS.
-  if (self.started) {
-    [self.containedViewController.view setNeedsLayout];
-    [self.containedViewController.view layoutIfNeeded];
-    [self.ntpViewController updateContentSuggestionForCurrentLayout];
+  if (!self.started) {
+    return;
   }
+  [self.containedViewController.view setNeedsLayout];
+  [self.containedViewController.view layoutIfNeeded];
+  [self.ntpViewController updateNTPLayout];
 }
 
 - (void)setContentOffsetToTop {
@@ -649,10 +664,6 @@ const base::Feature kUpdateNTPForFeedFix{"UpdateNTPForFeedFix",
 
 - (void)reloadContentSuggestions {
   [self.contentSuggestionsCoordinator reload];
-}
-
-- (BOOL)isFeedVisible {
-  return [self shouldFeedBeVisible] && self.discoverFeedViewController;
 }
 
 #pragma mark - PrefObserverDelegate
