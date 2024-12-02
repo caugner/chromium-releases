@@ -49,8 +49,6 @@
 #include "chrome/browser/devtools/devtools_window.h"
 #include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/download/download_stats.h"
-#include "chrome/browser/feed/web_feed_tab_helper.h"
-#include "chrome/browser/feed/web_feed_ui_util.h"
 #include "chrome/browser/language/language_model_manager_factory.h"
 #include "chrome/browser/media/router/media_router_feature.h"
 #include "chrome/browser/navigation_predictor/navigation_predictor_features.h"
@@ -113,6 +111,7 @@
 #include "chrome/browser/ui/user_notes/user_notes_controller.h"
 #include "chrome/browser/ui/web_applications/app_browser_controller.h"
 #include "chrome/browser/ui/webui/history/foreign_session_handler.h"
+#include "chrome/browser/user_education/user_education_service.h"
 #include "chrome/browser/web_applications/mojom/user_display_mode.mojom.h"
 #include "chrome/browser/web_applications/web_app_helpers.h"
 #include "chrome/browser/web_applications/web_app_icon_manager.h"
@@ -129,8 +128,7 @@
 #include "chrome/grit/branded_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/autofill/content/browser/content_autofill_client.h"
-#include "components/autofill/core/browser/ui/popup_hiding_reasons.h"
-#include "components/autofill/core/browser/ui/popup_item_ids.h"
+#include "components/autofill/core/browser/ui/suggestion_hiding_reason.h"
 #include "components/autofill/core/common/autofill_features.h"
 #include "components/autofill/core/common/password_generation_util.h"
 #include "components/autofill/core/common/unique_ids.h"
@@ -138,7 +136,6 @@
 #include "components/compose/core/browser/compose_features.h"
 #include "components/custom_handlers/protocol_handler.h"
 #include "components/download/public/common/download_url_parameters.h"
-#include "components/feed/feed_feature_list.h"
 #include "components/google/core/common/google_util.h"
 #include "components/guest_view/browser/guest_view_base.h"
 #include "components/language/core/browser/language_model_manager.h"
@@ -152,6 +149,7 @@
 #include "components/omnibox/browser/autocomplete_classifier.h"
 #include "components/omnibox/browser/autocomplete_match.h"
 #include "components/password_manager/content/browser/content_password_manager_driver.h"
+#include "components/password_manager/core/browser/features/password_features.h"
 #include "components/password_manager/core/browser/password_manager_metrics_util.h"
 #include "components/password_manager/core/browser/password_manager_util.h"
 #include "components/pdf/common/pdf_util.h"
@@ -179,6 +177,7 @@
 #include "components/url_formatter/url_formatter.h"
 #include "components/user_notes/user_notes_features.h"
 #include "components/user_prefs/user_prefs.h"
+#include "components/vector_icons/vector_icons.h"
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/child_process_security_policy.h"
@@ -494,8 +493,8 @@ const std::map<int, int>& GetIdcToUmaMap(UmaEnumIdLookupType type) {
        {IDC_CONTENT_CONTEXT_WEB_REGION_SEARCH, 116},
        {IDC_CONTENT_CONTEXT_RESHARELINKTOTEXT, 117},
        {IDC_CONTENT_CONTEXT_OPEN_IN_READING_MODE, 118},
-       {IDC_FOLLOW, 119},
-       {IDC_UNFOLLOW, 120},
+       // Removed: {IDC_FOLLOW, 119},
+       // Removed: {IDC_UNFOLLOW, 120},
        // Removed: {IDC_CONTENT_CONTEXT_AUTOFILL_CUSTOM_FIRST, 121},
        {IDC_CONTENT_CONTEXT_PARTIAL_TRANSLATE, 123},
        {IDC_CONTENT_CONTEXT_ADD_A_NOTE, 124},
@@ -520,13 +519,17 @@ const std::map<int, int>& GetIdcToUmaMap(UmaEnumIdLookupType type) {
        {IDC_CONTENT_CONTEXT_SEARCHWEBFORVIDEOFRAME, 143},
        {IDC_CONTENT_CONTEXT_OPENLINKPREVIEW, 144},
        {IDC_CONTENT_CONTEXT_AUTOFILL_FALLBACK_PLUS_ADDRESS, 145},
+       {IDC_CONTENT_CONTEXT_AUTOFILL_FALLBACK_PASSWORDS, 146},
+       {IDC_CONTENT_CONTEXT_AUTOFILL_FALLBACK_PASSWORDS_SELECT_PASSWORD, 147},
+       {IDC_CONTENT_CONTEXT_AUTOFILL_FALLBACK_PASSWORDS_IMPORT_PASSWORDS, 148},
+       {IDC_CONTENT_CONTEXT_AUTOFILL_FALLBACK_PASSWORDS_SUGGEST_PASSWORD, 149},
        // To add new items:
        //   - Add one more line above this comment block, using the UMA value
        //     from the line below this comment block.
        //   - Increment the UMA value in that latter line.
        //   - Add the new item to the RenderViewContextMenuItem enum in
        //     tools/metrics/histograms/enums.xml.
-       {0, 146}});
+       {0, 150}});
 
   // These UMA values are for the ContextMenuOptionDesktop enum, used for
   // the ContextMenu.SelectedOptionDesktop histograms.
@@ -688,7 +691,7 @@ void OnBrowserCreated(const GURL& link_url,
                       url::Origin initiator_origin,
                       Browser* browser) {
   if (!browser) {
-    // TODO(crbug.com/1374315): Make sure we do something or log an error if
+    // TODO(crbug.com/40242414): Make sure we do something or log an error if
     // opening a browser window was not possible.
     return;
   }
@@ -791,7 +794,7 @@ Browser* FindNormalBrowser(const Profile* profile) {
 #if BUILDFLAG(ENABLE_PDF)
 // Returns true if the PDF viewer is handling the save, false otherwise.
 bool MaybePdfViewerHandlesSave(RenderFrameHost* frame_host) {
-  if (!base::FeatureList::IsEnabled(chrome_pdf::features::kPdfOopif) ||
+  if (!chrome_pdf::features::IsOopifPdfEnabled() ||
       !IsFrameInPdfViewer(frame_host)) {
     return false;
   }
@@ -1090,7 +1093,9 @@ void RenderViewContextMenu::InitMenu() {
   RenderViewContextMenuBase::InitMenu();
 
   if (content_type_->SupportsGroup(
-          ContextMenuContentType::ITEM_GROUP_PASSWORD)) {
+          ContextMenuContentType::ITEM_GROUP_PASSWORD) &&
+      !base::FeatureList::IsEnabled(
+          password_manager::features::kPasswordManualFallbackAvailable)) {
     AppendPasswordItems();
   }
 
@@ -1171,10 +1176,9 @@ void RenderViewContextMenu::InitMenu() {
   if (content_type_->SupportsGroup(
           ContextMenuContentType::ITEM_GROUP_SEARCH_PROVIDER) &&
       params_.misspelled_word.empty() &&
-      (params_.page_url !=
-           chrome::GetSettingsUrl(chrome::kPasswordManagerSubPage) &&
-       params_.page_url !=
-           chrome::GetSettingsUrl(chrome::kPasswordCheckSubPage))) {
+      (params_.page_url != GetGooglePasswordManagerSubPageURLStr() &&
+       params_.page_url != chrome::kChromeUIPasswordManagerCheckupURL &&
+       params_.page_url != chrome::kChromeUIPasswordManagerSettingsURL)) {
     AppendSearchProvider();
   }
 
@@ -1335,8 +1339,8 @@ void RenderViewContextMenu::InitMenu() {
     autofill::AutofillClient* autofill_client =
         autofill::ContentAutofillClient::FromWebContents(web_contents);
     if (autofill_client) {
-      autofill_client->HideAutofillPopup(
-          autofill::PopupHidingReason::kContextMenuOpened);
+      autofill_client->HideAutofillSuggestions(
+          autofill::SuggestionHidingReason::kContextMenuOpened);
     }
   }
 }
@@ -1870,9 +1874,7 @@ void RenderViewContextMenu::AppendLinkItems() {
                                 /*add_separator*/ false);
     }
 
-#if !BUILDFLAG(IS_FUCHSIA)
     AppendClickToCallItem();
-#endif
 
     menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
     menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_SAVELINKAS,
@@ -2120,8 +2122,7 @@ void RenderViewContextMenu::AppendPluginItems() {
   bool is_full_page_pdf_viewer = false;
 #if BUILDFLAG(ENABLE_PDF)
   // Always append page items for full page PDF Viewers.
-  if (base::FeatureList::IsEnabled(chrome_pdf::features::kPdfOopif) &&
-      render_frame_host) {
+  if (chrome_pdf::features::IsOopifPdfEnabled() && render_frame_host) {
     // If the plugin is the PDF viewer, then `render_frame_host` will either be
     // the PDF extension host or the PDF content host.
     RenderFrameHost* extension_host =
@@ -2171,19 +2172,8 @@ void RenderViewContextMenu::AppendPageItems() {
   menu_model_.AddItemWithStringId(IDC_PRINT, IDS_CONTENT_CONTEXT_PRINT);
   AppendLiveCaptionItem();
   AppendMediaRouterItem();
-  LensOverlayController* const controller =
-      LensOverlayController::GetController(source_web_contents_);
-
-  // TODO(https://crbug.com/330808104): Delete the code in the else statement
-  // once overlay is launched.
-  if (controller && controller->Enabled()) {
-    AppendRegionSearchItem();
-  } else {
-#if BUILDFLAG(ENABLE_LENS_DESKTOP_GOOGLE_BRANDED_FEATURES)
   if (IsRegionSearchEnabled()) {
     AppendRegionSearchItem();
-  }
-#endif
   }
 
   // Note: `has_sharing_menu_items = true` also implies a separator was added
@@ -2630,9 +2620,7 @@ void RenderViewContextMenu::AppendSharingItems() {
   size_t items_before_sharing = menu_model_.GetItemCount();
   bool starting_separator_added = items_before_sharing > items_initial;
 
-#if !BUILDFLAG(IS_FUCHSIA)
   AppendClickToCallItem();
-#endif
 
   // Add an ending separator if there are sharing items, otherwise remove the
   // starting separator iff we added one above.
@@ -2643,7 +2631,6 @@ void RenderViewContextMenu::AppendSharingItems() {
     menu_model_.RemoveItemAt(items_initial);
 }
 
-#if !BUILDFLAG(IS_FUCHSIA)
 void RenderViewContextMenu::AppendClickToCallItem() {
   SharingClickToCallEntryPoint entry_point;
   std::optional<std::string> phone_number;
@@ -2670,29 +2657,46 @@ void RenderViewContextMenu::AppendClickToCallItem() {
   click_to_call_context_menu_observer_->BuildMenu(*phone_number, selection_text,
                                                   entry_point);
 }
-#endif  // !BUILDFLAG(IS_FUCHSIA)
 
 void RenderViewContextMenu::AppendRegionSearchItem() {
-  int resource_id = IDS_CONTENT_CONTEXT_LENS_REGION_SEARCH;
-
-  if (lens::features::IsLensFullscreenSearchEnabled()) {
-    // Default text for fullscreen search when enabled.
-    resource_id = IDS_CONTENT_CONTEXT_LENS_REGION_SEARCH_ALT1;
+  if (LensOverlayController::IsEnabled(GetProfile())) {
+    const gfx::VectorIcon& icon =
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
+        vector_icons::kGoogleLensMonochromeLogoIcon;
+#else
+        vector_icons::kSearchIcon;
+#endif
+    menu_model_.AddItemWithStringIdAndIcon(
+        IDC_CONTENT_CONTEXT_LENS_REGION_SEARCH,
+        IDS_CONTENT_CONTEXT_LENS_OVERLAY, ui::ImageModel::FromVectorIcon(icon));
+    const int command_index =
+        menu_model_.GetIndexOfCommandId(IDC_CONTENT_CONTEXT_LENS_REGION_SEARCH)
+            .value();
+    menu_model_.SetElementIdentifierAt(command_index, kRegionSearchItem);
+    menu_model_.SetIsNewFeatureAt(
+        command_index, UserEducationService::MaybeShowNewBadge(
+                           GetBrowserContext(), lens::features::kLensOverlay));
+    return;
   }
 
-  // GetDefaultSearchProvider can return null in unit tests or when the
-  // default search provider is disabled by policy. In these cases, we align
-  // with the search web for image menu item by not adding the region search
-  // menu item.
+  // GetImageSearchProvider can return null in unit tests or when the default
+  // search provider is disabled by policy. In these cases, we align with the
+  // search web for image menu item by not adding the region search menu item.
   const TemplateURL* provider = GetImageSearchProvider();
   if (provider) {
     const int region_search_idc = GetRegionSearchIdc();
+    int resource_id = IDS_CONTENT_CONTEXT_LENS_REGION_SEARCH;
+    if (lens::features::IsLensFullscreenSearchEnabled()) {
+      // Default text for fullscreen search when enabled.
+      resource_id = IDS_CONTENT_CONTEXT_LENS_REGION_SEARCH_ALT1;
+    }
     menu_model_.AddItem(region_search_idc,
                         l10n_util::GetStringFUTF16(
                             resource_id, GetImageSearchProviderName(provider)));
     if (companion::IsNewBadgeEnabledForSearchMenuItem(GetBrowser())) {
       menu_model_.SetIsNewFeatureAt(menu_model_.GetItemCount() - 1, true);
     }
+
     menu_model_.SetElementIdentifierAt(
         menu_model_.GetIndexOfCommandId(region_search_idc).value(),
         kRegionSearchItem);
@@ -3015,10 +3019,6 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
       NOTREACHED() << "Unhandled id: " << id;
       return false;
 #endif
-
-    case IDC_FOLLOW:
-    case IDC_UNFOLLOW:
-      return !GetProfile()->IsOffTheRecord();
 
     default:
       DUMP_WILL_BE_NOTREACHED_NORETURN() << "Unhandled id: " << id;
@@ -3484,7 +3484,7 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
       if (browser) {
         browser->window()->ShowEmojiPanel();
       } else {
-        // TODO(https://crbug.com/919167): Ensure this is called in the correct
+        // TODO(crbug.com/40608277): Ensure this is called in the correct
         // process. This fails in print preview for PWA windows on Mac.
         ui::ShowEmojiPanel();
       }
@@ -3511,14 +3511,6 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
 #endif  // BUILDFLAG(IS_CHROMEOS)
       break;
     }
-
-    case IDC_FOLLOW:
-      feed::FollowSite(source_web_contents_);
-      break;
-
-    case IDC_UNFOLLOW:
-      feed::UnfollowSite(source_web_contents_);
-      break;
 
     default:
       DUMP_WILL_BE_NOTREACHED_NORETURN() << "Unhandled id: " << id;
@@ -3831,6 +3823,10 @@ bool RenderViewContextMenu::IsQRCodeGeneratorEnabled() const {
 }
 
 bool RenderViewContextMenu::IsRegionSearchEnabled() const {
+  if (LensOverlayController::IsEnabled(GetProfile())) {
+    return GetBrowser()->is_type_normal();
+  }
+
 #if BUILDFLAG(ENABLE_LENS_DESKTOP_GOOGLE_BRANDED_FEATURES)
 #if BUILDFLAG(IS_MAC)
   // Region selection is broken in PWAs on Mac b/250074889
@@ -3904,25 +3900,6 @@ void RenderViewContextMenu::AppendSendTabToSelfItem(bool add_separator) {
 void RenderViewContextMenu::AppendUserNotesItems() {
   menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_ADD_A_NOTE,
                                   IDS_CONTENT_CONTEXT_ADD_A_NOTE);
-}
-
-// Returns true if the item was appended (along with a SEPARATOR).
-bool RenderViewContextMenu::AppendFollowUnfollowItem() {
-  TabWebFeedFollowState follow_state =
-      feed::WebFeedTabHelper::GetFollowState(source_web_contents_);
-  if (follow_state == TabWebFeedFollowState::kNotFollowed) {
-    menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
-    menu_model_.AddItem(IDC_FOLLOW,
-                        l10n_util::GetStringUTF16(IDS_TAB_CXMENU_FOLLOW_SITE));
-    return true;
-  }
-  if (follow_state == TabWebFeedFollowState::kFollowed) {
-    menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
-    menu_model_.AddItem(
-        IDC_UNFOLLOW, l10n_util::GetStringUTF16(IDS_TAB_CXMENU_UNFOLLOW_SITE));
-    return true;
-  }
-  return false;
 }
 
 std::unique_ptr<ui::DataTransferEndpoint>
@@ -4153,7 +4130,7 @@ void RenderViewContextMenu::ExecSaveLinkAs() {
   dl_params->set_referrer_policy(
       content::Referrer::ReferrerPolicyForUrlRequest(referrer.policy));
   dl_params->set_referrer_encoding(params_.frame_charset);
-  // TODO(https://crbug.com/1457702): use the actual origin here rather than
+  // TODO(crbug.com/40066346): use the actual origin here rather than
   // pulling it out of the frame url.
   dl_params->set_initiator(url::Origin::Create(params_.frame_url));
   dl_params->set_suggested_name(params_.suggested_filename);
@@ -4182,8 +4159,8 @@ void RenderViewContextMenu::ExecSaveAs() {
   RenderFrameHost* target_frame_host = nullptr;
 
 #if BUILDFLAG(ENABLE_PDF)
-  if (base::FeatureList::IsEnabled(chrome_pdf::features::kPdfOopif) &&
-      is_plugin && IsFrameInPdfViewer(frame_host)) {
+  if (chrome_pdf::features::IsOopifPdfEnabled() && is_plugin &&
+      IsFrameInPdfViewer(frame_host)) {
     // Give the PDF viewer a chance to handle the save.
     if (MaybePdfViewerHandlesSave(frame_host)) {
       return;
@@ -4275,15 +4252,15 @@ void RenderViewContextMenu::ExecAddANote() {
 void RenderViewContextMenu::ExecRegionSearch(
     int event_flags,
     bool is_google_default_search_provider) {
-  if (is_google_default_search_provider) {
-    // TODO(https://crbug.com/330808104): This should become a CHECK. If the
-    // menu item is clickable, then the controller must be enabled.
+  if (LensOverlayController::IsEnabled(GetProfile())) {
     LensOverlayController* const controller =
         LensOverlayController::GetController(source_web_contents_);
-    if (controller && controller->Enabled()) {
-      controller->ShowUI();
-      return;
-    }
+    CHECK(controller);
+    controller->ShowUI(
+        LensOverlayController::InvocationSource::kContentAreaContextMenuPage);
+    UserEducationService::MaybeNotifyPromoFeatureUsed(
+        GetBrowserContext(), lens::features::kLensOverlay);
+    return;
   }
 
 #if BUILDFLAG(GOOGLE_CHROME_BRANDING)
@@ -4600,7 +4577,7 @@ void RenderViewContextMenu::PluginActionAt(
   // frame. To trigger any plugin action, detect this child frame and trigger
   // the actions from there.
   content::RenderFrameHost* extension_rfh =
-      base::FeatureList::IsEnabled(chrome_pdf::features::kPdfOopif)
+      chrome_pdf::features::IsOopifPdfEnabled()
           ? pdf_frame_util::FindFullPagePdfExtensionHost(source_web_contents_)
           : source_web_contents_->GetPrimaryMainFrame();
   plugin_rfh = pdf_frame_util::FindPdfChildFrame(extension_rfh);

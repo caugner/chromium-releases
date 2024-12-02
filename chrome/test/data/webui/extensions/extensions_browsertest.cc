@@ -60,6 +60,10 @@ IN_PROC_BROWSER_TEST_F(CrExtensionsTest, HostPermissionsToggleList) {
   RunTest("extensions/host_permissions_toggle_list_test.js", "mocha.run()");
 }
 
+IN_PROC_BROWSER_TEST_F(CrExtensionsTest, ExtensionsMV2DeprecationPanel) {
+  RunTest("extensions/mv2_deprecation_panel_test.js", "mocha.run()");
+}
+
 IN_PROC_BROWSER_TEST_F(CrExtensionsTest, SafetyCheckReviewPanel) {
   RunTest("extensions/review_panel_test.js", "mocha.run()");
 }
@@ -147,7 +151,8 @@ IN_PROC_BROWSER_TEST_F(CrExtensionsToolbarTest, NarrowModeShowsMenu) {
   RunTestCase("NarrowModeShowsMenu");
 }
 
-// TODO(crbug.com/882342) Disabled on other platforms but MacOS due to timeouts.
+// TODO(crbug.com/40592901) Disabled on other platforms but MacOS due to
+// timeouts.
 #if !BUILDFLAG(IS_MAC)
 #define MAYBE_ClickHandlers DISABLED_ClickHandlers
 #else
@@ -243,6 +248,15 @@ IN_PROC_BROWSER_TEST_F(CrExtensionsDetailViewTest, LayoutSource) {
 }
 
 IN_PROC_BROWSER_TEST_F(CrExtensionsDetailViewTest,
+                       ElementVisibilityReloadButton) {
+  RunTestCase("ElementVisibilityReloadButton");
+}
+
+IN_PROC_BROWSER_TEST_F(CrExtensionsDetailViewTest, FailedReloadFiresLoadError) {
+  RunTestCase("FailedReloadFiresLoadError");
+}
+
+IN_PROC_BROWSER_TEST_F(CrExtensionsDetailViewTest,
                        SupervisedUserDisableReasons) {
   RunTestCase("SupervisedUserDisableReasons");
 }
@@ -306,12 +320,26 @@ IN_PROC_BROWSER_TEST_F(CrExtensionsItemListTest, NoSearchResults) {
   RunTestCase("NoSearchResults");
 }
 
+IN_PROC_BROWSER_TEST_F(CrExtensionsItemListTest, SectionsVisibility) {
+  RunTestCase("SectionsVisibility");
+}
+
 IN_PROC_BROWSER_TEST_F(CrExtensionsItemListTest, LoadTimeData) {
   RunTestCase("LoadTimeData");
 }
 
 IN_PROC_BROWSER_TEST_F(CrExtensionsItemListTest, SafetyCheckPanel) {
   RunTestCase("SafetyCheckPanel");
+}
+
+IN_PROC_BROWSER_TEST_F(CrExtensionsItemListTest,
+                       ManifestV2DeprecationPanel_Disabled) {
+  RunTestCase("ManifestV2DeprecationPanel_Disabled");
+}
+
+IN_PROC_BROWSER_TEST_F(CrExtensionsItemListTest,
+                       ManifestV2DeprecationPanel_Enabled) {
+  RunTestCase("ManifestV2DeprecationPanel_Enabled");
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -495,7 +523,7 @@ IN_PROC_BROWSER_TEST_F(CrExtensionsManagerTestWithIdQueryParam,
   RunTestCase("UrlNavigationToDetails");
 }
 
-// Disabled as flaky. TODO(crbug.com/1127741): Enable this test.
+// Disabled as flaky. TODO(crbug.com/40719203): Enable this test.
 IN_PROC_BROWSER_TEST_F(CrExtensionsManagerTestWithIdQueryParam,
                        DISABLED_UrlNavigationToActivityLogFail) {
   InstallPrerequisites();
@@ -539,7 +567,7 @@ class CrExtensionsOptionsDialogTest : public ExtensionSettingsTestBase {
   }
 };
 
-// TODO(crbug.com/1028357): Flaky on multiple platforms.
+// TODO(crbug.com/40109111): Flaky on multiple platforms.
 IN_PROC_BROWSER_TEST_F(CrExtensionsOptionsDialogTest, DISABLED_Layout) {
   InstallExtensionWithInPageOptions();
   RunTest("extensions/options_dialog_test.js",
@@ -558,7 +586,7 @@ class CrExtensionsErrorConsoleTest : public ExtensionSettingsTestBase {
 
 IN_PROC_BROWSER_TEST_F(CrExtensionsErrorConsoleTest, TestUpDownErrors) {
   SetDevModeEnabled(true);
-  // TODO(https://crbug.com/1269161): Update the associated extensions to
+  // TODO(crbug.com/40804030): Update the associated extensions to
   // Manifest V3 and stop ignoring deprecated manifest version warnings.
   SetSilenceDeprecatedManifestVersionWarnings(true);
   InstallErrorsExtension();

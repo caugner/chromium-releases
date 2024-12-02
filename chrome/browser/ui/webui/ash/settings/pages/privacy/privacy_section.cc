@@ -13,7 +13,6 @@
 #include "base/i18n/time_formatting.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/no_destructor.h"
-#include "base/strings/utf_string_conversions.h"
 #include "build/branding_buildflags.h"
 #include "build/chromeos_buildflags.h"
 #include "chrome/browser/ash/login/quick_unlock/quick_unlock_utils.h"
@@ -515,8 +514,12 @@ void PrivacySection::AddLoadTimeData(content::WebUIDataSource* html_source) {
        IDS_OS_SETTINGS_PRIVACY_HUB_SPEAK_ON_MUTE_DETECTION_TOGGLE_SUBTEXT},
       {"geolocationAreaTitle",
        IDS_OS_SETTINGS_PRIVACY_HUB_GEOLOCATION_AREA_TITLE},
-      {"geolocationAreaDescription",
-       IDS_OS_SETTINGS_PRIVACY_HUB_GEOLOCATION_AREA_DESCRIPTION},
+      {"geolocationAreaAllowedSubtext",
+       IDS_OS_SETTINGS_PRIVACY_HUB_GEOLOCATION_AREA_ALLOWED_SUBTEXT},
+      {"geolocationAreaOnlyAllowedForSystemSubtext",
+       IDS_OS_SETTINGS_PRIVACY_HUB_GEOLOCATION_AREA_ONLY_ALLOWED_FOR_SYSTEM_SUBTEXT},
+      {"geolocationAreaDisallowedSubtext",
+       IDS_OS_SETTINGS_PRIVACY_HUB_GEOLOCATION_AREA_DISALLOWED_SUBTEXT},
       {"geolocationControlledByPrimaryUserText",
        IDS_OS_SETTINGS_PRIVACY_HUB_GEOLOCATION_PRIMARY_USER_CONTROLLED},
       {"geolocationAccessLevelAllowed",
@@ -577,6 +580,8 @@ void PrivacySection::AddLoadTimeData(content::WebUIDataSource* html_source) {
        IDS_OS_SETTINGS_PRIVACY_HUB_NO_APP_CAN_USE_LOCATION_TEXT},
       {"privacyHubSystemServicesSectionTitle",
        IDS_OS_SETTINGS_PRIVACY_HUB_SYSTEM_SERVICES_SECTION_TITLE},
+      {"privacyHubSystemServicesGeolocationNotConfigured",
+       IDS_OS_SETTINGS_PRIVACY_HUB_SYSTEM_SERVICES_GEOLOCATION_NOT_CONFIGURED},
       {"privacyHubSystemServicesAllowedText",
        IDS_OS_SETTINGS_PRIVACY_HUB_SYSTEM_SERVICES_ALLOWED_TEXT},
       {"privacyHubSystemServicesBlockedText",
@@ -609,6 +614,22 @@ void PrivacySection::AddLoadTimeData(content::WebUIDataSource* html_source) {
        IDS_OS_SETTINGS_PRIVACY_HUB_CAMERA_TOGGLE_NO_CAMERA_CONNECTED_TOOLTIP_TEXT},
       {"privacyHubNoMicrophoneConnectedTooltipText",
        IDS_OS_SETTINGS_PRIVACY_HUB_MICROPHONE_TOGGLE_NO_MICROPHONE_CONNECTED_TOOLTIP_TEXT},
+      {"privacyHubAllowCameraAccessDialogTitle",
+       IDS_OS_SETTINGS_PRIVACY_HUB_ALLOW_CAMERA_ACCESS_DIALOG_TITLE},
+      {"privacyHubAllowLocationAccessDialogTitle",
+       IDS_OS_SETTINGS_PRIVACY_HUB_ALLOW_LOCATION_ACCESS_DIALOG_TITLE},
+      {"privacyHubAllowMicrophoneAccessDialogTitle",
+       IDS_OS_SETTINGS_PRIVACY_HUB_ALLOW_MICROPHONE_ACCESS_DIALOG_TITLE},
+      {"privacyHubAllowCameraAccessDialogBodyText",
+       IDS_OS_SETTINGS_PRIVACY_HUB_ALLOW_CAMERA_ACCESS_DIALOG_BODY_TEXT},
+      {"privacyHubAllowLocationAccessDialogBodyText",
+       IDS_OS_SETTINGS_PRIVACY_HUB_ALLOW_LOCATION_ACCESS_DIALOG_BODY_TEXT},
+      {"privacyHubAllowMicrophoneAccessDialogBodyText",
+       IDS_OS_SETTINGS_PRIVACY_HUB_ALLOW_MICROPHONE_ACCESS_DIALOG_BODY_TEXT},
+      {"privacyHubDialogConfirmButtonLabel",
+       IDS_OS_SETTINGS_PRIVACY_HUB_DIALOG_CONFIRM_BUTTON_LABEL},
+      {"privacyHubDialogCancelButtonLabel",
+       IDS_OS_SETTINGS_PRIVACY_HUB_DIALOG_CANCEL_BUTTON_LABEL},
   };
 
   html_source->AddLocalizedStrings(kLocalizedStrings);
@@ -664,11 +685,6 @@ void PrivacySection::AddLoadTimeData(content::WebUIDataSource* html_source) {
                          chrome::kPrivacyHubGeolocationLearnMoreURL);
 
   html_source->AddString("osSettingsAppId", web_app::kOsSettingsAppId);
-
-  html_source->AddString(
-      "authPrompt", l10n_util::GetStringFUTF16(
-                        IDS_SETTINGS_IN_SESSION_AUTH_ORIGIN_NAME_PROMPT,
-                        l10n_util::GetStringUTF16(IDS_SHORT_PRODUCT_OS_NAME)));
 
   html_source->AddBoolean("showSecureDnsSetting", IsSecureDnsAvailable());
   html_source->AddBoolean("showSecureDnsOsSettingLink", false);

@@ -327,6 +327,13 @@ struct AutocompleteMatch {
   // or |description|.
   static std::u16string SanitizeString(const std::u16string& text);
 
+  // Convenience function to check if `type` is featured Enterprise search.
+  static bool IsFeaturedEnterpriseSearchType(Type type);
+
+  // Convenience function to check if `type` is featured search type, e.g.
+  // starter pack and featured site search engines created by policy.
+  static bool IsFeaturedSearchType(Type type);
+
   // Convenience function to check if |type| is a search (as opposed to a URL or
   // an extension).
   static bool IsSearchType(Type type);
@@ -578,7 +585,7 @@ struct AutocompleteMatch {
   // get confused about which is which.  See the code that sets
   // |swap_contents_and_description| for conditions they are swapped.
   //
-  // TODO(crbug.com/1202964): Clean up the handling of contents and description
+  // TODO(crbug.com/40179316): Clean up the handling of contents and description
   // so that this copy is no longer required.
   AutocompleteMatch GetMatchWithContentsAndDescriptionPossiblySwapped() const;
 

@@ -86,7 +86,6 @@ gfx::BufferFormat GetBufferFormatForPlane(viz::SharedImageFormat format,
   return gfx::BufferFormat::RGBA_8888;
 }
 
-#if BUILDFLAG(USE_DAWN)
 wgpu::Texture CreateWGPUTexture(wgpu::SharedTextureMemory shared_texture_memory,
                                 uint32_t shared_image_usage,
                                 const gfx::Size& io_surface_size,
@@ -126,7 +125,6 @@ wgpu::Texture CreateWGPUTexture(wgpu::SharedTextureMemory shared_texture_memory,
 
   return shared_texture_memory.CreateTexture(&texture_descriptor);
 }
-#endif
 
 #if BUILDFLAG(SKIA_USE_METAL)
 
@@ -156,7 +154,7 @@ base::apple::scoped_nsprotocol<id<MTLTexture>> CreateMetalTexture(
   [mtl_tex_desc.get() setMipmapLevelCount:1];
   [mtl_tex_desc.get() setArrayLength:1];
   [mtl_tex_desc.get() setSampleCount:1];
-  // TODO(https://crbug.com/952063): For zero-copy resources that are populated
+  // TODO(crbug.com/40622826): For zero-copy resources that are populated
   // on the CPU (e.g, video frames), it may be that MTLStorageModeManaged will
   // be more appropriate.
 #if BUILDFLAG(IS_IOS)
@@ -660,11 +658,9 @@ bool IOSurfaceImageBacking::OverlayRepresentation::BeginReadAccess(
   // WaitForANGLECommandsToBeScheduled() call is required.
   iosurface_backing->WaitForANGLECommandsToBeScheduled();
 
-#if BUILDFLAG(USE_DAWN)
   // Likewise do the same for Dawn's commands.
   iosurface_backing->WaitForDawnCommandsToBeScheduled(
       /*device_to_exclude=*/nullptr);
-#endif
 
   gl::GLContext* context = gl::GLContext::GetCurrent();
   if (context) {
@@ -713,7 +709,6 @@ bool IOSurfaceImageBacking::OverlayRepresentation::IsInUseByWindowServer()
   return IOSurfaceIsInUse(io_surface_.get());
 }
 
-#if BUILDFLAG(USE_DAWN)
 IOSurfaceImageBacking::SharedTextureData::SharedTextureData() = default;
 
 IOSurfaceImageBacking::SharedTextureData::~SharedTextureData() {
@@ -943,7 +938,6 @@ void IOSurfaceImageBacking::DawnRepresentation::EndAccess() {
   texture_ = nullptr;
   usage_ = wgpu::TextureUsage::None;
 }
-#endif  // BUILDFLAG(USE_DAWN)
 
 // Enabling this functionality reduces overhead in the compositor by lowering
 // the frequency of begin/end access pairs. The semantic constraints for a
@@ -1010,6 +1004,7 @@ IOSurfaceImageBacking::IOSurfaceImageBacking(
       gl_target_(gl_target),
       framebuffer_attachment_angle_(framebuffer_attachment_angle),
       cleared_rect_(is_cleared ? gfx::Rect(size) : gfx::Rect()),
+      gr_context_type_(gr_context_type),
       weak_factory_(this) {
   CHECK(io_surface_);
 
@@ -1046,9 +1041,7 @@ bool IOSurfaceImageBacking::ReadbackToMemory(
 
   // Make sure any pending ANGLE EGLDisplays and Dawn devices are flushed.
   WaitForANGLECommandsToBeScheduled();
-#if BUILDFLAG(USE_DAWN)
   WaitForDawnCommandsToBeScheduled(/*device_to_exclude=*/nullptr);
-#endif
 
   ScopedIOSurfaceLock io_surface_lock(io_surface_.get(), /*options=*/0);
 
@@ -1099,9 +1092,7 @@ bool IOSurfaceImageBacking::UploadFromMemory(
 
   // Make sure any pending ANGLE EGLDisplays and Dawn devices are flushed.
   WaitForANGLECommandsToBeScheduled();
-#if BUILDFLAG(USE_DAWN)
   WaitForDawnCommandsToBeScheduled(/*device_to_exclude=*/nullptr);
-#endif
 
   ScopedIOSurfaceLock io_surface_lock(io_surface_.get(), /*options=*/0);
 
@@ -1293,7 +1284,6 @@ IOSurfaceImageBacking::ProduceOverlay(SharedImageManager* manager,
                                                  io_surface_);
 }
 
-#if BUILDFLAG(USE_DAWN)
 int IOSurfaceImageBacking::TrackBeginAccessToWGPUTexture(
     wgpu::Texture texture) {
   return wgpu_texture_ongoing_accesses_[texture.Get()]++;
@@ -1402,7 +1392,6 @@ void IOSurfaceImageBacking::WaitForDawnCommandsToBeScheduled(
     wgpu_devices_pending_flush_.insert(device_to_exclude);
   }
 }
-#endif
 
 void IOSurfaceImageBacking::AddEGLDisplayWithPendingCommands(
     gl::GLDisplayEGL* display) {
@@ -1429,14 +1418,13 @@ std::unique_ptr<DawnImageRepresentation> IOSurfaceImageBacking::ProduceDawn(
     wgpu::BackendType backend_type,
     std::vector<wgpu::TextureFormat> view_formats,
     scoped_refptr<SharedContextState> context_state) {
-#if BUILDFLAG(USE_DAWN)
   wgpu::TextureFormat wgpu_format = ToDawnFormat(format());
   // See comments in IOSurfaceImageBackingFactory::CreateSharedImage about
   // RGBA versus BGRA when using Skia Ganesh GL backend or ANGLE.
   if (io_surface_format_ == 'BGRA') {
     wgpu_format = wgpu::TextureFormat::BGRA8Unorm;
   }
-  // TODO(crbug.com/1293514): Remove these if conditions after using single
+  // TODO(crbug.com/40213546): Remove these if conditions after using single
   // multiplanar mailbox for which wgpu_format should already be correct.
   if (io_surface_format_ == '420v') {
     wgpu_format = wgpu::TextureFormat::R8BG8Biplanar420Unorm;
@@ -1487,7 +1475,7 @@ std::unique_ptr<DawnImageRepresentation> IOSurfaceImageBacking::ProduceDawn(
       // repeatedly). If Graphite is being used, however, we can and do cache
       // the SharedTextureMemory instance that is associated with the Graphite
       // device.
-      // TODO(crbug.com/1493854): Cache SharedTextureMemory objects for WebGPU
+      // TODO(crbug.com/40936879): Cache SharedTextureMemory objects for WebGPU
       // as well once crbug.com/1515822 is resolved.
       // NOTE: `dawn_context_provider` may be null if Graphite is not being
       // used.
@@ -1515,9 +1503,6 @@ std::unique_ptr<DawnImageRepresentation> IOSurfaceImageBacking::ProduceDawn(
   return std::make_unique<DawnFallbackImageRepresentation>(
       manager, this, tracker, wgpu::Device(device), wgpu_format,
       std::move(view_formats));
-#else
-  return nullptr;
-#endif
 }
 
 std::unique_ptr<SkiaGaneshImageRepresentation>
@@ -1732,9 +1717,7 @@ bool IOSurfaceImageBacking::IOSurfaceBackingEGLStateBeginAccess(
   // IOSurface might be written on a different GPU. So we have to wait for the
   // previous Dawn and ANGLE commands to be scheduled first.
   // TODO(crbug.com/40260114): Skip this if we're not on a dual-GPU system.
-#if BUILDFLAG(USE_DAWN)
   WaitForDawnCommandsToBeScheduled(/*device_to_exclude=*/nullptr);
-#endif
 
   // Note that we don't need to call WaitForANGLECommandsToBeScheduled for other
   // EGLDisplays because it is already done when the previous GL context is made
@@ -1836,7 +1819,15 @@ void IOSurfaceImageBacking::IOSurfaceBackingEGLStateEndAccess(
   CHECK(display);
   CHECK_EQ(display->GetDisplay(), egl_state->egl_display_);
 
-  if (gl::GetANGLEImplementation() == gl::ANGLEImplementation::kMetal) {
+  // Only enqueue shared events if we might ever use this backing on another
+  // Metal device e.g. with WebGPU or Graphite.
+  const bool has_webgpu_usage =
+      usage() &
+      (SHARED_IMAGE_USAGE_WEBGPU_READ | SHARED_IMAGE_USAGE_WEBGPU_WRITE |
+       SHARED_IMAGE_USAGE_WEBGPU_SWAP_CHAIN_TEXTURE |
+       SHARED_IMAGE_USAGE_WEBGPU_STORAGE_TEXTURE);
+  if (gl::GetANGLEImplementation() == gl::ANGLEImplementation::kMetal &&
+      (has_webgpu_usage || gr_context_type_ != GrContextType::kGL)) {
     id<MTLSharedEvent> shared_event = nil;
     uint64_t signal_value = 0;
     if (display->CreateMetalSharedEvent(&shared_event, &signal_value)) {

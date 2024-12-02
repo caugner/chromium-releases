@@ -521,7 +521,7 @@ PrefetchContainer::~PrefetchContainer() {
     builder.SetISPFilteringStatus(static_cast<int>(probe_result_.value()));
   }
 
-  // TODO(https://crbug.com/1299059): Get the navigation start time and set the
+  // TODO(crbug.com/40215782): Get the navigation start time and set the
   // NavigationStartToFetchStartMs field of the PrefetchProxy.PrefetchedResource
   // UKM event.
 
@@ -1060,7 +1060,7 @@ void PrefetchContainer::OnPrefetchComplete(
     return;
   }
 
-  // TODO(https://crbug.com/1399956): Call
+  // TODO(crbug.com/40250089): Call
   // SpeculationHostDevToolsObserver::OnPrefetchBodyDataReceived with body of
   // the response.
   const auto& devtools_observer = GetDevToolsObserver();
@@ -1260,7 +1260,7 @@ void PrefetchContainer::OnCookiesChanged() {
   CancelStreamingURLLoaderIfNotServing();
 }
 
-// TODO(crbug.com/1462206): We might be waiting on PrefetchContainer's head
+// TODO(crbug.com/40274818): We might be waiting on PrefetchContainer's head
 // from multiple navigations.
 // E.g. We might wait from one navigation but not use the prefetch, and
 // then we can use the prefetch in a separate navigation without waiting
@@ -1420,7 +1420,7 @@ void PrefetchContainer::MakeResourceRequest(
       // priority), but the fact that we're doing this at all for more
       // conservative candidates suggests a strong engagement signal.
       //
-      // TODO(crbug.com/1467928): Ideally, we would actually use a combination
+      // TODO(crbug.com/40276985): Ideally, we would actually use a combination
       // of the actual engagement seen (rather than the minimum required to
       // trigger the candidate) and the declared eagerness, and update them as
       // the prefetch becomes increasingly likely.
@@ -1477,7 +1477,7 @@ void PrefetchContainer::AddClientHintsHeaders(
     return;
   }
 
-  // TODO(crbug.com/1524069): Consider supporting UA override mode here
+  // TODO(crbug.com/41497015): Consider supporting UA override mode here
   const bool is_ua_override_on = false;
   net::HttpRequestHeaders client_hints_headers;
   AddClientHintsHeadersToPrefetchNavigation(

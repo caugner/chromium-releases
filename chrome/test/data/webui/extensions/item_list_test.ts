@@ -8,8 +8,7 @@ import 'chrome://extensions/extensions.js';
 import type {ExtensionsItemListElement} from 'chrome://extensions/extensions.js';
 import {loadTimeData} from 'chrome://resources/js/load_time_data.js';
 import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
-import {assertEquals} from 'chrome://webui-test/chai_assert.js';
-
+import {assertEquals, assertTrue} from 'chrome://webui-test/chai_assert.js';
 import {createExtensionInfo, testVisible} from './test_util.js';
 
 suite('ExtensionItemListTest', function() {
@@ -43,6 +42,7 @@ suite('ExtensionItemListTest', function() {
     itemList.extensions = extensionItems;
     itemList.apps = appItems;
     itemList.filter = '';
+    itemList.isMv2DeprecationWarningDismissed = false;
     document.body.appendChild(itemList);
   }
 
@@ -121,6 +121,42 @@ suite('ExtensionItemListTest', function() {
     boundTestVisible('#no-search-results', true);
   });
 
+  // Tests that the extensions section and the chrome apps section, along with
+  // their headers, are only visible when extensions or chrome apps are
+  // existent, respectively. Otherwise, no items section is shown.
+  test('SectionsVisibility', function() {
+    flush();
+
+    // Extensions and chrome apps were added during setup.
+    boundTestVisible('#extensions-section', true);
+    boundTestVisible('#extensions-section h2.section-header', true);
+    boundTestVisible('#chrome-apps-section', true);
+    boundTestVisible('#chrome-apps-section h2.section-header', true);
+    boundTestVisible('#no-items', false);
+
+    itemList.apps = [];
+    flush();
+
+    // Verify chrome apps section is not visible when there are no chrome apps.
+    boundTestVisible('#extensions-section', true);
+    boundTestVisible('#extensions-section h2.section-header', true);
+    boundTestVisible('#chrome-apps-section', false);
+    boundTestVisible('#chrome-apps-section h2.section-header', false);
+    boundTestVisible('#no-items', false);
+
+    itemList.extensions = [];
+    flush();
+
+    // Verify extensions section is not visible when there are no extensions.
+    // Since there are no extensions or chrome apps, no items section is
+    // displayed.
+    boundTestVisible('#extensions-section', false);
+    boundTestVisible('#extensions-section h2.section-header', false);
+    boundTestVisible('#chrome-apps-section', false);
+    boundTestVisible('#chrome-apps-section h2.section-header', false);
+    boundTestVisible('#no-items', true);
+  });
+
   test('LoadTimeData', function() {
     // Check that loadTimeData contains these values.
     loadTimeData.getBoolean('isManaged');
@@ -159,5 +195,63 @@ suite('ExtensionItemListTest', function() {
 
     flush();
     boundTestVisible('extensions-review-panel', true);
+  });
+
+  test('ManifestV2DeprecationPanel_Disabled', async function() {
+    // Panel is hidden if panel is disabled.
+    loadTimeData.overrideValues({'MV2DeprecationPanelEnabled': false});
+    setupElement();
+    boundTestVisible('extensions-mv2-deprecation-panel', false);
+  });
+
+  test('ManifestV2DeprecationPanel_Enabled', async function() {
+    // Panel is hidden if panel is enabled and has no extensions affected
+    // by the MV2 deprecation.
+    loadTimeData.overrideValues({'MV2DeprecationPanelEnabled': true});
+    setupElement();
+    boundTestVisible('extensions-mv2-deprecation-panel', false);
+
+    // Panel is visible if panel is enabled and has at least one extension
+    // affected by the MV2 deprecation.
+    itemList.push('extensions', createExtensionInfo({
+                    name: 'Extension D',
+                    id: 'd'.repeat(32),
+                    isAffectedByMV2Deprecation: true,
+                  }));
+    flush();
+    boundTestVisible('extensions-mv2-deprecation-panel', true);
+    const mv2DeprecationPanel =
+        itemList.shadowRoot!.querySelector('extensions-mv2-deprecation-panel');
+    assertTrue(!!mv2DeprecationPanel);
+    assertEquals(1, mv2DeprecationPanel.extensions.length);
+
+    // Panel is visible if panel is enabled and has multiple extensions affected
+    // by the MV2 deprecation.
+    itemList.push('extensions', createExtensionInfo({
+                    name: 'Extension E',
+                    id: 'e'.repeat(32),
+                    isAffectedByMV2Deprecation: true,
+                  }));
+    flush();
+    boundTestVisible('extensions-mv2-deprecation-panel', true);
+    assertEquals(2, mv2DeprecationPanel.extensions.length);
+
+    // Extensions that are affected by the MV2 deprecation, but have already
+    // been acknowledged, are not included in the list.
+    itemList.push('extensions', createExtensionInfo({
+                    name: 'Extension F',
+                    id: 'f'.repeat(32),
+                    isAffectedByMV2Deprecation: true,
+                    didAcknowledgeMV2DeprecationWarning: true,
+                  }));
+    flush();
+    boundTestVisible('extensions-mv2-deprecation-panel', true);
+    // The length remains at 2.
+    assertEquals(2, mv2DeprecationPanel.extensions.length);
+
+    // Panel is hidden if warning has been dismissed.
+    itemList.set('isMv2DeprecationWarningDismissed', true);
+    flush();
+    boundTestVisible('extensions-mv2-deprecation-panel', false);
   });
 });

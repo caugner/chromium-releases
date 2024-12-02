@@ -41,6 +41,11 @@ inline constexpr char kCredentialProviderEnabledOnStartup[] =
 #endif
 
 #if BUILDFLAG(IS_ANDROID)
+// Boolean pref indicating if the one-time notice for account storage was shown.
+// The notice informs passwords will start being saved to the signed-in account.
+inline constexpr char kAccountStorageNoticeShown[] =
+    "password_manager.account_storage_notice_shown";
+
 // Boolean controlling whether the password manager allows automatic signing in
 // through Credential Management API. This pref is not synced. Its value is set
 // by fetching the latest value from Google Mobile Services. Except for
@@ -269,7 +274,7 @@ inline constexpr char kPasswordDismissCompromisedAlertEnabled[] =
 // Boolean value indicating if the user has clicked on the "Password Manager"
 // item in settings after switching to the Unified Password Manager. A "New"
 // label is shown for the users who have not clicked on this item yet.
-// TODO(crbug.com/1217070): Remove this on Android once the feature is rolled
+// TODO(crbug.com/40185049): Remove this on Android once the feature is rolled
 // out.
 // TODO(crbug.com/40258836): Remove this for desktop once the feature is rolled
 // out.

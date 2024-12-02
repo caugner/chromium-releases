@@ -292,6 +292,11 @@ void WidgetDelegate::DeleteDelegate() {
   for (auto&& callback : delete_callbacks)
     std::move(callback).Run();
 
+  if (weak_this && !owned_by_widget && widget_ &&
+      widget_->ownership() == Widget::InitParams::CLIENT_OWNS_WIDGET) {
+    WidgetIsZombie(widget_.get());
+  }
+
   // TODO(kylixrd): Eventually the widget will never own the delegate, so much
   // of this code will need to be reworked.
   //
@@ -508,6 +513,10 @@ void WidgetDelegate::SetContentsViewImpl(std::unique_ptr<View> contents) {
 
 gfx::Rect WidgetDelegate::GetDesiredWidgetBounds() {
   DCHECK(GetWidget());
+
+  if (has_desired_bounds_delegate()) {
+    return params_.desired_bounds_delegate.Run();
+  }
 
   return gfx::Rect(GetWidget()->GetWindowBoundsInScreen().origin(),
                    GetWidget()->GetContentsView()->GetPreferredSize({}));

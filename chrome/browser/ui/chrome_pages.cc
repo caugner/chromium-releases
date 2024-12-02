@@ -7,6 +7,7 @@
 #include <stddef.h>
 
 #include <memory>
+#include <string_view>
 
 #include "ash/constants/ash_features.h"
 #include "ash/webui/shortcut_customization_ui/url_constants.h"
@@ -35,6 +36,7 @@
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/browser_navigator_params.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/passwords/ui_utils.h"
 #include "chrome/browser/ui/scoped_tabbed_browser_displayer.h"
 #include "chrome/browser/ui/singleton_tabs.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -84,8 +86,7 @@
 #include "components/signin/public/identity_manager/identity_manager.h"
 #endif
 
-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
-    BUILDFLAG(IS_FUCHSIA)
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
 #include "chrome/browser/web_applications/web_app_utils.h"
 #endif
 
@@ -259,7 +260,7 @@ void ShowSiteSettingsImpl(Browser* browser, Profile* profile, const GURL& url) {
   Navigate(&params);
 }
 
-// TODO(crbug.com/1011533): Add a browsertest that parallels the existing site
+// TODO(crbug.com/40101962): Add a browsertest that parallels the existing site
 // settings browsertests that open the page info button, and click through to
 // the file system site settings page for a given origin.
 void ShowSiteSettingsFileSystemImpl(Browser* browser,
@@ -274,7 +275,7 @@ void ShowSiteSettingsFileSystemImpl(Browser* browser,
   if (base::FeatureList::IsEnabled(
           features::kFileSystemAccessPersistentPermissions) &&
       SiteGURLIsValid(url)) {
-    // TODO(crbug.com/1505843): Update `origin_string` to remove the encoded
+    // TODO(crbug.com/40946480): Update `origin_string` to remove the encoded
     // trailing slash, once it's no longer required to correctly navigate to
     // file system site settings page for the given origin.
     const std::string origin_string =
@@ -519,9 +520,8 @@ void ShowPasswordDetailsPage(Browser* browser,
                              const std::string& password_domain_name) {
   base::RecordAction(
       UserMetricsAction("Options_ShowPasswordDetailsInPasswordManager"));
-  std::string url =
-      base::StrCat({kChromeUIPasswordManagerURL, "/", kPasswordManagerSubPage,
-                    "/", password_domain_name});
+  std::string url = base::StrCat(
+      {GetGooglePasswordManagerSubPageURLStr(), "/", password_domain_name});
   ShowSingletonTabIgnorePathOverwriteNTP(browser, GURL(url));
 }
 
@@ -571,9 +571,9 @@ void ShowSearchEngineSettings(Browser* browser) {
   ShowSettingsSubPage(browser, kSearchEnginesSubPage);
 }
 
-void ShowWebStore(Browser* browser, const base::StringPiece& utm_source_value) {
+void ShowWebStore(Browser* browser, std::string_view utm_source_value) {
   GURL webstore_url = extension_urls::GetWebstoreLaunchURL();
-  // TODO(crbug.com/1488136): Refactor this check into
+  // TODO(crbug.com/40073814): Refactor this check into
   // extension_urls::GetWebstoreLaunchURL() and fix tests relying on it.
   if (base::FeatureList::IsEnabled(extensions_features::kNewWebstoreURL)) {
     webstore_url = extension_urls::GetNewWebstoreLaunchURL();
@@ -719,8 +719,7 @@ void ShowShortcutCustomizationApp(Profile* profile,
 #endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 }
 
-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
-    BUILDFLAG(IS_FUCHSIA)
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
 void ShowWebAppSettingsImpl(Browser* browser,
                             Profile* profile,
                             const std::string& app_id,

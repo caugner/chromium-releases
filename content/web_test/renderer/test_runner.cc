@@ -2152,7 +2152,7 @@ void TestRunnerBindings::CopyImageThen(int x,
   GetWebFrame()->CopyImageAtForTesting(gfx::Point(x, y));
   auto sequence_number_after = sequence_number_before;
   while (sequence_number_before.value() == sequence_number_after.value()) {
-    // TODO(crbug.com/872076): Ideally we would CHECK here that the mojo call
+    // TODO(crbug.com/40588468): Ideally we would CHECK here that the mojo call
     // succeeded, but this crashes under some circumstances (crbug.com/1232810).
     remote_clipboard->GetSequenceNumber(ui::ClipboardBuffer::kCopyPaste,
                                         &sequence_number_after);
@@ -2786,7 +2786,7 @@ printing::PageRanges TestRunner::GetPrintingPageRanges(
                              base::SPLIT_WANT_NONEMPTY);
   printing::PageRanges result;
 
-  for (const std::string_view& range_string : range_strings) {
+  for (std::string_view range_string : range_strings) {
     // The format for each range is "<int> | <int>? - <int>?" where the page
     // numbers are 1-indexed.
     const std::vector<std::string_view> page_strings = base::SplitStringPiece(

@@ -202,7 +202,8 @@ const base::TimeDelta kCloseLensViewTimeout = base::Seconds(10);
   const bool isIncognito = browserState->IsOffTheRecord();
   LensConfiguration* configuration = [[LensConfiguration alloc] init];
   configuration.isIncognito = isIncognito;
-  configuration.ssoService = GetApplicationContext()->GetSSOService();
+  configuration.singleSignOnService =
+      GetApplicationContext()->GetSingleSignOnService();
   configuration.entrypoint = entrypoint;
 
   // Mark IPHs as completed.
@@ -244,7 +245,7 @@ const base::TimeDelta kCloseLensViewTimeout = base::Seconds(10);
   UIViewController* viewController =
       [lensController inputSelectionViewController];
 
-  // TODO(crbug.com/1353430): the returned UIViewController
+  // TODO(crbug.com/40235185): the returned UIViewController
   // must not be nil, remove this check once the internal
   // implementation of the method is complete.
   if (!viewController) {

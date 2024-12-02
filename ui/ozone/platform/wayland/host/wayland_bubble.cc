@@ -10,6 +10,7 @@
 #include "ui/ozone/platform/wayland/host/wayland_connection.h"
 #include "ui/ozone/platform/wayland/host/wayland_data_drag_controller.h"
 #include "ui/ozone/platform/wayland/host/wayland_window_manager.h"
+#include "ui/ozone/platform/wayland/host/wayland_zaura_shell.h"
 #include "ui/platform_window/platform_window_init_properties.h"
 
 namespace ui {
@@ -44,6 +45,9 @@ void WaylandBubble::Hide() {
   }
 
   WaylandWindow::Hide();
+  if (root_surface()) {
+    root_surface()->ResetZAuraSurface();
+  }
 
   Deactivate();
 
@@ -71,6 +75,13 @@ void WaylandBubble::SetBoundsInDIP(const gfx::Rect& bounds_dip) {
   }
 }
 
+void WaylandBubble::SetInputRegion(
+    std::optional<std::vector<gfx::Rect>> region_px) {
+  if (accept_events_) {
+    root_surface()->set_input_region(region_px);
+  }
+}
+
 void WaylandBubble::Activate() {
   if (subsurface_ && activatable_ && parent_window()) {
     parent_window()->ActivateBubble(this);
@@ -83,6 +94,30 @@ void WaylandBubble::Deactivate() {
     parent_window()->ActivateBubble(nullptr);
   }
   WaylandWindow::Deactivate();
+}
+
+void WaylandBubble::ShowTooltip(const std::u16string& text,
+                                const gfx::Point& position,
+                                const PlatformWindowTooltipTrigger trigger,
+                                const base::TimeDelta show_delay,
+                                const base::TimeDelta hide_delay) {
+  auto* zaura_surface = GetZAuraSurface();
+  const auto zaura_shell_trigger =
+      trigger == PlatformWindowTooltipTrigger::kCursor
+          ? ZAURA_SURFACE_TOOLTIP_TRIGGER_CURSOR
+          : ZAURA_SURFACE_TOOLTIP_TRIGGER_KEYBOARD;
+  if (zaura_surface &&
+      zaura_surface->ShowTooltip(text, position, zaura_shell_trigger,
+                                 show_delay, hide_delay)) {
+    connection()->Flush();
+  }
+}
+
+void WaylandBubble::HideTooltip() {
+  auto* zaura_surface = GetZAuraSurface();
+  if (zaura_surface && zaura_surface->HideTooltip()) {
+    connection()->Flush();
+  }
 }
 
 void WaylandBubble::UpdateWindowScale(bool update_bounds) {
@@ -127,6 +162,10 @@ void WaylandBubble::AddToParentAsSubsurface() {
       root_surface()->CreateSubsurface(parent_window()->root_surface());
   DCHECK(subsurface_);
 
+  if (auto* zaura_surface = root_surface()->CreateZAuraSurface()) {
+    zaura_surface->set_delegate(AsWeakPtr());
+  }
+
   SetSubsurfacePosition();
 
   // The associaded widget of this platform_window has a ui::Compositor and
@@ -166,18 +205,21 @@ void WaylandBubble::SetSubsurfacePosition() {
 bool WaylandBubble::OnInitialize(PlatformWindowInitProperties properties,
                                  PlatformWindowDelegate::State* state) {
   DCHECK(parent_window());
+
+  // `window_state` is always `kNormal` on WaylandPopup.
+  state->window_state = PlatformWindowState::kNormal;
+
   state->window_scale = parent_window()->applied_state().window_scale;
   // See details in WaylandWindow::RequestState().
   state->size_px = gfx::ScaleToEnclosingRectIgnoringError(
                        gfx::Rect(state->bounds_dip.size()), state->window_scale)
                        .size();
-  set_ui_scale(parent_window()->ui_scale());
-
   activatable_ = properties.activatable;
+  accept_events_ = properties.accept_events;
 
   // For now kBubbles draw their own shadow, not setting input_region means
   // shadow trap input as well.
-  if (!properties.accept_events) {
+  if (!accept_events_) {
     root_surface()->set_input_region(
         std::optional<std::vector<gfx::Rect>>({gfx::Rect()}));
   }

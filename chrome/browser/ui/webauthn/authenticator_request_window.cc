@@ -4,6 +4,7 @@
 
 #include "chrome/browser/ui/webauthn/authenticator_request_window.h"
 
+#include "base/command_line.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback.h"
 #include "base/memory/weak_ptr.h"
@@ -12,8 +13,10 @@
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/webauthn/authenticator_request_dialog_model.h"
+#include "chrome/browser/webauthn/webauthn_switches.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "device/fido/enclave/metrics.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "net/base/url_util.h"
 #include "net/http/http_response_headers.h"
@@ -21,6 +24,20 @@
 #include "ui/gfx/geometry/rect.h"
 
 namespace {
+
+const char kGpmPinResetReauthUrl[] =
+    "https://passwords.google.com/encryption/pin/reset";
+
+GURL GetGpmResetPinUrl() {
+  std::string command_line_url =
+      base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+          webauthn::switches::kGpmPinResetReauthUrlSwitch);
+  if (command_line_url.empty()) {
+    // Command line switch is not specified or is not a valid ASCII string.
+    return GURL(kGpmPinResetReauthUrl);
+  }
+  return GURL(command_line_url);
+}
 
 // This WebContents observer watches the WebView that shows a GAIA
 // reauthentication page. When that page navigates to a URL that includes the
@@ -128,11 +145,11 @@ class AuthenticatorRequestWindow
         // produce the "kdi" parameter's value.
         url = GaiaUrls::GetInstance()->gaia_url().Resolve(
             "/encryption/unlock/desktop?kdi=CAESDgoMaHdfcHJvdGVjdGVk");
+        device::enclave::RecordEvent(device::enclave::Event::kRecoveryShown);
         break;
 
-      case AuthenticatorRequestDialogModel::Step::kGPMReauthAccount:
-        // TODO(enclave): this isn't the correct URL, but it'll serve for now.
-        url = GaiaUrls::GetInstance()->reauth_url();
+      case AuthenticatorRequestDialogModel::Step::kGPMReauthForPinReset:
+        url = GetGpmResetPinUrl();
         reauth_observer_ = std::make_unique<ReauthWebContentsObserver>(
             web_contents.get(), url,
             // Unretained: `reauth_observer_` is owned by this object so if

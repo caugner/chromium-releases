@@ -41,7 +41,7 @@ class MockAutofillExternalDelegate : public AutofillExternalDelegate {
       : AutofillExternalDelegate(autofill_manager) {}
   ~MockAutofillExternalDelegate() override = default;
 
-  MOCK_METHOD(void, OnPopupShown, (), (override));
+  MOCK_METHOD(void, OnSuggestionsShown, (), (override));
 };
 
 // This test class is needed to make the constructor public.
@@ -96,14 +96,16 @@ class ChromeAutofillClientBrowserTest : public InProcessBrowserTest {
 IN_PROC_BROWSER_TEST_F(ChromeAutofillClientBrowserTest,
                        AutofillPopupIsShownIfOverlappingWithIph) {
   FormData form = test::CreateTestAddressFormData();
-  form.fields[0].bounds = gfx::RectF(10, 10);
+  form.fields[0].set_bounds(gfx::RectF(10, 10));
   client()->ShowAutofillFieldIphForManualFallbackFeature(form.fields[0]);
 
   auto delegate = std::make_unique<MockAutofillExternalDelegate>(
       &browser_autofill_manager());
 
   bool popup_shown = false;
-  EXPECT_CALL(*delegate, OnPopupShown).WillOnce([&] { popup_shown = true; });
+  EXPECT_CALL(*delegate, OnSuggestionsShown).WillOnce([&] {
+    popup_shown = true;
+  });
 
   base::WeakPtr<AutofillExternalDelegate> weak_delegate =
       delegate->GetWeakPtrForTest();
@@ -116,7 +118,7 @@ IN_PROC_BROWSER_TEST_F(ChromeAutofillClientBrowserTest,
       {Suggestion(u"test")},
       AutofillSuggestionTriggerSource::kFormControlElementClicked,
       /*form_control_ax_id=*/0);
-  client()->ShowAutofillPopup(open_args, weak_delegate);
+  client()->ShowAutofillSuggestions(open_args, weak_delegate);
 
   // Showing the Autofill Popup and hiding the IPH are asynchronous tasks.
   EXPECT_TRUE(base::test::RunUntil([&]() { return popup_shown; }))

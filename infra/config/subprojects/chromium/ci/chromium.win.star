@@ -7,7 +7,7 @@ load("//lib/args.star", "args")
 load("//lib/branches.star", "branches")
 load("//lib/builder_config.star", "builder_config")
 load("//lib/builder_health_indicators.star", "health_spec")
-load("//lib/builders.star", "os", "reclient", "sheriff_rotations", "siso")
+load("//lib/builders.star", "os", "reclient", "sheriff_rotations")
 load("//lib/ci.star", "ci")
 load("//lib/consoles.star", "consoles")
 load("//lib/gn_args.star", "gn_args")
@@ -29,11 +29,7 @@ ci.defaults.set(
     reclient_jobs = reclient.jobs.DEFAULT,
     service_account = ci.DEFAULT_SERVICE_ACCOUNT,
     shadow_service_account = ci.DEFAULT_SHADOW_SERVICE_ACCOUNT,
-    siso_configs = ["builder"],
-    siso_enable_cloud_profiler = True,
-    siso_enable_cloud_trace = True,
     siso_enabled = True,
-    siso_project = siso.project.DEFAULT_TRUSTED,
     siso_remote_jobs = reclient.jobs.DEFAULT,
 )
 
@@ -208,7 +204,7 @@ ci.builder(
         short_name = "32",
     ),
     cq_mirrors_console_view = "mirrors",
-    # TODO(crbug/1473182): Remove once the bug is closed.
+    # TODO(crbug.com/40926931): Remove once the bug is closed.
     reclient_bootstrap_env = {
         "RBE_experimental_exit_on_stuck_actions": "true",
     },
@@ -221,6 +217,9 @@ ci.builder(
         gclient_config = builder_config.gclient_config(
             config = "chromium",
             apply_configs = [
+                # This is necessary due to child builders running the
+                # telemetry_perf_unittests suite.
+                "chromium_with_telemetry_dependencies",
                 "use_clang_coverage",
             ],
         ),
@@ -276,6 +275,9 @@ ci.builder(
         ),
         build_gs_bucket = "chromium-win-archive",
     ),
+    builder_config_settings = builder_config.ci_settings(
+        retry_failed_shards = True,
+    ),
     builderless = False,
     console_view_entry = consoles.console_view_entry(
         category = "release|tester",
@@ -324,6 +326,9 @@ ci.builder(
         gclient_config = builder_config.gclient_config(
             config = "chromium",
             apply_configs = [
+                # This is necessary due to child builders running the
+                # telemetry_perf_unittests suite.
+                "chromium_with_telemetry_dependencies",
                 "use_clang_coverage",
             ],
         ),
@@ -459,7 +464,7 @@ ci.thin_tester(
     builder_config_settings = builder_config.ci_settings(
         retry_failed_shards = True,
     ),
-    # TODO(crbug.com/1383380): Enable sheriff when stable and green.
+    # TODO(crbug.com/40877793): Enable sheriff when stable and green.
     sheriff_rotations = args.ignore_default(None),
     tree_closing = False,
     console_view_entry = consoles.console_view_entry(

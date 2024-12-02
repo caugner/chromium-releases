@@ -1,23 +1,82 @@
-<style>
+<style include="cr-icons">
   :host {
-    --cr-realbox-min-width: 340px
+    --cr-realbox-min-width: 340px;
   }
-  #results {
-    height: 100%;
-    left: 0;
-    top: 0;
+
+  :host([is-back-arrow-visible]) {
+    --cr-realbox-min-width: 300px;
+  }
+
+  .results-pane {
+    border: none;
+     /* Viewport height minus the realbox height and margin. */
+    height: calc(100vh - 76px);
+    inset-inline-start: 0;
+     /*
+      * We need to offset by the realbox height and margin since we are in a
+      * fixed position.
+      */
+    inset-block-start: 76px;
+    position: fixed;
     width: 100%;
+    /*
+     * This z-index allows us to hide the results and loading image without
+     * changing their visiblity. Changing their visiblity can result in ghost
+     * frames.
+     */
+    z-index: 1;
   }
+
+  /* Set z-index to hide results to prevent ghost frames when reshowing. */
+  :host([is-loading-results]) #results {
+    z-index: 0;
+  }
+
+  #loadingResultsImage {
+    background-color: white;
+  }
+
+  :host(:not([is-loading-results])) #loadingResultsImage {
+    z-index: 0;
+  }
+
   #realboxContainer {
-    margin: 12px 8px;
+    align-items: center;
     display: flex;
+    font-family: Roboto, Arial, sans-serif;
+    margin: 12px 8px;
+    position: fixed;
+    z-index: 2;  /* Searchbox should render in front of the results iframe. */
+    /* TODO(jdonnelly): Specify these in a color mixer. */
+    --color-realbox-background: #ffffffff;
+    --color-realbox-background-hovered: #ffffffff;
+    --color-realbox-border: #dadce0ff;
+    --color-realbox-foreground: #202124ff;
+    --color-realbox-placeholder:#5f6368ff;
+    --color-realbox-results-background: #ffffffff;
+    --color-realbox-results-background-hovered:#e9e9eaff;
+    --color-realbox-results-focus-indicator: #e9e9eaff;
+    --color-realbox-shadow: #20212451;
+  }
+
+  cr-icon-button.icon-arrow-back {
+    margin-inline-start: 0px;
+    margin-inline-end: 12px;
   }
 </style>
 <div id="realboxContainer">
+  <template is="dom-if" if="[[isBackArrowVisible]]">
+    <cr-icon-button id="backButton" class="action-icon icon-arrow-back"
+        on-click="onBackArrowClick" aria-label="$i18n{backButton}">
+    </cr-icon-button>
+  </template>
   <cr-realbox id="realbox"></cr-realbox>
 </div>
 
-<iframe name="results" id="results"
+<!-- Image that is only shown when results are loading. -->
+<img id="loadingResultsImage" class="results-pane" src="[[loadingImageUrl]]">
+
+<iframe name="results" id="results" class="results-pane"
     allow="cross-origin-isolated; display-capture; geolocation; microphone;"
     frameBorder="0">
 </iframe>

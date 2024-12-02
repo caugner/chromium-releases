@@ -8,10 +8,12 @@ import("//build/config/android/rules.gni")
 android_library("java") {
   sources = [
     "java/src/org/chromium/chrome/browser/ui/google_bottom_bar/BottomBarConfig.java",
+    "java/src/org/chromium/chrome/browser/ui/google_bottom_bar/BottomBarConfigCreator.java",
     "java/src/org/chromium/chrome/browser/ui/google_bottom_bar/GoogleBottomBarCoordinator.java",
     "java/src/org/chromium/chrome/browser/ui/google_bottom_bar/GoogleBottomBarViewCreator.java",
   ]
   deps = [
+    ":java_resources",
     ":proto_java",
     "//base:base_java",
     "//chrome/browser/android/browserservices/intents:java",
@@ -23,14 +25,32 @@ android_library("java") {
   resources_package = "org.chromium.chrome.browser.ui.google_bottom_bar"
 }
 
+android_resources("java_resources") {
+  sources = [
+    "java/res/drawable/bookmark_add.xml",
+    "java/res/layout/google_bottom_bar_even.xml",
+    "java/res/layout/google_bottom_bar_spotlight.xml",
+    "java/res/values/colors.xml",
+    "java/res/values/dimens.xml",
+  ]
+  deps = [
+    "//chrome/browser/ui/android/page_insights:java_resources",
+    "//chrome/browser/ui/android/strings:ui_strings_grd",
+    "//components/browser_ui/bottomsheet/android:java_resources",
+    "//components/browser_ui/widget/android:java_resources",
+  ]
+}
+
 robolectric_library("junit") {
-  sources = [ "java/src/org/chromium/chrome/browser/ui/google_bottom_bar/BottomBarConfigTest.java" ]
+  sources = [ "java/src/org/chromium/chrome/browser/ui/google_bottom_bar/BottomBarConfigCreatorTest.java" ]
   deps = [
     ":java",
     "//base:base_java",
     "//base:base_java_test_support",
     "//base:base_junit_test_support",
+    "//chrome/browser/android/browserservices/intents:java",
     "//third_party/junit",
+    "//third_party/mockito:mockito_java",
   ]
 }
 

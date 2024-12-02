@@ -555,7 +555,7 @@ class PixelTestPages():
         PixelTestPage(
             'pixel_render_passes.html',
             base_name + '_RenderPasses',
-            test_rect=[0, 80, 485, 245],
+            test_rect=[3, 90, 485, 245],
             grace_period_end=date(2024, 5, 1),
             requires_fullscreen_os_screenshot_func=\
             RequiresFullScreenOSScreenshot
@@ -1577,4 +1577,18 @@ class PixelTestPages():
         PixelTestPage('receiver.html',
                       base_name + '_VP8_1Frame',
                       test_rect=[0, 0, 0, 0]),
+    ]
+
+  # Check what MediaFoundationD3D11VideoCapture works
+  @staticmethod
+  def MediaFoundationD3D11VideoCapturePages(
+      base_name: str) -> List[PixelTestPage]:
+    return [
+        PixelTestPage('media_foundation_d3d11_video_capture.html',
+                      base_name + '_MediaFoundationD3D11VideoCapture',
+                      test_rect=[0, 0, 300, 300],
+                      browser_args=[
+                          '--use-fake-ui-for-media-stream',
+                          '--enable-features=MediaFoundationD3D11VideoCapture'
+                      ]),
     ]

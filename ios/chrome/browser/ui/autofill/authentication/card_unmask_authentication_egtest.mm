@@ -8,6 +8,7 @@
 #import "base/strings/sys_string_conversions.h"
 #import "components/autofill/core/common/autofill_payments_features.h"
 #import "components/strings/grit/components_strings.h"
+#import "ios/chrome/browser/ui/autofill/authentication/authentication_egtest_util.h"
 #import "ios/chrome/browser/ui/autofill/autofill_app_interface.h"
 #import "ios/chrome/grit/ios_strings.h"
 #import "ios/chrome/test/earl_grey/chrome_actions.h"
@@ -19,38 +20,6 @@
 #import "net/test/embedded_test_server/default_handlers.h"
 #import "ui/base/l10n/l10n_util.h"
 #import "ui/base/l10n/l10n_util_mac.h"
-
-namespace {
-
-// The test page url.
-const char kCreditCardUrl[] = "/credit_card.html";
-
-// A string on the credit_card.html page used to know when the page has loaded.
-const char kAutofillTestString[] = "Autofill Test";
-
-// The name of the card name form input.
-const char kFormCardName[] = "CCName";
-
-}  // namespace
-
-// The url to intercept in order to inject card unmask responses. These tests
-// do not make requests to the real server.
-NSString* const kUnmaskCardRequestUrl =
-    @"https://payments.google.com/payments/apis-secure/creditcardservice/"
-    @"getrealpan?s7e_suffix=chromewallet";
-
-// The fake response from the payment server when OTP, email and CVC card unmask
-// options are available.
-NSString* const kUnmaskCardResponseSuccessOtpAndEmailAndCvc =
-    @"{\"context_token\":\"__fake_context_token__\",\"idv_challenge_options\":["
-    @"{\"sms_otp_challenge_option\":{\"challenge_id\":"
-    @"\"JGQ1YTkxM2ZjLWY4YTAtMTFlZS1hMmFhLWZmYjYwNWVjODcwMwo=\",\"masked_phone_"
-    @"number\":\"*******1234\",\"otp_length\":6}},{\"email_otp_challenge_"
-    @"option\":{\"challenge_id\":"
-    @"\"JDNhNTdlMzVhLWY4YTEtMTFlZS1hOTUwLWZiNzY3ZWM4ZWY3ZAo=\",\"masked_email_"
-    @"address\":\"a***b@gmail.com\",\"otp_length\":6}},{\"cvc_challenge_"
-    @"option\":{\"challenge_id\":\"hardcoded_3CSC_challenge_id\",\"cvc_"
-    @"length\":3,\"cvc_position\":\"CVC_POSITION_BACK\"}}]}";
 
 // The masked phone number associated with the OTP card unmask option.
 NSString* const kUnmaskOptionMaskedPhoneNumber = @"*******1234";
@@ -270,6 +239,32 @@ id<GREYMatcher> CardUnmaskAuthenticationSelectionCancelButton() {
   [[EarlGrey
       selectElementWithMatcher:grey_kindOfClassName(@"UIActivityIndicatorView")]
       assertWithMatcher:grey_sufficientlyVisible()];
+}
+
+- (void)testDismissInputViaSwipe {
+  [self showAuthenticationSelection];
+
+  // The initial access token has been used up, set another fake access token.
+  [AutofillAppInterface setAccessToken];
+  // Set a fake response for the select challenge option request.
+  [AutofillAppInterface
+      setPaymentsResponse:kSelectChallengeOptionResponseSuccess
+               forRequest:kSelectChallengeOptionRequestUrl
+            withErrorCode:net::HTTP_OK];
+
+  // Select the text message otp challenge option.
+  [[EarlGrey
+      selectElementWithMatcher:CardUnmaskTextMessageChallengeOptionLabel()]
+      performAction:grey_tap()];
+  [[EarlGrey
+      selectElementWithMatcher:CardUnmaskAuthenticationSelectionSendButton()]
+      performAction:grey_tap()];
+
+  // Swipe the input sheet down to close it.
+  [[EarlGrey selectElementWithMatcher:
+                 chrome_test_util::StaticTextWithAccessibilityLabelId(
+                     IDS_AUTOFILL_CARD_UNMASK_OTP_INPUT_DIALOG_TITLE)]
+      performAction:grey_swipeFastInDirection(kGREYDirectionDown)];
 }
 
 @end

@@ -94,7 +94,6 @@ import org.chromium.base.metrics.ScopedSysTraceEvent;
 import org.chromium.base.task.AsyncTask;
 import org.chromium.base.task.PostTask;
 import org.chromium.base.task.TaskTraits;
-import org.chromium.components.autofill.AndroidAutofillClient;
 import org.chromium.components.autofill.AutofillProvider;
 import org.chromium.components.autofill.AutofillSelectionMenuItemHelper;
 import org.chromium.components.content_capture.OnscreenContentProvider;
@@ -205,6 +204,9 @@ public class AwContents implements SmartClipProvider {
     // DOM id grammar: https://www.w3.org/TR/1999/REC-html401-19991224/types.html#type-name
     private static final Pattern sDataURLWithSelectorPattern =
             Pattern.compile("^[^#]*(#[A-Za-z][A-Za-z0-9\\-_:.]*)$");
+
+    private static final String CONSTRUCTOR_HISTOGRAM_NAME =
+            "Android.WebView.AwContentsConstructorTime";
 
     private static class ForceAuxiliaryBitmapRendering {
         private static final boolean sResult = lazyCheck();
@@ -490,8 +492,6 @@ public class AwContents implements SmartClipProvider {
     private float mMaxPageScaleFactor = 1.0f;
     private float mContentWidthDip;
     private float mContentHeightDip;
-
-    private AndroidAutofillClient mAndroidAutofillClient;
 
     private AwPdfExporter mAwPdfExporter;
 
@@ -895,11 +895,19 @@ public class AwContents implements SmartClipProvider {
         @Override
         public void onScrollUpdateGestureConsumed() {
             mScrollAccessibilityHelper.postViewScrolledAccessibilityEventCallback();
-            mZoomControls.invokeZoomPicker();
+            if (AwFeatureMap.isEnabled(AwFeatures.WEBVIEW_INVOKE_ZOOM_PICKER_ON_GSU)) {
+                mZoomControls.invokeZoomPicker();
+            }
         }
 
         @Override
         public void onScrollStarted(int scrollOffsetY, int scrollExtentY, boolean isDirectionUp) {
+            if (!AwFeatureMap.isEnabled(AwFeatures.WEBVIEW_INVOKE_ZOOM_PICKER_ON_GSU)) {
+                // This needs to be paired with call to setAutoDismissed(true) and a call to invoke
+                // zoom picker, so that a delayed hide task is posted by android. This is happening
+                // on scroll end below.
+                mZoomControls.setAutoDismissed(false);
+            }
             mZoomControls.invokeZoomPicker();
             if (mAwFrameMetricsListener != null) {
                 mAwFrameMetricsListener.onWebContentsScrollStateUpdate(
@@ -909,6 +917,12 @@ public class AwContents implements SmartClipProvider {
 
         @Override
         public void onScrollEnded(int scrollOffsetY, int scrollExtentY) {
+            if (!AwFeatureMap.isEnabled(AwFeatures.WEBVIEW_INVOKE_ZOOM_PICKER_ON_GSU)) {
+                mZoomControls.setAutoDismissed(true);
+                // A call to invoke is required so that a delayed hide task can be posted by
+                // android.
+                mZoomControls.invokeZoomPicker();
+            }
             if (mAwFrameMetricsListener != null) {
                 mAwFrameMetricsListener.onWebContentsScrollStateUpdate(
                         /* isScrolling= */ false, mId);
@@ -1273,6 +1287,7 @@ public class AwContents implements SmartClipProvider {
             AwSettings settings,
             DependencyFactory dependencyFactory) {
         assert browserContext != null;
+        long startTime = SystemClock.uptimeMillis();
         sLastId += 1;
         mId = sLastId;
         if (!browserContext.isDefaultAwBrowserContext()) {
@@ -1392,6 +1407,11 @@ public class AwContents implements SmartClipProvider {
 
             onContainerViewChanged();
         }
+        long delta = SystemClock.uptimeMillis() - startTime;
+        RecordHistogram.recordTimesHistogram(CONSTRUCTOR_HISTOGRAM_NAME, delta);
+        if (mId == 1) {
+            RecordHistogram.recordTimesHistogram(CONSTRUCTOR_HISTOGRAM_NAME + ".First", delta);
+        }
     }
 
     private void initWebContents(
@@ -1401,7 +1421,7 @@ public class AwContents implements SmartClipProvider {
             WindowAndroid windowAndroid,
             WebContentsInternalsHolder internalsHolder,
             AwSelectionActionMenuDelegate selectionActionMenuDelegate) {
-        webContents.initialize(
+        webContents.setDelegates(
                 PRODUCT_VERSION, viewDelegate, internalDispatcher, windowAndroid, internalsHolder);
         mViewEventSink = ViewEventSink.from(mWebContents);
         mViewEventSink.setHideKeyboardOnBlur(false);
@@ -2074,6 +2094,11 @@ public class AwContents implements SmartClipProvider {
 
     public AwDarkMode getAwDarkModeForTesting() {
         return mAwDarkMode;
+    }
+
+    public void flushBackForwardCache() {
+        if (isDestroyed(NO_WARN)) return;
+        AwContentsJni.get().flushBackForwardCache(mNativeAwContents);
     }
 
     /** Destroys this object and deletes its native counterpart. */
@@ -4157,16 +4182,6 @@ public class AwContents implements SmartClipProvider {
     }
 
     @CalledByNative
-    private void setAndroidAutofillClient(AndroidAutofillClient client) {
-        mAndroidAutofillClient = client;
-    }
-
-    @VisibleForTesting
-    public AndroidAutofillClient getAutofillClient() {
-        return mAndroidAutofillClient;
-    }
-
-    @CalledByNative
     private void didOverscroll(
             int deltaX, int deltaY, float velocityX, float velocityY, boolean insideVSync) {
         mScrollOffsetManager.overScrollBy(deltaX, deltaY);
@@ -5065,5 +5080,7 @@ public class AwContents implements SmartClipProvider {
         StartupJavascriptInfo[] getDocumentStartupJavascripts(long nativeAwContents);
 
         void onConfigurationChanged(long nativeAwContents);
+
+        void flushBackForwardCache(long nativeAwContents);
     }
 }

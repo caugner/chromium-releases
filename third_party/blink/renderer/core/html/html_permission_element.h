@@ -15,6 +15,7 @@
 #include "third_party/blink/renderer/core/css/properties/css_property.h"
 #include "third_party/blink/renderer/core/css/resolver/cascade_filter.h"
 #include "third_party/blink/renderer/core/dom/events/event_target.h"
+#include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/html/html_element.h"
 #include "third_party/blink/renderer/core/intersection_observer/intersection_observer.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
@@ -30,7 +31,8 @@ namespace blink {
 class CORE_EXPORT HTMLPermissionElement final
     : public HTMLElement,
       public mojom::blink::PermissionObserver,
-      public mojom::blink::EmbeddedPermissionControlClient {
+      public mojom::blink::EmbeddedPermissionControlClient,
+      public LocalFrameView::LifecycleNotificationObserver {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
@@ -47,6 +49,10 @@ class CORE_EXPORT HTMLPermissionElement final
 
   void AttachLayoutTree(AttachContext& context) override;
   void DetachLayoutTree(bool performing_reattach) override;
+  void Focus(const FocusParams& params) override;
+  bool SupportsFocus(UpdateBehavior) const override;
+  int DefaultTabIndex() const override;
+  CascadeFilter GetCascadeFilter() const override;
 
   bool granted() const { return permissions_granted_; }
 
@@ -59,10 +65,8 @@ class CORE_EXPORT HTMLPermissionElement final
     return permission_text_span_;
   }
 
-  CascadeFilter GetCascadeFilter() const override {
-    // Reject all properties for which 'kValidForPermissionElement' is false.
-    return CascadeFilter(CSSProperty::kValidForPermissionElement, false);
-  }
+  // HTMLElement overrides.
+  bool IsHTMLPermissionElement() const final { return true; }
 
   bool IsFullyVisibleForTesting() const { return is_fully_visible_; }
 
@@ -79,12 +83,22 @@ class CORE_EXPORT HTMLPermissionElement final
   FRIEND_TEST_ALL_PREFIXES(HTMLPemissionElementFencedFrameTest,
                            NotAllowedInFencedFrame);
   FRIEND_TEST_ALL_PREFIXES(HTMLPemissionElementSimTest,
+                           BlockedByMissingFrameAncestorsCSP);
+  FRIEND_TEST_ALL_PREFIXES(HTMLPemissionElementSimTest,
                            EnableClickingAfterDelay);
+  FRIEND_TEST_ALL_PREFIXES(HTMLPemissionElementLayoutChangeTest,
+                           InvalidatePEPCAfterMove);
+  FRIEND_TEST_ALL_PREFIXES(HTMLPemissionElementLayoutChangeTest,
+                           InvalidatePEPCAfterResize);
+  FRIEND_TEST_ALL_PREFIXES(HTMLPemissionElementLayoutChangeTest,
+                           InvalidatePEPCAfterMoveContainer);
+  FRIEND_TEST_ALL_PREFIXES(HTMLPemissionElementLayoutChangeTest,
+                           InvalidatePEPCAfterTransformContainer);
 
   enum class DisableReason {
     // This element is temporarily disabled for a short period
-    // (`kDefaultDisableTimeout`) after being attached to the DOM.
-    kRecentlyAttachedToDOM,
+    // (`kDefaultDisableTimeout`) after being attached to the layout tree.
+    kRecentlyAttachedToLayoutTree,
 
     // This element is temporarily disabled for a short period
     // (`kDefaultDisableTimeout`) after its intersection status changed from
@@ -94,6 +108,10 @@ class CORE_EXPORT HTMLPermissionElement final
     // This element is disabled because of the element's style.
     kInvalidStyle,
   };
+
+  // Translates `DisableReason` into strings, primarily used for logging
+  // console messages.
+  static String DisableReasonToString(DisableReason reason);
 
   // Ensure there is a connection to the permission service and return it.
   mojom::blink::PermissionService* GetPermissionService();
@@ -137,6 +155,8 @@ class CORE_EXPORT HTMLPermissionElement final
     return !permission_status_map_.empty();
   }
 
+  scoped_refptr<base::SingleThreadTaskRunner> GetTaskRunner();
+
   // Checks whether clicking is enabled at the moment. Clicking is disabled if
   // either:
   // 1) |DisableClickingIndefinitely| has been called and |EnableClicking| has
@@ -172,11 +192,10 @@ class CORE_EXPORT HTMLPermissionElement final
   void UpdateText();
 
   void AddConsoleError(String error);
+  void AddConsoleWarning(String warning);
 
   void OnIntersectionChanged(
       const HeapVector<Member<IntersectionObserverEntry>>& entries);
-
-  scoped_refptr<base::SingleThreadTaskRunner> GetTaskRunner();
 
   bool IsStyleValid();
 
@@ -194,6 +213,9 @@ class CORE_EXPORT HTMLPermissionElement final
                                float bound,
                                bool is_lower_bound,
                                bool should_multiply_by_content_size);
+
+  // LocalFrameView::LifecycleNotificationObserver
+  void DidFinishLifecycleUpdate(const LocalFrameView&) override;
 
   HeapMojoRemote<mojom::blink::PermissionService> permission_service_;
 
@@ -238,6 +260,10 @@ class CORE_EXPORT HTMLPermissionElement final
   // by IntersectionObserver).
   bool is_fully_visible_ = true;
 
+  // The intersection rectangle between the layout box of this element and the
+  // viewport.
+  gfx::Rect intersection_rect_;
+
   // The permission descriptors that correspond to a request made from this
   // permission element. Only computed once, when the `type` attribute is set.
   Vector<mojom::blink::PermissionDescriptorPtr> permission_descriptors_;
@@ -245,6 +271,32 @@ class CORE_EXPORT HTMLPermissionElement final
   // A bool that tracks whether a specific console message was sent already to
   // ensure it's not sent again.
   bool length_console_error_sent_ = false;
+};
+
+// The custom type casting is required for the PermissionElement OT because the
+// generated helpers code can lead to a compilation error or an
+// HTMLPermissionElement appearing in a document that does not have the
+// PermissionElement origin trial enabled (this would result in the creation of
+// an HTMLUnknownElement with the "Permission" tag name).
+// TODO((crbug.com/339781931): Once the origin trial has ended, these custom
+// type casts will no longer be necessary.
+template <>
+struct DowncastTraits<HTMLPermissionElement> {
+  static bool AllowFrom(const HTMLElement& element) {
+    return element.IsHTMLPermissionElement();
+  }
+  static bool AllowFrom(const Node& node) {
+    if (const HTMLElement* html_element = DynamicTo<HTMLElement>(node)) {
+      return html_element->IsHTMLPermissionElement();
+    }
+    return false;
+  }
+  static bool AllowFrom(const Element& element) {
+    if (const HTMLElement* html_element = DynamicTo<HTMLElement>(element)) {
+      return html_element->IsHTMLPermissionElement();
+    }
+    return false;
+  }
 };
 
 }  // namespace blink

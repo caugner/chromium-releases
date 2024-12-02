@@ -4,7 +4,8 @@
 
 import type {BrowserProxy} from 'chrome-untrusted://lens/browser_proxy.js';
 import type {CenterRotatedBox} from 'chrome-untrusted://lens/geometry.mojom-webui.js';
-import {LensPageCallbackRouter, type LensPageHandlerInterface} from 'chrome-untrusted://lens/lens.mojom-webui.js';
+import type {LensPageHandlerInterface, LensPageRemote} from 'chrome-untrusted://lens/lens.mojom-webui.js';
+import {LensPageCallbackRouter} from 'chrome-untrusted://lens/lens.mojom-webui.js';
 import {TestBrowserProxy} from 'chrome-untrusted://webui-test/test_browser_proxy.js';
 
 /**
@@ -14,15 +15,43 @@ import {TestBrowserProxy} from 'chrome-untrusted://webui-test/test_browser_proxy
 export class TestLensOverlayPageHandler extends TestBrowserProxy implements
     LensPageHandlerInterface {
   constructor() {
-    super(['closeRequestedByOverlay', 'issueLensRequest']);
+    super([
+      'closeRequestedByOverlayCloseButton',
+      'closeRequestedByOverlayBackgroundClick',
+      'addBackgroundBlur',
+      'closeSearchBubble',
+      'feedbackRequestedByOverlay',
+      'issueLensRequest',
+      'issueTextSelectionRequest',
+    ]);
   }
 
-  closeRequestedByOverlay() {
-    this.methodCalled('closeRequestedByOverlay');
+  closeRequestedByOverlayCloseButton() {
+    this.methodCalled('closeRequestedByOverlayCloseButton');
+  }
+
+  closeRequestedByOverlayBackgroundClick() {
+    this.methodCalled('closeRequestedByOverlayBackgroundClick');
+  }
+
+  addBackgroundBlur() {
+    this.methodCalled('addBackgroundBlur');
+  }
+
+  closeSearchBubble() {
+    this.methodCalled('closeSearchBubble');
+  }
+
+  feedbackRequestedByOverlay() {
+    this.methodCalled('feedbackRequestedByOverlay');
   }
 
   issueLensRequest(rect: CenterRotatedBox) {
     this.methodCalled('issueLensRequest', rect);
+  }
+
+  issueTextSelectionRequest(query: string) {
+    this.methodCalled('issueTextSelectionRequest', query);
   }
 }
 
@@ -33,4 +62,5 @@ export class TestLensOverlayPageHandler extends TestBrowserProxy implements
 export class TestLensOverlayBrowserProxy implements BrowserProxy {
   callbackRouter: LensPageCallbackRouter = new LensPageCallbackRouter();
   handler: TestLensOverlayPageHandler = new TestLensOverlayPageHandler();
+  page: LensPageRemote = this.callbackRouter.$.bindNewPipeAndPassRemote();
 }

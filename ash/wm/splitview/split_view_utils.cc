@@ -80,14 +80,15 @@ constexpr char kWindowLayoutCompleteOnSessionExitRootWord[] =
 
 constexpr char kExitPointRootWord[] = "ExitPoint";
 
-// Gets the duration, tween type and delay before animation based on |type|.
-void GetAnimationValuesForType(
-    SplitviewAnimationType type,
-    base::TimeDelta* out_duration,
-    gfx::Tween::Type* out_tween_type,
-    ui::LayerAnimator::PreemptionStrategy* out_preemption_strategy,
-    base::TimeDelta* out_delay) {
-  *out_preemption_strategy = ui::LayerAnimator::IMMEDIATELY_SET_NEW_TARGET;
+struct AnimationValues {
+  base::TimeDelta duration;
+  gfx::Tween::Type tween_type;
+  ui::LayerAnimator::PreemptionStrategy preemption_strategy =
+      ui::LayerAnimator::IMMEDIATELY_SET_NEW_TARGET;
+  base::TimeDelta delay;
+};
+
+AnimationValues GetAnimationValuesForType(SplitviewAnimationType type) {
   switch (type) {
     case SPLITVIEW_ANIMATION_HIGHLIGHT_FADE_IN:
     case SPLITVIEW_ANIMATION_HIGHLIGHT_FADE_IN_CANNOT_SNAP:
@@ -101,65 +102,58 @@ void GetAnimationValuesForType(
     case SPLITVIEW_ANIMATION_PREVIEW_AREA_SLIDE_OUT:
     case SPLITVIEW_ANIMATION_PREVIEW_AREA_TEXT_SLIDE_IN:
     case SPLITVIEW_ANIMATION_PREVIEW_AREA_TEXT_SLIDE_OUT:
-      *out_duration = kHighlightsFadeInOut;
-      *out_tween_type = gfx::Tween::FAST_OUT_SLOW_IN;
-      return;
+      return {.duration = kHighlightsFadeInOut,
+              .tween_type = gfx::Tween::FAST_OUT_SLOW_IN};
     case SPLITVIEW_ANIMATION_OTHER_HIGHLIGHT_FADE_IN:
     case SPLITVIEW_ANIMATION_OTHER_HIGHLIGHT_FADE_IN_CANNOT_SNAP:
     case SPLITVIEW_ANIMATION_OTHER_HIGHLIGHT_SLIDE_IN:
     case SPLITVIEW_ANIMATION_OTHER_HIGHLIGHT_TEXT_SLIDE_IN:
-      *out_delay = kOtherFadeInDelay;
-      *out_duration = kOtherFadeInOut;
-      *out_tween_type = gfx::Tween::LINEAR_OUT_SLOW_IN;
-      *out_preemption_strategy = ui::LayerAnimator::ENQUEUE_NEW_ANIMATION;
-      return;
+      return {.duration = kOtherFadeInOut,
+              .tween_type = gfx::Tween::LINEAR_OUT_SLOW_IN,
+              .preemption_strategy = ui::LayerAnimator::ENQUEUE_NEW_ANIMATION,
+              .delay = kOtherFadeInDelay};
     case SPLITVIEW_ANIMATION_OTHER_HIGHLIGHT_FADE_OUT:
     case SPLITVIEW_ANIMATION_OTHER_HIGHLIGHT_SLIDE_OUT:
     case SPLITVIEW_ANIMATION_OTHER_HIGHLIGHT_TEXT_SLIDE_OUT:
-      *out_duration = kOtherFadeInOut;
-      *out_tween_type = gfx::Tween::FAST_OUT_LINEAR_IN;
-      return;
+      return {.duration = kOtherFadeInOut,
+              .tween_type = gfx::Tween::FAST_OUT_LINEAR_IN};
     case SPLITVIEW_ANIMATION_PREVIEW_AREA_FADE_OUT:
     case SPLITVIEW_ANIMATION_PREVIEW_AREA_NIX_INSET:
-      *out_duration = kPreviewAreaFadeOut;
-      *out_tween_type = gfx::Tween::FAST_OUT_LINEAR_IN;
-      return;
+      return {.duration = kPreviewAreaFadeOut,
+              .tween_type = gfx::Tween::FAST_OUT_LINEAR_IN};
     case SPLITVIEW_ANIMATION_TEXT_FADE_IN:
-      *out_delay = kLabelAnimationDelay;
-      *out_duration = kLabelAnimation;
-      *out_tween_type = gfx::Tween::LINEAR_OUT_SLOW_IN;
-      *out_preemption_strategy = ui::LayerAnimator::ENQUEUE_NEW_ANIMATION;
-      return;
+      return {.duration = kLabelAnimation,
+              .tween_type = gfx::Tween::LINEAR_OUT_SLOW_IN,
+              .preemption_strategy = ui::LayerAnimator::ENQUEUE_NEW_ANIMATION,
+              .delay = kLabelAnimationDelay};
     case SPLITVIEW_ANIMATION_TEXT_FADE_OUT:
-      *out_duration = kLabelAnimation;
-      *out_tween_type = gfx::Tween::FAST_OUT_LINEAR_IN;
-      return;
+      return {.duration = kLabelAnimation,
+              .tween_type = gfx::Tween::FAST_OUT_LINEAR_IN};
     case SPLITVIEW_ANIMATION_SET_WINDOW_TRANSFORM:
-      *out_duration = kSplitviewWindowTransformDuration;
-      *out_tween_type = gfx::Tween::FAST_OUT_SLOW_IN;
-      *out_preemption_strategy =
-          ui::LayerAnimator::IMMEDIATELY_ANIMATE_TO_NEW_TARGET;
-      return;
+      return {.duration = kSplitviewWindowTransformDuration,
+              .tween_type = gfx::Tween::FAST_OUT_SLOW_IN,
+              .preemption_strategy =
+                  ui::LayerAnimator::IMMEDIATELY_ANIMATE_TO_NEW_TARGET};
   }
 
-  NOTREACHED();
+  NOTREACHED_NORETURN();
 }
 
-// Helper function to apply animation values to |settings|.
 void ApplyAnimationSettings(
-    ui::ScopedLayerAnimationSettings* settings,
     ui::LayerAnimator* animator,
     ui::LayerAnimationElement::AnimatableProperties animated_property,
     base::TimeDelta duration,
     gfx::Tween::Type tween,
     ui::LayerAnimator::PreemptionStrategy preemption_strategy,
-    base::TimeDelta delay) {
-  DCHECK_EQ(settings->GetAnimator(), animator);
-  settings->SetTransitionDuration(duration);
-  settings->SetTweenType(tween);
-  settings->SetPreemptionStrategy(preemption_strategy);
-  if (!delay.is_zero())
+    base::TimeDelta delay,
+    ui::ScopedLayerAnimationSettings& out_settings) {
+  CHECK_EQ(out_settings.GetAnimator(), animator);
+  out_settings.SetTransitionDuration(duration);
+  out_settings.SetTweenType(tween);
+  out_settings.SetPreemptionStrategy(preemption_strategy);
+  if (!delay.is_zero()) {
     animator->SchedulePauseForProperties(delay, animated_property);
+  }
 }
 
 // Returns BubbleDialogDelegateView if |transient_window| is a bubble dialog.
@@ -311,18 +305,12 @@ void DoSplitviewOpacityAnimation(ui::Layer* layer,
   if (layer->GetTargetOpacity() == target_opacity)
     return;
 
-  base::TimeDelta duration;
-  gfx::Tween::Type tween;
-  ui::LayerAnimator::PreemptionStrategy preemption_strategy;
-  base::TimeDelta delay;
-  GetAnimationValuesForType(type, &duration, &tween, &preemption_strategy,
-                            &delay);
-
+  const AnimationValues values = GetAnimationValuesForType(type);
   ui::LayerAnimator* animator = layer->GetAnimator();
   ui::ScopedLayerAnimationSettings settings(animator);
-  ApplyAnimationSettings(&settings, animator,
-                         ui::LayerAnimationElement::OPACITY, duration, tween,
-                         preemption_strategy, delay);
+  ApplyAnimationSettings(animator, ui::LayerAnimationElement::OPACITY,
+                         values.duration, values.tween_type,
+                         values.preemption_strategy, values.delay, settings);
   layer->SetOpacity(target_opacity);
 }
 
@@ -347,20 +335,16 @@ void DoSplitviewTransformAnimation(
       return;
   }
 
-  base::TimeDelta duration;
-  gfx::Tween::Type tween;
-  ui::LayerAnimator::PreemptionStrategy preemption_strategy;
-  base::TimeDelta delay;
-  GetAnimationValuesForType(type, &duration, &tween, &preemption_strategy,
-                            &delay);
-
+  const AnimationValues values = GetAnimationValuesForType(type);
   ui::LayerAnimator* animator = layer->GetAnimator();
   ui::ScopedLayerAnimationSettings settings(animator);
-  for (ui::ImplicitAnimationObserver* animation_observer : animation_observers)
+  for (ui::ImplicitAnimationObserver* animation_observer :
+       animation_observers) {
     settings.AddObserver(animation_observer);
-  ApplyAnimationSettings(&settings, animator,
-                         ui::LayerAnimationElement::TRANSFORM, duration, tween,
-                         preemption_strategy, delay);
+  }
+  ApplyAnimationSettings(animator, ui::LayerAnimationElement::TRANSFORM,
+                         values.duration, values.tween_type,
+                         values.preemption_strategy, values.delay, settings);
   layer->SetTransform(target_transform);
 }
 
@@ -385,29 +369,26 @@ void DoSplitviewClipRectAnimation(
       return;
   }
 
-  base::TimeDelta duration;
-  gfx::Tween::Type tween;
-  ui::LayerAnimator::PreemptionStrategy preemption_strategy;
-  base::TimeDelta delay;
-  GetAnimationValuesForType(type, &duration, &tween, &preemption_strategy,
-                            &delay);
-
+  const AnimationValues values = GetAnimationValuesForType(type);
   ui::ScopedLayerAnimationSettings settings(animator);
-  if (animation_observer.get())
+  if (animation_observer.get()) {
     settings.AddObserver(animation_observer.release());
-  ApplyAnimationSettings(&settings, animator, ui::LayerAnimationElement::CLIP,
-                         duration, tween, preemption_strategy, delay);
+  }
+  ApplyAnimationSettings(animator, ui::LayerAnimationElement::CLIP,
+                         values.duration, values.tween_type,
+                         values.preemption_strategy, values.delay, settings);
   layer->SetClipRect(target_clip_rect);
 }
 
 int GetWindowLength(aura::Window* window, bool horizontal) {
-  const auto& bounds = window->bounds();
+  const auto& bounds = window->GetTargetBounds();
   return horizontal ? bounds.width() : bounds.height();
 }
 
-bool IsPhysicalLeftOrTop(aura::Window* window) {
+bool IsPhysicallyLeftOrTop(aura::Window* window) {
   chromeos::WindowStateType state_type =
       WindowState::Get(window)->GetStateType();
+  CHECK(chromeos::IsSnappedWindowStateType(state_type));
   if (IsLayoutPrimary(window)) {
     return state_type == chromeos::WindowStateType::kPrimarySnapped;
   }
@@ -416,7 +397,7 @@ bool IsPhysicalLeftOrTop(aura::Window* window) {
 
 void SetWindowTransformDuringResizing(aura::Window* window,
                                       int divider_position) {
-  const bool is_primary_window = IsPhysicalLeftOrTop(window);
+  const bool is_primary_window = IsPhysicallyLeftOrTop(window);
   aura::Window* root_window = window->GetRootWindow();
   const int window_size = is_primary_window
                               ? divider_position
@@ -434,13 +415,9 @@ void SetWindowTransformDuringResizing(aura::Window* window,
   window_util::SetTransform(window, transform);
 }
 
-// TODO(michelefan): Revisit the logics when split view refactor is ready to
-// make everything works with `kSnapGroup` enabled.
 void MaybeRestoreSplitView(bool refresh_snapped_windows) {
-  const bool should_restore =
-      ShouldAllowSplitView() && (display::Screen::GetScreen()->InTabletMode() ||
-                                 SnapGroupController::Get());
-  if (!should_restore) {
+  if (!ShouldAllowSplitView() ||
+      !display::Screen::GetScreen()->InTabletMode()) {
     return;
   }
 
@@ -603,7 +580,8 @@ SnapPosition GetSnapPositionForLocation(
     // Check how far the window has been dragged.
     const auto distance = location_in_screen - *initial_location_in_screen;
     const int primary_axis_distance = horizontal ? distance.x() : distance.y();
-    const bool is_left_or_top = IsPhysicalLeftOrTop(snap_position, root_window);
+    const bool is_left_or_top =
+        IsPhysicallyLeftOrTop(snap_position, root_window);
     if ((is_left_or_top && primary_axis_distance > -minimum_drag_distance) ||
         (!is_left_or_top && primary_axis_distance < minimum_drag_distance)) {
       snap_position = SnapPosition::kNone;
@@ -646,7 +624,7 @@ bool IsLayoutHorizontal(const display::Display& display) {
     return IsCurrentScreenOrientationLandscape();
   }
 
-  // TODO(crbug.com/1233192): add DCHECK to avoid square size display.
+  // TODO(crbug.com/40191408): add DCHECK to avoid square size display.
   DCHECK(display.is_valid());
   return chromeos::IsLandscapeOrientation(GetSnapDisplayOrientation(display));
 }
@@ -665,14 +643,14 @@ bool IsLayoutPrimary(const display::Display& display) {
   return chromeos::IsPrimaryOrientation(GetSnapDisplayOrientation(display));
 }
 
-bool IsPhysicalLeftOrTop(SnapPosition position, aura::Window* window) {
+bool IsPhysicallyLeftOrTop(SnapPosition position, aura::Window* window) {
   DCHECK_NE(SnapPosition::kNone, position);
   return position == (IsLayoutPrimary(window) ? SnapPosition::kPrimary
                                               : SnapPosition::kSecondary);
 }
 
-bool IsPhysicalLeftOrTop(SnapPosition position,
-                         const display::Display& display) {
+bool IsPhysicallyLeftOrTop(SnapPosition position,
+                           const display::Display& display) {
   DCHECK_NE(SnapPosition::kNone, position);
   return position == (IsLayoutPrimary(display) ? SnapPosition::kPrimary
                                                : SnapPosition::kSecondary);
@@ -723,7 +701,7 @@ int GetEquivalentDividerPosition(aura::Window* window,
   const int window_length = GetWindowLength(window, horizontal);
   const int divider_delta =
       account_for_divider_width ? kSplitviewDividerShortSideLength / 2.f : 0;
-  return IsPhysicalLeftOrTop(window)
+  return IsPhysicallyLeftOrTop(window)
              ? window_length - divider_delta
              : GetDividerPositionUpperLimit(root_window) - window_length -
                    divider_delta;
@@ -736,7 +714,8 @@ gfx::Rect CalculateSnappedWindowBoundsInScreen(
     bool account_for_divider_width,
     int divider_position,
     bool is_resizing_with_divider) {
-  const bool snap_left_or_top = IsPhysicalLeftOrTop(snap_position, root_window);
+  const bool snap_left_or_top =
+      IsPhysicallyLeftOrTop(snap_position, root_window);
   const bool in_tablet_mode = display::Screen::GetScreen()->InTabletMode();
   const int work_area_size = GetDividerPositionUpperLimit(root_window);
 
@@ -977,6 +956,21 @@ bool ShouldConsiderDivider(aura::Window* window) {
       SplitViewController::Get(window->GetRootWindow());
   return split_view_controller->InSplitViewMode() &&
          split_view_controller->split_view_divider()->divider_widget();
+}
+
+bool CanWindowsFitInWorkArea(aura::Window* window1, aura::Window* window2) {
+  DCHECK_EQ(window1->GetRootWindow(), window2->GetRootWindow());
+  aura::Window* root_window = window1->GetRootWindow();
+  const bool horizontal = IsLayoutHorizontal(root_window);
+  const gfx::Rect work_area = display::Screen::GetScreen()
+                                  ->GetDisplayNearestWindow(root_window)
+                                  .work_area();
+  const int work_area_length =
+      horizontal ? work_area.width() : work_area.height();
+  return GetMinimumWindowLength(window1, horizontal) +
+             GetMinimumWindowLength(window2, horizontal) +
+             kSplitviewDividerShortSideLength <=
+         work_area_length;
 }
 
 ASH_EXPORT std::string BuildWindowLayoutCompleteOnSessionExitHistogram() {

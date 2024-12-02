@@ -57,6 +57,23 @@ public class CustomTabBottomBarDelegate
     private static final String TAG = "CustomTab";
     private static final int SLIDE_ANIMATION_DURATION_MS = 400;
 
+    /**
+     * Provides an interface for updating custom button states based on provided parameters.
+     *
+     * <p>Implementations of this interface should define the logic for determining how a custom
+     * button's appearance or behavior should change in response to the given parameters.
+     */
+    public interface CustomButtonsUpdater {
+
+        /**
+         * Updates the state of a bottom bar button based on the provided parameters.
+         *
+         * @param params The parameters containing information relevant to the button update.
+         * @return {@code true} if the button was successfully updated, {@code false} otherwise.
+         */
+        boolean updateBottomBarButton(CustomButtonParams params);
+    }
+
     private final Activity mActivity;
     private final WindowAndroid mWindowAndroid;
     private final BrowserControlsSizer mBrowserControlsSizer;
@@ -67,10 +84,12 @@ public class CustomTabBottomBarDelegate
 
     private CustomTabBottomBarView mBottomBarView;
     @Nullable private View mBottomBarContentView;
+    @Nullable private CustomButtonsUpdater mCustomButtonsUpdater;
     private PendingIntent mClickPendingIntent;
     private int[] mClickableIDs;
     private boolean mShowShadow = true;
     private @Nullable PendingIntent mSwipeUpPendingIntent;
+    private boolean mKeepContentView;
 
     /**
      * The override height in pixels. A value of -1 is interpreted as "not set" and means it should
@@ -109,7 +128,7 @@ public class CustomTabBottomBarDelegate
         mSystemNightModeMonitor = systemNightModeMonitor;
         mTabProvider = () -> tabProvider.getTab();
         browserControlsSizer.addObserver(this);
-
+        mKeepContentView = false;
         compositorContentInitializer.addCallback(this::addOverlayPanelManagerObserver);
 
         Callback<ViewportInsets> insetObserver = this::onViewportInsetChange;
@@ -182,17 +201,35 @@ public class CustomTabBottomBarDelegate
 
     /**
      * Updates the custom buttons on bottom bar area.
+     *
      * @param params The {@link CustomButtonParams} that describes the button to update.
      */
     public void updateBottomBarButtons(CustomButtonParams params) {
+        if (mCustomButtonsUpdater != null && mCustomButtonsUpdater.updateBottomBarButton(params)) {
+            return;
+        }
         ImageButton button = (ImageButton) getBottomBarView().findViewById(params.getId());
         button.setContentDescription(params.getDescription());
         button.setImageDrawable(params.getIcon(mActivity));
     }
 
     /**
+     * Sets the updater responsible for managing the state of custom buttons.
+     *
+     * <p>If the bottom bar view is set with {@link #setBottomBarContentView} you should always
+     * provide customButtonsUpdater.
+     *
+     * @param customButtonsUpdater The {@link CustomButtonsUpdater} implementation that will handle
+     *     the logic for updating custom button states, overriding the default logic.
+     */
+    public void setCustomButtonsUpdater(CustomButtonsUpdater customButtonsUpdater) {
+        mCustomButtonsUpdater = customButtonsUpdater;
+    }
+
+    /**
      * Updates the RemoteViews on the bottom bar. If the given remote view is null, animates the
      * bottom bar out.
+     *
      * @param remoteViews The new remote view hierarchy sent from the client.
      * @param clickableIDs Array of view ids, the onclick event of which is intercepcted by chrome.
      * @param pendingIntent The {@link PendingIntent} that will be sent on clicking event.
@@ -200,6 +237,11 @@ public class CustomTabBottomBarDelegate
      */
     public boolean updateRemoteViews(
             RemoteViews remoteViews, int[] clickableIDs, PendingIntent pendingIntent) {
+        // If the contentView is already set, it should have priority to keep being displayed over
+        // any remote views that are trying to be updated.
+        if (mBottomBarContentView != null && mKeepContentView) {
+            return false;
+        }
         RecordUserAction.record("CustomTabsRemoteViewsUpdated");
         if (remoteViews == null) {
             if (mBottomBarView == null) return false;
@@ -239,6 +281,20 @@ public class CustomTabBottomBarDelegate
     /** Sets the visibility of the bottom bar shadow. */
     public void setShowShadow(boolean show) {
         mShowShadow = show;
+    }
+
+    /**
+     * Determines the behavior of the bottom bar content view when using RemoteViews.
+     *
+     * <p>By default, RemoteViews may replace the bottom bar content view. If the bottom bar view
+     * set with {@link #setBottomBarContentView} should always displayed, set this value to {@code
+     * true}.
+     *
+     * <p>**Important Note:** Enabling this feature will prevent RemoteViews from being used via
+     * {@link #updateRemoteViews}.
+     */
+    public void setKeepContentView(boolean keep) {
+        mKeepContentView = keep;
     }
 
     /**

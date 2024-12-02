@@ -21,7 +21,7 @@ import type {IronSelectorElement} from 'chrome://resources/polymer/v3_0/iron-sel
 import type {DomRepeatEvent} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 import {PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
-import {TabData, TabItemType} from './tab_data.js';
+import {normalizeURL, TabData, TabItemType} from './tab_data.js';
 import {getTemplate} from './tab_organization_group.html.js';
 import type {Tab} from './tab_search.mojom-webui.js';
 import type {TabSearchItem} from './tab_search_item.js';
@@ -126,7 +126,8 @@ export class TabOrganizationGroupElement extends PolymerElement {
   private computeTabDatas_() {
     return this.tabs.map(
         tab => new TabData(
-            tab, TabItemType.OPEN_TAB, new URL(tab.url.url).hostname));
+            tab, TabItemType.OPEN_TAB,
+            new URL(normalizeURL(tab.url.url)).hostname));
   }
 
   private onTabsChange_() {
@@ -152,7 +153,8 @@ export class TabOrganizationGroupElement extends PolymerElement {
   }
 
   private showNewTabSectionHeader_(index: number) {
-    return this.firstNewTabIndex > 0 && this.firstNewTabIndex === index;
+    return loadTimeData.getBoolean('tabReorganizationDividerEnabled') &&
+        this.firstNewTabIndex > 0 && this.firstNewTabIndex === index;
   }
 
   private onInputFocus_() {

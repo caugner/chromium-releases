@@ -33,6 +33,7 @@
 #import "components/sync/base/sync_util.h"
 #import "components/sync/service/sync_api_component_factory.h"
 #import "components/sync/service/sync_service.h"
+#import "components/sync/service/trusted_vault_synthetic_field_trial.h"
 #import "components/sync_sessions/session_sync_service.h"
 #import "components/sync_user_events/user_event_service.h"
 #import "components/trusted_vault/trusted_vault_service.h"
@@ -41,6 +42,7 @@
 #import "ios/chrome/browser/bookmarks/model/account_bookmark_sync_service_factory.h"
 #import "ios/chrome/browser/bookmarks/model/local_or_syncable_bookmark_sync_service_factory.h"
 #import "ios/chrome/browser/consent_auditor/model/consent_auditor_factory.h"
+#import "ios/chrome/browser/data_sharing/model/data_sharing_service_factory.h"
 #import "ios/chrome/browser/dom_distiller/model/dom_distiller_service_factory.h"
 #import "ios/chrome/browser/favicon/model/favicon_service_factory.h"
 #import "ios/chrome/browser/history/model/history_service_factory.h"
@@ -114,7 +116,9 @@ IOSChromeSyncClient::IOSChromeSyncClient(ChromeBrowserState* browser_state)
               browser_state_, ServiceAccessType::IMPLICIT_ACCESS),
           /*TODO(crbug.com/330201909) implement for iOS
              product_specifications_service= */
-          nullptr);
+          nullptr,
+          data_sharing::DataSharingServiceFactory::GetForBrowserState(
+              browser_state_));
 
   local_data_query_helper_ =
       std::make_unique<browser_sync::LocalDataQueryHelper>(
@@ -309,4 +313,12 @@ void IOSChromeSyncClient::GetLocalDataDescriptions(
 void IOSChromeSyncClient::TriggerLocalDataMigration(
     syncer::ModelTypeSet types) {
   local_data_migration_helper_->Run(types);
+}
+
+void IOSChromeSyncClient::RegisterTrustedVaultAutoUpgradeSyntheticFieldTrial(
+    const syncer::TrustedVaultAutoUpgradeSyntheticFieldTrialGroup& group) {
+  CHECK(group.is_valid());
+
+  // TODO(crbug.com/338544832): Implement plumbing.
+  NOTIMPLEMENTED();
 }

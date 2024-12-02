@@ -6,7 +6,7 @@
 load("//lib/branches.star", "branches")
 load("//lib/builder_config.star", "builder_config")
 load("//lib/builder_url.star", "linkify_builder")
-load("//lib/builders.star", "os", "reclient", "siso")
+load("//lib/builders.star", "os", "reclient")
 load("//lib/try.star", "try_")
 load("//lib/consoles.star", "consoles")
 load("//project.star", "settings")
@@ -22,15 +22,11 @@ try_.defaults.set(
     compilator_cores = 16,
     execution_timeout = try_.DEFAULT_EXECUTION_TIMEOUT,
     orchestrator_cores = 2,
-    orchestrator_reclient_jobs = reclient.jobs.HIGH_JOBS_FOR_CQ,
+    orchestrator_siso_remote_jobs = reclient.jobs.HIGH_JOBS_FOR_CQ,
     reclient_instance = reclient.instance.DEFAULT_UNTRUSTED,
-    reclient_jobs = reclient.jobs.LOW_JOBS_FOR_CQ,
     service_account = try_.DEFAULT_SERVICE_ACCOUNT,
-    siso_configs = ["builder"],
-    siso_enable_cloud_profiler = True,
-    siso_enable_cloud_trace = True,
     siso_enabled = True,
-    siso_project = siso.project.DEFAULT_UNTRUSTED,
+    siso_remote_jobs = reclient.jobs.LOW_JOBS_FOR_CQ,
 )
 
 consoles.list_view(
@@ -74,7 +70,7 @@ try_.builder(
     cores = 16,
     ssd = True,
     execution_timeout = 9 * time.hour,
-    reclient_jobs = reclient.jobs.HIGH_JOBS_FOR_CQ,
+    siso_remote_jobs = reclient.jobs.HIGH_JOBS_FOR_CQ,
 )
 
 try_.builder(
@@ -115,7 +111,7 @@ try_.builder(
         "chromium.enable_cleandead": 100,
     },
     main_list_view = "try",
-    reclient_jobs = reclient.jobs.HIGH_JOBS_FOR_CQ,
+    siso_remote_jobs = reclient.jobs.HIGH_JOBS_FOR_CQ,
     tryjob = try_.job(),
 )
 
@@ -197,9 +193,9 @@ try_.builder(
     cores = 16,
     ssd = True,
     main_list_view = "try",
-    reclient_jobs = reclient.jobs.HIGH_JOBS_FOR_CQ,
+    siso_remote_jobs = reclient.jobs.HIGH_JOBS_FOR_CQ,
     tryjob = try_.job(
-        # TODO(crbug.com/1335555) Remove once cancelling doesn't wipe
+        # TODO(crbug.com/40847153) Remove once cancelling doesn't wipe
         # out builder cache
         cancel_stale = False,
     ),
@@ -282,24 +278,6 @@ try_.builder(
     gn_args = "ci/win10-multiscreen-fyi-rel",
     os = os.WINDOWS_10,
     contact_team_email = "web-windowing-team@google.com",
-)
-
-try_.builder(
-    name = "win10-wpt-content-shell-fyi-rel",
-    mirrors = [
-        "ci/win10-wpt-content-shell-fyi-rel",
-    ],
-    gn_args = "ci/win10-wpt-content-shell-fyi-rel",
-    os = os.WINDOWS_10,
-)
-
-try_.builder(
-    name = "win11-wpt-content-shell-fyi-rel",
-    mirrors = [
-        "ci/win11-wpt-content-shell-fyi-rel",
-    ],
-    gn_args = "ci/win11-wpt-content-shell-fyi-rel",
-    os = os.WINDOWS_ANY,
 )
 
 try_.builder(
@@ -394,6 +372,7 @@ try_.builder(
     gn_args = gn_args.config(
         configs = [
             "ci/win-arm64-dbg",
+            "no_symbols",
         ],
     ),
     builderless = False,
@@ -401,13 +380,13 @@ try_.builder(
     os = os.WINDOWS_10,
     contact_team_email = "chrome-desktop-engprod@google.com",
     main_list_view = "try",
-    reclient_jobs = reclient.jobs.HIGH_JOBS_FOR_CQ,
+    siso_remote_jobs = reclient.jobs.HIGH_JOBS_FOR_CQ,
     tryjob = try_.job(
-        # TODO(crbug.com/1335555) Remove once cancelling doesn't wipe
+        # TODO(crbug.com/40847153) Remove once cancelling doesn't wipe
         # out builder cache
         cancel_stale = False,
         # TODO(crbug.com/328175907) Enable after resources verified.
-        experiment_percentage = 50,
+        experiment_percentage = 100,
     ),
 )
 
@@ -430,7 +409,7 @@ try_.builder(
     contact_team_email = "chrome-desktop-engprod@google.com",
     # Enable when stable.
     # main_list_view = "try",
-    reclient_jobs = reclient.jobs.HIGH_JOBS_FOR_CQ,
+    siso_remote_jobs = reclient.jobs.HIGH_JOBS_FOR_CQ,
 )
 
 try_.builder(

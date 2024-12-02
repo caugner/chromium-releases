@@ -17,10 +17,8 @@
 #include "ash/accessibility/test_accessibility_controller_client.h"
 #include "ash/app_list/app_list_controller_impl.h"
 #include "ash/app_list/test/app_list_test_helper.h"
-#include "ash/constants/app_types.h"
 #include "ash/constants/ash_features.h"
 #include "ash/constants/ash_pref_names.h"
-#include "ash/constants/ash_switches.h"
 #include "ash/display/screen_orientation_controller.h"
 #include "ash/display/screen_orientation_controller_test_api.h"
 #include "ash/frame_throttler/frame_throttling_controller.h"
@@ -63,7 +61,7 @@
 #include "ash/wm/overview/overview_constants.h"
 #include "ash/wm/overview/overview_controller.h"
 #include "ash/wm/overview/overview_drop_target.h"
-#include "ash/wm/overview/overview_focus_cycler.h"
+#include "ash/wm/overview/overview_focus_cycler_old.h"
 #include "ash/wm/overview/overview_grid.h"
 #include "ash/wm/overview/overview_grid_event_handler.h"
 #include "ash/wm/overview/overview_grid_test_api.h"
@@ -105,6 +103,8 @@
 #include "base/test/metrics/user_action_tester.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/time/time.h"
+#include "chromeos/ui/base/app_types.h"
+#include "chromeos/ui/base/window_properties.h"
 #include "chromeos/ui/base/window_state_type.h"
 #include "chromeos/ui/frame/caption_buttons/snap_controller.h"
 #include "ui/aura/client/aura_constants.h"
@@ -896,10 +896,10 @@ TEST_P(OverviewSessionTest, DraggingOnMultipleDisplay) {
       gfx::ToRoundedPoint(normal_item->target_bounds().CenterPoint()));
   generator->PressLeftButton();
   generator->MoveMouseBy(20, 20);
-  EXPECT_TRUE(normal_item->item_mirror_for_dragging_);
-  EXPECT_TRUE(normal_item->window_mirror_for_dragging_);
-  EXPECT_FALSE(minimized_item->item_mirror_for_dragging_);
-  EXPECT_FALSE(minimized_item->window_mirror_for_dragging_);
+  EXPECT_TRUE(normal_item->item_mirror_for_dragging_for_testing());
+  EXPECT_TRUE(normal_item->window_mirror_for_dragging_for_testing());
+  EXPECT_FALSE(minimized_item->item_mirror_for_dragging_for_testing());
+  EXPECT_FALSE(minimized_item->window_mirror_for_dragging_for_testing());
 
   // Start dragging the minimzed window. We don't mirror the original window,
   // since the overview item widget already contains a mirror.
@@ -908,10 +908,10 @@ TEST_P(OverviewSessionTest, DraggingOnMultipleDisplay) {
       gfx::ToRoundedPoint(minimized_item->target_bounds().CenterPoint()));
   generator->PressLeftButton();
   generator->MoveMouseBy(20, 20);
-  EXPECT_FALSE(normal_item->item_mirror_for_dragging_);
-  EXPECT_FALSE(normal_item->window_mirror_for_dragging_);
-  EXPECT_TRUE(minimized_item->item_mirror_for_dragging_);
-  EXPECT_FALSE(minimized_item->window_mirror_for_dragging_);
+  EXPECT_FALSE(normal_item->item_mirror_for_dragging_for_testing());
+  EXPECT_FALSE(normal_item->window_mirror_for_dragging_for_testing());
+  EXPECT_TRUE(minimized_item->item_mirror_for_dragging_for_testing());
+  EXPECT_FALSE(minimized_item->window_mirror_for_dragging_for_testing());
 }
 
 // Tests that dragging an overview item with multiple displays and then exiting
@@ -1058,7 +1058,7 @@ TEST_P(OverviewSessionTest, DISABLED_TabletModeHistograms) {
 // Tests that entering overview when a fullscreen window is active in maximized
 // mode correctly applies the transformations to the window and correctly
 // updates the window bounds on exiting overview mode: http://crbug.com/401664.
-// TODO(crbug.com/1523918): Fix flaky test.
+// TODO(crbug.com/41496866): Fix flaky test.
 TEST_P(OverviewSessionTest, DISABLED_FullscreenWindowTabletMode) {
   ui::ScopedAnimationDurationScaleMode animation_scale(
       ui::ScopedAnimationDurationScaleMode::FAST_DURATION);
@@ -1620,30 +1620,13 @@ TEST_P(OverviewSessionTest, DropTargetOnCorrectDisplayForDraggingFromOverview) {
   EXPECT_FALSE(GetDropTarget(1));
 }
 
-namespace {
-
-// A simple window delegate that returns the specified hit-test code when
-// requested and applies a minimum size constraint if there is one.
-class TestDragWindowDelegate : public aura::test::TestWindowDelegate {
- public:
-  TestDragWindowDelegate() { set_window_component(HTCAPTION); }
-
-  TestDragWindowDelegate(const TestDragWindowDelegate&) = delete;
-  TestDragWindowDelegate& operator=(const TestDragWindowDelegate&) = delete;
-
-  ~TestDragWindowDelegate() override = default;
-
- private:
-  // aura::Test::TestWindowDelegate:
-  void OnWindowDestroyed(aura::Window* window) override { delete this; }
-};
-
-}  // namespace
-
 // Tests that toggling overview on and off does not cancel drag.
 TEST_P(OverviewSessionTest, DragDropInProgress) {
+  auto* window_delegate =
+      aura::test::TestWindowDelegate::CreateSelfDestroyingDelegate();
+  window_delegate->set_window_component(HTCAPTION);
   std::unique_ptr<aura::Window> window(CreateTestWindowInShellWithDelegate(
-      new TestDragWindowDelegate(), -1, gfx::Rect(100, 100)));
+      window_delegate, -1, gfx::Rect(100, 100)));
 
   GetEventGenerator()->set_current_screen_location(
       window->GetBoundsInScreen().CenterPoint());
@@ -1891,24 +1874,51 @@ TEST_P(OverviewSessionTest, NoWindowsIndicatorPosition) {
       GetOverviewSession()->grid_list()[0]->no_windows_widget();
   ASSERT_TRUE(no_windows_widget);
 
-  // Verify that originally the label is in the center of the workspace.
-  // Midpoint of height minus shelf.
-  int expected_y =
-      (300 - ShelfConfig::Get()->shelf_size() + kDeskBarZeroStateHeight) / 2;
-  EXPECT_EQ(gfx::Point(200, expected_y),
-            no_windows_widget->GetWindowBoundsInScreen().CenterPoint());
+  display::Screen* screen = display::Screen::GetScreen();
+
+  // The expected y of the label will be the screen minus the shelf and desks
+  // bar.
+  auto get_expected_y = [&screen]() -> int {
+    const int display_height = screen->GetPrimaryDisplay().bounds().height();
+    const int grid_y = kDeskBarZeroStateHeight;
+    int grid_height = display_height - ShelfConfig::Get()->shelf_size() -
+                      kDeskBarZeroStateHeight;
+    return grid_y + grid_height / 2;
+  };
+
+  // Verify that originally the label is in the center of the workspace. For
+  // forest, the padding calculations are much more complicated and we need to
+  // account for the birch bar, so we just check that the widget is roughly
+  // centered vertically.
+  gfx::Point no_windows_centerpoint =
+      no_windows_widget->GetWindowBoundsInScreen().CenterPoint();
+  if (IsForestFeatureEnabled()) {
+    EXPECT_EQ(200, no_windows_centerpoint.x());
+    EXPECT_GT(no_windows_centerpoint.y(), kDeskBarZeroStateHeight);
+    EXPECT_LT(no_windows_centerpoint.y(),
+              screen->GetPrimaryDisplay().bounds().height() -
+                  ShelfConfig::Get()->shelf_size());
+  } else {
+    EXPECT_EQ(gfx::Point(200, get_expected_y()), no_windows_centerpoint);
+  }
 
   // Verify that after rotating the display, the label is centered in the
-  // workspace 300x(400-shelf).
-  display::Screen* screen = display::Screen::GetScreen();
+  // workspace.
   const display::Display& display = screen->GetPrimaryDisplay();
   display_manager()->SetDisplayRotation(
       display.id(), display::Display::ROTATE_90,
       display::Display::RotationSource::ACTIVE);
-  expected_y =
-      (400 - ShelfConfig::Get()->shelf_size() + kDeskBarZeroStateHeight) / 2;
-  EXPECT_EQ(gfx::Point(150, expected_y),
-            no_windows_widget->GetWindowBoundsInScreen().CenterPoint());
+  no_windows_centerpoint =
+      no_windows_widget->GetWindowBoundsInScreen().CenterPoint();
+  if (IsForestFeatureEnabled()) {
+    EXPECT_EQ(150, no_windows_centerpoint.x());
+    EXPECT_GT(no_windows_centerpoint.y(), kDeskBarZeroStateHeight);
+    EXPECT_LT(no_windows_centerpoint.y(),
+              screen->GetPrimaryDisplay().bounds().height() -
+                  ShelfConfig::Get()->shelf_size());
+  } else {
+    EXPECT_EQ(gfx::Point(150, get_expected_y()), no_windows_centerpoint);
+  }
 }
 
 // Tests that toggling overview on removes any resize shadows that may have been
@@ -1958,10 +1968,13 @@ TEST_P(OverviewSessionTest, OverviewGridBounds) {
 
   Shelf* shelf = Shelf::ForWindow(Shell::GetPrimaryRootWindow());
   const gfx::Rect shelf_bounds = shelf->GetIdealBounds();
-  const gfx::Rect hotseat_bounds =
-      shelf->hotseat_widget()->GetWindowBoundsInScreen();
   EXPECT_FALSE(GetGridBounds().Intersects(shelf_bounds));
-  EXPECT_FALSE(GetGridBounds().Intersects(hotseat_bounds));
+
+  if (!IsForestFeatureEnabled()) {
+    const gfx::Rect hotseat_bounds =
+        shelf->hotseat_widget()->GetWindowBoundsInScreen();
+    EXPECT_FALSE(GetGridBounds().Intersects(hotseat_bounds));
+  }
 }
 
 TEST_P(OverviewSessionTest, NoWindowsIndicatorPositionSplitview) {
@@ -1989,15 +2002,33 @@ TEST_P(OverviewSessionTest, NoWindowsIndicatorPositionSplitview) {
                                     shelf_config->system_shelf_size() +
                                     shelf_config->hotseat_bottom_padding();
   const int expected_y = (300 - workarea_bottom_inset) / 2;
-  EXPECT_EQ(gfx::Point(expected_x, expected_y),
-            no_windows_widget->GetWindowBoundsInScreen().CenterPoint());
+
+  // The x location should be in the center. The y location is roughly in the
+  // center. A lot of calculations go towards the padding and birch and desks
+  // bar for the y location.
+  gfx::Point no_windows_centerpoint =
+      no_windows_widget->GetWindowBoundsInScreen().CenterPoint();
+  if (IsForestFeatureEnabled()) {
+    EXPECT_EQ(expected_x, no_windows_centerpoint.x());
+    EXPECT_GT(no_windows_centerpoint.y(), kDeskBarZeroStateHeight);
+    EXPECT_LT(no_windows_centerpoint.y(), 300 - workarea_bottom_inset);
+  } else {
+    EXPECT_EQ(gfx::Point(expected_x, expected_y), no_windows_centerpoint);
+  }
 
   // Tests that when snapping a window to the right in splitview, the no windows
   // indicator shows up in the middle of the left side of the screen.
   GetSplitViewController()->SnapWindow(window.get(), SnapPosition::kSecondary);
+  no_windows_centerpoint =
+      no_windows_widget->GetWindowBoundsInScreen().CenterPoint();
   expected_x = /*bounds_right=*/(200 - 4) / 2;
-  EXPECT_EQ(gfx::Point(expected_x, expected_y),
-            no_windows_widget->GetWindowBoundsInScreen().CenterPoint());
+  if (IsForestFeatureEnabled()) {
+    EXPECT_EQ(expected_x, no_windows_centerpoint.x());
+    EXPECT_GT(no_windows_centerpoint.y(), kDeskBarZeroStateHeight);
+    EXPECT_LT(no_windows_centerpoint.y(), 300 - workarea_bottom_inset);
+  } else {
+    EXPECT_EQ(gfx::Point(expected_x, expected_y), no_windows_centerpoint);
+  }
 }
 
 // Tests that the no windows indicator shows properly after adding an item.
@@ -3415,8 +3446,7 @@ TEST_P(OverviewSessionTest, FrameThrottlingBrowser) {
   for (int i = 0; i < window_count; ++i) {
     windows.emplace_back(
         CreateTestWindowInShellWithDelegate(nullptr, -1, gfx::Rect()));
-    windows[i]->SetProperty(aura::client::kAppType,
-                            static_cast<int>(AppType::BROWSER));
+    windows[i]->SetProperty(chromeos::kAppTypeKey, chromeos::AppType::BROWSER);
     windows[i]->SetEmbedFrameSinkId(ids[i]);
   }
 
@@ -3429,8 +3459,7 @@ TEST_P(OverviewSessionTest, FrameThrottlingBrowser) {
       CreateTestWindowInShellWithDelegate(nullptr, -1, gfx::Rect()));
   constexpr viz::FrameSinkId new_window_id{6u, 6u};
   new_window->SetEmbedFrameSinkId(new_window_id);
-  new_window->SetProperty(aura::client::kAppType,
-                          static_cast<int>(AppType::BROWSER));
+  new_window->SetProperty(chromeos::kAppTypeKey, chromeos::AppType::BROWSER);
   OverviewGrid* grid = GetOverviewSession()->grid_list()[0].get();
   grid->AppendItem(new_window.get(), /*reposition=*/false, /*animate=*/false,
                    /*use_spawn_animation=*/false);
@@ -3461,8 +3490,7 @@ TEST_P(OverviewSessionTest, FrameThrottlingLacros) {
   for (int i = 0; i < window_count; ++i) {
     windows.emplace_back(
         CreateTestWindowInShellWithDelegate(nullptr, -1, gfx::Rect()));
-    windows[i]->SetProperty(aura::client::kAppType,
-                            static_cast<int>(AppType::LACROS));
+    windows[i]->SetProperty(chromeos::kAppTypeKey, chromeos::AppType::LACROS);
     windows[i]->SetEmbedFrameSinkId(ids[i]);
   }
   for (auto& w : windows)
@@ -3479,8 +3507,7 @@ TEST_P(OverviewSessionTest, FrameThrottlingLacros) {
       CreateTestWindowInShellWithDelegate(nullptr, -1, gfx::Rect()));
   constexpr viz::FrameSinkId new_window_id{6u, 6u};
   new_window->SetEmbedFrameSinkId(new_window_id);
-  new_window->SetProperty(aura::client::kAppType,
-                          static_cast<int>(AppType::LACROS));
+  new_window->SetProperty(chromeos::kAppTypeKey, chromeos::AppType::LACROS);
   OverviewGrid* grid = GetOverviewSession()->grid_list()[0].get();
   grid->AppendItem(new_window.get(), /*reposition=*/false, /*animate=*/false,
                    /*use_spawn_animation=*/false);
@@ -3515,8 +3542,7 @@ TEST_P(OverviewSessionTest, FrameThrottlingArc) {
   for (int i = 0; i < window_count; ++i) {
     windows.emplace_back(
         CreateTestWindowInShellWithDelegate(nullptr, -1, gfx::Rect()));
-    windows[i]->SetProperty(aura::client::kAppType,
-                            static_cast<int>(AppType::ARC_APP));
+    windows[i]->SetProperty(chromeos::kAppTypeKey, chromeos::AppType::ARC_APP);
   }
 
   auto windows_to_throttle =
@@ -3530,8 +3556,7 @@ TEST_P(OverviewSessionTest, FrameThrottlingArc) {
   // Add a new window to overview.
   std::unique_ptr<aura::Window> new_window(
       CreateTestWindowInShellWithDelegate(nullptr, -1, gfx::Rect()));
-  new_window->SetProperty(aura::client::kAppType,
-                          static_cast<int>(AppType::ARC_APP));
+  new_window->SetProperty(chromeos::kAppTypeKey, chromeos::AppType::ARC_APP);
   windows_to_throttle.push_back(new_window.get());
   EXPECT_CALL(observer, OnThrottlingEnded());
   EXPECT_CALL(observer,
@@ -5143,7 +5168,7 @@ TEST_P(OverviewRasterScaleTest,
 }
 
 // Tests raster scale changes work in tablet mode.
-// TODO(crbug.com/1508655): Fix flaky test.
+// TODO(crbug.com/40949385): Fix flaky test.
 TEST_P(OverviewRasterScaleTest, DISABLED_RasterScaleTabletMode) {
   EnterTabletMode();
 
@@ -5748,7 +5773,7 @@ TEST_F(TabletModeOverviewSessionTest, CheckNoOverviewItemShift) {
 // Tests to see if windows are shifted if at least one window is
 // partially/completely positioned offscreen.
 TEST_F(TabletModeOverviewSessionTest, CheckOverviewItemShift) {
-  auto windows = CreateAppWindows(7);
+  auto windows = CreateAppWindows(9);
   ToggleOverview();
   ASSERT_TRUE(InOverviewSession());
 
@@ -5939,7 +5964,7 @@ TEST_F(TabletModeOverviewSessionTest, StackingOrderAfterGestureEvent) {
 // Test that scrolling occurs if started on top of a window using the window's
 // center-point as a start.
 TEST_F(TabletModeOverviewSessionTest, HorizontalScrollingOnOverviewItem) {
-  auto windows = CreateAppWindows(8);
+  auto windows = CreateAppWindows(9);
   ToggleOverview();
   ASSERT_TRUE(InOverviewSession());
 
@@ -6376,7 +6401,7 @@ TEST_F(TabletModeOverviewSessionTest, VerticalScrollingOnOverviewItem) {
 
 // Test that scrolling occurs if we hit the associated keyboard shortcut.
 TEST_F(TabletModeOverviewSessionTest, CheckScrollingWithKeyboardShortcut) {
-  auto windows = CreateAppWindows(8);
+  auto windows = CreateAppWindows(9);
   ToggleOverview();
   ASSERT_TRUE(InOverviewSession());
 
@@ -6415,7 +6440,7 @@ TEST_F(TabletModeOverviewSessionTest, LayoutValidAfterRotation) {
   display::test::ScopedSetInternalDisplayId set_internal(
       Shell::Get()->display_manager(),
       display::Screen::GetScreen()->GetPrimaryDisplay().id());
-  auto windows = CreateAppWindows(7);
+  auto windows = CreateAppWindows(9);
 
   // Helper to determine whether a grid layout is valid. It is considered valid
   // if the left edge of the first item is close enough to the left edge of the
@@ -6922,13 +6947,15 @@ class SplitViewOverviewSessionTest : public OverviewTestBase {
  protected:
   aura::Window* CreateWindow(const gfx::Rect& bounds) {
     aura::Window* window = CreateTestWindowInShellWithDelegate(
-        new SplitViewTestWindowDelegate, -1, bounds);
+        aura::test::TestWindowDelegate::CreateSelfDestroyingDelegate(), -1,
+        bounds);
     return window;
   }
 
   aura::Window* CreateWindowWithMinimumSize(const gfx::Rect& bounds,
                                             const gfx::Size& size) {
-    SplitViewTestWindowDelegate* delegate = new SplitViewTestWindowDelegate();
+    auto* delegate =
+        aura::test::TestWindowDelegate::CreateSelfDestroyingDelegate();
     aura::Window* window =
         CreateTestWindowInShellWithDelegate(delegate, -1, bounds);
     delegate->set_minimum_size(size);
@@ -7041,16 +7068,6 @@ class SplitViewOverviewSessionTest : public OverviewTestBase {
   }
 
  private:
-  class SplitViewTestWindowDelegate : public aura::test::TestWindowDelegate {
-   public:
-    SplitViewTestWindowDelegate() = default;
-    ~SplitViewTestWindowDelegate() override = default;
-
-    // aura::test::TestWindowDelegate:
-    void OnWindowDestroying(aura::Window* window) override { window->Hide(); }
-    void OnWindowDestroyed(aura::Window* window) override { delete this; }
-  };
-
   base::test::ScopedFeatureList scoped_feature_list_;
 };
 
@@ -10881,11 +10898,10 @@ class OakTest : public OverviewTestBase {
                               features::kFasterSplitScreenSetup,
                               features::kOsSettingsRevampWayfinding},
         /*disabled_features=*/{});
-    switches::SetIgnoreForestSecretKeyForTest(true);
   }
   OakTest(const OakTest&) = delete;
   OakTest& operator=(const OakTest&) = delete;
-  ~OakTest() override { switches::SetIgnoreForestSecretKeyForTest(false); }
+  ~OakTest() override = default;
 
   void SnapOneTestWindow(aura::Window* window,
                          WindowStateType state_type,

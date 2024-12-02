@@ -32,7 +32,7 @@ enum class OidcInterceptionStatus {
   kConsentCollection = 2,
   kProfileCreation = 3,
   kPolicyFetch = 4,
-  kAddAccount = 5,
+  kSetPrimaryAccountWithInvalidToken = 5,
   kCompleted = 6,
   // TODO(b/319479021): Add more error reporting and retry logics to make the
   // interceptor class more resilient
@@ -44,6 +44,7 @@ class ProfileAttributesEntry;
 
 using ClientRegisterCallback =
     base::OnceCallback<void(std::unique_ptr<policy::CloudPolicyClient>)>;
+using OidcInterceptionCallback = base::OnceCallback<void()>;
 using policy::CloudPolicyClient;
 
 // Called after a valid OIDC authentication redirection is captured. The
@@ -72,7 +73,8 @@ class OidcAuthenticationSigninInterceptor : public WebSigninInterceptor,
   virtual void MaybeInterceptOidcAuthentication(
       content::WebContents* intercepted_contents,
       ProfileManagementOicdTokens oidc_tokens,
-      std::string subject_id);
+      std::string subject_id,
+      OidcInterceptionCallback oidc_callback);
 
   // KeyedService:
   void Shutdown() override;
@@ -90,7 +92,6 @@ class OidcAuthenticationSigninInterceptor : public WebSigninInterceptor,
 
  private:
   void CreateBrowserAfterSigninInterception();
-  void CloseInterceptedWebContent(content::WebContents* intercepted_contents);
   // Cancels any current signin interception and resets the interceptor to its
   // initial state.
   void Reset();
@@ -102,16 +103,13 @@ class OidcAuthenticationSigninInterceptor : public WebSigninInterceptor,
   // importantly, if the 3P user identity is sync-ed to Google or not.
   void OnClientRegistered(std::unique_ptr<CloudPolicyClient> client);
 
-  // Pulls gaia id from fetched policies and user email from DM server response,
-  // and sets this AccountId as primary user of the new profile. Dasher-based
-  // identity only.
-  void AddAsPrimaryAccount(Profile* new_profile);
-
   // Called when user makes a decision on the profile creation dialog.
   void OnProfileCreationChoice(SigninInterceptionResult create);
   // Called when the new profile has been created.
   void OnNewSignedInProfileCreated(base::WeakPtr<Profile> new_profile);
-  // Called when policy fetch response has been received.
+  // Called when policy fetch response has been received, For Dasher-based
+  // profiles, pulls gaia id from fetched policies and user email from DM server
+  // response, and sets this AccountId as primary user of the new profile.
   void OnPolicyFetchCompleteInNewProfile(Profile* new_profile, bool success);
 
   const raw_ptr<Profile, DanglingUntriaged> profile_;
@@ -145,6 +143,8 @@ class OidcAuthenticationSigninInterceptor : public WebSigninInterceptor,
 
   std::unique_ptr<CloudPolicyClient> client_for_testing_ = nullptr;
   bool disable_browser_creation_after_interception_for_testing_ = false;
+
+  OidcInterceptionCallback oidc_callback_;
 
   base::WeakPtrFactory<OidcAuthenticationSigninInterceptor> weak_factory_{this};
 

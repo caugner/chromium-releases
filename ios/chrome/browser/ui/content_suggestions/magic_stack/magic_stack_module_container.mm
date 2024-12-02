@@ -73,6 +73,7 @@ const CGFloat kSeparatorHeight = 0.5;
     MagicStackModuleContentsFactory* _magicStackModuleContentsFactory;
     NSLayoutConstraint* _containerHeightAnchor;
     NSLayoutConstraint* _contentStackViewBottomMarginAnchor;
+    UIContextMenuInteraction* _contextMenuInteraction;
 }
 
 - (instancetype)initWithFrame:(CGRect)frame {
@@ -238,8 +239,16 @@ const CGFloat kSeparatorHeight = 0.5;
   }
   _type = config.type;
   if ([self allowsLongPress]) {
-    [self addInteraction:[[UIContextMenuInteraction alloc]
-                             initWithDelegate:self]];
+    if (!_contextMenuInteraction) {
+      _contextMenuInteraction =
+          [[UIContextMenuInteraction alloc] initWithDelegate:self];
+      [self addInteraction:_contextMenuInteraction];
+    }
+  } else {
+    if (_contextMenuInteraction) {
+      [self removeInteraction:_contextMenuInteraction];
+      _contextMenuInteraction = nil;
+    }
   }
 
   _title.text = [MagicStackModuleContainer titleStringForModule:_type];
@@ -249,7 +258,7 @@ const CGFloat kSeparatorHeight = 0.5;
   _seeMoreButton.hidden = !config.shouldShowSeeMore;
 
   if ([self shouldShowSubtitle]) {
-    // TODO(crbug.com/1474992): Update MagicStackModuleContainer to take an id
+    // TODO(crbug.com/40279482): Update MagicStackModuleContainer to take an id
     // config in its initializer so the container can build itself from a
     // passed config/state object.
     NSString* subtitle = [self subtitleStringForConfig:config];
@@ -325,7 +334,7 @@ const CGFloat kSeparatorHeight = 0.5;
       return kMagicStackContentSuggestionsModuleTabResumptionAccessibilityIdentifier;
 
     default:
-      // TODO(crbug.com/1506038): the code should use constants for
+      // TODO(crbug.com/40946679): the code should use constants for
       // accessibility identifiers, and not localized strings.
       return [self titleStringForModule:type];
   }

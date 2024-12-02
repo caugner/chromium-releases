@@ -94,6 +94,9 @@ const base::FeatureParam<int> kRepromptDurationMultiplier{
 const base::FeatureParam<base::TimeDelta> kDefaultBrowserAppMenuDuration{
     &kDefaultBrowserPromptRefresh, "app_menu_duration", base::Days(3)};
 
+const base::FeatureParam<bool> kAppMenuChipColorPrimary{
+    &kDefaultBrowserPromptRefresh, "app_menu_chip_color_primary", false};
+
 // Create new Extensions app menu option (removing "More Tools -> Extensions")
 // with submenu to manage extensions and visit chrome web store.
 BASE_FEATURE(kExtensionsMenuInAppMenu,
@@ -121,6 +124,12 @@ BASE_FEATURE(kEvDetailsInPageInfo,
 // Enables showing the "Get the most out of Chrome" section in settings.
 BASE_FEATURE(kGetTheMostOutOfChrome,
              "GetTheMostOutOfChrome",
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
+// This feature controls whether the user can be shown the Chrome for iOS promo
+// when saving or updating passwords.
+BASE_FEATURE(kIOSPromoRefreshedPasswordBubble,
+             "IOSPromoRefreshedPasswordBubble",
              base::FEATURE_DISABLED_BY_DEFAULT);
 
 // This feature controls whether the user can be shown the Chrome for iOS promo
@@ -327,8 +336,16 @@ BASE_FEATURE(kMultiTabOrganization,
              "MultiTabOrganization",
              base::FEATURE_DISABLED_BY_DEFAULT);
 
+BASE_FEATURE(kTabOrganizationAppMenuItem,
+             "TabOrganizationAppMenuItem",
+             base::FEATURE_ENABLED_BY_DEFAULT);
+
 BASE_FEATURE(kTabReorganization,
              "TabReorganization",
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
+BASE_FEATURE(kTabReorganizationDivider,
+             "TabReorganizationDivider",
              base::FEATURE_DISABLED_BY_DEFAULT);
 
 const base::FeatureParam<base::TimeDelta> kTabOrganizationTriggerPeriod{
@@ -473,12 +490,6 @@ BASE_FEATURE(kWebUITabStripContextMenuAfterTap,
              base::FEATURE_ENABLED_BY_DEFAULT
 #endif
 );
-
-#if BUILDFLAG(IS_CHROMEOS)
-BASE_FEATURE(kChromeOSTabSearchCaptionButton,
-             "ChromeOSTabSearchCaptionButton",
-             base::FEATURE_DISABLED_BY_DEFAULT);
-#endif
 
 #if BUILDFLAG(IS_MAC)
 // Enabled an experiment which increases the prominence to grant MacOS system

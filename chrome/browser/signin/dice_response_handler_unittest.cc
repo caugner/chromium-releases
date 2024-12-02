@@ -17,7 +17,6 @@
 #include "base/test/scoped_feature_list.h"
 #include "base/test/task_environment.h"
 #include "base/time/time.h"
-#include "chrome/browser/signin/signin_features.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/prefs/pref_service.h"
 #include "components/signin/core/browser/about_signin_internals.h"
@@ -29,6 +28,7 @@
 #include "components/signin/public/base/signin_buildflags.h"
 #include "components/signin/public/base/signin_metrics.h"
 #include "components/signin/public/base/signin_pref_names.h"
+#include "components/signin/public/base/signin_switches.h"
 #include "components/signin/public/base/test_signin_client.h"
 #include "components/signin/public/identity_manager/account_info.h"
 #include "components/signin/public/identity_manager/identity_test_environment.h"
@@ -378,8 +378,24 @@ void DiceResponseHandlerTest::RunSignoutTest(
   }
 }
 
+class SigninDiceResponseHandlerTestPreconnect
+    : public DiceResponseHandlerTest,
+      public ::testing::WithParamInterface<bool> {
+ public:
+  SigninDiceResponseHandlerTestPreconnect() {
+    feature_list_.InitWithFeatureState(
+        switches::kPreconnectAccountCapabilitiesPostSignin,
+        PreconnectEnabled());
+  }
+
+  bool PreconnectEnabled() { return GetParam(); }
+
+ private:
+  base::test::ScopedFeatureList feature_list_;
+};
+
 // Checks that a SIGNIN action triggers a token exchange request.
-TEST_F(DiceResponseHandlerTest, Signin) {
+TEST_P(SigninDiceResponseHandlerTestPreconnect, Signin) {
   DiceResponseParams dice_params = MakeDiceParams(DiceAction::SIGNIN);
   const auto& account_info = dice_params.signin_info->account_info;
   CoreAccountId account_id = identity_manager()->PickAccountIdForAccount(
@@ -413,7 +429,14 @@ TEST_F(DiceResponseHandlerTest, Signin) {
   // Check that the AccessPoint was propagated from the delegate.
   EXPECT_EQ(extended_account_info.access_point,
             signin_metrics::AccessPoint::ACCESS_POINT_SETTINGS);
+  EXPECT_EQ(
+      identity_test_env_.GetNumCallsToPrepareForFetchingAccountCapabilities(),
+      PreconnectEnabled() ? 1 : 0);
 }
+
+INSTANTIATE_TEST_SUITE_P(PreconnectEnabled,
+                         SigninDiceResponseHandlerTestPreconnect,
+                         ::testing::Bool());
 
 #if BUILDFLAG(ENABLE_BOUND_SESSION_CREDENTIALS)
 // Checks that a SIGNIN action triggers a token exchange request.

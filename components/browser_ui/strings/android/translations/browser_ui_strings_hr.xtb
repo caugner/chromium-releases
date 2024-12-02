@@ -31,7 +31,6 @@
 <translation id="1620510694547887537">Fotoaparat</translation>
 <translation id="1633720957382884102">Povezane web-lokacije</translation>
 <translation id="1644574205037202324">Povijest</translation>
-<translation id="1647582022260550163">Jeste li sigurni da želite poništiti dopuštenja i izbrisati kolačiće i podatke web-lokacije?</translation>
 <translation id="1652197001188145583">Kad je ta postavka uključena, web-lokacije mogu tražiti dopuštenje za upotrebu NFC uređaja. Kad je ta postavka isključena, web-lokacije ne mogu upotrebljavati NFC uređaje.</translation>
 <translation id="1660204651932907780">Web-lokacije mogu reproducirati zvuk (preporučeno)</translation>
 <translation id="1677097821151855053">Kolačići i drugi podaci web-lokacije koriste se kako bi vas web-lokacija zapamtila, na primjer kako bi vas prijavila na račun ili vam prilagodila oglase. Da biste upravljali kolačićima za sve web-lokacije, idite na <ph name="BEGIN_LINK" />Postavke<ph name="END_LINK" />.</translation>
@@ -123,7 +122,6 @@
 <translation id="3008272652534848354">Poništi dopuštenja</translation>
 <translation id="301521992641321250">Automatski blokirano</translation>
 <translation id="3069226013421428034">Dopusti prijavu treće strane za određenu web-lokaciju.</translation>
-<translation id="3082992102194421695">{COUNT,plural, =1{Istječe sutra}one{Istječe za # dan}few{Istječe za # dana}other{Istječe za # dana}}</translation>
 <translation id="310297983047869047">Prethodni slajd</translation>
 <translation id="3109724472072898302">Sažeto</translation>
 <translation id="3114012059975132928">Player videozapisa</translation>
@@ -135,6 +133,7 @@
 <translation id="3198916472715691905">Pohranjeni podaci: <ph name="STORAGE_AMOUNT" /></translation>
 <translation id="321187648315454507">Da bi vam aplikacija <ph name="APP_NAME" /> slati obavijesti, uključite obavijesti i u <ph name="BEGIN_LINK" />Androidovim postavkama<ph name="END_LINK" />.</translation>
 <translation id="3227137524299004712">Mikrofon</translation>
+<translation id="3232293466644486101">Brisanje podataka o pregledavanju…</translation>
 <translation id="3242646949159196181">Kad je ta postavka uključena, web-lokacije mogu reproducirati zvuk. Kad je ta postavka isključena, web-lokacije ne mogu reproducirati zvuk.</translation>
 <translation id="3277252321222022663">Dopuštanje pristupa senzorima za web-lokacije (preporučeno)</translation>
 <translation id="3285500645985761267">Dopustite povezanim web-lokacijama da vide vaše aktivnosti u grupi</translation>
@@ -198,6 +197,7 @@
 <translation id="4278390842282768270">Dopušteno</translation>
 <translation id="429312253194641664">Web-lokacija reproducira medije</translation>
 <translation id="42981349822642051">Proširi</translation>
+<translation id="4336219115486912529">{COUNT,plural, =1{Istječe sutra}one{Istječe za # dan}few{Istječe za # dana}other{Istječe za # dana}}</translation>
 <translation id="4336566011000459927">Chrome će danas ponovo ograničiti kolačiće</translation>
 <translation id="4336836404251800362"><ph name="RECENCY" /> <ph name="SEPARATOR" /> Vaša posljednja kartica</translation>
 <translation id="4338831206024587507">Sve web-lokacije na domeni <ph name="DOMAIN" /></translation>
@@ -308,6 +308,7 @@
 <translation id="6064125863973209585">Dovršena preuzimanja</translation>
 <translation id="6071501408666570960">Možda ste odjavljeni s ove web-lokacije</translation>
 <translation id="6120483543004435978">Kad je ta postavka uključena, web-lokacije mogu tražiti informacije kada aktivno koristite uređaj. Kad je ta postavka isključena, web-lokacije ne mogu znati kad aktivno koristite uređaj.</translation>
+<translation id="6140839633433422817">Jeste li sigurni da želite poništiti dopuštenja i izbrisati kolačiće i podatke web-lokacije?</translation>
 <translation id="6165508094623778733">Saznajte više</translation>
 <translation id="6171020522141473435">Kad je ta postavka uključena, web-lokacije mogu tražiti dopuštenje za upotrebu Bluetooth uređaja. Kad je ta postavka isključena, web-lokacije ne mogu upotrebljavati Bluetooth uređaje.</translation>
 <translation id="6177111841848151710">Blokirano za trenutačnu tražilicu</translation>
@@ -341,6 +342,7 @@
 <translation id="6545864417968258051">Traženje Bluetootha</translation>
 <translation id="6552800053856095716">{PERMISSIONS_SUMMARY_BLOCKED,plural, =1{Blokirana su dopuštenja <ph name="PERMISSION_1" />, <ph name="PERMISSION_2" /> i još <ph name="NUM_MORE" />}one{Blokirana su dopuštenja <ph name="PERMISSION_1" />, <ph name="PERMISSION_2" /> i još <ph name="NUM_MORE" />}few{Blokirana su dopuštenja <ph name="PERMISSION_1" />, <ph name="PERMISSION_2" /> i još <ph name="NUM_MORE" />}other{Blokirana su dopuštenja <ph name="PERMISSION_1" />, <ph name="PERMISSION_2" /> i još <ph name="NUM_MORE" />}}</translation>
 <translation id="6554732001434021288">Posljednji posjet bio je prije <ph name="NUM_DAYS" /> dana</translation>
+<translation id="656065428026159829">Prikaži više</translation>
 <translation id="6561560012278703671">Koristi tiše poruke (onemogućuje upitima za obavijesti da vas ometaju)</translation>
 <translation id="6593061639179217415">Klasični prikaz</translation>
 <translation id="6608650720463149374"><ph name="GIGABYTES" /> GB</translation>
@@ -401,7 +403,6 @@
 <translation id="7561196759112975576">Uvijek</translation>
 <translation id="757524316907819857">Web-lokacijama nije dopušteno reproduciranje zaštićenog sadržaja</translation>
 <translation id="7594634374516752650">Povezano s Bluetooth uređajem</translation>
-<translation id="7641339528570811325">Izbriši podatke o pregledavanju…</translation>
 <translation id="7649070708921625228">Pomoć</translation>
 <translation id="7658239707568436148">Odustani</translation>
 <translation id="7667547420449112975">Čarobnjak iz Oza</translation>

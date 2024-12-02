@@ -7,7 +7,7 @@
             "builder_id": {
               "bucket": "ci",
               "builder": "win-arm64-rel",
-              "project": "chromium-m125"
+              "project": "chromium-m126"
             },
             "builder_spec": {
               "build_gs_bucket": "chromium-win-archive",
@@ -25,6 +25,7 @@
               },
               "legacy_gclient_config": {
                 "apply_configs": [
+                  "chromium_with_telemetry_dependencies",
                   "use_clang_coverage"
                 ],
                 "config": "chromium"
@@ -35,7 +36,7 @@
             "builder_id": {
               "bucket": "ci",
               "builder": "win11-arm64-rel-tests",
-              "project": "chromium-m125"
+              "project": "chromium-m126"
             },
             "builder_spec": {
               "build_gs_bucket": "chromium-win-archive",
@@ -60,7 +61,7 @@
               "parent": {
                 "bucket": "ci",
                 "builder": "win-arm64-rel",
-                "project": "chromium-m125"
+                "project": "chromium-m126"
               }
             }
           }
@@ -70,7 +71,7 @@
         {
           "bucket": "ci",
           "builder": "win11-arm64-rel-tests",
-          "project": "chromium-m125"
+          "project": "chromium-m126"
         }
       ],
       "mirroring_builder_group_and_names": [
@@ -81,16 +82,6 @@
       ],
       "retry_failed_shards": true
     }
-  },
-  "$build/siso": {
-    "configs": [
-      "builder"
-    ],
-    "enable_cloud_profiler": true,
-    "enable_cloud_trace": true,
-    "experiments": [],
-    "project": "rbe-chromium-trusted",
-    "remote_jobs": 250
   },
   "$recipe_engine/resultdb/test_presentation": {
     "column_keys": [],

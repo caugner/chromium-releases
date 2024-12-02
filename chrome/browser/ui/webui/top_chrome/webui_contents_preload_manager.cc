@@ -7,8 +7,11 @@
 #include "base/feature_list.h"
 #include "base/memory/memory_pressure_monitor.h"
 #include "base/memory/weak_ptr.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/no_destructor.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/task_manager/web_contents_tags.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/prefs/prefs_tab_helper.h"
 #include "chrome/browser/ui/ui_features.h"
 #include "chrome/browser/ui/webui/top_chrome/top_chrome_web_ui_controller.h"
@@ -71,6 +74,22 @@ content::WebUIController* GetWebUIController(
 
   return webui->GetController();
 }
+
+// Enum class representing the results of attempting to use a preloaded WebUI
+// when WebUIContentsPreloadedManager::MakeContents() is called.
+// The description of each value is also in tools/metrics/histograms/enums.xml.
+enum class WebUIPreloadResult {
+  // No preloaded WebUI is available when a WebUI is requested.
+  kNoPreload = 0,
+  // The preloaded WebUI matches the requested WebUI.
+  kHit = 1,
+  // The preloaded WebUI is redirected to the requested WebUI.
+  kHitRedirected = 2,
+  // The preloaded WebUI does not match the requested WebUI and cannot be
+  // redirected.
+  kMiss = 3,
+  kMaxValue = kMiss,
+};
 
 }  // namespace
 
@@ -168,14 +187,19 @@ void WebUIContentsPreloadManager::EnsureFactoryBuilt() {
   BrowserContextShutdownNotifierFactory::GetInstance();
 }
 
-void WebUIContentsPreloadManager::WarmupForBrowserContext(
-    content::BrowserContext* browser_context) {
+void WebUIContentsPreloadManager::WarmupForBrowser(Browser* browser) {
+  // Most WebUIs, if not all, are hosted by a TYPE_NORMAL browser. This check
+  // skips unnecessary preloading for the majority of WebUIs.
+  if (!browser->is_type_normal()) {
+    return;
+  }
+
   if (preload_mode_ == PreloadMode::kPreloadOnMakeContents) {
     return;
   }
 
   CHECK_EQ(preload_mode_, PreloadMode::kPreloadOnWarmup);
-  PreloadForBrowserContext(browser_context);
+  PreloadForBrowserContext(browser->profile());
 }
 
 void WebUIContentsPreloadManager::PreloadForBrowserContextForTesting(
@@ -211,6 +235,10 @@ MakeContentsResult WebUIContentsPreloadManager::MakeContents(
     content::BrowserContext* browser_context) {
   std::unique_ptr<content::WebContents> web_contents_ret;
   bool is_ready_to_show = false;
+  WebUIPreloadResult preload_result = preloaded_web_contents_
+                                          ? WebUIPreloadResult::kMiss
+                                          : WebUIPreloadResult::kNoPreload;
+
   // Use preloaded contents if requested the same WebUI under the same browser
   // context. Navigating to or from a blank page is also allowed.
   // TODO(325836830): allow navigations between WebUIs.
@@ -219,8 +247,10 @@ MakeContentsResult WebUIContentsPreloadManager::MakeContents(
       (preloaded_web_contents_->GetURL().host() == webui_url.host() ||
        preloaded_web_contents_->GetURL().IsAboutBlank() ||
        webui_url.IsAboutBlank())) {
+    preload_result = WebUIPreloadResult::kHit;
     // Redirect if requested a different URL.
     if (preloaded_web_contents_->GetURL().host() != webui_url.host()) {
+      preload_result = WebUIPreloadResult::kHitRedirected;
       LoadURLForContents(preloaded_web_contents_.get(), webui_url);
     }
     web_contents_ret = std::move(preloaded_web_contents_);
@@ -230,6 +260,9 @@ MakeContentsResult WebUIContentsPreloadManager::MakeContents(
     web_contents_ret = CreateNewContents(browser_context, webui_url);
     is_ready_to_show = false;
   }
+
+  base::UmaHistogramEnumeration("WebUI.TopChrome.Preload.Result",
+                                preload_result);
 
   if (ShouldPreloadForBrowserContext(browser_context)) {
     // Preloads a new contents.
