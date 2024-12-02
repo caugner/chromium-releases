@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -42,10 +42,11 @@ const double kGlintRepeatIntervalIncreaseFactor = 1.5;
 // Used to implement TestingAPI
 static NSEvent* MakeMouseEvent(NSEventType type,
                                NSPoint point,
+                               int modifierFlags,
                                int clickCount) {
   return [NSEvent mouseEventWithType:type
                             location:point
-                       modifierFlags:0
+                       modifierFlags:modifierFlags
                            timestamp:0
                         windowNumber:0
                              context:nil
@@ -53,6 +54,31 @@ static NSEvent* MakeMouseEvent(NSEventType type,
                           clickCount:clickCount
                             pressure:0.0];
 }
+
+@implementation PanelTitlebarOverlayView
+// Sometimes we do not want to bring chrome window to foreground when we click
+// on any part of the titlebar. To do this, we first postpone the window
+// reorder here (shouldDelayWindowOrderingForEvent is called during when mouse
+// button is pressed but before mouseDown: is dispatched) and then complete
+// canceling the reorder by [NSApp preventWindowOrdering] in mouseDown handler
+// of this view.
+- (BOOL)shouldDelayWindowOrderingForEvent:(NSEvent*)theEvent {
+  disableReordering_ = ![controller_ isActivationByClickingTitlebarEnabled];
+  return disableReordering_;
+}
+
+- (void)mouseDown:(NSEvent*)event {
+  if (disableReordering_)
+    [NSApp preventWindowOrdering];
+  disableReordering_ = NO;
+  // Continue bubbling the event up the chain of responders.
+  [super mouseDown:event];
+}
+
+- (BOOL)acceptsFirstMouse:(NSEvent*)event {
+  return YES;
+}
+@end
 
 @implementation RepaintAnimation
 - (id)initWithView:(NSView*)targetView duration:(double) duration {
@@ -392,7 +418,8 @@ static NSEvent* MakeMouseEvent(NSEventType type,
 - (void)mouseDown:(NSEvent*)event {
   if ([controller_ isDraggable]) {
     dragState_ = PANEL_DRAG_CAN_START;
-    dragStartLocation_ = [event locationInWindow];
+    dragStartLocation_ =
+        [[self window] convertBaseToScreen:[event locationInWindow]];
   }
 }
 
@@ -400,12 +427,12 @@ static NSEvent* MakeMouseEvent(NSEventType type,
   DCHECK(dragState_ != PANEL_DRAG_IN_PROGRESS);
 
   if ([event clickCount] == 1)
-    [controller_ onTitlebarMouseClicked];
+    [controller_ onTitlebarMouseClicked:[event modifierFlags]];
 }
 
 - (BOOL)exceedsDragThreshold:(NSPoint)mouseLocation {
-  float deltaX = dragStartLocation_.x - mouseLocation.x;
-  float deltaY = dragStartLocation_.y - mouseLocation.y;
+  float deltaX = fabs(dragStartLocation_.x - mouseLocation.x);
+  float deltaY = fabs(dragStartLocation_.y - mouseLocation.y);
   return deltaX > kDragThreshold || deltaY > kDragThreshold;
 }
 
@@ -430,14 +457,19 @@ static NSEvent* MakeMouseEvent(NSEventType type,
                                           dequeue:YES];
 
     switch ([event type]) {
-      case NSLeftMouseDragged:
+      case NSLeftMouseDragged: {
+        // Get current mouse location in Cocoa's screen coordinates.
+        NSPoint mouseLocation =
+            [[self window] convertBaseToScreen:[event locationInWindow]];
         if (dragState_ == PANEL_DRAG_CAN_START) {
-          if (![self exceedsDragThreshold:[event locationInWindow]])
+          if (![self exceedsDragThreshold:mouseLocation])
             return;  // Don't start real drag yet.
-          [self startDrag];
+          [self startDrag:dragStartLocation_];
         }
-        [self dragWithDeltaX:[event deltaX]];
+        DCHECK(dragState_ == PANEL_DRAG_IN_PROGRESS);
+        [self drag:mouseLocation];
         break;
+      }
 
       case NSKeyUp:
         if ([event keyCode] == kVK_Escape) {
@@ -467,10 +499,10 @@ static NSEvent* MakeMouseEvent(NSEventType type,
   }
 }
 
-- (void)startDrag {
+- (void)startDrag:(NSPoint)mouseLocation {
   DCHECK(dragState_ == PANEL_DRAG_CAN_START);
   dragState_ = PANEL_DRAG_IN_PROGRESS;
-  [controller_ startDrag];
+  [controller_ startDrag:mouseLocation];
 }
 
 - (void)endDrag:(BOOL)cancelled {
@@ -479,10 +511,10 @@ static NSEvent* MakeMouseEvent(NSEventType type,
   dragState_ = PANEL_DRAG_SUPPRESSED;
 }
 
-- (void)dragWithDeltaX:(int)deltaX {
+- (void)drag:(NSPoint)mouseLocation {
   if (dragState_ != PANEL_DRAG_IN_PROGRESS)
     return;
-  [controller_ dragWithDeltaX:deltaX];
+  [controller_ drag:mouseLocation];
 }
 
 - (void)drawAttention {
@@ -545,6 +577,14 @@ static NSEvent* MakeMouseEvent(NSEventType type,
   }
 }
 
+- (int)iconOnlyWidthInScreenCoordinates {
+  int width = kIconAndTextPadding * 2;
+  if (!icon_)
+    return width;
+
+  return width + NSWidth([self convertRect:[icon_ frame] toView:nil]);
+}
+
 // (Private/TestingAPI)
 - (PanelWindowControllerCocoa*)controller {
   return controller_;
@@ -558,21 +598,27 @@ static NSEvent* MakeMouseEvent(NSEventType type,
   [[closeButton_ cell] performClick:closeButton_];
 }
 
-- (void)pressLeftMouseButtonTitlebar {
-  NSEvent* event = MakeMouseEvent(NSLeftMouseDown, NSZeroPoint, 0);
+- (void)pressLeftMouseButtonTitlebar:(NSPoint)mouseLocation
+                           modifiers:(int)modifierFlags {
+  // Convert from Cocoa's screen coordinates to base coordinates since the mouse
+  // event takes base coordinates.
+  NSEvent* event = MakeMouseEvent(
+      NSLeftMouseDown, [[self window] convertScreenToBase:mouseLocation],
+      modifierFlags, 0);
   [self mouseDown:event];
 }
 
-- (void)releaseLeftMouseButtonTitlebar {
-  NSEvent* event = MakeMouseEvent(NSLeftMouseUp, NSZeroPoint, 1);
+- (void)releaseLeftMouseButtonTitlebar:(int)modifierFlags {
+  NSEvent* event = MakeMouseEvent(NSLeftMouseUp, NSZeroPoint, modifierFlags, 1);
   [self mouseUp:event];
 }
 
-- (void)dragTitlebarDeltaX:(double)delta_x
-                    deltaY:(double)delta_y {
+- (void)dragTitlebar:(NSPoint)mouseLocation {
   if (dragState_ == PANEL_DRAG_CAN_START)
-    [self startDrag];
-  [self dragWithDeltaX:delta_x];
+    [self startDrag:dragStartLocation_];
+  // No need to do any conversion since |mouseLocation| is already in Cocoa's
+  // screen coordinates.
+  [self drag:mouseLocation];
 }
 
 - (void)cancelDragTitlebar {

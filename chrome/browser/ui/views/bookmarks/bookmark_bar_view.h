@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,7 +24,7 @@
 #include "ui/base/animation/animation_delegate.h"
 #include "ui/views/context_menu_controller.h"
 #include "ui/views/controls/button/button.h"
-#include "ui/views/controls/menu/view_menu_delegate.h"
+#include "ui/views/controls/button/menu_button_listener.h"
 #include "ui/views/drag_controller.h"
 
 class BookmarkContextMenu;
@@ -54,7 +54,7 @@ class TextButton;
 // creating the BookmarkModel.
 class BookmarkBarView : public DetachableToolbarView,
                         public BookmarkModelObserver,
-                        public views::ViewMenuDelegate,
+                        public views::MenuButtonListener,
                         public views::ButtonListener,
                         public content::NotificationObserver,
                         public views::ContextMenuController,
@@ -214,7 +214,7 @@ class BookmarkBarView : public DetachableToolbarView,
   virtual void BookmarkNodeFaviconChanged(BookmarkModel* model,
                                           const BookmarkNode* node) OVERRIDE;
 
-  // DragController:
+  // views::DragController:
   virtual void WriteDragDataForView(views::View* sender,
                                     const gfx::Point& press_pt,
                                     ui::OSExchangeData* data) OVERRIDE;
@@ -224,19 +224,19 @@ class BookmarkBarView : public DetachableToolbarView,
                                    const gfx::Point& press_pt,
                                    const gfx::Point& p) OVERRIDE;
 
-  // ViewMenuDelegate:
-  virtual void RunMenu(views::View* view, const gfx::Point& pt) OVERRIDE;
+  // views::MenuButtonListener:
+  virtual void OnMenuButtonClicked(views::View* view,
+                                   const gfx::Point& point) OVERRIDE;
 
-  // ButtonListener:
+  // views::ButtonListener:
   virtual void ButtonPressed(views::Button* sender,
                              const views::Event& event) OVERRIDE;
 
-  // ContextMenuController
+  // views::ContextMenuController:
   virtual void ShowContextMenuForView(views::View* source,
-                                      const gfx::Point& p,
-                                      bool is_mouse_gesture) OVERRIDE;
+                                      const gfx::Point& point) OVERRIDE;
 
-  // NotificationService:
+  // content::NotificationObserver::
   virtual void Observe(int type,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;

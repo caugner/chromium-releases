@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,7 @@
 #include <uxtheme.h>
 #include <Vssym32.h>
 
-#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/canvas.h"
 #include "ui/gfx/native_theme.h"
 #include "ui/gfx/rect.h"
 #include "ui/views/controls/menu/menu_config.h"
@@ -28,7 +28,7 @@ void MenuSeparator::OnPaint(gfx::Canvas* canvas) {
         config.gutter_to_label - config.gutter_width, 0,
         config.gutter_width, height());
     gfx::NativeTheme::ExtraParams extra;
-    theme->Paint(canvas->GetSkCanvas(), gfx::NativeTheme::kMenuPopupGutter,
+    theme->Paint(canvas->sk_canvas(), gfx::NativeTheme::kMenuPopupGutter,
                  gfx::NativeTheme::kNormal, gutter_bounds, extra);
     start_x = gutter_bounds.x() + config.gutter_width;
   }
@@ -36,7 +36,7 @@ void MenuSeparator::OnPaint(gfx::Canvas* canvas) {
   gfx::Rect separator_bounds(start_x, 0, width(), height());
   gfx::NativeTheme::ExtraParams extra;
   extra.menu_separator.has_gutter = config.render_gutter;
-  theme->Paint(canvas->GetSkCanvas(), gfx::NativeTheme::kMenuPopupSeparator,
+  theme->Paint(canvas->sk_canvas(), gfx::NativeTheme::kMenuPopupSeparator,
                gfx::NativeTheme::kNormal, separator_bounds, extra);
 }
 

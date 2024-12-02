@@ -85,7 +85,7 @@ struct ParamTraits<gfx::NativeView> {
     NOTIMPLEMENTED();
   }
 
-  static bool Read(const Message* m, void** iter, param_type* p) {
+  static bool Read(const Message* m, PickleIterator* iter, param_type* p) {
     NOTIMPLEMENTED();
     *p = NULL;
     return true;
@@ -102,7 +102,7 @@ template <>
 struct ParamTraits<ContentSettingsPattern> {
   typedef ContentSettingsPattern param_type;
   static void Write(Message* m, const param_type& p);
-  static bool Read(const Message* m, void** iter, param_type* r);
+  static bool Read(const Message* m, PickleIterator* iter, param_type* r);
   static void Log(const param_type& p, std::string* l);
 };
 
@@ -307,12 +307,6 @@ IPC_MESSAGE_ROUTED4(ChromeViewMsg_TranslatePage,
 IPC_MESSAGE_ROUTED1(ChromeViewMsg_RevertTranslation,
                     int /* page id */)
 
-// Tells a renderer if it's currently being prerendered.  Must only be set
-// to true before any navigation occurs, and only set to false at most once
-// after that.
-IPC_MESSAGE_ROUTED1(ChromeViewMsg_SetIsPrerendering,
-                    bool /* whether the RenderView is prerendering */)
-
 // Sent on process startup to indicate whether this process is running in
 // incognito mode.
 IPC_MESSAGE_CONTROL1(ChromeViewMsg_SetIsIncognitoProcess,
@@ -434,8 +428,8 @@ IPC_MESSAGE_ROUTED2(ChromeViewHostMsg_FindMissingPlugin,
                     std::string /* mime_type */)
 
 // Notifies the browser that a missing plug-in placeholder has been removed, so
-// the corresponding MissingPluginHost can be deleted.
-IPC_MESSAGE_ROUTED1(ChromeViewHostMsg_RemoveMissingPluginHost,
+// the corresponding PluginPlaceholderHost can be deleted.
+IPC_MESSAGE_ROUTED1(ChromeViewHostMsg_RemovePluginPlaceholderHost,
                     int /* placeholder_id */)
 
 // Notifies a missing plug-in placeholder that a plug-in with name |plugin_name|
@@ -460,6 +454,10 @@ IPC_MESSAGE_ROUTED1(ChromeViewMsg_ErrorDownloadingPlugin,
                     std::string /* message */)
 #endif  // defined(ENABLE_PLUGIN_INSTALLATION)
 
+// Notifies a missing plug-in placeholder that the user cancelled downloading
+// the plug-in.
+IPC_MESSAGE_ROUTED0(ChromeViewMsg_CancelledDownloadingPlugin)
+
 // Tells the browser to open chrome://plugins in a new tab. We use a separate
 // message because renderer processes aren't allowed to directly navigate to
 // chrome:// URLs.
@@ -475,15 +473,6 @@ IPC_MESSAGE_ROUTED3(ChromeViewHostMsg_Thumbnail,
 // Send a snapshot of the tab contents to the render host.
 IPC_MESSAGE_ROUTED1(ChromeViewHostMsg_Snapshot,
                     SkBitmap /* bitmap */)
-
-// Following message is used to communicate the values received by the
-// callback binding the JS to Cpp.
-// An instance of browser that has an automation host listening to it can
-// have a javascript send a native value (string, number, boolean) to the
-// listener in Cpp. (DomAutomationController)
-IPC_MESSAGE_ROUTED2(ChromeViewHostMsg_DomOperationResponse,
-                    std::string  /* json_string */,
-                    int  /* automation_id */)
 
 // A message for an external host.
 IPC_MESSAGE_ROUTED3(ChromeViewHostMsg_ForwardMessageToExternalHost,
@@ -543,8 +532,13 @@ IPC_MESSAGE_CONTROL1(ChromeViewHostMsg_DnsPrefetch,
 
 // Notifies when a plugin couldn't be loaded because it's outdated.
 IPC_MESSAGE_ROUTED2(ChromeViewHostMsg_BlockedOutdatedPlugin,
-                    string16, /* name */
-                    GURL      /* update_url */)
+                    int /* placeholder ID */,
+                    std::string /* plug-in group identifier */)
+
+// Notifies when a plugin couldn't be loaded because it requires
+// user authorization.
+IPC_MESSAGE_ROUTED1(ChromeViewHostMsg_BlockedUnauthorizedPlugin,
+                    string16 /* name */)
 
 // Provide the browser process with information about the WebCore resource
 // cache and current renderer framerate.

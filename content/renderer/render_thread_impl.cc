@@ -16,9 +16,11 @@
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
 #include "base/metrics/stats_table.h"
+#include "base/path_service.h"
 #include "base/shared_memory.h"
 #include "base/string_number_conversions.h"  // Temporary
 #include "base/threading/thread_local.h"
+#include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "base/win/scoped_com_initializer.h"
 #include "content/common/appcache/appcache_dispatcher.h"
@@ -26,38 +28,43 @@
 #include "content/common/database_messages.h"
 #include "content/common/db_message_filter.h"
 #include "content/common/dom_storage_messages.h"
+#include "content/common/gpu/client/gpu_channel_host.h"
 #include "content/common/gpu/gpu_messages.h"
+#include "content/common/indexed_db/indexed_db_dispatcher.h"
+#include "content/common/indexed_db/indexed_db_message_filter.h"
+#include "content/common/indexed_db/proxy_webidbfactory_impl.h"
 #include "content/common/npobject_util.h"
 #include "content/common/plugin_messages.h"
 #include "content/common/resource_dispatcher.h"
 #include "content/common/resource_messages.h"
 #include "content/common/view_messages.h"
 #include "content/common/web_database_observer_impl.h"
+#include "content/public/common/content_paths.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/renderer_preferences.h"
+#include "content/public/common/url_constants.h"
 #include "content/public/renderer/content_renderer_client.h"
 #include "content/public/renderer/render_process_observer.h"
 #include "content/public/renderer/render_view_visitor.h"
 #include "content/renderer/devtools_agent_filter.h"
 #include "content/renderer/gpu/compositor_thread.h"
-#include "content/renderer/gpu/gpu_channel_host.h"
-#include "content/renderer/indexed_db/indexed_db_dispatcher.h"
-#include "content/renderer/indexed_db/indexed_db_message_filter.h"
-#include "content/renderer/indexed_db/renderer_webidbfactory_impl.h"
 #include "content/renderer/media/audio_input_message_filter.h"
 #include "content/renderer/media/audio_message_filter.h"
+#include "content/renderer/media/media_stream_center.h"
 #include "content/renderer/media/video_capture_impl_manager.h"
 #include "content/renderer/media/video_capture_message_filter.h"
 #include "content/renderer/plugin_channel_host.h"
 #include "content/renderer/render_process_impl.h"
 #include "content/renderer/render_view_impl.h"
 #include "content/renderer/renderer_webkitplatformsupport_impl.h"
+#include "grit/content_resources.h"
 #include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_platform_file.h"
+#include "media/base/media.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_util.h"
-#include "third_party/tcmalloc/chromium/src/google/malloc_extension.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebColor.h"
+#include "third_party/tcmalloc/chromium/src/gperftools/malloc_extension.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebColorName.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebCompositor.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDatabase.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
@@ -67,6 +74,7 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPopupMenu.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebRuntimeFeatures.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebScriptController.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityPolicy.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebStorageEventDispatcher.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
@@ -95,6 +103,7 @@ using WebKit::WebFrame;
 using WebKit::WebNetworkStateNotifier;
 using WebKit::WebRuntimeFeatures;
 using WebKit::WebScriptController;
+using WebKit::WebSecurityPolicy;
 using WebKit::WebString;
 using WebKit::WebStorageEventDispatcher;
 using WebKit::WebView;
@@ -173,18 +182,22 @@ RenderThreadImpl::RenderThreadImpl(const std::string& channel_name)
 void RenderThreadImpl::Init() {
   TRACE_EVENT_BEGIN_ETW("RenderThreadImpl::Init", 0, "");
 
-#if defined(OS_MACOSX)
-  // On Mac, the select popups are rendered by the browser.
+#if defined(OS_MACOSX) || defined(OS_ANDROID)
+  // On Mac and Android, the select popups are rendered by the browser.
   WebKit::WebView::setUseExternalPopupMenus(true);
 #endif
 
   lazy_tls.Pointer()->Set(this);
+
 #if defined(OS_WIN)
   // If you are running plugins in this thread you need COM active but in
   // the normal case you don't.
   if (RenderProcessImpl::InProcessPlugins())
     initialize_com_.reset(new base::win::ScopedCOMInitializer());
 #endif
+
+  // Register this object as the main thread.
+  ChildProcess::current()->set_main_thread(this);
 
   // In single process the single process is all there is.
   suspend_webkit_shared_timer_ = true;
@@ -199,6 +212,8 @@ void RenderThreadImpl::Init() {
   appcache_dispatcher_.reset(new AppCacheDispatcher(Get()));
   main_thread_indexed_db_dispatcher_.reset(
       IndexedDBDispatcher::ThreadSpecificInstance());
+
+  media_stream_center_ = NULL;
 
   db_message_filter_ = new DBMessageFilter();
   AddFilter(db_message_filter_.get());
@@ -218,6 +233,13 @@ void RenderThreadImpl::Init() {
   AddFilter(new IndexedDBMessageFilter);
 
   content::GetContentClient()->renderer()->RenderThreadStarted();
+
+  // Note that under Linux, the media library will normally already have
+  // been initialized by the Zygote before this instance became a Renderer.
+  FilePath media_path;
+  PathService::Get(content::DIR_MEDIA_LIBS, &media_path);
+  if (!media_path.empty())
+    media::InitializeMediaLibrary(media_path);
 
   TRACE_EVENT_END_ETW("RenderThreadImpl::Init", 0, "");
 }
@@ -249,12 +271,10 @@ RenderThreadImpl::~RenderThreadImpl() {
   if (file_thread_.get())
     file_thread_->Stop();
 
-#ifdef WEBCOMPOSITOR_HAS_INITIALIZE
   if (compositor_initialized_) {
     WebKit::WebCompositor::shutdown();
     compositor_initialized_ = false;
   }
-#endif
   if (compositor_thread_.get()) {
     RemoveFilter(compositor_thread_->GetMessageFilter());
     compositor_thread_.reset();
@@ -443,23 +463,22 @@ void RenderThreadImpl::EnsureWebKitInitialized() {
   webkit_platform_support_.reset(new RendererWebKitPlatformSupportImpl);
   WebKit::initialize(webkit_platform_support_.get());
 
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kEnableThreadedCompositing)) {
+  bool has_enable = CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kEnableThreadedCompositing);
+  bool has_disable = CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kDisableThreadedCompositing);
+  bool enable = has_enable && (!has_disable);
+  if (enable) {
     compositor_thread_.reset(new CompositorThread(this));
     AddFilter(compositor_thread_->GetMessageFilter());
-#ifdef WEBCOMPOSITOR_HAS_INITIALIZE
     WebKit::WebCompositor::initialize(compositor_thread_->GetWebThread());
-#else
-    WebKit::WebCompositor::setThread(compositor_thread_->GetWebThread());
-#endif
-  } else {
-#ifdef WEBCOMPOSITOR_HAS_INITIALIZE
+  } else
     WebKit::WebCompositor::initialize(NULL);
-#endif
-  }
   compositor_initialized_ = true;
 
   WebScriptController::enableV8SingleThreadMode();
+
+  RenderThreadImpl::RegisterSchemes();
 
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
 
@@ -472,7 +491,16 @@ void RenderThreadImpl::EnsureWebKitInitialized() {
     RegisterExtension(extensions_v8::PlaybackExtension::Get());
   }
 
-  web_database_observer_impl_.reset(new WebDatabaseObserverImpl(Get()));
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kDomAutomationController)) {
+    base::StringPiece extension = content::GetContentClient()->GetDataResource(
+        IDR_DOM_AUTOMATION_JS);
+    RegisterExtension(new v8::Extension(
+        "dom_automation.js", extension.data(), 0, NULL, extension.size()));
+  }
+
+  web_database_observer_impl_.reset(
+      new WebDatabaseObserverImpl(sync_message_filter()));
   WebKit::WebDatabase::setObserver(web_database_observer_impl_.get());
 
   WebRuntimeFeatures::enableSockets(
@@ -503,6 +531,9 @@ void RenderThreadImpl::EnsureWebKitInitialized() {
   WebKit::WebRuntimeFeatures::enableMediaSource(
       command_line.HasSwitch(switches::kEnableMediaSource));
 
+  WebRuntimeFeatures::enableMediaPlayer(
+      media::IsMediaLibraryInitialized());
+
   WebKit::WebRuntimeFeatures::enableMediaStream(
       command_line.HasSwitch(switches::kEnableMediaStream));
 
@@ -525,7 +556,8 @@ void RenderThreadImpl::EnsureWebKitInitialized() {
 
   WebRuntimeFeatures::enablePushState(true);
 
-  WebRuntimeFeatures::enableTouch(false);
+  WebRuntimeFeatures::enableTouch(
+      command_line.HasSwitch(switches::kEnableTouchEvents));
 
   WebRuntimeFeatures::enableDeviceMotion(
       command_line.HasSwitch(switches::kEnableDeviceMotion));
@@ -535,6 +567,9 @@ void RenderThreadImpl::EnsureWebKitInitialized() {
 
   WebRuntimeFeatures::enableSpeechInput(
       !command_line.HasSwitch(switches::kDisableSpeechInput));
+
+  WebRuntimeFeatures::enableScriptedSpeech(
+      command_line.HasSwitch(switches::kEnableScriptedSpeech));
 
   WebRuntimeFeatures::enableFileSystem(
       !command_line.HasSwitch(switches::kDisableFileSystem));
@@ -550,12 +585,23 @@ void RenderThreadImpl::EnsureWebKitInitialized() {
   WebRuntimeFeatures::enableShadowDOM(
       command_line.HasSwitch(switches::kEnableShadowDOM));
 
+  WebRuntimeFeatures::enableStyleScoped(
+      command_line.HasSwitch(switches::kEnableStyleScoped));
+
   FOR_EACH_OBSERVER(RenderProcessObserver, observers_, WebKitInitialized());
 
   if (content::GetContentClient()->renderer()->
          RunIdleHandlerWhenWidgetsHidden()) {
     ScheduleIdleHandler(kLongIdleHandlerDelayMs);
   }
+}
+
+void RenderThreadImpl::RegisterSchemes() {
+  // swappedout: pages should not be accessible, and should also
+  // be treated as empty documents that can commit synchronously.
+  WebString swappedout_scheme(ASCIIToUTF16(chrome::kSwappedOutScheme));
+  WebSecurityPolicy::registerURLSchemeAsDisplayIsolated(swappedout_scheme);
+  WebSecurityPolicy::registerURLSchemeAsEmptyDocument(swappedout_scheme);
 }
 
 void RenderThreadImpl::RecordUserMetrics(const std::string& action) {
@@ -632,10 +678,17 @@ void RenderThreadImpl::IdleHandlerInForegroundTab() {
   } else  {
     int cpu_usage = 0;
     Send(new ViewHostMsg_GetCPUUsage(&cpu_usage));
-    if (cpu_usage < kIdleCPUUsageThresholdInPercents &&
-        v8::V8::IdleNotification()) {
-      // V8 finished collecting garbage.
-      new_delay_ms = kLongIdleHandlerDelayMs;
+    // Idle notification hint roughly specifies the expected duration of the
+    // idle pause. We set it proportional to the idle timer delay.
+    int idle_hint = static_cast<int>(new_delay_ms / 10);
+    if (cpu_usage < kIdleCPUUsageThresholdInPercents) {
+#if !defined(OS_MACOSX) && defined(USE_TCMALLOC)
+      MallocExtension::instance()->ReleaseFreeMemory();
+#endif
+      if (v8::V8::IdleNotification(idle_hint)) {
+        // V8 finished collecting garbage.
+        new_delay_ms = kLongIdleHandlerDelayMs;
+      }
     }
   }
   ScheduleIdleHandler(new_delay_ms);
@@ -664,6 +717,75 @@ void RenderThreadImpl::ReleaseCachedFonts() {
 }
 
 #endif  // OS_WIN
+
+bool RenderThreadImpl::IsWebFrameValid(WebKit::WebFrame* web_frame) {
+  if (!web_frame)
+    return false; // We must be shutting down.
+
+  RenderViewImpl* render_view = RenderViewImpl::FromWebView(web_frame->view());
+  if (!render_view)
+    return false; // We must be shutting down.
+
+  return true;
+}
+
+bool RenderThreadImpl::IsMainThread() {
+  return !!current();
+}
+
+bool RenderThreadImpl::IsIOThread() {
+  return MessageLoop::current() == ChildProcess::current()->io_message_loop();
+}
+
+MessageLoop* RenderThreadImpl::GetMainLoop() {
+  return message_loop();
+}
+
+scoped_refptr<base::MessageLoopProxy> RenderThreadImpl::GetIOLoopProxy() {
+  return ChildProcess::current()->io_message_loop_proxy();
+}
+
+base::WaitableEvent* RenderThreadImpl::GetShutDownEvent() {
+  return ChildProcess::current()->GetShutDownEvent();
+}
+
+scoped_ptr<base::SharedMemory> RenderThreadImpl::AllocateSharedMemory(
+    uint32 size) {
+  base::SharedMemoryHandle handle;
+  bool success;
+  IPC::Message* message =
+      new ChildProcessHostMsg_SyncAllocateSharedMemory(size, &handle);
+
+  // Allow calling this from the compositor thread.
+  if (MessageLoop::current() == message_loop())
+    success = ChildThread::Send(message);
+  else
+    success = sync_message_filter()->Send(message);
+
+  if (!success)
+    return scoped_ptr<base::SharedMemory>();
+
+  if (!base::SharedMemory::IsHandleValid(handle))
+    return scoped_ptr<base::SharedMemory>();
+  return scoped_ptr<base::SharedMemory>(new base::SharedMemory(handle, false));
+}
+
+int32 RenderThreadImpl::CreateViewCommandBuffer(
+      int32 surface_id, const GPUCreateCommandBufferConfig& init_params) {
+  int32 route_id = MSG_ROUTING_NONE;
+  IPC::Message* message = new GpuHostMsg_CreateViewCommandBuffer(
+      surface_id,
+      init_params,
+      &route_id);
+
+  // Allow calling this from the compositor thread.
+  if (MessageLoop::current() == message_loop())
+    ChildThread::Send(message);
+  else
+    sync_message_filter()->Send(message);
+
+  return route_id;
+}
 
 int32 RenderThreadImpl::RoutingIDForCurrentContext() {
   int32 routing_id = MSG_ROUTING_CONTROL;
@@ -768,7 +890,9 @@ void RenderThreadImpl::OnCreateNewView(const ViewMsg_New_Params& params) {
       params.surface_id,
       params.session_storage_namespace_id,
       params.frame_name,
-      params.next_page_id);
+      params.next_page_id,
+      params.screen_info,
+      params.guest);
 }
 
 GpuChannelHost* RenderThreadImpl::EstablishGpuChannelSync(
@@ -781,34 +905,30 @@ GpuChannelHost* RenderThreadImpl::EstablishGpuChannelSync(
       return GetGpuChannel();
 
     // Recreate the channel if it has been lost.
-    if (gpu_channel_->state() == GpuChannelHost::kLost)
-      gpu_channel_ = NULL;
+    gpu_channel_ = NULL;
   }
 
-  if (!gpu_channel_.get())
-    gpu_channel_ = new GpuChannelHost;
-
   // Ask the browser for the channel name.
+  int client_id = 0;
   IPC::ChannelHandle channel_handle;
   base::ProcessHandle renderer_process_for_gpu;
   content::GPUInfo gpu_info;
   if (!Send(new GpuHostMsg_EstablishGpuChannel(cause_for_gpu_launch,
+                                               &client_id,
                                                &channel_handle,
                                                &renderer_process_for_gpu,
                                                &gpu_info)) ||
       channel_handle.name.empty() ||
+#if defined(OS_POSIX)
+      channel_handle.socket.fd == -1 ||
+#endif
       renderer_process_for_gpu == base::kNullProcessHandle) {
     // Otherwise cancel the connection.
     gpu_channel_ = NULL;
     return NULL;
   }
 
-#if defined(OS_POSIX)
-  // Check the validity of fd for bug investigation.  Replace with normal error
-  // handling (see above) after bug fixed. See for details: crbug.com/95732.
-  CHECK_NE(-1, channel_handle.socket.fd);
-#endif
-
+  gpu_channel_ = new GpuChannelHost(this, 0, client_id);
   gpu_channel_->set_gpu_info(gpu_info);
   content::GetContentClient()->SetGpuInfo(gpu_info);
 
@@ -816,6 +936,19 @@ GpuChannelHost* RenderThreadImpl::EstablishGpuChannelSync(
   gpu_channel_->Connect(channel_handle, renderer_process_for_gpu);
 
   return GetGpuChannel();
+}
+
+WebKit::WebMediaStreamCenter* RenderThreadImpl::CreateMediaStreamCenter(
+    WebKit::WebMediaStreamCenterClient* client) {
+#if defined(ENABLE_WEBRTC)
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kEnableMediaStream)) {
+    return NULL;
+  }
+  if (!media_stream_center_)
+    media_stream_center_ = new content::MediaStreamCenter(client);
+#endif
+  return media_stream_center_;
 }
 
 GpuChannelHost* RenderThreadImpl::GetGpuChannel() {

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,9 +11,9 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
-#include "content/browser/renderer_host/render_view_host.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 
 #if defined(ENABLE_SAFE_BROWSING)
@@ -90,9 +90,9 @@ void SafeBrowsingTabObserver::UpdateSafebrowsingDetectionHost() {
     safebrowsing_detection_host_.reset();
   }
 
-  RenderViewHost* rvh = wrapper_->web_contents()->GetRenderViewHost();
-  rvh->Send(new ChromeViewMsg_SetClientSidePhishingDetection(rvh->routing_id(),
-                                                             safe_browsing));
+  content::RenderViewHost* rvh = wrapper_->web_contents()->GetRenderViewHost();
+  rvh->Send(new ChromeViewMsg_SetClientSidePhishingDetection(
+      rvh->GetRoutingID(), safe_browsing));
 #endif
 }
 

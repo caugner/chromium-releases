@@ -7,39 +7,6 @@ function TaskManager() { }
 
 cr.addSingletonGetter(TaskManager);
 
-/**
- * Whether task manager shows 'Private Memory' instead of 'Phsical Memory'.
- * On Linux and ChromeOS, this is true because calculating Phsical Memory is
- * slow.
- * @const
- */
-var USE_PRIVATE_MEM = cr.isLinux || cr.isChromeOS;
-
-/*
- * Default columns (column_id, label_id, width, is_default)
- * @const
- */
-var DEFAULT_COLUMNS = [
-    ['title', 'pageColumn', 300, true],
-    ['profileName', 'profileNameColumn', 120, false],
-    ['physicalMemory', 'physicalMemColumn', 80, !USE_PRIVATE_MEM],
-    ['sharedMemory', 'sharedMemColumn', 80, false],
-    ['privateMemory', 'privateMemColumn', 80, USE_PRIVATE_MEM],
-    ['cpuUsage', 'cpuColumn', 80, true],
-    ['networkUsage', 'netColumn', 85, true],
-    ['processId', 'processIDColumn', 100, false],
-    ['webCoreImageCacheSize', 'webcoreImageCacheColumn', 120, false],
-    ['webCoreScriptsCacheSize', 'webcoreScriptsCacheColumn', 120, false],
-    ['webCoreCSSCacheSize', 'webcoreCSSCacheColumn', 120, false],
-    ['fps', 'fpsColumn', 50, true],
-    ['sqliteMemoryUsed', 'sqliteMemoryUsedColumn', 80, false],
-    ['goatsTeleported', 'goatsTeleportedColumn', 80, false],
-    ['v8MemoryAllocatedSize', 'javascriptMemoryAllocatedColumn', 120, false],
-];
-
-var COMMAND_CONTEXTMENU_COLUMN_PREFIX = 'columnContextMenu';
-var COMMAND_CONTEXTMENU_TABLE_PREFIX = 'tableContextMenu';
-
 var localStrings = new LocalStrings();
 
 TaskManager.prototype = {
@@ -49,13 +16,13 @@ TaskManager.prototype = {
   onClose: function () {
     if (!this.disabled_) {
       this.disabled_ = true;
-      this.disableTaskManager();
+      commands.disableTaskManager();
     }
   },
 
   /**
-   * Handle selection change.
-   * This is also called when data of tasks are refleshed, even if selection
+   * Handles selection changes.
+   * This is also called when data of tasks are refreshed, even if selection
    * has not been changed.
    */
   onSelectionChange: function () {
@@ -102,54 +69,7 @@ TaskManager.prototype = {
       uniqueIds.push(task['uniqueId'][0]);
     }
 
-    chrome.send('killProcesses', uniqueIds);
-  },
-
-  /**
-   * Sends command to initiate resource inspection.
-   */
-  inspect: function (uniqueId) {
-    chrome.send('inspect', [uniqueId]);
-  },
-
-  /**
-   * Sends command to kill a process.
-   */
-  openAboutMemory: function () {
-    chrome.send('openAboutMemory');
-  },
-
-  /**
-   * Sends command to disable taskmanager model.
-   */
-  disableTaskManager: function () {
-    chrome.send('disableTaskManager');
-  },
-
-  /**
-   * Sends command to enable taskmanager model.
-   */
-  enableTaskManager: function () {
-    chrome.send('enableTaskManager');
-  },
-
-  /**
-   * Sends command to activate a page.
-   */
-  activatePage: function (uniqueId) {
-    chrome.send('activatePage', [uniqueId]);
-  },
-
-  /**
-   * Sends command to enable or disable the given columns to update the data.
-   * @public
-   */
-  setUpdateColumn: function(columnId, isEnabled) {
-    chrome.send('setUpdateColumn', [columnId, isEnabled]);
-
-    // The 'title' column contains the icon.
-    if (columnId == 'title')
-      chrome.send('setUpdateColumn', ['icon', isEnabled]);
+    commands.killSelectedProcesses(uniqueIds);
   },
 
   /**
@@ -170,12 +90,6 @@ TaskManager.prototype = {
     this.elementsCache_ = {};
     this.dialogDom_ = dialogDom;
     this.document_ = dialogDom.ownerDocument;
-
-    this.pendingTaskUpdates_ = [];
-    this.is_column_shown_ = [];
-    for (var i = 0; i < DEFAULT_COLUMNS.length; i++) {
-      this.is_column_shown_[i] = DEFAULT_COLUMNS[i][3];
-    }
 
     this.localized_column_ = [];
     for (var i = 0; i < DEFAULT_COLUMNS.length; i++) {
@@ -226,10 +140,7 @@ TaskManager.prototype = {
 
     this.initTable_();
 
-    // enableTaskManager() must be called after enabling columns using
-    // setUpdateColumn() because it is necessary to tell the handler which
-    // columns to display before updating.
-    this.enableTaskManager();
+    commands.enableTaskManager();
 
     // Populate the static localized strings.
     i18nTemplate.process(this.document_, templateData);
@@ -247,11 +158,9 @@ TaskManager.prototype = {
    */
   initElements_: function() {
     // <if expr="pp_ifdef('chromeos')">
-    // The elements 'dialog-title' and 'close-window' exist only on ChromeOS.
+    // The 'close-window' element exists only on ChromeOS.
     // This <if ... /if> section is removed while flattening HTML if chrome is
     // built as Desktop Chrome.
-    if (!this.opt_['isShowTitle'])
-      $('dialog-title').style.display = 'none';
     if (!this.opt_['isShowCloseButton'])
       $('close-window').style.display = 'none';
     $('close-window').addEventListener('click', this.close.bind(this));
@@ -259,8 +168,7 @@ TaskManager.prototype = {
 
     $('kill-process').addEventListener('click',
                                        this.killSelectedProcesses.bind(this));
-    $('about-memory-link').addEventListener('click',
-                                            this.openAboutMemory.bind(this));
+    $('about-memory-link').addEventListener('click', commands.openAboutMemory);
   },
 
   /**
@@ -301,16 +209,14 @@ TaskManager.prototype = {
   initColumnModel_: function () {
     var table_columns = new Array();
     for (var i = 0; i < DEFAULT_COLUMNS.length; i++) {
-      if (!this.is_column_shown_[i])
-        continue;
-
       var column = DEFAULT_COLUMNS[i];
       var columnId = column[0];
+      if (!isColumnEnabled(columnId))
+        continue;
+
       table_columns.push(new cr.ui.table.TableColumn(columnId,
                                                      this.localized_column_[i],
                                                      column[2]));
-
-      this.setUpdateColumn(columnId, true);
     }
 
     for (var i = 0; i < table_columns.length; i++) {
@@ -342,7 +248,7 @@ TaskManager.prototype = {
       item.command = command;
       command.menuitem = item;
       item.textContent = this.localized_column_[i];
-      if (this.is_column_shown_[i])
+      if (isColumnEnabled(column[0]))
         item.setAttributeNode(this.document_.createAttribute("checked"));
       this.columnSelectContextMenu_.appendChild(item);
     }
@@ -386,9 +292,6 @@ TaskManager.prototype = {
 
     this.document_.body.appendChild(this.tableContextMenu_);
     cr.ui.Menu.decorate(this.tableContextMenu_);
-
-    this.setUpdateColumn('canInspect', true);
-    this.setUpdateColumn('canActivate', true);
   },
 
   initTable_: function () {
@@ -532,6 +435,11 @@ TaskManager.prototype = {
       // Stores the cell element to the dictionary.
       this.elementsCache_[pid].cell[i] = cell;
     }
+
+    // Specifies the height of the row. The height of each row is
+    // 'num_of_tasks * HEIGHT_OF_TASK' px.
+    listItem.style.height = (data['uniqueId'].length * HEIGHT_OF_TASK) + 'px';
+
     listItem.data = data;
 
     // Stores the list item element, the number of columns and the number of
@@ -583,7 +491,7 @@ TaskManager.prototype = {
                                                     this.tableContextMenu_);
 
           label.addEventListener('dblclick', (function(uniqueId) {
-              this.activatePage(uniqueId);
+              commands.activatePage(uniqueId);
           }).bind(this, entry['uniqueId'][i]));
 
           label.data = entry;
@@ -608,56 +516,46 @@ TaskManager.prototype = {
   },
 
   /**
-   * Updates the task list with the |this.pendingTaskUpdates_| queue.
-   * This function does nothing if it is less than 900 ms after last update. In
-   * such case, the queue remains at that time, and it will update the list
-   * at next change event or at periodical every-second reflesh.
+   * Updates the task list with the supplied task.
    * @private
    */
-  processTaskChange_: function() {
-    var now = +new Date();  // Casts to integer and gets milliseconds.
-
-    // If it is less than 900 ms after last update, the list isn't updated now.
-    // 900 ms is a time to allow at least periodical reflesh of every second.
-    if ((now - this.lastUpdate_) < 900)
-      return;
-    this.lastUpdate_ = now;
-
+  processTaskChange: function(task) {
     var dm = this.dataModel_;
     var sm = this.selectionModel_;
-    if (!dm || !sm || this.pendingTaskUpdates_.length == 0)
-      return;
+    if (!dm || !sm) return;
 
     this.table_.list.startBatchUpdates();
     sm.beginChange();
 
-    var task;
-    while (task = this.pendingTaskUpdates_.shift()) {
-      var type = task.type;
-      var start = task.start;
-      var length = task.length;
-      var tasks = task.tasks;
-      if (type == 'change') {
-        // We have to store the selected indexes and restore them after
-        // splice(), because it might replace some items but the replaced
-        // items would lost the selection.
-        var oldSelectedIndexes = sm.selectedIndexes;
+    var type = task.type;
+    var start = task.start;
+    var length = task.length;
+    var tasks = task.tasks;
 
-        var args = [].slice.call(tasks);
-        args.unshift(start, length);
-        dm.splice.apply(dm, args);
+    // We have to store the selected pids and restore them after
+    // splice(), because it might replace some items but the replaced
+    // items would lose the selection.
+    var oldSelectedIndexes = sm.selectedIndexes;
 
-        sm.selectedIndexes = oldSelectedIndexes.filter(function(index) {
-          return index < dm.length;
-        });
-      } else if (type == 'add') {
-        var args = [].slice.call(tasks);
-        args.unshift(start, 0);
-        dm.splice.apply(dm, args);
-      } else if (type == 'remove') {
-        dm.splice(start, length);
-      }
+    // Create map of selected PIDs.
+    var selectedPids = {};
+    for (var i = 0; i < oldSelectedIndexes.length; i++) {
+      var item = dm.item(oldSelectedIndexes[i]);
+      if (item) selectedPids[item['processId'][0]] = true;
     }
+
+    var args = tasks.slice();
+    args.unshift(start, dm.length);
+    dm.splice.apply(dm, args);
+
+    // Create new array of selected indexes from map of old PIDs.
+    var newSelectedIndexes = [];
+    for (var i = 0; i < dm.length; i++) {
+      if (selectedPids[dm.item(i)['processId'][0]])
+        newSelectedIndexes.push(i);
+    }
+
+    sm.selectedIndexes = newSelectedIndexes;
 
     var pids = [];
     for (var i = 0; i < dm.length; i++) {
@@ -672,24 +570,6 @@ TaskManager.prototype = {
 
     sm.endChange();
     this.table_.list.endBatchUpdates();
-  },
-
-  onTaskChange: function(start, length, tasks) {
-    this.pendingTaskUpdates_.push(
-          {type:'change', start:start, length:length, tasks:tasks});
-    this.processTaskChange_();
-  },
-
-  onTaskAdd: function(start, length, tasks) {
-    this.pendingTaskUpdates_.push(
-        {type:'add', start:start, length:length, tasks:tasks});
-    this.processTaskChange_();
-  },
-
-  onTaskRemove: function(start, length, tasks) {
-    this.pendingTaskUpdates_.push(
-        {type:'remove', start:start, length:length, tasks:tasks});
-    this.processTaskChange_();
   },
 
   /**
@@ -711,9 +591,9 @@ TaskManager.prototype = {
         return;
 
       if (sub_command == 'inspect')
-        this.inspect(target_unique_id);
+        commands.inspect(target_unique_id);
       else if (sub_command == 'activate')
-        this.activatePage(target_unique_id);
+        commands.activatePage(target_unique_id);
 
       this.currentContextMenuTarget_ = undefined;
     }
@@ -725,7 +605,7 @@ TaskManager.prototype = {
 
   /**
    * Store resourceIndex of target resource of context menu, because resource
-   * will be replaced when it is refleshed.
+   * will be replaced when it is refreshed.
    */
   onTableContextMenuOpened_: function (e) {
     if (!this.isFinishedInitDelayed_)
@@ -742,15 +622,12 @@ TaskManager.prototype = {
     activate_menuitem.disabled = true;
 
     var target = e.target;
-    var classes = target.classList;
-    while (target &&
-        Array.prototype.indexOf.call(classes, 'detail-title') == -1) {
-      target = target.parentNode;
-      classes = target.classList;
+    for (; ; target = target.parentNode) {
+      if (!target) return;
+      var classes = target.classList;
+      if (classes &&
+          Array.prototype.indexOf.call(classes, 'detail-title') != -1) break;
     }
-
-    if (!target)
-      return;
 
     var index_in_group = target.index_in_group;
 
@@ -766,78 +643,42 @@ TaskManager.prototype = {
       activate_menuitem.disabled = false;
   },
 
-  onColumnContextMenu_: function(id, command) {
+  onColumnContextMenu_: function(columnId, command) {
     var menuitem = command.menuitem;
-    var checked_item_count = 0;
-    var is_uncheck = 0;
+    var checkedItemCount = 0;
+    var checked = isColumnEnabled(columnId);
 
     // Leaves a item visible when user tries making invisible but it is the
     // last one.
-    for (var i = 0; i < DEFAULT_COLUMNS.length; i++) {
-      var column = DEFAULT_COLUMNS[i];
-      if (column[0] == id && this.is_column_shown_[i]) {
-        is_uncheck = 1;
-      }
-      if (this.is_column_shown_[i])
-        checked_item_count++;
+    var enabledColumns = getEnabledColumns();
+    for (var id in enabledColumns) {
+      if (enabledColumns[id])
+        checkedItemCount++;
     }
-    if (checked_item_count == 1 && is_uncheck) {
+    if (checkedItemCount == 1 && checked)
       return;
-    }
 
     // Toggles the visibility of the column.
-    for (var i = 0; i < DEFAULT_COLUMNS.length; i++) {
-      var column = DEFAULT_COLUMNS[i];
-      if (column[0] == id) {
-        this.is_column_shown_[i] = !this.is_column_shown_[i];
-        var checked = this.is_column_shown_[i];
-        menuitem.checked = checked;
-        this.initColumnModel_()
-        this.table_.columnModel = this.columnModel_;
-        this.table_.redraw();
+    var newChecked = !checked;
+    menuitem.checked = newChecked;
+    setColumnEnabled(columnId, newChecked);
 
-        this.setUpdateColumn(column[0], checked);
-        return;
-      }
-    }
+    this.initColumnModel_()
+    this.table_.columnModel = this.columnModel_;
+    this.table_.redraw();
   },
 };
 
-var taskmanager = TaskManager.getInstance();
+// |taskmanager| has been declared in preload.js.
+taskmanager = TaskManager.getInstance();
 
 function init() {
   var params = parseQueryParams(window.location);
   var opt = {};
-  opt['isShowTitle'] = params.showtitle;
   opt['isBackgroundMode'] = params.background;
   opt['isShowCloseButton'] = params.showclose;
   taskmanager.initialize(document.body, opt);
 }
 
-function onClose() {
-  return taskmanager.onClose();
-}
-
 document.addEventListener('DOMContentLoaded', init);
-document.addEventListener('Close', onClose);
-
-function taskAdded(start, length, tasks) {
-  // Sometimes this can get called too early.
-  if (!taskmanager)
-    return;
-  taskmanager.onTaskAdd(start, length, tasks);
-}
-
-function taskChanged(start, length,tasks) {
-  // Sometimes this can get called too early.
-  if (!taskmanager)
-    return;
-  taskmanager.onTaskChange(start, length, tasks);
-}
-
-function taskRemoved(start, length) {
-  // Sometimes this can get called too early.
-  if (!taskmanager)
-    return;
-  taskmanager.onTaskRemove(start, length);
-}
+document.addEventListener('Close', taskmanager.onClose.bind(taskmanager));

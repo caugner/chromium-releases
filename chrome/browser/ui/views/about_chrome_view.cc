@@ -94,12 +94,10 @@ namespace browser {
 // Declared in browser_dialogs.h so that others don't
 // need to depend on our .h.
 views::Widget* ShowAboutChromeView(gfx::NativeWindow parent, Profile* profile) {
-  views::Widget* about_chrome_window =
-      browser::CreateViewsWindow(parent,
-                                 new AboutChromeView(profile),
-                                 STYLE_GENERIC);
-      about_chrome_window->Show();
-  return about_chrome_window;
+  views::Widget* window = views::Widget::CreateWindowWithParent(
+      new AboutChromeView(profile), parent);
+  window->Show();
+  return window;
 }
 
 }  // namespace browser
@@ -212,7 +210,7 @@ void AboutChromeView::Init() {
   main_text_label_ = new views::Label(string16());
 
   // Figure out what to write in the main label of the About box.
-  string16 text = l10n_util::GetStringUTF16(IDS_ABOUT_VERSION_LICENSE);
+  string16 text = l10n_util::GetStringUTF16(IDS_ABOUT_OLD_VERSION_LICENSE);
 
   chromium_url_appears_first_ =
       text.find(kBeginLinkChr()) < text.find(kBeginLinkOss());
@@ -256,8 +254,8 @@ void AboutChromeView::Init() {
   // Add together all the strings in the dialog for the purpose of calculating
   // the height of the dialog. The space for the Terms of Service string is not
   // included (it is added later, if needed).
-  string16 full_text = main_label_chunk1_ + chromium_url_->GetText() +
-                       main_label_chunk2_ + open_source_url_->GetText() +
+  string16 full_text = main_label_chunk1_ + chromium_url_->text() +
+                       main_label_chunk2_ + open_source_url_->text() +
                        main_label_chunk3_;
 
   dialog_dimensions_ = views::Widget::GetLocalizedContentsSize(
@@ -282,7 +280,7 @@ void AboutChromeView::Init() {
 
 #if defined(GOOGLE_CHROME_BUILD)
   std::vector<size_t> url_offsets;
-  text = l10n_util::GetStringFUTF16(IDS_ABOUT_TERMS_OF_SERVICE,
+  text = l10n_util::GetStringFUTF16(IDS_ABOUT_OLD_TERMS_OF_SERVICE,
                                     string16(),
                                     string16(),
                                     &url_offsets);
@@ -737,7 +735,7 @@ void AboutChromeView::UpdateStatus(GoogleUpdateUpgradeResult result,
         content::RecordAction(UserMetricsAction("UpgradeCheck_Upgraded"));
       restart_button_visible_ = true;
       const string16& update_string = UTF16ToWide(
-          l10n_util::GetStringUTF16(IDS_UPGRADE_SUCCESSFUL_RELAUNCH));
+          l10n_util::GetStringUTF16(IDS_OLD_UPGRADE_SUCCESSFUL_RELAUNCH));
       update_label_.SetText(update_string);
       show_success_indicator = true;
       break;
@@ -787,7 +785,7 @@ void AboutChromeView::UpdateStatus(GoogleUpdateUpgradeResult result,
 }
 
 int AboutChromeView::EnlargeWindowSizeIfNeeded() {
-  if (!error_label_ || error_label_->GetText().empty())
+  if (!error_label_ || error_label_->text().empty())
     return 0;
 
   // This will enlarge the window each time the function is called, which is

@@ -22,8 +22,9 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/sync/glue/data_type_controller.h"
-#include "chrome/browser/sync/sessions/session_state.h"
+#include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/sync/sync_ui_util.h"
+#include "sync/sessions/session_state.h"
 
 using browser_sync::sessions::SyncSessionSnapshot;
 
@@ -107,7 +108,8 @@ ProfileSyncServiceHarness::ProfileSyncServiceHarness(
       password_(password),
       profile_debug_name_(profile->GetDebugName()) {
   if (IsSyncAlreadySetup()) {
-    service_ = profile_->GetProfileSyncService();
+    service_ = ProfileSyncServiceFactory::GetInstance()->GetForProfile(
+        profile_);
     service_->AddObserver(this);
     ignore_result(TryListeningToMigrationEvents());
     wait_state_ = FULLY_SYNCED;
@@ -119,7 +121,8 @@ ProfileSyncServiceHarness::~ProfileSyncServiceHarness() {}
 // static
 ProfileSyncServiceHarness* ProfileSyncServiceHarness::CreateAndAttach(
     Profile* profile) {
-  if (!profile->HasProfileSyncService()) {
+  ProfileSyncServiceFactory* f = ProfileSyncServiceFactory::GetInstance();
+  if (!f->HasProfileSyncService(profile)) {
     NOTREACHED() << "Profile has never signed into sync.";
     return NULL;
   }
@@ -133,7 +136,8 @@ void ProfileSyncServiceHarness::SetCredentials(const std::string& username,
 }
 
 bool ProfileSyncServiceHarness::IsSyncAlreadySetup() {
-  return profile_->HasProfileSyncService();
+  return ProfileSyncServiceFactory::GetInstance()->HasProfileSyncService(
+      profile_);
 }
 
 bool ProfileSyncServiceHarness::SetupSync() {
@@ -151,7 +155,8 @@ bool ProfileSyncServiceHarness::SetupSync() {
 bool ProfileSyncServiceHarness::SetupSync(
     syncable::ModelTypeSet synced_datatypes) {
   // Initialize the sync client's profile sync service object.
-  service_ = profile_->GetProfileSyncService();
+  service_ =
+      ProfileSyncServiceFactory::GetInstance()->GetForProfile(profile_);
   if (service_ == NULL) {
     LOG(ERROR) << "SetupSync(): service_ is null.";
     return false;
@@ -160,6 +165,10 @@ bool ProfileSyncServiceHarness::SetupSync(
   // Subscribe sync client to notifications from the profile sync service.
   if (!service_->HasObserver(this))
     service_->AddObserver(this);
+
+  // Tell the sync service that setup is in progress so we don't start syncing
+  // until we've finished configuration.
+  service_->set_setup_in_progress(true);
 
   // Authenticate sync client using GAIA credentials.
   service_->signin()->StartSignIn(username_, password_, "", "");
@@ -188,14 +197,20 @@ bool ProfileSyncServiceHarness::SetupSync(
   // Make sure that a partner client hasn't already set an explicit passphrase.
   if (wait_state_ == SET_PASSPHRASE_FAILED) {
     LOG(ERROR) << "A passphrase is required for decryption. Sync cannot proceed"
-                  " until SetPassphrase is called.";
+                  " until SetDecryptionPassphrase is called.";
     return false;
   }
 
-  // Set our implicit passphrase.
-  service_->SetPassphrase(password_,
-                          ProfileSyncService::IMPLICIT,
-                          ProfileSyncService::USER_PROVIDED);
+  // Set an implicit passphrase for encryption if an explicit one hasn't already
+  // been set. If an explicit passphrase has been set, immediately return false,
+  // since a decryption passphrase is required.
+  if (!service_->IsUsingSecondaryPassphrase()) {
+    service_->SetEncryptionPassphrase(password_, ProfileSyncService::IMPLICIT);
+  } else {
+    LOG(ERROR) << "A passphrase is required for decryption. Sync cannot proceed"
+                  " until SetDecryptionPassphrase is called.";
+    return false;
+  }
 
   // Wait for initial sync cycle to be completed.
   DCHECK_EQ(wait_state_, WAITING_FOR_INITIAL_SYNC);
@@ -210,9 +225,12 @@ bool ProfileSyncServiceHarness::SetupSync(
   // Make sure that initial sync wasn't blocked by a missing passphrase.
   if (wait_state_ == SET_PASSPHRASE_FAILED) {
     LOG(ERROR) << "A passphrase is required for decryption. Sync cannot proceed"
-                  " until SetPassphrase is called.";
+                  " until SetDecryptionPassphrase is called.";
     return false;
   }
+
+  // Notify ProfileSyncService that we are done with configuration.
+  service_->set_setup_in_progress(false);
 
   // Indicate to the browser that sync setup is complete.
   service()->SetSyncSetupCompleted();
@@ -259,7 +277,7 @@ bool ProfileSyncServiceHarness::RunStateChangeMachine() {
         break;
       }
       if (service()->passphrase_required_reason() ==
-              sync_api::REASON_SET_PASSPHRASE_FAILED) {
+              sync_api::REASON_DECRYPTION) {
         // A passphrase is required for decryption and we don't have it. Do not
         // wait any more.
         SignalStateCompleteWithNextState(SET_PASSPHRASE_FAILED);
@@ -272,12 +290,6 @@ bool ProfileSyncServiceHarness::RunStateChangeMachine() {
       if (IsFullySynced()) {
         // The sync cycle we were waiting for is complete.
         SignalStateCompleteWithNextState(FULLY_SYNCED);
-        break;
-      }
-      if (!GetStatus().server_reachable) {
-        // The client cannot reach the sync server because the network is
-        // disabled. There is no need to wait anymore.
-        SignalStateCompleteWithNextState(SERVER_UNREACHABLE);
         break;
       }
       break;
@@ -296,8 +308,6 @@ bool ProfileSyncServiceHarness::RunStateChangeMachine() {
         // The client is not yet fully synced; keep waiting until we converge.
         break;
       }
-      timestamp_match_partner_->service()->RemoveObserver(this);
-      timestamp_match_partner_ = NULL;
 
       SignalStateCompleteWithNextState(FULLY_SYNCED);
       break;
@@ -327,15 +337,9 @@ bool ProfileSyncServiceHarness::RunStateChangeMachine() {
       // TODO(rlarocque): Figure out a less brittle way of detecting this.
       if (IsTypeEncrypted(waiting_for_encryption_type_) &&
           IsFullySynced() &&
-          GetLastSessionSnapshot()->num_conflicting_updates == 0) {
+          GetLastSessionSnapshot()->num_encryption_conflicts == 0) {
         // Encryption is now complete for the the type in which we were waiting.
         SignalStateCompleteWithNextState(FULLY_SYNCED);
-        break;
-      }
-      if (!GetStatus().server_reachable) {
-        // The client cannot reach the sync server because the network is
-        // disabled. There is no need to wait anymore.
-        SignalStateCompleteWithNextState(SERVER_UNREACHABLE);
         break;
       }
       break;
@@ -395,18 +399,9 @@ bool ProfileSyncServiceHarness::RunStateChangeMachine() {
       }
       break;
     }
-    case SERVER_UNREACHABLE: {
-      DVLOG(1) << GetClientInfoString("SERVER_UNREACHABLE");
-      if (GetStatus().server_reachable) {
-        // The client was offline due to the network being disabled, but is now
-        // back online. Wait for the pending sync cycle to complete.
-        SignalStateCompleteWithNextState(WAITING_FOR_FULL_SYNC);
-      }
-      break;
-    }
     case SET_PASSPHRASE_FAILED: {
       // A passphrase is required for decryption. There is nothing the sync
-      // client can do until SetPassphrase() is called.
+      // client can do until SetDecryptionPassphrase() is called.
       DVLOG(1) << GetClientInfoString("SET_PASSPHRASE_FAILED");
       break;
     }
@@ -534,7 +529,6 @@ bool ProfileSyncServiceHarness::AwaitDataSyncCompletion(
 
   CHECK(service()->sync_initialized());
   CHECK_NE(wait_state_, SYNC_DISABLED);
-  CHECK_NE(wait_state_, SERVER_UNREACHABLE);
 
   if (IsDataSynced()) {
     // Client is already synced; don't wait.
@@ -565,23 +559,12 @@ bool ProfileSyncServiceHarness::AwaitFullSyncCompletion(
     return true;
   }
 
-  if (wait_state_ == SERVER_UNREACHABLE) {
-    // Client was offline; wait for it to go online, and then wait for sync.
-    AwaitStatusChangeWithTimeout(kLiveSyncOperationTimeoutMs, reason);
-    DCHECK_EQ(wait_state_, WAITING_FOR_FULL_SYNC);
-    return AwaitStatusChangeWithTimeout(kLiveSyncOperationTimeoutMs, reason);
-  }
-
   DCHECK(service()->sync_initialized());
   wait_state_ = WAITING_FOR_FULL_SYNC;
   AwaitStatusChangeWithTimeout(kLiveSyncOperationTimeoutMs, reason);
   if (wait_state_ == FULLY_SYNCED) {
     // Client is online; sync was successful.
     return true;
-  } else if (wait_state_ == SERVER_UNREACHABLE) {
-    // Client is offline; sync was unsuccessful.
-    LOG(ERROR) << "Client went offline after waiting for sync to finish";
-    return false;
   } else {
     LOG(ERROR) << "Invalid wait state: " << wait_state_;
     return false;
@@ -726,7 +709,11 @@ bool ProfileSyncServiceHarness::WaitUntilTimestampMatches(
   timestamp_match_partner_ = partner;
   partner->service()->AddObserver(this);
   wait_state_ = WAITING_FOR_UPDATES;
-  return AwaitStatusChangeWithTimeout(kLiveSyncOperationTimeoutMs, reason);
+  bool return_value =
+      AwaitStatusChangeWithTimeout(kLiveSyncOperationTimeoutMs, reason);
+  partner->service()->RemoveObserver(this);
+  timestamp_match_partner_ = NULL;
+  return return_value;
 }
 
 bool ProfileSyncServiceHarness::AwaitStatusChangeWithTimeout(
@@ -739,16 +726,17 @@ bool ProfileSyncServiceHarness::AwaitStatusChangeWithTimeout(
   }
   scoped_refptr<StateChangeTimeoutEvent> timeout_signal(
       new StateChangeTimeoutEvent(this, reason));
-  MessageLoop* loop = MessageLoop::current();
-  bool did_allow_nestable_tasks = loop->NestableTasksAllowed();
-  loop->SetNestableTasksAllowed(true);
-  loop->PostDelayedTask(
-      FROM_HERE,
-      base::Bind(&StateChangeTimeoutEvent::Callback,
-                 timeout_signal.get()),
-      base::TimeDelta::FromMilliseconds(timeout_milliseconds));
-  loop->Run();
-  loop->SetNestableTasksAllowed(did_allow_nestable_tasks);
+  {
+    MessageLoop* loop = MessageLoop::current();
+    MessageLoop::ScopedNestableTaskAllower allow(loop);
+    loop->PostDelayedTask(
+        FROM_HERE,
+        base::Bind(&StateChangeTimeoutEvent::Callback,
+                   timeout_signal.get()),
+        base::TimeDelta::FromMilliseconds(timeout_milliseconds));
+    loop->Run();
+  }
+
   if (timeout_signal->Abort()) {
     DVLOG(1) << GetClientInfoString("AwaitStatusChangeWithTimeout succeeded");
     return true;
@@ -768,7 +756,7 @@ ProfileSyncService::Status ProfileSyncServiceHarness::GetStatus() {
 bool ProfileSyncServiceHarness::IsDataSyncedImpl(
     const browser_sync::sessions::SyncSessionSnapshot *snap) {
   return snap &&
-      snap->num_blocking_conflicting_updates == 0 &&
+      snap->num_simple_conflicts == 0 &&
       ServiceIsPushingChanges() &&
       GetStatus().notifications_enabled &&
       !service()->HasUnsyncedItems() &&
@@ -810,6 +798,10 @@ bool ProfileSyncServiceHarness::HasPendingBackendMigration() {
   browser_sync::BackendMigrator* migrator =
       service()->GetBackendMigratorForTest();
   return migrator && migrator->state() != browser_sync::BackendMigrator::IDLE;
+}
+
+bool ProfileSyncServiceHarness::AutoStartEnabled() {
+  return service_->auto_start_enabled();
 }
 
 bool ProfileSyncServiceHarness::MatchesOtherClient(
@@ -1003,10 +995,14 @@ std::string ProfileSyncServiceHarness::GetClientInfoString(
          << service()->HasUnsyncedItems()
          << ", unsynced_count: "
          << snap->unsynced_count
-         << ", num_conflicting_updates: "
-         << snap->num_conflicting_updates
-         << ", num_blocking_conflicting_updates: "
-         << snap->num_blocking_conflicting_updates
+         << ", encryption conflicts: "
+         << snap->num_encryption_conflicts
+         << ", hierarchy conflicts: "
+         << snap->num_hierarchy_conflicts
+         << ", simple conflicts: "
+         << snap->num_simple_conflicts
+         << ", server conflicts: "
+         << snap->num_server_conflicts
          << ", num_updates_downloaded : "
          << snap->syncer_status.num_updates_downloaded_total
          << ", passphrase_required_reason: "
@@ -1056,7 +1052,7 @@ bool ProfileSyncServiceHarness::WaitForTypeEncryption(
   // TODO(rlarocque): Figure out a less brittle way of detecting this.
   if (IsTypeEncrypted(type) &&
       IsFullySynced() &&
-      GetLastSessionSnapshot()->num_conflicting_updates == 0) {
+      GetLastSessionSnapshot()->num_encryption_conflicts == 0) {
     // Encryption is already complete for |type|; do not wait.
     return true;
   }
@@ -1109,6 +1105,8 @@ std::string ProfileSyncServiceHarness::GetServiceStatus() {
   DictionaryValue value;
   sync_ui_util::ConstructAboutInformation(service_, &value);
   std::string service_status;
-  base::JSONWriter::Write(&value, true, &service_status);
+  base::JSONWriter::WriteWithOptions(&value,
+                                     base::JSONWriter::OPTIONS_PRETTY_PRINT,
+                                     &service_status);
   return service_status;
 }

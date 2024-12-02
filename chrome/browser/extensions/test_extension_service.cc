@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,11 @@
 TestExtensionService::~TestExtensionService() {}
 
 const ExtensionSet* TestExtensionService::extensions() const {
+  ADD_FAILURE();
+  return NULL;
+}
+
+const ExtensionSet* TestExtensionService::disabled_extensions() const {
   ADD_FAILURE();
   return NULL;
 }
@@ -68,7 +73,7 @@ void TestExtensionService::CheckForUpdatesSoon() {
 SyncError TestExtensionService::MergeDataAndStartSyncing(
     syncable::ModelType type,
     const SyncDataList& initial_sync_data,
-    SyncChangeProcessor* sync_processor) {
+    scoped_ptr<SyncChangeProcessor> sync_processor) {
   ADD_FAILURE();
   return SyncError();
 }
@@ -95,12 +100,18 @@ bool TestExtensionService::is_ready() {
   return false;
 }
 
-void TestExtensionService::AddExtension(const Extension* extension) {
+bool TestExtensionService::AddExtension(const Extension* extension) {
   ADD_FAILURE();
+  return false;
 }
 
 void TestExtensionService::UnloadExtension(
     const std::string& extension_id,
     extension_misc::UnloadedExtensionReason reason) {
+  ADD_FAILURE();
+}
+
+void TestExtensionService::SyncExtensionChangeIfNeeded(
+    const Extension& extension) {
   ADD_FAILURE();
 }

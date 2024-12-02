@@ -24,18 +24,18 @@
 #include "chrome/browser/ui/find_bar/find_tab_helper.h"
 #include "chrome/browser/ui/gtk/browser_window_gtk.h"
 #include "chrome/browser/ui/gtk/custom_button.h"
-#include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/gtk/nine_box.h"
 #include "chrome/browser/ui/gtk/slide_animator_gtk.h"
 #include "chrome/browser/ui/gtk/tab_contents_container_gtk.h"
 #include "chrome/browser/ui/gtk/tabs/tab_strip_gtk.h"
+#include "chrome/browser/ui/gtk/theme_service_gtk.h"
 #include "chrome/browser/ui/gtk/view_id_util.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "content/browser/renderer_host/render_view_host.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/browser/notification_source.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -178,7 +178,7 @@ void BuildBorder(GtkWidget* child,
 FindBarGtk::FindBarGtk(BrowserWindowGtk* window)
     : browser_(window->browser()),
       window_(window),
-      theme_service_(GtkThemeService::GetFrom(browser_->profile())),
+      theme_service_(ThemeServiceGtk::GetFrom(browser_->profile())),
       container_width_(-1),
       container_height_(-1),
       match_label_failure_(false),
@@ -326,8 +326,9 @@ void FindBarGtk::Show(bool animate) {
     slide_widget_->Open();
     selection_rect_ = gfx::Rect();
     Reposition();
-    if (container_->window)
-      gdk_window_raise(container_->window);
+    GdkWindow* gdk_window = gtk_widget_get_window(container_);
+    if (gdk_window)
+      gdk_window_raise(gdk_window);
   } else {
     slide_widget_->OpenWithoutAnimation();
   }
@@ -372,14 +373,12 @@ void FindBarGtk::SetFindText(const string16& find_text) {
 
 void FindBarGtk::UpdateUIForFindResult(const FindNotificationDetails& result,
                                        const string16& find_text) {
-  if (!result.selection_rect().IsEmpty()) {
-    selection_rect_ = result.selection_rect();
-    int xposition = GetDialogPosition(result.selection_rect()).x();
-    GtkAllocation allocation;
-    gtk_widget_get_allocation(widget(), &allocation);
-    if (xposition != allocation.x)
-      Reposition();
-  }
+  selection_rect_ = result.selection_rect();
+  int xposition = GetDialogPosition(result.selection_rect()).x();
+  GtkAllocation allocation;
+  gtk_widget_get_allocation(widget(), &allocation);
+  if (xposition != allocation.x)
+    Reposition();
 
   // Once we find a match we no longer want to keep track of what had
   // focus. EndFindSession will then set the focus to the page content.
@@ -507,8 +506,7 @@ void FindBarGtk::Observe(int type,
 
     gtk_misc_set_alignment(GTK_MISC(match_count_label_), 0.5, 0.5);
   } else {
-    GdkColor gray = GDK_COLOR_RGB(0x7f, 0x7f, 0x7f);
-    gtk_widget_modify_cursor(text_entry_, &ui::kGdkBlack, &gray);
+    gtk_widget_modify_cursor(text_entry_, &ui::kGdkBlack, &ui::kGdkGray);
     gtk_widget_modify_base(text_entry_, GTK_STATE_NORMAL,
                            &kEntryBackgroundColor);
     gtk_widget_modify_text(text_entry_, GTK_STATE_NORMAL, &kEntryTextColor);
@@ -640,8 +638,9 @@ void FindBarGtk::Reposition() {
     return;
 
   // This will trigger an allocate, which allows us to reposition.
-  if (widget()->parent)
-    gtk_widget_queue_resize(widget()->parent);
+  GtkWidget* parent = gtk_widget_get_parent(widget());
+  if (parent)
+    gtk_widget_queue_resize(parent);
 }
 
 void FindBarGtk::StoreOutsideFocus() {
@@ -675,7 +674,7 @@ bool FindBarGtk::MaybeForwardKeyEventToRenderer(GdkEventKey* event) {
   if (!contents)
     return false;
 
-  RenderViewHost* render_view_host =
+  content::RenderViewHost* render_view_host =
       contents->web_contents()->GetRenderViewHost();
 
   // Make sure we don't have a text field element interfering with keyboard
@@ -718,13 +717,15 @@ void FindBarGtk::AdjustTextAlignment() {
 gfx::Point FindBarGtk::GetPosition() {
   gfx::Point point;
 
+  GtkWidget* parent = gtk_widget_get_parent(widget());
+
   GValue value = { 0, };
   g_value_init(&value, G_TYPE_INT);
-  gtk_container_child_get_property(GTK_CONTAINER(widget()->parent),
+  gtk_container_child_get_property(GTK_CONTAINER(parent),
                                    widget(), "x", &value);
   point.set_x(g_value_get_int(&value));
 
-  gtk_container_child_get_property(GTK_CONTAINER(widget()->parent),
+  gtk_container_child_get_property(GTK_CONTAINER(parent),
                                    widget(), "y", &value);
   point.set_y(g_value_get_int(&value));
 
@@ -736,7 +737,7 @@ gfx::Point FindBarGtk::GetPosition() {
 // static
 void FindBarGtk::OnParentSet(GtkWidget* widget, GtkObject* old_parent,
                              FindBarGtk* find_bar) {
-  if (!widget->parent)
+  if (!gtk_widget_get_parent(widget))
     return;
 
   g_signal_connect(gtk_widget_get_parent(widget), "set-floating-position",
@@ -888,7 +889,7 @@ gboolean FindBarGtk::OnExpose(GtkWidget* widget, GdkEventExpose* e,
       bar->container_height_ = allocation.height;
     }
 
-    cairo_t* cr = gdk_cairo_create(GDK_DRAWABLE(widget->window));
+    cairo_t* cr = gdk_cairo_create(gtk_widget_get_window(widget));
     gdk_cairo_rectangle(cr, &e->area);
     cairo_clip(cr);
 
@@ -902,7 +903,8 @@ gboolean FindBarGtk::OnExpose(GtkWidget* widget, GdkEventExpose* e,
     // now instead of when we render |border_bin_|. We don't use stacked event
     // boxes to simulate the effect because we need to blend them with this
     // background.
-    GtkAllocation border_allocation = bar->border_bin_->allocation;
+    GtkAllocation border_allocation;
+    gtk_widget_get_allocation(bar->border_bin_, &border_allocation);
 
     // Blit the left part of the background image once on the left.
     ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();

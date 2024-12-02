@@ -21,9 +21,7 @@ function canCollapseBeginWithEnd(beginEntry) {
          beginEntry.isBegin() &&
          beginEntry.end &&
          beginEntry.end.index == beginEntry.index + 1 &&
-         (!beginEntry.orig.params || !beginEntry.end.orig.params) &&
-         beginEntry.orig.wasPassivelyCaptured ==
-             beginEntry.end.orig.wasPassivelyCaptured;
+         (!beginEntry.orig.params || !beginEntry.end.orig.params);
 }
 
 /**
@@ -48,11 +46,8 @@ printLogEntriesAsText = function(logEntries, parent) {
     if (!entry.isEnd() || !canCollapseBeginWithEnd(entry.begin)) {
       tablePrinter.addRow();
 
-      // Annotate this entry with "(P)" if it was passively captured.
-      tablePrinter.addCell(entry.orig.wasPassivelyCaptured ? '(P) ' : '');
-
       tablePrinter.addCell('t=');
-      var date = timeutil.convertTimeTicksToDate(entry.orig.time) ;
+      var date = timeutil.convertTimeTicksToDate(entry.orig.time);
       var tCell = tablePrinter.addCell(date.getTime());
       tCell.alignRight = true;
       tablePrinter.addCell(' [st=');
@@ -80,12 +75,11 @@ printLogEntriesAsText = function(logEntries, parent) {
 
     // Output the extra parameters.
     if (entry.orig.params != undefined) {
-      // Those 6 skipped cells are: passive annotation, two for "t=", and
-      // three for "st=".
-      tablePrinter.setNewRowCellIndent(6 + entry.getDepth());
+      // Those 5 skipped cells are: two for "t=", and three for "st=".
+      tablePrinter.setNewRowCellIndent(5 + entry.getDepth());
       addRowsForExtraParams(tablePrinter,
                             entry.orig,
-                            g_browser.sourceTracker.getSecurityStripping());
+                            SourceTracker.getInstance().getSecurityStripping());
       tablePrinter.setNewRowCellIndent(0);
     }
   }
@@ -183,6 +177,13 @@ function addRowsForExtraParams(tablePrinter, entry, enableSecurityStripping) {
                   null);
       return;
 
+    case LogEventType.CERT_VERIFIER_JOB:
+    case LogEventType.SSL_CERTIFICATES_RECEIVED:
+      addTextRows(tablePrinter,
+                  getTextForCertificatesExtraParam(entry),
+                  null);
+      return;
+
     default:
       for (var k in entry.params) {
         if (k == 'headers' && entry.params[k] instanceof Array) {
@@ -217,7 +218,7 @@ function addRowsForExtraParams(tablePrinter, entry, enableSecurityStripping) {
         // on particular naming of event parameters to infer the type).
         if (typeof value == 'number') {
           if (k == 'net_error') {
-            paramStr += ' (' + getNetErrorSymbolicString(value) + ')';
+            paramStr += ' (' + netErrorToString(value) + ')';
           } else if (k == 'load_flags') {
             paramStr += ' (' + getLoadFlagSymbolicString(value) + ')';
           }
@@ -226,16 +227,6 @@ function addRowsForExtraParams(tablePrinter, entry, enableSecurityStripping) {
         addTextRows(tablePrinter, paramStr, null);
       }
   }
-}
-
-/**
- * Returns the name for netError.
- *
- * Example: getNetErrorSymbolicString(-105) would return
- * "NAME_NOT_RESOLVED".
- */
-function getNetErrorSymbolicString(netError) {
-  return getKeyWithValue(NetError, netError);
 }
 
 /**
@@ -355,6 +346,25 @@ function getTextForRequestHeadersExtraParam(entry) {
 
 function getTextForResponseHeadersExtraParam(entry) {
   return indentLines(' --> ', entry.params.headers);
+}
+
+/*
+ * Pretty-prints the contents of an X509CertificateNetLogParam value.
+ * @param {LogGroupEntry} A LogGroupEntry for an X509CertificateNetLogParam.
+ * @return {string} A formatted string containing all the certificates, in
+ *     PEM-encoded form.
+ */
+function getTextForCertificatesExtraParam(entry) {
+  if (!entry.params || !entry.params.certificates) {
+    // Some events, such as LogEventType.CERT_VERIFIER_JOB, only log
+    // certificates on the begin event.
+    return '';
+  }
+
+  var certs = entry.params.certificates.reduce(function(previous, current) {
+    return previous.concat(current.split('\n'));
+  }, new Array());
+  return ' --> certificates =\n' + indentLines('        ', certs);
 }
 
 function getTextForProxyConfigChangedExtraParam(entry) {

@@ -41,12 +41,12 @@
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/renderer_host/render_view_host.h"
 #include "content/public/browser/browser_child_process_host_iterator.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/child_process_data.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/process_type.h"
 #include "grit/generated_resources.h"
@@ -103,7 +103,7 @@ int GetMessagePrefixID(bool is_app,
 // TaskManagerRendererResource class
 ////////////////////////////////////////////////////////////////////////////////
 TaskManagerRendererResource::TaskManagerRendererResource(
-    base::ProcessHandle process, RenderViewHost* render_view_host)
+    base::ProcessHandle process, content::RenderViewHost* render_view_host)
     : process_(process),
       render_view_host_(render_view_host),
       pending_stats_update_(false),
@@ -128,7 +128,7 @@ void TaskManagerRendererResource::Refresh() {
   }
   if (!pending_fps_update_) {
     render_view_host_->Send(
-        new ChromeViewMsg_GetFPS(render_view_host_->routing_id()));
+        new ChromeViewMsg_GetFPS(render_view_host_->GetRoutingID()));
     pending_fps_update_ = true;
   }
   if (!pending_v8_memory_allocated_update_) {
@@ -180,8 +180,8 @@ TaskManager::Resource::Type TaskManagerRendererResource::GetType() const {
   return RENDERER;
 }
 
-int TaskManagerRendererResource::GetRoutingId() const {
-  return render_view_host_->routing_id();
+int TaskManagerRendererResource::GetRoutingID() const {
+  return render_view_host_->GetRoutingID();
 }
 
 bool TaskManagerRendererResource::ReportsCacheStats() const {
@@ -536,12 +536,18 @@ void TaskManagerTabContentsResourceProvider::Observe(int type,
 
 SkBitmap* TaskManagerBackgroundContentsResource::default_icon_ = NULL;
 
+// TODO(atwilson): http://crbug.com/116893
+// HACK: if the process handle is invalid, we use the current process's handle.
+// This preserves old behavior but is incorrect, and should be fixed.
 TaskManagerBackgroundContentsResource::TaskManagerBackgroundContentsResource(
     BackgroundContents* background_contents,
     const string16& application_name)
     : TaskManagerRendererResource(
           background_contents->web_contents()->GetRenderProcessHost()->
-              GetHandle(),
+              GetHandle() ?
+              background_contents->web_contents()->GetRenderProcessHost()->
+                  GetHandle() :
+              base::Process::Current().handle(),
           background_contents->web_contents()->GetRenderViewHost()),
       background_contents_(background_contents),
       application_name_(application_name) {
@@ -611,7 +617,7 @@ TaskManagerBackgroundContentsResourceProvider::GetResource(
   for (Resources::iterator i = resources_.begin(); i != resources_.end(); i++) {
     WebContents* tab = i->first->web_contents();
     if (tab->GetRenderProcessHost()->GetID() == render_process_host_id
-        && tab->GetRenderViewHost()->routing_id() == routing_id) {
+        && tab->GetRenderViewHost()->GetRoutingID() == routing_id) {
       return i->second;
     }
   }
@@ -702,9 +708,9 @@ void TaskManagerBackgroundContentsResourceProvider::Add(
   if (!updating_)
     return;
 
-  // Don't add contents whose process is dead.
-  if (!contents->web_contents()->GetRenderProcessHost()->GetHandle())
-    return;
+  // TODO(atwilson): http://crbug.com/116893
+  // We should check that the process handle is valid here, but it won't
+  // be in the case of NOTIFICATION_BACKGROUND_CONTENTS_OPENED.
 
   // Should never add the same BackgroundContents twice.
   DCHECK(resources_.find(contents) == resources_.end());

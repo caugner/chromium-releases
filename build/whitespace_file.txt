@@ -1,11 +1,11 @@
-Copyright (c) 2011 The Chromium Authors. All rights reserved.
+Copyright (c) 2012 The Chromium Authors. All rights reserved.
 Use of this useless file is governed by a BSD-style license that can be
 found in the LICENSE file.
 
 This file is used for making non-code changes to trigger buildbot cycles. Make
 any modification below this line.
 
-============================================================================
+=============================================================================
 
 Let's make a story. Add one sentence for each commit:
 
@@ -45,3 +45,6 @@ horror that had occurred, just the week before.
 
 Next time, there won't be any sushi. Why sushis with waffles anyway? It's like
 salmon in a cereal bowl.
+
+CHAPTER 4:
+The taste of stale sushi in his mouth the next morning was unbearable.

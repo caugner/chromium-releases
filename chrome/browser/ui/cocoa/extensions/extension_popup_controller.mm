@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,6 +19,8 @@
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_source.h"
 
+using content::RenderViewHost;
+
 namespace {
 // The duration for any animations that might be invoked by this controller.
 const NSTimeInterval kAnimationDuration = 0.2;
@@ -33,6 +35,46 @@ CGFloat Clamp(CGFloat value, CGFloat min, CGFloat max) {
 }
 
 }  // namespace
+
+@interface ExtensionPopupController (Private)
+// Callers should be using the public static method for initialization.
+// NOTE: This takes ownership of |host|.
+- (id)initWithHost:(ExtensionHost*)host
+      parentWindow:(NSWindow*)parentWindow
+        anchoredAt:(NSPoint)anchoredAt
+     arrowLocation:(info_bubble::BubbleArrowLocation)arrowLocation
+           devMode:(BOOL)devMode;
+
+// Called when the extension's hosted NSView has been resized.
+- (void)extensionViewFrameChanged;
+
+// Called when the extension's size changes.
+- (void)onSizeChanged:(NSSize)newSize;
+
+// Called when the extension view is shown.
+- (void)onViewDidShow;
+@end
+
+class ExtensionPopupContainer : public ExtensionViewMac::Container {
+ public:
+  explicit ExtensionPopupContainer(ExtensionPopupController* controller)
+      : controller_(controller) {
+  }
+
+  virtual void OnExtensionSizeChanged(
+      ExtensionViewMac* view,
+      const gfx::Size& new_size) OVERRIDE {
+    [controller_ onSizeChanged:
+        NSMakeSize(new_size.width(), new_size.height())];
+  }
+
+  virtual void OnExtensionViewDidShow(ExtensionViewMac* view) OVERRIDE {
+    [controller_ onViewDidShow];
+  }
+
+ private:
+  ExtensionPopupController* controller_; // Weak; owns this.
+};
 
 class DevtoolsNotificationBridge : public content::NotificationObserver {
  public:
@@ -70,19 +112,6 @@ class DevtoolsNotificationBridge : public content::NotificationObserver {
   ExtensionPopupController* controller_;
 };
 
-@interface ExtensionPopupController(Private)
-// Callers should be using the public static method for initialization.
-// NOTE: This takes ownership of |host|.
-- (id)initWithHost:(ExtensionHost*)host
-      parentWindow:(NSWindow*)parentWindow
-        anchoredAt:(NSPoint)anchoredAt
-     arrowLocation:(info_bubble::BubbleArrowLocation)arrowLocation
-           devMode:(BOOL)devMode;
-
-// Called when the extension's hosted NSView has been resized.
-- (void)extensionViewFrameChanged;
-@end
-
 @implementation ExtensionPopupController
 
 - (id)initWithHost:(ExtensionHost*)host
@@ -90,31 +119,6 @@ class DevtoolsNotificationBridge : public content::NotificationObserver {
         anchoredAt:(NSPoint)anchoredAt
      arrowLocation:(info_bubble::BubbleArrowLocation)arrowLocation
            devMode:(BOOL)devMode {
-
-  parentWindow_ = parentWindow;
-  anchor_ = [parentWindow convertBaseToScreen:anchoredAt];
-  host_.reset(host);
-  beingInspected_ = devMode;
-
-  scoped_nsobject<InfoBubbleView> view([[InfoBubbleView alloc] init]);
-  if (!view.get())
-    return nil;
-  [view setArrowLocation:arrowLocation];
-
-  extensionView_ = host->view()->native_view();
-  NSNotificationCenter* center = [NSNotificationCenter defaultCenter];
-  [center addObserver:self
-             selector:@selector(extensionViewFrameChanged)
-                 name:NSViewFrameDidChangeNotification
-               object:extensionView_];
-
-  // Watch to see if the parent window closes, and if so, close this one.
-  [center addObserver:self
-             selector:@selector(parentWindowWillClose:)
-                 name:NSWindowWillCloseNotification
-               object:parentWindow_];
-
-  [view addSubview:extensionView_];
   scoped_nsobject<InfoBubbleWindow> window(
       [[InfoBubbleWindow alloc]
           initWithContentRect:NSZeroRect
@@ -123,26 +127,42 @@ class DevtoolsNotificationBridge : public content::NotificationObserver {
                         defer:YES]);
   if (!window.get())
     return nil;
+  anchoredAt = [parentWindow convertBaseToScreen:anchoredAt];
+  if ((self = [super initWithWindow:window
+                       parentWindow:parentWindow
+                         anchoredAt:anchoredAt])) {
+    host_.reset(host);
+    beingInspected_ = devMode;
 
-  [window setDelegate:self];
-  [window setContentView:view];
-  self = [super initWithWindow:window];
-  if (beingInspected_) {
-    // Listen for the the devtools window closing.
-    notificationBridge_.reset(new DevtoolsNotificationBridge(self));
-    registrar_.reset(new content::NotificationRegistrar);
-    registrar_->Add(notificationBridge_.get(),
-                    content::NOTIFICATION_DEVTOOLS_WINDOW_CLOSING,
-                    content::Source<content::BrowserContext>(host->profile()));
-    registrar_->Add(notificationBridge_.get(),
-                    chrome::NOTIFICATION_EXTENSION_HOST_DID_STOP_LOADING,
-                    content::Source<Profile>(host->profile()));
+    InfoBubbleView* view = self.bubble;
+    [view setArrowLocation:arrowLocation];
+
+    extensionView_ = host->view()->native_view();
+    container_.reset(new ExtensionPopupContainer(self));
+    host->view()->set_container(container_.get());
+
+    NSNotificationCenter* center = [NSNotificationCenter defaultCenter];
+    [center addObserver:self
+               selector:@selector(extensionViewFrameChanged)
+                   name:NSViewFrameDidChangeNotification
+                 object:extensionView_];
+
+    [view addSubview:extensionView_];
+
+    if (beingInspected_) {
+      // Listen for the the devtools window closing.
+      notificationBridge_.reset(new DevtoolsNotificationBridge(self));
+      registrar_.reset(new content::NotificationRegistrar);
+      registrar_->Add(notificationBridge_.get(),
+                      content::NOTIFICATION_DEVTOOLS_WINDOW_CLOSING,
+                      content::Source<content::BrowserContext>(
+                          host->profile()));
+      registrar_->Add(notificationBridge_.get(),
+                      chrome::NOTIFICATION_EXTENSION_HOST_DID_STOP_LOADING,
+                      content::Source<Profile>(host->profile()));
+    }
   }
   return self;
-}
-
-- (void)showDevTools {
-  DevToolsWindow::OpenDevToolsWindow(host_->render_view_host());
 }
 
 - (void)dealloc {
@@ -150,29 +170,20 @@ class DevtoolsNotificationBridge : public content::NotificationObserver {
   [super dealloc];
 }
 
-- (void)parentWindowWillClose:(NSNotification*)notification {
-  [self close];
+- (void)showDevTools {
+  DevToolsWindow::OpenDevToolsWindow(host_->render_view_host());
 }
 
 - (void)windowWillClose:(NSNotification *)notification {
-  [[NSNotificationCenter defaultCenter] removeObserver:self];
-  [gPopup autorelease];
+  [super windowWillClose:notification];
   gPopup = nil;
+  if (host_->view())
+    host_->view()->set_container(NULL);
 }
 
-- (void)windowDidResignKey:(NSNotification *)notification {
-  NSWindow* window = [self window];
-  DCHECK_EQ([notification object], window);
-  // If the window isn't visible, it is already closed, and this notification
-  // has been sent as part of the closing operation, so no need to close.
-  if ([window isVisible] && !beingInspected_) {
-    [self close];
-  }
-}
-
-- (void)close {
-  [[[self window] parentWindow] removeChildWindow:[self window]];
-  [super close];
+- (void)windowDidResignKey:(NSNotification*)notification {
+  if (!beingInspected_)
+    [super windowDidResignKey:notification];
 }
 
 - (BOOL)isClosing {
@@ -257,7 +268,7 @@ class DevtoolsNotificationBridge : public content::NotificationObserver {
   frame = [extensionView_ convertRectToBase:frame];
   // Adjust the origin according to the height and width so that the arrow is
   // positioned correctly at the middle and slightly down from the button.
-  NSPoint windowOrigin = anchor_;
+  NSPoint windowOrigin = self.anchorPoint;
   NSSize offsets = NSMakeSize(info_bubble::kBubbleArrowXOffset +
                                   info_bubble::kBubbleArrowWidth / 2.0,
                               info_bubble::kBubbleArrowHeight / 2.0);
@@ -289,14 +300,27 @@ class DevtoolsNotificationBridge : public content::NotificationObserver {
   }
 }
 
-// We want this to be a child of a browser window. addChildWindow: (called from
-// this function) will bring the window on-screen; unfortunately,
-// [NSWindowController showWindow:] will also bring it on-screen (but will cause
-// unexpected changes to the window's position). We cannot have an
-// addChildWindow: and a subsequent showWindow:. Thus, we have our own version.
-- (void)showWindow:(id)sender {
-  [parentWindow_ addChildWindow:[self window] ordered:NSWindowAbove];
-  [[self window] makeKeyAndOrderFront:self];
+- (void)onSizeChanged:(NSSize)newSize {
+  // When we update the size, the window will become visible. Stay hidden until
+  // the host is loaded.
+  pendingSize_ = newSize;
+  if (!host_->did_stop_loading())
+    return;
+
+  // No need to use CA here, our caller calls us repeatedly to animate the
+  // resizing.
+  NSRect frame = [extensionView_ frame];
+  frame.size = newSize;
+
+  // |new_size| is in pixels. Convert to view units.
+  frame.size = [extensionView_ convertSize:frame.size fromView:nil];
+
+  [extensionView_ setFrame:frame];
+  [extensionView_ setNeedsDisplay:YES];
+}
+
+- (void)onViewDidShow {
+  [self onSizeChanged:pendingSize_];
 }
 
 - (void)windowDidResize:(NSNotification*)notification {

@@ -42,7 +42,7 @@ class CONTENT_EXPORT PeerConnectionHandler
   // WebKit::WebPeerConnectionHandler implementation
   virtual void initialize(
       const WebKit::WebString& server_configuration,
-      const WebKit::WebSecurityOrigin& security_origin) OVERRIDE;
+      const WebKit::WebString& username) OVERRIDE;
   virtual void produceInitialOffer(
       const WebKit::WebVector<WebKit::WebMediaStreamDescriptor>&
           pending_add_streams) OVERRIDE;
@@ -64,6 +64,9 @@ class CONTENT_EXPORT PeerConnectionHandler
   virtual void OnStateChange(StateType state_changed) OVERRIDE;
   virtual void OnAddStream(webrtc::MediaStreamInterface* stream) OVERRIDE;
   virtual void OnRemoveStream(webrtc::MediaStreamInterface* stream) OVERRIDE;
+  virtual void OnIceCandidate(
+      const webrtc::IceCandidateInterface* candidate) OVERRIDE;
+  virtual void OnIceComplete() OVERRIDE;
 
  private:
   FRIEND_TEST_ALL_PREFIXES(PeerConnectionHandlerTest, Basic);

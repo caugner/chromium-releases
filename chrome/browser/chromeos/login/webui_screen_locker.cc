@@ -18,9 +18,9 @@
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/renderer_host/render_widget_host_view.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_ui.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/x/x11_util.h"
@@ -42,6 +42,7 @@ WebUIScreenLocker::WebUIScreenLocker(ScreenLocker* screen_locker)
     : ScreenLockerDelegate(screen_locker),
       lock_ready_(false),
       webui_ready_(false) {
+  set_should_emit_login_prompt_visible(false);
 }
 
 void WebUIScreenLocker::LockScreen(bool unlock_on_input) {
@@ -58,7 +59,7 @@ void WebUIScreenLocker::LockScreen(bool unlock_on_input) {
   lock_window->Grab(webui_login_);
 
   // User list consisting of a single logged-in user.
-  UserList users(1, &chromeos::UserManager::Get()->logged_in_user());
+  UserList users(1, &chromeos::UserManager::Get()->GetLoggedInUser());
   login_display_.reset(new WebUILoginDisplay(this));
   login_display_->set_background_bounds(bounds);
   login_display_->Init(users, false, true, false);
@@ -87,30 +88,12 @@ void WebUIScreenLocker::SetInputEnabled(bool enabled) {
   SetStatusAreaEnabled(enabled);
 }
 
-void WebUIScreenLocker::SetSignoutEnabled(bool enabled) {
-  // TODO(flackr): Implement (crbug.com/105267).
-  NOTIMPLEMENTED();
-}
-
-void WebUIScreenLocker::ShowErrorMessage(const string16& message,
-                                         bool sign_out_only) {
-  // TODO(flackr): Use login_display_ to show error message (requires either
-  // adding a method to display error strings or strictly passing error ids:
-  // crbug.com/105267).
-  base::FundamentalValue login_attempts_value(0);
-  base::StringValue error_message(message);
-  base::StringValue help_link("");
-  base::FundamentalValue help_id(0);
-  GetWebUI()->CallJavascriptFunction("cr.ui.Oobe.showSignInError",
-                                     login_attempts_value,
-                                     error_message,
-                                     help_link,
-                                     help_id);
-}
-
-void WebUIScreenLocker::ShowCaptchaAndErrorMessage(const GURL& captcha_url,
-                                                   const string16& message) {
-  ShowErrorMessage(message, true);
+void WebUIScreenLocker::ShowErrorMessage(
+    int error_msg_id,
+    HelpAppLauncher::HelpTopic help_topic_id) {
+  login_display_->ShowError(error_msg_id,
+                  0 /* login_attempts */,
+                  help_topic_id);
 }
 
 void WebUIScreenLocker::ClearErrors() {
@@ -158,7 +141,7 @@ void WebUIScreenLocker::Observe(
       break;
     }
     default:
-      NOTREACHED();
+      WebUILoginView::Observe(type, source, details);
   }
 }
 
@@ -192,8 +175,16 @@ void WebUIScreenLocker::Login(const std::string& username,
       ASCIIToUTF16(password));
 }
 
+void WebUIScreenLocker::LoginAsDemoUser() {
+  NOTREACHED();
+}
+
 void WebUIScreenLocker::LoginAsGuest() {
   NOTREACHED();
+}
+
+void WebUIScreenLocker::Signout() {
+  chromeos::ScreenLocker::default_screen_locker()->Signout();
 }
 
 void WebUIScreenLocker::OnUserSelected(const std::string& username) {

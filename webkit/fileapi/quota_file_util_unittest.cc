@@ -14,6 +14,7 @@
 #include "webkit/fileapi/file_system_test_helper.h"
 #include "webkit/fileapi/file_system_types.h"
 #include "webkit/fileapi/file_system_usage_cache.h"
+#include "webkit/fileapi/file_util_helper.h"
 #include "webkit/fileapi/quota_file_util.h"
 
 namespace fileapi {
@@ -26,14 +27,11 @@ class QuotaFileUtilTest : public testing::Test {
     ASSERT_TRUE(data_dir_.CreateUniqueTempDir());
     quota_file_util_.reset(QuotaFileUtil::CreateDefault());
     quota_test_helper_.SetUp(data_dir_.path(), quota_file_util_.get());
-    obfuscated_test_helper_.SetUp(
-        quota_test_helper_.file_system_context(), NULL);
-    base_dir_ = obfuscated_test_helper_.GetOriginRootPath();
+    base_dir_ = quota_test_helper_.GetOriginRootPath();
   }
 
   void TearDown() {
     quota_test_helper_.TearDown();
-    obfuscated_test_helper_.TearDown();
   }
 
  protected:
@@ -41,8 +39,8 @@ class QuotaFileUtilTest : public testing::Test {
     return quota_test_helper_.NewOperationContext();
   }
 
-  FilePath Path(const std::string& file_name) {
-    return base_dir_.AppendASCII(file_name);
+  FileSystemPath Path(const std::string& file_name) {
+    return quota_test_helper_.CreatePath(base_dir_.AppendASCII(file_name));
   }
 
   base::PlatformFileError CreateFile(const char* file_name,
@@ -73,7 +71,6 @@ class QuotaFileUtilTest : public testing::Test {
  private:
   ScopedTempDir data_dir_;
   FilePath base_dir_;
-  FileSystemTestOriginHelper obfuscated_test_helper_;
   FileSystemTestOriginHelper quota_test_helper_;
   scoped_ptr<QuotaFileUtil> quota_file_util_;
 
@@ -188,9 +185,10 @@ TEST_F(QuotaFileUtilTest, CopyFile) {
   context.reset(NewContext());
   context->set_allowed_bytes_growth(1020);
   ASSERT_EQ(base::PLATFORM_FILE_OK,
-            quota_file_util()->Copy(context.get(),
-                                    Path(from_file),
-                                    Path(to_file1)));
+            quota_test_helper().SameFileUtilCopy(
+                context.get(),
+                Path(from_file),
+                Path(to_file1)));
   ASSERT_EQ(2041, quota_test_helper().GetCachedOriginUsage());
   ASSERT_EQ(quota_test_helper().ComputeCurrentOriginUsage(),
             quota_test_helper().GetCachedOriginUsage());
@@ -198,9 +196,10 @@ TEST_F(QuotaFileUtilTest, CopyFile) {
   context.reset(NewContext());
   context->set_allowed_bytes_growth(1019);
   ASSERT_EQ(base::PLATFORM_FILE_ERROR_NO_SPACE,
-            quota_file_util()->Copy(context.get(),
-                                    Path(from_file),
-                                    Path(to_file2)));
+            quota_test_helper().SameFileUtilCopy(
+                context.get(),
+                Path(from_file),
+                Path(to_file2)));
   ASSERT_EQ(2041, quota_test_helper().GetCachedOriginUsage());
   ASSERT_EQ(quota_test_helper().ComputeCurrentOriginUsage(),
             quota_test_helper().GetCachedOriginUsage());
@@ -208,9 +207,10 @@ TEST_F(QuotaFileUtilTest, CopyFile) {
   context.reset(NewContext());
   context->set_allowed_bytes_growth(1019);
   ASSERT_EQ(base::PLATFORM_FILE_OK,
-            quota_file_util()->Copy(context.get(),
-                                    Path(from_file),
-                                    Path(obstacle_file)));
+            quota_test_helper().SameFileUtilCopy(
+                context.get(),
+                Path(from_file),
+                Path(obstacle_file)));
   ASSERT_EQ(3060, quota_test_helper().GetCachedOriginUsage());
   ASSERT_EQ(quota_test_helper().ComputeCurrentOriginUsage(),
             quota_test_helper().GetCachedOriginUsage());
@@ -228,9 +228,10 @@ TEST_F(QuotaFileUtilTest, CopyFile) {
   context.reset(NewContext());
   context->set_allowed_bytes_growth(-2);  // quota exceeded
   ASSERT_EQ(base::PLATFORM_FILE_OK,
-            quota_file_util()->Copy(context.get(),
-                                    Path(from_file),
-                                    Path(obstacle_file)));
+            quota_test_helper().SameFileUtilCopy(
+                context.get(),
+                Path(from_file),
+                Path(obstacle_file)));
   ASSERT_EQ(3058, quota_test_helper().GetCachedOriginUsage());
   ASSERT_EQ(quota_test_helper().ComputeCurrentOriginUsage(),
             quota_test_helper().GetCachedOriginUsage());
@@ -278,9 +279,10 @@ TEST_F(QuotaFileUtilTest, CopyDirectory) {
   context.reset(NewContext());
   context->set_allowed_bytes_growth(1020);
   ASSERT_EQ(base::PLATFORM_FILE_OK,
-            quota_file_util()->Copy(context.get(),
-                                    Path(from_dir),
-                                    Path(to_dir1)));
+            quota_test_helper().SameFileUtilCopy(
+                context.get(),
+                Path(from_dir),
+                Path(to_dir1)));
   ASSERT_EQ(2040, quota_test_helper().GetCachedOriginUsage());
   ASSERT_EQ(quota_test_helper().ComputeCurrentOriginUsage(),
             quota_test_helper().GetCachedOriginUsage());
@@ -288,9 +290,10 @@ TEST_F(QuotaFileUtilTest, CopyDirectory) {
   context.reset(NewContext());
   context->set_allowed_bytes_growth(1019);
   EXPECT_EQ(base::PLATFORM_FILE_ERROR_NO_SPACE,
-            quota_file_util()->Copy(context.get(),
-                                    Path(from_dir),
-                                    Path(to_dir2)));
+            quota_test_helper().SameFileUtilCopy(
+                context.get(),
+                Path(from_dir),
+                Path(to_dir2)));
   ASSERT_TRUE(2540 == quota_test_helper().GetCachedOriginUsage() ||
               2560 == quota_test_helper().GetCachedOriginUsage());
   ASSERT_EQ(quota_test_helper().ComputeCurrentOriginUsage(),
@@ -319,9 +322,10 @@ TEST_F(QuotaFileUtilTest, MoveFile) {
   context.reset(NewContext());
   context->set_allowed_bytes_growth(0);
   ASSERT_EQ(base::PLATFORM_FILE_OK,
-            quota_file_util()->Move(context.get(),
-                                    Path(from_file),
-                                    Path(to_file)));
+            quota_test_helper().SameFileUtilMove(
+                context.get(),
+                Path(from_file),
+                Path(to_file)));
   ASSERT_EQ(1020, quota_test_helper().GetCachedOriginUsage());
   ASSERT_EQ(quota_test_helper().ComputeCurrentOriginUsage(),
             quota_test_helper().GetCachedOriginUsage());
@@ -354,9 +358,10 @@ TEST_F(QuotaFileUtilTest, MoveFile) {
   context.reset(NewContext());
   context->set_allowed_bytes_growth(0);
   ASSERT_EQ(base::PLATFORM_FILE_OK,
-            quota_file_util()->Move(context.get(),
-                                    Path(from_file),
-                                    Path(obstacle_file)));
+            quota_test_helper().SameFileUtilMove(
+                context.get(),
+                Path(from_file),
+                Path(obstacle_file)));
   ASSERT_EQ(2040, quota_test_helper().GetCachedOriginUsage());
   ASSERT_EQ(quota_test_helper().ComputeCurrentOriginUsage(),
             quota_test_helper().GetCachedOriginUsage());
@@ -377,9 +382,10 @@ TEST_F(QuotaFileUtilTest, MoveFile) {
   context.reset(NewContext());
   context->set_allowed_bytes_growth(-1020 - 1);  // quota exceeded, after
   ASSERT_EQ(base::PLATFORM_FILE_OK,
-            quota_file_util()->Move(context.get(),
-                                    Path(from_file),
-                                    Path(obstacle_file)));
+            quota_test_helper().SameFileUtilMove(
+                context.get(),
+                Path(from_file),
+                Path(obstacle_file)));
   ASSERT_EQ(1030, quota_test_helper().GetCachedOriginUsage());
   ASSERT_EQ(quota_test_helper().ComputeCurrentOriginUsage(),
             quota_test_helper().GetCachedOriginUsage());
@@ -414,9 +420,10 @@ TEST_F(QuotaFileUtilTest, MoveDirectory) {
   context.reset(NewContext());
   context->set_allowed_bytes_growth(1020);
   ASSERT_EQ(base::PLATFORM_FILE_OK,
-            quota_file_util()->Move(context.get(),
-                                    Path(from_dir),
-                                    Path(to_dir1)));
+            quota_test_helper().SameFileUtilMove(
+                context.get(),
+                Path(from_dir),
+                Path(to_dir1)));
   ASSERT_EQ(1020, quota_test_helper().GetCachedOriginUsage());
   ASSERT_EQ(quota_test_helper().ComputeCurrentOriginUsage(),
             quota_test_helper().GetCachedOriginUsage());
@@ -442,9 +449,10 @@ TEST_F(QuotaFileUtilTest, MoveDirectory) {
   context.reset(NewContext());
   context->set_allowed_bytes_growth(1019);
   EXPECT_EQ(base::PLATFORM_FILE_OK,
-            quota_file_util()->Move(context.get(),
-                                    Path(from_dir),
-                                    Path(to_dir2)));
+            quota_test_helper().SameFileUtilMove(
+                context.get(),
+                Path(from_dir),
+                Path(to_dir2)));
   ASSERT_EQ(2040, quota_test_helper().GetCachedOriginUsage());
   ASSERT_EQ(quota_test_helper().ComputeCurrentOriginUsage(),
             quota_test_helper().GetCachedOriginUsage());
@@ -503,9 +511,8 @@ TEST_F(QuotaFileUtilTest, Remove) {
   context.reset(NewContext());
   context->set_allowed_bytes_growth(QuotaFileUtil::kNoLimit);
   ASSERT_EQ(base::PLATFORM_FILE_OK,
-            quota_file_util()->Delete(context.get(),
-                                      Path(file),
-                                      false));
+            FileUtilHelper::Delete(context.get(), quota_file_util(),
+                                   Path(file), false));
   ASSERT_EQ(1140, quota_test_helper().GetCachedOriginUsage());
   ASSERT_EQ(quota_test_helper().ComputeCurrentOriginUsage(),
             quota_test_helper().GetCachedOriginUsage());
@@ -513,9 +520,8 @@ TEST_F(QuotaFileUtilTest, Remove) {
   context.reset(NewContext());
   context->set_allowed_bytes_growth(QuotaFileUtil::kNoLimit);
   ASSERT_EQ(base::PLATFORM_FILE_OK,
-            quota_file_util()->Delete(context.get(),
-                                      Path(dir),
-                                      true));
+            FileUtilHelper::Delete(context.get(), quota_file_util(),
+                                   Path(dir), true));
   ASSERT_EQ(0, quota_test_helper().GetCachedOriginUsage());
   ASSERT_EQ(quota_test_helper().ComputeCurrentOriginUsage(),
             quota_test_helper().GetCachedOriginUsage());

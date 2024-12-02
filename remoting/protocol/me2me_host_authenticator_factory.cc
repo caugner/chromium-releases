@@ -107,16 +107,19 @@ scoped_ptr<Authenticator> Me2MeHostAuthenticatorFactory::CreateAuthenticator(
     return scoped_ptr<Authenticator>(new RejectingAuthenticator());
   }
 
-  if (NegotiatingAuthenticator::IsNegotiableMessage(first_message)) {
-    return NegotiatingAuthenticator::CreateForHost(
-        local_cert_, *local_private_key_, shared_secret_hash_.value,
-        shared_secret_hash_.hash_function);
+  if (shared_secret_hash_.hash_function == AuthenticationMethod::NONE &&
+      shared_secret_hash_.value.empty()) {
+    // PIN isn't set. Enable V1 authentication.
+    if (!NegotiatingAuthenticator::IsNegotiableMessage(first_message)) {
+      return scoped_ptr<Authenticator>(
+          new V1HostAuthenticator(local_cert_, *local_private_key_,
+                                  "", remote_jid));
+    }
   }
 
-  // TODO(sergeyu): Old clients still use V1 auth protocol. Remove
-  // this once we are done migrating to V2. crbug.com/110483 .
-  return scoped_ptr<Authenticator>(new V1HostAuthenticator(
-      local_cert_, *local_private_key_, "", remote_jid));
+  return NegotiatingAuthenticator::CreateForHost(
+      local_cert_, *local_private_key_, shared_secret_hash_.value,
+      shared_secret_hash_.hash_function);
 }
 
 }  // namespace protocol

@@ -112,37 +112,6 @@ static const char* GuessSpecificDeviceName(uint32 channels) {
   }
 }
 
-// Reorder PCM from AAC layout to Alsa layout.
-// TODO(fbarchard): Switch layout when ffmpeg is updated.
-template<class Format>
-static void Swizzle50Layout(Format* b, uint32 filled) {
-  static const uint32 kNumSurroundChannels = 5;
-  Format aac[kNumSurroundChannels];
-  for (uint32 i = 0; i < filled; i += sizeof(aac), b += kNumSurroundChannels) {
-    memcpy(aac, b, sizeof(aac));
-    b[0] = aac[1];  // L
-    b[1] = aac[2];  // R
-    b[2] = aac[3];  // Ls
-    b[3] = aac[4];  // Rs
-    b[4] = aac[0];  // C
-  }
-}
-
-template<class Format>
-static void Swizzle51Layout(Format* b, uint32 filled) {
-  static const uint32 kNumSurroundChannels = 6;
-  Format aac[kNumSurroundChannels];
-  for (uint32 i = 0; i < filled; i += sizeof(aac), b += kNumSurroundChannels) {
-    memcpy(aac, b, sizeof(aac));
-    b[0] = aac[1];  // L
-    b[1] = aac[2];  // R
-    b[2] = aac[3];  // Ls
-    b[3] = aac[4];  // Rs
-    b[4] = aac[0];  // C
-    b[5] = aac[5];  // LFE
-  }
-}
-
 std::ostream& operator<<(std::ostream& os,
                          AlsaPcmOutputStream::InternalState state) {
   switch (state) {
@@ -182,15 +151,15 @@ AlsaPcmOutputStream::AlsaPcmOutputStream(const std::string& device_name,
                                          AlsaWrapper* wrapper,
                                          AudioManagerLinux* manager)
     : requested_device_name_(device_name),
-      pcm_format_(alsa_util::BitsToFormat(params.bits_per_sample)),
-      channels_(params.channels),
-      sample_rate_(params.sample_rate),
-      bytes_per_sample_(params.bits_per_sample / 8),
-      bytes_per_frame_(channels_ * params.bits_per_sample / 8),
+      pcm_format_(alsa_util::BitsToFormat(params.bits_per_sample())),
+      channels_(params.channels()),
+      sample_rate_(params.sample_rate()),
+      bytes_per_sample_(params.bits_per_sample() / 8),
+      bytes_per_frame_(channels_ * params.bits_per_sample() / 8),
       should_downmix_(false),
-      packet_size_(params.GetPacketSize()),
+      packet_size_(params.GetBytesPerBuffer()),
       micros_per_packet_(FramesToMicros(
-          params.samples_per_packet, sample_rate_)),
+          params.frames_per_buffer(), sample_rate_)),
       latency_micros_(std::max(AlsaPcmOutputStream::kMinLatencyMicros,
                                micros_per_packet_ * 2)),
       bytes_per_output_frame_(bytes_per_frame_),
@@ -204,22 +173,23 @@ AlsaPcmOutputStream::AlsaPcmOutputStream(const std::string& device_name,
       state_(kCreated),
       volume_(1.0f),
       source_callback_(NULL) {
-  DCHECK(manager_->GetMessageLoop()->BelongsToCurrentThread());
+  DCHECK(IsOnAudioThread());
 
   // Sanity check input values.
-  if ((params.sample_rate > kAlsaMaxSampleRate) || (params.sample_rate <= 0)) {
+  if (params.sample_rate() > kAlsaMaxSampleRate ||
+      params.sample_rate() <= 0) {
     LOG(WARNING) << "Unsupported audio frequency.";
     TransitionTo(kInError);
   }
 
-  if (AudioParameters::AUDIO_PCM_LINEAR != params.format &&
-      AudioParameters::AUDIO_PCM_LOW_LATENCY != params.format) {
+  if (AudioParameters::AUDIO_PCM_LINEAR != params.format() &&
+      AudioParameters::AUDIO_PCM_LOW_LATENCY != params.format()) {
     LOG(WARNING) << "Unsupported audio format";
     TransitionTo(kInError);
   }
 
   if (pcm_format_ == SND_PCM_FORMAT_UNKNOWN) {
-    LOG(WARNING) << "Unsupported bits per sample: " << params.bits_per_sample;
+    LOG(WARNING) << "Unsupported bits per sample: " << params.bits_per_sample();
     TransitionTo(kInError);
   }
 }
@@ -233,7 +203,7 @@ AlsaPcmOutputStream::~AlsaPcmOutputStream() {
 }
 
 bool AlsaPcmOutputStream::Open() {
-  DCHECK(manager_->GetMessageLoop()->BelongsToCurrentThread());
+  DCHECK(IsOnAudioThread());
 
   if (state() == kInError)
     return false;
@@ -256,11 +226,9 @@ bool AlsaPcmOutputStream::Open() {
       DVLOG(1) << "Auto-selected device: " << device_name_;
   } else {
     device_name_ = requested_device_name_;
-    playback_handle_ = alsa_util::OpenPlaybackDevice(wrapper_,
-                                                     device_name_.c_str(),
-                                                     channels_, sample_rate_,
-                                                     pcm_format_,
-                                                     latency_micros_);
+    playback_handle_ = alsa_util::OpenPlaybackDevice(
+        wrapper_, device_name_.c_str(), channels_, sample_rate_,
+        pcm_format_, latency_micros_);
   }
 
   // Finish initializing the stream if the device was opened successfully.
@@ -293,16 +261,14 @@ bool AlsaPcmOutputStream::Open() {
 }
 
 void AlsaPcmOutputStream::Close() {
-  DCHECK(manager_->GetMessageLoop()->BelongsToCurrentThread());
+  DCHECK(IsOnAudioThread());
 
-  // Sanity check that the transition occurs correctly.  It is safe to
-  // continue anyways because all operations for closing are idempotent.
-  if (TransitionTo(kIsClosed) != kIsClosed) {
-    NOTREACHED() << "Unable to transition Closed.";
-  } else {
-    // Shutdown the audio device.
-    if (playback_handle_ &&
-        alsa_util::CloseDevice(wrapper_, playback_handle_) < 0) {
+  if (state() != kIsClosed)
+    TransitionTo(kIsClosed);
+
+  // Shutdown the audio device.
+  if (playback_handle_) {
+    if (alsa_util::CloseDevice(wrapper_, playback_handle_) < 0) {
       LOG(WARNING) << "Unable to close audio device. Leaking handle.";
     }
     playback_handle_ = NULL;
@@ -313,16 +279,17 @@ void AlsaPcmOutputStream::Close() {
     // Signal anything that might already be scheduled to stop.
     stop_stream_ = true;  // Not necessary in production, but unit tests
                           // uses the flag to verify that stream was closed.
-    weak_factory_.InvalidateWeakPtrs();
-
-    // Signal to the manager that we're closed and can be removed.
-    // Should be last call in the method as it deletes "this".
-    manager_->ReleaseOutputStream(this);
   }
+
+  weak_factory_.InvalidateWeakPtrs();
+
+  // Signal to the manager that we're closed and can be removed.
+  // Should be last call in the method as it deletes "this".
+  manager_->ReleaseOutputStream(this);
 }
 
 void AlsaPcmOutputStream::Start(AudioSourceCallback* callback) {
-  DCHECK(manager_->GetMessageLoop()->BelongsToCurrentThread());
+  DCHECK(IsOnAudioThread());
 
   CHECK(callback);
 
@@ -361,7 +328,7 @@ void AlsaPcmOutputStream::Start(AudioSourceCallback* callback) {
 }
 
 void AlsaPcmOutputStream::Stop() {
-  DCHECK(manager_->GetMessageLoop()->BelongsToCurrentThread());
+  DCHECK(IsOnAudioThread());
 
   // Reset the callback, so that it is not called anymore.
   set_source_callback(NULL);
@@ -370,19 +337,19 @@ void AlsaPcmOutputStream::Stop() {
 }
 
 void AlsaPcmOutputStream::SetVolume(double volume) {
-  DCHECK(manager_->GetMessageLoop()->BelongsToCurrentThread());
+  DCHECK(IsOnAudioThread());
 
   volume_ = static_cast<float>(volume);
 }
 
 void AlsaPcmOutputStream::GetVolume(double* volume) {
-  DCHECK(manager_->GetMessageLoop()->BelongsToCurrentThread());
+  DCHECK(IsOnAudioThread());
 
   *volume = volume_;
 }
 
 void AlsaPcmOutputStream::BufferPacket(bool* source_exhausted) {
-  DCHECK(manager_->GetMessageLoop()->BelongsToCurrentThread());
+  DCHECK(IsOnAudioThread());
 
   // If stopped, simulate a 0-length packet.
   if (stop_stream_) {
@@ -406,11 +373,11 @@ void AlsaPcmOutputStream::BufferPacket(bool* source_exhausted) {
 
     scoped_refptr<media::DataBuffer> packet =
         new media::DataBuffer(packet_size_);
-    size_t packet_size = RunDataCallback(packet->GetWritableData(),
-                                         packet->GetBufferSize(),
-                                         AudioBuffersState(buffer_delay,
-                                                           hardware_delay));
-    CHECK(packet_size <= packet->GetBufferSize());
+    int packet_size = RunDataCallback(packet->GetWritableData(),
+                                      packet->GetBufferSize(),
+                                      AudioBuffersState(buffer_delay,
+                                                        hardware_delay));
+    CHECK_LE(packet_size, packet->GetBufferSize());
 
     // This should not happen, but in case it does, drop any trailing bytes
     // that aren't large enough to make a frame.  Without this, packet writing
@@ -431,30 +398,6 @@ void AlsaPcmOutputStream::BufferPacket(bool* source_exhausted) {
         LOG(ERROR) << "Folding failed";
       }
     } else {
-      // TODO(ajwong): Handle other channel orderings.
-
-      // Handle channel order for 5.0 audio.
-      if (channels_ == 5) {
-        if (bytes_per_sample_ == 1) {
-          Swizzle50Layout(packet->GetWritableData(), packet_size);
-        } else if (bytes_per_sample_ == 2) {
-          Swizzle50Layout(packet->GetWritableData(), packet_size);
-        } else if (bytes_per_sample_ == 4) {
-          Swizzle50Layout(packet->GetWritableData(), packet_size);
-        }
-      }
-
-      // Handle channel order for 5.1 audio.
-      if (channels_ == 6) {
-        if (bytes_per_sample_ == 1) {
-          Swizzle51Layout(packet->GetWritableData(), packet_size);
-        } else if (bytes_per_sample_ == 2) {
-          Swizzle51Layout(packet->GetWritableData(), packet_size);
-        } else if (bytes_per_sample_ == 4) {
-          Swizzle51Layout(packet->GetWritableData(), packet_size);
-        }
-      }
-
       media::AdjustVolume(packet->GetWritableData(),
                           packet_size,
                           channels_,
@@ -473,7 +416,7 @@ void AlsaPcmOutputStream::BufferPacket(bool* source_exhausted) {
 }
 
 void AlsaPcmOutputStream::WritePacket() {
-  DCHECK(manager_->GetMessageLoop()->BelongsToCurrentThread());
+  DCHECK(IsOnAudioThread());
 
   // If the device is in error, just eat the bytes.
   if (stop_stream_) {
@@ -487,7 +430,7 @@ void AlsaPcmOutputStream::WritePacket() {
   CHECK_EQ(buffer_->forward_bytes() % bytes_per_output_frame_, 0u);
 
   const uint8* buffer_data;
-  size_t buffer_size;
+  int buffer_size;
   if (buffer_->GetCurrentChunk(&buffer_data, &buffer_size)) {
     buffer_size = buffer_size - (buffer_size % bytes_per_output_frame_);
     snd_pcm_sframes_t frames = buffer_size / bytes_per_output_frame_;
@@ -537,7 +480,7 @@ void AlsaPcmOutputStream::WritePacket() {
 }
 
 void AlsaPcmOutputStream::WriteTask() {
-  DCHECK(manager_->GetMessageLoop()->BelongsToCurrentThread());
+  DCHECK(IsOnAudioThread());
 
   if (stop_stream_)
     return;
@@ -553,7 +496,7 @@ void AlsaPcmOutputStream::WriteTask() {
 }
 
 void AlsaPcmOutputStream::ScheduleNextWrite(bool source_exhausted) {
-  DCHECK(manager_->GetMessageLoop()->BelongsToCurrentThread());
+  DCHECK(IsOnAudioThread());
 
   if (stop_stream_)
     return;
@@ -604,19 +547,22 @@ void AlsaPcmOutputStream::ScheduleNextWrite(bool source_exhausted) {
     } else {
       // TODO(ajwong): Measure the reliability of the delay interval.  Use
       // base/metrics/histogram.h.
-      manager_->GetMessageLoop()->PostDelayedTask(FROM_HERE,
+      manager_->GetMessageLoop()->PostDelayedTask(
+          FROM_HERE,
           base::Bind(&AlsaPcmOutputStream::WriteTask,
                      weak_factory_.GetWeakPtr()),
-          next_fill_time_ms);
+          base::TimeDelta::FromMilliseconds(next_fill_time_ms));
     }
   }
 }
 
-uint32 AlsaPcmOutputStream::FramesToMicros(uint32 frames, uint32 sample_rate) {
+uint32 AlsaPcmOutputStream::FramesToMicros(uint32 frames,
+                                           uint32 sample_rate) {
   return frames * base::Time::kMicrosecondsPerSecond / sample_rate;
 }
 
-uint32 AlsaPcmOutputStream::FramesToMillis(uint32 frames, uint32 sample_rate) {
+uint32 AlsaPcmOutputStream::FramesToMillis(uint32 frames,
+                                           uint32 sample_rate) {
   return frames * base::Time::kMillisecondsPerSecond / sample_rate;
 }
 
@@ -695,7 +641,7 @@ snd_pcm_sframes_t AlsaPcmOutputStream::GetCurrentDelay() {
 }
 
 snd_pcm_sframes_t AlsaPcmOutputStream::GetAvailableFrames() {
-  DCHECK(manager_->GetMessageLoop()->BelongsToCurrentThread());
+  DCHECK(IsOnAudioThread());
 
   if (stop_stream_)
     return 0;
@@ -762,17 +708,17 @@ snd_pcm_t* AlsaPcmOutputStream::AutoSelectDevice(unsigned int latency) {
 
   // Step 3.
   device_name_ = kDefaultDevice;
-  if ((handle = alsa_util::OpenPlaybackDevice(wrapper_, device_name_.c_str(),
-                                              default_channels, sample_rate_,
-                                              pcm_format_, latency)) != NULL) {
+  if ((handle = alsa_util::OpenPlaybackDevice(
+      wrapper_, device_name_.c_str(), default_channels, sample_rate_,
+      pcm_format_, latency)) != NULL) {
     return handle;
   }
 
   // Step 4.
   device_name_ = kPlugPrefix + device_name_;
-  if ((handle = alsa_util::OpenPlaybackDevice(wrapper_, device_name_.c_str(),
-                                              default_channels, sample_rate_,
-                                              pcm_format_, latency)) != NULL) {
+  if ((handle = alsa_util::OpenPlaybackDevice(
+      wrapper_, device_name_.c_str(), default_channels, sample_rate_,
+      pcm_format_, latency)) != NULL) {
     return handle;
   }
 
@@ -809,7 +755,7 @@ bool AlsaPcmOutputStream::CanTransitionTo(InternalState to) {
 
 AlsaPcmOutputStream::InternalState
 AlsaPcmOutputStream::TransitionTo(InternalState to) {
-  DCHECK(manager_->GetMessageLoop()->BelongsToCurrentThread());
+  DCHECK(IsOnAudioThread());
 
   if (!CanTransitionTo(to)) {
     NOTREACHED() << "Cannot transition from: " << state_ << " to: " << to;
@@ -822,6 +768,11 @@ AlsaPcmOutputStream::TransitionTo(InternalState to) {
 
 AlsaPcmOutputStream::InternalState AlsaPcmOutputStream::state() {
   return state_;
+}
+
+bool AlsaPcmOutputStream::IsOnAudioThread() const {
+  return !manager_->GetMessageLoop() ||
+         manager_->GetMessageLoop()->BelongsToCurrentThread();
 }
 
 uint32 AlsaPcmOutputStream::RunDataCallback(uint8* dest,
@@ -843,6 +794,6 @@ void AlsaPcmOutputStream::RunErrorCallback(int code) {
 // Changes the AudioSourceCallback to proxy calls to.  Pass in NULL to
 // release ownership of the currently registered callback.
 void AlsaPcmOutputStream::set_source_callback(AudioSourceCallback* callback) {
-  DCHECK(manager_->GetMessageLoop()->BelongsToCurrentThread());
+  DCHECK(IsOnAudioThread());
   source_callback_ = callback;
 }

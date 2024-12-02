@@ -45,8 +45,8 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/thumbnail_score.h"
 #include "chrome/tools/profiles/thumbnail-inl.h"
-#include "content/browser/download/download_persistent_store_info.h"
 #include "content/public/browser/download_item.h"
+#include "content/public/browser/download_persistent_store_info.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "sql/connection.h"
@@ -58,6 +58,7 @@
 using base::Time;
 using base::TimeDelta;
 using content::DownloadItem;
+using content::DownloadPersistentStoreInfo;
 
 namespace history {
 class HistoryTest;
@@ -114,8 +115,8 @@ class HistoryTest : public testing::Test {
   // Creates the HistoryBackend and HistoryDatabase on the current thread,
   // assigning the values to backend_ and db_.
   void CreateBackendAndDatabase() {
-    backend_ =
-        new HistoryBackend(history_dir_, 0, new BackendDelegate(this), NULL);
+    backend_ = new HistoryBackend(history_dir_, 0, new BackendDelegate(this),
+                                  NULL);
     backend_->Init(std::string(), false);
     db_ = backend_->db_.get();
     DCHECK(in_mem_backend_.get()) << "Mem backend should have been set by "

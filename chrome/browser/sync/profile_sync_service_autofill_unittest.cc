@@ -25,14 +25,13 @@
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
+#include "chrome/browser/signin/token_service_factory.h"
 #include "chrome/browser/sync/abstract_profile_sync_service_test.h"
-#include "chrome/browser/sync/engine/model_changing_syncer_command.h"
 #include "chrome/browser/sync/glue/autofill_data_type_controller.h"
 #include "chrome/browser/sync/glue/autofill_profile_data_type_controller.h"
 #include "chrome/browser/sync/glue/data_type_controller.h"
 #include "chrome/browser/sync/glue/generic_change_processor.h"
 #include "chrome/browser/sync/glue/shared_change_processor.h"
-#include "chrome/browser/sync/glue/syncable_service_adapter.h"
 #include "chrome/browser/sync/internal_api/read_node.h"
 #include "chrome/browser/sync/internal_api/read_transaction.h"
 #include "chrome/browser/sync/internal_api/write_node.h"
@@ -40,11 +39,6 @@
 #include "chrome/browser/sync/profile_sync_components_factory.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_test_util.h"
-#include "chrome/browser/sync/protocol/autofill_specifics.pb.h"
-#include "chrome/browser/sync/syncable/directory_manager.h"
-#include "chrome/browser/sync/syncable/model_type.h"
-#include "chrome/browser/sync/syncable/syncable.h"
-#include "chrome/browser/sync/test/engine/test_id_factory.h"
 #include "chrome/browser/sync/test_profile_sync_service.h"
 #include "chrome/browser/webdata/autocomplete_syncable_service.h"
 #include "chrome/browser/webdata/autofill_change.h"
@@ -56,6 +50,11 @@
 #include "chrome/common/net/gaia/gaia_constants.h"
 #include "content/public/browser/notification_source.h"
 #include "content/test/test_browser_thread.h"
+#include "sync/engine/model_changing_syncer_command.h"
+#include "sync/protocol/autofill_specifics.pb.h"
+#include "sync/syncable/model_type.h"
+#include "sync/syncable/syncable.h"
+#include "sync/test/engine/test_id_factory.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
 using base::Time;
@@ -65,7 +64,6 @@ using browser_sync::AutofillProfileDataTypeController;
 using browser_sync::DataTypeController;
 using browser_sync::GenericChangeProcessor;
 using browser_sync::SharedChangeProcessor;
-using browser_sync::SyncableServiceAdapter;
 using browser_sync::GROUP_DB;
 using browser_sync::SyncBackendHostForProfileSyncTest;
 using browser_sync::UnrecoverableErrorHandler;
@@ -298,7 +296,7 @@ class AutofillEntryFactory : public AbstractAutofillFactory {
         WillOnce(MakeGenericChangeProcessor());
     EXPECT_CALL(*factory, CreateSharedChangeProcessor()).
         WillOnce(MakeSharedChangeProcessor());
-    EXPECT_CALL(*factory, GetAutocompleteSyncableService(_)).
+    EXPECT_CALL(*factory, GetSyncableServiceForType(syncable::AUTOFILL)).
         WillOnce(MakeAutocompleteSyncComponents(wds));
   }
 };
@@ -320,7 +318,8 @@ class AutofillProfileFactory : public AbstractAutofillFactory {
         WillOnce(MakeGenericChangeProcessor());
     EXPECT_CALL(*factory, CreateSharedChangeProcessor()).
         WillOnce(MakeSharedChangeProcessor());
-    EXPECT_CALL(*factory, GetAutofillProfileSyncableService(_)).
+    EXPECT_CALL(*factory,
+        GetSyncableServiceForType(syncable::AUTOFILL_PROFILE)).
         WillOnce(MakeAutofillProfileSyncComponents(wds));
   }
 };
@@ -365,6 +364,9 @@ class ProfileSyncServiceAutofillTest : public AbstractProfileSyncServiceTest {
     personal_data_manager_ = static_cast<PersonalDataManagerMock*>(
         PersonalDataManagerFactory::GetInstance()->SetTestingFactoryAndUse(
             &profile_, PersonalDataManagerMock::Build));
+    token_service_ = static_cast<TokenService*>(
+        TokenServiceFactory::GetInstance()->SetTestingFactoryAndUse(
+            &profile_, BuildTokenService));
     // GetHistoryService() gets called indirectly, but the result is ignored, so
     // it is safe to return NULL.
     EXPECT_CALL(profile_, GetHistoryService(_)).
@@ -379,10 +381,6 @@ class ProfileSyncServiceAutofillTest : public AbstractProfileSyncServiceTest {
         WillRepeatedly(Return(web_data_service_.get()));
     personal_data_manager_->Init(&profile_);
 
-    notification_service_ = new ThreadNotificationService(
-        db_thread_.DeprecatedGetThreadObject());
-    notification_service_->Init();
-
     // Note: This must be called *after* the notification service is created.
     web_data_service_->StartSyncableService();
   }
@@ -391,7 +389,6 @@ class ProfileSyncServiceAutofillTest : public AbstractProfileSyncServiceTest {
     // Note: The tear down order is important.
     service_.reset();
     web_data_service_->ShutdownSyncableService();
-    notification_service_->TearDown();
     profile_.ResetRequestContext();
     AbstractProfileSyncServiceTest::TearDown();
   }
@@ -411,14 +408,10 @@ class ProfileSyncServiceAutofillTest : public AbstractProfileSyncServiceTest {
                                    ProfileSyncService::AUTO_START,
                                    false,
                                    callback));
-    EXPECT_CALL(profile_, GetProfileSyncService()).WillRepeatedly(
-        Return(service_.get()));
     DataTypeController* data_type_controller =
         factory->CreateDataTypeController(components_factory,
             &profile_,
             service_.get());
-    SyncBackendHostForProfileSyncTest::
-        SetDefaultExpectationsForWorkerCreation(&profile_);
 
     factory->SetExpectation(components_factory,
                             service_.get(),
@@ -433,9 +426,6 @@ class ProfileSyncServiceAutofillTest : public AbstractProfileSyncServiceTest {
 
      // We need tokens to get the tests going
     token_service_->IssueAuthTokenForTest(GaiaConstants::kSyncService, "token");
-
-    EXPECT_CALL(profile_, GetTokenService()).
-        WillRepeatedly(Return(token_service_.get()));
 
     service_->RegisterDataTypeController(data_type_controller);
     service_->Initialize();
@@ -458,7 +448,7 @@ class ProfileSyncServiceAutofillTest : public AbstractProfileSyncServiceTest {
     sync_pb::EntitySpecifics specifics;
     AutocompleteSyncableService::WriteAutofillEntry(entry, &specifics);
     sync_pb::AutofillSpecifics* autofill_specifics =
-        specifics.MutableExtension(sync_pb::autofill);
+        specifics.mutable_autofill();
     node.SetAutofillSpecifics(*autofill_specifics);
     return true;
   }
@@ -476,7 +466,7 @@ class ProfileSyncServiceAutofillTest : public AbstractProfileSyncServiceTest {
     sync_pb::EntitySpecifics specifics;
     AutofillProfileSyncableService::WriteAutofillProfile(profile, &specifics);
     sync_pb::AutofillProfileSpecifics* profile_specifics =
-        specifics.MutableExtension(sync_pb::autofill_profile);
+        specifics.mutable_autofill_profile();
     node.SetAutofillProfileSpecifics(*profile_specifics);
     return true;
   }
@@ -573,8 +563,6 @@ class ProfileSyncServiceAutofillTest : public AbstractProfileSyncServiceTest {
   friend class AddAutofillHelper<AutofillProfile>;
   friend class FakeServerUpdater;
 
-  scoped_refptr<ThreadNotificationService> notification_service_;
-
   ProfileMock profile_;
   AutofillTableMock autofill_table_;
   scoped_ptr<WebDatabaseFake> web_database_;
@@ -618,7 +606,7 @@ class WriteTransactionTest: public WriteTransaction {
  public:
   WriteTransactionTest(const tracked_objects::Location& from_here,
                        WriterTag writer,
-                       const syncable::ScopedDirLookup& directory,
+                       syncable::Directory* directory,
                        scoped_ptr<WaitableEvent>* wait_for_syncapi)
       : WriteTransaction(from_here, writer, directory),
         wait_for_syncapi_(wait_for_syncapi) { }
@@ -654,9 +642,7 @@ class FakeServerUpdater : public base::RefCountedThreadSafe<FakeServerUpdater> {
     ASSERT_TRUE(BrowserThread::CurrentlyOn(BrowserThread::DB));
 
     sync_api::UserShare* user_share = service_->GetUserShare();
-    syncable::DirectoryManager* dir_manager = user_share->dir_manager.get();
-    syncable::ScopedDirLookup dir(dir_manager, user_share->name);
-    ASSERT_TRUE(dir.good());
+    syncable::Directory* directory = user_share->directory.get();
 
     // Create autofill protobuf.
     std::string tag = AutocompleteSyncableService::KeyToTag(
@@ -671,15 +657,14 @@ class FakeServerUpdater : public base::RefCountedThreadSafe<FakeServerUpdater> {
     }
 
     sync_pb::EntitySpecifics entity_specifics;
-    entity_specifics.MutableExtension(sync_pb::autofill)->
-        CopyFrom(new_autofill);
+    entity_specifics.mutable_autofill()->CopyFrom(new_autofill);
 
     {
       // Tell main thread we've started
       (*wait_for_start_)->Signal();
 
       // Create write transaction.
-      WriteTransactionTest trans(FROM_HERE, UNITTEST, dir,
+      WriteTransactionTest trans(FROM_HERE, UNITTEST, directory,
                                  wait_for_syncapi_);
 
       // Create actual entry based on autofill protobuf information.
@@ -1199,7 +1184,8 @@ TEST_F(ProfileSyncServiceAutofillTest, ProcessUserChangeRemoveProfile) {
   ASSERT_EQ(0U, new_sync_profiles.size());
 }
 
-TEST_F(ProfileSyncServiceAutofillTest, FLAKY_ServerChangeRace) {
+// http://crbug.com/57884
+TEST_F(ProfileSyncServiceAutofillTest, DISABLED_ServerChangeRace) {
   // Once for MergeDataAndStartSyncing() and twice for ProcessSyncChanges(), via
   // LoadAutofillData().
   EXPECT_CALL(autofill_table_, GetAllAutofillEntries(_)).

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,31 +9,6 @@
 #ifndef CHROME_TEST_GPU_WEBGL_CONFORMANCE_TEST_LIST_AUTOGEN_H_
 #define CHROME_TEST_GPU_WEBGL_CONFORMANCE_TEST_LIST_AUTOGEN_H_
 
-#if (defined(OS_LINUX)) && !defined(NDEBUG)
-#define MAYBE_conformance_more_conformance_quickCheckAPI_B1 DISABLED_conformance_more_conformance_quickCheckAPI_B1
-#elif !defined(MAYBE_conformance_more_conformance_quickCheckAPI_B1)
-#define MAYBE_conformance_more_conformance_quickCheckAPI_B1 conformance_more_conformance_quickCheckAPI_B1
-#endif
-#if (defined(OS_LINUX)) && !defined(NDEBUG)
-#define MAYBE_conformance_more_conformance_quickCheckAPI_G_I DISABLED_conformance_more_conformance_quickCheckAPI_G_I
-#elif !defined(MAYBE_conformance_more_conformance_quickCheckAPI_G_I)
-#define MAYBE_conformance_more_conformance_quickCheckAPI_G_I conformance_more_conformance_quickCheckAPI_G_I
-#endif
-#if defined(OS_MACOSX) || defined(OS_WIN) || defined(OS_LINUX)
-#define MAYBE_conformance_more_functions_readPixelsBadArgs FAILS_conformance_more_functions_readPixelsBadArgs
-#elif !defined(MAYBE_conformance_more_functions_readPixelsBadArgs)
-#define MAYBE_conformance_more_functions_readPixelsBadArgs conformance_more_functions_readPixelsBadArgs
-#endif
-#if defined(OS_MACOSX) || defined(OS_WIN) || defined(OS_LINUX)
-#define MAYBE_conformance_more_functions_texImage2DHTML FAILS_conformance_more_functions_texImage2DHTML
-#elif !defined(MAYBE_conformance_more_functions_texImage2DHTML)
-#define MAYBE_conformance_more_functions_texImage2DHTML conformance_more_functions_texImage2DHTML
-#endif
-#if defined(OS_MACOSX) || defined(OS_WIN) || defined(OS_LINUX)
-#define MAYBE_conformance_more_functions_texSubImage2DHTML FAILS_conformance_more_functions_texSubImage2DHTML
-#elif !defined(MAYBE_conformance_more_functions_texSubImage2DHTML)
-#define MAYBE_conformance_more_functions_texSubImage2DHTML conformance_more_functions_texSubImage2DHTML
-#endif
 CONFORMANCE_TEST(conformance_more_conformance_constants,
   "conformance/more/conformance/constants.html");
 CONFORMANCE_TEST(conformance_more_conformance_getContext,
@@ -42,7 +17,7 @@ CONFORMANCE_TEST(conformance_more_conformance_methods,
   "conformance/more/conformance/methods.html");
 CONFORMANCE_TEST(conformance_more_conformance_quickCheckAPI_A,
   "conformance/more/conformance/quickCheckAPI-A.html");
-CONFORMANCE_TEST(MAYBE_conformance_more_conformance_quickCheckAPI_B1,
+CONFORMANCE_TEST(conformance_more_conformance_quickCheckAPI_B1,
   "conformance/more/conformance/quickCheckAPI-B1.html");
 CONFORMANCE_TEST(conformance_more_conformance_quickCheckAPI_B2,
   "conformance/more/conformance/quickCheckAPI-B2.html");
@@ -54,7 +29,7 @@ CONFORMANCE_TEST(conformance_more_conformance_quickCheckAPI_C,
   "conformance/more/conformance/quickCheckAPI-C.html");
 CONFORMANCE_TEST(conformance_more_conformance_quickCheckAPI_D_G,
   "conformance/more/conformance/quickCheckAPI-D_G.html");
-CONFORMANCE_TEST(MAYBE_conformance_more_conformance_quickCheckAPI_G_I,
+CONFORMANCE_TEST(conformance_more_conformance_quickCheckAPI_G_I,
   "conformance/more/conformance/quickCheckAPI-G_I.html");
 CONFORMANCE_TEST(conformance_more_conformance_quickCheckAPI_L_S,
   "conformance/more/conformance/quickCheckAPI-L_S.html");
@@ -98,13 +73,13 @@ CONFORMANCE_TEST(conformance_more_functions_isTests,
   "conformance/more/functions/isTests.html");
 CONFORMANCE_TEST(conformance_more_functions_readPixels,
   "conformance/more/functions/readPixels.html");
-CONFORMANCE_TEST(MAYBE_conformance_more_functions_readPixelsBadArgs,
+CONFORMANCE_TEST(conformance_more_functions_readPixelsBadArgs,
   "conformance/more/functions/readPixelsBadArgs.html");
 CONFORMANCE_TEST(conformance_more_functions_texImage2D,
   "conformance/more/functions/texImage2D.html");
 CONFORMANCE_TEST(conformance_more_functions_texImage2DBadArgs,
   "conformance/more/functions/texImage2DBadArgs.html");
-CONFORMANCE_TEST(MAYBE_conformance_more_functions_texImage2DHTML,
+CONFORMANCE_TEST(conformance_more_functions_texImage2DHTML,
   "conformance/more/functions/texImage2DHTML.html");
 CONFORMANCE_TEST(conformance_more_functions_texImage2DHTMLBadArgs,
   "conformance/more/functions/texImage2DHTMLBadArgs.html");
@@ -112,7 +87,7 @@ CONFORMANCE_TEST(conformance_more_functions_texSubImage2D,
   "conformance/more/functions/texSubImage2D.html");
 CONFORMANCE_TEST(conformance_more_functions_texSubImage2DBadArgs,
   "conformance/more/functions/texSubImage2DBadArgs.html");
-CONFORMANCE_TEST(MAYBE_conformance_more_functions_texSubImage2DHTML,
+CONFORMANCE_TEST(conformance_more_functions_texSubImage2DHTML,
   "conformance/more/functions/texSubImage2DHTML.html");
 CONFORMANCE_TEST(conformance_more_functions_texSubImage2DHTMLBadArgs,
   "conformance/more/functions/texSubImage2DHTMLBadArgs.html");
@@ -228,8 +203,12 @@ CONFORMANCE_TEST(conformance_misc_is_object,
   "conformance/misc/is-object.html");
 CONFORMANCE_TEST(conformance_misc_null_object_behaviour,
   "conformance/misc/null-object-behaviour.html");
+CONFORMANCE_TEST(conformance_misc_functions_returning_strings,
+  "conformance/misc/functions-returning-strings.html");
 CONFORMANCE_TEST(conformance_misc_object_deletion_behaviour,
   "conformance/misc/object-deletion-behaviour.html");
+CONFORMANCE_TEST(conformance_misc_shader_precision_format,
+  "conformance/misc/shader-precision-format.html");
 CONFORMANCE_TEST(conformance_misc_type_conversion_test,
   "conformance/misc/type-conversion-test.html");
 CONFORMANCE_TEST(conformance_misc_uninitialized_test,
@@ -278,6 +257,8 @@ CONFORMANCE_TEST(conformance_rendering_point_size,
   "conformance/rendering/point-size.html");
 CONFORMANCE_TEST(conformance_rendering_triangle,
   "conformance/rendering/triangle.html");
+CONFORMANCE_TEST(conformance_rendering_line_loop_tri_fan,
+  "conformance/rendering/line-loop-tri-fan.html");
 CONFORMANCE_TEST(conformance_state_gl_enable_enum_test,
   "conformance/state/gl-enable-enum-test.html");
 CONFORMANCE_TEST(conformance_state_gl_enum_tests,
@@ -290,6 +271,8 @@ CONFORMANCE_TEST(conformance_state_gl_getstring,
   "conformance/state/gl-getstring.html");
 CONFORMANCE_TEST(conformance_state_gl_object_get_calls,
   "conformance/state/gl-object-get-calls.html");
+CONFORMANCE_TEST(conformance_textures_compressed_tex_image,
+  "conformance/textures/compressed-tex-image.html");
 CONFORMANCE_TEST(conformance_textures_copy_tex_image_and_sub_image_2d,
   "conformance/textures/copy-tex-image-and-sub-image-2d.html");
 CONFORMANCE_TEST(conformance_textures_gl_pixelstorei,
@@ -558,6 +541,10 @@ CONFORMANCE_TEST(conformance_glsl_implicit_ternary_ivec3_vec3_vert,
   "conformance/glsl/implicit/ternary_ivec3_vec3.vert.html");
 CONFORMANCE_TEST(conformance_glsl_implicit_ternary_ivec4_vec4_vert,
   "conformance/glsl/implicit/ternary_ivec4_vec4.vert.html");
+CONFORMANCE_TEST(conformance_glsl_misc_attrib_location_length_limits,
+  "conformance/glsl/misc/attrib-location-length-limits.html");
+CONFORMANCE_TEST(conformance_glsl_misc_embedded_struct_definitions_forbidden,
+  "conformance/glsl/misc/embedded-struct-definitions-forbidden.html");
 CONFORMANCE_TEST(conformance_glsl_misc_glsl_function_nodes,
   "conformance/glsl/misc/glsl-function-nodes.html");
 CONFORMANCE_TEST(conformance_glsl_misc_glsl_long_variable_names,
@@ -572,8 +559,14 @@ CONFORMANCE_TEST(conformance_glsl_misc_shader_with_257_character_identifier_frag
   "conformance/glsl/misc/shader-with-257-character-identifier.frag.html");
 CONFORMANCE_TEST(conformance_glsl_misc_shader_with__webgl_identifier_vert,
   "conformance/glsl/misc/shader-with-_webgl-identifier.vert.html");
+CONFORMANCE_TEST(conformance_glsl_misc_shader_with_arbitrary_indexing_frag,
+  "conformance/glsl/misc/shader-with-arbitrary-indexing.frag.html");
+CONFORMANCE_TEST(conformance_glsl_misc_shader_with_arbitrary_indexing_vert,
+  "conformance/glsl/misc/shader-with-arbitrary-indexing.vert.html");
 CONFORMANCE_TEST(conformance_glsl_misc_shader_with_attrib_array_vert,
   "conformance/glsl/misc/shader-with-attrib-array.vert.html");
+CONFORMANCE_TEST(conformance_glsl_misc_shader_with_attrib_struct_vert,
+  "conformance/glsl/misc/shader-with-attrib-struct.vert.html");
 CONFORMANCE_TEST(conformance_glsl_misc_shader_with_clipvertex_vert,
   "conformance/glsl/misc/shader-with-clipvertex.vert.html");
 CONFORMANCE_TEST(conformance_glsl_misc_shader_with_default_precision_frag,
@@ -618,8 +611,8 @@ CONFORMANCE_TEST(conformance_glsl_misc_shader_with_ivec3_return_value_frag,
   "conformance/glsl/misc/shader-with-ivec3-return-value.frag.html");
 CONFORMANCE_TEST(conformance_glsl_misc_shader_with_ivec4_return_value_frag,
   "conformance/glsl/misc/shader-with-ivec4-return-value.frag.html");
-CONFORMANCE_TEST(conformance_glsl_misc_shader_with_line_directive,
-  "conformance/glsl/misc/shader-with-line-directive.html");
+CONFORMANCE_TEST(conformance_glsl_misc_shader_with_limited_indexing_frag,
+  "conformance/glsl/misc/shader-with-limited-indexing.frag.html");
 CONFORMANCE_TEST(conformance_glsl_misc_shader_with_long_line,
   "conformance/glsl/misc/shader-with-long-line.html");
 CONFORMANCE_TEST(conformance_glsl_misc_shader_with_non_ascii_error_frag,
@@ -630,6 +623,8 @@ CONFORMANCE_TEST(conformance_glsl_misc_shader_with_quoted_error_frag,
   "conformance/glsl/misc/shader-with-quoted-error.frag.html");
 CONFORMANCE_TEST(conformance_glsl_misc_shader_with_undefined_preprocessor_symbol_frag,
   "conformance/glsl/misc/shader-with-undefined-preprocessor-symbol.frag.html");
+CONFORMANCE_TEST(conformance_glsl_misc_shader_with_uniform_in_loop_condition_vert,
+  "conformance/glsl/misc/shader-with-uniform-in-loop-condition.vert.html");
 CONFORMANCE_TEST(conformance_glsl_misc_shader_with_vec2_return_value_frag,
   "conformance/glsl/misc/shader-with-vec2-return-value.frag.html");
 CONFORMANCE_TEST(conformance_glsl_misc_shader_with_vec3_return_value_frag,
@@ -650,6 +645,12 @@ CONFORMANCE_TEST(conformance_glsl_misc_shader_without_precision_frag,
   "conformance/glsl/misc/shader-without-precision.frag.html");
 CONFORMANCE_TEST(conformance_glsl_misc_shared,
   "conformance/glsl/misc/shared.html");
+CONFORMANCE_TEST(conformance_glsl_misc_struct_nesting_exceeds_maximum,
+  "conformance/glsl/misc/struct-nesting-exceeds-maximum.html");
+CONFORMANCE_TEST(conformance_glsl_misc_struct_nesting_under_maximum,
+  "conformance/glsl/misc/struct-nesting-under-maximum.html");
+CONFORMANCE_TEST(conformance_glsl_misc_uniform_location_length_limits,
+  "conformance/glsl/misc/uniform-location-length-limits.html");
 CONFORMANCE_TEST(conformance_glsl_reserved__webgl_field_vert,
   "conformance/glsl/reserved/_webgl_field.vert.html");
 CONFORMANCE_TEST(conformance_glsl_reserved__webgl_function_vert,

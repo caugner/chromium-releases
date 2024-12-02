@@ -9,15 +9,18 @@
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/first_run/first_run.h"
+#include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_impl.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/sessions/session_restore.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_init.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
@@ -28,7 +31,16 @@
 
 class BrowserInitTest : public ExtensionBrowserTest {
  protected:
-  virtual void SetUpCommandLine(CommandLine* command_line) {
+  virtual bool SetUpUserDataDirectory() OVERRIDE {
+    // Make sure the first run sentinel file exists before running these tests,
+    // since some of them customize the session startup pref whose value can
+    // be different than the default during the first run.
+    // TODO(bauerb): set the first run flag instead of creating a sentinel file.
+    first_run::CreateSentinel();
+    return ExtensionBrowserTest::SetUpUserDataDirectory();
+  }
+
+  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
     ExtensionBrowserTest::SetUpCommandLine(command_line);
     command_line->AppendSwitch(switches::kEnablePanels);
   }
@@ -127,6 +139,10 @@ IN_PROC_BROWSER_TEST_F(BrowserInitTest, OpenURLsPopup) {
   BrowserList::RemoveObserver(&observer);
 }
 
+// We don't do non-process-startup browser launches on ChromeOS.
+// Session restore for process-startup browser launches is tested
+// in session_restore_uitest.
+#if !defined(OS_CHROMEOS)
 // Verify that startup URLs are honored when the process already exists but has
 // no tabbed browser windows (eg. as if the process is running only due to a
 // background application.
@@ -320,6 +336,8 @@ IN_PROC_BROWSER_TEST_F(BrowserInitTest, OpenAppShortcutPanel) {
 
 #endif  // !defined(OS_MACOSX)
 
+#endif  // !defined(OS_CHROMEOS)
+
 IN_PROC_BROWSER_TEST_F(BrowserInitTest, ReadingWasRestartedAfterRestart) {
   // Tests that BrowserInit::WasRestarted reads and resets the preference
   // kWasRestarted correctly.
@@ -342,6 +360,7 @@ IN_PROC_BROWSER_TEST_F(BrowserInitTest, ReadingWasRestartedAfterNormalStart) {
   EXPECT_FALSE(BrowserInit::WasRestarted());
 }
 
+#if !defined(OS_CHROMEOS)
 IN_PROC_BROWSER_TEST_F(BrowserInitTest, StartupURLsForTwoProfiles) {
   Profile* default_profile = browser()->profile();
 
@@ -474,3 +493,190 @@ IN_PROC_BROWSER_TEST_F(BrowserInitTest, UpdateWithTwoProfiles) {
   EXPECT_EQ(GURL(chrome::kChromeUINewTabURL),
             new_browser->GetWebContentsAt(0)->GetURL());
 }
+
+IN_PROC_BROWSER_TEST_F(BrowserInitTest, ProfilesWithoutPagesNotLaunched) {
+  Profile* default_profile = browser()->profile();
+
+  ProfileManager* profile_manager = g_browser_process->profile_manager();
+
+  // Create 4 more profiles.
+  FilePath dest_path1 = profile_manager->user_data_dir().Append(
+      FILE_PATH_LITERAL("New Profile 1"));
+  FilePath dest_path2 = profile_manager->user_data_dir().Append(
+      FILE_PATH_LITERAL("New Profile 2"));
+  FilePath dest_path3 = profile_manager->user_data_dir().Append(
+      FILE_PATH_LITERAL("New Profile 3"));
+  FilePath dest_path4 = profile_manager->user_data_dir().Append(
+      FILE_PATH_LITERAL("New Profile 4"));
+
+  Profile* profile_home1 = profile_manager->GetProfile(dest_path1);
+  ASSERT_TRUE(profile_home1);
+  Profile* profile_home2 = profile_manager->GetProfile(dest_path2);
+  ASSERT_TRUE(profile_home2);
+  Profile* profile_last = profile_manager->GetProfile(dest_path3);
+  ASSERT_TRUE(profile_last);
+  Profile* profile_urls = profile_manager->GetProfile(dest_path4);
+  ASSERT_TRUE(profile_urls);
+
+  // Set the profiles to open urls, open last visited pages or display the home
+  // page.
+  SessionStartupPref pref_home(SessionStartupPref::DEFAULT);
+  SessionStartupPref::SetStartupPref(profile_home1, pref_home);
+  SessionStartupPref::SetStartupPref(profile_home2, pref_home);
+
+  SessionStartupPref pref_last(SessionStartupPref::LAST);
+  SessionStartupPref::SetStartupPref(profile_last, pref_last);
+
+  std::vector<GURL> urls;
+  urls.push_back(ui_test_utils::GetTestUrl(
+      FilePath(FilePath::kCurrentDirectory),
+      FilePath(FILE_PATH_LITERAL("title1.html"))));
+
+  SessionStartupPref pref_urls(SessionStartupPref::URLS);
+  pref_urls.urls = urls;
+  SessionStartupPref::SetStartupPref(profile_urls, pref_urls);
+
+  // Close the browser.
+  browser()->window()->Close();
+
+  // Do a simple non-process-startup browser launch.
+  CommandLine dummy(CommandLine::NO_PROGRAM);
+
+  int return_code;
+  BrowserInit browser_init;
+  std::vector<Profile*> last_opened_profiles;
+  last_opened_profiles.push_back(profile_home1);
+  last_opened_profiles.push_back(profile_home2);
+  last_opened_profiles.push_back(profile_last);
+  last_opened_profiles.push_back(profile_urls);
+  browser_init.Start(dummy, profile_manager->user_data_dir(), profile_home1,
+                     last_opened_profiles, &return_code);
+
+
+  while (SessionRestore::IsRestoring(default_profile) ||
+         SessionRestore::IsRestoring(profile_home1) ||
+         SessionRestore::IsRestoring(profile_home2) ||
+         SessionRestore::IsRestoring(profile_last) ||
+         SessionRestore::IsRestoring(profile_urls))
+    MessageLoop::current()->RunAllPending();
+
+  Browser* new_browser = NULL;
+  // The last open profile (the profile_home1 in this case) will always be
+  // launched, even if it will open just the home page.
+  ASSERT_EQ(1u, BrowserList::GetBrowserCount(profile_home1));
+  new_browser = FindOneOtherBrowserForProfile(profile_home1, NULL);
+  ASSERT_TRUE(new_browser);
+  ASSERT_EQ(1, new_browser->tab_count());
+  EXPECT_EQ(GURL(chrome::kChromeUINewTabURL),
+            new_browser->GetWebContentsAt(0)->GetURL());
+
+  // profile_urls opened the urls.
+  ASSERT_EQ(1u, BrowserList::GetBrowserCount(profile_urls));
+  new_browser = FindOneOtherBrowserForProfile(profile_urls, NULL);
+  ASSERT_TRUE(new_browser);
+  ASSERT_EQ(1, new_browser->tab_count());
+  EXPECT_EQ(urls[0], new_browser->GetWebContentsAt(0)->GetURL());
+
+  // profile_last opened the last open pages.
+  ASSERT_EQ(1u, BrowserList::GetBrowserCount(profile_last));
+  new_browser = FindOneOtherBrowserForProfile(profile_last, NULL);
+  ASSERT_TRUE(new_browser);
+  ASSERT_EQ(1, new_browser->tab_count());
+  EXPECT_EQ(GURL(chrome::kChromeUINewTabURL),
+            new_browser->GetWebContentsAt(0)->GetURL());
+
+  // profile_home2 was not launched since it would've only opened the home page.
+  ASSERT_EQ(0u, BrowserList::GetBrowserCount(profile_home2));
+}
+
+IN_PROC_BROWSER_TEST_F(BrowserInitTest, ProfilesLaunchedAfterCrash) {
+  // After an unclean exit, all profiles will be launched. However, they won't
+  // open any pages automatically.
+
+  ProfileManager* profile_manager = g_browser_process->profile_manager();
+
+  // Create 3 profiles.
+  FilePath dest_path1 = profile_manager->user_data_dir().Append(
+      FILE_PATH_LITERAL("New Profile 1"));
+  FilePath dest_path2 = profile_manager->user_data_dir().Append(
+      FILE_PATH_LITERAL("New Profile 2"));
+  FilePath dest_path3 = profile_manager->user_data_dir().Append(
+      FILE_PATH_LITERAL("New Profile 3"));
+
+  Profile* profile_home = profile_manager->GetProfile(dest_path1);
+  ASSERT_TRUE(profile_home);
+  Profile* profile_last = profile_manager->GetProfile(dest_path2);
+  ASSERT_TRUE(profile_last);
+  Profile* profile_urls = profile_manager->GetProfile(dest_path3);
+  ASSERT_TRUE(profile_urls);
+
+  // Set the profiles to open the home page, last visited pages or URLs.
+  SessionStartupPref pref_home(SessionStartupPref::DEFAULT);
+  SessionStartupPref::SetStartupPref(profile_home, pref_home);
+
+  SessionStartupPref pref_last(SessionStartupPref::LAST);
+  SessionStartupPref::SetStartupPref(profile_last, pref_last);
+
+  std::vector<GURL> urls;
+  urls.push_back(ui_test_utils::GetTestUrl(
+      FilePath(FilePath::kCurrentDirectory),
+      FilePath(FILE_PATH_LITERAL("title1.html"))));
+
+  SessionStartupPref pref_urls(SessionStartupPref::URLS);
+  pref_urls.urls = urls;
+  SessionStartupPref::SetStartupPref(profile_urls, pref_urls);
+
+  // Simulate a launch after an unclear exit.
+  browser()->window()->Close();
+  static_cast<ProfileImpl*>(profile_home)->last_session_exited_cleanly_ = false;
+  static_cast<ProfileImpl*>(profile_last)->last_session_exited_cleanly_ = false;
+  static_cast<ProfileImpl*>(profile_urls)->last_session_exited_cleanly_ = false;
+
+  CommandLine dummy(CommandLine::NO_PROGRAM);
+  int return_code;
+  BrowserInit browser_init;
+  std::vector<Profile*> last_opened_profiles;
+  last_opened_profiles.push_back(profile_home);
+  last_opened_profiles.push_back(profile_last);
+  last_opened_profiles.push_back(profile_urls);
+  browser_init.Start(dummy, profile_manager->user_data_dir(), profile_home,
+                     last_opened_profiles, &return_code);
+
+  // No profiles are getting restored, since they all display the crash info
+  // bar.
+  EXPECT_FALSE(SessionRestore::IsRestoring(profile_home));
+  EXPECT_FALSE(SessionRestore::IsRestoring(profile_last));
+  EXPECT_FALSE(SessionRestore::IsRestoring(profile_urls));
+
+  // The profile which normally opens the home page displays the new tab page.
+  Browser* new_browser = NULL;
+  ASSERT_EQ(1u, BrowserList::GetBrowserCount(profile_home));
+  new_browser = FindOneOtherBrowserForProfile(profile_home, NULL);
+  ASSERT_TRUE(new_browser);
+  ASSERT_EQ(1, new_browser->tab_count());
+  EXPECT_EQ(GURL(chrome::kChromeUINewTabURL),
+            new_browser->GetWebContentsAt(0)->GetURL());
+  EXPECT_EQ(1U, new_browser->GetTabContentsWrapperAt(0)->infobar_tab_helper()->
+            infobar_count());
+
+  // The profile which normally opens last open pages displays the new tab page.
+  ASSERT_EQ(1u, BrowserList::GetBrowserCount(profile_last));
+  new_browser = FindOneOtherBrowserForProfile(profile_last, NULL);
+  ASSERT_TRUE(new_browser);
+  ASSERT_EQ(1, new_browser->tab_count());
+  EXPECT_EQ(GURL(chrome::kChromeUINewTabURL),
+            new_browser->GetWebContentsAt(0)->GetURL());
+  EXPECT_EQ(1U, new_browser->GetTabContentsWrapperAt(0)->infobar_tab_helper()->
+            infobar_count());
+
+  // The profile which normally opens URLs opens them (in addition to displaying
+  // the crash info bar).
+  ASSERT_EQ(1u, BrowserList::GetBrowserCount(profile_urls));
+  new_browser = FindOneOtherBrowserForProfile(profile_urls, NULL);
+  ASSERT_TRUE(new_browser);
+  ASSERT_EQ(1, new_browser->tab_count());
+  EXPECT_EQ(urls[0], new_browser->GetWebContentsAt(0)->GetURL());
+  EXPECT_EQ(1U, new_browser->GetTabContentsWrapperAt(0)->infobar_tab_helper()->
+            infobar_count());
+}
+#endif  // !OS_CHROMEOS

@@ -1,3 +1,7 @@
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
 [
   {
     "namespace": "experimental.socket",
@@ -16,6 +20,11 @@
           "resultCode": {
             "type": "integer",
             "description": "The result code, if the event type is writeComplete. The result code description matches that of <code>writeInfo.bytesWritten</code>.",
+            "optional": true
+          },
+          "data": {
+            "type": "string",
+            "description": "The data read, if the event type is dataRead.",
             "optional": true
           },
           "isFinalEvent": {

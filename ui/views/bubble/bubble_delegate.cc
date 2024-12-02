@@ -25,7 +25,10 @@ Widget* CreateBubbleWidget(BubbleDelegateView* bubble, Widget* parent) {
   Widget::InitParams bubble_params(Widget::InitParams::TYPE_BUBBLE);
   bubble_params.delegate = bubble;
   bubble_params.transparent = true;
-  bubble_params.parent_widget = parent;
+  if (bubble->parent_window())
+    bubble_params.parent = bubble->parent_window();
+  else
+    bubble_params.parent_widget = parent;
   if (bubble->use_focusless())
     bubble_params.can_activate = false;
 #if defined(OS_WIN) && !defined(USE_AURA)
@@ -37,39 +40,53 @@ Widget* CreateBubbleWidget(BubbleDelegateView* bubble, Widget* parent) {
 }
 
 #if defined(OS_WIN) && !defined(USE_AURA)
-// The border widget's delegate, needed for transparent Windows native controls.
-// TODO(msw): Remove this when Windows native controls are no longer needed.
-class VIEWS_EXPORT BubbleBorderDelegateView : public WidgetDelegateView {
+// Windows uses two widgets and some extra complexity to host partially
+// transparent native controls and use per-pixel HWND alpha on the border.
+// TODO(msw): Clean these up when Windows native controls are no longer needed.
+class BubbleBorderDelegate : public WidgetDelegate,
+                             public Widget::Observer {
  public:
-  explicit BubbleBorderDelegateView(BubbleDelegateView* bubble)
-      : bubble_(bubble) {}
-  virtual ~BubbleBorderDelegateView() {}
+  BubbleBorderDelegate(BubbleDelegateView* bubble, Widget* widget)
+      : bubble_(bubble),
+        widget_(widget) {
+    bubble_->GetWidget()->AddObserver(this);
+  }
 
-  // WidgetDelegateView overrides:
-  virtual bool CanActivate() const OVERRIDE;
-  virtual NonClientFrameView* CreateNonClientFrameView() OVERRIDE;
+  virtual ~BubbleBorderDelegate() {
+    if (bubble_ && bubble_->GetWidget())
+      bubble_->GetWidget()->RemoveObserver(this);
+  }
+
+  // WidgetDelegate overrides:
+  virtual bool CanActivate() const OVERRIDE { return false; }
+  virtual void DeleteDelegate() OVERRIDE { delete this; }
+  virtual Widget* GetWidget() OVERRIDE { return widget_; }
+  virtual const Widget* GetWidget() const OVERRIDE { return widget_; }
+  virtual NonClientFrameView* CreateNonClientFrameView(
+      views::Widget* widget) OVERRIDE {
+    return bubble_->CreateNonClientFrameView(widget);
+  }
+
+  // Widget::Observer overrides:
+  virtual void OnWidgetClosing(Widget* widget) OVERRIDE {
+    bubble_ = NULL;
+    widget_->Close();
+  }
 
  private:
   BubbleDelegateView* bubble_;
+  Widget* widget_;
 
-  DISALLOW_COPY_AND_ASSIGN(BubbleBorderDelegateView);
+  DISALLOW_COPY_AND_ASSIGN(BubbleBorderDelegate);
 };
-
-bool BubbleBorderDelegateView::CanActivate() const { return false; }
-
-NonClientFrameView* BubbleBorderDelegateView::CreateNonClientFrameView() {
-  return bubble_->CreateNonClientFrameView();
-}
 
 // Create a widget to host the bubble's border.
 Widget* CreateBorderWidget(BubbleDelegateView* bubble, Widget* parent) {
   Widget* border_widget = new Widget();
   Widget::InitParams border_params(Widget::InitParams::TYPE_BUBBLE);
-  border_params.delegate = new BubbleBorderDelegateView(bubble);
+  border_params.delegate = new BubbleBorderDelegate(bubble, border_widget);
   border_params.transparent = true;
   border_params.parent_widget = parent;
-  if (!border_params.parent_widget)
-    border_params.ownership = Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
   border_widget->Init(border_params);
   return border_widget;
 }
@@ -94,7 +111,8 @@ BubbleDelegateView::BubbleDelegateView()
       margin_(kDefaultMargin),
       original_opacity_(255),
       border_widget_(NULL),
-      use_focusless_(false) {
+      use_focusless_(false),
+      parent_window_(NULL) {
   set_background(views::Background::CreateSolidBackground(color_));
   AddAccelerator(ui::Accelerator(ui::VKEY_ESCAPE, 0));
 }
@@ -110,7 +128,8 @@ BubbleDelegateView::BubbleDelegateView(
       margin_(kDefaultMargin),
       original_opacity_(255),
       border_widget_(NULL),
-      use_focusless_(false) {
+      use_focusless_(false),
+      parent_window_(NULL) {
   set_background(views::Background::CreateSolidBackground(color_));
   AddAccelerator(ui::Accelerator(ui::VKEY_ESCAPE, 0));
 }
@@ -147,18 +166,9 @@ View* BubbleDelegateView::GetContentsView() {
   return this;
 }
 
-NonClientFrameView* BubbleDelegateView::CreateNonClientFrameView() {
+NonClientFrameView* BubbleDelegateView::CreateNonClientFrameView(
+    Widget* widget) {
   return new BubbleFrameView(arrow_location(), color(), margin());
-}
-
-void BubbleDelegateView::OnWidgetClosing(Widget* widget) {
-  if (widget == GetWidget()) {
-    widget->RemoveObserver(this);
-    if (border_widget_) {
-      border_widget_->Close();
-      border_widget_ = NULL;
-    }
-  }
 }
 
 void BubbleDelegateView::OnWidgetVisibilityChanged(Widget* widget,
@@ -268,6 +278,11 @@ void BubbleDelegateView::SizeToContents() {
 #if defined(OS_WIN) && !defined(USE_AURA)
   border_widget_->SetBounds(GetBubbleBounds());
   GetWidget()->SetBounds(GetBubbleClientBounds());
+
+  // Update the local client bounds clipped out by the border widget background.
+  // Used to correctly display overlapping semi-transparent widgets on Windows.
+  GetBubbleFrameView()->bubble_border()->set_client_bounds(
+      GetBubbleFrameView()->GetBoundsForClientView());
 #else
   GetWidget()->SetBounds(GetBubbleBounds());
 #endif

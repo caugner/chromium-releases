@@ -5,10 +5,11 @@
 #include "chrome/browser/chromeos/dbus/speech_synthesizer_client.h"
 
 #include "base/bind.h"
+#include "base/chromeos/chromeos_version.h"
 #include "base/compiler_specific.h"
-#include "chrome/browser/chromeos/system/runtime_environment.h"
 #include "dbus/bus.h"
 #include "dbus/message.h"
+#include "dbus/object_path.h"
 #include "dbus/object_proxy.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 
@@ -32,7 +33,7 @@ class SpeechSynthesizerClientImpl : public SpeechSynthesizerClient {
         weak_ptr_factory_(this) {
     proxy_ = bus->GetObjectProxy(
         speech_synthesis::kSpeechSynthesizerServiceName,
-        speech_synthesis::kSpeechSynthesizerServicePath);
+        dbus::ObjectPath(speech_synthesis::kSpeechSynthesizerServicePath));
   }
   virtual ~SpeechSynthesizerClientImpl() {}
 
@@ -125,7 +126,7 @@ SpeechSynthesizerClient::~SpeechSynthesizerClient() {
 
 // static
 SpeechSynthesizerClient* SpeechSynthesizerClient::Create(dbus::Bus* bus) {
-  if (system::runtime_environment::IsRunningOnChromeOS()) {
+  if (base::chromeos::IsRunningOnChromeOS()) {
     return new SpeechSynthesizerClientImpl(bus);
   } else {
     return new SpeechSynthesizerClientStubImpl();

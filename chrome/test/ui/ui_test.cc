@@ -18,7 +18,7 @@
 #include "base/environment.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
-#include "base/json/json_value_serializer.h"
+#include "base/json/json_file_value_serializer.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
@@ -75,11 +75,6 @@ const wchar_t UITestBase::kFailedNoCrashService[] =
 #else
     L"NOTE: Crash service not ported to this platform!";
 #endif
-
-// Uncomment this line to have the spawned process wait for the debugger to
-// attach.  This only works on Windows.  On posix systems, you can set the
-// BROWSER_WRAPPER env variable to wrap the browser process.
-// #define WAIT_FOR_DEBUGGER_ON_OPEN 1
 
 UITestBase::UITestBase()
     : launch_arguments_(CommandLine::NO_PROGRAM),
@@ -197,13 +192,26 @@ void UITestBase::SetLaunchSwitches() {
   // chrome/test/pyautolib/pyauto.py as well to take effect for all tests
   // on chromeos.
 
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kWaitForDebugger))
+    launch_arguments_.AppendSwitch(switches::kWaitForDebugger);
+
   // We need cookies on file:// for things like the page cycler.
   if (enable_file_cookies_)
     launch_arguments_.AppendSwitch(switches::kEnableFileCookies);
   if (dom_automation_enabled_)
     launch_arguments_.AppendSwitch(switches::kDomAutomationController);
-  if (!homepage_.empty())
-    launch_arguments_.AppendSwitchASCII(switches::kHomePage, homepage_);
+  if (!homepage_.empty()) {
+    // Pass |homepage_| both as an arg (so that it opens on startup) and to the
+    // homepage switch (so that the homepage is set).
+
+    if (!launch_arguments_.HasSwitch(switches::kHomePage))
+      launch_arguments_.AppendSwitchASCII(switches::kHomePage, homepage_);
+
+    if (launch_arguments_.GetArgs().empty() &&
+        !launch_arguments_.HasSwitch(switches::kRestoreLastSession)) {
+      launch_arguments_.AppendArg(homepage_);
+    }
+  }
   if (!test_name_.empty())
     launch_arguments_.AppendSwitchASCII(switches::kTestName, test_name_);
 #if defined(USE_AURA)
@@ -248,6 +256,33 @@ bool UITestBase::LaunchAnotherBrowserBlockUntilClosed(
   ProxyLauncher::LaunchState state = DefaultLaunchState();
   state.command.AppendArguments(cmdline, false);
   return launcher_->LaunchAnotherBrowserBlockUntilClosed(state);
+}
+
+bool UITestBase::LaunchAnotherBrowserNoUrlArg(const CommandLine& cmdline) {
+  // Clear the homepage temporarily, and reset the launch switches, so that the
+  // URL argument doesn't get added.
+
+  std::string homepage_original;
+  std::swap(homepage_original, homepage_);
+
+  CommandLine launch_arguments_original(launch_arguments_);
+  launch_arguments_ = CommandLine(launch_arguments_.GetProgram());
+
+  SetLaunchSwitches();
+
+  ProxyLauncher::LaunchState state = DefaultLaunchState();
+
+  // But do add the --homepage switch
+  state.command.AppendSwitchASCII(switches::kHomePage, homepage_original);
+
+  state.command.AppendArguments(cmdline, false);
+  bool result = launcher_->LaunchAnotherBrowserBlockUntilClosed(state);
+
+  // Reset launch_arguments_ and homepage_ to their original values.
+  std::swap(homepage_original, homepage_);
+  std::swap(launch_arguments_original, launch_arguments_);
+
+  return result;
 }
 #endif
 

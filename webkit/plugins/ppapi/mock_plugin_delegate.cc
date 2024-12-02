@@ -34,6 +34,9 @@ void MockPluginDelegate::PluginRequestedCancelComposition(
     PluginInstance* instance) {
 }
 
+void MockPluginDelegate::PluginSelectionChanged(PluginInstance* instance) {
+}
+
 void MockPluginDelegate::PluginCrashed(PluginInstance* instance) {
 }
 
@@ -66,25 +69,35 @@ MockPluginDelegate::CreateVideoDecoder(
 
 MockPluginDelegate::PlatformVideoCapture*
 MockPluginDelegate::CreateVideoCapture(
-    media::VideoCapture::EventHandler* handler){
+    const std::string& device_id,
+    PlatformVideoCaptureEventHandler* handler){
   return NULL;
 }
 
-MockPluginDelegate::PlatformAudio* MockPluginDelegate::CreateAudio(
+uint32_t MockPluginDelegate::GetAudioHardwareOutputSampleRate() {
+  return 0;
+}
+
+uint32_t MockPluginDelegate::GetAudioHardwareOutputBufferSize() {
+  return 0;
+}
+
+MockPluginDelegate::PlatformAudioOutput* MockPluginDelegate::CreateAudioOutput(
     uint32_t sample_rate,
     uint32_t sample_count,
-    PlatformAudioCommonClient* client) {
+    PlatformAudioOutputClient* client) {
   return NULL;
 }
 
 MockPluginDelegate::PlatformAudioInput* MockPluginDelegate::CreateAudioInput(
+    const std::string& device_id,
     uint32_t sample_rate,
     uint32_t sample_count,
-    PlatformAudioCommonClient* client) {
+    PlatformAudioInputClient* client) {
   return NULL;
 }
 
-MockPluginDelegate::PpapiBroker* MockPluginDelegate::ConnectToPpapiBroker(
+MockPluginDelegate::Broker* MockPluginDelegate::ConnectToBroker(
     PPB_Broker_Impl* client) {
   return NULL;
 }
@@ -266,6 +279,10 @@ void MockPluginDelegate::TCPSocketWrite(uint32 socket_id,
 void MockPluginDelegate::TCPSocketDisconnect(uint32 socket_id) {
 }
 
+void MockPluginDelegate::RegisterTCPSocket(PPB_TCPSocket_Private_Impl* socket,
+                                           uint32 socket_id) {
+}
+
 uint32 MockPluginDelegate::UDPSocketCreate() {
   return 0;
 }
@@ -285,6 +302,43 @@ void MockPluginDelegate::UDPSocketSendTo(uint32 socket_id,
 }
 
 void MockPluginDelegate::UDPSocketClose(uint32 socket_id) {
+}
+
+void MockPluginDelegate::TCPServerSocketListen(
+    PP_Resource socket_resource,
+    const PP_NetAddress_Private& addr,
+    int32_t backlog) {
+}
+
+void MockPluginDelegate::TCPServerSocketAccept(uint32 server_socket_id) {
+}
+
+void MockPluginDelegate::TCPServerSocketStopListening(
+    PP_Resource socket_resource,
+    uint32 socket_id) {
+}
+
+void MockPluginDelegate::RegisterHostResolver(
+    ::ppapi::PPB_HostResolver_Shared* host_resolver,
+    uint32 host_resolver_id) {
+}
+
+void MockPluginDelegate::HostResolverResolve(
+    uint32 host_resolver_id,
+    const ::ppapi::HostPortPair& host_port,
+    const PP_HostResolver_Private_Hint* hint) {
+}
+
+void MockPluginDelegate::UnregisterHostResolver(uint32 host_resolver_id) {
+}
+
+bool MockPluginDelegate::AddNetworkListObserver(
+    webkit_glue::NetworkListObserver* observer) {
+  return false;
+}
+
+void MockPluginDelegate::RemoveNetworkListObserver(
+    webkit_glue::NetworkListObserver* observer) {
 }
 
 int32_t MockPluginDelegate::ShowContextMenu(
@@ -376,6 +430,17 @@ bool MockPluginDelegate::IsInFullscreenMode() {
 
 bool MockPluginDelegate::IsPageVisible() const {
   return true;
+}
+
+int MockPluginDelegate::EnumerateDevices(
+    PP_DeviceType_Dev type,
+    const EnumerateDevicesCallback& callback) {
+  return -1;
+}
+
+webkit_glue::ClipboardClient*
+MockPluginDelegate::CreateClipboardClient() const {
+  return NULL;
 }
 
 }  // namespace ppapi

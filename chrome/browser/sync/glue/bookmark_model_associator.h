@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,8 +13,10 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/memory/weak_ptr.h"
-#include "chrome/browser/sync/internal_api/includes/unrecoverable_error_handler.h"
+#include "chrome/browser/sync/glue/data_type_controller.h"
+#include "chrome/browser/sync/glue/data_type_error_handler.h"
 #include "chrome/browser/sync/glue/model_associator.h"
+#include "sync/util/unrecoverable_error_handler.h"
 
 class BookmarkModel;
 class BookmarkNode;
@@ -34,10 +36,14 @@ class BookmarkModelAssociator
     : public PerDataTypeAssociatorInterface<BookmarkNode, int64> {
  public:
   static syncable::ModelType model_type() { return syncable::BOOKMARKS; }
+  // |expect_mobile_bookmarks_folder| controls whether or not we
+  // expect the mobile bookmarks permanent folder to be created.
+  // Should be set to true only by mobile clients.
   BookmarkModelAssociator(
       BookmarkModel* bookmark_model,
       sync_api::UserShare* user_share,
-      UnrecoverableErrorHandler* unrecoverable_error_handler);
+      DataTypeErrorHandler* unrecoverable_error_handler,
+      bool expect_mobile_bookmarks_folder);
   virtual ~BookmarkModelAssociator();
 
   // Updates the visibility of the permanents node in the BookmarkModel.
@@ -127,7 +133,8 @@ class BookmarkModelAssociator
 
   BookmarkModel* bookmark_model_;
   sync_api::UserShare* user_share_;
-  UnrecoverableErrorHandler* unrecoverable_error_handler_;
+  DataTypeErrorHandler* unrecoverable_error_handler_;
+  const bool expect_mobile_bookmarks_folder_;
   BookmarkIdToSyncIdMap id_map_;
   SyncIdToBookmarkNodeMap id_map_inverse_;
   // Stores sync ids for dirty associations.

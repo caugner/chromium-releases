@@ -11,10 +11,12 @@
 
 #include "base/basictypes.h"
 #include "base/string16.h"
+#include "chrome/browser/tabs/pinned_tab_codec.h"
 
 class Browser;
 class Profile;
 class TemplateURL;
+struct SessionStartupPref;
 
 namespace protector {
 
@@ -83,9 +85,20 @@ class BaseSettingChange {
 // |backup| will be owned by the returned |BaseSettingChange| instance. |actual|
 // is not owned and is safe to destroy after Protector::ShowChange has been
 // called for the returned instance.
-BaseSettingChange* CreateDefaultSearchProviderChange(
-    const TemplateURL* actual,
-    TemplateURL* backup);
+BaseSettingChange* CreateDefaultSearchProviderChange(const TemplateURL* actual,
+                                                     TemplateURL* backup);
+
+// Allocates and initializes BaseSettingChange implementation for session
+// startup setting, including the pinned tabs. Reports corresponding histograms.
+BaseSettingChange* CreateSessionStartupChange(
+    const SessionStartupPref& actual_startup_pref,
+    const PinnedTabCodec::Tabs& actual_pinned_tabs,
+    const SessionStartupPref& backup_startup_pref,
+    const PinnedTabCodec::Tabs& backup_pinned_tabs);
+
+// Allocates and initializes BaseSettingChange implementation for an unknown
+// preferences change with invalid backup.
+BaseSettingChange* CreatePrefsBackupInvalidChange();
 
 }  // namespace protector
 

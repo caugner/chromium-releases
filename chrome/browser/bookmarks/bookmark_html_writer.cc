@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -93,7 +93,8 @@ class Writer : public base::RefCountedThreadSafe<Writer> {
       : bookmarks_(bookmarks),
         path_(path),
         favicons_map_(favicons_map),
-        observer_(observer) {
+        observer_(observer),
+        file_stream_(NULL) {
   }
 
   // Writing bookmarks and favicons data to file.
@@ -144,7 +145,7 @@ class Writer : public base::RefCountedThreadSafe<Writer> {
     Write(kFolderChildrenEnd);
     Write(kNewline);
     // File stream close is forced so that unit test could read it.
-    file_stream_.Close();
+    file_stream_.CloseSync();
 
     NotifyOnFinish();
   }
@@ -164,7 +165,7 @@ class Writer : public base::RefCountedThreadSafe<Writer> {
   // Opens the file, returning true on success.
   bool OpenFile() {
     int flags = base::PLATFORM_FILE_CREATE_ALWAYS | base::PLATFORM_FILE_WRITE;
-    return (file_stream_.Open(path_, flags) == net::OK);
+    return (file_stream_.OpenSync(path_, flags) == net::OK);
   }
 
   // Increments the indent.
@@ -188,8 +189,7 @@ class Writer : public base::RefCountedThreadSafe<Writer> {
   // Writes raw text out returning true on success. This does not escape
   // the text in anyway.
   bool Write(const std::string& text) {
-    size_t wrote = file_stream_.Write(text.c_str(), text.length(),
-                                      net::CompletionCallback());
+    size_t wrote = file_stream_.WriteSync(text.c_str(), text.length());
     bool result = (wrote == text.length());
     DCHECK(result);
     return result;

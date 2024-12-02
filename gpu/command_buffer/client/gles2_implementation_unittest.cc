@@ -116,7 +116,8 @@ class MockTransferBuffer : public TransferBufferInterface {
       unsigned int result_size,
       unsigned int /* min_buffer_size */,
       unsigned int /* max_buffer_size */,
-      unsigned int alignment) OVERRIDE;
+      unsigned int alignment,
+      unsigned int size_to_flush) OVERRIDE;
   virtual int GetShmId() OVERRIDE;
   virtual void* GetResultBuffer() OVERRIDE;
   virtual int GetResultOffset() OVERRIDE;
@@ -224,7 +225,8 @@ bool MockTransferBuffer::Initialize(
     unsigned int result_size,
     unsigned int /* min_buffer_size */,
     unsigned int /* max_buffer_size */,
-    unsigned int alignment) {
+    unsigned int alignment,
+    unsigned int /* size_to_flush */) {
   // Just check they match.
   return size_ == starting_buffer_size &&
          result_size_ == result_size &&
@@ -318,6 +320,7 @@ class GLES2ImplementationTest : public testing::Test {
   static const GLuint kProgramsAndShadersStartId = 1;
   static const GLuint kRenderbuffersStartId = 1;
   static const GLuint kTexturesStartId = 1;
+  static const GLuint kQueriesStartId = 1;
 
   typedef MockTransferBuffer::ExpectedMemoryInfo ExpectedMemoryInfo;
 
@@ -332,6 +335,10 @@ class GLES2ImplementationTest : public testing::Test {
   bool NoCommandsWritten() {
     return static_cast<const uint8*>(static_cast<const void*>(commands_))[0] ==
            kInitialValue;
+  }
+
+  QueryTracker::Query* GetQuery(GLuint id) {
+    return gl_->query_tracker_->GetQuery(id);
   }
 
   void Initialize(bool shared_resources, bool bind_generates_resource) {
@@ -455,6 +462,15 @@ class GLES2ImplementationTest : public testing::Test {
     return transfer_buffer_->GetExpectedResultMemory(size);
   }
 
+  int CheckError() {
+    ExpectedMemoryInfo result =
+        GetExpectedResultMemory(sizeof(GetError::Result));
+    EXPECT_CALL(*command_buffer(), OnFlush())
+        .WillOnce(SetMemory(result.ptr, GLuint(GL_NO_ERROR)))
+        .RetiresOnSaturation();
+    return gl_->GetError();
+  }
+
   Sequence sequence_;
   scoped_ptr<MockClientCommandBuffer> command_buffer_;
   scoped_ptr<GLES2CmdHelper> helper_;
@@ -507,6 +523,7 @@ const GLuint GLES2ImplementationTest::kFramebuffersStartId;
 const GLuint GLES2ImplementationTest::kProgramsAndShadersStartId;
 const GLuint GLES2ImplementationTest::kRenderbuffersStartId;
 const GLuint GLES2ImplementationTest::kTexturesStartId;
+const GLuint GLES2ImplementationTest::kQueriesStartId;
 #endif
 
 TEST_F(GLES2ImplementationTest, ShaderSource) {
@@ -668,6 +685,76 @@ TEST_F(GLES2ImplementationTest, DrawArraysClientSideBuffers) {
   gl_->VertexAttribPointer(
       kAttribIndex2, kNumComponents2, GL_FLOAT, GL_FALSE, kClientStride, verts);
   gl_->DrawArrays(GL_POINTS, kFirst, kCount);
+  EXPECT_EQ(0, memcmp(&expected, commands_, sizeof(expected)));
+}
+
+TEST_F(GLES2ImplementationTest, DrawArraysInstancedANGLEClientSideBuffers) {
+  static const float verts[][4] = {
+    { 12.0f, 23.0f, 34.0f, 45.0f, },
+    { 56.0f, 67.0f, 78.0f, 89.0f, },
+    { 13.0f, 24.0f, 35.0f, 46.0f, },
+  };
+  struct Cmds {
+    EnableVertexAttribArray enable1;
+    EnableVertexAttribArray enable2;
+    VertexAttribDivisorANGLE divisor;
+    BindBuffer bind_to_emu;
+    BufferData set_size;
+    BufferSubData copy_data1;
+    cmd::SetToken set_token1;
+    VertexAttribPointer set_pointer1;
+    BufferSubData copy_data2;
+    cmd::SetToken set_token2;
+    VertexAttribPointer set_pointer2;
+    DrawArraysInstancedANGLE draw;
+    BindBuffer restore;
+  };
+  const GLuint kEmuBufferId = GLES2Implementation::kClientSideArrayId;
+  const GLuint kAttribIndex1 = 1;
+  const GLuint kAttribIndex2 = 3;
+  const GLint kNumComponents1 = 3;
+  const GLint kNumComponents2 = 2;
+  const GLsizei kClientStride = sizeof(verts[0]);
+  const GLint kFirst = 1;
+  const GLsizei kCount = 2;
+  const GLuint kDivisor = 1;
+  const GLsizei kSize1 =
+      arraysize(verts) * kNumComponents1 * sizeof(verts[0][0]);
+  const GLsizei kSize2 =
+      1 * kNumComponents2 * sizeof(verts[0][0]);
+  const GLsizei kEmuOffset1 = 0;
+  const GLsizei kEmuOffset2 = kSize1;
+  const GLsizei kTotalSize = kSize1 + kSize2;
+
+  ExpectedMemoryInfo mem1 = GetExpectedMemory(kSize1);
+  ExpectedMemoryInfo mem2 = GetExpectedMemory(kSize2);
+
+  Cmds expected;
+  expected.enable1.Init(kAttribIndex1);
+  expected.enable2.Init(kAttribIndex2);
+  expected.divisor.Init(kAttribIndex2, kDivisor);
+  expected.bind_to_emu.Init(GL_ARRAY_BUFFER, kEmuBufferId);
+  expected.set_size.Init(GL_ARRAY_BUFFER, kTotalSize, 0, 0, GL_DYNAMIC_DRAW);
+  expected.copy_data1.Init(
+      GL_ARRAY_BUFFER, kEmuOffset1, kSize1, mem1.id, mem1.offset);
+  expected.set_token1.Init(GetNextToken());
+  expected.set_pointer1.Init(
+      kAttribIndex1, kNumComponents1, GL_FLOAT, GL_FALSE, 0, kEmuOffset1);
+  expected.copy_data2.Init(
+      GL_ARRAY_BUFFER, kEmuOffset2, kSize2, mem2.id, mem2.offset);
+  expected.set_token2.Init(GetNextToken());
+  expected.set_pointer2.Init(
+      kAttribIndex2, kNumComponents2, GL_FLOAT, GL_FALSE, 0, kEmuOffset2);
+  expected.draw.Init(GL_POINTS, kFirst, kCount, 1);
+  expected.restore.Init(GL_ARRAY_BUFFER, 0);
+  gl_->EnableVertexAttribArray(kAttribIndex1);
+  gl_->EnableVertexAttribArray(kAttribIndex2);
+  gl_->VertexAttribPointer(
+      kAttribIndex1, kNumComponents1, GL_FLOAT, GL_FALSE, kClientStride, verts);
+  gl_->VertexAttribPointer(
+      kAttribIndex2, kNumComponents2, GL_FLOAT, GL_FALSE, kClientStride, verts);
+  gl_->VertexAttribDivisorANGLE(kAttribIndex2, kDivisor);
+  gl_->DrawArraysInstancedANGLE(GL_POINTS, kFirst, kCount, 1);
   EXPECT_EQ(0, memcmp(&expected, commands_, sizeof(expected)));
 }
 
@@ -835,6 +922,95 @@ TEST_F(GLES2ImplementationTest,
                            GL_FLOAT, GL_FALSE, kClientStride, verts);
   gl_->DrawElements(GL_POINTS, kCount, GL_UNSIGNED_SHORT,
                     reinterpret_cast<const void*>(kIndexOffset));
+  EXPECT_EQ(0, memcmp(&expected, commands_, sizeof(expected)));
+}
+
+TEST_F(GLES2ImplementationTest, DrawElementsInstancedANGLEClientSideBuffers) {
+  static const float verts[][4] = {
+    { 12.0f, 23.0f, 34.0f, 45.0f, },
+    { 56.0f, 67.0f, 78.0f, 89.0f, },
+    { 13.0f, 24.0f, 35.0f, 46.0f, },
+  };
+  static const uint16 indices[] = {
+    1, 2,
+  };
+  struct Cmds {
+    EnableVertexAttribArray enable1;
+    EnableVertexAttribArray enable2;
+    VertexAttribDivisorANGLE divisor;
+    BindBuffer bind_to_index_emu;
+    BufferData set_index_size;
+    BufferSubData copy_data0;
+    cmd::SetToken set_token0;
+    BindBuffer bind_to_emu;
+    BufferData set_size;
+    BufferSubData copy_data1;
+    cmd::SetToken set_token1;
+    VertexAttribPointer set_pointer1;
+    BufferSubData copy_data2;
+    cmd::SetToken set_token2;
+    VertexAttribPointer set_pointer2;
+    DrawElementsInstancedANGLE draw;
+    BindBuffer restore;
+    BindBuffer restore_element;
+  };
+  const GLsizei kIndexSize = sizeof(indices);
+  const GLuint kEmuBufferId = GLES2Implementation::kClientSideArrayId;
+  const GLuint kEmuIndexBufferId =
+      GLES2Implementation::kClientSideElementArrayId;
+  const GLuint kAttribIndex1 = 1;
+  const GLuint kAttribIndex2 = 3;
+  const GLint kNumComponents1 = 3;
+  const GLint kNumComponents2 = 2;
+  const GLsizei kClientStride = sizeof(verts[0]);
+  const GLsizei kCount = 2;
+  const GLsizei kSize1 =
+      arraysize(verts) * kNumComponents1 * sizeof(verts[0][0]);
+  const GLsizei kSize2 =
+      1 * kNumComponents2 * sizeof(verts[0][0]);
+  const GLuint kDivisor = 1;
+  const GLsizei kEmuOffset1 = 0;
+  const GLsizei kEmuOffset2 = kSize1;
+  const GLsizei kTotalSize = kSize1 + kSize2;
+
+  ExpectedMemoryInfo mem1 = GetExpectedMemory(kIndexSize);
+  ExpectedMemoryInfo mem2 = GetExpectedMemory(kSize1);
+  ExpectedMemoryInfo mem3 = GetExpectedMemory(kSize2);
+
+  Cmds expected;
+  expected.enable1.Init(kAttribIndex1);
+  expected.enable2.Init(kAttribIndex2);
+  expected.divisor.Init(kAttribIndex2, kDivisor);
+  expected.bind_to_index_emu.Init(GL_ELEMENT_ARRAY_BUFFER, kEmuIndexBufferId);
+  expected.set_index_size.Init(
+      GL_ELEMENT_ARRAY_BUFFER, kIndexSize, 0, 0, GL_DYNAMIC_DRAW);
+  expected.copy_data0.Init(
+      GL_ELEMENT_ARRAY_BUFFER, 0, kIndexSize, mem1.id, mem1.offset);
+  expected.set_token0.Init(GetNextToken());
+  expected.bind_to_emu.Init(GL_ARRAY_BUFFER, kEmuBufferId);
+  expected.set_size.Init(GL_ARRAY_BUFFER, kTotalSize, 0, 0, GL_DYNAMIC_DRAW);
+  expected.copy_data1.Init(
+      GL_ARRAY_BUFFER, kEmuOffset1, kSize1, mem2.id, mem2.offset);
+  expected.set_token1.Init(GetNextToken());
+  expected.set_pointer1.Init(
+      kAttribIndex1, kNumComponents1, GL_FLOAT, GL_FALSE, 0, kEmuOffset1);
+  expected.copy_data2.Init(
+      GL_ARRAY_BUFFER, kEmuOffset2, kSize2, mem3.id, mem3.offset);
+  expected.set_token2.Init(GetNextToken());
+  expected.set_pointer2.Init(kAttribIndex2, kNumComponents2,
+                             GL_FLOAT, GL_FALSE, 0, kEmuOffset2);
+  expected.draw.Init(GL_POINTS, kCount, GL_UNSIGNED_SHORT, 0, 1);
+  expected.restore.Init(GL_ARRAY_BUFFER, 0);
+  expected.restore_element.Init(GL_ELEMENT_ARRAY_BUFFER, 0);
+  gl_->EnableVertexAttribArray(kAttribIndex1);
+  gl_->EnableVertexAttribArray(kAttribIndex2);
+  gl_->VertexAttribPointer(kAttribIndex1, kNumComponents1,
+                           GL_FLOAT, GL_FALSE, kClientStride, verts);
+  gl_->VertexAttribPointer(kAttribIndex2, kNumComponents2,
+                           GL_FLOAT, GL_FALSE, kClientStride, verts);
+  gl_->VertexAttribDivisorANGLE(kAttribIndex2, kDivisor);
+  gl_->DrawElementsInstancedANGLE(
+      GL_POINTS, kCount, GL_UNSIGNED_SHORT, indices, 1);
   EXPECT_EQ(0, memcmp(&expected, commands_, sizeof(expected)));
 }
 
@@ -1877,7 +2053,7 @@ TEST_F(GLES2ImplementationTest, TexSubImage2DFlipY) {
   expected.pixel_store_i1.Init(GL_UNPACK_ALIGNMENT, kPixelStoreUnpackAlignment);
   expected.tex_image_2d.Init(
       kTarget, kLevel, kFormat, kTextureWidth, kTextureHeight, kBorder, kFormat,
-      kType, 0, NULL);
+      kType, 0, 0);
   expected.tex_sub_image_2d1.Init(kTarget, kLevel, kSubImageXOffset,
       kSubImageYOffset + 2, kSubImageWidth, 2, kFormat, kType,
       mem1.id, mem1.offset, false);
@@ -2138,6 +2314,126 @@ TEST_F(GLES2ImplementationTest, BufferDataLargerThanTransferBuffer) {
   expected.set_token2.Init(GetNextToken());
   gl_->BufferData(GL_ARRAY_BUFFER, arraysize(buf), buf, GL_DYNAMIC_DRAW);
   EXPECT_EQ(0, memcmp(&expected, commands_, sizeof(expected)));
+}
+
+TEST_F(GLES2ImplementationTest, BeginEndQueryEXT) {
+  // Test GetQueryivEXT returns 0 if no current query.
+  GLint param = -1;
+  gl_->GetQueryivEXT(GL_ANY_SAMPLES_PASSED_EXT, GL_CURRENT_QUERY_EXT, &param);
+  EXPECT_EQ(0, param);
+
+  GLuint expected_ids[2] = { 1, 2 }; // These must match what's actually genned.
+  struct GenCmds {
+    GenQueriesEXTImmediate gen;
+    GLuint data[2];
+  };
+  GenCmds expected_gen_cmds;
+  expected_gen_cmds.gen.Init(arraysize(expected_ids), &expected_ids[0]);
+  GLuint ids[arraysize(expected_ids)] = { 0, };
+  gl_->GenQueriesEXT(arraysize(expected_ids), &ids[0]);
+  EXPECT_EQ(0, memcmp(
+      &expected_gen_cmds, commands_, sizeof(expected_gen_cmds)));
+  GLuint id1 = ids[0];
+  GLuint id2 = ids[1];
+  ClearCommands();
+
+  // Test BeginQueryEXT fails if id = 0.
+  gl_->BeginQueryEXT(GL_ANY_SAMPLES_PASSED_EXT, 0);
+  EXPECT_TRUE(NoCommandsWritten());
+  EXPECT_EQ(GL_INVALID_OPERATION, CheckError());
+
+  // Test BeginQueryEXT fails if id not GENed.
+  // TODO(gman):
+
+  // Test BeginQueryEXT inserts command.
+  struct BeginCmds {
+    BeginQueryEXT begin_query;
+  };
+  BeginCmds expected_begin_cmds;
+  const void* commands = GetPut();
+  gl_->BeginQueryEXT(GL_ANY_SAMPLES_PASSED_EXT, id1);
+  QueryTracker::Query* query = GetQuery(id1);
+  ASSERT_TRUE(query != NULL);
+  expected_begin_cmds.begin_query.Init(
+      GL_ANY_SAMPLES_PASSED_EXT, id1, query->shm_id(), query->shm_offset());
+  EXPECT_EQ(0, memcmp(
+      &expected_begin_cmds, commands, sizeof(expected_begin_cmds)));
+  ClearCommands();
+
+  // Test GetQueryivEXT returns id.
+  param = -1;
+  gl_->GetQueryivEXT(GL_ANY_SAMPLES_PASSED_EXT, GL_CURRENT_QUERY_EXT, &param);
+  EXPECT_EQ(id1, static_cast<GLuint>(param));
+  gl_->GetQueryivEXT(
+      GL_ANY_SAMPLES_PASSED_CONSERVATIVE_EXT, GL_CURRENT_QUERY_EXT, &param);
+  EXPECT_EQ(0, param);
+
+  // Test BeginQueryEXT fails if between Begin/End.
+  gl_->BeginQueryEXT(GL_ANY_SAMPLES_PASSED_EXT, id2);
+  EXPECT_TRUE(NoCommandsWritten());
+  EXPECT_EQ(GL_INVALID_OPERATION, CheckError());
+
+  // Test EndQueryEXT fails if target not same as current query.
+  ClearCommands();
+  gl_->EndQueryEXT(GL_ANY_SAMPLES_PASSED_CONSERVATIVE_EXT);
+  EXPECT_TRUE(NoCommandsWritten());
+  EXPECT_EQ(GL_INVALID_OPERATION, CheckError());
+
+  // Test EndQueryEXT sends command
+  struct EndCmds {
+    EndQueryEXT end_query;
+  };
+  EndCmds expected_end_cmds;
+  expected_end_cmds.end_query.Init(
+      GL_ANY_SAMPLES_PASSED_EXT, query->submit_count());
+  commands = GetPut();
+  gl_->EndQueryEXT(GL_ANY_SAMPLES_PASSED_EXT);
+  EXPECT_EQ(0, memcmp(
+      &expected_end_cmds, commands, sizeof(expected_end_cmds)));
+
+  // Test EndQueryEXT fails if no current query.
+  ClearCommands();
+  gl_->EndQueryEXT(GL_ANY_SAMPLES_PASSED_EXT);
+  EXPECT_TRUE(NoCommandsWritten());
+  EXPECT_EQ(GL_INVALID_OPERATION, CheckError());
+
+  // Test 2nd Begin/End increments count.
+  uint32 old_submit_count = query->submit_count();
+  gl_->BeginQueryEXT(GL_ANY_SAMPLES_PASSED_EXT, id1);
+  EXPECT_NE(old_submit_count, query->submit_count());
+  expected_end_cmds.end_query.Init(
+      GL_ANY_SAMPLES_PASSED_EXT, query->submit_count());
+  commands = GetPut();
+  gl_->EndQueryEXT(GL_ANY_SAMPLES_PASSED_EXT);
+  EXPECT_EQ(0, memcmp(
+      &expected_end_cmds, commands, sizeof(expected_end_cmds)));
+
+  // Test BeginQueryEXT fails if target changed.
+  ClearCommands();
+  gl_->BeginQueryEXT(GL_ANY_SAMPLES_PASSED_CONSERVATIVE_EXT, id1);
+  EXPECT_TRUE(NoCommandsWritten());
+  EXPECT_EQ(GL_INVALID_OPERATION, CheckError());
+
+  // Test GetQueryObjectuivEXT fails if unused id
+  GLuint available = 0xBDu;
+  ClearCommands();
+  gl_->GetQueryObjectuivEXT(id2, GL_QUERY_RESULT_AVAILABLE_EXT, &available);
+  EXPECT_TRUE(NoCommandsWritten());
+  EXPECT_EQ(0xBDu, available);
+  EXPECT_EQ(GL_INVALID_OPERATION, CheckError());
+
+  // Test GetQueryObjectuivEXT fails if bad id
+  ClearCommands();
+  gl_->GetQueryObjectuivEXT(4567, GL_QUERY_RESULT_AVAILABLE_EXT, &available);
+  EXPECT_TRUE(NoCommandsWritten());
+  EXPECT_EQ(0xBDu, available);
+  EXPECT_EQ(GL_INVALID_OPERATION, CheckError());
+
+  // Test GetQueryObjectuivEXT CheckResultsAvailable
+  ClearCommands();
+  gl_->GetQueryObjectuivEXT(id1, GL_QUERY_RESULT_AVAILABLE_EXT, &available);
+  EXPECT_TRUE(NoCommandsWritten());
+  EXPECT_EQ(0u, available);
 }
 
 #include "gpu/command_buffer/client/gles2_implementation_unittest_autogen.h"

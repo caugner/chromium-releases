@@ -43,47 +43,41 @@ bool IsAllowed(ContentSetting setting) {
 
 }  // namespace
 
-// |ProfileKeyedFactory| is the owner of the |ProfileKeyedService|s. This
-// wrapper class allows others to hold shared pointers to CookieSettings.
-class CookieSettingsWrapper : public ProfileKeyedService {
- public:
-  explicit CookieSettingsWrapper(scoped_refptr<CookieSettings> cookie_settings)
-      : cookie_settings_(cookie_settings) {}
-  virtual ~CookieSettingsWrapper() {}
-
-  CookieSettings* cookie_settings() { return cookie_settings_.get(); }
-
- private:
-  // ProfileKeyedService methods:
-  virtual void Shutdown() OVERRIDE {
-    cookie_settings_->ShutdownOnUIThread();
-  }
-
-  scoped_refptr<CookieSettings> cookie_settings_;
-};
+// static
+scoped_refptr<CookieSettings> CookieSettings::Factory::GetForProfile(
+    Profile* profile) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  return static_cast<CookieSettings*>(
+      GetInstance()->GetServiceForProfile(profile, true).get());
+}
 
 // static
 CookieSettings::Factory* CookieSettings::Factory::GetInstance() {
   return Singleton<CookieSettings::Factory>::get();
 }
 
-CookieSettingsWrapper* CookieSettings::Factory::GetWrapperForProfile(
-    Profile* profile) {
-  return static_cast<CookieSettingsWrapper*>(
-      GetServiceForProfile(profile, true));
-}
-
 CookieSettings::Factory::Factory()
-    : ProfileKeyedServiceFactory("CookieSettings",
-                                 ProfileDependencyManager::GetInstance()) {
+    : RefcountedProfileKeyedServiceFactory(
+        "CookieSettings",
+        ProfileDependencyManager::GetInstance()) {
 }
 
-ProfileKeyedService* CookieSettings::Factory::BuildServiceInstanceFor(
-      Profile* profile) const {
-  scoped_refptr<CookieSettings> cookie_settings = new CookieSettings(
-      profile->GetHostContentSettingsMap(),
-      profile->GetPrefs());
-  return new CookieSettingsWrapper(cookie_settings);
+CookieSettings::Factory::~Factory() {}
+
+void CookieSettings::Factory::RegisterUserPrefs(PrefService* user_prefs) {
+  user_prefs->RegisterBooleanPref(prefs::kBlockThirdPartyCookies,
+                                  false,
+                                  PrefService::SYNCABLE_PREF);
+}
+
+bool CookieSettings::Factory::ServiceRedirectedInIncognito() {
+  return true;
+}
+
+scoped_refptr<RefcountedProfileKeyedService>
+CookieSettings::Factory::BuildServiceInstanceFor(Profile* profile) const {
+  return new CookieSettings(profile->GetHostContentSettingsMap(),
+                            profile->GetPrefs());
 }
 
 CookieSettings::CookieSettings(
@@ -105,15 +99,6 @@ CookieSettings::CookieSettings(
 }
 
 CookieSettings::~CookieSettings() {
-}
-
-// static
-CookieSettings* CookieSettings::GetForProfile(Profile* profile) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  CookieSettings* cookie_settings =
-      Factory::GetInstance()->GetWrapperForProfile(profile)->cookie_settings();
-  DCHECK(cookie_settings);
-  return cookie_settings;
 }
 
 ContentSetting
@@ -240,13 +225,6 @@ ContentSetting CookieSettings::GetCookieSetting(
   // We should always have a value, at least from the default provider.
   DCHECK(value.get());
   return content_settings::ValueToContentSetting(value.get());
-}
-
-// static
-void CookieSettings::RegisterUserPrefs(PrefService* prefs) {
-  prefs->RegisterBooleanPref(prefs::kBlockThirdPartyCookies,
-                             false,
-                             PrefService::SYNCABLE_PREF);
 }
 
 bool CookieSettings::ShouldBlockThirdPartyCookies() const {

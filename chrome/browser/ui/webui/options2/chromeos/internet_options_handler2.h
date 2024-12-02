@@ -34,7 +34,7 @@ class InternetOptionsHandler
   // OptionsPageUIHandler implementation.
   virtual void GetLocalizedValues(
       base::DictionaryValue* localized_strings) OVERRIDE;
-  virtual void Initialize() OVERRIDE;
+  virtual void InitializePage() OVERRIDE;
 
   // WebUIMessageHandler implementation.
   virtual void RegisterMessages() OVERRIDE;
@@ -96,6 +96,13 @@ class InternetOptionsHandler
   void ChangePinCallback(const base::ListValue* args);
   void ShareNetworkCallback(const base::ListValue* args);
   void ShowMorePlanInfoCallback(const ListValue* args);
+
+  /**
+   * Toggle airplane mode.  Disables all wireless networks when activated.
+   * Celluar and Bluetooth connections remain disabled while active, but
+   * Wi-Fi can be reactivated. |args| is unused.
+   */
+  void ToggleAirplaneModeCallback(const ListValue* args);
 
   // Populates the ui with the details of the given device path. This forces
   // an overlay to be displayed in the UI.

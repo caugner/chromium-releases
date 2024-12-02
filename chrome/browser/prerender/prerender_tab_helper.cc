@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -168,7 +168,6 @@ class PrerenderTabHelper::HoverData {
 PrerenderTabHelper::PrerenderTabHelper(TabContentsWrapper* tab)
     : content::WebContentsObserver(tab->web_contents()),
       tab_(tab),
-      pplt_load_start_(),
       last_hovers_(new HoverData[kNumHoverThresholds]) {
   for (int i = 0; i < kNumHoverThresholds; i++)
     last_hovers_[i].SetHoverThreshold(kMinHoverThresholdsMs[i]);
@@ -184,15 +183,13 @@ void PrerenderTabHelper::ProvisionalChangeToMainFrameUrl(
   RecordPageviewEvent(PAGEVIEW_EVENT_NEW_URL);
   if (IsTopSite(url))
     RecordPageviewEvent(PAGEVIEW_EVENT_TOP_SITE_NEW_URL);
-  if (!tab_->core_tab_helper()->delegate())
-    return;  // PrerenderManager needs a delegate to handle the swap.
   PrerenderManager* prerender_manager = MaybeGetPrerenderManager();
   if (!prerender_manager)
     return;
   if (prerender_manager->IsWebContentsPrerendering(web_contents()))
     return;
   prerender_manager->MarkWebContentsAsNotPrerendered(web_contents());
-  MaybeUsePrerenderedPage(url, opener_url);
+  prerender_manager->RecordNavigation(url);
 }
 
 void PrerenderTabHelper::UpdateTargetURL(int32 page_id, const GURL& url) {
@@ -207,17 +204,32 @@ void PrerenderTabHelper::UpdateTargetURL(int32 page_id, const GURL& url) {
 }
 
 void PrerenderTabHelper::DidStopLoading() {
-  // Don't include prerendered pages in the PPLT metric until after they are
-  // swapped in.
-
   // Compute the PPLT metric and report it in a histogram, if needed.
-  if (!pplt_load_start_.is_null() && !IsPrerendering()) {
+  // We include pages that are still prerendering and have just finished
+  // loading -- PrerenderManager will sort this out and handle it correctly
+  // (putting those times into a separate histogram).
+  if (!pplt_load_start_.is_null()) {
+    double fraction_elapsed_at_swapin = -1.0;
+    base::TimeTicks now = base::TimeTicks::Now();
+    if (!actual_load_start_.is_null()) {
+      double plt = (now - actual_load_start_).InMillisecondsF();
+      if (plt > 0.0) {
+        fraction_elapsed_at_swapin = 1.0 -
+            (now - pplt_load_start_).InMillisecondsF() / plt;
+      } else {
+        fraction_elapsed_at_swapin = 1.0;
+      }
+      DCHECK_GE(fraction_elapsed_at_swapin, 0.0);
+      DCHECK_LE(fraction_elapsed_at_swapin, 1.0);
+    }
     PrerenderManager::RecordPerceivedPageLoadTime(
-        base::TimeTicks::Now() - pplt_load_start_, web_contents(), url_);
+        now - pplt_load_start_, fraction_elapsed_at_swapin, web_contents(),
+        url_);
   }
 
   // Reset the PPLT metric.
   pplt_load_start_ = base::TimeTicks();
+  actual_load_start_ = base::TimeTicks();
 }
 
 void PrerenderTabHelper::DidStartProvisionalLoadForFrame(
@@ -225,7 +237,7 @@ void PrerenderTabHelper::DidStartProvisionalLoadForFrame(
       bool is_main_frame,
       const GURL& validated_url,
       bool is_error_page,
-      RenderViewHost* render_view_host) {
+      content::RenderViewHost* render_view_host) {
   if (is_main_frame) {
     RecordPageviewEvent(PAGEVIEW_EVENT_LOAD_START);
     if (IsTopSite(validated_url))
@@ -233,6 +245,7 @@ void PrerenderTabHelper::DidStartProvisionalLoadForFrame(
 
     // Record the beginning of a new PPLT navigation.
     pplt_load_start_ = base::TimeTicks::Now();
+    actual_load_start_ = base::TimeTicks();
 
     // Update hover stats.
     for (int i = 0; i < kNumHoverThresholds; i++)
@@ -247,17 +260,6 @@ PrerenderManager* PrerenderTabHelper::MaybeGetPrerenderManager() const {
       Profile::FromBrowserContext(web_contents()->GetBrowserContext()));
 }
 
-bool PrerenderTabHelper::MaybeUsePrerenderedPage(const GURL& url,
-                                                 const GURL& opener_url) {
-  PrerenderManager* prerender_manager = MaybeGetPrerenderManager();
-  if (!prerender_manager)
-    return false;
-  DCHECK(!prerender_manager->IsWebContentsPrerendering(web_contents()));
-  return prerender_manager->MaybeUsePrerenderedPage(web_contents(),
-                                                    url,
-                                                    opener_url);
-}
-
 bool PrerenderTabHelper::IsPrerendering() {
   PrerenderManager* prerender_manager = MaybeGetPrerenderManager();
   if (!prerender_manager)
@@ -270,10 +272,12 @@ void PrerenderTabHelper::PrerenderSwappedIn() {
   DCHECK(!IsPrerendering());
   if (pplt_load_start_.is_null()) {
     // If we have already finished loading, report a 0 PPLT.
-    PrerenderManager::RecordPerceivedPageLoadTime(base::TimeDelta(),
+    PrerenderManager::RecordPerceivedPageLoadTime(base::TimeDelta(), 1.0,
                                                   web_contents(), url_);
   } else {
-    // If we have not finished loading yet, rebase the start time to now.
+    // If we have not finished loading yet, record the actual load start, and
+    // rebase the start time to now.
+    actual_load_start_ = pplt_load_start_;
     pplt_load_start_ = base::TimeTicks::Now();
   }
 }

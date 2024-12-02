@@ -88,6 +88,7 @@
     <link rel="stylesheet" href="css/combobutton.css"></link>
 
     <link rel="stylesheet" href="css/file_manager.css"></link>
+    <link rel="stylesheet" href="css/common.css"></link>
 
     <script src="js/util.js"></script>
     <script src="js/directory_model.js"></script>
@@ -96,7 +97,7 @@
     <script src="js/file_manager_pyauto.js"></script>
     <script src="js/file_type.js"></script>
     <script src="js/main.js"></script>
-    <script src="js/metadata_provider.js"></script>
+    <script src="js/metadata/metadata_provider.js"></script>
 
     <!-- For accurate load performance tracking
          place all scripts above this line -->
@@ -119,7 +120,13 @@
       <command id="paste" i18n-values="label:PASTE_BUTTON_LABEL"></command>
       <command id="rename" i18n-values="label:RENAME_BUTTON_LABEL"></command>
       <command id="delete" i18n-values="label:DELETE_BUTTON_LABEL"></command>
-      <command id="newfolder" i18n-values="label:NEW_FOLDER_BUTTON_LABEL"></command>
+      <command id="newfolder" i18n-values="label:NEW_FOLDER_BUTTON_LABEL"
+      ></command>
+
+      <command id="unmount" i18n-values="label:UNMOUNT_DEVICE_BUTTON_LABEL"
+      ></command>
+      <command id="format" i18n-values="label:FORMAT_DEVICE_BUTTON_LABEL"
+      ></command>
     </commands>
 
     <menu class=file-context-menu>
@@ -134,6 +141,11 @@
       <menuitem command='#newfolder'
           visibleif='this.dialogType_ == "saveas-file" ||
                      this.dialogType_ == "full-page"'></menuitem>
+    </menu>
+
+    <menu class=roots-context-menu>
+      <menuitem command='#unmount'></menuitem>
+      <menuitem command='#format'></menuitem>
     </menu>
 
     <!-- TODO(bshe): Remove isAura flag after all chromeos use aura. -->
@@ -153,14 +165,14 @@
     </if>
     <div class=dialog-title visibleif='this.dialogType_ != "full-page" &&
         !this.isAura_'>[TITLE]</div>
-    <div class=dialog-container>
+    <div class=dialog-container sidebar=sidebar>
       <div class=dialog-sidebar>
-        <div class=close-sidebar><img src='images/close_sidebar.png'></div>
+        <div class=close-sidebar tabindex=0 role="button"></div>
         <list class=roots-list></list>
       </div>
       <div class=dialog-main>
         <div class=dialog-header>
-          <div class=open-sidebar><img src='images/open_sidebar.png'></div>
+          <div class=open-sidebar tabindex=0 role="button"></div>
           <div class=breadcrumbs></div>
           <!-- The outter div is a hack to remove margin between buttons. -->
           <div><button class="detail-view" tabindex="4" disabled></button></div>
@@ -171,6 +183,7 @@
             <div class=list-container>
               <div class=detail-table tabindex=0></div>
               <grid class=thumbnail-grid tabindex=0></grid>
+              <div class=spinner></div>
             </div>
             <div class=downloads-warning hidden>
               <img src=images/warning_icon_square_26x26.png>
@@ -179,18 +192,21 @@
           </div>
           <div class=preview-panel visibility=hidden>
             <div><div class=preview-thumbnails></div></div>
-            <div><div class=preview-summary></div></div>
+            <div class=preview-summary></div>
             <div class=spacer></div>
             <div class=tasks></div>
-            <div>
-              <div class='delete-button cr-button task-item' command='#delete'
-                      onclick='fileManager.deleteEntries(
-                               fileManager.selection.entries, false)'
-                      visibleif='this.dialogType_ == "full-page"'
-                  ><img src='images/button-icon-delete.png'
-                  ><div i18n-content=DELETE_BUTTON_LABEL></div
-              ></div>
-            </div>
+            <div class='delete-button cr-button task-item' command='#delete'
+                    role="button" tabindex=0
+                    onclick='fileManager.deleteEntries(
+                             fileManager.selection.entries, false)'
+                    onkeypress='if (event.keyCode == 13 ||
+                                    event.keyCode == 32) {
+                                    fileManager.deleteEntries(
+                                      fileManager.selection.entries, false);}'
+                    visibleif='this.dialogType_ == "full-page"'
+                ><img src='images/button-icon-delete.png'
+                ><div i18n-content=DELETE_BUTTON_LABEL></div
+            ></div>
           </div>
         </div>
       </div>
@@ -204,10 +220,24 @@
              visibleif='this.dialogType_ == "saveas-file"'>
       <div class=horizontal-spacer></div>
       <button class=ok disabled tabindex=2>[OK]</button>
+      <div class=preparing-label i18n-content=PREPARING_LABEL>[PREPARING]</div>
+      <div class=progress-bar>
+        <div class=progress-track></div>
+      </div>
       <button class=cancel tabindex=3 i18n-content=CANCEL_LABEL
               >[CANCEL]</button>
     </div>
+    <div class="butter-bar before-show">
+      <div class="content">
+        <div class="butter-message"></div>
+        <div class="progress-bar hide-in-butter">
+          <div class="progress-track"></div>
+        </div>
+      </div>
+      <div class="actions hide-in-butter"></div>
+    </div>
 
     <script>init();</script>
+    <div id=drag-image-container></div>
   </body>
 </html>

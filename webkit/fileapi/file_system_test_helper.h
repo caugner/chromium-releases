@@ -12,6 +12,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "googleurl/src/gurl.h"
+#include "webkit/fileapi/file_system_path.h"
 #include "webkit/fileapi/file_system_types.h"
 #include "webkit/fileapi/file_system_util.h"
 #include "webkit/quota/quota_types.h"
@@ -24,7 +25,6 @@ class FilePath;
 
 namespace fileapi {
 
-class FileSystemCallbackDispatcher;
 class FileSystemContext;
 class FileSystemFileUtil;
 class FileSystemOperation;
@@ -57,14 +57,29 @@ class FileSystemTestOriginHelper {
   GURL GetURLForPath(const FilePath& path) const;
   FilePath GetUsageCachePath() const;
 
+  // Creates a new FileSystemPath for the given |path|.
+  FileSystemPath CreatePath(const FilePath& path) const;
+  FileSystemPath CreatePathFromUTF8(const std::string& utf8) const {
+    return CreatePath(FilePath::FromUTF8Unsafe(utf8));
+  }
+
+  // Helper methods for same-FileUtil copy/move.
+  base::PlatformFileError SameFileUtilCopy(
+      FileSystemOperationContext* context,
+      const FileSystemPath& src,
+      const FileSystemPath& dest) const;
+  base::PlatformFileError SameFileUtilMove(
+      FileSystemOperationContext* context,
+      const FileSystemPath& src,
+      const FileSystemPath& dest) const;
+
   int64 GetCachedOriginUsage() const;
   bool RevokeUsageCache() const;
 
   // This doesn't work with OFSFU.
   int64 ComputeCurrentOriginUsage() const;
 
-  FileSystemOperation* NewOperation(
-      FileSystemCallbackDispatcher* callback_dispatcher);
+  FileSystemOperation* NewOperation();
   FileSystemOperationContext* NewOperationContext();
 
   FileSystemContext* file_system_context() const {
@@ -76,11 +91,9 @@ class FileSystemTestOriginHelper {
   quota::StorageType storage_type() const {
     return FileSystemTypeToQuotaStorageType(type_);
   }
-  FileSystemFileUtil* file_util() { return file_util_; }
+  FileSystemFileUtil* file_util() const { return file_util_; }
 
  private:
-  void InitializeOperationContext(FileSystemOperationContext* context);
-
   scoped_refptr<FileSystemContext> file_system_context_;
   const GURL origin_;
   const FileSystemType type_;

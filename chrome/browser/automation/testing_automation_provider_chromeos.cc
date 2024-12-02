@@ -12,6 +12,7 @@
 #include "chrome/browser/automation/automation_provider_json.h"
 #include "chrome/browser/automation/automation_provider_observers.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chromeos/accessibility/accessibility_util.h"
 #include "chrome/browser/chromeos/audio/audio_handler.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/network_library.h"
@@ -24,6 +25,7 @@
 #include "chrome/browser/chromeos/login/login_display_host.h"
 #include "chrome/browser/chromeos/login/screen_locker.h"
 #include "chrome/browser/chromeos/login/webui_login_display.h"
+#include "chrome/browser/chromeos/login/webui_login_display_host.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/options/take_photo_dialog.h"
 #include "chrome/browser/chromeos/proxy_cros_settings_parser.h"
@@ -37,6 +39,7 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/dialog_style.h"
 #include "chrome/browser/ui/views/window.h"
+#include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
 #include "chrome/common/pref_names.h"
 #include "net/base/network_change_notifier.h"
 #include "policy/policy_constants.h"
@@ -56,6 +59,14 @@ DictionaryValue* GetNetworkInfoDict(const chromeos::Network* network) {
   item->SetString("device_path", network->device_path());
   item->SetString("ip_address", network->ip_address());
   item->SetString("status", network->GetStateString());
+  return item;
+}
+
+DictionaryValue* GetWifiInfoDict(const chromeos::WifiNetwork* wifi) {
+  DictionaryValue* item = GetNetworkInfoDict(wifi);
+  item->SetInteger("strength", wifi->strength());
+  item->SetBoolean("encrypted", wifi->encrypted());
+  item->SetString("encryption", wifi->GetEncryptionString());
   return item;
 }
 
@@ -231,12 +242,12 @@ void TestingAutomationProvider::GetLoginInfo(DictionaryValue* args,
       chromeos::ScreenLocker::default_screen_locker();
 
   return_value->SetString("login_ui_type", "webui");
-  return_value->SetBoolean("is_owner", user_manager->current_user_is_owner());
-  return_value->SetBoolean("is_logged_in", user_manager->user_is_logged_in());
+  return_value->SetBoolean("is_owner", user_manager->IsCurrentUserOwner());
+  return_value->SetBoolean("is_logged_in", user_manager->IsUserLoggedIn());
   return_value->SetBoolean("is_screen_locked", screen_locker);
-  if (user_manager->user_is_logged_in()) {
+  if (user_manager->IsUserLoggedIn()) {
     return_value->SetBoolean("is_guest", user_manager->IsLoggedInAsGuest());
-    return_value->SetString("email", user_manager->logged_in_user().email());
+    return_value->SetString("email", user_manager->GetLoggedInUser().email());
   }
 
   reply.SendSuccess(return_value.get());
@@ -256,6 +267,8 @@ void TestingAutomationProvider::ShowCreateAccountUI(
 // flags. If you used EnableChromeTesting, you will have to call it again.
 void TestingAutomationProvider::LoginAsGuest(DictionaryValue* args,
                                              IPC::Message* reply_message) {
+  LOG(ERROR) << "TestingAutomationProvider::LoginAsGuest";
+
   chromeos::ExistingUserController* controller =
       chromeos::ExistingUserController::current_controller();
   // Return immediately, since we're going to die before the login is finished.
@@ -265,6 +278,8 @@ void TestingAutomationProvider::LoginAsGuest(DictionaryValue* args,
 
 void TestingAutomationProvider::Login(DictionaryValue* args,
                                       IPC::Message* reply_message) {
+  LOG(ERROR) << "TestingAutomationProvider::Login";
+
   std::string username, password;
   if (!args->GetString("username", &username) ||
       !args->GetString("password", &password)) {
@@ -282,6 +297,9 @@ void TestingAutomationProvider::Login(DictionaryValue* args,
   // WebUI login.
   chromeos::WebUILoginDisplay* webui_login_display =
       static_cast<chromeos::WebUILoginDisplay*>(controller->login_display());
+  LOG(ERROR) << "TestingAutomationProvider::Login ShowSigninScreenForCreds("
+             << username << ", " << password << ")";
+
   webui_login_display->ShowSigninScreenForCreds(username, password);
 }
 
@@ -411,10 +429,7 @@ void TestingAutomationProvider::GetNetworkInfo(DictionaryValue* args,
     for (chromeos::WifiNetworkVector::const_iterator iter =
          wifi_networks.begin(); iter != wifi_networks.end(); ++iter) {
       const chromeos::WifiNetwork* wifi = *iter;
-      DictionaryValue* item = GetNetworkInfoDict(wifi);
-      item->SetInteger("strength", wifi->strength());
-      item->SetBoolean("encrypted", wifi->encrypted());
-      item->SetString("encryption", wifi->GetEncryptionString());
+      DictionaryValue* item = GetWifiInfoDict(wifi);
       items->Set(wifi->service_path(), item);
     }
     return_value->Set("wifi_networks", items);
@@ -450,14 +465,15 @@ void TestingAutomationProvider::GetNetworkInfo(DictionaryValue* args,
   // Remembered Wifi Networks.
   const chromeos::WifiNetworkVector& remembered_wifi =
       network_library->remembered_wifi_networks();
-  ListValue* items = new ListValue;
+  DictionaryValue* remembered_wifi_items = new DictionaryValue;
   for (chromeos::WifiNetworkVector::const_iterator iter =
        remembered_wifi.begin(); iter != remembered_wifi.end();
        ++iter) {
       const chromeos::WifiNetwork* wifi = *iter;
-      items->Append(base::Value::CreateStringValue(wifi->service_path()));
+      DictionaryValue* item = GetWifiInfoDict(wifi);
+      remembered_wifi_items->Set(wifi->service_path(), item);
   }
-  return_value->Set("remembered_wifi", items);
+  return_value->Set("remembered_wifi", remembered_wifi_items);
 
   AutomationJSONReply(this, reply_message).SendSuccess(return_value.get());
 }
@@ -1000,6 +1016,45 @@ void TestingAutomationProvider::GetEnterprisePolicyInfo(
   reply.SendSuccess(return_value.get());
 }
 
+void TestingAutomationProvider::EnableSpokenFeedback(
+    DictionaryValue* args, IPC::Message* reply_message) {
+  AutomationJSONReply reply(this, reply_message);
+  scoped_ptr<DictionaryValue> return_value(new DictionaryValue);
+  bool enabled;
+  if (!args->GetBoolean("enabled", &enabled)) {
+    reply.SendError("Invalid or missing args.");
+    return;
+  }
+  const UserManager* user_manager = UserManager::Get();
+  if (!user_manager) {
+    reply.SendError("No user manager!");
+    return;
+  }
+
+  if (user_manager->IsUserLoggedIn()) {
+    chromeos::accessibility::EnableSpokenFeedback(enabled, NULL);
+  } else {
+    chromeos::ExistingUserController* controller =
+        chromeos::ExistingUserController::current_controller();
+    chromeos::WebUILoginDisplayHost* webui_login_display_host =
+        static_cast<chromeos::WebUILoginDisplayHost*>(
+            controller->login_display_host());
+    chromeos::accessibility::EnableSpokenFeedback(
+        enabled, webui_login_display_host->GetOobeUI()->web_ui());
+  }
+
+  reply.SendSuccess(return_value.get());
+}
+
+void TestingAutomationProvider::IsSpokenFeedbackEnabled(
+    DictionaryValue* args, IPC::Message* reply_message) {
+  AutomationJSONReply reply(this, reply_message);
+  scoped_ptr<DictionaryValue> return_value(new DictionaryValue);
+  return_value->SetBoolean("spoken_feedback",
+                           chromeos::accessibility::IsSpokenFeedbackEnabled());
+  reply.SendSuccess(return_value.get());
+}
+
 void TestingAutomationProvider::GetTimeInfo(Browser* browser,
                                             DictionaryValue* args,
                                             IPC::Message* reply_message) {
@@ -1130,8 +1185,8 @@ void TestingAutomationProvider::CaptureProfilePhoto(
   take_photo_dialog->AddObserver(new PhotoCaptureObserver(
       this, reply_message));
 
-  views::Widget* window = browser::CreateViewsWindow(
-      browser->window()->GetNativeHandle(), take_photo_dialog, STYLE_GENERIC);
+  views::Widget* window = views::Widget::CreateWindowWithParent(
+      take_photo_dialog, browser->window()->GetNativeHandle());
   window->SetAlwaysOnTop(true);
   window->Show();
 }

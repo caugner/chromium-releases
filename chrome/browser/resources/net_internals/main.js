@@ -34,8 +34,8 @@ var g_browser = null;
 var MainView = (function() {
   'use strict';
 
-  // We inherit from ResizableVerticalSplitView.
-  var superClass = ResizableVerticalSplitView;
+  // We inherit from HorizontalSplitView
+  var superClass = HorizontalSplitView;
 
   /**
    * Main entry point. Called once the page has loaded.
@@ -53,7 +53,7 @@ var MainView = (function() {
     // the constants themselves.
     g_browser.addConstantsObserver(new ConstantsObserver());
 
-    // This view is a left (resizable) navigation bar.
+    // This view is a left navigation bar.
     this.categoryTabSwitcher_ = new TabSwitcherView();
     var tabs = this.categoryTabSwitcher_;
 
@@ -61,14 +61,7 @@ var MainView = (function() {
     // between the different sub-views.
     superClass.call(this,
                     new DivView(MainView.CATEGORY_TAB_HANDLES_ID),
-                    tabs,
-                    new DivView(MainView.SPLITTER_BOX_FOR_MAIN_TABS_ID));
-
-    // By default the split for the left navbar will be at 50% of the entire
-    // width. This is not aesthetically pleasing, so we will shrink it.
-    // TODO(eroman): Should set this dynamically based on the largest tab
-    //               name rather than using a fixed width.
-    this.setLeftSplit(150);
+                    tabs);
 
     // Populate the main tabs.  Even tabs that don't contain information for the
     // running OS should be created, so they can load log dumps from other
@@ -126,6 +119,7 @@ var MainView = (function() {
     // area.
     this.statusView_ = StatusView.getInstance(this);
     var verticalSplitView = new VerticalSplitView(this.statusView_, this);
+    this.statusView_.setLayoutParent(verticalSplitView);
     var windowView = new WindowView(verticalSplitView);
 
     // Trigger initial layout.
@@ -140,7 +134,6 @@ var MainView = (function() {
 
   // IDs for special HTML elements in index.html
   MainView.CATEGORY_TAB_HANDLES_ID = 'category-tab-handles';
-  MainView.SPLITTER_BOX_FOR_MAIN_TABS_ID = 'splitter-box-for-main-tabs';
 
   cr.addSingletonGetter(MainView);
 
@@ -175,15 +168,15 @@ var MainView = (function() {
     onLoadLog: function(opt_fileName) {
       isViewingLoadedLog = true;
 
-      g_browser.sourceTracker.setSecurityStripping(false);
+      SourceTracker.getInstance().setSecurityStripping(false);
       this.stopCapturing();
       if (opt_fileName != undefined) {
         // If there's a file name, a log file was loaded, so swap out the status
         // bar to indicate we're no longer capturing events.
-        this.statusView_.onSwitchMode(StatusView.FOR_FILE_ID, opt_fileName);
+        this.statusView_.switchToSubView('loaded').setFileName(opt_fileName);
       } else {
         // Otherwise, the "Stop Capturing" button was presumably pressed.
-        this.statusView_.onSwitchMode(StatusView.FOR_VIEW_ID, '');
+        this.statusView_.switchToSubView('halted');
       }
     },
 
@@ -195,7 +188,8 @@ var MainView = (function() {
 
     stopCapturing: function() {
       g_browser.disable();
-      document.styleSheets[0].insertRule('.hideOnLoadLog { display: none; }');
+      document.styleSheets[0].insertRule(
+          '.hide-when-not-capturing { display: none; }');
     }
   };
 
@@ -236,14 +230,13 @@ var MainView = (function() {
 function ConstantsObserver() {}
 
 /**
- * Attempts to load all constants from |constants|.  Returns false if one or
- * more entries are missing.  On failure, global dictionaries are not
- * modified.
+ * Loads all constants from |constants|.  On failure, global dictionaries are
+ * not modifed.
+ * @param {Object} receivedConstants The map of received constants.
  */
-ConstantsObserver.prototype.onReceivedConstants =
-    function(receivedConstants) {
+ConstantsObserver.prototype.onReceivedConstants = function(receivedConstants) {
   if (!areValidConstants(receivedConstants))
-    return false;
+    return;
 
   Constants = receivedConstants;
 
@@ -261,6 +254,8 @@ ConstantsObserver.prototype.onReceivedConstants =
 
 /**
  * Returns true if it's given a valid-looking constants object.
+ * @param {Object} receivedConstants The received map of constants.
+ * @return {boolean} True if the |receivedConstants| object appears valid.
  */
 function areValidConstants(receivedConstants) {
   return typeof(receivedConstants) == 'object' &&
@@ -274,4 +269,31 @@ function areValidConstants(receivedConstants) {
          typeof(receivedConstants.addressFamily) == 'object' &&
          typeof(receivedConstants.timeTickOffset) == 'string' &&
          typeof(receivedConstants.logFormatVersion) == 'number';
+}
+
+/**
+ * Returns the name for netError.
+ *
+ * Example: netErrorToString(-105) would return
+ * "ERR_NAME_NOT_RESOLVED".
+ * @param {number} netError The net error code.
+ * @return {string} The name of the given error.
+ */
+function netErrorToString(netError) {
+  var str = getKeyWithValue(NetError, netError);
+  if (str == '?')
+    return str;
+  return 'ERR_' + str;
+}
+
+/**
+ * Returns a string representation of |family|.
+ * @param {number} family An AddressFamily
+ * @return {string} A representation of the given family.
+ */
+function addressFamilyToString(family) {
+  var str = getKeyWithValue(AddressFamily, family);
+  // All the address family start with ADDRESS_FAMILY_*.
+  // Strip that prefix since it is redundant and only clutters the output.
+  return str.replace(/^ADDRESS_FAMILY_/, '');
 }

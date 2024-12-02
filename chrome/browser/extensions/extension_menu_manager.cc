@@ -19,9 +19,9 @@
 #include "chrome/common/extensions/extension.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
+#include "content/public/common/context_menu_params.h"
 #include "ui/base/text/text_elider.h"
 #include "ui/gfx/favicon_size.h"
-#include "webkit/glue/context_menu.h"
 
 using content::WebContents;
 
@@ -390,7 +390,7 @@ static void AddURLProperty(DictionaryValue* dictionary,
 void ExtensionMenuManager::ExecuteCommand(
     Profile* profile,
     WebContents* web_contents,
-    const ContextMenuParams& params,
+    const content::ContextMenuParams& params,
     const ExtensionMenuItem::Id& menuItemId) {
   ExtensionEventRouter* event_router = profile->GetExtensionEventRouter();
   if (!event_router)
@@ -457,10 +457,11 @@ void ExtensionMenuManager::ExecuteCommand(
   }
 
   std::string json_args;
-  base::JSONWriter::Write(&args, false, &json_args);
+  base::JSONWriter::Write(&args, &json_args);
   std::string event_name = "contextMenus";
   event_router->DispatchEventToExtension(
-      item->extension_id(), event_name, json_args, profile, GURL());
+      item->extension_id(), event_name, json_args, profile, GURL(),
+      ExtensionEventRouter::USER_GESTURE_ENABLED);
 }
 
 void ExtensionMenuManager::SanitizeRadioList(

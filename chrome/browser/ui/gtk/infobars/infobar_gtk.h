@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,7 +20,7 @@
 #include "ui/base/gtk/owned_widget_gtk.h"
 
 class CustomDrawButton;
-class GtkThemeService;
+class ThemeServiceGtk;
 
 namespace ui {
 class GtkSignalRegistrar;
@@ -71,6 +71,10 @@ class InfoBarGtk : public InfoBar,
   // Creates a link button with the appropriate current gtk-theme state.
   GtkWidget* CreateLinkButton(const std::string& text);
 
+  // Builds a button with an arrow in it to emulate the menu-button style from
+  // the windows version.
+  static GtkWidget* CreateMenuButton(const std::string& text);
+
   // Adds |display_text| to the infobar. If |link_text| is not empty, it is
   // rendered as a hyperlink and inserted into |display_text| at |link_offset|,
   // or right aligned in the infobar if |link_offset| is |npos|. If a link is
@@ -106,7 +110,7 @@ class InfoBarGtk : public InfoBar,
   scoped_ptr<CustomDrawButton> close_button_;
 
   // The theme provider, used for getting border colors.
-  GtkThemeService* theme_service_;
+  ThemeServiceGtk* theme_service_;
 
   content::NotificationRegistrar registrar_;
 

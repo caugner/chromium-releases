@@ -8,7 +8,7 @@
 #include "base/logging.h"
 #include "base/synchronization/lock.h"
 #include "third_party/skia/include/core/SkBitmap.h"
-#include "ui/gfx/gtk_util.h"
+#include "ui/base/gtk/scoped_gobject.h"
 #include "ui/gfx/image/image.h"
 
 #include <gtk/gtk.h>
@@ -91,7 +91,7 @@ gfx::Image* ResourceBundle::GetPixbufImpl(int resource_id, bool rtl_enabled) {
 }
 
 GdkPixbuf* ResourceBundle::GetRTLEnabledPixbufNamed(int resource_id) {
-  return *GetPixbufImpl(resource_id, true);
+  return GetPixbufImpl(resource_id, true)->ToGdkPixbuf();
 }
 
 gfx::Image& ResourceBundle::GetRTLEnabledImageNamed(int resource_id) {

@@ -5,6 +5,19 @@
 {
   'variables': {
     'chromium_code': 1,
+    # Put all transitive dependencies for Windows HMAC here.
+    # This is required so that we can build them for nacl win64.
+    'hmac_win64_related_sources': [
+      'hmac.cc',
+      'hmac.h',
+      'hmac_win.cc',
+      'secure_util.cc',
+      'secure_util.h',
+      'symmetric_key.h',
+      'symmetric_key_win.cc',
+      'third_party/nss/chromium-sha256.h',
+      'third_party/nss/sha512.cc',
+    ],
   },
   'targets': [
     {
@@ -131,6 +144,9 @@
         },],
       ],
       'sources': [
+        # NOTE: all transitive dependencies of HMAC on windows need
+        #     to be placed in the source list above.
+        '<@(hmac_win64_related_sources)',
         'capi_util.cc',
         'capi_util.h',
         'crypto_export.h',
@@ -140,7 +156,9 @@
         'ec_private_key.h',
         'ec_private_key_nss.cc',
         'ec_private_key_openssl.cc',
+        'ec_signature_creator.cc',
         'ec_signature_creator.h',
+        'ec_signature_creator_impl.h',
         'ec_signature_creator_nss.cc',
         'ec_signature_creator_openssl.cc',
         'encryptor.cc',
@@ -149,14 +167,15 @@
         'encryptor_nss.cc',
         'encryptor_openssl.cc',
         'encryptor_win.cc',
-        'hmac.cc',
-        'hmac.h',
         'hmac_mac.cc',
         'hmac_nss.cc',
         'hmac_openssl.cc',
-        'hmac_win.cc',
+        'keychain_mac.cc',
+        'keychain_mac.h',
         'mac_security_services_lock.cc',
         'mac_security_services_lock.h',
+        'mock_keychain_mac.cc',
+        'mock_keychain_mac.h',
         'p224_spake.cc',
         'p224_spake.h',
         'nss_util.cc',
@@ -179,8 +198,6 @@
         'secure_hash.h',
         'secure_hash_default.cc',
         'secure_hash_openssl.cc',
-        'secure_util.cc',
-        'secure_util.h',
         'sha2.cc',
         'sha2.h',
         'signature_creator.h',
@@ -191,18 +208,14 @@
         'signature_verifier.h',
         'signature_verifier_nss.cc',
         'signature_verifier_openssl.cc',
-        'symmetric_key.h',
         'symmetric_key_mac.cc',
         'symmetric_key_nss.cc',
         'symmetric_key_openssl.cc',
-        'symmetric_key_win.cc',
         'third_party/nss/chromium-blapi.h',
         'third_party/nss/chromium-blapit.h',
         'third_party/nss/chromium-nss.h',
-        'third_party/nss/chromium-sha256.h',
         'third_party/nss/pk11akey.cc',
         'third_party/nss/secsign.cc',
-        'third_party/nss/sha512.cc',
       ],
     },
     {
@@ -237,7 +250,7 @@
         '../testing/gtest.gyp:gtest',
       ],
       'conditions': [
-        [ 'os_posix == 1 and OS != "mac"', {
+        [ 'os_posix == 1 and OS != "mac" and OS != "android"', {
           'conditions': [
             [ 'linux_use_tcmalloc==1', {
                 'dependencies': [
@@ -249,7 +262,7 @@
           'dependencies': [
             '../build/linux/system.gyp:ssl',
           ],
-        }, {  # os_posix != 1 or OS == "mac"
+        }, {  # os_posix != 1 or OS == "mac" or OS == "android"
           'sources!': [
             'rsa_private_key_nss_unittest.cc',
             'openpgp_symmetric_encryption_unittest.cc',
@@ -258,6 +271,11 @@
         [ 'OS == "mac" or OS == "win"', {
           'dependencies': [
             '../third_party/nss/nss.gyp:nss',
+          ],
+        }],
+        [ 'OS == "mac"', {
+          'dependencies': [
+            '../third_party/nss/nss.gyp:nspr',
           ],
         }],
         [ 'use_openssl==1', {
@@ -269,5 +287,33 @@
         }],
       ],
     },
+  ],
+  'conditions': [
+    [ 'OS == "win"', {
+      'targets': [
+        {
+          'target_name': 'crypto_nacl_win64',
+          'type': '<(component)',
+          'dependencies': [
+            '../base/base.gyp:base_nacl_win64',
+            '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations_win64',
+          ],
+          'sources': [
+            '<@(hmac_win64_related_sources)',
+          ],
+          'defines': [
+           'CRYPTO_IMPLEMENTATION',
+          ],
+          'msvs_disabled_warnings': [
+            4018,
+          ],
+          'configurations': {
+            'Common_Base': {
+              'msvs_target_platform': 'x64',
+            },
+          },
+        },
+      ],
+    }],
   ],
 }

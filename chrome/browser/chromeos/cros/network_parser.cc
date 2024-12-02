@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -46,7 +46,9 @@ bool NetworkDeviceParser::UpdateDeviceFromInfo(const DictionaryValue& info,
   }
   if (VLOG_IS_ON(2)) {
     std::string json;
-    base::JSONWriter::Write(&info, true, &json);
+    base::JSONWriter::WriteWithOptions(&info,
+                                       base::JSONWriter::OPTIONS_PRETTY_PRINT,
+                                       &json);
     VLOG(2) << "Updated device for path "
             << device->device_path() << ": " << json;
   }
@@ -66,7 +68,9 @@ bool NetworkDeviceParser::UpdateStatus(const std::string& key,
   }
   if (VLOG_IS_ON(2)) {
     std::string value_json;
-    base::JSONWriter::Write(&value, true, &value_json);
+    base::JSONWriter::WriteWithOptions(&value,
+                                       base::JSONWriter::OPTIONS_PRETTY_PRINT,
+                                       &value_json);
     VLOG(2) << "Updated value on device: "
             << device->device_path() << "[" << key << "] = " << value_json;
   }
@@ -129,7 +133,7 @@ bool NetworkParser::UpdateStatus(const std::string& key,
   PropertyIndex found_index = mapper().Get(key);
   if (index)
     *index = found_index;
-  network->UpdatePropertyMap(found_index, value);
+  network->UpdatePropertyMap(found_index, &value);
   if (!ParseValue(found_index, value, network)) {
     VLOG(1) << "Unhandled key '" << key << "' in Network: " << network->name()
             << " ID: " << network->unique_id()
@@ -138,7 +142,9 @@ bool NetworkParser::UpdateStatus(const std::string& key,
   }
   if (VLOG_IS_ON(2)) {
     std::string value_json;
-    base::JSONWriter::Write(&value, true, &value_json);
+    base::JSONWriter::WriteWithOptions(&value,
+                                       base::JSONWriter::OPTIONS_PRETTY_PRINT,
+                                       &value_json);
     VLOG(2) << "Updated value on network: "
             << network->unique_id() << "[" << key << "] = " << value_json;
   }
@@ -206,16 +212,17 @@ bool NetworkParser::ParseValue(PropertyIndex index,
       return true;
     }
     case PROPERTY_INDEX_UI_DATA: {
-      network->ui_data()->Clear();
+      network->set_ui_data(NetworkUIData());
       std::string ui_data_json;
       if (!value.GetAsString(&ui_data_json))
         return false;
-      scoped_ptr<base::Value> ui_data(
+      scoped_ptr<base::Value> ui_data_value(
           base::JSONReader::Read(ui_data_json, false));
-      if (!ui_data.get() || !ui_data->IsType(base::Value::TYPE_DICTIONARY))
+      base::DictionaryValue* ui_data_dict = NULL;
+      if (!ui_data_value.get() ||
+          !ui_data_value->GetAsDictionary(&ui_data_dict))
         return false;
-      network->ui_data()->Swap(
-          static_cast<base::DictionaryValue*>(ui_data.get()));
+      network->set_ui_data(NetworkUIData(*ui_data_dict));
       return true;
     }
     default:

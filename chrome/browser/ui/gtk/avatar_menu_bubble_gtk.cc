@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,8 +14,9 @@
 #include "chrome/browser/ui/gtk/browser_toolbar_gtk.h"
 #include "chrome/browser/ui/gtk/browser_window_gtk.h"
 #include "chrome/browser/ui/gtk/gtk_chrome_link_button.h"
-#include "chrome/browser/ui/gtk/gtk_theme_service.h"
+#include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/gtk/location_bar_view_gtk.h"
+#include "chrome/browser/ui/gtk/theme_service_gtk.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_source.h"
 #include "grit/generated_resources.h"
@@ -38,7 +39,7 @@ AvatarMenuBubbleGtk::AvatarMenuBubbleGtk(Browser* browser,
                                          BubbleGtk::ArrowLocationGtk arrow,
                                          const gfx::Rect* rect)
     : contents_(NULL),
-      theme_service_(GtkThemeService::GetFrom(browser->profile())),
+      theme_service_(ThemeServiceGtk::GetFrom(browser->profile())),
       new_profile_link_(NULL),
       minimum_width_(kBubbleMinWidth) {
   avatar_menu_model_.reset(new AvatarMenuModel(
@@ -89,7 +90,11 @@ void AvatarMenuBubbleGtk::OnAvatarMenuModelChanged(
 }
 
 void AvatarMenuBubbleGtk::OpenProfile(size_t profile_index) {
-  avatar_menu_model_->SwitchToProfile(profile_index);
+  GdkModifierType modifier_state;
+  gtk_get_current_event_state(&modifier_state);
+  guint modifier_state_uint = modifier_state;
+  avatar_menu_model_->SwitchToProfile(profile_index,
+      event_utils::DispositionFromGdkState(modifier_state_uint) == NEW_WINDOW);
   bubble_->Close();
 }
 

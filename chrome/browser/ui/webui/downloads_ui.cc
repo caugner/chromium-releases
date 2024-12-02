@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -36,7 +36,6 @@ ChromeWebUIDataSource* CreateDownloadsUIHTMLSource() {
 
   source->AddLocalizedString("title", IDS_DOWNLOAD_TITLE);
   source->AddLocalizedString("searchbutton", IDS_DOWNLOAD_SEARCH_BUTTON);
-  source->AddLocalizedString("no_results", IDS_DOWNLOAD_SEARCH_BUTTON);
   source->AddLocalizedString("searchresultsfor", IDS_DOWNLOAD_SEARCHRESULTSFOR);
   source->AddLocalizedString("downloads", IDS_DOWNLOAD_TITLE);
   source->AddLocalizedString("clear_all", IDS_DOWNLOAD_LINK_CLEAR_ALL);
@@ -56,6 +55,8 @@ ChromeWebUIDataSource* CreateDownloadsUIHTMLSource() {
                              IDS_PROMPT_MALICIOUS_DOWNLOAD_URL);
   source->AddLocalizedString("danger_content_desc",
                              IDS_PROMPT_MALICIOUS_DOWNLOAD_CONTENT);
+  source->AddLocalizedString("danger_uncommon_desc",
+                             IDS_PROMPT_UNCOMMON_DOWNLOAD_CONTENT);
   source->AddLocalizedString("danger_save", IDS_CONFIRM_DOWNLOAD);
   source->AddLocalizedString("danger_discard", IDS_DISCARD_DOWNLOAD);
 
@@ -71,6 +72,7 @@ ChromeWebUIDataSource* CreateDownloadsUIHTMLSource() {
                              IDS_DOWNLOAD_LINK_REMOVE);
 
   source->set_json_path("strings.js");
+  source->add_resource_path("downloads.css", IDR_DOWNLOADS_CSS);
   source->add_resource_path("downloads.js", IDR_DOWNLOADS_JS);
   source->set_default_resource(IDR_DOWNLOADS_HTML);
 
@@ -92,7 +94,6 @@ DownloadsUI::DownloadsUI(content::WebUI* web_ui) : WebUIController(web_ui) {
 
   DownloadsDOMHandler* handler = new DownloadsDOMHandler(dlm);
   web_ui->AddMessageHandler(handler);
-  handler->Init();
 
   // Set up the chrome://downloads/ source.
   profile->GetChromeURLDataManager()->AddDataSource(

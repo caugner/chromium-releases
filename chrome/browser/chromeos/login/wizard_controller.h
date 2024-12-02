@@ -20,6 +20,10 @@
 
 class PrefService;
 
+namespace base {
+class DictionaryValue;
+}
+
 namespace chromeos {
 
 class EnterpriseEnrollmentScreen;
@@ -72,13 +76,19 @@ class WizardController : public ScreenObserver {
   // Sets initial locale in local settings.
   static void SetInitialLocale(const std::string& locale);
 
+  // Registers OOBE preferences.
+  static void RegisterPrefs(PrefService* local_state);
+
   // Shows the first screen defined by |first_screen_name| or by default
   // if the parameter is empty. Takes ownership of |screen_parameters|.
   void Init(const std::string& first_screen_name,
-            DictionaryValue* screen_parameters);
+            base::DictionaryValue* screen_parameters);
 
-  // Skips OOBE update screen if it's currently shown.
-  void CancelOOBEUpdate();
+  // Advances to screen defined by |screen_name| and shows it.
+  void AdvanceToScreen(const std::string& screen_name);
+
+  // If being at register screen proceeds to the next one.
+  void SkipRegistration();
 
   // Lazy initializers and getters for screens.
   NetworkScreen* GetNetworkScreen();
@@ -89,34 +99,9 @@ class WizardController : public ScreenObserver {
   HTMLPageScreen* GetHTMLPageScreen();
   EnterpriseEnrollmentScreen* GetEnterpriseEnrollmentScreen();
 
-  // Show specific screen.
-  void ShowNetworkScreen();
-  void ShowUpdateScreen();
-  void ShowUserImageScreen();
-  void ShowEulaScreen();
-  void ShowRegistrationScreen();
-  void ShowHTMLPageScreen();
-  void ShowEnterpriseEnrollmentScreen();
-
-  // Determines which screen to show first by the parameter, shows it and
-  // sets it as the current one.
-  void ShowFirstScreen(const std::string& first_screen_name);
-
-  // Shows images login screen.
-  void ShowLoginScreen();
-
-  // Resumes a pending login screen.
-  void ResumeLoginScreen();
-
   // Returns a pointer to the current screen or NULL if there's no such
   // screen.
   WizardScreen* current_screen() const { return current_screen_; }
-
-  // If being at register screen proceeds to the next one.
-  void SkipRegistration();
-
-  // Registers OOBE preferences.
-  static void RegisterPrefs(PrefService* local_state);
 
   static const char kNetworkScreenName[];
   static const char kLoginScreenName[];
@@ -130,6 +115,21 @@ class WizardController : public ScreenObserver {
   static const char kEnterpriseEnrollmentScreenName[];
 
  private:
+  // Show specific screen.
+  void ShowNetworkScreen();
+  void ShowUpdateScreen();
+  void ShowUserImageScreen();
+  void ShowEulaScreen();
+  void ShowRegistrationScreen();
+  void ShowHTMLPageScreen();
+  void ShowEnterpriseEnrollmentScreen();
+
+  // Shows images login screen.
+  void ShowLoginScreen();
+
+  // Resumes a pending login screen.
+  void ResumeLoginScreen();
+
   // Exit handlers:
   void OnNetworkConnected();
   void OnNetworkOffline();
@@ -205,7 +205,7 @@ class WizardController : public ScreenObserver {
   static WizardController* default_controller_;
 
   // Parameters for the first screen. May be NULL.
-  scoped_ptr<DictionaryValue> screen_parameters_;
+  scoped_ptr<base::DictionaryValue> screen_parameters_;
 
   base::OneShotTimer<WizardController> smooth_show_timer_;
 

@@ -12,7 +12,6 @@
 #include "base/message_loop.h"
 #include "base/process.h"
 #include "base/win/scoped_handle.h"
-#include "chrome/app/scoped_ole_initializer.h"
 #include "chrome/browser/browser_process_impl.h"
 #include "chrome_frame/test/net/process_singleton_subclass.h"
 #include "chrome_frame/test/net/test_automation_provider.h"
@@ -21,6 +20,7 @@
 #include "content/public/browser/browser_main_parts.h"
 #include "content/public/browser/browser_thread.h"
 #include "net/base/net_test_suite.h"
+#include "net/url_request/url_request_test_util.h"
 
 class FakeBrowserProcessImpl;
 class ProcessSingleton;
@@ -84,6 +84,7 @@ class CFUrlRequestUnittestRunner
 
   // TestAutomationProviderDelegate.
   virtual void OnInitialTabLoaded();
+  virtual void OnProviderDestroyed();
 
   void StartTests();
 
@@ -102,6 +103,7 @@ class CFUrlRequestUnittestRunner
   virtual void PreEarlyInitialization() OVERRIDE;
   virtual void PostEarlyInitialization() OVERRIDE {}
   virtual void PreMainMessageLoopStart() OVERRIDE {}
+  virtual MessageLoop* GetMainMessageLoop() OVERRIDE;
   virtual void PostMainMessageLoopStart() OVERRIDE {}
   virtual void ToolkitInitialized() OVERRIDE {}
   virtual int PreCreateThreads() OVERRIDE;
@@ -116,12 +118,14 @@ class CFUrlRequestUnittestRunner
   // will be called.
   static DWORD WINAPI RunAllUnittests(void* param);
 
-  static void TakeDownBrowser(CFUrlRequestUnittestRunner* me);
+  void TakeDownBrowser();
 
  protected:
   base::win::ScopedHandle test_thread_;
   base::ProcessHandle crash_service_;
   DWORD test_thread_id_;
+
+  scoped_ptr<ScopedCustomUrlRequestTestHttpHost> override_http_host_;
 
   scoped_ptr<test_server::SimpleWebServer> test_http_server_;
   test_server::SimpleResponse chrome_frame_html_;
@@ -131,6 +135,15 @@ class CFUrlRequestUnittestRunner
   scoped_ptr<ProcessSingletonSubclass> pss_subclass_;
   ScopedChromeFrameRegistrar registrar_;
   int test_result_;
+
+ private:
+  // Causes HTTP tests to run over an external address rather than 127.0.0.1.
+  // See http://crbug.com/114369 .
+  void OverrideHttpHost();
+
+  bool launch_browser_;
+  bool prompt_after_setup_;
+  bool tests_ran_;
 
   DISALLOW_COPY_AND_ASSIGN(CFUrlRequestUnittestRunner);
 };

@@ -29,7 +29,6 @@ class AutocompleteEditController;
 class AutocompleteEditModel;
 class AutocompletePopupView;
 class LocationBarView;
-class TabContents;
 
 namespace views {
 class NativeViewHost;
@@ -100,8 +99,7 @@ class OmniboxViewWin
   virtual void OpenMatch(const AutocompleteMatch& match,
                          WindowOpenDisposition disposition,
                          const GURL& alternate_nav_url,
-                         size_t index,
-                         const string16& keyword) OVERRIDE;
+                         size_t index) OVERRIDE;
   virtual string16 GetText() const OVERRIDE;
   virtual bool IsEditingOrEmpty() const OVERRIDE;
   virtual int GetIcon() const OVERRIDE;
@@ -110,7 +108,9 @@ class OmniboxViewWin
                            const string16& display_text,
                            bool update_popup) OVERRIDE;
   virtual void SetWindowTextAndCaretPos(const string16& text,
-                                        size_t caret_pos) OVERRIDE;
+                                        size_t caret_pos,
+                                        bool update_popup,
+                                        bool notify_text_changed) OVERRIDE;
   virtual void SetForcedQuery() OVERRIDE;
   virtual bool IsSelectAll() OVERRIDE;
   virtual bool DeleteAtEndPressed() OVERRIDE;

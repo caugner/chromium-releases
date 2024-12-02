@@ -81,19 +81,16 @@
   fun:mktime
 }
 
+# See crbug.com/84244 for benign races in nss.
 {
   Benign race in nss (PR_EnterMonitor)
   ThreadSanitizer:Race
   fun:PR_EnterMonitor
 }
-
-# (Looks same as the one above)
 {
-  bug_84244
+  Benign race in nss (PR_ExitMonitor)
   ThreadSanitizer:Race
   fun:PR_ExitMonitor
-  ...
-  fun:nss*
 }
 
 ############################
@@ -134,15 +131,6 @@
   ThreadSanitizer:Race
   ...
   fun:pthreadMutexAlloc
-  fun:sqlite3MutexAlloc
-}
-
-{
-  Two writes, same value 2 (SQLLite pthreadMutexAlloc)
-  ThreadSanitizer:Race
-  fun:pthreadMutexAlloc
-  ...
-  fun:openDatabase
 }
 
 {
@@ -342,18 +330,6 @@
   fun:base::ThreadCollisionWarner::Leave
 }
 
-{
-   bug_100026
-   ThreadSanitizer:Race
-   ...
-   fun:std::*
-   ...
-   fun:logging::LogMessage::*LogMessage
-   fun:base::PlatformThread::SetThreadPriority
-   fun:base::SimpleThread::SetThreadPriority
-   fun:AudioDevice::Run
-}
-
 ############################
 # 2.2 Benign races in Chromium
 {
@@ -391,6 +367,23 @@
    ThreadSanitizer:Race
    fun:base::StatisticsRecorder::FindHistogram
    fun:base::*Histogram::FactoryGet
+}
+
+{
+   bug_115987a [benign races in Histogram in SequencedWorkerPool]
+   ThreadSanitizer:Race
+   ...
+   fun:base::Histogram::*
+   fun:base::SequencedWorkerPool::*
+}
+
+# Histogram macros involve string comparison in debug mode.
+{
+   bug_115987b [benign races in Histogram in SequencedWorkerPool]
+   ThreadSanitizer:Race
+   ...
+   fun:std::operator==
+   fun:base::SequencedWorkerPool::*
 }
 
 # 3. Suppressions for real chromium bugs that are not yet fixed.
@@ -557,26 +550,18 @@
 {
   bug_93932_g
   ThreadSanitizer:Race
+  ...
   fun:frame_thread_free
   ...
   fun:avcodec_close
-  ...
-  fun:media::FFmpegVideoDecoder::ReleaseFFmpegResources
 }
 {
-  bug_95509
+  bug_93932_h
   ThreadSanitizer:Race
   ...
-  fun:AudioDevice::ShutDownAudioThread
-}
-{
-  bug_95509_b
-  ThreadSanitizer:Race
-  fun:base::SyncSocket::Receive
-  fun:AudioDevice::Run
-  fun:base::DelegateSimpleThread::Run
-  fun:base::SimpleThread::ThreadMain
-  fun:base::::ThreadFunc
+  fun:render_slice
+  fun:vp3_decode_frame
+  fun:frame_worker_thread
 }
 {
   bug_100020
@@ -645,8 +630,9 @@
   ...
   fun:WebRTCAudioDeviceTest::OnMessageReceived
   ...
-  fun:IPC::Channel::ChannelImpl::ProcessIncomingMessages
+  fun:IPC::*
   fun:IPC::Channel::ChannelImpl::OnFileCanReadWithoutBlocking
+  ...
   fun:base::MessagePumpLibevent::FileDescriptorWatcher::OnFileCanReadWithoutBlocking
   fun:base::MessagePumpLibevent::OnLibeventNotification
   fun:event_process_active
@@ -680,6 +666,14 @@
   fun:WebRTCAudioDeviceTest_Construct_Test::TestBody
 }
 {
+  bug_103711i
+  ThreadSanitizer:Race
+  fun:webrtc::ProcessThreadImpl::Process
+  fun:webrtc::ProcessThreadImpl::Run
+  fun:webrtc::ThreadPosix::Run
+  fun:StartThread
+}
+{
    bug_104769
    ThreadSanitizer:Race
    fun:timeout_correct
@@ -693,8 +687,10 @@
   bug_104776_maybe_benign
   ThreadSanitizer:Race
   fun:base::StatisticsRecorder::StatisticsRecorder
+  fun:::BrowserMainRunnerImpl::Initialize
   fun:BrowserMain
   fun:::RunNamedProcessTypeMain
+  fun:::ContentMainRunnerImpl::Run
   fun:content::ContentMain
   fun:ChromeMain
   fun:main
@@ -727,12 +723,31 @@
   fun:AudioDevice::Run
 }
 {
-   bug_107903
+   bug_107903_a
    ThreadSanitizer:Race
    ...
    fun:TestProfileSyncService::~TestProfileSyncService
    fun:scoped_ptr::reset
    fun:ProfileSyncServiceAutofillTest::TearDown
+}
+{
+   bug_107903_b
+   ThreadSanitizer:Race
+   ...
+   fun:sync_api::SyncManager::SyncInternal::ShutdownOnSyncThread
+   fun:sync_api::SyncManager::ShutdownOnSyncThread
+   fun:browser_sync::SyncBackendHost::Core::DoShutdown
+   fun:base::internal::RunnableAdapter::Run
+}
+{
+   bug_107903_c
+   ThreadSanitizer:Race
+   fun:syncable::DirectoryChangeDelegate::~DirectoryChangeDelegate
+   fun:sync_api::SyncManager::SyncInternal::~SyncInternal
+   fun:sync_api::SyncManager::~SyncManager
+   fun:scoped_ptr::reset
+   fun:browser_sync::SyncBackendHost::Core::DoShutdown
+   fun:base::internal::RunnableAdapter::Run
 }
 {
   bug_108408
@@ -757,4 +772,122 @@
   ThreadSanitizer:Race
   ...
   fun:pa_rtpoll_run
+}
+{
+  bug_112200
+  ThreadSanitizer:Race
+  ...
+  fun:ff_thread_flush
+  fun:avcodec_flush_buffers
+  fun:avcodec_flush_buffers
+  ...
+  fun:media::FFmpegVideoDecoder::Flush
+  fun:base::internal::RunnableAdapter::Run
+}
+
+{
+  bug_112419
+  ThreadSanitizer:Race
+  ...
+  fun:::OCSPTrySendAndReceive
+  fun:pkix_pl_Pk11CertStore_GetCRL
+  fun:pkix_CrlChecker_CheckExternal
+  fun:PKIX_RevocationChecker_Check
+  fun:pkix_CheckChain
+  fun:pkix_Build_ValidateEntireChain
+  fun:pkix_BuildForwardDepthFirstSearch
+  fun:pkix_Build_InitiateBuildChain
+  fun:PKIX_BuildChain
+  fun:CERT_PKIXVerifyCert
+  fun:net::::PKIXVerifyCert
+  fun:net::X509Certificate::VerifyInternal
+  fun:net::X509Certificate::Verify
+  fun:net::CertVerifierWorker::Run
+  fun:base::internal::RunnableAdapter::Run
+}
+{
+  bug_113717
+  ThreadSanitizer:Race
+  fun:std::swap
+  fun:RenderThreadImpl::Send
+  fun:RenderWidget::Send
+  fun:RenderViewImpl::Send
+  fun:RenderWidget::DoDeferredUpdate
+  fun:RenderWidget::DoDeferredUpdateAndSendInputAck
+  fun:RenderWidget::InvalidationCallback
+  fun:base::internal::RunnableAdapter::Run
+}
+{
+  bug_113771_a
+  ThreadSanitizer:Race
+  fun:tracked_objects::ThreadData::TrackingStatus
+  fun:tracked_objects::ThreadData::TallyABirthIfActive
+  fun:base::TrackingInfo::TrackingInfo
+  fun:base::PendingTask::PendingTask
+}
+{
+  bug_113771_b
+  ThreadSanitizer:Race
+  fun:tracked_objects::ThreadData::TrackingStatus
+  fun:tracked_objects::ThreadData::Now
+  fun:tracked_objects::ThreadData::NowForEndOfRun
+  fun:MessageLoop::RunTask
+}
+{
+  bug_113771_c
+  ThreadSanitizer:Race
+  fun:tracked_objects::ThreadData::TrackingStatus
+  fun:tracked_objects::ThreadData::Now
+  fun:tracked_objects::ThreadData::NowForStartOfRun
+  fun:MessageLoop::RunTask
+}
+{
+  bug_115540
+  ThreadSanitizer:Race
+  fun:base::Thread::message_loop
+  fun:content::BrowserThreadImpl::PostTaskHelper
+  fun:content::BrowserThread::PostTask
+  fun:AudioRendererHost::OnCreated
+  fun:media::AudioOutputController::DoCreate
+}
+{
+  bug_116421
+  ThreadSanitizer:Race
+  fun:talk_base::Event::EnsureInitialized
+}
+{
+  bug_116559
+  ThreadSanitizer:Race
+  fun:logging::::LoggingTest_Dcheck_Test::TestBody
+  fun:testing::internal::HandleSehExceptionsInMethodIfSupported
+}
+{
+  bug_118319_a
+  ThreadSanitizer:Race
+  fun:content::BrowserThreadImpl::~BrowserThreadImpl
+  fun:content::BrowserProcessSubThread::~BrowserProcessSubThread
+  fun:scoped_ptr::reset
+  fun:content::BrowserMainLoop::ShutdownThreadsAndCleanUp
+  fun:::BrowserMainRunnerImpl::Shutdown
+  fun:BrowserMain
+  fun:::RunNamedProcessTypeMain
+  fun:::ContentMainRunnerImpl::Run
+  fun:content::ContentMain
+  fun:ChromeMain
+  fun:main
+}
+{
+  bug_118319_b
+  ThreadSanitizer:Race
+  fun:base::Thread::message_loop
+  fun:content::BrowserThreadImpl::PostTaskHelper
+  fun:content::BrowserThread::PostTask
+  fun:PluginLoaderPosix::GetPluginsToLoad
+  fun:base::internal::RunnableAdapter::Run
+}
+{
+  bug_118319_c
+  ThreadSanitizer:Race
+  fun:base::Thread::ThreadMain
+  fun:base::::ThreadFunc
 }

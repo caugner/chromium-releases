@@ -50,16 +50,11 @@ const AcceleratorMapping kAcceleratorMap[] = {
 #if !defined(OS_CHROMEOS)
   { ui::VKEY_F3,             true,  false, false, IDC_FIND_PREVIOUS },
 #endif
-#if defined(OS_CHROMEOS)
-  { ui::VKEY_S,              true,  false, true,  IDC_FOCUS_CHROMEOS_STATUS },
-#endif
   { ui::VKEY_D,              false, false, true,  IDC_FOCUS_LOCATION },
   { ui::VKEY_L,              false, true,  false, IDC_FOCUS_LOCATION },
 #if !defined(OS_CHROMEOS)
   { ui::VKEY_F10,            false, false, false, IDC_FOCUS_MENU_BAR },
-#endif
   { ui::VKEY_MENU,           false, false, false, IDC_FOCUS_MENU_BAR },
-#if !defined(OS_CHROMEOS)
   { ui::VKEY_F6,             false, false, false, IDC_FOCUS_NEXT_PANE },
 #else
   { ui::VKEY_F2,             false, true,  false, IDC_FOCUS_NEXT_PANE },
@@ -120,6 +115,9 @@ const AcceleratorMapping kAcceleratorMap[] = {
   { ui::VKEY_HOME,           false, false, true,  IDC_HOME },
   { ui::VKEY_T,              true,  true,  false, IDC_RESTORE_TAB },
   { ui::VKEY_S,              false, true,  false, IDC_SAVE_PAGE },
+#if defined(OS_CHROMEOS) && defined(USE_AURA)
+  { ui::VKEY_T,              false, true,  true, IDC_NEW_CROSH_TAB },
+#endif
 #if defined(OS_CHROMEOS)
   { ui::VKEY_M,              false, true,  false, IDC_FILE_MANAGER },
   { ui::VKEY_LWIN,           false, false, false, IDC_SEARCH },

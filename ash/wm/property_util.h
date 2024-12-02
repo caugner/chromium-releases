@@ -10,6 +10,8 @@
 
 namespace aura {
 class Window;
+template<typename T>
+struct WindowProperty;
 }
 
 namespace gfx {
@@ -33,6 +35,19 @@ ASH_EXPORT const gfx::Rect* GetRestoreBounds(aura::Window* window);
 
 // Deletes and clears the restore bounds property on |window|.
 ASH_EXPORT void ClearRestoreBounds(aura::Window* window);
+
+// Toggles the maximized state of the specified window.
+ASH_EXPORT void ToggleMaximizedState(aura::Window* window);
+
+ASH_EXPORT extern const aura::WindowProperty<bool>* const
+    kWindowTrackedByWorkspaceSplitPropKey;
+
+// Sets whether the specified window is tracked by workspace code. Default is
+// true. If set to false the workspace does not switch the current workspace,
+// nor does it attempt to impose constraints on the bounds of the window. This
+// is intended for tab dragging.
+ASH_EXPORT void SetTrackedByWorkspace(aura::Window* window, bool value);
+ASH_EXPORT bool GetTrackedByWorkspace(aura::Window* window);
 
 }
 

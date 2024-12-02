@@ -9,6 +9,7 @@
 
 #include "base/base64.h"
 #include "base/bind.h"
+#include "base/logging.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/message_loop.h"
 #include "base/stl_util.h"
@@ -20,9 +21,11 @@
 #include "chrome/browser/extensions/extension_function_dispatcher.h"
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_tab_helper.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/extensions/extension_tabs_module_constants.h"
-#include "chrome/browser/net/url_fixer_upper.h"
+#include "chrome/browser/extensions/extension_window_controller.h"
+#include "chrome/browser/extensions/extension_window_list.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/restore_tab_helper.h"
@@ -32,6 +35,7 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/extensions/shell_window.h"
 #include "chrome/browser/ui/panels/panel_manager.h"
 #include "chrome/browser/ui/snapshot_tab_helper.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
@@ -39,17 +43,18 @@
 #include "chrome/browser/web_applications/web_app.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/extensions/api/windows.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/extensions/extension_error_utils.h"
 #include "chrome/common/extensions/extension_messages.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/renderer_host/backing_store.h"
-#include "content/browser/renderer_host/render_view_host.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_view_host_delegate.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
@@ -59,13 +64,24 @@
 #include "ui/gfx/codec/jpeg_codec.h"
 #include "ui/gfx/codec/png_codec.h"
 
-namespace keys = extension_tabs_module_constants;
+#if defined(USE_ASH)
+#include "ash/ash_switches.h"
+#include "base/command_line.h"
+#include "chrome/browser/ui/views/ash/panel_view_aura.h"
+#endif
+
+namespace Get = extensions::api::windows::Get;
+namespace GetAll = extensions::api::windows::GetAll;
+namespace GetCurrent = extensions::api::windows::GetCurrent;
+namespace GetLastFocused = extensions::api::windows::GetLastFocused;
 namespace errors = extension_manifest_errors;
+namespace keys = extension_tabs_module_constants;
 
 using content::NavigationController;
 using content::NavigationEntry;
 using content::OpenURLParams;
 using content::Referrer;
+using content::RenderViewHost;
 using content::WebContents;
 
 const int CaptureVisibleTabFunction::kDefaultQuality = 90;
@@ -117,6 +133,44 @@ bool GetBrowserFromWindowID(
   return true;
 }
 
+ExtensionWindowController::ProfileMatchType ProfileMatchType(
+    bool include_incognito) {
+  return include_incognito ?
+      ExtensionWindowController::MATCH_INCOGNITO
+      : ExtensionWindowController::MATCH_NORMAL_ONLY;
+}
+
+bool GetWindowFromWindowID(UIThreadExtensionFunction* function,
+                           int window_id,
+                           ExtensionWindowController** controller) {
+  if (window_id == extension_misc::kCurrentWindowId) {
+    Browser* browser = function->dispatcher()->delegate()->GetBrowser();
+    // If there is a windowed browser associated with this extension, use that.
+    if (browser && browser->extension_window_controller()) {
+      *controller = browser->extension_window_controller();
+    } else {
+      // Otherwise get the focused or most recently added window.
+      *controller = ExtensionWindowList::GetInstance()->CurrentWindow(
+          function->profile(),
+          ProfileMatchType(function->include_incognito()));
+    }
+    if (!(*controller)) {
+      function->SetError(keys::kNoCurrentWindowError);
+      return false;
+    }
+  } else {
+    *controller = ExtensionWindowList::GetInstance()->FindWindowById(
+        function->profile(),
+        ProfileMatchType(function->include_incognito()),
+        window_id);
+    if (!(*controller)) {
+      function->SetError(ExtensionErrorUtils::FormatErrorMessage(
+          keys::kWindowNotFoundError, base::IntToString(window_id)));
+      return false;
+    }
+  }
+  return true;
+}
 // |error_message| can optionally be passed in and will be set with an
 // appropriate message if the tab cannot be found by id.
 bool GetTabById(int tab_id,
@@ -136,31 +190,6 @@ bool GetTabById(int tab_id,
         keys::kTabNotFoundError, base::IntToString(tab_id));
 
   return false;
-}
-
-// Takes |url_string| and returns a GURL which is either valid and absolute
-// or invalid. If |url_string| is not directly interpretable as a valid (it is
-// likely a relative URL) an attempt is made to resolve it. |extension| is
-// provided so it can be resolved relative to its extension base
-// (chrome-extension://<id>/). Using the source frame url would be more correct,
-// but because the api shipped with urls resolved relative to their extension
-// base, we decided it wasn't worth breaking existing extensions to fix.
-GURL ResolvePossiblyRelativeURL(const std::string& url_string,
-                                const Extension* extension) {
-  GURL url = GURL(url_string);
-  if (!url.is_valid())
-    url = extension->GetResourceURL(url_string);
-
-  return url;
-}
-
-bool IsCrashURL(const GURL& url) {
-  // Check a fixed-up URL, to normalize the scheme and parse hosts correctly.
-  GURL fixed_url =
-      URLFixerUpper::FixupURL(url.possibly_invalid_spec(), std::string());
-  return (fixed_url.SchemeIs(chrome::kChromeUIScheme) &&
-          (fixed_url.host() == chrome::kChromeUIBrowserCrashHost ||
-           fixed_url.host() == chrome::kChromeUICrashHost));
 }
 
 // Reads the |value| as either a single integer value or a list of integers.
@@ -215,98 +244,95 @@ QueryArg ParseBoolQueryArg(base::DictionaryValue* query, const char* key) {
 // Windows ---------------------------------------------------------------------
 
 bool GetWindowFunction::RunImpl() {
-  int window_id = extension_misc::kUnknownWindowId;
-  EXTENSION_FUNCTION_VALIDATE(args_->GetInteger(0, &window_id));
+  scoped_ptr<Get::Params> params(Get::Params::Create(*args_));
+  EXTENSION_FUNCTION_VALIDATE(params.get());
 
   bool populate_tabs = false;
-  if (HasOptionalArgument(1)) {
-    DictionaryValue* args = NULL;
-    EXTENSION_FUNCTION_VALIDATE(args_->GetDictionary(1, &args));
+  if (params->get_info.get() && params->get_info->populate.get())
+    populate_tabs = *params->get_info->populate;
 
-    if (args->HasKey(keys::kPopulateKey)) {
-      EXTENSION_FUNCTION_VALIDATE(args->GetBoolean(keys::kPopulateKey,
-          &populate_tabs));
-    }
-  }
-
-  Browser* browser = NULL;
-  if (!GetBrowserFromWindowID(this, window_id, &browser))
+  ExtensionWindowController* controller;
+  if (!GetWindowFromWindowID(this, params->window_id, &controller))
     return false;
 
-  result_.reset(ExtensionTabUtil::CreateWindowValue(browser, populate_tabs));
+  if (populate_tabs)
+    result_.reset(controller->CreateWindowValueWithTabs());
+  else
+    result_.reset(controller->CreateWindowValue());
   return true;
 }
 
 bool GetCurrentWindowFunction::RunImpl() {
+  scoped_ptr<GetCurrent::Params> params(GetCurrent::Params::Create(*args_));
+  EXTENSION_FUNCTION_VALIDATE(params.get());
+
   bool populate_tabs = false;
-  if (HasOptionalArgument(0)) {
-    DictionaryValue* args = NULL;
-    EXTENSION_FUNCTION_VALIDATE(args_->GetDictionary(0, &args));
+  if (params->get_info.get() && params->get_info->populate.get())
+    populate_tabs = *params->get_info->populate;
 
-    if (args->HasKey(keys::kPopulateKey)) {
-      EXTENSION_FUNCTION_VALIDATE(args->GetBoolean(keys::kPopulateKey,
-          &populate_tabs));
-    }
-  }
-
-  Browser* browser = GetCurrentBrowser();
-  if (!browser || !browser->window()) {
-    error_ = keys::kNoCurrentWindowError;
+  ExtensionWindowController* controller;
+  if (!GetWindowFromWindowID(this,
+                             extension_misc::kCurrentWindowId,
+                             &controller)) {
     return false;
   }
-  result_.reset(ExtensionTabUtil::CreateWindowValue(browser, populate_tabs));
+  if (populate_tabs)
+    result_.reset(controller->CreateWindowValueWithTabs());
+  else
+    result_.reset(controller->CreateWindowValue());
   return true;
 }
 
 bool GetLastFocusedWindowFunction::RunImpl() {
+  scoped_ptr<GetLastFocused::Params> params(
+      GetLastFocused::Params::Create(*args_));
+  EXTENSION_FUNCTION_VALIDATE(params.get());
+
   bool populate_tabs = false;
-  if (HasOptionalArgument(0)) {
-    DictionaryValue* args = NULL;
-    EXTENSION_FUNCTION_VALIDATE(args_->GetDictionary(0, &args));
+  if (params->get_info.get() && params->get_info->populate.get())
+    populate_tabs = *params->get_info->populate;
 
-    if (args->HasKey(keys::kPopulateKey)) {
-      EXTENSION_FUNCTION_VALIDATE(args->GetBoolean(keys::kPopulateKey,
-          &populate_tabs));
-    }
-  }
-
+  // Note: currently this returns the last active browser. If we decide to
+  // include other window types (e.g. panels), we will need to add logic to
+  // ExtensionWindowList that mirrors the active behavior of BrowserList.
   Browser* browser = BrowserList::FindAnyBrowser(
       profile(), include_incognito());
   if (!browser || !browser->window()) {
     error_ = keys::kNoLastFocusedWindowError;
     return false;
   }
-  result_.reset(ExtensionTabUtil::CreateWindowValue(browser, populate_tabs));
+  ExtensionWindowController* controller =
+      browser->extension_window_controller();
+  if (populate_tabs)
+    result_.reset(controller->CreateWindowValueWithTabs());
+  else
+    result_.reset(controller->CreateWindowValue());
   return true;
 }
 
 bool GetAllWindowsFunction::RunImpl() {
+  scoped_ptr<GetAll::Params> params(GetAll::Params::Create(*args_));
+  EXTENSION_FUNCTION_VALIDATE(params.get());
+
   bool populate_tabs = false;
-  if (HasOptionalArgument(0)) {
-    DictionaryValue* args = NULL;
-    EXTENSION_FUNCTION_VALIDATE(args_->GetDictionary(0, &args));
+  if (params->get_info.get() && params->get_info->populate.get())
+    populate_tabs = *params->get_info->populate;
 
-    if (args->HasKey(keys::kPopulateKey)) {
-      EXTENSION_FUNCTION_VALIDATE(args->GetBoolean(keys::kPopulateKey,
-          &populate_tabs));
-    }
+  ListValue* window_list = new ListValue();
+  const ExtensionWindowList::WindowList& windows =
+      ExtensionWindowList::GetInstance()->windows();
+  for (ExtensionWindowList::WindowList::const_iterator iter =
+           windows.begin();
+       iter != windows.end(); ++iter) {
+    if (!(*iter)->MatchesProfile(
+            profile(), ProfileMatchType(include_incognito())))
+      continue;
+    if (populate_tabs)
+      window_list->Append((*iter)->CreateWindowValueWithTabs());
+    else
+      window_list->Append((*iter)->CreateWindowValue());
   }
-
-  result_.reset(new ListValue());
-  Profile* incognito_profile =
-      include_incognito() && profile()->HasOffTheRecordProfile() ?
-          profile()->GetOffTheRecordProfile() : NULL;
-  for (BrowserList::const_iterator browser = BrowserList::begin();
-    browser != BrowserList::end(); ++browser) {
-      // Only examine browsers in the current profile that have windows.
-      if (((*browser)->profile() == profile() ||
-           (*browser)->profile() == incognito_profile) &&
-          (*browser)->window()) {
-        static_cast<ListValue*>(result_.get())->
-          Append(ExtensionTabUtil::CreateWindowValue(*browser, populate_tabs));
-      }
-  }
-
+  result_.reset(window_list);
   return true;
 }
 
@@ -392,14 +418,15 @@ bool CreateWindowFunction::RunImpl() {
       // Second, resolve, validate and convert them to GURLs.
       for (std::vector<std::string>::iterator i = url_strings.begin();
            i != url_strings.end(); ++i) {
-        GURL url = ResolvePossiblyRelativeURL(*i, GetExtension());
+        GURL url = ExtensionTabUtil::ResolvePossiblyRelativeURL(
+            *i, GetExtension());
         if (!url.is_valid()) {
           error_ = ExtensionErrorUtils::FormatErrorMessage(
               keys::kInvalidUrlError, *i);
           return false;
         }
         // Don't let the extension crash the browser or renderers.
-        if (IsCrashURL(url)) {
+        if (ExtensionTabUtil::IsCrashURL(url)) {
           error_ = keys::kNoCrashBrowserError;
           return false;
         }
@@ -522,10 +549,28 @@ bool CreateWindowFunction::RunImpl() {
         extension_id = GetExtension()->id();
       } else if (type_str == keys::kWindowTypeValuePanel) {
         extension_id = GetExtension()->id();
-        if (PanelManager::ShouldUsePanels(extension_id))
+        bool use_panels = false;
+#if !defined(OS_ANDROID)
+        use_panels = PanelManager::ShouldUsePanels(extension_id);
+#endif
+#if defined(USE_ASH)
+        if (CommandLine::ForCurrentProcess()->HasSwitch(
+                ash::switches::kAuraPanelManager))
+          use_panels = true;
+#endif
+        if (use_panels)
           window_type = Browser::TYPE_PANEL;
         else
           window_type = Browser::TYPE_POPUP;
+      } else if (type_str == keys::kWindowTypeValueShell &&
+          GetExtension()->is_platform_app()) {
+        GURL window_url =
+            urls.empty() ? GetExtension()->GetFullLaunchURL() : urls[0];
+        ShellWindow* shell_window =
+            ShellWindow::Create(window_profile, GetExtension(), window_url);
+        result_.reset(shell_window->extension_window_controller()->
+            CreateWindowValueWithTabs());
+        return true;
       } else if (type_str != keys::kWindowTypeValueNormal) {
         error_ = keys::kInvalidWindowTypeError;
         return false;
@@ -533,10 +578,23 @@ bool CreateWindowFunction::RunImpl() {
     }
   }
 
-  // Unlike other window types, Panels do not take focus by default.
-  if (!saw_focus_key && window_type == Browser::TYPE_PANEL)
-    focused = false;
+#if defined(USE_ASH)
+  // Aura Panels create a new PanelViewAura.
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+          ash::switches::kAuraPanelManager) &&
+      window_type == Browser::TYPE_PANEL) {
+    // Note: Panels ignore all but the first url provided.
+    std::string title =
+        web_app::GenerateApplicationNameFromExtensionId(extension_id);
+    PanelViewAura* panel_view = new PanelViewAura(title);
+    panel_view->Init(window_profile, urls[0], panel_bounds);
+    result_.reset(
+        panel_view->extension_window_controller()->CreateWindowValueWithTabs());
+    return true;
+  }
+#endif
 
+  // Create a new BrowserWindow.
   Browser* new_window;
   if (extension_id.empty()) {
     new_window = Browser::CreateForType(window_type, window_profile);
@@ -548,8 +606,12 @@ bool CreateWindowFunction::RunImpl() {
         (window_type == Browser::TYPE_PANEL ? panel_bounds : popup_bounds),
         window_profile);
   }
-  for (std::vector<GURL>::iterator i = urls.begin(); i != urls.end(); ++i)
-    new_window->AddSelectedTabWithURL(*i, content::PAGE_TRANSITION_LINK);
+  for (std::vector<GURL>::iterator i = urls.begin(); i != urls.end(); ++i) {
+    TabContentsWrapper* tab = new_window->AddSelectedTabWithURL(
+        *i, content::PAGE_TRANSITION_LINK);
+    if (window_type == Browser::TYPE_PANEL)
+      tab->extension_tab_helper()->SetExtensionAppIconById(extension_id);
+  }
   if (contents) {
     TabStripModel* target_tab_strip = new_window->tabstrip_model();
     target_tab_strip->InsertTabContentsAt(urls.size(), contents,
@@ -558,6 +620,10 @@ bool CreateWindowFunction::RunImpl() {
     new_window->NewTab();
   }
   new_window->SelectNumberedTab(0);
+
+  // Unlike other window types, Panels do not take focus by default.
+  if (!saw_focus_key && window_type == Browser::TYPE_PANEL)
+    focused = false;
 
   if (focused)
     new_window->window()->Show();
@@ -568,7 +634,8 @@ bool CreateWindowFunction::RunImpl() {
     // Don't expose incognito windows if the extension isn't allowed.
     result_.reset(Value::CreateNullValue());
   } else {
-    result_.reset(ExtensionTabUtil::CreateWindowValue(new_window, true));
+    result_.reset(
+        new_window->extension_window_controller()->CreateWindowValueWithTabs());
   }
 
   return true;
@@ -580,8 +647,8 @@ bool UpdateWindowFunction::RunImpl() {
   DictionaryValue* update_props;
   EXTENSION_FUNCTION_VALIDATE(args_->GetDictionary(1, &update_props));
 
-  Browser* browser = NULL;
-  if (!GetBrowserFromWindowID(this, window_id, &browser))
+  ExtensionWindowController* controller;
+  if (!GetWindowFromWindowID(this, window_id, &controller))
     return false;
 
   ui::WindowShowState show_state = ui::SHOW_STATE_DEFAULT;  // No change.
@@ -595,27 +662,43 @@ bool UpdateWindowFunction::RunImpl() {
       show_state = ui::SHOW_STATE_MINIMIZED;
     } else if (state_str == keys::kShowStateValueMaximized) {
       show_state = ui::SHOW_STATE_MAXIMIZED;
+    } else if (state_str == keys::kShowStateValueFullscreen) {
+      show_state = ui::SHOW_STATE_FULLSCREEN;
     } else {
       error_ = keys::kInvalidWindowStateError;
       return false;
     }
   }
 
+  if (show_state != ui::SHOW_STATE_FULLSCREEN &&
+      show_state != ui::SHOW_STATE_DEFAULT)
+    controller->SetFullscreenMode(false, GetExtension()->url());
+
   switch (show_state) {
     case ui::SHOW_STATE_MINIMIZED:
-      browser->window()->Minimize();
+      controller->window()->Minimize();
       break;
     case ui::SHOW_STATE_MAXIMIZED:
-      browser->window()->Maximize();
+      controller->window()->Maximize();
+      break;
+    case ui::SHOW_STATE_FULLSCREEN:
+      if (controller->window()->IsMinimized() ||
+          controller->window()->IsMaximized())
+        controller->window()->Restore();
+      controller->SetFullscreenMode(true, GetExtension()->url());
       break;
     case ui::SHOW_STATE_NORMAL:
-      browser->window()->Restore();
+      controller->window()->Restore();
       break;
     default:
       break;
   }
 
-  gfx::Rect bounds = browser->window()->GetRestoredBounds();
+  gfx::Rect bounds;
+  if (controller->window()->IsMinimized())
+    bounds = controller->window()->GetRestoredBounds();
+  else
+    bounds = controller->window()->GetBounds();
   bool set_bounds = false;
 
   // Any part of the bounds can optionally be set by the caller.
@@ -654,11 +737,12 @@ bool UpdateWindowFunction::RunImpl() {
 
   if (set_bounds) {
     if (show_state == ui::SHOW_STATE_MINIMIZED ||
-        show_state == ui::SHOW_STATE_MAXIMIZED) {
+        show_state == ui::SHOW_STATE_MAXIMIZED ||
+        show_state == ui::SHOW_STATE_FULLSCREEN) {
       error_ = keys::kInvalidWindowStateError;
       return false;
     }
-    browser->window()->SetBounds(bounds);
+    controller->window()->SetBounds(bounds);
   }
 
   bool active_val = false;
@@ -670,13 +754,14 @@ bool UpdateWindowFunction::RunImpl() {
         error_ = keys::kInvalidWindowStateError;
         return false;
       }
-      browser->window()->Activate();
+      controller->window()->Activate();
     } else {
-      if (show_state == ui::SHOW_STATE_MAXIMIZED) {
+      if (show_state == ui::SHOW_STATE_MAXIMIZED ||
+          show_state == ui::SHOW_STATE_FULLSCREEN) {
         error_ = keys::kInvalidWindowStateError;
         return false;
       }
-      browser->window()->Deactivate();
+      controller->window()->Deactivate();
     }
   }
 
@@ -684,10 +769,10 @@ bool UpdateWindowFunction::RunImpl() {
   if (update_props->HasKey(keys::kDrawAttentionKey)) {
     EXTENSION_FUNCTION_VALIDATE(update_props->GetBoolean(
         keys::kDrawAttentionKey, &draw_attention));
-    browser->window()->FlashFrame(draw_attention);
+    controller->window()->FlashFrame(draw_attention);
   }
 
-  result_.reset(ExtensionTabUtil::CreateWindowValue(browser, false));
+  result_.reset(controller->CreateWindowValue());
 
   return true;
 }
@@ -696,20 +781,17 @@ bool RemoveWindowFunction::RunImpl() {
   int window_id = -1;
   EXTENSION_FUNCTION_VALIDATE(args_->GetInteger(0, &window_id));
 
-  Browser* browser = GetBrowserInProfileWithId(profile(), window_id,
-                                               include_incognito(), &error_);
-  if (!browser)
+  ExtensionWindowController* controller;
+  if (!GetWindowFromWindowID(this, window_id, &controller))
     return false;
 
-  // Don't let the extension remove the window if the user is dragging tabs
-  // in that window.
-  if (!browser->IsTabStripEditable()) {
-    error_ = keys::kTabStripNotEditableError;
+  ExtensionWindowController::Reason reason;
+  if (!controller->CanClose(&reason)) {
+    if (reason == ExtensionWindowController::REASON_TAB_STRIP_NOT_EDITABLE)
+      error_ = keys::kTabStripNotEditableError;
     return false;
   }
-
-  browser->CloseWindow();
-
+  controller->window()->Close();
   return true;
 }
 
@@ -760,6 +842,9 @@ bool QueryTabsFunction::RunImpl() {
   QueryArg active = ParseBoolQueryArg(query, keys::kActiveKey);
   QueryArg pinned = ParseBoolQueryArg(query, keys::kPinnedKey);
   QueryArg selected = ParseBoolQueryArg(query, keys::kHighlightedKey);
+  QueryArg current_window = ParseBoolQueryArg(query, keys::kCurrentWindowKey);
+  QueryArg focused_window =
+      ParseBoolQueryArg(query, keys::kLastFocusedWindowKey);
 
   QueryArg loading = NOT_SET;
   if (query->HasKey(keys::kStatusKey)) {
@@ -815,6 +900,13 @@ bool QueryTabsFunction::RunImpl() {
 
     if (window_id == extension_misc::kCurrentWindowId &&
         *browser != GetCurrentBrowser())
+      continue;
+
+    if (!MatchesQueryArg(current_window, *browser == GetCurrentBrowser()))
+      continue;
+
+    if (!MatchesQueryArg(focused_window,
+        *browser == BrowserList::GetLastActive()))
       continue;
 
     if (!window_type.empty() &&
@@ -904,7 +996,8 @@ bool CreateTabFunction::RunImpl() {
   if (args->HasKey(keys::kUrlKey)) {
     EXTENSION_FUNCTION_VALIDATE(args->GetString(keys::kUrlKey,
                                                 &url_string));
-    url = ResolvePossiblyRelativeURL(url_string, GetExtension());
+    url = ExtensionTabUtil::ResolvePossiblyRelativeURL(url_string,
+                                                       GetExtension());
     if (!url.is_valid()) {
       error_ = ExtensionErrorUtils::FormatErrorMessage(keys::kInvalidUrlError,
                                                        url_string);
@@ -913,7 +1006,7 @@ bool CreateTabFunction::RunImpl() {
   }
 
   // Don't let extensions crash the browser or renderers.
-  if (IsCrashURL(url)) {
+  if (ExtensionTabUtil::IsCrashURL(url)) {
     error_ = keys::kNoCrashBrowserError;
     return false;
   }
@@ -1067,7 +1160,8 @@ bool HighlightTabsFunction::RunImpl() {
 
   selection.set_active(active_index);
   browser->tabstrip_model()->SetSelectionFromModel(selection);
-  result_.reset(ExtensionTabUtil::CreateWindowValue(browser, true));
+  result_.reset(
+      browser->extension_window_controller()->CreateWindowValueWithTabs());
   return true;
 }
 
@@ -1109,69 +1203,15 @@ bool UpdateTabFunction::RunImpl() {
   }
 
   web_contents_ = contents->web_contents();
-  NavigationController& controller = web_contents_->GetController();
 
   // TODO(rafaelw): handle setting remaining tab properties:
   // -title
   // -favIconUrl
 
-  // We wait to fire the callback when executing 'javascript:' URLs in tabs.
-  bool is_async = false;
-
   // Navigate the tab to a new location if the url is different.
-  std::string url_string;
-  if (update_props->HasKey(keys::kUrlKey)) {
-    EXTENSION_FUNCTION_VALIDATE(update_props->GetString(
-        keys::kUrlKey, &url_string));
-    GURL url = ResolvePossiblyRelativeURL(url_string, GetExtension());
-
-    if (!url.is_valid()) {
-      error_ = ExtensionErrorUtils::FormatErrorMessage(keys::kInvalidUrlError,
-                                                       url_string);
-      return false;
-    }
-
-    // Don't let the extension crash the browser or renderers.
-    if (IsCrashURL(url)) {
-      error_ = keys::kNoCrashBrowserError;
-      return false;
-    }
-
-    // JavaScript URLs can do the same kinds of things as cross-origin XHR, so
-    // we need to check host permissions before allowing them.
-    if (url.SchemeIs(chrome::kJavaScriptScheme)) {
-      if (!GetExtension()->CanExecuteScriptOnPage(
-              web_contents_->GetURL(), NULL, &error_)) {
-        return false;
-      }
-
-      ExtensionMsg_ExecuteCode_Params params;
-      params.request_id = request_id();
-      params.extension_id = extension_id();
-      params.is_javascript = true;
-      params.code = url.path();
-      params.all_frames = false;
-      params.in_main_world = true;
-
-      RenderViewHost* render_view_host = web_contents_->GetRenderViewHost();
-      render_view_host->Send(
-          new ExtensionMsg_ExecuteCode(render_view_host->routing_id(),
-                                       params));
-
-      Observe(web_contents_);
-      AddRef();  // Balanced in OnExecuteCodeFinished().
-
-      is_async = true;
-    }
-
-    controller.LoadURL(
-        url, content::Referrer(), content::PAGE_TRANSITION_LINK, std::string());
-
-    // The URL of a tab contents never actually changes to a JavaScript URL, so
-    // this check only makes sense in other cases.
-    if (!url.SchemeIs(chrome::kJavaScriptScheme))
-      DCHECK_EQ(url.spec(), web_contents_->GetURL().spec());
-  }
+  bool is_async = false;
+  if (!UpdateURLIfPresent(update_props, &is_async))
+    return false;
 
   bool active = false;
   // TODO(rafaelw): Setting |active| from js doesn't make much sense.
@@ -1233,6 +1273,67 @@ bool UpdateTabFunction::RunImpl() {
   return true;
 }
 
+bool UpdateTabFunction::UpdateURLIfPresent(DictionaryValue* update_props,
+                                           bool* is_async) {
+  if (!update_props->HasKey(keys::kUrlKey))
+    return true;
+
+  std::string url_string;
+  EXTENSION_FUNCTION_VALIDATE(update_props->GetString(
+      keys::kUrlKey, &url_string));
+  GURL url = ExtensionTabUtil::ResolvePossiblyRelativeURL(
+      url_string, GetExtension());
+
+  if (!url.is_valid()) {
+    error_ = ExtensionErrorUtils::FormatErrorMessage(
+        keys::kInvalidUrlError, url_string);
+    return false;
+  }
+
+  // Don't let the extension crash the browser or renderers.
+  if (ExtensionTabUtil::IsCrashURL(url)) {
+    error_ = keys::kNoCrashBrowserError;
+    return false;
+  }
+
+  // JavaScript URLs can do the same kinds of things as cross-origin XHR, so
+  // we need to check host permissions before allowing them.
+  if (url.SchemeIs(chrome::kJavaScriptScheme)) {
+    if (!GetExtension()->CanExecuteScriptOnPage(
+            web_contents_->GetURL(), NULL, &error_)) {
+      return false;
+    }
+
+    ExtensionMsg_ExecuteCode_Params params;
+    params.request_id = request_id();
+    params.extension_id = extension_id();
+    params.is_javascript = true;
+    params.code = url.path();
+    params.all_frames = false;
+    params.in_main_world = true;
+
+    RenderViewHost* render_view_host = web_contents_->GetRenderViewHost();
+    render_view_host->Send(
+        new ExtensionMsg_ExecuteCode(render_view_host->GetRoutingID(), params));
+
+    Observe(web_contents_);
+    AddRef();  // Balanced in OnExecuteCodeFinished().
+
+    *is_async = true;
+    return true;
+  }
+
+  web_contents_->GetController().LoadURL(
+      url, content::Referrer(), content::PAGE_TRANSITION_LINK, std::string());
+
+  // The URL of a tab contents never actually changes to a JavaScript URL, so
+  // this check only makes sense in other cases.
+  if (!url.SchemeIs(chrome::kJavaScriptScheme))
+    DCHECK_EQ(url.spec(), web_contents_->GetURL().spec());
+
+  return true;
+}
+
 void UpdateTabFunction::PopulateResult() {
   if (!has_callback())
     return;
@@ -1255,7 +1356,7 @@ bool UpdateTabFunction::OnMessageReceived(const IPC::Message& message) {
     return false;
 
   int message_request_id = -1;
-  void* iter = NULL;
+  PickleIterator iter(message);
   if (!message.ReadInt(&iter, &message_request_id)) {
     NOTREACHED() << "malformed extension message";
     return true;
@@ -1284,7 +1385,7 @@ void UpdateTabFunction::OnExecuteCodeFinished(int request_id,
   SendResponse(success);
 
   Observe(NULL);
-  Release();  // Balanced in RunImpl().
+  Release();  // Balanced in UpdateURLIfPresent().
 }
 
 bool MoveTabsFunction::RunImpl() {
@@ -1482,12 +1583,13 @@ bool RemoveTabsFunction::RunImpl() {
     // circumstances, whereas |Browser::CloseTabContents()| does not.
     RenderViewHost* render_view_host =
         contents->web_contents()->GetRenderViewHost();
-    render_view_host->delegate()->Close(render_view_host);
+    render_view_host->GetDelegate()->Close(render_view_host);
   }
   return true;
 }
 
-bool CaptureVisibleTabFunction::RunImpl() {
+bool CaptureVisibleTabFunction::GetTabToCapture(
+    WebContents** web_contents, TabContentsWrapper** wrapper) {
   Browser* browser = NULL;
   // windowId defaults to "current" window.
   int window_id = extension_misc::kCurrentWindowId;
@@ -1496,6 +1598,23 @@ bool CaptureVisibleTabFunction::RunImpl() {
     EXTENSION_FUNCTION_VALIDATE(args_->GetInteger(0, &window_id));
 
   if (!GetBrowserFromWindowID(this, window_id, &browser))
+    return false;
+
+  *web_contents = browser->GetSelectedWebContents();
+  if (*web_contents == NULL) {
+    error_ = keys::kInternalVisibleTabCaptureError;
+    return false;
+  }
+
+  *wrapper = browser->GetSelectedTabContentsWrapper();
+
+  return true;
+};
+
+bool CaptureVisibleTabFunction::RunImpl() {
+  WebContents* web_contents = NULL;
+  TabContentsWrapper* wrapper = NULL;
+  if (!GetTabToCapture(&web_contents, &wrapper))
     return false;
 
   image_format_ = FORMAT_JPEG;  // Default format is JPEG.
@@ -1526,12 +1645,6 @@ bool CaptureVisibleTabFunction::RunImpl() {
     }
   }
 
-  WebContents* web_contents = browser->GetSelectedWebContents();
-  if (!web_contents) {
-    error_ = keys::kInternalVisibleTabCaptureError;
-    return false;
-  }
-
   // captureVisibleTab() can return an image containing sensitive information
   // that the browser would otherwise protect.  Ensure the extension has
   // permission to do this.
@@ -1542,37 +1655,24 @@ bool CaptureVisibleTabFunction::RunImpl() {
 
   // If a backing store is cached for the tab we want to capture,
   // and it can be copied into a bitmap, then use it to generate the image.
-  BackingStore* backing_store = render_view_host->GetBackingStore(false);
-  if (backing_store && CaptureSnapshotFromBackingStore(backing_store))
+  // For example, some uncommon X11 visual modes are not supported by
+  // CopyFromBackingStore().
+  skia::PlatformCanvas temp_canvas;
+  if (render_view_host->CopyFromBackingStore(
+          gfx::Rect(), gfx::Size(), &temp_canvas)) {
+    VLOG(1) << "captureVisibleTab() got image from backing store.";
+    SendResultFromBitmap(skia::GetTopDevice(temp_canvas)->accessBitmap(false));
     return true;
+  }
 
   // Ask the renderer for a snapshot of the tab.
-  TabContentsWrapper* wrapper = browser->GetSelectedTabContentsWrapper();
   wrapper->snapshot_tab_helper()->CaptureSnapshot();
   registrar_.Add(this,
                  chrome::NOTIFICATION_TAB_SNAPSHOT_TAKEN,
-                 content::Source<TabContentsWrapper>(wrapper));
+                 content::Source<WebContents>(wrapper->web_contents()));
   AddRef();  // Balanced in CaptureVisibleTabFunction::Observe().
+  wrapper->snapshot_tab_helper()->CaptureSnapshot();
 
-  return true;
-}
-
-// Build the image of a tab's contents out of a backing store.
-// This may fail if we can not copy a backing store into a bitmap.
-// For example, some uncommon X11 visual modes are not supported by
-// CopyFromBackingStore().
-bool CaptureVisibleTabFunction::CaptureSnapshotFromBackingStore(
-    BackingStore* backing_store) {
-
-  skia::PlatformCanvas temp_canvas;
-  if (!backing_store->CopyFromBackingStore(gfx::Rect(backing_store->size()),
-                                           &temp_canvas)) {
-    return false;
-  }
-  VLOG(1) << "captureVisibleTab() got image from backing store.";
-
-  SendResultFromBitmap(
-      skia::GetTopDevice(temp_canvas)->accessBitmap(false));
   return true;
 }
 

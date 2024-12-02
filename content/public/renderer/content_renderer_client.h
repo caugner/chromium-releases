@@ -127,7 +127,6 @@ class ContentRendererClient {
   // Returns true if we should fork a new process for the given navigation.
   virtual bool ShouldFork(WebKit::WebFrame* frame,
                           const GURL& url,
-                          bool is_content_initiated,
                           bool is_initial_navigation,
                           bool* send_referrer) = 0;
 
@@ -144,6 +143,7 @@ class ContentRendererClient {
   // See the corresponding functions in WebKit::WebFrameClient.
   virtual void DidCreateScriptContext(WebKit::WebFrame* frame,
                                       v8::Handle<v8::Context> context,
+                                      int extension_group,
                                       int world_id) = 0;
   virtual void WillReleaseScriptContext(WebKit::WebFrame* frame,
                                         v8::Handle<v8::Context>,

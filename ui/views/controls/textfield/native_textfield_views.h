@@ -76,8 +76,7 @@ class VIEWS_EXPORT NativeTextfieldViews : public TouchSelectionClientView,
 
   // ContextMenuController overrides:
   virtual void ShowContextMenuForView(View* source,
-                                      const gfx::Point& p,
-                                      bool is_mouse_gesture) OVERRIDE;
+                                      const gfx::Point& point) OVERRIDE;
 
   // Overridden from DragController:
   virtual void WriteDragDataForView(View* sender,
@@ -99,6 +98,7 @@ class VIEWS_EXPORT NativeTextfieldViews : public TouchSelectionClientView,
   virtual void UpdateBorder() OVERRIDE;
   virtual void UpdateTextColor() OVERRIDE;
   virtual void UpdateBackgroundColor() OVERRIDE;
+  virtual void UpdateCursorColor() OVERRIDE;
   virtual void UpdateReadOnly() OVERRIDE;
   virtual void UpdateFont() OVERRIDE;
   virtual void UpdateIsObscured() OVERRIDE;
@@ -230,6 +230,10 @@ class VIEWS_EXPORT NativeTextfieldViews : public TouchSelectionClientView,
 
   // Returns true if the current text input type allows access by the IME.
   bool ImeEditingAllowed() const;
+
+  // Returns true if distance between |event| and |last_click_location_|
+  // exceeds the drag threshold.
+  bool ExceededDragThresholdFromLastClickLocation(const MouseEvent& event);
 
   // Checks if a char is ok to be inserted into the textfield. The |ch| is a
   // modified character, i.e., modifiers took effect when generating this char.

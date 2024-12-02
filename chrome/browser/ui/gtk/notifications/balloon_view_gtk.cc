@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,16 +24,16 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/gtk/custom_button.h"
-#include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/gtk/menu_gtk.h"
 #include "chrome/browser/ui/gtk/notifications/balloon_view_host_gtk.h"
 #include "chrome/browser/ui/gtk/rounded_window.h"
+#include "chrome/browser/ui/gtk/theme_service_gtk.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
-#include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/renderer_host/render_widget_host_view.h"
 #include "content/public/browser/notification_source.h"
+#include "content/public/browser/render_view_host.h"
+#include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -209,7 +209,7 @@ void BalloonViewImpl::AnimationProgressed(const ui::Animation* animation) {
 }
 
 void BalloonViewImpl::Show(Balloon* balloon) {
-  theme_service_ = GtkThemeService::GetFrom(balloon->profile());
+  theme_service_ = ThemeServiceGtk::GetFrom(balloon->profile());
 
   const std::string source_label_text = l10n_util::GetStringFUTF8(
       IDS_NOTIFICATION_BALLOON_SOURCE_LABEL,
@@ -415,7 +415,7 @@ void BalloonViewImpl::OnCloseButton(GtkWidget* widget) {
 gboolean BalloonViewImpl::OnContentsExpose(GtkWidget* sender,
                                            GdkEventExpose* event) {
   TRACE_EVENT0("ui::gtk", "BalloonViewImpl::OnContentsExpose");
-  cairo_t* cr = gdk_cairo_create(GDK_DRAWABLE(sender->window));
+  cairo_t* cr = gdk_cairo_create(gtk_widget_get_window(sender));
   gdk_cairo_rectangle(cr, &event->area);
   cairo_clip(cr);
 
@@ -439,7 +439,7 @@ gboolean BalloonViewImpl::OnContentsExpose(GtkWidget* sender,
 
 gboolean BalloonViewImpl::OnExpose(GtkWidget* sender, GdkEventExpose* event) {
   TRACE_EVENT0("ui::gtk", "BalloonViewImpl::OnExpose");
-  cairo_t* cr = gdk_cairo_create(GDK_DRAWABLE(sender->window));
+  cairo_t* cr = gdk_cairo_create(gtk_widget_get_window(sender));
   gdk_cairo_rectangle(cr, &event->area);
   cairo_clip(cr);
 

@@ -28,6 +28,9 @@ def Main(args):
   # them off on the main Chrome waterfall, but not on NaCl's integration bots.
   # This makes it easier to see when things have been fixed NaCl side.
   if not is_integration_bot:
+    # TODO(nfullagar): Reenable when this issue is resolved.
+    # http://code.google.com/p/chromium/issues/detail?id=116169
+    tests_to_disable.append('run_ppapi_example_audio_test');
     # TODO(ncbray): Reenable when this issue is resolved.
     # http://code.google.com/p/nativeclient/issues/detail?id=2091
     tests_to_disable.append('run_ppapi_bad_browser_test')
@@ -49,11 +52,9 @@ def Main(args):
     tests_to_disable.append('run_pm_redir_stderr_bg_1000000_chrome_browser_test')
     # http://code.google.com/p/nativeclient/issues/detail?id=2511
     tests_to_disable.append('run_ppapi_ppb_image_data_browser_test')
-    # TODO(cdn): Reenable once we can pass
-    # --disable-extensions-resource-whitelist to chrome for this test.
-    # http://code.google.com/p/nativeclient/issues/detail?id=108131
-    tests_to_disable.append('run_ppapi_extension_mime_handler_browser_test')
-
+    # Font API is only exported to trusted plugins now, and this test should be
+    # removed.
+    tests_to_disable.append('run_ppapi_example_font_test')
 
     # TODO(ncbray) why did these tests flake?
     # http://code.google.com/p/nativeclient/issues/detail?id=2230
@@ -79,6 +80,12 @@ def Main(args):
   if sys.platform in ('win32', 'cygwin'):
     tests_to_disable.append('run_ppapi_ppp_input_event_browser_test')
 
+    # TODO(mseaborn): Enable this test for 32-bit Windows.
+    # See http://code.google.com/p/nativeclient/issues/detail?id=2602
+    if not ('64' in os.environ.get('PROCESSOR_ARCHITECTURE', '') or
+            '64' in os.environ.get('PROCESSOR_ARCHITEW6432', '')):
+      tests_to_disable.append('run_inbrowser_exception_test')
+
   script_dir = os.path.dirname(os.path.abspath(__file__))
   test_dir = os.path.dirname(script_dir)
   chrome_dir = os.path.dirname(test_dir)
@@ -92,7 +99,12 @@ def Main(args):
          '--build-dir=',
          '--',
          nacl_integration_script,
-         '--disable_tests=%s' % ','.join(tests_to_disable)] + args
+         '--disable_tests=%s' % ','.join(tests_to_disable)]
+  if not is_integration_bot:
+    if sys.platform in ('win32', 'cygwin'):
+      # http://code.google.com/p/nativeclient/issues/detail?id=2648
+      cmd.append('--disable_glibc')
+  cmd += args
   sys.stdout.write('Running %s\n' % ' '.join(cmd))
   sys.stdout.flush()
   return subprocess.call(cmd)

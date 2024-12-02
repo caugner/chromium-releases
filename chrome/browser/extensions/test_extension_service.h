@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,6 +22,7 @@ class TestExtensionService : public ExtensionServiceInterface {
 
   // ExtensionServiceInterface implementation.
   virtual const ExtensionSet* extensions() const OVERRIDE;
+  virtual const ExtensionSet* disabled_extensions() const OVERRIDE;
   virtual PendingExtensionManager* pending_extension_manager() OVERRIDE;
 
   virtual bool UpdateExtension(
@@ -46,7 +47,7 @@ class TestExtensionService : public ExtensionServiceInterface {
   virtual SyncError MergeDataAndStartSyncing(
       syncable::ModelType type,
       const SyncDataList& initial_sync_data,
-      SyncChangeProcessor* sync_processor) OVERRIDE;
+      scoped_ptr<SyncChangeProcessor> sync_processor) OVERRIDE;
   virtual void StopSyncing(syncable::ModelType type) OVERRIDE;
   virtual SyncDataList GetAllSyncData(syncable::ModelType type) const OVERRIDE;
   virtual SyncError ProcessSyncChanges(
@@ -55,11 +56,13 @@ class TestExtensionService : public ExtensionServiceInterface {
 
   virtual bool is_ready() OVERRIDE;
 
-  virtual void AddExtension(const Extension* extension) OVERRIDE;
+  virtual bool AddExtension(const Extension* extension) OVERRIDE;
 
   virtual void UnloadExtension(
       const std::string& extension_id,
       extension_misc::UnloadedExtensionReason reason) OVERRIDE;
+
+  virtual void SyncExtensionChangeIfNeeded(const Extension& extension) OVERRIDE;
 };
 
 #endif  // CHROME_BROWSER_EXTENSIONS_TEST_EXTENSION_SERVICE_H_

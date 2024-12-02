@@ -76,12 +76,22 @@ void TestURLFetcher::SetExtraRequestHeaders(
   fake_extra_request_headers_.AddHeadersFromString(extra_request_headers);
 }
 
+void TestURLFetcher::AddExtraRequestHeader(const std::string& header_line) {
+  fake_extra_request_headers_.AddHeaderFromString(header_line);
+}
+
 void TestURLFetcher::GetExtraRequestHeaders(net::HttpRequestHeaders* headers) {
   *headers = fake_extra_request_headers_;
 }
 
 void TestURLFetcher::SetRequestContext(
     net::URLRequestContextGetter* request_context_getter) {
+}
+
+void TestURLFetcher::AssociateWithRenderView(
+    const GURL& first_party_for_cookies,
+    int render_process_id,
+    int render_view_id) {
 }
 
 void TestURLFetcher::SetAutomaticallyRetryOn5xx(bool retry) {
@@ -97,6 +107,11 @@ int TestURLFetcher::GetMaxRetries() const {
 
 base::TimeDelta TestURLFetcher::GetBackoffDelay() const {
   return fake_backoff_delay_;
+}
+
+void TestURLFetcher::SaveResponseToFileAtPath(
+    const FilePath& file_path,
+    scoped_refptr<base::MessageLoopProxy> file_message_loop_proxy) {
 }
 
 void TestURLFetcher::SaveResponseToTemporaryFile(
@@ -118,11 +133,6 @@ bool TestURLFetcher::WasFetchedViaProxy() const {
 
 void TestURLFetcher::Start() {
   // Overriden to do nothing. It is assumed the caller will notify the delegate.
-}
-
-void TestURLFetcher::StartWithRequestContextGetter(
-    net::URLRequestContextGetter* request_context_getter) {
-  NOTIMPLEMENTED();
 }
 
 const GURL& TestURLFetcher::GetOriginalURL() const {

@@ -14,7 +14,6 @@
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/ui/toolbar/toolbar_model.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
-#include "chrome/browser/ui/views/tab_contents/tab_contents_view_views.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/web_contents.h"
@@ -32,6 +31,7 @@
 #include "ui/gfx/path.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/screen.h"
+#include "ui/views/color_constants.h"
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/focus/focus_manager.h"
 #include "ui/views/views_delegate.h"
@@ -46,10 +46,12 @@
 #include "ui/views/widget/native_widget_win.h"
 #endif
 
-#if defined(USE_AURA)
+#if defined(USE_ASH)
 #include "ash/ash_switches.h"
 #include "ash/shell.h"
+#include "ash/wm/custom_frame_view_ash.h"
 #include "base/command_line.h"
+#include "ui/aura/window.h"
 #endif
 
 using base::TimeDelta;
@@ -272,7 +274,8 @@ const int kTitleLeftSpacing = 2;
 const int kTitleCaptionSpacing = 5;
 
 const SkColor kContentsBorderShadow = SkColorSetARGB(51, 0, 0, 0);
-}
+
+}  // namespace
 
 ////////////////////////////////////////////////////////////////////////////////
 // ConstrainedWindowFrameView, public:
@@ -443,21 +446,6 @@ void ConstrainedWindowFrameView::PaintFrameBorder(gfx::Canvas* canvas) {
   frame_background_->set_theme_overlay_bitmap(NULL);
   frame_background_->set_top_area_height(theme_frame->height());
 
-#if defined(USE_AURA)
-  // TODO(jamescook): Remove this when Aura defaults to its own window frame,
-  // BrowserNonClientFrameViewAura.  Until then, use custom square corners to
-  // avoid performance penalties associated with transparent layers.
-  frame_background_->SetCornerImages(
-      rb.GetBitmapNamed(IDR_AURA_WINDOW_TOP_LEFT),
-      rb.GetBitmapNamed(IDR_AURA_WINDOW_TOP_RIGHT),
-      rb.GetBitmapNamed(IDR_AURA_WINDOW_BOTTOM_LEFT),
-      rb.GetBitmapNamed(IDR_AURA_WINDOW_BOTTOM_RIGHT));
-  frame_background_->SetSideImages(
-      rb.GetBitmapNamed(IDR_WINDOW_LEFT_SIDE),
-      rb.GetBitmapNamed(IDR_WINDOW_TOP_CENTER),
-      rb.GetBitmapNamed(IDR_WINDOW_RIGHT_SIDE),
-      rb.GetBitmapNamed(IDR_WINDOW_BOTTOM_CENTER));
-#else
   frame_background_->SetCornerImages(
       resources_->GetPartBitmap(FRAME_TOP_LEFT_CORNER),
       resources_->GetPartBitmap(FRAME_TOP_RIGHT_CORNER),
@@ -468,8 +456,6 @@ void ConstrainedWindowFrameView::PaintFrameBorder(gfx::Canvas* canvas) {
       resources_->GetPartBitmap(FRAME_TOP_EDGE),
       resources_->GetPartBitmap(FRAME_RIGHT_EDGE),
       resources_->GetPartBitmap(FRAME_BOTTOM_EDGE));
-#endif
-
   frame_background_->PaintRestored(canvas, this);
 }
 
@@ -486,8 +472,8 @@ void ConstrainedWindowFrameView::PaintClientEdge(gfx::Canvas* canvas) {
   gfx::Rect frame_shadow_bounds(client_edge_bounds);
   frame_shadow_bounds.Inset(-kFrameShadowThickness, -kFrameShadowThickness);
 
-  canvas->FillRect(kContentsBorderShadow, frame_shadow_bounds);
-  canvas->FillRect(ResourceBundle::toolbar_color, client_edge_bounds);
+  canvas->FillRect(frame_shadow_bounds, kContentsBorderShadow);
+  canvas->FillRect(client_edge_bounds, views::kClientEdgeColor);
 }
 
 void ConstrainedWindowFrameView::LayoutWindowControls() {
@@ -550,6 +536,36 @@ void ConstrainedWindowFrameView::InitClass() {
   }
 }
 
+#if defined(USE_ASH)
+// Ash has its own window frames, but we need the special close semantics for
+// constrained windows.
+class ConstrainedWindowFrameViewAsh : public ash::CustomFrameViewAsh {
+ public:
+  explicit ConstrainedWindowFrameViewAsh()
+      : ash::CustomFrameViewAsh(),
+        container_(NULL) {
+  }
+
+  void Init(ConstrainedWindowViews* container) {
+    container_ = container;
+    ash::CustomFrameViewAsh::Init(container);
+    // Always use "active" look.
+    SetInactiveRenderingDisabled(true);
+  }
+
+  // views::ButtonListener overrides:
+  virtual void ButtonPressed(views::Button* sender,
+                             const views::Event& event) OVERRIDE {
+    if (sender == close_button())
+      container_->CloseConstrainedWindow();
+  }
+
+ private:
+  ConstrainedWindowViews* container_;  // not owned
+  DISALLOW_COPY_AND_ASSIGN(ConstrainedWindowFrameViewAsh);
+};
+#endif  // defined(USE_ASH)
+
 ////////////////////////////////////////////////////////////////////////////////
 // ConstrainedWindowViews, public:
 
@@ -564,6 +580,10 @@ ConstrainedWindowViews::ConstrainedWindowViews(
   params.native_widget = native_constrained_window_->AsNativeWidget();
   params.child = true;
   params.parent = wrapper->web_contents()->GetNativeView();
+#if defined(USE_ASH)
+  // Ash window headers can be transparent.
+  params.transparent = true;
+#endif
   Init(params);
 
   wrapper_->constrained_window_tab_helper()->AddConstrainedDialog(this);
@@ -598,6 +618,9 @@ void ConstrainedWindowViews::FocusConstrainedWindow() {
       widget_delegate()->GetInitiallyFocusedView()) {
     widget_delegate()->GetInitiallyFocusedView()->RequestFocus();
   }
+#if defined(USE_ASH)
+  GetNativeView()->Focus();
+#endif
 }
 
 gfx::NativeWindow ConstrainedWindowViews::GetNativeWindow() {
@@ -608,11 +631,13 @@ gfx::NativeWindow ConstrainedWindowViews::GetNativeWindow() {
 // ConstrainedWindowViews, views::Widget overrides:
 
 views::NonClientFrameView* ConstrainedWindowViews::CreateNonClientFrameView() {
-#if defined(USE_AURA)
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-          ash::switches::kAuraGoogleDialogFrames)) {
+#if defined(USE_ASH)
+  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  if (command_line->HasSwitch(ash::switches::kAuraGoogleDialogFrames))
     return ash::Shell::GetInstance()->CreateDefaultNonClientFrameView(this);
-  }
+  ConstrainedWindowFrameViewAsh* frame = new ConstrainedWindowFrameViewAsh;
+  frame->Init(this);
+  return frame;
 #endif
   return new ConstrainedWindowFrameView(this);
 }

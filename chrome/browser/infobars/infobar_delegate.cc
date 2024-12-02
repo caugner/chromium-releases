@@ -63,6 +63,14 @@ LinkInfoBarDelegate* InfoBarDelegate::AsLinkInfoBarDelegate() {
   return NULL;
 }
 
+MediaStreamInfoBarDelegate* InfoBarDelegate::AsMediaStreamInfobarDelegate() {
+  return NULL;
+}
+
+SavePasswordInfoBarDelegate* InfoBarDelegate::AsSavePasswordInfoBarDelegate() {
+  return NULL;
+}
+
 RegisterProtocolHandlerInfoBarDelegate*
     InfoBarDelegate::AsRegisterProtocolHandlerInfoBarDelegate() {
   return NULL;

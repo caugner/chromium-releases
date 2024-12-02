@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,20 +11,25 @@
 #include "base/string16.h"
 #include "chrome/browser/tab_contents/render_view_context_menu.h"
 
+namespace gfx {
+class Point;
+}
+
 namespace views {
 class MenuItemView;
 class MenuModelAdapter;
 class MenuRunner;
-}  // namespace views
+class Widget;
+}
 
 class RenderViewContextMenuViews : public RenderViewContextMenu {
  public:
   RenderViewContextMenuViews(content::WebContents* tab_contents,
-                             const ContextMenuParams& params);
+                             const content::ContextMenuParams& params);
 
   virtual ~RenderViewContextMenuViews();
 
-  void RunMenuAt(int x, int y);
+  void RunMenuAt(views::Widget* parent, const gfx::Point& point);
 
 #if defined(OS_WIN)
   // Set this menu to show for an external tab contents. This

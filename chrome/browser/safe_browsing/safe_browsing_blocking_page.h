@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -30,22 +30,28 @@
 #pragma once
 
 #include <map>
+#include <string>
 #include <vector>
 
+#include "base/gtest_prod_util.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
-#include "chrome/browser/tab_contents/chrome_interstitial_page.h"
+#include "content/public/browser/interstitial_page_delegate.h"
 #include "googleurl/src/gurl.h"
 
+class MalwareDetails;
 class MessageLoop;
 class SafeBrowsingBlockingPageFactory;
-class MalwareDetails;
-class TabContents;
 
 namespace base {
 class DictionaryValue;
 }
 
-class SafeBrowsingBlockingPage : public ChromeInterstitialPage {
+namespace content {
+class InterstitialPage;
+class WebContents;
+}
+
+class SafeBrowsingBlockingPage : public content::InterstitialPageDelegate {
  public:
   typedef std::vector<SafeBrowsingService::UnsafeResource> UnsafeResourceList;
   typedef std::map<content::WebContents*, UnsafeResourceList> UnsafeResourceMap;
@@ -67,16 +73,19 @@ class SafeBrowsingBlockingPage : public ChromeInterstitialPage {
     factory_ = factory;
   }
 
-  // ChromeInterstitialPage method:
+  // InterstitialPageDelegate method:
   virtual std::string GetHTMLContents() OVERRIDE;
-  virtual void Proceed() OVERRIDE;
-  virtual void DontProceed() OVERRIDE;
+  virtual void CommandReceived(const std::string& command) OVERRIDE;
+  virtual void OverrideRendererPrefs(
+      content::RendererPreferences* prefs) OVERRIDE;
+  virtual void OnProceed() OVERRIDE;
+  virtual void OnDontProceed() OVERRIDE;
 
  protected:
   friend class SafeBrowsingBlockingPageTest;
-
-  // ChromeInterstitialPage method:
-  virtual void CommandReceived(const std::string& command) OVERRIDE;
+  friend class TestSafeBrowsingBlockingPage;
+  FRIEND_TEST_ALL_PREFIXES(SafeBrowsingBlockingPageTest,
+                           ProceedThenDontProceed);
 
   void SetReportingPreference(bool report);
 
@@ -168,6 +177,12 @@ class SafeBrowsingBlockingPage : public ChromeInterstitialPage {
   // blocking page is shown. The object will be sent when the warning
   // is gone (if the user enables the feature).
   scoped_refptr<MalwareDetails> malware_details_;
+
+  bool proceeded_;
+
+  content::WebContents* web_contents_;
+  GURL url_;
+  content::InterstitialPage* interstitial_page_;  // Owns us
 
   // The factory used to instanciate SafeBrowsingBlockingPage objects.
   // Usefull for tests, so they can provide their own implementation of

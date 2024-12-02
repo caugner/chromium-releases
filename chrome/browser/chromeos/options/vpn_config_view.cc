@@ -56,13 +56,16 @@ class ProviderTypeComboboxModel : public ui::ComboboxModel {
  public:
   ProviderTypeComboboxModel() {}
   virtual ~ProviderTypeComboboxModel() {}
-  virtual int GetItemCount() {
+
+  // Overridden from ui::ComboboxModel:
+  virtual int GetItemCount() const OVERRIDE {
     return chromeos::PROVIDER_TYPE_MAX;
   }
-  virtual string16 GetItemAt(int index) {
+  virtual string16 GetItemAt(int index) OVERRIDE {
     ProviderType type = static_cast<ProviderType>(index);
     return ProviderTypeToString(type);
   }
+
  private:
   DISALLOW_COPY_AND_ASSIGN(ProviderTypeComboboxModel);
 };
@@ -73,25 +76,28 @@ class ServerCACertComboboxModel : public ui::ComboboxModel {
       : cert_library_(cert_library) {
   }
   virtual ~ServerCACertComboboxModel() {}
-  virtual int GetItemCount() {
+
+  // Overridden from ui::ComboboxModel:
+  virtual int GetItemCount() const OVERRIDE {
     if (cert_library_->CertificatesLoading())
       return 1;  // "Loading"
     // "Default" + certs.
     return cert_library_->GetCACertificates().Size() + 1;
   }
-  virtual string16 GetItemAt(int combo_index) {
+  virtual string16 GetItemAt(int index) OVERRIDE {
     if (cert_library_->CertificatesLoading())
       return l10n_util::GetStringUTF16(
           IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_CERT_LOADING);
-    if (combo_index == 0)
+    if (index == 0)
       return l10n_util::GetStringUTF16(
           IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_CERT_SERVER_CA_DEFAULT);
-    int cert_index = combo_index - 1;
+    int cert_index = index - 1;
     return cert_library_->GetCACertificates().GetDisplayStringAt(cert_index);
   }
 
  private:
   CertLibrary* cert_library_;
+
   DISALLOW_COPY_AND_ASSIGN(ServerCACertComboboxModel);
 };
 
@@ -101,7 +107,9 @@ class UserCertComboboxModel : public ui::ComboboxModel {
       : cert_library_(cert_library) {
   }
   virtual ~UserCertComboboxModel() {}
-  virtual int GetItemCount() {
+
+  // Overridden from ui::ComboboxModel:
+  virtual int GetItemCount() const OVERRIDE {
     if (cert_library_->CertificatesLoading())
       return 1;  // "Loading"
     int num_certs = cert_library_->GetUserCertificates().Size();
@@ -109,7 +117,7 @@ class UserCertComboboxModel : public ui::ComboboxModel {
       return 1;  // "None installed"
     return num_certs;
   }
-  virtual string16 GetItemAt(int combo_index) {
+  virtual string16 GetItemAt(int index) OVERRIDE {
     if (cert_library_->CertificatesLoading()) {
       return l10n_util::GetStringUTF16(
           IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_CERT_LOADING);
@@ -118,7 +126,7 @@ class UserCertComboboxModel : public ui::ComboboxModel {
       return l10n_util::GetStringUTF16(
           IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_USER_CERT_NONE_INSTALLED);
     }
-    return cert_library_->GetUserCertificates().GetDisplayStringAt(combo_index);
+    return cert_library_->GetUserCertificates().GetDisplayStringAt(index);
   }
 
  private:
@@ -148,6 +156,24 @@ string16 VPNConfigView::GetTitle() {
     return l10n_util::GetStringUTF16(IDS_OPTIONS_SETTINGS_ADD_VPN);
   else
     return l10n_util::GetStringUTF16(IDS_OPTIONS_SETTINGS_JOIN_VPN);
+}
+
+views::View* VPNConfigView::GetInitiallyFocusedView() {
+  // Put focus in the first editable field.
+  if (server_textfield_)
+    return server_textfield_;
+  else if (service_textfield_)
+    return service_textfield_;
+  else if (provider_type_combobox_)
+    return provider_type_combobox_;
+  else if (psk_passphrase_textfield_ && psk_passphrase_textfield_->enabled())
+    return psk_passphrase_textfield_;
+  else if (user_cert_combobox_ && user_cert_combobox_->enabled())
+    return user_cert_combobox_;
+  else if (server_ca_cert_combobox_ && server_ca_cert_combobox_->enabled())
+    return server_ca_cert_combobox_;
+  else
+    return NULL;
 }
 
 bool VPNConfigView::CanLogin() {
@@ -294,19 +320,9 @@ void VPNConfigView::Cancel() {
 }
 
 void VPNConfigView::InitFocus() {
-  // Put focus in the first editable field.
-  if (server_textfield_)
-    server_textfield_->RequestFocus();
-  else if (service_textfield_)
-    service_textfield_->RequestFocus();
-  else if (provider_type_combobox_)
-    provider_type_combobox_->RequestFocus();
-  else if (psk_passphrase_textfield_ && psk_passphrase_textfield_->enabled())
-    psk_passphrase_textfield_->RequestFocus();
-  else if (user_cert_combobox_ && user_cert_combobox_->enabled())
-    user_cert_combobox_->RequestFocus();
-  else if (server_ca_cert_combobox_ && server_ca_cert_combobox_->enabled())
-    server_ca_cert_combobox_->RequestFocus();
+  views::View* view_to_focus = GetInitiallyFocusedView();
+  if (view_to_focus)
+    view_to_focus->RequestFocus();
 }
 
 const std::string VPNConfigView::GetService() const {
@@ -481,7 +497,8 @@ void VPNConfigView::Init(VirtualNetwork* vpn) {
     psk_passphrase_label_ =  new views::Label(l10n_util::GetStringUTF16(
         IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_VPN_PSK_PASSPHRASE));
     layout->AddView(psk_passphrase_label_);
-    psk_passphrase_textfield_ = new PassphraseTextfield(vpn);
+    bool has_psk_passphrase = vpn && !vpn->IsPSKPassphraseRequired();
+    psk_passphrase_textfield_ = new PassphraseTextfield(has_psk_passphrase);
     psk_passphrase_textfield_->SetController(this);
     layout->AddView(psk_passphrase_textfield_);
     layout->AddView(
@@ -546,7 +563,8 @@ void VPNConfigView::Init(VirtualNetwork* vpn) {
   layout->StartRow(0, column_view_set_id);
   layout->AddView(new views::Label(l10n_util::GetStringUTF16(
       IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_VPN_USER_PASSPHRASE)));
-  user_passphrase_textfield_ = new PassphraseTextfield(vpn);
+  bool has_user_passphrase = vpn && !vpn->IsUserPassphraseRequired();
+  user_passphrase_textfield_ = new PassphraseTextfield(has_user_passphrase);
   user_passphrase_textfield_->SetController(this);
   user_passphrase_textfield_->SetEnabled(user_passphrase_ui_data_.editable());
   layout->AddView(user_passphrase_textfield_);

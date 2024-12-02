@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,13 +10,13 @@
 #include <vector>
 
 #include "base/file_util.h"
-#include "base/json/json_value_serializer.h"
+#include "base/json/json_file_value_serializer.h"
 #include "base/logging.h"
 #include "base/memory/linked_ptr.h"
 #include "base/stringprintf.h"
 #include "base/values.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/extensions/extension_constants.h"
+#include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/extensions/extension_file_util.h"
 #include "chrome/common/extensions/extension_message_bundle.h"
 #include "chrome/common/url_constants.h"
@@ -126,6 +126,41 @@ bool LocalizeManifest(const ExtensionMessageBundle& messages,
         return false;
     }
   }
+
+  // Initialize all intents.
+  DictionaryValue* intents = NULL;
+  if (manifest->GetDictionary(keys::kIntents, &intents)) {
+    DictionaryValue::key_iterator it = intents->begin_keys();
+    for ( ; it != intents->end_keys(); ++it) {
+      ListValue* actions = NULL;
+      DictionaryValue* action = NULL;
+
+      // Actions have either a dict or a list of dicts - handle both cases.
+      if (intents->GetListWithoutPathExpansion(*it, &actions)) {
+        for (size_t i = 0; i < actions->GetSize(); ++i) {
+          action = NULL;
+          if (actions->GetDictionary(i, &action)) {
+            if (!LocalizeManifestValue(keys::kIntentTitle, messages,
+                                       action, error))
+              return false;
+          }
+        }
+      } else if (intents->GetDictionaryWithoutPathExpansion(*it, &action)) {
+        if (!LocalizeManifestValue(keys::kIntentTitle, messages,
+                                   action, error))
+          return false;
+      }
+    }
+  }
+
+  // Initialize app.launch.local_path.
+  if (!LocalizeManifestValue(keys::kLaunchLocalPath, messages, manifest, error))
+    return false;
+
+  // Initialize app.launch.web_url.
+  if (!LocalizeManifestValue(keys::kLaunchWebURL, messages, manifest, error))
+    return false;
+
   // Add current locale key to the manifest, so we can overwrite prefs
   // with new manifest when chrome locale changes.
   manifest->SetString(keys::kCurrentLocale, CurrentLocaleOrDefault());

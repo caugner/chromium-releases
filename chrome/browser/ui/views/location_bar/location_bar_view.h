@@ -28,11 +28,11 @@
 #include "chrome/browser/ui/views/omnibox/omnibox_view_views.h"
 #elif defined(OS_WIN)
 #include "chrome/browser/ui/views/omnibox/omnibox_view_win.h"
-#elif defined(TOOLKIT_USES_GTK)
-#include "chrome/browser/ui/gtk/omnibox/omnibox_view_gtk.h"
 #endif
 
-class Browser;
+class ChromeToMobileView;
+class CommandUpdater;
+class ContentSettingBubbleModelDelegate;
 class ContentSettingImageView;
 class EVBubbleView;
 class ExtensionAction;
@@ -41,10 +41,17 @@ class InstantController;
 class KeywordHintView;
 class LocationIconView;
 class PageActionWithBadgeView;
+class PageActionImageView;
+class Profile;
 class SelectedKeywordView;
 class StarView;
 class TabContentsWrapper;
 class TemplateURLService;
+
+namespace views {
+class BubbleDelegateView;
+class Widget;
+}
 
 #if defined(OS_WIN) || defined(USE_AURA)
 class SuggestedTextView;
@@ -85,10 +92,32 @@ class LocationBarView : public LocationBar,
     // Returns the InstantController, or NULL if there isn't one.
     virtual InstantController* GetInstant() = 0;
 
+    // Creates Widget for the given delegate.
+    virtual views::Widget* CreateViewsBubble(
+        views::BubbleDelegateView* bubble_delegate) = 0;
+
+    // Creates PageActionImageView. Caller gets an ownership.
+    virtual PageActionImageView* CreatePageActionImageView(
+        LocationBarView* owner,
+        ExtensionAction* action) = 0;
+
+    // Returns ContentSettingBubbleModelDelegate.
+    virtual ContentSettingBubbleModelDelegate*
+        GetContentSettingBubbleModelDelegate() = 0;
+
+    // Shows page information in the given web contents.
+    virtual void ShowPageInfo(content::WebContents* web_contents,
+                              const GURL& url,
+                              const content::SSLStatus& ssl,
+                              bool show_history) = 0;
+
     // Called by the location bar view when the user starts typing in the edit.
     // This forces our security style to be UNKNOWN for the duration of the
     // editing.
     virtual void OnInputInProgress(bool in_progress) = 0;
+
+   protected:
+    virtual ~Delegate() {}
   };
 
   enum ColorKind {
@@ -111,10 +140,12 @@ class LocationBarView : public LocationBar,
     APP_LAUNCHER
   };
 
-  LocationBarView(Browser* browser,
+  LocationBarView(Profile* profile,
+                  CommandUpdater* command_updater,
                   ToolbarModel* model,
                   Delegate* delegate,
                   Mode mode);
+
   virtual ~LocationBarView();
 
   void Init();
@@ -133,7 +164,11 @@ class LocationBarView : public LocationBar,
   // saved state that the tab holds.
   void Update(const content::WebContents* tab_for_state_restoring);
 
-  Browser* browser() const { return browser_; }
+  // Returns corresponding profile.
+  Profile* profile() const { return profile_; }
+
+  // Returns the delegate.
+  Delegate* delegate() const { return delegate_; }
 
   // Sets |preview_enabled| for the PageAction View associated with this
   // |page_action|. If |preview_enabled| is true, the view will display the
@@ -151,6 +186,9 @@ class LocationBarView : public LocationBar,
 
   // Shows the bookmark bubble.
   void ShowStarBubble(const GURL& url, bool newly_bookmarked);
+
+  // Shows the Chrome To Mobile bubble.
+  void ShowChromeToMobileBubble();
 
   // Returns the screen coordinates of the location entry (where the URL text
   // appears, not where the icons are shown).
@@ -348,8 +386,11 @@ class LocationBarView : public LocationBar,
   // The Autocomplete Edit field.
   scoped_ptr<OmniboxView> location_entry_;
 
-  // The Browser object that corresponds to this View.
-  Browser* browser_;
+  // The profile which corresponds to this View.
+  Profile* profile_;
+
+  // Command updater which corresponds to this View.
+  CommandUpdater* command_updater_;
 
   // The model.
   ToolbarModel* model_;
@@ -408,6 +449,9 @@ class LocationBarView : public LocationBar,
 
   // The star.
   StarView* star_view_;
+
+  // The Chrome To Mobile page action icon view.
+  ChromeToMobileView* chrome_to_mobile_view_;
 
   // The mode that dictates how the bar shows.
   Mode mode_;

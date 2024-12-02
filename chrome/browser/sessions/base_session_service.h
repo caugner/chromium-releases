@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include "base/basictypes.h"
 #include "base/callback.h"
 #include "base/file_path.h"
+#include "base/gtest_prod_util.h"
 #include "base/location.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
@@ -124,6 +125,12 @@ class BaseSessionService : public CancelableRequestProvider,
       SessionID::id_type tab_id,
       const std::string& extension_id);
 
+  // Creates a SessionCommand stores a browser window's app name.
+  SessionCommand* CreateSetWindowAppNameCommand(
+      SessionID::id_type command_id,
+      SessionID::id_type window_id,
+      const std::string& app_name);
+
   // Converts a SessionCommand previously created by
   // CreateUpdateTabNavigationCommand into a TabNavigation. Returns true
   // on success. If successful |tab_id| is set to the id of the restored tab.
@@ -139,6 +146,13 @@ class BaseSessionService : public CancelableRequestProvider,
       SessionID::id_type* tab_id,
       std::string* extension_app_id);
 
+  // Extracts a SessionCommand as previously created by
+  // CreateSetWindowAppNameCommand into the window id and application name.
+  bool RestoreSetWindowAppNameCommand(
+      const SessionCommand& command,
+      SessionID::id_type* window_id,
+      std::string* app_name);
+
   // Returns true if the entry at specified |url| should be written to disk.
   bool ShouldTrackEntry(const GURL& url);
 
@@ -147,11 +161,6 @@ class BaseSessionService : public CancelableRequestProvider,
   Handle ScheduleGetLastSessionCommands(
       InternalGetCommandsRequest* request,
       CancelableRequestConsumerBase* consumer);
-
-  // Returns true if we appear to be running in production, false if
-  // we appear to be running as part of a unit test or if the FILE
-  // thread has gone away.
-  bool RunningInProduction() const;
 
   // In production, this posts the task to the FILE thread.  For
   // tests, it immediately runs the specified task on the current
@@ -163,6 +172,10 @@ class BaseSessionService : public CancelableRequestProvider,
   static const int max_persist_navigation_count;
 
  private:
+  FRIEND_TEST_ALL_PREFIXES(SessionServiceTest, KeepPostDataWithoutPasswords);
+  FRIEND_TEST_ALL_PREFIXES(SessionServiceTest, RemovePostData);
+  FRIEND_TEST_ALL_PREFIXES(SessionServiceTest, RemovePostDataWithPasswords);
+
   // The profile. This may be null during testing.
   Profile* profile_;
 
@@ -184,6 +197,9 @@ class BaseSessionService : public CancelableRequestProvider,
 
   // The number of commands sent to the backend before doing a reset.
   int commands_since_reset_;
+
+  // Whether to save the HTTP bodies of the POST requests.
+  bool save_post_data_;
 
   DISALLOW_COPY_AND_ASSIGN(BaseSessionService);
 };

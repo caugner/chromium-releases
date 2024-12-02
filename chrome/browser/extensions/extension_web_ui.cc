@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -77,7 +77,7 @@ class ExtensionWebUIImageLoadingTracker : public ImageLoadingTracker::Observer {
   void Init() {
     if (extension_) {
       ExtensionResource icon_resource =
-          extension_->GetIconResource(Extension::EXTENSION_ICON_BITTY,
+          extension_->GetIconResource(ExtensionIconSet::EXTENSION_ICON_BITTY,
                                       ExtensionIconSet::MATCH_EXACTLY);
 
       tracker_.LoadImage(extension_, icon_resource,
@@ -88,11 +88,13 @@ class ExtensionWebUIImageLoadingTracker : public ImageLoadingTracker::Observer {
     }
   }
 
-  virtual void OnImageLoaded(SkBitmap* image, const ExtensionResource& resource,
-                             int index) {
-    if (image) {
+  virtual void OnImageLoaded(const gfx::Image& image,
+                             const std::string& extension_id,
+                             int index) OVERRIDE {
+    if (!image.IsEmpty()) {
       std::vector<unsigned char> image_data;
-      if (!gfx::PNGCodec::EncodeBGRASkBitmap(*image, false, &image_data)) {
+      if (!gfx::PNGCodec::EncodeBGRASkBitmap(*image.ToSkBitmap(), false,
+                                             &image_data)) {
         NOTREACHED() << "Could not encode extension favicon";
       }
       ForwardResult(RefCountedBytes::TakeVector(&image_data));
@@ -222,6 +224,9 @@ bool ExtensionWebUI::HandleChromeURLOverride(
       UnregisterChromeURLOverride(page, profile, val);
       continue;
     }
+
+    if (!url->query().empty())
+      override += "?" + url->query();
     if (!url->ref().empty())
       override += "#" + url->ref();
     GURL extension_url(override);

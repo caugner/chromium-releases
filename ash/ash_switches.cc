@@ -4,17 +4,14 @@
 
 #include "ash/ash_switches.h"
 
-#include <string>
-
-#include "base/command_line.h"
-
 namespace ash {
 namespace switches {
 
-// Force the "compact" window mode regardless of the value of kAuraWindowMode.
-// This can be used to override a value set in chrome://flags.
-// TODO(derat): Remove this once the normal mode is usable on all platforms.
-const char kAuraForceCompactWindowMode[] = "aura-force-compact-window-mode";
+// Use the in-progress uber system tray.
+const char kDisableAshUberTray[] = "disable-ash-uber-tray";
+
+// Enables the Oak tree viewer.
+const char kAshEnableOak[] = "ash-enable-oak";
 
 // Use Google-style dialog box frames.
 const char kAuraGoogleDialogFrames[] = "aura-google-dialog-frames";
@@ -28,22 +25,11 @@ const char kAuraLegacyPowerButton[] = "aura-legacy-power-button";
 // Avoid drawing drop shadows under windows.
 const char kAuraNoShadows[] = "aura-no-shadows";
 
-// Use Aura-style translucent window frame.
-const char kAuraTranslucentFrames[] = "aura-translucent-frames";
+// If present animations are disabled.
+const char kAuraWindowAnimationsDisabled[] = "aura-window-animations-disabled";
 
-// Use a custom window style, e.g. --aura-window-mode=compact.
-// When this flag is not passed we default to "normal" mode.
-const char kAuraWindowMode[] = "aura-window-mode";
-
-// Show only a single maximized window, like traditional non-Aura builds.
-// Useful for low-resolution screens, such as on laptops.
-const char kAuraWindowModeCompact[] = "compact";
-
-// Default window management with multiple draggable windows.
-const char kAuraWindowModeNormal[] = "normal";
-
-// Use Aura-style workspace window dragging and sizing.
-const char kAuraWorkspaceManager[] = "aura-workspace-manager";
+// Use Aura to manage windows of type WINDOW_TYPE_PANEL.
+const char kAuraPanelManager[] = "aura-panels";
 
 }  // namespace switches
 }  // namespace ash

@@ -21,6 +21,7 @@
 #include "chrome/browser/prefs/pref_value_map.h"
 #include "chrome/browser/prefs/proxy_config_dictionary.h"
 #include "chrome/browser/prefs/proxy_prefs.h"
+#include "chrome/browser/prefs/session_startup_pref.h"
 #include "chrome/browser/search_engines/search_terms_data.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/common/content_settings.h"
@@ -33,27 +34,6 @@ namespace policy {
 namespace {
 
 // Helper classes --------------------------------------------------------------
-
-// Implementation of SearchTermsData just for validation.
-class SearchTermsDataForValidation : public SearchTermsData {
- public:
-  SearchTermsDataForValidation() {}
-
-  // Implementation of SearchTermsData.
-  virtual std::string GoogleBaseURLValue() const {
-    return "http://www.google.com/";
-  }
-  virtual std::string GetApplicationLocale() const {
-    return "en";
-  }
-#if defined(OS_WIN) && defined(GOOGLE_CHROME_BUILD)
-  virtual string16 GetRlzParameterValue() const {
-    return string16();
-  }
-#endif
- private:
-  DISALLOW_COPY_AND_ASSIGN(SearchTermsDataForValidation);
-};
 
 // This is used to check whether for a given ProxyMode value, the ProxyPacUrl,
 // the ProxyBypassList and the ProxyServer policies are allowed to be specified.
@@ -140,6 +120,18 @@ std::string ValueTypeToString(Value::Type type) {
   return std::string(strings[type]);
 }
 
+// Utility function that returns a JSON representation of the given |dict| as
+// a StringValue. The caller owns the returned object.
+base::StringValue* DictionaryToJSONString(const base::DictionaryValue* dict) {
+  std::string json_string;
+  base::JSONWriter::WriteWithOptions(
+      dict,
+      base::JSONWriter::OPTIONS_DO_NOT_ESCAPE |
+          base::JSONWriter::OPTIONS_PRETTY_PRINT,
+      &json_string);
+  return Value::CreateStringValue(json_string);
+}
+
 
 }  // namespace
 
@@ -156,16 +148,20 @@ void ConfigurationPolicyHandler::PrepareForDisplaying(
     PolicyMap* policies) const {
   // jstemplate can't render DictionaryValues/objects. Convert those values to
   // a string representation.
+  base::DictionaryValue* dict;
+  base::ListValue* list;
   for (PolicyMap::const_iterator it = policies->begin();
        it != policies->end(); ++it) {
     const PolicyMap::Entry& entry = it->second;
-    DictionaryValue* value;
-    if (entry.value->GetAsDictionary(&value)) {
-      std::string json_string;
-      base::JSONWriter::WriteWithOptions(
-          value, true, base::JSONWriter::OPTIONS_DO_NOT_ESCAPE, &json_string);
-      StringValue* string_value = Value::CreateStringValue(json_string);
-      policies->Set(it->first, entry.level, entry.scope, string_value);
+    if (entry.value->GetAsDictionary(&dict)) {
+      base::StringValue* value = DictionaryToJSONString(dict);
+      policies->Set(it->first, entry.level, entry.scope, value);
+    } else if (entry.value->GetAsList(&list)) {
+      for (size_t i = 0; i < list->GetSize(); ++i) {
+        if (list->GetDictionary(i, &dict)) {
+          list->Set(i, DictionaryToJSONString(dict));
+        }
+      }
     }
   }
 }
@@ -495,25 +491,21 @@ bool DefaultSearchPolicyHandler::CheckPolicySettings(const PolicyMap& policies,
     return true;
   }
 
-  const Value* search_url =
-      policies.GetValue(key::kDefaultSearchProviderSearchURL);
-  if (!search_url && AnyDefaultSearchPoliciesSpecified(policies)) {
-    errors->AddError(key::kDefaultSearchProviderSearchURL,
-                     IDS_POLICY_NOT_SPECIFIED_ERROR);
-    return false;
-  }
-
-  if (search_url && !DefaultSearchURLIsValid(policies)) {
-    errors->AddError(key::kDefaultSearchProviderSearchURL,
-                     IDS_POLICY_INVALID_SEARCH_URL_ERROR);
-    return false;
-  }
-  return true;
+  const Value* url;
+  std::string dummy;
+  if (DefaultSearchURLIsValid(policies, &url, &dummy) ||
+      !AnyDefaultSearchPoliciesSpecified(policies))
+    return true;
+  errors->AddError(key::kDefaultSearchProviderSearchURL, url ?
+      IDS_POLICY_INVALID_SEARCH_URL_ERROR : IDS_POLICY_NOT_SPECIFIED_ERROR);
+  return false;
 }
 
 void DefaultSearchPolicyHandler::ApplyPolicySettings(const PolicyMap& policies,
                                                      PrefValueMap* prefs) {
   if (DefaultSearchProviderIsDisabled(policies)) {
+    prefs->SetBoolean(prefs::kDefaultSearchProviderEnabled, false);
+
     // If default search is disabled, the other fields are ignored.
     prefs->SetString(prefs::kDefaultSearchProviderName, std::string());
     prefs->SetString(prefs::kDefaultSearchProviderSearchURL, std::string());
@@ -525,15 +517,12 @@ void DefaultSearchPolicyHandler::ApplyPolicySettings(const PolicyMap& policies,
     return;
   }
 
-  const Value* search_url =
-      policies.GetValue(key::kDefaultSearchProviderSearchURL);
-  // The search URL is required.
-  if (!search_url)
-    return;
-
-  // The other entries are optional.  Just make sure that they are all
-  // specified via policy, so that the regular prefs aren't used.
-  if (DefaultSearchURLIsValid(policies)) {
+  // The search URL is required.  The other entries are optional.  Just make
+  // sure that they are all specified via policy, so that the regular prefs
+  // aren't used.
+  const Value* dummy;
+  std::string url;
+  if (DefaultSearchURLIsValid(policies, &dummy, &url)) {
     std::vector<ConfigurationPolicyHandler*>::const_iterator handler;
     for (handler = handlers_.begin() ; handler != handlers_.end(); ++handler)
       (*handler)->ApplyPolicySettings(policies, prefs);
@@ -544,16 +533,19 @@ void DefaultSearchPolicyHandler::ApplyPolicySettings(const PolicyMap& policies,
     EnsureStringPrefExists(prefs, prefs::kDefaultSearchProviderKeyword);
     EnsureStringPrefExists(prefs, prefs::kDefaultSearchProviderInstantURL);
 
-    // For the name, default to the host if not specified.
-    std::string name;
+    // For the name and keyword, default to the host if not specified.  If there
+    // is no host (file: URLs?  Not sure), use "_" to guarantee that the keyword
+    // is non-empty.
+    std::string name, keyword;
+    std::string host(GURL(url).host());
+    if (host.empty())
+      host = "_";
     if (!prefs->GetString(prefs::kDefaultSearchProviderName, &name) ||
-        name.empty()) {
-      std::string search_url_string;
-      if (search_url->GetAsString(&search_url_string)) {
-        prefs->SetString(prefs::kDefaultSearchProviderName,
-                         GURL(search_url_string).host());
-      }
-    }
+        name.empty())
+      prefs->SetString(prefs::kDefaultSearchProviderName, host);
+    if (!prefs->GetString(prefs::kDefaultSearchProviderKeyword, &keyword) ||
+        keyword.empty())
+      prefs->SetString(prefs::kDefaultSearchProviderKeyword, host);
 
     // And clear the IDs since these are not specified via policy.
     prefs->SetString(prefs::kDefaultSearchProviderID, std::string());
@@ -599,20 +591,14 @@ bool DefaultSearchPolicyHandler::DefaultSearchProviderIsDisabled(
 }
 
 bool DefaultSearchPolicyHandler::DefaultSearchURLIsValid(
-    const PolicyMap& policies) {
-  const Value* search_url =
-      policies.GetValue(key::kDefaultSearchProviderSearchURL);
-  if (!search_url)
-    return false;
-
-  std::string search_url_string;
-  if (search_url->GetAsString(&search_url_string)) {
-    SearchTermsDataForValidation search_terms_data;
-    const TemplateURLRef search_url_ref(search_url_string, 0, 0);
-    // It must support replacement (which implies it is valid).
-    return search_url_ref.SupportsReplacementUsingTermsData(search_terms_data);
-  }
-  return false;
+    const PolicyMap& policies,
+    const Value** url_value,
+    std::string* url_string) {
+  *url_value = policies.GetValue(key::kDefaultSearchProviderSearchURL);
+  SearchTermsData search_terms_data;
+  return *url_value && (*url_value)->GetAsString(url_string) &&
+      TemplateURLRef(*url_string, 0, 0).SupportsReplacementUsingTermsData(
+          search_terms_data);
 }
 
 void DefaultSearchPolicyHandler::EnsureStringPrefExists(
@@ -965,6 +951,57 @@ void JavascriptPolicyHandler::ApplyPolicySettings(const PolicyMap& policies,
     prefs->SetValue(prefs::kManagedDefaultJavaScriptSetting,
                     Value::CreateIntegerValue(setting));
   }
+}
+
+// RestoreOnStartupPolicyHandler implementation --------------------------------
+
+RestoreOnStartupPolicyHandler::RestoreOnStartupPolicyHandler()
+    : SimplePolicyHandler(key::kRestoreOnStartup,
+                          prefs::kRestoreOnStartup,
+                          Value::TYPE_INTEGER) {
+}
+
+RestoreOnStartupPolicyHandler::~RestoreOnStartupPolicyHandler() {
+}
+
+bool RestoreOnStartupPolicyHandler::CheckPolicySettings(
+    const PolicyMap& policies,
+    PolicyErrorMap* errors) {
+  if (!SimplePolicyHandler::CheckPolicySettings(policies, errors))
+    return false;
+
+  // If the restore urls at start up policy is set, session cookies are treated
+  // as permanent cookies and site data needed to restore the session is not
+  // cleared so we have to warn the user in that case.
+  const base::Value* restore_policy = policies.GetValue(key::kRestoreOnStartup);
+
+  if (restore_policy) {
+    int restore_value;
+    if (restore_policy->GetAsInteger(&restore_value) &&
+        SessionStartupPref::PrefValueToType(restore_value) ==
+            SessionStartupPref::LAST) {
+
+      const base::Value* cookies_policy =
+          policies.GetValue(key::kCookiesSessionOnlyForUrls);
+      const base::ListValue *cookies_value;
+      if (cookies_policy && cookies_policy->GetAsList(&cookies_value) &&
+          !cookies_value->empty()) {
+        errors->AddError(key::kCookiesSessionOnlyForUrls,
+                         IDS_POLICY_OVERRIDDEN,
+                         key::kRestoreOnStartup);
+      }
+
+      const base::Value* exit_policy =
+          policies.GetValue(key::kClearSiteDataOnExit);
+      bool exit_value;
+      if (exit_policy && exit_policy->GetAsBoolean(&exit_value) && exit_value) {
+        errors->AddError(key::kClearSiteDataOnExit,
+                         IDS_POLICY_OVERRIDDEN,
+                         key::kRestoreOnStartup);
+      }
+    }
+  }
+  return true;
 }
 
 }  // namespace policy

@@ -29,12 +29,17 @@
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/ref_counted.h"
+#include "base/supports_user_data.h"
 #include "content/browser/renderer_host/media/media_stream_provider.h"
 #include "content/browser/renderer_host/media/media_stream_settings_requester.h"
 #include "content/common/media/media_stream_options.h"
 #include "content/common/content_export.h"
 
 class AudioManager;
+
+namespace content {
+class ResourceContext;
+}
 
 namespace media_stream {
 
@@ -49,8 +54,15 @@ class VideoCaptureManager;
 // MediaStreamManager::Listener.
 class CONTENT_EXPORT MediaStreamManager
     : public MediaStreamProviderListener,
-      public SettingsRequester {
+      public SettingsRequester,
+      public base::SupportsUserData::Data {
  public:
+  // Returns the MediaStreamManager for the given ResourceContext. If it hasn't
+  // been created yet, it will be constructed with the given AudioManager.
+  static MediaStreamManager* GetForResourceContext(
+      content::ResourceContext* resource_context,
+      AudioManager* audio_manager);
+
   explicit MediaStreamManager(AudioManager* audio_manager);
   virtual ~MediaStreamManager();
 
@@ -129,8 +141,8 @@ class CONTENT_EXPORT MediaStreamManager
                         std::string* label);
 
   scoped_ptr<MediaStreamDeviceSettings> device_settings_;
-  scoped_ptr<VideoCaptureManager> video_capture_manager_;
-  scoped_ptr<AudioInputDeviceManager> audio_input_device_manager_;
+  scoped_refptr<VideoCaptureManager> video_capture_manager_;
+  scoped_refptr<AudioInputDeviceManager> audio_input_device_manager_;
 
   // Keeps track of device types currently being enumerated to not enumerate
   // when not necessary.
@@ -139,7 +151,7 @@ class CONTENT_EXPORT MediaStreamManager
   // All non-closed request.
   typedef std::map<std::string, DeviceRequest> DeviceRequests;
   DeviceRequests requests_;
-  scoped_refptr<AudioManager> audio_manager_;
+  AudioManager* audio_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(MediaStreamManager);
 };

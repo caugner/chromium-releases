@@ -20,13 +20,15 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/browser/renderer_host/resource_dispatcher_host.h"
+#include "content/public/browser/interstitial_page.h"
 #include "content/public/browser/navigation_controller.h"
+#include "content/public/browser/notification_types.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
 #include "content/test/test_browser_thread.h"
 
 using content::BrowserThread;
+using content::InterstitialPage;
 using content::NavigationController;
 using content::WebContents;
 
@@ -274,7 +276,8 @@ class SafeBrowsingBlockingPageTest : public InProcessBrowserTest,
     // NavigateToURL returns.
     SafeBrowsingBlockingPage* interstitial_page =
         static_cast<SafeBrowsingBlockingPage*>(
-            InterstitialPage::GetInterstitialPage(contents));
+            InterstitialPage::GetInterstitialPage(contents)->
+                GetDelegateForTesting());
     ASSERT_TRUE(interstitial_page);
     interstitial_page->CommandReceived(command);
   }
@@ -304,7 +307,8 @@ class SafeBrowsingBlockingPageTest : public InProcessBrowserTest,
     if (contents->ShowingInterstitialPage() && wait_for_delete) {
       // We'll get notified when the interstitial is deleted.
       static_cast<TestSafeBrowsingBlockingPage*>(
-          contents->GetInterstitialPage())->set_wait_for_delete();
+          contents->GetInterstitialPage()->GetDelegateForTesting())->
+              set_wait_for_delete();
       ui_test_utils::RunMessageLoop();
     }
 
@@ -428,9 +432,11 @@ IN_PROC_BROWSER_TEST_F(SafeBrowsingBlockingPageTest, MalwareProceed) {
   GURL url = test_server()->GetURL(kEmptyPage);
   AddURLResult(url, SafeBrowsingService::URL_MALWARE);
 
+  // Note: NOTIFICATION_LOAD_STOP may come before or after the DidNavigate
+  // event that clears the interstitial.  We wait for DidNavigate instead.
   ui_test_utils::NavigateToURL(browser(), url);
   ui_test_utils::WindowedNotificationObserver observer(
-      content::NOTIFICATION_LOAD_STOP,
+      content::NOTIFICATION_NAV_ENTRY_COMMITTED,
       content::Source<NavigationController>(
           &browser()->GetSelectedTabContentsWrapper()->web_contents()->
               GetController()));
@@ -461,8 +467,10 @@ IN_PROC_BROWSER_TEST_F(SafeBrowsingBlockingPageTest, PhishingProceed) {
 
   ui_test_utils::NavigateToURL(browser(), url);
 
+  // Note: NOTIFICATION_LOAD_STOP may come before or after the DidNavigate
+  // event that clears the interstitial.  We wait for DidNavigate instead.
   ui_test_utils::WindowedNotificationObserver observer(
-      content::NOTIFICATION_LOAD_STOP,
+      content::NOTIFICATION_NAV_ENTRY_COMMITTED,
       content::Source<NavigationController>(
           &browser()->GetSelectedTabContentsWrapper()->web_contents()->
               GetController()));
@@ -480,8 +488,10 @@ IN_PROC_BROWSER_TEST_F(SafeBrowsingBlockingPageTest, PhishingReportError) {
 
   ui_test_utils::NavigateToURL(browser(), url);
 
+  // Note: NOTIFICATION_LOAD_STOP may come before or after the DidNavigate
+  // event that clears the interstitial.  We wait for DidNavigate instead.
   ui_test_utils::WindowedNotificationObserver observer(
-      content::NOTIFICATION_LOAD_STOP,
+      content::NOTIFICATION_NAV_ENTRY_COMMITTED,
       content::Source<NavigationController>(
           &browser()->GetSelectedTabContentsWrapper()->web_contents()->
               GetController()));
@@ -503,8 +513,10 @@ IN_PROC_BROWSER_TEST_F(SafeBrowsingBlockingPageTest,
 
   ui_test_utils::NavigateToURL(browser(), url);
 
+  // Note: NOTIFICATION_LOAD_STOP may come before or after the DidNavigate
+  // event that clears the interstitial.  We wait for DidNavigate instead.
   ui_test_utils::WindowedNotificationObserver observer(
-      content::NOTIFICATION_LOAD_STOP,
+      content::NOTIFICATION_NAV_ENTRY_COMMITTED,
       content::Source<NavigationController>(
           &browser()->GetSelectedTabContentsWrapper()->web_contents()->
               GetController()));

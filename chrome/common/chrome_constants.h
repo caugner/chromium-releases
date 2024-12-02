@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -57,7 +57,6 @@ extern const FilePath::CharType kCacheDirname[];
 extern const FilePath::CharType kCRLSetFilename[];
 extern const FilePath::CharType kMediaCacheDirname[];
 extern const FilePath::CharType kOffTheRecordMediaCacheDirname[];
-extern const FilePath::CharType kAppCacheDirname[];
 extern const FilePath::CharType kThemePackFilename[];
 extern const FilePath::CharType kCookieFilename[];
 extern const FilePath::CharType kOBCertFilename[];
@@ -83,6 +82,14 @@ extern const FilePath::CharType kLoginDataFileName[];
 extern const FilePath::CharType kJumpListIconDirname[];
 extern const FilePath::CharType kWebAppDirname[];
 extern const FilePath::CharType kServiceStateFileName[];
+extern const FilePath::CharType kReadmeFilename[];
+
+#if defined(OS_CHROMEOS)
+extern const FilePath::CharType kGDataCacheDirname[];
+#endif  // defined(OS_CHROMEOS)
+
+// File name of the Pepper Flash plugin on different platforms.
+extern const FilePath::CharType kPepperFlashPluginFilename[];
 
 extern const bool kRecordModeEnabled;
 
@@ -105,6 +112,13 @@ extern const int kJavascriptMessageExpectedDelay;
 
 // Are touch icons enabled? False by default.
 extern const bool kEnableTouchIcon;
+
+// Fraction of the total number of processes to be used for hosting
+// extensions. If we have more extensions than this percentage, we will start
+// combining extensions in existing processes. This allows web pages to have
+// enough render processes and not be starved when a lot of extensions are
+// installed.
+extern const float kMaxShareOfExtensionProcesses;
 
 #if defined(OS_LINUX)
 // The highest and lowest assigned OOM score adjustment

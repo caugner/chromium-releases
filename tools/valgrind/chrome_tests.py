@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -222,6 +222,12 @@ class ChromeTests:
     self.SetupLdPath(False)
     return tool.Run(cmd, None)
 
+  def TestAsh(self):
+    return self.SimpleTest("ash", "aura_shell_unittests")
+
+  def TestAura(self):
+    return self.SimpleTest("aura", "aura_unittests")
+
   def TestBase(self):
     return self.SimpleTest("base", "base_unittests")
 
@@ -233,6 +239,12 @@ class ChromeTests:
 
   def TestCrypto(self):
     return self.SimpleTest("crypto", "crypto_unittests")
+
+  def TestFFmpeg(self):
+    return self.SimpleTest("chrome", "ffmpeg_unittests")
+
+  def TestFFmpegRegressions(self):
+    return self.SimpleTest("chrome", "ffmpeg_regression_tests")
 
   def TestGfx(self):
     return self.SimpleTest("chrome", "gfx_unittests")
@@ -278,6 +290,12 @@ class ChromeTests:
     return self.SimpleTest("webkit", "test_shell_tests")
 
   def TestUnit(self):
+    # http://crbug.com/51716
+    # Disabling all unit tests
+    # Problems reappeared after r119922
+    if common.IsMac() and (self._options.valgrind_tool == "memcheck"):
+      logging.warning("unit_tests are disabled for memcheck on MacOS.")
+      return 0;
     return self.SimpleTest("chrome", "unit_tests")
 
   def TestUIUnit(self):
@@ -438,10 +456,14 @@ class ChromeTests:
   # Recognise the original abbreviations as well as full executable names.
   _test_list = {
     "cmdline" : RunCmdLine,
+    "ash": TestAsh,              "aura_shell_unittests": TestAsh,
+    "aura": TestAura,            "aura_unittests": TestAura,
     "automated_ui" : TestAutomatedUI,
     "base": TestBase,            "base_unittests": TestBase,
     "browser": TestBrowser,      "browser_tests": TestBrowser,
     "crypto": TestCrypto,        "crypto_unittests": TestCrypto,
+    "ffmpeg": TestFFmpeg,        "ffmpeg_unittests": TestFFmpeg,
+    "ffmpeg_regression_tests": TestFFmpegRegressions,
     "googleurl": TestGURL,       "googleurl_unittests": TestGURL,
     "content": TestContent,      "content_unittests": TestContent,
     "courgette": TestCourgette,  "courgette_unittests": TestCourgette,

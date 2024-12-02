@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,9 +8,9 @@
 #include "base/message_loop.h"
 #include "base/tracked_objects.h"
 #include "base/synchronization/waitable_event.h"
-#include "third_party/libjingle/source/talk/base/messagequeue.h"
+#include "third_party/libjingle/overrides/talk/base/messagequeue.h"
+#include "third_party/libjingle/overrides/talk/base/thread.h"
 #include "third_party/libjingle/source/talk/base/taskrunner.h"
-#include "third_party/libjingle/source/talk/base/thread.h"
 
 namespace base {
 class MessageLoopProxy;
@@ -47,7 +47,7 @@ class JingleThread : public talk_base::Thread {
   JingleThread();
   virtual ~JingleThread();
 
-  void Start();
+  bool Start();
 
   // Main function for the thread. Should not be called directly.
   virtual void Run() OVERRIDE;

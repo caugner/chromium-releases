@@ -13,14 +13,14 @@
 #include "base/shared_memory.h"
 #include "content/browser/debugger/devtools_netlog_observer.h"
 #include "content/browser/host_zoom_map_impl.h"
-#include "content/browser/renderer_host/resource_dispatcher_host.h"
-#include "content/browser/renderer_host/resource_dispatcher_host_request_info.h"
+#include "content/browser/renderer_host/resource_dispatcher_host_impl.h"
 #include "content/browser/renderer_host/resource_message_filter.h"
-#include "content/browser/resource_context.h"
+#include "content/browser/resource_context_impl.h"
 #include "content/common/resource_messages.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/global_request_id.h"
 #include "content/public/browser/resource_dispatcher_host_delegate.h"
+#include "content/public/browser/resource_request_info.h"
 #include "content/public/common/resource_response.h"
 #include "net/base/io_buffer.h"
 #include "net/base/load_flags.h"
@@ -28,7 +28,8 @@
 #include "webkit/glue/resource_loader_bridge.h"
 
 using base::TimeTicks;
-using content::GlobalRequestID;
+
+namespace content {
 
 namespace {
 
@@ -81,10 +82,10 @@ AsyncResourceHandler::AsyncResourceHandler(
     ResourceMessageFilter* filter,
     int routing_id,
     const GURL& url,
-    ResourceDispatcherHost* resource_dispatcher_host)
+    ResourceDispatcherHostImpl* rdh)
     : filter_(filter),
       routing_id_(routing_id),
-      rdh_(resource_dispatcher_host),
+      rdh_(rdh),
       next_buffer_size_(kInitialReadBufSize),
       url_(url) {
 }
@@ -133,15 +134,15 @@ bool AsyncResourceHandler::OnResponseStarted(
 
   DevToolsNetLogObserver::PopulateResponseInfo(request, response);
 
-  const content::ResourceContext& resource_context =
-      filter_->resource_context();
-  content::HostZoomMap* host_zoom_map = resource_context.host_zoom_map();
+  content::ResourceContext* resource_context = filter_->resource_context();
+  content::HostZoomMap* host_zoom_map =
+      content::GetHostZoomMapForResourceContext(resource_context);
 
-  ResourceDispatcherHostRequestInfo* info = rdh_->InfoForRequest(request);
-  if (info->resource_type() == ResourceType::MAIN_FRAME && host_zoom_map) {
+  const ResourceRequestInfo* info = ResourceRequestInfo::ForRequest(request);
+  if (info->GetResourceType() == ResourceType::MAIN_FRAME && host_zoom_map) {
     GURL request_url(request->url());
     filter_->Send(new ViewMsg_SetZoomLevelForLoadingURL(
-        info->route_id(),
+        info->GetRouteID(),
         request_url, host_zoom_map->GetZoomLevel(net::GetHostOrSpecFromURL(
             request_url))));
   }
@@ -284,3 +285,5 @@ void AsyncResourceHandler::GlobalCleanup() {
     tmp->Release();
   }
 }
+
+}  // namespace content

@@ -7,6 +7,7 @@
 #include <atlbase.h>
 #include <atlcom.h>
 #include <exdisp.h>
+#include <Winsock2.h>
 
 #include "base/bind.h"
 #include "base/command_line.h"
@@ -49,13 +50,14 @@
 #include "chrome_frame/test/simulate_input.h"
 #include "chrome_frame/test/win_event_receiver.h"
 #include "chrome_frame/utils.h"
-#include "content/app/content_main.h"
+#include "content/public/app/content_main.h"
 #include "content/public/app/startup_helper_win.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_paths.h"
+#include "net/base/net_util.h"
 #include "sandbox/src/sandbox_types.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -93,14 +95,6 @@ const char kChromeFrameHtml[] = "<html><head>"
     "<meta http-equiv=\"X-UA-Compatible\" content=\"chrome=1\" />"
     "<link rel=\"shortcut icon\" href=\"file://c:\\favicon.ico\"/>"
     "</head><body>Chrome Frame should now be loaded</body></html>";
-
-bool ShouldLaunchBrowser() {
-  return !CommandLine::ForCurrentProcess()->HasSwitch(kManualBrowserLaunch);
-}
-
-bool PromptAfterSetup() {
-  return CommandLine::ForCurrentProcess()->HasSwitch(kPromptAfterSetup);
-}
 
 // Uses the IAccessible interface for the window to set the focus.
 // This can be useful when you don't have control over the thread that
@@ -284,6 +278,8 @@ void FilterDisabledTests() {
     "HTTPSRequestTest.HTTPSPreloadedHSTSTest",
     "HTTPSRequestTest.ResumeTest",
     "HTTPSRequestTest.SSLSessionCacheShardTest",
+    "HTTPSRequestTest.SSLSessionCacheShardTest",
+    "HTTPSRequestTest.HTTPSErrorsNoClobberTSSTest",
   };
 
   const char* ie9_disabled_tests[] = {
@@ -293,6 +289,8 @@ void FilterDisabledTests() {
     "URLRequestTestHTTP.NetworkDelegateRedirectRequestPost",
     "URLRequestTestHTTP.GetTest",
     "HTTPSRequestTest.HTTPSPreloadedHSTSTest",
+    // This always hangs on erikwright's box with IE9.
+    "URLRequestTestHTTP.Redirect302Tests"
   };
 
   std::string filter("-");  // All following filters will be negative.
@@ -310,6 +308,12 @@ void FilterDisabledTests() {
   }
 
   ::testing::FLAGS_gtest_filter = filter;
+}
+
+void OnIEShutdownFailure() {
+  DLOG(ERROR) << "Failed to shutdown IE and npchrome_frame cleanly after test "
+                 "execution.";
+  ::ExitProcess(1);
 }
 
 }  // namespace
@@ -417,6 +421,15 @@ BOOL SupplyProxyCredentials::EnumChildren(HWND hwnd, LPARAM param) {
 
 FakeExternalTab::FakeExternalTab() {
   user_data_dir_ = chrome_frame_test::GetProfilePathForIE();
+
+  if (file_util::PathExists(user_data_dir_)) {
+    VLOG(1) << __FUNCTION__ << " deleting IE Profile user data directory "
+            << user_data_dir_.value();
+    bool deleted = file_util::Delete(user_data_dir_, true);
+    LOG_IF(ERROR, !deleted) << "Failed to delete user data directory directory "
+                            << user_data_dir_.value();
+  }
+
   PathService::Get(chrome::DIR_USER_DATA, &overridden_user_dir_);
   PathService::Override(chrome::DIR_USER_DATA, user_data_dir_);
   process_singleton_.reset(new ProcessSingleton(user_data_dir_));
@@ -481,14 +494,19 @@ CFUrlRequestUnittestRunner::CFUrlRequestUnittestRunner(int argc, char** argv)
     : NetTestSuite(argc, argv, false),
       chrome_frame_html_("/chrome_frame", kChromeFrameHtml),
       registrar_(chrome_frame_test::GetTestBedType()),
-      test_result_(0) {
+      test_result_(0),
+      launch_browser_(
+          !CommandLine::ForCurrentProcess()->HasSwitch(kManualBrowserLaunch)),
+      prompt_after_setup_(
+          CommandLine::ForCurrentProcess()->HasSwitch(kPromptAfterSetup)),
+      tests_ran_(false) {
 }
 
 CFUrlRequestUnittestRunner::~CFUrlRequestUnittestRunner() {
 }
 
 void CFUrlRequestUnittestRunner::StartChromeFrameInHostBrowser() {
-  if (!ShouldLaunchBrowser())
+  if (!launch_browser_)
     return;
 
   base::win::ScopedCOMInitializer com;
@@ -512,13 +530,13 @@ void CFUrlRequestUnittestRunner::StartChromeFrameInHostBrowser() {
 }
 
 void CFUrlRequestUnittestRunner::ShutDownHostBrowser() {
-  if (ShouldLaunchBrowser()) {
+  if (launch_browser_) {
     base::win::ScopedCOMInitializer com;
     chrome_frame_test::CloseAllIEWindows();
   }
 }
 
-// Override virtual void Initialize to not call icu initialize
+// Override virtual void Initialize to not call icu initialize.
 void CFUrlRequestUnittestRunner::Initialize() {
   DCHECK(::GetCurrentThreadId() == test_thread_id_);
 
@@ -534,6 +552,10 @@ void CFUrlRequestUnittestRunner::Initialize() {
 
   // Next, do some initialization for NetTestSuite.
   NetTestSuite::InitializeTestThreadNoNetworkChangeNotifier();
+
+  // Finally, override the host used by the HTTP tests. See
+  // http://crbug.com/114369 .
+  OverrideHttpHost();
 }
 
 void CFUrlRequestUnittestRunner::Shutdown() {
@@ -558,8 +580,19 @@ void CFUrlRequestUnittestRunner::OnInitialTabLoaded() {
   StartTests();
 }
 
+void CFUrlRequestUnittestRunner::OnProviderDestroyed() {
+  if (tests_ran_) {
+    if (crash_service_)
+      base::KillProcess(crash_service_, 0, false);
+    ::ExitProcess(test_result());
+  } else {
+    DLOG(ERROR) << "Automation Provider shutting down before test execution "
+                   "has completed.";
+  }
+}
+
 void CFUrlRequestUnittestRunner::StartTests() {
-  if (PromptAfterSetup())
+  if (prompt_after_setup_)
     MessageBoxA(NULL, "click ok to run", "", MB_OK);
 
   DCHECK_EQ(test_thread_.IsValid(), false);
@@ -574,23 +607,32 @@ DWORD CFUrlRequestUnittestRunner::RunAllUnittests(void* param) {
   CFUrlRequestUnittestRunner* me =
       reinterpret_cast<CFUrlRequestUnittestRunner*>(param);
   me->test_result_ = me->Run();
-  BrowserThread::PostTask(BrowserThread::UI,
-                          FROM_HERE,
-                          base::Bind(TakeDownBrowser, me));
+  me->tests_ran_ = true;
+  BrowserThread::PostTask(
+      BrowserThread::UI,
+      FROM_HERE,
+      base::Bind(&CFUrlRequestUnittestRunner::TakeDownBrowser,
+                 base::Unretained(me)));
   return 0;
 }
 
-// static
-void CFUrlRequestUnittestRunner::TakeDownBrowser(
-    CFUrlRequestUnittestRunner* me) {
-  if (PromptAfterSetup())
+void CFUrlRequestUnittestRunner::TakeDownBrowser() {
+  if (prompt_after_setup_)
     MessageBoxA(NULL, "click ok to exit", "", MB_OK);
 
-  me->ShutDownHostBrowser();
+  // AddRef to ensure that IE going away does not trigger the Chrome shutdown
+  // process.
+  // IE shutting down will, however, trigger the automation channel to shut
+  // down, at which time we will exit the process (see OnProviderDestroyed).
+  g_browser_process->AddRefModule();
+  ShutDownHostBrowser();
+
+  // In case IE is somehow hung, make sure we don't sit around until a try-bot
+  // kills us. OnIEShutdownFailure will log and exit with an error.
   BrowserThread::PostDelayedTask(BrowserThread::UI,
                                  FROM_HERE,
-                                 MessageLoop::QuitClosure(),
-                                 TestTimeouts::tiny_timeout_ms());
+                                 base::Bind(&OnIEShutdownFailure),
+                                 TestTimeouts::action_max_timeout_ms());
 }
 
 void CFUrlRequestUnittestRunner::InitializeLogging() {
@@ -608,9 +650,42 @@ void CFUrlRequestUnittestRunner::InitializeLogging() {
   logging::SetLogItems(true, true, true, true);
 }
 
+void CFUrlRequestUnittestRunner::OverrideHttpHost() {
+  net::NetworkInterfaceList nic_list;
+  if (!net::GetNetworkList(&nic_list)) {
+    LOG(ERROR) << "GetNetworkList failed to look up non-loopback adapters. "
+               << "Tests will be run over the loopback adapter, which may "
+               << "result in hangs.";
+    return;
+  }
+
+  // GetNetworkList only returns 'Up' non-loopback adapters. Select the first
+  // IPV4 address found - we should be able to bind/connect over it.
+  for (size_t i = 0; i < nic_list.size(); ++i) {
+    if (nic_list[i].address.size() != net::kIPv4AddressSize)
+      continue;
+    char* address_string =
+        inet_ntoa(*reinterpret_cast<in_addr*>(&nic_list[i].address[0]));
+    DCHECK(address_string != NULL);
+    if (address_string == NULL)
+      continue;
+    LOG(INFO) << "HTTP tests will run over " << address_string << ".";
+    override_http_host_.reset(
+        new ScopedCustomUrlRequestTestHttpHost(address_string));
+    return;
+  }
+
+  LOG(ERROR) << "Failed to find a non-loopback IP_V4 address. Tests will be "
+             << "run over the loopback adapter, which may result in hangs.";
+}
+
 void CFUrlRequestUnittestRunner::PreEarlyInitialization() {
   testing::InitGoogleTest(&g_argc, g_argv);
   FilterDisabledTests();
+}
+
+MessageLoop* CFUrlRequestUnittestRunner::GetMainMessageLoop() {
+  return NULL;
 }
 
 int CFUrlRequestUnittestRunner::PreCreateThreads() {
@@ -661,7 +736,7 @@ void CFUrlRequestUnittestRunner::PostDestroyThreads() {
   // Avoid CRT cleanup in debug test runs to ensure that webkit ASSERTs which
   // check if globals are created and destroyed on the same thread don't fire.
   // Webkit global objects are created on the inproc renderer thread.
-  ExitProcess(test_result());
+  ::ExitProcess(test_result());
 #endif
 }
 
@@ -720,16 +795,6 @@ int main(int argc, char** argv) {
   ScopedChromeFrameRegistrar::RegisterAndExitProcessIfDirected();
   g_argc = argc;
   g_argv = argv;
-
-  if (chrome_frame_test::GetInstalledIEVersion() >= IE_9) {
-    // Adding this here as the command line and the logging stuff gets
-    // initialized in the NetTestSuite constructor. Did not want to break that.
-    base::AtExitManager at_exit_manager;
-    CommandLine::Init(argc, argv);
-    CFUrlRequestUnittestRunner::InitializeLogging();
-    LOG(INFO) << "Not running ChromeFrame net tests on IE9+";
-    return 0;
-  }
 
   google_breakpad::scoped_ptr<google_breakpad::ExceptionHandler> breakpad(
       InitializeCrashReporting(HEADLESS));

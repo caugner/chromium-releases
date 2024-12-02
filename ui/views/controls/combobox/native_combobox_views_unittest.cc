@@ -50,19 +50,20 @@ class TestCombobox : public views::Combobox {
   DISALLOW_COPY_AND_ASSIGN(TestCombobox);
 };
 
-// A concrete class is needed to test the combobox
+// A concrete class is needed to test the combo box.
 class TestComboboxModel : public ui::ComboboxModel {
  public:
   TestComboboxModel() {}
   virtual ~TestComboboxModel() {}
-  virtual int GetItemCount() {
+
+  // Overridden from ui::ComboboxModel:
+  virtual int GetItemCount() const OVERRIDE {
     return 4;
   }
-  virtual string16 GetItemAt(int index) {
-    EXPECT_GE(index, 0);
-    EXPECT_LT(index, GetItemCount());
+  virtual string16 GetItemAt(int index) OVERRIDE {
     return string16();
   }
+
  private:
   DISALLOW_COPY_AND_ASSIGN(TestComboboxModel);
 };
@@ -135,14 +136,14 @@ class NativeComboboxViewsTest : public ViewsTestBase {
   // We need widget to populate wrapper class.
   Widget* widget_;
 
-  // combobox_ will be allocated InitCombobox() and then owned by widget_.
+  // |combobox_| will be allocated InitCombobox() and then owned by |widget_|.
   TestCombobox* combobox_;
 
-  // combobox_view_ is the pointer to the pure Views interface of combobox_.
+  // |combobox_view_| is the pointer to the pure Views interface of |combobox_|.
   NativeComboboxViews* combobox_view_;
 
-  // Combobox does not take ownership of model_, which needs to be scoped.
-  scoped_ptr<ui::ComboboxModel> model_;
+  // Combobox does not take ownership of the model, hence it needs to be scoped.
+  scoped_ptr<TestComboboxModel> model_;
 
   // For testing input method related behaviors.
   MockInputMethod* input_method_;

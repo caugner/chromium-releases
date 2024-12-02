@@ -15,7 +15,6 @@ class Extension;
 class HtmlDialogUIDelegate;
 class Profile;
 class SkBitmap;
-class TabContents;
 class TabContentsWrapper;
 class TabModalConfirmDialogDelegate;
 class TemplateURL;
@@ -52,6 +51,10 @@ gfx::NativeWindow ShowHtmlDialog(gfx::NativeWindow parent,
 // Closes the given dialog.
 void CloseHtmlDialog(gfx::NativeWindow window);
 
+// Shows the collected cookies dialog box.
+void ShowCollectedCookiesDialog(gfx::NativeWindow parent_window,
+                                TabContentsWrapper* tab_contents);
+
 // Creates the ExtensionInstalledBubble and schedules it to be shown once
 // the extension has loaded. |extension| is the installed extension. |browser|
 // is the browser window which will host the bubble. |icon| is the install
@@ -66,14 +69,6 @@ void ShowExtensionInstalledBubble(const Extension* extension,
 // and it needs to keep track of which tabs are currently hung.
 void ShowHungRendererDialog(content::WebContents* contents);
 void HideHungRendererDialog(content::WebContents* contents);
-
-// Native implementations of hung renderer dialogs.
-void ShowNativeHungRendererDialog(content::WebContents* contents);
-void HideNativeHungRendererDialog(content::WebContents* contents);
-
-// Show the edit search engine dialog.
-void ConfirmAddSearchProvider(const TemplateURL* template_url,
-                              Profile* profile);
 
 // Shows a tab-modal dialog box.
 void ShowTabModalConfirmDialog(TabModalConfirmDialogDelegate* delegate,

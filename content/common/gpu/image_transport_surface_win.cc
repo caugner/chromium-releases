@@ -40,7 +40,7 @@ class PbufferImageTransportSurface
   virtual bool SwapBuffers() OVERRIDE;
   virtual bool PostSubBuffer(int x, int y, int width, int height) OVERRIDE;
   virtual std::string GetExtensions() OVERRIDE;
-  virtual void SetVisible(bool visible) OVERRIDE;
+  virtual void SetBufferAllocation(BufferAllocationState state) OVERRIDE;
 
  protected:
   // ImageTransportSurface implementation
@@ -55,8 +55,8 @@ class PbufferImageTransportSurface
   virtual ~PbufferImageTransportSurface();
   void SendBuffersSwapped();
 
-  // Whether the surface is currently visible.
-  bool is_visible_;
+  // Tracks the current buffer allocation state.
+  BufferAllocationState buffer_allocation_state_;
 
   // Size to resize to when the surface becomes visible.
   gfx::Size visible_size_;
@@ -70,7 +70,7 @@ PbufferImageTransportSurface::PbufferImageTransportSurface(
     GpuChannelManager* manager,
     GpuCommandBufferStub* stub)
     : GLSurfaceAdapter(new gfx::PbufferGLSurfaceEGL(false, gfx::Size(1, 1))),
-      is_visible_(true) {
+      buffer_allocation_state_(BUFFER_ALLOCATION_FRONT_AND_BACK) {
   helper_.reset(new ImageTransportHelper(this,
                                          manager,
                                          stub,
@@ -121,16 +121,29 @@ bool PbufferImageTransportSurface::PostSubBuffer(
   return false;
 }
 
-void PbufferImageTransportSurface::SetVisible(bool visible) {
-  if (visible == is_visible_)
+void PbufferImageTransportSurface::SetBufferAllocation(
+    BufferAllocationState state) {
+  if (buffer_allocation_state_ == state)
     return;
+  buffer_allocation_state_ = state;
 
-  is_visible_ = visible;
+  switch (state) {
+    case BUFFER_ALLOCATION_FRONT_AND_BACK:
+      Resize(visible_size_);
+      break;
 
-  if (visible)
-    Resize(visible_size_);
-  else
-    Resize(gfx::Size(1, 1));
+    case BUFFER_ALLOCATION_FRONT_ONLY:
+      Resize(gfx::Size(1, 1));
+      break;
+
+    case BUFFER_ALLOCATION_NONE:
+      Resize(gfx::Size(1, 1));
+      helper_->Suspend();
+      break;
+
+    default:
+      NOTREACHED();
+  }
 }
 
 std::string PbufferImageTransportSurface::GetExtensions() {
@@ -168,7 +181,7 @@ void PbufferImageTransportSurface::OnResizeViewACK() {
 }
 
 void PbufferImageTransportSurface::OnResize(gfx::Size size) {
-  if (is_visible_)
+  if (buffer_allocation_state_ == BUFFER_ALLOCATION_FRONT_AND_BACK)
     Resize(size);
 
   visible_size_ = size;
@@ -180,10 +193,11 @@ void PbufferImageTransportSurface::OnResize(gfx::Size size) {
 scoped_refptr<gfx::GLSurface> ImageTransportSurface::CreateSurface(
     GpuChannelManager* manager,
     GpuCommandBufferStub* stub,
-    gfx::PluginWindowHandle handle) {
+    const gfx::GLSurfaceHandle& handle) {
   scoped_refptr<gfx::GLSurface> surface;
 
-  if (gfx::GetGLImplementation() == gfx::kGLImplementationEGLGLES2 &&
+  if (handle.transport &&
+      gfx::GetGLImplementation() == gfx::kGLImplementationEGLGLES2 &&
       !CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kDisableImageTransportSurface)) {
     const char* extensions = eglQueryString(eglGetDisplay(EGL_DEFAULT_DISPLAY),
@@ -195,13 +209,14 @@ scoped_refptr<gfx::GLSurface> ImageTransportSurface::CreateSurface(
   }
 
   if (!surface.get()) {
-    surface = gfx::GLSurface::CreateViewGLSurface(false, handle);
+    surface = gfx::GLSurface::CreateViewGLSurface(false, handle.handle);
     if (!surface.get())
       return NULL;
 
     surface = new PassThroughImageTransportSurface(manager,
                                                    stub,
-                                                   surface.get());
+                                                   surface.get(),
+                                                   handle.transport);
   }
 
   if (surface->Initialize())

@@ -1,11 +1,11 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 cr.define('options.search_engines', function() {
-  const InlineEditableItemList = options.InlineEditableItemList;
-  const InlineEditableItem = options.InlineEditableItem;
-  const ListSelectionController = cr.ui.ListSelectionController;
+  /** @const */ var InlineEditableItemList = options.InlineEditableItemList;
+  /** @const */ var InlineEditableItem = options.InlineEditableItem;
+  /** @const */ var ListSelectionController = cr.ui.ListSelectionController;
 
   /**
    * Creates a new search engine list item.
@@ -122,7 +122,7 @@ cr.define('options.search_engines', function() {
       // is implemented. When this is removed, remove the extra div above.
       if (engine['canBeDefault']) {
         var makeDefaultButtonEl = this.ownerDocument.createElement('button');
-        makeDefaultButtonEl.className = 'raw-button custom-appearance';
+        makeDefaultButtonEl.className = 'custom-appearance list-inline-button';
         makeDefaultButtonEl.textContent =
             templateData.makeDefaultSearchEngineButton;
         makeDefaultButtonEl.onclick = function(e) {
@@ -154,7 +154,7 @@ cr.define('options.search_engines', function() {
             localStrings.getString('searchEngineTableURLPlaceholder');
       }
 
-      var fields = [ this.nameField_, this.keywordField_, this.urlField_ ];
+      var fields = [this.nameField_, this.keywordField_, this.urlField_];
         for (var i = 0; i < fields.length; i++) {
         fields[i].oninput = this.startFieldValidation_.bind(this);
       }
@@ -224,9 +224,9 @@ cr.define('options.search_engines', function() {
      * @return {array} The current input field values.
      */
     getInputFieldValues_: function() {
-      return [ this.nameField_.value,
-               this.keywordField_.value,
-               this.urlField_.value ];
+      return [this.nameField_.value,
+              this.keywordField_.value,
+              this.urlField_.value];
     },
 
     /**
@@ -286,7 +286,7 @@ cr.define('options.search_engines', function() {
 
     /** @inheritDoc */
     deleteItemAtIndex: function(index) {
-      var modelIndex = this.dataModel.item(index)['modelIndex']
+      var modelIndex = this.dataModel.item(index)['modelIndex'];
       chrome.send('removeSearchEngine', [String(modelIndex)]);
     },
 

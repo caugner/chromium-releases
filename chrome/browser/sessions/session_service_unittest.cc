@@ -27,6 +27,10 @@
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebData.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebHTTPBody.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebHistoryItem.h"
+#include "webkit/glue/glue_serialize.h"
 
 using content::NavigationEntry;
 
@@ -48,7 +52,8 @@ class SessionServiceTest : public BrowserWithTestWindowTest,
     SessionService* session_service = new SessionService(path_);
     helper_.set_service(session_service);
 
-    service()->SetWindowType(window_id, Browser::TYPE_TABBED);
+    service()->SetWindowType(
+        window_id, Browser::TYPE_TABBED, SessionService::TYPE_NORMAL);
     service()->SetWindowBounds(window_id,
                                window_bounds,
                                ui::SHOW_STATE_NORMAL);
@@ -275,7 +280,8 @@ TEST_F(SessionServiceTest, TwoWindows) {
   UpdateNavigation(window_id, tab1_id, nav1, 0, true);
 
   const gfx::Rect window2_bounds(3, 4, 5, 6);
-  service()->SetWindowType(window2_id, Browser::TYPE_TABBED);
+  service()->SetWindowType(
+      window2_id, Browser::TYPE_TABBED, SessionService::TYPE_NORMAL);
   service()->SetWindowBounds(window2_id,
                              window2_bounds,
                              ui::SHOW_STATE_MAXIMIZED);
@@ -329,7 +335,8 @@ TEST_F(SessionServiceTest, WindowWithNoTabsGetsPruned) {
   UpdateNavigation(window_id, tab1_id, nav1, 0, true);
 
   const gfx::Rect window2_bounds(3, 4, 5, 6);
-  service()->SetWindowType(window2_id, Browser::TYPE_TABBED);
+  service()->SetWindowType(
+      window2_id, Browser::TYPE_TABBED, SessionService::TYPE_NORMAL);
   service()->SetWindowBounds(window2_id,
                              window2_bounds,
                              ui::SHOW_STATE_NORMAL);
@@ -391,7 +398,8 @@ TEST_F(SessionServiceTest, WindowCloseCommittedAfterNavigate) {
   SessionID tab2_id;
   ASSERT_NE(window2_id.id(), window_id.id());
 
-  service()->SetWindowType(window2_id, Browser::TYPE_TABBED);
+  service()->SetWindowType(
+      window2_id, Browser::TYPE_TABBED, SessionService::TYPE_NORMAL);
   service()->SetWindowBounds(window2_id,
                              window_bounds,
                              ui::SHOW_STATE_NORMAL);
@@ -436,7 +444,8 @@ TEST_F(SessionServiceTest, IgnorePopups) {
   SessionID tab2_id;
   ASSERT_NE(window2_id.id(), window_id.id());
 
-  service()->SetWindowType(window2_id, Browser::TYPE_POPUP);
+  service()->SetWindowType(
+      window2_id, Browser::TYPE_POPUP, SessionService::TYPE_NORMAL);
   service()->SetWindowBounds(window2_id,
                              window_bounds,
                              ui::SHOW_STATE_NORMAL);
@@ -477,7 +486,8 @@ TEST_F(SessionServiceTest, RestorePopup) {
   SessionID tab2_id;
   ASSERT_NE(window2_id.id(), window_id.id());
 
-  service()->SetWindowType(window2_id, Browser::TYPE_POPUP);
+  service()->SetWindowType(
+      window2_id, Browser::TYPE_POPUP, SessionService::TYPE_NORMAL);
   service()->SetWindowBounds(window2_id,
                              window_bounds,
                              ui::SHOW_STATE_NORMAL);
@@ -518,6 +528,61 @@ TEST_F(SessionServiceTest, RestorePopup) {
   helper_.AssertTabEquals(window2_id, tab2_id, 0, 0, 1, *tab);
   helper_.AssertNavigationEquals(nav2, tab->navigations[0]);
 }
+
+#if defined (USE_AURA)
+// Makes sure we track apps. Only applicable on aura.
+TEST_F(SessionServiceTest, RestoreApp) {
+  SessionID window2_id;
+  SessionID tab_id;
+  SessionID tab2_id;
+  ASSERT_NE(window2_id.id(), window_id.id());
+
+  service()->SetWindowType(
+      window2_id, Browser::TYPE_POPUP, SessionService::TYPE_APP);
+  service()->SetWindowBounds(window2_id,
+                             window_bounds,
+                             ui::SHOW_STATE_NORMAL);
+  service()->SetWindowAppName(window2_id, "TestApp");
+
+  TabNavigation nav1(0, GURL("http://google.com"), content::Referrer(),
+                     ASCIIToUTF16("abc"), "def",
+                     content::PAGE_TRANSITION_QUALIFIER_MASK);
+  TabNavigation nav2(0, GURL("http://google2.com"), content::Referrer(),
+                     ASCIIToUTF16("abcd"), "defg",
+                     content::PAGE_TRANSITION_AUTO_BOOKMARK);
+
+  helper_.PrepareTabInWindow(window_id, tab_id, 0, true);
+  UpdateNavigation(window_id, tab_id, nav1, 0, true);
+
+  helper_.PrepareTabInWindow(window2_id, tab2_id, 0, false);
+  UpdateNavigation(window2_id, tab2_id, nav2, 0, true);
+
+  ScopedVector<SessionWindow> windows;
+  ReadWindows(&(windows.get()));
+
+  ASSERT_EQ(2U, windows->size());
+  int tabbed_index = windows[0]->type == Browser::TYPE_TABBED ?
+      0 : 1;
+  int app_index = tabbed_index == 0 ? 1 : 0;
+  ASSERT_EQ(0, windows[tabbed_index]->selected_tab_index);
+  ASSERT_EQ(window_id.id(), windows[tabbed_index]->window_id.id());
+  ASSERT_EQ(1U, windows[tabbed_index]->tabs.size());
+
+  SessionTab* tab = windows[tabbed_index]->tabs[0];
+  helper_.AssertTabEquals(window_id, tab_id, 0, 0, 1, *tab);
+  helper_.AssertNavigationEquals(nav1, tab->navigations[0]);
+
+  ASSERT_EQ(0, windows[app_index]->selected_tab_index);
+  ASSERT_EQ(window2_id.id(), windows[app_index]->window_id.id());
+  ASSERT_EQ(1U, windows[app_index]->tabs.size());
+  ASSERT_TRUE(windows[app_index]->type == Browser::TYPE_POPUP);
+  ASSERT_EQ("TestApp", windows[app_index]->app_name);
+
+  tab = windows[app_index]->tabs[0];
+  helper_.AssertTabEquals(window2_id, tab2_id, 0, 0, 1, *tab);
+  helper_.AssertNavigationEquals(nav2, tab->navigations[0]);
+}
+#endif
 
 // Tests pruning from the front.
 TEST_F(SessionServiceTest, PruneFromFront) {
@@ -673,4 +738,118 @@ TEST_F(SessionServiceTest, DontPersistDefault) {
   ReadWindows(&(windows.get()));
   ASSERT_EQ(1U, windows->size());
   EXPECT_EQ(ui::SHOW_STATE_NORMAL, windows[0]->show_state);
+}
+
+TEST_F(SessionServiceTest, RemovePostData) {
+  helper_.service()->save_post_data_ = false;
+
+  SessionID tab_id;
+  ASSERT_NE(window_id.id(), tab_id.id());
+
+  std::string content_state("dummy_content_state");
+  // Create a TabNavigation containing content_state and representing a POST
+  // request.
+  TabNavigation nav1(0, GURL("http://google.com"), content::Referrer(),
+                     ASCIIToUTF16("title"), content_state,
+                     content::PAGE_TRANSITION_QUALIFIER_MASK);
+  nav1.set_type_mask(TabNavigation::HAS_POST_DATA);
+
+  // Create a TabNavigation containing content_state and representing a normal
+  // request.
+  TabNavigation nav2(0, GURL("http://google.com/nopost"), content::Referrer(),
+                     ASCIIToUTF16("title"), content_state,
+                     content::PAGE_TRANSITION_QUALIFIER_MASK);
+
+  helper_.PrepareTabInWindow(window_id, tab_id, 0, true);
+  UpdateNavigation(window_id, tab_id, nav1, 0, true);
+  UpdateNavigation(window_id, tab_id, nav2, 1, true);
+
+  ScopedVector<SessionWindow> windows;
+  ReadWindows(&(windows.get()));
+
+  helper_.AssertSingleWindowWithSingleTab(windows.get(), 2);
+
+  // Expected: the HTTP body was removed from the content state of the POST
+  // navigation but the content state of the normal navigation is intact.
+  EXPECT_NE(content_state, windows[0]->tabs[0]->navigations[0].state());
+  helper_.AssertNavigationEquals(nav2, windows[0]->tabs[0]->navigations[1]);
+}
+
+TEST_F(SessionServiceTest, KeepPostDataWithoutPasswords) {
+  helper_.service()->save_post_data_ = true;
+
+  SessionID tab_id;
+  ASSERT_NE(window_id.id(), tab_id.id());
+
+  // Create a content state representing a HTTP body without posted passwords.
+  WebKit::WebHTTPBody http_body;
+  http_body.initialize();
+  const char char_data[] = "data";
+  http_body.appendData(WebKit::WebData(char_data, sizeof(char_data)-1));
+  WebKit::WebHistoryItem history_item;
+  history_item.initialize();
+  history_item.setHTTPBody(http_body);
+  std::string content_state = webkit_glue::HistoryItemToString(history_item);
+
+  // Create a TabNavigation containing content_state and representing a POST
+  // request.
+  TabNavigation nav1(0, GURL("http://google.com"), content::Referrer(),
+                     ASCIIToUTF16("title"), content_state,
+                     content::PAGE_TRANSITION_QUALIFIER_MASK);
+  nav1.set_type_mask(TabNavigation::HAS_POST_DATA);
+
+  // Create a TabNavigation containing content_state and representing a normal
+  // request.
+  TabNavigation nav2(0, GURL("http://google.com/nopost"), content::Referrer(),
+                     ASCIIToUTF16("title"), content_state,
+                     content::PAGE_TRANSITION_QUALIFIER_MASK);
+
+  helper_.PrepareTabInWindow(window_id, tab_id, 0, true);
+  UpdateNavigation(window_id, tab_id, nav1, 0, true);
+  UpdateNavigation(window_id, tab_id, nav2, 1, true);
+
+  ScopedVector<SessionWindow> windows;
+  ReadWindows(&(windows.get()));
+
+  helper_.AssertSingleWindowWithSingleTab(windows.get(), 2);
+
+  // Expected: the content state of both navigations was saved and restored.
+  helper_.AssertNavigationEquals(nav1, windows[0]->tabs[0]->navigations[0]);
+  helper_.AssertNavigationEquals(nav2, windows[0]->tabs[0]->navigations[1]);
+}
+
+TEST_F(SessionServiceTest, RemovePostDataWithPasswords) {
+  helper_.service()->save_post_data_ = true;
+
+  SessionID tab_id;
+  ASSERT_NE(window_id.id(), tab_id.id());
+
+  // Create a content state representing a HTTP body with posted passwords.
+  WebKit::WebHTTPBody http_body;
+  http_body.initialize();
+  const char char_data[] = "data";
+  http_body.appendData(WebKit::WebData(char_data, sizeof(char_data)-1));
+  http_body.setContainsPasswordData(true);
+  WebKit::WebHistoryItem history_item;
+  history_item.initialize();
+  history_item.setHTTPBody(http_body);
+  std::string content_state = webkit_glue::HistoryItemToString(history_item);
+
+  // Create a TabNavigation containing content_state and representing a POST
+  // request with passwords.
+  TabNavigation nav1(0, GURL("http://google.com"), content::Referrer(),
+                     ASCIIToUTF16("title"), content_state,
+                     content::PAGE_TRANSITION_QUALIFIER_MASK);
+  nav1.set_type_mask(TabNavigation::HAS_POST_DATA);
+  helper_.PrepareTabInWindow(window_id, tab_id, 0, true);
+  UpdateNavigation(window_id, tab_id, nav1, 0, true);
+
+  ScopedVector<SessionWindow> windows;
+  ReadWindows(&(windows.get()));
+
+  helper_.AssertSingleWindowWithSingleTab(windows.get(), 1);
+
+  // Expected: the HTTP body was removed from the content state of the POST
+  // navigation with passwords.
+  EXPECT_NE(content_state, windows[0]->tabs[0]->navigations[0].state());
 }

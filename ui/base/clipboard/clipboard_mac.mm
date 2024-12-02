@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,7 +18,7 @@
 #import "third_party/mozilla/NSPasteboard+Utils.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/clipboard/custom_data_helper.h"
-#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/canvas.h"
 #include "ui/gfx/scoped_ns_graphics_context_save_gstate_mac.h"
 #include "ui/gfx/size.h"
 
@@ -79,12 +79,17 @@ Clipboard::FormatType Clipboard::FormatType::Deserialize(
 }
 
 Clipboard::Clipboard() {
+  DCHECK(CalledOnValidThread());
 }
 
 Clipboard::~Clipboard() {
+  DCHECK(CalledOnValidThread());
 }
 
-void Clipboard::WriteObjects(const ObjectMap& objects) {
+void Clipboard::WriteObjects(Buffer buffer, const ObjectMap& objects) {
+  DCHECK(CalledOnValidThread());
+  DCHECK_EQ(buffer, BUFFER_STANDARD);
+
   NSPasteboard* pb = GetPasteboard();
   [pb declareTypes:[NSArray array] owner:nil];
 
@@ -209,6 +214,7 @@ void Clipboard::WriteWebSmartPaste() {
 }
 
 uint64 Clipboard::GetSequenceNumber(Buffer buffer) {
+  DCHECK(CalledOnValidThread());
   DCHECK_EQ(buffer, BUFFER_STANDARD);
 
   NSPasteboard* pb = GetPasteboard();
@@ -217,6 +223,7 @@ uint64 Clipboard::GetSequenceNumber(Buffer buffer) {
 
 bool Clipboard::IsFormatAvailable(const FormatType& format,
                                   Buffer buffer) const {
+  DCHECK(CalledOnValidThread());
   DCHECK_EQ(buffer, BUFFER_STANDARD);
 
   NSPasteboard* pb = GetPasteboard();
@@ -231,9 +238,18 @@ bool Clipboard::IsFormatAvailable(const FormatType& format,
   return [types containsObject:format.ToNSString()];
 }
 
+void Clipboard::Clear(Buffer buffer) {
+  DCHECK(CalledOnValidThread());
+  DCHECK_EQ(buffer, BUFFER_STANDARD);
+
+  NSPasteboard* pb = GetPasteboard();
+  [pb declareTypes:[NSArray array] owner:nil];
+}
+
 void Clipboard::ReadAvailableTypes(Clipboard::Buffer buffer,
                                    std::vector<string16>* types,
                                    bool* contains_filenames) const {
+  DCHECK(CalledOnValidThread());
   types->clear();
   if (IsFormatAvailable(Clipboard::GetPlainTextFormatType(), buffer))
     types->push_back(UTF8ToUTF16(kMimeTypeText));
@@ -252,6 +268,7 @@ void Clipboard::ReadAvailableTypes(Clipboard::Buffer buffer,
 }
 
 void Clipboard::ReadText(Clipboard::Buffer buffer, string16* result) const {
+  DCHECK(CalledOnValidThread());
   DCHECK_EQ(buffer, BUFFER_STANDARD);
   NSPasteboard* pb = GetPasteboard();
   NSString* contents = [pb stringForType:NSStringPboardType];
@@ -263,6 +280,7 @@ void Clipboard::ReadText(Clipboard::Buffer buffer, string16* result) const {
 
 void Clipboard::ReadAsciiText(Clipboard::Buffer buffer,
                               std::string* result) const {
+  DCHECK(CalledOnValidThread());
   DCHECK_EQ(buffer, BUFFER_STANDARD);
   NSPasteboard* pb = GetPasteboard();
   NSString* contents = [pb stringForType:NSStringPboardType];
@@ -276,6 +294,7 @@ void Clipboard::ReadAsciiText(Clipboard::Buffer buffer,
 void Clipboard::ReadHTML(Clipboard::Buffer buffer, string16* markup,
                          std::string* src_url, uint32* fragment_start,
                          uint32* fragment_end) const {
+  DCHECK(CalledOnValidThread());
   DCHECK_EQ(buffer, BUFFER_STANDARD);
 
   // TODO(avi): src_url?
@@ -304,6 +323,7 @@ void Clipboard::ReadHTML(Clipboard::Buffer buffer, string16* markup,
 }
 
 SkBitmap Clipboard::ReadImage(Buffer buffer) const {
+  DCHECK(CalledOnValidThread());
   DCHECK_EQ(buffer, BUFFER_STANDARD);
 
   scoped_nsobject<NSImage> image(
@@ -316,7 +336,7 @@ SkBitmap Clipboard::ReadImage(Buffer buffer) const {
   int width = [image size].width;
   int height = [image size].height;
 
-  gfx::CanvasSkia canvas(gfx::Size(width, height), false);
+  gfx::Canvas canvas(gfx::Size(width, height), false);
   {
     skia::ScopedPlatformPaint scoped_platform_paint(canvas.sk_canvas());
     CGContextRef gc = scoped_platform_paint.GetPlatformSurface();
@@ -334,6 +354,7 @@ SkBitmap Clipboard::ReadImage(Buffer buffer) const {
 void Clipboard::ReadCustomData(Buffer buffer,
                                const string16& type,
                                string16* result) const {
+  DCHECK(CalledOnValidThread());
   DCHECK_EQ(buffer, BUFFER_STANDARD);
 
   NSPasteboard* pb = GetPasteboard();
@@ -345,6 +366,7 @@ void Clipboard::ReadCustomData(Buffer buffer,
 }
 
 void Clipboard::ReadBookmark(string16* title, std::string* url) const {
+  DCHECK(CalledOnValidThread());
   NSPasteboard* pb = GetPasteboard();
 
   if (title) {
@@ -363,39 +385,8 @@ void Clipboard::ReadBookmark(string16* title, std::string* url) const {
   }
 }
 
-void Clipboard::ReadFile(FilePath* file) const {
-  if (!file) {
-    NOTREACHED();
-    return;
-  }
-
-  *file = FilePath();
-  std::vector<FilePath> files;
-  ReadFiles(&files);
-
-  // Take the first file, if available.
-  if (!files.empty())
-    *file = files[0];
-}
-
-void Clipboard::ReadFiles(std::vector<FilePath>* files) const {
-  if (!files) {
-    NOTREACHED();
-    return;
-  }
-
-  files->clear();
-
-  NSPasteboard* pb = GetPasteboard();
-  NSArray* fileList = [pb propertyListForType:NSFilenamesPboardType];
-
-  for (unsigned int i = 0; i < [fileList count]; ++i) {
-    std::string file = [[fileList objectAtIndex:i] UTF8String];
-    files->push_back(FilePath(file));
-  }
-}
-
 void Clipboard::ReadData(const FormatType& format, std::string* result) const {
+  DCHECK(CalledOnValidThread());
   NSPasteboard* pb = GetPasteboard();
   NSData* data = [pb dataForType:format.ToNSString()];
   if ([data length])

@@ -12,6 +12,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
+#include "chrome/browser/chromeos/input_method/input_method_whitelist.h"
 #include "content/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/x/x11_util.h"
@@ -37,8 +38,7 @@ namespace {
 class XKeyboardTest : public testing::Test {
  public:
   XKeyboardTest()
-      : controller_(IBusController::Create()),
-        util_(controller_->GetSupportedInputMethods()),
+      : util_(whitelist_.GetSupportedInputMethods()),
         ui_thread_(BrowserThread::UI, &message_loop_) {
   }
 
@@ -50,7 +50,7 @@ class XKeyboardTest : public testing::Test {
     xkey_.reset();
   }
 
-  scoped_ptr<IBusController> controller_;
+  InputMethodWhitelist whitelist_;
   InputMethodUtil util_;
   scoped_ptr<XKeyboard> xkey_;
 
@@ -149,7 +149,7 @@ TEST_F(XKeyboardTest, TestCreateFullXkbLayoutNameBasic) {
       "us!", GetMap(kVoidKey, kVoidKey, kVoidKey)).c_str());
   EXPECT_STREQ("", xkey_->CreateFullXkbLayoutName(
       "us; /bin/sh", GetMap(kVoidKey, kVoidKey, kVoidKey)).c_str());
-  EXPECT_STREQ("ab-c_12+chromeos(disabled_disabled_disabled),us",
+  EXPECT_STREQ("ab-c_12+chromeos(disabled_disabled_disabled)",
                xkey_->CreateFullXkbLayoutName(
                    "ab-c_12",
                    GetMap(kVoidKey, kVoidKey, kVoidKey)).c_str());
@@ -177,20 +177,10 @@ TEST_F(XKeyboardTest, TestCreateFullXkbLayoutNameBasic) {
                xkey_->CreateFullXkbLayoutName(
                    "us(dvorak)",
                    GetMap(kVoidKey, kVoidKey, kVoidKey)).c_str());
-  EXPECT_STREQ("jp+chromeos(disabled_disabled_disabled),us",
+  EXPECT_STREQ("jp+chromeos(disabled_disabled_disabled)",
                xkey_->CreateFullXkbLayoutName(
                    "jp",  // does not use AltGr, therefore no _keepralt.
                    GetMap(kVoidKey, kVoidKey, kVoidKey)).c_str());
-
-  // When the layout name is not "us", the second layout should be added.
-  EXPECT_EQ(std::string::npos, xkey_->CreateFullXkbLayoutName(
-      "us", GetMap(kVoidKey, kVoidKey, kVoidKey)).find(",us"));
-  EXPECT_EQ(std::string::npos, xkey_->CreateFullXkbLayoutName(
-      "us(dvorak)", GetMap(kVoidKey, kVoidKey, kVoidKey)).find(",us"));
-  EXPECT_NE(std::string::npos, xkey_->CreateFullXkbLayoutName(
-      "gb(extd)", GetMap(kVoidKey, kVoidKey, kVoidKey)).find(",us"));
-  EXPECT_NE(std::string::npos, xkey_->CreateFullXkbLayoutName(
-      "jp", GetMap(kVoidKey, kVoidKey, kVoidKey)).find(",us"));
 }
 
 TEST_F(XKeyboardTest, TestCreateFullXkbLayoutNameKeepCapsLock) {
@@ -199,15 +189,14 @@ TEST_F(XKeyboardTest, TestCreateFullXkbLayoutNameKeepCapsLock) {
                    "us(colemak)",
                    // The 1st kVoidKey should be ignored.
                    GetMap(kVoidKey, kVoidKey, kVoidKey)).c_str());
-  EXPECT_STREQ("de(neo)+"
-               "chromeos(search_leftcontrol_leftcontrol_keepralt),us",
+  EXPECT_STREQ("de(neo)+chromeos(search_leftcontrol_leftcontrol_keepralt)",
                xkey_->CreateFullXkbLayoutName(
                    // The 1st kLeftControlKey should be ignored.
                    "de(neo)", GetMap(kLeftControlKey,
                                      kLeftControlKey,
                                      kLeftControlKey)).c_str());
-  EXPECT_STREQ("gb(extd)+chromeos(disabled_disabled_disabled_keepralt),us",
-                xkey_->CreateFullXkbLayoutName(
+  EXPECT_STREQ("gb(extd)+chromeos(disabled_disabled_disabled_keepralt)",
+               xkey_->CreateFullXkbLayoutName(
                     "gb(extd)",
                     GetMap(kVoidKey, kVoidKey, kVoidKey)).c_str());
 }
@@ -217,7 +206,7 @@ TEST_F(XKeyboardTest, TestCreateFullXkbLayoutNameKeepAlt) {
                xkey_->CreateFullXkbLayoutName(
                    "us(intl)", GetMap(kVoidKey, kVoidKey, kVoidKey)).c_str());
   EXPECT_STREQ("kr(kr104)+"
-               "chromeos(leftcontrol_leftcontrol_leftcontrol_keepralt),us",
+               "chromeos(leftcontrol_leftcontrol_leftcontrol_keepralt)",
                xkey_->CreateFullXkbLayoutName(
                    "kr(kr104)", GetMap(kLeftControlKey,
                                        kLeftControlKey,

@@ -44,12 +44,19 @@ class LoginDisplay : public RemoveUserDelegate {
                                const std::string& password) = 0;
 
     // Sign in using |username| and |password| specified.
-    // Used for both known users only.
+    // Used for known users only.
     virtual void Login(const std::string& username,
                        const std::string& password) = 0;
 
+    // Sign in as a demo user.
+    virtual void LoginAsDemoUser() = 0;
+
     // Sign in into Guest session.
     virtual void LoginAsGuest() = 0;
+
+    // Sign out the currently signed in user.
+    // Used when the lock screen is being displayed.
+    virtual void Signout() = 0;
 
     // Called when existing user pod is selected in the UI.
     virtual void OnUserSelected(const std::string& username) = 0;

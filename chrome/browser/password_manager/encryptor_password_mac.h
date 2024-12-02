@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,11 +10,13 @@
 
 #include "base/basictypes.h"
 
+namespace crypto {
 class MacKeychain;
+}  // namespace crypto
 
 class EncryptorPassword {
  public:
-  explicit EncryptorPassword(const MacKeychain& keychain)
+  explicit EncryptorPassword(const crypto::MacKeychain& keychain)
       : keychain_(keychain) {
   }
 
@@ -28,7 +30,7 @@ class EncryptorPassword {
 
  private:
   DISALLOW_COPY_AND_ASSIGN(EncryptorPassword);
-  const MacKeychain& keychain_;
+  const crypto::MacKeychain& keychain_;
 };
 
 #endif  // CHROME_BROWSER_PASSWORD_MANAGER_ENCRYPTOR_PASSWORD_H__

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,10 +30,20 @@ class Bridge;
   NSPoint anchor_;
   IBOutlet InfoBubbleView* bubble_;  // to set arrow position
   // Bridge that listens for notifications.
-  scoped_ptr<BaseBubbleControllerInternal::Bridge> base_bridge_;
+  scoped_ptr<BaseBubbleControllerInternal::Bridge> baseBridge_;
+
+  // Non-nil only on 10.7+. Both weak, owned by AppKit.
+  // A local event tap that will dismiss the bubble when a click is delivered
+  // outside the window. This is needed because the window shares first
+  // responder with its parent.
+  id eventTap_;
+  // A notification observer that gets triggered when any window resigns key.
+  id resignationObserver_;
 }
 
 @property(nonatomic, readonly) NSWindow* parentWindow;
+// The point in base screen coordinates at which the bubble should open and the
+// arrow tip points.
 @property(nonatomic, assign) NSPoint anchorPoint;
 @property(nonatomic, readonly) InfoBubbleView* bubble;
 
@@ -68,4 +78,12 @@ class Bridge;
 // frame is ignored.
 - (NSBox*)separatorWithFrame:(NSRect)frame;
 
+@end
+
+// Methods for use by subclasses.
+@interface BaseBubbleController (Protected)
+// Registers event taps *after* the window is shown so that the bubble is
+// dismissed when it resigns key. This only needs to be called if
+// |-showWindow:| is overriden and does not call super. Noop on OSes <10.7.
+- (void)registerKeyStateEventTap;
 @end

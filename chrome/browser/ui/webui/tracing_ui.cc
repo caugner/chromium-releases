@@ -9,19 +9,24 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
+#include "base/debug/trace_event.h"
 #include "base/file_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/gpu_blacklist.h"
+#include "chrome/browser/gpu_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/select_file_dialog.h"
 #include "chrome/browser/ui/webui/chrome_web_ui_data_source.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/gpu/gpu_data_manager.h"
-#include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/trace_controller.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/gpu_data_manager.h"
+#include "content/public/browser/gpu_data_manager_observer.h"
+#include "content/public/browser/render_view_host.h"
+#include "content/public/browser/trace_controller.h"
+#include "content/public/browser/trace_subscriber.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
 #include "content/public/browser/web_ui.h"
@@ -31,6 +36,8 @@
 #include "ui/base/l10n/l10n_util.h"
 
 using content::BrowserThread;
+using content::GpuDataManager;
+using content::TraceController;
 using content::WebContents;
 using content::WebUIMessageHandler;
 
@@ -54,8 +61,8 @@ class TracingMessageHandler
     : public WebUIMessageHandler,
       public SelectFileDialog::Listener,
       public base::SupportsWeakPtr<TracingMessageHandler>,
-      public TraceSubscriber,
-      public GpuDataManager::Observer {
+      public content::TraceSubscriber,
+      public content::GpuDataManagerObserver {
  public:
   TracingMessageHandler();
   virtual ~TracingMessageHandler();
@@ -69,10 +76,11 @@ class TracingMessageHandler
 
   // TraceSubscriber implementation.
   virtual void OnEndTracingComplete();
-  virtual void OnTraceDataCollected(const std::string& trace_fragment);
+  virtual void OnTraceDataCollected(
+      const scoped_refptr<base::RefCountedString>& trace_fragment);
   virtual void OnTraceBufferPercentFullReply(float percent_full);
 
-  // GpuDataManager::Observer implementation.
+  // GpuDataManagerObserver implementation.
   virtual void OnGpuInfoUpdate() OVERRIDE;
 
   // Messages.
@@ -100,9 +108,6 @@ class TracingMessageHandler
 
   // True while tracing is active.
   bool trace_enabled_;
-
-  // Cache the Singleton for efficiency.
-  GpuDataManager* gpu_data_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(TracingMessageHandler);
 };
@@ -142,12 +147,10 @@ class TaskProxy : public base::RefCountedThreadSafe<TaskProxy> {
 TracingMessageHandler::TracingMessageHandler()
   : select_trace_file_dialog_type_(SelectFileDialog::SELECT_NONE),
     trace_enabled_(false) {
-  gpu_data_manager_ = GpuDataManager::GetInstance();
-  DCHECK(gpu_data_manager_);
 }
 
 TracingMessageHandler::~TracingMessageHandler() {
-  gpu_data_manager_->RemoveObserver(this);
+  GpuDataManager::GetInstance()->RemoveObserver(this);
 
   if (select_trace_file_dialog_)
     select_trace_file_dialog_->ListenerDestroyed();
@@ -184,11 +187,11 @@ void TracingMessageHandler::OnTracingControllerInitialized(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   // Watch for changes in GPUInfo
-  gpu_data_manager_->AddObserver(this);
+  GpuDataManager::GetInstance()->AddObserver(this);
 
   // Tell GpuDataManager it should have full GpuInfo. If the
   // Gpu process has not run yet, this will trigger its launch.
-  gpu_data_manager_->RequestCompleteGpuInfoIfNeeded();
+  GpuDataManager::GetInstance()->RequestCompleteGpuInfoIfNeeded();
 
   // Run callback immediately in case the info is ready and no update in the
   // future.
@@ -218,7 +221,7 @@ void TracingMessageHandler::OnTracingControllerInitialized(
     }
 
     dict->SetString("blacklist_version",
-        GpuDataManager::GetInstance()->GetBlacklistVersion());
+        GpuBlacklist::GetInstance()->GetVersion());
     web_ui()->CallJavascriptFunction("tracingController.onClientInfoUpdate",
                                      *dict);
   }
@@ -232,10 +235,10 @@ void TracingMessageHandler::OnBeginRequestBufferPercentFull(
 void TracingMessageHandler::OnGpuInfoUpdate() {
   // Get GPU Info.
   scoped_ptr<base::DictionaryValue> gpu_info_val(
-      gpu_data_manager_->GpuInfoAsDictionaryValue());
+      gpu_util::GpuInfoAsDictionaryValue());
 
   // Add in blacklisting features
-  Value* feature_status = gpu_data_manager_->GetFeatureStatus();
+  Value* feature_status = gpu_util::GetFeatureStatus();
   if (feature_status)
     gpu_info_val->Set("featureStatus", feature_status);
 
@@ -380,7 +383,7 @@ void TracingMessageHandler::OnEndTracingComplete() {
 }
 
 void TracingMessageHandler::OnTraceDataCollected(
-    const std::string& trace_fragment) {
+    const scoped_refptr<base::RefCountedString>& trace_fragment) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   base::debug::TraceResultBuffer::SimpleOutput output;
@@ -388,7 +391,7 @@ void TracingMessageHandler::OnTraceDataCollected(
   trace_buffer.SetOutputCallback(output.GetCallback());
   output.Append("tracingController.onTraceDataCollected(");
   trace_buffer.Start();
-  trace_buffer.AddFragment(trace_fragment);
+  trace_buffer.AddFragment(trace_fragment->data());
   trace_buffer.Finish();
   output.Append(");");
 

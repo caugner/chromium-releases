@@ -5,7 +5,7 @@
 // The DownloadFileManager owns a set of DownloadFile objects, each of which
 // represent one in progress download and performs the disk IO for that
 // download. The DownloadFileManager itself is a singleton object owned by the
-// ResourceDispatcherHost.
+// ResourceDispatcherHostImpl.
 //
 // The DownloadFileManager uses the file_thread for performing file write
 // operations, in order to avoid disk activity on either the IO (network) thread
@@ -49,21 +49,24 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/timer.h"
-#include "content/browser/download/interrupt_reasons.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/download_id.h"
+#include "content/public/browser/download_interrupt_reasons.h"
 #include "net/base/net_errors.h"
 #include "ui/gfx/native_widget_types.h"
 
 struct DownloadCreateInfo;
 class DownloadRequestHandle;
 class FilePath;
-class ResourceDispatcherHost;
 
 namespace content {
 class DownloadBuffer;
 class DownloadFile;
 class DownloadManager;
+}
+
+namespace net {
+class BoundNetLog;
 }
 
 // Manages all in progress downloads.
@@ -78,14 +81,14 @@ class CONTENT_EXPORT DownloadFileManager
         DownloadCreateInfo* info,
         const DownloadRequestHandle& request_handle,
         content::DownloadManager* download_manager,
-        bool calculate_hash) = 0;
+        bool calculate_hash,
+        const net::BoundNetLog& bound_net_log) = 0;
   };
 
   // Takes ownership of the factory.
   // Passing in a NULL for |factory| will cause a default
   // |DownloadFileFactory| to be used.
-  DownloadFileManager(ResourceDispatcherHost* rdh,
-                      DownloadFileFactory* factory);
+  explicit DownloadFileManager(DownloadFileFactory* factory);
 
   // Called on shutdown on the UI thread.
   void Shutdown();
@@ -105,7 +108,7 @@ class CONTENT_EXPORT DownloadFileManager
   // fine-tune the error message.  It is empty if the transaction
   // was not performed securely.
   void OnResponseCompleted(content::DownloadId global_id,
-                           InterruptReason reason,
+                           content::DownloadInterruptReason reason,
                            const std::string& security_info);
 
   // Handlers for notifications sent from the UI thread and run on the
@@ -139,6 +142,14 @@ class CONTENT_EXPORT DownloadFileManager
     return downloads_.size();
   }
 
+  void SetFileFactoryForTesting(scoped_ptr<DownloadFileFactory> file_factory) {
+    download_file_factory_.reset(file_factory.release());
+  }
+
+  DownloadFileFactory* GetFileFactoryForTesting() const {
+    return download_file_factory_.get();  // Explicitly NOT a scoped_ptr.
+  }
+
  private:
   friend class base::RefCountedThreadSafe<DownloadFileManager>;
   friend class DownloadFileManagerTest;
@@ -160,7 +171,8 @@ class CONTENT_EXPORT DownloadFileManager
   void CreateDownloadFile(DownloadCreateInfo* info,
                           const DownloadRequestHandle& request_handle,
                           content::DownloadManager* download_manager,
-                          bool hash_needed);
+                          bool hash_needed,
+                          const net::BoundNetLog& bound_net_log);
 
   // Called only on the download thread.
   content::DownloadFile* GetDownloadFile(content::DownloadId global_id);
@@ -185,7 +197,6 @@ class CONTENT_EXPORT DownloadFileManager
   // is controlled from the FILE thread, and posts updates to the UI thread.
   base::RepeatingTimer<DownloadFileManager> update_timer_;
 
-  ResourceDispatcherHost* resource_dispatcher_host_;
   scoped_ptr<DownloadFileFactory> download_file_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(DownloadFileManager);

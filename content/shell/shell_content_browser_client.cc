@@ -7,21 +7,12 @@
 #include "base/command_line.h"
 #include "base/file_path.h"
 #include "content/shell/shell.h"
-#include "content/shell/shell_browser_main.h"
+#include "content/shell/shell_browser_main_parts.h"
 #include "content/shell/shell_devtools_delegate.h"
 #include "content/shell/shell_render_view_host_observer.h"
 #include "content/shell/shell_switches.h"
 #include "googleurl/src/gurl.h"
 #include "third_party/skia/include/core/SkBitmap.h"
-#include "webkit/glue/webpreferences.h"
-
-#if defined(OS_WIN)
-#include "content/browser/tab_contents/tab_contents.h"
-#include "content/browser/tab_contents/tab_contents_view_win.h"
-#include "content/common/view_messages.h"
-#elif defined(OS_LINUX)
-#include "content/browser/tab_contents/tab_contents_view_gtk.h"
-#endif
 
 namespace content {
 
@@ -37,20 +28,14 @@ BrowserMainParts* ShellContentBrowserClient::CreateBrowserMainParts(
   return new ShellBrowserMainParts(parameters);
 }
 
-WebContentsView* ShellContentBrowserClient::CreateWebContentsView(
+WebContentsView* ShellContentBrowserClient::OverrideCreateWebContentsView(
     WebContents* web_contents) {
-  ShellDevToolsDelegate* devtools_delegate =
-      shell_browser_main_parts_->devtools_delegate();
-  if (devtools_delegate)
-    devtools_delegate->AddWebContents(web_contents);
-
-#if defined(OS_WIN)
-  return new TabContentsViewWin(web_contents);
-#elif defined(OS_LINUX)
-  return new TabContentsViewGtk(web_contents, NULL);
-#else
   return NULL;
-#endif
+}
+
+WebContentsViewDelegate* ShellContentBrowserClient::GetWebContentsViewDelegate(
+    content::WebContents* web_contents) {
+  return NULL;
 }
 
 void ShellContentBrowserClient::RenderViewHostCreated(
@@ -76,10 +61,6 @@ bool ShellContentBrowserClient::ShouldUseProcessPerSite(
   return false;
 }
 
-bool ShellContentBrowserClient::IsURLSameAsAnySiteInstance(const GURL& url) {
-  return false;
-}
-
 bool ShellContentBrowserClient::IsHandledURL(const GURL& url) {
   return false;
 }
@@ -88,6 +69,11 @@ bool ShellContentBrowserClient::IsSuitableHost(
     RenderProcessHost* process_host,
     const GURL& site_url) {
   return true;
+}
+
+bool ShellContentBrowserClient::ShouldTryToUseExistingProcessHost(
+      BrowserContext* browser_context, const GURL& url) {
+  return false;
 }
 
 void ShellContentBrowserClient::SiteInstanceGotProcess(
@@ -132,7 +118,7 @@ SkBitmap* ShellContentBrowserClient::GetDefaultFavicon() {
 bool ShellContentBrowserClient::AllowAppCache(
     const GURL& manifest_url,
     const GURL& first_party,
-    const content::ResourceContext& context) {
+    content::ResourceContext* context) {
   return true;
 }
 
@@ -140,7 +126,7 @@ bool ShellContentBrowserClient::AllowGetCookie(
     const GURL& url,
     const GURL& first_party,
     const net::CookieList& cookie_list,
-    const content::ResourceContext& context,
+    content::ResourceContext* context,
     int render_process_id,
     int render_view_id) {
   return true;
@@ -150,7 +136,7 @@ bool ShellContentBrowserClient::AllowSetCookie(
     const GURL& url,
     const GURL& first_party,
     const std::string& cookie_line,
-    const content::ResourceContext& context,
+    content::ResourceContext* context,
     int render_process_id,
     int render_view_id,
     net::CookieOptions* options) {
@@ -158,24 +144,32 @@ bool ShellContentBrowserClient::AllowSetCookie(
 }
 
 bool ShellContentBrowserClient::AllowSaveLocalState(
-    const content::ResourceContext& context) {
+    content::ResourceContext* context) {
   return true;
 }
 
 bool ShellContentBrowserClient::AllowWorkerDatabase(
-    int worker_route_id,
     const GURL& url,
     const string16& name,
     const string16& display_name,
     unsigned long estimated_size,
-    WorkerProcessHost* worker_process_host) {
+    content::ResourceContext* context,
+    const std::vector<std::pair<int, int> >& render_views) {
   return true;
 }
 
 bool ShellContentBrowserClient::AllowWorkerFileSystem(
-    int worker_route_id,
     const GURL& url,
-    WorkerProcessHost* worker_process_host) {
+    content::ResourceContext* context,
+    const std::vector<std::pair<int, int> >& render_views) {
+  return true;
+}
+
+bool ShellContentBrowserClient::AllowWorkerIndexedDB(
+    const GURL& url,
+    const string16& name,
+    content::ResourceContext* context,
+    const std::vector<std::pair<int, int> >& render_views) {
   return true;
 }
 
@@ -185,7 +179,7 @@ QuotaPermissionContext*
 }
 
 net::URLRequestContext* ShellContentBrowserClient::OverrideRequestContextForURL(
-    const GURL& url, const content::ResourceContext& context) {
+    const GURL& url, content::ResourceContext* context) {
   return NULL;
 }
 
@@ -196,15 +190,22 @@ void ShellContentBrowserClient::ShowItemInFolder(const FilePath& path) {
 }
 
 void ShellContentBrowserClient::AllowCertificateError(
-    SSLCertErrorHandler* handler,
+    int render_process_id,
+    int render_view_id,
+    int cert_error,
+    const net::SSLInfo& ssl_info,
+    const GURL& request_url,
     bool overridable,
-    const base::Callback<void(SSLCertErrorHandler*, bool)>& callback) {
+    const base::Callback<void(bool)>& callback,
+    bool* cancel_request) {
 }
 
 void ShellContentBrowserClient::SelectClientCertificate(
     int render_process_id,
     int render_view_id,
-    SSLClientAuthHandler* handler) {
+    const net::HttpNetworkSession* network_session,
+    net::SSLCertRequestInfo* cert_request_info,
+    const base::Callback<void(net::X509Certificate*)>& callback) {
 }
 
 void ShellContentBrowserClient::AddNewCertificate(
@@ -212,6 +213,15 @@ void ShellContentBrowserClient::AddNewCertificate(
     net::X509Certificate* cert,
     int render_process_id,
     int render_view_id) {
+}
+
+void ShellContentBrowserClient::RequestMediaAccessPermission(
+    const content::MediaStreamRequest* request,
+    const content::MediaResponseCallback& callback) {
+}
+
+MediaObserver* ShellContentBrowserClient::GetMediaObserver() {
+  return NULL;
 }
 
 void ShellContentBrowserClient::RequestDesktopNotificationPermission(
@@ -224,7 +234,7 @@ void ShellContentBrowserClient::RequestDesktopNotificationPermission(
 WebKit::WebNotificationPresenter::Permission
     ShellContentBrowserClient::CheckDesktopNotificationPermission(
         const GURL& source_origin,
-        const content::ResourceContext& context,
+        content::ResourceContext* context,
         int render_process_id) {
   return WebKit::WebNotificationPresenter::PermissionAllowed;
 }
@@ -243,35 +253,32 @@ void ShellContentBrowserClient::CancelDesktopNotification(
 }
 
 bool ShellContentBrowserClient::CanCreateWindow(
+    const GURL& opener_url,
     const GURL& origin,
     WindowContainerType container_type,
-    const content::ResourceContext& context,
+    content::ResourceContext* context,
     int render_process_id) {
   return true;
 }
 
 std::string ShellContentBrowserClient::GetWorkerProcessTitle(
-    const GURL& url, const content::ResourceContext& context) {
+    const GURL& url, content::ResourceContext* context) {
   return std::string();
 }
 
 void ShellContentBrowserClient::ResourceDispatcherHostCreated() {
 }
 
+SpeechRecognitionManagerDelegate*
+    ShellContentBrowserClient::GetSpeechRecognitionManagerDelegate() {
+  return NULL;
+}
+
 ui::Clipboard* ShellContentBrowserClient::GetClipboard() {
   return shell_browser_main_parts_->GetClipboard();
 }
 
-MHTMLGenerationManager* ShellContentBrowserClient::GetMHTMLGenerationManager() {
-  return NULL;
-}
-
 net::NetLog* ShellContentBrowserClient::GetNetLog() {
-  return NULL;
-}
-
-speech_input::SpeechInputManager*
-    ShellContentBrowserClient::GetSpeechInputManager() {
   return NULL;
 }
 
@@ -283,8 +290,9 @@ bool ShellContentBrowserClient::IsFastShutdownPossible() {
   return true;
 }
 
-WebPreferences ShellContentBrowserClient::GetWebkitPrefs(RenderViewHost* rvh) {
-  return WebPreferences();
+void ShellContentBrowserClient::OverrideWebkitPrefs(RenderViewHost* rvh,
+                                                    const GURL& url,
+                                                    WebPreferences* prefs) {
 }
 
 void ShellContentBrowserClient::UpdateInspectorSetting(
@@ -312,7 +320,8 @@ std::string ShellContentBrowserClient::GetDefaultDownloadName() {
   return "download";
 }
 
-bool ShellContentBrowserClient::AllowSocketAPI(const GURL& url) {
+bool ShellContentBrowserClient::AllowSocketAPI(BrowserContext* browser_context,
+                                               const GURL& url) {
   return false;
 }
 
@@ -335,5 +344,9 @@ crypto::CryptoModuleBlockingPasswordDelegate*
   return NULL;
 }
 #endif
+
+ShellBrowserContext* ShellContentBrowserClient::browser_context() {
+  return shell_browser_main_parts_->browser_context();
+}
 
 }  // namespace content

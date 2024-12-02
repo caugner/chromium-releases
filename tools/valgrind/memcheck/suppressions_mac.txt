@@ -1728,8 +1728,8 @@
    ...
    fun:_ZN8Security12KeychainCore5Trust8evaluate*
    fun:SecTrustEvaluate
-   fun:_ZNK3net15X509Certificate14VerifyInternalERKSsiPNS_16CertVerifyResultE
-   fun:_ZNK3net15X509Certificate6VerifyERKSsiPNS_16CertVerifyResultE
+   fun:_ZN3net17CertVerifyProcMac14VerifyInternal*
+   fun:_ZN3net14CertVerifyProc6Verify*CertVerifyResult*
 }
 {
    bug_96559a
@@ -1869,7 +1869,7 @@
 {
    bug_102621
    Memcheck:Uninitialized
-   fun:NSHFSTypeCodeFromFileType
+   ...
    fun:-[NSPasteboard(ChimeraPasteboardURLUtils) getURLs:andTitles:convertingFilenames:]
    fun:_ZN2ui33PopulateURLAndTitleFromPasteboardEP4GURLPSbItN4base20string16_char_traitsESaItEEP12NSPasteboarda
    fun:_ZN24WebDragDestTest_URL_Test8TestBodyEv
@@ -1909,8 +1909,8 @@
    fun:_ZN12_GLOBAL__N_115EnvironmentImpl10SetVarImplEPKcRKSs
    fun:_ZN12_GLOBAL__N_115EnvironmentImpl6SetVarEPKcRKSs
    fun:_Z18AppendToPythonPathRK8FilePath
-   fun:_ZN3net10TestServer13SetPythonPathEv
-   fun:_ZN3net10TestServer5StartEv
+   fun:_ZN*3net15LocalTestServer13SetPythonPathEv
+   fun:_ZN3net15LocalTestServer5StartEv
    fun:_ZN12_GLOBAL__N_132MimeTypeTests_MimeTypeTests_Test8TestBodyEv
 }
 {
@@ -2151,11 +2151,16 @@
    fun:malloc_zone_malloc
    fun:malloc_set_zone_name
    fun:malloc_default_purgeable_zone
+   ...
    fun:_ZN4base30EnableTerminationOnOutOfMemoryEv
    fun:_ZN7leveldb12_GLOBAL__N_111ChromiumEnvC2Ev
+   ...
    fun:_ZN4base25DefaultLazyInstanceTraitsIN7leveldb12_GLOBAL__N_111ChromiumEnvEE3NewEPv
+   ...
    fun:_ZN4base12LazyInstanceIN7leveldb12_GLOBAL__N_111ChromiumEnvENS_*
+   ...
    fun:_ZN7leveldb7OptionsC2Ev
+   ...
    fun:_ZN7fileapi27FileSystemDirectoryDatabase4InitEv
    fun:_ZN7fileapi27FileSystemDirectoryDatabase11GetFileInfoExPNS0_8FileInfoE
    fun:_ZN7fileapi59FileSystemDirectoryDatabaseTest_TestMissingFileGetInfo_Test8TestBodyEv
@@ -2331,4 +2336,51 @@
    fun:_ZN7history17ThumbnailDatabase4InitERK8FilePathPKNS_16HistoryPublisherEPNS_11URLDatabaseE
    fun:_ZN7history14HistoryBackend8InitImplERKSs
    fun:_ZN7history14HistoryBackend4InitERKSsb
+}
+{
+   bug_112078
+   Memcheck:Uninitialized
+   fun:glViewport_Exec
+   fun:glViewport
+   fun:-[AcceleratedPluginView globalFrameDidChange:]
+   fun:-[AcceleratedPluginView renewGState]
+   fun:-[NSView _invalidateGStatesForTree]
+   fun:-[NSView(NSInternal) _setHidden:setNeedsDisplay:]
+   fun:-[NSView _setHidden:]
+   fun:_ZN23RenderWidgetHostViewMac17MovePluginWindowsERKSt6vectorIN6webkit5npapi17WebPluginGeometryESaIS3_EE
+   fun:_ZN27RenderWidgetHostViewMacTest24AddAcceleratedPluginViewEii
+   fun:_ZN53RenderWidgetHostViewMacTest_FocusAcceleratedView_Test8TestBodyEv
+}
+{
+   bug_112086
+   Memcheck:Uninitialized
+   fun:x_zone_size
+   fun:find_registered_purgeable_zone
+   fun:malloc_make_purgeable
+}
+{
+   bug_117310
+   Memcheck:Leak
+   fun:_Znw*
+   fun:_ZN7WebCore23v8StringToWebCoreStringIN3WTF12AtomicStringEEET_N2v86HandleINS4_6StringEEENS_12ExternalModeE
+   fun:_ZN7WebCore29v8StringToAtomicWebCoreStringEN2v86HandleINS0_6StringEEE
+   fun:_ZN7WebCore11V8DOMWindow19namedPropertyGetterEN2v85LocalINS1_6StringEEERKNS1_12AccessorInfoE
+   fun:_ZN2v88internal8JSObject26GetPropertyWithInterceptorEPNS0_10JSReceiverEPNS0_6StringEP18PropertyAttributes
+   fun:_ZN2v88internal6Object11GetPropertyEPS1_PNS0_12LookupResultEPNS0_6StringEP18PropertyAttributes
+   fun:_ZN2v88internal6Object11GetPropertyENS0_6HandleIS1_EES3_PNS0_12LookupResultENS2_INS0_6StringEEEP18PropertyAttributes
+   fun:_ZN2v88internal6LoadIC4LoadENS0_16InlineCacheStateENS0_6HandleINS0_6ObjectEEENS3_INS0_6StringEEE
+   fun:_ZN2v88internal11LoadIC_MissENS0_9ArgumentsEPNS0_7IsolateE
+   obj:*
+   obj:*
+   obj:*
+   obj:*
+   fun:_ZN2v88internalL6InvokeEbNS0_6HandleINS0_10JSFunctionEEENS1_INS0_6ObjectEEEiPS5_Pb
+   fun:_ZN2v88internal9Execution4CallENS0_6HandleINS0_6ObjectEEES4_iPS4_Pbb
+   fun:_ZN2v88Function4CallENS_6HandleINS_6ObjectEEEiPNS1_INS_5ValueEEE
+   fun:_ZN7WebCore7V8Proxy24instrumentedCallFunctionEPNS_5FrameEN2v86HandleINS3_8FunctionEEENS4_INS3_6ObjectEEEiPNS4_INS3_5ValueEEE
+   fun:_ZN7WebCore7V8Proxy12callFunctionEN2v86HandleINS1_8FunctionEEENS2_INS1_6ObjectEEEiPNS2_INS1_5ValueEEE
+   fun:_ZN7WebCore19V8LazyEventListener20callListenerFunctionEPNS_22ScriptExecutionContextEN2v86HandleINS3_5ValueEEEPNS_5EventE
+   fun:_ZN7WebCore23V8AbstractEventListener18invokeEventHandlerEPNS_22ScriptExecutionContextEPNS_5EventEN2v86HandleINS5_5ValueEEE
+   fun:_ZN7WebCore23V8AbstractEventListener11handleEventEPNS_22ScriptExecutionContextEPNS_5EventE
+   fun:_ZN7WebCore11EventTarget18fireEventListenersEPNS_5EventEPNS_15EventTargetDataERN3WTF6VectorINS_23RegisteredEventListenerELm1EEE
 }

@@ -13,7 +13,7 @@
 #include "chrome/browser/ui/views/tab_icon_view.h"
 #include "ui/base/animation/animation_delegate.h"
 #include "ui/views/controls/button/button.h"
-#include "ui/views/controls/menu/view_menu_delegate.h"
+#include "ui/views/controls/button/menu_button_listener.h"
 
 class Extension;
 class PanelBrowserView;
@@ -36,7 +36,7 @@ class MenuRunner;
 
 class PanelBrowserFrameView : public BrowserNonClientFrameView,
                               public views::ButtonListener,
-                              public views::ViewMenuDelegate,
+                              public views::MenuButtonListener,
                               public TabIconView::TabIconViewModel,
                               public ui::AnimationDelegate {
  public:
@@ -78,6 +78,7 @@ class PanelBrowserFrameView : public BrowserNonClientFrameView,
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
   virtual void OnThemeChanged() OVERRIDE;
   virtual gfx::Size GetMinimumSize() OVERRIDE;
+  virtual gfx::Size GetMaximumSize() OVERRIDE;
   virtual void Layout() OVERRIDE;
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
   virtual bool OnMousePressed(const views::MouseEvent& event) OVERRIDE;
@@ -89,8 +90,9 @@ class PanelBrowserFrameView : public BrowserNonClientFrameView,
   virtual void ButtonPressed(views::Button* sender, const views::Event& event)
       OVERRIDE;
 
-  // Overridden from views::ViewMenuDelegate:
-  virtual void RunMenu(View* source, const gfx::Point& pt) OVERRIDE;
+  // Overridden from views::MenuButtonListener:
+  virtual void OnMenuButtonClicked(views::View* source,
+                                   const gfx::Point& point) OVERRIDE;
 
   // Overridden from TabIconView::TabIconViewModel:
   virtual bool ShouldTabIconViewAnimate() const OVERRIDE;
@@ -149,6 +151,7 @@ class PanelBrowserFrameView : public BrowserNonClientFrameView,
 
   // Custom draw the frame.
   void PaintFrameBorder(gfx::Canvas* canvas);
+  void PaintClientEdge(gfx::Canvas* canvas);
 
   // Called by MouseWatcher to notify if the mouse enters or leaves the window.
   void OnMouseEnterOrLeaveWindow(bool mouse_entered);
@@ -157,6 +160,7 @@ class PanelBrowserFrameView : public BrowserNonClientFrameView,
   SkColor GetDefaultTitleColor(PaintState paint_state) const;
   SkColor GetTitleColor(PaintState paint_state) const;
   const SkPaint& GetDefaultFrameTheme(PaintState paint_state) const;
+  SkColor GetFrameColor(PaintState paint_state) const;
   SkBitmap* GetFrameTheme(PaintState paint_state) const;
 
   // Make settings button visible if either of the conditions is met:
@@ -171,6 +175,8 @@ class PanelBrowserFrameView : public BrowserNonClientFrameView,
   bool EnsureSettingsMenuCreated();
 
   string16 GetTitleText() const;
+
+  bool CanResize() const;
 
 #ifdef UNIT_TEST
   PanelSettingsMenuModel* settings_menu_model() const {

@@ -19,7 +19,6 @@
 #import "chrome/browser/ui/cocoa/fast_resize_view.h"
 #import "chrome/browser/ui/cocoa/find_bar/find_bar_cocoa_controller.h"
 #import "chrome/browser/ui/cocoa/floating_bar_backing_view.h"
-#import "chrome/browser/ui/cocoa/focus_tracker.h"
 #import "chrome/browser/ui/cocoa/framed_browser_window.h"
 #import "chrome/browser/ui/cocoa/fullscreen_window.h"
 #import "chrome/browser/ui/cocoa/infobars/infobar_container_controller.h"
@@ -31,11 +30,13 @@
 #import "chrome/browser/ui/cocoa/toolbar/toolbar_controller.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/pref_names.h"
-#include "content/browser/renderer_host/render_widget_host_view.h"
+#include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
+#import "ui/base/cocoa/focus_tracker.h"
 #include "ui/base/ui_base_types.h"
 
+using content::RenderWidgetHostView;
 using content::WebContents;
 
 // Forward-declare symbols that are part of the 10.6 SDK.
@@ -122,6 +123,19 @@ const CGFloat kLocBarBottomInset = 1;
   NSRect monitorFrame = [[[NSScreen screens] objectAtIndex:0] frame];
   NSScreen* windowScreen = [window screen];
 
+  // Start with the window's frame, which is in virtual coordinates.
+  // Do some y twiddling to flip the coordinate system.
+  gfx::Rect bounds(NSRectToCGRect([window frame]));
+  bounds.set_y(monitorFrame.size.height - bounds.y() - bounds.height());
+
+  // Browser::SaveWindowPlacement saves information for session restore.
+  ui::WindowShowState show_state = ui::SHOW_STATE_NORMAL;
+  if ([window isMiniaturized])
+    show_state = ui::SHOW_STATE_MINIMIZED;
+  else if ([self isFullscreen])
+    show_state = ui::SHOW_STATE_FULLSCREEN;
+  browser_->SaveWindowPlacement(bounds, show_state);
+
   // |windowScreen| can be nil (for example, if the monitor arrangement was
   // changed while in fullscreen mode).  If we see a nil screen, return without
   // saving.
@@ -129,16 +143,6 @@ const CGFloat kLocBarBottomInset = 1;
   // http://crbug.com/36479.
   if (!windowScreen)
     return;
-
-  // Start with the window's frame, which is in virtual coordinates.
-  // Do some y twiddling to flip the coordinate system.
-  gfx::Rect bounds(NSRectToCGRect([window frame]));
-  bounds.set_y(monitorFrame.size.height - bounds.y() - bounds.height());
-
-  // Browser::SaveWindowPlacement saves information for session restore.
-  ui::WindowShowState show_state = [window isMiniaturized] ?
-      ui::SHOW_STATE_MINIMIZED : ui::SHOW_STATE_NORMAL;
-  browser_->SaveWindowPlacement(bounds, show_state);
 
   // Only save main window information to preferences.
   PrefService* prefs = browser_->profile()->GetPrefs();
@@ -874,6 +878,9 @@ willPositionSheet:(NSWindow*)sheet
   [self deregisterForContentViewResizeNotifications];
   enteringFullscreen_ = NO;
   [self setPresentationModeInternal:NO forceDropdown:NO];
+
+  // Force a relayout to try and get the window back into a reasonable state.
+  [self layoutSubviews];
 }
 
 - (void)windowDidFailToExitFullScreen:(NSWindow*)window {

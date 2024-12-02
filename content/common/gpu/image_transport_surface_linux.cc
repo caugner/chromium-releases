@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#if defined(ENABLE_GPU)
-
 #include "content/common/gpu/image_transport_surface.h"
 
 // This conflicts with the defines in Xlib.h and must come first.
@@ -14,23 +12,27 @@
 #include <X11/Xlib.h>
 #include <X11/extensions/Xcomposite.h>
 
+// Note: these must be included before anything that includes gl_bindings.h
+// They're effectively standard library headers.
+#include "third_party/khronos/EGL/egl.h"
+#include "third_party/khronos/EGL/eglext.h"
+#include "third_party/mesa/MesaLib/include/GL/osmesa.h"
+
 #include "base/bind.h"
 #include "base/memory/weak_ptr.h"
 #include "base/debug/trace_event.h"
 #include "content/common/gpu/gpu_channel.h"
 #include "content/common/gpu/gpu_channel_manager.h"
 #include "content/common/gpu/gpu_command_buffer_stub.h"
+#include "content/common/gpu/texture_image_transport_surface.h"
 #include "gpu/command_buffer/service/gpu_scheduler.h"
-#include "third_party/angle/include/EGL/egl.h"
-#include "third_party/angle/include/EGL/eglext.h"
-#include "third_party/mesa/MesaLib/include/GL/osmesa.h"
-#include "ui/gfx/rect.h"
 #include "ui/gfx/gl/gl_context.h"
 #include "ui/gfx/gl/gl_bindings.h"
 #include "ui/gfx/gl/gl_implementation.h"
 #include "ui/gfx/gl/gl_surface_egl.h"
 #include "ui/gfx/gl/gl_surface_glx.h"
 #include "ui/gfx/gl/gl_surface_osmesa.h"
+#include "ui/gfx/rect.h"
 
 namespace {
 
@@ -91,7 +93,7 @@ class EGLImageTransportSurface
   virtual gfx::Size GetSize() OVERRIDE;
   virtual bool OnMakeCurrent(gfx::GLContext* context) OVERRIDE;
   virtual unsigned int GetBackingFrameBufferObject() OVERRIDE;
-  virtual void SetVisible(bool visible) OVERRIDE;
+  virtual void SetBufferAllocation(BufferAllocationState state) OVERRIDE;
 
  protected:
   // ImageTransportSurface implementation
@@ -107,8 +109,9 @@ class EGLImageTransportSurface
   void ReleaseSurface(scoped_refptr<EGLAcceleratedSurface>* surface);
   void SendBuffersSwapped();
   void SendPostSubBuffer(int x, int y, int width, int height);
-  void GetRegionsToCopy(const gfx::Rect& new_damage_rect,
-                        std::vector<gfx::Rect>* regions);
+
+  // Tracks the current buffer allocation state.
+  BufferAllocationState buffer_allocation_state_;
 
   uint32 fbo_id_;
 
@@ -142,7 +145,7 @@ class GLXImageTransportSurface
   virtual std::string GetExtensions();
   virtual gfx::Size GetSize() OVERRIDE;
   virtual bool OnMakeCurrent(gfx::GLContext* context) OVERRIDE;
-  virtual void SetVisible(bool visible) OVERRIDE;
+  virtual void SetBufferAllocation(BufferAllocationState state) OVERRIDE;
 
  protected:
   // ImageTransportSurface implementation:
@@ -161,6 +164,11 @@ class GLXImageTransportSurface
 
   void SendBuffersSwapped();
   void SendPostSubBuffer(int x, int y, int width, int height);
+
+  void ResizeSurface(gfx::Size size);
+
+  // Tracks the current buffer allocation state.
+  BufferAllocationState buffer_allocation_state_;
 
   XID dummy_parent_;
   gfx::Size size_;
@@ -262,6 +270,7 @@ EGLImageTransportSurface::EGLImageTransportSurface(
     GpuChannelManager* manager,
     GpuCommandBufferStub* stub)
     : gfx::PbufferGLSurfaceEGL(false, gfx::Size(1, 1)),
+      buffer_allocation_state_(BUFFER_ALLOCATION_FRONT_AND_BACK),
       fbo_id_(0),
       made_current_(false) {
   helper_.reset(new ImageTransportHelper(this,
@@ -324,12 +333,30 @@ unsigned int EGLImageTransportSurface::GetBackingFrameBufferObject() {
   return fbo_id_;
 }
 
-void EGLImageTransportSurface::SetVisible(bool visible) {
-  if (!visible && back_surface_.get() && front_surface_.get()) {
-    ReleaseSurface(&back_surface_);
-  } else if (visible && !back_surface_.get() && front_surface_.get()) {
-    // Leverage the OnResize hook because it does exactly what we want
-    OnResize(front_surface_->size());
+void EGLImageTransportSurface::SetBufferAllocation(
+    BufferAllocationState state) {
+  if (buffer_allocation_state_ == state)
+    return;
+  buffer_allocation_state_ = state;
+
+  switch (state) {
+    case BUFFER_ALLOCATION_FRONT_AND_BACK:
+      if (!back_surface_.get() && front_surface_.get())
+        OnResize(front_surface_->size());
+      break;
+
+    case BUFFER_ALLOCATION_FRONT_ONLY:
+      if (back_surface_.get() && front_surface_.get())
+        ReleaseSurface(&back_surface_);
+      break;
+
+    case BUFFER_ALLOCATION_NONE:
+      if (back_surface_.get() && front_surface_.get())
+        ReleaseSurface(&back_surface_);
+      break;
+
+    default:
+      NOTREACHED();
   }
 }
 
@@ -344,9 +371,6 @@ void EGLImageTransportSurface::ReleaseSurface(
 }
 
 void EGLImageTransportSurface::OnResize(gfx::Size size) {
-  if (back_surface_.get())
-    ReleaseSurface(&back_surface_);
-
   back_surface_ = new EGLAcceleratedSurface(size);
 
   GLint previous_fbo_id = 0;
@@ -407,10 +431,15 @@ bool EGLImageTransportSurface::PostSubBuffer(
   bool surfaces_same_size = front_surface_.get() &&
       front_surface_->size() == expected_size;
 
-  const gfx::Rect new_damage_rect = gfx::Rect(x, y, width, height);
+  const gfx::Rect new_damage_rect(x, y, width, height);
+
+  // An empty damage rect is a successful no-op.
+  if (new_damage_rect.IsEmpty())
+    return true;
+
   if (surfaces_same_size) {
     std::vector<gfx::Rect> regions_to_copy;
-    GetRegionsToCopy(new_damage_rect, &regions_to_copy);
+    GetRegionsToCopy(previous_damage_rect_, new_damage_rect, &regions_to_copy);
 
     GLint previous_texture_id = 0;
     glGetIntegerv(GL_ACTIVE_TEXTURE, &previous_texture_id);
@@ -461,42 +490,6 @@ void EGLImageTransportSurface::SendPostSubBuffer(
   helper_->SetScheduled(false);
 }
 
-void EGLImageTransportSurface::GetRegionsToCopy(
-    const gfx::Rect& new_damage_rect,
-    std::vector<gfx::Rect>* regions) {
-  DCHECK(front_surface_->size() == back_surface_->size());
-  gfx::Rect intersection = previous_damage_rect_.Intersect(new_damage_rect);
-
-  if (intersection.IsEmpty()) {
-    regions->push_back(previous_damage_rect_);
-    return;
-  }
-
-  // Top (above the intersection).
-  regions->push_back(gfx::Rect(previous_damage_rect_.x(),
-      previous_damage_rect_.y(),
-      previous_damage_rect_.width(),
-      intersection.y() - previous_damage_rect_.y()));
-
-  // Left (of the intersection).
-  regions->push_back(gfx::Rect(previous_damage_rect_.x(),
-      intersection.y(),
-      intersection.x() - previous_damage_rect_.x(),
-      intersection.height()));
-
-  // Right (of the intersection).
-  regions->push_back(gfx::Rect(intersection.right(),
-      intersection.y(),
-      previous_damage_rect_.right() - intersection.right(),
-      intersection.height()));
-
-  // Bottom (below the intersection).
-  regions->push_back(gfx::Rect(previous_damage_rect_.x(),
-      intersection.bottom(),
-      previous_damage_rect_.width(),
-      previous_damage_rect_.bottom() - intersection.bottom()));
-}
-
 std::string EGLImageTransportSurface::GetExtensions() {
   std::string extensions = gfx::GLSurface::GetExtensions();
   extensions += extensions.empty() ? "" : " ";
@@ -531,6 +524,7 @@ GLXImageTransportSurface::GLXImageTransportSurface(
     GpuChannelManager* manager,
     GpuCommandBufferStub* stub)
     : gfx::NativeViewGLSurfaceGLX(),
+      buffer_allocation_state_(BUFFER_ALLOCATION_FRONT_AND_BACK),
       dummy_parent_(0),
       size_(1, 1),
       bound_(false),
@@ -614,31 +608,48 @@ void GLXImageTransportSurface::ReleaseSurface() {
   bound_ = false;
 }
 
-void GLXImageTransportSurface::SetVisible(bool visible) {
-  Display* dpy = static_cast<Display*>(GetDisplay());
-  if (!visible) {
-    XResizeWindow(dpy, window_, 1, 1);
-  } else {
-    XResizeWindow(dpy, window_, size_.width(), size_.height());
-    needs_resize_ = true;
+void GLXImageTransportSurface::SetBufferAllocation(
+    BufferAllocationState state) {
+  if (buffer_allocation_state_ == state)
+    return;
+  buffer_allocation_state_ = state;
+
+  switch (state) {
+    case BUFFER_ALLOCATION_FRONT_AND_BACK: {
+      ResizeSurface(size_);
+      break;
+    }
+    case BUFFER_ALLOCATION_FRONT_ONLY: {
+      ResizeSurface(gfx::Size(1,1));
+      break;
+    }
+    case BUFFER_ALLOCATION_NONE: {
+      ResizeSurface(gfx::Size(1,1));
+      if (bound_)
+        ReleaseSurface();
+      break;
+    }
+    default:
+      NOTREACHED();
   }
+}
+
+void GLXImageTransportSurface::ResizeSurface(gfx::Size size) {
+  Display* dpy = static_cast<Display*>(GetDisplay());
+  XResizeWindow(dpy, window_, size.width(), size.height());
   glXWaitX();
+  // Seems necessary to perform a swap after a resize
+  // in order to resize the front and back buffers (Intel driver bug).
+  // This doesn't always happen with scissoring enabled, so do it now.
+  if (gfx::g_GLX_MESA_copy_sub_buffer && gfx::GLSurface::GetCurrent() == this)
+    gfx::NativeViewGLSurfaceGLX::SwapBuffers();
+  needs_resize_ = true;
 }
 
 void GLXImageTransportSurface::OnResize(gfx::Size size) {
   TRACE_EVENT0("gpu", "GLXImageTransportSurface::OnResize");
   size_ = size;
-
-  Display* dpy = static_cast<Display*>(GetDisplay());
-  XResizeWindow(dpy, window_, size_.width(), size_.height());
-  glXWaitX();
-  // Seems necessary to perform a swap after a resize
-  // in order to resize the front and back buffers (Intel driver bug).
-  // This doesn't always happen with scissoring enabled, so do it now.
-  if (gfx::g_GLX_MESA_copy_sub_buffer &&
-      gfx::GLSurface::GetCurrent() == this)
-    gfx::NativeViewGLSurfaceGLX::SwapBuffers();
-  needs_resize_ = true;
+  ResizeSurface(size_);
 }
 
 bool GLXImageTransportSurface::SwapBuffers() {
@@ -792,8 +803,8 @@ void OSMesaImageTransportSurface::ReleaseSurface() {
 }
 
 void OSMesaImageTransportSurface::OnResize(gfx::Size size) {
-  if (shared_mem_.get())
-    ReleaseSurface();
+  shared_mem_.reset();
+  shared_id_ = 0;
 
   GLSurfaceOSMesa::Resize(size);
 
@@ -895,34 +906,40 @@ gfx::Size OSMesaImageTransportSurface::GetSize() {
 scoped_refptr<gfx::GLSurface> ImageTransportSurface::CreateSurface(
     GpuChannelManager* manager,
     GpuCommandBufferStub* stub,
-    gfx::PluginWindowHandle handle) {
+    const gfx::GLSurfaceHandle& handle) {
   scoped_refptr<gfx::GLSurface> surface;
-#if defined(UI_COMPOSITOR_IMAGE_TRANSPORT)
-  switch (gfx::GetGLImplementation()) {
-    case gfx::kGLImplementationDesktopGL:
-      surface = new GLXImageTransportSurface(manager, stub);
-      break;
-    case gfx::kGLImplementationEGLGLES2:
-      surface = new EGLImageTransportSurface(manager, stub);
-      break;
-    case gfx::kGLImplementationOSMesaGL:
-      surface = new OSMesaImageTransportSurface(manager, stub);
-      break;
-    default:
-      NOTREACHED();
+  if (!handle.handle) {
+    DCHECK(handle.transport);
+    if (!handle.parent_client_id) {
+      switch (gfx::GetGLImplementation()) {
+        case gfx::kGLImplementationDesktopGL:
+          surface = new GLXImageTransportSurface(manager, stub);
+          break;
+        case gfx::kGLImplementationEGLGLES2:
+          surface = new EGLImageTransportSurface(manager, stub);
+          break;
+        case gfx::kGLImplementationOSMesaGL:
+          surface = new OSMesaImageTransportSurface(manager, stub);
+          break;
+        default:
+          NOTREACHED();
+          return NULL;
+      }
+    } else {
+      surface = new TextureImageTransportSurface(manager, stub, handle);
+    }
+  } else {
+    surface = gfx::GLSurface::CreateViewGLSurface(false, handle.handle);
+    if (!surface.get())
       return NULL;
+    surface = new PassThroughImageTransportSurface(manager,
+                                                   stub,
+                                                   surface.get(),
+                                                   handle.transport);
   }
-#else
-  surface = gfx::GLSurface::CreateViewGLSurface(false, handle);
-  if (!surface.get())
-    return NULL;
 
-  surface = new PassThroughImageTransportSurface(manager, stub, surface.get());
-#endif
   if (surface->Initialize())
     return surface;
   else
     return NULL;
 }
-
-#endif  // defined(USE_GPU)

@@ -72,7 +72,7 @@ const int kExpectedStillRunningExitCode = 0;
 
 // Sleeps until file filename is created.
 void WaitToDie(const char* filename) {
-  FILE *fp;
+  FILE* fp;
   do {
     base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(10));
     fp = fopen(filename, "r");
@@ -82,7 +82,7 @@ void WaitToDie(const char* filename) {
 
 // Signals children they should die now.
 void SignalChildren(const char* filename) {
-  FILE *fp = fopen(filename, "w");
+  FILE* fp = fopen(filename, "w");
   fclose(fp);
 }
 
@@ -146,13 +146,7 @@ TEST_F(ProcessUtilTest, KillSlowChild) {
 }
 
 // Times out on Linux and Win, flakes on other platforms, http://crbug.com/95058
-#if defined(OS_LINUX) || defined(OS_WIN)
-#define MAYBE_GetTerminationStatusExit DISABLED_GetTerminationStatusExit
-#else
-#define MAYBE_GetTerminationStatusExit FLAKY_GetTerminationStatusExit
-#endif
-
-TEST_F(ProcessUtilTest, MAYBE_GetTerminationStatusExit) {
+TEST_F(ProcessUtilTest, DISABLED_GetTerminationStatusExit) {
   remove(kSignalFileSlow);
   base::ProcessHandle handle = this->SpawnChild("SlowChildProcess", false);
   ASSERT_NE(base::kNullProcessHandle, handle);
@@ -183,6 +177,25 @@ TEST_F(ProcessUtilTest, GetProcId) {
   EXPECT_NE(0ul, id2);
   EXPECT_NE(id1, id2);
   base::CloseProcessHandle(handle);
+}
+
+TEST_F(ProcessUtilTest, GetModuleFromAddress) {
+  // Since the unit tests are their own EXE, this should be
+  // equivalent to the EXE's HINSTANCE.
+  //
+  // kExpectedKilledExitCode is a constant in this file and
+  // therefore within the unit test EXE.
+  EXPECT_EQ(::GetModuleHandle(NULL),
+            base::GetModuleFromAddress(
+                const_cast<int*>(&kExpectedKilledExitCode)));
+
+  // Any address within the kernel32 module should return
+  // kernel32's HMODULE.  Our only assumption here is that
+  // kernel32 is larger than 4 bytes.
+  HMODULE kernel32 = ::GetModuleHandle(L"kernel32.dll");
+  HMODULE kernel32_from_address =
+      base::GetModuleFromAddress(reinterpret_cast<DWORD*>(kernel32) + 1);
+  EXPECT_EQ(kernel32, kernel32_from_address);
 }
 #endif
 
@@ -247,7 +260,7 @@ TEST_F(ProcessUtilTest, MAYBE_GetTerminationStatusCrash) {
   base::EnableInProcessStackDumping();
   remove(kSignalFileCrash);
 }
-#endif // !defined(OS_MACOSX)
+#endif  // !defined(OS_MACOSX)
 
 MULTIPROCESS_TEST_MAIN(KilledChildProcess) {
   WaitToDie(kSignalFileKill);
@@ -399,24 +412,23 @@ TEST_F(ProcessUtilTest, GetAppOutput) {
                                     // boundary.
     message += "Hello!";
   }
+  // cmd.exe's echo always adds a \r\n to its output.
+  std::string expected(message);
+  expected += "\r\n";
 
-  FilePath python_runtime;
-  ASSERT_TRUE(PathService::Get(base::DIR_SOURCE_ROOT, &python_runtime));
-  python_runtime = python_runtime.Append(FILE_PATH_LITERAL("third_party"))
-                                 .Append(FILE_PATH_LITERAL("python_26"))
-                                 .Append(FILE_PATH_LITERAL("python.exe"));
-
-  CommandLine cmd_line(python_runtime);
-  cmd_line.AppendArg("-c");
-  cmd_line.AppendArg("import sys; sys.stdout.write('" + message + "');");
+  FilePath cmd(L"cmd.exe");
+  CommandLine cmd_line(cmd);
+  cmd_line.AppendArg("/c");
+  cmd_line.AppendArg("echo " + message + "");
   std::string output;
   ASSERT_TRUE(base::GetAppOutput(cmd_line, &output));
-  EXPECT_EQ(message, output);
+  EXPECT_EQ(expected, output);
 
   // Let's make sure stderr is ignored.
-  CommandLine other_cmd_line(python_runtime);
-  other_cmd_line.AppendArg("-c");
-  other_cmd_line.AppendArg("import sys; sys.stderr.write('Hello!');");
+  CommandLine other_cmd_line(cmd);
+  other_cmd_line.AppendArg("/c");
+  // http://msdn.microsoft.com/library/cc772622.aspx
+  cmd_line.AppendArg("echo " + message + " >&2");
   output.clear();
   ASSERT_TRUE(base::GetAppOutput(other_cmd_line, &output));
   EXPECT_EQ("", output);
@@ -442,9 +454,16 @@ TEST_F(ProcessUtilTest, MacTerminateOnHeapCorruption) {
   // will fail.
 
   char buf[3];
+#ifndef ADDRESS_SANITIZER
   ASSERT_DEATH(free(buf), "being freed.*"
       "\\*\\*\\* set a breakpoint in malloc_error_break to debug.*"
       "Terminating process due to a potential for future heap corruption");
+#else
+  // AddressSanitizer replaces malloc() and prints a different error message on
+  // heap corruption.
+  ASSERT_DEATH(free(buf), "attempting free on address which "
+      "was not malloc\\(\\)-ed");
+#endif
 }
 
 #endif  // defined(OS_MACOSX)
@@ -505,7 +524,7 @@ int ProcessUtilTest::CountOpenFDsInChild() {
   if (pipe(fds) < 0)
     NOTREACHED();
 
-  base::file_handle_mapping_vector fd_mapping_vec;
+  base::FileHandleMappingVector fd_mapping_vec;
   fd_mapping_vec.push_back(std::pair<int, int>(fds[1], kChildPipe));
   base::ProcessHandle handle = this->SpawnChild(
       "ProcessUtilsLeakFDChildProcess", fd_mapping_vec, false);
@@ -551,10 +570,10 @@ TEST_F(ProcessUtilTest, FDRemapping) {
 
 namespace {
 
-std::string TestLaunchProcess(const base::environment_vector& env_changes,
+std::string TestLaunchProcess(const base::EnvironmentVector& env_changes,
                               const int clone_flags) {
   std::vector<std::string> args;
-  base::file_handle_mapping_vector fds_to_remap;
+  base::FileHandleMappingVector fds_to_remap;
 
   args.push_back(kPosixShell);
   args.push_back("-c");
@@ -597,7 +616,7 @@ const char kLargeString[] =
 }  // namespace
 
 TEST_F(ProcessUtilTest, LaunchProcess) {
-  base::environment_vector env_changes;
+  base::EnvironmentVector env_changes;
   const int no_clone_flags = 0;
 
   env_changes.push_back(std::make_pair(std::string("BASE_TEST"),
@@ -636,7 +655,7 @@ TEST_F(ProcessUtilTest, LaunchProcess) {
 TEST_F(ProcessUtilTest, AlterEnvironment) {
   const char* const empty[] = { NULL };
   const char* const a2[] = { "A=2", NULL };
-  base::environment_vector changes;
+  base::EnvironmentVector changes;
   char** e;
 
   e = base::AlterEnvironment(changes, empty);
@@ -1099,7 +1118,7 @@ TEST_F(OutOfMemoryDeathTest, PosixMemalignPurgeable) {
 // Since these allocation functions take a signed size, it's possible that
 // calling them just once won't be enough to exhaust memory. In the 32-bit
 // environment, it's likely that these allocation attempts will fail because
-// not enough contiguous address space is availble. In the 64-bit environment,
+// not enough contiguous address space is available. In the 64-bit environment,
 // it's likely that they'll fail because they would require a preposterous
 // amount of (virtual) memory.
 

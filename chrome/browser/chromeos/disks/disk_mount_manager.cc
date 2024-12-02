@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -596,6 +596,8 @@ std::string DiskMountManager::MountTypeToString(MountType type) {
       return "file";
     case MOUNT_TYPE_NETWORK_STORAGE:
       return "network";
+    case MOUNT_TYPE_GDATA:
+      return "gdata";
     case MOUNT_TYPE_INVALID:
       return "invalid";
     default:
@@ -627,8 +629,26 @@ MountType DiskMountManager::MountTypeFromString(const std::string& type_str) {
     return MOUNT_TYPE_NETWORK_STORAGE;
   else if (type_str == "file")
     return MOUNT_TYPE_ARCHIVE;
+  else if (type_str == "gdata")
+    return MOUNT_TYPE_GDATA;
   else
     return MOUNT_TYPE_INVALID;
+}
+
+// static
+std::string DiskMountManager::DeviceTypeToString(DeviceType type) {
+  switch (type) {
+    case DEVICE_TYPE_USB:
+      return "usb";
+    case DEVICE_TYPE_SD:
+      return "sd";
+    case DEVICE_TYPE_OPTICAL_DISC:
+      return "optical";
+    case DEVICE_TYPE_MOBILE:
+      return "mobile";
+    default:
+      return "unknown";
+  }
 }
 
 // static

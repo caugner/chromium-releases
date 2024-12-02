@@ -16,11 +16,11 @@
 #include "chrome/browser/notifications/notification.h"
 #include "chrome/browser/notifications/notification_options_menu_model.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/renderer_host/render_widget_host_view.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/render_view_host.h"
+#include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -28,7 +28,7 @@
 #include "ui/base/animation/slide_animation.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/canvas.h"
 #include "ui/gfx/insets.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/views/bubble/bubble_border.h"
@@ -124,6 +124,17 @@ BalloonViewImpl::~BalloonViewImpl() {
 }
 
 void BalloonViewImpl::Close(bool by_user) {
+  animation_->Stop();
+  html_contents_->Shutdown();
+  // Detach contents from widget before then close.
+  // This is necessary because a widget may be deleted
+  // after this when chrome is shutting down.
+  html_container_->GetRootView()->RemoveAllChildViews(true);
+  html_container_->Close();
+  frame_container_->GetRootView()->RemoveAllChildViews(true);
+  frame_container_->Close();
+  // Post the tast at the end to sure this this WidgetDelegate
+  // instance is avaiable when Widget::CloseNow gets called.
   MessageLoop::current()->PostTask(FROM_HERE,
                                    base::Bind(&BalloonViewImpl::DelayedClose,
                                               method_factory_.GetWeakPtr(),
@@ -143,7 +154,8 @@ BalloonHost* BalloonViewImpl::GetHost() const {
   return html_contents_.get();
 }
 
-void BalloonViewImpl::RunMenu(views::View* source, const gfx::Point& pt) {
+void BalloonViewImpl::OnMenuButtonClicked(views::View* source,
+                                          const gfx::Point& point) {
   CreateOptionsMenu();
 
   views::MenuModelAdapter menu_model_adapter(options_menu_model_.get());
@@ -176,13 +188,6 @@ void BalloonViewImpl::ButtonPressed(views::Button* sender,
 }
 
 void BalloonViewImpl::DelayedClose(bool by_user) {
-  html_contents_->Shutdown();
-  html_container_->CloseNow();
-  // The BalloonViewImpl has to be detached from frame_container_ now
-  // because CloseNow on linux/views destroys the view hierachy
-  // asynchronously.
-  frame_container_->GetRootView()->RemoveAllChildViews(true);
-  frame_container_->CloseNow();
   balloon_->OnClose(by_user);
 }
 
@@ -219,7 +224,7 @@ void BalloonViewImpl::RepositionToBalloon() {
     gfx::Rect contents_rect = GetContentsRectangle();
     html_container_->SetBounds(contents_rect);
     html_contents_->SetPreferredSize(contents_rect.size());
-    RenderWidgetHostView* view =
+    content::RenderWidgetHostView* view =
         html_contents_->web_contents()->GetRenderWidgetHostView();
     if (view)
       view->SetSize(contents_rect.size());
@@ -268,7 +273,7 @@ void BalloonViewImpl::AnimationProgressed(const ui::Animation* animation) {
   html_container_->SetShape(path.CreateNativeRegion());
 
   html_contents_->SetPreferredSize(contents_rect.size());
-  RenderWidgetHostView* view =
+  content::RenderWidgetHostView* view =
       html_contents_->web_contents()->GetRenderWidgetHostView();
   if (view)
     view->SetSize(contents_rect.size());
@@ -506,13 +511,12 @@ void BalloonViewImpl::OnPaint(gfx::Canvas* canvas) {
   SkPaint paint;
   paint.setAntiAlias(true);
   paint.setColor(kControlBarBackgroundColor);
-  canvas->GetSkCanvas()->drawPath(path, paint);
+  canvas->sk_canvas()->drawPath(path, paint);
 
   // Draw a 1-pixel gray line between the content and the menu bar.
   int line_width = GetTotalWidth() - kLeftMargin - kRightMargin;
-  canvas->FillRect(kControlBarSeparatorLineColor,
-                   gfx::Rect(kLeftMargin, 1 + GetShelfHeight(), line_width, 1));
-
+  canvas->FillRect(gfx::Rect(kLeftMargin, 1 + GetShelfHeight(), line_width, 1),
+                   kControlBarSeparatorLineColor);
   View::OnPaint(canvas);
   OnPaintBorder(canvas);
 }

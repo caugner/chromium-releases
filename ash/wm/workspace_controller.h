@@ -9,7 +9,6 @@
 #include "ash/ash_export.h"
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
-#include "ui/aura/root_window_observer.h"
 #include "ui/aura/window_observer.h"
 #include "ui/base/models/simple_menu_model.h"
 
@@ -30,6 +29,7 @@ class Widget;
 namespace ash {
 namespace internal {
 
+class WorkspaceControllerTestHelper;
 class WorkspaceEventFilter;
 class WorkspaceLayoutManager;
 class WorkspaceManager;
@@ -38,7 +38,6 @@ class WorkspaceManager;
 // various workspace pieces: WorkspaceManager, WorkspaceLayoutManager and
 // WorkspaceEventFilter.
 class ASH_EXPORT WorkspaceController :
-      public aura::RootWindowObserver,
       public aura::WindowObserver,
       public ui::SimpleMenuModel::Delegate {
  public:
@@ -47,7 +46,7 @@ class ASH_EXPORT WorkspaceController :
 
   void ToggleOverview();
 
-  // Returns the workspace manager that this controler owns.
+  // Returns the workspace manager that this controller owns.
   WorkspaceManager* workspace_manager() {
     return workspace_manager_.get();
   }
@@ -55,13 +54,13 @@ class ASH_EXPORT WorkspaceController :
   // Shows the menu allowing you to configure various aspects of workspaces.
   void ShowMenu(views::Widget* widget, const gfx::Point& location);
 
-  // aura::RootWindowObserver overrides:
-  virtual void OnRootWindowResized(const gfx::Size& new_size) OVERRIDE;
+  // Sets the size of the grid.
+  void SetGridSize(int grid_size);
 
   // aura::WindowObserver overrides:
   virtual void OnWindowPropertyChanged(aura::Window* window,
-                                       const char* key,
-                                       void* old) OVERRIDE;
+                                       const void* key,
+                                       intptr_t old) OVERRIDE;
 
   // ui::SimpleMenuModel::Delegate overrides:
   virtual bool IsCommandIdChecked(int command_id) const OVERRIDE;
@@ -72,9 +71,10 @@ class ASH_EXPORT WorkspaceController :
       ui::Accelerator* accelerator) OVERRIDE;
 
  private:
+  friend class WorkspaceControllerTestHelper;
+
   enum MenuItem {
-    MENU_SNAP_TO_GRID,
-    MENU_OPEN_MAXIMIZED,
+    MENU_CHANGE_WALLPAPER,
   };
 
   aura::Window* viewport_;
@@ -84,10 +84,12 @@ class ASH_EXPORT WorkspaceController :
   // Owned by the window its attached to.
   WorkspaceLayoutManager* layout_manager_;
 
-  // Owned the window set on.
+  // Owned by |viewport_|.
   WorkspaceEventFilter* event_filter_;
 
+#if !defined(OS_MACOSX)
   scoped_ptr<views::MenuRunner> menu_runner_;
+#endif
 
   DISALLOW_COPY_AND_ASSIGN(WorkspaceController);
 };

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,7 @@
 #include "content/public/browser/favicon_status.h"
 #include "content/public/browser/global_request_id.h"
 #include "content/public/browser/navigation_entry.h"
-#include "content/public/browser/ssl_status.h"
+#include "content/public/common/ssl_status.h"
 
 namespace content {
 
@@ -54,6 +54,8 @@ class CONTENT_EXPORT NavigationEntryImpl
   virtual const GURL& GetUserTypedURL() const OVERRIDE;
   virtual void SetHasPostData(bool has_post_data) OVERRIDE;
   virtual bool GetHasPostData() const OVERRIDE;
+  virtual void SetPostID(int64 post_id) OVERRIDE;
+  virtual int64 GetPostID() const OVERRIDE;
   virtual const FaviconStatus& GetFavicon() const OVERRIDE;
   virtual FaviconStatus& GetFavicon() OVERRIDE;
   virtual const SSLStatus& GetSSL() const OVERRIDE;
@@ -142,6 +144,15 @@ class CONTENT_EXPORT NavigationEntryImpl
     return transferred_global_request_id_;
   }
 
+  // Whether this (pending) navigation is reload across site instances.
+  // Resets to false after commit.
+  void set_is_cross_site_reload(bool is_cross_site_reload) {
+    is_cross_site_reload_ = is_cross_site_reload;
+  }
+  bool is_cross_site_reload() const {
+    return is_cross_site_reload_;
+  }
+
  private:
   // WARNING WARNING WARNING WARNING WARNING WARNING WARNING WARNING WARNING
   // Session/Tab restore save portions of this class so that it can be recreated
@@ -165,6 +176,7 @@ class CONTENT_EXPORT NavigationEntryImpl
   PageTransition transition_type_;
   GURL user_typed_url_;
   bool has_post_data_;
+  int64 post_id_;
   RestoreType restore_type_;
 
   // This member is not persisted with sesssion restore.
@@ -189,6 +201,13 @@ class CONTENT_EXPORT NavigationEntryImpl
   // is transferred to the new process, this is cleared and the request
   // continues as normal.
   GlobalRequestID transferred_global_request_id_;
+
+  // This is set to true when this entry is being reloaded and due to changes in
+  // the state of the URL, it has to be reloaded in a different site instance.
+  // In such case, we must treat it as an existing navigation in the new site
+  // instance, instead of a new navigation. This value should not be persisted
+  // and is not needed after the entry commits.
+  bool is_cross_site_reload_;
 
   // Copy and assignment is explicitly allowed for this class.
 };

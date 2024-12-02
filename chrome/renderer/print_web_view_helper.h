@@ -100,6 +100,8 @@ class PrintWebViewHelper
   friend class PrintWebViewHelperTestBase;
   FRIEND_TEST_ALL_PREFIXES(PrintWebViewHelperTest,
                            BlockScriptInitiatedPrinting);
+  FRIEND_TEST_ALL_PREFIXES(PrintWebViewHelperTest,
+                           BlockScriptInitiatedPrintingFromPopup);
   FRIEND_TEST_ALL_PREFIXES(PrintWebViewHelperTest, OnPrintPages);
 
 #if defined(OS_WIN) || defined(OS_MACOSX)
@@ -109,6 +111,7 @@ class PrintWebViewHelper
 
   enum PrintingResult {
     OK,
+    FAIL_PRINT_INIT,
     FAIL_PRINT,
     FAIL_PREVIEW,
   };
@@ -182,6 +185,10 @@ class PrintWebViewHelper
 
   void OnPrintingDone(bool success);
 
+  // Enable/Disable window.print calls.  If |blocked| is true window.print
+  // calls will silently fail.  Call with |blocked| set to false to reenable.
+  void SetScriptedPrintBlocked(bool blocked);
+
   // Main printing code -------------------------------------------------------
 
   void Print(WebKit::WebFrame* frame, const WebKit::WebNode& node);
@@ -193,7 +200,7 @@ class PrintWebViewHelper
 
   // Initialize print page settings with default settings.
   // Used only for native printing workflow.
-  bool InitPrintSettings(WebKit::WebFrame* frame, const WebKit::WebNode& node);
+  bool InitPrintSettings();
 
   // Initialize print page settings with default settings and prepare the frame
   // for print. A new PrepareFrameAndViewForPrint is created to fulfill the
@@ -221,11 +228,9 @@ class PrintWebViewHelper
 
   // Page Printing / Rendering ------------------------------------------------
 
-  // Prints all the pages listed in |params|.
+  // Prints all the pages listed in |print_pages_params_|.
   // It will implicitly revert the document to display CSS media type.
-  bool PrintPages(const PrintMsg_PrintPages_Params& params,
-                  WebKit::WebFrame* frame,
-                  const WebKit::WebNode& node);
+  bool PrintPages(WebKit::WebFrame* frame, const WebKit::WebNode& node);
 
   // Prints the page listed in |params|.
 #if defined(USE_X11)
@@ -313,6 +318,9 @@ class PrintWebViewHelper
 
   // Script Initiated Printing ------------------------------------------------
 
+  // Return true if script initiated printing is currently allowed.
+  bool IsScriptInitiatedPrintAllowed(WebKit::WebFrame* frame);
+
   // Returns true if script initiated printing occurs too often.
   bool IsScriptInitiatedPrintTooFrequent(WebKit::WebFrame* frame);
 
@@ -340,6 +348,7 @@ class PrintWebViewHelper
   // Returns true if print preview should continue, false on failure.
   bool PreviewPageRendered(int page_number, printing::Metafile* metafile);
 
+  // WebView used only to print the selection.
   WebKit::WebView* print_web_view_;
 
   scoped_ptr<PrintMsg_PrintPages_Params> print_pages_params_;
@@ -354,6 +363,7 @@ class PrintWebViewHelper
   // Used for scripted initiated printing blocking.
   base::Time last_cancelled_script_print_;
   int user_cancelled_scripted_print_count_;
+  bool is_scripted_printing_blocked_;
 
   // Let the browser process know of a printing failure. Only set to false when
   // the failure came from the browser in the first place.
@@ -413,11 +423,11 @@ class PrintWebViewHelper
     void set_error(enum PrintPreviewErrorBuckets error);
 
     // Getters
-    WebKit::WebFrame* frame() const;
+    WebKit::WebFrame* frame();
     const WebKit::WebNode& node() const;
     int total_page_count() const;
-    bool generate_draft_pages();
-    printing::PreviewMetafile* metafile() const;
+    bool generate_draft_pages() const;
+    printing::PreviewMetafile* metafile();
     const PrintMsg_Print_Params& print_params() const;
     const gfx::Size& GetPrintCanvasSize() const;
     int last_error() const;
@@ -465,7 +475,6 @@ class PrintWebViewHelper
   };
 
   PrintPreviewContext print_preview_context_;
-
   DISALLOW_COPY_AND_ASSIGN(PrintWebViewHelper);
 };
 

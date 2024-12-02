@@ -12,8 +12,10 @@
 #include "chrome/browser/chromeos/login/login_html_dialog.h"
 #include "chrome/browser/chromeos/status/status_area_button.h"
 #include "chrome/browser/chromeos/status/status_area_view_chromeos.h"
-#include "chrome/browser/tab_first_render_watcher.h"
+#include "chrome/browser/tab_render_watcher.h"
 #include "chrome/browser/ui/views/unhandled_keyboard_event_handler.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
@@ -39,7 +41,8 @@ namespace chromeos {
 class WebUILoginView : public views::WidgetDelegateView,
                        public StatusAreaButton::Delegate,
                        public content::WebContentsDelegate,
-                       public TabFirstRenderWatcher::Delegate {
+                       public content::NotificationObserver,
+                       public TabRenderWatcher::Delegate {
  public:
   static const int kStatusAreaCornerPadding;
 
@@ -80,6 +83,11 @@ class WebUILoginView : public views::WidgetDelegateView,
   void SetStatusAreaVisible(bool visible);
 
  protected:
+  // Let non-login derived classes suppress emission of this signal.
+  void set_should_emit_login_prompt_visible(bool emit) {
+    should_emit_login_prompt_visible_ = emit;
+  }
+
   // Overridden from views::View:
   virtual void Layout() OVERRIDE;
   virtual void OnLocaleChanged() OVERRIDE;
@@ -90,14 +98,13 @@ class WebUILoginView : public views::WidgetDelegateView,
       const views::View* button_view, int command_id) const OVERRIDE;
   virtual void ExecuteStatusAreaCommand(
       const views::View* button_view, int command_id) OVERRIDE;
-  virtual gfx::Font GetStatusAreaFont(const gfx::Font& font) const OVERRIDE;
   virtual StatusAreaButton::TextStyle GetStatusAreaTextStyle() const OVERRIDE;
   virtual void ButtonVisibilityChanged(views::View* button_view) OVERRIDE;
 
-  // TabFirstRenderWatcher::Delegate implementation.
-  virtual void OnRenderHostCreated(RenderViewHost* host) OVERRIDE;
+  // TabRenderWatcher::Delegate implementation.
+  virtual void OnRenderHostCreated(content::RenderViewHost* host) OVERRIDE;
   virtual void OnTabMainFrameLoaded() OVERRIDE;
-  virtual void OnTabMainFrameFirstRender() OVERRIDE;
+  virtual void OnTabMainFrameRender() OVERRIDE;
 
   // Creates and adds the status area (separate window).
   virtual void InitStatusArea();
@@ -107,6 +114,11 @@ class WebUILoginView : public views::WidgetDelegateView,
 
   // Returns the type to use for the status area widget.
   virtual views::Widget::InitParams::Type GetStatusAreaWidgetType();
+
+  // Overridden from content::NotificationObserver.
+  virtual void Observe(int type,
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   StatusAreaView* status_area_;
 
@@ -118,7 +130,8 @@ class WebUILoginView : public views::WidgetDelegateView,
   typedef std::map<ui::Accelerator, std::string> AccelMap;
 
   // Overridden from content::WebContentsDelegate.
-  virtual bool HandleContextMenu(const ContextMenuParams& params) OVERRIDE;
+  virtual bool HandleContextMenu(
+      const content::ContextMenuParams& params) OVERRIDE;
   virtual void HandleKeyboardEvent(
       const NativeWebKeyboardEvent& event) OVERRIDE;
   virtual bool IsPopupOrPanel(
@@ -128,6 +141,8 @@ class WebUILoginView : public views::WidgetDelegateView,
   // Called when focus is returned from status area.
   // |reverse| is true when focus is traversed backwards (using Shift-Tab).
   void ReturnFocus(bool reverse);
+
+  content::NotificationRegistrar registrar_;
 
   // Login window which shows the view.
   views::Widget* login_window_;
@@ -143,17 +158,23 @@ class WebUILoginView : public views::WidgetDelegateView,
   // Maps installed accelerators to OOBE webui accelerator identifiers.
   AccelMap accel_map_;
 
-  // Proxy settings dialog that can be invoked from network menu.
-  scoped_ptr<LoginHtmlDialog> proxy_settings_dialog_;
-
   // Watches webui_login_'s TabContents rendering.
-  scoped_ptr<TabFirstRenderWatcher> tab_watcher_;
+  scoped_ptr<TabRenderWatcher> tab_watcher_;
 
   // Whether the host window is frozen.
   bool host_window_frozen_;
 
   // Caches StatusArea visibility setting before it has been initialized.
   bool status_area_visibility_on_init_;
+
+  // Has the login page told us that it's ready?  This is triggered by either
+  // all of the user images or the GAIA prompt being loaded, whichever comes
+  // first.
+  bool login_page_is_loaded_;
+
+  // Should we emit the login-prompt-visible signal when the login page is
+  // displayed?
+  bool should_emit_login_prompt_visible_;
 
   DISALLOW_COPY_AND_ASSIGN(WebUILoginView);
 };

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -61,6 +61,9 @@ cr.define('options', function() {
       Preferences.getInstance().addEventListener(
           $('useWhitelistCheck').pref,
           this.handleUseWhitelistPrefChange_.bind(this));
+
+      $('accounts-options-overlay-confirm').onclick =
+          OptionsPage.closeOverlay.bind(OptionsPage);
     },
 
     /**
@@ -94,7 +97,7 @@ cr.define('options', function() {
     handleUseWhitelistCheckChange_: function(e) {
       // Whitelist existing users when guest login is being disabled.
       if ($('useWhitelistCheck').checked) {
-        chrome.send('whitelistExistingUsers', []);
+        chrome.send('whitelistExistingUsers');
       }
 
       this.updateControls_();
@@ -138,7 +141,7 @@ cr.define('options', function() {
    * Returns whether we're currently in guest mode.
    */
   AccountsOptions.loggedInAsGuest = function() {
-    return localStrings.getString('logged_in_as_guest') == 'true';
+    return localStrings.getString('loggedInAsGuest') == 'true';
   };
 
   /**
@@ -155,6 +158,73 @@ cr.define('options', function() {
   AccountsOptions.updateAccountPicture = function(username) {
     if (this.showWhitelist_)
       $('userList').updateAccountPicture(username);
+  };
+
+  /**
+   * Disable or hide some elements in Guest mode in ChromeOS.
+   * All elements within given document with guest-visibility
+   * attribute are either hidden (for guest-visibility="hidden")
+   * or disabled (for guest-visibility="disabled").
+   *
+   * @param {Document} document Document that should processed.
+   */
+  AccountsOptions.applyGuestModeVisibility = function(document) {
+    if (!cr.isChromeOS || !AccountsOptions.loggedInAsGuest())
+      return;
+    var elements = document.querySelectorAll('[guest-visibility]');
+    for (var i = 0; i < elements.length; i++) {
+      var element = elements[i];
+      var visibility = element.getAttribute('guest-visibility');
+      if (visibility == 'hidden') {
+        element.hidden = true;
+      } else if (visibility == 'disabled') {
+        AccountsOptions.disableElementsForGuest(element);
+      }
+    }
+  }
+
+  /**
+   * Disables and marks page elements for Guest mode.
+   * Adds guest-disabled css class to all elements within given subtree,
+   * disables interactive elements (input/select/button), and removes href
+   * attribute from <a> elements.
+   *
+   * @param {Element} element Root element of DOM subtree that should be
+   *     disabled.
+   */
+  AccountsOptions.disableElementsForGuest = function(element) {
+    AccountsOptions.disableElementForGuest_(element);
+
+    // Walk the tree, searching each ELEMENT node.
+    var walker = document.createTreeWalker(element,
+                                           NodeFilter.SHOW_ELEMENT,
+                                           null,
+                                           false);
+
+    var node = walker.nextNode();
+    while (node) {
+      AccountsOptions.disableElementForGuest_(node);
+      node = walker.nextNode();
+    }
+  };
+
+  /**
+   * Disables single element for Guest mode.
+   * Adds guest-disabled css class, adds disabled attribute for appropriate
+   * elements (input/select/button), and removes href attribute from
+   * <a> element.
+   *
+   * @private
+   * @param {Element} element Element that should be disabled.
+   */
+  AccountsOptions.disableElementForGuest_ = function(element) {
+    element.classList.add('guest-disabled');
+    if (element.nodeName == 'INPUT' ||
+        element.nodeName == 'SELECT' ||
+        element.nodeName == 'BUTTON')
+      element.disabled = true;
+    if (element.nodeName == 'A')
+      element.removeAttribute('href');
   };
 
   // Export

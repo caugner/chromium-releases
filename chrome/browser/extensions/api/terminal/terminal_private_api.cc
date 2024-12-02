@@ -5,10 +5,11 @@
 #include "chrome/browser/extensions/api/terminal/terminal_private_api.h"
 
 #include "base/bind.h"
+#include "base/chromeos/chromeos_version.h"
 #include "base/json/json_writer.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/process_proxy/process_proxy_registry.h"
-#include "chrome/browser/chromeos/system/runtime_environment.h"
+#include "chrome/browser/extensions/api/terminal/terminal_extension_helper.h"
 #include "chrome/browser/extensions/extension_event_names.h"
 #include "chrome/browser/extensions/extension_event_router.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -22,34 +23,8 @@ const char kCroshCommand[] = "/usr/bin/crosh";
 // We make stubbed crosh just echo back input.
 const char kStubbedCroshCommand[] = "cat";
 
-const char kPermissionError[] =
-    "Extension does not have the permission to use this API";
-
-const char* kAllowedExtensionIds[] ={
-    "okddffdblfhhnmhodogpojmfkjmhinfp",  // test SSH/Crosh Client
-    "pnhechapfaindjhompbnflcldabbghjo"  // HTerm App
-};
-
-// Allow component and whitelisted extensions.
-bool AllowAccessToExtension(Profile* profile, const std::string& extension_id) {
-  ExtensionService* service = profile->GetExtensionService();
-  const Extension* extension = service->GetExtensionById(extension_id, false);
-
-  if (!extension)
-    return false;
-
-  if (extension->location() == Extension::COMPONENT)
-    return true;
-
-  for (size_t i = 0; i < arraysize(kAllowedExtensionIds); i++) {
-    if (extension->id() == kAllowedExtensionIds[i])
-      return true;
-  }
-  return false;
-}
-
 const char* GetCroshPath() {
-  if (chromeos::system::runtime_environment::IsRunningOnChromeOS())
+  if (base::chromeos::IsRunningOnChromeOS())
     return kCroshCommand;
   else
     return kStubbedCroshCommand;
@@ -75,15 +50,13 @@ void NotifyProcessOutput(Profile* profile,
     return;
   }
 
-  CHECK(AllowAccessToExtension(profile, extension_id));
-
   base::ListValue args;
   args.Append(new base::FundamentalValue(pid));
   args.Append(new base::StringValue(output_type));
   args.Append(new base::StringValue(output));
 
   std::string args_json;
-  base::JSONWriter::Write(&args, false /* pretty_print */, &args_json);
+  base::JSONWriter::Write(&args, &args_json);
 
   if (profile && profile->GetExtensionEventRouter()) {
     profile->GetExtensionEventRouter()->DispatchEventToExtension(
@@ -101,11 +74,6 @@ TerminalPrivateFunction::~TerminalPrivateFunction() {
 }
 
 bool TerminalPrivateFunction::RunImpl() {
-  if (!AllowAccessToExtension(profile_, extension_id())) {
-    error_ = kPermissionError;
-    return false;
-  }
-
   return RunTerminalFunction();
 }
 
@@ -208,6 +176,45 @@ void CloseTerminalProcessFunction::CloseOnFileThread(pid_t pid) {
 }
 
 void CloseTerminalProcessFunction::RespondOnUIThread(bool success) {
+  result_.reset(new base::FundamentalValue(success));
+  SendResponse(true);
+}
+
+bool OnTerminalResizeFunction::RunTerminalFunction() {
+  if (args_->GetSize() != 3)
+    return false;
+
+  pid_t pid;
+  if (!args_->GetInteger(0, &pid))
+    return false;
+
+  int width;
+  if (!args_->GetInteger(1, &width))
+    return false;
+
+  int height;
+  if (!args_->GetInteger(2, &height))
+    return false;
+
+  // Registry lives on the FILE thread.
+  content::BrowserThread::PostTask(content::BrowserThread::FILE, FROM_HERE,
+      base::Bind(&OnTerminalResizeFunction::OnResizeOnFileThread, this, pid,
+                 width, height));
+
+  return true;
+}
+
+void OnTerminalResizeFunction::OnResizeOnFileThread(pid_t pid,
+                                                    int width, int height) {
+  bool success = ProcessProxyRegistry::Get()->OnTerminalResize(pid,
+                                                               width, height);
+
+  content::BrowserThread::PostTask(content::BrowserThread::UI, FROM_HERE,
+      base::Bind(&OnTerminalResizeFunction::RespondOnUIThread, this,
+      success));
+}
+
+void OnTerminalResizeFunction::RespondOnUIThread(bool success) {
   result_.reset(new base::FundamentalValue(success));
   SendResponse(true);
 }

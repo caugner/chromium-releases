@@ -15,6 +15,7 @@
 #include "base/observer_list.h"
 #include "base/time.h"
 #include "ui/base/animation/animation_container_element.h"
+#include "ui/base/animation/tween.h"
 #include "ui/gfx/compositor/compositor_export.h"
 #include "ui/gfx/compositor/layer_animation_element.h"
 
@@ -33,6 +34,8 @@ class Transform;
 
 // When a property of layer needs to be changed it is set by way of
 // LayerAnimator. This enables LayerAnimator to animate property changes.
+// NB: during many tests, set_disable_animations_for_test is used and causes
+// all animations to complete immediately.
 class COMPOSITOR_EXPORT LayerAnimator : public AnimationContainerElement {
  public:
   enum PreemptionStrategy {
@@ -64,6 +67,10 @@ class COMPOSITOR_EXPORT LayerAnimator : public AnimationContainerElement {
   virtual void SetOpacity(float opacity);
   float GetTargetOpacity() const;
 
+  // Sets the visibility of the delegate. May cause an implicit animation.
+  virtual void SetVisibility(bool visibility);
+  bool GetTargetVisibility() const;
+
   // Sets the layer animation delegate the animator is associated with. The
   // animator does not own the delegate.
   void SetDelegate(LayerAnimationDelegate* delegate);
@@ -73,6 +80,10 @@ class COMPOSITOR_EXPORT LayerAnimator : public AnimationContainerElement {
   // IMMEDIATELY_SET_NEW_TARGET (see ImmediatelySetNewTarget below).
   void set_preemption_strategy(PreemptionStrategy strategy) {
     preemption_strategy_ = strategy;
+  }
+
+  PreemptionStrategy preemption_strategy() const {
+    return preemption_strategy_;
   }
 
   // Start an animation sequence. If an animation for the same property is in
@@ -108,16 +119,31 @@ class COMPOSITOR_EXPORT LayerAnimator : public AnimationContainerElement {
   // Stops all animation and clears any queued animations.
   void StopAnimating();
 
-  // For testing purposes only.
-  void set_disable_timer_for_test(bool enabled) {
-    disable_timer_for_test_ = enabled;
-  }
-  base::TimeTicks get_last_step_time_for_test() { return last_step_time_; }
-
   // These functions are used for adding or removing observers from the observer
   // list. The observers are notified when animations end.
   void AddObserver(LayerAnimationObserver* observer);
   void RemoveObserver(LayerAnimationObserver* observer);
+
+  // This determines how implicit animations will be tweened. This has no
+  // effect on animations that are explicitly started or scheduled. The default
+  // is Tween::LINEAR.
+  void set_tween_type(Tween::Type tween_type) { tween_type_ = tween_type; }
+  Tween::Type tween_type() const { return tween_type_; }
+
+  // For testing purposes only.
+  void set_disable_timer_for_test(bool disable_timer) {
+    disable_timer_for_test_ = disable_timer;
+  }
+  base::TimeTicks last_step_time() const { return last_step_time_; }
+
+  // When set to true, all animations complete immediately.
+  static void set_disable_animations_for_test(bool disable_animations) {
+    disable_animations_for_test_ = disable_animations;
+  }
+
+  static bool disable_animations_for_test() {
+    return disable_animations_for_test_;
+  }
 
  protected:
   LayerAnimationDelegate* delegate() { return delegate_; }
@@ -223,6 +249,9 @@ class COMPOSITOR_EXPORT LayerAnimator : public AnimationContainerElement {
   // The default length of animations.
   base::TimeDelta transition_duration_;
 
+  // The default tween type for implicit transitions
+  Tween::Type tween_type_;
+
   // Used for coordinating the starting of animations.
   base::TimeTicks last_step_time_;
 
@@ -232,6 +261,9 @@ class COMPOSITOR_EXPORT LayerAnimator : public AnimationContainerElement {
   // This prevents the animator from automatically stepping through animations
   // and allows for manual stepping.
   bool disable_timer_for_test_;
+
+  // This causes all animations to complete immediately.
+  static bool disable_animations_for_test_;
 
   // Observers are notified when layer animations end, are scheduled or are
   // aborted.

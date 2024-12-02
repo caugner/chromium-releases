@@ -68,6 +68,7 @@
 #define IDC_ENCODING_MENU               35005
 #define IDC_EMAIL_PAGE_LOCATION         35006
 #define IDC_ADVANCED_PRINT              35007
+#define IDC_CHROME_TO_MOBILE_PAGE       35008
 
 // When adding a new encoding to this list, be sure to append it to the
 // EncodingMenuController::kValidEncodingIds array in
@@ -172,8 +173,11 @@
 #define IDC_SHOW_SYNC_SETUP             40030
 #define IDC_EXTENSION_ERRORS            40031
 #define IDC_SHOW_SYNC_ERROR             40032
-#define IDC_SHOW_SETTINGS_CHANGES       40033
-#define IDC_SHOW_AVATAR_MENU            40034
+#define IDC_SHOW_SETTINGS_CHANGE_FIRST  40033
+#define IDC_SHOW_SETTINGS_CHANGE_LAST   40133
+#define IDC_SHOW_AVATAR_MENU            40134
+#define IDC_EXTENSION_DISABLED_FIRST    40135
+#define IDC_EXTENSION_DISABLED_LAST     40235
 
 // Spell-check
 // Insert any additional suggestions before _LAST; these have to be consecutive.
@@ -189,7 +193,6 @@
 #define IDC_SPELLCHECK_LANGUAGES_FIRST  41006
 #define IDC_SPELLCHECK_LANGUAGES_LAST   41106
 #define IDC_CHECK_SPELLING_OF_THIS_FIELD  41107
-#define IDC_SYNC_BOOKMARKS              41108
 #define IDC_SPELLPANEL_TOGGLE           41109
 #define IDC_SPELLCHECK_ADD_TO_DICTIONARY 41110
 
@@ -214,11 +217,11 @@
 // Identifiers for platform-specific items.
 // Placed in a common file to help insure they never collide.
 #define IDC_VIEW_MENU                   44000     // OSX only
-#define IDC_SYSTEM_OPTIONS              45000     // ChromeOS only
 #define IDC_INTERNET_OPTIONS            45100     // ChromeOS only
 #define IDC_LANGUAGE_OPTIONS            45200     // ChromeOS only
 #define IDC_LOCK_SCREEN                 45300     // ChromeOS only
 #define IDC_SHUTDOWN                    45400     // ChromeOS only
+#define IDC_NEW_CROSH_TAB               45500     // ChromeOS Aura only
 #define IDC_HISTORY_MENU                46000     // OSX only
 #define IDC_PROFILE_MAIN_MENU           46100     // OSX only
 #define IDC_INPUT_METHODS_MENU          46300     // Linux only
@@ -274,14 +277,17 @@
 #define IDC_CONTENT_CONTEXT_NO_SPELLING_SUGGESTIONS 50155
 #define IDC_CONTENT_CONTEXT_SPELLING_SUGGESTION 50156
 #define IDC_CONTENT_CONTEXT_SPELLING_TOGGLE 50157
+#define IDC_CONTENT_CONTEXT_SPEECH_MENU 50158
+#define IDC_CONTENT_CONTEXT_SPEECH_START_SPEAKING 50159
+#define IDC_CONTENT_CONTEXT_SPEECH_STOP_SPEAKING 50160
 // Frame items.
-#define IDC_CONTENT_CONTEXT_RELOADFRAME 50160
-#define IDC_CONTENT_CONTEXT_VIEWFRAMESOURCE 50161
-#define IDC_CONTENT_CONTEXT_VIEWFRAMEINFO 50162
+#define IDC_CONTENT_CONTEXT_RELOADFRAME 50170
+#define IDC_CONTENT_CONTEXT_VIEWFRAMESOURCE 50171
+#define IDC_CONTENT_CONTEXT_VIEWFRAMEINFO 50172
 // Search items.
-#define IDC_CONTENT_CONTEXT_GOTOURL 50170
-#define IDC_CONTENT_CONTEXT_SEARCHWEBFOR 50171
-#define IDC_CONTENT_CONTEXT_ADDSEARCHENGINE 50172
+#define IDC_CONTENT_CONTEXT_GOTOURL 50180
+#define IDC_CONTENT_CONTEXT_SEARCHWEBFOR 50181
+#define IDC_CONTENT_CONTEXT_ADDSEARCHENGINE 50182
 
 // Context menu items in the bookmark bar
 #define IDC_BOOKMARK_BAR_OPEN_ALL 51000

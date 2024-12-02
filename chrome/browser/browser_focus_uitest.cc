@@ -22,10 +22,11 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/renderer_host/render_widget_host_view.h"
-#include "content/browser/tab_contents/interstitial_page.h"
+#include "content/public/browser/interstitial_page.h"
+#include "content/public/browser/interstitial_page_delegate.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/render_view_host.h"
+#include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
 #include "net/test/test_server.h"
@@ -51,7 +52,9 @@
 #include "base/string_util.h"
 #endif
 
+using content::InterstitialPage;
 using content::NavigationController;
+using content::RenderViewHost;
 using content::WebContents;
 
 #if defined(OS_MACOSX)
@@ -73,7 +76,7 @@ using content::WebContents;
 #define MAYBE_TabsRememberFocusFindInPage FAILS_TabsRememberFocusFindInPage
 #elif defined(OS_WIN)
 // Flaky, http://crbug.com/62537.
-#define MAYBE_TabsRememberFocusFindInPage FLAKY_TabsRememberFocusFindInPage
+#define MAYBE_TabsRememberFocusFindInPage DISABLED_TabsRememberFocusFindInPage
 #endif
 
 namespace {
@@ -143,7 +146,7 @@ void CheckFocus(Browser* browser, ViewID id, const base::Time& timeout) {
     MessageLoop::current()->PostDelayedTask(
         FROM_HERE,
         base::Bind(&CheckFocus, browser, id, timeout),
-        10);
+        base::TimeDelta::FromMilliseconds(10));
   }
 };
 
@@ -174,7 +177,7 @@ class BrowserFocusTest : public InProcessBrowserTest {
     MessageLoop::current()->PostDelayedTask(
         FROM_HERE,
         base::Bind(&CheckFocus, browser(), vid, timeout),
-        100);
+        base::TimeDelta::FromMilliseconds(100));
     ui_test_utils::RunMessageLoop();
     return IsViewFocused(vid);
   }
@@ -182,10 +185,9 @@ class BrowserFocusTest : public InProcessBrowserTest {
   ViewID location_bar_focus_view_id_;
 };
 
-class TestInterstitialPage : public InterstitialPage {
+class TestInterstitialPage : public content::InterstitialPageDelegate {
  public:
-  TestInterstitialPage(WebContents* tab, bool new_navigation, const GURL& url)
-      : InterstitialPage(tab, new_navigation, url) {
+  TestInterstitialPage(WebContents* tab, bool new_navigation, const GURL& url) {
     FilePath file_path;
     bool r = PathService::Get(chrome::DIR_TEST_DATA, &file_path);
     EXPECT_TRUE(r);
@@ -193,28 +195,30 @@ class TestInterstitialPage : public InterstitialPage {
     file_path = file_path.AppendASCII(kTypicalPageName);
     r = file_util::ReadFileToString(file_path, &html_contents_);
     EXPECT_TRUE(r);
+    interstitial_page_ = InterstitialPage::Create(
+        tab, new_navigation, url , this);
+    interstitial_page_->Show();
   }
 
   virtual std::string GetHTMLContents() {
     return html_contents_;
   }
 
-  // Exposing render_view_host() and tab() to be public; they are declared as
-  // protected in the superclass.
-  virtual RenderViewHost* render_view_host() {
-    return InterstitialPage::render_view_host();
+  RenderViewHost* render_view_host() {
+    return interstitial_page_->GetRenderViewHostForTesting();
   }
 
-  virtual WebContents* tab() {
-    return InterstitialPage::tab();
+  void DontProceed() {
+    interstitial_page_->DontProceed();
   }
 
   bool HasFocus() {
-    return render_view_host()->view()->HasFocus();
+    return render_view_host()->GetView()->HasFocus();
   }
 
  private:
   std::string html_contents_;
+  InterstitialPage* interstitial_page_;  // Owns us.
 };
 
 IN_PROC_BROWSER_TEST_F(BrowserFocusTest, ClickingMovesFocus) {
@@ -222,9 +226,10 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest, ClickingMovesFocus) {
 #if defined(OS_POSIX)
   // It seems we have to wait a little bit for the widgets to spin up before
   // we can start clicking on them.
-  MessageLoop::current()->PostDelayedTask(FROM_HERE,
-                                          MessageLoop::QuitClosure(),
-                                          kActionDelayMs);
+  MessageLoop::current()->PostDelayedTask(
+      FROM_HERE,
+      MessageLoop::QuitClosure(),
+      base::TimeDelta::FromMilliseconds(kActionDelayMs));
   ui_test_utils::RunMessageLoop();
 #endif  // defined(OS_POSIX)
 
@@ -238,7 +243,7 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest, ClickingMovesFocus) {
 }
 
 // Flaky, http://crbug.com/69034.
-IN_PROC_BROWSER_TEST_F(BrowserFocusTest, FLAKY_BrowsersRememberFocus) {
+IN_PROC_BROWSER_TEST_F(BrowserFocusTest, DISABLED_BrowsersRememberFocus) {
   ASSERT_TRUE(ui_test_utils::BringBrowserWindowToFront(browser()));
   ASSERT_TRUE(test_server()->Start());
 
@@ -413,7 +418,7 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest, MAYBE_TabsRememberFocusFindInPage) {
 // Background window does not steal focus.
 // Flaky, http://crbug.com/62538.
 IN_PROC_BROWSER_TEST_F(BrowserFocusTest,
-                       FLAKY_BackgroundBrowserDontStealFocus) {
+                       DISABLED_BackgroundBrowserDontStealFocus) {
   ASSERT_TRUE(ui_test_utils::BringBrowserWindowToFront(browser()));
   ASSERT_TRUE(test_server()->Start());
 
@@ -621,11 +626,10 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest, MAYBE_FocusTraversalOnInterstitial) {
   TestInterstitialPage* interstitial_page =
       new TestInterstitialPage(browser()->GetSelectedWebContents(),
                                true, GURL("http://interstitial.com"));
-  interstitial_page->Show();
   // Give some time for the interstitial to show.
   MessageLoop::current()->PostDelayedTask(FROM_HERE,
                                           MessageLoop::QuitClosure(),
-                                          1000);
+                                          base::TimeDelta::FromSeconds(1));
   ui_test_utils::RunMessageLoop();
 
   browser()->FocusLocationBar();
@@ -727,7 +731,7 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest, MAYBE_FocusTraversalOnInterstitial) {
 // Focus stays on page with interstitials.
 // http://crbug.com/81451
 #if defined(OS_MACOSX) || defined(OS_WIN)
-IN_PROC_BROWSER_TEST_F(BrowserFocusTest, FLAKY_InterstitialFocus) {
+IN_PROC_BROWSER_TEST_F(BrowserFocusTest, DISABLED_InterstitialFocus) {
 #else
 IN_PROC_BROWSER_TEST_F(BrowserFocusTest, InterstitialFocus) {
 #endif
@@ -740,18 +744,17 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest, InterstitialFocus) {
 
   // Page should have focus.
   ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER_FOCUS_VIEW));
-  EXPECT_TRUE(browser()->GetSelectedWebContents()->GetRenderViewHost()->view()->
-      HasFocus());
+  EXPECT_TRUE(browser()->GetSelectedWebContents()->GetRenderViewHost()->
+              GetView()->HasFocus());
 
   // Let's show an interstitial.
   TestInterstitialPage* interstitial_page =
       new TestInterstitialPage(browser()->GetSelectedWebContents(),
                                true, GURL("http://interstitial.com"));
-  interstitial_page->Show();
   // Give some time for the interstitial to show.
   MessageLoop::current()->PostDelayedTask(FROM_HERE,
                                           MessageLoop::QuitClosure(),
-                                          1000);
+                                          base::TimeDelta::FromSeconds(1));
   ui_test_utils::RunMessageLoop();
 
   // The interstitial should have focus now.
@@ -768,7 +771,7 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest, InterstitialFocus) {
 // Make sure Find box can request focus, even when it is already open.
 // Flaky on mac and valgrind. http://crbug.com/67301.
 #if defined(OS_MACOSX)
-#define MAYBE_FindFocusTest FLAKY_FindFocusTest
+#define MAYBE_FindFocusTest DISABLED_FindFocusTest
 #else
 #define MAYBE_FindFocusTest FindFocusTest
 #endif
@@ -826,7 +829,7 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest, FindFocusTest) {
 // Makes sure the focus is in the right location when opening the different
 // types of tabs.
 // Flaky, http://crbug.com/62539.
-IN_PROC_BROWSER_TEST_F(BrowserFocusTest, FLAKY_TabInitialFocus) {
+IN_PROC_BROWSER_TEST_F(BrowserFocusTest, DISABLED_TabInitialFocus) {
   ASSERT_TRUE(ui_test_utils::BringBrowserWindowToFront(browser()));
 
   // Open the history tab, focus should be on the tab contents.

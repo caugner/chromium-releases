@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "crypto/ec_signature_creator.h"
+#include "crypto/ec_signature_creator_impl.h"
 
 #include <cryptohi.h>
 #include <pk11pub.h>
@@ -18,8 +18,7 @@ namespace crypto {
 
 namespace {
 
-SECStatus SignData(PLArenaPool* arena,
-                   SECItem* result,
+SECStatus SignData(SECItem* result,
                    SECItem* input,
                    SECKEYPrivateKey* key,
                    HASH_HashType hash_type) {
@@ -51,48 +50,39 @@ SECStatus SignData(PLArenaPool* arena,
 
 }  // namespace
 
-// static
-ECSignatureCreator* ECSignatureCreator::Create(ECPrivateKey* key) {
-  return new ECSignatureCreator(key);
-}
-
-ECSignatureCreator::ECSignatureCreator(ECPrivateKey* key)
+ECSignatureCreatorImpl::ECSignatureCreatorImpl(ECPrivateKey* key)
     : key_(key) {
   EnsureNSSInit();
 }
 
-ECSignatureCreator::~ECSignatureCreator() { }
+ECSignatureCreatorImpl::~ECSignatureCreatorImpl() {}
 
-bool ECSignatureCreator::Sign(const uint8* data,
-                              int data_len,
-                              std::vector<uint8>* signature) {
+bool ECSignatureCreatorImpl::Sign(const uint8* data,
+                                  int data_len,
+                                  std::vector<uint8>* signature) {
   // Data to be signed
   SECItem secret;
   secret.type = siBuffer;
   secret.len = data_len;
   secret.data = const_cast<unsigned char*>(data);
 
-  // |arena| is used to encode the cert.
-  crypto::ScopedPLArenaPool arena(PORT_NewArena(DER_DEFAULT_CHUNKSIZE));
-  CHECK(arena.get() != NULL);
-
-  // Allocate space to contain the signed data.
-  SECItem* result = SECITEM_AllocItem(arena.get(), NULL, 0);
-  if (!result) {
-    DLOG(ERROR) << "Unable to allocate space for signed data.";
-    return false;
-  }
+  // SECItem to receive the output buffer.
+  SECItem result;
+  result.type = siBuffer;
+  result.len = 0;
+  result.data = NULL;
 
   // Sign the secret data and save it to |result|.
   SECStatus rv =
-      SignData(arena.get(), result, &secret, key_->key(), HASH_AlgSHA1);
+      SignData(&result, &secret, key_->key(), HASH_AlgSHA1);
   if (rv != SECSuccess) {
     DLOG(ERROR) << "DerSignData: " << PORT_GetError();
     return false;
   }
 
   // Copy the signed data into the output vector.
-  signature->assign(result->data, result->data + result->len);
+  signature->assign(result.data, result.data + result.len);
+  SECITEM_FreeItem(&result, PR_FALSE /* only free |result.data| */);
   return true;
 }
 

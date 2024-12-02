@@ -9,9 +9,9 @@
 #include "base/i18n/rtl.h"
 #include "chrome/browser/ui/gtk/status_bubble_gtk.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
-#include "content/browser/renderer_host/render_widget_host_view_gtk.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "ui/base/gtk/gtk_expanded_container.h"
 #include "ui/base/gtk/gtk_floating_container.h"
@@ -132,7 +132,7 @@ void TabContentsContainerGtk::PackTab(TabContentsWrapper* tab) {
 
   gfx::NativeView widget = tab->web_contents()->GetNativeView();
   if (widget) {
-    if (widget->parent != expanded_)
+    if (gtk_widget_get_parent(widget) != expanded_)
       gtk_container_add(GTK_CONTAINER(expanded_), widget);
     gtk_widget_show(widget);
   }
@@ -140,8 +140,8 @@ void TabContentsContainerGtk::PackTab(TabContentsWrapper* tab) {
   // We need to make sure that we are below the findbar.
   // Sometimes the content native view will be null.
   if (tab->web_contents()->GetContentNativeView()) {
-    GdkWindow* content_gdk_window =
-        tab->web_contents()->GetContentNativeView()->window;
+    GdkWindow* content_gdk_window = gtk_widget_get_window(
+        tab->web_contents()->GetContentNativeView());
     if (content_gdk_window)
       gdk_window_lower(content_gdk_window);
   }

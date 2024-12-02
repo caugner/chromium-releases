@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,30 +18,41 @@
 #include "base/timer.h"
 #include "base/utf_string_conversions.h"
 #include "build/build_config.h"
+#include "chrome/browser/low_memory_observer.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_constants.h"
-#include "content/browser/renderer_host/render_widget_host.h"
-#include "content/browser/zygote_host_linux.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/zygote_host_linux.h"
 
 #if !defined(OS_CHROMEOS)
 #error This file only meant to be compiled on ChromeOS
 #endif
 
-using base::TimeDelta;
-using base::TimeTicks;
 using base::ProcessHandle;
 using base::ProcessMetrics;
+using base::TimeDelta;
+using base::TimeTicks;
 using content::BrowserThread;
 using content::WebContents;
 
+namespace browser {
+
 namespace {
+
+// The default interval in seconds after which to adjust the oom_score_adj
+// value.
+const int kAdjustmentIntervalSeconds = 10;
+
+// The default interval in milliseconds to wait before setting the score of
+// currently focused tab.
+const int kFocusedTabScoreAdjustIntervalMs = 500;
 
 // Returns a unique ID for a TabContents.  Do not cast back to a pointer, as
 // the TabContents could be deleted if the user closed the tab.
@@ -63,6 +74,7 @@ bool DiscardTabById(int64 target_web_contents_id) {
       int64 web_contents_id = IdFromTabContents(web_contents);
       if (web_contents_id == target_web_contents_id) {
         model->DiscardTabContentsAt(idx);
+        LOG(WARNING) << "Discarded tab with id: " << target_web_contents_id;
         return true;
       }
     }
@@ -72,15 +84,8 @@ bool DiscardTabById(int64 target_web_contents_id) {
 
 }  // namespace
 
-namespace browser {
-
-// The default interval in seconds after which to adjust the oom_score_adj
-// value.
-#define ADJUSTMENT_INTERVAL_SECONDS 10
-
-// The default interval in milliseconds to wait before setting the score of
-// currently focused tab.
-#define FOCUSED_TAB_SCORE_ADJUST_INTERVAL_MS 500
+////////////////////////////////////////////////////////////////////////////////
+// OomPriorityManager
 
 OomPriorityManager::TabStats::TabStats()
   : is_pinned(false),
@@ -93,7 +98,7 @@ OomPriorityManager::TabStats::~TabStats() {
 }
 
 OomPriorityManager::OomPriorityManager()
-  : focused_tab_pid_(0) {
+  : focused_tab_pid_(0), low_memory_observer_(new LowMemoryObserver) {
   registrar_.Add(this,
       content::NOTIFICATION_RENDERER_PROCESS_CLOSED,
       content::NotificationService::AllBrowserContextsAndSources());
@@ -112,14 +117,16 @@ OomPriorityManager::~OomPriorityManager() {
 void OomPriorityManager::Start() {
   if (!timer_.IsRunning()) {
     timer_.Start(FROM_HERE,
-                 TimeDelta::FromSeconds(ADJUSTMENT_INTERVAL_SECONDS),
+                 TimeDelta::FromSeconds(kAdjustmentIntervalSeconds),
                  this,
                  &OomPriorityManager::AdjustOomPriorities);
   }
+  low_memory_observer_->Start();
 }
 
 void OomPriorityManager::Stop() {
   timer_.Stop();
+  low_memory_observer_->Stop();
 }
 
 std::vector<string16> OomPriorityManager::GetTabTitles() {
@@ -176,7 +183,7 @@ bool OomPriorityManager::CompareTabStats(TabStats first,
 void OomPriorityManager::AdjustFocusedTabScoreOnFileThread() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
   base::AutoLock pid_to_oom_score_autolock(pid_to_oom_score_lock_);
-  ZygoteHost::GetInstance()->AdjustRendererOOMScore(
+  content::ZygoteHost::GetInstance()->AdjustRendererOOMScore(
       focused_tab_pid_, chrome::kLowestRendererOomScore);
   pid_to_oom_score_[focused_tab_pid_] = chrome::kLowestRendererOomScore;
 }
@@ -210,8 +217,9 @@ void OomPriorityManager::Observe(int type,
     case content::NOTIFICATION_RENDER_WIDGET_VISIBILITY_CHANGED: {
       bool visible = *content::Details<bool>(details).ptr();
       if (visible) {
-        focused_tab_pid_ = content::Source<RenderWidgetHost>(source).ptr()->
-            process()->GetHandle();
+        focused_tab_pid_ =
+            content::Source<content::RenderWidgetHost>(source).ptr()->
+            GetProcess()->GetHandle();
 
         // If the currently focused tab already has a lower score, do not
         // set it. This can happen in case the newly focused tab is script
@@ -227,7 +235,7 @@ void OomPriorityManager::Observe(int type,
             focus_tab_score_adjust_timer_.Reset();
           else
             focus_tab_score_adjust_timer_.Start(FROM_HERE,
-              TimeDelta::FromMilliseconds(FOCUSED_TAB_SCORE_ADJUST_INTERVAL_MS),
+              TimeDelta::FromMilliseconds(kFocusedTabScoreAdjustIntervalMs),
               this, &OomPriorityManager::OnFocusTabScoreAdjustmentTimeout);
         }
       }
@@ -323,7 +331,7 @@ void OomPriorityManager::AdjustOomPrioritiesOnFileThread(
       score = static_cast<int>(priority + 0.5f);
       it = pid_to_oom_score_.find(iterator->renderer_handle);
       if (it == pid_to_oom_score_.end() || it->second != score) {
-        ZygoteHost::GetInstance()->AdjustRendererOOMScore(
+        content::ZygoteHost::GetInstance()->AdjustRendererOOMScore(
             iterator->renderer_handle, score);
         pid_to_oom_score_[iterator->renderer_handle] = score;
       }

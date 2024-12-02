@@ -13,6 +13,7 @@
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/extensions/bundle_installer.h"
 #include "chrome/browser/extensions/extension_install_dialog.h"
 #include "chrome/browser/extensions/theme_installed_infobar_delegate.h"
 #include "chrome/browser/infobars/infobar_tab_helper.h"
@@ -27,6 +28,7 @@
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
@@ -40,28 +42,38 @@
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/image/image.h"
+
+#if defined(USE_ASH)
+#include "ash/shell.h"
+#endif
 
 using content::WebContents;
+using extensions::BundleInstaller;
 
 static const int kTitleIds[ExtensionInstallUI::NUM_PROMPT_TYPES] = {
-  0,
+  0,  // The regular install prompt depends on what's being installed.
   IDS_EXTENSION_INLINE_INSTALL_PROMPT_TITLE,
+  IDS_EXTENSION_INSTALL_PROMPT_TITLE,
   IDS_EXTENSION_RE_ENABLE_PROMPT_TITLE,
   IDS_EXTENSION_PERMISSIONS_PROMPT_TITLE
 };
 static const int kHeadingIds[ExtensionInstallUI::NUM_PROMPT_TYPES] = {
   IDS_EXTENSION_INSTALL_PROMPT_HEADING,
-  IDS_EXTENSION_INSTALL_PROMPT_HEADING,
+  0,  // Inline installs use the extension name.
+  0,  // Heading for bundle installs depends on the bundle contents.
   IDS_EXTENSION_RE_ENABLE_PROMPT_HEADING,
   IDS_EXTENSION_PERMISSIONS_PROMPT_HEADING
 };
 static const int kAcceptButtonIds[ExtensionInstallUI::NUM_PROMPT_TYPES] = {
   IDS_EXTENSION_PROMPT_INSTALL_BUTTON,
   IDS_EXTENSION_PROMPT_INSTALL_BUTTON,
+  IDS_EXTENSION_PROMPT_INSTALL_BUTTON,
   IDS_EXTENSION_PROMPT_RE_ENABLE_BUTTON,
   IDS_EXTENSION_PROMPT_PERMISSIONS_BUTTON
 };
 static const int kAbortButtonIds[ExtensionInstallUI::NUM_PROMPT_TYPES] = {
+  0,  // These all use the platform's default cancel label.
   0,
   0,
   0,
@@ -70,6 +82,7 @@ static const int kAbortButtonIds[ExtensionInstallUI::NUM_PROMPT_TYPES] = {
 static const int kPermissionsHeaderIds[ExtensionInstallUI::NUM_PROMPT_TYPES] = {
   IDS_EXTENSION_PROMPT_WILL_HAVE_ACCESS_TO,
   IDS_EXTENSION_PROMPT_WILL_HAVE_ACCESS_TO,
+  IDS_EXTENSION_PROMPT_THESE_WILL_HAVE_ACCESS_TO,
   IDS_EXTENSION_PROMPT_WILL_NOW_HAVE_ACCESS_TO,
   IDS_EXTENSION_PROMPT_WANTS_ACCESS_TO,
 };
@@ -83,6 +96,8 @@ const int kIconSize = 69;
 
 ExtensionInstallUI::Prompt::Prompt(PromptType type)
     : type_(type),
+      extension_(NULL),
+      bundle_(NULL),
       average_rating_(0.0),
       rating_count_(0) {
 }
@@ -91,7 +106,7 @@ ExtensionInstallUI::Prompt::~Prompt() {
 }
 
 void ExtensionInstallUI::Prompt::SetPermissions(
-    std::vector<string16> permissions) {
+    const std::vector<string16>& permissions) {
   permissions_ = permissions;
 }
 
@@ -105,10 +120,9 @@ void ExtensionInstallUI::Prompt::SetInlineInstallWebstoreData(
   rating_count_ = rating_count;
 }
 
-string16 ExtensionInstallUI::Prompt::GetDialogTitle(
-    const Extension* extension) const {
+string16 ExtensionInstallUI::Prompt::GetDialogTitle() const {
   if (type_ == INSTALL_PROMPT) {
-    return l10n_util::GetStringUTF16(extension->is_app() ?
+    return l10n_util::GetStringUTF16(extension_->is_app() ?
         IDS_EXTENSION_INSTALL_APP_PROMPT_TITLE :
         IDS_EXTENSION_INSTALL_EXTENSION_PROMPT_TITLE);
   } else {
@@ -116,13 +130,14 @@ string16 ExtensionInstallUI::Prompt::GetDialogTitle(
   }
 }
 
-string16 ExtensionInstallUI::Prompt::GetHeading(
-    const std::string& extension_name) const {
+string16 ExtensionInstallUI::Prompt::GetHeading() const {
   if (type_ == INLINE_INSTALL_PROMPT) {
-    return UTF8ToUTF16(extension_name);
+    return UTF8ToUTF16(extension_->name());
+  } else if (type_ == BUNDLE_INSTALL_PROMPT) {
+    return bundle_->GetHeadingTextFor(BundleInstaller::Item::STATE_PENDING);
   } else {
     return l10n_util::GetStringFUTF16(
-        kHeadingIds[type_], UTF8ToUTF16(extension_name));
+        kHeadingIds[type_], UTF8ToUTF16(extension_->name()));
   }
 }
 
@@ -139,7 +154,7 @@ string16 ExtensionInstallUI::Prompt::GetAbortButtonLabel() const {
   return l10n_util::GetStringUTF16(kAbortButtonIds[type_]);
 }
 
-string16 ExtensionInstallUI::Prompt::GetPermissionsHeader() const {
+string16 ExtensionInstallUI::Prompt::GetPermissionsHeading() const {
   return l10n_util::GetStringUTF16(kPermissionsHeaderIds[type_]);
 }
 
@@ -190,7 +205,8 @@ size_t ExtensionInstallUI::Prompt::GetPermissionCount() const {
   return permissions_.size();
 }
 
-string16 ExtensionInstallUI::Prompt::GetPermission(int index) const {
+string16 ExtensionInstallUI::Prompt::GetPermission(size_t index) const {
+  CHECK_LT(index, permissions_.size());
   return l10n_util::GetStringFUTF16(
       IDS_EXTENSION_PERMISSION_LINE, permissions_[index]);
 }
@@ -290,7 +306,7 @@ void ExtensionInstallUI::OnInstallSuccess(const Extension* extension,
 #endif
 
   if (extension->is_app() && !use_bubble_for_apps) {
-    ExtensionInstallUI::OpenAppInstalledNTP(browser, extension->id());
+    ExtensionInstallUI::OpenAppInstalledUI(browser, extension->id());
     return;
   }
 
@@ -305,17 +321,17 @@ bool disable_failure_ui_for_tests = false;
 
 void ExtensionInstallUI::OnInstallFailure(const string16& error) {
   DCHECK(ui_loop_ == MessageLoop::current());
+  if (disable_failure_ui_for_tests || skip_post_install_ui_)
+    return;
 
   Browser* browser = BrowserList::GetLastActiveWithProfile(profile_);
-  if (disable_failure_ui_for_tests)
-    return;
   browser::ShowErrorBox(
       browser ? browser->window()->GetNativeHandle() : NULL,
       l10n_util::GetStringUTF16(IDS_EXTENSION_INSTALL_FAILURE_TITLE),
       error);
 }
 
-void ExtensionInstallUI::SetIcon(SkBitmap* image) {
+void ExtensionInstallUI::SetIcon(const SkBitmap* image) {
   if (image)
     icon_ = *image;
   else
@@ -324,9 +340,10 @@ void ExtensionInstallUI::SetIcon(SkBitmap* image) {
     icon_ = Extension::GetDefaultIcon(extension_->is_app());
 }
 
-void ExtensionInstallUI::OnImageLoaded(
-    SkBitmap* image, const ExtensionResource& resource, int index) {
-  SetIcon(image);
+void ExtensionInstallUI::OnImageLoaded(const gfx::Image& image,
+                                       const std::string& extension_id,
+                                       int index) {
+  SetIcon(image.IsEmpty() ? NULL : image.ToSkBitmap());
 
   switch (prompt_type_) {
     case PERMISSIONS_PROMPT:
@@ -340,8 +357,9 @@ void ExtensionInstallUI::OnImageLoaded(
 
       Prompt prompt(prompt_type_);
       prompt.SetPermissions(permissions_->GetWarningMessages());
-      ShowExtensionInstallDialog(
-          profile_, delegate_, extension_, &icon_, prompt);
+      prompt.set_extension(extension_);
+      prompt.set_icon(gfx::Image(new SkBitmap(icon_)));
+      ShowExtensionInstallDialog(profile_, delegate_, prompt);
       break;
     }
     default:
@@ -351,16 +369,30 @@ void ExtensionInstallUI::OnImageLoaded(
 }
 
 // static
-void ExtensionInstallUI::OpenAppInstalledNTP(Browser* browser,
-                                             const std::string& app_id) {
-  browser::NavigateParams params =
-      browser->GetSingletonTabNavigateParams(GURL(chrome::kChromeUINewTabURL));
-  browser::Navigate(&params);
+void ExtensionInstallUI::OpenAppInstalledUI(Browser* browser,
+                                            const std::string& app_id) {
 
-  content::NotificationService::current()->Notify(
-      chrome::NOTIFICATION_APP_INSTALLED_TO_NTP,
-      content::Source<WebContents>(params.target_contents->web_contents()),
-      content::Details<const std::string>(&app_id));
+  if (NewTabUI::ShouldShowApps()) {
+    browser::NavigateParams params = browser->GetSingletonTabNavigateParams(
+        GURL(chrome::kChromeUINewTabURL));
+    browser::Navigate(&params);
+
+    content::NotificationService::current()->Notify(
+        chrome::NOTIFICATION_APP_INSTALLED_TO_NTP,
+        content::Source<WebContents>(params.target_contents->web_contents()),
+        content::Details<const std::string>(&app_id));
+  } else {
+#if defined(USE_ASH)
+    ash::Shell::GetInstance()->ToggleAppList();
+
+    content::NotificationService::current()->Notify(
+        chrome::NOTIFICATION_APP_INSTALLED_TO_APPLIST,
+        content::Source<Profile>(browser->profile()),
+        content::Details<const std::string>(&app_id));
+#else
+    NOTREACHED();
+#endif
+  }
 }
 
 // static
@@ -416,8 +448,8 @@ void ExtensionInstallUI::ShowConfirmation(PromptType prompt_type) {
   // Load the image asynchronously. For the response, check OnImageLoaded.
   prompt_type_ = prompt_type;
   ExtensionResource image =
-      extension_->GetIconResource(Extension::EXTENSION_ICON_LARGE,
-                                  ExtensionIconSet::MATCH_EXACTLY);
+      extension_->GetIconResource(ExtensionIconSet::EXTENSION_ICON_LARGE,
+                                  ExtensionIconSet::MATCH_BIGGER);
   tracker_.LoadImage(extension_, image,
                      gfx::Size(kIconSize, kIconSize),
                      ImageLoadingTracker::DONT_CACHE);

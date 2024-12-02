@@ -5,18 +5,22 @@
 #include "ppapi/proxy/ppb_instance_proxy.h"
 
 #include "ppapi/c/pp_errors.h"
+#include "ppapi/c/pp_time.h"
 #include "ppapi/c/pp_var.h"
+#include "ppapi/c/ppb_audio_config.h"
 #include "ppapi/c/ppb_instance.h"
 #include "ppapi/c/ppb_messaging.h"
 #include "ppapi/c/ppb_mouse_lock.h"
 #include "ppapi/proxy/enter_proxy.h"
 #include "ppapi/proxy/host_dispatcher.h"
 #include "ppapi/proxy/plugin_dispatcher.h"
+#include "ppapi/proxy/plugin_proxy_delegate.h"
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ppapi/proxy/serialized_var.h"
 #include "ppapi/shared_impl/ppapi_globals.h"
 #include "ppapi/shared_impl/ppb_url_util_shared.h"
 #include "ppapi/shared_impl/ppb_view_shared.h"
+#include "ppapi/shared_impl/var.h"
 #include "ppapi/thunk/enter.h"
 #include "ppapi/thunk/thunk.h"
 
@@ -80,6 +84,12 @@ bool PPB_Instance_Proxy::OnMessageReceived(const IPC::Message& msg) {
                         OnHostMsgBindGraphics)
     IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBInstance_IsFullFrame,
                         OnHostMsgIsFullFrame)
+    IPC_MESSAGE_HANDLER(
+        PpapiHostMsg_PPBInstance_GetAudioHardwareOutputSampleRate,
+        OnHostMsgGetAudioHardwareOutputSampleRate)
+    IPC_MESSAGE_HANDLER(
+        PpapiHostMsg_PPBInstance_GetAudioHardwareOutputBufferSize,
+        OnHostMsgGetAudioHardwareOutputBufferSize)
     IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBInstance_ExecuteScript,
                         OnHostMsgExecuteScript)
     IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBInstance_GetDefaultCharSet,
@@ -98,6 +108,8 @@ bool PPB_Instance_Proxy::OnMessageReceived(const IPC::Message& msg) {
                         OnHostMsgRequestInputEvents)
     IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBInstance_ClearInputEvents,
                         OnHostMsgClearInputEvents)
+    IPC_MESSAGE_HANDLER(PpapiMsg_PPPInputEvent_HandleInputEvent_ACK,
+                        OnMsgHandleInputEventAck)
     IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBInstance_LockMouse,
                         OnHostMsgLockMouse)
     IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBInstance_UnlockMouse,
@@ -183,6 +195,24 @@ PP_Var PPB_Instance_Proxy::ExecuteScript(PP_Instance instance,
   return result.Return(dispatcher());
 }
 
+uint32_t PPB_Instance_Proxy::GetAudioHardwareOutputSampleRate(
+    PP_Instance instance) {
+  uint32_t result = PP_AUDIOSAMPLERATE_NONE;
+  dispatcher()->Send(
+      new PpapiHostMsg_PPBInstance_GetAudioHardwareOutputSampleRate(
+          API_ID_PPB_INSTANCE, instance, &result));
+  return result;
+}
+
+uint32_t PPB_Instance_Proxy::GetAudioHardwareOutputBufferSize(
+    PP_Instance instance) {
+  uint32_t result = 0;
+  dispatcher()->Send(
+      new PpapiHostMsg_PPBInstance_GetAudioHardwareOutputBufferSize(
+          API_ID_PPB_INSTANCE, instance, &result));
+  return result;
+}
+
 PP_Var PPB_Instance_Proxy::GetDefaultCharSet(PP_Instance instance) {
   PluginDispatcher* dispatcher = PluginDispatcher::GetForInstance(instance);
   if (!dispatcher)
@@ -211,6 +241,21 @@ PP_Bool PPB_Instance_Proxy::FlashIsFullscreen(PP_Instance instance) {
   if (!data)
     return PP_FALSE;
   return data->flash_fullscreen;
+}
+
+PP_Var PPB_Instance_Proxy::GetFontFamilies(PP_Instance instance) {
+  PluginDispatcher* dispatcher = PluginDispatcher::GetForInstance(instance);
+  if (!dispatcher)
+    return PP_MakeUndefined();
+
+  // Assume the font families don't change, so we can cache the result globally.
+  CR_DEFINE_STATIC_LOCAL(std::string, families, ());
+  if (families.empty()) {
+    PluginGlobals::Get()->plugin_proxy_delegate()->SendToBrowser(
+        new PpapiHostMsg_PPBInstance_GetFontFamilies(&families));
+  }
+
+  return StringVar::StringToPPVar(families);
 }
 
 PP_Bool PPB_Instance_Proxy::SetFullscreen(PP_Instance instance,
@@ -246,7 +291,7 @@ PP_Bool PPB_Instance_Proxy::FlashGetScreenSize(PP_Instance instance,
 }
 
 void PPB_Instance_Proxy::SampleGamepads(PP_Instance instance,
-                                        PP_GamepadsData_Dev* data) {
+                                        PP_GamepadsSampleData* data) {
   NOTIMPLEMENTED();
 }
 
@@ -277,6 +322,12 @@ void PPB_Instance_Proxy::ClearInputEventRequest(PP_Instance instance,
                                                 uint32_t event_classes) {
   dispatcher()->Send(new PpapiHostMsg_PPBInstance_ClearInputEvents(
       API_ID_PPB_INSTANCE, instance, event_classes));
+}
+
+void PPB_Instance_Proxy::ClosePendingUserGesture(PP_Instance instance,
+                                                 PP_TimeTicks timestamp) {
+  // Not called on the plugin side.
+  NOTREACHED();
 }
 
 void PPB_Instance_Proxy::ZoomChanged(PP_Instance instance,
@@ -404,6 +455,20 @@ void PPB_Instance_Proxy::OnHostMsgBindGraphics(PP_Instance instance,
   }
 }
 
+void PPB_Instance_Proxy::OnHostMsgGetAudioHardwareOutputSampleRate(
+    PP_Instance instance, uint32_t* result) {
+  EnterInstanceNoLock enter(instance, false);
+  if (enter.succeeded())
+    *result = enter.functions()->GetAudioHardwareOutputSampleRate(instance);
+}
+
+void PPB_Instance_Proxy::OnHostMsgGetAudioHardwareOutputBufferSize(
+    PP_Instance instance, uint32_t* result) {
+  EnterInstanceNoLock enter(instance, false);
+  if (enter.succeeded())
+    *result = enter.functions()->GetAudioHardwareOutputBufferSize(instance);
+}
+
 void PPB_Instance_Proxy::OnHostMsgIsFullFrame(PP_Instance instance,
                                               PP_Bool* result) {
   EnterInstanceNoLock enter(instance, false);
@@ -491,8 +556,16 @@ void PPB_Instance_Proxy::OnHostMsgClearInputEvents(PP_Instance instance,
     enter.functions()->ClearInputEventRequest(instance, event_classes);
 }
 
-void PPB_Instance_Proxy::OnHostMsgPostMessage(PP_Instance instance,
-                                          SerializedVarReceiveInput message) {
+void PPB_Instance_Proxy::OnMsgHandleInputEventAck(PP_Instance instance,
+                                                  PP_TimeTicks timestamp) {
+  EnterInstanceNoLock enter(instance, false);
+  if (enter.succeeded())
+    enter.functions()->ClosePendingUserGesture(instance, timestamp);
+}
+
+void PPB_Instance_Proxy::OnHostMsgPostMessage(
+    PP_Instance instance,
+    SerializedVarReceiveInput message) {
   EnterInstanceNoLock enter(instance, false);
   if (enter.succeeded())
     enter.functions()->PostMessage(instance, message.Get(dispatcher()));
@@ -500,8 +573,10 @@ void PPB_Instance_Proxy::OnHostMsgPostMessage(PP_Instance instance,
 
 void PPB_Instance_Proxy::OnHostMsgLockMouse(PP_Instance instance) {
   EnterHostFunctionForceCallback<PPB_Instance_FunctionAPI> enter(
-      instance, callback_factory_,
-      &PPB_Instance_Proxy::MouseLockCompleteInHost, instance);
+      instance,
+      callback_factory_.NewCallback(
+          &PPB_Instance_Proxy::MouseLockCompleteInHost,
+          instance));
   if (enter.succeeded())
     enter.SetResult(enter.functions()->LockMouse(instance, enter.callback()));
 }

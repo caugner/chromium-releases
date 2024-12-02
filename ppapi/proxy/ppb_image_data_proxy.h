@@ -6,6 +6,7 @@
 #define PPAPI_PPB_IMAGE_DATA_PROXY_H_
 
 #include "base/memory/scoped_ptr.h"
+#include "build/build_config.h"
 #include "ppapi/c/pp_bool.h"
 #include "ppapi/c/pp_completion_callback.h"
 #include "ppapi/c/pp_instance.h"
@@ -22,14 +23,7 @@
 
 class TransportDIB;
 
-namespace skia {
-class PlatformCanvas;
-}
-
 namespace ppapi {
-
-class HostResource;
-
 namespace proxy {
 
 // The proxied image data resource. Unlike most resources, this needs to be
@@ -55,16 +49,20 @@ class ImageData : public ppapi::Resource,
 
   const PP_ImageDataDesc& desc() const { return desc_; }
 
-  static const ImageHandle NullHandle;
+  static ImageHandle NullHandle();
   static ImageHandle HandleFromInt(int32_t i);
 
  private:
   PP_ImageDataDesc desc_;
 
+#if defined(OS_NACL)
+  // TODO(brettw) implement this (see .cc file).
+#else
   scoped_ptr<TransportDIB> transport_dib_;
 
   // Null when the image isn't mapped.
   scoped_ptr<skia::PlatformCanvas> mapped_canvas_;
+#endif
 
   DISALLOW_COPY_AND_ASSIGN(ImageData);
 };

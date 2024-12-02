@@ -21,6 +21,10 @@
 
 class Profile;
 
+namespace content {
+class DOMStorageContext;
+}
+
 // This class fetches local storage information in the WebKit thread, and
 // notifies the UI thread upon completion.
 // A client of this class need to call StartFetching from the UI thread to
@@ -80,7 +84,8 @@ class BrowsingDataLocalStorageHelper
   // Notifies the completion callback in the UI thread.
   void NotifyInUIThread();
 
-  Profile* profile_;
+  // Owned by the profile
+  content::DOMStorageContext* dom_storage_context_;
 
   // This only mutates on the UI thread.
   base::Callback<void(const std::list<LocalStorageInfo>&)> completion_callback_;
@@ -95,10 +100,10 @@ class BrowsingDataLocalStorageHelper
   std::list<LocalStorageInfo> local_storage_info_;
 
  private:
-  // Enumerates all local storage files in the WEBKIT thread.
-  void FetchLocalStorageInfoInWebKitThread();
-  // Delete a single local storage file in the WEBKIT thread.
-  void DeleteLocalStorageFileInWebKitThread(const FilePath& file_path);
+  // Called back with the all the local storage files.
+  void GetAllStorageFilesCallback(const std::vector<FilePath>& files);
+  // Get the file info on the file thread.
+  void FetchLocalStorageInfo(const std::vector<FilePath>& files);
 
   DISALLOW_COPY_AND_ASSIGN(BrowsingDataLocalStorageHelper);
 };
@@ -136,12 +141,8 @@ class CannedBrowsingDataLocalStorageHelper
   virtual ~CannedBrowsingDataLocalStorageHelper();
 
   // Convert the pending local storage info to local storage info objects.
-  void ConvertPendingInfoInWebKitThread();
+  void ConvertPendingInfo();
 
-  // Used to protect access to pending_local_storage_info_.
-  mutable base::Lock lock_;
-
-  // May mutate on WEBKIT and UI threads.
   std::set<GURL> pending_local_storage_info_;
 
   Profile* profile_;

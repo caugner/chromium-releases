@@ -4,20 +4,22 @@
 
 #include "ui/aura/gestures/gesture_point.h"
 
+#include <cmath>
+
+#include "base/basictypes.h"
 #include "ui/aura/event.h"
+#include "ui/aura/gestures/gesture_configuration.h"
 #include "ui/base/events.h"
 
 namespace {
 
-// TODO(girard): Make these configurable in sync with this CL
-//               http://crbug.com/100773
-const double kMaximumTouchDownDurationInSecondsForClick = 0.8;
-const double kMinimumTouchDownDurationInSecondsForClick = 0.01;
-const double kMaximumSecondsBetweenDoubleClick = 0.7;
-const int kMaximumTouchMoveInPixelsForClick = 20;
-const float kMinFlickSpeedSquared = 550.f * 550.f;
+const int kMinRailBreakVelocity = 200;
+const int kMinScrollDeltaSquared = 5 * 5;
+const int kRailBreakProportion = 15;
+const int kRailStartProportion = 2;
+const int kBufferedPoints = 10;
 
-}  // namespace aura
+}  // namespace
 
 namespace aura {
 
@@ -25,30 +27,37 @@ GesturePoint::GesturePoint()
     : first_touch_time_(0.0),
       last_touch_time_(0.0),
       last_tap_time_(0.0),
-      x_velocity_(0.0),
-      y_velocity_(0.0) {
+      velocity_calculator_(kBufferedPoints),
+      point_id_(-1) {
 }
+
+GesturePoint::~GesturePoint() {}
 
 void GesturePoint::Reset() {
   first_touch_time_ = last_touch_time_ = 0.0;
-  x_velocity_ = y_velocity_ = 0.0;
+  velocity_calculator_.ClearHistory();
+  point_id_ = -1;
 }
 
-void GesturePoint::UpdateValues(const TouchEvent& event, GestureState state) {
-  if (state != GS_NO_GESTURE && event.type() == ui::ET_TOUCH_MOVED) {
-    double interval(event.time_stamp().InSecondsF() - last_touch_time_);
-    x_velocity_ = (event.x() - last_touch_position_.x()) / interval;
-    y_velocity_ = (event.y() - last_touch_position_.y()) / interval;
+void GesturePoint::UpdateValues(const TouchEvent& event) {
+  const int64 event_timestamp_microseconds =
+      event.time_stamp().InMicroseconds();
+  if (event.type() == ui::ET_TOUCH_MOVED) {
+    velocity_calculator_.PointSeen(event.x(),
+                                   event.y(),
+                                   event_timestamp_microseconds);
   }
 
   last_touch_time_ = event.time_stamp().InSecondsF();
   last_touch_position_ = event.location();
 
-  if (state == GS_NO_GESTURE) {
+  if (event.type() == ui::ET_TOUCH_PRESSED) {
     first_touch_time_ = last_touch_time_;
     first_touch_position_ = event.location();
-    x_velocity_ = 0.0;
-    y_velocity_ = 0.0;
+    velocity_calculator_.ClearHistory();
+    velocity_calculator_.PointSeen(event.x(),
+                                   event.y(),
+                                   event_timestamp_microseconds);
   }
 }
 
@@ -81,37 +90,84 @@ bool GesturePoint::IsInScrollWindow(const TouchEvent& event) const {
          !IsInsideManhattanSquare(event);
 }
 
-bool GesturePoint::IsInFlickWindow(const TouchEvent& event) const {
+bool GesturePoint::IsInFlickWindow(const TouchEvent& event) {
   return IsOverMinFlickSpeed() && event.type() != ui::ET_TOUCH_CANCELLED;
+}
+
+bool GesturePoint::DidScroll(const TouchEvent& event, int dist) const {
+  return abs(last_touch_position_.x() - first_touch_position_.x()) > dist ||
+         abs(last_touch_position_.y() - first_touch_position_.y()) > dist;
+}
+
+float GesturePoint::Distance(const GesturePoint& point) const {
+  float x_diff = point.last_touch_position_.x() - last_touch_position_.x();
+  float y_diff = point.last_touch_position_.y() - last_touch_position_.y();
+  return sqrt(x_diff * x_diff + y_diff * y_diff);
+}
+
+bool GesturePoint::HasEnoughDataToEstablishRail() const {
+  int dx = x_delta();
+  int dy = y_delta();
+
+  int delta_squared = dx * dx + dy * dy;
+  return delta_squared > kMinScrollDeltaSquared;
+}
+
+bool GesturePoint::IsInHorizontalRailWindow() const {
+  int dx = x_delta();
+  int dy = y_delta();
+  return abs(dx) > kRailStartProportion * abs(dy);
+}
+
+bool GesturePoint::IsInVerticalRailWindow() const {
+  int dx = x_delta();
+  int dy = y_delta();
+  return abs(dy) > kRailStartProportion * abs(dx);
+}
+
+bool GesturePoint::BreaksHorizontalRail() {
+  float vx = XVelocity();
+  float vy = YVelocity();
+  return fabs(vy) > kRailBreakProportion * fabs(vx) + kMinRailBreakVelocity;
+}
+
+bool GesturePoint::BreaksVerticalRail() {
+  float vx = XVelocity();
+  float vy = YVelocity();
+  return fabs(vx) > kRailBreakProportion * fabs(vy) + kMinRailBreakVelocity;
 }
 
 bool GesturePoint::IsInClickTimeWindow() const {
   double duration = last_touch_time_ - first_touch_time_;
-  return duration >= kMinimumTouchDownDurationInSecondsForClick &&
-         duration < kMaximumTouchDownDurationInSecondsForClick;
+  return duration >=
+      GestureConfiguration::min_touch_down_duration_in_seconds_for_click() &&
+      duration <
+      GestureConfiguration::max_touch_down_duration_in_seconds_for_click();
 }
 
 bool GesturePoint::IsInSecondClickTimeWindow() const {
   double duration =  last_touch_time_ - last_tap_time_;
-  return duration < kMaximumSecondsBetweenDoubleClick;
+  return duration < GestureConfiguration::max_seconds_between_double_click();
 }
 
 bool GesturePoint::IsInsideManhattanSquare(const TouchEvent& event) const {
   int manhattanDistance = abs(event.x() - first_touch_position_.x()) +
                           abs(event.y() - first_touch_position_.y());
-  return manhattanDistance < kMaximumTouchMoveInPixelsForClick;
+  return manhattanDistance <
+      GestureConfiguration::max_touch_move_in_pixels_for_click();
 }
 
 bool GesturePoint::IsSecondClickInsideManhattanSquare(
     const TouchEvent& event) const {
   int manhattanDistance = abs(event.x() - last_tap_position_.x()) +
                           abs(event.y() - last_tap_position_.y());
-  return manhattanDistance < kMaximumTouchMoveInPixelsForClick;
+  return manhattanDistance <
+      GestureConfiguration::max_touch_move_in_pixels_for_click();
 }
 
-bool GesturePoint::IsOverMinFlickSpeed() const {
-  return (x_velocity_ * x_velocity_ + y_velocity_ * y_velocity_) >
-          kMinFlickSpeedSquared;
+bool GesturePoint::IsOverMinFlickSpeed() {
+  return velocity_calculator_.VelocitySquared() >
+      GestureConfiguration::min_flick_speed_squared();
 }
 
 }  // namespace aura

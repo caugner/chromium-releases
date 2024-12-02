@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-cr.define('ntp4', function() {
+cr.define('ntp', function() {
   'use strict';
 
   var localStrings = new LocalStrings;
@@ -16,6 +16,7 @@ cr.define('ntp4', function() {
     NTP_RECENTLY_CLOSED: 4,
     NTP_APP_RE_ENABLE: 16,
     NTP_WEBSTORE_FOOTER: 18,
+    NTP_WEBSTORE_PLUS_ICON: 19,
   };
 
   // Histogram buckets for UMA tracking of where a DnD drop came from.
@@ -27,6 +28,8 @@ cr.define('ntp4', function() {
     OUTSIDE_NTP: 4
   };
   var DRAG_SOURCE_LIMIT = DRAG_SOURCE.OUTSIDE_NTP + 1;
+
+  /** @const */ var appInstallHintTileLimit = 10;
 
   /**
    * App context menu. The class is designed to be used as a singleton with
@@ -106,10 +109,10 @@ cr.define('ntp4', function() {
      */
     forAllLaunchTypes_: function(f) {
       // Order matters: index matches launchType id.
-      var launchTypes = [ this.launchPinnedTab_,
-                          this.launchRegularTab_,
-                          this.launchFullscreen_,
-                          this.launchNewWindow_ ];
+      var launchTypes = [this.launchPinnedTab_,
+                         this.launchRegularTab_,
+                         this.launchFullscreen_,
+                         this.launchNewWindow_];
 
       for (var i = 0; i < launchTypes.length; ++i) {
         if (!launchTypes[i])
@@ -443,7 +446,7 @@ cr.define('ntp4', function() {
       if (this.useSmallIcon_) {
         // 3/4 is the ratio of 96px to 128px (the used height and full height
         // of icons in apps).
-        var iconSize = imgSize * 3/4;
+        var iconSize = imgSize * 3 / 4;
         // The -2 is for the div border to improve the visual alignment for the
         // icon div.
         this.imgDiv_.style.width = this.imgDiv_.style.height =
@@ -606,7 +609,7 @@ cr.define('ntp4', function() {
     },
   };
 
-  var TilePage = ntp4.TilePage;
+  var TilePage = ntp.TilePage;
 
   // The fraction of the app tile size that the icon uses.
   var APP_IMG_SIZE_FRACTION = 4 / 5;
@@ -646,6 +649,16 @@ cr.define('ntp4', function() {
     initialize: function() {
       this.classList.add('apps-page');
 
+      if (templateData.appInstallHintEnabled) {
+        this.appInstallHint_ = $('app-install-hint-template').cloneNode(true);
+        this.appInstallHint_.addEventListener('click', function(e) {
+          chrome.send('recordAppLaunchByURL',
+              [encodeURIComponent(this.href),
+               APP_LAUNCH.NTP_WEBSTORE_PLUS_ICON]);
+        });
+        this.content_.appendChild(this.appInstallHint_);
+      }
+
       this.addEventListener('cardselected', this.onCardSelected_);
       // Add event listeners for two events, so we can temporarily suppress
       // the app notification bubbles when the app card slides in and out of
@@ -669,10 +682,31 @@ cr.define('ntp4', function() {
       if (animate) {
         // Select the page and scroll all the way down so the animation is
         // visible.
-        ntp4.getCardSlider().selectCardByValue(this);
+        ntp.getCardSlider().selectCardByValue(this);
         this.content_.scrollTop = this.content_.scrollHeight;
       }
+
       this.appendTile(new App(appData), animate);
+      this.hintStateMayHaveChanged_();
+    },
+
+    /**
+     * Similar to appendApp, but it respects the app_launch_ordinal field of
+     * |appData|.
+     * @param {Object} appData The data that describes the app.
+     */
+    insertApp: function(appData) {
+      var index = 0;
+      for (var i = 0; i < this.tileElements_.length; i++) {
+        if (appData.app_launch_ordinal <
+            this.tileElements_[i].firstChild.appData.app_launch_ordinal) {
+          index = i;
+          break;
+        }
+      }
+
+      this.addTileAt(new App(appData), index, false);
+      this.hintStateMayHaveChanged_();
     },
 
     /**
@@ -746,9 +780,9 @@ cr.define('ntp4', function() {
         }
     },
 
-    /** @inheritdoc */
+    /** @inheritDoc */
     doDragOver: function(e) {
-      var tile = ntp4.getCurrentlyDraggingTile();
+      var tile = ntp.getCurrentlyDraggingTile();
       if (tile && !tile.querySelector('.app')) {
         e.preventDefault();
         this.setDropEffect(e.dataTransfer);
@@ -759,14 +793,18 @@ cr.define('ntp4', function() {
 
     /** @inheritDoc */
     shouldAcceptDrag: function(e) {
-      return !!ntp4.getCurrentlyDraggingTile() ||
-          (e.dataTransfer && e.dataTransfer.types.indexOf('url') != -1);
+      if (ntp.getCurrentlyDraggingTile())
+        return true;
+      if (!e.dataTransfer || !e.dataTransfer.types)
+        return false;
+      return Array.prototype.indexOf.call(e.dataTransfer.types,
+                                          'text/uri-list') != -1;
     },
 
     /** @inheritDoc */
     addDragData: function(dataTransfer, index) {
       var sourceId = -1;
-      var currentlyDraggingTile = ntp4.getCurrentlyDraggingTile();
+      var currentlyDraggingTile = ntp.getCurrentlyDraggingTile();
       if (currentlyDraggingTile) {
         var tileContents = currentlyDraggingTile.firstChild;
         if (tileContents.classList.contains('app')) {
@@ -836,7 +874,7 @@ cr.define('ntp4', function() {
     generateAppForLink: function(data) {
       assert(data.url != undefined);
       assert(data.title != undefined);
-      var pageIndex = ntp4.getAppsPageIndex(this);
+      var pageIndex = ntp.getAppsPageIndex(this);
       chrome.send('generateAppForLink', [data.url, data.title, pageIndex]);
     },
 
@@ -845,7 +883,7 @@ cr.define('ntp4', function() {
       if (!(draggedTile.firstChild instanceof App))
         return;
 
-      var pageIndex = ntp4.getAppsPageIndex(this);
+      var pageIndex = ntp.getAppsPageIndex(this);
       chrome.send('setPageIndex', [draggedTile.firstChild.appId, pageIndex]);
 
       var appIds = [];
@@ -860,11 +898,86 @@ cr.define('ntp4', function() {
 
     /** @inheritDoc */
     setDropEffect: function(dataTransfer) {
-      var tile = ntp4.getCurrentlyDraggingTile();
+      var tile = ntp.getCurrentlyDraggingTile();
       if (tile && tile.querySelector('.app'))
-        ntp4.setCurrentDropEffect(dataTransfer, 'move');
+        ntp.setCurrentDropEffect(dataTransfer, 'move');
       else
-        ntp4.setCurrentDropEffect(dataTransfer, 'copy');
+        ntp.setCurrentDropEffect(dataTransfer, 'copy');
+    },
+
+    /**
+     * Called when we may need to change app install hint visibility.
+     * @private
+     */
+    hintStateMayHaveChanged_: function() {
+      if (this.updateHintState_())
+        this.repositionTiles_();
+      else
+        this.repositionHint_();
+    },
+
+    /**
+     * Updates whether the app install hint is visible. Returns true if we need
+     * to reposition other tiles (because webstore app changed visibility).
+     * @private
+     */
+    updateHintState_: function() {
+      if (!this.appInstallHint_)
+        return;
+
+      var appsPages = document.querySelectorAll('.apps-page');
+      var numTiles = this.tileElements_.length;
+      var showHint =
+          numTiles < appInstallHintTileLimit && appsPages.length == 1;
+      this.appInstallHint_.hidden = !showHint;
+
+      var webstoreApp = this.querySelector('.webstore');
+      if (!webstoreApp)
+        return false;
+
+      var webstoreTile = findAncestorByClass(webstoreApp, 'tile');
+      if (showHint) {
+        if (!webstoreTile.classList.contains('real'))
+          return false;
+
+        webstoreTile.classList.remove('real');
+        return true;
+      }
+
+      if (webstoreTile.classList.contains('real'))
+        return false;
+
+      webstoreTile.classList.add('real');
+      return true;
+    },
+
+    /**
+     * Repositions the app tile hint (to be called when tiles move).
+     * @private
+     */
+    repositionHint_: function() {
+      if (!this.appInstallHint_ || this.appInstallHint_.hidden)
+        return;
+
+      var index = this.tileElements_.length;
+      var layout = this.layoutValues_;
+      var col = index % layout.numRowTiles;
+      var row = Math.floor(index / layout.numRowTiles);
+      var realX = this.tileGrid_.offsetLeft +
+          col * layout.colWidth + layout.leftMargin;
+      var realY = this.tileGrid_.offsetTop + row * layout.rowHeight;
+
+      this.appInstallHint_.style.left = realX + 'px';
+      this.appInstallHint_.style.right = realX + 'px';
+      this.appInstallHint_.style.top = realY + 'px';
+      this.appInstallHint_.style.width = layout.tileWidth + 'px';
+      this.appInstallHint_.style.height = layout.tileWidth + 'px';
+    },
+
+    /** @inheritDoc */
+    repositionTiles_: function(ignoreNode) {
+      TilePage.prototype.repositionTiles_.call(this, ignoreNode);
+      this.repositionHint_();
     },
   };
 
@@ -897,8 +1010,3 @@ cr.define('ntp4', function() {
     launchAppAfterEnable: launchAppAfterEnable,
   };
 });
-
-// TODO(estade): update the content handlers to use ntp namespace instead of
-// making these global.
-var appNotificationChanged = ntp4.appNotificationChanged;
-var launchAppAfterEnable = ntp4.launchAppAfterEnable;

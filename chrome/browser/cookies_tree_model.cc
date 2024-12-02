@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,12 +16,11 @@
 #include "chrome/browser/browsing_data_cookie_helper.h"
 #include "chrome/browser/content_settings/cookie_settings.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "content/browser/in_process_webkit/webkit_context.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "grit/ui_resources.h"
-#include "net/base/cookie_monster.h"
 #include "net/base/registry_controlled_domain.h"
+#include "net/cookies/cookie_monster.h"
 #include "net/url_request/url_request_context.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -328,10 +327,10 @@ CookieTreeOriginNode* CookieTreeRootNode::GetOrCreateOriginNode(
 
   // First see if there is an existing match.
   std::vector<CookieTreeNode*>::iterator origin_node_iterator =
-      lower_bound(children().begin(),
-                  children().end(),
-                  &origin_node,
-                  OriginNodeComparator());
+      std::lower_bound(children().begin(),
+                       children().end(),
+                       &origin_node,
+                       OriginNodeComparator());
 
   if (origin_node_iterator != children().end() &&
       WideToUTF16Hack(CookieTreeOriginNode::TitleForUrl(url)) ==
@@ -596,10 +595,10 @@ bool CookieTreeNode::NodeTitleComparator::operator() (
 void CookieTreeNode::AddChildSortedByTitle(CookieTreeNode* new_child) {
   DCHECK(new_child);
   std::vector<CookieTreeNode*>::iterator iter =
-      lower_bound(children().begin(),
-                  children().end(),
-                  new_child,
-                  NodeTitleComparator());
+      std::lower_bound(children().begin(),
+                       children().end(),
+                       new_child,
+                       NodeTitleComparator());
   GetModel()->Add(this, new_child, iter - children().begin());
 }
 

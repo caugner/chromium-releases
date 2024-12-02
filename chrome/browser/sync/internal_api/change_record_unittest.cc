@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,19 +6,19 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "base/string_number_conversions.h"
+#include "base/test/values_test_util.h"
 #include "base/values.h"
-#include "chrome/browser/sync/protocol/extension_specifics.pb.h"
-#include "chrome/browser/sync/protocol/proto_value_conversions.h"
-#include "chrome/browser/sync/protocol/sync.pb.h"
-#include "chrome/test/base/values_test_util.h"
+#include "sync/protocol/extension_specifics.pb.h"
+#include "sync/protocol/proto_value_conversions.h"
+#include "sync/protocol/sync.pb.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace sync_api {
 namespace {
 
-using test::ExpectDictDictionaryValue;
-using test::ExpectDictStringValue;
+using base::ExpectDictDictionaryValue;
+using base::ExpectDictStringValue;
 using testing::Invoke;
 using testing::StrictMock;
 
@@ -75,9 +75,9 @@ class MockExtraChangeRecordData
 
 TEST_F(ChangeRecordTest, ChangeRecordToValue) {
   sync_pb::EntitySpecifics old_specifics;
-  old_specifics.MutableExtension(sync_pb::extension)->set_id("old");
+  old_specifics.mutable_extension()->set_id("old");
   sync_pb::EntitySpecifics new_specifics;
-  old_specifics.MutableExtension(sync_pb::extension)->set_id("new");
+  old_specifics.mutable_extension()->set_id("new");
 
   const int64 kTestId = 5;
 

@@ -12,12 +12,12 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebAudioDevice.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebVector.h"
 
+class AudioParameters;
+
 class RendererWebAudioDeviceImpl : public WebKit::WebAudioDevice,
                                    public AudioDevice::RenderCallback {
  public:
-  RendererWebAudioDeviceImpl(size_t buffer_size,
-                             int channels,
-                             double sample_rate,
+  RendererWebAudioDeviceImpl(const AudioParameters& params,
                              WebKit::WebAudioDevice::RenderCallback* callback);
   virtual ~RendererWebAudioDeviceImpl();
 
@@ -30,7 +30,7 @@ class RendererWebAudioDeviceImpl : public WebKit::WebAudioDevice,
   virtual size_t Render(const std::vector<float*>& audio_data,
                         size_t number_of_frames,
                         size_t audio_delay_milliseconds) OVERRIDE;
-  virtual void OnError() OVERRIDE;
+  virtual void OnRenderError() OVERRIDE;
 
  private:
   scoped_refptr<AudioDevice> audio_device_;

@@ -14,6 +14,7 @@
 #include "base/tracked_objects.h"
 #include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/process_singleton.h"
+#include "chrome/browser/task_profiler/auto_tracking.h"
 #include "chrome/browser/ui/browser_init.h"
 #include "content/public/browser/browser_main_parts.h"
 #include "content/public/browser/browser_thread.h"
@@ -63,6 +64,7 @@ class ChromeBrowserMainParts : public content::BrowserMainParts {
   virtual void PostEarlyInitialization() OVERRIDE;
   virtual void ToolkitInitialized() OVERRIDE;
   virtual void PreMainMessageLoopStart() OVERRIDE;
+  virtual MessageLoop* GetMainMessageLoop() OVERRIDE;
   virtual void PostMainMessageLoopStart() OVERRIDE;
   virtual int PreCreateThreads() OVERRIDE;
   virtual void PreMainMessageLoopRun() OVERRIDE;
@@ -123,6 +125,10 @@ class ChromeBrowserMainParts : public content::BrowserMainParts {
   // computer startup has on retention and usage of Chrome.
   void AutoLaunchChromeFieldTrial();
 
+  // A field trial to test the viability of a DNS based, certificate revocation
+  // system.
+  void ComodoDNSExperimentFieldTrial();
+
   // Methods for |SetupMetricsAndFieldTrials()| --------------------------------
 
   // Constructs metrics service and does related initialization, including
@@ -163,7 +169,7 @@ class ChromeBrowserMainParts : public content::BrowserMainParts {
   // Creating this object starts tracking the creation and deletion of Task
   // instance. This MUST be done before main_message_loop, so that it is
   // destroyed after the main_message_loop.
-  tracked_objects::AutoTracking tracking_objects_;
+  task_profiler::AutoTracking tracking_objects_;
 
   // Statistical testing infrastructure for the entire browser. NULL until
   // SetupMetricsAndFieldTrials is called.

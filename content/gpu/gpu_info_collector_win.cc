@@ -7,6 +7,7 @@
 #include <windows.h>
 #include <d3d9.h>
 #include <setupapi.h>
+#include <winsatcominterfacei.h>
 
 #include "base/command_line.h"
 #include "base/file_path.h"
@@ -32,43 +33,98 @@ std::string VersionNumberToString(uint32 version_number) {
   return base::IntToString(hi) + "." + base::IntToString(low);
 }
 
-}  // namespace anonymous
+float GetAssessmentScore(IProvideWinSATResultsInfo* results,
+                         WINSAT_ASSESSMENT_TYPE type) {
+  IProvideWinSATAssessmentInfo* subcomponent = NULL;
+  if (FAILED(results->GetAssessmentInfo(type, &subcomponent)))
+    return 0.0;
 
-// Setup API functions
-typedef HDEVINFO (WINAPI*SetupDiGetClassDevsWFunc)(
-    CONST GUID *ClassGuid,
-    PCWSTR Enumerator,
-    HWND hwndParent,
-    DWORD Flags
-);
-typedef BOOL (WINAPI*SetupDiEnumDeviceInfoFunc)(
-    HDEVINFO DeviceInfoSet,
-    DWORD MemberIndex,
-    PSP_DEVINFO_DATA DeviceInfoData
-);
-typedef BOOL (WINAPI*SetupDiGetDeviceRegistryPropertyWFunc)(
-    HDEVINFO DeviceInfoSet,
-    PSP_DEVINFO_DATA DeviceInfoData,
-    DWORD Property,
-    PDWORD PropertyRegDataType,
-    PBYTE PropertyBuffer,
-    DWORD PropertyBufferSize,
-    PDWORD RequiredSize
-);
-typedef BOOL (WINAPI*SetupDiDestroyDeviceInfoListFunc)(
-    HDEVINFO DeviceInfoSet
-);
+  float score = 0.0;
+  if (FAILED(subcomponent->get_Score(&score)))
+    score = 0.0;
+  subcomponent->Release();
+  return score;
+}
+
+content::GpuPerformanceStats RetrieveGpuPerformanceStats() {
+  IQueryRecentWinSATAssessment* assessment = NULL;
+  IProvideWinSATResultsInfo* results = NULL;
+
+  content::GpuPerformanceStats stats;
+
+  do {
+    HRESULT hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+    if (FAILED(hr)) {
+      LOG(ERROR) << "CoInitializeEx() failed";
+      break;
+    }
+
+    hr = CoCreateInstance(__uuidof(CQueryWinSAT),
+                          NULL,
+                          CLSCTX_INPROC_SERVER,
+                          __uuidof(IQueryRecentWinSATAssessment),
+                          reinterpret_cast<void**>(&assessment));
+    if (FAILED(hr)) {
+      LOG(ERROR) << "CoCreateInstance() failed";
+      break;
+    }
+
+    hr = assessment->get_Info(&results);
+    if (FAILED(hr)) {
+      LOG(ERROR) << "get_Info() failed";
+      break;
+    }
+
+    WINSAT_ASSESSMENT_STATE state = WINSAT_ASSESSMENT_STATE_UNKNOWN;
+    hr = results->get_AssessmentState(&state);
+    if (FAILED(hr)) {
+      LOG(ERROR) << "get_AssessmentState() failed";
+      break;
+    }
+    if (state != WINSAT_ASSESSMENT_STATE_VALID &&
+        state != WINSAT_ASSESSMENT_STATE_INCOHERENT_WITH_HARDWARE) {
+      LOG(ERROR) << "Can't retrieve a valid assessment";
+      break;
+    }
+
+    hr = results->get_SystemRating(&stats.overall);
+    if (FAILED(hr))
+      LOG(ERROR) << "Get overall score failed";
+
+    stats.gaming = GetAssessmentScore(results, WINSAT_ASSESSMENT_D3D);
+    if (stats.gaming == 0.0)
+      LOG(ERROR) << "Get gaming score failed";
+
+    stats.graphics = GetAssessmentScore(results, WINSAT_ASSESSMENT_GRAPHICS);
+    if (stats.graphics == 0.0)
+      LOG(ERROR) << "Get graphics score failed";
+  } while (false);
+
+  if (assessment)
+    assessment->Release();
+  if (results)
+    results->Release();
+  CoUninitialize();
+
+  return stats;
+}
+
+}  // namespace anonymous
 
 namespace gpu_info_collector {
 
 bool CollectGraphicsInfo(content::GPUInfo* gpu_info) {
   DCHECK(gpu_info);
 
+  gpu_info->performance_stats = RetrieveGpuPerformanceStats();
+
   if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kUseGL)) {
     std::string requested_implementation_name =
         CommandLine::ForCurrentProcess()->GetSwitchValueASCII(switches::kUseGL);
-    if (requested_implementation_name == "swiftshader")
+    if (requested_implementation_name == "swiftshader") {
+      gpu_info->software_rendering = true;
       return false;
+    }
   }
 
   if (gfx::GetGLImplementation() != gfx::kGLImplementationEGLGLES2) {
@@ -112,6 +168,8 @@ bool CollectPreliminaryGraphicsInfo(content::GPUInfo* gpu_info) {
   bool rt = true;
   if (!CollectVideoCardInfo(gpu_info))
     rt = false;
+
+  gpu_info->performance_stats = RetrieveGpuPerformanceStats();
 
   return rt;
 }
@@ -186,36 +244,11 @@ bool CollectVideoCardInfo(content::GPUInfo* gpu_info) {
 
 bool CollectDriverInfoD3D(const std::wstring& device_id,
                           content::GPUInfo* gpu_info) {
-  HMODULE lib_setupapi = LoadLibraryW(L"setupapi.dll");
-  if (!lib_setupapi) {
-    LOG(ERROR) << "Open setupapi.dll failed";
-    return false;
-  }
-  SetupDiGetClassDevsWFunc fp_get_class_devs =
-      reinterpret_cast<SetupDiGetClassDevsWFunc>(
-          GetProcAddress(lib_setupapi, "SetupDiGetClassDevsW"));
-  SetupDiEnumDeviceInfoFunc fp_enum_device_info =
-      reinterpret_cast<SetupDiEnumDeviceInfoFunc>(
-          GetProcAddress(lib_setupapi, "SetupDiEnumDeviceInfo"));
-  SetupDiGetDeviceRegistryPropertyWFunc fp_get_device_registry_property =
-      reinterpret_cast<SetupDiGetDeviceRegistryPropertyWFunc>(
-          GetProcAddress(lib_setupapi, "SetupDiGetDeviceRegistryPropertyW"));
-  SetupDiDestroyDeviceInfoListFunc fp_destroy_device_info_list =
-      reinterpret_cast<SetupDiDestroyDeviceInfoListFunc>(
-          GetProcAddress(lib_setupapi, "SetupDiDestroyDeviceInfoList"));
-  if (!fp_get_class_devs || !fp_enum_device_info ||
-      !fp_get_device_registry_property || !fp_destroy_device_info_list) {
-    FreeLibrary(lib_setupapi);
-    LOG(ERROR) << "Retrieve setupapi.dll functions failed";
-    return false;
-  }
-
   // create device info for the display device
-  HDEVINFO device_info = fp_get_class_devs(
+  HDEVINFO device_info = SetupDiGetClassDevsW(
     NULL, device_id.c_str(), NULL,
     DIGCF_PRESENT | DIGCF_PROFILE | DIGCF_ALLCLASSES);
   if (device_info == INVALID_HANDLE_VALUE) {
-    FreeLibrary(lib_setupapi);
     LOG(ERROR) << "Creating device info failed";
     return false;
   }
@@ -224,9 +257,9 @@ bool CollectDriverInfoD3D(const std::wstring& device_id,
   bool found = false;
   SP_DEVINFO_DATA device_info_data;
   device_info_data.cbSize = sizeof(device_info_data);
-  while (fp_enum_device_info(device_info, index++, &device_info_data)) {
+  while (SetupDiEnumDeviceInfo(device_info, index++, &device_info_data)) {
     WCHAR value[255];
-    if (fp_get_device_registry_property(device_info,
+    if (SetupDiGetDeviceRegistryPropertyW(device_info,
                                         &device_info_data,
                                         SPDRP_DRIVER,
                                         NULL,
@@ -263,8 +296,7 @@ bool CollectDriverInfoD3D(const std::wstring& device_id,
       }
     }
   }
-  fp_destroy_device_info_list(device_info);
-  FreeLibrary(lib_setupapi);
+  SetupDiDestroyDeviceInfoList(device_info);
   return found;
 }
 

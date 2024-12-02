@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -292,8 +292,7 @@ void OmniboxViewMac::Update(const WebContents* tab_for_state_restoring) {
 void OmniboxViewMac::OpenMatch(const AutocompleteMatch& match,
                                WindowOpenDisposition disposition,
                                const GURL& alternate_nav_url,
-                               size_t selected_line,
-                               const string16& keyword) {
+                               size_t selected_line) {
   // TODO(shess): Why is the caller passing an invalid url in the
   // first place?  Make sure that case isn't being dropped on the
   // floor.
@@ -301,8 +300,7 @@ void OmniboxViewMac::OpenMatch(const AutocompleteMatch& match,
     return;
   }
 
-  model_->OpenMatch(match, disposition, alternate_nav_url,
-                    selected_line, keyword);
+  model_->OpenMatch(match, disposition, alternate_nav_url, selected_line);
 }
 
 string16 OmniboxViewMac::GetText() const {
@@ -329,11 +327,8 @@ void OmniboxViewMac::SetUserText(const string16& text,
   model_->SetUserText(text);
   // TODO(shess): TODO below from gtk.
   // TODO(deanm): something about selection / focus change here.
-  SetText(display_text);
-  if (update_popup) {
-    UpdatePopup();
-  }
-  model_->OnChanged();
+  SetWindowTextAndCaretPos(display_text, display_text.length(), update_popup,
+      true);
 }
 
 NSRange OmniboxViewMac::GetSelectedRange() const {
@@ -364,9 +359,17 @@ void OmniboxViewMac::SetSelectedRange(const NSRange range) {
 }
 
 void OmniboxViewMac::SetWindowTextAndCaretPos(const string16& text,
-                                              size_t caret_pos) {
+                                              size_t caret_pos,
+                                              bool update_popup,
+                                              bool notify_text_changed) {
   DCHECK_LE(caret_pos, text.size());
   SetTextAndSelectedRange(text, NSMakeRange(caret_pos, caret_pos));
+
+  if (update_popup)
+    UpdatePopup();
+
+  if (notify_text_changed)
+    TextChanged();
 }
 
 void OmniboxViewMac::SetForcedQuery() {
@@ -532,6 +535,11 @@ void OmniboxViewMac::EmphasizeURLComponents() {
   }
 }
 
+void OmniboxViewMac::TextChanged() {
+  EmphasizeURLComponents();
+  model_->OnChanged();
+}
+
 void OmniboxViewMac::ApplyTextAttributes(const string16& display_text,
                                          NSMutableAttributedString* as) {
   NSUInteger as_length = [as length];
@@ -606,7 +614,7 @@ void OmniboxViewMac::OnTemporaryTextMaybeChanged(const string16& display_text,
     saved_temporary_selection_ = GetSelectedRange();
 
   suggest_text_length_ = 0;
-  SetWindowTextAndCaretPos(display_text, display_text.size());
+  SetWindowTextAndCaretPos(display_text, display_text.size(), false, false);
   model_->OnChanged();
   [field_ clearUndoChain];
 }
@@ -686,9 +694,9 @@ bool OmniboxViewMac::OnAfterPossibleChange() {
   delete_at_end_pressed_ = false;
 
   const bool something_changed = model_->OnAfterPossibleChange(
-      new_text, new_selection.location, NSMaxRange(new_selection),
-      selection_differs, text_differs, just_deleted_text,
-      !IsImeComposing());
+      text_before_change_, new_text, new_selection.location,
+      NSMaxRange(new_selection), selection_differs, text_differs,
+      just_deleted_text, !IsImeComposing());
 
   if (delete_was_pressed_ && at_end_of_edit)
     delete_at_end_pressed_ = true;
@@ -698,8 +706,7 @@ bool OmniboxViewMac::OnAfterPossibleChange() {
   // Linux watches for something_changed && text_differs, but that
   // fails for us in case you copy the URL and paste the identical URL
   // back (we'll lose the styling).
-  EmphasizeURLComponents();
-  model_->OnChanged();
+  TextChanged();
 
   delete_was_pressed_ = false;
 
@@ -793,7 +800,7 @@ bool OmniboxViewMac::OnDoCommandBySelector(SEL cmd) {
   if (cmd == @selector(deleteForward:))
     delete_was_pressed_ = true;
 
-  // Don't intercept up/down-arrow if the popup isn't open.
+  // Don't intercept up/down-arrow or backtab if the popup isn't open.
   if (popup_view_->IsOpen()) {
     if (cmd == @selector(moveDown:)) {
       model_->OnUpOrDownKeyPressed(1);
@@ -802,6 +809,13 @@ bool OmniboxViewMac::OnDoCommandBySelector(SEL cmd) {
 
     if (cmd == @selector(moveUp:)) {
       model_->OnUpOrDownKeyPressed(-1);
+      return true;
+    }
+
+    if (cmd == @selector(insertBacktab:) &&
+        model_->popup_model()->selected_line_state() ==
+            AutocompletePopupModel::KEYWORD) {
+      model_->ClearKeyword(GetText());
       return true;
     }
   }
@@ -829,26 +843,10 @@ bool OmniboxViewMac::OnDoCommandBySelector(SEL cmd) {
     return model_->OnEscapeKeyPressed();
   }
 
-  if (cmd == @selector(insertTab:) ||
-      cmd == @selector(insertTabIgnoringFieldEditor:)) {
-    if (model_->is_keyword_hint())
-      return model_->AcceptKeyword();
-
-    if (suggest_text_length_ > 0) {
-      model_->CommitSuggestedText(true);
-      return true;
-    }
-
-    if (!IsCaretAtEnd()) {
-      PlaceCaretAt(GetTextLength());
-      // OnDidChange() will not be triggered when setting selected range in this
-      // method, so we need to call it explicitly.
-      OnDidChange();
-      return true;
-    }
-
-    if (model_->AcceptCurrentInstantPreview())
-      return true;
+  if ((cmd == @selector(insertTab:) ||
+      cmd == @selector(insertTabIgnoringFieldEditor:)) &&
+      model_->is_keyword_hint()) {
+    return model_->AcceptKeyword();
   }
 
   // |-noop:| is sent when the user presses Cmd+Return. Override the no-op

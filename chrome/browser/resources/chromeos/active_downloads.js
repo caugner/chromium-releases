@@ -233,10 +233,11 @@ DownloadRow.prototype = {
   },
 
   setDangerousIcon_: function(warning) {
+    var escapedPath = encodeURIComponent(this.path).replace(/'/g,'%27');
     this.icon.className = warning ? 'iconwarning' : 'icon';
     this.icon.style.background = warning ? '' :
-        'url(chrome://fileicon' + escape(this.path) +
-        '?iconsize=small) no-repeat';
+        'url(\'chrome://fileicon/' + escapedPath +
+        '?iconsize=small\') no-repeat';
   },
 
   /**
@@ -334,6 +335,8 @@ DownloadRow.prototype = {
       dangerText = localStrings.getString('dangerousurl');
     } else if (dangerType == 'DANGEROUS_CONTENT') {
       dangerText = localStrings.getStringF('dangerouscontent', this.name);
+    } else if (dangerType == 'UNCOMMON_CONTENT') {
+      dangerText = localStrings.getStringF('uncommoncontent', this.name);
     } else if (dangerType == 'DANGEROUS_FILE' && this.path.match(/\.crx$/)) {
       dangerText = localStrings.getString('dangerousextension');
     } else {

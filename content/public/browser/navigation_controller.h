@@ -15,13 +15,12 @@
 #include "content/public/common/page_transition_types.h"
 
 class GURL;
-class SessionStorageNamespace;
-class SSLManager;
 
 namespace content {
 
 class BrowserContext;
 class NavigationEntry;
+class SessionStorageNamespace;
 class WebContents;
 struct Referrer;
 
@@ -206,8 +205,6 @@ class NavigationController {
   virtual void RemoveEntryAtIndex(int index) = 0;
 
   // Random --------------------------------------------------------------------
-
-  virtual SSLManager* GetSSLManager() = 0;
 
   // The session storage namespace that all child render views should use.
   virtual SessionStorageNamespace* GetSessionStorageNamespace() const = 0;

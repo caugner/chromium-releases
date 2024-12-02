@@ -1,4 +1,4 @@
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -197,13 +197,16 @@
                 'WARNING_CFLAGS': [
                   # libxml passes `const unsigned char*` through `const char*`.
                   '-Wno-pointer-sign',
-                  # libxml converts xmlSchemaValType to xmlSchemaTypeType.
-                  '-Wno-conversion',
+                  # pattern.c and uri.c both have an intentional
+                  # `for (...);` / `while(...);` loop. I submitted a patch to
+                  # move the `'` to its own line, but until that's landed
+                  # suppress the warning:
+                  '-Wno-empty-body',
                 ],
               },
               'cflags': [
                 '-Wno-pointer-sign',
-                '-Wno-conversion',
+                '-Wno-empty-body',
               ],
             }],
           ],

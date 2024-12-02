@@ -14,6 +14,7 @@
 #include "base/message_loop.h"
 #include "content/browser/renderer_host/media/mock_media_observer.h"
 #include "content/renderer/mock_content_renderer_client.h"
+#include "media/base/channel_layout.h"
 #include "ipc/ipc_channel.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/webrtc/common_types.h"
@@ -32,6 +33,7 @@ class ScopedCOMInitializer;
 
 namespace content {
 class ContentRendererClient;
+class MockResourceContext;
 class ResourceContext;
 class TestBrowserThread;
 }
@@ -107,9 +109,11 @@ class WebRTCAutoDelete {
 class AudioUtilInterface {
  public:
   virtual ~AudioUtilInterface() {}
-  virtual double GetAudioHardwareSampleRate() = 0;
-  virtual double GetAudioInputHardwareSampleRate() = 0;
-  virtual uint32 GetAudioInputHardwareChannelCount() = 0;
+  virtual int GetAudioHardwareSampleRate() = 0;
+  virtual int GetAudioInputHardwareSampleRate(
+      const std::string& device_id) = 0;
+  virtual ChannelLayout GetAudioInputHardwareChannelLayout(
+      const std::string& device_id) = 0;
 };
 
 // Implemented and defined in the cc file.
@@ -136,9 +140,9 @@ class WebRTCAudioDeviceTest
   void CreateChannel(const char* name);
   void DestroyChannel();
 
-  void OnGetHardwareSampleRate(double* sample_rate);
-  void OnGetHardwareInputSampleRate(double* sample_rate);
-  void OnGetHardwareInputChannelCount(uint32* channels);
+  void OnGetHardwareSampleRate(int* sample_rate);
+  void OnGetHardwareInputSampleRate(int* sample_rate);
+  void OnGetHardwareInputChannelLayout(ChannelLayout* channels);
 
   // IPC::Channel::Listener implementation.
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
@@ -162,8 +166,8 @@ class WebRTCAudioDeviceTest
   scoped_ptr<WebRTCMockRenderProcess> mock_process_;
   scoped_ptr<MockMediaObserver> media_observer_;
   scoped_ptr<media_stream::MediaStreamManager> media_stream_manager_;
-  scoped_refptr<AudioManager> audio_manager_;
-  scoped_ptr<content::ResourceContext> resource_context_;
+  scoped_ptr<AudioManager> audio_manager_;
+  scoped_ptr<content::MockResourceContext> resource_context_;
   scoped_refptr<net::URLRequestContext> test_request_context_;
   scoped_ptr<IPC::Channel> channel_;
   scoped_refptr<AudioRendererHost> audio_render_host_;

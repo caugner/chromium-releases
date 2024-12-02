@@ -4,59 +4,49 @@
 
 #include "ui/aura/test/aura_test_base.h"
 
-#if defined(OS_WIN)
-#include <ole2.h>
-#endif
-
+#include "ui/aura/env.h"
+#include "ui/aura/monitor_manager.h"
 #include "ui/aura/root_window.h"
+#include "ui/aura/test/single_monitor_manager.h"
+#include "ui/aura/test/test_screen.h"
+#include "ui/aura/test/test_stacking_client.h"
+#include "ui/aura/ui_controls_aura.h"
+#include "ui/ui_controls/ui_controls.h"
 
 namespace aura {
 namespace test {
 
-AuraTestBase::AuraTestBase()
-    : setup_called_(false),
-      teardown_called_(false) {
-#if defined(OS_WIN)
-  OleInitialize(NULL);
-#endif
-
-  RootWindow::GetInstance()->Show();
-  RootWindow::GetInstance()->SetHostSize(gfx::Size(600, 600));
+AuraTestBase::AuraTestBase() {
 }
 
 AuraTestBase::~AuraTestBase() {
-#if defined(OS_WIN)
-  OleUninitialize();
-#endif
-  CHECK(setup_called_)
-      << "You have overridden SetUp but never called super class's SetUp";
-  CHECK(teardown_called_)
-      << "You have overridden TearDown but never called super class's TearDown";
-
-  // Flush the message loop because we have pending release tasks
-  // and these tasks if un-executed would upset Valgrind.
-  RunAllPendingInMessageLoop();
-
-  // Ensure that we don't use the previously-allocated static RootWindow object
-  // later -- on Linux, it holds a reference to our message loop's X connection.
-  aura::RootWindow::DeleteInstance();
 }
 
 void AuraTestBase::SetUp() {
   testing::Test::SetUp();
-  setup_called_ = true;
+  Env::GetInstance()->SetMonitorManager(new SingleMonitorManager);
+  root_window_.reset(Env::GetInstance()->monitor_manager()->
+                     CreateRootWindowForPrimaryMonitor());
+  gfx::Screen::SetInstance(new aura::TestScreen(root_window_.get()));
+  ui_controls::InstallUIControlsAura(CreateUIControlsAura(root_window_.get()));
+  helper_.InitRootWindow(root_window());
+  helper_.SetUp();
+  stacking_client_.reset(new TestStackingClient(root_window()));
 }
 
 void AuraTestBase::TearDown() {
-  teardown_called_ = true;
+  // Flush the message loop because we have pending release tasks
+  // and these tasks if un-executed would upset Valgrind.
+  RunAllPendingInMessageLoop();
+
+  stacking_client_.reset();
+  helper_.TearDown();
+  root_window_.reset();
   testing::Test::TearDown();
 }
 
 void AuraTestBase::RunAllPendingInMessageLoop() {
-#if !defined(OS_MACOSX)
-  message_loop_.RunAllPendingWithDispatcher(
-      RootWindow::GetInstance()->GetDispatcher());
-#endif
+  helper_.RunAllPendingInMessageLoop(root_window());
 }
 
 }  // namespace test

@@ -9,11 +9,15 @@
 
 #include "net/base/ip_endpoint.h"
 #include "remoting/proto/internal.pb.h"
+#include "remoting/proto/video.pb.h"
 #include "remoting/protocol/client_stub.h"
+#include "remoting/protocol/clipboard_stub.h"
 #include "remoting/protocol/connection_to_client.h"
+#include "remoting/protocol/host_event_stub.h"
 #include "remoting/protocol/host_stub.h"
 #include "remoting/protocol/input_stub.h"
 #include "remoting/protocol/session.h"
+#include "remoting/protocol/transport.h"
 #include "remoting/protocol/video_stub.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
@@ -43,18 +47,30 @@ class MockConnectionToClientEventHandler :
   MockConnectionToClientEventHandler();
   virtual ~MockConnectionToClientEventHandler();
 
-  MOCK_METHOD1(OnConnectionOpened, void(ConnectionToClient* connection));
-  MOCK_METHOD1(OnConnectionClosed, void(ConnectionToClient* connection));
-  MOCK_METHOD2(OnConnectionFailed, void(ConnectionToClient* connection,
-                                        Session::Error error));
+  MOCK_METHOD1(OnConnectionAuthenticated, void(ConnectionToClient* connection));
+  MOCK_METHOD1(OnConnectionChannelsConnected,
+               void(ConnectionToClient* connection));
+  MOCK_METHOD2(OnConnectionClosed, void(ConnectionToClient* connection,
+                                        ErrorCode error));
   MOCK_METHOD2(OnSequenceNumberUpdated, void(ConnectionToClient* connection,
                                              int64 sequence_number));
-  MOCK_METHOD3(OnClientIpAddress, void(ConnectionToClient* connection,
-                                       const std::string& channel_name,
-                                       const net::IPEndPoint& end_point));
+  MOCK_METHOD3(OnRouteChange, void(ConnectionToClient* connection,
+                                   const std::string& channel_name,
+                                   const TransportRoute& route));
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockConnectionToClientEventHandler);
+};
+
+class MockClipboardStub : public ClipboardStub {
+ public:
+  MockClipboardStub();
+  virtual ~MockClipboardStub();
+
+  MOCK_METHOD1(InjectClipboardEvent, void(const ClipboardEvent& event));
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(MockClipboardStub);
 };
 
 class MockInputStub : public InputStub {
@@ -67,6 +83,19 @@ class MockInputStub : public InputStub {
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockInputStub);
+};
+
+class MockHostEventStub : public HostEventStub {
+ public:
+  MockHostEventStub();
+  virtual ~MockHostEventStub();
+
+  MOCK_METHOD1(InjectClipboardEvent, void(const ClipboardEvent& event));
+  MOCK_METHOD1(InjectKeyEvent, void(const KeyEvent& event));
+  MOCK_METHOD1(InjectMouseEvent, void(const MouseEvent& event));
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(MockHostEventStub);
 };
 
 class MockHostStub : public HostStub {
@@ -92,8 +121,13 @@ class MockVideoStub : public VideoStub {
   MockVideoStub();
   virtual ~MockVideoStub();
 
-  MOCK_METHOD2(ProcessVideoPacket, void(const VideoPacket* video_packet,
-                                        const base::Closure& done));
+  MOCK_METHOD2(ProcessVideoPacketPtr, void(const VideoPacket* video_packet,
+                                           const base::Closure& done));
+  virtual void ProcessVideoPacket(scoped_ptr<VideoPacket> video_packet,
+                                  const base::Closure& done) {
+    ProcessVideoPacketPtr(video_packet.get(), done);
+  }
+
   MOCK_METHOD0(GetPendingPackets, int());
 
  private:
@@ -109,7 +143,7 @@ class MockSession : public Session {
                void(const StateChangeCallback& callback));
   MOCK_METHOD1(SetRouteChangeCallback,
                void(const RouteChangeCallback& callback));
-  MOCK_METHOD0(error, Session::Error());
+  MOCK_METHOD0(error, ErrorCode());
   MOCK_METHOD2(CreateStreamChannel, void(
       const std::string& name, const StreamChannelCallback& callback));
   MOCK_METHOD2(CreateDatagramChannel, void(

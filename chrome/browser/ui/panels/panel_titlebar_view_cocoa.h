@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -33,6 +33,16 @@ enum PanelDragState {
   PANEL_DRAG_SUPPRESSED  // Ignore drag events until PANEL_DRAG_CAN_START.
 };
 
+// This view overlays the titlebar on top. It is used to intercept
+// mouse input to prevent reordering of the other browser windows when clicking
+// on the titlebar (to minimize or reorder) while in a docked strip.
+@interface PanelTitlebarOverlayView : NSView {
+ @private
+  IBOutlet PanelWindowControllerCocoa* controller_;
+  BOOL disableReordering_;
+}
+@end
+
 @interface RepaintAnimation : NSAnimation {
  @private
   NSView* targetView_;
@@ -58,7 +68,7 @@ enum PanelDragState {
   ScopedCrTrackingArea closeButtonTrackingArea_;
   PanelDragState dragState_;
   BOOL isDrawingAttention_;
-  NSPoint dragStartLocation_;
+  NSPoint dragStartLocation_;  // in cocoa's screen coordinates.
   // "Glint" animation is used in "Draw Attention" mode.
   scoped_nsobject<RepaintAnimation> glintAnimation_;
   scoped_nsobject<NSTimer> glintAnimationTimer_;
@@ -89,9 +99,10 @@ enum PanelDragState {
 - (void)didChangeMainWindow:(NSNotification*)notification;
 
 // Helpers to control title drag operation, called from more then one place.
-- (void)startDrag;
+// |mouseLocation| is in Cocoa's screen coordinates.
+- (void)startDrag:(NSPoint)mouseLocation;
 - (void)endDrag:(BOOL)cancelled;
-- (void)dragWithDeltaX:(int)deltaX;
+- (void)drag:(NSPoint)mouseLocation;
 
   // Update the visibility of settings button.
 - (void)updateSettingsButtonVisibility:(BOOL)mouseOverWindow;
@@ -104,6 +115,9 @@ enum PanelDragState {
 - (void)startGlintAnimation;
 - (void)restartGlintAnimation:(NSTimer*)timer;
 - (void)stopGlintAnimation;
+
+// Returns width of titlebar when shown in "icon only" mode.
+- (int)iconOnlyWidthInScreenCoordinates;
 
 @end  // @interface PanelTitlebarView
 
@@ -118,10 +132,11 @@ enum PanelDragState {
 - (void)simulateCloseButtonClick;
 
 // NativePanelTesting support.
-- (void)pressLeftMouseButtonTitlebar;
-- (void)releaseLeftMouseButtonTitlebar;
-- (void)dragTitlebarDeltaX:(double)delta_x
-                    deltaY:(double)delta_y;
+// |mouseLocation| is in Cocoa's screen coordinates.
+- (void)pressLeftMouseButtonTitlebar:(NSPoint)mouseLocation
+                           modifiers:(int)modifierFlags;
+- (void)releaseLeftMouseButtonTitlebar:(int)modifierFlags;
+- (void)dragTitlebar:(NSPoint)mouseLocation;
 - (void)cancelDragTitlebar;
 - (void)finishDragTitlebar;
 

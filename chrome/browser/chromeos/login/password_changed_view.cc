@@ -7,7 +7,6 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/chromeos/login/rounded_rect_painter.h"
 #include "chrome/browser/chromeos/login/textfield_with_margin.h"
-#include "chrome/browser/chromeos/login/wizard_accessibility_helper.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "ui/base/keycodes/keyboard_codes.h"
@@ -59,7 +58,7 @@ views::View* PasswordChangedView::GetInitiallyFocusedView() {
 }
 
 ui::ModalType PasswordChangedView::GetModalType() const {
-  return ui::MODAL_TYPE_WINDOW;
+  return ui::MODAL_TYPE_SYSTEM;
 }
 
 views::View* PasswordChangedView::GetContentsView() {

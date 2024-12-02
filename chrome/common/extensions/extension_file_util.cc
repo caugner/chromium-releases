@@ -8,7 +8,7 @@
 #include <vector>
 
 #include "base/file_util.h"
-#include "base/json/json_value_serializer.h"
+#include "base/json/json_file_value_serializer.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
 #include "base/path_service.h"
@@ -19,7 +19,7 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_action.h"
-#include "chrome/common/extensions/extension_constants.h"
+#include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/extensions/extension_l10n_util.h"
 #include "chrome/common/extensions/extension_message_bundle.h"
 #include "chrome/common/extensions/extension_messages.h"
@@ -124,6 +124,15 @@ scoped_refptr<Extension> LoadExtension(const FilePath& extension_path,
                                        Extension::Location location,
                                        int flags,
                                        std::string* error) {
+  return LoadExtension(
+      extension_path, std::string(), location, flags, error);
+}
+
+scoped_refptr<Extension> LoadExtension(const FilePath& extension_path,
+                                       const std::string& extension_id,
+                                       Extension::Location location,
+                                       int flags,
+                                       std::string* error) {
   scoped_ptr<DictionaryValue> manifest(LoadManifest(extension_path, error));
   if (!manifest.get())
     return NULL;
@@ -136,6 +145,7 @@ scoped_refptr<Extension> LoadExtension(const FilePath& extension_path,
       location,
       *manifest,
       flags,
+      extension_id,
       error));
   if (!extension.get())
     return NULL;
@@ -622,8 +632,10 @@ FilePath GetUserDataTempDir() {
   // explicit thread check.
   base::ThreadRestrictions::AssertIOAllowed();
 
-  // Getting chrome::DIR_USER_DATA_TEMP is failing.  Use histogram to see why.
-  // TODO(skerner): Fix the problem, and remove this code.  crbug.com/70056
+  // The following enum used to be sent as a histogram to diagnose issues
+  // accessing the temp path (crbug/70056).  The histogram is gone, but
+  // the enum makes it clear exactly why the temp directory can not be
+  // accessed, which may aid debugging in the future.
   enum DirectoryCreationResult {
     SUCCESS = 0,
 
@@ -670,10 +682,6 @@ FilePath GetUserDataTempDir() {
     // Successfully created the Temp directory.
     result = SUCCESS;
   }
-
-  UMA_HISTOGRAM_ENUMERATION("Extensions.GetUserDataTempDir",
-                            result,
-                            NUM_DIRECTORY_CREATION_RESULTS);
 
   if (result == SUCCESS)
     return temp_path;

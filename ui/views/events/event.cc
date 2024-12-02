@@ -20,9 +20,6 @@ Event::Event(ui::EventType type, int flags)
       flags_(flags) {
   // Safely initialize the pointer/struct to null/empty.
   memset(&native_event_, 0, sizeof(native_event_));
-#if defined(TOOLKIT_USES_GTK)
-  gdk_event_ = NULL;
-#endif
 }
 
 Event::Event(const NativeEvent& native_event, ui::EventType type, int flags)
@@ -30,9 +27,6 @@ Event::Event(const NativeEvent& native_event, ui::EventType type, int flags)
       type_(type),
       time_stamp_(base::Time::NowFromSystemTime()),
       flags_(flags) {
-#if defined(TOOLKIT_USES_GTK)
-  gdk_event_ = NULL;
-#endif
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -148,6 +142,12 @@ MouseWheelEvent::MouseWheelEvent(const NativeEvent& native_event)
       offset_(ui::GetMouseWheelOffset(native_event)) {
 }
 #endif
+
+MouseWheelEvent::MouseWheelEvent(const ScrollEvent& scroll_event)
+    : MouseEvent(scroll_event.native_event()),
+      offset_(scroll_event.y_offset()) {
+  set_type(ui::ET_MOUSEWHEEL);
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 // TouchEvent, public:

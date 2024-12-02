@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -76,6 +76,7 @@ class CONTENT_EXPORT URLFetcher {
     HEAD,
     DELETE_REQUEST,   // DELETE is already taken on Windows.
                       // <winnt.h> defines a DELETE macro.
+    PUT,
   };
 
   // |url| is the URL to send the request to.
@@ -91,7 +92,7 @@ class CONTENT_EXPORT URLFetcher {
   static URLFetcher* Create(int id,
                             const GURL& url,
                             RequestType request_type,
-                            content::URLFetcherDelegate* d);
+                            URLFetcherDelegate* d);
 
   // Cancels all existing URLFetchers.  Will notify the URLFetcherDelegates.
   // Note that any new URLFetchers created while this is running will not be
@@ -139,8 +140,14 @@ class CONTENT_EXPORT URLFetcher {
 
   // Set extra headers on the request.  Must be called before the request
   // is started.
+  // This replaces the entire extra request headers.
   virtual void SetExtraRequestHeaders(
       const std::string& extra_request_headers) = 0;
+
+  // Add header (with format field-name ":" [ field-value ]) to the request
+  // headers.  Must be called before the request is started.
+  // This appends the header to the current extra request headers.
+  virtual void AddExtraRequestHeader(const std::string& header_line) = 0;
 
   virtual void GetExtraRequestHeaders(net::HttpRequestHeaders* headers) = 0;
 
@@ -148,6 +155,12 @@ class CONTENT_EXPORT URLFetcher {
   // request is started.
   virtual void SetRequestContext(
       net::URLRequestContextGetter* request_context_getter) = 0;
+
+  // Mark URLRequests started by the URLFetcher to stem from the given render
+  // view.
+  virtual void AssociateWithRenderView(const GURL& first_party_for_cookies,
+                                       int render_process_id,
+                                       int render_view_id) = 0;
 
   // If |retry| is false, 5xx responses will be propagated to the observer,
   // if it is true URLFetcher will automatically re-execute the request,
@@ -162,8 +175,20 @@ class CONTENT_EXPORT URLFetcher {
   virtual base::TimeDelta GetBackoffDelay() const = 0;
 
   // By default, the response is saved in a string. Call this method to save the
+  // response to a file instead. Must be called before Start().
+  // |file_message_loop_proxy| will be used for all file operations.
+  // To save to a temporary file, use SaveResponseToTemporaryFile().
+  // The created file is removed when the URLFetcher is deleted unless you
+  // take ownership by calling GetResponseAsFilePath().
+  virtual void SaveResponseToFileAtPath(
+      const FilePath& file_path,
+      scoped_refptr<base::MessageLoopProxy> file_message_loop_proxy) = 0;
+
+  // By default, the response is saved in a string. Call this method to save the
   // response to a temporary file instead. Must be called before Start().
   // |file_message_loop_proxy| will be used for all file operations.
+  // The created file is removed when the URLFetcher is deleted unless you
+  // take ownership by calling GetResponseAsFilePath().
   virtual void SaveResponseToTemporaryFile(
       scoped_refptr<base::MessageLoopProxy> file_message_loop_proxy) = 0;
 
@@ -184,10 +209,6 @@ class CONTENT_EXPORT URLFetcher {
   // Start the request.  After this is called, you may not change any other
   // settings.
   virtual void Start() = 0;
-
-  // Restarts the URLFetcher with a new URLRequestContextGetter.
-  virtual void StartWithRequestContextGetter(
-      net::URLRequestContextGetter* request_context_getter) = 0;
 
   // Return the URL that we were asked to fetch.
   virtual const GURL& GetOriginalURL() const = 0;
@@ -220,7 +241,7 @@ class CONTENT_EXPORT URLFetcher {
 
   // Get the path to the file containing the response body. Returns false
   // if the response body was not saved to a file. If take_ownership is
-  // true, caller takes responsibility for the temp file, and it will not
+  // true, caller takes responsibility for the file, and it will not
   // be removed once the URLFetcher is destroyed.  User should not take
   // ownership more than once, or call this method after taking ownership.
   virtual bool GetResponseAsFilePath(bool take_ownership,

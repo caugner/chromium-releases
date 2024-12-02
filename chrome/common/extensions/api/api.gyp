@@ -3,22 +3,33 @@
 # found in the LICENSE file.
 
 {
-  'variables': {
-    'chromium_code': 1,
-    'json_schema_files': [
-      'permissions.json',
-    ],
-    'cc_dir': 'chrome/common/extensions/api',
-    'root_namespace': 'extensions::api',
-  },
   'targets': [
     {
       'target_name': 'api',
       'type': 'static_library',
       'sources': [
+        '<@(idl_schema_files)',
         '<@(json_schema_files)',
       ],
-      'includes': ['../../../../build/json_schema_compile.gypi'],
+      'includes': [
+        '../../../../build/json_schema_bundle_compile.gypi',
+        '../../../../build/json_schema_compile.gypi',
+      ],
+      'variables': {
+        'chromium_code': 1,
+        'json_schema_files': [
+          'experimental.declarative.json',
+          'permissions.json',
+          'tabs.json',
+          'windows.json',
+        ],
+        'idl_schema_files': [
+          'experimental.bluetooth.idl',
+          'experimental.dns.idl',
+        ],
+        'cc_dir': 'chrome/common/extensions/api',
+        'root_namespace': 'extensions::api',
+      },
     },
   ],
 }

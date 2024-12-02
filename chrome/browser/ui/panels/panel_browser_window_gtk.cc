@@ -10,6 +10,7 @@
 #include "chrome/browser/ui/panels/panel.h"
 #include "chrome/browser/ui/panels/panel_bounds_animation.h"
 #include "chrome/browser/ui/panels/panel_manager.h"
+#include "chrome/browser/ui/panels/panel_strip.h"
 #include "chrome/browser/ui/panels/panel_settings_menu_model.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_service.h"
@@ -37,6 +38,10 @@ const char* const kDrawAttentionTitleMarkupPrefix =
     "<span fgcolor='#ffffff'>";
 const char* const kDrawAttentionTitleMarkupSuffix = "</span>";
 
+// Set minimium width for window really small so it can be reduced to icon only
+// size in overflow expansion state.
+const int kMinWindowWidth = 2;
+
 }
 
 NativePanel* Panel::CreateNativePanel(Browser* browser, Panel* panel,
@@ -58,26 +63,17 @@ PanelBrowserWindowGtk::PanelBrowserWindowGtk(Browser* browser,
       panel_(panel),
       bounds_(bounds),
       window_size_known_(false),
-      is_drawing_attention_(false) {
+      is_drawing_attention_(false),
+      window_has_mouse_(false),
+      show_close_button_(true) {
 }
 
 PanelBrowserWindowGtk::~PanelBrowserWindowGtk() {
-  if (drag_widget_) {
-    // Terminate the grab if we have it. We could do this using any widget,
-    // |drag_widget_| is just convenient.
-    gtk_grab_add(drag_widget_);
-    gtk_grab_remove(drag_widget_);
-    DestroyDragWidget();
-  }
-  panel_->OnNativePanelClosed();
-  ui::WorkAreaWatcherX::RemoveObserver(this);
+  CleanupDragDrop();
 }
 
 void PanelBrowserWindowGtk::Init() {
   BrowserWindowGtk::Init();
-
-  // Keep the window docked to the bottom of the screen on resizes.
-  gtk_window_set_gravity(window(), GDK_GRAVITY_SOUTH_EAST);
 
   // Keep the window always on top.
   gtk_window_set_keep_above(window(), TRUE);
@@ -94,7 +90,20 @@ void PanelBrowserWindowGtk::Init() {
   g_signal_connect(titlebar_widget(), "button-release-event",
                    G_CALLBACK(OnTitlebarButtonReleaseEventThunk), this);
 
+  g_signal_connect(window_, "enter-notify-event",
+                   G_CALLBACK(OnEnterNotifyThunk), this);
+  g_signal_connect(window_, "leave-notify-event",
+                   G_CALLBACK(OnLeaveNotifyThunk), this);
+
   ui::WorkAreaWatcherX::AddObserver(this);
+  registrar_.Add(
+      this,
+      chrome::NOTIFICATION_PANEL_CHANGED_LAYOUT_MODE,
+      content::Source<Panel>(panel_.get()));
+  registrar_.Add(
+      this,
+      chrome::NOTIFICATION_WINDOW_CLOSED,
+      content::Source<GtkWindow>(window()));
 }
 
 bool PanelBrowserWindowGtk::GetWindowEdge(int x, int y, GdkWindowEdge* edge) {
@@ -126,7 +135,7 @@ void PanelBrowserWindowGtk::SetGeometryHints() {
   // Set minimum height the window can be set to.
   GdkGeometry hints;
   hints.min_height = Panel::kMinimizedPanelHeight;
-  hints.min_width = panel_->min_size().width();
+  hints.min_width = kMinWindowWidth;
   gtk_window_set_geometry_hints(
       window(), GTK_WIDGET(window()), &hints, GDK_HINT_MIN_SIZE);
 
@@ -172,33 +181,57 @@ void PanelBrowserWindowGtk::ShowSettingsMenu(GtkWidget* widget,
   settings_menu_->PopupForWidget(widget, event->button, event->time);
 }
 
+void PanelBrowserWindowGtk::DrawPopupFrame(cairo_t* cr,
+                                           GtkWidget* widget,
+                                           GdkEventExpose* event) {
+  BrowserWindowGtk::DrawPopupFrame(cr, widget, event);
+
+  if (is_drawing_attention_)
+    DrawAttentionFrame(cr, widget, event);
+}
+
 void PanelBrowserWindowGtk::DrawCustomFrame(cairo_t* cr,
                                             GtkWidget* widget,
                                             GdkEventExpose* event) {
   BrowserWindowGtk::DrawCustomFrame(cr, widget, event);
 
-  if (is_drawing_attention_) {
-    cairo_set_source_rgb(cr, kDrawAttentionRFraction,
-                         kDrawAttentionGFraction,
-                         kDrawAttentionBFraction);
+  if (is_drawing_attention_)
+    DrawAttentionFrame(cr, widget, event);
+}
 
-    GdkRectangle dest_rectangle = GetTitlebarRectForDrawAttention();
-    GdkRegion* dest_region = gdk_region_rectangle(&dest_rectangle);
+void PanelBrowserWindowGtk::DrawAttentionFrame(cairo_t* cr,
+                                               GtkWidget* widget,
+                                               GdkEventExpose* event) {
+  cairo_set_source_rgb(cr, kDrawAttentionRFraction,
+                       kDrawAttentionGFraction,
+                       kDrawAttentionBFraction);
 
-    gdk_region_intersect(dest_region, event->region);
-    gdk_cairo_region(cr, dest_region);
+  GdkRectangle dest_rectangle = GetTitlebarRectForDrawAttention();
+  GdkRegion* dest_region = gdk_region_rectangle(&dest_rectangle);
 
-    cairo_clip(cr);
-    cairo_paint(cr);
-    gdk_region_destroy(dest_region);
-  }
+  gdk_region_intersect(dest_region, event->region);
+  gdk_cairo_region(cr, dest_region);
+
+  cairo_clip(cr);
+  cairo_paint(cr);
+  gdk_region_destroy(dest_region);
 }
 
 void PanelBrowserWindowGtk::ActiveWindowChanged(GdkWindow* active_window) {
   bool was_active = IsActive();
   BrowserWindowGtk::ActiveWindowChanged(active_window);
-  if (was_active == IsActive())  // State didn't change.
+  if (!window() || was_active == IsActive())  // State didn't change.
     return;
+
+  PanelStrip* panel_strip = panel_->panel_strip();
+  if (panel_strip) {
+    if ((IsActive() || window_has_mouse_) &&
+        panel_strip->type() != PanelStrip::IN_OVERFLOW) {
+      titlebar()->ShowPanelWrenchButton();
+    } else {
+      titlebar()->HidePanelWrenchButton();
+    }
+  }
 
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_PANEL_CHANGED_ACTIVE_STATUS,
@@ -227,8 +260,41 @@ BrowserWindowGtk::TitleDecoration PanelBrowserWindowGtk::GetWindowTitle(
   }
 }
 
+bool PanelBrowserWindowGtk::ShouldShowCloseButton() const {
+  return show_close_button_;
+}
+
 void PanelBrowserWindowGtk::WorkAreaChanged() {
   panel_->manager()->OnDisplayChanged();
+}
+
+void PanelBrowserWindowGtk::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
+  switch (type) {
+    case chrome::NOTIFICATION_PANEL_CHANGED_LAYOUT_MODE:
+      titlebar()->UpdateCustomFrame(true);
+      break;
+    case chrome::NOTIFICATION_WINDOW_CLOSED:
+      // Cleanup.
+      if (bounds_animator_.get())
+        bounds_animator_.reset();
+
+      CleanupDragDrop();
+      if (drag_widget_) {
+        // Terminate the grab if we have it. We could do this using any widget,
+        // |drag_widget_| is just convenient.
+        gtk_grab_add(drag_widget_);
+        gtk_grab_remove(drag_widget_);
+        DestroyDragWidget();
+      }
+      panel_->OnNativePanelClosed();
+      ui::WorkAreaWatcherX::RemoveObserver(this);
+      break;
+  }
+
+  BrowserWindowGtk::Observe(type, source, details);
 }
 
 void PanelBrowserWindowGtk::ShowPanel() {
@@ -256,31 +322,49 @@ void PanelBrowserWindowGtk::SetBoundsInternal(const gfx::Rect& bounds,
   if (bounds == bounds_)
     return;
 
-  if (drag_widget_ || !animate) {
-    DCHECK(!bounds_animator_.get() || !bounds_animator_->is_animating());
-    // If the current panel is being dragged, it should just move with the
-    // user drag, we should not animate.
-    gtk_window_move(window(), bounds.x(), bounds.y());
+  bool old_show_close_button = show_close_button_;
+  show_close_button_ =
+      bounds.width() > panel_->manager()->overflow_strip_width();
+  if (show_close_button_ != old_show_close_button)
+    titlebar()->UpdateCustomFrame(true);
+
+  if (!bounds_.width() || !bounds_.height()) {
+    // If the old bounds are 0 in either dimension, we need to show the
+    // window as it would now be hidden.
+    gtk_widget_show(GTK_WIDGET(window()));
+    gdk_window_move(gtk_widget_get_window(GTK_WIDGET(window())), bounds_.x(),
+                    bounds_.y());
+  }
+
+  if (!animate) {
+    // If no animation is in progress, apply bounds change instantly. Otherwise,
+    // continue the animation with new target bounds.
+    if (!IsAnimatingBounds()) {
+      if (bounds_.origin() != bounds.origin())
+        gtk_window_move(window(), bounds.x(), bounds.y());
+      if (bounds_.size() != bounds.size())
+        ResizeWindow(bounds.width(), bounds.height());
+    }
   } else if (window_size_known_) {
     StartBoundsAnimation(bounds_, bounds);
   }
+
   // If window size is not known, wait till the size is known before starting
   // the animation.
 
   bounds_ = bounds;
 }
 
-void PanelBrowserWindowGtk::ClosePanel() {
-  // Cancel any currently running animation since we're closing down.
-  if (bounds_animator_.get())
-    bounds_animator_.reset();
+void PanelBrowserWindowGtk::ResizeWindow(int width, int height) {
+  // Gtk does not allow window size to be set to 0, so make it 1 if it's 0.
+  gtk_window_resize(window(), std::max(width, 1), std::max(height, 1));
+}
 
+void PanelBrowserWindowGtk::ClosePanel() {
   Close();
 }
 
 void PanelBrowserWindowGtk::ActivatePanel() {
-  gdk_window_set_accept_focus(
-      gtk_widget_get_window(GTK_WIDGET(window())), TRUE);
   Activate();
 }
 
@@ -292,15 +376,15 @@ void PanelBrowserWindowGtk::DeactivatePanel() {
   } else {
     Deactivate();
   }
-
-  if (panel_->expansion_state() == Panel::MINIMIZED) {
-    gdk_window_set_accept_focus(
-        gtk_widget_get_window(GTK_WIDGET(window())), FALSE);
-  }
 }
 
 bool PanelBrowserWindowGtk::IsPanelActive() const {
   return IsActive();
+}
+
+void PanelBrowserWindowGtk::PreventActivationByOS(bool prevent_activation) {
+  gtk_window_set_accept_focus(window(), !prevent_activation);
+  return;
 }
 
 gfx::NativeWindow PanelBrowserWindowGtk::GetNativePanelHandle() {
@@ -344,6 +428,8 @@ void PanelBrowserWindowGtk::PanelPaste() {
 }
 
 void PanelBrowserWindowGtk::DrawAttention(bool draw_attention) {
+  DCHECK((panel_->attention_mode() & Panel::USE_PANEL_ATTENTION) != 0);
+
   if (is_drawing_attention_ == draw_attention)
     return;
 
@@ -354,6 +440,9 @@ void PanelBrowserWindowGtk::DrawAttention(bool draw_attention) {
       gtk_widget_get_window(GTK_WIDGET(window())), &rect, TRUE);
 
   UpdateTitleBar();
+
+  if ((panel_->attention_mode() & Panel::USE_SYSTEM_ATTENTION) != 0)
+    ::BrowserWindowGtk::FlashFrame(draw_attention);
 }
 
 bool PanelBrowserWindowGtk::IsDrawingAttention() const {
@@ -369,9 +458,6 @@ bool PanelBrowserWindowGtk::PreHandlePanelKeyboardEvent(
 void PanelBrowserWindowGtk::FullScreenModeChanged(bool is_full_screen) {
   // Nothing to do here as z-order rules for panels ensures that they're below
   // any app running in full screen mode.
-
-  // Full screen detection should not have been enabled for Linux.
-  NOTREACHED();
 }
 
 void PanelBrowserWindowGtk::HandlePanelKeyboardEvent(
@@ -388,16 +474,24 @@ void PanelBrowserWindowGtk::DestroyPanelBrowser() {
 }
 
 gfx::Size PanelBrowserWindowGtk::IconOnlySize() const {
-  // TODO(prasdt): to be implemented.
-  return gfx::Size();
+  GtkAllocation allocation;
+  gtk_widget_get_allocation(titlebar_widget(), &allocation);
+  return gfx::Size(titlebar()->IconOnlyWidth(), allocation.height);
 }
 
 void PanelBrowserWindowGtk::EnsurePanelFullyVisible() {
-  // TODO(prasdt): to be implemented.
+  gtk_window_present(window());
 }
 
 void PanelBrowserWindowGtk::SetPanelAppIconVisibility(bool visible) {
-  // TODO(prasdt): to be implemented.
+  return;
+}
+
+void PanelBrowserWindowGtk::SetPanelAlwaysOnTop(bool on_top) {
+  gtk_window_set_keep_above(window(), on_top);
+}
+
+void PanelBrowserWindowGtk::EnableResizeByMouse(bool enable) {
 }
 
 gfx::Size PanelBrowserWindowGtk::WindowSizeFromContentSize(
@@ -422,14 +516,11 @@ int PanelBrowserWindowGtk::TitleOnlyHeight() const {
 
 void PanelBrowserWindowGtk::StartBoundsAnimation(
     const gfx::Rect& from_bounds, const gfx::Rect& to_bounds) {
-  if (bounds_animator_.get() && bounds_animator_->is_animating()) {
-    animation_start_bounds_ = last_animation_progressed_bounds_;
-  } else {
-    animation_start_bounds_ = from_bounds;
-  }
+  animation_start_bounds_ = IsAnimatingBounds() ?
+      last_animation_progressed_bounds_ : from_bounds;
 
   bounds_animator_.reset(new PanelBoundsAnimation(
-      this, panel_.get(), from_bounds, to_bounds));
+      this, panel_.get(), animation_start_bounds_, to_bounds));
 
   bounds_animator_->Start();
   last_animation_progressed_bounds_ = animation_start_bounds_;
@@ -461,6 +552,7 @@ void PanelBrowserWindowGtk::DidProcessEvent(GdkEvent* event) {
   gint old_y = static_cast<gint>(old_y_double);
 
   if (!drag_widget_ &&
+      !IsAnimatingBounds() &&
       gtk_drag_check_threshold(titlebar_widget(), old_x,
                                old_y, new_x, new_y)) {
     CreateDragWidget();
@@ -471,11 +563,11 @@ void PanelBrowserWindowGtk::DidProcessEvent(GdkEvent* event) {
       // it here to reduce the reference count.
       gtk_target_list_unref(list);
     }
-    panel_->manager()->StartDragging(panel_.get());
+    panel_->manager()->StartDragging(panel_.get(), gfx::Point(old_x, old_y));
   }
 
   if (drag_widget_) {
-    panel_->manager()->Drag(new_x - old_x);
+    panel_->manager()->Drag(gfx::Point(new_x, new_y));
     gdk_event_free(last_mouse_down_);
     last_mouse_down_ = gdk_event_copy(event);
   }
@@ -483,6 +575,11 @@ void PanelBrowserWindowGtk::DidProcessEvent(GdkEvent* event) {
 
 void PanelBrowserWindowGtk::AnimationEnded(const ui::Animation* animation) {
   titlebar()->SendEnterNotifyToCloseButtonIfUnderMouse();
+
+  // If the final size is 0 in either dimension, hide the window as gtk does
+  // not allow the window size to be 0.
+  if (!bounds_.width() || !bounds_.height())
+    gtk_widget_hide(GTK_WIDGET(window()));
 
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_PANEL_BOUNDS_ANIMATIONS_FINISHED,
@@ -492,33 +589,15 @@ void PanelBrowserWindowGtk::AnimationEnded(const ui::Animation* animation) {
 
 void PanelBrowserWindowGtk::AnimationProgressed(
     const ui::Animation* animation) {
-  DCHECK(!drag_widget_);
   DCHECK(window_size_known_);
 
   gfx::Rect new_bounds = bounds_animator_->CurrentValueBetween(
       animation_start_bounds_, bounds_);
 
-  // Resize if necessary.
-  if (animation_start_bounds_.size() != bounds_.size())
-    gtk_window_resize(window(), new_bounds.width(), new_bounds.height());
-
-  // Only move if bottom right corner will change.
-  // Panels use window gravity of GDK_GRAVITY_SOUTH_EAST which means the
-  // window is anchored to the bottom right corner on resize, making it
-  // unnecessary to move the window if the bottom right corner is unchanged.
-  // For example, when we minimize to the bottom, moving can actually
-  // result in the wrong behavior.
-  //   - Say window is 100x100 with x,y=900,900 on a 1000x1000 screen.
-  //   - Say you minimize the window to 100x3 and move it to 900,997 to keep it
-  //     anchored to the bottom.
-  //   - resize is an async operation and the window manager will decide that
-  //     the move will take the window off screen and it won't honor the
-  //     request.
-  //   - When resize finally happens, you'll have a 100x3 window a x,y=900,900.
-  bool move = (animation_start_bounds_.bottom() != bounds_.bottom()) ||
-              (animation_start_bounds_.right() != bounds_.right());
-  if (move)
-    gtk_window_move(window_, new_bounds.x(), new_bounds.y());
+  gdk_window_move_resize(gtk_widget_get_window(GTK_WIDGET(window())),
+                         new_bounds.x(), new_bounds.y(),
+                         std::max(new_bounds.width(), 1),  // 0 not allowed
+                         std::max(new_bounds.height(), 1));  // 0 not allowed
 
   last_animation_progressed_bounds_ = new_bounds;
 }
@@ -616,12 +695,23 @@ gboolean PanelBrowserWindowGtk::OnTitlebarButtonReleaseEvent(
 
   CleanupDragDrop();
 
-  if (panel_->expansion_state() == Panel::EXPANDED) {
+  if (event->state & GDK_CONTROL_MASK) {
+    panel_->OnTitlebarClicked(panel::APPLY_TO_ALL);
+    return TRUE;
+  }
+
+  // TODO(jennb): Move remaining titlebar click handling out of here.
+  // (http://crbug.com/118431)
+  PanelStrip* panel_strip = panel_->panel_strip();
+  if (!panel_strip)
+    return TRUE;
+
+  if (panel_strip->type() == PanelStrip::DOCKED &&
+      panel_->expansion_state() == Panel::EXPANDED) {
     if (base::Time::Now() < disableMinimizeUntilTime_)
       return TRUE;
 
     panel_->SetExpansionState(Panel::MINIMIZED);
-
   } else {
     panel_->Activate();
   }
@@ -636,7 +726,7 @@ void PanelBrowserWindowGtk::HandleFocusIn(GtkWidget* widget,
   if (!is_drawing_attention_)
     return;
 
-  DrawAttention(false);
+  panel_->FlashFrame(false);
   DCHECK(panel_->expansion_state() == Panel::EXPANDED);
 
   disableMinimizeUntilTime_ = base::Time::Now() +
@@ -675,6 +765,36 @@ gboolean PanelBrowserWindowGtk::OnDragButtonReleased(GtkWidget* widget,
   return TRUE;
 }
 
+gboolean PanelBrowserWindowGtk::OnEnterNotify(GtkWidget* widget,
+                                              GdkEventCrossing* event) {
+  // Ignore if entered from a child widget.
+  if (event->detail == GDK_NOTIFY_INFERIOR)
+    return FALSE;
+
+  PanelStrip* panel_strip = panel_->panel_strip();
+  if (!panel_strip)
+    return FALSE;
+
+  if (window() && panel_strip->type() != PanelStrip::IN_OVERFLOW)
+    titlebar()->ShowPanelWrenchButton();
+
+  window_has_mouse_ = true;
+  return FALSE;
+}
+
+gboolean PanelBrowserWindowGtk::OnLeaveNotify(GtkWidget* widget,
+                                              GdkEventCrossing* event) {
+  // Ignore if left towards a child widget.
+  if (event->detail == GDK_NOTIFY_INFERIOR)
+    return FALSE;
+
+  if (window_ && !IsActive())
+    titlebar()->HidePanelWrenchButton();
+
+  window_has_mouse_ = false;
+  return FALSE;
+}
+
 // NativePanelTesting implementation.
 class NativePanelTestingGtk : public NativePanelTesting {
  public:
@@ -683,9 +803,10 @@ class NativePanelTestingGtk : public NativePanelTesting {
 
  private:
   virtual void PressLeftMouseButtonTitlebar(
-      const gfx::Point& point) OVERRIDE;
-  virtual void ReleaseMouseButtonTitlebar() OVERRIDE;
-  virtual void DragTitlebar(int delta_x, int delta_y) OVERRIDE;
+      const gfx::Point& mouse_location, panel::ClickModifier modifier) OVERRIDE;
+  virtual void ReleaseMouseButtonTitlebar(
+      panel::ClickModifier modifier) OVERRIDE;
+  virtual void DragTitlebar(const gfx::Point& mouse_location) OVERRIDE;
   virtual void CancelDragTitlebar() OVERRIDE;
   virtual void FinishDragTitlebar() OVERRIDE;
   virtual bool VerifyDrawingAttention() const OVERRIDE;
@@ -709,7 +830,7 @@ NativePanelTestingGtk::NativePanelTestingGtk(
 }
 
 void NativePanelTestingGtk::PressLeftMouseButtonTitlebar(
-    const gfx::Point& point) {
+    const gfx::Point& mouse_location, panel::ClickModifier modifier) {
   // If there is an animation, wait for it to finish as we don't handle button
   // clicks while animation is in progress.
   while (panel_browser_window_gtk_->IsAnimatingBounds())
@@ -717,8 +838,10 @@ void NativePanelTestingGtk::PressLeftMouseButtonTitlebar(
 
   GdkEvent* event = gdk_event_new(GDK_BUTTON_PRESS);
   event->button.button = 1;
-  event->button.x_root = point.x();
-  event->button.y_root = point.y();
+  event->button.x_root = mouse_location.x();
+  event->button.y_root = mouse_location.y();
+  if (modifier == panel::APPLY_TO_ALL)
+    event->button.state |= GDK_CONTROL_MASK;
   panel_browser_window_gtk_->OnTitlebarButtonPressEvent(
       panel_browser_window_gtk_->titlebar_widget(),
       reinterpret_cast<GdkEventButton*>(event));
@@ -726,24 +849,25 @@ void NativePanelTestingGtk::PressLeftMouseButtonTitlebar(
   MessageLoopForUI::current()->RunAllPending();
 }
 
-void NativePanelTestingGtk::ReleaseMouseButtonTitlebar() {
+void NativePanelTestingGtk::ReleaseMouseButtonTitlebar(
+    panel::ClickModifier modifier) {
   GdkEvent* event = gdk_event_new(GDK_BUTTON_RELEASE);
   event->button.button = 1;
+  if (modifier == panel::APPLY_TO_ALL)
+    event->button.state |= GDK_CONTROL_MASK;
   panel_browser_window_gtk_->OnTitlebarButtonReleaseEvent(
       panel_browser_window_gtk_->titlebar_widget(),
       reinterpret_cast<GdkEventButton*>(event));
   MessageLoopForUI::current()->RunAllPending();
 }
 
-void NativePanelTestingGtk::DragTitlebar(int delta_x, int delta_y) {
+void NativePanelTestingGtk::DragTitlebar(const gfx::Point& mouse_location) {
   // Prevent extra unwanted signals and focus grabs.
   panel_browser_window_gtk_->system_drag_disabled_for_testing_ = true;
 
   GdkEvent* event = gdk_event_new(GDK_MOTION_NOTIFY);
-  gdk_event_get_root_coords(panel_browser_window_gtk_->last_mouse_down_,
-      &event->motion.x_root, &event->motion.y_root);
-  event->motion.x_root += delta_x;
-  event->motion.y_root += delta_y;
+  event->motion.x_root = mouse_location.x();
+  event->motion.y_root = mouse_location.y();
   panel_browser_window_gtk_->DidProcessEvent(event);
   gdk_event_free(event);
   MessageLoopForUI::current()->RunAllPending();
@@ -779,10 +903,8 @@ bool NativePanelTestingGtk::VerifyActiveState(bool is_active) {
 void NativePanelTestingGtk::WaitForWindowCreationToComplete() const {
   while (!panel_browser_window_gtk_->window_size_known_)
     MessageLoopForUI::current()->RunAllPending();
-  while (panel_browser_window_gtk_->bounds_animator_.get() &&
-         panel_browser_window_gtk_->bounds_animator_->is_animating()) {
+  while (panel_browser_window_gtk_->IsAnimatingBounds())
     MessageLoopForUI::current()->RunAllPending();
-  }
 }
 
 bool NativePanelTestingGtk::IsWindowSizeKnown() const {

@@ -1,34 +1,56 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/chromeos/dbus/bluetooth_manager_client.h"
 
 #include "base/bind.h"
+#include "base/chromeos/chromeos_version.h"
 #include "base/logging.h"
-#include "chrome/browser/chromeos/system/runtime_environment.h"
+#include "chrome/browser/chromeos/dbus/bluetooth_property.h"
 #include "dbus/bus.h"
 #include "dbus/message.h"
+#include "dbus/object_path.h"
 #include "dbus/object_proxy.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 
 namespace chromeos {
+
+BluetoothManagerClient::Properties::Properties(dbus::ObjectProxy* object_proxy,
+                                               PropertyChangedCallback callback)
+    : BluetoothPropertySet(object_proxy,
+                           bluetooth_manager::kBluetoothManagerInterface,
+                           callback) {
+  RegisterProperty(bluetooth_manager::kAdaptersProperty, &adapters);
+}
+
+BluetoothManagerClient::Properties::~Properties() {
+}
+
 
 // The BluetoothManagerClient implementation used in production.
 class BluetoothManagerClientImpl : public BluetoothManagerClient {
  public:
   explicit BluetoothManagerClientImpl(dbus::Bus* bus)
       : weak_ptr_factory_(this),
-        bluetooth_manager_proxy_(NULL) {
-    VLOG(1) << "Creating BluetoothManagerClientImpl";
+        object_proxy_(NULL) {
+    DVLOG(1) << "Creating BluetoothManagerClientImpl";
 
+    // Create the object proxy.
     DCHECK(bus);
-
-    bluetooth_manager_proxy_ = bus->GetObjectProxy(
+    object_proxy_ = bus->GetObjectProxy(
         bluetooth_manager::kBluetoothManagerServiceName,
-        bluetooth_manager::kBluetoothManagerServicePath);
+        dbus::ObjectPath(bluetooth_manager::kBluetoothManagerServicePath));
 
-    bluetooth_manager_proxy_->ConnectToSignal(
+    object_proxy_->ConnectToSignal(
+        bluetooth_manager::kBluetoothManagerInterface,
+        bluetooth_manager::kAdapterAddedSignal,
+        base::Bind(&BluetoothManagerClientImpl::AdapterAddedReceived,
+                   weak_ptr_factory_.GetWeakPtr()),
+        base::Bind(&BluetoothManagerClientImpl::AdapterAddedConnected,
+                   weak_ptr_factory_.GetWeakPtr()));
+
+    object_proxy_->ConnectToSignal(
         bluetooth_manager::kBluetoothManagerInterface,
         bluetooth_manager::kAdapterRemovedSignal,
         base::Bind(&BluetoothManagerClientImpl::AdapterRemovedReceived,
@@ -36,61 +58,122 @@ class BluetoothManagerClientImpl : public BluetoothManagerClient {
         base::Bind(&BluetoothManagerClientImpl::AdapterRemovedConnected,
                    weak_ptr_factory_.GetWeakPtr()));
 
-    bluetooth_manager_proxy_->ConnectToSignal(
+    object_proxy_->ConnectToSignal(
         bluetooth_manager::kBluetoothManagerInterface,
         bluetooth_manager::kDefaultAdapterChangedSignal,
         base::Bind(&BluetoothManagerClientImpl::DefaultAdapterChangedReceived,
                    weak_ptr_factory_.GetWeakPtr()),
         base::Bind(&BluetoothManagerClientImpl::DefaultAdapterChangedConnected,
                    weak_ptr_factory_.GetWeakPtr()));
+
+    // Create the properties structure.
+    properties_ = new Properties(
+        object_proxy_,
+        base::Bind(&BluetoothManagerClientImpl::OnPropertyChanged,
+                   weak_ptr_factory_.GetWeakPtr()));
+
+    properties_->ConnectSignals();
+    properties_->GetAll();
   }
 
   virtual ~BluetoothManagerClientImpl() {
+    // Clean up the Properties structure.
+    delete properties_;
   }
 
   // BluetoothManagerClient override.
-  virtual void AddObserver(Observer* observer) {
-    VLOG(1) << "AddObserver";
+  virtual void AddObserver(Observer* observer) OVERRIDE {
     DCHECK(observer);
     observers_.AddObserver(observer);
   }
 
   // BluetoothManagerClient override.
-  virtual void RemoveObserver(Observer* observer) {
-    VLOG(1) << "RemoveObserver";
+  virtual void RemoveObserver(Observer* observer) OVERRIDE {
     DCHECK(observer);
     observers_.RemoveObserver(observer);
   }
 
   // BluetoothManagerClient override.
-  virtual void DefaultAdapter(const DefaultAdapterCallback& callback) {
-    LOG(INFO) << "DefaultAdapter";
+  virtual Properties* GetProperties() OVERRIDE {
+    return properties_;
+  }
 
+  // BluetoothManagerClient override.
+  virtual void DefaultAdapter(const AdapterCallback& callback) OVERRIDE {
     dbus::MethodCall method_call(
       bluetooth_manager::kBluetoothManagerInterface,
       bluetooth_manager::kDefaultAdapter);
 
-    DCHECK(bluetooth_manager_proxy_);
-    bluetooth_manager_proxy_->CallMethod(
+    DCHECK(object_proxy_);
+    object_proxy_->CallMethod(
       &method_call,
       dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
       base::Bind(&BluetoothManagerClientImpl::OnDefaultAdapter,
                  weak_ptr_factory_.GetWeakPtr(), callback));
   }
 
+  // BluetoothManagerClient override.
+  virtual void FindAdapter(const std::string& address,
+                           const AdapterCallback& callback) {
+    dbus::MethodCall method_call(
+      bluetooth_manager::kBluetoothManagerInterface,
+      bluetooth_manager::kFindAdapter);
+
+    dbus::MessageWriter writer(&method_call);
+    writer.AppendString(address);
+
+    DCHECK(object_proxy_);
+    object_proxy_->CallMethod(
+      &method_call,
+      dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
+      base::Bind(&BluetoothManagerClientImpl::OnFindAdapter,
+                 weak_ptr_factory_.GetWeakPtr(), callback));
+  }
+
  private:
+  // Called by BluetoothPropertySet when a property value is changed,
+  // either by result of a signal or response to a GetAll() or Get()
+  // call. Informs observers.
+  void OnPropertyChanged(const std::string& property_name) {
+    FOR_EACH_OBSERVER(BluetoothManagerClient::Observer, observers_,
+                      ManagerPropertyChanged(property_name));
+  }
+
+  // Called by dbus:: when an AdapterAdded signal is received.
+  void AdapterAddedReceived(dbus::Signal* signal) {
+    DCHECK(signal);
+    dbus::MessageReader reader(signal);
+    dbus::ObjectPath object_path;
+    if (!reader.PopObjectPath(&object_path)) {
+      LOG(WARNING) << "AdapterAdded signal has incorrect parameters: "
+                   << signal->ToString();
+      return;
+    }
+
+    DVLOG(1) << "Adapter added: " << object_path.value();
+    FOR_EACH_OBSERVER(Observer, observers_, AdapterAdded(object_path));
+  }
+
+  // Called by dbus:: when the AdapterAdded signal is initially connected.
+  void AdapterAddedConnected(const std::string& interface_name,
+                             const std::string& signal_name,
+                             bool success) {
+    LOG_IF(WARNING, !success) << "Failed to connect to AdapterAdded signal.";
+  }
+
   // Called by dbus:: when an AdapterRemoved signal is received.
   void AdapterRemovedReceived(dbus::Signal* signal) {
     DCHECK(signal);
     dbus::MessageReader reader(signal);
-    std::string adapter;
-    if (!reader.PopObjectPath(&adapter)) {
-      LOG(ERROR) << "AdapterRemoved signal has incorrect parameters: "
-          << signal->ToString();
+    dbus::ObjectPath object_path;
+    if (!reader.PopObjectPath(&object_path)) {
+      LOG(WARNING) << "AdapterRemoved signal has incorrect parameters: "
+                   << signal->ToString();
       return;
     }
-    VLOG(1) << "Adapter removed: " << adapter;
-    FOR_EACH_OBSERVER(Observer, observers_, AdapterRemoved(adapter));
+
+    DVLOG(1) << "Adapter removed: " << object_path.value();
+    FOR_EACH_OBSERVER(Observer, observers_, AdapterRemoved(object_path));
   }
 
   // Called by dbus:: when the AdapterRemoved signal is initially connected.
@@ -104,14 +187,15 @@ class BluetoothManagerClientImpl : public BluetoothManagerClient {
   void DefaultAdapterChangedReceived(dbus::Signal* signal) {
     DCHECK(signal);
     dbus::MessageReader reader(signal);
-    std::string adapter;
-    if (!reader.PopObjectPath(&adapter)) {
-      LOG(ERROR) << "DefaultAdapterChanged signal has incorrect parameters: "
-          << signal->ToString();
+    dbus::ObjectPath object_path;
+    if (!reader.PopObjectPath(&object_path)) {
+      LOG(WARNING) << "DefaultAdapterChanged signal has incorrect parameters: "
+                   << signal->ToString();
       return;
     }
-    VLOG(1) << "Default adapter changed: " << adapter;
-    FOR_EACH_OBSERVER(Observer, observers_, DefaultAdapterChanged(adapter));
+
+    DVLOG(1) << "Default adapter changed: " << object_path.value();
+    FOR_EACH_OBSERVER(Observer, observers_, DefaultAdapterChanged(object_path));
   }
 
   // Called by dbus:: when the DefaultAdapterChanged signal is initially
@@ -124,26 +208,47 @@ class BluetoothManagerClientImpl : public BluetoothManagerClient {
   }
 
   // Called when a response for DefaultAdapter() is received.
-  void OnDefaultAdapter(const DefaultAdapterCallback& callback,
+  void OnDefaultAdapter(const AdapterCallback& callback,
                         dbus::Response* response) {
     // Parse response.
     bool success = false;
-    std::string adapter;
+    dbus::ObjectPath object_path;
     if (response != NULL) {
       dbus::MessageReader reader(response);
-      if (!reader.PopObjectPath(&adapter)) {
-        LOG(ERROR) << "DefaultAdapter response has incorrect parameters: "
-            << response->ToString();
+      if (!reader.PopObjectPath(&object_path)) {
+        LOG(WARNING) << "DefaultAdapter response has incorrect parameters: "
+                     << response->ToString();
       } else {
         success = true;
-        LOG(INFO) << "OnDefaultAdapter: " << adapter;
       }
     } else {
-      LOG(ERROR) << "Failed to get default adapter.";
+      LOG(WARNING) << "Failed to get default adapter.";
     }
 
     // Notify client.
-    callback.Run(adapter, success);
+    callback.Run(object_path, success);
+  }
+
+  // Called when a response for FindAdapter() is received.
+  void OnFindAdapter(const AdapterCallback& callback,
+                     dbus::Response* response) {
+    // Parse response.
+    bool success = false;
+    dbus::ObjectPath object_path;
+    if (response != NULL) {
+      dbus::MessageReader reader(response);
+      if (!reader.PopObjectPath(&object_path)) {
+        LOG(WARNING) << "FindAdapter response has incorrect parameters: "
+                     << response->ToString();
+      } else {
+        success = true;
+      }
+    } else {
+      LOG(WARNING) << "Failed to find adapter.";
+    }
+
+    // Notify client.
+    callback.Run(object_path, success);
   }
 
   // Weak pointer factory for generating 'this' pointers that might live longer
@@ -151,7 +256,10 @@ class BluetoothManagerClientImpl : public BluetoothManagerClient {
   base::WeakPtrFactory<BluetoothManagerClientImpl> weak_ptr_factory_;
 
   // D-Bus proxy for BlueZ Manager interface.
-  dbus::ObjectProxy* bluetooth_manager_proxy_;
+  dbus::ObjectProxy* object_proxy_;
+
+  // Properties for BlueZ Manager interface.
+  Properties* properties_;
 
   // List of observers interested in event notifications from us.
   ObserverList<Observer> observers_;
@@ -164,16 +272,30 @@ class BluetoothManagerClientImpl : public BluetoothManagerClient {
 class BluetoothManagerClientStubImpl : public BluetoothManagerClient {
  public:
   // BluetoothManagerClient override.
-  virtual void AddObserver(Observer* observer) {
+  virtual void AddObserver(Observer* observer) OVERRIDE {
   }
 
   // BluetoothManagerClient override.
-  virtual void RemoveObserver(Observer* observer) {
+  virtual void RemoveObserver(Observer* observer) OVERRIDE {
   }
 
   // BluetoothManagerClient override.
-  virtual void DefaultAdapter(const DefaultAdapterCallback& callback) {
-    VLOG(1) << "Requested default adapter.";
+  virtual Properties* GetProperties() OVERRIDE {
+    VLOG(1) << "GetProperties";
+    return NULL;
+  }
+
+  // BluetoothManagerClient override.
+  virtual void DefaultAdapter(const AdapterCallback& callback) OVERRIDE {
+    VLOG(1) << "DefaultAdapter.";
+    callback.Run(dbus::ObjectPath(), false);
+  }
+
+  // BluetoothManagerClient override.
+  virtual void FindAdapter(const std::string& address,
+                           const AdapterCallback& callback) {
+    VLOG(1) << "FindAdapter: " << address;
+    callback.Run(dbus::ObjectPath(), false);
   }
 };
 
@@ -184,7 +306,7 @@ BluetoothManagerClient::~BluetoothManagerClient() {
 }
 
 BluetoothManagerClient* BluetoothManagerClient::Create(dbus::Bus* bus) {
-  if (system::runtime_environment::IsRunningOnChromeOS()) {
+  if (base::chromeos::IsRunningOnChromeOS()) {
     return new BluetoothManagerClientImpl(bus);
   } else {
     return new BluetoothManagerClientStubImpl();

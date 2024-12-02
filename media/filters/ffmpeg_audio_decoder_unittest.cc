@@ -7,11 +7,13 @@
 #include "base/bind.h"
 #include "base/message_loop.h"
 #include "base/stringprintf.h"
+#include "media/base/data_buffer.h"
 #include "media/base/mock_callback.h"
 #include "media/base/mock_filters.h"
 #include "media/base/test_data_util.h"
 #include "media/ffmpeg/ffmpeg_common.h"
 #include "media/filters/ffmpeg_audio_decoder.h"
+#include "media/filters/ffmpeg_decoder_unittest.h"
 #include "media/filters/ffmpeg_glue.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -28,7 +30,8 @@ ACTION_P(InvokeReadPacket, test) {
 class FFmpegAudioDecoderTest : public testing::Test {
  public:
   FFmpegAudioDecoderTest()
-      : decoder_(new FFmpegAudioDecoder(&message_loop_)),
+      : decoder_(new FFmpegAudioDecoder(base::Bind(&Identity<MessageLoop*>,
+                                                   &message_loop_))),
         demuxer_(new StrictMock<MockDemuxerStream>()) {
     CHECK(FFmpegGlue::GetInstance());
 
@@ -70,24 +73,19 @@ class FFmpegAudioDecoderTest : public testing::Test {
         .WillOnce(ReturnRef(config_));
 
     decoder_->Initialize(demuxer_,
-                         NewExpectedClosure(),
-                         base::Bind(&MockStatisticsCallback::OnStatistics,
-                                    base::Unretained(&statistics_callback_)));
+                         NewExpectedStatusCB(PIPELINE_OK),
+                         base::Bind(&MockStatisticsCB::OnStatistics,
+                                    base::Unretained(&statistics_cb_)));
 
     message_loop_.RunAllPending();
   }
 
-  void Stop() {
-    decoder_->Stop(NewExpectedClosure());
-    message_loop_.RunAllPending();
-  }
-
-  void ReadPacket(const DemuxerStream::ReadCallback& read_callback) {
+  void ReadPacket(const DemuxerStream::ReadCB& read_cb) {
     CHECK(!encoded_audio_.empty()) << "ReadPacket() called too many times";
 
     scoped_refptr<Buffer> buffer(encoded_audio_.front());
     encoded_audio_.pop_front();
-    read_callback.Run(buffer);
+    read_cb.Run(buffer);
   }
 
   void Read() {
@@ -117,7 +115,7 @@ class FFmpegAudioDecoderTest : public testing::Test {
   MessageLoop message_loop_;
   scoped_refptr<FFmpegAudioDecoder> decoder_;
   scoped_refptr<StrictMock<MockDemuxerStream> > demuxer_;
-  MockStatisticsCallback statistics_callback_;
+  MockStatisticsCB statistics_cb_;
 
   scoped_array<uint8> vorbis_extradata_;
   int vorbis_extradata_size_;
@@ -134,17 +132,6 @@ TEST_F(FFmpegAudioDecoderTest, Initialize) {
   EXPECT_EQ(16, decoder_->bits_per_channel());
   EXPECT_EQ(CHANNEL_LAYOUT_STEREO, decoder_->channel_layout());
   EXPECT_EQ(44100, decoder_->samples_per_second());
-
-  Stop();
-}
-
-TEST_F(FFmpegAudioDecoderTest, Flush) {
-  Initialize();
-
-  decoder_->Flush(NewExpectedClosure());
-  message_loop_.RunAllPending();
-
-  Stop();
 }
 
 TEST_F(FFmpegAudioDecoderTest, ProduceAudioSamples) {
@@ -157,7 +144,7 @@ TEST_F(FFmpegAudioDecoderTest, ProduceAudioSamples) {
   EXPECT_CALL(*demuxer_, Read(_))
       .Times(5)
       .WillRepeatedly(InvokeReadPacket(this));
-  EXPECT_CALL(statistics_callback_, OnStatistics(_))
+  EXPECT_CALL(statistics_cb_, OnStatistics(_))
       .Times(5);
 
   Read();
@@ -176,8 +163,6 @@ TEST_F(FFmpegAudioDecoderTest, ProduceAudioSamples) {
   Read();
   ASSERT_EQ(4u, decoded_audio_.size());
   ExpectEndOfStream(3);
-
-  Stop();
 }
 
 TEST_F(FFmpegAudioDecoderTest, ReadAbort) {
@@ -192,8 +177,6 @@ TEST_F(FFmpegAudioDecoderTest, ReadAbort) {
 
   EXPECT_EQ(decoded_audio_.size(), 1u);
   EXPECT_TRUE(decoded_audio_[0].get() ==  NULL);
-
-  Stop();
 }
 
 }  // namespace media

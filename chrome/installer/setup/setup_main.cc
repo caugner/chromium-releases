@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -68,6 +68,7 @@ using installer::MasterPreferences;
 const wchar_t kChromePipeName[] = L"\\\\.\\pipe\\ChromeCrashServices";
 const wchar_t kGoogleUpdatePipeName[] = L"\\\\.\\pipe\\GoogleCrashServices\\";
 const wchar_t kSystemPrincipalSid[] = L"S-1-5-18";
+const int kGoogleUpdateTimeoutMs = 20 * 1000;
 
 const MINIDUMP_TYPE kLargerDumpType = static_cast<MINIDUMP_TYPE>(
     MiniDumpWithProcessThreadData |  // Get PEB and TEB.
@@ -756,12 +757,13 @@ installer::InstallStatus InstallProductsHelper(
   // rollback here and we schedule for deletion on reboot if the delete fails.
   // As such, we do not use DeleteTreeWorkItem.
   if (cmd_line.HasSwitch(installer::switches::kInstallerData)) {
-    std::wstring prefs_path(cmd_line.GetSwitchValueNative(
+    FilePath prefs_path(cmd_line.GetSwitchValuePath(
         installer::switches::kInstallerData));
     if (!file_util::Delete(prefs_path, true)) {
-      LOG(ERROR) << "Failed deleting master preferences file " << prefs_path
+      LOG(ERROR) << "Failed deleting master preferences file "
+                 << prefs_path.value()
                  << ", scheduling for deletion after reboot.";
-      ScheduleFileSystemEntityForDeletion(prefs_path.c_str());
+      ScheduleFileSystemEntityForDeletion(prefs_path.value().c_str());
     }
   }
 
@@ -833,6 +835,41 @@ installer::InstallStatus UninstallProduct(
       cmd_line.GetProgram(), product, remove_all, force_uninstall, cmd_line);
 }
 
+// Tell Google Update that an uninstall has taken place.  This gives it a chance
+// to uninstall itself straight away if no more products are installed on the
+// system rather than waiting for the next time the scheduled task runs.
+// Success or failure of Google Update has no bearing on the success or failure
+// of Chrome's uninstallation.
+void UninstallGoogleUpdate(bool system_install) {
+  string16 uninstall_cmd(
+      GoogleUpdateSettings::GetUninstallCommandLine(system_install));
+  if (!uninstall_cmd.empty()) {
+    base::win::ScopedHandle process;
+    LOG(INFO) << "Launching Google Update's uninstaller: " << uninstall_cmd;
+    if (base::LaunchProcess(uninstall_cmd, base::LaunchOptions(),
+                            process.Receive())) {
+      int exit_code = 0;
+      if (base::WaitForExitCodeWithTimeout(process, &exit_code,
+                                           kGoogleUpdateTimeoutMs)) {
+        if (exit_code == 0) {
+          LOG(INFO) << "  normal exit.";
+        } else {
+          LOG(ERROR) << "Google Update uninstaller (" << uninstall_cmd
+                     << ") exited with code " << exit_code << ".";
+        }
+      } else {
+        // The process didn't finish in time, or GetExitCodeProcess failed.
+        LOG(ERROR) << "Google Update uninstaller (" << uninstall_cmd
+                   << ") is taking more than " << kGoogleUpdateTimeoutMs
+                   << " milliseconds to complete.";
+      }
+    } else {
+      PLOG(ERROR) << "Failed to launch Google Update uninstaller ("
+                  << uninstall_cmd << ")";
+    }
+  }
+}
+
 installer::InstallStatus UninstallProducts(
     const InstallationState& original_state,
     const InstallerState& installer_state,
@@ -858,6 +895,8 @@ installer::InstallStatus UninstallProducts(
     if (prod_status != installer::UNINSTALL_SUCCESSFUL)
       install_status = prod_status;
   }
+
+  UninstallGoogleUpdate(installer_state.system_install());
 
   return install_status;
 }
@@ -1050,11 +1089,16 @@ bool HandleNonInstallCmdLineOptions(const InstallationState& original_state,
       // We started as system-level and have been re-launched as user level
       // to continue with the toast experiment.
       scoped_ptr<Version> installed_version(
-          InstallUtil::GetChromeVersion(browser_dist,
-                                        installer_state->system_install()));
-      browser_dist->LaunchUserExperiment(cmd_line.GetProgram(),
-                                         installer::REENTRY_SYS_UPDATE,
-                                         *installed_version, *product, true);
+          InstallUtil::GetChromeVersion(browser_dist, true));
+      if (!installed_version.get()) {
+        LOG(ERROR) << "No installation of "
+                   << browser_dist->GetAppShortCutName()
+                   << " found for system-level toast.";
+      } else {
+        browser_dist->LaunchUserExperiment(cmd_line.GetProgram(),
+                                           installer::REENTRY_SYS_UPDATE,
+                                           *installed_version, *product, true);
+      }
     }
   } else if (cmd_line.HasSwitch(
                  installer::switches::kChromeFrameReadyModeOptIn)) {

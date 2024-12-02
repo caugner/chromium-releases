@@ -14,7 +14,7 @@
 
 #include "base/command_line.h"
 #include "base/file_path.h"
-#include "base/json/json_value_serializer.h"
+#include "base/json/json_file_value_serializer.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
@@ -29,6 +29,7 @@
 #include "chrome/common/attrition_experiments.h"
 #include "chrome/common/chrome_result_codes.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/net/test_server_locations.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/installer/util/channel_info.h"
 #include "chrome/installer/util/product.h"
@@ -128,36 +129,48 @@ int GetDirectoryWriteAgeInHours(const wchar_t* path) {
 // If system_level_toast is true, appends --system-level-toast.
 // If handle to experiment result key was given at startup, re-add it.
 // Does not wait for the process to terminate.
-bool LaunchSetup(CommandLine cmd_line, bool system_level_toast) {
+// |cmd_line| may be modified as a result of this call.
+bool LaunchSetup(CommandLine* cmd_line,
+                 const installer::Product& product,
+                 bool system_level_toast) {
+  const CommandLine& current_cmd_line = *CommandLine::ForCurrentProcess();
+
+  // Propagate --verbose-logging to the invoked setup.exe.
+  if (current_cmd_line.HasSwitch(installer::switches::kVerboseLogging))
+    cmd_line->AppendSwitch(installer::switches::kVerboseLogging);
+
+  // Pass along product-specific options.
+  product.AppendProductFlags(cmd_line);
+
   // Re-add the system level toast flag.
   if (system_level_toast) {
-    cmd_line.AppendSwitch(installer::switches::kSystemLevelToast);
+    cmd_line->AppendSwitch(installer::switches::kSystemLevel);
+    cmd_line->AppendSwitch(installer::switches::kSystemLevelToast);
 
     // Re-add the toast result key. We need to do this because Setup running as
     // system passes the key to Setup running as user, but that child process
     // does not perform the actual toasting, it launches another Setup (as user)
     // to do so. That is the process that needs the key.
-    const CommandLine& current_cmd_line = *CommandLine::ForCurrentProcess();
     std::string key(installer::switches::kToastResultsKey);
     std::string toast_key = current_cmd_line.GetSwitchValueASCII(key);
     if (!toast_key.empty()) {
-      cmd_line.AppendSwitchASCII(key, toast_key);
+      cmd_line->AppendSwitchASCII(key, toast_key);
 
       // Use handle inheritance to make sure the duplicated toast results key
       // gets inherited by the child process.
       base::LaunchOptions options;
       options.inherit_handles = true;
-      return base::LaunchProcess(cmd_line, options, NULL);
+      return base::LaunchProcess(*cmd_line, options, NULL);
     }
   }
 
-  return base::LaunchProcess(cmd_line, base::LaunchOptions(), NULL);
+  return base::LaunchProcess(*cmd_line, base::LaunchOptions(), NULL);
 }
 
 // For System level installs, setup.exe lives in the system temp, which
 // is normally c:\windows\temp. In many cases files inside this folder
 // are not accessible for execution by regular user accounts.
-// This function changes the permisions so that any authenticated user
+// This function changes the permissions so that any authenticated user
 // can launch |exe| later on. This function should only be called if the
 // code is running at the system level.
 bool FixDACLsForExecute(const FilePath& exe) {
@@ -212,9 +225,23 @@ bool FixDACLsForExecute(const FilePath& exe) {
 // Remote Desktop sessions do not count as interactive sessions; running this
 // method as a user logged in via remote desktop will do nothing.
 bool LaunchSetupAsConsoleUser(const FilePath& setup_path,
+                              const installer::Product& product,
                               const std::string& flag) {
   CommandLine cmd_line(setup_path);
   cmd_line.AppendSwitch(flag);
+
+  // Pass along product-specific options.
+  product.AppendProductFlags(&cmd_line);
+
+  // Convey to the invoked setup.exe that it's operating on a system-level
+  // installation.
+  cmd_line.AppendSwitch(installer::switches::kSystemLevel);
+
+  // Propagate --verbose-logging to the invoked setup.exe.
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+          installer::switches::kVerboseLogging)) {
+    cmd_line.AppendSwitch(installer::switches::kVerboseLogging);
+  }
 
   // Get the Google Update results key, and pass it on the command line to
   // the child process.
@@ -230,18 +257,25 @@ bool LaunchSetupAsConsoleUser(const FilePath& setup_path,
   }
 
   DWORD console_id = ::WTSGetActiveConsoleSessionId();
-  if (console_id == 0xFFFFFFFF)
+  if (console_id == 0xFFFFFFFF) {
+    PLOG(ERROR) << __FUNCTION__ << " failed to get active session id";
     return false;
+  }
   HANDLE user_token;
-  if (!::WTSQueryUserToken(console_id, &user_token))
+  if (!::WTSQueryUserToken(console_id, &user_token)) {
+    PLOG(ERROR) << __FUNCTION__ << " failed to get user token for console_id "
+                << console_id;
     return false;
+  }
   // Note: Handle inheritance must be true in order for the child process to be
   // able to use the duplicated handle above (Google Update results).
   base::LaunchOptions options;
   options.as_user = user_token;
   options.inherit_handles = true;
+  VLOG(1) << __FUNCTION__ << " launching " << cmd_line.GetCommandLineString();
   bool launched = base::LaunchProcess(cmd_line, options, NULL);
   ::CloseHandle(user_token);
+  VLOG(1) << __FUNCTION__ << "   result: " << launched;
   return launched;
 }
 
@@ -465,7 +499,11 @@ std::wstring GoogleChromeDistribution::GetStatsServerURL() {
 }
 
 std::string GoogleChromeDistribution::GetNetworkStatsServer() const {
-  return "chrome.googleechotest.com";
+  return chrome_common_net::kEchoTestServerLocation;
+}
+
+std::string GoogleChromeDistribution::GetHttpPipeliningTestServer() const {
+  return chrome_common_net::kPipelineTestServerBaseUrl;
 }
 
 std::wstring GoogleChromeDistribution::GetDistributionData(HKEY root_key) {
@@ -577,7 +615,7 @@ void SetClient(const std::wstring& experiment_group, bool last_write) {
 bool GoogleChromeDistribution::GetExperimentDetails(
     UserExperiment* experiment, int flavor) {
   // Maximum number of experiment flavors we support.
-  const int kMax = 4;
+  static const int kMax = 4;
   // This struct determines which experiment flavors we show for each locale and
   // brand.
   //
@@ -680,12 +718,16 @@ bool GoogleChromeDistribution::GetExperimentDetails(
 //    this function with |system_install| true and a REENTRY_SYS_UPDATE status.
 void GoogleChromeDistribution::LaunchUserExperiment(
     const FilePath& setup_path, installer::InstallStatus status,
-    const Version& version, const installer::Product& installation,
+    const Version& version, const installer::Product& product,
     bool system_level) {
+  VLOG(1) << "LaunchUserExperiment status: " << status << " product: "
+          << product.distribution()->GetAppShortCutName()
+          << " system_level: " << system_level;
+
   if (system_level) {
     if (installer::NEW_VERSION_UPDATED == status) {
       // We need to relaunch as the interactive user.
-      LaunchSetupAsConsoleUser(setup_path,
+      LaunchSetupAsConsoleUser(setup_path, product,
                                installer::switches::kSystemLevelToast);
       return;
     }
@@ -714,7 +756,7 @@ void GoogleChromeDistribution::LaunchUserExperiment(
   } else {
     // Check browser usage inactivity by the age of the last-write time of the
     // chrome user data directory.
-    FilePath user_data_dir(installation.GetUserDataPath());
+    FilePath user_data_dir(product.GetUserDataPath());
 
     const bool toast_experiment_enabled = false;
     const int kThirtyDays = 30 * 24;
@@ -758,7 +800,7 @@ void GoogleChromeDistribution::LaunchUserExperiment(
                              base::IntToString(flavor));
   cmd_line.AppendSwitchASCII(installer::switches::kExperimentGroup,
                              WideToASCII(base_group));
-  LaunchSetup(cmd_line, system_level);
+  LaunchSetup(&cmd_line, product, system_level);
 }
 
 // User qualifies for the experiment. To test, use --try-chrome-again=|flavor|

@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,18 +17,27 @@ class Profile;
 // StartupPref is stored in the preferences for a particular profile.
 struct SessionStartupPref {
   enum Type {
-    // Indicates the user doesn't want to restore a previous session.
+    // Indicates the user wants to open the New Tab page.
     DEFAULT,
+
+    // Deprecated. See comment in session_startup_pref.cc
+    HOMEPAGE,
 
     // Indicates the user wants to restore the last session.
     LAST,
 
     // Indicates the user wants to restore a specific set of URLs. The URLs
     // are contained in urls.
-    URLS
+    URLS,
+
+    // Number of values in this enum.
+    TYPE_COUNT
   };
 
   static void RegisterUserPrefs(PrefService* prefs);
+
+  // Returns the default value for |type|.
+  static Type GetDefaultStartupType();
 
   // What should happen on startup for the specified profile.
   static void SetStartupPref(Profile* profile, const SessionStartupPref& pref);
@@ -41,7 +50,15 @@ struct SessionStartupPref {
   static bool TypeIsManaged(PrefService* prefs);
   static bool URLsAreManaged(PrefService* prefs);
 
-  SessionStartupPref();
+  // Converts an integer pref value to a SessionStartupPref::Type.
+  static SessionStartupPref::Type PrefValueToType(int pref_value);
+
+  // Returns |true| if a change to startup type or URLS was detected by
+  // ProtectorService.
+  static bool DidStartupPrefChange(Profile* profile);
+
+  // Returns the protected backup of startup type and URLS.
+  static SessionStartupPref GetStartupPrefBackup(Profile* profile);
 
   explicit SessionStartupPref(Type type);
 

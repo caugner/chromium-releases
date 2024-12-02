@@ -16,7 +16,6 @@
 #include "googleurl/src/gurl.h"
 #include "ui/base/ui_base_types.h"
 
-struct ContextMenuParams;
 
 namespace base {
 class ListValue;
@@ -26,6 +25,7 @@ template<class T> class PropertyAccessor;
 namespace content {
 class WebContents;
 class WebUIMessageHandler;
+struct ContextMenuParams;
 }
 
 namespace gfx {
@@ -41,6 +41,10 @@ class HtmlDialogUIDelegate {
   // Returns the title of the dialog.
   virtual string16 GetDialogTitle() const = 0;
 
+  // Returns the dialog's name identifier. Used to identify this dialog for
+  // state restoration.
+  virtual std::string GetDialogName() const;
+
   // Get the HTML file path for the content to load in the dialog.
   virtual GURL GetDialogContentURL() const = 0;
 
@@ -53,6 +57,9 @@ class HtmlDialogUIDelegate {
 
   // Get the size of the dialog.
   virtual void GetDialogSize(gfx::Size* size) const = 0;
+
+  // Get the size of the dialog.
+  virtual void GetMinimumDialogSize(gfx::Size* size) const;
 
   // Gets the JSON string input to use when showing the dialog.
   virtual std::string GetDialogArgs() const = 0;
@@ -82,7 +89,7 @@ class HtmlDialogUIDelegate {
   // customized menu.
   // Returns true iff you do NOT want the standard context menu to be
   // shown (because you want to handle it yourself).
-  virtual bool HandleContextMenu(const ContextMenuParams& params);
+  virtual bool HandleContextMenu(const content::ContextMenuParams& params);
 
   // A callback to allow the delegate to open a new URL inside |source|.
   // On return |out_new_contents| should contain the WebContents the URL
@@ -145,7 +152,8 @@ class HtmlDialogUI : public content::WebUIController {
 
  private:
   // WebUIController
-  virtual void RenderViewCreated(RenderViewHost* render_view_host) OVERRIDE;
+  virtual void RenderViewCreated(
+      content::RenderViewHost* render_view_host) OVERRIDE;
 
   // JS message handler.
   void OnDialogClosed(const base::ListValue* args);

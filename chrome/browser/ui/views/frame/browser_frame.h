@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,6 @@
 #include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "build/build_config.h"
-#include "chrome/browser/ui/views/frame/native_browser_frame_delegate.h"
 #include "ui/views/widget/widget.h"
 
 class AvatarMenuButton;
@@ -52,9 +51,9 @@ class BrowserFrame : public views::Widget {
   gfx::Rect GetBoundsForTabStrip(views::View* tabstrip) const;
 
   // Returns the y coordinate within the window at which the horizontal TabStrip
-  // begins (or would begin).  If |restored| is true, this is calculated as if
-  // we were in restored mode regardless of the current mode.
-  int GetHorizontalTabStripVerticalOffset(bool restored) const;
+  // begins (or would begin).  If |force_restored| is true, this is calculated
+  // as if we were in restored mode regardless of the current mode.
+  int GetHorizontalTabStripVerticalOffset(bool force_restored) const;
 
   // Tells the frame to update the throbber.
   void UpdateThrobber(bool running);
@@ -65,11 +64,6 @@ class BrowserFrame : public views::Widget {
   // Notifies the frame that the tab strip display mode changed so it can update
   // its frame treatment if necessary.
   void TabStripDisplayModeChanged();
-
-  // Returns true for single window mode.  ChromeOS and Aura laptop mode use a
-  // single window filling the work area, which does not have a close, maximize,
-  // minimize or restore button and does not draw frame edges.
-  bool IsSingleWindowMode() const;
 
   // Overridden from views::Widget:
   virtual bool IsMaximized() const OVERRIDE;

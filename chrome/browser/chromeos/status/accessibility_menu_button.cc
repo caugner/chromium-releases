@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -52,10 +52,10 @@ AccessibilityMenuButton::~AccessibilityMenuButton() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// views::ViewMenuDelegate implementation:
+// views::MenuButtonListener implementation:
 
-void AccessibilityMenuButton::RunMenu(views::View* source,
-                                      const gfx::Point& pt) {
+void AccessibilityMenuButton::OnMenuButtonClicked(views::View* source,
+                                                  const gfx::Point& point) {
   PrepareMenu();
 
   gfx::Point screen_location;
@@ -63,8 +63,7 @@ void AccessibilityMenuButton::RunMenu(views::View* source,
   gfx::Rect bounds(screen_location, source->size());
   CHECK(menu_runner_->RunMenuAt(source->GetWidget()->GetTopLevelWidget(),
                                 this, bounds, views::MenuItemView::TOPRIGHT,
-                                0) ==
-        views::MenuRunner::NORMAL_EXIT);
+                                0) == views::MenuRunner::NORMAL_EXIT);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -73,7 +72,7 @@ void AccessibilityMenuButton::RunMenu(views::View* source,
 void AccessibilityMenuButton::ExecuteCommand(int id) {
   switch (id) {
     case MENU_ITEM_DISABLE_SPOKEN_FEEDBACK:
-      accessibility::EnableAccessibility(false, NULL);
+      accessibility::EnableSpokenFeedback(false, NULL);
       break;
     default:
       NOTREACHED();

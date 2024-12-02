@@ -4,15 +4,10 @@
 
 // Custom bindings for the contentSettings API.
 
-(function() {
+var chromeHidden = requireNative('chrome_hidden').GetChromeHidden();
+var sendRequest = require('sendRequest').sendRequest;
 
-native function GetChromeHidden();
-
-var chromeHidden = GetChromeHidden();
-
-chromeHidden.registerCustomType('ContentSetting', function(typesAPI) {
-  var sendRequest = typesAPI.sendRequest;
-
+chromeHidden.registerCustomType('ContentSetting', function() {
   function extendSchema(schema) {
     var extendedSchema = schema.slice();
     extendedSchema.unshift({'type': 'string'});
@@ -54,5 +49,3 @@ chromeHidden.registerCustomType('ContentSetting', function(typesAPI) {
 
   return ContentSetting;
 });
-
-})();

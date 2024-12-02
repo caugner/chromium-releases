@@ -19,11 +19,15 @@
 #include "ppapi/proxy/ppb_file_ref_proxy.h"
 #include "ppapi/proxy/ppb_file_system_proxy.h"
 #include "ppapi/proxy/ppb_flash_menu_proxy.h"
+#include "ppapi/proxy/ppb_flash_message_loop_proxy.h"
 #include "ppapi/proxy/ppb_flash_net_connector_proxy.h"
-#include "ppapi/proxy/ppb_font_proxy.h"
 #include "ppapi/proxy/ppb_graphics_2d_proxy.h"
 #include "ppapi/proxy/ppb_graphics_3d_proxy.h"
+#include "ppapi/proxy/ppb_host_resolver_private_proxy.h"
 #include "ppapi/proxy/ppb_image_data_proxy.h"
+#include "ppapi/proxy/ppb_network_monitor_private_proxy.h"
+#include "ppapi/proxy/ppb_talk_private_proxy.h"
+#include "ppapi/proxy/ppb_tcp_server_socket_private_proxy.h"
 #include "ppapi/proxy/ppb_tcp_socket_private_proxy.h"
 #include "ppapi/proxy/ppb_udp_socket_private_proxy.h"
 #include "ppapi/proxy/ppb_url_loader_proxy.h"
@@ -36,7 +40,7 @@
 #include "ppapi/shared_impl/ppb_input_event_shared.h"
 #include "ppapi/shared_impl/ppb_resource_array_shared.h"
 #include "ppapi/shared_impl/ppb_url_request_info_shared.h"
-#include "ppapi/shared_impl/private/ppb_font_shared.h"
+#include "ppapi/shared_impl/private/ppb_browser_font_trusted_shared.h"
 #include "ppapi/shared_impl/var.h"
 #include "ppapi/thunk/enter.h"
 #include "ppapi/thunk/ppb_image_data_api.h"
@@ -75,8 +79,8 @@ PP_Resource ResourceCreationProxy::CreateAudioConfig(
     PP_Instance instance,
     PP_AudioSampleRate sample_rate,
     uint32_t sample_frame_count) {
-  return PPB_AudioConfig_Shared::CreateAsProxy(
-      instance, sample_rate, sample_frame_count);
+  return PPB_AudioConfig_Shared::Create(
+      OBJECT_IS_PROXY, instance, sample_rate, sample_frame_count);
 }
 
 PP_Resource ResourceCreationProxy::CreateAudioTrusted(PP_Instance instance) {
@@ -84,24 +88,33 @@ PP_Resource ResourceCreationProxy::CreateAudioTrusted(PP_Instance instance) {
   return 0;
 }
 
-PP_Resource ResourceCreationProxy::CreateAudioInput(
+PP_Resource ResourceCreationProxy::CreateAudioInput0_1(
     PP_Instance instance,
     PP_Resource config_id,
     PPB_AudioInput_Callback audio_input_callback,
     void* user_data) {
-  return PPB_AudioInput_Proxy::CreateProxyResource(instance, config_id,
-                                                   audio_input_callback,
-                                                   user_data);
+  return PPB_AudioInput_Proxy::CreateProxyResource0_1(instance, config_id,
+                                                      audio_input_callback,
+                                                      user_data);
 }
 
-PP_Resource ResourceCreationProxy::CreateAudioInputTrusted(
+PP_Resource ResourceCreationProxy::CreateAudioInput(
     PP_Instance instance) {
-  // Proxied plugins can't created trusted audio input devices.
-  return 0;
+  return PPB_AudioInput_Proxy::CreateProxyResource(instance);
 }
 
 PP_Resource ResourceCreationProxy::CreateBroker(PP_Instance instance) {
   return PPB_Broker_Proxy::CreateProxyResource(instance);
+}
+
+PP_Resource ResourceCreationProxy::CreateBrowserFont(
+    PP_Instance instance,
+    const PP_BrowserFont_Trusted_Description* description) {
+  PluginDispatcher* dispatcher = PluginDispatcher::GetForInstance(instance);
+  if (!dispatcher)
+    return 0;
+  return PPB_BrowserFont_Trusted_Shared::Create(
+      OBJECT_IS_PROXY, instance, *description, dispatcher->preferences());
 }
 
 PP_Resource ResourceCreationProxy::CreateBuffer(PP_Instance instance,
@@ -138,33 +151,34 @@ PP_Resource ResourceCreationProxy::CreateFileSystem(
   return PPB_FileSystem_Proxy::CreateProxyResource(instance, type);
 }
 
+#if !defined(OS_NACL)
 PP_Resource ResourceCreationProxy::CreateFlashMenu(
     PP_Instance instance,
     const PP_Flash_Menu* menu_data) {
   return PPB_Flash_Menu_Proxy::CreateProxyResource(instance, menu_data);
 }
 
+PP_Resource ResourceCreationProxy::CreateFlashMessageLoop(
+    PP_Instance instance) {
+  return PPB_Flash_MessageLoop_Proxy::CreateProxyResource(instance);
+}
+
 PP_Resource ResourceCreationProxy::CreateFlashNetConnector(
     PP_Instance instance) {
   return PPB_Flash_NetConnector_Proxy::CreateProxyResource(instance);
 }
-
-PP_Resource ResourceCreationProxy::CreateFontObject(
-    PP_Instance instance,
-    const PP_FontDescription_Dev* description) {
-  PluginDispatcher* dispatcher =
-      PluginDispatcher::GetForInstance(instance);
-  if (!dispatcher)
-    return 0;
-  return PPB_Font_Shared::CreateAsProxy(instance, *description,
-                                        dispatcher->preferences());
-}
+#endif  // !defined(OS_NACL)
 
 PP_Resource ResourceCreationProxy::CreateGraphics2D(PP_Instance instance,
                                                     const PP_Size& size,
                                                     PP_Bool is_always_opaque) {
   return PPB_Graphics2D_Proxy::CreateProxyResource(instance, size,
                                                    is_always_opaque);
+}
+
+PP_Resource ResourceCreationProxy::CreateHostResolverPrivate(
+    PP_Instance instance) {
+  return PPB_HostResolver_Private_Proxy::CreateProxyResource(instance);
 }
 
 PP_Resource ResourceCreationProxy::CreateImageData(PP_Instance instance,
@@ -199,7 +213,7 @@ PP_Resource ResourceCreationProxy::CreateKeyboardInputEvent(
     data.character_text = text_str->value();
   }
 
-  return (new PPB_InputEvent_Shared(PPB_InputEvent_Shared::InitAsProxy(),
+  return (new PPB_InputEvent_Shared(OBJECT_IS_PROXY,
                                     instance, data))->GetReference();
 }
 
@@ -228,8 +242,16 @@ PP_Resource ResourceCreationProxy::CreateMouseInputEvent(
   data.mouse_click_count = click_count;
   data.mouse_movement = *mouse_movement;
 
-  return (new PPB_InputEvent_Shared(PPB_InputEvent_Shared::InitAsProxy(),
+  return (new PPB_InputEvent_Shared(OBJECT_IS_PROXY,
                                     instance, data))->GetReference();
+}
+
+PP_Resource ResourceCreationProxy::CreateNetworkMonitor(
+      PP_Instance instance,
+      PPB_NetworkMonitor_Callback callback,
+      void* user_data) {
+  return PPB_NetworkMonitor_Private_Proxy::CreateProxyResource(
+      instance, callback, user_data);
 }
 
 PP_Resource ResourceCreationProxy::CreateGraphics3D(
@@ -254,7 +276,7 @@ PP_Resource ResourceCreationProxy::CreateResourceArray(
     const PP_Resource elements[],
     uint32_t size) {
   PPB_ResourceArray_Shared* object = new PPB_ResourceArray_Shared(
-      PPB_ResourceArray_Shared::InitAsProxy(), instance, elements, size);
+      OBJECT_IS_PROXY, instance, elements, size);
   return object->GetReference();
 }
 
@@ -264,10 +286,21 @@ PP_Resource ResourceCreationProxy::CreateScrollbar(PP_Instance instance,
   return 0;
 }
 
+PP_Resource ResourceCreationProxy::CreateTalk(PP_Instance instance) {
+  return PPB_Talk_Private_Proxy::CreateProxyResource(instance);
+}
+
+#if !defined(OS_NACL)
+PP_Resource ResourceCreationProxy::CreateTCPServerSocketPrivate(
+    PP_Instance instance) {
+  return PPB_TCPServerSocket_Private_Proxy::CreateProxyResource(instance);
+}
+
 PP_Resource ResourceCreationProxy::CreateTCPSocketPrivate(
     PP_Instance instance) {
   return PPB_TCPSocket_Private_Proxy::CreateProxyResource(instance);
 }
+#endif  // !defined(OS_NACL)
 
 PP_Resource ResourceCreationProxy::CreateTransport(PP_Instance instance,
                                                    const char* name,
@@ -276,10 +309,12 @@ PP_Resource ResourceCreationProxy::CreateTransport(PP_Instance instance,
   return 0;
 }
 
+#if !defined(OS_NACL)
 PP_Resource ResourceCreationProxy::CreateUDPSocketPrivate(
     PP_Instance instance) {
   return PPB_UDPSocket_Private_Proxy::CreateProxyResource(instance);
 }
+#endif  // !defined(OS_NACL)
 
 PP_Resource ResourceCreationProxy::CreateURLLoader(PP_Instance instance) {
   return PPB_URLLoader_Proxy::CreateProxyResource(instance);
@@ -288,8 +323,8 @@ PP_Resource ResourceCreationProxy::CreateURLLoader(PP_Instance instance) {
 PP_Resource ResourceCreationProxy::CreateURLRequestInfo(
     PP_Instance instance,
     const PPB_URLRequestInfo_Data& data) {
-  return (new PPB_URLRequestInfo_Shared(
-      HostResource::MakeInstanceOnly(instance), data))->GetReference();
+  return (new PPB_URLRequestInfo_Shared(OBJECT_IS_PROXY,
+                                        instance, data))->GetReference();
 }
 
 PP_Resource ResourceCreationProxy::CreateVideoCapture(PP_Instance instance) {
@@ -331,7 +366,7 @@ PP_Resource ResourceCreationProxy::CreateWheelInputEvent(
   data.wheel_ticks = *wheel_ticks;
   data.wheel_scroll_by_page = PP_ToBool(scroll_by_page);
 
-  return (new PPB_InputEvent_Shared(PPB_InputEvent_Shared::InitAsProxy(),
+  return (new PPB_InputEvent_Shared(OBJECT_IS_PROXY,
                                     instance, data))->GetReference();
 }
 

@@ -11,15 +11,15 @@
 #include "base/callback.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/timer.h"
-#include "content/browser/download/download_types.h"
 #include "content/browser/renderer_host/resource_handler.h"
+#include "content/public/browser/download_manager.h"
 #include "content/public/browser/download_id.h"
+#include "content/public/browser/download_save_info.h"
 #include "content/public/browser/global_request_id.h"
 #include "net/base/net_errors.h"
 
 class DownloadFileManager;
 class DownloadRequestHandle;
-class ResourceDispatcherHost;
 struct DownloadCreateInfo;
 
 namespace content {
@@ -33,21 +33,19 @@ class URLRequest;
 // Forwards data to the download thread.
 class DownloadResourceHandler : public ResourceHandler {
  public:
-  typedef base::Callback<void(content::DownloadId, net::Error)>
-      OnStartedCallback;
+  typedef content::DownloadManager::OnStartedCallback OnStartedCallback;
 
   static const size_t kLoadsToWrite = 100;  // number of data buffers queued
 
   // started_cb will be called exactly once on the UI thread.
-  DownloadResourceHandler(ResourceDispatcherHost* rdh,
-                          int render_process_host_id,
+  DownloadResourceHandler(int render_process_host_id,
                           int render_view_id,
                           int request_id,
                           const GURL& url,
                           DownloadFileManager* download_file_manager,
                           net::URLRequest* request,
                           const OnStartedCallback& started_cb,
-                          const DownloadSaveInfo& save_info);
+                          const content::DownloadSaveInfo& save_info);
 
   virtual bool OnUploadProgress(int request_id,
                                 uint64 position,
@@ -96,12 +94,16 @@ class DownloadResourceHandler : public ResourceHandler {
  private:
   virtual ~DownloadResourceHandler();
 
+  void OnResponseCompletedInternal(int request_id,
+                                   const net::URLRequestStatus& status,
+                                   const std::string& security_info);
+
   void StartPauseTimer();
   void CallStartedCB(content::DownloadId id, net::Error error);
 
   // Generates a DownloadId and calls DownloadFileManager.
   void StartOnUIThread(scoped_ptr<DownloadCreateInfo> info,
-                       DownloadRequestHandle handle);
+                       const DownloadRequestHandle& handle);
   void set_download_id(content::DownloadId id);
 
   content::DownloadId download_id_;
@@ -114,9 +116,8 @@ class DownloadResourceHandler : public ResourceHandler {
   net::URLRequest* request_;
   // This is used only on the UI thread.
   OnStartedCallback started_cb_;
-  DownloadSaveInfo save_info_;
+  content::DownloadSaveInfo save_info_;
   scoped_refptr<content::DownloadBuffer> buffer_;
-  ResourceDispatcherHost* rdh_;
   bool is_paused_;
   base::OneShotTimer<DownloadResourceHandler> pause_timer_;
 

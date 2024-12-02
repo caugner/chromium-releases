@@ -15,26 +15,28 @@
 
 using content::BrowserThread;
 using content::BrowserThreadImpl;
+using content::RenderViewHostImplTestHarness;
 
-class RenderWidgetHostViewMacTest : public RenderViewHostTestHarness {
+class RenderWidgetHostViewMacTest : public RenderViewHostImplTestHarness {
  public:
   RenderWidgetHostViewMacTest() : old_rwhv_(NULL), rwhv_mac_(NULL) {}
 
   virtual void SetUp() {
-    RenderViewHostTestHarness::SetUp();
+    RenderViewHostImplTestHarness::SetUp();
 
     // TestRenderViewHost's destruction assumes that its view is a
     // TestRenderWidgetHostView, so store its view and reset it back to the
     // stored view in |TearDown()|.
-    old_rwhv_ = rvh()->view();
+    old_rwhv_ = rvh()->GetView();
 
     // Owned by its |cocoa_view()|, i.e. |rwhv_cocoa_|.
-    rwhv_mac_ = new RenderWidgetHostViewMac(rvh());
+    rwhv_mac_ = static_cast<RenderWidgetHostViewMac*>(
+        content::RenderWidgetHostView::CreateViewForWidget(rvh()));
     rwhv_cocoa_.reset([rwhv_mac_->cocoa_view() retain]);
   }
   virtual void TearDown() {
     // See comment in SetUp().
-    rvh()->SetView(old_rwhv_);
+    test_rvh()->SetView(old_rwhv_);
 
     // Make sure the rwhv_mac_ is gone once the superclass's |TearDown()| runs.
     rwhv_cocoa_.reset();
@@ -42,7 +44,7 @@ class RenderWidgetHostViewMacTest : public RenderViewHostTestHarness {
     MessageLoop::current()->RunAllPending();
     pool_.Recycle();
 
-    RenderViewHostTestHarness::TearDown();
+    RenderViewHostImplTestHarness::TearDown();
   }
  protected:
   // Adds an accelerated plugin view to |rwhv_cocoa_|.  Returns a handle to the
@@ -77,7 +79,7 @@ class RenderWidgetHostViewMacTest : public RenderViewHostTestHarness {
   // This class isn't derived from PlatformTest.
   base::mac::ScopedNSAutoreleasePool pool_;
 
-  RenderWidgetHostView* old_rwhv_;
+  content::RenderWidgetHostView* old_rwhv_;
 
  protected:
   RenderWidgetHostViewMac* rwhv_mac_;

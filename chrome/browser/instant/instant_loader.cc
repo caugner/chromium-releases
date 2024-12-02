@@ -31,11 +31,6 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/render_messages.h"
-#include "content/browser/in_process_webkit/session_storage_namespace.h"
-#include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/renderer_host/render_widget_host.h"
-#include "content/browser/renderer_host/render_widget_host_view.h"
-#include "content/browser/tab_contents/provisional_load_details.h"
 #include "content/public/browser/favicon_status.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_details.h"
@@ -46,6 +41,10 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/render_view_host.h"
+#include "content/public/browser/render_widget_host.h"
+#include "content/public/browser/render_widget_host_view.h"
+#include "content/public/browser/session_storage_namespace.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/browser/web_contents_view.h"
@@ -55,6 +54,9 @@
 
 using content::NavigationController;
 using content::NavigationEntry;
+using content::RenderViewHost;
+using content::RenderWidgetHost;
+using content::SessionStorageNamespace;
 using content::WebContents;
 
 namespace {
@@ -82,8 +84,10 @@ void AddPreviewUsageForHistogram(TemplateURLID template_url_id,
   DCHECK(0 <= usage && usage < PREVIEW_NUM_TYPES);
   // Only track the histogram for the instant loaders, for now.
   if (template_url_id) {
-    UMA_HISTOGRAM_ENUMERATION("Instant.Previews" + group, usage,
-                              PREVIEW_NUM_TYPES);
+    base::Histogram* histogram = base::LinearHistogram::FactoryGet(
+        "Instant.Previews" + group, 1, PREVIEW_NUM_TYPES, PREVIEW_NUM_TYPES + 1,
+        base::Histogram::kUmaTargetedHistogramFlag);
+    histogram->Add(usage);
   }
 }
 
@@ -166,7 +170,7 @@ void InstantLoader::FrameLoadObserver::Observe(
       int text_length = static_cast<int>(text_.size());
       RenderViewHost* host = web_contents_->GetRenderViewHost();
       host->Send(new ChromeViewMsg_DetermineIfPageSupportsInstant(
-          host->routing_id(), text_, verbatim_, text_length, text_length));
+          host->GetRoutingID(), text_, verbatim_, text_length, text_length));
       break;
     }
     default:
@@ -225,13 +229,15 @@ class InstantLoader::TabContentsDelegateImpl
                                  bool* proceed_to_fire_unload) OVERRIDE;
   virtual void SetFocusToLocationBar(bool select_all) OVERRIDE;
   virtual bool ShouldFocusPageAfterCrash() OVERRIDE;
+  virtual void WebContentsFocused(WebContents* contents) OVERRIDE;
   virtual void LostCapture() OVERRIDE;
   // If the user drags, we won't get a mouse up (at least on Linux). Commit the
   // instant result when the drag ends, so that during the drag the page won't
   // move around.
   virtual void DragEnded() OVERRIDE;
-  virtual bool CanDownload(content::WebContents* source,
-                           int request_id) OVERRIDE;
+  virtual bool CanDownload(content::RenderViewHost* render_view_host,
+                           int request_id,
+                           const std::string& request_method) OVERRIDE;
   virtual void HandleMouseUp() OVERRIDE;
   virtual void HandleMouseActivate() OVERRIDE;
   virtual bool OnGoToEntryOffset(int offset) OVERRIDE;
@@ -249,6 +255,12 @@ class InstantLoader::TabContentsDelegateImpl
 
   // content::WebContentsObserver:
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
+  virtual void DidFailProvisionalLoad(
+      int64 frame_id,
+      bool is_main_frame,
+      const GURL& validated_url,
+      int error_code,
+      const string16& error_description) OVERRIDE;
 
  private:
   typedef std::vector<scoped_refptr<history::HistoryAddPageArgs> >
@@ -304,9 +316,6 @@ InstantLoader::TabContentsDelegateImpl::TabContentsDelegateImpl(
   DCHECK(loader->preview_contents());
   registrar_.Add(this, content::NOTIFICATION_INTERSTITIAL_ATTACHED,
       content::Source<WebContents>(loader->preview_contents()->web_contents()));
-  registrar_.Add(this, content::NOTIFICATION_FAIL_PROVISIONAL_LOAD_WITH_ERROR,
-      content::Source<NavigationController>(
-          &loader->preview_contents()->web_contents()->GetController()));
 }
 
 void InstantLoader::TabContentsDelegateImpl::PrepareForNewLoad() {
@@ -412,15 +421,6 @@ void InstantLoader::TabContentsDelegateImpl::Observe(
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
   switch (type) {
-    case content::NOTIFICATION_FAIL_PROVISIONAL_LOAD_WITH_ERROR:
-      if (content::Details<ProvisionalLoadDetails>(details)->url() ==
-          loader_->url_) {
-        // This typically happens with downloads (which are disabled with
-        // instant active). To ensure the download happens when the user presses
-        // enter we set needs_reload_ to true, which triggers a reload.
-        loader_->needs_reload_ = true;
-      }
-      break;
     case content::NOTIFICATION_RENDER_WIDGET_HOST_DID_PAINT:
       UnregisterForPaintNotifications();
       PreviewPainted();
@@ -446,7 +446,7 @@ void InstantLoader::TabContentsDelegateImpl::NavigationStateChanged(
     // committed before waiting on paint as there is always an initial paint
     // when a new renderer is created from the resize so that if we showed the
     // preview after the first paint we would end up with a white rect.
-    RenderWidgetHostView *rwhv = source->GetRenderWidgetHostView();
+    content::RenderWidgetHostView *rwhv = source->GetRenderWidgetHostView();
     if (rwhv)
       RegisterForPaintNotifications(rwhv->GetRenderWidgetHost());
   } else if (source->IsCrashed()) {
@@ -480,6 +480,11 @@ bool InstantLoader::TabContentsDelegateImpl::ShouldFocusPageAfterCrash() {
   return false;
 }
 
+void InstantLoader::TabContentsDelegateImpl::WebContentsFocused(
+    WebContents* contents) {
+  loader_->delegate_->InstantLoaderContentsFocused();
+}
+
 void InstantLoader::TabContentsDelegateImpl::LostCapture() {
   CommitFromMouseReleaseIfNecessary();
 }
@@ -488,8 +493,10 @@ void InstantLoader::TabContentsDelegateImpl::DragEnded() {
   CommitFromMouseReleaseIfNecessary();
 }
 
-bool InstantLoader::TabContentsDelegateImpl::CanDownload(WebContents* source,
-                                                         int request_id) {
+bool InstantLoader::TabContentsDelegateImpl::CanDownload(
+        RenderViewHost* render_view_host,
+        int request_id,
+        const std::string& request_method) {
   // Downloads are disabled.
   return false;
 }
@@ -556,6 +563,20 @@ bool InstantLoader::TabContentsDelegateImpl::OnMessageReceived(
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
+}
+
+void InstantLoader::TabContentsDelegateImpl::DidFailProvisionalLoad(
+    int64 frame_id,
+    bool is_main_frame,
+    const GURL& validated_url,
+    int error_code,
+    const string16& error_description) {
+  if (validated_url == loader_->url_) {
+    // This typically happens with downloads (which are disabled with
+    // instant active). To ensure the download happens when the user presses
+    // enter we set needs_reload_ to true, which triggers a reload.
+    loader_->needs_reload_ = true;
+  }
 }
 
 void InstantLoader::TabContentsDelegateImpl::OnSetSuggestions(
@@ -689,7 +710,11 @@ bool InstantLoader::Update(TabContentsWrapper* tab_contents,
       RenderViewHost* host =
           preview_contents_->web_contents()->GetRenderViewHost();
       host->Send(new ChromeViewMsg_SearchBoxChange(
-          host->routing_id(), user_text_, verbatim, text_length, text_length));
+          host->GetRoutingID(),
+          user_text_,
+          verbatim,
+          text_length,
+          text_length));
 
       string16 complete_suggested_text_lower = base::i18n::ToLower(
           complete_suggested_text_);
@@ -760,10 +785,10 @@ TabContentsWrapper* InstantLoader::ReleasePreviewContents(
     RenderViewHost* host =
         preview_contents_->web_contents()->GetRenderViewHost();
     if (type == INSTANT_COMMIT_FOCUS_LOST) {
-      host->Send(new ChromeViewMsg_SearchBoxCancel(host->routing_id()));
+      host->Send(new ChromeViewMsg_SearchBoxCancel(host->GetRoutingID()));
     } else {
       host->Send(new ChromeViewMsg_SearchBoxSubmit(
-          host->routing_id(), user_text_,
+          host->GetRoutingID(), user_text_,
           type == INSTANT_COMMIT_PRESSED_ENTER));
     }
   }
@@ -802,11 +827,11 @@ TabContentsWrapper* InstantLoader::ReleasePreviewContents(
       type == INSTANT_COMMIT_DESTROY ? PREVIEW_DELETED : PREVIEW_COMMITTED,
       group_);
   if (type != INSTANT_COMMIT_DESTROY) {
-    UMA_HISTOGRAM_ENUMERATION(
-        "Instant.SessionStorageNamespace" + group_,
-        tab_contents == NULL || session_storage_namespace_ ==
-            GetSessionStorageNamespace(tab_contents),
-        2);
+    base::Histogram* histogram = base::LinearHistogram::FactoryGet(
+        "Instant.SessionStorageNamespace" + group_, 1, 2, 3,
+        base::Histogram::kUmaTargetedHistogramFlag);
+    histogram->Add(tab_contents == NULL || session_storage_namespace_ ==
+        GetSessionStorageNamespace(tab_contents));
   }
   session_storage_namespace_ = NULL;
   return preview_contents_.release();
@@ -998,7 +1023,7 @@ void InstantLoader::SendBoundsToPage(bool force_if_waiting) {
     RenderViewHost* host =
         preview_contents_->web_contents()->GetRenderViewHost();
     host->Send(new ChromeViewMsg_SearchBoxResize(
-        host->routing_id(), GetOmniboxBoundsInTermsOfPreview()));
+        host->GetRoutingID(), GetOmniboxBoundsInTermsOfPreview()));
   }
 }
 
@@ -1120,10 +1145,10 @@ void InstantLoader::LoadInstantURL(TabContentsWrapper* tab_contents,
   // send a SearchBoxChange message.
   if (user_text.empty()) {
     host->Send(new ChromeViewMsg_SearchBoxResize(
-        host->routing_id(), GetOmniboxBoundsInTermsOfPreview()));
+        host->GetRoutingID(), GetOmniboxBoundsInTermsOfPreview()));
   } else {
     host->Send(new ChromeViewMsg_SearchBoxChange(
-        host->routing_id(), user_text, verbatim, 0, 0));
+        host->GetRoutingID(), user_text, verbatim, 0, 0));
   }
 
   frame_load_observer_.reset(new FrameLoadObserver(

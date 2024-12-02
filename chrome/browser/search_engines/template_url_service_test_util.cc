@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 #include "base/path_service.h"
 #include "base/scoped_temp_dir.h"
 #include "base/threading/thread.h"
-#include "chrome/browser/search_engines/template_url.h"
+#include "chrome/browser/search_engines/search_terms_data.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -157,7 +157,7 @@ void TemplateURLServiceTestUtil::TearDown() {
     profile_->TearDown();
     profile_.reset();
   }
-  TemplateURLRef::SetGoogleBaseURL(NULL);
+  UIThreadSearchTermsData::SetGoogleBaseURL(NULL);
 
   // Flush the message loop to make application verifiers happy.
   message_loop_.RunAllPending();
@@ -219,15 +219,11 @@ string16 TemplateURLServiceTestUtil::GetAndClearSearchTerm() {
 
 void TemplateURLServiceTestUtil::SetGoogleBaseURL(
     const std::string& base_url) const {
-  TemplateURLRef::SetGoogleBaseURL(new std::string(base_url));
+  UIThreadSearchTermsData::SetGoogleBaseURL(new std::string(base_url));
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_GOOGLE_URL_UPDATED,
       content::NotificationService::AllSources(),
       content::NotificationService::NoDetails());
-}
-
-WebDataService* TemplateURLServiceTestUtil::GetWebDataService() {
-  return profile_->GetWebDataService(Profile::EXPLICIT_ACCESS);
 }
 
 TemplateURLService* TemplateURLServiceTestUtil::model() const {
@@ -240,4 +236,8 @@ TestingProfile* TemplateURLServiceTestUtil::profile() const {
 
 void TemplateURLServiceTestUtil::StartIOThread() {
   profile_->StartIOThread();
+}
+
+void TemplateURLServiceTestUtil::PumpLoop() {
+  message_loop_.RunAllPending();
 }

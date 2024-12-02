@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,6 +17,7 @@ using content::NavigationEntry;
 TabNavigation::TabNavigation()
     : transition_(content::PAGE_TRANSITION_TYPED),
       type_mask_(0),
+      post_id_(-1),
       index_(-1) {
 }
 
@@ -32,6 +33,7 @@ TabNavigation::TabNavigation(int index,
       state_(state),
       transition_(transition),
       type_mask_(0),
+      post_id_(-1),
       index_(index) {
 }
 
@@ -42,6 +44,7 @@ TabNavigation::TabNavigation(const TabNavigation& tab)
       state_(tab.state_),
       transition_(tab.transition_),
       type_mask_(tab.type_mask_),
+      post_id_(-1),
       index_(tab.index_) {
 }
 
@@ -55,6 +58,7 @@ TabNavigation& TabNavigation::operator=(const TabNavigation& tab) {
   state_ = tab.state_;
   transition_ = tab.transition_;
   type_mask_ = tab.type_mask_;
+  post_id_ = tab.post_id_;
   index_ = tab.index_;
   return *this;
 }
@@ -77,6 +81,7 @@ NavigationEntry* TabNavigation::ToNavigationEntry(
   entry->SetTitle(title_);
   entry->SetContentState(state_);
   entry->SetHasPostData(type_mask_ & TabNavigation::HAS_POST_DATA);
+  entry->SetPostID(post_id_);
 
   return entry;
 }
@@ -88,6 +93,7 @@ void TabNavigation::SetFromNavigationEntry(const NavigationEntry& entry) {
   state_ = entry.GetContentState();
   transition_ = entry.GetTransitionType();
   type_mask_ = entry.GetHasPostData() ? TabNavigation::HAS_POST_DATA : 0;
+  post_id_ = entry.GetPostID();
 }
 
 // static

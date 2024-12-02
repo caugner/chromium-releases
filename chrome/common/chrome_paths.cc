@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -220,14 +220,11 @@ bool PathProvider(int key, FilePath* result) {
       if (!GetInternalPluginsDirectory(&cur))
         return false;
       break;
-    case chrome::DIR_MEDIA_LIBS:
-#if defined(OS_MACOSX)
-      *result = base::mac::FrameworkBundlePath();
-      *result = result->Append("Libraries");
-      return true;
-#else
-      return PathService::Get(chrome::DIR_APP, result);
-#endif
+    case chrome::DIR_PEPPER_FLASH_PLUGIN:
+      if (!GetInternalPluginsDirectory(&cur))
+        return false;
+      cur = cur.Append(FILE_PATH_LITERAL("PepperFlash"));
+      break;
     case chrome::FILE_LOCAL_STATE:
       if (!PathService::Get(chrome::DIR_USER_DATA, &cur))
         return false;
@@ -246,7 +243,9 @@ bool PathProvider(int key, FilePath* result) {
         return false;
       break;
     case chrome::FILE_PEPPER_FLASH_PLUGIN:
+      if (!PathService::Get(chrome::DIR_PEPPER_FLASH_PLUGIN, &cur))
         return false;
+      cur = cur.Append(chrome::kPepperFlashPluginFilename);
       break;
     case chrome::FILE_PDF_PLUGIN:
       if (!GetInternalPluginsDirectory(&cur))
@@ -334,19 +333,6 @@ bool PathProvider(int key, FilePath* result) {
       cur = cur.Append(FILE_PATH_LITERAL("test"));
       if (!file_util::PathExists(cur))  // We don't want to create this
         return false;
-      break;
-    case chrome::DIR_LAYOUT_TESTS:
-      if (!PathService::Get(base::DIR_SOURCE_ROOT, &cur))
-        return false;
-      cur = cur.Append(FILE_PATH_LITERAL("third_party"));
-      cur = cur.Append(FILE_PATH_LITERAL("WebKit"));
-      cur = cur.Append(FILE_PATH_LITERAL("LayoutTests"));
-      if (file_util::DirectoryExists(cur))
-        break;
-      if (!PathService::Get(chrome::DIR_TEST_DATA, &cur))
-        return false;
-      cur = cur.Append(FILE_PATH_LITERAL("layout_tests"));
-      cur = cur.Append(FILE_PATH_LITERAL("LayoutTests"));
       break;
 #if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_OPENBSD)
     case chrome::DIR_POLICY_FILES: {

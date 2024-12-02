@@ -46,6 +46,10 @@ namespace content {
 class RenderProcessHost;
 }
 
+namespace extensions {
+class ExtensionDownloader;
+}
+
 namespace prerender {
 bool IsOmniboxEnabled(Profile* profile);
 }
@@ -151,7 +155,8 @@ class MetricsService : public content::NotificationObserver,
 
   // First part of the init task. Called on the FILE thread to load hardware
   // class information.
-  void InitTaskGetHardwareClass(base::MessageLoopProxy* target_loop);
+  static void InitTaskGetHardwareClass(base::WeakPtr<MetricsService> self,
+                                       base::MessageLoopProxy* target_loop);
 
   // Callback from InitTaskGetHardwareClass() that continues the init task by
   // loading plugin information.
@@ -218,11 +223,14 @@ class MetricsService : public content::NotificationObserver,
   // Starts the process of uploading metrics data.
   void StartScheduledUpload();
 
-  // Do not call OnMemoryDetailCollectionDone() or
-  // OnHistogramSynchronizationDone() directly; use
-  // StartSchedulerIfNecessary() to schedule a call.
+  // Starts collecting any data that should be added to a log just before it is
+  // closed.
+  void StartFinalLogInfoCollection();
+  // Callbacks for various stages of final log info collection. Do not call
+  // these directly.
   void OnMemoryDetailCollectionDone();
   void OnHistogramSynchronizationDone();
+  void OnFinalLogInfoCollectionDone();
 
   // Takes whatever log should be uploaded next (according to the state_)
   // and makes it the staged log.  If there is already a staged log, this is a
@@ -231,6 +239,9 @@ class MetricsService : public content::NotificationObserver,
 
   // Record stats, client ID, Session ID, etc. in a special "first" log.
   void PrepareInitialLog();
+
+  // Uploads the currently staged log (which must be non-null).
+  void SendStagedLog();
 
   // Prepared the staged log to be passed to the server. Upon return,
   // current_fetch_ should be reset with its upload data set to a compressed
@@ -285,9 +296,8 @@ class MetricsService : public content::NotificationObserver,
                              const content::NotificationSource& source,
                              const content::NotificationDetails& details);
 
-  // Logs keywords specific metrics. Keyword metrics are recorded in the
-  // profile specific metrics.
-  void LogKeywords(const TemplateURLService* url_model);
+  // Logs the number of keywords.
+  void LogKeywordCount(size_t keyword_count);
 
   // Saves plugin-related updates from the in-object buffer to Local State
   // for retrieval next time we send a Profile log (generally next launch).
@@ -339,13 +349,24 @@ class MetricsService : public content::NotificationObserver,
   std::vector<webkit::WebPluginInfo> plugins_;
 
   // The outstanding transmission appears as a URL Fetch operation.
-  scoped_ptr<content::URLFetcher> current_fetch_;
+  scoped_ptr<content::URLFetcher> current_fetch_xml_;
+  scoped_ptr<content::URLFetcher> current_fetch_proto_;
 
-  // The URL for the metrics server.
-  std::wstring server_url_;
+  // Cached responses from the XML request while we wait for a response to the
+  // protubuf request.
+  int response_code_;
+  std::string response_status_;
+  std::string response_data_;
+
+  // The URLs for the XML and protobuf metrics servers.
+  string16 server_url_xml_;
+  string16 server_url_proto_;
 
   // The TCP/UDP echo server to collect network connectivity stats.
   std::string network_stats_server_;
+
+  // The HTTP pipelining test server.
+  std::string http_pipelining_test_server_;
 
   // The IOThread for accessing global HostResolver to resolve
   // network_stats_server_ host. |io_thread_| is accessed on IO thread and it is
@@ -374,7 +395,12 @@ class MetricsService : public content::NotificationObserver,
   struct ChildProcessStats;
   std::map<string16, ChildProcessStats> child_process_stats_buffer_;
 
-  base::WeakPtrFactory<MetricsService> log_sender_factory_;
+  // Weak pointers factory used to post task on different threads. All weak
+  // pointers managed by this factory have the same lifetime as MetricsService.
+  base::WeakPtrFactory<MetricsService> self_ptr_factory_;
+
+  // Weak pointers factory used for saving state. All weak pointers managed by
+  // this factory are invalidated in ScheduleNextStateSave.
   base::WeakPtrFactory<MetricsService> state_saver_factory_;
 
   // Dictionary containing all the profile specific metrics. This is set
@@ -410,6 +436,7 @@ class MetricsServiceHelper {
  private:
   friend class InstantFieldTrial;
   friend bool prerender::IsOmniboxEnabled(Profile* profile);
+  friend class extensions::ExtensionDownloader;
 
   // Returns true if prefs::kMetricsReportingEnabled is set.
   static bool IsMetricsReportingEnabled();

@@ -16,6 +16,7 @@
 #include "base/process.h"
 #include "build/build_config.h"
 #include "content/common/gpu/gpu_command_buffer_stub.h"
+#include "content/common/gpu/gpu_memory_manager.h"
 #include "content/common/message_router.h"
 #include "ipc/ipc_sync_channel.h"
 #include "ui/gfx/gl/gl_share_group.h"
@@ -73,8 +74,8 @@ class GpuChannel : public IPC::Channel::Listener,
   // IPC::Message::Sender implementation:
   virtual bool Send(IPC::Message* msg) OVERRIDE;
 
-  // Whether this channel is able to handle IPC messages.
-  bool IsScheduled();
+  virtual void AppendAllCommandBufferStubs(
+      std::vector<GpuCommandBufferStubBase*>& stubs);
 
   // This is called when a command buffer transitions from the unscheduled
   // state to the scheduled state, which potentially means the channel
@@ -83,7 +84,7 @@ class GpuChannel : public IPC::Channel::Listener,
   void OnScheduled();
 
   void CreateViewCommandBuffer(
-      gfx::PluginWindowHandle window,
+      const gfx::GLSurfaceHandle& window,
       int32 surface_id,
       const GPUCreateCommandBufferConfig& init_params,
       int32* route_id);
@@ -114,6 +115,8 @@ class GpuChannel : public IPC::Channel::Listener,
   bool OnControlMessageReceived(const IPC::Message& msg);
 
   void HandleMessage();
+  void PollWork(int route_id);
+  void ScheduleDelayedWork(GpuCommandBufferStub *stub, int64 delay);
 
   // Message handlers.
   void OnInitialize(base::ProcessHandle renderer_process);
@@ -122,8 +125,6 @@ class GpuChannel : public IPC::Channel::Listener,
       const GPUCreateCommandBufferConfig& init_params,
       IPC::Message* reply_message);
   void OnDestroyCommandBuffer(int32 route_id, IPC::Message* reply_message);
-
-  void OnEcho(const IPC::Message& message);
 
   void OnWillGpuSwitchOccur(bool is_creating_context,
                             gfx::GpuPreference gpu_preference,
@@ -146,7 +147,7 @@ class GpuChannel : public IPC::Channel::Listener,
   int client_id_;
 
   // Uniquely identifies the channel within this GPU process.
-  int channel_id_;
+  std::string channel_id_;
 
   // Handle to the renderer process that is on the other side of the channel.
   base::ProcessHandle renderer_process_;

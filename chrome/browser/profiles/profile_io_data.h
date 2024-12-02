@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,12 +17,9 @@
 #include "base/synchronization/lock.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
 #include "chrome/browser/prefs/pref_member.h"
-#include "content/browser/resource_context.h"
-#include "net/base/cookie_monster.h"
+#include "content/public/browser/resource_context.h"
+#include "net/cookies/cookie_monster.h"
 
-class AudioManager;
-class ChromeAppCacheService;
-class ChromeBlobStorageContext;
 class CookieSettings;
 class DesktopNotificationService;
 class ExtensionInfoMap;
@@ -32,19 +29,11 @@ class Profile;
 class ProtocolHandlerRegistry;
 class TransportSecurityPersister;
 
-namespace fileapi {
-class FileSystemContext;
-}  // namespace fileapi
-
-namespace media_stream {
-class MediaStreamManager;
-}  // namespace media_stream
-
 namespace net {
 class CookieStore;
 class FraudulentCertificateReporter;
 class HttpTransactionFactory;
-class OriginBoundCertService;
+class ServerBoundCertService;
 class ProxyConfigService;
 class ProxyService;
 class SSLConfigService;
@@ -55,14 +44,6 @@ namespace policy {
 class URLBlacklistManager;
 }  // namespace policy
 
-namespace quota {
-class QuotaManager;
-};  // namespace quota
-
-namespace webkit_database {
-class DatabaseTracker;
-}  // webkit_database
-
 // Conceptually speaking, the ProfileIOData represents data that lives on the IO
 // thread that is owned by a Profile, such as, but not limited to, network
 // objects like CookieMonster, HttpTransactionFactory, etc.  Profile owns
@@ -71,6 +52,8 @@ class DatabaseTracker;
 class ProfileIOData {
  public:
   virtual ~ProfileIOData();
+
+  static ProfileIOData* FromResourceContext(content::ResourceContext* rc);
 
   // Returns true if |scheme| is handled in Chrome, or by default handlers in
   // net::URLRequest.
@@ -81,7 +64,7 @@ class ProfileIOData {
   static bool IsHandledURL(const GURL& url);
 
   // Called by Profile.
-  const content::ResourceContext& GetResourceContext() const;
+  content::ResourceContext* GetResourceContext() const;
   ChromeURLDataManagerBackend* GetChromeURLDataManagerBackend() const;
 
   // These should only be called at most once each. Ownership is reversed when
@@ -100,10 +83,17 @@ class ProfileIOData {
   ExtensionInfoMap* GetExtensionInfoMap() const;
   HostContentSettingsMap* GetHostContentSettingsMap() const;
   CookieSettings* GetCookieSettings() const;
+
+#if defined(ENABLE_NOTIFICATIONS)
   DesktopNotificationService* GetNotificationService() const;
+#endif
 
   BooleanPrefMember* clear_local_state_on_exit()  const {
     return &clear_local_state_on_exit_;
+  }
+
+  IntegerPrefMember* session_startup_pref() const {
+    return &session_startup_pref_;
   }
 
   ChromeURLRequestContext* extensions_request_context() const {
@@ -145,19 +135,16 @@ class ProfileIOData {
     std::string accept_charset;
     std::string referrer_charset;
     IOThread* io_thread;
-    scoped_refptr<AudioManager> audio_manager;
     scoped_refptr<HostContentSettingsMap> host_content_settings_map;
     scoped_refptr<CookieSettings> cookie_settings;
-    scoped_refptr<content::HostZoomMap> host_zoom_map;
     scoped_refptr<net::SSLConfigService> ssl_config_service;
     scoped_refptr<net::CookieMonster::Delegate> cookie_monster_delegate;
-    scoped_refptr<webkit_database::DatabaseTracker> database_tracker;
-    scoped_refptr<ChromeAppCacheService> appcache_service;
-    scoped_refptr<ChromeBlobStorageContext> blob_storage_context;
-    scoped_refptr<fileapi::FileSystemContext> file_system_context;
-    scoped_refptr<quota::QuotaManager> quota_manager;
     scoped_refptr<ExtensionInfoMap> extension_info_map;
+
+#if defined(ENABLE_NOTIFICATIONS)
     DesktopNotificationService* notification_service;
+#endif
+
     scoped_refptr<ProtocolHandlerRegistry> protocol_handler_registry;
     // We need to initialize the ProxyConfigService from the UI thread
     // because on linux it relies on initializing things through gconf,
@@ -170,6 +157,8 @@ class ProfileIOData {
   };
 
   explicit ProfileIOData(bool is_incognito);
+
+  static std::string GetSSLSessionCacheShard();
 
   void InitializeOnUIThread(Profile* profile);
   void ApplyProfileParamsToContext(ChromeURLRequestContext* context) const;
@@ -191,12 +180,12 @@ class ProfileIOData {
     return chrome_url_data_manager_backend_.get();
   }
 
-  // An OriginBoundCertService object is created by a derived class of
+  // A ServerBoundCertService object is created by a derived class of
   // ProfileIOData, and the derived class calls this method to set the
-  // origin_bound_cert_service_ member and transfers ownership to the base
+  // server_bound_cert_service_ member and transfers ownership to the base
   // class.
-  void set_origin_bound_cert_service(
-      net::OriginBoundCertService* origin_bound_cert_service) const;
+  void set_server_bound_cert_service(
+      net::ServerBoundCertService* server_bound_cert_service) const;
 
   net::NetworkDelegate* network_delegate() const {
     return network_delegate_.get();
@@ -221,13 +210,21 @@ class ProfileIOData {
  private:
   class ResourceContext : public content::ResourceContext {
    public:
-    explicit ResourceContext(const ProfileIOData* io_data);
+    explicit ResourceContext(ProfileIOData* io_data);
     virtual ~ResourceContext();
 
    private:
-    virtual void EnsureInitialized() const OVERRIDE;
+    friend class ProfileIOData;
 
-    const ProfileIOData* const io_data_;
+    // ResourceContext implementation:
+    virtual net::HostResolver* GetHostResolver() OVERRIDE;
+    virtual net::URLRequestContext* GetRequestContext() OVERRIDE;
+    void EnsureInitialized();
+
+    ProfileIOData* const io_data_;
+
+    net::HostResolver* host_resolver_;
+    net::URLRequestContext* request_context_;
   };
 
   typedef base::hash_map<std::string, scoped_refptr<ChromeURLRequestContext> >
@@ -267,6 +264,8 @@ class ProfileIOData {
   mutable BooleanPrefMember enable_referrers_;
   mutable BooleanPrefMember clear_local_state_on_exit_;
   mutable BooleanPrefMember safe_browsing_enabled_;
+  // TODO(marja): Remove session_startup_pref_ if no longer needed.
+  mutable IntegerPrefMember session_startup_pref_;
 
   // Pointed to by NetworkDelegate.
   mutable scoped_ptr<policy::URLBlacklistManager> url_blacklist_manager_;
@@ -274,7 +273,7 @@ class ProfileIOData {
   // Pointed to by URLRequestContext.
   mutable scoped_ptr<ChromeURLDataManagerBackend>
       chrome_url_data_manager_backend_;
-  mutable scoped_ptr<net::OriginBoundCertService> origin_bound_cert_service_;
+  mutable scoped_ptr<net::ServerBoundCertService> server_bound_cert_service_;
   mutable scoped_ptr<net::NetworkDelegate> network_delegate_;
   mutable scoped_ptr<net::FraudulentCertificateReporter>
       fraudulent_certificate_reporter_;
@@ -283,19 +282,15 @@ class ProfileIOData {
   mutable scoped_ptr<net::URLRequestJobFactory> job_factory_;
 
   // Pointed to by ResourceContext.
-  mutable scoped_refptr<webkit_database::DatabaseTracker> database_tracker_;
-  mutable scoped_refptr<ChromeAppCacheService> appcache_service_;
-  mutable scoped_refptr<ChromeBlobStorageContext> blob_storage_context_;
-  mutable scoped_refptr<fileapi::FileSystemContext> file_system_context_;
-  mutable scoped_refptr<quota::QuotaManager> quota_manager_;
-  mutable scoped_refptr<content::HostZoomMap> host_zoom_map_;
-  mutable scoped_ptr<media_stream::MediaStreamManager> media_stream_manager_;
 
   // TODO(willchan): Remove from ResourceContext.
   mutable scoped_refptr<ExtensionInfoMap> extension_info_map_;
   mutable scoped_refptr<HostContentSettingsMap> host_content_settings_map_;
   mutable scoped_refptr<CookieSettings> cookie_settings_;
+
+#if defined(ENABLE_NOTIFICATIONS)
   mutable DesktopNotificationService* notification_service_;
+#endif
 
   mutable ResourceContext resource_context_;
 

@@ -96,6 +96,8 @@ class BrowserDistribution {
 
   virtual std::string GetNetworkStatsServer() const;
 
+  virtual std::string GetHttpPipeliningTestServer() const;
+
 #if defined(OS_WIN)
   virtual std::wstring GetDistributionData(HKEY root_key);
 #endif
@@ -130,7 +132,7 @@ class BrowserDistribution {
   virtual void LaunchUserExperiment(const FilePath& setup_path,
                                     installer::InstallStatus status,
                                     const Version& version,
-                                    const installer::Product& installation,
+                                    const installer::Product& product,
                                     bool system_level);
 
   // The user has qualified for the inactive user toast experiment and this

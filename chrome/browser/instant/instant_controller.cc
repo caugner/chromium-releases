@@ -26,8 +26,8 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
-#include "content/browser/renderer_host/render_widget_host_view.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 
 #if defined(TOOLKIT_VIEWS)
@@ -39,12 +39,14 @@
 InstantController::InstantController(Profile* profile,
                                      InstantDelegate* delegate)
     : delegate_(delegate),
+      template_url_service_(TemplateURLServiceFactory::GetForProfile(profile)),
       tab_contents_(NULL),
       is_displayable_(false),
       is_out_of_date_(true),
       commit_on_mouse_up_(false),
       last_transition_type_(content::PAGE_TRANSITION_LINK),
       ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
+  DCHECK(template_url_service_);
   PrefService* service = profile->GetPrefs();
   if (service && !InstantFieldTrial::IsInstantExperiment(profile)) {
     // kInstantEnabledOnce was added after instant, set it now to make sure it
@@ -133,8 +135,10 @@ void InstantController::Disable(Profile* profile) {
                                 delta.InMinutes(), 1, 60 * 24 * 10, 50);
   }
 
-  UMA_HISTOGRAM_COUNTS(
-      "Instant.OptOut" + InstantFieldTrial::GetGroupName(profile), 1);
+  base::Histogram* histogram = base::Histogram::FactoryGet(
+      "Instant.OptOut" + InstantFieldTrial::GetGroupName(profile), 1, 1000000,
+      50, base::Histogram::kUmaTargetedHistogramFlag);
+  histogram->Add(1);
 
   service->SetBoolean(prefs::kInstantEnabledOnce, true);
   service->SetBoolean(prefs::kInstantEnabled, false);
@@ -162,13 +166,15 @@ bool InstantController::Update(TabContentsWrapper* tab_contents,
   last_url_ = match.destination_url;
   last_user_text_ = user_text;
 
-  if (!ShouldUseInstant(match)) {
+  const TemplateURL* template_url = match.GetTemplateURL();
+  const TemplateURL* default_t_url =
+      template_url_service_->GetDefaultSearchProvider();
+  if (!IsValidInstantTemplateURL(template_url) || !default_t_url ||
+      (template_url->id() != default_t_url->id())) {
     Hide();
     return false;
   }
 
-  const TemplateURL* template_url = match.template_url;
-  DCHECK(template_url);  // ShouldUseInstant returns false if no turl.
   if (!loader_.get()) {
     loader_.reset(new InstantLoader(this, template_url->id(),
         InstantFieldTrial::GetGroupName(tab_contents->profile())));
@@ -247,12 +253,8 @@ bool InstantController::PrepareForCommit() {
   if (!InstantFieldTrial::IsHiddenExperiment(tab_contents_->profile()))
     return IsCurrent();
 
-  TemplateURLService* model = TemplateURLServiceFactory::GetForProfile(
-      tab_contents_->profile());
-  if (!model)
-    return false;
-
-  const TemplateURL* template_url = model->GetDefaultSearchProvider();
+  const TemplateURL* template_url =
+      template_url_service_->GetDefaultSearchProvider();
   if (!IsValidInstantTemplateURL(template_url) ||
       loader_->template_url_id() != template_url->id() ||
       loader_->IsNavigationPending() ||
@@ -313,7 +315,7 @@ void InstantController::OnAutocompleteLostFocus(
     return;
   }
 
-  RenderWidgetHostView* rwhv =
+  content::RenderWidgetHostView* rwhv =
       GetPreviewContents()->web_contents()->GetRenderWidgetHostView();
   if (!view_gaining_focus || !rwhv) {
     DestroyPreviewContents();
@@ -324,17 +326,15 @@ void InstantController::OnAutocompleteLostFocus(
   // For views the top level widget is always focused. If the focus change
   // originated in views determine the child Widget from the view that is being
   // focused.
-  if (view_gaining_focus) {
-    views::Widget* widget =
-        views::Widget::GetWidgetForNativeView(view_gaining_focus);
-    if (widget) {
-      views::FocusManager* focus_manager = widget->GetFocusManager();
-      if (focus_manager && focus_manager->is_changing_focus() &&
-          focus_manager->GetFocusedView() &&
-          focus_manager->GetFocusedView()->GetWidget()) {
-        view_gaining_focus =
-            focus_manager->GetFocusedView()->GetWidget()->GetNativeView();
-      }
+  views::Widget* widget =
+      views::Widget::GetWidgetForNativeView(view_gaining_focus);
+  if (widget) {
+    views::FocusManager* focus_manager = widget->GetFocusManager();
+    if (focus_manager && focus_manager->is_changing_focus() &&
+        focus_manager->GetFocusedView() &&
+        focus_manager->GetFocusedView()->GetWidget()) {
+      view_gaining_focus =
+          focus_manager->GetFocusedView()->GetWidget()->GetNativeView();
     }
   }
 #endif
@@ -386,12 +386,8 @@ void InstantController::OnAutocompleteGotFocus(
     return;
   }
 
-  TemplateURLService* model = TemplateURLServiceFactory::GetForProfile(
-      tab_contents->profile());
-  if (!model)
-    return;
-
-  const TemplateURL* template_url = model->GetDefaultSearchProvider();
+  const TemplateURL* template_url =
+      template_url_service_->GetDefaultSearchProvider();
   if (!IsValidInstantTemplateURL(template_url))
     return;
 
@@ -480,6 +476,15 @@ void InstantController::SwappedTabContents(InstantLoader* loader) {
     delegate_->ShowInstant(loader->preview_contents());
 }
 
+void InstantController::InstantLoaderContentsFocused() {
+#if defined(USE_AURA)
+  // On aura the omnibox only receives a focus lost if we initiate the focus
+  // change. This does that.
+  if (!InstantFieldTrial::IsSilentExperiment(tab_contents_->profile()))
+    delegate_->InstantPreviewFocused();
+#endif
+}
+
 void InstantController::UpdateIsDisplayable() {
   if (!is_out_of_date_ &&
       InstantFieldTrial::IsHiddenExperiment(tab_contents_->profile())) {
@@ -519,19 +524,6 @@ void InstantController::UpdateLoader(const TemplateURL* template_url,
   // For the HIDDEN and SILENT field trials, don't send back suggestions.
   if (!InstantFieldTrial::ShouldSetSuggestedText(tab_contents_->profile()))
     suggested_text->clear();
-}
-
-bool InstantController::ShouldUseInstant(const AutocompleteMatch& match) {
-  TemplateURLService* model = TemplateURLServiceFactory::GetForProfile(
-      tab_contents_->profile());
-  if (!model)
-    return false;
-
-  const TemplateURL* default_t_url = model->GetDefaultSearchProvider();
-  const TemplateURL* match_t_url = match.template_url;
-  return IsValidInstantTemplateURL(default_t_url) &&
-      IsValidInstantTemplateURL(match_t_url) &&
-      (match_t_url->id() == default_t_url->id());
 }
 
 // Returns true if |template_url| is a valid TemplateURL for use by instant.

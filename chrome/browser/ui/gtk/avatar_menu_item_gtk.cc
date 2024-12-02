@@ -10,8 +10,8 @@
 #include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/ui/gtk/gtk_chrome_link_button.h"
-#include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
+#include "chrome/browser/ui/gtk/theme_service_gtk.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_source.h"
 #include "grit/generated_resources.h"
@@ -22,7 +22,7 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/text/text_elider.h"
-#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/canvas.h"
 #include "ui/gfx/gtk_util.h"
 #include "ui/gfx/image/image.h"
 
@@ -47,7 +47,7 @@ const GdkColor kBackgroundColor = GDK_COLOR_RGB(0xff, 0xff, 0xff);
 AvatarMenuItemGtk::AvatarMenuItemGtk(Delegate* delegate,
                                      const AvatarMenuModel::Item& item,
                                      size_t item_index,
-                                     GtkThemeService* theme_service)
+                                     ThemeServiceGtk* theme_service)
     : delegate_(delegate),
       item_(item),
       item_index_(item_index),
@@ -216,7 +216,7 @@ gboolean AvatarMenuItemGtk::OnEventBoxExpose(GtkWidget* widget,
   return TRUE;
 }
 
-void AvatarMenuItemGtk::Init(GtkThemeService* theme_service) {
+void AvatarMenuItemGtk::Init(ThemeServiceGtk* theme_service) {
   widget_.Own(gtk_event_box_new());
 
   g_signal_connect(widget_.get(), "button-press-event",
@@ -241,14 +241,15 @@ void AvatarMenuItemGtk::Init(GtkThemeService* theme_service) {
   // of the profile icon.
   if (item_.active) {
     const SkBitmap* avatar_image = item_.icon.ToSkBitmap();
-    gfx::CanvasSkia canvas(*avatar_image, /* is_opaque */ true);
+    gfx::Canvas canvas(*avatar_image, /* is_opaque */ true);
 
     ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-    SkBitmap check_image = rb.GetImageNamed(IDR_PROFILE_SELECTED);
-    gfx::Rect check_rect(0, 0, check_image.width(), check_image.height());
-    int y = avatar_image->height() - check_image.height();
-    int x = avatar_image->width() - check_image.width() + kCheckMarkXOffset;
-    canvas.DrawBitmapInt(check_image, x, y);
+    const SkBitmap* check_image = rb.GetImageNamed(
+        IDR_PROFILE_SELECTED).ToSkBitmap();
+    gfx::Rect check_rect(0, 0, check_image->width(), check_image->height());
+    int y = avatar_image->height() - check_image->height();
+    int x = avatar_image->width() - check_image->width() + kCheckMarkXOffset;
+    canvas.DrawBitmapInt(*check_image, x, y);
 
     SkBitmap final_image = canvas.ExtractBitmap();
     avatar_pixbuf = gfx::GdkPixbufFromSkBitmap(&final_image);

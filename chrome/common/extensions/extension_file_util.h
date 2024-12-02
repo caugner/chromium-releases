@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,7 +20,7 @@ namespace base {
 class DictionaryValue;
 }
 
-// Utilties for manipulating the on-disk storage of extensions.
+// Utilities for manipulating the on-disk storage of extensions.
 namespace extension_file_util {
 
 // The name of the directory inside the profile that we store installed
@@ -28,7 +28,7 @@ namespace extension_file_util {
 extern const char kInstallDirectoryName[];
 
 // Copies |unpacked_source_dir| into the right location under |extensions_dir|.
-// The destination directiory is returned on success, or empty path is returned
+// The destination directory is returned on success, or empty path is returned
 // on failure.
 FilePath InstallExtension(const FilePath& unpacked_source_dir,
                           const std::string& id,
@@ -42,6 +42,13 @@ void UninstallExtension(const FilePath& extensions_dir,
 // Loads and validates an extension from the specified directory. Returns NULL
 // on failure, with a description of the error in |error|.
 scoped_refptr<Extension> LoadExtension(const FilePath& extension_root,
+                                       Extension::Location location,
+                                       int flags,
+                                       std::string* error);
+
+// The same as LoadExtension except use the provided |extension_id|.
+scoped_refptr<Extension> LoadExtension(const FilePath& extension_root,
+                                       const std::string& extension_id,
                                        Extension::Location location,
                                        int flags,
                                        std::string* error);

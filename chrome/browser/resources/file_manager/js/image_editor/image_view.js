@@ -5,7 +5,7 @@
 /**
  * The overlay displaying the image.
  */
-function ImageView(container, viewport) {
+function ImageView(container, viewport, metadataProvider) {
   this.container_ = container;
   this.viewport_ = viewport;
   this.document_ = container.ownerDocument;
@@ -36,6 +36,11 @@ function ImageView(container, viewport) {
    */
   this.screenImage_ = null;
 
+  this.localImageTransformFetcher_ = function(url, callback) {
+    metadataProvider.fetchLocal(url, function(metadata) {
+      callback(metadata.imageTransform);
+    });
+  };
 }
 
 ImageView.ANIMATION_DURATION = 180;
@@ -44,8 +49,10 @@ ImageView.FAST_SCROLL_INTERVAL = 300;
 
 ImageView.LOAD_TYPE_CACHED_FULL = 0;
 ImageView.LOAD_TYPE_CACHED_SCREEN = 1;
-ImageView.LOAD_TYPE_FILE = 2;
-ImageView.LOAD_TYPE_TOTAL = 3;
+ImageView.LOAD_TYPE_IMAGE_FILE = 2;
+ImageView.LOAD_TYPE_VIDEO_FILE = 3;
+ImageView.LOAD_TYPE_ERROR = 4;
+ImageView.LOAD_TYPE_TOTAL = 5;
 
 ImageView.prototype = {__proto__: ImageBuffer.Overlay.prototype};
 
@@ -116,6 +123,10 @@ ImageView.prototype.invalidateCaches = function() {
 
 ImageView.prototype.getCanvas = function() { return this.contentCanvas_ };
 
+ImageView.prototype.hasValidImage = function() {
+  return !this.preview_ && this.contentCanvas_ && this.contentCanvas_.width;
+};
+
 ImageView.prototype.getVideo = function() { return this.videoElement_ };
 
 ImageView.prototype.getThumbnail = function() { return this.thumbnailCanvas_ };
@@ -175,59 +186,94 @@ ImageView.prototype.load = function(
 
   this.contentID_ = id;
 
-  if (FileType.getMediaType(source) == 'video') {
+  var loadingVideo = FileType.getMediaType(source) == 'video';
+  if (loadingVideo) {
     var video = this.document_.createElement('video');
-    video.src = source;
+    if (metadata.thumbnailURL) {
+      video.setAttribute('poster', metadata.thumbnailURL);
+      this.replace(video, slide); // Show the poster immediately.
+    }
+    video.addEventListener('loadedmetadata', onVideoLoad);
+    video.addEventListener('error', onVideoLoad);
+
+    video.src = metadata.contentURL || source;
     video.load();
-    displayMainImage(ImageView.LOAD_TYPE_TOTAL, video);
+
+    function onVideoLoad() {
+      video.removeEventListener('loadedmetadata', onVideoLoad);
+      video.removeEventListener('error', onVideoLoad);
+      displayMainImage(ImageView.LOAD_TYPE_VIDEO_FILE, slide,
+          !!metadata.thumbnailURL /* preview shown */, video);
+    }
     return;
   }
   var readyContent = this.getReadyContent(id, source);
   if (readyContent) {
-    displayMainImage(ImageView.LOAD_TYPE_CACHED_FULL, readyContent);
+    displayMainImage(ImageView.LOAD_TYPE_CACHED_FULL, slide,
+        false /* no preview */, readyContent);
   } else {
     var cachedScreen = this.screenCache_.getItem(id);
     if (cachedScreen) {
       // We have a cached screen-scale canvas, use it instead of a thumbnail.
-      displayThumbnail(ImageView.LOAD_TYPE_CACHED_SCREEN, cachedScreen);
+      displayThumbnail(ImageView.LOAD_TYPE_CACHED_SCREEN, slide, cachedScreen);
       // As far as the user can tell the image is loaded. We still need to load
       // the full res image to make editing possible, but we can report now.
       ImageUtil.metrics.recordInterval(ImageUtil.getMetricName('DisplayTime'));
     } else if (metadata.thumbnailURL) {
       this.imageLoader_.load(
           metadata.thumbnailURL,
-          metadata.thumbnailTransform,
-          displayThumbnail.bind(null, ImageView.LOAD_TYPE_FILE));
+          function(url, callback) { callback(metadata.thumbnailTransform); },
+          displayThumbnail.bind(null, ImageView.LOAD_TYPE_IMAGE_FILE, slide));
     } else {
-      loadMainImage(ImageView.LOAD_TYPE_FILE, 0);
+      loadMainImage(ImageView.LOAD_TYPE_IMAGE_FILE, slide, source,
+          false /* no preview*/, 0 /* delay */);
     }
   }
 
-  function displayThumbnail(loadType, canvas) {
+  function displayThumbnail(loadType, slide, canvas) {
     // The thumbnail may have different aspect ratio than the main image.
     // Force the main image proportions to avoid flicker.
     var time = Date.now();
 
     var mainImageLoadDelay = ImageView.ANIMATION_WAIT_INTERVAL;
+    var mainImageSlide = slide;
 
     // Do not do slide-in animation when scrolling very fast.
     if (self.lastLoadTime_ &&
         (time - self.lastLoadTime_) < ImageView.FAST_SCROLL_INTERVAL) {
-      slide = 0;
+      mainImageSlide = 0;
     }
     self.lastLoadTime_ = time;
 
-    self.replace(canvas, slide, metadata.width, metadata.height);
-    if (!slide) mainImageLoadDelay = 0;
-    slide = 0;
-    loadMainImage(loadType, mainImageLoadDelay);
+    if (canvas.width) {
+      if (metadata.contentURL) {
+        // We do not know the main image size, but chances are that it is large
+        // enough. Show the thumbnail at the maximum possible scale.
+        var bounds = self.viewport_.getScreenBounds();
+        var scale = Math.min (bounds.width / canvas.width,
+                              bounds.height / canvas.height);
+        self.replace(canvas, slide,
+            canvas.width * scale, canvas.height * scale, true /* preview */);
+      } else {
+        self.replace(canvas, slide,
+            metadata.width, metadata.height, true /* preview */);
+      }
+      if (!mainImageSlide) mainImageLoadDelay = 0;
+      mainImageSlide = 0;
+    } else {
+      // Thumbnail image load failed, loading the main image immediately.
+      mainImageLoadDelay = 0;
+    }
+    loadMainImage(loadType, mainImageSlide, source,
+        canvas.width != 0, mainImageLoadDelay);
   }
 
-  function loadMainImage(loadType, delay) {
-    if (self.prefetchLoader_.isLoading(source)) {
+  function loadMainImage(loadType, slide, contentURL, previewShown, delay) {
+    if (self.prefetchLoader_.isLoading(contentURL)) {
       // The image we need is already being prefetched. Initiating another load
       // would be a waste. Hijack the load instead by overriding the callback.
-      self.prefetchLoader_.setCallback(displayMainImage.bind(null, loadType));
+      self.prefetchLoader_.setCallback(
+          displayMainImage.bind(null, loadType, slide, previewShown));
 
       // Swap the loaders so that the self.isLoading works correctly.
       var temp = self.prefetchLoader_;
@@ -238,19 +284,35 @@ ImageView.prototype.load = function(
     self.prefetchLoader_.cancel();  // The prefetch was doing something useless.
 
     self.imageLoader_.load(
-        source,
-        metadata.imageTransform,
-        displayMainImage.bind(null, loadType),
+        contentURL,
+        self.localImageTransformFetcher_,
+        displayMainImage.bind(null, loadType, slide, previewShown),
         delay);
   }
 
-  function displayMainImage(loadType, content) {
-    self.replace(content, slide);
-    ImageUtil.metrics.recordEnum(ImageUtil.getMetricName('LoadMode'),
-        loadType, ImageView.LOAD_TYPE_TOTAL);
-    if (loadType != ImageView.LOAD_TYPE_CACHED_SCREEN) {
+  function displayMainImage(loadType, slide, previewShown, content) {
+    if ((!loadingVideo && !content.width) ||
+        (loadingVideo && !content.duration)) {
+      loadType = ImageView.LOAD_TYPE_ERROR;
+    }
+
+    // If we already displayed the preview we should not replace the content if:
+    //   1. The full content failed to load.
+    //     or
+    //   2. We are loading a video (because the full video is displayed in the
+    //      same HTML element as the preview).
+    if (!(previewShown &&
+        (loadType == ImageView.LOAD_TYPE_ERROR ||
+         loadType == ImageView.LOAD_TYPE_VIDEO_FILE))) {
+      self.replace(content, slide);
+    }
+
+    if (loadType != ImageView.LOAD_TYPE_ERROR &&
+        loadType != ImageView.LOAD_TYPE_CACHED_SCREEN) {
       ImageUtil.metrics.recordInterval(ImageUtil.getMetricName('DisplayTime'));
     }
+    ImageUtil.metrics.recordEnum(ImageUtil.getMetricName('LoadMode'),
+        loadType, ImageView.LOAD_TYPE_TOTAL);
     if (opt_callback) opt_callback(loadType);
   }
 };
@@ -278,7 +340,8 @@ ImageView.prototype.getReadyContent = function(id, source) {
 ImageView.prototype.prefetch = function(id, source, metadata) {
   var self = this;
   function prefetchDone(canvas) {
-    self.contentCache_.putItem(id, canvas);
+    if (canvas.width)
+      self.contentCache_.putItem(id, canvas);
   }
 
   var cached = this.getReadyContent(id, source);
@@ -291,14 +354,14 @@ ImageView.prototype.prefetch = function(id, source, metadata) {
 
     this.prefetchLoader_.load(
         source,
-        metadata.imageTransform,
+        this.localImageTransformFetcher_,
         prefetchDone,
         ImageView.ANIMATION_WAIT_INTERVAL);
   }
 };
 
 ImageView.prototype.replaceContent_ = function(
-    content, opt_reuseScreenCanvas, opt_width, opt_height) {
+    content, opt_reuseScreenCanvas, opt_width, opt_height, opt_preview) {
 
   if (content.constructor.name == 'HTMLVideoElement') {
     this.contentCanvas_ = null;
@@ -328,8 +391,9 @@ ImageView.prototype.replaceContent_ = function(
     this.container_.appendChild(this.screenImage_);
   }
 
+  this.preview_ = opt_preview;
   // If this is not a thumbnail, cache the content and the screen-scale image.
-  if (!opt_width && !opt_height) {
+  if (this.hasValidImage()) {
     this.contentCache_.putItem(this.contentID_, this.contentCanvas_, true);
     this.screenCache_.putItem(this.contentID_, this.screenImage_);
 
@@ -339,7 +403,11 @@ ImageView.prototype.replaceContent_ = function(
     this.updateThumbnail_(this.screenImage_);
 
     for (var i = 0; i != this.contentCallbacks_.length; i++) {
-      this.contentCallbacks_[i]();
+      try {
+        this.contentCallbacks_[i]();
+      } catch(e) {
+        console.error(e);
+      }
     }
   }
 };
@@ -369,10 +437,10 @@ ImageView.prototype.updateThumbnail_ = function(canvas) {
  *           <0 for right-to-left, > 0 for left-to-right, 0 for no animation.
  */
 ImageView.prototype.replace = function(
-    content, opt_slide, opt_width, opt_height) {
+    content, opt_slide, opt_width, opt_height, opt_preview) {
   var oldScreenImage = this.screenImage_;
 
-  this.replaceContent_(content, !opt_slide, opt_width, opt_height);
+  this.replaceContent_(content, !opt_slide, opt_width, opt_height, opt_preview);
 
   // TODO(kaznacheev): The line below is too obscure.
   // Refactor the whole 'slide' thing for clarity.

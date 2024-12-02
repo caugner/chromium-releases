@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -71,7 +71,8 @@ class BrowsingDataQuotaHelperTest : public testing::Test {
   void RegisterClient(const quota::MockOriginData* data, std::size_t data_len) {
     quota::MockStorageClient* client =
         new quota::MockStorageClient(
-            quota_manager_->proxy(), data, data_len);
+            quota_manager_->proxy(), data, quota::QuotaClient::kFileSystem,
+            data_len);
     quota_manager_->proxy()->RegisterClient(client);
     client->TouchAllOriginsAndNotify();
   }
@@ -145,6 +146,30 @@ TEST_F(BrowsingDataQuotaHelperTest, FetchData) {
     {"https://example.com/", quota::kStorageTypeTemporary, 10},
     {"http://example.com/", quota::kStorageTypePersistent, 100},
     {"http://example2.com/", quota::kStorageTypeTemporary, 1000},
+  };
+
+  RegisterClient(kOrigins, arraysize(kOrigins));
+  StartFetching();
+  MessageLoop::current()->RunAllPending();
+  EXPECT_TRUE(fetching_completed());
+
+  std::set<QuotaInfo> expected, actual;
+  actual.insert(quota_info().begin(), quota_info().end());
+  expected.insert(QuotaInfo("example.com", 11, 100));
+  expected.insert(QuotaInfo("example2.com", 1000, 0));
+  EXPECT_TRUE(expected == actual);
+}
+
+TEST_F(BrowsingDataQuotaHelperTest, IgnoreExtensions) {
+  const quota::MockOriginData kOrigins[] = {
+    {"http://example.com/", quota::kStorageTypeTemporary, 1},
+    {"https://example.com/", quota::kStorageTypeTemporary, 10},
+    {"http://example.com/", quota::kStorageTypePersistent, 100},
+    {"http://example2.com/", quota::kStorageTypeTemporary, 1000},
+    {"chrome-extension://abcdefghijklmnopqrstuvwxyz/",
+        quota::kStorageTypeTemporary, 10000},
+    {"chrome-extension://abcdefghijklmnopqrstuvwxyz/",
+        quota::kStorageTypePersistent, 100000},
   };
 
   RegisterClient(kOrigins, arraysize(kOrigins));

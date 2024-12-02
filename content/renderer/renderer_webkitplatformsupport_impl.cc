@@ -11,18 +11,18 @@
 #include "base/shared_memory.h"
 #include "base/utf_string_conversions.h"
 #include "content/common/database_util.h"
-#include "content/common/file_system/webfilesystem_impl.h"
+#include "content/common/fileapi/webblobregistry_impl.h"
+#include "content/common/fileapi/webfilesystem_impl.h"
 #include "content/common/file_utilities_messages.h"
+#include "content/common/indexed_db/proxy_webidbfactory_impl.h"
 #include "content/common/mime_registry_messages.h"
 #include "content/common/npobject_util.h"
 #include "content/common/view_messages.h"
-#include "content/common/webblobregistry_impl.h"
 #include "content/common/webmessageportchannel_impl.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/common/gpu_info.h"
 #include "content/public/renderer/content_renderer_client.h"
 #include "content/renderer/gamepad_shared_memory_reader.h"
-#include "content/renderer/gpu/webgraphicscontext3d_command_buffer_impl.h"
-#include "content/renderer/indexed_db/renderer_webidbfactory_impl.h"
 #include "content/renderer/media/audio_device.h"
 #include "content/renderer/media/audio_hardware.h"
 #include "content/renderer/media/renderer_webaudiodevice_impl.h"
@@ -36,10 +36,11 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebBlobRegistry.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebGamepads.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebGraphicsContext3D.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBFactory.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBKey.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBKeyPath.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebMediaStreamCenter.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebMediaStreamCenterClient.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebPeerConnectionHandler.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebPeerConnectionHandlerClient.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebRuntimeFeatures.h"
@@ -51,7 +52,6 @@
 #include "webkit/glue/webclipboard_impl.h"
 #include "webkit/glue/webfileutilities_impl.h"
 #include "webkit/glue/webkit_glue.h"
-#include "webkit/gpu/webgraphicscontext3d_in_process_impl.h"
 
 #if defined(OS_WIN)
 #include "content/common/child_process_messages.h"
@@ -64,7 +64,7 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/mac/WebSandboxSupport.h"
 #endif
 
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
+#if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID)
 #include <string>
 #include <map>
 
@@ -87,6 +87,10 @@ using WebKit::WebIDBFactory;
 using WebKit::WebIDBKey;
 using WebKit::WebIDBKeyPath;
 using WebKit::WebKitPlatformSupport;
+using WebKit::WebMediaStreamCenter;
+using WebKit::WebMediaStreamCenterClient;
+using WebKit::WebPeerConnectionHandler;
+using WebKit::WebPeerConnectionHandlerClient;
 using WebKit::WebSerializedScriptValue;
 using WebKit::WebStorageArea;
 using WebKit::WebStorageEventDispatcher;
@@ -117,6 +121,12 @@ class RendererWebKitPlatformSupportImpl::FileUtilities
                                       int mode);
 };
 
+#if defined(OS_ANDROID)
+// WebKit doesn't use WebSandboxSupport on android so we don't need to
+// implement anything here.
+class RendererWebKitPlatformSupportImpl::SandboxSupport {
+};
+#else
 class RendererWebKitPlatformSupportImpl::SandboxSupport
     : public WebKit::WebSandboxSupport {
  public:
@@ -147,6 +157,7 @@ class RendererWebKitPlatformSupportImpl::SandboxSupport
   std::map<string16, WebKit::WebFontFamily> unicode_font_families_;
 #endif
 };
+#endif  // defined(OS_ANDROID)
 
 //------------------------------------------------------------------------------
 
@@ -182,7 +193,12 @@ RendererWebKitPlatformSupportImpl::fileUtilities() {
 }
 
 WebKit::WebSandboxSupport* RendererWebKitPlatformSupportImpl::sandboxSupport() {
+#if defined(OS_ANDROID)
+  // WebKit doesn't use WebSandboxSupport on android.
+  return NULL;
+#else
   return sandbox_support_.get();
+#endif
 }
 
 WebKit::WebCookieJar* RendererWebKitPlatformSupportImpl::cookieJar() {
@@ -295,21 +311,29 @@ void RendererWebKitPlatformSupportImpl::suddenTerminationChanged(bool enabled) {
 WebStorageNamespace*
 RendererWebKitPlatformSupportImpl::createLocalStorageNamespace(
     const WebString& path, unsigned quota) {
+#ifdef ENABLE_NEW_DOM_STORAGE_BACKEND
+  return new RendererWebStorageNamespaceImpl(DOM_STORAGE_LOCAL);
+#else
   if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kSingleProcess))
     return WebStorageNamespace::createLocalStorageNamespace(path, quota);
   return new RendererWebStorageNamespaceImpl(DOM_STORAGE_LOCAL);
+#endif
 }
 
 void RendererWebKitPlatformSupportImpl::dispatchStorageEvent(
     const WebString& key, const WebString& old_value,
     const WebString& new_value, const WebString& origin,
     const WebKit::WebURL& url, bool is_local_storage) {
+#ifdef ENABLE_NEW_DOM_STORAGE_BACKEND
+  NOTREACHED();
+#else
   DCHECK(CommandLine::ForCurrentProcess()->HasSwitch(switches::kSingleProcess));
   // Inefficient, but only used in single process mode.
   scoped_ptr<WebStorageEventDispatcher> event_dispatcher(
       WebStorageEventDispatcher::create());
   event_dispatcher->dispatchStorageEvent(key, old_value, new_value, origin,
                                          url, is_local_storage);
+#endif
 }
 
 //------------------------------------------------------------------------------
@@ -491,6 +515,12 @@ bool RendererWebKitPlatformSupportImpl::SandboxSupport::loadFont(
   return FontLoader::CGFontRefFromBuffer(font_data, font_data_size, out);
 }
 
+#elif defined(OS_ANDROID)
+
+// WebKit doesn't use WebSandboxSupport on android so we don't need to
+// implement anything here. This is cleaner to support than excluding the
+// whole class for android.
+
 #elif defined(OS_POSIX)
 
 void
@@ -564,43 +594,18 @@ RendererWebKitPlatformSupportImpl::sharedWorkerRepository() {
   }
 }
 
-WebKit::WebGraphicsContext3D*
-RendererWebKitPlatformSupportImpl::createGraphicsContext3D() {
-  // The WebGraphicsContext3DInProcessImpl code path is used for
-  // layout tests (though not through this code) as well as for
-  // debugging and bringing up new ports.
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kInProcessWebGL)) {
-    return new webkit::gpu::WebGraphicsContext3DInProcessImpl(
-        gfx::kNullPluginWindow, NULL);
-  } else {
-#if defined(ENABLE_GPU)
-    return new WebGraphicsContext3DCommandBufferImpl();
-#else
-    return NULL;
-#endif
-  }
-}
+bool RendererWebKitPlatformSupportImpl::canAccelerate2dCanvas() {
+  RenderThreadImpl* thread = RenderThreadImpl::current();
+  GpuChannelHost* host = thread->EstablishGpuChannelSync(
+      content::CAUSE_FOR_GPU_LAUNCH_CANVAS_2D);
+  if (!host)
+    return false;
 
-WebKit::WebGraphicsContext3D*
-RendererWebKitPlatformSupportImpl::createOffscreenGraphicsContext3D(
-    const WebGraphicsContext3D::Attributes& attributes) {
-  // The WebGraphicsContext3DInProcessImpl code path is used for
-  // layout tests (though not through this code) as well as for
-  // debugging and bringing up new ports.
-  scoped_ptr<WebGraphicsContext3D> context;
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kInProcessWebGL)) {
-    context.reset(new webkit::gpu::WebGraphicsContext3DInProcessImpl(
-        gfx::kNullPluginWindow, NULL));
-  } else {
-#if defined(ENABLE_GPU)
-    context.reset(new WebGraphicsContext3DCommandBufferImpl());
-#else
-    return NULL;
-#endif
-  }
-  if (!context->initialize(attributes, NULL, false))
-    return NULL;
-  return context.release();
+  const content::GPUInfo& gpu_info = host->gpu_info();
+  if (gpu_info.can_lose_context || gpu_info.software_rendering)
+    return false;
+
+  return true;
 }
 
 double RendererWebKitPlatformSupportImpl::audioHardwareSampleRate() {
@@ -613,14 +618,53 @@ size_t RendererWebKitPlatformSupportImpl::audioHardwareBufferSize() {
 
 WebAudioDevice*
 RendererWebKitPlatformSupportImpl::createAudioDevice(
-    size_t buffer_size,
-    unsigned channels,
-    double sample_rate,
+    size_t bufferSize,
+    unsigned numberOfChannels,
+    double sampleRate,
     WebAudioDevice::RenderCallback* callback) {
-  return new RendererWebAudioDeviceImpl(buffer_size,
-                                        channels,
-                                        sample_rate,
-                                        callback);
+  ChannelLayout layout = CHANNEL_LAYOUT_UNSUPPORTED;
+
+  // The |numberOfChannels| does not exactly identify the channel layout of the
+  // device. The switch statement below assigns a best guess to the channel
+  // layout based on number of channels.
+  // TODO(crogers): WebKit should give the channel layout instead of the hard
+  // channel count.
+  switch (numberOfChannels) {
+    case 1:
+      layout = CHANNEL_LAYOUT_MONO;
+      break;
+    case 2:
+      layout = CHANNEL_LAYOUT_STEREO;
+      break;
+    case 3:
+      layout = CHANNEL_LAYOUT_2_1;
+      break;
+    case 4:
+      layout = CHANNEL_LAYOUT_4_0;
+      break;
+    case 5:
+      layout = CHANNEL_LAYOUT_5_0;
+      break;
+    case 6:
+      layout = CHANNEL_LAYOUT_5_1;
+      break;
+    case 7:
+      layout = CHANNEL_LAYOUT_7_0;
+      break;
+    case 8:
+      layout = CHANNEL_LAYOUT_7_1;
+      break;
+    default:
+      layout = CHANNEL_LAYOUT_STEREO;
+  }
+
+  AudioParameters params(AudioParameters::AUDIO_PCM_LOW_LATENCY,
+                         layout,
+                         static_cast<int>(sampleRate),
+                         16,
+                         bufferSize);
+
+  return new RendererWebAudioDeviceImpl(params, callback);
 }
 
 //------------------------------------------------------------------------------
@@ -672,9 +716,9 @@ void RendererWebKitPlatformSupportImpl::GetPlugins(
 
 //------------------------------------------------------------------------------
 
-WebKit::WebPeerConnectionHandler*
+WebPeerConnectionHandler*
 RendererWebKitPlatformSupportImpl::createPeerConnectionHandler(
-    WebKit::WebPeerConnectionHandlerClient* client) {
+    WebPeerConnectionHandlerClient* client) {
   WebFrame* web_frame = WebFrame::frameForCurrentContext();
   if (!web_frame)
     return NULL;
@@ -682,4 +726,21 @@ RendererWebKitPlatformSupportImpl::createPeerConnectionHandler(
   if (!render_view)
     return NULL;
   return render_view->CreatePeerConnectionHandler(client);
+}
+
+//------------------------------------------------------------------------------
+
+WebMediaStreamCenter*
+RendererWebKitPlatformSupportImpl::createMediaStreamCenter(
+    WebMediaStreamCenterClient* client) {
+  RenderThreadImpl* render_thread = RenderThreadImpl::current();
+  DCHECK(render_thread);
+  if (!render_thread)
+    return NULL;
+  return render_thread->CreateMediaStreamCenter(client);
+}
+
+GpuChannelHostFactory*
+RendererWebKitPlatformSupportImpl::GetGpuChannelHostFactory() {
+  return RenderThreadImpl::current();
 }

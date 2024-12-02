@@ -25,7 +25,6 @@
 #include "googleurl/src/gurl.h"
 
 class Profile;
-class TabContents;
 
 namespace base {
 class DictionaryValue;
@@ -69,6 +68,7 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
     PRERENDER_MODE_ENABLED,
     PRERENDER_MODE_EXPERIMENT_CONTROL_GROUP,
     PRERENDER_MODE_EXPERIMENT_PRERENDER_GROUP,
+    PRERENDER_MODE_EXPERIMENT_5MIN_TTL_GROUP,
     PRERENDER_MODE_EXPERIMENT_NO_USE_GROUP,
     PRERENDER_MODE_MAX
   };
@@ -111,7 +111,7 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
   // tab at the time the prerender is generated from the omnibox.
   bool AddPrerenderFromOmnibox(
       const GURL& url,
-      SessionStorageNamespace* session_storage_namespace);
+      content::SessionStorageNamespace* session_storage_namespace);
 
   // Destroy all prerenders for the given child route id pair and assign a final
   // status to them.
@@ -121,15 +121,14 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
   // Cancels all active prerenders.
   void CancelAllPrerenders();
 
-  // For a given WebContents that wants to navigate to the URL supplied,
-  // determines whether a prerendered version of the URL can be used,
-  // and substitutes the prerendered RVH into the WebContents. |opener_url| is
-  // set to the window.opener url that the WebContents should have set and
-  // will be empty if there is no opener set. Returns whether or not a
-  // prerendered RVH could be used or not.
+  // Cancels all active prerenders with the ORIGIN_OMNIBOX origin.
+  void CancelOmniboxPrerenders();
+
+  // If |url| matches a valid prerendered page, try to swap it into
+  // |web_contents| and merge browsing histories. Returns |true| if a
+  // prerendered page is swapped in, |false| otherwise.
   bool MaybeUsePrerenderedPage(content::WebContents* web_contents,
-                               const GURL& url,
-                               const GURL& opener_url);
+                               const GURL& url);
 
   // Moves a PrerenderContents to the pending delete list from the list of
   // active prerenders when prerendering should be cancelled.
@@ -140,14 +139,13 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
   // when the user navigates to a page to when it finishes loading. The actual
   // load may have started prior to navigation due to prerender hints.
   // This must be called on the UI thread.
+  // |fraction_plt_elapsed_at_swap_in| must either be in [0.0, 1.0], or a value
+  // outside that range indicating that it doesn't apply.
   static void RecordPerceivedPageLoadTime(
       base::TimeDelta perceived_page_load_time,
+      double fraction_plt_elapsed_at_swap_in,
       content::WebContents* web_contents,
       const GURL& url);
-
-  // Returns whether prerendering is currently enabled for this manager.
-  // Must be called on the UI thread.
-  bool is_enabled() const;
 
   // Set whether prerendering is currently enabled for this manager.
   // Must be called on the UI thread.
@@ -155,8 +153,14 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
   // they time out, but new ones will not be generated.
   void set_enabled(bool enabled);
 
+  // Controls if we launch or squash prefetch requests as they arrive from
+  // renderers.
+  static bool IsPrefetchEnabled();
+  static void SetIsPrefetchEnabled(bool enabled);
+
   static PrerenderManagerMode GetMode();
   static void SetMode(PrerenderManagerMode mode);
+  static const char* GetModeString();
   static bool IsPrerenderingPossible();
   static bool ActuallyPrerendering();
   static bool IsControlGroup();
@@ -166,6 +170,10 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
   // is prerendering a page.
   bool IsWebContentsPrerendering(content::WebContents* web_contents) const;
 
+  // Returns true if there is a prerendered page for the given URL and it has
+  // finished loading. Only valid if called before MaybeUsePrerenderedPage.
+  bool DidPrerenderFinishLoading(const GURL& url) const;
+
   // Maintaining and querying the set of WebContents belonging to this
   // PrerenderManager that are currently showing prerendered pages.
   void MarkWebContentsAsPrerendered(content::WebContents* web_contents);
@@ -173,10 +181,10 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
   void MarkWebContentsAsNotPrerendered(content::WebContents* web_contents);
   bool IsWebContentsPrerendered(content::WebContents* web_contents) const;
   bool WouldWebContentsBePrerendered(content::WebContents* web_contents) const;
-  bool IsOldRenderViewHost(const RenderViewHost* render_view_host) const;
+  bool IsOldRenderViewHost(
+      const content::RenderViewHost* render_view_host) const;
 
-  // Checks whether navigation to the provided URL has occurred in a visible
-  // tab recently.
+  // Checks whether |url| has been recently navigated to.
   bool HasRecentlyBeenNavigatedTo(const GURL& url);
 
   // Returns true if the method given is invalid for prerendering.
@@ -221,6 +229,13 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
 
   bool IsPendingEntry(const GURL& url) const;
 
+  // Returns true if |url| matches any URLs being prerendered.
+  bool IsPrerendering(const GURL& url) const;
+
+  // Records that some visible tab navigated (or was redirected) to the
+  // provided URL.
+  void RecordNavigation(const GURL& url);
+
  protected:
   void SetPrerenderContentsFactory(
       PrerenderContents::Factory* prerender_contents_factory);
@@ -237,6 +252,11 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
   // Test that needs needs access to internal functions.
   friend class PrerenderBrowserTest;
   FRIEND_TEST_ALL_PREFIXES(PrerenderManagerTest, AliasURLTest);
+  FRIEND_TEST_ALL_PREFIXES(PrerenderManagerTest, CancelAllTest);
+  FRIEND_TEST_ALL_PREFIXES(PrerenderManagerTest,
+                           CancelOmniboxRemovesOmniboxTest);
+  FRIEND_TEST_ALL_PREFIXES(PrerenderManagerTest,
+                           CancelOmniboxDoesNotRemoveLinkTest);
   FRIEND_TEST_ALL_PREFIXES(PrerenderManagerTest, ClearTest);
   FRIEND_TEST_ALL_PREFIXES(PrerenderManagerTest, ControlGroup);
   FRIEND_TEST_ALL_PREFIXES(PrerenderManagerTest, DropOldestRequestTest);
@@ -259,6 +279,8 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
 
   class MostVisitedSites;
 
+  typedef std::list<PrerenderContentsData> PrerenderContentsDataList;
+
   // Adds a prerender for |url| from referrer |referrer| initiated from the
   // RenderViewHost specified by |child_route_id_pair|. The |origin| specifies
   // how the prerender was added. If the |session_storage_namespace| is NULL,
@@ -269,15 +291,7 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
       const std::pair<int, int>& child_route_id_pair,
       const GURL& url,
       const content::Referrer& referrer,
-      SessionStorageNamespace* session_storage_namespace);
-
-  // Adds a pending preload issued by the prerendering RenderView identified by
-  // |child_route_id_pair|.  If and when that prerendering RenderView is used,
-  // the specified prerender will start.
-  void AddPendingPrerender(Origin origin,
-                           const std::pair<int, int>& child_route_id_pair,
-                           const GURL& url,
-                           const content::Referrer& referrer);
+      content::SessionStorageNamespace* session_storage_namespace);
 
   // Retrieves the PrerenderContents object for the specified URL, if it
   // has been prerendered.  The caller will then have ownership of the
@@ -308,6 +322,7 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
   // automatically be cancelled.
   void PostCleanupTask();
 
+  base::TimeDelta GetMaxAge() const;
   bool IsPrerenderElementFresh(const base::Time start) const;
   void DeleteOldEntries();
   virtual base::Time GetCurrentTime() const;
@@ -328,18 +343,13 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
   // Finds the specified PrerenderContents and returns it, if it exists.
   // Returns NULL otherwise.  Unlike GetEntry, the PrerenderManager maintains
   // ownership of the PrerenderContents.
-  PrerenderContents* FindEntry(const GURL& url);
+  PrerenderContents* FindEntry(const GURL& url) const;
 
   // Returns the iterator to the PrerenderContentsData entry that is being
   // prerendered from the given child route id pair.
-  std::list<PrerenderContentsData>::iterator
+  PrerenderContentsDataList::iterator
       FindPrerenderContentsForChildRouteIdPair(
           const std::pair<int, int>& child_route_id_pair);
-
-  // Returns whether the PrerenderManager is currently within the prerender
-  // window - effectively, up to 30 seconds after a prerender tag has been
-  // observed.
-  bool WithinWindow() const;
 
   bool DoesRateLimitAllowPrerender() const;
 
@@ -358,10 +368,6 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
 
   // Adds to the history list.
   void AddToHistory(PrerenderContents* contents);
-
-  // Records that some visible tab navigated (or was redirected) to the
-  // provided URL.
-  void RecordNavigation(const GURL& url);
 
   // Returns a new Value representing the pages currently being prerendered. The
   // caller is responsible for delete'ing the return value.
@@ -385,6 +391,10 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
                          uint8 experiment_id,
                          FinalStatus final_status) const;
 
+  // Returns whether prerendering is currently enabled for this manager.
+  // Must be called on the UI thread.
+  bool IsEnabled() const;
+
   // The configuration.
   Config config_;
 
@@ -393,13 +403,15 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
   // of the PrerenderManager.
   bool enabled_;
 
+  static bool is_prefetch_enabled_;
+
   // The profile that owns this PrerenderManager.
   Profile* profile_;
 
   PrerenderTracker* prerender_tracker_;
 
   // List of prerendered elements.
-  std::list<PrerenderContentsData> prerender_list_;
+  PrerenderContentsDataList prerender_list_;
 
   // List of recent navigations in this profile, sorted by ascending
   // navigate_time_.

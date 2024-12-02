@@ -1,6 +1,6 @@
-#inetTitle {
-  border: none;
-}
+/* Copyright (c) 2012 The Chromium Authors. All rights reserved.
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file. */
 
 #network-general-div {
   -webkit-margin-start: 15px;
@@ -20,7 +20,8 @@
   position: relative;
 }
 
-.network-password > input, .network-password > select {
+.network-password > input,
+.network-password > select {
   width: 200px;
 }
 
@@ -34,14 +35,14 @@
 }
 
 .network-item:not([connecting]):hover {
-  border-color: hsl(214, 91%, 85%);
   background-color: hsl(214, 91%, 97%);
+  border-color: hsl(214, 91%, 85%);
 }
 
 .network-item[connected] {
+  background-color: hsl(214,91%,89%);
   background-image: -webkit-linear-gradient(rgba(255, 255, 255, 0.8),
                                             rgba(255, 255, 255, 0));
-  background-color: hsl(214,91%,89%);
   border-color: hsl(214, 91%, 65%);
 }
 
@@ -89,9 +90,9 @@ html[dir='rtl'] .network-item-text {
 }
 
 .network-item > * > button {
+  margin-right: 5px;
   min-width: 100px;
   visibility: hidden;
-  margin-right: 5px;
 }
 
 .network-item:hover > * > button,
@@ -104,15 +105,8 @@ html[dir='rtl'] .network-item-text {
 }
 
 .displaytable > section > .network-title {
-  vertical-align: top;
   padding-top: 20px;
-}
-
-#detailsInternetPage {
-  min-width: 440px;
-  min-height: 420px;
-  padding-bottom: 40px;
-  position: relative;
+  vertical-align: top;
 }
 
 #details-plan-table {
@@ -120,31 +114,31 @@ html[dir='rtl'] .network-item-text {
 }
 
 #planSummary {
-  width: 350px;
   padding-bottom: 5px;
+  width: 350px;
 }
 
 #planWarning {
-  width: 350px;
-  padding-top: 5px;
   font-weight: bold;
+  padding-top: 5px;
+  width: 350px;
 }
 
 #locked-network-banner {
   height: 31px;
-  width: 100%;
   margin: 0;
   padding-top: 10px;
   vertical-align: middle;
+  width: 100%;
 }
 
 #locked-network-icon {
-  background-image: url("chrome://theme/IDR_WARNING");
+  background-image: url('chrome://theme/IDR_WARNING');
+  background-position: center;
   background-repeat: no-repeat;
-  background-position:center;
   display: inline-block;
-  padding: 5px;
   height: 21px;
+  padding: 5px;
   vertical-align: middle;
   width: 24px;
 }
@@ -154,11 +148,11 @@ html[dir='rtl'] .network-item-text {
 }
 
 #internet-owner-only-warning {
+  -webkit-padding-start: 20px;
+  background-image: url('warning.png');
+  background-repeat: no-repeat;
   margin: 10px 0;
   padding-bottom: 1px;
-  -webkit-padding-start: 20px;
-  background-repeat: no-repeat;
-  background-image: url('warning.png');
 }
 
 #ipConfigList .name {

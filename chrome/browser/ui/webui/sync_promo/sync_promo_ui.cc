@@ -15,9 +15,10 @@
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/sync/profile_sync_service.h"
+#include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/browser/ui/webui/chrome_web_ui_data_source.h"
-#include "chrome/browser/ui/webui/options/core_options_handler.h"
+#include "chrome/browser/ui/webui/options2/core_options_handler2.h"
 #include "chrome/browser/ui/webui/sync_promo/sync_promo_handler.h"
 #include "chrome/browser/ui/webui/sync_promo/sync_promo_trial.h"
 #include "chrome/browser/ui/webui/theme_source.h"
@@ -39,7 +40,6 @@ namespace {
 const char kStringsJsFile[] = "strings.js";
 const char kSyncPromoJsFile[] = "sync_promo.js";
 
-const char kSyncPromoQueryKeyIsLaunchPage[] = "is_launch_page";
 const char kSyncPromoQueryKeyNextPage[] = "next_page";
 const char kSyncPromoQueryKeySource[] = "source";
 
@@ -80,7 +80,7 @@ class SyncPromoUIHTMLSource : public ChromeWebUIDataSource {
 SyncPromoUIHTMLSource::SyncPromoUIHTMLSource(content::WebUI* web_ui)
     : ChromeWebUIDataSource(chrome::kChromeUISyncPromoHost) {
   DictionaryValue localized_strings;
-  CoreOptionsHandler::GetStaticLocalizedValues(&localized_strings);
+  options2::CoreOptionsHandler::GetStaticLocalizedValues(&localized_strings);
   SyncSetupHandler::GetStaticLocalizedValues(&localized_strings, web_ui);
   AddLocalizedStrings(localized_strings);
 }
@@ -111,10 +111,7 @@ bool GetValueForKeyInQuery(const GURL& url, const std::string& search_key,
 }  // namespace
 
 SyncPromoUI::SyncPromoUI(content::WebUI* web_ui) : WebUIController(web_ui) {
-  web_ui->HideURL();
-
   SyncPromoHandler* handler = new SyncPromoHandler(
-      GetSourceForSyncPromoURL(web_ui->GetWebContents()->GetURL()),
       g_browser_process->profile_manager());
   web_ui->AddMessageHandler(handler);
 
@@ -152,7 +149,8 @@ bool SyncPromoUI::ShouldShowSyncPromo(Profile* profile) {
 
   // If the user is already signed into sync then don't show the promo.
   ProfileSyncService* service =
-      profile->GetOriginalProfile()->GetProfileSyncService();
+      ProfileSyncServiceFactory::GetInstance()->GetForProfile(
+          profile->GetOriginalProfile());
   if (!service || service->HasSyncSetupCompleted())
     return false;
 
@@ -174,11 +172,8 @@ void SyncPromoUI::RegisterUserPrefs(PrefService* prefs) {
 
 // static
 bool SyncPromoUI::ShouldShowSyncPromoAtStartup(Profile* profile,
-                                               bool is_new_profile,
-                                               bool* promo_suppressed) {
+                                               bool is_new_profile) {
   DCHECK(profile);
-  DCHECK(promo_suppressed);
-  *promo_suppressed = false;
 
   if (!ShouldShowSyncPromo(profile))
     return false;
@@ -204,19 +199,6 @@ bool SyncPromoUI::ShouldShowSyncPromoAtStartup(Profile* profile,
   if (show_count >= kSyncPromoShowAtStartupMaximum)
     return false;
 
-  // If the current install is part of trial then let the trial determine if we
-  // should show the promo or not.
-  switch (sync_promo_trial::GetStartupOverrideForCurrentTrial()) {
-    case sync_promo_trial::STARTUP_OVERRIDE_NONE:
-      // No override so simply continue.
-      break;
-    case sync_promo_trial::STARTUP_OVERRIDE_SHOW:
-      return true;
-    case sync_promo_trial::STARTUP_OVERRIDE_HIDE:
-      *promo_suppressed = true;
-      return false;
-  }
-
   // This pref can be set in the master preferences file to allow or disallow
   // showing the sync promo at startup.
   if (prefs->HasPrefPath(prefs::kSyncPromoShowOnFirstRunAllowed))
@@ -226,8 +208,12 @@ bool SyncPromoUI::ShouldShowSyncPromoAtStartup(Profile* profile,
   if (!AllowPromoAtStartupForCurrentBrand())
     return false;
 
-  // Default to show the promo.
+  // Default to show the promo for Google Chrome builds.
+#if defined(GOOGLE_CHROME_BUILD)
   return true;
+#else
+  return false;
+#endif
 }
 
 void SyncPromoUI::DidShowSyncPromoAtStartup(Profile* profile) {
@@ -246,14 +232,12 @@ void SyncPromoUI::SetUserSkippedSyncPromo(Profile* profile) {
 }
 
 // static
-GURL SyncPromoUI::GetSyncPromoURL(const GURL& next_page,
-                                  bool show_title,
-                                  const std::string& source) {
+GURL SyncPromoUI::GetSyncPromoURL(const GURL& next_page, Source source) {
+  DCHECK_NE(SOURCE_UNKNOWN, source);
+
   std::stringstream stream;
   stream << chrome::kChromeUISyncPromoURL << "?"
-         << kSyncPromoQueryKeyIsLaunchPage << "="
-         << (show_title ? "true" : "false") << "&"
-         << kSyncPromoQueryKeySource << "=" << source;
+         << kSyncPromoQueryKeySource << "=" << static_cast<int>(source);
 
   if (!next_page.spec().empty()) {
     url_canon::RawCanonOutputT<char> output;
@@ -264,16 +248,6 @@ GURL SyncPromoUI::GetSyncPromoURL(const GURL& next_page,
   }
 
   return GURL(stream.str());
-}
-
-// static
-bool SyncPromoUI::GetIsLaunchPageForSyncPromoURL(const GURL& url) {
-  std::string value;
-  // Show the title if the promo is currently the Chrome launch page (and not
-  // the page accessed through the NTP).
-  if (GetValueForKeyInQuery(url, kSyncPromoQueryKeyIsLaunchPage, &value))
-    return value == "true";
-  return false;
 }
 
 // static
@@ -290,42 +264,14 @@ GURL SyncPromoUI::GetNextPageURLForSyncPromoURL(const GURL& url) {
 }
 
 // static
-std::string SyncPromoUI::GetSourceForSyncPromoURL(const GURL& url) {
+SyncPromoUI::Source SyncPromoUI::GetSourceForSyncPromoURL(const GURL& url) {
   std::string value;
-  return GetValueForKeyInQuery(url, kSyncPromoQueryKeySource, &value) ?
-      value : std::string();
-}
-
-// static
-bool SyncPromoUI::UserHasSeenSyncPromoAtStartup(Profile* profile) {
-  return profile->GetPrefs()->GetInteger(prefs::kSyncPromoStartupCount) > 0;
-}
-
-// static
-SyncPromoUI::Version SyncPromoUI::GetSyncPromoVersion() {
-  int value = 0;
-  if (base::StringToInt(CommandLine::ForCurrentProcess()->
-      GetSwitchValueASCII(switches::kSyncPromoVersion), &value)) {
-    if (value >= VERSION_DEFAULT && value < VERSION_COUNT)
-      return static_cast<Version>(value);
-  }
-
-  Version version;
-  if (sync_promo_trial::GetSyncPromoVersionForCurrentTrial(&version)) {
-    // Currently the sync promo dialog has two problems. First, it's not modal
-    // so the user can interact with other browser windows. Second, it uses
-    // a nested message loop that can cause the sync promo page not to render.
-    // To work around these problems the sync promo dialog is only shown for
-    // the first profile. TODO(sail): Fix these issues if the sync promo dialog
-    // is more widely deployed.
-    ProfileInfoCache& cache =
-        g_browser_process->profile_manager()->GetProfileInfoCache();
-    if (cache.GetNumberOfProfiles() > 1 &&
-        version == SyncPromoUI::VERSION_DIALOG) {
-      return SyncPromoUI::VERSION_SIMPLE;
+  if (GetValueForKeyInQuery(url, kSyncPromoQueryKeySource, &value)) {
+    int source = 0;
+    if (base::StringToInt(value, &source) && source >= SOURCE_START_PAGE &&
+        source < SOURCE_UNKNOWN) {
+      return static_cast<Source>(source);
     }
-    return version;
   }
-
-  return VERSION_DEFAULT;
+  return SOURCE_UNKNOWN;
 }

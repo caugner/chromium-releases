@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,10 +9,11 @@
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/browser/net/url_request_failed_dns_job.h"
-#include "content/browser/net/url_request_mock_http_job.h"
 #include "content/public/browser/web_contents.h"
+#include "content/test/net/url_request_failed_job.h"
+#include "content/test/net/url_request_mock_http_job.h"
 #include "content/test/test_navigation_observer.h"
+#include "net/base/net_errors.h"
 
 using content::BrowserThread;
 using content::NavigationController;
@@ -71,6 +72,11 @@ class ErrorPageTest : public InProcessBrowserTest {
         base::Bind(&chrome_browser_net::SetUrlRequestMocksEnabled, true));
   }
 
+  // Returns a GURL that results in a DNS error.
+  GURL GetDnsErrorURL() const {
+    return URLRequestFailedJob::GetMockHttpUrl(net::ERR_NAME_NOT_RESOLVED);
+  }
+
  private:
   // Navigates the browser the indicated direction in the history and waits for
   // |num_navigations| to occur and the title to change to |expected_title|.
@@ -105,40 +111,37 @@ class ErrorPageTest : public InProcessBrowserTest {
 
 // See crbug.com/109669
 #if defined(USE_AURA)
-#define MAYBE_DNSError_Basic FLAKY_DNSError_Basic
+#define MAYBE_DNSError_Basic DISABLED_DNSError_Basic
 #else
 #define MAYBE_DNSError_Basic DNSError_Basic
 #endif
 // Test that a DNS error occuring in the main frame redirects to an error page.
 IN_PROC_BROWSER_TEST_F(ErrorPageTest, MAYBE_DNSError_Basic) {
-  GURL test_url(URLRequestFailedDnsJob::kTestUrl);
   // The first navigation should fail, and the second one should be the error
   // page.
-  NavigateToURLAndWaitForTitle(test_url, "Mock Link Doctor", 2);
+  NavigateToURLAndWaitForTitle(GetDnsErrorURL(), "Mock Link Doctor", 2);
 }
 
 // Test that a DNS error occuring in the main frame does not result in an
 // additional session history entry.
 IN_PROC_BROWSER_TEST_F(ErrorPageTest, DNSError_GoBack1) {
-  GURL test_url(URLRequestFailedDnsJob::kTestUrl);
   NavigateToFileURL(FILE_PATH_LITERAL("title2.html"));
-  NavigateToURLAndWaitForTitle(test_url, "Mock Link Doctor", 2);
+  NavigateToURLAndWaitForTitle(GetDnsErrorURL(), "Mock Link Doctor", 2);
   GoBackAndWaitForTitle("Title Of Awesomeness", 1);
 }
 
 // See crbug.com/109669
 #if defined(USE_AURA)
-#define MAYBE_DNSError_GoBack2 FLAKY_DNSError_GoBack2
+#define MAYBE_DNSError_GoBack2 DISABLED_DNSError_GoBack2
 #else
 #define MAYBE_DNSError_GoBack2 DNSError_GoBack2
 #endif
 // Test that a DNS error occuring in the main frame does not result in an
 // additional session history entry.
 IN_PROC_BROWSER_TEST_F(ErrorPageTest, MAYBE_DNSError_GoBack2) {
-  GURL test_url(URLRequestFailedDnsJob::kTestUrl);
   NavigateToFileURL(FILE_PATH_LITERAL("title2.html"));
 
-  NavigateToURLAndWaitForTitle(test_url, "Mock Link Doctor", 2);
+  NavigateToURLAndWaitForTitle(GetDnsErrorURL(), "Mock Link Doctor", 2);
   NavigateToFileURL(FILE_PATH_LITERAL("title3.html"));
 
   GoBackAndWaitForTitle("Mock Link Doctor", 2);
@@ -147,17 +150,16 @@ IN_PROC_BROWSER_TEST_F(ErrorPageTest, MAYBE_DNSError_GoBack2) {
 
 // See crbug.com/109669
 #if defined(USE_AURA)
-#define MAYBE_DNSError_GoBack2AndForward FLAKY_DNSError_GoBack2AndForward
+#define MAYBE_DNSError_GoBack2AndForward DISABLED_DNSError_GoBack2AndForward
 #else
 #define MAYBE_DNSError_GoBack2AndForward DNSError_GoBack2AndForward
 #endif
 // Test that a DNS error occuring in the main frame does not result in an
 // additional session history entry.
 IN_PROC_BROWSER_TEST_F(ErrorPageTest, MAYBE_DNSError_GoBack2AndForward) {
-  GURL test_url(URLRequestFailedDnsJob::kTestUrl);
   NavigateToFileURL(FILE_PATH_LITERAL("title2.html"));
 
-  NavigateToURLAndWaitForTitle(test_url, "Mock Link Doctor", 2);
+  NavigateToURLAndWaitForTitle(GetDnsErrorURL(), "Mock Link Doctor", 2);
   NavigateToFileURL(FILE_PATH_LITERAL("title3.html"));
 
   GoBackAndWaitForTitle("Mock Link Doctor", 2);
@@ -168,17 +170,16 @@ IN_PROC_BROWSER_TEST_F(ErrorPageTest, MAYBE_DNSError_GoBack2AndForward) {
 
 // See crbug.com/109669
 #if defined(USE_AURA)
-#define MAYBE_DNSError_GoBack2Forward2 FLAKY_DNSError_GoBack2Forward2
+#define MAYBE_DNSError_GoBack2Forward2 DISABLED_DNSError_GoBack2Forward2
 #else
 #define MAYBE_DNSError_GoBack2Forward2 DNSError_GoBack2Forward2
 #endif
 // Test that a DNS error occuring in the main frame does not result in an
 // additional session history entry.
 IN_PROC_BROWSER_TEST_F(ErrorPageTest, MAYBE_DNSError_GoBack2Forward2) {
-  GURL test_url(URLRequestFailedDnsJob::kTestUrl);
   NavigateToFileURL(FILE_PATH_LITERAL("title3.html"));
 
-  NavigateToURLAndWaitForTitle(test_url, "Mock Link Doctor", 2);
+  NavigateToURLAndWaitForTitle(GetDnsErrorURL(), "Mock Link Doctor", 2);
   NavigateToFileURL(FILE_PATH_LITERAL("title2.html"));
 
   GoBackAndWaitForTitle("Mock Link Doctor", 2);

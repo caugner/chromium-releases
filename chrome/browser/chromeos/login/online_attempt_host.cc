@@ -4,11 +4,13 @@
 
 #include "chrome/browser/chromeos/login/online_attempt_host.h"
 
+#include "base/bind.h"
 #include "base/sha1.h"
 #include "chrome/browser/chromeos/login/auth_attempt_state.h"
 #include "chrome/browser/chromeos/login/authenticator.h"
 #include "chrome/browser/chromeos/login/online_attempt.h"
 #include "chrome/browser/profiles/profile.h"
+#include "content/public/browser/browser_thread.h"
 
 namespace chromeos {
 
@@ -23,6 +25,7 @@ OnlineAttemptHost::~OnlineAttemptHost() {
 void OnlineAttemptHost::Check(Profile* profile,
                               const std::string& username,
                               const std::string& password) {
+  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
   std::string attempt_hash = base::SHA1HashString(username + "\n" + password);
   if (attempt_hash != current_attempt_hash_) {
     Reset();
@@ -37,25 +40,35 @@ void OnlineAttemptHost::Check(Profile* profile,
             std::string(),
             std::string(),
             false));  // Isn't a new user.
-    online_attempt_ = new OnlineAttempt(false,  // Don't use oauth.
-                                        state_.get(),
-                                        this);
+    online_attempt_.reset(new OnlineAttempt(false,  // Don't use oauth.
+                                            state_.get(),
+                                            this));
     online_attempt_->Initiate(profile);
   }
 }
 
 void OnlineAttemptHost::Reset() {
-  online_attempt_ = NULL;
+  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+  online_attempt_.reset(NULL);
   current_attempt_hash_.clear();
   current_username_.clear();
 }
 
 void OnlineAttemptHost::Resolve() {
+  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
   if (state_->online_complete()) {
     bool success = state_->online_outcome().reason() == LoginFailure::NONE;
-    delegate_->OnChecked(current_username_, success);
-    Reset();
+    content::BrowserThread::PostTask(
+        content::BrowserThread::UI, FROM_HERE,
+        base::Bind(&OnlineAttemptHost::ResolveOnUIThread,
+                   base::Unretained(this), success));
   }
+}
+
+void OnlineAttemptHost::ResolveOnUIThread(bool success) {
+  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+  delegate_->OnChecked(current_username_, success);
+  Reset();
 }
 
 }  // chromeos

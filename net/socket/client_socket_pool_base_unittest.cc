@@ -247,7 +247,7 @@ class TestConnectJob : public ConnectJob {
                        true /* successful */,
                        true /* async */,
                        false /* recoverable */),
-            kPendingConnectDelay);
+            base::TimeDelta::FromMilliseconds(kPendingConnectDelay));
         return ERR_IO_PENDING;
       case kMockPendingFailingJob:
         set_load_state(LOAD_STATE_CONNECTING);
@@ -258,7 +258,7 @@ class TestConnectJob : public ConnectJob {
                        false /* error */,
                        true  /* async */,
                        false /* recoverable */),
-            2);
+            base::TimeDelta::FromMilliseconds(2));
         return ERR_IO_PENDING;
       case kMockWaitingJob:
         client_socket_factory_->WaitForSignal(this);
@@ -281,7 +281,7 @@ class TestConnectJob : public ConnectJob {
                        false /* error */,
                        true  /* async */,
                        true  /* recoverable */),
-            2);
+            base::TimeDelta::FromMilliseconds(2));
         return ERR_IO_PENDING;
       case kMockAdditionalErrorStateJob:
         store_additional_error_state_ = true;
@@ -297,7 +297,7 @@ class TestConnectJob : public ConnectJob {
                        false /* error */,
                        true  /* async */,
                        false /* recoverable */),
-            2);
+            base::TimeDelta::FromMilliseconds(2));
         return ERR_IO_PENDING;
       default:
         NOTREACHED();
@@ -1410,8 +1410,10 @@ class RequestSocketCallback : public TestCompletionCallbackBase {
       handle_->socket()->Disconnect();
       handle_->Reset();
       {
-        MessageLoop::ScopedNestableTaskAllower nestable(
-            MessageLoop::current());
+        // TODO: Resolve conflicting intentions of stopping recursion with the
+        // |!within_callback_| test (above) and the call to |RunAllPending()|
+        // below.  http://crbug.com/114130.
+        MessageLoop::ScopedNestableTaskAllower allow(MessageLoop::current());
         MessageLoop::current()->RunAllPending();
       }
       within_callback_ = true;
@@ -1437,7 +1439,7 @@ class RequestSocketCallback : public TestCompletionCallbackBase {
           // operations that happen on timers (e.g. cleanup of idle
           // connections) can execute.
           {
-            MessageLoop::ScopedNestableTaskAllower nestable(
+            MessageLoop::ScopedNestableTaskAllower allow(
                 MessageLoop::current());
             base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(10));
             EXPECT_EQ(OK, next_job_callback.WaitForResult());
@@ -3323,8 +3325,8 @@ TEST_F(ClientSocketPoolBaseTest, PreconnectWithoutBackupJob) {
   // the backup job a pending job instead of a waiting job, so it
   // *would* complete if it were created.
   connect_job_factory_->set_job_type(TestConnectJob::kMockPendingJob);
-  MessageLoop::current()->PostDelayedTask(FROM_HERE,
-                                          MessageLoop::QuitClosure(), 1000);
+  MessageLoop::current()->PostDelayedTask(
+      FROM_HERE, MessageLoop::QuitClosure(), base::TimeDelta::FromSeconds(1));
   MessageLoop::current()->Run();
   EXPECT_FALSE(pool_->HasGroup("a"));
 }

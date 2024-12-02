@@ -44,7 +44,7 @@ class CONTENT_EXPORT AudioRendererImpl
   virtual void SetPlaybackRate(float rate) OVERRIDE;
   virtual void Pause(const base::Closure& callback) OVERRIDE;
   virtual void Seek(base::TimeDelta time,
-                    const media::FilterStatusCB& cb) OVERRIDE;
+                    const media::PipelineStatusCB& cb) OVERRIDE;
   virtual void Play(const base::Closure& callback) OVERRIDE;
 
   // media::AudioRenderer implementation.
@@ -81,7 +81,7 @@ class CONTENT_EXPORT AudioRendererImpl
   virtual size_t Render(const std::vector<float*>& audio_data,
                         size_t number_of_frames,
                         size_t audio_delay_milliseconds) OVERRIDE;
-  virtual void OnError() OVERRIDE;
+  virtual void OnRenderError() OVERRIDE;
 
   // Accessors used by tests.
   base::Time earliest_end_time() const {

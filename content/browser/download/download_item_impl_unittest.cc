@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,10 +8,9 @@
 #include "content/browser/download/download_create_info.h"
 #include "content/browser/download/download_item_impl.h"
 #include "content/browser/download/download_request_handle.h"
-#include "content/browser/download/download_status_updater.h"
-#include "content/browser/download/interrupt_reasons.h"
-#include "content/browser/download/mock_download_item.h"
 #include "content/public/browser/download_id.h"
+#include "content/public/browser/download_interrupt_reasons.h"
+#include "content/test/mock_download_item.h"
 #include "content/test/test_browser_thread.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -20,6 +19,7 @@ using content::BrowserThread;
 using content::DownloadId;
 using content::DownloadItem;
 using content::DownloadManager;
+using content::MockDownloadItem;
 
 DownloadId::Domain kValidDownloadItemIdDomain = "valid DownloadId::Domain";
 
@@ -52,18 +52,18 @@ class MockRequestHandle : public DownloadRequestHandleInterface {
 
 class DownloadItemTest : public testing::Test {
  public:
-  class MockObserver : public content::DownloadItem::Observer {
+  class MockObserver : public DownloadItem::Observer {
    public:
     explicit MockObserver(DownloadItem* item) : item_(item), updated_(false) {
       item_->AddObserver(this);
     }
     ~MockObserver() { item_->RemoveObserver(this); }
 
-    virtual void OnDownloadUpdated(content::DownloadItem* download) {
+    virtual void OnDownloadUpdated(DownloadItem* download) {
       updated_ = true;
     }
 
-    virtual void OnDownloadOpened(content::DownloadItem* download) { }
+    virtual void OnDownloadOpened(DownloadItem* download) { }
 
     bool CheckUpdated() {
       bool was_updated = updated_;
@@ -113,7 +113,7 @@ class DownloadItemTest : public testing::Test {
         new testing::NiceMock<MockRequestHandle>;
     DownloadItem* download =
         new DownloadItemImpl(&delegate_, *(info_.get()),
-                             request_handle, false);
+                             request_handle, false, net::BoundNetLog());
     allocated_downloads_.insert(download);
     return download;
   }
@@ -123,9 +123,6 @@ class DownloadItemTest : public testing::Test {
     allocated_downloads_.erase(item);
     delete item;
   }
-
- protected:
-  DownloadStatusUpdater download_status_updater_;
 
  private:
   MessageLoopForUI loop_;
@@ -181,9 +178,8 @@ TEST_F(DownloadItemTest, NotificationAfterComplete) {
   DownloadItem* item = CreateDownloadItem(DownloadItem::IN_PROGRESS);
   MockObserver observer(item);
 
-  // Calling OnAllDataSaved does not trigger notification
   item->OnAllDataSaved(kDownloadChunkSize, DownloadItem::kEmptyFileHash);
-  ASSERT_FALSE(observer.CheckUpdated());
+  ASSERT_TRUE(observer.CheckUpdated());
 
   item->MarkAsComplete();
   ASSERT_TRUE(observer.CheckUpdated());
@@ -201,7 +197,8 @@ TEST_F(DownloadItemTest, NotificationAfterInterrupted) {
   DownloadItem* item = CreateDownloadItem(DownloadItem::IN_PROGRESS);
   MockObserver observer(item);
 
-  item->Interrupted(kDownloadChunkSize, "", DOWNLOAD_INTERRUPT_REASON_NONE);
+  item->Interrupted(kDownloadChunkSize, "",
+                    content::DOWNLOAD_INTERRUPT_REASON_NONE);
   ASSERT_TRUE(observer.CheckUpdated());
 }
 
@@ -284,10 +281,25 @@ TEST_F(DownloadItemTest, NotificationAfterTogglePause) {
   ASSERT_TRUE(observer.CheckUpdated());
 }
 
+TEST_F(DownloadItemTest, DisplayName) {
+  DownloadItem* item = CreateDownloadItem(DownloadItem::IN_PROGRESS);
+  DownloadStateInfo info = item->GetStateInfo();
+  info.target_name = FilePath(FILE_PATH_LITERAL("foo.bar"));
+  item->SetFileCheckResults(info);
+  EXPECT_EQ(FILE_PATH_LITERAL("foo.bar"),
+            item->GetFileNameToReportUser().value());
+  item->SetPathUniquifier(1);
+  EXPECT_EQ(FILE_PATH_LITERAL("foo (1).bar"),
+            item->GetFileNameToReportUser().value());
+  item->SetDisplayName(FilePath(FILE_PATH_LITERAL("new.name")));
+  EXPECT_EQ(FILE_PATH_LITERAL("new.name"),
+            item->GetFileNameToReportUser().value());
+}
+
 static char external_data_test_string[] = "External data test";
 static int destructor_called = 0;
 
-class TestExternalData : public content::DownloadItem::ExternalData {
+class TestExternalData : public DownloadItem::ExternalData {
  public:
   int value;
   virtual ~TestExternalData() {
@@ -297,9 +309,11 @@ class TestExternalData : public content::DownloadItem::ExternalData {
 
 TEST_F(DownloadItemTest, ExternalData) {
   DownloadItem* item = CreateDownloadItem(DownloadItem::IN_PROGRESS);
+  const DownloadItem* const_item = item;
 
   // Shouldn't be anything there before set.
   EXPECT_EQ(NULL, item->GetExternalData(&external_data_test_string));
+  EXPECT_EQ(NULL, const_item->GetExternalData(&external_data_test_string));
 
   TestExternalData* test1(new TestExternalData());
   test1->value = 2;
@@ -310,6 +324,13 @@ TEST_F(DownloadItemTest, ExternalData) {
       static_cast<TestExternalData*>(
           item->GetExternalData(&external_data_test_string));
   EXPECT_EQ(test1, test_result);
+
+  // Ditto for const lookup.
+  const TestExternalData* test_const_result =
+      static_cast<const TestExternalData*>(
+          const_item->GetExternalData(&external_data_test_string));
+  EXPECT_EQ(static_cast<const TestExternalData*>(test1),
+            test_const_result);
 
   // Destructor should be called if value overwritten.  New value
   // should then be retrievable.

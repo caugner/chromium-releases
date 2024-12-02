@@ -28,8 +28,9 @@ class CONTENT_EXPORT MediaStreamDispatcherHost
     : public content::BrowserMessageFilter,
       public MediaStreamRequester {
  public:
-  MediaStreamDispatcherHost(const content::ResourceContext* resource_context,
-                            int render_process_id);
+  MediaStreamDispatcherHost(content::ResourceContext* resource_context,
+                            int render_process_id,
+                            AudioManager* audio_manager);
   virtual ~MediaStreamDispatcherHost();
 
   // MediaStreamRequester implementation.
@@ -77,8 +78,9 @@ class CONTENT_EXPORT MediaStreamDispatcherHost
   // creating one if needed.
   MediaStreamManager* manager();
 
-  const content::ResourceContext* resource_context_;
+  content::ResourceContext* resource_context_;
   int render_process_id_;
+  AudioManager* audio_manager_;
 
   struct StreamRequest;
   typedef std::map<std::string, StreamRequest> StreamMap;

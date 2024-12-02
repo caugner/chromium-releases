@@ -1,10 +1,11 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "net/socket/ssl_client_socket.h"
 
 #include "net/base/address_list.h"
+#include "net/base/cert_test_util.h"
 #include "net/base/cert_verifier.h"
 #include "net/base/host_resolver.h"
 #include "net/base/io_buffer.h"
@@ -13,6 +14,7 @@
 #include "net/base/net_errors.h"
 #include "net/base/ssl_config_service.h"
 #include "net/base/test_completion_callback.h"
+#include "net/base/test_root_certs.h"
 #include "net/socket/client_socket_factory.h"
 #include "net/socket/client_socket_handle.h"
 #include "net/socket/socket_test_util.h"
@@ -29,7 +31,7 @@ class SSLClientSocketTest : public PlatformTest {
  public:
   SSLClientSocketTest()
       : socket_factory_(net::ClientSocketFactory::GetDefaultFactory()),
-        cert_verifier_(new net::CertVerifier) {
+        cert_verifier_(net::CertVerifier::CreateDefault()) {
   }
 
  protected:
@@ -67,7 +69,9 @@ static bool LogContainsSSLConnectEndEvent(
 };
 
 TEST_F(SSLClientSocketTest, Connect) {
-  net::TestServer test_server(net::TestServer::TYPE_HTTPS, FilePath());
+  net::TestServer test_server(net::TestServer::TYPE_HTTPS,
+                              net::TestServer::kLocalhost,
+                              FilePath());
   ASSERT_TRUE(test_server.Start());
 
   net::AddressList addr;
@@ -317,7 +321,9 @@ TEST_F(SSLClientSocketTest, ConnectClientAuthSendNullCert) {
 //   - Server sends data unexpectedly.
 
 TEST_F(SSLClientSocketTest, Read) {
-  net::TestServer test_server(net::TestServer::TYPE_HTTPS, FilePath());
+  net::TestServer test_server(net::TestServer::TYPE_HTTPS,
+                              net::TestServer::kLocalhost,
+                              FilePath());
   ASSERT_TRUE(test_server.Start());
 
   net::AddressList addr;
@@ -371,7 +377,9 @@ TEST_F(SSLClientSocketTest, Read) {
 // Test the full duplex mode, with Read and Write pending at the same time.
 // This test also serves as a regression test for http://crbug.com/29815.
 TEST_F(SSLClientSocketTest, Read_FullDuplex) {
-  net::TestServer test_server(net::TestServer::TYPE_HTTPS, FilePath());
+  net::TestServer test_server(net::TestServer::TYPE_HTTPS,
+                              net::TestServer::kLocalhost,
+                              FilePath());
   ASSERT_TRUE(test_server.Start());
 
   net::AddressList addr;
@@ -430,7 +438,9 @@ TEST_F(SSLClientSocketTest, Read_FullDuplex) {
 }
 
 TEST_F(SSLClientSocketTest, Read_SmallChunks) {
-  net::TestServer test_server(net::TestServer::TYPE_HTTPS, FilePath());
+  net::TestServer test_server(net::TestServer::TYPE_HTTPS,
+                              net::TestServer::kLocalhost,
+                              FilePath());
   ASSERT_TRUE(test_server.Start());
 
   net::AddressList addr;
@@ -481,7 +491,9 @@ TEST_F(SSLClientSocketTest, Read_SmallChunks) {
 }
 
 TEST_F(SSLClientSocketTest, Read_Interrupted) {
-  net::TestServer test_server(net::TestServer::TYPE_HTTPS, FilePath());
+  net::TestServer test_server(net::TestServer::TYPE_HTTPS,
+                              net::TestServer::kLocalhost,
+                              FilePath());
   ASSERT_TRUE(test_server.Start());
 
   net::AddressList addr;
@@ -529,7 +541,9 @@ TEST_F(SSLClientSocketTest, Read_Interrupted) {
 }
 
 TEST_F(SSLClientSocketTest, Read_FullLogging) {
-  net::TestServer test_server(net::TestServer::TYPE_HTTPS, FilePath());
+  net::TestServer test_server(net::TestServer::TYPE_HTTPS,
+                              net::TestServer::kLocalhost,
+                              FilePath());
   ASSERT_TRUE(test_server.Start());
 
   net::AddressList addr;
@@ -595,7 +609,9 @@ TEST_F(SSLClientSocketTest, Read_FullLogging) {
 
 // Regression test for http://crbug.com/42538
 TEST_F(SSLClientSocketTest, PrematureApplicationData) {
-  net::TestServer test_server(net::TestServer::TYPE_HTTPS, FilePath());
+  net::TestServer test_server(net::TestServer::TYPE_HTTPS,
+                              net::TestServer::kLocalhost,
+                              FilePath());
   ASSERT_TRUE(test_server.Start());
 
   net::AddressList addr;
@@ -616,9 +632,10 @@ TEST_F(SSLClientSocketTest, PrematureApplicationData) {
 
   // All reads and writes complete synchronously (async=false).
   net::MockRead data_reads[] = {
-    net::MockRead(false, reinterpret_cast<const char*>(application_data),
+    net::MockRead(net::SYNCHRONOUS,
+                  reinterpret_cast<const char*>(application_data),
                   arraysize(application_data)),
-    net::MockRead(false, net::OK),
+    net::MockRead(net::SYNCHRONOUS, net::OK),
   };
 
   net::StaticSocketDataProvider data(data_reads, arraysize(data_reads),
@@ -723,7 +740,9 @@ TEST_F(SSLClientSocketTest, CipherSuiteDisables) {
 // Here we verify that such a simple ClientSocketHandle, not associated with any
 // client socket pool, can be destroyed safely.
 TEST_F(SSLClientSocketTest, ClientSocketHandleNotFromPool) {
-  net::TestServer test_server(net::TestServer::TYPE_HTTPS, FilePath());
+  net::TestServer test_server(net::TestServer::TYPE_HTTPS,
+                              net::TestServer::kLocalhost,
+                              FilePath());
   ASSERT_TRUE(test_server.Start());
 
   net::AddressList addr;
@@ -754,8 +773,162 @@ TEST_F(SSLClientSocketTest, ClientSocketHandleNotFromPool) {
   EXPECT_EQ(net::OK, rv);
 }
 
+// Verifies that SSLClientSocket::ExportKeyingMaterial return a success
+// code and different keying label results in different keying material.
+TEST_F(SSLClientSocketTest, ExportKeyingMaterial) {
+  net::TestServer test_server(net::TestServer::TYPE_HTTPS,
+                              net::TestServer::kLocalhost,
+                              FilePath());
+  ASSERT_TRUE(test_server.Start());
+
+  net::AddressList addr;
+  ASSERT_TRUE(test_server.GetAddressList(&addr));
+
+  net::TestCompletionCallback callback;
+
+  net::StreamSocket* transport = new net::TCPClientSocket(
+      addr, NULL, net::NetLog::Source());
+  int rv = transport->Connect(callback.callback());
+  if (rv == net::ERR_IO_PENDING)
+    rv = callback.WaitForResult();
+  EXPECT_EQ(net::OK, rv);
+
+  net::SSLClientSocketContext context;
+  context.cert_verifier = cert_verifier_.get();
+  scoped_ptr<net::SSLClientSocket> sock(
+      socket_factory_->CreateSSLClientSocket(
+          transport, test_server.host_port_pair(), kDefaultSSLConfig,
+          NULL, context));
+
+  rv = sock->Connect(callback.callback());
+  if (rv == net::ERR_IO_PENDING)
+    rv = callback.WaitForResult();
+  EXPECT_EQ(net::OK, rv);
+  EXPECT_TRUE(sock->IsConnected());
+
+  const int kKeyingMaterialSize = 32;
+  const char* kKeyingLabel1 = "client-socket-test-1";
+  const char* kKeyingContext = "";
+  unsigned char client_out1[kKeyingMaterialSize];
+  memset(client_out1, 0, sizeof(client_out1));
+  rv = sock->ExportKeyingMaterial(kKeyingLabel1, false, kKeyingContext,
+                                  client_out1, sizeof(client_out1));
+  EXPECT_EQ(rv, net::OK);
+
+  const char* kKeyingLabel2 = "client-socket-test-2";
+  unsigned char client_out2[kKeyingMaterialSize];
+  memset(client_out2, 0, sizeof(client_out2));
+  rv = sock->ExportKeyingMaterial(kKeyingLabel2, false, kKeyingContext,
+                                  client_out2, sizeof(client_out2));
+  EXPECT_EQ(rv, net::OK);
+  EXPECT_NE(memcmp(client_out1, client_out2, kKeyingMaterialSize), 0);
+}
+
 // Verifies that SSLClientSocket::ClearSessionCache can be called without
 // explicit NSS initialization.
 TEST(SSLClientSocket, ClearSessionCache) {
   net::SSLClientSocket::ClearSessionCache();
 }
+
+// This tests that SSLInfo contains a properly re-constructed certificate
+// chain. That, in turn, verifies that GetSSLInfo is giving us the chain as
+// verified, not the chain as served by the server. (They may be different.)
+//
+// CERT_CHAIN_WRONG_ROOT is redundant-server-chain.pem. It contains A
+// (end-entity) -> B -> C, and C is signed by D. We do not set D to be a
+// trusted root in this test. Instead, we install C2 as a root; C2 contains
+// the same public key as C. redundant-server-chain.pem should therefore
+// validate as A -> B -> C2. If it does, this test passes.
+//
+// This test is the upper-layer analogue for
+// X509CertificateTest.VerifyReturnChainProperlyOrdered.
+#if defined(OS_MACOSX)
+// TODO(rsleevi): http://crbug.com/114343 / http://crbug.com/69278 - OS X
+// path building fails to properly handle cross-certified intermediates
+// without AIA information, so this test is disabled.
+#define MAYBE_VerifyReturnChainProperlyOrdered \
+    DISABLED_VerifyReturnChainProperlyOrdered
+#elif defined(OS_ANDROID)
+// TODO(jnd): http://crbug.com/116838 - Requires support of Android APIs
+#define MAYBE_VerifyReturnChainProperlyOrdered \
+    DISABLED_VerifyReturnChainProperlyOrdered
+#elif defined(USE_OPENSSL)
+// TODO(jnd): http://crbug.com/117196 - OpenSSL doesn't support arbitrary
+// trust anchors or cross-signed certificate chain path building until
+// OpenSSL 1.1.0.
+#define MAYBE_VerifyReturnChainProperlyOrdered \
+    DISABLED_VerifyReturnChainProperlyOrdered
+#else
+#define MAYBE_VerifyReturnChainProperlyOrdered \
+    VerifyReturnChainProperlyOrdered
+#endif
+TEST_F(SSLClientSocketTest, MAYBE_VerifyReturnChainProperlyOrdered) {
+  // We will expect SSLInfo to ultimately contain this chain.
+  net::CertificateList certs = CreateCertificateListFromFile(
+      net::GetTestCertsDirectory(), "redundant-validated-chain.pem",
+      net::X509Certificate::FORMAT_AUTO);
+  ASSERT_EQ(3U, certs.size());
+
+  // Load and install the root for the validated chain.
+  scoped_refptr<net::X509Certificate> root_cert =
+    net::ImportCertFromFile(net::GetTestCertsDirectory(),
+                           "redundant-validated-chain-root.pem");
+  ASSERT_NE(static_cast<net::X509Certificate*>(NULL), root_cert);
+  net::ScopedTestRoot scoped_root(root_cert);
+
+  // Set up a test server with CERT_CHAIN_WRONG_ROOT.
+  net::TestServer::HTTPSOptions https_options(
+      net::TestServer::HTTPSOptions::CERT_CHAIN_WRONG_ROOT);
+  net::TestServer test_server(https_options,
+                              FilePath(FILE_PATH_LITERAL("net/data/ssl")));
+  ASSERT_TRUE(test_server.Start());
+
+  net::AddressList addr;
+  ASSERT_TRUE(test_server.GetAddressList(&addr));
+
+  net::TestCompletionCallback callback;
+  net::CapturingNetLog log(net::CapturingNetLog::kUnbounded);
+  net::StreamSocket* transport = new net::TCPClientSocket(
+      addr, &log, net::NetLog::Source());
+  int rv = transport->Connect(callback.callback());
+  if (rv == net::ERR_IO_PENDING)
+    rv = callback.WaitForResult();
+  EXPECT_EQ(net::OK, rv);
+
+  scoped_ptr<net::SSLClientSocket> sock(
+      CreateSSLClientSocket(transport, test_server.host_port_pair(),
+                            kDefaultSSLConfig));
+  EXPECT_FALSE(sock->IsConnected());
+  rv = sock->Connect(callback.callback());
+
+  net::CapturingNetLog::EntryList entries;
+  log.GetEntries(&entries);
+  EXPECT_TRUE(net::LogContainsBeginEvent(
+      entries, 5, net::NetLog::TYPE_SSL_CONNECT));
+  if (rv == net::ERR_IO_PENDING)
+    rv = callback.WaitForResult();
+
+  EXPECT_EQ(net::OK, rv);
+  EXPECT_TRUE(sock->IsConnected());
+  log.GetEntries(&entries);
+  EXPECT_TRUE(LogContainsSSLConnectEndEvent(entries, -1));
+
+  net::SSLInfo ssl_info;
+  sock->GetSSLInfo(&ssl_info);
+
+  // Verify that SSLInfo contains the corrected re-constructed chain A -> B
+  // -> C2.
+  const net::X509Certificate::OSCertHandles& intermediates =
+      ssl_info.cert->GetIntermediateCertificates();
+  ASSERT_EQ(2U, intermediates.size());
+  EXPECT_TRUE(net::X509Certificate::IsSameOSCert(
+      ssl_info.cert->os_cert_handle(), certs[0]->os_cert_handle()));
+  EXPECT_TRUE(net::X509Certificate::IsSameOSCert(
+      intermediates[0], certs[1]->os_cert_handle()));
+  EXPECT_TRUE(net::X509Certificate::IsSameOSCert(
+      intermediates[1], certs[2]->os_cert_handle()));
+
+  sock->Disconnect();
+  EXPECT_FALSE(sock->IsConnected());
+}
+

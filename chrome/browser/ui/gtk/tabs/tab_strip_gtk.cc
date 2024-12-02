@@ -23,10 +23,10 @@
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/gtk/browser_window_gtk.h"
 #include "chrome/browser/ui/gtk/custom_button.h"
-#include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/gtk/tabs/dragged_tab_controller_gtk.h"
 #include "chrome/browser/ui/gtk/tabs/tab_strip_menu_controller.h"
+#include "chrome/browser/ui/gtk/theme_service_gtk.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_source.h"
@@ -38,7 +38,7 @@
 #include "ui/base/animation/slide_animation.h"
 #include "ui/base/dragdrop/gtk_dnd_util.h"
 #include "ui/base/gtk/gtk_compat.h"
-#include "ui/base/gtk/gtk_screen_utils.h"
+#include "ui/base/gtk/gtk_screen_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/gtk_util.h"
 #include "ui/gfx/image/image.h"
@@ -714,7 +714,7 @@ TabStripGtk::TabStripGtk(TabStripModel* model, BrowserWindowGtk* window)
       tab_vertical_offset_(0),
       model_(model),
       window_(window),
-      theme_service_(GtkThemeService::GetFrom(model->profile())),
+      theme_service_(ThemeServiceGtk::GetFrom(model->profile())),
       weak_factory_(this),
       layout_factory_(this),
       added_as_message_loop_observer_(false),
@@ -1298,7 +1298,7 @@ bool TabStripGtk::HasAvailableDragActions() const {
   return model_->delegate()->GetDragActions() != 0;
 }
 
-GtkThemeService* TabStripGtk::GetThemeProvider() {
+ThemeServiceGtk* TabStripGtk::GetThemeProvider() {
   return theme_service_;
 }
 
@@ -1450,9 +1450,12 @@ void TabStripGtk::GenerateIdealBounds() {
 void TabStripGtk::LayoutNewTabButton(double last_tab_right,
                                      double unselected_width) {
   GtkWidget* toplevel = gtk_widget_get_ancestor(widget(), GTK_TYPE_WINDOW);
-  bool is_maximized = toplevel &&
-      ((gdk_window_get_state(toplevel->window) & GDK_WINDOW_STATE_MAXIMIZED)
-          != 0);
+  bool is_maximized = false;
+  if (toplevel) {
+    GdkWindow* gdk_window = gtk_widget_get_window(toplevel);
+    is_maximized = (gdk_window_get_state(gdk_window) &
+                    GDK_WINDOW_STATE_MAXIMIZED) != 0;
+  }
 
   int y = is_maximized ? 0 : kNewTabButtonVOffset;
   int height = newtab_surface_bounds_.height() + kNewTabButtonVOffset - y;
@@ -1750,7 +1753,7 @@ void TabStripGtk::SetDropIndex(int index, bool drop_before) {
                     drop_bounds.width(), drop_bounds.height());
 }
 
-bool TabStripGtk::CompleteDrop(guchar* data, bool is_plain_text) {
+bool TabStripGtk::CompleteDrop(const guchar* data, bool is_plain_text) {
   if (!drop_info_.get())
     return false;
 
@@ -1767,11 +1770,11 @@ bool TabStripGtk::CompleteDrop(guchar* data, bool is_plain_text) {
   if (is_plain_text) {
     AutocompleteMatch match;
     model_->profile()->GetAutocompleteClassifier()->Classify(
-        UTF8ToUTF16(reinterpret_cast<char*>(data)), string16(), false, false,
-        &match, NULL);
+        UTF8ToUTF16(reinterpret_cast<const char*>(data)), string16(),
+        false, false, &match, NULL);
     url = match.destination_url;
   } else {
-    std::string url_string(reinterpret_cast<char*>(data));
+    std::string url_string(reinterpret_cast<const char*>(data));
     url = GURL(url_string.substr(0, url_string.find_first_of('\n')));
   }
   if (!url.is_valid())
@@ -1824,7 +1827,7 @@ gboolean TabStripGtk::DropInfo::OnExposeEvent(GtkWidget* widget,
     SetContainerShapeMask();
   }
 
-  cairo_t* cr = gdk_cairo_create(GDK_DRAWABLE(widget->window));
+  cairo_t* cr = gdk_cairo_create(gtk_widget_get_window(widget));
   gdk_cairo_rectangle(cr, &event->area);
   cairo_clip(cr);
 
@@ -1852,7 +1855,7 @@ void TabStripGtk::DropInfo::SetContainerColorMap() {
 // Sets full transparency for the container window.  This is used if
 // compositing is available for the screen.
 void TabStripGtk::DropInfo::SetContainerTransparency() {
-  cairo_t* cairo_context = gdk_cairo_create(container->window);
+  cairo_t* cairo_context = gdk_cairo_create(gtk_widget_get_window(container));
   if (!cairo_context)
       return;
 
@@ -1890,7 +1893,8 @@ void TabStripGtk::DropInfo::SetContainerShapeMask() {
   cairo_destroy(cairo_context);
 
   // Set the shape mask.
-  gdk_window_shape_combine_mask(container->window, pixmap, 0, 0);
+  GdkWindow* gdk_window = gtk_widget_get_window(container);
+  gdk_window_shape_combine_mask(gdk_window, pixmap, 0, 0);
   g_object_unref(pixmap);
 }
 
@@ -2157,7 +2161,8 @@ gboolean TabStripGtk::OnDragDataReceived(GtkWidget* widget,
   if (info == ui::TEXT_URI_LIST ||
       info == ui::NETSCAPE_URL ||
       info == ui::TEXT_PLAIN) {
-    success = CompleteDrop(data->data, info == ui::TEXT_PLAIN);
+    success = CompleteDrop(gtk_selection_data_get_data(data),
+                           info == ui::TEXT_PLAIN);
   }
 
   gtk_drag_finish(context, success, FALSE, time);

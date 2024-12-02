@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,14 +12,18 @@
 #include "content/public/browser/notification_registrar.h"
 #include "ui/gfx/rect.h"
 
-class RenderViewHost;
 struct WebMenuItem;
+
+namespace content {
+class RenderViewHost;
+class RenderViewHostImpl;
+}
 
 class PopupMenuHelper : public content::NotificationObserver {
  public:
   // Creates a PopupMenuHelper that will notify |render_view_host| when a user
   // selects or cancels the popup.
-  explicit PopupMenuHelper(RenderViewHost* render_view_host);
+  explicit PopupMenuHelper(content::RenderViewHost* render_view_host);
 
   // Shows the popup menu and notifies the RenderViewHost of the selection/
   // cancel.
@@ -39,7 +43,7 @@ class PopupMenuHelper : public content::NotificationObserver {
 
   content::NotificationRegistrar notification_registrar_;
 
-  RenderViewHost* render_view_host_;
+  content::RenderViewHostImpl* render_view_host_;
 
   DISALLOW_COPY_AND_ASSIGN(PopupMenuHelper);
 };

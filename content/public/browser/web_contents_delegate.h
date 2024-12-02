@@ -15,13 +15,13 @@
 #include "content/public/browser/navigation_type.h"
 #include "content/public/common/page_transition_types.h"
 #include "content/public/common/window_container_type.h"
+#include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/native_widget_types.h"
 #include "webkit/glue/window_open_disposition.h"
 
 class FilePath;
 class GURL;
 class TabContents;
-struct ContextMenuParams;
 struct NativeWebKeyboardEvent;
 
 namespace base {
@@ -30,10 +30,13 @@ class ListValue;
 
 namespace content {
 class BrowserContext;
+class ColorChooser;
 class DownloadItem;
 class JavaScriptDialogCreator;
+class RenderViewHost;
 class WebContents;
 class WebIntentsDispatcher;
+struct ContextMenuParams;
 struct FileChooserParams;
 struct SSLStatus;
 }
@@ -208,7 +211,9 @@ class CONTENT_EXPORT WebContentsDelegate {
   virtual void WebContentsFocused(WebContents* contents) {}
 
   // Asks the delegate if the given tab can download.
-  virtual bool CanDownload(WebContents* source, int request_id);
+  virtual bool CanDownload(RenderViewHost* render_view_host,
+                           int request_id,
+                           const std::string& request_method);
 
   // Notifies the delegate that a download is starting.
   virtual void OnStartDownload(WebContents* source, DownloadItem* download) {}
@@ -219,19 +224,10 @@ class CONTENT_EXPORT WebContentsDelegate {
   virtual int GetExtraRenderViewHeight() const;
 
   // Returns true if the context menu operation was handled by the delegate.
-  virtual bool HandleContextMenu(const ContextMenuParams& params);
+  virtual bool HandleContextMenu(const content::ContextMenuParams& params);
 
   // Returns true if the context menu command was handled
   virtual bool ExecuteContextMenuCommand(int command);
-
-  // Shows the page info using the specified information.
-  // |url| is the url of the page/frame the info applies to, |ssl| is the SSL
-  // information for that page/frame.  If |show_history| is true, a section
-  // showing how many times that URL has been visited is added to the page info.
-  virtual void ShowPageInfo(content::BrowserContext* browser_context,
-                            const GURL& url,
-                            const SSLStatus& ssl,
-                            bool show_history) {}
 
   // Opens source view for given tab contents that is navigated to the given
   // page url.
@@ -316,6 +312,13 @@ class CONTENT_EXPORT WebContentsDelegate {
   // NULL in which case dialogs aren't shown.
   virtual JavaScriptDialogCreator* GetJavaScriptDialogCreator();
 
+  // Called when color chooser should open. Returns the opened color chooser.
+  virtual content::ColorChooser* OpenColorChooser(WebContents* tab,
+                                                  int color_chooser_id,
+                                                  const SkColor& color);
+
+  virtual void DidEndColorChooser() {}
+
   // Called when a file selection is to be done.
   virtual void RunFileChooser(WebContents* tab,
                               const FileChooserParams& params) {}
@@ -370,6 +373,10 @@ class CONTENT_EXPORT WebContentsDelegate {
   // Invoked when the preferred size of the contents has been changed.
   virtual void UpdatePreferredSize(WebContents* tab,
                                    const gfx::Size& pref_size) {}
+
+  // Invoked when the contents auto-resized and the container should match it.
+  virtual void ResizeDueToAutoResize(WebContents* tab,
+                                     const gfx::Size& new_size) {}
 
   // Notification message from HTML UI.
   virtual void WebUISend(WebContents* tab,

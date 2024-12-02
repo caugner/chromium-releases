@@ -1,3 +1,7 @@
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
 [
   {
     "namespace":"webstorePrivate",
@@ -15,6 +19,44 @@
           {
             "name": "callback",
             "type": "function",
+            "optional": "true",
+            "parameters": []
+          }
+        ]
+      },
+      {
+        "name": "installBundle",
+        "description": "Initiates the install process for the given bundle of extensions.",
+        "parameters": [
+          {
+            "name": "details",
+            "description": "An array of extension details to be installed.",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "The id of the extension to be installed.",
+                  "minLength": 32,
+                  "maxLength": 32
+                },
+                "manifest": {
+                  "type": "string",
+                  "description": "A string with the contents of the extension's manifest.json file. During the install process, the browser will check that the downloaded extension's manifest matches what was passed in here.",
+                  "minLength": 1
+                },
+                "localizedName": {
+                  "type": "string",
+                  "description": "A string to use instead of the raw value of the 'name' key from manifest.json."
+                }
+              }
+            }
+          },
+          {
+            "name": "callback",
+            "type": "function",
+            "description": "Called when the install process completes. Upon failures, chrome.extension.lastError will be set to 'user_canceled' or 'unknown_error'.",
             "optional": "true",
             "parameters": []
           }
@@ -170,7 +212,12 @@
         "description": "Sets a preference value with the store login.",
         "parameters": [
           { "name": "login", "type": "string" },
-          { "name": "callback", "type": "function", "optional": "true" }
+          {
+            "name": "callback",
+            "type": "function",
+            "optional": "true",
+            "parameters": []
+          }
         ]
       },
       {

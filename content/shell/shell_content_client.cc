@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -27,7 +27,8 @@ void ShellContentClient::AddNPAPIPlugins(
     webkit::npapi::PluginList* plugin_list) {
 }
 
-bool ShellContentClient::CanSendWhileSwappedOut(const IPC::Message* msg) {
+bool ShellContentClient::HasWebUIScheme(const GURL& url) const {
+  // There are no WebUI URLs in content_shell.
   return false;
 }
 
@@ -37,7 +38,10 @@ bool ShellContentClient::CanHandleWhileSwappedOut(const IPC::Message& msg) {
 
 std::string ShellContentClient::GetUserAgent(bool* overriding) const {
   *overriding = false;
-  return std::string("Chrome/15.16.17.18");
+  // The "19" is so that sites that sniff for version think that this is
+  // something reasonably current; the "77.34.5" is a hint that this isn't a
+  // standard Chrome.
+  return webkit_glue::BuildUserAgentFromProduct("Chrome/19.77.34.5");
 }
 
 string16 ShellContentClient::GetLocalizedString(int message_id) const {

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -35,11 +35,12 @@ class ImporterBridge : public base::RefCountedThreadSafe<ImporterBridge> {
   virtual void SetFavicons(
       const std::vector<history::ImportedFaviconUsage>& favicons) = 0;
 
-  virtual void SetHistoryItems(const std::vector<history::URLRow>& rows,
+  virtual void SetHistoryItems(const history::URLRows& rows,
                                history::VisitSource visit_source) = 0;
 
+  // WARNING: This function takes ownership of (and deletes) the pointers in
+  // |template_urls|!
   virtual void SetKeywords(const std::vector<TemplateURL*>& template_urls,
-                           int default_keyword_index,
                            bool unique_on_host_and_path) = 0;
 
   virtual void SetPasswordForm(const webkit::forms::PasswordForm& form) = 0;

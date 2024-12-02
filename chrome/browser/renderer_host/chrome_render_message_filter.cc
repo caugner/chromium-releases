@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,13 +23,14 @@
 #include "chrome/browser/net/predictor.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/task_manager/task_manager.h"
+#include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension_file_util.h"
 #include "chrome/common/extensions/extension_message_bundle.h"
 #include "chrome/common/extensions/extension_messages.h"
 #include "chrome/common/render_messages.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/renderer_host/resource_dispatcher_host.h"
+#include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/common/process_type.h"
 #include "googleurl/src/gurl.h"
@@ -53,8 +54,7 @@ ChromeRenderMessageFilter::ChromeRenderMessageFilter(
       profile_(profile),
       request_context_(request_context),
       extension_info_map_(profile->GetExtensionInfoMap()),
-      cookie_settings_(CookieSettings::GetForProfile(profile)),
-      resource_context_(profile->GetResourceContext()),
+      cookie_settings_(CookieSettings::Factory::GetForProfile(profile)),
       weak_ptr_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
 }
 
@@ -85,11 +85,16 @@ bool ChromeRenderMessageFilter::OnMessageReceived(const IPC::Message& message,
     IPC_MESSAGE_HANDLER(ExtensionHostMsg_AddListener, OnExtensionAddListener)
     IPC_MESSAGE_HANDLER(ExtensionHostMsg_RemoveListener,
                         OnExtensionRemoveListener)
-    IPC_MESSAGE_HANDLER(ExtensionHostMsg_ExtensionIdle, OnExtensionIdle)
+    IPC_MESSAGE_HANDLER(ExtensionHostMsg_AddLazyListener,
+                        OnExtensionAddLazyListener)
+    IPC_MESSAGE_HANDLER(ExtensionHostMsg_RemoveLazyListener,
+                        OnExtensionRemoveLazyListener)
     IPC_MESSAGE_HANDLER(ExtensionHostMsg_ExtensionEventAck, OnExtensionEventAck)
     IPC_MESSAGE_HANDLER(ExtensionHostMsg_CloseChannel, OnExtensionCloseChannel)
     IPC_MESSAGE_HANDLER(ExtensionHostMsg_RequestForIOThread,
                         OnExtensionRequestForIOThread)
+    IPC_MESSAGE_HANDLER(ExtensionHostMsg_ShouldCloseAck,
+                        OnExtensionShouldCloseAck)
 #if defined(USE_TCMALLOC)
     IPC_MESSAGE_HANDLER(ChromeViewHostMsg_RendererTcmalloc, OnRendererTcmalloc)
     IPC_MESSAGE_HANDLER(ChromeViewHostMsg_WriteTcmallocHeapProfile_ACK,
@@ -106,6 +111,7 @@ bool ChromeRenderMessageFilter::OnMessageReceived(const IPC::Message& message,
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
 
+#if defined(ENABLE_AUTOMATION)
   if ((message.type() == ChromeViewHostMsg_GetCookies::ID ||
        message.type() == ChromeViewHostMsg_SetCookie::ID) &&
     AutomationResourceMessageFilter::ShouldFilterCookieMessages(
@@ -119,6 +125,7 @@ bool ChromeRenderMessageFilter::OnMessageReceived(const IPC::Message& message,
     IPC_END_MESSAGE_MAP()
     handled = true;
   }
+#endif
 
   return handled;
 }
@@ -132,9 +139,11 @@ void ChromeRenderMessageFilter::OverrideThreadForMessage(
 #endif
     case ExtensionHostMsg_AddListener::ID:
     case ExtensionHostMsg_RemoveListener::ID:
-    case ExtensionHostMsg_ExtensionIdle::ID:
+    case ExtensionHostMsg_AddLazyListener::ID:
+    case ExtensionHostMsg_RemoveLazyListener::ID:
     case ExtensionHostMsg_ExtensionEventAck::ID:
     case ExtensionHostMsg_CloseChannel::ID:
+    case ExtensionHostMsg_ShouldCloseAck::ID:
     case ChromeViewHostMsg_UpdatedCacheStats::ID:
       *thread = BrowserThread::UI;
       break;
@@ -147,12 +156,7 @@ void ChromeRenderMessageFilter::OverrideThreadForMessage(
 void ChromeRenderMessageFilter::OnLaunchNaCl(
     const std::wstring& url, int socket_count, IPC::Message* reply_msg) {
   NaClProcessHost* host = new NaClProcessHost(url);
-  if (!host->Launch(this, socket_count, reply_msg)) {
-    // On failure, the NaClProcessHost didn't send the reply which the renderer
-    // is blocked on. Unblock the renderer by sending an error.
-    reply_msg->set_reply_error();
-    Send(reply_msg);
-  }
+  host->Launch(this, socket_count, reply_msg, extension_info_map_);
 }
 #endif
 
@@ -200,16 +204,42 @@ void ChromeRenderMessageFilter::OnFPS(int routing_id, float fps) {
             routing_id, fps));
     return;
   }
+
+  base::ProcessId renderer_id = base::GetProcId(peer_handle());
+
   TaskManager::GetInstance()->model()->NotifyFPS(
-      base::GetProcId(peer_handle()), routing_id, fps);
+      renderer_id, routing_id, fps);
+
+  FPSDetails details(routing_id, fps);
+  content::NotificationService::current()->Notify(
+      chrome::NOTIFICATION_RENDERER_FPS_COMPUTED,
+      content::Source<const base::ProcessId>(&renderer_id),
+      content::Details<const FPSDetails>(&details));
 }
 
 void ChromeRenderMessageFilter::OnV8HeapStats(int v8_memory_allocated,
-                                        int v8_memory_used) {
+                                              int v8_memory_used) {
+  if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
+    BrowserThread::PostTask(
+        BrowserThread::UI, FROM_HERE,
+        base::Bind(
+            &ChromeRenderMessageFilter::OnV8HeapStats, this,
+            v8_memory_allocated, v8_memory_used));
+    return;
+  }
+
+  base::ProcessId renderer_id = base::GetProcId(peer_handle());
+
   TaskManager::GetInstance()->model()->NotifyV8HeapStats(
-      base::GetProcId(peer_handle()),
+      renderer_id,
       static_cast<size_t>(v8_memory_allocated),
       static_cast<size_t>(v8_memory_used));
+
+  V8HeapStatsDetails details(v8_memory_allocated, v8_memory_used);
+  content::NotificationService::current()->Notify(
+      chrome::NOTIFICATION_RENDERER_V8_HEAP_STATS_COMPUTED,
+      content::Source<const base::ProcessId>(&renderer_id),
+      content::Details<const V8HeapStatsDetails>(&details));
 }
 
 void ChromeRenderMessageFilter::OnOpenChannelToExtension(
@@ -323,16 +353,25 @@ void ChromeRenderMessageFilter::OnExtensionRemoveListener(
       event_name, process, extension_id);
 }
 
-void ChromeRenderMessageFilter::OnExtensionIdle(
-    const std::string& extension_id) {
-  if (profile_->GetExtensionProcessManager())
-    profile_->GetExtensionProcessManager()->OnExtensionIdle(extension_id);
+void ChromeRenderMessageFilter::OnExtensionAddLazyListener(
+    const std::string& extension_id, const std::string& event_name) {
+  if (profile_->GetExtensionEventRouter())
+    profile_->GetExtensionEventRouter()->AddLazyEventListener(
+        event_name, extension_id);
+}
+
+void ChromeRenderMessageFilter::OnExtensionRemoveLazyListener(
+    const std::string& extension_id, const std::string& event_name) {
+  if (profile_->GetExtensionEventRouter())
+    profile_->GetExtensionEventRouter()->RemoveLazyEventListener(
+        event_name, extension_id);
 }
 
 void ChromeRenderMessageFilter::OnExtensionEventAck(
     const std::string& extension_id) {
   if (profile_->GetExtensionEventRouter())
-    profile_->GetExtensionEventRouter()->OnExtensionEventAck(extension_id);
+    profile_->GetExtensionEventRouter()->OnExtensionEventAck(
+        profile_, extension_id);
 }
 
 void ChromeRenderMessageFilter::OnExtensionCloseChannel(int port_id) {
@@ -351,6 +390,13 @@ void ChromeRenderMessageFilter::OnExtensionRequestForIOThread(
   ExtensionFunctionDispatcher::DispatchOnIOThread(
       extension_info_map_, profile_, render_process_id_,
       weak_ptr_factory_.GetWeakPtr(), routing_id, params);
+}
+
+void ChromeRenderMessageFilter::OnExtensionShouldCloseAck(
+     const std::string& extension_id, int sequence_id) {
+  if (profile_->GetExtensionProcessManager())
+    profile_->GetExtensionProcessManager()->OnShouldCloseAck(
+        extension_id, sequence_id);
 }
 
 #if defined(USE_TCMALLOC)
@@ -445,15 +491,19 @@ void ChromeRenderMessageFilter::OnGetCookies(
     const GURL& url,
     const GURL& first_party_for_cookies,
     IPC::Message* reply_msg) {
+#if defined(ENABLE_AUTOMATION)
   AutomationResourceMessageFilter::GetCookiesForUrl(
       this, request_context_->GetURLRequestContext(), render_process_id_,
       reply_msg, url);
+#endif
 }
 
 void ChromeRenderMessageFilter::OnSetCookie(const IPC::Message& message,
                                             const GURL& url,
                                             const GURL& first_party_for_cookies,
                                             const std::string& cookie) {
+#if defined(ENABLE_AUTOMATION)
   AutomationResourceMessageFilter::SetCookiesForUrl(
       render_process_id_, message.routing_id(), url, cookie);
+#endif
 }

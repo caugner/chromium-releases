@@ -23,8 +23,8 @@
 #include "chrome/browser/prefs/pref_set_observer.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/protector/base_setting_change.h"
-#include "chrome/browser/protector/protector_service_factory.h"
 #include "chrome/browser/protector/protector_service.h"
+#include "chrome/browser/protector/protector_service_factory.h"
 #include "chrome/browser/rlz/rlz.h"
 #include "chrome/browser/search_engines/search_host_to_urls_map.h"
 #include "chrome/browser/search_engines/search_terms_data.h"
@@ -33,7 +33,6 @@
 #include "chrome/browser/search_engines/template_url_service_observer.h"
 #include "chrome/browser/search_engines/util.h"
 #include "chrome/browser/sync/api/sync_change.h"
-#include "chrome/browser/sync/protocol/search_engine_specifics.pb.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/env_vars.h"
@@ -43,6 +42,8 @@
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/notification_service.h"
 #include "net/base/net_util.h"
+#include "sync/protocol/search_engine_specifics.pb.h"
+#include "sync/protocol/sync.pb.h"
 #include "ui/base/l10n/l10n_util.h"
 
 typedef SearchHostToURLsMap::TemplateURLSet TemplateURLSet;
@@ -110,11 +111,10 @@ TemplateURLService::TemplateURLService(Profile* profile)
       load_handle_(0),
       default_search_provider_(NULL),
       is_default_search_managed_(false),
-      next_id_(1),
+      next_id_(kInvalidTemplateURLID + 1),
       time_provider_(&base::Time::Now),
       models_associated_(false),
       processing_syncer_changes_(false),
-      sync_processor_(NULL),
       pending_synced_default_search_(false) {
   DCHECK(profile_);
   Init(NULL, 0);
@@ -129,11 +129,10 @@ TemplateURLService::TemplateURLService(const Initializer* initializers,
       service_(NULL),
       default_search_provider_(NULL),
       is_default_search_managed_(false),
-      next_id_(1),
+      next_id_(kInvalidTemplateURLID + 1),
       time_provider_(&base::Time::Now),
       models_associated_(false),
       processing_syncer_changes_(false),
-      sync_processor_(NULL),
       pending_synced_default_search_(false) {
   Init(initializers, count);
 }
@@ -166,7 +165,11 @@ string16 TemplateURLService::GenerateKeyword(const GURL& url,
 
   // Strip "www." off the front of the keyword; otherwise the keyword won't work
   // properly.  See http://code.google.com/p/chromium/issues/detail?id=6984 .
-  return net::StripWWW(UTF8ToUTF16(url.host()));
+  // Special case: if the host was exactly "www." (not sure this can happen but
+  // perhaps with some weird intranet and custom DNS server?), ensure we at
+  // least don't return the empty string.
+  string16 keyword(net::StripWWW(UTF8ToUTF16(url.host())));
+  return keyword.empty() ? ASCIIToUTF16("www") : keyword;
 }
 
 // static
@@ -238,11 +241,11 @@ bool TemplateURLService::CanReplaceKeyword(
                              // keywords. If we need to support empty kewords
                              // the code needs to change slightly.
   const TemplateURL* existing_url = GetTemplateURLForKeyword(keyword);
+  if (template_url_to_replace)
+    *template_url_to_replace = existing_url;
   if (existing_url) {
     // We already have a TemplateURL for this keyword. Only allow it to be
     // replaced if the TemplateURL can be replaced.
-    if (template_url_to_replace)
-      *template_url_to_replace = existing_url;
     return CanReplace(existing_url);
   }
 
@@ -266,14 +269,8 @@ void TemplateURLService::FindMatchingKeywords(
   DCHECK(matches != NULL);
   DCHECK(matches->empty());  // The code for exact matches assumes this.
 
-  // Visual Studio 2010 has problems converting NULL to the null pointer for
-  // std::pair.  See http://connect.microsoft.com/VisualStudio/feedback/details/520043/error-converting-from-null-to-a-pointer-type-in-std-pair
-  // It will work if we pass nullptr.
-#if defined(_MSC_VER) && _MSC_VER >= 1600
-  const TemplateURL* null_url = nullptr;
-#else
-  const TemplateURL* null_url = NULL;
-#endif
+  // Required for VS2010: http://connect.microsoft.com/VisualStudio/feedback/details/520043/error-converting-from-null-to-a-pointer-type-in-std-pair
+  const TemplateURL* const kNullTemplateURL = NULL;
 
   // Find matching keyword range.  Searches the element map for keywords
   // beginning with |prefix| and stores the endpoints of the resulting set in
@@ -282,7 +279,7 @@ void TemplateURLService::FindMatchingKeywords(
                   KeywordToTemplateMap::const_iterator> match_range(
       std::equal_range(
           keyword_to_template_map_.begin(), keyword_to_template_map_.end(),
-          KeywordToTemplateMap::value_type(prefix, null_url),
+          KeywordToTemplateMap::value_type(prefix, kNullTemplateURL),
           LessWithPrefix()));
 
   // Return vector of matching keywords.
@@ -323,14 +320,28 @@ void TemplateURLService::Remove(const TemplateURL* template_url) {
   NotifyObservers();
 }
 
+void TemplateURLService::RemoveAutoGeneratedSince(base::Time created_after) {
+  RemoveAutoGeneratedBetween(created_after, base::Time());
+}
+
 void TemplateURLService::RemoveAutoGeneratedBetween(base::Time created_after,
                                                     base::Time created_before) {
+  RemoveAutoGeneratedForOriginBetween(GURL(), created_after, created_before);
+}
+
+void TemplateURLService::RemoveAutoGeneratedForOriginBetween(
+    const GURL& origin,
+    base::Time created_after,
+    base::Time created_before) {
+  GURL o(origin.GetOrigin());
   bool should_notify = false;
   for (size_t i = 0; i < template_urls_.size();) {
     if (template_urls_[i]->date_created() >= created_after &&
         (created_before.is_null() ||
          template_urls_[i]->date_created() < created_before) &&
-        CanReplace(template_urls_[i])) {
+        CanReplace(template_urls_[i]) &&
+        (o.is_empty() ||
+         GenerateSearchURL(template_urls_[i]).GetOrigin() == o)) {
       RemoveNoNotify(template_urls_[i]);
       should_notify = true;
     } else {
@@ -341,9 +352,6 @@ void TemplateURLService::RemoveAutoGeneratedBetween(base::Time created_after,
     NotifyObservers();
 }
 
-void TemplateURLService::RemoveAutoGeneratedSince(base::Time created_after) {
-  RemoveAutoGeneratedBetween(created_after, base::Time());
-}
 
 void TemplateURLService::RegisterExtensionKeyword(const Extension* extension) {
   // TODO(mpcomplete): disable the keyword when the extension is disabled.
@@ -402,7 +410,7 @@ std::vector<const TemplateURL*> TemplateURLService::GetTemplateURLs() const {
 }
 
 void TemplateURLService::IncrementUsageCount(const TemplateURL* url) {
-  DCHECK(url && find(template_urls_.begin(), template_urls_.end(), url) !=
+  DCHECK(url && std::find(template_urls_.begin(), template_urls_.end(), url) !=
          template_urls_.end());
   const_cast<TemplateURL*>(url)->set_usage_count(url->usage_count() + 1);
   if (service_.get())
@@ -568,7 +576,7 @@ void TemplateURLService::OnWebDataServiceRequestDone(
       TemplateURL* managed_default = default_from_prefs.release();
       if (managed_default) {
         managed_default->set_created_by_policy(true);
-        managed_default->set_id(0);
+        managed_default->set_id(kInvalidTemplateURLID);
         AddNoNotify(managed_default);
       }
       default_search_provider = managed_default;
@@ -591,7 +599,8 @@ void TemplateURLService::OnWebDataServiceRequestDone(
     // If the default search provider existed previously, then just
     // set the member variable. Otherwise, we'll set it using the method
     // to ensure that it is saved properly after its id is set.
-    if (default_search_provider && default_search_provider->id() != 0) {
+    if (default_search_provider &&
+        (default_search_provider->id() != kInvalidTemplateURLID)) {
       default_search_provider_ = default_search_provider;
       default_search_provider = NULL;
     }
@@ -772,8 +781,8 @@ SyncError TemplateURLService::ProcessSyncChanges(
       std::string guid = turl->sync_guid();
       if (existing_keyword_turl)
         ResolveSyncKeywordConflict(turl.get(), &new_changes);
-      // Force the local ID to 0 so we can add it.
-      turl->set_id(0);
+      // Force the local ID to kInvalidTemplateURLID so we can add it.
+      turl->set_id(kInvalidTemplateURLID);
       Add(turl.release());
 
       // Possibly set the newly added |turl| as the default search provider.
@@ -813,11 +822,12 @@ SyncError TemplateURLService::ProcessSyncChanges(
 SyncError TemplateURLService::MergeDataAndStartSyncing(
     syncable::ModelType type,
     const SyncDataList& initial_sync_data,
-    SyncChangeProcessor* sync_processor) {
+    scoped_ptr<SyncChangeProcessor> sync_processor) {
   DCHECK(loaded());
   DCHECK_EQ(type, syncable::SEARCH_ENGINES);
-  DCHECK(!sync_processor_);
-  sync_processor_ = sync_processor;
+  DCHECK(!sync_processor_.get());
+  DCHECK(sync_processor.get());
+  sync_processor_ = sync_processor.Pass();
 
   // We just started syncing, so set our wait-for-default flag if we are
   // expecting a default from Sync.
@@ -897,8 +907,8 @@ SyncError TemplateURLService::MergeDataAndStartSyncing(
         // from local_data_map in this case as it may still need to be pushed to
         // the cloud.
         ResolveSyncKeywordConflict(sync_turl.get(), &new_changes);
-        // Force the local ID to 0 so we can add it.
-        sync_turl->set_id(0);
+        // Force the local ID to kInvalidTemplateURLID so we can add it.
+        sync_turl->set_id(kInvalidTemplateURLID);
         Add(sync_turl.release());
 
         // Possibly set the newly added |turl| as the default search provider.
@@ -925,7 +935,7 @@ SyncError TemplateURLService::MergeDataAndStartSyncing(
 void TemplateURLService::StopSyncing(syncable::ModelType type) {
   DCHECK_EQ(type, syncable::SEARCH_ENGINES);
   models_associated_ = false;
-  sync_processor_ = NULL;
+  sync_processor_.reset();
 }
 
 void TemplateURLService::ProcessTemplateURLChange(
@@ -960,8 +970,8 @@ void TemplateURLService::ProcessTemplateURLChange(
 SyncData TemplateURLService::CreateSyncDataFromTemplateURL(
     const TemplateURL& turl) {
   sync_pb::EntitySpecifics specifics;
-  sync_pb::SearchEngineSpecifics* se_specifics = specifics.MutableExtension(
-      sync_pb::search_engine);
+  sync_pb::SearchEngineSpecifics* se_specifics =
+      specifics.mutable_search_engine();
   se_specifics->set_short_name(UTF16ToUTF8(turl.short_name()));
   se_specifics->set_keyword(UTF16ToUTF8(turl.keyword()));
   se_specifics->set_favicon_url(turl.GetFaviconURL().spec());
@@ -998,8 +1008,7 @@ SyncDataMap TemplateURLService::CreateGUIDToSyncDataMap(
   SyncDataMap data_map;
   SyncDataList::const_iterator iter;
   for (iter = sync_data.begin(); iter != sync_data.end(); ++iter) {
-    data_map[iter->GetSpecifics().GetExtension(
-        sync_pb::search_engine).sync_guid()] = *iter;
+    data_map[iter->GetSpecifics().search_engine().sync_guid()] = *iter;
   }
   return data_map;
 }
@@ -1119,20 +1128,19 @@ void TemplateURLService::SetTemplateURLs(
   for (std::vector<TemplateURL*>::const_iterator i = urls.begin();
        i != urls.end();
        ++i) {
-    if ((*i)->id() == 0)
-      continue;
-    next_id_ = std::max(next_id_, (*i)->id());
-    AddToMaps(*i);
-    template_urls_.push_back(*i);
+    if ((*i)->id() != kInvalidTemplateURLID) {
+      next_id_ = std::max(next_id_, (*i)->id());
+      AddToMaps(*i);
+      template_urls_.push_back(*i);
+    }
   }
 
   // Next add the new items that don't have id's.
   for (std::vector<TemplateURL*>::const_iterator i = urls.begin();
        i != urls.end();
        ++i) {
-    if ((*i)->id() != 0)
-      continue;
-    AddNoNotify(*i);
+    if ((*i)->id() == kInvalidTemplateURLID)
+      AddNoNotify(*i);
   }
 }
 
@@ -1150,9 +1158,10 @@ void TemplateURLService::NotifyLoaded() {
       content::Source<TemplateURLService>(this),
       content::NotificationService::NoDetails());
 
-  for (size_t i = 0; i < pending_extension_ids_.size(); ++i) {
-    const Extension* extension = profile_->GetExtensionService()->
-        GetExtensionById(pending_extension_ids_[i], true);
+  for (PendingExtensionIDs::const_iterator i(pending_extension_ids_.begin());
+       i != pending_extension_ids_.end(); ++i) {
+    const Extension* extension =
+        profile_->GetExtensionService()->GetExtensionById(*i, true);
     if (extension)
       RegisterExtensionKeyword(extension);
   }
@@ -1296,8 +1305,8 @@ void TemplateURLService::UpdateNoNotify(const TemplateURL* existing_turl,
                                         const TemplateURL& new_values) {
   DCHECK(loaded_);
   DCHECK(existing_turl);
-  DCHECK(find(template_urls_.begin(), template_urls_.end(), existing_turl) !=
-         template_urls_.end());
+  DCHECK(std::find(template_urls_.begin(), template_urls_.end(), existing_turl)
+         != template_urls_.end());
 
   if (!existing_turl->keyword().empty())
     keyword_to_template_map_.erase(existing_turl->keyword());
@@ -1563,8 +1572,8 @@ void TemplateURLService::UpdateDefaultSearch() {
 
 void TemplateURLService::SetDefaultSearchProviderNoNotify(
     const TemplateURL* url) {
-  DCHECK(!url || find(template_urls_.begin(), template_urls_.end(), url) !=
-         template_urls_.end());
+  DCHECK(!url || std::find(template_urls_.begin(), template_urls_.end(), url)
+         != template_urls_.end());
   default_search_provider_ = url;
 
   if (url) {
@@ -1578,7 +1587,7 @@ void TemplateURLService::SetDefaultSearchProviderNoNotify(
     const TemplateURLRef* url_ref = url->url();
     if (url_ref && url_ref->HasGoogleBaseURLs()) {
       GoogleURLTracker::RequestServerCheck();
-#if defined(OS_WIN) && defined(GOOGLE_CHROME_BUILD)
+#if defined(ENABLE_RLZ)
       // Needs to be evaluated. See http://crbug.com/62328.
       base::ThreadRestrictions::ScopedAllowIO allow_io;
       RLZTracker::RecordProductEvent(rlz_lib::CHROME,
@@ -1593,7 +1602,8 @@ void TemplateURLService::SetDefaultSearchProviderNoNotify(
 
     // If we are syncing, we want to set the synced pref that will notify other
     // instances to change their default to this new search provider.
-    if (sync_processor_ && url && !url->sync_guid().empty() && GetPrefs()) {
+    if (sync_processor_.get() && url && !url->sync_guid().empty() &&
+        GetPrefs()) {
       GetPrefs()->SetString(prefs::kSyncedDefaultSearchProviderGUID,
                             url->sync_guid());
     }
@@ -1609,9 +1619,9 @@ void TemplateURLService::SetDefaultSearchProviderNoNotify(
 
 void TemplateURLService::AddNoNotify(TemplateURL* template_url) {
   DCHECK(template_url);
-  DCHECK(template_url->id() == 0);
-  DCHECK(find(template_urls_.begin(), template_urls_.end(), template_url) ==
-         template_urls_.end());
+  DCHECK_EQ(kInvalidTemplateURLID, template_url->id());
+  DCHECK(std::find(template_urls_.begin(), template_urls_.end(), template_url)
+         == template_urls_.end());
   template_url->set_id(++next_id_);
   template_urls_.push_back(template_url);
   AddToMaps(template_url);
@@ -1625,9 +1635,9 @@ void TemplateURLService::AddNoNotify(TemplateURL* template_url) {
 }
 
 void TemplateURLService::RemoveNoNotify(const TemplateURL* template_url) {
-  TemplateURLVector::iterator i = find(template_urls_.begin(),
-                                       template_urls_.end(),
-                                       template_url);
+  TemplateURLVector::iterator i = std::find(template_urls_.begin(),
+                                            template_urls_.end(),
+                                            template_url);
   if (i == template_urls_.end())
     return;
 
@@ -1818,8 +1828,8 @@ void TemplateURLService::MergeSyncAndLocalURLDuplicates(
 
       Remove(local_turl);
 
-      // Force the local ID to 0 so we can add it.
-      scoped_sync_turl->set_id(0);
+      // Force the local ID to kInvalidTemplateURLID so we can add it.
+      scoped_sync_turl->set_id(kInvalidTemplateURLID);
       TemplateURL* temp = scoped_sync_turl.release();
       Add(temp);
       if (delete_default)
@@ -1839,7 +1849,7 @@ void TemplateURLService::MergeSyncAndLocalURLDuplicates(
 void TemplateURLService::SetDefaultSearchProviderIfNewlySynced(
     const std::string& guid) {
   // If we're not syncing or if default search is managed by policy, ignore.
-  if (!sync_processor_ || is_default_search_managed_)
+  if (!sync_processor_.get() || is_default_search_managed_)
     return;
 
   PrefService* prefs = GetPrefs();
@@ -1884,7 +1894,7 @@ void TemplateURLService::UpdateTemplateURLWithSyncData(
     TemplateURL* dst,
     const SyncData& sync_data) {
   sync_pb::SearchEngineSpecifics specifics =
-      sync_data.GetSpecifics().GetExtension(sync_pb::search_engine);
+      sync_data.GetSpecifics().search_engine();
   dst->set_short_name(UTF8ToUTF16(specifics.short_name()));
   dst->set_keyword(UTF8ToUTF16(specifics.keyword()));
   dst->SetFaviconURL(GURL(specifics.favicon_url()));

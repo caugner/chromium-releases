@@ -8,9 +8,10 @@
 #include "base/values.h"
 #include "chrome/browser/extensions/extension_event_names.h"
 #include "chrome/browser/extensions/extension_event_router.h"
-#include "chrome/browser/extensions/extension_page_actions_module_constants.h"
+#include "chrome/browser/extensions/api/extension_action/extension_page_actions_api_constants.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/extensions/extension_tabs_module_constants.h"
+#include "chrome/browser/extensions/extension_window_controller.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/browser.h"
@@ -28,7 +29,7 @@
 
 namespace events = extension_event_names;
 namespace tab_keys = extension_tabs_module_constants;
-namespace page_action_keys = extension_page_actions_module_constants;
+namespace page_action_keys = extension_page_actions_api_constants;
 
 using content::NavigationController;
 using content::WebContents;
@@ -171,12 +172,13 @@ void ExtensionBrowserEventRouter::UnregisterForTabNotifications(
 void ExtensionBrowserEventRouter::OnBrowserWindowReady(const Browser* browser) {
   ListValue args;
 
-  DictionaryValue* window_dictionary = ExtensionTabUtil::CreateWindowValue(
-      browser, false);
+  DCHECK(browser->extension_window_controller());
+  DictionaryValue* window_dictionary =
+      browser->extension_window_controller()->CreateWindowValue();
   args.Append(window_dictionary);
 
   std::string json_args;
-  base::JSONWriter::Write(&args, false, &json_args);
+  base::JSONWriter::Write(&args, &json_args);
 
   DispatchEvent(browser->profile(), events::kOnWindowCreated, json_args);
 }
@@ -232,7 +234,7 @@ void ExtensionBrowserEventRouter::OnBrowserSetLastActive(
   ListValue real_args;
   real_args.Append(Value::CreateIntegerValue(window_id));
   std::string real_json_args;
-  base::JSONWriter::Write(&real_args, false, &real_json_args);
+  base::JSONWriter::Write(&real_args, &real_json_args);
 
   // When switching between windows in the default and incognitoi profiles,
   // dispatch WINDOW_ID_NONE to extensions whose profile lost focus that
@@ -244,7 +246,7 @@ void ExtensionBrowserEventRouter::OnBrowserSetLastActive(
     ListValue none_args;
     none_args.Append(
         Value::CreateIntegerValue(extension_misc::kUnknownWindowId));
-    base::JSONWriter::Write(&none_args, false, &none_json_args);
+    base::JSONWriter::Write(&none_args, &none_json_args);
   }
 
   DispatchEventsAcrossIncognito((focused_profile_ ? focused_profile_ :
@@ -286,7 +288,7 @@ void ExtensionBrowserEventRouter::TabInsertedAt(TabContentsWrapper* contents,
   args.Append(object_args);
 
   std::string json_args;
-  base::JSONWriter::Write(&args, false, &json_args);
+  base::JSONWriter::Write(&args, &json_args);
 
   DispatchEvent(contents->profile(), events::kOnTabAttached, json_args);
 }
@@ -310,7 +312,7 @@ void ExtensionBrowserEventRouter::TabDetachedAt(TabContentsWrapper* contents,
   args.Append(object_args);
 
   std::string json_args;
-  base::JSONWriter::Write(&args, false, &json_args);
+  base::JSONWriter::Write(&args, &json_args);
 
   DispatchEvent(contents->profile(), events::kOnTabDetached, json_args);
 }
@@ -329,7 +331,7 @@ void ExtensionBrowserEventRouter::TabClosingAt(TabStripModel* tab_strip_model,
   args.Append(object_args);
 
   std::string json_args;
-  base::JSONWriter::Write(&args, false, &json_args);
+  base::JSONWriter::Write(&args, &json_args);
 
   DispatchEvent(contents->profile(), events::kOnTabRemoved, json_args);
 
@@ -356,13 +358,13 @@ void ExtensionBrowserEventRouter::ActiveTabChanged(
   // The onActivated event replaced onActiveChanged and onSelectionChanged. The
   // deprecated events take two arguments: tabId, {windowId}.
   std::string old_json_args;
-  base::JSONWriter::Write(&args, false, &old_json_args);
+  base::JSONWriter::Write(&args, &old_json_args);
 
   // The onActivated event takes one argument: {windowId, tabId}.
   std::string new_json_args;
   args.Remove(0, NULL);
   object_args->Set(tab_keys::kTabIdKey, Value::CreateIntegerValue(tab_id));
-  base::JSONWriter::Write(&args, false, &new_json_args);
+  base::JSONWriter::Write(&args, &new_json_args);
 
   Profile* profile = new_contents->profile();
   DispatchEvent(profile, events::kOnTabSelectionChanged, old_json_args);
@@ -396,7 +398,7 @@ void ExtensionBrowserEventRouter::TabSelectionChanged(
   args.Append(select_info);
 
   std::string json_args;
-  base::JSONWriter::Write(&args, false, &json_args);
+  base::JSONWriter::Write(&args, &json_args);
 
   // The onHighlighted event replaced onHighlightChanged.
   Profile* profile = tab_strip_model->profile();
@@ -421,7 +423,7 @@ void ExtensionBrowserEventRouter::TabMoved(TabContentsWrapper* contents,
   args.Append(object_args);
 
   std::string json_args;
-  base::JSONWriter::Write(&args, false, &json_args);
+  base::JSONWriter::Write(&args, &json_args);
 
   DispatchEvent(contents->profile(), events::kOnTabMoved, json_args);
 }
@@ -489,7 +491,7 @@ void ExtensionBrowserEventRouter::DispatchEventWithTab(
   args.Append(ExtensionTabUtil::CreateTabValueActive(
       web_contents, active));
   std::string json_args;
-  base::JSONWriter::Write(&args, false, &json_args);
+  base::JSONWriter::Write(&args, &json_args);
   if (!extension_id.empty()) {
     DispatchEventToExtension(profile, extension_id, event_name, json_args);
   } else {
@@ -506,7 +508,7 @@ void ExtensionBrowserEventRouter::DispatchSimpleBrowserEvent(
   args.Append(Value::CreateIntegerValue(window_id));
 
   std::string json_args;
-  base::JSONWriter::Write(&args, false, &json_args);
+  base::JSONWriter::Write(&args, &json_args);
 
   DispatchEvent(profile, event_name, json_args);
 }
@@ -530,7 +532,7 @@ void ExtensionBrowserEventRouter::DispatchTabUpdatedEvent(
   args.Append(ExtensionTabUtil::CreateTabValue(contents));
 
   std::string json_args;
-  base::JSONWriter::Write(&args, false, &json_args);
+  base::JSONWriter::Write(&args, &json_args);
 
   Profile* profile = Profile::FromBrowserContext(contents->GetBrowserContext());
   DispatchEvent(profile, events::kOnTabUpdated, json_args);
@@ -621,7 +623,7 @@ void ExtensionBrowserEventRouter::DispatchOldPageActionEvent(
   args.Append(data);
 
   std::string json_args;
-  base::JSONWriter::Write(&args, false, &json_args);
+  base::JSONWriter::Write(&args, &json_args);
 
   DispatchEventToExtension(profile, extension_id, "pageActions", json_args);
 }
@@ -652,4 +654,19 @@ void ExtensionBrowserEventRouter::BrowserActionExecuted(
     return;
   DispatchEventWithTab(profile, extension_id, "browserAction.onClicked",
                        tab_contents->web_contents(), true);
+}
+
+void ExtensionBrowserEventRouter::CommandExecuted(
+    Profile* profile,
+    const std::string& extension_id,
+    const std::string& command) {
+  ListValue args;
+  args.Append(Value::CreateStringValue(command));
+  std::string json_args;
+  base::JSONWriter::Write(&args, &json_args);
+
+  DispatchEventToExtension(profile,
+                           extension_id,
+                           "experimental.keybinding.onCommand",
+                           json_args);
 }

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -42,14 +42,22 @@ class BookmarkModelMock : public BookmarkModel {
   MOCK_CONST_METHOD0(IsLoaded, bool(void));
 };
 
-class BookmarkDataTypeControllerTest : public testing::Test {
+class HistoryMock : public HistoryService {
  public:
-  BookmarkDataTypeControllerTest()
+  HistoryMock() {}
+  MOCK_METHOD0(BackendLoaded, bool(void));
+};
+
+
+class SyncBookmarkDataTypeControllerTest : public testing::Test {
+ public:
+  SyncBookmarkDataTypeControllerTest()
       : ui_thread_(BrowserThread::UI, &message_loop_) {}
 
   virtual void SetUp() {
     model_associator_ = new ModelAssociatorMock();
     change_processor_ = new ChangeProcessorMock();
+    history_service_ = new HistoryMock();
     profile_sync_factory_.reset(
         new ProfileSyncComponentsFactoryMock(model_associator_,
                                    change_processor_));
@@ -62,8 +70,12 @@ class BookmarkDataTypeControllerTest : public testing::Test {
  protected:
   void SetStartExpectations() {
     EXPECT_CALL(profile_, GetBookmarkModel()).
-        WillOnce(Return(&bookmark_model_));
+        WillRepeatedly(Return(&bookmark_model_));
+    EXPECT_CALL(profile_, GetHistoryService(_)).
+        WillRepeatedly(Return(history_service_.get()));
     EXPECT_CALL(bookmark_model_, IsLoaded()).WillRepeatedly(Return(true));
+    EXPECT_CALL(*history_service_,
+                BackendLoaded()).WillRepeatedly(Return(true));
   }
 
   void SetAssociateExpectations() {
@@ -88,6 +100,7 @@ class BookmarkDataTypeControllerTest : public testing::Test {
   scoped_ptr<ProfileSyncComponentsFactoryMock> profile_sync_factory_;
   ProfileMock profile_;
   BookmarkModelMock bookmark_model_;
+  scoped_refptr<HistoryMock> history_service_;
   ProfileSyncServiceMock service_;
   ModelAssociatorMock* model_associator_;
   ChangeProcessorMock* change_processor_;
@@ -98,7 +111,7 @@ class BookmarkDataTypeControllerTest : public testing::Test {
   }
 };
 
-TEST_F(BookmarkDataTypeControllerTest, StartBookmarkModelReady) {
+TEST_F(SyncBookmarkDataTypeControllerTest, StartDependentsReady) {
   SetStartExpectations();
   SetAssociateExpectations();
 
@@ -110,7 +123,7 @@ TEST_F(BookmarkDataTypeControllerTest, StartBookmarkModelReady) {
   EXPECT_EQ(DataTypeController::RUNNING, bookmark_dtc_->state());
 }
 
-TEST_F(BookmarkDataTypeControllerTest, StartBookmarkModelNotReady) {
+TEST_F(SyncBookmarkDataTypeControllerTest, StartBookmarkModelNotReady) {
   SetStartExpectations();
   EXPECT_CALL(bookmark_model_, IsLoaded()).WillRepeatedly(Return(false));
   SetAssociateExpectations();
@@ -119,6 +132,8 @@ TEST_F(BookmarkDataTypeControllerTest, StartBookmarkModelNotReady) {
   bookmark_dtc_->Start(
       base::Bind(&StartCallbackMock::Run, base::Unretained(&start_callback_)));
   EXPECT_EQ(DataTypeController::MODEL_STARTING, bookmark_dtc_->state());
+  testing::Mock::VerifyAndClearExpectations(&bookmark_model_);
+  EXPECT_CALL(bookmark_model_, IsLoaded()).WillRepeatedly(Return(true));
 
   // Send the notification that the bookmark model has started.
   content::NotificationService::current()->Notify(
@@ -128,7 +143,28 @@ TEST_F(BookmarkDataTypeControllerTest, StartBookmarkModelNotReady) {
   EXPECT_EQ(DataTypeController::RUNNING, bookmark_dtc_->state());
 }
 
-TEST_F(BookmarkDataTypeControllerTest, StartFirstRun) {
+TEST_F(SyncBookmarkDataTypeControllerTest, StartHistoryServiceNotReady) {
+  SetStartExpectations();
+  EXPECT_CALL(*history_service_,
+              BackendLoaded()).WillRepeatedly(Return(false));
+  SetAssociateExpectations();
+
+  EXPECT_CALL(start_callback_, Run(DataTypeController::OK, _));
+  bookmark_dtc_->Start(
+      base::Bind(&StartCallbackMock::Run, base::Unretained(&start_callback_)));
+  EXPECT_EQ(DataTypeController::MODEL_STARTING, bookmark_dtc_->state());
+  testing::Mock::VerifyAndClearExpectations(history_service_.get());
+  EXPECT_CALL(*history_service_, BackendLoaded()).WillRepeatedly(Return(true));
+
+  // Send the notification that the history service has finished loading the db.
+  content::NotificationService::current()->Notify(
+      chrome::NOTIFICATION_HISTORY_LOADED,
+      content::Source<Profile>(&profile_),
+      content::NotificationService::NoDetails());
+  EXPECT_EQ(DataTypeController::RUNNING, bookmark_dtc_->state());
+}
+
+TEST_F(SyncBookmarkDataTypeControllerTest, StartFirstRun) {
   SetStartExpectations();
   SetAssociateExpectations();
   EXPECT_CALL(*model_associator_, SyncModelHasUserCreatedNodes(_)).
@@ -138,9 +174,10 @@ TEST_F(BookmarkDataTypeControllerTest, StartFirstRun) {
       base::Bind(&StartCallbackMock::Run, base::Unretained(&start_callback_)));
 }
 
-TEST_F(BookmarkDataTypeControllerTest, StartBusy) {
+TEST_F(SyncBookmarkDataTypeControllerTest, StartBusy) {
   SetStartExpectations();
   EXPECT_CALL(bookmark_model_, IsLoaded()).WillRepeatedly(Return(false));
+  EXPECT_CALL(*history_service_, BackendLoaded()).WillRepeatedly(Return(false));
 
   EXPECT_CALL(start_callback_, Run(DataTypeController::BUSY, _));
   bookmark_dtc_->Start(
@@ -149,7 +186,7 @@ TEST_F(BookmarkDataTypeControllerTest, StartBusy) {
       base::Bind(&StartCallbackMock::Run, base::Unretained(&start_callback_)));
 }
 
-TEST_F(BookmarkDataTypeControllerTest, StartOk) {
+TEST_F(SyncBookmarkDataTypeControllerTest, StartOk) {
   SetStartExpectations();
   SetAssociateExpectations();
   EXPECT_CALL(*model_associator_, SyncModelHasUserCreatedNodes(_)).
@@ -160,7 +197,7 @@ TEST_F(BookmarkDataTypeControllerTest, StartOk) {
       base::Bind(&StartCallbackMock::Run, base::Unretained(&start_callback_)));
 }
 
-TEST_F(BookmarkDataTypeControllerTest, StartAssociationFailed) {
+TEST_F(SyncBookmarkDataTypeControllerTest, StartAssociationFailed) {
   SetStartExpectations();
   // Set up association to fail.
   EXPECT_CALL(*profile_sync_factory_, CreateBookmarkSyncComponents(_, _));
@@ -179,7 +216,7 @@ TEST_F(BookmarkDataTypeControllerTest, StartAssociationFailed) {
   EXPECT_EQ(DataTypeController::DISABLED, bookmark_dtc_->state());
 }
 
-TEST_F(BookmarkDataTypeControllerTest,
+TEST_F(SyncBookmarkDataTypeControllerTest,
        StartAssociationTriggersUnrecoverableError) {
   SetStartExpectations();
   // Set up association to fail with an unrecoverable error.
@@ -195,9 +232,10 @@ TEST_F(BookmarkDataTypeControllerTest,
   EXPECT_EQ(DataTypeController::NOT_RUNNING, bookmark_dtc_->state());
 }
 
-TEST_F(BookmarkDataTypeControllerTest, StartAborted) {
+TEST_F(SyncBookmarkDataTypeControllerTest, StartAborted) {
   SetStartExpectations();
   EXPECT_CALL(bookmark_model_, IsLoaded()).WillRepeatedly(Return(false));
+  EXPECT_CALL(*history_service_, BackendLoaded()).WillRepeatedly(Return(false));
 
   EXPECT_CALL(start_callback_, Run(DataTypeController::ABORTED, _));
   bookmark_dtc_->Start(
@@ -206,7 +244,7 @@ TEST_F(BookmarkDataTypeControllerTest, StartAborted) {
   EXPECT_EQ(DataTypeController::NOT_RUNNING, bookmark_dtc_->state());
 }
 
-TEST_F(BookmarkDataTypeControllerTest, Stop) {
+TEST_F(SyncBookmarkDataTypeControllerTest, Stop) {
   SetStartExpectations();
   SetAssociateExpectations();
   SetStopExpectations();
@@ -221,7 +259,7 @@ TEST_F(BookmarkDataTypeControllerTest, Stop) {
   EXPECT_EQ(DataTypeController::NOT_RUNNING, bookmark_dtc_->state());
 }
 
-TEST_F(BookmarkDataTypeControllerTest, OnUnrecoverableError) {
+TEST_F(SyncBookmarkDataTypeControllerTest, OnUnrecoverableError) {
   SetStartExpectations();
   SetAssociateExpectations();
   EXPECT_CALL(*model_associator_, SyncModelHasUserCreatedNodes(_)).

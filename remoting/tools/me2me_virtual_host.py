@@ -11,6 +11,7 @@
 
 import atexit
 import base64
+import errno
 import getpass
 import hashlib
 import hmac
@@ -23,6 +24,7 @@ import signal
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 import urllib2
 import uuid
@@ -72,7 +74,13 @@ class Authentication:
   def __init__(self, config_file):
     self.config_file = config_file
 
-  def refresh_tokens(self):
+  def generate_tokens(self):
+    """Prompt for username/password and use them to generate new authentication
+    tokens.
+
+    Raises:
+      Exception: Failed to get new authentication tokens.
+    """
     print "Email:",
     self.login = raw_input()
     password = getpass.getpass("Password: ")
@@ -138,6 +146,18 @@ class Host:
     self.private_key = None
 
   def register(self, auth):
+    """Generates a private key for the stored |host_id|, and registers it with
+    the Directory service.
+
+    Args:
+      auth: Authentication object with credentials for authenticating with the
+        Directory service.
+
+    Raises:
+      urllib2.HTTPError: An error occurred talking to the Directory server
+        (for example, if the |auth| credentials were rejected).
+    """
+
     logging.info("HostId: " + self.host_id)
     logging.info("HostName: " + self.host_name)
 
@@ -163,27 +183,43 @@ class Host:
     opener.add_handler(urllib2.HTTPDefaultErrorHandler())
 
     logging.info("Registering host with directory service...")
-    try:
-      res = urllib2.urlopen(request)
-      data = res.read()
-    except urllib2.HTTPError, err:
-      logging.error("Directory returned error: " + str(err))
-      logging.error(err.read())
-      sys.exit(1)
+
+    res = urllib2.urlopen(request)
+    data = res.read()
+
     logging.info("Done")
 
   def ask_pin(self):
+    print \
+"""Chromoting host supports PIN-based authentication, but it doesn't
+work with Chrome 16 and Chrome 17 clients. Leave the PIN empty if you
+need to use Chrome 16 or Chrome 17 clients. If you only use Chrome 18
+or above, please set a non-empty PIN. You can change PIN later using
+-p flag."""
     while 1:
-      pin = getpass.getpass("Host PIN (can be empty): ")
-      if len(pin) > 0 and len(pin) < 4:
+      pin = getpass.getpass("Host PIN: ")
+      if len(pin) == 0:
+        print "Using empty PIN"
+        break
+      if len(pin) < 4:
         print "PIN must be at least 4 characters long."
         continue
+      pin2 = getpass.getpass("Confirm host PIN: ")
+      if pin2 != pin:
+        print "PINs didn't match. Please try again."
+        continue
       break
+    self.set_pin(pin)
+
+  def set_pin(self, pin):
     if pin == "":
-      self.host_secret_hash = None
+      self.host_secret_hash = "plain:"
     else:
       self.host_secret_hash = "hmac:" + base64.b64encode(
           hmac.new(str(self.host_id), pin, hashlib.sha256).digest())
+
+  def is_pin_set(self):
+    return self.host_secret_hash
 
   def load_config(self):
     try:
@@ -203,6 +239,7 @@ class Host:
     data = {
         "host_id": self.host_id,
         "host_name": self.host_name,
+        "host_secret_hash": self.host_secret_hash,
         "private_key": self.private_key,
     }
     if self.host_secret_hash:
@@ -254,9 +291,12 @@ class Desktop:
 
     # Create clean environment for new session, so it is cleanly separated from
     # the user's console X session.
-    self.child_env = {"DISPLAY": ":%d" % display}
+    self.child_env = {
+        "DISPLAY": ":%d" % display,
+        "REMOTING_ME2ME_SESSION": "1" }
     for key in [
         "HOME",
+        "LANG",
         "LOGNAME",
         "PATH",
         "SHELL",
@@ -399,6 +439,14 @@ def daemonize(log_filename):
   """Background this process and detach from controlling terminal, redirecting
   stdout/stderr to |log_filename|."""
 
+  # TODO(lambroslambrou): Having stdout/stderr redirected to a log file is not
+  # ideal - it could create a filesystem DoS if the daemon or a child process
+  # were to write excessive amounts to stdout/stderr.  Ideally, stdout/stderr
+  # should be redirected to a pipe or socket, and a process at the other end
+  # should consume the data and write it to a logging facility which can do
+  # data-capping or log-rotation. The 'logger' command-line utility could be
+  # used for this, but it might cause too much syslog spam.
+
   # Create new (temporary) file-descriptors before forking, so any errors get
   # reported to the main process and set the correct exit-code.
   # The mode is provided, since Python otherwise sets a default mode of 0777,
@@ -427,8 +475,7 @@ def daemonize(log_filename):
     # Parent process
     os._exit(0)
 
-  logging.info("Daemon process running, PID = %d, logging to '%s'" %
-               (os.getpid(), log_filename))
+  logging.info("Daemon process running, logging to '%s'" % log_filename)
 
   os.chdir(HOME_DIR)
 
@@ -459,7 +506,19 @@ def cleanup():
       desktop.x_proc.terminate()
 
 
+def reload_config():
+  for desktop in g_desktops:
+    if desktop.host_proc:
+      # Terminating the Host will cause the main loop to spawn another
+      # instance, which will read any changes made to the Host config file.
+      desktop.host_proc.terminate()
+
+
 def signal_handler(signum, stackframe):
+  if signum == signal.SIGUSR1:
+    logging.info("SIGUSR1 caught, reloading configuration.")
+    reload_config()
+  else:
     # Exit cleanly so the atexit handler, cleanup(), gets called.
     raise SystemExit
 
@@ -475,6 +534,14 @@ def main():
   parser.add_option("-k", "--stop", dest="stop", default=False,
                     action="store_true",
                     help="stop the daemon currently running")
+  parser.add_option("-p", "--new-pin", dest="new_pin", default=False,
+                    action="store_true",
+                    help="set new PIN before starting the host")
+  parser.add_option("", "--check-running", dest="check_running", default=False,
+                    action="store_true",
+                    help="return 0 if the daemon is running, or 1 otherwise")
+  parser.add_option("", "--explicit-pin", dest="explicit_pin", default=None,
+                    help="set or unset the pin on the command line")
   (options, args) = parser.parse_args()
 
   size_components = options.size.split("x")
@@ -483,6 +550,10 @@ def main():
 
   host_hash = hashlib.md5(socket.gethostname()).hexdigest()
   pid_filename = os.path.join(CONFIG_DIR, "host#%s.pid" % host_hash)
+
+  if options.check_running:
+    running, pid = PidFile(pid_filename).check()
+    return 0 if (running and pid != 0) else 1
 
   if options.stop:
     running, pid = PidFile(pid_filename).check()
@@ -506,7 +577,7 @@ def main():
 
   atexit.register(cleanup)
 
-  for s in [signal.SIGHUP, signal.SIGINT, signal.SIGTERM]:
+  for s in [signal.SIGHUP, signal.SIGINT, signal.SIGTERM, signal.SIGUSR1]:
     signal.signal(s, signal_handler)
 
   # Ensure full path to config directory exists.
@@ -514,43 +585,80 @@ def main():
     os.makedirs(CONFIG_DIR, mode=0700)
 
   auth = Authentication(os.path.join(CONFIG_DIR, "auth.json"))
-  if not auth.load_config():
-    try:
-      auth.refresh_tokens()
-    except:
-      logging.error("Authentication failed.")
-      return 1
-    auth.save_config()
+  need_auth_tokens = not auth.load_config()
 
   host = Host(os.path.join(CONFIG_DIR, "host#%s.json" % host_hash))
+  register_host = not host.load_config()
 
-  if not host.load_config():
-    host.ask_pin()
-    host.register(auth)
+  if options.explicit_pin != None:
+    host.set_pin(options.explicit_pin)
     host.save_config()
+    running, pid = PidFile(pid_filename).check()
+    if running and pid != 0:
+      os.kill(pid, signal.SIGUSR1)
+    return 0
+
+  # Outside the loop so user doesn't get asked twice.
+  if register_host:
+    host.ask_pin()
+  elif options.new_pin or not host.is_pin_set():
+    host.ask_pin()
+    host.save_config()
+    running, pid = PidFile(pid_filename).check()
+    if running and pid != 0:
+      os.kill(pid, signal.SIGUSR1)
+      print "The running instance has been updated with the new PIN."
+      return 0
+
+  # The loop is to deal with the case of registering a new Host with
+  # previously-saved auth tokens (from a previous run of this script), which
+  # may require re-prompting for username & password.
+  while True:
+    try:
+      if need_auth_tokens:
+        auth.generate_tokens()
+        auth.save_config()
+        need_auth_tokens = False
+    except Exception:
+      logging.error("Authentication failed")
+      return 1
+
+    try:
+      if register_host:
+        host.register(auth)
+        host.save_config()
+    except urllib2.HTTPError, err:
+      if err.getcode() == 401:
+        # Authentication failed - re-prompt for username & password.
+        need_auth_tokens = True
+        continue
+      else:
+        # Not an authentication error.
+        logging.error("Directory returned error: " + str(err))
+        logging.error(err.read())
+        return 1
+
+    # |auth| and |host| are both set up, so break out of the loop.
+    break
 
   global g_pidfile
   g_pidfile = PidFile(pid_filename)
   running, pid = g_pidfile.check()
 
   if running:
-    if pid == 0:
-      pid = 'unknown'
-
-    logging.error("An instance of this script is already running, PID is %s." %
-                  pid)
-    logging.error("If this isn't the case, delete '%s' and try again." %
-                  pid_filename)
+    print "An instance of this script is already running."
+    print "Use the -k flag to terminate the running instance."
+    print "If this isn't the case, delete '%s' and try again." % pid_filename
     return 1
 
   g_pidfile.create()
 
   # daemonize() must only be called after prompting for user/password, as the
   # process will become detached from the controlling terminal.
-  log_filename = os.path.join(CONFIG_DIR, "host#%s.log" % host_hash)
 
   if not options.foreground:
-    daemonize(log_filename)
+    log_file = tempfile.NamedTemporaryFile(prefix="me2me_host_", delete=False)
+    daemonize(log_file.name)
 
   g_pidfile.write_pid()
 
@@ -596,7 +704,17 @@ def main():
       logging.info("Launching host process")
       desktop.launch_host(host)
 
-    pid, status = os.wait()
+    try:
+      pid, status = os.wait()
+    except OSError, e:
+      if e.errno == errno.EINTR:
+        # Retry on EINTR, which can happen if a signal such as SIGUSR1 is
+        # received.
+        continue
+      else:
+        # Anything else is an unexpected error.
+        raise
+
     logging.info("wait() returned (%s,%s)" % (pid, status))
 
     # When os.wait() notifies that a process has terminated, any Popen instance
@@ -613,6 +731,14 @@ def main():
     if desktop.host_proc is not None and pid == desktop.host_proc.pid:
       logging.info("Host process terminated")
       desktop.host_proc = None
+
+      # The exit-code must match the one used in HeartbeatSender.
+      if os.WEXITSTATUS(status) == 100:
+        logging.info("Host ID has been deleted - exiting.")
+        # Host config is no longer valid.  Delete it, so the next time this
+        # script is run, a new Host ID will be created and registered.
+        os.remove(host.config_file)
+        return 0
 
 
 if __name__ == "__main__":

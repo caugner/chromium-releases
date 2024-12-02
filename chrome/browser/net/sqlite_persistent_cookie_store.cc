@@ -293,10 +293,9 @@ bool InitTable(sql::Connection* db) {
       return false;
   }
 
-  // Try to create the index every time. Older versions did not have this index,
-  // so we want those people to get it.
-  if (!db->Execute("CREATE INDEX IF NOT EXISTS cookie_times ON cookies"
-                   " (creation_utc)"))
+  // Older code created an index on creation_utc, which is already
+  // primary key for the table.
+  if (!db->Execute("DROP INDEX IF EXISTS cookie_times"))
     return false;
 
   if (!db->Execute("CREATE INDEX IF NOT EXISTS domain ON cookies(host_key)"))
@@ -506,8 +505,7 @@ bool SQLitePersistentCookieStore::Backend::InitializeDatabase() {
   sql::Statement smt(db_->GetUniqueStatement(
     "SELECT DISTINCT host_key FROM cookies"));
 
-  if (!smt) {
-    NOTREACHED() << "select statement prep failed";
+  if (!smt.is_valid()) {
     db_.reset();
     return false;
   }
@@ -590,7 +588,6 @@ bool SQLitePersistentCookieStore::Backend::LoadCookiesForDomains(
       "FROM cookies WHERE host_key = ? AND persistent = 1"));
   }
   if (!smt.is_valid()) {
-    NOTREACHED() << "select statement prep failed";
     smt.Clear();  // Disconnect smt_ref from db_.
     db_.reset();
     return false;
@@ -777,7 +774,8 @@ void SQLitePersistentCookieStore::Backend::BatchOperation(
     // We've gotten our first entry for this batch, fire off the timer.
     BrowserThread::PostDelayedTask(
         BrowserThread::DB, FROM_HERE,
-        base::Bind(&Backend::Commit, this), kCommitIntervalMs);
+        base::Bind(&Backend::Commit, this),
+        base::TimeDelta::FromMilliseconds(kCommitIntervalMs));
   } else if (num_pending == kCommitAfterBatchSize) {
     // We've reached a big enough batch, fire off a commit now.
     BrowserThread::PostTask(
@@ -805,30 +803,23 @@ void SQLitePersistentCookieStore::Backend::Commit() {
       "expires_utc, secure, httponly, last_access_utc, has_expires, "
       "persistent) "
       "VALUES (?,?,?,?,?,?,?,?,?,?,?)"));
-  if (!add_smt) {
-    NOTREACHED();
+  if (!add_smt.is_valid())
     return;
-  }
 
   sql::Statement update_access_smt(db_->GetCachedStatement(SQL_FROM_HERE,
       "UPDATE cookies SET last_access_utc=? WHERE creation_utc=?"));
-  if (!update_access_smt) {
-    NOTREACHED();
+  if (!update_access_smt.is_valid())
     return;
-  }
 
   sql::Statement del_smt(db_->GetCachedStatement(SQL_FROM_HERE,
                          "DELETE FROM cookies WHERE creation_utc=?"));
-  if (!del_smt) {
-    NOTREACHED();
+  if (!del_smt.is_valid())
     return;
-  }
 
   sql::Transaction transaction(db_.get());
-  if (!transaction.Begin()) {
-    NOTREACHED();
+  if (!transaction.Begin())
     return;
-  }
+
   for (PendingOperationsList::iterator it = ops.begin();
        it != ops.end(); ++it) {
     // Free the cookies as we commit them to the database.

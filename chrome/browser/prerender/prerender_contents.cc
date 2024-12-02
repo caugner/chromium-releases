@@ -21,24 +21,22 @@
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/icon_messages.h"
-#include "chrome/common/render_messages.h"
+#include "chrome/common/prerender_messages.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/in_process_webkit/session_storage_namespace.h"
-#include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/renderer_host/resource_request_details.h"
+#include "content/public/browser/resource_request_details.h"
+#include "content/public/browser/browser_child_process_host.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/browser/web_contents_view.h"
 #include "ui/gfx/rect.h"
 
-#if defined(OS_MACOSX)
-#include "content/browser/mach_broker_mac.h"
-#endif
-
 using content::DownloadItem;
 using content::OpenURLParams;
+using content::RenderViewHost;
+using content::ResourceRedirectDetails;
 using content::WebContents;
 
 namespace prerender {
@@ -61,6 +59,29 @@ struct PrerenderURLPredicate {
   }
   GURL url_;
 };
+
+// Tells the render process at |child_id| whether |url| is a new prerendered
+// page, or whether |url| is being removed as a prerendered page. Currently
+// this will only inform the render process that created the prerendered page
+// with <link rel="prerender"> tags about it. This means that if the user
+// clicks on a link for a prerendered URL in a different page, the prerender
+// will not be swapped in.
+void InformRenderProcessAboutPrerender(const GURL& url,
+                                       bool is_add,
+                                       int child_id) {
+  if (child_id < 0)
+    return;
+  content::RenderProcessHost* render_process_host =
+      content::RenderProcessHost::FromID(child_id);
+  if (!render_process_host)
+    return;
+  IPC::Message* message = NULL;
+  if (is_add)
+    message = new PrerenderMsg_AddPrerenderURL(url);
+  else
+    message = new PrerenderMsg_RemovePrerenderURL(url);
+  render_process_host->Send(message);
+}
 
 }  // end namespace
 
@@ -115,7 +136,9 @@ class PrerenderContents::TabContentsDelegateImpl
     return false;
   }
 
-  virtual bool CanDownload(WebContents* source, int request_id) OVERRIDE {
+  virtual bool CanDownload(RenderViewHost* render_view_host,
+                           int request_id,
+                           const std::string& request_method) OVERRIDE {
     prerender_contents_->Destroy(FINAL_STATUS_DOWNLOAD);
     // Cancel the download.
     return false;
@@ -220,6 +243,7 @@ PrerenderContents::PrerenderContents(
       profile_(profile),
       page_id_(0),
       has_stopped_loading_(false),
+      has_finished_loading_(false),
       final_status_(FINAL_STATUS_MAX),
       prerendering_has_started_(false),
       match_complete_status_(MATCH_COMPLETE_DEFAULT),
@@ -227,7 +251,8 @@ PrerenderContents::PrerenderContents(
       child_id_(-1),
       route_id_(-1),
       origin_(origin),
-      experiment_id_(experiment_id) {
+      experiment_id_(experiment_id),
+      creator_child_id_(-1) {
   DCHECK(prerender_manager != NULL);
 }
 
@@ -242,30 +267,42 @@ PrerenderContents::Factory* PrerenderContents::CreateFactory() {
 
 void PrerenderContents::StartPrerendering(
     const RenderViewHost* source_render_view_host,
-    SessionStorageNamespace* session_storage_namespace) {
+    content::SessionStorageNamespace* session_storage_namespace) {
   DCHECK(profile_ != NULL);
   DCHECK(!prerendering_has_started_);
   DCHECK(prerender_contents_.get() == NULL);
 
   prerendering_has_started_ = true;
+  DCHECK(creator_child_id_ == -1);
+  DCHECK(alias_urls_.size() == 1);
+  if (source_render_view_host)
+    creator_child_id_ = source_render_view_host->GetProcess()->GetID();
+  InformRenderProcessAboutPrerender(prerender_url_, true,
+                                    creator_child_id_);
+
   WebContents* new_contents = WebContents::Create(
       profile_, NULL, MSG_ROUTING_NONE, NULL, session_storage_namespace);
   prerender_contents_.reset(new TabContentsWrapper(new_contents));
   content::WebContentsObserver::Observe(new_contents);
 
-  gfx::Rect tab_bounds(640, 480);
+  gfx::Rect tab_bounds = prerender_manager_->config().default_tab_bounds;
   if (source_render_view_host) {
-    DCHECK(source_render_view_host->view() != NULL);
+    DCHECK(source_render_view_host->GetView() != NULL);
     WebContents* source_wc =
-        source_render_view_host->delegate()->GetAsWebContents();
+        source_render_view_host->GetDelegate()->GetAsWebContents();
     if (source_wc) {
       // Set the size of the new TC to that of the old TC.
       source_wc->GetView()->GetContainerBounds(&tab_bounds);
     }
   } else {
+#if !defined(OS_ANDROID)
     // Try to get the active tab of the active browser and use that for tab
     // bounds. If the browser has never been active, we will fail to get a size
     // but we shouldn't be prerendering in that case anyway.
+    //
+    // This code is unneeded on Android as we do not have a Browser object so we
+    // can't get the size, and |default_tab_bounds| will be set to the right
+    // value.
     Browser* active_browser = BrowserList::GetLastActiveWithProfile(profile_);
     if (active_browser) {
       WebContents* active_web_contents = active_browser->GetWebContentsAt(
@@ -273,6 +310,7 @@ void PrerenderContents::StartPrerendering(
       if (active_web_contents)
         active_web_contents->GetView()->GetContainerBounds(&tab_bounds);
     }
+#endif  // !defined(OS_ANDROID)
   }
 
   tab_contents_delegate_.reset(new TabContentsDelegateImpl(this));
@@ -286,8 +324,8 @@ void PrerenderContents::StartPrerendering(
   render_view_host_observer_.reset(
       new PrerenderRenderViewHostObserver(this, render_view_host_mutable()));
 
-  child_id_ = render_view_host()->process()->GetID();
-  route_id_ = render_view_host()->routing_id();
+  child_id_ = render_view_host()->GetProcess()->GetID();
+  route_id_ = render_view_host()->GetRoutingID();
 
   // Register this with the ResourceDispatcherHost as a prerender
   // RenderViewHost. This must be done before the Navigate message to catch all
@@ -363,8 +401,14 @@ PrerenderContents::~PrerenderContents() {
       match_complete_status_,
       final_status_);
 
-  if (child_id_ != -1 && route_id_ != -1)
+  if (child_id_ != -1 && route_id_ != -1) {
     prerender_tracker_->OnPrerenderingFinished(child_id_, route_id_);
+    for (std::vector<GURL>::const_iterator it = alias_urls_.begin();
+         it != alias_urls_.end();
+         ++it) {
+      InformRenderProcessAboutPrerender(*it, false, creator_child_id_);
+    }
+  }
 
   // If we still have a TabContents, clean up anything we need to and then
   // destroy it.
@@ -397,9 +441,9 @@ void PrerenderContents::Observe(int type,
       ResourceRedirectDetails* resource_redirect_details =
           content::Details<ResourceRedirectDetails>(details).ptr();
       CHECK(resource_redirect_details);
-      if (resource_redirect_details->resource_type() ==
+      if (resource_redirect_details->resource_type ==
           ResourceType::MAIN_FRAME) {
-        if (!AddAliasURL(resource_redirect_details->new_url()))
+        if (!AddAliasURL(resource_redirect_details->new_url))
           return;
       }
       break;
@@ -419,8 +463,8 @@ void PrerenderContents::Observe(int type,
         // first navigation, so there's no need to send the message just after
         // the TabContents is created.
         new_render_view_host->Send(
-            new ChromeViewMsg_SetIsPrerendering(
-                new_render_view_host->routing_id(),
+            new PrerenderMsg_SetIsPrerendering(
+                new_render_view_host->GetRoutingID(),
                 true));
 
         // Make sure the size of the RenderViewHost has been passed to the new
@@ -476,6 +520,7 @@ bool PrerenderContents::AddAliasURL(const GURL& url) {
   }
 
   alias_urls_.push_back(url);
+  InformRenderProcessAboutPrerender(url, true, creator_child_id_);
   prerender_tracker_->AddPrerenderURLOnUIThread(url);
   return true;
 }
@@ -531,7 +576,15 @@ void PrerenderContents::DidStartProvisionalLoadForFrame(
     // case, the spinner would start again in the browser, so we must reset
     // has_stopped_loading_ so that the spinner won't be stopped.
     has_stopped_loading_ = false;
+    has_finished_loading_ = false;
   }
+}
+
+void PrerenderContents::DidFinishLoad(int64 frame_id,
+                                      const GURL& validated_url,
+                                      bool is_main_frame) {
+  if (is_main_frame)
+    has_finished_loading_ = true;
 }
 
 bool PrerenderContents::ShouldSuppressDialogs() {
@@ -580,9 +633,9 @@ void PrerenderContents::Destroy(FinalStatus final_status) {
 base::ProcessMetrics* PrerenderContents::MaybeGetProcessMetrics() {
   if (process_metrics_.get() == NULL) {
     // If a PrenderContents hasn't started prerending, don't be fully formed.
-    if (!render_view_host() || !render_view_host()->process())
+    if (!render_view_host() || !render_view_host()->GetProcess())
       return NULL;
-    base::ProcessHandle handle = render_view_host()->process()->GetHandle();
+    base::ProcessHandle handle = render_view_host()->GetProcess()->GetHandle();
     if (handle == base::kNullProcessHandle)
       return NULL;
 #if !defined(OS_MACOSX)
@@ -590,7 +643,7 @@ base::ProcessMetrics* PrerenderContents::MaybeGetProcessMetrics() {
 #else
     process_metrics_.reset(base::ProcessMetrics::CreateProcessMetrics(
         handle,
-        MachBroker::GetInstance()));
+        content::BrowserChildProcessHost::GetPortProvider()));
 #endif
   }
 

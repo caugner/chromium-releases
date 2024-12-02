@@ -8,14 +8,17 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "third_party/skia/include/core/SkXfermode.h"
+#include "ui/aura/client/stacking_client.h"
+#include "ui/aura/env.h"
 #include "ui/aura/event.h"
+#include "ui/aura/monitor_manager.h"
+#include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_delegate.h"
 #include "ui/base/hit_test.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/aura/root_window.h"
 #include "ui/base/ui_base_paths.h"
-#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/canvas.h"
 #include "ui/gfx/compositor/test/compositor_test_support.h"
 #include "ui/gfx/rect.h"
 
@@ -59,7 +62,7 @@ class DemoWindowDelegate : public aura::WindowDelegate {
   virtual bool CanFocus() OVERRIDE { return true; }
   virtual void OnCaptureLost() OVERRIDE {}
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE {
-    canvas->GetSkCanvas()->drawColor(color_, SkXfermode::kSrc_Mode);
+    canvas->sk_canvas()->drawColor(color_, SkXfermode::kSrc_Mode);
   }
   virtual void OnWindowDestroying() OVERRIDE {}
   virtual void OnWindowDestroyed() OVERRIDE {}
@@ -71,6 +74,27 @@ class DemoWindowDelegate : public aura::WindowDelegate {
   DISALLOW_COPY_AND_ASSIGN(DemoWindowDelegate);
 };
 
+class DemoStackingClient : public aura::client::StackingClient {
+ public:
+  explicit DemoStackingClient(aura::RootWindow* root_window)
+      : root_window_(root_window) {
+    aura::client::SetStackingClient(this);
+  }
+
+  virtual ~DemoStackingClient() {
+    aura::client::SetStackingClient(NULL);
+  }
+
+  // Overridden from aura::client::StackingClient:
+  virtual aura::Window* GetDefaultParent(aura::Window* window) OVERRIDE {
+    return root_window_;
+  }
+
+ private:
+  aura::RootWindow* root_window_;
+
+  DISALLOW_COPY_AND_ASSIGN(DemoStackingClient);
+};
 
 }  // namespace
 
@@ -88,13 +112,16 @@ int main(int argc, char** argv) {
   MessageLoop message_loop(MessageLoop::TYPE_UI);
   ui::CompositorTestSupport::Initialize();
 
-  aura::RootWindow::GetInstance();
+  scoped_ptr<aura::RootWindow> root_window(
+      aura::MonitorManager::CreateRootWindowForPrimaryMonitor());
+  scoped_ptr<DemoStackingClient> stacking_client(new DemoStackingClient(
+      root_window.get()));
 
   // Create a hierarchy of test windows.
   DemoWindowDelegate window_delegate1(SK_ColorBLUE);
   aura::Window window1(&window_delegate1);
   window1.set_id(1);
-  window1.Init(ui::Layer::LAYER_TEXTURED);
+  window1.Init(ui::LAYER_TEXTURED);
   window1.SetBounds(gfx::Rect(100, 100, 400, 400));
   window1.Show();
   window1.SetParent(NULL);
@@ -102,7 +129,7 @@ int main(int argc, char** argv) {
   DemoWindowDelegate window_delegate2(SK_ColorRED);
   aura::Window window2(&window_delegate2);
   window2.set_id(2);
-  window2.Init(ui::Layer::LAYER_TEXTURED);
+  window2.Init(ui::LAYER_TEXTURED);
   window2.SetBounds(gfx::Rect(200, 200, 350, 350));
   window2.Show();
   window2.SetParent(NULL);
@@ -110,12 +137,13 @@ int main(int argc, char** argv) {
   DemoWindowDelegate window_delegate3(SK_ColorGREEN);
   aura::Window window3(&window_delegate3);
   window3.set_id(3);
-  window3.Init(ui::Layer::LAYER_TEXTURED);
+  window3.Init(ui::LAYER_TEXTURED);
   window3.SetBounds(gfx::Rect(10, 10, 50, 50));
   window3.Show();
   window3.SetParent(&window2);
 
-  aura::RootWindow::GetInstance()->Run();
+  root_window->ShowRootWindow();
+  MessageLoopForUI::current()->Run();
 
   ui::CompositorTestSupport::Terminate();
 

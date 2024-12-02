@@ -3,7 +3,8 @@
     dir:textdirection;
     hasattribution:hasattribution;
     customlogo:customlogo;
-    themegravity:themegravity;"
+    themegravity:themegravity;
+    bookmarkbarattached:bookmarkbarattached;"
   class="starting-up">
 <head>
 <meta charset="utf-8">
@@ -20,16 +21,17 @@
 <!-- It's important that this be the first script loaded. -->
 <script src="logging.js"></script>
 
-<link rel="stylesheet" href="../shared/css/button.css">
 <link rel="stylesheet" href="../shared/css/bubble.css">
 <link rel="stylesheet" href="../shared/css/expandable_bubble.css">
 <link rel="stylesheet" href="../shared/css/menu.css">
 <link rel="stylesheet" href="../shared/css/trash.css">
+<link rel="stylesheet" href="../shared/css/widgets.css">
 <link rel="stylesheet" href="apps_page.css">
+<link rel="stylesheet" href="chrome://newtab/suggestions_page.css">
 <link rel="stylesheet" href="most_visited_page.css">
 <link rel="stylesheet" href="nav_dot.css">
 <link rel="stylesheet" href="new_tab.css">
-<link rel="stylesheet" href="recently_closed.css">
+<link rel="stylesheet" href="footer_menu.css">
 <link rel="stylesheet" href="tile_page.css">
 <link id="themecss" rel="stylesheet">
 
@@ -62,9 +64,10 @@
 <script src="nav_dot.js"></script>
 <script src="new_tab.js"></script>
 <script src="recently_closed.js"></script>
+<script src="other_sessions.js"></script>
 </head>
 
-<body>
+<body i18n-values=".style.fontFamily:fontfamily;.style.fontSize:fontsize">
   <button id="login-container" class="custom-appearance" hidden>
     <div id="login-status-header-container" class="login-status-row">
       <div id="login-status-header"></div>
@@ -103,14 +106,25 @@
       <ul id="dot-list">
       </ul>
 
-      <button id="recently-closed-menu-button" class="custom-appearance">
-        <span i18n-content="recentlyclosed"></span>
-        <div class="disclosure-triangle"></div>
+      <div class="menu-container">
+        <button id="other-sessions-menu-button"
+            class="footer-menu-button custom-appearance invisible">
+          <span i18n-content="otherSessions"></span>
+          <div class="disclosure-triangle"></div>
+        </button>
+
+        <button id="recently-closed-menu-button"
+            class="footer-menu-button custom-appearance">
+          <span i18n-content="recentlyclosed"></span>
+          <div class="disclosure-triangle"></div>
+        </button>
+
         <div id="vertical-separator"></div>
-      </button>
+      </div>
 
       <a id="chrome-web-store-href">
-        <span id="chrome-web-store-title" i18n-content="webStoreTitle"></span>
+        <span id="chrome-web-store-title" i18n-content="webStoreTitleShort">
+        </span>
       </a>
 
       <div id="trash" class="trash">
@@ -172,6 +186,16 @@
   </div>
   <span class="title"></span>
 </div>
+
+<!-- App install hint -->
+<a id="app-install-hint-template" class="app-install-hint">
+  <div class="app-install-hint-interior">
+    <div class="interior-background"></div>
+    <div class="vertical-bar"></div>
+    <div class="horizontal-bar"></div>
+  </div>
+  <span i18n-content="appInstallHintText"></span>
+</a>
 
 </div>
 

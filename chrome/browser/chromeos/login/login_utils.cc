@@ -6,6 +6,7 @@
 
 #include <vector>
 
+#include "ash/ash_switches.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/file_path.h"
@@ -25,6 +26,8 @@
 #include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/chromeos/boot_times_loader.h"
 #include "chrome/browser/chromeos/cros/cert_library.h"
+#include "chrome/browser/chromeos/cros/cros_library.h"
+#include "chrome/browser/chromeos/cros/cryptohome_library.h"
 #include "chrome/browser/chromeos/cros/network_library.h"
 #include "chrome/browser/chromeos/cros_settings.h"
 #include "chrome/browser/chromeos/cros_settings_names.h"
@@ -32,7 +35,6 @@
 #include "chrome/browser/chromeos/dbus/session_manager_client.h"
 #include "chrome/browser/chromeos/input_method/input_method_manager.h"
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
-#include "chrome/browser/chromeos/login/cookie_fetcher.h"
 #include "chrome/browser/chromeos/login/language_switch_menu.h"
 #include "chrome/browser/chromeos/login/login_display_host.h"
 #include "chrome/browser/chromeos/login/ownership_service.h"
@@ -53,6 +55,7 @@
 #include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/signin/token_service.h"
+#include "chrome/browser/signin/token_service_factory.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/ui/browser_init.h"
@@ -69,18 +72,15 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "googleurl/src/gurl.h"
-#include "net/base/cookie_monster.h"
-#include "net/base/cookie_store.h"
+#include "net/cookies/cookie_monster.h"
+#include "net/cookies/cookie_store.h"
 #include "net/http/http_auth_cache.h"
 #include "net/http/http_network_session.h"
 #include "net/http/http_transaction_factory.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
-#include "ui/gfx/gl/gl_switches.h"
-
-#if defined(USE_AURA)
 #include "ui/gfx/compositor/compositor_switches.h"
-#endif
+#include "ui/gfx/gl/gl_switches.h"
 
 using content::BrowserThread;
 
@@ -550,11 +550,12 @@ class LoginUtilsImpl : public LoginUtils,
   }
 
   // LoginUtils implementation:
+  virtual void DoBrowserLaunch(Profile* profile,
+                               LoginDisplayHost* login_host) OVERRIDE;
   virtual void PrepareProfile(
       const std::string& username,
       const std::string& display_email,
       const std::string& password,
-      const GaiaAuthConsumer::ClientLoginResult& credentials,
       bool pending_requests,
       bool using_oauth,
       bool has_cookies,
@@ -648,7 +649,6 @@ class LoginUtilsImpl : public LoginUtils,
                         Profile::CreateStatus status);
 
   std::string password_;
-  GaiaAuthConsumer::ClientLoginResult credentials_;
   bool pending_requests_;
   bool using_oauth_;
   bool has_cookies_;
@@ -695,11 +695,49 @@ class LoginUtilsWrapper {
   DISALLOW_COPY_AND_ASSIGN(LoginUtilsWrapper);
 };
 
+void LoginUtilsImpl::DoBrowserLaunch(Profile* profile,
+                                     LoginDisplayHost* login_host) {
+  if (browser_shutdown::IsTryingToQuit())
+    return;
+
+  StatusAreaViewChromeos::SetScreenMode(StatusAreaViewChromeos::BROWSER_MODE);
+  if (login_host) {
+    // Enable status area now as the login window may be destructed anytime
+    // after LaunchBrowser.
+    login_host->SetStatusAreaVisible(true);
+    login_host->SetStatusAreaEnabled(true);
+  }
+
+  BootTimesLoader::Get()->AddLoginTimeMarker("BrowserLaunched", false);
+
+  VLOG(1) << "Launching browser...";
+  BrowserInit browser_init;
+  int return_code;
+  BrowserInit::IsFirstRun first_run = first_run::IsChromeFirstRun() ?
+      BrowserInit::IS_FIRST_RUN: BrowserInit::IS_NOT_FIRST_RUN;
+  browser_init.LaunchBrowser(*CommandLine::ForCurrentProcess(),
+                             profile,
+                             FilePath(),
+                             BrowserInit::IS_PROCESS_STARTUP,
+                             first_run,
+                             &return_code);
+
+  // Mark login host for deletion after browser starts.  This
+  // guarantees that the message loop will be referenced by the
+  // browser before it is dereferenced by the login host.
+  if (login_host) {
+    login_host->OnSessionStart();
+    content::NotificationService::current()->Notify(
+        chrome::NOTIFICATION_SESSION_STARTED,
+        content::NotificationService::AllSources(),
+        content::NotificationService::NoDetails());
+  }
+}
+
 void LoginUtilsImpl::PrepareProfile(
     const std::string& username,
     const std::string& display_email,
     const std::string& password,
-    const GaiaAuthConsumer::ClientLoginResult& credentials,
     bool pending_requests,
     bool using_oauth,
     bool has_cookies,
@@ -727,7 +765,6 @@ void LoginUtilsImpl::PrepareProfile(
 
   password_ = password;
 
-  credentials_ = credentials;
   pending_requests_ = pending_requests;
   using_oauth_ = using_oauth;
   has_cookies_ = has_cookies;
@@ -780,7 +817,7 @@ void LoginUtilsImpl::OnProfileCreated(
     case Profile::CREATE_STATUS_INITIALIZED:
       break;
     case Profile::CREATE_STATUS_CREATED: {
-      if (UserManager::Get()->current_user_is_new())
+      if (UserManager::Get()->IsCurrentUserNew())
         SetFirstLoginPrefs(user_profile->GetPrefs());
       // Make sure that the google service username is properly set (we do this
       // on every sign in, not just the first login, to deal with existing
@@ -789,7 +826,7 @@ void LoginUtilsImpl::OnProfileCreated(
       google_services_username.Init(prefs::kGoogleServicesUsername,
                                     user_profile->GetPrefs(), NULL);
       google_services_username.SetValue(
-          UserManager::Get()->logged_in_user().display_email());
+          UserManager::Get()->GetLoggedInUser().display_email());
       // Make sure we flip every profile to not share proxies if the user hasn't
       // specified so explicitly.
       const PrefService::Preference* use_shared_proxies_pref =
@@ -867,6 +904,13 @@ void LoginUtilsImpl::OnProfileCreated(
 
   user_profile->OnLogin();
 
+  // Send the notification before creating the browser so additional objects
+  // that need the profile (e.g. the launcher) can be created first.
+  content::NotificationService::current()->Notify(
+      chrome::NOTIFICATION_LOGIN_USER_PROFILE_PREPARED,
+      content::NotificationService::AllSources(),
+      content::Details<Profile>(user_profile));
+
   // TODO(altimofeev): This pointer should probably never be NULL, but it looks
   // like LoginUtilsImpl::OnProfileCreated() may be getting called before
   // LoginUtilsImpl::PrepareProfile() has set |delegate_| when Chrome is killed
@@ -875,9 +919,6 @@ void LoginUtilsImpl::OnProfileCreated(
   // resolved.
   if (delegate_)
     delegate_->OnProfilePrepared(user_profile);
-
-  // TODO(altimofeev): Need to sanitize memory used to store password.
-  credentials_ = GaiaAuthConsumer::ClientLoginResult();
 }
 
 void LoginUtilsImpl::FetchOAuth1AccessToken(Profile* auth_profile) {
@@ -913,23 +954,28 @@ void LoginUtilsImpl::StartSignedInServices(
   // Make sure SigninManager is connected to our current user (this should
   // happen automatically because we set kGoogleServicesUsername in
   // OnProfileCreated()).
-  DCHECK_EQ(UserManager::Get()->logged_in_user().display_email(),
+  DCHECK_EQ(UserManager::Get()->GetLoggedInUser().display_email(),
             signin->GetAuthenticatedUsername());
   static bool initialized = false;
   if (!initialized) {
     initialized = true;
-    // Pass the updated passphrase to the sync service for use in decrypting
-    // data encrypted with the user's GAIA password.
+    // Notify the sync service that signin was successful. Note: Since the sync
+    // service is lazy-initialized, we need to make sure it has been created.
     ProfileSyncService* sync_service =
         ProfileSyncServiceFactory::GetInstance()->GetForProfile(user_profile);
     if (sync_service) {
-      sync_service->SetPassphrase(password_,
-          ProfileSyncService::IMPLICIT,
-          ProfileSyncService::INTERNAL);
+      GoogleServiceSigninSuccessDetails details(
+          signin->GetAuthenticatedUsername(),
+          password_);
+      content::NotificationService::current()->Notify(
+          chrome::NOTIFICATION_GOOGLE_SIGNIN_SUCCESSFUL,
+          content::Source<Profile>(user_profile),
+          content::Details<const GoogleServiceSigninSuccessDetails>(&details));
     }
   }
   password_.clear();
-  TokenService* token_service = user_profile->GetTokenService();
+  TokenService* token_service =
+      TokenServiceFactory::GetForProfile(user_profile);
   token_service->UpdateCredentials(credentials);
   if (token_service->AreCredentialsValid())
     token_service->StartFetchingTokens();
@@ -990,12 +1036,18 @@ std::string LoginUtilsImpl::GetOffTheRecordCommandLine(
     CommandLine* command_line) {
   static const char* kForwardSwitches[] = {
       switches::kCompressSystemFeedback,
+      switches::kDisableAccelerated2dCanvas,
       switches::kDisableAcceleratedPlugins,
+      switches::kDisableLoginAnimations,
       switches::kDisableSeccompSandbox,
+      switches::kDisableThreadedAnimation,
       switches::kEnableGView,
       switches::kEnableLogging,
       switches::kEnablePartialSwap,
       switches::kEnableSensors,
+      switches::kEnableSmoothScrolling,
+      switches::kEnableThreadedCompositing,
+      switches::kDisableThreadedCompositing,
       switches::kForceCompositingMode,
       switches::kLoginProfile,
       switches::kScrollPixels,
@@ -1004,10 +1056,16 @@ std::string LoginUtilsImpl::GetOffTheRecordCommandLine(
       switches::kPpapiFlashInProcess,
       switches::kPpapiFlashPath,
       switches::kPpapiFlashVersion,
+      switches::kFlingTapSuppressMaxDown,
+      switches::kFlingTapSuppressMaxGap,
       switches::kTouchDevices,
-#if defined(USE_AURA)
+      ash::switches::kDisableAshUberTray,
+      ash::switches::kAuraLegacyPowerButton,
+      ash::switches::kAuraNoShadows,
+      ash::switches::kAuraPanelManager,
+      ash::switches::kAuraWindowAnimationsDisabled,
       switches::kUIEnablePartialSwap,
-#endif
+      switches::kUIUseGPUProcess,
       switches::kUseGL,
       switches::kUserDataDir,
 #if defined(USE_VIRTUAL_KEYBOARD)
@@ -1060,7 +1118,7 @@ void LoginUtilsImpl::SetFirstLoginPrefs(PrefService* prefs) {
       input_method::InputMethodManager::GetInstance();
   std::vector<std::string> input_method_ids;
   manager->GetInputMethodUtil()->GetFirstLoginInputMethodIds(
-      locale, manager->current_input_method(), &input_method_ids);
+      locale, manager->GetCurrentInputMethod(), &input_method_ids);
   // Save the input methods in the user's preferences.
   StringPrefMember language_preload_engines;
   language_preload_engines.Init(prefs::kLanguagePreloadEngines,
@@ -1100,12 +1158,6 @@ scoped_refptr<Authenticator> LoginUtilsImpl::CreateAuthenticator(
     LoginStatusConsumer* consumer) {
   // Screen locker needs new Authenticator instance each time.
   if (ScreenLocker::default_screen_locker())
-    authenticator_ = NULL;
-
-  // In case of non-WebUI login new instance of Authenticator is supposed
-  // to be created on each call.
-  // TODO(nkostylev): Clean up after WebUI login migration is complete.
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kWebUILogin))
     authenticator_ = NULL;
 
   if (authenticator_ == NULL)
@@ -1231,7 +1283,8 @@ bool LoginUtilsImpl::ReadOAuth1AccessToken(Profile* user_profile,
                                            std::string* token,
                                            std::string* secret) {
   // Skip reading oauth token if user does not have a valid status.
-  if (UserManager::Get()->logged_in_user().oauth_token_status() !=
+  if (UserManager::Get()->IsUserLoggedIn() &&
+      UserManager::Get()->GetLoggedInUser().oauth_token_status() !=
       User::OAUTH_TOKEN_STATUS_VALID) {
     return false;
   }
@@ -1267,7 +1320,7 @@ void LoginUtilsImpl::StoreOAuth1AccessToken(Profile* user_profile,
   // ...then record the presence of valid OAuth token for this account in local
   // state as well.
   UserManager::Get()->SaveUserOAuthStatus(
-      UserManager::Get()->logged_in_user().email(),
+      UserManager::Get()->GetLoggedInUser().email(),
       User::OAUTH_TOKEN_STATUS_VALID);
 }
 
@@ -1286,7 +1339,7 @@ void LoginUtilsImpl::FetchCredentials(Profile* user_profile,
                                       const std::string& secret) {
   oauth_login_verifier_.reset(new OAuthLoginVerifier(
       this, user_profile, token, secret,
-      UserManager::Get()->logged_in_user().email()));
+      UserManager::Get()->GetLoggedInUser().email()));
   oauth_login_verifier_->StartOAuthVerification();
 }
 
@@ -1343,7 +1396,7 @@ void LoginUtilsImpl::OnOAuthVerificationSucceeded(
 void LoginUtilsImpl::OnOnlineStateChanged(bool online) {
   // If we come online for the first time after successful offline login,
   // we need to kick of OAuth token verification process again.
-  if (online && UserManager::Get()->user_is_logged_in() &&
+  if (online && UserManager::Get()->IsUserLoggedIn() &&
       oauth_login_verifier_.get() &&
       !oauth_login_verifier_->is_done()) {
     oauth_login_verifier_->ContinueVerification();
@@ -1358,49 +1411,6 @@ LoginUtils* LoginUtils::Get() {
 // static
 void LoginUtils::Set(LoginUtils* mock) {
   LoginUtilsWrapper::GetInstance()->reset(mock);
-}
-
-// static
-void LoginUtils::DoBrowserLaunch(Profile* profile,
-                                 LoginDisplayHost* login_host) {
-  if (browser_shutdown::IsTryingToQuit())
-    return;
-
-  StatusAreaViewChromeos::SetScreenMode(StatusAreaViewChromeos::BROWSER_MODE);
-  if (login_host) {
-    login_host->SetStatusAreaVisible(true);
-    login_host->SetStatusAreaEnabled(true);
-#if defined(USE_AURA)
-    // Close lock window now so that the launched browser can receive focus.
-    // TODO(oshima): Implement hide animation for lock screens.
-    login_host->CloseWindow();
-#endif
-  }
-
-  BootTimesLoader::Get()->AddLoginTimeMarker("BrowserLaunched", false);
-
-  VLOG(1) << "Launching browser...";
-  BrowserInit browser_init;
-  int return_code;
-  BrowserInit::IsFirstRun first_run = first_run::IsChromeFirstRun() ?
-      BrowserInit::IS_FIRST_RUN: BrowserInit::IS_NOT_FIRST_RUN;
-  browser_init.LaunchBrowser(*CommandLine::ForCurrentProcess(),
-                             profile,
-                             FilePath(),
-                             BrowserInit::IS_PROCESS_STARTUP,
-                             first_run,
-                             &return_code);
-
-  // Mark login host for deletion after browser starts.  This
-  // guarantees that the message loop will be referenced by the
-  // browser before it is dereferenced by the login host.
-  if (login_host) {
-    login_host->OnSessionStart();
-    content::NotificationService::current()->Notify(
-        chrome::NOTIFICATION_SESSION_STARTED,
-        content::NotificationService::AllSources(),
-        content::NotificationService::NoDetails());
-  }
 }
 
 // static

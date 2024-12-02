@@ -7,14 +7,17 @@
 #pragma once
 
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "base/basictypes.h"
 #include "base/callback_forward.h"
 #include "chrome/browser/chromeos/cros_settings_provider.h"
-#include "chrome/browser/chromeos/login/signed_settings_helper.h"
+#include "chrome/browser/chromeos/login/ownership_service.h"
 #include "chrome/browser/chromeos/signed_settings_migration_helper.h"
+#include "chrome/browser/policy/proto/chrome_device_policy.pb.h"
 #include "chrome/browser/policy/proto/device_management_backend.pb.h"
+#include "chrome/browser/prefs/pref_value_map.h"
 #include "content/public/browser/notification_registrar.h"
 
 namespace base {
@@ -23,21 +26,25 @@ class Value;
 
 namespace chromeos {
 
-class OwnershipService;
-
 // CrosSettingsProvider implementation that works with SignedSettings.
 class DeviceSettingsProvider : public CrosSettingsProvider,
                                public content::NotificationObserver {
  public:
-  explicit DeviceSettingsProvider(const NotifyObserversCallback& notify_cb);
+  explicit DeviceSettingsProvider(const NotifyObserversCallback& notify_cb,
+                                  SignedSettingsHelper* signed_settings_helper);
   virtual ~DeviceSettingsProvider();
 
   // CrosSettingsProvider implementation.
   virtual const base::Value* Get(const std::string& path) const OVERRIDE;
-  virtual bool GetTrusted(const std::string& path,
-                          const base::Closure& callback) OVERRIDE;
+  virtual bool PrepareTrustedValues(const base::Closure& callback) OVERRIDE;
   virtual bool HandlesSetting(const std::string& path) const OVERRIDE;
   virtual void Reload() OVERRIDE;
+
+ protected:
+  // For test use only.
+  void set_ownership_status(OwnershipService::Status status) {
+    ownership_status_ = status;
+  }
 
  private:
   // CrosSettingsProvider implementation:
@@ -66,6 +73,23 @@ class DeviceSettingsProvider : public CrosSettingsProvider,
       SignedSettings::ReturnCode code,
       const enterprise_management::PolicyFetchResponse& policy);
 
+  // Decode the various groups of policies.
+  void DecodeLoginPolicies(
+      const enterprise_management::ChromeDeviceSettingsProto& policy,
+      PrefValueMap* new_values_cache) const;
+  void DecodeKioskPolicies(
+      const enterprise_management::ChromeDeviceSettingsProto& policy,
+      PrefValueMap* new_values_cache) const;
+  void DecodeNetworkPolicies(
+      const enterprise_management::ChromeDeviceSettingsProto& policy,
+      PrefValueMap* new_values_cache) const;
+  void DecodeReportingPolicies(
+      const enterprise_management::ChromeDeviceSettingsProto& policy,
+      PrefValueMap* new_values_cache) const;
+  void DecodeGenericPolicies(
+      const enterprise_management::ChromeDeviceSettingsProto& policy,
+      PrefValueMap* new_values_cache) const;
+
   // Parses the policy cache and fills the cache of base::Value objects.
   void UpdateValuesCache();
 
@@ -76,7 +100,7 @@ class DeviceSettingsProvider : public CrosSettingsProvider,
   void ApplyRoamingSetting(bool new_value) const;
 
   // Applies any changes of the policies that are not handled by the respective
-  // subsystms.
+  // subsystems.
   void ApplySideEffects() const;
 
   // In case of missing policy blob we should verify if this is upgrade of
@@ -108,6 +132,7 @@ class DeviceSettingsProvider : public CrosSettingsProvider,
   // Pending callbacks that need to be invoked after settings verification.
   std::vector<base::Closure> callbacks_;
 
+  SignedSettingsHelper* signed_settings_helper_;
   OwnershipService::Status ownership_status_;
   mutable scoped_ptr<SignedSettingsMigrationHelper> migration_helper_;
 
@@ -126,8 +151,9 @@ class DeviceSettingsProvider : public CrosSettingsProvider,
   typedef std::pair<std::string, base::Value*> PendingQueueElement;
   std::vector<PendingQueueElement> pending_changes_;
 
-  friend class SignedSettingsHelper;
-
+  friend class DeviceSettingsProviderTest;
+  FRIEND_TEST_ALL_PREFIXES(DeviceSettingsProviderTest,
+                           InitializationTestUnowned);
   DISALLOW_COPY_AND_ASSIGN(DeviceSettingsProvider);
 };
 

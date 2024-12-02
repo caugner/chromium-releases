@@ -44,7 +44,8 @@ GLES2DecoderTestBase::GLES2DecoderTestBase()
       client_texture_id_(106),
       client_element_buffer_id_(107),
       client_vertex_shader_id_(121),
-      client_fragment_shader_id_(122) {
+      client_fragment_shader_id_(122),
+      client_query_id_(123) {
   memset(immediate_buffer_, 0xEE, sizeof(immediate_buffer_));
 }
 
@@ -196,6 +197,7 @@ void GLES2DecoderTestBase::InitDecoder(
   std::vector<int32> attribs(attributes, attributes + arraysize(attributes));
 
   decoder_.reset(GLES2Decoder::Create(group_.get()));
+  decoder_->set_log_synthesized_gl_errors(false);
   decoder_->Initialize(
       surface_, context_, surface_->GetSize(), DisallowedFeatures(),
       NULL, attribs);
@@ -449,9 +451,11 @@ void GLES2DecoderTestBase::SetupExpectationsForFramebufferClearingMulti(
 void GLES2DecoderTestBase::SetupShaderForUniform() {
   static AttribInfo attribs[] = {
     { "foo", 1, GL_FLOAT, 1, },
+    { "goo", 1, GL_FLOAT, 2, },
   };
   static UniformInfo uniforms[] = {
-    { "bar", 3, GL_INT, 1, },
+    { "bar", 1, GL_INT, 0, 2, },
+    { "car", 4, GL_INT, 1, 1, },
   };
   const GLuint kClientVertexShaderId = 5001;
   const GLuint kServiceVertexShaderId = 6001;
@@ -662,6 +666,35 @@ void GLES2DecoderTestBase::DoTexImage2D(
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
 }
 
+void GLES2DecoderTestBase::DoTexImage2DSameSize(
+    GLenum target, GLint level, GLenum internal_format,
+    GLsizei width, GLsizei height, GLint border,
+    GLenum format, GLenum type,
+    uint32 shared_memory_id, uint32 shared_memory_offset) {
+  if (GLES2Decoder::IsAngle())
+  {
+    EXPECT_CALL(*gl_, TexSubImage2D(
+        target, level, 0, 0, width, height, format, type, _))
+        .Times(1)
+        .RetiresOnSaturation();
+  } else {
+    EXPECT_CALL(*gl_, GetError())
+        .WillOnce(Return(GL_NO_ERROR))
+        .RetiresOnSaturation();
+    EXPECT_CALL(*gl_, TexImage2D(target, level, internal_format,
+                                 width, height, border, format, type, _))
+        .Times(1)
+        .RetiresOnSaturation();
+    EXPECT_CALL(*gl_, GetError())
+        .WillOnce(Return(GL_NO_ERROR))
+        .RetiresOnSaturation();
+  }
+  TexImage2D cmd;
+  cmd.Init(target, level, internal_format, width, height, border, format,
+           type, shared_memory_id, shared_memory_offset);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+}
+
 void GLES2DecoderTestBase::DoRenderbufferStorage(
     GLenum target, GLenum internal_format, GLenum actual_format,
     GLsizei width, GLsizei height,  GLenum error) {
@@ -733,6 +766,17 @@ void GLES2DecoderTestBase::DoVertexAttribPointer(
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
 }
 
+void GLES2DecoderTestBase::DoVertexAttribDivisorANGLE(
+    GLuint index, GLuint divisor) {
+  EXPECT_CALL(*gl_,
+              VertexAttribDivisorANGLE(index, divisor))
+      .Times(1)
+      .RetiresOnSaturation();
+  VertexAttribDivisorANGLE cmd;
+  cmd.Init(index, divisor);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+}
+
 // GCC requires these declarations, but MSVC requires they not be present
 #ifndef COMPILER_MSVC
 const GLint GLES2DecoderTestBase::kMaxTextureSize;
@@ -755,6 +799,7 @@ const GLuint GLES2DecoderTestBase::kServiceTextureId;
 const GLuint GLES2DecoderTestBase::kServiceProgramId;
 const GLuint GLES2DecoderTestBase::kServiceShaderId;
 const GLuint GLES2DecoderTestBase::kServiceElementBufferId;
+const GLuint GLES2DecoderTestBase::kServiceQueryId;
 
 const int32 GLES2DecoderTestBase::kSharedMemoryId;
 const size_t GLES2DecoderTestBase::kSharedBufferSize;
@@ -800,10 +845,14 @@ const GLint GLES2DecoderTestBase::kMaxUniformLength;
 const GLint GLES2DecoderTestBase::kUniform1Size;
 const GLint GLES2DecoderTestBase::kUniform2Size;
 const GLint GLES2DecoderTestBase::kUniform3Size;
-const GLint GLES2DecoderTestBase::kUniform1Location;
-const GLint GLES2DecoderTestBase::kUniform2Location;
-const GLint GLES2DecoderTestBase::kUniform2ElementLocation;
-const GLint GLES2DecoderTestBase::kUniform3Location;
+const GLint GLES2DecoderTestBase::kUniform1RealLocation;
+const GLint GLES2DecoderTestBase::kUniform2RealLocation;
+const GLint GLES2DecoderTestBase::kUniform2ElementRealLocation;
+const GLint GLES2DecoderTestBase::kUniform3RealLocation;
+const GLint GLES2DecoderTestBase::kUniform1FakeLocation;
+const GLint GLES2DecoderTestBase::kUniform2FakeLocation;
+const GLint GLES2DecoderTestBase::kUniform2ElementFakeLocation;
+const GLint GLES2DecoderTestBase::kUniform3FakeLocation;
 const GLenum GLES2DecoderTestBase::kUniform1Type;
 const GLenum GLES2DecoderTestBase::kUniform2Type;
 const GLenum GLES2DecoderTestBase::kUniform3Type;
@@ -828,9 +877,12 @@ void GLES2DecoderTestBase::SetupDefaultProgram() {
       { kAttrib3Name, kAttrib3Size, kAttrib3Type, kAttrib3Location, },
     };
     static UniformInfo uniforms[] = {
-      { kUniform1Name, kUniform1Size, kUniform1Type, kUniform1Location, },
-      { kUniform2Name, kUniform2Size, kUniform2Type, kUniform2Location, },
-      { kUniform3Name, kUniform3Size, kUniform3Type, kUniform3Location, },
+      { kUniform1Name, kUniform1Size, kUniform1Type,
+        kUniform1FakeLocation, kUniform1RealLocation },
+      { kUniform2Name, kUniform2Size, kUniform2Type,
+        kUniform2FakeLocation, kUniform2RealLocation },
+      { kUniform3Name, kUniform3Size, kUniform3Type,
+        kUniform3FakeLocation, kUniform3RealLocation },
     };
     SetupShader(attribs, arraysize(attribs), uniforms, arraysize(uniforms),
                 client_program_id_, kServiceProgramId,
@@ -856,9 +908,12 @@ void GLES2DecoderTestBase::SetupCubemapProgram() {
       { kAttrib3Name, kAttrib3Size, kAttrib3Type, kAttrib3Location, },
     };
     static UniformInfo uniforms[] = {
-      { kUniform1Name, kUniform1Size, kUniformCubemapType, kUniform1Location, },
-      { kUniform2Name, kUniform2Size, kUniform2Type, kUniform2Location, },
-      { kUniform3Name, kUniform3Size, kUniform3Type, kUniform3Location, },
+      { kUniform1Name, kUniform1Size, kUniformCubemapType,
+        kUniform1FakeLocation, kUniform1RealLocation, },
+      { kUniform2Name, kUniform2Size, kUniform2Type,
+        kUniform2FakeLocation, kUniform2RealLocation, },
+      { kUniform3Name, kUniform3Size, kUniform3Type,
+        kUniform3FakeLocation, kUniform3RealLocation, },
     };
     SetupShader(attribs, arraysize(attribs), uniforms, arraysize(uniforms),
                 client_program_id_, kServiceProgramId,
@@ -965,7 +1020,7 @@ void GLES2DecoderTestBase::SetupShader(
       if (!ProgramManager::IsInvalidPrefix(info.name, strlen(info.name))) {
         EXPECT_CALL(*gl_, GetUniformLocation(program_service_id,
                                              StrEq(info.name)))
-            .WillOnce(Return(info.location))
+            .WillOnce(Return(info.real_location))
             .RetiresOnSaturation();
         if (info.size > 1) {
           std::string base_name = info.name;
@@ -978,7 +1033,7 @@ void GLES2DecoderTestBase::SetupShader(
                 std::string(base_name) + "[" + base::IntToString(jj) + "]");
             EXPECT_CALL(*gl_, GetUniformLocation(program_service_id,
                                                  StrEq(element_name)))
-                .WillOnce(Return(info.location + jj * 2))
+                .WillOnce(Return(info.real_location + jj * 2))
                 .RetiresOnSaturation();
           }
         }

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -55,7 +55,7 @@ bool LaunchXdgUtility(const std::vector<std::string>& argv, int* exit_code) {
   int devnull = open("/dev/null", O_RDONLY);
   if (devnull < 0)
     return false;
-  base::file_handle_mapping_vector no_stdin;
+  base::FileHandleMappingVector no_stdin;
   no_stdin.push_back(std::make_pair(devnull, STDIN_FILENO));
 
   base::ProcessHandle handle;
@@ -73,7 +73,7 @@ bool LaunchXdgUtility(const std::vector<std::string>& argv, int* exit_code) {
 std::string CreateShortcutIcon(
     const ShellIntegration::ShortcutInfo& shortcut_info,
     const FilePath& shortcut_filename) {
-  if (shortcut_info.favicon.isNull())
+  if (shortcut_info.favicon.IsEmpty())
     return std::string();
 
   // TODO(phajdan.jr): Report errors from this function, possibly as infobars.
@@ -85,7 +85,8 @@ std::string CreateShortcutIcon(
       shortcut_filename.ReplaceExtension("png"));
 
   std::vector<unsigned char> png_data;
-  gfx::PNGCodec::EncodeBGRASkBitmap(shortcut_info.favicon, false, &png_data);
+  const SkBitmap* bitmap = shortcut_info.favicon.ToSkBitmap();
+  gfx::PNGCodec::EncodeBGRASkBitmap(*bitmap, false, &png_data);
   int bytes_written = file_util::WriteFile(temp_file_path,
       reinterpret_cast<char*>(png_data.data()), png_data.size());
 
@@ -102,7 +103,7 @@ std::string CreateShortcutIcon(
   argv.push_back("user");
 
   argv.push_back("--size");
-  argv.push_back(base::IntToString(shortcut_info.favicon.width()));
+  argv.push_back(base::IntToString(bitmap->width()));
 
   argv.push_back(temp_file_path.value());
   std::string icon_name = temp_file_path.BaseName().RemoveExtension().value();

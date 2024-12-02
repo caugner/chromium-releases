@@ -9,15 +9,19 @@
 #import "base/mac/scoped_sending_event.h"
 #include "base/memory/scoped_nsobject.h"
 #include "base/message_loop.h"
-#include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_view_mac.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
 #import "ui/base/cocoa/base_view.h"
 #include "webkit/glue/webmenurunner_mac.h"
 
+using content::RenderViewHost;
+using content::RenderViewHostImpl;
+using content::RenderWidgetHost;
+
 PopupMenuHelper::PopupMenuHelper(RenderViewHost* render_view_host)
-    : render_view_host_(render_view_host) {
+    : render_view_host_(static_cast<RenderViewHostImpl*>(render_view_host)) {
   notification_registrar_.Add(
       this, content::NOTIFICATION_RENDER_WIDGET_HOST_DESTROYED,
       content::Source<RenderWidgetHost>(render_view_host));
@@ -35,7 +39,7 @@ void PopupMenuHelper::ShowPopupMenu(
   // would in turn delete me, causing a crash once the -runMenuInView
   // call returns. That's what was happening in <http://crbug.com/33250>).
   RenderWidgetHostViewMac* rwhvm =
-      static_cast<RenderWidgetHostViewMac*>(render_view_host_->view());
+      static_cast<RenderWidgetHostViewMac*>(render_view_host_->GetView());
   scoped_nsobject<RenderWidgetHostViewCocoa> cocoa_view
       ([rwhvm->cocoa_view() retain]);
 

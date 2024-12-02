@@ -13,15 +13,19 @@ class ConstrainedWindow;
 class HtmlDialogTabContentsDelegate;
 class HtmlDialogUIDelegate;
 class Profile;
-class RenderViewHost;
 class TabContentsWrapper;
 
 namespace base {
 template<class T> class PropertyAccessor;
 }
 
+namespace content {
+class RenderViewHost;
+}
+
 class ConstrainedHtmlUIDelegate {
  public:
+  virtual const HtmlDialogUIDelegate* GetHtmlDialogUIDelegate() const = 0;
   virtual HtmlDialogUIDelegate* GetHtmlDialogUIDelegate() = 0;
 
   // Called when the dialog is being closed in response to a "DialogClose"
@@ -57,7 +61,8 @@ class ConstrainedHtmlUI : public content::WebUIController {
   virtual ~ConstrainedHtmlUI();
 
   // WebUIController implementation:
-  virtual void RenderViewCreated(RenderViewHost* render_view_host) OVERRIDE;
+  virtual void RenderViewCreated(
+      content::RenderViewHost* render_view_host) OVERRIDE;
 
   // Create a constrained HTML dialog. The actual object that gets created
   // is a ConstrainedHtmlUIDelegate, which later triggers construction of a

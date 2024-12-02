@@ -40,8 +40,8 @@
 #endif
 
 #if defined(TOOLKIT_VIEWS)
+#include "ui/base/dragdrop/drag_utils.h"
 #include "ui/base/dragdrop/os_exchange_data.h"
-#include "ui/views/drag_utils.h"
 #include "ui/views/events/event.h"
 #include "ui/views/widget/native_widget.h"
 #include "ui/views/widget/widget.h"
@@ -158,8 +158,7 @@ void OpenAllImpl(const BookmarkNode* node,
       Browser* new_browser = BrowserList::GetLastActiveWithProfile(profile);
       if (new_browser) {
         WebContents* current_tab = new_browser->GetSelectedWebContents();
-        DCHECK(new_browser && current_tab);
-        if (new_browser && current_tab)
+        if (current_tab)
           *navigator = current_tab;
       }  // else, new_browser == NULL, which happens during testing.
     }
@@ -357,7 +356,7 @@ void DragBookmarks(Profile* profile,
 
   views::Widget* widget = views::Widget::GetWidgetForNativeView(view);
   if (widget) {
-    widget->RunShellDrag(NULL, data,
+    widget->RunShellDrag(NULL, data, gfx::Point(),
         ui::DragDropTypes::DRAG_COPY | ui::DragDropTypes::DRAG_MOVE |
         ui::DragDropTypes::DRAG_LINK);
   }
@@ -722,7 +721,7 @@ bool ConfirmDeleteBookmarkNode(const BookmarkNode* node,
                                gfx::NativeWindow window) {
   DCHECK(node && node->is_folder() && !node->empty());
   return browser::ShowYesNoBox(window,
-      l10n_util::GetStringUTF16(IDS_DELETE),
+      l10n_util::GetStringUTF16(IDS_PRODUCT_NAME),
       l10n_util::GetStringFUTF16Int(IDS_BOOKMARK_EDITOR_CONFIRM_DELETE,
                                     ChildURLCountTotal(node)));
 }

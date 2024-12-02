@@ -31,17 +31,16 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/in_process_webkit/session_storage_namespace.h"
-#include "content/browser/load_notification_details.h"
-#include "content/browser/renderer_host/render_view_host.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/devtools_agent_host_registry.h"
 #include "content/public/browser/devtools_manager.h"
 #include "content/public/browser/favicon_status.h"
+#include "content/public/browser/load_notification_details.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
 #include "content/public/common/bindings_policy.h"
@@ -61,6 +60,7 @@ using content::DevToolsManager;
 using content::NavigationController;
 using content::NavigationEntry;
 using content::OpenURLParams;
+using content::RenderViewHost;
 using content::WebContents;
 
 const char DevToolsWindow::kDevToolsApp[] = "DevToolsApp";
@@ -148,7 +148,9 @@ DevToolsWindow* DevToolsWindow::OpenDevToolsWindow(
 DevToolsWindow* DevToolsWindow::ToggleDevToolsWindow(
     RenderViewHost* inspected_rvh,
     DevToolsToggleAction action) {
-  return ToggleDevToolsWindow(inspected_rvh, false, action);
+  return ToggleDevToolsWindow(inspected_rvh,
+                              action == DEVTOOLS_TOGGLE_ACTION_INSPECT,
+                              action);
 }
 
 void DevToolsWindow::InspectElement(RenderViewHost* inspected_rvh,
@@ -221,7 +223,7 @@ DevToolsWindow::DevToolsWindow(TabContentsWrapper* tab_contents,
           ThemeServiceFactory::GetForProfile(profile_)));
   // There is no inspected_rvh in case of shared workers.
   if (inspected_rvh) {
-    WebContents* tab = inspected_rvh->delegate()->GetAsWebContents();
+    WebContents* tab = inspected_rvh->GetDelegate()->GetAsWebContents();
     if (tab)
       inspected_tab_ = TabContentsWrapper::GetCurrentWrapperForContents(tab);
   }
@@ -468,7 +470,7 @@ WebContents* DevToolsWindow::OpenURLFromTab(WebContents* source,
 void DevToolsWindow::CallClientFunction(const string16& function_name,
                                         const Value& arg) {
   std::string json;
-  base::JSONWriter::Write(&arg, false, &json);
+  base::JSONWriter::Write(&arg, &json);
   string16 javascript = function_name + char16('(') + UTF8ToUTF16(json) +
       ASCIIToUTF16(");");
   tab_contents_->web_contents()->GetRenderViewHost()->
@@ -638,7 +640,7 @@ DevToolsWindow* DevToolsWindow::ToggleDevToolsWindow(
   bool do_open = force_open;
   if (!window) {
     Profile* profile = Profile::FromBrowserContext(
-        inspected_rvh->process()->GetBrowserContext());
+        inspected_rvh->GetProcess()->GetBrowserContext());
     bool docked = profile->GetPrefs()->GetBoolean(prefs::kDevToolsOpenDocked);
     window = Create(profile, inspected_rvh, docked, false);
     manager->RegisterDevToolsClientHostFor(agent, window->frontend_host_);

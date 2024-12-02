@@ -24,10 +24,12 @@
 
 class InstantLoaderDelegate;
 class InstantLoaderManagerTest;
-class SessionStorageNamespace;
-class TabContents;
 class TabContentsWrapper;
 class TemplateURL;
+
+namespace content {
+class SessionStorageNamespace;
+}
 
 // InstantLoader does the loading of a particular URL for InstantController.
 // InstantLoader notifies its delegate, which is typically InstantController, of
@@ -255,7 +257,7 @@ class InstantLoader : public content::NotificationObserver {
 
   // The session storage namespace identifier of the original tab contents that
   // the preview_contents_ was based upon.
-  scoped_refptr<SessionStorageNamespace> session_storage_namespace_;
+  scoped_refptr<content::SessionStorageNamespace> session_storage_namespace_;
 
   DISALLOW_COPY_AND_ASSIGN(InstantLoader);
 };

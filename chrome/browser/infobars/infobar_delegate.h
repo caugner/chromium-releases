@@ -16,8 +16,10 @@ class InfoBar;
 class InfoBarTabHelper;
 class InsecureContentInfoBarDelegate;
 class LinkInfoBarDelegate;
+class MediaStreamInfoBarDelegate;
 class PluginInstallerInfoBarDelegate;
 class RegisterProtocolHandlerInfoBarDelegate;
+class SavePasswordInfoBarDelegate;
 class ThemeInstalledInfoBarDelegate;
 class TranslateInfoBarDelegate;
 
@@ -88,8 +90,10 @@ class InfoBarDelegate {
   virtual ExtensionInfoBarDelegate* AsExtensionInfoBarDelegate();
   virtual InsecureContentInfoBarDelegate* AsInsecureContentInfoBarDelegate();
   virtual LinkInfoBarDelegate* AsLinkInfoBarDelegate();
+  virtual MediaStreamInfoBarDelegate* AsMediaStreamInfobarDelegate();
   virtual RegisterProtocolHandlerInfoBarDelegate*
       AsRegisterProtocolHandlerInfoBarDelegate();
+  virtual SavePasswordInfoBarDelegate* AsSavePasswordInfoBarDelegate();
   virtual ThemeInstalledInfoBarDelegate* AsThemePreviewInfobarDelegate();
   virtual TranslateInfoBarDelegate* AsTranslateInfoBarDelegate();
 

@@ -18,6 +18,12 @@ namespace gpu {
 
 class TransferBuffer;
 
+namespace gles2 {
+
+class GLES2Implementation;
+
+}  // namespace gles2
+
 namespace demos {
 
 class Demo;
@@ -42,9 +48,9 @@ class Window {
   gfx::NativeWindow CreateNativeWindow(const wchar_t* title,
                                        int width, int height);
   // Converts native window handle to NPAPI plugin window handle.
-  gfx::PluginWindowHandle PluginWindow(gfx::NativeWindow hwnd);
+  gfx::AcceleratedWidget PluginWindow(gfx::NativeWindow hwnd);
   // Creates an OpenGL ES 2.0 rendering context for the given window.
-  bool CreateRenderContext(gfx::PluginWindowHandle hwnd);
+  bool CreateRenderContext(gfx::AcceleratedWidget hwnd);
 
   gfx::NativeWindow window_handle_;
   scoped_ptr<Demo> demo_;
@@ -56,6 +62,7 @@ class Window {
   scoped_refptr<gfx::GLSurface> surface_;
   scoped_ptr<gpu::gles2::GLES2CmdHelper> gles2_cmd_helper_;
   scoped_ptr<gpu::TransferBuffer> transfer_buffer_;
+  scoped_ptr<gpu::gles2::GLES2Implementation> gles2_implementation_;
 
   DISALLOW_COPY_AND_ASSIGN(Window);
 };

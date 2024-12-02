@@ -6,12 +6,14 @@
 #define ASH_LAUNCHER_LAUNCHER_VIEW_H_
 #pragma once
 
+#include <utility>
 #include <vector>
 
 #include "ash/launcher/launcher_button_host.h"
 #include "ash/launcher/launcher_model_observer.h"
+#include "ui/views/context_menu_controller.h"
 #include "ui/views/controls/button/button.h"
-#include "ui/views/widget/widget_delegate.h"
+#include "ui/views/view.h"
 
 namespace views {
 class BoundsAnimator;
@@ -21,22 +23,49 @@ class MenuRunner;
 
 namespace ash {
 
+class LauncherDelegate;
 struct LauncherItem;
 class LauncherModel;
-class LauncherWindowCycler;
 class ViewModel;
 
 namespace internal {
 
-class LauncherView : public views::WidgetDelegateView,
-                     public LauncherModelObserver,
-                     public views::ButtonListener,
-                     public LauncherButtonHost {
+class LauncherButton;
+
+class ASH_EXPORT LauncherView : public views::View,
+                                public LauncherModelObserver,
+                                public views::ButtonListener,
+                                public LauncherButtonHost,
+                                public views::ContextMenuController {
  public:
-  explicit LauncherView(LauncherModel* model);
+  // Use the api in this class for testing only.
+  class ASH_EXPORT TestAPI {
+   public:
+    explicit TestAPI(LauncherView* launcher_view)
+        : launcher_view_(launcher_view) {
+    }
+    // Number of icons displayed.
+    int GetButtonCount();
+    // Retrieve the button at |index|.
+    LauncherButton* GetButton(int index);
+
+   private:
+    LauncherView* launcher_view_;
+
+    DISALLOW_COPY_AND_ASSIGN(TestAPI);
+  };
+
+  LauncherView(LauncherModel* model, LauncherDelegate* delegate);
   virtual ~LauncherView();
 
   void Init();
+
+  // Returns the ideal bounds of the specified item, or an empty rect if id
+  // isn't know.
+  gfx::Rect GetIdealBoundsOfItemIcon(LauncherID id);
+
+  // Returns true if we're showing a menu.
+  bool IsShowingMenu() const;
 
  private:
   class FadeOutAnimationDelegate;
@@ -73,6 +102,13 @@ class LauncherView : public views::WidgetDelegateView,
   // Invoked when the mouse is dragged. Updates the models as appropriate.
   void ContinueDrag(const views::MouseEvent& event);
 
+  // Returns true if |typea| and |typeb| should be in the same drag range.
+  bool SameDragType(LauncherItemType typea, LauncherItemType typeb) const;
+
+  // Returns the range (in the model) the item at the specified index can be
+  // dragged to.
+  std::pair<int,int> GetDragRange(int index);
+
   // If there is a drag operation in progress it's canceled.
   void CancelDrag(views::View* deleted_view);
 
@@ -85,17 +121,13 @@ class LauncherView : public views::WidgetDelegateView,
   // Shows the overflow menu.
   void ShowOverflowMenu();
 
-  // If |view| represents TYPE_BROWSER_SHORTCUT Reset() is invoked on the
-  // LauncherWindowCycler.
-  void MaybeResetWindowCycler(views::View* view);
-
   // Overridden from views::View:
   virtual gfx::Size GetPreferredSize() OVERRIDE;
   virtual void OnBoundsChanged(const gfx::Rect& previous_bounds) OVERRIDE;
 
   // Overridden from LauncherModelObserver:
   virtual void LauncherItemAdded(int model_index) OVERRIDE;
-  virtual void LauncherItemRemoved(int model_index) OVERRIDE;
+  virtual void LauncherItemRemoved(int model_index, LauncherID id) OVERRIDE;
   virtual void LauncherItemChanged(int model_index,
                                    const ash::LauncherItem& old_item) OVERRIDE;
   virtual void LauncherItemMoved(int start_index, int target_index) OVERRIDE;
@@ -109,13 +141,21 @@ class LauncherView : public views::WidgetDelegateView,
   virtual void MouseReleasedOnButton(views::View* view,
                                      bool canceled) OVERRIDE;
   virtual void MouseExitedButton(views::View* view) OVERRIDE;
+  virtual string16 GetAccessibleName(const views::View* view) OVERRIDE;
 
   // Overriden from views::ButtonListener:
   virtual void ButtonPressed(views::Button* sender,
                              const views::Event& event) OVERRIDE;
 
+  // Overriden from views::ContextMenuController:
+  virtual void ShowContextMenuForView(views::View* source,
+                                      const gfx::Point& point) OVERRIDE;
+
   // The model; owned by Launcher.
   LauncherModel* model_;
+
+  // Delegate; owned by Launcher.
+  LauncherDelegate* delegate_;
 
   // Used to manage the set of active launcher buttons. There is a view per
   // item in |model_|.
@@ -139,12 +179,14 @@ class LauncherView : public views::WidgetDelegateView,
   // Index |drag_view_| was initially at.
   int start_drag_index_;
 
+  // Used for the context menu of a particular item.
+  LauncherID context_menu_id_;
+
 #if !defined(OS_MACOSX)
   scoped_ptr<views::MenuRunner> overflow_menu_runner_;
-#endif
 
-  // Used to handle cycling among windows.
-  scoped_ptr<LauncherWindowCycler> cycler_;
+  scoped_ptr<views::MenuRunner> launcher_menu_runner_;
+#endif
 
   DISALLOW_COPY_AND_ASSIGN(LauncherView);
 };

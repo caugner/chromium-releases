@@ -10,12 +10,14 @@
 #include "base/string_util.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
-#include "content/browser/browser_url_handler.h"
-#include "content/browser/child_process_security_policy.h"
-#include "content/browser/in_process_webkit/session_storage_namespace.h"
-#include "content/browser/renderer_host/render_view_host.h"  // Temporary
+#include "content/browser/browser_url_handler_impl.h"
+#include "content/browser/child_process_security_policy_impl.h"
+#include "content/browser/in_process_webkit/dom_storage_context_impl.h"
+#include "content/browser/in_process_webkit/session_storage_namespace_impl.h"
+#include "content/browser/renderer_host/render_view_host_impl.h"  // Temporary
 #include "content/browser/site_instance_impl.h"
-#include "content/browser/tab_contents/interstitial_page.h"
+#include "content/browser/tab_contents/debug_urls.h"
+#include "content/browser/tab_contents/interstitial_page_impl.h"
 #include "content/browser/tab_contents/navigation_entry_impl.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/common/view_messages.h"
@@ -33,10 +35,13 @@
 #include "webkit/glue/webkit_glue.h"
 
 using content::BrowserContext;
+using content::DOMStorageContext;
 using content::GlobalRequestID;
 using content::NavigationController;
 using content::NavigationEntry;
 using content::NavigationEntryImpl;
+using content::RenderViewHostImpl;
+using content::SessionStorageNamespace;
 using content::SiteInstance;
 using content::UserMetricsAction;
 using content::WebContents;
@@ -138,7 +143,7 @@ NavigationEntry* NavigationController::CreateNavigationEntry(
   // used internally.
   GURL loaded_url(url);
   bool reverse_on_redirect = false;
-  BrowserURLHandler::GetInstance()->RewriteURLIfNecessary(
+  BrowserURLHandlerImpl::GetInstance()->RewriteURLIfNecessary(
       &loaded_url, browser_context, &reverse_on_redirect);
 
   NavigationEntryImpl* entry = new NavigationEntryImpl(
@@ -167,7 +172,7 @@ void NavigationController::DisablePromptOnRepost() {
 NavigationControllerImpl::NavigationControllerImpl(
     TabContents* contents,
     BrowserContext* browser_context,
-    SessionStorageNamespace* session_storage_namespace)
+    SessionStorageNamespaceImpl* session_storage_namespace)
     : browser_context_(browser_context),
       pending_entry_(NULL),
       last_committed_entry_index_(-1),
@@ -181,8 +186,9 @@ NavigationControllerImpl::NavigationControllerImpl(
       pending_reload_(NO_RELOAD) {
   DCHECK(browser_context_);
   if (!session_storage_namespace_) {
-    session_storage_namespace_ = new SessionStorageNamespace(
-        browser_context_->GetWebKitContext());
+    session_storage_namespace_ = new SessionStorageNamespaceImpl(
+        static_cast<DOMStorageContextImpl*>(
+            BrowserContext::GetDOMStorageContext(browser_context_)));
   }
 }
 
@@ -266,9 +272,45 @@ void NavigationControllerImpl::ReloadInternal(bool check_for_repost,
   } else {
     DiscardNonCommittedEntriesInternal();
 
-    pending_entry_index_ = current_index;
-    entries_[pending_entry_index_]->SetTransitionType(
-        content::PAGE_TRANSITION_RELOAD);
+    NavigationEntryImpl* entry = entries_[current_index].get();
+    SiteInstanceImpl* site_instance = entry->site_instance();
+    DCHECK(site_instance);
+
+    // If we are reloading an entry that no longer belongs to the current
+    // site instance (for example, refreshing a page for just installed app),
+    // the reload must happen in a new process.
+    // The new entry must have a new page_id and site instance, so it behaves
+    // as new navigation (which happens to clear forward history).
+    // Tabs that are discarded due to low memory conditions may not have a site
+    // instance, and should not be treated as a cross-site reload.
+    if (site_instance &&
+        site_instance->HasWrongProcessForURL(entry->GetURL())) {
+      // Create a navigation entry that resembles the current one, but do not
+      // copy page id, site instance, and content state.
+      NavigationEntryImpl* nav_entry = NavigationEntryImpl::FromNavigationEntry(
+          CreateNavigationEntry(
+              entry->GetURL(), entry->GetReferrer(), entry->GetTransitionType(),
+              false, entry->extra_headers(), browser_context_));
+
+      // Mark the reload type as NO_RELOAD, so navigation will not be considered
+      // a reload in the renderer.
+      reload_type = NavigationController::NO_RELOAD;
+
+      nav_entry->set_is_cross_site_reload(true);
+      pending_entry_ = nav_entry;
+    } else {
+      pending_entry_index_ = current_index;
+
+      // The title of the page being reloaded might have been removed in the
+      // meanwhile, so we need to revert to the default title upon reload and
+      // invalidate the previously cached title (SetTitle will do both).
+      // See Chromium issue 96041.
+      entries_[pending_entry_index_]->SetTitle(string16());
+
+      entries_[pending_entry_index_]->SetTransitionType(
+          content::PAGE_TRANSITION_RELOAD);
+    }
+
     NavigateToPendingEntry(reload_type);
   }
 }
@@ -301,8 +343,8 @@ void NavigationControllerImpl::LoadEntry(NavigationEntryImpl* entry) {
   // Don't navigate to URLs disabled by policy. This prevents showing the URL
   // on the Omnibar when it is also going to be blocked by
   // ChildProcessSecurityPolicy::CanRequestURL.
-  ChildProcessSecurityPolicy *policy =
-      ChildProcessSecurityPolicy::GetInstance();
+  ChildProcessSecurityPolicyImpl* policy =
+      ChildProcessSecurityPolicyImpl::GetInstance();
   if (policy->IsDisabledScheme(entry->GetURL().scheme()) ||
       policy->IsDisabledScheme(entry->GetVirtualURL().scheme())) {
     VLOG(1) << "URL not loaded because the scheme is blocked by policy: "
@@ -495,7 +537,7 @@ void NavigationControllerImpl::RemoveEntryAtIndex(int index) {
 void NavigationControllerImpl::UpdateVirtualURLToURL(
     NavigationEntryImpl* entry, const GURL& new_url) {
   GURL new_virtual_url(new_url);
-  if (BrowserURLHandler::GetInstance()->ReverseURLRewrite(
+  if (BrowserURLHandlerImpl::GetInstance()->ReverseURLRewrite(
           &new_virtual_url, entry->GetVirtualURL(), browser_context_)) {
     entry->SetVirtualURL(new_virtual_url);
   }
@@ -537,6 +579,9 @@ void NavigationControllerImpl::LoadURL(
     const content::Referrer& referrer,
     content::PageTransition transition,
     const std::string& extra_headers) {
+  if (content::HandleDebugURL(url, transition))
+    return;
+
   // The user initiated a load, we don't need to reload anymore.
   needs_reload_ = false;
 
@@ -583,6 +628,13 @@ bool NavigationControllerImpl::RendererDidNavigate(
   // Restored entries start out with a null SiteInstance, but we should have
   // assigned one in NavigateToPendingEntry.
   DCHECK(pending_entry_index_ == -1 || pending_entry_->site_instance());
+
+  // If we are doing a cross-site reload, we need to replace the existing
+  // navigation entry, not add another entry to the history. This has the side
+  // effect of removing forward browsing history, if such existed.
+  if (pending_entry_ != NULL) {
+    details->did_replace_entry = pending_entry_->is_cross_site_reload();
+  }
 
   // is_in_page must be computed before the entry gets committed.
   details->is_in_page = IsURLInPageNavigation(params.url);
@@ -734,7 +786,9 @@ content::NavigationType NavigationControllerImpl::ClassifyNavigation(
       temp.append(",");
     }
     GURL url(temp);
-    tab_contents_->GetRenderViewHost()->Send(new ViewMsg_TempCrashWithData(url));
+    static_cast<RenderViewHostImpl*>(
+        tab_contents_->GetRenderViewHost())->Send(
+            new ViewMsg_TempCrashWithData(url));
     return content::NAVIGATION_TYPE_NAV_IGNORE;
   }
   NavigationEntryImpl* existing_entry = entries_[existing_entry_index].get();
@@ -818,6 +872,7 @@ void NavigationControllerImpl::RendererDidNavigateToNewPage(
   new_entry->set_site_instance(
       static_cast<SiteInstanceImpl*>(tab_contents_->GetSiteInstance()));
   new_entry->SetHasPostData(params.is_post);
+  new_entry->SetPostID(params.post_id);
 
   InsertOrReplaceEntry(new_entry, *did_replace_entry);
 }
@@ -848,6 +903,7 @@ void NavigationControllerImpl::RendererDidNavigateToExistingPage(
       static_cast<SiteInstanceImpl*>(tab_contents_->GetSiteInstance()));
 
   entry->SetHasPostData(params.is_post);
+  entry->SetPostID(params.post_id);
 
   // The entry we found in the list might be pending if the user hit
   // back/forward/reload. This load should commit it (since it's already in the
@@ -1107,12 +1163,9 @@ void NavigationControllerImpl::PruneAllButActive() {
     // Normally the interstitial page hides itself if the user doesn't proceeed.
     // This would result in showing a NavigationEntry we just removed. Set this
     // so the interstitial triggers a reload if the user doesn't proceed.
-    tab_contents_->GetInterstitialPage()->set_reload_on_dont_proceed(true);
+    static_cast<InterstitialPageImpl*>(tab_contents_->GetInterstitialPage())->
+        set_reload_on_dont_proceed(true);
   }
-}
-
-SSLManager* NavigationControllerImpl::GetSSLManager() {
-  return &ssl_manager_;
 }
 
 void NavigationControllerImpl::SetMaxRestoredPageID(int32 max_id) {
@@ -1245,8 +1298,10 @@ void NavigationControllerImpl::NavigateToPendingEntry(ReloadType reload_type) {
   // cannot make new requests.  Unblock (and disable) it to allow this
   // navigation to succeed.  The interstitial will stay visible until the
   // resulting DidNavigate.
-  if (tab_contents_->GetInterstitialPage())
-    tab_contents_->GetInterstitialPage()->CancelForNavigation();
+  if (tab_contents_->GetInterstitialPage()) {
+    static_cast<InterstitialPageImpl*>(tab_contents_->GetInterstitialPage())->
+        CancelForNavigation();
+  }
 
   // For session history navigations only the pending_entry_index_ is set.
   if (!pending_entry_) {

@@ -196,6 +196,18 @@ TEST_F(PrintWebViewHelperTest, BlockScriptInitiatedPrinting) {
   VerifyPagesPrinted(true);
 }
 
+TEST_F(PrintWebViewHelperTest, BlockScriptInitiatedPrintingFromPopup) {
+  PrintWebViewHelper* print_web_view_helper = PrintWebViewHelper::Get(view_);
+  print_web_view_helper->SetScriptedPrintBlocked(true);
+  LoadHTML(kPrintWithJSHTML);
+  VerifyPagesPrinted(false);
+
+  print_web_view_helper->SetScriptedPrintBlocked(false);
+  LoadHTML(kPrintWithJSHTML);
+  VerifyPageCount(1);
+  VerifyPagesPrinted(true);
+}
+
 #if defined(OS_WIN) || defined(OS_MACOSX)
 // TODO(estade): I don't think this test is worth porting to Linux. We will have
 // to rip out and replace most of the IPC code if we ever plan to improve
@@ -431,7 +443,7 @@ class PrintWebViewHelperPreviewTest : public PrintWebViewHelperTestBase {
       EXPECT_EQ(margin_right, param.a.margin_right);
       EXPECT_EQ(margin_left, param.a.margin_left);
       EXPECT_EQ(margin_bottom, param.a.margin_bottom);
-      EXPECT_EQ(page_has_print_css, param.b);
+      EXPECT_EQ(page_has_print_css, param.c);
     }
   }
 
@@ -601,7 +613,7 @@ TEST_F(PrintWebViewHelperPreviewTest, PrintPreviewShrinkToFitPage) {
   OnPrintPreview(dict);
 
   EXPECT_EQ(0, chrome_render_thread_->print_preview_pages_remaining());
-  VerifyDefaultPageLayout(576, 652, 69, 71, 18, 18, true);
+  VerifyDefaultPageLayout(612, 693, 49, 50, 0, 0, true);
   VerifyPrintPreviewCancelled(false);
   VerifyPrintPreviewFailed(false);
 }
@@ -751,6 +763,46 @@ TEST_F(PrintWebViewHelperPreviewTest,
   OnPrintPreview(dict);
 
   // We should have received invalid printer settings from |printer_|.
+  VerifyPrintPreviewInvalidPrinterSettings(true);
+  EXPECT_EQ(0, chrome_render_thread_->print_preview_pages_remaining());
+
+  // It should receive the invalid printer settings message only.
+  VerifyPrintPreviewFailed(false);
+  VerifyPrintPreviewGenerated(false);
+}
+
+// Tests that when the selected printer has invalid page settings, print preview
+// receives error message.
+TEST_F(PrintWebViewHelperPreviewTest,
+       OnPrintPreviewUsingInvalidPageSize) {
+  LoadHTML(kPrintPreviewHTML);
+
+  chrome_render_thread_->printer()->UseInvalidPageSize();
+
+  DictionaryValue dict;
+  CreatePrintSettingsDictionary(&dict);
+  OnPrintPreview(dict);
+
+  VerifyPrintPreviewInvalidPrinterSettings(true);
+  EXPECT_EQ(0, chrome_render_thread_->print_preview_pages_remaining());
+
+  // It should receive the invalid printer settings message only.
+  VerifyPrintPreviewFailed(false);
+  VerifyPrintPreviewGenerated(false);
+}
+
+// Tests that when the selected printer has invalid content settings, print
+// preview receives error message.
+TEST_F(PrintWebViewHelperPreviewTest,
+       OnPrintPreviewUsingInvalidContentSize) {
+  LoadHTML(kPrintPreviewHTML);
+
+  chrome_render_thread_->printer()->UseInvalidContentSize();
+
+  DictionaryValue dict;
+  CreatePrintSettingsDictionary(&dict);
+  OnPrintPreview(dict);
+
   VerifyPrintPreviewInvalidPrinterSettings(true);
   EXPECT_EQ(0, chrome_render_thread_->print_preview_pages_remaining());
 

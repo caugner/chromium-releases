@@ -22,7 +22,6 @@
 #include "base/win/scoped_comptr.h"
 #include "base/win/win_util.h"
 #include "ui/base/win/window_impl.h"
-#include "ui/gfx/compositor/compositor.h"
 #include "ui/views/focus/focus_manager.h"
 #include "ui/views/layout/layout_manager.h"
 #include "ui/views/widget/native_widget_private.h"
@@ -33,7 +32,7 @@ class ViewProp;
 }
 
 namespace gfx {
-class CanvasSkia;
+class Canvas;
 class Font;
 class Rect;
 }
@@ -70,7 +69,6 @@ const int WM_NCUAHDRAWFRAME = 0xAF;
 ///////////////////////////////////////////////////////////////////////////////
 class VIEWS_EXPORT NativeWidgetWin : public ui::WindowImpl,
                                      public MessageLoopForUI::Observer,
-                                     public ui::CompositorDelegate,
                                      public internal::NativeWidgetPrivate {
  public:
   explicit NativeWidgetWin(internal::NativeWidgetDelegate* delegate);
@@ -172,9 +170,6 @@ class VIEWS_EXPORT NativeWidgetWin : public ui::WindowImpl,
     return ::GetClientRect(GetNativeView(), rect);
   }
 
-  // Overridden from ui::CompositorDelegate:
-  virtual void ScheduleDraw();
-
   // Overridden from internal::NativeWidgetPrivate:
   virtual void InitNativeWidget(const Widget::InitParams& params) OVERRIDE;
   virtual NonClientFrameView* CreateNonClientFrameView() OVERRIDE;
@@ -221,6 +216,7 @@ class VIEWS_EXPORT NativeWidgetWin : public ui::WindowImpl,
   virtual void SetSize(const gfx::Size& size) OVERRIDE;
   virtual void StackAbove(gfx::NativeView native_view) OVERRIDE;
   virtual void StackAtTop() OVERRIDE;
+  virtual void StackBelow(gfx::NativeView native_view) OVERRIDE;
   virtual void SetShape(gfx::NativeRegion shape) OVERRIDE;
   virtual void Close() OVERRIDE;
   virtual void CloseNow() OVERRIDE;
@@ -243,9 +239,11 @@ class VIEWS_EXPORT NativeWidgetWin : public ui::WindowImpl,
   virtual bool IsFullscreen() const OVERRIDE;
   virtual void SetOpacity(unsigned char opacity) OVERRIDE;
   virtual void SetUseDragFrame(bool use_drag_frame) OVERRIDE;
+  virtual void FlashFrame(bool flash) OVERRIDE;
   virtual bool IsAccessibleWidget() const OVERRIDE;
   virtual void RunShellDrag(View* view,
                             const ui::OSExchangeData& data,
+                            const gfx::Point& location,
                             int operation) OVERRIDE;
   virtual void SchedulePaintInRect(const gfx::Rect& rect) OVERRIDE;
   virtual void SetCursor(gfx::NativeCursor cursor) OVERRIDE;
@@ -503,6 +501,10 @@ class VIEWS_EXPORT NativeWidgetWin : public ui::WindowImpl,
   // frame windows.
   void ResetWindowRegion(bool force);
 
+  // When removing the standard frame, tells the DWM how much glass we want on
+  // the edges. Currently hardcoded to 10px on all sides.
+  void UpdateDWMFrame();
+
   // Calls DefWindowProc, safely wrapping the call in a ScopedRedrawLock to
   // prevent frame flicker. DefWindowProc handling can otherwise render the
   // classic-look window title bar directly.
@@ -550,7 +552,7 @@ class VIEWS_EXPORT NativeWidgetWin : public ui::WindowImpl,
 
   // A canvas that contains the window contents in the case of a layered
   // window.
-  scoped_ptr<gfx::CanvasSkia> layered_window_contents_;
+  scoped_ptr<gfx::Canvas> layered_window_contents_;
 
   // We must track the invalid rect ourselves, for two reasons:
   // For layered windows, Windows will not do this properly with
@@ -615,9 +617,6 @@ class VIEWS_EXPORT NativeWidgetWin : public ui::WindowImpl,
   // If this is greater than zero, the widget should be locked against updates.
   int lock_updates_count_;
 
-  // The window styles of the window before updates were locked.
-  DWORD saved_window_style_;
-
   // When true, this flag makes us discard incoming SetWindowPos() requests that
   // only change our position/size.  (We still allow changes to Z-order,
   // activation, etc.)
@@ -640,9 +639,6 @@ class VIEWS_EXPORT NativeWidgetWin : public ui::WindowImpl,
   // true.
   bool restored_enabled_;
 
-  // The compositor for accelerated drawing.
-  scoped_refptr<ui::Compositor> compositor_;
-
   // This flag can be initialized and checked after certain operations (such as
   // DefWindowProc) to avoid stack-controlled NativeWidgetWin operations (such
   // as unlocking the Window with a ScopedRedrawLock) after Widget destruction.
@@ -652,6 +648,8 @@ class VIEWS_EXPORT NativeWidgetWin : public ui::WindowImpl,
   // rather than asking the Widget for the non_client_view so that we know at
   // Init time, before the Widget has created the NonClientView.
   bool has_non_client_view_;
+
+  bool remove_standard_frame_;
 
   DISALLOW_COPY_AND_ASSIGN(NativeWidgetWin);
 };

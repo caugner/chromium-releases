@@ -9,6 +9,7 @@
 #include "base/bind.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/cros_settings.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
@@ -58,8 +59,8 @@ base::Value* CreateSettingsValue(base::Value *value,
 // Returns true if |username| is the logged-in owner.
 bool IsLoggedInOwner(const std::string& username) {
   UserManager* user_manager = UserManager::Get();
-  return user_manager->current_user_is_owner() &&
-      user_manager->logged_in_user().email() == username;
+  return user_manager->IsCurrentUserOwner() &&
+      user_manager->GetLoggedInUser().email() == username;
 }
 
 // Creates a user info dictionary to be stored in the |ListValue| that is
@@ -111,7 +112,7 @@ CoreChromeOSOptionsHandler::~CoreChromeOSOptionsHandler() {
                  pointer_factory_.GetWeakPtr()));
 }
 
-void CoreChromeOSOptionsHandler::Initialize() {
+void CoreChromeOSOptionsHandler::InitializeHandler() {
   proxy_prefs_.reset(PrefSetObserver::CreateProxyPrefSetObserver(
     Profile::FromWebUI(web_ui())->GetPrefs(), this));
   // Observe the chromeos::ProxyConfigServiceImpl for changes from the UI.
@@ -120,6 +121,11 @@ void CoreChromeOSOptionsHandler::Initialize() {
   proxy_tracker->AddNotificationCallback(
       base::Bind(&CoreChromeOSOptionsHandler::NotifyProxyPrefsChanged,
                  pointer_factory_.GetWeakPtr()));
+}
+
+void CoreChromeOSOptionsHandler::InitializePage() {
+  // NOTE: Don't remove this, we're intentionally ignoring the base class'
+  // implementation of InitializePage.
 }
 
 base::Value* CoreChromeOSOptionsHandler::FetchPref(
@@ -161,7 +167,7 @@ base::Value* CoreChromeOSOptionsHandler::FetchPref(
     return pref_value->DeepCopy();
   }
   // All other prefs are decorated the same way.
-  bool enabled = (UserManager::Get()->current_user_is_owner() ||
+  bool enabled = (UserManager::Get()->IsCurrentUserOwner() ||
                   !IsSettingOwnerOnly(pref_name));
   return CreateSettingsValue(
       pref_value->DeepCopy(),  // The copy will be owned by the dictionary.
@@ -205,6 +211,17 @@ void CoreChromeOSOptionsHandler::StopObservingPref(const std::string& path) {
     CrosSettings::Get()->RemoveSettingsObserver(path.c_str(), this);
   else  // Call base class to handle regular preferences.
     ::options2::CoreOptionsHandler::StopObservingPref(path);
+}
+
+void CoreChromeOSOptionsHandler::GetLocalizedValues(
+    DictionaryValue* localized_strings) {
+  DCHECK(localized_strings);
+  CoreOptionsHandler::GetLocalizedValues(localized_strings);
+
+  localized_strings->SetString(
+      "loggedInAsGuest",
+      chromeos::UserManager::Get()->IsLoggedInAsGuest() ?
+          ASCIIToUTF16("true") : ASCIIToUTF16("false"));
 }
 
 void CoreChromeOSOptionsHandler::Observe(

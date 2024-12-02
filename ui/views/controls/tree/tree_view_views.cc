@@ -13,7 +13,7 @@
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
-#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/image/image.h"
 #include "ui/gfx/native_theme.h"
 #include "ui/gfx/skia_util.h"
 #include "ui/views/background.h"
@@ -58,10 +58,12 @@ TreeView::TreeView()
       row_height_(font_.GetHeight() + kTextVerticalPadding * 2) {
   set_focusable(true);
   set_background(Background::CreateSolidBackground(SK_ColorWHITE));
-  closed_icon_ = *ResourceBundle::GetSharedInstance().GetBitmapNamed(
-      (base::i18n::IsRTL() ? IDR_FOLDER_CLOSED_RTL : IDR_FOLDER_CLOSED));
-  open_icon_ = *ResourceBundle::GetSharedInstance().GetBitmapNamed(
-      (base::i18n::IsRTL() ? IDR_FOLDER_OPEN_RTL : IDR_FOLDER_OPEN));
+  closed_icon_ = *ui::ResourceBundle::GetSharedInstance().GetImageNamed(
+      (base::i18n::IsRTL() ? IDR_FOLDER_CLOSED_RTL
+                           : IDR_FOLDER_CLOSED)).ToSkBitmap();
+  open_icon_ = *ui::ResourceBundle::GetSharedInstance().GetImageNamed(
+      (base::i18n::IsRTL() ? IDR_FOLDER_OPEN_RTL
+                           : IDR_FOLDER_OPEN)).ToSkBitmap();
   text_offset_ = closed_icon_.width() + kImagePadding + kImagePadding +
       kArrowRegionSize;
 }
@@ -513,7 +515,7 @@ void TreeView::OnPaint(gfx::Canvas* canvas) {
   int min_y, max_y;
   {
     SkRect sk_clip_rect;
-    if (canvas->GetSkCanvas()->getClipBounds(&sk_clip_rect)) {
+    if (canvas->sk_canvas()->getClipBounds(&sk_clip_rect)) {
       gfx::Rect clip_rect = gfx::SkRectToRect(sk_clip_rect);
       min_y = clip_rect.y();
       max_y = clip_rect.bottom();
@@ -560,7 +562,7 @@ void TreeView::ConfigureInternalNode(TreeModelNode* model_node,
 
 void TreeView::UpdateNodeTextWidth(InternalNode* node) {
   int width = 0, height = 0;
-  gfx::CanvasSkia::SizeStringInt(node->model_node()->GetTitle(),
+  gfx::Canvas::SizeStringInt(node->model_node()->GetTitle(),
       font_, &width, &height, gfx::Canvas::NO_ELLIPSIS);
   node->set_text_width(width);
 }
@@ -661,7 +663,7 @@ void TreeView::PaintRow(gfx::Canvas* canvas,
     if (base::i18n::IsRTL())
       text_bounds.set_x(bounds.x());
     if (node == selected_node_) {
-      canvas->FillRect(kSelectedBackgroundColor, text_bounds);
+      canvas->FillRect(text_bounds, kSelectedBackgroundColor);
       if (HasFocus())
         canvas->DrawFocusRect(text_bounds);
     }
@@ -688,16 +690,15 @@ void TreeView::PaintExpandControl(gfx::Canvas* canvas,
   if (!expanded) {
     int delta = base::i18n::IsRTL() ? 1 : -1;
     for (int i = 0; i < 4; ++i) {
-      canvas->FillRect(kArrowColor,
-                       gfx::Rect(center_x + delta * (2 - i),
-                                 center_y - (3 - i), 1, (3 - i) * 2 + 1));
+      canvas->FillRect(gfx::Rect(center_x + delta * (2 - i),
+                                 center_y - (3 - i), 1, (3 - i) * 2 + 1),
+                       kArrowColor);
     }
   } else {
     center_y -= 2;
     for (int i = 0; i < 4; ++i) {
-      canvas->FillRect(kArrowColor,
-                       gfx::Rect(center_x - (3 - i), center_y + i,
-                                 (3 - i) * 2 + 1, 1));
+      canvas->FillRect(gfx::Rect(center_x - (3 - i), center_y + i,
+                                 (3 - i) * 2 + 1, 1), kArrowColor);
     }
   }
 }

@@ -9,7 +9,6 @@
 #include "base/stl_util.h"
 #include "content/browser/renderer_host/media/media_stream_manager.h"
 #include "content/browser/renderer_host/media/video_capture_manager.h"
-#include "content/browser/resource_context.h"
 #include "content/common/media/video_capture_messages.h"
 
 using content::BrowserMessageFilter;
@@ -38,9 +37,10 @@ struct VideoCaptureHost::Entry {
   video_capture::State state;
 };
 
-VideoCaptureHost::VideoCaptureHost(
-    const content::ResourceContext* resource_context)
-    : resource_context_(resource_context) {
+VideoCaptureHost::VideoCaptureHost(content::ResourceContext* resource_context,
+                                   AudioManager* audio_manager)
+    : resource_context_(resource_context),
+      audio_manager_(audio_manager) {
 }
 
 VideoCaptureHost::~VideoCaptureHost() {}
@@ -286,5 +286,6 @@ void VideoCaptureHost::DoDeleteVideoCaptureController(
 
 media_stream::VideoCaptureManager* VideoCaptureHost::GetVideoCaptureManager() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  return resource_context_->media_stream_manager()->video_capture_manager();
+  return media_stream::MediaStreamManager::GetForResourceContext(
+      resource_context_, audio_manager_)->video_capture_manager();
 }

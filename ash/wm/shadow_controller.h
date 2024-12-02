@@ -11,7 +11,7 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/memory/linked_ptr.h"
-#include "ui/aura/root_window_observer.h"
+#include "ui/aura/env_observer.h"
 #include "ui/aura/window_observer.h"
 #include "ash/ash_export.h"
 
@@ -29,8 +29,8 @@ class Shadow;
 
 // ShadowController observes changes to windows and creates and updates drop
 // shadows as needed.
-class ASH_EXPORT ShadowController : public aura::RootWindowObserver,
-                                           public aura::WindowObserver {
+class ASH_EXPORT ShadowController : public aura::EnvObserver,
+                                    public aura::WindowObserver {
  public:
   class TestApi {
    public:
@@ -50,12 +50,12 @@ class ASH_EXPORT ShadowController : public aura::RootWindowObserver,
   explicit ShadowController();
   virtual ~ShadowController();
 
-  // aura::RootWindowObserver override:
+  // aura::EnvObserver override:
   virtual void OnWindowInitialized(aura::Window* window) OVERRIDE;
 
   // aura::WindowObserver overrides:
   virtual void OnWindowPropertyChanged(
-      aura::Window* window, const char* name, void* old) OVERRIDE;
+      aura::Window* window, const void* key, intptr_t old) OVERRIDE;
   virtual void OnWindowBoundsChanged(
       aura::Window* window, const gfx::Rect& bounds) OVERRIDE;
   virtual void OnWindowDestroyed(aura::Window* window) OVERRIDE;
@@ -69,6 +69,10 @@ class ASH_EXPORT ShadowController : public aura::RootWindowObserver,
   // Returns |window|'s shadow from |window_shadows_|, or NULL if no shadow
   // exists.
   Shadow* GetShadowForWindow(aura::Window* window);
+
+  // Updates the shadow styles for windows when activation changes.
+  void HandleWindowActivationChange(aura::Window* gaining_active,
+                                    aura::Window* losing_active);
 
   // Shows or hides |window|'s shadow as needed (creating the shadow if
   // necessary).

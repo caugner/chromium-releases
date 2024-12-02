@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include <errno.h>
 #include <limits.h>
+#include <pthread.h>
 #include <signal.h>
 #include <sys/resource.h>
 #include <unistd.h>
@@ -21,7 +22,12 @@
 #include "chrome/common/chrome_switches.h"
 #include "content/public/browser/browser_thread.h"
 
-#if defined(TOOLKIT_USES_GTK) && !defined(OS_CHROMEOS)
+#if defined(OS_ANDROID)
+#include <asm/page.h>  // for PAGE_SIZE needed by PTHREAD_STACK_MIN
+#endif
+
+#if defined(TOOLKIT_USES_GTK)
+#include "chrome/browser/chrome_browser_main_extra_parts_gtk.h"
 #include "chrome/browser/printing/print_dialog_gtk.h"
 #endif
 
@@ -231,7 +237,7 @@ void ChromeBrowserMainPartsPosix::PostMainMessageLoopStart() {
   } else {
     g_shutdown_pipe_read_fd = pipefd[0];
     g_shutdown_pipe_write_fd = pipefd[1];
-    const size_t kShutdownDetectorThreadStackSize = 4096;
+    const size_t kShutdownDetectorThreadStackSize = PTHREAD_STACK_MIN;
     // TODO(viettrungluu,willchan): crbug.com/29675 - This currently leaks, so
     // if you change this, you'll probably need to change the suppression.
     if (!base::PlatformThread::CreateNonJoinable(
@@ -262,8 +268,27 @@ void ChromeBrowserMainPartsPosix::PostMainMessageLoopStart() {
   action.sa_handler = SIGHUPHandler;
   CHECK(sigaction(SIGHUP, &action, NULL) == 0);
 
-#if defined(TOOLKIT_USES_GTK) && !defined(OS_CHROMEOS)
+#if defined(TOOLKIT_USES_GTK)
   printing::PrintingContextGtk::SetCreatePrintDialogFunction(
       &PrintDialogGtk::CreatePrintDialog);
+#endif
+}
+
+void ChromeBrowserMainPartsPosix::ShowMissingLocaleMessageBox() {
+#if defined(OS_CHROMEOS)
+  NOTREACHED();  // Should not ever happen on ChromeOS.
+#elif defined(OS_ANDROID)
+  // TODO(port) Update this as needed.
+  // Probably should not ever happen on Android, but at the time of this
+  // writing, Android isn't even using ChromeBrowserMainPartsPosix yet.
+  NOTREACHED();
+#elif defined(OS_MACOSX)
+  // Not called on Mac because we load the locale files differently.
+  NOTREACHED();
+#elif defined(TOOLKIT_USES_GTK)
+  ChromeBrowserMainExtraPartsGtk::ShowMessageBox(
+      chrome_browser::kMissingLocaleDataMessage);
+#else
+#error "Need MessageBox implementation."
 #endif
 }

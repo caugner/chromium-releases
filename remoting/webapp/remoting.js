@@ -20,6 +20,8 @@ remoting.Error = {
   HOST_IS_OFFLINE: /*i18n-content*/'ERROR_HOST_IS_OFFLINE',
   INCOMPATIBLE_PROTOCOL: /*i18n-content*/'ERROR_INCOMPATIBLE_PROTOCOL',
   BAD_PLUGIN_VERSION: /*i18n-content*/'ERROR_BAD_PLUGIN_VERSION',
+  NETWORK_FAILURE: /*i18n-content*/'ERROR_NETWORK_FAILURE',
+  HOST_OVERLOAD: /*i18n-content*/'ERROR_HOST_OVERLOAD',
   GENERIC: /*i18n-content*/'ERROR_GENERIC',
   UNEXPECTED: /*i18n-content*/'ERROR_UNEXPECTED',
   SERVICE_UNAVAILABLE: /*i18n-content*/'ERROR_SERVICE_UNAVAILABLE'
@@ -29,19 +31,21 @@ remoting.Error = {
  * Entry point for app initialization.
  */
 remoting.init = function() {
+  remoting.logExtensionInfoAsync_();
   l10n.localize();
   var button = document.getElementById('toggle-scaling');
   button.title = chrome.i18n.getMessage(/*i18n-content*/'TOOLTIP_SCALING');
   // Create global objects.
   remoting.oauth2 = new remoting.OAuth2();
-  remoting.debug = new remoting.DebugLog(
-      document.getElementById('debug-messages'),
+  remoting.stats = new remoting.ConnectionStats(
       document.getElementById('statistics'));
+  remoting.formatIq = new remoting.FormatIq();
   remoting.hostList = new remoting.HostList(
       document.getElementById('host-list'),
       document.getElementById('host-list-error'));
   remoting.toolbar = new remoting.Toolbar(
       document.getElementById('session-toolbar'));
+  remoting.clipboard = new remoting.Clipboard();
 
   refreshEmail_();
   var email = remoting.oauth2.getCachedEmail();
@@ -50,9 +54,20 @@ remoting.init = function() {
   }
 
   window.addEventListener('blur', pluginLostFocus_, false);
+  // The plugin's onFocus handler sends a paste command to |window|, because
+  // it can't send one to the plugin element itself.
+  window.addEventListener('paste', pluginGotPaste_, false);
+
+  if (isHostModeSupported_()) {
+    var noShare = document.getElementById('chrome-os-no-share');
+    noShare.parentNode.removeChild(noShare);
+  } else {
+    var button = document.getElementById('share-button');
+    button.disabled = true;
+  }
 
   // Parse URL parameters.
-  var urlParams = getUrlParameters();
+  var urlParams = getUrlParameters_();
   if ('mode' in urlParams) {
     if (urlParams['mode'] == 'me2me') {
       var hostId = urlParams['hostId'];
@@ -62,29 +77,34 @@ remoting.init = function() {
   }
 
   // No valid URL parameters, start up normally.
+  remoting.initDaemonUi();
+};
+
+// initDaemonUi is called if the app is not starting up in session mode, and
+// also if the user cancels pin entry or the connection in session mode.
+remoting.initDaemonUi = function () {
+  remoting.daemonPlugin = new remoting.DaemonPlugin();
+  remoting.daemonPlugin.updateDom();
   remoting.setMode(getAppStartupMode_());
-  if (isHostModeSupported_()) {
-    var noShare = document.getElementById('chrome-os-no-share');
-    noShare.parentNode.removeChild(noShare);
-  } else {
-    var button = document.getElementById('share-button');
-    button.disabled = true;
-  }
+  remoting.askPinDialog = new remoting.AskPinDialog(remoting.daemonPlugin);
 };
 
 /**
- * If there is an incomplete share or connection in progress, cancel it.
+ * Log information about the current extension.
+ * The extension manifest is loaded and parsed to extract this info.
  */
-remoting.cancelPendingOperation = function() {
-  document.getElementById('cancel-button').disabled = true;
-  switch (remoting.getMajorMode()) {
-    case remoting.AppMode.HOST:
-      remoting.cancelShare();
-      break;
-    case remoting.AppMode.CLIENT:
-      remoting.cancelConnect();
-      break;
+remoting.logExtensionInfoAsync_ = function() {
+  /** @type {XMLHttpRequest} */
+  var xhr = new XMLHttpRequest();
+  xhr.open('GET', 'manifest.json');
+  xhr.onload = function(e) {
+    var manifest =
+        /** @type {{name: string, version: string, default_locale: string}} */
+        JSON.parse(xhr.responseText);
+    var name = chrome.i18n.getMessage('PRODUCT_NAME');
+    console.log(name + ' version: ' + manifest.version);
   }
+  xhr.send(null);
 };
 
 /**
@@ -114,6 +134,20 @@ remoting.clearOAuth2 = function() {
   window.localStorage.removeItem(KEY_EMAIL_);
   remoting.setMode(remoting.AppMode.UNAUTHENTICATED);
 };
+
+/**
+ * Callback function called when the browser window gets a paste operation.
+ *
+ * @param {Event} eventUncast
+ * @return {boolean}
+ */
+function pluginGotPaste_(eventUncast) {
+  var event = /** @type {remoting.ClipboardEvent} */ eventUncast;
+  if (event && event.clipboardData) {
+    remoting.clipboard.toHost(event.clipboardData);
+  }
+  return false;
+}
 
 /**
  * Callback function called when the browser window loses focus. In this case,
@@ -171,8 +205,10 @@ function getEmail_() {
  * @return {remoting.AppMode} The mode to start in.
  */
 function getAppStartupMode_() {
-  return remoting.oauth2.isAuthenticated() ? remoting.AppMode.HOME :
-      remoting.AppMode.UNAUTHENTICATED;
+  if (!remoting.oauth2.isAuthenticated()) {
+    return remoting.AppMode.UNAUTHENTICATED;
+  }
+  return remoting.AppMode.HOME;
 }
 
 /**
@@ -183,4 +219,17 @@ function getAppStartupMode_() {
 function isHostModeSupported_() {
   // Currently, sharing on Chromebooks is not supported.
   return !navigator.userAgent.match(/\bCrOS\b/);
+}
+
+/**
+ * @return {Object.<string, string>} The URL parameters.
+ */
+function getUrlParameters_() {
+  var result = {};
+  var parts = window.location.search.substring(1).split('&');
+  for (var i = 0; i < parts.length; i++) {
+    var pair = parts[i].split('=');
+    result[pair[0]] = decodeURIComponent(pair[1]);
+  }
+  return result;
 }

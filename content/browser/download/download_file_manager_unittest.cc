@@ -7,15 +7,16 @@
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/message_loop.h"
+#include "base/scoped_temp_dir.h"
 #include "base/string_number_conversions.h"
 #include "content/browser/browser_thread_impl.h"
 #include "content/browser/download/download_buffer.h"
 #include "content/browser/download/download_create_info.h"
+#include "content/browser/download/download_interrupt_reasons_impl.h"
 #include "content/browser/download/download_request_handle.h"
-#include "content/browser/download/download_status_updater.h"
 #include "content/browser/download/mock_download_file.h"
-#include "content/browser/download/mock_download_manager.h"
 #include "content/public/browser/download_id.h"
+#include "content/test/mock_download_manager.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -24,6 +25,7 @@
 using content::BrowserThread;
 using content::BrowserThreadImpl;
 using content::DownloadId;
+using content::MockDownloadManager;
 
 using ::testing::_;
 using ::testing::AtLeast;
@@ -44,7 +46,8 @@ class MockDownloadFileFactory :
       DownloadCreateInfo* info,
       const DownloadRequestHandle& request_handle,
       content::DownloadManager* download_manager,
-      bool calculate_hash) OVERRIDE;
+      bool calculate_hash,
+      const net::BoundNetLog& bound_net_log) OVERRIDE;
 
   MockDownloadFile* GetExistingFile(const DownloadId& id);
 
@@ -56,13 +59,15 @@ content::DownloadFile* MockDownloadFileFactory::CreateFile(
     DownloadCreateInfo* info,
     const DownloadRequestHandle& request_handle,
     content::DownloadManager* download_manager,
-    bool calculate_hash) {
+    bool calculate_hash,
+    const net::BoundNetLog& bound_net_log) {
   DCHECK(files_.end() == files_.find(info->download_id));
   MockDownloadFile* created_file = new MockDownloadFile();
   files_[info->download_id] = created_file;
 
   ON_CALL(*created_file, GetDownloadManager())
       .WillByDefault(Return(download_manager));
+  EXPECT_CALL(*created_file, Initialize());
 
   return created_file;
 }
@@ -94,6 +99,18 @@ content::DownloadManager* MockDownloadRequestHandle::GetDownloadManager()
 
 class DownloadFileManagerTest : public testing::Test {
  public:
+  // State of renamed file. Used with RenameFile().
+  enum RenameFileState {
+    IN_PROGRESS,
+    COMPLETE
+  };
+
+  // Whether to overwrite the target filename in RenameFile().
+  enum RenameFileOverwrite {
+    OVERWRITE,
+    DONT_OVERWRITE
+  };
+
   static const char* kTestData1;
   static const char* kTestData2;
   static const char* kTestData3;
@@ -122,8 +139,7 @@ class DownloadFileManagerTest : public testing::Test {
     download_manager_ = new MockDownloadManager();
     request_handle_.reset(new MockDownloadRequestHandle(download_manager_));
     download_file_factory_ = new MockDownloadFileFactory;
-    download_file_manager_ =
-        new DownloadFileManager(NULL, download_file_factory_);
+    download_file_manager_ = new DownloadFileManager(download_file_factory_);
   }
 
   virtual void TearDown() {
@@ -167,7 +183,8 @@ class DownloadFileManagerTest : public testing::Test {
 
     // Set expectations and return values.
     EXPECT_CALL(*download_manager_, CreateDownloadItem(info, _))
-        .Times(1);
+        .Times(1)
+        .WillOnce(Return(net::BoundNetLog()));
     EXPECT_CALL(*download_manager_, GenerateFileHash())
         .Times(AtLeast(1))
         .WillRepeatedly(Return(false));
@@ -232,9 +249,14 @@ class DownloadFileManagerTest : public testing::Test {
         .WillOnce(Return(error_to_insert));
 
     if (error_to_insert != net::OK) {
+      EXPECT_CALL(*file, GetDownloadManager())
+          .Times(AtLeast(1));
       EXPECT_CALL(*file, BytesSoFar())
           .Times(AtLeast(1))
           .WillRepeatedly(Return(byte_count_[id]));
+      EXPECT_CALL(*file, GetHashState())
+          .Times(AtLeast(1));
+      EXPECT_CALL(*file, Cancel());
     }
 
     download_file_manager_->UpdateDownload(id, download_buffer_.get());
@@ -245,8 +267,8 @@ class DownloadFileManagerTest : public testing::Test {
               id.local(),
               byte_count_[id],
               "",
-              ConvertNetErrorToInterruptReason(error_to_insert,
-                                               DOWNLOAD_INTERRUPT_FROM_DISK)));
+              content::ConvertNetErrorToInterruptReason(
+                  error_to_insert, content::DOWNLOAD_INTERRUPT_FROM_DISK)));
 
       ProcessAllPendingMessages();
       ++error_count_[id];
@@ -257,18 +279,22 @@ class DownloadFileManagerTest : public testing::Test {
   }
 
   // Renames the download file.
-  // |id| is the download ID of the download file.
-  // |new_path| is the new file name.
-  // |error_to_insert| is the error to inject.  For no error, use net::OK.
-  // |is_complete| indicates whether the rename occurs after the download is
-  // complete.
-  // |replace| indicates whether to replace or uniquify the file.  Only used
-  // if |is_complete| true.
+  // |id|           is the download ID of the download file.
+  // |new_path|     is the new file path.
+  // |unique_path|  is the actual path that the download file will be
+  //                renamed to. If there is an existing file at
+  //                |new_path| and |replace| is false, then |new_path|
+  //                will be uniquified.
+  // |rename_error| is the error to inject.  For no error, use net::OK.
+  // |state|        whether we are renaming an in-progress download or a
+  //                completed download.
+  // |should_overwrite| indicates whether to replace or uniquify the file.
   void RenameFile(const DownloadId& id,
                   const FilePath& new_path,
-                  net::Error error_to_insert,
-                  bool is_complete,
-                  bool replace) {
+                  const FilePath& unique_path,
+                  net::Error rename_error,
+                  RenameFileState state,
+                  RenameFileOverwrite should_overwrite) {
     // Expected call sequence:
     //  RenameInProgressDownloadFile/RenameCompletingDownloadFile
     //    GetDownloadFile
@@ -291,52 +317,46 @@ class DownloadFileManagerTest : public testing::Test {
     MockDownloadFile* file = download_file_factory_->GetExistingFile(id);
     ASSERT_TRUE(file != NULL);
 
-    FilePath unique_path = new_path;
-    int uniquifier = 0;
-
-    if (is_complete && !replace) {
-      uniquifier = content::DownloadFile::GetUniquePathNumber(new_path);
-      if (uniquifier > 0)
-        content::DownloadFile::AppendNumberToPath(&unique_path, uniquifier);
+    if (state == COMPLETE || rename_error != net::OK) {
+      EXPECT_CALL(*file, GetDownloadManager())
+          .Times(AtLeast(1));
     }
 
     EXPECT_CALL(*file, Rename(unique_path))
         .Times(1)
-        .WillOnce(Return(error_to_insert));
+        .WillOnce(Return(rename_error));
 
-    if (error_to_insert != net::OK) {
-      EXPECT_CALL(*file, GetDownloadManager());
-
+    if (rename_error != net::OK) {
       EXPECT_CALL(*file, BytesSoFar())
           .Times(AtLeast(1))
           .WillRepeatedly(Return(byte_count_[id]));
+      EXPECT_CALL(*file, GetHashState())
+          .Times(AtLeast(1));
     }
 
-    if (!is_complete) {
+    if (state == IN_PROGRESS) {
       download_file_manager_->RenameInProgressDownloadFile(id, new_path);
-    } else {
-      download_file_manager_->RenameCompletingDownloadFile(id,
-                                                           new_path,
-                                                           replace);
+    } else {  // state == COMPLETE
+      download_file_manager_->RenameCompletingDownloadFile(
+          id, new_path, (should_overwrite == OVERWRITE));
     }
 
-    if (error_to_insert != net::OK) {
+    if (rename_error != net::OK) {
       EXPECT_CALL(*download_manager_,
-                      OnDownloadInterrupted(
-                          id.local(),
-                          byte_count_[id],
-                          "",
-                          ConvertNetErrorToInterruptReason(
-                             error_to_insert, DOWNLOAD_INTERRUPT_FROM_DISK)));
-
+                  OnDownloadInterrupted(
+                      id.local(),
+                      byte_count_[id],
+                      "",
+                      content::ConvertNetErrorToInterruptReason(
+                          rename_error,
+                          content::DOWNLOAD_INTERRUPT_FROM_DISK)));
       ProcessAllPendingMessages();
       ++error_count_[id];
-    } else if (is_complete) {
+    } else if (state == COMPLETE) {
       EXPECT_CALL(*download_manager_, OnDownloadRenamedToFinalName(
-          id.local(), unique_path, uniquifier));
+          id.local(), unique_path, _));
       ProcessAllPendingMessages();
     }
-
   }
 
   // Finish the download operation.
@@ -345,7 +365,7 @@ class DownloadFileManagerTest : public testing::Test {
   // DOWNLOAD_INTERRUPT_REASON_NONE.
   // |security_string| is the extra security information, if interrupted.
   void OnResponseCompleted(const DownloadId& id,
-                           InterruptReason reason,
+                           content::DownloadInterruptReason reason,
                            const std::string& security_string) {
     //  OnResponseCompleted
     //    GetDownloadFile
@@ -364,9 +384,12 @@ class DownloadFileManagerTest : public testing::Test {
     ASSERT_TRUE(file != NULL);
 
     EXPECT_CALL(*file, Finish());
-    if (reason == DOWNLOAD_INTERRUPT_REASON_NONE) {
+    EXPECT_CALL(*file, GetDownloadManager());
+    if (reason == content::DOWNLOAD_INTERRUPT_REASON_NONE) {
       EXPECT_CALL(*file, GetHash(_))
           .WillOnce(Return(false));
+    } else {
+      EXPECT_CALL(*file, GetHashState());
     }
     EXPECT_CALL(*file, BytesSoFar())
         .Times(AtLeast(1))
@@ -374,7 +397,7 @@ class DownloadFileManagerTest : public testing::Test {
 
     download_file_manager_->OnResponseCompleted(id, reason, security_string);
 
-    if (reason == DOWNLOAD_INTERRUPT_REASON_NONE) {
+    if (reason == content::DOWNLOAD_INTERRUPT_REASON_NONE) {
       EXPECT_CALL(*download_manager_,
                   OnResponseCompleted(id.local(), byte_count_[id], ""))
           .Times(1);
@@ -391,7 +414,7 @@ class DownloadFileManagerTest : public testing::Test {
 
     ProcessAllPendingMessages();
 
-    if (reason != DOWNLOAD_INTERRUPT_REASON_NONE)
+    if (reason != content::DOWNLOAD_INTERRUPT_REASON_NONE)
       ++error_count_[id];
 
     ClearExpectations(id);
@@ -494,7 +517,7 @@ TEST_F(DownloadFileManagerTest, CompleteDownload) {
   UpdateDownload(dummy_id, kTestData2, strlen(kTestData2), net::OK);
   UpdateDownload(dummy_id, kTestData3, strlen(kTestData3), net::OK);
 
-  OnResponseCompleted(dummy_id, DOWNLOAD_INTERRUPT_REASON_NONE, "");
+  OnResponseCompleted(dummy_id, content::DOWNLOAD_INTERRUPT_REASON_NONE, "");
 
   CleanUp(dummy_id);
 }
@@ -511,7 +534,7 @@ TEST_F(DownloadFileManagerTest, CompleteDownloadWithError) {
   UpdateDownload(dummy_id, kTestData3, strlen(kTestData3), net::OK);
 
   OnResponseCompleted(dummy_id,
-                      DOWNLOAD_INTERRUPT_REASON_FILE_VIRUS_INFECTED,
+                      content::DOWNLOAD_INTERRUPT_REASON_FILE_VIRUS_INFECTED,
                       "");
 
   CleanUp(dummy_id);
@@ -521,16 +544,18 @@ TEST_F(DownloadFileManagerTest, RenameInProgress) {
   // Same as StartDownload, at first.
   DownloadCreateInfo* info = new DownloadCreateInfo;
   DownloadId dummy_id(download_manager_.get(), kDummyDownloadId);
+  ScopedTempDir download_dir;
+  ASSERT_TRUE(download_dir.CreateUniqueTempDir());
 
   StartDownload(info, dummy_id);
 
   UpdateDownload(dummy_id, kTestData1, strlen(kTestData1), net::OK);
   UpdateDownload(dummy_id, kTestData2, strlen(kTestData2), net::OK);
-  FilePath foo(FILE_PATH_LITERAL("foo.txt"));
-  RenameFile(dummy_id, foo, net::OK, false, false);
+  FilePath foo(download_dir.path().Append(FILE_PATH_LITERAL("foo.txt")));
+  RenameFile(dummy_id, foo, foo, net::OK, IN_PROGRESS, OVERWRITE);
   UpdateDownload(dummy_id, kTestData3, strlen(kTestData3), net::OK);
 
-  OnResponseCompleted(dummy_id, DOWNLOAD_INTERRUPT_REASON_NONE, "");
+  OnResponseCompleted(dummy_id, content::DOWNLOAD_INTERRUPT_REASON_NONE, "");
 
   CleanUp(dummy_id);
 }
@@ -539,13 +564,16 @@ TEST_F(DownloadFileManagerTest, RenameInProgressWithError) {
   // Same as StartDownload, at first.
   DownloadCreateInfo* info = new DownloadCreateInfo;
   DownloadId dummy_id(download_manager_.get(), kDummyDownloadId);
+  ScopedTempDir download_dir;
+  ASSERT_TRUE(download_dir.CreateUniqueTempDir());
 
   StartDownload(info, dummy_id);
 
   UpdateDownload(dummy_id, kTestData1, strlen(kTestData1), net::OK);
   UpdateDownload(dummy_id, kTestData2, strlen(kTestData2), net::OK);
-  FilePath foo(FILE_PATH_LITERAL("foo.txt"));
-  RenameFile(dummy_id, foo, net::ERR_FILE_PATH_TOO_LONG, false, false);
+  FilePath foo(download_dir.path().Append(FILE_PATH_LITERAL("foo.txt")));
+  RenameFile(dummy_id, foo, foo, net::ERR_FILE_PATH_TOO_LONG,
+             IN_PROGRESS, OVERWRITE);
 
   CleanUp(dummy_id);
 }
@@ -554,6 +582,8 @@ TEST_F(DownloadFileManagerTest, RenameCompleting) {
   // Same as StartDownload, at first.
   DownloadCreateInfo* info = new DownloadCreateInfo;
   DownloadId dummy_id(download_manager_.get(), kDummyDownloadId);
+  ScopedTempDir download_dir;
+  ASSERT_TRUE(download_dir.CreateUniqueTempDir());
 
   StartDownload(info, dummy_id);
 
@@ -561,10 +591,36 @@ TEST_F(DownloadFileManagerTest, RenameCompleting) {
   UpdateDownload(dummy_id, kTestData2, strlen(kTestData2), net::OK);
   UpdateDownload(dummy_id, kTestData3, strlen(kTestData3), net::OK);
 
-  OnResponseCompleted(dummy_id, DOWNLOAD_INTERRUPT_REASON_NONE, "");
+  OnResponseCompleted(dummy_id, content::DOWNLOAD_INTERRUPT_REASON_NONE, "");
 
-  FilePath foo(FILE_PATH_LITERAL("foo.txt"));
-  RenameFile(dummy_id, foo, net::OK, false, false);
+  FilePath foo(download_dir.path().Append(FILE_PATH_LITERAL("foo.txt")));
+  RenameFile(dummy_id, foo, foo, net::OK, COMPLETE, OVERWRITE);
+
+  CleanUp(dummy_id);
+}
+
+TEST_F(DownloadFileManagerTest, RenameCompletingWithUniquification) {
+  // Same as StartDownload, at first.
+  DownloadCreateInfo* info = new DownloadCreateInfo;
+  DownloadId dummy_id(download_manager_.get(), kDummyDownloadId);
+  ScopedTempDir download_dir;
+  ASSERT_TRUE(download_dir.CreateUniqueTempDir());
+
+  StartDownload(info, dummy_id);
+
+  UpdateDownload(dummy_id, kTestData1, strlen(kTestData1), net::OK);
+  UpdateDownload(dummy_id, kTestData2, strlen(kTestData2), net::OK);
+  UpdateDownload(dummy_id, kTestData3, strlen(kTestData3), net::OK);
+
+  OnResponseCompleted(dummy_id, content::DOWNLOAD_INTERRUPT_REASON_NONE, "");
+
+  FilePath foo(download_dir.path().Append(FILE_PATH_LITERAL("foo.txt")));
+  FilePath unique_foo(foo.InsertBeforeExtension(FILE_PATH_LITERAL(" (1)")));
+  // Create a file at |foo|. Since we are specifying DONT_OVERWRITE,
+  // RenameCompletingDownloadFile() should pick "foo (1).txt" instead of
+  // overwriting this file.
+  ASSERT_EQ(0, file_util::WriteFile(foo, "", 0));
+  RenameFile(dummy_id, foo, unique_foo, net::OK, COMPLETE, DONT_OVERWRITE);
 
   CleanUp(dummy_id);
 }
@@ -573,6 +629,8 @@ TEST_F(DownloadFileManagerTest, RenameCompletingWithError) {
   // Same as StartDownload, at first.
   DownloadCreateInfo* info = new DownloadCreateInfo;
   DownloadId dummy_id(download_manager_.get(), kDummyDownloadId);
+  ScopedTempDir download_dir;
+  ASSERT_TRUE(download_dir.CreateUniqueTempDir());
 
   StartDownload(info, dummy_id);
 
@@ -580,10 +638,11 @@ TEST_F(DownloadFileManagerTest, RenameCompletingWithError) {
   UpdateDownload(dummy_id, kTestData2, strlen(kTestData2), net::OK);
   UpdateDownload(dummy_id, kTestData3, strlen(kTestData3), net::OK);
 
-  OnResponseCompleted(dummy_id, DOWNLOAD_INTERRUPT_REASON_NONE, "");
+  OnResponseCompleted(dummy_id, content::DOWNLOAD_INTERRUPT_REASON_NONE, "");
 
-  FilePath foo(FILE_PATH_LITERAL("foo.txt"));
-  RenameFile(dummy_id, foo, net::ERR_FILE_PATH_TOO_LONG, false, false);
+  FilePath foo(download_dir.path().Append(FILE_PATH_LITERAL("foo.txt")));
+  RenameFile(dummy_id, foo, foo, net::ERR_FILE_PATH_TOO_LONG,
+             COMPLETE, OVERWRITE);
 
   CleanUp(dummy_id);
 }
@@ -592,19 +651,22 @@ TEST_F(DownloadFileManagerTest, RenameTwice) {
   // Same as StartDownload, at first.
   DownloadCreateInfo* info = new DownloadCreateInfo;
   DownloadId dummy_id(download_manager_.get(), kDummyDownloadId);
+  ScopedTempDir download_dir;
+  ASSERT_TRUE(download_dir.CreateUniqueTempDir());
 
   StartDownload(info, dummy_id);
 
   UpdateDownload(dummy_id, kTestData1, strlen(kTestData1), net::OK);
   UpdateDownload(dummy_id, kTestData2, strlen(kTestData2), net::OK);
-  FilePath crfoo(FILE_PATH_LITERAL("foo.txt.crdownload"));
-  RenameFile(dummy_id, crfoo, net::OK, false, false);
+  FilePath crfoo(download_dir.path().Append(
+      FILE_PATH_LITERAL("foo.txt.crdownload")));
+  RenameFile(dummy_id, crfoo, crfoo, net::OK, IN_PROGRESS, OVERWRITE);
   UpdateDownload(dummy_id, kTestData3, strlen(kTestData3), net::OK);
 
-  OnResponseCompleted(dummy_id, DOWNLOAD_INTERRUPT_REASON_NONE, "");
+  OnResponseCompleted(dummy_id, content::DOWNLOAD_INTERRUPT_REASON_NONE, "");
 
-  FilePath foo(FILE_PATH_LITERAL("foo.txt"));
-  RenameFile(dummy_id, foo, net::OK, false, false);
+  FilePath foo(download_dir.path().Append(FILE_PATH_LITERAL("foo.txt")));
+  RenameFile(dummy_id, foo, foo, net::OK, COMPLETE, OVERWRITE);
 
   CleanUp(dummy_id);
 }
@@ -615,6 +677,8 @@ TEST_F(DownloadFileManagerTest, TwoDownloads) {
   DownloadCreateInfo* info2 = new DownloadCreateInfo;
   DownloadId dummy_id(download_manager_.get(), kDummyDownloadId);
   DownloadId dummy_id2(download_manager_.get(), kDummyDownloadId2);
+  ScopedTempDir download_dir;
+  ASSERT_TRUE(download_dir.CreateUniqueTempDir());
 
   StartDownload(info, dummy_id);
 
@@ -625,28 +689,30 @@ TEST_F(DownloadFileManagerTest, TwoDownloads) {
   UpdateDownload(dummy_id, kTestData2, strlen(kTestData2), net::OK);
 
   UpdateDownload(dummy_id2, kTestData4, strlen(kTestData4), net::OK);
-  FilePath crbar(FILE_PATH_LITERAL("bar.txt.crdownload"));
-  RenameFile(dummy_id2, crbar, net::OK, false, false);
+  FilePath crbar(download_dir.path().Append(
+      FILE_PATH_LITERAL("bar.txt.crdownload")));
+  RenameFile(dummy_id2, crbar, crbar, net::OK, IN_PROGRESS, OVERWRITE);
 
-  FilePath crfoo(FILE_PATH_LITERAL("foo.txt.crdownload"));
-  RenameFile(dummy_id, crfoo, net::OK, false, false);
+  FilePath crfoo(download_dir.path().Append(
+      FILE_PATH_LITERAL("foo.txt.crdownload")));
+  RenameFile(dummy_id, crfoo, crfoo, net::OK, IN_PROGRESS, OVERWRITE);
 
   UpdateDownload(dummy_id, kTestData3, strlen(kTestData3), net::OK);
 
   UpdateDownload(dummy_id2, kTestData5, strlen(kTestData5), net::OK);
   UpdateDownload(dummy_id2, kTestData6, strlen(kTestData6), net::OK);
 
-  OnResponseCompleted(dummy_id2, DOWNLOAD_INTERRUPT_REASON_NONE, "");
+  OnResponseCompleted(dummy_id2, content::DOWNLOAD_INTERRUPT_REASON_NONE, "");
 
-  OnResponseCompleted(dummy_id, DOWNLOAD_INTERRUPT_REASON_NONE, "");
+  OnResponseCompleted(dummy_id, content::DOWNLOAD_INTERRUPT_REASON_NONE, "");
 
-  FilePath bar(FILE_PATH_LITERAL("bar.txt"));
-  RenameFile(dummy_id2, bar, net::OK, false, false);
+  FilePath bar(download_dir.path().Append(FILE_PATH_LITERAL("bar.txt")));
+  RenameFile(dummy_id2, bar, bar, net::OK, COMPLETE, OVERWRITE);
 
   CleanUp(dummy_id2);
 
-  FilePath foo(FILE_PATH_LITERAL("foo.txt"));
-  RenameFile(dummy_id, foo, net::OK, false, false);
+  FilePath foo(download_dir.path().Append(FILE_PATH_LITERAL("foo.txt")));
+  RenameFile(dummy_id, foo, foo, net::OK, COMPLETE, OVERWRITE);
 
   CleanUp(dummy_id);
 }

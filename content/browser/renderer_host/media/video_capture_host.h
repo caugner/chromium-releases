@@ -45,6 +45,8 @@
 #include "content/public/browser/browser_message_filter.h"
 #include "ipc/ipc_message.h"
 
+class AudioManager;
+
 namespace content {
 class ResourceContext;
 }  // namespace content
@@ -53,7 +55,8 @@ class CONTENT_EXPORT VideoCaptureHost
     : public content::BrowserMessageFilter,
       public VideoCaptureControllerEventHandler {
  public:
-  explicit VideoCaptureHost(const content::ResourceContext* resource_context);
+  explicit VideoCaptureHost(content::ResourceContext* resource_context,
+                            AudioManager* audio_manager);
 
   // content::BrowserMessageFilter implementation.
   virtual void OnChannelClosing() OVERRIDE;
@@ -141,7 +144,8 @@ class CONTENT_EXPORT VideoCaptureHost
   EntryMap entries_;
 
   // Used to get a pointer to VideoCaptureManager to start/stop capture devices.
-  const content::ResourceContext* resource_context_;
+  content::ResourceContext* resource_context_;
+  AudioManager* audio_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(VideoCaptureHost);
 };

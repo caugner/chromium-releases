@@ -27,7 +27,8 @@ class SettingsStorage;
 
 // The component of extension settings which runs on the UI thread, as opposed
 // to SettingsBackend which lives on the FILE thread.
-// All public methods must be called on the UI thread.
+// All public methods, must be called on the UI thread, with the exception of
+// GetBackendForSync(), which must be called on the FILE thread.
 class SettingsFrontend {
  public:
   // Creates with the default factory. Ownership of |profile| not taken.
@@ -45,10 +46,9 @@ class SettingsFrontend {
   typedef base::Callback<void(SyncableService*)> SyncableServiceCallback;
   typedef base::Callback<void(SettingsStorage*)> StorageCallback;
 
-  // Runs |callback| on the FILE thread with the SyncableService for
-  // |model_type|, either EXTENSION_SETTINGS or APP_SETTINGS.
-  void RunWithSyncableService(
-      syncable::ModelType model_type, const SyncableServiceCallback& callback);
+  // Must only be called from the FILE thread. |type| should be either
+  // APP_SETTINGS or EXTENSION_SETTINGS.
+  SyncableService* GetBackendForSync(syncable::ModelType type) const;
 
   // Runs |callback| on the FILE thread with the storage area for
   // |extension_id|.  If there is no extension with that ID, the storage area
@@ -71,7 +71,7 @@ class SettingsFrontend {
       Profile* profile);
 
   // The quota limit configurations for the local and sync areas, taken out of
-  // the schema in chrome/common/extensions/api/experimental.storage.json.
+  // the schema in chrome/common/extensions/api/storage.json.
   const SettingsStorageQuotaEnforcer::Limits local_quota_limit_;
   const SettingsStorageQuotaEnforcer::Limits sync_quota_limit_;
 
@@ -87,8 +87,7 @@ class SettingsFrontend {
   // Ref-counted container for each SettingsBackend object.  There are 4: an
   // apps and an extensions Backend for the LOCAL namespace, and likewise for
   // the SYNC namespace.  They only differ in what directory the database for
-  // each exists in (and the Backends in the SYNC namespace happen to be
-  // returned from RunWithSyncableService).
+  // each exists in.
   class BackendWrapper;
   struct BackendWrappers {
     BackendWrappers();

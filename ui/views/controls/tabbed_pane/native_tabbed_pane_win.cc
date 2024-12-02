@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,7 @@
 #include "ui/base/l10n/l10n_util_win.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/win/hwnd_util.h"
-#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/canvas.h"
 #include "ui/gfx/font.h"
 #include "ui/gfx/native_theme_win.h"
 #include "ui/views/controls/tabbed_pane/tabbed_pane.h"
@@ -41,7 +41,7 @@ class TabBackground : public Background {
     gfx::Rect r(0, 0, view->width(), view->height());
     gfx::NativeTheme::ExtraParams extra;
     gfx::NativeTheme::instance()->Paint(
-        canvas->GetSkCanvas(), gfx::NativeTheme::kTabPanelBackground,
+        canvas->sk_canvas(), gfx::NativeTheme::kTabPanelBackground,
         gfx::NativeTheme::kNormal, r, extra);
   }
 

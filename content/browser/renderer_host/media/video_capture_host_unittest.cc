@@ -13,15 +13,14 @@
 #include "base/stl_util.h"
 #include "base/stringprintf.h"
 #include "content/browser/browser_thread_impl.h"
-#include "content/browser/mock_resource_context.h"
 #include "content/browser/renderer_host/media/media_stream_manager.h"
 #include "content/browser/renderer_host/media/video_capture_host.h"
 #include "content/browser/renderer_host/media/video_capture_manager.h"
-#include "content/browser/resource_context.h"
 #include "content/common/media/video_capture_messages.h"
+#include "content/test/mock_resource_context.h"
 #include "media/audio/audio_manager.h"
 #include "media/video/capture/video_capture_types.h"
-
+#include "net/url_request/url_request_context.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -33,7 +32,6 @@ using ::testing::InSequence;
 using ::testing::Mock;
 using ::testing::Return;
 using content::BrowserThread;
-
 using content::BrowserThreadImpl;
 
 // Id used to identify the capture session between renderer and
@@ -73,8 +71,9 @@ class DumpVideo {
 
 class MockVideoCaptureHost : public VideoCaptureHost {
  public:
-  explicit MockVideoCaptureHost(content::ResourceContext* resource_context)
-      : VideoCaptureHost(resource_context),
+  MockVideoCaptureHost(content::ResourceContext* resource_context,
+                       AudioManager* audio_manager)
+      : VideoCaptureHost(resource_context, audio_manager),
         return_buffers_(false),
         dump_video_(false) {}
   virtual ~MockVideoCaptureHost() {
@@ -206,21 +205,14 @@ class VideoCaptureHostTest : public testing::Test {
     io_thread_.reset(new BrowserThreadImpl(BrowserThread::IO,
                                            message_loop_.get()));
 
-    audio_manager_ = AudioManager::Create();
-
-    // Create a MediaStreamManager instance and hand over pointer to
-    // ResourceContext.
-    media_stream_manager_.reset(new media_stream::MediaStreamManager(
-        audio_manager_));
+    audio_manager_.reset(AudioManager::Create());
 
 #ifndef TEST_REAL_CAPTURE_DEVICE
-    media_stream_manager_->UseFakeDevice();
+    media_stream::MediaStreamManager::GetForResourceContext(
+        &resource_context_, audio_manager_.get())->UseFakeDevice();
 #endif
 
-    content::MockResourceContext::GetInstance()->set_media_stream_manager(
-        media_stream_manager_.get());
-    host_ = new MockVideoCaptureHost(
-        content::MockResourceContext::GetInstance());
+    host_ = new MockVideoCaptureHost(&resource_context_, audio_manager_.get());
 
     // Simulate IPC channel connected.
     host_->OnChannelConnected(base::GetCurrentProcId());
@@ -244,8 +236,6 @@ class VideoCaptureHostTest : public testing::Test {
 
     // We need to continue running message_loop_ to complete all destructions.
     SyncWithVideoCaptureManagerThread();
-
-    content::MockResourceContext::GetInstance()->set_media_stream_manager(NULL);
   }
 
   // Called on the VideoCaptureManager thread.
@@ -255,11 +245,13 @@ class VideoCaptureHostTest : public testing::Test {
 
   // Called on the main thread.
   static void PostQuitOnVideoCaptureManagerThread(
-      MessageLoop* message_loop, content::ResourceContext* resource_context) {
-    resource_context->media_stream_manager()->video_capture_manager()->
-        GetMessageLoop()->PostTask(FROM_HERE,
-                                   base::Bind(&PostQuitMessageLoop,
-                                              message_loop));
+      MessageLoop* message_loop, content::ResourceContext* resource_context,
+      AudioManager* audio_manager) {
+    media_stream::MediaStreamManager* manager =
+        media_stream::MediaStreamManager::GetForResourceContext(
+            resource_context, audio_manager);
+    manager->video_capture_manager()->GetMessageLoop()->PostTask(
+        FROM_HERE, base::Bind(&PostQuitMessageLoop, message_loop));
   }
 
   // SyncWithVideoCaptureManagerThread() waits until all pending tasks on the
@@ -270,9 +262,8 @@ class VideoCaptureHostTest : public testing::Test {
   void SyncWithVideoCaptureManagerThread() {
     message_loop_->PostTask(
         FROM_HERE,
-        base::Bind(&PostQuitOnVideoCaptureManagerThread,
-                   message_loop_.get(),
-                   content::MockResourceContext::GetInstance()));
+        base::Bind(&PostQuitOnVideoCaptureManagerThread, message_loop_.get(),
+                   &resource_context_, audio_manager_.get()));
     message_loop_->Run();
   }
 
@@ -371,8 +362,8 @@ class VideoCaptureHostTest : public testing::Test {
   scoped_ptr<MessageLoop> message_loop_;
   scoped_ptr<BrowserThreadImpl> ui_thread_;
   scoped_ptr<BrowserThreadImpl> io_thread_;
-  scoped_ptr<media_stream::MediaStreamManager> media_stream_manager_;
-  scoped_refptr<AudioManager> audio_manager_;
+  scoped_ptr<AudioManager> audio_manager_;
+  content::MockResourceContext resource_context_;
 
   DISALLOW_COPY_AND_ASSIGN(VideoCaptureHostTest);
 };

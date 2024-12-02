@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/notification_types.h"
@@ -17,6 +17,7 @@
 #include "net/base/net_util.h"
 #include "net/test/test_server.h"
 
+using content::RenderViewHostImpl;
 using content::WebContents;
 
 class RenderViewHostTest : public InProcessBrowserTest {
@@ -31,8 +32,8 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostTest,
   GURL empty_url(test_server()->GetURL("files/empty.html"));
   ui_test_utils::NavigateToURL(browser(), empty_url);
 
-  RenderViewHost* rvh =
-      browser()->GetSelectedWebContents()->GetRenderViewHost();
+  RenderViewHostImpl* rvh = static_cast<RenderViewHostImpl*>(
+      browser()->GetSelectedWebContents()->GetRenderViewHost());
 
   {
     Value* value = rvh->ExecuteJavascriptAndGetValue(string16(),

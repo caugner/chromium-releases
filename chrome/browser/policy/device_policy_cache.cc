@@ -18,8 +18,10 @@
 #include "chrome/browser/chromeos/cros_settings.h"
 #include "chrome/browser/chromeos/dbus/dbus_thread_manager.h"
 #include "chrome/browser/chromeos/dbus/update_engine_client.h"
+#include "chrome/browser/chromeos/login/authenticator.h"
 #include "chrome/browser/chromeos/login/ownership_service.h"
 #include "chrome/browser/chromeos/login/signed_settings_helper.h"
+#include "chrome/browser/policy/app_pack_updater.h"
 #include "chrome/browser/policy/cloud_policy_data_store.h"
 #include "chrome/browser/policy/enterprise_install_attributes.h"
 #include "chrome/browser/policy/enterprise_metrics.h"
@@ -27,6 +29,8 @@
 #include "chrome/browser/policy/proto/device_management_backend.pb.h"
 #include "chrome/browser/policy/proto/device_management_local.pb.h"
 #include "policy/policy_constants.h"
+
+using google::protobuf::RepeatedPtrField;
 
 namespace em = enterprise_management;
 
@@ -140,7 +144,7 @@ void DevicePolicyCache::Load() {
                  weak_ptr_factory_.GetWeakPtr()));
 }
 
-void DevicePolicyCache::SetPolicy(const em::PolicyFetchResponse& policy) {
+bool DevicePolicyCache::SetPolicy(const em::PolicyFetchResponse& policy) {
   DCHECK(IsReady());
 
   // Make sure we have an enterprise device.
@@ -152,7 +156,7 @@ void DevicePolicyCache::SetPolicy(const em::PolicyFetchResponse& policy) {
                               kMetricPolicySize);
     InformNotifier(CloudPolicySubsystem::LOCAL_ERROR,
                    CloudPolicySubsystem::POLICY_LOCAL_ERROR);
-    return;
+    return false;
   }
 
   // Check the user this policy is for against the device-locked name.
@@ -163,17 +167,20 @@ void DevicePolicyCache::SetPolicy(const em::PolicyFetchResponse& policy) {
                               kMetricPolicySize);
     InformNotifier(CloudPolicySubsystem::LOCAL_ERROR,
                    CloudPolicySubsystem::POLICY_LOCAL_ERROR);
-    return;
+    return false;
   }
 
-  if (registration_user != policy_data.username()) {
+  // Existing installations may not have a canonicalized version of the
+  // registration user name in install attributes, so re-canonicalize here.
+  if (chromeos::Authenticator::Canonicalize(registration_user) !=
+      chromeos::Authenticator::Canonicalize(policy_data.username())) {
     LOG(WARNING) << "Refusing policy blob for " << policy_data.username()
                  << " which doesn't match " << registration_user;
     UMA_HISTOGRAM_ENUMERATION(kMetricPolicy, kMetricPolicyFetchUserMismatch,
                               kMetricPolicySize);
     InformNotifier(CloudPolicySubsystem::LOCAL_ERROR,
                    CloudPolicySubsystem::POLICY_LOCAL_ERROR);
-    return;
+    return false;
   }
 
   set_last_policy_refresh_time(base::Time::NowFromSystemTime());
@@ -183,6 +190,7 @@ void DevicePolicyCache::SetPolicy(const em::PolicyFetchResponse& policy) {
       base::Bind(&DevicePolicyCache::PolicyStoreOpCompleted,
                  weak_ptr_factory_.GetWeakPtr());
   new StorePolicyOperation(signed_settings_helper_, policy, callback);
+  return true;
 }
 
 void DevicePolicyCache::SetUnmanaged() {
@@ -197,10 +205,7 @@ void DevicePolicyCache::OnRetrievePolicyCompleted(
   if (!IsReady()) {
     std::string device_token;
     InstallInitialPolicy(code, policy, &device_token);
-    // We need to call SetDeviceToken unconditionally to indicate the cache has
-    // finished loading.
-    data_store_->SetDeviceToken(device_token, true);
-    SetReady();
+    SetTokenAndFlagReady(device_token);
   } else {  // In other words, IsReady() == true
     if (code != chromeos::SignedSettings::SUCCESS) {
       if (code == chromeos::SignedSettings::BAD_SIGNATURE) {
@@ -308,24 +313,151 @@ void DevicePolicyCache::InstallInitialPolicy(
     set_last_policy_refresh_time(timestamp);
 }
 
+void DevicePolicyCache::SetTokenAndFlagReady(const std::string& device_token) {
+  // Wait for device settings to become available.
+  if (!chromeos::CrosSettings::Get()->PrepareTrustedValues(
+          base::Bind(&DevicePolicyCache::SetTokenAndFlagReady,
+                     weak_ptr_factory_.GetWeakPtr(),
+                     device_token))) {
+    return;
+  }
+
+  // We need to call SetDeviceToken unconditionally to indicate the cache has
+  // finished loading.
+  data_store_->SetDeviceToken(device_token, true);
+  SetReady();
+}
+
 // static
-void DevicePolicyCache::DecodeDevicePolicy(
+void DevicePolicyCache::DecodeLoginPolicies(
     const em::ChromeDeviceSettingsProto& policy,
     PolicyMap* policies) {
-  if (policy.has_device_policy_refresh_rate()) {
-    const em::DevicePolicyRefreshRateProto container =
-        policy.device_policy_refresh_rate();
-    if (container.has_device_policy_refresh_rate()) {
-      policies->Set(key::kDevicePolicyRefreshRate,
+  if (policy.has_guest_mode_enabled()) {
+    const em::GuestModeEnabledProto& container(policy.guest_mode_enabled());
+    if (container.has_guest_mode_enabled()) {
+      policies->Set(key::kDeviceGuestModeEnabled,
                     POLICY_LEVEL_MANDATORY,
                     POLICY_SCOPE_MACHINE,
-                    DecodeIntegerValue(container.device_policy_refresh_rate()));
+                    Value::CreateBooleanValue(container.guest_mode_enabled()));
     }
   }
 
+  if (policy.has_show_user_names()) {
+    const em::ShowUserNamesOnSigninProto& container(policy.show_user_names());
+    if (container.has_show_user_names()) {
+      policies->Set(key::kDeviceShowUserNamesOnSignin,
+                    POLICY_LEVEL_MANDATORY,
+                    POLICY_SCOPE_MACHINE,
+                    Value::CreateBooleanValue(container.show_user_names()));
+    }
+  }
+
+  if (policy.has_allow_new_users()) {
+    const em::AllowNewUsersProto& container(policy.allow_new_users());
+    if (container.has_allow_new_users()) {
+      policies->Set(key::kDeviceAllowNewUsers,
+                    POLICY_LEVEL_MANDATORY,
+                    POLICY_SCOPE_MACHINE,
+                    Value::CreateBooleanValue(container.allow_new_users()));
+    }
+  }
+
+  if (policy.has_user_whitelist()) {
+    const em::UserWhitelistProto& container(policy.user_whitelist());
+    if (container.user_whitelist_size()) {
+      ListValue* whitelist = new ListValue();
+      RepeatedPtrField<std::string>::const_iterator entry;
+      for (entry = container.user_whitelist().begin();
+           entry != container.user_whitelist().end();
+           ++entry) {
+        whitelist->Append(Value::CreateStringValue(*entry));
+      }
+      policies->Set(key::kDeviceUserWhitelist,
+                    POLICY_LEVEL_MANDATORY,
+                    POLICY_SCOPE_MACHINE,
+                    whitelist);
+    }
+  }
+
+  if (policy.has_ephemeral_users_enabled()) {
+    const em::EphemeralUsersEnabledProto& container(
+        policy.ephemeral_users_enabled());
+    if (container.has_ephemeral_users_enabled()) {
+      policies->Set(key::kDeviceEphemeralUsersEnabled,
+                    POLICY_LEVEL_MANDATORY,
+                    POLICY_SCOPE_MACHINE,
+                    Value::CreateBooleanValue(
+                        container.ephemeral_users_enabled()));
+    }
+  }
+}
+
+// static
+void DevicePolicyCache::DecodeKioskPolicies(
+    const em::ChromeDeviceSettingsProto& policy,
+    PolicyMap* policies) {
+  if (policy.has_forced_logout_timeouts()) {
+    const em::ForcedLogoutTimeoutsProto& container(
+        policy.forced_logout_timeouts());
+    if (container.has_idle_logout_timeout()) {
+      policies->Set(key::kDeviceIdleLogoutTimeout,
+                    POLICY_LEVEL_MANDATORY,
+                    POLICY_SCOPE_MACHINE,
+                    DecodeIntegerValue(container.idle_logout_timeout()));
+    }
+    if (container.has_idle_logout_warning_duration()) {
+      policies->Set(key::kDeviceIdleLogoutWarningDuration,
+                    POLICY_LEVEL_MANDATORY,
+                    POLICY_SCOPE_MACHINE,
+                    DecodeIntegerValue(
+                        container.idle_logout_warning_duration()));
+    }
+  }
+
+  if (policy.has_login_screen_saver()) {
+    const em::ScreenSaverProto& container(
+        policy.login_screen_saver());
+    if (container.has_screen_saver_extension_id()) {
+      policies->Set(key::kDeviceLoginScreenSaverId,
+                    POLICY_LEVEL_MANDATORY,
+                    POLICY_SCOPE_MACHINE,
+                    Value::CreateStringValue(
+                        container.screen_saver_extension_id()));
+    }
+    if (container.has_screen_saver_timeout()) {
+      policies->Set(key::kDeviceLoginScreenSaverTimeout,
+                    POLICY_LEVEL_MANDATORY,
+                    POLICY_SCOPE_MACHINE,
+                    DecodeIntegerValue(container.screen_saver_timeout()));
+    }
+  }
+
+  if (policy.has_app_pack()) {
+    const em::AppPackProto& container(policy.app_pack());
+    base::ListValue* app_pack_list = new base::ListValue();
+    for (int i = 0; i < container.app_pack_size(); ++i) {
+      const em::AppPackEntryProto& entry(container.app_pack(i));
+      if (entry.has_extension_id() && entry.has_update_url()) {
+        base::DictionaryValue* dict = new base::DictionaryValue();
+        dict->SetString(AppPackUpdater::kExtensionId, entry.extension_id());
+        dict->SetString(AppPackUpdater::kUpdateUrl, entry.update_url());
+        app_pack_list->Append(dict);
+      }
+    }
+    policies->Set(key::kDeviceAppPack,
+                  POLICY_LEVEL_MANDATORY,
+                  POLICY_SCOPE_MACHINE,
+                  app_pack_list);
+  }
+}
+
+// static
+void DevicePolicyCache::DecodeNetworkPolicies(
+    const em::ChromeDeviceSettingsProto& policy,
+    PolicyMap* policies) {
   if (policy.has_device_proxy_settings()) {
-    const em::DeviceProxySettingsProto container =
-        policy.device_proxy_settings();
+    const em::DeviceProxySettingsProto& container(
+        policy.device_proxy_settings());
     scoped_ptr<DictionaryValue> proxy_settings(new DictionaryValue);
     if (container.has_proxy_mode())
       proxy_settings->SetString(key::kProxyMode, container.proxy_mode());
@@ -345,18 +477,15 @@ void DevicePolicyCache::DecodeDevicePolicy(
     }
   }
 
-  if (policy.has_release_channel() &&
-      policy.release_channel().has_release_channel()) {
-    std::string channel(policy.release_channel().release_channel());
-    policies->Set(key::kChromeOsReleaseChannel,
-                  POLICY_LEVEL_MANDATORY,
-                  POLICY_SCOPE_MACHINE,
-                  Value::CreateStringValue(channel));
-    // TODO(dubroy): Once http://crosbug.com/17015 is implemented, we won't
-    // have to pass the channel in here, only ping the update engine to tell
-    // it to fetch the channel from the policy.
-    chromeos::DBusThreadManager::Get()->GetUpdateEngineClient()
-        ->SetReleaseTrack(channel);
+  if (policy.has_data_roaming_enabled()) {
+    const em::DataRoamingEnabledProto& container(policy.data_roaming_enabled());
+    if (container.has_data_roaming_enabled()) {
+      policies->Set(key::kDeviceDataRoamingEnabled,
+                    POLICY_LEVEL_MANDATORY,
+                    POLICY_SCOPE_MACHINE,
+                    Value::CreateBooleanValue(
+                        container.data_roaming_enabled()));
+    }
   }
 
   if (policy.has_open_network_configuration() &&
@@ -368,6 +497,122 @@ void DevicePolicyCache::DecodeDevicePolicy(
                   POLICY_SCOPE_MACHINE,
                   Value::CreateStringValue(config));
   }
+}
+
+// static
+void DevicePolicyCache::DecodeReportingPolicies(
+    const em::ChromeDeviceSettingsProto& policy,
+    PolicyMap* policies) {
+  if (policy.has_device_reporting()) {
+    const em::DeviceReportingProto& container(policy.device_reporting());
+    if (container.has_report_version_info()) {
+      policies->Set(key::kReportDeviceVersionInfo,
+                    POLICY_LEVEL_MANDATORY,
+                    POLICY_SCOPE_MACHINE,
+                    Value::CreateBooleanValue(container.report_version_info()));
+    }
+    if (container.has_report_activity_times()) {
+      policies->Set(key::kReportDeviceActivityTimes,
+                    POLICY_LEVEL_MANDATORY,
+                    POLICY_SCOPE_MACHINE,
+                    Value::CreateBooleanValue(
+                        container.report_activity_times()));
+    }
+    if (container.has_report_boot_mode()) {
+      policies->Set(key::kReportDeviceBootMode,
+                    POLICY_LEVEL_MANDATORY,
+                    POLICY_SCOPE_MACHINE,
+                    Value::CreateBooleanValue(container.report_boot_mode()));
+    }
+  }
+}
+
+// static
+void DevicePolicyCache::DecodeGenericPolicies(
+    const em::ChromeDeviceSettingsProto& policy,
+    PolicyMap* policies) {
+  if (policy.has_device_policy_refresh_rate()) {
+    const em::DevicePolicyRefreshRateProto& container(
+        policy.device_policy_refresh_rate());
+    if (container.has_device_policy_refresh_rate()) {
+      policies->Set(key::kDevicePolicyRefreshRate,
+                    POLICY_LEVEL_MANDATORY,
+                    POLICY_SCOPE_MACHINE,
+                    DecodeIntegerValue(container.device_policy_refresh_rate()));
+    }
+  }
+
+  if (policy.has_metrics_enabled()) {
+    const em::MetricsEnabledProto& container(policy.metrics_enabled());
+    if (container.has_metrics_enabled()) {
+      policies->Set(key::kDeviceMetricsReportingEnabled,
+                    POLICY_LEVEL_MANDATORY,
+                    POLICY_SCOPE_MACHINE,
+                    Value::CreateBooleanValue(container.metrics_enabled()));
+    }
+  }
+
+  if (policy.has_release_channel()) {
+    const em::ReleaseChannelProto& container(policy.release_channel());
+    if (container.has_release_channel()) {
+      std::string channel(container.release_channel());
+      policies->Set(key::kChromeOsReleaseChannel,
+                    POLICY_LEVEL_MANDATORY,
+                    POLICY_SCOPE_MACHINE,
+                    Value::CreateStringValue(channel));
+      // TODO(dubroy): Once http://crosbug.com/17015 is implemented, we won't
+      // have to pass the channel in here, only ping the update engine to tell
+      // it to fetch the channel from the policy.
+      chromeos::DBusThreadManager::Get()->GetUpdateEngineClient()->
+          SetReleaseTrack(channel);
+    }
+    if (container.has_release_channel_delegated()) {
+      policies->Set(key::kChromeOsReleaseChannelDelegated,
+                    POLICY_LEVEL_MANDATORY,
+                    POLICY_SCOPE_MACHINE,
+                    Value::CreateBooleanValue(
+                        container.release_channel_delegated()));
+    }
+  }
+
+  if (policy.has_auto_update_settings()) {
+    const em::AutoUpdateSettingsProto& container(policy.auto_update_settings());
+    if (container.has_update_disabled()) {
+      policies->Set(key::kDeviceAutoUpdateDisabled,
+                    POLICY_LEVEL_MANDATORY,
+                    POLICY_SCOPE_MACHINE,
+                    Value::CreateBooleanValue(container.update_disabled()));
+    }
+  }
+
+  if (policy.has_start_up_urls()) {
+    const em::StartUpUrlsProto& container(policy.start_up_urls());
+    if (container.start_up_urls_size()) {
+      ListValue* urls = new ListValue();
+      RepeatedPtrField<std::string>::const_iterator entry;
+      for (entry = container.start_up_urls().begin();
+           entry != container.start_up_urls().end();
+           ++entry) {
+        urls->Append(Value::CreateStringValue(*entry));
+      }
+      policies->Set(key::kDeviceStartUpUrls,
+                    POLICY_LEVEL_MANDATORY,
+                    POLICY_SCOPE_MACHINE,
+                    urls);
+    }
+  }
+}
+
+// static
+void DevicePolicyCache::DecodeDevicePolicy(
+    const em::ChromeDeviceSettingsProto& policy,
+    PolicyMap* policies) {
+  // Decode the various groups of policies.
+  DecodeLoginPolicies(policy, policies);
+  DecodeKioskPolicies(policy, policies);
+  DecodeNetworkPolicies(policy, policies);
+  DecodeReportingPolicies(policy, policies);
+  DecodeGenericPolicies(policy, policies);
 }
 
 }  // namespace policy

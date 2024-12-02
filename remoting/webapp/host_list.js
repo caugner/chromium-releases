@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -91,10 +91,12 @@ remoting.HostList.prototype.refresh = function(onDone) {
   }
   /** @param {string} token The OAuth2 token. */
   var getHosts = function(token) {
-    var headers = { 'Authorization': 'OAuth ' + token };
+    // TODO(simonmorris): Pass the access token in a header, not a URL
+    // parameter, when crbug.com/116574 has a better fix.
+    var params = { 'access_token': token };
     remoting.xhr.get(
         'https://www.googleapis.com/chromoting/v1/@me/hosts',
-        parseHostListResponse, '', headers);
+        parseHostListResponse, params);
   };
   remoting.oauth2.callWithToken(getHosts);
 };
@@ -118,6 +120,19 @@ remoting.HostList.prototype.parseHostListResponse_ = function(xhr, onDone) {
           /** @type {{data: {items: Array}}} */ JSON.parse(xhr.responseText);
       if (parsed_response.data && parsed_response.data.items) {
         this.hosts_ = parsed_response.data.items;
+        /**
+         * @param {remoting.Host} a
+         * @param {remoting.Host} b
+         */
+        var cmp = function(a, b) {
+          if (a.status < b.status) {
+            return 1;
+          } else if (b.status < a.status) {
+            return -1;
+          }
+          return 0;
+        };
+        this.hosts_ = /** @type {Array} */ this.hosts_.sort(cmp);
       }
     } else {
       // Some other error.
@@ -166,12 +181,14 @@ remoting.HostList.prototype.display = function() {
    */
   var onDelete = function(hostTableEntry) { that.deleteHost_(hostTableEntry); }
 
+  this.table_.hidden = (this.hosts_.length == 0);
+
   for (var i = 0; i < this.hosts_.length; ++i) {
     /** @type {remoting.Host} */
     var host = this.hosts_[i];
     // Validate the entry to make sure it has all the fields we expect.
-    if (host.hostName && host.hostId && host.status && host.jabberId &&
-        host.publicKey) {
+    // If the host has never sent a heartbeat, then there will be no jabberId.
+    if (host.hostName && host.hostId && host.status && host.publicKey) {
       var hostTableEntry = new remoting.HostTableEntry();
       hostTableEntry.init(host, onRename, onDelete);
       this.hostTableEntries_[i] = hostTableEntry;
@@ -182,6 +199,7 @@ remoting.HostList.prototype.display = function() {
   if (this.lastError_ != '') {
     l10n.localizeElementFromTag(this.errorDiv_, this.lastError_);
   }
+  this.errorDiv_.hidden = (this.lastError_ == '');
 
   this.showOrHide_(this.hosts_.length != 0 || this.lastError_ != '');
 };
@@ -196,12 +214,6 @@ remoting.HostList.prototype.display = function() {
 remoting.HostList.prototype.showOrHide_ = function(show) {
   var parent = /** @type {Element} */ (this.table_.parentNode);
   parent.hidden = !show;
-  if (show) {
-    parent.style.height = parent.scrollHeight + 'px';
-    removeClass(parent, remoting.HostList.COLLAPSED_);
-  } else {
-    addClass(parent, remoting.HostList.COLLAPSED_);
-  }
 };
 
 /**
@@ -237,6 +249,15 @@ remoting.HostList.prototype.deleteHost_ = function(hostTableEntry) {
  * @private
  */
 remoting.HostList.prototype.renameHost_ = function(hostTableEntry) {
+  for (var i = 0; i < this.hosts_.length; ++i) {
+    if (this.hosts_[i].hostId == hostTableEntry.host.hostId) {
+      this.hosts_[i].hostName = hostTableEntry.host.hostName;
+      break;
+    }
+  }
+  window.localStorage.setItem(remoting.HostList.HOSTS_KEY,
+                              JSON.stringify(this.hosts_));
+
   /** @param {string} token */
   var renameHost = function(token) {
     var headers = {
@@ -257,12 +278,6 @@ remoting.HostList.prototype.renameHost_ = function(hostTableEntry) {
   }
   remoting.oauth2.callWithToken(renameHost);
 };
-
-/**
- * Class name for the host list when it is collapsed.
- * @private
- */
-remoting.HostList.COLLAPSED_ = 'collapsed';
 
 /**
  * Key name under which Me2Me hosts are cached.

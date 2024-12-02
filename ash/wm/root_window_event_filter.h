@@ -12,6 +12,10 @@
 #include "ui/aura/event_filter.h"
 #include "ash/ash_export.h"
 
+namespace aura {
+class RootWindow;
+}
+
 namespace ash {
 namespace internal {
 
@@ -25,10 +29,24 @@ namespace internal {
 // event.
 class ASH_EXPORT RootWindowEventFilter : public aura::EventFilter {
  public:
-  RootWindowEventFilter();
+  RootWindowEventFilter(aura::RootWindow* root_window);
   virtual ~RootWindowEventFilter();
 
-  // Adds/removes additional event filters.
+  // Returns the cursor for the specified component.
+  static gfx::NativeCursor CursorForWindowComponent(int window_component);
+
+  // Freezes updates to the cursor until UnlockCursor() is invoked.
+  void LockCursor();
+
+  // Unlocks the cursor.
+  void UnlockCursor();
+
+  void set_update_cursor_visibility(bool update) {
+    update_cursor_visibility_ = update;
+  }
+
+  // Adds/removes additional event filters. This does not take ownership of
+  // the EventFilter.
   void AddFilter(aura::EventFilter* filter);
   void RemoveFilter(aura::EventFilter* filter);
   size_t GetFilterCount() const;
@@ -61,8 +79,25 @@ class ASH_EXPORT RootWindowEventFilter : public aura::EventFilter {
   ui::TouchStatus FilterTouchEvent(aura::Window* target,
                                    aura::TouchEvent* event);
 
+  aura::RootWindow* root_window_;
+
   // Additional event filters that pre-handles events.
   ObserverList<aura::EventFilter, true> filters_;
+
+  // Number of times LockCursor() has been invoked without a corresponding
+  // UnlockCursor().
+  int cursor_lock_count_;
+
+  // Set to true if UpdateCursor() is invoked while |cursor_lock_count_| == 0.
+  bool did_cursor_change_;
+
+  // Cursor to set once |cursor_lock_count_| is set to 0. Only valid if
+  // |did_cursor_change_| is true.
+  gfx::NativeCursor cursor_to_set_on_unlock_;
+
+  // Should we show the mouse cursor when we see mouse movement and hide it when
+  // we see a touch event?
+  bool update_cursor_visibility_;
 
   DISALLOW_COPY_AND_ASSIGN(RootWindowEventFilter);
 };

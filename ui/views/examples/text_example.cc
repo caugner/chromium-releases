@@ -7,7 +7,6 @@
 #include "base/utf_string_conversions.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
-#include "ui/gfx/canvas_skia.h"
 #include "ui/views/controls/button/checkbox.h"
 #include "ui/views/controls/combobox/combobox.h"
 #include "ui/views/controls/label.h"
@@ -97,24 +96,24 @@ class TextExample::TextExampleView : public View {
       text_flags_(0),
       halo_(false),
       fade_(false),
-      fade_mode_(gfx::CanvasSkia::TruncateFadeTail) {
+      fade_mode_(gfx::Canvas::TruncateFadeTail) {
   }
 
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE {
 #if defined(OS_WIN)
     if (fade_) {
-      gfx::Rect rect(0, 0, width(), height());
       size_t characters_to_truncate_from_head =
-          gfx::CanvasSkia::TruncateFadeHeadAndTail ? 10 : 0;
-      canvas->AsCanvasSkia()->DrawFadeTruncatingString(text_, fade_mode_,
-          characters_to_truncate_from_head, font_, SK_ColorDKGRAY, rect);
+          gfx::Canvas::TruncateFadeHeadAndTail ? 10 : 0;
+      canvas->DrawFadeTruncatingString(text_, fade_mode_,
+          characters_to_truncate_from_head, font_, SK_ColorDKGRAY,
+          GetLocalBounds());
       return;
     }
 #endif
 
     if (halo_) {
-      canvas->AsCanvasSkia()->DrawStringWithHalo(text_, font_, SK_ColorDKGRAY,
-          SK_ColorWHITE, 0, 0, width(), height(), text_flags_);
+      canvas->DrawStringWithHalo(text_, font_, SK_ColorDKGRAY, SK_ColorWHITE, 0,
+          0, width(), height(), text_flags_);
     } else {
       canvas->DrawStringInt(text_, font_, SK_ColorDKGRAY, 0, 0, width(),
           height(), text_flags_);
@@ -133,8 +132,8 @@ class TextExample::TextExampleView : public View {
   bool fade() const { return fade_; }
   void set_fade(bool fade) { fade_ = fade; }
 
-  gfx::CanvasSkia::TruncateFadeMode fade_mode() const { return fade_mode_; }
-  void set_fade_mode(gfx::CanvasSkia::TruncateFadeMode fade_mode) {
+  gfx::Canvas::TruncateFadeMode fade_mode() const { return fade_mode_; }
+  void set_fade_mode(gfx::Canvas::TruncateFadeMode fade_mode) {
     fade_mode_ = fade_mode;
   }
 
@@ -164,7 +163,7 @@ class TextExample::TextExampleView : public View {
   bool fade_;
 
   // If |fade_| is |true|, fade mode parameter to |DrawFadeTruncatingString()|.
-  gfx::CanvasSkia::TruncateFadeMode fade_mode_;
+  gfx::Canvas::TruncateFadeMode fade_mode_;
 
   DISALLOW_COPY_AND_ASSIGN(TextExampleView);
 };
@@ -188,7 +187,9 @@ Combobox* TextExample::AddCombobox(GridLayout* layout,
                                    int count) {
   layout->StartRow(0, 0);
   layout->AddView(new Label(ASCIIToUTF16(name)));
-  Combobox* combo_box = new Combobox(new ExampleComboboxModel(strings, count));
+  ExampleComboboxModel* new_model = new ExampleComboboxModel(strings, count);
+  example_combobox_model_.push_back(new_model);
+  Combobox* combo_box = new Combobox(new_model);
   combo_box->SetSelectedItem(0);
   combo_box->set_listener(this);
   layout->AddView(combo_box, kNumColumns - 1, 1);
@@ -337,15 +338,15 @@ void TextExample::ItemChanged(Combobox* combo_box,
         break;
 #if defined(OS_WIN)
       case 2:
-        text_view_->set_fade_mode(gfx::CanvasSkia::TruncateFadeTail);
+        text_view_->set_fade_mode(gfx::Canvas::TruncateFadeTail);
         text_view_->set_fade(true);
         break;
       case 3:
-        text_view_->set_fade_mode(gfx::CanvasSkia::TruncateFadeHead);
+        text_view_->set_fade_mode(gfx::Canvas::TruncateFadeHead);
         text_view_->set_fade(true);
         break;
       case 4:
-        text_view_->set_fade_mode(gfx::CanvasSkia::TruncateFadeHeadAndTail);
+        text_view_->set_fade_mode(gfx::Canvas::TruncateFadeHeadAndTail);
         text_view_->set_fade(true);
         break;
 #endif

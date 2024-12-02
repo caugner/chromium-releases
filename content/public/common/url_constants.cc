@@ -39,16 +39,37 @@ const char kHttpsScheme[] = "https";
 const char kJavaScriptScheme[] = "javascript";
 const char kMailToScheme[] = "mailto";
 const char kMetadataScheme[] = "metadata";
+const char kSwappedOutScheme[] = "swappedout";
 const char kViewSourceScheme[] = "view-source";
 
 const char kStandardSchemeSeparator[] = "://";
 
 const char kAboutBlankURL[] = "about:blank";
-const char kAboutCrashURL[] = "about:crash";
+const char kChromeUIAppCacheInternalsHost[] = "appcache-internals";
+const char kChromeUIBlobInternalsHost[] = "blob-internals";
+const char kChromeUIBrowserCrashHost[] = "inducebrowsercrashforrealz";
+const char kChromeUINetworkViewCacheHost[] = "view-http-cache";
+const char kChromeUICrashURL[] = "chrome://crash";
+const char kChromeUIGpuCleanURL[] = "chrome://gpuclean";
+const char kChromeUIGpuCrashURL[] = "chrome://gpucrash";
+const char kChromeUIGpuHangURL[] = "chrome://gpuhang";
+const char kChromeUIHangURL[] = "chrome://hang";
+const char kChromeUIKillURL[] = "chrome://kill";
+const char kChromeUINetworkViewCacheURL[] = "chrome://view-http-cache/";
+const char kChromeUIShorthangURL[] = "chrome://shorthang";
 
 // This error URL is loaded in normal web renderer processes, so it should not
 // have a chrome:// scheme that might let it be confused with a WebUI page.
 const char kUnreachableWebDataURL[] = "data:text/html,chromewebdata";
+
+// This URL is loaded when a page is swapped out and replaced by a page in a
+// different renderer process.  It must have a unique origin that cannot be
+// scripted by other pages in the process.
+const char kSwappedOutURL[] = "swappedout://";
+
+}  // namespace chrome
+
+namespace content {
 
 const char** GetSavableSchemes() {
   return const_cast<const char**>(g_savable_schemes);
@@ -57,9 +78,9 @@ const char** GetSavableSchemes() {
 void RegisterContentSchemes(const char** additional_savable_schemes) {
   // Don't need "chrome-internal" which was used in old versions of Chrome for
   // the new tab page.
-  url_util::AddStandardScheme(kChromeDevToolsScheme);
-  url_util::AddStandardScheme(kChromeUIScheme);
-  url_util::AddStandardScheme(kMetadataScheme);
+  url_util::AddStandardScheme(chrome::kChromeDevToolsScheme);
+  url_util::AddStandardScheme(chrome::kChromeUIScheme);
+  url_util::AddStandardScheme(chrome::kMetadataScheme);
 
   // Prevent future modification of the standard schemes list. This is to
   // prevent accidental creation of data races in the program. AddStandardScheme
@@ -86,4 +107,4 @@ void RegisterContentSchemes(const char** additional_savable_schemes) {
   }
 }
 
-}  // namespace chrome
+}  // namespace content

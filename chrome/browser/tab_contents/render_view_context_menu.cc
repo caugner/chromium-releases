@@ -49,7 +49,6 @@
 #include "chrome/browser/translate/translate_prefs.h"
 #include "chrome/browser/translate/translate_tab_helper.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/prefs/prefs_tab_helper.h"
 #include "chrome/browser/ui/search_engines/search_engine_tab_helper.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_constants.h"
@@ -60,20 +59,19 @@
 #include "chrome/common/print_messages.h"
 #include "chrome/common/spellcheck_messages.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/child_process_security_policy.h"
-#include "content/browser/download/download_types.h"
-#include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/renderer_host/render_widget_host_view.h"
-#include "content/browser/speech/speech_input_preferences.h"
-#include "content/browser/ssl/ssl_manager.h"
+#include "content/public/browser/child_process_security_policy.h"
 #include "content/public/browser/download_manager.h"
+#include "content/public/browser/download_save_info.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_service.h"
-#include "content/public/browser/ssl_status.h"
+#include "content/public/browser/render_view_host.h"
+#include "content/public/browser/render_widget_host_view.h"
+#include "content/public/browser/speech_recognition_preferences.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_restriction.h"
+#include "content/public/common/ssl_status.h"
 #include "grit/generated_resources.h"
 #include "net/base/escape.h"
 #include "net/base/net_util.h"
@@ -86,12 +84,15 @@
 #include "webkit/glue/webmenuitem.h"
 
 #ifdef FILE_MANAGER_EXTENSION
-#include "chrome/browser/extensions/file_manager_util.h"
+#include "chrome/browser/chromeos/extensions/file_manager_util.h"
 #endif
 
+using content::ChildProcessSecurityPolicy;
 using content::DownloadManager;
+using content::NavigationController;
 using content::NavigationEntry;
 using content::OpenURLParams;
+using content::RenderViewHost;
 using content::SSLStatus;
 using content::UserMetricsAction;
 using content::WebContents;
@@ -238,7 +239,7 @@ static const int kSpellcheckRadioGroup = 1;
 
 RenderViewContextMenu::RenderViewContextMenu(
     WebContents* web_contents,
-    const ContextMenuParams& params)
+    const content::ContextMenuParams& params)
     : params_(params),
       source_web_contents_(web_contents),
       profile_(Profile::FromBrowserContext(web_contents->GetBrowserContext())),
@@ -270,7 +271,7 @@ static bool ExtensionPatternMatch(const URLPatternSet& patterns,
 
 // static
 bool RenderViewContextMenu::ExtensionContextAndPatternMatch(
-    const ContextMenuParams& params,
+    const content::ContextMenuParams& params,
     ExtensionMenuItem::ContextList contexts,
     const URLPatternSet& target_url_patterns) {
   bool has_link = !params.link_url.is_empty();
@@ -321,7 +322,7 @@ bool RenderViewContextMenu::ExtensionContextAndPatternMatch(
   return false;
 }
 
-static const GURL& GetDocumentURL(const ContextMenuParams& params) {
+static const GURL& GetDocumentURL(const content::ContextMenuParams& params) {
   return params.frame_url.is_empty() ? params.page_url : params.frame_url;
 }
 
@@ -330,7 +331,7 @@ static const GURL& GetDocumentURL(const ContextMenuParams& params) {
 // static
 ExtensionMenuItem::List RenderViewContextMenu::GetRelevantExtensionItems(
     const ExtensionMenuItem::List& items,
-    const ContextMenuParams& params,
+    const content::ContextMenuParams& params,
     Profile* profile,
     bool can_cross_incognito) {
   ExtensionMenuItem::List result;
@@ -525,8 +526,12 @@ void RenderViewContextMenu::AppendAllExtensionItems() {
 }
 
 void RenderViewContextMenu::InitMenu() {
-  if (GetPlatformApp()) {
-    AppendPlatformAppItems();
+  const Extension* extension = GetExtension();
+  if (extension) {
+    if (extension->is_platform_app())
+      AppendPlatformAppItems(extension);
+    else
+      AppendPopupExtensionItems();
     return;
   }
 
@@ -597,17 +602,6 @@ void RenderViewContextMenu::InitMenu() {
 #endif
   }
 
-  if (params_.is_editable) {
-    // Add a menu item that shows suggestions.
-    if (!spelling_menu_observer_.get()) {
-      spelling_menu_observer_.reset(new SpellingMenuObserver(this));
-    }
-    if (spelling_menu_observer_.get()) {
-      observers_.AddObserver(spelling_menu_observer_.get());
-      spelling_menu_observer_->InitMenu(params_);
-    }
-  }
-
   if (params_.is_editable)
     AppendEditableItems();
   else if (has_selection)
@@ -630,7 +624,7 @@ void RenderViewContextMenu::InitMenu() {
   observers_.AddObserver(print_preview_menu_observer_.get());
 }
 
-const Extension* RenderViewContextMenu::GetPlatformApp() const {
+const Extension* RenderViewContextMenu::GetExtension() const {
   ExtensionProcessManager* process_manager =
       profile_->GetExtensionProcessManager();
   // There is no process manager in some tests.
@@ -642,31 +636,49 @@ const Extension* RenderViewContextMenu::GetPlatformApp() const {
   for (iter = process_manager->begin(); iter != process_manager->end();
        ++iter) {
     ExtensionHost* host = *iter;
-    if (host->host_contents() == source_web_contents_) {
-      if (host->extension() && host->extension()->is_platform_app()) {
-        return host->extension();
-      }
-    }
+    if (host->host_contents() == source_web_contents_)
+      return host->extension();
   }
 
   return NULL;
 }
 
-void RenderViewContextMenu::AppendPlatformAppItems() {
-  const Extension* platform_app = GetPlatformApp();
+void RenderViewContextMenu::AppendPlatformAppItems(
+    const Extension* platform_app) {
   DCHECK(platform_app);
   int index = 0;
   AppendExtensionItems(platform_app->id(), &index);
+
+  // Add dev tools for unpacked extensions.
+  if (platform_app->location() == Extension::LOAD) {
+    menu_model_.AddItemWithStringId(IDC_RELOAD, IDS_CONTENT_CONTEXT_RELOAD);
+    AppendDeveloperItems();
+  }
 }
 
-void RenderViewContextMenu::LookUpInDictionary() {
-  // Used only in the Mac port.
-  NOTREACHED();
+void RenderViewContextMenu::AppendPopupExtensionItems() {
+  bool has_selection = !params_.selection_text.empty();
+
+  if (params_.is_editable)
+    AppendEditableItems();
+  else if (has_selection)
+    AppendCopyItem();
+
+  if (has_selection)
+    AppendSearchProvider();
+
+  AppendAllExtensionItems();
+  AppendDeveloperItems();
 }
 
 void RenderViewContextMenu::AddMenuItem(int command_id,
                                         const string16& title) {
   menu_model_.AddItem(command_id, title);
+}
+
+void RenderViewContextMenu::AddCheckItem(int command_id,
+                                         const string16& title) {
+  menu_model_.AddCheckItem(command_id, title);
 }
 
 void RenderViewContextMenu::AddSeparator() {
@@ -847,8 +859,13 @@ void RenderViewContextMenu::AppendPageItems() {
 
   menu_model_.AddItemWithStringId(IDC_VIEW_SOURCE,
                                   IDS_CONTENT_CONTEXT_VIEWPAGESOURCE);
-  menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_VIEWPAGEINFO,
-                                  IDS_CONTENT_CONTEXT_VIEWPAGEINFO);
+  // Only add View Page Info if there's a browser.  This is a temporary thing
+  // while View Page Info crashes Chrome Frame; see http://crbug.com/120901.
+  // TODO(grt) Remove this once page info is back for Chrome Frame.
+  if (!external_) {
+    menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_VIEWPAGEINFO,
+                                    IDS_CONTENT_CONTEXT_VIEWPAGEINFO);
+  }
 }
 
 void RenderViewContextMenu::AppendFrameItems() {
@@ -860,8 +877,13 @@ void RenderViewContextMenu::AppendFrameItems() {
   //   IDS_CONTENT_CONTEXT_PRINTFRAME
   menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_VIEWFRAMESOURCE,
                                   IDS_CONTENT_CONTEXT_VIEWFRAMESOURCE);
-  menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_VIEWFRAMEINFO,
-                                  IDS_CONTENT_CONTEXT_VIEWFRAMEINFO);
+  // Only add View Frame Info if there's a browser.  This is a temporary thing
+  // while View Frame Info crashes Chrome Frame; see http://crbug.com/120901.
+  // TODO(grt) Remove this once frame info is back for Chrome Frame.
+  if (!external_) {
+    menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_VIEWFRAMEINFO,
+                                    IDS_CONTENT_CONTEXT_VIEWFRAMEINFO);
+  }
 }
 
 void RenderViewContextMenu::AppendCopyItem() {
@@ -915,6 +937,8 @@ void RenderViewContextMenu::AppendSearchProvider() {
 }
 
 void RenderViewContextMenu::AppendEditableItems() {
+  AppendSpellingSuggestionsSubMenu();
+
   menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_UNDO,
                                   IDS_CONTENT_CONTEXT_UNDO);
   menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_REDO,
@@ -953,15 +977,20 @@ void RenderViewContextMenu::AppendEditableItems() {
                                   IDS_CONTENT_CONTEXT_SELECTALL);
 }
 
+void RenderViewContextMenu::AppendSpellingSuggestionsSubMenu() {
+  if (!spelling_menu_observer_.get())
+    spelling_menu_observer_.reset(new SpellingMenuObserver(this));
+  observers_.AddObserver(spelling_menu_observer_.get());
+  spelling_menu_observer_->InitMenu(params_);
+}
+
 void RenderViewContextMenu::AppendSpellcheckOptionsSubMenu() {
   if (!spellchecker_submenu_observer_.get()) {
     spellchecker_submenu_observer_.reset(new SpellCheckerSubMenuObserver(
         this, this, kSpellcheckRadioGroup));
   }
-  if (spellchecker_submenu_observer_.get()) {
-    spellchecker_submenu_observer_->InitMenu(params_);
-    observers_.AddObserver(spellchecker_submenu_observer_.get());
-  }
+  spellchecker_submenu_observer_->InitMenu(params_);
+  observers_.AddObserver(spellchecker_submenu_observer_.get());
 }
 
 void RenderViewContextMenu::AppendSpeechInputOptionsSubMenu() {
@@ -1304,10 +1333,6 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
           WebContextMenuData::CheckableMenuItemEnabled;
     case IDC_WRITING_DIRECTION_MENU:
       return true;
-    case IDC_CONTENT_CONTEXT_LOOK_UP_IN_DICTIONARY:
-      // This is OK because the menu is not shown when it isn't
-      // appropriate.
-      return true;
 #elif defined(OS_POSIX)
     // TODO(suzhe): this should not be enabled for password fields.
     case IDC_INPUT_METHODS_MENU:
@@ -1391,14 +1416,14 @@ bool RenderViewContextMenu::IsCommandIdChecked(int id) const {
   // Check box for menu item 'Block offensive words'.
   if (id == IDC_CONTENT_CONTEXT_SPEECH_INPUT_FILTER_PROFANITIES) {
     return profile_->GetPrefs()->GetBoolean(
-        prefs::kSpeechInputFilterProfanities);
+        prefs::kSpeechRecognitionFilterProfanities);
   }
 
   return false;
 }
 
 void RenderViewContextMenu::ExecuteCommand(int id) {
-  return ExecuteCommand(id, 0);
+  ExecuteCommand(id, 0);
 }
 
 void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
@@ -1484,27 +1509,53 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
               content::PAGE_TRANSITION_LINK);
       break;
 
-    case IDC_CONTENT_CONTEXT_SAVEAVAS:
-    case IDC_CONTENT_CONTEXT_SAVEIMAGEAS:
     case IDC_CONTENT_CONTEXT_SAVELINKAS: {
-      download_util::RecordDownloadCount(
-          download_util::INITIATED_BY_CONTEXT_MENU_COUNT);
+      download_util::RecordDownloadSource(
+          download_util::INITIATED_BY_CONTEXT_MENU);
       const GURL& referrer =
           params_.frame_url.is_empty() ? params_.page_url : params_.frame_url;
-      const GURL& url =
-          (id == IDC_CONTENT_CONTEXT_SAVELINKAS ? params_.link_url :
-                                                  params_.src_url);
+      const GURL& url = params_.link_url;
+      content::DownloadSaveInfo save_info;
+      save_info.prompt_for_save_location = true;
       DownloadManager* dlm =
           DownloadServiceFactory::GetForProfile(profile_)->GetDownloadManager();
-      // For images and AV "Save As" context menu commands, save the cached
-      // data even if it is no longer valid. This helps ensure that the content
-      // that is visible on the page is what is saved. For links, this behavior
-      // is not desired since the content being linked to is not visible.
-      bool prefer_cache = (id != IDC_CONTENT_CONTEXT_SAVELINKAS);
-      DownloadSaveInfo save_info;
+      dlm->DownloadUrl(url,
+                       referrer,
+                       params_.frame_charset,
+                       false,  // Don't prefer_cache
+                       -1,  // No POST id
+                       save_info,
+                       source_web_contents_,
+                       DownloadManager::OnStartedCallback());
+      break;
+    }
+
+    case IDC_CONTENT_CONTEXT_SAVEAVAS:
+    case IDC_CONTENT_CONTEXT_SAVEIMAGEAS: {
+      download_util::RecordDownloadSource(
+          download_util::INITIATED_BY_CONTEXT_MENU);
+      const GURL& referrer =
+          params_.frame_url.is_empty() ? params_.page_url : params_.frame_url;
+      const GURL& url = params_.src_url;
+      content::DownloadSaveInfo save_info;
       save_info.prompt_for_save_location = true;
-      dlm->DownloadUrl(url, referrer, params_.frame_charset,
-                       prefer_cache, save_info, source_web_contents_);
+      int64 post_id = -1;
+      if (url == source_web_contents_->GetURL()) {
+        const NavigationEntry* entry =
+            source_web_contents_->GetController().GetActiveEntry();
+        if (entry)
+          post_id = entry->GetPostID();
+      }
+      DownloadManager* dlm =
+          DownloadServiceFactory::GetForProfile(profile_)->GetDownloadManager();
+      dlm->DownloadUrl(url,
+                       referrer,
+                       "",
+                       true,  // prefer_cache
+                       post_id,
+                       save_info,
+                       source_web_contents_,
+                       DownloadManager::OnStartedCallback());
       break;
     }
 
@@ -1625,7 +1676,7 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
           tab_contents_wrapper->print_view_manager()->PrintPreviewNow();
         }
       } else {
-        rvh->Send(new PrintMsg_PrintNodeUnderContextMenu(rvh->routing_id()));
+        rvh->Send(new PrintMsg_PrintNodeUnderContextMenu(rvh->GetRoutingID()));
       }
       break;
 
@@ -1638,10 +1689,11 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
       break;
 
     case IDC_CONTENT_CONTEXT_VIEWPAGEINFO: {
-      NavigationEntry* nav_entry =
-          source_web_contents_->GetController().GetActiveEntry();
-      source_web_contents_->ShowPageInfo(nav_entry->GetURL(),
-                                         nav_entry->GetSSL(), true);
+      NavigationController* controller = &source_web_contents_->GetController();
+      NavigationEntry* nav_entry = controller->GetActiveEntry();
+      Browser* browser = Browser::GetBrowserForController(controller, NULL);
+      browser->ShowPageInfo(source_web_contents_, nav_entry->GetURL(),
+                            nav_entry->GetSSL(), true);
       break;
     }
 
@@ -1681,25 +1733,10 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
       break;
 
     case IDC_CONTENT_CONTEXT_VIEWFRAMEINFO: {
-      // Deserialize the SSL info.
-      SSLStatus ssl;
-      if (!params_.security_info.empty()) {
-        int cert_id;
-        net::CertStatus cert_status;
-        int security_bits;
-        int connection_status;
-        SSLManager::DeserializeSecurityInfo(params_.security_info,
-                                            &cert_id,
-                                            &cert_status,
-                                            &security_bits,
-                                            &connection_status);
-        ssl.cert_id = cert_id;
-        ssl.cert_status = cert_status;
-        ssl.security_bits = security_bits;
-        ssl.connection_status = connection_status;
-      }
-      source_web_contents_->ShowPageInfo(params_.frame_url, ssl,
-                                         false);  // Don't show the history.
+      Browser* browser = Browser::GetBrowserForController(
+          &source_web_contents_->GetController(), NULL);
+      browser->ShowPageInfo(source_web_contents_, params_.frame_url,
+                            params_.security_info, false);
       break;
     }
 
@@ -1769,9 +1806,6 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
       rvh->NotifyTextDirection();
       break;
     }
-    case IDC_CONTENT_CONTEXT_LOOK_UP_IN_DICTIONARY:
-      LookUpInDictionary();
-      break;
 #endif  // OS_MACOSX
     case IDC_CONTENT_CONTEXT_PROTOCOL_HANDLER_SETTINGS: {
       content::RecordAction(
@@ -1817,9 +1851,9 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
     case IDC_CONTENT_CONTEXT_SPEECH_INPUT_FILTER_PROFANITIES: {
       PrefService* prefs = profile_->GetPrefs();
       const bool filter = !prefs->GetBoolean(
-          prefs::kSpeechInputFilterProfanities);
-      prefs->SetBoolean(prefs::kSpeechInputFilterProfanities, filter);
-      profile_->GetSpeechInputPreferences()->set_filter_profanities(filter);
+          prefs::kSpeechRecognitionFilterProfanities);
+      prefs->SetBoolean(prefs::kSpeechRecognitionFilterProfanities, filter);
+      profile_->GetSpeechRecognitionPreferences()->SetFilterProfanities(filter);
       break;
     }
 
@@ -1842,7 +1876,7 @@ ProtocolHandlerRegistry::ProtocolHandlerList
 RenderViewContextMenu::GetHandlersForLinkUrl() {
   ProtocolHandlerRegistry::ProtocolHandlerList handlers =
       protocol_handler_registry_->GetHandlersFor(params_.link_url.scheme());
-  sort(handlers.begin(), handlers.end());
+  std::sort(handlers.begin(), handlers.end());
   return handlers;
 }
 
@@ -1851,9 +1885,10 @@ void RenderViewContextMenu::MenuWillShow(ui::SimpleMenuModel* source) {
   if (source != &menu_model_)
     return;
 
-  RenderWidgetHostView* view = source_web_contents_->GetRenderWidgetHostView();
+  content::RenderWidgetHostView* view =
+      source_web_contents_->GetRenderWidgetHostView();
   if (view)
-    view->ShowingContextMenu(true);
+    view->SetShowingContextMenu(true);
 }
 
 void RenderViewContextMenu::MenuClosed(ui::SimpleMenuModel* source) {
@@ -1861,9 +1896,10 @@ void RenderViewContextMenu::MenuClosed(ui::SimpleMenuModel* source) {
   if (source != &menu_model_)
     return;
 
-  RenderWidgetHostView* view = source_web_contents_->GetRenderWidgetHostView();
+  content::RenderWidgetHostView* view =
+      source_web_contents_->GetRenderWidgetHostView();
   if (view)
-    view->ShowingContextMenu(false);
+    view->SetShowingContextMenu(false);
   RenderViewHost* rvh = source_web_contents_->GetRenderViewHost();
   if (rvh) {
     rvh->NotifyContextMenuClosed(params_.custom_context);
@@ -1872,17 +1908,28 @@ void RenderViewContextMenu::MenuClosed(ui::SimpleMenuModel* source) {
 
 bool RenderViewContextMenu::IsDevCommandEnabled(int id) const {
   if (id == IDC_CONTENT_CONTEXT_INSPECTELEMENT) {
-    const CommandLine& command_line = *CommandLine::ForCurrentProcess();
-    TabContentsWrapper* tab_contents_wrapper =
-        TabContentsWrapper::GetCurrentWrapperForContents(
-            source_web_contents_);
-    if (!tab_contents_wrapper)
-      return false;
-    // Don't enable the web inspector if JavaScript is disabled.
-    if (!tab_contents_wrapper->prefs_tab_helper()->per_tab_prefs()->GetBoolean(
-            prefs::kWebKitJavascriptEnabled) ||
-        command_line.HasSwitch(switches::kDisableJavaScript))
-      return false;
+    // Don't enable the web inspector if JavaScript is disabled. We don't
+    // check this when this is the web contents of an extension (e.g.
+    // for a popup extension or a platform app) as they have JavaScript
+    // always enabled.
+    const Extension* extension = GetExtension();
+    if (!extension) {
+      const CommandLine* command_line = CommandLine::ForCurrentProcess();
+      if (!profile_->GetPrefs()->GetBoolean(
+          prefs::kWebKitGlobalJavascriptEnabled) ||
+          command_line->HasSwitch(switches::kDisableJavaScript))
+        return false;
+#if defined(OS_MACOSX)
+    } else {
+      // Disable dev tools for popup extensions for Mac OS X builds, as the
+      // extension popups for these builds do not support dynamically inspecting
+      // the popups.
+      // TODO(benwells): Add support for these builds and remove this #if.
+      if (!extension->is_platform_app())
+        return false;
+#endif
+    }
+
     // Don't enable the web inspector if the developer tools are disabled via
     // the preference dev-tools-disabled.
     if (profile_->GetPrefs()->GetBoolean(prefs::kDevToolsDisabled))

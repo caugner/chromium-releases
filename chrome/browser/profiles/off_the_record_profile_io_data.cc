@@ -7,7 +7,6 @@
 #include "base/bind.h"
 #include "base/logging.h"
 #include "base/stl_util.h"
-#include "base/stringprintf.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/io_thread.h"
@@ -18,10 +17,10 @@
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/resource_context.h"
 #include "content/public/browser/browser_thread.h"
-#include "net/base/default_origin_bound_cert_store.h"
-#include "net/base/origin_bound_cert_service.h"
+#include "content/public/browser/resource_context.h"
+#include "net/base/default_server_bound_cert_store.h"
+#include "net/base/server_bound_cert_service.h"
 #include "net/ftp/ftp_network_layer.h"
 #include "net/http/http_cache.h"
 #include "net/http/http_server_properties_impl.h"
@@ -64,14 +63,14 @@ GetChromeURLDataManagerBackendGetter() const {
                     base::Unretained(io_data_));
 }
 
-const content::ResourceContext&
+content::ResourceContext*
 OffTheRecordProfileIOData::Handle::GetResourceContext() const {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   LazyInitialize();
   return GetResourceContextNoInit();
 }
 
-const content::ResourceContext&
+content::ResourceContext*
 OffTheRecordProfileIOData::Handle::GetResourceContextNoInit() const {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   // Don't call LazyInitialize here, since the resource context is created at
@@ -129,34 +128,25 @@ OffTheRecordProfileIOData::Handle::GetIsolatedAppRequestContextGetter(
 }
 
 void OffTheRecordProfileIOData::Handle::LazyInitialize() const {
-  if (!initialized_) {
-    io_data_->InitializeOnUIThread(profile_);
-    ChromeNetworkDelegate::InitializeReferrersEnabled(
-        io_data_->enable_referrers(), profile_->GetPrefs());
+  if (initialized_)
+    return;
+
+  // Set initialized_ to true at the beginning in case any of the objects
+  // below try to get the ResourceContext pointer.
+  initialized_ = true;
+  ChromeNetworkDelegate::InitializeReferrersEnabled(
+      io_data_->enable_referrers(), profile_->GetPrefs());
 #if defined(ENABLE_SAFE_BROWSING)
-    io_data_->safe_browsing_enabled()->Init(prefs::kSafeBrowsingEnabled,
-        profile_->GetPrefs(), NULL);
-    io_data_->safe_browsing_enabled()->MoveToThread(BrowserThread::IO);
+  io_data_->safe_browsing_enabled()->Init(prefs::kSafeBrowsingEnabled,
+      profile_->GetPrefs(), NULL);
+  io_data_->safe_browsing_enabled()->MoveToThread(BrowserThread::IO);
 #endif
-    initialized_ = true;
-  }
+  io_data_->InitializeOnUIThread(profile_);
 }
 
 OffTheRecordProfileIOData::OffTheRecordProfileIOData()
     : ProfileIOData(true) {}
 OffTheRecordProfileIOData::~OffTheRecordProfileIOData() {}
-
-unsigned OffTheRecordProfileIOData::ssl_session_cache_instance_ = 0;
-
-// static
-std::string OffTheRecordProfileIOData::GetSSLSessionCacheShard() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  // The SSL session cache is partitioned by setting a string. This returns a
-  // unique string to partition the SSL session cache. Each time we create a
-  // new Incognito profile, we'll get a fresh SSL session cache which is also
-  // separate from the non-incognito ones.
-  return StringPrintf("incognito/%u", ssl_session_cache_instance_++);
-}
 
 void OffTheRecordProfileIOData::LazyInitializeInternal(
     ProfileParams* profile_params) const {
@@ -191,12 +181,12 @@ void OffTheRecordProfileIOData::LazyInitializeInternal(
   http_server_properties_.reset(new net::HttpServerPropertiesImpl);
   main_context->set_http_server_properties(http_server_properties_.get());
 
-  // For incognito, we use a non-persistent origin bound cert store.
-  net::OriginBoundCertService* origin_bound_cert_service =
-      new net::OriginBoundCertService(
-          new net::DefaultOriginBoundCertStore(NULL));
-  set_origin_bound_cert_service(origin_bound_cert_service);
-  main_context->set_origin_bound_cert_service(origin_bound_cert_service);
+  // For incognito, we use a non-persistent server bound cert store.
+  net::ServerBoundCertService* server_bound_cert_service =
+      new net::ServerBoundCertService(
+          new net::DefaultServerBoundCertStore(NULL));
+  set_server_bound_cert_service(server_bound_cert_service);
+  main_context->set_server_bound_cert_service(server_bound_cert_service);
 
   main_context->set_cookie_store(
       new net::CookieMonster(NULL, profile_params->cookie_monster_delegate));
@@ -216,7 +206,7 @@ void OffTheRecordProfileIOData::LazyInitializeInternal(
   net::HttpCache* cache =
       new net::HttpCache(main_context->host_resolver(),
                          main_context->cert_verifier(),
-                         main_context->origin_bound_cert_service(),
+                         main_context->server_bound_cert_service(),
                          main_context->transport_security_state(),
                          main_context->proxy_service(),
                          GetSSLSessionCacheShard(),

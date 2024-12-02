@@ -8,8 +8,8 @@
 
 #include "base/bind.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/stringprintf.h"
 #include "base/string_number_conversions.h"
+#include "base/stringprintf.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/time.h"
 #include "base/values.h"
@@ -18,6 +18,7 @@
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/printing/print_preview_tab_controller.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/restore_tab_helper.h"
 #include "chrome/browser/sessions/session_id.h"
@@ -28,16 +29,17 @@
 #include "chrome/common/automation_id.h"
 #include "chrome/common/chrome_view_type.h"
 #include "chrome/common/extensions/extension.h"
-#include "content/browser/renderer_host/render_view_host.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
-#include "net/base/cookie_monster.h"
-#include "net/base/cookie_store.h"
+#include "net/cookies/cookie_monster.h"
+#include "net/cookies/cookie_store.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 
 using content::BrowserThread;
+using content::RenderViewHost;
 using content::WebContents;
 
 namespace {
@@ -430,7 +432,7 @@ AutomationId GetIdForExtensionView(const ExtensionHost* ext_host) {
   // Since these extension views do not permit navigation, using the
   // renderer process and view ID should suffice.
   std::string id = base::StringPrintf("%d|%d",
-      ext_host->render_view_host()->routing_id(),
+      ext_host->render_view_host()->GetRoutingID(),
       ext_host->render_process_host()->GetID());
   return AutomationId(type, id);
 }
@@ -443,6 +445,8 @@ bool GetTabForId(const AutomationId& id, WebContents** tab) {
   if (id.type() != AutomationId::kTypeTab)
     return false;
 
+  printing::PrintPreviewTabController* preview_controller =
+      printing::PrintPreviewTabController::GetInstance();
   BrowserList::const_iterator iter = BrowserList::begin();
   for (; iter != BrowserList::end(); ++iter) {
     Browser* browser = *iter;
@@ -452,6 +456,18 @@ bool GetTabForId(const AutomationId& id, WebContents** tab) {
               id.id()) {
         *tab = wrapper->web_contents();
         return true;
+      }
+      if (preview_controller) {
+        TabContentsWrapper* preview_wrapper =
+            preview_controller->GetPrintPreviewForTab(wrapper);
+        if (preview_wrapper) {
+          std::string preview_id = base::IntToString(
+              preview_wrapper->restore_tab_helper()->session_id().id());
+          if (preview_id == id.id()) {
+            *tab = preview_wrapper->web_contents();
+            return true;
+          }
+        }
       }
     }
   }

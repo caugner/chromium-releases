@@ -26,14 +26,18 @@
 #include "sql/init_status.h"
 
 class BookmarkService;
-struct DownloadPersistentStoreInfo;
 class TestingProfile;
 struct ThumbnailScore;
+
+namespace content {
+struct DownloadPersistentStoreInfo;
+}
 
 namespace history {
 
 class CommitLaterTask;
 class HistoryPublisher;
+class VisitFilter;
 
 // *See the .cc file for more information on the design.*
 //
@@ -173,6 +177,13 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
       int result_count,
       int days_back);
 
+  // Request the |result_count| URLs and the chain of redirects
+  // leading to each of these URLs, filterd and sorted based on the |filter|.
+  void QueryFilteredURLs(
+      scoped_refptr<QueryMostVisitedURLsRequest> request,
+      int result_count,
+      const history::VisitFilter& filter);
+
   // QueryMostVisitedURLs without the request.
   void QueryMostVisitedURLsImpl(int result_count,
                                 int days_back,
@@ -249,11 +260,11 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   void GetNextDownloadId(scoped_refptr<DownloadNextIdRequest> request);
   void QueryDownloads(scoped_refptr<DownloadQueryRequest> request);
   void CleanUpInProgressEntries();
-  void UpdateDownload(const DownloadPersistentStoreInfo& data);
+  void UpdateDownload(const content::DownloadPersistentStoreInfo& data);
   void UpdateDownloadPath(const FilePath& path, int64 db_handle);
   void CreateDownload(scoped_refptr<DownloadCreateRequest> request,
                       int32 id,
-                      const DownloadPersistentStoreInfo& info);
+                      const content::DownloadPersistentStoreInfo& info);
   void RemoveDownload(int64 db_handle);
   void RemoveDownloadsBetween(const base::Time remove_begin,
                               const base::Time remove_end);
@@ -285,7 +296,7 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
 
   void ProcessDBTask(scoped_refptr<HistoryDBTaskRequest> request);
 
-  virtual bool GetAllTypedURLs(std::vector<history::URLRow>* urls);
+  virtual bool GetAllTypedURLs(URLRows* urls);
 
   virtual bool GetVisitsForURL(URLID id, VisitVector* visits);
 
@@ -341,8 +352,7 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   // added for each given URL at the last visit time in the URLRow if the
   // passed visit type != SOURCE_SYNCED (the sync code manages visits itself).
   // Each visit will have the visit_source type set.
-  void AddPagesWithDetails(const std::vector<URLRow>& info,
-                           VisitSource visit_source);
+  void AddPagesWithDetails(const URLRows& info, VisitSource visit_source);
 
 #if defined(UNIT_TEST)
   HistoryDatabase* db() const { return db_.get(); }
@@ -381,6 +391,8 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, GetFaviconForURL);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest,
                            CloneFaviconIsRestrictedToSameDomain);
+  FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest,
+                           QueryFilteredURLs);
 
   friend class ::TestingProfile;
 
@@ -536,14 +548,14 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   // referenced by any URL, and also all favicons that aren't used by those
   // URLs. The favicon IDs will change, so this will update the url rows in the
   // vector to reference the new IDs.
-  bool ClearAllThumbnailHistory(std::vector<URLRow>* kept_urls);
+  bool ClearAllThumbnailHistory(URLRows* kept_urls);
 
   // Deletes all information in the history database, except for the supplied
   // set of URLs in the URL table (these should correspond to the bookmarked
   // URLs).
   //
   // The IDs of the URLs may change.
-  bool ClearAllMainHistory(const std::vector<URLRow>& kept_urls);
+  bool ClearAllMainHistory(const URLRows& kept_urls);
 
   // Returns the BookmarkService, blocking until it is loaded. This may return
   // NULL during testing.

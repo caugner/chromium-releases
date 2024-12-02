@@ -21,6 +21,7 @@
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_log.h"
+#include "net/base/single_request_cert_verifier.h"
 #include "net/base/ssl_cert_request_info.h"
 #include "net/base/ssl_connection_status_flags.h"
 #include "net/base/ssl_info.h"
@@ -719,12 +720,12 @@ void SSLClientSocketMac::GetSSLInfo(SSLInfo* ssl_info) {
   if (!server_cert_)
     return;
 
-  ssl_info->cert = server_cert_;
+  ssl_info->cert = server_cert_verify_result_.verified_cert;
   ssl_info->cert_status = server_cert_verify_result_.cert_status;
   ssl_info->public_key_hashes = server_cert_verify_result_.public_key_hashes;
   ssl_info->is_issued_by_known_root =
       server_cert_verify_result_.is_issued_by_known_root;
-  ssl_info->client_cert_sent = was_origin_bound_cert_sent() ||
+  ssl_info->client_cert_sent = WasDomainBoundCertSent() ||
       (ssl_config_.send_client_cert && ssl_config_.client_cert);
 
   // security info
@@ -778,8 +779,9 @@ void SSLClientSocketMac::GetSSLCertRequestInfo(
 }
 
 int SSLClientSocketMac::ExportKeyingMaterial(const base::StringPiece& label,
+                                             bool has_context,
                                              const base::StringPiece& context,
-                                             unsigned char *out,
+                                             unsigned char* out,
                                              unsigned int outlen) {
   return ERR_NOT_IMPLEMENTED;
 }
@@ -790,6 +792,10 @@ SSLClientSocketMac::GetNextProto(std::string* proto,
   proto->clear();
   server_protos->clear();
   return kNextProtoUnsupported;
+}
+
+ServerBoundCertService* SSLClientSocketMac::GetServerBoundCertService() const {
+  return NULL;
 }
 
 int SSLClientSocketMac::InitializeSSLContext() {
@@ -1153,6 +1159,8 @@ int SSLClientSocketMac::DoVerifyCert() {
     flags |= X509Certificate::VERIFY_REV_CHECKING_ENABLED;
   if (ssl_config_.verify_ev_cert)
     flags |= X509Certificate::VERIFY_EV_CERT;
+  if (ssl_config_.cert_io_enabled)
+    flags |= X509Certificate::VERIFY_CERT_IO_ENABLED;
   verifier_.reset(new SingleRequestCertVerifier(cert_verifier_));
   return verifier_->Verify(
       server_cert_, host_and_port_.host(), flags,
@@ -1280,11 +1288,9 @@ int SSLClientSocketMac::DidCompleteHandshake() {
       GetServerCert(ssl_context_));
   if (!new_server_cert)
     return ERR_UNEXPECTED;
-  if (net_log_.IsLoggingBytes()) {
-    net_log_.AddEvent(
-        NetLog::TYPE_SSL_CERTIFICATES_RECEIVED,
-        make_scoped_refptr(new X509CertificateNetLogParam(new_server_cert)));
-  }
+  net_log_.AddEvent(
+      NetLog::TYPE_SSL_CERTIFICATES_RECEIVED,
+      make_scoped_refptr(new X509CertificateNetLogParam(new_server_cert)));
 
   if (renegotiating_ &&
       X509Certificate::IsSameOSCert(server_cert_->os_cert_handle(),

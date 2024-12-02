@@ -8,10 +8,10 @@
 
 #include "base/bind.h"
 #include "base/message_loop.h"
-#include "content/browser/child_process_security_policy.h"
+#include "content/browser/child_process_security_policy_impl.h"
 #include "content/browser/debugger/devtools_netlog_observer.h"
 #include "content/browser/debugger/render_view_devtools_agent_host.h"
-#include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/devtools_client_host.h"
@@ -98,6 +98,12 @@ void DevToolsManagerImpl::InspectElement(DevToolsAgentHost* agent_host,
   agent_host->InspectElement(x, y);
 }
 
+void DevToolsManagerImpl::AddMessageToConsole(DevToolsAgentHost* agent_host,
+                                              ConsoleMessageLevel level,
+                                              const std::string& message) {
+  agent_host->AddMessageToConsole(level, message);
+}
+
 void DevToolsManagerImpl::ClientHostClosing(DevToolsClientHost* client_host) {
   DevToolsAgentHost* agent_host = GetDevToolsAgentHostFor(client_host);
   if (!agent_host) {
@@ -130,11 +136,13 @@ void DevToolsManagerImpl::UnregisterDevToolsClientHostFor(
   client_host->InspectedTabClosing();
 }
 
-void DevToolsManagerImpl::OnNavigatingToPendingEntry(RenderViewHost* rvh,
-                                                     RenderViewHost* dest_rvh,
-                                                     const GURL& gurl) {
-  if (rvh == dest_rvh && rvh->render_view_termination_status() ==
-          base::TERMINATION_STATUS_STILL_RUNNING)
+void DevToolsManagerImpl::OnNavigatingToPendingEntry(
+    RenderViewHost* rvh,
+    RenderViewHost* dest_rvh,
+    const GURL& gurl) {
+  if (rvh == dest_rvh && static_cast<RenderViewHostImpl*>(
+          rvh)->render_view_termination_status() ==
+              base::TERMINATION_STATUS_STILL_RUNNING)
     return;
   int cookie = DetachClientHost(rvh);
   if (cookie != -1) {
@@ -149,8 +157,9 @@ void DevToolsManagerImpl::OnNavigatingToPendingEntry(RenderViewHost* rvh,
   }
 }
 
-void DevToolsManagerImpl::OnCancelPendingNavigation(RenderViewHost* pending,
-                                                    RenderViewHost* current) {
+void DevToolsManagerImpl::OnCancelPendingNavigation(
+    RenderViewHost* pending,
+    RenderViewHost* current) {
   int cookie = DetachClientHost(pending);
   if (cookie != -1) {
     // Navigating to URL in the inspected window.
@@ -240,7 +249,8 @@ void DevToolsManagerImpl::BindClientHost(
 
   int process_id = agent_host->GetRenderProcessId();
   if (process_id != -1)
-    ChildProcessSecurityPolicy::GetInstance()->GrantReadRawCookies(process_id);
+    ChildProcessSecurityPolicyImpl::GetInstance()->GrantReadRawCookies(
+        process_id);
 }
 
 void DevToolsManagerImpl::UnbindClientHost(DevToolsAgentHost* agent_host,
@@ -274,7 +284,8 @@ void DevToolsManagerImpl::UnbindClientHost(DevToolsAgentHost* agent_host,
       return;
   }
   // We've disconnected from the last renderer -> revoke cookie permissions.
-  ChildProcessSecurityPolicy::GetInstance()->RevokeReadRawCookies(process_id);
+  ChildProcessSecurityPolicyImpl::GetInstance()->RevokeReadRawCookies(
+      process_id);
 }
 
 void DevToolsManagerImpl::CloseAllClientHosts() {

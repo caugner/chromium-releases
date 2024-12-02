@@ -2,8 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
+
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
@@ -11,9 +12,14 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/sessions/restore_tab_helper.h"
 #include "chrome/browser/extensions/extension_tabs_module_constants.h"
+#include "chrome/browser/net/url_fixer_upper.h"
+#include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/extension_manifest_constants.h"
+#include "chrome/common/url_constants.h"
 #include "content/public/browser/favicon_status.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/web_contents.h"
+#include "googleurl/src/gurl.h"
 
 namespace keys = extension_tabs_module_constants;
 namespace errors = extension_manifest_errors;
@@ -69,7 +75,9 @@ std::string ExtensionTabUtil::GetWindowShowStateText(const Browser* browser) {
   BrowserWindow* window = browser->window();
   if (window->IsMinimized())
     return keys::kShowStateValueMinimized;
-  if (window->IsMaximized() || window->IsFullscreen())
+  if (window->IsFullscreen())
+    return keys::kShowStateValueFullscreen;
+  if (window->IsMaximized())
     return keys::kShowStateValueMaximized;
   return keys::kShowStateValueNormal;
 }
@@ -147,37 +155,6 @@ DictionaryValue* ExtensionTabUtil::CreateTabValueActive(
   return result;
 }
 
-// if |populate| is true, each window gets a list property |tabs| which contains
-// fully populated tab objects.
-DictionaryValue* ExtensionTabUtil::CreateWindowValue(const Browser* browser,
-                                                     bool populate_tabs) {
-  DCHECK(browser);
-  DCHECK(browser->window());
-  DictionaryValue* result = new DictionaryValue();
-  result->SetInteger(keys::kIdKey, ExtensionTabUtil::GetWindowId(browser));
-  result->SetBoolean(keys::kIncognitoKey,
-                     browser->profile()->IsOffTheRecord());
-  result->SetBoolean(keys::kFocusedKey, browser->window()->IsActive());
-  gfx::Rect bounds;
-  if (browser->window()->IsMaximized() || browser->window()->IsFullscreen())
-    bounds = browser->window()->GetBounds();
-  else
-    bounds = browser->window()->GetRestoredBounds();
-
-  result->SetInteger(keys::kLeftKey, bounds.x());
-  result->SetInteger(keys::kTopKey, bounds.y());
-  result->SetInteger(keys::kWidthKey, bounds.width());
-  result->SetInteger(keys::kHeightKey, bounds.height());
-  result->SetString(keys::kWindowTypeKey, GetWindowTypeText(browser));
-  result->SetString(keys::kShowStateKey, GetWindowShowStateText(browser));
-
-  if (populate_tabs) {
-    result->Set(keys::kTabsKey, ExtensionTabUtil::CreateTabList(browser));
-  }
-
-  return result;
-}
-
 bool ExtensionTabUtil::GetTabStripModel(const WebContents* web_contents,
                                         TabStripModel** tab_strip_model,
                                         int* tab_index) {
@@ -250,4 +227,22 @@ bool ExtensionTabUtil::GetTabById(int tab_id,
     }
   }
   return false;
+}
+
+GURL ExtensionTabUtil::ResolvePossiblyRelativeURL(const std::string& url_string,
+                                                  const Extension* extension) {
+  GURL url = GURL(url_string);
+  if (!url.is_valid())
+    url = extension->GetResourceURL(url_string);
+
+  return url;
+}
+
+bool ExtensionTabUtil::IsCrashURL(const GURL& url) {
+  // Check a fixed-up URL, to normalize the scheme and parse hosts correctly.
+  GURL fixed_url =
+      URLFixerUpper::FixupURL(url.possibly_invalid_spec(), std::string());
+  return (fixed_url.SchemeIs(chrome::kChromeUIScheme) &&
+          (fixed_url.host() == chrome::kChromeUIBrowserCrashHost ||
+           fixed_url.host() == chrome::kChromeUICrashHost));
 }

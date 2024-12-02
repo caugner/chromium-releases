@@ -18,23 +18,15 @@
 #include "base/observer_list.h"
 #include "base/synchronization/lock.h"
 #include "content/browser/download/download_item_impl.h"
-#include "content/browser/download/download_status_updater_delegate.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/download_manager.h"
 
-class DownloadStatusUpdater;
-
-namespace content {
-class DownloadQuery;
-}
-
 class CONTENT_EXPORT DownloadManagerImpl
     : public content::DownloadManager,
-      public DownloadItemImpl::Delegate,
-      public DownloadStatusUpdaterDelegate {
+      public DownloadItemImpl::Delegate {
  public:
   DownloadManagerImpl(content::DownloadManagerDelegate* delegate,
-                      DownloadStatusUpdater* status_updater);
+                      net::NetLog* net_log);
 
   // content::DownloadManager functions.
   virtual void Shutdown() OVERRIDE;
@@ -42,8 +34,6 @@ class CONTENT_EXPORT DownloadManagerImpl
                                      DownloadVector* result) OVERRIDE;
   virtual void GetAllDownloads(const FilePath& dir_path,
                                DownloadVector* result) OVERRIDE;
-  virtual void SearchByQuery(const content::DownloadQuery& query,
-                             DownloadVector* results) OVERRIDE;
   virtual void SearchDownloads(const string16& query,
                                DownloadVector* result) OVERRIDE;
   virtual bool Init(content::BrowserContext* browser_context) OVERRIDE;
@@ -55,10 +45,11 @@ class CONTENT_EXPORT DownloadManagerImpl
   virtual void OnResponseCompleted(int32 download_id, int64 size,
                                    const std::string& hash) OVERRIDE;
   virtual void CancelDownload(int32 download_id) OVERRIDE;
-  virtual void OnDownloadInterrupted(int32 download_id,
-                                     int64 size,
-                                     const std::string& hash_state,
-                                     InterruptReason reason) OVERRIDE;
+  virtual void OnDownloadInterrupted(
+      int32 download_id,
+      int64 size,
+      const std::string& hash_state,
+      content::DownloadInterruptReason reason) OVERRIDE;
   virtual void OnDownloadRenamedToFinalName(int download_id,
                                             const FilePath& full_path,
                                             int uniquifier) OVERRIDE;
@@ -70,18 +61,20 @@ class CONTENT_EXPORT DownloadManagerImpl
                            const GURL& referrer,
                            const std::string& referrer_encoding,
                            bool prefer_cache,
-                           const DownloadSaveInfo& save_info,
-                           content::WebContents* web_contents) OVERRIDE;
+                           int64 post_id,
+                           const content::DownloadSaveInfo& save_info,
+                           content::WebContents* web_contents,
+                           const OnStartedCallback& callback) OVERRIDE;
   virtual void AddObserver(Observer* observer) OVERRIDE;
   virtual void RemoveObserver(Observer* observer) OVERRIDE;
   virtual void OnPersistentStoreQueryComplete(
-      std::vector<DownloadPersistentStoreInfo>* entries) OVERRIDE;
+      std::vector<content::DownloadPersistentStoreInfo>* entries) OVERRIDE;
   virtual void OnItemAddedToPersistentStore(int32 download_id,
                                             int64 db_handle) OVERRIDE;
   virtual int InProgressCount() const OVERRIDE;
   virtual content::BrowserContext* GetBrowserContext() const OVERRIDE;
   virtual FilePath LastDownloadPath() OVERRIDE;
-  virtual void CreateDownloadItem(
+  virtual net::BoundNetLog CreateDownloadItem(
       DownloadCreateInfo* info,
       const DownloadRequestHandle& request_handle) OVERRIDE;
   virtual content::DownloadItem* CreateSavePackageDownloadItem(
@@ -90,8 +83,8 @@ class CONTENT_EXPORT DownloadManagerImpl
       bool is_otr,
       content::DownloadItem::Observer* observer) OVERRIDE;
   virtual void ClearLastDownloadPath() OVERRIDE;
-  virtual void FileSelected(const FilePath& path, void* params) OVERRIDE;
-  virtual void FileSelectionCanceled(void* params) OVERRIDE;
+  virtual void FileSelected(const FilePath& path, int32 download_id) OVERRIDE;
+  virtual void FileSelectionCanceled(int32 download_id) OVERRIDE;
   virtual void RestartDownload(int32 download_id) OVERRIDE;
   virtual void CheckForHistoryFilesRemoval() OVERRIDE;
   virtual content::DownloadItem* GetDownloadItem(int id) OVERRIDE;
@@ -122,11 +115,8 @@ class CONTENT_EXPORT DownloadManagerImpl
   virtual void AssertStateConsistent(
       content::DownloadItem* download) const OVERRIDE;
 
-  // Overridden from DownloadStatusUpdaterDelegate:
-  virtual bool IsDownloadProgressKnown() const OVERRIDE;
-  virtual int64 GetInProgressDownloadCount() const OVERRIDE;
-  virtual int64 GetReceivedDownloadBytes() const OVERRIDE;
-  virtual int64 GetTotalDownloadBytes() const OVERRIDE;
+  // For unit tests only.
+  void SetFileManagerForTesting(DownloadFileManager* file_manager);
 
  private:
   typedef std::set<content::DownloadItem*> DownloadSet;
@@ -162,20 +152,17 @@ class CONTENT_EXPORT DownloadManagerImpl
   // Called back after a target path for the file to be downloaded to has been
   // determined, either automatically based on the suggested file name, or by
   // the user in a Save As dialog box.
-  virtual void ContinueDownloadWithPath(content::DownloadItem* download,
-                                        const FilePath& chosen_file) OVERRIDE;
+  void ContinueDownloadWithPath(content::DownloadItem* download,
+                                const FilePath& chosen_file);
 
   // Retrieves the download from the |download_id|.
   // Returns NULL if the download is not active.
-  virtual content::DownloadItem* GetActiveDownload(int32 download_id) OVERRIDE;
+  content::DownloadItem* GetActiveDownload(int32 download_id);
 
   // Removes |download| from the active and in progress maps.
   // Called when the download is cancelled or has an error.
   // Does nothing if the download is not in the history DB.
   void RemoveFromActiveList(content::DownloadItem* download);
-
-  // Updates the delegate about the overall download progress.
-  void UpdateDownloadProgress();
 
   // Inform observers that the model has changed.
   void NotifyModelChanged();
@@ -195,9 +182,6 @@ class CONTENT_EXPORT DownloadManagerImpl
 
   // Called when Save Page As entry is committed to the persistent store.
   void OnSavePageItemAddedToPersistentStore(int32 download_id, int64 db_handle);
-
-  // For unit tests only.
-  virtual void SetFileManager(DownloadFileManager* file_manager) OVERRIDE;
 
   // |downloads_| is the owning set for all downloads known to the
   // DownloadManager.  This includes downloads started by the user in
@@ -255,9 +239,6 @@ class CONTENT_EXPORT DownloadManagerImpl
   // Non-owning pointer for handling file writing on the download_thread_.
   DownloadFileManager* file_manager_;
 
-  // Non-owning pointer for updating the download status.
-  base::WeakPtr<DownloadStatusUpdater> status_updater_;
-
   // The user's last choice for download directory. This is only used when the
   // user wants us to prompt for a save location for each download.
   FilePath last_download_path_;
@@ -268,6 +249,8 @@ class CONTENT_EXPORT DownloadManagerImpl
   // TODO(rdsmith): Remove when http://crbug.com/85408 is fixed.
   // For debugging only.
   int64 largest_db_handle_in_history_;
+
+  net::NetLog* net_log_;
 
   DISALLOW_COPY_AND_ASSIGN(DownloadManagerImpl);
 };

@@ -68,11 +68,12 @@ var util = {
   },
 
   /**
-   * Given a list of Entries, recurse any DirectoryEntries, and call back
-   * with a list of all file and directory entries encountered (including the
-   * original set).
+   * Given a list of Entries, recurse any DirectoryEntries if |recurse| is true,
+   * and call back with a list of all file and directory entries encountered
+   * (including the original set).
    */
-  recurseAndResolveEntries: function(entries, successCallback, errorCallback) {
+  recurseAndResolveEntries: function(entries, recurse,
+                                     successCallback, errorCallback) {
     var pendingSubdirectories = 0;
     var pendingFiles = 0;
 
@@ -109,12 +110,14 @@ var util = {
     function tallyEntry(entry) {
       if (entry.isDirectory) {
         dirEntries.push(entry);
-        recurseDirectory(entry);
+        if (recurse) {
+          recurseDirectory(entry);
+        }
       } else {
         fileEntries.push(entry);
         pendingFiles++;
-        entry.file(function(file) {
-          fileBytes += file.size;
+        entry.getMetadata(function(metadata) {
+          fileBytes += metadata.size;
           pendingFiles--;
           areWeThereYet();
         });
@@ -208,7 +211,7 @@ var util = {
    * @param {function(!DirEntry)} successCallback The function to invoke for
    *     each DirEntry found.  Also invoked once with null at the end of the
    *     process.
-   * @param {function(string, FileError)} errorCallback The function to invoke
+   * @param {function(FileError)} errorCallback The function to invoke
    *     for each path that cannot be resolved.
    */
   getDirectories: function(dirEntry, params, paths, successCallback,
@@ -233,12 +236,62 @@ var util = {
           getNextDirectory();
         },
         function(err) {
-          errorCallback(path, err);
+          errorCallback(err);
           getNextDirectory();
         });
     }
 
     getNextDirectory();
+  },
+
+  /**
+   * Utility function to resolve multiple files with a single call.
+   *
+   * The successCallback will be invoked once for each directory object
+   * found.  The errorCallback will be invoked once for each
+   * path that could not be resolved.
+   *
+   * The successCallback is invoked with a null entry when all paths have
+   * been processed.
+   *
+   * @param {DirEntry} dirEntry The base directory.
+   * @param {Object} params The parameters to pass to the underlying
+   *     getFile calls.
+   * @param {Array<string>} paths The list of files to resolve.
+   * @param {function(!FileEntry)} successCallback The function to invoke for
+   *     each FileEntry found.  Also invoked once with null at the end of the
+   *     process.
+   * @param {function(FileError)} errorCallback The function to invoke
+   *     for each path that cannot be resolved.
+   */
+  getFiles: function(dirEntry, params, paths, successCallback,
+                     errorCallback) {
+
+    // Copy the params array, since we're going to destroy it.
+    params = [].slice.call(params);
+
+    function onComplete() {
+      successCallback(null);
+    }
+
+    function getNextFile() {
+      var path = paths.shift();
+      if (!path)
+        return onComplete();
+
+      dirEntry.getFile(
+        path, params,
+        function(entry) {
+          successCallback(entry);
+          getNextFile();
+        },
+        function(err) {
+          errorCallback(err);
+          getNextFile();
+        });
+    }
+
+    getNextFile();
   },
 
   /**
@@ -326,6 +379,16 @@ var util = {
   },
 
   /**
+   * Remove a file or a directory.
+   */
+  removeFileOrDirectory: function(entry, onSuccess, onError) {
+    if (entry.isDirectory)
+      entry.removeRecursively(onSuccess, onError);
+    else
+      entry.remove(onSuccess, onError);
+  },
+
+  /**
    * Lookup tables used by bytesToSi.
    */
   units_: ['B', 'KB', 'MB', 'GB', 'TB', 'PB'],
@@ -378,6 +441,33 @@ var util = {
   },
 
   /**
+   * Reads the entire file into a text string.
+   *
+   * @param {string} fileUrl
+   * @param {number} maxSize
+   * @param {function(string)} onSuccess
+   * @param {function(Object)} onError
+   */
+  readTextFromFileURL: function(fileUrl, maxSize, onSuccess, onError) {
+    onError = onError || util.flog('Error reading from ' + fileUrl);
+
+    webkitResolveLocalFileSystemURL(fileUrl, onEntry, onError);
+
+    function onEntry(entry) { entry.file(onFile, onError) }
+
+    function onFile(file) {
+      if (file.size > maxSize) {
+        onError('File is too large (' + file.size + 'b)');
+        return;
+      }
+      var fileReader = new FileReader();
+      fileReader.onloadend = function() { onSuccess(fileReader.result) };
+      fileReader.onerror = onError;
+      fileReader.readAsText(file);
+    }
+  },
+
+  /**
    * Write a blob to a file.
    * Truncates the file first, so the previous content is fully overwritten.
    * @param {FileEntry} entry
@@ -414,5 +504,19 @@ var util = {
     }
 
     return element;
+  },
+
+  /**
+   * Returns a string '[Ctrl-][Alt-][Shift-][Meta-]' depending on the event
+   * modifiers. Convenient for writing out conditions in keyboard handlers.
+   *
+   * @param {Event} event
+   * @return {string}
+   */
+  getKeyModifiers: function(event) {
+    return (event.ctrlKey ? 'Ctrl-' : '') +
+           (event.altKey ? 'Alt-' : '') +
+           (event.shiftKey ? 'Shift-' : '') +
+           (event.metaKey ? 'Meta-' : '');
   }
 };

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,7 @@
  * @fileoverview The recently closed menu: button, model data, and menu.
  */
 
-cr.define('ntp4', function() {
+cr.define('ntp', function() {
   'use strict';
 
   var localStrings = new LocalStrings();
@@ -34,7 +34,7 @@ cr.define('ntp4', function() {
       MenuButton.prototype.decorate.call(this);
       this.menu = new Menu;
       cr.ui.decorate(this.menu, Menu);
-      this.menu.classList.add('recent-menu');
+      this.menu.classList.add('footer-menu');
       document.body.appendChild(this.menu);
 
       this.needsRebuild_ = true;
@@ -80,7 +80,7 @@ cr.define('ntp4', function() {
     addItem_: function(data) {
       var isWindow = data.type == 'window';
       var a = this.ownerDocument.createElement('a');
-      a.className = 'recent-menu-item';
+      a.className = 'footer-menu-item';
       if (isWindow) {
         a.href = '';
         a.classList.add('recent-window');
@@ -94,7 +94,7 @@ cr.define('ntp4', function() {
       function onClick(e) {
         chrome.send('recordAppLaunchByURL',
                     [encodeURIComponent(data.url),
-                     ntp4.APP_LAUNCH.NTP_RECENTLY_CLOSED]);
+                     ntp.APP_LAUNCH.NTP_RECENTLY_CLOSED]);
         var index = Array.prototype.indexOf.call(a.parentNode.children, a);
         chrome.send('reopenTab', [data.sessionId, index,
             e.button, e.altKey, e.ctrlKey, e.metaKey, e.shiftKey]);

@@ -10,7 +10,7 @@
 #include "base/win/enum_variant.h"
 #include "base/win/scoped_comptr.h"
 #include "content/browser/accessibility/browser_accessibility_manager_win.h"
-#include "content/common/view_messages.h"
+#include "content/common/accessibility_messages.h"
 #include "net/base/escape.h"
 #include "ui/base/accessibility/accessible_text_utils.h"
 
@@ -173,11 +173,6 @@ BrowserAccessibility* BrowserAccessibility::Create() {
 
 BrowserAccessibilityWin* BrowserAccessibility::toBrowserAccessibilityWin() {
   return static_cast<BrowserAccessibilityWin*>(this);
-}
-
-std::string BrowserAccessibility::ToString() {
-  // TODO(dtseng): Implement this and human readable role strings.
-  return "";
 }
 
 BrowserAccessibilityWin::BrowserAccessibilityWin()
@@ -2727,14 +2722,14 @@ void BrowserAccessibilityWin::PostInitialize() {
 
   // Fire an event when an alert first appears.
   if (role_ == WebAccessibility::ROLE_ALERT && first_time_)
-    manager_->NotifyAccessibilityEvent(ViewHostMsg_AccEvent::ALERT, this);
+    manager_->NotifyAccessibilityEvent(AccessibilityNotificationAlert, this);
 
   // Fire events if text has changed.
   string16 text = TextForIAccessibleText();
   if (previous_text_ != text) {
     if (!previous_text_.empty() && !text.empty()) {
       manager_->NotifyAccessibilityEvent(
-          ViewHostMsg_AccEvent::OBJECT_SHOW, this);
+          AccessibilityNotificationObjectShow, this);
     }
 
     // TODO(dmazzoni): Look into HIDE events, too.
@@ -3005,6 +3000,14 @@ void BrowserAccessibilityWin::InitRoleAndState() {
       break;
     case WebAccessibility::ROLE_BUTTON:
       ia_role_ = ROLE_SYSTEM_PUSHBUTTON;
+      bool is_aria_pressed_defined;
+      bool is_mixed;
+      if (GetAriaTristate("aria-pressed", &is_aria_pressed_defined, &is_mixed))
+        ia_state_ |= STATE_SYSTEM_PRESSED;
+      if (is_aria_pressed_defined)
+        ia2_role_ = IA2_ROLE_TOGGLE_BUTTON;
+      if (is_mixed)
+        ia_state_ |= STATE_SYSTEM_MIXED;
       break;
     case WebAccessibility::ROLE_CELL:
       ia_role_ = ROLE_SYSTEM_CELL;
@@ -3060,8 +3063,12 @@ void BrowserAccessibilityWin::InitRoleAndState() {
       ia_role_ = ROLE_SYSTEM_TABLE;
       ia_state_|= STATE_SYSTEM_READONLY;
       break;
-    case WebAccessibility::ROLE_GROUP:
-      if (html_tag == L"li") {
+    case WebAccessibility::ROLE_GROUP: {
+      string16 aria_role;
+      GetStringAttribute(WebAccessibility::ATTR_ROLE, &aria_role);
+      if (aria_role == L"group" || html_tag == L"fieldset") {
+        ia_role_ = ROLE_SYSTEM_GROUPING;
+      } else if (html_tag == L"li") {
         ia_role_ = ROLE_SYSTEM_LISTITEM;
       } else if (html_tag == L"form") {
         role_name_ = html_tag;
@@ -3078,6 +3085,7 @@ void BrowserAccessibilityWin::InitRoleAndState() {
       }
       ia_state_|= STATE_SYSTEM_READONLY;
       break;
+    }
     case WebAccessibility::ROLE_GROW_AREA:
       ia_role_ = ROLE_SYSTEM_GRIP;
       ia_state_|= STATE_SYSTEM_READONLY;
@@ -3243,10 +3251,15 @@ void BrowserAccessibilityWin::InitRoleAndState() {
       ia2_role_ = IA2_ROLE_SECTION;
       ia_state_|= STATE_SYSTEM_READONLY;
       break;
-    case WebAccessibility::ROLE_TAB_GROUP:
-    case WebAccessibility::ROLE_TAB_LIST:
-    case WebAccessibility::ROLE_TAB_PANEL:
+    case WebAccessibility::ROLE_TAB_GROUP_UNUSED:
+      NOTREACHED();
       ia_role_ = ROLE_SYSTEM_PAGETABLIST;
+      break;
+    case WebAccessibility::ROLE_TAB_LIST:
+      ia_role_ = ROLE_SYSTEM_PAGETABLIST;
+      break;
+    case WebAccessibility::ROLE_TAB_PANEL:
+      ia_role_ = ROLE_SYSTEM_PROPERTYPAGE;
       break;
     case WebAccessibility::ROLE_TEXTAREA:
       ia_role_ = ROLE_SYSTEM_TEXT;

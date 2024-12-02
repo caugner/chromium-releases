@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
+#include "base/callback_helpers.h"
 #include "base/message_loop.h"
 #include "base/stl_util.h"
 
@@ -21,7 +22,6 @@ class CompositeFilter::FilterHostImpl : public FilterHost {
   virtual void SetError(PipelineStatus error) OVERRIDE;
   virtual base::TimeDelta GetTime() const OVERRIDE;
   virtual base::TimeDelta GetDuration() const OVERRIDE;
-  virtual void SetTime(base::TimeDelta time) OVERRIDE;
   virtual void SetNaturalVideoSize(const gfx::Size& size) OVERRIDE;
   virtual void NotifyEnded() OVERRIDE;
   virtual void DisableAudioRenderer() OVERRIDE;
@@ -49,17 +49,13 @@ CompositeFilter::~CompositeFilter() {
   filters_.clear();
 }
 
-bool CompositeFilter::AddFilter(scoped_refptr<Filter> filter) {
-  // TODO(fischman,scherkus): s/bool/void/ the return type and CHECK on failure
-  // of the sanity-checks that return false today.
+void CompositeFilter::AddFilter(scoped_refptr<Filter> filter) {
   DCHECK_EQ(message_loop_, MessageLoop::current());
-  if (!filter.get() || state_ != kCreated || !host())
-    return false;
+  CHECK(filter && state_ == kCreated && host());
 
   // Register ourselves as the filter's host.
   filter->set_host(host_impl_.get());
   filters_.push_back(make_scoped_refptr(filter.get()));
-  return true;
 }
 
 void CompositeFilter::RemoveFilter(scoped_refptr<Filter> filter) {
@@ -89,71 +85,71 @@ FilterHost* CompositeFilter::host() {
   return host_impl_.get() ? host_impl_->host() : NULL;
 }
 
-void CompositeFilter::Play(const base::Closure& play_callback) {
+void CompositeFilter::Play(const base::Closure& play_cb) {
   DCHECK_EQ(message_loop_, MessageLoop::current());
   if (IsOperationPending()) {
     SendErrorToHost(PIPELINE_ERROR_OPERATION_PENDING);
-    play_callback.Run();
+    play_cb.Run();
     return;
   } else if (state_ == kPlaying) {
-    play_callback.Run();
+    play_cb.Run();
     return;
   } else if (!host() || (state_ != kPaused && state_ != kCreated)) {
     SendErrorToHost(PIPELINE_ERROR_INVALID_STATE);
-    play_callback.Run();
+    play_cb.Run();
     return;
   }
 
   ChangeState(kPlayPending);
-  callback_ = play_callback;
+  callback_ = play_cb;
   StartSerialCallSequence();
 }
 
-void CompositeFilter::Pause(const base::Closure& pause_callback) {
+void CompositeFilter::Pause(const base::Closure& pause_cb) {
   DCHECK_EQ(message_loop_, MessageLoop::current());
   if (IsOperationPending()) {
     SendErrorToHost(PIPELINE_ERROR_OPERATION_PENDING);
-    pause_callback.Run();
+    pause_cb.Run();
     return;
   } else if (state_ == kPaused) {
-    pause_callback.Run();
+    pause_cb.Run();
     return;
   } else if (!host() || state_ != kPlaying) {
     SendErrorToHost(PIPELINE_ERROR_INVALID_STATE);
-    pause_callback.Run();
+    pause_cb.Run();
     return;
   }
 
   ChangeState(kPausePending);
-  callback_ = pause_callback;
+  callback_ = pause_cb;
   StartSerialCallSequence();
 }
 
-void CompositeFilter::Flush(const base::Closure& flush_callback) {
+void CompositeFilter::Flush(const base::Closure& flush_cb) {
   DCHECK_EQ(message_loop_, MessageLoop::current());
   if (IsOperationPending()) {
     SendErrorToHost(PIPELINE_ERROR_OPERATION_PENDING);
-    flush_callback.Run();
+    flush_cb.Run();
     return;
   } else if (!host() || (state_ != kCreated && state_ != kPaused)) {
     SendErrorToHost(PIPELINE_ERROR_INVALID_STATE);
-    flush_callback.Run();
+    flush_cb.Run();
     return;
   }
 
   ChangeState(kFlushPending);
-  callback_ = flush_callback;
+  callback_ = flush_cb;
   StartParallelCallSequence();
 }
 
-void CompositeFilter::Stop(const base::Closure& stop_callback) {
+void CompositeFilter::Stop(const base::Closure& stop_cb) {
   DCHECK_EQ(message_loop_, MessageLoop::current());
   if (!host()) {
     SendErrorToHost(PIPELINE_ERROR_INVALID_STATE);
-    stop_callback.Run();
+    stop_cb.Run();
     return;
   } else if (state_ == kStopped) {
-    stop_callback.Run();
+    stop_cb.Run();
     return;
   }
 
@@ -178,7 +174,7 @@ void CompositeFilter::Stop(const base::Closure& stop_callback) {
       break;
     default:
       SendErrorToHost(PIPELINE_ERROR_INVALID_STATE);
-      stop_callback.Run();
+      stop_cb.Run();
       return;
   }
 
@@ -187,7 +183,7 @@ void CompositeFilter::Stop(const base::Closure& stop_callback) {
     status_cb_.Reset();
   }
 
-  callback_ = stop_callback;
+  callback_ = stop_cb;
   if (state_ == kStopPending) {
     StartSerialCallSequence();
   }
@@ -203,7 +199,7 @@ void CompositeFilter::SetPlaybackRate(float playback_rate) {
 }
 
 void CompositeFilter::Seek(base::TimeDelta time,
-                           const FilterStatusCB& seek_cb) {
+                           const PipelineStatusCB& seek_cb) {
   DCHECK_EQ(message_loop_, MessageLoop::current());
 
   if (IsOperationPending()) {
@@ -291,14 +287,14 @@ void CompositeFilter::DispatchPendingCallback(PipelineStatus status) {
   DCHECK(status_cb_.is_null() ^ callback_.is_null());
 
   if (!status_cb_.is_null()) {
-    ResetAndRunCB(&status_cb_, status);
+    base::ResetAndReturn(&status_cb_).Run(status);
     return;
   }
 
   if (!callback_.is_null()) {
     if (status != PIPELINE_OK)
       SendErrorToHost(status);
-    ResetAndRunCB(&callback_);
+    base::ResetAndReturn(&callback_).Run();
   }
 }
 
@@ -443,17 +439,6 @@ void CompositeFilter::OnStatusCB(const base::Closure& callback,
 }
 
 void CompositeFilter::SetError(PipelineStatus error) {
-  // TODO(acolwell): Temporary hack to handle errors that occur
-  // during filter initialization. In this case we just forward
-  // the error to the host even if it is on the wrong thread. We
-  // have to do this because if we defer the call, we can't be
-  // sure the host will get the error before the "init done" callback
-  // is executed. This will be cleaned up when filter init is refactored.
-  if (state_ == kCreated) {
-    SendErrorToHost(error);
-    return;
-  }
-
   if (message_loop_ != MessageLoop::current()) {
     message_loop_->PostTask(FROM_HERE,
         base::Bind(&CompositeFilter::SetError, this, error));
@@ -461,6 +446,7 @@ void CompositeFilter::SetError(PipelineStatus error) {
   }
 
   DCHECK_EQ(message_loop_, MessageLoop::current());
+  DCHECK_NE(state_, kCreated);
 
   // Drop errors recieved while stopping or stopped.
   // This shields the owner of this object from having
@@ -494,10 +480,6 @@ base::TimeDelta CompositeFilter::FilterHostImpl::GetTime() const {
 
 base::TimeDelta CompositeFilter::FilterHostImpl::GetDuration() const {
   return host_->GetDuration();
-}
-
-void CompositeFilter::FilterHostImpl::SetTime(base::TimeDelta time) {
-  host_->SetTime(time);
 }
 
 void CompositeFilter::FilterHostImpl::SetNaturalVideoSize(

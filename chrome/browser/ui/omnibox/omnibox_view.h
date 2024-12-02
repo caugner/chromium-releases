@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -78,14 +78,11 @@ class OmniboxView {
   //
   // |selected_line| is passed to SendOpenNotification(); see comments there.
   //
-  // If the URL was expanded from a keyword, |keyword| is that keyword.
-  //
   // This may close the popup.
   virtual void OpenMatch(const AutocompleteMatch& match,
                          WindowOpenDisposition disposition,
                          const GURL& alternate_nav_url,
-                         size_t selected_line,
-                         const string16& keyword) = 0;
+                         size_t selected_line) = 0;
 
   // Returns the current text of the edit control, which could be the
   // "temporary" text set by the popup, the "permanent" text set by the
@@ -109,7 +106,9 @@ class OmniboxView {
 
   // Sets the window text and the caret position.
   virtual void SetWindowTextAndCaretPos(const string16& text,
-                                        size_t caret_pos) = 0;
+                                        size_t caret_pos,
+                                        bool update_popup,
+                                        bool notify_text_changed) = 0;
 
   // Sets the edit to forced query mode.  Practically speaking, this means that
   // if the edit is not in forced query mode, its text is set to "?" with the

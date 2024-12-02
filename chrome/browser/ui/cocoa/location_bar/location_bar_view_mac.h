@@ -17,12 +17,14 @@
 #include "chrome/browser/autocomplete/autocomplete_edit.h"
 #include "chrome/browser/extensions/image_loading_tracker.h"
 #include "chrome/browser/prefs/pref_member.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/cocoa/omnibox/omnibox_view_mac.h"
 #include "chrome/browser/ui/omnibox/location_bar.h"
 #include "chrome/browser/ui/toolbar/toolbar_model.h"
 #include "chrome/common/content_settings_types.h"
 
 @class AutocompleteTextField;
+class ChromeToMobileDecoration;
 class CommandUpdater;
 class ContentSettingDecoration;
 class EVBubbleDecoration;
@@ -42,7 +44,8 @@ class ToolbarModel;
 class LocationBarViewMac : public AutocompleteEditController,
                            public LocationBar,
                            public LocationBarTesting,
-                           public content::NotificationObserver {
+                           public content::NotificationObserver,
+                           public CommandUpdater::CommandObserver {
  public:
   LocationBarViewMac(AutocompleteTextField* field,
                      CommandUpdater* command_updater,
@@ -84,8 +87,14 @@ class LocationBarViewMac : public AutocompleteEditController,
   // Set the starred state of the bookmark star.
   void SetStarred(bool starred);
 
+  // Set ChromeToMobileDecoration's lit state (to update the icon).
+  void SetChromeToMobileDecorationLit(bool lit);
+
   // Get the point on the star for the bookmark bubble to aim at.
   NSPoint GetBookmarkBubblePoint() const;
+
+  // Get the point on the Chrome To Mobile icon for anchoring its bubble.
+  NSPoint GetChromeToMobileBubblePoint() const;
 
   // Get the point in the security icon at which the page info bubble aims.
   NSPoint GetPageInfoBubblePoint() const;
@@ -150,6 +159,9 @@ class LocationBarViewMac : public AutocompleteEditController,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
 
+  // Overridden from CommandUpdater::CommandObserver.
+  virtual void EnabledStateChangedForCommand(int id, bool enabled) OVERRIDE;
+
  private:
   // Posts |notification| to the default notification center.
   void PostNotification(NSString* notification);
@@ -172,6 +184,9 @@ class LocationBarViewMac : public AutocompleteEditController,
 
   // Checks if the bookmark star should be enabled or not.
   bool IsStarEnabled();
+
+  // Update the Chrome To Mobile page action visibility and command state.
+  void UpdateChromeToMobileEnabled();
 
   scoped_ptr<OmniboxViewMac> omnibox_view_;
 
@@ -199,6 +214,9 @@ class LocationBarViewMac : public AutocompleteEditController,
 
   // Bookmark star right of page actions.
   scoped_ptr<StarDecoration> star_decoration_;
+
+  // Chrome To Mobile page action icon.
+  scoped_ptr<ChromeToMobileDecoration> chrome_to_mobile_decoration_;
 
   // Any installed Page Actions.
   ScopedVector<PageActionDecoration> page_action_decorations_;

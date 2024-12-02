@@ -27,10 +27,6 @@
 #include "googleurl/src/gurl.h"
 #include "ui/gfx/rect.h"
 
-#if defined(TOOLKIT_USES_GTK)
-#include "chrome/browser/chromeos/legacy_window_manager/wm_message_listener.h"
-#endif
-
 namespace chromeos {
 
 class LoginDisplayHost;
@@ -77,6 +73,8 @@ class ExistingUserController : public LoginDisplay::Delegate,
                              const std::string& password) OVERRIDE;
   virtual void Login(const std::string& username,
                      const std::string& password) OVERRIDE;
+  virtual void Signout() OVERRIDE;
+  virtual void LoginAsDemoUser() OVERRIDE;
   virtual void LoginAsGuest() OVERRIDE;
   virtual void OnUserSelected(const std::string& username) OVERRIDE;
   virtual void OnStartEnterpriseEnrollment() OVERRIDE;
@@ -112,12 +110,10 @@ class ExistingUserController : public LoginDisplay::Delegate,
   virtual void OnLoginSuccess(
       const std::string& username,
       const std::string& password,
-      const GaiaAuthConsumer::ClientLoginResult& credentials,
       bool pending_requests,
       bool using_oauth) OVERRIDE;
   virtual void OnOffTheRecordLoginSuccess() OVERRIDE;
-  virtual void OnPasswordChangeDetected(
-      const GaiaAuthConsumer::ClientLoginResult& credentials) OVERRIDE;
+  virtual void OnPasswordChangeDetected() OVERRIDE;
   virtual void WhiteListCheckFailed(const std::string& email) OVERRIDE;
   virtual void OnOnlineChecked(
       const std::string& username, bool success) OVERRIDE;
@@ -168,10 +164,6 @@ class ExistingUserController : public LoginDisplay::Delegate,
     login_performer_delegate_.reset(d);
   }
 
-  // Passes owner user to cryptohomed. Called right before mounting a user.
-  // Subsequent disk space control checks are invoked by cryptohomed timer.
-  void SetOwnerUserInCryptohome();
-
   // Updates the |login_display_| attached to this controller.
   void UpdateLoginDisplay(const UserList& users);
 
@@ -218,9 +210,6 @@ class ExistingUserController : public LoginDisplay::Delegate,
   // Whether everything is ready to launch the browser.
   bool ready_for_browser_launch_;
 
-  // Whether two factor credentials were used.
-  bool two_factor_credentials_;
-
   // Used to verify ownership before starting enterprise enrollment.
   scoped_ptr<OwnershipStatusChecker> ownership_checker_;
 
@@ -253,7 +242,7 @@ class ExistingUserController : public LoginDisplay::Delegate,
   // from showing the screen until a successful login is performed.
   base::Time time_init_;
 
-  FRIEND_TEST_ALL_PREFIXES(ExistingUserControllerTest, NewUserLogin);
+  FRIEND_TEST_ALL_PREFIXES(ExistingUserControllerTest, ExistingUserLogin);
 
   DISALLOW_COPY_AND_ASSIGN(ExistingUserController);
 };

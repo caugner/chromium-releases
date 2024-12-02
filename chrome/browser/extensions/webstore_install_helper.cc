@@ -10,12 +10,14 @@
 #include "base/values.h"
 #include "chrome/common/chrome_utility_messages.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/utility_process_host.h"
 #include "content/public/common/url_fetcher.h"
 #include "net/base/load_flags.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_status.h"
 
 using content::BrowserThread;
+using content::UtilityProcessHost;
 
 namespace {
 
@@ -59,7 +61,8 @@ void WebstoreInstallHelper::Start() {
     url_fetcher_.reset(content::URLFetcher::Create(
         icon_url_, content::URLFetcher::GET, this));
     url_fetcher_->SetRequestContext(context_getter_);
-    url_fetcher_->SetLoadFlags(net::LOAD_DO_NOT_SAVE_COOKIES);
+    url_fetcher_->SetLoadFlags(net::LOAD_DO_NOT_SAVE_COOKIES |
+                               net::LOAD_DO_NOT_SEND_COOKIES);
 
     url_fetcher_->Start();
     // We'll get called back in OnURLFetchComplete.
@@ -69,8 +72,8 @@ void WebstoreInstallHelper::Start() {
 void WebstoreInstallHelper::StartWorkOnIOThread() {
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   utility_host_ =
-      (new UtilityProcessHost(this, BrowserThread::IO))->AsWeakPtr();
-  utility_host_->set_use_linux_zygote(true);
+      UtilityProcessHost::Create(this, BrowserThread::IO)->AsWeakPtr();
+  utility_host_->EnableZygote();
   utility_host_->StartBatchMode();
 
   if (!icon_base64_data_.empty())

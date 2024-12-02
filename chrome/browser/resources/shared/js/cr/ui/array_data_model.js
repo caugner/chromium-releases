@@ -7,8 +7,8 @@
  */
 
 cr.define('cr.ui', function() {
-  const EventTarget = cr.EventTarget;
-  const Event = cr.Event;
+  /** @const */ var EventTarget = cr.EventTarget;
+  /** @const */ var Event = cr.Event;
 
   /**
    * A data model that wraps a simple array and supports sorting by storing
@@ -106,7 +106,11 @@ cr.define('cr.ui', function() {
      * @return {number} The index of the first found element or -1 if not found.
      */
     indexOf: function(item, opt_fromIndex) {
-      return this.array_.indexOf(item, opt_fromIndex);
+      for (var i = opt_fromIndex || 0; i < this.indexes_.length; i++) {
+        if (item === this.item(i))
+          return i;
+      }
+      return -1;
     },
 
     /**
@@ -116,7 +120,9 @@ cr.define('cr.ui', function() {
      * @return {Array} An array of elements in the selected range.
      */
     slice: function(opt_from, opt_to) {
-      return this.array_.slice.apply(this.array_, arguments);
+      var arr = this.array_;
+      return this.indexes_.slice(opt_from, opt_to).map(
+          function(index) { return arr[index] });
     },
 
     /**

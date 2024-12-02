@@ -3,7 +3,9 @@
 // found in the LICENSE file.
 
 #include "chrome/browser/notifications/balloon_host.h"
+
 #include "chrome/browser/notifications/balloon.h"
+#include "chrome/browser/notifications/balloon_collection_impl.h"
 #include "chrome/browser/notifications/notification.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_preferences_util.h"
@@ -11,15 +13,15 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/webui/chrome_web_ui_controller_factory.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/chrome_view_type.h"
 #include "chrome/common/extensions/extension_messages.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/common/chrome_view_type.h"
-#include "content/browser/renderer_host/render_view_host.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/site_instance.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/bindings_policy.h"
@@ -68,9 +70,9 @@ void BalloonHost::HandleMouseDown() {
   balloon_->OnClick();
 }
 
-void BalloonHost::UpdatePreferredSize(WebContents* source,
-                                      const gfx::Size& pref_size) {
-  balloon_->SetContentPreferredSize(pref_size);
+void BalloonHost::ResizeDueToAutoResize(WebContents* source,
+                                        const gfx::Size& pref_size) {
+  balloon_->ResizeDueToAutoResize(pref_size);
 }
 
 void BalloonHost::AddNewContents(WebContents* source,
@@ -85,11 +87,12 @@ void BalloonHost::AddNewContents(WebContents* source,
   browser->AddWebContents(new_contents, disposition, initial_pos, user_gesture);
 }
 
-void BalloonHost::RenderViewCreated(RenderViewHost* render_view_host) {
-  render_view_host->DisableScrollbarsForThreshold(
-      balloon_->min_scrollbar_size());
-  render_view_host->WasResized();
-  render_view_host->EnablePreferredSizeMode();
+void BalloonHost::RenderViewCreated(content::RenderViewHost* render_view_host) {
+  gfx::Size min_size(BalloonCollectionImpl::min_balloon_width(),
+                     BalloonCollectionImpl::min_balloon_height());
+  gfx::Size max_size(BalloonCollectionImpl::max_balloon_width(),
+                     BalloonCollectionImpl::max_balloon_height());
+  render_view_host->EnableAutoResize(min_size, max_size);
 
   if (enable_web_ui_)
     render_view_host->AllowBindings(content::BINDINGS_POLICY_WEB_UI);

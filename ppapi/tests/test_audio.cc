@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -52,11 +52,19 @@ std::string TestAudio::TestCreation() {
     PP_AUDIOMINSAMPLEFRAMECOUNT,
     PP_AUDIOMAXSAMPLEFRAMECOUNT,
     // Include some "okay-looking" frame counts; check their validity below.
+    PP_AUDIOSAMPLERATE_44100 / 100,  // 10ms @ 44.1kHz
+    PP_AUDIOSAMPLERATE_48000 / 100,  // 10ms @ 48kHz
+    2 * PP_AUDIOSAMPLERATE_44100 / 100,  // 20ms @ 44.1kHz
+    2 * PP_AUDIOSAMPLERATE_48000 / 100,  // 20ms @ 48kHz
     1024,
     2048,
     4096
   };
-
+  PP_AudioSampleRate sample_rate = audio_config_interface_->RecommendSampleRate(
+      instance_->pp_instance());
+  ASSERT_TRUE(sample_rate == PP_AUDIOSAMPLERATE_NONE ||
+              sample_rate == PP_AUDIOSAMPLERATE_44100 ||
+              sample_rate == PP_AUDIOSAMPLERATE_48000);
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kSampleRates); i++) {
     PP_AudioSampleRate sample_rate = kSampleRates[i];
 
@@ -64,7 +72,7 @@ std::string TestAudio::TestCreation() {
       // Make a config, create the audio resource, and release the config.
       uint32_t request_frame_count = kRequestFrameCounts[j];
       uint32_t frame_count = audio_config_interface_->RecommendSampleFrameCount(
-          sample_rate, request_frame_count);
+          instance_->pp_instance(), sample_rate, request_frame_count);
       PP_Resource ac = audio_config_interface_->CreateStereo16Bit(
           instance_->pp_instance(), sample_rate, frame_count);
       ASSERT_TRUE(ac);
@@ -106,7 +114,7 @@ std::string TestAudio::TestDestroyNoStop() {
   const uint32_t kRequestFrameCount = 2048;
 
   uint32_t frame_count = audio_config_interface_->RecommendSampleFrameCount(
-      kSampleRate, kRequestFrameCount);
+      instance_->pp_instance(), kSampleRate, kRequestFrameCount);
   PP_Resource ac = audio_config_interface_->CreateStereo16Bit(
       instance_->pp_instance(), kSampleRate, frame_count);
   ASSERT_TRUE(ac);
@@ -133,7 +141,7 @@ std::string TestAudio::TestFailures() {
 
   // We want a valid config for some of our tests of |Create()|.
   uint32_t frame_count = audio_config_interface_->RecommendSampleFrameCount(
-      kSampleRate, kRequestFrameCount);
+      instance_->pp_instance(), kSampleRate, kRequestFrameCount);
   PP_Resource ac = audio_config_interface_->CreateStereo16Bit(
       instance_->pp_instance(), kSampleRate, frame_count);
   ASSERT_TRUE(ac);

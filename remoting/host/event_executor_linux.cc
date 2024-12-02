@@ -1,8 +1,10 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "remoting/host/event_executor.h"
+
+#include <set>
 
 #include <X11/Xlib.h>
 #include <X11/XF86keysym.h>
@@ -18,27 +20,42 @@
 
 namespace remoting {
 
-using protocol::MouseEvent;
+using protocol::ClipboardEvent;
 using protocol::KeyEvent;
+using protocol::MouseEvent;
 
 namespace {
+
+// USB to XKB keycode map table.
+#define USB_KEYMAP(usb, xkb, win, mac) {usb, xkb}
+#include "remoting/host/usb_keycode_map.h"
 
 // A class to generate events on Linux.
 class EventExecutorLinux : public EventExecutor {
  public:
   EventExecutorLinux(MessageLoop* message_loop, Capturer* capturer);
-  virtual ~EventExecutorLinux() {};
+  virtual ~EventExecutorLinux();
 
   bool Init();
 
+  // Clipboard stub interface.
+  virtual void InjectClipboardEvent(const ClipboardEvent& event)
+      OVERRIDE;
+
+  // InputStub interface.
   virtual void InjectKeyEvent(const KeyEvent& event) OVERRIDE;
   virtual void InjectMouseEvent(const MouseEvent& event) OVERRIDE;
 
  private:
+  // |mode| is one of the AutoRepeatModeOn, AutoRepeatModeOff,
+  // AutoRepeatModeDefault constants defined by the XChangeKeyboardControl()
+  // API.
+  void SetAutoRepeatForKey(int keycode, int mode);
   void InjectScrollWheelClicks(int button, int count);
 
   MessageLoop* message_loop_;
-  Capturer* capturer_;
+
+  std::set<int> pressed_keys_;
 
   // X11 graphics context.
   Display* display_;
@@ -92,7 +109,7 @@ int VerticalScrollWheelToX11ButtonNumber(int dy) {
 // host's keyboard layout (see http://crbug.com/74550 ).
 const int kUsVkeyToKeysym[256] = {
   // 0x00 - 0x07
-  -1, -1, -1, -1,
+  -1, -1, -1, XK_Cancel,
   // 0x04 - 0x07
   -1, -1, -1, -1,
   // 0x08 - 0x0B
@@ -103,9 +120,9 @@ const int kUsVkeyToKeysym[256] = {
   // 0x10 - 0x13
   XK_Shift_L, XK_Control_L, XK_Alt_L, XK_Pause,
   // 0x14 - 0x17
-  XK_Caps_Lock, XK_Kana_Shift, -1, /* VKEY_JUNJA */ -1,
+  XK_Caps_Lock, XK_Kana_Shift, -1, XK_Hangul_Jeonja,
   // 0x18 - 0x1B
-  /* VKEY_FINAL */ -1, XK_Kanji, -1, XK_Escape,
+  XK_Hangul_End, XK_Kanji, -1, XK_Escape,
   // 0x1C - 0x1F
   XK_Henkan, XK_Muhenkan, /* VKEY_ACCEPT */ -1, XK_Mode_switch,
 
@@ -182,7 +199,7 @@ const int kUsVkeyToKeysym[256] = {
   -1, -1, -1, -1,
 
   // 0xA0 - 0xA3
-  XK_Num_Lock, XK_Scroll_Lock, XK_Control_L, XK_Control_R,
+  XK_Shift_L, XK_Shift_R, XK_Control_L, XK_Control_R,
   // 0xA4 - 0xA7
   XK_Meta_L, XK_Meta_R, XF86XK_Back, XF86XK_Forward,
   // 0xA8 - 0xAB
@@ -247,14 +264,28 @@ int ChromotocolKeycodeToX11Keysym(int32_t keycode) {
   return kUsVkeyToKeysym[keycode];
 }
 
+uint16_t UsbKeycodeToXkbKeycode(uint32_t usb_keycode) {
+  if (usb_keycode == 0)
+    return 0;
+
+  for (uint i = 0; i < arraysize(usb_keycode_map); i++)
+    if (usb_keycode_map[i].usb_keycode == usb_keycode)
+      return usb_keycode_map[i].native_keycode;
+
+  return 0;
+}
+
 EventExecutorLinux::EventExecutorLinux(MessageLoop* message_loop,
                                        Capturer* capturer)
     : message_loop_(message_loop),
-      capturer_(capturer),
       display_(XOpenDisplay(NULL)),
       root_window_(BadValue),
       width_(0),
       height_(0) {
+}
+
+EventExecutorLinux::~EventExecutorLinux() {
+  CHECK(pressed_keys_.empty());
 }
 
 bool EventExecutorLinux::Init() {
@@ -289,6 +320,10 @@ bool EventExecutorLinux::Init() {
   return true;
 }
 
+void EventExecutorLinux::InjectClipboardEvent(const ClipboardEvent& event) {
+  // TODO(simonmorris): Implement clipboard injection.
+}
+
 void EventExecutorLinux::InjectKeyEvent(const KeyEvent& event) {
   if (MessageLoop::current() != message_loop_) {
     message_loop_->PostTask(
@@ -298,27 +333,69 @@ void EventExecutorLinux::InjectKeyEvent(const KeyEvent& event) {
     return;
   }
 
-  // TODO(ajwong): This will only work for QWERTY keyboards.
-  int keysym = ChromotocolKeycodeToX11Keysym(event.keycode());
+  int keycode = 0;
+  if (event.has_usb_keycode() && event.usb_keycode() != 0) {
+    keycode = UsbKeycodeToXkbKeycode(event.usb_keycode());
+    VLOG(3) << "Got usb keycode: " << std::hex << event.usb_keycode()
+            << " to xkb keycode: " << keycode << std::dec;
+  } else {
+    // Fall back to keysym translation.
+    // TODO(garykac) Remove this once we switch entirely over to USB keycodes.
+    int keysym = ChromotocolKeycodeToX11Keysym(event.keycode());
 
-  if (keysym == -1) {
-    LOG(WARNING) << "Ignoring unknown key: " << event.keycode();
-    return;
+    VLOG(3) << "Converting Win vkey: " << std::hex << event.keycode()
+            << " to xkeysym: " << keysym << std::dec;
+    if (keysym == -1) {
+      LOG(WARNING) << "Ignoring unknown key: " << event.keycode();
+      return;
+    }
+
+    // Translate the keysym into a keycode understandable by the X display.
+    keycode = XKeysymToKeycode(display_, keysym);
+    VLOG(3) << "Converting xkeysym: " << std::hex << keysym
+            << " to x11 keycode: " << keycode << std::dec;
+    if (keycode == 0) {
+      LOG(WARNING) << "Ignoring undefined keysym: " << keysym
+                   << " for key: " << event.keycode();
+      return;
+    }
+
+    VLOG(3) << "Got pepper key: " << event.keycode()
+            << " sending keysym: " << keysym
+            << " to keycode: " << keycode;
   }
 
-  // Translate the keysym into a keycode understandable by the X display.
-  int keycode = XKeysymToKeycode(display_, keysym);
-  if (keycode == 0) {
-    LOG(WARNING) << "Ignoring undefined keysym: " << keysym
-                 << " for key: " << event.keycode();
-    return;
+  if (event.pressed()) {
+    if (pressed_keys_.find(keycode) != pressed_keys_.end()) {
+      // Key is already held down, so lift the key up to ensure this repeated
+      // press takes effect.
+      XTestFakeKeyEvent(display_, keycode, False, CurrentTime);
+    } else {
+      // Key is not currently held down, so disable auto-repeat for this
+      // key to avoid repeated presses in case network congestion delays the
+      // key-released event from the client.
+      SetAutoRepeatForKey(keycode, AutoRepeatModeOff);
+    }
+    pressed_keys_.insert(keycode);
+  } else {
+    pressed_keys_.erase(keycode);
+
+    // Reset the AutoRepeatMode for the key that has been lifted.  In the IT2Me
+    // case, this ensures that key-repeating will continue to work normally
+    // for the local user of the host machine.  "ModeDefault" is used instead
+    // of "ModeOn", since some keys (such as Shift) should not auto-repeat.
+    SetAutoRepeatForKey(keycode, AutoRepeatModeDefault);
   }
 
-  VLOG(3) << "Got pepper key: " << event.keycode()
-          << " sending keysym: " << keysym
-          << " to keycode: " << keycode;
   XTestFakeKeyEvent(display_, keycode, event.pressed(), CurrentTime);
   XFlush(display_);
+}
+
+void EventExecutorLinux::SetAutoRepeatForKey(int keycode, int mode) {
+  XKeyboardControl control;
+  control.key = keycode;
+  control.auto_repeat_mode = mode;
+  XChangeKeyboardControl(display_, KBKey | KBAutoRepeatMode, &control);
 }
 
 void EventExecutorLinux::InjectScrollWheelClicks(int button, int count) {
@@ -386,14 +463,14 @@ void EventExecutorLinux::InjectMouseEvent(const MouseEvent& event) {
 
 }  // namespace
 
-EventExecutor* EventExecutor::Create(MessageLoop* message_loop,
-                                     Capturer* capturer) {
-  EventExecutorLinux* executor = new EventExecutorLinux(message_loop, capturer);
+scoped_ptr<protocol::HostEventStub> EventExecutor::Create(
+    MessageLoop* message_loop, Capturer* capturer) {
+  scoped_ptr<EventExecutorLinux> executor(
+      new EventExecutorLinux(message_loop, capturer));
   if (!executor->Init()) {
-    delete executor;
-    executor = NULL;
+    executor.reset(NULL);
   }
-  return executor;
+  return executor.PassAs<protocol::HostEventStub>();
 }
 
 }  // namespace remoting

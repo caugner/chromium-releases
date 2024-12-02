@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,9 +20,16 @@
 
 namespace extensions {
 
-using namespace settings_namespace;
+using settings_namespace::FromString;
+using settings_namespace::LOCAL;
+using settings_namespace::Namespace;
+using settings_namespace::SYNC;
+using settings_namespace::ToString;
 
 namespace {
+
+// TODO(kalman): test both EXTENSION_SETTINGS and APP_SETTINGS.
+const syncable::ModelType kModelType = syncable::EXTENSION_SETTINGS;
 
 class NoopSyncChangeProcessor : public SyncChangeProcessor {
  public:
@@ -33,6 +40,28 @@ class NoopSyncChangeProcessor : public SyncChangeProcessor {
   }
 
   virtual ~NoopSyncChangeProcessor() {};
+};
+
+class SyncChangeProcessorDelegate : public SyncChangeProcessor {
+ public:
+  explicit SyncChangeProcessorDelegate(SyncChangeProcessor* recipient)
+      : recipient_(recipient) {
+    DCHECK(recipient_);
+  }
+  virtual ~SyncChangeProcessorDelegate() {}
+
+  // SyncChangeProcessor implementation.
+  virtual SyncError ProcessSyncChanges(
+      const tracked_objects::Location& from_here,
+      const SyncChangeList& change_list) OVERRIDE {
+    return recipient_->ProcessSyncChanges(from_here, change_list);
+  }
+
+ private:
+  // The recipient of all sync changes.
+  SyncChangeProcessor* recipient_;
+
+  DISALLOW_COPY_AND_ASSIGN(SyncChangeProcessorDelegate);
 };
 
 }  // namespace
@@ -69,27 +98,19 @@ class ExtensionSettingsApiTest : public ExtensionApiTest {
   }
 
   void InitSync(SyncChangeProcessor* sync_processor) {
-    browser()->profile()->GetExtensionService()->
-        settings_frontend()->RunWithSyncableService(
-            // TODO(kalman): test both EXTENSION_SETTINGS and APP_SETTINGS.
-            syncable::EXTENSION_SETTINGS,
-            base::Bind(
-                &ExtensionSettingsApiTest::InitSyncWithSyncableService,
-                this,
-                sync_processor));
     MessageLoop::current()->RunAllPending();
+    InitSyncWithSyncableService(
+        sync_processor,
+        browser()->profile()->GetExtensionService()->settings_frontend()->
+              GetBackendForSync(kModelType));
   }
 
   void SendChanges(const SyncChangeList& change_list) {
-    browser()->profile()->GetExtensionService()->
-        settings_frontend()->RunWithSyncableService(
-            // TODO(kalman): test both EXTENSION_SETTINGS and APP_SETTINGS.
-            syncable::EXTENSION_SETTINGS,
-            base::Bind(
-                &ExtensionSettingsApiTest::SendChangesToSyncableService,
-                this,
-                change_list));
     MessageLoop::current()->RunAllPending();
+    SendChangesToSyncableService(
+        change_list,
+        browser()->profile()->GetExtensionService()->settings_frontend()->
+              GetBackendForSync(kModelType));
   }
 
  private:
@@ -131,16 +152,17 @@ class ExtensionSettingsApiTest : public ExtensionApiTest {
     message->SetString("action", action);
     message->SetBoolean("isFinalAction", is_final_action);
     std::string message_json;
-    base::JSONWriter::Write(message.get(), false, &message_json);
+    base::JSONWriter::Write(message.get(), &message_json);
     return message_json;
   }
 
   void InitSyncWithSyncableService(
       SyncChangeProcessor* sync_processor, SyncableService* settings_service) {
     EXPECT_FALSE(settings_service->MergeDataAndStartSyncing(
-        syncable::EXTENSION_SETTINGS,
+        kModelType,
         SyncDataList(),
-        sync_processor).IsSet());
+        scoped_ptr<SyncChangeProcessor>(
+            new SyncChangeProcessorDelegate(sync_processor))).IsSet());
   }
 
   void SendChangesToSyncableService(
@@ -290,7 +312,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionSettingsApiTest,
   SyncChangeList sync_changes;
   StringValue bar("bar");
   sync_changes.push_back(settings_sync_util::CreateAdd(
-      extension_id, "foo", bar));
+      extension_id, "foo", bar, kModelType));
   SendChanges(sync_changes);
 
   ReplyWhenSatisfied(SYNC,
@@ -300,7 +322,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionSettingsApiTest,
   // Remove "foo" via sync.
   sync_changes.clear();
   sync_changes.push_back(settings_sync_util::CreateDelete(
-      extension_id, "foo"));
+      extension_id, "foo", kModelType));
   SendChanges(sync_changes);
 
   FinalReplyWhenSatisfied(SYNC,
@@ -338,7 +360,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionSettingsApiTest,
   SyncChangeList sync_changes;
   StringValue bar("bar");
   sync_changes.push_back(settings_sync_util::CreateAdd(
-      extension_id, "foo", bar));
+      extension_id, "foo", bar, kModelType));
   SendChanges(sync_changes);
 
   ReplyWhenSatisfied(LOCAL, "assertNoNotifications", "assertNoNotifications");
@@ -346,7 +368,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionSettingsApiTest,
   // Remove "foo" via sync.
   sync_changes.clear();
   sync_changes.push_back(settings_sync_util::CreateDelete(
-      extension_id, "foo"));
+      extension_id, "foo", kModelType));
   SendChanges(sync_changes);
 
   FinalReplyWhenSatisfied(LOCAL,

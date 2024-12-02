@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -64,10 +64,6 @@ var BrowserBridge = (function() {
     this.pollableDataHelpers_.httpPipeliningStatus =
         new PollableDataHelper('onHttpPipeliningStatusChanged',
                                this.sendGetHttpPipeliningStatus.bind(this));
-
-    // NetLog entries are all sent to the |SourceTracker|, which both tracks
-    // them and manages its own observer list.
-    this.sourceTracker = new SourceTracker();
 
     // Setting this to true will cause messages from the browser to be ignored,
     // and no messages will be sent to the browser, either.  Intended for use
@@ -258,7 +254,7 @@ var BrowserBridge = (function() {
     },
 
     receivedLogEntries: function(logEntries) {
-      this.sourceTracker.onReceivedLogEntries(logEntries);
+      EventsTracker.getInstance().addLogEntries(logEntries);
     },
 
     receivedProxySettings: function(proxySettings) {
@@ -293,10 +289,6 @@ var BrowserBridge = (function() {
 
     receivedServiceProviders: function(serviceProviders) {
       this.pollableDataHelpers_.serviceProviders.update(serviceProviders);
-    },
-
-    receivedPassiveLogEntries: function(entries) {
-      this.sourceTracker.onReceivedPassiveLogEntries(entries);
     },
 
     receivedStartConnectionTestSuite: function() {

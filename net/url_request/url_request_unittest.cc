@@ -5,8 +5,8 @@
 #include "build/build_config.h"
 
 #if defined(OS_WIN)
-#include <shlobj.h>
 #include <windows.h>
+#include <shlobj.h>
 #endif
 
 #include <algorithm>
@@ -27,8 +27,8 @@
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
-#include "net/base/cookie_monster.h"
-#include "net/base/cookie_store_test_helpers.h"
+#include "net/base/cert_test_util.h"
+#include "net/base/ev_root_ca_metadata.h"
 #include "net/base/load_flags.h"
 #include "net/base/mock_host_resolver.h"
 #include "net/base/net_errors.h"
@@ -37,7 +37,10 @@
 #include "net/base/net_module.h"
 #include "net/base/net_util.h"
 #include "net/base/ssl_connection_status_flags.h"
+#include "net/base/test_root_certs.h"
 #include "net/base/upload_data.h"
+#include "net/cookies/cookie_monster.h"
+#include "net/cookies/cookie_store_test_helpers.h"
 #include "net/disk_cache/disk_cache.h"
 #include "net/ftp/ftp_network_layer.h"
 #include "net/http/http_cache.h"
@@ -45,6 +48,7 @@
 #include "net/http/http_network_session.h"
 #include "net/http/http_request_headers.h"
 #include "net/http/http_response_headers.h"
+#include "net/ocsp/nss_ocsp.h"
 #include "net/proxy/proxy_service.h"
 #include "net/socket/ssl_client_socket.h"
 #include "net/test/test_server.h"
@@ -58,11 +62,30 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
 
+#if defined(OS_WIN)
+#include "base/win/windows_version.h"
+#endif
+
 using base::Time;
 
 namespace net {
 
 namespace {
+
+// A subclass of TestServer that uses a statically-configured hostname. This is
+// to work around mysterious failures in chrome_frame_net_tests. See:
+// http://crbug.com/114369
+class LocalHttpTestServer : public TestServer {
+ public:
+  explicit LocalHttpTestServer(const FilePath& document_root)
+      : TestServer(TestServer::TYPE_HTTP,
+                   ScopedCustomUrlRequestTestHttpHost::value(),
+                   document_root) {}
+  LocalHttpTestServer()
+      : TestServer(TestServer::TYPE_HTTP,
+                   ScopedCustomUrlRequestTestHttpHost::value(),
+                   FilePath()) {}
+};
 
 const string16 kChrome(ASCIIToUTF16("chrome"));
 const string16 kSecret(ASCIIToUTF16("secret"));
@@ -121,6 +144,20 @@ void CheckSSLInfo(const SSLInfo& ssl_info) {
   int cipher_suite = SSLConnectionStatusToCipherSuite(
       ssl_info.connection_status);
   EXPECT_NE(0, cipher_suite);
+}
+
+bool FingerprintsEqual(const FingerprintVector& a, const FingerprintVector& b) {
+  size_t size = a.size();
+
+  if (size != b.size())
+    return false;
+
+  for (size_t i = 0; i < size; ++i) {
+    if (!a[i].Equals(b[i]))
+      return false;
+  }
+
+  return true;
 }
 
 }  // namespace
@@ -395,8 +432,7 @@ class URLRequestTest : public PlatformTest {
 class URLRequestTestHTTP : public URLRequestTest {
  public:
   URLRequestTestHTTP()
-      : test_server_(TestServer::TYPE_HTTP,
-                     FilePath(FILE_PATH_LITERAL(
+      : test_server_(FilePath(FILE_PATH_LITERAL(
                                   "net/data/url_request_unittest"))) {
   }
 
@@ -506,7 +542,7 @@ class URLRequestTestHTTP : public URLRequestTest {
                         strlen(expected_data)));
   }
 
-  TestServer test_server_;
+  LocalHttpTestServer test_server_;
 };
 
 // In this unit test, we're using the HTTPTestServer as a proxy server and
@@ -1183,8 +1219,9 @@ TEST_F(URLRequestTestHTTP, GetZippedTest) {
 TEST_F(URLRequestTestHTTP, DISABLED_HTTPSToHTTPRedirectNoRefererTest) {
   ASSERT_TRUE(test_server_.Start());
 
-  TestServer https_test_server(
-      TestServer::TYPE_HTTPS, FilePath(FILE_PATH_LITERAL("net/data/ssl")));
+  TestServer https_test_server(TestServer::TYPE_HTTPS,
+                               TestServer::kLocalhost,
+                               FilePath(FILE_PATH_LITERAL("net/data/ssl")));
   ASSERT_TRUE(https_test_server.Start());
 
   // An https server is sent a request with an https referer,
@@ -1246,6 +1283,7 @@ class HTTPSRequestTest : public testing::Test {
 // (see bug 102991).
 TEST_F(HTTPSRequestTest, DISABLED_HTTPSGetTest) {
   TestServer test_server(TestServer::TYPE_HTTPS,
+                         TestServer::kLocalhost,
                          FilePath(FILE_PATH_LITERAL("net/data/ssl")));
   ASSERT_TRUE(test_server.Start());
 
@@ -1337,6 +1375,327 @@ TEST_F(HTTPSRequestTest, HTTPSExpiredTest) {
   }
 }
 
+// Disabled on Android - http://crbug.com/119642 - The Android test server
+// does not support generating OCSP responses on the fly.
+#if !defined(OS_ANDROID)
+
+class TestSSLConfigService : public SSLConfigService {
+ public:
+  TestSSLConfigService(bool ev_enabled, bool online_rev_checking)
+      : ev_enabled_(ev_enabled),
+        online_rev_checking_(online_rev_checking) {
+  }
+
+  virtual void GetSSLConfig(SSLConfig* config) {
+    *config = SSLConfig();
+    config->rev_checking_enabled = online_rev_checking_;
+    config->verify_ev_cert = ev_enabled_;
+  }
+
+ private:
+  const bool ev_enabled_;
+  const bool online_rev_checking_;
+};
+
+// This the fingerprint of the "Testing CA" certificate used by the testserver.
+// See net/data/ssl/certificates/ocsp-test-root.pem.
+static const SHA1Fingerprint kOCSPTestCertFingerprint =
+  { { 0xf1, 0xad, 0xf6, 0xce, 0x42, 0xac, 0xe7, 0xb4, 0xf4, 0x24,
+      0xdb, 0x1a, 0xf7, 0xa0, 0x9f, 0x09, 0xa1, 0xea, 0xf1, 0x5c } };
+
+// This is the policy OID contained in the certificates that testserver
+// generates.
+static const char kOCSPTestCertPolicy[] = "1.3.6.1.4.1.11129.2.4.1";
+
+class HTTPSOCSPTest : public HTTPSRequestTest {
+ public:
+  HTTPSOCSPTest()
+      : context_(new TestURLRequestContext(true)),
+        ev_test_policy_(EVRootCAMetadata::GetInstance(),
+                        kOCSPTestCertFingerprint,
+                        kOCSPTestCertPolicy) {
+  }
+
+  virtual void SetUp() OVERRIDE {
+    SetupContext(context_);
+    context_->Init();
+
+    scoped_refptr<net::X509Certificate> root_cert =
+      ImportCertFromFile(GetTestCertsDirectory(), "ocsp-test-root.pem");
+    CHECK_NE(static_cast<X509Certificate*>(NULL), root_cert);
+    test_root_.reset(new ScopedTestRoot(root_cert));
+
+#if defined(USE_NSS)
+    SetURLRequestContextForNSSHttpIO(context_.get());
+    EnsureNSSHttpIOInit();
+#endif
+  }
+
+  void DoConnection(const TestServer::HTTPSOptions& https_options,
+                    CertStatus* out_cert_status) {
+    TestServer test_server(https_options,
+                           FilePath(FILE_PATH_LITERAL("net/data/ssl")));
+    ASSERT_TRUE(test_server.Start());
+
+    TestDelegate d;
+    d.set_allow_certificate_errors(true);
+    URLRequest r(test_server.GetURL(""), &d);
+    r.set_context(context_.get());
+    r.Start();
+
+    MessageLoop::current()->Run();
+
+    EXPECT_EQ(1, d.response_started_count());
+    *out_cert_status = r.ssl_info().cert_status;
+  }
+
+  ~HTTPSOCSPTest() {
+#if defined(USE_NSS)
+    ShutdownNSSHttpIO();
+#endif
+  }
+
+ protected:
+  // SetupContext configures the URLRequestContext that will be used for making
+  // connetions to testserver. This can be overridden in test subclasses for
+  // different behaviour.
+  virtual void SetupContext(URLRequestContext* context) {
+    context->set_ssl_config_service(
+        new TestSSLConfigService(true /* check for EV */,
+                                 true /* online revocation checking */));
+  }
+
+  scoped_ptr<ScopedTestRoot> test_root_;
+  scoped_refptr<TestURLRequestContext> context_;
+  ScopedTestEVPolicy ev_test_policy_;
+};
+
+static CertStatus ExpectedCertStatusForFailedOnlineRevocationCheck() {
+#if defined(OS_WIN)
+  // Windows can return CERT_STATUS_UNABLE_TO_CHECK_REVOCATION but we don't
+  // have that ability on other platforms.
+  return CERT_STATUS_UNABLE_TO_CHECK_REVOCATION;
+#else
+  return 0;
+#endif
+}
+
+// SystemUsesChromiumEVMetadata returns true iff the current operating system
+// uses Chromium's EV metadata (i.e. EVRootCAMetadata). If it does not, then
+// several tests are effected because our testing EV certificate won't be
+// recognised as EV.
+static bool SystemUsesChromiumEVMetadata() {
+#if defined(USE_OPENSSL)
+  // http://crbug.com/117478 - OpenSSL does not support EV validation.
+  return false;
+#elif defined(OS_MACOSX)
+  // On OS X, we use the system to tell us whether a certificate is EV or not
+  // and the system won't recognise our testing root.
+  return false;
+#else
+  return true;
+#endif
+}
+
+static bool
+SystemSupportsOCSP() {
+#if defined(USE_OPENSSL)
+  // http://crbug.com/117478 - OpenSSL does not support OCSP.
+  return false;
+#elif defined(OS_WIN)
+  return base::win::GetVersion() >= base::win::VERSION_VISTA;
+#elif defined(OS_ANDROID)
+  // TODO(jnd): http://crbug.com/117478 - EV verification is not yet supported.
+  return false;
+#else
+  return true;
+#endif
+}
+
+TEST_F(HTTPSOCSPTest, Valid) {
+  if (!SystemSupportsOCSP()) {
+    LOG(WARNING) << "Skipping test because system doesn't support OCSP";
+    return;
+  }
+
+  TestServer::HTTPSOptions https_options(TestServer::HTTPSOptions::CERT_AUTO);
+  https_options.ocsp_status = TestServer::HTTPSOptions::OCSP_OK;
+
+  CertStatus cert_status;
+  DoConnection(https_options, &cert_status);
+
+  EXPECT_EQ(0u, cert_status & CERT_STATUS_ALL_ERRORS);
+
+  EXPECT_EQ(SystemUsesChromiumEVMetadata(),
+            static_cast<bool>(cert_status & CERT_STATUS_IS_EV));
+
+  EXPECT_TRUE(cert_status & CERT_STATUS_REV_CHECKING_ENABLED);
+}
+
+TEST_F(HTTPSOCSPTest, Revoked) {
+  if (!SystemSupportsOCSP()) {
+    LOG(WARNING) << "Skipping test because system doesn't support OCSP";
+    return;
+  }
+
+  TestServer::HTTPSOptions https_options(
+      TestServer::HTTPSOptions::CERT_AUTO);
+  https_options.ocsp_status = TestServer::HTTPSOptions::OCSP_REVOKED;
+
+  CertStatus cert_status;
+  DoConnection(https_options, &cert_status);
+
+#if !defined(OS_MACOSX)
+  // Doesn't pass on OS X yet for reasons that need to be investigated.
+  EXPECT_EQ(CERT_STATUS_REVOKED, cert_status & CERT_STATUS_ALL_ERRORS);
+#endif
+  EXPECT_FALSE(cert_status & CERT_STATUS_IS_EV);
+  EXPECT_TRUE(cert_status & CERT_STATUS_REV_CHECKING_ENABLED);
+}
+
+TEST_F(HTTPSOCSPTest, Invalid) {
+  if (!SystemSupportsOCSP()) {
+    LOG(WARNING) << "Skipping test because system doesn't support OCSP";
+    return;
+  }
+
+  TestServer::HTTPSOptions https_options(
+      TestServer::HTTPSOptions::CERT_AUTO);
+  https_options.ocsp_status = TestServer::HTTPSOptions::OCSP_INVALID;
+
+  CertStatus cert_status;
+  DoConnection(https_options, &cert_status);
+
+  EXPECT_EQ(ExpectedCertStatusForFailedOnlineRevocationCheck(),
+            cert_status & CERT_STATUS_ALL_ERRORS);
+
+  // Without a positive OCSP response, we shouldn't show the EV status.
+  EXPECT_FALSE(cert_status & CERT_STATUS_IS_EV);
+  EXPECT_TRUE(cert_status & CERT_STATUS_REV_CHECKING_ENABLED);
+}
+
+class HTTPSEVCRLSetTest : public HTTPSOCSPTest {
+ protected:
+  virtual void SetupContext(URLRequestContext* context) OVERRIDE {
+    context->set_ssl_config_service(
+        new TestSSLConfigService(true /* check for EV */,
+                                 false /* online revocation checking */));
+  }
+};
+
+TEST_F(HTTPSEVCRLSetTest, MissingCRLSetAndInvalidOCSP) {
+  if (!SystemSupportsOCSP()) {
+    LOG(WARNING) << "Skipping test because system doesn't support OCSP";
+    return;
+  }
+
+  TestServer::HTTPSOptions https_options(
+      TestServer::HTTPSOptions::CERT_AUTO);
+  https_options.ocsp_status = TestServer::HTTPSOptions::OCSP_INVALID;
+  SSLConfigService::SetCRLSet(scoped_refptr<CRLSet>());
+
+  CertStatus cert_status;
+  DoConnection(https_options, &cert_status);
+
+  EXPECT_EQ(ExpectedCertStatusForFailedOnlineRevocationCheck(),
+            cert_status & CERT_STATUS_ALL_ERRORS);
+
+  EXPECT_FALSE(cert_status & CERT_STATUS_IS_EV);
+  EXPECT_TRUE(cert_status & CERT_STATUS_REV_CHECKING_ENABLED);
+}
+
+TEST_F(HTTPSEVCRLSetTest, MissingCRLSetAndGoodOCSP) {
+  if (!SystemSupportsOCSP()) {
+    LOG(WARNING) << "Skipping test because system doesn't support OCSP";
+    return;
+  }
+
+  TestServer::HTTPSOptions https_options(
+      TestServer::HTTPSOptions::CERT_AUTO);
+  https_options.ocsp_status = TestServer::HTTPSOptions::OCSP_OK;
+  SSLConfigService::SetCRLSet(scoped_refptr<CRLSet>());
+
+  CertStatus cert_status;
+  DoConnection(https_options, &cert_status);
+
+  EXPECT_EQ(0u, cert_status & CERT_STATUS_ALL_ERRORS);
+
+  EXPECT_EQ(SystemUsesChromiumEVMetadata(),
+            static_cast<bool>(cert_status & CERT_STATUS_IS_EV));
+
+  EXPECT_TRUE(cert_status & CERT_STATUS_REV_CHECKING_ENABLED);
+}
+
+TEST_F(HTTPSEVCRLSetTest, ExpiredCRLSet) {
+  if (!SystemSupportsOCSP()) {
+    LOG(WARNING) << "Skipping test because system doesn't support OCSP";
+    return;
+  }
+
+  TestServer::HTTPSOptions https_options(
+      TestServer::HTTPSOptions::CERT_AUTO);
+  https_options.ocsp_status = TestServer::HTTPSOptions::OCSP_INVALID;
+  SSLConfigService::SetCRLSet(
+      scoped_refptr<CRLSet>(CRLSet::ExpiredCRLSetForTesting()));
+
+  CertStatus cert_status;
+  DoConnection(https_options, &cert_status);
+
+  EXPECT_EQ(ExpectedCertStatusForFailedOnlineRevocationCheck(),
+            cert_status & CERT_STATUS_ALL_ERRORS);
+
+  EXPECT_FALSE(cert_status & CERT_STATUS_IS_EV);
+  EXPECT_TRUE(cert_status & CERT_STATUS_REV_CHECKING_ENABLED);
+}
+
+TEST_F(HTTPSEVCRLSetTest, FreshCRLSet) {
+  TestServer::HTTPSOptions https_options(
+      TestServer::HTTPSOptions::CERT_AUTO);
+  https_options.ocsp_status = TestServer::HTTPSOptions::OCSP_INVALID;
+  SSLConfigService::SetCRLSet(
+      scoped_refptr<CRLSet>(CRLSet::EmptyCRLSetForTesting()));
+
+  CertStatus cert_status;
+  DoConnection(https_options, &cert_status);
+
+  // With a valid, fresh CRLSet the bad OCSP response shouldn't matter because
+  // we wont check it.
+  EXPECT_EQ(0u, cert_status & CERT_STATUS_ALL_ERRORS);
+
+  EXPECT_EQ(SystemUsesChromiumEVMetadata(),
+            static_cast<bool>(cert_status & CERT_STATUS_IS_EV));
+
+  EXPECT_FALSE(cert_status & CERT_STATUS_REV_CHECKING_ENABLED);
+}
+
+class HTTPSCRLSetTest : public HTTPSOCSPTest {
+ protected:
+  virtual void SetupContext(URLRequestContext* context) OVERRIDE {
+    context->set_ssl_config_service(
+        new TestSSLConfigService(false /* check for EV */,
+                                 false /* online revocation checking */));
+  }
+};
+
+TEST_F(HTTPSCRLSetTest, ExpiredCRLSet) {
+  TestServer::HTTPSOptions https_options(
+      TestServer::HTTPSOptions::CERT_AUTO);
+  https_options.ocsp_status = TestServer::HTTPSOptions::OCSP_INVALID;
+  SSLConfigService::SetCRLSet(
+      scoped_refptr<CRLSet>(CRLSet::ExpiredCRLSetForTesting()));
+
+  CertStatus cert_status;
+  DoConnection(https_options, &cert_status);
+
+  // If we're not trying EV verification then, even if the CRLSet has expired,
+  // we don't fall back to online revocation checks.
+  EXPECT_EQ(0u, cert_status & CERT_STATUS_ALL_ERRORS);
+  EXPECT_FALSE(cert_status & CERT_STATUS_IS_EV);
+  EXPECT_FALSE(cert_status & CERT_STATUS_REV_CHECKING_ENABLED);
+}
+
+#endif  // !defined(OS_ANDROID)
+
 // This tests that a load of www.google.com with a certificate error sets
 // the |certificate_errors_are_fatal| flag correctly. This flag will cause
 // the interstitial to be fatal.
@@ -1377,6 +1736,66 @@ TEST_F(HTTPSRequestTest, HTTPSPreloadedHSTSTest) {
   EXPECT_FALSE(d.received_data_before_response());
   EXPECT_TRUE(d.have_certificate_errors());
   EXPECT_TRUE(d.certificate_errors_are_fatal());
+}
+
+// This tests that cached HTTPS page loads do not cause any updates to the
+// TransportSecurityState.
+TEST_F(HTTPSRequestTest, HTTPSErrorsNoClobberTSSTest) {
+  // The actual problem -- CERT_MISMATCHED_NAME in this case -- doesn't
+  // matter. It just has to be any error.
+  TestServer::HTTPSOptions https_options(
+      TestServer::HTTPSOptions::CERT_MISMATCHED_NAME);
+  TestServer test_server(https_options,
+                         FilePath(FILE_PATH_LITERAL("net/data/ssl")));
+  ASSERT_TRUE(test_server.Start());
+
+  // We require that the URL be www.google.com in order to pick up the
+  // preloaded and dynamic HSTS and public key pin entries in the
+  // TransportSecurityState. This means that we have to use a
+  // MockHostResolver in order to direct www.google.com to the testserver.
+
+  MockHostResolver host_resolver;
+  host_resolver.rules()->AddRule("www.google.com", "127.0.0.1");
+  TestNetworkDelegate network_delegate;  // must outlive URLRequest
+  scoped_refptr<TestURLRequestContext> context(new TestURLRequestContext(true));
+  context->set_network_delegate(&network_delegate);
+  context->set_host_resolver(&host_resolver);
+  TransportSecurityState transport_security_state("");
+  TransportSecurityState::DomainState domain_state;
+  EXPECT_TRUE(transport_security_state.HasMetadata(&domain_state,
+                                                   "www.google.com", true));
+  context->set_transport_security_state(&transport_security_state);
+  context->Init();
+
+  TestDelegate d;
+  TestURLRequest r(GURL(StringPrintf("https://www.google.com:%d",
+                                     test_server.host_port_pair().port())),
+                   &d);
+  r.set_context(context);
+
+  r.Start();
+  EXPECT_TRUE(r.is_pending());
+
+  MessageLoop::current()->Run();
+
+  EXPECT_EQ(1, d.response_started_count());
+  EXPECT_FALSE(d.received_data_before_response());
+  EXPECT_TRUE(d.have_certificate_errors());
+  EXPECT_TRUE(d.certificate_errors_are_fatal());
+
+  // Get a fresh copy of the state, and check that it hasn't been updated.
+  TransportSecurityState::DomainState new_domain_state;
+  EXPECT_TRUE(transport_security_state.HasMetadata(&new_domain_state,
+                                                   "www.google.com", true));
+  EXPECT_EQ(new_domain_state.mode, domain_state.mode);
+  EXPECT_EQ(new_domain_state.include_subdomains,
+            domain_state.include_subdomains);
+  EXPECT_TRUE(FingerprintsEqual(new_domain_state.preloaded_spki_hashes,
+                                domain_state.preloaded_spki_hashes));
+  EXPECT_TRUE(FingerprintsEqual(new_domain_state.dynamic_spki_hashes,
+                                domain_state.dynamic_spki_hashes));
+  EXPECT_TRUE(FingerprintsEqual(new_domain_state.bad_preloaded_spki_hashes,
+                                domain_state.bad_preloaded_spki_hashes));
 }
 
 namespace {
@@ -2465,41 +2884,10 @@ TEST_F(URLRequestTestHTTP, BasicAuthWithCookies) {
     EXPECT_TRUE(d.data_received().find("Cookie: got_challenged=true")
         != std::string::npos);
   }
-
-  // Same test as above, except this time the restart is initiated earlier
-  // (without user intervention since identity is embedded in the URL).
-  {
-    TestNetworkDelegate network_delegate;  // must outlive URLRequest
-    scoped_refptr<TestURLRequestContext> context(
-        new TestURLRequestContext(true));
-    context->set_network_delegate(&network_delegate);
-    context->Init();
-
-    TestDelegate d;
-
-    GURL::Replacements replacements;
-    std::string username("user2");
-    std::string password("secret");
-    replacements.SetUsernameStr(username);
-    replacements.SetPasswordStr(password);
-    GURL url_with_identity = url_requiring_auth.ReplaceComponents(replacements);
-
-    URLRequest r(url_with_identity, &d);
-    r.set_context(context);
-    r.Start();
-
-    MessageLoop::current()->Run();
-
-    EXPECT_TRUE(d.data_received().find("user2/secret") != std::string::npos);
-
-    // Make sure we sent the cookie in the restarted transaction.
-    EXPECT_TRUE(d.data_received().find("Cookie: got_challenged=true")
-        != std::string::npos);
-  }
 }
 
 TEST_F(URLRequestTest, DelayedCookieCallback) {
-  TestServer test_server(TestServer::TYPE_HTTP, FilePath());
+  LocalHttpTestServer test_server;
   ASSERT_TRUE(test_server.Start());
 
   scoped_refptr<URLRequestContext> context(new TestURLRequestContext());
@@ -2510,18 +2898,22 @@ TEST_F(URLRequestTest, DelayedCookieCallback) {
 
   // Set up a cookie.
   {
+    TestNetworkDelegate network_delegate;
+    context->set_network_delegate(&network_delegate);
     TestDelegate d;
     URLRequest req(test_server.GetURL("set-cookie?CookieToNotSend=1"), &d);
     req.set_context(context);
     req.Start();
     MessageLoop::current()->Run();
-    EXPECT_EQ(0, d.blocked_get_cookies_count());
-    EXPECT_EQ(0, d.blocked_set_cookie_count());
-    EXPECT_EQ(1, d.set_cookie_count());
+    EXPECT_EQ(0, network_delegate.blocked_get_cookies_count());
+    EXPECT_EQ(0, network_delegate.blocked_set_cookie_count());
+    EXPECT_EQ(1, network_delegate.set_cookie_count());
   }
 
   // Verify that the cookie is set.
   {
+    TestNetworkDelegate network_delegate;
+    context->set_network_delegate(&network_delegate);
     TestDelegate d;
     TestURLRequest req(test_server.GetURL("echoheader?Cookie"), &d);
     req.set_context(context);
@@ -2530,28 +2922,32 @@ TEST_F(URLRequestTest, DelayedCookieCallback) {
 
     EXPECT_TRUE(d.data_received().find("CookieToNotSend=1")
                 != std::string::npos);
-    EXPECT_EQ(0, d.blocked_get_cookies_count());
-    EXPECT_EQ(0, d.blocked_set_cookie_count());
+    EXPECT_EQ(0, network_delegate.blocked_get_cookies_count());
+    EXPECT_EQ(0, network_delegate.blocked_set_cookie_count());
   }
 }
 
 TEST_F(URLRequestTest, DoNotSendCookies) {
-  TestServer test_server(TestServer::TYPE_HTTP, FilePath());
+  LocalHttpTestServer test_server;
   ASSERT_TRUE(test_server.Start());
 
   // Set up a cookie.
   {
+    TestNetworkDelegate network_delegate;
+    default_context_->set_network_delegate(&network_delegate);
     TestDelegate d;
     URLRequest req(test_server.GetURL("set-cookie?CookieToNotSend=1"), &d);
     req.set_context(default_context_);
     req.Start();
     MessageLoop::current()->Run();
-    EXPECT_EQ(0, d.blocked_get_cookies_count());
-    EXPECT_EQ(0, d.blocked_set_cookie_count());
+    EXPECT_EQ(0, network_delegate.blocked_get_cookies_count());
+    EXPECT_EQ(0, network_delegate.blocked_set_cookie_count());
   }
 
   // Verify that the cookie is set.
   {
+    TestNetworkDelegate network_delegate;
+    default_context_->set_network_delegate(&network_delegate);
     TestDelegate d;
     TestURLRequest req(test_server.GetURL("echoheader?Cookie"), &d);
     req.set_context(default_context_);
@@ -2560,12 +2956,14 @@ TEST_F(URLRequestTest, DoNotSendCookies) {
 
     EXPECT_TRUE(d.data_received().find("CookieToNotSend=1")
                 != std::string::npos);
-    EXPECT_EQ(0, d.blocked_get_cookies_count());
-    EXPECT_EQ(0, d.blocked_set_cookie_count());
+    EXPECT_EQ(0, network_delegate.blocked_get_cookies_count());
+    EXPECT_EQ(0, network_delegate.blocked_set_cookie_count());
   }
 
   // Verify that the cookie isn't sent when LOAD_DO_NOT_SEND_COOKIES is set.
   {
+    TestNetworkDelegate network_delegate;
+    default_context_->set_network_delegate(&network_delegate);
     TestDelegate d;
     TestURLRequest req(test_server.GetURL("echoheader?Cookie"), &d);
     req.set_load_flags(LOAD_DO_NOT_SEND_COOKIES);
@@ -2577,30 +2975,36 @@ TEST_F(URLRequestTest, DoNotSendCookies) {
                 == std::string::npos);
 
     // LOAD_DO_NOT_SEND_COOKIES does not trigger OnGetCookies.
-    EXPECT_EQ(0, d.blocked_get_cookies_count());
-    EXPECT_EQ(0, d.blocked_set_cookie_count());
+    EXPECT_EQ(0, network_delegate.blocked_get_cookies_count());
+    EXPECT_EQ(0, network_delegate.blocked_set_cookie_count());
   }
+
+  default_context_->set_network_delegate(&default_network_delegate_);
 }
 
 TEST_F(URLRequestTest, DoNotSaveCookies) {
-  TestServer test_server(TestServer::TYPE_HTTP, FilePath());
+  LocalHttpTestServer test_server;
   ASSERT_TRUE(test_server.Start());
 
   // Set up a cookie.
   {
+    TestNetworkDelegate network_delegate;
+    default_context_->set_network_delegate(&network_delegate);
     TestDelegate d;
     URLRequest req(test_server.GetURL("set-cookie?CookieToNotUpdate=2"), &d);
     req.set_context(default_context_);
     req.Start();
     MessageLoop::current()->Run();
 
-    EXPECT_EQ(0, d.blocked_get_cookies_count());
-    EXPECT_EQ(0, d.blocked_set_cookie_count());
-    EXPECT_EQ(1, d.set_cookie_count());
+    EXPECT_EQ(0, network_delegate.blocked_get_cookies_count());
+    EXPECT_EQ(0, network_delegate.blocked_set_cookie_count());
+    EXPECT_EQ(1, network_delegate.set_cookie_count());
   }
 
   // Try to set-up another cookie and update the previous cookie.
   {
+    TestNetworkDelegate network_delegate;
+    default_context_->set_network_delegate(&network_delegate);
     TestDelegate d;
     URLRequest req(test_server.GetURL(
         "set-cookie?CookieToNotSave=1&CookieToNotUpdate=1"), &d);
@@ -2611,13 +3015,15 @@ TEST_F(URLRequestTest, DoNotSaveCookies) {
     MessageLoop::current()->Run();
 
     // LOAD_DO_NOT_SAVE_COOKIES does not trigger OnSetCookie.
-    EXPECT_EQ(0, d.blocked_get_cookies_count());
-    EXPECT_EQ(0, d.blocked_set_cookie_count());
-    EXPECT_EQ(0, d.set_cookie_count());
+    EXPECT_EQ(0, network_delegate.blocked_get_cookies_count());
+    EXPECT_EQ(0, network_delegate.blocked_set_cookie_count());
+    EXPECT_EQ(0, network_delegate.set_cookie_count());
   }
 
   // Verify the cookies weren't saved or updated.
   {
+    TestNetworkDelegate network_delegate;
+    default_context_->set_network_delegate(&network_delegate);
     TestDelegate d;
     TestURLRequest req(test_server.GetURL("echoheader?Cookie"), &d);
     req.set_context(default_context_);
@@ -2629,30 +3035,36 @@ TEST_F(URLRequestTest, DoNotSaveCookies) {
     EXPECT_TRUE(d.data_received().find("CookieToNotUpdate=2")
                 != std::string::npos);
 
-    EXPECT_EQ(0, d.blocked_get_cookies_count());
-    EXPECT_EQ(0, d.blocked_set_cookie_count());
-    EXPECT_EQ(0, d.set_cookie_count());
+    EXPECT_EQ(0, network_delegate.blocked_get_cookies_count());
+    EXPECT_EQ(0, network_delegate.blocked_set_cookie_count());
+    EXPECT_EQ(0, network_delegate.set_cookie_count());
   }
+
+  default_context_->set_network_delegate(&default_network_delegate_);
 }
 
 TEST_F(URLRequestTest, DoNotSendCookies_ViaPolicy) {
-  TestServer test_server(TestServer::TYPE_HTTP, FilePath());
+  LocalHttpTestServer test_server;
   ASSERT_TRUE(test_server.Start());
 
   // Set up a cookie.
   {
+    TestNetworkDelegate network_delegate;
+    default_context_->set_network_delegate(&network_delegate);
     TestDelegate d;
     URLRequest req(test_server.GetURL("set-cookie?CookieToNotSend=1"), &d);
     req.set_context(default_context_);
     req.Start();
     MessageLoop::current()->Run();
 
-    EXPECT_EQ(0, d.blocked_get_cookies_count());
-    EXPECT_EQ(0, d.blocked_set_cookie_count());
+    EXPECT_EQ(0, network_delegate.blocked_get_cookies_count());
+    EXPECT_EQ(0, network_delegate.blocked_set_cookie_count());
   }
 
   // Verify that the cookie is set.
   {
+    TestNetworkDelegate network_delegate;
+    default_context_->set_network_delegate(&network_delegate);
     TestDelegate d;
     TestURLRequest req(test_server.GetURL("echoheader?Cookie"), &d);
     req.set_context(default_context_);
@@ -2662,14 +3074,16 @@ TEST_F(URLRequestTest, DoNotSendCookies_ViaPolicy) {
     EXPECT_TRUE(d.data_received().find("CookieToNotSend=1")
                 != std::string::npos);
 
-    EXPECT_EQ(0, d.blocked_get_cookies_count());
-    EXPECT_EQ(0, d.blocked_set_cookie_count());
+    EXPECT_EQ(0, network_delegate.blocked_get_cookies_count());
+    EXPECT_EQ(0, network_delegate.blocked_set_cookie_count());
   }
 
   // Verify that the cookie isn't sent.
   {
+    TestNetworkDelegate network_delegate;
+    default_context_->set_network_delegate(&network_delegate);
     TestDelegate d;
-    d.set_cookie_options(TestDelegate::NO_GET_COOKIES);
+    network_delegate.set_cookie_options(TestNetworkDelegate::NO_GET_COOKIES);
     TestURLRequest req(test_server.GetURL("echoheader?Cookie"), &d);
     req.set_context(default_context_);
     req.Start();
@@ -2678,31 +3092,37 @@ TEST_F(URLRequestTest, DoNotSendCookies_ViaPolicy) {
     EXPECT_TRUE(d.data_received().find("Cookie: CookieToNotSend=1")
                 == std::string::npos);
 
-    EXPECT_EQ(1, d.blocked_get_cookies_count());
-    EXPECT_EQ(0, d.blocked_set_cookie_count());
+    EXPECT_EQ(1, network_delegate.blocked_get_cookies_count());
+    EXPECT_EQ(0, network_delegate.blocked_set_cookie_count());
   }
+
+  default_context_->set_network_delegate(&default_network_delegate_);
 }
 
 TEST_F(URLRequestTest, DoNotSaveCookies_ViaPolicy) {
-  TestServer test_server(TestServer::TYPE_HTTP, FilePath());
+  LocalHttpTestServer test_server;
   ASSERT_TRUE(test_server.Start());
 
   // Set up a cookie.
   {
+    TestNetworkDelegate network_delegate;
+    default_context_->set_network_delegate(&network_delegate);
     TestDelegate d;
     URLRequest req(test_server.GetURL("set-cookie?CookieToNotUpdate=2"),  &d);
     req.set_context(default_context_);
     req.Start();
     MessageLoop::current()->Run();
 
-    EXPECT_EQ(0, d.blocked_get_cookies_count());
-    EXPECT_EQ(0, d.blocked_set_cookie_count());
+    EXPECT_EQ(0, network_delegate.blocked_get_cookies_count());
+    EXPECT_EQ(0, network_delegate.blocked_set_cookie_count());
   }
 
   // Try to set-up another cookie and update the previous cookie.
   {
+    TestNetworkDelegate network_delegate;
+    default_context_->set_network_delegate(&network_delegate);
     TestDelegate d;
-    d.set_cookie_options(TestDelegate::NO_SET_COOKIE);
+    network_delegate.set_cookie_options(TestNetworkDelegate::NO_SET_COOKIE);
     URLRequest req(test_server.GetURL(
         "set-cookie?CookieToNotSave=1&CookieToNotUpdate=1"), &d);
     req.set_context(default_context_);
@@ -2710,13 +3130,15 @@ TEST_F(URLRequestTest, DoNotSaveCookies_ViaPolicy) {
 
     MessageLoop::current()->Run();
 
-    EXPECT_EQ(0, d.blocked_get_cookies_count());
-    EXPECT_EQ(2, d.blocked_set_cookie_count());
+    EXPECT_EQ(0, network_delegate.blocked_get_cookies_count());
+    EXPECT_EQ(2, network_delegate.blocked_set_cookie_count());
   }
 
 
   // Verify the cookies weren't saved or updated.
   {
+    TestNetworkDelegate network_delegate;
+    default_context_->set_network_delegate(&network_delegate);
     TestDelegate d;
     TestURLRequest req(test_server.GetURL("echoheader?Cookie"), &d);
     req.set_context(default_context_);
@@ -2728,47 +3150,57 @@ TEST_F(URLRequestTest, DoNotSaveCookies_ViaPolicy) {
     EXPECT_TRUE(d.data_received().find("CookieToNotUpdate=2")
                 != std::string::npos);
 
-    EXPECT_EQ(0, d.blocked_get_cookies_count());
-    EXPECT_EQ(0, d.blocked_set_cookie_count());
+    EXPECT_EQ(0, network_delegate.blocked_get_cookies_count());
+    EXPECT_EQ(0, network_delegate.blocked_set_cookie_count());
   }
+
+  default_context_->set_network_delegate(&default_network_delegate_);
 }
 
 TEST_F(URLRequestTest, DoNotSaveEmptyCookies) {
-  TestServer test_server(TestServer::TYPE_HTTP, FilePath());
+  LocalHttpTestServer test_server;
   ASSERT_TRUE(test_server.Start());
 
   // Set up an empty cookie.
   {
+    TestNetworkDelegate network_delegate;
+    default_context_->set_network_delegate(&network_delegate);
     TestDelegate d;
     URLRequest req(test_server.GetURL("set-cookie"), &d);
     req.set_context(default_context_);
     req.Start();
     MessageLoop::current()->Run();
 
-    EXPECT_EQ(0, d.blocked_get_cookies_count());
-    EXPECT_EQ(0, d.blocked_set_cookie_count());
-    EXPECT_EQ(0, d.set_cookie_count());
+    EXPECT_EQ(0, network_delegate.blocked_get_cookies_count());
+    EXPECT_EQ(0, network_delegate.blocked_set_cookie_count());
+    EXPECT_EQ(0, network_delegate.set_cookie_count());
   }
+
+  default_context_->set_network_delegate(&default_network_delegate_);
 }
 
 TEST_F(URLRequestTest, DoNotSendCookies_ViaPolicy_Async) {
-  TestServer test_server(TestServer::TYPE_HTTP, FilePath());
+  LocalHttpTestServer test_server;
   ASSERT_TRUE(test_server.Start());
 
   // Set up a cookie.
   {
+    TestNetworkDelegate network_delegate;
+    default_context_->set_network_delegate(&network_delegate);
     TestDelegate d;
     URLRequest req(test_server.GetURL("set-cookie?CookieToNotSend=1"), &d);
     req.set_context(default_context_);
     req.Start();
     MessageLoop::current()->Run();
 
-    EXPECT_EQ(0, d.blocked_get_cookies_count());
-    EXPECT_EQ(0, d.blocked_set_cookie_count());
+    EXPECT_EQ(0, network_delegate.blocked_get_cookies_count());
+    EXPECT_EQ(0, network_delegate.blocked_set_cookie_count());
   }
 
   // Verify that the cookie is set.
   {
+    TestNetworkDelegate network_delegate;
+    default_context_->set_network_delegate(&network_delegate);
     TestDelegate d;
     TestURLRequest req(test_server.GetURL("echoheader?Cookie"), &d);
     req.set_context(default_context_);
@@ -2778,14 +3210,16 @@ TEST_F(URLRequestTest, DoNotSendCookies_ViaPolicy_Async) {
     EXPECT_TRUE(d.data_received().find("CookieToNotSend=1")
                 != std::string::npos);
 
-    EXPECT_EQ(0, d.blocked_get_cookies_count());
-    EXPECT_EQ(0, d.blocked_set_cookie_count());
+    EXPECT_EQ(0, network_delegate.blocked_get_cookies_count());
+    EXPECT_EQ(0, network_delegate.blocked_set_cookie_count());
   }
 
   // Verify that the cookie isn't sent.
   {
+    TestNetworkDelegate network_delegate;
+    default_context_->set_network_delegate(&network_delegate);
     TestDelegate d;
-    d.set_cookie_options(TestDelegate::NO_GET_COOKIES);
+    network_delegate.set_cookie_options(TestNetworkDelegate::NO_GET_COOKIES);
     TestURLRequest req(test_server.GetURL("echoheader?Cookie"), &d);
     req.set_context(default_context_);
     req.Start();
@@ -2794,31 +3228,37 @@ TEST_F(URLRequestTest, DoNotSendCookies_ViaPolicy_Async) {
     EXPECT_TRUE(d.data_received().find("Cookie: CookieToNotSend=1")
                 == std::string::npos);
 
-    EXPECT_EQ(1, d.blocked_get_cookies_count());
-    EXPECT_EQ(0, d.blocked_set_cookie_count());
+    EXPECT_EQ(1, network_delegate.blocked_get_cookies_count());
+    EXPECT_EQ(0, network_delegate.blocked_set_cookie_count());
   }
+
+  default_context_->set_network_delegate(&default_network_delegate_);
 }
 
 TEST_F(URLRequestTest, DoNotSaveCookies_ViaPolicy_Async) {
-  TestServer test_server(TestServer::TYPE_HTTP, FilePath());
+  LocalHttpTestServer test_server;
   ASSERT_TRUE(test_server.Start());
 
   // Set up a cookie.
   {
+    TestNetworkDelegate network_delegate;
+    default_context_->set_network_delegate(&network_delegate);
     TestDelegate d;
     URLRequest req(test_server.GetURL("set-cookie?CookieToNotUpdate=2"), &d);
     req.set_context(default_context_);
     req.Start();
     MessageLoop::current()->Run();
 
-    EXPECT_EQ(0, d.blocked_get_cookies_count());
-    EXPECT_EQ(0, d.blocked_set_cookie_count());
+    EXPECT_EQ(0, network_delegate.blocked_get_cookies_count());
+    EXPECT_EQ(0, network_delegate.blocked_set_cookie_count());
   }
 
   // Try to set-up another cookie and update the previous cookie.
   {
+    TestNetworkDelegate network_delegate;
+    default_context_->set_network_delegate(&network_delegate);
     TestDelegate d;
-    d.set_cookie_options(TestDelegate::NO_SET_COOKIE);
+    network_delegate.set_cookie_options(TestNetworkDelegate::NO_SET_COOKIE);
     URLRequest req(test_server.GetURL(
         "set-cookie?CookieToNotSave=1&CookieToNotUpdate=1"), &d);
     req.set_context(default_context_);
@@ -2826,12 +3266,14 @@ TEST_F(URLRequestTest, DoNotSaveCookies_ViaPolicy_Async) {
 
     MessageLoop::current()->Run();
 
-    EXPECT_EQ(0, d.blocked_get_cookies_count());
-    EXPECT_EQ(2, d.blocked_set_cookie_count());
+    EXPECT_EQ(0, network_delegate.blocked_get_cookies_count());
+    EXPECT_EQ(2, network_delegate.blocked_set_cookie_count());
   }
 
   // Verify the cookies weren't saved or updated.
   {
+    TestNetworkDelegate network_delegate;
+    default_context_->set_network_delegate(&network_delegate);
     TestDelegate d;
     TestURLRequest req(test_server.GetURL("echoheader?Cookie"), &d);
     req.set_context(default_context_);
@@ -2843,9 +3285,11 @@ TEST_F(URLRequestTest, DoNotSaveCookies_ViaPolicy_Async) {
     EXPECT_TRUE(d.data_received().find("CookieToNotUpdate=2")
                 != std::string::npos);
 
-    EXPECT_EQ(0, d.blocked_get_cookies_count());
-    EXPECT_EQ(0, d.blocked_set_cookie_count());
+    EXPECT_EQ(0, network_delegate.blocked_get_cookies_count());
+    EXPECT_EQ(0, network_delegate.blocked_set_cookie_count());
   }
+
+  default_context_->set_network_delegate(&default_network_delegate_);
 }
 
 void CheckCookiePolicyCallback(bool* was_run, const CookieList& cookies) {
@@ -2856,13 +3300,15 @@ void CheckCookiePolicyCallback(bool* was_run, const CookieList& cookies) {
 }
 
 TEST_F(URLRequestTest, CookiePolicy_ForceSession) {
-  TestServer test_server(TestServer::TYPE_HTTP, FilePath());
+  LocalHttpTestServer test_server;
   ASSERT_TRUE(test_server.Start());
 
   // Set up a cookie.
   {
+    TestNetworkDelegate network_delegate;
+    default_context_->set_network_delegate(&network_delegate);
     TestDelegate d;
-    d.set_cookie_options(TestDelegate::FORCE_SESSION);
+    network_delegate.set_cookie_options(TestNetworkDelegate::FORCE_SESSION);
     URLRequest req(test_server.GetURL(
         "set-cookie?A=1;expires=\"Fri, 05 Feb 2010 23:42:01 GMT\""), &d);
     req.set_context(default_context_);
@@ -2870,9 +3316,10 @@ TEST_F(URLRequestTest, CookiePolicy_ForceSession) {
 
     MessageLoop::current()->Run();
 
-    EXPECT_EQ(0, d.blocked_get_cookies_count());
-    EXPECT_EQ(0, d.blocked_set_cookie_count());
+    EXPECT_EQ(0, network_delegate.blocked_get_cookies_count());
+    EXPECT_EQ(0, network_delegate.blocked_set_cookie_count());
   }
+  default_context_->set_network_delegate(&default_network_delegate_);
 
   // Now, check the cookie store.
   bool was_run = false;
@@ -3225,9 +3672,9 @@ TEST_F(URLRequestTest, Intercept) {
   TestDelegate d;
   TestURLRequest req(GURL("http://test_intercept/foo"), &d);
   req.set_context(default_context_);
-  URLRequest::UserData* user_data0 = new URLRequest::UserData();
-  URLRequest::UserData* user_data1 = new URLRequest::UserData();
-  URLRequest::UserData* user_data2 = new URLRequest::UserData();
+  base::SupportsUserData::Data* user_data0 = new base::SupportsUserData::Data();
+  base::SupportsUserData::Data* user_data1 = new base::SupportsUserData::Data();
+  base::SupportsUserData::Data* user_data2 = new base::SupportsUserData::Data();
   req.SetUserData(NULL, user_data0);
   req.SetUserData(&user_data1, user_data1);
   req.SetUserData(&user_data2, user_data2);
@@ -3534,7 +3981,7 @@ TEST_F(URLRequestTest, NetworkDelegateProxyError) {
 // Check that it is impossible to change the referrer in the extra headers of
 // an URLRequest.
 TEST_F(URLRequestTest, DoNotOverrideReferrer) {
-  TestServer test_server(TestServer::TYPE_HTTP, FilePath());
+  LocalHttpTestServer test_server;
   ASSERT_TRUE(test_server.Start());
 
   // If extra headers contain referer and the request contains a referer,
@@ -3589,7 +4036,8 @@ TEST_F(URLRequestTest, RequestCompletionForEmptyResponse) {
 
 class URLRequestTestFTP : public URLRequestTest {
  public:
-  URLRequestTestFTP() : test_server_(TestServer::TYPE_FTP, FilePath()) {
+  URLRequestTestFTP()
+      : test_server_(TestServer::TYPE_FTP, TestServer::kLocalhost, FilePath()) {
   }
 
  protected:
@@ -3597,7 +4045,7 @@ class URLRequestTestFTP : public URLRequestTest {
 };
 
 // Flaky, see http://crbug.com/25045.
-TEST_F(URLRequestTestFTP, FLAKY_FTPDirectoryListing) {
+TEST_F(URLRequestTestFTP, DISABLED_FTPDirectoryListing) {
   ASSERT_TRUE(test_server_.Start());
 
   TestDelegate d;
@@ -3621,7 +4069,7 @@ TEST_F(URLRequestTestFTP, FLAKY_FTPDirectoryListing) {
 }
 
 // Flaky, see http://crbug.com/25045.
-TEST_F(URLRequestTestFTP, FLAKY_FTPGetTestAnonymous) {
+TEST_F(URLRequestTestFTP, DISABLED_FTPGetTestAnonymous) {
   ASSERT_TRUE(test_server_.Start());
 
   FilePath app_path;
@@ -3651,7 +4099,7 @@ TEST_F(URLRequestTestFTP, FLAKY_FTPGetTestAnonymous) {
 }
 
 // Flaky, see http://crbug.com/25045.
-TEST_F(URLRequestTestFTP, FLAKY_FTPGetTest) {
+TEST_F(URLRequestTestFTP, DISABLED_FTPGetTest) {
   ASSERT_TRUE(test_server_.Start());
 
   FilePath app_path;
@@ -3683,7 +4131,7 @@ TEST_F(URLRequestTestFTP, FLAKY_FTPGetTest) {
 }
 
 // Flaky, see http://crbug.com/25045.
-TEST_F(URLRequestTestFTP, FLAKY_FTPCheckWrongPassword) {
+TEST_F(URLRequestTestFTP, DISABLED_FTPCheckWrongPassword) {
   ASSERT_TRUE(test_server_.Start());
 
   FilePath app_path;
@@ -3713,7 +4161,7 @@ TEST_F(URLRequestTestFTP, FLAKY_FTPCheckWrongPassword) {
 }
 
 // Flaky, see http://crbug.com/25045.
-TEST_F(URLRequestTestFTP, FLAKY_FTPCheckWrongPasswordRestart) {
+TEST_F(URLRequestTestFTP, DISABLED_FTPCheckWrongPasswordRestart) {
   ASSERT_TRUE(test_server_.Start());
 
   FilePath app_path;
@@ -3746,7 +4194,7 @@ TEST_F(URLRequestTestFTP, FLAKY_FTPCheckWrongPasswordRestart) {
 }
 
 // Flaky, see http://crbug.com/25045.
-TEST_F(URLRequestTestFTP, FLAKY_FTPCheckWrongUser) {
+TEST_F(URLRequestTestFTP, DISABLED_FTPCheckWrongUser) {
   ASSERT_TRUE(test_server_.Start());
 
   FilePath app_path;
@@ -3776,7 +4224,7 @@ TEST_F(URLRequestTestFTP, FLAKY_FTPCheckWrongUser) {
 }
 
 // Flaky, see http://crbug.com/25045.
-TEST_F(URLRequestTestFTP, FLAKY_FTPCheckWrongUserRestart) {
+TEST_F(URLRequestTestFTP, DISABLED_FTPCheckWrongUserRestart) {
   ASSERT_TRUE(test_server_.Start());
 
   FilePath app_path;
@@ -3809,7 +4257,7 @@ TEST_F(URLRequestTestFTP, FLAKY_FTPCheckWrongUserRestart) {
 }
 
 // Flaky, see http://crbug.com/25045.
-TEST_F(URLRequestTestFTP, FLAKY_FTPCacheURLCredentials) {
+TEST_F(URLRequestTestFTP, DISABLED_FTPCacheURLCredentials) {
   ASSERT_TRUE(test_server_.Start());
 
   FilePath app_path;
@@ -3860,7 +4308,7 @@ TEST_F(URLRequestTestFTP, FLAKY_FTPCacheURLCredentials) {
 }
 
 // Flaky, see http://crbug.com/25045.
-TEST_F(URLRequestTestFTP, FLAKY_FTPCacheLoginBoxCredentials) {
+TEST_F(URLRequestTestFTP, DISABLED_FTPCacheLoginBoxCredentials) {
   ASSERT_TRUE(test_server_.Start());
 
   FilePath app_path;

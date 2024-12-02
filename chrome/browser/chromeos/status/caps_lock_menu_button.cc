@@ -6,17 +6,19 @@
 
 #include <string>
 
+#include "base/chromeos/chromeos_version.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/chromeos/input_method/input_method_manager.h"
 #include "chrome/browser/chromeos/input_method/xkeyboard.h"
 #include "chrome/browser/chromeos/login/screen_locker.h"
 #include "chrome/browser/chromeos/status/status_area_bubble.h"
-#include "chrome/browser/chromeos/system/runtime_environment.h"
+#include "chrome/browser/chromeos/status/status_area_view_chromeos.h"
 #include "chrome/browser/chromeos/view_ids.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
+#include "content/public/browser/notification_service.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -56,14 +58,14 @@ namespace chromeos {
 
 CapsLockMenuButton::CapsLockMenuButton(StatusAreaButton::Delegate* delegate)
     : StatusAreaButton(delegate, this),
-      prefs_(GetPrefService()),
+      initialized_prefs_(false),
       status_(NULL),
       should_show_bubble_(true),
       bubble_count_(0) {
   set_id(VIEW_ID_STATUS_BUTTON_CAPS_LOCK);
-  if (prefs_)
-    remap_search_key_to_.Init(
-        prefs::kLanguageXkbRemapSearchKeyTo, prefs_, this);
+
+  if (StatusAreaViewChromeos::IsBrowserMode())
+    InitializePrefMember();
 
   SetIcon(*ResourceBundle::GetSharedInstance().GetBitmapNamed(
       IDR_STATUSBAR_CAPS_LOCK));
@@ -77,9 +79,18 @@ CapsLockMenuButton::CapsLockMenuButton(StatusAreaButton::Delegate* delegate)
   // device. SystemKeyEventListener is never initialized on chrome for cros
   // running on linux.
   DCHECK(SystemKeyEventListener::GetInstance() ||
-         !system::runtime_environment::IsRunningOnChromeOS());
+         !base::chromeos::IsRunningOnChromeOS());
   if (SystemKeyEventListener::GetInstance())
     SystemKeyEventListener::GetInstance()->AddCapsLockObserver(this);
+
+#if defined(USE_ASH)
+  if (StatusAreaViewChromeos::IsLoginMode()) {
+    // See comments in InputMethodMenu::InputMethodMenu().
+    registrar_.Add(this,
+                   chrome::NOTIFICATION_SESSION_STARTED,
+                   content::NotificationService::AllSources());
+  }
+#endif
 }
 
 CapsLockMenuButton::~CapsLockMenuButton() {
@@ -104,9 +115,10 @@ string16 CapsLockMenuButton::GetLabel(int id) const {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// views::ViewMenuDelegate implementation:
+// views::MenuButtonListener implementation:
 
-void CapsLockMenuButton::RunMenu(views::View* source, const gfx::Point& pt) {
+void CapsLockMenuButton::OnMenuButtonClicked(views::View* source,
+                                             const gfx::Point& point) {
   static const int kDummyCommandId = 1000;
 
   if (IsBubbleShown())
@@ -172,8 +184,14 @@ void CapsLockMenuButton::OnCapsLockChange(bool enabled) {
 void CapsLockMenuButton::Observe(int type,
                                  const content::NotificationSource& source,
                                  const content::NotificationDetails& details) {
-  if (type == chrome::NOTIFICATION_PREF_CHANGED)
-    UpdateAccessibleName();
+  switch (type) {
+    case chrome::NOTIFICATION_PREF_CHANGED:
+      UpdateAccessibleName();
+      break;
+    case chrome::NOTIFICATION_SESSION_STARTED:
+      InitializePrefMember();
+      break;
+  }
 }
 
 void CapsLockMenuButton::UpdateAccessibleName() {
@@ -249,10 +267,25 @@ void CapsLockMenuButton::HideBubble() {
 }
 
 bool CapsLockMenuButton::HasCapsLock() const {
-  return (prefs_ &&
-          (remap_search_key_to_.GetValue() == input_method::kCapsLockKey)) ||
-      // A keyboard for Linux usually has Caps Lock.
-      !system::runtime_environment::IsRunningOnChromeOS();
+  // A keyboard for Linux usually has Caps Lock.
+  if (!base::chromeos::IsRunningOnChromeOS())
+    return true;
+  // On the login screen, Caps Lock is not available.
+  if (!initialized_prefs_)
+    return false;
+
+  return remap_search_key_to_.GetValue() == input_method::kCapsLockKey;
+}
+
+void CapsLockMenuButton::InitializePrefMember() {
+  if (!initialized_prefs_) {
+    PrefService* prefs = GetPrefService();
+    if (prefs) {
+      initialized_prefs_ = true;
+      remap_search_key_to_.Init(
+          prefs::kLanguageXkbRemapSearchKeyTo, prefs, this);
+    }
+  }
 }
 
 }  // namespace chromeos

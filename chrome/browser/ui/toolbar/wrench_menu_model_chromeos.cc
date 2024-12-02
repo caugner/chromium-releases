@@ -7,6 +7,7 @@
 #include "base/command_line.h"
 #include "base/i18n/number_formatting.h"
 #include "chrome/app/chrome_command_ids.h"
+#include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/task_manager/task_manager.h"
 #include "chrome/common/chrome_switches.h"
 #include "grit/chromium_strings.h"
@@ -53,30 +54,35 @@ void WrenchMenuModel::Build() {
   AddItem(IDC_VIEW_BACKGROUND_PAGES,
       l10n_util::GetStringFUTF16(IDS_VIEW_BACKGROUND_PAGES,
           num_background_pages));
-  AddItem(IDC_UPGRADE_DIALOG, l10n_util::GetStringUTF16(IDS_UPDATE_NOW));
   AddItem(IDC_VIEW_INCOMPATIBILITIES,
       l10n_util::GetStringUTF16(IDS_VIEW_INCOMPATIBILITIES));
 
+#if !defined(USE_ASH)
   // Use an icon for IDC_HELP_PAGE menu item.
   AddItemWithStringId(IDC_HELP_PAGE, IDS_HELP_PAGE);
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
   SetIcon(GetIndexOfCommandId(IDC_HELP_PAGE),
           *rb.GetBitmapNamed(IDR_HELP_MENU));
+#endif
 
   // Show IDC_FEEDBACK in top-tier wrench menu for ChromeOS.
   AddItemWithStringId(IDC_FEEDBACK, IDS_FEEDBACK);
 
   AddGlobalErrorMenuItems();
 
+#if !defined(USE_ASH)
   AddSeparator();
 
   if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kGuestSession)) {
     AddItemWithStringId(IDC_EXIT, IDS_EXIT_GUEST_MODE);
+    AddItemWithStringId(IDC_SHUTDOWN, IDS_SHUTDOWN_BUTTON);
+  } else if (chromeos::UserManager::Get()->IsLoggedInAsDemoUser()) {
+    AddItemWithStringId(IDC_EXIT, IDS_SIGN_OUT);
   } else {
     AddItemWithStringId(IDC_LOCK_SCREEN, IDS_LOCK_SCREEN);
     AddItemWithStringId(IDC_EXIT, IDS_SIGN_OUT);
+    AddItemWithStringId(IDC_SHUTDOWN, IDS_SHUTDOWN_BUTTON);
   }
-
-  AddItemWithStringId(IDC_SHUTDOWN, IDS_SHUTDOWN_BUTTON);
+#endif
 }
 

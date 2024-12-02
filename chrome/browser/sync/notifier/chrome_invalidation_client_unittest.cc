@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,13 +7,13 @@
 #include "base/message_loop.h"
 #include "chrome/browser/sync/notifier/chrome_invalidation_client.h"
 #include "chrome/browser/sync/notifier/state_writer.h"
-#include "chrome/browser/sync/syncable/model_type.h"
-#include "chrome/browser/sync/syncable/model_type_payload_map.h"
-#include "chrome/browser/sync/util/weak_handle.h"
-#include "google/cacheinvalidation/v2/invalidation-client.h"
-#include "google/cacheinvalidation/v2/types.h"
+#include "google/cacheinvalidation/include/invalidation-client.h"
+#include "google/cacheinvalidation/include/types.h"
 #include "google/cacheinvalidation/v2/types.pb.h"
 #include "jingle/notifier/base/fake_base_task.h"
+#include "sync/syncable/model_type.h"
+#include "sync/syncable/model_type_payload_map.h"
+#include "sync/util/weak_handle.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -59,15 +59,6 @@ class MockStateWriter : public StateWriter {
   MOCK_METHOD1(WriteState, void(const std::string&));
 };
 
-class MockCallback {
- public:
-  MOCK_METHOD0(Run, void());
-
-  invalidation::Closure* MakeClosure() {
-    return invalidation::NewPermanentCallback(this, &MockCallback::Run);
-  }
-};
-
 }  // namespace
 
 class ChromeInvalidationClientTest : public testing::Test {
@@ -82,8 +73,13 @@ class ChromeInvalidationClientTest : public testing::Test {
   }
 
   virtual void TearDown() {
-    client_.Stop();
+    // client_.Stop() stops the invalidation scheduler, which deletes any
+    // pending tasks without running them.  Some tasks "run and delete" another
+    // task, so they must be run in order to avoid leaking the inner task.
+    // client_.Stop() does not schedule any tasks, so it's both necessary and
+    // sufficient to drain the task queue before calling it.
     message_loop_.RunAllPending();
+    client_.Stop();
   }
 
   // |payload| can be NULL, but not |type_name|.

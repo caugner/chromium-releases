@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,7 +26,7 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/text/text_elider.h"
 #include "ui/base/theme_provider.h"
-#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/canvas.h"
 #include "ui/gfx/favicon_size.h"
 #include "ui/gfx/font.h"
 #include "ui/views/controls/button/image_button.h"
@@ -477,8 +477,8 @@ void BaseTab::PaintTitle(gfx::Canvas* canvas, SkColor title_color) {
   }
 
 #if defined(OS_WIN)
-  canvas->AsCanvasSkia()->DrawFadeTruncatingString(title,
-      gfx::CanvasSkia::TruncateFadeTail, 0, *font_, title_color, title_bounds);
+  canvas->DrawFadeTruncatingString(title, gfx::Canvas::TruncateFadeTail, 0,
+                                   *font_, title_color, title_bounds);
 #else
   canvas->DrawStringInt(title, *font_, title_color,
                         title_bounds.x(), title_bounds.y(),
@@ -487,6 +487,10 @@ void BaseTab::PaintTitle(gfx::Canvas* canvas, SkColor title_color) {
 }
 
 void BaseTab::AnimationProgressed(const ui::Animation* animation) {
+  // Ignore if the pulse animation is being performed on active tab because
+  // it repaints the same image. See |Tab::PaintTabBackground()|.
+  if (animation == pulse_animation_.get() && IsActive())
+    return;
   SchedulePaint();
 }
 
@@ -504,10 +508,9 @@ void BaseTab::ButtonPressed(views::Button* sender, const views::Event& event) {
 }
 
 void BaseTab::ShowContextMenuForView(views::View* source,
-                                     const gfx::Point& p,
-                                     bool is_mouse_gesture) {
+                                     const gfx::Point& point) {
   if (controller() && !closing())
-    controller()->ShowContextMenuForTab(this, p);
+    controller()->ShowContextMenuForTab(this, point);
 }
 
 int BaseTab::loading_animation_frame() const {

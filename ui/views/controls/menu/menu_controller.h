@@ -155,6 +155,18 @@ class VIEWS_EXPORT MenuController : public MessageLoop::Dispatcher {
     SELECTION_EXIT                  = 1 << 2,
   };
 
+  // Result type for SendAcceleratorToHotTrackedView
+  enum SendAcceleratorResultType {
+    // Accelerator is not sent because of no hot tracked views.
+    ACCELERATOR_NOT_PROCESSED,
+
+    // Accelerator is sent to the hot tracked views.
+    ACCELERATOR_PROCESSED,
+
+    // Same as above and the accelerator causes the exit of the menu.
+    ACCELERATOR_PROCESSED_EXIT
+  };
+
   // Tracks selection information.
   struct State {
     State();
@@ -222,6 +234,10 @@ class VIEWS_EXPORT MenuController : public MessageLoop::Dispatcher {
   // to show/hide submenus and update state_.
   void SetSelection(MenuItemView* menu_item, int types);
 
+  void SetSelectionOnPointerDown(SubmenuView* source,
+                                 const LocatedEvent& event);
+  void StartDrag(SubmenuView* source, const gfx::Point& location);
+
 #if defined(OS_WIN)
   // Dispatcher method. This returns true if the menu was canceled, or
   // if the message is such that the menu should be closed.
@@ -232,8 +248,6 @@ class VIEWS_EXPORT MenuController : public MessageLoop::Dispatcher {
 #elif defined(USE_AURA)
   virtual base::MessagePumpDispatcher::DispatchStatus Dispatch(
       XEvent* xevent) OVERRIDE;
-#else
-  virtual bool Dispatch(GdkEvent* event) OVERRIDE;
 #endif
 
   // Key processing. The return value of this is returned from Dispatch.
@@ -247,9 +261,8 @@ class VIEWS_EXPORT MenuController : public MessageLoop::Dispatcher {
 
   virtual ~MenuController();
 
-  // If there is a hot tracked view AcceleratorPressed is invoked on it and
-  // true is returned.
-  bool SendAcceleratorToHotTrackedView();
+  // AcceleratorPressed is invoked on the hot tracked view if it exists.
+  SendAcceleratorResultType SendAcceleratorToHotTrackedView();
 
   void UpdateInitialLocation(const gfx::Rect& bounds,
                              MenuItemView::AnchorPosition position);
@@ -386,10 +399,10 @@ class VIEWS_EXPORT MenuController : public MessageLoop::Dispatcher {
   // the title. Returns true if a match was selected and the menu should exit.
   bool SelectByChar(char16 key);
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_AURA)
   // If there is a window at the location of the event, a new mouse event is
-  // generated and posted to it.
-  void RepostEvent(SubmenuView* source, const MouseEvent& event);
+  // generated and posted to it at the given location.
+  void RepostEvent(SubmenuView* source, const LocatedEvent& event);
 #endif
 
   // Sets the drop target to new_item.

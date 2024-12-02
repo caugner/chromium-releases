@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,13 +23,15 @@ typedef UITest RepostFormWarningTest;
 
 #if defined(OS_WIN)
 // http://crbug.com/47228
-#define MAYBE_TestDoubleReload FLAKY_TestDoubleReload
+#define MAYBE_TestDoubleReload DISABLED_TestDoubleReload
 #else
 #define MAYBE_TestDoubleReload TestDoubleReload
 #endif
 
 TEST_F(RepostFormWarningTest, MAYBE_TestDoubleReload) {
-  net::TestServer test_server(net::TestServer::TYPE_HTTP, FilePath(kDocRoot));
+  net::TestServer test_server(net::TestServer::TYPE_HTTP,
+                              net::TestServer::kLocalhost,
+                              FilePath(kDocRoot));
   ASSERT_TRUE(test_server.Start());
 
   scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
@@ -63,13 +65,15 @@ TEST_F(RepostFormWarningTest, MAYBE_TestDoubleReload) {
 
 #if defined(OS_WIN)
 // http://crbug.com/47228
-#define MAYBE_TestLoginAfterRepost FLAKY_TestLoginAfterRepost
+#define MAYBE_TestLoginAfterRepost DISABLED_TestLoginAfterRepost
 #else
 #define MAYBE_TestLoginAfterRepost TestLoginAfterRepost
 #endif
 
 TEST_F(RepostFormWarningTest, MAYBE_TestLoginAfterRepost) {
-  net::TestServer test_server(net::TestServer::TYPE_HTTP, FilePath(kDocRoot));
+  net::TestServer test_server(net::TestServer::TYPE_HTTP,
+                              net::TestServer::kLocalhost,
+                              FilePath(kDocRoot));
   ASSERT_TRUE(test_server.Start());
 
   scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));

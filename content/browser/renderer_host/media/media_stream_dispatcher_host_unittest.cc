@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,15 +7,15 @@
 #include "base/bind.h"
 #include "base/message_loop.h"
 #include "content/browser/browser_thread_impl.h"
-#include "content/browser/mock_resource_context.h"
 #include "content/browser/renderer_host/media/media_stream_dispatcher_host.h"
 #include "content/browser/renderer_host/media/media_stream_manager.h"
 #include "content/browser/renderer_host/media/video_capture_manager.h"
-#include "content/browser/resource_context.h"
 #include "content/common/media/media_stream_messages.h"
 #include "content/common/media/media_stream_options.h"
+#include "content/test/mock_resource_context.h"
 #include "ipc/ipc_message_macros.h"
 #include "media/audio/audio_manager.h"
+#include "net/url_request/url_request_context.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -36,8 +36,9 @@ namespace media_stream {
 class MockMediaStreamDispatcherHost : public MediaStreamDispatcherHost {
  public:
   MockMediaStreamDispatcherHost(content::ResourceContext* resource_context,
-                                MessageLoop* message_loop)
-      : MediaStreamDispatcherHost(resource_context, kProcessId),
+                                MessageLoop* message_loop,
+                                AudioManager* audio_manager)
+      : MediaStreamDispatcherHost(resource_context, kProcessId, audio_manager),
         message_loop_(message_loop) {}
   virtual ~MockMediaStreamDispatcherHost() {}
 
@@ -152,23 +153,17 @@ class MediaStreamDispatcherHostTest : public testing::Test {
     io_thread_.reset(new BrowserThreadImpl(BrowserThread::IO,
                                            message_loop_.get()));
 
-    audio_manager_ = AudioManager::Create();
+    audio_manager_.reset(AudioManager::Create());
 
-    // Create a MediaStreamManager instance and hand over pointer to
-    // ResourceContext.
-    media_stream_manager_.reset(new MediaStreamManager(audio_manager_));
     // Make sure we use fake devices to avoid long delays.
-    media_stream_manager_->UseFakeDevice();
-    content::MockResourceContext::GetInstance()->set_media_stream_manager(
-        media_stream_manager_.get());
+    MediaStreamManager::GetForResourceContext(
+        &resource_context_, audio_manager_.get())->UseFakeDevice();
 
     host_ = new MockMediaStreamDispatcherHost(
-        content::MockResourceContext::GetInstance(), message_loop_.get());
+        &resource_context_, message_loop_.get(), audio_manager_.get());
   }
 
   virtual void TearDown() {
-    content::MockResourceContext::GetInstance()->set_media_stream_manager(NULL);
-
     // Needed to make sure the manager finishes all tasks on its own thread.
     SyncWithVideoCaptureManagerThread();
   }
@@ -196,7 +191,9 @@ class MediaStreamDispatcherHostTest : public testing::Test {
     message_loop_->PostTask(
         FROM_HERE,
         base::Bind(&PostQuitOnVideoCaptureManagerThread,
-                   message_loop_.get(), media_stream_manager_.get()));
+                   message_loop_.get(),
+                   MediaStreamManager::GetForResourceContext(
+                       &resource_context_, audio_manager_.get())));
     message_loop_->Run();
   }
 
@@ -204,8 +201,8 @@ class MediaStreamDispatcherHostTest : public testing::Test {
   scoped_ptr<MessageLoop> message_loop_;
   scoped_ptr<BrowserThreadImpl> ui_thread_;
   scoped_ptr<BrowserThreadImpl> io_thread_;
-  scoped_ptr<MediaStreamManager> media_stream_manager_;
-  scoped_refptr<AudioManager> audio_manager_;
+  scoped_ptr<AudioManager> audio_manager_;
+  content::MockResourceContext resource_context_;
 };
 
 TEST_F(MediaStreamDispatcherHostTest, GenerateStream) {
@@ -303,8 +300,9 @@ TEST_F(MediaStreamDispatcherHostTest, FailDevice) {
 
   EXPECT_CALL(*host_, OnVideoDeviceFailed(kRenderId, 0));
   int session_id = host_->video_devices_[0].session_id;
-  content::MockResourceContext::GetInstance()->media_stream_manager()->
-      video_capture_manager()->Error(session_id);
+  MediaStreamManager::GetForResourceContext(
+      &resource_context_, audio_manager_.get())->
+          video_capture_manager()->Error(session_id);
   WaitForResult();
   EXPECT_EQ(host_->video_devices_.size(), 0u);
   EXPECT_EQ(host_->NumberOfStreams(), 1u);

@@ -399,7 +399,8 @@ TEST_F(HostContentSettingsMapTest, HostTrimEndingDotCheck) {
   TestingProfile profile;
   HostContentSettingsMap* host_content_settings_map =
       profile.GetHostContentSettingsMap();
-  CookieSettings* cookie_settings = CookieSettings::GetForProfile(&profile);
+  CookieSettings* cookie_settings =
+      CookieSettings::Factory::GetForProfile(&profile);
 
   ContentSettingsPattern pattern =
        ContentSettingsPattern::FromString("[*.]example.com");
@@ -758,7 +759,7 @@ TEST_F(HostContentSettingsMapTest, CanonicalizeExceptionsUnicodeAndPunycode) {
   const DictionaryValue* content_setting_prefs =
       profile.GetPrefs()->GetDictionary(prefs::kContentSettingsPatternPairs);
   std::string prefs_as_json;
-  base::JSONWriter::Write(content_setting_prefs, false, &prefs_as_json);
+  base::JSONWriter::Write(content_setting_prefs, &prefs_as_json);
   EXPECT_STREQ("{\"[*.]xn--ira-ppa.com,*\":{\"images\":2}}",
                prefs_as_json.c_str());
 }
@@ -843,7 +844,7 @@ TEST_F(HostContentSettingsMapTest, ResourceIdentifierPrefs) {
   const DictionaryValue* content_setting_prefs =
       profile.GetPrefs()->GetDictionary(prefs::kContentSettingsPatternPairs);
   std::string prefs_as_json;
-  base::JSONWriter::Write(content_setting_prefs, false, &prefs_as_json);
+  base::JSONWriter::Write(content_setting_prefs, &prefs_as_json);
   EXPECT_EQ("{}", prefs_as_json);
 
   host_content_settings_map->SetContentSetting(
@@ -855,7 +856,7 @@ TEST_F(HostContentSettingsMapTest, ResourceIdentifierPrefs) {
 
   content_setting_prefs =
       profile.GetPrefs()->GetDictionary(prefs::kContentSettingsPatternPairs);
-  base::JSONWriter::Write(content_setting_prefs, false, &prefs_as_json);
+  base::JSONWriter::Write(content_setting_prefs, &prefs_as_json);
   EXPECT_EQ("{\"[*.]example.com,*\":{\"per_plugin\":{\"otherplugin\":2}}}",
             prefs_as_json);
 }

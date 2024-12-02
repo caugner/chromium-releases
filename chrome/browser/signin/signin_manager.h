@@ -21,9 +21,9 @@
 #include <string>
 
 #include "base/compiler_specific.h"
+#include "base/gtest_prod_util.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/net/gaia/gaia_oauth_fetcher.h"
 #include "chrome/browser/profiles/profile_keyed_service.h"
 #include "chrome/common/net/gaia/gaia_auth_consumer.h"
 #include "chrome/common/net/gaia/google_service_auth_error.h"
@@ -47,10 +47,13 @@ struct GoogleServiceSigninSuccessDetails {
 };
 
 class SigninManager : public GaiaAuthConsumer,
-                      public GaiaOAuthConsumer,
                       public content::NotificationObserver,
                       public ProfileKeyedService {
  public:
+  // Returns true if the cookie policy for the given profile allows cookies
+  // for the Google signin domain.
+  static bool AreSigninCookiesAllowed(Profile* profile);
+
   SigninManager();
   virtual ~SigninManager();
 
@@ -69,12 +72,6 @@ class SigninManager : public GaiaAuthConsumer,
   // (by platform / depending on StartBehavior). Bug 88109.
   void SetAuthenticatedUsername(const std::string& username);
 
-  // Attempt to sign in this user with OAuth. If successful, set a preference
-  // indicating the signed in user and send out a notification, then start
-  // fetching tokens for the user. SigninManager takes ownership of |fetcher|.
-  virtual void StartOAuthSignIn(const std::string& oauth1_request_token,
-                                GaiaOAuthFetcher* fetcher);
-
   // Attempt to sign in this user with ClientLogin. If successful, set a
   // preference indicating the signed in user and send out a notification,
   // then start fetching tokens for the user.
@@ -89,38 +86,43 @@ class SigninManager : public GaiaAuthConsumer,
   // attempt.
   void ProvideSecondFactorAccessCode(const std::string& access_code);
 
+  // Attempt to sign in this user with existing credentials from the cookie jar.
+  // |session_index| indicates which user account to use if the cookie jar
+  // contains a multi-login session. Otherwise the end result of this call is
+  // the same as StartSignIn().
+  virtual void StartSignInWithCredentials(const std::string& session_index,
+                                          const std::string& username,
+                                          const std::string& password);
+
   // Sign a user out, removing the preference, erasing all keys
   // associated with the user, and canceling all auth in progress.
   virtual void SignOut();
 
-  // Returns the auth error associated with the last login attempt, or None if
-  // there have been no login failures.
-  virtual const GoogleServiceAuthError& GetLoginAuthError() const;
+  // Returns true if there's a signin in progress.
+  bool AuthInProgress() const;
+
+  // Handles errors if a required user info key is not returned from the
+  // GetUserInfo call.
+  void OnGetUserInfoKeyNotFound(const std::string& key);
 
   // GaiaAuthConsumer
   virtual void OnClientLoginSuccess(const ClientLoginResult& result) OVERRIDE;
   virtual void OnClientLoginFailure(
       const GoogleServiceAuthError& error) OVERRIDE;
-  virtual void OnGetUserInfoSuccess(const std::string& key,
-                                    const std::string& value) OVERRIDE;
-  virtual void OnGetUserInfoKeyNotFound(const std::string& key) OVERRIDE;
+  virtual void OnOAuthLoginTokenSuccess(const std::string& refresh_token,
+                                        const std::string& access_token,
+                                        int expires_in_secs) OVERRIDE;
+  virtual void OnOAuthLoginTokenFailure(
+      const GoogleServiceAuthError& error) OVERRIDE;
+  virtual void OnGetUserInfoSuccess(const UserInfoMap& data) OVERRIDE;
   virtual void OnGetUserInfoFailure(
       const GoogleServiceAuthError& error) OVERRIDE;
+  virtual void OnTokenAuthSuccess(const net::ResponseCookies& cookies,
+                                  const std::string& data) OVERRIDE;
   virtual void OnTokenAuthFailure(const GoogleServiceAuthError& error) OVERRIDE;
-
-  // GaiaOAuthConsumer
-  virtual void OnOAuthGetAccessTokenSuccess(const std::string& token,
-                                            const std::string& secret) OVERRIDE;
-  virtual void OnOAuthGetAccessTokenFailure(
+  virtual void OnUberAuthTokenSuccess(const std::string& token) OVERRIDE;
+  virtual void OnUberAuthTokenFailure(
       const GoogleServiceAuthError& error) OVERRIDE;
-  virtual void OnOAuthWrapBridgeSuccess(const std::string& service_name,
-                                        const std::string& token,
-                                        const std::string& expires_in) OVERRIDE;
-  virtual void OnOAuthWrapBridgeFailure(
-      const std::string& service_name,
-      const GoogleServiceAuthError& error) OVERRIDE;
-  virtual void OnUserInfoSuccess(const std::string& email) OVERRIDE;
-  virtual void OnUserInfoFailure(const GoogleServiceAuthError& error) OVERRIDE;
 
   // content::NotificationObserver
   virtual void Observe(int type,
@@ -133,12 +135,16 @@ class SigninManager : public GaiaAuthConsumer,
   FRIEND_TEST_ALL_PREFIXES(SigninManagerTest, ProvideSecondFactorSuccess);
   FRIEND_TEST_ALL_PREFIXES(SigninManagerTest, ProvideSecondFactorFailure);
   void PrepareForSignin();
-  void PrepareForOAuthSignin();
 
   // Called when a new request to re-authenticate a user is in progress.
   // Will clear in memory data but leaves the db as such so when the browser
   // restarts we can use the old token(which might throw a password error).
   void ClearTransientSigninData();
+
+  // Called to handle an error from a GAIA auth fetch.  Sets the last error
+  // to |error|, sends out a notification of login failure, and clears the
+  // transient signin data.
+  void HandleAuthError(const GoogleServiceAuthError& error);
 
   Profile* profile_;
 
@@ -146,9 +152,6 @@ class SigninManager : public GaiaAuthConsumer,
   std::string possibly_invalid_username_;
   std::string password_;  // This is kept empty whenever possible.
   bool had_two_factor_error_;
-
-  // OAuth identity.
-  std::string oauth1_request_token_;
 
   void CleanupNotificationRegistration();
 
@@ -159,15 +162,8 @@ class SigninManager : public GaiaAuthConsumer,
   // Actual client login handler.
   scoped_ptr<GaiaAuthFetcher> client_login_;
 
-  // Actual OAuth login handler.
-  scoped_ptr<GaiaOAuthFetcher> oauth_login_;
-
   // Register for notifications from the TokenService.
   content::NotificationRegistrar registrar_;
-
-  // The last error we received when logging in (used to retrieve details like
-  // captchas, etc).
-  GoogleServiceAuthError last_login_auth_error_;
 
   std::string authenticated_username_;
 

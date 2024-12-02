@@ -8,18 +8,22 @@
 #include "base/stringprintf.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_test_api.h"
+#include "chrome/browser/extensions/unpacked_installer.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/web_applications/web_app.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
+#include "net/base/net_util.h"
 
 namespace {
 
 const char kTestServerPort[] = "testServer.port";
 const char kTestDataDirectory[] = "testDataDirectory";
+const char kTestWebSocketPort[] = "testWebSocketPort";
 
 };  // namespace
 
@@ -131,31 +135,16 @@ bool ExtensionApiTest::RunExtensionTestIncognitoNoFileAccess(
 
 bool ExtensionApiTest::RunExtensionSubtest(const char* extension_name,
                                            const std::string& page_url) {
-  DCHECK(!page_url.empty()) << "Argument page_url is required.";
-  return RunExtensionTestImpl(extension_name, page_url, kFlagEnableFileAccess);
+  return RunExtensionSubtest(extension_name, page_url, kFlagEnableFileAccess);
 }
 
-bool ExtensionApiTest::RunExtensionSubtestNoFileAccess(
-    const char* extension_name,
-    const std::string& page_url) {
+bool ExtensionApiTest::RunExtensionSubtest(const char* extension_name,
+                                           const std::string& page_url,
+                                           int flags) {
   DCHECK(!page_url.empty()) << "Argument page_url is required.";
-  return RunExtensionTestImpl(extension_name, page_url, kFlagNone);
+  return RunExtensionTestImpl(extension_name, page_url, flags);
 }
 
-bool ExtensionApiTest::RunExtensionSubtestIncognito(
-    const char* extension_name,
-    const std::string& page_url) {
-  DCHECK(!page_url.empty()) << "Argument page_url is required.";
-  return RunExtensionTestImpl(extension_name, page_url,
-                              kFlagEnableIncognito | kFlagEnableFileAccess);
-}
-
-bool ExtensionApiTest::RunExtensionSubtestIncognitoNoFileAccess(
-    const char* extension_name,
-    const std::string& page_url) {
-  DCHECK(!page_url.empty()) << "Argument page_url is required.";
-  return RunExtensionTestImpl(extension_name, page_url, kFlagEnableIncognito);
-}
 
 bool ExtensionApiTest::RunPageTest(const std::string& page_url) {
   return RunExtensionSubtest("", page_url);
@@ -174,6 +163,7 @@ bool ExtensionApiTest::RunExtensionTestImpl(const char* extension_name,
   bool enable_fileaccess = (flags & kFlagEnableFileAccess) != 0;
   bool load_as_component = (flags & kFlagLoadAsComponent) != 0;
   bool launch_shell = (flags & kFlagLaunchAppShell) != 0;
+  bool use_incognito = (flags & kFlagUseIncognito) != 0;
 
   ResultCatcher catcher;
   DCHECK(!std::string(extension_name).empty() || !page_url.empty()) <<
@@ -208,10 +198,12 @@ bool ExtensionApiTest::RunExtensionTestImpl(const char* extension_name,
       url = extension->GetResourceURL(page_url);
     }
 
-    ui_test_utils::NavigateToURL(browser(), url);
+    if (use_incognito)
+      ui_test_utils::OpenURLOffTheRecord(browser()->profile(), url);
+    else
+      ui_test_utils::NavigateToURL(browser(), url);
 
   } else if (launch_shell) {
-    web_app::SetDisableShortcutCreationForTests(true);
     Browser::OpenApplication(
         browser()->profile(),
         extension,
@@ -271,7 +263,74 @@ bool ExtensionApiTest::StartTestServer() {
   return true;
 }
 
+bool ExtensionApiTest::StartWebSocketServer(const FilePath& root_directory) {
+  websocket_server_.reset(new ui_test_utils::TestWebSocketServer());
+  int port = websocket_server_->UseRandomPort();
+  if (!websocket_server_->Start(root_directory))
+    return false;
+
+  test_config_->SetInteger(kTestWebSocketPort, port);
+  return true;
+}
+
 void ExtensionApiTest::SetUpCommandLine(CommandLine* command_line) {
   ExtensionBrowserTest::SetUpCommandLine(command_line);
   test_data_dir_ = test_data_dir_.AppendASCII("api_test");
+}
+
+PlatformAppApiTest::PlatformAppApiTest()
+    : previous_command_line_(CommandLine::NO_PROGRAM) {}
+
+PlatformAppApiTest::~PlatformAppApiTest() {}
+
+void PlatformAppApiTest::SetUpCommandLine(CommandLine* command_line) {
+  ExtensionApiTest::SetUpCommandLine(command_line);
+
+  // If someone is using this class, we're going to insist on management of the
+  // relevant flags. If these flags are already set, die.
+  DCHECK(!command_line->HasSwitch(switches::kEnablePlatformApps));
+  DCHECK(!command_line->HasSwitch(switches::kEnableExperimentalExtensionApis));
+
+  // Squirrel away for potential use in VerifyPermissions.
+  //
+  // TODO(miket): I _could_ just call VerifyPermissions here instead of
+  // requiring everyone who inherits from PlatformAppApiTest to explicitly call
+  // it within a test, but that feels overbearing.
+  previous_command_line_ = *command_line;
+
+  command_line->AppendSwitch(switches::kEnableExperimentalExtensionApis);
+  command_line->AppendSwitch(switches::kEnablePlatformApps);
+}
+
+void PlatformAppApiTest::VerifyPermissions(const FilePath& extension_path) {
+#if defined(OS_WIN)
+  // See http://code.google.com/p/chromium/issues/detail?id=119758.
+  //
+  // TODO(miket): investigate why WaitForExtensionLoadError() doesn't receive
+  // the expected notification on XP/Vista, but succeeds on other platforms.
+#else
+  CommandLine old_command_line(*CommandLine::ForCurrentProcess());
+  ExtensionService* service = browser()->profile()->GetExtensionService();
+
+  // Neither experimental nor platform-app flag.
+  *CommandLine::ForCurrentProcess() = previous_command_line_;
+  extensions::UnpackedInstaller::Create(service)->Load(extension_path);
+  ASSERT_TRUE(WaitForExtensionLoadError());
+
+  // Only experimental flag.
+  *CommandLine::ForCurrentProcess() = previous_command_line_;
+  CommandLine::ForCurrentProcess()->AppendSwitch(
+      switches::kEnableExperimentalExtensionApis);
+  extensions::UnpackedInstaller::Create(service)->Load(extension_path);
+  ASSERT_TRUE(WaitForExtensionLoadError());
+
+  // Only platform-app flag.
+  *CommandLine::ForCurrentProcess() = previous_command_line_;
+  CommandLine::ForCurrentProcess()->AppendSwitch(
+      switches::kEnablePlatformApps);
+  extensions::UnpackedInstaller::Create(service)->Load(extension_path);
+  ASSERT_TRUE(WaitForExtensionLoadError());
+
+  *CommandLine::ForCurrentProcess() = old_command_line;
+#endif
 }

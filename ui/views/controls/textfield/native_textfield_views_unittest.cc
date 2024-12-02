@@ -14,6 +14,7 @@
 #include "base/string16.h"
 #include "base/utf_string_conversions.h"
 #include "googleurl/src/gurl.h"
+#include "grit/ui_strings.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/clipboard/clipboard.h"
 #include "ui/base/clipboard/scoped_clipboard_writer.h"
@@ -34,20 +35,6 @@
 #include "ui/views/views_delegate.h"
 #include "ui/views/widget/native_widget_private.h"
 #include "ui/views/widget/widget.h"
-
-// Drag and drop for aura in linux hasn't been implemented yet.
-// Bug http://crbug.com/97845
-#if defined(USE_AURA) && defined(OS_LINUX)
-#define MAYBE_DragAndDrop_InitiateDrag DISABLED_DragAndDrop_InitiateDrag
-#define MAYBE_DragAndDrop_ToTheLeft DISABLED_DragAndDrop_ToTheLeft
-#define MAYBE_DragAndDrop_ToTheRight DISABLED_DragAndDrop_ToTheRight
-#define MAYBE_DragAndDrop_Canceled DISABLED_DragAndDrop_Canceled
-#else
-#define MAYBE_DragAndDrop_InitiateDrag DragAndDrop_InitiateDrag
-#define MAYBE_DragAndDrop_ToTheLeft DragAndDrop_ToTheLeft
-#define MAYBE_DragAndDrop_ToTheRight DragAndDrop_ToTheRight
-#define MAYBE_DragAndDrop_Canceled DragAndDrop_Canceled
-#endif  // OS_LINUX && USE_AURA
 
 namespace {
 
@@ -258,7 +245,8 @@ class NativeTextfieldViewsTest : public ViewsTestBase,
 
   void SetClipboardText(const std::string& text) {
     ui::ScopedClipboardWriter clipboard_writer(
-        views::ViewsDelegate::views_delegate->GetClipboard());
+        views::ViewsDelegate::views_delegate->GetClipboard(),
+        ui::Clipboard::BUFFER_STANDARD);
     clipboard_writer.WriteText(ASCIIToUTF16(text));
   }
 
@@ -269,7 +257,7 @@ class NativeTextfieldViewsTest : public ViewsTestBase,
   int GetCursorPositionX(int cursor_pos) {
     gfx::RenderText* render_text = textfield_view_->GetRenderText();
     return render_text->GetCursorBounds(
-        gfx::SelectionModel(cursor_pos), false).x();
+        gfx::SelectionModel(cursor_pos, gfx::CURSOR_FORWARD), false).x();
   }
 
   // Get the current cursor bounds.
@@ -509,6 +497,20 @@ TEST_F(NativeTextfieldViewsTest, PasswordTest) {
   // the actual text instead of "*".
   EXPECT_STR_EQ("my password", textfield_->text());
   EXPECT_TRUE(last_contents_.empty());
+
+  // Cut and copy should be disabled in the context menu.
+  model_->SelectAll();
+  EXPECT_FALSE(IsCommandIdEnabled(IDS_APP_CUT));
+  EXPECT_FALSE(IsCommandIdEnabled(IDS_APP_COPY));
+
+  // Cut and copy keyboard shortcuts and menu commands should do nothing.
+  SetClipboardText("foo");
+  SendKeyEvent(ui::VKEY_C, false, true);
+  SendKeyEvent(ui::VKEY_X, false, true);
+  ExecuteCommand(IDS_APP_COPY);
+  ExecuteCommand(IDS_APP_CUT);
+  EXPECT_STR_EQ("foo", string16(GetClipboardText()));
+  EXPECT_STR_EQ("my password", textfield_->text());
 }
 
 TEST_F(NativeTextfieldViewsTest, InputTypeSetsObscured) {
@@ -744,7 +746,7 @@ TEST_F(NativeTextfieldViewsTest, DragToSelect) {
   EXPECT_EQ(textfield_->text(), textfield_->GetSelectedText());
 }
 
-#if defined(OS_WIN) || defined(TOOLKIT_USES_GTK)
+#if defined(OS_WIN)
 TEST_F(NativeTextfieldViewsTest, DragAndDrop_AcceptDrop) {
   InitTextfield(Textfield::STYLE_DEFAULT);
   textfield_->SetText(ASCIIToUTF16("hello world"));
@@ -787,21 +789,22 @@ TEST_F(NativeTextfieldViewsTest, DragAndDrop_AcceptDrop) {
   ui::OSExchangeData bad_data;
   bad_data.SetFilename(FilePath(FILE_PATH_LITERAL("x")));
 #if defined(OS_WIN)
-  bad_data.SetPickledData(CF_BITMAP, Pickle());
+#if defined(USE_AURA)
+  ui::OSExchangeData::CustomFormat fmt = ui::Clipboard::GetBitmapFormatType();
+#else
+  ui::OSExchangeData::CustomFormat fmt = CF_BITMAP;
+#endif
+  bad_data.SetPickledData(fmt, Pickle());
   bad_data.SetFileContents(FilePath(L"x"), "x");
   bad_data.SetHtml(string16(ASCIIToUTF16("x")), GURL("x.org"));
   ui::OSExchangeData::DownloadFileInfo download(FilePath(), NULL);
   bad_data.SetDownloadFileInfo(download);
-#else
-  // Skip OSExchangeDataProviderWin::SetURL, which also sets CF_TEXT / STRING.
-  bad_data.SetURL(GURL("x.org"), string16(ASCIIToUTF16("x")));
-  bad_data.SetPickledData(GDK_SELECTION_PRIMARY, Pickle());
 #endif
   EXPECT_FALSE(textfield_view_->CanDrop(bad_data));
 }
 #endif
 
-TEST_F(NativeTextfieldViewsTest, MAYBE_DragAndDrop_InitiateDrag) {
+TEST_F(NativeTextfieldViewsTest, DragAndDrop_InitiateDrag) {
   InitTextfield(Textfield::STYLE_DEFAULT);
   textfield_->SetText(ASCIIToUTF16("hello string world"));
 
@@ -825,6 +828,11 @@ TEST_F(NativeTextfieldViewsTest, MAYBE_DragAndDrop_InitiateDrag) {
   EXPECT_EQ(ui::DragDropTypes::DRAG_NONE,
             textfield_view_->GetDragOperationsForView(NULL, kStringPoint));
   textfield_->SelectRange(kStringRange);
+  // Ensure that password textfields do not support drag operations.
+  textfield_->SetObscured(true);
+  EXPECT_EQ(ui::DragDropTypes::DRAG_NONE,
+            textfield_view_->GetDragOperationsForView(NULL, kStringPoint));
+  textfield_->SetObscured(false);
   // Ensure that textfields only initiate drag operations inside the selection.
   EXPECT_EQ(ui::DragDropTypes::DRAG_NONE,
             textfield_view_->GetDragOperationsForView(NULL, gfx::Point()));
@@ -839,7 +847,7 @@ TEST_F(NativeTextfieldViewsTest, MAYBE_DragAndDrop_InitiateDrag) {
       textfield_view_->GetDragOperationsForView(textfield_view_, kStringPoint));
 }
 
-TEST_F(NativeTextfieldViewsTest, MAYBE_DragAndDrop_ToTheRight) {
+TEST_F(NativeTextfieldViewsTest, DragAndDrop_ToTheRight) {
   InitTextfield(Textfield::STYLE_DEFAULT);
   textfield_->SetText(ASCIIToUTF16("hello world"));
 
@@ -893,7 +901,7 @@ TEST_F(NativeTextfieldViewsTest, MAYBE_DragAndDrop_ToTheRight) {
   EXPECT_STR_EQ("h welloorld", textfield_->text());
 }
 
-TEST_F(NativeTextfieldViewsTest, MAYBE_DragAndDrop_ToTheLeft) {
+TEST_F(NativeTextfieldViewsTest, DragAndDrop_ToTheLeft) {
   InitTextfield(Textfield::STYLE_DEFAULT);
   textfield_->SetText(ASCIIToUTF16("hello world"));
 
@@ -946,7 +954,7 @@ TEST_F(NativeTextfieldViewsTest, MAYBE_DragAndDrop_ToTheLeft) {
   EXPECT_STR_EQ("h worlellod", textfield_->text());
 }
 
-TEST_F(NativeTextfieldViewsTest, MAYBE_DragAndDrop_Canceled) {
+TEST_F(NativeTextfieldViewsTest, DragAndDrop_Canceled) {
   InitTextfield(Textfield::STYLE_DEFAULT);
   textfield_->SetText(ASCIIToUTF16("hello world"));
 
@@ -1350,32 +1358,32 @@ TEST_F(NativeTextfieldViewsTest, HitInsideTextAreaTest) {
   std::vector<gfx::Rect> cursor_bounds;
 
   // Save each cursor bound.
-  gfx::SelectionModel sel(0, 0, gfx::SelectionModel::LEADING);
+  gfx::SelectionModel sel(0, gfx::CURSOR_FORWARD);
   cursor_bounds.push_back(GetCursorBounds(sel));
 
-  sel = gfx::SelectionModel(1, 0, gfx::SelectionModel::TRAILING);
+  sel = gfx::SelectionModel(1, gfx::CURSOR_BACKWARD);
   gfx::Rect bound = GetCursorBounds(sel);
-  sel = gfx::SelectionModel(1, 1, gfx::SelectionModel::LEADING);
+  sel = gfx::SelectionModel(1, gfx::CURSOR_FORWARD);
   EXPECT_EQ(bound.x(), GetCursorBounds(sel).x());
   cursor_bounds.push_back(bound);
 
   // Check that a cursor at the end of the Latin portion of the text is at the
   // same position as a cursor placed at the end of the RTL Hebrew portion.
-  sel = gfx::SelectionModel(2, 1, gfx::SelectionModel::TRAILING);
+  sel = gfx::SelectionModel(2, gfx::CURSOR_BACKWARD);
   bound = GetCursorBounds(sel);
-  sel = gfx::SelectionModel(4, 3, gfx::SelectionModel::TRAILING);
+  sel = gfx::SelectionModel(4, gfx::CURSOR_BACKWARD);
   EXPECT_EQ(bound.x(), GetCursorBounds(sel).x());
   cursor_bounds.push_back(bound);
 
-  sel = gfx::SelectionModel(3, 2, gfx::SelectionModel::TRAILING);
+  sel = gfx::SelectionModel(3, gfx::CURSOR_BACKWARD);
   bound = GetCursorBounds(sel);
-  sel = gfx::SelectionModel(3, 3, gfx::SelectionModel::LEADING);
+  sel = gfx::SelectionModel(3, gfx::CURSOR_FORWARD);
   EXPECT_EQ(bound.x(), GetCursorBounds(sel).x());
   cursor_bounds.push_back(bound);
 
-  sel = gfx::SelectionModel(2, 2, gfx::SelectionModel::LEADING);
+  sel = gfx::SelectionModel(2, gfx::CURSOR_FORWARD);
   bound = GetCursorBounds(sel);
-  sel = gfx::SelectionModel(4, 2, gfx::SelectionModel::LEADING);
+  sel = gfx::SelectionModel(4, gfx::CURSOR_FORWARD);
   EXPECT_EQ(bound.x(), GetCursorBounds(sel).x());
   cursor_bounds.push_back(bound);
 

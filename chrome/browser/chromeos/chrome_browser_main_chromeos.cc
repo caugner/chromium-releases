@@ -6,17 +6,18 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
+#include "base/chromeos/chromeos_version.h"
 #include "base/command_line.h"
 #include "base/lazy_instance.h"
 #include "base/message_loop.h"
 #include "base/string_number_conversions.h"
 #include "chrome/browser/browser_process_impl.h"
+#include "chrome/browser/chromeos/background/desktop_background_observer.h"
 #include "chrome/browser/chromeos/audio/audio_handler.h"
-#include "chrome/browser/chromeos/bluetooth/bluetooth_manager.h"
-#include "chrome/browser/chromeos/boot_times_loader.h"
 #include "chrome/browser/chromeos/boot_times_loader.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
-#include "chrome/browser/chromeos/cros/cros_library.h"
+#include "chrome/browser/chromeos/cryptohome/async_method_caller.h"
+#include "chrome/browser/chromeos/dbus/cros_dbus_service.h"
 #include "chrome/browser/chromeos/dbus/dbus_thread_manager.h"
 #include "chrome/browser/chromeos/dbus/power_manager_client.h"
 #include "chrome/browser/chromeos/dbus/session_manager_client.h"
@@ -25,6 +26,10 @@
 #include "chrome/browser/chromeos/imageburner/burn_manager.h"
 #include "chrome/browser/chromeos/input_method/input_method_manager.h"
 #include "chrome/browser/chromeos/input_method/xkeyboard.h"
+#include "chrome/browser/chromeos/kiosk_mode/kiosk_mode_idle_logout.h"
+#include "chrome/browser/chromeos/kiosk_mode/kiosk_mode_screensaver.h"
+#include "chrome/browser/chromeos/kiosk_mode/kiosk_mode_settings.h"
+#include "chrome/browser/chromeos/legacy_window_manager/initial_browser_window_observer.h"
 #include "chrome/browser/chromeos/login/authenticator.h"
 #include "chrome/browser/chromeos/login/login_utils.h"
 #include "chrome/browser/chromeos/login/ownership_service.h"
@@ -34,10 +39,13 @@
 #include "chrome/browser/chromeos/net/cros_network_change_notifier_factory.h"
 #include "chrome/browser/chromeos/net/network_change_notifier_chromeos.h"
 #include "chrome/browser/chromeos/power/brightness_observer.h"
+#include "chrome/browser/chromeos/power/power_button_controller_delegate_chromeos.h"
+#include "chrome/browser/chromeos/power/power_button_observer.h"
+#include "chrome/browser/chromeos/power/power_state_override.h"
 #include "chrome/browser/chromeos/power/resume_observer.h"
 #include "chrome/browser/chromeos/power/screen_lock_observer.h"
+#include "chrome/browser/chromeos/power/video_property_writer.h"
 #include "chrome/browser/chromeos/status/status_area_view_chromeos.h"
-#include "chrome/browser/chromeos/system/runtime_environment.h"
 #include "chrome/browser/chromeos/system/statistics_provider.h"
 #include "chrome/browser/chromeos/system_key_event_listener.h"
 #include "chrome/browser/chromeos/upgrade_detector_chromeos.h"
@@ -50,6 +58,7 @@
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/signin/token_service_factory.h"
 #include "chrome/browser/ui/views/browser_dialogs.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
@@ -62,19 +71,9 @@
 #include "net/url_request/url_request.h"
 #include "ui/base/l10n/l10n_util.h"
 
-#if defined(TOOLKIT_USES_GTK)
-#include <gtk/gtk.h>
-#endif
 
-#if defined(USE_AURA)
-#include "chrome/browser/chromeos/legacy_window_manager/initial_browser_window_observer.h"
-#include "chrome/browser/chromeos/power/power_button_controller_delegate_chromeos.h"
-#include "chrome/browser/chromeos/power/power_button_observer.h"
-#include "chrome/browser/chromeos/power/video_property_writer.h"
-#endif
 
 class MessageLoopObserver : public MessageLoopForUI::Observer {
-#if defined(USE_AURA)
   virtual base::EventStatus WillProcessEvent(
       const base::NativeEvent& event) OVERRIDE {
     return base::EVENT_CONTINUE;
@@ -83,34 +82,6 @@ class MessageLoopObserver : public MessageLoopForUI::Observer {
   virtual void DidProcessEvent(
       const base::NativeEvent& event) OVERRIDE {
   }
-#else
-  virtual void WillProcessEvent(GdkEvent* event) {
-    // On chromeos we want to map Alt-left click to right click.
-    // This code only changes presses and releases. We could decide to also
-    // modify drags and crossings. It doesn't seem to be a problem right now
-    // with our support for context menus (the only real need we have).
-    // There are some inconsistent states both with what we have and what
-    // we would get if we added drags. You could get a right drag without a
-    // right down for example, unless we started synthesizing events, which
-    // seems like more trouble than it's worth.
-    if ((event->type == GDK_BUTTON_PRESS ||
-        event->type == GDK_2BUTTON_PRESS ||
-        event->type == GDK_3BUTTON_PRESS ||
-        event->type == GDK_BUTTON_RELEASE) &&
-        event->button.button == 1 &&
-        event->button.state & GDK_MOD1_MASK) {
-      // Change the button to the third (right) one.
-      event->button.button = 3;
-      // Remove the Alt key and first button state.
-      event->button.state &= ~(GDK_MOD1_MASK | GDK_BUTTON1_MASK);
-      // Add the third (right) button state.
-      event->button.state |= GDK_BUTTON3_MASK;
-    }
-  }
-
-  virtual void DidProcessEvent(GdkEvent* event) {
-  }
-#endif
 };
 
 static base::LazyInstance<MessageLoopObserver> g_message_loop_observer =
@@ -146,7 +117,6 @@ class StubLogin : public chromeos::LoginStatusConsumer,
 
   void OnLoginSuccess(const std::string& username,
                       const std::string& password,
-                      const GaiaAuthConsumer::ClientLoginResult& credentials,
                       bool pending_requests,
                       bool using_oauth) {
     pending_requests_ = pending_requests;
@@ -155,7 +125,6 @@ class StubLogin : public chromeos::LoginStatusConsumer,
       chromeos::LoginUtils::Get()->PrepareProfile(username,
                                                   std::string(),
                                                   password,
-                                                  credentials,
                                                   pending_requests,
                                                   using_oauth,
                                                   false,
@@ -168,7 +137,7 @@ class StubLogin : public chromeos::LoginStatusConsumer,
   // LoginUtils::Delegate implementation:
   virtual void OnProfilePrepared(Profile* profile) {
     profile_prepared_ = true;
-    chromeos::LoginUtils::DoBrowserLaunch(profile, NULL);
+    chromeos::LoginUtils::Get()->DoBrowserLaunch(profile, NULL);
     if (!pending_requests_)
       delete this;
   }
@@ -199,7 +168,11 @@ void OptionallyRunChromeOSLoginManager(const CommandLine& parsed_command_line,
           size.SetSize(width, height);
       }
     }
+
     browser::ShowLoginWizard(first_screen, size);
+
+    if (chromeos::KioskModeSettings::Get()->IsKioskModeEnabled())
+      chromeos::InitializeKioskModeScreensaver();
   } else if (parsed_command_line.HasSwitch(switches::kLoginUser) &&
       parsed_command_line.HasSwitch(switches::kLoginPassword)) {
     chromeos::BootTimesLoader::Get()->RecordLoginAttempted();
@@ -223,8 +196,9 @@ ChromeBrowserMainPartsChromeos::ChromeBrowserMainPartsChromeos(
 }
 
 ChromeBrowserMainPartsChromeos::~ChromeBrowserMainPartsChromeos() {
-  chromeos::imageburner::BurnManager::Shutdown();
-
+  if (chromeos::KioskModeSettings::Get()->IsKioskModeEnabled())
+    chromeos::ShutdownKioskModeScreensaver();
+  cryptohome::AsyncMethodCaller::Shutdown();
   chromeos::disks::DiskMountManager::Shutdown();
 
   // CrosLibrary is shut down before DBusThreadManager even though the former
@@ -235,6 +209,7 @@ ChromeBrowserMainPartsChromeos::~ChromeBrowserMainPartsChromeos() {
   if (!parameters().ui_task && chromeos::CrosLibrary::Get())
     chromeos::CrosLibrary::Shutdown();
 
+  chromeos::CrosDBusService::Shutdown();
   chromeos::DBusThreadManager::Shutdown();
 
   // To be precise, logout (browser shutdown) is not yet done, but the
@@ -280,18 +255,14 @@ void ChromeBrowserMainPartsChromeos::PostMainMessageLoopStart() {
   // Initialize DBusThreadManager for the browser. This must be done after
   // the main message loop is started, as it uses the message loop.
   chromeos::DBusThreadManager::Initialize();
+  chromeos::CrosDBusService::Initialize();
 
   // Initialize the session manager observer so that we'll take actions
   // per signals sent from the session manager.
   session_manager_observer_.reset(new chromeos::SessionManagerObserver);
-  chromeos::DBusThreadManager::Get()->GetSessionManagerClient()->
-      AddObserver(session_manager_observer_.get());
 
-  // Initialize the disk mount manager.
   chromeos::disks::DiskMountManager::Initialize();
-
-  // Initialize the burn manager.
-  chromeos::imageburner::BurnManager::Initialize();
+  cryptohome::AsyncMethodCaller::Initialize();
 
   // Initialize the network change notifier for Chrome OS. The network
   // change notifier starts to monitor changes from the power manager and
@@ -302,21 +273,19 @@ void ChromeBrowserMainPartsChromeos::PostMainMessageLoopStart() {
   // detector starts to monitor changes from the update engine.
   UpgradeDetectorChromeos::GetInstance()->Init();
 
-  if (chromeos::system::runtime_environment::IsRunningOnChromeOS()) {
+  if (base::chromeos::IsRunningOnChromeOS()) {
     // Enable Num Lock on X start up for http://crosbug.com/p/5795 and
     // http://crosbug.com/p/6245. We don't do this for Chromium OS since many
     // netbooks do not work as intended when Num Lock is on (e.g. On a netbook
     // with a small keyboard, u, i, o, p, ... keys might be repurposed as
     // cursor keys when Num Lock is on).
 #if defined(GOOGLE_CHROME_BUILD)
-      chromeos::input_method::InputMethodManager::GetInstance()->
-          GetXKeyboard()->SetNumLockEnabled(true);
+    chromeos::input_method::InputMethodManager::GetInstance()->
+        GetXKeyboard()->SetNumLockEnabled(true);
 #endif
 
-#if defined(USE_AURA)
-      initial_browser_window_observer_.reset(
-          new chromeos::InitialBrowserWindowObserver);
-#endif
+    initial_browser_window_observer_.reset(
+        new chromeos::InitialBrowserWindowObserver);
   }
 
   ChromeBrowserMainPartsLinux::PostMainMessageLoopStart();
@@ -325,14 +294,14 @@ void ChromeBrowserMainPartsChromeos::PostMainMessageLoopStart() {
 // Threads are initialized MainMessageLoopStart and MainMessageLoopRun.
 
 void ChromeBrowserMainPartsChromeos::PreMainMessageLoopRun() {
-  // Initialize the audio handler on ChromeOS.
   chromeos::AudioHandler::Initialize();
+  chromeos::imageburner::BurnManager::Initialize();
 
   // Listen for system key events so that the user will be able to adjust the
   // volume on the login screen, if Chrome is running on Chrome OS
   // (i.e. not Linux desktop), and in non-test mode.
   // Note: SystemKeyEventListener depends on the DBus thread.
-  if (chromeos::system::runtime_environment::IsRunningOnChromeOS() &&
+  if (base::chromeos::IsRunningOnChromeOS() &&
       !parameters().ui_task) {  // ui_task is non-NULL when running tests.
     chromeos::SystemKeyEventListener::Initialize();
   }
@@ -347,16 +316,6 @@ void ChromeBrowserMainPartsChromeos::PreProfileInit() {
   // Now that the file thread exists we can record our stats.
   chromeos::BootTimesLoader::Get()->RecordChromeMainStats();
 
-#if defined(TOOLKIT_USES_GTK)
-  // Read locale-specific GTK resource information.
-  std::string gtkrc = l10n_util::GetStringUTF8(IDS_LOCALE_GTKRC);
-  if (!gtkrc.empty())
-    gtk_rc_parse_string(gtkrc.c_str());
-#else
-  // TODO(saintlou): Need to provide an Aura equivalent.
-  NOTIMPLEMENTED();
-#endif
-
   // Trigger prefetching of ownership status.
   chromeos::OwnershipService::GetSharedInstance()->Prewarm();
 
@@ -365,7 +324,11 @@ void ChromeBrowserMainPartsChromeos::PreProfileInit() {
 
   // Initialize the screen locker now so that it can receive
   // LOGIN_USER_CHANGED notification from UserManager.
-  chromeos::ScreenLocker::InitClass();
+  if (chromeos::KioskModeSettings::Get()->IsKioskModeEnabled()) {
+    chromeos::InitializeKioskModeIdleLogout();
+  } else {
+    chromeos::ScreenLocker::InitClass();
+  }
 
   // This forces the ProfileManager to be created and register for the
   // notification it needs to track the logged in user.
@@ -407,6 +370,10 @@ void ChromeBrowserMainPartsChromeos::PreProfileInit() {
 
   // In Aura builds this will initialize ash::Shell.
   ChromeBrowserMainPartsLinux::PreProfileInit();
+
+  // Initialize desktop background observer so that it can receive
+  // LOGIN_USER_CHANGED notification from UserManager.
+  desktop_background_observer_.reset(new chromeos::DesktopBackgroundObserver);
 }
 
 void ChromeBrowserMainPartsChromeos::PostProfileInit() {
@@ -419,7 +386,7 @@ void ChromeBrowserMainPartsChromeos::PostProfileInit() {
     // grab a token and register with the policy server.
     // TODO(mnissler): Remove once OAuth is the only authentication mechanism.
     g_browser_process->browser_policy_connector()->SetUserPolicyTokenService(
-        profile()->GetTokenService());
+        TokenServiceFactory::GetForProfile(profile()));
 
     // Make sure we flip every profile to not share proxies if the user hasn't
     // specified so explicitly.
@@ -440,10 +407,10 @@ void ChromeBrowserMainPartsChromeos::PostProfileInit() {
   // Initialize the brightness observer so that we'll display an onscreen
   // indication of brightness changes during login.
   brightness_observer_.reset(new chromeos::BrightnessObserver());
-  chromeos::DBusThreadManager::Get()->GetPowerManagerClient()->AddObserver(
-      brightness_observer_.get());
   resume_observer_.reset(new chromeos::ResumeObserver());
   screen_lock_observer_.reset(new chromeos::ScreenLockObserver());
+  if (chromeos::KioskModeSettings::Get()->IsKioskModeEnabled())
+    power_state_override_.reset(new chromeos::PowerStateOverride());
 
   ChromeBrowserMainPartsLinux::PostProfileInit();
 }
@@ -477,25 +444,10 @@ void ChromeBrowserMainPartsChromeos::PostBrowserStart() {
   // on the background FILE thread.
   chromeos::system::StatisticsProvider::GetInstance();
 
-  // Initialize the Chrome OS bluetooth subsystem.
-  // We defer this to PreMainMessageLoopRun because we don't want to check the
-  // parsed command line until after about_flags::ConvertFlagsToSwitches has
-  // been called.
-  // TODO(vlaviano): Move this back to PostMainMessageLoopStart when we remove
-  // the --enable-bluetooth flag.
-  if (parsed_command_line().HasSwitch(switches::kEnableBluetooth)) {
-    chromeos::BluetoothManager::Initialize();
-  }
-
-#if defined(USE_AURA)
   // These are dependent on the ash::Shell singleton already having been
   // initialized.
   power_button_observer_.reset(new chromeos::PowerButtonObserver);
-  chromeos::DBusThreadManager::Get()->GetPowerManagerClient()->AddObserver(
-      power_button_observer_.get());
-
   video_property_writer_.reset(new chromeos::VideoPropertyWriter);
-#endif
 
   ChromeBrowserMainPartsLinux::PostBrowserStart();
 }
@@ -525,21 +477,10 @@ void ChromeBrowserMainPartsChromeos::PostMainMessageLoopRun() {
 
   // We should remove observers attached to D-Bus clients before
   // DBusThreadManager is shut down.
-  if (session_manager_observer_.get()) {
-    chromeos::DBusThreadManager::Get()->GetSessionManagerClient()->
-        RemoveObserver(session_manager_observer_.get());
-  }
+  session_manager_observer_.reset();
   screen_lock_observer_.reset();
   resume_observer_.reset();
-  if (brightness_observer_.get()) {
-    chromeos::DBusThreadManager::Get()->GetPowerManagerClient()
-        ->RemoveObserver(brightness_observer_.get());
-  }
-
-  // Shut these down here instead of in the destructor in case we exited before
-  // running BrowserMainLoop::RunMainMessageLoopParts() and never initialized
-  // these.
-  chromeos::BluetoothManager::Shutdown();
+  brightness_observer_.reset();
 
   // The XInput2 event listener needs to be shut down earlier than when
   // Singletons are finally destroyed in AtExitManager.
@@ -548,15 +489,17 @@ void ChromeBrowserMainPartsChromeos::PostMainMessageLoopRun() {
   // chromeos::SystemKeyEventListener::Shutdown() is always safe to call,
   // even if Initialize() wasn't called.
   chromeos::SystemKeyEventListener::Shutdown();
+  chromeos::imageburner::BurnManager::Shutdown();
   chromeos::AudioHandler::Shutdown();
 
   chromeos::WebSocketProxyController::Shutdown();
 
-#if defined(USE_AURA)
   // Let VideoPropertyWriter unregister itself as an observer of the ash::Shell
   // singleton before the shell is destroyed.
   video_property_writer_.reset();
-#endif
+  // Remove PowerButtonObserver attached to a D-Bus client before
+  // DBusThreadManager is shut down.
+  power_button_observer_.reset();
 
   ChromeBrowserMainPartsLinux::PostMainMessageLoopRun();
 }

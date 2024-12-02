@@ -21,12 +21,17 @@ namespace chromeos {
 
 // Style Note: Clients are sorted by names.
 class BluetoothAdapterClient;
+class BluetoothDeviceClient;
+class BluetoothInputClient;
 class BluetoothManagerClient;
+class BluetoothNodeClient;
+class CashewClient;
 class CrosDisksClient;
+class CryptohomeClient;
 class ImageBurnerClient;
+class IntrospectableClient;
 class PowerManagerClient;
 class SessionManagerClient;
-class SensorsClient;
 class SpeechSynthesizerClient;
 class UpdateEngineClient;
 
@@ -67,34 +72,62 @@ class DBusThreadManager {
   // Gets the global instance. Initialize() must be called first.
   static DBusThreadManager* Get();
 
+  // Returns the D-Bus system bus instance, owned by DBusThreadManager.
+  virtual dbus::Bus* GetSystemBus() = 0;
+
   // Returns the bluetooth adapter client, owned by DBusThreadManager.
   // Do not cache this pointer and use it after DBusThreadManager is shut
   // down.
   virtual BluetoothAdapterClient* GetBluetoothAdapterClient() = 0;
+
+  // Returns the bluetooth device client, owned by DBusThreadManager.
+  // Do not cache this pointer and use it after DBusThreadManager is shut
+  // down.
+  virtual BluetoothDeviceClient* GetBluetoothDeviceClient() = 0;
+
+  // Returns the bluetooth input client, owned by DBusThreadManager.
+  // Do not cache this pointer and use it after DBusThreadManager is shut
+  // down.
+  virtual BluetoothInputClient* GetBluetoothInputClient() = 0;
 
   // Returns the bluetooth manager client, owned by DBusThreadManager.
   // Do not cache this pointer and use it after DBusThreadManager is shut
   // down.
   virtual BluetoothManagerClient* GetBluetoothManagerClient() = 0;
 
+  // Returns the bluetooth node client, owned by DBusThreadManager.
+  // Do not cache this pointer and use it after DBusThreadManager is shut
+  // down.
+  virtual BluetoothNodeClient* GetBluetoothNodeClient() = 0;
+
+  // Returns the Cashew client, owned by DBusThreadManager.
+  // Do not cache this pointer and use it after DBusThreadManager is shut
+  // down.
+  virtual CashewClient* GetCashewClient() = 0;
+
   // Returns the cros-disks client, owned by DBusThreadManager.
   // Do not cache this pointer and use it after DBusThreadManager is shut
   // down.
   virtual CrosDisksClient* GetCrosDisksClient() = 0;
+
+  // Returns the Cryptohome client, owned by DBusThreadManager.
+  // Do not cache this pointer and use it after DBusThreadManager is shut
+  // down.
+  virtual CryptohomeClient* GetCryptohomeClient() = 0;
 
   // Returns the image burner client, owned by DBusThreadManager.
   // Do not cache this pointer and use it after DBusThreadManger is shut
   // down.
   virtual ImageBurnerClient* GetImageBurnerClient() = 0;
 
+  // Returns the introspectable object client, owned by DBusThreadManager.
+  // Do not cache this pointer and use it after DBusThreadManger is shut
+  // down.
+  virtual IntrospectableClient* GetIntrospectableClient() = 0;
+
   // Returns the power manager client, owned by DBusThreadManager.
   // See also comments at session_manager_client().
   virtual PowerManagerClient* GetPowerManagerClient() = 0;
-
-  // Returns the session manager client, owned by DBusThreadManager.
-  // Do not cache this pointer and use it after DBusThreadManager is shut
-  // down.
-  virtual SensorsClient* GetSensorsClient() = 0;
 
   // Returns the session manager client, owned by DBusThreadManager.
   // Do not cache this pointer and use it after DBusThreadManager is shut
