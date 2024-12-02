@@ -21,12 +21,14 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/system/sys_info.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "base/timer/timer.h"
 #include "chrome/browser/apps/app_service/app_launch_params.h"
 #include "chrome/browser/apps/launch_service/launch_service.h"
 #include "chrome/browser/apps/platform_apps/app_load_service.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_process_platform_part.h"
+#include "chrome/browser/chromeos/extensions/default_web_app_ids.h"
 #include "chrome/browser/chromeos/file_manager/path_util.h"
 #include "chrome/browser/chromeos/login/demo_mode/demo_resources.h"
 #include "chrome/browser/chromeos/login/demo_mode/demo_setup_controller.h"
@@ -76,11 +78,6 @@ constexpr char kPhotosPath[] = "media/photos";
 // contains splash screen images.
 constexpr char kSplashScreensPath[] = "media/splash_screens";
 
-bool IsDemoModeOfflineEnrolled() {
-  DCHECK(DemoSession::IsDeviceInDemoMode());
-  return DemoSession::GetDemoConfig() == DemoSession::DemoModeConfig::kOffline;
-}
-
 // Returns the list of apps normally pinned by Demo Mode policy that shouldn't
 // be pinned if the device is offline.
 std::vector<std::string> GetIgnorePinPolicyApps() {
@@ -122,7 +119,7 @@ std::string GetHighlightsAppId() {
   if (board == "nocturne")
     return extension_misc::kHighlightsNocturneAppId;
   if (board == "atlas")
-    return extension_misc::kHighlightsAltAppId;
+    return extension_misc::kHighlightsAtlasAppId;
   return extension_misc::kHighlightsAppId;
 }
 
@@ -220,6 +217,12 @@ std::string DemoSession::DemoConfigToString(
 // static
 bool DemoSession::IsDeviceInDemoMode() {
   return GetDemoConfig() != DemoModeConfig::kNone;
+}
+
+// static
+bool DemoSession::IsDemoModeOfflineEnrolled() {
+  return DemoSession::IsDeviceInDemoMode() &&
+         DemoSession::GetDemoConfig() == DemoSession::DemoModeConfig::kOffline;
 }
 
 // static
@@ -328,7 +331,7 @@ std::string DemoSession::GetScreensaverAppId() {
   if (board == "nocturne")
     return extension_misc::kScreensaverNocturneAppId;
   if (board == "atlas")
-    return extension_misc::kScreensaverAltAppId;
+    return extension_misc::kScreensaverAtlasAppId;
   if (board == "kukui")
     return extension_misc::kScreensaverKukuiAppId;
   return extension_misc::kScreensaverAppId;
@@ -340,7 +343,8 @@ bool DemoSession::ShouldDisplayInAppLauncher(const std::string& app_id) {
     return true;
   return app_id != GetScreensaverAppId() &&
          app_id != extensions::kWebStoreAppId &&
-         app_id != extension_misc::kGeniusAppId;
+         app_id != extension_misc::kGeniusAppId &&
+         app_id != default_web_apps::kHelpAppId;
 }
 
 // static
@@ -446,9 +450,8 @@ void DemoSession::InstallDemoResources() {
   DCHECK(profile);
   const base::FilePath downloads =
       file_manager::util::GetDownloadsFolderForProfile(profile);
-  base::PostTask(
-      FROM_HERE,
-      {base::ThreadPool(), base::TaskPriority::USER_VISIBLE, base::MayBlock()},
+  base::ThreadPool::PostTask(
+      FROM_HERE, {base::TaskPriority::USER_VISIBLE, base::MayBlock()},
       base::BindOnce(&InstallDemoMedia, demo_resources_->path(), downloads));
 }
 

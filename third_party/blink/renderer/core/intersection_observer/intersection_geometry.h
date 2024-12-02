@@ -100,6 +100,8 @@ class CORE_EXPORT IntersectionGeometry {
 
   PhysicalRect TargetRect() const { return target_rect_; }
   PhysicalRect IntersectionRect() const { return intersection_rect_; }
+
+  // The intersection rect without applying viewport clipping.
   PhysicalRect UnclippedIntersectionRect() const {
     return unclipped_intersection_rect_;
   }
