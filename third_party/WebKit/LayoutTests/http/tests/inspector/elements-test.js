@@ -545,8 +545,8 @@ InspectorTest.dumpElementsTree = function(rootNode, depth, resultsArray)
     function dumpMap(name, map)
     {
         var result = [];
-        for (var id in map)
-            result.push(id + "=" + map[id]);
+        for (var id of map.keys())
+            result.push(id + "=" + map.get(id));
         if (!result.length)
             return "";
         return name + ":[" + result.join(",") + "]";
@@ -916,11 +916,12 @@ InspectorTest.dumpBreadcrumb = function(message)
     InspectorTest.addResult(result.join(" > "));
 }
 
-InspectorTest.matchingSelectors = function(rule)
+InspectorTest.matchingSelectors = function(matchedStyles, rule)
 {
     var selectors = [];
-    for (var i = 0; i < rule.matchingSelectors.length; ++i)
-        selectors.push(rule.selectors[rule.matchingSelectors[i]].text);
+    var matchingSelectors = matchedStyles.matchingSelectors(rule);
+    for (var i = 0; i < matchingSelectors.length; ++i)
+        selectors.push(rule.selectors[matchingSelectors[i]].text);
     return "[" + selectors.join(", ") + "]";
 }
 

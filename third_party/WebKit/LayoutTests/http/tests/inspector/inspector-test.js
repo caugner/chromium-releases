@@ -66,7 +66,7 @@ InspectorTest.evaluateFunctionInOverlay = function(func, callback)
 {
     var expression = "testRunner.evaluateInWebInspectorOverlay(\"(\" + " + func + " + \")()\")";
     var mainContext = InspectorTest.runtimeModel.executionContexts()[0];
-    mainContext.evaluate(expression, "", false, false, true, false, wrapCallback);
+    mainContext.evaluate(expression, "", false, false, true, false, false, wrapCallback);
 
     function wrapCallback(val, err, result)
     {
@@ -223,6 +223,13 @@ InspectorTest.formatters.formatAsURL = function(value)
     if (lastIndex < 0)
         return value;
     return ".../" + value.substr(lastIndex);
+}
+
+InspectorTest.formatters.formatAsDescription = function(value)
+{
+    if (!value)
+        return value;
+    return "\"" +  value.replace(/^function [gs]et /, "function ") + "\"";
 }
 
 InspectorTest.addObject = function(object, customFormatters, prefix, firstLinePrefix)
@@ -731,8 +738,7 @@ InspectorTest.clearSpecificInfoFromStackFrames = function(text)
     var buffer = text.replace(/\(file:\/\/\/(?:[^)]+\)|[\w\/:-]+)/g, "(...)");
     buffer = buffer.replace(/\(<anonymous>:[^)]+\)/g, "(...)");
     buffer = buffer.replace(/VM\d+/g, "VM");
-    buffer = buffer.replace(/\s*at[^()]+\(native\)/g, "");
-    return buffer.replace(/\s*at Object.InjectedScript.[^)]+\)/g, "");
+    return buffer.replace(/\s*at[^()]+\(native\)/g, "");
 }
 
 InspectorTest.hideInspectorView = function()
@@ -796,7 +802,6 @@ InspectorTest.TempFileMock = function(dirPath, name)
 {
     this._chunks = [];
     this._name = name;
-    this._size = 0;
 }
 
 InspectorTest.TempFileMock.prototype = {
@@ -806,10 +811,11 @@ InspectorTest.TempFileMock.prototype = {
      */
     write: function(chunks, callback)
     {
+        var size = 0;
         for (var i = 0; i < chunks.length; ++i)
-            this._size += chunks[i].length;
+            size += chunks[i].length;
         this._chunks.push.apply(this._chunks, chunks);
-        setTimeout(callback.bind(this, this._size), 1);
+        setTimeout(callback.bind(this, size), 1);
     },
 
     finishWriting: function() { },
@@ -844,7 +850,7 @@ InspectorTest.TempFileMock.prototype = {
      * @param {!WebInspector.OutputStream} outputStream
      * @param {!WebInspector.OutputStreamDelegate} delegate
      */
-    writeToOutputSteam: function(outputStream, delegate)
+    copyToOutputStream: function(outputStream, delegate)
     {
         var name = this._name;
         var text = this._chunks.join("");
@@ -964,7 +970,7 @@ WebInspector.targetManager.observeTargets({
         InspectorTest.debuggerModel = WebInspector.DebuggerModel.fromTarget(target);
         InspectorTest.runtimeModel = target.runtimeModel;
         InspectorTest.domModel = WebInspector.DOMModel.fromTarget(target);
-        InspectorTest.cssModel = WebInspector.CSSStyleModel.fromTarget(target);
+        InspectorTest.cssModel = WebInspector.CSSModel.fromTarget(target);
         InspectorTest.workerManager = target.workerManager;
         InspectorTest.powerProfiler = target.powerProfiler;
         InspectorTest.cpuProfilerModel = target.cpuProfilerModel;
@@ -1133,7 +1139,7 @@ function runTest(enableWatchDogWhileDebugging)
     testRunner.evaluateInWebInspector(initializeCallId, toEvaluate);
 
     if (window.debugTest)
-        test = "function() { " + test.toString() + "; window.test = test; InspectorTest.addResult = window._originalConsoleLog; InspectorTest.completeTest = function() {}; InspectorTest.debugTest = true; }";
+        test = "function() { window.test = " + test.toString() + "; InspectorTest.addResult = window._originalConsoleLog; InspectorTest.completeTest = function() {}; }";
     toEvaluate = "(" + runTestInFrontend + ")(" + test + ");";
     testRunner.evaluateInWebInspector(runTestCallId, toEvaluate);
 

@@ -11,6 +11,14 @@ InspectorTest.cssParserService = function()
     return cssParserService;
 }
 
+var sassSourceMapFactory = null;
+InspectorTest.sassSourceMapFactory = function()
+{
+    if (!sassSourceMapFactory)
+        sassSourceMapFactory = new WebInspector.SASSSourceMapFactory();
+    return sassSourceMapFactory;
+}
+
 InspectorTest.parseCSS = function(url, text)
 {
     return WebInspector.SASSSupport.parseCSS(InspectorTest.cssParserService(), url, text);
@@ -30,14 +38,12 @@ InspectorTest.parseSCSS = function(url, text)
 InspectorTest.loadASTMapping = function(header, callback)
 {
     var completeSourceMapURL = WebInspector.ParsedURL.completeURL(header.sourceURL, header.sourceMapURL);
-    WebInspector.SourceMap.load(completeSourceMapURL, header.sourceURL, onSourceMapLoaded);
+    WebInspector.TextSourceMap.load(completeSourceMapURL, header.sourceURL).then(onSourceMapLoaded);
 
     function onSourceMapLoaded(sourceMap)
     {
-        var astService = new WebInspector.ASTService();
-        WebInspector.ASTSourceMap.fromSourceMap(astService, header.cssModel(), sourceMap)
-            .then(mapping => callback(mapping))
-            .then(() => astService.dispose());
+        InspectorTest.sassSourceMapFactory().editableSourceMap(header.cssModel().target(), sourceMap)
+            .then(map => callback(map));
     }
 }
 
@@ -168,23 +174,23 @@ InspectorTest.validateASTRanges = function(ast)
 
     function validate(textNode)
     {
-        if (textNode.range.extract(textNode.document.text) !== textNode.text)
+        if (textNode.document.text.extract(textNode.range) !== textNode.text)
             invalidNodes.push(textNode);
     }
 }
 
 InspectorTest.validateMapping = function(mapping)
 {
-    InspectorTest.addResult("Mapped CSS: " + mapping._cssToSass.size);
-    InspectorTest.addResult("Mapped SCSS: " + mapping._sassToCss.size);
-    var cssNodes = mapping._cssToSass.keysArray();
+    InspectorTest.addResult("Mapped CSS: " + mapping._compiledToSource.size);
+    InspectorTest.addResult("Mapped SCSS: " + mapping._sourceToCompiled.size);
+    var cssNodes = mapping._compiledToSource.keysArray();
     var staleCSS = 0;
     var staleSASS = 0;
     for (var i = 0; i < cssNodes.length; ++i) {
         var cssNode = cssNodes[i];
-        staleCSS += cssNode.document !== mapping.cssAST().document ? 1 : 0;
-        var sassNode = mapping.toSASSNode(cssNode);
-        var sassAST = mapping.sassModels().get(sassNode.document.url);
+        staleCSS += cssNode.document !== mapping.compiledModel().document ? 1 : 0;
+        var sassNode = mapping.toSourceNode(cssNode);
+        var sassAST = mapping.sourceModels().get(sassNode.document.url);
         staleSASS += sassNode.document !== sassAST.document ? 1 : 0;
     }
     if (staleCSS || staleSASS) {
@@ -212,15 +218,14 @@ InspectorTest.updateSASSText = function(url, newText)
 InspectorTest.runCSSEditTests = function(header, tests)
 {
     var astSourceMap;
-    var astService = new WebInspector.ASTService();
     InspectorTest.loadASTMapping(header, onMapping);
 
     function onMapping(map)
     {
         astSourceMap = map;
         InspectorTest.addResult("INITIAL MODELS");
-        logASTText(map.cssAST(), true);
-        for (var ast of map.sassModels().values())
+        logASTText(map.compiledModel(), true);
+        for (var ast of map.sourceModels().values())
             logASTText(ast, true);
         runTests();
     }
@@ -229,17 +234,16 @@ InspectorTest.runCSSEditTests = function(header, tests)
     {
         if (!tests.length) {
             InspectorTest.completeTest();
-            astService.dispose();
             return;
         }
         var test = tests.shift();
         logTestName(test.name);
-        var text = astSourceMap.cssAST().document.text;
+        var text = astSourceMap.compiledModel().document.text.value();
         var edits = test(text);
         logSourceEdits(text, edits);
         var ranges = edits.map(edit => edit.oldRange);
         var texts = edits.map(edit => edit.newText);
-        WebInspector.SASSProcessor.processCSSEdits(astService, astSourceMap, ranges, texts)
+        astSourceMap.editCompiled(ranges, texts)
             .then(onEditsDone);
     }
 
@@ -250,9 +254,9 @@ InspectorTest.runCSSEditTests = function(header, tests)
             runTests();
             return;
         }
-        logASTText(result.map.cssAST());
-        for (var sassURL of result.newSASSSources.keys()) {
-            var ast = result.map.sassModels().get(sassURL);
+        logASTText(result.map.compiledModel());
+        for (var sassURL of result.newSources.keys()) {
+            var ast = result.map.sourceModels().get(sassURL);
             logASTText(ast);
         }
         runTests();
@@ -262,7 +266,7 @@ InspectorTest.runCSSEditTests = function(header, tests)
     {
         customTitle = customTitle || ast.document.url.split("/").pop();
         InspectorTest.addResult("===== " + customTitle + " =====");
-        var text = ast.document.text.replace(/ /g, ".");
+        var text = ast.document.text.value().replace(/ /g, ".");
         var lines = text.split("\n");
         if (!avoidIndent)
             lines = indent(lines);
@@ -287,7 +291,7 @@ InspectorTest.runCSSEditTests = function(header, tests)
             var edit = edits[i];
             var range = edit.oldRange;
             var line = String.sprintf("{%d, %d, %d, %d}", range.startLine, range.startColumn, range.endLine, range.endColumn);
-            line += String.sprintf(" '%s' => '%s'", range.extract(text), edit.newText);
+            line += String.sprintf(" '%s' => '%s'", (new WebInspector.Text(text)).extract(range), edit.newText);
             lines.push(line);
         }
         lines = indent(lines);
@@ -307,7 +311,7 @@ InspectorTest.createEdit = function(source, pattern, newText, matchNumber)
     if (!match)
         return null;
     var sourceRange = new WebInspector.SourceRange(match.index, match[0].length);
-    var textRange = sourceRange.toTextRange(source);
+    var textRange = sourceRange.toTextRange(new WebInspector.Text(source));
     return new WebInspector.SourceEdit("", textRange, newText);
 }
 

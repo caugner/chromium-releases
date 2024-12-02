@@ -4,19 +4,20 @@
 
 // Unit test for VideoCaptureManager.
 
+#include "content/browser/renderer_host/media/video_capture_manager.h"
+
 #include <stdint.h>
 
+#include <memory>
 #include <string>
 
 #include "base/bind.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/run_loop.h"
 #include "content/browser/browser_thread_impl.h"
 #include "content/browser/renderer_host/media/media_stream_provider.h"
 #include "content/browser/renderer_host/media/video_capture_controller_event_handler.h"
-#include "content/browser/renderer_host/media/video_capture_manager.h"
 #include "content/common/media/media_stream_options.h"
 #include "media/capture/video/fake_video_capture_device_factory.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -81,8 +82,9 @@ class VideoCaptureManagerTest : public testing::Test {
                                            message_loop_.get()));
     io_thread_.reset(new BrowserThreadImpl(BrowserThread::IO,
                                            message_loop_.get()));
-    vcm_ = new VideoCaptureManager(scoped_ptr<media::VideoCaptureDeviceFactory>(
-        new media::FakeVideoCaptureDeviceFactory()));
+    vcm_ = new VideoCaptureManager(
+        std::unique_ptr<media::VideoCaptureDeviceFactory>(
+            new media::FakeVideoCaptureDeviceFactory()));
     video_capture_device_factory_ =
         static_cast<media::FakeVideoCaptureDeviceFactory*>(
             vcm_->video_capture_device_factory());
@@ -158,14 +160,20 @@ class VideoCaptureManagerTest : public testing::Test {
                                frame_observer_.get());
   }
 
+#if defined(OS_ANDROID)
+  void ApplicationStateChange(base::android::ApplicationState state) {
+    vcm_->OnApplicationStateChange(state);
+  }
+#endif
+
   int next_client_id_;
   std::map<VideoCaptureControllerID, VideoCaptureController*> controllers_;
   scoped_refptr<VideoCaptureManager> vcm_;
-  scoped_ptr<MockMediaStreamProviderListener> listener_;
-  scoped_ptr<base::MessageLoop> message_loop_;
-  scoped_ptr<BrowserThreadImpl> ui_thread_;
-  scoped_ptr<BrowserThreadImpl> io_thread_;
-  scoped_ptr<MockFrameObserver> frame_observer_;
+  std::unique_ptr<MockMediaStreamProviderListener> listener_;
+  std::unique_ptr<base::MessageLoop> message_loop_;
+  std::unique_ptr<BrowserThreadImpl> ui_thread_;
+  std::unique_ptr<BrowserThreadImpl> io_thread_;
+  std::unique_ptr<MockFrameObserver> frame_observer_;
   media::FakeVideoCaptureDeviceFactory* video_capture_device_factory_;
 
  private:
@@ -541,7 +549,7 @@ TEST_F(VideoCaptureManagerTest, CloseWithoutStop) {
 }
 
 // Try to open, start, pause and resume a device.
-TEST_F(VideoCaptureManagerTest, PauseAndResume) {
+TEST_F(VideoCaptureManagerTest, PauseAndResumeClient) {
   StreamDeviceInfoArray devices;
 
   InSequence s;
@@ -570,6 +578,47 @@ TEST_F(VideoCaptureManagerTest, PauseAndResume) {
   message_loop_->RunUntilIdle();
   vcm_->Unregister();
 }
+
+#if defined(OS_ANDROID)
+// Try to open, start, pause and resume a device.
+TEST_F(VideoCaptureManagerTest, PauseAndResumeDevice) {
+  StreamDeviceInfoArray devices;
+
+  InSequence s;
+  EXPECT_CALL(*listener_, DevicesEnumerated(MEDIA_DEVICE_VIDEO_CAPTURE, _))
+      .WillOnce(SaveArg<1>(&devices));
+  EXPECT_CALL(*listener_, Opened(MEDIA_DEVICE_VIDEO_CAPTURE, _));
+  EXPECT_CALL(*listener_, Closed(MEDIA_DEVICE_VIDEO_CAPTURE, _));
+
+  vcm_->EnumerateDevices(MEDIA_DEVICE_VIDEO_CAPTURE);
+
+  // Wait to get device callback.
+  message_loop_->RunUntilIdle();
+
+  int video_session_id = vcm_->Open(devices.front());
+  VideoCaptureControllerID client_id = StartClient(video_session_id, true);
+
+  // Release/ResumeDevices according to ApplicationStatus. Should cause no
+  // problem in any order. Check https://crbug.com/615557 for more details.
+  ApplicationStateChange(
+      base::android::APPLICATION_STATE_HAS_RUNNING_ACTIVITIES);
+  ApplicationStateChange(
+      base::android::APPLICATION_STATE_HAS_STOPPED_ACTIVITIES);
+  ApplicationStateChange(
+      base::android::APPLICATION_STATE_HAS_STOPPED_ACTIVITIES);
+  ApplicationStateChange(
+      base::android::APPLICATION_STATE_HAS_RUNNING_ACTIVITIES);
+  ApplicationStateChange(
+      base::android::APPLICATION_STATE_HAS_RUNNING_ACTIVITIES);
+
+  StopClient(client_id);
+  vcm_->Close(video_session_id);
+
+  // Wait to check callbacks before removing the listener.
+  message_loop_->RunUntilIdle();
+  vcm_->Unregister();
+}
+#endif
 
 // TODO(mcasas): Add a test to check consolidation of the supported formats
 // provided by the device when http://crbug.com/323913 is closed.

@@ -83,6 +83,7 @@ namespace http://www.w3.org/1999/xhtml
     property insertAdjacentHTML
     property insertAdjacentText
     property insertBefore
+    property isConnected
     property isContentEditable
     property isDefaultNamespace
     property isEqualNode
@@ -201,6 +202,7 @@ namespace http://www.w3.org/1999/xhtml
     property replaceChild
     property requestFullscreen
     property requestPointerLock
+    property rootNode
     property scroll
     property scrollBy
     property scrollHeight
@@ -223,7 +225,6 @@ namespace http://www.w3.org/1999/xhtml
     property textContent
     property title
     property translate
-    property treeRoot
     property webkitMatchesSelector
     property webkitRequestFullScreen
     property webkitRequestFullscreen
@@ -317,6 +318,7 @@ html element audio
     property played
     property preload
     property readyState
+    property remote
     property seekable
     property seeking
     property setMediaKeys
@@ -386,6 +388,7 @@ html element canvas
     property height
     property toBlob
     property toDataURL
+    property transferControlToOffscreen
     property width
 html element caption
     property align
@@ -674,6 +677,7 @@ html element link
     property rel
     property relList
     property rev
+    property scope
     property sheet
     property sizes
     property target
@@ -852,7 +856,7 @@ html element select
 html element shadow
     property getDistributedNodes
 html element slot
-    property getAssignedNodes
+    property assignedNodes
     property name
 html element small
 html element source
@@ -1060,6 +1064,7 @@ html element video
     property poster
     property preload
     property readyState
+    property remote
     property seekable
     property seeking
     property setMediaKeys
@@ -1164,6 +1169,7 @@ namespace http://www.w3.org/2000/svg
     property insertAdjacentHTML
     property insertAdjacentText
     property insertBefore
+    property isConnected
     property isContentEditable
     property isDefaultNamespace
     property isEqualNode
@@ -1282,6 +1288,7 @@ namespace http://www.w3.org/2000/svg
     property replaceChild
     property requestFullscreen
     property requestPointerLock
+    property rootNode
     property scroll
     property scrollBy
     property scrollHeight
@@ -1304,7 +1311,6 @@ namespace http://www.w3.org/2000/svg
     property textContent
     property title
     property translate
-    property treeRoot
     property webkitMatchesSelector
     property webkitRequestFullScreen
     property webkitRequestFullscreen

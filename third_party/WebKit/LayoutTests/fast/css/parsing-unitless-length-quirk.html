@@ -183,7 +183,7 @@ test(function(){
     assert_equals(sheet.cssRules[40].style.font, "");
 }, "No unitless length quirk for font property");
 test(function(){
-    assert_equals(sheet.cssRules[41].style.backgroundPosition, "10px 50%");
+    assert_equals(sheet.cssRules[41].style.backgroundPosition, "10px center");
 }, "Unitless length quirk for background-position property");
 test(function(){
     assert_equals(sheet.cssRules[42].style.backgroundPosition, "10px 20px");
@@ -195,7 +195,7 @@ test(function(){
     assert_equals(sheet.cssRules[44].style.background, "");
 }, "No unitless length quirk for background property");
 test(function(){
-    assert_equals(sheet.cssRules[45].style.background, "10px 50% rgb(255, 0, 0)");
+    assert_equals(sheet.cssRules[45].style.background, "10px center rgb(255, 0, 0)");
 }, "No unitless length quirk for background property");
 test(function(){
     assert_equals(sheet.cssRules[46].style.background, "");
