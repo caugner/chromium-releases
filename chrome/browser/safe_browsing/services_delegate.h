@@ -7,6 +7,7 @@
 
 #include <memory>
 
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "build/build_config.h"
 #include "chrome/browser/safe_browsing/incident_reporting/delayed_analysis_callback.h"
@@ -117,12 +118,14 @@ class ServicesDelegate {
   virtual void CreateTelemetryService(Profile* profile) {}
   virtual void RemoveTelemetryService(Profile* profile) {}
 
+  virtual void OnProfileWillBeDestroyed(Profile* profile) {}
+
  protected:
   // Unowned pointer
-  SafeBrowsingService* const safe_browsing_service_;
+  const raw_ptr<SafeBrowsingService> safe_browsing_service_;
 
   // Unowned pointer
-  ServicesCreator* const services_creator_;
+  const raw_ptr<ServicesCreator> services_creator_;
 };
 
 }  // namespace safe_browsing

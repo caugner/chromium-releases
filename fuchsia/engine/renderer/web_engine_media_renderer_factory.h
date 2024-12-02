@@ -9,7 +9,6 @@
 #include <vector>
 
 #include "base/callback.h"
-#include "base/macros.h"
 #include "media/base/renderer_factory.h"
 #include "media/fuchsia/mojom/fuchsia_media_resource_provider.mojom.h"
 #include "mojo/public/cpp/bindings/remote.h"

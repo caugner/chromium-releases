@@ -6,7 +6,7 @@
 load("//lib/args.star", "args")
 load("//lib/builders.star", "goma", "os", "sheriff_rotations")
 load("//lib/branches.star", "branches")
-load("//lib/ci.star", "ci")
+load("//lib/ci.star", "ci", "rbe_instance", "rbe_jobs")
 load("//lib/consoles.star", "consoles")
 
 ci.defaults.set(
@@ -27,7 +27,7 @@ ci.defaults.set(
 
 consoles.console_view(
     name = "chromium.linux",
-    branch_selector = branches.STANDARD_MILESTONE,
+    branch_selector = branches.FUCHSIA_LTS_MILESTONE,
     ordering = {
         None: ["release", "debug"],
         "release": consoles.ordering(short_names = ["bld", "tst", "nsl", "gcc"]),
@@ -127,7 +127,7 @@ ci.builder(
 
 ci.builder(
     name = "Fuchsia ARM64",
-    branch_selector = branches.STANDARD_MILESTONE,
+    branch_selector = branches.FUCHSIA_LTS_MILESTONE,
     console_view_entry = [
         consoles.console_view_entry(
             category = "fuchsia|a64",
@@ -146,7 +146,7 @@ ci.builder(
 
 ci.builder(
     name = "Fuchsia x64",
-    branch_selector = branches.STANDARD_MILESTONE,
+    branch_selector = branches.FUCHSIA_LTS_MILESTONE,
     console_view_entry = [
         consoles.console_view_entry(
             category = "fuchsia|x64",
@@ -183,6 +183,9 @@ ci.builder(
         short_name = "bld",
     ),
     cq_mirrors_console_view = "mirrors",
+    goma_backend = None,
+    reclient_instance = rbe_instance.DEFAULT,
+    reclient_jobs = rbe_jobs.HIGH_JOBS_FOR_CI,
 )
 
 ci.builder(
@@ -193,6 +196,9 @@ ci.builder(
         short_name = "64",
     ),
     cq_mirrors_console_view = "mirrors",
+    goma_backend = None,
+    reclient_jobs = rbe_jobs.DEFAULT,
+    reclient_instance = rbe_instance.DEFAULT,
 )
 
 ci.builder(
@@ -201,6 +207,9 @@ ci.builder(
         category = "debug|builder",
         short_name = "32",
     ),
+    goma_backend = None,
+    reclient_jobs = rbe_jobs.DEFAULT,
+    reclient_instance = rbe_instance.DEFAULT,
 )
 
 ci.builder(
@@ -211,6 +220,9 @@ ci.builder(
         short_name = "bld-wl",
     ),
     cq_mirrors_console_view = "mirrors",
+    goma_backend = None,
+    reclient_jobs = rbe_jobs.DEFAULT,
+    reclient_instance = rbe_instance.DEFAULT,
 )
 
 ci.builder(
@@ -234,6 +246,9 @@ ci.builder(
     ),
     cq_mirrors_console_view = "mirrors",
     triggered_by = ["ci/Linux Builder (dbg)"],
+    goma_backend = None,
+    reclient_jobs = rbe_jobs.DEFAULT,
+    reclient_instance = rbe_instance.DEFAULT,
 )
 
 ci.builder(
@@ -250,7 +265,7 @@ ci.builder(
 
 ci.builder(
     name = "fuchsia-arm64-cast",
-    branch_selector = branches.STANDARD_MILESTONE,
+    branch_selector = branches.FUCHSIA_LTS_MILESTONE,
     console_view_entry = [
         consoles.console_view_entry(
             category = "fuchsia|cast",
@@ -281,7 +296,7 @@ ci.builder(
 
 ci.builder(
     name = "fuchsia-x64-cast",
-    branch_selector = branches.STANDARD_MILESTONE,
+    branch_selector = branches.FUCHSIA_LTS_MILESTONE,
     console_view_entry = [
         consoles.console_view_entry(
             category = "fuchsia|cast",

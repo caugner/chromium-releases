@@ -790,7 +790,7 @@ TEST_F(PrivacySandboxSettingsTest, GetFlocStatusForDisplay) {
   // Check the status of the user's FLoC is correctly returned. This depends
   // on whether the FLoC origin trial feature is enabled, and whether the user
   // has FLoC enabled.
-  // TODO(crbug.com/1287951): User control disabled while OT is not active.
+  // TODO(crbug.com/1287951): FLoC is always disabled if OT is not active.
   feature_list()->InitWithFeatures(
       {blink::features::kInterestCohortAPIOriginTrial}, {});
   profile()->GetTestingPrefService()->SetBoolean(

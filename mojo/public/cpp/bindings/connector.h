@@ -295,6 +295,8 @@ class COMPONENT_EXPORT(MOJO_CPP_BINDINGS) Connector : public MessageReceiver {
   base::OnceClosure connection_error_handler_;
 
   ScopedMessagePipeHandle message_pipe_;
+  // `incoming_receiver_` is not a raw_ptr<...> for performance reasons (based
+  // on analysis of sampling profiler data).
   MessageReceiver* incoming_receiver_ = nullptr;
 
   scoped_refptr<base::SequencedTaskRunner> task_runner_;
@@ -340,6 +342,8 @@ class COMPONENT_EXPORT(MOJO_CPP_BINDINGS) Connector : public MessageReceiver {
 
   // A cached pointer to the RunLoopNestingObserver for the thread on which this
   // Connector was created.
+  // `nesting_observer_` is not a raw_ptr<...> for performance reasons (based on
+  // analysis of sampling profiler data).
   RunLoopNestingObserver* nesting_observer_ = nullptr;
 
   // |true| iff the Connector is currently dispatching a message. Used to detect

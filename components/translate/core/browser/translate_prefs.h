@@ -13,7 +13,7 @@
 
 #include "base/feature_list.h"
 #include "base/gtest_prod_util.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/strings/string_piece.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
@@ -44,6 +44,18 @@ extern const base::Feature kTranslateRecentTarget;
 // This allows the user to disable translate by using the
 // `--disable-features=Translate` command-line flag.
 extern const base::Feature kTranslate;
+
+// Whether to migrate the obsolete always-translate languages pref to the new
+// pref during object construction as a fix for crbug/1291356, which had
+// previously not been migrated at all on iOS. This also enables a more
+// conservative pref merging process that aims to merge in old always-translate
+// language values from the obsolete pref without conflicting with any values in
+// the new pref that may have been added.
+//
+// TODO(crbug/1291356): This base::Feature only exists to allow a less risky
+// merge into iOS M98. This base::Feature should be removed once it's no longer
+// relevant and the enabled behavior should become the only behavior.
+extern const base::Feature kMigrateAlwaysTranslateLanguagesFix;
 
 // Minimum number of times the user must accept a translation before we show
 // a shortcut to the "Always Translate" functionality.
@@ -393,7 +405,7 @@ class TranslatePrefs {
   // accepted for a language, creating it if necessary.
   base::DictionaryValue* GetTranslationAcceptedCountDictionary() const;
 
-  PrefService* prefs_;  // Weak.
+  raw_ptr<PrefService> prefs_;  // Weak.
 
   std::string country_;  // The country the app runs in.
 
