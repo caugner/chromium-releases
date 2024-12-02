@@ -620,6 +620,7 @@ interface NetworkInformation : EventTarget
     getter effectiveType
     getter onchange
     getter rtt
+    getter saveData
     method constructor
     setter onchange
 interface Notification : EventTarget
@@ -668,6 +669,7 @@ interface PerformanceObserver
     method constructor
     method disconnect
     method observe
+    method takeRecords
 interface PerformanceObserverEntryList
     attribute @@toStringTag
     method constructor
@@ -691,9 +693,18 @@ interface PerformanceResourceTiming : PerformanceEntry
     getter responseEnd
     getter responseStart
     getter secureConnectionStart
+    getter serverTiming
     getter transferSize
     getter workerStart
     method constructor
+    method toJSON
+interface PerformanceServerTiming
+    attribute @@toStringTag
+    getter description
+    getter duration
+    getter name
+    method constructor
+    method toJSON
 interface PermissionStatus : EventTarget
     attribute @@toStringTag
     getter onchange
@@ -754,6 +765,7 @@ interface Request
     getter bodyUsed
     getter cache
     getter credentials
+    getter destination
     getter headers
     getter integrity
     getter method
@@ -971,6 +983,7 @@ interface WorkerNavigator
     getter appVersion
     getter budget
     getter connection
+    getter deviceMemory
     getter hardwareConcurrency
     getter onLine
     getter permissions

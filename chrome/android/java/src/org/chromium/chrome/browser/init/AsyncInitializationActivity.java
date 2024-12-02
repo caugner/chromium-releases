@@ -29,6 +29,7 @@ import android.view.ViewTreeObserver.OnPreDrawListener;
 import android.view.WindowManager;
 
 import org.chromium.base.ApiCompatibilityUtils;
+import org.chromium.base.StrictModeContext;
 import org.chromium.base.TraceEvent;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.library_loader.LibraryLoader;
@@ -111,10 +112,11 @@ public abstract class AsyncInitializationActivity extends AppCompatActivity impl
         // switcher resources. Overriding the smallestScreenWidthDp in the Configuration ensures
         // Android will load the tab strip resources. See crbug.com/588838.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            if (DeviceFormFactor.isTablet()) {
+            int smallestDeviceWidthDp = DeviceFormFactor.getSmallestDeviceWidthDp();
+
+            if (smallestDeviceWidthDp >= DeviceFormFactor.MINIMUM_TABLET_WIDTH_DP) {
                 Configuration overrideConfiguration = new Configuration();
-                overrideConfiguration.smallestScreenWidthDp =
-                        DeviceFormFactor.getSmallestDeviceWidthDp();
+                overrideConfiguration.smallestScreenWidthDp = smallestDeviceWidthDp;
                 applyOverrideConfiguration(overrideConfiguration);
             }
         }
@@ -124,24 +126,30 @@ public abstract class AsyncInitializationActivity extends AppCompatActivity impl
     @Override
     public void preInflationStartup() {
         mHadWarmStart = LibraryLoader.isInitialized();
-        mIsTablet = DeviceFormFactor.isTablet();
+        // On some devices, OEM modifications have been made to the resource loader that cause the
+        // DeviceFormFactor calculation of whether a device is using tablet resources to be
+        // incorrect. Check which resources were actually loaded and set the DeviceFormFactor
+        // values. See crbug.com/662338.
+        boolean isTablet = getResources().getBoolean(R.bool.is_tablet);
+        boolean isLargeTablet = getResources().getBoolean(R.bool.is_large_tablet);
+        DeviceFormFactor.setIsTablet(isTablet, isLargeTablet);
+        mIsTablet = isTablet;
     }
 
     @Override
     public final void setContentViewAndLoadLibrary() {
-        // Unless it was called before, {@link #setContentView} inflates the decorView and the basic
-        // UI hierarchy as stubs. This is done here before kicking long running I/O because
-        // inflation accesses resource files (XML, etc) even if we are inflating views defined by
-        // the framework. If this operation gets blocked because other long running I/O are running,
-        // we delay onCreate(), onStart() and first draw consequently.
-
-        setContentView();
-        if (mLaunchBehindWorkaround != null) mLaunchBehindWorkaround.onSetContentView();
+        // Start loading libraries before setContentView(). This "hides" library loading behind
+        // UI inflation and prevents stalling UI thread. See crbug.com/796957 for details.
+        // Note that for optimal performance AsyncInitTaskRunner.startBackgroundTasks() needs
+        // to start warmup renderer only after library is loaded.
 
         if (!mStartupDelayed) {
             // Kick off long running IO tasks that can be done in parallel.
             mNativeInitializationController.startBackgroundTasks(shouldAllocateChildConnection());
         }
+
+        setContentView();
+        if (mLaunchBehindWorkaround != null) mLaunchBehindWorkaround.onSetContentView();
     }
 
     /** Controls the parameter of {@link NativeInitializationController#startBackgroundTasks()}.*/
@@ -260,7 +268,10 @@ public abstract class AsyncInitializationActivity extends AppCompatActivity impl
         }
 
         if (DocumentModeAssassin.getInstance().isMigrationNecessary()) {
-            super.onCreate(null);
+            // Some Samsung devices load fonts from disk, crbug.com/691706.
+            try (StrictModeContext unused = StrictModeContext.allowDiskReads()) {
+                super.onCreate(null);
+            }
 
             // Kick the user to the MigrationActivity.
             UpgradeActivity.launchInstance(this, getIntent());
@@ -283,7 +294,10 @@ public abstract class AsyncInitializationActivity extends AppCompatActivity impl
             return;
         }
 
-        super.onCreate(transformSavedInstanceStateForOnCreate(savedInstanceState));
+        // Some Samsung devices load fonts from disk, crbug.com/691706.
+        try (StrictModeContext unused = StrictModeContext.allowDiskReads()) {
+            super.onCreate(transformSavedInstanceStateForOnCreate(savedInstanceState));
+        }
         mOnCreateTimestampMs = SystemClock.elapsedRealtime();
         mOnCreateTimestampUptimeMs = SystemClock.uptimeMillis();
         mSavedInstanceState = savedInstanceState;
@@ -327,6 +341,13 @@ public abstract class AsyncInitializationActivity extends AppCompatActivity impl
         mNativeInitializationController.startBackgroundTasks(shouldAllocateChildConnection());
 
         if (mFirstDrawComplete) onFirstDrawComplete();
+    }
+
+    /**
+     * @return Whether the native library initialization is delayed at this point.
+     */
+    protected boolean isStartupDelayed() {
+        return mStartupDelayed;
     }
 
     /**

@@ -68,11 +68,8 @@ class AnimationObserverDeleteLayer : public ui::ImplicitAnimationObserver {
 
 // SystemTrayBubble
 
-SystemTrayBubble::SystemTrayBubble(SystemTray* tray, SystemTrayView* view)
-    : tray_(tray),
-      system_tray_view_(view),
-      bubble_view_(nullptr),
-      autoclose_delay_(0) {}
+SystemTrayBubble::SystemTrayBubble(SystemTray* tray)
+    : tray_(tray), autoclose_delay_(0) {}
 
 SystemTrayBubble::~SystemTrayBubble() {
   // Reset the host pointer in bubble_view_ in case its destruction is deferred.
@@ -145,7 +142,14 @@ void SystemTrayBubble::UpdateView(
   }
 
   UpdateBottomPadding();
+
+  // Enfore relayout of |bubble_view_|. The view code will skip the relayout of
+  // |bubble_view_| if its bounds does not change. However, we need to
+  // force |bubble_view_| relayout in order to set the bounds of its newly
+  // created children view to preferred sizes.
+  bubble_view_->InvalidateLayout();
   bubble_view_->GetWidget()->GetContentsView()->Layout();
+
   // Make sure that the bubble is large enough for the default view.
   if (system_tray_type == SystemTrayView::SYSTEM_TRAY_TYPE_DEFAULT) {
     bubble_view_->SetMaxHeight(0);  // Clear max height limit.
@@ -182,16 +186,19 @@ void SystemTrayBubble::UpdateView(
 }
 
 void SystemTrayBubble::InitView(views::View* anchor,
+                                const std::vector<SystemTrayItem*>& items,
+                                SystemTrayView::SystemTrayType system_tray_type,
                                 LoginStatus login_status,
                                 TrayBubbleView::InitParams* init_params) {
   DCHECK(anchor);
   DCHECK(!bubble_view_);
 
-  if (system_tray_view_->system_tray_type() ==
-          SystemTrayView::SYSTEM_TRAY_TYPE_DETAILED &&
+  if (system_tray_type == SystemTrayView::SYSTEM_TRAY_TYPE_DETAILED &&
       init_params->max_height < GetDetailedBubbleMaxHeight()) {
     init_params->max_height = GetDetailedBubbleMaxHeight();
   }
+
+  system_tray_view_ = new SystemTrayView(system_tray_type, items);
 
   init_params->delegate = tray_;
   // Place the bubble on same display as this system tray.
@@ -210,6 +217,7 @@ void SystemTrayBubble::InitView(views::View* anchor,
 
 void SystemTrayBubble::BubbleViewDestroyed() {
   bubble_view_ = nullptr;
+  system_tray_view_ = nullptr;
 }
 
 void SystemTrayBubble::StartAutoCloseTimer(int seconds) {

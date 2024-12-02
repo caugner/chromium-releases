@@ -85,11 +85,20 @@ void MediaStreamVideoSource::AddTrack(
 void MediaStreamVideoSource::RemoveTrack(MediaStreamVideoTrack* video_track,
                                          base::OnceClosure callback) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  std::vector<MediaStreamVideoTrack*>::iterator it =
-      std::find(tracks_.begin(), tracks_.end(), video_track);
-  DCHECK(it != tracks_.end());
-  tracks_.erase(it);
+  {
+    std::vector<MediaStreamVideoTrack*>::iterator it =
+        std::find(tracks_.begin(), tracks_.end(), video_track);
+    DCHECK(it != tracks_.end());
+    tracks_.erase(it);
+  }
   secure_tracker_.Remove(video_track);
+
+  {
+    auto it = std::find(suspended_tracks_.begin(), suspended_tracks_.end(),
+                        video_track);
+    if (it != suspended_tracks_.end())
+      suspended_tracks_.erase(it);
+  }
 
   for (auto it = pending_tracks_.begin(); it != pending_tracks_.end(); ++it) {
     if (it->track == video_track) {

@@ -600,6 +600,7 @@ Starting worker: resources/global-interface-listing-worker.js
 [Worker]     getter effectiveType
 [Worker]     getter onchange
 [Worker]     getter rtt
+[Worker]     getter saveData
 [Worker]     method constructor
 [Worker]     setter onchange
 [Worker] interface Notification : EventTarget
@@ -643,6 +644,7 @@ Starting worker: resources/global-interface-listing-worker.js
 [Worker]     method constructor
 [Worker]     method disconnect
 [Worker]     method observe
+[Worker]     method takeRecords
 [Worker] interface PerformanceObserverEntryList
 [Worker]     attribute @@toStringTag
 [Worker]     method constructor
@@ -666,9 +668,18 @@ Starting worker: resources/global-interface-listing-worker.js
 [Worker]     getter responseEnd
 [Worker]     getter responseStart
 [Worker]     getter secureConnectionStart
+[Worker]     getter serverTiming
 [Worker]     getter transferSize
 [Worker]     getter workerStart
 [Worker]     method constructor
+[Worker]     method toJSON
+[Worker] interface PerformanceServerTiming
+[Worker]     attribute @@toStringTag
+[Worker]     getter description
+[Worker]     getter duration
+[Worker]     getter name
+[Worker]     method constructor
+[Worker]     method toJSON
 [Worker] interface PermissionStatus : EventTarget
 [Worker]     attribute @@toStringTag
 [Worker]     getter onchange
@@ -724,6 +735,7 @@ Starting worker: resources/global-interface-listing-worker.js
 [Worker]     getter bodyUsed
 [Worker]     getter cache
 [Worker]     getter credentials
+[Worker]     getter destination
 [Worker]     getter headers
 [Worker]     getter integrity
 [Worker]     getter method
@@ -928,6 +940,7 @@ Starting worker: resources/global-interface-listing-worker.js
 [Worker]     getter appVersion
 [Worker]     getter budget
 [Worker]     getter connection
+[Worker]     getter deviceMemory
 [Worker]     getter hardwareConcurrency
 [Worker]     getter onLine
 [Worker]     getter permissions

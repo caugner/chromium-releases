@@ -24,7 +24,7 @@
 #include "gpu/command_buffer/client/shared_memory_limits.h"
 #include "gpu/command_buffer/client/transfer_buffer.h"
 #include "gpu/command_buffer/common/constants.h"
-#include "gpu/command_buffer/common/gles2_cmd_utils.h"
+#include "gpu/command_buffer/common/context_creation_attribs.h"
 #include "gpu/command_buffer/common/sync_token.h"
 #include "gpu/command_buffer/service/command_buffer_direct.h"
 #include "gpu/command_buffer/service/context_group.h"
@@ -180,7 +180,7 @@ class CommandBufferCheckLostContext : public CommandBufferDirect {
       : CommandBufferDirect(transfer_buffer_manager, sync_point_manager),
         context_lost_allowed_(context_lost_allowed) {}
 
-  ~CommandBufferCheckLostContext() override {}
+  ~CommandBufferCheckLostContext() override = default;
 
   void Flush(int32_t put_offset) override {
     CommandBufferDirect::Flush(put_offset);
@@ -299,7 +299,7 @@ void GLManager::InitializeWithWorkaroundsImpl(
 
   share_group_ = share_group ? share_group : new gl::GLShareGroup;
 
-  gles2::ContextCreationAttribHelper attribs;
+  ContextCreationAttribs attribs;
   attribs.red_size = 8;
   attribs.green_size = 8;
   attribs.blue_size = 8;
@@ -521,6 +521,16 @@ void GLManager::SignalQuery(uint32_t query, const base::Closure& callback) {
   NOTIMPLEMENTED();
 }
 
+void GLManager::CreateGpuFence(uint32_t gpu_fence_id, ClientGpuFence source) {
+  NOTIMPLEMENTED();
+}
+
+void GLManager::GetGpuFence(
+    uint32_t gpu_fence_id,
+    base::OnceCallback<void(std::unique_ptr<gfx::GpuFence>)> callback) {
+  NOTIMPLEMENTED();
+}
+
 void GLManager::SetLock(base::Lock*) {
   NOTIMPLEMENTED();
 }
@@ -543,18 +553,6 @@ void GLManager::FlushPendingWork() {
 
 uint64_t GLManager::GenerateFenceSyncRelease() {
   return next_fence_sync_release_++;
-}
-
-bool GLManager::IsFenceSyncRelease(uint64_t release) {
-  return release > 0 && release < next_fence_sync_release_;
-}
-
-bool GLManager::IsFenceSyncFlushed(uint64_t release) {
-  return IsFenceSyncRelease(release);
-}
-
-bool GLManager::IsFenceSyncFlushReceived(uint64_t release) {
-  return IsFenceSyncRelease(release);
 }
 
 bool GLManager::IsFenceSyncReleased(uint64_t release) {
