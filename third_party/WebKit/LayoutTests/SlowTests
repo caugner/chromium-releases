@@ -9,17 +9,17 @@
 
 crbug.com/24182 [ Debug ] storage/indexeddb/objectstore-cursor.html [ Slow ]
 crbug.com/24182 storage/indexeddb/mozilla/test_objectStore_openKeyCursor.html [ Slow ]
-crbug.com/24182 editing/selection/move-by-word-visually-mac.html [ Slow ]
-crbug.com/24182 editing/selection/move-by-word-visually-multi-line.html [ Slow ]
+crbug.com/24182 editing/selection/modify_move/move-by-word-visually-mac.html [ Slow ]
+crbug.com/24182 editing/selection/modify_move/move-by-word-visually-multi-line.html [ Slow ]
 crbug.com/24182 compositing/culling/filter-occlusion-blur-large.html [ Slow ]
 crbug.com/24182 compositing/video-frame-size-change.html [ Slow ]
 crbug.com/24182 css3/filters/effect-reference-hidpi-hw.html [ Slow ]
 crbug.com/24182 css3/filters/filter-change-repaint-composited.html [ Slow ]
 crbug.com/24182 editing/selection/caret-at-bidi-boundary.html [ Slow ]
-crbug.com/24182 editing/selection/move-by-word-visually-single-space-inline-element.html [ Slow ]
-crbug.com/24182 editing/selection/move-by-word-visually-inline-block-positioned-element.html [ Slow ]
-crbug.com/24182 editing/selection/move-by-word-visually-multi-space.html [ Slow ]
-crbug.com/24182 editing/selection/move-by-word-visually-crash-test-5.html [ Slow ]
+crbug.com/24182 editing/selection/modify_move/move-by-word-visually-single-space-inline-element.html [ Slow ]
+crbug.com/24182 editing/selection/modify_move/move-by-word-visually-inline-block-positioned-element.html [ Slow ]
+crbug.com/24182 editing/selection/modify_move/move-by-word-visually-multi-space.html [ Slow ]
+crbug.com/24182 editing/selection/modify_move/move-by-word-visually-crash-test-5.html [ Slow ]
 crbug.com/24182 fast/dom/SelectorAPI/resig-SelectorsAPI-test.xhtml [ Slow ]
 crbug.com/24182 fast/forms/time-multiple-fields/time-multiple-fields-stepup-stepdown-from-renderer.html [ Slow ]
 crbug.com/24182 fast/frames/cached-frame-counter.html [ Slow ]
@@ -58,7 +58,6 @@ crbug.com/24182 virtual/gpu/fast/canvas/canvas-composite-alpha.html [ Slow ]
 crbug.com/433711 [ Debug ] virtual/gpu/fast/canvas/canvas-composite-image.html [ Slow ]
 crbug.com/24182 virtual/gpu/fast/canvas/canvas-composite-canvas.html [ Slow ]
 crbug.com/24182 virtual/gpu/fast/canvas/canvas-createImageBitmap-drawImage.html [ Slow ]
-crbug.com/24182 virtual/gpu/fast/canvas/canvas-createImageBitmap-drawImage-with-options.html [ Slow ]
 crbug.com/24182 virtual/gpu/fast/canvas/canvas-draw-canvas-on-canvas-shadow.html [ Slow ]
 crbug.com/24182 virtual/gpu/fast/canvas/canvas-drawImage-shadow.html [ Slow ]
 crbug.com/24182 virtual/gpu/fast/canvas/canvas-imageSmoothingEnabled-repaint.html [ Slow ]
@@ -148,6 +147,7 @@ crbug.com/248938 virtual/threaded/animations/3d/replace-filling-transform.html [
 crbug.com/311482 virtual/threaded/animations/interpolation/filter-interpolation.html [ Slow ]
 crbug.com/311482 virtual/threaded/animations/keyframes-unprefixed-03.html [ Slow ]
 crbug.com/243871 virtual/threaded/fast/scroll-behavior/ [ Slow ]
+crbug.com/243871 virtual/threaded/fast/idle-callback/idle_periods.html [ Slow ]
 
 crbug.com/258896 animations/animation-direction-reverse-fill-mode.html [ Slow ]
 
@@ -197,7 +197,7 @@ crbug.com/237270 [ Win7 ] fast/css/custom-font-xheight.html [ Slow ]
 crbug.com/241576 [ Win ] http/tests/appcache/404-manifest.html [ Slow ]
 crbug.com/241869 [ Debug ] css3/flexbox/multiline-justify-content.html [ Slow ]
 crbug.com/243249 http/tests/misc/submit-post-keygen.html [ Slow ]
-crbug.com/245154 editing/selection/move-by-character-brute-force.html [ Slow ]
+crbug.com/245154 editing/selection/modify_move/move-by-character-brute-force.html [ Slow ]
 crbug.com/246749 inspector/extensions/extensions-panel.html [ Slow ]
 
 # This test takes 5+ seconds as intended because it tests connection throttling.
@@ -274,11 +274,14 @@ crbug.com/528419 [ Linux ] inspector/elements/shadow/shadow-host-display-modes.h
 crbug.com/528419 [ Linux ] inspector/elements/styles-2/pseudo-elements.html [ Slow ]
 
 crbug.com/529345 [ Win10 ] paint/masks/fieldset-mask.html [ Slow ]
-crbug.com/356957 editing/spelling/spellcheck-editable-on-focus.html [ Slow ]
 crbug.com/552556 [ Win Linux ] virtual/threaded/fast/scroll-behavior/overflow-scroll-root-frame-animates.html [ Slow ]
 crbug.com/552556 [ Win Linux ] virtual/threaded/fast/scroll-behavior/overflow-scroll-animates.html [ Slow ]
 crbug.com/570656 [ Mac ] fast/writing-mode/Kusa-Makura-background-canvas.html [ Slow ]
 crbug.com/570656 [ Mac ] fast/text/unicode-fallback-font.html [ Slow ]
 
-# This is really only slow under MSAN, but it's forbidden to add this expectation to MSANExpectations.
-crbug.com/584807 [ Linux ] printing/webgl-oversized-printing.html [ Slow ]
+crbug.com/584807 printing/webgl-oversized-printing.html [ Slow ]
+crbug.com/584807 virtual/threaded/printing/webgl-oversized-printing.html [ Slow ]
+
+crbug.com/592183 usb/usbDevice.html [ Slow ]
+
+crbug.com/594189 virtual/spv2/fast/overflow/lots-of-sibling-inline-boxes.html [ Slow ]

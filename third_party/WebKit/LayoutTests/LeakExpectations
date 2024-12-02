@@ -48,13 +48,10 @@ crbug.com/327574 fast/loader/data-images-with-images-disabled.html [ Leak ]
 # Untriaged but known leaks which may be false positives.
 # -----------------------------------------------------------------
 
-crbug.com/364411 fast/frames/location-observe-callback-crash.html [ Leak ]
-
 crbug.com/364417 editing/selection/selection-in-iframe-removed-crash.html [ Leak ]
 crbug.com/364417 editing/selection/user-select-js-property.html [ Leak ]
 crbug.com/364417 fast/events/touch/gesture/context-menu-on-long-tap.html [ Leak ]
 crbug.com/364417 fast/repaint/japanese-rl-selection-clear.html [ Leak ]
-crbug.com/364417 virtual/spv2/fast/repaint/japanese-rl-selection-clear.html [ Leak ]
 crbug.com/364417 fast/text/international/hebrew-selection.html [ Leak ]
 
 crbug.com/455369 fast/html/marquee-destroyed-without-removed-from-crash.html [ Leak Pass ]
@@ -96,13 +93,12 @@ crbug.com/571534 virtual/threaded/animations/svg-element-css-animation-crash.htm
 
 crbug.com/588598 web-animations-api/player-cancel-event.html [ Leak ]
 
+crbug.com/596002 http/tests/w3c/webperf/submission/Google/resource-timing/html/test_resource_initiator_types.html [ Leak ]
+
 # -----------------------------------------------------------------
 # Untriaged but known leaks of ActiveDOMObject (fast).
 # -----------------------------------------------------------------
 crbug.com/506529 fast/mediastream/MediaStreamConstructor.html [ Leak ]
-crbug.com/506529 fast/speech/scripted/speechrecognition-basics.html [ Leak ]
-crbug.com/506529 fast/speech/scripted/speechrecognition-errors.html [ Leak ]
-crbug.com/506529 fast/speech/scripted/start-exception.html [ Leak ]
 crbug.com/506529 fast/events/constructors/media-stream-event-constructor.html [ Leak ]
 crbug.com/506529 fast/files/workers/worker-read-blob-async-crash.html [ Leak ]
 crbug.com/506529 virtual/pointerevent/fast/events/constructors/media-stream-event-constructor.html [ Leak ]
@@ -120,7 +116,6 @@ crbug.com/506752 storage/indexeddb/ [ Skip ]
 # Untriaged but known leaks of ActiveDOMObject (http).
 # -----------------------------------------------------------------
 crbug.com/506754 http/tests/cachestorage/window/cache-put.html [ Leak ]
-crbug.com/506754 http/tests/inspector/filesystem/request-file-content.html [ Leak ]
 crbug.com/506754 http/tests/inspector/network/network-xhr-replay.html [ Leak ]
 crbug.com/506754 http/tests/inspector/service-workers/service-worker-agents.html [ Crash Leak ]
 crbug.com/506754 http/tests/security/cross-origin-indexeddb-allowed.html [ Leak ]
@@ -148,3 +143,33 @@ crbug.com/451577 [ Linux ] inspector/extensions/extensions-sidebar.html [ Slow ]
 crbug.com/578297 [ Linux ] media/video-autoplay-experiment-modes.html [ Slow ]
 crbug.com/578297 [ Linux ] virtual/threaded/printing/webgl-oversized-printing.html [ Slow ]
 crbug.com/578297 [ Linux ] http/tests/media/media-source/mediasource-appendstream-quota-exceeded.html [ Slow ]
+
+# -----------------------------------------------------------------
+# Leaks in imported/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/*
+# -----------------------------------------------------------------
+crbug.com/594603 [ Linux ] imported/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/flexbox/flexbox-baseline-align-self-baseline-vert-001.html [ Leak ]
+crbug.com/594603 [ Linux ] imported/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/flexbox/flexbox-baseline-empty-001a.html [ Leak ]
+crbug.com/594603 [ Linux ] imported/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/flexbox/flexbox-baseline-empty-001b.html [ Leak ]
+crbug.com/594603 [ Linux ] imported/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/flexbox/flexbox-baseline-multi-item-vert-001.html [ Leak ]
+crbug.com/594603 [ Linux ] imported/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/flexbox/flexbox-whitespace-handling-002.xhtml [ Leak ]
+crbug.com/594309 [ Linux ] imported/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/variables/variable-declaration-15.html [ Leak ]
+crbug.com/594309 [ Linux ] imported/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/variables/variable-declaration-16.html [ Leak ]
+crbug.com/594309 [ Linux ] imported/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/variables/variable-declaration-17.html [ Leak ]
+crbug.com/594309 [ Linux ] imported/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/variables/variable-declaration-18.html [ Leak ]
+
+
+# -----------------------------------------------------------------
+# Leaks in ScriptedIdleTaskController
+# See LayoutTests/intersection-observer/README for details.
+# -----------------------------------------------------------------
+crbug.com/595155 http/tests/intersection-observer/iframe-cross-origin.html [ Leak ]
+crbug.com/595155 intersection-observer/containing-block.html [ Leak ]
+crbug.com/595155 intersection-observer/iframe-no-root.html [ Leak ]
+crbug.com/595155 intersection-observer/multiple-thresholds.html [ Leak ]
+crbug.com/595155 intersection-observer/observer-without-js-reference.html [ Leak ]
+crbug.com/595155 intersection-observer/root-margin.html [ Leak ]
+crbug.com/595155 intersection-observer/same-document-no-root.html [ Leak ]
+crbug.com/595155 intersection-observer/same-document-root.html [ Leak ]
+crbug.com/595155 intersection-observer/same-document-zero-size-target.html [ Leak ]
+crbug.com/595155 intersection-observer/timestamp.html [ Leak ]
+crbug.com/595155 intersection-observer/unclipped-root.html [ Leak ]

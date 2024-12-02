@@ -50,11 +50,6 @@ interface CloseEvent : Event
 interface CountQueuingStrategy
     method constructor
     method size
-interface CrossOriginServiceWorkerClient : EventTarget
-    getter origin
-    getter targetUrl
-    method constructor
-    method postMessage
 interface Crypto
     getter subtle
     method constructor
@@ -149,6 +144,7 @@ interface Event
     getter defaultPrevented
     getter eventPhase
     getter path
+    getter relatedTargetScoped
     getter returnValue
     getter scoped
     getter srcElement
@@ -255,6 +251,10 @@ interface FileReaderSync
     method readAsBinaryString
     method readAsDataURL
     method readAsText
+interface ForeignFetchEvent : ExtendableEvent
+    getter request
+    method constructor
+    method respondWith
 interface FormData
     method append
     method constructor
@@ -344,6 +344,7 @@ interface IDBKeyRange
     getter upper
     getter upperOpen
     method constructor
+    method includes
 interface IDBObjectStore
     getter autoIncrement
     getter indexNames
@@ -412,7 +413,7 @@ interface ImageData
     method constructor
 interface InstallEvent : ExtendableEvent
     method constructor
-    method registerForeignFetchScopes
+    method registerForeignFetch
 interface MessageChannel
     getter port1
     getter port2
@@ -445,6 +446,7 @@ interface Notification : EventTarget
     static getter maxActions
     static getter permission
     getter actions
+    getter badge
     getter body
     getter data
     getter dir
@@ -475,8 +477,72 @@ interface OffscreenCanvas
     getter height
     getter width
     method constructor
+    method getContext
+    method transferToImageBitmap
     setter height
     setter width
+interface OffscreenCanvasRenderingContext2D
+    getter fillStyle
+    getter lineCap
+    getter lineDashOffset
+    getter lineJoin
+    getter lineWidth
+    getter miterLimit
+    getter offscreenCanvas
+    getter shadowBlur
+    getter shadowColor
+    getter shadowOffsetX
+    getter shadowOffsetY
+    getter strokeStyle
+    method arc
+    method arcTo
+    method beginPath
+    method bezierCurveTo
+    method clearRect
+    method closePath
+    method constructor
+    method ellipse
+    method fill
+    method fillRect
+    method getLineDash
+    method lineTo
+    method moveTo
+    method quadraticCurveTo
+    method rect
+    method resetTransform
+    method restore
+    method rotate
+    method save
+    method scale
+    method setLineDash
+    method setTransform
+    method stroke
+    method strokeRect
+    method transform
+    method translate
+    setter fillStyle
+    setter lineCap
+    setter lineDashOffset
+    setter lineJoin
+    setter lineWidth
+    setter miterLimit
+    setter shadowBlur
+    setter shadowColor
+    setter shadowOffsetX
+    setter shadowOffsetY
+    setter strokeStyle
+interface Path2D
+    method addPath
+    method arc
+    method arcTo
+    method bezierCurveTo
+    method closePath
+    method constructor
+    method ellipse
+    method lineTo
+    method moveTo
+    method quadraticCurveTo
+    method rect
 interface PerformanceObserverEntryList
     method constructor
     method getEntries
@@ -560,29 +626,7 @@ interface Response
     method constructor
     method json
     method text
-interface ServicePort
-    getter data
-    getter name
-    getter targetURL
-    method close
-    method constructor
-    method postMessage
-interface ServicePortCollection : EventTarget
-    getter onclose
-    getter onconnect
-    getter onmessage
-    method connect
-    method constructor
-    method match
-    method matchAll
-    setter onclose
-    setter onconnect
-    setter onmessage
-interface ServicePortConnectEvent : ExtendableEvent
-    getter origin
-    getter targetURL
-    method constructor
-    method respondWith
+    method v8ExtraStreamBody
 interface ServiceWorkerGlobalScope : WorkerGlobalScope
     method constructor
 interface ServiceWorkerRegistration : EventTarget
@@ -645,6 +689,7 @@ interface URL
     getter port
     getter protocol
     getter search
+    getter searchParams
     getter username
     method constructor
     method toString
@@ -701,6 +746,7 @@ interface WindowClient : Client
     method focus
     method navigate
 interface WorkerGlobalScope : EventTarget
+    getter addressSpace
     getter console
     getter crypto
     getter indexedDB
@@ -750,7 +796,6 @@ interface WorkerNavigator
     getter permissions
     getter platform
     getter product
-    getter services
     getter storage
     getter userAgent
     getter webkitPersistentStorage
@@ -814,6 +859,7 @@ interface webkitIDBKeyRange
     getter upper
     getter upperOpen
     method constructor
+    method includes
 interface webkitIDBObjectStore
     getter autoIncrement
     getter indexNames
@@ -863,7 +909,6 @@ global object
     getter caches
     getter clients
     getter onactivate
-    getter oncrossoriginmessage
     getter onfetch
     getter onforeignfetch
     getter ongeofenceenter
@@ -880,7 +925,6 @@ global object
     method gc
     method skipWaiting
     setter onactivate
-    setter oncrossoriginmessage
     setter onfetch
     setter onforeignfetch
     setter ongeofenceenter
