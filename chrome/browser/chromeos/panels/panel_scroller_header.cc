@@ -6,9 +6,9 @@
 
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/chromeos/panels/panel_scroller.h"
-#include "gfx/canvas.h"
-#include "gfx/font.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/canvas.h"
+#include "ui/gfx/font.h"
 
 PanelScrollerHeader::PanelScrollerHeader(PanelScroller* scroller)
     : views::View(),
@@ -35,7 +35,7 @@ gfx::Size PanelScrollerHeader::GetPreferredSize() {
   return gfx::Size(size().width(), 18);
 }
 
-void PanelScrollerHeader::Paint(gfx::Canvas* canvas) {
+void PanelScrollerHeader::OnPaint(gfx::Canvas* canvas) {
   // TODO(brettw) fill this out with real styling.
   canvas->FillRectInt(0xFFFFFFFF, 0, 0, size().width(), size().height());
   canvas->DrawLineInt(0xFFE6E6E6, 0, size().height() - 1,

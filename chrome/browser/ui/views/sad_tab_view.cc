@@ -6,19 +6,19 @@
 
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/google/google_util.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
-#include "chrome/browser/tab_contents/tab_contents_delegate.h"
 #include "chrome/common/url_constants.h"
-#include "gfx/canvas.h"
-#include "gfx/canvas_skia.h"
-#include "gfx/size.h"
-#include "gfx/skia_util.h"
+#include "content/browser/tab_contents/tab_contents.h"
+#include "content/browser/tab_contents/tab_contents_delegate.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "grit/theme_resources.h"
 #include "third_party/skia/include/effects/SkGradientShader.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/canvas.h"
+#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/size.h"
+#include "ui/gfx/skia_util.h"
 
 static const int kSadTabOffset = -64;
 static const int kIconTitleSpacing = 20;
@@ -70,7 +70,9 @@ SadTabView::SadTabView(TabContents* tab_contents, Kind kind)
   }
 }
 
-void SadTabView::Paint(gfx::Canvas* canvas) {
+SadTabView::~SadTabView() {}
+
+void SadTabView::OnPaint(gfx::Canvas* canvas) {
   SkPaint paint;
   SkSafeUnref(paint.setShader(
       gfx::CreateGradientShader(

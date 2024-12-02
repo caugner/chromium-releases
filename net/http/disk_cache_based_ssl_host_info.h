@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef NET_HTTP_DISK_CACHE_BASED_SSL_HOST_INFO_H
-#define NET_HTTP_DISK_CACHE_BASED_SSL_HOST_INFO_H
+#ifndef NET_HTTP_DISK_CACHE_BASED_SSL_HOST_INFO_H_
+#define NET_HTTP_DISK_CACHE_BASED_SSL_HOST_INFO_H_
 
 #include <string>
 
@@ -28,6 +28,7 @@ class DiskCacheBasedSSLHostInfo : public SSLHostInfo,
  public:
   DiskCacheBasedSSLHostInfo(const std::string& hostname,
                             const SSLConfig& ssl_config,
+                            CertVerifier* cert_verifier,
                             HttpCache* http_cache);
 
   // Implementation of SSLHostInfo
@@ -52,36 +53,29 @@ class DiskCacheBasedSSLHostInfo : public SSLHostInfo,
     NONE,
   };
 
-  ~DiskCacheBasedSSLHostInfo();
-
   class CallbackImpl : public CallbackRunner<Tuple1<int> > {
    public:
     CallbackImpl(const base::WeakPtr<DiskCacheBasedSSLHostInfo>& obj,
-                 void (DiskCacheBasedSSLHostInfo::*meth) (int))
-        : obj_(obj),
-          meth_(meth) {
-    }
-
-    virtual void RunWithParams(const Tuple1<int>& params) {
-      if (!obj_) {
-        delete this;
-      } else {
-        DispatchToMethod(obj_.get(), meth_, params);
-      }
-    }
+                 void (DiskCacheBasedSSLHostInfo::*meth)(int));
+    virtual ~CallbackImpl();
 
     disk_cache::Backend** backend_pointer() { return &backend_; }
     disk_cache::Entry** entry_pointer() { return &entry_; }
     disk_cache::Backend* backend() const { return backend_; }
     disk_cache::Entry* entry() const { return entry_; }
 
+    // CallbackRunner<Tuple1<int> >:
+    virtual void RunWithParams(const Tuple1<int>& params);
+
    private:
     base::WeakPtr<DiskCacheBasedSSLHostInfo> obj_;
-    void (DiskCacheBasedSSLHostInfo::*meth_) (int);
+    void (DiskCacheBasedSSLHostInfo::*meth_)(int);
 
     disk_cache::Backend* backend_;
     disk_cache::Entry* entry_;
   };
+
+  virtual ~DiskCacheBasedSSLHostInfo();
 
   std::string key() const;
 
@@ -96,11 +90,12 @@ class DiskCacheBasedSSLHostInfo : public SSLHostInfo,
   int DoGetBackend();
   int DoOpen();
   int DoRead();
-  int DoCreate();
   int DoWrite();
+  int DoCreate();
 
   // WaitForDataReadyDone is the terminal state of the read operation.
   int WaitForDataReadyDone();
+
   // SetDone is the terminal state of the write operation.
   int SetDone();
 
@@ -124,4 +119,4 @@ class DiskCacheBasedSSLHostInfo : public SSLHostInfo,
 
 }  // namespace net
 
-#endif  // NET_HTTP_DISK_CACHE_BASED_SSL_HOST_INFO_H
+#endif  // NET_HTTP_DISK_CACHE_BASED_SSL_HOST_INFO_H_

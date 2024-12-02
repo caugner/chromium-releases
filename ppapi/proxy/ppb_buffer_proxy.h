@@ -13,25 +13,27 @@ struct PPB_Buffer_Dev;
 namespace pp {
 namespace proxy {
 
+class HostResource;
+
 class PPB_Buffer_Proxy : public InterfaceProxy {
  public:
   PPB_Buffer_Proxy(Dispatcher* dispatcher, const void* target_interface);
   virtual ~PPB_Buffer_Proxy();
+
+  static const Info* GetInfo();
 
   const PPB_Buffer_Dev* ppb_buffer_target() const {
     return static_cast<const PPB_Buffer_Dev*>(target_interface());
   }
 
   // InterfaceProxy implementation.
-  virtual const void* GetSourceInterface() const;
-  virtual InterfaceID GetInterfaceId() const;
   virtual bool OnMessageReceived(const IPC::Message& msg);
 
  private:
   // Message handlers.
   void OnMsgCreate(PP_Instance instance,
                    uint32_t size,
-                   PP_Resource* result_resource,
+                   HostResource* result_resource,
                    int* result_shm_handle);
 };
 

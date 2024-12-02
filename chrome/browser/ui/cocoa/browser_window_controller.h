@@ -19,7 +19,7 @@
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_controller.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_bubble_controller.h"
 #import "chrome/browser/ui/cocoa/browser_command_executor.h"
-#import "chrome/browser/ui/cocoa/tab_contents_controller.h"
+#import "chrome/browser/ui/cocoa/tab_contents/tab_contents_controller.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_strip_controller.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_window_controller.h"
 #import "chrome/browser/ui/cocoa/themed_window.h"
@@ -155,6 +155,9 @@ class TabContents;
 
 // Return a weak pointer to the tab strip controller.
 - (TabStripController*)tabStripController;
+
+// Access the ObjC controller that contains the infobars.
+- (InfoBarContainerController*)infoBarContainerController;
 
 // Access the C++ bridge object representing the status bubble for the window.
 - (StatusBubbleMac*)statusBubble;

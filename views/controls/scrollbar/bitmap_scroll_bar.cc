@@ -13,11 +13,11 @@
 #include "base/message_loop.h"
 #include "base/string16.h"
 #include "base/utf_string_conversions.h"
-#include "gfx/canvas.h"
 #include "grit/app_strings.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/gfx/canvas.h"
 #include "views/controls/menu/menu.h"
 #include "views/controls/scroll_view.h"
 #include "views/widget/widget.h"
@@ -74,9 +74,9 @@ class AutorepeatButton : public ImageButton {
 #elif defined(OS_LINUX)
     gfx::Point cursor_point = Screen::GetCursorScreenPoint();
 #endif
-    views::MouseEvent event(views::Event::ET_MOUSE_RELEASED,
+    views::MouseEvent event(ui::ET_MOUSE_RELEASED,
                             cursor_point.x(), cursor_point.y(),
-                            views::Event::EF_LEFT_BUTTON_DOWN);
+                            ui::EF_LEFT_BUTTON_DOWN);
     Button::NotifyClick(event);
   }
 
@@ -118,7 +118,7 @@ class BitmapScrollBarThumb : public View {
     } else {
       thumb_bounds.set_height(size);
     }
-    SetBounds(thumb_bounds);
+    SetBoundsRect(thumb_bounds);
   }
 
   // Retrieves the size (width or height) of the thumb.
@@ -137,7 +137,7 @@ class BitmapScrollBarThumb : public View {
     } else {
       thumb_bounds.set_y(track_bounds.y() + position);
     }
-    SetBounds(thumb_bounds);
+    SetBoundsRect(thumb_bounds);
   }
 
   // Gets the position of the thumb on the x or y axis.
@@ -409,7 +409,7 @@ gfx::Size BitmapScrollBar::GetPreferredSize() {
   return gfx::Size(button_prefsize.width(), button_prefsize.height() * 2);
 }
 
-void BitmapScrollBar::Paint(gfx::Canvas* canvas) {
+void BitmapScrollBar::OnPaint(gfx::Canvas* canvas) {
   // Paint the track.
   gfx::Rect track_bounds = GetTrackBounds();
   canvas->TileImageInt(*images_[THUMB_TRACK][thumb_track_state_],
@@ -491,13 +491,13 @@ void BitmapScrollBar::OnMouseReleased(const MouseEvent& event, bool canceled) {
 }
 
 bool BitmapScrollBar::OnMouseWheel(const MouseWheelEvent& event) {
-  ScrollByContentsOffset(event.GetOffset());
+  ScrollByContentsOffset(event.offset());
   return true;
 }
 
 bool BitmapScrollBar::OnKeyPressed(const KeyEvent& event) {
   ScrollAmount amount = SCROLL_NONE;
-  switch (event.GetKeyCode()) {
+  switch (event.key_code()) {
     case ui::VKEY_UP:
       if (!IsHorizontal())
         amount = SCROLL_PREV_LINE;
@@ -547,12 +547,11 @@ enum ScrollBarContextMenuCommands {
   ScrollBarContextMenuCommand_ScrollNext
 };
 
-void BitmapScrollBar::ShowContextMenu(View* source,
-                                      const gfx::Point& p,
-                                      bool is_mouse_gesture) {
+void BitmapScrollBar::ShowContextMenuForView(View* source,
+                                             const gfx::Point& p,
+                                             bool is_mouse_gesture) {
   Widget* widget = GetWidget();
-  gfx::Rect widget_bounds;
-  widget->GetBounds(&widget_bounds, true);
+  gfx::Rect widget_bounds = widget->GetWindowScreenBounds();
   gfx::Point temp_pt(p.x() - widget_bounds.x(), p.y() - widget_bounds.y());
   View::ConvertPointFromWidget(this, &temp_pt);
   context_menu_mouse_position_ = IsHorizontal() ? temp_pt.x() : temp_pt.y();

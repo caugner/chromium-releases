@@ -7,7 +7,7 @@
 #include "chrome/browser/autocomplete/autocomplete_edit_view_win.h"
 #include "chrome/browser/autocomplete/autocomplete_popup_model.h"
 #include "chrome/browser/ui/views/autocomplete/autocomplete_popup_contents_view.h"
-#include "gfx/insets.h"
+#include "ui/gfx/insets.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 // AutocompletePopupWin, public:
@@ -40,7 +40,8 @@ AutocompletePopupWin::~AutocompletePopupWin() {
 ////////////////////////////////////////////////////////////////////////////////
 // AutocompletePopupWin, WidgetWin overrides:
 
-LRESULT AutocompletePopupWin::OnMouseActivate(HWND window, UINT hit_test,
-                                              UINT mouse_message) {
+LRESULT AutocompletePopupWin::OnMouseActivate(UINT message,
+                                              WPARAM w_param,
+                                              LPARAM l_param) {
   return MA_NOACTIVATE;
 }

@@ -52,32 +52,14 @@ class ChromeFrameDistribution : public BrowserDistribution {
   virtual bool CanSetAsDefault();
 
   virtual void UpdateInstallStatus(bool system_install,
-      bool incremental_install, bool multi_install,
+      installer::ArchiveType archive_type,
       installer::InstallStatus install_status);
-
-  virtual std::vector<FilePath> GetKeyFiles();
-
-  virtual std::vector<FilePath> GetComDllList();
-
-  virtual void AppendUninstallCommandLineFlags(CommandLine* cmd_line);
-
-  virtual bool ShouldCreateUninstallEntry();
-
-  virtual bool SetChannelFlags(bool set, installer::ChannelInfo* channel_info);
 
  protected:
   friend class BrowserDistribution;
 
   // Disallow construction from non-friends.
-  explicit ChromeFrameDistribution(
-      const installer::MasterPreferences& prefs);
-
-  // Determines whether this Chrome Frame distribution is being used to work
-  // with CEEE bits as well.
-  bool ceee_;
-
-  // True when Chrome Frame is installed in ready mode (users have to opt in).
-  bool ready_mode_;
+  ChromeFrameDistribution();
 };
 
 #endif  // CHROME_INSTALLER_UTIL_CHROME_FRAME_DISTRIBUTION_H_

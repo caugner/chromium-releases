@@ -41,7 +41,8 @@ class ChromeInvalidationClient
    public:
     virtual ~Listener();
 
-    virtual void OnInvalidate(syncable::ModelType model_type) = 0;
+    virtual void OnInvalidate(syncable::ModelType model_type,
+                              const std::string& payload) = 0;
 
     virtual void OnInvalidateAll() = 0;
   };
@@ -68,7 +69,7 @@ class ChromeInvalidationClient
   // Register the sync types that we're interested in getting
   // notifications for.  Must only be called between calls to Start()
   // and Stop().
-  void RegisterTypes();
+  void RegisterTypes(const syncable::ModelTypeSet& types);
 
   // invalidation::InvalidationListener implementation.
   //

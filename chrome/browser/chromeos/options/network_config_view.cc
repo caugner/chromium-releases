@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,8 +13,8 @@
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "views/grid_layout.h"
-#include "views/standard_layout.h"
+#include "views/layout/grid_layout.h"
+#include "views/layout/layout_constants.h"
 #include "views/widget/widget_gtk.h"
 #include "views/window/window.h"
 
@@ -22,7 +22,7 @@ using views::WidgetGtk;
 
 namespace chromeos {
 
-NetworkConfigView::NetworkConfigView(const WifiNetwork* wifi)
+NetworkConfigView::NetworkConfigView(WifiNetwork* wifi)
     : browser_mode_(true),
       title_(ASCIIToWide(wifi->name())),
       wificonfig_view_(new WifiConfigView(this, wifi)),
@@ -35,10 +35,13 @@ NetworkConfigView::NetworkConfigView()
           l10n_util::GetStringUTF16(IDS_OPTIONS_SETTINGS_OTHER_NETWORKS))),
       wificonfig_view_(new WifiConfigView(this)),
       delegate_(NULL) {
+  SetAccessibleName(
+      l10n_util::GetStringUTF16(IDS_OPTIONS_SETTINGS_OTHER_NETWORKS));
 }
 
 gfx::NativeWindow NetworkConfigView::GetNativeWindow() const {
-  return GTK_WINDOW(static_cast<WidgetGtk*>(GetWidget())->GetNativeView());
+  return
+      GTK_WINDOW(static_cast<const WidgetGtk*>(GetWidget())->GetNativeView());
 }
 
 std::wstring NetworkConfigView::GetDialogButtonLabel(
@@ -52,7 +55,7 @@ bool NetworkConfigView::IsDialogButtonEnabled(
     MessageBoxFlags::DialogButton button) const {
   // Disable connect button if cannot login.
   if (button == MessageBoxFlags::DIALOGBUTTON_OK)
-    return wificonfig_view_->can_login();
+    return wificonfig_view_->CanLogin();
   return true;
 }
 

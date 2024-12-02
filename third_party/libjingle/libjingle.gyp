@@ -1,4 +1,4 @@
-# Copyright (c) 2009 The Chromium Authors. All rights reserved.
+# Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -150,13 +150,11 @@
         'overrides/talk/xmllite/qname.cc',
         'overrides/talk/xmllite/qname.h',
 
-        'source/talk/base/DiskCacheStd.h',
         'source/talk/base/Equifax_Secure_Global_eBusiness_CA-1.h',
         'source/talk/base/asyncfile.cc',
         'source/talk/base/asyncfile.h',
         'source/talk/base/asynchttprequest.cc',
         'source/talk/base/asynchttprequest.h',
-        'source/talk/base/asyncpacketsocket.cc',
         'source/talk/base/asyncpacketsocket.h',
         'source/talk/base/asyncsocket.cc',
         'source/talk/base/asyncsocket.h',
@@ -169,6 +167,8 @@
         'source/talk/base/base64.cc',
         'source/talk/base/base64.h',
         'source/talk/base/basicdefs.h',
+        'source/talk/base/basicpacketsocketfactory.cc',
+        'source/talk/base/basicpacketsocketfactory.h',
         'source/talk/base/bytebuffer.cc',
         'source/talk/base/bytebuffer.h',
         'source/talk/base/byteorder.h',
@@ -182,15 +182,12 @@
         'source/talk/base/diskcache.h',
         'source/talk/base/event.cc',
         'source/talk/base/event.h',
-        'source/talk/base/fakenetwork.h',
         'source/talk/base/fileutils.cc',
         'source/talk/base/fileutils.h',
-        'source/talk/base/fileutils_mock.h',
         'source/talk/base/firewallsocketserver.cc',
         'source/talk/base/firewallsocketserver.h',
         'source/talk/base/flags.cc',
         'source/talk/base/flags.h',
-        'source/talk/base/hash.h',
         'source/talk/base/helpers.cc',
         'source/talk/base/helpers.h',
         'source/talk/base/host.cc',
@@ -204,7 +201,6 @@
         'source/talk/base/httpcommon.h',
         'source/talk/base/httprequest.cc',
         'source/talk/base/httprequest.h',
-        'source/talk/base/icftypes.h',
         'source/talk/base/linked_ptr.h',
         'source/talk/base/logging.cc',
         'source/talk/base/md5.h',
@@ -213,7 +209,6 @@
         'source/talk/base/messagehandler.h',
         'source/talk/base/messagequeue.cc',
         'source/talk/base/messagequeue.h',
-        'source/talk/base/netfw.h',
         'source/talk/base/nethelpers.cc',
         'source/talk/base/nethelpers.h',
         'source/talk/base/network.cc',
@@ -226,6 +221,8 @@
         'source/talk/base/proxydetect.h',
         'source/talk/base/proxyinfo.cc',
         'source/talk/base/proxyinfo.h',
+        'source/talk/base/ratetracker.cc',
+        'source/talk/base/ratetracker.h',
         'source/talk/base/sec_buffer.h',
         'source/talk/base/signalthread.cc',
         'source/talk/base/signalthread.h',
@@ -312,7 +309,6 @@
         ['OS=="win"', {
           'sources': [
             'overrides/talk/base/win32socketinit.cc',
-            'source/talk/base/convert.h',  # win32 only
             'source/talk/base/schanneladapter.cc',
             'source/talk/base/schanneladapter.h',
             'source/talk/base/win32.h',

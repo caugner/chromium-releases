@@ -362,12 +362,6 @@ class DownloadTest : public InProcessBrowserTest {
     EXPECT_EQ(origin_file_size, downloaded_file_size);
     EXPECT_TRUE(file_util::ContentsEqual(downloaded_file, origin_file));
 
-#if defined(OS_WIN)
-    // Check if the Zone Identifier is correctly set.
-    if (file_util::VolumeSupportsADS(downloaded_file))
-      EXPECT_TRUE(file_util::HasInternetZoneIdentifier(downloaded_file));
-#endif
-
     // Delete the downloaded copy of the file.
     bool downloaded_file_deleted =
         file_util::DieFileDie(downloaded_file, false);
@@ -376,11 +370,11 @@ class DownloadTest : public InProcessBrowserTest {
   }
 
   // TODO(ahendrickson) -- |expected_title_in_progress| and
-  // |expected_title_in_finished| need to be checked.
+  // |expected_title_finished| need to be checked.
   bool RunSizeTest(Browser* browser,
                    const GURL& url,
-                   const std::wstring& expected_title_in_progress,
-                   const std::wstring& expected_title_finished) {
+                   const string16& expected_title_in_progress,
+                   const string16& expected_title_finished) {
     if (!InitialSetup(false))
       return false;
 
@@ -414,7 +408,7 @@ class DownloadTest : public InProcessBrowserTest {
     // TODO(ahendrickson): check download status text after downloading.
 
     // Make sure the download shelf is showing.
-    EXPECT_TRUE(browser->window()->IsDownloadShelfVisible());
+    EXPECT_TRUE(IsDownloadUIVisible(browser));
 
     FilePath filename;
     net::FileURLToFilePath(url, &filename);
@@ -433,6 +427,33 @@ class DownloadTest : public InProcessBrowserTest {
     return true;
   }
 
+  // Figure out if the appropriate download visibility was done.  A
+  // utility function to support ChromeOS variations.  On ChromeOS
+  // a webui panel is used instead of the download shelf; the
+  // test for TYPE_APP_PANEL detects this type of panel.
+  static bool IsDownloadUIVisible(Browser* browser) {
+#if defined(OS_CHROMEOS)
+    for (BrowserList::const_iterator it = BrowserList::begin();
+         it != BrowserList::end(); ++it) {
+      if ((*it)->type() == Browser::TYPE_APP_PANEL) {
+        return true;
+      }
+    }
+    return false;
+#else
+    return browser->window()->IsDownloadShelfVisible();
+#endif
+  }
+
+  static void ExpectWindowCountAfterDownload(size_t expected) {
+#if defined(OS_CHROMEOS)
+    // On ChromeOS, a download panel is created to display
+    // download information, and this counts as a window.
+    expected++;
+#endif
+    EXPECT_EQ(expected, BrowserList::size());
+  }
+
  private:
   // Location of the test data.
   FilePath test_dir_;
@@ -448,13 +469,7 @@ class DownloadTest : public InProcessBrowserTest {
 // Mock responses have extension .mock-http-headers appended to the file name.
 
 // Download a file due to the associated MIME type.
-//
-// Test is believed good (non-flaky) in itself, but it
-// sometimes trips over underlying flakiness in the downloads
-// subsystem in in http://crbug.com/63237.  Until that bug is
-// fixed, this test should be considered flaky.  It's entered as
-// DISABLED since if 63237 does cause a failure, it'll be a timeout.
-IN_PROC_BROWSER_TEST_F(DownloadTest, DISABLED_DownloadMimeType) {
+IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadMimeType) {
   ASSERT_TRUE(InitialSetup(false));
   FilePath file(FILE_PATH_LITERAL("download-test1.lib"));
   GURL url(URLRequestMockHTTPJob::GetMockUrl(file));
@@ -465,8 +480,30 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DISABLED_DownloadMimeType) {
   // Check state.
   EXPECT_EQ(1, browser()->tab_count());
   CheckDownload(browser(), file, file);
-  EXPECT_TRUE(browser()->window()->IsDownloadShelfVisible());
+  EXPECT_TRUE(IsDownloadUIVisible(browser()));
 }
+
+#if defined(OS_WIN)
+// Download a file and confirm that the zone identifier (on windows)
+// is set to internet.
+IN_PROC_BROWSER_TEST_F(DownloadTest, CheckInternetZone) {
+  ASSERT_TRUE(InitialSetup(false));
+  FilePath file(FILE_PATH_LITERAL("download-test1.lib"));
+  GURL url(URLRequestMockHTTPJob::GetMockUrl(file));
+
+  // Download the file and wait.  We do not expect the Select File dialog.
+  DownloadAndWait(browser(), url, EXPECT_NO_SELECT_DIALOG);
+
+  // Check state.  Special file state must be checked before CheckDownload,
+  // as CheckDownload will delete the output file.
+  EXPECT_EQ(1, browser()->tab_count());
+  FilePath downloaded_file = GetDownloadDirectory(browser()).Append(file);
+  if (file_util::VolumeSupportsADS(downloaded_file))
+    EXPECT_TRUE(file_util::HasInternetZoneIdentifier(downloaded_file));
+  CheckDownload(browser(), file, file);
+  EXPECT_TRUE(IsDownloadUIVisible(browser()));
+}
+#endif
 
 // Put up a Select File dialog when the file is downloaded, due to its MIME
 // type.
@@ -475,7 +512,6 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DISABLED_DownloadMimeType) {
 // download directory because of http://crbug.com/62099.  No big loss; it
 // was primarily confirming DownloadsObserver wait on select file dialog
 // functionality anyway.
-// Additionally, there is Windows-specific flake, http://crbug.com/20809.
 IN_PROC_BROWSER_TEST_F(DownloadTest, DISABLED_DownloadMimeTypeSelect) {
   ASSERT_TRUE(InitialSetup(true));
   FilePath file(FILE_PATH_LITERAL("download-test1.lib"));
@@ -489,7 +525,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DISABLED_DownloadMimeTypeSelect) {
   EXPECT_EQ(1, browser()->tab_count());
   // Since we exited while the Select File dialog was visible, there should not
   // be anything in the download shelf and so it should not be visible.
-  EXPECT_FALSE(browser()->window()->IsDownloadShelfVisible());
+  EXPECT_FALSE(IsDownloadUIVisible(browser()));
 }
 
 // Access a file with a viewable mime-type, verify that a download
@@ -508,21 +544,14 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, NoDownload) {
 
   // Check state.
   EXPECT_EQ(1, browser()->tab_count());
-  EXPECT_FALSE(browser()->window()->IsDownloadShelfVisible());
+  EXPECT_FALSE(IsDownloadUIVisible(browser()));
 }
 
 // Download a 0-size file with a content-disposition header, verify that the
 // download tab opened and the file exists as the filename specified in the
 // header.  This also ensures we properly handle empty file downloads.
 // The download shelf should be visible in the current tab.
-//
-// Test is believed mostly good (non-flaky) in itself, but it
-// sometimes trips over underlying flakiness in the downloads
-// subsystem in in http://crbug.com/63237.  Until that bug is
-// fixed, this test should be considered flaky.  It's entered as
-// DISABLED since if 63237 does cause a failure, it'll be a timeout.
-// Additionally, there is Windows-specific flake, http://crbug.com/20809.
-IN_PROC_BROWSER_TEST_F(DownloadTest, DISABLED_ContentDisposition) {
+IN_PROC_BROWSER_TEST_F(DownloadTest, ContentDisposition) {
   ASSERT_TRUE(InitialSetup(false));
   FilePath file(FILE_PATH_LITERAL("download-test3.gif"));
   GURL url(URLRequestMockHTTPJob::GetMockUrl(file));
@@ -535,18 +564,14 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DISABLED_ContentDisposition) {
 
   // Check state.
   EXPECT_EQ(1, browser()->tab_count());
-  EXPECT_TRUE(browser()->window()->IsDownloadShelfVisible());
+  EXPECT_TRUE(IsDownloadUIVisible(browser()));
 }
 
+#if !defined(OS_CHROMEOS)  // Download shelf is not per-window on ChromeOS.
 // Test that the download shelf is per-window by starting a download in one
 // tab, opening a second tab, closing the shelf, going back to the first tab,
 // and checking that the shelf is closed.
-//
-// The test sometimes trips over underlying flakiness in the downloads
-// subsystem in in http://crbug.com/63237.  It's entered as
-// DISABLED since if 63237 does cause a failure, it'll be a timeout.
-// Additionally, there is Windows-specific flake, http://crbug.com/20809.
-IN_PROC_BROWSER_TEST_F(DownloadTest, DISABLED_PerWindowShelf) {
+IN_PROC_BROWSER_TEST_F(DownloadTest, PerWindowShelf) {
   ASSERT_TRUE(InitialSetup(false));
   FilePath file(FILE_PATH_LITERAL("download-test3.gif"));
   GURL url(URLRequestMockHTTPJob::GetMockUrl(file));
@@ -559,25 +584,26 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DISABLED_PerWindowShelf) {
 
   // Check state.
   EXPECT_EQ(1, browser()->tab_count());
-  EXPECT_TRUE(browser()->window()->IsDownloadShelfVisible());
+  EXPECT_TRUE(IsDownloadUIVisible(browser()));
 
   // Open a second tab and wait.
   EXPECT_NE(static_cast<TabContentsWrapper*>(NULL),
             browser()->AddSelectedTabWithURL(GURL(), PageTransition::TYPED));
   EXPECT_EQ(2, browser()->tab_count());
-  EXPECT_TRUE(browser()->window()->IsDownloadShelfVisible());
+  EXPECT_TRUE(IsDownloadUIVisible(browser()));
 
   // Hide the download shelf.
   browser()->window()->GetDownloadShelf()->Close();
-  EXPECT_FALSE(browser()->window()->IsDownloadShelfVisible());
+  EXPECT_FALSE(IsDownloadUIVisible(browser()));
 
   // Go to the first tab.
   browser()->SelectTabContentsAt(0, true);
   EXPECT_EQ(2, browser()->tab_count());
 
   // The download shelf should not be visible.
-  EXPECT_FALSE(browser()->window()->IsDownloadShelfVisible());
+  EXPECT_FALSE(IsDownloadUIVisible(browser()));
 }
+#endif  // !OS_CHROMEOS
 
 // UnknownSize and KnownSize are tests which depend on
 // URLRequestSlowDownloadJob to serve content in a certain way. Data will be
@@ -587,53 +613,35 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DISABLED_PerWindowShelf) {
 // "download-finish".  At that time, the download will finish.
 // These tests don't currently test much due to holes in |RunSizeTest()|.  See
 // comments in that routine for details.
-
-// Test is believed mostly good (non-flaky) in itself, but it
-// very occasionally trips over underlying flakiness in the downloads
-// subsystem in in http://crbug.com/63237.  Until that bug is
-// fixed, this test should be considered flaky.  It's entered as
-// DISABLED since if 63237 does cause a failure, it'll be a timeout.
-// Additionally, there is Windows-specific flake, http://crbug.com/20809.
-IN_PROC_BROWSER_TEST_F(DownloadTest, DISABLED_UnknownSize) {
+IN_PROC_BROWSER_TEST_F(DownloadTest, UnknownSize) {
   GURL url(URLRequestSlowDownloadJob::kUnknownSizeUrl);
   FilePath filename;
   net::FileURLToFilePath(url, &filename);
   filename = filename.BaseName();
-  ASSERT_TRUE(RunSizeTest(browser(),
-                          url,
-                          L"32.0 KB - " + filename.ToWStringHack(),
-                          L"100% - " + filename.ToWStringHack()));
+  ASSERT_TRUE(RunSizeTest(
+                  browser(),
+                  url,
+                  ASCIIToUTF16("32.0 KB - ") + filename.LossyDisplayName(),
+                  ASCIIToUTF16("100% - ") + filename.LossyDisplayName()));
 }
 
-// Test is believed mostly good (non-flaky) in itself, but it
-// very occasionally trips over underlying flakiness in the downloads
-// subsystem in in http://crbug.com/63237.  Until that bug is
-// fixed, this test should be considered flaky.  It's entered as
-// DISABLED since if 63237 does cause a failure, it'll be a timeout.
-// Additionally, there is Windows-specific flake, http://crbug.com/20809.
-IN_PROC_BROWSER_TEST_F(DownloadTest, DISABLED_KnownSize) {
+IN_PROC_BROWSER_TEST_F(DownloadTest, KnownSize) {
   GURL url(URLRequestSlowDownloadJob::kKnownSizeUrl);
   FilePath filename;
   net::FileURLToFilePath(url, &filename);
   filename = filename.BaseName();
-  ASSERT_TRUE(RunSizeTest(browser(),
-                          url,
-                          L"71% - " + filename.ToWStringHack(),
-                          L"100% - " + filename.ToWStringHack()));
+  ASSERT_TRUE(RunSizeTest(
+                  browser(),
+                  url,
+                  ASCIIToUTF16("71% - ") + filename.LossyDisplayName(),
+                  ASCIIToUTF16("100% - ") + filename.LossyDisplayName()));
 }
 
 // Test that when downloading an item in Incognito mode, we don't crash when
 // closing the last Incognito window (http://crbug.com/13983).
 // Also check that the download shelf is not visible after closing the
 // Incognito window.
-//
-// Test is believed mostly good (non-flaky) in itself, but it
-// sometimes trips over underlying flakiness in the downloads
-// subsystem in in http://crbug.com/63237.  Until that bug is
-// fixed, this test should be considered flaky.  It's entered as
-// DISABLED since if 63237 does cause a failure, it'll be a timeout.
-// Additionally, there is Windows-specific flake, http://crbug.com/20809.
-IN_PROC_BROWSER_TEST_F(DownloadTest, DISABLED_IncognitoDownload) {
+IN_PROC_BROWSER_TEST_F(DownloadTest, IncognitoDownload) {
   ASSERT_TRUE(InitialSetup(false));
 
   // Open an Incognito window.
@@ -652,24 +660,34 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DISABLED_IncognitoDownload) {
   DownloadAndWait(incognito, url, EXPECT_NO_SELECT_DIALOG);
 
   // We should still have 2 windows.
-  window_count = BrowserList::size();
-  EXPECT_EQ(2, window_count);
+  ExpectWindowCountAfterDownload(2);
 
   // Verify that the download shelf is showing for the Incognito window.
-  bool is_shelf_visible = incognito->window()->IsDownloadShelfVisible();
+  bool is_shelf_visible = IsDownloadUIVisible(incognito);
   EXPECT_TRUE(is_shelf_visible);
 
   // Close the Incognito window and don't crash.
   incognito->CloseWindow();
+#if !defined(OS_MACOSX)
+  // On Mac OS X, the UI window close is delayed until the outermost
+  // message loop runs.  So it isn't possible to get a BROWSER_CLOSED
+  // notification inside of a test.
   ui_test_utils::WaitForNotificationFrom(NotificationType::BROWSER_CLOSED,
                                          Source<Browser>(incognito));
 
-  window_count = BrowserList::size();
-  EXPECT_EQ(1, window_count);
+  ExpectWindowCountAfterDownload(1);
+#endif
 
   // Verify that the regular window does not have a download shelf.
-  is_shelf_visible = browser()->window()->IsDownloadShelfVisible();
+  is_shelf_visible = IsDownloadUIVisible(browser());
+
+#if defined(OS_CHROMEOS)
+  // On ChromeOS it's a popup rather than a download shelf, and it sticks
+  // around.
+  EXPECT_TRUE(is_shelf_visible);
+#else
   EXPECT_FALSE(is_shelf_visible);
+#endif
 
   CheckDownload(browser(), file, file);
 }
@@ -692,17 +710,12 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DontCloseNewTab1) {
 
   // We should have two tabs now.
   EXPECT_EQ(2, browser()->tab_count());
-  EXPECT_FALSE(browser()->window()->IsDownloadShelfVisible());
+  EXPECT_FALSE(IsDownloadUIVisible(browser()));
 }
 
 // Download a file in a background tab. Verify that the tab is closed
 // automatically, and that the download shelf is visible in the current tab.
-//
-// The test sometimes trips over underlying flakiness in the downloads
-// subsystem in http://crbug.com/63237.  It's entered as
-// DISABLED since if 63237 does cause a failure, it'll be a timeout.
-// Additionally, there is Windows-specific flake, http://crbug.com/20809.
-IN_PROC_BROWSER_TEST_F(DownloadTest, DISABLED_CloseNewTab1) {
+IN_PROC_BROWSER_TEST_F(DownloadTest, CloseNewTab1) {
   ASSERT_TRUE(InitialSetup(false));
 
   // Download a file in a new background tab and wait.  The tab is automatically
@@ -717,7 +730,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DISABLED_CloseNewTab1) {
       ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
 
   // When the download finishes, we should still have one tab.
-  EXPECT_TRUE(browser()->window()->IsDownloadShelfVisible());
+  EXPECT_TRUE(IsDownloadUIVisible(browser()));
   EXPECT_EQ(1, browser()->tab_count());
 
   CheckDownload(browser(), file, file);
@@ -730,12 +743,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DISABLED_CloseNewTab1) {
 //
 // The download_page1.html page contains an openNew() function that opens a
 // tab and then downloads download-test1.lib.
-//
-// The test sometimes trips over underlying flakiness in the downloads
-// subsystem in in http://crbug.com/63237.  It's entered as
-// DISABLED since if 63237 does cause a failure, it'll be a timeout.
-// Additionally, there is Windows-specific flake, http://crbug.com/20809.
-IN_PROC_BROWSER_TEST_F(DownloadTest, DISABLED_DontCloseNewTab2) {
+IN_PROC_BROWSER_TEST_F(DownloadTest, DontCloseNewTab2) {
   ASSERT_TRUE(InitialSetup(false));
   // Because it's an HTML link, it should open a web page rather than
   // downloading.
@@ -754,7 +762,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DISABLED_DontCloseNewTab2) {
                                  ui_test_utils::BROWSER_TEST_WAIT_FOR_TAB);
 
   // When the download finishes, we should have two tabs.
-  EXPECT_TRUE(browser()->window()->IsDownloadShelfVisible());
+  EXPECT_TRUE(IsDownloadUIVisible(browser()));
   EXPECT_EQ(2, browser()->tab_count());
 
   CheckDownload(browser(), file, file);
@@ -767,12 +775,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DISABLED_DontCloseNewTab2) {
 //
 // The download_page2.html page contains an openNew() function that opens a
 // tab.
-//
-// The test sometimes trips over underlying flakiness in the downloads
-// subsystem in in http://crbug.com/63237.  It's entered as
-// DISABLED since if 63237 does cause a failure, it'll be a timeout.
-// Additionally, there is Windows-specific flake, http://crbug.com/20809.
-IN_PROC_BROWSER_TEST_F(DownloadTest, DISABLED_DontCloseNewTab3) {
+IN_PROC_BROWSER_TEST_F(DownloadTest, DontCloseNewTab3) {
   ASSERT_TRUE(InitialSetup(false));
   // Because it's an HTML link, it should open a web page rather than
   // downloading.
@@ -801,7 +804,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DISABLED_DontCloseNewTab3) {
                                  ui_test_utils::BROWSER_TEST_NONE);
 
   // When the download finishes, we should have two tabs.
-  EXPECT_TRUE(browser()->window()->IsDownloadShelfVisible());
+  EXPECT_TRUE(IsDownloadUIVisible(browser()));
   EXPECT_EQ(2, browser()->tab_count());
 
   CheckDownload(browser(), file, file);
@@ -814,12 +817,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DISABLED_DontCloseNewTab3) {
 // The download_page3.html page contains an openNew() function that opens a
 // tab with download-test1.lib in the URL.  When the URL is determined to be
 // a download, the tab is closed automatically.
-//
-// The test sometimes trips over underlying flakiness in the downloads
-// subsystem in in http://crbug.com/63237.  It's entered as
-// DISABLED since if 63237 does cause a failure, it'll be a timeout.
-// Additionally, there is Windows-specific flake, http://crbug.com/20809.
-IN_PROC_BROWSER_TEST_F(DownloadTest, DISABLED_CloseNewTab2) {
+IN_PROC_BROWSER_TEST_F(DownloadTest, CloseNewTab2) {
   ASSERT_TRUE(InitialSetup(false));
   // Because it's an HTML link, it should open a web page rather than
   // downloading.
@@ -839,7 +837,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DISABLED_CloseNewTab2) {
                                  ui_test_utils::BROWSER_TEST_WAIT_FOR_TAB);
 
   // When the download finishes, we should still have one tab.
-  EXPECT_TRUE(browser()->window()->IsDownloadShelfVisible());
+  EXPECT_TRUE(IsDownloadUIVisible(browser()));
   EXPECT_EQ(1, browser()->tab_count());
 
   CheckDownload(browser(), file, file);
@@ -852,12 +850,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DISABLED_CloseNewTab2) {
 //
 // The download_page4.html page contains a form with download-test1.lib as the
 // action.
-//
-// The test sometimes trips over underlying flakiness in the downloads
-// subsystem in in http://crbug.com/63237.  It's entered as
-// DISABLED since if 63237 does cause a failure, it'll be a timeout.
-// Additionally, there is Windows-specific flake, http://crbug.com/20809.
-IN_PROC_BROWSER_TEST_F(DownloadTest, DISABLED_CloseNewTab3) {
+IN_PROC_BROWSER_TEST_F(DownloadTest, CloseNewTab3) {
   ASSERT_TRUE(InitialSetup(false));
   // Because it's an HTML link, it should open a web page rather than
   // downloading.
@@ -879,7 +872,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DISABLED_CloseNewTab3) {
       ui_test_utils::BROWSER_TEST_WAIT_FOR_TAB);
 
   // When the download finishes, we should still have one tab.
-  EXPECT_TRUE(browser()->window()->IsDownloadShelfVisible());
+  EXPECT_TRUE(IsDownloadUIVisible(browser()));
   EXPECT_EQ(1, browser()->tab_count());
 
   CheckDownload(browser(), file, file);
@@ -892,18 +885,14 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DISABLED_CloseNewTab3) {
 // Verify that we have 1 window, and the download shelf is not visible.
 //
 // Regression test for http://crbug.com/44454
-//
-// Test is believed mostly good (non-flaky) in itself, but it
-// sometimes trips over underlying flakiness in the downloads
-// subsystem in in http://crbug.com/63237.  Until that bug is
-// fixed, this test should be considered flaky.  It's entered as
-// DISABLED since if 63237 does cause a failure, it'll be a timeout.
-// Additionally, there is Windows-specific flake, http://crbug.com/20809.
-IN_PROC_BROWSER_TEST_F(DownloadTest, DISABLED_NewWindow) {
+IN_PROC_BROWSER_TEST_F(DownloadTest, NewWindow) {
   ASSERT_TRUE(InitialSetup(false));
   FilePath file(FILE_PATH_LITERAL("download-test1.lib"));
   GURL url(URLRequestMockHTTPJob::GetMockUrl(file));
+#if !defined(OS_MACOSX)
+  // See below.
   Browser* first_browser = browser();
+#endif
 
   // Download a file in a new window and wait.
   DownloadAndWaitWithDisposition(browser(),
@@ -914,10 +903,14 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DISABLED_NewWindow) {
 
   // When the download finishes, the download shelf SHOULD NOT be visible in
   // the first window.
-  int window_count = BrowserList::size();
-  EXPECT_EQ(2, window_count);
+  ExpectWindowCountAfterDownload(2);
   EXPECT_EQ(1, browser()->tab_count());
-  EXPECT_FALSE(browser()->window()->IsDownloadShelfVisible());
+#if defined(OS_CHROMEOS)
+  // Except on chromeos the download UI isn't window-specific.
+  EXPECT_TRUE(IsDownloadUIVisible(browser()));
+#else
+  EXPECT_FALSE(IsDownloadUIVisible(browser()));
+#endif
 
   // The download shelf SHOULD be visible in the second window.
   std::set<Browser*> original_browsers;
@@ -927,18 +920,29 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DISABLED_NewWindow) {
   ASSERT_TRUE(download_browser != NULL);
   EXPECT_NE(download_browser, browser());
   EXPECT_EQ(1, download_browser->tab_count());
-  EXPECT_TRUE(download_browser->window()->IsDownloadShelfVisible());
+  EXPECT_TRUE(IsDownloadUIVisible(download_browser));
 
   // Close the new window.
   download_browser->CloseWindow();
+#if !defined(OS_MACOSX)
+  // On Mac OS X, the UI window close is delayed until the outermost
+  // message loop runs.  So it isn't possible to get a BROWSER_CLOSED
+  // notification inside of a test.
   ui_test_utils::WaitForNotificationFrom(NotificationType::BROWSER_CLOSED,
                                          Source<Browser>(download_browser));
   EXPECT_EQ(first_browser, browser());
-  window_count = BrowserList::size();
-  EXPECT_EQ(1, window_count);
+  ExpectWindowCountAfterDownload(1);
+#endif
+
   EXPECT_EQ(1, browser()->tab_count());
-  // The download shelf should not be visible in the remaining window.
-  EXPECT_FALSE(browser()->window()->IsDownloadShelfVisible());
+#if defined(OS_CHROMEOS)
+  // On ChromeOS the popup sticks around.
+  EXPECT_TRUE(IsDownloadUIVisible(browser()));
+#else
+  // Otherwise, the download shelf should not be visible in the
+  // remaining window.
+  EXPECT_FALSE(IsDownloadUIVisible(browser()));
+#endif
 
   CheckDownload(browser(), file, file);
 }

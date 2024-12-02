@@ -8,7 +8,7 @@
 #include "base/logging.h"
 #include "base/mac/scoped_cftyperef.h"
 #include "base/sys_string_conversions.h"
-#include "gfx/rect.h"
+#include "ui/gfx/rect.h"
 
 using base::mac::ScopedCFTypeRef;
 
@@ -17,6 +17,8 @@ namespace printing {
 PdfMetafile::PdfMetafile()
     : page_is_open_(false) {
 }
+
+PdfMetafile::~PdfMetafile() {}
 
 CGContextRef PdfMetafile::Init() {
   // Ensure that Init hasn't already been called.

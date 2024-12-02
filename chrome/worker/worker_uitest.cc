@@ -7,12 +7,12 @@
 #include "base/test/test_timeouts.h"
 #include "base/threading/platform_thread.h"
 #include "chrome/app/chrome_command_ids.h"
-#include "chrome/browser/worker_host/worker_service.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/automation/browser_proxy.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/ui/ui_layout_test.h"
 #include "chrome/test/ui_test_utils.h"
+#include "content/browser/worker_host/worker_service.h"
 #include "net/test/test_server.h"
 
 namespace {
@@ -91,12 +91,16 @@ class WorkerTest : public UILayoutTest {
 #endif
 
     int cur_process_count;
-    for (int i = 0; i < 10; ++i) {
-      cur_process_count = GetBrowserProcessCount();
+    for (int i = 0; i < 100; ++i) {
+      cur_process_count = 0;
+      if (!GetBrowserProcessCount(&cur_process_count))
+        return false;
       if (cur_process_count == number_of_processes)
         return true;
 
-      base::PlatformThread::Sleep(TestTimeouts::action_timeout_ms() / 10);
+      // Sometimes the worker processes can take a while to shut down on the
+      // bots, so use a longer timeout period to avoid spurious failures.
+      base::PlatformThread::Sleep(TestTimeouts::action_max_timeout_ms() / 100);
     }
 
     EXPECT_EQ(number_of_processes, cur_process_count);
@@ -200,6 +204,13 @@ TEST_F(WorkerTest, SingleSharedWorker) {
 
 TEST_F(WorkerTest, MultipleSharedWorkers) {
   RunTest(FilePath(FILE_PATH_LITERAL("multi_worker.html?shared=true")));
+}
+
+TEST_F(WorkerTest, TerminateQueuedWorkers) {
+  ASSERT_TRUE(WaitForProcessCountToBe(1, 0));
+  RunTest(FilePath(FILE_PATH_LITERAL("terminate_queued_workers.html")));
+  // Make sure all workers exit.
+  ASSERT_TRUE(WaitForProcessCountToBe(1, 0));
 }
 
 #if defined(OS_LINUX)
@@ -307,7 +318,8 @@ TEST_F(WorkerTest, WorkerLocation) {
   RunWorkerFastLayoutTest("worker-location.html");
 }
 
-TEST_F(WorkerTest, WorkerMapGc) {
+// Flaky, http://crbug.com/71518.
+TEST_F(WorkerTest, FLAKY_WorkerMapGc) {
   RunWorkerFastLayoutTest("wrapper-map-gc.html");
 }
 
@@ -612,7 +624,8 @@ TEST_F(WorkerTest, FLAKY_WorkerClose) {
   ASSERT_TRUE(WaitForProcessCountToBe(1, 0));
 }
 
-TEST_F(WorkerTest, QueuedSharedWorkerShutdown) {
+// Flaky, http://crbug.com/70861.
+TEST_F(WorkerTest, FLAKY_QueuedSharedWorkerShutdown) {
   // Tests to make sure that queued shared workers are started up when
   // shared workers shut down.
   int max_workers_per_tab = WorkerService::kMaxWorkersPerTabWhenSeparate;

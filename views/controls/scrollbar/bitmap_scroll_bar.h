@@ -96,7 +96,7 @@ class BitmapScrollBar : public ScrollBar,
 
   // View overrides:
   virtual gfx::Size GetPreferredSize();
-  virtual void Paint(gfx::Canvas* canvas);
+  virtual void OnPaint(gfx::Canvas* canvas);
   virtual void Layout();
   virtual bool OnMousePressed(const MouseEvent& event);
   virtual void OnMouseReleased(const MouseEvent& event, bool canceled);
@@ -114,9 +114,9 @@ class BitmapScrollBar : public ScrollBar,
   virtual int GetPosition() const;
 
   // ContextMenuController overrides.
-  virtual void ShowContextMenu(View* source,
-                               const gfx::Point& p,
-                               bool is_mouse_gesture);
+  virtual void ShowContextMenuForView(View* source,
+                                      const gfx::Point& p,
+                                      bool is_mouse_gesture);
 
   // Menu::Delegate overrides:
   virtual std::wstring GetLabel(int id) const;

@@ -43,6 +43,7 @@ class ClientContext;
 class InputHandler;
 class JingleThread;
 class PepperView;
+class PepperViewProxy;
 class RectangleUpdateDecoder;
 
 struct ClientConfig;
@@ -61,33 +62,48 @@ class ChromotingInstance : public pp::Instance {
 
   virtual bool Init(uint32_t argc, const char* argn[], const char* argv[]);
   virtual void Connect(const ClientConfig& config);
+  virtual void ConnectSandboxed(const std::string& your_jid,
+                                const std::string& host_jid);
   virtual bool HandleInputEvent(const PP_InputEvent& event);
   virtual void Disconnect();
   virtual pp::Var GetInstanceObject();
   virtual void ViewChanged(const pp::Rect& position, const pp::Rect& clip);
 
-  virtual bool CurrentlyOnPluginThread() const;
-
   // Convenience wrapper to get the ChromotingScriptableObject.
   ChromotingScriptableObject* GetScriptableObject();
+
+  // Called by ChromotingScriptableObject to provide username and password.
+  void SubmitLoginInfo(const std::string& username,
+                       const std::string& password);
+
+  void LogDebugInfo(const std::string& info);
 
  private:
   FRIEND_TEST_ALL_PREFIXES(ChromotingInstanceTest, TestCaseSetup);
 
-  // Since we're an internal plugin, we can just grab the message loop during
-  // init to figure out which thread we're on.  This should only be used to
-  // sanity check which thread we're executing on. Do not post task here!
-  // Instead, use PPB_Core:CallOnMainThread() in the pepper api.
-  //
-  // TODO(ajwong): Think if there is a better way to safeguard this.
-  MessageLoop* pepper_main_loop_dont_post_to_me_;
+  bool initialized_;
 
   ClientContext context_;
   scoped_ptr<protocol::ConnectionToHost> host_connection_;
   scoped_ptr<PepperView> view_;
-  scoped_ptr<RectangleUpdateDecoder> rectangle_decoder_;
+
+  // PepperViewProxy is refcounted and used to interface between chromoting
+  // objects and PepperView and perform thread switching. It wraps around
+  // |view_| and receives method calls on chromoting threads. These method
+  // calls are then delegates on the pepper thread. During destruction of
+  // ChromotingInstance we need to detach PepperViewProxy from PepperView since
+  // both ChromotingInstance and PepperView are destroyed and there will be
+  // outstanding tasks on the pepper message loo.
+  scoped_refptr<PepperViewProxy> view_proxy_;
+  scoped_refptr<RectangleUpdateDecoder> rectangle_decoder_;
   scoped_ptr<InputHandler> input_handler_;
   scoped_ptr<ChromotingClient> client_;
+
+  // XmppProxy is a refcounted interface used to perform thread-switching and
+  // detaching between objects whose lifetimes are controlled by pepper, and
+  // jingle_glue objects. This is used when if we start a sandboxed jingle
+  // connection.
+  scoped_refptr<PepperXmppProxy> xmpp_proxy_;
 
   // JavaScript interface to control this instance.
   // This wraps a ChromotingScriptableObject in a pp::Var.

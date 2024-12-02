@@ -40,19 +40,15 @@
 #endif
 #include "base/ref_counted.h"
 #include "base/weak_ptr.h"
-#include "gfx/native_widget_types.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebNavigationPolicy.h"
-#include "webkit/tools/test_shell/event_sending_controller.h"
+#include "ui/gfx/native_widget_types.h"
 #include "webkit/tools/test_shell/layout_test_controller.h"
-#include "webkit/tools/test_shell/plain_text_controller.h"
-#include "webkit/tools/test_shell/text_input_controller.h"
 #include "webkit/tools/test_shell/webview_host.h"
 #include "webkit/tools/test_shell/webwidget_host.h"
 
 typedef std::list<gfx::NativeWindow> WindowList;
 
 struct WebPreferences;
-class AccessibilityController;
 class GURL;
 class TestNavigationEntry;
 class TestNavigationController;
@@ -157,9 +153,6 @@ public:
     // We use this to avoid relying on Windows focus during layout test mode.
     void SetFocus(WebWidgetHost* host, bool enable);
 
-    AccessibilityController* accessibility_controller() const {
-      return accessibility_controller_.get();
-    }
     LayoutTestController* layout_test_controller() {
       return layout_test_controller_.get();
     }
@@ -167,9 +160,6 @@ public:
     TestWebViewDelegate* popup_delegate() { return popup_delegate_.get(); }
     TestNavigationController* navigation_controller() {
       return navigation_controller_.get();
-    }
-    EventSendingController* event_sending_controller() {
-      return event_sending_controller_.get();
     }
     TestNotificationPresenter* notification_presenter() {
       return notification_presenter_.get();
@@ -184,26 +174,6 @@ public:
 
     // Passes options from LayoutTestController through to the delegate (or
     // any other caller).
-    bool ShouldDumpEditingCallbacks() {
-      return layout_test_mode_ &&
-             layout_test_controller_->ShouldDumpEditingCallbacks();
-    }
-    bool ShouldDumpFrameLoadCallbacks() {
-      return layout_test_mode_ && (test_is_preparing_ || test_is_pending_) &&
-             layout_test_controller_->ShouldDumpFrameLoadCallbacks();
-    }
-    bool ShouldDumpResourceLoadCallbacks() {
-      return layout_test_mode_ && (test_is_preparing_ || test_is_pending_) &&
-             layout_test_controller_->ShouldDumpResourceLoadCallbacks();
-    }
-    bool ShouldDumpResourceResponseMIMETypes() {
-      return layout_test_mode_ && (test_is_preparing_ || test_is_pending_) &&
-             layout_test_controller_->ShouldDumpResourceResponseMIMETypes();
-    }
-    bool ShouldDumpTitleChanges() {
-      return layout_test_mode_ &&
-             layout_test_controller_->ShouldDumpTitleChanges();
-    }
     bool AcceptsEditing() {
       return layout_test_controller_->AcceptsEditing();
     }
@@ -252,12 +222,6 @@ public:
     // window JavaScript objects so they can be accessed by layout tests.
     virtual void BindJSObjectsToWindow(WebKit::WebFrame* frame);
 
-    // Runs a layout test.  Loads a single file (specified in params.test_url)
-    // into the first available window, then dumps the requested text
-    // representation to stdout. Returns false if the test cannot be run
-    // because no windows are open.
-    static bool RunFileTest(const TestParams& params);
-
     // Writes the back-forward list data for every open window into result.
     // Should call DumpBackForwardListOfWindow on each TestShell window.
     static void DumpAllBackForwardLists(string16* result);
@@ -267,16 +231,6 @@ public:
 
     // Writes the back-forward list data for this test shell into result.
     void DumpBackForwardList(string16* result);
-
-    // Dumps the output from given test as text and/or image depending on
-    // the flags set.
-    static void Dump(TestShell* shell);
-
-    // Writes the image captured from the given web frame to the given file.
-    // The returned string is the ASCII-ized MD5 sum of the image.
-    static std::string DumpImage(skia::PlatformCanvas* canvas,
-                                 const FilePath& path,
-                                 const std::string& pixel_hash);
 
     static void ResetWebPreferences();
 
@@ -324,13 +278,6 @@ public:
     static std::string GetJSFlagsForLoad(size_t load) {
       if (load >= js_flags_.size()) return "";
       return js_flags_[load];
-    }
-
-    // Set whether to dump when the loaded page has finished processing. This is
-    // used with multiple load testing where normally we only want to have the
-    // output from the last load.
-    static void SetDumpWhenFinished(bool dump_when_finished) {
-      dump_when_finished_ = dump_when_finished;
     }
 
 #if defined(OS_WIN)
@@ -440,11 +387,7 @@ private:
     // Default timeout in ms for file page loads when in layout test mode.
     static int file_test_timeout_ms_;
 
-    scoped_ptr<AccessibilityController> accessibility_controller_;
     scoped_ptr<LayoutTestController> layout_test_controller_;
-    scoped_ptr<EventSendingController> event_sending_controller_;
-    scoped_ptr<PlainTextController> plain_text_controller_;
-    scoped_ptr<TextInputController> text_input_controller_;
     scoped_ptr<TestNavigationController> navigation_controller_;
     scoped_ptr<TestNotificationPresenter> notification_presenter_;
 
@@ -475,9 +418,6 @@ private:
     // a string (e.g. "--xxx --yyy"). Each flag set is used for separate loads
     // of each URL.
     static std::vector<std::string> js_flags_;
-
-    // True if a test shell dump should be made when the test is finished.
-    static bool dump_when_finished_;
 
     // True if we're testing the accelerated canvas 2d path.
     static bool accelerated_2d_canvas_enabled_;

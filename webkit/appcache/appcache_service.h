@@ -27,6 +27,10 @@ namespace base {
 class MessageLoopProxy;
 }
 
+namespace quota {
+class SpecialStoragePolicy;
+}
+
 namespace appcache {
 
 class AppCacheBackendImpl;
@@ -57,6 +61,11 @@ class AppCacheService {
     if (storage_.get())
       storage_->PurgeMemory();
   }
+
+  // Determines if a request for 'url' can be satisfied while offline.
+  // This method always completes asynchronously.
+  void CanHandleMainResourceOffline(const GURL& url,
+                                    net::CompletionCallback* callback);
 
   // Populates 'collection' with info about all of the appcaches stored
   // within the service, 'callback' is invoked upon completion. The service
@@ -90,6 +99,11 @@ class AppCacheService {
     appcache_policy_ = policy;
   }
 
+  quota::SpecialStoragePolicy* special_storage_policy() const {
+    return special_storage_policy_.get();
+  }
+  void set_special_storage_policy(quota::SpecialStoragePolicy* policy);
+
   // Each child process in chrome uses a distinct backend instance.
   // See chrome/browser/AppCacheDispatcherHost.
   void RegisterBackend(AppCacheBackendImpl* backend_impl);
@@ -103,6 +117,7 @@ class AppCacheService {
 
  protected:
   class AsyncHelper;
+  class CanHandleOfflineHelper;
   class DeleteHelper;
   class GetInfoHelper;
 
@@ -111,6 +126,7 @@ class AppCacheService {
 
   AppCachePolicy* appcache_policy_;
   scoped_ptr<AppCacheStorage> storage_;
+  scoped_refptr<quota::SpecialStoragePolicy> special_storage_policy_;
   PendingAsyncHelpers pending_helpers_;
   BackendMap backends_;  // One 'backend' per child process.
   // Context for use during cache updates.

@@ -8,7 +8,10 @@
 #include "base/string16.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
+#include "chrome/browser/chromeos/login/background_view.h"
+#include "chrome/browser/chromeos/login/helper.h"
 #include "chrome/browser/chromeos/login/help_app_launcher.h"
+#include "chrome/browser/chromeos/login/login_utils.h"
 #include "chrome/browser/chromeos/login/network_selection_view.h"
 #include "chrome/browser/chromeos/login/screen_observer.h"
 #include "grit/chromium_strings.h"
@@ -100,8 +103,10 @@ NetworkSelectionView* NetworkScreen::AllocateView() {
 
 void NetworkScreen::OnHelpLinkActivated() {
   ClearErrors();
-  if (!help_app_.get())
-    help_app_.reset(new HelpAppLauncher(view()->GetNativeWindow()));
+  if (!help_app_.get()) {
+    help_app_ = new HelpAppLauncher(
+        LoginUtils::Get()->GetBackgroundView()->GetNativeWindow());
+  }
   help_app_->ShowHelpTopic(HelpAppLauncher::HELP_CONNECTIVITY);
 }
 
@@ -174,20 +179,11 @@ void NetworkScreen::UpdateStatus(NetworkLibrary* network) {
   if (network->Connected())
     ClearErrors();
 
-  if (network->ethernet_connected()) {
-    StopWaitingForConnection(
-        l10n_util::GetStringUTF16(IDS_STATUSBAR_NETWORK_DEVICE_ETHERNET));
-  } else if (network->wifi_connected()) {
-    StopWaitingForConnection(ASCIIToUTF16(network->wifi_network()->name()));
-  } else if (network->cellular_connected()) {
-    StopWaitingForConnection(ASCIIToUTF16(network->cellular_network()->name()));
-  } else if (network->ethernet_connecting()) {
-    WaitForConnection(
-        l10n_util::GetStringUTF16(IDS_STATUSBAR_NETWORK_DEVICE_ETHERNET));
-  } else if (network->wifi_connecting()) {
-    WaitForConnection(ASCIIToUTF16(network->wifi_network()->name()));
-  } else if (network->cellular_connecting()) {
-    WaitForConnection(ASCIIToUTF16(network->cellular_network()->name()));
+  string16 network_name = GetCurrentNetworkName(network);
+  if (network->Connected()) {
+    StopWaitingForConnection(network_name);
+  } else if (network->Connecting()) {
+    WaitForConnection(network_name);
   } else {
     StopWaitingForConnection(network_id_);
   }

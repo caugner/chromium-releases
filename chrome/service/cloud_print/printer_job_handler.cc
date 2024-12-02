@@ -65,8 +65,13 @@ bool PrinterJobHandler::Initialize() {
     printer_watcher_->StartWatching(this);
     CheckForJobs(kJobFetchReasonStartup);
   } else {
-    // This printer does not exist any more. Delete it from the server.
-    OnPrinterDeleted();
+    // This printer does not exist any more. Check if we should delete it from
+    // the server.
+    bool delete_from_server = false;
+    delegate_->OnPrinterNotFound(printer_info_.printer_name,
+                                 &delete_from_server);
+    if (delete_from_server)
+      OnPrinterDeleted();
   }
   return true;
 }
@@ -104,7 +109,10 @@ void PrinterJobHandler::Start() {
         request_->StartGetRequest(
             CloudPrintHelpers::GetUrlForPrinterDelete(
                 cloud_print_server_url_, printer_info_cloud_.printer_id),
-            this, auth_token_, kCloudPrintAPIMaxRetryCount);
+            this,
+            auth_token_,
+            kCloudPrintAPIMaxRetryCount,
+            std::string());
       }
       if (!task_in_progress_ && printer_update_pending_) {
         printer_update_pending_ = false;
@@ -120,7 +128,10 @@ void PrinterJobHandler::Start() {
             CloudPrintHelpers::GetUrlForJobFetch(
                 cloud_print_server_url_, printer_info_cloud_.printer_id,
                 job_fetch_reason_),
-            this, auth_token_, kCloudPrintAPIMaxRetryCount);
+            this,
+            auth_token_,
+            kCloudPrintAPIMaxRetryCount,
+            std::string());
         last_job_fetch_time_ = base::TimeTicks::Now();
         VLOG(1) << "Last job fetch time for printer "
                 << printer_info_.printer_name.c_str() << " is "
@@ -249,7 +260,12 @@ void PrinterJobHandler::OnReceivePrinterCaps(
     request_->StartPostRequest(
         CloudPrintHelpers::GetUrlForPrinterUpdate(
             cloud_print_server_url_, printer_info_cloud_.printer_id),
-        this, auth_token_, kCloudPrintAPIMaxRetryCount, mime_type, post_data);
+        this,
+        auth_token_,
+        kCloudPrintAPIMaxRetryCount,
+        mime_type,
+        post_data,
+        std::string());
   } else {
     // We are done here. Go to the Stop state
     MessageLoop::current()->PostTask(
@@ -403,7 +419,8 @@ PrinterJobHandler::HandleJobMetadataResponse(
         request_->StartGetRequest(GURL(print_ticket_url.c_str()),
                                   this,
                                   auth_token_,
-                                  kCloudPrintAPIMaxRetryCount);
+                                  kCloudPrintAPIMaxRetryCount,
+                                  std::string());
       }
     }
   }
@@ -424,10 +441,13 @@ PrinterJobHandler::HandlePrintTicketResponse(const URLFetcher* source,
     job_details_.print_ticket_ = data;
     SetNextDataHandler(&PrinterJobHandler::HandlePrintDataResponse);
     request_ = new CloudPrintURLFetcher;
+    std::string accept_headers = "Accept: ";
+    accept_headers += print_system_->GetSupportedMimeTypes();
     request_->StartGetRequest(GURL(print_data_url_.c_str()),
                               this,
                               auth_token_,
-                              kJobDataMaxRetryCount);
+                              kJobDataMaxRetryCount,
+                              accept_headers);
   } else {
     // The print ticket was not valid. We are done here.
     FailedFetchingJobData();
@@ -575,7 +595,8 @@ void PrinterJobHandler::UpdateJobStatus(cloud_print::PrintJobStatus status,
                                                       status),
           this,
           auth_token_,
-          kCloudPrintAPIMaxRetryCount);
+          kCloudPrintAPIMaxRetryCount,
+          std::string());
     }
   }
 }

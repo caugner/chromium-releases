@@ -13,10 +13,10 @@
 #include "base/path_service.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "gfx/codec/png_codec.h"
 #include "skia/ext/vector_canvas.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/effects/SkDashPathEffect.h"
+#include "ui/gfx/codec/png_codec.h"
 
 namespace skia {
 
@@ -234,10 +234,10 @@ class ImageTest : public testing::Test {
                           AppendASCII(test_info.name());
 
     // Hack for a quick lowercase. We assume all the tests names are ASCII.
-    std::string tmp(WideToASCII(test_dir_.ToWStringHack()));
+    FilePath::StringType tmp(test_dir_.value());
     for (size_t i = 0; i < tmp.size(); ++i)
       tmp[i] = base::ToLowerASCII(tmp[i]);
-    test_dir_ = FilePath::FromWStringHack(ASCIIToWide(tmp));
+    test_dir_ = FilePath(tmp);
 
     if (action_ == GENERATE) {
       // Make sure the directory exist.

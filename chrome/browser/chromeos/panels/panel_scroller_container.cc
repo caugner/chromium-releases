@@ -4,14 +4,14 @@
 
 #include "chrome/browser/chromeos/panels/panel_scroller_container.h"
 
-#include "gfx/canvas.h"
+#include "ui/gfx/canvas.h"
 
 PanelScrollerContainer::PanelScrollerContainer(PanelScroller* scroller,
                                                views::View* contents)
     : views::View(),
       scroller_(scroller),
       contents_(contents) {
-  AddChildView(0, contents_);
+  AddChildViewAt(contents_, 0);
   // TODO(brettw) figure out memory management.
 }
 
@@ -25,6 +25,6 @@ gfx::Size PanelScrollerContainer::GetPreferredSize() {
 void PanelScrollerContainer::Layout() {
 }
 
-void PanelScrollerContainer::Paint(gfx::Canvas* canvas) {
+void PanelScrollerContainer::OnPaint(gfx::Canvas* canvas) {
   canvas->DrawLineInt(0xFF000080, 0, 0, size().width(), size().height());
 }

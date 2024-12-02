@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 #include <gtk/gtk.h>
-#include "views/event.h"
+#include "views/events/event.h"
 #include "views/widget/gtk_views_window.h"
 #include "views/focus/focus_manager.h"
 
@@ -18,7 +18,7 @@ static void gtk_views_window_move_focus(GtkWindow* window,
   if (focus_manager) {
     GdkEvent* key = gtk_get_current_event();
     if (key && key->type == GDK_KEY_PRESS) {
-      views::KeyEvent key_event(reinterpret_cast<GdkEventKey*>(key));
+      views::KeyEvent key_event(key);
       focus_manager->OnKeyEvent(key_event);
     }
   } else if (GTK_WINDOW_CLASS(gtk_views_window_parent_class)->move_focus) {

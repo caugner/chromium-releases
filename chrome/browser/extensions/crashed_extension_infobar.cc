@@ -7,7 +7,6 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/common/extensions/extension.h"
-#include "grit/browser_resources.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -50,7 +49,7 @@ CrashedExtensionInfoBarDelegate*
 
 string16 CrashedExtensionInfoBarDelegate::GetMessageText() const {
   return l10n_util::GetStringFUTF16(IDS_EXTENSION_CRASHED_INFOBAR_MESSAGE,
-      UTF8ToUTF16(extension_name_));
+                                    UTF8ToUTF16(extension_name_));
 }
 
 int CrashedExtensionInfoBarDelegate::GetButtons() const {
@@ -61,7 +60,7 @@ string16 CrashedExtensionInfoBarDelegate::GetButtonLabel(
     InfoBarButton button) const {
   DCHECK_EQ(BUTTON_OK, button);
   return l10n_util::GetStringUTF16(
-      IDS_EXTENSION_CRASHED_INFOBAR_RESTART_BUTTON);
+      IDS_EXTENSION_CRASHED_INFOBAR_RELOAD_BUTTON);
 }
 
 bool CrashedExtensionInfoBarDelegate::Accept() {

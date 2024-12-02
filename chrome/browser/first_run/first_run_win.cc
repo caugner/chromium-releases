@@ -25,6 +25,7 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_updater.h"
 #include "chrome/browser/importer/importer.h"
+#include "chrome/browser/importer/importer_progress_dialog.h"
 #include "chrome/browser/metrics/user_metrics.h"
 #include "chrome/browser/process_singleton.h"
 #include "chrome/browser/profiles/profile.h"
@@ -50,8 +51,8 @@
 #include "views/controls/image_view.h"
 #include "views/controls/link.h"
 #include "views/focus/accelerator_handler.h"
-#include "views/grid_layout.h"
-#include "views/standard_layout.h"
+#include "views/layout/grid_layout.h"
+#include "views/layout/layout_constants.h"
 #include "views/widget/root_view.h"
 #include "views/widget/widget_win.h"
 #include "views/window/window.h"
@@ -87,43 +88,6 @@ bool InvokeGoogleUpdateForRename() {
     }
   }
   return false;
-}
-
-bool LaunchSetupWithParam(const std::string& param, const std::wstring& value,
-                          int* ret_code) {
-  FilePath exe_path;
-  if (!PathService::Get(base::DIR_MODULE, &exe_path))
-    return false;
-  exe_path = exe_path.Append(installer::kInstallerDir);
-  exe_path = exe_path.Append(installer::kSetupExe);
-  base::ProcessHandle ph;
-  CommandLine cl(exe_path);
-  cl.AppendSwitchNative(param, value);
-
-  CommandLine* browser_command_line = CommandLine::ForCurrentProcess();
-  if (browser_command_line->HasSwitch(switches::kChromeFrame)) {
-    cl.AppendSwitch(switches::kChromeFrame);
-  }
-
-  if (!base::LaunchApp(cl, false, false, &ph))
-    return false;
-  DWORD wr = ::WaitForSingleObject(ph, INFINITE);
-  if (wr != WAIT_OBJECT_0)
-    return false;
-  return (TRUE == ::GetExitCodeProcess(ph, reinterpret_cast<DWORD*>(ret_code)));
-}
-
-bool WriteEULAtoTempFile(FilePath* eula_path) {
-  base::StringPiece terms =
-      ResourceBundle::GetSharedInstance().GetRawDataResource(IDR_TERMS_HTML);
-  if (terms.empty())
-    return false;
-  FILE *file = file_util::CreateAndOpenTemporaryFile(eula_path);
-  if (!file)
-    return false;
-  bool good = fwrite(terms.data(), terms.size(), 1, file) == 1;
-  fclose(file);
-  return good;
 }
 
 // Helper class that performs delayed first-run tasks that need more of the
@@ -524,10 +488,11 @@ bool FirstRun::ImportSettings(Profile* profile, int browser_type,
 // static
 bool FirstRun::ImportSettings(Profile* profile,
                               scoped_refptr<ImporterHost> importer_host,
+                              scoped_refptr<ImporterList> importer_list,
                               int items_to_import) {
   return ImportSettings(
       profile,
-      importer_host->GetSourceProfileInfoAt(0).browser_type,
+      importer_list->GetSourceProfileInfoAt(0).browser_type,
       items_to_import,
       FilePath(), false, NULL);
 }
@@ -548,24 +513,27 @@ int FirstRun::ImportFromBrowser(Profile* profile,
     NOTREACHED();
     return false;
   }
-  scoped_refptr<ImporterHost> importer_host = new ImporterHost();
-  FirstRunImportObserver observer;
+  scoped_refptr<ImporterHost> importer_host(new ImporterHost);
+  FirstRunImportObserver importer_observer;
+
+  scoped_refptr<ImporterList> importer_list(new ImporterList);
+  importer_list->DetectSourceProfilesHack();
 
   // If |skip_first_run_ui|, we run in headless mode.  This means that if
   // there is user action required the import is automatically canceled.
   if (skip_first_run_ui > 0)
     importer_host->set_headless();
 
-  StartImportingWithUI(
+  importer::ShowImportProgressDialog(
       parent_window,
       static_cast<uint16>(items_to_import),
       importer_host,
-      importer_host->GetSourceProfileInfoForBrowserType(browser_type),
+      &importer_observer,
+      importer_list->GetSourceProfileInfoForBrowserType(browser_type),
       profile,
-      &observer,
       true);
-  observer.RunLoop();
-  return observer.import_result();
+  importer_observer.RunLoop();
+  return importer_observer.import_result();
 }
 
 // static
@@ -617,7 +585,7 @@ class TryChromeDialog : public views::ButtonListener,
   // Shows the modal dialog asking the user to try chrome. Note that the dialog
   // has no parent and it will position itself in a lower corner of the screen.
   // The dialog does not steal focus and does not have an entry in the taskbar.
-  Upgrade::TryResult ShowModal() {
+  Upgrade::TryResult ShowModal(ProcessSingleton* process_singleton) {
     using views::GridLayout;
     ResourceBundle& rb = ResourceBundle::GetSharedInstance();
 
@@ -632,6 +600,7 @@ class TryChromeDialog : public views::ButtonListener,
       NOTREACHED();
       return Upgrade::TD_DIALOG_ERROR;
     }
+
     popup->set_delete_on_destroy(true);
     popup->set_window_style(WS_POPUP | WS_CLIPCHILDREN);
     popup->set_window_ex_style(WS_EX_TOOLWINDOW);
@@ -655,7 +624,7 @@ class TryChromeDialog : public views::ButtonListener,
     columns->AddColumn(GridLayout::LEADING, GridLayout::LEADING, 0,
                        GridLayout::FIXED, icon_size.width(),
                        icon_size.height());
-    columns->AddPaddingColumn(0, kRelatedControlHorizontalSpacing);
+    columns->AddPaddingColumn(0, views::kRelatedControlHorizontalSpacing);
     columns->AddColumn(GridLayout::FILL, GridLayout::FILL, 1,
                        GridLayout::USE_PREF, 0, 0);
     columns->AddColumn(GridLayout::TRAILING, GridLayout::FILL, 1,
@@ -663,28 +632,28 @@ class TryChromeDialog : public views::ButtonListener,
     // Second row: [pad][pad][radio 1].
     columns = layout->AddColumnSet(1);
     columns->AddPaddingColumn(0, icon_size.width());
-    columns->AddPaddingColumn(0, kRelatedControlHorizontalSpacing);
+    columns->AddPaddingColumn(0, views::kRelatedControlHorizontalSpacing);
     columns->AddColumn(GridLayout::LEADING, GridLayout::FILL, 1,
                        GridLayout::USE_PREF, 0, 0);
     // Third row: [pad][pad][radio 2].
     columns = layout->AddColumnSet(2);
     columns->AddPaddingColumn(0, icon_size.width());
-    columns->AddPaddingColumn(0, kRelatedControlHorizontalSpacing);
+    columns->AddPaddingColumn(0, views::kRelatedControlHorizontalSpacing);
     columns->AddColumn(GridLayout::LEADING, GridLayout::FILL, 1,
                        GridLayout::USE_PREF, 0, 0);
     // Fourth row: [pad][pad][button][pad][button].
     columns = layout->AddColumnSet(3);
     columns->AddPaddingColumn(0, icon_size.width());
-    columns->AddPaddingColumn(0, kRelatedControlHorizontalSpacing);
+    columns->AddPaddingColumn(0, views::kRelatedControlHorizontalSpacing);
     columns->AddColumn(GridLayout::LEADING, GridLayout::FILL, 0,
                        GridLayout::USE_PREF, 0, 0);
-    columns->AddPaddingColumn(0, kRelatedButtonHSpacing);
+    columns->AddPaddingColumn(0, views::kRelatedButtonHSpacing);
     columns->AddColumn(GridLayout::LEADING, GridLayout::FILL, 0,
                        GridLayout::USE_PREF, 0, 0);
     // Fifth row: [pad][pad][link].
     columns = layout->AddColumnSet(4);
     columns->AddPaddingColumn(0, icon_size.width());
-    columns->AddPaddingColumn(0, kRelatedControlHorizontalSpacing);
+    columns->AddPaddingColumn(0, views::kRelatedControlHorizontalSpacing);
     columns->AddColumn(GridLayout::LEADING, GridLayout::FILL, 1,
                        GridLayout::USE_PREF, 0, 0);
     // First row views.
@@ -762,10 +731,14 @@ class TryChromeDialog : public views::ButtonListener,
     // Carve the toast shape into the window.
     SetToastRegion(popup->GetNativeView(),
                    preferred.width(), preferred.height());
-    // Time to show the window in a modal loop.
     popup_ = popup;
+
+    // Time to show the window in a modal loop. We don't want this chrome
+    // instance trying to serve WM_COPYDATA requests, as we'll surely crash.
+    process_singleton->Lock(popup->GetNativeView());
     popup_->Show();
     MessageLoop::current()->Run();
+    process_singleton->Unlock();
     return result_;
   }
 
@@ -854,12 +827,14 @@ class TryChromeDialog : public views::ButtonListener,
 
 }  // namespace
 
-Upgrade::TryResult Upgrade::ShowTryChromeDialog(size_t version) {
+Upgrade::TryResult Upgrade::ShowTryChromeDialog(
+    size_t version,
+    ProcessSingleton* process_singleton) {
   if (version > 10000) {
     // This is a test value. We want to make sure we exercise
     // returning this early. See EarlyReturnTest test harness.
     return Upgrade::TD_NOT_NOW;
   }
   TryChromeDialog td(version);
-  return td.ShowModal();
+  return td.ShowModal(process_singleton);
 }

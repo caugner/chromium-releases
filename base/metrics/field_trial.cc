@@ -41,6 +41,7 @@ FieldTrial::FieldTrial(const std::string& name,
     accumulated_group_probability_(0),
     next_group_number_(kDefaultGroupNumber+1),
     group_(kNotFinalized) {
+  DCHECK_GT(total_probability, 0);
   DCHECK(!default_group_name_.empty());
   FieldTrialList::Register(this);
 
@@ -53,7 +54,7 @@ FieldTrial::FieldTrial(const std::string& name,
   base::Time::Exploded exploded;
   exploded.year = year;
   exploded.month = month;
-  exploded.day_of_week = 0;  // Should be unusued.
+  exploded.day_of_week = 0;  // Should be unused.
   exploded.day_of_month = day_of_month;
   exploded.hour = 0;
   exploded.minute = 0;
@@ -114,6 +115,8 @@ void FieldTrial::EnableBenchmarking() {
   enable_benchmarking_ = true;
 }
 
+FieldTrial::~FieldTrial() {}
+
 // static
 Time FieldTrial::GetBuildTime() {
   Time integral_build_time;
@@ -123,8 +126,6 @@ Time FieldTrial::GetBuildTime() {
   DCHECK(result);
   return integral_build_time;
 }
-
-FieldTrial::~FieldTrial() {}
 
 //------------------------------------------------------------------------------
 // FieldTrialList methods and members.

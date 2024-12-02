@@ -35,10 +35,27 @@ PP_Bool SetFullscreen(PP_Instance instance, PP_Bool fullscreen) {
   return result;
 }
 
-const PPB_Fullscreen_Dev ppb_fullscreen = {
+PP_Bool GetScreenSize(PP_Instance instance, PP_Size* size) {
+  PluginDispatcher* dispatcher = PluginDispatcher::GetForInstance(instance);
+  if (!dispatcher)
+    return PP_FALSE;
+
+  PP_Bool result = PP_FALSE;
+  dispatcher->Send(new PpapiHostMsg_PPBFullscreen_GetScreenSize(
+      INTERFACE_ID_PPB_FULLSCREEN, instance, &result, size));
+  return result;
+}
+
+const PPB_Fullscreen_Dev fullscreen_interface = {
   &IsFullscreen,
-  &SetFullscreen
+  &SetFullscreen,
+  &GetScreenSize
 };
+
+InterfaceProxy* CreateFullscreenProxy(Dispatcher* dispatcher,
+                                      const void* target_interface) {
+  return new PPB_Fullscreen_Proxy(dispatcher, target_interface);
+}
 
 }  // namespace
 
@@ -50,12 +67,16 @@ PPB_Fullscreen_Proxy::PPB_Fullscreen_Proxy(Dispatcher* dispatcher,
 PPB_Fullscreen_Proxy::~PPB_Fullscreen_Proxy() {
 }
 
-const void* PPB_Fullscreen_Proxy::GetSourceInterface() const {
-  return &ppb_fullscreen;
-}
-
-InterfaceID PPB_Fullscreen_Proxy::GetInterfaceId() const {
-  return INTERFACE_ID_PPB_FULLSCREEN;
+// static
+const InterfaceProxy::Info* PPB_Fullscreen_Proxy::GetInfo() {
+  static const Info info = {
+    &fullscreen_interface,
+    PPB_FULLSCREEN_DEV_INTERFACE,
+    INTERFACE_ID_PPB_FULLSCREEN,
+    false,
+    &CreateFullscreenProxy,
+  };
+  return &info;
 }
 
 bool PPB_Fullscreen_Proxy::OnMessageReceived(const IPC::Message& msg) {
@@ -65,6 +86,8 @@ bool PPB_Fullscreen_Proxy::OnMessageReceived(const IPC::Message& msg) {
                         OnMsgIsFullscreen)
     IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBFullscreen_SetFullscreen,
                         OnMsgSetFullscreen)
+    IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBFullscreen_GetScreenSize,
+                        OnMsgGetScreenSize)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   // TODO(brettw): handle bad messages!
@@ -80,6 +103,12 @@ void PPB_Fullscreen_Proxy::OnMsgSetFullscreen(PP_Instance instance,
                                               PP_Bool fullscreen,
                                               PP_Bool* result) {
   *result = ppb_fullscreen_target()->SetFullscreen(instance, fullscreen);
+}
+
+void PPB_Fullscreen_Proxy::OnMsgGetScreenSize(PP_Instance instance,
+                                              PP_Bool* result,
+                                              PP_Size* size) {
+  *result = ppb_fullscreen_target()->GetScreenSize(instance, size);
 }
 
 }  // namespace proxy

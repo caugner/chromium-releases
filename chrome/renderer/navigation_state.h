@@ -39,7 +39,7 @@ class NavigationState : public WebKit::WebDataSource::ExtraData {
     LINK_LOAD_RELOAD,          // JS/link directed reload.
     LINK_LOAD_CACHE_STALE_OK,  // back/forward or encoding change.
     LINK_LOAD_CACHE_ONLY,      // Allow stale data (avoid doing a re-post)
-    PRERENDER_LOAD,            // Navigation started as the speculatively
+    PRERENDER_LOAD,            // Navigation started as the speculative
                                // prendering of a linked page.
     kLoadTypeMax               // Bounding value for this enum.
   };
@@ -159,6 +159,12 @@ class NavigationState : public WebKit::WebDataSource::ExtraData {
     first_paint_after_load_time_ = value;
   }
 
+  // The time that a prerendered page was displayed.  Invalid for
+  // non-prerendered pages.  Can be either before or after
+  // |finish_document_load_time_|.
+  const base::Time& prerendered_page_display_time() const;
+  void set_prerendered_page_display_time(const base::Time& value);
+
   // True iff the histograms for the associated frame have been dumped.
   bool load_histograms_recorded() const { return load_histograms_recorded_; }
   void set_load_histograms_recorded(bool value) {
@@ -204,21 +210,13 @@ class NavigationState : public WebKit::WebDataSource::ExtraData {
     security_info_ = security_info;
   }
 
-  bool postpone_loading_data() const { return postpone_loading_data_; }
-  void set_postpone_loading_data(bool postpone_loading_data) {
-    postpone_loading_data_ = postpone_loading_data;
+  bool use_error_page() const { return use_error_page_; }
+  void set_use_error_page(bool use_error_page) {
+    use_error_page_ = use_error_page;
   }
 
-  const std::string& postponed_data() const { return postponed_data_; }
-  void clear_postponed_data() { postponed_data_.clear(); }
-  void append_postponed_data(const char* data, size_t data_len) {
-    postponed_data_.append(data, data_len);
-  }
-
-  bool is_prerendering() const { return is_prerendering_; }
-  void set_is_prerendering(bool is_prerendering) {
-    is_prerendering_ = is_prerendering;
-  }
+  bool was_started_as_prerender() const;
+  void set_was_started_as_prerender(bool was_started_as_prerender);
 
   int http_status_code() const { return http_status_code_; }
   void set_http_status_code(int http_status_code) {
@@ -297,6 +295,7 @@ class NavigationState : public WebKit::WebDataSource::ExtraData {
   base::Time finish_load_time_;
   base::Time first_paint_time_;
   base::Time first_paint_after_load_time_;
+  base::Time prerendered_page_display_time_;
   bool load_histograms_recorded_;
   bool web_timing_histograms_recorded_;
   bool request_committed_;
@@ -308,12 +307,13 @@ class NavigationState : public WebKit::WebDataSource::ExtraData {
   scoped_ptr<webkit_glue::PasswordForm> password_form_data_;
   scoped_ptr<webkit_glue::AltErrorPageResourceFetcher> alt_error_page_fetcher_;
   std::string security_info_;
-  bool postpone_loading_data_;
-  std::string postponed_data_;
 
-  // True if page is being prerendered.  False once prerendered page is
-  // displayed.
-  bool is_prerendering_;
+  // True if we should use an error page, if the http status code alos indicates
+  // an error.
+  bool use_error_page_;
+
+  // True if a page load started as a prerender.  Preserved across redirects.
+  bool was_started_as_prerender_;
 
   bool cache_policy_override_set_;
   WebKit::WebURLRequest::CachePolicy cache_policy_override_;

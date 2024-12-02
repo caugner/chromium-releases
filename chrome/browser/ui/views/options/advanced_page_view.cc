@@ -19,8 +19,8 @@
 #include "views/controls/message_box_view.h"
 #include "views/controls/button/native_button.h"
 #include "views/controls/scroll_view.h"
-#include "views/grid_layout.h"
-#include "views/standard_layout.h"
+#include "views/layout/grid_layout.h"
+#include "views/layout/layout_constants.h"
 #include "views/window/dialog_delegate.h"
 #include "views/window/window.h"
 
@@ -142,7 +142,7 @@ void AdvancedPageView::InitControlLayout() {
 
   layout->StartRow(1, single_column_view_set_id);
   layout->AddView(advanced_scroll_view_);
-  layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
+  layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
 
   layout->StartRow(0, single_column_view_set_id);
   layout->AddView(reset_to_default_button_, 1, 1,

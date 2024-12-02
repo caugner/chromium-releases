@@ -115,7 +115,7 @@ class BaseTab : public ui::AnimationDelegate,
   views::ImageButton* close_button() const { return close_button_; }
 
   // Paints the icon at the specified coordinates, mirrored for RTL if needed.
-  void PaintIcon(gfx::Canvas* canvas, int x, int y);
+  void PaintIcon(gfx::Canvas* canvas);
   void PaintTitle(gfx::Canvas* canvas, SkColor title_color);
 
   // Overridden from AnimationDelegate:
@@ -128,12 +128,17 @@ class BaseTab : public ui::AnimationDelegate,
                              const views::Event& event);
 
   // views::ContextMenuController overrides:
-  virtual void ShowContextMenu(views::View* source,
-                               const gfx::Point& p,
-                               bool is_mouse_gesture);
+  virtual void ShowContextMenuForView(views::View* source,
+                                      const gfx::Point& p,
+                                      bool is_mouse_gesture);
 
-  // Returns the bounds of the title.
-  virtual const gfx::Rect& title_bounds() const = 0;
+  // Returns the bounds of the title and icon.
+  virtual const gfx::Rect& GetTitleBounds() const = 0;
+  virtual const gfx::Rect& GetIconBounds() const = 0;
+
+  virtual int loading_animation_frame() const;
+  virtual bool should_display_crashed_favicon() const;
+  virtual int fav_icon_hiding_offset() const;
 
   static gfx::Font* font() { return font_; }
   static int font_height() { return font_height_; }
@@ -153,8 +158,11 @@ class BaseTab : public ui::AnimationDelegate,
   void StartCrashAnimation();
   void StopCrashAnimation();
 
-  // Return true if the crash animation is currently running.
+  // Returns true if the crash animation is currently running.
   bool IsPerformingCrashAnimation() const;
+
+  // Schedules repaint task for icon.
+  void ScheduleIconPaint();
 
   static void InitResources();
 
@@ -170,6 +178,15 @@ class BaseTab : public ui::AnimationDelegate,
   // True if the tab is being dragged.
   bool dragging_;
 
+  // The offset used to animate the favicon location. This is used when the tab
+  // crashes.
+  int fav_icon_hiding_offset_;
+
+  // The current index of the loading animation.
+  int loading_animation_frame_;
+
+  bool should_display_crashed_favicon_;
+
   // Pulse animation.
   scoped_ptr<ui::ThrobAnimation> pulse_animation_;
 
@@ -183,21 +200,12 @@ class BaseTab : public ui::AnimationDelegate,
 
   views::ImageButton* close_button_;
 
-  // The current index of the loading animation.
-  int loading_animation_frame_;
-
   // Whether to disable throbber animations. Only true if this is an app tab
   // renderer and a command line flag has been passed in to disable the
   // animations.
   bool throbber_disabled_;
 
   ui::ThemeProvider* theme_provider_;
-
-  // The offset used to animate the favicon location. This is used when the tab
-  // crashes.
-  int fav_icon_hiding_offset_;
-
-  bool should_display_crashed_favicon_;
 
   static gfx::Font* font_;
   static int font_height_;

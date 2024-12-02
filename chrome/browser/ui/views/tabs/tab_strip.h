@@ -9,9 +9,9 @@
 #include "base/ref_counted.h"
 #include "base/timer.h"
 #include "chrome/browser/ui/views/tabs/base_tab_strip.h"
-#include "gfx/point.h"
-#include "gfx/rect.h"
 #include "ui/base/animation/animation_container.h"
+#include "ui/gfx/point.h"
+#include "ui/gfx/rect.h"
 #include "views/controls/button/image_button.h"
 #include "views/mouse_watcher.h"
 
@@ -56,7 +56,6 @@ class TabStrip : public BaseTabStrip,
   virtual void MouseMovedOutOfView();
 
   // BaseTabStrip implementation:
-  virtual int GetPreferredHeight();
   virtual void SetBackgroundOffset(const gfx::Point& offset);
   virtual bool IsPositionInWindowCaption(const gfx::Point& point);
   virtual void PrepareForCloseAt(int model_index);
@@ -69,7 +68,7 @@ class TabStrip : public BaseTabStrip,
 
   // views::View overrides:
   virtual void PaintChildren(gfx::Canvas* canvas);
-  virtual views::View* GetViewByID(int id) const;
+  virtual const views::View* GetViewByID(int id) const;
   virtual gfx::Size GetPreferredSize();
   // NOTE: the drag and drop methods are invoked from FrameView. This is done to
   // allow for a drop region that extends outside the bounds of the TabStrip.
@@ -78,14 +77,13 @@ class TabStrip : public BaseTabStrip,
   virtual void OnDragExited();
   virtual int OnPerformDrop(const views::DropTargetEvent& event);
   virtual AccessibilityTypes::Role GetAccessibleRole();
-  virtual views::View* GetViewForPoint(const gfx::Point& point);
+  virtual views::View* GetEventHandlerForPoint(const gfx::Point& point);
   virtual void OnThemeChanged();
 
  protected:
   // BaseTabStrip overrides:
   virtual BaseTab* CreateTab();
   virtual void StartInsertTabAnimation(int model_index, bool foreground);
-  virtual void StartMoveTabAnimation();
   virtual void AnimateToIdealBounds();
   virtual bool ShouldHighlightCloseButtonAfterRemove();
   virtual void DoLayout();
@@ -211,18 +209,12 @@ class TabStrip : public BaseTabStrip,
   // animating to their desired position/bounds. This is used by the standard
   // Layout method and other callers like the DraggedTabController that need
   // stable representations of Tab positions.
-  void GenerateIdealBounds();
+  virtual void GenerateIdealBounds();
 
   // Starts various types of TabStrip animations.
   void StartResizeLayoutAnimation();
-  void StartMoveTabAnimation(int from_model_index,
-                             int to_model_index);
-  void StartMiniTabAnimation();
+  virtual void StartMiniTabAnimation();
   void StartMouseInitiatedRemoveTabAnimation(int model_index);
-
-  // Stops any ongoing animations. If |layout| is true and an animation is
-  // ongoing this does a layout.
-  virtual void StopAnimating(bool layout);
 
   // Calculates the available width for tabs, assuming a Tab is to be closed.
   int GetAvailableWidthForTabs(Tab* last_tab) const;

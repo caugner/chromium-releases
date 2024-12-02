@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,8 +12,8 @@
 
 #include "base/scoped_ptr.h"
 #include "build/build_config.h"
-#include "gfx/native_widget_types.h"
 #include "printing/printing_context.h"
+#include "ui/gfx/native_widget_types.h"
 
 namespace printing {
 
@@ -28,13 +28,13 @@ class PrintingContextWin : public PrintingContext {
                                   bool has_selection,
                                   PrintSettingsCallback* callback);
   virtual Result UseDefaultSettings();
+  virtual Result UpdatePrintSettings(const PageRanges& ranges);
   virtual Result InitWithSettings(const PrintSettings& settings);
   virtual Result NewDocument(const string16& document_name);
   virtual Result NewPage();
   virtual Result PageDone();
   virtual Result DocumentDone();
   virtual void Cancel();
-  virtual void DismissDialog();
   virtual void ReleaseContext();
   virtual gfx::NativeDrawingContext context() const;
 

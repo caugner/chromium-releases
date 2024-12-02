@@ -26,10 +26,10 @@
 #include "chrome/browser/ui/views/theme_background.h"
 #include "chrome/browser/ui/views/toolbar_view.h"
 #include "chrome/common/chrome_switches.h"
-#include "gfx/canvas.h"
 #include "grit/generated_resources.h"
 #include "third_party/cros/chromeos_wm_ipc_enums.h"
 #include "ui/base/models/simple_menu_model.h"
+#include "ui/gfx/canvas.h"
 #include "views/controls/button/button.h"
 #include "views/controls/button/image_button.h"
 #include "views/controls/menu/menu_2.h"
@@ -89,7 +89,7 @@ class BrowserViewLayout : public ::BrowserViewLayout {
     gfx::Rect tabstrip_bounds(
         browser_view_->frame()->GetBoundsForTabStrip(tabstrip_));
     gfx::Point tabstrip_origin = tabstrip_bounds.origin();
-    views::View::ConvertPointToView(browser_view_->GetParent(), browser_view_,
+    views::View::ConvertPointToView(browser_view_->parent(), browser_view_,
                                     &tabstrip_origin);
     tabstrip_bounds.set_origin(tabstrip_origin);
     return browser_view_->UseVerticalTabs() ?
@@ -115,7 +115,7 @@ class BrowserViewLayout : public ::BrowserViewLayout {
   virtual int NonClientHitTest(const gfx::Point& point) {
     gfx::Point point_in_browser_view_coords(point);
     views::View::ConvertPointToView(
-        browser_view_->GetParent(), browser_view_,
+        browser_view_->parent(), browser_view_,
         &point_in_browser_view_coords);
     return IsPointInViewsInTitleArea(point_in_browser_view_coords) ?
         HTCLIENT : ::BrowserViewLayout::NonClientHitTest(point);
@@ -234,7 +234,7 @@ void BrowserView::Init() {
   // a NonClientFrameView even though visually a TabStrip is over a
   // NonClientFrameView.
   BrowserFrameGtk* gtk_frame = static_cast<BrowserFrameGtk*>(frame());
-  gtk_frame->GetNonClientView()->SetContextMenuController(this);
+  gtk_frame->non_client_view()->SetContextMenuController(this);
 
   // Listen to wrench menu opens.
   toolbar()->AddMenuListener(this);
@@ -305,15 +305,15 @@ void BrowserView::Paste() {
 }
 
 // views::ContextMenuController overrides.
-void BrowserView::ShowContextMenu(views::View* source,
-                                  const gfx::Point& p,
-                                  bool is_mouse_gesture) {
+void BrowserView::ShowContextMenuForView(views::View* source,
+                                         const gfx::Point& p,
+                                         bool is_mouse_gesture) {
   // Only show context menu if point is in unobscured parts of browser, i.e.
   // if NonClientHitTest returns :
   // - HTCAPTION: in title bar or unobscured part of tabstrip
   // - HTNOWHERE: as the name implies.
   gfx::Point point_in_parent_coords(p);
-  views::View::ConvertPointToView(NULL, GetParent(), &point_in_parent_coords);
+  views::View::ConvertPointToView(NULL, parent(), &point_in_parent_coords);
   int hit_test = NonClientHitTest(point_in_parent_coords);
   if (hit_test == HTCAPTION || hit_test == HTNOWHERE)
     system_menu_menu_->RunMenuAt(p, views::Menu2::ALIGN_TOPLEFT);

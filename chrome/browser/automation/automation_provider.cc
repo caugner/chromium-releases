@@ -40,7 +40,6 @@
 #include "chrome/browser/bookmarks/bookmark_storage.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/browser_window.h"
 #include "chrome/browser/browsing_data_remover.h"
 #include "chrome/browser/character_encoding.h"
@@ -67,20 +66,17 @@
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/printing/print_job.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/renderer_host/render_process_host.h"
-#include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/ssl/ssl_manager.h"
 #include "chrome/browser/ssl/ssl_blocking_page.h"
-#include "chrome/browser/tab_contents/navigation_entry.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
-#include "chrome/browser/tab_contents/tab_contents_view.h"
 #include "chrome/browser/ui/app_modal_dialogs/app_modal_dialog.h"
 #include "chrome/browser/ui/app_modal_dialogs/app_modal_dialog_queue.h"
 #include "chrome/browser/ui/find_bar/find_bar.h"
 #include "chrome/browser/ui/find_bar/find_bar_controller.h"
 #include "chrome/browser/ui/find_bar/find_notification_details.h"
+#include "chrome/browser/ui/find_bar/find_tab_helper.h"
 #include "chrome/browser/ui/login/login_prompt.h"
 #include "chrome/browser/ui/omnibox/location_bar.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/automation_constants.h"
 #include "chrome/common/automation_messages.h"
 #include "chrome/common/chrome_constants.h"
@@ -93,11 +89,16 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/automation/tab_proxy.h"
+#include "content/browser/browser_thread.h"
+#include "content/browser/renderer_host/render_process_host.h"
+#include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/tab_contents/navigation_entry.h"
+#include "content/browser/tab_contents/tab_contents.h"
+#include "content/browser/tab_contents/tab_contents_view.h"
 #include "net/proxy/proxy_service.h"
 #include "net/proxy/proxy_config_service_fixed.h"
 #include "net/url_request/url_request_context.h"
 #include "chrome/browser/automation/ui_controls.h"
-#include "views/event.h"
 #include "webkit/glue/password_form.h"
 
 #if defined(OS_WIN)
@@ -109,9 +110,12 @@ using base::Time;
 AutomationProvider::AutomationProvider(Profile* profile)
     : profile_(profile),
       reply_message_(NULL),
+      reinitialize_on_channel_error_(false),
       is_connected_(false),
       initial_loads_complete_(false) {
   TRACE_EVENT_BEGIN("AutomationProvider::AutomationProvider", 0, "");
+
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   browser_tracker_.reset(new AutomationBrowserTracker(this));
   extension_tracker_.reset(new AutomationExtensionTracker(this));
@@ -134,21 +138,16 @@ AutomationProvider::~AutomationProvider() {
                                        port_containers_.end());
   port_containers_.clear();
 
-  // Make sure that any outstanding NotificationObservers also get destroyed.
-  ObserverList<NotificationObserver>::Iterator it(notification_observer_list_);
-  NotificationObserver* observer;
-  while ((observer = it.GetNext()) != NULL)
-    delete observer;
-
-  if (channel_.get()) {
+  if (channel_.get())
     channel_->Close();
-  }
+
   g_browser_process->ReleaseModule();
 }
 
 bool AutomationProvider::InitializeChannel(const std::string& channel_id) {
   TRACE_EVENT_BEGIN("AutomationProvider::InitializeChannel", 0, "");
 
+  channel_id_ = channel_id;
   std::string effective_channel_id = channel_id;
 
   // If the channel_id starts with kNamedInterfacePrefix, create a named IPC
@@ -160,6 +159,8 @@ bool AutomationProvider::InitializeChannel(const std::string& channel_id) {
         strlen(automation::kNamedInterfacePrefix));
     if (effective_channel_id.length() <= 0)
       return false;
+
+    reinitialize_on_channel_error_ = true;
   }
 
   if (!automation_resource_message_filter_.get()) {
@@ -196,37 +197,6 @@ void AutomationProvider::OnInitialLoadsComplete() {
   initial_loads_complete_ = true;
   if (is_connected_)
     Send(new AutomationMsg_InitialLoadsComplete());
-}
-
-NotificationObserver* AutomationProvider::AddNavigationStatusListener(
-    NavigationController* tab, IPC::Message* reply_message,
-    int number_of_navigations, bool include_current_navigation) {
-  NotificationObserver* observer =
-      new NavigationNotificationObserver(tab, this, reply_message,
-                                         number_of_navigations,
-                                         include_current_navigation);
-
-  notification_observer_list_.AddObserver(observer);
-  return observer;
-}
-
-void AutomationProvider::RemoveNavigationStatusListener(
-    NotificationObserver* obs) {
-  notification_observer_list_.RemoveObserver(obs);
-}
-
-NotificationObserver* AutomationProvider::AddTabStripObserver(
-    Browser* parent,
-    IPC::Message* reply_message) {
-  NotificationObserver* observer =
-      new TabAppendedNotificationObserver(parent, this, reply_message);
-  notification_observer_list_.AddObserver(observer);
-
-  return observer;
-}
-
-void AutomationProvider::RemoveTabStripObserver(NotificationObserver* obs) {
-  notification_observer_list_.RemoveObserver(obs);
 }
 
 void AutomationProvider::AddLoginHandler(NavigationController* tab,
@@ -424,10 +394,6 @@ bool AutomationProvider::OnMessageReceived(const IPC::Message& message) {
                                     OnRunUnloadHandlers)
     IPC_MESSAGE_HANDLER(AutomationMsg_SetZoomLevel, OnSetZoomLevel)
 #endif  // defined(OS_WIN)
-#if defined(OS_CHROMEOS)
-    IPC_MESSAGE_HANDLER_DELAY_REPLY(AutomationMsg_LoginWithUserAndPass,
-                                    LoginWithUserAndPass)
-#endif  // defined(OS_CHROMEOS)
     IPC_MESSAGE_UNHANDLED(handled = false;OnUnhandledMessage())
   IPC_END_MESSAGE_MAP()
   return handled;
@@ -470,7 +436,21 @@ void AutomationProvider::HandleUnused(const IPC::Message& message, int handle) {
   }
 }
 
+bool AutomationProvider::ReinitializeChannel() {
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
+
+  // Make sure any old channels are cleaned up before starting up a new one.
+  channel_.reset();
+  return InitializeChannel(channel_id_);
+}
+
 void AutomationProvider::OnChannelError() {
+  if (reinitialize_on_channel_error_) {
+    VLOG(1) << "AutomationProxy disconnected, resetting AutomationProvider.";
+    if (ReinitializeChannel())
+      return;
+    VLOG(1) << "Error reinitializing AutomationProvider channel.";
+  }
   VLOG(1) << "AutomationProxy went away, shutting down app.";
   AutomationProviderList::GetInstance()->RemoveProvider(this);
 }
@@ -529,7 +509,11 @@ void AutomationProvider::SendFindRequest(
   if (!with_json) {
     find_in_page_observer_.reset(observer);
   }
-  tab_contents->set_current_find_request_id(request_id);
+  TabContentsWrapper* wrapper =
+      TabContentsWrapper::GetCurrentWrapperForContents(tab_contents);
+  if (wrapper)
+    wrapper->find_tab_helper()->set_current_find_request_id(request_id);
+
   tab_contents->render_view_host()->StartFinding(
       FindInPageNotificationObserver::kFindInPageRequestId,
       search_string,
@@ -854,7 +838,7 @@ void AutomationProvider::GetEnabledExtensions(
 
 void AutomationProvider::WaitForExtensionTestResult(
     IPC::Message* reply_message) {
-  DCHECK(reply_message_ == NULL);
+  DCHECK(!reply_message_);
   reply_message_ = reply_message;
   // Call MaybeSendResult, because the result might have come in before
   // we were waiting on it.

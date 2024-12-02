@@ -6,11 +6,9 @@
 #define CHROME_INSTALLER_UTIL_COPY_TREE_WORK_ITEM_H_
 #pragma once
 
-#include <windows.h>
-
-#include <string>
-
 #include "base/file_path.h"
+#include "base/gtest_prod_util.h"
+#include "base/scoped_temp_dir.h"
 #include "chrome/installer/util/work_item.h"
 
 // A WorkItem subclass that recursively copies a file system hierarchy from
@@ -21,6 +19,11 @@
 // to the temporary directory passed in, and then copies the source hierarchy
 // to the destination location. During rollback the original destination
 // hierarchy is moved back.
+// NOTE: It is a best practice to ensure that the temporary directory is on the
+// same volume as the destination path.  If this is not the case, the existing
+// destination path is not moved, but rather copied, to the destination path.
+// This will result in in-use files being left behind, as well as potentially
+// losing ACLs or other metadata in the case of a rollback.
 class CopyTreeWorkItem : public WorkItem {
  public:
   virtual ~CopyTreeWorkItem();
@@ -37,18 +40,14 @@ class CopyTreeWorkItem : public WorkItem {
   // Notes on temp_path: to facilitate rollback, the caller needs to supply
   // a temporary directory to save the original files if they exist under
   // dest_path.
-  CopyTreeWorkItem(const std::wstring& source_path,
-                   const std::wstring& dest_path,
-                   const std::wstring& temp_dir,
+  CopyTreeWorkItem(const FilePath& source_path,
+                   const FilePath& dest_path,
+                   const FilePath& temp_dir,
                    CopyOverWriteOption overwrite_option,
-                   const std::wstring& alternative_path);
+                   const FilePath& alternative_path);
 
   // Checks if the path specified is in use (and hence can not be deleted)
   bool IsFileInUse(const FilePath& path);
-
-  // Get a backup path that can keep the original files under dest_path_,
-  // and set backup_path_ with the result.
-  bool GetBackupPath();
 
   // Source path to copy files from.
   FilePath source_path_;
@@ -78,9 +77,14 @@ class CopyTreeWorkItem : public WorkItem {
   // existed and was in use. Needed during rollback.
   bool copied_to_alternate_path_;
 
-  // The full path in temporary directory that the original dest_path_ has
-  // been moved to.
-  FilePath backup_path_;
+  // The temporary directory into which the original dest_path_ has been moved.
+  ScopedTempDir backup_path_;
+
+  FRIEND_TEST_ALL_PREFIXES(CopyTreeWorkItemTest, CopyFileSameContent);
+  FRIEND_TEST_ALL_PREFIXES(CopyTreeWorkItemTest, CopyFileInUse);
+  FRIEND_TEST_ALL_PREFIXES(CopyTreeWorkItemTest, CopyFileAndCleanup);
+  FRIEND_TEST_ALL_PREFIXES(CopyTreeWorkItemTest, NewNameAndCopyTest);
+  FRIEND_TEST_ALL_PREFIXES(CopyTreeWorkItemTest, CopyFileInUseAndCleanup);
 };
 
 #endif  // CHROME_INSTALLER_UTIL_COPY_TREE_WORK_ITEM_H_

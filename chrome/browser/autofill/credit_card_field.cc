@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,7 @@
 #include "ui/base/l10n/l10n_util.h"
 
 bool CreditCardField::GetFieldInfo(FieldTypeMap* field_type_map) const {
-  bool ok = Add(field_type_map, number_, AutoFillType(CREDIT_CARD_NUMBER));
+  bool ok = Add(field_type_map, number_, AutofillType(CREDIT_CARD_NUMBER));
   DCHECK(ok);
 
   // If the heuristics detected first and last name in separate fields,
@@ -21,17 +21,17 @@ bool CreditCardField::GetFieldInfo(FieldTypeMap* field_type_map) const {
   // initial.
   if (cardholder_last_ == NULL) {
     // Add() will check if cardholder_ is != NULL.
-    ok = ok && Add(field_type_map, cardholder_, AutoFillType(CREDIT_CARD_NAME));
+    ok = ok && Add(field_type_map, cardholder_, AutofillType(CREDIT_CARD_NAME));
     DCHECK(ok);
   }
 
-  ok = ok && Add(field_type_map, type_, AutoFillType(CREDIT_CARD_TYPE));
+  ok = ok && Add(field_type_map, type_, AutofillType(CREDIT_CARD_TYPE));
   DCHECK(ok);
   ok = ok && Add(field_type_map, expiration_month_,
-      AutoFillType(CREDIT_CARD_EXP_MONTH));
+      AutofillType(CREDIT_CARD_EXP_MONTH));
   DCHECK(ok);
   ok = ok && Add(field_type_map, expiration_year_,
-      AutoFillType(CREDIT_CARD_EXP_4_DIGIT_YEAR));
+      AutofillType(CREDIT_CARD_EXP_4_DIGIT_YEAR));
   DCHECK(ok);
 
   return ok;
@@ -43,10 +43,10 @@ FormFieldType CreditCardField::GetFormFieldType() const {
 
 // static
 CreditCardField* CreditCardField::Parse(
-    std::vector<AutoFillField*>::const_iterator* iter,
+    std::vector<AutofillField*>::const_iterator* iter,
     bool is_ecml) {
   scoped_ptr<CreditCardField> credit_card_field(new CreditCardField);
-  std::vector<AutoFillField*>::const_iterator q = *iter;
+  std::vector<AutofillField*>::const_iterator q = *iter;
   string16 pattern;
 
   // Credit card fields can appear in many different orders.
@@ -81,8 +81,8 @@ CreditCardField* CreditCardField::Parse(
       // and ExpediaBilling.html in our test suite), recognize separate fields
       // for the cardholder's first and last name if they have the labels "cfnm"
       // and "clnm".
-      std::vector<AutoFillField*>::const_iterator p = q;
-      AutoFillField* first;
+      std::vector<AutofillField*>::const_iterator p = q;
+      AutofillField* first;
       if (!is_ecml && ParseText(&p, ASCIIToUTF16("^cfnm"), &first) &&
           ParseText(&p, ASCIIToUTF16("^clnm"),
                     &credit_card_field->cardholder_last_)) {
@@ -118,35 +118,40 @@ CreditCardField* CreditCardField::Parse(
         &credit_card_field->number_))
       continue;
 
-    // "Expiration date" is the most common label here, but some pages have
-    // "Expires", "exp. date" or "exp. month" and "exp. year".  We also look for
-    // the field names ccmonth and ccyear, which appear on at least 4 of our
-    // test pages.
-    //
-    // -> On at least one page (The China Shop2.html) we find only the labels
-    // "month" and "year".  So for now we match these words directly; we'll
-    // see if this turns out to be too general.
-    //
-    // Toolbar Bug 51451: indeed, simply matching "month" is too general for
-    //   https://rps.fidelity.com/ftgw/rps/RtlCust/CreatePIN/Init.
-    // Instead, we match only words beginning with "month".
-    if (is_ecml)
-      pattern = GetEcmlPattern(kEcmlCardExpireMonth);
-    else
-      pattern = l10n_util::GetStringUTF16(IDS_AUTOFILL_EXPIRATION_MONTH_RE);
-
-    if ((!credit_card_field->expiration_month_ ||
-        credit_card_field->expiration_month_->IsEmpty()) &&
-        ParseText(&q, pattern, &credit_card_field->expiration_month_)) {
+    if ((*q) && LowerCaseEqualsASCII((*q)->form_control_type(), "month")) {
+      credit_card_field->expiration_month_ = *q++;
+    } else {
+      // "Expiration date" is the most common label here, but some pages have
+      // "Expires", "exp. date" or "exp. month" and "exp. year".  We also look
+      // for the field names ccmonth and ccyear, which appear on at least 4 of
+      // our test pages.
+      //
+      // -> On at least one page (The China Shop2.html) we find only the labels
+      // "month" and "year".  So for now we match these words directly; we'll
+      // see if this turns out to be too general.
+      //
+      // Toolbar Bug 51451: indeed, simply matching "month" is too general for
+      //   https://rps.fidelity.com/ftgw/rps/RtlCust/CreatePIN/Init.
+      // Instead, we match only words beginning with "month".
       if (is_ecml)
-        pattern = GetEcmlPattern(kEcmlCardExpireYear);
+        pattern = GetEcmlPattern(kEcmlCardExpireMonth);
       else
-        pattern = l10n_util::GetStringUTF16(IDS_AUTOFILL_EXPIRATION_DATE_RE);
+        pattern = l10n_util::GetStringUTF16(IDS_AUTOFILL_EXPIRATION_MONTH_RE);
 
-      if (!ParseText(&q, pattern, &credit_card_field->expiration_year_))
-        return NULL;
+      if ((!credit_card_field->expiration_month_ ||
+          credit_card_field->expiration_month_->IsEmpty()) &&
+        ParseText(&q, pattern, &credit_card_field->expiration_month_)) {
 
-      continue;
+        if (is_ecml)
+          pattern = GetEcmlPattern(kEcmlCardExpireYear);
+        else
+          pattern = l10n_util::GetStringUTF16(IDS_AUTOFILL_EXPIRATION_DATE_RE);
+
+        if (!ParseText(&q, pattern, &credit_card_field->expiration_year_)) {
+          return NULL;
+        }
+        continue;
+      }
     }
 
     if (ParseText(&q, GetEcmlPattern(kEcmlCardExpireDay)))
@@ -180,7 +185,10 @@ CreditCardField* CreditCardField::Parse(
   // the cvc and date were found independently they are returned.
   if ((credit_card_field->number_ || credit_card_field->verification_) &&
       credit_card_field->expiration_month_ &&
-      credit_card_field->expiration_year_) {
+      (credit_card_field->expiration_year_ ||
+      (LowerCaseEqualsASCII(
+           credit_card_field->expiration_month_->form_control_type(),
+           "month")))) {
       *iter = q;
       return credit_card_field.release();
   }

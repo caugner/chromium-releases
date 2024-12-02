@@ -81,6 +81,16 @@
             </dl>
           </dd>
 
+          <!-- OBJECT METHODS -->
+          <dd>
+            <div></div>
+          </dd>
+
+          <!-- OBJECT EVENT FIELDS -->
+          <dd>
+            <div></div>
+          </dd>
+
           <!-- FUNCTION PARAMETERS -->
           <dd>
             <div></div>
@@ -267,7 +277,7 @@
                     </ol>
                   </li>
                   <li>
-                    <a href="#methods">Methods</a>
+                    <a>Methods</a>
                     <ol>
                       <li>
                         <a href="#method-anchor">methodName</a>
@@ -275,7 +285,7 @@
                     </ol>
                   </li>
                   <li>
-                    <a href="#events">Events</a>
+                    <a>Events</a>
                     <ol>
                       <li>
                         <a href="#event-anchor">eventName</a>
@@ -312,10 +322,13 @@ on the following experimental APIs:
 <ul>
   <li>
   <a href="experimental.clipboard.html">experimental.clipboard</a></li><li>
+  <a href="experimental.contentSettings.misc.html">experimental.contentSettings.misc</a></li><li>
+  <a href="experimental.extension.html">experimental.extension</a></li><li>
   <a href="experimental.infobars.html">experimental.infobars</a></li><li>
   <a href="experimental.processes.html">experimental.processes</a></li><li>
   <a href="experimental.proxy.html">experimental.proxy</a></li><li>
   <a href="experimental.sidebar.html">experimental.sidebar</a></li><li>
+  <a href="experimental.tts.html">experimental.tts</a></li><li>
   <a href="experimental.webNavigation.html">experimental.webNavigation</a></li><li>
   <a href="experimental.webRequest.html">experimental.webRequest</a></li>
 </ul>
@@ -356,13 +369,26 @@ upload extensions that use experimental APIs.
 </pre>
   </li>
   <li>
-    Specify the <b>--enable-experimental-extension-apis</b> flag
-    when you launch the browser.
-    On Windows, you can do this by modifying
-    the properties of the shortcut that you use to launch Google Chrome.
-    For example:
+    Enable the experimental API in your browser.
+    You can do this in either of two ways:
+    <ul>
+      <li> Go to <b>chrome://flags</b>,
+        find "Experimental Extension APIs",
+        click its "Enable" link,
+        and restart Chrome.
+        From now on,
+        unless you return to that page and disable experimental APIs,
+        you'll be able to run extensions that use experimental APIs.
+      </li>
+      <li> Specify the <b>--enable-experimental-extension-apis</b> flag
+        each time you launch the browser.
+        On Windows, you can do this by modifying
+        the properties of the shortcut that you use to launch Google Chrome.
+        For example:
 
 <pre><em>path_to_chrome.exe</em> <b>--enable-experimental-extension-apis</b></pre>
+      </li>
+    </ul>
   </li>
 
   <li>
@@ -406,8 +432,8 @@ For information on the standard APIs that extensions can use, see
           </div> <!-- /apiGroup -->
 
           <!-- METHODS -->
-          <div class="apiGroup" id="methods">
-            <a name="methods"></a>
+          <div id="methodsTemplate" class="apiGroup">
+            <a></a>
             <h3>Methods</h3>
 
             <!-- iterates over all functions -->
@@ -482,10 +508,9 @@ For information on the standard APIs that extensions can use, see
           </div>  <!-- /apiGroup -->
 
           <!-- EVENTS -->
-          <div class="apiGroup">
-            <a name="events"></a>
-            <h3 id="events">Events</h3>
-
+          <div id="eventsTemplate" class="apiGroup">
+            <a></a>
+            <h3>Events</h3>
             <!-- iterates over all events -->
             <div class="apiItem">
               <a></a>
@@ -503,14 +528,15 @@ For information on the standard APIs that extensions can use, see
                 </p>
 
                 <!-- PARAMETERS -->
-                <h4>Parameters</h4>
-                <dl>
-                  <div>
+                <div>
+                  <h4>Parameters</h4>
+                  <dl>
                     <div>
+                      <div>
+                      </div>
                     </div>
-                  </div>
-                </dl>
-
+                  </dl>
+                </div>
               </div> <!-- /decription -->
 
             </div> <!-- /apiItem -->

@@ -30,6 +30,9 @@ struct PrinterBasicInfo {
 typedef std::vector<PrinterBasicInfo> PrinterList;
 
 struct PrinterCapsAndDefaults {
+  PrinterCapsAndDefaults();
+  ~PrinterCapsAndDefaults();
+
   std::string printer_capabilities;
   std::string caps_mime_type;
   std::string printer_defaults;
@@ -48,7 +51,7 @@ class PrintBackend : public base::RefCountedThreadSafe<PrintBackend> {
   virtual ~PrintBackend();
 
   // Enumerates the list of installed local and network printers.
-  virtual void EnumeratePrinters(PrinterList* printer_list) = 0;
+  virtual bool EnumeratePrinters(PrinterList* printer_list) = 0;
 
   // Gets the capabilities and defaults for a specific printer.
   virtual bool GetPrinterCapsAndDefaults(

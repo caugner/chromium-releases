@@ -12,11 +12,6 @@
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_window.h"
-#include "chrome/browser/renderer_host/render_view_host.h"
-#include "chrome/browser/renderer_host/render_widget_host_view.h"
-#include "chrome/browser/tab_contents/interstitial_page.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
-#include "chrome/browser/tab_contents/tab_contents_view.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/view_ids.h"
@@ -24,6 +19,11 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/test/in_process_browser_test.h"
 #include "chrome/test/ui_test_utils.h"
+#include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/renderer_host/render_widget_host_view.h"
+#include "content/browser/tab_contents/interstitial_page.h"
+#include "content/browser/tab_contents/tab_contents.h"
+#include "content/browser/tab_contents/tab_contents_view.h"
 #include "net/test/test_server.h"
 
 #if defined(TOOLKIT_VIEWS) || defined(OS_WIN)
@@ -154,10 +154,14 @@ class TestInterstitialPage : public InterstitialPage {
     return html_contents_;
   }
 
-  // Exposing render_view_host() to be public; it is declared as protected in
-  // the superclass.
+  // Exposing render_view_host() and tab() to be public; they are declared as
+  // protected in the superclass.
   virtual RenderViewHost* render_view_host() {
     return InterstitialPage::render_view_host();
+  }
+
+  virtual TabContents* tab() {
+    return InterstitialPage::tab();
   }
 
   bool HasFocus() {
@@ -168,7 +172,7 @@ class TestInterstitialPage : public InterstitialPage {
   virtual void FocusedNodeChanged(bool is_editable_node) {
     NotificationService::current()->Notify(
         NotificationType::FOCUS_CHANGED_IN_PAGE,
-        Source<RenderViewHost>(render_view_host()),
+        Source<TabContents>(tab()),
         Details<const bool>(&is_editable_node));
   }
 
@@ -339,7 +343,7 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest, MAYBE_TabsRememberFocusFindInPage) {
   ui_test_utils::NavigateToURL(browser(), url);
 
   browser()->Find();
-  ui_test_utils::FindInPage(browser()->GetSelectedTabContents(),
+  ui_test_utils::FindInPage(browser()->GetSelectedTabContentsWrapper(),
                             ASCIIToUTF16("a"), true, false, NULL);
   ASSERT_TRUE(IsViewFocused(VIEW_ID_FIND_IN_PAGE_TEXT_FIELD));
 
@@ -465,6 +469,10 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest, MAYBE_FocusTraversal) {
     // Location bar should be focused.
     ASSERT_TRUE(IsViewFocused(VIEW_ID_LOCATION_BAR));
 
+    // Move the caret to the end, otherwise the next Tab key may not move focus.
+    ASSERT_TRUE(ui_test_utils::SendKeyPressSync(
+        browser(), ui::VKEY_END, false, false, false, false));
+
     // Now let's press tab to move the focus.
     for (size_t j = 0; j < arraysize(kExpElementIDs); ++j) {
       SCOPED_TRACE(StringPrintf("inner loop %" PRIuS, j));
@@ -487,8 +495,8 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest, MAYBE_FocusTraversal) {
         ASSERT_TRUE(ui_test_utils::SendKeyPressAndWaitWithDetails(
             browser(), ui::VKEY_TAB, false, false, false, false,
             NotificationType::FOCUS_CHANGED_IN_PAGE,
-            NotificationSource(Source<RenderViewHost>(
-                browser()->GetSelectedTabContents()->render_view_host())),
+            NotificationSource(Source<TabContents>(
+                browser()->GetSelectedTabContents())),
             details));
       } else {
         // On the last tab key press, the focus returns to the browser.
@@ -511,6 +519,10 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest, MAYBE_FocusTraversal) {
     // Location bar should be focused.
     ASSERT_TRUE(IsViewFocused(VIEW_ID_LOCATION_BAR));
 
+    // Move the caret to the end, otherwise the next Tab key may not move focus.
+    ASSERT_TRUE(ui_test_utils::SendKeyPressSync(
+        browser(), ui::VKEY_END, false, false, false, false));
+
     // Now let's press shift-tab to move the focus in reverse.
     for (size_t j = 0; j < arraysize(kExpElementIDs); ++j) {
       SCOPED_TRACE(StringPrintf("inner loop: %" PRIuS, j));
@@ -526,8 +538,8 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest, MAYBE_FocusTraversal) {
         ASSERT_TRUE(ui_test_utils::SendKeyPressAndWaitWithDetails(
             browser(), ui::VKEY_TAB, false, true, false, false,
             NotificationType::FOCUS_CHANGED_IN_PAGE,
-            NotificationSource(Source<RenderViewHost>(
-                browser()->GetSelectedTabContents()->render_view_host())),
+            NotificationSource(Source<TabContents>(
+                browser()->GetSelectedTabContents())),
             details));
       } else {
         // On the last tab key press, the focus returns to the browser.
@@ -591,6 +603,10 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest, MAYBE_FocusTraversalOnInterstitial) {
     // Location bar should be focused.
     ASSERT_TRUE(IsViewFocused(VIEW_ID_LOCATION_BAR));
 
+    // Move the caret to the end, otherwise the next Tab key may not move focus.
+    ASSERT_TRUE(ui_test_utils::SendKeyPressSync(
+        browser(), ui::VKEY_END, false, false, false, false));
+
     // Now let's press tab to move the focus.
     for (size_t j = 0; j < 7; ++j) {
       // Let's make sure the focus is on the expected element in the page.
@@ -606,8 +622,8 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest, MAYBE_FocusTraversalOnInterstitial) {
           NotificationService::AllSources();
       if (j < arraysize(kExpElementIDs) - 1) {
         notification_type = NotificationType::FOCUS_CHANGED_IN_PAGE;
-        notification_source = Source<RenderViewHost>(
-            interstitial_page->render_view_host());
+        notification_source = Source<TabContents>(
+            interstitial_page->tab());
       } else {
         // On the last tab key press, the focus returns to the browser.
         notification_type = NotificationType::FOCUS_RETURNED_TO_BROWSER;
@@ -630,6 +646,10 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest, MAYBE_FocusTraversalOnInterstitial) {
     // Location bar should be focused.
     ASSERT_TRUE(IsViewFocused(VIEW_ID_LOCATION_BAR));
 
+    // Move the caret to the end, otherwise the next Tab key may not move focus.
+    ASSERT_TRUE(ui_test_utils::SendKeyPressSync(
+        browser(), ui::VKEY_END, false, false, false, false));
+
     // Now let's press shift-tab to move the focus in reverse.
     for (size_t j = 0; j < 7; ++j) {
       NotificationType::Type notification_type;
@@ -637,8 +657,8 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest, MAYBE_FocusTraversalOnInterstitial) {
           NotificationService::AllSources();
       if (j < arraysize(kExpElementIDs) - 1) {
         notification_type = NotificationType::FOCUS_CHANGED_IN_PAGE;
-        notification_source = Source<RenderViewHost>(
-            interstitial_page->render_view_host());
+        notification_source = Source<TabContents>(
+            interstitial_page->tab());
       } else {
         // On the last tab key press, the focus returns to the browser.
         notification_type = NotificationType::FOCUS_RETURNED_TO_BROWSER;

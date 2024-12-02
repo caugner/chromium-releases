@@ -10,6 +10,7 @@
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/password_manager/password_store.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/sync/abstract_profile_sync_service_test.h"
 #include "chrome/browser/sync/engine/syncapi.h"
 #include "chrome/browser/sync/glue/password_change_processor.h"
@@ -24,12 +25,12 @@
 #include "chrome/browser/sync/syncable/syncable.h"
 #include "chrome/browser/sync/test_profile_sync_service.h"
 #include "chrome/common/net/gaia/gaia_constants.h"
-#include "chrome/common/notification_observer_mock.h"
-#include "chrome/common/notification_source.h"
-#include "chrome/common/notification_type.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/sync/engine/test_id_factory.h"
 #include "chrome/test/profile_mock.h"
+#include "content/common/notification_observer_mock.h"
+#include "content/common/notification_source.h"
+#include "content/common/notification_type.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "webkit/glue/password_form.h"
 
@@ -189,7 +190,7 @@ class ProfileSyncServicePasswordTest : public AbstractProfileSyncServiceTest {
           WillRepeatedly(Return(&token_service_));
 
       EXPECT_CALL(profile_, GetPasswordStore(_)).
-          Times(2).
+          Times(3).
           WillRepeatedly(Return(password_store_.get()));
 
       EXPECT_CALL(observer_,
@@ -212,8 +213,7 @@ class ProfileSyncServicePasswordTest : public AbstractProfileSyncServiceTest {
   }
 
   void AddPasswordSyncNode(const PasswordForm& entry) {
-    sync_api::WriteTransaction trans(
-        service_->backend()->GetUserShareHandle());
+    sync_api::WriteTransaction trans(service_->GetUserShare());
     sync_api::ReadNode password_root(&trans);
     ASSERT_TRUE(password_root.InitByTagLookup(browser_sync::kPasswordTag));
 
@@ -226,7 +226,7 @@ class ProfileSyncServicePasswordTest : public AbstractProfileSyncServiceTest {
   }
 
   void GetPasswordEntriesFromSyncDB(std::vector<PasswordForm>* entries) {
-    sync_api::ReadTransaction trans(service_->backend()->GetUserShareHandle());
+    sync_api::ReadTransaction trans(service_->GetUserShare());
     sync_api::ReadNode password_root(&trans);
     ASSERT_TRUE(password_root.InitByTagLookup(browser_sync::kPasswordTag));
 

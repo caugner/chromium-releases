@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,17 +12,18 @@
 #include "base/ref_counted.h"
 #include "base/shared_memory.h"
 #include "base/sync_socket.h"
-#include "gfx/size.h"
 #include "googleurl/src/gurl.h"
 #include "ppapi/c/pp_completion_callback.h"
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/c/pp_instance.h"
 #include "ppapi/c/pp_stdint.h"
+#include "ui/gfx/size.h"
 #include "webkit/fileapi/file_system_types.h"
 #include "webkit/plugins/ppapi/dir_contents.h"
 
 class AudioMessageFilter;
 class GURL;
+class P2PSocketDispatcher;
 
 namespace base {
 class MessageLoopProxy;
@@ -34,13 +35,12 @@ class FileSystemCallbackDispatcher;
 }
 
 namespace gfx {
+class Point;
 class Rect;
 }
 
 namespace gpu {
-namespace gles2 {
-class GLES2Implementation;
-}
+class CommandBuffer;
 }
 
 namespace skia {
@@ -64,8 +64,10 @@ namespace ppapi {
 
 class FileIO;
 class FullscreenContainer;
+class PepperFilePath;
 class PluginInstance;
 class PluginModule;
+class PPB_Flash_Menu_Impl;
 class PPB_Flash_NetConnector_Impl;
 
 // Virtual interface that the browser implements to implement features for
@@ -84,10 +86,12 @@ class PluginDelegate {
   // have PluginDelegates).
   class ModuleLifetime {
    public:
-    // Notification that the given plugin object has been deleted. This is
-    // called from the module's destructor, so you should not dereference the
-    // given pointer.
-    virtual void PluginModuleDestroyed(PluginModule* destroyed_module) = 0;
+    // Notification that the given plugin object is no longer usable. It either
+    // indicates the module was deleted, or that it has crashed.
+    //
+    // This can be called from the module's destructor, so you should not
+    // dereference the given pointer.
+    virtual void PluginModuleDead(PluginModule* dead_module) = 0;
   };
 
   // This class is implemented by the PluginDelegate implementation and is
@@ -145,15 +149,6 @@ class PluginDelegate {
     // Initialize the context.
     virtual bool Init() = 0;
 
-    // Present the rendered frame to the compositor.
-    virtual bool SwapBuffers() = 0;
-
-    // Get the last EGL error.
-    virtual unsigned GetError() = 0;
-
-    // Resize the backing texture used as a back buffer by OpenGL.
-    virtual void ResizeBackingTexture(const gfx::Size& size) = 0;
-
     // Set an optional callback that will be invoked when the side effects of
     // a SwapBuffers call become visible to the compositor. Takes ownership
     // of the callback.
@@ -163,10 +158,14 @@ class PluginDelegate {
     // compositors namespace. Otherwise return 0. Returns 0 by default.
     virtual unsigned GetBackingTextureId() = 0;
 
-    // This call will return the address of the GLES2 implementation for this
-    // context that is constructed in Initialize() and is valid until this
-    // context is destroyed.
-    virtual gpu::gles2::GLES2Implementation* GetGLES2Implementation() = 0;
+    // This call will return the address of the command buffer for this context
+    // that is constructed in Initialize() and is valid until this context is
+    // destroyed.
+    virtual gpu::CommandBuffer* GetCommandBuffer() = 0;
+
+    // Set an optional callback that will be invoked when the context is lost
+    // (e.g. gpu process crash). Takes ownership of the callback.
+    virtual void SetContextLostCallback(Callback0::Type* callback) = 0;
   };
 
   class PlatformAudio {
@@ -251,6 +250,7 @@ class PluginDelegate {
   virtual bool AsyncOpenFile(const FilePath& path,
                              int flags,
                              AsyncOpenFileCallback* callback) = 0;
+
   virtual bool OpenFileSystem(
       const GURL& url,
       fileapi::FileSystemType type,
@@ -275,30 +275,18 @@ class PluginDelegate {
       const FilePath& directory_path,
       fileapi::FileSystemCallbackDispatcher* dispatcher) = 0;
 
-  virtual base::PlatformFileError OpenModuleLocalFile(
-      const std::string& module_name,
-      const FilePath& path,
-      int flags,
-      base::PlatformFile* file) = 0;
-  virtual base::PlatformFileError RenameModuleLocalFile(
-      const std::string& module_name,
-      const FilePath& path_from,
-      const FilePath& path_to) = 0;
-  virtual base::PlatformFileError DeleteModuleLocalFileOrDir(
-      const std::string& module_name,
-      const FilePath& path,
-      bool recursive) = 0;
-  virtual base::PlatformFileError CreateModuleLocalDir(
-      const std::string& module_name,
-      const FilePath& path) = 0;
-  virtual base::PlatformFileError QueryModuleLocalFile(
-      const std::string& module_name,
-      const FilePath& path,
-      base::PlatformFileInfo* info) = 0;
-  virtual base::PlatformFileError GetModuleLocalDirContents(
-      const std::string& module_name,
-      const FilePath& path,
-      DirContents* contents) = 0;
+  virtual base::PlatformFileError OpenFile(const PepperFilePath& path,
+                                           int flags,
+                                           base::PlatformFile* file) = 0;
+  virtual base::PlatformFileError RenameFile(const PepperFilePath& from_path,
+                                             const PepperFilePath& to_path) = 0;
+  virtual base::PlatformFileError DeleteFileOrDir(const PepperFilePath& path,
+                                                  bool recursive) = 0;
+  virtual base::PlatformFileError CreateDir(const PepperFilePath& path) = 0;
+  virtual base::PlatformFileError QueryFile(const PepperFilePath& path,
+                                            base::PlatformFileInfo* info) = 0;
+  virtual base::PlatformFileError GetDirContents(const PepperFilePath& path,
+                                                 DirContents* contents) = 0;
 
   // Returns a MessageLoopProxy instance associated with the message loop
   // of the file thread in this renderer.
@@ -313,10 +301,20 @@ class PluginDelegate {
       webkit::ppapi::PPB_Flash_NetConnector_Impl* connector,
       const struct PP_Flash_NetAddress* addr) = 0;
 
+  // Show the given context menu at the given position (in the render view's
+  // coordinates).
+  virtual int32_t ShowContextMenu(
+      webkit::ppapi::PPB_Flash_Menu_Impl* menu,
+      const gfx::Point& position) = 0;
+
   // Create a fullscreen container for a plugin instance. This effectively
   // switches the plugin to fullscreen.
   virtual FullscreenContainer* CreateFullscreenContainer(
       PluginInstance* instance) = 0;
+
+  // Gets the size of the screen. The fullscreen window will be created at that
+  // size.
+  virtual gfx::Size GetScreenSize() = 0;
 
   // Returns a string with the name of the default 8-bit char encoding.
   virtual std::string GetDefaultEncoding() = 0;
@@ -338,6 +336,13 @@ class PluginDelegate {
 
   // Tells the browser that the PDF has an unsupported feature.
   virtual void HasUnsupportedFeature() = 0;
+
+  // Socket dispatcher for P2P connections. Returns to NULL if P2P API
+  // is disabled.
+  //
+  // TODO(sergeyu): Replace this with a higher-level P2P API
+  // implementation.
+  virtual P2PSocketDispatcher* GetP2PSocketDispatcher() = 0;
 };
 
 }  // namespace ppapi

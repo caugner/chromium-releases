@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,12 +14,14 @@
 #include "base/scoped_ptr.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
-#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/history/url_database.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/test/testing_browser_process.h"
+#include "chrome/test/testing_browser_process_test.h"
 #include "chrome/test/testing_profile.h"
+#include "content/browser/browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using base::Time;
@@ -64,7 +66,7 @@ struct TestURLInfo {
   {"http://xyzabcdefghijklmnopqrstuvw.com/a", "An XYZ", 1, 1, 0},
 };
 
-class HistoryQuickProviderTest : public testing::Test,
+class HistoryQuickProviderTest : public TestingBrowserProcessTest,
                                  public ACProviderListener {
  public:
   HistoryQuickProviderTest()
@@ -96,7 +98,7 @@ class HistoryQuickProviderTest : public testing::Test,
   // Runs an autocomplete query on |text| and checks to see that the returned
   // results' destination URLs match those provided. |expected_urls| does not
   // need to be in sorted order.
-  void RunTest(const std::wstring text,
+  void RunTest(const string16 text,
                std::vector<std::string> expected_urls,
                std::string expected_top_result);
 
@@ -137,7 +139,8 @@ void HistoryQuickProviderTest::FillData() {
                                          history::SOURCE_BROWSED);
   }
 
-  history::InMemoryURLIndex* index = new history::InMemoryURLIndex();
+  history::InMemoryURLIndex* index =
+      new history::InMemoryURLIndex(FilePath(FILE_PATH_LITERAL("/dummy")));
   PrefService* prefs = profile_->GetPrefs();
   std::string languages(prefs->GetString(prefs::kAcceptLanguages));
   index->Init(db, languages);
@@ -163,13 +166,13 @@ class SetShouldContain : public std::unary_function<const std::string&,
   std::set<std::string> matches_;
 };
 
-void HistoryQuickProviderTest::RunTest(const std::wstring text,
+void HistoryQuickProviderTest::RunTest(const string16 text,
                                        std::vector<std::string> expected_urls,
                                        std::string expected_top_result) {
   std::sort(expected_urls.begin(), expected_urls.end());
 
   MessageLoop::current()->RunAllPending();
-  AutocompleteInput input(text, std::wstring(), false, false, true, false);
+  AutocompleteInput input(text, string16(), false, false, true, false);
   provider_->Start(input, false);
   EXPECT_TRUE(provider_->done());
 
@@ -194,7 +197,7 @@ void HistoryQuickProviderTest::RunTest(const std::wstring text,
 }
 
 TEST_F(HistoryQuickProviderTest, SimpleSingleMatch) {
-  std::wstring text(L"slashdot");
+  string16 text(ASCIIToUTF16("slashdot"));
   std::string expected_url("http://slashdot.org/favorite_page.html");
   std::vector<std::string> expected_urls;
   expected_urls.push_back(expected_url);
@@ -202,7 +205,7 @@ TEST_F(HistoryQuickProviderTest, SimpleSingleMatch) {
 }
 
 TEST_F(HistoryQuickProviderTest, MultiMatch) {
-  std::wstring text(L"foo");
+  string16 text(ASCIIToUTF16("foo"));
   std::vector<std::string> expected_urls;
   expected_urls.push_back("http://foo.com/");
   expected_urls.push_back("http://foo.com/dir/");
@@ -214,7 +217,7 @@ TEST_F(HistoryQuickProviderTest, MultiMatch) {
 }
 
 TEST_F(HistoryQuickProviderTest, StartRelativeMatch) {
-  std::wstring text(L"xyz");
+  string16 text(ASCIIToUTF16("xyz"));
   std::vector<std::string> expected_urls;
   expected_urls.push_back("http://xyzabcdefghijklmnopqrstuvw.com/a");
   expected_urls.push_back("http://abcxyzdefghijklmnopqrstuvw.com/a");
@@ -225,7 +228,7 @@ TEST_F(HistoryQuickProviderTest, StartRelativeMatch) {
 }
 
 TEST_F(HistoryQuickProviderTest, RecencyMatch) {
-  std::wstring text(L"startest");
+  string16 text(ASCIIToUTF16("startest"));
   std::vector<std::string> expected_urls;
   expected_urls.push_back("http://startest.com/y/a");
   expected_urls.push_back("http://startest.com/y/b");

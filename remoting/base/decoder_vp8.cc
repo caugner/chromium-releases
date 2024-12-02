@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,16 +10,13 @@
 
 extern "C" {
 #define VPX_CODEC_DISABLE_COMPAT 1
-#include "third_party/libvpx/source/libvpx/vpx/vpx_codec.h"
-#include "third_party/libvpx/source/libvpx/vpx/vpx_decoder.h"
-#include "third_party/libvpx/source/libvpx/vpx/vp8dx.h"
+#include "third_party/libvpx/libvpx.h"
 }
 
 namespace remoting {
 
 DecoderVp8::DecoderVp8()
-    : reverse_rows_(true),
-      state_(kUninitialized),
+    : state_(kUninitialized),
       codec_(NULL) {
 }
 
@@ -84,19 +81,34 @@ Decoder::DecodeResult DecoderVp8::DecodePacket(const VideoPacket* packet) {
   // Perform YUV conversion.
   uint8* data_start = frame_->data(media::VideoFrame::kRGBPlane);
   int stride = frame_->stride(media::VideoFrame::kRGBPlane);
-  if (reverse_rows_) {
-    data_start = data_start + (frame_->height() - 1) * stride;
-    stride = -stride;
-  }
 
-  media::ConvertYUVToRGB32(image->planes[0], image->planes[1], image->planes[2],
-                           data_start, frame_->width(), frame_->height(),
-                           image->stride[0], image->stride[1], stride,
-                           media::YV12);
+  // Propogate updated rects.
+  updated_rects_.clear();
+  for (int i = 0; i < packet->dirty_rects_size(); ++i) {
+    gfx::Rect r = gfx::Rect(packet->dirty_rects(i).x(),
+                            packet->dirty_rects(i).y(),
+                            packet->dirty_rects(i).width(),
+                            packet->dirty_rects(i).height());
+
+    // Perform color space conversion only on the updated rectangle.
+    ConvertYUVToRGB32WithRect(image->planes[0],
+                              image->planes[1],
+                              image->planes[2],
+                              data_start,
+                              r.x(),
+                              r.y(),
+                              r.width(),
+                              r.height(),
+                              image->stride[0],
+                              image->stride[1],
+                              stride);
+    updated_rects_.push_back(r);
+  }
   return DECODE_DONE;
 }
 
 void DecoderVp8::GetUpdatedRects(UpdatedRects* rects) {
+  rects->swap(updated_rects_);
 }
 
 void DecoderVp8::Reset() {

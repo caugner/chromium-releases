@@ -11,7 +11,8 @@
 #include "ui/base/clipboard/scoped_clipboard_writer.h"
 #include "ui/base/message_box_flags.h"
 #include "views/controls/button/checkbox.h"
-#include "views/standard_layout.h"
+#include "views/layout/grid_layout.h"
+#include "views/layout/layout_constants.h"
 #include "views/views_delegate.h"
 #include "views/window/client_view.h"
 
@@ -44,6 +45,8 @@ MessageBoxView::MessageBoxView(int dialog_flags,
       ALLOW_THIS_IN_INITIALIZER_LIST(focus_grabber_factory_(this)) {
   Init(dialog_flags, default_prompt);
 }
+
+MessageBoxView::~MessageBoxView() {}
 
 std::wstring MessageBoxView::GetInputText() {
   if (prompt_field_)
@@ -165,7 +168,7 @@ void MessageBoxView::ResetLayoutManager() {
     column_set->AddColumn(GridLayout::LEADING, GridLayout::LEADING, 0,
                           GridLayout::FIXED, icon_size.width(),
                           icon_size.height());
-    column_set->AddPaddingColumn(0, kUnrelatedControlHorizontalSpacing);
+    column_set->AddPaddingColumn(0, views::kUnrelatedControlHorizontalSpacing);
   }
   column_set->AddColumn(GridLayout::FILL, GridLayout::FILL, 1,
                         GridLayout::FIXED, message_width_, 0);
@@ -175,8 +178,8 @@ void MessageBoxView::ResetLayoutManager() {
   if (prompt_field_) {
     column_set = layout->AddColumnSet(textfield_column_view_set_id);
     if (icon_) {
-      column_set->AddPaddingColumn(0,
-          icon_size.width() + kUnrelatedControlHorizontalSpacing);
+      column_set->AddPaddingColumn(
+          0, icon_size.width() + views::kUnrelatedControlHorizontalSpacing);
     }
     column_set->AddColumn(GridLayout::FILL, GridLayout::FILL, 1,
                           GridLayout::USE_PREF, 0, 0);
@@ -187,8 +190,8 @@ void MessageBoxView::ResetLayoutManager() {
   if (checkbox_) {
     column_set = layout->AddColumnSet(checkbox_column_view_set_id);
     if (icon_) {
-      column_set->AddPaddingColumn(0,
-          icon_size.width() + kUnrelatedControlHorizontalSpacing);
+      column_set->AddPaddingColumn(
+          0, icon_size.width() + views::kUnrelatedControlHorizontalSpacing);
     }
     column_set->AddColumn(GridLayout::FILL, GridLayout::FILL, 1,
                           GridLayout::USE_PREF, 0, 0);
@@ -201,16 +204,16 @@ void MessageBoxView::ResetLayoutManager() {
   layout->AddView(message_label_);
 
   if (prompt_field_) {
-    layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
+    layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
     layout->StartRow(0, textfield_column_view_set_id);
     layout->AddView(prompt_field_);
   }
 
   if (checkbox_) {
-    layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
+    layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
     layout->StartRow(0, checkbox_column_view_set_id);
     layout->AddView(checkbox_);
   }
 
-  layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
+  layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
 }

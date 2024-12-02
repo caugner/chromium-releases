@@ -7,13 +7,13 @@
 #include <gtk/gtk.h>
 
 #include "base/message_loop.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
-#include "chrome/common/notification_registrar.h"
-#include "chrome/common/notification_source.h"
-#include "gfx/rect.h"
+#include "content/browser/tab_contents/tab_contents.h"
+#include "content/common/notification_registrar.h"
+#include "content/common/notification_source.h"
 #include "grit/theme_resources.h"
 #include "ui/base/animation/linear_animation.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/rect.h"
 
 namespace {
 

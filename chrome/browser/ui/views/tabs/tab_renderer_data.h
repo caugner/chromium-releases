@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_UI_VIEWS_TABS_TAB_RENDERER_DATA_H_
 #pragma once
 
+#include "base/process_util.h"
 #include "base/string16.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 
@@ -20,22 +21,27 @@ struct TabRendererData {
     NETWORK_STATE_LOADING,  // connected, transferring data.
   };
 
-  TabRendererData()
-      : network_state(NETWORK_STATE_NONE),
-        loading(false),
-        crashed(false),
-        off_the_record(false),
-        show_icon(true),
-        mini(false),
-        blocked(false),
-        app(false) {
+  TabRendererData();
+  ~TabRendererData();
+
+  // This interprets the crashed status to decide whether or not this
+  // render data represents a tab that is "crashed" (i.e. the render
+  // process died unexpectedly).
+  bool IsCrashed() const {
+    return (crashed_status == base::TERMINATION_STATUS_PROCESS_WAS_KILLED ||
+            crashed_status == base::TERMINATION_STATUS_PROCESS_CRASHED ||
+            crashed_status == base::TERMINATION_STATUS_ABNORMAL_TERMINATION);
   }
+
+  // Returns true if the TabRendererData is same as given |data|. Two favicons
+  // are considered equals if two SkBitmaps point to the same SkPixelRef object.
+  bool Equals(const TabRendererData& data);
 
   SkBitmap favicon;
   NetworkState network_state;
   string16 title;
   bool loading;
-  bool crashed;
+  base::TerminationStatus crashed_status;
   bool off_the_record;
   bool show_icon;
   bool mini;

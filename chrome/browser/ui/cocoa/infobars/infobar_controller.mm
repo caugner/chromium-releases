@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,8 @@
 #include "base/logging.h"  // for NOTREACHED()
 #include "base/mac/mac_util.h"
 #include "base/sys_string_conversions.h"
-#include "chrome/browser/tab_contents/infobar_delegate.h"
+#include "chrome/browser/tab_contents/confirm_infobar_delegate.h"
+#include "chrome/browser/tab_contents/link_infobar_delegate.h"
 #import "chrome/browser/ui/cocoa/animatable_view.h"
 #include "chrome/browser/ui/cocoa/event_utils.h"
 #include "chrome/browser/ui/cocoa/infobars/infobar.h"
@@ -167,6 +168,9 @@ const float kAnimateCloseDuration = 0.12;
 - (void)animateOpen {
   // Force the frame size to be 0 and then start an animation.
   NSRect frame = [[self view] frame];
+  // Slide the origin down so it doesn't animate on top of the toolbar, but
+  // rather just in the content area.
+  frame.origin.y -= infobars::kAntiSpoofHeight;
   CGFloat finalHeight = frame.size.height;
   frame.size.height = 0;
   [[self view] setFrame:frame];
@@ -182,6 +186,14 @@ const float kAnimateCloseDuration = 0.12;
 }
 
 - (void)animateClosed {
+  // Notify the container of our intentions.
+  [containerController_ willRemoveController:self];
+
+  // Take out the anti-spoof height so that the animation does not jump.
+  NSRect frame = [[self view] frame];
+  frame.size.height -= infobars::kAntiSpoofHeight;
+  [[self view] setFrame:frame];
+
   // Start animating closed.  We will receive a notification when the animation
   // is done, at which point we can remove our view from the hierarchy and
   // notify the delegate that the infobar was closed.
@@ -332,25 +344,6 @@ const float kAnimateCloseDuration = 0.12;
                                  atIndex:linkOffset];
   // Update the label view with the new text.
   [[label_.get() textStorage] setAttributedString:infoText];
-}
-
-@end
-
-
-/////////////////////////////////////////////////////////////////////////
-// AlertInfoBarController implementation
-
-@implementation AlertInfoBarController
-
-// Alert infobars have a text message.
-- (void)addAdditionalControls {
-  // No buttons.
-  [self removeButtons];
-
-  // Insert the text.
-  AlertInfoBarDelegate* delegate = delegate_->AsAlertInfoBarDelegate();
-  DCHECK(delegate);
-  [self setLabelToMessage:base::SysUTF16ToNSString(delegate->GetMessageText())];
 }
 
 @end
@@ -517,12 +510,6 @@ const float kAnimateCloseDuration = 0.12;
 
 //////////////////////////////////////////////////////////////////////////
 // CreateInfoBar() implementations
-
-InfoBar* AlertInfoBarDelegate::CreateInfoBar() {
-  AlertInfoBarController* controller =
-      [[AlertInfoBarController alloc] initWithDelegate:this];
-  return new InfoBar(controller);
-}
 
 InfoBar* LinkInfoBarDelegate::CreateInfoBar() {
   LinkInfoBarController* controller =

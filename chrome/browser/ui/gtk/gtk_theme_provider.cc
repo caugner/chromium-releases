@@ -11,6 +11,8 @@
 #include "base/environment.h"
 #include "base/nix/xdg_util.h"
 #include "base/stl_util-inl.h"
+#include "chrome/browser/browser_list.h"
+#include "chrome/browser/browser_window.h"
 #include "chrome/browser/metrics/user_metrics.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
@@ -19,17 +21,11 @@
 #include "chrome/browser/ui/gtk/gtk_chrome_button.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/gtk/hover_controller_gtk.h"
-#include "chrome/common/notification_details.h"
-#include "chrome/common/notification_service.h"
-#include "chrome/common/notification_source.h"
-#include "chrome/common/notification_type.h"
 #include "chrome/common/pref_names.h"
-#include "gfx/canvas_skia.h"
-#include "gfx/color_utils.h"
-#include "gfx/gtk_util.h"
-#include "gfx/skbitmap_operations.h"
-#include "gfx/skia_util.h"
-#include "gfx/skia_utils_gtk.h"
+#include "content/common/notification_details.h"
+#include "content/common/notification_service.h"
+#include "content/common/notification_source.h"
+#include "content/common/notification_type.h"
 #include "grit/app_resources.h"
 #include "grit/theme_resources.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -38,6 +34,12 @@
 #include "third_party/skia/include/core/SkShader.h"
 #include "ui/base/gtk/gtk_signal_registrar.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/color_utils.h"
+#include "ui/gfx/gtk_util.h"
+#include "ui/gfx/skbitmap_operations.h"
+#include "ui/gfx/skia_util.h"
+#include "ui/gfx/skia_utils_gtk.h"
 
 namespace {
 
@@ -632,6 +634,9 @@ void GtkThemeProvider::NotifyThemeChanged(const Extension* extension) {
     gtk_chrome_button_set_use_gtk_rendering(
         GTK_CHROME_BUTTON(*it), use_gtk_);
   }
+
+  GtkWindow* window = BrowserList::GetLastActive()->window()->GetNativeHandle();
+  gtk_util::SetDefaultWindowIcon(window);
 }
 
 void GtkThemeProvider::FreePlatformCaches() {

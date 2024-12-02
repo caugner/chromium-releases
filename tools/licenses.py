@@ -73,7 +73,6 @@ PRUNE_PATHS = set([
     os.path.join('third_party', 'googlemac'),
     os.path.join('third_party', 'pcre'),
     os.path.join('third_party', 'psutils'),
-    os.path.join('third_party', 'py'),
     os.path.join('third_party', 'sawbuck'),
 
     # Redistribution does not require attribution in documentation.
@@ -94,12 +93,6 @@ ADDITIONAL_PATHS = (
     # The directory with the word list for Chinese and Japanese segmentation
     # with different license terms than ICU.
     os.path.join('third_party','icu','source','data','brkitr'),
-    # A bit of a hack. In SPECIAL_CASES, we override all the fields for v8.core
-    # and v8.strongtalk, so these don't need to be (and aren't) actual 
-    # directories. This is just a way to insert two items into the list of 
-    # items to be processed.
-    os.path.join('v8.core'),
-    os.path.join('v8.strongtalk'),
 )
 
 
@@ -142,18 +135,6 @@ SPECIAL_CASES = {
         "Name": "pdfsqueeze",
         "URL": "http://code.google.com/p/pdfsqueeze/",
         "License File": "COPYING",
-    },
-    # v8.core and v8.strongtalk aren't directories. We just want to include
-    # two LICENSE files without having to create empty directories to hold them.
-    os.path.join('v8.core'): {
-        "Name": "V8 JavaScript Engine",
-        "URL": "http://code.google.com/p/v8/",
-        "License File": "/v8/LICENSE.v8",
-    },
-    os.path.join('v8.strongtalk'): {
-        "Name": "Strongtalk",
-        "URL": "http://www.strongtalk.org/",
-        "License File": "/v8/LICENSE.strongtalk",
     },
 }
 

@@ -166,6 +166,8 @@
         '<(DEPTH)/skia/skia.gyp:skia',
         '<(DEPTH)/third_party/icu/icu.gyp:icui18n',
         '<(DEPTH)/third_party/icu/icu.gyp:icuuc',
+        '<(DEPTH)/third_party/libjingle/libjingle.gyp:libjingle',
+        '<(DEPTH)/third_party/libjingle/libjingle.gyp:libjingle_p2p',
         '<(DEPTH)/third_party/npapi/npapi.gyp:npapi',
         '<(DEPTH)/ppapi/ppapi.gyp:ppapi_c',
         'webkit_resources',
@@ -192,7 +194,6 @@
         '../plugins/npapi/gtk_plugin_container_manager.h',
         '../plugins/npapi/npapi_extension_thunk.cc',
         '../plugins/npapi/npapi_extension_thunk.h',
-        '../plugins/npapi/nphostapi.h',
         '../plugins/npapi/plugin_constants_win.cc',
         '../plugins/npapi/plugin_constants_win.h',
         '../plugins/npapi/plugin_group.cc',
@@ -222,7 +223,6 @@
         '../plugins/npapi/plugin_string_stream.h',
         '../plugins/npapi/plugin_web_event_converter_mac.h',
         '../plugins/npapi/plugin_web_event_converter_mac.mm',
-        '../plugins/npapi/ppb_private.h',
         '../plugins/npapi/quickdraw_drawing_manager_mac.cc',
         '../plugins/npapi/quickdraw_drawing_manager_mac.h',
         '../plugins/npapi/webplugin.cc',
@@ -263,6 +263,8 @@
         '../plugins/ppapi/event_conversion.h',
         '../plugins/ppapi/file_callbacks.cc',
         '../plugins/ppapi/file_callbacks.h',
+        '../plugins/ppapi/file_path.cc',
+        '../plugins/ppapi/file_path.h',
         '../plugins/ppapi/fullscreen_container.h',
         '../plugins/ppapi/npapi_glue.cc',
         '../plugins/ppapi/npapi_glue.h',
@@ -295,9 +297,17 @@
         '../plugins/ppapi/ppb_file_ref_impl.h',
         '../plugins/ppapi/ppb_file_system_impl.cc',
         '../plugins/ppapi/ppb_file_system_impl.h',
+        '../plugins/ppapi/ppb_flash_clipboard_impl.cc',
+        '../plugins/ppapi/ppb_flash_clipboard_impl.h',
+        '../plugins/ppapi/ppb_flash_file_impl.cc',
+        '../plugins/ppapi/ppb_flash_file_impl.h',
         '../plugins/ppapi/ppb_flash_impl.cc',
         '../plugins/ppapi/ppb_flash_impl.h',
         '../plugins/ppapi/ppb_flash_impl_linux.cc',
+        '../plugins/ppapi/ppb_flash_menu_impl.cc',
+        '../plugins/ppapi/ppb_flash_menu_impl.h',
+        '../plugins/ppapi/ppb_flash_net_connector_impl.cc',
+        '../plugins/ppapi/ppb_flash_net_connector_impl.h',
         '../plugins/ppapi/ppb_font_impl.cc',
         '../plugins/ppapi/ppb_font_impl.h',
         '../plugins/ppapi/ppb_gles_chromium_texture_mapping_impl.cc',
@@ -314,6 +324,8 @@
         '../plugins/ppapi/ppb_opengles_impl.h',
         '../plugins/ppapi/ppb_pdf_impl.cc',
         '../plugins/ppapi/ppb_pdf_impl.h',
+        '../plugins/ppapi/ppb_proxy_impl.cc',
+        '../plugins/ppapi/ppb_proxy_impl.h',
         '../plugins/ppapi/ppb_scrollbar_impl.cc',
         '../plugins/ppapi/ppb_scrollbar_impl.h',
         '../plugins/ppapi/ppb_surface_3d_impl.cc',
@@ -418,12 +430,14 @@
         'webdropdata.h',
         'webfileutilities_impl.cc',
         'webfileutilities_impl.h',
+        'webkit_constants.h',
         'webkit_glue.cc',
         'webkit_glue.h',
         'webkitclient_impl.cc',
         'webkitclient_impl.h',
         'webmediaplayer_impl.h',
         'webmediaplayer_impl.cc',
+        'webmenuitem.cc',
         'webmenuitem.h',
         'webmenurunner_mac.h',
         'webmenurunner_mac.mm',
@@ -482,7 +496,7 @@
           'sources/': [['exclude', '_mac\\.(cc|mm)$']],
           'sources!': [
             'webthemeengine_impl_mac.cc',
-          ],          
+          ],
         }, {  # else: OS=="mac"
           'sources/': [['exclude', 'plugin_(lib|list)_posix\\.cc$']],
           'link_settings': {
@@ -496,11 +510,6 @@
             '../plugins/ppapi/ppb_graphics_3d_impl.cc',
             '../plugins/ppapi/ppb_graphics_3d_impl.h',
             '../plugins/ppapi/ppb_open_gl_es_impl.cc',
-          ],
-        }],
-        ['enable_gpu==1', {
-          'dependencies': [
-            '<(DEPTH)/gpu/gpu.gyp:gpu_plugin',
           ],
         }],
         ['OS!="win"', {
@@ -539,5 +548,42 @@
         }],
       ],
     },
+  ],
+  'conditions': [
+    ['use_third_party_translations==1', {
+      'targets': [
+        {
+          'target_name': 'inspector_strings',
+          'type': 'none',
+          'variables': {
+            'grit_out_dir': '<(PRODUCT_DIR)/resources/inspector/l10n',
+          },
+          'actions': [
+            {
+              'action_name': 'inspector_strings',
+              'variables': {
+                'input_path': './inspector_strings.grd',
+              },
+              'inputs': [
+                '<!@(<(grit_info_cmd) --inputs <(input_path))',
+              ],
+              'outputs': [
+                '<!@(<(grit_info_cmd) --outputs \'<(grit_out_dir)\' <(input_path))',
+              ],
+              'action': ['<@(grit_cmd)',
+                         '-i', '<(input_path)', 'build',
+                         '-o', '<(grit_out_dir)',
+                         '<@(grit_defines)'],
+              'message': 'Generating resources from <(input_path)',
+            },
+          ],
+          'conditions': [
+            ['OS=="win"', {
+              'dependencies': ['<(DEPTH)/build/win/system.gyp:cygwin'],
+            }],
+          ],
+        },
+      ],
+    }],
   ],
 }

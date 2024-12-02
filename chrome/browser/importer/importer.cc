@@ -10,33 +10,29 @@
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/browser_thread.h"
-#include "chrome/browser/browsing_instance.h"
 #include "chrome/browser/importer/firefox_profile_lock.h"
 #include "chrome/browser/importer/importer_bridge.h"
-#include "chrome/browser/renderer_host/site_instance.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_model.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/webdata/web_data_service.h"
 #include "chrome/common/notification_source.h"
-#include "gfx/codec/png_codec.h"
-#include "gfx/favicon_size.h"
+#include "content/browser/browser_thread.h"
+#include "content/browser/browsing_instance.h"
+#include "content/browser/site_instance.h"
 #include "grit/generated_resources.h"
 #include "skia/ext/image_operations.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/gfx/codec/png_codec.h"
+#include "ui/gfx/favicon_size.h"
 #include "webkit/glue/image_decoder.h"
 
 // TODO(port): Port these files.
 #if defined(OS_WIN)
-#include "app/win/win_util.h"
-#include "chrome/browser/ui/views/importer_lock_view.h"
+#include "ui/base/message_box_win.h"
 #include "views/window/window.h"
-#elif defined(OS_MACOSX)
-#include "chrome/browser/ui/cocoa/importer/importer_lock_dialog.h"
-#elif defined(TOOLKIT_USES_GTK)
-#include "chrome/browser/ui/gtk/import_lock_dialog_gtk.h"
 #endif
 
 using webkit_glue::PasswordForm;
@@ -88,28 +84,10 @@ ImporterHost::ImporterHost()
       installed_bookmark_observer_(false),
       is_source_readable_(true),
       headless_(false),
-      parent_window_(NULL),
-      importer_list_(new ImporterList) {
-  importer_list_->DetectSourceProfilesHack();
-}
-
-ImporterHost::ImporterHost(ImporterList::Observer* observer)
-    : profile_(NULL),
-      observer_(NULL),
-      task_(NULL),
-      importer_(NULL),
-      waiting_for_bookmarkbar_model_(false),
-      installed_bookmark_observer_(false),
-      is_source_readable_(true),
-      headless_(false),
-      parent_window_(NULL),
-      importer_list_(new ImporterList) {
-  importer_list_->DetectSourceProfiles(observer);
+      parent_window_(NULL) {
 }
 
 ImporterHost::~ImporterHost() {
-  importer_list_->SetObserver(NULL);
-
   if (NULL != importer_)
     importer_->Release();
 
@@ -146,14 +124,7 @@ void ImporterHost::ShowWarningDialog() {
   if (headless_) {
     OnLockViewEnd(false);
   } else {
-#if defined(OS_WIN)
-    views::Window::CreateChromeWindow(NULL, gfx::Rect(),
-                                      new ImporterLockView(this))->Show();
-#elif defined(TOOLKIT_USES_GTK)
-    ImportLockDialogGtk::Show(parent_window_, this);
-#else
-    ImportLockDialogCocoa::ShowWarning(this);
-#endif
+    browser::ShowImportLockDialog(parent_window_, this);
   }
 }
 
@@ -215,7 +186,7 @@ void ImporterHost::StartImportSettings(
   // credentials.
   if (profile_info.browser_type == importer::GOOGLE_TOOLBAR5) {
     if (!toolbar_importer_utils::IsGoogleGAIACookieInstalled()) {
-      app::win::MessageBox(
+      ui::MessageBox(
           NULL,
           UTF16ToWide(l10n_util::GetStringUTF16(
               IDS_IMPORTER_GOOGLE_LOGIN_TEXT)).c_str(),
@@ -329,15 +300,6 @@ ExternalProcessImporterHost::ExternalProcessImporterHost()
       import_process_launched_(false) {
 }
 
-ExternalProcessImporterHost::ExternalProcessImporterHost(
-    ImporterList::Observer* observer)
-    : ImporterHost(observer),
-      items_(0),
-      import_to_bookmark_bar_(false),
-      cancelled_(false),
-      import_process_launched_(false) {
-}
-
 void ExternalProcessImporterHost::Loaded(BookmarkModel* model) {
   DCHECK(model->IsLoaded());
   model->RemoveObserver(this);
@@ -413,7 +375,7 @@ ExternalProcessImporterClient::ExternalProcessImporterClient(
       items_(items),
       import_to_bookmark_bar_(import_to_bookmark_bar),
       bridge_(bridge),
-      cancelled_(FALSE) {
+      cancelled_(false) {
   bridge_->AddRef();
   process_importer_host_->ImportStarted();
 }

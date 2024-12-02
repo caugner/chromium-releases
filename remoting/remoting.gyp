@@ -73,7 +73,14 @@
         'chromoting_base',
         'chromoting_client',
         'chromoting_jingle_glue',
-        '../ppapi/ppapi.gyp:ppapi_cpp_objects',
+        '<(DEPTH)/ppapi/ppapi.gyp:ppapi_cpp_objects',
+
+        # TODO(sergeyu): This is a hack: plugin should not depend on
+        # webkit glue. Skia is needed here to add include path webkit glue
+        # depends on. See comments in chromoting_instance.cc for details.
+        # crbug.com/74951
+        '<(DEPTH)/webkit/support/webkit_support.gyp:glue',
+        '<(DEPTH)/skia/skia.gyp:skia',
       ],
       'sources': [
         'client/plugin/chromoting_instance.cc',
@@ -84,10 +91,16 @@
         'client/plugin/pepper_entrypoints.h',
         'client/plugin/pepper_input_handler.cc',
         'client/plugin/pepper_input_handler.h',
+        'client/plugin/pepper_port_allocator_session.cc',
+        'client/plugin/pepper_port_allocator_session.h',
         'client/plugin/pepper_view.cc',
         'client/plugin/pepper_view.h',
+        'client/plugin/pepper_view_proxy.cc',
+        'client/plugin/pepper_view_proxy.h',
         'client/plugin/pepper_util.cc',
         'client/plugin/pepper_util.h',
+        'client/plugin/pepper_xmpp_proxy.cc',
+        'client/plugin/pepper_xmpp_proxy.h',
         '../media/base/yuv_convert.cc',
         '../media/base/yuv_convert.h',
         '../media/base/yuv_row.h',
@@ -111,7 +124,7 @@
       'target_name': 'chromoting_base',
       'type': '<(library)',
       'dependencies': [
-        '../gfx/gfx.gyp:gfx',
+        '../ui/gfx/gfx.gyp:gfx',
         '../media/media.gyp:media',
         '../third_party/protobuf/protobuf.gyp:protobuf_lite',
         '../third_party/libvpx/libvpx.gyp:libvpx_include',
@@ -181,6 +194,7 @@
         'chromoting_base',
         'chromoting_jingle_glue',
         'chromoting_protocol',
+        'differ_block',
       ],
       'sources': [
         'host/access_verifier.cc',
@@ -193,10 +207,10 @@
         'host/chromoting_host.h',
         'host/chromoting_host_context.cc',
         'host/chromoting_host_context.h',
+        'host/desktop_environment.cc',
+        'host/desktop_environment.h',
         'host/differ.h',
         'host/differ.cc',
-        'host/differ_block.h',
-        'host/differ_block.cc',
         'host/screen_recorder.cc',
         'host/screen_recorder.h',
         'host/heartbeat_sender.cc',
@@ -205,12 +219,11 @@
         'host/host_config.h',
         'host/host_key_pair.cc',
         'host/host_key_pair.h',
-        'host/host_stub_fake.cc',
-        'host/host_stub_fake.h',
         'host/json_host_config.cc',
         'host/json_host_config.h',
         'host/in_memory_host_config.cc',
         'host/in_memory_host_config.h',
+        'host/user_authenticator.h',
       ],
       'conditions': [
         ['OS=="win"', {
@@ -219,6 +232,9 @@
             'host/capturer_gdi.h',
             'host/event_executor_win.cc',
             'host/event_executor_win.h',
+            'host/user_authenticator_fake.cc',
+            'host/user_authenticator_fake.h',
+            'host/user_authenticator_win.cc',
           ],
         }],
         ['OS=="linux"', {
@@ -227,12 +243,16 @@
             'host/capturer_linux.h',
             'host/event_executor_linux.cc',
             'host/event_executor_linux.h',
+            'host/user_authenticator_pam.cc',
+            'host/user_authenticator_pam.h',
+            'host/user_authenticator_linux.cc'
           ],
           'link_settings': {
             'libraries': [
               '-lX11',
               '-lXdamage',
               '-lXtst',
+              '-lpam',
             ],
           },
         }],
@@ -242,6 +262,8 @@
             'host/capturer_mac.h',
             'host/event_executor_mac.cc',
             'host/event_executor_mac.h',
+            'host/user_authenticator_mac.cc',
+            'host/user_authenticator_mac.h',
           ],
           'link_settings': {
             'libraries': [
@@ -292,6 +314,8 @@
         'host/capturer_fake_ascii.cc',
         'host/capturer_fake_ascii.h',
         'host/simple_host_process.cc',
+        '../base/test/mock_chrome_application_mac.mm',
+        '../base/test/mock_chrome_application_mac.h',
       ],
     },  # end of target 'chromoting_simple_host'
 
@@ -324,16 +348,14 @@
       'sources': [
         'jingle_glue/channel_socket_adapter.cc',
         'jingle_glue/channel_socket_adapter.h',
+        'jingle_glue/http_port_allocator.cc',
+        'jingle_glue/http_port_allocator.h',
         'jingle_glue/iq_request.cc',
         'jingle_glue/iq_request.h',
         'jingle_glue/jingle_client.cc',
         'jingle_glue/jingle_client.h',
-        'jingle_glue/jingle_info_task.cc',
-        'jingle_glue/jingle_info_task.h',
         'jingle_glue/jingle_thread.cc',
         'jingle_glue/jingle_thread.h',
-        'jingle_glue/relay_port_allocator.cc',
-        'jingle_glue/relay_port_allocator.h',
         'jingle_glue/stream_socket_adapter.cc',
         'jingle_glue/stream_socket_adapter.h',
         'jingle_glue/ssl_adapter.h',
@@ -342,6 +364,7 @@
         'jingle_glue/ssl_socket_adapter.h',
         'jingle_glue/utils.cc',
         'jingle_glue/utils.h',
+        'jingle_glue/xmpp_proxy.h',
         'jingle_glue/xmpp_socket_adapter.cc',
         'jingle_glue/xmpp_socket_adapter.h',
       ],
@@ -364,22 +387,22 @@
         'protocol/client_control_Sender.h',
         'protocol/client_message_dispatcher.cc',
         'protocol/client_message_dispatcher.h',
+        'protocol/client_stub.cc',
         'protocol/client_stub.h',
         'protocol/connection_to_client.cc',
         'protocol/connection_to_client.h',
         'protocol/connection_to_host.cc',
         'protocol/connection_to_host.h',
-        'protocol/host_control_message_handler.h',
         'protocol/host_control_sender.cc',
         'protocol/host_control_sender.h',
-        'protocol/host_event_message_handler.h',
         'protocol/host_message_dispatcher.cc',
         'protocol/host_message_dispatcher.h',
+        'protocol/host_stub.cc',
         'protocol/host_stub.h',
         'protocol/input_sender.cc',
         'protocol/input_sender.h',
-        'protocol/jingle_connection_to_host.cc',
-        'protocol/jingle_connection_to_host.h',
+        'protocol/input_stub.cc',
+        'protocol/input_stub.h',
         'protocol/jingle_session.cc',
         'protocol/jingle_session.h',
         'protocol/jingle_session_manager.cc',
@@ -410,6 +433,8 @@
         'protocol/session_manager.h',
         'protocol/socket_reader_base.cc',
         'protocol/socket_reader_base.h',
+        'protocol/socket_wrapper.cc',
+        'protocol/socket_wrapper.h',
         'protocol/util.cc',
         'protocol/util.h',
         'protocol/video_reader.cc',
@@ -421,6 +446,46 @@
     },  # end of target 'chromoting_protocol'
 
     {
+      'target_name': 'differ_block',
+      'type': '<(library)',
+      'include_dirs': [
+        '..',
+      ],
+      'dependencies': [
+        '../media/media.gyp:cpu_features',
+      ],
+      'conditions': [
+        [ 'target_arch == "ia32" or target_arch == "x64"', {
+          'dependencies': [
+            'differ_block_sse2',
+          ],
+        }],
+      ],
+      'sources': [
+        'host/differ_block.cc',
+        'host/differ_block.h',
+      ],
+    }, # end of target differ_block
+
+    {
+      'target_name': 'differ_block_sse2',
+      'type': '<(library)',
+      'include_dirs': [
+        '..',
+      ],
+      'conditions': [
+        [ 'OS == "linux" or OS == "freebsd" or OS == "openbsd"', {
+          'cflags': [
+            '-msse2',
+          ],
+        }],
+      ],
+      'sources': [
+        'host/differ_block_sse2.cc',
+      ],
+    }, # end of target differ_block_sse2
+
+    {
       'target_name': 'chromotocol_test_client',
       'type': 'executable',
       'dependencies': [
@@ -429,6 +494,8 @@
       ],
       'sources': [
         'protocol/protocol_test_client.cc',
+        '../base/test/mock_chrome_application_mac.mm',
+        '../base/test/mock_chrome_application_mac.h',
       ],
     },  # end of target 'chromotocol_test_client'
 
@@ -445,7 +512,7 @@
         '../base/base.gyp:base',
         '../base/base.gyp:base_i18n',
         '../base/base.gyp:test_support_base',
-        '../gfx/gfx.gyp:gfx',
+        '../ui/gfx/gfx.gyp:gfx',
         '../testing/gmock.gyp:gmock',
         '../testing/gtest.gyp:gtest',
       ],
@@ -462,24 +529,29 @@
         'base/encode_decode_unittest.cc',
         'base/encoder_vp8_unittest.cc',
         'base/encoder_row_based_unittest.cc',
-        'base/mock_objects.h',
+        'base/base_mock_objects.cc',
+        'base/base_mock_objects.h',
 # BUG57351        'client/chromoting_view_unittest.cc',
-        'client/mock_objects.h',
         'host/access_verifier_unittest.cc',
         'host/chromoting_host_context_unittest.cc',
-        'host/differ_unittest.cc',
+        'host/chromoting_host_unittest.cc',
+        'host/desktop_environment_fake.cc',
+        'host/desktop_environment_fake.h',
         'host/differ_block_unittest.cc',
+        'host/differ_unittest.cc',
         'host/heartbeat_sender_unittest.cc',
         'host/host_key_pair_unittest.cc',
+        'host/host_mock_objects.cc',
+        'host/host_mock_objects.h',
         'host/json_host_config_unittest.cc',
-        'host/mock_objects.h',
         'host/screen_recorder_unittest.cc',
         'host/test_key_pair.h',
         'jingle_glue/channel_socket_adapter_unittest.cc',
-        'jingle_glue/jingle_client_unittest.cc',
-        'jingle_glue/jingle_thread_unittest.cc',
         'jingle_glue/iq_request_unittest.cc',
-        'jingle_glue/mock_objects.h',
+        'jingle_glue/jingle_client_unittest.cc',
+        'jingle_glue/jingle_glue_mock_objects.cc',
+        'jingle_glue/jingle_glue_mock_objects.h',
+        'jingle_glue/jingle_thread_unittest.cc',
         'jingle_glue/stream_socket_adapter_unittest.cc',
         'protocol/connection_to_client_unittest.cc',
         'protocol/fake_session.cc',
@@ -487,7 +559,8 @@
         'protocol/jingle_session_unittest.cc',
         'protocol/message_decoder_unittest.cc',
         'protocol/message_reader_unittest.cc',
-        'protocol/mock_objects.h',
+        'protocol/protocol_mock_objects.cc',
+        'protocol/protocol_mock_objects.h',
         'protocol/rtp_video_reader_unittest.cc',
         'protocol/rtp_video_writer_unittest.cc',
         'protocol/session_manager_pair.cc',

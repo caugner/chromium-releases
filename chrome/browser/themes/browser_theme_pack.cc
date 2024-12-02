@@ -9,10 +9,8 @@
 #include "base/threading/thread_restrictions.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/themes/browser_theme_provider.h"
-#include "gfx/codec/png_codec.h"
-#include "gfx/skbitmap_operations.h"
+#include "content/browser/browser_thread.h"
 #include "grit/app_resources.h"
 #include "grit/theme_resources.h"
 #include "net/base/file_stream.h"
@@ -20,6 +18,8 @@
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "ui/base/resource/data_pack.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/codec/png_codec.h"
+#include "ui/gfx/skbitmap_operations.h"
 
 namespace {
 
@@ -298,8 +298,8 @@ RefCountedMemory* ReadFileData(const FilePath& path) {
 
 // Does error checking for invalid incoming data while trying to read an
 // floating point value.
-bool ValidRealValue(ListValue* tint_list, int index, double* out) {
-  if (tint_list->GetReal(index, out))
+bool ValidDoubleValue(ListValue* tint_list, int index, double* out) {
+  if (tint_list->GetDouble(index, out))
     return true;
 
   int value = 0;
@@ -619,9 +619,9 @@ void BrowserThemePack::BuildTintsFromJSON(DictionaryValue* tints_value) {
         (tint_list->GetSize() == 3)) {
       color_utils::HSL hsl = { -1, -1, -1 };
 
-      if (ValidRealValue(tint_list, 0, &hsl.h) &&
-          ValidRealValue(tint_list, 1, &hsl.s) &&
-          ValidRealValue(tint_list, 2, &hsl.l)) {
+      if (ValidDoubleValue(tint_list, 0, &hsl.h) &&
+          ValidDoubleValue(tint_list, 1, &hsl.s) &&
+          ValidDoubleValue(tint_list, 2, &hsl.l)) {
         int id = GetIntForString(*iter, kTintTable);
         if (id != -1) {
           temp_tints[id] = hsl;
@@ -680,7 +680,7 @@ void BrowserThemePack::ReadColorsFromJSON(
         if (color_list->GetSize() == 4) {
           double alpha;
           int alpha_int;
-          if (color_list->GetReal(3, &alpha)) {
+          if (color_list->GetDouble(3, &alpha)) {
             color = SkColorSetARGB(static_cast<int>(alpha * 255), r, g, b);
           } else if (color_list->GetInteger(3, &alpha_int) &&
                      (alpha_int == 0 || alpha_int == 1)) {

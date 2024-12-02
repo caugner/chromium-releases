@@ -12,20 +12,21 @@
 
 namespace webdriver {
 
+class Response;
+
 // A call with HTTP GET will return the title of the tab. See:
 // http://code.google.com/p/selenium/wiki/JsonWireProtocol#/session/:sessionId/title
 class TitleCommand : public WebDriverCommand {
  public:
-  inline TitleCommand(const std::vector<std::string>& path_segments,
-                      const DictionaryValue* const parameters)
-      : WebDriverCommand(path_segments, parameters) {}
-  virtual ~TitleCommand() {}
+  TitleCommand(const std::vector<std::string>& path_segments,
+               const DictionaryValue* const parameters);
+  virtual ~TitleCommand();
 
-  virtual bool DoesGet() { return true; }
+  virtual bool DoesGet();
   virtual void ExecuteGet(Response* const response);
 
  private:
-  virtual bool RequiresValidTab() { return true; }
+  virtual bool RequiresValidTab();
 
   DISALLOW_COPY_AND_ASSIGN(TitleCommand);
 };

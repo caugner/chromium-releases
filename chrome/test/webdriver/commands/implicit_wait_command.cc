@@ -2,43 +2,65 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "chrome/test/webdriver/commands/implicit_wait_command.h"
+
 #include <string>
 
+#include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/test/webdriver/commands/implicit_wait_command.h"
+#include "chrome/test/webdriver/commands/response.h"
 
 namespace webdriver {
 
-bool ImplicitWaitCommand::Init(Response* const response) {
-  if (!(WebDriverCommand::Init(response))) {
-    SET_WEBDRIVER_ERROR(response, "Failure on Init for find element",
-                        kInternalServerError);
-    return false;
-  }
+ImplicitWaitCommand::ImplicitWaitCommand(
+    const std::vector<std::string>& path_segments,
+    const DictionaryValue* const parameters)
+    : WebDriverCommand(path_segments, parameters) {}
 
-  // Record the requested wait time.
-  if (!GetIntegerParameter("ms", &ms_to_wait_)) {
-    SET_WEBDRIVER_ERROR(response, "Request missing ms parameter",
-                        kBadRequest);
-    return false;
-  }
+ImplicitWaitCommand::~ImplicitWaitCommand() {}
 
+bool ImplicitWaitCommand::DoesPost() {
   return true;
 }
 
 void ImplicitWaitCommand::ExecutePost(Response* const response) {
-  // Validate the wait time before setting it to the session.
-  if (ms_to_wait_ < 0) {
-    SET_WEBDRIVER_ERROR(response, "Wait must be non-negative",
-                        kBadRequest);
+  if (!HasParameter("ms")) {
+    SET_WEBDRIVER_ERROR(response, "Request missing ms parameter", kBadRequest);
     return;
   }
 
-  session_->set_implicit_wait(ms_to_wait_);
-  LOG(INFO) << "Implicit wait set to: " << ms_to_wait_ << " ms";
+  int ms_to_wait;
+  if (!GetIntegerParameter("ms", &ms_to_wait)) {
+    // Client may have sent us a floating point number. Since DictionaryValue
+    // will not do a down cast for us, we must explicitly check for it here.
+    // Note webdriver only supports whole milliseconds for a timeout value, so
+    // we are safe to downcast.
+    double ms;
+    if (!GetDoubleParameter("ms", &ms)) {
+      SET_WEBDRIVER_ERROR(response, "ms parameter is not a number",
+                          kBadRequest);
+      return;
+    }
+    ms_to_wait = static_cast<int>(ms);
+  }
 
-  response->set_value(new StringValue("success"));
-  response->set_status(kSuccess);
+  // Validate the wait time before setting it to the session.
+  if (ms_to_wait < 0) {
+    SET_WEBDRIVER_ERROR(response,
+        base::StringPrintf("Wait must be non-negative: %d", ms_to_wait).c_str(),
+        kBadRequest);
+    return;
+  }
+
+  session_->set_implicit_wait(ms_to_wait);
+  LOG(INFO) << "Implicit wait set to: " << ms_to_wait << " ms";
+
+  response->SetValue(new StringValue("success"));
+  response->SetStatus(kSuccess);
+}
+
+bool ImplicitWaitCommand::RequiresValidTab() {
+  return true;
 }
 
 }  // namespace webdriver

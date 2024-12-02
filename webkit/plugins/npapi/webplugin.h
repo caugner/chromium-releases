@@ -9,8 +9,8 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "gfx/native_widget_types.h"
-#include "gfx/rect.h"
+#include "ui/gfx/native_widget_types.h"
+#include "ui/gfx/rect.h"
 
 // TODO(port): this typedef is obviously incorrect on non-Windows
 // platforms, but now a lot of code now accidentally depends on them
@@ -166,7 +166,7 @@ class WebPlugin {
   virtual void BindFakePluginWindowHandle(bool opaque) {}
 
   // Returns the accelerated surface abstraction for accelerated plugins.
-  virtual WebPluginAcceleratedSurface* GetAcceleratedSurface() { return NULL; }
+  virtual WebPluginAcceleratedSurface* GetAcceleratedSurface();
 #endif
 
   // Gets the WebPluginDelegate that implements the interface.

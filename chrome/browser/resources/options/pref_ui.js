@@ -292,7 +292,8 @@ cr.define('options', function() {
       if (this.continuous)
         this.setRangePref_();
 
-      this.notifyChange(this, this.mapValueToRange_(this.value));
+      if (this.notifyChange)
+        this.notifyChange(this, this.mapValueToRange_(this.value));
     },
 
     /**
@@ -302,6 +303,9 @@ cr.define('options', function() {
     setRangePref_: function() {
       Preferences.setIntegerPref(
           this.pref, this.mapValueToRange_(this.value), this.metric);
+
+      if (this.notifyPrefChange)
+        this.notifyPrefChange(this, this.mapValueToRange_(this.value));
     },
 
     /**
@@ -410,8 +414,8 @@ cr.define('options', function() {
                 Preferences.setIntegerPref(self.pref,
                     self.options[self.selectedIndex].value, self.metric);
                 break;
-              case 'real':
-                Preferences.setRealPref(self.pref,
+              case 'double':
+                Preferences.setDoublePref(self.pref,
                     self.options[self.selectedIndex].value, self.metric);
                 break;
               case 'boolean':

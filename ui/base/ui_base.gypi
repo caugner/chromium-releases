@@ -46,8 +46,13 @@
       'type': '<(library)',
       'dependencies': [
         '../base/base.gyp:base',
-        '../gfx/gfx.gyp:gfx',
+        '../ui/gfx/gfx.gyp:gfx',
         '../skia/skia.gyp:skia',
+        '../third_party/icu/icu.gyp:icui18n',
+        '../third_party/icu/icu.gyp:icuuc',
+      ],
+      # Export these dependencies since text_elider.h includes ICU headers.
+      'export_dependent_settings': [
         '../third_party/icu/icu.gyp:icui18n',
         '../third_party/icu/icu.gyp:icuuc',
       ],

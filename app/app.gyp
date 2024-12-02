@@ -58,8 +58,8 @@
         'sql/connection_unittest.cc',
         'sql/statement_unittest.cc',
         'sql/transaction_unittest.cc',
+        'test_suite.cc',
         'test_suite.h',
-        'win/win_util_unittest.cc',
       ],
       'include_dirs': [
         '..',
@@ -79,7 +79,6 @@
           'sources!': [
             '../ui/base/dragdrop/os_exchange_data_win_unittest.cc',
             '../ui/base/view_prop_unittest.cc',
-            'win_util_unittest.cc',
           ],
         }],
         ['OS =="linux" or OS =="freebsd"', {

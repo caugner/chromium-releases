@@ -11,6 +11,7 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_window.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/views/browser_actions_container.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
@@ -27,7 +28,7 @@
 #include "views/controls/button/image_button.h"
 #include "views/controls/image_view.h"
 #include "views/controls/label.h"
-#include "views/standard_layout.h"
+#include "views/layout/layout_constants.h"
 #include "views/view.h"
 
 namespace {
@@ -40,11 +41,11 @@ const int kRightColumnWidth = 285;
 // around the content view. We compensate by reducing our outer borders by this
 // amount + 4px.
 const int kOuterMarginInset = 10;
-const int kHorizOuterMargin = kPanelHorizMargin - kOuterMarginInset;
-const int kVertOuterMargin = kPanelVertMargin - kOuterMarginInset;
+const int kHorizOuterMargin = views::kPanelHorizMargin - kOuterMarginInset;
+const int kVertOuterMargin = views::kPanelVertMargin - kOuterMarginInset;
 
 // Interior vertical margin is 8px smaller than standard
-const int kVertInnerMargin = kPanelVertMargin - 8;
+const int kVertInnerMargin = views::kPanelVertMargin - 8;
 
 // The image we use for the close button has three pixels of whitespace padding.
 const int kCloseButtonPadding = 3;
@@ -60,6 +61,18 @@ const int kAnimationWaitTime = 50;
 const int kAnimationWaitMaxRetry = 10;
 
 }  // namespace
+
+namespace browser {
+
+void ShowExtensionInstalledBubble(
+    const Extension* extension,
+    Browser* browser,
+    SkBitmap icon,
+    Profile* profile) {
+  ExtensionInstalledBubble::Show(extension, browser, icon);
+}
+
+} // namespace browser
 
 // InstalledBubbleContent is the content view which is placed in the
 // ExtensionInstalledBubble. It displays the install icon and explanatory
@@ -148,9 +161,9 @@ class InstalledBubbleContent : public views::View,
   virtual gfx::Size GetPreferredSize() {
     int width = kHorizOuterMargin;
     width += kIconSize;
-    width += kPanelHorizMargin;
+    width += views::kPanelHorizMargin;
     width += kRightColumnWidth;
-    width += 2*kPanelHorizMargin;
+    width += 2 * views::kPanelHorizMargin;
     width += kHorizOuterMargin;
 
     int height = kVertOuterMargin;
@@ -173,7 +186,7 @@ class InstalledBubbleContent : public views::View,
 
     icon_->SetBounds(x, y, kIconSize, kIconSize);
     x += kIconSize;
-    x += kPanelHorizMargin;
+    x += views::kPanelHorizMargin;
 
     y += kRightcolumnVerticalShift;
     heading_->SizeToFit(kRightColumnWidth);
@@ -198,7 +211,7 @@ class InstalledBubbleContent : public views::View,
     y += kVertInnerMargin;
 
     gfx::Size sz;
-    x += kRightColumnWidth + 2 * kPanelHorizMargin + kHorizOuterMargin -
+    x += kRightColumnWidth + 2 * views::kPanelHorizMargin + kHorizOuterMargin -
         close_button_->GetPreferredSize().width();
     y = kVertOuterMargin;
     sz = close_button_->GetPreferredSize();
@@ -256,6 +269,8 @@ ExtensionInstalledBubble::ExtensionInstalledBubble(const Extension* extension,
   registrar_.Add(this, NotificationType::EXTENSION_UNLOADED,
       Source<Profile>(browser->profile()));
 }
+
+ExtensionInstalledBubble::~ExtensionInstalledBubble() {}
 
 void ExtensionInstalledBubble::Observe(NotificationType type,
                                        const NotificationSource& source,
@@ -356,4 +371,12 @@ void ExtensionInstalledBubble::InfoBubbleClosing(InfoBubble* info_bubble,
   }
 
   Release();  // Balanced in ctor.
+}
+
+bool ExtensionInstalledBubble::CloseOnEscape() {
+  return true;
+}
+
+bool ExtensionInstalledBubble::FadeInOnShow() {
+  return true;
 }

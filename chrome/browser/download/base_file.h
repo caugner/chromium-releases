@@ -11,10 +11,12 @@
 #include "base/file_path.h"
 #include "base/linked_ptr.h"
 #include "base/scoped_ptr.h"
-#include "base/third_party/nss/blapi.h"
 #include "chrome/browser/power_save_blocker.h"
 #include "googleurl/src/gurl.h"
 
+namespace base {
+class SecureHash;
+}
 namespace net {
 class FileStream;
 }
@@ -38,9 +40,7 @@ class BaseFile {
   bool AppendDataToFile(const char* data, size_t data_len);
 
   // Rename the download file. Returns true on success.
-  // |path_renamed_| is set to true only if |is_final_rename| is true.
-  // Marked virtual for testing.
-  virtual bool Rename(const FilePath& full_path, bool is_final_rename);
+  virtual bool Rename(const FilePath& full_path);
 
   // Abort the download and automatically close the file.
   void Cancel();
@@ -52,7 +52,6 @@ class BaseFile {
   void AnnotateWithSourceInformation();
 
   FilePath full_path() const { return full_path_; }
-  bool path_renamed() const { return path_renamed_; }
   bool in_progress() const { return file_stream_ != NULL; }
   int64 bytes_so_far() const { return bytes_so_far_; }
 
@@ -68,9 +67,6 @@ class BaseFile {
 
   // Full path to the file including the file name.
   FilePath full_path_;
-
-  // Whether the download is still using its initial temporary path.
-  bool path_renamed_;
 
  private:
   static const size_t kSha256HashLen = 32;
@@ -95,7 +91,7 @@ class BaseFile {
 
   // Used to calculate sha256 hash for the file when calculate_hash_
   // is set.
-  scoped_ptr<SHA256Context> sha_context_;
+  scoped_ptr<base::SecureHash> secure_hash_;
 
   unsigned char sha256_hash_[kSha256HashLen];
 

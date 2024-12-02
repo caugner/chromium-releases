@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,36 +21,38 @@ struct PPB_Audio;
 namespace pp {
 namespace proxy {
 
+class HostResource;
+
 class PPB_Audio_Proxy : public InterfaceProxy {
  public:
   PPB_Audio_Proxy(Dispatcher* dispatcher, const void* target_interface);
   virtual ~PPB_Audio_Proxy();
+
+  static const Info* GetInfo();
 
   const PPB_Audio* ppb_audio_target() const {
     return static_cast<const PPB_Audio*>(target_interface());
   }
 
   // InterfaceProxy implementation.
-  virtual const void* GetSourceInterface() const;
-  virtual InterfaceID GetInterfaceId() const;
   virtual bool OnMessageReceived(const IPC::Message& msg);
 
  private:
   // Plugin->renderer message handlers.
   void OnMsgCreate(PP_Instance instance_id,
-                   PP_Resource config_id,
-                   PP_Resource* result);
-  void OnMsgStartOrStop(PP_Resource audio_id, bool play);
+                   const HostResource& config_id,
+                   HostResource* result);
+  void OnMsgStartOrStop(const HostResource& audio_id, bool play);
 
   // Renderer->plugin message handlers.
-  void OnMsgNotifyAudioStreamCreated(
-      PP_Resource audio_id,
-      int32_t result_code,
-      IPC::PlatformFileForTransit socket_handle,
-      base::SharedMemoryHandle shared_memory_handle,
-      uint32_t shared_memory_length);
+  void OnMsgNotifyAudioStreamCreated(const HostResource& audio_id,
+                                     int32_t result_code,
+                                     IPC::PlatformFileForTransit socket_handle,
+                                     base::SharedMemoryHandle handle,
+                                     uint32_t length);
 
-  void AudioChannelConnected(int32_t result, PP_Resource resource);
+  void AudioChannelConnected(int32_t result,
+                             const HostResource& resource);
 
   // In the renderer, this is called in response to a stream created message.
   // It will retrieve the shared memory and socket handles and place them into
@@ -61,7 +63,7 @@ class PPB_Audio_Proxy : public InterfaceProxy {
   // arguments may be written to, and others may be untouched, depending on
   // where the error occurred.
   int32_t GetAudioConnectedHandles(
-      PP_Resource resource,
+      const HostResource& resource,
       IPC::PlatformFileForTransit* foreign_socket_handle,
       base::SharedMemoryHandle* foreign_shared_memory_handle,
       uint32_t* shared_memory_length);

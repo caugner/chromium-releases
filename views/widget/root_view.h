@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,93 +13,51 @@
 #include "views/focus/focus_search.h"
 #include "views/view.h"
 
-#if defined(OS_LINUX)
-typedef struct _GdkEventExpose GdkEventExpose;
-#endif
-
 namespace views {
 
-class PaintTask;
 class Widget;
-
 #if defined(TOUCH_UI)
 class GestureManager;
 #endif
 
-/////////////////////////////////////////////////////////////////////////////
-//
+////////////////////////////////////////////////////////////////////////////////
 // RootView class
 //
-//   The RootView is the root of a View hierarchy. A RootView is always the
-//   first and only child of a Widget.
+//  The RootView is the root of a View hierarchy. A RootView is attached to a
+//  Widget. The Widget is responsible for receiving events from the host
+//  environment, converting them to views-compatible events and then forwarding
+//  them to the RootView for propagation into the View hierarchy.
 //
-//   The RootView manages the View hierarchy's interface with the Widget
-//   and also maintains the current invalid rect - the region that needs
-//   repainting.
+//  A RootView can have only one child, called its "Contents View" which is
+//  sized to fill the bounds of the RootView (and hence the client area of the
+//  Widget). Call SetContentsView() after the associated Widget has been
+//  initialized to attach the contents view to the RootView.
+//  TODO(beng): Enforce no other callers to AddChildView/tree functions by
+//              overriding those methods as private here.
+//  TODO(beng): Move to internal namespace and remove accessors from
+//              View/Widget.
+//  TODO(beng): Clean up API further, make WidgetImpl a friend.
 //
-/////////////////////////////////////////////////////////////////////////////
 class RootView : public View,
                  public FocusTraversable {
  public:
   static const char kViewClassName[];
 
+  // Creation and lifetime -----------------------------------------------------
   explicit RootView(Widget* widget);
-
   virtual ~RootView();
+
+  // Tree operations -----------------------------------------------------------
 
   // Sets the "contents view" of the RootView. This is the single child view
   // that is responsible for laying out the contents of the widget.
   void SetContentsView(View* contents_view);
 
-  // Layout and Painting functions
+  // Called when parent of the host changed.
+  void NotifyNativeViewHierarchyChanged(bool attached,
+                                        gfx::NativeView native_view);
 
-  // Overridden from View to implement paint scheduling.
-  virtual void SchedulePaint(const gfx::Rect& r, bool urgent);
-
-  // Convenience to schedule the whole view
-  virtual void SchedulePaint();
-
-  // Paint this RootView and its child Views.
-  virtual void ProcessPaint(gfx::Canvas* canvas);
-
-  // If the invalid rect is non-empty and there is a pending paint the RootView
-  // is painted immediately. This is internally invoked as the result of
-  // invoking SchedulePaint.
-  virtual void PaintNow();
-
-  // Whether or not this View needs repainting. If |urgent| is true, this method
-  // returns whether this root view needs to paint as soon as possible.
-  virtual bool NeedsPainting(bool urgent);
-
-  // Invoked by the Widget to discover what rectangle should be painted.
-  const gfx::Rect& GetScheduledPaintRect();
-
-  // Returns the region scheduled to paint clipped to the RootViews bounds.
-  gfx::Rect GetScheduledPaintRectConstrainedToSize();
-
-  // Tree functions
-
-  // Get the Widget that hosts this View.
-  virtual Widget* GetWidget() const;
-
-  // Public API for broadcasting theme change notifications to this View
-  // hierarchy.
-  void NotifyThemeChanged();
-
-  // Public API for broadcasting locale change notifications to this View
-  // hierarchy.
-  void NotifyLocaleChanged();
-
-  // The following event methods are overridden to propagate event to the
-  // control tree
-  virtual bool OnMousePressed(const MouseEvent& e);
-  virtual bool OnMouseDragged(const MouseEvent& e);
-  virtual void OnMouseReleased(const MouseEvent& e, bool canceled);
-  virtual void OnMouseMoved(const MouseEvent& e);
-  virtual void SetMouseHandler(View* new_mouse_handler);
-#if defined(TOUCH_UI)
-  virtual TouchStatus OnTouchEvent(const TouchEvent& e);
-#endif
+  // Input ---------------------------------------------------------------------
 
   // Invoked By the Widget if the mouse drag is interrupted by
   // the system. Invokes OnMouseReleased with a value of true for canceled.
@@ -109,42 +67,18 @@ class RootView : public View,
   // bounds.
   virtual void ProcessOnMouseExited();
 
-  // Make the provided view focused. Also make sure that our Widget is focused.
-  void FocusView(View* view);
-
-  // Returns the View in this RootView hierarchy that has the focus, or NULL if
-  // no View currently has the focus.
-  View* GetFocusedView();
-
   // Process a key event. Send the event to the focused view and up the focus
   // path, and finally to the default keyboard handler, until someone consumes
   // it.  Returns whether anyone consumed the event.
   bool ProcessKeyEvent(const KeyEvent& event);
 
-  // Set the default keyboard handler. The default keyboard handler is
-  // a view that will get an opportunity to process key events when all
-  // views in the focus path did not process an event.
-  //
-  // Note: this is a single view at this point. We may want to make
-  // this a list if needed.
-  void SetDefaultKeyboardHandler(View* v);
+#if defined(TOUCH_UI) && defined(UNIT_TEST)
+  // For unit testing purposes, we use this method to set a mock
+  // GestureManager
+  void SetGestureManager(GestureManager* g) { gesture_manager_ = g; }
+#endif
 
-  // Set whether this root view should focus the corresponding hwnd
-  // when an unprocessed mouse event occurs.
-  void SetFocusOnMousePressed(bool f);
-
-  // Process a mousewheel event. Return true if the event was processed
-  // and false otherwise.
-  // MouseWheel events are sent on the focus path.
-  virtual bool ProcessMouseWheelEvent(const MouseWheelEvent& e);
-
-  // Overridden to handle special root view case.
-  virtual bool IsVisibleInRootView() const;
-
-  // FocusTraversable implementation.
-  virtual FocusSearch* GetFocusSearch();
-  virtual FocusTraversable* GetFocusTraversableParent();
-  virtual View* GetFocusTraversableParentView();
+  // Focus ---------------------------------------------------------------------
 
   // Used to set the FocusTraversable parent after the view has been created
   // (typically when the hierarchy changes and this RootView is added/removed).
@@ -153,54 +87,46 @@ class RootView : public View,
   // Used to set the View parent after the view has been created.
   virtual void SetFocusTraversableParentView(View* view);
 
-  // Called when parent of the host changed.
-  void NotifyNativeViewHierarchyChanged(bool attached,
-                                        gfx::NativeView native_view);
+  // System events -------------------------------------------------------------
 
-  // Returns the name of this class: views/RootView
-  virtual std::string GetClassName() const;
+  // Public API for broadcasting theme change notifications to this View
+  // hierarchy.
+  void ThemeChanged();
 
-  // Clears the region that is schedule to be painted. You nearly never need
-  // to invoke this. This is primarily intended for Widgets.
-  void ClearPaintRect();
+  // Public API for broadcasting locale change notifications to this View
+  // hierarchy.
+  void LocaleChanged();
 
-#if defined(OS_WIN)
-  // Invoked from the Widget to service a WM_PAINT call.
-  void OnPaint(HWND hwnd);
-#elif defined(OS_LINUX)
-  void OnPaint(GdkEventExpose* event);
+  // Overridden from FocusTraversable:
+  virtual FocusSearch* GetFocusSearch() OVERRIDE;
+  virtual FocusTraversable* GetFocusTraversableParent() OVERRIDE;
+  virtual View* GetFocusTraversableParentView() OVERRIDE;
+
+  // Overridden from View:
+  virtual void SchedulePaintInRect(const gfx::Rect& rect) OVERRIDE;
+  virtual const Widget* GetWidget() const OVERRIDE;
+  virtual Widget* GetWidget() OVERRIDE;
+  virtual bool OnMousePressed(const MouseEvent& e) OVERRIDE;
+  virtual bool OnMouseDragged(const MouseEvent& e) OVERRIDE;
+  virtual void OnMouseReleased(const MouseEvent& e, bool canceled) OVERRIDE;
+  virtual void OnMouseMoved(const MouseEvent& e) OVERRIDE;
+  virtual void SetMouseHandler(View* new_mouse_handler) OVERRIDE;
+  virtual bool OnMouseWheel(const MouseWheelEvent& e) OVERRIDE;
+#if defined(TOUCH_UI)
+  virtual TouchStatus OnTouchEvent(const TouchEvent& e) OVERRIDE;
 #endif
-
-  // Starts a drag operation for the specified view. This blocks until done.
-  // If the view has not been deleted during the drag, OnDragDone is invoked
-  // on the view.
-  // NOTE: |view| may be null.
-  void StartDragForViewFromMouseEvent(View* view,
-                                      const OSExchangeData& data,
-                                      int operation);
-
-  // Accessibility accessors/mutators, overridden from View.
-  virtual AccessibilityTypes::Role GetAccessibleRole();
-
-#if defined(TOUCH_UI) && defined(UNIT_TEST)
-  // For unit testing purposes, we use this method to set a mock
-  // GestureManager
-  void SetGestureManager(GestureManager* g) { gesture_manager_ = g; }
-#endif
+  virtual bool IsVisibleInRootView() const OVERRIDE;
+  virtual std::string GetClassName() const OVERRIDE;
+  virtual AccessibilityTypes::Role GetAccessibleRole() OVERRIDE;
 
  protected:
-
-  // Overridden to properly reset our event propagation member
-  // variables when a child is removed
-  virtual void ViewHierarchyChanged(bool is_add, View *parent, View *child);
-
-#ifndef NDEBUG
-  virtual bool IsProcessingPaint() const { return is_processing_paint_; }
-#endif
+  // Overridden from View:
+  virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
+  virtual void ViewHierarchyChanged(bool is_add, View* parent,
+                                    View* child) OVERRIDE;
 
  private:
   friend class View;
-  friend class PaintTask;
 
 #if defined(TOUCH_UI)
   // Required so the GestureManager can call the Process* entry points
@@ -208,67 +134,35 @@ class RootView : public View,
   friend class GestureManager;
 #endif
 
-  RootView();
+  // Coordinate conversion -----------------------------------------------------
 
   // Convert a point to our current mouse handler. Returns false if the
   // mouse handler is not connected to a Widget. In that case, the
-  // conversion cannot take place and *p is unchanged
-  bool ConvertPointToMouseHandler(const gfx::Point& l, gfx::Point *p);
+  // conversion cannot take place and |p| is unchanged
+  bool ConvertPointToMouseHandler(const gfx::Point& l, gfx::Point* p);
+
+  // Input ---------------------------------------------------------------------
 
   // Update the cursor given a mouse event. This is called by non mouse_move
   // event handlers to honor the cursor desired by views located under the
-  // cursor during drag operations.
+  // cursor during drag operations. The location of the mouse should be in the
+  // current coordinate system (i.e. any necessary transformation should be
+  // applied to the point prior to calling this).
   void UpdateCursor(const MouseEvent& e);
 
-  // Notification that size and/or position of a view has changed. This
-  // notifies the appropriate views.
-  void ViewBoundsChanged(View* view, bool size_changed, bool position_changed);
-
-  // Registers a view for notification when the visible bounds relative to the
-  // root of a view changes.
-  void RegisterViewForVisibleBoundsNotification(View* view);
-  void UnregisterViewForVisibleBoundsNotification(View* view);
-
-  // Returns the next focusable view or view containing a FocusTraversable (NULL
-  // if none was found), starting at the starting_view.
-  // check_starting_view, can_go_up and can_go_down controls the traversal of
-  // the views hierarchy.
-  // skip_group_id specifies a group_id, -1 means no group. All views from a
-  // group are traversed in one pass.
-  View* FindNextFocusableViewImpl(View* starting_view,
-                                  bool check_starting_view,
-                                  bool can_go_up,
-                                  bool can_go_down,
-                                  int skip_group_id,
-                                  FocusTraversable** focus_traversable,
-                                  View** focus_traversable_view);
-
-  // Same as FindNextFocusableViewImpl but returns the previous focusable view.
-  View* FindPreviousFocusableViewImpl(View* starting_view,
-                                      bool check_starting_view,
-                                      bool can_go_up,
-                                      bool can_go_down,
-                                      int skip_group_id,
-                                      FocusTraversable** focus_traversable,
-                                      View** focus_traversable_view);
-
-  // Convenience method that returns true if a view is focusable and does not
-  // belong to the specified group.
-  bool IsViewFocusableCandidate(View* v, int skip_group_id);
-
-  // Returns the view selected for the group of the selected view. If the view
-  // does not belong to a group or if no view is selected in the group, the
-  // specified view is returned.
-  static View* FindSelectedViewForGroup(View* view);
-
-  // Updates the last_mouse_* fields from e.
+  // Updates the last_mouse_* fields from e. The location of the mouse should be
+  // in the current coordinate system (i.e. any necessary transformation should
+  // be applied to the point prior to calling this).
   void SetMouseLocationAndFlags(const MouseEvent& e);
 
-  // If a view is dragging, this returns it. Otherwise returns NULL.
-  View* GetDragView();
+  //////////////////////////////////////////////////////////////////////////////
 
-  // Sets the current cursor, or resets it to the last one if NULL is provided.
-  void SetActiveCursor(gfx::NativeCursor cursor);
+  // Tree operations -----------------------------------------------------------
+
+  // The host Widget
+  Widget* widget_;
+
+  // Input ---------------------------------------------------------------------
 
   // The view currently handing down - drag - up
   View* mouse_pressed_handler_;
@@ -280,65 +174,14 @@ class RootView : public View,
   // a double-click lands on the same view as its single-click part.
   View* last_click_handler_;
 
-  // The host Widget
-  Widget* widget_;
-
-  // The focus search algorithm.
-  FocusSearch focus_search_;
-
-  // The rectangle that should be painted
-  gfx::Rect invalid_rect_;
-
-  // Whether the current invalid rect should be painted urgently.
-  bool invalid_rect_urgent_;
-
-  // The task that we are using to trigger some non urgent painting or NULL
-  // if no painting has been scheduled yet.
-  PaintTask* pending_paint_task_;
-
-  // Indicate if, when the pending_paint_task_ is run, actual painting is still
-  // required.
-  bool paint_task_needed_;
-
   // true if mouse_handler_ has been explicitly set
   bool explicit_mouse_handler_;
-
-  // Previous cursor
-  gfx::NativeCursor previous_cursor_;
-
-  // Default keyboard handler
-  View* default_keyboard_handler_;
-
-  // Whether this root view should make our hwnd focused
-  // when an unprocessed mouse press event occurs
-  bool focus_on_mouse_pressed_;
-
-  // Flag used to ignore focus events when we focus the native window associated
-  // with a view.
-  bool ignore_set_focus_calls_;
-
-  // Whether this root view belongs to the current active window.
-  // bool activated_;
 
   // Last position/flag of a mouse press/drag. Used if capture stops and we need
   // to synthesize a release.
   int last_mouse_event_flags_;
   int last_mouse_event_x_;
   int last_mouse_event_y_;
-
-  // The parent FocusTraversable, used for focus traversal.
-  FocusTraversable* focus_traversable_parent_;
-
-  // The View that contains this RootView. This is used when we have RootView
-  // wrapped inside native components, and is used for the focus traversal.
-  View* focus_traversable_parent_view_;
-
-  // Tracks drag state for a view.
-  View::DragInfo drag_info;
-
-  // Valid for the lifetime of StartDragForViewFromMouseEvent, indicates the
-  // view the drag started from.
-  View* drag_view_;
 
 #if defined(TOUCH_UI)
   // The gesture_manager_ for this.
@@ -348,11 +191,27 @@ class RootView : public View,
   View* touch_pressed_handler_;
 #endif
 
-#ifndef NDEBUG
-  // True if we're currently processing paint.
-  bool is_processing_paint_;
-#endif
-  DISALLOW_COPY_AND_ASSIGN(RootView);
+  // Focus ---------------------------------------------------------------------
+
+  // The focus search algorithm.
+  FocusSearch focus_search_;
+
+  // Whether this root view belongs to the current active window.
+  // bool activated_;
+
+  // The parent FocusTraversable, used for focus traversal.
+  FocusTraversable* focus_traversable_parent_;
+
+  // The View that contains this RootView. This is used when we have RootView
+  // wrapped inside native components, and is used for the focus traversal.
+  View* focus_traversable_parent_view_;
+
+  // Drag and drop -------------------------------------------------------------
+
+  // Tracks drag state for a view.
+  View::DragInfo drag_info;
+
+  DISALLOW_IMPLICIT_CONSTRUCTORS(RootView);
 };
 }  // namespace views
 

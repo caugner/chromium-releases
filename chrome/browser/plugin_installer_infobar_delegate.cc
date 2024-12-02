@@ -4,14 +4,13 @@
 
 #include "chrome/browser/plugin_installer_infobar_delegate.h"
 
-#include "chrome/browser/renderer_host/render_view_host.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
+#include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/tab_contents/tab_contents.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "webkit/plugins/npapi/default_plugin_shared.h"
 
 PluginInstallerInfoBarDelegate::PluginInstallerInfoBarDelegate(
     TabContents* tab_contents)
@@ -20,32 +19,16 @@ PluginInstallerInfoBarDelegate::PluginInstallerInfoBarDelegate(
 }
 
 PluginInstallerInfoBarDelegate::~PluginInstallerInfoBarDelegate() {
-  // Remove any InfoBars we may be showing.
-  tab_contents_->RemoveInfoBar(this);
-}
-
-void PluginInstallerInfoBarDelegate::OnMissingPluginStatus(int status) {
-  switch (status) {
-    case webkit::npapi::default_plugin::MISSING_PLUGIN_AVAILABLE: {
-      tab_contents_->AddInfoBar(this);
-      break;
-    }
-    case webkit::npapi::default_plugin::MISSING_PLUGIN_USER_STARTED_DOWNLOAD: {
-      // Hide the InfoBar if user already started download/install of the
-      // missing plugin.
-      tab_contents_->RemoveInfoBar(this);
-      break;
-    }
-    default: {
-      NOTREACHED();
-      break;
-    }
-  }
 }
 
 SkBitmap* PluginInstallerInfoBarDelegate::GetIcon() const {
   return ResourceBundle::GetSharedInstance().GetBitmapNamed(
       IDR_INFOBAR_PLUGIN_INSTALL);
+}
+
+PluginInstallerInfoBarDelegate*
+    PluginInstallerInfoBarDelegate::AsPluginInstallerInfoBarDelegate() {
+  return this;
 }
 
 string16 PluginInstallerInfoBarDelegate::GetMessageText() const {

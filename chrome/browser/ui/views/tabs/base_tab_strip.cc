@@ -133,10 +133,6 @@ bool BaseTabStrip::IsAnimating() const {
   return bounds_animator_.IsAnimating();
 }
 
-BaseTab* BaseTabStrip::GetSelectedBaseTab() const {
-  return GetBaseTabAtModelIndex(controller_->GetSelectedIndex());
-}
-
 void BaseTabStrip::AddTabAt(int model_index,
                             bool foreground,
                             const TabRendererData& data) {
@@ -175,7 +171,6 @@ void BaseTabStrip::SetTabData(int model_index, const TabRendererData& data) {
   BaseTab* tab = GetBaseTabAtModelIndex(model_index);
   bool mini_state_changed = tab->data().mini != data.mini;
   tab->SetData(data);
-  tab->SchedulePaint();
 
   if (mini_state_changed) {
     if (GetWindow() && GetWindow()->IsVisible())
@@ -256,8 +251,8 @@ void BaseTabStrip::CloseTab(BaseTab* tab) {
     controller_->CloseTab(model_index);
 }
 
-void BaseTabStrip::ShowContextMenu(BaseTab* tab, const gfx::Point& p) {
-  controller_->ShowContextMenu(tab, p);
+void BaseTabStrip::ShowContextMenuForTab(BaseTab* tab, const gfx::Point& p) {
+  controller_->ShowContextMenuForTab(tab, p);
 }
 
 bool BaseTabStrip::IsTabSelected(const BaseTab* tab) const {
@@ -327,13 +322,13 @@ BaseTab* BaseTabStrip::GetTabAt(BaseTab* tab,
                                 const gfx::Point& tab_in_tab_coordinates) {
   gfx::Point local_point = tab_in_tab_coordinates;
   ConvertPointToView(tab, this, &local_point);
-  views::View* view = GetViewForPoint(local_point);
+  views::View* view = GetEventHandlerForPoint(local_point);
   if (!view)
     return NULL;  // No tab contains the point.
 
   // Walk up the view hierarchy until we find a tab, or the TabStrip.
   while (view && view != this && view->GetID() != VIEW_ID_TAB)
-    view = view->GetParent();
+    view = view->parent();
 
   return view && view->GetID() == VIEW_ID_TAB ?
       static_cast<BaseTab*>(view) : NULL;
@@ -355,6 +350,12 @@ bool BaseTabStrip::OnMouseDragged(const views::MouseEvent&  event) {
 void BaseTabStrip::OnMouseReleased(const views::MouseEvent& event,
                                    bool canceled) {
   EndDrag(canceled);
+}
+
+void BaseTabStrip::StartMoveTabAnimation() {
+  PrepareForAnimation();
+  GenerateIdealBounds();
+  AnimateToIdealBounds();
 }
 
 void BaseTabStrip::StartRemoveTabAnimation(int model_index) {
@@ -389,6 +390,10 @@ void BaseTabStrip::StartMiniTabAnimation() {
   AnimateToIdealBounds();
 }
 
+bool BaseTabStrip::ShouldHighlightCloseButtonAfterRemove() {
+  return true;
+}
+
 void BaseTabStrip::RemoveAndDeleteTab(BaseTab* tab) {
   int tab_data_index = TabIndexOfTab(tab);
 
@@ -406,6 +411,16 @@ int BaseTabStrip::TabIndexOfTab(BaseTab* tab) const {
       return i;
   }
   return -1;
+}
+
+void BaseTabStrip::StopAnimating(bool layout) {
+  if (!IsAnimating())
+    return;
+
+  bounds_animator().Cancel();
+
+  if (layout)
+    DoLayout();
 }
 
 void BaseTabStrip::DestroyDragController() {
@@ -431,7 +446,7 @@ void BaseTabStrip::StartedDraggingTab(BaseTab* tab) {
   GenerateIdealBounds();
   int tab_data_index = TabIndexOfTab(tab);
   DCHECK(tab_data_index != -1);
-  tab->SetBounds(ideal_bounds(tab_data_index));
+  tab->SetBoundsRect(ideal_bounds(tab_data_index));
   SchedulePaint();
 }
 
@@ -475,7 +490,7 @@ void BaseTabStrip::DoLayout() {
   GenerateIdealBounds();
 
   for (int i = 0; i < tab_count(); ++i)
-    tab_data_[i].tab->SetBounds(tab_data_[i].ideal_bounds);
+    tab_data_[i].tab->SetBoundsRect(tab_data_[i].ideal_bounds);
 
   SchedulePaint();
 }

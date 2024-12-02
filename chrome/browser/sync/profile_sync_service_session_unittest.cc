@@ -56,7 +56,6 @@ class ProfileSyncServiceSessionTest
   ProfileSyncServiceSessionTest()
       : window_bounds_(0, 1, 2, 3),
         notified_of_update_(false) {}
-
   ProfileSyncService* sync_service() { return sync_service_.get(); }
 
   TestIdFactory* ids() { return sync_service_->id_factory(); }
@@ -65,7 +64,9 @@ class ProfileSyncServiceSessionTest
   SessionService* service() { return helper_.service(); }
 
   virtual void SetUp() {
+    // BrowserWithTestWindowTest implementation.
     BrowserWithTestWindowTest::SetUp();
+
     profile()->set_has_history_service(true);
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
     SessionService* session_service = new SessionService(temp_dir_.path());
@@ -98,16 +99,17 @@ class ProfileSyncServiceSessionTest
   bool StartSyncService(Task* task, bool will_fail_association) {
     if (sync_service_.get())
       return false;
-
     sync_service_.reset(new TestProfileSyncService(
         &factory_, profile(), "test user", false, task));
     profile()->set_session_service(helper_.service());
 
     // Register the session data type.
     model_associator_ =
-        new SessionModelAssociator(sync_service_.get());
+        new SessionModelAssociator(sync_service_.get(),
+                                   true /* setup_for_test */);
     change_processor_ = new SessionChangeProcessor(
-        sync_service_.get(), model_associator_);
+        sync_service_.get(), model_associator_,
+        true /* setup_for_test */);
     EXPECT_CALL(factory_, CreateSessionSyncComponents(_, _)).
         WillOnce(Return(ProfileSyncFactory::SyncComponents(
             model_associator_, change_processor_)));
@@ -122,8 +124,6 @@ class ProfileSyncServiceSessionTest
     MessageLoop::current()->Run();
     return true;
   }
-
-  SyncBackendHost* backend() { return sync_service_->backend(); }
 
   // Path used in testing.
   ScopedTempDir temp_dir_;
@@ -146,8 +146,10 @@ class CreateRootTask : public Task {
 
   virtual ~CreateRootTask() {}
   virtual void Run() {
-    success_ = ProfileSyncServiceTestHelper::CreateRoot(syncable::SESSIONS,
-        test_->sync_service(), test_->ids());
+    success_ = ProfileSyncServiceTestHelper::CreateRoot(
+        syncable::SESSIONS,
+        test_->sync_service()->GetUserShare(),
+        test_->ids());
   }
 
   bool success() { return success_; }
@@ -173,8 +175,7 @@ TEST_F(ProfileSyncServiceSessionTest, WriteSessionToNode) {
   ASSERT_NE(sync_api::kInvalidId, sync_id);
 
   // Check that we can get the correct session specifics back from the node.
-  sync_api::ReadTransaction trans(sync_service_->
-      backend()->GetUserShareHandle());
+  sync_api::ReadTransaction trans(sync_service_->GetUserShare());
   sync_api::ReadNode node(&trans);
   ASSERT_TRUE(node.InitByClientTagLookup(syncable::SESSIONS,
       machine_tag));
@@ -320,7 +321,7 @@ TEST_F(ProfileSyncServiceSessionTest, UpdatedSyncNodeActionUpdate) {
   record->id = node_id;
   ASSERT_FALSE(notified_of_update_);
   {
-    sync_api::WriteTransaction trans(backend()->GetUserShareHandle());
+    sync_api::WriteTransaction trans(sync_service_->GetUserShare());
     change_processor_->ApplyChangesFromSyncModel(&trans, record.get(), 1);
   }
   ASSERT_TRUE(notified_of_update_);
@@ -339,7 +340,7 @@ TEST_F(ProfileSyncServiceSessionTest, UpdatedSyncNodeActionAdd) {
   record->id = node_id;
   ASSERT_FALSE(notified_of_update_);
   {
-    sync_api::WriteTransaction trans(backend()->GetUserShareHandle());
+    sync_api::WriteTransaction trans(sync_service_->GetUserShare());
     change_processor_->ApplyChangesFromSyncModel(&trans, record.get(), 1);
   }
   ASSERT_TRUE(notified_of_update_);
@@ -358,7 +359,7 @@ TEST_F(ProfileSyncServiceSessionTest, UpdatedSyncNodeActionDelete) {
   record->id = node_id;
   ASSERT_FALSE(notified_of_update_);
   {
-    sync_api::WriteTransaction trans(backend()->GetUserShareHandle());
+    sync_api::WriteTransaction trans(sync_service_->GetUserShare());
     change_processor_->ApplyChangesFromSyncModel(&trans, record.get(), 1);
   }
   ASSERT_TRUE(notified_of_update_);

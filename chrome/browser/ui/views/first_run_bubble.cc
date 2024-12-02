@@ -18,13 +18,13 @@
 #include "ui/base/l10n/l10n_font_util.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/base/win/hwnd_util.h"
-#include "views/event.h"
 #include "views/controls/button/native_button.h"
 #include "views/controls/button/image_button.h"
 #include "views/controls/label.h"
+#include "views/events/event.h"
 #include "views/focus/focus_manager.h"
-#include "views/standard_layout.h"
+#include "views/layout/layout_constants.h"
+#include "views/widget/widget_win.h"
 #include "views/window/window.h"
 
 namespace {
@@ -175,7 +175,7 @@ void FirstRunBubbleView::Layout() {
                      pref_size.height());
 
   int next_v_space = label1_->y() + pref_size.height() +
-                     kRelatedControlSmallVerticalSpacing;
+                     views::kRelatedControlSmallVerticalSpacing;
 
   pref_size = label2_->GetPreferredSize();
   label2_->SetBounds(kBubblePadding, next_v_space,
@@ -183,7 +183,7 @@ void FirstRunBubbleView::Layout() {
                      pref_size.height());
 
   next_v_space = label2_->y() + label2_->height() +
-                 kPanelSubVerticalSpacing;
+                 views::kPanelSubVerticalSpacing;
 
   pref_size = label3_->GetPreferredSize();
   label3_->SetBounds(kBubblePadding, next_v_space,
@@ -193,12 +193,12 @@ void FirstRunBubbleView::Layout() {
   pref_size = change_button_->GetPreferredSize();
   change_button_->SetBounds(
       canvas.width() - pref_size.width() - kBubblePadding,
-      canvas.height() - pref_size.height() - kButtonVEdgeMargin,
+      canvas.height() - pref_size.height() - views::kButtonVEdgeMargin,
       pref_size.width(), pref_size.height());
 
   pref_size = keep_button_->GetPreferredSize();
   keep_button_->SetBounds(change_button_->x() - pref_size.width() -
-                          kRelatedButtonHSpacing, change_button_->y(),
+                          views::kRelatedButtonHSpacing, change_button_->y(),
                           pref_size.width(), pref_size.height());
 }
 
@@ -332,7 +332,8 @@ void FirstRunOEMBubbleView::Layout() {
       pref_size.height());
 
   int next_v_space =
-      label1_->y() + pref_size.height() + kRelatedControlSmallVerticalSpacing;
+      label1_->y() + pref_size.height() +
+          views::kRelatedControlSmallVerticalSpacing;
 
   pref_size = label3_->GetPreferredSize();
   label3_->SetBounds(kOEMBubblePadding, next_v_space,
@@ -358,7 +359,7 @@ gfx::Size FirstRunOEMBubbleView::GetPreferredSize() {
   // now, we force Vista to show a correctly-sized box by taking account of
   // the difference in font size calculation. The coefficient should not be
   // stored in a variable because it's a hack and should go away.
-  if (ui::ShouldUseVistaFrame()) {
+  if (views::WidgetWin::IsAeroGlassEnabled()) {
     size.set_width(static_cast<int>(size.width() * 0.85));
     size.set_height(static_cast<int>(size.height() * 0.85));
   }
@@ -445,7 +446,7 @@ void FirstRunMinimalBubbleView::Layout() {
                      pref_size.height());
 
   int next_v_space = label1_->y() + pref_size.height() +
-                     kRelatedControlSmallVerticalSpacing;
+                     views::kRelatedControlSmallVerticalSpacing;
 
   pref_size = label2_->GetPreferredSize();
   label2_->SetBounds(kBubblePadding, next_v_space,
@@ -473,27 +474,28 @@ FirstRunBubble* FirstRunBubble::Show(Profile* profile,
                                      const gfx::Rect& position_relative_to,
                                      BubbleBorder::ArrowLocation arrow_location,
                                      FirstRun::BubbleType bubble_type) {
-  FirstRunBubble* window = new FirstRunBubble();
+  FirstRunBubble* bubble = new FirstRunBubble();
   FirstRunBubbleViewBase* view = NULL;
 
   switch (bubble_type) {
     case FirstRun::OEM_BUBBLE:
-      view = new FirstRunOEMBubbleView(window, profile);
+      view = new FirstRunOEMBubbleView(bubble, profile);
       break;
     case FirstRun::LARGE_BUBBLE:
-      view = new FirstRunBubbleView(window, profile);
+      view = new FirstRunBubbleView(bubble, profile);
       break;
     case FirstRun::MINIMAL_BUBBLE:
-      view = new FirstRunMinimalBubbleView(window, profile);
+      view = new FirstRunMinimalBubbleView(bubble, profile);
       break;
     default:
       NOTREACHED();
   }
-  window->set_view(view);
-  window->Init(parent, position_relative_to, arrow_location, view, window);
-  window->GetFocusManager()->AddFocusChangeListener(view);
+  bubble->set_view(view);
+  bubble->InitBubble(
+      parent, position_relative_to, arrow_location, view, bubble);
+  bubble->GetFocusManager()->AddFocusChangeListener(view);
   view->BubbleShown();
-  return window;
+  return bubble;
 }
 
 FirstRunBubble::FirstRunBubble()

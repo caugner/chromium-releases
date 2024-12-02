@@ -19,7 +19,6 @@
 #include "net/proxy/proxy_service.h"
 #include "net/socket/socket_test_util.h"
 #include "net/spdy/spdy_framer.h"
-#include "net/spdy/spdy_session_pool.h"
 #include "net/url_request/url_request_context.h"
 
 namespace net {
@@ -280,6 +279,13 @@ spdy::SpdyFrame* ConstructSpdySynReplyError(
 spdy::SpdyFrame* ConstructSpdyPost(int64 content_length,
                                    const char* const extra_headers[],
                                    int extra_header_count);
+
+// Constructs a chunked transfer SPDY POST SYN packet.
+// |extra_headers| are the extra header-value pairs, which typically
+// will vary the most between calls.
+// Returns a SpdyFrame.
+spdy::SpdyFrame* ConstructChunkedSpdyPost(const char* const extra_headers[],
+                                          int extra_header_count);
 
 // Constructs a standard SPDY SYN_REPLY packet to match the SPDY POST.
 // |extra_headers| are the extra header-value pairs, which typically

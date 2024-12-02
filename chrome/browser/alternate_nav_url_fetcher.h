@@ -8,7 +8,7 @@
 
 #include <string>
 
-#include "chrome/browser/tab_contents/infobar_delegate.h"
+#include "chrome/browser/tab_contents/link_infobar_delegate.h"
 #include "chrome/common/net/url_fetcher.h"
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
@@ -59,6 +59,7 @@ class AlternateNavURLFetcher : public NotificationObserver,
 
   // LinkInfoBarDelegate
   virtual SkBitmap* GetIcon() const;
+  virtual Type GetInfoBarType() const;
   virtual string16 GetMessageTextWithOffset(size_t* link_offset) const;
   virtual string16 GetLinkText() const;
   virtual bool LinkClicked(WindowOpenDisposition disposition);

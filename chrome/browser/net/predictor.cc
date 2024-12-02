@@ -14,8 +14,8 @@
 #include "base/string_util.h"
 #include "base/time.h"
 #include "base/values.h"
-#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/net/preconnect.h"
+#include "content/browser/browser_thread.h"
 #include "net/base/address_list.h"
 #include "net/base/completion_callback.h"
 #include "net/base/host_port_pair.h"
@@ -133,7 +133,6 @@ void Predictor::LearnFromNavigation(const GURL& referring_url,
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   DCHECK(referring_url == referring_url.GetWithEmptyPath());
   DCHECK(target_url == target_url.GetWithEmptyPath());
-  DCHECK(target_url != referring_url);
   if (referring_url.has_host()) {
     referrers_[referring_url].SuggestHost(target_url);
   }
@@ -184,8 +183,8 @@ void Predictor::AnticipateOmniboxUrl(const GURL& url, bool preconnectable) {
           return;  // We've done a preconnect recently.
         last_omnibox_preconnect_ = now;
         const int kConnectionsNeeded = 1;
-        Preconnect::PreconnectOnUIThread(CanonicalizeUrl(url), motivation,
-                                         kConnectionsNeeded);
+        PreconnectOnUIThread(CanonicalizeUrl(url), motivation,
+                             kConnectionsNeeded);
         return;  // Skip pre-resolution, since we'll open a connection.
       }
     } else {
@@ -218,8 +217,8 @@ void Predictor::PreconnectUrlAndSubresources(const GURL& url) {
     std::string host = url.HostNoBrackets();
     UrlInfo::ResolutionMotivation motivation(UrlInfo::EARLY_LOAD_MOTIVATED);
     const int kConnectionsNeeded = 1;
-    Preconnect::PreconnectOnUIThread(CanonicalizeUrl(url), motivation,
-                                     kConnectionsNeeded);
+    PreconnectOnUIThread(CanonicalizeUrl(url), motivation,
+                         kConnectionsNeeded);
     PredictFrameSubresources(url.GetWithEmptyPath());
   }
 }
@@ -258,7 +257,9 @@ void Predictor::PrepareFrameSubresources(const GURL& url) {
       evalution = PRECONNECTION;
       future_url->second.IncrementPreconnectionCount();
       int count = static_cast<int>(std::ceil(connection_expectation));
-      Preconnect::PreconnectOnIOThread(future_url->first, motivation, count);
+      if (url.host() == future_url->first.host())
+        ++count;
+      PreconnectOnIOThread(future_url->first, motivation, count);
     } else if (connection_expectation > kDNSPreresolutionWorthyExpectedValue) {
       evalution = PRERESOLUTION;
       future_url->second.preresolution_increment();

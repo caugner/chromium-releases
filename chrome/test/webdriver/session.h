@@ -1,63 +1,154 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_TEST_WEBDRIVER_SESSION_H_
 #define CHROME_TEST_WEBDRIVER_SESSION_H_
 
+#include <map>
 #include <string>
+#include <vector>
 
 #include "base/scoped_ptr.h"
-
-#include "chrome/test/automation/automation_proxy.h"
-#include "chrome/test/automation/browser_proxy.h"
-#include "chrome/test/automation/tab_proxy.h"
-#include "chrome/test/automation/window_proxy.h"
-#include "chrome/test/ui/ui_test.h"
+#include "base/string16.h"
+#include "base/threading/thread.h"
+#include "chrome/common/automation_constants.h"
+#include "chrome/test/webdriver/automation.h"
 #include "chrome/test/webdriver/error_codes.h"
 
+class DictionaryValue;
+class FilePath;
+class GURL;
+class ListValue;
+class Value;
+
+namespace base {
+class WaitableEvent;
+}
+
+namespace gfx {
+class Point;
+}
+
 namespace webdriver {
+
+class WebElementId;
 
 // Every connection made by WebDriver maps to a session object.
 // This object creates the chrome instance and keeps track of the
 // state necessary to control the chrome browser created.
-// TODO(phajdan.jr):  Abstract UITestBase classes, see:
-// http://code.google.com/p/chromium/issues/detail?id=56865
-class Session : private UITestBase {
+// A session manages its own lifetime.
+class Session {
  public:
-#if defined(OS_POSIX)
-  typedef char ProfileDir[L_tmpnam + 1];  // +1 for \0
-#elif defined(OS_WIN)
-  typedef char ProfileDir[MAX_PATH + 1];  // +1 for \0
-#endif
+  // Adds this |Session| to the |SessionManager|. The session manages its own
+  // lifetime. Do not call delete.
+  Session();
+  // Removes this |Session| from the |SessionManager|.
+  ~Session();
 
-  explicit Session(const std::string& id);
+  // Starts the session thread and a new browser, using the exe found in
+  // |browser_dir|. If |browser_dir| is empty, it will search in all the default
+  // locations. Returns true on success. On failure, the session will delete
+  // itself and return false.
+  bool Init(const FilePath& browser_dir);
 
-  bool Init();
-
-  // Terminates this session and disconnects its automation proxy. After
-  // invoking this method, the Session can safely be deleted.
+  // Terminates this session and deletes itself.
   void Terminate();
 
-  // Finds the active tab that webdriver commands should go to.
-  scoped_refptr<TabProxy> ActiveTab();
-
-  void SetBrowserAndTab(const int window_num,
-                        const scoped_refptr<BrowserProxy>& browser,
-                        const scoped_refptr<TabProxy>& tab);
-
-  // Executes the given |script| in the context of the frame that is currently
-  // the focus of this session. The |script| should be in the form of a
-  // function body (e.g. "return arguments[0]"), where \args| is the list of
-  // arguments to pass to the function. The caller is responsible for the
-  // script result |value|.
-  ErrorCode ExecuteScript(const std::wstring& script,
+  // Executes the given |script| in the context of the given window and frame.
+  // The |script| should be in the form of a function body
+  // (e.g. "return arguments[0]"), where |args| is the list of arguments to
+  // pass to the function. The caller is responsible for the script result
+  // |value|.
+  ErrorCode ExecuteScript(int window_id,
+                          const std::string& frame_xpath,
+                          const std::string& script,
                           const ListValue* const args,
                           Value** value);
 
+  // Same as above, but uses the currently targeted window and frame.
+  ErrorCode ExecuteScript(const std::string& script,
+                          const ListValue* const args,
+                          Value** value);
+
+  // Send the given keys to the given element dictionary. This function takes
+  // ownership of |element|.
+  ErrorCode SendKeys(const WebElementId& element, const string16& keys);
+
+  // Clicks the mouse at the given location using the given button.
+  void MouseClick(const gfx::Point& click, automation::MouseButton button);
+  bool MouseMove(const gfx::Point& location);
+  bool MouseDrag(const gfx::Point& start, const gfx::Point& end);
+
+  bool NavigateToURL(const std::string& url);
+  bool GoForward();
+  bool GoBack();
+  bool Reload();
+  bool GetURL(GURL* url);
+  bool GetURL(std::string* url);
+  bool GetTabTitle(std::string* tab_title);
+  bool GetCookies(const GURL& url, std::string* cookies);
+  bool GetCookieByName(const GURL& url, const std::string& cookie_name,
+             std::string* cookie);
+  bool DeleteCookie(const GURL& url, const std::string& cookie_name);
+  bool SetCookie(const GURL& url, const std::string& cookie);
+
+  // Gets all the currently existing window IDs. Returns true on success.
+  bool GetWindowIds(std::vector<int>* window_ids);
+
+  // Switches the window used by default. |name| is either an ID returned by
+  // |GetWindowIds| or the name attribute of a DOM window.
+  ErrorCode SwitchToWindow(const std::string& name);
+
+  // Switches the frame used by default. |name_or_id| is either the name or id
+  // of a frame element.
+  ErrorCode SwitchToFrameWithNameOrId(const std::string& name_or_id);
+
+  // Switches the frame used by default. |index| is the zero-based frame index.
+  ErrorCode SwitchToFrameWithIndex(int index);
+
+  // Closes the current window. Returns true on success.
+  // Note: The session will be deleted if this closes the last window in the
+  // session.
+  bool CloseWindow();
+
+  // Gets the version of the running browser.
+  std::string GetVersion();
+
+  // Finds a single element in the given window and frame, starting at the given
+  // |root_element|, using the given locator strategy. |locator| should be a
+  // constant from |LocatorType|. Returns an error code. If successful,
+  // |element| will be set as the found element.
+  ErrorCode FindElementInFrame(int window_id,
+                               const std::string& frame_xpath,
+                               const WebElementId& root_element,
+                               const std::string& locator,
+                               const std::string& query,
+                               WebElementId* element);
+
+  // Same as above, but uses the current window and frame.
+  ErrorCode FindElement(const WebElementId& root_element,
+                        const std::string& locator,
+                        const std::string& query,
+                        WebElementId* element);
+
+  // Same as above, but finds multiple elements.
+  ErrorCode FindElements(const WebElementId& root_element,
+                         const std::string& locator,
+                         const std::string& query,
+                         std::vector<WebElementId>* elements);
+
+  // Scroll the element into view and get its location relative to the client's
+  // viewport.
+  ErrorCode GetElementLocationInView(
+      const WebElementId& element, int* x, int* y);
+
+  // Waits for all tabs to stop loading. Returns true on success.
+  bool WaitForAllTabsToStopLoading();
+
   inline const std::string& id() const { return id_; }
 
-  inline int implicit_wait() { return implicit_wait_; }
+  inline int implicit_wait() const { return implicit_wait_; }
   inline void set_implicit_wait(const int& timeout) {
     implicit_wait_ = timeout > 0 ? timeout : 0;
   }
@@ -68,32 +159,47 @@ class Session : private UITestBase {
     speed_ = speed;
   }
 
-  inline const char* tmp_profile_dir() {
-    return tmp_profile_dir_;
-  };
-
-  inline const std::wstring& current_frame_xpath() const {
+  inline const std::string& current_frame_xpath() const {
     return current_frame_xpath_;
   }
 
-  inline void set_current_frame_xpath(const std::wstring& xpath) {
+  inline void set_current_frame_xpath(const std::string& xpath) {
     current_frame_xpath_ = xpath;
   }
 
+  inline int current_window_id() const { return current_window_id_; }
+
  private:
-  bool CreateTemporaryProfileDirectory();
-  bool LoadProxies();
-  void SetupCommandLine();
+  void RunSessionTask(Task* task);
+  void RunSessionTaskOnSessionThread(
+      Task* task,
+      base::WaitableEvent* done_event);
+  void InitOnSessionThread(const FilePath& browser_dir, bool* success);
+  void TerminateOnSessionThread();
+  void SendKeysOnSessionThread(const string16& keys, bool* success);
+  ErrorCode SwitchToFrameWithJavaScriptLocatedFrame(
+      const std::string& script,
+      ListValue* args);
+  ErrorCode FindElementsHelper(int window_id,
+                               const std::string& frame_xpath,
+                               const WebElementId& root_element,
+                               const std::string& locator,
+                               const std::string& query,
+                               bool find_one,
+                               std::vector<WebElementId>* elements);
+  ErrorCode GetLocationInViewHelper(int window_id,
+                                    const std::string& frame_xpath,
+                                    const WebElementId& element,
+                                    int* offset_x,
+                                    int* offset_y);
 
   const std::string id_;
 
-  int window_num_;
-  scoped_refptr<BrowserProxy> browser_;
-  scoped_refptr<TabProxy> tab_;
+  scoped_ptr<Automation> automation_;
+  base::Thread thread_;
 
   int implicit_wait_;
   Speed speed_;
-  ProfileDir tmp_profile_dir_;
 
   // The XPath to the frame within this session's active tab which all
   // commands should be directed to. XPath strings can represent a frame deep
@@ -101,12 +207,14 @@ class Session : private UITestBase {
   // Example, /html/body/table/tbody/tr/td/iframe\n/frameset/frame[1]
   // should break into 2 xpaths
   // /html/body/table/tbody/tr/td/iframe & /frameset/frame[1].
-  std::wstring current_frame_xpath_;
+  std::string current_frame_xpath_;
+  int current_window_id_;
 
   DISALLOW_COPY_AND_ASSIGN(Session);
 };
 
 }  // namespace webdriver
 
-#endif  // CHROME_TEST_WEBDRIVER_SESSION_H_
+DISABLE_RUNNABLE_METHOD_REFCOUNT(webdriver::Session);
 
+#endif  // CHROME_TEST_WEBDRIVER_SESSION_H_

@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,7 +17,6 @@
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "base/i18n/time_formatting.h"
-#include "gfx/font.h"
 #include "printing/page_number.h"
 #include "printing/page_overlays.h"
 #include "printing/printed_pages_source.h"
@@ -25,6 +24,7 @@
 #include "printing/units.h"
 #include "skia/ext/platform_device.h"
 #include "ui/base/text/text_elider.h"
+#include "ui/gfx/font.h"
 
 namespace {
 
@@ -80,6 +80,12 @@ void PrintedDocument::SetPage(int page_number,
   {
     base::AutoLock lock(lock_);
     mutable_.pages_[page_number] = page;
+
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
+    if (page_number < mutable_.first_page)
+      mutable_.first_page = page_number;
+#endif
+
     if (mutable_.shrink_factor == 0) {
       mutable_.shrink_factor = shrink;
     } else {
@@ -109,10 +115,17 @@ bool PrintedDocument::IsComplete() const {
   PageNumber page(immutable_.settings_, mutable_.page_count_);
   if (page == PageNumber::npos())
     return false;
+
   for (; page != PageNumber::npos(); ++page) {
+#if defined(OS_WIN) || defined(OS_MACOSX)
+    const bool metafile_must_be_valid = true;
+#elif defined(OS_POSIX)
+    const bool metafile_must_be_valid = (page.ToInt() == mutable_.first_page);
+#endif
     PrintedPages::const_iterator itr = mutable_.pages_.find(page.ToInt());
-    if (itr == mutable_.pages_.end() || !itr->second.get() ||
-        !itr->second->native_metafile())
+    if (itr == mutable_.pages_.end() || !itr->second.get())
+      return false;
+    if (metafile_must_be_valid && !itr->second->native_metafile())
       return false;
   }
   return true;
@@ -226,7 +239,7 @@ void PrintedDocument::PrintHeaderFooter(gfx::NativeDrawingContext context,
   if (string_size.width() > bounding.width()) {
     if (line == PageOverlays::kUrl) {
       output = UTF16ToWideHack(ui::ElideUrl(url(), font, bounding.width(),
-                                            std::wstring()));
+                                            std::string()));
     } else {
       output = UTF16ToWideHack(ui::ElideText(WideToUTF16Hack(output),
           font, bounding.width(), false));
@@ -251,9 +264,9 @@ void PrintedDocument::DebugDump(const PrintedPage& page) {
   filename += ASCIIToUTF16("_.emf");
 #if defined(OS_WIN)
   page.native_metafile()->SaveTo(
-      g_debug_dump_info.Get().debug_dump_path.Append(filename).ToWStringHack());
+      g_debug_dump_info.Get().debug_dump_path.Append(filename).value());
 #else  // OS_WIN
-  NOTIMPLEMENTED();
+  NOTIMPLEMENTED();  // TODO: convert SaveTo to accept a FilePath
 #endif  // OS_WIN
 }
 
@@ -271,6 +284,9 @@ PrintedDocument::Mutable::Mutable(PrintedPagesSource* source)
       expected_page_count_(0),
       page_count_(0),
       shrink_factor(0) {
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
+  first_page = INT_MAX;
+#endif
 }
 
 PrintedDocument::Mutable::~Mutable() {

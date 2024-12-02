@@ -8,18 +8,18 @@
 #include "base/scoped_ptr.h"
 #include "base/stl_util-inl.h"
 #include "base/task.h"
-#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/sync/glue/data_type_controller.h"
 #include "chrome/browser/sync/glue/data_type_controller_mock.h"
 #include "chrome/browser/sync/glue/data_type_manager_impl.h"
 #include "chrome/browser/sync/glue/sync_backend_host_mock.h"
 #include "chrome/browser/sync/profile_sync_test_util.h"
 #include "chrome/browser/sync/syncable/model_type.h"
-#include "chrome/common/notification_details.h"
-#include "chrome/common/notification_observer_mock.h"
-#include "chrome/common/notification_registrar.h"
-#include "chrome/common/notification_service.h"
-#include "chrome/common/notification_type.h"
+#include "content/browser/browser_thread.h"
+#include "content/common/notification_details.h"
+#include "content/common/notification_observer_mock.h"
+#include "content/common/notification_registrar.h"
+#include "content/common/notification_service.h"
+#include "content/common/notification_type.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -97,6 +97,20 @@ class DataTypeManagerImplTest : public testing::Test {
         WillRepeatedly(Return(DataTypeController::NOT_RUNNING));
   }
 
+  void SetBusyStartStopExpectations(DataTypeControllerMock* mock_dtc,
+                                    DataTypeController::State busy_state) {
+    InSequence seq;
+    EXPECT_CALL(*mock_dtc, state()).
+        WillRepeatedly(Return(DataTypeController::NOT_RUNNING));
+    EXPECT_CALL(*mock_dtc, Start(_)).
+        WillOnce(InvokeCallback((DataTypeController::OK)));
+    EXPECT_CALL(*mock_dtc, state()).
+        WillRepeatedly(Return(busy_state));
+    EXPECT_CALL(*mock_dtc, Stop()).Times(1);
+    EXPECT_CALL(*mock_dtc, state()).
+        WillRepeatedly(Return(DataTypeController::NOT_RUNNING));
+  }
+
   void SetNotUsedExpectations(DataTypeControllerMock* mock_dtc) {
     EXPECT_CALL(*mock_dtc, Start(_)).Times(0);
     EXPECT_CALL(*mock_dtc, Stop()).Times(0);
@@ -120,6 +134,7 @@ class DataTypeManagerImplTest : public testing::Test {
   }
 
   void SetBackendExpectations(int times) {
+    EXPECT_CALL(backend_, UpdateEnabledTypes(_)).Times(times);
     EXPECT_CALL(backend_, ConfigureDataTypes(_, _, _)).Times(times);
     EXPECT_CALL(backend_, StartSyncingWithServer()).Times(times);
     EXPECT_CALL(backend_, RequestPause()).Times(times);
@@ -139,6 +154,7 @@ TEST_F(DataTypeManagerImplTest, NoControllers) {
   DataTypeManagerImpl dtm(&backend_, controllers_);
   SetConfigureStartExpectation();
   SetConfigureDoneExpectation(DataTypeManager::OK);
+  EXPECT_CALL(backend_, UpdateEnabledTypes(_));
   dtm.Configure(types_);
   EXPECT_EQ(DataTypeManager::CONFIGURED, dtm.state());
   dtm.Stop();
@@ -148,6 +164,37 @@ TEST_F(DataTypeManagerImplTest, NoControllers) {
 TEST_F(DataTypeManagerImplTest, ConfigureOne) {
   DataTypeControllerMock* bookmark_dtc = MakeBookmarkDTC();
   SetStartStopExpectations(bookmark_dtc);
+  controllers_[syncable::BOOKMARKS] = bookmark_dtc;
+  SetBackendExpectations(1);
+  DataTypeManagerImpl dtm(&backend_, controllers_);
+  types_.insert(syncable::BOOKMARKS);
+  SetConfigureStartExpectation();
+  SetConfigureDoneExpectation(DataTypeManager::OK);
+  dtm.Configure(types_);
+  EXPECT_EQ(DataTypeManager::CONFIGURED, dtm.state());
+  dtm.Stop();
+  EXPECT_EQ(DataTypeManager::STOPPED, dtm.state());
+}
+
+TEST_F(DataTypeManagerImplTest, ConfigureOneStopWhileStarting) {
+  DataTypeControllerMock* bookmark_dtc = MakeBookmarkDTC();
+  SetBusyStartStopExpectations(bookmark_dtc,
+                               DataTypeController::MODEL_STARTING);
+  controllers_[syncable::BOOKMARKS] = bookmark_dtc;
+  SetBackendExpectations(1);
+  DataTypeManagerImpl dtm(&backend_, controllers_);
+  types_.insert(syncable::BOOKMARKS);
+  SetConfigureStartExpectation();
+  SetConfigureDoneExpectation(DataTypeManager::OK);
+  dtm.Configure(types_);
+  EXPECT_EQ(DataTypeManager::CONFIGURED, dtm.state());
+  dtm.Stop();
+  EXPECT_EQ(DataTypeManager::STOPPED, dtm.state());
+}
+
+TEST_F(DataTypeManagerImplTest, ConfigureOneStopWhileAssociating) {
+  DataTypeControllerMock* bookmark_dtc = MakeBookmarkDTC();
+  SetBusyStartStopExpectations(bookmark_dtc, DataTypeController::ASSOCIATING);
   controllers_[syncable::BOOKMARKS] = bookmark_dtc;
   SetBackendExpectations(1);
   DataTypeManagerImpl dtm(&backend_, controllers_);
@@ -203,6 +250,7 @@ TEST_F(DataTypeManagerImplTest, ConfigureOneThenAnother) {
   types_.insert(syncable::PREFERENCES);
   SetConfigureStartExpectation();
   SetConfigureDoneExpectation(DataTypeManager::OK);
+
   dtm.Configure(types_);
   EXPECT_EQ(DataTypeManager::CONFIGURED, dtm.state());
 
@@ -575,10 +623,12 @@ TEST_F(DataTypeManagerImplTest, ConfigureWhileDownloadPending) {
   // Should now be RESTARTING.
   EXPECT_EQ(DataTypeManager::RESTARTING, dtm.state());
 
-  // Run the task, and this should finish the restart and eventually
-  // get us configured.
+  // Running the task will queue a restart task to the message loop, and
+  // eventually get us configured.
   task->Run();
   delete task;
+  EXPECT_EQ(DataTypeManager::RESTARTING, dtm.state());
+  MessageLoop::current()->RunAllPending();
   EXPECT_EQ(DataTypeManager::CONFIGURED, dtm.state());
 
   dtm.Stop();

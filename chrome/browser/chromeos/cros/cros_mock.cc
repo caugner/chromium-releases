@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,6 +17,7 @@
 #include "chrome/browser/chromeos/cros/mock_speech_synthesis_library.h"
 #include "chrome/browser/chromeos/cros/mock_system_library.h"
 #include "chrome/browser/chromeos/cros/mock_touchpad_library.h"
+#include "chrome/browser/chromeos/input_method/input_method_util.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/login/wizard_screen.h"
 #include "chrome/test/in_process_browser_test.h"
@@ -45,7 +46,12 @@ CrosMock::CrosMock()
       mock_screen_lock_library_(NULL),
       mock_speech_synthesis_library_(NULL),
       mock_system_library_(NULL),
-      mock_touchpad_library_(NULL) {}
+      mock_touchpad_library_(NULL),
+      current_input_method_("", "", "", ""),
+      previous_input_method_("", "", "", "") {
+  current_input_method_ =
+      input_method::GetFallbackInputMethodDescriptor();
+}
 
 CrosMock::~CrosMock() {
 }
@@ -194,14 +200,6 @@ void CrosMock::SetStatusAreaMocksExpectations() {
 }
 
 void CrosMock::SetKeyboardLibraryStatusAreaExpectations() {
-  EXPECT_CALL(*mock_keyboard_library_, GetHardwareKeyboardLayoutName())
-      .Times(AnyNumber())
-      .WillRepeatedly((Return("xkb:us::eng")))
-      .RetiresOnSaturation();
-  EXPECT_CALL(*mock_keyboard_library_, GetCurrentKeyboardLayoutName())
-      .Times(AnyNumber())
-      .WillRepeatedly((Return("us")))
-      .RetiresOnSaturation();
   EXPECT_CALL(*mock_keyboard_library_, SetCurrentKeyboardLayoutByName(_))
       .Times(AnyNumber())
       .WillRepeatedly((Return(true)))
@@ -234,15 +232,27 @@ void CrosMock::SetInputMethodLibraryStatusAreaExpectations() {
       .RetiresOnSaturation();
   EXPECT_CALL(*mock_input_method_library_, GetActiveInputMethods())
       .Times(AnyNumber())
-      .WillRepeatedly(InvokeWithoutArgs(CreateFallbackInputMethodDescriptors))
+      .WillRepeatedly(InvokeWithoutArgs(CreateInputMethodDescriptors))
       .RetiresOnSaturation();
   EXPECT_CALL(*mock_input_method_library_, GetSupportedInputMethods())
       .Times(AnyNumber())
-      .WillRepeatedly(InvokeWithoutArgs(CreateFallbackInputMethodDescriptors))
+      .WillRepeatedly(InvokeWithoutArgs(CreateInputMethodDescriptors))
+      .RetiresOnSaturation();
+  EXPECT_CALL(*mock_input_method_library_, current_input_method())
+      .Times(AnyNumber())
+      .WillRepeatedly((ReturnRef(current_input_method_)))
+      .RetiresOnSaturation();
+  EXPECT_CALL(*mock_input_method_library_, previous_input_method())
+      .Times(AnyNumber())
+      .WillRepeatedly((ReturnRef(previous_input_method_)))
       .RetiresOnSaturation();
   EXPECT_CALL(*mock_input_method_library_, current_ime_properties())
       .Times(AnyNumber())
       .WillRepeatedly((ReturnRef(ime_properties_)))
+      .RetiresOnSaturation();
+  EXPECT_CALL(*mock_input_method_library_, GetNumActiveInputMethods())
+      .Times(AnyNumber())
+      .WillRepeatedly((Return(1)))
       .RetiresOnSaturation();
   EXPECT_CALL(*mock_input_method_library_, SetImeConfig(_, _, _))
       .Times(AnyNumber())
@@ -254,7 +264,7 @@ void CrosMock::SetInputMethodLibraryStatusAreaExpectations() {
   EXPECT_CALL(*mock_input_method_library_, SetDeferImeStartup(_))
       .Times(AnyNumber())
       .RetiresOnSaturation();
-  EXPECT_CALL(*mock_input_method_library_, StopInputMethodProcesses())
+  EXPECT_CALL(*mock_input_method_library_, StopInputMethodDaemon())
       .Times(AnyNumber())
       .RetiresOnSaturation();
 }
@@ -301,12 +311,18 @@ void CrosMock::SetNetworkLibraryStatusAreaExpectations() {
   EXPECT_CALL(*mock_network_library_, cellular_network())
       .Times(AnyNumber())
       .WillRepeatedly((Return((const CellularNetwork*)(NULL))));
+  EXPECT_CALL(*mock_network_library_, virtual_network())
+      .Times(AnyNumber())
+      .WillRepeatedly((Return((const VirtualNetwork*)(NULL))));
   EXPECT_CALL(*mock_network_library_, wifi_networks())
       .Times(AnyNumber())
       .WillRepeatedly((ReturnRef(wifi_networks_)));
   EXPECT_CALL(*mock_network_library_, cellular_networks())
       .Times(AnyNumber())
       .WillRepeatedly((ReturnRef(cellular_networks_)));
+  EXPECT_CALL(*mock_network_library_, virtual_networks())
+      .Times(AnyNumber())
+      .WillRepeatedly((ReturnRef(virtual_networks_)));
 
   // Set specific expectations for interesting functions:
 
@@ -337,7 +353,7 @@ void CrosMock::SetNetworkLibraryStatusAreaExpectations() {
 
 void CrosMock::SetPowerLibraryStatusAreaExpectations() {
   EXPECT_CALL(*mock_power_library_, AddObserver(_))
-      .Times(1)
+      .Times(2)
       .RetiresOnSaturation();
   EXPECT_CALL(*mock_power_library_, battery_fully_charged())
       .Times(1)
@@ -364,7 +380,7 @@ void CrosMock::SetPowerLibraryStatusAreaExpectations() {
       .WillRepeatedly((Return(base::TimeDelta::FromMinutes(24))))
       .RetiresOnSaturation();
   EXPECT_CALL(*mock_power_library_, RemoveObserver(_))
-      .Times(1)
+      .Times(2)
       .RetiresOnSaturation();
 }
 
@@ -444,6 +460,13 @@ void CrosMock::TearDownMocks() {
     test_api()->SetSystemLibrary(NULL, false);
   if (mock_touchpad_library_)
     test_api()->SetTouchpadLibrary(NULL, false);
+}
+
+InputMethodDescriptors* CrosMock::CreateInputMethodDescriptors() {
+  InputMethodDescriptors* descriptors = new InputMethodDescriptors;
+  descriptors->push_back(
+      input_method::GetFallbackInputMethodDescriptor());
+  return descriptors;
 }
 
 }  // namespace chromeos

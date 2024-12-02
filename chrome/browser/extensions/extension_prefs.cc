@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/extensions/extension_pref_store.h"
 #include "chrome/browser/prefs/pref_notifier.h"
+#include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/url_pattern.h"
 #include "chrome/common/notification_service.h"
@@ -79,6 +80,12 @@ const char kPrefLaunchType[] = "launchType";
 // A preference determining the order of which the apps appear on the NTP.
 const char kPrefAppLaunchIndex[] = "app_launcher_index";
 
+// A preference determining the page on which an app appears in the NTP.
+const char kPrefPageIndex[] = "page_index";
+
+// A preference specifying if the user dragged the app on the NTP.
+const char kPrefUserDraggedApp[] = "user_dragged_app_ntp";
+
 // A preference for storing extra data sent in update checks for an extension.
 const char kUpdateUrlData[] = "update_url_data";
 
@@ -141,12 +148,13 @@ static void ExtentToStringSet(const ExtensionExtent& host_extent,
 
 }  // namespace
 
-ExtensionPrefs::ExtensionPrefs(PrefService* prefs,
-                               const FilePath& root_dir,
-                               ExtensionPrefStore* pref_store)
+ExtensionPrefs::ExtensionPrefs(
+    PrefService* prefs,
+    const FilePath& root_dir,
+    ExtensionPrefValueMap* extension_pref_value_map)
     : prefs_(prefs),
       install_directory_(root_dir),
-      pref_store_(pref_store) {
+      extension_pref_value_map_(extension_pref_value_map) {
   // TODO(asargent) - Remove this in a couple of months. (See comment above
   // CleanupBadExtensionKeys).
   CleanupBadExtensionKeys(prefs_);
@@ -337,9 +345,7 @@ void ExtensionPrefs::AddToExtensionPrefStringSet(
 
 void ExtensionPrefs::SavePrefsAndNotify() {
   prefs_->ScheduleSavePersistentPrefs();
-  // TODO(mnissler, danno): Don't use pref_notifier() here, but tell the
-  // PrefService by some other means that we changed the pref value.
-  prefs_->pref_notifier()->OnPreferenceChanged(kExtensionsPref);
+  ScopedUserPrefUpdate update(prefs_, kExtensionsPref);
 }
 
 bool ExtensionPrefs::IsBlacklistBitSet(DictionaryValue* ext) {
@@ -481,6 +487,25 @@ void ExtensionPrefs::SetLastPingDayImpl(const Time& time,
   SavePrefsAndNotify();
 }
 
+Time ExtensionPrefs::LastPingDay(const std::string& extension_id) const {
+  DCHECK(Extension::IdIsValid(extension_id));
+  return LastPingDayImpl(GetExtensionPref(extension_id));
+}
+
+Time ExtensionPrefs::BlacklistLastPingDay() const {
+  return LastPingDayImpl(prefs_->GetDictionary(kExtensionsBlacklistUpdate));
+}
+
+void ExtensionPrefs::SetLastPingDay(const std::string& extension_id,
+                                    const Time& time) {
+  DCHECK(Extension::IdIsValid(extension_id));
+  SetLastPingDayImpl(time, GetExtensionPref(extension_id));
+}
+
+void ExtensionPrefs::SetBlacklistLastPingDay(const Time& time) {
+  SetLastPingDayImpl(time,
+                     prefs_->GetMutableDictionary(kExtensionsBlacklistUpdate));
+}
 
 bool ExtensionPrefs::GetGrantedPermissions(
     const std::string& extension_id,
@@ -504,11 +529,20 @@ bool ExtensionPrefs::GetGrantedPermissions(
   // "permissions" array and from the content script "matches" arrays,
   // so the URLPattern needs to accept valid schemes from both types.
   for (std::set<std::string>::iterator i = host_permissions.begin();
-       i != host_permissions.end(); ++i)
-    host_extent->AddPattern(URLPattern(
+       i != host_permissions.end(); ++i) {
+    URLPattern pattern(
         Extension::kValidHostPermissionSchemes |
-        UserScript::kValidUserScriptSchemes,
-        *i));
+        UserScript::kValidUserScriptSchemes);
+
+    // Parse without strict checks, so that new strict checks do not
+    // fail on a pattern in an installed extension.
+    if (URLPattern::PARSE_SUCCESS != pattern.Parse(
+            *i, URLPattern::PARSE_LENIENT)) {
+      NOTREACHED();  // Corrupt prefs?  Hand editing?
+    } else {
+      host_extent->AddPattern(pattern);
+    }
+  }
 
   return true;
 }
@@ -537,26 +571,6 @@ void ExtensionPrefs::AddGrantedPermissions(
   }
 
   SavePrefsAndNotify();
-}
-
-Time ExtensionPrefs::LastPingDay(const std::string& extension_id) const {
-  DCHECK(Extension::IdIsValid(extension_id));
-  return LastPingDayImpl(GetExtensionPref(extension_id));
-}
-
-Time ExtensionPrefs::BlacklistLastPingDay() const {
-  return LastPingDayImpl(prefs_->GetDictionary(kExtensionsBlacklistUpdate));
-}
-
-void ExtensionPrefs::SetLastPingDay(const std::string& extension_id,
-                                    const Time& time) {
-  DCHECK(Extension::IdIsValid(extension_id));
-  SetLastPingDayImpl(time, GetExtensionPref(extension_id));
-}
-
-void ExtensionPrefs::SetBlacklistLastPingDay(const Time& time) {
-  SetLastPingDayImpl(time,
-                     prefs_->GetMutableDictionary(kExtensionsBlacklistUpdate));
 }
 
 bool ExtensionPrefs::IsIncognitoEnabled(const std::string& extension_id) {
@@ -610,23 +624,51 @@ ExtensionPrefs::LaunchType ExtensionPrefs::GetLaunchType(
 extension_misc::LaunchContainer ExtensionPrefs::GetLaunchContainer(
     const Extension* extension,
     ExtensionPrefs::LaunchType default_pref_value) {
-  extension_misc::LaunchContainer launch_container =
+  extension_misc::LaunchContainer manifest_launch_container =
       extension->launch_container();
 
-  // Apps with app.launch.container = 'panel' should always
-  // open in a panel.
-  if (launch_container == extension_misc::LAUNCH_PANEL)
-    return extension_misc::LAUNCH_PANEL;
+  const extension_misc::LaunchContainer kInvalidLaunchContainer =
+      static_cast<extension_misc::LaunchContainer>(-1);
 
-  ExtensionPrefs::LaunchType prefs_launch_type =
-      GetLaunchType(extension->id(), default_pref_value);
+  extension_misc::LaunchContainer result = kInvalidLaunchContainer;
 
-  // If the user chose to open in a window, then launch in one.
-  if (prefs_launch_type == ExtensionPrefs::LAUNCH_WINDOW)
-    return extension_misc::LAUNCH_WINDOW;
+  if (manifest_launch_container == extension_misc::LAUNCH_PANEL) {
+    // Apps with app.launch.container = 'panel' should always
+    // open in a panel.
+    result = extension_misc::LAUNCH_PANEL;
 
-  // Otherwise, use the container the extension chose.
-  return launch_container;
+  } else if (manifest_launch_container == extension_misc::LAUNCH_TAB) {
+    // Look for prefs that indicate the user's choice of launch
+    // container.  The app's menu on the NTP provides a UI to set
+    // this preference.  If no preference is set, |default_pref_value|
+    // is used.
+    ExtensionPrefs::LaunchType prefs_launch_type =
+        GetLaunchType(extension->id(), default_pref_value);
+
+    if (prefs_launch_type == ExtensionPrefs::LAUNCH_WINDOW) {
+      // If the pref is set to launch a window (or no pref is set, and
+      // window opening is the default), make the container a window.
+      result = extension_misc::LAUNCH_WINDOW;
+
+    } else {
+      // All other launch types (tab, pinned, fullscreen) are
+      // implemented as tabs in a window.
+      result = extension_misc::LAUNCH_TAB;
+    }
+  } else {
+    // If a new value for app.launch.container is added, logic
+    // for it should be added here.  extension_misc::LAUNCH_WINDOW
+    // is not present because there is no way to set it in a manifest.
+    NOTREACHED() << manifest_launch_container;
+  }
+
+  // All paths should set |result|.
+  if (result == kInvalidLaunchContainer) {
+    DLOG(FATAL) << "Failed to set a launch container.";
+    result = extension_misc::LAUNCH_TAB;
+  }
+
+  return result;
 }
 
 void ExtensionPrefs::SetLaunchType(const std::string& extension_id,
@@ -696,15 +738,14 @@ void ExtensionPrefs::OnExtensionInstalled(
   }
   UpdateExtensionPref(id, kPrefAppLaunchIndex,
                       Value::CreateIntegerValue(GetNextAppLaunchIndex()));
+  extension_pref_value_map_->RegisterExtension(
+      id, install_time, initial_state == Extension::ENABLED);
   SavePrefsAndNotify();
 }
 
 void ExtensionPrefs::OnExtensionUninstalled(const std::string& extension_id,
                                             const Extension::Location& location,
                                             bool external_uninstall) {
-  PrefKeySet pref_keys;
-  GetExtensionControlledPrefKeys(extension_id, &pref_keys);
-
   // For external extensions, we save a preference reminding ourself not to try
   // and install the extension anymore (except when |external_uninstall| is
   // true, which signifies that the registry key was deleted or the pref file
@@ -713,11 +754,10 @@ void ExtensionPrefs::OnExtensionUninstalled(const std::string& extension_id,
     UpdateExtensionPref(extension_id, kPrefState,
                         Value::CreateIntegerValue(Extension::KILLBIT));
     SavePrefsAndNotify();
+    extension_pref_value_map_->SetExtensionState(extension_id, false);
   } else {
     DeleteExtensionPrefs(extension_id);
   }
-
-  UpdatePrefStore(pref_keys);
 }
 
 Extension::State ExtensionPrefs::GetExtensionState(
@@ -742,12 +782,10 @@ void ExtensionPrefs::SetExtensionState(const Extension* extension,
                                        Extension::State state) {
   UpdateExtensionPref(extension->id(), kPrefState,
                       Value::CreateIntegerValue(state));
-
-  PrefKeySet pref_keys;
-  GetExtensionControlledPrefKeys(extension->id(), &pref_keys);
-  UpdatePrefStore(pref_keys);
-
   SavePrefsAndNotify();
+
+  bool enabled = (state == Extension::ENABLED);
+  extension_pref_value_map_->SetExtensionState(extension->id(), enabled);
 }
 
 bool ExtensionPrefs::GetBrowserActionVisibility(const Extension* extension) {
@@ -827,6 +865,7 @@ void ExtensionPrefs::DeleteExtensionPrefs(const std::string& extension_id) {
     dict->Remove(extension_id, NULL);
     SavePrefsAndNotify();
   }
+  extension_pref_value_map_->UnregisterExtension(extension_id);
 }
 
 DictionaryValue* ExtensionPrefs::GetOrCreateExtensionPref(
@@ -850,18 +889,6 @@ DictionaryValue* ExtensionPrefs::GetExtensionPref(
   DictionaryValue* extension = NULL;
   dict->GetDictionary(extension_id, &extension);
   return extension;
-}
-
-DictionaryValue* ExtensionPrefs::GetExtensionControlledPrefs(
-    const std::string& extension_id) const {
-  DictionaryValue* extension = GetExtensionPref(extension_id);
-  if (!extension) {
-    NOTREACHED();
-    return NULL;
-  }
-  DictionaryValue* preferences = NULL;
-  extension->GetDictionary(kPrefPreferences, &preferences);
-  return preferences;
 }
 
 // Helper function for GetInstalledExtensionsInfo.
@@ -1112,6 +1139,44 @@ void ExtensionPrefs::SetAppLauncherOrder(
       NotificationService::NoDetails());
 }
 
+int ExtensionPrefs::GetPageIndex(const std::string& extension_id)
+{
+  int value;
+  if (ReadExtensionPrefInteger(extension_id, kPrefPageIndex, &value))
+    return value;
+
+  return -1;
+}
+
+void ExtensionPrefs::SetPageIndex(const std::string& extension_id, int index)
+{
+  CHECK_GE(index, 0);
+  UpdateExtensionPref(extension_id, kPrefPageIndex,
+                      Value::CreateIntegerValue(index));
+  SavePrefsAndNotify();
+}
+
+bool ExtensionPrefs::WasAppDraggedByUser(const std::string& extension_id) {
+  DictionaryValue* dictionary = GetExtensionPref(extension_id);
+  if (!dictionary) {
+    NOTREACHED();
+    return false;
+  }
+
+  return ReadBooleanFromPref(dictionary, kPrefUserDraggedApp);
+}
+
+void ExtensionPrefs::SetAppDraggedByUser(const std::string& extension_id) {
+  DictionaryValue* dictionary = GetExtensionPref(extension_id);
+  if (!dictionary) {
+    NOTREACHED();
+    return;
+  }
+
+  dictionary->SetBoolean(kPrefUserDraggedApp, true);
+  SavePrefsAndNotify();
+}
+
 void ExtensionPrefs::SetUpdateUrlData(const std::string& extension_id,
                                       const std::string& data) {
   DictionaryValue* dictionary = GetExtensionPref(extension_id);
@@ -1154,16 +1219,14 @@ base::Time ExtensionPrefs::GetInstallTime(
   return base::Time::FromInternalValue(install_time_i64);
 }
 
-void ExtensionPrefs::GetEnabledExtensions(ExtensionIdSet* out) const {
+void ExtensionPrefs::GetExtensions(ExtensionIdSet* out) {
   CHECK(out);
-  const DictionaryValue* extensions =
-      pref_service()->GetDictionary(kExtensionsPref);
 
-  for (DictionaryValue::key_iterator ext_id = extensions->begin_keys();
-       ext_id != extensions->end_keys(); ++ext_id) {
-    if (GetExtensionState(*ext_id) != Extension::ENABLED)
-      continue;
-    out->push_back(*ext_id);
+  scoped_ptr<ExtensionsInfo> extensions_info(GetInstalledExtensionsInfo());
+
+  for (size_t i = 0; i < extensions_info->size(); ++i) {
+    ExtensionInfo* info = extensions_info->at(i).get();
+    out->push_back(info->extension_id);
   }
 }
 
@@ -1192,119 +1255,118 @@ void ExtensionPrefs::FixMissingPrefs(const ExtensionIdSet& extension_ids) {
     SavePrefsAndNotify();
 }
 
+DictionaryValue* ExtensionPrefs::GetExtensionControlledPrefs(
+    const std::string& extension_id) const {
+  DictionaryValue* source_dict = prefs_->GetMutableDictionary(kExtensionsPref);
+  DictionaryValue* preferences = NULL;
+  std::string key = extension_id + std::string(".") + kPrefPreferences;
+  if (!source_dict->GetDictionary(key, &preferences)) {
+    source_dict->Set(key, new DictionaryValue);
+    bool success = source_dict->GetDictionary(key, &preferences);
+    DCHECK(success);
+  }
+  return preferences;
+}
+
 void ExtensionPrefs::InitPrefStore() {
   // When this is called, the PrefService is initialized and provides access
   // to the user preferences stored in a JSON file.
   ExtensionIdSet extension_ids;
-  GetEnabledExtensions(&extension_ids);
+  GetExtensions(&extension_ids);
   FixMissingPrefs(extension_ids);
 
-  // Collect the unique extension controlled preference keys of all extensions.
-  PrefKeySet ext_controlled_prefs;
+  // Store extension controlled preference values in the
+  // |extension_pref_value_map_|, which then informs the subscribers
+  // (ExtensionPrefStores) about the winning values.
   for (ExtensionIdSet::iterator ext_id = extension_ids.begin();
        ext_id != extension_ids.end(); ++ext_id) {
-    GetExtensionControlledPrefKeys(*ext_id, &ext_controlled_prefs);
-  }
+    extension_pref_value_map_->RegisterExtension(
+        *ext_id,
+        GetInstallTime(*ext_id),
+        GetExtensionState(*ext_id) == Extension::ENABLED);
 
-  // Store winning preference for each extension controlled preference.
-  UpdatePrefStore(ext_controlled_prefs);
-  pref_store_->OnInitializationCompleted();
-}
-
-const Value* ExtensionPrefs::GetWinningExtensionControlledPrefValue(
-    const std::string& key) const {
-  Value *winner = NULL;
-  base::Time winners_install_time = base::Time();
-
-  ExtensionIdSet extension_ids;
-  GetEnabledExtensions(&extension_ids);
-  for (ExtensionIdSet::iterator ext_id = extension_ids.begin();
-       ext_id != extension_ids.end(); ++ext_id) {
-    base::Time extension_install_time = GetInstallTime(*ext_id);
-
-    // We do not need to consider extensions that were installed before the
-    // most recent extension found that provides the requested preference.
-    if (extension_install_time < winners_install_time)
-      continue;
-
-    DictionaryValue* preferences = GetExtensionControlledPrefs(*ext_id);
-    Value *value = NULL;
-    if (preferences && preferences->GetWithoutPathExpansion(key, &value)) {
-      // This extension is more recent than the last one providing this pref.
-      winner = value;
-      winners_install_time = extension_install_time;
+    DictionaryValue* prefs = GetExtensionControlledPrefs(*ext_id);
+    for (DictionaryValue::key_iterator i = prefs->begin_keys();
+         i != prefs->end_keys(); ++i) {
+      Value* value;
+      if (!prefs->GetWithoutPathExpansion(*i, &value))
+        continue;
+      extension_pref_value_map_->SetExtensionPref(
+          *ext_id, *i, false, value->DeepCopy());
     }
   }
 
-  return winner;
+  extension_pref_value_map_->NotifyInitializationCompleted();
 }
 
-void ExtensionPrefs::UpdatePrefStore(
-    const ExtensionPrefs::PrefKeySet& pref_keys) {
-  for (PrefKeySet::const_iterator i = pref_keys.begin();
-       i != pref_keys.end(); ++i) {
-    UpdatePrefStore(*i);
-  }
-}
-
-void ExtensionPrefs::UpdatePrefStore(const std::string& pref_key) {
-  if (pref_store_ == NULL)
-    return;
-  const Value* winning_pref_value =
-      GetWinningExtensionControlledPrefValue(pref_key);
-
-  if (winning_pref_value)
-    pref_store_->SetExtensionPref(pref_key, winning_pref_value->DeepCopy());
-  else
-    pref_store_->RemoveExtensionPref(pref_key);
-}
 
 void ExtensionPrefs::SetExtensionControlledPref(const std::string& extension_id,
                                                 const std::string& pref_key,
+                                                bool incognito,
                                                 Value* value) {
-  scoped_ptr<Value> scoped_value(value);
+#ifndef NDEBUG
+  const PrefService::Preference* pref =
+      pref_service()->FindPreference(pref_key.c_str());
+  DCHECK(pref) << "Extension controlled preference key " << pref_key
+               << " not registered.";
+  DCHECK_EQ(pref->GetType(), value->GetType())
+      << "Extension controlled preference " << pref_key << " has wrong type.";
+#endif
+
+  if (!incognito) {
+    // Also store in persisted Preferences file to recover after a
+    // browser restart.
+    DictionaryValue* dict = GetExtensionControlledPrefs(extension_id);
+    dict->SetWithoutPathExpansion(pref_key, value->DeepCopy());
+    pref_service()->ScheduleSavePersistentPrefs();
+  }
+
+  extension_pref_value_map_->SetExtensionPref(
+      extension_id, pref_key, incognito, value);
+}
+
+void ExtensionPrefs::RemoveExtensionControlledPref(
+    const std::string& extension_id,
+    const std::string& pref_key,
+    bool incognito) {
   DCHECK(pref_service()->FindPreference(pref_key.c_str()))
       << "Extension controlled preference key " << pref_key
       << " not registered.";
-  DictionaryValue* extension_preferences =
-      GetExtensionControlledPrefs(extension_id);
 
-  if (extension_preferences == NULL) {  // May be pruned when writing to disk.
-    DictionaryValue* extension = GetExtensionPref(extension_id);
-    if (extension == NULL) {
-      LOG(ERROR) << "Extension preference for " << extension_id << " undefined";
-      return;
-    }
-    extension_preferences = new DictionaryValue;
-    extension->Set(kPrefPreferences, extension_preferences);
+  if (!incognito) {
+    // Also store in persisted Preferences file to recover after a
+    // browser restart.
+    DictionaryValue* dict = GetExtensionControlledPrefs(extension_id);
+    dict->RemoveWithoutPathExpansion(pref_key, NULL);
+    pref_service()->ScheduleSavePersistentPrefs();
   }
 
-  Value* oldValue = NULL;
-  extension_preferences->GetWithoutPathExpansion(pref_key, &oldValue);
-  bool modified = !Value::Equals(oldValue, scoped_value.get());
-  if (!modified)
-    return;
-
-  if (scoped_value.get() == NULL)
-    extension_preferences->RemoveWithoutPathExpansion(pref_key, NULL);
-  else
-    extension_preferences->SetWithoutPathExpansion(pref_key,
-                                                   scoped_value.release());
-  pref_service()->ScheduleSavePersistentPrefs();
-
-  UpdatePrefStore(pref_key);
+  extension_pref_value_map_->RemoveExtensionPref(
+      extension_id, pref_key, incognito);
 }
 
-void ExtensionPrefs::GetExtensionControlledPrefKeys(
-    const std::string& extension_id, PrefKeySet *out) const {
-  DCHECK(out != NULL);
-  DictionaryValue* ext_prefs = GetExtensionControlledPrefs(extension_id);
-  if (ext_prefs) {
-    for (DictionaryValue::key_iterator i = ext_prefs->begin_keys();
-         i != ext_prefs->end_keys(); ++i) {
-      out->insert(*i);
-    }
-  }
+bool ExtensionPrefs::CanExtensionControlPref(const std::string& extension_id,
+                                             const std::string& pref_key,
+                                             bool incognito) {
+  DCHECK(pref_service()->FindPreference(pref_key.c_str()))
+      << "Extension controlled preference key " << pref_key
+      << " not registered.";
+
+  return extension_pref_value_map_->CanExtensionControlPref(extension_id,
+                                                            pref_key,
+                                                            incognito);
+}
+
+bool ExtensionPrefs::DoesExtensionControlPref(const std::string& extension_id,
+                                              const std::string& pref_key,
+                                              bool incognito) {
+  DCHECK(pref_service()->FindPreference(pref_key.c_str()))
+      << "Extension controlled preference key " << pref_key
+      << " not registered.";
+
+  return extension_pref_value_map_->DoesExtensionControlPref(extension_id,
+                                                             pref_key,
+                                                             incognito);
 }
 
 // static

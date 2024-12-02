@@ -7,10 +7,10 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/intranet_redirect_detector.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/tab_contents/navigation_controller.h"
-#include "chrome/browser/tab_contents/navigation_entry.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/notification_service.h"
+#include "content/browser/tab_contents/navigation_controller.h"
+#include "content/browser/tab_contents/navigation_entry.h"
+#include "content/browser/tab_contents/tab_contents.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "net/base/registry_controlled_domain.h"
@@ -93,7 +93,7 @@ void AlternateNavURLFetcher::OnURLFetchComplete(
     int response_code,
     const ResponseCookies& cookies,
     const std::string& data) {
-  DCHECK(fetcher_.get() == source);
+  DCHECK_EQ(fetcher_.get(), source);
   SetStatusFromURLFetch(url, status, response_code);
   ShowInfobarIfPossible();
 }
@@ -103,11 +103,14 @@ SkBitmap* AlternateNavURLFetcher::GetIcon() const {
       IDR_INFOBAR_ALT_NAV_URL);
 }
 
+InfoBarDelegate::Type AlternateNavURLFetcher::GetInfoBarType() const {
+  return PAGE_ACTION_TYPE;
+}
+
 string16 AlternateNavURLFetcher::GetMessageTextWithOffset(
     size_t* link_offset) const {
   const string16 label = l10n_util::GetStringFUTF16(
       IDS_ALTERNATE_NAV_URL_VIEW_LABEL, string16(), link_offset);
-  DCHECK(*link_offset != string16::npos);
   return label;
 }
 
@@ -166,6 +169,5 @@ void AlternateNavURLFetcher::ShowInfobarIfPossible() {
 
   infobar_contents_ = controller_->tab_contents();
   StoreActiveEntryUniqueID(infobar_contents_);
-  // We will be deleted when the InfoBar is destroyed. (See InfoBarClosed).
   infobar_contents_->AddInfoBar(this);
 }

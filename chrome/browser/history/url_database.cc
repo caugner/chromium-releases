@@ -163,8 +163,11 @@ URLID URLDatabase::AddURLInternal(const history::URLRow& info,
   statement.BindInt(5, info.hidden() ? 1 : 0);
   statement.BindInt64(6, info.favicon_id());
 
-  if (!statement.Run())
+  if (!statement.Run()) {
+    VLOG(0) << "Failed to add url " << info.url().possibly_invalid_spec()
+            << " to table history.urls.";
     return 0;
+  }
   return GetDB().GetLastInsertRowId();
 }
 
@@ -231,6 +234,25 @@ bool URLDatabase::InitURLEnumeratorForEverything(URLEnumerator* enumerator) {
     NOTREACHED() << GetDB().GetErrorMessage();
     return false;
   }
+  enumerator->initialized_ = true;
+  return true;
+}
+
+bool URLDatabase::InitURLEnumeratorForSignificant(URLEnumerator* enumerator) {
+  DCHECK(!enumerator->initialized_);
+  std::string sql("SELECT ");
+  sql.append(kURLRowFields);
+  sql.append(" FROM urls WHERE last_visit_time >= ? OR visit_count > ? OR "
+             "typed_count > ?");
+  enumerator->statement_.Assign(GetDB().GetUniqueStatement(sql.c_str()));
+  if (!enumerator->statement_) {
+    NOTREACHED() << GetDB().GetErrorMessage();
+    return false;
+  }
+  enumerator->statement_.BindInt64(
+      0, AutocompleteAgeThreshold().ToInternalValue());
+  enumerator->statement_.BindInt(1, kLowQualityMatchVisitLimit);
+  enumerator->statement_.BindInt(2, kLowQualityMatchTypedLimit);
   enumerator->initialized_ = true;
   return true;
 }

@@ -135,7 +135,6 @@ bool NotificationProvider::ShowText(const WebNotification& notification,
   params.direction = notification.direction();
   params.notification_id = id;
   params.replace_id = notification.replaceId();
-
   return Send(new ViewHostMsg_ShowDesktopNotification(routing_id(), params));
 }
 

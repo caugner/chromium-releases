@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,6 +17,7 @@
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/task.h"
+#include "base/threading/thread_restrictions.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_signin.h"
 #include "chrome/browser/history/history_types.h"
@@ -29,9 +30,9 @@
 #include "chrome/browser/sync/glue/data_type_controller.h"
 #include "chrome/browser/sync/glue/data_type_manager.h"
 #include "chrome/browser/sync/glue/session_data_type_controller.h"
+#include "chrome/browser/sync/js_arg_list.h"
 #include "chrome/browser/sync/profile_sync_factory.h"
 #include "chrome/browser/sync/signin_manager.h"
-#include "chrome/browser/sync/sync_ui_util.h"
 #include "chrome/browser/sync/token_migrator.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/net/gaia/gaia_constants.h"
@@ -78,9 +79,9 @@ ProfileSyncService::ProfileSyncService(ProfileSyncFactory* factory,
       sync_service_url_(kDevServerUrl),
       backend_initialized_(false),
       is_auth_in_progress_(false),
-      ALLOW_THIS_IN_INITIALIZER_LIST(wizard_(this)),
+      wizard_(ALLOW_THIS_IN_INITIALIZER_LIST(this)),
       unrecoverable_error_detected_(false),
-      ALLOW_THIS_IN_INITIALIZER_LIST(scoped_runnable_method_factory_(this)),
+      scoped_runnable_method_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)),
       token_migrator_(NULL),
       clear_server_data_state_(CLEAR_NOT_STARTED) {
   DCHECK(factory);
@@ -93,9 +94,11 @@ ProfileSyncService::ProfileSyncService(ProfileSyncFactory* factory,
   // Dev servers have more features than standard sync servers.
   // Chrome stable and beta builds will go to the standard sync servers.
 #if defined(GOOGLE_CHROME_BUILD)
+  // GetVersionStringModifier hits the registry. See http://crbug.com/70380.
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
   // For stable, this is "". For dev, this is "dev". For beta, this is "beta".
   // For daily, this is "canary build".
-  // For linux Chromium builds, this could be anything depending on the
+  // For Linux Chromium builds, this could be anything depending on the
   // distribution, so always direct those users to dev server urls.
   // If this is an official build, it will always be one of the above.
   std::string channel = platform_util::GetVersionStringModifier();
@@ -416,7 +419,8 @@ void ProfileSyncService::InitializeBackend(bool delete_sync_data_folder) {
 
   SyncCredentials credentials = GetCredentials();
 
-  backend_->Initialize(sync_service_url_,
+  backend_->Initialize(this,
+                       sync_service_url_,
                        types,
                        profile_->GetRequestContext(),
                        credentials,
@@ -425,7 +429,11 @@ void ProfileSyncService::InitializeBackend(bool delete_sync_data_folder) {
 }
 
 void ProfileSyncService::CreateBackend() {
-  backend_.reset(new SyncBackendHost(this, profile_));
+  backend_.reset(new SyncBackendHost(profile_));
+}
+
+bool ProfileSyncService::IsEncryptedDatatypeEnabled() const {
+  return !encrypted_types_.empty();
 }
 
 void ProfileSyncService::StartUp() {
@@ -463,6 +471,8 @@ void ProfileSyncService::Shutdown(bool sync_disabled) {
                       Source<DataTypeManager>(data_type_manager_.get()));
     data_type_manager_.reset();
   }
+
+  js_event_handlers_.RemoveBackend();
 
   // Move aside the backend so nobody else tries to use it while we are
   // shutting it down.
@@ -527,6 +537,10 @@ void ProfileSyncService::UpdateLastSyncedTime() {
 
 void ProfileSyncService::NotifyObservers() {
   FOR_EACH_OBSERVER(Observer, observers_, OnStateChanged());
+  // TODO(akalin): Make an Observer subclass that listens and does the
+  // event routing.
+  js_event_handlers_.RouteJsEvent(
+      "onSyncServiceStateChanged", browser_sync::JsArgList(), NULL);
 }
 
 // static
@@ -590,6 +604,8 @@ void ProfileSyncService::OnUnrecoverableError(
 
 void ProfileSyncService::OnBackendInitialized() {
   backend_initialized_ = true;
+
+  js_event_handlers_.SetBackend(backend_->GetJsBackend());
 
   // The very first time the backend initializes is effectively the first time
   // we can say we successfully "synced".  last_synced_time_ will only be null
@@ -700,8 +716,22 @@ void ProfileSyncService::OnPassphraseRequired(bool for_decryption) {
     return;
   }
 
-  if (WizardIsVisible()) {
+  // We will skip the passphrase prompt and suppress the warning
+  // if the passphrase is needed for decryption but the user is
+  // not syncing an encrypted data type on this machine.
+  // Otherwise we prompt.
+  if (!IsEncryptedDatatypeEnabled() && for_decryption) {
+    OnPassphraseAccepted();
+    return;
+  }
+
+  if (WizardIsVisible() && for_decryption) {
     wizard_.Step(SyncSetupWizard::ENTER_PASSPHRASE);
+  } else if (WizardIsVisible() && !for_decryption) {
+    // The user is enabling an encrypted data type for the first
+    // time, and we don't even have a default passphrase.  We need
+    // to refresh credentials and show the passphrase migration.
+    SigninForPassphraseMigration(NULL);
   }
 
   NotifyObservers();
@@ -722,6 +752,14 @@ void ProfileSyncService::OnPassphraseAccepted() {
   wizard_.Step(SyncSetupWizard::DONE);
 }
 
+void ProfileSyncService::OnEncryptionComplete(
+    const syncable::ModelTypeSet& encrypted_types) {
+  if (encrypted_types_ != encrypted_types) {
+    encrypted_types_ = encrypted_types;
+    NotifyObservers();
+  }
+}
+
 void ProfileSyncService::ShowLoginDialog(gfx::NativeWindow parent_window) {
   if (!cros_user_.empty()) {
     // For ChromeOS, any login UI needs to be handled by the settings page.
@@ -733,6 +771,9 @@ void ProfileSyncService::ShowLoginDialog(gfx::NativeWindow parent_window) {
 
   if (WizardIsVisible()) {
     wizard_.Focus();
+    // Force the wizard to step to the login screen (which will only actually
+    // happen if the transition is valid).
+    wizard_.Step(SyncSetupWizard::GAIA_LOGIN);
     return;
   }
 
@@ -1008,6 +1049,12 @@ bool ProfileSyncService::IsCryptographerReady() const {
   return backend_.get() && backend_->IsCryptographerReady();
 }
 
+SyncBackendHost* ProfileSyncService::GetBackendForTest() {
+  // We don't check |backend_initialized_|; we assume the test class
+  // knows what it's doing.
+  return backend_.get();
+}
+
 void ProfileSyncService::ConfigureDataTypeManager() {
   if (!data_type_manager_.get()) {
     data_type_manager_.reset(
@@ -1023,7 +1070,87 @@ void ProfileSyncService::ConfigureDataTypeManager() {
 
   syncable::ModelTypeSet types;
   GetPreferredDataTypes(&types);
+  // We set this special case here since it's the only datatype whose encryption
+  // status we already know. All others are set after the initial sync
+  // completes (for now).
+  // TODO(zea): Implement a better way that uses preferences for which types
+  // need encryption.
+  encrypted_types_.clear();
+  if (types.count(syncable::PASSWORDS) > 0)
+    encrypted_types_.insert(syncable::PASSWORDS);
   data_type_manager_->Configure(types);
+}
+
+sync_api::UserShare* ProfileSyncService::GetUserShare() const {
+  if (backend_.get() && backend_initialized_) {
+    return backend_->GetUserShare();
+  }
+  NOTREACHED();
+  return NULL;
+}
+
+const browser_sync::sessions::SyncSessionSnapshot*
+    ProfileSyncService::GetLastSessionSnapshot() const {
+  if (backend_.get() && backend_initialized_) {
+    return backend_->GetLastSessionSnapshot();
+  }
+  NOTREACHED();
+  return NULL;
+}
+
+bool ProfileSyncService::HasUnsyncedItems() const {
+  if (backend_.get() && backend_initialized_) {
+    return backend_->HasUnsyncedItems();
+  }
+  NOTREACHED();
+  return false;
+}
+
+void ProfileSyncService::GetModelSafeRoutingInfo(
+    browser_sync::ModelSafeRoutingInfo* out) {
+  if (backend_.get() && backend_initialized_) {
+    backend_->GetModelSafeRoutingInfo(out);
+  } else {
+    NOTREACHED();
+  }
+}
+
+syncable::AutofillMigrationState
+    ProfileSyncService::GetAutofillMigrationState() {
+  if (backend_.get() && backend_initialized_) {
+    return backend_->GetAutofillMigrationState();
+  }
+  NOTREACHED();
+  return syncable::NOT_DETERMINED;
+}
+
+void ProfileSyncService::SetAutofillMigrationState(
+    syncable::AutofillMigrationState state) {
+  if (backend_.get() && backend_initialized_) {
+    backend_->SetAutofillMigrationState(state);
+  } else {
+    NOTREACHED();
+  }
+}
+
+syncable::AutofillMigrationDebugInfo
+    ProfileSyncService::GetAutofillMigrationDebugInfo() {
+  if (backend_.get() && backend_initialized_) {
+    return backend_->GetAutofillMigrationDebugInfo();
+  }
+  NOTREACHED();
+  syncable::AutofillMigrationDebugInfo debug_info = { 0 };
+  return debug_info;
+}
+
+void ProfileSyncService::SetAutofillMigrationDebugInfo(
+    syncable::AutofillMigrationDebugInfo::PropertyToSet property_to_set,
+    const syncable::AutofillMigrationDebugInfo& info) {
+  if (backend_.get() && backend_initialized_) {
+    backend_->SetAutofillMigrationDebugInfo(property_to_set, info);
+  } else {
+    NOTREACHED();
+  }
 }
 
 void ProfileSyncService::ActivateDataType(
@@ -1034,7 +1161,7 @@ void ProfileSyncService::ActivateDataType(
     return;
   }
   DCHECK(backend_initialized_);
-  change_processor->Start(profile(), backend_->GetUserShareHandle());
+  change_processor->Start(profile(), backend_->GetUserShare());
   backend_->ActivateDataType(data_type_controller, change_processor);
 }
 
@@ -1061,6 +1188,16 @@ void ProfileSyncService::SetPassphrase(const std::string& passphrase,
     tried_creating_explicit_passphrase_ = true;
   else if (is_explicit)
     tried_setting_explicit_passphrase_ = true;
+}
+
+void ProfileSyncService::EncryptDataTypes(
+    const syncable::ModelTypeSet& encrypted_types) {
+  backend_->EncryptDataTypes(encrypted_types);
+}
+
+void ProfileSyncService::GetEncryptedDataTypes(
+    syncable::ModelTypeSet* encrypted_types) const {
+  *encrypted_types = encrypted_types_;
 }
 
 void ProfileSyncService::Observe(NotificationType type,
@@ -1098,6 +1235,10 @@ void ProfileSyncService::Observe(NotificationType type,
         wizard_.Step(SyncSetupWizard::DONE);
       NotifyObservers();
 
+      // In the old world, this would be a no-op.  With new syncer thread,
+      // this is the point where it is safe to switch from config-mode to
+      // normal operation.
+      backend_->StartSyncingWithServer();
       break;
     }
     case NotificationType::SYNC_DATA_TYPES_UPDATED: {
@@ -1184,6 +1325,10 @@ void ProfileSyncService::RemoveObserver(Observer* observer) {
 
 bool ProfileSyncService::HasObserver(Observer* observer) const {
   return observers_.HasObserver(observer);
+}
+
+browser_sync::JsFrontend* ProfileSyncService::GetJsFrontend() {
+  return &js_event_handlers_;
 }
 
 void ProfileSyncService::SyncEvent(SyncEventCodes code) {

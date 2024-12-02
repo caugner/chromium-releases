@@ -10,6 +10,7 @@
 #include "app/gfx/gl/gl_bindings.h"
 #include "app/gfx/gl/gl_context.h"
 #include "app/gfx/gl/gl_implementation.h"
+#include "base/file_util.h"
 #include "base/logging.h"
 #include "base/scoped_ptr.h"
 #include "base/string_piece.h"
@@ -77,13 +78,22 @@ struct PciInterface {
   FT_pci_lookup_name pci_lookup_name;
 };
 
+// This checks if a system supports PCI bus.
+// We check the existence of /sys/bus/pci or /sys/bug/pci_express.
+bool IsPciSupported() {
+  const FilePath pci_path("/sys/bus/pci/");
+  const FilePath pcie_path("/sys/bus/pci_express/");
+  return (file_util::PathExists(pci_path) ||
+          file_util::PathExists(pcie_path));
+}
+
 // This dynamically opens libpci and get function pointers we need.  Return
 // NULL if library fails to open or any functions can not be located.
 // Returned interface (if not NULL) should be deleted in FinalizeLibPci.
 PciInterface* InitializeLibPci(const char* lib_name) {
   void* handle = dlopen(lib_name, RTLD_LAZY);
   if (handle == NULL) {
-    LOG(ERROR) << "Fail to dlopen libpci";
+    LOG(INFO) << "Failed to dlopen " << lib_name;
     return NULL;
   }
   PciInterface* interface = new struct PciInterface;
@@ -106,7 +116,7 @@ PciInterface* InitializeLibPci(const char* lib_name) {
       interface->pci_scan_bus == NULL ||
       interface->pci_fill_info == NULL ||
       interface->pci_lookup_name == NULL) {
-    LOG(ERROR) << "Missing required function(s) from libpci";
+    LOG(ERROR) << "Missing required function(s) from " << lib_name;
     dlclose(handle);
     delete interface;
     return NULL;
@@ -133,17 +143,41 @@ bool CollectGraphicsInfo(GPUInfo* gpu_info) {
   // desktop GL and GL_ARB_robustness extension is available.
   gpu_info->SetCanLoseContext(
       gfx::GetGLImplementation() == gfx::kGLImplementationEGLGLES2);
-  gpu_info->SetProgress(GPUInfo::kComplete);
+  gpu_info->SetLevel(GPUInfo::kComplete);
   return CollectGraphicsInfoGL(gpu_info);
+}
+
+bool CollectPreliminaryGraphicsInfo(GPUInfo* gpu_info) {
+  DCHECK(gpu_info);
+
+  gpu_info->SetLevel(GPUInfo::kPartial);
+
+  bool rt = true;
+  if (!CollectVideoCardInfo(gpu_info))
+    rt = false;
+
+  // TODO(zmo): if vendor is ATI, consider passing /etc/ati/amdpcsdb.default
+  // for driver information.
+
+  return rt;
 }
 
 bool CollectVideoCardInfo(GPUInfo* gpu_info) {
   DCHECK(gpu_info);
 
+  if (IsPciSupported() == false) {
+    LOG(INFO) << "PCI bus scanning is not supported";
+    return false;
+  }
+
   // TODO(zmo): be more flexible about library name.
   PciInterface* interface = InitializeLibPci("libpci.so.3");
   if (interface == NULL)
+    interface = InitializeLibPci("libpci.so");
+  if (interface == NULL) {
+    LOG(ERROR) << "Failed to locate libpci";
     return false;
+  }
 
   PciAccess* access = (interface->pci_alloc)();
   DCHECK(access != NULL);
@@ -217,7 +251,7 @@ bool CollectVideoCardInfo(GPUInfo* gpu_info) {
   return (gpu_active != NULL);
 }
 
-bool CollectDriverInfo(GPUInfo* gpu_info) {
+bool CollectDriverInfoGL(GPUInfo* gpu_info) {
   DCHECK(gpu_info);
 
   std::string gl_version_string = gpu_info->gl_version_string();
@@ -235,7 +269,7 @@ bool CollectDriverInfo(GPUInfo* gpu_info) {
   if (pos != std::string::npos)
     driver_version = driver_version.substr(0, pos);
 
-  gpu_info->SetDriverInfo(pieces[1], driver_version);
+  gpu_info->SetDriverInfo(pieces[1], driver_version, "");
   return true;
 }
 

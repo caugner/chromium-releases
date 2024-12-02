@@ -15,18 +15,20 @@ struct PPB_AudioConfig;
 namespace pp {
 namespace proxy {
 
+class HostResource;
+
 class PPB_AudioConfig_Proxy : public InterfaceProxy {
  public:
   PPB_AudioConfig_Proxy(Dispatcher* dispatcher, const void* target_interface);
   virtual ~PPB_AudioConfig_Proxy();
+
+  static const Info* GetInfo();
 
   const PPB_AudioConfig* ppb_audio_config_target() const {
     return static_cast<const PPB_AudioConfig*>(target_interface());
   }
 
   // InterfaceProxy implementation.
-  virtual const void* GetSourceInterface() const;
-  virtual InterfaceID GetInterfaceId() const;
   virtual bool OnMessageReceived(const IPC::Message& msg);
 
  private:
@@ -34,7 +36,7 @@ class PPB_AudioConfig_Proxy : public InterfaceProxy {
   void OnMsgCreateStereo16Bit(PP_Instance instance,
                               int32_t sample_rate,
                               uint32_t sample_frame_count,
-                              PP_Resource* result);
+                              HostResource* result);
   void OnMsgRecommendSampleFrameCount(int32_t sample_rate,
                                       uint32_t requested,
                                       uint32_t* result);

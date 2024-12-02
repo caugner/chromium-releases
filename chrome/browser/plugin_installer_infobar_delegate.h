@@ -6,7 +6,7 @@
 #define CHROME_BROWSER_PLUGIN_INSTALLER_INFOBAR_DELEGATE_H_
 #pragma once
 
-#include "chrome/browser/tab_contents/infobar_delegate.h"
+#include "chrome/browser/tab_contents/confirm_infobar_delegate.h"
 
 class TabContents;
 
@@ -15,13 +15,13 @@ class TabContents;
 class PluginInstallerInfoBarDelegate : public ConfirmInfoBarDelegate {
  public:
   explicit PluginInstallerInfoBarDelegate(TabContents* tab_contents);
-  virtual ~PluginInstallerInfoBarDelegate();
-
-  void OnMissingPluginStatus(int status);
 
  private:
+  virtual ~PluginInstallerInfoBarDelegate();
+
   // ConfirmInfoBarDelegate:
   virtual SkBitmap* GetIcon() const;
+  virtual PluginInstallerInfoBarDelegate* AsPluginInstallerInfoBarDelegate();
   virtual string16 GetMessageText() const;
   virtual int GetButtons() const;
   virtual string16 GetButtonLabel(InfoBarButton button) const;

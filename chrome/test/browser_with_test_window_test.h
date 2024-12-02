@@ -7,9 +7,10 @@
 #pragma once
 
 #include "base/message_loop.h"
-#include "chrome/browser/browser_thread.h"
-#include "chrome/browser/renderer_host/test/test_render_view_host.h"
+#include "chrome/test/testing_browser_process_test.h"
 #include "chrome/test/test_browser_window.h"
+#include "content/browser/browser_thread.h"
+#include "content/browser/renderer_host/test_render_view_host.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 class Browser;
@@ -39,7 +40,7 @@ class TestingProfile;
 //
 // Subclasses must invoke BrowserWithTestWindowTest::SetUp as it is responsible
 // for creating the various objects of this class.
-class BrowserWithTestWindowTest : public testing::Test {
+class BrowserWithTestWindowTest : public TestingBrowserProcessTest {
  public:
   BrowserWithTestWindowTest();
   virtual ~BrowserWithTestWindowTest();

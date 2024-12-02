@@ -12,15 +12,15 @@
 #include "chrome/browser/download/download_util.h"
 #include "chrome/browser/download/drag_download_file.h"
 #include "chrome/browser/download/drag_download_util.h"
-#include "chrome/browser/renderer_host/render_view_host.h"
-#include "chrome/browser/renderer_host/render_view_host_delegate.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
-#include "chrome/browser/tab_contents/tab_contents_view.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
-#include "gfx/gtk_util.h"
+#include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/renderer_host/render_view_host_delegate.h"
+#include "content/browser/tab_contents/tab_contents.h"
+#include "content/browser/tab_contents/tab_contents_view.h"
 #include "net/base/file_stream.h"
 #include "net/base/net_util.h"
 #include "ui/base/dragdrop/gtk_dnd_util.h"
+#include "ui/gfx/gtk_util.h"
 #include "webkit/glue/webdropdata.h"
 
 using WebKit::WebDragOperation;
@@ -74,8 +74,7 @@ void TabContentsDragSource::StartDragging(const WebDropData& drop_data,
   // Guard against re-starting before previous drag completed.
   if (drag_context_) {
     NOTREACHED();
-    if (tab_contents()->render_view_host())
-      tab_contents()->render_view_host()->DragSourceSystemDragEnded();
+    tab_contents()->SystemDragEnded();
     return;
   }
 
@@ -140,8 +139,7 @@ void TabContentsDragSource::StartDragging(const WebDropData& drop_data,
   if (!drag_context_) {
     drag_failed_ = true;
     drop_data_.reset();
-    if (tab_contents()->render_view_host())
-      tab_contents()->render_view_host()->DragSourceSystemDragEnded();
+    tab_contents()->SystemDragEnded();
     return;
   }
 
@@ -358,8 +356,7 @@ void TabContentsDragSource::OnDragEnd(GtkWidget* sender,
     }
   }
 
-  if (tab_contents()->render_view_host())
-    tab_contents()->render_view_host()->DragSourceSystemDragEnded();
+  tab_contents()->SystemDragEnded();
 
   drop_data_.reset();
   drag_context_ = NULL;

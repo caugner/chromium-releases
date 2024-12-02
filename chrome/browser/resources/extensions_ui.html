@@ -417,7 +417,7 @@ var extensionDataFormat = {
 var devModeExpanded = false;
 
 /**
- * Toggles the devModeExpanded, and notifies the c++ dom_ui to toggle the
+ * Toggles the devModeExpanded, and notifies the c++ WebUI to toggle the
  * extensions.ui.developer_mode which saved in the preferences.
  */
 function toggleDevModeExpanded() {
@@ -461,17 +461,17 @@ function requestExtensionsData() {
 
 // Used for observing function of the backend datasource for this page by
 // tests.
-var domui_responded_ = false;
+var webui_responded_ = false;
 
 // Used to only do some work the first time we render.
 var rendered_once_ = false;
 
 /**
- * Called by the dom_ui_ to re-populate the page with data representing
+ * Called by the web_ui_ to re-populate the page with data representing
  * the current state of installed extensions.
  */
 function returnExtensionsData(extensionsData){
-  domui_responded_ = true;
+  webui_responded_ = true;
   devModeExpanded = extensionsData.developerMode;
 
   var bodyContainer = document.getElementById('body-container');
@@ -535,7 +535,7 @@ function returnExtensionsData(extensionsData){
  * Tell the C++ ExtensionDOMHandler to inspect the page detailed in |viewData|.
  */
 function sendInspectMessage(viewData) {
-  // TODO(aa): This is ghetto, but DOMUIBindings doesn't support sending
+  // TODO(aa): This is ghetto, but WebUIBindings doesn't support sending
   // anything other than arrays of strings, and this is all going to get
   // replaced with V8 extensions soon anyway.
   chrome.send('inspect', [
@@ -892,11 +892,9 @@ document.addEventListener('DOMContentLoaded', requestExtensionsData);
                   onclick="handleEnableExtension(this, true)"
                   href="javascript:void 0;"
                   i18n-content="enable"
-                  >ENABLE</a>
-                <span jsdisplay="!terminated">-</span>
+                  >ENABLE</a>-
                 <a
                   jsvalues=".extensionId:id"
-                  jsdisplay="!terminated"
                   onclick="handleUninstallExtension(this)"
                   href="javascript:void 0;"
                   i18n-content="uninstall"

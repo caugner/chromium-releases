@@ -10,6 +10,7 @@
 
 #include <map>
 #include <string>
+#include <vector>
 
 #include "base/process.h"
 #include "base/string_util.h"
@@ -28,12 +29,15 @@ bool WillHandleBrowserAboutURL(GURL* url, Profile* profile);
 
 // Register the data source for chrome://about URLs.
 // Safe to call multiple times.
-void InitializeAboutDataSource();
+void InitializeAboutDataSource(Profile* profile);
 
 // We have a few magic commands that don't cause navigations, but rather pop up
 // dialogs. This function handles those cases, and returns true if so. In this
 // case, normal tab navigation should be skipped.
 bool HandleNonNavigationAboutURL(const GURL& url);
+
+// Gets the paths that are shown in about:about.
+std::vector<std::string> AboutPaths();
 
 #if defined(USE_TCMALLOC)
 // A map of header strings (e.g. "Browser", "Renderer PID 123")
@@ -60,7 +64,8 @@ class AboutTcmallocOutputs {
   }
 
  private:
-  AboutTcmallocOutputs() {}
+  AboutTcmallocOutputs();
+  ~AboutTcmallocOutputs();
 
   AboutTcmallocOutputsType outputs_;
 

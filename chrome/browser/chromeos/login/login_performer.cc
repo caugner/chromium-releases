@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,18 +11,21 @@
 #include "base/metrics/histogram.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/chromeos/boot_times_loader.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/screen_lock_library.h"
+#include "chrome/browser/chromeos/cros_settings_names.h"
 #include "chrome/browser/chromeos/login/login_utils.h"
 #include "chrome/browser/chromeos/login/screen_locker.h"
 #include "chrome/browser/chromeos/user_cros_settings_provider.h"
 #include "chrome/browser/metrics/user_metrics.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/common/notification_service.h"
-#include "chrome/common/notification_type.h"
+#include "chrome/common/pref_names.h"
+#include "content/browser/browser_thread.h"
+#include "content/common/notification_service.h"
+#include "content/common/notification_type.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -249,8 +252,23 @@ void LoginPerformer::Login(const std::string& username,
     StartAuthentication();
   } else {
     // Otherwise, do whitelist check first.
-    SignedSettingsHelper::Get()->StartCheckWhitelistOp(
-        username, this);
+    PrefService* local_state = g_browser_process->local_state();
+    CHECK(local_state);
+    if (local_state->IsManagedPreference(kAccountsPrefUsers)) {
+      if (UserCrosSettingsProvider::IsEmailInCachedWhitelist(username)) {
+        StartAuthentication();
+      } else {
+        if (delegate_)
+          delegate_->WhiteListCheckFailed(username);
+        else
+          NOTREACHED();
+      }
+    } else {
+      // In case of signed settings: with current implementation we do not
+      // trust whitelist returned by PrefService.  So make separate check.
+      SignedSettingsHelper::Get()->StartCheckWhitelistOp(
+          username, this);
+    }
   }
 }
 

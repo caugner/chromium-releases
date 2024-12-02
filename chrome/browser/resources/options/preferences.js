@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,34 +17,14 @@ cr.define('options', function() {
   cr.addSingletonGetter(Preferences);
 
   /**
-   * Extracts preference value.
-   * @param {Object} dict Map of preference values passed to fetchPrefs
-   *     callback.
-   * @param {string} name Preference name.
-   * @return preference value.
-   */
-  Preferences.getPref = function (dict, name) {
-    var parts = name.split('.');
-    var cur = dict;
-    for (var part; part = parts.shift(); ) {
-      if (cur[part]) {
-        cur = cur[part];
-      } else {
-        return null;
-      }
-    }
-    return cur;
-  };
-
-  /**
    * Sets value of a boolean preference.
    * and signals its changed value.
    * @param {string} name Preference name.
    * @param {boolean} value New preference value.
    * @param {string} metric User metrics identifier.
    */
-  Preferences.setBooleanPref = function (name, value, metric) {
-    var argumentList = [name, value ? 'true' : 'false'];
+  Preferences.setBooleanPref = function(name, value, metric) {
+    var argumentList = [name, Boolean(value)];
     if (metric != undefined) argumentList.push(metric);
     chrome.send('setBooleanPref', argumentList);
   };
@@ -57,22 +37,22 @@ cr.define('options', function() {
    * @param {string} metric User metrics identifier.
    */
   Preferences.setIntegerPref = function(name, value, metric) {
-    var argumentList = [name, String(value)];
+    var argumentList = [name, Number(value)];
     if (metric != undefined) argumentList.push(metric);
     chrome.send('setIntegerPref', argumentList);
   };
 
   /**
-   * Sets value of a real-valued preference.
+   * Sets value of a double-valued preference.
    * and signals its changed value.
    * @param {string} name Preference name.
    * @param {number} value New preference value.
    * @param {string} metric User metrics identifier.
    */
-  Preferences.setRealPref = function(name, value, metric) {
-    var argumentList = [name, String(value)];
+  Preferences.setDoublePref = function(name, value, metric) {
+    var argumentList = [name, Number(value)];
     if (metric != undefined) argumentList.push(metric);
-    chrome.send('setRealPref', argumentList);
+    chrome.send('setDoublePref', argumentList);
   };
 
   /**
@@ -83,22 +63,22 @@ cr.define('options', function() {
    * @param {string} metric User metrics identifier.
    */
   Preferences.setStringPref = function(name, value, metric) {
-    var argumentList = [name, value];
+    var argumentList = [name, String(value)];
     if (metric != undefined) argumentList.push(metric);
     chrome.send('setStringPref', argumentList);
   };
 
   /**
-   * Sets value of a JSON preference.
+   * Sets value of a JSON list preference.
    * and signals its changed value.
    * @param {string} name Preference name.
-   * @param {string} value New preference value.
+   * @param {Array} value New preference value.
    * @param {string} metric User metrics identifier.
    */
-  Preferences.setObjectPref = function(name, value, metric) {
+  Preferences.setListPref = function(name, value, metric) {
     var argumentList = [name, JSON.stringify(value)];
     if (metric != undefined) argumentList.push(metric);
-    chrome.send('setObjectPref', argumentList);
+    chrome.send('setListPref', argumentList);
   };
 
   /**
@@ -190,4 +170,3 @@ cr.define('options', function() {
   };
 
 });
-

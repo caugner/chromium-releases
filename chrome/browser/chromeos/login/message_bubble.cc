@@ -12,7 +12,7 @@
 #include "views/controls/button/image_button.h"
 #include "views/controls/image_view.h"
 #include "views/controls/label.h"
-#include "views/grid_layout.h"
+#include "views/layout/grid_layout.h"
 #include "views/widget/widget.h"
 
 namespace chromeos {
@@ -114,8 +114,8 @@ MessageBubble* MessageBubble::Show(views::Widget* parent,
   // The bubble will be destroyed when it is closed.
   MessageBubble* bubble = new MessageBubble(
       views::WidgetGtk::TYPE_WINDOW, parent, image, text, help, true, delegate);
-  bubble->Init(parent, position_relative_to, arrow_location,
-               bubble->text_->GetParent(), delegate);
+  bubble->InitBubble(parent, position_relative_to, arrow_location,
+                     bubble->text_->parent(), delegate);
   return bubble;
 }
 
@@ -131,8 +131,8 @@ MessageBubble* MessageBubble::ShowNoGrab(
   // The bubble will be destroyed when it is closed.
   MessageBubble* bubble = new MessageBubble(
       views::WidgetGtk::TYPE_CHILD, parent, image, text, help, false, delegate);
-  bubble->Init(parent, position_relative_to, arrow_location,
-               bubble->text_->GetParent(), delegate);
+  bubble->InitBubble(parent, position_relative_to, arrow_location,
+                     bubble->text_->parent(), delegate);
   return bubble;
 }
 

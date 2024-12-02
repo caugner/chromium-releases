@@ -10,9 +10,11 @@
 #include "base/callback.h"
 #include "base/scoped_ptr.h"
 #include "base/synchronization/lock.h"
+#include "base/synchronization/waitable_event.h"
 #include "base/threading/thread.h"
 #include "chrome/browser/chromeos/audio_mixer.h"
-#include "chrome/browser/prefs/pref_member.h"
+
+class PrefService;
 
 struct _snd_mixer_elem;
 struct _snd_mixer;
@@ -75,6 +77,7 @@ class AudioMixerAlsa : public AudioMixer {
                                double rounding_bias);
 
   // In ALSA, the mixer element's 'switch' is turned off to mute.
+  // GetElementMuted_Locked() returns false on failure.
   bool GetElementMuted_Locked(_snd_mixer_elem* elem) const;
   void SetElementMuted_Locked(_snd_mixer_elem* elem, bool mute);
 
@@ -96,8 +99,8 @@ class AudioMixerAlsa : public AudioMixer {
   _snd_mixer_elem* elem_master_;
   _snd_mixer_elem* elem_pcm_;
 
-  IntegerPrefMember mute_pref_;
-  RealPrefMember volume_pref_;
+  PrefService* prefs_;
+  base::WaitableEvent done_event_;
 
   scoped_ptr<base::Thread> thread_;
 
@@ -109,4 +112,3 @@ class AudioMixerAlsa : public AudioMixer {
 DISABLE_RUNNABLE_METHOD_REFCOUNT(chromeos::AudioMixerAlsa);
 
 #endif  // CHROME_BROWSER_CHROMEOS_AUDIO_MIXER_ALSA_H_
-

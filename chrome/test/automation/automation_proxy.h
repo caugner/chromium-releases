@@ -21,12 +21,12 @@
 #include "chrome/common/automation_constants.h"
 #include "chrome/test/automation/automation_handle_tracker.h"
 #include "chrome/test/automation/browser_proxy.h"
-#include "gfx/native_widget_types.h"
 #include "googleurl/src/gurl.h"
 #include "ipc/ipc_channel_proxy.h"
 #include "ipc/ipc_message.h"
 #include "ipc/ipc_sync_channel.h"
 #include "ui/base/message_box_flags.h"
+#include "ui/gfx/native_widget_types.h"
 
 class BrowserProxy;
 class ExtensionProxy;
@@ -86,6 +86,9 @@ class AutomationProxy : public IPC::Channel::Listener,
   // to true. Note that perform_version_check_ defaults to false, call
   // set_perform_version_check() to set it.
   AutomationLaunchResult WaitForAppLaunch();
+
+  // See description in AutomationMsg_WaitForProcessLauncherThreadToGoIdle.
+  bool WaitForProcessLauncherThreadToGoIdle() WARN_UNUSED_RESULT;
 
   // Waits for any initial page loads to complete.
   // NOTE: this only fires once for a run of the application.
@@ -209,6 +212,10 @@ class AutomationProxy : public IPC::Channel::Listener,
 
   // Resets to the default theme. Returns true on success.
   bool ResetToDefaultTheme();
+
+  // Generic pattern for sending automation requests.
+  bool SendJSONRequest(const std::string& request,
+                       std::string* response) WARN_UNUSED_RESULT;
 
 #if defined(OS_CHROMEOS)
   // Logs in through the Chrome OS login wizard with given |username|

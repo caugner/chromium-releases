@@ -93,9 +93,6 @@ class AutofillProfileModelAssociator
   // only for completeness.
   virtual bool GetSyncIdForTaggedNode(const std::string& tag, int64* sync_id);
 
-  // Returns sync service instance.
-  ProfileSyncService* sync_service() { return sync_service_; }
-
   static bool OverwriteProfileWithServerData(
       AutoFillProfile* merge_into,
       const sync_pb::AutofillProfileSpecifics& specifics);
@@ -148,7 +145,7 @@ class AutofillProfileModelAssociator
   bool LoadAutofillData(std::vector<AutoFillProfile*>* profiles);
 
   static bool MergeField(FormGroup* f,
-                         AutoFillFieldType t,
+                         AutofillFieldType t,
                          const std::string& specifics_field);
 
   // Helper to persist any changes that occured during model association to
@@ -184,11 +181,13 @@ class AutofillProfileModelAssociator
 };
 
 struct AutofillProfileModelAssociator::DataBundle {
+  DataBundle();
+  ~DataBundle();
+
   std::set<std::string> current_profiles;
   std::vector<std::string> profiles_to_delete;
   std::vector<AutoFillProfile*> updated_profiles;
   std::vector<AutoFillProfile*> new_profiles;  // We own these pointers.
-  ~DataBundle() { STLDeleteElements(&new_profiles); }
 };
 
 }  // namespace browser_sync

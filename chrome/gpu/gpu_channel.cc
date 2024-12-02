@@ -2,41 +2,43 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/gpu/gpu_channel.h"
-
 #if defined(OS_WIN)
 #include <windows.h>
 #endif
 
+#include "chrome/gpu/gpu_channel.h"
+
 #include "base/command_line.h"
 #include "base/process_util.h"
 #include "base/string_util.h"
-#include "chrome/common/child_process.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/gpu_messages.h"
 #include "chrome/gpu/gpu_thread.h"
 #include "chrome/gpu/gpu_video_service.h"
+#include "content/common/child_process.h"
 
 #if defined(OS_POSIX)
 #include "ipc/ipc_channel_posix.h"
 #endif
 
-GpuChannel::GpuChannel(GpuThread* gpu_thread, int renderer_id)
+GpuChannel::GpuChannel(GpuThread* gpu_thread,
+                       int renderer_id)
     : gpu_thread_(gpu_thread),
-      renderer_id_(renderer_id) {
+      renderer_id_(renderer_id),
+      renderer_process_(NULL),
+      renderer_pid_(NULL) {
   DCHECK(gpu_thread);
+  DCHECK(renderer_id);
   const CommandLine* command_line = CommandLine::ForCurrentProcess();
   log_messages_ = command_line->HasSwitch(switches::kLogPluginMessages);
 }
 
 GpuChannel::~GpuChannel() {
-}
-
-void GpuChannel::OnChannelConnected(int32 peer_pid) {
-  if (!renderer_process_.Open(peer_pid)) {
-    NOTREACHED();
-  }
+#if defined(OS_WIN)
+  if (renderer_process_)
+    CloseHandle(renderer_process_);
+#endif
 }
 
 bool GpuChannel::OnMessageReceived(const IPC::Message& message) {
@@ -48,13 +50,25 @@ bool GpuChannel::OnMessageReceived(const IPC::Message& message) {
   if (message.routing_id() == MSG_ROUTING_CONTROL)
     return OnControlMessageReceived(message);
 
-  // Fail silently if the GPU process has destroyed while the IPC message was
-  // en-route.
-  return router_.RouteMessage(message);
+  if (!router_.RouteMessage(message)) {
+    // Respond to sync messages even if router failed to route.
+    if (message.is_sync()) {
+      IPC::Message* reply = IPC::SyncMessage::GenerateReply(&message);
+      reply->set_reply_error();
+      Send(reply);
+    }
+    return false;
+  }
+
+  return true;
 }
 
 void GpuChannel::OnChannelError() {
-  static_cast<GpuThread*>(ChildThread::current())->RemoveChannel(renderer_id_);
+  gpu_thread_->RemoveChannel(renderer_id_);
+}
+
+void GpuChannel::OnChannelConnected(int32 peer_pid) {
+  renderer_pid_ = peer_pid;
 }
 
 bool GpuChannel::Send(IPC::Message* message) {
@@ -69,6 +83,23 @@ bool GpuChannel::Send(IPC::Message* message) {
   }
 
   return channel_->Send(message);
+}
+
+void GpuChannel::CreateViewCommandBuffer(
+    gfx::PluginWindowHandle window,
+    int32 render_view_id,
+    const GPUCreateCommandBufferConfig& init_params,
+    int32* route_id) {
+  *route_id = MSG_ROUTING_NONE;
+
+#if defined(ENABLE_GPU)
+  *route_id = GenerateRouteID();
+  scoped_ptr<GpuCommandBufferStub> stub(new GpuCommandBufferStub(
+      this, window, NULL, gfx::Size(), init_params.allowed_extensions,
+      init_params.attribs, 0, *route_id, renderer_id_, render_view_id));
+  router_.AddRoute(*route_id, stub.get());
+  stubs_.AddWithID(stub.release(), *route_id);
+#endif  // ENABLE_GPU
 }
 
 #if defined(OS_MACOSX)
@@ -97,8 +128,7 @@ bool GpuChannel::IsRenderViewGone(int32 renderer_route_id) {
 bool GpuChannel::OnControlMessageReceived(const IPC::Message& msg) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(GpuChannel, msg)
-    IPC_MESSAGE_HANDLER(GpuChannelMsg_CreateViewCommandBuffer,
-        OnCreateViewCommandBuffer)
+    IPC_MESSAGE_HANDLER(GpuChannelMsg_Initialize, OnInitialize)
     IPC_MESSAGE_HANDLER(GpuChannelMsg_CreateOffscreenCommandBuffer,
         OnCreateOffscreenCommandBuffer)
     IPC_MESSAGE_HANDLER(GpuChannelMsg_DestroyCommandBuffer,
@@ -118,51 +148,13 @@ int GpuChannel::GenerateRouteID() {
   return ++last_id;
 }
 
-void GpuChannel::OnCreateViewCommandBuffer(
-    gfx::NativeViewId view_id,
-    int32 render_view_id,
-    const GPUCreateCommandBufferConfig& init_params,
-    int32* route_id) {
-  *route_id = MSG_ROUTING_NONE;
+void GpuChannel::OnInitialize(base::ProcessHandle renderer_process) {
+  // Initialize should only happen once.
+  DCHECK(!renderer_process_);
 
-#if defined(ENABLE_GPU)
-
-  gfx::PluginWindowHandle handle = gfx::kNullPluginWindow;
-#if defined(OS_WIN)
-  // TODO(apatrick): We don't actually need the window handle on the Windows
-  // platform. At this point, it only indicates to the GpuCommandBufferStub
-  // whether onscreen or offscreen rendering is requested. The window handle
-  // that will be rendered to is the child compositor window and that window
-  // handle is provided by the browser process. Looking at what we are doing on
-  // this and other platforms, I think a redesign is in order here. Perhaps
-  // on all platforms the renderer just indicates whether it wants onscreen or
-  // offscreen rendering and the browser provides whichever platform specific
-  // "render target" the GpuCommandBufferStub targets.
-  handle = gfx::NativeViewFromId(view_id);
-#elif defined(OS_LINUX)
-  // Ask the browser for the view's XID.
-  gpu_thread_->Send(new GpuHostMsg_GetViewXID(view_id, &handle));
-#elif defined(OS_MACOSX)
-  // On Mac OS X we currently pass a (fake) PluginWindowHandle for the
-  // NativeViewId. We could allocate fake NativeViewIds on the browser
-  // side as well, and map between those and PluginWindowHandles, but
-  // this seems excessive.
-  handle = static_cast<gfx::PluginWindowHandle>(
-      static_cast<intptr_t>(view_id));
-#else
-  // TODO(apatrick): This needs to be something valid for mac and linux.
-  // Offscreen rendering will work on these platforms but not rendering to the
-  // window.
-  DCHECK_EQ(view_id, 0);
-#endif
-
-  *route_id = GenerateRouteID();
-  scoped_ptr<GpuCommandBufferStub> stub(new GpuCommandBufferStub(
-      this, handle, NULL, gfx::Size(), init_params.allowed_extensions,
-      init_params.attribs, 0, *route_id, renderer_id_, render_view_id));
-  router_.AddRoute(*route_id, stub.get());
-  stubs_.AddWithID(stub.release(), *route_id);
-#endif  // ENABLE_GPU
+  // Verify that the renderer has passed its own process handle.
+  if (base::GetProcId(renderer_process) == renderer_pid_)
+    renderer_process_ = renderer_process;
 }
 
 void GpuChannel::OnCreateOffscreenCommandBuffer(

@@ -9,10 +9,11 @@
 #include <string>
 
 #include "base/basictypes.h"
+#include "chrome/installer/util/util_constants.h"
 
 namespace installer {
 class ChannelInfo;
-class Package;
+class InstallerState;
 }
 
 // This class provides accessors to the Google Update 'ClientState' information
@@ -38,7 +39,7 @@ class GoogleUpdateSettings {
 
   // Sets the machine-wide EULA consented flag required on OEM installs.
   // Returns false if the setting could not be recorded.
-  static bool SetEULAConsent(const installer::Package& package,
+  static bool SetEULAConsent(const installer::InstallerState& installer_state,
                              bool consented);
 
   // Returns the last time chrome was run in days. It uses a recorded value
@@ -98,12 +99,10 @@ class GoogleUpdateSettings {
   // - If we are currently running full installer, we remove this magic
   // string (if it is present) regardless of whether installer failed or not.
   // There is no fall-back for full installer :)
-  // - If multi-install fails we append -multifail; otherwise, we remove it
-  // (i.e., success or single-install).
+  // - Unconditionally remove "-multifail" since we haven't crashed.
   // |state_key| should be obtained via InstallerState::state_key().
   static void UpdateInstallStatus(bool system_install,
-                                  bool incremental_install,
-                                  bool multi_install,
+                                  installer::ArchiveType archive_type,
                                   int install_return_code,
                                   const std::wstring& product_guid);
 
@@ -116,12 +115,11 @@ class GoogleUpdateSettings {
   // - If full installer failed, still remove this magic
   //   string (if it is present already).
   //
-  // diff_install: tells whether this is incremental install or not.
+  // archive_type: tells whether this is incremental install or not.
   // install_return_code: if 0, means installation was successful.
   // value: current value of Google Update "ap" key.
   // Returns true if |value| is modified.
-  static bool UpdateGoogleUpdateApKey(bool diff_install,
-                                      bool multi_install,
+  static bool UpdateGoogleUpdateApKey(installer::ArchiveType archive_type,
                                       int install_return_code,
                                       installer::ChannelInfo* value);
 

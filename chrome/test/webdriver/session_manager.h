@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,8 +8,9 @@
 #include <map>
 #include <string>
 
+#include "base/file_path.h"
 #include "base/singleton.h"
-
+#include "base/synchronization/lock.h"
 #include "chrome/test/webdriver/session.h"
 
 namespace webdriver {
@@ -24,30 +25,32 @@ class SessionManager {
   // Returns the singleton instance.
   static SessionManager* GetInstance();
 
-  std::string GetIPAddress();
-  bool SetIPAddress(const std::string& port);
+  std::string GetAddress();
 
-  bool Create(std::string* id);
-  bool Delete(const std::string& id);
+  void Add(Session* session);
+  bool Remove(const std::string& id);
   bool Has(const std::string& id) const;
 
   Session* GetSession(const std::string& id) const;
 
+  void set_port(const std::string& port);
+
+  void set_url_base(const std::string& url_base);
+  std::string url_base() const;
+
+  void set_chrome_dir(const FilePath& chrome_dir);
+  FilePath chrome_dir() const;
+
  private:
-  SessionManager() : addr_(""), port_(""), count_(0) {}
+  SessionManager();
+  ~SessionManager();
   friend struct DefaultSingletonTraits<SessionManager>;
-  std::string GenerateSessionID();
-  std::string IPLookup(const std::string& nic);
 
   std::map<std::string, Session*> map_;
-  base::Lock session_generation_;
-  // Record the address and port for the HTTP 303 See other redirect.
-  // We save the IP and Port of the machine chromedriver is running on since
-  // a HTTP 303, see other,  resdirect is sent after a successful creation of
-  // a session, ie: http://172.22.41.105:8080/session/DFSSE453CV588
-  std::string addr_;
+  mutable base::Lock map_lock_;
   std::string port_;
-  int count_;
+  std::string url_base_;
+  FilePath chrome_dir_;
 
   DISALLOW_COPY_AND_ASSIGN(SessionManager);
 };
@@ -55,4 +58,3 @@ class SessionManager {
 }  // namespace webdriver
 
 #endif  // CHROME_TEST_WEBDRIVER_SESSION_MANAGER_H_
-

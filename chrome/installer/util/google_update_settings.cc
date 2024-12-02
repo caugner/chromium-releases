@@ -17,11 +17,11 @@
 #include "chrome/installer/util/channel_info.h"
 #include "chrome/installer/util/google_update_constants.h"
 #include "chrome/installer/util/install_util.h"
-#include "chrome/installer/util/package.h"
-#include "chrome/installer/util/package_properties.h"
+#include "chrome/installer/util/installer_state.h"
 #include "chrome/installer/util/product.h"
 
 using base::win::RegKey;
+using installer::InstallerState;
 
 namespace {
 
@@ -126,33 +126,43 @@ bool GoogleUpdateSettings::SetMetricsId(const std::wstring& metrics_id) {
 }
 
 bool GoogleUpdateSettings::SetEULAConsent(
-    const installer::Package& package,
+    const InstallerState& installer_state,
     bool consented) {
   // If this is a multi install, Google Update will have put eulaaccepted=0 into
   // the ClientState key of the multi-installer.  Conduct a brief search for
   // this value and store the consent in the corresponding location.
-  HKEY root = package.system_level() ? HKEY_LOCAL_MACHINE : HKEY_CURRENT_USER;
+  HKEY root = installer_state.root_key();
+  EulaSearchResult status = NO_SETTING;
+  std::wstring reg_path;
+  std::wstring fallback_reg_path;
 
-  std::wstring reg_path = package.properties()->GetStateMediumKey();
-  EulaSearchResult status = HasEULASetting(
-      root, package.properties()->GetStateKey(), !consented);
+  if (installer_state.package_type() == InstallerState::MULTI_PACKAGE) {
+    BrowserDistribution* binaries_dist =
+        installer_state.multi_package_binaries_distribution();
+    fallback_reg_path = reg_path = binaries_dist->GetStateMediumKey();
+    status = HasEULASetting(root, binaries_dist->GetStateKey(), !consented);
+  }
   if (status != FOUND_SAME_SETTING) {
     EulaSearchResult new_status = NO_SETTING;
-    installer::Products::const_iterator scan = package.products().begin();
-    installer::Products::const_iterator end = package.products().end();
+    installer::Products::const_iterator scan =
+        installer_state.products().begin();
+    installer::Products::const_iterator end =
+        installer_state.products().end();
     for (; status != FOUND_SAME_SETTING && scan != end; ++scan) {
-      const installer::Product& product = *(scan->get());
-      new_status = HasEULASetting(root, product.distribution()->GetStateKey(),
+      if (fallback_reg_path.empty())
+        fallback_reg_path = (*scan)->distribution()->GetStateMediumKey();
+      new_status = HasEULASetting(root, (*scan)->distribution()->GetStateKey(),
                                   !consented);
       if (new_status > status) {
         status = new_status;
-        reg_path = product.distribution()->GetStateMediumKey();
+        reg_path = (*scan)->distribution()->GetStateMediumKey();
       }
     }
     if (status == NO_SETTING) {
       LOG(WARNING)
-          << "eulaaccepted value not found; setting consent on package";
-      reg_path = package.properties()->GetStateMediumKey();
+          << "eulaaccepted value not found; setting consent in key "
+          << fallback_reg_path;
+      reg_path = fallback_reg_path;
     }
   }
   RegKey key(HKEY_LOCAL_MACHINE, reg_path.c_str(), KEY_SET_VALUE);
@@ -239,8 +249,10 @@ bool GoogleUpdateSettings::GetChromeChannel(bool system_install,
 }
 
 void GoogleUpdateSettings::UpdateInstallStatus(bool system_install,
-    bool incremental_install, bool multi_install, int install_return_code,
+    installer::ArchiveType archive_type, int install_return_code,
     const std::wstring& product_guid) {
+  DCHECK(archive_type != installer::UNKNOWN_ARCHIVE_TYPE ||
+         install_return_code != 0);
   HKEY reg_root = (system_install) ? HKEY_LOCAL_MACHINE : HKEY_CURRENT_USER;
 
   RegKey key;
@@ -250,45 +262,48 @@ void GoogleUpdateSettings::UpdateInstallStatus(bool system_install,
   reg_key.append(product_guid);
   LONG result = key.Open(reg_root, reg_key.c_str(),
                          KEY_QUERY_VALUE | KEY_SET_VALUE);
-  if (result != ERROR_SUCCESS || !channel_info.Initialize(key)) {
-    VLOG(1) << "Application key not found.";
-    if (!incremental_install && !multi_install || !install_return_code) {
-      VLOG(1) << "Returning without changing application key.";
-      return;
-    } else if (!key.Valid()) {
-      reg_key.assign(google_update::kRegPathClientState);
-      result = key.Open(reg_root, reg_key.c_str(), KEY_CREATE_SUB_KEY);
+  if (result == ERROR_SUCCESS)
+    channel_info.Initialize(key);
+  else if (result != ERROR_FILE_NOT_FOUND)
+    LOG(ERROR) << "Failed to open " << reg_key << "; Error: " << result;
+
+  if (UpdateGoogleUpdateApKey(archive_type, install_return_code,
+                              &channel_info)) {
+    // We have a modified channel_info value to write.
+    // Create the app's ClientState key if it doesn't already exist.
+    if (!key.Valid()) {
+      result = key.Open(reg_root, google_update::kRegPathClientState,
+                        KEY_CREATE_SUB_KEY);
       if (result == ERROR_SUCCESS)
         result = key.CreateKey(product_guid.c_str(), KEY_SET_VALUE);
 
       if (result != ERROR_SUCCESS) {
-        LOG(ERROR) << "Failed to create application key. Error: " << result;
+        LOG(ERROR) << "Failed to create " << reg_key << "; Error: " << result;
         return;
       }
     }
-  }
-
-  if (UpdateGoogleUpdateApKey(incremental_install, multi_install,
-                              install_return_code, &channel_info) &&
-      !channel_info.Write(&key)) {
-    LOG(ERROR) << "Failed to write value " << channel_info.value()
-               << " to the registry field " << google_update::kRegApField;
+    if (!channel_info.Write(&key)) {
+      LOG(ERROR) << "Failed to write to application's ClientState key "
+                 << google_update::kRegApField << " = " << channel_info.value();
+    }
   }
 }
 
 bool GoogleUpdateSettings::UpdateGoogleUpdateApKey(
-    bool diff_install, bool multi_install, int install_return_code,
+    installer::ArchiveType archive_type, int install_return_code,
     installer::ChannelInfo* value) {
+  DCHECK(archive_type != installer::UNKNOWN_ARCHIVE_TYPE ||
+         install_return_code != 0);
   bool modified = false;
 
-  if (!diff_install || !install_return_code) {
+  if (archive_type == installer::FULL_ARCHIVE_TYPE || !install_return_code) {
     if (value->SetFullSuffix(false)) {
       VLOG(1) << "Removed incremental installer failure key; "
                  "switching to channel: "
               << value->value();
       modified = true;
     }
-  } else {
+  } else if (archive_type == installer::INCREMENTAL_ARCHIVE_TYPE) {
     if (value->SetFullSuffix(true)) {
       VLOG(1) << "Incremental installer failed; switching to channel: "
               << value->value();
@@ -297,22 +312,16 @@ bool GoogleUpdateSettings::UpdateGoogleUpdateApKey(
       VLOG(1) << "Incremental installer failure; already on channel: "
               << value->value();
     }
+  } else {
+    // It's okay if we don't know the archive type.  In this case, leave the
+    // "-full" suffix as we found it.
+    DCHECK_EQ(installer::UNKNOWN_ARCHIVE_TYPE, archive_type);
   }
 
-  if (!multi_install || !install_return_code) {
-    if (value->SetMultiFailSuffix(false)) {
-      VLOG(1) << "Removed multi-install failure key; switching to channel: "
-              << value->value();
-      modified = true;
-    }
-  } else {
-    if (value->SetMultiFailSuffix(true)) {
-      VLOG(1) << "Multi-install failed; switching to channel: "
-              << value->value();
-      modified = true;
-    } else {
-      VLOG(1) << "Multi-install failed; already on channel: " << value->value();
-    }
+  if (value->SetMultiFailSuffix(false)) {
+    VLOG(1) << "Removed multi-install failure key; switching to channel: "
+            << value->value();
+    modified = true;
   }
 
   return modified;

@@ -12,6 +12,7 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebExceptionCode.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBCallbacks.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBDatabase.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBObjectStore.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBTransactionCallbacks.h"
 
 class IndexedDBKey;
@@ -30,7 +31,7 @@ class IndexedDBDispatcher : public IPC::Channel::Listener {
   ~IndexedDBDispatcher();
 
   // IPC::Channel::Listener implementation.
-  bool OnMessageReceived(const IPC::Message& msg);
+  virtual bool OnMessageReceived(const IPC::Message& msg);
 
   void RequestIDBFactoryOpen(
       const string16& name,
@@ -38,6 +39,12 @@ class IndexedDBDispatcher : public IPC::Channel::Listener {
       const string16& origin,
       WebKit::WebFrame* web_frame,
       uint64 maximum_size);
+
+  void RequestIDBFactoryDeleteDatabase(
+      const string16& name,
+      WebKit::WebIDBCallbacks* callbacks,
+      const string16& origin,
+      WebKit::WebFrame* web_frame);
 
   void RequestIDBCursorUpdate(
       const SerializedScriptValue& value,
@@ -55,6 +62,13 @@ class IndexedDBDispatcher : public IPC::Channel::Listener {
       WebKit::WebIDBCallbacks* callbacks_ptr,
       int32 idb_cursor_id,
       WebKit::WebExceptionCode* ec);
+
+  void RequestIDBDatabaseClose(
+      int32 idb_database_id);
+
+  void RequestIDBDatabaseOpen(
+      WebKit::WebIDBDatabaseCallbacks* callbacks_ptr,
+      int32 idb_database_id);
 
   void RequestIDBDatabaseSetVersion(
       const string16& version,
@@ -98,7 +112,7 @@ class IndexedDBDispatcher : public IPC::Channel::Listener {
 
   void RequestIDBObjectStorePut(const SerializedScriptValue& value,
                                 const IndexedDBKey& key,
-                                bool add_only,
+                                WebKit::WebIDBObjectStore::PutMode putMode,
                                 WebKit::WebIDBCallbacks* callbacks,
                                 int32 idb_object_store_id,
                                 const WebKit::WebIDBTransaction& transaction,
@@ -106,6 +120,12 @@ class IndexedDBDispatcher : public IPC::Channel::Listener {
 
   void RequestIDBObjectStoreDelete(
       const IndexedDBKey& key,
+      WebKit::WebIDBCallbacks* callbacks,
+      int32 idb_object_store_id,
+      const WebKit::WebIDBTransaction& transaction,
+      WebKit::WebExceptionCode* ec);
+
+  void RequestIDBObjectStoreClear(
       WebKit::WebIDBCallbacks* callbacks,
       int32 idb_object_store_id,
       const WebKit::WebIDBTransaction& transaction,
@@ -137,15 +157,19 @@ class IndexedDBDispatcher : public IPC::Channel::Listener {
   void OnSuccessSerializedScriptValue(int32 response_id,
                                       const SerializedScriptValue& value);
   void OnError(int32 response_id, int code, const string16& message);
+  void OnBlocked(int32 response_id);
   void OnAbort(int32 transaction_id);
   void OnComplete(int32 transaction_id);
   void OnTimeout(int32 transaction_id);
+  void OnVersionChange(int32 database_id, const string16& newVersion);
 
   // Careful! WebIDBCallbacks wraps non-threadsafe data types. It must be
   // destroyed and used on the same thread it was created on.
   IDMap<WebKit::WebIDBCallbacks, IDMapOwnPointer> pending_callbacks_;
   IDMap<WebKit::WebIDBTransactionCallbacks, IDMapOwnPointer>
       pending_transaction_callbacks_;
+  IDMap<WebKit::WebIDBDatabaseCallbacks, IDMapOwnPointer>
+      pending_database_callbacks_;
 
   DISALLOW_COPY_AND_ASSIGN(IndexedDBDispatcher);
 };

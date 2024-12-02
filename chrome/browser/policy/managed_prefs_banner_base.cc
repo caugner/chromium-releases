@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,10 @@
 #include "chrome/common/notification_details.h"
 #include "chrome/common/notification_type.h"
 #include "chrome/common/pref_names.h"
+
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/cros_settings_names.h"
+#endif
 
 namespace policy {
 
@@ -67,6 +71,8 @@ void ManagedPrefsBannerBase::Init(PrefService* local_state,
       AddUserPref(prefs::kDefaultSearchProviderSuggestURL);
       AddUserPref(prefs::kDefaultSearchProviderIconURL);
       AddUserPref(prefs::kDefaultSearchProviderEncodings);
+      AddUserPref(prefs::kInstantEnabled);
+      AddLocalStatePref(prefs::kDefaultBrowserSettingEnabled);
       break;
     case OPTIONS_PAGE_CONTENT:
       AddUserPref(prefs::kSyncManaged);
@@ -85,11 +91,19 @@ void ManagedPrefsBannerBase::Init(PrefService* local_state,
 #if defined(GOOGLE_CHROME_BUILD)
       AddLocalStatePref(prefs::kMetricsReportingEnabled);
 #endif
-      AddUserPref(prefs::kProxyMode);
-      AddUserPref(prefs::kProxyServer);
-      AddUserPref(prefs::kProxyPacUrl);
-      AddUserPref(prefs::kProxyBypassList);
+      AddUserPref(prefs::kProxy);
+      AddUserPref(prefs::kCloudPrintProxyEnabled);
+      AddUserPref(prefs::kDownloadDefaultDirectory);
       break;
+#if defined(OS_CHROMEOS)
+    case OPTIONS_PAGE_ACCOUNTS:
+      AddLocalStatePref(chromeos::kAccountsPrefAllowGuest);
+      AddLocalStatePref(chromeos::kAccountsPrefAllowNewUser);
+      AddLocalStatePref(chromeos::kAccountsPrefShowUserNamesOnSignIn);
+      AddLocalStatePref(chromeos::kAccountsPrefUsers);
+      AddLocalStatePref(chromeos::kSystemTimezone);
+      break;
+#endif
     default:
       NOTREACHED();
   }

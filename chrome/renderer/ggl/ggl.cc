@@ -62,7 +62,7 @@ class Context : public base::SupportsWeakPtr<Context> {
 
   // Initialize a GGL context that can be used in association with a a GPU
   // channel acquired from a RenderWidget or RenderView.
-  bool Initialize(gfx::NativeViewId view,
+  bool Initialize(bool onscreen,
                   int render_view_id,
                   const gfx::Size& size,
                   const char* allowed_extensions,
@@ -80,6 +80,10 @@ class Context : public base::SupportsWeakPtr<Context> {
   // service side.
   void SetSwapBuffersCallback(Callback0::Type* callback) {
     swap_buffers_callback_.reset(callback);
+  }
+
+  void SetContextLostCallback(Callback0::Type* callback) {
+    context_lost_callback_.reset(callback);
   }
 
   // For an offscreen frame buffer context, return the frame buffer ID with
@@ -123,12 +127,19 @@ class Context : public base::SupportsWeakPtr<Context> {
   gpu::gles2::GLES2Implementation* gles2_implementation() const {
     return gles2_implementation_;
   }
+
+  CommandBufferProxy* command_buffer() const {
+    return command_buffer_;
+  }
+
  private:
   void OnSwapBuffers();
+  void OnContextLost();
 
   scoped_refptr<GpuChannelHost> channel_;
   base::WeakPtr<Context> parent_;
   scoped_ptr<Callback0::Type> swap_buffers_callback_;
+  scoped_ptr<Callback0::Type> context_lost_callback_;
   uint32 parent_texture_id_;
   CommandBufferProxy* command_buffer_;
   gpu::gles2::GLES2CmdHelper* gles2_helper_;
@@ -156,7 +167,7 @@ Context::~Context() {
   Destroy();
 }
 
-bool Context::Initialize(gfx::NativeViewId view,
+bool Context::Initialize(bool onscreen,
                          int render_view_id,
                          const gfx::Size& size,
                          const char* allowed_extensions,
@@ -207,9 +218,8 @@ bool Context::Initialize(gfx::NativeViewId view,
   }
 
   // Create a proxy to a command buffer in the GPU process.
-  if (view) {
+  if (onscreen) {
     command_buffer_ = channel_->CreateViewCommandBuffer(
-        view,
         render_view_id,
         allowed_extensions,
         attribs);
@@ -234,8 +244,11 @@ bool Context::Initialize(gfx::NativeViewId view,
     return false;
   }
 
-  command_buffer_->SetSwapBuffersCallback(NewCallback(this,
-                                                      &Context::OnSwapBuffers));
+  command_buffer_->SetSwapBuffersCallback(
+      NewCallback(this, &Context::OnSwapBuffers));
+
+  command_buffer_->SetChannelErrorCallback(
+      NewCallback(this, &Context::OnContextLost));
 
   // Create the GLES2 helper, which writes the command buffer protocol.
   gles2_helper_ = new gpu::gles2::GLES2CmdHelper(command_buffer_);
@@ -431,17 +444,21 @@ void Context::OnSwapBuffers() {
     swap_buffers_callback_->Run();
 }
 
+void Context::OnContextLost() {
+  if (context_lost_callback_.get())
+    context_lost_callback_->Run();
+}
+
 #endif  // ENABLE_GPU
 
 Context* CreateViewContext(GpuChannelHost* channel,
-                           gfx::NativeViewId view,
                            int render_view_id,
                            const char* allowed_extensions,
                            const int32* attrib_list) {
 #if defined(ENABLE_GPU)
   scoped_ptr<Context> context(new Context(channel, NULL));
   if (!context->Initialize(
-      view, render_view_id, gfx::Size(), allowed_extensions, attrib_list))
+      true, render_view_id, gfx::Size(), allowed_extensions, attrib_list))
     return NULL;
 
   return context.release();
@@ -465,7 +482,7 @@ Context* CreateOffscreenContext(GpuChannelHost* channel,
                                 const int32* attrib_list) {
 #if defined(ENABLE_GPU)
   scoped_ptr<Context> context(new Context(channel, parent));
-  if (!context->Initialize(0, 0, size, allowed_extensions, attrib_list))
+  if (!context->Initialize(false, 0, size, allowed_extensions, attrib_list))
     return NULL;
 
   return context.release();
@@ -506,6 +523,13 @@ void SetSwapBuffersCallback(Context* context,
                             Callback0::Type* callback) {
 #if defined(ENABLE_GPU)
   context->SetSwapBuffersCallback(callback);
+#endif
+}
+
+void SetContextLostCallback(Context* context,
+                            Callback0::Type* callback) {
+#if defined(ENABLE_GPU)
+  context->SetContextLostCallback(callback);
 #endif
 }
 
@@ -575,6 +599,11 @@ gpu::gles2::GLES2Implementation* GetImplementation(Context* context) {
     return NULL;
 
   return context->gles2_implementation();
+}
+
+CommandBufferProxy* GetCommandBufferProxy(Context* context) {
+  DCHECK(context);
+  return context->command_buffer();
 }
 
 }  // namespace ggl

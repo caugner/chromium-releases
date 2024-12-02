@@ -18,6 +18,16 @@ namespace net {
 
 // This is the hard-coded location used by the DNS portion of web proxy
 // auto-discovery.
+//
+// Note that we not use DNS devolution to find the WPAD host, since that could
+// be dangerous should our top level domain registry  become out of date.
+//
+// Instead we directly resolve "wpad", and let the operating system apply the
+// DNS suffix search paths. This is the same approach taken by Firefox, and
+// compatibility hasn't been an issue.
+//
+// For more details, also check out this comment:
+// http://code.google.com/p/chromium/issues/detail?id=18575#c20
 static const char kWpadUrl[] = "http://wpad/wpad.dat";
 
 InitProxyResolver::InitProxyResolver(ProxyResolver* resolver,
@@ -72,7 +82,7 @@ int InitProxyResolver::Init(const ProxyConfig& config,
 }
 
 // Initialize the fallback rules.
-// (1) WPAD
+// (1) WPAD (DNS).
 // (2) Custom PAC URL.
 InitProxyResolver::UrlList InitProxyResolver::BuildPacUrlsFallbackList(
     const ProxyConfig& config) const {
@@ -151,8 +161,10 @@ int InitProxyResolver::DoWait() {
 
 int InitProxyResolver::DoWaitComplete(int result) {
   DCHECK_EQ(OK, result);
-  if (wait_delay_.ToInternalValue() != 0)
-    net_log_.EndEvent(NetLog::TYPE_INIT_PROXY_RESOLVER_WAIT, NULL);
+  if (wait_delay_.ToInternalValue() != 0) {
+    net_log_.EndEventWithNetErrorCode(NetLog::TYPE_INIT_PROXY_RESOLVER_WAIT,
+                                      result);
+  }
   next_state_ = GetStartState();
   return OK;
 }
@@ -185,14 +197,10 @@ int InitProxyResolver::DoFetchPacScript() {
 int InitProxyResolver::DoFetchPacScriptComplete(int result) {
   DCHECK(resolver_->expects_pac_bytes());
 
-  if (result == OK) {
-    net_log_.EndEvent(NetLog::TYPE_INIT_PROXY_RESOLVER_FETCH_PAC_SCRIPT, NULL);
-  } else {
-    net_log_.EndEvent(
-        NetLog::TYPE_INIT_PROXY_RESOLVER_FETCH_PAC_SCRIPT,
-        make_scoped_refptr(new NetLogIntegerParameter("net_error", result)));
+  net_log_.EndEventWithNetErrorCode(
+      NetLog::TYPE_INIT_PROXY_RESOLVER_FETCH_PAC_SCRIPT, result);
+  if (result != OK)
     return TryToFallbackPacUrl(result);
-  }
 
   next_state_ = STATE_SET_PAC_SCRIPT;
   return result;
@@ -219,12 +227,10 @@ int InitProxyResolver::DoSetPacScript() {
 }
 
 int InitProxyResolver::DoSetPacScriptComplete(int result) {
-  if (result != OK) {
-    net_log_.EndEvent(
-        NetLog::TYPE_INIT_PROXY_RESOLVER_SET_PAC_SCRIPT,
-        make_scoped_refptr(new NetLogIntegerParameter("net_error", result)));
+  net_log_.EndEventWithNetErrorCode(
+      NetLog::TYPE_INIT_PROXY_RESOLVER_SET_PAC_SCRIPT, result);
+  if (result != OK)
     return TryToFallbackPacUrl(result);
-  }
 
   // Let the caller know which automatic setting we ended up initializing the
   // resolver for (there may have been multiple fallbacks to choose from.)
@@ -240,7 +246,6 @@ int InitProxyResolver::DoSetPacScriptComplete(int result) {
     }
   }
 
-  net_log_.EndEvent(NetLog::TYPE_INIT_PROXY_RESOLVER_SET_PAC_SCRIPT, NULL);
   return result;
 }
 

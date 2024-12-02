@@ -52,6 +52,27 @@ void ChromotingClient::Start() {
   }
 }
 
+void ChromotingClient::StartSandboxed(scoped_refptr<XmppProxy> xmpp_proxy,
+                                      const std::string& your_jid,
+                                      const std::string& host_jid) {
+  // TODO(ajwong): Merge this with Start(), and just change behavior based on
+  // ClientConfig.
+  if (message_loop() != MessageLoop::current()) {
+    message_loop()->PostTask(
+        FROM_HERE,
+        NewRunnableMethod(this, &ChromotingClient::StartSandboxed, xmpp_proxy,
+                          your_jid, host_jid));
+    return;
+  }
+
+  connection_->ConnectSandboxed(xmpp_proxy, your_jid, host_jid, this, this,
+                                this);
+
+  if (!view_->Initialize()) {
+    ClientDone();
+  }
+}
+
 void ChromotingClient::Stop() {
   if (message_loop() != MessageLoop::current()) {
     message_loop()->PostTask(
@@ -132,8 +153,8 @@ void ChromotingClient::DispatchPacket() {
 
 void ChromotingClient::OnConnectionOpened(protocol::ConnectionToHost* conn) {
   VLOG(1) << "ChromotingClient::OnConnectionOpened";
-  SetConnectionState(CONNECTED);
   Initialize();
+  SetConnectionState(CONNECTED);
 }
 
 void ChromotingClient::OnConnectionClosed(protocol::ConnectionToHost* conn) {
@@ -219,11 +240,29 @@ void ChromotingClient::Initialize() {
 void ChromotingClient::NotifyResolution(
     const protocol::NotifyResolutionRequest* msg, Task* done) {
   NOTIMPLEMENTED();
+  done->Run();
+  delete done;
 }
 
 void ChromotingClient::BeginSessionResponse(
     const protocol::LocalLoginStatus* msg, Task* done) {
-  NOTIMPLEMENTED();
+  if (message_loop() != MessageLoop::current()) {
+    message_loop()->PostTask(
+        FROM_HERE,
+        NewRunnableMethod(this, &ChromotingClient::BeginSessionResponse,
+                          msg, done));
+    return;
+  }
+
+  // Inform the connection that the client has been authenticated. This will
+  // enable the communication channels.
+  if (msg->success()) {
+    connection_->OnClientAuthenticated();
+  }
+
+  view_->UpdateLoginStatus(msg->success(), msg->error_info());
+  done->Run();
+  delete done;
 }
 
 }  // namespace remoting

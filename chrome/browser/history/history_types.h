@@ -122,10 +122,10 @@ class URLRow {
     favicon_id_ = favicon_id;
   }
 
+ protected:
   // Swaps the contents of this URLRow with another, which allows it to be
   // destructively copied without memory allocations.
-  // (Virtual because it's overridden by URLResult.)
-  virtual void Swap(URLRow* other);
+  void Swap(URLRow* other);
 
  private:
   // This class writes directly into this structure and clears our dirty bits
@@ -359,7 +359,7 @@ class URLResult : public URLRow {
     return title_match_positions_;
   }
 
-  virtual void Swap(URLResult* other);
+  void SwapResult(URLResult* other);
 
  private:
   friend class HistoryBackend;
@@ -663,6 +663,26 @@ class MostVisitedThumbnails
 
   DISALLOW_COPY_AND_ASSIGN(MostVisitedThumbnails);
 };
+
+// Autocomplete thresholds -----------------------------------------------------
+
+// Constants which specify, when considered altogether, 'significant'
+// history items. These are used to filter out insignificant items
+// for consideration as autocomplete candidates.
+extern const int kLowQualityMatchTypedLimit;
+extern const int kLowQualityMatchVisitLimit;
+extern const int kLowQualityMatchAgeLimitInDays;
+
+// Returns the date threshold for considering an history item as significant.
+base::Time AutocompleteAgeThreshold();
+
+// Return true if |row| qualifies as an autocomplete candidate. If |time_cache|
+// is_null() then this function determines a new time threshold each time it is
+// called. Since getting system time can be costly (such as for cases where
+// this function will be called in a loop over many history items), you can
+// provide a non-null |time_cache| by simply initializing |time_cache| with
+// AutocompleteAgeThreshold() (or any other desired time in the past).
+bool RowQualifiesAsSignificant(const URLRow& row, const base::Time& threshold);
 
 }  // namespace history
 

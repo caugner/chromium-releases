@@ -11,21 +11,21 @@
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/metrics/user_metrics.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
 #include "chrome/common/notification_source.h"
 #include "chrome/common/notification_type.h"
-#include "gfx/canvas.h"
-#include "gfx/canvas_skia.h"
-#include "gfx/skia_util.h"
+#include "content/browser/tab_contents/tab_contents.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "third_party/skia/include/core/SkPaint.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/canvas.h"
+#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/skia_util.h"
 #include "views/background.h"
 #include "views/controls/button/image_button.h"
 #include "views/controls/button/menu_button.h"
@@ -231,14 +231,12 @@ class ScheduleAllView : public views::View {
  public:
   ScheduleAllView() {}
 
-  virtual void SchedulePaint(const gfx::Rect& r, bool urgent) {
+  virtual void SchedulePaintInRect(const gfx::Rect& r) {
     if (!IsVisible())
       return;
 
-    if (GetParent()) {
-      GetParent()->SchedulePaint(GetBounds(APPLY_MIRRORING_TRANSFORMATION),
-                                 urgent);
-    }
+    if (parent())
+      parent()->SchedulePaintInRect(GetMirroredBounds());
   }
 
  private:
@@ -344,13 +342,13 @@ class WrenchMenu::CutCopyPasteView : public WrenchMenuView {
   gfx::Size GetPreferredSize() {
     // Returned height doesn't matter as MenuItemView forces everything to the
     // height of the menuitemview.
-    return gfx::Size(GetMaxChildViewPreferredWidth() * GetChildViewCount(), 0);
+    return gfx::Size(GetMaxChildViewPreferredWidth() * child_count(), 0);
   }
 
   void Layout() {
     // All buttons are given the same width.
     int width = GetMaxChildViewPreferredWidth();
-    for (int i = 0; i < GetChildViewCount(); ++i)
+    for (int i = 0; i < child_count(); ++i)
       GetChildViewAt(i)->SetBounds(i * width, 0, width, height());
   }
 
@@ -363,7 +361,7 @@ class WrenchMenu::CutCopyPasteView : public WrenchMenuView {
   // Returns the max preferred width of all the children.
   int GetMaxChildViewPreferredWidth() {
     int width = 0;
-    for (int i = 0; i < GetChildViewCount(); ++i)
+    for (int i = 0; i < child_count(); ++i)
       width = std::max(width, GetChildViewAt(i)->GetPreferredSize().width());
     return width;
   }
@@ -458,22 +456,22 @@ class WrenchMenu::ZoomView : public WrenchMenuView,
                                 decrement_button_->GetPreferredSize().width());
     gfx::Rect bounds(0, 0, button_width, height());
 
-    decrement_button_->SetBounds(bounds);
+    decrement_button_->SetBoundsRect(bounds);
 
     x += bounds.width();
     bounds.set_x(x);
     bounds.set_width(zoom_label_width_);
-    zoom_label_->SetBounds(bounds);
+    zoom_label_->SetBoundsRect(bounds);
 
     x += bounds.width();
     bounds.set_x(x);
     bounds.set_width(button_width);
-    increment_button_->SetBounds(bounds);
+    increment_button_->SetBoundsRect(bounds);
 
     x += bounds.width() + kZoomPadding;
     bounds.set_x(x);
     bounds.set_width(fullscreen_button_->GetPreferredSize().width());
-    fullscreen_button_->SetBounds(bounds);
+    fullscreen_button_->SetBoundsRect(bounds);
   }
 
   // ButtonListener:

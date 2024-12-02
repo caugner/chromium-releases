@@ -2,24 +2,23 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/content_settings/host_content_settings_map_unittest.h"
-
 #include "base/auto_reset.h"
 #include "base/command_line.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
 #include "chrome/browser/content_settings/content_settings_details.h"
+#include "chrome/browser/content_settings/host_content_settings_map.h"
+#include "chrome/browser/content_settings/stub_settings_observer.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/notification_registrar.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/test/testing_browser_process_test.h"
 #include "chrome/test/testing_pref_service.h"
 #include "chrome/test/testing_profile.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/static_cookie_policy.h"
 #include "testing/gtest/include/gtest/gtest.h"
-
 
 namespace {
 
@@ -32,7 +31,7 @@ bool SettingsEqual(const ContentSettings& settings1,
   return true;
 }
 
-class HostContentSettingsMapTest : public testing::Test {
+class HostContentSettingsMapTest : public TestingBrowserProcessTest {
  public:
   HostContentSettingsMapTest() : ui_thread_(BrowserThread::UI, &message_loop_) {
   }
@@ -123,6 +122,8 @@ TEST_F(HostContentSettingsMapTest, DefaultValues) {
       CONTENT_SETTING_ASK;
   desired_settings.settings[CONTENT_SETTINGS_TYPE_NOTIFICATIONS] =
       CONTENT_SETTING_ASK;
+  desired_settings.settings[CONTENT_SETTINGS_TYPE_PRERENDER] =
+      CONTENT_SETTING_ALLOW;
   ContentSettings settings =
       host_content_settings_map->GetContentSettings(host);
   EXPECT_TRUE(SettingsEqual(desired_settings, settings));
@@ -424,6 +425,8 @@ TEST_F(HostContentSettingsMapTest, NestedSettings) {
       CONTENT_SETTING_ASK;
   desired_settings.settings[CONTENT_SETTINGS_TYPE_NOTIFICATIONS] =
       CONTENT_SETTING_ASK;
+  desired_settings.settings[CONTENT_SETTINGS_TYPE_PRERENDER] =
+      CONTENT_SETTING_ALLOW;
   ContentSettings settings =
       host_content_settings_map->GetContentSettings(host);
   EXPECT_TRUE(SettingsEqual(desired_settings, settings));
@@ -616,6 +619,14 @@ TEST_F(HostContentSettingsMapTest, ResourceIdentifier) {
   EXPECT_EQ(CONTENT_SETTING_ALLOW,
             host_content_settings_map->GetContentSetting(
                 host, CONTENT_SETTINGS_TYPE_PLUGINS, resource2));
+
+  // If resource content settings are enabled GetContentSettings should return
+  // CONTENT_SETTING_DEFAULT for content types that require resource
+  // identifiers.
+  ContentSettings settings =
+      host_content_settings_map->GetContentSettings(host);
+  EXPECT_EQ(CONTENT_SETTING_DEFAULT,
+            settings.settings[CONTENT_SETTINGS_TYPE_PLUGINS]);
 }
 
 TEST_F(HostContentSettingsMapTest, ResourceIdentifierPrefs) {

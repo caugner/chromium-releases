@@ -4,16 +4,16 @@
 
 #include "chrome/browser/chromeos/frame/bubble_frame_view.h"
 
-#include "gfx/canvas_skia.h"
-#include "gfx/font.h"
-#include "gfx/insets.h"
-#include "gfx/path.h"
-#include "gfx/rect.h"
 #include "chrome/browser/chromeos/frame/bubble_window.h"
 #include "chrome/browser/chromeos/login/helper.h"
 #include "chrome/browser/ui/views/bubble_border.h"
 #include "grit/theme_resources.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/font.h"
+#include "ui/gfx/insets.h"
+#include "ui/gfx/path.h"
+#include "ui/gfx/rect.h"
 #include "views/controls/button/image_button.h"
 #include "views/controls/label.h"
 #include "views/controls/throbber.h"
@@ -48,8 +48,8 @@ BubbleFrameView::BubbleFrameView(views::Window* frame,
       throbber_(NULL) {
   set_border(new BubbleBorder(BubbleBorder::NONE));
 
-  if (frame_->GetDelegate()->ShouldShowWindowTitle()) {
-    title_ = new views::Label(frame_->GetDelegate()->GetWindowTitle());
+  if (frame_->window_delegate()->ShouldShowWindowTitle()) {
+    title_ = new views::Label(frame_->window_delegate()->GetWindowTitle());
     title_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
     title_->SetFont(title_->font().DeriveFont(kFontSizeCorrectionDelta,
                                               gfx::Font::BOLD));
@@ -88,7 +88,7 @@ void BubbleFrameView::StopThrobber() {
   DCHECK(throbber_ != NULL);
   throbber_->Stop();
   if (title_)
-    title_->SetText(frame_->GetDelegate()->GetWindowTitle());
+    title_->SetText(frame_->window_delegate()->GetWindowTitle());
 }
 
 gfx::Rect BubbleFrameView::GetBoundsForClientView() const {
@@ -150,9 +150,9 @@ gfx::Insets BubbleFrameView::GetInsets() const {
 }
 
 gfx::Size BubbleFrameView::GetPreferredSize() {
-  gfx::Size pref = frame_->GetClientView()->GetPreferredSize();
+  gfx::Size pref = frame_->client_view()->GetPreferredSize();
   gfx::Rect bounds(0, 0, pref.width(), pref.height());
-  return frame_->GetNonClientView()->GetWindowBoundsForClientBounds(
+  return frame_->non_client_view()->GetWindowBoundsForClientBounds(
       bounds).size();
 }
 
@@ -202,7 +202,7 @@ void BubbleFrameView::Layout() {
       std::max(0, height() - top_height - insets.bottom()));
 }
 
-void BubbleFrameView::Paint(gfx::Canvas* canvas) {
+void BubbleFrameView::OnPaint(gfx::Canvas* canvas) {
   // The border of this view creates an anti-aliased round-rect region for the
   // contents, which we need to fill with the background color.
   SkPaint paint;
@@ -210,7 +210,7 @@ void BubbleFrameView::Paint(gfx::Canvas* canvas) {
   paint.setStyle(SkPaint::kFill_Style);
   paint.setColor(BubbleWindow::kBackgroundColor);
   gfx::Path path;
-  gfx::Rect bounds(GetLocalBounds(false));
+  gfx::Rect bounds(GetContentsBounds());
   SkRect rect;
   rect.set(SkIntToScalar(bounds.x()), SkIntToScalar(bounds.y()),
            SkIntToScalar(bounds.right()), SkIntToScalar(bounds.bottom()));
@@ -218,7 +218,7 @@ void BubbleFrameView::Paint(gfx::Canvas* canvas) {
   path.addRoundRect(rect, radius, radius);
   canvas->AsCanvasSkia()->drawPath(path, paint);
 
-  PaintBorder(canvas);
+  OnPaintBorder(canvas);
 }
 
 void BubbleFrameView::ButtonPressed(views::Button* sender,

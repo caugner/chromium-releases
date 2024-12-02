@@ -11,12 +11,12 @@
 
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
-#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/favicon_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/profile_sync_service.h"
-#include "gfx/codec/png_codec.h"
+#include "content/browser/browser_thread.h"
 #include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/gfx/codec/png_codec.h"
 
 namespace browser_sync {
 

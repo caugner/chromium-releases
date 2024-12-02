@@ -71,7 +71,7 @@ bool PopulateWordSet(WordSet* word_set, FILE* file, AffReader* aff_reader,
 
     std::vector<std::string> split;
     SplitDicLine(line, &split);
-    if (split.size() == 0 || split.size() > 2) {
+    if (split.empty() || split.size() > 2) {
       printf("Line %d has extra slashes in the %s file\n", line_number,
              file_type);
       return false;
@@ -132,8 +132,13 @@ DicReader::DicReader(const FilePath& path) {
   file_ = file_util::OpenFile(path, "r");
 
   FilePath additional_path =
-      path.InsertBeforeExtension(FILE_PATH_LITERAL("_delta"));
+      path.ReplaceExtension(FILE_PATH_LITERAL("dic_delta"));
   additional_words_file_ = file_util::OpenFile(additional_path, "r");
+
+  if (additional_words_file_)
+    printf("Reading %" PRFilePath " ...\n", additional_path.value().c_str());
+  else
+    printf("%" PRFilePath " not found.\n", additional_path.value().c_str());
 }
 
 DicReader::~DicReader() {

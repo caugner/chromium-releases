@@ -19,12 +19,6 @@ ostream& operator<<(ostream& out, const Id& id) {
   return out;
 }
 
-using browser_sync::FastDump;
-FastDump& operator<<(FastDump& dump, const Id& id) {
-  dump.out_->sputn(id.s_.data(), id.s_.size());
-  return dump;
-}
-
 string Id::GetServerId() const {
   // Currently root is the string "0". We need to decide on a true value.
   // "" would be convenient here, as the IsRoot call would not be needed.
@@ -48,6 +42,21 @@ Id Id::CreateFromClientString(const string& local_id) {
     id.s_ = "r";
   else
     id.s_ = string("c") + local_id;
+  return id;
+}
+
+Id Id::GetLexicographicSuccessor() const {
+  // The successor of a string is given by appending the least
+  // character in the alphabet.
+  Id id = *this;
+  id.s_.push_back(0);
+  return id;
+}
+
+// static
+Id Id::GetLeastIdForLexicographicComparison() {
+  Id id;
+  id.s_.clear();
   return id;
 }
 

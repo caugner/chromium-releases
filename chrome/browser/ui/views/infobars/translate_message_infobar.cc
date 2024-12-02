@@ -5,53 +5,64 @@
 #include "chrome/browser/ui/views/infobars/translate_message_infobar.h"
 
 #include "chrome/browser/translate/translate_infobar_delegate.h"
-#include "chrome/browser/ui/views/infobars/infobar_text_button.h"
-#include "views/controls/image_view.h"
+#include "views/controls/button/text_button.h"
+#include "views/controls/label.h"
 
 TranslateMessageInfoBar::TranslateMessageInfoBar(
     TranslateInfoBarDelegate* delegate)
-    : TranslateInfoBarBase(delegate) {
-  label_ = CreateLabel(delegate->GetMessageInfoBarText());
-  AddChildView(label_);
+    : TranslateInfoBarBase(delegate),
+      label_(NULL),
+      button_(NULL) {
+}
 
-  string16 button_text = delegate->GetMessageInfoBarButtonText();
-  if (button_text.empty()) {
-    button_ = NULL;
-  } else {
-    button_ = InfoBarTextButton::Create(this, button_text);
-    AddChildView(button_);
-  }
+TranslateMessageInfoBar::~TranslateMessageInfoBar() {
 }
 
 void TranslateMessageInfoBar::Layout() {
   TranslateInfoBarBase::Layout();
 
-  int x = icon_->bounds().right() + InfoBar::kIconLabelSpacing;
-  gfx::Size label_pref_size = label_->GetPreferredSize();
-  int available_width = GetAvailableWidth() - x;
-  gfx::Size button_pref_size;
-  if (button_) {
-    button_pref_size = button_->GetPreferredSize();
-    available_width -=
-        (button_pref_size.width() + InfoBar::kButtonInLabelSpacing);
-  }
-  label_->SetBounds(x, InfoBar::OffsetY(this, label_pref_size),
-                    std::min(label_pref_size.width(), available_width),
-                    label_pref_size.height());
+  gfx::Size label_size = label_->GetPreferredSize();
+  label_->SetBounds(StartX(), OffsetY(label_size),
+      std::min(label_size.width(),
+               std::max(0, EndX() - StartX() - ContentMinimumWidth())),
+      label_size.height());
 
   if (button_) {
-    button_->SetBounds(label_->bounds().right() +
-                          InfoBar::kButtonInLabelSpacing,
-                       InfoBar::OffsetY(this, button_pref_size),
-                       button_pref_size.width(), button_pref_size.height());
+    gfx::Size button_size = button_->GetPreferredSize();
+    button_->SetBounds(label_->bounds().right() + kButtonInLabelSpacing,
+        OffsetY(button_size), button_size.width(), button_size.height());
   }
+}
+
+void TranslateMessageInfoBar::ViewHierarchyChanged(bool is_add,
+                                                   View* parent,
+                                                   View* child) {
+  if (is_add && (child == this) && (label_ == NULL)) {
+    TranslateInfoBarDelegate* delegate = GetDelegate();
+    label_ = CreateLabel(delegate->GetMessageInfoBarText());
+    AddChildView(label_);
+
+    string16 button_text(delegate->GetMessageInfoBarButtonText());
+    if (!button_text.empty()) {
+      button_ = CreateTextButton(this, button_text, false);
+      AddChildView(button_);
+    }
+  }
+
+  // This must happen after adding all other children so InfoBarView can ensure
+  // the close button is the last child.
+  TranslateInfoBarBase::ViewHierarchyChanged(is_add, parent, child);
 }
 
 void TranslateMessageInfoBar::ButtonPressed(views::Button* sender,
                                             const views::Event& event) {
-  if (sender == button_) {
+  if (sender == button_)
     GetDelegate()->MessageInfoBarButtonPressed();
-    return;
-  }
-  TranslateInfoBarBase::ButtonPressed(sender, event);
+  else
+    TranslateInfoBarBase::ButtonPressed(sender, event);
+}
+
+int TranslateMessageInfoBar::ContentMinimumWidth() const {
+  return (button_ != NULL) ?
+      (button_->GetPreferredSize().width() + kButtonInLabelSpacing) : 0;
 }

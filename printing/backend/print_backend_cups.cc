@@ -84,7 +84,7 @@ class PrintBackendCUPS : public PrintBackend {
   virtual ~PrintBackendCUPS() {}
 
   // PrintBackend implementation.
-  virtual void EnumeratePrinters(PrinterList* printer_list);
+  virtual bool EnumeratePrinters(PrinterList* printer_list);
 
   virtual bool GetPrinterCapsAndDefaults(const std::string& printer_name,
                                          PrinterCapsAndDefaults* printer_info);
@@ -107,12 +107,19 @@ PrintBackendCUPS::PrintBackendCUPS(const GURL& print_server_url, bool blocking)
     : print_server_url_(print_server_url), blocking_(blocking) {
 }
 
-void PrintBackendCUPS::EnumeratePrinters(PrinterList* printer_list) {
+bool PrintBackendCUPS::EnumeratePrinters(PrinterList* printer_list) {
   DCHECK(printer_list);
   printer_list->clear();
 
   cups_dest_t* destinations = NULL;
   int num_dests = GetDests(&destinations);
+  if ((num_dests == 0) && (cupsLastError() > IPP_OK_EVENTS_COMPLETE)) {
+    VLOG(1) << "CP_CUPS: Error getting printers from CUPS server. Server: "
+            << print_server_url_
+            << " Error: "
+            << static_cast<int>(cupsLastError());
+    return false;
+  }
 
   for (int printer_index = 0; printer_index < num_dests; printer_index++) {
     const cups_dest_t& printer = destinations[printer_index];
@@ -142,6 +149,7 @@ void PrintBackendCUPS::EnumeratePrinters(PrinterList* printer_list) {
   cupsFreeDests(num_dests, destinations);
 
   VLOG(1) << "CUPS: Enumerated " << printer_list->size() << " printers.";
+  return true;
 }
 
 bool PrintBackendCUPS::GetPrinterCapsAndDefaults(
@@ -235,27 +243,28 @@ FilePath PrintBackendCUPS::GetPPD(const char* name) {
     // Note: After looking at CUPS sources, it looks like non-blocking
     // connection will timeout after 10 seconds of no data period. And it will
     // return the same way as if data was completely and sucessfully downloaded.
-    // To distinguish error case from the normal return, will check result file
-    // size agains content length.
     HttpConnectionCUPS http(print_server_url_);
     http.SetBlocking(blocking_);
     ppd_file_path = cupsGetPPD2(http.http(), name);
     // Check if the get full PPD, since non-blocking call may simply return
     // normally after timeout expired.
     if (ppd_file_path) {
+      // There is no reliable way right now to detect full and complete PPD
+      // get downloaded. If we reach http timeout, it may simply return
+      // downloaded part as a full response. It might be good enough to check
+      // http->data_remaining or http->_data_remaining, unfortunately http_t
+      // is an internal structure and fields are not exposed in CUPS headers.
+      // httpGetLength or httpGetLength2 returning the full content size.
+      // Comparing file size against that content length might be unreliable
+      // since some http reponses are encoded and content_length > file size.
+      // Let's just check for the obvious CUPS and http errors here.
       ppd_path = FilePath(ppd_file_path);
-      off_t content_len = httpGetLength2(http.http());
-      int64 ppd_size = 0;
-      // This is a heuristic to detect if we reached timeout. If we see content
-      // length is larger that the actual file we downloaded it means timeout
-      // reached. Sometimes http can be compressed, and in that case the
-      // the content length will be smaller than the actual payload (not sure
-      // if CUPS support such responses).
-      if (!file_util::GetFileSize(ppd_path, &ppd_size) ||
-          content_len > ppd_size) {
+      ipp_status_t error_code = cupsLastError();
+      int http_error = httpError(http.http());
+      if (error_code > IPP_OK_EVENTS_COMPLETE || http_error != 0) {
         LOG(ERROR) << "Error downloading PPD file for: " << name
-                   << ", file size: "  << ppd_size
-                   << ", content length: " << content_len;
+                   << ", CUPS error: " << static_cast<int>(error_code)
+                   << ", HTTP error: " << http_error;
         file_util::Delete(ppd_path, false);
         ppd_path.clear();
       }

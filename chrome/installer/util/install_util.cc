@@ -12,24 +12,26 @@
 
 #include <algorithm>
 
+#include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/path_service.h"
 #include "base/scoped_ptr.h"
 #include "base/string_util.h"
 #include "base/values.h"
+#include "base/version.h"
 #include "base/win/registry.h"
 #include "base/win/windows_version.h"
 #include "chrome/common/json_value_serializer.h"
 #include "chrome/installer/util/browser_distribution.h"
 #include "chrome/installer/util/google_update_constants.h"
 #include "chrome/installer/util/l10n_string_util.h"
-#include "chrome/installer/util/master_preferences_constants.h"
+#include "chrome/installer/util/installation_state.h"
 #include "chrome/installer/util/util_constants.h"
 #include "chrome/installer/util/work_item_list.h"
 
 using base::win::RegKey;
-using installer::MasterPreferences;
+using installer::ProductState;
 
 bool InstallUtil::ExecuteExeAsAdmin(const CommandLine& cmd, DWORD* exit_code) {
   FilePath::StringType program(cmd.GetProgram().value());
@@ -68,14 +70,13 @@ bool InstallUtil::ExecuteExeAsAdmin(const CommandLine& cmd, DWORD* exit_code) {
   return true;
 }
 
-std::wstring InstallUtil::GetChromeUninstallCmd(bool system_install,
-                                                BrowserDistribution* dist) {
-  DCHECK(dist);
-  HKEY root = system_install ? HKEY_LOCAL_MACHINE : HKEY_CURRENT_USER;
-  RegKey key(root, dist->GetUninstallRegPath().c_str(), KEY_READ);
-  std::wstring uninstall_cmd;
-  key.ReadValue(installer::kUninstallStringField, &uninstall_cmd);
-  return uninstall_cmd;
+CommandLine InstallUtil::GetChromeUninstallCmd(
+    bool system_install, BrowserDistribution::Type distribution_type) {
+  ProductState state;
+  if (state.Initialize(system_install, distribution_type)) {
+    return state.uninstall_command();
+  }
+  return CommandLine(CommandLine::NO_PROGRAM);
 }
 
 Version* InstallUtil::GetChromeVersion(BrowserDistribution* dist,
@@ -202,8 +203,8 @@ bool InstallUtil::DeleteRegistryKey(RegKey& root_key,
   VLOG(1) << "Deleting registry key " << key_path;
   LONG result = root_key.DeleteKey(key_path.c_str());
   if (result != ERROR_SUCCESS && result != ERROR_FILE_NOT_FOUND) {
-    PLOG(ERROR) << "Failed to delete registry key: " << key_path
-                << " error: " << result;
+    LOG(ERROR) << "Failed to delete registry key: " << key_path
+               << " error: " << result;
     return false;
   }
   return true;
@@ -238,6 +239,28 @@ int InstallUtil::GetInstallReturnCode(installer::InstallStatus status) {
       return 0;
     default:
       return status;
+  }
+}
+
+// static
+void InstallUtil::MakeUninstallCommand(const std::wstring& exe_path,
+                                       const std::wstring& arguments,
+                                       CommandLine* command_line) {
+  const bool no_program = exe_path.empty();
+
+  // Return a bunch of nothingness.
+  if (no_program && arguments.empty()) {
+    *command_line = CommandLine(CommandLine::NO_PROGRAM);
+  } else {
+    // Form a full command line string.
+    std::wstring command;
+    command.append(1, L'"')
+        .append(no_program ? L"" : exe_path)
+        .append(L"\" ")
+        .append(arguments);
+
+    // If we have a program name, return this complete command line.
+    *command_line = CommandLine::FromString(command);
   }
 }
 

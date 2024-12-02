@@ -1,18 +1,18 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "views/controls/menu/menu_item_view.h"
 
 #include "base/utf_string_conversions.h"
-#include "gfx/canvas_skia.h"
-#include "gfx/favicon_size.h"
 #include "grit/app_resources.h"
 #include "third_party/skia/include/effects/SkGradientShader.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/favicon_size.h"
 #include "views/controls/button/text_button.h"
 #include "views/controls/menu/menu_config.h"
-#include "views/controls/menu/radio_button_image_gtk.h"
+#include "views/controls/menu/menu_image_util_gtk.h"
 #include "views/controls/menu/submenu_view.h"
 
 namespace views {
@@ -24,7 +24,7 @@ static const SkColor kSelectedBackgroundColor = SkColorSetRGB(0xDC, 0xE4, 0xFA);
 static const SkColor kSelectedBackgroundColor = SkColorSetRGB(246, 249, 253);
 #endif
 
-gfx::Size MenuItemView::GetPreferredSize() {
+gfx::Size MenuItemView::CalculatePreferredSize() {
   const gfx::Font& font = MenuConfig::instance().font;
   // TODO(sky): this is a workaround until I figure out why font.height()
   // isn't returning the right thing. We really only want to include
@@ -36,12 +36,12 @@ gfx::Size MenuItemView::GetPreferredSize() {
       content_height + GetBottomMargin() + GetTopMargin());
 }
 
-void MenuItemView::Paint(gfx::Canvas* canvas, bool for_drag) {
+void MenuItemView::PaintButton(gfx::Canvas* canvas, PaintButtonMode mode) {
   const MenuConfig& config = MenuConfig::instance();
   bool render_selection =
-      (!for_drag && IsSelected() &&
+      (mode == PB_NORMAL && IsSelected() &&
        parent_menu_item_->GetSubmenu()->GetShowSelection(this) &&
-       GetChildViewCount() == 0);
+       !has_children());
 
   int icon_x = config.item_left_margin;
   int top_margin = GetTopMargin();
@@ -69,11 +69,14 @@ void MenuItemView::Paint(gfx::Canvas* canvas, bool for_drag) {
   } else if (type_ == RADIO) {
     const SkBitmap* image =
         GetRadioButtonImage(GetDelegate()->IsItemChecked(GetCommand()));
-    canvas->DrawBitmapInt(*image,
-                          icon_x,
-                          top_margin +
-                          (height() - top_margin - bottom_margin -
-                           image->height()) / 2);
+    gfx::Rect radio_bounds(icon_x,
+                           top_margin +
+                           (height() - top_margin - bottom_margin -
+                            image->height()) / 2,
+                           image->width(),
+                           image->height());
+    AdjustBoundsForRTLUI(&radio_bounds);
+    canvas->DrawBitmapInt(*image, radio_bounds.x(), radio_bounds.y());
   }
 
   // Render the foreground.
@@ -90,7 +93,7 @@ void MenuItemView::Paint(gfx::Canvas* canvas, bool for_drag) {
   gfx::Rect text_bounds(label_start_, top_margin +
                         (available_height - font.GetHeight()) / 2, width,
                         font.GetHeight());
-  text_bounds.set_x(MirroredLeftPointForRect(text_bounds));
+  text_bounds.set_x(GetMirroredXForRect(text_bounds));
   canvas->DrawStringInt(WideToUTF16Hack(GetTitle()), font, fg_color,
                         text_bounds.x(), text_bounds.y(), text_bounds.width(),
                         text_bounds.height(),
@@ -105,7 +108,7 @@ void MenuItemView::Paint(gfx::Canvas* canvas, bool for_drag) {
                           bottom_margin - icon_.height()) / 2,
                           icon_.width(),
                           icon_.height());
-    icon_bounds.set_x(MirroredLeftPointForRect(icon_bounds));
+    icon_bounds.set_x(GetMirroredXForRect(icon_bounds));
     canvas->DrawBitmapInt(icon_, icon_bounds.x(), icon_bounds.y());
   }
 
@@ -117,8 +120,7 @@ void MenuItemView::Paint(gfx::Canvas* canvas, bool for_drag) {
                                          config.arrow_width) / 2,
                            config.arrow_width, height());
     AdjustBoundsForRTLUI(&arrow_bounds);
-    ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-    canvas->DrawBitmapInt(*rb.GetBitmapNamed(IDR_MENU_ARROW),
+    canvas->DrawBitmapInt(*GetSubmenuArrowImage(),
                           arrow_bounds.x(), arrow_bounds.y());
   }
 }

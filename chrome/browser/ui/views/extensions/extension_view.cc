@@ -5,9 +5,9 @@
 #include "chrome/browser/ui/views/extensions/extension_view.h"
 
 #include "chrome/browser/extensions/extension_host.h"
-#include "chrome/browser/renderer_host/render_view_host.h"
-#include "chrome/browser/renderer_host/render_widget_host_view.h"
 #include "chrome/browser/ui/views/extensions/extension_popup.h"
+#include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/renderer_host/render_widget_host_view.h"
 #include "views/widget/widget.h"
 
 #if defined(OS_WIN)
@@ -33,9 +33,8 @@ ExtensionView::ExtensionView(ExtensionHost* host, Browser* browser)
 }
 
 ExtensionView::~ExtensionView() {
-  View* parent = GetParent();
-  if (parent)
-    parent->RemoveChildView(this);
+  if (parent())
+    parent()->RemoveChildView(this);
   CleanUp();
 }
 
@@ -75,13 +74,12 @@ void ExtensionView::SetVisible(bool is_visible) {
   }
 }
 
-void ExtensionView::DidChangeBounds(const gfx::Rect& previous,
-                                    const gfx::Rect& current) {
-  View::DidChangeBounds(previous, current);
+void ExtensionView::OnBoundsChanged() {
+  View::OnBoundsChanged();
   // Propagate the new size to RenderWidgetHostView.
   // We can't send size zero because RenderWidget DCHECKs that.
-  if (render_view_host()->view() && !current.IsEmpty())
-    render_view_host()->view()->SetSize(gfx::Size(width(), height()));
+  if (render_view_host()->view() && !bounds().IsEmpty())
+    render_view_host()->view()->SetSize(size());
 }
 
 void ExtensionView::CreateWidgetHostView() {
@@ -106,7 +104,7 @@ void ExtensionView::CreateWidgetHostView() {
   RenderWidgetHostViewViews* view_views =
       static_cast<RenderWidgetHostViewViews*>(view);
   view_views->InitAsChild();
-  Attach(view_views->GetNativeView());
+  AttachToView(view_views);
 #elif defined(OS_LINUX)
   RenderWidgetHostViewGtk* view_gtk =
       static_cast<RenderWidgetHostViewGtk*>(view);
@@ -172,15 +170,14 @@ void ExtensionView::ViewHierarchyChanged(bool is_add,
 
 void ExtensionView::PreferredSizeChanged() {
   View::PreferredSizeChanged();
-  if (container_) {
+  if (container_)
     container_->OnExtensionPreferredSizeChanged(this);
-  }
 }
 
 bool ExtensionView::SkipDefaultKeyEventProcessing(const views::KeyEvent& e) {
   // Let the tab key event be processed by the renderer (instead of moving the
   // focus to the next focusable view).
-  return (e.GetKeyCode() == ui::VKEY_TAB);
+  return (e.key_code() == ui::VKEY_TAB);
 }
 
 void ExtensionView::HandleMouseMove() {

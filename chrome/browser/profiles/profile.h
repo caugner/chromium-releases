@@ -22,6 +22,11 @@ class ProxyConfigServiceImpl;
 }
 #endif
 
+namespace fileapi {
+class FileSystemContext;
+class SandboxedFileSystemContext;
+}
+
 namespace history {
 class TopSites;
 }
@@ -32,15 +37,15 @@ class SSLConfigService;
 }
 
 namespace policy {
-class ProfilePolicyContext;
+class ProfilePolicyConnector;
+}
+
+namespace prerender {
+class PrerenderManager;
 }
 
 namespace webkit_database {
 class DatabaseTracker;
-}
-
-namespace fileapi {
-class SandboxedFileSystemContext;
 }
 
 class AutocompleteClassifier;
@@ -50,7 +55,7 @@ class BrowserSignin;
 class BrowserThemeProvider;
 class ChromeAppCacheService;
 class ChromeBlobStorageContext;
-class ChromeURLRequestContextGetter;
+class ChromeURLDataManager;
 class CloudPrintProxyService;
 class DesktopNotificationService;
 class DownloadManager;
@@ -59,8 +64,10 @@ class ExtensionDevToolsManager;
 class ExtensionEventRouter;
 class ExtensionInfoMap;
 class ExtensionMessageService;
+class ExtensionPrefValueMap;
 class ExtensionProcessManager;
 class ExtensionService;
+class ExtensionSpecialStoragePolicy;
 class FaviconService;
 class FilePath;
 class FindBarState;
@@ -76,12 +83,10 @@ class PersonalDataManager;
 class PinnedTabService;
 class PrefProxyConfigTracker;
 class PrefService;
-class PrerenderManager;
 class ProfileSyncFactory;
 class ProfileSyncService;
-class ProfileSyncService;
 class PromoCounter;
-class PromoCounter;
+class ProtocolHandlerRegistry;
 class SQLitePersistentCookieStore;
 class SSLConfigServiceManager;
 class SSLHostState;
@@ -100,7 +105,7 @@ class VisitedLinkEventListener;
 class VisitedLinkMaster;
 class WebDataService;
 class WebKitContext;
-class WebResourceService;
+class PromoResourceService;
 
 typedef intptr_t ProfileId;
 
@@ -131,8 +136,11 @@ class Profile {
     IMPLICIT_ACCESS
   };
 
+  // Key used to bind profile to the widget with which it is associated.
+  static const char* kProfileKey;
+
   // Value that represents no profile Id.
-  static const ProfileId InvalidProfileId;
+  static const ProfileId kInvalidProfileId;
 
   Profile();
   virtual ~Profile() {}
@@ -217,6 +225,10 @@ class Profile {
   // Accessor. The instance is created at startup.
   virtual ExtensionEventRouter* GetExtensionEventRouter() = 0;
 
+  // Accessor. The instance is created upon first access.
+  virtual ExtensionSpecialStoragePolicy*
+      GetExtensionSpecialStoragePolicy() = 0;
+
   // Retrieves a pointer to the SSLHostState associated with this profile.
   // The SSLHostState is lazily created the first time that this method is
   // called.
@@ -282,6 +294,11 @@ class Profile {
   // time that this method is called.
   virtual PrefService* GetPrefs() = 0;
 
+  // Retrieves a pointer to the PrefService that manages the preferences
+  // for OffTheRecord Profiles.  This PrefService is lazily created the first
+  // time that this method is called.
+  virtual PrefService* GetOffTheRecordPrefs() = 0;
+
   // Returns the TemplateURLModel for this profile. This is owned by the
   // the Profile.
   virtual TemplateURLModel* GetTemplateURLModel() = 0;
@@ -300,7 +317,7 @@ class Profile {
   // Returns the FileSystemContext associated to this profile.  The context
   // is lazily created the first time this method is called.  This is owned
   // by the profile.
-  virtual fileapi::SandboxedFileSystemContext* GetFileSystemContext() = 0;
+  virtual fileapi::FileSystemContext* GetFileSystemContext() = 0;
 
   // Returns the BrowserSignin object assigned to this profile.
   virtual BrowserSignin* GetBrowserSignin() = 0;
@@ -400,6 +417,9 @@ class Profile {
   // Returns the BookmarkModel, creating if not yet created.
   virtual BookmarkModel* GetBookmarkModel() = 0;
 
+  // Returns the ProtocolHandlerRegistry, creating if not yet created.
+  virtual ProtocolHandlerRegistry* GetProtocolHandlerRegistry() = 0;
+
   // Returns the Gaia Token Service, creating if not yet created.
   virtual TokenService* GetTokenService() = 0;
 
@@ -461,8 +481,12 @@ class Profile {
 
   virtual void InitExtensions() = 0;
 
-  // Start up service that gathers data from a web resource feed.
-  virtual void InitWebResources() = 0;
+  // Start up service that gathers data from a promo resource feed.
+  virtual void InitPromoResources() = 0;
+
+  // Register URLRequestFactories for protocols registered with
+  // registerProtocolHandler.
+  virtual void InitRegisteredProtocolHandlers() = 0;
 
   // Returns the new tab page resource cache.
   virtual NTPResourceCache* GetNTPResourceCache() = 0;
@@ -481,14 +505,30 @@ class Profile {
   // Returns the PromoCounter for Instant, or NULL if not applicable.
   virtual PromoCounter* GetInstantPromoCounter() = 0;
 
-  // Gets the policy context associated with this profile.
-  virtual policy::ProfilePolicyContext* GetPolicyContext() = 0;
+  // Gets the policy connector associated with this profile.
+  virtual policy::ProfilePolicyConnector* GetPolicyConnector() = 0;
+
+  // Returns the ChromeURLDataManager for this profile.
+  virtual ChromeURLDataManager* GetChromeURLDataManager() = 0;
 
 #if defined(OS_CHROMEOS)
-  // Changes application locale.
-  // "Keep local" means that changes should not be propagated to other devices.
-  virtual void ChangeApplicationLocale(
-      const std::string& locale, bool keep_local) = 0;
+  enum AppLocaleChangedVia {
+    // Caused by chrome://settings change.
+    APP_LOCALE_CHANGED_VIA_SETTINGS,
+    // Locale has been reverted via LocaleChangeGuard.
+    APP_LOCALE_CHANGED_VIA_REVERT,
+    // From login screen.
+    APP_LOCALE_CHANGED_VIA_LOGIN,
+    // Source unknown.
+    APP_LOCALE_CHANGED_VIA_UNKNOWN
+  };
+
+  // Changes application locale for a profile.
+  virtual void ChangeAppLocale(
+      const std::string& locale, AppLocaleChangedVia via) = 0;
+
+  // Called after login.
+  virtual void OnLogin() = 0;
 
   // Returns ChromeOS's ProxyConfigServiceImpl, creating if not yet created.
   virtual chromeos::ProxyConfigServiceImpl*
@@ -496,6 +536,9 @@ class Profile {
 
   // Creates ChromeOS's EnterpriseExtensionListener.
   virtual void SetupChromeOSEnterpriseExtensionObserver() = 0;
+
+  // Initializes Chrome OS's preferences.
+  virtual void InitChromeOSPreferences() = 0;
 
 #endif  // defined(OS_CHROMEOS)
 
@@ -505,7 +548,10 @@ class Profile {
 
   // Returns the PrerenderManager used to prerender entire webpages for this
   // profile.
-  virtual PrerenderManager* GetPrerenderManager() = 0;
+  virtual prerender::PrerenderManager* GetPrerenderManager() = 0;
+
+  // Returns whether it is a guest session.
+  static bool IsGuestSession();
 
 #ifdef UNIT_TEST
   // Use with caution.  GetDefaultRequestContext may be called on any thread!
@@ -546,6 +592,8 @@ class Profile {
   Profile* CreateOffTheRecordProfile();
 
  protected:
+  friend class OffTheRecordProfileImpl;
+
   static URLRequestContextGetter* default_request_context_;
 
  private:

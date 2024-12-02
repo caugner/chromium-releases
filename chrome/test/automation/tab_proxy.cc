@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,7 @@
 #include "chrome/common/automation_messages.h"
 #include "chrome/common/json_value_serializer.h"
 #include "chrome/test/automation/automation_proxy.h"
+#include "chrome/test/automation/browser_proxy.h"
 #include "googleurl/src/gurl.h"
 
 TabProxy::TabProxy(AutomationMessageSender* sender,
@@ -21,6 +22,29 @@ TabProxy::TabProxy(AutomationMessageSender* sender,
     : AutomationResourceProxy(tracker, sender, handle) {
 }
 
+scoped_refptr<BrowserProxy> TabProxy::GetParentBrowser() const {
+  if (!is_valid())
+    return NULL;
+
+  int browser_handle = 0;
+  bool success = false;
+  sender_->Send(new AutomationMsg_GetParentBrowserOfTab(
+      handle_, &browser_handle, &success));
+  if (!success)
+    return NULL;
+
+  BrowserProxy* browser = static_cast<BrowserProxy*>(
+      tracker_->GetResource(browser_handle));
+  if (!browser) {
+    browser = new BrowserProxy(sender_, tracker_, browser_handle);
+    browser->AddRef();
+  }
+
+  // Since there is no scoped_refptr::attach.
+  scoped_refptr<BrowserProxy> result;
+  result.swap(&browser);
+  return result;
+}
 
 bool TabProxy::GetTabTitle(std::wstring* title) const {
   if (!is_valid())
@@ -563,7 +587,10 @@ void TabProxy::HandleMessageFromExternalHost(const std::string& message,
 bool TabProxy::WaitForTabToBeRestored(uint32 timeout_ms) {
   if (!is_valid())
     return false;
-  return sender_->Send(new AutomationMsg_WaitForTabToBeRestored(handle_));
+  bool succeeded = false;
+  return sender_->Send(
+      new AutomationMsg_WaitForTabToBeRestored(handle_, &succeeded)) &&
+      succeeded;
 }
 
 bool TabProxy::GetSecurityState(SecurityStyle* security_style,
@@ -635,14 +662,14 @@ bool TabProxy::SavePage(const FilePath& file_name,
   return succeeded;
 }
 
-bool TabProxy::GetInfoBarCount(int* count) {
+bool TabProxy::GetInfoBarCount(size_t* count) {
   if (!is_valid())
     return false;
 
   return sender_->Send(new AutomationMsg_GetInfoBarCount(handle_, count));
 }
 
-bool TabProxy::WaitForInfoBarCount(int target_count) {
+bool TabProxy::WaitForInfoBarCount(size_t target_count) {
   if (!is_valid())
     return false;
 
@@ -651,7 +678,7 @@ bool TabProxy::WaitForInfoBarCount(int target_count) {
       handle_, target_count, &success)) && success;
 }
 
-bool TabProxy::ClickInfoBarAccept(int info_bar_index,
+bool TabProxy::ClickInfoBarAccept(size_t info_bar_index,
                                   bool wait_for_navigation) {
   if (!is_valid())
     return false;
@@ -785,7 +812,7 @@ void TabProxy::JavaScriptStressTestControl(int cmd, int param) {
     return;
 
   sender_->Send(new AutomationMsg_JavaScriptStressTestControl(
-      0, handle_, cmd, param));
+      handle_, cmd, param));
 }
 
 void TabProxy::AddObserver(TabProxyDelegate* observer) {

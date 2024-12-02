@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,12 +9,12 @@
 #include "base/logging.h"
 #include "base/stl_util-inl.h"
 #include "base/utf_string_conversions.h"
-#include "gfx/canvas.h"
-#include "gfx/font.h"
-#include "gfx/skia_utils_gtk.h"
+#include "ui/gfx/canvas.h"
+#include "ui/gfx/font.h"
+#include "ui/gfx/skia_utils_gtk.h"
 #include "views/background.h"
 #include "views/controls/tabbed_pane/tabbed_pane.h"
-#include "views/fill_layout.h"
+#include "views/layout/fill_layout.h"
 #include "views/widget/root_view.h"
 #include "views/widget/widget_gtk.h"
 
@@ -64,7 +64,8 @@ View* NativeTabbedPaneGtk::RemoveTabAtIndex(int index) {
 
   GtkWidget* page =
       gtk_notebook_get_nth_page(GTK_NOTEBOOK(native_view()), index);
-  WidgetGtk* widget = WidgetGtk::GetViewForNative(page);
+  WidgetGtk* widget =
+      static_cast<WidgetGtk*>(NativeWidget::GetNativeWidgetForNativeView(page));
 
   // detach the content view from widget so that we can delete widget
   // without destroying the content view.
@@ -104,7 +105,7 @@ View* NativeTabbedPaneGtk::GetView() {
 }
 
 void NativeTabbedPaneGtk::SetFocus() {
-  Focus();
+  OnFocus();
 }
 
 gfx::Size NativeTabbedPaneGtk::GetPreferredSize() {
@@ -153,7 +154,7 @@ void NativeTabbedPaneGtk::DoAddTabAtIndex(int index, const std::wstring& title,
   WidgetGtk* page_container = new WidgetGtk(WidgetGtk::TYPE_CHILD);
   page_container->Init(NULL, gfx::Rect());
   page_container->SetContentsView(contents);
-  page_container->SetFocusTraversableParent(GetRootView());
+  page_container->SetFocusTraversableParent(GetWidget()->GetFocusTraversable());
   page_container->SetFocusTraversableParentView(this);
   page_container->Show();
 
@@ -194,14 +195,15 @@ WidgetGtk* NativeTabbedPaneGtk::GetWidgetAt(int index) {
   DCHECK(index <= GetTabCount());
   GtkWidget* page = gtk_notebook_get_nth_page(GTK_NOTEBOOK(native_view()),
                                               index);
-  WidgetGtk* widget = WidgetGtk::GetViewForNative(page);
+  WidgetGtk* widget =
+      static_cast<WidgetGtk*>(NativeWidget::GetNativeWidgetForNativeView(page));
   DCHECK(widget);
   return widget;
 }
 
 View* NativeTabbedPaneGtk::GetTabViewAt(int index) {
   WidgetGtk* widget = GetWidgetAt(index);
-  DCHECK(widget && widget->GetRootView()->GetChildViewCount() == 1);
+  DCHECK(widget && widget->GetRootView()->child_count() == 1);
   return widget->GetRootView()->GetChildViewAt(0);
 }
 

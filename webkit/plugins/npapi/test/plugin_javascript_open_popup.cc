@@ -1,9 +1,11 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "build/build_config.h"
 #include "webkit/plugins/npapi/test/plugin_javascript_open_popup.h"
+
+#include "build/build_config.h"
+#include "base/logging.h"
 
 #if defined(USE_X11)
 #include "third_party/npapi/bindings/npapi_x11.h"
@@ -82,8 +84,12 @@ bool ExecuteJavascriptPopupWindowTargetPluginTest::CheckWindow(
 
   if (xwindow) {
     Window root, parent;
+    Window* wins = NULL;
+    unsigned int num_child;
     Status status = XQueryTree(extra->display, xwindow, &root, &parent,
-                               NULL, NULL);  // NULL children info.
+                               &wins, &num_child);
+    if (wins)
+      XFree(wins);
     DCHECK(status != 0);
     if (!parent || parent == root)
       SetError("Windowed plugin instantiated with NULL parent");

@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,6 +15,7 @@
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/ref_counted.h"
+#include "base/scoped_ptr.h"
 #include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/sys_info.h"
@@ -29,15 +30,10 @@
 #include "chrome/renderer/plugin_channel_host.h"
 #include "chrome/renderer/render_thread.h"
 #include "chrome/renderer/render_view.h"
-#include "gfx/blit.h"
-#include "gfx/canvas_skia.h"
-#include "gfx/native_widget_types.h"
-#include "gfx/size.h"
 #include "grit/generated_resources.h"
 #include "grit/renderer_resources.h"
 #include "ipc/ipc_channel_handle.h"
 #include "net/base/mime_util.h"
-#include "printing/native_metafile.h"
 #include "skia/ext/platform_canvas.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebBindings.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebCursorInfo.h"
@@ -47,11 +43,20 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebVector.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/blit.h"
+#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/native_widget_types.h"
+#include "ui/gfx/size.h"
 #include "webkit/plugins/npapi/webplugin.h"
 #include "webkit/glue/webkit_glue.h"
 
 #if defined(OS_POSIX)
 #include "ipc/ipc_channel_posix.h"
+#endif
+
+#if defined(OS_WIN)
+#include "printing/native_metafile_factory.h"
+#include "printing/native_metafile.h"
 #endif
 
 using WebKit::WebBindings;
@@ -926,13 +931,14 @@ void WebPluginDelegateProxy::Print(gfx::NativeDrawingContext context) {
   }
 
 #if defined(OS_WIN)
-  printing::NativeMetafile metafile;
-  if (!metafile.Init(memory.memory(), size)) {
+  scoped_ptr<printing::NativeMetafile> metafile(
+      printing::NativeMetafileFactory::CreateMetafile());
+  if (!metafile->Init(memory.memory(), size)) {
     NOTREACHED();
     return;
   }
   // Playback the buffer.
-  metafile.Playback(context, NULL);
+  metafile->Playback(context, NULL);
 #else
   // TODO(port): plugin printing.
   NOTIMPLEMENTED();
@@ -1335,7 +1341,7 @@ void WebPluginDelegateProxy::CopyFromTransportToBacking(const gfx::Rect& rect) {
                        rect.y() * stride + 4 * rect.x();
   // The two bitmaps are flipped relative to each other.
   int dest_starting_row = plugin_rect_.height() - rect.y() - 1;
-  DCHECK(backing_store_.size() > 0);
+  DCHECK(!backing_store_.empty());
   uint8* target_data = &(backing_store_[0]) + dest_starting_row * stride +
                        4 * rect.x();
   for (int row = 0; row < rect.height(); ++row) {
@@ -1443,37 +1449,6 @@ bool WebPluginDelegateProxy::BindFakePluginWindowHandle(bool opaque) {
   return true;
 }
 #endif
-
-CommandBufferProxy* WebPluginDelegateProxy::CreateCommandBuffer() {
-#if defined(ENABLE_GPU)
-#if defined(OS_MACOSX)
-  if (!BindFakePluginWindowHandle(true))
-    return NULL;
-#endif
-  int command_buffer_id;
-  if (!Send(new PluginMsg_CreateCommandBuffer(instance_id_,
-                                              &command_buffer_id))) {
-    return NULL;
-  }
-
-  CommandBufferProxy* command_buffer =
-      new CommandBufferProxy(channel_host_, command_buffer_id);
-  channel_host_->AddRoute(command_buffer_id, command_buffer, NULL);
-  return command_buffer;
-#else
-  return NULL;
-#endif  // ENABLE_GPU
-}
-
-void WebPluginDelegateProxy::DestroyCommandBuffer(
-    CommandBufferProxy* command_buffer) {
-  DCHECK(command_buffer);
-#if defined(ENABLE_GPU)
-  Send(new PluginMsg_DestroyCommandBuffer(instance_id_));
-  channel_host_->RemoveRoute(command_buffer->route_id());
-  delete command_buffer;
-#endif
-}
 
 gfx::PluginWindowHandle WebPluginDelegateProxy::GetPluginWindowHandle() {
   return window_;

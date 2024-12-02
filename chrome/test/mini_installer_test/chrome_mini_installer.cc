@@ -15,6 +15,7 @@
 #include "base/win/registry.h"
 #include "chrome/installer/util/browser_distribution.h"
 #include "chrome/installer/util/google_update_constants.h"
+#include "chrome/installer/util/installation_validation_helper.h"
 #include "chrome/test/mini_installer_test/mini_installer_test_constants.h"
 #include "chrome/test/mini_installer_test/mini_installer_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -80,9 +81,12 @@ void ChromeMiniInstaller::Install() {
 // This method will get the previous latest full installer from
 // nightly location, install it and over install with specified install_type.
 void ChromeMiniInstaller::OverInstallOnFullInstaller(
-    const std::wstring& install_type) {
+    const std::wstring& install_type, bool should_start_ie) {
   ASSERT_TRUE(has_full_installer_ && has_diff_installer_ &&
-    has_prev_installer_);
+      has_prev_installer_);
+
+  if (should_start_ie)
+    LaunchIE(L"http://www.google.com");
 
   InstallMiniInstaller(false, prev_installer_);
 
@@ -118,7 +122,6 @@ void ChromeMiniInstaller::OverInstallOnFullInstaller(
     FAIL();
   }
 }
-
 
 // This method will get the latest full installer from nightly location
 // and installs it.
@@ -257,7 +260,7 @@ void ChromeMiniInstaller::UnInstall() {
   }
   MiniInstallerTestUtil::CloseProcesses(installer::kChromeExe);
   std::wstring uninstall_path = GetUninstallPath();
-  if (uninstall_path == L"") {
+  if (uninstall_path.empty()) {
     printf("\n %ls install is in a weird state. Cleaning the machine...\n",
             product_name.c_str());
     CleanChromeInstall();
@@ -289,6 +292,46 @@ void ChromeMiniInstaller::UnInstall() {
     ASSERT_EQ(0,
         base::GetProcessCount(mini_installer_constants::kIEExecutable, NULL));
   }
+}
+
+void ChromeMiniInstaller::UnInstallChromeFrameWithIERunning() {
+  std::wstring product_name =
+      mini_installer_constants::kChromeFrameProductName;
+  BrowserDistribution* dist = BrowserDistribution::GetDistribution();
+  if (!CheckRegistryKey(dist->GetVersionKey())) {
+    printf("%ls is not installed.\n", product_name.c_str());
+    return;
+  }
+
+  MiniInstallerTestUtil::CloseProcesses(installer::kChromeExe);
+  std::wstring uninstall_path = GetUninstallPath();
+
+  if (uninstall_path.empty()) {
+    printf("\n %ls install is in a weird state. Cleaning the machine...\n",
+            product_name.c_str());
+    CleanChromeInstall();
+    return;
+  }
+
+  ASSERT_TRUE(file_util::PathExists(FilePath(uninstall_path)));
+  std::wstring uninstall_args(L"\"");
+  uninstall_args.append(uninstall_path);
+  uninstall_args.append(L"\" --uninstall --force-uninstall");
+  uninstall_args.append(L" --chrome-frame");
+
+  if (install_type_ == mini_installer_constants::kSystemInstall)
+    uninstall_args = uninstall_args + L" --system-level";
+
+  base::ProcessHandle setup_handle;
+  base::LaunchApp(uninstall_args, false, false, &setup_handle);
+
+  ASSERT_TRUE(CloseUninstallWindow());
+  ASSERT_TRUE(MiniInstallerTestUtil::VerifyProcessHandleClosed(setup_handle));
+  ASSERT_FALSE(CheckRegistryKeyOnUninstall(dist->GetVersionKey()));
+
+  DeleteUserDataFolder();
+  MiniInstallerTestUtil::CloseProcesses(
+      mini_installer_constants::kIEProcessName);
 }
 
 // Will clean up the machine if Chrome install is messed up.
@@ -484,7 +527,7 @@ std::wstring ChromeMiniInstaller::GetChromeInstallDirectoryLocation() {
     PathService::Get(base::DIR_PROGRAM_FILES, &path);
   else
     PathService::Get(base::DIR_LOCAL_APP_DATA, &path);
-  return path.ToWStringHack();
+  return path.value();
 }
 
 FilePath ChromeMiniInstaller::GetStartMenuShortcutPath() {
@@ -597,6 +640,7 @@ void ChromeMiniInstaller::VerifyChromeLaunch(bool expected_status) {
 
 // Verifies Chrome/Chrome Frame install.
 void ChromeMiniInstaller::VerifyInstall(bool over_install) {
+  VerifyMachineState();
   if (is_chrome_frame_) {
     VerifyChromeFrameInstall();
   } else {
@@ -611,35 +655,43 @@ void ChromeMiniInstaller::VerifyInstall(bool over_install) {
   }
 }
 
+// This method verifies installation of Chrome/Chrome Frame via machine
+// introspection.
+void ChromeMiniInstaller::VerifyMachineState() {
+  using installer::InstallationValidator;
+
+  InstallationValidator::InstallationType type =
+      installer::ExpectValidInstallation(
+          install_type_ == mini_installer_constants::kSystemInstall);
+  if (is_chrome_frame_) {
+    EXPECT_NE(0,
+              type & InstallationValidator::ProductBits::CHROME_FRAME_SINGLE);
+  } else {
+    EXPECT_NE(0, type & InstallationValidator::ProductBits::CHROME_SINGLE);
+  }
+}
+
 // This method will verify if ChromeFrame installed successfully. It will
 // launch IE with cf:about:version, then check if
 // chrome.exe process got spawned.
 void ChromeMiniInstaller::VerifyChromeFrameInstall() {
+  // Launch IE
+  LaunchIE(L"gcf:about:version");
+
+  // Check if Chrome process got spawned.
+  MiniInstallerTestUtil::VerifyProcessLaunch(installer::kChromeExe, true);
+}
+
+void ChromeMiniInstaller::LaunchIE(const std::wstring& navigate_url) {
   FilePath browser_path;
   PathService::Get(base::DIR_PROGRAM_FILES, &browser_path);
   browser_path = browser_path.Append(mini_installer_constants::kIELocation);
   browser_path = browser_path.Append(mini_installer_constants::kIEProcessName);
 
   CommandLine cmd_line(browser_path);
-  cmd_line.AppendArgNative(L"gcf:about:version");
+  cmd_line.AppendArgNative(navigate_url);
 
-  // Launch IE
   base::LaunchApp(cmd_line, false, false, NULL);
-
-  // Check if Chrome process got spawned.
-  MiniInstallerTestUtil::VerifyProcessLaunch(installer::kChromeExe, true);
-
-  // Verify if IExplore folder got created
-  FilePath path = GetUserDataDirPath();
-  path = path.AppendASCII("IEXPLORE");
-  if (!file_util::PathExists(path)) {
-    // The profile folder for IE 6 and 7 lives in the user's Temporary Internet
-    // Files folder. Check there if the previous one was not found.
-    PathService::Get(base::DIR_IE_INTERNET_CACHE, &path);
-    path = path.AppendASCII("Google Chrome Frame");
-  }
-
-  ASSERT_TRUE(file_util::PathExists(path));
 }
 
 // This method will launch any requested browser.

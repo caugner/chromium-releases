@@ -6,7 +6,7 @@
 #define CHROME_BROWSER_EXTENSIONS_THEME_INSTALLED_INFOBAR_DELEGATE_H_
 #pragma once
 
-#include "chrome/browser/tab_contents/infobar_delegate.h"
+#include "chrome/browser/tab_contents/confirm_infobar_delegate.h"
 #include "chrome/common/notification_registrar.h"
 
 class Extension;
@@ -24,7 +24,7 @@ class ThemeInstalledInfoBarDelegate : public ConfirmInfoBarDelegate,
 
   // Returns true if the given theme is the same as the one associated with this
   // info bar.
-  bool MatchesTheme(const Extension* theme);
+  bool MatchesTheme(const Extension* theme) const;
 
  protected:
   virtual ~ThemeInstalledInfoBarDelegate();

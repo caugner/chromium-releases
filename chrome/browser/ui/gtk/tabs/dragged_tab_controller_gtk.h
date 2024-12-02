@@ -12,10 +12,10 @@
 
 #include "base/scoped_ptr.h"
 #include "base/timer.h"
-#include "chrome/browser/tab_contents/tab_contents_delegate.h"
 #include "chrome/browser/ui/tabs/dock_info.h"
-#include "chrome/common/notification_observer.h"
-#include "chrome/common/notification_registrar.h"
+#include "content/browser/tab_contents/tab_contents_delegate.h"
+#include "content/common/notification_observer.h"
+#include "content/common/notification_registrar.h"
 #include "ui/base/x/x11_util.h"
 
 class DraggedTabGtk;
@@ -87,9 +87,8 @@ class DraggedTabControllerGtk : public NotificationObserver,
   virtual void LoadingStateChanged(TabContents* source);
   virtual void CloseContents(TabContents* source);
   virtual void MoveContents(TabContents* source, const gfx::Rect& pos);
-  virtual bool IsPopup(TabContents* source);
+  virtual bool IsPopup(const TabContents* source) const;
   virtual void ToolbarSizeChanged(TabContents* source, bool is_animating);
-  virtual void URLStarredChanged(TabContents* source, bool starred);
   virtual void UpdateTargetURL(TabContents* source, const GURL& url);
 
   // Overridden from NotificationObserver:

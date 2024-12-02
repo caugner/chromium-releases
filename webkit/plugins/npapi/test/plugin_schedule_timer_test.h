@@ -5,7 +5,6 @@
 #ifndef WEBKIT_PLUGINS_NPAPI_TEST_PLUGIN_SCHEDULE_TIMER_TEST_H
 #define WEBKIT_PLUGINS_NPAPI_TEST_PLUGIN_SCHEDULE_TIMER_TEST_H
 
-#include "base/at_exit.h"
 #include "base/time.h"
 #include "webkit/plugins/npapi/test/plugin_test.h"
 
@@ -23,9 +22,6 @@ class ScheduleTimerTest : public PluginTest {
   void OnTimer(uint32 timer_id);
 
  private:
-  // base::Time needs one of these.
-  base::AtExitManager at_exit_manager_;
-
   // Table mapping timer index (as used in event schedule) to timer id.
   static const int kNumTimers = 3;
   uint32 timer_ids_[kNumTimers];
@@ -60,7 +56,7 @@ class ScheduleTimerTest : public PluginTest {
 
   // Returns index of matching unreceived event or -1 if not found.
   int FindUnreceivedEvent(int time, uint32 timer_id);
-  void HandleEvent(int event_index);
+  void HandleEventIndex(int event_index);
 };
 
 }  // namespace NPAPIClient

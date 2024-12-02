@@ -21,6 +21,7 @@
 #include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/third_party/xdg_mime/xdgmime.h"
+#include "base/threading/thread_restrictions.h"
 
 namespace {
 
@@ -155,6 +156,7 @@ class IconTheme {
 IconTheme::IconTheme(const std::string& name)
   : index_theme_loaded_(false),
     info_array_(NULL) {
+  base::ThreadRestrictions::AssertIOAllowed();
   // Iterate on all icon directories to find directories of the specified
   // theme and load the first encountered index.theme.
   std::map<FilePath, int>::iterator iter;
@@ -523,7 +525,7 @@ FilePath LookupIconInDefaultTheme(const std::string& icon_name, int size) {
   EnsureUpdated();
   MimeUtilConstants* constants = MimeUtilConstants::GetInstance();
   std::map<std::string, IconTheme*>* icon_themes = constants->icon_themes_;
-  if (icon_themes->size() == 0)
+  if (icon_themes->empty())
     InitDefaultThemes();
 
   FilePath icon_path;
@@ -550,10 +552,12 @@ MimeUtilConstants::~MimeUtilConstants() {
 namespace mime_util {
 
 std::string GetFileMimeType(const FilePath& filepath) {
+  base::ThreadRestrictions::AssertIOAllowed();
   return xdg_mime_get_mime_type_from_file_name(filepath.value().c_str());
 }
 
 std::string GetDataMimeType(const std::string& data) {
+  base::ThreadRestrictions::AssertIOAllowed();
   return xdg_mime_get_mime_type_for_data(data.data(), data.length(), NULL);
 }
 
@@ -576,6 +580,7 @@ void DetectGtkTheme() {
 }
 
 FilePath GetMimeIcon(const std::string& mime_type, size_t size) {
+  base::ThreadRestrictions::AssertIOAllowed();
   std::vector<std::string> icon_names;
   std::string icon_name;
   FilePath icon_file;

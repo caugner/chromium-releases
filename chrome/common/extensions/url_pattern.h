@@ -91,15 +91,23 @@ class URLPattern {
     SCHEME_ALL      = -1,
   };
 
+  // Options for URLPattern::Parse().
+  enum ParseOption {
+    PARSE_LENIENT,
+    PARSE_STRICT
+  };
+
   // Error codes returned from Parse().
   enum ParseResult {
-    PARSE_SUCCESS,
+    PARSE_SUCCESS = 0,
     PARSE_ERROR_MISSING_SCHEME_SEPARATOR,
     PARSE_ERROR_INVALID_SCHEME,
     PARSE_ERROR_WRONG_SCHEME_SEPARATOR,
     PARSE_ERROR_EMPTY_HOST,
     PARSE_ERROR_INVALID_HOST_WILDCARD,
     PARSE_ERROR_EMPTY_PATH,
+    PARSE_ERROR_HAS_COLON,  // Only checked when strict checks are enabled.
+    NUM_PARSE_RESULTS
   };
 
   // The <all_urls> string pattern.
@@ -113,6 +121,14 @@ class URLPattern {
   // to be a valid pattern. If the string is not known ahead of time, use
   // Parse() instead, which returns success or failure.
   URLPattern(int valid_schemes, const std::string& pattern);
+
+#if defined(_MSC_VER) && _MSC_VER >= 1600
+  // Note: don't use this directly. This exists so URLPattern can be used
+  // with STL containers.  Starting with Visual Studio 2010, we can't have this
+  // method private and use "friend class std::vector<URLPattern>;" as we used
+  // to do.
+  URLPattern();
+#endif
 
   ~URLPattern();
 
@@ -132,10 +148,7 @@ class URLPattern {
   // Gets the path the pattern matches with the leading slash. This can have
   // embedded asterisks which are interpreted using glob rules.
   const std::string& path() const { return path_; }
-  void set_path(const std::string& path) {
-    path_ = path;
-    path_escaped_ = "";
-  }
+  void SetPath(const std::string& path);
 
   // Returns true if this pattern matches all urls.
   bool match_all_urls() const { return match_all_urls_; }
@@ -144,8 +157,16 @@ class URLPattern {
   // Initializes this instance by parsing the provided string. Returns
   // URLPattern::PARSE_SUCCESS on success, or an error code otherwise. On
   // failure, this instance will have some intermediate values and is in an
-  // invalid state.
-  ParseResult Parse(const std::string& pattern_str);
+  // invalid state.  Adding error checks to URLPattern::Parse() can cause
+  // patterns in installed extensions to fail.  If an installed extension
+  // uses a pattern that was valid but fails a new error check, the
+  // extension will fail to load when chrome is auto-updated.  To avoid
+  // this, new parse checks are enabled only when |strictness| is
+  // OPTION_STRICT.  OPTION_STRICT should be used when loading in developer
+  // mode, or when an extension's patterns are controlled by chrome (such
+  // as component extensions).
+  ParseResult Parse(const std::string& pattern_str,
+                    ParseOption strictness);
 
   // Sets the scheme for pattern matches. This can be a single '*' if the
   // pattern matches all valid schemes (as defined by the valid_schemes_
@@ -200,12 +221,17 @@ class URLPattern {
     };
   };
 
+  // Get an error string for a ParseResult.
+  static const char* GetParseResultString(URLPattern::ParseResult parse_result);
+
  private:
+#if !(defined(_MSC_VER) && _MSC_VER >= 1600)
   friend class std::vector<URLPattern>;
 
   // Note: don't use this directly. This exists so URLPattern can be used
   // with STL containers.
   URLPattern();
+#endif
 
   // A bitmask containing the schemes which are considered valid for this
   // pattern. Parse() uses this to decide whether a pattern contains a valid
@@ -231,9 +257,8 @@ class URLPattern {
   std::string path_;
 
   // The path with "?" and "\" characters escaped for use with the
-  // MatchPattern() function. This is populated lazily, the first time it is
-  // needed.
-  mutable std::string path_escaped_;
+  // MatchPattern() function.
+  std::string path_escaped_;
 };
 
 typedef std::vector<URLPattern> URLPatternList;

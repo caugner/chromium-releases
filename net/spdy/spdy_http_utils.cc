@@ -83,8 +83,10 @@ void CreateSpdyHeadersFromHttpRequest(const HttpRequestInfo& info,
   HttpRequestHeaders::Iterator it(request_headers);
   while (it.GetNext()) {
     std::string name = StringToLowerASCII(it.name());
-    if (name == "connection" || name == "proxy-connection")
+    if (name == "connection" || name == "proxy-connection" ||
+        name == "transfer-encoding") {
       continue;
+    }
     if (headers->find(name) == headers->end()) {
       (*headers)[name] = it.value();
     } else {
@@ -105,6 +107,20 @@ void CreateSpdyHeadersFromHttpRequest(const HttpRequestInfo& info,
   else
     (*headers)["url"] = HttpUtil::SpecForRequest(info.url);
 
+}
+
+// TODO(gavinp): re-adjust this once SPDY v3 has three priority bits,
+// eliminating the need for this folding.
+int ConvertRequestPriorityToSpdyPriority(const RequestPriority priority) {
+  DCHECK(HIGHEST <= priority && priority < NUM_PRIORITIES);
+  switch (priority) {
+    case LOWEST:
+      return SPDY_PRIORITY_LOWEST - 1;
+    case IDLE:
+      return SPDY_PRIORITY_LOWEST;
+    default:
+      return priority;
+  }
 }
 
 }  // namespace net

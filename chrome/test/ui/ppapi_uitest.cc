@@ -142,8 +142,8 @@ TEST_F(PPAPITest, FLAKY_Scrollbar) {
   RunTest("Scrollbar");
 }
 
-TEST_F(PPAPITest, UrlUtil) {
-  RunTest("UrlUtil");
+TEST_F(PPAPITest, URLUtil) {
+  RunTest("URLUtil");
 }
 
 TEST_F(PPAPITest, CharSet) {
@@ -154,17 +154,19 @@ TEST_F(PPAPITest, Var) {
   RunTest("Var");
 }
 
-// TODO(dumi): figure out why this test is flaky / crashing.
-TEST_F(PPAPITest, DISABLED_FileIO) {
+TEST_F(PPAPITest, FileIO) {
   RunTestViaHTTP("FileIO");
 }
 
-// TODO(dumi): figure out why this test is flaky / crashing.
-TEST_F(PPAPITest, DISABLED_FileRef) {
+TEST_F(PPAPITest, FileRef) {
   RunTestViaHTTP("FileRef");
 }
 
 // http://crbug.com/63239
 TEST_F(PPAPITest, DISABLED_DirectoryReader) {
   RunTestViaHTTP("DirectoryReader");
+}
+
+TEST_F(PPAPITest, DISABLED_Transport) {
+  RunTest("Transport");
 }

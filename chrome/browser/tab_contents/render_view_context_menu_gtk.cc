@@ -9,7 +9,7 @@
 #include "base/string_util.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/renderer_host/render_widget_host_view_gtk.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
+#include "content/browser/tab_contents/tab_contents.h"
 #include "webkit/glue/context_menu.h"
 
 RenderViewContextMenuGtk::RenderViewContextMenuGtk(
@@ -44,7 +44,7 @@ void RenderViewContextMenuGtk::Popup(const gfx::Point& point) {
   RenderWidgetHostView* rwhv = source_tab_contents_->GetRenderWidgetHostView();
   if (rwhv)
     rwhv->ShowingContextMenu(true);
-  menu_gtk_->PopupAsContextAt(triggering_event_time_, point);
+  menu_gtk_->PopupAsContext(point, triggering_event_time_);
 }
 
 void RenderViewContextMenuGtk::StoppedShowing() {

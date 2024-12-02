@@ -8,13 +8,13 @@
 #include "base/string16.h"
 #include "base/utf_string_conversions.h"
 #include "build/build_config.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/in_process_browser_test.h"
 #include "chrome/test/test_launcher_utils.h"
 #include "chrome/test/ui_test_utils.h"
+#include "content/browser/tab_contents/tab_contents.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/net_util.h"
 
@@ -46,7 +46,14 @@ class GPUBrowserTest : public InProcessBrowserTest {
   FilePath gpu_test_dir_;
 };
 
-IN_PROC_BROWSER_TEST_F(GPUBrowserTest, BrowserTestCanLaunchWithOSMesa) {
+#if defined(OS_WIN)
+// Flaky on Windows (dbg): http://crbug.com/72608
+#define MAYBE_BrowserTestCanLaunchWithOSMesa DISABLED_BrowserTestCanLaunchWithOSMesa
+#else
+#define MAYBE_BrowserTestCanLaunchWithOSMesa BrowserTestCanLaunchWithOSMesa
+#endif
+
+IN_PROC_BROWSER_TEST_F(GPUBrowserTest, MAYBE_BrowserTestCanLaunchWithOSMesa) {
   // Check the webgl test reports success and that the renderer was OSMesa.
   ui_test_utils::NavigateToURL(
       browser(),

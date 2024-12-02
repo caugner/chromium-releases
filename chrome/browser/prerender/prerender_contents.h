@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,22 +9,31 @@
 #include <string>
 #include <vector>
 
-#include "chrome/browser/renderer_host/render_view_host_delegate.h"
+#include "base/time.h"
+#include "chrome/browser/prerender/prerender_final_status.h"
 #include "chrome/browser/tab_contents/render_view_host_delegate_helper.h"
 #include "chrome/browser/ui/app_modal_dialogs/js_modal_dialog.h"
 #include "chrome/common/notification_registrar.h"
 #include "chrome/common/view_types.h"
 #include "chrome/common/window_container_type.h"
+#include "content/browser/renderer_host/render_view_host_delegate.h"
 #include "webkit/glue/window_open_disposition.h"
 
 class TabContents;
-class PrerenderManager;
 struct WebPreferences;
 struct ViewHostMsg_FrameNavigate_Params;
+
+namespace base {
+class ProcessMetrics;
+}
 
 namespace gfx {
 class Rect;
 }
+
+namespace prerender {
+
+class PrerenderManager;
 
 // This class is a peer of TabContents. It can host a renderer, but does not
 // have any visible display. Its navigation is not managed by a
@@ -36,10 +45,30 @@ class PrerenderContents : public RenderViewHostDelegate,
                           public NotificationObserver,
                           public JavaScriptAppModalDialogDelegate {
  public:
-  PrerenderContents(PrerenderManager* prerender_manager, Profile* profile,
-                    const GURL& url, const std::vector<GURL>& alias_urls);
+  // PrerenderContents::Create uses the currently registered Factory to create
+  // the PrerenderContents. Factory is intended for testing.
+  class Factory {
+   public:
+    Factory() {}
+    virtual ~Factory() {}
+
+    virtual PrerenderContents* CreatePrerenderContents(
+        PrerenderManager* prerender_manager, Profile* profile, const GURL& url,
+        const std::vector<GURL>& alias_urls, const GURL& referrer) = 0;
+
+   private:
+    DISALLOW_COPY_AND_ASSIGN(Factory);
+  };
+
   virtual ~PrerenderContents();
+
+  static Factory* CreateFactory();
+
   virtual void StartPrerendering();
+
+  // Verifies that the prerendering is not using too many resources, and kills
+  // it if not.
+  void DestroyWhenUsingTooManyResources();
 
   RenderViewHost* render_view_host() { return render_view_host_; }
   // Allows replacing of the RenderViewHost owned by this class, including
@@ -51,6 +80,16 @@ class PrerenderContents : public RenderViewHostDelegate,
   }
   string16 title() const { return title_; }
   int32 page_id() const { return page_id_; }
+  GURL icon_url() const { return icon_url_; }
+  bool has_stopped_loading() const { return has_stopped_loading_; }
+
+  // Set the final status for how the PrerenderContents was used. This
+  // should only be called once, and should be called before the prerender
+  // contents are destroyed.
+  void set_final_status(FinalStatus final_status);
+  FinalStatus final_status() const;
+
+  base::TimeTicks load_start_time() const { return load_start_time_; }
 
   // Indicates whether this prerendered page can be used for the provided
   // URL, i.e. whether there is a match.
@@ -67,7 +106,7 @@ class PrerenderContents : public RenderViewHostDelegate,
                            int32 page_id,
                            const std::wstring& title);
   virtual WebPreferences GetWebkitPrefs();
-  virtual void ProcessDOMUIMessage(const ViewHostMsg_DomMessage_Params& params);
+  virtual void ProcessWebUIMessage(const ViewHostMsg_DomMessage_Params& params);
   virtual void RunJavaScriptMessage(const std::wstring& message,
                                     const std::wstring& default_prompt,
                                     const GURL& frame_url,
@@ -75,16 +114,15 @@ class PrerenderContents : public RenderViewHostDelegate,
                                     IPC::Message* reply_msg,
                                     bool* did_suppress_message);
   virtual void Close(RenderViewHost* render_view_host);
+  virtual void DidStopLoading();
   virtual RendererPreferences GetRendererPrefs(Profile* profile) const;
 
   // RenderViewHostDelegate::View
   virtual void CreateNewWindow(
       int route_id,
-      WindowContainerType window_container_type,
-      const string16& frame_name);
+      const ViewHostMsg_CreateWindow_Params& params);
   virtual void CreateNewWidget(int route_id, WebKit::WebPopupType popup_type);
-  virtual void CreateNewFullscreenWidget(
-      int route_id, WebKit::WebPopupType popup_type);
+  virtual void CreateNewFullscreenWidget(int route_id);
   virtual void ShowCreatedWindow(int route_id,
                                  WindowOpenDisposition disposition,
                                  const gfx::Rect& initial_pos,
@@ -137,11 +175,22 @@ class PrerenderContents : public RenderViewHostDelegate,
                                       const std::string& value);
   virtual void ClearInspectorSettings();
 
+  virtual void OnJSOutOfMemory();
+  virtual void RendererUnresponsive(RenderViewHost* render_view_host,
+                                    bool is_during_unload);
+
  protected:
+  PrerenderContents(PrerenderManager* prerender_manager, Profile* profile,
+                    const GURL& url, const std::vector<GURL>& alias_urls,
+                    const GURL& referrer);
+
   // from RenderViewHostDelegate.
   virtual bool OnMessageReceived(const IPC::Message& message);
 
  private:
+  // Needs to be able to call the constructor.
+  friend class PrerenderContentsFactoryImpl;
+
   // Message handlers.
   void OnDidStartProvisionalLoadForFrame(int64 frame_id,
                                          bool main_frame,
@@ -150,7 +199,18 @@ class PrerenderContents : public RenderViewHostDelegate,
                                     const GURL& source_url,
                                     const GURL& target_url);
 
-  void AddAliasURL(const GURL& url);
+  void OnUpdateFavIconURL(int32 page_id, const GURL& icon_url);
+
+  // Adds an alias URL, for one of the many redirections. Returns whether
+  // the URL is valid.
+  bool AddAliasURL(const GURL& url);
+
+  // Remove |this| from the PrerenderManager, set a final status, and
+  // delete |this|.
+  void Destroy(FinalStatus reason);
+
+  // Returns the ProcessMetrics for the render process, if it exists.
+  base::ProcessMetrics* MaybeGetProcessMetrics();
 
   // The prerender manager owning this object.
   PrerenderManager* prerender_manager_;
@@ -163,6 +223,9 @@ class PrerenderContents : public RenderViewHostDelegate,
 
   // The URL being prerendered.
   GURL prerender_url_;
+
+  // The referrer.
+  GURL referrer_;
 
   // The NavigationParameters of the finished navigation.
   scoped_ptr<ViewHostMsg_FrameNavigate_Params> navigate_params_;
@@ -178,6 +241,7 @@ class PrerenderContents : public RenderViewHostDelegate,
   string16 title_;
   int32 page_id_;
   GURL url_;
+  GURL icon_url_;
   NotificationRegistrar registrar_;
 
   // A vector of URLs that this prerendered page matches against.
@@ -185,7 +249,26 @@ class PrerenderContents : public RenderViewHostDelegate,
   // such as HTTP redirects or javascript redirects.
   std::vector<GURL> alias_urls_;
 
+  bool has_stopped_loading_;
+
+  FinalStatus final_status_;
+
+  // Time at which we started to load the URL.  This is used to compute
+  // the time elapsed from initiating a prerender until the time the
+  // (potentially only partially) prerendered page is shown to the user.
+  base::TimeTicks load_start_time_;
+
+  // Process Metrics of the render process associated with the
+  // RenderViewHost for this object.
+  scoped_ptr<base::ProcessMetrics> process_metrics_;
+
+  // Maximum amount of private memory that may be used per PrerenderContents,
+  // in MB.
+  static const int kMaxPrerenderPrivateMB = 100;
+
   DISALLOW_COPY_AND_ASSIGN(PrerenderContents);
 };
+
+}  // prerender
 
 #endif  // CHROME_BROWSER_PRERENDER_PRERENDER_CONTENTS_H_

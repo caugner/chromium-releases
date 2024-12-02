@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include "base/mac/scoped_nsautorelease_pool.h"
 #include "base/metrics/stats_table.h"
 #include "base/process_util.h"
+#include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/common/chrome_constants.h"
@@ -21,6 +22,7 @@
 
 #if defined(OS_MACOSX)
 #include "base/mac/mac_util.h"
+#include "chrome/common/chrome_application_mac.h"
 #endif
 
 #if defined(OS_POSIX)
@@ -85,6 +87,10 @@ ChromeTestSuite::~ChromeTestSuite() {
 }
 
 void ChromeTestSuite::Initialize() {
+#if defined(OS_MACOSX)
+  chrome_application_mac::RegisterCrApp();
+#endif
+
   base::mac::ScopedNSAutoreleasePool autorelease_pool;
 
   base::TestSuite::Initialize();

@@ -80,7 +80,7 @@ View* DropHelper::CalculateTargetViewImpl(
     const OSExchangeData& data,
     bool check_can_drop,
     View** deepest_view) {
-  View* view = root_view_->GetViewForPoint(root_view_location);
+  View* view = root_view_->GetEventHandlerForPoint(root_view_location);
   if (view == deepest_view_) {
     // The view the mouse is over hasn't changed; reuse the target.
     return target_view_;
@@ -96,7 +96,7 @@ View* DropHelper::CalculateTargetViewImpl(
   // drop.
   while (view && view != target_view_ &&
          (!view->IsEnabled() || !view->CanDrop(data))) {
-    view = view->GetParent();
+    view = view->parent();
   }
 #else
   int formats = 0;
@@ -111,7 +111,7 @@ View* DropHelper::CalculateTargetViewImpl(
     }
     formats = 0;
     custom_formats.clear();
-    view = view->GetParent();
+    view = view->parent();
   }
 #endif
   return view;

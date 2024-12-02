@@ -4,9 +4,9 @@
 
 #include "chrome/browser/chromeos/status/status_area_button.h"
 
-#include "gfx/canvas.h"
-#include "gfx/skbitmap_operations.h"
 #include "grit/theme_resources.h"
+#include "ui/gfx/canvas.h"
+#include "ui/gfx/skbitmap_operations.h"
 #include "views/border.h"
 #include "views/view.h"
 
@@ -20,7 +20,7 @@ static const SkColor kStatusTextHaloColor = SkColorSetARGB(0xB3, 0, 0, 0);
 
 StatusAreaButton::StatusAreaButton(views::ViewMenuDelegate* menu_delegate)
     : MenuButton(NULL, std::wstring(), menu_delegate, false),
-      use_menu_button_paint_(false), enabled_(true) {
+      use_menu_button_paint_(false), active_(true) {
   set_border(NULL);
 
   // Use an offset that is top aligned with toolbar.
@@ -30,7 +30,7 @@ StatusAreaButton::StatusAreaButton(views::ViewMenuDelegate* menu_delegate)
   SetTextHaloColor(kStatusTextHaloColor);
 }
 
-void StatusAreaButton::Paint(gfx::Canvas* canvas, bool for_drag) {
+void StatusAreaButton::PaintButton(gfx::Canvas* canvas, PaintButtonMode mode) {
   if (state() == BS_PUSHED) {
     // Apply 10% white when pushed down.
     canvas->FillRectInt(SkColorSetARGB(0x19, 0xFF, 0xFF, 0xFF),
@@ -38,10 +38,10 @@ void StatusAreaButton::Paint(gfx::Canvas* canvas, bool for_drag) {
   }
 
   if (use_menu_button_paint_) {
-    views::MenuButton::Paint(canvas, for_drag);
+    views::MenuButton::PaintButton(canvas, mode);
   } else {
-    DrawIcon(canvas);
-    PaintFocusBorder(canvas);
+    canvas->DrawBitmapInt(icon(), horizontal_padding(), 0);
+    OnPaintFocusBorder(canvas);
   }
 }
 
@@ -79,16 +79,15 @@ void StatusAreaButton::SetText(const std::wstring& text) {
   // TextButtons normally remember the max text size, so the button's preferred
   // size will always be as large as the largest text ever put in it.
   // We clear that max text size, so we can adjust the size to fit the text.
-  ClearMaxTextSize();
+  // The order is important.  ClearMaxTextSize sets the size to that of the
+  // current text, so it must be called after SetText.
   views::MenuButton::SetText(text);
-}
-
-void StatusAreaButton::DrawIcon(gfx::Canvas* canvas) {
-  canvas->DrawBitmapInt(icon(), horizontal_padding(), 0);
+  ClearMaxTextSize();
+  PreferredSizeChanged();
 }
 
 bool StatusAreaButton::Activate() {
-  if (enabled_) {
+  if (active_) {
     return views::MenuButton::Activate();
   } else {
     return true;

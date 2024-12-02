@@ -6,11 +6,9 @@
 #define CHROME_BROWSER_UI_BROWSER_WINDOW_H_
 #pragma once
 
-#include <vector>
-
-#include "chrome/browser/tab_contents/navigation_entry.h"
 #include "chrome/common/content_settings_types.h"
-#include "gfx/native_widget_types.h"
+#include "content/browser/tab_contents/navigation_entry.h"
+#include "ui/gfx/native_widget_types.h"
 
 class Browser;
 class BrowserWindowTesting;
@@ -121,6 +119,11 @@ class BrowserWindow {
   // currently maximized or minimized) in terms of the screen coordinates.
   virtual gfx::Rect GetRestoredBounds() const = 0;
 
+  // Retrieves the window's current bounds, including its frame.
+  // This will only differ from GetRestoredBounds() for maximized
+  // and minimized windows.
+  virtual gfx::Rect GetBounds() const = 0;
+
   // TODO(beng): REMOVE?
   // Returns true if the frame is maximized (aka zoomed).
   virtual bool IsMaximized() const = 0;
@@ -189,6 +192,7 @@ class BrowserWindow {
       TemplateURL* template_url,
       TemplateURLModel* template_url_model) {
     // TODO(levin): Implement this for non-Windows platforms and make it pure.
+    // http://crbug.com/38475
   }
 
   // Shows a confirmation dialog box for adding a search engine described by
@@ -200,7 +204,7 @@ class BrowserWindow {
   virtual void ToggleBookmarkBar() = 0;
 
   // Shows the About Chrome dialog box.
-  virtual views::Window* ShowAboutChromeDialog() = 0;
+  virtual void ShowAboutChromeDialog() = 0;
 
   // Shows the Update Recommended dialog box.
   virtual void ShowUpdateChromeDialog() = 0;
@@ -346,10 +350,6 @@ class BrowserWindow {
 
   // Construct a FindBar implementation for the specified |browser|.
   static FindBar* CreateFindBar(Browser* browser_window);
-
-  // Grabs a snapshot of the current browser window and returns the bounds.
-  virtual gfx::Rect GrabWindowSnapshot(std::vector<unsigned char>*
-                                       png_representation) = 0;
 
  protected:
   friend class BrowserList;

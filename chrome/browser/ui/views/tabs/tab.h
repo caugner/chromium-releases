@@ -10,7 +10,7 @@
 
 #include "base/scoped_ptr.h"
 #include "chrome/browser/ui/views/tabs/base_tab.h"
-#include "gfx/point.h"
+#include "ui/gfx/point.h"
 
 namespace ui {
 class MultiAnimation;
@@ -56,28 +56,28 @@ class Tab : public BaseTab {
   static int GetMiniWidth();
 
  protected:
-  virtual const gfx::Rect& title_bounds() const { return title_bounds_; }
-
   // BaseTab overrides:
-  virtual void DataChanged(const TabRendererData& old);
+  virtual const gfx::Rect& GetTitleBounds() const OVERRIDE;
+  virtual const gfx::Rect& GetIconBounds() const OVERRIDE;
+  virtual void DataChanged(const TabRendererData& old) OVERRIDE;
 
  private:
   // Overridden from views::View:
-  virtual void Paint(gfx::Canvas* canvas);
-  virtual void Layout();
-  virtual void OnThemeChanged();
-  virtual std::string GetClassName() const { return kViewClassName; }
-  virtual bool HasHitTestMask() const;
-  virtual void GetHitTestMask(gfx::Path* path) const;
-  virtual bool GetTooltipTextOrigin(const gfx::Point& p, gfx::Point* origin);
-  virtual void OnMouseMoved(const views::MouseEvent& event);
+  virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
+  virtual void Layout() OVERRIDE;
+  virtual void OnThemeChanged() OVERRIDE;
+  virtual std::string GetClassName() const OVERRIDE;
+  virtual bool HasHitTestMask() const OVERRIDE;
+  virtual void GetHitTestMask(gfx::Path* path) const OVERRIDE;
+  virtual bool GetTooltipTextOrigin(const gfx::Point& p,
+                                    gfx::Point* origin) OVERRIDE;
+  virtual void OnMouseMoved(const views::MouseEvent& event) OVERRIDE;
 
   // Paint various portions of the Tab
   void PaintTabBackground(gfx::Canvas* canvas);
   void PaintInactiveTabBackgroundWithTitleChange(gfx::Canvas* canvas);
   void PaintInactiveTabBackground(gfx::Canvas* canvas);
   void PaintActiveTabBackground(gfx::Canvas* canvas);
-  void PaintIcon(gfx::Canvas* canvas);
   SkBitmap DrawHoverGlowBitmap(int width, int height);
 
   // Returns the number of favicon-size elements that can fit in the tab's

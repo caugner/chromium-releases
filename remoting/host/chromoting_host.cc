@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,46 +13,52 @@
 #include "remoting/base/encoder_vp8.h"
 #include "remoting/host/capturer.h"
 #include "remoting/host/chromoting_host_context.h"
+#include "remoting/host/desktop_environment.h"
 #include "remoting/host/event_executor.h"
 #include "remoting/host/host_config.h"
-#include "remoting/host/host_stub_fake.h"
+#include "remoting/host/host_key_pair.h"
 #include "remoting/host/screen_recorder.h"
+#include "remoting/proto/auth.pb.h"
 #include "remoting/protocol/connection_to_client.h"
+#include "remoting/protocol/client_stub.h"
 #include "remoting/protocol/host_stub.h"
 #include "remoting/protocol/input_stub.h"
 #include "remoting/protocol/jingle_session_manager.h"
 #include "remoting/protocol/session_config.h"
 
 using remoting::protocol::ConnectionToClient;
+using remoting::protocol::InputStub;
 
 namespace remoting {
 
 // static
 ChromotingHost* ChromotingHost::Create(ChromotingHostContext* context,
                                        MutableHostConfig* config) {
+  Capturer* capturer = Capturer::Create(context->main_message_loop());
+  InputStub* input_stub = CreateEventExecutor(context->ui_message_loop(),
+                                              capturer);
   return Create(context, config,
-                Capturer::Create(context->main_message_loop()));
+                new DesktopEnvironment(capturer, input_stub));
 }
 
 // static
 ChromotingHost* ChromotingHost::Create(ChromotingHostContext* context,
                                        MutableHostConfig* config,
-                                       Capturer* capturer) {
-  return new ChromotingHost(context, config, capturer);
+                                       DesktopEnvironment* environment) {
+  return new ChromotingHost(context, config, environment);
 }
 
 ChromotingHost::ChromotingHost(ChromotingHostContext* context,
-                               MutableHostConfig* config, Capturer* capturer)
+                               MutableHostConfig* config,
+                               DesktopEnvironment* environment)
     : context_(context),
       config_(config),
-      capturer_(capturer),
-      input_stub_(CreateEventExecutor(
-          context->main_message_loop(), capturer)),
-      host_stub_(new HostStubFake()),
+      desktop_environment_(environment),
       state_(kInitial),
       protocol_config_(protocol::CandidateSessionConfig::CreateDefault()) {
+  DCHECK(desktop_environment_.get());
+  desktop_environment_->set_event_handler(this);
 }
-
 
 ChromotingHost::~ChromotingHost() {
 }
@@ -91,12 +97,20 @@ void ChromotingHost::Start(Task* shutdown_task) {
     return;
 
   // Connect to the talk network with a JingleClient.
-  jingle_client_ = new JingleClient(context_->jingle_thread());
-  jingle_client_->Init(xmpp_login, xmpp_auth_token,
-                       kChromotingTokenServiceName, this);
+  signal_strategy_.reset(
+      new XmppSignalStrategy(context_->jingle_thread(), xmpp_login,
+                             xmpp_auth_token,
+                             kChromotingTokenServiceName));
+  jingle_client_ = new JingleClient(context_->jingle_thread(),
+                                    signal_strategy_.get(),
+                                    NULL,
+                                    this);
+  jingle_client_->Init();
 
-  heartbeat_sender_ = new HeartbeatSender();
-  if (!heartbeat_sender_->Init(config_, jingle_client_.get())) {
+  heartbeat_sender_ =
+      new HeartbeatSender(context_->jingle_thread()->message_loop(),
+                          jingle_client_.get(), config_);
+  if (!heartbeat_sender_->Init()) {
     LOG(ERROR) << "Failed to initialize HeartbeatSender.";
     return;
   }
@@ -121,9 +135,8 @@ void ChromotingHost::Shutdown() {
     state_ = kStopped;
   }
 
-  // Tell the session to stop and then disconnect all clients.
+  // Make sure ScreenRecorder doesn't write to the connection.
   if (recorder_.get()) {
-    recorder_->Stop(NULL);
     recorder_->RemoveAllConnections();
   }
 
@@ -148,9 +161,11 @@ void ChromotingHost::Shutdown() {
     jingle_client_->Close();
   }
 
-  // Lastly call the shutdown task.
-  if (shutdown_task_.get()) {
+  if (recorder_.get()) {
+    recorder_->Stop(shutdown_task_.release());
+  } else {
     shutdown_task_->Run();
+    shutdown_task_.reset();
   }
 }
 
@@ -162,21 +177,19 @@ void ChromotingHost::OnClientConnected(ConnectionToClient* connection) {
   if (!recorder_.get()) {
     // Then we create a ScreenRecorder passing the message loops that
     // it should run on.
-    DCHECK(capturer_.get());
+    DCHECK(desktop_environment_->capturer());
 
     Encoder* encoder = CreateEncoder(connection->session()->config());
 
     recorder_ = new ScreenRecorder(context_->main_message_loop(),
                                    context_->encode_message_loop(),
                                    context_->network_message_loop(),
-                                   capturer_.release(),
+                                   desktop_environment_->capturer(),
                                    encoder);
   }
 
   // Immediately add the connection and start the session.
   recorder_->AddConnection(connection);
-  recorder_->Start();
-  VLOG(1) << "Session manager started";
 }
 
 void ChromotingHost::OnClientDisconnected(ConnectionToClient* connection) {
@@ -187,6 +200,7 @@ void ChromotingHost::OnClientDisconnected(ConnectionToClient* connection) {
   if (recorder_.get()) {
     recorder_->RemoveConnection(connection);
     recorder_->Stop(NULL);
+    recorder_ = NULL;
   }
 
   // Close the connection to connection just to be safe.
@@ -206,7 +220,7 @@ void ChromotingHost::OnConnectionOpened(ConnectionToClient* connection) {
   context_->main_message_loop()->PostTask(
       FROM_HERE,
       NewRunnableMethod(this, &ChromotingHost::OnClientConnected,
-                        connection_));
+                        make_scoped_refptr(connection)));
 }
 
 void ChromotingHost::OnConnectionClosed(ConnectionToClient* connection) {
@@ -216,7 +230,7 @@ void ChromotingHost::OnConnectionClosed(ConnectionToClient* connection) {
   context_->main_message_loop()->PostTask(
       FROM_HERE,
       NewRunnableMethod(this, &ChromotingHost::OnClientDisconnected,
-                        connection_));
+                        make_scoped_refptr(connection)));
 }
 
 void ChromotingHost::OnConnectionFailed(ConnectionToClient* connection) {
@@ -226,7 +240,7 @@ void ChromotingHost::OnConnectionFailed(ConnectionToClient* connection) {
   context_->main_message_loop()->PostTask(
       FROM_HERE,
       NewRunnableMethod(this, &ChromotingHost::OnClientDisconnected,
-                        connection_));
+                        make_scoped_refptr(connection)));
 }
 
 ////////////////////////////////////////////////////////////////////////////
@@ -240,13 +254,21 @@ void ChromotingHost::OnStateChange(JingleClient* jingle_client,
     // Create and start session manager.
     protocol::JingleSessionManager* server =
         new protocol::JingleSessionManager(context_->jingle_thread());
+
+    // Assign key and certificate to server.
+    HostKeyPair key_pair;
+    CHECK(key_pair.Load(config_))
+        << "Failed to load server authentication data";
+
     // TODO(ajwong): Make this a command switch when we're more stable.
     server->set_allow_local_ips(true);
     server->Init(jingle_client->GetFullJid(),
                  jingle_client->session_manager(),
-                 NewCallback(this, &ChromotingHost::OnNewClientSession));
-    session_manager_ = server;
+                 NewCallback(this, &ChromotingHost::OnNewClientSession),
+                 key_pair.CopyPrivateKey(),
+                 key_pair.GenerateCertificate());
 
+    session_manager_ = server;
     // Start heartbeating.
     heartbeat_sender_->Start();
   } else if (state == JingleClient::CLOSED) {
@@ -278,8 +300,10 @@ void ChromotingHost::OnNewClientSession(
     return;
   }
 
+  // TODO(simonmorris): The resolution is set in the video stream now,
+  // so it doesn't need to be set here.
   *protocol_config_->mutable_initial_resolution() =
-      protocol::ScreenResolution(capturer_->width(), capturer_->height());
+      protocol::ScreenResolution(2048, 2048);
   // TODO(sergeyu): Respect resolution requested by the client if supported.
   protocol::SessionConfig* config = protocol_config_->Select(
       session->candidate_config(), true /* force_host_resolution */);
@@ -299,11 +323,11 @@ void ChromotingHost::OnNewClientSession(
 
   VLOG(1) << "Client connected: " << session->jid();
 
-  // If we accept the connected then create a client object and set the
-  // callback.
+  // If we accept the connected then create a connection object.
   connection_ = new ConnectionToClient(context_->network_message_loop(),
-                                       this, host_stub_.get(),
-                                       input_stub_.get());
+                                       this,
+                                       desktop_environment_.get(),
+                                       desktop_environment_->input_stub());
   connection_->Init(session);
 }
 
@@ -312,6 +336,10 @@ void ChromotingHost::set_protocol_config(
   DCHECK(config_.get());
   DCHECK_EQ(state_, kInitial);
   protocol_config_.reset(config);
+}
+
+protocol::HostStub* ChromotingHost::host_stub() const {
+  return desktop_environment_.get();
 }
 
 void ChromotingHost::OnServerClosed() {
@@ -341,6 +369,37 @@ std::string ChromotingHost::GenerateHostAuthToken(
     const std::string& encoded_client_token) {
   // TODO(ajwong): Return the signature of this instead.
   return encoded_client_token;
+}
+
+void ChromotingHost::LocalLoginSucceeded() {
+  if (MessageLoop::current() != context_->main_message_loop()) {
+    context_->main_message_loop()->PostTask(
+        FROM_HERE,
+        NewRunnableMethod(this, &ChromotingHost::LocalLoginSucceeded));
+    return;
+  }
+
+  protocol::LocalLoginStatus* status = new protocol::LocalLoginStatus();
+  status->set_success(true);
+  connection_->client_stub()->BeginSessionResponse(
+      status, new DeleteTask<protocol::LocalLoginStatus>(status));
+
+  connection_->OnClientAuthenticated();
+  recorder_->Start();
+}
+
+void ChromotingHost::LocalLoginFailed() {
+  if (MessageLoop::current() != context_->main_message_loop()) {
+    context_->main_message_loop()->PostTask(
+        FROM_HERE,
+        NewRunnableMethod(this, &ChromotingHost::LocalLoginFailed));
+    return;
+  }
+
+  protocol::LocalLoginStatus* status = new protocol::LocalLoginStatus();
+  status->set_success(false);
+  connection_->client_stub()->BeginSessionResponse(
+      status, new DeleteTask<protocol::LocalLoginStatus>(status));
 }
 
 }  // namespace remoting

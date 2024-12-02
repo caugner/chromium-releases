@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,9 +17,9 @@
 #include "chrome/browser/notifications/notification_test_util.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/common/notification_service.h"
 #include "chrome/test/in_process_browser_test.h"
 #include "chrome/test/ui_test_utils.h"
+#include "content/common/notification_service.h"
 #include "ui/base/x/x11_util.h"
 
 namespace {
@@ -40,7 +40,7 @@ class NotificationTest : public InProcessBrowserTest,
         expected_(PanelController::INITIAL) {
   }
 
-  void HandleDOMUIMessage(const ListValue* value) {
+  void HandleWebUIMessage(const ListValue* value) {
     MessageLoop::current()->Quit();
   }
 
@@ -288,9 +288,7 @@ IN_PROC_BROWSER_TEST_F(NotificationTest, TestStateTransition1) {
 // This test depends on the fact that the panel state change occurs
 // quicker than stale timeout, thus the stale timeout cannot be set to
 // 0. This test explicitly controls the stale state instead.
-
-// TODO(oshima): bug chromium-os:7306 Fix this flaky test on ChromeOS.
-IN_PROC_BROWSER_TEST_F(NotificationTest, FLAKY_TestStateTransition2) {
+IN_PROC_BROWSER_TEST_F(NotificationTest, TestStateTransition2) {
   // Register observer here as the registration does not work in SetUp().
   NotificationRegistrar registrar;
   registrar.Add(this,
@@ -540,41 +538,41 @@ IN_PROC_BROWSER_TEST_F(NotificationTest, TestCloseDismissAllNonSticky) {
   EXPECT_EQ(1, tester->GetStickyNotificationCount());
 }
 
-IN_PROC_BROWSER_TEST_F(NotificationTest, TestAddDOMUIMessageCallback) {
+IN_PROC_BROWSER_TEST_F(NotificationTest, TestAddWebUIMessageCallback) {
   BalloonCollectionImpl* collection = GetBalloonCollectionImpl();
   Profile* profile = browser()->profile();
 
   collection->AddSystemNotification(
       NewMockNotification("1"), profile, false, false);
 
-  EXPECT_TRUE(collection->AddDOMUIMessageCallback(
+  EXPECT_TRUE(collection->AddWebUIMessageCallback(
       NewMockNotification("1"),
       "test",
       NewCallback(
           static_cast<NotificationTest*>(this),
-          &NotificationTest::HandleDOMUIMessage)));
+          &NotificationTest::HandleWebUIMessage)));
 
   // Adding callback for the same message twice should fail.
-  EXPECT_FALSE(collection->AddDOMUIMessageCallback(
+  EXPECT_FALSE(collection->AddWebUIMessageCallback(
       NewMockNotification("1"),
       "test",
       NewCallback(
           static_cast<NotificationTest*>(this),
-          &NotificationTest::HandleDOMUIMessage)));
+          &NotificationTest::HandleWebUIMessage)));
 
   // Adding callback to nonexistent notification should fail.
-  EXPECT_FALSE(collection->AddDOMUIMessageCallback(
+  EXPECT_FALSE(collection->AddWebUIMessageCallback(
       NewMockNotification("2"),
       "test1",
       NewCallback(
           static_cast<NotificationTest*>(this),
-          &NotificationTest::HandleDOMUIMessage)));
+          &NotificationTest::HandleWebUIMessage)));
 }
 
-IN_PROC_BROWSER_TEST_F(NotificationTest, TestDOMUIMessageCallback) {
+IN_PROC_BROWSER_TEST_F(NotificationTest, TestWebUIMessageCallback) {
   BalloonCollectionImpl* collection = GetBalloonCollectionImpl();
   Profile* profile = browser()->profile();
-  // a notification that sends 'test' domui message back to chrome.
+  // A notification that sends 'test' WebUI message back to chrome.
   const GURL content_url(
       "data:text/html;charset=utf-8,"
       "<html><script>function send() { chrome.send('test', ['']); }</script>"
@@ -585,12 +583,12 @@ IN_PROC_BROWSER_TEST_F(NotificationTest, TestDOMUIMessageCallback) {
       profile,
       false,
       false);
-  EXPECT_TRUE(collection->AddDOMUIMessageCallback(
+  EXPECT_TRUE(collection->AddWebUIMessageCallback(
       NewMockNotification("1"),
       "test",
       NewCallback(
           static_cast<NotificationTest*>(this),
-          &NotificationTest::HandleDOMUIMessage)));
+          &NotificationTest::HandleWebUIMessage)));
   MessageLoop::current()->Run();
 }
 

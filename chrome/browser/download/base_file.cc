@@ -1,24 +1,22 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/download/base_file.h"
 
+#include "base/crypto/secure_hash.h"
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/stringprintf.h"
-#include "base/third_party/nss/blapi.h"
-#include "base/third_party/nss/sha256.h"
 #include "net/base/file_stream.h"
 #include "net/base/net_errors.h"
-#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/download/download_util.h"
+#include "content/browser/browser_thread.h"
 
 #if defined(OS_WIN)
-#include "app/win/win_util.h"
 #include "chrome/common/win_safe_util.h"
 #elif defined(OS_MACOSX)
-#include "chrome/browser/ui/cocoa/file_metadata.h"
+#include "chrome/browser/cocoa/file_metadata.h"
 #endif
 
 BaseFile::BaseFile(const FilePath& full_path,
@@ -27,14 +25,12 @@ BaseFile::BaseFile(const FilePath& full_path,
                    int64 received_bytes,
                    const linked_ptr<net::FileStream>& file_stream)
     : full_path_(full_path),
-      path_renamed_(false),
       source_url_(source_url),
       referrer_url_(referrer_url),
       file_stream_(file_stream),
       bytes_so_far_(received_bytes),
       power_save_blocker_(true),
-      calculate_hash_(false),
-      sha_context_(NULL) {
+      calculate_hash_(false) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
 }
 
@@ -50,10 +46,8 @@ bool BaseFile::Initialize(bool calculate_hash) {
 
   calculate_hash_ = calculate_hash;
 
-  if (calculate_hash_) {
-    sha_context_.reset(new SHA256Context);
-    SHA256_Begin(sha_context_.get());
-  }
+  if (calculate_hash_)
+    secure_hash_.reset(base::SecureHash::Create(base::SecureHash::SHA256));
 
   if (!full_path_.empty() ||
       download_util::CreateTemporaryFileForDownload(&full_path_))
@@ -78,16 +72,13 @@ bool BaseFile::AppendDataToFile(const char* data, size_t data_len) {
   if (written != data_len)
     return false;
 
-  if (calculate_hash_) {
-    SHA256_Update(sha_context_.get(),
-                  reinterpret_cast<const unsigned char*>(data),
-                  data_len);
-  }
+  if (calculate_hash_)
+    secure_hash_->Update(data, data_len);
 
   return true;
 }
 
-bool BaseFile::Rename(const FilePath& new_path, bool is_final_rename) {
+bool BaseFile::Rename(const FilePath& new_path) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
 
   // Save the information whether the download is in progress because
@@ -97,8 +88,6 @@ bool BaseFile::Rename(const FilePath& new_path, bool is_final_rename) {
   // If the new path is same as the old one, there is no need to perform the
   // following renaming logic.
   if (new_path == full_path_) {
-    path_renamed_ = is_final_rename;
-
     // Don't close the file if we're not done (finished or canceled).
     if (!saved_in_progress)
       Close();
@@ -139,7 +128,6 @@ bool BaseFile::Rename(const FilePath& new_path, bool is_final_rename) {
 #endif
 
   full_path_ = new_path;
-  path_renamed_ = is_final_rename;
 
   // We don't need to re-open the file if we're done (finished or canceled).
   if (!saved_in_progress)
@@ -162,7 +150,7 @@ void BaseFile::Finish() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
 
   if (calculate_hash_)
-    SHA256_End(sha_context_.get(), sha256_hash_, NULL, kSha256HashLen);
+    secure_hash_->Finish(sha256_hash_, kSha256HashLen);
 
   Close();
 }

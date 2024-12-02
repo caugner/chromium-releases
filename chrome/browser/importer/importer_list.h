@@ -13,8 +13,8 @@
 #include "base/ref_counted.h"
 #include "base/scoped_vector.h"
 #include "build/build_config.h"
-#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/importer/importer_data_types.h"
+#include "content/browser/browser_thread.h"
 
 class Importer;
 
@@ -94,6 +94,12 @@ class ImporterList : public base::RefCountedThreadSafe<ImporterList> {
   // Weak reference. Only valid after DetectSourceProfiles() is called and until
   // SourceProfilesLoaded() has returned.
   Observer* observer_;
+
+  // True if |observer_| is set during the lifetime of source profile detection.
+  // This hack is necessary in order to not use |observer_| != NULL as a method
+  // of determining whether this object is being observed or not.
+  // TODO(jhawkins): Remove once DetectSourceProfilesHack() is removed.
+  bool is_observed_;
 
   // True if source profiles are loaded.
   bool source_profiles_loaded_;

@@ -271,19 +271,19 @@ int SpdyProxyClientSocket::DoLoop(int last_io_result) {
         break;
       case STATE_SEND_REQUEST:
         DCHECK_EQ(OK, rv);
-        net_log_.BeginEvent(NetLog::TYPE_HTTP_TRANSACTION_TUNNEL_SEND_REQUEST,
-                            NULL);
+        net_log_.BeginEvent(
+            NetLog::TYPE_HTTP_TRANSACTION_TUNNEL_SEND_REQUEST, NULL);
         rv = DoSendRequest();
         break;
       case STATE_SEND_REQUEST_COMPLETE:
+        net_log_.EndEventWithNetErrorCode(
+            NetLog::TYPE_HTTP_TRANSACTION_TUNNEL_SEND_REQUEST, rv);
         rv = DoSendRequestComplete(rv);
-        net_log_.EndEvent(NetLog::TYPE_HTTP_TRANSACTION_TUNNEL_SEND_REQUEST,
-                          NULL);
         break;
       case STATE_READ_REPLY_COMPLETE:
         rv = DoReadReplyComplete(rv);
-        net_log_.EndEvent(NetLog::TYPE_HTTP_TRANSACTION_TUNNEL_READ_HEADERS,
-                          NULL);
+        net_log_.EndEventWithNetErrorCode(
+            NetLog::TYPE_HTTP_TRANSACTION_TUNNEL_READ_HEADERS, rv);
         break;
       default:
         NOTREACHED() << "bad state";
@@ -404,11 +404,11 @@ int SpdyProxyClientSocket::OnSendBody() {
   return ERR_UNEXPECTED;
 }
 
-bool SpdyProxyClientSocket::OnSendBodyComplete(int status) {
+int SpdyProxyClientSocket::OnSendBodyComplete(int /*status*/, bool* /*eof*/) {
   // Because we use |spdy_stream_| via STATE_OPEN (ala WebSockets)
   // OnSendBodyComplete() should never be called.
   NOTREACHED();
-  return false;
+  return ERR_UNEXPECTED;
 }
 
 int SpdyProxyClientSocket::OnResponseReceived(
@@ -496,6 +496,9 @@ void SpdyProxyClientSocket::OnClose(int status)  {
   }
   if (write_callback)
     write_callback->Run(ERR_CONNECTION_CLOSED);
+}
+
+void SpdyProxyClientSocket::set_chunk_callback(ChunkCallback* /*callback*/) {
 }
 
 }  // namespace net

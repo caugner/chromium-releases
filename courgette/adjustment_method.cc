@@ -149,7 +149,7 @@ struct Node {
   std::list<Node*> edges_in_frequency_order;
 
   bool in_queue_;
-  bool Extended() const { return edges_.size() > 0; }
+  bool Extended() const { return !edges_.empty(); }
 
   uint32 Weight() const {
     return  edges_in_frequency_order.front()->count_;
@@ -595,7 +595,7 @@ class GraphAdjuster : public AdjustmentMethod {
 
   void CollectTraces(const AssemblyProgram* program, Trace* abs32, Trace* rel32,
                      bool is_model) {
-    const std::vector<Instruction*>& instructions = program->instructions();
+    const InstructionVector& instructions = program->instructions();
     for (size_t i = 0;  i < instructions.size();  ++i) {
       Instruction* instruction = instructions.at(i);
       if (Label* label = program->InstructionAbs32Label(instruction))

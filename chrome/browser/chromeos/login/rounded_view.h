@@ -5,9 +5,9 @@
 #ifndef CHROME_BROWSER_CHROMEOS_LOGIN_ROUNDED_VIEW_H_
 #define CHROME_BROWSER_CHROMEOS_LOGIN_ROUNDED_VIEW_H_
 
-#include "gfx/canvas.h"
-#include "gfx/canvas_skia.h"
-#include "gfx/rect.h"
+#include "ui/gfx/canvas.h"
+#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/rect.h"
 
 namespace chromeos {
 
@@ -39,10 +39,10 @@ class RoundedView: public C {
   template<typename D>
   explicit RoundedView(const D &value) : C(value) {}
   template<typename D1, typename D2>
-  explicit RoundedView(const D1 &val1, const D2 &val2) : C(val1, val2) {}
+  RoundedView(const D1& val1, const D2& val2) : C(val1, val2) {}
 
   // Overrides views::View.
-  virtual void ProcessPaint(gfx::Canvas* canvas);
+  virtual void Paint(gfx::Canvas* canvas);
 
  protected:
   // Returns the path that will be used for a clip.
@@ -58,12 +58,12 @@ class RoundedView: public C {
 // RoundedView implementation.
 
 template <typename C>
-void RoundedView<C>::ProcessPaint(gfx::Canvas* canvas) {
+void RoundedView<C>::Paint(gfx::Canvas* canvas) {
   // Setup clip region.
   canvas->Save();
   canvas->AsCanvasSkia()->clipPath(GetClipPath());
   // Do original painting.
-  C::ProcessPaint(canvas);
+  C::Paint(canvas);
   canvas->Restore();
   // Add frame.
   DrawFrame(canvas);

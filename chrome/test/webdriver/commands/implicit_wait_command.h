@@ -12,6 +12,8 @@
 
 namespace webdriver {
 
+class Response;
+
 // Set the amount of time the driver should wait when searching for elements.
 // If this command is never sent, the driver will default to an implicit wait
 // of 0 ms. Until the webelement commands are checked in we do no use this
@@ -19,19 +21,15 @@ namespace webdriver {
 // http://code.google.com/p/selenium/wiki/JsonWireProtocol#/session/:sessionId/timeouts/implicit_wait
 class ImplicitWaitCommand : public WebDriverCommand {
  public:
-  inline ImplicitWaitCommand(const std::vector<std::string>& path_segments,
-                             const DictionaryValue* const parameters)
-      : WebDriverCommand(path_segments, parameters), ms_to_wait_(0) {}
-  virtual ~ImplicitWaitCommand() {}
+  ImplicitWaitCommand(const std::vector<std::string>& path_segments,
+                      const DictionaryValue* const parameters);
+  virtual ~ImplicitWaitCommand();
 
-  virtual bool Init(Response* const response);
-
-  virtual bool DoesPost() { return true; }
+  virtual bool DoesPost();
   virtual void ExecutePost(Response* const response);
 
  private:
-  int ms_to_wait_;
-  virtual bool RequiresValidTab() { return true; }
+  virtual bool RequiresValidTab();
 
   DISALLOW_COPY_AND_ASSIGN(ImplicitWaitCommand);
 };

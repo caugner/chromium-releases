@@ -21,7 +21,7 @@ class GlassBrowserFrameView : public BrowserNonClientFrameView {
   virtual ~GlassBrowserFrameView();
 
   // Overridden from BrowserNonClientFrameView:
-  virtual gfx::Rect GetBoundsForTabStrip(BaseTabStrip* tabstrip) const;
+  virtual gfx::Rect GetBoundsForTabStrip(views::View* tabstrip) const;
   virtual int GetHorizontalTabStripVerticalOffset(bool restored) const;
   virtual void UpdateThrobber(bool running);
 
@@ -37,7 +37,7 @@ class GlassBrowserFrameView : public BrowserNonClientFrameView {
 
  protected:
   // Overridden from views::View:
-  virtual void Paint(gfx::Canvas* canvas);
+  virtual void OnPaint(gfx::Canvas* canvas);
   virtual void Layout();
 
  private:

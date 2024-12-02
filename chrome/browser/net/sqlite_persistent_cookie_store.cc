@@ -18,8 +18,9 @@
 #include "base/scoped_ptr.h"
 #include "base/string_util.h"
 #include "base/threading/thread.h"
-#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/diagnostics/sqlite_diagnostics.h"
+#include "content/browser/browser_thread.h"
+#include "googleurl/src/gurl.h"
 
 using base::Time;
 
@@ -185,6 +186,8 @@ bool SQLitePersistentCookieStore::Backend::Load(
   while (smt.Step()) {
     scoped_ptr<net::CookieMonster::CanonicalCookie> cc(
         new net::CookieMonster::CanonicalCookie(
+            // The "source" URL is not used with persisted cookies.
+            GURL(),                                         // Source
             smt.ColumnString(2),                            // name
             smt.ColumnString(3),                            // value
             smt.ColumnString(1),                            // domain

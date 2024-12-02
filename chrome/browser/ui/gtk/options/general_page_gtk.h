@@ -20,7 +20,6 @@
 #include "googleurl/src/gurl.h"
 #include "ui/base/gtk/gtk_signal.h"
 
-class AccessibleWidgetHelper;
 class CustomHomePagesTableModel;
 class Profile;
 class TemplateURLModel;
@@ -151,6 +150,7 @@ class GeneralPageGtk : public OptionsPageBase,
   // Widgets of the default browser group
   GtkWidget* default_browser_status_label_;
   GtkWidget* default_browser_use_as_default_button_;
+  BooleanPrefMember default_browser_policy_;
 
   // The parent GtkTable widget
   GtkWidget* page_;
@@ -164,9 +164,6 @@ class GeneralPageGtk : public OptionsPageBase,
 
   // The helper object that performs default browser set/check tasks.
   scoped_refptr<ShellIntegration::DefaultBrowserWorker> default_browser_worker_;
-
-  // Helper object to manage accessibility metadata.
-  scoped_ptr<AccessibleWidgetHelper> accessible_widget_helper_;
 
   // Tracks managed preference warning banner state.
   ManagedPrefsBannerGtk managed_prefs_banner_;

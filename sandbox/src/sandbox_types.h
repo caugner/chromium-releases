@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -53,10 +53,15 @@ enum TerminationCodes {
 class TargetServices;
 class BrokerServices;
 
-// Contains the pointer to a target or broker service.
-union SandboxInterfaceInfo {
-  TargetServices* target_services;
+// Contains the pointer to a target or broker service. Older code used
+// a union so the |legacy| member is there for us to detect we are
+// being passed a SandboxInterfaceInfo by old code. If legacy is not
+// null it means we are dealing with old code a must copy this value
+// into both |broker_services| and |target_services|.
+struct SandboxInterfaceInfo {
+  void* legacy;
   BrokerServices* broker_services;
+  TargetServices* target_services;
 };
 
 #if SANDBOX_EXPORTS

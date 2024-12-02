@@ -13,8 +13,8 @@
 #include "base/callback.h"
 #include "base/mac/scoped_cftyperef.h"
 #include "base/scoped_ptr.h"
-#include "gfx/rect.h"
-#include "gfx/size.h"
+#include "ui/gfx/rect.h"
+#include "ui/gfx/size.h"
 
 // Should not include GL headers in a header file. Forward declare these types
 // instead.
@@ -34,7 +34,7 @@ class Rect;
 class AcceleratedSurface {
  public:
   AcceleratedSurface();
-  virtual ~AcceleratedSurface() { }
+  virtual ~AcceleratedSurface();
 
   // Set up internal buffers. |share_context|, if non-NULL, is a context
   // with which the internally created OpenGL context shares textures and

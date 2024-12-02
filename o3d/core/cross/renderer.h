@@ -112,6 +112,12 @@ class Renderer {
     DISPLAY_MODE_DEFAULT = 0
   };
 
+  enum RenderMode {
+    RENDER_MODE_AUTO,
+    RENDER_MODE_3D,
+    RENDER_MODE_2D,
+  };
+
   // A StateHandler takes a param and sets or resets a render state.
   class StateHandler {
    public:
@@ -147,6 +153,11 @@ class Renderer {
   // Creates a 'default' renderer, choosing the correct implementation type.
   static Renderer* CreateDefaultRenderer(ServiceLocator* service_locator);
 
+  // Creates a 2D renderer.  This can be used instead of CreateDefaultRenderer
+  // when 3D is not supported by the underlying system, and is not strictly
+  // needed by the application.
+  static Renderer* Create2DRenderer(ServiceLocator* service_locator);
+
   // Gets whether or not the renderer should attempt to use the software
   // renderer.
   static bool IsForceSoftwareRenderer();
@@ -154,9 +165,9 @@ class Renderer {
   // Initialises the renderer for use, claiming hardware resources.
   InitStatus Init(const DisplayWindow& display, bool off_screen);
 
-  // The platform specific part of initalization.
-  virtual InitStatus InitPlatformSpecific(const DisplayWindow& display,
-                                          bool off_screen) = 0;
+  // Switch rendering to a different window after initialization (if supported
+  // by the implementation).
+  virtual bool ChangeDisplayWindow(const DisplayWindow& display);
 
   // Initializes stuff that has to happen after Init
   virtual void InitCommon();
@@ -393,6 +404,10 @@ class Renderer {
   virtual RenderDepthStencilSurface::Ref CreateDepthStencilSurface(
       int width,
       int height) = 0;
+
+#ifdef OS_MACOSX
+  virtual bool SupportsCoreGraphics() const { return false; }
+#endif
 
   ServiceLocator* service_locator() const { return service_locator_; }
 
@@ -665,6 +680,10 @@ class Renderer {
   }
 
  private:
+  // The platform specific part of initalization.
+  virtual InitStatus InitPlatformSpecific(const DisplayWindow& display,
+                                          bool off_screen) = 0;
+
   // Adds the default states to their respective stacks.
   void AddDefaultStates();
 

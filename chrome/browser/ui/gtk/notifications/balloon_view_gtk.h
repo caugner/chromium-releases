@@ -13,13 +13,13 @@
 #include "chrome/browser/notifications/balloon.h"
 #include "chrome/browser/ui/gtk/menu_gtk.h"
 #include "chrome/browser/ui/gtk/notifications/balloon_view_host_gtk.h"
-#include "chrome/common/notification_observer.h"
-#include "chrome/common/notification_registrar.h"
-#include "gfx/point.h"
-#include "gfx/rect.h"
-#include "gfx/size.h"
+#include "content/common/notification_observer.h"
+#include "content/common/notification_registrar.h"
 #include "ui/base/animation/animation_delegate.h"
 #include "ui/base/gtk/gtk_signal.h"
+#include "ui/gfx/point.h"
+#include "ui/gfx/rect.h"
+#include "ui/gfx/size.h"
 
 class BalloonCollection;
 class CustomDrawButton;
@@ -41,7 +41,7 @@ class BalloonViewImpl : public BalloonView,
                         public ui::AnimationDelegate {
  public:
   explicit BalloonViewImpl(BalloonCollection* collection);
-  ~BalloonViewImpl();
+  virtual ~BalloonViewImpl();
 
   // BalloonView interface.
   virtual void Show(Balloon* balloon);
@@ -63,7 +63,9 @@ class BalloonViewImpl : public BalloonView,
   // ui::AnimationDelegate interface.
   virtual void AnimationProgressed(const ui::Animation* animation);
 
-  // Do the delayed close work.
+  // Do the delayed close work.  The balloon and all view components will be
+  // destroyed at this time, so it shouldn't be called while still processing
+  // an event that relies on them.
   void DelayedClose(bool by_user);
 
   // The height of the balloon's shelf.
@@ -83,9 +85,12 @@ class BalloonViewImpl : public BalloonView,
   // Where the balloon contents should be in screen coordinates.
   gfx::Rect GetContentsRectangle() const;
 
+  CHROMEGTK_CALLBACK_1(BalloonViewImpl, gboolean, OnContentsExpose,
+                       GdkEventExpose*);
   CHROMEGTK_CALLBACK_0(BalloonViewImpl, void, OnCloseButton);
   CHROMEGTK_CALLBACK_1(BalloonViewImpl, gboolean, OnExpose, GdkEventExpose*);
-  CHROMEGTK_CALLBACK_0(BalloonViewImpl, void, OnOptionsMenuButton);
+  CHROMEGTK_CALLBACK_1(BalloonViewImpl, void, OnOptionsMenuButton,
+                       GdkEventButton*);
   CHROMEGTK_CALLBACK_0(BalloonViewImpl, gboolean, OnDestroy);
 
   // Non-owned pointer to the balloon which owns this object.

@@ -15,13 +15,13 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sidebar/sidebar_container.h"
 #include "chrome/browser/sidebar/sidebar_manager.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_error_utils.h"
 #include "chrome/common/extensions/extension_sidebar_utils.h"
 #include "chrome/common/render_messages.h"
+#include "content/browser/tab_contents/tab_contents.h"
 #include "ipc/ipc_message_utils.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 
@@ -37,10 +37,10 @@ const char kInvalidExpandContextError[] =
 // Keys.
 const char kBadgeTextKey[] = "text";
 const char kImageDataKey[] = "imageData";
+const char kPathKey[] = "path";
 const char kStateKey[] = "state";
 const char kTabIdKey[] = "tabId";
 const char kTitleKey[] = "title";
-const char kUrlKey[] = "url";
 // Events.
 const char kOnStateChanged[] = "experimental.sidebar.onStateChanged";
 }  // namespace
@@ -204,11 +204,11 @@ bool HideSidebarFunction::RunImpl(TabContents* tab,
 bool NavigateSidebarFunction::RunImpl(TabContents* tab,
                                       const std::string& content_id,
                                       const DictionaryValue& details) {
-  std::string url_string;
-  EXTENSION_FUNCTION_VALIDATE(details.GetString(kUrlKey, &url_string));
+  std::string path_string;
+  EXTENSION_FUNCTION_VALIDATE(details.GetString(kPathKey, &path_string));
 
-  GURL url = extension_sidebar_utils::ResolveAndVerifyUrl(
-      url_string, GetExtension(), &error_);
+  GURL url = extension_sidebar_utils::ResolveRelativePath(
+      path_string, GetExtension(), &error_);
   if (!url.is_valid())
     return false;
 

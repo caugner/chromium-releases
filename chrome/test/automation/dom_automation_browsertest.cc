@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -33,11 +33,10 @@ typedef DOMElementProxy::By By;
 
 #if defined(OS_WIN)
 // See http://crbug.com/61636
-#define MAYBE_FindByXPath FLAKY_FindByXPath
+#define MAYBE_FindByXPath DISABLED_FindByXPath
 #else
 #define MAYBE_FindByXPath FindByXPath
 #endif
-
 IN_PROC_BROWSER_TEST_F(DOMAutomationTest, MAYBE_FindByXPath) {
   ASSERT_TRUE(test_server()->Start());
   ui_test_utils::NavigateToURL(browser(),
@@ -128,7 +127,13 @@ IN_PROC_BROWSER_TEST_F(DOMAutomationTest, FindBySelectors) {
   ASSERT_EQ(3, nested_count);
 }
 
-IN_PROC_BROWSER_TEST_F(DOMAutomationTest, FindByText) {
+#if defined(OS_WIN)
+// http://crbug.com/72745
+#define MAYBE_FindByText FLAKY_FindByText
+#else
+#define MAYBE_FindByText FindByText
+#endif
+IN_PROC_BROWSER_TEST_F(DOMAutomationTest, MAYBE_FindByText) {
   ASSERT_TRUE(test_server()->Start());
   ui_test_utils::NavigateToURL(browser(),
                                GetTestURL("find_elements/test.html"));

@@ -2,7 +2,7 @@
 # Known reports on the third party we have no control over.
 UNINITIALIZED READ
 ...
-*!deflate_slow
+*!deflate_*
 *!MOZ_Z_deflate
 
 ############################
@@ -63,6 +63,10 @@ SHELL32.dll!SHFileOperation*
 
 # http://code.google.com/p/drmemory/issues/detail?id=14
 UNINITIALIZED READ
+...
+*!CreateProcess*
+
+LEAK
 ...
 *!CreateProcess*
 
@@ -277,6 +281,23 @@ LEAK
 *!_getptd_noexit
 *!_getptd
 
+# http://code.google.com/p/drmemory/issues/detail?id=304
+UNINITIALIZED READ
+...
+*!_nh_malloc_dbg_impl
+
+UNADDRESSABLE ACCESS
+...
+*!_nh_malloc_dbg_impl
+
+# http://code.google.com/p/drmemory/issues/detail?id=305
+LEAK
+*!free
+*!free
+*!operator new
+...
+*!MiniDumpWriteDump
+
 ############################
 # TODO(timurrrr): investigate these
 UNINITIALIZED READ
@@ -363,6 +384,10 @@ CRYPT32.dll!I_CertSyncStore
 
 ############################
 # Intentional errors in Chromium tests (ToolsSanityTests)
+LEAK
+base_unittests.exe!operator new
+base_unittests.exe!operator new[]
+base_unittests.exe!base::ToolsSanityTest_MemoryLeak_Test::TestBody
 
 UNADDRESSABLE ACCESS
 base_unittests.exe!*ReadValueOutOfArrayBoundsLeft
@@ -403,6 +428,16 @@ base_unittests.exe!*ReadValueOutOfArrayBoundsRight
 base_unittests.exe!*MakeSomeErrors
 base_unittests.exe!base::ToolsSanityTest_AccessesToNewMemory_Test::TestBody
 
+UNADDRESSABLE ACCESS
+base_unittests.exe!*WriteValueOutOfArrayBoundsLeft
+base_unittests.exe!*MakeSomeErrors
+base_unittests.exe!base::ToolsSanityTest_AccessesToNewMemory_Test::TestBody
+
+UNADDRESSABLE ACCESS
+base_unittests.exe!*WriteValueOutOfArrayBoundsRight
+base_unittests.exe!*MakeSomeErrors
+base_unittests.exe!base::ToolsSanityTest_AccessesToNewMemory_Test::TestBody
+
 UNINITIALIZED READ
 base_unittests.exe!*ReadUninitializedValue
 base_unittests.exe!*MakeSomeErrors
@@ -425,13 +460,6 @@ UNINITIALIZED READ
 ...
 *!vp8_*
 
-# http://crbug.com/57910
-POSSIBLE LEAK
-...
-*!*inflateInit*
-*!remoting::DecompressorZlib::InitStream
-*!remoting::DecompressorZlib::Reset
-
 # http://crbug.com/70388
 LEAK
 *!operator new
@@ -445,6 +473,29 @@ WINSPOOL.DRV!OpenPrinterW
 *!PrintDlgExMock
 *!printing::PrintingContextWin::AskUserForSettings
 *!PrintingContextTest_PrintAll_Test::TestBody
+
+# http://crbug.com/73744
+LEAK
+*!operator new
+*!remoting::TraceContext::Get
+*!remoting::TraceContext::tracer
+*!remoting::ScreenRecorder::DoCapture
+*!remoting::ScreenRecorder::DoStart
+
+# http://crbug.com/74413
+LEAK
+*!operator new
+*!net::HttpAuthHandlerFactory::CreateDefault
+
+# http://crbug.com/74417
+LEAK
+*!operator new
+*!disk_cache::BackendImpl::CreateEntryImpl
+
+# http://crbug.com/74425
+LEAK
+*!operator new
+*!disk_cache::BackendImpl::NewEntry
 
 # Empty line at EOF - workaround for
 # http://code.google.com/p/drmemory/issues/detail?id=41

@@ -30,6 +30,7 @@ import optparse
 import os
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -87,7 +88,11 @@ import plugins_info
 import prefs_info
 from pyauto_errors import JSONInterfaceError
 from pyauto_errors import NTPThumbnailNotShownError
+import pyauto_utils
 import simplejson as json  # found in third_party
+
+_HTTP_SERVER = None
+_OPTIONS = None
 
 
 class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
@@ -142,11 +147,81 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
 
     Can be used to prevent launching the browser window by default in case a
     test wants to do some additional setup before firing browser.
+
+    When using the named interface, it connects to an existing browser
+    instance.
     """
+    named_channel_id = _OPTIONS.channel_id
+    if self.IsChromeOS():  # Enable testing interface on ChromeOS
+      if self.get_clear_profile():
+        self.CleanupBrowserProfileOnChromeOS()
+      if not named_channel_id:
+        named_channel_id = self.EnableChromeTestingOnChromeOS()
+    if named_channel_id:
+      self.UseNamedChannelID(named_channel_id)
     self.SetUp()     # Fire browser
 
   def tearDown(self):
     self.TearDown()  # Destroy browser
+
+  @staticmethod
+  def CloseChromeOnChromeOS():
+    """Gracefully exit chrome on ChromeOS."""
+    subprocess.call(['pkill', 'chrome'])
+
+  def EnableChromeTestingOnChromeOS(self):
+    """Enables the named automation interface on chromeos.
+
+    Restarts chrome so that you get a fresh instance.
+    Also sets some testing-friendly flags for chrome.
+
+    Expects suid python to be present in the same dir as pyautolib.py
+    """
+    def _IsRootSuid(path):
+      return os.path.isfile(path) and (os.stat(path).st_mode & stat.S_ISUID)
+    suid_python = os.path.normpath(os.path.join(
+        os.path.dirname(pyautolib.__file__), 'python'))
+    assert _IsRootSuid(suid_python), \
+        'Did not find suid-root python at %s' % suid_python
+    file_path = os.path.join(os.path.dirname(__file__), 'chromeos',
+                             'enable_testing.py')
+    args = [suid_python, file_path]
+    # Pass extra chrome flags for testing
+    for flag in self.ExtraChromeFlagsOnChromeOS():
+      args.append('--extra-chrome-flags=%s' % flag)
+    proc = subprocess.Popen(args, stdout=subprocess.PIPE)
+    automation_channel_path = proc.communicate()[0]
+    automation_channel_path = automation_channel_path.strip()
+    assert len(automation_channel_path), 'Could not enable testing interface'
+    return automation_channel_path
+
+  def ExtraChromeFlagsOnChromeOS(self):
+    """Return a list of extra chrome flags to use with chrome for testing.
+
+    These are flags needed to facilitate testing.
+    """
+    return [
+       '--homepage=about:blank',
+       '--allow-file-access',
+       '--enable-file-cookies',
+       '--dom-automation',
+    ]
+
+  @staticmethod
+  def CleanupBrowserProfileOnChromeOS():
+    """Cleanup browser profile dir on ChromeOS.
+
+    Browser should not be running, or else there will be locked files.
+    """
+    profile_dir = '/home/chronos/user'
+    for item in os.listdir(profile_dir):
+      if item != '.pki':  # Causes stateful partition to get erased
+        pyauto_utils.RemovePath(os.path.join(profile_dir, item))
+
+    chronos_dir = '/home/chronos'
+    for item in os.listdir(chronos_dir):
+      if item != 'user' and not item.startswith('.'):
+        pyauto_utils.RemovePath(os.path.join(chronos_dir, item))
 
   def RestartBrowser(self, clear_profile=True):
     """Restart the browser.
@@ -158,6 +233,15 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
                      Defaults to True, that is restarts browser with a clean
                      profile.
     """
+    if self.IsChromeOS():
+      self.TearDown()
+      if clear_profile:
+        self.CleanupBrowserProfileOnChromeOS()
+      self.CloseChromeOnChromeOS()
+      self.EnableChromeTestingOnChromeOS()
+      self.SetUp()
+      return
+    # Not chromeos
     orig_clear_state = self.get_clear_profile()
     self.CloseBrowserAndServer()
     self.set_clear_profile(clear_profile)
@@ -197,6 +281,16 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     """
     return PyUITest.GetFileURLForPath(
         os.path.join(PyUITest.DataDir(), relative_path))
+
+  @staticmethod
+  def GetHttpURLForDataPath(data_path):
+    """Get http:// url for the given path in the data dir.
+
+    The URL will be usable only after starting the http server.
+    """
+    global _HTTP_SERVER
+    assert _HTTP_SERVER, 'HTTP Server not yet started'
+    return _HTTP_SERVER.GetURL(os.path.join('files', data_path)).spec()
 
   @staticmethod
   def IsMac():
@@ -368,6 +462,8 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
                     'text': text,
                   }
       windex: 0-based window index on which to work. Default: 0 (first window)
+              Use -ve windex if the automation command does not apply to a
+              browser window. example: chromeos login
 
     Returns:
       a dictionary for the output returned by the automation channel.
@@ -1497,9 +1593,9 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
   def SetTheme(self, crx_file_path):
     """Installs the given theme synchronously.
 
-    A theme file is file with .crx suffix, like an extension.
-    This method call waits until theme is installed and will trigger the
-    "theme installed" infobar.
+    A theme file is a file with a .crx suffix, like an extension.  The theme
+    file must be specified with an absolute path.  This method call waits until
+    the theme is installed and will trigger the "theme installed" infobar.
 
     Uses InstallExtension().
 
@@ -1963,25 +2059,67 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     """
     return self._GetNTPInfo()['recently_closed']
 
-  def _GetNTPInfo(self):
-    """Get info about the NTP. This does not retrieve the actual info shown
-    in a particular NTP, but the current data that would be used to display
-    a NTP.
-
-    This includes info about the most visited sites, the recently closed
-    tabs and windows, and the default NTP sites.
-
-    TODO(kkania): Add info about apps.
-
-    Returns:
-      a dictionary containing info about NTP info. See details about the
-      sections in their respective methods.
+  def GetNTPApps(self):
+    """Retrieves information about the apps listed on the NTP.
 
     SAMPLE:
-    { u'most_visited': [ ... ],
-      u'recently_closed': [ ... ]
+    [
+      {
+        u'description': u'Web Store',
+        u'options_url': u'',
+        u'app_launch_index': 2,
+        u'name': u'Chrome Web Store',
+        u'launch_url': u'https://chrome.google.com/webstore',
+        u'icon_small': u'chrome://favicon/https://chrome.google.com/webstore',
+        u'launch_container': 2,
+        u'icon_big': u'chrome://theme/IDR_APP_DEFAULT_ICON',
+        u'id': u'ahfgeienlihckogmohjhadlkjgocpleb',
+        u'launch_type': 1
+      },
+      {
+        u'description': u'A countdown app',
+        u'options_url': u'',
+        u'app_launch_index': 1,
+        u'name': u'Countdown',
+        u'launch_url': (u'chrome-extension://aeabikdlfbfeihglecobdkdflahfgcpd/'
+                        u'launchLocalPath.html'),
+        u'icon_small': (u'chrome://favicon/chrome-extension://'
+                        u'aeabikdlfbfeihglecobdkdflahfgcpd/'
+                        u'launchLocalPath.html'),
+        u'launch_container': 2,
+        u'icon_big': (u'chrome-extension://aeabikdlfbfeihglecobdkdflahfgcpd/'
+                      u'countdown128.png'),
+        u'id': u'aeabikdlfbfeihglecobdkdflahfgcpd',
+        u'launch_type': 1
+      }
+    ]
+
+    Returns:
+      A list of dictionaries in which each dictionary contains the information
+      for a single app that appears in the "Apps" section of the NTP.
+    """
+    return self._GetNTPInfo()['apps']
+
+  def _GetNTPInfo(self):
+    """Get info about the New Tab Page (NTP).
+
+    This does not retrieve the actual info displayed in a particular NTP; it
+    retrieves the current state of internal data that would be used to display
+    an NTP.  This includes info about the apps, the most visited sites,
+    the recently closed tabs and windows, and the default NTP sites.
+
+    SAMPLE:
+    {
+      u'apps': [ ... ],
+      u'most_visited': [ ... ],
+      u'recently_closed': [ ... ],
       u'default_sites': [ ... ]
     }
+
+    Returns:
+      A dictionary containing all the NTP info. See details about the different
+      sections in their respective methods: GetNTPApps(), GetNTPThumbnails(),
+      GetNTPRecentlyClosed(), and GetNTPDefaultSites().
 
     Raises:
       pyauto_errors.JSONInterfaceError if the automation call returns an error.
@@ -1994,6 +2132,18 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
   def _CheckNTPThumbnailShown(self, thumbnail):
     if self.GetNTPThumbnailIndex(thumbnail) == -1:
       raise NTPThumbnailNotShownError()
+
+  def InstallApp(self, app_crx_file_path):
+    """Installs the specified app synchronously.
+
+    An app file is a file with a .crx suffix, like an extension or theme.  The
+    app file must be specified with an absolute path.  This method will not
+    return until the app is installed.
+
+    Returns:
+      True, on success.
+    """
+    return self.InstallExtension(app_crx_file_path, False)
 
   def KillRendererProcess(self, pid):
     """Kills the given renderer process.
@@ -2013,6 +2163,131 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     }
     return self._GetResultFromJSONRequest(cmd_dict)
 
+  def GetNTPThumbnailMode(self):
+    """Identifies whether or not each relevant NTP section is in thumbnail mode.
+
+    Thumbnail mode applies to the Apps section and the Most Visited section.
+    When in thumbnail mode, large thumbnails appear for each item in the
+    section.  When not in thumbnail mode, small icons appear instead.  At any
+    given time, at most one section can be in thumbnail mode in the NTP.
+
+    SAMPLE OUTPUT:
+    {
+      u'apps': True,
+      u'most_visited': False
+    }
+
+    Returns:
+      A dictionary indicating whether or not each relevant section of the NTP
+      is in thumbnail mode.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = {
+        'command': 'GetNTPThumbnailMode',
+    }
+    return self._GetResultFromJSONRequest(cmd_dict)
+
+  def SetNTPThumbnailMode(self, section, turn_on):
+    """Puts or removes a section of the NTP into/from thumbnail (expanded) mode.
+
+    Thumbnail mode applies to the Apps section and the Most Visited section.
+    At any given time, at most one section can be in thumbnail mode in the NTP;
+    when a specified section is put into thumbnail mode, the other section is
+    removed from thumbnail mode.
+
+    Args:
+      section: A string representing the NTP section to use.
+               Possible values:
+                 'apps': the "Apps" section.
+                 'most_visited': the "Most Visited" section.
+      turn_on: A boolean indicating whether to put the section into thumbnail
+               mode (True), or remove the section from thumbnail mode (False).
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = {
+        'command': 'SetNTPThumbnailMode',
+        'section': section,
+        'turn_on': turn_on
+    }
+    return self._GetResultFromJSONRequest(cmd_dict)
+
+  def GetNTPMenuMode(self):
+    """Identifies whether or not each relevant NTP section is in menu mode.
+
+    Menu mode applies to the Apps section, the Most Visited section, and the
+    Recently Closed section.  When in menu mode, the section is almost
+    completely hidden, appearing as a menu at the bottom of the NTP.  When not
+    in menu mode, the section appears with all information in the regular
+    location in the NTP.
+
+    SAMPLE OUTPUT:
+    {
+      u'apps': False,
+      u'most_visited': True,
+      u'recently_closed': True
+    }
+
+    Returns:
+      A dictionary indicating whether or not each relevant section of the NTP
+      is in menu mode.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = {
+        'command': 'GetNTPMenuMode',
+    }
+    return self._GetResultFromJSONRequest(cmd_dict)
+
+  def SetNTPMenuMode(self, section, turn_on):
+    """Puts or removes the specified section of the NTP into/from menu mode.
+
+    Menu mode applies to the Apps section, the Most Visited section, and the
+    Recently Closed section.
+
+    Args:
+      section: A string representing the NTP section to use.
+               Possible values:
+                 'apps': the "Apps" section.
+                 'most_visited': the "Most Visited" section.
+                 'recently_closed': the "Recently Closed" section.
+      turn_on: A boolean indicating whether to put the section into menu mode
+               (True), or remove the section from menu mode (False).
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = {
+        'command': 'SetNTPMenuMode',
+        'section': section,
+        'turn_on': turn_on
+    }
+    return self._GetResultFromJSONRequest(cmd_dict)
+
+  ## ChromeOS section
+
+  def Login(self, username, password):
+    """Login to chromeos.
+
+    Waits until logged in.
+    Should be displaying the login screen to work.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = {
+        'command': 'Login',
+        'username': username,
+        'password': password,
+    }
+    return self._GetResultFromJSONRequest(cmd_dict, windex=-1)
+
+  ## ChromeOS section -- end
+
 
 class PyUITestSuite(pyautolib.PyUITestSuiteBase, unittest.TestSuite):
   """Base TestSuite for PyAuto UI tests."""
@@ -2027,6 +2302,14 @@ class PyUITestSuite(pyautolib.PyUITestSuiteBase, unittest.TestSuite):
     os.environ['PATH'] = browser_dir + os.pathsep + os.environ['PATH']
 
     unittest.TestSuite.__init__(self)
+    cr_source_root = os.path.normpath(os.path.join(
+        os.path.dirname(__file__), os.pardir, os.pardir, os.pardir))
+    self.SetCrSourceRoot(pyautolib.FilePath(cr_source_root))
+
+    # Start http server, if needed.
+    global _OPTIONS
+    if not _OPTIONS.no_http_server:
+      self._StartHTTPServer()
 
   def __del__(self):
     # python unittest module is setup such that the suite gets deleted before
@@ -2035,6 +2318,28 @@ class PyUITestSuite(pyautolib.PyUITestSuiteBase, unittest.TestSuite):
     # suite. Forcibly delete the test cases before the suite.
     del self._tests
     pyautolib.PyUITestSuiteBase.__del__(self)
+
+    global _HTTP_SERVER
+    if _HTTP_SERVER:
+      self._StopHTTPServer()
+
+  def _StartHTTPServer(self):
+    """Start a local file server hosting data files over http://"""
+    global _HTTP_SERVER
+    assert not _HTTP_SERVER, 'HTTP Server already started'
+    http_server = pyautolib.TestServer(pyautolib.TestServer.TYPE_HTTP,
+        pyautolib.FilePath(os.path.join('chrome', 'test', 'data')))
+    assert http_server.Start(), 'Could not start http server'
+    _HTTP_SERVER = http_server
+    logging.debug('Started http server..')
+
+  def _StopHTTPServer(self):
+    """Stop the local http server."""
+    global _HTTP_SERVER
+    assert _HTTP_SERVER, 'HTTP Server not yet started'
+    assert _HTTP_SERVER.Stop(), 'Could not stop http server'
+    _HTTP_SERVER = None
+    logging.debug('Stopped http server..')
 
 
 class _GTestTextTestResult(unittest._TextTestResult):
@@ -2139,8 +2444,16 @@ class Main(object):
     parser.add_option(
         '-L', '--list-tests', action='store_true', default=False,
         help='List all tests, and exit.')
+    parser.add_option(
+        '', '--no-http-server', action='store_true', default=False,
+        help='Do not start an http server to serve files in data dir.')
+    parser.add_option(
+        '', '--channel-id', type='string', default='',
+        help='Name of channel id, if using named interface.')
 
     self._options, self._args = parser.parse_args()
+    global _OPTIONS
+    _OPTIONS = self._options  # export options so other classes can access
 
     # Setup logging - start with defaults
     level = logging.INFO

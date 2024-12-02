@@ -114,15 +114,8 @@ void AfterInitialize(bool unit_test_mode) {
   // Load font files in the resource folder.
   static const char* const fontFileNames[] = {
       "AHEM____.TTF",
-      "WebKitWeightWatcher100.ttf",
-      "WebKitWeightWatcher200.ttf",
-      "WebKitWeightWatcher300.ttf",
-      "WebKitWeightWatcher400.ttf",
-      "WebKitWeightWatcher500.ttf",
-      "WebKitWeightWatcher600.ttf",
-      "WebKitWeightWatcher700.ttf",
-      "WebKitWeightWatcher800.ttf",
-      "WebKitWeightWatcher900.ttf",
+      // We don't register WebKitWeightWather fonts because of
+      // webkit.org/b/50709.
   };
 
   NSString* resources = [[NSBundle mainBundle] resourcePath];
@@ -216,28 +209,10 @@ base::StringPiece GetDataResource(int resource_id) {
     }
     return resize_corner_data;
   }
-
-  case IDR_SEARCH_CANCEL:
-  case IDR_SEARCH_CANCEL_PRESSED:
-  case IDR_SEARCH_MAGNIFIER:
-  case IDR_SEARCH_MAGNIFIER_RESULTS:
-  case IDR_MEDIA_PAUSE_BUTTON:
-  case IDR_MEDIA_PLAY_BUTTON:
-  case IDR_MEDIA_PLAY_BUTTON_DISABLED:
-  case IDR_MEDIA_SOUND_FULL_BUTTON:
-  case IDR_MEDIA_SOUND_NONE_BUTTON:
-  case IDR_MEDIA_SOUND_DISABLED:
-  case IDR_MEDIA_SLIDER_THUMB:
-  case IDR_MEDIA_VOLUME_SLIDER_THUMB: {
-    base::StringPiece res;
-    g_resource_data_pack->GetStringPiece(resource_id, &res);
-    return res;
   }
-
-  default:
-    break;
-  }
-  return base::StringPiece();
+  base::StringPiece res;
+  g_resource_data_pack->GetStringPiece(resource_id, &res);
+  return res;
 }
 
 }  // namespace webkit_glue

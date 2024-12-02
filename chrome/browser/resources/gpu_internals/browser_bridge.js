@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@ cr.define('gpu', function() {
    * @constructor
    */
   function BrowserBridge() {
-    // If we are not running inside DOMUI, output chrome.send messages
+    // If we are not running inside WebUI, output chrome.send messages
     // to the console to help with quick-iteration debugging.
     if (chrome.send === undefined && console.log) {
       chrome.send = function(messageHandler, args) {
@@ -19,10 +19,13 @@ cr.define('gpu', function() {
 
     this.nextRequestId_ = 0;
     this.pendingCallbacks_ = [];
+
+    // Tell c++ code that we are ready to receive GPU Info.
+    chrome.send('browserBridgeInitialized');
   }
 
   BrowserBridge.prototype = {
-    __proto__: Object.prototype,
+    __proto__: cr.EventTarget.prototype,
 
     /**
      * Sends a message to the browser with specified args. The
@@ -50,6 +53,21 @@ cr.define('gpu', function() {
       var callback = this.pendingCallbacks_[requestId];
       callback(args);
       delete this.pendingCallbacks_[requestId];
+    },
+
+    /**
+     * Get gpuInfo data.
+     */
+    get gpuInfo() {
+      return this.gpuInfo_;
+    },
+
+    /**
+     * Called from gpu c++ code when GPU Info is updated.
+     */
+    onGpuInfoUpdate: function(gpuInfo) {
+      this.gpuInfo_ = gpuInfo;
+      cr.dispatchSimpleEvent(this, 'gpuInfoUpdate');
     }
   };
 

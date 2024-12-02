@@ -1,5 +1,5 @@
 #!/usr/bin/python
-# Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+# Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -93,19 +93,15 @@ class ChromeTests:
       exe = exe + '.exe'
 
     if not self._options.build_dir:
-      if common.IsWine():
-        self._options.build_dir = os.path.join(
-            self._source_dir, "chrome", "Debug")
+      dirs = [
+        os.path.join(self._source_dir, "xcodebuild", "Debug"),
+        os.path.join(self._source_dir, "out", "Debug"),
+        os.path.join(self._source_dir, "build", "Debug"),
+      ]
+      if exe:
+        self._options.build_dir = FindDirContainingNewestFile(dirs, exe)
       else:
-        dirs = [
-          os.path.join(self._source_dir, "xcodebuild", "Debug"),
-          os.path.join(self._source_dir, "out", "Debug"),
-          os.path.join(self._source_dir, "build", "Debug"),
-        ]
-        if exe:
-          self._options.build_dir = FindDirContainingNewestFile(dirs, exe)
-        else:
-          self._options.build_dir = FindNewestDir(dirs)
+        self._options.build_dir = FindNewestDir(dirs)
 
     cmd = list(self._command_preamble)
 
@@ -130,9 +126,6 @@ class ChromeTests:
       for arg in valgrind_test_args:
         cmd.append(arg)
     if exe:
-      if common.IsWine():
-        cmd.append(os.environ.get('WINE'))
-        exe = exe + '.exe'
       cmd.append(os.path.join(self._options.build_dir, exe))
       # Valgrind runs tests slowly, so slow tests hurt more; show elapased time
       # so we can find the slowpokes.
@@ -161,11 +154,16 @@ class ChromeTests:
         os.path.join(gtest_files_dir, name + ".gtest_%s.txt" % platform_suffix),
         os.path.join(gtest_files_dir, name + ".gtest-%s_%s.txt" % \
             (tool.ToolName(), platform_suffix))]
+    logging.info("Reading gtest exclude filter files:")
     for filename in gtest_filter_files:
+      # strip the leading absolute path (may be very long on the bot)
+      # and the following / or \.
+      readable_filename = filename.replace("\\", "/")  # '\' on Windows
+      readable_filename = readable_filename.replace(self._source_dir, "")[1:]
       if not os.path.exists(filename):
-        logging.info("gtest filter file %s not found - skipping" % filename)
+        logging.info("  \"%s\" - not found" % readable_filename)
         continue
-      logging.info("Reading gtest filters from %s" % filename)
+      logging.info("  \"%s\" - OK" % readable_filename)
       f = open(filename, 'r')
       for line in f.readlines():
         if line.startswith("#") or line.startswith("//") or line.isspace():
@@ -269,7 +267,9 @@ class ChromeTests:
   def TestGfx(self):
     return self.SimpleTest("chrome", "gfx_unittests")
 
-  UI_VALGRIND_ARGS = ["--timeout=180000", "--trace_children", "--indirect"]
+  # Valgrind timeouts are in seconds.
+  UI_VALGRIND_ARGS = ["--timeout=7200", "--trace_children", "--indirect"]
+  # UI test timeouts are in milliseconds.
   UI_TEST_ARGS = ["--ui-test-timeout=240000",
                   "--ui-test-action-timeout=120000",
                   "--ui-test-action-max-timeout=280000",
@@ -289,7 +289,7 @@ class ChromeTests:
     return self.SimpleTest("chrome", "interactive_ui_tests",
                            valgrind_test_args=self.UI_VALGRIND_ARGS,
                            cmd_args=(self.UI_TEST_ARGS +
-                                     ["--test-terminate-timeout=240000"]))
+                                     ["--test-terminate-timeout=300000"]))
 
   def TestReliability(self):
     script_dir = path_utils.ScriptDir()
@@ -306,6 +306,11 @@ class ChromeTests:
 
   def TestSync(self):
     return self.SimpleTest("chrome", "sync_unit_tests")
+
+  def TestSyncIntegration(self):
+    return self.SimpleTest("chrome", "sync_integration_tests",
+                           valgrind_test_args=self.UI_VALGRIND_ARGS,
+                           cmd_args=(["--test-terminate-timeout=900000"]))
 
   def TestLayoutChunk(self, chunk_num, chunk_size):
     # Run tests [chunk_num*chunk_size .. (chunk_num+1)*chunk_size) from the
@@ -428,6 +433,8 @@ class ChromeTests:
     "safe_browsing": TestSafeBrowsing, "safe_browsing_tests": TestSafeBrowsing,
     "startup": TestStartup,      "startup_tests": TestStartup,
     "sync": TestSync,            "sync_unit_tests": TestSync,
+    "sync_integration_tests": TestSyncIntegration,
+    "sync_integration": TestSyncIntegration,
     "test_shell": TestTestShell, "test_shell_tests": TestTestShell,
     "ui": TestUI,                "ui_tests": TestUI,
     "unit": TestUnit,            "unit_tests": TestUnit,

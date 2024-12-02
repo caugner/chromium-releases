@@ -11,19 +11,19 @@
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_model.h"
 #include "chrome/browser/search_engines/template_url_prepopulate_data.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
-#include "gfx/canvas.h"
+#include "content/browser/tab_contents/tab_contents.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "grit/theme_resources.h"
 #include "ui/base/message_box_flags.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/canvas.h"
 #include "views/controls/button/native_button.h"
 #include "views/controls/image_view.h"
 #include "views/controls/label.h"
-#include "views/grid_layout.h"
-#include "views/standard_layout.h"
+#include "views/layout/grid_layout.h"
+#include "views/layout/layout_constants.h"
 #include "views/window/dialog_client_view.h"
 #include "views/window/window.h"
 
@@ -124,7 +124,7 @@ void DefaultSearchView::Show(TabContents* tab_contents,
 DefaultSearchView::~DefaultSearchView() {
 }
 
-void DefaultSearchView::Paint(gfx::Canvas* canvas) {
+void DefaultSearchView::OnPaint(gfx::Canvas* canvas) {
   // Fill in behind the background image with the standard gray toolbar color.
   canvas->FillRectInt(SkColorSetRGB(237, 238, 237), 0, 0, width(),
                       background_image_->height());
@@ -218,7 +218,7 @@ void DefaultSearchView::SetupControls(PrefService* prefs) {
 
   // Now set-up the dialog contents.
   GridLayout* layout = new views::GridLayout(this);
-  layout->SetInsets(0, 0, kPanelVertMargin, 0);
+  layout->SetInsets(0, 0, views::kPanelVertMargin, 0);
   SetLayoutManager(layout);
 
   // Add a column set that spans the whole dialog.
@@ -233,22 +233,23 @@ void DefaultSearchView::SetupControls(PrefService* prefs) {
   // Add a column set that spans the whole dialog but obeying padding.
   ColumnSet* padded_whole_dialog_column_set =
       layout->AddColumnSet(kPaddedWholeDialogViewSetId);
-  padded_whole_dialog_column_set->AddPaddingColumn(1, kPanelVertMargin);
+  padded_whole_dialog_column_set->AddPaddingColumn(1, views::kPanelVertMargin);
   padded_whole_dialog_column_set->AddColumn(
       GridLayout::LEADING, GridLayout::LEADING,
       1, GridLayout::USE_PREF, 0, 0);
-  padded_whole_dialog_column_set->AddPaddingColumn(1, kPanelVertMargin);
+  padded_whole_dialog_column_set->AddPaddingColumn(1, views::kPanelVertMargin);
 
   // Add a column set for the search engine choices.
   ColumnSet* choices_column_set = layout->AddColumnSet(kChoicesViewSetId);
-  choices_column_set->AddPaddingColumn(1, kPanelVertMargin);
+  choices_column_set->AddPaddingColumn(1, views::kPanelVertMargin);
   choices_column_set->AddColumn(GridLayout::CENTER, GridLayout::CENTER,
                                 1, GridLayout::USE_PREF, 0, 0);
-  choices_column_set->AddPaddingColumn(1, kRelatedControlHorizontalSpacing);
+  choices_column_set->AddPaddingColumn(
+      1, views::kRelatedControlHorizontalSpacing);
   choices_column_set->AddColumn(GridLayout::CENTER, GridLayout::CENTER,
                                 1, GridLayout::USE_PREF, 0, 0);
   choices_column_set->LinkColumnSizes(0, 2, -1);
-  choices_column_set->AddPaddingColumn(1, kPanelVertMargin);
+  choices_column_set->AddPaddingColumn(1, views::kPanelVertMargin);
 
   // Add the "search box" image.
   layout->StartRow(0, kWholeDialogViewSetId);
@@ -263,7 +264,7 @@ void DefaultSearchView::SetupControls(PrefService* prefs) {
 
   // Add text informing the user about the requested default change.
   layout->StartRowWithPadding(0, kPaddedWholeDialogViewSetId,
-                              1, kLabelToControlVerticalSpacing);
+                              1, views::kLabelToControlVerticalSpacing);
   Label* summary_label = new Label(UTF16ToWide(l10n_util::GetStringFUTF16(
       IDS_DEFAULT_SEARCH_SUMMARY,
       WideToUTF16(proposed_short_name))));
@@ -275,19 +276,19 @@ void DefaultSearchView::SetupControls(PrefService* prefs) {
 
   // Add the labels for the tops of the choices.
   layout->StartRowWithPadding(0, kChoicesViewSetId,
-                              0, kRelatedControlVerticalSpacing);
+                              0, views::kRelatedControlVerticalSpacing);
   layout->AddView(CreateProviderLabel(IDS_DEFAULT_SEARCH_LABEL_CURRENT));
   layout->AddView(CreateProviderLabel(IDS_DEFAULT_SEARCH_LABEL_PROPOSED));
 
   // Add the logos.
   layout->StartRowWithPadding(0, kChoicesViewSetId,
-                              0, kRelatedControlVerticalSpacing);
+                              0, views::kRelatedControlVerticalSpacing);
   layout->AddView(CreateProviderLogo(default_logo_id, default_short_name));
   layout->AddView(CreateProviderLogo(proposed_logo_id, proposed_short_name));
 
   // Add the buttons.
   layout->StartRowWithPadding(0, kChoicesViewSetId,
-                              0, kRelatedControlVerticalSpacing);
+                              0, views::kRelatedControlVerticalSpacing);
   default_provider_button_ = CreateProviderChoiceButton(
       this,
       IDS_DEFAULT_SEARCH_PROMPT_CURRENT,

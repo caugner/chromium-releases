@@ -5,7 +5,6 @@
 #include "chrome/browser/printing/print_preview_tab_controller.h"
 
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
@@ -14,6 +13,7 @@
 #include "chrome/common/notification_details.h"
 #include "chrome/common/notification_source.h"
 #include "chrome/common/url_constants.h"
+#include "content/browser/tab_contents/tab_contents.h"
 
 namespace printing {
 
@@ -42,6 +42,22 @@ TabContents* PrintPreviewTabController::GetOrCreatePreviewTab(
     return preview_tab;
   }
   return CreatePrintPreviewTab(initiator_tab, browser_window_id);
+}
+
+TabContents* PrintPreviewTabController::GetPrintPreviewForTab(
+    TabContents* tab) const {
+  PrintPreviewTabMap::const_iterator it = preview_tab_map_.find(tab);
+  if (it != preview_tab_map_.end())
+    return tab;
+
+  for (it = preview_tab_map_.begin(); it != preview_tab_map_.end(); ++it) {
+    // If |tab| is an initiator tab.
+    if (tab == it->second) {
+      // Return the associated preview tab.
+      return it->first;
+    }
+  }
+  return NULL;
 }
 
 void PrintPreviewTabController::Observe(NotificationType type,
@@ -135,19 +151,6 @@ TabContents* PrintPreviewTabController::GetInitiatorTab(
   PrintPreviewTabMap::iterator it = preview_tab_map_.find(preview_tab);
   if (it != preview_tab_map_.end())
     return preview_tab_map_[preview_tab];
-  return NULL;
-}
-
-TabContents* PrintPreviewTabController::GetPrintPreviewForTab(
-    TabContents* tab) {
-  PrintPreviewTabMap::iterator it = preview_tab_map_.find(tab);
-  if (it != preview_tab_map_.end())
-    return tab;
-
-  for (it = preview_tab_map_.begin(); it != preview_tab_map_.end(); ++it) {
-    if (it->second == tab)
-      return it->first;
-  }
   return NULL;
 }
 

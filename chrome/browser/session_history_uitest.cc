@@ -91,7 +91,7 @@ TEST_F(SessionHistoryTest, MAYBE_BasicBackForward) {
 
   // about:blank should be loaded first.
   ASSERT_FALSE(tab_->GoBack());
-  EXPECT_EQ(L"", GetTabTitle());
+  EXPECT_EQ(L"about:blank", GetTabTitle());
 
   ASSERT_TRUE(tab_->NavigateToURL(
       test_server_.GetURL("files/session_history/bot1.html")));
@@ -132,10 +132,10 @@ TEST_F(SessionHistoryTest, MAYBE_BasicBackForward) {
   EXPECT_EQ(L"bot1", GetTabTitle());
 
   ASSERT_TRUE(tab_->GoBack());
-  EXPECT_EQ(L"", GetTabTitle());
+  EXPECT_EQ(L"about:blank", GetTabTitle());
 
   ASSERT_FALSE(tab_->GoBack());
-  EXPECT_EQ(L"", GetTabTitle());
+  EXPECT_EQ(L"about:blank", GetTabTitle());
 
   ASSERT_TRUE(tab_->GoForward());
   EXPECT_EQ(L"bot1", GetTabTitle());
@@ -158,7 +158,7 @@ TEST_F(SessionHistoryTest, MAYBE_FrameBackForward) {
   // about:blank should be loaded first.
   GURL home(homepage());
   ASSERT_FALSE(tab_->GoBack());
-  EXPECT_EQ(L"", GetTabTitle());
+  EXPECT_EQ(L"about:blank", GetTabTitle());
   EXPECT_EQ(home, GetTabURL());
 
   GURL frames(test_server_.GetURL("files/session_history/frames.html"));
@@ -185,7 +185,7 @@ TEST_F(SessionHistoryTest, MAYBE_FrameBackForward) {
   EXPECT_EQ(frames, GetTabURL());
 
   ASSERT_TRUE(tab_->GoBack());
-  EXPECT_EQ(L"", GetTabTitle());
+  EXPECT_EQ(L"about:blank", GetTabTitle());
   EXPECT_EQ(home, GetTabURL());
 
   ASSERT_TRUE(tab_->GoForward());
@@ -215,15 +215,9 @@ TEST_F(SessionHistoryTest, MAYBE_FrameBackForward) {
   EXPECT_EQ(frames, GetTabURL());
 }
 
-#if defined(OS_WIN)
 // See http://crbug.com/61619
-#define MAYBE_FrameFormBackForward FLAKY_FrameFormBackForward
-#else
-#define MAYBE_FrameFormBackForward FrameFormBackForward
-#endif
-
 // Test that back/forward preserves POST data and document state in subframes.
-TEST_F(SessionHistoryTest, MAYBE_FrameFormBackForward) {
+TEST_F(SessionHistoryTest, FLAKY_FrameFormBackForward) {
   ASSERT_TRUE(test_server_.Start());
 
   // about:blank should be loaded first.
@@ -340,7 +334,7 @@ TEST_F(SessionHistoryTest, MAYBE_FragmentBackForward) {
 
   // about:blank should be loaded first.
   ASSERT_FALSE(tab_->GoBack());
-  EXPECT_EQ(L"", GetTabTitle());
+  EXPECT_EQ(L"about:blank", GetTabTitle());
 
   GURL fragment(test_server_.GetURL("files/session_history/fragment.html"));
   ASSERT_TRUE(tab_->NavigateToURL(fragment));
@@ -411,7 +405,7 @@ TEST_F(SessionHistoryTest, FLAKY_JavascriptHistory) {
 
   // about:blank should be loaded first.
   ASSERT_FALSE(tab_->GoBack());
-  EXPECT_EQ(L"", GetTabTitle());
+  EXPECT_EQ(L"about:blank", GetTabTitle());
 
   ASSERT_TRUE(tab_->NavigateToURL(
       test_server_.GetURL("files/session_history/bot1.html")));
@@ -445,10 +439,10 @@ TEST_F(SessionHistoryTest, FLAKY_JavascriptHistory) {
   // history is [blank, bot1, bot2, *bot3]
 
   JavascriptGo("-3");
-  EXPECT_EQ(L"", GetTabTitle());
+  EXPECT_EQ(L"about:blank", GetTabTitle());
 
   ASSERT_FALSE(tab_->GoBack());
-  EXPECT_EQ(L"", GetTabTitle());
+  EXPECT_EQ(L"about:blank", GetTabTitle());
 
   JavascriptGo("1");
   EXPECT_EQ(L"bot1", GetTabTitle());
@@ -466,10 +460,10 @@ TEST_F(SessionHistoryTest, FLAKY_JavascriptHistory) {
   EXPECT_EQ(L"bot1", GetTabTitle());
 
   JavascriptGo("-1");
-  EXPECT_EQ(L"", GetTabTitle());
+  EXPECT_EQ(L"about:blank", GetTabTitle());
 
   ASSERT_FALSE(tab_->GoBack());
-  EXPECT_EQ(L"", GetTabTitle());
+  EXPECT_EQ(L"about:blank", GetTabTitle());
 
   JavascriptGo("1");
   EXPECT_EQ(L"bot1", GetTabTitle());
@@ -500,7 +494,7 @@ TEST_F(SessionHistoryTest, FAILS_LocationReplace) {
 TEST_F(SessionHistoryTest, FLAKY_HistorySearchXSS) {
   // about:blank should be loaded first.
   ASSERT_FALSE(tab_->GoBack());
-  EXPECT_EQ(L"", GetTabTitle());
+  EXPECT_EQ(L"about:blank", GetTabTitle());
 
   GURL url(std::string(chrome::kChromeUIHistoryURL) +
       "#q=%3Cimg%20src%3Dx%3Ax%20onerror%3D%22document.title%3D'XSS'%22%3E");

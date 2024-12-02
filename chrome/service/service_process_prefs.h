@@ -18,6 +18,7 @@ class ServiceProcessPrefs {
   // file I/O can be done.
   ServiceProcessPrefs(const FilePath& pref_filename,
                       base::MessageLoopProxy* file_message_loop_proxy);
+  ~ServiceProcessPrefs();
 
   // Read preferences from the backing file.
   void ReadPrefs();
@@ -41,7 +42,7 @@ class ServiceProcessPrefs {
   void GetDictionary(const std::string& key, DictionaryValue** result);
 
  private:
-  JsonPrefStore prefs_;
+  scoped_refptr<JsonPrefStore> prefs_;
 
   DISALLOW_COPY_AND_ASSIGN(ServiceProcessPrefs);
 };

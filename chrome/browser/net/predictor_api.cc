@@ -15,11 +15,11 @@
 #include "base/values.h"
 #include "base/synchronization/waitable_event.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/net/preconnect.h"
 #include "chrome/browser/net/referrer.h"
 #include "chrome/browser/net/url_info.h"
+#include "chrome/browser/prefs/browser_prefs.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
 #include "chrome/browser/profiles/profile.h"
@@ -27,6 +27,7 @@
 #include "chrome/common/notification_registrar.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
+#include "content/browser/browser_thread.h"
 #include "net/base/host_resolver.h"
 #include "net/base/host_resolver_impl.h"
 
@@ -95,6 +96,9 @@ class InitialObserver {
   // Persist the current first_navigations_ for storage in a list.
   void GetInitialDnsResolutionList(ListValue* startup_list);
 
+  // Discards all initial loading history.
+  void DiscardInitialNavigationHistory() { first_navigations_.clear(); }
+
  private:
   // List of the first N URL resolutions observed in this run.
   FirstNavigations first_navigations_;
@@ -131,6 +135,12 @@ void OnTheRecord(bool enable) {
   on_the_record_switch = enable;
   if (on_the_record_switch)
     g_browser_process->io_thread()->ChangedToOnTheRecord();
+}
+
+void DiscardInitialNavigationHistory() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  if (g_initial_observer)
+    g_initial_observer->DiscardInitialNavigationHistory();
 }
 
 void RegisterUserPrefs(PrefService* user_prefs) {
@@ -394,16 +404,15 @@ static void InitNetworkPredictor(TimeDelta max_dns_queue_delay,
           prefs::kDnsPrefetchingHostReferralList)->DeepCopy());
 
   // Remove obsolete preferences from local state if necessary.
-  int dns_prefs_version =
-      user_prefs->GetInteger(prefs::kMultipleProfilePrefMigration);
-  if (dns_prefs_version < 1) {
-    // These prefs only need to be registered if they need to be cleared from
-    // local state.
+  int current_version =
+      local_state->GetInteger(prefs::kMultipleProfilePrefMigration);
+  if ((current_version & browser::DNS_PREFS) == 0) {
     local_state->RegisterListPref(prefs::kDnsStartupPrefetchList);
     local_state->RegisterListPref(prefs::kDnsHostReferralList);
     local_state->ClearPref(prefs::kDnsStartupPrefetchList);
     local_state->ClearPref(prefs::kDnsHostReferralList);
-    user_prefs->SetInteger(prefs::kMultipleProfilePrefMigration, 1);
+    local_state->SetInteger(prefs::kMultipleProfilePrefMigration,
+        current_version | browser::DNS_PREFS);
   }
 
   g_browser_process->io_thread()->InitNetworkPredictor(

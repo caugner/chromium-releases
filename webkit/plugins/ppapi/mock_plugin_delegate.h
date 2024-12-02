@@ -57,30 +57,18 @@ class MockPluginDelegate : public PluginDelegate {
   virtual bool ReadDirectory(
       const FilePath& directory_path,
       fileapi::FileSystemCallbackDispatcher* dispatcher);
-  virtual base::PlatformFileError OpenModuleLocalFile(
-      const std::string& module_name,
-      const FilePath& path,
-      int flags,
-      base::PlatformFile* file);
-  virtual base::PlatformFileError RenameModuleLocalFile(
-      const std::string& module_name,
-      const FilePath& path_from,
-      const FilePath& path_to);
-  virtual base::PlatformFileError DeleteModuleLocalFileOrDir(
-      const std::string& module_name,
-      const FilePath& path,
-      bool recursive);
-  virtual base::PlatformFileError CreateModuleLocalDir(
-      const std::string& module_name,
-      const FilePath& path);
-  virtual base::PlatformFileError QueryModuleLocalFile(
-      const std::string& module_name,
-      const FilePath& path,
-      base::PlatformFileInfo* info);
-  virtual base::PlatformFileError GetModuleLocalDirContents(
-      const std::string& module_name,
-      const FilePath& path,
-      DirContents* contents);
+  virtual base::PlatformFileError OpenFile(const PepperFilePath& path,
+                                           int flags,
+                                           base::PlatformFile* file);
+  virtual base::PlatformFileError RenameFile(const PepperFilePath& from_path,
+                                             const PepperFilePath& to_path);
+  virtual base::PlatformFileError DeleteFileOrDir(const PepperFilePath& path,
+                                                  bool recursive);
+  virtual base::PlatformFileError CreateDir(const PepperFilePath& path);
+  virtual base::PlatformFileError QueryFile(const PepperFilePath& path,
+                                            base::PlatformFileInfo* info);
+  virtual base::PlatformFileError GetDirContents(const PepperFilePath& path,
+                                                 DirContents* contents);
   virtual scoped_refptr<base::MessageLoopProxy>
       GetFileThreadMessageLoopProxy();
   virtual int32_t ConnectTcp(
@@ -90,8 +78,12 @@ class MockPluginDelegate : public PluginDelegate {
   virtual int32_t ConnectTcpAddress(
       webkit::ppapi::PPB_Flash_NetConnector_Impl* connector,
       const struct PP_Flash_NetAddress* addr);
+  virtual int32_t ShowContextMenu(
+      webkit::ppapi::PPB_Flash_Menu_Impl* menu,
+      const gfx::Point& position);
   virtual FullscreenContainer* CreateFullscreenContainer(
       PluginInstance* instance);
+  virtual gfx::Size GetScreenSize();
   virtual std::string GetDefaultEncoding();
   virtual void ZoomLimitsChanged(double minimum_factor,
                                  double maximum_factor);
@@ -100,6 +92,7 @@ class MockPluginDelegate : public PluginDelegate {
   virtual void DidStopLoading();
   virtual void SetContentRestriction(int restrictions);
   virtual void HasUnsupportedFeature();
+  virtual P2PSocketDispatcher* GetP2PSocketDispatcher();
 };
 
 }  // namespace ppapi

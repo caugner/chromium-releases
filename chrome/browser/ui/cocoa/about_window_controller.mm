@@ -11,10 +11,10 @@
 #include "base/sys_string_conversions.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_window.h"
+#import "chrome/browser/cocoa/keystone_glue.h"
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/platform_util.h"
 #import "chrome/browser/ui/cocoa/background_tile_view.h"
-#import "chrome/browser/ui/cocoa/keystone_glue.h"
 #include "chrome/browser/ui/cocoa/restart_browser.h"
 #include "chrome/common/url_constants.h"
 #include "grit/chromium_strings.h"
@@ -25,6 +25,7 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/image.h"
 
 namespace {
 

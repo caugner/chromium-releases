@@ -15,12 +15,13 @@
 
 #include "base/basictypes.h"
 #include "base/message_loop.h"
+#include "base/scoped_ptr.h"
 #include "base/threading/non_thread_safe.h"
 #include "base/timer.h"
-#include "base/scoped_ptr.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/download/download_status_updater.h"
 #include "chrome/browser/prefs/pref_change_registrar.h"
+#include "chrome/browser/prefs/pref_member.h"
 #include "chrome/browser/tab_contents/thumbnail_generator.h"
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
@@ -28,7 +29,8 @@
 
 class ChromeNetLog;
 class CommandLine;
-class DebuggerWrapper;
+class DevToolsHttpProtocolHandler;
+class DevToolsProtocolHandler;
 class FilePath;
 class NotificationService;
 class PluginDataRemover;
@@ -55,18 +57,23 @@ class BrowserProcessImpl : public BrowserProcess,
 #if defined(USE_X11)
   virtual base::Thread* background_x11_thread();
 #endif
+  virtual WatchDogThread* watchdog_thread();
   virtual ProfileManager* profile_manager();
   virtual PrefService* local_state();
   virtual DevToolsManager* devtools_manager();
   virtual SidebarManager* sidebar_manager();
   virtual ui::Clipboard* clipboard();
+  virtual ExtensionEventRouterForwarder* extension_event_router_forwarder();
   virtual NotificationUIManager* notification_ui_manager();
-  virtual policy::ConfigurationPolicyProviderKeeper*
-      configuration_policy_provider_keeper();
+  virtual policy::BrowserPolicyConnector* browser_policy_connector();
   virtual IconManager* icon_manager();
   virtual ThumbnailGenerator* GetThumbnailGenerator();
   virtual AutomationProviderList* InitAutomationProviderList();
-  virtual void InitDebuggerWrapper(int port, bool useHttp);
+  virtual void InitDevToolsHttpProtocolHandler(
+      const std::string& ip,
+      int port,
+      const std::string& frontend_url);
+  virtual void InitDevToolsLegacyProtocolHandler(int port);
   virtual unsigned int AddRefModule();
   virtual unsigned int ReleaseModule();
   virtual bool IsShuttingDown();
@@ -81,6 +88,7 @@ class BrowserProcessImpl : public BrowserProcess,
   virtual TabCloseableStateWatcher* tab_closeable_state_watcher();
   virtual safe_browsing::ClientSideDetectionService*
       safe_browsing_detection_service();
+  virtual bool plugin_finder_disabled() const;
   virtual void CheckForInspectorFiles();
 
   // NotificationObserver methods
@@ -93,6 +101,8 @@ class BrowserProcessImpl : public BrowserProcess,
 #endif
 
   virtual bool have_inspector_files() const;
+
+  virtual ChromeNetLog* net_log();
 
 #if defined(IPC_MESSAGE_LOG_ENABLED)
   virtual void SetIPCLoggingEnabled(bool enable);
@@ -115,13 +125,13 @@ class BrowserProcessImpl : public BrowserProcess,
   void CreateDBThread();
   void CreateProcessLauncherThread();
   void CreateCacheThread();
+  void CreateWatchdogThread();
   void CreateTemplateURLModel();
   void CreateProfileManager();
   void CreateWebDataService();
   void CreateLocalState();
   void CreateViewedPageTracker();
   void CreateIconManager();
-  void CreateDebuggerWrapper(int port, bool useHttp);
   void CreateDevToolsManager();
   void CreateSidebarManager();
   void CreateGoogleURLTracker();
@@ -163,6 +173,9 @@ class BrowserProcessImpl : public BrowserProcess,
   bool created_cache_thread_;
   scoped_ptr<base::Thread> cache_thread_;
 
+  bool created_watchdog_thread_;
+  scoped_ptr<WatchDogThread> watchdog_thread_;
+
   bool created_profile_manager_;
   scoped_ptr<ProfileManager> profile_manager_;
 
@@ -172,8 +185,12 @@ class BrowserProcessImpl : public BrowserProcess,
   bool created_icon_manager_;
   scoped_ptr<IconManager> icon_manager_;
 
-  bool created_debugger_wrapper_;
-  scoped_refptr<DebuggerWrapper> debugger_wrapper_;
+  scoped_refptr<ExtensionEventRouterForwarder>
+      extension_event_router_forwarder_;
+
+  scoped_refptr<DevToolsHttpProtocolHandler> devtools_http_handler_;
+
+  scoped_refptr<DevToolsProtocolHandler> devtools_legacy_handler_;
 
   bool created_devtools_manager_;
   scoped_refptr<DevToolsManager> devtools_manager_;
@@ -181,9 +198,8 @@ class BrowserProcessImpl : public BrowserProcess,
   bool created_sidebar_manager_;
   scoped_refptr<SidebarManager> sidebar_manager_;
 
-  bool created_configuration_policy_provider_keeper_;
-  scoped_ptr<policy::ConfigurationPolicyProviderKeeper>
-      configuration_policy_provider_keeper_;
+  bool created_browser_policy_connector_;
+  scoped_ptr<policy::BrowserPolicyConnector> browser_policy_connector_;
 
   scoped_refptr<printing::PrintPreviewTabController>
       print_preview_tab_controller_;
@@ -245,6 +261,9 @@ class BrowserProcessImpl : public BrowserProcess,
 
   NotificationRegistrar notification_registrar_;
   scoped_refptr<PluginDataRemover> plugin_data_remover_;
+
+  // Monitors the state of the 'DisablePluginFinder' policy.
+  BooleanPrefMember plugin_finder_disabled_pref_;
 
 #if (defined(OS_WIN) || defined(OS_LINUX)) && !defined(OS_CHROMEOS)
   base::RepeatingTimer<BrowserProcessImpl> autoupdate_timer_;

@@ -54,10 +54,28 @@
             'IgnoreAllDefaultLibraries': 'true',
             'OptimizeForWindows98': '1',
             'SubSystem': '2',     # Set /SUBSYSTEM:WINDOWS
-            'AdditionalDependencies': [
-              '"$(VCInstallDir)crt\\src\\intel\\mt_lib\\memset.obj"',
-              '"$(VCInstallDir)crt\\src\\intel\\mt_lib\\P4_memset.obj"',
-              'shlwapi.lib',
+            'conditions': [
+              ['MSVS_VERSION=="2010"', {
+                'AdditionalDependencies': [
+                  # These two object files are included in Visual Studio 2008
+                  # but not 2010.
+                  # TODO(bradnelson):
+                  # http://code.google.com/p/chromium/issues/detail?id=72885
+                  '"$(VCInstallDir)..\\..\\Microsoft Visual Studio 9.0\\VC\\'
+                      'crt\\src\\intel\\mt_lib\\memset.obj"',
+                  '"$(VCInstallDir)..\\..\\Microsoft Visual Studio 9.0\\VC\\'
+                      'crt\\src\\intel\\mt_lib\\P4_memset.obj"',
+                  'shlwapi.lib',
+                  'setupapi.lib',
+                ],
+              },{
+                'AdditionalDependencies': [
+                  '"$(VCInstallDir)crt\\src\\intel\\mt_lib\\memset.obj"',
+                  '"$(VCInstallDir)crt\\src\\intel\\mt_lib\\P4_memset.obj"',
+                  'shlwapi.lib',
+                  'setupapi.lib',
+                ],
+              }],
             ],
           },
           'VCManifestTool': {
@@ -179,7 +197,7 @@
                 '<(PRODUCT_DIR)/nacl64.dll',
                 '<(PRODUCT_DIR)/ppGoogleNaClPluginChrome.dll',
                 '<(PRODUCT_DIR)/locales/en-US.dll',
-                '<(PRODUCT_DIR)/icudt42.dll',
+                '<(PRODUCT_DIR)/icudt46.dll',
               ],
               'outputs': [
                 'xxx.out',

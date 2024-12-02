@@ -7,15 +7,22 @@
 #include "base/time.h"
 #include "net/url_request/url_request_context.h"
 #include "webkit/fileapi/file_system_callback_dispatcher.h"
+#include "webkit/fileapi/file_system_context.h"
+#include "webkit/fileapi/file_system_file_util_proxy.h"
+#include "webkit/fileapi/file_system_operation_context.h"
+#include "webkit/fileapi/file_system_path_manager.h"
 #include "webkit/fileapi/file_writer_delegate.h"
 
 namespace fileapi {
 
 FileSystemOperation::FileSystemOperation(
     FileSystemCallbackDispatcher* dispatcher,
-    scoped_refptr<base::MessageLoopProxy> proxy)
+    scoped_refptr<base::MessageLoopProxy> proxy,
+    FileSystemContext* file_system_context)
     : proxy_(proxy),
       dispatcher_(dispatcher),
+      file_system_context_(file_system_context),
+      file_system_operation_context_(FileSystemFileUtil::GetInstance()),
       callback_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
   DCHECK(dispatcher);
 #ifndef NDEBUG
@@ -25,7 +32,23 @@ FileSystemOperation::FileSystemOperation(
 
 FileSystemOperation::~FileSystemOperation() {
   if (file_writer_delegate_.get())
-    base::FileUtilProxy::Close(proxy_, file_writer_delegate_->file(), NULL);
+    FileSystemFileUtilProxy::Close(
+        file_system_operation_context_,
+        proxy_, file_writer_delegate_->file(), NULL);
+}
+
+void FileSystemOperation::OpenFileSystem(
+    const GURL& origin_url, fileapi::FileSystemType type, bool create) {
+#ifndef NDEBUG
+  DCHECK(kOperationNone == pending_operation_);
+  pending_operation_ = static_cast<FileSystemOperation::OperationType>(
+      kOperationOpenFileSystem);
+#endif
+
+  DCHECK(file_system_context_.get());
+  file_system_context_->path_manager()->GetFileSystemRootPath(
+      origin_url, type, create,
+      callback_factory_.NewCallback(&FileSystemOperation::DidGetRootPath));
 }
 
 void FileSystemOperation::CreateFile(const FilePath& path,
@@ -35,10 +58,15 @@ void FileSystemOperation::CreateFile(const FilePath& path,
   pending_operation_ = kOperationCreateFile;
 #endif
 
-  base::FileUtilProxy::EnsureFileExists(
-    proxy_, path, callback_factory_.NewCallback(
-        exclusive ? &FileSystemOperation::DidEnsureFileExistsExclusive
-                  : &FileSystemOperation::DidEnsureFileExistsNonExclusive));
+  if (!VerifyFileSystemPathForWrite(path, true /* create */)) {
+    delete this;
+    return;
+  }
+  FileSystemFileUtilProxy::EnsureFileExists(
+      file_system_operation_context_,
+      proxy_, path, callback_factory_.NewCallback(
+          exclusive ? &FileSystemOperation::DidEnsureFileExistsExclusive
+                    : &FileSystemOperation::DidEnsureFileExistsNonExclusive));
 }
 
 void FileSystemOperation::CreateDirectory(const FilePath& path,
@@ -49,7 +77,12 @@ void FileSystemOperation::CreateDirectory(const FilePath& path,
   pending_operation_ = kOperationCreateDirectory;
 #endif
 
-  base::FileUtilProxy::CreateDirectory(
+  if (!VerifyFileSystemPathForWrite(path, true /* create */)) {
+    delete this;
+    return;
+  }
+  FileSystemFileUtilProxy::CreateDirectory(
+      file_system_operation_context_,
       proxy_, path, exclusive, recursive, callback_factory_.NewCallback(
           &FileSystemOperation::DidFinishFileOperation));
 }
@@ -61,8 +94,14 @@ void FileSystemOperation::Copy(const FilePath& src_path,
   pending_operation_ = kOperationCopy;
 #endif
 
-  base::FileUtilProxy::Copy(proxy_, src_path, dest_path,
-      callback_factory_.NewCallback(
+  if (!VerifyFileSystemPathForRead(src_path) ||
+      !VerifyFileSystemPathForWrite(dest_path, true /* create */)) {
+    delete this;
+    return;
+  }
+  FileSystemFileUtilProxy::Copy(
+      file_system_operation_context_,
+      proxy_, src_path, dest_path, callback_factory_.NewCallback(
           &FileSystemOperation::DidFinishFileOperation));
 }
 
@@ -73,8 +112,14 @@ void FileSystemOperation::Move(const FilePath& src_path,
   pending_operation_ = kOperationMove;
 #endif
 
-  base::FileUtilProxy::Move(proxy_, src_path, dest_path,
-      callback_factory_.NewCallback(
+  if (!VerifyFileSystemPathForRead(src_path) ||
+      !VerifyFileSystemPathForWrite(dest_path, true /* create */)) {
+    delete this;
+    return;
+  }
+  FileSystemFileUtilProxy::Move(
+      file_system_operation_context_,
+      proxy_, src_path, dest_path, callback_factory_.NewCallback(
           &FileSystemOperation::DidFinishFileOperation));
 }
 
@@ -84,8 +129,14 @@ void FileSystemOperation::DirectoryExists(const FilePath& path) {
   pending_operation_ = kOperationDirectoryExists;
 #endif
 
-  base::FileUtilProxy::GetFileInfo(proxy_, path, callback_factory_.NewCallback(
-      &FileSystemOperation::DidDirectoryExists));
+  if (!VerifyFileSystemPathForRead(path)) {
+    delete this;
+    return;
+  }
+  FileSystemFileUtilProxy::GetFileInfo(
+      file_system_operation_context_,
+      proxy_, path, callback_factory_.NewCallback(
+          &FileSystemOperation::DidDirectoryExists));
 }
 
 void FileSystemOperation::FileExists(const FilePath& path) {
@@ -94,8 +145,14 @@ void FileSystemOperation::FileExists(const FilePath& path) {
   pending_operation_ = kOperationFileExists;
 #endif
 
-  base::FileUtilProxy::GetFileInfo(proxy_, path, callback_factory_.NewCallback(
-      &FileSystemOperation::DidFileExists));
+  if (!VerifyFileSystemPathForRead(path)) {
+    delete this;
+    return;
+  }
+  FileSystemFileUtilProxy::GetFileInfo(
+      file_system_operation_context_,
+      proxy_, path, callback_factory_.NewCallback(
+          &FileSystemOperation::DidFileExists));
 }
 
 void FileSystemOperation::GetMetadata(const FilePath& path) {
@@ -104,8 +161,14 @@ void FileSystemOperation::GetMetadata(const FilePath& path) {
   pending_operation_ = kOperationGetMetadata;
 #endif
 
-  base::FileUtilProxy::GetFileInfo(proxy_, path, callback_factory_.NewCallback(
-      &FileSystemOperation::DidGetMetadata));
+  if (!VerifyFileSystemPathForRead(path)) {
+    delete this;
+    return;
+  }
+  FileSystemFileUtilProxy::GetFileInfo(
+      file_system_operation_context_,
+      proxy_, path, callback_factory_.NewCallback(
+          &FileSystemOperation::DidGetMetadata));
 }
 
 void FileSystemOperation::ReadDirectory(const FilePath& path) {
@@ -114,8 +177,13 @@ void FileSystemOperation::ReadDirectory(const FilePath& path) {
   pending_operation_ = kOperationReadDirectory;
 #endif
 
-  base::FileUtilProxy::ReadDirectory(proxy_, path,
-      callback_factory_.NewCallback(
+  if (!VerifyFileSystemPathForRead(path)) {
+    delete this;
+    return;
+  }
+  FileSystemFileUtilProxy::ReadDirectory(
+      file_system_operation_context_,
+      proxy_, path, callback_factory_.NewCallback(
           &FileSystemOperation::DidReadDirectory));
 }
 
@@ -125,8 +193,13 @@ void FileSystemOperation::Remove(const FilePath& path, bool recursive) {
   pending_operation_ = kOperationRemove;
 #endif
 
-  base::FileUtilProxy::Delete(proxy_, path, recursive,
-      callback_factory_.NewCallback(
+  if (!VerifyFileSystemPathForWrite(path, false /* create */)) {
+    delete this;
+    return;
+  }
+  FileSystemFileUtilProxy::Delete(
+      file_system_operation_context_,
+      proxy_, path, recursive, callback_factory_.NewCallback(
           &FileSystemOperation::DidFinishFileOperation));
 }
 
@@ -139,12 +212,17 @@ void FileSystemOperation::Write(
   DCHECK(kOperationNone == pending_operation_);
   pending_operation_ = kOperationWrite;
 #endif
+  if (!VerifyFileSystemPathForWrite(path, true /* create */)) {
+    delete this;
+    return;
+  }
   DCHECK(blob_url.is_valid());
   file_writer_delegate_.reset(new FileWriterDelegate(this, offset));
   blob_request_.reset(
       new net::URLRequest(blob_url, file_writer_delegate_.get()));
   blob_request_->set_context(url_request_context);
-  base::FileUtilProxy::CreateOrOpen(
+  FileSystemFileUtilProxy::CreateOrOpen(
+      file_system_operation_context_,
       proxy_,
       path,
       base::PLATFORM_FILE_OPEN | base::PLATFORM_FILE_WRITE |
@@ -153,25 +231,18 @@ void FileSystemOperation::Write(
           &FileSystemOperation::OnFileOpenedForWrite));
 }
 
-void FileSystemOperation::OnFileOpenedForWrite(
-    base::PlatformFileError rv,
-    base::PassPlatformFile file,
-    bool created) {
-  if (base::PLATFORM_FILE_OK != rv) {
-    dispatcher_->DidFail(rv);
-    delete this;
-    return;
-  }
-  file_writer_delegate_->Start(file.ReleaseValue(), blob_request_.get());
-}
-
 void FileSystemOperation::Truncate(const FilePath& path, int64 length) {
 #ifndef NDEBUG
   DCHECK(kOperationNone == pending_operation_);
   pending_operation_ = kOperationTruncate;
 #endif
-  base::FileUtilProxy::Truncate(proxy_, path, length,
-      callback_factory_.NewCallback(
+  if (!VerifyFileSystemPathForWrite(path, false /* create */)) {
+    delete this;
+    return;
+  }
+  FileSystemFileUtilProxy::Truncate(
+      file_system_operation_context_,
+      proxy_, path, length, callback_factory_.NewCallback(
           &FileSystemOperation::DidFinishFileOperation));
 }
 
@@ -183,7 +254,12 @@ void FileSystemOperation::TouchFile(const FilePath& path,
   pending_operation_ = kOperationTouchFile;
 #endif
 
-  base::FileUtilProxy::Touch(
+  if (!VerifyFileSystemPathForWrite(path, true /* create */)) {
+    delete this;
+    return;
+  }
+  FileSystemFileUtilProxy::Touch(
+      file_system_operation_context_,
       proxy_, path, last_access_time, last_modified_time,
       callback_factory_.NewCallback(&FileSystemOperation::DidTouchFile));
 }
@@ -206,7 +282,7 @@ void FileSystemOperation::Cancel(FileSystemOperation* cancel_operation_ptr) {
       blob_request_->Cancel();
 
     dispatcher_->DidFail(base::PLATFORM_FILE_ERROR_ABORT);
-    cancel_operation->dispatcher()->DidSucceed();
+    cancel_operation->dispatcher_->DidSucceed();
     delete this;
   } else {
 #ifndef NDEBUG
@@ -219,6 +295,13 @@ void FileSystemOperation::Cancel(FileSystemOperation* cancel_operation_ptr) {
     DCHECK(!cancel_operation_.get());
     cancel_operation_.swap(cancel_operation);
   }
+}
+
+void FileSystemOperation::DidGetRootPath(
+    bool success, const FilePath& path, const std::string& name) {
+  DCHECK(success || path.empty());
+  dispatcher_->DidOpenFileSystem(name, path);
+  delete this;
 }
 
 void FileSystemOperation::DidEnsureFileExistsExclusive(
@@ -243,7 +326,7 @@ void FileSystemOperation::DidFinishFileOperation(
 #endif
 
     dispatcher_->DidFail(base::PLATFORM_FILE_ERROR_ABORT);
-    cancel_operation_->dispatcher()->DidSucceed();
+    cancel_operation_->dispatcher_->DidSucceed();
   } else if (rv == base::PLATFORM_FILE_OK) {
     dispatcher_->DidSucceed();
   } else {
@@ -259,7 +342,7 @@ void FileSystemOperation::DidDirectoryExists(
     if (file_info.is_directory)
       dispatcher_->DidSucceed();
     else
-      dispatcher_->DidFail(base::PLATFORM_FILE_ERROR_FAILED);
+      dispatcher_->DidFail(base::PLATFORM_FILE_ERROR_NOT_A_DIRECTORY);
   } else {
     dispatcher_->DidFail(rv);
   }
@@ -271,7 +354,7 @@ void FileSystemOperation::DidFileExists(
     const base::PlatformFileInfo& file_info) {
   if (rv == base::PLATFORM_FILE_OK) {
     if (file_info.is_directory)
-      dispatcher_->DidFail(base::PLATFORM_FILE_ERROR_FAILED);
+      dispatcher_->DidFail(base::PLATFORM_FILE_ERROR_NOT_A_FILE);
     else
       dispatcher_->DidSucceed();
   } else {
@@ -318,6 +401,67 @@ void FileSystemOperation::DidTouchFile(base::PlatformFileError rv) {
   else
     dispatcher_->DidFail(rv);
   delete this;
+}
+
+void FileSystemOperation::OnFileOpenedForWrite(
+    base::PlatformFileError rv,
+    base::PassPlatformFile file,
+    bool created) {
+  if (base::PLATFORM_FILE_OK != rv) {
+    dispatcher_->DidFail(rv);
+    delete this;
+    return;
+  }
+  file_writer_delegate_->Start(file.ReleaseValue(), blob_request_.get());
+}
+
+bool FileSystemOperation::VerifyFileSystemPathForRead(
+    const FilePath& path) {
+  // If we have no context, we just allow any operations.
+  if (!file_system_context_.get())
+    return true;
+
+  // We may want do more checks, but for now it just checks if the given
+  // |path| is under the valid FileSystem root path for this host context.
+  if (!file_system_context_->path_manager()->CrackFileSystemPath(
+          path, NULL, NULL, NULL)) {
+    dispatcher_->DidFail(base::PLATFORM_FILE_ERROR_SECURITY);
+    return false;
+  }
+  return true;
+}
+
+bool FileSystemOperation::VerifyFileSystemPathForWrite(
+    const FilePath& path, bool create) {
+  GURL origin_url;
+  FilePath virtual_path;
+
+  // If we have no context, we just allow any operations.
+  if (!file_system_context_.get())
+    return true;
+
+  if (!file_system_context_->path_manager()->CrackFileSystemPath(
+          path, &origin_url, NULL, &virtual_path)) {
+    dispatcher_->DidFail(base::PLATFORM_FILE_ERROR_SECURITY);
+    return false;
+  }
+  // Any write access is disallowed on the root path.
+  if (virtual_path.value().length() == 0 ||
+      virtual_path.DirName().value() == virtual_path.value()) {
+    dispatcher_->DidFail(base::PLATFORM_FILE_ERROR_SECURITY);
+    return false;
+  }
+  if (create && FileSystemPathManager::IsRestrictedFileName(
+          path.BaseName())) {
+    dispatcher_->DidFail(base::PLATFORM_FILE_ERROR_SECURITY);
+    return false;
+  }
+  // TODO(kinuko): the check must be moved to QuotaFileSystemFileUtil.
+  if (!file_system_context_->IsStorageUnlimited(origin_url)) {
+    dispatcher_->DidFail(base::PLATFORM_FILE_ERROR_NO_SPACE);
+    return false;
+  }
+  return true;
 }
 
 }  // namespace fileapi
