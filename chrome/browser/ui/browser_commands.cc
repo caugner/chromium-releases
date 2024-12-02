@@ -71,7 +71,7 @@
 #include "chrome/browser/ui/qrcode_generator/qrcode_generator_bubble_controller.h"
 #include "chrome/browser/ui/read_later/reading_list_model_factory.h"
 #include "chrome/browser/ui/scoped_tabbed_browser_displayer.h"
-#include "chrome/browser/ui/send_tab_to_self/send_tab_to_self_bubble_controller.h"
+#include "chrome/browser/ui/send_tab_to_self/send_tab_to_self_bubble.h"
 #include "chrome/browser/ui/sharing_hub/screenshot/screenshot_captured_bubble_controller.h"
 #include "chrome/browser/ui/sharing_hub/sharing_hub_bubble_controller.h"
 #include "chrome/browser/ui/startup/startup_tab.h"
@@ -80,6 +80,7 @@
 #include "chrome/browser/ui/tab_dialogs.h"
 #include "chrome/browser/ui/tabs/tab_group.h"
 #include "chrome/browser/ui/tabs/tab_group_model.h"
+#include "chrome/browser/ui/tabs/tab_strip_user_gesture_details.h"
 #include "chrome/browser/ui/translate/translate_bubble_ui_action_logger.h"
 #include "chrome/browser/ui/ui_features.h"
 #include "chrome/browser/ui/user_education/reopen_tab_in_product_help.h"
@@ -114,6 +115,7 @@
 #include "components/reading_list/core/reading_list_entry.h"
 #include "components/reading_list/core/reading_list_model.h"
 #include "components/reading_list/core/reading_list_pref_names.h"
+#include "components/services/app_service/public/cpp/app_launch_util.h"
 #include "components/services/app_service/public/mojom/types.mojom.h"
 #include "components/sessions/core/live_tab_context.h"
 #include "components/sessions/core/tab_restore_service.h"
@@ -174,6 +176,10 @@
 #if BUILDFLAG(IS_CHROMEOS_LACROS)
 #include "chromeos/crosapi/mojom/task_manager.mojom.h"
 #include "chromeos/lacros/lacros_service.h"
+#endif
+
+#if BUILDFLAG(IS_CHROMEOS)
+#include "chrome/browser/apps/intent_helper/supported_links_infobar_delegate.h"
 #endif
 
 namespace {
@@ -686,17 +692,16 @@ void NewWindow(Browser* browser) {
   if (browser->app_controller()) {
     const web_app::AppId app_id = browser->app_controller()->app_id();
 
-    auto launch_container =
-        apps::mojom::LaunchContainer::kLaunchContainerWindow;
+    auto launch_container = apps::LaunchContainer::kLaunchContainerWindow;
 
     auto* provider = web_app::WebAppProvider::GetForWebApps(profile);
     if (provider && provider->registrar().GetAppEffectiveDisplayMode(app_id) ==
                         blink::mojom::DisplayMode::kBrowser) {
-      launch_container = apps::mojom::LaunchContainer::kLaunchContainerTab;
+      launch_container = apps::LaunchContainer::kLaunchContainerTab;
     }
     apps::AppLaunchParams params = apps::AppLaunchParams(
         app_id, launch_container, WindowOpenDisposition::NEW_WINDOW,
-        apps::mojom::LaunchSource::kFromKeyboard);
+        apps::LaunchSource::kFromKeyboard);
     apps::AppServiceProxyFactory::GetForProfile(profile)
         ->BrowserAppLauncher()
         ->LaunchAppWithParams(std::move(params));
@@ -709,7 +714,7 @@ void NewWindow(Browser* browser) {
   if (extension && extension->is_hosted_app()) {
     const auto app_launch_params = CreateAppLaunchParamsUserContainer(
         profile, extension, WindowOpenDisposition::NEW_WINDOW,
-        apps::mojom::LaunchSource::kFromKeyboard);
+        apps::LaunchSource::kFromKeyboard);
     OpenApplicationWindow(
         profile, app_launch_params,
         extensions::AppLaunchInfo::GetLaunchWebURL(extension));
@@ -787,13 +792,13 @@ bool CanResetZoom(content::WebContents* contents) {
 }
 
 void SelectNextTab(Browser* browser,
-                   TabStripModel::UserGestureDetails gesture_detail) {
+                   TabStripUserGestureDetails gesture_detail) {
   base::RecordAction(UserMetricsAction("SelectNextTab"));
   browser->tab_strip_model()->SelectNextTab(gesture_detail);
 }
 
 void SelectPreviousTab(Browser* browser,
-                       TabStripModel::UserGestureDetails gesture_detail) {
+                       TabStripUserGestureDetails gesture_detail) {
   base::RecordAction(UserMetricsAction("SelectPrevTab"));
   browser->tab_strip_model()->SelectPreviousTab(gesture_detail);
 }
@@ -810,7 +815,7 @@ void MoveTabPrevious(Browser* browser) {
 
 void SelectNumberedTab(Browser* browser,
                        int index,
-                       TabStripModel::UserGestureDetails gesture_detail) {
+                       TabStripUserGestureDetails gesture_detail) {
   int visible_count = 0;
   for (int i = 0; i < browser->tab_strip_model()->count(); i++) {
     if (browser->tab_strip_model()->IsTabCollapsed(i)) {
@@ -826,7 +831,7 @@ void SelectNumberedTab(Browser* browser,
 }
 
 void SelectLastTab(Browser* browser,
-                   TabStripModel::UserGestureDetails gesture_detail) {
+                   TabStripUserGestureDetails gesture_detail) {
   for (int i = browser->tab_strip_model()->count() - 1; i >= 0; i--) {
     if (!browser->tab_strip_model()->IsTabCollapsed(i)) {
       base::RecordAction(UserMetricsAction("SelectLastTab"));
@@ -1286,10 +1291,7 @@ void ManagePasswordsForPage(Browser* browser) {
 void SendTabToSelfFromPageAction(Browser* browser) {
   WebContents* web_contents =
       browser->tab_strip_model()->GetActiveWebContents();
-  send_tab_to_self::SendTabToSelfBubbleController* controller =
-      send_tab_to_self::SendTabToSelfBubbleController::
-          CreateOrGetFromWebContents(web_contents);
-  controller->ShowBubble();
+  send_tab_to_self::ShowBubble(web_contents);
 }
 
 void GenerateQRCodeFromPageAction(Browser* browser) {
@@ -1408,7 +1410,7 @@ void RouteMediaInvokedFromAppMenu(Browser* browser) {
     return;
 
   dialog_controller->ShowMediaRouterDialog(
-      media_router::MediaRouterDialogOpenOrigin::APP_MENU);
+      media_router::MediaRouterDialogActivationLocation::APP_MENU);
 }
 
 void CutCopyPaste(Browser* browser, int command_id) {
@@ -1713,8 +1715,13 @@ Browser* OpenInChrome(Browser* hosted_app_browser) {
       source_tabstrip->DetachWebContentsAtForInsertion(
           source_tabstrip->active_index()),
       true);
-  apps::MaybeShowIntentPicker(
-      target_browser->tab_strip_model()->GetActiveWebContents());
+  auto* web_contents =
+      target_browser->tab_strip_model()->GetActiveWebContents();
+  apps::MaybeShowIntentPicker(web_contents);
+#if BUILDFLAG(IS_CHROMEOS)
+  apps::SupportedLinksInfoBarDelegate::RemoveSupportedLinksInfoBar(
+      web_contents);
+#endif
   target_browser->window()->Show();
   return target_browser;
 }

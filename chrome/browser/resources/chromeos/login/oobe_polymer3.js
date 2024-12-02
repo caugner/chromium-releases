@@ -13,6 +13,7 @@ import 'chrome://oobe/components/test_util.m.js';
 import 'chrome://oobe/test_api/test_api.m.js';
 import {commonScreensList, loginScreensList, oobeScreensList} from 'chrome://oobe/screens.js';
 import {MultiTapDetector} from './multi_tap_detector.m.js';
+import './components/common_styles/oobe_flex_layout_styles.m.js';
 // clang-format on
 
 /**
@@ -121,6 +122,16 @@ function initializeOobe() {
     addScreensToMainContainer(commonScreensList);
     const isOobeFlow = loadTimeData.getBoolean('isOobeFlow');
     addScreensToMainContainer(isOobeFlow ? oobeScreensList : loginScreensList);
+
+    // The default is to have the class 'oobe-display' in <body> for the OOBE
+    // flow. For the 'Add Person' flow, we remove it.
+    if (!isOobeFlow) {
+      document.body.classList.remove('oobe-display');
+    } else {
+      assert(
+          document.body.classList.contains('oobe-display'),
+          'The body of the document must contain oobe-display as a class for the OOBE flow!');
+    }
 
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', initializeOobe);

@@ -484,7 +484,7 @@ export class PDFViewerElement extends PDFViewerBaseElement {
   }
 
   /** Exits annotation mode if active. */
-  async exitAnnotationMode_(): Promise<void> {
+  private async exitAnnotationMode_(): Promise<void> {
     if (!this.$.toolbar.annotationMode) {
       return;
     }
@@ -993,7 +993,7 @@ export class PDFViewerElement extends PDFViewerBaseElement {
         {
           type: 'saveFile',
           accepts: [{description: '*.pdf', extensions: ['pdf']}],
-          suggestedName: fileName
+          suggestedName: fileName,
         },
         (entry?: FileSystemFileEntry) => {
           if (chrome.runtime.lastError) {
