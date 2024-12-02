@@ -19,43 +19,52 @@ namespace android_webview {
 class AwPrintManager : public printing::PrintManager,
     public content::WebContentsUserData<AwPrintManager> {
  public:
+  // Creates an AwPrintManager for the provided WebContents. If the
+  // AwPrintManager already exists, it is destroyed and a new one is created.
+  // The returned pointer is owned by |contents|.
+  static AwPrintManager* CreateForWebContents(
+      content::WebContents* contents,
+      std::unique_ptr<printing::PrintSettings> settings,
+      int file_descriptor,
+      PdfWritingDoneCallback callback);
+
   ~AwPrintManager() override;
+
+  // mojom::PrintManagerHost:
+  void GetDefaultPrintSettings(
+      GetDefaultPrintSettingsCallback callback) override;
 
   // printing::PrintManager:
   void PdfWritingDone(int page_count) override;
 
   bool PrintNow();
 
-  // Updates the parameters for printing.
-  void UpdateParam(std::unique_ptr<printing::PrintSettings> settings,
-                   int file_descriptor,
-                   PdfWritingDoneCallback callback);
-
  private:
   friend class content::WebContentsUserData<AwPrintManager>;
 
-  explicit AwPrintManager(content::WebContents* contents);
+  AwPrintManager(content::WebContents* contents,
+                 std::unique_ptr<printing::PrintSettings> settings,
+                 int file_descriptor,
+                 PdfWritingDoneCallback callback);
 
   // printing::PrintManager:
   void OnDidPrintDocument(
       content::RenderFrameHost* render_frame_host,
       const printing::mojom::DidPrintDocumentParams& params,
       std::unique_ptr<DelayedFrameDispatchHelper> helper) override;
-  void OnGetDefaultPrintSettings(content::RenderFrameHost* render_frame_host,
-                                 IPC::Message* reply_msg) override;
   void OnScriptedPrint(content::RenderFrameHost* render_frame_host,
-                       const PrintHostMsg_ScriptedPrint_Params& params,
+                       const printing::mojom::ScriptedPrintParams& params,
                        IPC::Message* reply_msg) override;
 
   static void OnDidPrintDocumentWritingDone(
       const PdfWritingDoneCallback& callback,
       std::unique_ptr<DelayedFrameDispatchHelper> helper,
-      int page_count);
+      uint32_t page_count);
 
-  std::unique_ptr<printing::PrintSettings> settings_;
+  const std::unique_ptr<printing::PrintSettings> settings_;
 
   // The file descriptor into which the PDF of the document will be written.
-  int fd_ = -1;
+  int fd_;
 
   WEB_CONTENTS_USER_DATA_KEY_DECL();
 

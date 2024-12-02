@@ -160,7 +160,6 @@ void DeviceImpl::OnOpen(base::WeakPtr<DeviceImpl> self,
     return;
   }
 
-  self->opening_ = false;
   self->device_handle_ = std::move(handle);
   if (self->device_handle_ && self->client_)
     self->client_->OnDeviceOpened();
@@ -176,18 +175,15 @@ void DeviceImpl::OnPermissionGrantedForOpen(OpenCallback callback,
     device_->Open(base::BindOnce(
         &DeviceImpl::OnOpen, weak_factory_.GetWeakPtr(), std::move(callback)));
   } else {
-    opening_ = false;
     std::move(callback).Run(mojom::UsbOpenDeviceError::ACCESS_DENIED);
   }
 }
 
 void DeviceImpl::Open(OpenCallback callback) {
-  if (opening_ || device_handle_) {
+  if (device_handle_) {
     std::move(callback).Run(mojom::UsbOpenDeviceError::ALREADY_OPEN);
     return;
   }
-
-  opening_ = true;
 
   if (!device_->permission_granted()) {
     device_->RequestPermission(
