@@ -20,42 +20,24 @@
         {
           "object": "NGPhysicalBoxFragment LayoutNGBlockFlow (relative positioned) DIV",
           "rect": [428, 38, 300, 20],
-          "reason": "disappeared"
+          "reason": "subtree"
         },
         {
           "object": "NGPhysicalBoxFragment LayoutNGBlockFlow (relative positioned) DIV",
           "rect": [28, 38, 300, 20],
-          "reason": "appeared"
+          "reason": "subtree"
         },
         {
           "object": "NGPhysicalTextFragment 'There should only be one copy of this text.'",
           "rect": [428, 38, 270, 19],
-          "reason": "disappeared"
+          "reason": "subtree"
         },
         {
           "object": "NGPhysicalTextFragment 'There should only be one copy of this text.'",
           "rect": [28, 38, 270, 19],
-          "reason": "appeared"
+          "reason": "subtree"
         }
       ]
-    }
-  ],
-  "objectPaintInvalidations": [
-    {
-      "object": "NGPhysicalBoxFragment LayoutNGBlockFlow (positioned) BODY",
-      "reason": "subtree"
-    },
-    {
-      "object": "NGPhysicalBoxFragment LayoutNGBlockFlow (positioned) DIV id='container'",
-      "reason": "subtree"
-    },
-    {
-      "object": "NGPhysicalBoxFragment LayoutNGBlockFlow (relative positioned) DIV",
-      "reason": "subtree"
-    },
-    {
-      "object": "NGPhysicalTextFragment 'There should only be one copy of this text.'",
-      "reason": "subtree"
     }
   ]
 }

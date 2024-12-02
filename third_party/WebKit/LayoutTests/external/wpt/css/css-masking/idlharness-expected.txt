@@ -1,5 +1,5 @@
 This is a testharness.js-based test.
-PASS Test IDL implementation of css-masking
+PASS idl_test setup
 FAIL SVGClipPathElement interface: existence and properties of interface object assert_equals: prototype of SVGClipPathElement is not SVGElement expected function "function SVGElement() { [native code] }" but got function "function SVGGraphicsElement() { [native code] }"
 PASS SVGClipPathElement interface object length
 PASS SVGClipPathElement interface object name
@@ -7,9 +7,7 @@ FAIL SVGClipPathElement interface: existence and properties of interface prototy
 PASS SVGClipPathElement interface: existence and properties of interface prototype object's "constructor" property
 PASS SVGClipPathElement interface: existence and properties of interface prototype object's @@unscopables property
 PASS SVGClipPathElement interface: attribute clipPathUnits
-PASS Unscopable handled correctly for clipPathUnits property on SVGClipPathElement
 FAIL SVGClipPathElement interface: attribute transform assert_own_property: expected property "transform" missing
-PASS Unscopable handled correctly for transform property on SVGClipPathElement
 PASS SVGClipPathElement must be primary interface of [object SVGClipPathElement]
 PASS Stringification of [object SVGClipPathElement]
 PASS SVGClipPathElement interface: [object SVGClipPathElement] must inherit property "clipPathUnits" with the proper type
@@ -21,17 +19,11 @@ PASS SVGMaskElement interface: existence and properties of interface prototype o
 PASS SVGMaskElement interface: existence and properties of interface prototype object's "constructor" property
 PASS SVGMaskElement interface: existence and properties of interface prototype object's @@unscopables property
 PASS SVGMaskElement interface: attribute maskUnits
-PASS Unscopable handled correctly for maskUnits property on SVGMaskElement
 PASS SVGMaskElement interface: attribute maskContentUnits
-PASS Unscopable handled correctly for maskContentUnits property on SVGMaskElement
 PASS SVGMaskElement interface: attribute x
-PASS Unscopable handled correctly for x property on SVGMaskElement
 PASS SVGMaskElement interface: attribute y
-PASS Unscopable handled correctly for y property on SVGMaskElement
 PASS SVGMaskElement interface: attribute width
-PASS Unscopable handled correctly for width property on SVGMaskElement
 PASS SVGMaskElement interface: attribute height
-PASS Unscopable handled correctly for height property on SVGMaskElement
 PASS SVGMaskElement must be primary interface of [object SVGMaskElement]
 PASS Stringification of [object SVGMaskElement]
 PASS SVGMaskElement interface: [object SVGMaskElement] must inherit property "maskUnits" with the proper type
@@ -40,5 +32,6 @@ PASS SVGMaskElement interface: [object SVGMaskElement] must inherit property "x"
 PASS SVGMaskElement interface: [object SVGMaskElement] must inherit property "y" with the proper type
 PASS SVGMaskElement interface: [object SVGMaskElement] must inherit property "width" with the proper type
 PASS SVGMaskElement interface: [object SVGMaskElement] must inherit property "height" with the proper type
+PASS WorkerGlobalScope interface: existence and properties of interface object
 Harness: the test ran to completion.
 

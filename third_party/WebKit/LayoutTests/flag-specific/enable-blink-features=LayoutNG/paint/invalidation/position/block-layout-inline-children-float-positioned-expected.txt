@@ -39,44 +39,10 @@
         },
         {
           "object": "LayoutNGBlockFlow HTML",
-          "rect": [301, 37, 292, 19],
+          "rect": [155, 37, 292, 19],
           "reason": "chunk appeared"
         }
       ]
-    }
-  ],
-  "objectPaintInvalidations": [
-    {
-      "object": "NGPhysicalBoxFragment LayoutNGBlockFlow P",
-      "reason": "subtree"
-    },
-    {
-      "object": "NGPhysicalTextFragment 'This is a test for regression against '",
-      "reason": "subtree"
-    },
-    {
-      "object": "NGPhysicalTextFragment 'https://bugs.webkit.org/show_bug.cgi?id=40142'",
-      "reason": "subtree"
-    },
-    {
-      "object": "NGPhysicalBoxFragment LayoutNGBlockFlow DIV id='target'",
-      "reason": "subtree"
-    },
-    {
-      "object": "NGPhysicalBoxFragment LayoutNGBlockFlow (floating) SPAN",
-      "reason": "subtree"
-    },
-    {
-      "object": "NGPhysicalTextFragment 'the quick brown fox jumped over the lazy dog'",
-      "reason": "subtree"
-    },
-    {
-      "object": "NGPhysicalBoxFragment LayoutNGBlockFlow (positioned) SPAN",
-      "reason": "subtree"
-    },
-    {
-      "object": "NGPhysicalTextFragment 'the quick brown fox jumped over the lazy dog'",
-      "reason": "subtree"
     }
   ]
 }

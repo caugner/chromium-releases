@@ -67,6 +67,7 @@
 #include "services/network/public/cpp/resource_response.h"
 #include "services/network/public/cpp/url_loader_completion_status.h"
 #include "third_party/blink/public/common/frame/sandbox_flags.h"
+#include "third_party/blink/public/common/service_worker/service_worker_utils.h"
 #include "third_party/blink/public/platform/resource_request_blocked_reason.h"
 #include "third_party/blink/public/platform/web_mixed_content_context_type.h"
 #include "url/url_constants.h"
@@ -210,9 +211,9 @@ void AddAdditionalRequestHeaders(
       }
     }
     std::string value = base::StringPrintf(
-        "cause=\"%s\", destination=\"document\", target=\"%s\", site=\"%s\"",
+        "cause=\"%s\", destination=\"%s\", site=\"%s\"",
         has_user_gesture ? "user-activated" : "forced",
-        frame_tree_node->IsMainFrame() ? "top-level" : "nested",
+        frame_tree_node->IsMainFrame() ? "document" : "nested-document",
         site_value.c_str());
     headers->SetHeaderIfMissing("Sec-Metadata", value);
   }
@@ -693,7 +694,8 @@ void NavigationRequest::CreateNavigationHandle() {
                                        common_params_.referrer),
           common_params_.has_user_gesture, common_params_.transition,
           is_external_protocol, begin_params_->request_context_type,
-          begin_params_->mixed_content_context_type);
+          begin_params_->mixed_content_context_type,
+          common_params_.input_start);
 
   if (!frame_tree_node->navigation_request()) {
     // A callback could have cancelled this request synchronously in which case
@@ -925,8 +927,9 @@ void NavigationRequest::OnResponseStarted(
     const GlobalRequestID& request_id,
     bool is_download,
     bool is_stream,
+    PreviewsState previews_state,
     base::Optional<SubresourceLoaderParams> subresource_loader_params) {
-  DCHECK(state_ == STARTED);
+  DCHECK_EQ(state_, STARTED);
   DCHECK(response);
   TRACE_EVENT_ASYNC_STEP_INTO0("navigation", "NavigationRequest", this,
                                "OnResponseStarted");
@@ -993,8 +996,7 @@ void NavigationRequest::OnResponseStarted(
   }
 
   // Update the previews state of the request.
-  common_params_.previews_state =
-      static_cast<PreviewsState>(response->head.previews_state);
+  common_params_.previews_state = previews_state;
 
   // Select an appropriate renderer to commit the navigation.
   RenderFrameHostImpl* render_frame_host = nullptr;
@@ -1073,8 +1075,13 @@ void NavigationRequest::OnResponseStarted(
   // download.
   if (is_download && (response->head.headers.get() &&
                       (response->head.headers->response_code() / 100 != 2))) {
-    navigation_handle_->set_net_error_code(net::ERR_INVALID_RESPONSE);
-    frame_tree_node_->ResetNavigationRequest(false, true);
+    OnRequestFailedInternal(
+        network::URLLoaderCompletionStatus(net::ERR_INVALID_RESPONSE),
+        false /* skip_throttles */, base::nullopt /* error_page_content */,
+        false /* collapse_frame */);
+
+    // DO NOT ADD CODE after this. The previous call to OnRequestFailedInternal
+    // has destroyed the NavigationRequest.
     return;
   }
 
@@ -1487,10 +1494,20 @@ void NavigationRequest::OnWillProcessResponseChecksComplete(
   // If the NavigationThrottles allowed the navigation to continue, have the
   // processing of the response resume in the network stack.
   if (result.action() == NavigationThrottle::PROCEED) {
-    // If this is a download, intercept the navigation response and pass it to
-    // DownloadManager, and cancel the navigation.
-    if (is_download_ &&
-        base::FeatureList::IsEnabled(network::features::kNetworkService)) {
+    // NetworkService doesn't use ResourceDispatcherHost.
+    bool served_via_resource_dispatcher_host =
+        !base::FeatureList::IsEnabled(network::features::kNetworkService);
+    // When S13nServiceWorker is on, it doesn't use ResourceDispatcherHost when
+    // a service worker serves the response.
+    served_via_resource_dispatcher_host =
+        served_via_resource_dispatcher_host &&
+        !(blink::ServiceWorkerUtils::IsServicificationEnabled() &&
+          response_->head.was_fetched_via_service_worker);
+
+    // NetworkService or S13nServiceWorker: If this is a download, intercept the
+    // navigation response and pass it to DownloadManager, and cancel the
+    // navigation.
+    if (is_download_ && !served_via_resource_dispatcher_host) {
       // TODO(arthursonzogni): Pass the real ResourceRequest. For the moment
       // only these 4 parameters will be used, but it may evolve quickly.
       auto resource_request = std::make_unique<network::ResourceRequest>();
@@ -1498,6 +1515,7 @@ void NavigationRequest::OnWillProcessResponseChecksComplete(
       resource_request->method = common_params_.method;
       resource_request->request_initiator = begin_params_->initiator_origin;
       resource_request->referrer = common_params_.referrer.url;
+      resource_request->has_user_gesture = common_params_.has_user_gesture;
 
       BrowserContext* browser_context =
           frame_tree_node_->navigator()->GetController()->GetBrowserContext();
