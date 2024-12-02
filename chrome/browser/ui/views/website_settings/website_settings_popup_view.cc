@@ -6,7 +6,6 @@
 
 #include <algorithm>
 
-#include "base/command_line.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/certificate_viewer.h"
@@ -18,7 +17,6 @@
 #include "chrome/browser/ui/views/website_settings/permission_selector_view.h"
 #include "chrome/browser/ui/website_settings/website_settings.h"
 #include "chrome/browser/ui/website_settings/website_settings_utils.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/common/content_settings_types.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/browser_thread.h"
@@ -53,6 +51,14 @@
 #include "url/gurl.h"
 
 namespace {
+
+// NOTE(jdonnelly): This use of this process-wide variable assumes that there's
+// never more than one website settings popup shown and that it's associated
+// with the current window. If this assumption fails in the future, we'll need
+// to return a weak pointer from ShowPopup so callers can associate it with the
+// current window (or other context) and check if the popup they care about is
+// showing.
+bool is_popup_showing = false;
 
 // Padding values for sections on the connection tab.
 const int kConnectionSectionPaddingBottom = 16;
@@ -141,6 +147,9 @@ class InternalPageInfoPopupView : public views::BubbleDelegateView {
  public:
   explicit InternalPageInfoPopupView(views::View* anchor_view);
   virtual ~InternalPageInfoPopupView();
+
+  // views::BubbleDelegateView:
+  virtual void OnWidgetDestroying(views::Widget* widget) OVERRIDE;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(InternalPageInfoPopupView);
@@ -250,6 +259,10 @@ InternalPageInfoPopupView::InternalPageInfoPopupView(views::View* anchor_view)
 InternalPageInfoPopupView::~InternalPageInfoPopupView() {
 }
 
+void InternalPageInfoPopupView::OnWidgetDestroying(views::Widget* widget) {
+  is_popup_showing = false;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // WebsiteSettingsPopupView
 ////////////////////////////////////////////////////////////////////////////////
@@ -264,12 +277,18 @@ void WebsiteSettingsPopupView::ShowPopup(views::View* anchor_view,
                                          const GURL& url,
                                          const content::SSLStatus& ssl,
                                          Browser* browser) {
+  is_popup_showing = true;
   if (InternalChromePage(url)) {
     new InternalPageInfoPopupView(anchor_view);
   } else {
     new WebsiteSettingsPopupView(anchor_view, profile, web_contents, url, ssl,
                                  browser);
   }
+}
+
+// static
+bool WebsiteSettingsPopupView::IsPopupShowing() {
+  return is_popup_showing;
 }
 
 WebsiteSettingsPopupView::WebsiteSettingsPopupView(
@@ -357,6 +376,7 @@ void WebsiteSettingsPopupView::OnPermissionChanged(
 }
 
 void WebsiteSettingsPopupView::OnWidgetDestroying(views::Widget* widget) {
+  is_popup_showing = false;
   presenter_->OnUIClosing();
 }
 
@@ -532,9 +552,7 @@ void WebsiteSettingsPopupView::SetIdentityInfo(
         l10n_util::GetStringUTF16(IDS_PAGEINFO_CERT_INFO_BUTTON));
     certificate_dialog_link_->set_listener(this);
 
-    if (!signed_certificate_timestamp_ids_.empty() &&
-        CommandLine::ForCurrentProcess()->HasSwitch(
-            switches::kEnableSignedCertificateTimestampsViewer)) {
+    if (!signed_certificate_timestamp_ids_.empty()) {
       signed_certificate_timestamps_link_ =
           new views::Link(l10n_util::GetStringUTF16(
               IDS_PAGEINFO_CERT_TRANSPARENCY_INFO_BUTTON));

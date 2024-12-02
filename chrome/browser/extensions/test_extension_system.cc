@@ -14,7 +14,6 @@
 #include "chrome/browser/extensions/state_store.h"
 #include "chrome/browser/extensions/user_script_master.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/value_store/testing_value_store.h"
 #include "chrome/common/chrome_switches.h"
 #include "content/public/browser/browser_thread.h"
 #include "extensions/browser/event_router.h"
@@ -30,6 +29,7 @@
 #include "extensions/browser/process_manager.h"
 #include "extensions/browser/quota_service.h"
 #include "extensions/browser/runtime_data.h"
+#include "extensions/browser/value_store/testing_value_store.h"
 
 using content::BrowserThread;
 
@@ -86,8 +86,8 @@ ExtensionService* TestExtensionSystem::CreateExtensionService(
     bool autoupdate_enabled) {
   if (!ExtensionPrefs::Get(profile_))
     CreateExtensionPrefs(command_line, install_directory);
-  install_verifier_.reset(new InstallVerifier(ExtensionPrefs::Get(profile_),
-                                              NULL));
+  install_verifier_.reset(
+      new InstallVerifier(ExtensionPrefs::Get(profile_), profile_));
   // The ownership of |value_store_| is immediately transferred to state_store_,
   // but we keep a naked pointer to the TestingValueStore.
   scoped_ptr<TestingValueStore> value_store(new TestingValueStore());
@@ -152,9 +152,11 @@ TestExtensionSystem::lazy_background_task_queue() {
   return NULL;
 }
 
-EventRouter* TestExtensionSystem::event_router() {
-  return NULL;
+void TestExtensionSystem::SetEventRouter(scoped_ptr<EventRouter> event_router) {
+  event_router_.reset(event_router.release());
 }
+
+EventRouter* TestExtensionSystem::event_router() { return event_router_.get(); }
 
 ExtensionWarningService* TestExtensionSystem::warning_service() {
   return NULL;
@@ -181,8 +183,7 @@ const OneShotEvent& TestExtensionSystem::ready() const {
 }
 
 // static
-BrowserContextKeyedService* TestExtensionSystem::Build(
-    content::BrowserContext* profile) {
+KeyedService* TestExtensionSystem::Build(content::BrowserContext* profile) {
   return new TestExtensionSystem(static_cast<Profile*>(profile));
 }
 

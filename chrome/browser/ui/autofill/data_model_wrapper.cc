@@ -9,12 +9,12 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/ui/autofill/autofill_dialog_common.h"
 #include "chrome/browser/ui/autofill/autofill_dialog_i18n_input.h"
 #include "chrome/browser/ui/autofill/autofill_dialog_models.h"
 #include "components/autofill/content/browser/wallet/full_wallet.h"
 #include "components/autofill/content/browser/wallet/wallet_address.h"
 #include "components/autofill/content/browser/wallet/wallet_items.h"
+#include "components/autofill/core/browser/autofill_country.h"
 #include "components/autofill/core/browser/autofill_data_model.h"
 #include "components/autofill/core/browser/autofill_field.h"
 #include "components/autofill/core/browser/autofill_profile.h"
@@ -28,17 +28,11 @@
 
 namespace autofill {
 
-using base::ASCIIToUTF16;
-using base::UTF16ToUTF8;
-
 DataModelWrapper::~DataModelWrapper() {}
 
 void DataModelWrapper::FillInputs(DetailInputs* inputs) {
   for (size_t i = 0; i < inputs->size(); ++i) {
-    DetailInput* input = &(*inputs)[i];
-    input->initial_value = common::GetHardcodedValueForType(input->type);
-    if (input->initial_value.empty())
-      input->initial_value = GetInfo(AutofillType(input->type));
+    (*inputs)[i].initial_value = GetInfo(AutofillType((*inputs)[i].type));
   }
 }
 
@@ -71,9 +65,9 @@ bool DataModelWrapper::GetDisplayText(
   base::string16 non_address_info;
   base::string16 email = GetInfoForDisplay(AutofillType(EMAIL_ADDRESS));
   if (!email.empty())
-    non_address_info += ASCIIToUTF16("\n") + email;
+    non_address_info += base::ASCIIToUTF16("\n") + email;
 
-  non_address_info += ASCIIToUTF16("\n") + phone;
+  non_address_info += base::ASCIIToUTF16("\n") + phone;
 
   // The separator is locale-specific.
   std::string compact_separator =
@@ -141,8 +135,9 @@ base::string16 AutofillProfileWrapper::GetInfoForDisplay(
 
     // If there is no user-defined formatting at all, add some standard
     // formatting.
-    if (ContainsOnlyChars(phone_number, ASCIIToUTF16("0123456789"))) {
-      std::string region = UTF16ToASCII(
+    if (base::ContainsOnlyChars(phone_number,
+                                base::ASCIIToUTF16("0123456789"))) {
+      std::string region = base::UTF16ToASCII(
           GetInfo(AutofillType(HTML_TYPE_COUNTRY_CODE, HTML_MODE_NONE)));
       i18n::PhoneObject phone(phone_number, region);
       return phone.GetFormattedNumber();
@@ -293,7 +288,8 @@ bool WalletInstrumentWrapper::GetDisplayText(
 
   // TODO(estade): descriptive_name() is user-provided. Should we use it or
   // just type + last 4 digits?
-  base::string16 line1 = instrument_->descriptive_name() + ASCIIToUTF16("\n");
+  base::string16 line1 =
+      instrument_->descriptive_name() + base::ASCIIToUTF16("\n");
   *vertically_compact = line1 + *vertically_compact;
   *horizontally_compact = line1 + *horizontally_compact;
   return true;
@@ -342,6 +338,28 @@ base::string16 FullWalletShippingWrapper::GetInfo(
     const AutofillType& type) const {
   return full_wallet_->shipping_address()->GetInfo(
       type, g_browser_process->GetApplicationLocale());
+}
+
+I18nAddressDataWrapper::I18nAddressDataWrapper(
+    const ::i18n::addressinput::AddressData* address)
+    : address_(address) {}
+
+I18nAddressDataWrapper::~I18nAddressDataWrapper() {}
+
+base::string16 I18nAddressDataWrapper::GetInfo(const AutofillType& type) const {
+  ::i18n::addressinput::AddressField field;
+  if (!i18ninput::FieldForType(type.GetStorableType(), &field))
+    return base::string16();
+
+  if (field == ::i18n::addressinput::STREET_ADDRESS)
+    return base::string16();
+
+  if (field == ::i18n::addressinput::COUNTRY) {
+    return AutofillCountry(address_->country_code,
+                           g_browser_process->GetApplicationLocale()).name();
+  }
+
+  return base::UTF8ToUTF16(address_->GetFieldValue(field));
 }
 
 }  // namespace autofill

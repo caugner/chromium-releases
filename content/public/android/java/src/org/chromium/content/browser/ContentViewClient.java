@@ -7,7 +7,6 @@ package org.chromium.content.browser;
 import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
-import android.graphics.RectF;
 import android.util.Log;
 import android.view.ActionMode;
 import android.view.KeyEvent;
@@ -142,6 +141,13 @@ public class ContentViewClient {
     }
 
     /**
+     * Notification that the selection has changed.
+     * @param selection The newly established selection.
+     */
+    public void onSelectionChanged(String selection) {
+    }
+
+    /**
      * Called when a new content intent is requested to be started.
      */
     public void onStartContentIntent(Context context, String intentUrl) {
@@ -159,12 +165,6 @@ public class ContentViewClient {
         } catch (ActivityNotFoundException ex) {
             Log.w(TAG, "No application can handle " + intentUrl);
         }
-    }
-
-    public void onExternalVideoSurfaceRequested(int playerId) {
-    }
-
-    public void onGeometryChanged(int playerId, RectF rect) {
     }
 
     public ContentVideoViewClient getContentVideoViewClient() {

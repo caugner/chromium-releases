@@ -12,11 +12,16 @@
 #include "base/rand_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/local_discovery/privet_constants.h"
 #include "components/cloud_devices/printer_description.h"
 #include "net/base/url_util.h"
+#include "printing/pwg_raster_settings.h"
 #include "printing/units.h"
+#include "ui/gfx/text_elider.h"
 #include "url/gurl.h"
+
+using namespace cloud_devices::printer;
 
 namespace local_discovery {
 
@@ -48,6 +53,8 @@ const int kPrivetCancelationTimeoutSeconds = 3;
 const int kPrivetLocalPrintMaxRetries = 2;
 
 const int kPrivetLocalPrintDefaultTimeout = 5;
+
+const size_t kPrivetLocalPrintMaxJobNameLength = 64;
 
 GURL CreatePrivetURL(const std::string& path) {
   GURL url(kUrlPlaceHolder);
@@ -107,8 +114,6 @@ void PrivetInfoOperationImpl::OnError(PrivetURLFetcher* fetcher,
 void PrivetInfoOperationImpl::OnParsedJson(PrivetURLFetcher* fetcher,
                                            const base::DictionaryValue* value,
                                            bool has_error) {
-  if (!has_error)
-    privet_client_->CacheInfo(value);
   callback_.Run(value);
 }
 
@@ -455,7 +460,6 @@ PrivetLocalPrintOperationImpl::PrivetLocalPrintOperationImpl(
     : privet_client_(privet_client),
       delegate_(delegate),
       use_pdf_(false),
-      has_capabilities_(false),
       has_extended_workflow_(false),
       started_(false),
       offline_(false),
@@ -483,7 +487,6 @@ void PrivetLocalPrintOperationImpl::Start() {
 void PrivetLocalPrintOperationImpl::OnPrivetInfoDone(
     const base::DictionaryValue* value) {
   if (value && !value->HasKey(kPrivetKeyError)) {
-    has_capabilities_ = false;
     has_extended_workflow_ = false;
     bool has_printing = false;
 
@@ -492,9 +495,7 @@ void PrivetLocalPrintOperationImpl::OnPrivetInfoDone(
       for (size_t i = 0; i < api_list->GetSize(); i++) {
         std::string api;
         api_list->GetString(i, &api);
-        if (api == kPrivetCapabilitiesPath) {
-          has_capabilities_ = true;
-        } else if (api == kPrivetSubmitdocPath) {
+        if (api == kPrivetSubmitdocPath) {
           has_printing = true;
         } else if (api == kPrivetCreatejobPath) {
           has_extended_workflow_ = true;
@@ -514,26 +515,22 @@ void PrivetLocalPrintOperationImpl::OnPrivetInfoDone(
 }
 
 void PrivetLocalPrintOperationImpl::StartInitialRequest() {
-  if (has_capabilities_) {
-    GetCapabilities();
+  use_pdf_ = false;
+  ContentTypesCapability content_types;
+  if (content_types.LoadFrom(capabilities_)) {
+    use_pdf_ = content_types.Contains(kPrivetContentTypePDF) ||
+               content_types.Contains(kPrivetContentTypeAny);
+  }
+
+  if (use_pdf_) {
+    StartPrinting();
   } else {
-    // Since we have no capabilities, the only reasonable format we can
-    // request is PWG Raster.
-    use_pdf_ = false;
+    DpiCapability dpis;
+    if (dpis.LoadFrom(capabilities_)) {
+      dpi_ = std::max(dpis.GetDefault().horizontal, dpis.GetDefault().vertical);
+    }
     StartConvertToPWG();
   }
-}
-
-void PrivetLocalPrintOperationImpl::GetCapabilities() {
-  current_response_ = base::Bind(
-      &PrivetLocalPrintOperationImpl::OnCapabilitiesResponse,
-      base::Unretained(this));
-
-  url_fetcher_= privet_client_->CreateURLFetcher(
-      CreatePrivetURL(kPrivetCapabilitiesPath), net::URLFetcher::GET, this);
-  url_fetcher_->DoNotRetryOnTransientError();
-
-  url_fetcher_->Start();
 }
 
 void PrivetLocalPrintOperationImpl::DoCreatejob() {
@@ -543,7 +540,7 @@ void PrivetLocalPrintOperationImpl::DoCreatejob() {
 
   url_fetcher_= privet_client_->CreateURLFetcher(
       CreatePrivetURL(kPrivetCreatejobPath), net::URLFetcher::POST, this);
-  url_fetcher_->SetUploadData(kPrivetContentTypeCJT, ticket_);
+  url_fetcher_->SetUploadData(kPrivetContentTypeCJT, ticket_.ToString());
 
   url_fetcher_->Start();
 }
@@ -565,10 +562,15 @@ void PrivetLocalPrintOperationImpl::DoSubmitdoc() {
                                     user_);
   }
 
+  base::string16 shortened_jobname;
+
+  gfx::ElideString(base::UTF8ToUTF16(jobname_),
+                   kPrivetLocalPrintMaxJobNameLength,
+                   &shortened_jobname);
+
   if (!jobname_.empty()) {
-    url = net::AppendQueryParameter(url,
-                                    kPrivetURLKeyJobname,
-                                    jobname_);
+    url = net::AppendQueryParameter(
+        url, kPrivetURLKeyJobname, base::UTF16ToUTF8(shortened_jobname));
   }
 
   if (!jobid_.empty()) {
@@ -599,16 +601,67 @@ void PrivetLocalPrintOperationImpl::DoSubmitdoc() {
 }
 
 void PrivetLocalPrintOperationImpl::StartPrinting() {
-  if (has_extended_workflow_ && !ticket_.empty() && jobid_.empty()) {
+  if (has_extended_workflow_ && jobid_.empty()) {
     DoCreatejob();
   } else {
     DoSubmitdoc();
   }
 }
 
+void PrivetLocalPrintOperationImpl::FillPwgRasterSettings(
+    printing::PwgRasterSettings* transform_settings) {
+  PwgRasterConfigCapability raster_capability;
+  // If the raster capability fails to load, raster_capability will contain
+  // the default value.
+  raster_capability.LoadFrom(capabilities_);
+
+  DuplexTicketItem duplex_item;
+  DuplexType duplex_value = NO_DUPLEX;
+
+  DocumentSheetBack document_sheet_back =
+      raster_capability.value().document_sheet_back;
+
+  if (duplex_item.LoadFrom(ticket_)) {
+    duplex_value = duplex_item.value();
+  }
+
+  transform_settings->odd_page_transform = printing::TRANSFORM_NORMAL;
+  switch (duplex_value) {
+    case NO_DUPLEX:
+      transform_settings->odd_page_transform = printing::TRANSFORM_NORMAL;
+      break;
+    case LONG_EDGE:
+      if (document_sheet_back == ROTATED) {
+        transform_settings->odd_page_transform = printing::TRANSFORM_ROTATE_180;
+      } else if (document_sheet_back == FLIPPED) {
+        transform_settings->odd_page_transform =
+            printing::TRANSFORM_FLIP_VERTICAL;
+      }
+      break;
+    case SHORT_EDGE:
+      if (document_sheet_back == MANUAL_TUMBLE) {
+        transform_settings->odd_page_transform = printing::TRANSFORM_ROTATE_180;
+      } else if (document_sheet_back == FLIPPED) {
+        transform_settings->odd_page_transform =
+            printing::TRANSFORM_FLIP_HORIZONTAL;
+      }
+  }
+
+  transform_settings->rotate_all_pages =
+      raster_capability.value().rotate_all_pages;
+
+  transform_settings->reverse_page_order =
+      raster_capability.value().reverse_order_streaming;
+}
+
 void PrivetLocalPrintOperationImpl::StartConvertToPWG() {
+  printing::PwgRasterSettings transform_settings;
+
+  FillPwgRasterSettings(&transform_settings);
+
   if (!pwg_raster_converter_)
     pwg_raster_converter_ = PWGRasterConverter::CreateDefault();
+
   double scale = dpi_;
   scale /= printing::kPointsPerInch;
   // Make vertical rectangle to optimize streaming to printer. Fix orientation
@@ -616,41 +669,11 @@ void PrivetLocalPrintOperationImpl::StartConvertToPWG() {
   gfx::Rect area(std::min(page_size_.width(), page_size_.height()) * scale,
                  std::max(page_size_.width(), page_size_.height()) * scale);
   pwg_raster_converter_->Start(
-      data_, printing::PdfRenderSettings(area, dpi_, true),
+      data_,
+      printing::PdfRenderSettings(area, dpi_, true),
+      transform_settings,
       base::Bind(&PrivetLocalPrintOperationImpl::OnPWGRasterConverted,
                  base::Unretained(this)));
-}
-
-void PrivetLocalPrintOperationImpl::OnCapabilitiesResponse(
-    bool has_error,
-    const base::DictionaryValue* value) {
-  if (has_error) {
-    delegate_->OnPrivetPrintingError(this, 200);
-    return;
-  }
-
-  cloud_devices::CloudDeviceDescription description;
-  if (!description.InitFromDictionary(make_scoped_ptr(value->DeepCopy()))) {
-    delegate_->OnPrivetPrintingError(this, 200);
-    return;
-  }
-
-  use_pdf_ = false;
-  cloud_devices::printer::ContentTypesCapability content_types;
-  if (content_types.LoadFrom(description)) {
-    use_pdf_ = content_types.Contains(kPrivetContentTypePDF) ||
-               content_types.Contains(kPrivetContentTypeAny);
-  }
-
-  if (use_pdf_) {
-    StartPrinting();
-  } else {
-    cloud_devices::printer::DpiCapability dpis;
-    if (dpis.LoadFrom(description)) {
-      dpi_ = std::max(dpis.GetDefault().horizontal, dpis.GetDefault().vertical);
-    }
-    StartConvertToPWG();
-  }
 }
 
 void PrivetLocalPrintOperationImpl::OnSubmitdocResponse(
@@ -755,7 +778,13 @@ void PrivetLocalPrintOperationImpl::SetData(base::RefCountedBytes* data) {
 
 void PrivetLocalPrintOperationImpl::SetTicket(const std::string& ticket) {
   DCHECK(!started_);
-  ticket_ = ticket;
+  ticket_.InitFromString(ticket);
+}
+
+void PrivetLocalPrintOperationImpl::SetCapabilities(
+    const std::string& capabilities) {
+  DCHECK(!started_);
+  capabilities_.InitFromString(capabilities);
 }
 
 void PrivetLocalPrintOperationImpl::SetUsername(const std::string& user) {
@@ -787,16 +816,9 @@ PrivetHTTPClientImpl::PrivetHTTPClientImpl(
     const std::string& name,
     const net::HostPortPair& host_port,
     net::URLRequestContextGetter* request_context)
-    : name_(name),
-      fetcher_factory_(request_context),
-      host_port_(host_port) {
-}
+    : name_(name), request_context_(request_context), host_port_(host_port) {}
 
 PrivetHTTPClientImpl::~PrivetHTTPClientImpl() {
-}
-
-const base::DictionaryValue* PrivetHTTPClientImpl::GetCachedInfo() const {
-  return cached_info_.get();
 }
 
 scoped_ptr<PrivetRegisterOperation>
@@ -861,21 +883,12 @@ scoped_ptr<PrivetURLFetcher> PrivetHTTPClientImpl::CreateURLFetcher(
   replacements.SetHostStr(host_port_.host());
   std::string port(base::IntToString(host_port_.port()));  // Keep string alive.
   replacements.SetPortStr(port);
-  return fetcher_factory_.CreateURLFetcher(url.ReplaceComponents(replacements),
-                                           request_type, delegate);
+  return scoped_ptr<PrivetURLFetcher>(
+      new PrivetURLFetcher(url.ReplaceComponents(replacements),
+                           request_type,
+                           request_context_.get(),
+                           delegate));
 }
-
-void PrivetHTTPClientImpl::CacheInfo(const base::DictionaryValue* cached_info) {
-  cached_info_.reset(cached_info->DeepCopy());
-  std::string token;
-  if (cached_info_->GetString(kPrivetInfoKeyToken, &token)) {
-    fetcher_factory_.set_token(token);
-  }
-}
-
-bool PrivetHTTPClientImpl::HasToken() const {
-  return fetcher_factory_.get_token() != "";
-};
 
 void PrivetHTTPClientImpl::RefreshPrivetToken(
     const PrivetURLFetcher::TokenCallback& callback) {

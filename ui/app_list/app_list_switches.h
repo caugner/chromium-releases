@@ -10,16 +10,28 @@
 namespace app_list {
 namespace switches {
 
-APP_LIST_EXPORT extern const char kEnableExperimentalAppList[];
-APP_LIST_EXPORT extern const char kEnableFolderUI[];
-APP_LIST_EXPORT extern const char kDisableVoiceSearch[];
+// Please keep these flags sorted.
+APP_LIST_EXPORT extern const char kDisableSyncAppList[];
+APP_LIST_EXPORT extern const char kEnableVoiceSearch[];
 APP_LIST_EXPORT extern const char kEnableAppInfo[];
+APP_LIST_EXPORT extern const char kEnableExperimentalAppList[];
+APP_LIST_EXPORT extern const char kEnableExperimentalAppListPosition[];
+APP_LIST_EXPORT extern const char kEnableHotwordAlwaysOn[];
+APP_LIST_EXPORT extern const char kEnableSyncAppList[];
+
+bool APP_LIST_EXPORT IsAppListSyncEnabled();
 
 bool APP_LIST_EXPORT IsFolderUIEnabled();
 
 bool APP_LIST_EXPORT IsVoiceSearchEnabled();
 
+bool APP_LIST_EXPORT IsHotwordAlwaysOnEnabled();
+
 bool APP_LIST_EXPORT IsAppInfoEnabled();
+
+bool APP_LIST_EXPORT IsExperimentalAppListEnabled();
+
+bool APP_LIST_EXPORT IsExperimentalAppListPositionEnabled();
 
 }  // namespace switches
 }  // namespace app_list

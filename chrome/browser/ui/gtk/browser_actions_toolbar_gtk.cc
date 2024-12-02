@@ -144,7 +144,7 @@ class BrowserActionButton : public content::NotificationObserver,
         this, chrome::NOTIFICATION_EXTENSION_BROWSER_ACTION_UPDATED,
         content::Source<ExtensionAction>(browser_action()));
     registrar_.Add(
-        this, chrome::NOTIFICATION_EXTENSION_UNLOADED,
+        this, chrome::NOTIFICATION_EXTENSION_UNLOADED_DEPRECATED,
         content::Source<Profile>(
             toolbar->browser()->profile()->GetOriginalProfile()));
     registrar_.Add(
@@ -177,7 +177,7 @@ class BrowserActionButton : public content::NotificationObserver,
      case chrome::NOTIFICATION_EXTENSION_BROWSER_ACTION_UPDATED:
       UpdateState();
       break;
-     case chrome::NOTIFICATION_EXTENSION_UNLOADED:
+     case chrome::NOTIFICATION_EXTENSION_UNLOADED_DEPRECATED:
      case chrome::NOTIFICATION_WINDOW_CLOSED:
       DisconnectBrowserActionPopupAccelerator();
       break;
@@ -259,16 +259,16 @@ class BrowserActionButton : public content::NotificationObserver,
   // popup will grant tab permissions if |should_grant| is true. Popup's shown
   // via an API should not grant permissions.
   bool Activate(GtkWidget* widget, bool should_grant) {
-    ExtensionToolbarModel* model = toolbar_->model();
+    extensions::ExtensionToolbarModel* model = toolbar_->model();
     const Extension* extension = extension_;
     Browser* browser = toolbar_->browser();
     GURL popup_url;
 
     switch (model->ExecuteBrowserAction(
         extension, browser, &popup_url, should_grant)) {
-      case ExtensionToolbarModel::ACTION_NONE:
+      case extensions::ExtensionToolbarModel::ACTION_NONE:
         break;
-      case ExtensionToolbarModel::ACTION_SHOW_POPUP:
+      case extensions::ExtensionToolbarModel::ACTION_SHOW_POPUP:
         ExtensionPopupGtk::Show(popup_url, browser, widget,
                                 ExtensionPopupGtk::SHOW);
         return true;
@@ -503,7 +503,7 @@ BrowserActionsToolbarGtk::BrowserActionsToolbarGtk(Browser* browser)
       desired_width_(0),
       start_width_(0),
       weak_factory_(this) {
-  model_ = ExtensionToolbarModel::Get(profile_);
+  model_ = extensions::ExtensionToolbarModel::Get(profile_);
   if (!model_)
     return;
 
@@ -834,9 +834,9 @@ void BrowserActionsToolbarGtk::ExecuteCommand(int command_id, int event_flags) {
 
   switch (model_->ExecuteBrowserAction(
       extension, browser(), &popup_url, true)) {
-    case ExtensionToolbarModel::ACTION_NONE:
+    case extensions::ExtensionToolbarModel::ACTION_NONE:
       break;
-    case ExtensionToolbarModel::ACTION_SHOW_POPUP:
+    case extensions::ExtensionToolbarModel::ACTION_SHOW_POPUP:
       ExtensionPopupGtk::Show(popup_url, browser(), chevron(),
                               ExtensionPopupGtk::SHOW);
       break;

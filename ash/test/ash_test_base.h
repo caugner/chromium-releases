@@ -114,6 +114,8 @@ class AshTestBase : public testing::Test {
 
   void set_start_session(bool start_session) { start_session_ = start_session; }
 
+  AshTestHelper* ash_test_helper() { return ash_test_helper_.get(); }
+
   void RunAllPendingInMessageLoop();
 
   TestScreenshotDelegate* GetScreenshotDelegate();
@@ -137,7 +139,7 @@ class AshTestBase : public testing::Test {
   bool teardown_called_;
   // |SetUp()| doesn't activate session if this is set to false.
   bool start_session_;
-  content::TestBrowserThreadBundle thread_bundle_;
+  scoped_ptr<content::TestBrowserThreadBundle> thread_bundle_;
   scoped_ptr<AshTestHelper> ash_test_helper_;
   scoped_ptr<aura::test::EventGenerator> event_generator_;
 #if defined(OS_WIN)

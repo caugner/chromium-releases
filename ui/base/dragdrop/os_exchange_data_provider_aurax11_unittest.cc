@@ -12,6 +12,7 @@
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/base/dragdrop/file_info.h"
 #include "url/gurl.h"
 
 const char kFileURL[] = "file:///home/user/file.txt";
@@ -68,24 +69,27 @@ TEST_F(OSExchangeDataProviderAuraX11Test, FilesArentURLs) {
   AddURLList(kFileURL);
 
   EXPECT_TRUE(provider.HasFile());
-  EXPECT_FALSE(provider.HasURL());
+  EXPECT_TRUE(provider.HasURL(ui::OSExchangeData::CONVERT_FILENAMES));
+  EXPECT_FALSE(provider.HasURL(ui::OSExchangeData::DO_NOT_CONVERT_FILENAMES));
 }
 
 TEST_F(OSExchangeDataProviderAuraX11Test, HTTPURLsArentFiles) {
   AddURLList(kGoogleURL);
 
   EXPECT_FALSE(provider.HasFile());
-  EXPECT_TRUE(provider.HasURL());
+  EXPECT_TRUE(provider.HasURL(ui::OSExchangeData::CONVERT_FILENAMES));
+  EXPECT_TRUE(provider.HasURL(ui::OSExchangeData::DO_NOT_CONVERT_FILENAMES));
 }
 
 TEST_F(OSExchangeDataProviderAuraX11Test, URIListWithBoth) {
   AddURLList("file:///home/user/file.txt\nhttp://www.google.com");
 
   EXPECT_TRUE(provider.HasFile());
-  EXPECT_TRUE(provider.HasURL());
+  EXPECT_TRUE(provider.HasURL(ui::OSExchangeData::CONVERT_FILENAMES));
+  EXPECT_TRUE(provider.HasURL(ui::OSExchangeData::DO_NOT_CONVERT_FILENAMES));
 
   // We should only receive the file from GetFilenames().
-  std::vector<OSExchangeData::FileInfo> filenames;
+  std::vector<FileInfo> filenames;
   EXPECT_TRUE(provider.GetFilenames(&filenames));
   ASSERT_EQ(1u, filenames.size());
   EXPECT_EQ(kFileName, filenames[0].path.value());
@@ -104,7 +108,7 @@ TEST_F(OSExchangeDataProviderAuraX11Test, OnlyStringURLIsUnfiltered) {
   provider.SetString(file_url);
 
   EXPECT_TRUE(provider.HasString());
-  EXPECT_FALSE(provider.HasURL());
+  EXPECT_FALSE(provider.HasURL(ui::OSExchangeData::DO_NOT_CONVERT_FILENAMES));
 }
 
 TEST_F(OSExchangeDataProviderAuraX11Test, StringAndURIListFilterString) {

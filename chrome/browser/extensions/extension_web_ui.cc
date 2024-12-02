@@ -30,6 +30,7 @@
 #include "content/public/browser/web_ui.h"
 #include "content/public/common/bindings_policy.h"
 #include "content/public/common/page_transition_types.h"
+#include "extensions/browser/extension_registry.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_resource.h"
 #include "extensions/common/manifest_handlers/incognito_info.h"
@@ -120,6 +121,30 @@ void RunFaviconCallbackAsync(
                  base::Owned(favicon_bitmap_results)));
 }
 
+bool ValidateOverrideURL(const base::Value* override_url_value,
+                         const GURL& source_url,
+                         const extensions::ExtensionSet& extensions,
+                         GURL* override_url,
+                         const Extension** extension) {
+  std::string override;
+  if (!override_url_value || !override_url_value->GetAsString(&override)) {
+    return false;
+  }
+  if (!source_url.query().empty())
+    override += "?" + source_url.query();
+  if (!source_url.ref().empty())
+    override += "#" + source_url.ref();
+  *override_url = GURL(override);
+  if (!override_url->is_valid()) {
+    return false;
+  }
+  *extension = extensions.GetByID(override_url->host());
+  if (!*extension) {
+    return false;
+  }
+  return true;
+}
+
 }  // namespace
 
 const char ExtensionWebUI::kExtensionURLOverrides[] =
@@ -142,8 +167,8 @@ ExtensionWebUI::ExtensionWebUI(content::WebUI* web_ui, const GURL& url)
 
   // Hack: A few things we specialize just for the bookmark manager.
   if (extension->id() == extension_misc::kBookmarkManagerId) {
-    bookmark_manager_private_event_router_.reset(
-        new extensions::BookmarkManagerPrivateEventRouter(
+    bookmark_manager_private_drag_event_router_.reset(
+        new extensions::BookmarkManagerPrivateDragEventRouter(
             profile, web_ui->GetWebContents()));
 
     web_ui->SetLinkTransitionType(content::PAGE_TRANSITION_AUTO_BOOKMARK);
@@ -152,9 +177,9 @@ ExtensionWebUI::ExtensionWebUI(content::WebUI* web_ui, const GURL& url)
 
 ExtensionWebUI::~ExtensionWebUI() {}
 
-extensions::BookmarkManagerPrivateEventRouter*
-ExtensionWebUI::bookmark_manager_private_event_router() {
-  return bookmark_manager_private_event_router_.get();
+extensions::BookmarkManagerPrivateDragEventRouter*
+ExtensionWebUI::bookmark_manager_private_drag_event_router() {
+  return bookmark_manager_private_drag_event_router_.get();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -178,47 +203,33 @@ bool ExtensionWebUI::HandleChromeURLOverride(
   Profile* profile = Profile::FromBrowserContext(browser_context);
   const base::DictionaryValue* overrides =
       profile->GetPrefs()->GetDictionary(kExtensionURLOverrides);
-  std::string page = url->host();
+
+  std::string url_host = url->host();
   const base::ListValue* url_list = NULL;
-  if (!overrides || !overrides->GetList(page, &url_list))
+  if (!overrides || !overrides->GetList(url_host, &url_list))
     return false;
 
-  ExtensionService* service = profile->GetExtensionService();
+  extensions::ExtensionRegistry* registry =
+      extensions::ExtensionRegistry::Get(browser_context);
+  const extensions::ExtensionSet& extensions = registry->enabled_extensions();
 
-  size_t i = 0;
-  while (i < url_list->GetSize()) {
+  GURL component_url;
+  bool found_component_override = false;
+
+  // Iterate over the URL list looking for a suitable override. If a
+  // valid non-component override is encountered it is chosen immediately.
+  for (size_t i = 0; i < url_list->GetSize(); ++i) {
     const base::Value* val = NULL;
     url_list->Get(i, &val);
 
-    // Verify that the override value is good.  If not, unregister it and find
-    // the next one.
-    std::string override;
-    if (!val->GetAsString(&override)) {
-      NOTREACHED();
-      UnregisterChromeURLOverride(page, profile, val);
-      continue;
-    }
-
-    if (!url->query().empty())
-      override += "?" + url->query();
-    if (!url->ref().empty())
-      override += "#" + url->ref();
-    GURL extension_url(override);
-    if (!extension_url.is_valid()) {
-      NOTREACHED();
-      UnregisterChromeURLOverride(page, profile, val);
-      continue;
-    }
-
-    // Verify that the extension that's being referred to actually exists.
-    const Extension* extension =
-        service->extensions()->GetByID(extension_url.host());
-    if (!extension) {
-      // This can currently happen if you use --load-extension one run, and
-      // then don't use it the next.  It could also happen if an extension
-      // were deleted directly from the filesystem, etc.
-      LOG(WARNING) << "chrome URL override present for non-existant extension";
-      UnregisterChromeURLOverride(page, profile, val);
+    GURL override_url;
+    const Extension* extension;
+    if (!ValidateOverrideURL(
+            val, *url, extensions, &override_url, &extension)) {
+      LOG(WARNING) << "Invalid chrome URL override";
+      UnregisterChromeURLOverride(url_host, profile, val);
+      // The above Unregister call will remove this item from url_list.
+      --i;
       continue;
     }
 
@@ -228,13 +239,27 @@ bool ExtensionWebUI::HandleChromeURLOverride(
         extensions::IncognitoInfo::IsSplitMode(extension) &&
         extensions::util::IsIncognitoEnabled(extension->id(), profile);
     if (profile->IsOffTheRecord() && !incognito_override_allowed) {
-      ++i;
       continue;
     }
 
-    *url = extension_url;
+    if (!extensions::Manifest::IsComponentLocation(extension->location())) {
+      *url = override_url;
+      return true;
+    }
+
+    if (!found_component_override) {
+      found_component_override = true;
+      component_url = override_url;
+    }
+  }
+
+  // If no other non-component overrides were found, use the first known
+  // component override, if any.
+  if (found_component_override) {
+    *url = component_url;
     return true;
   }
+
   return false;
 }
 

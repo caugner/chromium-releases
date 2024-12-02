@@ -12,7 +12,8 @@
 #include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "content/browser/renderer_host/compositing_iosurface_shader_programs_mac.h"
-#include "content/public/common/content_switches.h"
+#include "content/browser/gpu/gpu_data_manager_impl.h"
+#include "ui/base/ui_base_switches.h"
 #include "ui/gl/gl_switches.h"
 #include "ui/gl/gpu_switching_manager.h"
 
@@ -20,8 +21,9 @@ namespace content {
 
 CoreAnimationStatus GetCoreAnimationStatus() {
   static CoreAnimationStatus status =
-      CommandLine::ForCurrentProcess()->HasSwitch(switches::kUseCoreAnimation) ?
-          CORE_ANIMATION_ENABLED : CORE_ANIMATION_DISABLED;
+      CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kDisableCoreAnimation) ?
+              CORE_ANIMATION_DISABLED : CORE_ANIMATION_ENABLED;
   return status;
 }
 
@@ -33,11 +35,11 @@ CompositingIOSurfaceContext::Get(int window_number) {
   // Return the context for this window_number, if it exists.
   WindowMap::iterator found = window_map()->find(window_number);
   if (found != window_map()->end()) {
-    DCHECK(found->second->can_be_shared_);
+    DCHECK(!found->second->poisoned_);
     return found->second;
   }
 
-  bool is_vsync_disabled =
+  static bool is_vsync_disabled =
       CommandLine::ForCurrentProcess()->HasSwitch(switches::kDisableGpuVsync);
 
   base::scoped_nsobject<NSOpenGLContext> nsgl_context;
@@ -144,30 +146,23 @@ CompositingIOSurfaceContext::Get(int window_number) {
     return NULL;
   }
 
-  scoped_refptr<DisplayLinkMac> display_link;
-  if (!is_vsync_disabled) {
-    display_link = DisplayLinkMac::Create();
-    if (!display_link) {
-      LOG(ERROR) << "Failed to create display link for GL context.";
-    }
-  }
-
   return new CompositingIOSurfaceContext(
       window_number,
       nsgl_context.release(),
       cgl_context_strong,
       cgl_context,
       is_vsync_disabled,
-      display_link,
       shader_program_cache.Pass());
 }
 
-// static
-void CompositingIOSurfaceContext::MarkExistingContextsAsNotShareable() {
+void CompositingIOSurfaceContext::PoisonContextAndSharegroup() {
+  if (poisoned_)
+    return;
+
   for (WindowMap::iterator it = window_map()->begin();
        it != window_map()->end();
        ++it) {
-    it->second->can_be_shared_ = false;
+    it->second->poisoned_ = true;
   }
   window_map()->clear();
 }
@@ -178,7 +173,6 @@ CompositingIOSurfaceContext::CompositingIOSurfaceContext(
     base::ScopedTypeRef<CGLContextObj> cgl_context_strong,
     CGLContextObj cgl_context,
     bool is_vsync_disabled,
-    scoped_refptr<DisplayLinkMac> display_link,
     scoped_ptr<CompositingIOSurfaceShaderPrograms> shader_program_cache)
     : window_number_(window_number),
       nsgl_context_(nsgl_context),
@@ -186,21 +180,24 @@ CompositingIOSurfaceContext::CompositingIOSurfaceContext(
       cgl_context_(cgl_context),
       is_vsync_disabled_(is_vsync_disabled),
       shader_program_cache_(shader_program_cache.Pass()),
-      can_be_shared_(true),
+      poisoned_(false),
       initialized_is_intel_(false),
       is_intel_(false),
-      screen_(0),
-      display_link_(display_link) {
+      screen_(0) {
   DCHECK(window_map()->find(window_number_) == window_map()->end());
   window_map()->insert(std::make_pair(window_number_, this));
+
+  GpuDataManager::GetInstance()->AddObserver(this);
 }
 
 CompositingIOSurfaceContext::~CompositingIOSurfaceContext() {
+  GpuDataManager::GetInstance()->RemoveObserver(this);
+
   {
     gfx::ScopedCGLSetCurrentContext scoped_set_current_context(cgl_context_);
     shader_program_cache_->Reset();
   }
-  if (can_be_shared_) {
+  if (!poisoned_) {
     DCHECK(window_map()->find(window_number_) != window_map()->end());
     DCHECK(window_map()->find(window_number_)->second == this);
     window_map()->erase(window_number_);
@@ -229,6 +226,13 @@ bool CompositingIOSurfaceContext::IsVendorIntel() {
     initialized_is_intel_ = true;
   }
   return is_intel_;
+}
+
+void CompositingIOSurfaceContext::OnGpuSwitching() {
+  // Recreate all browser-side GL contexts whenever the GPU switches. If this
+  // is not done, performance will suffer.
+  // http://crbug.com/361493
+  PoisonContextAndSharegroup();
 }
 
 // static

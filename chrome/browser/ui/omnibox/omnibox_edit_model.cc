@@ -50,7 +50,6 @@
 #include "chrome/browser/ui/omnibox/omnibox_popup_model.h"
 #include "chrome/browser/ui/omnibox/omnibox_popup_view.h"
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
-#include "chrome/browser/ui/search/instant_controller.h"
 #include "chrome/browser/ui/search/instant_search_prerenderer.h"
 #include "chrome/browser/ui/search/search_tab_helper.h"
 #include "chrome/browser/ui/toolbar/toolbar_model.h"
@@ -502,20 +501,21 @@ void OmniboxEditModel::SetInputInProgress(bool in_progress) {
     time_user_first_modified_omnibox_ = base::TimeTicks::Now();
     content::RecordAction(base::UserMetricsAction("OmniboxInputInProgress"));
     autocomplete_controller()->ResetSession();
-    // Once the user starts editing, re-enable URL replacement, so that it will
-    // kick in if applicable once the edit is committed or reverted. (While the
-    // edit is in progress, this won't have a visible effect.)
-    controller_->GetToolbarModel()->set_url_replacement_enabled(true);
   }
 
-  if (chrome::GetOriginChipV2HideTrigger() ==
-      chrome::ORIGIN_CHIP_V2_HIDE_ON_USER_INPUT)
-    controller()->GetToolbarModel()->set_origin_chip_enabled(!in_progress);
+  // The following code handles two cases:
+  // * For HIDE_ON_USER_INPUT, it hides the chip when user input begins.
+  // * For HIDE_ON_MOUSE_RELEASE, which only hides the chip on mouse release if
+  //   the omnibox is empty, it handles the "omnibox was not empty" case by
+  //   acting like HIDE_ON_USER_INPUT.
+  if (chrome::ShouldDisplayOriginChipV2() && in_progress)
+    controller()->GetToolbarModel()->set_origin_chip_enabled(false);
 
   controller_->GetToolbarModel()->set_input_in_progress(in_progress);
   controller_->Update(NULL);
 
-  delegate_->NotifySearchTabHelper(user_input_in_progress_, !in_revert_);
+  if (user_input_in_progress_ || !in_revert_)
+    delegate_->OnInputStateChanged();
 }
 
 void OmniboxEditModel::Revert() {
@@ -784,18 +784,9 @@ void OmniboxEditModel::OpenMatch(AutocompleteMatch match,
       // in template_url.h.
     }
 
-    // TODO(pkasting): This histogram obsoletes the next one.  Remove the next
-    // one in Chrome 32 or later.
     UMA_HISTOGRAM_ENUMERATION("Omnibox.SearchEngineType",
         TemplateURLPrepopulateData::GetEngineType(*template_url),
         SEARCH_ENGINE_MAX);
-    // NOTE: Non-prepopulated engines will all have ID 0, which is fine as
-    // the prepopulate IDs start at 1.  Distribution-specific engines will
-    // all have IDs above the maximum, and will be automatically lumped
-    // together in an "overflow" bucket in the histogram.
-    UMA_HISTOGRAM_ENUMERATION("Omnibox.SearchEngine",
-        template_url->prepopulate_id(),
-        TemplateURLPrepopulateData::kMaxPrepopulatedEngineID);
   }
 
   // Get the current text before we call RevertAll() which will clear it.
@@ -869,7 +860,9 @@ bool OmniboxEditModel::AcceptKeyword(EnteredKeywordModeMethod entered_method) {
 void OmniboxEditModel::AcceptTemporaryTextAsUserText() {
   InternalSetUserText(UserTextFromDisplayText(view_->GetText()));
   has_temporary_text_ = false;
-  delegate_->NotifySearchTabHelper(user_input_in_progress_, !in_revert_);
+
+  if (user_input_in_progress_ || !in_revert_)
+    delegate_->OnInputStateChanged();
 }
 
 void OmniboxEditModel::ClearKeyword(const base::string16& visible_text) {
@@ -922,12 +915,14 @@ void OmniboxEditModel::OnSetFocus(bool control_down) {
     // that we avoid PermanentURL() here because it's not guaranteed to give us
     // the actual underlying current URL, e.g. if we're on the NTP and the
     // |permanent_text_| is empty.
-    autocomplete_controller()->StartZeroSuggest(delegate_->GetURL(),
-                                                ClassifyPage(),
-                                                permanent_text_);
+    autocomplete_controller()->StartZeroSuggest(AutocompleteInput(
+        permanent_text_, base::string16::npos, base::string16(),
+        delegate_->GetURL(), ClassifyPage(), false, false, true,
+        AutocompleteInput::ALL_MATCHES));
   }
 
-  delegate_->NotifySearchTabHelper(user_input_in_progress_, !in_revert_);
+  if (user_input_in_progress_ || !in_revert_)
+    delegate_->OnInputStateChanged();
 }
 
 void OmniboxEditModel::SetCaretVisibility(bool visible) {
@@ -939,23 +934,12 @@ void OmniboxEditModel::SetCaretVisibility(bool visible) {
 }
 
 void OmniboxEditModel::OnWillKillFocus(gfx::NativeView view_gaining_focus) {
-  InstantController* instant = GetInstantController();
-  if (instant) {
-    instant->OmniboxFocusChanged(OMNIBOX_FOCUS_NONE,
-                                 OMNIBOX_FOCUS_CHANGE_EXPLICIT,
-                                 view_gaining_focus);
-  }
-
-  // TODO(jered): Rip this out along with StartZeroSuggest.
-  autocomplete_controller()->StopZeroSuggest();
-  delegate_->NotifySearchTabHelper(user_input_in_progress_, !in_revert_);
+  if (user_input_in_progress_ || !in_revert_)
+    delegate_->OnInputStateChanged();
 }
 
 void OmniboxEditModel::OnKillFocus() {
-  // TODO(samarth): determine if it is safe to move the call to
-  // OmniboxFocusChanged() from OnWillKillFocus() to here, which would let us
-  // just call SetFocusState() to handle the state change.
-  focus_state_ = OMNIBOX_FOCUS_NONE;
+  SetFocusState(OMNIBOX_FOCUS_NONE, OMNIBOX_FOCUS_CHANGE_EXPLICIT);
   focus_source_ = INVALID;
   control_key_state_ = UP;
   paste_state_ = NONE;
@@ -977,6 +961,15 @@ bool OmniboxEditModel::OnEscapeKeyPressed() {
     view_->Update();
   }
 
+  // When using the origin chip, hitting escape to revert all should either
+  // display the URL (when search term replacement would not be performed for
+  // this page) or the search terms (when it would).  To accomplish this,
+  // we'll need to disable URL replacement iff it's currently enabled and
+  // search term replacement wouldn't normally happen.
+  bool should_disable_url_replacement =
+      controller_->GetToolbarModel()->url_replacement_enabled() &&
+      !controller_->GetToolbarModel()->WouldPerformSearchTermReplacement(true);
+
   // If the user wasn't editing, but merely had focus in the edit, allow <esc>
   // to be processed as an accelerator, so it can still be used to stop a load.
   // When the permanent text isn't all selected we still fall through to the
@@ -984,8 +977,8 @@ bool OmniboxEditModel::OnEscapeKeyPressed() {
   // <esc> to quickly replace all the text; this matches IE.
   const bool has_zero_suggest_match = match.provider &&
       (match.provider->type() == AutocompleteProvider::TYPE_ZERO_SUGGEST);
-  if (!has_zero_suggest_match && !user_input_in_progress_ &&
-      view_->IsSelectAll())
+  if (!has_zero_suggest_match && !should_disable_url_replacement &&
+      !user_input_in_progress_ && view_->IsSelectAll())
     return false;
 
   if (!user_text_.empty()) {
@@ -993,7 +986,12 @@ bool OmniboxEditModel::OnEscapeKeyPressed() {
                               OMNIBOX_USER_TEXT_CLEARED_WITH_ESCAPE,
                               OMNIBOX_USER_TEXT_CLEARED_NUM_OF_ITEMS);
   }
-  view_->RevertAll();
+
+  if (should_disable_url_replacement) {
+    controller_->GetToolbarModel()->set_url_replacement_enabled(false);
+    UpdatePermanentText();
+  }
+  view_->RevertWithoutResettingSearchTermReplacement();
   view_->SelectAll(true);
   return true;
 }
@@ -1382,7 +1380,8 @@ bool OmniboxEditModel::CreatedKeywordSearchByInsertingSpaceInMiddle(
 
   // Then check if the text before the inserted space matches a keyword.
   base::string16 keyword;
-  TrimWhitespace(new_text.substr(0, space_position), TRIM_LEADING, &keyword);
+  base::TrimWhitespace(new_text.substr(0, space_position), base::TRIM_LEADING,
+                       &keyword);
   return !keyword.empty() && !autocomplete_controller()->keyword_provider()->
       GetKeywordForText(keyword).empty();
 }
@@ -1439,10 +1438,6 @@ void OmniboxEditModel::SetFocusState(OmniboxFocusState state,
   if (state == focus_state_)
     return;
 
-  InstantController* instant = GetInstantController();
-  if (instant)
-    instant->OmniboxFocusChanged(state, reason, NULL);
-
   // Update state and notify view if the omnibox has focus and the caret
   // visibility changed.
   const bool was_caret_visible = is_caret_visible();
@@ -1450,4 +1445,6 @@ void OmniboxEditModel::SetFocusState(OmniboxFocusState state,
   if (focus_state_ != OMNIBOX_FOCUS_NONE &&
       is_caret_visible() != was_caret_visible)
     view_->ApplyCaretVisibility();
+
+  delegate_->OnFocusChanged(focus_state_, reason);
 }

@@ -19,7 +19,6 @@
 #include "chrome/browser/extensions/updater/extension_updater.h"
 #include "chrome/browser/extensions/webstore_startup_installer.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
-#include "chrome/browser/signin/profile_oauth2_token_service.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
@@ -28,6 +27,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/extensions/manifest_url_handler.h"
+#include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "extensions/browser/extension_system.h"
@@ -148,6 +148,18 @@ void StartupAppLauncher::OnOAuthFileLoaded(KioskOAuthParams* auth_params) {
   InitializeTokenService();
 }
 
+void StartupAppLauncher::RestartLauncher() {
+  // If the installer is still running in the background, we don't need to
+  // restart the launch process. We will just wait until it completes and
+  // lunches the kiosk app.
+  if (installer_ != NULL) {
+    LOG(WARNING) << "Installer still running";
+    return;
+  }
+
+  MaybeInitializeNetwork();
+}
+
 void StartupAppLauncher::MaybeInitializeNetwork() {
   network_ready_handled_ = false;
 
@@ -176,8 +188,9 @@ void StartupAppLauncher::InitializeTokenService() {
       ProfileOAuth2TokenServiceFactory::GetForProfile(profile_);
   SigninManagerBase* signin_manager =
       SigninManagerFactory::GetForProfile(profile_);
-  if (profile_token_service->RefreshTokenIsAvailable(
-          signin_manager->GetAuthenticatedAccountId()) ||
+  const std::string primary_account_id =
+      signin_manager->GetAuthenticatedAccountId();
+  if (profile_token_service->RefreshTokenIsAvailable(primary_account_id) ||
       auth_params_.refresh_token.empty()) {
     MaybeInitializeNetwork();
   } else {
@@ -196,7 +209,7 @@ void StartupAppLauncher::InitializeTokenService() {
     profile_token_service->AddObserver(this);
 
     profile_token_service->UpdateCredentials(
-        "kiosk_mode@localhost",
+        primary_account_id,
         auth_params_.refresh_token);
   }
 }
@@ -294,6 +307,11 @@ void StartupAppLauncher::BeginInstall() {
 void StartupAppLauncher::InstallCallback(bool success,
                                          const std::string& error) {
   installer_ = NULL;
+  if (delegate_->IsShowingNetworkConfigScreen()) {
+    LOG(WARNING) << "Showing network config screen";
+    return;
+  }
+
   if (success) {
     // Finish initialization after the callback returns.
     // So that the app finishes its installation.

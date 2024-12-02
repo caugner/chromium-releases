@@ -164,6 +164,10 @@ bool BrowserAccessibilityAndroid::IsHierarchical() const {
           role() == ui::AX_ROLE_TREE);
 }
 
+bool BrowserAccessibilityAndroid::IsLink() const {
+  return role() == ui::AX_ROLE_LINK || role() == ui::AX_ROLE_IMAGE_MAP_LINK;
+}
+
 bool BrowserAccessibilityAndroid::IsMultiLine() const {
   return role() == ui::AX_ROLE_TEXT_AREA;
 }
@@ -246,6 +250,9 @@ const char* BrowserAccessibilityAndroid::GetClassName() const {
     case ui::AX_ROLE_DIALOG:
       class_name = "android.app.Dialog";
       break;
+    case ui::AX_ROLE_ROOT_WEB_AREA:
+      class_name = "android.webkit.WebView";
+      break;
     default:
       class_name = "android.view.View";
       break;
@@ -260,8 +267,7 @@ base::string16 BrowserAccessibilityAndroid::GetText() const {
     return base::string16();
   }
 
-  base::string16 description = GetString16Attribute(
-      ui::AX_ATTR_DESCRIPTION);
+  base::string16 description = GetString16Attribute(ui::AX_ATTR_DESCRIPTION);
   base::string16 text;
   if (!name().empty())
     text = base::UTF8ToUTF16(name());
@@ -280,17 +286,31 @@ base::string16 BrowserAccessibilityAndroid::GetText() const {
   }
 
   switch(role()) {
-    case ui::AX_ROLE_IMAGE_MAP_LINK:
-    case ui::AX_ROLE_LINK:
-      if (!text.empty())
-        text += base::ASCIIToUTF16(" ");
-      text += base::ASCIIToUTF16("Link");
-      break;
     case ui::AX_ROLE_HEADING:
       // Only append "heading" if this node already has text.
       if (!text.empty())
         text += base::ASCIIToUTF16(" Heading");
       break;
+  }
+
+  if (text.empty() && IsLink()) {
+    base::string16 url = GetString16Attribute(ui::AX_ATTR_URL);
+    // Given a url like http://foo.com/bar/baz.png, just return the
+    // base name, e.g., "baz".
+    int trailing_slashes = 0;
+    while (url.size() - trailing_slashes > 0 &&
+           url[url.size() - trailing_slashes - 1] == '/') {
+      trailing_slashes++;
+    }
+    if (trailing_slashes)
+      url = url.substr(0, url.size() - trailing_slashes);
+    size_t slash_index = url.rfind('/');
+    if (slash_index != std::string::npos)
+      url = url.substr(slash_index + 1);
+    size_t dot_index = url.rfind('.');
+    if (dot_index != std::string::npos)
+      url = url.substr(0, dot_index);
+    text = url;
   }
 
   return text;

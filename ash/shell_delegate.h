@@ -19,9 +19,6 @@ class AppListViewDelegate;
 namespace aura {
 class RootWindow;
 class Window;
-namespace client {
-class UserActionClient;
-}
 }
 
 namespace content {
@@ -43,7 +40,6 @@ class KeyboardControllerProxy;
 namespace ash {
 
 class AccessibilityDelegate;
-class CapsLockDelegate;
 class MediaDelegate;
 class NewWindowDelegate;
 class WindowTreeHostFactory;
@@ -80,8 +76,9 @@ class ASH_EXPORT ShellDelegate {
   // can perform tasks necessary before the shell is initialized.
   virtual void PreInit() = 0;
 
-  // Shuts down the environment.
-  virtual void Shutdown() = 0;
+  // Called at the beginninig of Shell destructor so that
+  // delegate can use Shell instance to perform cleanup tasks.
+  virtual void PreShutdown() = 0;
 
   // Invoked when the user uses Ctrl-Shift-Q to close chrome.
   virtual void Exit() = 0;
@@ -108,9 +105,6 @@ class ASH_EXPORT ShellDelegate {
   // Creates a user wallpaper delegate. Shell takes ownership of the delegate.
   virtual UserWallpaperDelegate* CreateUserWallpaperDelegate() = 0;
 
-  // Creates a caps lock delegate. Shell takes ownership of the delegate.
-  virtual CapsLockDelegate* CreateCapsLockDelegate() = 0;
-
   // Creates a session state delegate. Shell takes ownership of the delegate.
   virtual SessionStateDelegate* CreateSessionStateDelegate() = 0;
 
@@ -122,9 +116,6 @@ class ASH_EXPORT ShellDelegate {
 
   // Creates a media delegate. Shell takes ownership of the delegate.
   virtual MediaDelegate* CreateMediaDelegate() = 0;
-
-  // Creates a user action client. Shell takes ownership of the object.
-  virtual aura::client::UserActionClient* CreateUserActionClient() = 0;
 
   // Creates a menu model of the context for the |root_window|.
   // When a ContextMenu is used for an item created by ShelfWindowWatcher,

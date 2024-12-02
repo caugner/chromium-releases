@@ -76,8 +76,10 @@ class FolderImageSource : public gfx::CanvasImageSource {
 
 }  // namespace
 
-AppListFolderItem::AppListFolderItem(const std::string& id)
+AppListFolderItem::AppListFolderItem(const std::string& id,
+                                     FolderType folder_type)
     : AppListItem(id),
+      folder_type_(folder_type),
       item_list_(new AppListItemList) {
   item_list_->AddObserver(this);
 }
@@ -178,6 +180,11 @@ size_t AppListFolderItem::ChildItemCount() const {
   return item_list_->item_count();
 }
 
+void AppListFolderItem::OnExtensionPreferenceChanged() {
+  for (size_t i = 0; i < item_list_->item_count(); ++i)
+    item_list_->item_at(i)->OnExtensionPreferenceChanged();
+}
+
 bool AppListFolderItem::CompareForTest(const AppListItem* other) const {
   if (!AppListItem::CompareForTest(other))
     return false;
@@ -201,7 +208,7 @@ void AppListFolderItem::ItemIconChanged() {
   UpdateIcon();
 }
 
-void AppListFolderItem::ItemTitleChanged() {
+void AppListFolderItem::ItemNameChanged() {
 }
 
 void AppListFolderItem::ItemHighlightedChanged() {

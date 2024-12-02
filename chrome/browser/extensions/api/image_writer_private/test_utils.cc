@@ -51,8 +51,8 @@ class ImageWriterFakeImageBurnerClient
 #endif
 
 MockOperationManager::MockOperationManager() : OperationManager(NULL) {}
-MockOperationManager::MockOperationManager(Profile* profile)
-    : OperationManager(profile) {}
+MockOperationManager::MockOperationManager(content::BrowserContext* context)
+    : OperationManager(context) {}
 MockOperationManager::~MockOperationManager() {}
 
 FakeImageWriterClient::FakeImageWriterClient() {}
@@ -167,7 +167,7 @@ bool ImageWriterUnitTestBase::FillFile(const base::FilePath& file,
   scoped_ptr<char[]> buffer(new char[length]);
   memset(buffer.get(), pattern, length);
 
-  return file_util::WriteFile(file, buffer.get(), length) == length;
+  return base::WriteFile(file, buffer.get(), length) == length;
 }
 
 }  // namespace image_writer

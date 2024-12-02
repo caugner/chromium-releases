@@ -11,7 +11,7 @@
 #include <vector>
 
 #include "base/logging.h"
-
+#include "base/numerics/safe_conversions.h"
 #include "components/cloud_devices/cloud_device_description.h"
 
 namespace base {
@@ -133,7 +133,7 @@ class SelectionCapability {
     if (is_default) {
       DCHECK_EQ(default_idx_, -1);
       // Point to the last element.
-      default_idx_ = static_cast<int>(size());
+      default_idx_ = base::checked_cast<int>(size());
     }
     options_.push_back(option);
   }
@@ -191,6 +191,33 @@ class EmptyCapability {
 
  private:
   DISALLOW_COPY_AND_ASSIGN(EmptyCapability);
+};
+
+// Represents an item that is of a specific value type.
+// Ex: "<CAPABILITY_NAME>": {<VALUE>}
+// Option specifies data type for <VALUE>.
+// Traits specifies how <VALUE> is stored in JSON and semantic validation.
+template <class Option, class Traits>
+class ValueCapability {
+ public:
+  ValueCapability();
+  ~ValueCapability();
+
+  bool LoadFrom(const CloudDeviceDescription& description);
+  void SaveTo(CloudDeviceDescription* description) const;
+
+  void Reset() { value_ = Option(); }
+
+  bool IsValid() const;
+
+  const Option& value() const { return value_; }
+
+  void set_value(const Option& value) { value_ = value; }
+
+ private:
+  Option value_;
+
+  DISALLOW_COPY_AND_ASSIGN(ValueCapability);
 };
 
 // Represents CJT items.

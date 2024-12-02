@@ -62,7 +62,7 @@
 #include "net/http/http_transaction_factory.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
-#include "ui/base/accessibility/accessibility_types.h"
+#include "ui/accessibility/ax_enums.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/views/widget/widget.h"
 
@@ -758,6 +758,9 @@ void ExistingUserController::OnLoginSuccess(const UserContext& user_context) {
   offline_failed_ = false;
   login_display_->set_signin_completed(true);
 
+  UserManager::Get()->GetUserFlow(user_context.username)->HandleLoginSuccess(
+      user_context);
+
   StopPublicSessionAutoLoginTimer();
 
   bool has_cookies =
@@ -1051,14 +1054,6 @@ void ExistingUserController::InitializeStartUrls() const {
     }
   }
 
-  ServicesCustomizationDocument* customization =
-      ServicesCustomizationDocument::GetInstance();
-  if (!ServicesCustomizationDocument::WasApplied() &&
-      customization->IsReady()) {
-    // Since we don't use OEM start URL anymore, just mark as applied.
-    customization->ApplyCustomization();
-  }
-
   // Only show getting started guide for a new user.
   const bool should_show_getstarted_guide = user_manager->IsCurrentUserNew();
 
@@ -1120,7 +1115,7 @@ void ExistingUserController::SendAccessibilityAlert(
     const std::string& alert_text) {
   AccessibilityAlertInfo event(ProfileHelper::GetSigninProfile(), alert_text);
   SendControlAccessibilityNotification(
-      ui::AccessibilityTypes::EVENT_VALUE_CHANGED, &event);
+      ui::AX_EVENT_VALUE_CHANGED, &event);
 }
 
 }  // namespace chromeos

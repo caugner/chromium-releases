@@ -30,7 +30,6 @@
 #include "extensions/common/constants.h"
 #include "extensions/common/stack_frame.h"
 #include "net/base/data_url.h"
-#include "skia/ext/image_operations.h"
 #include "skia/ext/platform_canvas.h"
 #include "third_party/WebKit/public/platform/WebCString.h"
 #include "third_party/WebKit/public/platform/WebRect.h"
@@ -102,42 +101,6 @@ GURL StripRef(const GURL& url) {
   GURL::Replacements replacements;
   replacements.ClearRef();
   return url.ReplaceComponents(replacements);
-}
-
-// If the source image is null or occupies less area than
-// |thumbnail_min_area_pixels|, we return the image unmodified.  Otherwise, we
-// scale down the image so that the width and height do not exceed
-// |thumbnail_max_size_pixels|, preserving the original aspect ratio.
-SkBitmap Downscale(blink::WebImage image,
-                   int thumbnail_min_area_pixels,
-                   gfx::Size thumbnail_max_size_pixels) {
-  if (image.isNull())
-    return SkBitmap();
-
-  gfx::Size image_size = image.size();
-
-  if (image_size.GetArea() < thumbnail_min_area_pixels)
-    return image.getSkBitmap();
-
-  if (image_size.width() <= thumbnail_max_size_pixels.width() &&
-      image_size.height() <= thumbnail_max_size_pixels.height())
-    return image.getSkBitmap();
-
-  gfx::SizeF scaled_size = image_size;
-
-  if (scaled_size.width() > thumbnail_max_size_pixels.width()) {
-    scaled_size.Scale(thumbnail_max_size_pixels.width() / scaled_size.width());
-  }
-
-  if (scaled_size.height() > thumbnail_max_size_pixels.height()) {
-    scaled_size.Scale(
-        thumbnail_max_size_pixels.height() / scaled_size.height());
-  }
-
-  return skia::ImageOperations::Resize(image.getSkBitmap(),
-                                       skia::ImageOperations::RESIZE_GOOD,
-                                       static_cast<int>(scaled_size.width()),
-                                       static_cast<int>(scaled_size.height()));
 }
 
 // The delimiter for a stack trace provided by WebKit.
@@ -275,8 +238,6 @@ bool ChromeRenderViewObserver::OnMessageReceived(const IPC::Message& message) {
                         OnSetClientSidePhishingDetection)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_SetVisuallyDeemphasized,
                         OnSetVisuallyDeemphasized)
-    IPC_MESSAGE_HANDLER(ChromeViewMsg_RequestThumbnailForContextNode,
-                        OnRequestThumbnailForContextNode)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_GetFPS, OnGetFPS)
 #if defined(OS_ANDROID)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_UpdateTopControlsState,
@@ -294,15 +255,8 @@ bool ChromeRenderViewObserver::OnMessageReceived(const IPC::Message& message) {
 }
 
 void ChromeRenderViewObserver::OnWebUIJavaScript(
-    const base::string16& frame_xpath,
-    const base::string16& jscript,
-    int id,
-    bool notify_result) {
-  webui_javascript_.reset(new WebUIJavaScript());
-  webui_javascript_->frame_xpath = frame_xpath;
-  webui_javascript_->jscript = jscript;
-  webui_javascript_->id = id;
-  webui_javascript_->notify_result = notify_result;
+    const base::string16& javascript) {
+  webui_javascript_ = javascript;
 }
 
 void ChromeRenderViewObserver::OnJavaScriptStressTestControl(int cmd,
@@ -399,6 +353,9 @@ void ChromeRenderViewObserver::Navigate(const GURL& url) {
   // event (including tab reload).
   if (chrome_render_process_observer_)
     chrome_render_process_observer_->ExecutePendingClearCache();
+  // Let translate_helper do any preparatory work for loading a URL.
+  if (translate_helper_)
+    translate_helper_->PrepareForUrl(url);
 }
 
 void ChromeRenderViewObserver::OnSetClientSidePhishingDetection(
@@ -426,22 +383,6 @@ void ChromeRenderViewObserver::OnSetVisuallyDeemphasized(bool deemphasized) {
   }
 }
 
-void ChromeRenderViewObserver::OnRequestThumbnailForContextNode(
-    int thumbnail_min_area_pixels, gfx::Size thumbnail_max_size_pixels) {
-  WebNode context_node = render_view()->GetContextMenuNode();
-  SkBitmap thumbnail;
-  gfx::Size original_size;
-  if (!context_node.isNull() && context_node.isElementNode()) {
-    blink::WebImage image = context_node.to<WebElement>().imageContents();
-    original_size = image.size();
-    thumbnail = Downscale(image,
-                          thumbnail_min_area_pixels,
-                          thumbnail_max_size_pixels);
-  }
-  Send(new ChromeViewHostMsg_RequestThumbnailForContextNode_ACK(
-      routing_id(), thumbnail, original_size));
-}
-
 void ChromeRenderViewObserver::OnGetFPS() {
   float fps = (render_view()->GetFilteredTimePerFrame() > 0.0f)?
       1.0f / render_view()->GetFilteredTimePerFrame() : 0.0f;
@@ -450,12 +391,9 @@ void ChromeRenderViewObserver::OnGetFPS() {
 
 void ChromeRenderViewObserver::DidStartLoading() {
   if ((render_view()->GetEnabledBindings() & content::BINDINGS_POLICY_WEB_UI) &&
-      webui_javascript_.get()) {
-    render_view()->EvaluateScript(webui_javascript_->frame_xpath,
-                                  webui_javascript_->jscript,
-                                  webui_javascript_->id,
-                                  webui_javascript_->notify_result);
-    webui_javascript_.reset();
+      !webui_javascript_.empty()) {
+    render_view()->GetMainRenderFrame()->ExecuteJavaScript(webui_javascript_);
+    webui_javascript_.clear();
   }
 }
 

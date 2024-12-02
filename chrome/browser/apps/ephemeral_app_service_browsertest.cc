@@ -22,7 +22,7 @@ namespace {
 
 const int kNumTestApps = 2;
 const char* kTestApps[] = {
-  "platform_apps/shell_window/generic",
+  "platform_apps/app_window/generic",
   "platform_apps/minimal"
 };
 
@@ -37,7 +37,7 @@ class EphemeralAppServiceBrowserTest : public PlatformAppBrowserTest {
           InstallExtensionWithSourceAndFlags(
               path,
               1,
-              extensions::Manifest::UNPACKED,
+              extensions::Manifest::INTERNAL,
               Extension::IS_EPHEMERAL);
       app_ids_.push_back(extension->id());
     }

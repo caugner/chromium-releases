@@ -296,7 +296,7 @@ TEST(IndexedDBLevelDBCodingTest, DecodeVarInt) {
     slice = StringPiece(&*v.begin(), v.size() - 1);
     EXPECT_FALSE(DecodeVarInt(&slice, &res));
 
-    slice = StringPiece(&*v.begin(), 0u);
+    slice = StringPiece(&*v.begin(), static_cast<size_t>(0));
     EXPECT_FALSE(DecodeVarInt(&slice, &res));
 
     // Verify decoding at an offset, to detect unaligned memory access.
@@ -408,7 +408,7 @@ TEST(IndexedDBLevelDBCodingTest, DecodeStringWithLength) {
     slice = StringPiece(&*v.begin(), v.size() - 1);
     EXPECT_FALSE(DecodeStringWithLength(&slice, &res));
 
-    slice = StringPiece(&*v.begin(), 0u);
+    slice = StringPiece(&*v.begin(), static_cast<size_t>(0));
     EXPECT_FALSE(DecodeStringWithLength(&slice, &res));
 
     // Verify decoding at an offset, to detect unaligned memory access.
@@ -516,7 +516,7 @@ TEST(IndexedDBLevelDBCodingTest, DecodeBinary) {
     slice = StringPiece(&*v.begin(), v.size() - 1);
     EXPECT_FALSE(DecodeBinary(&slice, &result));
 
-    slice = StringPiece(&*v.begin(), 0u);
+    slice = StringPiece(&*v.begin(), static_cast<size_t>(0));
     EXPECT_FALSE(DecodeBinary(&slice, &result));
 
     // Verify decoding at an offset, to detect unaligned memory access.
@@ -557,7 +557,7 @@ TEST(IndexedDBLevelDBCodingTest, DecodeDouble) {
     slice = StringPiece(&*v.begin(), v.size() - 1);
     EXPECT_FALSE(DecodeDouble(&slice, &result));
 
-    slice = StringPiece(&*v.begin(), 0u);
+    slice = StringPiece(&*v.begin(), static_cast<size_t>(0));
     EXPECT_FALSE(DecodeDouble(&slice, &result));
 
     // Verify decoding at an offset, to detect unaligned memory access.
@@ -596,13 +596,13 @@ TEST(IndexedDBLevelDBCodingTest, EncodeDecodeIDBKey) {
     EncodeIDBKey(expected_key, &v);
     slice = StringPiece(&*v.begin(), v.size());
     EXPECT_TRUE(DecodeIDBKey(&slice, &decoded_key));
-    EXPECT_TRUE(decoded_key->IsEqual(expected_key));
+    EXPECT_TRUE(decoded_key->Equals(expected_key));
     EXPECT_TRUE(slice.empty());
 
     slice = StringPiece(&*v.begin(), v.size() - 1);
     EXPECT_FALSE(DecodeIDBKey(&slice, &decoded_key));
 
-    slice = StringPiece(&*v.begin(), 0u);
+    slice = StringPiece(&*v.begin(), static_cast<size_t>(0));
     EXPECT_FALSE(DecodeIDBKey(&slice, &decoded_key));
   }
 }

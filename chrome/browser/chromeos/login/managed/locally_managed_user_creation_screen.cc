@@ -11,7 +11,10 @@
 #include "base/values.h"
 #include "chrome/browser/chromeos/camera_detector.h"
 #include "chrome/browser/chromeos/login/existing_user_controller.h"
-#include "chrome/browser/chromeos/login/managed/locally_managed_user_creation_controller.h"
+#include "chrome/browser/chromeos/login/managed/managed_user_creation_controller.h"
+#include "chrome/browser/chromeos/login/managed/managed_user_creation_controller_new.h"
+#include "chrome/browser/chromeos/login/managed/managed_user_creation_controller_old.h"
+#include "chrome/browser/chromeos/login/managed/supervised_user_authentication.h"
 #include "chrome/browser/chromeos/login/screens/error_screen.h"
 #include "chrome/browser/chromeos/login/screens/screen_observer.h"
 #include "chrome/browser/chromeos/login/supervised_user_manager.h"
@@ -62,7 +65,7 @@ void ConfigureErrorScreen(ErrorScreen* screen,
       break;
     case NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_PORTAL:
       screen->SetErrorState(ErrorScreen::ERROR_STATE_PORTAL,
-                            network->name());
+                            network ? network->name() : std::string());
       screen->FixCaptivePortal();
       break;
     case NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_PROXY_AUTH_REQUIRED:
@@ -87,14 +90,14 @@ LocallyManagedUserCreationScreen::LocallyManagedUserCreationScreen(
       last_page_(kNameOfIntroScreen),
       image_decoder_(NULL),
       apply_photo_after_decoding_(false),
-      selected_image_(0),
-      was_camera_present_(false) {
+      selected_image_(0) {
   DCHECK(actor_);
   if (actor_)
     actor_->SetDelegate(this);
 }
 
 LocallyManagedUserCreationScreen::~LocallyManagedUserCreationScreen() {
+  CameraPresenceNotifier::GetInstance()->RemoveObserver(this);
   if (actor_)
     actor_->SetDelegate(NULL);
   if (image_decoder_.get())
@@ -108,6 +111,7 @@ void LocallyManagedUserCreationScreen::PrepareToShow() {
 }
 
 void LocallyManagedUserCreationScreen::Show() {
+  CameraPresenceNotifier::GetInstance()->AddObserver(this);
   if (actor_) {
     actor_->Show();
     // TODO(antrim) : temorary hack (until upcoming hackaton). Should be
@@ -160,6 +164,7 @@ void LocallyManagedUserCreationScreen::ShowInitialScreen() {
 }
 
 void LocallyManagedUserCreationScreen::Hide() {
+  CameraPresenceNotifier::GetInstance()->RemoveObserver(this);
   if (actor_)
     actor_->Hide();
   if (!on_error_screen_)
@@ -183,7 +188,15 @@ void LocallyManagedUserCreationScreen::AuthenticateManager(
     const std::string& manager_password) {
   // Make sure no two controllers exist at the same time.
   controller_.reset();
-  controller_.reset(new LocallyManagedUserCreationController(this, manager_id));
+  SupervisedUserAuthentication* authentication =
+      UserManager::Get()->GetSupervisedUserManager()->GetAuthentication();
+
+  if (authentication->GetStableSchema() ==
+      SupervisedUserAuthentication::SCHEMA_PLAIN) {
+    controller_.reset(new ManagedUserCreationControllerOld(this, manager_id));
+  } else {
+    controller_.reset(new ManagedUserCreationControllerNew(this, manager_id));
+  }
 
   ExistingUserController::current_controller()->
       Login(UserContext(manager_id,
@@ -198,11 +211,10 @@ void LocallyManagedUserCreationScreen::CreateManagedUser(
   int image;
   if (selected_image_ == User::kExternalImageIndex)
     // TODO(dzhioev): crbug/249660
-    image = LocallyManagedUserCreationController::kDummyAvatarIndex;
+    image = ManagedUserCreationController::kDummyAvatarIndex;
   else
     image = selected_image_;
-  controller_->SetUpCreation(display_name, managed_user_password, image);
-  controller_->StartCreation();
+  controller_->StartCreation(display_name, managed_user_password, image);
 }
 
 void LocallyManagedUserCreationScreen::ImportManagedUser(
@@ -219,7 +231,7 @@ void LocallyManagedUserCreationScreen::ImportManagedUser(
   std::string master_key;
   std::string avatar;
   bool exists;
-  int avatar_index = LocallyManagedUserCreationController::kDummyAvatarIndex;
+  int avatar_index = ManagedUserCreationController::kDummyAvatarIndex;
   user_info->GetString(ManagedUserSyncService::kName, &display_name);
   user_info->GetString(ManagedUserSyncService::kMasterKey, &master_key);
   user_info->GetString(ManagedUserSyncService::kChromeOsAvatar, &avatar);
@@ -263,7 +275,7 @@ void LocallyManagedUserCreationScreen::ImportManagedUserWithPassword(
   std::string master_key;
   std::string avatar;
   bool exists;
-  int avatar_index = LocallyManagedUserCreationController::kDummyAvatarIndex;
+  int avatar_index = ManagedUserCreationController::kDummyAvatarIndex;
   user_info->GetString(ManagedUserSyncService::kName, &display_name);
   user_info->GetString(ManagedUserSyncService::kMasterKey, &master_key);
   user_info->GetString(ManagedUserSyncService::kChromeOsAvatar, &avatar);
@@ -333,16 +345,16 @@ void LocallyManagedUserCreationScreen::OnActorDestroyed(
 }
 
 void LocallyManagedUserCreationScreen::OnCreationError(
-    LocallyManagedUserCreationController::ErrorCode code) {
+    ManagedUserCreationController::ErrorCode code) {
   base::string16 title;
   base::string16 message;
   base::string16 button;
   // TODO(antrim) : find out which errors do we really have.
   // We might reuse some error messages from ordinary user flow.
   switch (code) {
-    case LocallyManagedUserCreationController::CRYPTOHOME_NO_MOUNT:
-    case LocallyManagedUserCreationController::CRYPTOHOME_FAILED_MOUNT:
-    case LocallyManagedUserCreationController::CRYPTOHOME_FAILED_TPM:
+    case ManagedUserCreationController::CRYPTOHOME_NO_MOUNT:
+    case ManagedUserCreationController::CRYPTOHOME_FAILED_MOUNT:
+    case ManagedUserCreationController::CRYPTOHOME_FAILED_TPM:
       title = l10n_util::GetStringUTF16(
           IDS_CREATE_LOCALLY_MANAGED_USER_TPM_ERROR_TITLE);
       message = l10n_util::GetStringUTF16(
@@ -350,8 +362,8 @@ void LocallyManagedUserCreationScreen::OnCreationError(
       button = l10n_util::GetStringUTF16(
           IDS_CREATE_LOCALLY_MANAGED_USER_TPM_ERROR_BUTTON);
       break;
-    case LocallyManagedUserCreationController::CLOUD_SERVER_ERROR:
-    case LocallyManagedUserCreationController::TOKEN_WRITE_FAILED:
+    case ManagedUserCreationController::CLOUD_SERVER_ERROR:
+    case ManagedUserCreationController::TOKEN_WRITE_FAILED:
       title = l10n_util::GetStringUTF16(
           IDS_CREATE_LOCALLY_MANAGED_USER_GENERIC_ERROR_TITLE);
       message = l10n_util::GetStringUTF16(
@@ -359,7 +371,7 @@ void LocallyManagedUserCreationScreen::OnCreationError(
       button = l10n_util::GetStringUTF16(
           IDS_CREATE_LOCALLY_MANAGED_USER_GENERIC_ERROR_BUTTON);
       break;
-    case LocallyManagedUserCreationController::NO_ERROR:
+    case ManagedUserCreationController::NO_ERROR:
       NOTREACHED();
   }
   if (actor_)
@@ -434,21 +446,10 @@ void LocallyManagedUserCreationScreen::OnCreationSuccess() {
   ApplyPicture();
 }
 
-void LocallyManagedUserCreationScreen::CheckCameraPresence() {
-  CameraDetector::StartPresenceCheck(
-      base::Bind(&LocallyManagedUserCreationScreen::OnCameraPresenceCheckDone,
-                 weak_factory_.GetWeakPtr()));
-}
-
-void LocallyManagedUserCreationScreen::OnCameraPresenceCheckDone() {
-  bool is_camera_present = CameraDetector::camera_presence() ==
-                           CameraDetector::kCameraPresent;
-  if (actor_) {
-    if (is_camera_present != was_camera_present_) {
-      actor_->SetCameraPresent(is_camera_present);
-      was_camera_present_ = is_camera_present;
-    }
-  }
+void LocallyManagedUserCreationScreen::OnCameraPresenceCheckDone(
+    bool is_camera_present) {
+  if (actor_)
+    actor_->SetCameraPresent(is_camera_present);
 }
 
 void LocallyManagedUserCreationScreen::OnGetManagedUsers(
@@ -470,7 +471,7 @@ void LocallyManagedUserCreationScreen::OnGetManagedUsers(
     base::DictionaryValue* ui_copy =
         static_cast<base::DictionaryValue*>(new base::DictionaryValue());
 
-    int avatar_index = LocallyManagedUserCreationController::kDummyAvatarIndex;
+    int avatar_index = ManagedUserCreationController::kDummyAvatarIndex;
     std::string chromeos_avatar;
     if (local_copy->GetString(ManagedUserSyncService::kChromeOsAvatar,
                               &chromeos_avatar) &&

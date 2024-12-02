@@ -11,6 +11,7 @@
 #include "base/i18n/rtl.h"
 #include "base/prefs/pref_service.h"
 #include "base/stl_util.h"
+#include "base/strings/string_split.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -21,6 +22,7 @@
 #include "chrome/browser/extensions/location_bar_controller.h"
 #include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search/instant_service.h"
 #include "chrome/browser/search/instant_service_factory.h"
 #include "chrome/browser/search/search.h"
@@ -38,6 +40,7 @@
 #include "chrome/browser/ui/omnibox/omnibox_popup_view.h"
 #include "chrome/browser/ui/passwords/manage_passwords_bubble_ui_controller.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/toolbar/origin_chip_info.h"
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/bookmarks/bookmark_prompt_view.h"
 #include "chrome/browser/ui/views/browser_dialogs.h"
@@ -48,6 +51,7 @@
 #include "chrome/browser/ui/views/location_bar/location_bar_layout.h"
 #include "chrome/browser/ui/views/location_bar/location_icon_view.h"
 #include "chrome/browser/ui/views/location_bar/open_pdf_in_reader_view.h"
+#include "chrome/browser/ui/views/location_bar/origin_chip_view.h"
 #include "chrome/browser/ui/views/location_bar/page_action_image_view.h"
 #include "chrome/browser/ui/views/location_bar/page_action_with_badge_view.h"
 #include "chrome/browser/ui/views/location_bar/selected_keyword_view.h"
@@ -57,7 +61,7 @@
 #include "chrome/browser/ui/views/location_bar/zoom_view.h"
 #include "chrome/browser/ui/views/passwords/manage_passwords_bubble_view.h"
 #include "chrome/browser/ui/views/passwords/manage_passwords_icon_view.h"
-#include "chrome/browser/ui/views/toolbar/origin_chip_view.h"
+#include "chrome/browser/ui/views/toolbar/toolbar_origin_chip_view.h"
 #include "chrome/browser/ui/zoom/zoom_controller.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -69,13 +73,14 @@
 #include "extensions/common/permissions/permissions_data.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "ui/base/accessibility/accessible_view_state.h"
+#include "ui/accessibility/ax_view_state.h"
 #include "ui/base/dragdrop/drag_drop_types.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/theme_provider.h"
 #include "ui/events/event.h"
+#include "ui/gfx/animation/slide_animation.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/color_utils.h"
 #include "ui/gfx/image/image.h"
@@ -198,6 +203,8 @@ LocationBarView::LocationBarView(Browser* browser,
       browser_(browser),
       omnibox_view_(NULL),
       delegate_(delegate),
+      origin_chip_view_(NULL),
+      toolbar_origin_chip_view_(NULL),
       location_icon_view_(NULL),
       ev_bubble_view_(NULL),
       ime_inline_autocomplete_view_(NULL),
@@ -209,14 +216,14 @@ LocationBarView::LocationBarView(Browser* browser,
       generated_credit_card_view_(NULL),
       open_pdf_in_reader_view_(NULL),
       manage_passwords_icon_view_(NULL),
-      origin_chip_view_(NULL),
       translate_icon_view_(NULL),
       star_view_(NULL),
       search_button_(NULL),
       is_popup_mode_(is_popup_mode),
       show_focus_rect_(false),
       template_url_service_(NULL),
-      animation_offset_(0),
+      dropdown_animation_offset_(0),
+      animated_host_label_(NULL),
       weak_ptr_factory_(this) {
   edit_bookmarks_enabled_.Init(
       prefs::kEditBookmarksEnabled, profile->GetPrefs(),
@@ -250,8 +257,7 @@ void LocationBarView::Init() {
 
   const int kOmniboxPopupBorderImages[] =
       IMAGE_GRID(IDR_OMNIBOX_POPUP_BORDER_AND_SHADOW);
-  const int kOmniboxBorderImages[] =
-      IMAGE_GRID(IDR_OMNIBOX_BORDER_AND_SHADOW);
+  const int kOmniboxBorderImages[] = IMAGE_GRID(IDR_TEXTFIELD);
   border_painter_.reset(views::Painter::CreateImageGridPainter(
       is_popup_mode_ ? kOmniboxPopupBorderImages : kOmniboxBorderImages));
 
@@ -314,6 +320,15 @@ void LocationBarView::Init() {
           ui::NativeTheme::kColorId_TextfieldSelectionColor));
   ime_inline_autocomplete_view_->SetVisible(false);
   AddChildView(ime_inline_autocomplete_view_);
+
+  animated_host_label_ = new views::Label(base::string16(), font_list);
+  animated_host_label_->SetVisible(false);
+  AddChildView(animated_host_label_);
+
+  origin_chip_view_ = new OriginChipView(this, profile(), font_list);
+  origin_chip_view_->SetFocusable(false);
+  origin_chip_view_->set_drag_controller(this);
+  AddChildView(origin_chip_view_);
 
   const SkColor text_color = GetColor(ToolbarModel::NONE, TEXT);
   selected_keyword_view_ = new SelectedKeywordView(
@@ -415,12 +430,22 @@ void LocationBarView::Init() {
   search_button_->SetVisible(false);
   AddChildView(search_button_);
 
+  show_url_animation_.reset(new gfx::SlideAnimation(this));
+  show_url_animation_->SetTweenType(gfx::Tween::FAST_OUT_SLOW_IN);
+  show_url_animation_->SetSlideDuration(200);
+
+  hide_url_animation_.reset(new gfx::SlideAnimation(this));
+  hide_url_animation_->SetTweenType(gfx::Tween::FAST_OUT_SLOW_IN);
+  hide_url_animation_->SetSlideDuration(200);
+
   content::Source<Profile> profile_source = content::Source<Profile>(profile());
   registrar_.Add(this,
                  chrome::NOTIFICATION_EXTENSION_LOCATION_BAR_UPDATED,
                  profile_source);
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_LOADED, profile_source);
-  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED, profile_source);
+  registrar_.Add(this,
+                 chrome::NOTIFICATION_EXTENSION_UNLOADED_DEPRECATED,
+                 profile_source);
 
   // Initialize the location entry. We do this to avoid a black flash which is
   // visible when the location entry has just been initialized.
@@ -522,7 +547,7 @@ void LocationBarView::SetFocusAndSelection(bool select_all) {
 }
 
 void LocationBarView::SetAnimationOffset(int offset) {
-  animation_offset_ = offset;
+  dropdown_animation_offset_ = offset;
 }
 
 void LocationBarView::UpdateContentSettingsIcons() {
@@ -585,7 +610,7 @@ void LocationBarView::OnFocus() {
   // Chrome OS.  It is noop on Win. This should be removed once
   // Chrome OS migrates to aura, which uses Views' textfield that receives
   // focus. See crbug.com/106428.
-  NotifyAccessibilityEvent(ui::AccessibilityTypes::EVENT_FOCUS, false);
+  NotifyAccessibilityEvent(ui::AX_EVENT_FOCUS, false);
 
   // Then focus the native location view which implements accessibility for
   // Windows.
@@ -613,7 +638,8 @@ void LocationBarView::SetPreviewEnabledPageAction(ExtensionAction* page_action,
   SchedulePaint();
 }
 
-views::View* LocationBarView::GetPageActionView(ExtensionAction *page_action) {
+PageActionWithBadgeView* LocationBarView::GetPageActionView(
+    ExtensionAction* page_action) {
   DCHECK(page_action);
   for (PageActionViews::const_iterator i(page_action_views_.begin());
        i != page_action_views_.end(); ++i) {
@@ -682,11 +708,14 @@ gfx::Size LocationBarView::GetPreferredSize() {
   gfx::Size background_min_size(border_painter_->GetMinimumSize());
   if (!IsInitialized())
     return background_min_size;
+
+  gfx::Size origin_chip_view_min_size(origin_chip_view_->GetMinimumSize());
   gfx::Size search_button_min_size(search_button_->GetMinimumSize());
   gfx::Size min_size(background_min_size);
   min_size.SetToMax(search_button_min_size);
-  min_size.set_width(
-      background_min_size.width() + search_button_min_size.width());
+  min_size.set_width(origin_chip_view_min_size.width() +
+                     background_min_size.width() +
+                     search_button_min_size.width());
   return min_size;
 }
 
@@ -694,18 +723,65 @@ void LocationBarView::Layout() {
   if (!IsInitialized())
     return;
 
+  animated_host_label_->SetVisible(false);
+  origin_chip_view_->SetVisible(origin_chip_view_->ShouldShow());
   selected_keyword_view_->SetVisible(false);
   location_icon_view_->SetVisible(false);
   ev_bubble_view_->SetVisible(false);
   keyword_hint_view_->SetVisible(false);
 
   const int item_padding = GetItemPadding();
+
   // The textfield has 1 px of whitespace before the text in the RTL case only.
   const int kEditLeadingInternalSpace = base::i18n::IsRTL() ? 1 : 0;
   LocationBarLayout leading_decorations(
       LocationBarLayout::LEFT_EDGE, item_padding - kEditLeadingInternalSpace);
   LocationBarLayout trailing_decorations(LocationBarLayout::RIGHT_EDGE,
                                          item_padding);
+
+  // Show and position the animated host label used in the show and hide URL
+  // animations.
+  if (show_url_animation_->is_animating() ||
+      hide_url_animation_->is_animating()) {
+    const GURL url = GetWebContents()->GetURL();
+    const base::string16 host =
+        OriginChip::LabelFromURLForProfile(url, profile());
+    animated_host_label_->SetText(host);
+
+    const base::string16 formatted_url = GetToolbarModel()->GetFormattedURL();
+
+    // Split the formatted URL on the host name in order to determine the size
+    // of the text leading up to it.
+    std::vector<base::string16> substrings;
+    base::SplitStringUsingSubstr(formatted_url, host, &substrings);
+    const base::string16 text_leading_host = substrings[0];
+    const int leading_text_width =
+        gfx::Canvas::GetStringWidth(text_leading_host,
+                                    origin_chip_view_->GetFontList());
+
+    const int position_of_host_name_in_chip = origin_chip_view_->host_label_x();
+    const int position_of_host_name_in_url =
+        position_of_host_name_in_chip + leading_text_width;
+
+    int host_label_x = position_of_host_name_in_chip;
+    if (show_url_animation_->is_animating()) {
+      host_label_x = show_url_animation_->
+          CurrentValueBetween(position_of_host_name_in_chip,
+                              position_of_host_name_in_url);
+    } else if (hide_url_animation_->is_animating()) {
+      host_label_x = hide_url_animation_->
+          CurrentValueBetween(position_of_host_name_in_url,
+                              position_of_host_name_in_chip);
+    }
+    animated_host_label_->SetBounds(
+        host_label_x, 0,
+        animated_host_label_->GetPreferredSize().width(), height());
+    animated_host_label_->SetVisible(true);
+  }
+
+  const int origin_chip_width = origin_chip_view_->visible() ?
+      origin_chip_view_->GetPreferredSize().width() : 0;
+  origin_chip_view_->SetBounds(0, 0, origin_chip_width, height());
 
   const base::string16 keyword(omnibox_view_->model()->keyword());
   const bool is_keyword_hint(omnibox_view_->model()->is_keyword_hint());
@@ -737,7 +813,8 @@ void LocationBarView::Layout() {
         selected_keyword_view_->set_is_extension_icon(false);
       }
     }
-  } else if (!origin_chip_view_ &&
+  } else if (!toolbar_origin_chip_view_ &&
+      !chrome::ShouldDisplayOriginChipV2() &&
       (GetToolbarModel()->GetSecurityLevel(false) == ToolbarModel::EV_SECURE)) {
     ev_bubble_view_->SetLabel(GetToolbarModel()->GetEVCertName());
     // The largest fraction of the omnibox that can be taken by the EV bubble.
@@ -745,7 +822,7 @@ void LocationBarView::Layout() {
     leading_decorations.AddDecoration(bubble_location_y, bubble_height, false,
                                       kMaxBubbleFraction, kBubblePadding,
                                       item_padding, 0, ev_bubble_view_);
-  } else {
+  } else if (!origin_chip_view_->visible()) {
     leading_decorations.AddDecoration(
         vertical_edge_thickness(), location_height,
         GetBuiltInHorizontalPaddingForChildViews(),
@@ -816,7 +893,8 @@ void LocationBarView::Layout() {
 
   // Perform layout.
   const int horizontal_edge_thickness = GetHorizontalEdgeThickness();
-  int full_width = width() - horizontal_edge_thickness;
+  int full_width = width() - horizontal_edge_thickness - origin_chip_width;
+
   // The search button images are made to look as if they overlay the normal
   // edge images, but to align things, the search button needs to be inset
   // horizontally by 1 px.
@@ -836,7 +914,7 @@ void LocationBarView::Layout() {
   int available_width = entry_width - location_needed_width;
   // The bounds must be wide enough for all the decorations to fit.
   gfx::Rect location_bounds(
-      horizontal_edge_thickness, vertical_edge_thickness(),
+      origin_chip_width + horizontal_edge_thickness, vertical_edge_thickness(),
       std::max(full_width, full_width - entry_width), location_height);
   leading_decorations.LayoutPass3(&location_bounds, &available_width);
   trailing_decorations.LayoutPass3(&location_bounds, &available_width);
@@ -927,7 +1005,13 @@ void LocationBarView::Layout() {
 }
 
 void LocationBarView::PaintChildren(gfx::Canvas* canvas) {
-  View::PaintChildren(canvas);
+  // Paint all the children except for the origin chip and the search button,
+  // which will be painted after the border.
+  for (int i = 0, count = child_count(); i < count; ++i)
+    if (!child_at(i)->layer() &&
+        (child_at(i) != origin_chip_view_) &&
+        (child_at(i) != search_button_))
+      child_at(i)->Paint(canvas);
 
   // For non-InstantExtendedAPI cases, if necessary, show focus rect. As we need
   // the focus rect to appear on top of children we paint here rather than
@@ -942,6 +1026,11 @@ void LocationBarView::PaintChildren(gfx::Canvas* canvas) {
   if (is_popup_mode_ && (GetHorizontalEdgeThickness() == 0))
     border_rect.Inset(-kPopupEdgeThickness, 0);
   views::Painter::PaintPainterAt(canvas, border_painter_.get(), border_rect);
+
+  // The origin chip and the search button must be painted after the border so
+  // that the border shadow is not drawn over them.
+  origin_chip_view_->Paint(canvas);
+  search_button_->Paint(canvas);
 }
 
 void LocationBarView::OnPaint(gfx::Canvas* canvas) {
@@ -977,13 +1066,13 @@ void LocationBarView::SelectAll() {
 }
 
 views::ImageView* LocationBarView::GetLocationIconView() {
-  return origin_chip_view_ ?
-      origin_chip_view_->location_icon_view() : location_icon_view_;
+  return toolbar_origin_chip_view_ ?
+      toolbar_origin_chip_view_->location_icon_view() : location_icon_view_;
 }
 
 const views::ImageView* LocationBarView::GetLocationIconView() const {
-  return origin_chip_view_ ?
-      origin_chip_view_->location_icon_view() : location_icon_view_;
+  return toolbar_origin_chip_view_ ?
+      toolbar_origin_chip_view_->location_icon_view() : location_icon_view_;
 }
 
 views::View* LocationBarView::GetLocationBarAnchor() {
@@ -1054,7 +1143,10 @@ void LocationBarView::OnChanged() {
       *GetThemeProvider()->GetImageSkiaNamed((icon_id == IDR_OMNIBOX_SEARCH) ?
           IDR_OMNIBOX_SEARCH_BUTTON_LOUPE : IDR_OMNIBOX_SEARCH_BUTTON_ARROW));
 
-  if (origin_chip_view_)
+  if (toolbar_origin_chip_view_)
+    toolbar_origin_chip_view_->OnChanged();
+
+  if (origin_chip_view_->visible())
     origin_chip_view_->OnChanged();
 
   Layout();
@@ -1063,6 +1155,59 @@ void LocationBarView::OnChanged() {
 
 void LocationBarView::OnSetFocus() {
   GetFocusManager()->SetFocusedView(this);
+}
+
+void LocationBarView::ShowURL() {
+  if (chrome::ShouldDisplayOriginChipV2()) {
+    omnibox_view_->SetVisible(false);
+    omnibox_view_->ShowURL();
+    show_url_animation_->Show();
+  } else {
+    omnibox_view_->ShowURL();
+  }
+}
+
+void LocationBarView::OnShowURLAnimationEnded() {
+  animated_host_label_->SetVisible(false);
+  omnibox_view_->SetVisible(true);
+  omnibox_view_->FadeIn();
+  omnibox_view_->SetFocus();
+
+  // Sometimes the selection established by OmniboxView::ShowURL() is lost at
+  // the call to SetFocus() above.  Select all again to be sure.
+  // TODO(jdonnelly): Figure out why the selection is sometimes lost and
+  // implement a more principled fix.
+  omnibox_view_->SelectAll(true);
+}
+
+void LocationBarView::HideURL() {
+  omnibox_view_->SetVisible(false);
+  hide_url_animation_->Show();
+}
+
+void LocationBarView::OnHideURLAnimationEnded() {
+  animated_host_label_->SetVisible(false);
+  omnibox_view_->HideURL();
+  omnibox_view_->SetVisible(true);
+  origin_chip_view_->FadeIn();
+}
+
+void LocationBarView::AnimationProgressed(const gfx::Animation* animation) {
+  if (animation == show_url_animation_.get() ||
+      animation == hide_url_animation_.get()) {
+    Layout();
+    SchedulePaint();
+  }
+}
+
+void LocationBarView::AnimationEnded(const gfx::Animation* animation) {
+  if (animation == show_url_animation_.get()) {
+    show_url_animation_->Reset();
+    OnShowURLAnimationEnded();
+  } else if (animation == hide_url_animation_.get()) {
+    hide_url_animation_->Reset();
+    OnHideURLAnimationEnded();
+  }
 }
 
 InstantController* LocationBarView::GetInstant() {
@@ -1089,11 +1234,11 @@ bool LocationBarView::HasFocus() const {
   return omnibox_view_->model()->has_focus();
 }
 
-void LocationBarView::GetAccessibleState(ui::AccessibleViewState* state) {
+void LocationBarView::GetAccessibleState(ui::AXViewState* state) {
   if (!IsInitialized())
     return;
 
-  state->role = ui::AccessibilityTypes::ROLE_LOCATION_BAR;
+  state->role = ui::AX_ROLE_LOCATION_BAR;
   state->name = l10n_util::GetStringUTF16(IDS_ACCNAME_LOCATION);
   state->value = omnibox_view_->GetText();
 
@@ -1104,7 +1249,7 @@ void LocationBarView::GetAccessibleState(ui::AccessibleViewState* state) {
   state->selection_end = entry_end;
 
   if (is_popup_mode_) {
-    state->state |= ui::AccessibilityTypes::STATE_READONLY;
+    state->AddStateFlag(ui::AX_STATE_READ_ONLY);
   } else {
     state->set_value_callback =
         base::Bind(&LocationBarView::AccessibilitySetValue,
@@ -1153,10 +1298,12 @@ void LocationBarView::WriteDragDataForView(views::View* sender,
 
 int LocationBarView::GetDragOperationsForView(views::View* sender,
                                               const gfx::Point& p) {
-  DCHECK((sender == location_icon_view_) || (sender == ev_bubble_view_));
+  DCHECK((sender == location_icon_view_) || (sender == ev_bubble_view_) ||
+         (sender == origin_chip_view_));
   WebContents* web_contents = delegate_->GetWebContents();
   return (web_contents && web_contents->GetURL().is_valid() &&
-          !GetOmniboxView()->IsEditingOrEmpty()) ?
+          (!GetOmniboxView()->IsEditingOrEmpty() ||
+           sender == origin_chip_view_)) ?
       (ui::DragDropTypes::DRAG_COPY | ui::DragDropTypes::DRAG_LINK) :
       ui::DragDropTypes::DRAG_NONE;
 }
@@ -1309,7 +1456,7 @@ void LocationBarView::Observe(int type,
     }
 
     case chrome::NOTIFICATION_EXTENSION_LOADED:
-    case chrome::NOTIFICATION_EXTENSION_UNLOADED:
+    case chrome::NOTIFICATION_EXTENSION_UNLOADED_DEPRECATED:
       Update(NULL);
       break;
 

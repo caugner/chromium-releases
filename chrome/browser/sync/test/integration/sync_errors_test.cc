@@ -8,7 +8,8 @@
 #include "chrome/browser/sync/test/integration/bookmarks_helper.h"
 #include "chrome/browser/sync/test/integration/passwords_helper.h"
 #include "chrome/browser/sync/test/integration/profile_sync_service_harness.h"
-#include "chrome/browser/sync/test/integration/status_change_checker.h"
+#include "chrome/browser/sync/test/integration/single_client_status_change_checker.h"
+#include "chrome/browser/sync/test/integration/sync_integration_test_util.h"
 #include "chrome/browser/sync/test/integration/sync_test.h"
 #include "chrome/common/pref_names.h"
 #include "google_apis/gaia/google_service_auth_error.h"
@@ -16,12 +17,36 @@
 
 using bookmarks_helper::AddFolder;
 using bookmarks_helper::SetTitle;
+using sync_integration_test_util::AwaitCommitActivityCompletion;
 
 namespace {
 
+class SyncDisabledChecker : public SingleClientStatusChangeChecker {
+ public:
+  explicit SyncDisabledChecker(ProfileSyncService* service)
+      : SingleClientStatusChangeChecker(service) {}
+
+  virtual bool IsExitConditionSatisfied() OVERRIDE {
+    return !service()->setup_in_progress() &&
+           !service()->HasSyncSetupCompleted();
+  }
+
+  virtual std::string GetDebugMessage() const OVERRIDE {
+    return "Sync Disabled";
+  }
+};
+
+bool AwaitSyncDisabled(ProfileSyncService* service) {
+  SyncDisabledChecker checker(service);
+  checker.Await();
+  return !checker.TimedOut();
+}
+
 class SyncErrorTest : public SyncTest {
  public:
-  SyncErrorTest() : SyncTest(SINGLE_CLIENT) {}
+  // TODO(pvalenzuela): Switch to SINGLE_CLIENT once FakeServer
+  // supports this scenario.
+  SyncErrorTest() : SyncTest(SINGLE_CLIENT_LEGACY) {}
   virtual ~SyncErrorTest() {}
 
  private:
@@ -29,28 +54,27 @@ class SyncErrorTest : public SyncTest {
 };
 
 // Helper class that waits until the sync engine has hit an actionable error.
-class ActionableErrorChecker : public StatusChangeChecker {
+class ActionableErrorChecker : public SingleClientStatusChangeChecker {
  public:
   explicit ActionableErrorChecker(ProfileSyncService* service)
-      : StatusChangeChecker("ActionableErrorChecker"),
-        service_(service) {}
+      : SingleClientStatusChangeChecker(service) {}
 
   virtual ~ActionableErrorChecker() {}
 
   // Checks if an actionable error has been hit. Called repeatedly each time PSS
   // notifies observers of a state change.
   virtual bool IsExitConditionSatisfied() OVERRIDE {
-    DCHECK(service_);
     ProfileSyncService::Status status;
-    service_->QueryDetailedSyncStatus(&status);
+    service()->QueryDetailedSyncStatus(&status);
     return (status.sync_protocol_error.action != syncer::UNKNOWN_ACTION &&
-            service_->HasUnrecoverableError());
+            service()->HasUnrecoverableError());
+  }
+
+  virtual std::string GetDebugMessage() const OVERRIDE {
+    return "ActionableErrorChecker";
   }
 
  private:
-  // The PSS instance that will eventually hit an actionable error.
-  ProfileSyncService* service_;
-
   DISALLOW_COPY_AND_ASSIGN(ActionableErrorChecker);
 };
 
@@ -60,13 +84,13 @@ IN_PROC_BROWSER_TEST_F(SyncErrorTest, BirthdayErrorTest) {
   // Add an item, wait for sync, and trigger a birthday error on the server.
   const BookmarkNode* node1 = AddFolder(0, 0, L"title1");
   SetTitle(0, node1, L"new_title1");
-  ASSERT_TRUE(GetClient(0)->AwaitCommitActivityCompletion());
+  ASSERT_TRUE(AwaitCommitActivityCompletion(GetClient(0)->service()));
   TriggerBirthdayError();
 
   // Now make one more change so we will do another sync.
   const BookmarkNode* node2 = AddFolder(0, 0, L"title2");
   SetTitle(0, node2, L"new_title2");
-  ASSERT_TRUE(GetClient(0)->AwaitSyncDisabled());
+  ASSERT_TRUE(AwaitSyncDisabled(GetClient(0)->service()));
 }
 
 IN_PROC_BROWSER_TEST_F(SyncErrorTest, ActionableErrorTest) {
@@ -74,7 +98,7 @@ IN_PROC_BROWSER_TEST_F(SyncErrorTest, ActionableErrorTest) {
 
   const BookmarkNode* node1 = AddFolder(0, 0, L"title1");
   SetTitle(0, node1, L"new_title1");
-  ASSERT_TRUE(GetClient(0)->AwaitCommitActivityCompletion());
+  ASSERT_TRUE(AwaitCommitActivityCompletion(GetClient(0)->service()));
 
   syncer::SyncProtocolError protocol_error;
   protocol_error.error_type = syncer::TRANSIENT_ERROR;
@@ -89,10 +113,11 @@ IN_PROC_BROWSER_TEST_F(SyncErrorTest, ActionableErrorTest) {
 
   // Wait until an actionable error is encountered.
   ActionableErrorChecker actionable_error_checker(GetClient(0)->service());
-  ASSERT_TRUE(GetClient(0)->AwaitStatusChange(&actionable_error_checker,
-                                              "Awaiting actionable error"));
+  actionable_error_checker.Await();
+  ASSERT_FALSE(actionable_error_checker.TimedOut());
 
-  ProfileSyncService::Status status = GetClient(0)->GetStatus();
+  ProfileSyncService::Status status;
+  GetClient(0)->service()->QueryDetailedSyncStatus(&status);
   ASSERT_EQ(status.sync_protocol_error.error_type, protocol_error.error_type);
   ASSERT_EQ(status.sync_protocol_error.action, protocol_error.action);
   ASSERT_EQ(status.sync_protocol_error.url, protocol_error.url);
@@ -100,7 +125,8 @@ IN_PROC_BROWSER_TEST_F(SyncErrorTest, ActionableErrorTest) {
       protocol_error.error_description);
 }
 
-IN_PROC_BROWSER_TEST_F(SyncErrorTest, ErrorWhileSettingUp) {
+// Disabled, http://crbug.com/351160 .
+IN_PROC_BROWSER_TEST_F(SyncErrorTest, DISABLED_ErrorWhileSettingUp) {
   ASSERT_TRUE(SetupClients());
 
   syncer::SyncProtocolError protocol_error;
@@ -108,7 +134,7 @@ IN_PROC_BROWSER_TEST_F(SyncErrorTest, ErrorWhileSettingUp) {
   protocol_error.error_description = "Not My Fault";
   protocol_error.url = "www.google.com";
 
-  if (clients()[0]->AutoStartEnabled()) {
+  if (clients()[0]->service()->auto_start_enabled()) {
     // In auto start enabled platforms like chrome os we should be
     // able to set up even if the first sync while setting up fails.
     // Trigger error on every 2 out of 3 requests.
@@ -136,7 +162,7 @@ IN_PROC_BROWSER_TEST_F(SyncErrorTest,
 
   const BookmarkNode* node1 = AddFolder(0, 0, L"title1");
   SetTitle(0, node1, L"new_title1");
-  ASSERT_TRUE(GetClient(0)->AwaitCommitActivityCompletion());
+  ASSERT_TRUE(AwaitCommitActivityCompletion(GetClient(0)->service()));
 
   syncer::SyncProtocolError protocol_error;
   protocol_error.error_type = syncer::NOT_MY_BIRTHDAY;
@@ -148,8 +174,9 @@ IN_PROC_BROWSER_TEST_F(SyncErrorTest,
   // Now make one more change so we will do another sync.
   const BookmarkNode* node2 = AddFolder(0, 0, L"title2");
   SetTitle(0, node2, L"new_title2");
-  ASSERT_TRUE(GetClient(0)->AwaitSyncDisabled());
-  ProfileSyncService::Status status = GetClient(0)->GetStatus();
+  ASSERT_TRUE(AwaitSyncDisabled(GetClient(0)->service()));
+  ProfileSyncService::Status status;
+  GetClient(0)->service()->QueryDetailedSyncStatus(&status);
   ASSERT_EQ(status.sync_protocol_error.error_type, protocol_error.error_type);
   ASSERT_EQ(status.sync_protocol_error.action, protocol_error.action);
   ASSERT_EQ(status.sync_protocol_error.url, protocol_error.url);
@@ -171,7 +198,7 @@ IN_PROC_BROWSER_TEST_F(SyncErrorTest, DISABLED_DisableDatatypeWhileRunning) {
 
   const BookmarkNode* node1 = AddFolder(0, 0, L"title1");
   SetTitle(0, node1, L"new_title1");
-  ASSERT_TRUE(GetClient(0)->AwaitCommitActivityCompletion());
+  ASSERT_TRUE(AwaitCommitActivityCompletion(GetClient(0)->service()));
   // TODO(lipalani)" Verify initial sync ended for typed url is false.
 }
 

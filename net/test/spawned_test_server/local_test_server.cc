@@ -10,6 +10,7 @@
 #include "base/path_service.h"
 #include "base/process/kill.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/test/test_timeouts.h"
 #include "base/values.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/net_errors.h"
@@ -22,7 +23,7 @@ namespace {
 
 bool AppendArgumentFromJSONValue(const std::string& key,
                                  const base::Value& value_node,
-                                 CommandLine* command_line) {
+                                 base::CommandLine* command_line) {
   std::string argument_name = "--" + key;
   switch (value_node.GetType()) {
     case base::Value::TYPE_NULL:
@@ -126,6 +127,10 @@ bool LocalTestServer::Stop() {
 
 #if defined(OS_WIN)
   // This kills all the processes in the job object.
+  TerminateJobObject(job_handle_.Get(), 1);
+  // This is done asynchronously so wait a bit for the processes to be killed.
+  WaitForSingleObject(job_handle_.Get(),
+                      TestTimeouts::action_timeout().InMilliseconds());
   job_handle_.Close();
 #endif
 
@@ -198,7 +203,8 @@ bool LocalTestServer::SetPythonPath() const {
   return true;
 }
 
-bool LocalTestServer::AddCommandLineArguments(CommandLine* command_line) const {
+bool LocalTestServer::AddCommandLineArguments(
+    base::CommandLine* command_line) const {
   base::DictionaryValue arguments_dict;
   if (!GenerateArguments(&arguments_dict))
     return false;

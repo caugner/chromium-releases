@@ -10,14 +10,16 @@
 #include "base/command_line.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
+#include "base/macros.h"
 #include "base/message_loop/message_loop.h"
 #include "jni/MojoMain_jni.h"
 #include "mojo/public/shell/application.h"
+#include "mojo/service_manager/service_loader.h"
+#include "mojo/service_manager/service_manager.h"
 #include "mojo/services/native_viewport/native_viewport_service.h"
 #include "mojo/shell/context.h"
 #include "mojo/shell/init.h"
 #include "mojo/shell/run.h"
-#include "mojo/shell/service_manager.h"
 #include "ui/gl/gl_surface_egl.h"
 
 using base::LazyInstance;
@@ -32,18 +34,23 @@ LazyInstance<scoped_ptr<base::MessageLoop> > g_java_message_loop =
 LazyInstance<scoped_ptr<shell::Context> > g_context =
     LAZY_INSTANCE_INITIALIZER;
 
-class NativeViewportServiceLoader : public shell::ServiceManager::Loader {
+class NativeViewportServiceLoader : public ServiceLoader {
  public:
   NativeViewportServiceLoader() {}
   virtual ~NativeViewportServiceLoader() {}
 
  private:
-  virtual void Load(const GURL& url,
-                    ScopedShellHandle service_handle)
-      MOJO_OVERRIDE {
+  virtual void LoadService(ServiceManager* manager,
+                           const GURL& url,
+                           ScopedShellHandle service_handle) OVERRIDE {
     app_.reset(CreateNativeViewportService(g_context.Get().get(),
                                            service_handle.Pass()));
   }
+
+  virtual void OnServiceError(ServiceManager* manager,
+                              const GURL& url) OVERRIDE {
+  }
+
   scoped_ptr<Application> app_;
 };
 

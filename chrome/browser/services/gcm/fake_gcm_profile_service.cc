@@ -13,8 +13,7 @@
 namespace gcm {
 
 // static
-BrowserContextKeyedService* FakeGCMProfileService::Build(
-    content::BrowserContext* context) {
+KeyedService* FakeGCMProfileService::Build(content::BrowserContext* context) {
   Profile* profile = static_cast<Profile*>(context);
   return new FakeGCMProfileService(profile);
 }
@@ -27,7 +26,6 @@ FakeGCMProfileService::~FakeGCMProfileService() {}
 
 void FakeGCMProfileService::Register(const std::string& app_id,
                                      const std::vector<std::string>& sender_ids,
-                                     const std::string& cert,
                                      RegisterCallback callback) {
   base::MessageLoop::current()->PostTask(
       FROM_HERE,
@@ -35,22 +33,25 @@ void FakeGCMProfileService::Register(const std::string& app_id,
                  base::Unretained(this),
                  app_id,
                  sender_ids,
-                 cert,
                  callback));
 }
 
 void FakeGCMProfileService::RegisterFinished(
     const std::string& app_id,
     const std::vector<std::string>& sender_ids,
-    const std::string& cert,
     RegisterCallback callback) {
   if (collect_) {
     last_registered_app_id_ = app_id;
     last_registered_sender_ids_ = sender_ids;
-    last_registered_cert_ = cert;
   }
 
   callback.Run(base::UintToString(sender_ids.size()), GCMClient::SUCCESS);
+}
+
+void FakeGCMProfileService::Unregister(const std::string& app_id,
+                                       UnregisterCallback callback) {
+  base::MessageLoop::current()->PostTask(
+      FROM_HERE, base::Bind(callback, GetNextExpectedUnregisterResponse()));
 }
 
 void FakeGCMProfileService::Send(const std::string& app_id,
@@ -78,6 +79,19 @@ void FakeGCMProfileService::SendFinished(
   }
 
   callback.Run(message.id, GCMClient::SUCCESS);
+}
+
+void FakeGCMProfileService::AddExpectedUnregisterResponse(
+    GCMClient::Result result) {
+  unregister_responses_.push_back(result);
+}
+
+GCMClient::Result FakeGCMProfileService::GetNextExpectedUnregisterResponse() {
+  if (unregister_responses_.empty())
+    return GCMClient::SUCCESS;
+  GCMClient::Result response = *unregister_responses_.begin();
+  unregister_responses_.erase(unregister_responses_.begin());
+  return response;
 }
 
 }  // namespace gcm

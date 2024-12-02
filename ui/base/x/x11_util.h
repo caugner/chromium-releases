@@ -203,6 +203,10 @@ UI_BASE_EXPORT bool SetAtomArrayProperty(XID window,
                                          const std::string& name,
                                          const std::string& type,
                                          const std::vector<Atom>& value);
+UI_BASE_EXPORT bool SetStringProperty(XID window,
+                                      Atom property,
+                                      Atom type,
+                                      const std::string& value);
 
 // Gets the X atom for default display corresponding to atom_name.
 Atom GetAtom(const char* atom_name);
@@ -223,6 +227,10 @@ UI_BASE_EXPORT XID GetParentWindow(XID window);
 
 // Walk up |window|'s hierarchy until we find a direct child of |root|.
 XID GetHighestAncestorWindow(XID window, XID root);
+
+// Determine whether we should default to native decorations or the custom
+// frame based on the currently-running window manager.
+UI_BASE_EXPORT bool GetCustomFramePrefDefault();
 
 static const int kAllDesktops = -1;
 // Queries the desktop |window| is on, kAllDesktops if sticky. Returns false if

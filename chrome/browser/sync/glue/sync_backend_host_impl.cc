@@ -12,13 +12,14 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/glue/sync_backend_host_core.h"
 #include "chrome/browser/sync/glue/sync_backend_registrar.h"
-#include "chrome/browser/sync/sync_prefs.h"
 #include "chrome/common/chrome_switches.h"
 #include "components/sync_driver/sync_frontend.h"
+#include "components/sync_driver/sync_prefs.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "sync/internal_api/public/base_transaction.h"
+#include "sync/internal_api/public/events/protocol_event.h"
 #include "sync/internal_api/public/http_bridge.h"
 #include "sync/internal_api/public/internal_components_factory.h"
 #include "sync/internal_api/public/internal_components_factory_impl.h"
@@ -46,7 +47,7 @@ namespace browser_sync {
 SyncBackendHostImpl::SyncBackendHostImpl(
     const std::string& name,
     Profile* profile,
-    const base::WeakPtr<SyncPrefs>& sync_prefs)
+    const base::WeakPtr<sync_driver::SyncPrefs>& sync_prefs)
     : frontend_loop_(base::MessageLoop::current()),
       profile_(profile),
       name_(name),
@@ -474,6 +475,14 @@ SyncedDeviceTracker* SyncBackendHostImpl::GetSyncedDeviceTracker() const {
   return core_->synced_device_tracker();
 }
 
+void SyncBackendHostImpl::SetForwardProtocolEvents(bool forward) {
+  DCHECK(initialized());
+  registrar_->sync_thread()->message_loop()->PostTask(
+      FROM_HERE,
+      base::Bind(&SyncBackendHostCore::SetForwardProtocolEvents,
+                 core_, forward));
+}
+
 void SyncBackendHostImpl::InitCore(scoped_ptr<DoInitializeOptions> options) {
   registrar_->sync_thread()->message_loop()->PostTask(FROM_HERE,
       base::Bind(&SyncBackendHostCore::DoInitialize,
@@ -662,6 +671,10 @@ void SyncBackendHostImpl::OnIncomingInvalidation(
                  invalidation_map));
 }
 
+std::string SyncBackendHostImpl::GetOwnerName() const {
+  return "SyncBackendHostImpl";
+}
+
 bool SyncBackendHostImpl::CheckPassphraseAgainstCachedPendingKeys(
     const std::string& passphrase) const {
   DCHECK(cached_pending_keys_.has_blob());
@@ -738,6 +751,14 @@ void SyncBackendHostImpl::HandleConnectionStatusChangeOnFrontendLoop(
   DVLOG(1) << "Connection status changed: "
            << syncer::ConnectionStatusToString(status);
   frontend_->OnConnectionStatusChange(status);
+}
+
+void SyncBackendHostImpl::HandleProtocolEventOnFrontendLoop(
+    syncer::ProtocolEvent* event) {
+  scoped_ptr<syncer::ProtocolEvent> scoped_event(event);
+  if (!frontend_)
+    return;
+  frontend_->OnProtocolEvent(*scoped_event);
 }
 
 base::MessageLoop* SyncBackendHostImpl::GetSyncLoopForTesting() {

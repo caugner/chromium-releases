@@ -7,8 +7,8 @@
 #include "gpu/command_buffer/client/gles2_cmd_helper.h"
 #include "gpu/command_buffer/client/gles2_implementation.h"
 #include "gpu/command_buffer/client/transfer_buffer.h"
+#include "mojo/public/cpp/system/core.h"
 #include "mojo/public/gles2/gles2.h"
-#include "mojo/public/system/core_cpp.h"
 
 namespace mojo {
 namespace gles2 {
@@ -40,12 +40,16 @@ bool GLES2Context::Initialize() {
     return false;
   gles2_helper_->SetAutomaticFlushes(false);
   transfer_buffer_.reset(new gpu::TransferBuffer(gles2_helper_.get()));
+  bool bind_generates_resource = true;
+  // TODO(piman): Some contexts (such as compositor) want this to be true, so
+  // this needs to be a public parameter.
+  bool lose_context_when_out_of_memory = false;
   implementation_.reset(
       new gpu::gles2::GLES2Implementation(gles2_helper_.get(),
                                           NULL,
                                           transfer_buffer_.get(),
-                                          true,
-                                          true,
+                                          bind_generates_resource,
+                                          lose_context_when_out_of_memory,
                                           &command_buffer_));
   return implementation_->Initialize(kDefaultStartTransferBufferSize,
                                      kDefaultMinTransferBufferSize,

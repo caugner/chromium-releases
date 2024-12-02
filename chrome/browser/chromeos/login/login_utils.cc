@@ -47,6 +47,7 @@
 #include "chrome/browser/chromeos/login/saml/saml_offline_signin_limiter.h"
 #include "chrome/browser/chromeos/login/saml/saml_offline_signin_limiter_factory.h"
 #include "chrome/browser/chromeos/login/screen_locker.h"
+#include "chrome/browser/chromeos/login/startup_utils.h"
 #include "chrome/browser/chromeos/login/supervised_user_manager.h"
 #include "chrome/browser/chromeos/login/user.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
@@ -59,6 +60,8 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/rlz/rlz.h"
+#include "chrome/browser/signin/signin_manager.h"
+#include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/ui/app_list/start_page_service.h"
@@ -413,10 +416,9 @@ void LoginUtilsImpl::PrepareProfile(
   delegate_ = delegate;
   InitSessionRestoreStrategy();
 
-  base::FilePath profile_dir;
   if (DemoAppLauncher::IsDemoAppSession(user_context.username)) {
     g_browser_process->profile_manager()->CreateProfileAsync(
-        ProfileManager::GetGuestProfilePath(),
+        user_manager->GetUserProfileDir(user_context.username),
         base::Bind(&LoginUtilsImpl::OnOTRProfileCreated, AsWeakPtr(),
                    user_context.username),
         base::string16(), base::string16(), std::string());
@@ -458,10 +460,9 @@ void LoginUtilsImpl::InitProfilePreferences(Profile* user_profile,
     // Make sure that the google service username is properly set (we do this
     // on every sign in, not just the first login, to deal with existing
     // profiles that might not have it set yet).
-    StringPrefMember google_services_username;
-    google_services_username.Init(prefs::kGoogleServicesUsername,
-                                  user_profile->GetPrefs());
-    google_services_username.SetValue(user_id);
+    SigninManagerBase* signin_manager =
+        SigninManagerFactory::GetForProfile(user_profile);
+    signin_manager->SetAuthenticatedUsername(user_id);
   }
 }
 
@@ -666,8 +667,8 @@ void LoginUtilsImpl::FinalizePrepareProfile(Profile* user_profile) {
 void LoginUtilsImpl::InitRlzDelayed(Profile* user_profile) {
 #if defined(ENABLE_RLZ)
   if (!g_browser_process->local_state()->HasPrefPath(prefs::kRLZBrand)) {
-    // Read brand code asynchronously from an OEM file and repost ourselves.
-    google_util::chromeos::SetBrandFromFile(
+    // Read brand code asynchronously from an OEM data and repost ourselves.
+    google_util::chromeos::InitBrand(
         base::Bind(&LoginUtilsImpl::InitRlzDelayed, AsWeakPtr(), user_profile));
     return;
   }
@@ -711,9 +712,11 @@ void LoginUtilsImpl::CompleteOffTheRecordLogin(const GURL& start_url) {
   // flag. We keep only some of the arguments of this process.
   const CommandLine& browser_command_line = *CommandLine::ForCurrentProcess();
   CommandLine command_line(browser_command_line.GetProgram());
-  std::string cmd_line_str = GetOffTheRecordCommandLine(start_url,
-                                                        browser_command_line,
-                                                        &command_line);
+  std::string cmd_line_str =
+      GetOffTheRecordCommandLine(start_url,
+                                 StartupUtils::IsOobeCompleted(),
+                                 browser_command_line,
+                                 &command_line);
 
   RestartChrome(cmd_line_str);
 }
@@ -918,6 +921,7 @@ void LoginUtilsImpl::AttemptRestart(Profile* profile) {
 // static
 void LoginUtils::RegisterPrefs(PrefRegistrySimple* registry) {
   registry->RegisterBooleanPref(prefs::kFactoryResetRequested, false);
+  registry->RegisterBooleanPref(prefs::kRollbackRequested, false);
   registry->RegisterStringPref(prefs::kRLZBrand, std::string());
   registry->RegisterBooleanPref(prefs::kRLZDisabled, false);
 }

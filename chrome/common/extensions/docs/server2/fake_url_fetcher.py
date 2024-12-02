@@ -5,7 +5,7 @@
 import os
 import posixpath
 
-from future import Gettable, Future
+from future import Future
 from path_util import AssertIsDirectory, IsDirectory
 
 
@@ -51,7 +51,7 @@ class FakeUrlFetcher(object):
     def resolve():
       self._async_resolve_count += 1
       return self._DoFetch(url)
-    return Future(delegate=Gettable(resolve))
+    return Future(callback=resolve)
 
   def Fetch(self, url):
     self._sync_count += 1
@@ -106,6 +106,12 @@ class FakeURLFSFetcher(object):
     return _Response(self._file_system.ReadSingle(
         posixpath.join(self._base_path, url)).Get())
 
+  def UpdateFS(self, file_system, base_path=None):
+    '''Replace the underlying FileSystem used to reslove URLs.
+    '''
+    self._file_system = file_system
+    self._base_path = base_path or self._base_path
+
 
 class MockURLFetcher(object):
   def __init__(self, fetcher):
@@ -122,7 +128,7 @@ class MockURLFetcher(object):
     def resolve():
       self._fetch_resolve_count += 1
       return future.Get()
-    return Future(delegate=Gettable(resolve))
+    return Future(callback=resolve)
 
   def CheckAndReset(self,
                     fetch_count=0,

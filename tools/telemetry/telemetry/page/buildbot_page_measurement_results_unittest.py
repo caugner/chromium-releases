@@ -7,6 +7,8 @@ import unittest
 from telemetry.page import buildbot_page_measurement_results
 from telemetry.page import page_set
 from telemetry.page import perf_tests_helper
+from telemetry.value import list_of_scalar_values
+from telemetry.value import scalar
 
 def _MakePageSet():
   return page_set.PageSet.FromDict({
@@ -144,7 +146,7 @@ class BuildbotPageMeasurementResultsTest(unittest.TestCase):
     self.assertEquals(expected, measurement_results.results)
 
   def test_basic_summary_pass_and_fail_page(self):
-    """If a page failed, only print summary for individual passing pages."""
+    """If a page failed, only print summary for individual pages."""
     test_page_set = _MakePageSet()
 
     measurement_results = SummarySavingPageMeasurementResults()
@@ -160,6 +162,7 @@ class BuildbotPageMeasurementResultsTest(unittest.TestCase):
 
     measurement_results.PrintSummary()
     expected = ['RESULT a_by_url: http___www.bar.com_= 7 seconds',
+                'RESULT a_by_url: http___www.foo.com_= 3 seconds',
                 'RESULT telemetry_page_measurement_results: ' +
                     'num_failed= 1 count',
                 'RESULT telemetry_page_measurement_results: ' +
@@ -167,14 +170,13 @@ class BuildbotPageMeasurementResultsTest(unittest.TestCase):
     self.assertEquals(expected, measurement_results.results)
 
   def test_repeated_pageset_one_iteration_one_page_fails(self):
-    """Page fails on one iteration, no results for that page should print."""
+    """Page fails on one iteration, no averaged results should print."""
     test_page_set = _MakePageSet()
 
     measurement_results = SummarySavingPageMeasurementResults()
     measurement_results.WillMeasurePage(test_page_set.pages[0])
     measurement_results.Add('a', 'seconds', 3)
     measurement_results.DidMeasurePage()
-    measurement_results.AddSuccess(test_page_set.pages[0])
 
     measurement_results.WillMeasurePage(test_page_set.pages[1])
     measurement_results.Add('a', 'seconds', 7)
@@ -192,7 +194,10 @@ class BuildbotPageMeasurementResultsTest(unittest.TestCase):
     measurement_results.AddSuccess(test_page_set.pages[1])
 
     measurement_results.PrintSummary()
-    expected = ['RESULT a_by_url: http___www.foo.com_= [3,4] seconds\n' +
+    expected = ['RESULT a_by_url: http___www.bar.com_= [7,8] seconds\n' +
+                    'Avg a_by_url: 7.500000seconds\n' +
+                    'Sd  a_by_url: 0.707107seconds',
+                'RESULT a_by_url: http___www.foo.com_= [3,4] seconds\n' +
                     'Avg a_by_url: 3.500000seconds\n' +
                     'Sd  a_by_url: 0.707107seconds',
                 'RESULT telemetry_page_measurement_results: ' +
@@ -202,7 +207,7 @@ class BuildbotPageMeasurementResultsTest(unittest.TestCase):
     self.assertEquals(expected, measurement_results.results)
 
   def test_repeated_pageset_one_iteration_one_page_error(self):
-    """Page error on one iteration, no results for that page should print."""
+    """Page error on one iteration, no averaged results should print."""
     test_page_set = _MakePageSet()
 
     measurement_results = SummarySavingPageMeasurementResults()
@@ -227,13 +232,16 @@ class BuildbotPageMeasurementResultsTest(unittest.TestCase):
     measurement_results.AddSuccess(test_page_set.pages[1])
 
     measurement_results.PrintSummary()
-    expected = ['RESULT a_by_url: http___www.foo.com_= [3,4] seconds\n' +
+    expected = ['RESULT a_by_url: http___www.bar.com_= [7,8] seconds\n' +
+                    'Avg a_by_url: 7.500000seconds\n' +
+                    'Sd  a_by_url: 0.707107seconds',
+                'RESULT a_by_url: http___www.foo.com_= [3,4] seconds\n' +
                     'Avg a_by_url: 3.500000seconds\n' +
                     'Sd  a_by_url: 0.707107seconds',
                 'RESULT telemetry_page_measurement_results: ' +
                     'num_failed= 0 count',
-                'RESULT telemetry_page_measurement_results:' +
-                    ' num_errored= 1 count']
+                'RESULT telemetry_page_measurement_results: ' +
+                    'num_errored= 1 count']
     self.assertEquals(expected, measurement_results.results)
 
   def test_repeated_pageset(self):
@@ -323,7 +331,8 @@ class BuildbotPageMeasurementResultsTest(unittest.TestCase):
 
     measurement_results = SummarySavingPageMeasurementResults(trace_tag='_ref')
 
-    measurement_results.AddSummary('a', 'seconds', 1)
+    measurement_results.AddSummaryValue(
+        scalar.ScalarValue(None, 'a', 'seconds', 1))
 
     measurement_results.WillMeasurePage(test_page_set.pages[0])
     measurement_results.Add('b', 'seconds', 2)
@@ -335,7 +344,8 @@ class BuildbotPageMeasurementResultsTest(unittest.TestCase):
     measurement_results.DidMeasurePage()
     measurement_results.AddSuccess(test_page_set.pages[1])
 
-    measurement_results.AddSummary('c', 'seconds', 4)
+    measurement_results.AddSummaryValue(
+        scalar.ScalarValue(None, 'c', 'seconds', 4))
 
     measurement_results.PrintSummary()
 
@@ -354,7 +364,8 @@ class BuildbotPageMeasurementResultsTest(unittest.TestCase):
 
     measurement_results = SummarySavingPageMeasurementResults()
 
-    measurement_results.AddSummary('a', 'seconds', 1)
+    measurement_results.AddSummaryValue(
+        scalar.ScalarValue(None, 'a', 'seconds', 1))
 
     measurement_results.WillMeasurePage(test_page_set.pages[0])
     measurement_results.Add('b', 'seconds', 2)
@@ -383,7 +394,8 @@ class BuildbotPageMeasurementResultsTest(unittest.TestCase):
 
     measurement_results = SummarySavingPageMeasurementResults()
 
-    measurement_results.AddSummary('a', 'seconds', 1, data_type='unimportant')
+    measurement_results.AddSummaryValue(
+        scalar.ScalarValue(None, 'a', 'seconds', 1, important=False))
 
     measurement_results.WillMeasurePage(test_page_set.pages[0])
     measurement_results.Add('b', 'seconds', 2, data_type='unimportant')
@@ -412,7 +424,8 @@ class BuildbotPageMeasurementResultsTest(unittest.TestCase):
 
     measurement_results = SummarySavingPageMeasurementResults()
 
-    measurement_results.AddSummary('a', 'seconds', [1, 1])
+    measurement_results.AddSummaryValue(
+        list_of_scalar_values.ListOfScalarValues(None, 'a', 'seconds', [1, 1]))
 
     measurement_results.WillMeasurePage(test_page_set.pages[0])
     measurement_results.Add('b', 'seconds', [2, 2])

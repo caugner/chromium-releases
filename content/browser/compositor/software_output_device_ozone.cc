@@ -3,7 +3,6 @@
 // found in the LICENSE file.
 
 #include "content/browser/compositor/software_output_device_ozone.h"
-#include "third_party/skia/include/core/SkBitmapDevice.h"
 #include "third_party/skia/include/core/SkDevice.h"
 #include "ui/compositor/compositor.h"
 #include "ui/gfx/ozone/surface_factory_ozone.h"
@@ -42,7 +41,6 @@ void SoftwareOutputDeviceOzone::Resize(const gfx::Size& viewport_size) {
                                             bounds);
 
   canvas_ = skia::SharePtr(factory->GetCanvasForWidget(realized_widget_));
-  device_ = skia::SharePtr(canvas_->getDevice());
 }
 
 SkCanvas* SoftwareOutputDeviceOzone::BeginPaint(const gfx::Rect& damage_rect) {

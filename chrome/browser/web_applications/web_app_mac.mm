@@ -145,7 +145,7 @@ base::FilePath GetWritableApplicationsDirectory() {
 
       // Create a zero-byte ".localized" file to inherit localizations from OSX
       // for folders that have special meaning.
-      file_util::WriteFile(path.Append(".localized"), NULL, 0);
+      base::WriteFile(path.Append(".localized"), NULL, 0);
     }
     return base::PathIsWritable(path) ? path : base::FilePath();
   }
@@ -440,7 +440,7 @@ void ShowCreateChromeAppShortcutsDialog(gfx::NativeWindow /*parent_window*/,
   // Normally we would show a dialog, but since we always create the app
   // shortcut in /Applications there are no options for the user to choose.
   web_app::UpdateShortcutInfoAndIconForApp(
-      *app, profile,
+      app, profile,
       base::Bind(&CreateShortcutsAndRunCallback, close_callback));
 }
 

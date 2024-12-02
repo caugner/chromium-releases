@@ -20,6 +20,7 @@
 // For SetHardwareKeyboardLayoutForTesting.
 #include "chromeos/ime/fake_input_method_delegate.h"
 #include "chromeos/ime/input_method_delegate.h"
+#include "chromeos/ime/input_method_whitelist.h"
 // TODO(nona): move this header from this file.
 #include "grit/generated_resources.h"
 
@@ -42,21 +43,21 @@ const struct {
   { "pinyin", "\xe6\x8b\xbc" },  // U+62FC
   { "_comp_ime_cpgalbafkoofkjmaeonnfijgpfennjjnzh-t-i0-pinyin",
     "\xe6\x8b\xbc" },
-  { "_comp_ime_nmblnjkfdkabgdofidlkienfnnbjhnabzh-t-i0-pinyin",
+  { "_comp_ime_gjaehgfemfahhmlgpdfknkhdnemmolopzh-t-i0-pinyin",
     "\xe6\x8b\xbc" },
-  { "_comp_ime_gjhclobljhjhgoebiipblnmdodbmpdgdzh-t-i0-wubi-1986",
+  { "_comp_ime_gjaehgfemfahhmlgpdfknkhdnemmolopzh-t-i0-wubi-1986",
     "\xe4\xba\x94" }, // U+4E94
   { "pinyin-dv", "\xe6\x8b\xbc" },
   // For traditional Chinese input methods
   { "mozc-chewing", "\xe9\x85\xb7" },  // U+9177
   { "_comp_ime_ekbifjdfhkmdeeajnolmgdlmkllopefizh-hant-t-i0-und",
     "\xE6\xB3\xA8" },  // U+6CE8
-  { "_comp_ime_goedamlknlnjaengojinmfgpmdjmkooozh-hant-t-i0-und",
+  { "_comp_ime_gjaehgfemfahhmlgpdfknkhdnemmolopzh-hant-t-i0-und",
     "\xE6\xB3\xA8" },  // U+6CE8
   { "m17n:zh:cangjie", "\xe5\x80\x89" },  // U+5009
   { "_comp_ime_aeebooiibjahgpgmhkeocbeekccfknbjzh-hant-t-i0-cangjie-1987",
     "\xe5\x80\x89" },  // U+5009
-  { "_comp_ime_gjhclobljhjhgoebiipblnmdodbmpdgdzh-hant-t-i0-cangjie-1987",
+  { "_comp_ime_gjaehgfemfahhmlgpdfknkhdnemmolopzh-hant-t-i0-cangjie-1987",
     "\xe5\x80\x89" },  // U+5009
   { "m17n:zh:quick", "\xe9\x80\x9f" },  // U+901F
   // For Hangul input method.
@@ -91,17 +92,17 @@ const struct {
   { "pinyin-dv", IDS_LANGUAGES_MEDIUM_LEN_NAME_CHINESE_SIMPLIFIED },
   { "_comp_ime_cpgalbafkoofkjmaeonnfijgpfennjjnzh-t-i0-pinyin",
     IDS_LANGUAGES_MEDIUM_LEN_NAME_CHINESE_SIMPLIFIED},
-  { "_comp_ime_nmblnjkfdkabgdofidlkienfnnbjhnabzh-t-i0-pinyin",
+  { "_comp_ime_gjaehgfemfahhmlgpdfknkhdnemmolopzh-t-i0-pinyin",
     IDS_LANGUAGES_MEDIUM_LEN_NAME_CHINESE_SIMPLIFIED },
-  { "_comp_ime_gjhclobljhjhgoebiipblnmdodbmpdgdzh-t-i0-wubi-1986",
+  { "_comp_ime_gjaehgfemfahhmlgpdfknkhdnemmolopzh-t-i0-wubi-1986",
     IDS_LANGUAGES_MEDIUM_LEN_NAME_CHINESE_SIMPLIFIED },
   { "_comp_ime_ekbifjdfhkmdeeajnolmgdlmkllopefizh-hant-t-i0-und",
     IDS_LANGUAGES_MEDIUM_LEN_NAME_CHINESE_TRADITIONAL },
-  { "_comp_ime_goedamlknlnjaengojinmfgpmdjmkooozh-hant-t-i0-und",
+  { "_comp_ime_gjaehgfemfahhmlgpdfknkhdnemmolopzh-hant-t-i0-und",
     IDS_LANGUAGES_MEDIUM_LEN_NAME_CHINESE_TRADITIONAL },
   { "_comp_ime_aeebooiibjahgpgmhkeocbeekccfknbjzh-hant-t-i0-cangjie-1987",
     IDS_LANGUAGES_MEDIUM_LEN_NAME_CHINESE_TRADITIONAL },
-  { "_comp_ime_gjhclobljhjhgoebiipblnmdodbmpdgdzh-hant-t-i0-cangjie-1987",
+  { "_comp_ime_gjaehgfemfahhmlgpdfknkhdnemmolopzh-hant-t-i0-cangjie-1987",
     IDS_LANGUAGES_MEDIUM_LEN_NAME_CHINESE_TRADITIONAL },
 };
 const size_t kMappingImeIdToMediumLenNameResourceIdLen =
@@ -118,13 +119,88 @@ const struct {
 } kDefaultInputMethodRecommendation[] = {
   { "ja", "us", "_comp_ime_fpfbhcjppmaeaijcidgiibchfbnhbeljnacl_mozc_us" },
   { "ja", "jp", "_comp_ime_fpfbhcjppmaeaijcidgiibchfbnhbeljnacl_mozc_jp" },
-  { "zh-CN", "us", "_comp_ime_nmblnjkfdkabgdofidlkienfnnbjhnabzh-t-i0-pinyin" },
+  { "zh-CN", "us", "_comp_ime_gjaehgfemfahhmlgpdfknkhdnemmolopzh-t-i0-pinyin" },
   { "zh-TW", "us",
-    "_comp_ime_goedamlknlnjaengojinmfgpmdjmkooozh-hant-t-i0-und" },
+    "_comp_ime_gjaehgfemfahhmlgpdfknkhdnemmolopzh-hant-t-i0-und" },
+#if defined(OFFICIAL_BUILD)
+  { "th", "us", "_comp_ime_habcdindjejkmepknlhkkloncjcpcnbfvkd_th" },
+  { "vi", "us", "_comp_ime_habcdindjejkmepknlhkkloncjcpcnbfvkd_vi_tcvn" },
+  { "vi", "us", "_comp_ime_habcdindjejkmepknlhkkloncjcpcnbfvkd_vi_tcvn" },
+#else
   { "th", "us", "_comp_ime_jhffeifommiaekmbkkjlpmilogcfdohpvkd_th" },
   { "vi", "us", "_comp_ime_jhffeifommiaekmbkkjlpmilogcfdohpvkd_vi_tcvn" },
   { "vi", "us", "_comp_ime_jhffeifommiaekmbkkjlpmilogcfdohpvkd_vi_tcvn" },
+#endif
 };
+
+// The map from xkb layout to the indicator text.
+// Refer to crbug.com/349829.
+const char* const kXkbIndicators[][2] = {{"am", "AM"},
+                                         {"be", "BE"},
+                                         {"bg", "BG"},
+                                         {"bg(phonetic)", "BG"},
+                                         {"br", "BR"},
+                                         {"by", "BY"},
+                                         {"ca", "CA"},
+                                         {"ca(eng)", "CA"},
+                                         {"ca(multix)", "CA"},
+                                         {"ch", "CH"},
+                                         {"ch(fr)", "CH"},
+                                         {"cz", "CZ"},
+                                         {"cz(qwerty)", "CS"},
+                                         {"de", "DE"},
+                                         {"de(neo)", "NEO"},
+                                         {"dk", "DK"},
+                                         {"ee", "EE"},
+                                         {"es", "ES"},
+                                         {"es(cat)", "CAS"},
+                                         {"fi", "FI"},
+                                         {"fr", "FR"},
+                                         {"gb(dvorak)", "DV"},
+                                         {"gb(extd)", "GB"},
+                                         {"ge", "GE"},
+                                         {"gr", "GR"},
+                                         {"hr", "HR"},
+                                         {"hu", "HU"},
+                                         {"il", "IL"},
+                                         {"is", "IS"},
+                                         {"it", "IT"},
+                                         {"jp", "JA"},
+                                         {"latam", "LA"},
+                                         {"lt", "LT"},
+                                         {"lv(apostrophe)", "LV"},
+                                         {"mn", "MN"},
+                                         {"no", "NO"},
+                                         {"pl", "PL"},
+                                         {"pt", "PT"},
+                                         {"ro", "RO"},
+                                         {"rs", "RS"},
+                                         {"ru", "RU"},
+                                         {"ru(phonetic)", "RU"},
+                                         {"se", "SE"},
+                                         {"si", "SI"},
+                                         {"sk", "SK"},
+                                         {"tr", "TR"},
+                                         {"ua", "UA"},
+                                         {"us", "US"},
+                                         {"us(altgr-intl)", "EXTD"},
+                                         {"us(colemak)", "CO"},
+                                         {"us(dvorak)", "DV"},
+                                         {"us(intl)", "INTL"}, };
+
+// The old chinese input method ids for migration.
+// See crbug.com/357384.
+const char* kOldChineseExtensionIds[] = {
+  "goedamlknlnjaengojinmfgpmdjmkooo",
+  "nmblnjkfdkabgdofidlkienfnnbjhnab",
+  "gjhclobljhjhgoebiipblnmdodbmpdgd"
+};
+
+// The new chinese input method id for migration.
+// See crbug.com/357384.
+const char* kNewChineseExtensionId = "gjaehgfemfahhmlgpdfknkhdnemmolop";
+
+const size_t kExtensionIdLen = 32;
 
 }  // namespace
 
@@ -291,6 +367,11 @@ InputMethodUtil::InputMethodUtil(
     scoped_ptr<InputMethodDescriptors> supported_input_methods)
     : supported_input_methods_(supported_input_methods.Pass()),
       delegate_(delegate) {
+  // Makes sure the supported input methods at least have the fallback ime.
+  // So that it won't cause massive test failures.
+  if (supported_input_methods_->empty())
+    supported_input_methods_->push_back(GetFallbackInputMethodDescriptor());
+
   ReloadInternalMaps();
 
   // Initialize a map from English string to Chrome string resource ID as well.
@@ -300,6 +381,11 @@ InputMethodUtil::InputMethodUtil(
         map_entry.english_string_from_ibus, map_entry.resource_id)).second;
     DCHECK(result) << "Duplicated string is found: "
                    << map_entry.english_string_from_ibus;
+  }
+
+  // Initialize the map from xkb layout to indicator text.
+  for (size_t i = 0; i < arraysize(kXkbIndicators); ++i) {
+    xkb_layout_to_indicator_[kXkbIndicators[i][0]] = kXkbIndicators[i][1];
   }
 }
 
@@ -341,8 +427,8 @@ bool InputMethodUtil::IsValidInputMethodId(
 
 // static
 bool InputMethodUtil::IsKeyboardLayout(const std::string& input_method_id) {
-  const bool kCaseInsensitive = false;
-  return StartsWithASCII(input_method_id, "xkb:", kCaseInsensitive);
+  return StartsWithASCII(input_method_id, "xkb:", false) ||
+      extension_ime_util::IsKeyboardLayoutExtension(input_method_id);
 }
 
 std::string InputMethodUtil::GetLanguageCodeFromInputMethodId(
@@ -398,13 +484,11 @@ base::string16 InputMethodUtil::GetInputMethodShortName(
   }
 
   // Display the keyboard layout name when using a keyboard layout.
-  if (text.empty() &&
-      IsKeyboardLayout(input_method.id())) {
-    const size_t kMaxKeyboardLayoutNameLen = 2;
-    const base::string16 keyboard_layout =
-        base::UTF8ToUTF16(GetKeyboardLayoutName(input_method.id()));
-    text = StringToUpperASCII(keyboard_layout).substr(
-        0, kMaxKeyboardLayoutNameLen);
+  if (text.empty() && IsKeyboardLayout(input_method.id())) {
+    std::map<std::string, std::string>::const_iterator it =
+        xkb_layout_to_indicator_.find(GetKeyboardLayoutName(input_method.id()));
+    if (it != xkb_layout_to_indicator_.end())
+      text = base::UTF8ToUTF16(it->second);
   }
 
   // TODO(yusukes): Some languages have two or more input methods. For example,
@@ -441,7 +525,7 @@ base::string16 InputMethodUtil::GetInputMethodMediumName(
 
 base::string16 InputMethodUtil::GetInputMethodLongName(
     const InputMethodDescriptor& input_method) const {
-  if (!input_method.name().empty()) {
+  if (!input_method.name().empty() && !IsKeyboardLayout(input_method.id())) {
     // If the descriptor has a name, use it.
     return base::UTF8ToUTF16(input_method.name());
   }
@@ -459,7 +543,12 @@ base::string16 InputMethodUtil::GetInputMethodLongName(
   DCHECK(!input_method.language_codes().empty());
   const std::string language_code = input_method.language_codes().at(0);
 
-  base::string16 text = TranslateString(input_method.id());
+  // Before translate the string, convert the input method id to legacy xkb id
+  // if possible.
+  // TODO(shuchen): the GetInputMethodLongName() method should be removed when
+  // finish the wrapping of xkb to extension.
+  base::string16 text = TranslateString(
+      extension_ime_util::MaybeGetLegacyXkbId(input_method.id()));
   if (text == standard_input_method_text ||
              language_code == "de" ||
              language_code == "fr" ||
@@ -476,9 +565,11 @@ base::string16 InputMethodUtil::GetInputMethodLongName(
 
 const InputMethodDescriptor* InputMethodUtil::GetInputMethodDescriptorFromId(
     const std::string& input_method_id) const {
-  InputMethodIdToDescriptorMap::const_iterator iter
-      = id_to_descriptor_.find(input_method_id);
-  return (iter == id_to_descriptor_.end()) ? NULL : &(iter->second);
+  InputMethodIdToDescriptorMap::const_iterator iter =
+      id_to_descriptor_.find(input_method_id);
+  if (iter == id_to_descriptor_.end())
+    return NULL;
+  return &(iter->second);
 }
 
 bool InputMethodUtil::GetInputMethodIdsFromLanguageCode(
@@ -611,11 +702,53 @@ std::string InputMethodUtil::GetLanguageDefaultInputMethodId(
   return std::string();
 }
 
+bool InputMethodUtil::MigrateXkbInputMethods(
+    std::vector<std::string>* input_method_ids) {
+  bool rewritten = false;
+  std::vector<std::string>& ids = *input_method_ids;
+  for (size_t i = 0; i < ids.size(); ++i) {
+    std::string id =
+        extension_ime_util::GetInputMethodIDByKeyboardLayout(ids[i]);
+    // Migrates the old chinese ime id to new ones.
+    // TODO(shuchen): Change the function name to MigrateInputMethods,
+    // and create an abstract layer to map a comprehensive input method id to
+    // the real extension based input method id.
+    // e.g. "zh-t-i0-pinyin" maps to
+    // "_comp_id_gjaehgfemfahhmlgpdfknkhdnemmolopzh-t-i0-pinyin".
+    // See crbug.com/358083.
+    for (size_t j = 0; j < arraysize(kOldChineseExtensionIds); ++j) {
+      size_t pos = id.find(kOldChineseExtensionIds[j]);
+      if (pos != std::string::npos) {
+        id.replace(pos, kExtensionIdLen, kNewChineseExtensionId);
+        break;
+      }
+    }
+    if (id != ids[i]) {
+      ids[i] = id;
+      rewritten = true;
+    }
+  }
+  if (rewritten) {
+    // Removes the duplicates.
+    std::vector<std::string> new_ids;
+    for (size_t i = 0; i < ids.size(); ++i) {
+      if (std::find(new_ids.begin(), new_ids.end(), ids[i]) == new_ids.end())
+        new_ids.push_back(ids[i]);
+    }
+    ids.swap(new_ids);
+  }
+  return rewritten;
+}
+
 void InputMethodUtil::UpdateHardwareLayoutCache() {
   DCHECK(thread_checker_.CalledOnValidThread());
   hardware_layouts_.clear();
   hardware_login_layouts_.clear();
-  Tokenize(delegate_->GetHardwareKeyboardLayouts(), ",", &hardware_layouts_);
+  if (cached_hardware_layouts_.empty())
+    Tokenize(delegate_->GetHardwareKeyboardLayouts(), ",",
+             &cached_hardware_layouts_);
+  hardware_layouts_ = cached_hardware_layouts_;
+  MigrateXkbInputMethods(&hardware_layouts_);
 
   for (size_t i = 0; i < hardware_layouts_.size(); ++i) {
     if (IsLoginKeyboard(hardware_layouts_[i]))
@@ -635,24 +768,21 @@ void InputMethodUtil::UpdateHardwareLayoutCache() {
 void InputMethodUtil::SetHardwareKeyboardLayoutForTesting(
     const std::string& layout) {
   delegate_->SetHardwareKeyboardLayoutForTesting(layout);
+  cached_hardware_layouts_.clear();
   UpdateHardwareLayoutCache();
 }
 
 const std::vector<std::string>&
     InputMethodUtil::GetHardwareInputMethodIds() {
   DCHECK(thread_checker_.CalledOnValidThread());
-  // Once the initialization is done, at least one input method should be set.
-  if (hardware_layouts_.empty())
-    UpdateHardwareLayoutCache();
+  UpdateHardwareLayoutCache();
   return hardware_layouts_;
 }
 
 const std::vector<std::string>&
     InputMethodUtil::GetHardwareLoginInputMethodIds() {
   DCHECK(thread_checker_.CalledOnValidThread());
-  // Once the initialization is done, at least one input method should be set.
-  if (hardware_login_layouts_.empty())
-    UpdateHardwareLayoutCache();
+  UpdateHardwareLayoutCache();
   return hardware_login_layouts_;
 }
 
@@ -665,16 +795,50 @@ bool InputMethodUtil::IsLoginKeyboard(const std::string& input_method_id)
 
 void InputMethodUtil::SetComponentExtensions(
     const InputMethodDescriptors& imes) {
-  component_extension_ime_id_to_descriptor_.clear();
   for (size_t i = 0; i < imes.size(); ++i) {
-    const InputMethodDescriptor& input_method = imes.at(i);
+    const InputMethodDescriptor& input_method = imes[i];
     DCHECK(!input_method.language_codes().empty());
-    const std::string language_code = input_method.language_codes().at(0);
-    id_to_language_code_.insert(
-        std::make_pair(input_method.id(), language_code));
-    id_to_descriptor_.insert(
-        std::make_pair(input_method.id(), input_method));
+    const std::vector<std::string>& language_codes =
+        input_method.language_codes();
+    id_to_language_code_[input_method.id()] = language_codes[0];
+    id_to_descriptor_[input_method.id()] = input_method;
+
+    typedef LanguageCodeToIdsMap::const_iterator It;
+    for (size_t j = 0; j < language_codes.size(); ++j) {
+      std::pair<It, It> range =
+          language_code_to_ids_.equal_range(language_codes[j]);
+      It it = range.first;
+      for (; it != range.second; ++it) {
+        if (it->second == input_method.id())
+          break;
+      }
+      if (it == range.second)
+        language_code_to_ids_.insert(
+            std::make_pair(language_codes[j], input_method.id()));
+    }
   }
+}
+
+void InputMethodUtil::InitXkbInputMethodsForTesting() {
+  cached_hardware_layouts_.clear();
+  if (!extension_ime_util::UseWrappedExtensionKeyboardLayouts())
+    return;
+  scoped_ptr<InputMethodDescriptors> original_imes =
+      InputMethodWhitelist().GetSupportedInputMethods();
+  InputMethodDescriptors whitelist_imes;
+  for (size_t i = 0; i < original_imes->size(); ++i) {
+    const InputMethodDescriptor& ime = (*original_imes)[i];
+    whitelist_imes.push_back(InputMethodDescriptor(
+        extension_ime_util::GetInputMethodIDByKeyboardLayout(ime.id()),
+        "",
+        ime.indicator(),
+        ime.keyboard_layouts(),
+        ime.language_codes(),
+        ime.is_login_keyboard(),
+        ime.options_page_url(),
+        ime.input_view_url()));
+  }
+  SetComponentExtensions(whitelist_imes);
 }
 
 InputMethodDescriptor InputMethodUtil::GetFallbackInputMethodDescriptor() {
@@ -682,14 +846,15 @@ InputMethodDescriptor InputMethodUtil::GetFallbackInputMethodDescriptor() {
   layouts.push_back("us");
   std::vector<std::string> languages;
   languages.push_back("en-US");
-  return InputMethodDescriptor("xkb:us::eng",
-                               "",
-                               "US",
-                               layouts,
-                               languages,
-                               true,  // login keyboard.
-                               GURL(),  // options page, not available.
-                               GURL()); // input view page, not available.
+  return InputMethodDescriptor(
+      extension_ime_util::GetInputMethodIDByKeyboardLayout("xkb:us::eng"),
+      "",
+      "US",
+      layouts,
+      languages,
+      true,  // login keyboard.
+      GURL(),  // options page, not available.
+      GURL()); // input view page, not available.
 }
 
 void InputMethodUtil::ReloadInternalMaps() {

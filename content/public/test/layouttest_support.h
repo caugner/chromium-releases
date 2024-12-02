@@ -6,10 +6,12 @@
 #define CONTENT_PUBLIC_TEST_LAYOUTTEST_SUPPORT_H_
 
 #include "base/callback_forward.h"
+#include "third_party/WebKit/public/platform/WebScreenOrientation.h"
 
 namespace blink {
 class WebDeviceMotionData;
 class WebDeviceOrientationData;
+class WebGamepad;
 class WebGamepads;
 struct WebSize;
 }
@@ -41,6 +43,12 @@ void EnableWebTestProxyCreation(const base::Callback<
 // WebKitPlatformSupport::sampleGamepads().
 void SetMockGamepads(const blink::WebGamepads& pads);
 
+// Notifies blink about a new gamepad.
+void MockGamepadConnected(int index, const blink::WebGamepad& pad);
+
+// Notifies blink that a gamepad has been disconnected.
+void MockGamepadDisconnected(int index, const blink::WebGamepad& pad);
+
 // Sets WebDeviceMotionData that should be used when registering
 // a listener through WebKitPlatformSupport::setDeviceMotionListener().
 void SetMockDeviceMotionData(const blink::WebDeviceMotionData& data);
@@ -48,6 +56,10 @@ void SetMockDeviceMotionData(const blink::WebDeviceMotionData& data);
 // Sets WebDeviceOrientationData that should be used when registering
 // a listener through WebKitPlatformSupport::setDeviceOrientationListener().
 void SetMockDeviceOrientationData(const blink::WebDeviceOrientationData& data);
+
+// Sets WebScreenOrientation that should be used when registering a listener
+// through WebKitPlatformSupport::setScreenOrientationListener().
+void SetMockScreenOrientation(const blink::WebScreenOrientation& orientation);
 
 // Returns the length of the local session history of a render view.
 int GetLocalSessionHistoryLength(RenderView* render_view);

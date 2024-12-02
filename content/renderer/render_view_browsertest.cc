@@ -9,6 +9,8 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/win/windows_version.h"
+#include "content/child/request_extra_data.h"
+#include "content/child/service_worker/service_worker_network_provider.h"
 #include "content/common/frame_messages.h"
 #include "content/common/ssl_status_serialization.h"
 #include "content/common/view_messages.h"
@@ -19,12 +21,16 @@
 #include "content/public/common/page_zoom.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/common/url_utils.h"
+#include "content/public/renderer/content_renderer_client.h"
 #include "content/public/renderer/document_state.h"
 #include "content/public/renderer/history_item_serialization.h"
 #include "content/public/renderer/navigation_state.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/render_view_test.h"
 #include "content/public/test/test_utils.h"
+#include "content/renderer/accessibility/renderer_accessibility.h"
+#include "content/renderer/accessibility/renderer_accessibility_complete.h"
+#include "content/renderer/accessibility/renderer_accessibility_focus_only.h"
 #include "content/renderer/render_view_impl.h"
 #include "content/shell/browser/shell.h"
 #include "content/shell/browser/shell_browser_context.h"
@@ -516,22 +522,22 @@ TEST_F(RenderViewImplTest, SendSwapOutACK) {
   int initial_page_id = view()->GetPageId();
 
   // Respond to a swap out request.
-  view()->OnSwapOut();
+  view()->main_render_frame()->OnSwapOut();
 
   // Ensure the swap out commits synchronously.
   EXPECT_NE(initial_page_id, view()->GetPageId());
 
   // Check for a valid OnSwapOutACK.
   const IPC::Message* msg = render_thread_->sink().GetUniqueMessageMatching(
-      ViewHostMsg_SwapOut_ACK::ID);
+      FrameHostMsg_SwapOut_ACK::ID);
   ASSERT_TRUE(msg);
 
   // It is possible to get another swap out request.  Ensure that we send
   // an ACK, even if we don't have to do anything else.
   render_thread_->sink().ClearMessages();
-  view()->OnSwapOut();
+  view()->main_render_frame()->OnSwapOut();
   const IPC::Message* msg2 = render_thread_->sink().GetUniqueMessageMatching(
-      ViewHostMsg_SwapOut_ACK::ID);
+      FrameHostMsg_SwapOut_ACK::ID);
   ASSERT_TRUE(msg2);
 
   // If we navigate back to this RenderView, ensure we don't send a state
@@ -584,11 +590,11 @@ TEST_F(RenderViewImplTest, ReloadWhileSwappedOut) {
   ProcessPendingMessages();
 
   // Respond to a swap out request.
-  view()->OnSwapOut();
+  view()->main_render_frame()->OnSwapOut();
 
   // Check for a OnSwapOutACK.
   const IPC::Message* msg = render_thread_->sink().GetUniqueMessageMatching(
-      ViewHostMsg_SwapOut_ACK::ID);
+      FrameHostMsg_SwapOut_ACK::ID);
   ASSERT_TRUE(msg);
   render_thread_->sink().ClearMessages();
 
@@ -1946,15 +1952,15 @@ TEST_F(RenderViewImplTest, SetEditableSelectionAndComposition) {
            "</body>"
            "</html>");
   ExecuteJavaScript("document.getElementById('test1').focus();");
-  view()->OnSetEditableSelectionOffsets(4, 8);
+  frame()->OnSetEditableSelectionOffsets(4, 8);
   const std::vector<blink::WebCompositionUnderline> empty_underline;
-  view()->OnSetCompositionFromExistingText(7, 10, empty_underline);
+  frame()->OnSetCompositionFromExistingText(7, 10, empty_underline);
   blink::WebTextInputInfo info = view()->webview()->textInputInfo();
   EXPECT_EQ(4, info.selectionStart);
   EXPECT_EQ(8, info.selectionEnd);
   EXPECT_EQ(7, info.compositionStart);
   EXPECT_EQ(10, info.compositionEnd);
-  view()->OnUnselect();
+  frame()->OnUnselect();
   info = view()->webview()->textInputInfo();
   EXPECT_EQ(0, info.selectionStart);
   EXPECT_EQ(0, info.selectionEnd);
@@ -1971,14 +1977,14 @@ TEST_F(RenderViewImplTest, OnExtendSelectionAndDelete) {
            "</body>"
            "</html>");
   ExecuteJavaScript("document.getElementById('test1').focus();");
-  view()->OnSetEditableSelectionOffsets(10, 10);
-  view()->OnExtendSelectionAndDelete(3, 4);
+  frame()->OnSetEditableSelectionOffsets(10, 10);
+  frame()->OnExtendSelectionAndDelete(3, 4);
   blink::WebTextInputInfo info = view()->webview()->textInputInfo();
   EXPECT_EQ("abcdefgopqrstuvwxyz", info.value);
   EXPECT_EQ(7, info.selectionStart);
   EXPECT_EQ(7, info.selectionEnd);
-  view()->OnSetEditableSelectionOffsets(4, 8);
-  view()->OnExtendSelectionAndDelete(2, 5);
+  frame()->OnSetEditableSelectionOffsets(4, 8);
+  frame()->OnExtendSelectionAndDelete(2, 5);
   info = view()->webview()->textInputInfo();
   EXPECT_EQ("abuvwxyz", info.value);
   EXPECT_EQ(2, info.selectionStart);
@@ -2065,9 +2071,8 @@ TEST_F(RenderViewImplTest, MessageOrderInDidChangeSelection) {
 
 class SuppressErrorPageTest : public RenderViewTest {
  public:
-  virtual void SetUp() OVERRIDE {
-    SetRendererClientForTesting(&client_);
-    RenderViewTest::SetUp();
+  virtual ContentRendererClient* CreateContentRendererClient() OVERRIDE {
+    return new TestContentRendererClient;
   }
 
   RenderViewImpl* view() {
@@ -2097,8 +2102,6 @@ class SuppressErrorPageTest : public RenderViewTest {
         *error_html = "A suffusion of yellow.";
     }
   };
-
-  TestContentRendererClient client_;
 };
 
 #if defined(OS_ANDROID)
@@ -2126,7 +2129,8 @@ TEST_F(SuppressErrorPageTest, MAYBE_Suppresses) {
   // An error occurred.
   view()->main_render_frame()->didFailProvisionalLoad(web_frame, error);
   const int kMaxOutputCharacters = 22;
-  EXPECT_EQ("", UTF16ToASCII(web_frame->contentAsText(kMaxOutputCharacters)));
+  EXPECT_EQ("",
+            base::UTF16ToASCII(web_frame->contentAsText(kMaxOutputCharacters)));
 }
 
 #if defined(OS_ANDROID)
@@ -2156,7 +2160,7 @@ TEST_F(SuppressErrorPageTest, MAYBE_DoesNotSuppress) {
   ProcessPendingMessages();
   const int kMaxOutputCharacters = 22;
   EXPECT_EQ("A suffusion of yellow.",
-            UTF16ToASCII(web_frame->contentAsText(kMaxOutputCharacters)));
+            base::UTF16ToASCII(web_frame->contentAsText(kMaxOutputCharacters)));
 }
 
 // Tests if IME API's candidatewindow* events sent from browser are handled
@@ -2219,6 +2223,40 @@ TEST_F(RenderViewImplTest, SendFaviconURLUpdateEvent) {
       ViewHostMsg_UpdateFaviconURL::ID));
 }
 
+// Test progress tracker messages.
+TEST_F(RenderViewImplTest, SendProgressCompletionUpdates) {
+  std::string data_url_string = "data:text/html,<body>placeholder</body>";
+  GURL url(data_url_string);
+  GetMainFrame()->loadRequest(blink::WebURLRequest(url));
+
+  EXPECT_TRUE(render_thread_->sink().GetFirstMessageMatching(
+      FrameHostMsg_DidStartLoading::ID));
+
+  // The load started, we should receive a start notification and a progress
+  // update with the minimum progress.
+  const IPC::Message* message = render_thread_->sink().GetFirstMessageMatching(
+      ViewHostMsg_DidChangeLoadProgress::ID);
+  EXPECT_TRUE(message);
+  Tuple1<double> progress_value;
+  ViewHostMsg_DidChangeLoadProgress::Read(message, &progress_value);
+  EXPECT_EQ(0.1, progress_value.a);
+  render_thread_->sink().ClearMessages();
+
+  ProcessPendingMessages();
+
+  // The data url has loaded, so we should see a progress change to 1.0 (done)
+  // and a stop notification.
+  message = render_thread_->sink().GetFirstMessageMatching(
+      ViewHostMsg_DidChangeLoadProgress::ID);
+  EXPECT_TRUE(message);
+  ViewHostMsg_DidChangeLoadProgress::Read(message, &progress_value);
+  EXPECT_EQ(1.0, progress_value.a);
+
+  EXPECT_TRUE(render_thread_->sink().GetFirstMessageMatching(
+      FrameHostMsg_DidStopLoading::ID));
+  render_thread_->sink().ClearMessages();
+}
+
 TEST_F(RenderViewImplTest, FocusElementCallsFocusedNodeChanged) {
   LoadHTML("<input id='test1' value='hello1'></input>"
            "<input id='test2' value='hello2'></input>");
@@ -2241,13 +2279,82 @@ TEST_F(RenderViewImplTest, FocusElementCallsFocusedNodeChanged) {
   EXPECT_TRUE(params.a);
   render_thread_->sink().ClearMessages();
 
-  view()->webview()->clearFocusedNode();
+  view()->webview()->clearFocusedElement();
   const IPC::Message* msg3 = render_thread_->sink().GetFirstMessageMatching(
         ViewHostMsg_FocusedNodeChanged::ID);
   EXPECT_TRUE(msg3);
   ViewHostMsg_FocusedNodeChanged::Read(msg3, &params);
   EXPECT_FALSE(params.a);
   render_thread_->sink().ClearMessages();
+}
+
+TEST_F(RenderViewImplTest, ServiceWorkerNetworkProviderSetup) {
+  ServiceWorkerNetworkProvider* provider = NULL;
+  RequestExtraData* extra_data = NULL;
+
+  // Make sure each new document has a new provider and
+  // that the main request is tagged with the provider's id.
+  LoadHTML("<b>A Document</b>");
+  ASSERT_TRUE(GetMainFrame()->dataSource());
+  provider = ServiceWorkerNetworkProvider::FromDocumentState(
+      DocumentState::FromDataSource(GetMainFrame()->dataSource()));
+  ASSERT_TRUE(provider);
+  extra_data = static_cast<RequestExtraData*>(
+      GetMainFrame()->dataSource()->request().extraData());
+  ASSERT_TRUE(extra_data);
+  EXPECT_EQ(extra_data->service_worker_provider_id(),
+            provider->provider_id());
+  int provider1_id = provider->provider_id();
+
+  LoadHTML("<b>New Document B Goes Here</b>");
+  ASSERT_TRUE(GetMainFrame()->dataSource());
+  provider = ServiceWorkerNetworkProvider::FromDocumentState(
+      DocumentState::FromDataSource(GetMainFrame()->dataSource()));
+  ASSERT_TRUE(provider);
+  EXPECT_NE(provider1_id, provider->provider_id());
+  extra_data = static_cast<RequestExtraData*>(
+      GetMainFrame()->dataSource()->request().extraData());
+  ASSERT_TRUE(extra_data);
+  EXPECT_EQ(extra_data->service_worker_provider_id(),
+            provider->provider_id());
+
+  // See that subresource requests are also tagged with the provider's id.
+  EXPECT_EQ(frame(), RenderFrameImpl::FromWebFrame(GetMainFrame()));
+  blink::WebURLRequest request(GURL("http://foo.com"));
+  request.setTargetType(blink::WebURLRequest::TargetIsSubresource);
+  blink::WebURLResponse redirect_response;
+  frame()->willSendRequest(GetMainFrame(), 0, request, redirect_response);
+  extra_data = static_cast<RequestExtraData*>(request.extraData());
+  ASSERT_TRUE(extra_data);
+  EXPECT_EQ(extra_data->service_worker_provider_id(),
+            provider->provider_id());
+}
+
+TEST_F(RenderViewImplTest, OnSetAccessibilityMode) {
+  ASSERT_EQ(AccessibilityModeOff, view()->accessibility_mode());
+  ASSERT_EQ((RendererAccessibility*) NULL, view()->renderer_accessibility());
+
+  view()->OnSetAccessibilityMode(AccessibilityModeTreeOnly);
+  ASSERT_EQ(AccessibilityModeTreeOnly, view()->accessibility_mode());
+  ASSERT_NE((RendererAccessibility*) NULL, view()->renderer_accessibility());
+  ASSERT_EQ(RendererAccessibilityTypeComplete,
+            view()->renderer_accessibility()->GetType());
+
+  view()->OnSetAccessibilityMode(AccessibilityModeOff);
+  ASSERT_EQ(AccessibilityModeOff, view()->accessibility_mode());
+  ASSERT_EQ((RendererAccessibility*) NULL, view()->renderer_accessibility());
+
+  view()->OnSetAccessibilityMode(AccessibilityModeComplete);
+  ASSERT_EQ(AccessibilityModeComplete, view()->accessibility_mode());
+  ASSERT_NE((RendererAccessibility*) NULL, view()->renderer_accessibility());
+  ASSERT_EQ(RendererAccessibilityTypeComplete,
+            view()->renderer_accessibility()->GetType());
+
+  view()->OnSetAccessibilityMode(AccessibilityModeEditableTextOnly);
+  ASSERT_EQ(AccessibilityModeEditableTextOnly, view()->accessibility_mode());
+  ASSERT_NE((RendererAccessibility*) NULL, view()->renderer_accessibility());
+  ASSERT_EQ(RendererAccessibilityTypeFocusOnly,
+            view()->renderer_accessibility()->GetType());
 }
 
 }  // namespace content

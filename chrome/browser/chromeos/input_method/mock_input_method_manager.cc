@@ -10,7 +10,8 @@ namespace input_method {
 MockInputMethodManager::MockInputMethodManager()
     : add_observer_count_(0),
       remove_observer_count_(0),
-      util_(&delegate_, whitelist_.GetSupportedInputMethods()) {
+      util_(&delegate_, whitelist_.GetSupportedInputMethods()),
+      mod3_used_(false) {
   active_input_method_ids_.push_back("xkb:us::eng");
 }
 
@@ -91,7 +92,7 @@ void MockInputMethodManager::ChangeInputMethod(
     const std::string& input_method_id) {
 }
 
-void MockInputMethodManager::ActivateInputMethodProperty(
+void MockInputMethodManager::ActivateInputMethodMenuItem(
     const std::string& key) {
 }
 
@@ -144,13 +145,12 @@ InputMethodDescriptor MockInputMethodManager::GetCurrentInputMethod() const {
   return descriptor;
 }
 
-InputMethodPropertyList
-MockInputMethodManager::GetCurrentInputMethodProperties() const {
-  return InputMethodPropertyList();
+bool MockInputMethodManager::IsISOLevel5ShiftUsedByCurrentInputMethod() const {
+  return mod3_used_;
 }
 
-void MockInputMethodManager::SetCurrentInputMethodProperties(
-    const InputMethodPropertyList& property_list) {
+bool MockInputMethodManager::IsAltGrUsedByCurrentInputMethod() const {
+  return false;
 }
 
 XKeyboard* MockInputMethodManager::GetXKeyboard() {
@@ -174,5 +174,11 @@ bool MockInputMethodManager::IsLoginKeyboard(
     const std::string& layout) const {
   return true;
 }
+
+bool MockInputMethodManager::MigrateXkbInputMethods(
+    std::vector<std::string>* input_method_ids) {
+  return false;
+}
+
 }  // namespace input_method
 }  // namespace chromeos

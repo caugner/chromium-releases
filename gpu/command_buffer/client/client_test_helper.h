@@ -25,18 +25,20 @@ class MockCommandBufferBase : public CommandBuffer {
   static const int32 kTransferBufferBaseId = 0x123;
   static const int32 kMaxTransferBuffers = 6;
 
-  MockCommandBufferBase() { }
+  MockCommandBufferBase();
   virtual ~MockCommandBufferBase();
 
   virtual bool Initialize() OVERRIDE;
   virtual State GetState() OVERRIDE;
   virtual State GetLastState() OVERRIDE;
   virtual int32 GetLastToken() OVERRIDE;
-  virtual State FlushSync(int32 put_offset, int32 last_known_get) OVERRIDE;
+  virtual void WaitForTokenInRange(int32 start, int32 end) OVERRIDE;
+  virtual void WaitForGetOffsetInRange(int32 start, int32 end) OVERRIDE;
   virtual void SetGetBuffer(int transfer_buffer_id) OVERRIDE;
   virtual void SetGetOffset(int32 get_offset) OVERRIDE;
-  virtual Buffer CreateTransferBuffer(size_t size, int32* id) OVERRIDE;
-  virtual Buffer GetTransferBuffer(int32 id) OVERRIDE;
+  virtual scoped_refptr<gpu::Buffer> CreateTransferBuffer(size_t size,
+                                                          int32* id) OVERRIDE;
+  virtual scoped_refptr<gpu::Buffer> GetTransferBuffer(int32 id) OVERRIDE;
   virtual void SetToken(int32 token) OVERRIDE;
   virtual void SetParseError(error::Error error) OVERRIDE;
   virtual void SetContextLostReason(error::ContextLostReason reason) OVERRIDE;
@@ -51,10 +53,9 @@ class MockCommandBufferBase : public CommandBuffer {
   virtual void OnFlush() = 0;
 
  private:
-  scoped_ptr<int8[]> transfer_buffers_[kMaxTransferBuffers];
-  Buffer transfer_buffer_buffers_[kMaxTransferBuffers];
+  scoped_refptr<Buffer> transfer_buffer_buffers_[kMaxTransferBuffers];
   CommandBufferEntry* ring_buffer_;
-  Buffer ring_buffer_buffer_;
+  scoped_refptr<Buffer> ring_buffer_buffer_;
   State state_;
 };
 

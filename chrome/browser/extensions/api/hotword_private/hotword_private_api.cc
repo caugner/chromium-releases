@@ -19,12 +19,13 @@ namespace OnEnabledChanged =
     api::hotword_private::OnEnabledChanged;
 
 static base::LazyInstance<
-    ProfileKeyedAPIFactory<HotwordPrivateEventService> > g_factory =
-        LAZY_INSTANCE_INITIALIZER;
+    BrowserContextKeyedAPIFactory<HotwordPrivateEventService> > g_factory =
+    LAZY_INSTANCE_INITIALIZER;
 
-HotwordPrivateEventService::HotwordPrivateEventService(Profile* profile)
-    : profile_(profile) {
-  pref_change_registrar_.Init(profile->GetPrefs());
+HotwordPrivateEventService::HotwordPrivateEventService(
+    content::BrowserContext* context)
+    : profile_(Profile::FromBrowserContext(context)) {
+  pref_change_registrar_.Init(profile_->GetPrefs());
   pref_change_registrar_.Add(
       prefs::kHotwordSearchEnabled,
       base::Bind(&HotwordPrivateEventService::OnEnabledChanged,
@@ -38,7 +39,7 @@ void HotwordPrivateEventService::Shutdown() {
 }
 
 // static
-ProfileKeyedAPIFactory<HotwordPrivateEventService>*
+BrowserContextKeyedAPIFactory<HotwordPrivateEventService>*
 HotwordPrivateEventService::GetFactoryInstance() {
   return g_factory.Pointer();
 }
@@ -75,6 +76,16 @@ bool HotwordPrivateSetEnabledFunction::RunImpl() {
   return true;
 }
 
+bool HotwordPrivateSetAudioLoggingEnabledFunction::RunImpl() {
+  scoped_ptr<api::hotword_private::SetEnabled::Params> params(
+      api::hotword_private::SetEnabled::Params::Create(*args_));
+  EXTENSION_FUNCTION_VALIDATE(params.get());
+
+  PrefService* prefs = GetProfile()->GetPrefs();
+  prefs->SetBoolean(prefs::kHotwordAudioLoggingEnabled, params->state);
+  return true;
+}
+
 bool HotwordPrivateGetStatusFunction::RunImpl() {
   api::hotword_private::StatusDetails result;
 
@@ -87,8 +98,10 @@ bool HotwordPrivateGetStatusFunction::RunImpl() {
 
   PrefService* prefs = GetProfile()->GetPrefs();
   result.enabled_set = prefs->HasPrefPath(prefs::kHotwordSearchEnabled);
-  result.enabled =
-      prefs->GetBoolean(prefs::kHotwordSearchEnabled);
+  result.enabled = prefs->GetBoolean(prefs::kHotwordSearchEnabled);
+  result.audio_logging_enabled = false;
+  if (hotword_service)
+    result.audio_logging_enabled = hotword_service->IsOptedIntoAudioLogging();
 
   SetResult(result.ToValue().release());
   return true;

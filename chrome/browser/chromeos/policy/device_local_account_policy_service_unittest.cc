@@ -34,6 +34,8 @@
 #include "components/policy/core/common/cloud/policy_builder.h"
 #include "components/policy/core/common/external_data_fetcher.h"
 #include "components/policy/core/common/mock_configuration_policy_provider.h"
+#include "components/policy/core/common/policy_bundle.h"
+#include "components/policy/core/common/policy_map.h"
 #include "components/policy/core/common/schema_registry.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_test_util.h"
@@ -133,35 +135,10 @@ DeviceLocalAccountPolicyServiceTestBase::
 void DeviceLocalAccountPolicyServiceTestBase::SetUp() {
   chromeos::DeviceSettingsTestBase::SetUp();
 
-  // Values implicitly enforced for public accounts.
-  expected_policy_map_.Set(key::kLidCloseAction,
-                           POLICY_LEVEL_MANDATORY,
-                           POLICY_SCOPE_USER,
-                           base::Value::CreateIntegerValue(
-                               chromeos::PowerPolicyController::
-                                   ACTION_STOP_SESSION),
-                           NULL);
-  expected_policy_map_.Set(key::kShelfAutoHideBehavior,
-                           POLICY_LEVEL_MANDATORY,
-                           POLICY_SCOPE_USER,
-                           base::Value::CreateStringValue("Never"),
-                           NULL);
-  expected_policy_map_.Set(key::kShowLogoutButtonInTray,
-                           POLICY_LEVEL_MANDATORY,
-                           POLICY_SCOPE_USER,
-                           base::Value::CreateBooleanValue(true),
-                           NULL);
-  expected_policy_map_.Set(key::kFullscreenAllowed,
-                           POLICY_LEVEL_MANDATORY,
-                           POLICY_SCOPE_USER,
-                           base::Value::CreateBooleanValue(false),
-                           NULL);
-
-  // Explicitly set value.
   expected_policy_map_.Set(key::kDisableSpdy,
                            POLICY_LEVEL_MANDATORY,
                            POLICY_SCOPE_USER,
-                           base::Value::CreateBooleanValue(true),
+                           new base::FundamentalValue(true),
                            NULL);
 
   device_local_account_policy_.payload().mutable_disablespdy()->set_value(
@@ -787,16 +764,40 @@ class DeviceLocalAccountPolicyProviderTest
 
 DeviceLocalAccountPolicyProviderTest::DeviceLocalAccountPolicyProviderTest() {
   CreatePolicyService();
-  provider_.reset(new DeviceLocalAccountPolicyProvider(
+  provider_ = DeviceLocalAccountPolicyProvider::Create(
       GenerateDeviceLocalAccountUserId(kAccount1,
                                        DeviceLocalAccount::TYPE_PUBLIC_SESSION),
-      service_.get()));
+      service_.get());
 }
 
 void DeviceLocalAccountPolicyProviderTest::SetUp() {
   DeviceLocalAccountPolicyServiceTestBase::SetUp();
   provider_->Init(&schema_registry_);
   provider_->AddObserver(&provider_observer_);
+
+  // Values implicitly enforced for public accounts.
+  expected_policy_map_.Set(key::kLidCloseAction,
+                           POLICY_LEVEL_MANDATORY,
+                           POLICY_SCOPE_MACHINE,
+                           new base::FundamentalValue(
+                               chromeos::PowerPolicyController::
+                                   ACTION_STOP_SESSION),
+                           NULL);
+  expected_policy_map_.Set(key::kShelfAutoHideBehavior,
+                           POLICY_LEVEL_MANDATORY,
+                           POLICY_SCOPE_MACHINE,
+                           new base::StringValue("Never"),
+                           NULL);
+  expected_policy_map_.Set(key::kShowLogoutButtonInTray,
+                           POLICY_LEVEL_MANDATORY,
+                           POLICY_SCOPE_MACHINE,
+                           new base::FundamentalValue(true),
+                           NULL);
+  expected_policy_map_.Set(key::kFullscreenAllowed,
+                           POLICY_LEVEL_MANDATORY,
+                           POLICY_SCOPE_MACHINE,
+                           new base::FundamentalValue(false),
+                           NULL);
 }
 
 void DeviceLocalAccountPolicyProviderTest::TearDown() {
@@ -861,7 +862,7 @@ TEST_F(DeviceLocalAccountPolicyProviderTest, Policy) {
       .Set(key::kDisableSpdy,
            POLICY_LEVEL_MANDATORY,
            POLICY_SCOPE_USER,
-           base::Value::CreateBooleanValue(false),
+           new base::FundamentalValue(false),
            NULL);
   EXPECT_TRUE(expected_policy_bundle.Equals(provider_->policies()));
 

@@ -6,17 +6,16 @@
 #define MOJO_GLES2_COMMAND_BUFFER_CLIENT_IMPL_H_
 
 #include <map>
-#include <queue>
 
+#include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/shared_memory.h"
 #include "gpu/command_buffer/common/command_buffer.h"
 #include "gpu/command_buffer/common/command_buffer_shared.h"
 #include "gpu/command_buffer/common/gpu_control.h"
-
 #include "mojo/public/bindings/error_handler.h"
 #include "mojo/public/bindings/remote_ptr.h"
-#include "mojom/command_buffer.h"
+#include "mojo/services/gles2/command_buffer.mojom.h"
 
 namespace base {
 class RunLoop;
@@ -54,12 +53,14 @@ class CommandBufferClientImpl : public CommandBufferClient,
   virtual State GetLastState() OVERRIDE;
   virtual int32 GetLastToken() OVERRIDE;
   virtual void Flush(int32 put_offset) OVERRIDE;
-  virtual State FlushSync(int32 put_offset, int32 last_known_get) OVERRIDE;
+  virtual void WaitForTokenInRange(int32 start, int32 end) OVERRIDE;
+  virtual void WaitForGetOffsetInRange(int32 start, int32 end) OVERRIDE;
   virtual void SetGetBuffer(int32 shm_id) OVERRIDE;
   virtual void SetGetOffset(int32 get_offset) OVERRIDE;
-  virtual gpu::Buffer CreateTransferBuffer(size_t size, int32* id) OVERRIDE;
+  virtual scoped_refptr<gpu::Buffer> CreateTransferBuffer(size_t size,
+                                                          int32* id) OVERRIDE;
   virtual void DestroyTransferBuffer(int32 id) OVERRIDE;
-  virtual gpu::Buffer GetTransferBuffer(int32 id) OVERRIDE;
+  virtual scoped_refptr<gpu::Buffer> GetTransferBuffer(int32 id) OVERRIDE;
   virtual void SetToken(int32 token) OVERRIDE;
   virtual void SetParseError(gpu::error::Error error) OVERRIDE;
   virtual void SetContextLostReason(gpu::error::ContextLostReason reason)
@@ -87,19 +88,18 @@ class CommandBufferClientImpl : public CommandBufferClient,
   void CancelAnimationFrames();
 
  private:
-  typedef std::map<int32, gpu::Buffer> TransferBufferMap;
+  typedef std::map<int32, scoped_refptr<gpu::Buffer> > TransferBufferMap;
 
   // CommandBufferClient implementation:
-  virtual void DidInitialize(bool success) MOJO_OVERRIDE;
-  virtual void DidMakeProgress(const CommandBufferState& state) MOJO_OVERRIDE;
-  virtual void DidDestroy() MOJO_OVERRIDE;
-  virtual void EchoAck() MOJO_OVERRIDE;
-  virtual void LostContext(int32_t lost_reason) MOJO_OVERRIDE;
+  virtual void DidInitialize(bool success) OVERRIDE;
+  virtual void DidMakeProgress(const CommandBufferState& state) OVERRIDE;
+  virtual void DidDestroy() OVERRIDE;
+  virtual void LostContext(int32_t lost_reason) OVERRIDE;
 
   // ErrorHandler implementation:
-  virtual void OnError() MOJO_OVERRIDE;
+  virtual void OnError() OVERRIDE;
 
-  virtual void DrawAnimationFrame() MOJO_OVERRIDE;
+  virtual void DrawAnimationFrame() OVERRIDE;
 
   void TryUpdateState();
   void MakeProgressAndUpdateState();
@@ -118,7 +118,6 @@ class CommandBufferClientImpl : public CommandBufferClient,
   TransferBufferMap transfer_buffers_;
   int32 last_put_offset_;
   int32 next_transfer_buffer_id_;
-  std::queue<base::Closure> echo_closures_;
 
   bool initialize_result_;
 };

@@ -23,11 +23,11 @@
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/client/screen_position_client.h"
 #include "ui/aura/client/window_tree_client.h"
-#include "ui/aura/root_window.h"
 #include "ui/aura/test/event_generator.h"
 #include "ui/aura/test/test_window_delegate.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_delegate.h"
+#include "ui/aura/window_tree_host.h"
 #include "ui/base/ime/input_method_initializer.h"
 #include "ui/events/gestures/gesture_configuration.h"
 #include "ui/gfx/display.h"
@@ -48,6 +48,10 @@
 #include "win8/test/test_registrar_constants.h"
 #endif
 
+#if defined(USE_X11)
+#include <X11/Xlib.h>
+#endif
+
 namespace ash {
 namespace test {
 namespace {
@@ -58,12 +62,12 @@ class AshEventGeneratorDelegate : public aura::test::EventGeneratorDelegate {
   virtual ~AshEventGeneratorDelegate() {}
 
   // aura::test::EventGeneratorDelegate overrides:
-  virtual aura::RootWindow* GetRootWindowAt(
+  virtual aura::WindowTreeHost* GetHostAt(
       const gfx::Point& point_in_screen) const OVERRIDE {
     gfx::Screen* screen = Shell::GetScreen();
     gfx::Display display = screen->GetDisplayNearestPoint(point_in_screen);
     return Shell::GetInstance()->display_controller()->
-        GetRootWindowForDisplayId(display.id())->GetDispatcher();
+        GetRootWindowForDisplayId(display.id())->GetHost();
   }
 
   virtual aura::client::ScreenPositionClient* GetScreenPositionClient(
@@ -90,6 +94,14 @@ AshTestBase::AshTestBase()
     : setup_called_(false),
       teardown_called_(false),
       start_session_(true) {
+#if defined(USE_X11)
+  // This is needed for tests which use this base class but are run in browser
+  // test binaries so don't get the default initialization in the unit test
+  // suite.
+  XInitThreads();
+#endif
+
+  thread_bundle_.reset(new content::TestBrowserThreadBundle);
   // Must initialize |ash_test_helper_| here because some tests rely on
   // AshTestBase methods before they call AshTestBase::SetUp().
   ash_test_helper_.reset(new AshTestHelper(base::MessageLoopForUI::current()));
@@ -123,7 +135,7 @@ void AshTestBase::SetUp() {
   ash_test_helper_->SetUp(start_session_);
 
   Shell::GetPrimaryRootWindow()->Show();
-  Shell::GetPrimaryRootWindow()->GetDispatcher()->host()->Show();
+  Shell::GetPrimaryRootWindow()->GetHost()->Show();
   // Move the mouse cursor to far away so that native events doesn't
   // interfere test expectations.
   Shell::GetPrimaryRootWindow()->MoveCursorTo(gfx::Point(-1000, -1000));

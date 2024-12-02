@@ -48,6 +48,9 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/user_metrics.h"
+#include "extensions/browser/extension_registry.h"
+#include "extensions/common/extension_set.h"
+#include "extensions/common/manifest.h"
 #include "grit/generated_resources.h"
 #include "net/http/http_transaction_factory.h"
 #include "net/url_request/url_request_context.h"
@@ -104,7 +107,7 @@ int64 ComputeFilesSize(const base::FilePath& directory,
 }
 
 // Simple task to log the size of the current profile.
-void ProfileSizeTask(const base::FilePath& path, int extension_count) {
+void ProfileSizeTask(const base::FilePath& path, int enabled_app_count) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
   const int64 kBytesInOneMB = 1024 * 1024;
 
@@ -152,9 +155,9 @@ void ProfileSizeTask(const base::FilePath& path, int extension_count) {
   size_MB = static_cast<int>(size / kBytesInOneMB);
   UMA_HISTOGRAM_COUNTS_10000("Profile.PolicySize", size_MB);
 
-  // Count number of extensions in this profile, if we know.
-  if (extension_count != -1)
-    UMA_HISTOGRAM_COUNTS_10000("Profile.AppCount", extension_count);
+  // Count number of enabled apps in this profile, if we know.
+  if (enabled_app_count != -1)
+    UMA_HISTOGRAM_COUNTS_10000("Profile.AppCount", enabled_app_count);
 }
 
 void QueueProfileDirectoryForDeletion(const base::FilePath& path) {
@@ -187,6 +190,27 @@ void CheckCryptohomeIsMounted(chromeos::DBusMethodCallStatus call_status,
 }
 
 #endif
+
+#if defined(ENABLE_EXTENSIONS)
+
+// Returns the number of installed (and enabled) apps, excluding any component
+// apps.
+size_t GetEnabledAppCount(Profile* profile) {
+  size_t installed_apps = 0u;
+  const extensions::ExtensionSet& extensions =
+      extensions::ExtensionRegistry::Get(profile)->enabled_extensions();
+  for (extensions::ExtensionSet::const_iterator iter = extensions.begin();
+       iter != extensions.end();
+       ++iter) {
+    if ((*iter)->is_app() &&
+        (*iter)->location() != extensions::Manifest::COMPONENT) {
+      ++installed_apps;
+    }
+  }
+  return installed_apps;
+}
+
+#endif  // ENABLE_EXTENSIONS
 
 } // namespace
 
@@ -264,7 +288,8 @@ Profile* ProfileManager::GetLastUsedProfile() {
 // static
 Profile* ProfileManager::GetLastUsedProfileAllowedByPolicy() {
   Profile* profile = GetLastUsedProfile();
-  if (IncognitoModePrefs::GetAvailability(profile->GetPrefs()) ==
+  if (profile->IsGuestSession() ||
+      IncognitoModePrefs::GetAvailability(profile->GetPrefs()) ==
       IncognitoModePrefs::FORCED) {
     return profile->GetOffTheRecordProfile();
   }
@@ -364,7 +389,7 @@ void ProfileManager::CreateProfileAsync(
     ProfileInfoCache& cache = GetProfileInfoCache();
     // Get the icon index from the user's icon url
     size_t icon_index;
-    std::string icon_url_std = UTF16ToASCII(icon_url);
+    std::string icon_url_std = base::UTF16ToASCII(icon_url);
     if (cache.IsDefaultAvatarIconUrl(icon_url_std, &icon_index)) {
       // add profile to cache with user selected name and avatar
       cache.AddProfileToCache(profile_path, name, base::string16(), icon_index,
@@ -383,9 +408,11 @@ void ProfileManager::CreateProfileAsync(
   if (!callback.is_null()) {
     if (iter != profiles_info_.end() && info->created) {
       Profile* profile = info->profile.get();
-      // If this was the guest profile, apply settings.
-      if (profile->GetPath() == ProfileManager::GetGuestProfilePath())
+      // If this was the guest profile, apply settings and go OffTheRecord.
+      if (profile->GetPath() == ProfileManager::GetGuestProfilePath()) {
         SetGuestProfilePrefs(profile);
+        profile = profile->GetOffTheRecordProfile();
+      }
       // Profile has already been created. Run callback immediately.
       callback.Run(profile, Profile::CREATE_STATUS_INITIALIZED);
     } else {
@@ -721,7 +748,10 @@ void ProfileManager::InitProfileUserPrefs(Profile* profile) {
     } else if (profile->GetPath() ==
                profiles::GetDefaultProfileDir(cache.GetUserDataDir())) {
       avatar_index = 0;
-      profile_name = l10n_util::GetStringUTF8(IDS_DEFAULT_PROFILE_NAME);
+      // The --new-profile-management flag no longer uses the "First User" name.
+      profile_name = switches::IsNewProfileManagement() ?
+          base::UTF16ToUTF8(cache.ChooseNameForNewProfile(avatar_index)) :
+          l10n_util::GetStringUTF8(IDS_DEFAULT_PROFILE_NAME);
     } else {
       avatar_index = cache.ChooseAvatarIconIndexForNewProfile();
       profile_name =
@@ -901,7 +931,7 @@ void ProfileManager::OnProfileCreated(Profile* profile,
   }
 
   if (profile) {
-    // If this was the guest profile, finish setting its incognito status.
+    // If this was the guest profile, finish setting its special status.
     if (profile->GetPath() == ProfileManager::GetGuestProfilePath())
       SetGuestProfilePrefs(profile);
 
@@ -956,17 +986,15 @@ void ProfileManager::DoFinalInitForServices(Profile* profile,
 
 void ProfileManager::DoFinalInitLogging(Profile* profile) {
   // Count number of extensions in this profile.
-  int extension_count = -1;
+  int enabled_app_count = -1;
 #if defined(ENABLE_EXTENSIONS)
-  ExtensionService* extension_service = profile->GetExtensionService();
-  if (extension_service)
-    extension_count = extension_service->GetAppIds().size();
+  enabled_app_count = GetEnabledAppCount(profile);
 #endif
 
   // Log the profile size after a reasonable startup delay.
   BrowserThread::PostDelayedTask(
       BrowserThread::FILE, FROM_HERE,
-      base::Bind(&ProfileSizeTask, profile->GetPath(), extension_count),
+      base::Bind(&ProfileSizeTask, profile->GetPath(), enabled_app_count),
       base::TimeDelta::FromSeconds(112));
 }
 
@@ -1110,11 +1138,12 @@ void ProfileManager::AddProfileToCache(Profile* profile) {
 }
 
 void ProfileManager::SetGuestProfilePrefs(Profile* profile) {
+  PrefService* prefs = profile->GetPrefs();
+  prefs->SetBoolean(prefs::kSigninAllowed, false);
   // This can be removed in the future but needs to be present through
   // a release (or two) so that any existing installs get switched to
   // the new state and away from the previous "forced" state.
-  IncognitoModePrefs::SetAvailability(profile->GetPrefs(),
-                                      IncognitoModePrefs::ENABLED);
+  IncognitoModePrefs::SetAvailability(prefs, IncognitoModePrefs::ENABLED);
 }
 
 bool ProfileManager::ShouldGoOffTheRecord(Profile* profile) {

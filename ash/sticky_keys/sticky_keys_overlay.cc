@@ -130,6 +130,8 @@ class StickyKeysOverlayView : public views::WidgetDelegateView {
 
   StickyKeyState GetKeyState(ui::EventFlags modifier);
 
+  void SetModifierVisible(ui::EventFlags modifier, bool visible);
+
  private:
   void AddKeyLabel(ui::EventFlags modifier, const std::string& key_label);
 
@@ -161,6 +163,8 @@ StickyKeysOverlayView::StickyKeysOverlayView() {
               l10n_util::GetStringUTF8(IDS_ASH_ALT_KEY));
   AddKeyLabel(ui::EF_SHIFT_DOWN,
               l10n_util::GetStringUTF8(IDS_ASH_SHIFT_KEY));
+  AddKeyLabel(ui::EF_ALTGR_DOWN,
+              l10n_util::GetStringUTF8(IDS_ASH_ALTGR_KEY));
 }
 
 StickyKeysOverlayView::~StickyKeysOverlayView() {}
@@ -187,6 +191,13 @@ StickyKeyState StickyKeysOverlayView::GetKeyState(ui::EventFlags modifier) {
   ModifierLabelMap::iterator it = modifier_label_map_.find(modifier);
   DCHECK(it != modifier_label_map_.end());
   return it->second->state();
+}
+
+void StickyKeysOverlayView::SetModifierVisible(ui::EventFlags modifier,
+                                               bool visible) {
+  ModifierLabelMap::iterator it = modifier_label_map_.find(modifier);
+  DCHECK(it != modifier_label_map_.end());
+  it->second->SetVisible(visible);
 }
 
 void StickyKeysOverlayView::AddKeyLabel(ui::EventFlags modifier,
@@ -253,6 +264,12 @@ void StickyKeysOverlay::Show(bool visible) {
       base::TimeDelta::FromMilliseconds(kSlideAnimationDurationMs));
 
   overlay_widget_->GetLayer()->SetTransform(gfx::Transform());
+}
+
+void StickyKeysOverlay::SetModifierVisible(ui::EventFlags modifier,
+                                           bool visible) {
+  overlay_view_->SetModifierVisible(modifier, visible);
+  widget_size_ = overlay_view_->GetPreferredSize();
 }
 
 void StickyKeysOverlay::SetModifierKeyState(ui::EventFlags modifier,

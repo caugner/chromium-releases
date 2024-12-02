@@ -26,6 +26,7 @@
 #include "ui/views/controls/link.h"
 #include "ui/views/controls/link_listener.h"
 #include "ui/views/layout/layout_constants.h"
+#include "ui/views/widget/widget_observer.h"
 
 using content::WebContents;
 
@@ -64,6 +65,7 @@ class SpeechRecognitionBubbleView : public views::BubbleDelegateView,
   virtual void LinkClicked(views::Link* source, int event_flags) OVERRIDE;
 
   // views::View overrides.
+  virtual bool AcceleratorPressed(const ui::Accelerator& accelerator) OVERRIDE;
   virtual gfx::Size GetPreferredSize() OVERRIDE;
   virtual void Layout() OVERRIDE;
 
@@ -107,10 +109,15 @@ SpeechRecognitionBubbleView::SpeechRecognitionBubbleView(
       display_mode_(SpeechRecognitionBubbleBase::DISPLAY_MODE_WARM_UP),
       kIconLayoutMinWidth(ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
                           IDR_SPEECH_INPUT_MIC_EMPTY)->width()) {
-  // The bubble lifetime is managed by its controller; closing on escape or
-  // explicitly closing on deactivation will cause unexpected behavior.
-  set_close_on_esc(false);
+  // The bubble lifetime is managed by its controller; explicitly closing
+  // on deactivation will cause unexpected behavior.
   set_close_on_deactivate(false);
+  // Prevent default behavior of bubble closure on escape key and handle
+  // it in the AcceleratorPressed() to avoid an unexpected behavior.
+  set_close_on_esc(false);
+
+  // Update the bubble's bounds when the window's bounds changes.
+  set_move_with_anchor(true);
 }
 
 void SpeechRecognitionBubbleView::OnWidgetActivationChanged(
@@ -225,6 +232,17 @@ void SpeechRecognitionBubbleView::LinkClicked(views::Link* source,
   content::SpeechRecognitionManager::GetInstance()->ShowAudioInputSettings();
 }
 
+bool SpeechRecognitionBubbleView::AcceleratorPressed(
+    const ui::Accelerator& accelerator) {
+  // The accelerator is added by BubbleDelegateView.
+  if (accelerator.key_code() == ui::VKEY_ESCAPE) {
+    delegate_->InfoBubbleButtonClicked(SpeechRecognitionBubble::BUTTON_CANCEL);
+    return true;
+  }
+
+  return BubbleDelegateView::AcceleratorPressed(accelerator);
+}
+
 gfx::Size SpeechRecognitionBubbleView::GetPreferredSize() {
   int width = heading_->GetPreferredSize().width();
   int control_width = cancel_->GetPreferredSize().width();
@@ -310,7 +328,9 @@ void SpeechRecognitionBubbleView::Layout() {
 }
 
 // Implementation of SpeechRecognitionBubble.
-class SpeechRecognitionBubbleImpl : public SpeechRecognitionBubbleBase {
+class SpeechRecognitionBubbleImpl
+    : public SpeechRecognitionBubbleBase,
+      public views::WidgetObserver {
  public:
   SpeechRecognitionBubbleImpl(int render_process_id, int render_view_id,
                               Delegate* delegate,
@@ -324,6 +344,9 @@ class SpeechRecognitionBubbleImpl : public SpeechRecognitionBubbleBase {
   // SpeechRecognitionBubbleBase methods.
   virtual void UpdateLayout() OVERRIDE;
   virtual void UpdateImage() OVERRIDE;
+
+  // views::WidgetObserver methods.
+  virtual void OnWidgetDestroying(views::Widget* widget) OVERRIDE;
 
  private:
   Delegate* delegate_;
@@ -344,9 +367,14 @@ SpeechRecognitionBubbleImpl::SpeechRecognitionBubbleImpl(
 
 SpeechRecognitionBubbleImpl::~SpeechRecognitionBubbleImpl() {
   if (bubble_) {
+    bubble_->GetWidget()->RemoveObserver(this);
     bubble_->set_notify_delegate_on_activation_change(false);
     bubble_->GetWidget()->Close();
   }
+}
+
+void SpeechRecognitionBubbleImpl::OnWidgetDestroying(views::Widget* widget) {
+  bubble_ = NULL;
 }
 
 void SpeechRecognitionBubbleImpl::Show() {
@@ -378,7 +406,8 @@ void SpeechRecognitionBubbleImpl::Show() {
 
     views::BubbleDelegateView::CreateBubble(bubble_);
     UpdateLayout();
-  }
+    bubble_->GetWidget()->AddObserver(this);
+   }
   bubble_->GetWidget()->Show();
 }
 

@@ -25,6 +25,7 @@
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/sync_driver/sync_prefs.h"
 #include "content/public/browser/browser_context.h"
 
 using extensions::PreferencesPrivateGetSyncCategoriesWithoutPassphraseFunction;
@@ -39,13 +40,13 @@ class FakeProfileSyncService : public ProfileSyncService {
             profile,
             NULL,
             ProfileOAuth2TokenServiceFactory::GetForProfile(profile),
-            ProfileSyncService::MANUAL_START),
+            browser_sync::MANUAL_START),
         sync_initialized_(true),
         initialized_state_violation_(false) {}
 
   virtual ~FakeProfileSyncService() {}
 
-  static BrowserContextKeyedService* BuildFakeProfileSyncService(
+  static KeyedService* BuildFakeProfileSyncService(
       content::BrowserContext* context) {
     return new FakeProfileSyncService(static_cast<Profile*>(context));
   }
@@ -116,17 +117,18 @@ class PreferencesPrivateApiTest : public ExtensionApiTest {
 
     Profile* profile =
         Profile::CreateProfile(path, NULL, Profile::CREATE_MODE_SYNCHRONOUS);
-    browser_sync::SyncPrefs sync_prefs(profile->GetPrefs());
+    sync_driver::SyncPrefs sync_prefs(profile->GetPrefs());
     sync_prefs.SetKeepEverythingSynced(false);
 
     ProfileManager* profile_manager = g_browser_process->profile_manager();
     profile_manager->RegisterTestingProfile(profile, true, false);
-    browser_ = new Browser(Browser::CreateParams(
-        profile, chrome::HOST_DESKTOP_TYPE_NATIVE));
 
     service_ = static_cast<FakeProfileSyncService*>(
         ProfileSyncServiceFactory::GetInstance()->SetTestingFactoryAndUse(
         profile, &FakeProfileSyncService::BuildFakeProfileSyncService));
+
+    browser_ = new Browser(Browser::CreateParams(
+        profile, chrome::HOST_DESKTOP_TYPE_NATIVE));
   }
 
   // Calls GetSyncCategoriesWithoutPassphraseFunction and verifies that the
@@ -167,7 +169,7 @@ PreferencesPrivateApiTest::TestGetSyncCategoriesWithoutPassphraseFunction() {
                "Encrypted categories should not be present";
   EXPECT_EQ(categories->end(),
            categories->Find(base::StringValue("Typed URLs"))) <<
-               "Unsynced categories should not be present";;
+               "Unsynced categories should not be present";
 }
 
 IN_PROC_BROWSER_TEST_F(PreferencesPrivateApiTest,

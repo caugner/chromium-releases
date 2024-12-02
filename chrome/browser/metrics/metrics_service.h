@@ -42,6 +42,11 @@ class PrefRegistrySimple;
 class Profile;
 class TemplateURLService;
 
+namespace {
+class CrashesDOMHandler;
+class FlashDOMHandler;
+}
+
 namespace base {
 class DictionaryValue;
 class MessageLoopProxy;
@@ -60,6 +65,11 @@ struct WebPluginInfo;
 namespace extensions {
 class ExtensionDownloader;
 class ManifestFetchData;
+class MetricsPrivateGetIsCrashReportingEnabledFunction;
+}
+
+namespace metrics {
+class ClonedInstallDetector;
 }
 
 namespace net {
@@ -68,6 +78,10 @@ class URLFetcher;
 
 namespace prerender {
 bool IsOmniboxEnabled(Profile* profile);
+}
+
+namespace system_logs {
+class ChromeInternalLogSource;
 }
 
 namespace tracked_objects {
@@ -91,8 +105,7 @@ struct SyntheticTrialGroup {
   // This constructor is private specifically so as to control which code is
   // able to access it. New code that wishes to use it should be added as a
   // friend class.
-  SyntheticTrialGroup(uint32 trial, uint32 group, base::TimeTicks start);
-
+  SyntheticTrialGroup(uint32 trial, uint32 group);
 };
 
 class MetricsService
@@ -275,6 +288,11 @@ class MetricsService
   // To use this method, SyntheticTrialGroup should friend your class.
   void RegisterSyntheticFieldTrial(const SyntheticTrialGroup& trial_group);
 
+  // Check if this install was cloned or imaged from another machine. If a
+  // clone is detected, reset the client id and low entropy source. This
+  // should not be called more than once.
+  void CheckForClonedInstall();
+
  private:
   // The MetricsService has a lifecycle that is stored as a state.
   // See metrics_service.cc for description of this lifecycle.
@@ -340,9 +358,19 @@ class MetricsService
   // Callback that moves the state to INIT_TASK_DONE.
   virtual void FinishedReceivingProfilerData() OVERRIDE;
 
-  // Get the amount of uptime since this function was last called.
-  // This updates the cumulative uptime metric for uninstall as a side effect.
-  base::TimeDelta GetIncrementalUptime(PrefService* pref);
+  // Get the amount of uptime since this process started and since the last
+  // call to this function.  Also updates the cumulative uptime metric (stored
+  // as a pref) for uninstall.  Uptimes are measured using TimeTicks, which
+  // guarantees that it is monotonic and does not jump if the user changes
+  // his/her clock.  The TimeTicks implementation also makes the clock not
+  // count time the computer is suspended.
+  void GetUptimes(PrefService* pref,
+                  base::TimeDelta* incremental_uptime,
+                  base::TimeDelta* uptime);
+
+  // Reset the client id and low entropy source if the kMetricsResetMetricIDs
+  // pref is true.
+  void ResetMetricsIDsIfNecessary();
 
   // Returns the low entropy source for this client. This is a random value
   // that is non-identifying amongst browser clients. This method will
@@ -480,8 +508,8 @@ class MetricsService
   // additional logging of the type of page loaded.
   void LogLoadStarted(content::WebContents* web_contents);
 
-  // Checks whether a notification can be logged.
-  bool CanLogNotification();
+  // Checks whether events should currently be logged.
+  bool ShouldLogEvents();
 
   // Sets the value of the specified path in prefs and schedules a save.
   void RecordBooleanPrefValue(const char* path, bool value);
@@ -498,6 +526,10 @@ class MetricsService
   base::ActionCallback action_callback_;
 
   content::NotificationRegistrar registrar_;
+
+  // Set to true when |ResetMetricsIDsIfNecessary| is called for the first time.
+  // This prevents multiple resets within the same Chrome session.
+  bool metrics_ids_reset_check_performed_;
 
   // Indicate whether recording and reporting are currently happening.
   // These should not be set directly, but by calling SetRecording and
@@ -591,7 +623,10 @@ class MetricsService
   // The last entropy source returned by this service, used for testing.
   EntropySourceReturned entropy_source_returned_;
 
-  // Stores the time of the last call to |GetIncrementalUptime()|.
+  // Stores the time of the first call to |GetUptimes()|.
+  base::TimeTicks first_updated_time_;
+
+  // Stores the time of the last call to |GetUptimes()|.
   base::TimeTicks last_updated_time_;
 
   // Execution phase the browser is in.
@@ -604,12 +639,15 @@ class MetricsService
   // Field trial groups that map to Chrome configuration states.
   SyntheticTrialGroups synthetic_trial_groups_;
 
+  scoped_ptr<metrics::ClonedInstallDetector> cloned_install_detector_;
+
   FRIEND_TEST_ALL_PREFIXES(MetricsServiceTest, ClientIdCorrectlyFormatted);
   FRIEND_TEST_ALL_PREFIXES(MetricsServiceTest, IsPluginProcess);
   FRIEND_TEST_ALL_PREFIXES(MetricsServiceTest, LowEntropySource0NotReset);
   FRIEND_TEST_ALL_PREFIXES(MetricsServiceTest,
                            PermutedEntropyCacheClearedWhenLowEntropyReset);
   FRIEND_TEST_ALL_PREFIXES(MetricsServiceTest, RegisterSyntheticTrial);
+  FRIEND_TEST_ALL_PREFIXES(MetricsServiceTest, ResetMetricsIDs);
   FRIEND_TEST_ALL_PREFIXES(MetricsServiceBrowserTest,
                            CheckLowEntropySourceUsed);
   FRIEND_TEST_ALL_PREFIXES(MetricsServiceReportingTest,
@@ -618,17 +656,29 @@ class MetricsService
   DISALLOW_COPY_AND_ASSIGN(MetricsService);
 };
 
-// This class limits and documents access to the IsMetricsReportingEnabled()
-// method. Since the method is private, each user has to be explicitly declared
-// as a 'friend' below.
+// This class limits and documents access to the IsMetricsReportingEnabled() and
+// IsCrashReportingEnabled() methods. Since these methods are private, each user
+// has to be explicitly declared as a 'friend' below.
 class MetricsServiceHelper {
  private:
   friend bool prerender::IsOmniboxEnabled(Profile* profile);
+  friend class ChromeRenderMessageFilter;
+  friend class ::CrashesDOMHandler;
   friend class extensions::ExtensionDownloader;
   friend class extensions::ManifestFetchData;
+  friend class extensions::MetricsPrivateGetIsCrashReportingEnabledFunction;
+  friend class ::FlashDOMHandler;
+  friend class system_logs::ChromeInternalLogSource;
+  FRIEND_TEST_ALL_PREFIXES(MetricsServiceTest, MetricsReportingEnabled);
+  FRIEND_TEST_ALL_PREFIXES(MetricsServiceTest, CrashReportingEnabled);
 
   // Returns true if prefs::kMetricsReportingEnabled is set.
   static bool IsMetricsReportingEnabled();
+
+  // Returns true if crash reporting is enabled.  This is set at the platform
+  // level for Android and ChromeOS, and otherwise is the same as
+  // IsMetricsReportingEnabled for desktop Chrome.
+  static bool IsCrashReportingEnabled();
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(MetricsServiceHelper);
 };

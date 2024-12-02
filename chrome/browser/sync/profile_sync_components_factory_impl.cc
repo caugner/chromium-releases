@@ -4,16 +4,12 @@
 
 #include "base/command_line.h"
 #include "build/build_config.h"
-#include "chrome/browser/about_flags.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/enhanced_bookmarks_features.h"
-#include "chrome/browser/browser_process.h"
 #include "chrome/browser/dom_distiller/dom_distiller_service_factory.h"
-#include "chrome/browser/extensions/api/storage/settings_frontend.h"
-#include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/extension_sync_service.h"
 #include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
+#include "chrome/browser/password_manager/password_store_factory.h"
 #include "chrome/browser/pref_service_flags_storage.h"
 #include "chrome/browser/prefs/pref_model_associator.h"
 #include "chrome/browser/prefs/pref_service_syncable.h"
@@ -32,9 +28,7 @@
 #include "chrome/browser/sync/glue/extension_data_type_controller.h"
 #include "chrome/browser/sync/glue/extension_setting_data_type_controller.h"
 #include "chrome/browser/sync/glue/generic_change_processor.h"
-#include "chrome/browser/sync/glue/password_change_processor.h"
 #include "chrome/browser/sync/glue/password_data_type_controller.h"
-#include "chrome/browser/sync/glue/password_model_associator.h"
 #include "chrome/browser/sync/glue/search_engine_data_type_controller.h"
 #include "chrome/browser/sync/glue/session_change_processor.h"
 #include "chrome/browser/sync/glue/session_data_type_controller.h"
@@ -54,20 +48,31 @@
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/themes/theme_syncable_service.h"
-#include "chrome/browser/ui/app_list/app_list_syncable_service.h"
-#include "chrome/browser/ui/app_list/app_list_syncable_service_factory.h"
 #include "chrome/browser/webdata/autocomplete_syncable_service.h"
 #include "chrome/browser/webdata/web_data_service_factory.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/chrome_version_info.h"
 #include "chrome/common/pref_names.h"
 #include "components/autofill/core/browser/webdata/autofill_profile_syncable_service.h"
 #include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
 #include "components/dom_distiller/core/dom_distiller_service.h"
+#include "components/password_manager/core/browser/password_store.h"
 #include "components/sync_driver/data_type_manager_observer.h"
 #include "components/sync_driver/proxy_data_type_controller.h"
 #include "content/public/browser/browser_thread.h"
 #include "extensions/browser/extension_system.h"
 #include "sync/api/syncable_service.h"
+
+#if defined(ENABLE_EXTENSIONS)
+#include "chrome/browser/extensions/api/storage/settings_sync_util.h"
+#include "chrome/browser/extensions/extension_sync_service.h"
+#endif
+
+#if defined(ENABLE_APP_LIST)
+#include "chrome/browser/ui/app_list/app_list_syncable_service.h"
+#include "chrome/browser/ui/app_list/app_list_syncable_service_factory.h"
+#include "ui/app_list/app_list_switches.h"
+#endif
 
 #if defined(ENABLE_MANAGED_USERS)
 #include "chrome/browser/managed_mode/managed_user_settings_service.h"
@@ -81,6 +86,8 @@
 #if !defined(OS_ANDROID)
 #include "chrome/browser/notifications/sync_notifier/chrome_notifier_service.h"
 #include "chrome/browser/notifications/sync_notifier/chrome_notifier_service_factory.h"
+#include "chrome/browser/notifications/sync_notifier/synced_notification_app_info_service.h"
+#include "chrome/browser/notifications/sync_notifier/synced_notification_app_info_service_factory.h"
 #endif
 
 #if defined(ENABLE_SPELLCHECK)
@@ -102,9 +109,7 @@ using browser_sync::DataTypeManagerObserver;
 using browser_sync::ExtensionDataTypeController;
 using browser_sync::ExtensionSettingDataTypeController;
 using browser_sync::GenericChangeProcessor;
-using browser_sync::PasswordChangeProcessor;
 using browser_sync::PasswordDataTypeController;
-using browser_sync::PasswordModelAssociator;
 using browser_sync::ProxyDataTypeController;
 using browser_sync::SearchEngineDataTypeController;
 using browser_sync::SessionChangeProcessor;
@@ -119,6 +124,19 @@ using browser_sync::TypedUrlDataTypeController;
 using browser_sync::TypedUrlModelAssociator;
 using browser_sync::UIDataTypeController;
 using content::BrowserThread;
+
+namespace {
+
+syncer::ModelTypeSet GetDisabledTypesFromCommandLine(
+    CommandLine* command_line) {
+  syncer::ModelTypeSet disabled_types;
+  std::string disabled_types_str =
+      command_line->GetSwitchValueASCII(switches::kDisableSyncTypes);
+  disabled_types = syncer::ModelTypeSetFromString(disabled_types_str);
+  return disabled_types;
+}
+
+}  // namespace
 
 ProfileSyncComponentsFactoryImpl::ProfileSyncComponentsFactoryImpl(
     Profile* profile, CommandLine* command_line)
@@ -135,31 +153,35 @@ ProfileSyncComponentsFactoryImpl::~ProfileSyncComponentsFactoryImpl() {
 
 void ProfileSyncComponentsFactoryImpl::RegisterDataTypes(
     ProfileSyncService* pss) {
-  RegisterCommonDataTypes(pss);
+  syncer::ModelTypeSet disabled_types =
+      GetDisabledTypesFromCommandLine(command_line_);
+  // TODO(zea): pass an enabled_types set for types that are off by default.
+  RegisterCommonDataTypes(disabled_types, pss);
 #if !defined(OS_ANDROID)
-  RegisterDesktopDataTypes(pss);
+  RegisterDesktopDataTypes(disabled_types, pss);
 #endif
 }
 
 void ProfileSyncComponentsFactoryImpl::RegisterCommonDataTypes(
+    syncer::ModelTypeSet disabled_types,
     ProfileSyncService* pss) {
   // Autofill sync is enabled by default.  Register unless explicitly
   // disabled.
-  if (!command_line_->HasSwitch(switches::kDisableSyncAutofill)) {
+  if (!disabled_types.Has(syncer::AUTOFILL)) {
     pss->RegisterDataTypeController(
         new AutofillDataTypeController(this, profile_, pss));
   }
 
   // Autofill profile sync is enabled by default.  Register unless explicitly
   // disabled.
-  if (!command_line_->HasSwitch(switches::kDisableSyncAutofillProfile)) {
+  if (!disabled_types.Has(syncer::AUTOFILL_PROFILE)) {
     pss->RegisterDataTypeController(
         new AutofillProfileDataTypeController(this, profile_, pss));
   }
 
   // Bookmark sync is enabled by default.  Register unless explicitly
   // disabled.
-  if (!command_line_->HasSwitch(switches::kDisableSyncBookmarks)) {
+  if (!disabled_types.Has(syncer::BOOKMARKS)) {
     pss->RegisterDataTypeController(
         new BookmarkDataTypeController(this, profile_, pss));
   }
@@ -167,14 +189,14 @@ void ProfileSyncComponentsFactoryImpl::RegisterCommonDataTypes(
   // TypedUrl sync is enabled by default.  Register unless explicitly disabled,
   // or if saving history is disabled.
   if (!profile_->GetPrefs()->GetBoolean(prefs::kSavingBrowserHistoryDisabled) &&
-      !command_line_->HasSwitch(switches::kDisableSyncTypedUrls)) {
+      !disabled_types.Has(syncer::TYPED_URLS)) {
     pss->RegisterDataTypeController(
         new TypedUrlDataTypeController(this, profile_, pss));
   }
 
   // Delete directive sync is enabled by default.  Register unless full history
   // sync is disabled.
-  if (!command_line_->HasSwitch(switches::kHistoryDisableFullHistorySync)) {
+  if (!disabled_types.Has(syncer::HISTORY_DELETE_DIRECTIVES)) {
     pss->RegisterDataTypeController(
         new UIDataTypeController(
             BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI),
@@ -186,21 +208,17 @@ void ProfileSyncComponentsFactoryImpl::RegisterCommonDataTypes(
   }
 
   // Session sync is enabled by default.  Register unless explicitly disabled.
-  if (!command_line_->HasSwitch(switches::kDisableSyncTabs)) {
+  if (!disabled_types.Has(syncer::PROXY_TABS)) {
       pss->RegisterDataTypeController(new ProxyDataTypeController(
          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI),
          syncer::PROXY_TABS));
-    if (command_line_->HasSwitch(switches::kDisableSyncSessionsV2)) {
-      pss->RegisterDataTypeController(
-          new SessionDataTypeController(this, profile_, pss));
-    } else {
-      pss->RegisterDataTypeController(
-          new SessionDataTypeController2(this, profile_, pss));
-    }
+    pss->RegisterDataTypeController(
+        new SessionDataTypeController2(this, profile_, pss));
   }
 
   // Favicon sync is enabled by default. Register unless explicitly disabled.
-  if (!command_line_->HasSwitch(switches::kDisableSyncFavicons)) {
+  if (!disabled_types.Has(syncer::FAVICON_IMAGES) &&
+      !disabled_types.Has(syncer::FAVICON_TRACKING)) {
     pss->RegisterDataTypeController(
         new UIDataTypeController(
             BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI),
@@ -221,17 +239,11 @@ void ProfileSyncComponentsFactoryImpl::RegisterCommonDataTypes(
 
   // Password sync is enabled by default.  Register unless explicitly
   // disabled.
-  if (!command_line_->HasSwitch(switches::kDisableSyncPasswords)) {
+  if (!disabled_types.Has(syncer::PASSWORDS)) {
     pss->RegisterDataTypeController(
         new PasswordDataTypeController(this, profile_, pss));
   }
-  ExtensionService* extension_service = extension_system_->extension_service();
-  if (extension_service) {
-    if (IsBookmarksExtensionInstalled(
-            extension_service->extensions()->GetIDs())) {
-      OptInIntoBookmarksExperiment();
-    }
-  }
+
   // Article sync is disabled by default.  Register only if explicitly enabled.
   if (IsEnableSyncArticlesSet()) {
     pss->RegisterDataTypeController(
@@ -276,17 +288,18 @@ void ProfileSyncComponentsFactoryImpl::RegisterCommonDataTypes(
 }
 
 void ProfileSyncComponentsFactoryImpl::RegisterDesktopDataTypes(
+    syncer::ModelTypeSet disabled_types,
     ProfileSyncService* pss) {
   // App sync is enabled by default.  Register unless explicitly
   // disabled.
-  if (!command_line_->HasSwitch(switches::kDisableSyncApps)) {
+  if (!disabled_types.Has(syncer::APPS)) {
     pss->RegisterDataTypeController(
         new ExtensionDataTypeController(syncer::APPS, this, profile_, pss));
   }
 
   // Extension sync is enabled by default.  Register unless explicitly
   // disabled.
-  if (!command_line_->HasSwitch(switches::kDisableSyncExtensions)) {
+  if (!disabled_types.Has(syncer::EXTENSIONS)) {
     pss->RegisterDataTypeController(
         new ExtensionDataTypeController(syncer::EXTENSIONS,
                                         this, profile_, pss));
@@ -294,7 +307,7 @@ void ProfileSyncComponentsFactoryImpl::RegisterDesktopDataTypes(
 
   // Preference sync is enabled by default.  Register unless explicitly
   // disabled.
-  if (!command_line_->HasSwitch(switches::kDisableSyncPreferences)) {
+  if (!disabled_types.Has(syncer::PREFERENCES)) {
     pss->RegisterDataTypeController(
         new UIDataTypeController(
             BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI),
@@ -306,7 +319,7 @@ void ProfileSyncComponentsFactoryImpl::RegisterDesktopDataTypes(
 
   }
 
-  if (!command_line_->HasSwitch(switches::kDisableSyncPriorityPreferences)) {
+  if (!disabled_types.Has(syncer::PRIORITY_PREFERENCES)) {
     pss->RegisterDataTypeController(
         new UIDataTypeController(
             BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI),
@@ -319,7 +332,7 @@ void ProfileSyncComponentsFactoryImpl::RegisterDesktopDataTypes(
 
 #if defined(ENABLE_THEMES)
   // Theme sync is enabled by default.  Register unless explicitly disabled.
-  if (!command_line_->HasSwitch(switches::kDisableSyncThemes)) {
+  if (!disabled_types.Has(syncer::THEMES)) {
     pss->RegisterDataTypeController(
         new ThemeDataTypeController(this, profile_, pss));
   }
@@ -327,14 +340,14 @@ void ProfileSyncComponentsFactoryImpl::RegisterDesktopDataTypes(
 
   // Search Engine sync is enabled by default.  Register unless explicitly
   // disabled.
-  if (!command_line_->HasSwitch(switches::kDisableSyncSearchEngines)) {
+  if (!disabled_types.Has(syncer::SEARCH_ENGINES)) {
     pss->RegisterDataTypeController(
         new SearchEngineDataTypeController(this, profile_, pss));
   }
 
   // Extension setting sync is enabled by default.  Register unless explicitly
   // disabled.
-  if (!command_line_->HasSwitch(switches::kDisableSyncExtensionSettings)) {
+  if (!disabled_types.Has(syncer::EXTENSION_SETTINGS)) {
     pss->RegisterDataTypeController(
         new ExtensionSettingDataTypeController(
             syncer::EXTENSION_SETTINGS, this, profile_, pss));
@@ -342,15 +355,14 @@ void ProfileSyncComponentsFactoryImpl::RegisterDesktopDataTypes(
 
   // App setting sync is enabled by default.  Register unless explicitly
   // disabled.
-  if (!command_line_->HasSwitch(switches::kDisableSyncAppSettings)) {
+  if (!disabled_types.Has(syncer::APP_SETTINGS)) {
     pss->RegisterDataTypeController(
         new ExtensionSettingDataTypeController(
             syncer::APP_SETTINGS, this, profile_, pss));
   }
 
 #if defined(ENABLE_APP_LIST)
-  // App List sync is disabled by default.  Register only if enabled.
-  if (command_line_->HasSwitch(switches::kEnableSyncAppList)) {
+  if (app_list::switches::IsAppListSyncEnabled()) {
     pss->RegisterDataTypeController(
         new UIDataTypeController(
             BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI),
@@ -363,20 +375,31 @@ void ProfileSyncComponentsFactoryImpl::RegisterDesktopDataTypes(
 #endif
 
   // Synced Notifications are enabled by default.
-  pss->RegisterDataTypeController(
-      new UIDataTypeController(
-            BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI),
-            base::Bind(&ChromeReportUnrecoverableError),
-            syncer::SYNCED_NOTIFICATIONS,
-            this,
-            profile_,
-            pss));
+  if (!disabled_types.Has(syncer::SYNCED_NOTIFICATIONS)) {
+    pss->RegisterDataTypeController(
+        new UIDataTypeController(
+              BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI),
+              base::Bind(&ChromeReportUnrecoverableError),
+              syncer::SYNCED_NOTIFICATIONS,
+              this,
+              profile_,
+              pss));
 
-  // TODO(petewil): Enable the data type controller once we have a handler.
+    // Synced Notification App Infos are disabled by default.
+    if (command_line_->HasSwitch(switches::kEnableSyncSyncedNotifications)) {
+      pss->RegisterDataTypeController(new UIDataTypeController(
+          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI),
+          base::Bind(&ChromeReportUnrecoverableError),
+          syncer::SYNCED_NOTIFICATION_APP_INFO,
+          this,
+          profile_,
+          pss));
+    }
+  }
 
 #if defined(OS_LINUX) || defined(OS_WIN) || defined(OS_CHROMEOS)
   // Dictionary sync is enabled by default.
-  if (!command_line_->HasSwitch(switches::kDisableSyncDictionary)) {
+  if (!disabled_types.Has(syncer::DICTIONARY)) {
     pss->RegisterDataTypeController(
         new UIDataTypeController(
             BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI),
@@ -406,10 +429,10 @@ DataTypeManager* ProfileSyncComponentsFactoryImpl::CreateDataTypeManager(
 }
 
 browser_sync::SyncBackendHost*
-    ProfileSyncComponentsFactoryImpl::CreateSyncBackendHost(
-      const std::string& name,
-      Profile* profile,
-      const base::WeakPtr<browser_sync::SyncPrefs>& sync_prefs) {
+ProfileSyncComponentsFactoryImpl::CreateSyncBackendHost(
+    const std::string& name,
+    Profile* profile,
+    const base::WeakPtr<sync_driver::SyncPrefs>& sync_prefs) {
   return new browser_sync::SyncBackendHostImpl(name, profile, sync_prefs);
 }
 
@@ -455,15 +478,17 @@ base::WeakPtr<syncer::SyncableService> ProfileSyncComponentsFactoryImpl::
             web_data_service_.get())->AsWeakPtr();
       }
     }
+    case syncer::SEARCH_ENGINES:
+      return TemplateURLServiceFactory::GetForProfile(profile_)->AsWeakPtr();
+#if defined(ENABLE_EXTENSIONS)
     case syncer::APPS:
     case syncer::EXTENSIONS:
       return ExtensionSyncService::Get(profile_)->AsWeakPtr();
-    case syncer::SEARCH_ENGINES:
-      return TemplateURLServiceFactory::GetForProfile(profile_)->AsWeakPtr();
     case syncer::APP_SETTINGS:
     case syncer::EXTENSION_SETTINGS:
-      return extension_system_->extension_service()->settings_frontend()->
-          GetBackendForSync(type)->AsWeakPtr();
+      return extensions::settings_sync_util::GetSyncableService(profile_, type)
+          ->AsWeakPtr();
+#endif
 #if defined(ENABLE_APP_LIST)
     case syncer::APP_LIST:
       return app_list::AppListSyncableServiceFactory::GetForProfile(profile_)->
@@ -487,6 +512,14 @@ base::WeakPtr<syncer::SyncableService> ProfileSyncComponentsFactoryImpl::
               profile_, Profile::EXPLICIT_ACCESS);
       return notifier_service ? notifier_service->AsWeakPtr()
           : base::WeakPtr<syncer::SyncableService>();
+    }
+
+    case syncer::SYNCED_NOTIFICATION_APP_INFO: {
+      notifier::SyncedNotificationAppInfoService* app_info =
+          notifier::SyncedNotificationAppInfoServiceFactory::GetForProfile(
+              profile_, Profile::EXPLICIT_ACCESS);
+      return app_info ? app_info->AsWeakPtr()
+                      : base::WeakPtr<syncer::SyncableService>();
     }
 #endif
 #if defined(ENABLE_SPELLCHECK)
@@ -526,11 +559,20 @@ base::WeakPtr<syncer::SyncableService> ProfileSyncComponentsFactoryImpl::
       return ProfileSyncServiceFactory::GetForProfile(profile_)->
           GetSessionsSyncableService()->AsWeakPtr();
     }
+    case syncer::PASSWORDS: {
+#if defined(PASSWORD_MANAGER_ENABLE_SYNC)
+      PasswordStore* password_store = PasswordStoreFactory::GetForProfile(
+          profile_, Profile::EXPLICIT_ACCESS);
+      return password_store ? password_store->GetPasswordSyncableService()
+                            : base::WeakPtr<syncer::SyncableService>();
+#else
+      return base::WeakPtr<syncer::SyncableService>();
+#endif
+    }
     default:
       // The following datatypes still need to be transitioned to the
       // syncer::SyncableService API:
       // Bookmarks
-      // Passwords
       // Typed URLs
       NOTREACHED();
       return base::WeakPtr<syncer::SyncableService>();
@@ -558,22 +600,6 @@ ProfileSyncComponentsFactory::SyncComponents
                                   kExpectMobileBookmarksFolder);
   BookmarkChangeProcessor* change_processor =
       new BookmarkChangeProcessor(model_associator,
-                                  error_handler);
-  return SyncComponents(model_associator, change_processor);
-}
-
-ProfileSyncComponentsFactory::SyncComponents
-    ProfileSyncComponentsFactoryImpl::CreatePasswordSyncComponents(
-        ProfileSyncService* profile_sync_service,
-        PasswordStore* password_store,
-        DataTypeErrorHandler* error_handler) {
-  PasswordModelAssociator* model_associator =
-      new PasswordModelAssociator(profile_sync_service,
-                                  password_store,
-                                  error_handler);
-  PasswordChangeProcessor* change_processor =
-      new PasswordChangeProcessor(model_associator,
-                                  password_store,
                                   error_handler);
   return SyncComponents(model_associator, change_processor);
 }

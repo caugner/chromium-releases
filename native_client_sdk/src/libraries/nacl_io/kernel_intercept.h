@@ -21,6 +21,12 @@
 
 EXTERN_C_BEGIN
 
+#ifdef __cplusplus
+namespace nacl_io {
+class KernelProxy;
+}
+#endif
+
 struct fuse_operations;
 
 /*
@@ -33,24 +39,36 @@ struct fuse_operations;
  * with NULL will instantiate a default kernel proxy object.  ki_init must
  * be called before any other ki_XXX function can be used.
  */
-void ki_init(void* kernel_proxy);
-void ki_init_ppapi(void* kernel_proxy,
-                   PP_Instance instance,
-                   PPB_GetInterface get_browser_interface);
+int ki_init(void* kernel_proxy);
+
+/*
+ * Saves the current internal state.  This is used by test code which can
+ * use this to save the current state before calling ki_init().  The
+ * pushed state is restored in the next call to ki_uninit().
+ */
+int ki_push_state_for_testing();
+
+int ki_init_ppapi(void* kernel_proxy,
+                  PP_Instance instance,
+                  PPB_GetInterface get_browser_interface);
+
 
 /*
  * ki_init_interface() is a variant of ki_init() that can be called with
  * a PepperInterface object.  The ownership of this object then passes
  * to nacl_io and it will be deleted on ki_uninit().
  */
-void ki_init_interface(void* kp, void* pepper_interface);
+int ki_init_interface(void* kernel_proxy, void* pepper_interface);
 
-int ki_register_fs_type(const char* fs_type, struct fuse_operations* fuse_ops);
-int ki_unregister_fs_type(const char* fs_type);
+#ifdef __cplusplus
+nacl_io::KernelProxy* ki_get_proxy();
+#endif
+
 int ki_is_initialized();
 void ki_uninit();
 
 int ki_chdir(const char* path);
+void ki_exit(int status);
 char* ki_getcwd(char* buf, size_t size);
 char* ki_getwd(char* buf);
 int ki_dup(int oldfd);

@@ -16,6 +16,7 @@
 #include "content/common/gpu/media/video_accelerator_unittest_helpers.h"
 #include "media/base/bind_to_current_loop.h"
 #include "media/base/bitstream_buffer.h"
+#include "media/base/test_data_util.h"
 #include "media/filters/h264_parser.h"
 #include "media/video/video_encode_accelerator.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -51,12 +52,12 @@ const uint32 kDefaultFPS = 30;
 //   Output stream is saved for the simple encode test only.
 // - |requested_bitrate| requested bitrate in bits per second (optional).
 //   Bitrate is only forced for tests that test bitrate.
-const base::FilePath::CharType* test_stream_data =
-    FILE_PATH_LITERAL("sync_192p_20frames.yuv:320:192:1:out.h264:200000");
+base::FilePath::StringType test_stream_data =
+    media::GetTestDataFilePath("sync_192p20_frames.yuv").value() +
+    ":320:192:1:out.h264:200000";
 
 struct TestStream {
-  explicit TestStream(base::FilePath::StringType filename)
-      : requested_bitrate(0) {}
+  TestStream() : requested_bitrate(0) {}
   ~TestStream() {}
 
   gfx::Size size;
@@ -379,7 +380,7 @@ VEAClient::VEAClient(const TestStream& test_stream,
     base::FilePath out_filename(test_stream_.out_filename);
     // This creates or truncates out_filename.
     // Without it, AppendToFile() will not work.
-    EXPECT_EQ(0, file_util::WriteFile(out_filename, NULL, 0));
+    EXPECT_EQ(0, base::WriteFile(out_filename, NULL, 0));
   }
 
   thread_checker_.DetachFromThread();
@@ -391,7 +392,7 @@ void VEAClient::CreateEncoder() {
   DCHECK(thread_checker_.CalledOnValidThread());
   CHECK(!has_encoder());
 
-  encoder_.reset(new ExynosVideoEncodeAccelerator(this));
+  encoder_.reset(new ExynosVideoEncodeAccelerator());
 
   SetState(CS_ENCODER_SET);
   DVLOG(1) << "Profile: " << test_stream_.requested_profile
@@ -399,7 +400,8 @@ void VEAClient::CreateEncoder() {
   encoder_->Initialize(kInputFormat,
                        test_stream_.size,
                        test_stream_.requested_profile,
-                       test_stream_.requested_bitrate);
+                       test_stream_.requested_bitrate,
+                       this);
 }
 
 void VEAClient::DestroyEncoder() {
@@ -496,7 +498,7 @@ void VEAClient::BitstreamBufferReady(int32 bitstream_buffer_id,
 
   if (save_to_file_) {
     int size = base::checked_cast<int>(payload_size);
-    EXPECT_EQ(file_util::AppendToFile(
+    EXPECT_EQ(base::AppendToFile(
                   base::FilePath::FromUTF8Unsafe(test_stream_.out_filename),
                   static_cast<char*>(shm->memory()),
                   size),
@@ -679,7 +681,7 @@ TEST_P(VideoEncodeAcceleratorTest, TestSimpleEncode) {
   const unsigned int keyframe_period = GetParam().b;
   const bool force_bitrate = GetParam().c;
 
-  TestStream test_stream(test_stream_data);
+  TestStream test_stream;
   ParseAndReadTestStreamData(test_stream_data, &test_stream);
 
   // Disregard save_to_file if we didn't get an output filename.
@@ -745,8 +747,6 @@ int main(int argc, char** argv) {
   // Needed to enable DVLOG through --vmodule.
   logging::LoggingSettings settings;
   settings.logging_dest = logging::LOG_TO_SYSTEM_DEBUG_LOG;
-  settings.dcheck_state =
-      logging::ENABLE_DCHECK_FOR_NON_OFFICIAL_RELEASE_BUILDS;
   CHECK(logging::InitLogging(settings));
 
   CommandLine* cmd_line = CommandLine::ForCurrentProcess();

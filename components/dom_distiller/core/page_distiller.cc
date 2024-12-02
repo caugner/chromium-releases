@@ -24,7 +24,10 @@ DistilledPageInfo::DistilledPageInfo() {}
 DistilledPageInfo::~DistilledPageInfo() {}
 
 PageDistiller::PageDistiller(const DistillerPageFactory& distiller_page_factory)
-    : distiller_page_(distiller_page_factory.CreateDistillerPage(this).Pass()) {
+    : weak_factory_(this) {
+  distiller_page_ =
+      distiller_page_factory.CreateDistillerPage(weak_factory_.GetWeakPtr())
+          .Pass();
 }
 
 PageDistiller::~PageDistiller() {}
@@ -37,11 +40,15 @@ void PageDistiller::DistillPage(const GURL& url,
   LoadURL(url);
 }
 
-void PageDistiller::LoadURL(const GURL& url) { distiller_page_->LoadURL(url); }
+void PageDistiller::LoadURL(const GURL& url) {
+  DVLOG(1) << "Loading for distillation: " << url.spec();
+  distiller_page_->LoadURL(url);
+}
 
 void PageDistiller::OnLoadURLDone() { GetDistilledContent(); }
 
 void PageDistiller::GetDistilledContent() {
+  DVLOG(1) << "Beginning distillation";
   std::string script = ResourceBundle::GetSharedInstance()
                            .GetRawDataResource(IDR_DISTILLER_JS)
                            .as_string();
@@ -50,6 +57,9 @@ void PageDistiller::GetDistilledContent() {
 
 void PageDistiller::OnExecuteJavaScriptDone(const GURL& page_url,
                                             const base::Value* value) {
+  DVLOG(1) << "Distillation complete; extracting resources for "
+      << page_url.spec();
+
   scoped_ptr<DistilledPageInfo> page_info(new DistilledPageInfo());
   std::string result;
   const base::ListValue* result_list = NULL;

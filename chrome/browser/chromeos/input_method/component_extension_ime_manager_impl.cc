@@ -27,35 +27,25 @@ struct WhitelistedComponentExtensionIME {
   const char* path;
 } whitelisted_component_extension[] = {
   {
-    // ChromeOS Keyboards extension.
-    "jhffeifommiaekmbkkjlpmilogcfdohp",
-    "/usr/share/chromeos-assets/input_methods/keyboard_layouts",
-  },
-  {
     // ChromeOS Hangul Input.
     "bdgdidmhaijohebebipajioienkglgfo",
     "/usr/share/chromeos-assets/input_methods/hangul",
   },
 #if defined(OFFICIAL_BUILD)
   {
+    // Official Google XKB Input.
+    "jkghodnilhceideoidjikpgommlajknk",
+    "/usr/share/chromeos-assets/input_methods/google_xkb",
+  },
+  {
+    // Official Google Keyboards Input.
+    "habcdindjejkmepknlhkkloncjcpcnbf",
+    "/usr/share/chromeos-assets/input_methods/google_keyboards",
+  },
+  {
     // Official Google Japanese Input.
     "fpfbhcjppmaeaijcidgiibchfbnhbelj",
     "/usr/share/chromeos-assets/input_methods/nacl_mozc",
-  },
-  {
-    // Google Chinese Input (zhuyin)
-    "goedamlknlnjaengojinmfgpmdjmkooo",
-    "/usr/share/chromeos-assets/input_methods/zhuyin",
-  },
-  {
-    // Google Chinese Input (pinyin)
-    "nmblnjkfdkabgdofidlkienfnnbjhnab",
-    "/usr/share/chromeos-assets/input_methods/pinyin",
-  },
-  {
-    // Google Chinese Input (cangjie)
-    "gjhclobljhjhgoebiipblnmdodbmpdgd",
-    "/usr/share/chromeos-assets/input_methods/cangjie",
   },
   {
     // Google input tools.
@@ -63,6 +53,16 @@ struct WhitelistedComponentExtensionIME {
     "/usr/share/chromeos-assets/input_methods/input_tools",
   },
 #else
+  {
+    // Open-sourced ChromeOS xkb extension.
+    "fgoepimhcoialccpbmpnnblemnepkkao",
+    "/usr/share/chromeos-assets/input_methods/xkb",
+  },
+  {
+    // Open-sourced ChromeOS Keyboards extension.
+    "jhffeifommiaekmbkkjlpmilogcfdohp",
+    "/usr/share/chromeos-assets/input_methods/keyboard_layouts",
+  },
   {
     // Open-sourced Pinyin Chinese Input Method.
     "cpgalbafkoofkjmaeonnfijgpfennjjn",
@@ -116,23 +116,24 @@ bool ComponentExtensionIMEManagerImpl::Load(const std::string& extension_id,
                                             const std::string& manifest,
                                             const base::FilePath& file_path) {
   DCHECK(thread_checker_.CalledOnValidThread());
-  if (loaded_extension_id_.find(extension_id) != loaded_extension_id_.end())
+  Profile* profile = ProfileManager::GetActiveUserProfile();
+  extensions::ExtensionSystem* extension_system =
+      extensions::ExtensionSystem::Get(profile);
+  ExtensionService* extension_service = extension_system->extension_service();
+  if (extension_service->GetExtensionById(extension_id, false))
     return false;
   const std::string loaded_extension_id =
       GetComponentLoader()->Add(manifest, file_path);
   DCHECK_EQ(loaded_extension_id, extension_id);
-  loaded_extension_id_.insert(extension_id);
   return true;
 }
 
-bool ComponentExtensionIMEManagerImpl::Unload(const std::string& extension_id,
+void ComponentExtensionIMEManagerImpl::Unload(const std::string& extension_id,
                                               const base::FilePath& file_path) {
   DCHECK(thread_checker_.CalledOnValidThread());
-  if (loaded_extension_id_.find(extension_id) == loaded_extension_id_.end())
-    return false;
+  // Remove(extension_id) does nothing when the extension has already been
+  // removed or not been registered.
   GetComponentLoader()->Remove(extension_id);
-  loaded_extension_id_.erase(extension_id);
-  return true;
 }
 
 scoped_ptr<base::DictionaryValue> ComponentExtensionIMEManagerImpl::GetManifest(
@@ -176,6 +177,7 @@ bool ComponentExtensionIMEManagerImpl::IsInitialized() {
 
 // static
 bool ComponentExtensionIMEManagerImpl::ReadEngineComponent(
+    const ComponentExtensionIME& component_extension,
     const base::DictionaryValue& dict,
     ComponentExtensionEngine* out) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::FILE));
@@ -219,6 +221,33 @@ bool ComponentExtensionIMEManagerImpl::ReadEngineComponent(
     if (layouts->GetString(i, &buffer))
       out->layouts.push_back(buffer);
   }
+
+  std::string url_string;
+  if (dict.GetString(extensions::manifest_keys::kInputView,
+                     &url_string)) {
+    GURL url = extensions::Extension::GetResourceURL(
+        extensions::Extension::GetBaseURLFromExtensionId(
+            component_extension.id),
+        url_string);
+    if (!url.is_valid())
+      return false;
+    out->input_view_url = url;
+  }
+
+  if (dict.GetString(extensions::manifest_keys::kOptionsPage,
+                     &url_string)) {
+    GURL url = extensions::Extension::GetResourceURL(
+        extensions::Extension::GetBaseURLFromExtensionId(
+            component_extension.id),
+        url_string);
+    if (!url.is_valid())
+      return false;
+    out->options_page_url = url;
+  } else {
+    // Fallback to extension level options page.
+    out->options_page_url = component_extension.options_page_url;
+  }
+
   return true;
 }
 
@@ -240,15 +269,6 @@ bool ComponentExtensionIMEManagerImpl::ReadExtensionInfo(
     if (!url.is_valid())
       return false;
     out->options_page_url = url;
-  }
-  if (manifest.GetString(extensions::manifest_keys::kInputView,
-                         &url_string)) {
-    GURL url = extensions::Extension::GetResourceURL(
-        extensions::Extension::GetBaseURLFromExtensionId(extension_id),
-        url_string);
-    if (!url.is_valid())
-      return false;
-    out->input_view_url = url;
   }
   // It's okay to return true on no option page and/or input view page case.
   return true;
@@ -296,7 +316,7 @@ void ComponentExtensionIMEManagerImpl::ReadComponentExtensionsInfo(
         continue;
 
       ComponentExtensionEngine engine;
-      ReadEngineComponent(*dictionary, &engine);
+      ReadEngineComponent(component_ime, *dictionary, &engine);
       component_ime.engines.push_back(engine);
     }
     out_imes->push_back(component_ime);

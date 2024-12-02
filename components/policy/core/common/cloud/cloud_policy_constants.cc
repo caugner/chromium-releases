@@ -32,6 +32,7 @@ const char kValueRequestRegister[] = "register";
 const char kValueRequestApiAuthorization[] = "api_authorization";
 const char kValueRequestUnregister[] = "unregister";
 const char kValueRequestUploadCertificate[] = "cert_upload";
+const char kValueRequestDeviceStateRetrieval[] = "device_state_retrieval";
 const char kValueUserAffiliationManaged[] = "managed";
 const char kValueUserAffiliationNone[] = "none";
 
@@ -91,7 +92,7 @@ std::string GetPolicyVerificationKey() {
   // Disable key verification by default until production servers generate
   // the proper signatures.
   CommandLine* command_line = CommandLine::ForCurrentProcess();
-  if (!command_line->HasSwitch(switches::kEnablePolicyKeyVerification)) {
+  if (command_line->HasSwitch(switches::kDisablePolicyKeyVerification)) {
     return std::string();
   } else {
     return std::string(reinterpret_cast<const char*>(kPolicyVerificationKey),

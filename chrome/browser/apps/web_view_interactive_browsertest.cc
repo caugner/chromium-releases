@@ -10,8 +10,8 @@
 #include "chrome/browser/apps/app_browsertest_util.h"
 #include "chrome/browser/extensions/extension_test_message_listener.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/tab_contents/render_view_context_menu_browsertest_util.h"
-#include "chrome/browser/tab_contents/render_view_context_menu_test_util.h"
+#include "chrome/browser/renderer_context_menu/render_view_context_menu_browsertest_util.h"
+#include "chrome/browser/renderer_context_menu/render_view_context_menu_test_util.h"
 #include "chrome/test/base/interactive_test_utils.h"
 #include "chrome/test/base/test_launcher_utils.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -172,7 +172,7 @@ class WebViewInteractiveTest
 
     scoped_ptr<ExtensionTestMessageListener> done_listener(
         new ExtensionTestMessageListener("TEST_PASSED", false));
-    done_listener->AlsoListenForFailureMessage("TEST_FAILED");
+    done_listener->set_failure_message("TEST_FAILED");
     if (!content::ExecuteScript(
             *embedder_web_contents,
             base::StringPrintf("runTest('%s')", test_name.c_str()))) {
@@ -473,7 +473,7 @@ IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest, PointerLock) {
   // div. We then move the mouse over that div to ensure the mouse was properly
   // unlocked and that the div receieves the message.
   ExtensionTestMessageListener move_captured_listener("move-captured", false);
-  move_captured_listener.AlsoListenForFailureMessage("timeout");
+  move_captured_listener.set_failure_message("timeout");
 
   // Mouse should already be over lock button (since we just unlocked), so send
   // click to re-lock the mouse.
@@ -744,7 +744,7 @@ IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest, Navigation_BackForwardKeys) {
 
   ExtensionTestMessageListener done_listener(
       "TEST_PASSED", false);
-  done_listener.AlsoListenForFailureMessage("TEST_FAILED");
+  done_listener.set_failure_message("TEST_FAILED");
   ExtensionTestMessageListener ready_back_key_listener(
       "ReadyForBackKey", false);
   ExtensionTestMessageListener ready_forward_key_listener(

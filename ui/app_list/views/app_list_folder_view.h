@@ -13,10 +13,6 @@
 #include "ui/views/controls/button/button.h"
 #include "ui/views/view.h"
 
-namespace content {
-class WebContents;
-}
-
 namespace views {
 class ViewModel;
 }
@@ -34,13 +30,12 @@ class PaginationModel;
 
 class AppListFolderView : public views::View,
                           public FolderHeaderViewDelegate,
-                          public AppListItemListObserver,
+                          public AppListModelObserver,
                           public ui::ImplicitAnimationObserver {
  public:
   AppListFolderView(AppsContainerView* container_view,
                     AppListModel* model,
-                    AppListMainView* app_list_main_view,
-                    content::WebContents* start_page_contents);
+                    AppListMainView* app_list_main_view);
   virtual ~AppListFolderView();
 
   void SetAppListFolderItem(AppListFolderItem* folder);
@@ -84,15 +79,18 @@ class AppListFolderView : public views::View,
   // Hides the view immediately without animation.
   void HideViewImmediately();
 
-  // views::View overrides:
+  // Returns true if the associated folder item is an OEM folder.
+  bool IsOEMFolder() const;
+
+  // views::View
   virtual gfx::Size GetPreferredSize() OVERRIDE;
   virtual void Layout() OVERRIDE;
   virtual bool OnKeyPressed(const ui::KeyEvent& event) OVERRIDE;
 
-  // Overridden from AppListItemListObserver:
-  virtual void OnListItemRemoved(size_t index, AppListItem* item) OVERRIDE;
+  // AppListModelObserver
+  virtual void OnAppListItemWillBeDeleted(AppListItem* item) OVERRIDE;
 
-  // ui::ImplicitAnimationObserver overrides:
+  // ui::ImplicitAnimationObserver
   virtual void OnImplicitAnimationsCompleted() OVERRIDE;
 
   AppsGridView* items_grid_view() { return items_grid_view_; }
@@ -110,8 +108,12 @@ class AppListFolderView : public views::View,
   // Overridden from FolderHeaderViewDelegate:
   virtual void NavigateBack(AppListFolderItem* item,
                             const ui::Event& event_flags) OVERRIDE;
+  virtual void GiveBackFocusToSearchBox() OVERRIDE;
+  virtual void SetItemName(AppListFolderItem* item,
+                           const std::string& name) OVERRIDE;
 
   AppsContainerView* container_view_;  // Not owned.
+  AppListMainView* app_list_main_view_;   // Not Owned.
   FolderHeaderView* folder_header_view_;  // Owned by views hierarchy.
   AppsGridView* items_grid_view_;  // Owned by the views hierarchy.
 

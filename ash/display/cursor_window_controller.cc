@@ -10,8 +10,8 @@
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
 #include "ui/aura/env.h"
-#include "ui/aura/root_window.h"
 #include "ui/aura/window_delegate.h"
+#include "ui/aura/window_event_dispatcher.h"
 #include "ui/base/cursor/cursors_aura.h"
 #include "ui/base/hit_test.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -53,13 +53,11 @@ class CursorWindowDelegate : public aura::WindowDelegate {
   }
   virtual void OnDeviceScaleFactorChanged(
       float device_scale_factor) OVERRIDE {}
-  virtual void OnWindowDestroying() OVERRIDE {}
-  virtual void OnWindowDestroyed() OVERRIDE {}
+  virtual void OnWindowDestroying(aura::Window* window) OVERRIDE {}
+  virtual void OnWindowDestroyed(aura::Window* window) OVERRIDE {}
   virtual void OnWindowTargetVisibilityChanged(bool visible) OVERRIDE {}
   virtual bool HasHitTestMask() const OVERRIDE { return false; }
   virtual void GetHitTestMask(gfx::Path* mask) const OVERRIDE {}
-  virtual void DidRecreateLayer(ui::Layer* old_layer,
-                                ui::Layer* new_layer) OVERRIDE {}
 
   // Sets cursor compositing mode on/off.
   void SetCursorCompositingEnabled(bool enabled) {
@@ -120,9 +118,9 @@ void CursorWindowController::UpdateContainer() {
   if (is_cursor_compositing_enabled_) {
     SetDisplay(display_);
   } else {
-    aura::RootWindow* mirror_root_window = Shell::GetInstance()->
-        display_controller()->mirror_window_controller()->root_window();
-    SetContainer(mirror_root_window ? mirror_root_window->window() : NULL);
+    aura::WindowTreeHost* mirror_host = Shell::GetInstance()->
+        display_controller()->mirror_window_controller()->host();
+    SetContainer(mirror_host ? mirror_host->window() : NULL);
   }
 }
 
@@ -137,7 +135,7 @@ void CursorWindowController::SetDisplay(const gfx::Display& display) {
     return;
 
   SetContainer(GetRootWindowController(root_window)->GetContainer(
-      kShellWindowId_OverlayContainer));
+      kShellWindowId_MouseCursorContainer));
   SetBoundsInScreen(display.bounds());
 }
 
@@ -147,8 +145,7 @@ void CursorWindowController::UpdateLocation() {
 
   gfx::Point point = aura::Env::GetInstance()->last_mouse_location();
   if (!is_cursor_compositing_enabled_) {
-    Shell::GetPrimaryRootWindow()->GetDispatcher()->host()->ConvertPointToHost(
-        &point);
+    Shell::GetPrimaryRootWindow()->GetHost()->ConvertPointToHost(&point);
   } else {
     point.Offset(-bounds_in_screen_.x(), -bounds_in_screen_.y());
   }

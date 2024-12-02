@@ -23,6 +23,12 @@
 namespace {
 const int kMaxTimesToShowOptInPopup = 10;
 
+// Allowed languages for hotwording.
+static const char* kSupportedLocales[] = {
+  "en",
+  "en_us"
+};
+
 // Enum describing the state of the hotword preference.
 // This is used for UMA stats -- do not reorder or delete items; only add to
 // the end.
@@ -63,6 +69,17 @@ void RecordAvailabilityMetrics(
                             NUM_HOTWORD_EXTENSION_AVAILABILITY_METRICS);
 }
 
+void RecordLoggingMetrics(Profile* profile) {
+  // If the user is not opted in to hotword voice search, the audio logging
+  // metric is not valid so it is not recorded.
+  if (!profile->GetPrefs()->GetBoolean(prefs::kHotwordSearchEnabled))
+    return;
+
+  UMA_HISTOGRAM_BOOLEAN(
+      "Hotword.HotwordAudioLogging",
+      profile->GetPrefs()->GetBoolean(prefs::kHotwordAudioLoggingEnabled));
+}
+
 ExtensionService* GetExtensionService(Profile* profile) {
   CHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
 
@@ -79,6 +96,8 @@ namespace hotword_internal {
 // Constants for the hotword field trial.
 const char kHotwordFieldTrialName[] = "VoiceTrigger";
 const char kHotwordFieldTrialDisabledGroupName[] = "Disabled";
+// Old preference constant.
+const char kHotwordUnusablePrefName[] = "hotword.search_enabled";
 }  // namespace hotword_internal
 
 // static
@@ -90,10 +109,14 @@ bool HotwordService::DoesHotwordSupportLanguage(Profile* profile) {
 #else
       g_browser_process->GetApplicationLocale();
 #endif
-  // Only available for English now.
   std::string normalized_locale = l10n_util::NormalizeLocale(locale);
-  return normalized_locale == "en" || normalized_locale == "en_us" ||
-      normalized_locale =="en_US";
+  StringToLowerASCII(&normalized_locale);
+
+  for (size_t i = 0; i < arraysize(kSupportedLocales); i++) {
+    if (kSupportedLocales[i] == normalized_locale)
+      return true;
+  }
+  return false;
 }
 
 HotwordService::HotwordService(Profile* profile)
@@ -108,8 +131,10 @@ HotwordService::HotwordService(Profile* profile)
       enabled_state = DISABLED;
   } else {
     // If the preference has not been set the hotword extension should
-    // not be running.
-    DisableHotwordExtension(GetExtensionService(profile_));
+    // not be running. However, this should only be done if auto-install
+    // is enabled which is gated through the IsHotwordAllowed check.
+    if (IsHotwordAllowed())
+      DisableHotwordExtension(GetExtensionService(profile_));
   }
   UMA_HISTOGRAM_ENUMERATION("Hotword.Enabled", enabled_state,
                             NUM_HOTWORD_ENABLED_METRICS);
@@ -123,6 +148,13 @@ HotwordService::HotwordService(Profile* profile)
   registrar_.Add(this,
                  chrome::NOTIFICATION_EXTENSION_INSTALLED,
                  content::Source<Profile>(profile_));
+
+  // Clear the old user pref because it became unusable.
+  // TODO(rlp): Remove this code per crbug.com/358789.
+  if (profile_->GetPrefs()->HasPrefPath(
+          hotword_internal::kHotwordUnusablePrefName)) {
+    profile_->GetPrefs()->ClearPref(hotword_internal::kHotwordUnusablePrefName);
+  }
 }
 
 HotwordService::~HotwordService() {
@@ -135,7 +167,11 @@ void HotwordService::Observe(int type,
     const extensions::Extension* extension =
         content::Details<const extensions::InstalledExtensionInfo>(details)
               ->extension;
-    if (extension->id() == extension_misc::kHotwordExtensionId &&
+    // Disabling the extension automatically on install should only occur
+    // if the user is in the field trial for auto-install which is gated
+    // by the IsHotwordAllowed check.
+    if (IsHotwordAllowed() &&
+        extension->id() == extension_misc::kHotwordExtensionId &&
         !profile_->GetPrefs()->GetBoolean(prefs::kHotwordSearchEnabled)) {
       DisableHotwordExtension(GetExtensionService(profile_));
       // Once the extension is disabled, it will not be enabled until the
@@ -183,6 +219,7 @@ bool HotwordService::IsServiceAvailable() {
       service->GetExtensionById(extension_misc::kHotwordExtensionId, true);
 
   RecordAvailabilityMetrics(service, extension);
+  RecordLoggingMetrics(profile_);
 
   return extension && IsHotwordAllowed();
 }
@@ -193,6 +230,13 @@ bool HotwordService::IsHotwordAllowed() {
   return !group.empty() &&
       group != hotword_internal::kHotwordFieldTrialDisabledGroupName &&
       DoesHotwordSupportLanguage(profile_);
+}
+
+bool HotwordService::IsOptedIntoAudioLogging() {
+  // Do not opt the user in if the preference has not been set.
+  return
+      profile_->GetPrefs()->HasPrefPath(prefs::kHotwordAudioLoggingEnabled) &&
+      profile_->GetPrefs()->GetBoolean(prefs::kHotwordAudioLoggingEnabled);
 }
 
 bool HotwordService::RetryHotwordExtension() {

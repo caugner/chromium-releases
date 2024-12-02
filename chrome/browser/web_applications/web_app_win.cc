@@ -64,9 +64,9 @@ bool SaveIconWithCheckSum(const base::FilePath& icon_file,
   GetImageCheckSum(image, &digest);
 
   base::FilePath cheksum_file(icon_file.ReplaceExtension(kIconChecksumFileExt));
-  return file_util::WriteFile(cheksum_file,
-                              reinterpret_cast<const char*>(&digest),
-                              sizeof(digest)) == sizeof(digest);
+  return base::WriteFile(cheksum_file,
+                         reinterpret_cast<const char*>(&digest),
+                         sizeof(digest)) == sizeof(digest);
 }
 
 // Returns true if |icon_file| is missing or different from |image|.
@@ -227,7 +227,8 @@ bool CreateShortcutsInPaths(
     }
     if (shortcut_paths[i] != web_app_path) {
       int unique_number =
-          file_util::GetUniquePathNumber(shortcut_file, FILE_PATH_LITERAL(""));
+          base::GetUniquePathNumber(shortcut_file,
+                                    base::FilePath::StringType());
       if (unique_number == -1) {
         success = false;
         continue;
@@ -440,13 +441,10 @@ void UpdatePlatformShortcuts(
     }
   }
 
-  // If an icon file exists, and is out of date, replace it with the new icon
-  // and let the shell know the icon has been modified.
+  // Update the icon if necessary.
   base::FilePath icon_file = web_app_path.Append(file_name).AddExtension(
       FILE_PATH_LITERAL(".ico"));
-  if (base::PathExists(icon_file)) {
-    web_app::internals::CheckAndSaveIcon(icon_file, shortcut_info.favicon);
-  }
+  web_app::internals::CheckAndSaveIcon(icon_file, shortcut_info.favicon);
 }
 
 void DeletePlatformShortcuts(

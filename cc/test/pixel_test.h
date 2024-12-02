@@ -9,6 +9,7 @@
 #include "cc/test/pixel_comparator.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/size.h"
+#include "ui/gl/gl_implementation.h"
 
 #ifndef CC_TEST_PIXEL_TEST_H_
 #define CC_TEST_PIXEL_TEST_H_
@@ -20,6 +21,7 @@ class FakeOutputSurfaceClient;
 class OutputSurface;
 class ResourceProvider;
 class SoftwareRenderer;
+class SharedBitmapManager;
 
 class PixelTest : public testing::Test, RendererClient {
  protected:
@@ -49,6 +51,7 @@ class PixelTest : public testing::Test, RendererClient {
   class PixelTestRendererClient;
   scoped_ptr<FakeOutputSurfaceClient> output_surface_client_;
   scoped_ptr<OutputSurface> output_surface_;
+  scoped_ptr<SharedBitmapManager> shared_bitmap_manager_;
   scoped_ptr<ResourceProvider> resource_provider_;
   scoped_ptr<TextureMailboxDeleter> texture_mailbox_deleter_;
   scoped_ptr<DirectRenderer> renderer_;
@@ -73,6 +76,8 @@ class PixelTest : public testing::Test, RendererClient {
 
   bool PixelsMatchReference(const base::FilePath& ref_file,
                             const PixelComparator& comparator);
+
+  scoped_ptr<gfx::DisableNullDrawGLBindings> enable_pixel_output_;
 };
 
 template<typename RendererType>

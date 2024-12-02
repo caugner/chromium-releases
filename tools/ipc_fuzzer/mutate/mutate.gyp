@@ -17,6 +17,7 @@
         '../../../media/cast/transport/cast_transport.gyp:cast_transport',
         '../../../ppapi/ppapi_internal.gyp:ppapi_ipc',
         '../../../skia/skia.gyp:skia',
+        '../../../third_party/libjingle/libjingle.gyp:libjingle',
         '../../../third_party/mt19937ar/mt19937ar.gyp:mt19937ar',
         '../../../ui/accessibility/accessibility.gyp:ax_gen',
         '../message_lib/message_lib.gyp:ipc_message_lib',
@@ -29,6 +30,9 @@
       'include_dirs': [
         '../../..',
       ],
+      'defines': [
+        'USE_CUPS',
+      ],
     },
     {
       'target_name': 'ipc_fuzzer_generate',
@@ -40,6 +44,7 @@
         '../../../media/cast/transport/cast_transport.gyp:cast_transport',
         '../../../ppapi/ppapi_internal.gyp:ppapi_ipc',
         '../../../skia/skia.gyp:skia',
+        '../../../third_party/libjingle/libjingle.gyp:libjingle',
         '../../../third_party/mt19937ar/mt19937ar.gyp:mt19937ar',
         '../../../ui/accessibility/accessibility.gyp:ax_gen',
         '../message_lib/message_lib.gyp:ipc_message_lib',
@@ -51,6 +56,9 @@
       ],
       'include_dirs': [
         '../../..',
+      ],
+      'defines': [
+        'USE_CUPS',
       ],
     },
     {
@@ -65,6 +73,9 @@
       ],
       'include_dirs': [
         '../../..',
+      ],
+      'defines': [
+        'USE_CUPS',
       ],
     },
   ],

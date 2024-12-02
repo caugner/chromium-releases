@@ -6,8 +6,7 @@
 
 #include <cctype>
 
-#include "content/shell/renderer/test_runner/AccessibilityController.h"
-#include "content/shell/renderer/test_runner/EventSender.h"
+#include "content/shell/renderer/test_runner/event_sender.h"
 #include "content/shell/renderer/test_runner/MockColorChooser.h"
 #include "content/shell/renderer/test_runner/MockWebSpeechInputController.h"
 #include "content/shell/renderer/test_runner/MockWebSpeechRecognizer.h"
@@ -15,11 +14,12 @@
 #include "content/shell/renderer/test_runner/TestCommon.h"
 #include "content/shell/renderer/test_runner/TestInterfaces.h"
 #include "content/shell/renderer/test_runner/TestPlugin.h"
-#include "content/shell/renderer/test_runner/TestRunner.h"
 #include "content/shell/renderer/test_runner/WebTestDelegate.h"
 #include "content/shell/renderer/test_runner/WebTestInterfaces.h"
 #include "content/shell/renderer/test_runner/WebTestRunner.h"
 #include "content/shell/renderer/test_runner/WebUserMediaClientMock.h"
+#include "content/shell/renderer/test_runner/accessibility_controller.h"
+#include "content/shell/renderer/test_runner/test_runner.h"
 // FIXME: Including platform_canvas.h here is a layering violation.
 #include "skia/ext/platform_canvas.h"
 #include "third_party/WebKit/public/platform/WebCString.h"
@@ -717,7 +717,7 @@ void WebTestProxyBase::scheduleComposite()
 
 void WebTestProxyBase::scheduleAnimation()
 {
-    if (!m_testInterfaces->testRunner()->testIsRunning())
+    if (!m_testInterfaces->testRunner()->TestIsRunning())
         return;
 
     if (!m_animateScheduled) {
@@ -759,7 +759,7 @@ void WebTestProxyBase::didAutoResize(const WebSize&)
 void WebTestProxyBase::postAccessibilityEvent(const blink::WebAXObject& obj, blink::WebAXEvent event)
 {
     if (event == blink::WebAXEventFocus)
-        m_testInterfaces->accessibilityController()->setFocusedElement(obj);
+        m_testInterfaces->accessibilityController()->SetFocusedElement(obj);
 
     const char* eventName = 0;
     switch (event) {
@@ -820,6 +820,9 @@ void WebTestProxyBase::postAccessibilityEvent(const blink::WebAXObject& obj, bli
     case blink::WebAXEventRowExpanded:
         eventName = "RowExpanded";
         break;
+    case blink::WebAXEventScrollPositionChanged:
+        eventName = "ScrollPositionChanged";
+        break;
     case blink::WebAXEventScrolledToAnchor:
         eventName = "ScrolledToAnchor";
         break;
@@ -844,11 +847,14 @@ void WebTestProxyBase::postAccessibilityEvent(const blink::WebAXObject& obj, bli
     case blink::WebAXEventValueChanged:
         eventName = "ValueChanged";
         break;
+    default:
+        eventName = "Unknown";
+        break;
     }
 
-    m_testInterfaces->accessibilityController()->notificationReceived(obj, eventName);
+    m_testInterfaces->accessibilityController()->NotificationReceived(obj, eventName);
 
-    if (m_testInterfaces->accessibilityController()->shouldLogAccessibilityEvents()) {
+    if (m_testInterfaces->accessibilityController()->ShouldLogAccessibilityEvents()) {
         string message("AccessibilityNotification - ");
         message += eventName;
 
@@ -869,7 +875,7 @@ void WebTestProxyBase::startDragging(WebFrame*, const WebDragData& data, WebDrag
 {
     // When running a test, we need to fake a drag drop operation otherwise
     // Windows waits for real mouse events to know when the drag is over.
-    m_testInterfaces->eventSender()->doDragDrop(data, mask);
+    m_testInterfaces->eventSender()->DoDragDrop(data, mask);
 }
 
 // The output from these methods in layout test mode should match that
@@ -918,7 +924,7 @@ void WebTestProxyBase::didStopLoading()
 
 void WebTestProxyBase::showContextMenu(WebFrame*, const WebContextMenuData& contextMenuData)
 {
-    m_testInterfaces->eventSender()->setContextMenuData(contextMenuData);
+    m_testInterfaces->eventSender()->SetContextMenuData(contextMenuData);
 }
 
 WebUserMediaClient* WebTestProxyBase::userMediaClient()
@@ -941,7 +947,7 @@ void WebTestProxyBase::printPage(WebFrame* frame)
 
 WebNotificationPresenter* WebTestProxyBase::notificationPresenter()
 {
-    return m_testInterfaces->testRunner()->notificationPresenter();
+    return m_testInterfaces->testRunner()->notification_presenter();
 }
 
 WebMIDIClient* WebTestProxyBase::webMIDIClient()
@@ -970,12 +976,12 @@ WebSpeechRecognizer* WebTestProxyBase::speechRecognizer()
 
 bool WebTestProxyBase::requestPointerLock()
 {
-    return m_testInterfaces->testRunner()->requestPointerLock();
+    return m_testInterfaces->testRunner()->RequestPointerLock();
 }
 
 void WebTestProxyBase::requestPointerUnlock()
 {
-    m_testInterfaces->testRunner()->requestPointerUnlock();
+    m_testInterfaces->testRunner()->RequestPointerUnlock();
 }
 
 bool WebTestProxyBase::isPointerLocked()
@@ -1011,6 +1017,18 @@ void WebTestProxyBase::didCloseChooser()
 bool WebTestProxyBase::isChooserShown()
 {
     return 0 < m_chooserCount;
+}
+
+void WebTestProxyBase::loadURLExternally(WebFrame* frame, const WebURLRequest& request, WebNavigationPolicy policy, const WebString& suggested_name)
+{
+    if (m_testInterfaces->testRunner()->shouldWaitUntilExternalURLLoad()) {
+        if (policy == WebNavigationPolicyDownload) {
+            m_delegate->printMessage(string("Downloading URL with suggested filename \"") + suggested_name.utf8() + "\"\n");
+        } else {
+            m_delegate->printMessage(string("Loading URL externally - \"") + URLDescription(request.url()) + "\"\n");
+        }
+        m_delegate->testFinished();
+    }
 }
 
 void WebTestProxyBase::didStartProvisionalLoad(WebFrame* frame)

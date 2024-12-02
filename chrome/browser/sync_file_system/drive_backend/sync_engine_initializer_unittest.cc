@@ -13,6 +13,7 @@
 #include "chrome/browser/sync_file_system/drive_backend/drive_backend_test_util.h"
 #include "chrome/browser/sync_file_system/drive_backend/metadata_database.h"
 #include "chrome/browser/sync_file_system/drive_backend/metadata_database.pb.h"
+#include "chrome/browser/sync_file_system/drive_backend/sync_task_manager.h"
 #include "chrome/browser/sync_file_system/sync_file_system_test_util.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "google_apis/drive/drive_api_parser.h"
@@ -48,10 +49,15 @@ class SyncEngineInitializerTest : public testing::Test {
         "sync_file_system/account_metadata.json"));
     ASSERT_TRUE(fake_drive_service_.LoadResourceListForWapi(
         "gdata/empty_feed.json"));
+
+    sync_task_manager_.reset(new SyncTaskManager(
+        base::WeakPtr<SyncTaskManager::Client>(),
+        1 /* maximum_parallel_task */));
+    sync_task_manager_->Initialize(SYNC_STATUS_OK);
   }
 
   virtual void TearDown() OVERRIDE {
-    initializer_.reset();
+    sync_task_manager_.reset();
     metadata_database_.reset();
     base::RunLoop().RunUntilIdle();
   }
@@ -61,19 +67,31 @@ class SyncEngineInitializerTest : public testing::Test {
   }
 
   SyncStatusCode RunInitializer() {
-    initializer_.reset(new SyncEngineInitializer(
-        NULL,
-        base::MessageLoopProxy::current(),
-        &fake_drive_service_,
-        database_path(),
-        in_memory_env_.get()));
+    SyncEngineInitializer* initializer =
+        new SyncEngineInitializer(
+            NULL,
+            base::MessageLoopProxy::current(),
+            &fake_drive_service_,
+            database_path(),
+            in_memory_env_.get());
     SyncStatusCode status = SYNC_STATUS_UNKNOWN;
 
-    initializer_->Run(CreateResultReceiver(&status));
-    base::RunLoop().RunUntilIdle();
+    sync_task_manager_->ScheduleSyncTask(
+        FROM_HERE,
+        scoped_ptr<SyncTask>(initializer),
+        SyncTaskManager::PRIORITY_MED,
+        base::Bind(&SyncEngineInitializerTest::DidRunInitializer,
+                   base::Unretained(this), initializer, &status));
 
-    metadata_database_ = initializer_->PassMetadataDatabase();
+    base::RunLoop().RunUntilIdle();
     return status;
+  }
+
+  void DidRunInitializer(SyncEngineInitializer* initializer,
+                         SyncStatusCode* status_out,
+                         SyncStatusCode status) {
+    *status_out = status;
+    metadata_database_ = initializer->PassMetadataDatabase();
   }
 
   SyncStatusCode PopulateDatabase(
@@ -135,7 +153,7 @@ class SyncEngineInitializerTest : public testing::Test {
     for (size_t i = 0; i < sync_root->parents().size(); ++i) {
       google_apis::GDataErrorCode error = google_apis::GDATA_OTHER_ERROR;
       fake_drive_service_.RemoveResourceFromDirectory(
-          sync_root->parents()[i]->file_id(),
+          sync_root->parents()[i].file_id(),
           sync_root->file_id(),
           CreateResultReceiver(&error));
       base::RunLoop().RunUntilIdle();
@@ -154,13 +172,13 @@ class SyncEngineInitializerTest : public testing::Test {
   }
 
   size_t CountTrackersForFile(const std::string& file_id) {
-    TrackerSet trackers;
+    TrackerIDSet trackers;
     metadata_database_->FindTrackersByFileID(file_id, &trackers);
-    return trackers.tracker_set().size();
+    return trackers.size();
   }
 
   bool HasActiveTracker(const std::string& file_id) {
-    TrackerSet trackers;
+    TrackerIDSet trackers;
     return metadata_database_->FindTrackersByFileID(file_id, &trackers) &&
         trackers.has_active();
   }
@@ -176,12 +194,12 @@ class SyncEngineInitializerTest : public testing::Test {
     return !entry->GetLinkByType(google_apis::Link::LINK_PARENT);
   }
 
-  size_t NumberOfMetadata() {
-    return metadata_database_->file_by_id_.size();
+  size_t CountFileMetadata() {
+    return metadata_database_->CountFileMetadata();
   }
 
-  size_t NumberOfTrackers() {
-    return metadata_database_->tracker_by_id_.size();
+  size_t CountFileTracker() {
+    return metadata_database_->CountFileTracker();
   }
 
   google_apis::GDataErrorCode AddParentFolder(
@@ -201,8 +219,8 @@ class SyncEngineInitializerTest : public testing::Test {
   scoped_ptr<leveldb::Env> in_memory_env_;
   drive::FakeDriveService fake_drive_service_;
 
-  scoped_ptr<SyncEngineInitializer> initializer_;
   scoped_ptr<MetadataDatabase> metadata_database_;
+  scoped_ptr<SyncTaskManager> sync_task_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(SyncEngineInitializerTest);
 };
@@ -215,8 +233,8 @@ TEST_F(SyncEngineInitializerTest, EmptyDatabase_NoRemoteSyncRoot) {
 
   EXPECT_TRUE(HasActiveTracker(sync_root_folder_id));
 
-  EXPECT_EQ(1u, NumberOfMetadata());
-  EXPECT_EQ(1u, NumberOfTrackers());
+  EXPECT_EQ(1u, CountFileMetadata());
+  EXPECT_EQ(1u, CountFileTracker());
 }
 
 TEST_F(SyncEngineInitializerTest, EmptyDatabase_RemoteSyncRootExists) {
@@ -237,8 +255,8 @@ TEST_F(SyncEngineInitializerTest, EmptyDatabase_RemoteSyncRootExists) {
   EXPECT_FALSE(HasActiveTracker(app_root_1->file_id()));
   EXPECT_FALSE(HasActiveTracker(app_root_2->file_id()));
 
-  EXPECT_EQ(3u, NumberOfMetadata());
-  EXPECT_EQ(3u, NumberOfTrackers());
+  EXPECT_EQ(3u, CountFileMetadata());
+  EXPECT_EQ(3u, CountFileTracker());
 }
 
 TEST_F(SyncEngineInitializerTest, DatabaseAlreadyInitialized) {
@@ -264,8 +282,8 @@ TEST_F(SyncEngineInitializerTest, DatabaseAlreadyInitialized) {
   EXPECT_FALSE(HasActiveTracker(app_root_1->file_id()));
   EXPECT_FALSE(HasActiveTracker(app_root_2->file_id()));
 
-  EXPECT_EQ(3u, NumberOfMetadata());
-  EXPECT_EQ(3u, NumberOfTrackers());
+  EXPECT_EQ(3u, CountFileMetadata());
+  EXPECT_EQ(3u, CountFileTracker());
 }
 
 TEST_F(SyncEngineInitializerTest, EmptyDatabase_MultiCandidate) {
@@ -280,8 +298,8 @@ TEST_F(SyncEngineInitializerTest, EmptyDatabase_MultiCandidate) {
   EXPECT_TRUE(HasActiveTracker(sync_root_1->file_id()));
   EXPECT_FALSE(HasActiveTracker(sync_root_2->file_id()));
 
-  EXPECT_EQ(1u, NumberOfMetadata());
-  EXPECT_EQ(1u, NumberOfTrackers());
+  EXPECT_EQ(1u, CountFileMetadata());
+  EXPECT_EQ(1u, CountFileTracker());
 }
 
 TEST_F(SyncEngineInitializerTest, EmptyDatabase_UndetachedRemoteSyncRoot) {
@@ -294,8 +312,8 @@ TEST_F(SyncEngineInitializerTest, EmptyDatabase_UndetachedRemoteSyncRoot) {
 
   EXPECT_TRUE(HasNoParent(sync_root->file_id()));
 
-  EXPECT_EQ(1u, NumberOfMetadata());
-  EXPECT_EQ(1u, NumberOfTrackers());
+  EXPECT_EQ(1u, CountFileMetadata());
+  EXPECT_EQ(1u, CountFileTracker());
 }
 
 TEST_F(SyncEngineInitializerTest, EmptyDatabase_MultiparentSyncRoot) {
@@ -312,8 +330,8 @@ TEST_F(SyncEngineInitializerTest, EmptyDatabase_MultiparentSyncRoot) {
 
   EXPECT_TRUE(HasNoParent(sync_root->file_id()));
 
-  EXPECT_EQ(1u, NumberOfMetadata());
-  EXPECT_EQ(1u, NumberOfTrackers());
+  EXPECT_EQ(1u, CountFileMetadata());
+  EXPECT_EQ(1u, CountFileTracker());
 }
 
 TEST_F(SyncEngineInitializerTest, EmptyDatabase_FakeRemoteSyncRoot) {
@@ -327,8 +345,8 @@ TEST_F(SyncEngineInitializerTest, EmptyDatabase_FakeRemoteSyncRoot) {
   EXPECT_EQ(0u, CountTrackersForFile(sync_root->file_id()));
   EXPECT_FALSE(HasNoParent(sync_root->file_id()));
 
-  EXPECT_EQ(1u, NumberOfMetadata());
-  EXPECT_EQ(1u, NumberOfTrackers());
+  EXPECT_EQ(1u, CountFileMetadata());
+  EXPECT_EQ(1u, CountFileTracker());
 }
 
 }  // namespace drive_backend

@@ -12,6 +12,7 @@
 #include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "base/time/time.h"
+#include "media/cast/transport/cast_transport_config.h"
 
 namespace media {
 namespace cast {
@@ -28,6 +29,20 @@ const size_t kMaxIpPacketSize = 1500;
 const int kStartRttMs = 20;
 const int64 kCastMessageUpdateIntervalMs = 33;
 const int64 kNackRepeatIntervalMs = 30;
+
+enum CastInitializationStatus {
+  STATUS_AUDIO_UNINITIALIZED,
+  STATUS_VIDEO_UNINITIALIZED,
+  STATUS_AUDIO_INITIALIZED,
+  STATUS_VIDEO_INITIALIZED,
+  STATUS_INVALID_CAST_ENVIRONMENT,
+  STATUS_INVALID_CRYPTO_CONFIGURATION,
+  STATUS_UNSUPPORTED_AUDIO_CODEC,
+  STATUS_INVALID_AUDIO_CONFIGURATION,
+  STATUS_INVALID_VIDEO_CONFIGURATION,
+  STATUS_GPU_ACCELERATION_NOT_SUPPORTED,
+  STATUS_GPU_ACCELERATION_ERROR,
+};
 
 enum DefaultSettings {
   kDefaultAudioEncoderBitrate = 0,  // This means "auto," and may mean VBR.
@@ -71,6 +86,12 @@ static const int64 kUnixEpochInNtpSeconds = GG_INT64_C(2208988800);
 // Magic fractional unit. Used to convert time (in microseconds) to/from
 // fractional NTP seconds.
 static const double kMagicFractionalUnit = 4.294967296E3;
+
+// The maximum number of Cast receiver events to keep in history for the
+// purpose of sending the events through RTCP.
+// The number chosen should be more than the number of events that can be
+// stored in a RTCP packet.
+static const size_t kReceiverRtcpEventHistorySize = 512;
 
 inline bool IsNewerFrameId(uint32 frame_id, uint32 prev_frame_id) {
   return (frame_id != prev_frame_id) &&
@@ -151,6 +172,55 @@ inline uint32 GetVideoRtpTimestamp(const base::TimeTicks& time_ticks) {
   // Timestamp is in 90 KHz for video.
   return static_cast<uint32>(recorded_delta.InMilliseconds() * 90);
 }
+
+class RtpSenderStatistics {
+ public:
+  explicit RtpSenderStatistics(int frequency)
+      : frequency_(frequency),
+        rtp_timestamp_(0) {
+    memset(&sender_info_, 0, sizeof(sender_info_));
+  }
+
+  ~RtpSenderStatistics() {}
+
+  void UpdateInfo(const base::TimeTicks& now) {
+    // Update RTP timestamp and return last stored statistics.
+    uint32 ntp_seconds = 0;
+    uint32 ntp_fraction = 0;
+    uint32 rtp_timestamp = 0;
+    if (rtp_timestamp_ > 0) {
+      base::TimeDelta time_since_last_send = now - time_sent_;
+      rtp_timestamp = rtp_timestamp_ + time_since_last_send.InMilliseconds() *
+                                           (frequency_ / 1000);
+      // Update NTP time to current time.
+      ConvertTimeTicksToNtp(now, &ntp_seconds, &ntp_fraction);
+    }
+    // Populate sender info.
+    sender_info_.rtp_timestamp = rtp_timestamp;
+    sender_info_.ntp_seconds = ntp_seconds;
+    sender_info_.ntp_fraction = ntp_fraction;
+  }
+
+  transport::RtcpSenderInfo sender_info() const {
+    return sender_info_;
+  }
+
+  void Store(transport::RtcpSenderInfo sender_info,
+             base::TimeTicks time_sent,
+             uint32 rtp_timestamp) {
+    sender_info_ = sender_info;
+    time_sent_ = time_sent;
+    rtp_timestamp_ = rtp_timestamp;
+}
+
+ private:
+  int frequency_;
+  transport::RtcpSenderInfo sender_info_;
+  base::TimeTicks time_sent_;
+  uint32 rtp_timestamp_;
+
+  DISALLOW_COPY_AND_ASSIGN(RtpSenderStatistics);
+};
 
 }  // namespace cast
 }  // namespace media

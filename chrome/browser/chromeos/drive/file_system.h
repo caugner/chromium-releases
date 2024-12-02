@@ -38,6 +38,7 @@ class JobScheduler;
 namespace internal {
 class AboutResourceLoader;
 class ChangeListLoader;
+class DirectoryLoader;
 class FileCache;
 class LoaderController;
 class ResourceMetadata;
@@ -99,7 +100,6 @@ class FileSystem : public FileSystemInterface,
                     const FileOperationCallback& callback) OVERRIDE;
   virtual void Move(const base::FilePath& src_file_path,
                     const base::FilePath& dest_file_path,
-                    bool preserve_last_modified,
                     const FileOperationCallback& callback) OVERRIDE;
   virtual void Remove(const base::FilePath& file_path,
                       bool is_recursive,
@@ -127,7 +127,7 @@ class FileSystem : public FileSystemInterface,
                              const GetFileCallback& callback) OVERRIDE;
   virtual void GetFileForSaving(const base::FilePath& file_path,
                                       const GetFileCallback& callback) OVERRIDE;
-  virtual void GetFileContent(
+  virtual base::Closure GetFileContent(
       const base::FilePath& file_path,
       const GetFileContentInitializedCallback& initialized_callback,
       const google_apis::GetContentCallback& get_content_callback,
@@ -155,7 +155,14 @@ class FileSystem : public FileSystemInterface,
   virtual void GetCacheEntry(
       const base::FilePath& drive_file_path,
       const GetCacheEntryCallback& callback) OVERRIDE;
+  virtual void AddPermission(const base::FilePath& drive_file_path,
+                             const std::string& email,
+                             google_apis::drive::PermissionRole role,
+                             const FileOperationCallback& callback) OVERRIDE;
   virtual void Reset(const FileOperationCallback& callback) OVERRIDE;
+  virtual void GetPathFromResourceId(const std::string& resource_id,
+                                     const GetFilePathCallback& callback)
+      OVERRIDE;
 
   // file_system::OperationObserver overrides.
   virtual void OnDirectoryChangedByOperation(
@@ -178,17 +185,18 @@ class FileSystem : public FileSystemInterface,
   internal::SyncClient* sync_client_for_testing() { return sync_client_.get(); }
 
  private:
+  struct CreateDirectoryParams;
+
   // Used for initialization and Reset(). (Re-)initializes sub components that
   // need to be recreated during the reset of resource metadata and the cache.
   void ResetComponents();
 
-  // Part of CreateDirectory(). Called after ChangeListLoader::LoadIfNeeded()
+  // Part of CreateDirectory(). Called after ReadDirectory()
   // is called and made sure that the resource metadata is loaded.
-  void CreateDirectoryAfterLoad(const base::FilePath& directory_path,
-                                bool is_exclusive,
-                                bool is_recursive,
-                                const FileOperationCallback& callback,
-                                FileError load_error);
+  void CreateDirectoryAfterRead(const CreateDirectoryParams& params,
+                                FileError error,
+                                scoped_ptr<ResourceEntryVector> entries,
+                                bool has_more);
 
   void FinishPin(const FileOperationCallback& callback,
                  const std::string* local_id,
@@ -209,35 +217,30 @@ class FileSystem : public FileSystemInterface,
   void OnUpdateChecked(FileError error);
 
   // Part of GetResourceEntry().
-  // Called when LoadDirectoryIfNeeded() is complete.
-  void GetResourceEntryAfterLoad(const base::FilePath& file_path,
+  // Called when ReadDirectory() is complete.
+  void GetResourceEntryAfterRead(const base::FilePath& file_path,
                                  const GetResourceEntryCallback& callback,
-                                 FileError error);
-
-  // Part of ReadDirectory()
-  // 1) Called when LoadDirectoryIfNeeded() is complete.
-  // 2) Called when ResourceMetadata::ReadDirectory() is complete.
-  // |callback| must not be null.
-  void ReadDirectoryAfterLoad(const base::FilePath& directory_path,
-                              const ReadDirectoryCallback& callback,
-                              FileError error);
-  void ReadDirectoryAfterRead(const base::FilePath& directory_path,
-                              const ReadDirectoryCallback& callback,
-                              const ResourceEntryVector* entries,
-                              FileError error);
+                                 FileError error,
+                                 scoped_ptr<ResourceEntryVector> entries,
+                                 bool has_more);
 
   // Part of GetShareUrl. Resolves the resource entry to get the resource it,
   // and then uses it to ask for the share url. |callback| must not be null.
-  void GetShareUrlAfterGetResourceEntry(
-      const base::FilePath& file_path,
-      const GURL& embed_origin,
-      const GetShareUrlCallback& callback,
-      FileError error,
-      scoped_ptr<ResourceEntry> entry);
-  void OnGetResourceEntryForGetShareUrl(
-      const GetShareUrlCallback& callback,
-      google_apis::GDataErrorCode status,
-      const GURL& share_url);
+  void GetShareUrlAfterGetResourceEntry(const base::FilePath& file_path,
+                                        const GURL& embed_origin,
+                                        const GetShareUrlCallback& callback,
+                                        ResourceEntry* entry,
+                                        FileError error);
+  void OnGetResourceEntryForGetShareUrl(const GetShareUrlCallback& callback,
+                                        google_apis::GDataErrorCode status,
+                                        const GURL& share_url);
+  // Part of AddPermission.
+  void AddPermissionAfterGetResourceEntry(
+      const std::string& email,
+      google_apis::drive::PermissionRole role,
+      const FileOperationCallback& callback,
+      ResourceEntry* entry,
+      FileError error);
 
   // Part of OnDriveSyncError().
   virtual void OnDriveSyncErrorAfterGetFilePath(
@@ -268,6 +271,8 @@ class FileSystem : public FileSystemInterface,
 
   // The loader is used to load the change lists.
   scoped_ptr<internal::ChangeListLoader> change_list_loader_;
+
+  scoped_ptr<internal::DirectoryLoader> directory_loader_;
 
   scoped_ptr<internal::SyncClient> sync_client_;
 

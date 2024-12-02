@@ -4,10 +4,10 @@
 
 #include "mojo/public/bindings/error_handler.h"
 #include "mojo/public/bindings/remote_ptr.h"
+#include "mojo/public/bindings/tests/math_calculator.mojom.h"
+#include "mojo/public/bindings/tests/sample_service.mojom.h"
 #include "mojo/public/environment/environment.h"
 #include "mojo/public/utility/run_loop.h"
-#include "mojom/math_calculator.h"
-#include "mojom/sample_service.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace mojo {
@@ -112,8 +112,6 @@ class RemotePtrTest : public testing::Test {
   Environment env_;
   RunLoop loop_;
 };
-
-}  // namespace
 
 TEST_F(RemotePtrTest, EndToEnd) {
   // Suppose this is instantiated in a process that has pipe0_.
@@ -224,8 +222,9 @@ TEST_F(RemotePtrTest, NoPeerAttribute) {
   // This is a test to ensure the following compiles. The sample::Port interface
   // does not have an explicit Peer attribute.
   InterfacePipe<sample::Port, NoInterface> pipe;
-  RemotePtr<sample::Port> port(pipe.handle_to_self.Pass());
+  RemotePtr<sample::Port> port(pipe.handle_to_self.Pass(), NULL);
 }
 
+}  // namespace
 }  // namespace test
 }  // namespace mojo

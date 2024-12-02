@@ -5,12 +5,13 @@
 #include "chrome/browser/sync/test_profile_sync_service.h"
 
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/managed_mode/managed_user_signin_manager_wrapper.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/sync/glue/sync_backend_host.h"
 #include "chrome/browser/sync/glue/sync_backend_host_core.h"
+#include "chrome/browser/sync/managed_user_signin_manager_wrapper.h"
 #include "chrome/browser/sync/profile_sync_components_factory.h"
 #include "chrome/browser/sync/profile_sync_components_factory_mock.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
@@ -30,11 +31,12 @@ namespace browser_sync {
 
 SyncBackendHostForProfileSyncTest::SyncBackendHostForProfileSyncTest(
     Profile* profile,
-    const base::WeakPtr<SyncPrefs>& sync_prefs,
+    const base::WeakPtr<sync_driver::SyncPrefs>& sync_prefs,
     base::Closure callback)
-    : browser_sync::SyncBackendHostImpl(
-        profile->GetDebugName(), profile, sync_prefs),
-    callback_(callback) {}
+    : browser_sync::SyncBackendHostImpl(profile->GetDebugName(),
+                                        profile,
+                                        sync_prefs),
+      callback_(callback) {}
 
 SyncBackendHostForProfileSyncTest::~SyncBackendHostForProfileSyncTest() {}
 
@@ -101,12 +103,12 @@ TestProfileSyncService::TestProfileSyncService(
     Profile* profile,
     SigninManagerBase* signin,
     ProfileOAuth2TokenService* oauth2_token_service,
-    ProfileSyncService::StartBehavior behavior)
-        : ProfileSyncService(factory,
-                             profile,
-                             new ManagedUserSigninManagerWrapper(signin),
-                             oauth2_token_service,
-                             behavior) {
+    browser_sync::ProfileSyncServiceStartBehavior behavior)
+    : ProfileSyncService(factory,
+                         profile,
+                         new ManagedUserSigninManagerWrapper(profile, signin),
+                         oauth2_token_service,
+                         behavior) {
   SetSyncSetupCompleted();
 }
 
@@ -114,7 +116,7 @@ TestProfileSyncService::~TestProfileSyncService() {
 }
 
 // static
-BrowserContextKeyedService* TestProfileSyncService::TestFactoryFunction(
+KeyedService* TestProfileSyncService::TestFactoryFunction(
     content::BrowserContext* context) {
   Profile* profile = static_cast<Profile*>(context);
   SigninManagerBase* signin =
@@ -127,7 +129,7 @@ BrowserContextKeyedService* TestProfileSyncService::TestFactoryFunction(
                                     profile,
                                     signin,
                                     oauth2_token_service,
-                                    ProfileSyncService::AUTO_START);
+                                    browser_sync::AUTO_START);
 }
 
 // static

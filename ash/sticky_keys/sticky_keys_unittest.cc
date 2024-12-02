@@ -14,10 +14,10 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/memory/scoped_vector.h"
-#include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
-#include "ui/aura/window_tree_host_delegate.h"
+#include "ui/aura/window_tree_host.h"
 #include "ui/events/event_handler.h"
+#include "ui/events/event_processor.h"
 #include "ui/events/test/events_test_utils_x11.h"
 #include "ui/events/x/device_data_manager.h"
 
@@ -25,8 +25,8 @@ namespace ash {
 
 namespace {
 
-// The device id of the test scroll device.
-const unsigned int kScrollDeviceId = 1;
+// The device id of the test touchpad device.
+const unsigned int kTouchPadDeviceId = 1;
 
 }  // namespace
 
@@ -52,7 +52,7 @@ class EventBuffer : public ui::EventHandler {
       events_.push_back(
           new ui::MouseWheelEvent(*static_cast<ui::MouseWheelEvent*>(event)));
     } else {
-      events_.push_back(new ui::MouseEvent(event->native_event()));
+      events_.push_back(new ui::MouseEvent(*event));
     }
   }
 
@@ -143,6 +143,8 @@ class StickyKeysTest : public test::AshTestBase,
     // it ourselves.
     target_ = CreateTestWindowInShellWithId(0);
     root_window_ = target_->GetRootWindow();
+
+    ui::SetUpTouchPadForTest(kTouchPadDeviceId);
   }
 
   virtual void TearDown() OVERRIDE {
@@ -172,9 +174,21 @@ class StickyKeysTest : public test::AshTestBase,
     return event;
   }
 
+  // Creates a mouse event backed by a native XInput2 generic button event.
+  // This is the standard native event on Chromebooks.
   ui::MouseEvent* GenerateMouseEvent(bool is_button_press) {
-    scoped_xevent_.InitButtonEvent(
-        is_button_press ? ui::ET_MOUSE_PRESSED : ui::ET_MOUSE_RELEASED, 0);
+    return GenerateMouseEventAt(is_button_press, gfx::Point());
+  }
+
+  // Creates a mouse event backed by a native XInput2 generic button event.
+  // The |location| should be in physical pixels.
+  ui::MouseEvent* GenerateMouseEventAt(bool is_button_press,
+                                       const gfx::Point& location) {
+    scoped_xevent_.InitGenericButtonEvent(
+        kTouchPadDeviceId,
+        is_button_press ? ui::ET_MOUSE_PRESSED : ui::ET_MOUSE_RELEASED,
+        location,
+        0);
     ui::MouseEvent* event = new ui::MouseEvent(scoped_xevent_);
     ui::Event::DispatcherApi dispatcher(event);
     dispatcher.set_target(target_);
@@ -183,7 +197,8 @@ class StickyKeysTest : public test::AshTestBase,
 
   ui::MouseWheelEvent* GenerateMouseWheelEvent(int wheel_delta) {
     EXPECT_NE(0, wheel_delta);
-    scoped_xevent_.InitMouseWheelEvent(wheel_delta, 0);
+    scoped_xevent_.InitGenericMouseWheelEvent(
+        kTouchPadDeviceId, wheel_delta, 0);
     ui::MouseWheelEvent* event = new ui::MouseWheelEvent(scoped_xevent_);
     ui::Event::DispatcherApi dispatcher(event);
     dispatcher.set_target(target_);
@@ -191,7 +206,7 @@ class StickyKeysTest : public test::AshTestBase,
   }
 
   ui::ScrollEvent* GenerateScrollEvent(int scroll_delta) {
-    scoped_xevent_.InitScrollEvent(kScrollDeviceId, // deviceid
+    scoped_xevent_.InitScrollEvent(kTouchPadDeviceId, // deviceid
                                    0,               // x_offset
                                    scroll_delta,    // y_offset
                                    0,               // x_offset_ordinal
@@ -206,7 +221,7 @@ class StickyKeysTest : public test::AshTestBase,
   ui::ScrollEvent* GenerateFlingScrollEvent(int fling_delta,
                                             bool is_cancel) {
     scoped_xevent_.InitFlingScrollEvent(
-        kScrollDeviceId, // deviceid
+        kTouchPadDeviceId, // deviceid
         0,               // x_velocity
         fling_delta,     // y_velocity
         0,               // x_velocity_ordinal
@@ -230,26 +245,38 @@ class StickyKeysTest : public test::AshTestBase,
   }
 
   // Creates a synthesized MouseEvent that is not backed by a native event.
-  ui::MouseEvent* GenerateSynthesizedMouseEvent(bool is_button_press) {
-    ui::MouseEvent* event = new ui::MouseEvent(
-        is_button_press ? ui::ET_MOUSE_PRESSED : ui::ET_MOUSE_RELEASED,
-        gfx::Point(0, 0),
-        gfx::Point(0, 0),
-        ui::EF_LEFT_MOUSE_BUTTON,
-        ui::EF_LEFT_MOUSE_BUTTON);
+  ui::MouseEvent* GenerateSynthesizedMouseEventAt(ui::EventType event_type,
+                                                  const gfx::Point& location) {
+    ui::MouseEvent* event = new ui::MouseEvent(event_type,
+                                               location,
+                                               location,
+                                               ui::EF_LEFT_MOUSE_BUTTON,
+                                               ui::EF_LEFT_MOUSE_BUTTON);
     ui::Event::DispatcherApi dispatcher(event);
     dispatcher.set_target(target_);
     return event;
   }
 
+  // Creates a synthesized mouse press or release event.
+  ui::MouseEvent* GenerateSynthesizedMouseClickEvent(
+      bool is_button_press,
+      const gfx::Point& location) {
+    return GenerateSynthesizedMouseEventAt(
+        is_button_press ? ui::ET_MOUSE_PRESSED : ui::ET_MOUSE_RELEASED,
+        location);
+  }
+
   // Creates a synthesized ET_MOUSE_MOVED event.
-  ui::MouseEvent* GenerateSynthesizedMouseEvent(int x, int y) {
-    ui::MouseEvent* event = new ui::MouseEvent(
-        ui::ET_MOUSE_MOVED,
-        gfx::Point(x, y),
-        gfx::Point(x, y),
-        ui::EF_LEFT_MOUSE_BUTTON,
-        ui::EF_LEFT_MOUSE_BUTTON);
+  ui::MouseEvent* GenerateSynthesizedMouseMoveEvent(
+      const gfx::Point& location) {
+    return GenerateSynthesizedMouseEventAt(ui::ET_MOUSE_MOVED, location);
+  }
+
+  // Creates a synthesized MouseWHeel event.
+  ui::MouseWheelEvent* GenerateSynthesizedMouseWheelEvent(int wheel_delta) {
+    scoped_ptr<ui::MouseEvent> mev(
+        GenerateSynthesizedMouseEventAt(ui::ET_MOUSEWHEEL, gfx::Point(0, 0)));
+    ui::MouseWheelEvent* event = new ui::MouseWheelEvent(*mev, 0, wheel_delta);
     ui::Event::DispatcherApi dispatcher(event);
     dispatcher.set_target(target_);
     return event;
@@ -264,7 +291,7 @@ class StickyKeysTest : public test::AshTestBase,
     handler->HandleKeyEvent(ev.get());
   }
 
-  void SendActivateStickyKeyPattern(aura::WindowEventDispatcher* dispatcher,
+  void SendActivateStickyKeyPattern(ui::EventProcessor* dispatcher,
                                     ui::KeyboardCode key_code) {
     scoped_ptr<ui::KeyEvent> ev;
     ev.reset(GenerateKey(true, key_code));
@@ -476,9 +503,9 @@ TEST_F(StickyKeysTest, MouseMovedModifierTest) {
   // Press ctrl and handle mouse move events.
   kev.reset(GenerateKey(true, ui::VKEY_CONTROL));
   sticky_key.HandleKeyEvent(kev.get());
-  mev.reset(GenerateSynthesizedMouseEvent(0, 0));
+  mev.reset(GenerateSynthesizedMouseMoveEvent(gfx::Point(0, 0)));
   sticky_key.HandleMouseEvent(mev.get());
-  mev.reset(GenerateSynthesizedMouseEvent(100, 100));
+  mev.reset(GenerateSynthesizedMouseMoveEvent(gfx::Point(100, 100)));
   sticky_key.HandleMouseEvent(mev.get());
 
   // Sticky keys should be enabled afterwards.
@@ -488,8 +515,6 @@ TEST_F(StickyKeysTest, MouseMovedModifierTest) {
 }
 
 TEST_F(StickyKeysTest, NormalModifiedScrollTest) {
-  ui::SetUpScrollDeviceForTest(kScrollDeviceId);
-
   scoped_ptr<ui::KeyEvent> kev;
   scoped_ptr<ui::ScrollEvent> sev;
   MockStickyKeysHandlerDelegate* mock_delegate =
@@ -605,7 +630,6 @@ TEST_F(StickyKeysTest, MouseEventLocked) {
 }
 
 TEST_F(StickyKeysTest, ScrollEventOneshot) {
-  ui::SetUpScrollDeviceForTest(kScrollDeviceId);
   // Disable Australlian scrolling.
   ui::DeviceDataManager::GetInstance()->set_natural_scroll_enabled(true);
 
@@ -658,7 +682,6 @@ TEST_F(StickyKeysTest, ScrollEventOneshot) {
 }
 
 TEST_F(StickyKeysTest, ScrollDirectionChanged) {
-  ui::SetUpScrollDeviceForTest(kScrollDeviceId);
   // Disable Australlian scrolling.
   ui::DeviceDataManager::GetInstance()->set_natural_scroll_enabled(true);
 
@@ -696,7 +719,6 @@ TEST_F(StickyKeysTest, ScrollDirectionChanged) {
 }
 
 TEST_F(StickyKeysTest, ScrollEventLocked) {
-  ui::SetUpScrollDeviceForTest(kScrollDeviceId);
   // Disable Australlian scrolling.
   ui::DeviceDataManager::GetInstance()->set_natural_scroll_enabled(true);
 
@@ -779,12 +801,12 @@ TEST_F(StickyKeysTest, SynthesizedEvents) {
   EXPECT_EQ(STICKY_KEY_STATE_ENABLED, sticky_key.current_state());
 
   scoped_ptr<ui::MouseEvent> mev;
-  mev.reset(GenerateSynthesizedMouseEvent(true));
+  mev.reset(GenerateSynthesizedMouseClickEvent(true, gfx::Point(0, 0)));
   sticky_key.HandleMouseEvent(mev.get());
   EXPECT_TRUE(mev->flags() & ui::EF_CONTROL_DOWN);
   EXPECT_EQ(STICKY_KEY_STATE_ENABLED, sticky_key.current_state());
 
-  mev.reset(GenerateSynthesizedMouseEvent(false));
+  mev.reset(GenerateSynthesizedMouseClickEvent(false, gfx::Point(0, 0)));
   sticky_key.HandleMouseEvent(mev.get());
   EXPECT_TRUE(mev->flags() & ui::EF_CONTROL_DOWN);
   EXPECT_EQ(STICKY_KEY_STATE_DISABLED, sticky_key.current_state());
@@ -794,8 +816,8 @@ TEST_F(StickyKeysTest, KeyEventDispatchImpl) {
   // Test the actual key event dispatch implementation.
   EventBuffer buffer;
   ScopedVector<ui::Event> events;
-  aura::WindowEventDispatcher* dispatcher = Shell::GetPrimaryRootWindow()
-      ->GetDispatcher();
+  ui::EventProcessor* dispatcher =
+      Shell::GetPrimaryRootWindow()->GetHost()->event_processor();
   Shell::GetInstance()->AddPreTargetHandler(&buffer);
   Shell::GetInstance()->sticky_keys_controller()->Enable(true);
 
@@ -827,38 +849,16 @@ TEST_F(StickyKeysTest, KeyEventDispatchImpl) {
             static_cast<ui::KeyEvent*>(events[0])->key_code());
   EXPECT_FALSE(events[0]->flags() & ui::EF_CONTROL_DOWN);
 
-  Shell::GetInstance()->RemovePreTargetHandler(&buffer);
-}
-
-TEST_F(StickyKeysTest, MouseEventDispatchImpl) {
-  // Test the actual sticky mouse event dispatch implementation.
-  EventBuffer buffer;
-  ScopedVector<ui::Event> events;
-  aura::WindowEventDispatcher* dispatcher = Shell::GetPrimaryRootWindow()
-      ->GetDispatcher();
-  Shell::GetInstance()->AddPreTargetHandler(&buffer);
-  Shell::GetInstance()->sticky_keys_controller()->Enable(true);
-
-  scoped_ptr<ui::MouseEvent> ev;
+  // Test that synthesized key events are dispatched correctly.
   SendActivateStickyKeyPattern(dispatcher, ui::VKEY_CONTROL);
   buffer.PopEvents(&events);
-
-  // Test mouse press event is correctly modified.
-  ev.reset(GenerateMouseEvent(true));
-  ui::EventDispatchDetails details = dispatcher->OnEventFromSource(ev.get());
-  buffer.PopEvents(&events);
-  EXPECT_EQ(1u, events.size());
-  EXPECT_EQ(ui::ET_MOUSE_PRESSED, events[0]->type());
-  EXPECT_TRUE(events[0]->flags() & ui::EF_CONTROL_DOWN);
-
-  // Test mouse release event is correctly modified and modifier release
-  // event is sent.
-  ev.reset(GenerateMouseEvent(false));
-  details = dispatcher->OnEventFromSource(ev.get());
-  ASSERT_FALSE(details.dispatcher_destroyed);
+  scoped_ptr<ui::KeyEvent> kev;
+  kev.reset(GenerateSynthesizedKeyEvent(true, ui::VKEY_K));
+  dispatcher->OnEventFromSource(kev.get());
   buffer.PopEvents(&events);
   EXPECT_EQ(2u, events.size());
-  EXPECT_EQ(ui::ET_MOUSE_RELEASED, events[0]->type());
+  EXPECT_EQ(ui::ET_KEY_PRESSED, events[0]->type());
+  EXPECT_EQ(ui::VKEY_K, static_cast<ui::KeyEvent*>(events[0])->key_code());
   EXPECT_TRUE(events[0]->flags() & ui::EF_CONTROL_DOWN);
   EXPECT_EQ(ui::ET_KEY_RELEASED, events[1]->type());
   EXPECT_EQ(ui::VKEY_CONTROL,
@@ -867,12 +867,85 @@ TEST_F(StickyKeysTest, MouseEventDispatchImpl) {
   Shell::GetInstance()->RemovePreTargetHandler(&buffer);
 }
 
-TEST_F(StickyKeysTest, MouseWheelEventDispatchImpl) {
+class StickyKeysMouseDispatchTest
+    : public StickyKeysTest,
+      public ::testing::WithParamInterface<int> {
+};
+
+TEST_P(StickyKeysMouseDispatchTest, MouseEventDispatchImpl) {
+  int scale_factor = GetParam();
+  std::ostringstream display_specs;
+  display_specs << "1280x1024*" << scale_factor;
+  UpdateDisplay(display_specs.str());
+
+  EventBuffer buffer;
+  ScopedVector<ui::Event> events;
+  ui::EventProcessor* dispatcher =
+      Shell::GetPrimaryRootWindow()->GetHost()->event_processor();
+  Shell::GetInstance()->AddPreTargetHandler(&buffer);
+  Shell::GetInstance()->sticky_keys_controller()->Enable(true);
+
+  scoped_ptr<ui::MouseEvent> ev;
+  SendActivateStickyKeyPattern(dispatcher, ui::VKEY_CONTROL);
+  buffer.PopEvents(&events);
+
+  // Test mouse press event is correctly modified and has correct DIP location.
+  gfx::Point physical_location(400, 400);
+  gfx::Point dip_location(physical_location.x() / scale_factor,
+                          physical_location.y() / scale_factor);
+  ev.reset(GenerateMouseEventAt(true, physical_location));
+  ui::EventDispatchDetails details = dispatcher->OnEventFromSource(ev.get());
+  buffer.PopEvents(&events);
+  EXPECT_EQ(1u, events.size());
+  EXPECT_EQ(ui::ET_MOUSE_PRESSED, events[0]->type());
+  EXPECT_TRUE(events[0]->flags() & ui::EF_CONTROL_DOWN);
+  EXPECT_EQ(dip_location.ToString(),
+            static_cast<ui::MouseEvent*>(events[0])->location().ToString());
+
+  // Test mouse release event is correctly modified and modifier release
+  // event is sent. The mouse event should have the correct DIP location.
+  ev.reset(GenerateMouseEventAt(false, physical_location));
+  details = dispatcher->OnEventFromSource(ev.get());
+  ASSERT_FALSE(details.dispatcher_destroyed);
+  buffer.PopEvents(&events);
+  EXPECT_EQ(2u, events.size());
+  EXPECT_EQ(ui::ET_MOUSE_RELEASED, events[0]->type());
+  EXPECT_TRUE(events[0]->flags() & ui::EF_CONTROL_DOWN);
+  EXPECT_EQ(ui::ET_KEY_RELEASED, events[1]->type());
+  EXPECT_EQ(dip_location.ToString(),
+            static_cast<ui::MouseEvent*>(events[0])->location().ToString());
+  EXPECT_EQ(ui::VKEY_CONTROL,
+            static_cast<ui::KeyEvent*>(events[1])->key_code());
+
+  // Test synthesized mouse events are dispatched correctly.
+  SendActivateStickyKeyPattern(dispatcher, ui::VKEY_CONTROL);
+  buffer.PopEvents(&events);
+  ev.reset(GenerateSynthesizedMouseClickEvent(false, physical_location));
+  dispatcher->OnEventFromSource(ev.get());
+  buffer.PopEvents(&events);
+  EXPECT_EQ(2u, events.size());
+  EXPECT_EQ(ui::ET_MOUSE_RELEASED, events[0]->type());
+  EXPECT_TRUE(events[0]->flags() & ui::EF_CONTROL_DOWN);
+  EXPECT_EQ(dip_location.ToString(),
+            static_cast<ui::MouseEvent*>(events[0])->location().ToString());
+  EXPECT_EQ(ui::ET_KEY_RELEASED, events[1]->type());
+  EXPECT_EQ(ui::VKEY_CONTROL,
+            static_cast<ui::KeyEvent*>(events[1])->key_code());
+
+  Shell::GetInstance()->RemovePreTargetHandler(&buffer);
+}
+
+TEST_P(StickyKeysMouseDispatchTest, MouseWheelEventDispatchImpl) {
+  int scale_factor = GetParam();
+  std::ostringstream display_specs;
+  display_specs << "1280x1024*" << scale_factor;
+  UpdateDisplay(display_specs.str());
+
   // Test the actual mouse wheel event dispatch implementation.
   EventBuffer buffer;
   ScopedVector<ui::Event> events;
-  aura::WindowEventDispatcher* dispatcher = Shell::GetPrimaryRootWindow()
-      ->GetDispatcher();
+  ui::EventProcessor* dispatcher =
+      Shell::GetPrimaryRootWindow()->GetHost()->event_processor();
   Shell::GetInstance()->AddPreTargetHandler(&buffer);
   Shell::GetInstance()->sticky_keys_controller()->Enable(true);
 
@@ -888,7 +961,7 @@ TEST_F(StickyKeysTest, MouseWheelEventDispatchImpl) {
   buffer.PopEvents(&events);
   EXPECT_EQ(2u, events.size());
   EXPECT_TRUE(events[0]->IsMouseWheelEvent());
-  EXPECT_EQ(ui::MouseWheelEvent::kWheelDelta,
+  EXPECT_EQ(ui::MouseWheelEvent::kWheelDelta / scale_factor,
             static_cast<ui::MouseWheelEvent*>(events[0])->y_offset());
   EXPECT_TRUE(events[0]->flags() & ui::EF_CONTROL_DOWN);
   EXPECT_EQ(ui::ET_KEY_RELEASED, events[1]->type());
@@ -906,8 +979,25 @@ TEST_F(StickyKeysTest, MouseWheelEventDispatchImpl) {
   buffer.PopEvents(&events);
   EXPECT_EQ(2u, events.size());
   EXPECT_TRUE(events[0]->IsMouseWheelEvent());
-  EXPECT_EQ(-ui::MouseWheelEvent::kWheelDelta,
+  EXPECT_EQ(-ui::MouseWheelEvent::kWheelDelta / scale_factor,
             static_cast<ui::MouseWheelEvent*>(events[0])->y_offset());
+  EXPECT_TRUE(events[0]->flags() & ui::EF_CONTROL_DOWN);
+  EXPECT_EQ(ui::ET_KEY_RELEASED, events[1]->type());
+  EXPECT_EQ(ui::VKEY_CONTROL,
+            static_cast<ui::KeyEvent*>(events[1])->key_code());
+
+  // Test synthesized mouse wheel events are dispatched correctly.
+  SendActivateStickyKeyPattern(dispatcher, ui::VKEY_CONTROL);
+  buffer.PopEvents(&events);
+  ev.reset(
+      GenerateSynthesizedMouseWheelEvent(ui::MouseWheelEvent::kWheelDelta));
+  dispatcher->OnEventFromSource(ev.get());
+  buffer.PopEvents(&events);
+  EXPECT_EQ(2u, events.size());
+  EXPECT_TRUE(events[0]->IsMouseWheelEvent());
+  EXPECT_EQ(ui::MouseWheelEvent::kWheelDelta / scale_factor,
+            static_cast<ui::MouseWheelEvent*>(events[0])->y_offset());
+  EXPECT_TRUE(events[0]->flags() & ui::EF_CONTROL_DOWN);
   EXPECT_TRUE(events[0]->flags() & ui::EF_CONTROL_DOWN);
   EXPECT_EQ(ui::ET_KEY_RELEASED, events[1]->type());
   EXPECT_EQ(ui::VKEY_CONTROL,
@@ -915,5 +1005,9 @@ TEST_F(StickyKeysTest, MouseWheelEventDispatchImpl) {
 
   Shell::GetInstance()->RemovePreTargetHandler(&buffer);
 }
+
+INSTANTIATE_TEST_CASE_P(DPIScaleFactors,
+                        StickyKeysMouseDispatchTest,
+                        ::testing::Values(1, 2));
 
 }  // namespace ash

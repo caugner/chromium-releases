@@ -9,6 +9,7 @@
 
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/ime/linux/linux_input_method_context_factory.h"
+#include "ui/events/x/text_edit_key_bindings_delegate_x11.h"
 #include "ui/gfx/linux_font_delegate.h"
 #include "ui/shell_dialogs/linux_shell_dialog.h"
 #include "ui/views/controls/button/button.h"
@@ -30,6 +31,7 @@ namespace views {
 class Border;
 class LabelButton;
 class View;
+class NativeThemeChangeObserver;
 class WindowButtonOrderObserver;
 
 // Adapter class with targets to render like different toolkits. Set by any
@@ -41,7 +43,8 @@ class WindowButtonOrderObserver;
 // liuigtk3.so, etc.
 class VIEWS_EXPORT LinuxUI : public ui::LinuxInputMethodContextFactory,
                              public gfx::LinuxFontDelegate,
-                             public ui::LinuxShellDialog {
+                             public ui::LinuxShellDialog,
+                             public ui::TextEditKeyBindingsDelegateX11 {
  public:
   virtual ~LinuxUI() {}
 
@@ -76,9 +79,6 @@ class VIEWS_EXPORT LinuxUI : public ui::LinuxInputMethodContextFactory,
   // Returns a NativeTheme that will provide system colors and draw system
   // style widgets.
   virtual ui::NativeTheme* GetNativeTheme() const = 0;
-
-  virtual void SetUseSystemTheme(bool use_system_theme) = 0;
-  virtual bool GetUseSystemTheme() const = 0;
 
   // Returns whether we should be using the native theme provided by this
   // object by default.
@@ -117,6 +117,12 @@ class VIEWS_EXPORT LinuxUI : public ui::LinuxInputMethodContextFactory,
   // Removes the observer from the LinuxUI's list.
   virtual void RemoveWindowButtonOrderObserver(
       WindowButtonOrderObserver* observer) = 0;
+
+  // Notifies the observer when the native theme changes.
+  virtual void AddNativeThemeChangeObserver(
+      NativeThemeChangeObserver* observer) = 0;
+  virtual void RemoveNativeThemeChangeObserver(
+      NativeThemeChangeObserver* observer) = 0;
 
   // Determines whether the user's window manager is Unity.
   virtual bool UnityIsRunning() = 0;

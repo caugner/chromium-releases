@@ -8,8 +8,8 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/tab_contents/render_view_context_menu.h"
-#include "chrome/browser/tab_contents/render_view_context_menu_browsertest_util.h"
+#include "chrome/browser/renderer_context_menu/render_view_context_menu.h"
+#include "chrome/browser/renderer_context_menu/render_view_context_menu_browsertest_util.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -597,10 +597,11 @@ IN_PROC_BROWSER_TEST_F(ReferrerPolicyTest, IFrame) {
 
   // Verify that the referrer policy was honored and the main page's origin was
   // send as referrer.
+  content::RenderFrameHost* frame = content::FrameMatchingPredicate(
+      tab, base::Bind(&content::FrameIsChildOfMainFrame));
   std::string title;
-  EXPECT_TRUE(content::ExecuteScriptInFrameAndExtractString(
-      tab,
-      "//iframe",
+  EXPECT_TRUE(content::ExecuteScriptAndExtractString(
+      frame,
       "window.domAutomationController.send(document.title)",
       &title));
   EXPECT_EQ("Referrer is " + ssl_test_server_->GetURL(std::string()).spec(),
@@ -614,14 +615,12 @@ IN_PROC_BROWSER_TEST_F(ReferrerPolicyTest, IFrame) {
 
   expected_title = base::ASCIIToUTF16("loaded");
   title_watcher.reset(new content::TitleWatcher(tab, expected_title));
-  EXPECT_TRUE(
-      content::ExecuteScriptInFrame(tab, "//iframe", "location.reload()"));
+  EXPECT_TRUE(content::ExecuteScript(frame, "location.reload()"));
   EXPECT_EQ(expected_title, title_watcher->WaitAndGetTitle());
 
   // Verify that the full url of the iframe was used as referrer.
-  EXPECT_TRUE(content::ExecuteScriptInFrameAndExtractString(
-      tab,
-      "//iframe",
+  EXPECT_TRUE(content::ExecuteScriptAndExtractString(
+      frame,
       "window.domAutomationController.send(document.title)",
       &title));
   EXPECT_EQ("Referrer is " +

@@ -13,7 +13,8 @@
           '<!(echo <(deb_filename) | sed -e "s/.deb$/.changes/")',
           '<(PRODUCT_DIR)/remoting_me2me_host.debug',
           '<(PRODUCT_DIR)/remoting_start_host.debug',
-          '<(PRODUCT_DIR)/remoting_native_messaging_host.debug',
+          '<(PRODUCT_DIR)/native_messaging_host.debug',
+          '<(PRODUCT_DIR)/remote_assistance_host.debug',
         ]
       },
       'targets': [
@@ -127,7 +128,8 @@
             'host/setup/start_host.cc',
           ],
           'conditions': [
-            ['linux_use_tcmalloc==1', {
+            # TODO(dmikurube): Kill linux_use_tcmalloc. http://crbug.com/345554
+            ['(use_allocator!="none" and use_allocator!="see_use_tcmalloc") or (use_allocator=="see_use_tcmalloc" and linux_use_tcmalloc==1)', {
               'dependencies': [
                 '../base/allocator/allocator.gyp:allocator',
               ],

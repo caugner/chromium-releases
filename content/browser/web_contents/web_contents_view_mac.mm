@@ -159,14 +159,8 @@ void WebContentsViewMac::OnTabCrashed(base::TerminationStatus /* status */,
 void WebContentsViewMac::SizeContents(const gfx::Size& size) {
   // TODO(brettw | japhet) This is a hack and should be removed.
   // See web_contents_view.h.
-  gfx::Rect rect(gfx::Point(), size);
-  WebContentsViewCocoa* view = cocoa_view_.get();
-
-  NSPoint origin = [view frame].origin;
-  NSRect frame = [view flipRectToNSRect:rect];
-  frame.origin = NSMakePoint(NSMinX(frame) + origin.x,
-                             NSMinY(frame) + origin.y);
-  [view setFrame:frame];
+  // Note(erikchen): This method has /never/ worked correctly. I've removed the
+  // previous implementation.
 }
 
 void WebContentsViewMac::Focus() {
@@ -254,10 +248,17 @@ void WebContentsViewMac::ShowPopupMenu(
     const std::vector<MenuItem>& items,
     bool right_aligned,
     bool allow_multiple_selection) {
-  PopupMenuHelper popup_menu_helper(web_contents_->GetRenderViewHost());
-  popup_menu_helper.ShowPopupMenu(bounds, item_height, item_font_size,
-                                  selected_item, items, right_aligned,
-                                  allow_multiple_selection);
+  popup_menu_helper_.reset(
+      new PopupMenuHelper(web_contents_->GetRenderViewHost()));
+  popup_menu_helper_->ShowPopupMenu(bounds, item_height, item_font_size,
+                                    selected_item, items, right_aligned,
+                                    allow_multiple_selection);
+  popup_menu_helper_.reset();
+}
+
+void WebContentsViewMac::HidePopupMenu() {
+  if (popup_menu_helper_)
+    popup_menu_helper_->Hide();
 }
 
 gfx::Rect WebContentsViewMac::GetViewBounds() const {
@@ -626,6 +627,15 @@ void WebContentsViewMac::CloseTab() {
 
   [self webContents]->
       FocusThroughTabTraversal(direction == NSSelectingPrevious);
+}
+
+// When the subviews require a layout, their size should be reset to the size
+// of this view. (It is possible for the size to get out of sync as an
+// optimization in preparation for an upcoming WebContentsView resize.
+// http://crbug.com/264207)
+- (void)resizeSubviewsWithOldSize:(NSSize)oldBoundsSize {
+  for (NSView* subview in self.subviews)
+    [subview setFrame:self.bounds];
 }
 
 @end

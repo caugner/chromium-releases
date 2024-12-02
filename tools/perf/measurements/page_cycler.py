@@ -19,7 +19,7 @@ import collections
 import os
 
 from metrics import cpu
-from metrics import io
+from metrics import iometric
 from metrics import memory
 from metrics import power
 from metrics import speedindex
@@ -28,6 +28,8 @@ from telemetry.core import util
 from telemetry.page import page_measurement
 
 class PageCycler(page_measurement.PageMeasurement):
+  options = {'pageset_repeat': 10}
+
   def __init__(self, *args, **kwargs):
     super(PageCycler, self).__init__(*args, **kwargs)
 
@@ -35,8 +37,6 @@ class PageCycler(page_measurement.PageMeasurement):
                            'page_cycler.js'), 'r') as f:
       self._page_cycler_js = f.read()
 
-    self._record_v8_object_stats = False
-    self._report_speed_index = False
     self._speedindex_metric = speedindex.SpeedIndexMetric()
     self._memory_metric = None
     self._power_metric = power.PowerMetric()
@@ -45,15 +45,8 @@ class PageCycler(page_measurement.PageMeasurement):
     self._cold_run_start_index = None
     self._has_loaded_page = collections.defaultdict(int)
 
-  def AddCommandLineOptions(self, parser):
-    # The page cyclers should default to 10 iterations. In order to change the
-    # default of an option, we must remove and re-add it.
-    # TODO: Remove this after transition to run_benchmark.
-    pageset_repeat_option = parser.get_option('--pageset-repeat')
-    pageset_repeat_option.default = 10
-    parser.remove_option('--pageset-repeat')
-    parser.add_option(pageset_repeat_option)
-
+  @classmethod
+  def AddCommandLineArgs(cls, parser):
     parser.add_option('--v8-object-stats',
         action='store_true',
         help='Enable detailed V8 object statistics.')
@@ -62,8 +55,13 @@ class PageCycler(page_measurement.PageMeasurement):
         action='store_true',
         help='Enable the speed index metric.')
 
-    parser.add_option('--cold-load-percent', type='int',
+    parser.add_option('--cold-load-percent', type='int', default=50,
                       help='%d of page visits for which a cold load is forced')
+
+  @classmethod
+  def ProcessCommandLineArgs(cls, parser, args):
+    cls._record_v8_object_stats = args.v8_object_stats
+    cls._report_speed_index = args.report_speed_index
 
   def DidStartBrowser(self, browser):
     """Initialize metrics once right after the browser has been launched."""
@@ -98,24 +96,17 @@ class PageCycler(page_measurement.PageMeasurement):
   def CustomizeBrowserOptions(self, options):
     memory.MemoryMetric.CustomizeBrowserOptions(options)
     power.PowerMetric.CustomizeBrowserOptions(options)
-    io.IOMetric.CustomizeBrowserOptions(options)
+    iometric.IOMetric.CustomizeBrowserOptions(options)
     options.AppendExtraBrowserArgs('--js-flags=--expose_gc')
 
-    if options.v8_object_stats:
-      self._record_v8_object_stats = True
+    if self._record_v8_object_stats:
       v8_object_stats.V8ObjectStatsMetric.CustomizeBrowserOptions(options)
-
-    if options.report_speed_index:
-      self._report_speed_index = True
+    if self._report_speed_index:
       self._speedindex_metric.CustomizeBrowserOptions(options)
 
+    # TODO: Move the rest of this method to ProcessCommandLineArgs.
     cold_runs_percent_set = (options.cold_load_percent != None)
     # Handle requests for cold cache runs
-    if (cold_runs_percent_set and
-        (options.repeat_options.page_repeat_secs or
-         options.repeat_options.pageset_repeat_secs)):
-      raise Exception('--cold-load-percent is incompatible with timed repeat')
-
     if (cold_runs_percent_set and
         (options.cold_load_percent < 0 or options.cold_load_percent > 100)):
       raise Exception('--cold-load-percent must be in the range [0-100]')
@@ -125,18 +116,18 @@ class PageCycler(page_measurement.PageMeasurement):
     # assertion failures on _started_warm in WillNavigateToPage.
     if cold_runs_percent_set:
       number_warm_pageset_runs = int(
-          (int(options.repeat_options.pageset_repeat_iters) - 1) *
+          (int(options.repeat_options.pageset_repeat) - 1) *
           (100 - options.cold_load_percent) / 100)
       number_warm_runs = (number_warm_pageset_runs *
-                          options.repeat_options.page_repeat_iters)
+                          options.repeat_options.page_repeat)
       self._cold_run_start_index = (number_warm_runs +
-          options.repeat_options.page_repeat_iters)
+          options.repeat_options.page_repeat)
       self.discard_first_result = (not options.cold_load_percent or
                                    self.discard_first_result)
     else:
       self._cold_run_start_index = (
-          options.repeat_options.pageset_repeat_iters *
-          options.repeat_options.page_repeat_iters)
+          options.repeat_options.pageset_repeat *
+          options.repeat_options.page_repeat)
 
   def MeasurePage(self, page, tab, results):
     tab.WaitForJavaScriptExpression('__pc_load_time', 60)
@@ -172,7 +163,7 @@ class PageCycler(page_measurement.PageMeasurement):
           tab, results, chart_name=chart_name_prefix+'speed_index')
 
   def DidRunTest(self, browser, results):
-    io.IOMetric().AddSummaryResults(browser, results)
+    iometric.IOMetric().AddSummaryResults(browser, results)
 
   def IsRunCold(self, url):
     return (self.ShouldRunCold(url) or

@@ -8,6 +8,7 @@
 #include "base/bind_helpers.h"
 #include "base/message_loop/message_loop.h"
 #include "base/strings/string_number_conversions.h"
+#include "chrome/test/base/chrome_unit_test_suite.h"
 #include "chrome/test/base/interactive_test_utils.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -16,7 +17,6 @@
 #include "ui/compositor/test/context_factories_for_test.h"
 #include "ui/message_center/message_center.h"
 #include "ui/views/view.h"
-#include "ui/views/widget/desktop_aura/desktop_screen.h"
 #include "ui/views/widget/widget.h"
 
 #if defined(USE_ASH)
@@ -28,15 +28,19 @@
 #if defined(USE_AURA)
 #include "ui/aura/client/event_client.h"
 #include "ui/aura/env.h"
-#include "ui/aura/root_window.h"
 #include "ui/aura/test/aura_test_helper.h"
-#include "ui/views/corewm/wm_state.h"
+#include "ui/aura/window_event_dispatcher.h"
+#include "ui/aura/window_tree_host.h"
+#include "ui/compositor/test/context_factories_for_test.h"
+#include "ui/wm/core/wm_state.h"
 #endif
 
 #if defined(OS_CHROMEOS)
 #include "chromeos/audio/cras_audio_handler.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/network/network_handler.h"
+#else  // !defined(OS_CHROMEOS)
+#include "ui/views/widget/desktop_aura/desktop_screen.h"
 #endif
 
 namespace {
@@ -92,19 +96,27 @@ void ViewEventTestBase::Done() {
       base::MessageLoop::QuitClosure());
 }
 
+void ViewEventTestBase::SetUpTestCase() {
+  ChromeUnitTestSuite::InitializeProviders();
+  ChromeUnitTestSuite::InitializeResourceBundle();
+}
+
 void ViewEventTestBase::SetUp() {
 #if defined(USE_AURA)
-  wm_state_.reset(new views::corewm::WMState);
+  wm_state_.reset(new wm::WMState);
 #endif
 
   views::ViewsDelegate::views_delegate = &views_delegate_;
   ui::InitializeInputMethodForTesting();
   gfx::NativeView context = NULL;
 
-#if defined(USE_ASH)
+#if defined(USE_AURA)
   // The ContextFactory must exist before any Compositors are created.
-  bool allow_test_contexts = true;
-  ui::InitializeContextFactoryForTests(allow_test_contexts);
+  bool enable_pixel_output = false;
+  ui::InitializeContextFactoryForTests(enable_pixel_output);
+#endif
+
+#if defined(USE_ASH)
 #if defined(OS_WIN)
   // http://crbug.com/154081 use ash::Shell code path below on win_ash bots when
   // interactive_ui_tests is brought up on that platform.
@@ -126,6 +138,7 @@ void ViewEventTestBase::SetUp() {
   shell_delegate->test_session_state_delegate()
       ->SetActiveUserSessionStarted(true);
   context = ash::Shell::GetPrimaryRootWindow();
+  context->GetHost()->Show();
 #endif  // !OS_WIN
   aura::Env::CreateInstance();
 #elif defined(USE_AURA)
@@ -133,8 +146,7 @@ void ViewEventTestBase::SetUp() {
   // the test screen.
   aura_test_helper_.reset(
       new aura::test::AuraTestHelper(base::MessageLoopForUI::current()));
-  bool allow_test_contexts = true;
-  aura_test_helper_->SetUp(allow_test_contexts);
+  aura_test_helper_->SetUp();
   context = aura_test_helper_->root_window();
 #endif  // !USE_ASH && USE_AURA
 
@@ -147,6 +159,8 @@ void ViewEventTestBase::TearDown() {
     content::RunAllPendingInMessageLoop();
     window_ = NULL;
   }
+
+  ui::Clipboard::DestroyClipboardForCurrentThread();
 
 #if defined(USE_ASH)
 #if !defined(OS_WIN)
@@ -161,10 +175,13 @@ void ViewEventTestBase::TearDown() {
   message_center::MessageCenter::Shutdown();
 #endif  // !OS_WIN
   aura::Env::DeleteInstance();
-  ui::TerminateContextFactoryForTests();
 #elif defined(USE_AURA)
   aura_test_helper_->TearDown();
 #endif  // !USE_ASH && USE_AURA
+
+#if defined(USE_AURA)
+  ui::TerminateContextFactoryForTests();
+#endif
 
   ui::ShutdownInputMethodForTesting();
   views::ViewsDelegate::views_delegate = NULL;

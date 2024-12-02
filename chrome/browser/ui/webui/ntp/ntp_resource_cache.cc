@@ -175,8 +175,6 @@ NTPResourceCache::NTPResourceCache(Profile* profile)
 
   // Watch for pref changes that cause us to need to invalidate the HTML cache.
   profile_pref_change_registrar_.Init(profile_->GetPrefs());
-  profile_pref_change_registrar_.Add(prefs::kSyncAcknowledgedSyncTypes,
-                                     callback);
   profile_pref_change_registrar_.Add(prefs::kShowBookmarkBar, callback);
   profile_pref_change_registrar_.Add(prefs::kNtpShownPage, callback);
   profile_pref_change_registrar_.Add(prefs::kSignInPromoShowNTPBubble,
@@ -330,7 +328,6 @@ void NTPResourceCache::CreateNewTabIncognitoHTML() {
   localized_strings.SetString("extensionsmessage",
       l10n_util::GetStringFUTF16(
           IDS_NEW_TAB_OTR_EXTENSIONS_MESSAGE,
-          l10n_util::GetStringUTF16(IDS_PRODUCT_NAME),
           base::ASCIIToUTF16(chrome::kChromeUIExtensionsURL)));
   bool bookmark_bar_attached = profile_->GetPrefs()->GetBoolean(
       prefs::kShowBookmarkBar);

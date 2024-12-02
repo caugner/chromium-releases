@@ -37,6 +37,7 @@ class PepperUMAHost : public ppapi::host::ResourceHost {
       ppapi::host::HostMessageContext* context) OVERRIDE;
 
  private:
+  bool IsPluginWhitelisted();
   bool IsHistogramAllowed(const std::string& histogram);
 
   int32_t OnHistogramCustomTimes(
@@ -61,13 +62,16 @@ class PepperUMAHost : public ppapi::host::ResourceHost {
       int32_t sample,
       int32_t boundary_value);
 
+  int32_t OnIsCrashReportingEnabled(
+      ppapi::host::HostMessageContext* context);
+
   const GURL document_url_;
   bool is_plugin_in_process_;
 
   // Set of origins that can use UMA private APIs from NaCl.
   std::set<std::string> allowed_origins_;
-  // Set of histograms that can be used from this interface.
-  std::set<std::string> allowed_histograms_;
+  // Set of hashed histogram prefixes that can be used from this interface.
+  std::set<std::string> allowed_histogram_prefixes_;
 
   DISALLOW_COPY_AND_ASSIGN(PepperUMAHost);
 };

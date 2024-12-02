@@ -44,7 +44,8 @@ void NinePatchLayerLayoutTest(const gfx::Size& bitmap_size,
                                layer_size.height() - border.height());
 
   FakeImplProxy proxy;
-  FakeUIResourceLayerTreeHostImpl host_impl(&proxy);
+  TestSharedBitmapManager shared_bitmap_manager;
+  FakeUIResourceLayerTreeHostImpl host_impl(&proxy, &shared_bitmap_manager);
   scoped_ptr<NinePatchLayerImpl> layer =
       NinePatchLayerImpl::Create(host_impl.active_tree(), 1);
   layer->draw_properties().visible_content_rect = visible_content_rect;
@@ -54,12 +55,8 @@ void NinePatchLayerLayoutTest(const gfx::Size& bitmap_size,
   layer->draw_properties().render_target = layer.get();
 
   UIResourceId uid = 1;
-  SkBitmap skbitmap;
-  skbitmap.setConfig(
-      SkBitmap::kARGB_8888_Config, bitmap_size.width(), bitmap_size.height());
-  skbitmap.allocPixels();
-  skbitmap.setImmutable();
-  UIResourceBitmap bitmap(skbitmap);
+  bool is_opaque = false;
+  UIResourceBitmap bitmap(bitmap_size, is_opaque);
 
   host_impl.CreateUIResource(uid, bitmap);
   layer->SetUIResourceId(uid);

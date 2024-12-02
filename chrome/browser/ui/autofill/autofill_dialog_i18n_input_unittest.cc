@@ -4,26 +4,22 @@
 
 #include "chrome/browser/ui/autofill/autofill_dialog_i18n_input.h"
 
-#include "base/command_line.h"
-#include "chrome/common/chrome_switches.h"
 #include "components/autofill/core/browser/field_types.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/libaddressinput/chromium/cpp/include/libaddressinput/address_ui.h"
 
 namespace autofill {
 namespace i18ninput {
 
 namespace {
 
+#if defined(OS_MACOSX)
 const size_t kNumberOfAddressLinesUS = 7;
+#else
+const size_t kNumberOfAddressLinesUS = 6;
+#endif
 
 }  // namespace
-
-TEST(AutofillDialogI18nInput, FlagFlipsEnabled) {
-  bool enabled = Enabled();
-  CommandLine* command_line = CommandLine::ForCurrentProcess();
-  command_line->AppendSwitch(::switches::kDisableAutofillAddressI18n);
-  EXPECT_NE(enabled, Enabled());
-}
 
 TEST(AutofillDialogI18nInput, USShippingAddress) {
   DetailInputs inputs;
@@ -48,22 +44,28 @@ TEST(AutofillDialogI18nInput, USCityStateAndZipCodeShareInputRow) {
   BuildAddressInputs(common::ADDRESS_TYPE_SHIPPING, "US", &inputs);
   ASSERT_EQ(kNumberOfAddressLinesUS, inputs.size());
 
-  // Inputs before or after [ City ] [ State ] [ Zip ] should be on other lines.
-  EXPECT_NE(inputs[2].length, DetailInput::SHORT);
+#if defined(OS_MACOSX)
+  int input_index = 3;
+#else
+  int input_index = 2;
+#endif
 
-  const DetailInput& city = inputs[3];
-  ASSERT_EQ(ADDRESS_HOME_CITY, city.type);
+  // Inputs before or after [ City ] [ State ] [ Zip ] should be on other lines.
+  EXPECT_NE(inputs[input_index - 1].length, DetailInput::SHORT);
+
+  const DetailInput& city = inputs[input_index++];
+  EXPECT_EQ(ADDRESS_HOME_CITY, city.type);
   EXPECT_EQ(city.length, DetailInput::SHORT);
 
-  const DetailInput& state = inputs[4];
-  ASSERT_EQ(ADDRESS_HOME_STATE, state.type);
+  const DetailInput& state = inputs[input_index++];
+  EXPECT_EQ(ADDRESS_HOME_STATE, state.type);
   EXPECT_EQ(state.length, DetailInput::SHORT);
 
-  const DetailInput& zip = inputs[5];
-  ASSERT_EQ(ADDRESS_HOME_ZIP, zip.type);
+  const DetailInput& zip = inputs[input_index++];
+  EXPECT_EQ(ADDRESS_HOME_ZIP, zip.type);
   EXPECT_EQ(zip.length, DetailInput::SHORT);
 
-  EXPECT_NE(inputs[6].length, DetailInput::SHORT);
+  EXPECT_NE(inputs[input_index].length, DetailInput::SHORT);
 }
 
 TEST(AutofillDialogI18nInput, IvoryCoastNoStreetLine2) {
@@ -71,6 +73,15 @@ TEST(AutofillDialogI18nInput, IvoryCoastNoStreetLine2) {
   BuildAddressInputs(common::ADDRESS_TYPE_SHIPPING, "CI", &inputs);
   for (size_t i = 0; i < inputs.size(); ++i) {
     EXPECT_NE(ADDRESS_HOME_LINE2, inputs[i].type);
+  }
+}
+
+TEST(AutofillDialogI18nInput, FullySupportedCountries) {
+  const std::vector<std::string>& regions =
+      ::i18n::addressinput::GetRegionCodes();
+  for (size_t i = 0; i < regions.size(); ++i) {
+    bool should_be_supported = !(regions[i] == "KR" || regions[i] == "CN");
+    EXPECT_EQ(should_be_supported, CountryIsFullySupported(regions[i]));
   }
 }
 

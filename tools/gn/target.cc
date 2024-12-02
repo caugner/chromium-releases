@@ -54,8 +54,7 @@ void MergeAllDependentConfigsFrom(const Target* from_target,
 Target::Target(const Settings* settings, const Label& label)
     : Item(settings, label),
       output_type_(UNKNOWN),
-      hard_dep_(false),
-      external_(false) {
+      hard_dep_(false) {
 }
 
 Target::~Target() {
@@ -76,8 +75,10 @@ const char* Target::GetStringForOutputType(OutputType type) {
       return "Static library";
     case COPY_FILES:
       return "Copy";
-    case CUSTOM:
-      return "Custom";
+    case ACTION:
+      return "Action";
+    case ACTION_FOREACH:
+      return "ActionForEach";
     default:
       return "";
   }

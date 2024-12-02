@@ -566,6 +566,8 @@ void LocalizedError::GetStrings(int error_code,
       "diagnose", l10n_util::GetStringUTF16(IDS_ERRORPAGES_BUTTON_DIAGNOSE));
 #endif  // defined(OS_CHROMEOS)
 
+  error_strings->SetBoolean("staleCopyInCache", stale_copy_in_cache);
+
   if (options.details_resource_id != kErrorPagesNoDetails) {
     error_strings->SetString(
         "errorDetails", l10n_util::GetStringUTF16(options.details_resource_id));

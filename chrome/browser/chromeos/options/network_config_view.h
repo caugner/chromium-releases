@@ -67,7 +67,7 @@ class NetworkConfigView : public views::DialogDelegateView,
   virtual ui::ModalType GetModalType() const OVERRIDE;
 
   // views::View overrides.
-  virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
+  virtual void GetAccessibleState(ui::AXViewState* state) OVERRIDE;
 
   // views::ButtonListener overrides.
   virtual void ButtonPressed(
@@ -140,6 +140,9 @@ class ChildNetworkConfigView : public views::View {
   // Called to set focus when view is recreated with the same dialog
   // being active. For example, clicking on "Advanced" button.
   virtual void InitFocus() = 0;
+
+  // Returns 'true' if the dialog is for configuration only (default is false).
+  virtual bool IsConfigureDialog();
 
   // Minimum with of input fields / combo boxes.
   static const int kInputFieldMinWidth;

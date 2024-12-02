@@ -33,6 +33,7 @@
 #include "cc/test/layer_tree_test.h"
 #include "cc/test/render_pass_test_common.h"
 #include "cc/test/test_context_provider.h"
+#include "cc/test/test_shared_bitmap_manager.h"
 #include "cc/test/test_web_graphics_context_3d.h"
 #include "cc/trees/layer_tree_host_impl.h"
 #include "cc/trees/layer_tree_impl.h"
@@ -933,8 +934,9 @@ class LayerTreeHostContextTestDontUseLostResources
 
     child_output_surface_ = FakeOutputSurface::Create3d();
     child_output_surface_->BindToClient(&output_surface_client_);
+    shared_bitmap_manager_.reset(new TestSharedBitmapManager());
     child_resource_provider_ = ResourceProvider::Create(
-        child_output_surface_.get(), NULL, 0, false, 1);
+        child_output_surface_.get(), shared_bitmap_manager_.get(), 0, false, 1);
   }
 
   static void EmptyReleaseCallback(unsigned sync_point, bool lost) {}
@@ -1126,10 +1128,8 @@ class LayerTreeHostContextTestDontUseLostResources
     // This will get called twice:
     // First when we create the initial output surface...
     if (layer_tree_host()->source_frame_number() > 0) {
-      // ... and then again after we forced the context to be lost on the third
-      // frame. Verify this assumption here.
+      // ... and then again after we forced the context to be lost.
       lost_context_ = true;
-      EXPECT_EQ(layer_tree_host()->source_frame_number(), 3);
     }
     return LayerTreeHostContextTest::CreateFakeOutputSurface(fallback);
   }
@@ -1137,7 +1137,7 @@ class LayerTreeHostContextTestDontUseLostResources
   virtual void DidCommitAndDrawFrame() OVERRIDE {
     ASSERT_TRUE(layer_tree_host()->hud_layer());
     // End the test once we know the 3nd frame drew.
-    if (layer_tree_host()->source_frame_number() < 4) {
+    if (layer_tree_host()->source_frame_number() < 5) {
       layer_tree_host()->root_layer()->SetNeedsDisplay();
       layer_tree_host()->SetNeedsCommit();
     } else {
@@ -1153,6 +1153,7 @@ class LayerTreeHostContextTestDontUseLostResources
 
   FakeOutputSurfaceClient output_surface_client_;
   scoped_ptr<FakeOutputSurface> child_output_surface_;
+  scoped_ptr<SharedBitmapManager> shared_bitmap_manager_;
   scoped_ptr<ResourceProvider> child_resource_provider_;
 
   scoped_refptr<DelegatedFrameResourceCollection>

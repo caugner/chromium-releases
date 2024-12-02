@@ -25,9 +25,13 @@ class CommonSwitches {
             FeatureSwitch::DEFAULT_DISABLED),
         global_commands(
             switches::kGlobalCommands,
+#if defined(OS_CHROMEOS)
             FeatureSwitch::DEFAULT_DISABLED),
+#else
+            FeatureSwitch::DEFAULT_ENABLED),
+#endif
         prompt_for_external_extensions(
-            switches::kPromptForExternalExtensions,
+            NULL,
 #if defined(OS_WIN)
             FeatureSwitch::DEFAULT_ENABLED),
 #else
@@ -108,9 +112,12 @@ bool FeatureSwitch::IsEnabled() const {
   if (override_value_ != OVERRIDE_NONE)
     return override_value_ == OVERRIDE_ENABLED;
 
+  if (!switch_name_)
+    return default_value_;
+
   std::string temp = command_line_->GetSwitchValueASCII(switch_name_);
   std::string switch_value;
-  TrimWhitespaceASCII(temp, TRIM_ALL, &switch_value);
+  base::TrimWhitespaceASCII(temp, base::TRIM_ALL, &switch_value);
 
   if (switch_value == "1")
     return true;
@@ -128,10 +135,12 @@ bool FeatureSwitch::IsEnabled() const {
 }
 
 std::string FeatureSwitch::GetLegacyEnableFlag() const {
+  DCHECK(switch_name_);
   return std::string("enable-") + switch_name_;
 }
 
 std::string FeatureSwitch::GetLegacyDisableFlag() const {
+  DCHECK(switch_name_);
   return std::string("disable-") + switch_name_;
 }
 

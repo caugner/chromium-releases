@@ -12,6 +12,7 @@
         'mojo_environment_chromium',
         'mojo_gles2',
         'mojo_gles2_bindings',
+        'mojo_js_bindings_lib',
         'mojo_native_viewport_bindings',
         'mojo_system',
       ],
@@ -29,24 +30,16 @@
         'apps/js/mojo_runner_delegate.h',
         'apps/js/bindings/threading.cc',
         'apps/js/bindings/threading.h',
-        'apps/js/bindings/core.cc',
-        'apps/js/bindings/core.h',
         'apps/js/bindings/gl/context.cc',
         'apps/js/bindings/gl/context.h',
         'apps/js/bindings/gl/module.cc',
         'apps/js/bindings/gl/module.h',
-        'apps/js/bindings/handle.cc',
-        'apps/js/bindings/handle.h',
         'apps/js/bindings/monotonic_clock.cc',
         'apps/js/bindings/monotonic_clock.h',
-        'apps/js/bindings/support.cc',
-        'apps/js/bindings/support.h',
-        'apps/js/bindings/waiting_callback.cc',
-        'apps/js/bindings/waiting_callback.h',
       ],
     },
     {
-      'target_name': 'mojo_js_unittests',
+      'target_name': 'mojo_apps_js_unittests',
       'type': 'executable',
       'dependencies': [
         '../gin/gin.gyp:gin_test',
@@ -55,7 +48,7 @@
         'mojo_sample_service',
       ],
       'sources': [
-        'apps/js/test/run_js_tests.cc',
+        'apps/js/test/run_apps_js_tests.cc',
       ],
     },
     {
@@ -68,5 +61,25 @@
         'apps/js/main.cc',
       ],
     },
+  ],
+  'conditions': [
+    ['test_isolation_mode != "noop"', {
+      'targets': [
+        {
+          'target_name': 'mojo_apps_js_unittests_run',
+          'type': 'none',
+          'dependencies': [
+            'mojo_apps_js_unittests',
+          ],
+          'includes': [
+            '../build/isolate.gypi',
+            'mojo_apps_js_unittests.isolate',
+          ],
+          'sources': [
+            'mojo_apps_js_unittests.isolate',
+          ],
+        },
+      ],
+    }],
   ],
 }

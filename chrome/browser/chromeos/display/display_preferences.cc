@@ -20,7 +20,6 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/common/pref_names.h"
-#include "chromeos/display/output_configurator.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 #include "ui/gfx/display.h"
 #include "ui/gfx/insets.h"
@@ -61,6 +60,36 @@ void InsetsToValue(const gfx::Insets& insets, base::DictionaryValue* value) {
   value->SetInteger(kInsetsLeftKey, insets.left());
   value->SetInteger(kInsetsBottomKey, insets.bottom());
   value->SetInteger(kInsetsRightKey, insets.right());
+}
+
+std::string ColorProfileToString(ui::ColorCalibrationProfile profile) {
+  switch (profile) {
+    case ui::COLOR_PROFILE_STANDARD:
+      return "standard";
+    case ui::COLOR_PROFILE_DYNAMIC:
+      return "dynamic";
+    case ui::COLOR_PROFILE_MOVIE:
+      return "movie";
+    case ui::COLOR_PROFILE_READING:
+      return "reading";
+    case ui::NUM_COLOR_PROFILES:
+      break;
+  }
+  NOTREACHED();
+  return "";
+}
+
+ui::ColorCalibrationProfile StringToColorProfile(std::string value) {
+  if (value == "standard")
+    return ui::COLOR_PROFILE_STANDARD;
+  else if (value == "dynamic")
+    return ui::COLOR_PROFILE_DYNAMIC;
+  else if (value == "movie")
+    return ui::COLOR_PROFILE_MOVIE;
+  else if (value == "reading")
+    return ui::COLOR_PROFILE_READING;
+  NOTREACHED();
+  return ui::COLOR_PROFILE_STANDARD;
 }
 
 ash::internal::DisplayManager* GetDisplayManager() {
@@ -142,11 +171,17 @@ void LoadDisplayProperties() {
     gfx::Insets insets;
     if (ValueToInsets(*dict_value, &insets))
       insets_to_set = &insets;
+
+    ui::ColorCalibrationProfile color_profile = ui::COLOR_PROFILE_STANDARD;
+    std::string color_profile_name;
+    if (dict_value->GetString("color_profile_name", &color_profile_name))
+      color_profile = StringToColorProfile(color_profile_name);
     GetDisplayManager()->RegisterDisplayProperty(id,
                                                  rotation,
                                                  ui_scale,
                                                  insets_to_set,
-                                                 resolution_in_pixels);
+                                                 resolution_in_pixels,
+                                                 color_profile);
   }
 }
 
@@ -206,9 +241,12 @@ void StoreCurrentDisplayProperties() {
       property_value->SetInteger("width", mode.size.width());
       property_value->SetInteger("height", mode.size.height());
     }
-
     if (!info.overscan_insets_in_dip().empty())
       InsetsToValue(info.overscan_insets_in_dip(), property_value.get());
+    if (info.color_profile() != ui::COLOR_PROFILE_STANDARD) {
+      property_value->SetString(
+          "color_profile_name", ColorProfileToString(info.color_profile()));
+    }
     pref_data->Set(base::Int64ToString(id), property_value.release());
   }
 }

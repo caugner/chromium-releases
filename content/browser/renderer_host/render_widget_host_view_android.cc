@@ -6,6 +6,7 @@
 
 #include <android/bitmap.h>
 
+#include "base/android/sys_utils.h"
 #include "base/basictypes.h"
 #include "base/bind.h"
 #include "base/callback_helpers.h"
@@ -155,8 +156,8 @@ RenderWidgetHostViewAndroid::RenderWidgetHostViewAndroid(
                                     switches::kEnableDelegatedRenderer) &&
                                 !CommandLine::ForCurrentProcess()->HasSwitch(
                                     switches::kDisableDelegatedRenderer)),
-      root_window_destroyed_(false),
-      locks_on_frame_count_(0) {
+      locks_on_frame_count_(0),
+      observing_root_window_(false) {
   if (!using_delegated_renderer_) {
     texture_layer_ = cc::TextureLayer::Create(NULL);
     layer_ = texture_layer_;
@@ -227,8 +228,10 @@ void RenderWidgetHostViewAndroid::WasShown() {
 
   host_->WasShown();
 
-  if (content_view_core_ && !using_synchronous_compositor_)
+  if (content_view_core_ && !using_synchronous_compositor_) {
     content_view_core_->GetWindowAndroid()->AddObserver(this);
+    observing_root_window_ = true;
+  }
 }
 
 void RenderWidgetHostViewAndroid::WasHidden() {
@@ -241,8 +244,10 @@ void RenderWidgetHostViewAndroid::WasHidden() {
   // utilization.
   host_->WasHidden();
 
-  if (content_view_core_ && !using_synchronous_compositor_)
+  if (content_view_core_ && !using_synchronous_compositor_) {
     content_view_core_->GetWindowAndroid()->RemoveObserver(this);
+    observing_root_window_ = false;
+  }
 }
 
 void RenderWidgetHostViewAndroid::WasResized() {
@@ -253,7 +258,6 @@ void RenderWidgetHostViewAndroid::SetSize(const gfx::Size& size) {
   // Ignore the given size as only the Java code has the power to
   // resize the view on Android.
   default_size_ = size;
-  WasResized();
 }
 
 void RenderWidgetHostViewAndroid::SetBounds(const gfx::Rect& rect) {
@@ -262,7 +266,7 @@ void RenderWidgetHostViewAndroid::SetBounds(const gfx::Rect& rect) {
 
 void RenderWidgetHostViewAndroid::GetScaledContentBitmap(
     float scale,
-    gfx::Size* out_size,
+    SkBitmap::Config bitmap_config,
     gfx::Rect src_subrect,
     const base::Callback<void(bool, const SkBitmap&)>& result_callback) {
   if (!IsSurfaceAvailableForCopy()) {
@@ -281,9 +285,8 @@ void RenderWidgetHostViewAndroid::GetScaledContentBitmap(
   DCHECK_GT(device_scale_factor, 0);
   gfx::Size dst_size(
       gfx::ToCeiledSize(gfx::ScaleSize(bounds, scale / device_scale_factor)));
-  *out_size = dst_size;
   CopyFromCompositingSurface(
-      src_subrect, dst_size, result_callback, SkBitmap::kARGB_8888_Config);
+      src_subrect, dst_size, result_callback, bitmap_config);
 }
 
 bool RenderWidgetHostViewAndroid::HasValidFrame() const {
@@ -335,7 +338,6 @@ void RenderWidgetHostViewAndroid::MovePluginWindows(
 void RenderWidgetHostViewAndroid::Focus() {
   host_->Focus();
   host_->SetInputMethodActive(true);
-  ResetClipping();
   if (overscroll_effect_enabled_)
     overscroll_effect_->Enable();
 }
@@ -420,17 +422,14 @@ void RenderWidgetHostViewAndroid::ReleaseLocksOnSurface() {
   while (locks_on_frame_count_ > 0) {
     UnlockCompositingSurface();
   }
+  RunAckCallbacks();
 }
 
 gfx::Rect RenderWidgetHostViewAndroid::GetViewBounds() const {
   if (!content_view_core_)
     return gfx::Rect(default_size_);
 
-  gfx::Size size = content_view_core_->GetViewportSizeDip();
-  gfx::Size offset = content_view_core_->GetViewportSizeOffsetDip();
-  size.Enlarge(-offset.width(), -offset.height());
-
-  return gfx::Rect(size);
+  return gfx::Rect(content_view_core_->GetViewSize());
 }
 
 gfx::Size RenderWidgetHostViewAndroid::GetPhysicalBackingSize() const {
@@ -463,8 +462,8 @@ void RenderWidgetHostViewAndroid::TextInputTypeChanged(
   // Unused on Android, which uses OnTextInputChanged instead.
 }
 
-int RenderWidgetHostViewAndroid::GetNativeImeAdapter() {
-  return reinterpret_cast<int>(&ime_adapter_android_);
+long RenderWidgetHostViewAndroid::GetNativeImeAdapter() {
+  return reinterpret_cast<intptr_t>(&ime_adapter_android_);
 }
 
 void RenderWidgetHostViewAndroid::OnTextInputStateChanged(
@@ -609,6 +608,13 @@ void RenderWidgetHostViewAndroid::SelectionBoundsChanged(
   }
 }
 
+void RenderWidgetHostViewAndroid::SelectionRootBoundsChanged(
+    const gfx::Rect& bounds) {
+  if (content_view_core_) {
+    content_view_core_->OnSelectionRootBoundsChanged(bounds);
+  }
+}
+
 void RenderWidgetHostViewAndroid::ScrollOffsetChanged() {
 }
 
@@ -628,28 +634,12 @@ void RenderWidgetHostViewAndroid::CopyFromCompositingSurface(
     const gfx::Size& dst_size,
     const base::Callback<void(bool, const SkBitmap&)>& callback,
     const SkBitmap::Config bitmap_config) {
-  // Only ARGB888 and RGB565 supported as of now.
-  bool format_support = ((bitmap_config == SkBitmap::kRGB_565_Config) ||
-                         (bitmap_config == SkBitmap::kARGB_8888_Config));
-  if (!format_support) {
-    DCHECK(format_support);
+  if (!IsReadbackConfigSupported(bitmap_config)) {
     callback.Run(false, SkBitmap());
     return;
   }
   base::TimeTicks start_time = base::TimeTicks::Now();
   if (!using_synchronous_compositor_ && !IsSurfaceAvailableForCopy()) {
-    callback.Run(false, SkBitmap());
-    return;
-  }
-  ImageTransportFactoryAndroid* factory =
-      ImageTransportFactoryAndroid::GetInstance();
-  GLHelper* gl_helper = factory->GetGLHelper();
-  if (!gl_helper)
-    return;
-  bool check_rgb565_support = gl_helper->CanUseRgb565Readback();
-  if ((bitmap_config == SkBitmap::kRGB_565_Config) &&
-      !check_rgb565_support) {
-    LOG(ERROR) << "Readbackformat rgb565  not supported";
     callback.Run(false, SkBitmap());
     return;
   }
@@ -740,6 +730,7 @@ void RenderWidgetHostViewAndroid::OnAcceleratedCompositingStateChange() {
 
 void RenderWidgetHostViewAndroid::SendDelegatedFrameAck(
     uint32 output_surface_id) {
+  DCHECK(host_);
   cc::CompositorFrameAck ack;
   if (resource_collection_.get())
     resource_collection_->TakeUnusedResourcesForChildCompositor(&ack.resources);
@@ -1037,8 +1028,6 @@ void RenderWidgetHostViewAndroid::BuffersSwapped(
   ImageTransportFactoryAndroid::GetInstance()->AcquireTexture(
       texture_id_in_layer_, mailbox.name);
 
-  ResetClipping();
-
   current_mailbox_ = mailbox;
   last_output_surface_id_ = output_surface_id;
 
@@ -1316,59 +1305,9 @@ void RenderWidgetHostViewAndroid::SendGestureEvent(
     host_->ForwardGestureEventWithLatencyInfo(event, CreateLatencyInfo(event));
 }
 
-void RenderWidgetHostViewAndroid::SelectRange(const gfx::Point& start,
-                                              const gfx::Point& end) {
-  if (host_)
-    host_->SelectRange(start, end);
-}
-
 void RenderWidgetHostViewAndroid::MoveCaret(const gfx::Point& point) {
   if (host_)
     host_->MoveCaret(point);
-}
-
-void RenderWidgetHostViewAndroid::RequestContentClipping(
-    const gfx::Rect& clipping,
-    const gfx::Size& content_size) {
-  // A focused view provides its own clipping.
-  if (HasFocus())
-    return;
-
-  ClipContents(clipping, content_size);
-}
-
-void RenderWidgetHostViewAndroid::ResetClipping() {
-  ClipContents(gfx::Rect(gfx::Point(), content_size_in_layer_),
-               content_size_in_layer_);
-}
-
-void RenderWidgetHostViewAndroid::ClipContents(const gfx::Rect& clipping,
-                                               const gfx::Size& content_size) {
-  if (!texture_id_in_layer_ || content_size_in_layer_.IsEmpty())
-    return;
-
-  gfx::Size clipped_content(content_size_in_layer_);
-  clipped_content.SetToMin(clipping.size());
-  texture_layer_->SetBounds(clipped_content);
-  texture_layer_->SetNeedsDisplay();
-
-  if (texture_size_in_layer_.IsEmpty()) {
-    texture_layer_->SetUV(gfx::PointF(), gfx::PointF());
-    return;
-  }
-
-  gfx::PointF offset(
-      clipping.x() + content_size_in_layer_.width() - content_size.width(),
-      clipping.y() + content_size_in_layer_.height() - content_size.height());
-  offset.SetToMax(gfx::PointF());
-
-  gfx::Vector2dF uv_scale(1.f / texture_size_in_layer_.width(),
-                          1.f / texture_size_in_layer_.height());
-  texture_layer_->SetUV(
-      gfx::PointF(offset.x() * uv_scale.x(),
-                  offset.y() * uv_scale.y()),
-      gfx::PointF((offset.x() + clipped_content.width()) * uv_scale.x(),
-                  (offset.y() + clipped_content.height()) * uv_scale.y()));
 }
 
 SkColor RenderWidgetHostViewAndroid::GetCachedBackgroundColor() const {
@@ -1396,20 +1335,17 @@ void RenderWidgetHostViewAndroid::DidStopFlinging() {
 
 void RenderWidgetHostViewAndroid::SetContentViewCore(
     ContentViewCoreImpl* content_view_core) {
-  RunAckCallbacks();
-
   RemoveLayers();
-  // TODO: crbug.com/324341
-  // WindowAndroid and Compositor should outlive all WebContents.
-  // Allowing this here at runtime is a bandaid.
-  DCHECK(!root_window_destroyed_);
-  if (content_view_core_ && !root_window_destroyed_ &&
-      !using_synchronous_compositor_) {
+  if (observing_root_window_ && content_view_core_) {
     content_view_core_->GetWindowAndroid()->RemoveObserver(this);
+    observing_root_window_ = false;
   }
 
-  if (content_view_core != content_view_core_)
+  bool resize = false;
+  if (content_view_core != content_view_core_) {
     ReleaseLocksOnSurface();
+    resize = true;
+  }
 
   content_view_core_ = content_view_core;
 
@@ -1422,10 +1358,13 @@ void RenderWidgetHostViewAndroid::SetContentViewCore(
   }
 
   AttachLayers();
-  if (content_view_core_ && !root_window_destroyed_ &&
-      !using_synchronous_compositor_) {
+  if (content_view_core_ && !using_synchronous_compositor_) {
     content_view_core_->GetWindowAndroid()->AddObserver(this);
+    observing_root_window_ = true;
   }
+
+  if (resize && content_view_core_)
+    WasResized();
 }
 
 void RenderWidgetHostViewAndroid::RunAckCallbacks() {
@@ -1442,8 +1381,14 @@ void RenderWidgetHostViewAndroid::OnCompositingDidCommit() {
 void RenderWidgetHostViewAndroid::OnDetachCompositor() {
   DCHECK(content_view_core_);
   DCHECK(!using_synchronous_compositor_);
-  root_window_destroyed_ = true;
   RunAckCallbacks();
+}
+
+void RenderWidgetHostViewAndroid::OnWillDestroyWindow() {
+  // crbug.com/324341
+  // WindowAndroid and Compositor should outlive all WebContents.
+  NOTREACHED();
+  observing_root_window_ = false;
 }
 
 void RenderWidgetHostViewAndroid::OnLostResources() {
@@ -1453,7 +1398,7 @@ void RenderWidgetHostViewAndroid::OnLostResources() {
   if (delegated_renderer_layer_.get())
     DestroyDelegatedContent();
   texture_id_in_layer_ = 0;
-  RunAckCallbacks();
+  DCHECK(ack_callbacks_.empty());
 }
 
 // static
@@ -1494,6 +1439,7 @@ void RenderWidgetHostViewAndroid::PrepareTextureCopyOutputResult(
   ImageTransportFactoryAndroid* factory =
       ImageTransportFactoryAndroid::GetInstance();
   GLHelper* gl_helper = factory->GetGLHelper();
+
   if (!gl_helper)
     return;
 
@@ -1524,6 +1470,27 @@ void RenderWidgetHostViewAndroid::PrepareTextureCopyOutputResult(
                  base::Passed(&bitmap),
                  start_time,
                  base::Passed(&bitmap_pixels_lock)));
+}
+
+bool RenderWidgetHostViewAndroid::IsReadbackConfigSupported(
+    SkBitmap::Config bitmap_config) {
+  ImageTransportFactoryAndroid* factory =
+      ImageTransportFactoryAndroid::GetInstance();
+  GLHelper* gl_helper = factory->GetGLHelper();
+  if (!gl_helper)
+    return false;
+  return gl_helper->IsReadbackConfigSupported(bitmap_config);
+}
+
+SkBitmap::Config RenderWidgetHostViewAndroid::PreferredReadbackFormat() {
+  // Define the criteria here. If say the 16 texture readback is
+  // supported we should go with that (this degrades quality)
+  // or stick back to the default format.
+  if (base::android::SysUtils::IsLowEndDevice()) {
+    if (IsReadbackConfigSupported(SkBitmap::kRGB_565_Config))
+      return SkBitmap::kRGB_565_Config;
+  }
+  return SkBitmap::kARGB_8888_Config;
 }
 
 // static

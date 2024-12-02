@@ -62,6 +62,14 @@ struct FormatElement {
 //    }
 class Rule {
  public:
+  // The types of fields that describe the rule.
+  enum IdentityField {
+    KEY,
+    NAME,
+    LATIN_NAME,
+    IDENTITY_FIELDS_SIZE
+  };
+
   Rule();
   ~Rule();
 
@@ -80,9 +88,30 @@ class Rule {
   // Parses |json_rule|, which must contain parsed serialized rule.
   void ParseJsonRule(const Json& json_rule);
 
+  // Returns the value of the |identity_field| for this rule, for example, can
+  // return "TX" or "Texas". The |identity_field| parameter should not be
+  // IDENTITY_FIELDS_SIZE.
+  const std::string& GetIdentityField(IdentityField identity_field) const;
+
+  // Returns the key for this rule. For example, can return "TX".
+  const std::string& GetKey() const { return key_; }
+
+  // Returns the name for this rule. For example, the name for "TX" is "Texas".
+  const std::string& GetName() const { return name_; }
+
+  // Returns the latinized version of the name. For example, the latinized
+  // version of "北京市" is "Beijing Shi".
+  const std::string& GetLatinName() const { return latin_name_; }
+
   // Returns the format of the address as it should appear on an envelope.
   const std::vector<std::vector<FormatElement> >& GetFormat() const {
     return format_;
+  }
+
+  // Returns the latinized format of the address as it should appear on an
+  // envelope.
+  const std::vector<std::vector<FormatElement> >& GetLatinFormat() const {
+    return latin_format_;
   }
 
   // Returns the required fields for this rule.
@@ -97,6 +126,12 @@ class Rule {
   // Returns all of the language codes for which this rule has custom rules, for
   // example ["de", "fr", "it"].
   const std::vector<std::string>& GetLanguages() const { return languages_; }
+
+  // Returns all of the languages codes for addresses that adhere to this rule,
+  // for example ["de", "fr", "gsw", "it"].
+  const std::vector<std::string>& GetInputLanguages() const {
+    return input_languages_;
+  }
 
   // Returns the language code of this rule, for example "de".
   const std::string& GetLanguage() const { return language_; }
@@ -141,13 +176,18 @@ class Rule {
                          const std::vector<std::string>& values,
                          std::string* sub_key) const;
 
+  std::string key_;
+  std::string name_;
+  std::string latin_name_;
   std::vector<std::vector<FormatElement> > format_;
+  std::vector<std::vector<FormatElement> > latin_format_;
   std::vector<AddressField> required_;
   std::vector<std::string> sub_keys_;
   std::vector<std::string> sub_names_;
   // The Latin names (when |sub_names_| is not in Latin characters).
   std::vector<std::string> sub_lnames_;
   std::vector<std::string> languages_;
+  std::vector<std::string> input_languages_;
   std::string language_;
   std::string postal_code_format_;
   int admin_area_name_message_id_;
