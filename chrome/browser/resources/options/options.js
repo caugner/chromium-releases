@@ -7,6 +7,7 @@ var AlertOverlay = options.AlertOverlay;
 var AutofillEditAddressOverlay = options.AutofillEditAddressOverlay;
 var AutofillEditCreditCardOverlay = options.AutofillEditCreditCardOverlay;
 var AutofillOptions = options.AutofillOptions;
+var AutomaticSettingsResetBanner = options.AutomaticSettingsResetBanner;
 var BrowserOptions = options.BrowserOptions;
 var ClearBrowserDataOverlay = options.ClearBrowserDataOverlay;
 var ConfirmDialog = options.ConfirmDialog;
@@ -104,6 +105,16 @@ function load() {
             $('spelling-enabled-control').metric),
         BrowserOptions.getInstance());
   }
+  OptionsPage.registerOverlay(
+      new ConfirmDialog(
+          'hotwordConfirm',
+          loadTimeData.getString('hotwordConfirmOverlayTabTitle'),
+          'hotword-confirm-overlay',
+          $('hotword-confirm-ok'),
+          $('hotword-confirm-cancel'),
+          $('hotword-search-enable').pref,
+          $('hotword-search-enable').metric),
+      BrowserOptions.getInstance());
   OptionsPage.registerOverlay(ContentSettings.getInstance(),
                               BrowserOptions.getInstance(),
                               [$('privacyContentSettingsButton')]);
@@ -142,7 +153,7 @@ function load() {
   if (!cr.isChromeOS) {
     OptionsPage.registerOverlay(ManagedUserCreateConfirmOverlay.getInstance(),
                                 BrowserOptions.getInstance());
-    if (loadTimeData.getBoolean('allowCreateExistingManagedUsers')) {
+    if (!loadTimeData.getBoolean('disableCreateExistingManagedUsers')) {
       OptionsPage.registerOverlay(ManagedUserImportOverlay.getInstance(),
                                   BrowserOptions.getInstance());
     }
@@ -216,6 +227,7 @@ function load() {
   OptionsFocusManager.getInstance().initialize();
   Preferences.getInstance().initialize();
   ResetProfileSettingsBanner.getInstance().initialize();
+  AutomaticSettingsResetBanner.getInstance().initialize();
   OptionsPage.initialize();
 
   var path = document.location.pathname;

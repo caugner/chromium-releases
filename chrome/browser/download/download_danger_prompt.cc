@@ -43,7 +43,7 @@ class DownloadDangerPromptImpl : public DownloadDangerPrompt,
 
   // TabModalConfirmDialogDelegate:
   virtual base::string16 GetTitle() OVERRIDE;
-  virtual base::string16 GetMessage() OVERRIDE;
+  virtual base::string16 GetDialogMessage() OVERRIDE;
   virtual base::string16 GetAcceptButtonTitle() OVERRIDE;
   virtual base::string16 GetCancelButtonTitle() OVERRIDE;
   virtual void OnAccepted() OVERRIDE;
@@ -119,7 +119,7 @@ base::string16 DownloadDangerPromptImpl::GetTitle() {
   }
 }
 
-base::string16 DownloadDangerPromptImpl::GetMessage() {
+base::string16 DownloadDangerPromptImpl::GetDialogMessage() {
   if (show_context_) {
     switch (download_->GetDangerType()) {
       case content::DOWNLOAD_DANGER_TYPE_DANGEROUS_FILE: {
@@ -158,7 +158,7 @@ base::string16 DownloadDangerPromptImpl::GetMessage() {
       case content::DOWNLOAD_DANGER_TYPE_DANGEROUS_HOST: {
         return l10n_util::GetStringUTF16(
             IDS_PROMPT_CONFIRM_KEEP_MALICIOUS_DOWNLOAD_LEAD) +
-            ASCIIToUTF16("\n\n") +
+            base::ASCIIToUTF16("\n\n") +
             l10n_util::GetStringUTF16(
                 IDS_PROMPT_CONFIRM_KEEP_MALICIOUS_DOWNLOAD_BODY);
       }

@@ -171,6 +171,7 @@ class SearchTabHelper : public content::WebContentsObserver,
   virtual void ThemeInfoChanged(const ThemeBackgroundInfo& theme_info) OVERRIDE;
   virtual void MostVisitedItemsChanged(
       const std::vector<InstantMostVisitedItem>& items) OVERRIDE;
+  virtual void OmniboxStartMarginChanged(int omnibox_start_margin) OVERRIDE;
 
   // Removes recommended URLs if a matching URL is already open in the Browser,
   // if the Most Visited Tile Placement experiment is enabled, and the client is

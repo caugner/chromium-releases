@@ -307,6 +307,12 @@ NET_ERROR(SSL_SERVER_CERT_CHANGED, -156)
 // performed.
 NET_ERROR(SSL_INAPPROPRIATE_FALLBACK, -157)
 
+// Certificate Transparency: All Signed Certificate Timestamps failed to verify.
+NET_ERROR(CT_NO_SCTS_VERIFIED_OK, -158)
+
+// The SSL server sent us a fatal unrecognized_name alert.
+NET_ERROR(SSL_UNRECOGNIZED_NAME_ALERT, -159)
+
 // Certificate error codes
 //
 // The values of certificate error codes must be consecutive.
@@ -414,10 +420,6 @@ NET_ERROR(CERT_NAME_CONSTRAINT_VIOLATION, -212)
 
 // The value immediately past the last certificate error code.
 NET_ERROR(CERT_END, -213)
-
-// Certificate Transparency: All Signed Certificate Timestamps failed to verify.
-// XXX(eranm): Move this error to a more appropriate category.
-NET_ERROR(CT_NO_SCTS_VERIFIED_OK, -299)
 
 // The URL is invalid.
 NET_ERROR(INVALID_URL, -300)
@@ -569,6 +571,9 @@ NET_ERROR(RESPONSE_HEADERS_TRUNCATED, -357)
 // The QUIC crytpo handshake failed.  This means that the server was unable
 // to read any requests sent, so they may be resent.
 NET_ERROR(QUIC_HANDSHAKE_FAILED, -358)
+
+// An https resource was requested over an insecure QUIC connection.
+NET_ERROR(REQUEST_FOR_SECURE_RESOURCE_OVER_INSECURE_QUIC, -359)
 
 // The cache does not have the requested entry.
 NET_ERROR(CACHE_MISS, -400)

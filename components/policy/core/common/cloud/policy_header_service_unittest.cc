@@ -6,6 +6,7 @@
 #include "base/json/json_reader.h"
 #include "base/test/test_simple_task_runner.h"
 #include "base/values.h"
+#include "components/policy/core/common/cloud/cloud_policy_constants.h"
 #include "components/policy/core/common/cloud/mock_cloud_policy_store.h"
 #include "components/policy/core/common/cloud/policy_header_io_helper.h"
 #include "components/policy/core/common/cloud/policy_header_service.h"
@@ -37,8 +38,10 @@ class PolicyHeaderServiceTest : public testing::Test {
   virtual ~PolicyHeaderServiceTest() {}
 
   virtual void SetUp() OVERRIDE {
-    service_.reset(new PolicyHeaderService(
-        kDMServerURL, &user_store_, &device_store_));
+    service_.reset(new PolicyHeaderService(kDMServerURL,
+                                           kPolicyVerificationKeyHash,
+                                           &user_store_,
+                                           &device_store_));
     helper_ = service_->CreatePolicyHeaderIOHelper(task_runner_).Pass();
   }
 
@@ -50,7 +53,8 @@ class PolicyHeaderServiceTest : public testing::Test {
   }
 
   void ValidateHeader(const net::HttpRequestHeaders& headers,
-                      const std::string& expected_dmtoken) {
+                      const std::string& expected_dmtoken,
+                      const std::string& expected_policy_token) {
     if (expected_dmtoken.empty()) {
       EXPECT_TRUE(headers.IsEmpty());
     } else {
@@ -61,14 +65,17 @@ class PolicyHeaderServiceTest : public testing::Test {
       std::string decoded;
       base::Base64Decode(header, &decoded);
       // Parse the JSON.
-      scoped_ptr<Value> value(base::JSONReader::Read(decoded));
+      scoped_ptr<base::Value> value(base::JSONReader::Read(decoded));
       ASSERT_TRUE(value);
-      DictionaryValue* dict;
+      base::DictionaryValue* dict;
       EXPECT_TRUE(value->GetAsDictionary(&dict));
       // Read the values and verify them vs the expected values.
       std::string dm_token;
       dict->GetString("user_dmtoken", &dm_token);
       EXPECT_EQ(dm_token, expected_dmtoken);
+      std::string policy_token;
+      dict->GetString("user_policy_token", &policy_token);
+      EXPECT_EQ(policy_token, expected_policy_token);
     }
   }
 
@@ -91,8 +98,10 @@ TEST_F(PolicyHeaderServiceTest, TestCreationAndShutdown) {
 TEST_F(PolicyHeaderServiceTest, TestWithAndWithoutPolicyHeader) {
   // Set policy - this should push a header to the PolicyHeaderIOHelper.
   scoped_ptr<PolicyData> policy(new PolicyData());
-  std::string expected_token = "expected_token";
-  policy->set_request_token(expected_token);
+  std::string expected_dmtoken = "expected_dmtoken";
+  std::string expected_policy_token = "expected_dmtoken";
+  policy->set_request_token(expected_dmtoken);
+  policy->set_policy_token(expected_policy_token);
   user_store_.SetPolicy(policy.Pass());
   task_runner_->RunUntilIdle();
 
@@ -100,7 +109,8 @@ TEST_F(PolicyHeaderServiceTest, TestWithAndWithoutPolicyHeader) {
   net::TestURLRequest request(
       GURL(kDMServerURL), net::DEFAULT_PRIORITY, NULL, &context);
   helper_->AddPolicyHeaders(&request);
-  ValidateHeader(request.extra_request_headers(), expected_token);
+  ValidateHeader(request.extra_request_headers(), expected_dmtoken,
+                 expected_policy_token);
 
   // Now blow away the policy data.
   user_store_.SetPolicy(scoped_ptr<PolicyData>());
@@ -109,7 +119,7 @@ TEST_F(PolicyHeaderServiceTest, TestWithAndWithoutPolicyHeader) {
   net::TestURLRequest request2(
       GURL(kDMServerURL), net::DEFAULT_PRIORITY, NULL, &context);
   helper_->AddPolicyHeaders(&request2);
-  ValidateHeader(request2.extra_request_headers(), "");
+  ValidateHeader(request2.extra_request_headers(), "", "");
 }
 
 }  // namespace policy

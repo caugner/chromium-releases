@@ -8,7 +8,6 @@
 #include <string>
 
 #include "base/command_line.h"
-#include "base/message_loop/message_loop.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/scoped_testing_local_state.h"
@@ -16,15 +15,12 @@
 #include "components/variations/metrics_util.h"
 #include "content/public/common/process_type.h"
 #include "content/public/common/webplugininfo.h"
-#include "content/public/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread_bundle.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/size.h"
 
 #if defined(OS_CHROMEOS)
-#include "chromeos/dbus/fake_bluetooth_adapter_client.h"
-#include "chromeos/dbus/fake_bluetooth_device_client.h"
-#include "chromeos/dbus/fake_bluetooth_input_client.h"
-#include "chromeos/dbus/fake_dbus_thread_manager.h"
+#include "chrome/browser/metrics/metrics_log_chromeos.h"
 #endif  // OS_CHROMEOS
 
 namespace {
@@ -42,10 +38,30 @@ class TestMetricsService : public MetricsService {
   DISALLOW_COPY_AND_ASSIGN(TestMetricsService);
 };
 
+#if defined(OS_CHROMEOS)
+class TestMetricsLogChromeOS : public MetricsLogChromeOS {
+ public:
+  explicit TestMetricsLogChromeOS(
+      metrics::ChromeUserMetricsExtension* uma_proto)
+      : MetricsLogChromeOS(uma_proto) {
+  }
+
+ protected:
+  // Don't touch bluetooth information, as it won't be correctly initialized.
+  virtual void WriteBluetoothProto() OVERRIDE {
+  }
+};
+#endif  // OS_CHROMEOS
+
 class TestMetricsLog : public MetricsLog {
  public:
   TestMetricsLog(const std::string& client_id, int session_id)
-      : MetricsLog(client_id, session_id) {}
+      : MetricsLog(client_id, session_id) {
+#if defined(OS_CHROMEOS)
+    metrics_log_chromeos_.reset(new TestMetricsLogChromeOS(
+        MetricsLog::uma_proto()));
+#endif  // OS_CHROMEOS
+  }
   virtual ~TestMetricsLog() {}
 
  private:
@@ -67,28 +83,10 @@ class TestMetricsLog : public MetricsLog {
 class MetricsServiceTest : public testing::Test {
  public:
   MetricsServiceTest()
-      : ui_thread_(content::BrowserThread::UI, &message_loop_),
-        testing_local_state_(TestingBrowserProcess::GetGlobal()) {
-#if defined(OS_CHROMEOS)
-    chromeos::FakeDBusThreadManager* fake_dbus_thread_manager =
-        new chromeos::FakeDBusThreadManager;
-    fake_dbus_thread_manager->SetBluetoothAdapterClient(
-        scoped_ptr<chromeos::BluetoothAdapterClient>(
-            new chromeos::FakeBluetoothAdapterClient));
-    fake_dbus_thread_manager->SetBluetoothDeviceClient(
-        scoped_ptr<chromeos::BluetoothDeviceClient>(
-            new chromeos::FakeBluetoothDeviceClient));
-    fake_dbus_thread_manager->SetBluetoothInputClient(
-        scoped_ptr<chromeos::BluetoothInputClient>(
-            new chromeos::FakeBluetoothInputClient));
-    chromeos::DBusThreadManager::InitializeForTesting(fake_dbus_thread_manager);
-#endif  // OS_CHROMEOS
+      : testing_local_state_(TestingBrowserProcess::GetGlobal()) {
   }
 
   virtual ~MetricsServiceTest() {
-#if defined(OS_CHROMEOS)
-    chromeos::DBusThreadManager::Shutdown();
-#endif  // OS_CHROMEOS
     MetricsService::SetExecutionPhase(MetricsService::UNINITIALIZED_PHASE);
   }
 
@@ -114,8 +112,7 @@ class MetricsServiceTest : public testing::Test {
   }
 
  private:
-  base::MessageLoopForUI message_loop_;
-  content::TestBrowserThread ui_thread_;
+  content::TestBrowserThreadBundle thread_bundle_;
   ScopedTestingLocalState testing_local_state_;
 
   DISALLOW_COPY_AND_ASSIGN(MetricsServiceTest);

@@ -4,7 +4,10 @@
 
 #include "ash/shelf/shelf_window_watcher_item_delegate.h"
 
+#include "ash/shelf/shelf_model.h"
 #include "ash/shelf/shelf_util.h"
+#include "ash/shell.h"
+#include "ash/shell_delegate.h"
 #include "ash/wm/window_state.h"
 #include "ui/aura/window.h"
 #include "ui/views/corewm/window_animations.h"
@@ -14,8 +17,9 @@ namespace ash {
 namespace internal {
 
 ShelfWindowWatcherItemDelegate::ShelfWindowWatcherItemDelegate(
-    aura::Window* window)
-    : window_(window) {
+    aura::Window* window, ShelfModel* model)
+    : window_(window),
+      model_(model) {
 }
 
 ShelfWindowWatcherItemDelegate::~ShelfWindowWatcherItemDelegate() {
@@ -42,13 +46,15 @@ bool ShelfWindowWatcherItemDelegate::ItemSelected(const ui::Event& event) {
 }
 
 base::string16 ShelfWindowWatcherItemDelegate::GetTitle() {
-  return GetLauncherItemDetailsForWindow(window_)->title;
+  return GetShelfItemDetailsForWindow(window_)->title;
 }
 
 ui::MenuModel* ShelfWindowWatcherItemDelegate::CreateContextMenu(
     aura::Window* root_window) {
-  // TODO(simonhong): Create ShelfItemContextMenu.
-  return NULL;
+  ash::ShelfItem item = *(model_->ItemByID(GetShelfIDForWindow(window_)));
+  return Shell::GetInstance()->delegate()->CreateContextMenu(root_window,
+                                                             this,
+                                                             &item);
 }
 
 ShelfMenuModel* ShelfWindowWatcherItemDelegate::CreateApplicationMenu(

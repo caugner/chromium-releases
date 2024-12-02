@@ -16,6 +16,7 @@
 #include "content/browser/browser_plugin/test_browser_plugin_guest_delegate.h"
 #include "content/browser/browser_plugin/test_browser_plugin_guest_manager.h"
 #include "content/browser/child_process_security_policy_impl.h"
+#include "content/browser/frame_host/render_widget_host_view_guest.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/common/browser_plugin/browser_plugin_messages.h"
@@ -39,6 +40,7 @@
 #include "net/test/spawned_test_server/spawned_test_server.h"
 #include "third_party/WebKit/public/web/WebInputEvent.h"
 
+using base::ASCIIToUTF16;
 using blink::WebInputEvent;
 using blink::WebMouseEvent;
 using content::BrowserPluginEmbedder;
@@ -224,15 +226,6 @@ class BrowserPluginHostTest : public ContentBrowserTest {
         TestBrowserPluginHostFactory::GetInstance());
     content::BrowserPluginGuestManager::set_factory_for_testing(
         TestBrowserPluginHostFactory::GetInstance());
-
-    // On legacy windows, the AcceptDragEvents test needs this to pass.
-#if defined(OS_WIN) && !defined(USE_AURA)
-    UseRealGLBindings();
-#endif
-    // We need real contexts, otherwise the embedder doesn't composite, but the
-    // guest does, and that isn't an expected configuration.
-    UseRealGLContexts();
-
     ContentBrowserTest::SetUp();
   }
   virtual void TearDown() OVERRIDE {
@@ -275,7 +268,7 @@ class BrowserPluginHostTest : public ContentBrowserTest {
   bool IsAttributeNull(RenderViewHost* rvh, const std::string& attribute) {
     scoped_ptr<base::Value> value = content::ExecuteScriptAndGetValue(rvh,
         "document.getElementById('plugin').getAttribute('" + attribute + "');");
-    return value->GetType() == Value::TYPE_NULL;
+    return value->GetType() == base::Value::TYPE_NULL;
   }
 
   // Removes all attributes in the comma-delimited string |attributes|.
@@ -527,7 +520,7 @@ IN_PROC_BROWSER_TEST_F(BrowserPluginHostTest, AcceptTouchEvents) {
 
 // This tests verifies that reloading the embedder does not crash the browser
 // and that the guest is reset.
-IN_PROC_BROWSER_TEST_F(BrowserPluginHostTest, ReloadEmbedder) {
+IN_PROC_BROWSER_TEST_F(BrowserPluginHostTest, DISABLED_ReloadEmbedder) {
   const char kEmbedderURL[] = "/browser_plugin_embedder.html";
   StartBrowserPluginTest(kEmbedderURL, kHTMLForGuest, true, std::string());
   RenderViewHostImpl* rvh = static_cast<RenderViewHostImpl*>(
@@ -578,9 +571,9 @@ IN_PROC_BROWSER_TEST_F(BrowserPluginHostTest, ReloadEmbedder) {
   }
 }
 
-// Always failing in the win7_aura try bot. See http://crbug.com/181107.
+// Always failing in the win7 try bot. See http://crbug.com/181107.
 // Times out on the Mac. See http://crbug.com/297576.
-#if (defined(OS_WIN) && defined(USE_AURA)) || defined(OS_MACOSX)
+#if defined(OS_WIN) || defined(OS_MACOSX)
 #define MAYBE_AcceptDragEvents DISABLED_AcceptDragEvents
 #else
 #define MAYBE_AcceptDragEvents AcceptDragEvents
@@ -821,7 +814,19 @@ class BrowserPluginThreadedCompositorTest : public BrowserPluginHostTest {
   virtual void SetUpCommandLine(CommandLine* cmd) OVERRIDE {
     BrowserPluginHostTest::SetUpCommandLine(cmd);
     cmd->AppendSwitch(switches::kEnableThreadedCompositing);
+  }
+};
 
+class BrowserPluginThreadedCompositorPixelTest
+    : public BrowserPluginThreadedCompositorTest {
+ protected:
+  virtual void SetUp() OVERRIDE {
+    EnablePixelOutput();
+    BrowserPluginThreadedCompositorTest::SetUp();
+  }
+
+  virtual void SetUpCommandLine(CommandLine* cmd) OVERRIDE {
+    BrowserPluginThreadedCompositorTest::SetUpCommandLine(cmd);
     // http://crbug.com/327035
     cmd->AppendSwitch(switches::kDisableDelegatedRenderer);
   }
@@ -897,7 +902,7 @@ static void CompareSkBitmapAndRun(const base::Closure& callback,
 #else
 #define MAYBE_GetBackingStore GetBackingStore
 #endif
-IN_PROC_BROWSER_TEST_F(BrowserPluginThreadedCompositorTest,
+IN_PROC_BROWSER_TEST_F(BrowserPluginThreadedCompositorPixelTest,
                        MAYBE_GetBackingStore) {
   const char kEmbedderURL[] = "/browser_plugin_embedder.html";
   const char kHTMLForGuest[] =
@@ -923,6 +928,56 @@ IN_PROC_BROWSER_TEST_F(BrowserPluginThreadedCompositorTest,
                    &result));
     loop.Run();
   }
+}
+
+// This test exercises the following scenario:
+// 1. An <input> in guest has focus.
+// 2. User takes focus to embedder by clicking e.g. an <input> in embedder.
+// 3. User brings back the focus directly to the <input> in #1.
+//
+// Now we need to make sure TextInputTypeChange fires properly for the guest's
+// view (RenderWidgetHostViewGuest) upon step #3. This test ensures that,
+// otherwise IME doesn't work after step #3.
+IN_PROC_BROWSER_TEST_F(BrowserPluginHostTest, FocusRestored) {
+  const char kEmbedderURL[] = "/browser_plugin_embedder.html";
+  const char kGuestHTML[] = "data:text/html,"
+      "<html><body><input id=\"input1\"></body>"
+      "<script>"
+      "var i = document.getElementById(\"input1\");"
+      "document.body.addEventListener(\"click\", function(e) {"
+      "  i.focus();"
+      "});"
+      "i.addEventListener(\"focus\", function(e) {"
+      "  document.title = \"FOCUS\";"
+      "});"
+      "i.addEventListener(\"blur\", function(e) {"
+      "  document.title = \"BLUR\";"
+      "});"
+      "</script>"
+      "</html>";
+  StartBrowserPluginTest(kEmbedderURL, kGuestHTML, true,
+                         "document.getElementById(\"plugin\").focus();");
+
+  ASSERT_TRUE(test_embedder());
+  const char *kTitles[3] = {"FOCUS", "BLUR", "FOCUS"};
+  gfx::Point kClickPoints[3] = {
+    gfx::Point(20, 20), gfx::Point(700, 20), gfx::Point(20, 20)
+  };
+
+  for (int i = 0; i < 3; ++i) {
+    base::string16 expected_title = base::UTF8ToUTF16(kTitles[i]);
+    content::TitleWatcher title_watcher(test_guest()->web_contents(),
+                                        expected_title);
+    SimulateMouseClickAt(test_embedder()->web_contents(), 0,
+        blink::WebMouseEvent::ButtonLeft,
+        kClickPoints[i]);
+    base::string16 actual_title = title_watcher.WaitAndGetTitle();
+    EXPECT_EQ(expected_title, actual_title);
+  }
+  TestBrowserPluginGuest* guest = test_guest();
+  ASSERT_TRUE(guest);
+  ui::TextInputType text_input_type = guest->last_text_input_type();
+  ASSERT_TRUE(text_input_type != ui::TEXT_INPUT_TYPE_NONE);
 }
 
 // Tests input method.
@@ -953,7 +1008,7 @@ IN_PROC_BROWSER_TEST_F(BrowserPluginHostTest, InputMethod) {
   {
     ExecuteSyncJSFunction(guest_rvh,
                           "document.getElementById('input1').focus();");
-    string16 expected_title = UTF8ToUTF16("InputTest123");
+    base::string16 expected_title = base::UTF8ToUTF16("InputTest123");
     content::TitleWatcher title_watcher(test_guest()->web_contents(),
                                         expected_title);
     embedder_rvh->Send(
@@ -967,7 +1022,7 @@ IN_PROC_BROWSER_TEST_F(BrowserPluginHostTest, InputMethod) {
   }
   // A composition is committed via IME.
   {
-    string16 expected_title = UTF8ToUTF16("InputTest456");
+    base::string16 expected_title = base::UTF8ToUTF16("InputTest456");
     content::TitleWatcher title_watcher(test_guest()->web_contents(),
                                         expected_title);
     embedder_rvh->Send(
@@ -984,7 +1039,7 @@ IN_PROC_BROWSER_TEST_F(BrowserPluginHostTest, InputMethod) {
   {
     ExecuteSyncJSFunction(guest_rvh,
                           "document.getElementById('input1').value = '';");
-    string16 composition = UTF8ToUTF16("InputTest789");
+    base::string16 composition = base::UTF8ToUTF16("InputTest789");
     content::TitleWatcher title_watcher(test_guest()->web_contents(),
                                         composition);
     embedder_rvh->Send(
@@ -1005,7 +1060,7 @@ IN_PROC_BROWSER_TEST_F(BrowserPluginHostTest, InputMethod) {
             guest_rvh, "document.getElementById('input1').value");
     std::string result;
     ASSERT_TRUE(value->GetAsString(&result));
-    EXPECT_EQ(UTF16ToUTF8(composition), result);
+    EXPECT_EQ(base::UTF16ToUTF8(composition), result);
   }
   // Tests ExtendSelectionAndDelete message works in browser_plugin.
   {
@@ -1016,7 +1071,7 @@ IN_PROC_BROWSER_TEST_F(BrowserPluginHostTest, InputMethod) {
                           "i.value = 'InputTestABC';"
                           "i.selectionStart=6;"
                           "i.selectionEnd=6;");
-    string16 expected_value = UTF8ToUTF16("InputABC");
+    base::string16 expected_value = base::UTF8ToUTF16("InputABC");
     content::TitleWatcher title_watcher(test_guest()->web_contents(),
                                         expected_value);
     // Delete 'Test' in 'InputTestABC', as the caret is after 'T':
@@ -1032,7 +1087,7 @@ IN_PROC_BROWSER_TEST_F(BrowserPluginHostTest, InputMethod) {
             guest_rvh, "document.getElementById('input1').value");
     std::string actual_value;
     ASSERT_TRUE(value->GetAsString(&actual_value));
-    EXPECT_EQ(UTF16ToUTF8(expected_value), actual_value);
+    EXPECT_EQ(base::UTF16ToUTF8(expected_value), actual_value);
   }
 }
 

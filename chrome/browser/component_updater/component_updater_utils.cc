@@ -3,15 +3,21 @@
 // found in the LICENSE file.
 
 #include "chrome/browser/component_updater/component_updater_utils.h"
+
 #include "base/file_util.h"
 #include "base/files/file_path.h"
 #include "base/guid.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/string_piece.h"
+#include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/sys_info.h"
 #include "base/win/windows_version.h"
+#include "chrome/browser/component_updater/component_updater_service.h"
 #include "chrome/browser/component_updater/crx_update_item.h"
+#include "chrome/browser/omaha_query_params/omaha_query_params.h"
 #include "chrome/common/chrome_version_info.h"
-#include "chrome/common/omaha_query_params/omaha_query_params.h"
+#include "extensions/common/extension.h"
 #include "net/base/load_flags.h"
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_request_context_getter.h"
@@ -37,16 +43,18 @@ std::string BuildProtocolRequest(const std::string& request_body,
   base::StringAppendF(
       &request,
       "version=\"%s-%s\" prodversion=\"%s\" "
-      "requestid=\"{%s}\" updaterchannel=\"%s\" prodchannel=\"%s\" "
+      "requestid=\"{%s}\" lang=\"%s\" updaterchannel=\"%s\" prodchannel=\"%s\" "
       "os=\"%s\" arch=\"%s\" nacl_arch=\"%s\"",
-      prod_id.c_str(), chrome_version.c_str(),        // "version"
-      chrome_version.c_str(),                         // "prodversion"
-      base::GenerateGUID().c_str(),                   // "requestid"
-      chrome::OmahaQueryParams::GetChannelString(),   // "updaterchannel"
-      chrome::OmahaQueryParams::GetChannelString(),   // "prodchannel"
-      chrome::OmahaQueryParams::getOS(),              // "os"
-      chrome::OmahaQueryParams::getArch(),            // "arch"
-      chrome::OmahaQueryParams::getNaclArch());       // "nacl_arch"
+      prod_id.c_str(),
+      chrome_version.c_str(),                        // "version"
+      chrome_version.c_str(),                        // "prodversion"
+      base::GenerateGUID().c_str(),                  // "requestid"
+      chrome::OmahaQueryParams::GetLang(),           // "lang",
+      chrome::OmahaQueryParams::GetChannelString(),  // "updaterchannel"
+      chrome::OmahaQueryParams::GetChannelString(),  // "prodchannel"
+      chrome::OmahaQueryParams::GetOS(),             // "os"
+      chrome::OmahaQueryParams::GetArch(),           // "arch"
+      chrome::OmahaQueryParams::GetNaclArch());      // "nacl_arch"
 #if defined(OS_WIN)
     const bool is_wow64(
         base::win::OSInfo::GetInstance()->wow64_status() ==
@@ -141,6 +149,28 @@ bool DeleteFileAndEmptyParentDirectory(const base::FilePath& filepath) {
     return true;
 
   return base::DeleteFile(dirname, false);
+}
+
+// Produces an extension-like friendly id.
+std::string HexStringToID(const std::string& hexstr) {
+  std::string id;
+  for (size_t i = 0; i < hexstr.size(); ++i) {
+    int val = 0;
+    if (base::HexStringToInt(base::StringPiece(hexstr.begin() + i,
+                                               hexstr.begin() + i + 1),
+                             &val)) {
+      id.append(1, val + 'a');
+    } else {
+      id.append(1, 'a');
+    }
+  }
+  DCHECK(extensions::Extension::IdIsValid(id));
+  return id;
+}
+
+std::string GetCrxComponentID(const CrxComponent& component) {
+  return HexStringToID(StringToLowerASCII(base::HexEncode(&component.pk_hash[0],
+                       component.pk_hash.size()/2)));
 }
 
 }  // namespace component_updater

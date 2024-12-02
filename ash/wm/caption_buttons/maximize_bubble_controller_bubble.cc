@@ -19,7 +19,7 @@
 #include "ui/views/controls/label.h"
 #include "ui/views/layout/box_layout.h"
 #include "ui/views/mouse_watcher.h"
-
+#include "ui/wm/public/masked_window_targeter.h"
 
 namespace ash {
 
@@ -76,8 +76,8 @@ BubbleContentsView::BubbleContentsView(
   const SkColor kBubbleTextColor = SK_ColorWHITE;
   label_view_->SetEnabledColor(kBubbleTextColor);
   const int kLabelSpacing = 4;
-  label_view_->set_border(views::Border::CreateEmptyBorder(
-      kLabelSpacing, 0, kLabelSpacing, 0));
+  label_view_->SetBorder(
+      views::Border::CreateEmptyBorder(kLabelSpacing, 0, kLabelSpacing, 0));
   AddChildView(label_view_);
 }
 
@@ -262,6 +262,36 @@ gfx::Size MaximizeBubbleBorder::GetMinimumSize() const {
                    std::max(kLineWidth, kArrowHeight) + kLineWidth);
 }
 
+namespace {
+
+// MaximizebubbleTargeter  -----------------------------------------------------
+
+// Window targeter used for the bubble.
+class MaximizeBubbleTargeter : public ::wm::MaskedWindowTargeter {
+ public:
+  MaximizeBubbleTargeter(aura::Window* window,
+                         MaximizeBubbleBorder* border)
+      : ::wm::MaskedWindowTargeter(window),
+        border_(border) {
+  }
+
+  virtual ~MaximizeBubbleTargeter() {}
+
+ private:
+  // ::wm::MaskedWindowTargeter:
+  virtual bool GetHitTestMask(aura::Window* window,
+                              gfx::Path* mask) const OVERRIDE {
+    border_->GetMask(mask);
+    return true;
+  }
+
+  MaximizeBubbleBorder* border_;
+
+  DISALLOW_COPY_AND_ASSIGN(MaximizeBubbleTargeter);
+};
+
+}  // namespace
+
 
 // BubbleMouseWatcherHost -----------------------------------------------------
 
@@ -348,7 +378,8 @@ MaximizeBubbleControllerBubble::MaximizeBubbleControllerBubble(
   bubble_widget_->non_client_view()->frame_view()->set_background(NULL);
 
   bubble_border_ = new MaximizeBubbleBorder(this, GetAnchorView());
-  GetBubbleFrameView()->SetBubbleBorder(bubble_border_);
+  GetBubbleFrameView()->SetBubbleBorder(
+      scoped_ptr<views::BubbleBorder>(bubble_border_));
   GetBubbleFrameView()->set_background(NULL);
 
   // Recalculate size with new border.
@@ -358,6 +389,10 @@ MaximizeBubbleControllerBubble::MaximizeBubbleControllerBubble(
     GetWidget()->Show();
   else
     StartFade(true);
+
+  aura::Window* window = bubble_widget_->GetNativeWindow();
+  window->SetEventTargeter(scoped_ptr<ui::EventTargeter>(
+      new MaximizeBubbleTargeter(window, bubble_border_)));
 
   ash::Shell::GetInstance()->metrics()->RecordUserMetricsAction(
       ash::UMA_WINDOW_MAXIMIZE_BUTTON_SHOW_BUBBLE);

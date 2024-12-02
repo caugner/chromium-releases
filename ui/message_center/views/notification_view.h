@@ -38,7 +38,6 @@ class MESSAGE_CENTER_EXPORT NotificationView : public MessageView,
   // |controller| may be NULL, but has to be set before the view is shown.
   static NotificationView* Create(MessageCenterController* controller,
                                   const Notification& notification,
-                                  bool expanded,
                                   bool top_level);
 
     virtual ~NotificationView();
@@ -60,9 +59,6 @@ class MESSAGE_CENTER_EXPORT NotificationView : public MessageView,
   virtual void ClickOnNotification(const std::string& notification_id) OVERRIDE;
   virtual void RemoveNotification(const std::string& notification_id,
                                   bool by_user) OVERRIDE;
-  virtual void DisableNotificationsFromThisSource(
-      const NotifierId& notifier_id) OVERRIDE;
-  virtual void ShowNotifierSettingsBubble() OVERRIDE;
 
   void set_controller(MessageCenterController* controller) {
     controller_ = controller;
@@ -70,12 +66,9 @@ class MESSAGE_CENTER_EXPORT NotificationView : public MessageView,
 
  protected:
   NotificationView(MessageCenterController* controller,
-                   const Notification& notification,
-                   bool expanded);
+                   const Notification& notification);
 
  private:
-  bool IsExpansionNeeded(int width);
-  bool IsMessageExpansionNeeded(int width);
   int GetMessageLineLimit(int width);
   int GetMessageLines(int width, int limit);
   int GetMessageHeight(int width, int limit);
@@ -84,10 +77,8 @@ class MESSAGE_CENTER_EXPORT NotificationView : public MessageView,
 
   // Describes whether the view should display a hand pointer or not.
   bool clickable_;
-  bool is_expanded_;
 
   // Weak references to NotificationView descendants owned by their parents.
-  views::View* background_view_;
   views::View* top_view_;
   BoundedLabel* title_view_;
   BoundedLabel* message_view_;
@@ -98,7 +89,6 @@ class MESSAGE_CENTER_EXPORT NotificationView : public MessageView,
   views::View* image_view_;
   views::ProgressBar* progress_bar_view_;
   std::vector<views::View*> action_buttons_;
-  PaddedButton* expand_button_;
 
   DISALLOW_COPY_AND_ASSIGN(NotificationView);
 };

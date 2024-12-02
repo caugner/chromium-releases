@@ -23,6 +23,7 @@
 #include "ui/message_center/message_center_util.h"
 #include "ui/message_center/notification.h"
 #include "ui/message_center/notification_list.h"
+#include "ui/message_center/views/message_view_context_menu_controller.h"
 #include "ui/message_center/views/notification_view.h"
 #include "ui/message_center/views/toast_contents_view.h"
 #include "ui/views/background.h"
@@ -68,6 +69,7 @@ MessagePopupCollection::MessagePopupCollection(gfx::NativeView parent,
       latest_toast_entered_(NULL),
       user_is_closing_toasts_by_clicking_(false),
       first_item_has_no_margin_(first_item_has_no_margin),
+      context_menu_controller_(new MessageViewContextMenuController(this)),
       weak_factory_(this) {
   DCHECK(message_center_);
   defer_timer_.reset(new base::OneShotTimer<MessagePopupCollection>);
@@ -116,13 +118,10 @@ void MessagePopupCollection::RemoveNotification(
   message_center_->RemoveNotification(notification_id, by_user);
 }
 
-void MessagePopupCollection::DisableNotificationsFromThisSource(
-    const NotifierId& notifier_id) {
-  message_center_->DisableNotificationsByNotifier(notifier_id);
-}
-
-void MessagePopupCollection::ShowNotifierSettingsBubble() {
-  tray_->ShowNotifierSettingsBubble();
+scoped_ptr<ui::MenuModel> MessagePopupCollection::CreateMenuModel(
+    const NotifierId& notifier_id,
+    const base::string16& display_source) {
+  return tray_->CreateNotificationMenuModel(notifier_id, display_source);
 }
 
 bool MessagePopupCollection::HasClickedListener(
@@ -134,29 +133,6 @@ void MessagePopupCollection::ClickOnNotificationButton(
     const std::string& notification_id,
     int button_index) {
   message_center_->ClickOnNotificationButton(notification_id, button_index);
-}
-
-void MessagePopupCollection::ExpandNotification(
-    const std::string& notification_id) {
-  message_center_->ExpandNotification(notification_id);
-}
-
-void MessagePopupCollection::GroupBodyClicked(
-    const std::string& last_notification_id) {
-  // No group views in popup collection.
-  NOTREACHED();
-}
-
-// When clicked on the "N more" button, perform some reasonable action.
-// TODO(dimich): find out what the reasonable action could be.
-void MessagePopupCollection::ExpandGroup(const NotifierId& notifier_id) {
-  // No group views in popup collection.
-  NOTREACHED();
-}
-
-void MessagePopupCollection::RemoveGroup(const NotifierId& notifier_id) {
-  // No group views in popup collection.
-  NOTREACHED();
 }
 
 void MessagePopupCollection::MarkAllPopupsShown() {
@@ -186,14 +162,11 @@ void MessagePopupCollection::UpdateWidgets() {
     if (FindToast((*iter)->id()))
       continue;
 
-    bool expanded = true;
-    if (IsExperimentalNotificationUIEnabled())
-      expanded = (*iter)->is_expanded();
     NotificationView* view =
         NotificationView::Create(NULL,
                                  *(*iter),
-                                 expanded,
                                  true); // Create top-level notification.
+    view->set_context_menu_controller(context_menu_controller_.get());
     int view_height = ToastContentsView::GetToastSizeForView(view).height();
     int height_available = top_down ? work_area_.bottom() - base : base;
 
@@ -499,10 +472,6 @@ void MessagePopupCollection::OnNotificationUpdated(
     if ((*iter)->id() != notification_id)
       continue;
 
-    bool expanded = true;
-    if (IsExperimentalNotificationUIEnabled())
-      expanded = (*iter)->is_expanded();
-
     const RichNotificationData& optional_fields =
         (*iter)->rich_notification_data();
     bool a11y_feedback_for_updates =
@@ -511,8 +480,8 @@ void MessagePopupCollection::OnNotificationUpdated(
     NotificationView* view =
         NotificationView::Create(*toast_iter,
                                  *(*iter),
-                                 expanded,
                                  true); // Create top-level notification.
+    view->set_context_menu_controller(context_menu_controller_.get());
     (*toast_iter)->SetContents(view, a11y_feedback_for_updates);
     updated = true;
   }

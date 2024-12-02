@@ -79,7 +79,7 @@ GlobalErrorBubbleView::GlobalErrorBubbleView(
   scoped_ptr<views::Label> title_label(new views::Label(title_string));
   title_label->SetMultiLine(true);
   title_label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-  title_label->SetFont(rb.GetFont(ui::ResourceBundle::MediumFont));
+  title_label->SetFontList(rb.GetFontList(ui::ResourceBundle::MediumFont));
 
   std::vector<base::string16> message_strings(error_->GetBubbleViewMessages());
   std::vector<views::Label*> message_labels;
@@ -94,7 +94,7 @@ GlobalErrorBubbleView::GlobalErrorBubbleView(
   base::string16 accept_string(error_->GetBubbleViewAcceptButtonLabel());
   scoped_ptr<views::LabelButton> accept_button(
       new views::LabelButton(this, accept_string));
-  accept_button->SetStyle(views::Button::STYLE_NATIVE_TEXTBUTTON);
+  accept_button->SetStyle(views::Button::STYLE_BUTTON);
   accept_button->SetIsDefault(true);
   accept_button->set_tag(TAG_ACCEPT_BUTTON);
 
@@ -102,7 +102,7 @@ GlobalErrorBubbleView::GlobalErrorBubbleView(
   scoped_ptr<views::LabelButton> cancel_button;
   if (!cancel_string.empty()) {
     cancel_button.reset(new views::LabelButton(this, cancel_string));
-    cancel_button->SetStyle(views::Button::STYLE_NATIVE_TEXTBUTTON);
+    cancel_button->SetStyle(views::Button::STYLE_BUTTON);
     cancel_button->set_tag(TAG_CANCEL_BUTTON);
   }
 

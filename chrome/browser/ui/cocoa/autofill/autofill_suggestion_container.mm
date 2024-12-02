@@ -54,6 +54,34 @@ const CGFloat kLabelWithInputTopPadding = 5.0;
 @end
 
 
+@interface AutofillSuggestionView : NSView {
+ @private
+  // The main input field - only view not ignoring mouse events.
+  NSView* inputField_;
+}
+
+@property (assign, nonatomic) NSView* inputField;
+
+@end
+
+
+// The suggestion container should ignore any mouse events unless they occur
+// within the bounds of an editable field.
+@implementation AutofillSuggestionView
+
+@synthesize inputField = inputField_;
+
+- (NSView*)hitTest:(NSPoint)point {
+  NSView* hitView = [super hitTest:point];
+  if ([hitView isDescendantOf:inputField_])
+    return hitView;
+
+  return nil;
+}
+
+@end
+
+
 @implementation IconAttachmentCell
 
 - (NSPoint)cellBaselineOffset {
@@ -78,6 +106,17 @@ const CGFloat kLabelWithInputTopPadding = 5.0;
   CGFloat lineHeight = [font ascender];
   baseline_ = std::floor((lineHeight - [[self image] size].height) / 2.0);
 }
+
+@end
+
+
+@interface AutofillSuggestionContainer (Private)
+
+// Set the main suggestion text and the corresponding |icon|.
+// Attempts to wrap the text if |wrapText| is set.
+- (void)setSuggestionText:(NSString*)line
+                     icon:(NSImage*)icon
+                 wrapText:(BOOL)wrapText;
 
 @end
 
@@ -119,13 +158,17 @@ const CGFloat kLabelWithInputTopPadding = 5.0;
   [spacer_ setBoxType:NSBoxSeparator];
   [spacer_ setBorderType:NSLineBorder];
 
-  base::scoped_nsobject<NSView> view([[NSView alloc] initWithFrame:NSZeroRect]);
+  base::scoped_nsobject<AutofillSuggestionView> view(
+      [[AutofillSuggestionView alloc] initWithFrame:NSZeroRect]);
   [view setSubviews:
       @[ label_, inputField_, spacer_ ]];
+  [view setInputField:inputField_];
   [self setView:view];
 }
 
-- (void)setSuggestionText:(NSString*)line icon:(NSImage*)icon {
+- (void)setSuggestionText:(NSString*)line
+                     icon:(NSImage*)icon
+                 wrapText:(BOOL)wrapText {
   [label_ setString:@""];
 
   if ([icon size].width) {
@@ -151,10 +194,30 @@ const CGFloat kLabelWithInputTopPadding = 5.0;
   [[label_ textStorage] appendAttributedString:str1];
 
   [label_ setVerticallyResizable:YES];
-  [label_ setHorizontallyResizable:NO];
-  [label_ setFrameSize:NSMakeSize(2 * autofill::kFieldWidth, kInfiniteSize)];
+  [label_ setHorizontallyResizable:!wrapText];
+  if (wrapText) {
+    CGFloat availableWidth =
+        4 * autofill::kFieldWidth - [inputField_ frame].size.width;
+    [label_ setFrameSize:NSMakeSize(availableWidth, kInfiniteSize)];
+  } else {
+    [label_ setFrameSize:NSMakeSize(kInfiniteSize, kInfiniteSize)];
+  }
+  [[label_ layoutManager] ensureLayoutForTextContainer:[label_ textContainer]];
   [label_ sizeToFit];
 }
+
+- (void)
+    setSuggestionWithVerticallyCompactText:(NSString*)verticallyCompactText
+                   horizontallyCompactText:(NSString*)horizontallyCompactText
+                                      icon:(NSImage*)icon
+                                  maxWidth:(CGFloat)maxWidth {
+  // Prefer the vertically compact text when it fits. If it doesn't fit, fall
+  // back to the horizontally compact text.
+  [self setSuggestionText:verticallyCompactText icon:icon wrapText:NO];
+  if ([self preferredSize].width > maxWidth)
+    [self setSuggestionText:horizontallyCompactText icon:icon wrapText:YES];
+}
+
 
 - (void)showInputField:(NSString*)text withIcon:(NSImage*)icon {
   [[inputField_ cell] setPlaceholderString:text];

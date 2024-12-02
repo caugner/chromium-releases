@@ -11,7 +11,10 @@
 
 #define TELEMETRY 1
 
+#include "base/command_line.h"
 #include "base/environment.h"
+#include "base/path_service.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/test/nacl/nacl_browsertest_util.h"
 
 namespace {
@@ -60,8 +63,53 @@ NACL_BROWSER_TEST_F(NaClBrowserTest, ProgressEvents, {
   RunNaClIntegrationTest(FILE_PATH_LITERAL("ppapi_progress_events.html"));
 })
 
+// Note: currently not run on PNaCl because crash throttling causes the last few
+// tests to fail for the wrong reasons.  Enabling this test would also require
+// creating a new set of manifests because shared NaCl/PNaCl manifests are not
+// allowed.  Also not run on GLibc because it's a large test that is at risk of
+// causing timeouts.
+// crbug/338444
+#if defined(OS_WIN)
+#define MAYBE_Bad DISABLED_Bad
+#else
+#define MAYBE_Bad Bad
+#endif
+IN_PROC_BROWSER_TEST_F(NaClBrowserTestNewlib, MAYBE_Bad) {
+  RunNaClIntegrationTest(FILE_PATH_LITERAL("ppapi_bad.html"));
+}
+
+// partially_invalid.c does not have an ARM version of its asm.
+#if !defined(__arm__)
+IN_PROC_BROWSER_TEST_F(NaClBrowserTestNewlib, BadNative) {
+  RunNaClIntegrationTest(FILE_PATH_LITERAL("ppapi_bad_native.html"));
+}
+#endif
+
 NACL_BROWSER_TEST_F(NaClBrowserTest, MAYBE_Crash, {
   RunNaClIntegrationTest(FILE_PATH_LITERAL("ppapi_crash.html"));
+})
+
+// PNaCl version does not work.
+IN_PROC_BROWSER_TEST_F(NaClBrowserTestNewlib, ManifestFile) {
+  RunNaClIntegrationTest(FILE_PATH_LITERAL("pm_manifest_file_test.html"));
+}
+IN_PROC_BROWSER_TEST_F(NaClBrowserTestGLibc, ManifestFile) {
+  RunNaClIntegrationTest(FILE_PATH_LITERAL("pm_manifest_file_test.html"));
+}
+IN_PROC_BROWSER_TEST_F(NaClBrowserTestNewlib, PreInitManifestFile) {
+  RunNaClIntegrationTest(FILE_PATH_LITERAL(
+      "pm_pre_init_manifest_file_test.html"));
+}
+IN_PROC_BROWSER_TEST_F(NaClBrowserTestGLibc, PreInitManifestFile) {
+  RunNaClIntegrationTest(FILE_PATH_LITERAL(
+      "pm_pre_init_manifest_file_test.html"));
+}
+IN_PROC_BROWSER_TEST_F(NaClBrowserTestNewlib, IrtManifestFile) {
+  RunNaClIntegrationTest(FILE_PATH_LITERAL("irt_manifest_file_test.html"));
+}
+
+NACL_BROWSER_TEST_F(NaClBrowserTest, Nameservice, {
+  RunNaClIntegrationTest(FILE_PATH_LITERAL("pm_nameservice_test.html"));
 })
 
 // Some versions of Visual Studio does not like preprocessor
@@ -133,6 +181,10 @@ IN_PROC_BROWSER_TEST_F(NaClBrowserTestStatic, SameOriginCookie) {
 
 IN_PROC_BROWSER_TEST_F(NaClBrowserTestStatic, CORSNoCookie) {
   RunLoadTest(FILE_PATH_LITERAL("cross_origin/cors_no_cookie.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(NaClBrowserTestStatic, RelativeManifest) {
+  RunLoadTest(FILE_PATH_LITERAL("manifest/relative_manifest.html"));
 }
 
 IN_PROC_BROWSER_TEST_F(NaClBrowserTestPnacl,
@@ -235,6 +287,28 @@ IN_PROC_BROWSER_TEST_F(NaClBrowserTestNewlibStderrPM, RedirectFg1) {
 IN_PROC_BROWSER_TEST_F(NaClBrowserTestNewlibStderrPM, RedirectBg1) {
   RunNaClIntegrationTest(FILE_PATH_LITERAL(
       "pm_redir_test.html?stream=stderr&thread=bg&delay_us=1000000"));
+}
+
+class NaClBrowserTestNewlibExtension : public NaClBrowserTestNewlib {
+ public:
+  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+    NaClBrowserTestNewlib::SetUpCommandLine(command_line);
+    base::FilePath src_root;
+    ASSERT_TRUE(PathService::Get(base::DIR_SOURCE_ROOT, &src_root));
+
+    base::FilePath document_root;
+    ASSERT_TRUE(GetDocumentRoot(&document_root));
+
+    // Document root is relative to source root, and source root may not be CWD.
+    command_line->AppendSwitchPath(switches::kLoadExtension,
+                                   src_root.Append(document_root));
+  }
+};
+
+// TODO(ncbray) support glibc and PNaCl
+IN_PROC_BROWSER_TEST_F(NaClBrowserTestNewlibExtension, MimeHandler) {
+  RunNaClIntegrationTest(FILE_PATH_LITERAL(
+      "ppapi_extension_mime_handler.html"));
 }
 
 }  // namespace

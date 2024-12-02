@@ -16,13 +16,7 @@ namespace gcm {
 BrowserContextKeyedService* FakeGCMProfileService::Build(
     content::BrowserContext* context) {
   Profile* profile = static_cast<Profile*>(context);
-
   return new FakeGCMProfileService(profile);
-}
-
-// static
-void FakeGCMProfileService::EnableGCMForTesting() {
-  GCMProfileService::enable_gcm_for_testing_ = true;
 }
 
 FakeGCMProfileService::FakeGCMProfileService(Profile* profile)

@@ -12,6 +12,7 @@
 #include "chrome/renderer/extensions/dispatcher.h"
 #include "content/public/renderer/document_state.h"
 #include "content/public/renderer/navigation_state.h"
+#include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_view.h"
 #include "extensions/common/constants.h"
 #include "third_party/WebKit/public/platform/WebURL.h"
@@ -142,10 +143,11 @@ ContentSetting GetContentSettingFromRules(
 }  // namespace
 
 ContentSettingsObserver::ContentSettingsObserver(
-    content::RenderView* render_view,
+    content::RenderFrame* render_frame,
     extensions::Dispatcher* extension_dispatcher)
-    : content::RenderViewObserver(render_view),
-      content::RenderViewObserverTracker<ContentSettingsObserver>(render_view),
+    : content::RenderFrameObserver(render_frame),
+      content::RenderFrameObserverTracker<ContentSettingsObserver>(
+          render_frame),
       extension_dispatcher_(extension_dispatcher),
       allow_displaying_insecure_content_(false),
       allow_running_insecure_content_(false),
@@ -153,7 +155,7 @@ ContentSettingsObserver::ContentSettingsObserver(
       is_interstitial_page_(false),
       npapi_plugins_blocked_(false) {
   ClearBlockedContentSettings();
-  render_view->GetWebView()->setPermissionClient(this);
+  render_frame->GetWebFrame()->setPermissionClient(this);
 }
 
 ContentSettingsObserver::~ContentSettingsObserver() {
@@ -191,6 +193,7 @@ bool ContentSettingsObserver::OnMessageReceived(const IPC::Message& message) {
                         OnSetAllowDisplayingInsecureContent)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_SetAllowRunningInsecureContent,
                         OnSetAllowRunningInsecureContent)
+    IPC_MESSAGE_HANDLER(ChromeViewMsg_ReloadFrame, OnReloadFrame);
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   if (handled)
@@ -205,8 +208,8 @@ bool ContentSettingsObserver::OnMessageReceived(const IPC::Message& message) {
   return false;
 }
 
-void ContentSettingsObserver::DidCommitProvisionalLoad(
-    WebFrame* frame, bool is_new_navigation) {
+void ContentSettingsObserver::DidCommitProvisionalLoad(bool is_new_navigation) {
+  WebFrame* frame = render_frame()->GetWebFrame();
   if (frame->parent())
     return;  // Not a top-level navigation.
 
@@ -227,7 +230,7 @@ void ContentSettingsObserver::DidCommitProvisionalLoad(
   // If we start failing this DCHECK, please makes sure we don't regress
   // this bug: http://code.google.com/p/chromium/issues/detail?id=79304
   DCHECK(frame->document().securityOrigin().toString() == "null" ||
-         !url.SchemeIs(chrome::kDataScheme));
+         !url.SchemeIs(content::kDataScheme));
 }
 
 bool ContentSettingsObserver::allowDatabase(WebFrame* frame,
@@ -375,8 +378,7 @@ bool ContentSettingsObserver::allowReadFromClipboard(WebFrame* frame,
   bool allowed = false;
   // TODO(dcheng): Should we consider a toURL() method on WebSecurityOrigin?
   Send(new ChromeViewHostMsg_CanTriggerClipboardRead(
-      routing_id(), GURL(frame->document().securityOrigin().toString().utf8()),
-      &allowed));
+      GURL(frame->document().securityOrigin().toString().utf8()), &allowed));
   return allowed;
 }
 
@@ -384,8 +386,7 @@ bool ContentSettingsObserver::allowWriteToClipboard(WebFrame* frame,
                                                     bool default_value) {
   bool allowed = false;
   Send(new ChromeViewHostMsg_CanTriggerClipboardWrite(
-      routing_id(), GURL(frame->document().securityOrigin().toString().utf8()),
-      &allowed));
+      GURL(frame->document().securityOrigin().toString().utf8()), &allowed));
   return allowed;
 }
 
@@ -395,7 +396,7 @@ bool ContentSettingsObserver::allowWebComponents(WebFrame* frame,
     return true;
 
   WebSecurityOrigin origin = frame->document().securityOrigin();
-  if (EqualsASCII(origin.protocol(), chrome::kChromeUIScheme))
+  if (EqualsASCII(origin.protocol(), content::kChromeUIScheme))
     return true;
 
   if (const extensions::Extension* extension = GetExtension(origin)) {
@@ -548,15 +549,6 @@ bool ContentSettingsObserver::allowRunningInsecureContent(
   return true;
 }
 
-bool ContentSettingsObserver::allowWebGLDebugRendererInfo(WebFrame* frame) {
-  bool allowed = false;
-  Send(new ChromeViewHostMsg_IsWebGLDebugRendererInfoAllowed(
-      routing_id(),
-      GURL(frame->top()->document().securityOrigin().toString().utf8()),
-      &allowed));
-  return allowed;
-}
-
 void ContentSettingsObserver::didNotAllowPlugins(WebFrame* frame) {
   DidBlockContentType(CONTENT_SETTINGS_TYPE_PLUGINS);
 }
@@ -584,9 +576,6 @@ void ContentSettingsObserver::OnNPAPINotSupported() {
 
 void ContentSettingsObserver::OnSetAllowDisplayingInsecureContent(bool allow) {
   allow_displaying_insecure_content_ = allow;
-  WebFrame* main_frame = render_view()->GetWebView()->mainFrame();
-  if (main_frame)
-    main_frame->reload();
 }
 
 void ContentSettingsObserver::OnSetAllowRunningInsecureContent(bool allow) {
@@ -594,6 +583,11 @@ void ContentSettingsObserver::OnSetAllowRunningInsecureContent(bool allow) {
   OnSetAllowDisplayingInsecureContent(allow);
 }
 
+void ContentSettingsObserver::OnReloadFrame() {
+  DCHECK(!render_frame()->GetWebFrame()->parent()) <<
+      "Should only be called on the main frame";
+  render_frame()->GetWebFrame()->reload();
+}
 
 void ContentSettingsObserver::ClearBlockedContentSettings() {
   for (size_t i = 0; i < arraysize(content_blocked_); ++i)
@@ -639,24 +633,24 @@ bool ContentSettingsObserver::IsWhitelistedForContentSettings(
   if (origin.isUnique())
     return false;  // Uninitialized document?
 
-  if (EqualsASCII(origin.protocol(), chrome::kChromeUIScheme))
+  if (EqualsASCII(origin.protocol(), content::kChromeUIScheme))
     return true;  // Browser UI elements should still work.
 
-  if (EqualsASCII(origin.protocol(), chrome::kChromeDevToolsScheme))
+  if (EqualsASCII(origin.protocol(), content::kChromeDevToolsScheme))
     return true;  // DevTools UI elements should still work.
 
   if (EqualsASCII(origin.protocol(), extensions::kExtensionScheme))
     return true;
 
   // TODO(creis, fsamuel): Remove this once the concept of swapped out
-  // RenderViews goes away.
+  // RenderFrames goes away.
   if (document_url == GURL(content::kSwappedOutURL))
     return true;
 
   // If the scheme is file:, an empty file name indicates a directory listing,
   // which requires JavaScript to function properly.
-  if (EqualsASCII(origin.protocol(), chrome::kFileScheme)) {
-    return document_url.SchemeIs(chrome::kFileScheme) &&
+  if (EqualsASCII(origin.protocol(), content::kFileScheme)) {
+    return document_url.SchemeIs(content::kFileScheme) &&
            document_url.ExtractFileName().empty();
   }
 

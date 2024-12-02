@@ -31,6 +31,7 @@ class GoogleUpdateSettings {
     AUTOMATIC_UPDATES   = 1,
     MANUAL_UPDATES_ONLY = 2,
     AUTO_UPDATES_ONLY   = 3,
+    UPDATE_POLICIES_COUNT
   };
 
   // Defines product data that is tracked/used by Google Update.
@@ -166,7 +167,7 @@ class GoogleUpdateSettings {
   // it is a multi-install product, in which case it will return "m",
   // "unknown-m", "dev-m", or "beta-m").
   static bool GetChromeChannelAndModifiers(bool system_install,
-                                           string16* channel);
+                                           base::string16* channel);
 
   // This method changes the Google Update "ap" value to move the installation
   // on to or off of one of the recovery channels.
@@ -227,9 +228,12 @@ class GoogleUpdateSettings {
   static UpdatePolicy GetAppUpdatePolicy(const std::wstring& app_guid,
                                          bool* is_overridden);
 
+  // Records UMA stats about Chrome's update policy.
+  static void RecordChromeUpdatePolicyHistograms();
+
   // Returns Google Update's uninstall command line, or an empty string if none
   // is found.
-  static string16 GetUninstallCommandLine(bool system_install);
+  static base::string16 GetUninstallCommandLine(bool system_install);
 
   // Returns the version of Google Update that is installed.
   static Version GetGoogleUpdateVersion(bool system_install);
@@ -266,7 +270,7 @@ class GoogleUpdateSettings {
   // (even if the label does not need to be set for this particular distribution
   // type).
   static bool SetExperimentLabels(bool system_install,
-                                  const string16& experiment_labels);
+                                  const base::string16& experiment_labels);
 
   // Reads the Google Update experiment_labels value in the ClientState key for
   // this Chrome product and writes it into |experiment_labels|. If the key or
@@ -275,7 +279,7 @@ class GoogleUpdateSettings {
   // this will do nothing to |experiment_labels|. This will return true if the
   // label did not exist, or was successfully read.
   static bool ReadExperimentLabels(bool system_install,
-                                   string16* experiment_labels);
+                                   base::string16* experiment_labels);
 
  private:
   DISALLOW_IMPLICIT_CONSTRUCTORS(GoogleUpdateSettings);

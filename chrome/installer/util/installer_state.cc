@@ -582,7 +582,7 @@ bool InstallerState::AreBinariesInUse(
 
 base::FilePath InstallerState::GetInstallerDirectory(
     const Version& version) const {
-  return target_path().Append(ASCIIToWide(version.GetString()))
+  return target_path().Append(base::ASCIIToWide(version.GetString()))
       .Append(kInstallerDir);
 }
 
@@ -660,7 +660,7 @@ void InstallerState::GetExistingExeVersions(
     scoped_ptr<FileVersionInfo> file_version_info(
         FileVersionInfo::CreateFileVersionInfo(chrome_exe));
     if (file_version_info) {
-      string16 version_string = file_version_info->file_version();
+      base::string16 version_string = file_version_info->file_version();
       if (!version_string.empty() && IsStringASCII(version_string))
         existing_versions->insert(WideToASCII(version_string));
     }

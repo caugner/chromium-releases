@@ -162,6 +162,11 @@ class TestGLES2Interface : public gpu::gles2::GLES2InterfaceStub {
   virtual void ConsumeTextureCHROMIUM(GLenum target,
                                       const GLbyte* mailbox) OVERRIDE;
 
+  virtual void ResizeCHROMIUM(GLuint width,
+                              GLuint height,
+                              float device_scale) OVERRIDE;
+  virtual void LoseContextCHROMIUM(GLenum current, GLenum other) OVERRIDE;
+
  private:
   TestWebGraphicsContext3D* test_context_;
 };

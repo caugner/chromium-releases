@@ -9,7 +9,6 @@
 #include "base/logging.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/certificate_viewer.h"
-#include "chrome/browser/ui/views/constrained_window_views.h"
 #include "components/web_modal/web_contents_modal_dialog_host.h"
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "components/web_modal/web_contents_modal_dialog_manager_delegate.h"
@@ -73,8 +72,8 @@ CertificateSelectorTableModel::CertificateSelectorTableModel(
     net::X509Certificate* cert = cert_request_info->client_certs[i].get();
     base::string16 text = l10n_util::GetStringFUTF16(
         IDS_CERT_SELECTOR_TABLE_CERT_FORMAT,
-        UTF8ToUTF16(cert->subject().GetDisplayName()),
-        UTF8ToUTF16(cert->issuer().GetDisplayName()));
+        base::UTF8ToUTF16(cert->subject().GetDisplayName()),
+        base::UTF8ToUTF16(cert->issuer().GetDisplayName()));
     items_.push_back(text);
   }
 }
@@ -130,7 +129,7 @@ void SSLClientCertificateSelector::Init() {
   layout->StartRow(0, column_set_id);
   base::string16 text = l10n_util::GetStringFUTF16(
       IDS_CLIENT_CERT_DIALOG_TEXT,
-      ASCIIToUTF16(cert_request_info()->host_and_port));
+      base::ASCIIToUTF16(cert_request_info()->host_and_port.ToString()));
   views::Label* label = new views::Label(text);
   label->SetMultiLine(true);
   label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
@@ -238,16 +237,6 @@ bool SSLClientCertificateSelector::Accept() {
   return false;
 }
 
-// TODO(wittman): Remove this override once we move to the new style frame view
-// on all dialogs.
-views::NonClientFrameView*
-    SSLClientCertificateSelector::CreateNonClientFrameView(
-        views::Widget* widget) {
-  return CreateConstrainedStyleNonClientFrameView(
-      widget,
-      web_contents_->GetBrowserContext());
-}
-
 views::View* SSLClientCertificateSelector::GetInitiallyFocusedView() {
   return table_;
 }
@@ -256,7 +245,7 @@ views::View* SSLClientCertificateSelector::CreateExtraView() {
   DCHECK(!view_cert_button_);
   view_cert_button_ = new views::LabelButton(this,
       l10n_util::GetStringUTF16(IDS_PAGEINFO_CERT_INFO_BUTTON));
-  view_cert_button_->SetStyle(views::Button::STYLE_NATIVE_TEXTBUTTON);
+  view_cert_button_->SetStyle(views::Button::STYLE_BUTTON);
   return view_cert_button_;
 }
 

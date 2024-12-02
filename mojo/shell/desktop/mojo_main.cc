@@ -19,12 +19,10 @@ int main(int argc, char** argv) {
 
   gfx::GLSurface::InitializeOneOff();
 
-  base::MessageLoop message_loop(base::MessageLoop::TYPE_UI);
-
+  base::MessageLoop message_loop;
   mojo::shell::Context context;
   message_loop.PostTask(FROM_HERE, base::Bind(mojo::shell::Run, &context));
 
   message_loop.Run();
-
   return 0;
 }

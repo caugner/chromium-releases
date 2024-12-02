@@ -32,18 +32,18 @@ class MockDeviceClient : public media::VideoCaptureDevice::Client {
   MOCK_METHOD2(ReserveOutputBuffer,
                scoped_refptr<Buffer>(media::VideoFrame::Format format,
                                      const gfx::Size& dimensions));
-  MOCK_METHOD0(OnError, void());
+  MOCK_METHOD1(OnError, void(const std::string& reason));
   MOCK_METHOD5(OnIncomingCapturedFrame,
                void(const uint8* data,
                     int length,
-                    base::Time timestamp,
+                    base::TimeTicks timestamp,
                     int rotation,
                     const media::VideoCaptureFormat& frame_format));
   MOCK_METHOD5(OnIncomingCapturedBuffer,
                void(const scoped_refptr<Buffer>& buffer,
                     media::VideoFrame::Format format,
                     const gfx::Size& dimensions,
-                    base::Time timestamp,
+                    base::TimeTicks timestamp,
                     int frame_rate));
 };
 
@@ -57,7 +57,8 @@ class DesktopCaptureDeviceAuraTest : public testing::Test {
  protected:
   virtual void SetUp() OVERRIDE {
     helper_.reset(new aura::test::AuraTestHelper(&message_loop_));
-    helper_->SetUp();
+    bool allow_test_contexts = true;
+    helper_->SetUp(allow_test_contexts);
 
     // We need a window to cover desktop area so that DesktopCaptureDeviceAura
     // can use gfx::NativeWindow::GetWindowAtScreenPoint() to locate the
@@ -65,7 +66,7 @@ class DesktopCaptureDeviceAuraTest : public testing::Test {
     gfx::Rect desktop_bounds = root_window()->bounds();
     window_delegate_.reset(new aura::test::TestWindowDelegate());
     desktop_window_.reset(new aura::Window(window_delegate_.get()));
-    desktop_window_->Init(ui::LAYER_TEXTURED);
+    desktop_window_->Init(aura::WINDOW_LAYER_TEXTURED);
     desktop_window_->SetBounds(desktop_bounds);
     aura::client::ParentWindowWithContext(
         desktop_window_.get(), root_window(), desktop_bounds);
@@ -98,7 +99,7 @@ TEST_F(DesktopCaptureDeviceAuraTest, StartAndStop) {
           content::DesktopMediaID::RegisterAuraWindow(root_window())));
 
   scoped_ptr<MockDeviceClient> client(new MockDeviceClient());
-  EXPECT_CALL(*client, OnError()).Times(0);
+  EXPECT_CALL(*client, OnError(_)).Times(0);
 
   media::VideoCaptureParams capture_params;
   capture_params.requested_format.frame_size.SetSize(640, 480);

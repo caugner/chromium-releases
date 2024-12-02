@@ -29,7 +29,7 @@ class BuildDirAmbiguous(Exception): pass
 
 class ChromeTests:
   SLOW_TOOLS = ["memcheck", "tsan", "tsan_rv", "drmemory"]
-  LAYOUT_TESTS_DEFAULT_CHUNK_SIZE = 500
+  LAYOUT_TESTS_DEFAULT_CHUNK_SIZE = 400
 
   def __init__(self, options, args, test):
     if ':' in test:
@@ -266,6 +266,9 @@ class ChromeTests:
   def TestBase(self):
     return self.SimpleTest("base", "base_unittests")
 
+  def TestCast(self):
+    return self.SimpleTest("chrome", "cast_unittests")
+
   def TestChromeOS(self):
     return self.SimpleTest("chromeos", "chromeos_unittests")
 
@@ -298,6 +301,9 @@ class ChromeTests:
 
   def TestFFmpegRegressions(self):
     return self.SimpleTest("chrome", "ffmpeg_regression_tests")
+
+  def TestGCM(self):
+    return self.SimpleTest("gcm", "gcm_unit_tests")
 
   def TestGPU(self):
     return self.SimpleTest("gpu", "gpu_unittests")
@@ -441,7 +447,9 @@ class ChromeTests:
     # http://crbug.com/260627: After the switch to content_shell from DRT, each
     # test now brings up 3 processes.  Under Valgrind, they become memory bound
     # and can eventually OOM if we don't reduce the total count.
-    jobs = max(1, int(multiprocessing.cpu_count() * 0.4))
+    # It'd be nice if content_shell automatically throttled the startup of new
+    # tests if we're low on memory.
+    jobs = max(1, int(multiprocessing.cpu_count() * 0.3))
     script_cmd = ["python", script, "-v",
                   "--run-singly",  # run a separate DumpRenderTree for each test
                   "--fully-parallel",
@@ -537,6 +545,7 @@ class ChromeTests:
     "automated_ui" : TestAutomatedUI,
     "base": TestBase,            "base_unittests": TestBase,
     "browser": TestBrowser,      "browser_tests": TestBrowser,
+    "cast": TestCast,            "cast_unittests": TestCast,
     "chromeos": TestChromeOS,    "chromeos_unittests": TestChromeOS,
     "components": TestComponents,"components_unittests": TestComponents,
     "compositor": TestCompositor,"compositor_unittests": TestCompositor,
@@ -548,6 +557,7 @@ class ChromeTests:
     "events": TestEvents,        "events_unittests": TestEvents,
     "ffmpeg": TestFFmpeg,        "ffmpeg_unittests": TestFFmpeg,
     "ffmpeg_regression_tests": TestFFmpegRegressions,
+    "gcm": TestGCM,              "gcm_unit_tests": TestGCM,
     "gpu": TestGPU,              "gpu_unittests": TestGPU,
     "ipc": TestIpc,              "ipc_tests": TestIpc,
     "interactive_ui": TestInteractiveUI,

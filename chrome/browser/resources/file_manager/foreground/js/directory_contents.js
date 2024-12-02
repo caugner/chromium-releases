@@ -58,9 +58,10 @@ DirectoryContentScanner.prototype.__proto__ = ContentScanner.prototype;
  */
 DirectoryContentScanner.prototype.scan = function(
     entriesCallback, successCallback, errorCallback) {
-  if (!this.entry_ || this.entry_ === DirectoryModel.fakeDriveEntry_) {
+  if (!this.entry_ || util.isFakeEntry(this.entry_)) {
     // If entry is not specified or a fake, we cannot read it.
-    errorCallback(util.createFileError(FileError.INVALID_MODIFICATION_ERR));
+    errorCallback(util.createDOMError(
+        util.FileError.INVALID_MODIFICATION_ERR));
     return;
   }
 
@@ -70,7 +71,7 @@ DirectoryContentScanner.prototype.scan = function(
     reader.readEntries(
         function(entries) {
           if (this.cancelled_) {
-            errorCallback(util.createFileError(FileError.ABORT_ERR));
+            errorCallback(util.createDOMError(util.FileError.ABORT_ERR));
             return;
           }
 
@@ -134,15 +135,15 @@ DriveSearchContentScanner.prototype.scan = function(
         {query: this.query_, nextFeed: nextFeed},
         function(entries, nextFeed) {
           if (this.cancelled_) {
-            errorCallback(util.createFileError(FileError.ABORT_ERR));
+            errorCallback(util.createDOMError(util.FileError.ABORT_ERR));
             return;
           }
 
           // TODO(tbarzic): Improve error handling.
           if (!entries) {
             console.error('Drive search encountered an error.');
-            errorCallback(util.createFileError(
-                FileError.INVALID_MODIFICATION_ERR));
+            errorCallback(util.createDOMError(
+                util.FileError.INVALID_MODIFICATION_ERR));
             return;
           }
 
@@ -170,7 +171,7 @@ DriveSearchContentScanner.prototype.scan = function(
       function() {
         // Check cancelled state before read the entries.
         if (this.cancelled_) {
-          errorCallback(util.createFileError(FileError.ABORT_ERR));
+          errorCallback(util.createDOMError(util.FileError.ABORT_ERR));
           return;
         }
         readEntries('');
@@ -208,7 +209,7 @@ LocalSearchContentScanner.prototype.scan = function(
   var maybeRunCallback = function() {
     if (numRunningTasks === 0) {
       if (this.cancelled_)
-        errorCallback(util.createFileError(FileError.ABORT_ERR));
+        errorCallback(util.createDOMError(util.FileError.ABORT_ERR));
       else if (error)
         errorCallback(error);
       else
@@ -258,15 +259,13 @@ LocalSearchContentScanner.prototype.scan = function(
 
 /**
  * Scanner of the entries for the metadata search on Drive File System.
- * @param {string} query The query of the search.
  * @param {DriveMetadataSearchContentScanner.SearchType} searchType The option
  *     of the search.
  * @constructor
  * @extends {ContentScanner}
  */
-function DriveMetadataSearchContentScanner(query, searchType) {
+function DriveMetadataSearchContentScanner(searchType) {
   ContentScanner.call(this);
-  this.query_ = query;
   this.searchType_ = searchType;
 }
 
@@ -294,17 +293,17 @@ DriveMetadataSearchContentScanner.SearchType = Object.freeze({
 DriveMetadataSearchContentScanner.prototype.scan = function(
     entriesCallback, successCallback, errorCallback) {
   chrome.fileBrowserPrivate.searchDriveMetadata(
-      {query: this.query_, types: this.searchType_, maxResults: 500},
+      {query: '', types: this.searchType_, maxResults: 500},
       function(results) {
         if (this.cancelled_) {
-          errorCallback(util.createFileError(FileError.ABORT_ERR));
+          errorCallback(util.createDOMError(util.FileError.ABORT_ERR));
           return;
         }
 
         if (!results) {
           console.error('Drive search encountered an error.');
-          errorCallback(util.createFileError(
-              FileError.INVALID_MODIFICATION_ERR));
+          errorCallback(util.createDOMError(
+              util.FileError.INVALID_MODIFICATION_ERR));
           return;
         }
 
@@ -402,6 +401,32 @@ FileFilter.prototype.filter = function(entry) {
 };
 
 /**
+ * Array data model that can replace its item.
+ * @param {Array} array Array to be used internal.
+ */
+function ReplacableArrayDataModel(array) {
+  cr.ui.ArrayDataModel.call(this, array);
+}
+
+ReplacableArrayDataModel.prototype = {
+  __proto__: cr.ui.ArrayDataModel.prototype
+};
+
+/**
+ * Replace the contents of item and publish a 'change' event.
+ * If the old item is not found in the list, the new item is just ignored.
+ * @param {*} oldItem Old item.
+ * @param {*} newItem New item.
+ */
+ReplacableArrayDataModel.prototype.replaceItem = function(oldItem, newItem) {
+  var index = this.indexOf(oldItem);
+  if (index >= 0) {
+    this.array_[this.indexes_[index]] = newItem;
+    this.updateIndex(index);
+  }
+};
+
+/**
  * A context of DirectoryContents.
  * TODO(yoshiki): remove this. crbug.com/224869.
  *
@@ -413,7 +438,7 @@ function FileListContext(fileFilter, metadataCache) {
   /**
    * @type {cr.ui.ArrayDataModel}
    */
-  this.fileList = new cr.ui.ArrayDataModel([]);
+  this.fileList = new ReplacableArrayDataModel([]);
 
   /**
    * @type {MetadataCache}
@@ -437,22 +462,20 @@ function FileListContext(fileFilter, metadataCache) {
  * @param {boolean} isSearch True for search directory contents, otherwise
  *     false.
  * @param {DirectoryEntry} directoryEntry The entry of the current directory.
- * @param {DirectoryEntry} lastNonSearchDirectoryEntry The entry of the last
- *     non-search directory.
  * @param {function():ContentScanner} scannerFactory The factory to create
  *     ContentScanner instance.
  * @constructor
  * @extends {cr.EventTarget}
  */
-function DirectoryContents(context, isSearch, directoryEntry,
-                           lastNonSearchDirectoryEntry,
+function DirectoryContents(context,
+                           isSearch,
+                           directoryEntry,
                            scannerFactory) {
   this.context_ = context;
   this.fileList_ = context.fileList;
 
   this.isSearch_ = isSearch;
   this.directoryEntry_ = directoryEntry;
-  this.lastNonSearchDirectoryEntry_ = lastNonSearchDirectoryEntry;
 
   this.scannerFactory_ = scannerFactory;
   this.scanner_ = null;
@@ -471,8 +494,10 @@ DirectoryContents.prototype.__proto__ = cr.EventTarget.prototype;
  */
 DirectoryContents.prototype.clone = function() {
   return new DirectoryContents(
-      this.context_, this.isSearch_, this.directoryEntry_,
-      this.lastNonSearchDirectoryEntry_, this.scannerFactory_);
+      this.context_,
+      this.isSearch_,
+      this.directoryEntry_,
+      this.scannerFactory_);
 };
 
 /**
@@ -522,13 +547,6 @@ DirectoryContents.prototype.isSearch = function() {
  */
 DirectoryContents.prototype.getDirectoryEntry = function() {
   return this.directoryEntry_;
-};
-
-/**
- * @return {DirectoryEntry} A DirectoryEntry for the last non search contents.
- */
-DirectoryContents.prototype.getLastNonSearchDirectoryEntry = function() {
-  return this.lastNonSearchDirectoryEntry_;
 };
 
 /**
@@ -644,40 +662,7 @@ DirectoryContents.prototype.onNewEntries_ = function(entries) {
  * @param {function(Object)} callback Callback on done.
  */
 DirectoryContents.prototype.prefetchMetadata = function(entries, callback) {
-  this.context_.metadataCache.get(entries, 'filesystem', callback);
-};
-
-/**
- * @param {Array.<Entry>} entries Files.
- * @param {function(Object)} callback Callback on done.
- */
-DirectoryContents.prototype.reloadMetadata = function(entries, callback) {
-  this.context_.metadataCache.clear(entries, '*');
-  this.context_.metadataCache.get(entries, 'filesystem', callback);
-};
-
-/**
- * @param {string} name Directory name.
- * @param {function(DirectoryEntry)} successCallback Called on success.
- * @param {function(FileError)} errorCallback On error.
- */
-DirectoryContents.prototype.createDirectory = function(
-    name, successCallback, errorCallback) {
-  // TODO(hidehiko): createDirectory should not be the part of
-  // DirectoryContent.
-  if (this.isSearch_ || !this.directoryEntry_) {
-    errorCallback(util.createFileError(FileError.INVALID_MODIFICATION_ERR));
-    return;
-  }
-
-  var onSuccess = function(newEntry) {
-    this.reloadMetadata([newEntry], function() {
-      successCallback(newEntry);
-    });
-  };
-
-  this.directoryEntry_.getDirectory(name, {create: true, exclusive: true},
-                                    onSuccess.bind(this), errorCallback);
+  this.context_.metadataCache.get(entries, 'filesystem|drive', callback);
 };
 
 /**
@@ -692,7 +677,6 @@ DirectoryContents.createForDirectory = function(context, directoryEntry) {
       context,
       false,  // Non search.
       directoryEntry,
-      directoryEntry,
       function() {
         return new DirectoryContentScanner(directoryEntry);
       });
@@ -704,18 +688,15 @@ DirectoryContents.createForDirectory = function(context, directoryEntry) {
  *
  * @param {FileListContext} context File list context.
  * @param {DirectoryEntry} directoryEntry The current directory entry.
- * @param {DirectoryEntry} previousDirectoryEntry The DirectoryEntry that was
- *     current before the search.
  * @param {string} query Search query.
  * @return {DirectoryContents} Created DirectoryContents instance.
  */
 DirectoryContents.createForDriveSearch = function(
-    context, directoryEntry, previousDirectoryEntry, query) {
+    context, directoryEntry, query) {
   return new DirectoryContents(
       context,
       true,  // Search.
       directoryEntry,
-      previousDirectoryEntry,
       function() {
         return new DriveSearchContentScanner(query);
       });
@@ -736,7 +717,6 @@ DirectoryContents.createForLocalSearch = function(
       context,
       true,  // Search.
       directoryEntry,
-      directoryEntry,
       function() {
         return new LocalSearchContentScanner(directoryEntry, query);
       });
@@ -750,21 +730,18 @@ DirectoryContents.createForLocalSearch = function(
  * @param {DirectoryEntry} fakeDirectoryEntry Fake directory entry representing
  *     the set of result entries. This serves as a top directory for the
  *     search.
- * @param {DirectoryEntry} driveDirectoryEntry Directory for the actual drive.
- * @param {string} query Search query.
  * @param {DriveMetadataSearchContentScanner.SearchType} searchType The type of
  *     the search. The scanner will restricts the entries based on the given
  *     type.
  * @return {DirectoryContents} Created DirectoryContents instance.
  */
 DirectoryContents.createForDriveMetadataSearch = function(
-    context, fakeDirectoryEntry, driveDirectoryEntry, query, searchType) {
+    context, fakeDirectoryEntry, searchType) {
   return new DirectoryContents(
       context,
       true,  // Search
       fakeDirectoryEntry,
-      driveDirectoryEntry,
       function() {
-        return new DriveMetadataSearchContentScanner(query, searchType);
+        return new DriveMetadataSearchContentScanner(searchType);
       });
 };

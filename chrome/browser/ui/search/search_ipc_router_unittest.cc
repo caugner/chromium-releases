@@ -74,6 +74,7 @@ class MockSearchIPCRouterPolicy : public SearchIPCRouter::Policy {
   MOCK_METHOD0(ShouldSendSetPromoInformation, bool());
   MOCK_METHOD0(ShouldSendSetDisplayInstantResults, bool());
   MOCK_METHOD0(ShouldSendSetSuggestionToPrefetch, bool());
+  MOCK_METHOD0(ShouldSendSetOmniboxStartMargin, bool());
   MOCK_METHOD0(ShouldSendMostVisitedItems, bool());
   MOCK_METHOD0(ShouldSendThemeBackgroundInfo, bool());
   MOCK_METHOD0(ShouldSendToggleVoiceSearch, bool());
@@ -358,7 +359,7 @@ TEST_F(SearchIPCRouterTest, ProcessLogImpressionMsg) {
   SetupMockDelegateAndPolicy();
   MockSearchIPCRouterPolicy* policy = GetSearchIPCRouterPolicy();
   EXPECT_CALL(*mock_delegate(),
-              OnLogImpression(3, ASCIIToUTF16("Server"))).Times(1);
+              OnLogImpression(3, base::ASCIIToUTF16("Server"))).Times(1);
   EXPECT_CALL(*policy, ShouldProcessLogEvent()).Times(1)
       .WillOnce(testing::Return(true));
 
@@ -367,7 +368,7 @@ TEST_F(SearchIPCRouterTest, ProcessLogImpressionMsg) {
       contents->GetRoutingID(),
       contents->GetController().GetVisibleEntry()->GetPageID(),
       3,
-      ASCIIToUTF16("Server")));
+      base::ASCIIToUTF16("Server")));
   OnMessageReceived(*message);
 }
 
@@ -375,7 +376,7 @@ TEST_F(SearchIPCRouterTest, ProcessChromeIdentityCheckMsg) {
   NavigateAndCommitActiveTab(GURL(chrome::kChromeSearchLocalNtpUrl));
   SetupMockDelegateAndPolicy();
   MockSearchIPCRouterPolicy* policy = GetSearchIPCRouterPolicy();
-  const base::string16 test_identity = ASCIIToUTF16("foo@bar.com");
+  const base::string16 test_identity = base::ASCIIToUTF16("foo@bar.com");
   EXPECT_CALL(*mock_delegate(), OnChromeIdentityCheck(test_identity)).Times(1);
   EXPECT_CALL(*policy, ShouldProcessChromeIdentityCheck()).Times(1)
       .WillOnce(testing::Return(true));
@@ -393,7 +394,7 @@ TEST_F(SearchIPCRouterTest, IgnoreChromeIdentityCheckMsg) {
   SetupMockDelegateAndPolicy();
   MockSearchIPCRouterPolicy* policy = GetSearchIPCRouterPolicy();
 
-  const base::string16 test_identity = ASCIIToUTF16("foo@bar.com");
+  const base::string16 test_identity = base::ASCIIToUTF16("foo@bar.com");
   EXPECT_CALL(*mock_delegate(), OnChromeIdentityCheck(test_identity)).Times(0);
   EXPECT_CALL(*policy, ShouldProcessChromeIdentityCheck()).Times(1)
       .WillOnce(testing::Return(false));
@@ -727,6 +728,30 @@ TEST_F(SearchIPCRouterTest, DoNotSendSetSuggestionToPrefetch) {
   GetSearchTabHelper(contents)->SetSuggestionToPrefetch(InstantSuggestion());
   EXPECT_FALSE(MessageWasSent(
       ChromeViewMsg_SearchBoxSetSuggestionToPrefetch::ID));
+}
+
+TEST_F(SearchIPCRouterTest, SendSetOmniboxStartMargin) {
+  NavigateAndCommitActiveTab(GURL("chrome-search://foo/bar"));
+  SetupMockDelegateAndPolicy();
+  MockSearchIPCRouterPolicy* policy = GetSearchIPCRouterPolicy();
+  EXPECT_CALL(*policy, ShouldSendSetOmniboxStartMargin()).Times(1)
+      .WillOnce(testing::Return(true));
+
+  process()->sink().ClearMessages();
+  GetSearchIPCRouter().SetOmniboxStartMargin(92);
+  EXPECT_TRUE(MessageWasSent(ChromeViewMsg_SearchBoxMarginChange::ID));
+}
+
+TEST_F(SearchIPCRouterTest, DoNotSendSetOmniboxStartMargin) {
+  NavigateAndCommitActiveTab(GURL("chrome-search://foo/bar"));
+  SetupMockDelegateAndPolicy();
+  MockSearchIPCRouterPolicy* policy = GetSearchIPCRouterPolicy();
+  EXPECT_CALL(*policy, ShouldSendSetOmniboxStartMargin()).Times(1)
+      .WillOnce(testing::Return(false));
+
+  process()->sink().ClearMessages();
+  GetSearchIPCRouter().SetOmniboxStartMargin(92);
+  EXPECT_FALSE(MessageWasSent(ChromeViewMsg_SearchBoxMarginChange::ID));
 }
 
 TEST_F(SearchIPCRouterTest, SendMostVisitedItemsMsg) {

@@ -18,7 +18,6 @@
 #include "chrome/browser/chromeos/app_mode/kiosk_app_data_delegate.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_app_manager.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/image_loader.h"
 #include "chrome/browser/extensions/webstore_data_fetcher.h"
 #include "chrome/browser/extensions/webstore_install_helper.h"
@@ -27,6 +26,7 @@
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/manifest_handlers/icons_handler.h"
 #include "content/public/browser/browser_thread.h"
+#include "extensions/browser/extension_system.h"
 #include "extensions/common/manifest.h"
 #include "extensions/common/manifest_constants.h"
 #include "ui/gfx/codec/png_codec.h"
@@ -41,11 +41,6 @@ namespace {
 // Keys for local state data. See sample layout in KioskAppManager.
 const char kKeyName[] = "name";
 const char kKeyIcon[] = "icon";
-
-// Web store data keys.
-const char kManifestKey[] = "manifest";
-const char kIconUrlKey[] = "icon_url";
-const char kLocalizedNameKey[] = "localized_name";
 
 const char kInvalidWebstoreResponseError[] = "Invalid Chrome Web Store reponse";
 

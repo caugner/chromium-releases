@@ -59,7 +59,7 @@ base::string16 GetProfileIdFromPath(const base::FilePath& profile_path) {
   if (chrome::GetDefaultUserDataDirectory(&default_user_data_dir) &&
       profile_path.DirName() == default_user_data_dir &&
       profile_path.BaseName().value() ==
-          ASCIIToUTF16(chrome::kInitialProfile)) {
+          base::ASCIIToUTF16(chrome::kInitialProfile)) {
     return base::string16();
   }
 
@@ -106,18 +106,20 @@ base::string16 GetExpectedAppId(const CommandLine& command_line,
     profile_subdir =
         command_line.GetSwitchValuePath(switches::kProfileDirectory);
   } else {
-    profile_subdir = base::FilePath(ASCIIToUTF16(chrome::kInitialProfile));
+    profile_subdir =
+        base::FilePath(base::ASCIIToUTF16(chrome::kInitialProfile));
   }
   DCHECK(!profile_subdir.empty());
 
   base::FilePath profile_path = user_data_dir.Append(profile_subdir);
   base::string16 app_name;
   if (command_line.HasSwitch(switches::kApp)) {
-    app_name = UTF8ToUTF16(web_app::GenerateApplicationNameFromURL(
+    app_name = base::UTF8ToUTF16(web_app::GenerateApplicationNameFromURL(
         GURL(command_line.GetSwitchValueASCII(switches::kApp))));
   } else if (command_line.HasSwitch(switches::kAppId)) {
-    app_name = UTF8ToUTF16(web_app::GenerateApplicationNameFromExtensionId(
-        command_line.GetSwitchValueASCII(switches::kAppId)));
+    app_name = base::UTF8ToUTF16(
+        web_app::GenerateApplicationNameFromExtensionId(
+            command_line.GetSwitchValueASCII(switches::kAppId)));
   } else if (command_line.HasSwitch(switches::kShowAppList)) {
     app_name = GetAppListAppName();
   } else {
@@ -232,7 +234,7 @@ bool ShellIntegration::SetAsDefaultProtocolClient(const std::string& protocol) {
     return false;
   }
 
-  base::string16 wprotocol(UTF8ToUTF16(protocol));
+  base::string16 wprotocol(base::UTF8ToUTF16(protocol));
   BrowserDistribution* dist = BrowserDistribution::GetDistribution();
   if (!ShellUtil::MakeChromeDefaultProtocolClient(dist, chrome_exe.value(),
         wprotocol)) {
@@ -271,7 +273,7 @@ bool ShellIntegration::SetAsDefaultProtocolClientInteractive(
   }
 
   BrowserDistribution* dist = BrowserDistribution::GetDistribution();
-  base::string16 wprotocol(UTF8ToUTF16(protocol));
+  base::string16 wprotocol(base::UTF8ToUTF16(protocol));
   if (!ShellUtil::ShowMakeChromeDefaultProtocolClientSystemUI(
           dist, chrome_exe.value(), wprotocol)) {
     LOG(ERROR) << "Failed to launch the set-default-client Windows UI.";
@@ -290,14 +292,27 @@ ShellIntegration::DefaultWebClientState ShellIntegration::GetDefaultBrowser() {
 ShellIntegration::DefaultWebClientState
     ShellIntegration::IsDefaultProtocolClient(const std::string& protocol) {
   return GetDefaultWebClientStateFromShellUtilDefaultState(
-      ShellUtil::GetChromeDefaultProtocolClientState(UTF8ToUTF16(protocol)));
+      ShellUtil::GetChromeDefaultProtocolClientState(
+          base::UTF8ToUTF16(protocol)));
 }
 
-std::string ShellIntegration::GetApplicationForProtocol(const GURL& url) {
-  // TODO(calamity): this will be implemented when external_protocol_dialog is
-  // refactored on windows.
-  NOTREACHED();
-  return std::string();
+base::string16 ShellIntegration::GetApplicationForProtocol(const GURL& url) {
+  std::wstring url_spec = base::ASCIIToWide(url.possibly_invalid_spec());
+  std::wstring cmd_key_path =
+      base::ASCIIToWide(url.scheme() + "\\shell\\open\\command");
+  base::win::RegKey cmd_key(HKEY_CLASSES_ROOT, cmd_key_path.c_str(), KEY_READ);
+  size_t split_offset = url_spec.find(L':');
+  if (split_offset == std::wstring::npos)
+    return std::wstring();
+  std::wstring parameters = url_spec.substr(split_offset + 1,
+                                            url_spec.length() - 1);
+  std::wstring application_to_launch;
+  if (cmd_key.ReadValue(NULL, &application_to_launch) == ERROR_SUCCESS) {
+    ReplaceSubstringsAfterOffset(&application_to_launch, 0, L"%1", parameters);
+    return application_to_launch;
+  }
+
+  return std::wstring();
 }
 
 // There is no reliable way to say which browser is default on a machine (each

@@ -24,13 +24,13 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/policy/browser_policy_connector.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/policy/core/browser/browser_policy_connector.h"
 #include "components/policy/core/common/external_data_fetcher.h"
 #include "components/policy/core/common/external_data_manager.h"
 #include "components/policy/core/common/mock_configuration_policy_provider.h"
@@ -460,6 +460,10 @@ class PolicyPrefsTest : public InProcessBrowserTest {
         TemplateURLServiceFactory::GetForProfile(browser()->profile()));
   }
 
+  virtual void TearDownOnMainThread() OVERRIDE {
+    ClearProviderPolicy();
+  }
+
   void ClearProviderPolicy() {
     provider_.UpdateChromePolicy(PolicyMap());
     base::RunLoop().RunUntilIdle();
@@ -468,7 +472,8 @@ class PolicyPrefsTest : public InProcessBrowserTest {
   void SetProviderPolicy(const base::DictionaryValue& policies,
                          PolicyLevel level) {
     PolicyMap policy_map;
-    for (DictionaryValue::Iterator it(policies); !it.IsAtEnd(); it.Advance()) {
+    for (base::DictionaryValue::Iterator it(policies);
+         !it.IsAtEnd(); it.Advance()) {
       const PolicyDetails* policy_details = GetChromePolicyDetails(it.key());
       ASSERT_TRUE(policy_details);
       policy_map.Set(

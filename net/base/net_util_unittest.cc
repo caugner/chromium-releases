@@ -30,6 +30,9 @@
 #include <net/if.h>
 #endif  // OS_WIN
 
+using base::ASCIIToUTF16;
+using base::WideToUTF16;
+
 namespace net {
 
 namespace {
@@ -493,7 +496,7 @@ std::string DumpIPNumber(const IPAddressNumber& v) {
 }
 
 void RunGenerateFileNameTestCase(const GenerateFilenameCase* test_case) {
-  std::string default_filename(WideToUTF8(test_case->default_filename));
+  std::string default_filename(base::WideToUTF8(test_case->default_filename));
   base::FilePath file_path = GenerateFileName(
       GURL(test_case->url), test_case->content_disp_header,
       test_case->referrer_charset, test_case->suggested_filename,
@@ -2545,6 +2548,10 @@ TEST(NetUtilTest, FormatUrl) {
      L"http://xn--qcka1pmc.jp/\x30B0\x30FC\x30B0\x30EB"
      L"?q=\x30B0\x30FC\x30B0\x30EB", 7},
 
+    {"Unescape normally with BiDi control character",
+     "http://example.com/%E2%80%AEabc?q=%E2%80%8Fxy", "en", default_format_type,
+     UnescapeRule::NORMAL, L"http://example.com/%E2%80%AEabc?q=%E2%80%8Fxy", 7},
+
     {"Unescape normally including unescape spaces",
      "http://www.google.com/search?q=Hello%20World", "en", default_format_type,
      UnescapeRule::SPACES, L"http://www.google.com/search?q=Hello World", 7},
@@ -3299,7 +3306,7 @@ TEST(NetUtilTest, IsLocalhost) {
 // Verify GetNetworkList().
 TEST(NetUtilTest, GetNetworkList) {
   NetworkInterfaceList list;
-  ASSERT_TRUE(GetNetworkList(&list));
+  ASSERT_TRUE(GetNetworkList(&list, INCLUDE_HOST_SCOPE_VIRTUAL_INTERFACES));
   for (NetworkInterfaceList::iterator it = list.begin();
        it != list.end(); ++it) {
     // Verify that the name is not empty.
@@ -3344,7 +3351,7 @@ TEST(NetUtilTest, GetNetworkList) {
       EXPECT_EQ(luid_to_guid(&luid, &guid), NO_ERROR);
       LPOLESTR name;
       StringFromCLSID(guid, &name);
-      EXPECT_STREQ(UTF8ToWide(it->name).c_str(), name);
+      EXPECT_STREQ(base::UTF8ToWide(it->name).c_str(), name);
       CoTaskMemFree(name);
       continue;
     } else {

@@ -134,10 +134,8 @@ void RecentlyUsedFoldersComboModel::RemoveObserver(
   observers_.RemoveObserver(observer);
 }
 
-
-void RecentlyUsedFoldersComboModel::Loaded(BookmarkModel* model,
-                                           bool ids_reassigned) {
-}
+void RecentlyUsedFoldersComboModel::BookmarkModelLoaded(BookmarkModel* model,
+                                                        bool ids_reassigned) {}
 
 void RecentlyUsedFoldersComboModel::BookmarkModelBeingDeleted(
     BookmarkModel* model) {
@@ -174,8 +172,10 @@ void RecentlyUsedFoldersComboModel::OnWillRemoveBookmarks(
       ++i;
     }
   }
-  if (changed)
-    FOR_EACH_OBSERVER(ui::ComboboxModelObserver, observers_, OnModelChanged());
+  if (changed) {
+    FOR_EACH_OBSERVER(ui::ComboboxModelObserver, observers_,
+                      OnComboboxModelChanged(this));
+  }
 }
 
 void RecentlyUsedFoldersComboModel::BookmarkNodeRemoved(
@@ -215,8 +215,10 @@ void RecentlyUsedFoldersComboModel::BookmarkAllNodesRemoved(
       ++i;
     }
   }
-  if (changed)
-    FOR_EACH_OBSERVER(ui::ComboboxModelObserver, observers_, OnModelChanged());
+  if (changed) {
+    FOR_EACH_OBSERVER(ui::ComboboxModelObserver, observers_,
+                      OnComboboxModelChanged(this));
+  }
 }
 
 void RecentlyUsedFoldersComboModel::MaybeChangeParent(
@@ -228,7 +230,7 @@ void RecentlyUsedFoldersComboModel::MaybeChangeParent(
   const BookmarkNode* new_parent = GetNodeAt(selected_index);
   if (new_parent != node->parent()) {
     content::RecordAction(
-        content::UserMetricsAction("BookmarkBubble_ChangeParent"));
+        base::UserMetricsAction("BookmarkBubble_ChangeParent"));
     bookmark_model_->Move(node, new_parent, new_parent->child_count());
   }
 }

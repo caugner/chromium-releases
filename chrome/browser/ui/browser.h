@@ -45,8 +45,8 @@
 #include "ui/shell_dialogs/select_file_dialog.h"
 
 class BrowserContentSettingBubbleModelDelegate;
+class BrowserContentTranslateDriverObserver;
 class BrowserInstantController;
-class BrowserLanguageStateObserver;
 class BrowserSyncedWindowDelegate;
 class BrowserToolbarModelDelegate;
 class BrowserTabRestoreServiceDelegate;
@@ -444,8 +444,8 @@ class Browser : public TabStripModelObserver,
   virtual void OverscrollUpdate(int delta_y) OVERRIDE;
   virtual void ShowValidationMessage(content::WebContents* web_contents,
                                      const gfx::Rect& anchor_in_root_view,
-                                     const string16& main_text,
-                                     const string16& sub_text) OVERRIDE;
+                                     const base::string16& main_text,
+                                     const base::string16& sub_text) OVERRIDE;
   virtual void HideValidationMessage(
       content::WebContents* web_contents) OVERRIDE;
   virtual void MoveValidationMessage(
@@ -567,7 +567,6 @@ class Browser : public TabStripModelObserver,
   virtual bool ShouldFocusLocationBarByDefault(
       content::WebContents* source) OVERRIDE;
   virtual void SetFocusToLocationBar(bool select_all) OVERRIDE;
-  virtual void RenderWidgetShowing() OVERRIDE;
   virtual int GetExtraRenderViewHeight() const OVERRIDE;
   virtual void ViewSourceForTab(content::WebContents* source,
                                 const GURL& page_url) OVERRIDE;
@@ -649,7 +648,9 @@ class Browser : public TabStripModelObserver,
   // Overridden from CoreTabHelperDelegate:
   // Note that the caller is responsible for deleting |old_contents|.
   virtual void SwapTabContents(content::WebContents* old_contents,
-                               content::WebContents* new_contents) OVERRIDE;
+                               content::WebContents* new_contents,
+                               bool did_start_load,
+                               bool did_finish_load) OVERRIDE;
   virtual bool CanReloadContents(
       content::WebContents* web_contents) const OVERRIDE;
   virtual bool CanSaveContents(
@@ -926,7 +927,7 @@ class Browser : public TabStripModelObserver,
   // The following factory is used to close the frame at a later time.
   base::WeakPtrFactory<Browser> weak_factory_;
 
-  scoped_ptr<BrowserLanguageStateObserver> language_state_observer_;
+  scoped_ptr<BrowserContentTranslateDriverObserver> translate_driver_observer_;
 
   scoped_ptr<chrome::ValidationMessageBubble> validation_message_bubble_;
 

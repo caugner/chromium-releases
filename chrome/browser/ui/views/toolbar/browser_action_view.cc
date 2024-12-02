@@ -123,7 +123,7 @@ BrowserActionButton::BrowserActionButton(const Extension* extension,
       delegate_(delegate),
       context_menu_(NULL),
       called_registered_extension_command_(false) {
-  set_border(NULL);
+  SetBorder(views::Border::NullBorder());
   set_alignment(TextButton::ALIGN_CENTER);
   set_context_menu_controller(this);
 
@@ -241,10 +241,7 @@ void BrowserActionButton::UpdateState() {
         ThemeServiceFactory::GetForProfile(browser_->profile());
 
     int background_id = IDR_BROWSER_ACTION;
-    extensions::DevModeBubbleController* controller =
-        extensions::DevModeBubbleController::Get(
-            browser_->profile());
-    if (controller->IsDevModeExtension(extension_))
+    if (extensions::DevModeBubbleController::IsDevModeExtension(extension_))
       background_id = IDR_BROWSER_ACTION_HIGHLIGHT;
 
     gfx::ImageSkia bg = *theme->GetImageSkiaNamed(background_id);
@@ -261,7 +258,7 @@ void BrowserActionButton::UpdateState() {
   // If the browser action name is empty, show the extension name instead.
   std::string title = browser_action()->GetTitle(tab_id);
   base::string16 name =
-      UTF8ToUTF16(title.empty() ? extension()->name() : title);
+      base::UTF8ToUTF16(title.empty() ? extension()->name() : title);
   SetTooltipText(delegate_->NeedToShowTooltip() ? name : base::string16());
   SetAccessibleName(name);
 

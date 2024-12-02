@@ -334,10 +334,7 @@ content::PepperPluginInfo CreatePepperFlashInfo(const base::FilePath& path,
                                                 const std::string& version) {
   content::PepperPluginInfo plugin;
 
-  // Flash being out of process is handled separately than general plugins
-  // for testing purposes.
-  plugin.is_out_of_process = !CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kPpapiFlashInProcess);
+  plugin.is_out_of_process = true;
   plugin.name = content::kFlashPluginName;
   plugin.path = path;
   plugin.permissions = kPepperFlashPermissions;
@@ -463,10 +460,12 @@ void ChromeContentClient::AddAdditionalSchemes(
     std::vector<std::string>* savable_schemes) {
   standard_schemes->push_back(extensions::kExtensionScheme);
   savable_schemes->push_back(extensions::kExtensionScheme);
-  standard_schemes->push_back(chrome::kExtensionResourceScheme);
-  savable_schemes->push_back(chrome::kExtensionResourceScheme);
+  standard_schemes->push_back(extensions::kExtensionResourceScheme);
+  savable_schemes->push_back(extensions::kExtensionResourceScheme);
   standard_schemes->push_back(chrome::kChromeSearchScheme);
   savable_schemes->push_back(chrome::kChromeSearchScheme);
+  standard_schemes->push_back(chrome::kDomDistillerScheme);
+  savable_schemes->push_back(chrome::kDomDistillerScheme);
 #if defined(OS_CHROMEOS)
   standard_schemes->push_back(chrome::kCrosScheme);
 #endif

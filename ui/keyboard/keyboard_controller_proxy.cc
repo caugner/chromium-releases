@@ -96,7 +96,6 @@ class KeyboardContentsDelegate : public content::WebContentsDelegate,
     proxy_->RequestAudioInput(web_contents, request, callback);
   }
 
-
   // Overridden from content::WebContentsObserver:
   virtual void WebContentsDestroyed(content::WebContents* contents) OVERRIDE {
     delete this;
@@ -129,10 +128,10 @@ void KeyboardControllerProxy::SetOverrideContentUrl(const GURL& url) {
   override_url_ = url;
   // Restores the keyboard window size to default.
   aura::Window* container = GetKeyboardWindow()->parent();
-  CHECK(container);
-  container->layout_manager()->OnWindowResized();
-
-  ReloadContents();
+  if (container) {
+    container->layout_manager()->OnWindowResized();
+    ReloadContents();
+  }
 }
 
 void KeyboardControllerProxy::ReloadContents() {
@@ -161,6 +160,10 @@ aura::Window* KeyboardControllerProxy::GetKeyboardWindow() {
   return keyboard_contents_->GetView()->GetNativeView();
 }
 
+bool KeyboardControllerProxy::HasKeyboardWindow() const {
+  return keyboard_contents_;
+}
+
 void KeyboardControllerProxy::ShowKeyboardContainer(aura::Window* container) {
   GetKeyboardWindow()->Show();
   container->Show();
@@ -183,6 +186,9 @@ void KeyboardControllerProxy::SetUpdateInputType(ui::TextInputType type) {
     input_context.SetString("type", TextInputTypeToString(type));
     webui->CallJavascriptFunction("OnTextInputBoxFocused", input_context);
   }
+}
+
+void KeyboardControllerProxy::EnsureCaretInWorkArea() {
 }
 
 void KeyboardControllerProxy::SetupWebContents(content::WebContents* contents) {

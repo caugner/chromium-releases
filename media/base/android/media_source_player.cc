@@ -34,7 +34,7 @@ namespace media {
 // static
 bool MediaSourcePlayer::IsTypeSupported(
     const std::vector<uint8>& scheme_uuid,
-    const std::string& security_level,
+    MediaDrmBridge::SecurityLevel security_level,
     const std::string& container,
     const std::vector<std::string>& codecs) {
   if (!MediaDrmBridge::IsCryptoSchemeSupported(scheme_uuid, container)) {
@@ -525,9 +525,8 @@ void MediaSourcePlayer::ProcessPendingEvents() {
     ConfigureVideoDecoderJob();
 
     // Return early if we can't successfully configure a new video decoder job
-    // yet, except continue processing other pending events if |surface_| is
-    // empty.
-    if (HasVideo() && !video_decoder_job_ && !surface_.IsEmpty())
+    // yet.
+    if (HasVideo() && !video_decoder_job_)
       return;
   }
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2014 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -3797,38 +3797,6 @@ TEST_F(GLES2FormatTest, GetProgramInfoCHROMIUM) {
   EXPECT_EQ(sizeof(cmd), cmd.header.size * 4u);
   EXPECT_EQ(static_cast<GLuint>(11), cmd.program);
   EXPECT_EQ(static_cast<uint32>(12), cmd.bucket_id);
-  CheckBytesWrittenMatchesExpectedSize(
-      next_cmd, sizeof(cmd));
-}
-
-TEST_F(GLES2FormatTest, CreateStreamTextureCHROMIUM) {
-  cmds::CreateStreamTextureCHROMIUM& cmd =
-      *GetBufferAs<cmds::CreateStreamTextureCHROMIUM>();
-  void* next_cmd = cmd.Set(
-      &cmd,
-      static_cast<GLuint>(11),
-      static_cast<uint32>(12),
-      static_cast<uint32>(13));
-  EXPECT_EQ(static_cast<uint32>(cmds::CreateStreamTextureCHROMIUM::kCmdId),
-            cmd.header.command);
-  EXPECT_EQ(sizeof(cmd), cmd.header.size * 4u);
-  EXPECT_EQ(static_cast<GLuint>(11), cmd.client_id);
-  EXPECT_EQ(static_cast<uint32>(12), cmd.result_shm_id);
-  EXPECT_EQ(static_cast<uint32>(13), cmd.result_shm_offset);
-  CheckBytesWrittenMatchesExpectedSize(
-      next_cmd, sizeof(cmd));
-}
-
-TEST_F(GLES2FormatTest, DestroyStreamTextureCHROMIUM) {
-  cmds::DestroyStreamTextureCHROMIUM& cmd =
-      *GetBufferAs<cmds::DestroyStreamTextureCHROMIUM>();
-  void* next_cmd = cmd.Set(
-      &cmd,
-      static_cast<GLuint>(11));
-  EXPECT_EQ(static_cast<uint32>(cmds::DestroyStreamTextureCHROMIUM::kCmdId),
-            cmd.header.command);
-  EXPECT_EQ(sizeof(cmd), cmd.header.size * 4u);
-  EXPECT_EQ(static_cast<GLuint>(11), cmd.texture);
   CheckBytesWrittenMatchesExpectedSize(
       next_cmd, sizeof(cmd));
 }

@@ -5,6 +5,8 @@
 #ifndef COMPONENTS_DOM_DISTILLER_CORE_DOM_DISTILLER_TEST_UTIL_H_
 #define COMPONENTS_DOM_DISTILLER_CORE_DOM_DISTILLER_TEST_UTIL_H_
 
+#include <vector>
+
 #include "components/dom_distiller/core/dom_distiller_observer.h"
 #include "components/dom_distiller/core/fake_db.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -41,7 +43,7 @@ testing::Matcher<const std::vector<DomDistillerObserver::ArticleUpdate>&>
 // Creates a simple DomDistillerStore backed by |fake_db| and initialized
 // with |store_model|.
 DomDistillerStore* CreateStoreWithFakeDB(FakeDB* fake_db,
-                                         FakeDB::EntryMap* store_model);
+                                         const FakeDB::EntryMap& store_model);
 
 }  // namespace util
 }  // namespace test

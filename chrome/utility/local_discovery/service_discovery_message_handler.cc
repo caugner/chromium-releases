@@ -66,38 +66,36 @@ class PreCreatedMDnsSocketFactory : public net::MDnsSocketFactory {
  public:
   PreCreatedMDnsSocketFactory() {}
   virtual ~PreCreatedMDnsSocketFactory() {
-    Reset();
+    // Not empty if process exits too fast, before starting mDns code. If
+    // happened, destructors may crash accessing destroyed global objects.
+    sockets_.weak_clear();
   }
 
   // net::MDnsSocketFactory implementation:
   virtual void CreateSockets(
       ScopedVector<net::DatagramServerSocket>* sockets) OVERRIDE {
-    for (size_t i = 0; i < sockets_.size(); ++i) {
-      // Takes ownership of sockets_[i].socket;
-      ScopedSocketFactory platform_factory(sockets_[i].socket);
-      scoped_ptr<net::DatagramServerSocket> socket(
-          net::CreateAndBindMDnsSocket(sockets_[i].address_family,
-                                       sockets_[i].interface_index));
-      if (socket)
-        sockets->push_back(socket.release());
-    }
-    sockets_.clear();
+    sockets->swap(sockets_);
+    Reset();
   }
 
-  void AddSocket(const SocketInfo& socket) {
-    sockets_.push_back(socket);
+  void AddSocket(const SocketInfo& socket_info) {
+    // Takes ownership of socket_info.socket;
+    ScopedSocketFactory platform_factory(socket_info.socket);
+    scoped_ptr<net::DatagramServerSocket> socket(
+        net::CreateAndBindMDnsSocket(socket_info.address_family,
+                                     socket_info.interface_index));
+    if (socket) {
+      socket->DetachFromThread();
+      sockets_.push_back(socket.release());
+    }
   }
 
   void Reset() {
-    for (size_t i = 0; i < sockets_.size(); ++i) {
-      if (sockets_[i].socket != net::kInvalidSocket)
-        ClosePlatformSocket(sockets_[i].socket);
-    }
     sockets_.clear();
   }
 
  private:
-  std::vector<SocketInfo> sockets_;
+  ScopedVector<net::DatagramServerSocket> sockets_;
 
   DISALLOW_COPY_AND_ASSIGN(PreCreatedMDnsSocketFactory);
 };
@@ -224,6 +222,8 @@ bool ServiceDiscoveryMessageHandler::OnMessageReceived(
 #endif  // OS_POSIX
     IPC_MESSAGE_HANDLER(LocalDiscoveryMsg_StartWatcher, OnStartWatcher)
     IPC_MESSAGE_HANDLER(LocalDiscoveryMsg_DiscoverServices, OnDiscoverServices)
+    IPC_MESSAGE_HANDLER(LocalDiscoveryMsg_SetActivelyRefreshServices,
+                        OnSetActivelyRefreshServices)
     IPC_MESSAGE_HANDLER(LocalDiscoveryMsg_DestroyWatcher, OnDestroyWatcher)
     IPC_MESSAGE_HANDLER(LocalDiscoveryMsg_ResolveService, OnResolveService)
     IPC_MESSAGE_HANDLER(LocalDiscoveryMsg_DestroyResolver, OnDestroyResolver)
@@ -270,6 +270,14 @@ void ServiceDiscoveryMessageHandler::OnDiscoverServices(uint64 id,
   PostTask(FROM_HERE,
            base::Bind(&ServiceDiscoveryMessageHandler::DiscoverServices,
                       base::Unretained(this), id, force_update));
+}
+
+void ServiceDiscoveryMessageHandler::OnSetActivelyRefreshServices(
+    uint64 id, bool actively_refresh_services) {
+  PostTask(FROM_HERE,
+           base::Bind(
+               &ServiceDiscoveryMessageHandler::SetActivelyRefreshServices,
+               base::Unretained(this), id, actively_refresh_services));
 }
 
 void ServiceDiscoveryMessageHandler::OnDestroyWatcher(uint64 id) {
@@ -330,6 +338,16 @@ void ServiceDiscoveryMessageHandler::DiscoverServices(uint64 id,
     return;
   DCHECK(ContainsKey(service_watchers_, id));
   service_watchers_[id]->DiscoverNewServices(force_update);
+}
+
+void ServiceDiscoveryMessageHandler::SetActivelyRefreshServices(
+    uint64 id,
+    bool actively_refresh_services) {
+  VLOG(1) << "ActivelyRefreshServices, id=" << id;
+  if (!service_discovery_client_)
+    return;
+  DCHECK(ContainsKey(service_watchers_, id));
+  service_watchers_[id]->SetActivelyRefreshServices(actively_refresh_services);
 }
 
 void ServiceDiscoveryMessageHandler::DestroyWatcher(uint64 id) {

@@ -5,13 +5,15 @@
 import json
 import logging
 from StringIO import StringIO
+import posixpath
 
-import appengine_blobstore as blobstore
+from appengine_blobstore import AppEngineBlobstore, BLOBSTORE_GITHUB
 from appengine_url_fetcher import AppEngineUrlFetcher
-from appengine_wrappers import urlfetch
+from appengine_wrappers import urlfetch, blobstore
 from docs_server_utils import StringIdentity
 from file_system import FileSystem, StatInfo
 from future import Future
+from path_util import IsDirectory
 import url_constants
 from zipfile import ZipFile, BadZipfile
 
@@ -53,7 +55,7 @@ class _AsyncFetchFutureZip(object):
       return None
     if self._key_to_delete is not None:
       self._blobstore.Delete(_MakeBlobstoreKey(self._key_to_delete),
-                             blobstore.BLOBSTORE_GITHUB)
+                             BLOBSTORE_GITHUB)
     try:
       return_zip = ZipFile(StringIO(blob))
     except BadZipfile as e:
@@ -62,7 +64,7 @@ class _AsyncFetchFutureZip(object):
 
     self._blobstore.Set(_MakeBlobstoreKey(self._key_to_set),
                         blob,
-                        blobstore.BLOBSTORE_GITHUB)
+                        BLOBSTORE_GITHUB)
     return return_zip
 
 class GithubFileSystem(FileSystem):
@@ -70,7 +72,7 @@ class GithubFileSystem(FileSystem):
   def CreateChromeAppsSamples(object_store_creator):
     return GithubFileSystem(
         '%s/GoogleChrome/chrome-app-samples' % url_constants.GITHUB_REPOS,
-        blobstore.AppEngineBlobstore(),
+        AppEngineBlobstore(),
         object_store_creator)
 
   def __init__(self, url, blobstore, object_store_creator):
@@ -99,17 +101,15 @@ class GithubFileSystem(FileSystem):
 
   def _GetZip(self, version):
     try:
-      blob = self._blobstore.Get(_MakeBlobstoreKey(version),
-                                 blobstore.BLOBSTORE_GITHUB)
-    except:
+      blob = self._blobstore.Get(_MakeBlobstoreKey(version), BLOBSTORE_GITHUB)
+    except blobstore.BlobNotFoundError:
       self._zip_file = Future(value=None)
       return
     if blob is not None:
       try:
         self._zip_file = Future(value=ZipFile(StringIO(blob)))
       except BadZipfile as e:
-        self._blobstore.Delete(_MakeBlobstoreKey(version),
-                               blobstore.BLOBSTORE_GITHUB)
+        self._blobstore.Delete(_MakeBlobstoreKey(version), BLOBSTORE_GITHUB)
         logging.error('Bad github zip file: %s' % e)
         self._zip_file = Future(value=None)
     else:
@@ -131,7 +131,7 @@ class GithubFileSystem(FileSystem):
     if zip_file is None:
       logging.error('Bad github zip file.')
       return ''
-    prefix = zip_file.namelist()[0][:-1]
+    prefix = zip_file.namelist()[0]
     return zip_file.read(prefix + path)
 
   def _ListDir(self, path):
@@ -145,7 +145,7 @@ class GithubFileSystem(FileSystem):
       return []
     filenames = zip_file.namelist()
     # Take out parent directory name (GoogleChrome-chrome-app-samples-c78a30f)
-    filenames = [f[len(filenames[0]) - 1:] for f in filenames]
+    filenames = [f[len(filenames[0]):] for f in filenames]
     # Remove the path of the directory we're listing from the filenames.
     filenames = [f[len(path):] for f in filenames
                  if f != path and f.startswith(path)]
@@ -158,7 +158,7 @@ class GithubFileSystem(FileSystem):
       self._GetZip(version)
     result = {}
     for path in paths:
-      if path.endswith('/'):
+      if IsDirectory(path):
         result[path] = self._ListDir(path)
       else:
         result[path] = self._ReadFile(path)

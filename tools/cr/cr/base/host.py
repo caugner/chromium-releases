@@ -6,6 +6,7 @@
 
 import os
 import pipes
+import signal
 import subprocess
 
 import cr
@@ -41,8 +42,9 @@ class Host(cr.Plugin, cr.Plugin.Type):
         return host
 
   def _Execute(self, context, command,
-               shell=False, capture=False, ignore_dry_run=False,
-               return_status=False):
+               shell=False, capture=False, silent=False,
+               ignore_dry_run=False, return_status=False,
+               ignore_interrupt_signal=False):
     """This is the only method that launches external programs.
 
     It is a thin wrapper around subprocess.Popen that handles cr specific
@@ -58,6 +60,9 @@ class Host(cr.Plugin, cr.Plugin.Type):
         the command to be run anyway.
       return_status: switches the function to returning the status code rather
         the output.
+      ignore_interrupt_signal: Ignore the interrupt signal (i.e., Ctrl-C) while
+        the command is running. Useful for letting interactive programs manage
+        Ctrl-C by themselves.
     Returns:
       the status if return_status is true, or the output if capture is true,
       otherwise nothing.
@@ -78,6 +83,8 @@ class Host(cr.Plugin, cr.Plugin.Type):
       out = None
       if capture:
         out = subprocess.PIPE
+      elif silent:
+        out = open(os.devnull, "w")
       try:
         p = subprocess.Popen(
             command, shell=shell,
@@ -92,11 +99,14 @@ class Host(cr.Plugin, cr.Plugin.Type):
             print '   ', key, '=', value
         exit(1)
       try:
+        if ignore_interrupt_signal:
+          signal.signal(signal.SIGINT, signal.SIG_IGN)
         output, _ = p.communicate()
-      except KeyboardInterrupt:
-        p.terminate()
-        p.wait()
-        exit(1)
+      finally:
+        if ignore_interrupt_signal:
+          signal.signal(signal.SIGINT, signal.SIG_DFL)
+        if silent:
+          out.close()
       if return_status:
         return p.returncode
       if p.returncode != 0:
@@ -108,11 +118,16 @@ class Host(cr.Plugin, cr.Plugin.Type):
   @cr.Plugin.activemethod
   def Shell(self, context, *command):
     command = ' '.join([pipes.quote(arg) for arg in command])
-    return self._Execute(context, [command], shell=True)
+    return self._Execute(context, [command], shell=True,
+                         ignore_interrupt_signal=True)
 
   @cr.Plugin.activemethod
   def Execute(self, context, *command):
     return self._Execute(context, command, shell=False)
+
+  @cr.Plugin.activemethod
+  def ExecuteSilently(self, context, *command):
+    return self._Execute(context, command, shell=False, silent=True)
 
   @cr.Plugin.activemethod
   def CaptureShell(self, context, *command):
@@ -127,6 +142,23 @@ class Host(cr.Plugin, cr.Plugin.Type):
   def ExecuteStatus(self, context, *command):
     return self._Execute(context, command,
                          ignore_dry_run=True, return_status=True)
+
+  @cr.Plugin.activemethod
+  def YesNo(self, question, default=True):
+    """Ask the user a yes no question
+
+    This blocks until the user responds.
+    Args:
+      question: The question string to show the user
+      default: True if the default response is Yes
+    Returns:
+      True if the response was yes.
+    """
+    options = 'Y/n' if default else 'y/N'
+    result = raw_input(question + ' [' + options + '] ').lower()
+    if result == '':
+      return default
+    return result in ['y', 'yes']
 
   @classmethod
   def SearchPath(cls, name):

@@ -67,6 +67,10 @@
     ],
     "max_manifest_version": 1
   },
+  "bluetooth": {
+    "channel": "dev",
+    "extension_types": ["platform_app"]
+  },
   "browser_action": {
     "channel": "stable",
     "extension_types": ["extension"]
@@ -146,7 +150,7 @@
   "display_in_launcher": [
     {
       "channel": "stable",
-      "extension_types": ["legacy_packaged_app", "platform_app"],
+      "extension_types": ["legacy_packaged_app", "platform_app", "hosted_app"],
       "location": "component"
     },
     {
@@ -160,7 +164,7 @@
   "display_in_new_tab_page": [
     {
       "channel": "stable",
-      "extension_types": ["legacy_packaged_app", "platform_app"],
+      "extension_types": ["legacy_packaged_app", "platform_app", "hosted_app"],
       "location": "component"
     },
     {
@@ -191,10 +195,17 @@
       "extension", "hosted_app", "legacy_packaged_app", "platform_app"
     ]
   },
-  "file_browser_handlers": {
-    "channel": "stable",
-    "extension_types": ["extension", "legacy_packaged_app"]
-  },
+  "file_browser_handlers": [
+    {
+      "channel": "stable",
+      "extension_types": ["extension", "legacy_packaged_app"]
+    },
+    {
+      "channel": "stable",
+      "extension_types": ["platform_app"],
+      "location": "component"
+    }
+  ],
   "file_handlers": {
     "channel": "stable",
     "extension_types": ["platform_app"]
@@ -211,10 +222,17 @@
     "channel": "stable",
     "extension_types": "all"
   },
-  "incognito": {
-    "channel": "stable",
-    "extension_types": ["extension", "legacy_packaged_app"]
-  },
+  "incognito": [
+    {
+      "channel": "stable",
+      "extension_types": ["extension", "legacy_packaged_app"]
+    },
+    {
+      "channel": "stable",
+      "extension_types": ["platform_app"],
+      "location": "component"
+    }
+  ],
   "input_components": {
     "channel": "stable",
     "extension_types": ["extension", "legacy_packaged_app"]
@@ -285,7 +303,6 @@
     "whitelist": [
       "mdbihdcgjmagbcapkhhkjbbdlkflmbfo",  // unit_tests
       "pafkbggdmjlpgkdkcbjmhmfcdpncadgh",  // Google Now
-      "hkhhlkdconhgemhegnplaldnmnmkaemd",  // Get Started App
       "nmmhkkegccagdldgiimedpiccmgmieda",  // In-app payments support app.
       "4B1D0E19C6C43C008C44A8278C8B5BFE15ABEB3C",
       "F7FA7ABC1ECB89BA8EE6656847EFABBF43BB9BCA",
@@ -400,14 +417,21 @@
     "channel": "stable",
     "extension_types": "all"
   },
-  "web_accessible_resources": {
-    "channel": "stable",
-    "extension_types": [
-      "extension", "legacy_packaged_app", "hosted_app"
-    ]
-  },
+  "web_accessible_resources": [
+    {
+      "channel": "stable",
+      "extension_types": [
+        "extension", "legacy_packaged_app", "hosted_app"
+      ]
+    },
+    {
+      "channel": "stable",
+      "extension_types": ["platform_app"],
+      "location": "component"
+    }
+  ],
   "webview": {
-    "channel": "dev",
+    "channel": "stable",
     "extension_types": ["platform_app"],
     "min_manifest_version": 2
   }

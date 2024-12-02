@@ -12,7 +12,6 @@
 #include "net/quic/quic_received_packet_manager.h"
 #include "net/quic/test_tools/quic_framer_peer.h"
 #include "net/quic/test_tools/quic_sent_packet_manager_peer.h"
-#include "net/quic/test_tools/quic_test_writer.h"
 
 namespace net {
 namespace test {
@@ -52,6 +51,12 @@ QuicConnectionVisitorInterface* QuicConnectionPeer::GetVisitor(
 QuicPacketCreator* QuicConnectionPeer::GetPacketCreator(
     QuicConnection* connection) {
   return &connection->packet_creator_;
+}
+
+// static
+QuicSentPacketManager* QuicConnectionPeer::GetSentPacketManager(
+    QuicConnection* connection) {
+  return &connection->sent_packet_manager_;
 }
 
 // static
@@ -107,17 +112,6 @@ QuicPacketEntropyHash QuicConnectionPeer::ReceivedEntropyHash(
     QuicPacketSequenceNumber sequence_number) {
   return connection->received_packet_manager_.EntropyHash(
       sequence_number);
-}
-
-// static
-bool QuicConnectionPeer::IsWriteBlocked(QuicConnection* connection) {
-  return connection->write_blocked_;
-}
-
-// static
-void QuicConnectionPeer::SetIsWriteBlocked(QuicConnection* connection,
-                                           bool write_blocked) {
-  connection->write_blocked_ = write_blocked;
 }
 
 // static
@@ -201,8 +195,19 @@ QuicPacketWriter* QuicConnectionPeer::GetWriter(QuicConnection* connection) {
 
 // static
 void QuicConnectionPeer::SetWriter(QuicConnection* connection,
-                                   QuicTestWriter* writer) {
+                                   QuicPacketWriter* writer) {
   connection->writer_ = writer;
+}
+
+// static
+void QuicConnectionPeer::CloseConnection(QuicConnection* connection) {
+  connection->connected_ = false;
+}
+
+// static
+QuicEncryptedPacket* QuicConnectionPeer::GetConnectionClosePacket(
+    QuicConnection* connection) {
+  return connection->connection_close_packet_.get();
 }
 
 }  // namespace test

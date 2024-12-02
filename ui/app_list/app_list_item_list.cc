@@ -4,7 +4,7 @@
 
 #include "ui/app_list/app_list_item_list.h"
 
-#include "ui/app_list/app_list_item_model.h"
+#include "ui/app_list/app_list_item.h"
 
 namespace app_list {
 
@@ -22,9 +22,9 @@ void AppListItemList::RemoveObserver(AppListItemListObserver* observer) {
   observers_.RemoveObserver(observer);
 }
 
-AppListItemModel* AppListItemList::FindItem(const std::string& id) {
+AppListItem* AppListItemList::FindItem(const std::string& id) {
   for (size_t i = 0; i < app_list_items_.size(); ++i) {
-    AppListItemModel* item = app_list_items_[i];
+    AppListItem* item = app_list_items_[i];
     if (item->id() == id)
       return item;
   }
@@ -33,7 +33,7 @@ AppListItemModel* AppListItemList::FindItem(const std::string& id) {
 
 bool AppListItemList::FindItemIndex(const std::string& id, size_t* index) {
   for (size_t i = 0; i < app_list_items_.size(); ++i) {
-    AppListItemModel* item = app_list_items_[i];
+    AppListItem* item = app_list_items_[i];
     if (item->id() == id) {
       *index = i;
       return true;
@@ -42,94 +42,19 @@ bool AppListItemList::FindItemIndex(const std::string& id, size_t* index) {
   return false;
 }
 
-size_t AppListItemList::AddItem(AppListItemModel* item) {
-  CHECK(std::find(app_list_items_.begin(), app_list_items_.end(), item)
-        == app_list_items_.end());
-  EnsureValidItemPosition(item);
-  size_t index = GetItemSortOrderIndex(item->position(), item->id());
-  app_list_items_.insert(app_list_items_.begin() + index, item);
-  FOR_EACH_OBSERVER(AppListItemListObserver,
-                    observers_,
-                    OnListItemAdded(index, item));
-  return index;
-}
-
-void AppListItemList::InsertItemAt(AppListItemModel* item, size_t index) {
-  DCHECK_LE(index, item_count());
-  if (item_count() == 0) {
-    AddItem(item);
-    return;
-  }
-
-  AppListItemModel* prev =
-      index > 0 ? app_list_items_[index - 1] : NULL;
-  AppListItemModel* next = index <= app_list_items_.size() - 1 ?
-      app_list_items_[index] : NULL;
-  CHECK_NE(prev, next);
-
-  if (prev && next && prev->position().Equals(next->position()))
-    prev = NULL;
-
-  if (!prev)
-    item->set_position(next->position().CreateBefore());
-  else if (!next)
-    item->set_position(prev->position().CreateAfter());
-  else
-    item->set_position(prev->position().CreateBetween(next->position()));
-
-  app_list_items_.insert(app_list_items_.begin() + index, item);
-
-  FOR_EACH_OBSERVER(AppListItemListObserver,
-                    observers_,
-                    OnListItemAdded(index, item));
-}
-
-void AppListItemList::DeleteItem(const std::string& id) {
-  scoped_ptr<AppListItemModel> item = RemoveItem(id);
-  // |item| will be deleted on destruction.
-}
-
-void AppListItemList::DeleteItemsByType(const char* type) {
-  for (int i = static_cast<int>(app_list_items_.size()) - 1;
-       i >= 0; --i) {
-    AppListItemModel* item = app_list_items_[i];
-    if (!type || item->GetAppType() == type)
-      DeleteItemAt(i);
-  }
-}
-
-scoped_ptr<AppListItemModel> AppListItemList::RemoveItem(
-    const std::string& id) {
-  size_t index;
-  if (FindItemIndex(id, &index))
-    return RemoveItemAt(index);
-
-  return scoped_ptr<AppListItemModel>();
-}
-
-scoped_ptr<AppListItemModel> AppListItemList::RemoveItemAt(size_t index) {
-  DCHECK_LT(index, item_count());
-  AppListItemModel* item = app_list_items_[index];
-  app_list_items_.weak_erase(app_list_items_.begin() + index);
-  FOR_EACH_OBSERVER(AppListItemListObserver,
-                    observers_,
-                    OnListItemRemoved(index, item));
-  return make_scoped_ptr<AppListItemModel>(item);
-}
-
 void AppListItemList::MoveItem(size_t from_index, size_t to_index) {
   DCHECK_LT(from_index, item_count());
   DCHECK_LT(to_index, item_count());
   if (from_index == to_index)
     return;
 
-  AppListItemModel* target_item = app_list_items_[from_index];
+  AppListItem* target_item = app_list_items_[from_index];
   app_list_items_.weak_erase(app_list_items_.begin() + from_index);
   app_list_items_.insert(app_list_items_.begin() + to_index, target_item);
 
   // Update position
-  AppListItemModel* prev = to_index > 0 ? app_list_items_[to_index - 1] : NULL;
-  AppListItemModel* next = to_index < app_list_items_.size() - 1 ?
+  AppListItem* prev = to_index > 0 ? app_list_items_[to_index - 1] : NULL;
+  AppListItem* next = to_index < app_list_items_.size() - 1 ?
       app_list_items_[to_index + 1] : NULL;
   CHECK_NE(prev, next);
 
@@ -157,7 +82,7 @@ void AppListItemList::MoveItem(size_t from_index, size_t to_index) {
 }
 
 void AppListItemList::SetItemPosition(
-    AppListItemModel* item,
+    AppListItem* item,
     const syncer::StringOrdinal& new_position) {
   DCHECK(item);
   size_t from_index;
@@ -189,12 +114,72 @@ void AppListItemList::SetItemPosition(
 
 // AppListItemList private
 
-void AppListItemList::DeleteItemAt(size_t index) {
-  scoped_ptr<AppListItemModel> item = RemoveItemAt(index);
+syncer::StringOrdinal AppListItemList::CreatePositionBefore(
+    const syncer::StringOrdinal& position) {
+  if (app_list_items_.empty())
+    return syncer::StringOrdinal::CreateInitialOrdinal();
+
+  size_t nitems = app_list_items_.size();
+  size_t index;
+  if (!position.IsValid()) {
+    index = nitems;
+  } else {
+    for (index = 0; index < nitems; ++index) {
+      if (!app_list_items_[index]->position().LessThan(position))
+        break;
+    }
+  }
+  if (index == 0)
+    return app_list_items_[0]->position().CreateBefore();
+  if (index == nitems)
+    return app_list_items_[nitems - 1]->position().CreateAfter();
+  return app_list_items_[index - 1]->position().CreateBetween(
+      app_list_items_[index]->position());
+}
+
+AppListItem* AppListItemList::AddItem(scoped_ptr<AppListItem> item_ptr) {
+  AppListItem* item = item_ptr.get();
+  CHECK(std::find(app_list_items_.begin(), app_list_items_.end(), item)
+        == app_list_items_.end());
+  EnsureValidItemPosition(item);
+  size_t index = GetItemSortOrderIndex(item->position(), item->id());
+  app_list_items_.insert(app_list_items_.begin() + index, item_ptr.release());
+  FOR_EACH_OBSERVER(AppListItemListObserver,
+                    observers_,
+                    OnListItemAdded(index, item));
+  return item;
+}
+
+void AppListItemList::DeleteItem(const std::string& id) {
+  scoped_ptr<AppListItem> item = RemoveItem(id);
   // |item| will be deleted on destruction.
 }
 
-void AppListItemList::EnsureValidItemPosition(AppListItemModel* item) {
+scoped_ptr<AppListItem> AppListItemList::RemoveItem(
+    const std::string& id) {
+  size_t index;
+  if (FindItemIndex(id, &index))
+    return RemoveItemAt(index);
+
+  return scoped_ptr<AppListItem>();
+}
+
+scoped_ptr<AppListItem> AppListItemList::RemoveItemAt(size_t index) {
+  DCHECK_LT(index, item_count());
+  AppListItem* item = app_list_items_[index];
+  app_list_items_.weak_erase(app_list_items_.begin() + index);
+  FOR_EACH_OBSERVER(AppListItemListObserver,
+                    observers_,
+                    OnListItemRemoved(index, item));
+  return make_scoped_ptr<AppListItem>(item);
+}
+
+void AppListItemList::DeleteItemAt(size_t index) {
+  scoped_ptr<AppListItem> item = RemoveItemAt(index);
+  // |item| will be deleted on destruction.
+}
+
+void AppListItemList::EnsureValidItemPosition(AppListItem* item) {
   syncer::StringOrdinal position = item->position();
   if (position.IsValid())
     return;

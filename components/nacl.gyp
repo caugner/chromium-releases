@@ -151,6 +151,7 @@
           ],
           'dependencies': [
             '../content/content.gyp:content_renderer',
+            '../third_party/WebKit/public/blink.gyp:blink',
             '../webkit/common/webkit_common.gyp:webkit_common',
           ],
           'defines': [
@@ -186,9 +187,24 @@
                 'IN_NACL_HELPER=1',
               ],
               'sources': [
-                'nacl/loader/nacl_sandbox_linux.cc',
                 'nacl/loader/nacl_helper_linux.cc',
                 'nacl/loader/nacl_helper_linux.h',
+                'nacl/loader/nacl_sandbox_linux.cc',
+                'nacl/loader/nonsfi/abi_conversion.cc',
+                'nacl/loader/nonsfi/abi_conversion.h',
+                'nacl/loader/nonsfi/elf_loader.cc',
+                'nacl/loader/nonsfi/elf_loader.h',
+                'nacl/loader/nonsfi/irt_basic.cc',
+                'nacl/loader/nonsfi/irt_clock.cc',
+                'nacl/loader/nonsfi/irt_fdio.cc',
+                'nacl/loader/nonsfi/irt_futex.cc',
+                'nacl/loader/nonsfi/irt_interfaces.cc',
+                'nacl/loader/nonsfi/irt_interfaces.h',
+                'nacl/loader/nonsfi/irt_memory.cc',
+                'nacl/loader/nonsfi/irt_thread.cc',
+                'nacl/loader/nonsfi/irt_util.h',
+                'nacl/loader/nonsfi/nonsfi_main.cc',
+                'nacl/loader/nonsfi/nonsfi_main.h',
                 '../base/posix/unix_domain_socket_linux.cc',
                 '../content/common/child_process_sandbox_support_impl_shm_linux.cc',
                 '../content/common/sandbox_linux/sandbox_bpf_base_policy_linux.cc',
@@ -215,6 +231,14 @@
                       ],
                     }],
                   ],
+                }],
+                ['use_seccomp_bpf == 0', {
+                  'sources!': [
+                    '../content/common/sandbox_linux/sandbox_bpf_base_policy_linux.cc',
+                    '../content/common/sandbox_linux/sandbox_init_linux.cc',
+                  ],
+                }, {
+                  'defines': ['USE_SECCOMP_BPF'],
                 }],
               ],
               'cflags': ['-fPIE'],

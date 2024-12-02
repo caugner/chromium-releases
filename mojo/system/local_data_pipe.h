@@ -20,9 +20,10 @@ namespace system {
 // protection provided by |DataPipe|'s |lock_|.
 class MOJO_SYSTEM_IMPL_EXPORT LocalDataPipe : public DataPipe {
  public:
-  LocalDataPipe();
-
-  MojoResult Init(const MojoCreateDataPipeOptions* options);
+  // |validated_options| should be the output of |DataPipe::ValidateOptions()|.
+  // In particular: |struct_size| is ignored (so |validated_options| must be the
+  // current version of the struct) and |capacity_num_bytes| must be nonzero.
+  explicit LocalDataPipe(const MojoCreateDataPipeOptions& validated_options);
 
  private:
   friend class base::RefCountedThreadSafe<LocalDataPipe>;
@@ -30,45 +31,49 @@ class MOJO_SYSTEM_IMPL_EXPORT LocalDataPipe : public DataPipe {
 
   // |DataPipe| implementation:
   virtual void ProducerCloseImplNoLock() OVERRIDE;
+  virtual MojoResult ProducerWriteDataImplNoLock(const void* elements,
+                                                 uint32_t* num_bytes,
+                                                 bool all_or_none) OVERRIDE;
   virtual MojoResult ProducerBeginWriteDataImplNoLock(
       void** buffer,
-      uint32_t* buffer_num_elements,
-      MojoWriteDataFlags flags) OVERRIDE;
+      uint32_t* buffer_num_bytes,
+      bool all_or_none) OVERRIDE;
   virtual MojoResult ProducerEndWriteDataImplNoLock(
-      uint32_t num_elements_written) OVERRIDE;
+      uint32_t num_bytes_written) OVERRIDE;
   virtual MojoWaitFlags ProducerSatisfiedFlagsNoLock() OVERRIDE;
   virtual MojoWaitFlags ProducerSatisfiableFlagsNoLock() OVERRIDE;
   virtual void ConsumerCloseImplNoLock() OVERRIDE;
-  virtual MojoResult ConsumerDiscardDataNoLock(uint32_t* num_elements,
-                                               bool all_or_none) OVERRIDE;
-  virtual MojoResult ConsumerQueryDataNoLock(uint32_t* num_elements) OVERRIDE;
-  virtual MojoResult ConsumerBeginReadDataImplNoLock(
-      const void** buffer,
-      uint32_t* buffer_num_elements,
-      MojoReadDataFlags flags) OVERRIDE;
+  virtual MojoResult ConsumerReadDataImplNoLock(void* elements,
+                                                uint32_t* num_bytes,
+                                                bool all_or_none) OVERRIDE;
+  virtual MojoResult ConsumerDiscardDataImplNoLock(uint32_t* num_bytes,
+                                                   bool all_or_none) OVERRIDE;
+  virtual MojoResult ConsumerQueryDataImplNoLock(uint32_t* num_bytes) OVERRIDE;
+  virtual MojoResult ConsumerBeginReadDataImplNoLock(const void** buffer,
+                                                     uint32_t* buffer_num_bytes,
+                                                     bool all_or_none) OVERRIDE;
   virtual MojoResult ConsumerEndReadDataImplNoLock(
-      uint32_t num_elements_read) OVERRIDE;
+      uint32_t num_bytes_read) OVERRIDE;
   virtual MojoWaitFlags ConsumerSatisfiedFlagsNoLock() OVERRIDE;
   virtual MojoWaitFlags ConsumerSatisfiableFlagsNoLock() OVERRIDE;
 
   void EnsureBufferNoLock();
+  void DestroyBufferNoLock();
 
   // Get the maximum (single) write/read size right now (in number of elements);
   // result fits in a |uint32_t|.
-  size_t GetMaxElementsToWriteNoLock();
-  size_t GetMaxElementsToReadNoLock();
+  size_t GetMaxNumBytesToWriteNoLock();
+  size_t GetMaxNumBytesToReadNoLock();
+
+  // Marks the given number of bytes as consumed/discarded. |num_bytes| must be
+  // greater than |current_num_bytes_|.
+  void MarkDataAsConsumedNoLock(size_t num_bytes);
 
   // The members below are protected by |DataPipe|'s |lock_|:
-  bool producer_open_;
-  bool consumer_open_;
-
-  scoped_ptr_malloc<char, base::ScopedPtrAlignedFree> buffer_;
+  scoped_ptr<char, base::AlignedFreeDeleter> buffer_;
   // Circular buffer.
-  size_t buffer_first_element_index_;
-  size_t buffer_current_num_elements_;
-
-  uint32_t two_phase_max_elements_written_;
-  uint32_t two_phase_max_elements_read_;
+  size_t start_index_;
+  size_t current_num_bytes_;
 
   DISALLOW_COPY_AND_ASSIGN(LocalDataPipe);
 };

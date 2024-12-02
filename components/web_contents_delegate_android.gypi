@@ -17,14 +17,13 @@
             '../net/net.gyp:net',
             '../skia/skia.gyp:skia',
             '../ui/gfx/gfx.gyp:gfx',
+            '../ui/gfx/gfx.gyp:gfx_geometry',
             '../ui/ui.gyp:ui',
-            '../webkit/glue/webkit_glue.gyp:glue',
             'web_contents_delegate_android_jni_headers',
           ],
           'include_dirs': [
             '..',
             '../skia/config',
-            '<(SHARED_INTERMEDIATE_DIR)/web_contents_delegate_android',
           ],
           'sources': [
             'web_contents_delegate_android/color_chooser_android.cc',
@@ -59,6 +58,7 @@
           ],
           'variables': {
             'jni_gen_package': 'web_contents_delegate_android',
+            'jni_generator_ptr_type': 'long',
           },
           'includes': [ '../build/jni_generator.gypi' ],
         },

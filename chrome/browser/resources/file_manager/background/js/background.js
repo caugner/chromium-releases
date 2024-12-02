@@ -52,7 +52,7 @@ function Background() {
    * File operation manager.
    * @type {FileOperationManager}
    */
-  this.fileOperationManager = FileOperationManager.getInstance();
+  this.fileOperationManager = new FileOperationManager();
 
   /**
    * Event handler for progress center.
@@ -60,6 +60,23 @@ function Background() {
    * @private
    */
   this.fileOperationHandler_ = new FileOperationHandler(this);
+
+  /**
+   * Event handler for C++ sides notifications.
+   * @type {DeviceHandler}
+   * @private
+   */
+  this.deviceHandler_ = new DeviceHandler();
+
+  /**
+   * Drive sync handler.
+   * @type {DriveSyncHandler}
+   * @private
+   */
+  this.driveSyncHandler_ = new DriveSyncHandler(this.progressCenter);
+  this.driveSyncHandler_.addEventListener(
+      DriveSyncHandler.COMPLETED_EVENT,
+      function() { this.tryClose(); }.bind(this));
 
   /**
    * String assets.
@@ -149,7 +166,8 @@ Background.prototype.ready = function(callback) {
  */
 Background.prototype.tryClose = function() {
   // If the file operation is going, the background page cannot close.
-  if (this.fileOperationManager.hasQueuedTasks()) {
+  if (this.fileOperationManager.hasQueuedTasks() ||
+      this.driveSyncHandler_.syncing) {
     this.lastTimeCanClose_ = null;
     return;
   }
@@ -223,6 +241,40 @@ function AppWindowWrapper(url, id, options) {
   Object.seal(this);
 }
 
+AppWindowWrapper.prototype = {
+  /**
+   * @return {AppWindow} Wrapped application window.
+   */
+  get rawAppWindow() {
+    return this.window_;
+  }
+};
+
+/**
+ * Focuses the window on the specified desktop.
+ * @param {AppWindow} appWindow Application window.
+ * @param {string=} opt_profileId The profiled ID of the target window. If it is
+ *     dropped, the window is focused on the current window.
+ */
+AppWindowWrapper.focusOnDesktop = function(appWindow, opt_profileId) {
+  new Promise(function(onFullfilled, onRejected) {
+    if (opt_profileId) {
+      onFullfilled(opt_profileId);
+    } else {
+      chrome.fileBrowserPrivate.getProfiles(function(profiles,
+                                                     currentId,
+                                                     displayedId) {
+        onFullfilled(currentId);
+      });
+    }
+  }).then(function(profileId) {
+    appWindow.contentWindow.chrome.fileBrowserPrivate.visitDesktop(
+        profileId, function() {
+      appWindow.focus();
+    });
+  });
+};
+
 /**
  * Shift distance to avoid overlapping windows.
  * @type {number}
@@ -230,14 +282,23 @@ function AppWindowWrapper(url, id, options) {
  */
 AppWindowWrapper.SHIFT_DISTANCE = 40;
 
+/**
+ * Sets the icon of the window.
+ * @param {string} iconPath Path of the icon.
+ */
+AppWindowWrapper.prototype.setIcon = function(iconPath) {
+  this.window_.setIcon(iconPath);
+};
 
 /**
  * Opens the window.
  *
  * @param {Object} appState App state.
+ * @param {boolean} reopen True if the launching is triggered automatically.
+ *     False otherwize.
  * @param {function()=} opt_callback Completion callback.
  */
-AppWindowWrapper.prototype.launch = function(appState, opt_callback) {
+AppWindowWrapper.prototype.launch = function(appState, reopen, opt_callback) {
   // Check if the window is opened or not.
   if (this.openingOrOpened_) {
     console.error('The window is already opened.');
@@ -333,6 +394,7 @@ AppWindowWrapper.prototype.launch = function(appState, opt_callback) {
     var contentWindow = appWindow.contentWindow;
     contentWindow.appID = this.id_;
     contentWindow.appState = this.appState_;
+    contentWindow.appReopen = reopen;
     contentWindow.appInitialURL = this.url_;
     if (window.IN_TEST)
       contentWindow.IN_TEST = true;
@@ -415,12 +477,16 @@ SingletonAppWindowWrapper.prototype = {__proto__: AppWindowWrapper.prototype};
  * Activates an existing window or creates a new one.
  *
  * @param {Object} appState App state.
+ * @param {boolean} reopen True if the launching is triggered automatically.
+ *     False otherwize.
  * @param {function()=} opt_callback Completion callback.
  */
-SingletonAppWindowWrapper.prototype.launch = function(appState, opt_callback) {
+SingletonAppWindowWrapper.prototype.launch =
+    function(appState, reopen, opt_callback) {
   // If the window is not opened yet, just call the parent method.
   if (!this.openingOrOpened_) {
-    AppWindowWrapper.prototype.launch.call(this, appState, opt_callback);
+    AppWindowWrapper.prototype.launch.call(
+        this, appState, reopen, opt_callback);
     return;
   }
 
@@ -428,8 +494,8 @@ SingletonAppWindowWrapper.prototype.launch = function(appState, opt_callback) {
   // The queue is used to wait until the window is opened.
   this.queue.run(function(nextStep) {
     this.window_.contentWindow.appState = appState;
+    this.window_.contentWindow.appReopen = reopen;
     this.window_.contentWindow.reload();
-    this.window_.focus();
     if (opt_callback)
       opt_callback();
     nextStep();
@@ -438,20 +504,24 @@ SingletonAppWindowWrapper.prototype.launch = function(appState, opt_callback) {
 
 /**
  * Reopen a window if its state is saved in the local storage.
+ * @param {function()=} opt_callback Completion callback.
  */
-SingletonAppWindowWrapper.prototype.reopen = function() {
+SingletonAppWindowWrapper.prototype.reopen = function(opt_callback) {
   chrome.storage.local.get(this.id_, function(items) {
     var value = items[this.id_];
-    if (!value)
+    if (!value) {
+      opt_callback && opt_callback();
       return;  // No app state persisted.
+    }
 
     try {
       var appState = JSON.parse(value);
     } catch (e) {
       console.error('Corrupt launch data for ' + this.id_, value);
+      opt_callback && opt_callback();
       return;
     }
-    this.launch(appState);
+    this.launch(appState, true, opt_callback);
   }.bind(this));
 };
 
@@ -500,24 +570,38 @@ function launchFileManager(opt_appState, opt_id, opt_type, opt_callback) {
 
   // Wait until all windows are created.
   background.queue.run(function(onTaskCompleted) {
-    // Check if there is already a window with the same path. If so, then
+    // Check if there is already a window with the same URL. If so, then
     // reuse it instead of opening a new one.
     if (type == LaunchType.FOCUS_SAME_OR_CREATE ||
         type == LaunchType.FOCUS_ANY_OR_CREATE) {
-      if (opt_appState && opt_appState.defaultPath) {
+      if (opt_appState) {
         for (var key in background.appWindows) {
           if (!key.match(FILES_ID_PATTERN))
             continue;
 
           var contentWindow = background.appWindows[key].contentWindow;
-          if (contentWindow.appState &&
-              opt_appState.defaultPath == contentWindow.appState.defaultPath) {
-            background.appWindows[key].focus();
-            if (opt_callback)
-              opt_callback(key);
-            onTaskCompleted();
-            return;
+          if (!contentWindow.appState)
+            continue;
+
+          // Different current directories.
+          if (opt_appState.currentDirectoryURL !==
+                  contentWindow.appState.currentDirectoryURL) {
+            continue;
           }
+
+          // Selection URL specified, and it is different.
+          if (opt_appState.selectionURL &&
+                  opt_appState.selectionURL !==
+                  contentWindow.appState.selectionURL) {
+            continue;
+          }
+
+          AppWindowWrapper.focusOnDesktop(
+              background.appWindows[key], opt_appState.displayedId);
+          if (opt_callback)
+            opt_callback(key);
+          onTaskCompleted();
+          return;
         }
       }
     }
@@ -548,7 +632,8 @@ function launchFileManager(opt_appState, opt_id, opt_type, opt_callback) {
           continue;
 
         if (!background.appWindows[key].isMinimized()) {
-          background.appWindows[key].focus();
+          AppWindowWrapper.focusOnDesktop(
+              background.appWindows[key], (opt_appState || {}).displayedId);
           if (opt_callback)
             opt_callback(key);
           onTaskCompleted();
@@ -560,7 +645,8 @@ function launchFileManager(opt_appState, opt_id, opt_type, opt_callback) {
         if (!key.match(FILES_ID_PATTERN))
           continue;
 
-        background.appWindows[key].focus();
+        AppWindowWrapper.focusOnDesktop(
+            background.appWindows[key], (opt_appState || {}).displayedId);
         if (opt_callback)
           opt_callback(key);
         onTaskCompleted();
@@ -579,7 +665,9 @@ function launchFileManager(opt_appState, opt_id, opt_type, opt_callback) {
         'main.html',
         appId,
         FILE_MANAGER_WINDOW_CREATE_OPTIONS);
-    appWindow.launch(opt_appState || {}, function() {
+    appWindow.launch(opt_appState || {}, false, function() {
+      AppWindowWrapper.focusOnDesktop(
+          appWindow.window_, (opt_appState || {}).displayedId);
       if (opt_callback)
         opt_callback(appId);
       onTaskCompleted();
@@ -636,7 +724,11 @@ Background.prototype.onExecute_ = function(action, details) {
           params: {
             action: action
           },
-          defaultPath: details.entries[0].fullPath
+          // It is not allowed to call getParent() here, since there may be
+          // no permissions to access it at this stage. Therefore we are passing
+          // the selectionURL only, and the currentDirectory will be resolved
+          // later.
+          selectionURL: details.entries[0].toURL()
         };
         // For mounted devices just focus any Files.app window. The mounted
         // volume will appear on the navigation list.
@@ -649,39 +741,81 @@ Background.prototype.onExecute_ = function(action, details) {
 };
 
 /**
- * Audio player window create options.
- * @type {Object}
+ * Icon of the audio player.
+ * TODO(yoshiki): Consider providing an exact size icon, instead of relying
+ * on downsampling by ash.
+ *
+ * @type {string}
  * @const
  */
-var AUDIO_PLAYER_CREATE_OPTIONS = Object.freeze({
-  type: 'panel',
-  hidden: true,
-  minHeight: 35 + 58,
-  minWidth: 280,
-  height: 35 + 58,
-  width: 280
+var AUDIO_PLAYER_ICON = 'audio_player/icons/audio-player-64.png';
+
+// The instance of audio player. Until it's ready, this is null.
+var audioPlayer = null;
+
+// Queue to serializes the initialization, launching and reloading of the audio
+// player, so races won't happen.
+var audioPlayerInitializationQueue = new AsyncUtil.Queue();
+
+audioPlayerInitializationQueue.run(function(callback) {
+  // TODO(yoshiki): Remove '--file-manager-enable-new-audio-player' flag after
+  // the feature is launched.
+  var newAudioPlayerEnabled = true;
+
+  var audioPlayerHTML =
+      newAudioPlayerEnabled ? 'audio_player.html' : 'mediaplayer.html';
+
+  /**
+   * Audio player window create options.
+   * @type {Object}
+   */
+  var audioPlayerCreateOptions = Object.freeze({
+      type: 'panel',
+      hidden: true,
+      minHeight:
+          newAudioPlayerEnabled ?
+              (44 + 73) :  // 44px: track, 73px: controller
+              (35 + 58),  // 35px: track, 58px: controller
+      minWidth: newAudioPlayerEnabled ? 292 : 280,
+      height: newAudioPlayerEnabled ? (44 + 73) : (35 + 58),  // collapsed
+      width: newAudioPlayerEnabled ? 292 : 280,
+  });
+
+  audioPlayer = new SingletonAppWindowWrapper(audioPlayerHTML,
+                                              audioPlayerCreateOptions);
+  callback();
 });
 
-var audioPlayer = new SingletonAppWindowWrapper('mediaplayer.html',
-                                                AUDIO_PLAYER_CREATE_OPTIONS);
-
 /**
- * Launch the audio player.
+ * Launches the audio player.
  * @param {Object} playlist Playlist.
+ * @param {string=} opt_displayedId ProfileID of the desktop where the audio
+ *     player should show.
  */
-function launchAudioPlayer(playlist) {
-  audioPlayer.launch(playlist);
+function launchAudioPlayer(playlist, opt_displayedId) {
+  audioPlayerInitializationQueue.run(function(callback) {
+    audioPlayer.launch(playlist, false, function(appWindow) {
+      audioPlayer.setIcon(AUDIO_PLAYER_ICON);
+      AppWindowWrapper.focusOnDesktop(audioPlayer.rawAppWindow,
+                                      opt_displayedId);
+    });
+    callback();
+  });
 }
 
 var videoPlayer = new SingletonAppWindowWrapper('video_player.html',
                                                 {hidden: true});
 
 /**
- * Launch the video player.
+ * Launches the video player.
  * @param {string} url Video url.
+ * @param {string=} opt_displayedId ProfileID of the desktop where the video
+ *     player should show.
  */
-function launchVideoPlayer(url) {
-  videoPlayer.launch({url: url});
+function launchVideoPlayer(url, opt_displayedId) {
+  videoPlayer.launch({url: url}, false, function(appWindow) {
+    AppWindowWrapper.focusOnDesktop(videoPlayer.rawAppWindow, opt_displayedId);
+  });
 }
 
 /**
@@ -727,8 +861,18 @@ Background.prototype.onRestarted_ = function() {
     }
   });
 
-  // Reopen sub-applications.
-  audioPlayer.reopen();
+  // Reopen audio player.
+  audioPlayerInitializationQueue.run(function(callback) {
+    audioPlayer.reopen(function() {
+      // If the audioPlayer is reopened, change its window's icon. Otherwise
+      // there is no reopened window so just skip the call of setIcon.
+      if (audioPlayer.rawAppWindow)
+        audioPlayer.setIcon(AUDIO_PLAYER_ICON);
+    });
+    callback();
+  });
+
+  // Reopen video player.
   videoPlayer.reopen();
 };
 
@@ -739,14 +883,15 @@ Background.prototype.onRestarted_ = function() {
  */
 Background.prototype.onContextMenuClicked_ = function(info) {
   if (info.menuItemId == 'new-window') {
-    // Find the focused window (if any) and use it's current path for the
-    // new window. If not found, then launch with the default path.
+    // Find the focused window (if any) and use it's current url for the
+    // new window. If not found, then launch with the default url.
     for (var key in background.appWindows) {
       try {
         if (background.appWindows[key].contentWindow.isFocused()) {
           var appState = {
-            defaultPath: background.appWindows[key].contentWindow.
-                appState.defaultPath
+            // Do not clone the selection url, only the current directory.
+            currentDirectoryURL: background.appWindows[key].contentWindow.
+                appState.currentDirectoryURL
           };
           launchFileManager(appState);
           return;
@@ -757,7 +902,7 @@ Background.prototype.onContextMenuClicked_ = function(info) {
       }
     }
 
-    // Launch with the default path.
+    // Launch with the default URL.
     launchFileManager();
   }
 };

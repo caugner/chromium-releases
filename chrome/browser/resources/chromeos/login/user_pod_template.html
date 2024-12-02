@@ -1,7 +1,9 @@
 <div id="user-pod-template" class="pod need-password" hidden>
   <div class="main-pane">
     <div class="signed-in-indicator" i18n-content="signedIn" hidden></div>
-    <img class="user-image" alt="">
+    <div class="user-image-container">
+      <img class="user-image" alt="">
+    </div>
     <div class="name"></div>
     <div class="password-area">
       <div class="password-input-container">
@@ -15,6 +17,8 @@
       </button>
     </div>
     <button class="signin-button" i18n-content="signinButton"></button>
+    <button class="launch-app-button" i18n-content="launchAppButton" hidden>
+    </button>
     <div class="locked-indicator" hidden></div>
   </div>
   <div class="action-box-area">
@@ -37,6 +41,18 @@
       <button class="remove-warning-button
                      custom-appearance button-fancy button-red"
           i18n-content="removeUserWarningButtonTitle"></button>
+    </div>
+  </div>
+  <div class="user-type-bubble">
+    <div class="user-type-bubble-header">
+      <span class="mp-policy-title"
+          i18n-content="multiProfilesRestrictedPolicyTitle" hidden></span>
+    </div>
+    <div class="user-type-bubble-body">
+      <span class="mp-policy-not-allowed-msg"
+          i18n-content="multiProfilesNotAllowedPolicyMsg" hidden></span>
+      <span class="mp-policy-primary-only-msg"
+          i18n-content="multiProfilesPrimaryOnlyPolicyMsg" hidden></span>
     </div>
   </div>
 </div>

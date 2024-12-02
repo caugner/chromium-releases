@@ -60,6 +60,8 @@ leak:v8::internal::Genesis::Genesis
 
 # Suppressions for objects which can be owned by the V8 heap. This is a
 # temporary workaround until LeakSanitizer supports the V8 heap.
+# Those should only fire in (browser)tests. If you see one of them in Chrome,
+# then it's a real leak.
 # http://crbug.com/328552
 leak:extensions::ObjectBackedNativeHandler::RouteFunction
 leak:toString<WTF::AtomicString>
@@ -72,10 +74,8 @@ leak:WebCore::*::errorMethodCallback
 leak:WebCore::v8StringToWebCoreString
 leak:WTF::StringImpl::createUninitialized
 leak:ResourceBundleSourceMap::GetSource
-
-# http://crbug.com/328987
-leak:MetricsNetworkObserver::ProbeWifiPHYLayerProtocol
-leak:MetricsLog::MetricsLog
+leak:WebCore::ScriptState::forContext
+leak:TranslateScriptBrowserTest::ExecuteScript
 
 #### Actual bugs in Chromium code ####
 # PLEASE DO NOT ADD NEW SUPPRESSIONS TO THIS SECTION. Instead, commits that
@@ -83,9 +83,6 @@ leak:MetricsLog::MetricsLog
 
 # Small test-only leak in ppapi_unittests. http://crbug.com/258113
 leak:ppapi::proxy::PPP_Instance_Private_ProxyTest_PPPInstancePrivate_Test
-
-# Leak in base_unittests. http://crbug.com/268267
-leak:base::WeakPtrTest_MoveOwnershipAfterInvalidate_Test::TestBody
 
 # Leak in cc_unittests. http://crbug.com/285174
 leak:gpu::gles2::GLES2DecoderImpl::DoBindRenderbuffer
@@ -109,5 +106,8 @@ leak:gtk_util::*AppModal
 
 # http://crbug.com/318221
 leak:base::EnsureProcessTerminated
+
+# http://crbug.com/322671
+leak:content::SpeechRecognitionBrowserTest::SetUpOnMainThread
 
 # PLEASE DO NOT ADD NEW SUPPRESSIONS HERE. See the comment above.

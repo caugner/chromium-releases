@@ -11,12 +11,12 @@
 #include "build/build_config.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/extension_test_message_listener.h"
 #include "chrome/browser/media_galleries/media_galleries_test_util.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "content/public/browser/render_view_host.h"
+#include "extensions/browser/extension_system.h"
 #include "extensions/common/extension.h"
 
 namespace {
@@ -90,7 +90,7 @@ class MediaGalleriesPrivateGalleryWatchApiTest : public ExtensionApiTest {
                               const std::string& ok_message) {
     ExtensionTestMessageListener listener(ok_message, false);
     host->ExecuteJavascriptInWebFrame(base::string16(),
-                                      ASCIIToUTF16(js_command));
+                                      base::ASCIIToUTF16(js_command));
     EXPECT_TRUE(listener.WaitUntilSatisfied());
   }
 

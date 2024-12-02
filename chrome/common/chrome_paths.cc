@@ -5,6 +5,7 @@
 #include "chrome/common/chrome_paths.h"
 
 #include "base/file_util.h"
+#include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/mac/bundle_locations.h"
 #include "base/path_service.h"
@@ -94,9 +95,8 @@ const base::FilePath::CharType kFilepathSinglePrefExtensions[] =
 #endif  // defined(GOOGLE_CHROME_BUILD)
 #endif  // defined(OS_LINUX)
 
-}  // namespace
-
-namespace chrome {
+static base::LazyInstance<base::FilePath>
+    g_invalid_specified_user_data_dir = LAZY_INSTANCE_INITIALIZER;
 
 // Gets the path for internal plugins.
 bool GetInternalPluginsDirectory(base::FilePath* result) {
@@ -115,6 +115,10 @@ bool GetInternalPluginsDirectory(base::FilePath* result) {
   // The rest of the world expects plugins in the module directory.
   return PathService::Get(base::DIR_MODULE, result);
 }
+
+}  // namespace
+
+namespace chrome {
 
 bool PathProvider(int key, base::FilePath* result) {
   // Some keys are just aliases...
@@ -503,6 +507,34 @@ bool PathProvider(int key, base::FilePath* result) {
 #endif
       break;
 
+#if defined(OS_LINUX) || (defined(OS_MACOSX) && !defined(OS_IOS))
+    case chrome::DIR_NATIVE_MESSAGING:
+#if defined(OS_MACOSX)
+#if defined(GOOGLE_CHROME_BUILD)
+      cur = base::FilePath(FILE_PATH_LITERAL(
+           "/Library/Google/Chrome/NativeMessagingHosts"));
+#else
+      cur = base::FilePath(FILE_PATH_LITERAL(
+          "/Library/Application Support/Chromium/NativeMessagingHosts"));
+#endif
+#else  // defined(OS_MACOSX)
+#if defined(GOOGLE_CHROME_BUILD)
+      cur = base::FilePath(FILE_PATH_LITERAL(
+          "/etc/opt/chrome/native-messaging-hosts"));
+#else
+      cur = base::FilePath(FILE_PATH_LITERAL(
+          "/etc/chromium/native-messaging-hosts"));
+#endif
+#endif  // !defined(OS_MACOSX)
+      break;
+
+    case chrome::DIR_USER_NATIVE_MESSAGING:
+      if (!PathService::Get(chrome::DIR_USER_DATA, &cur))
+        return false;
+      cur = cur.Append(FILE_PATH_LITERAL("NativeMessagingHosts"));
+      break;
+#endif  // defined(OS_LINUX) || (defined(OS_MACOSX) && !defined(OS_IOS))
+
     default:
       return false;
   }
@@ -521,6 +553,14 @@ bool PathProvider(int key, base::FilePath* result) {
 // eliminate this object file if there is no direct entry point into it.
 void RegisterPathProvider() {
   PathService::RegisterProvider(PathProvider, PATH_START, PATH_END);
+}
+
+void SetInvalidSpecifiedUserDataDir(const base::FilePath& user_data_dir) {
+  g_invalid_specified_user_data_dir.Get() = user_data_dir;
+}
+
+const base::FilePath& GetInvalidSpecifiedUserDataDir() {
+  return g_invalid_specified_user_data_dir.Get();
 }
 
 }  // namespace chrome

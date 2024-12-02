@@ -18,6 +18,8 @@
 #include "url/gurl.h"
 #include "webkit/common/database/database_identifier.h"
 
+using base::ASCIIToUTF16;
+
 namespace content {
 
 class IndexedDBFactoryTest : public testing::Test {
@@ -316,7 +318,7 @@ TEST_F(IndexedDBFactoryTest, DeleteDatabaseClosesBackingStore) {
                           temp_directory.path());
 
   EXPECT_TRUE(factory->IsBackingStoreOpen(origin));
-  EXPECT_FALSE(factory->IsBackingStorePendingClose(origin));
+  EXPECT_TRUE(factory->IsBackingStorePendingClose(origin));
 
   // Now simulate shutdown, which should stop the timer.
   factory->ContextDestroyed();
@@ -342,7 +344,7 @@ TEST_F(IndexedDBFactoryTest, GetDatabaseNamesClosesBackingStore) {
                             temp_directory.path());
 
   EXPECT_TRUE(factory->IsBackingStoreOpen(origin));
-  EXPECT_FALSE(factory->IsBackingStorePendingClose(origin));
+  EXPECT_TRUE(factory->IsBackingStorePendingClose(origin));
 
   // Now simulate shutdown, which should stop the timer.
   factory->ContextDestroyed();
@@ -400,9 +402,7 @@ class UpgradeNeededCallbacks : public MockIndexedDBCallbacks {
   virtual void OnUpgradeNeeded(
       int64 old_version,
       scoped_ptr<IndexedDBConnection> connection,
-      const content::IndexedDBDatabaseMetadata& metadata,
-      blink::WebIDBDataLoss data_loss,
-      std::string data_loss_message) OVERRIDE {
+      const content::IndexedDBDatabaseMetadata& metadata) OVERRIDE {
     connection_ = connection.Pass();
   }
 

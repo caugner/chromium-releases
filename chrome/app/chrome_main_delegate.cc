@@ -5,7 +5,6 @@
 #include "chrome/app/chrome_main_delegate.h"
 
 #include "base/command_line.h"
-#include "base/environment.h"
 #include "base/files/file_path.h"
 #include "base/i18n/rtl.h"
 #include "base/lazy_instance.h"
@@ -15,12 +14,10 @@
 #include "base/path_service.h"
 #include "base/process/memory.h"
 #include "base/process/process_handle.h"
-#include "base/strings/stringprintf.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/strings/string_util.h"
 #include "build/build_config.h"
 #include "chrome/browser/chrome_content_browser_client.h"
 #include "chrome/browser/defaults.h"
-#include "chrome/browser/policy/policy_path_parser.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_content_client.h"
 #include "chrome/common/chrome_paths.h"
@@ -30,6 +27,7 @@
 #include "chrome/common/crash_keys.h"
 #include "chrome/common/logging_chrome.h"
 #include "chrome/common/profiling.h"
+#include "chrome/common/switch_utils.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/plugin/chrome_content_plugin_client.h"
 #include "chrome/renderer/chrome_content_renderer_client.h"
@@ -99,6 +97,14 @@
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
 #include "components/breakpad/app/breakpad_linux.h"
+#endif
+
+#if defined(OS_LINUX)
+#include "base/environment.h"
+#endif
+
+#if defined(OS_MACOSX) || defined(OS_WIN)
+#include "chrome/browser/policy/policy_path_parser.h"
 #endif
 
 #if !defined(CHROME_MULTIPLE_DLL_CHILD)
@@ -234,6 +240,8 @@ bool SubprocessNeedsResourceBundle(const std::string& process_type) {
       // Windows needs resources for the default/null plugin.
       // Mac needs them for the plugin process name.
       process_type == switches::kPluginProcess ||
+      // Needed for scrollbar related images.
+      process_type == switches::kWorkerProcess ||
 #endif
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
       // The zygote process opens the resources for the renderers.
@@ -242,7 +250,6 @@ bool SubprocessNeedsResourceBundle(const std::string& process_type) {
 #if defined(OS_MACOSX)
       // Mac needs them too for scrollbar related images and for sandbox
       // profiles.
-      process_type == switches::kWorkerProcess ||
       process_type == switches::kNaClLoaderProcess ||
       process_type == switches::kPpapiPluginProcess ||
       process_type == switches::kPpapiBrokerProcess ||
@@ -313,6 +320,64 @@ struct MainFunction {
   const char* name;
   int (*function)(const content::MainFunctionParams&);
 };
+
+// Initializes the user data dir. Must be called before InitializeLocalState().
+void InitializeUserDataDir() {
+  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  base::FilePath user_data_dir =
+      command_line->GetSwitchValuePath(switches::kUserDataDir);
+  std::string process_type =
+      command_line->GetSwitchValueASCII(switches::kProcessType);
+
+#if defined(OS_LINUX)
+  // On Linux, Chrome does not support running multiple copies under different
+  // DISPLAYs, so the profile directory can be specified in the environment to
+  // support the virtual desktop use-case.
+  if (user_data_dir.empty()) {
+    std::string user_data_dir_string;
+    scoped_ptr<base::Environment> environment(base::Environment::Create());
+    if (environment->GetVar("CHROME_USER_DATA_DIR", &user_data_dir_string) &&
+        IsStringUTF8(user_data_dir_string)) {
+      user_data_dir = base::FilePath::FromUTF8Unsafe(user_data_dir_string);
+    }
+  }
+#endif
+#if defined(OS_MACOSX) || defined(OS_WIN)
+  policy::path_parser::CheckUserDataDirPolicy(&user_data_dir);
+#endif
+
+  const bool specified_directory_was_invalid = !user_data_dir.empty() &&
+      !PathService::OverrideAndCreateIfNeeded(chrome::DIR_USER_DATA,
+          user_data_dir, true);
+  // Save inaccessible or invalid paths so the user may be prompted later.
+  if (specified_directory_was_invalid)
+    chrome::SetInvalidSpecifiedUserDataDir(user_data_dir);
+
+  // Warn and fail early if the process fails to get a user data directory.
+  if (!PathService::Get(chrome::DIR_USER_DATA, &user_data_dir)) {
+    // If an invalid command-line or policy override was specified, the user
+    // will be given an error with that value. Otherwise, use the directory
+    // returned by PathService (or the fallback default directory) in the error.
+    if (!specified_directory_was_invalid) {
+      // PathService::Get() returns false and yields an empty path if it fails
+      // to create DIR_USER_DATA. Retrieve the default value manually to display
+      // a more meaningful error to the user in that case.
+      if (user_data_dir.empty())
+        chrome::GetDefaultUserDataDirectory(&user_data_dir);
+      chrome::SetInvalidSpecifiedUserDataDir(user_data_dir);
+    }
+
+    // The browser process (which is identified by an empty |process_type|) will
+    // handle the error later; other processes that need the dir crash here.
+    CHECK(process_type.empty()) << "Unable to get the user data directory "
+                                << "for process type: " << process_type;
+  }
+
+  // Append the fallback user data directory to the commandline. Otherwise,
+  // child or service processes will attempt to use the invalid directory.
+  if (specified_directory_was_invalid)
+    command_line->AppendSwitchPath(switches::kUserDataDir, user_data_dir);
+}
 
 }  // namespace
 
@@ -582,31 +647,9 @@ void ChromeMainDelegate::PreSandboxStartup() {
   child_process_logging::Init();
 #endif
 
-  // Notice a user data directory override if any
-  base::FilePath user_data_dir =
-      command_line.GetSwitchValuePath(switches::kUserDataDir);
-#if defined(OS_LINUX)
-  // On Linux, Chrome does not support running multiple copies under different
-  // DISPLAYs, so the profile directory can be specified in the environment to
-  // support the virtual desktop use-case.
-  if (user_data_dir.empty()) {
-    std::string user_data_dir_string;
-    scoped_ptr<base::Environment> environment(base::Environment::Create());
-    if (environment->GetVar("CHROME_USER_DATA_DIR", &user_data_dir_string) &&
-        IsStringUTF8(user_data_dir_string)) {
-      user_data_dir = base::FilePath::FromUTF8Unsafe(user_data_dir_string);
-    }
-  }
-#endif
-#if defined(OS_MACOSX) || defined(OS_WIN)
-  policy::path_parser::CheckUserDataDirPolicy(&user_data_dir);
-#endif
-  if (!user_data_dir.empty()) {
-    CHECK(PathService::OverrideAndCreateIfNeeded(
-        chrome::DIR_USER_DATA,
-        user_data_dir,
-        chrome::ProcessNeedsProfileDir(process_type)));
-  }
+  // Initialize the user data dir for any process type that needs it.
+  if (chrome::ProcessNeedsProfileDir(process_type))
+    InitializeUserDataDir();
 
   stats_counter_timer_.reset(new base::StatsCounterTimer("Chrome.Init"));
   startup_timer_.reset(new base::StatsScope<base::StatsCounterTimer>
@@ -667,7 +710,8 @@ void ChromeMainDelegate::PreSandboxStartup() {
     int locale_pak_fd = base::GlobalDescriptors::GetInstance()->MaybeGet(
         kAndroidLocalePakDescriptor);
     CHECK(locale_pak_fd != -1);
-    ResourceBundle::InitSharedInstanceWithPakFile(locale_pak_fd, false);
+    ResourceBundle::InitSharedInstanceWithPakFile(base::File(locale_pak_fd),
+                                                  false);
 
     int extra_pak_keys[] = {
       kAndroidChrome100PercentPakDescriptor,
@@ -678,7 +722,7 @@ void ChromeMainDelegate::PreSandboxStartup() {
           base::GlobalDescriptors::GetInstance()->MaybeGet(extra_pak_keys[i]);
       CHECK(pak_fd != -1);
       ResourceBundle::GetSharedInstance().AddDataPackFromFile(
-          pak_fd, ui::SCALE_FACTOR_100P);
+          base::File(pak_fd), ui::SCALE_FACTOR_100P);
     }
 
     base::i18n::SetICUDefaultLocale(locale);
@@ -834,7 +878,7 @@ ChromeMainDelegate::CreateContentBrowserClient() {
 #if defined(CHROME_MULTIPLE_DLL_CHILD)
   return NULL;
 #else
-  return &g_chrome_content_browser_client.Get();
+  return g_chrome_content_browser_client.Pointer();
 #endif
 }
 
@@ -842,7 +886,7 @@ content::ContentPluginClient* ChromeMainDelegate::CreateContentPluginClient() {
 #if defined(CHROME_MULTIPLE_DLL_BROWSER)
   return NULL;
 #else
-  return &g_chrome_content_plugin_client.Get();
+  return g_chrome_content_plugin_client.Pointer();
 #endif
 }
 
@@ -851,7 +895,7 @@ ChromeMainDelegate::CreateContentRendererClient() {
 #if defined(CHROME_MULTIPLE_DLL_BROWSER)
   return NULL;
 #else
-  return &g_chrome_content_renderer_client.Get();
+  return g_chrome_content_renderer_client.Pointer();
 #endif
 }
 
@@ -860,6 +904,6 @@ ChromeMainDelegate::CreateContentUtilityClient() {
 #if defined(CHROME_MULTIPLE_DLL_BROWSER)
   return NULL;
 #else
-  return &g_chrome_content_utility_client.Get();
+  return g_chrome_content_utility_client.Pointer();
 #endif
 }

@@ -12,8 +12,7 @@
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/common/child_process_host_impl.h"
-#include "content/public/browser/notification_service.h"
-#include "content/public/browser/notification_types.h"
+#include "content/public/browser/global_request_id.h"
 #include "content/public/browser/render_widget_host_iterator.h"
 #include "content/public/browser/storage_partition.h"
 
@@ -188,10 +187,6 @@ void MockRenderProcessHost::Cleanup() {
     FOR_EACH_OBSERVER(RenderProcessHostObserver,
                       observers_,
                       RenderProcessHostDestroyed(this));
-    NotificationService::current()->Notify(
-        NOTIFICATION_RENDERER_PROCESS_TERMINATED,
-        Source<RenderProcessHost>(this),
-        NotificationService::NoDetails());
     base::MessageLoop::current()->DeleteSoon(FROM_HERE, this);
     RenderProcessHostImpl::UnregisterHost(GetID());
     deletion_callback_called_ = true;
@@ -250,12 +245,27 @@ base::TimeDelta MockRenderProcessHost::GetChildProcessIdleTime() const {
   return base::TimeDelta::FromMilliseconds(0);
 }
 
-void MockRenderProcessHost::SurfaceUpdated(int32 surface_id) {
-}
-
 void MockRenderProcessHost::ResumeRequestsForView(int route_id) {
 }
 
+void MockRenderProcessHost::FilterURL(bool empty_allowed, GURL* url) {
+  RenderProcessHostImpl::FilterURL(this, empty_allowed, url);
+}
+
+#if defined(ENABLE_WEBRTC)
+void MockRenderProcessHost::EnableAecDump(const base::FilePath& file) {
+}
+
+void MockRenderProcessHost::DisableAecDump() {
+}
+
+void MockRenderProcessHost::SetWebRtcLogMessageCallback(
+    base::Callback<void(const std::string&)> callback) {
+}
+#endif
+
+void MockRenderProcessHost::ResumeDeferredNavigation(
+    const GlobalRequestID& request_id) {}
 
 bool MockRenderProcessHost::OnMessageReceived(const IPC::Message& msg) {
   IPC::Listener* listener = listeners_.Lookup(msg.routing_id());

@@ -5,8 +5,6 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop/message_loop.h"
-#include "base/message_loop/message_loop_proxy.h"
 #include "base/run_loop.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/test/test_timeouts.h"
@@ -71,13 +69,13 @@ class MockClient : public media::VideoCaptureDevice::Client {
   explicit MockClient(base::Callback<void(const VideoCaptureFormat&)> frame_cb)
       : main_thread_(base::MessageLoopProxy::current()), frame_cb_(frame_cb) {}
 
-  virtual void OnError() OVERRIDE {
+  virtual void OnError(const std::string& error_message) OVERRIDE {
     OnErr();
   }
 
   virtual void OnIncomingCapturedFrame(const uint8* data,
                                        int length,
-                                       base::Time timestamp,
+                                       base::TimeTicks timestamp,
                                        int rotation,
                                        const VideoCaptureFormat& format)
       OVERRIDE {
@@ -87,13 +85,13 @@ class MockClient : public media::VideoCaptureDevice::Client {
   virtual void OnIncomingCapturedBuffer(const scoped_refptr<Buffer>& buffer,
                                         media::VideoFrame::Format format,
                                         const gfx::Size& dimensions,
-                                        base::Time timestamp,
+                                        base::TimeTicks timestamp,
                                         int frame_rate) OVERRIDE {
     NOTREACHED();
   }
 
  private:
-  scoped_refptr<base::MessageLoopProxy> main_thread_;
+  scoped_refptr<base::SingleThreadTaskRunner> main_thread_;
   base::Callback<void(const VideoCaptureFormat&)> frame_cb_;
 };
 
@@ -361,7 +359,13 @@ TEST_F(VideoCaptureDeviceTest, MAYBE_CaptureMjpeg) {
   device->StopAndDeAllocate();
 }
 
+#if defined(OS_ANDROID)
+// TODO(mcasas): Reenable this test that is disabled in Android due to
+// http://crbug.com/327043.
+TEST_F(VideoCaptureDeviceTest, DISABLED_GetDeviceSupportedFormats) {
+#else
 TEST_F(VideoCaptureDeviceTest, GetDeviceSupportedFormats) {
+#endif
   VideoCaptureDevice::GetDeviceNames(&names_);
   if (!names_.size()) {
     DVLOG(1) << "No camera available. Exiting test.";

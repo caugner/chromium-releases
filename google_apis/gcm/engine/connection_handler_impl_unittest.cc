@@ -27,7 +27,7 @@ typedef std::vector<net::MockWrite> WriteList;
 
 const uint64 kAuthId = 54321;
 const uint64 kAuthToken = 12345;
-const char kMCSVersion = 38;  // The protocol version.
+const char kMCSVersion = 41;  // The protocol version.
 const int kMCSPort = 5228;    // The server port.
 const char kDataMsgFrom[] = "data_from";
 const char kDataMsgCategory[] = "data_category";
@@ -49,12 +49,16 @@ const char kDataMsgCategoryLong2[] =
 std::string EncodePacket(uint8 tag, const std::string& proto) {
   std::string result;
   google::protobuf::io::StringOutputStream string_output_stream(&result);
-  google::protobuf::io::CodedOutputStream coded_output_stream(
+  {
+    google::protobuf::io::CodedOutputStream coded_output_stream(
       &string_output_stream);
-  const unsigned char tag_byte[1] = {tag};
-  coded_output_stream.WriteRaw(tag_byte, 1);
-  coded_output_stream.WriteVarint32(proto.size());
-  coded_output_stream.WriteRaw(proto.c_str(), proto.size());
+    const unsigned char tag_byte[1] = { tag };
+    coded_output_stream.WriteRaw(tag_byte, 1);
+    coded_output_stream.WriteVarint32(proto.size());
+    coded_output_stream.WriteRaw(proto.c_str(), proto.size());
+    // ~CodedOutputStream must run before the move constructor at the
+    // return statement. http://crbug.com/338962
+  }
   return result;
 }
 
@@ -63,7 +67,8 @@ std::string EncodeHandshakeRequest() {
   std::string result;
   const char version_byte[1] = {kMCSVersion};
   result.append(version_byte, 1);
-  ScopedMessage login_request(BuildLoginRequest(kAuthId, kAuthToken));
+  ScopedMessage login_request(
+      BuildLoginRequest(kAuthId, kAuthToken, ""));
   result.append(EncodePacket(kLoginRequestTag,
                              login_request->SerializeAsString()));
   return result;
@@ -198,8 +203,9 @@ void GCMConnectionHandlerImplTest::Connect(
           base::Bind(&GCMConnectionHandlerImplTest::ConnectionContinuation,
                      base::Unretained(this))));
   EXPECT_FALSE(connection_handler()->CanSendMessage());
-  connection_handler_->Init(*BuildLoginRequest(kAuthId, kAuthToken),
-                            socket_.Pass());
+  connection_handler_->Init(
+      *BuildLoginRequest(kAuthId, kAuthToken, ""),
+      socket_.get());
 }
 
 void GCMConnectionHandlerImplTest::ReadContinuation(

@@ -69,7 +69,7 @@ class OobeUI : public OobeDisplay,
   static const char kScreenWrongHWID[];
   static const char kScreenAppLaunchSplash[];
   static const char kScreenConfirmPassword[];
-  static const char kScreenMessageBox[];
+  static const char kScreenFatalError[];
 
   OobeUI(content::WebUI* web_ui, const GURL& url);
   virtual ~OobeUI();
@@ -118,9 +118,6 @@ class OobeUI : public OobeDisplay,
   void ShowSigninScreen(const LoginScreenContext& context,
                         SigninScreenHandlerDelegate* delegate,
                         NativeWindowDelegate* native_window_delegate);
-
-  // Shows the kiosk splash screen.
-  void ShowAppLaunchSplashScreen();
 
   // Resets the delegate set in ShowSigninScreen.
   void ResetSigninScreenHandlerDelegate();

@@ -2,7 +2,21 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import("pkg_config.gni")
+import("//build/config/linux/pkg_config.gni")
+import("//build/config/sysroot.gni")
+
+config("sdk") {
+  if (sysroot != "") {
+    cflags = [ "--sysroot=" + sysroot ]
+    ldflags = [ "--sysroot=" + sysroot ]
+
+    # Need to get some linker flags out of the sysroot.
+    ldflags += [ exec_script("sysroot_ld_path.py",
+        [ rebase_path("//build/linux/sysroot_ld_path.sh", ".", root_build_dir),
+          sysroot ],
+        "value") ]
+  }
+}
 
 # Sets up the dynamic library search path to include our "lib" directory.
 config("executable_ldconfig") {
@@ -31,7 +45,6 @@ pkg_config("gtk") {
   # Gtk requires gmodule, but it does not list it as a dependency in some
   # misconfigured systems.
   packages = [ "gmodule-2.0", "gtk+-2.0", "gthread-2.0" ]
-  defines = [ "TOOLKIT_GTK" ]
 }
 
 pkg_config("pangocairo") {
@@ -45,7 +58,6 @@ pkg_config("udev") {
 config("x11") {
   # Don't bother running pkg-config for these X related libraries since it just
   # returns the same libs, and forking pkg-config is slow.
-  defines = [ "USE_X11" ]
   libs = [
     "X11",
     "Xcomposite",
