@@ -6,14 +6,23 @@
 
 #if defined(OS_LINUX)
 #include <gdk/gdkkeysyms.h>
+#include "views/screen.h"
 #endif
 
 #include "app/l10n_util.h"
+#include "base/keyboard_codes.h"
 #include "base/logging.h"
 
 namespace views {
 
-static int kButtonBorderHWidth = 8;
+static const int kButtonBorderHWidth = 8;
+
+#if defined(OS_WIN)
+// The min size in DLUs comes from
+// http://msdn.microsoft.com/library/default.asp?url=/library/en-us/dnwue/html/ch14e.asp
+static const int kMinWidthDLUs = 50;
+static const int kMinHeightDLUs = 14;
+#endif
 
 // static
 const char NativeButton::kViewClassName[] = "views/NativeButton";
@@ -25,10 +34,7 @@ NativeButton::NativeButton(ButtonListener* listener)
     : Button(listener),
       native_wrapper_(NULL),
       is_default_(false),
-      ignore_minimum_size_(false),
-      minimum_size_(50, 14) {
-  // The min size in DLUs comes from
-  // http://msdn.microsoft.com/library/default.asp?url=/library/en-us/dnwue/html/ch14e.asp
+      ignore_minimum_size_(false) {
   InitBorder();
   SetFocusable(true);
 }
@@ -37,11 +43,8 @@ NativeButton::NativeButton(ButtonListener* listener, const std::wstring& label)
     : Button(listener),
       native_wrapper_(NULL),
       is_default_(false),
-      ignore_minimum_size_(false),
-      minimum_size_(50, 14) {
+      ignore_minimum_size_(false) {
   SetLabel(label);  // SetLabel takes care of label layout in RTL UI.
-  // The min size in DLUs comes from
-  // http://msdn.microsoft.com/library/default.asp?url=/library/en-us/dnwue/html/ch14e.asp
   InitBorder();
   SetFocusable(true);
 }
@@ -71,17 +74,12 @@ void NativeButton::SetLabel(const std::wstring& label) {
 }
 
 void NativeButton::SetIsDefault(bool is_default) {
-#if defined(OS_WIN)
-  int return_code = VK_RETURN;
-#else
-  int return_code = GDK_Return;
-#endif
   if (is_default == is_default_)
     return;
   if (is_default)
-    AddAccelerator(Accelerator(return_code, false, false, false));
+    AddAccelerator(Accelerator(base::VKEY_RETURN, false, false, false));
   else
-    RemoveAccelerator(Accelerator(return_code, false, false, false));
+    RemoveAccelerator(Accelerator(base::VKEY_RETURN, false, false, false));
   SetAppearsAsDefault(is_default);
 }
 
@@ -95,7 +93,18 @@ void NativeButton::ButtonPressed() {
   RequestFocus();
 
   // TODO(beng): obtain mouse event flags for native buttons someday.
-  NotifyClick(mouse_event_flags());
+#if defined(OS_WIN)
+  DWORD pos = GetMessagePos();
+  POINTS points = MAKEPOINTS(pos);
+  gfx::Point cursor_point(points.x, points.y);
+#elif defined(OS_LINUX)
+  gfx::Point cursor_point = Screen::GetCursorScreenPoint();
+#endif
+
+  views::MouseEvent event(views::Event::ET_MOUSE_RELEASED,
+                          cursor_point.x(), cursor_point.y(),
+                          views::Event::EF_LEFT_BUTTON_DOWN);
+  NotifyClick(event);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -113,21 +122,16 @@ gfx::Size NativeButton::GetPreferredSize() {
   sz.set_width(sz.width() + border.left() + border.right());
   sz.set_height(sz.height() + border.top() + border.bottom());
 
-  // Clamp the size returned to at least the minimum size.
 #if defined(OS_WIN)
+  // Clamp the size returned to at least the minimum size.
   if (!ignore_minimum_size_) {
-    if (minimum_size_.width()) {
-      int min_width = font_.horizontal_dlus_to_pixels(minimum_size_.width());
-      sz.set_width(std::max(static_cast<int>(sz.width()), min_width));
-    }
-    if (minimum_size_.height()) {
-      int min_height = font_.vertical_dlus_to_pixels(minimum_size_.height());
-      sz.set_height(std::max(static_cast<int>(sz.height()), min_height));
-    }
+    sz.set_width(std::max(sz.width(),
+                          font_.horizontal_dlus_to_pixels(kMinWidthDLUs)));
+    sz.set_height(std::max(sz.height(),
+                           font_.vertical_dlus_to_pixels(kMinHeightDLUs)));
   }
-#else
-    if (minimum_size_.width() || minimum_size_.height())
-      NOTIMPLEMENTED();
+  // GTK returns a meaningful preferred size so that we don't need to adjust
+  // the preferred size as we do on windows.
 #endif
 
   return sz;
@@ -149,7 +153,9 @@ void NativeButton::SetEnabled(bool flag) {
 void NativeButton::ViewHierarchyChanged(bool is_add, View* parent,
                                          View* child) {
   if (is_add && !native_wrapper_ && GetWidget()) {
-    CreateWrapper();
+    // The native wrapper's lifetime will be managed by the view hierarchy after
+    // we call AddChildView.
+    native_wrapper_ = CreateWrapper();
     AddChildView(native_wrapper_->GetView());
   }
 }
@@ -160,7 +166,17 @@ std::string NativeButton::GetClassName() const {
 
 bool NativeButton::AcceleratorPressed(const Accelerator& accelerator) {
   if (IsEnabled()) {
-    NotifyClick(mouse_event_flags());
+#if defined(OS_WIN)
+    DWORD pos = GetMessagePos();
+    POINTS points = MAKEPOINTS(pos);
+    gfx::Point cursor_point(points.x, points.y);
+#elif defined(OS_LINUX)
+    gfx::Point cursor_point = Screen::GetCursorScreenPoint();
+#endif
+    views::MouseEvent event(views::Event::ET_MOUSE_RELEASED,
+                            cursor_point.x(), cursor_point.y(),
+                            views::Event::EF_LEFT_BUTTON_DOWN);
+    NotifyClick(event);
     return true;
   }
   return false;
@@ -178,10 +194,12 @@ void NativeButton::Focus() {
 ////////////////////////////////////////////////////////////////////////////////
 // NativeButton, protected:
 
-void NativeButton::CreateWrapper() {
-  native_wrapper_ = NativeButtonWrapper::CreateNativeButtonWrapper(this);
-  native_wrapper_->UpdateLabel();
-  native_wrapper_->UpdateEnabled();
+NativeButtonWrapper* NativeButton::CreateWrapper() {
+  NativeButtonWrapper* native_wrapper =
+      NativeButtonWrapper::CreateNativeButtonWrapper(this);
+  native_wrapper->UpdateLabel();
+  native_wrapper->UpdateEnabled();
+  return native_wrapper;
 }
 
 void NativeButton::InitBorder() {

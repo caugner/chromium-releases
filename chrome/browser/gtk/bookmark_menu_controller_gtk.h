@@ -11,17 +11,19 @@
 
 #include "base/scoped_ptr.h"
 #include "chrome/browser/bookmarks/base_bookmark_model_observer.h"
+#include "chrome/browser/gtk/bookmark_context_menu_gtk.h"
 #include "chrome/common/owned_widget_gtk.h"
 #include "webkit/glue/window_open_disposition.h"
 
-class BookmarkContextMenu;
 class Browser;
+class Profile;
 class Profiler;
 class PageNavigator;
 class BookmarkModel;
 class BookmarkNode;
 
-class BookmarkMenuController : public BaseBookmarkModelObserver {
+class BookmarkMenuController : public BaseBookmarkModelObserver,
+                               public BookmarkContextMenuGtk::Delegate {
  public:
   // Creates a BookmarkMenuController showing the children of |node| starting
   // at index |start_child_index|.
@@ -34,6 +36,8 @@ class BookmarkMenuController : public BaseBookmarkModelObserver {
                          bool show_other_folder);
   virtual ~BookmarkMenuController();
 
+  GtkWidget* widget() { return menu_; }
+
   // Pops up the menu. |widget| must be a GtkChromeButton.
   void Popup(GtkWidget* widget, gint button_type, guint32 timestamp);
 
@@ -41,6 +45,9 @@ class BookmarkMenuController : public BaseBookmarkModelObserver {
   virtual void BookmarkModelChanged();
   virtual void BookmarkNodeFavIconLoaded(BookmarkModel* model,
                                          const BookmarkNode* node);
+
+  // Overridden from BookmarkContextMenuGtk::Delegate:
+  virtual void WillExecuteCommand();
 
  private:
   // Recursively change the bookmark hierarchy rooted in |parent| into a set of
@@ -103,7 +110,7 @@ class BookmarkMenuController : public BaseBookmarkModelObserver {
   // all sorts of weird non-standard things with this menu, like:
   // - The menu is a drag target
   // - The menu items have context menus.
-  OwnedWidgetGtk menu_;
+  GtkWidget* menu_;
 
   // Whether we should ignore the next button release event (because we were
   // dragging).
@@ -117,7 +124,7 @@ class BookmarkMenuController : public BaseBookmarkModelObserver {
   std::map<const BookmarkNode*, GtkWidget*> node_to_menu_widget_map_;
 
   // Owns our right click context menu.
-  scoped_ptr<BookmarkContextMenu> context_menu_;
+  scoped_ptr<BookmarkContextMenuGtk> context_menu_;
 
   DISALLOW_COPY_AND_ASSIGN(BookmarkMenuController);
 };

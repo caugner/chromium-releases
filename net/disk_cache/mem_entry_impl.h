@@ -68,6 +68,8 @@ class MemEntryImpl : public Entry {
   virtual int WriteSparseData(int64 offset, net::IOBuffer* buf, int buf_len,
                               net::CompletionCallback* completion_callback);
   virtual int GetAvailableRange(int64 offset, int len, int64* start);
+  virtual void CancelSparseIO() {}
+  virtual int ReadyForSparseIO(net::CompletionCallback* completion_callback);
 
   // Performs the initialization of a EntryImpl that will be added to the
   // cache.
@@ -142,19 +144,18 @@ class MemEntryImpl : public Entry {
   int32 data_size_[NUM_STREAMS];
   int ref_count_;
 
-  MemEntryImpl* next_;               // Pointers for the LRU list.
+  int child_id_;              // The ID of a child entry.
+  int child_first_pos_;       // The position of the first byte in a child
+                              // entry.
+  MemEntryImpl* next_;        // Pointers for the LRU list.
   MemEntryImpl* prev_;
-  MemEntryImpl* parent_;             // Pointer to the parent entry.
+  MemEntryImpl* parent_;      // Pointer to the parent entry.
   scoped_ptr<EntryMap> children_;
 
-  int child_id_;               // The ID of a child entry.
-  int child_first_pos_;        // The position of the first byte in a child
-                               // entry.
-
-  base::Time last_modified_;   // LRU information.
+  base::Time last_modified_;  // LRU information.
   base::Time last_used_;
-  MemBackendImpl* backend_;    // Back pointer to the cache.
-  bool doomed_;                // True if this entry was removed from the cache.
+  MemBackendImpl* backend_;   // Back pointer to the cache.
+  bool doomed_;               // True if this entry was removed from the cache.
 
   DISALLOW_EVIL_CONSTRUCTORS(MemEntryImpl);
 };

@@ -21,7 +21,6 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/debug_flags.h"
 #include "chrome/common/notification_service.h"
-#include "ipc/ipc_logging.h"
 #include "sandbox/src/sandbox.h"
 #include "webkit/glue/plugins/plugin_list.h"
 
@@ -181,21 +180,6 @@ bool AddGenericPolicy(sandbox::TargetPolicy* policy) {
   if (result != sandbox::SBOX_ALL_OK)
     return false;
 
-#ifdef IPC_MESSAGE_LOG_ENABLED
-  // Add the policy for the IPC logging events.
-  result = policy->AddRule(sandbox::TargetPolicy::SUBSYS_SYNC,
-                           sandbox::TargetPolicy::EVENTS_ALLOW_ANY,
-                           IPC::Logging::GetEventName(true).c_str());
-  if (result != sandbox::SBOX_ALL_OK)
-    return false;
-
-  result = policy->AddRule(sandbox::TargetPolicy::SUBSYS_SYNC,
-                           sandbox::TargetPolicy::EVENTS_ALLOW_ANY,
-                           IPC::Logging::GetEventName(false).c_str());
-  if (result != sandbox::SBOX_ALL_OK)
-    return false;
-#endif
-
   // Add the policy for debug message only in debug
 #ifndef NDEBUG
   std::wstring debug_message;
@@ -280,9 +264,7 @@ bool ApplyPolicyForUntrustedPlugin(sandbox::TargetPolicy* policy) {
 }
 
 // Adds the custom policy rules for a given plugin. |trusted_plugins| contains
-// the comma separate list of plugins that should not be sandboxed. The plugin
-// in the list can be either the plugin dll name of the class id if it's an
-// ActiveX.
+// the comma separate list of plugin dll names that should not be sandboxed.
 bool AddPolicyForPlugin(const CommandLine* cmd_line,
                         sandbox::TargetPolicy* policy) {
   std::wstring plugin_dll = cmd_line->
@@ -355,13 +337,15 @@ base::ProcessHandle StartProcessWithAccess(CommandLine* cmd_line,
   base::ProcessHandle process = 0;
   const CommandLine& browser_command_line = *CommandLine::ForCurrentProcess();
   ChildProcessInfo::ProcessType type;
-  std::wstring type_str = cmd_line->GetSwitchValue(switches::kProcessType);
+  std::string type_str = cmd_line->GetSwitchValueASCII(switches::kProcessType);
   if (type_str == switches::kRendererProcess) {
     type = ChildProcessInfo::RENDER_PROCESS;
   } else if (type_str == switches::kPluginProcess) {
     type = ChildProcessInfo::PLUGIN_PROCESS;
   } else if (type_str == switches::kWorkerProcess) {
     type = ChildProcessInfo::WORKER_PROCESS;
+  } else if (type_str == switches::kNaClProcess) {
+    type = ChildProcessInfo::NACL_PROCESS;
   } else if (type_str == switches::kUtilityProcess) {
     type = ChildProcessInfo::UTILITY_PROCESS;
   } else {
@@ -374,8 +358,10 @@ base::ProcessHandle StartProcessWithAccess(CommandLine* cmd_line,
       (type != ChildProcessInfo::PLUGIN_PROCESS ||
        browser_command_line.HasSwitch(switches::kSafePlugins));
 #if !defined (GOOGLE_CHROME_BUILD)
-  if (browser_command_line.HasSwitch(switches::kInProcessPlugins)) {
+  if (browser_command_line.HasSwitch(switches::kInProcessPlugins) ||
+      browser_command_line.HasSwitch(switches::kInternalNaCl)) {
     // In process plugins won't work if the sandbox is enabled.
+    // The internal NaCl plugin doesn't work in the sandbox for now.
     in_sandbox = false;
   }
 #endif
@@ -397,6 +383,8 @@ base::ProcessHandle StartProcessWithAccess(CommandLine* cmd_line,
   sandbox::TargetPolicy* policy = broker_service->CreatePolicy();
 
   bool on_sandbox_desktop = false;
+  // TODO(gregoryd): try locked-down policy for sel_ldr after we fix IMC.
+  // TODO(gregoryd): do we need a new desktop for sel_ldr?
   if (type == ChildProcessInfo::PLUGIN_PROCESS) {
     if (!AddPolicyForPlugin(cmd_line, policy))
       return 0;

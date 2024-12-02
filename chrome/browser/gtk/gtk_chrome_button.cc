@@ -4,8 +4,8 @@
 
 #include "chrome/browser/gtk/gtk_chrome_button.h"
 
+#include "app/gfx/gtk_util.h"
 #include "base/basictypes.h"
-#include "base/gfx/gtk_util.h"
 #include "chrome/browser/gtk/nine_box.h"
 
 #include "grit/app_resources.h"
@@ -44,10 +44,11 @@ static void gtk_chrome_button_class_init(GtkChromeButtonClass* button_class) {
       "  GtkButton::child-displacement-x = 0"
       "  GtkButton::child-displacement-y = 0"
       "}"
-      "widget \"*chrome-button\" style \"chrome-button\"");
+      "widget_class \"*.<GtkChromeButton>\" style \"chrome-button\"");
 
   GObjectClass* gobject_class = G_OBJECT_CLASS(button_class);
-  GtkWidgetClass* widget_class = reinterpret_cast<GtkWidgetClass*>(button_class);
+  GtkWidgetClass* widget_class = reinterpret_cast<GtkWidgetClass*>(
+      button_class);
   widget_class->expose_event = gtk_chrome_button_expose;
 
   g_nine_box_prelight = new NineBox(
@@ -80,9 +81,6 @@ static void gtk_chrome_button_init(GtkChromeButton* button) {
   priv->paint_state = -1;
   priv->use_gtk_rendering = FALSE;
 
-  gtk_widget_set_name(GTK_WIDGET(button), "chrome-button");
-  gtk_widget_set_app_paintable(GTK_WIDGET(button), TRUE);
-
   GTK_WIDGET_UNSET_FLAGS(button, GTK_CAN_FOCUS);
 }
 
@@ -97,14 +95,8 @@ static gboolean gtk_chrome_button_expose(GtkWidget* widget,
     // rendering AND we're in either the prelight or active state so that we
     // get the button border for the current GTK theme drawn.
     if (paint_state == GTK_STATE_PRELIGHT || paint_state == GTK_STATE_ACTIVE) {
-      (*GTK_WIDGET_CLASS(gtk_chrome_button_parent_class)->expose_event)
+      return GTK_WIDGET_CLASS(gtk_chrome_button_parent_class)->expose_event
           (widget, event);
-    } else if (gtk_bin_get_child(GTK_BIN(widget))) {
-      // Otherwise, we're still responsible for rendering our children if we
-      // have any.
-      gtk_container_propagate_expose(GTK_CONTAINER(widget),
-                                     gtk_bin_get_child(GTK_BIN(widget)),
-                                     event);
     }
   } else {
     NineBox* nine_box = NULL;
@@ -116,16 +108,16 @@ static gboolean gtk_chrome_button_expose(GtkWidget* widget,
     // Only draw theme graphics if we have some.
     if (nine_box)
       nine_box->RenderToWidget(widget);
-
-    // If we have a child widget, draw it.
-    if (gtk_bin_get_child(GTK_BIN(widget))) {
-      gtk_container_propagate_expose(GTK_CONTAINER(widget),
-                                     gtk_bin_get_child(GTK_BIN(widget)),
-                                     event);
-    }
   }
 
-  return TRUE;  // Don't propagate, we are the default handler.
+  // If we have a child widget, draw it.
+  if (gtk_bin_get_child(GTK_BIN(widget))) {
+    gtk_container_propagate_expose(GTK_CONTAINER(widget),
+                                   gtk_bin_get_child(GTK_BIN(widget)),
+                                   event);
+  }
+
+  return FALSE;
 }
 
 GtkWidget* gtk_chrome_button_new(void) {

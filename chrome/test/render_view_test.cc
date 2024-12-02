@@ -5,30 +5,33 @@
 #include "chrome/test/render_view_test.h"
 
 #include "chrome/browser/extensions/extension_function_dispatcher.h"
+#include "chrome/common/extensions/extension.h"
 #include "chrome/common/native_web_keyboard_event.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/renderer_preferences.h"
 #include "chrome/renderer/extensions/event_bindings.h"
 #include "chrome/renderer/extensions/extension_process_bindings.h"
+#include "chrome/renderer/extensions/js_only_v8_extensions.h"
 #include "chrome/renderer/extensions/renderer_extension_bindings.h"
-#include "chrome/renderer/js_only_v8_extensions.h"
 #include "chrome/renderer/renderer_main_platform_delegate.h"
+#include "webkit/api/public/WebFrame.h"
 #include "webkit/api/public/WebInputEvent.h"
 #include "webkit/api/public/WebKit.h"
+#include "webkit/api/public/WebScriptController.h"
 #include "webkit/api/public/WebScriptSource.h"
 #include "webkit/api/public/WebURLRequest.h"
-#include "webkit/glue/webview.h"
+#include "webkit/api/public/WebView.h"
+#include "webkit/glue/webkit_glue.h"
 
+using WebKit::WebFrame;
 using WebKit::WebScriptSource;
 using WebKit::WebString;
 using WebKit::WebURLRequest;
 
 namespace {
-
 const int32 kRouteId = 5;
 const int32 kOpenerId = 7;
-
-};
+}  // namespace
 
 void RenderViewTest::ProcessPendingMessages() {
   msg_loop_.PostTask(FROM_HERE, new MessageLoop::QuitTask());
@@ -36,11 +39,11 @@ void RenderViewTest::ProcessPendingMessages() {
 }
 
 WebFrame* RenderViewTest::GetMainFrame() {
-  return view_->webview()->GetMainFrame();
+  return view_->webview()->mainFrame();
 }
 
 void RenderViewTest::ExecuteJavaScript(const char* js) {
-  GetMainFrame()->ExecuteScript(WebScriptSource(WebString::fromUTF8(js)));
+  GetMainFrame()->executeScript(WebScriptSource(WebString::fromUTF8(js)));
 }
 
 void RenderViewTest::LoadHTML(const char* html) {
@@ -48,7 +51,7 @@ void RenderViewTest::LoadHTML(const char* html) {
   url_str.append(html);
   GURL url(url_str);
 
-  GetMainFrame()->LoadRequest(WebURLRequest(url));
+  GetMainFrame()->loadRequest(WebURLRequest(url));
 
   // The load actually happens asynchronously, so we pump messages to process
   // the pending continuation.
@@ -67,10 +70,14 @@ void RenderViewTest::SetUp() {
   platform_.reset(new RendererMainPlatformDelegate(*params_));
   platform_->PlatformInitialize();
 
+  // Setting flags and really doing anything with WebKit is fairly fragile and
+  // hacky, but this is the world we live in...
+  webkit_glue::SetJavaScriptFlags(L" --expose-gc");
   WebKit::initialize(&webkitclient_);
   WebKit::registerExtension(BaseJsV8Extension::Get());
   WebKit::registerExtension(JsonSchemaJsV8Extension::Get());
   WebKit::registerExtension(EventBindings::Get());
+  WebKit::registerExtension(ExtensionApiTestV8Extension::Get());
   WebKit::registerExtension(ExtensionProcessBindings::Get());
   WebKit::registerExtension(RendererExtensionBindings::Get());
   EventBindings::SetRenderThread(&render_thread_);
@@ -80,12 +87,17 @@ void RenderViewTest::SetUp() {
   ExtensionFunctionDispatcher::GetAllFunctionNames(&names);
   ExtensionProcessBindings::SetFunctionNames(names);
 
+  std::vector<std::string> permissions(
+      Extension::kPermissionNames,
+      Extension::kPermissionNames + Extension::kNumPermissions);
+  ExtensionProcessBindings::SetAPIPermissions("", permissions);
+
   mock_process_.reset(new MockProcess());
 
   render_thread_.set_routing_id(kRouteId);
 
   // This needs to pass the mock render thread to the view.
-  view_ = RenderView::Create(&render_thread_, NULL, NULL, kOpenerId,
+  view_ = RenderView::Create(&render_thread_, 0, kOpenerId,
                              RendererPreferences(), WebPreferences(),
                              new SharedRenderViewCounter(0), kRouteId);
 
@@ -93,6 +105,10 @@ void RenderViewTest::SetUp() {
   mock_keyboard_.reset(new MockKeyboard());
 }
 void RenderViewTest::TearDown() {
+  // Try very hard to collect garbage before shutting down.
+  GetMainFrame()->collectGarbage();
+  GetMainFrame()->collectGarbage();
+
   render_thread_.SendCloseMessage();
 
   // Run the loop so the release task from the renderwidget executes.
@@ -103,9 +119,13 @@ void RenderViewTest::TearDown() {
   view_ = NULL;
 
   mock_process_.reset();
-  WebKit::shutdown();
 
+  // After resetting the view_ and mock_process_ we may get some new tasks
+  // which need to be processed before shutting down WebKit
+  // (http://crbug.com/21508).
   msg_loop_.RunAllPending();
+
+  WebKit::shutdown();
 
   mock_keyboard_.reset();
 
@@ -139,26 +159,25 @@ int RenderViewTest::SendKeyEvent(MockKeyboard::Layout layout,
   // WM_KEYDOWN and WM_KEYUP sends virtual-key codes. On the other hand,
   // WM_CHAR sends a composed Unicode character.
   NativeWebKeyboardEvent keydown_event(NULL, WM_KEYDOWN, key_code, 0);
-  scoped_ptr<IPC::Message> keydown_message(new ViewMsg_HandleInputEvent(0));
-  keydown_message->WriteData(reinterpret_cast<const char*>(&keydown_event),
-                             sizeof(WebKit::WebKeyboardEvent));
-  view_->OnHandleInputEvent(*keydown_message);
+  SendNativeKeyEvent(keydown_event);
 
   NativeWebKeyboardEvent char_event(NULL, WM_CHAR, (*output)[0], 0);
-  scoped_ptr<IPC::Message> char_message(new ViewMsg_HandleInputEvent(0));
-  char_message->WriteData(reinterpret_cast<const char*>(&char_event),
-                          sizeof(WebKit::WebKeyboardEvent));
-  view_->OnHandleInputEvent(*char_message);
+  SendNativeKeyEvent(char_event);
 
   NativeWebKeyboardEvent keyup_event(NULL, WM_KEYUP, key_code, 0);
-  scoped_ptr<IPC::Message> keyup_message(new ViewMsg_HandleInputEvent(0));
-  keyup_message->WriteData(reinterpret_cast<const char*>(&keyup_event),
-                           sizeof(WebKit::WebKeyboardEvent));
-  view_->OnHandleInputEvent(*keyup_message);
+  SendNativeKeyEvent(keyup_event);
 
   return length;
 #else
   NOTIMPLEMENTED();
   return L'\0';
 #endif
+}
+
+void RenderViewTest::SendNativeKeyEvent(
+    const NativeWebKeyboardEvent& key_event) {
+  scoped_ptr<IPC::Message> input_message(new ViewMsg_HandleInputEvent(0));
+  input_message->WriteData(reinterpret_cast<const char*>(&key_event),
+                           sizeof(WebKit::WebKeyboardEvent));
+  view_->OnHandleInputEvent(*input_message);
 }

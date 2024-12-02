@@ -24,17 +24,22 @@
 #include "base/string_util.h"
 #include "net/base/cookie_monster.h"
 #include "net/base/load_flags.h"
+#include "net/base/load_log.h"
+#include "net/base/load_log_unittest.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_module.h"
 #include "net/base/net_util.h"
 #include "net/base/upload_data.h"
 #include "net/disk_cache/disk_cache.h"
+#include "net/ftp/ftp_network_layer.h"
 #include "net/http/http_cache.h"
 #include "net/http/http_network_layer.h"
 #include "net/http/http_response_headers.h"
 #include "net/proxy/proxy_service.h"
 #include "net/socket/ssl_test_util.h"
 #include "net/url_request/url_request.h"
+#include "net/url_request/url_request_file_dir_job.h"
+#include "net/url_request/url_request_http_job.h"
 #include "net/url_request/url_request_test_job.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
@@ -43,23 +48,27 @@ using base::Time;
 
 namespace {
 
-class URLRequestHttpCacheContext : public URLRequestContext {
+class URLRequestTestContext : public URLRequestContext {
  public:
-  URLRequestHttpCacheContext() {
+  URLRequestTestContext() {
     host_resolver_ = net::CreateSystemHostResolver();
     proxy_service_ = net::ProxyService::CreateNull();
+    ftp_transaction_factory_ = new net::FtpNetworkLayer(host_resolver_);
+    ssl_config_service_ = new net::SSLConfigServiceDefaults;
     http_transaction_factory_ =
         new net::HttpCache(
-          net::HttpNetworkLayer::CreateFactory(host_resolver_, proxy_service_),
+          net::HttpNetworkLayer::CreateFactory(host_resolver_, proxy_service_,
+                                               ssl_config_service_),
           disk_cache::CreateInMemoryCacheBackend(0));
     // In-memory cookie store.
     cookie_store_ = new net::CookieMonster();
+    accept_language_ = "en-us,fr";
+    accept_charset_ = "iso-8859-1,*,utf-8";
   }
 
-  virtual ~URLRequestHttpCacheContext() {
-    delete cookie_store_;
+  virtual ~URLRequestTestContext() {
+    delete ftp_transaction_factory_;
     delete http_transaction_factory_;
-    delete proxy_service_;
   }
 };
 
@@ -67,11 +76,11 @@ class TestURLRequest : public URLRequest {
  public:
   TestURLRequest(const GURL& url, Delegate* delegate)
       : URLRequest(url, delegate) {
-    set_context(new URLRequestHttpCacheContext());
+    set_context(new URLRequestTestContext());
   }
 };
 
-StringPiece TestNetResourceProvider(int key) {
+base::StringPiece TestNetResourceProvider(int key) {
   return "header";
 }
 
@@ -111,16 +120,35 @@ scoped_refptr<net::UploadData> CreateSimpleUploadData(const char* data) {
 
 // Inherit PlatformTest since we require the autorelease pool on Mac OS X.f
 class URLRequestTest : public PlatformTest {
+ public:
+  ~URLRequestTest() {
+    EXPECT_EQ(0u, URLRequest::InstanceTracker::Get()->GetLiveRequests().size());
+  }
 };
 
-TEST_F(URLRequestTest, ProxyTunnelRedirectTest) {
+class URLRequestTestHTTP : public URLRequestTest {
+ protected:
+  static void SetUpTestCase() {
+    server_ = HTTPTestServer::CreateForkingServer(
+        L"net/data/url_request_unittest/");
+  }
+
+  static void TearDownTestCase() {
+    server_ = NULL;
+  }
+
+  static scoped_refptr<HTTPTestServer> server_;
+};
+
+// static
+scoped_refptr<HTTPTestServer> URLRequestTestHTTP::server_;
+
+TEST_F(URLRequestTestHTTP, ProxyTunnelRedirectTest) {
   // In this unit test, we're using the HTTPTestServer as a proxy server and
   // issuing a CONNECT request with the magic host name "www.redirect.com".
   // The HTTPTestServer will return a 302 response, which we should not
   // follow.
-  scoped_refptr<HTTPTestServer> server =
-      HTTPTestServer::CreateServer(L"", NULL);
-  ASSERT_TRUE(NULL != server.get());
+  ASSERT_TRUE(NULL != server_.get());
   TestDelegate d;
   {
     URLRequest r(GURL("https://www.redirect.com/"), &d);
@@ -141,13 +169,11 @@ TEST_F(URLRequestTest, ProxyTunnelRedirectTest) {
   }
 }
 
-TEST_F(URLRequestTest, UnexpectedServerAuthTest) {
+TEST_F(URLRequestTestHTTP, UnexpectedServerAuthTest) {
   // In this unit test, we're using the HTTPTestServer as a proxy server and
   // issuing a CONNECT request with the magic host name "www.server-auth.com".
   // The HTTPTestServer will return a 401 response, which we should balk at.
-  scoped_refptr<HTTPTestServer> server =
-      HTTPTestServer::CreateServer(L"", NULL);
-  ASSERT_TRUE(NULL != server.get());
+  ASSERT_TRUE(NULL != server_.get());
   TestDelegate d;
   {
     URLRequest r(GURL("https://www.server-auth.com/"), &d);
@@ -165,13 +191,11 @@ TEST_F(URLRequestTest, UnexpectedServerAuthTest) {
   }
 }
 
-TEST_F(URLRequestTest, GetTest_NoCache) {
-  scoped_refptr<HTTPTestServer> server =
-      HTTPTestServer::CreateServer(L"", NULL);
-  ASSERT_TRUE(NULL != server.get());
+TEST_F(URLRequestTestHTTP, GetTest_NoCache) {
+  ASSERT_TRUE(NULL != server_.get());
   TestDelegate d;
   {
-    TestURLRequest r(server->TestServerPage(""), &d);
+    TestURLRequest r(server_->TestServerPage(""), &d);
 
     r.Start();
     EXPECT_TRUE(r.is_pending());
@@ -181,19 +205,23 @@ TEST_F(URLRequestTest, GetTest_NoCache) {
     EXPECT_EQ(1, d.response_started_count());
     EXPECT_FALSE(d.received_data_before_response());
     EXPECT_NE(0, d.bytes_received());
+
+    // The first and last entries of the LoadLog should be for
+    // TYPE_URL_REQUEST_START.
+    net::ExpectLogContains(r.load_log(), 0,
+                           net::LoadLog::TYPE_URL_REQUEST_START,
+                           net::LoadLog::PHASE_BEGIN);
+    net::ExpectLogContains(r.load_log(), r.load_log()->events().size() - 1,
+                           net::LoadLog::TYPE_URL_REQUEST_START,
+                           net::LoadLog::PHASE_END);
   }
-#ifndef NDEBUG
-  DCHECK_EQ(url_request_metrics.object_count, 0);
-#endif
 }
 
-TEST_F(URLRequestTest, GetTest) {
-  scoped_refptr<HTTPTestServer> server =
-      HTTPTestServer::CreateServer(L"", NULL);
-  ASSERT_TRUE(NULL != server.get());
+TEST_F(URLRequestTestHTTP, GetTest) {
+  ASSERT_TRUE(NULL != server_.get());
   TestDelegate d;
   {
-    TestURLRequest r(server->TestServerPage(""), &d);
+    TestURLRequest r(server_->TestServerPage(""), &d);
 
     r.Start();
     EXPECT_TRUE(r.is_pending());
@@ -204,21 +232,119 @@ TEST_F(URLRequestTest, GetTest) {
     EXPECT_FALSE(d.received_data_before_response());
     EXPECT_NE(0, d.bytes_received());
   }
-#ifndef NDEBUG
-  DCHECK_EQ(url_request_metrics.object_count, 0);
-#endif
+}
+
+// Test the instance tracking functionality of URLRequest.
+TEST_F(URLRequestTest, Tracking) {
+  URLRequest::InstanceTracker::Get()->ClearRecentlyDeceased();
+  EXPECT_EQ(0u, URLRequest::InstanceTracker::Get()->GetLiveRequests().size());
+  EXPECT_EQ(0u,
+            URLRequest::InstanceTracker::Get()->GetRecentlyDeceased().size());
+
+  {
+    URLRequest req1(GURL("http://req1"), NULL);
+    URLRequest req2(GURL("http://req2"), NULL);
+    URLRequest req3(GURL("http://req3"), NULL);
+
+    std::vector<URLRequest*> live_reqs =
+        URLRequest::InstanceTracker::Get()->GetLiveRequests();
+    ASSERT_EQ(3u, live_reqs.size());
+    EXPECT_EQ(GURL("http://req1"), live_reqs[0]->original_url());
+    EXPECT_EQ(GURL("http://req2"), live_reqs[1]->original_url());
+    EXPECT_EQ(GURL("http://req3"), live_reqs[2]->original_url());
+  }
+
+  EXPECT_EQ(0u, URLRequest::InstanceTracker::Get()->GetLiveRequests().size());
+
+  URLRequest::InstanceTracker::RecentRequestInfoList recent_reqs =
+      URLRequest::InstanceTracker::Get()->GetRecentlyDeceased();
+
+  // Note that the order is reversed from definition order, because
+  // this matches the destructor order.
+  ASSERT_EQ(3u, recent_reqs.size());
+  EXPECT_EQ(GURL("http://req3"), recent_reqs[0].original_url);
+  EXPECT_EQ(GURL("http://req2"), recent_reqs[1].original_url);
+  EXPECT_EQ(GURL("http://req1"), recent_reqs[2].original_url);
+}
+
+// Test the instance tracking functionality of URLRequest.
+TEST_F(URLRequestTest, TrackingGraveyardBounded) {
+  URLRequest::InstanceTracker::Get()->ClearRecentlyDeceased();
+  EXPECT_EQ(0u, URLRequest::InstanceTracker::Get()->GetLiveRequests().size());
+  EXPECT_EQ(0u,
+            URLRequest::InstanceTracker::Get()->GetRecentlyDeceased().size());
+
+  const size_t kMaxGraveyardSize =
+      URLRequest::InstanceTracker::kMaxGraveyardSize;
+  const size_t kMaxURLLen = URLRequest::InstanceTracker::kMaxGraveyardURLSize;
+
+  // Add twice as many requests as will fit in the graveyard.
+  for (size_t i = 0; i < kMaxGraveyardSize * 2; ++i)
+    URLRequest req(GURL(StringPrintf("http://req%d", i).c_str()), NULL);
+
+  // Check that only the last |kMaxGraveyardSize| requests are in-memory.
+
+  URLRequest::InstanceTracker::RecentRequestInfoList recent_reqs =
+      URLRequest::InstanceTracker::Get()->GetRecentlyDeceased();
+
+  ASSERT_EQ(kMaxGraveyardSize, recent_reqs.size());
+
+  for (size_t i = 0; i < kMaxGraveyardSize; ++i) {
+    size_t req_number = i + kMaxGraveyardSize;
+    GURL url(StringPrintf("http://req%d", req_number).c_str());
+    EXPECT_EQ(url, recent_reqs[i].original_url);
+  }
+
+  URLRequest::InstanceTracker::Get()->ClearRecentlyDeceased();
+  EXPECT_EQ(0u,
+            URLRequest::InstanceTracker::Get()->GetRecentlyDeceased().size());
+
+  // Check that very long URLs are truncated.
+  std::string big_url_spec("http://");
+  big_url_spec.resize(2 * kMaxURLLen, 'x');
+  GURL big_url(big_url_spec);
+  {
+    URLRequest req(big_url, NULL);
+  }
+  ASSERT_EQ(1u,
+            URLRequest::InstanceTracker::Get()->GetRecentlyDeceased().size());
+  // The +1 is because GURL canonicalizes with a trailing '/' ... maybe
+  // we should just save the std::string rather than the GURL.
+  EXPECT_EQ(kMaxURLLen + 1,
+            URLRequest::InstanceTracker::Get()->GetRecentlyDeceased()[0]
+                .original_url.spec().size());
+}
+
+// Test the instance tracking functionality of URLRequest does not
+// fail if the URL was invalid. http://crbug.com/21423.
+TEST_F(URLRequestTest, TrackingInvalidURL) {
+  URLRequest::InstanceTracker::Get()->ClearRecentlyDeceased();
+  EXPECT_EQ(0u, URLRequest::InstanceTracker::Get()->GetLiveRequests().size());
+  EXPECT_EQ(0u,
+            URLRequest::InstanceTracker::Get()->GetRecentlyDeceased().size());
+
+  {
+    GURL invalid_url("xabc");
+    EXPECT_FALSE(invalid_url.is_valid());
+    URLRequest req(invalid_url, NULL);
+  }
+
+  // Check that the invalid URL made it into graveyard.
+  URLRequest::InstanceTracker::RecentRequestInfoList recent_reqs =
+      URLRequest::InstanceTracker::Get()->GetRecentlyDeceased();
+
+  ASSERT_EQ(1u, recent_reqs.size());
+  EXPECT_FALSE(recent_reqs[0].original_url.is_valid());
 }
 
 TEST_F(URLRequestTest, QuitTest) {
+  // Don't use shared server here because we order it to quit.
+  // It would impact other tests.
   scoped_refptr<HTTPTestServer> server =
       HTTPTestServer::CreateServer(L"", NULL);
   ASSERT_TRUE(NULL != server.get());
   server->SendQuit();
   EXPECT_TRUE(server->WaitToFinish(20000));
-
-#ifndef NDEBUG
-  DCHECK_EQ(url_request_metrics.object_count, 0);
-#endif
 }
 
 class HTTPSRequestTest : public testing::Test {
@@ -281,9 +407,6 @@ TEST_F(HTTPSRequestTest, MAYBE_HTTPSGetTest) {
     EXPECT_FALSE(d.received_data_before_response());
     EXPECT_NE(0, d.bytes_received());
   }
-#ifndef NDEBUG
-  DCHECK_EQ(url_request_metrics.object_count, 0);
-#endif
 }
 
 TEST_F(HTTPSRequestTest, MAYBE_HTTPSMismatchedTest) {
@@ -344,7 +467,7 @@ TEST_F(HTTPSRequestTest, MAYBE_HTTPSExpiredTest) {
   }
 }
 
-TEST_F(URLRequestTest, CancelTest) {
+TEST_F(URLRequestTestHTTP, CancelTest) {
   TestDelegate d;
   {
     TestURLRequest r(GURL("http://www.google.com/"), &d);
@@ -362,22 +485,17 @@ TEST_F(URLRequestTest, CancelTest) {
     EXPECT_EQ(0, d.bytes_received());
     EXPECT_FALSE(d.received_data_before_response());
   }
-#ifndef NDEBUG
-  DCHECK_EQ(url_request_metrics.object_count, 0);
-#endif
 }
 
-TEST_F(URLRequestTest, CancelTest2) {
-  scoped_refptr<HTTPTestServer> server =
-      HTTPTestServer::CreateServer(L"", NULL);
-  ASSERT_TRUE(NULL != server.get());
+TEST_F(URLRequestTestHTTP, CancelTest2) {
+  ASSERT_TRUE(NULL != server_.get());
 
   // error C2446: '!=' : no conversion from 'HTTPTestServer *const '
   // to 'const int'
 
   TestDelegate d;
   {
-    TestURLRequest r(server->TestServerPage(""), &d);
+    TestURLRequest r(server_->TestServerPage(""), &d);
 
     d.set_cancel_in_response_started(true);
 
@@ -391,18 +509,13 @@ TEST_F(URLRequestTest, CancelTest2) {
     EXPECT_FALSE(d.received_data_before_response());
     EXPECT_EQ(URLRequestStatus::CANCELED, r.status().status());
   }
-#ifndef NDEBUG
-  DCHECK_EQ(url_request_metrics.object_count, 0);
-#endif
 }
 
-TEST_F(URLRequestTest, CancelTest3) {
-  scoped_refptr<HTTPTestServer> server =
-      HTTPTestServer::CreateServer(L"", NULL);
-  ASSERT_TRUE(NULL != server.get());
+TEST_F(URLRequestTestHTTP, CancelTest3) {
+  ASSERT_TRUE(NULL != server_.get());
   TestDelegate d;
   {
-    TestURLRequest r(server->TestServerPage(""), &d);
+    TestURLRequest r(server_->TestServerPage(""), &d);
 
     d.set_cancel_in_received_data(true);
 
@@ -419,18 +532,13 @@ TEST_F(URLRequestTest, CancelTest3) {
     EXPECT_FALSE(d.received_data_before_response());
     EXPECT_EQ(URLRequestStatus::CANCELED, r.status().status());
   }
-#ifndef NDEBUG
-  DCHECK_EQ(url_request_metrics.object_count, 0);
-#endif
 }
 
-TEST_F(URLRequestTest, CancelTest4) {
-  scoped_refptr<HTTPTestServer> server =
-      HTTPTestServer::CreateServer(L"", NULL);
-  ASSERT_TRUE(NULL != server.get());
+TEST_F(URLRequestTestHTTP, CancelTest4) {
+  ASSERT_TRUE(NULL != server_.get());
   TestDelegate d;
   {
-    TestURLRequest r(server->TestServerPage(""), &d);
+    TestURLRequest r(server_->TestServerPage(""), &d);
 
     r.Start();
     EXPECT_TRUE(r.is_pending());
@@ -450,16 +558,14 @@ TEST_F(URLRequestTest, CancelTest4) {
   EXPECT_EQ(0, d.bytes_received());
 }
 
-TEST_F(URLRequestTest, CancelTest5) {
-  scoped_refptr<HTTPTestServer> server =
-      HTTPTestServer::CreateServer(L"", NULL);
-  ASSERT_TRUE(NULL != server.get());
-  scoped_refptr<URLRequestContext> context = new URLRequestHttpCacheContext();
+TEST_F(URLRequestTestHTTP, CancelTest5) {
+  ASSERT_TRUE(NULL != server_.get());
+  scoped_refptr<URLRequestContext> context = new URLRequestTestContext();
 
   // populate cache
   {
     TestDelegate d;
-    URLRequest r(server->TestServerPage("cachetime"), &d);
+    URLRequest r(server_->TestServerPage("cachetime"), &d);
     r.set_context(context);
     r.Start();
     MessageLoop::current()->Run();
@@ -469,7 +575,7 @@ TEST_F(URLRequestTest, CancelTest5) {
   // cancel read from cache (see bug 990242)
   {
     TestDelegate d;
-    URLRequest r(server->TestServerPage("cachetime"), &d);
+    URLRequest r(server_->TestServerPage("cachetime"), &d);
     r.set_context(context);
     r.Start();
     r.Cancel();
@@ -480,16 +586,10 @@ TEST_F(URLRequestTest, CancelTest5) {
     EXPECT_EQ(0, d.bytes_received());
     EXPECT_FALSE(d.received_data_before_response());
   }
-
-#ifndef NDEBUG
-  DCHECK_EQ(url_request_metrics.object_count, 0);
-#endif
 }
 
-TEST_F(URLRequestTest, PostTest) {
-  scoped_refptr<HTTPTestServer> server =
-      HTTPTestServer::CreateServer(L"net/data", NULL);
-  ASSERT_TRUE(NULL != server.get());
+TEST_F(URLRequestTestHTTP, PostTest) {
+  ASSERT_TRUE(NULL != server_.get());
   const int kMsgSize = 20000;  // multiple of 10
   const int kIterations = 50;
   char *uploadBytes = new char[kMsgSize+1];
@@ -507,12 +607,11 @@ TEST_F(URLRequestTest, PostTest) {
   }
   uploadBytes[kMsgSize] = '\0';
 
-  scoped_refptr<URLRequestContext> context =
-      new URLRequestHttpCacheContext();
+  scoped_refptr<URLRequestContext> context = new URLRequestTestContext();
 
   for (int i = 0; i < kIterations; ++i) {
     TestDelegate d;
-    URLRequest r(server->TestServerPage("echo"), &d);
+    URLRequest r(server_->TestServerPage("echo"), &d);
     r.set_context(context);
     r.set_method("POST");
 
@@ -532,18 +631,13 @@ TEST_F(URLRequestTest, PostTest) {
     EXPECT_EQ(d.data_received().compare(uploadBytes), 0);
   }
   delete[] uploadBytes;
-#ifndef NDEBUG
-  DCHECK_EQ(url_request_metrics.object_count, 0);
-#endif
 }
 
-TEST_F(URLRequestTest, PostEmptyTest) {
-  scoped_refptr<HTTPTestServer> server =
-      HTTPTestServer::CreateServer(L"net/data", NULL);
-  ASSERT_TRUE(NULL != server.get());
+TEST_F(URLRequestTestHTTP, PostEmptyTest) {
+  ASSERT_TRUE(NULL != server_.get());
   TestDelegate d;
   {
-    TestURLRequest r(server->TestServerPage("echo"), &d);
+    TestURLRequest r(server_->TestServerPage("echo"), &d);
     r.set_method("POST");
 
     r.Start();
@@ -557,18 +651,13 @@ TEST_F(URLRequestTest, PostEmptyTest) {
     EXPECT_FALSE(d.received_data_before_response());
     EXPECT_TRUE(d.data_received().empty());
   }
-#ifndef NDEBUG
-  DCHECK_EQ(url_request_metrics.object_count, 0);
-#endif
 }
 
-TEST_F(URLRequestTest, PostFileTest) {
-  scoped_refptr<HTTPTestServer> server =
-      HTTPTestServer::CreateServer(L"net/data", NULL);
-  ASSERT_TRUE(NULL != server.get());
+TEST_F(URLRequestTestHTTP, PostFileTest) {
+  ASSERT_TRUE(NULL != server_.get());
   TestDelegate d;
   {
-    TestURLRequest r(server->TestServerPage("echo"), &d);
+    TestURLRequest r(server_->TestServerPage("echo"), &d);
     r.set_method("POST");
 
     FilePath dir;
@@ -609,9 +698,6 @@ TEST_F(URLRequestTest, PostFileTest) {
     ASSERT_EQ(size, d.bytes_received());
     EXPECT_EQ(0, memcmp(d.data_received().c_str(), buf.get(), size));
   }
-#ifndef NDEBUG
-  DCHECK_EQ(url_request_metrics.object_count, 0);
-#endif
 }
 
 TEST_F(URLRequestTest, AboutBlankTest) {
@@ -628,9 +714,6 @@ TEST_F(URLRequestTest, AboutBlankTest) {
     EXPECT_FALSE(d.received_data_before_response());
     EXPECT_EQ(d.bytes_received(), 0);
   }
-#ifndef NDEBUG
-  DCHECK_EQ(url_request_metrics.object_count, 0);
-#endif
 }
 
 TEST_F(URLRequestTest, FileTest) {
@@ -655,9 +738,6 @@ TEST_F(URLRequestTest, FileTest) {
     EXPECT_FALSE(d.received_data_before_response());
     EXPECT_EQ(d.bytes_received(), static_cast<int>(file_size));
   }
-#ifndef NDEBUG
-  DCHECK_EQ(url_request_metrics.object_count, 0);
-#endif
 }
 
 TEST_F(URLRequestTest, FileTestFullSpecifiedRange) {
@@ -666,9 +746,9 @@ TEST_F(URLRequestTest, FileTestFullSpecifiedRange) {
   FillBuffer(buffer.get(), buffer_size);
 
   FilePath temp_path;
-  EXPECT_TRUE(file_util::CreateTemporaryFileName(&temp_path));
+  EXPECT_TRUE(file_util::CreateTemporaryFile(&temp_path));
   GURL temp_url = net::FilePathToFileURL(temp_path);
-  file_util::WriteFile(temp_path, buffer.get(), buffer_size);
+  EXPECT_TRUE(file_util::WriteFile(temp_path, buffer.get(), buffer_size));
 
   int64 file_size;
   EXPECT_TRUE(file_util::GetFileSize(temp_path, &file_size));
@@ -699,9 +779,6 @@ TEST_F(URLRequestTest, FileTestFullSpecifiedRange) {
   }
 
   EXPECT_TRUE(file_util::Delete(temp_path, false));
-#ifndef NDEBUG
-  DCHECK_EQ(url_request_metrics.object_count, 0);
-#endif
 }
 
 TEST_F(URLRequestTest, FileTestHalfSpecifiedRange) {
@@ -710,9 +787,9 @@ TEST_F(URLRequestTest, FileTestHalfSpecifiedRange) {
   FillBuffer(buffer.get(), buffer_size);
 
   FilePath temp_path;
-  EXPECT_TRUE(file_util::CreateTemporaryFileName(&temp_path));
+  EXPECT_TRUE(file_util::CreateTemporaryFile(&temp_path));
   GURL temp_url = net::FilePathToFileURL(temp_path);
-  file_util::WriteFile(temp_path, buffer.get(), buffer_size);
+  EXPECT_TRUE(file_util::WriteFile(temp_path, buffer.get(), buffer_size));
 
   int64 file_size;
   EXPECT_TRUE(file_util::GetFileSize(temp_path, &file_size));
@@ -742,9 +819,6 @@ TEST_F(URLRequestTest, FileTestHalfSpecifiedRange) {
   }
 
   EXPECT_TRUE(file_util::Delete(temp_path, false));
-#ifndef NDEBUG
-  DCHECK_EQ(url_request_metrics.object_count, 0);
-#endif
 }
 
 TEST_F(URLRequestTest, FileTestMultipleRanges) {
@@ -753,9 +827,9 @@ TEST_F(URLRequestTest, FileTestMultipleRanges) {
   FillBuffer(buffer.get(), buffer_size);
 
   FilePath temp_path;
-  EXPECT_TRUE(file_util::CreateTemporaryFileName(&temp_path));
+  EXPECT_TRUE(file_util::CreateTemporaryFile(&temp_path));
   GURL temp_url = net::FilePathToFileURL(temp_path);
-  file_util::WriteFile(temp_path, buffer.get(), buffer_size);
+  EXPECT_TRUE(file_util::WriteFile(temp_path, buffer.get(), buffer_size));
 
   int64 file_size;
   EXPECT_TRUE(file_util::GetFileSize(temp_path, &file_size));
@@ -773,9 +847,6 @@ TEST_F(URLRequestTest, FileTestMultipleRanges) {
   }
 
   EXPECT_TRUE(file_util::Delete(temp_path, false));
-#ifndef NDEBUG
-  DCHECK_EQ(url_request_metrics.object_count, 0);
-#endif
 }
 
 TEST_F(URLRequestTest, InvalidUrlTest) {
@@ -789,9 +860,6 @@ TEST_F(URLRequestTest, InvalidUrlTest) {
     MessageLoop::current()->Run();
     EXPECT_TRUE(d.request_failed());
   }
-#ifndef NDEBUG
-  DCHECK_EQ(url_request_metrics.object_count, 0);
-#endif
 }
 
 // This test is disabled because it fails on some computers due to proxies
@@ -807,21 +875,20 @@ TEST_F(URLRequestTest, DISABLED_DnsFailureTest) {
     MessageLoop::current()->Run();
     EXPECT_TRUE(d.request_failed());
   }
-#ifndef NDEBUG
-  DCHECK_EQ(url_request_metrics.object_count, 0);
-#endif
 }
 
-TEST_F(URLRequestTest, ResponseHeadersTest) {
-  scoped_refptr<HTTPTestServer> server =
-      HTTPTestServer::CreateServer(L"net/data/url_request_unittest", NULL);
-  ASSERT_TRUE(NULL != server.get());
+TEST_F(URLRequestTestHTTP, ResponseHeadersTest) {
+  ASSERT_TRUE(NULL != server_.get());
   TestDelegate d;
-  TestURLRequest req(server->TestServerPage("files/with-headers.html"), &d);
+  TestURLRequest req(server_->TestServerPage("files/with-headers.html"), &d);
   req.Start();
   MessageLoop::current()->Run();
 
   const net::HttpResponseHeaders* headers = req.response_headers();
+
+  // Simple sanity check that response_info() accesses the same data.
+  EXPECT_EQ(headers, req.response_info().headers.get());
+
   std::string header;
   EXPECT_TRUE(headers->GetNormalizedHeader("cache-control", &header));
   EXPECT_EQ("private", header);
@@ -911,11 +978,11 @@ TEST_F(URLRequestTest, ResolveShortcutTest) {
   CoInitialize(NULL);
   // Temporarily create a shortcut for test
   result = CoCreateInstance(CLSID_ShellLink, NULL,
-                          CLSCTX_INPROC_SERVER, IID_IShellLink,
-                          reinterpret_cast<LPVOID*>(&shell));
+                            CLSCTX_INPROC_SERVER, IID_IShellLink,
+                            reinterpret_cast<LPVOID*>(&shell));
   ASSERT_TRUE(SUCCEEDED(result));
   result = shell->QueryInterface(IID_IPersistFile,
-                             reinterpret_cast<LPVOID*>(&persist));
+                                reinterpret_cast<LPVOID*>(&persist));
   ASSERT_TRUE(SUCCEEDED(result));
   result = shell->SetPath(app_path.value().c_str());
   EXPECT_TRUE(SUCCEEDED(result));
@@ -960,20 +1027,14 @@ TEST_F(URLRequestTest, ResolveShortcutTest) {
   // Clean the shortcut
   DeleteFile(lnk_path.c_str());
   CoUninitialize();
-
-#ifndef NDEBUG
-  DCHECK_EQ(url_request_metrics.object_count, 0);
-#endif
 }
 #endif  // defined(OS_WIN)
 
-TEST_F(URLRequestTest, ContentTypeNormalizationTest) {
-  scoped_refptr<HTTPTestServer> server =
-      HTTPTestServer::CreateServer(L"net/data/url_request_unittest", NULL);
-  ASSERT_TRUE(NULL != server.get());
+TEST_F(URLRequestTestHTTP, ContentTypeNormalizationTest) {
+  ASSERT_TRUE(NULL != server_.get());
 
   TestDelegate d;
-  TestURLRequest req(server->TestServerPage(
+  TestURLRequest req(server_->TestServerPage(
       "files/content-type-normalization.html"), &d);
   req.Start();
   MessageLoop::current()->Run();
@@ -1007,21 +1068,48 @@ TEST_F(URLRequestTest, FileDirCancelTest) {
 
     MessageLoop::current()->Run();
   }
-#ifndef NDEBUG
-  DCHECK_EQ(url_request_metrics.object_count, 0);
-#endif
 
   // Take out mock resource provider.
   net::NetModule::SetResourceProvider(NULL);
 }
 
-TEST_F(URLRequestTest, RestrictRedirects) {
-  scoped_refptr<HTTPTestServer> server =
-      HTTPTestServer::CreateServer(L"net/data/url_request_unittest", NULL);
-  ASSERT_TRUE(NULL != server.get());
+TEST_F(URLRequestTest, FileDirRedirectNoCrash) {
+  // There is an implicit redirect when loading a file path that matches a
+  // directory and does not end with a slash.  Ensure that following such
+  // redirects does not crash.  See http://crbug.com/18686.
+
+  FilePath path;
+  PathService::Get(base::DIR_SOURCE_ROOT, &path);
+  path = path.Append(FILE_PATH_LITERAL("net"));
+  path = path.Append(FILE_PATH_LITERAL("data"));
+  path = path.Append(FILE_PATH_LITERAL("url_request_unittest"));
 
   TestDelegate d;
-  TestURLRequest req(server->TestServerPage(
+  d.set_quit_on_redirect(true);
+  TestURLRequest req(net::FilePathToFileURL(path), &d);
+  req.Start();
+  MessageLoop::current()->Run();
+
+  // Let the directory lister have time to finish its work, which will
+  // cause the URLRequestFileDirJob's ref count to drop to 1.
+  URLRequestFileDirJob* job = static_cast<URLRequestFileDirJob*>(req.job());
+  while (!job->list_complete()) {
+    PlatformThread::Sleep(10);
+    MessageLoop::current()->RunAllPending();
+  }
+
+  // Should not crash during this call!
+  req.FollowDeferredRedirect();
+
+  // Flush event queue.
+  MessageLoop::current()->RunAllPending();
+}
+
+TEST_F(URLRequestTestHTTP, RestrictRedirects) {
+  ASSERT_TRUE(NULL != server_.get());
+
+  TestDelegate d;
+  TestURLRequest req(server_->TestServerPage(
       "files/redirect-to-file.html"), &d);
   req.Start();
   MessageLoop::current()->Run();
@@ -1030,13 +1118,11 @@ TEST_F(URLRequestTest, RestrictRedirects) {
   EXPECT_EQ(net::ERR_UNSAFE_REDIRECT, req.status().os_error());
 }
 
-TEST_F(URLRequestTest, RedirectToInvalidURL) {
-  scoped_refptr<HTTPTestServer> server =
-      HTTPTestServer::CreateServer(L"net/data/url_request_unittest", NULL);
-  ASSERT_TRUE(NULL != server.get());
+TEST_F(URLRequestTestHTTP, RedirectToInvalidURL) {
+  ASSERT_TRUE(NULL != server_.get());
 
   TestDelegate d;
-  TestURLRequest req(server->TestServerPage(
+  TestURLRequest req(server_->TestServerPage(
       "files/redirect-to-invalid-url.html"), &d);
   req.Start();
   MessageLoop::current()->Run();
@@ -1045,12 +1131,10 @@ TEST_F(URLRequestTest, RedirectToInvalidURL) {
   EXPECT_EQ(net::ERR_INVALID_URL, req.status().os_error());
 }
 
-TEST_F(URLRequestTest, NoUserPassInReferrer) {
-  scoped_refptr<HTTPTestServer> server =
-      HTTPTestServer::CreateServer(L"net/data/url_request_unittest", NULL);
-  ASSERT_TRUE(NULL != server.get());
+TEST_F(URLRequestTestHTTP, NoUserPassInReferrer) {
+  ASSERT_TRUE(NULL != server_.get());
   TestDelegate d;
-  TestURLRequest req(server->TestServerPage(
+  TestURLRequest req(server_->TestServerPage(
       "echoheader?Referer"), &d);
   req.set_referrer("http://user:pass@foo.com/");
   req.Start();
@@ -1059,14 +1143,12 @@ TEST_F(URLRequestTest, NoUserPassInReferrer) {
   EXPECT_EQ(std::string("http://foo.com/"), d.data_received());
 }
 
-TEST_F(URLRequestTest, CancelRedirect) {
-  scoped_refptr<HTTPTestServer> server =
-      HTTPTestServer::CreateServer(L"net/data/url_request_unittest", NULL);
-  ASSERT_TRUE(NULL != server.get());
+TEST_F(URLRequestTestHTTP, CancelRedirect) {
+  ASSERT_TRUE(NULL != server_.get());
   TestDelegate d;
   {
     d.set_cancel_in_received_redirect(true);
-    TestURLRequest req(server->TestServerPage(
+    TestURLRequest req(server_->TestServerPage(
         "files/redirect-test.html"), &d);
     req.Start();
     MessageLoop::current()->Run();
@@ -1078,14 +1160,12 @@ TEST_F(URLRequestTest, CancelRedirect) {
   }
 }
 
-TEST_F(URLRequestTest, DeferredRedirect) {
-  scoped_refptr<HTTPTestServer> server =
-      HTTPTestServer::CreateServer(L"net/data/url_request_unittest", NULL);
-  ASSERT_TRUE(NULL != server.get());
+TEST_F(URLRequestTestHTTP, DeferredRedirect) {
+  ASSERT_TRUE(NULL != server_.get());
   TestDelegate d;
   {
     d.set_quit_on_redirect(true);
-    TestURLRequest req(server->TestServerPage(
+    TestURLRequest req(server_->TestServerPage(
         "files/redirect-test.html"), &d);
     req.Start();
     MessageLoop::current()->Run();
@@ -1112,14 +1192,12 @@ TEST_F(URLRequestTest, DeferredRedirect) {
   }
 }
 
-TEST_F(URLRequestTest, CancelDeferredRedirect) {
-  scoped_refptr<HTTPTestServer> server =
-      HTTPTestServer::CreateServer(L"net/data/url_request_unittest", NULL);
-  ASSERT_TRUE(NULL != server.get());
+TEST_F(URLRequestTestHTTP, CancelDeferredRedirect) {
+  ASSERT_TRUE(NULL != server_.get());
   TestDelegate d;
   {
     d.set_quit_on_redirect(true);
-    TestURLRequest req(server->TestServerPage(
+    TestURLRequest req(server_->TestServerPage(
         "files/redirect-test.html"), &d);
     req.Start();
     MessageLoop::current()->Run();
@@ -1136,63 +1214,49 @@ TEST_F(URLRequestTest, CancelDeferredRedirect) {
   }
 }
 
-TEST_F(URLRequestTest, VaryHeader) {
-  scoped_refptr<HTTPTestServer> server =
-      HTTPTestServer::CreateServer(L"net/data/url_request_unittest", NULL);
-  ASSERT_TRUE(NULL != server.get());
+TEST_F(URLRequestTestHTTP, VaryHeader) {
+  ASSERT_TRUE(NULL != server_.get());
 
-  scoped_refptr<URLRequestContext> context = new URLRequestHttpCacheContext();
-
-  Time response_time;
+  scoped_refptr<URLRequestContext> context = new URLRequestTestContext();
 
   // populate the cache
   {
     TestDelegate d;
-    URLRequest req(server->TestServerPage("echoheader?foo"), &d);
+    URLRequest req(server_->TestServerPage("echoheader?foo"), &d);
     req.set_context(context);
     req.SetExtraRequestHeaders("foo:1");
     req.Start();
     MessageLoop::current()->Run();
-
-    response_time = req.response_time();
   }
-
-  // Make sure that the response time of a future response will be in the
-  // future!
-  PlatformThread::Sleep(10);
 
   // expect a cache hit
   {
     TestDelegate d;
-    URLRequest req(server->TestServerPage("echoheader?foo"), &d);
+    URLRequest req(server_->TestServerPage("echoheader?foo"), &d);
     req.set_context(context);
     req.SetExtraRequestHeaders("foo:1");
     req.Start();
     MessageLoop::current()->Run();
 
-    EXPECT_TRUE(req.response_time() == response_time);
+    EXPECT_TRUE(req.was_cached());
   }
 
   // expect a cache miss
   {
     TestDelegate d;
-    URLRequest req(server->TestServerPage("echoheader?foo"), &d);
+    URLRequest req(server_->TestServerPage("echoheader?foo"), &d);
     req.set_context(context);
     req.SetExtraRequestHeaders("foo:2");
     req.Start();
     MessageLoop::current()->Run();
 
-    EXPECT_FALSE(req.response_time() == response_time);
+    EXPECT_FALSE(req.was_cached());
   }
 }
 
-TEST_F(URLRequestTest, BasicAuth) {
-  scoped_refptr<URLRequestContext> context = new URLRequestHttpCacheContext();
-  scoped_refptr<HTTPTestServer> server =
-      HTTPTestServer::CreateServer(L"", NULL);
-  ASSERT_TRUE(NULL != server.get());
-
-  Time response_time;
+TEST_F(URLRequestTestHTTP, BasicAuth) {
+  scoped_refptr<URLRequestContext> context = new URLRequestTestContext();
+  ASSERT_TRUE(NULL != server_.get());
 
   // populate the cache
   {
@@ -1200,20 +1264,14 @@ TEST_F(URLRequestTest, BasicAuth) {
     d.set_username(L"user");
     d.set_password(L"secret");
 
-    URLRequest r(server->TestServerPage("auth-basic"), &d);
+    URLRequest r(server_->TestServerPage("auth-basic"), &d);
     r.set_context(context);
     r.Start();
 
     MessageLoop::current()->Run();
 
     EXPECT_TRUE(d.data_received().find("user/secret") != std::string::npos);
-
-    response_time = r.response_time();
   }
-
-  // Let some time pass so we can ensure that a future response will have a
-  // response time value in the future.
-  PlatformThread::Sleep(10 /* milliseconds */);
 
   // repeat request with end-to-end validation.  since auth-basic results in a
   // cachable page, we expect this test to result in a 304.  in which case, the
@@ -1223,7 +1281,7 @@ TEST_F(URLRequestTest, BasicAuth) {
     d.set_username(L"user");
     d.set_password(L"secret");
 
-    URLRequest r(server->TestServerPage("auth-basic"), &d);
+    URLRequest r(server_->TestServerPage("auth-basic"), &d);
     r.set_context(context);
     r.set_load_flags(net::LOAD_VALIDATE_CACHE);
     r.Start();
@@ -1232,26 +1290,23 @@ TEST_F(URLRequestTest, BasicAuth) {
 
     EXPECT_TRUE(d.data_received().find("user/secret") != std::string::npos);
 
-    // Should be the same cached document, which means that the response time
-    // should not have changed.
-    EXPECT_TRUE(response_time == r.response_time());
+    // Should be the same cached document.
+    EXPECT_TRUE(r.was_cached());
   }
 }
 
 // Check that Set-Cookie headers in 401 responses are respected.
 // http://crbug.com/6450
-TEST_F(URLRequestTest, BasicAuthWithCookies) {
-  scoped_refptr<HTTPTestServer> server =
-      HTTPTestServer::CreateServer(L"", NULL);
-  ASSERT_TRUE(NULL != server.get());
+TEST_F(URLRequestTestHTTP, BasicAuthWithCookies) {
+  ASSERT_TRUE(NULL != server_.get());
 
   GURL url_requiring_auth =
-      server->TestServerPage("auth-basic?set-cookie-if-challenged");
+      server_->TestServerPage("auth-basic?set-cookie-if-challenged");
 
   // Request a page that will give a 401 containing a Set-Cookie header.
   // Verify that when the transaction is restarted, it includes the new cookie.
   {
-    scoped_refptr<URLRequestContext> context = new URLRequestHttpCacheContext();
+    scoped_refptr<URLRequestContext> context = new URLRequestTestContext();
     TestDelegate d;
     d.set_username(L"user");
     d.set_password(L"secret");
@@ -1272,7 +1327,7 @@ TEST_F(URLRequestTest, BasicAuthWithCookies) {
   // Same test as above, except this time the restart is initiated earlier
   // (without user intervention since identity is embedded in the URL).
   {
-    scoped_refptr<URLRequestContext> context = new URLRequestHttpCacheContext();
+    scoped_refptr<URLRequestContext> context = new URLRequestTestContext();
     TestDelegate d;
 
     GURL::Replacements replacements;
@@ -1300,7 +1355,7 @@ TEST_F(URLRequestTest, DoNotSendCookies) {
   scoped_refptr<HTTPTestServer> server =
       HTTPTestServer::CreateServer(L"", NULL);
   ASSERT_TRUE(NULL != server.get());
-  scoped_refptr<URLRequestContext> context = new URLRequestHttpCacheContext();
+  scoped_refptr<URLRequestContext> context = new URLRequestTestContext();
 
   // Set up a cookie.
   {
@@ -1341,7 +1396,7 @@ TEST_F(URLRequestTest, DoNotSaveCookies) {
   scoped_refptr<HTTPTestServer> server =
       HTTPTestServer::CreateServer(L"", NULL);
   ASSERT_TRUE(NULL != server.get());
-  scoped_refptr<URLRequestContext> context = new URLRequestHttpCacheContext();
+  scoped_refptr<URLRequestContext> context = new URLRequestTestContext();
 
   // Set up a cookie.
   {
@@ -1355,7 +1410,7 @@ TEST_F(URLRequestTest, DoNotSaveCookies) {
 
   // Try to set-up another cookie and update the previous cookie.
   {
-    scoped_refptr<URLRequestContext> context = new URLRequestHttpCacheContext();
+    scoped_refptr<URLRequestContext> context = new URLRequestTestContext();
     TestDelegate d;
     URLRequest req(server->TestServerPage(
         "set-cookie?CookieToNotSave=1&CookieToNotUpdate=1"), &d);
@@ -1385,13 +1440,11 @@ TEST_F(URLRequestTest, DoNotSaveCookies) {
 // The subsequent transaction should use GET, and should not send the
 // Content-Type header.
 // http://code.google.com/p/chromium/issues/detail?id=843
-TEST_F(URLRequestTest, Post302RedirectGet) {
+TEST_F(URLRequestTestHTTP, Post302RedirectGet) {
   const char kData[] = "hello world";
-  scoped_refptr<HTTPTestServer> server =
-      HTTPTestServer::CreateServer(L"net/data/url_request_unittest", NULL);
-  ASSERT_TRUE(NULL != server.get());
+  ASSERT_TRUE(NULL != server_.get());
   TestDelegate d;
-  TestURLRequest req(server->TestServerPage("files/redirect-to-echoall"), &d);
+  TestURLRequest req(server_->TestServerPage("files/redirect-to-echoall"), &d);
   req.set_method("POST");
   req.set_upload(CreateSimpleUploadData(kData));
 
@@ -1425,13 +1478,11 @@ TEST_F(URLRequestTest, Post302RedirectGet) {
   EXPECT_TRUE(ContainsString(data, "Accept-Charset:"));
 }
 
-TEST_F(URLRequestTest, Post307RedirectPost) {
+TEST_F(URLRequestTestHTTP, Post307RedirectPost) {
   const char kData[] = "hello world";
-  scoped_refptr<HTTPTestServer> server =
-      HTTPTestServer::CreateServer(L"net/data/url_request_unittest", NULL);
-  ASSERT_TRUE(NULL != server.get());
+  ASSERT_TRUE(NULL != server_.get());
   TestDelegate d;
-  TestURLRequest req(server->TestServerPage("files/redirect307-to-echo"),
+  TestURLRequest req(server_->TestServerPage("files/redirect307-to-echo"),
       &d);
   req.set_method("POST");
   req.set_upload(CreateSimpleUploadData(kData).get());
@@ -1688,7 +1739,9 @@ TEST_F(URLRequestTest, InterceptRedirect) {
 
   // Check we got one good response
   EXPECT_TRUE(req.status().is_success());
-  EXPECT_EQ(200, req.response_headers()->response_code());
+  if (req.status().is_success()) {
+    EXPECT_EQ(200, req.response_headers()->response_code());
+  }
   EXPECT_EQ(TestInterceptor::ok_data(), d.data_received());
   EXPECT_EQ(1, d.response_started_count());
   EXPECT_EQ(0, d.received_redirect_count());
@@ -1777,7 +1830,9 @@ TEST_F(URLRequestTest, InterceptRestartRequired) {
 
   // Check we received one good response
   EXPECT_TRUE(req.status().is_success());
-  EXPECT_EQ(200, req.response_headers()->response_code());
+  if (req.status().is_success()) {
+    EXPECT_EQ(200, req.response_headers()->response_code());
+  }
   EXPECT_EQ(TestInterceptor::ok_data(), d.data_received());
   EXPECT_EQ(1, d.response_started_count());
   EXPECT_EQ(0, d.received_redirect_count());
@@ -1891,28 +1946,48 @@ TEST_F(URLRequestTest, InterceptRespectsCancelInRestart) {
   EXPECT_EQ(URLRequestStatus::CANCELED, req.status().status());
 }
 
-// FTP tests appear to be hanging some of the time
-#if 1  // !defined(OS_WIN)
-  #define MAYBE_FTPGetTestAnonymous   DISABLED_FTPGetTestAnonymous
-  #define MAYBE_FTPGetTest            DISABLED_FTPGetTest
-  #define MAYBE_FTPCheckWrongUser     DISABLED_FTPCheckWrongUser
-  #define MAYBE_FTPCheckWrongPassword DISABLED_FTPCheckWrongPassword
-#else
-  #define MAYBE_FTPGetTestAnonymous   FTPGetTestAnonymous
-  #define MAYBE_FTPGetTest            FTPGetTest
-  #define MAYBE_FTPCheckWrongUser     FTPCheckWrongUser
-  #define MAYBE_FTPCheckWrongPassword FTPCheckWrongPassword
-#endif
+class URLRequestTestFTP : public URLRequestTest {
+ protected:
+  static void SetUpTestCase() {
+    server_ = FTPTestServer::CreateServer(L"");
+  }
 
-TEST_F(URLRequestTest, MAYBE_FTPGetTestAnonymous) {
-  scoped_refptr<FTPTestServer> server = FTPTestServer::CreateServer(L"");
-  ASSERT_TRUE(NULL != server.get());
+  static void TearDownTestCase() {
+    server_ = NULL;
+  }
+
+  static scoped_refptr<FTPTestServer> server_;
+};
+
+// static
+scoped_refptr<FTPTestServer> URLRequestTestFTP::server_;
+
+// Flaky, see http://crbug.com/25045.
+TEST_F(URLRequestTestFTP, FLAKY_FTPDirectoryListing) {
+  ASSERT_TRUE(NULL != server_.get());
+  TestDelegate d;
+  {
+    TestURLRequest r(server_->TestServerPage("/"), &d);
+    r.Start();
+    EXPECT_TRUE(r.is_pending());
+
+    MessageLoop::current()->Run();
+
+    EXPECT_FALSE(r.is_pending());
+    EXPECT_EQ(1, d.response_started_count());
+    EXPECT_FALSE(d.received_data_before_response());
+    EXPECT_LT(0, d.bytes_received());
+  }
+}
+
+TEST_F(URLRequestTestFTP, FTPGetTestAnonymous) {
+  ASSERT_TRUE(NULL != server_.get());
   FilePath app_path;
   PathService::Get(base::DIR_SOURCE_ROOT, &app_path);
   app_path = app_path.AppendASCII("LICENSE");
   TestDelegate d;
   {
-    TestURLRequest r(server->TestServerPage("/LICENSE"), &d);
+    TestURLRequest r(server_->TestServerPage("/LICENSE"), &d);
     r.Start();
     EXPECT_TRUE(r.is_pending());
 
@@ -1921,23 +1996,22 @@ TEST_F(URLRequestTest, MAYBE_FTPGetTestAnonymous) {
     int64 file_size = 0;
     file_util::GetFileSize(app_path, &file_size);
 
-    EXPECT_TRUE(!r.is_pending());
+    EXPECT_FALSE(r.is_pending());
     EXPECT_EQ(1, d.response_started_count());
     EXPECT_FALSE(d.received_data_before_response());
     EXPECT_EQ(d.bytes_received(), static_cast<int>(file_size));
   }
 }
 
-TEST_F(URLRequestTest, MAYBE_FTPGetTest) {
-  scoped_refptr<FTPTestServer> server =
-      FTPTestServer::CreateServer(L"", "chrome", "chrome");
-  ASSERT_TRUE(NULL != server.get());
+TEST_F(URLRequestTestFTP, FTPGetTest) {
+  ASSERT_TRUE(NULL != server_.get());
   FilePath app_path;
   PathService::Get(base::DIR_SOURCE_ROOT, &app_path);
   app_path = app_path.AppendASCII("LICENSE");
   TestDelegate d;
   {
-    TestURLRequest r(server->TestServerPage("/LICENSE"), &d);
+    TestURLRequest r(server_->TestServerPage("/LICENSE", "chrome", "chrome"),
+                     &d);
     r.Start();
     EXPECT_TRUE(r.is_pending());
 
@@ -1946,23 +2020,22 @@ TEST_F(URLRequestTest, MAYBE_FTPGetTest) {
     int64 file_size = 0;
     file_util::GetFileSize(app_path, &file_size);
 
-    EXPECT_TRUE(!r.is_pending());
+    EXPECT_FALSE(r.is_pending());
     EXPECT_EQ(1, d.response_started_count());
     EXPECT_FALSE(d.received_data_before_response());
     EXPECT_EQ(d.bytes_received(), static_cast<int>(file_size));
   }
 }
 
-TEST_F(URLRequestTest, MAYBE_FTPCheckWrongPassword) {
-  scoped_refptr<FTPTestServer> server =
-      FTPTestServer::CreateServer(L"", "chrome", "wrong_password");
-  ASSERT_TRUE(NULL != server.get());
+TEST_F(URLRequestTestFTP, FTPCheckWrongPassword) {
+  ASSERT_TRUE(NULL != server_.get());
   FilePath app_path;
   PathService::Get(base::DIR_SOURCE_ROOT, &app_path);
   app_path = app_path.AppendASCII("LICENSE");
   TestDelegate d;
   {
-    TestURLRequest r(server->TestServerPage("/LICENSE"), &d);
+    TestURLRequest r(server_->TestServerPage("/LICENSE",
+                                             "chrome", "wrong_password"), &d);
     r.Start();
     EXPECT_TRUE(r.is_pending());
 
@@ -1971,23 +2044,27 @@ TEST_F(URLRequestTest, MAYBE_FTPCheckWrongPassword) {
     int64 file_size = 0;
     file_util::GetFileSize(app_path, &file_size);
 
-    EXPECT_TRUE(!r.is_pending());
+    EXPECT_FALSE(r.is_pending());
     EXPECT_EQ(1, d.response_started_count());
     EXPECT_FALSE(d.received_data_before_response());
     EXPECT_EQ(d.bytes_received(), 0);
   }
 }
 
-TEST_F(URLRequestTest, MAYBE_FTPCheckWrongUser) {
-  scoped_refptr<FTPTestServer> server =
-      FTPTestServer::CreateServer(L"", "wrong_user", "chrome");
-  ASSERT_TRUE(NULL != server.get());
+// Flaky, see http://crbug.com/25045.
+TEST_F(URLRequestTestFTP, FLAKY_FTPCheckWrongPasswordRestart) {
+  ASSERT_TRUE(NULL != server_.get());
   FilePath app_path;
   PathService::Get(base::DIR_SOURCE_ROOT, &app_path);
   app_path = app_path.AppendASCII("LICENSE");
   TestDelegate d;
+  // Set correct login credentials. The delegate will be asked for them when
+  // the initial login with wrong credentials will fail.
+  d.set_username(L"chrome");
+  d.set_password(L"chrome");
   {
-    TestURLRequest r(server->TestServerPage("/LICENSE"), &d);
+    TestURLRequest r(server_->TestServerPage("/LICENSE",
+                                             "chrome", "wrong_password"), &d);
     r.Start();
     EXPECT_TRUE(r.is_pending());
 
@@ -1996,9 +2073,208 @@ TEST_F(URLRequestTest, MAYBE_FTPCheckWrongUser) {
     int64 file_size = 0;
     file_util::GetFileSize(app_path, &file_size);
 
-    EXPECT_TRUE(!r.is_pending());
+    EXPECT_FALSE(r.is_pending());
+    EXPECT_EQ(1, d.response_started_count());
+    EXPECT_FALSE(d.received_data_before_response());
+    EXPECT_EQ(d.bytes_received(), static_cast<int>(file_size));
+  }
+}
+
+TEST_F(URLRequestTestFTP, FTPCheckWrongUser) {
+  ASSERT_TRUE(NULL != server_.get());
+  FilePath app_path;
+  PathService::Get(base::DIR_SOURCE_ROOT, &app_path);
+  app_path = app_path.AppendASCII("LICENSE");
+  TestDelegate d;
+  {
+    TestURLRequest r(server_->TestServerPage("/LICENSE",
+                                             "wrong_user", "chrome"), &d);
+    r.Start();
+    EXPECT_TRUE(r.is_pending());
+
+    MessageLoop::current()->Run();
+
+    int64 file_size = 0;
+    file_util::GetFileSize(app_path, &file_size);
+
+    EXPECT_FALSE(r.is_pending());
     EXPECT_EQ(1, d.response_started_count());
     EXPECT_FALSE(d.received_data_before_response());
     EXPECT_EQ(d.bytes_received(), 0);
   }
+}
+
+// Flaky, see http://crbug.com/25045.
+TEST_F(URLRequestTestFTP, FLAKY_FTPCheckWrongUserRestart) {
+  ASSERT_TRUE(NULL != server_.get());
+  FilePath app_path;
+  PathService::Get(base::DIR_SOURCE_ROOT, &app_path);
+  app_path = app_path.AppendASCII("LICENSE");
+  TestDelegate d;
+  // Set correct login credentials. The delegate will be asked for them when
+  // the initial login with wrong credentials will fail.
+  d.set_username(L"chrome");
+  d.set_password(L"chrome");
+  {
+    TestURLRequest r(server_->TestServerPage("/LICENSE",
+                                             "wrong_user", "chrome"), &d);
+    r.Start();
+    EXPECT_TRUE(r.is_pending());
+
+    MessageLoop::current()->Run();
+
+    int64 file_size = 0;
+    file_util::GetFileSize(app_path, &file_size);
+
+    EXPECT_FALSE(r.is_pending());
+    EXPECT_EQ(1, d.response_started_count());
+    EXPECT_FALSE(d.received_data_before_response());
+    EXPECT_EQ(d.bytes_received(), static_cast<int>(file_size));
+  }
+}
+
+// Flaky, see http://crbug.com/25045.
+TEST_F(URLRequestTestFTP, FLAKY_FTPCacheURLCredentials) {
+  ASSERT_TRUE(NULL != server_.get());
+  FilePath app_path;
+  PathService::Get(base::DIR_SOURCE_ROOT, &app_path);
+  app_path = app_path.AppendASCII("LICENSE");
+
+  scoped_ptr<TestDelegate> d(new TestDelegate);
+  {
+    // Pass correct login identity in the URL.
+    TestURLRequest r(server_->TestServerPage("/LICENSE",
+                                             "chrome", "chrome"),
+                     d.get());
+    r.Start();
+    EXPECT_TRUE(r.is_pending());
+
+    MessageLoop::current()->Run();
+
+    int64 file_size = 0;
+    file_util::GetFileSize(app_path, &file_size);
+
+    EXPECT_FALSE(r.is_pending());
+    EXPECT_EQ(1, d->response_started_count());
+    EXPECT_FALSE(d->received_data_before_response());
+    EXPECT_EQ(d->bytes_received(), static_cast<int>(file_size));
+  }
+
+  d.reset(new TestDelegate);
+  {
+    // This request should use cached identity from previous request.
+    TestURLRequest r(server_->TestServerPage("/LICENSE"), d.get());
+    r.Start();
+    EXPECT_TRUE(r.is_pending());
+
+    MessageLoop::current()->Run();
+
+    int64 file_size = 0;
+    file_util::GetFileSize(app_path, &file_size);
+
+    EXPECT_FALSE(r.is_pending());
+    EXPECT_EQ(1, d->response_started_count());
+    EXPECT_FALSE(d->received_data_before_response());
+    EXPECT_EQ(d->bytes_received(), static_cast<int>(file_size));
+  }
+}
+
+// Flaky, see http://crbug.com/25045.
+TEST_F(URLRequestTestFTP, FLAKY_FTPCacheLoginBoxCredentials) {
+  ASSERT_TRUE(NULL != server_.get());
+  FilePath app_path;
+  PathService::Get(base::DIR_SOURCE_ROOT, &app_path);
+  app_path = app_path.AppendASCII("LICENSE");
+
+  scoped_ptr<TestDelegate> d(new TestDelegate);
+  // Set correct login credentials. The delegate will be asked for them when
+  // the initial login with wrong credentials will fail.
+  d->set_username(L"chrome");
+  d->set_password(L"chrome");
+  {
+    TestURLRequest r(server_->TestServerPage("/LICENSE",
+                                             "chrome", "wrong_password"),
+                     d.get());
+    r.Start();
+    EXPECT_TRUE(r.is_pending());
+
+    MessageLoop::current()->Run();
+
+    int64 file_size = 0;
+    file_util::GetFileSize(app_path, &file_size);
+
+    EXPECT_FALSE(r.is_pending());
+    EXPECT_EQ(1, d->response_started_count());
+    EXPECT_FALSE(d->received_data_before_response());
+    EXPECT_EQ(d->bytes_received(), static_cast<int>(file_size));
+  }
+
+  // Use a new delegate without explicit credentials. The cached ones should be
+  // used.
+  d.reset(new TestDelegate);
+  {
+    // Don't pass wrong credentials in the URL, they would override valid cached
+    // ones.
+    TestURLRequest r(server_->TestServerPage("/LICENSE"), d.get());
+    r.Start();
+    EXPECT_TRUE(r.is_pending());
+
+    MessageLoop::current()->Run();
+
+    int64 file_size = 0;
+    file_util::GetFileSize(app_path, &file_size);
+
+    EXPECT_FALSE(r.is_pending());
+    EXPECT_EQ(1, d->response_started_count());
+    EXPECT_FALSE(d->received_data_before_response());
+    EXPECT_EQ(d->bytes_received(), static_cast<int>(file_size));
+  }
+}
+
+// Check that default A-L header is sent.
+TEST_F(URLRequestTestHTTP, DefaultAcceptLanguage) {
+  ASSERT_TRUE(NULL != server_.get());
+  TestDelegate d;
+  TestURLRequest req(server_->TestServerPage("echoheader?Accept-Language"), &d);
+  req.set_context(new URLRequestTestContext());
+  req.Start();
+  MessageLoop::current()->Run();
+  EXPECT_EQ(req.context()->accept_language(), d.data_received());
+}
+
+// Check that if request overrides the A-L header, the default is not appended.
+// See http://crbug.com/20894
+TEST_F(URLRequestTestHTTP, OverrideAcceptLanguage) {
+  ASSERT_TRUE(NULL != server_.get());
+  TestDelegate d;
+  TestURLRequest req(server_->TestServerPage("echoheader?Accept-Language"), &d);
+  req.set_context(new URLRequestTestContext());
+  req.SetExtraRequestHeaders("Accept-Language: ru");
+  req.Start();
+  MessageLoop::current()->Run();
+  EXPECT_EQ(std::string("ru"), d.data_received());
+}
+
+// Check that default A-C header is sent.
+TEST_F(URLRequestTestHTTP, DefaultAcceptCharset) {
+  ASSERT_TRUE(NULL != server_.get());
+  TestDelegate d;
+  TestURLRequest req(server_->TestServerPage("echoheader?Accept-Charset"), &d);
+  req.set_context(new URLRequestTestContext());
+  req.Start();
+  MessageLoop::current()->Run();
+  EXPECT_EQ(req.context()->accept_charset(), d.data_received());
+}
+
+// Check that if request overrides the A-C header, the default is not appended.
+// See http://crbug.com/20894
+TEST_F(URLRequestTestHTTP, OverrideAcceptCharset) {
+  ASSERT_TRUE(NULL != server_.get());
+  TestDelegate d;
+  TestURLRequest req(server_->TestServerPage("echoheader?Accept-Charset"), &d);
+  req.set_context(new URLRequestTestContext());
+  req.SetExtraRequestHeaders("Accept-Charset: koi-8r");
+  req.Start();
+  MessageLoop::current()->Run();
+  EXPECT_EQ(std::string("koi-8r"), d.data_received());
 }

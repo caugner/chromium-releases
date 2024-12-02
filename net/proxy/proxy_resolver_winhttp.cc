@@ -45,7 +45,7 @@ static void FreeInfo(WINHTTP_PROXY_INFO* info) {
 }
 
 ProxyResolverWinHttp::ProxyResolverWinHttp()
-    : ProxyResolver(true), session_handle_(NULL) {
+    : ProxyResolver(false /*expects_pac_bytes*/), session_handle_(NULL) {
 }
 
 ProxyResolverWinHttp::~ProxyResolverWinHttp() {
@@ -53,8 +53,10 @@ ProxyResolverWinHttp::~ProxyResolverWinHttp() {
 }
 
 int ProxyResolverWinHttp::GetProxyForURL(const GURL& query_url,
-                                         const GURL& pac_url,
-                                         ProxyInfo* results) {
+                                         ProxyInfo* results,
+                                         CompletionCallback* /*callback*/,
+                                         RequestHandle* /*request*/,
+                                         LoadLog* /*load_log*/) {
   // If we don't have a WinHTTP session, then create a new one.
   if (!session_handle_ && !OpenWinHttpSession())
     return ERR_FAILED;
@@ -68,9 +70,8 @@ int ProxyResolverWinHttp::GetProxyForURL(const GURL& query_url,
   WINHTTP_AUTOPROXY_OPTIONS options = {0};
   options.fAutoLogonIfChallenged = FALSE;
   options.dwFlags = WINHTTP_AUTOPROXY_CONFIG_URL;
-  std::wstring pac_url_wide = ASCIIToWide(pac_url.spec());
-  options.lpszAutoConfigUrl =
-      pac_url_wide.empty() ? L"http://wpad/wpad.dat" : pac_url_wide.c_str();
+  std::wstring pac_url_wide = ASCIIToWide(pac_url_.spec());
+  options.lpszAutoConfigUrl = pac_url_wide.c_str();
 
   WINHTTP_PROXY_INFO info = {0};
   DCHECK(session_handle_);
@@ -132,6 +133,18 @@ int ProxyResolverWinHttp::GetProxyForURL(const GURL& query_url,
 
   FreeInfo(&info);
   return rv;
+}
+
+void ProxyResolverWinHttp::CancelRequest(RequestHandle request) {
+  // This is a synchronous ProxyResolver; no possibility for async requests.
+  NOTREACHED();
+}
+
+int ProxyResolverWinHttp::SetPacScript(const GURL& pac_url,
+                                       const std::string& /*pac_bytes*/,
+                                       CompletionCallback* /*callback*/) {
+  pac_url_ = pac_url.is_valid() ? pac_url : GURL("http://wpad/wpad.dat");
+  return OK;
 }
 
 bool ProxyResolverWinHttp::OpenWinHttpSession() {

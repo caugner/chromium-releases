@@ -7,6 +7,7 @@
 
 #include <gtk/gtk.h>
 #include <string>
+#include <vector>
 
 #include "base/gfx/point.h"
 #include "base/gfx/rect.h"
@@ -15,17 +16,14 @@
 
 typedef struct _GtkWidget GtkWidget;
 
+struct RendererPreferences;  // from common/renderer_preferences.h
+
 namespace event_utils {
 
 // Translates event flags into what kind of disposition they represent.
 // For example, a middle click would mean to open a background tab.
 // event_flags are the state in the GdkEvent structure.
 WindowOpenDisposition DispositionFromEventFlags(guint state);
-
-// Get the timestamp (milliseconds) out of a GdkEvent.
-// Returns 0 if the event has no timestamp.
-// TODO(evanm): see comments in jankometer.cc about using this.
-guint32 GetGdkEventTime(GdkEvent* event);
 
 }  // namespace event_utils
 
@@ -50,16 +48,20 @@ const int kContentAreaBorder = 12;
 const int kContentAreaSpacing = 18;
 
 // Create a table of labeled controls, using proper spacing and alignment.
-// Arguments should be pairs of const char*, GtkWidget*, concluding with a NULL.
-// The first argument is a color to force the label text to. It can be NULL to
-// get the system default.
+// Arguments should be pairs of const char*, GtkWidget*, concluding with a
+// NULL.  The first argument is a vector in which to place all labels
+// produced. It can be NULL if you don't need to keep track of the label
+// widgets. The second argument is a color to force the label text to. It can
+// be NULL to get the system default.
+//
 // For example:
-// controls = CreateLabeledControlsGroup(&gfx::kGdkBlack,
+// controls = CreateLabeledControlsGroup(NULL, &gfx::kGdkBlack,
 //                                       "Name:", title_entry_,
 //                                       "Folder:", folder_combobox_,
 //                                       NULL);
-GtkWidget* CreateLabeledControlsGroup(const GdkColor* color,
-                                      const char* text, ...);
+GtkWidget* CreateLabeledControlsGroup(
+    std::vector<GtkWidget*>* labels,
+    const char* text, ...);
 
 // Create a GtkBin with |child| as its child widget.  This bin will paint a
 // border of color |color| with the sizes specified in pixels.
@@ -69,7 +71,9 @@ GtkWidget* CreateGtkBorderBin(GtkWidget* child, const GdkColor* color,
 // Calculates the size of given widget based on the size specified in
 // number of characters/lines (in locale specific resource file) and
 // font metrics.
-bool GetWidgetSizeFromResources(GtkWidget* widget, int width_chars,
+// NOTE: Make sure to realize |widget| before using this method, or a
+// default font size will be used instead of the actual font size.
+void GetWidgetSizeFromResources(GtkWidget* widget, int width_chars,
                                 int height_lines, int* width, int* height);
 
 // Remove all children from this container.
@@ -127,6 +131,58 @@ bool WidgetContainsCursor(GtkWidget* widget);
 // Sets the icon of |window| to the product icon (potentially used in window
 // border or alt-tab list).
 void SetWindowIcon(GtkWindow* window);
+
+// Sets the default window icon for windows created in this app.
+void SetDefaultWindowIcon();
+
+// Adds an action button with the given text to the dialog. Only useful when you
+// want a stock icon but not the stock text to go with it. Returns the button.
+GtkWidget* AddButtonToDialog(GtkWidget* dialog, const gchar* text,
+                             const gchar* stock_id, gint response_id);
+
+// Sets all the foreground color states of |label| to |color|.
+void SetLabelColor(GtkWidget* label, const GdkColor* color);
+
+// Adds the given widget to an alignment identing it by |kGroupIndent|.
+GtkWidget* IndentWidget(GtkWidget* content);
+
+// Initialize the font settings in |prefs| (used when creating new renderers)
+// based on GtkSettings (which itself comes from XSETTINGS).
+void InitRendererPrefsFromGtkSettings(RendererPreferences* prefs);
+
+// Get the current location of the mouse cursor relative to the screen.
+gfx::Point ScreenPoint(GtkWidget* widget);
+
+// Get the current location of the mouse cursor relative to the widget.
+gfx::Point ClientPoint(GtkWidget* widget);
+
+// Reverses a point in RTL mode. Used in making vectors of GdkPoints for window
+// shapes.
+GdkPoint MakeBidiGdkPoint(gint x, gint y, gint width, bool ltr);
+
+// Draws a GTK text entry with the style parameters of GtkEntry
+// |offscreen_entry| onto |widget_to_draw_on| in the rectangle |rec|. Drawing
+// is only done in the clip rectangle |dirty_rec|.
+void DrawTextEntryBackground(GtkWidget* offscreen_entry,
+                             GtkWidget* widget_to_draw_on,
+                             GdkRectangle* dirty_rec,
+                             GdkRectangle* rec);
+
+// Returns the two colors averaged together.
+GdkColor AverageColors(GdkColor color_one, GdkColor color_two);
+
+// Show the image for the given menu item, even if the user's default is to not
+// show images. Only to be used for favicons or other menus where the image is
+// crucial to its functionality.
+void SetAlwaysShowImage(GtkWidget* image_menu_item);
+
+// Returns a static instance of a GdkCursor* object, sharable across the
+// process.  Returns a GdkCursor with a +1 refcount, as if it was just created
+// with gdk_cursor_new(); owner must gdk_cursor_unref() it when done with it.
+GdkCursor* GetCursor(GdkCursorType type);
+
+// Stacks a |popup| window directly on top of a |toplevel| window.
+void StackPopupWindow(GtkWidget* popup, GtkWidget* toplevel);
 
 }  // namespace gtk_util
 

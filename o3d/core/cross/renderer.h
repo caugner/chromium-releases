@@ -147,6 +147,10 @@ class Renderer {
   // Creates a 'default' renderer, choosing the correct implementation type.
   static Renderer* CreateDefaultRenderer(ServiceLocator* service_locator);
 
+  // Gets whether or not the renderer should attempt to use the software
+  // renderer.
+  static bool IsForceSoftwareRenderer();
+
   // Initialises the renderer for use, claiming hardware resources.
   InitStatus Init(const DisplayWindow& display, bool off_screen);
 
@@ -167,16 +171,34 @@ class Renderer {
   virtual void Destroy() = 0;
 
   // Prepares the rendering device for subsequent draw calls.
-  virtual bool BeginDraw() = 0;
+  // This is called during a RenderTree and can be called mutliple times
+  // during a single frame.
+  // NOTE: See StartRendering!
+  bool BeginDraw();
 
-  // Notifies the renderer that the draw calls for this frame are completed.
-  virtual void EndDraw() = 0;
+  // This is called during a RenderTree and can be called mutliple times during
+  // a single frame. It gives the renderer a chance to flush state before
+  // returning to JavaScript if JavaScript is calling RenderTree directly.
+  // NOTE: See StartRendering!
+  void EndDraw();
 
-  // Does any pre-rendering preparation
-  virtual bool StartRendering() = 0;
+  // Does any pre-rendering preparation.
+  // The order of operations is
+  //   StartRendering()
+  //     BeginDraw();
+  //     EndDraw()
+  //     BeginDraw();
+  //     EndDraw()
+  //     BeginDraw();
+  //     EndDraw()
+  //   FinishRendering();  // <- Presents the results.
+  bool StartRendering();
 
   // Presents the results of the draw calls for this frame.
-  virtual void FinishRendering() = 0;
+  void FinishRendering();
+
+  // Copy the contents of the backbuffer to the window.
+  void Present();
 
   // Returns whether a render is required.
   bool need_to_render() const {
@@ -191,34 +213,34 @@ class Renderer {
   // Handles the plugin resize event.
   virtual void Resize(int width, int height) = 0;
 
-  // Turns fullscreen display on or off.
+  // Turns fullscreen display on.
   // Parameters:
-  //  fullscreen: true for fullscreen, false for in-plugin display
   //  display: a platform-specific display identifier
-  //  mode_id: a mode returned by GetDisplayModes, for fullscreen use.  Ignored
-  //      in non-fullscreen mode.
+  //  mode_id: a mode returned by GetDisplayModes
   // Returns true on success, false on failure.
-  // TODO: Make this pure virtual once it's implemented everywhere.
-  virtual bool SetFullscreen(bool fullscreen, const DisplayWindow& display,
-      int mode_id) {
-    return false;
-  }
+  virtual bool GoFullscreen(const DisplayWindow& display,
+                            int mode_id) = 0;
+
+  // Cancels fullscreen display. Restores rendering to windowed mode
+  // with the given width and height.
+  // Parameters:
+  //  display: a platform-specific display identifier
+  //  width: the width to which to restore windowed rendering
+  //  height: the height to which to restore windowed rendering
+  // Returns true on success, false on failure.
+  virtual bool CancelFullscreen(const DisplayWindow& display,
+                                int width, int height) = 0;
 
   // Tells whether we're currently displayed fullscreen or not.
-  virtual bool fullscreen() const { return false; }
+  virtual bool fullscreen() const = 0;
 
   // Get a vector of the available fullscreen display modes.
   // Clears *modes on error.
-  // TODO: Make this pure virtual once it's implemented everywhere.
-  virtual void GetDisplayModes(std::vector<DisplayMode> *modes) {
-    modes->clear();
-  }
+  virtual void GetDisplayModes(std::vector<DisplayMode> *modes) = 0;
+
   // Get a single fullscreen display mode by id.
   // Returns true on success, false on error.
-  // TODO: Make this pure virtual once it's implemented everywhere.
-  virtual bool GetDisplayMode(int id, DisplayMode *mode) {
-    return false;
-  }
+  virtual bool GetDisplayMode(int id, DisplayMode *mode) = 0;
 
   // Gets the viewport.
   void GetViewport(Float4* rectangle, Float2* depth_range);
@@ -242,12 +264,12 @@ class Renderer {
   void SetViewport(const Float4& rectangle, const Float2& depth_range);
 
   // Clears the current buffers.
-  virtual void Clear(const Float4 &color,
-                     bool color_flag,
-                     float depth,
-                     bool depth_flag,
-                     int stencil,
-                     bool stencil_flag) = 0;
+  void Clear(const Float4 &color,
+             bool color_flag,
+             float depth,
+             bool depth_flag,
+             int stencil,
+             bool stencil_flag);
 
   // Renders this Element using the parameters from override first, followed by
   // the draw_element, followed by params on this Primitive and material.
@@ -256,11 +278,11 @@ class Renderer {
   //   draw_element: DrawElement to override params with.
   //   material: Material to render with.
   //   override: Override to render with.
-  virtual void RenderElement(Element* element,
-                             DrawElement* draw_element,
-                             Material* material,
-                             ParamObject* override,
-                             ParamCache* param_cache) = 0;
+  void RenderElement(Element* element,
+                     DrawElement* draw_element,
+                     Material* material,
+                     ParamObject* override,
+                     ParamCache* param_cache);
 
   // Pushes rendering states.
   void PushRenderStates(State *state);
@@ -274,8 +296,11 @@ class Renderer {
   //   surface: RenderSurface to bind to the color buffer.
   //   depth_surface: RenderDepthStencilSurface to bind to the depth/stencil
   //       buffer.
-  void SetRenderSurfaces(RenderSurface* surface,
-                         RenderDepthStencilSurface* depth_surface);
+  //   is_back_buffer: True if the render surface being set should be considered
+  //       the backbuffer.
+  void SetRenderSurfaces(const RenderSurface* surface,
+                         const RenderDepthStencilSurface* depth_surface,
+                         bool is_back_buffer);
 
   // Gets the current render surfaces.
   // Parameters:
@@ -283,8 +308,11 @@ class Renderer {
   //       buffer.
   //   depth_surface: pointer to variable to hold RenderDepthStencilSurface to
   //       bind to the depth/stencil buffer.
-  void GetRenderSurfaces(RenderSurface** surface,
-                         RenderDepthStencilSurface** depth_surface);
+  //   is_back_buffer: pointer to variable to hold whether or not the surface
+  //       returned is the back buffer.
+  void GetRenderSurfaces(const RenderSurface** surface,
+                         const RenderDepthStencilSurface** depth_surface,
+                         bool* is_back_buffer);
 
   // Creates a StreamBank, returning a platform specific implementation class.
   virtual StreamBank::Ref CreateStreamBank() = 0;
@@ -313,17 +341,6 @@ class Renderer {
 
   // Frees a Param Cache.
   void FreeParamCache(ParamCache* param_cache);
-
-  // Attempts to create a Texture with the given bitmap, automatically
-  // determining whether the to create a 2D texture, cube texture, etc. If
-  // creation fails the method returns NULL.
-  // Parameters:
-  //  bitmap: The bitmap specifying the dimensions, format and content of the
-  //          new texture. The created texture takes ownership of the bitmap
-  //          data.
-  // Returns:
-  //  A ref-counted pointer to the texture or NULL if it did not load.
-  Texture::Ref CreateTextureFromBitmap(Bitmap* bitmap);
 
   // Creates and returns a platform specific Texture2D object.  It allocates
   // the necessary resources to store texture data for the given image size
@@ -364,14 +381,23 @@ class Renderer {
       int width,
       int height) = 0;
 
-  // Saves a png screenshot.
-  // Returns true on success and false on failure.
-  virtual bool SaveScreen(const String& file_name) = 0;
-
   ServiceLocator* service_locator() const { return service_locator_; }
 
   // Returns the type of Param needed for a particular state.
   const ObjectBase::Class* GetStateParamType(const String& state_name) const;
+
+  // Whether we are currently rendering (between StartRendering /
+  // FinishRendering calls).
+  // NOTE: See StartRendering!
+  bool rendering() const {
+    return rendering_;
+  }
+
+  // Whether we are currently drawing (between BeginDraw / EndDraw calls).
+  // NOTE: See StartRendering!
+  bool drawing() const {
+    return drawing_;
+  }
 
   // Get the client area's width.
   int width() const {
@@ -384,13 +410,13 @@ class Renderer {
   }
 
   // Get the width of the buffer to which the renderer is drawing.
-  int render_width() const {
-    return render_width_;
+  int display_width() const {
+    return display_width_;
   }
 
   // Get the height of the buffer to which the renderer is drawing.
-  int render_height() const {
-    return render_height_;
+  int display_height() const {
+    return display_height_;
   }
 
   // Whether or not the underlying API (D3D or OpenGL) supports
@@ -444,6 +470,10 @@ class Renderer {
     ++draw_elements_culled_;
   }
 
+  void IncrementDrawElementsRendered() {
+    ++draw_elements_rendered_;
+  }
+
   void AddPrimitivesRendered(int amount_to_add) {
     primitives_rendered_ += amount_to_add;
   }
@@ -472,7 +502,6 @@ class Renderer {
   // renderer, then it is not safe to bind the texture.
   bool SafeToBindTexture(Texture* texture) const;
 
-
   // When rendering only part of the view because of scrolling or the window
   // being smaller than the client size, etc, this lets us adjust the origin of
   // the top left of the drawing within our area, effectively allowing us to
@@ -490,6 +519,24 @@ class Renderer {
   // current platform.
   virtual const int* GetRGBAUByteNSwizzleTable() = 0;
 
+  // Used only for unit testing purposes. Should not be used elsewhere.
+  void set_rendering(bool rendering) {
+    rendering_ = rendering;
+  }
+
+  // Used only by the ColorWriteEnable state handlers. Should not be used
+  // elsewhere.
+  // Sets the write mask. This must be called by platform specific renderers
+  // when the color write mask is changed.
+  void SetWriteMask(int mask) {
+    write_mask_ = mask & 0xF;
+  }
+
+  // Indicates whether this Renderer has yet presented to the screen.
+  bool presented_once() {
+    return presented_once_;
+  }
+
  protected:
   typedef vector_map<String, StateHandler*> StateHandlerMap;
   typedef std::vector<ParamVector> ParamVectorArray;
@@ -498,6 +545,9 @@ class Renderer {
   // Make the constructor protected so that users can only create one
   // using the CreateDefaultRenderer factory method.
   explicit Renderer(ServiceLocator* service_locator);
+
+  // Sets whether or not the renderer supports non-power of 2 textures.
+  void SetSupportsNPOT(bool supports_npot);
 
   // Adds a state handler to the state handler map
   // Parameters:
@@ -526,15 +576,11 @@ class Renderer {
 
   // Sets the render surfaces on a specific platform.
   virtual void SetRenderSurfacesPlatformSpecific(
-      RenderSurface* surface,
-      RenderDepthStencilSurface* depth_surface) = 0;
+      const RenderSurface* surface,
+      const RenderDepthStencilSurface* depth_surface) = 0;
 
   // Creates a platform specific ParamCache.
   virtual ParamCache* CreatePlatformSpecificParamCache() = 0;
-
-  // Platform specific version of CreateTextureFromBitmap.
-  virtual Texture::Ref CreatePlatformSpecificTextureFromBitmap(
-      Bitmap* bitmap) = 0;
 
   // Platform specific version of CreateTexture2D
   virtual Texture2D::Ref CreatePlatformSpecificTexture2D(
@@ -551,6 +597,32 @@ class Renderer {
       int levels,
       bool enable_render_surfaces) = 0;
 
+  // The platform specific part of BeginDraw.
+  virtual bool PlatformSpecificBeginDraw() = 0;
+
+  // The platform specific part of EndDraw.
+  virtual void PlatformSpecificEndDraw() = 0;
+
+  // The platform specific part of StartRendering.
+  virtual bool PlatformSpecificStartRendering() = 0;
+
+  // The platform specific part of EndRendering.
+  virtual void PlatformSpecificFinishRendering() = 0;
+
+  // The platform specific part of Present.
+  virtual void PlatformSpecificPresent() = 0;
+
+  // The platform specific part of Clear.
+  virtual void PlatformSpecificClear(const Float4 &color,
+                                     bool color_flag,
+                                     float depth,
+                                     bool depth_flag,
+                                     int stencil,
+                                     bool stencil_flag) = 0;
+
+  // Applies states that have been modified (marked dirty).
+  virtual void ApplyDirtyStates() = 0;
+
   // Sets the viewport. This is the platform specific version.
   virtual void SetViewportInPixels(int left,
                                    int top,
@@ -562,27 +634,48 @@ class Renderer {
   // Sets the client's size. Derived classes must call this on Init and Resize.
   void SetClientSize(int width, int height);
 
-  // Whether or not the underlying API supports non-power-of-two textures.
-  bool supports_npot_;
+  // Calls any registered lost resources callback.
+  void CallLostResourcesCallback() const {
+    lost_resources_callback_manager_.Run();
+  }
 
-  // Whether we need to clear the entire client area next render.
-  bool clear_client_;
+  int dest_x_offset() const {
+    return dest_x_offset_;
+  }
 
-  // Whether a render is required.
-  bool need_to_render_;
+  int dest_y_offset() const {
+    return dest_y_offset_;
+  }
+
+  Features* features() const {
+    return features_.Get();
+  }
+
+ private:
+  // Adds the default states to their respective stacks.
+  void AddDefaultStates();
+
+  // Removes the default states from their respective stacks.
+  void RemoveDefaultStates();
+
+  // Clears the backbuffer.
+  void ClearBackBuffer();
+
+  // Clears the backbuffer if it has not been cleared.
+  void ClearBackBufferIfNotCleared() {
+    if (!back_buffer_cleared_ && current_render_surface_is_back_buffer_) {
+      ClearBackBuffer();
+    }
+  }
+
+  ServiceLocator* service_locator_;
+  ServiceImplementation<Renderer> service_;
+  ServiceDependency<Features> features_;
 
   // The current render surfaces. NULL = no surface.
-  RenderSurface* current_render_surface_;
-  RenderDepthStencilSurface* current_depth_surface_;
-
-  int render_frame_count_;  // count of times we've rendered frame.
-  int transforms_processed_;  // count of transforms processed this frame.
-  int transforms_culled_;  // count of transforms culled this frame.
-  int draw_elements_processed_;  // count of draw elements processed this frame.
-  int draw_elements_culled_;  // count of draw elements culled this frame.
-  int draw_elements_rendered_;  // count of draw elements culled this frame.
-  int primitives_rendered_;  // count of primitives (tris, lines)
-                             // rendered this frame.
+  const RenderSurface* current_render_surface_;
+  const RenderDepthStencilSurface* current_depth_surface_;
+  bool current_render_surface_is_back_buffer_;
 
   Sampler::Ref error_sampler_;  // sampler used when one is missing.
   Texture::Ref error_texture_;  // texture used when one is missing.
@@ -603,47 +696,65 @@ class Renderer {
   // State object holding the default state settings.
   State::Ref default_state_;
 
+  // A State object holding the settings required to be able to clear the
+  // back buffer.
+  State::Ref clear_back_buffer_state_;
+
+  // Lost Resources Callbacks.
+  LostResourcesCallbackManager lost_resources_callback_manager_;
+
   // Current viewport setting.
   Float4 viewport_;
 
   // Current depth range.
   Float2 depth_range_;
 
-  // Lost Resources Callbacks.
-  LostResourcesCallbackManager lost_resources_callback_manager_;
+  // Current write mask.
+  int write_mask_;
 
-  int dest_x_offset() const {
-    return dest_x_offset_;
-  }
+  int render_frame_count_;  // count of times we've rendered frame.
+  int transforms_processed_;  // count of transforms processed this frame.
+  int transforms_culled_;  // count of transforms culled this frame.
+  int draw_elements_processed_;  // count of draw elements processed this frame.
+  int draw_elements_culled_;  // count of draw elements culled this frame.
+  int draw_elements_rendered_;  // count of draw elements culled this frame.
+  int primitives_rendered_;  // count of primitives (tris, lines)
+                             // rendered this frame.
 
-  int dest_y_offset() const {
-    return dest_y_offset_;
-  }
+  // The depth of times we've called StartRendering/FinishRenderering.
+  int start_depth_;
 
-  Features* features() const {
-    return features_.Get();
-  }
+  // Whether we need to clear the entire client area next render.
+  bool clear_client_;
 
- private:
-  ServiceLocator* service_locator_;
-  ServiceImplementation<Renderer> service_;
-  ServiceDependency<Features> features_;
+  // Whether a render is required.
+  bool need_to_render_;
+
+  // Whether we are currently rendering (between StartRendering /
+  // FinishRendering calls)
+  bool rendering_;
+
+  // Whether or not we are drawing (between BeingDraw/EndDraw calls)
+  bool drawing_;
 
   int width_;  // width of the client area in pixels
   int height_;  // height of the client area in pixels
 
-  int render_width_;  // width of the thing we are rendering to.
-  int render_height_;  // height of the thing we are rendering to.
+  int display_width_;  // width of the thing we are rendering to.
+  int display_height_;  // height of the thing we are rendering to.
 
   // X and Y offsets for destination rectangle.
   int dest_x_offset_;
   int dest_y_offset_;
 
-  // Adds the default states to their respective stacks.
-  void AddDefaultStates();
+  // Whether or not the underlying API supports non-power-of-two textures.
+  bool supports_npot_;
 
-  // Removes the default states from their respective stacks.
-  void RemoveDefaultStates();
+  // Whether the backbuffer has been cleared this frame.
+  bool back_buffer_cleared_;
+
+  // Whether we have ever completed a call to Present().
+  bool presented_once_;
 
   DISALLOW_COPY_AND_ASSIGN(Renderer);
 };

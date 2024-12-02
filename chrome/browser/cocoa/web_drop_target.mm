@@ -11,6 +11,8 @@
 #include "webkit/glue/webdropdata.h"
 #include "webkit/glue/window_open_disposition.h"
 
+using WebKit::WebDragOperationsMask;
+
 @implementation WebDropTarget
 
 // |contents| is the TabContents representing this tab, used to communicate
@@ -25,8 +27,8 @@
 
 // Call to set whether or not we should allow the drop. Takes effect the
 // next time |-draggingUpdated:| is called.
-- (void)setIsDropTarget:(BOOL)isDropTarget {
-  isDropTarget_ = isDropTarget;
+- (void)setCurrentOperation: (NSDragOperation)operation {
+  current_operation_ = operation;
 }
 
 // Given a point in window coordinates and a view in that window, return a
@@ -85,13 +87,16 @@
   NSPoint windowPoint = [info draggingLocation];
   NSPoint viewPoint = [self flipWindowPointToView:windowPoint view:view];
   NSPoint screenPoint = [self flipWindowPointToScreen:windowPoint view:view];
+  NSDragOperation mask = [info draggingSourceOperationMask];
   tabContents_->render_view_host()->DragTargetDragEnter(data,
       gfx::Point(viewPoint.x, viewPoint.y),
-      gfx::Point(screenPoint.x, screenPoint.y));
+      gfx::Point(screenPoint.x, screenPoint.y),
+      static_cast<WebDragOperationsMask>(mask));
 
-  isDropTarget_ = YES;
-
-  return NSDragOperationCopy;
+  // We won't know the true operation (whether the drag is allowed) until we
+  // hear back from the renderer. For now, be optimistic:
+  current_operation_ = NSDragOperationCopy;
+  return current_operation_;
 }
 
 - (void)draggingExited:(id<NSDraggingInfo>)info {
@@ -121,13 +126,13 @@
   NSPoint windowPoint = [info draggingLocation];
   NSPoint viewPoint = [self flipWindowPointToView:windowPoint view:view];
   NSPoint screenPoint = [self flipWindowPointToScreen:windowPoint view:view];
+  NSDragOperation mask = [info draggingSourceOperationMask];
   tabContents_->render_view_host()->DragTargetDragOver(
       gfx::Point(viewPoint.x, viewPoint.y),
-      gfx::Point(screenPoint.x, screenPoint.y));
+      gfx::Point(screenPoint.x, screenPoint.y),
+      static_cast<WebDragOperationsMask>(mask));
 
-  if (!isDropTarget_)
-    return NSDragOperationNone;
-  return NSDragOperationCopy;
+  return current_operation_;
 }
 
 - (BOOL)performDragOperation:(id<NSDraggingInfo>)info
@@ -171,11 +176,18 @@
   DCHECK([pboard containsURLData]);
 
   // The getURLs:andTitles: will already validate URIs so we don't need to
-  // again. The arrays it returns are both of NSString's.
+  // again. However, if the URI is a local file, it won't be prefixed with
+  // file://, which is what GURL expects. We can detect that case because the
+  // resulting URI will have no valid scheme, and we'll assume it's a local
+  // file. The arrays returned are both of NSString's.
   NSArray* urls = nil;
   NSArray* titles = nil;
   [pboard getURLs:&urls andTitles:&titles];
-  data->url = GURL([[urls objectAtIndex:0] UTF8String]);
+  NSString* urlString = [urls objectAtIndex:0];
+  NSURL* url = [NSURL URLWithString:urlString];
+  if (![url scheme])
+    urlString = [[NSURL fileURLWithPath:urlString] absoluteString];
+  data->url = GURL([urlString UTF8String]);
   data->url_title = base::SysNSStringToUTF16([titles objectAtIndex:0]);
 }
 
@@ -203,7 +215,22 @@
         base::SysNSStringToUTF16([pboard stringForType:NSHTMLPboardType]);
   }
 
-  // TODO(pinkerton): Get files and file contents.
+  // Get files.
+  if ([types containsObject:NSFilenamesPboardType]) {
+    NSArray* files = [pboard propertyListForType:NSFilenamesPboardType];
+    if ([files isKindOfClass:[NSArray class]] && [files count]) {
+      for (NSUInteger i = 0; i < [files count]; i++) {
+        NSString* filename = [files objectAtIndex:i];
+        BOOL isDir = NO;
+        BOOL exists = [[NSFileManager defaultManager] fileExistsAtPath:filename
+                                                           isDirectory:&isDir];
+        if (exists && !isDir)
+          data->filenames.push_back(base::SysNSStringToUTF16(filename));
+      }
+    }
+  }
+
+  // TODO(pinkerton): Get file contents.
 }
 
 @end

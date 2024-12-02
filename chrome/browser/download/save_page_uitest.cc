@@ -6,6 +6,7 @@
 #include "base/path_service.h"
 #include "base/platform_thread.h"
 #include "base/string_util.h"
+#include "base/test/test_file_util.h"
 #include "chrome/app/chrome_dll_resource.h"
 #include "chrome/browser/net/url_request_mock_http_job.h"
 #include "chrome/browser/download/save_package.h"
@@ -28,42 +29,16 @@ class SavePageTest : public UITest {
  protected:
   SavePageTest() : UITest() {}
 
-  void CheckFile(const FilePath& client_file,
-                 const FilePath& server_file,
-                 bool check_equal) {
-    file_util::FileInfo previous, current;
-    bool exist = false;
-    for (int i = 0; i < 20; ++i) {
-      if (exist) {
-        file_util::GetFileInfo(client_file, &current);
-        if (current.size == previous.size)
-          break;
-        previous = current;
-      } else if (file_util::PathExists(client_file)) {
-        file_util::GetFileInfo(client_file, &previous);
-        exist = true;
-      }
-      PlatformThread::Sleep(sleep_timeout_ms());
-    }
-    EXPECT_TRUE(exist);
-
-    if (check_equal) {
-      FilePath server_file_name;
-      ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA,
-                                   &server_file_name));
-      server_file_name = server_file_name.AppendASCII(kTestDir)
-                                         .Append(server_file);
-      ASSERT_TRUE(file_util::PathExists(server_file_name));
-
-      int64 client_file_size = 0;
-      int64 server_file_size = 0;
-      EXPECT_TRUE(file_util::GetFileSize(client_file, &client_file_size));
-      EXPECT_TRUE(file_util::GetFileSize(server_file_name, &server_file_size));
-      EXPECT_EQ(client_file_size, server_file_size);
-      EXPECT_TRUE(file_util::ContentsEqual(client_file, server_file_name));
-    }
-
-    EXPECT_TRUE(DieFileDie(client_file, false));
+  void CheckFile(const FilePath& generated_file,
+                 const FilePath& expected_result_file) {
+    FilePath expected_result_filepath = UITest::GetTestFilePath(
+        UTF8ToWide(kTestDir), expected_result_file.ToWStringHack());
+    ASSERT_TRUE(file_util::PathExists(expected_result_filepath));
+    WaitForGeneratedFileAndCheck(generated_file,
+                                 expected_result_filepath,
+                                 false,  // Don't care whether they are equal.
+                                 false,
+                                 false);  // Don't delete file
   }
 
   virtual void SetUp() {
@@ -71,115 +46,17 @@ class SavePageTest : public UITest {
     EXPECT_TRUE(file_util::CreateNewTempDirectory(FILE_PATH_LITERAL(""),
                                                   &save_dir_));
 
-    download_dir_ = FilePath::FromWStringHack(GetDownloadDirectory());
+    download_dir_ = GetDownloadDirectory();
   }
 
   virtual void TearDown() {
     UITest::TearDown();
-    DieFileDie(save_dir_, true);
+    file_util::DieFileDie(save_dir_, true);
   }
 
   FilePath save_dir_;
   FilePath download_dir_;
 };
-
-// Flaky on Linux: http://code.google.com/p/chromium/issues/detail?id=14746
-TEST_F(SavePageTest, SaveHTMLOnly) {
-  std::string file_name("a.htm");
-  FilePath full_file_name = save_dir_.AppendASCII(file_name);
-  FilePath dir = save_dir_.AppendASCII("a_files");
-
-  GURL url = URLRequestMockHTTPJob::GetMockUrl(
-    UTF8ToWide(std::string(kTestDir) + "/" + file_name));
-  scoped_refptr<TabProxy> tab(GetActiveTab());
-  ASSERT_TRUE(tab.get());
-  ASSERT_TRUE(tab->NavigateToURL(url));
-  WaitUntilTabCount(1);
-
-  EXPECT_TRUE(tab->SavePage(full_file_name.ToWStringHack(), dir.ToWStringHack(),
-                            SavePackage::SAVE_AS_ONLY_HTML));
-  scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
-  EXPECT_TRUE(WaitForDownloadShelfVisible(browser.get()));
-
-  CheckFile(full_file_name, FilePath::FromWStringHack(UTF8ToWide(file_name)),
-            true);
-  EXPECT_FALSE(file_util::PathExists(dir));
-}
-
-// Flaky on Linux: http://code.google.com/p/chromium/issues/detail?id=14746
-TEST_F(SavePageTest, SaveCompleteHTML) {
-  std::string file_name = "b.htm";
-  FilePath full_file_name = save_dir_.AppendASCII(file_name);
-  FilePath dir = save_dir_.AppendASCII("b_files");
-
-  GURL url = URLRequestMockHTTPJob::GetMockUrl(
-      UTF8ToWide(std::string(kTestDir) + "/" + file_name));
-  scoped_refptr<TabProxy> tab(GetActiveTab());
-  ASSERT_TRUE(tab.get());
-  ASSERT_TRUE(tab->NavigateToURL(url));
-  WaitUntilTabCount(1);
-
-  EXPECT_TRUE(tab->SavePage(full_file_name.ToWStringHack(), dir.ToWStringHack(),
-                            SavePackage::SAVE_AS_COMPLETE_HTML));
-  scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
-  EXPECT_TRUE(WaitForDownloadShelfVisible(browser.get()));
-
-  CheckFile(dir.AppendASCII("1.png"), FilePath(FILE_PATH_LITERAL("1.png")),
-                            true);
-  CheckFile(dir.AppendASCII("1.css"), FilePath(FILE_PATH_LITERAL("1.css")),
-                            true);
-  CheckFile(full_file_name, FilePath::FromWStringHack(UTF8ToWide(file_name)),
-            false);
-  EXPECT_TRUE(DieFileDie(dir, true));
-}
-
-TEST_F(SavePageTest, NoSave) {
-  std::string file_name = "c.htm";
-  FilePath full_file_name = save_dir_.AppendASCII(file_name);
-  FilePath dir = save_dir_.AppendASCII("c_files");
-
-  scoped_refptr<TabProxy> tab(GetActiveTab());
-  ASSERT_TRUE(tab.get());
-  ASSERT_TRUE(tab->NavigateToURL(GURL("about:blank")));
-  WaitUntilTabCount(1);
-
-  EXPECT_FALSE(tab->SavePage(full_file_name.ToWStringHack(),
-                             dir.ToWStringHack(),
-                             SavePackage::SAVE_AS_ONLY_HTML));
-  scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
-  EXPECT_FALSE(WaitForDownloadShelfVisible(browser.get()));
-}
-
-TEST_F(SavePageTest, FilenameFromPageTitle) {
-  std::string file_name = "b.htm";
-
-  FilePath full_file_name = download_dir_.AppendASCII(
-      std::string("Test page for saving page feature") + kAppendedExtension);
-  FilePath dir = download_dir_.AppendASCII(
-      "Test page for saving page feature_files");
-
-  GURL url = URLRequestMockHTTPJob::GetMockUrl(
-      UTF8ToWide(std::string(kTestDir) + "/" + file_name));
-  scoped_refptr<TabProxy> tab(GetActiveTab());
-  ASSERT_TRUE(tab.get());
-  ASSERT_TRUE(tab->NavigateToURL(url));
-  WaitUntilTabCount(1);
-
-  scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
-  automation()->SavePackageShouldPromptUser(false);
-  EXPECT_TRUE(browser->RunCommandAsync(IDC_SAVE_PAGE));
-  EXPECT_TRUE(WaitForDownloadShelfVisible(browser.get()));
-  automation()->SavePackageShouldPromptUser(true);
-
-  CheckFile(dir.AppendASCII("1.png"), FilePath(FILE_PATH_LITERAL("1.png")),
-                            true);
-  CheckFile(dir.AppendASCII("1.css"), FilePath(FILE_PATH_LITERAL("1.css")),
-                            true);
-  CheckFile(full_file_name, FilePath::FromWStringHack(UTF8ToWide(file_name)),
-            false);
-  EXPECT_TRUE(DieFileDie(full_file_name, false));
-  EXPECT_TRUE(DieFileDie(dir, true));
-}
 
 // This tests that a webpage with the title "test.exe" is saved as
 // "test.exe.htm".
@@ -191,8 +68,8 @@ TEST_F(SavePageTest, CleanFilenameFromPageTitle) {
       download_dir_.AppendASCII(std::string("test.exe") + kAppendedExtension);
   FilePath dir = download_dir_.AppendASCII("test.exe_files");
 
-  GURL url = URLRequestMockHTTPJob::GetMockUrl(
-    UTF8ToWide(std::string(kTestDir) + "/" + file_name));
+  GURL url = URLRequestMockHTTPJob::GetMockUrl(FilePath(ASCIIToWide(
+                 std::string(kTestDir) + "/" + file_name)));
   scoped_refptr<TabProxy> tab(GetActiveTab());
   ASSERT_TRUE(tab.get());
   ASSERT_TRUE(tab->NavigateToURL(url));
@@ -204,9 +81,8 @@ TEST_F(SavePageTest, CleanFilenameFromPageTitle) {
   EXPECT_TRUE(WaitForDownloadShelfVisible(browser.get()));
   automation()->SavePackageShouldPromptUser(true);
 
-  CheckFile(full_file_name, FilePath::FromWStringHack(UTF8ToWide(file_name)),
-            false);
-  EXPECT_TRUE(DieFileDie(full_file_name, false));
-  EXPECT_TRUE(DieFileDie(dir, true));
+  CheckFile(full_file_name, FilePath::FromWStringHack(UTF8ToWide(file_name)));
+  EXPECT_TRUE(file_util::DieFileDie(full_file_name, false));
+  EXPECT_TRUE(file_util::DieFileDie(dir, true));
 }
 #endif

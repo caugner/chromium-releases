@@ -115,7 +115,8 @@ class DownloadItem {
                int64 download_size,
                int render_process_id,
                int request_id,
-               bool is_dangerous);
+               bool is_dangerous,
+               bool save_as);
 
   ~DownloadItem();
 
@@ -211,6 +212,7 @@ class DownloadItem {
   void set_auto_opened(bool auto_opened) { auto_opened_ = auto_opened; }
   FilePath original_name() const { return original_name_; }
   void set_original_name(const FilePath& name) { original_name_ = name; }
+  bool save_as() const { return save_as_; }
 
   // Returns the file-name that should be reported to the user, which is
   // file_name_ for safe downloads and original_name_ for dangerous ones with
@@ -293,7 +295,10 @@ class DownloadItem {
   int render_process_id_;
   int request_id_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(DownloadItem);
+  // True if the item was downloaded as a result of 'save as...'
+  bool save_as_;
+
+  DISALLOW_COPY_AND_ASSIGN(DownloadItem);
 };
 
 
@@ -452,6 +457,10 @@ class DownloadManager : public base::RefCountedThreadSafe<DownloadManager>,
   void GenerateSafeFilename(const std::string& mime_type,
                             FilePath* file_name);
 
+  // Used to determine whether the download item is an extension file or not.
+  static bool IsExtensionInstall(const DownloadItem* item);
+  static bool IsExtensionInstall(const DownloadCreateInfo* info);
+
  private:
   // Opens a download via the Windows shell.
   void OpenDownloadInShell(const DownloadItem* download,
@@ -495,6 +504,11 @@ class DownloadManager : public base::RefCountedThreadSafe<DownloadManager>,
 
   // Persist the automatic opening preference.
   void SaveAutoOpens();
+
+  // Download cancel helper function.
+  void DownloadCancelledInternal(int download_id,
+                                 int render_process_id,
+                                 int request_id);
 
   // Runs the network cancel on the IO thread.
   static void OnCancelDownloadRequest(ResourceDispatcherHost* rdh,

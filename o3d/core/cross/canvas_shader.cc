@@ -32,14 +32,13 @@
 
 // This file contains the implementation for the CanvasShader class.
 
-#include "core/cross/precompile.h"
 #include "core/cross/canvas_shader.h"
 #include "base/scoped_ptr.h"
 #include "core/cross/canvas_utils.h"
 #include "core/cross/error.h"
 
-#include "third_party/skia/include/core/SkShader.h"
-#include "third_party/skia/include/effects/SkGradientShader.h"
+#include "SkShader.h"
+#include "SkGradientShader.h"
 
 namespace o3d {
 

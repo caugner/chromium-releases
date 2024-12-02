@@ -1,10 +1,10 @@
 /*
  * Copyright (C) 2009 Google Inc. All rights reserved.
- * 
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
  * met:
- * 
+ *
  *     * Redistributions of source code must retain the above copyright
  * notice, this list of conditions and the following disclaimer.
  *     * Redistributions in binary form must reproduce the above
@@ -14,7 +14,7 @@
  *     * Neither the name of Google Inc. nor the names of its
  * contributors may be used to endorse or promote products derived from
  * this software without specific prior written permission.
- * 
+ *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
  * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
  * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
@@ -31,7 +31,11 @@
 #include "config.h"
 #include "WebString.h"
 
+#include "WebCString.h"
+
+#include "CString.h"
 #include "PlatformString.h"
+#include "AtomicString.h"
 
 namespace WebKit {
 
@@ -67,6 +71,11 @@ const WebUChar* WebString::data() const
     return m_private ? const_cast<WebStringPrivate*>(m_private)->characters() : 0;
 }
 
+WebCString WebString::utf8() const
+{
+    return WebCore::String(m_private).utf8();
+}
+
 WebString WebString::fromUTF8(const char* data, size_t length)
 {
     return WebCore::String::fromUTF8(data, length);
@@ -93,6 +102,23 @@ WebString& WebString::operator=(const WebCore::String& s)
 WebString::operator WebCore::String() const
 {
     return m_private;
+}
+
+WebString::WebString(const WebCore::AtomicString& s)
+    : m_private(0)
+{
+    assign(s.string());
+}
+
+WebString& WebString::operator=(const WebCore::AtomicString& s)
+{
+    assign(s.string());
+    return *this;
+}
+
+WebString::operator WebCore::AtomicString() const
+{
+    return WebCore::AtomicString(static_cast<WebCore::StringImpl *>(m_private));
 }
 
 void WebString::assign(WebStringPrivate* p)

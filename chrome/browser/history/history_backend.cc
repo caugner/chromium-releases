@@ -11,6 +11,7 @@
 #include "base/histogram.h"
 #include "base/message_loop.h"
 #include "base/scoped_ptr.h"
+#include "base/scoped_vector.h"
 #include "base/string_util.h"
 #include "base/time.h"
 #include "chrome/browser/autocomplete/history_url_provider.h"
@@ -247,6 +248,9 @@ FilePath HistoryBackend::GetArchivedFileName() const {
 }
 
 SegmentID HistoryBackend::GetLastSegmentID(VisitID from_visit) {
+  // Set is used to detect referrer loops.  Should not happen, but can
+  // if the database is corrupt.
+  std::set<VisitID> visit_set;
   VisitID visit_id = from_visit;
   while (visit_id) {
     VisitRow row;
@@ -257,6 +261,12 @@ SegmentID HistoryBackend::GetLastSegmentID(VisitID from_visit) {
 
     // Check the referrer of this visit, if any.
     visit_id = row.referring_visit;
+
+    if (visit_set.find(visit_id) != visit_set.end()) {
+      NOTREACHED() << "Loop in referer chain, giving up";
+      break;
+    }
+    visit_set.insert(visit_id);
   }
   return 0;
 }
@@ -505,7 +515,7 @@ void HistoryBackend::InitImpl() {
   // Fill the in-memory database and send it back to the history service on the
   // main thread.
   InMemoryHistoryBackend* mem_backend = new InMemoryHistoryBackend;
-  if (mem_backend->Init(history_name.ToWStringHack()))
+  if (mem_backend->Init(history_name))
     delegate_->SetInMemoryBackend(mem_backend);  // Takes ownership of pointer.
   else
     delete mem_backend;  // Error case, run without the in-memory DB.
@@ -528,6 +538,13 @@ void HistoryBackend::InitImpl() {
     LOG(WARNING) << "Text database initialization failed, running without it.";
     text_database_.reset();
   }
+  if (db_->needs_version_17_migration()) {
+    // See needs_version_17_migration() decl for more. In this case, we want
+    // to erase all the text database files. This must be done after the text
+    // database manager has been initialized, since it knows about all the
+    // files it manages.
+    text_database_->DeleteAll();
+  }
 
   // Thumbnail database.
   thumbnail_db_.reset(new ThumbnailDatabase());
@@ -543,6 +560,12 @@ void HistoryBackend::InitImpl() {
   }
 
   // Archived database.
+  if (db_->needs_version_17_migration()) {
+    // See needs_version_17_migration() decl for more. In this case, we want
+    // to delete the archived database and need to do so before we try to
+    // open the file. We can ignore any error (maybe the file doesn't exist).
+    file_util::Delete(archived_name, false);
+  }
   archived_db_.reset(new ArchivedDatabase());
   if (!archived_db_->Init(archived_name)) {
     LOG(WARNING) << "Could not initialize the archived database.";
@@ -1018,8 +1041,8 @@ void HistoryBackend::QueryHistory(scoped_refptr<QueryHistoryRequest> request,
   request->ForwardResult(QueryHistoryRequest::TupleType(request->handle(),
                                                         &request->value));
 
-  HISTOGRAM_TIMES("History.QueryHistory",
-                  TimeTicks::Now() - beginning_time);
+  UMA_HISTOGRAM_TIMES("History.QueryHistory",
+                      TimeTicks::Now() - beginning_time);
 }
 
 // Basic time-based querying of history.
@@ -1162,26 +1185,26 @@ void HistoryBackend::QueryTopURLsAndRedirects(
 
   if (!db_.get()) {
     request->ForwardResult(QueryTopURLsAndRedirectsRequest::TupleType(
-        NULL, NULL));
+        request->handle(), false, NULL, NULL));
     return;
   }
 
   std::vector<GURL>* top_urls = &request->value.a;
   history::RedirectMap* redirects = &request->value.b;
 
-  std::vector<PageUsageData*> data;
+  ScopedVector<PageUsageData> data;
   db_->QuerySegmentUsage(base::Time::Now() - base::TimeDelta::FromDays(90),
-      result_count, &data);
+      result_count, &data.get());
 
   for (size_t i = 0; i < data.size(); ++i) {
     top_urls->push_back(data[i]->GetURL());
-    history::RedirectList list;
-    GetMostRecentRedirectsFrom(top_urls->back(), &list);
-    (*redirects)[top_urls->back()] = new RefCountedVector<GURL>(list);
+    RefCountedVector<GURL>* list = new RefCountedVector<GURL>;
+    GetMostRecentRedirectsFrom(top_urls->back(), &list->data);
+    (*redirects)[top_urls->back()] = list;
   }
 
   request->ForwardResult(QueryTopURLsAndRedirectsRequest::TupleType(
-      top_urls, redirects));
+      request->handle(), true, top_urls, redirects));
 }
 
 void HistoryBackend::GetRedirectsFromSpecificVisit(
@@ -1336,8 +1359,8 @@ void HistoryBackend::GetPageThumbnailDirectly(
     if (!success)
       *data = NULL;  // This will tell the callback there was an error.
 
-    HISTOGRAM_TIMES("History.GetPageThumbnail",
-                    TimeTicks::Now() - beginning_time);
+    UMA_HISTOGRAM_TIMES("History.GetPageThumbnail",
+                        TimeTicks::Now() - beginning_time);
   }
 }
 
@@ -1419,16 +1442,33 @@ void HistoryBackend::SetImportedFavicons(
     }
 
     // Save the mapping from all the URLs to the favicon.
+    BookmarkService* bookmark_service = GetBookmarkService();
     for (std::set<GURL>::const_iterator url = favicon_usage[i].urls.begin();
          url != favicon_usage[i].urls.end(); ++url) {
       URLRow url_row;
-      if (!db_->GetRowForURL(*url, &url_row) ||
-          url_row.favicon_id() == favicon_id)
-        continue;  // Don't set favicons for unknown URLs.
-      url_row.set_favicon_id(favicon_id);
-      db_->UpdateURLRow(url_row.id(), url_row);
-
-      favicons_changed.insert(*url);
+      if (!db_->GetRowForURL(*url, &url_row)) {
+        // If the URL is present as a bookmark, add the url in history to
+        // save the favicon mapping. This will match with what history db does
+        // for regular bookmarked URLs with favicons - when history db is
+        // cleaned, we keep an entry in the db with 0 visits as long as that
+        // url is bookmarked.
+        if (bookmark_service && bookmark_service_->IsBookmarked(*url)) {
+          URLRow url_info(*url);
+          url_info.set_visit_count(0);
+          url_info.set_typed_count(0);
+          url_info.set_last_visit(base::Time());
+          url_info.set_hidden(false);
+          url_info.set_favicon_id(favicon_id);
+          db_->AddURL(url_info);
+          favicons_changed.insert(*url);
+        }
+      } else if (url_row.favicon_id() == 0) {
+        // URL is present in history, update the favicon *only* if it
+        // is not set already.
+        url_row.set_favicon_id(favicon_id);
+        db_->UpdateURLRow(url_row.id(), url_row);
+        favicons_changed.insert(*url);
+      }
     }
   }
 
@@ -1502,8 +1542,8 @@ void HistoryBackend::GetFavIconForURL(
           TimeDelta::FromDays(kFavIconRefetchDays);
     }
 
-    HISTOGRAM_TIMES("History.GetFavIconForURL",
-                    TimeTicks::Now() - beginning_time);
+    UMA_HISTOGRAM_TIMES("History.GetFavIconForURL",
+                        TimeTicks::Now() - beginning_time);
   }
 
   request->ForwardResult(

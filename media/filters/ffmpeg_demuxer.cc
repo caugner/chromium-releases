@@ -188,7 +188,7 @@ void FFmpegDemuxerStream::FulfillPendingRead() {
 }
 
 base::TimeDelta FFmpegDemuxerStream::ConvertTimestamp(int64 timestamp) {
-  if (timestamp == AV_NOPTS_VALUE)
+  if (timestamp == static_cast<int64>(AV_NOPTS_VALUE))
     return StreamSample::kInvalidTimestamp;
   AVRational time_base = { 1, base::Time::kMicrosecondsPerSecond };
   int64 microseconds = av_rescale_q(timestamp, stream_->time_base, time_base);
@@ -293,6 +293,12 @@ int FFmpegDemuxer::Read(int size, uint8* data) {
   // TODO(hclam): use a more meaningful constant as error.
   if (read_has_failed_)
     return AVERROR_IO;
+
+  // If the read position exceeds the size of the data source. We should return
+  // end-of-file directly.
+  int64 file_size;
+  if (data_source_->GetSize(&file_size) && read_position_ >= file_size)
+    return AVERROR_EOF;
 
   // Asynchronous read from data source.
   data_source_->Read(read_position_, size, data,
@@ -439,8 +445,10 @@ void FFmpegDemuxer::SeekTask(base::TimeDelta time, FilterCallback* callback) {
   // will attempt to use the lowest-index video stream, if present, followed by
   // the lowest-index audio stream.
   if (av_seek_frame(format_context_, -1, time.InMicroseconds(), flags) < 0) {
-    // TODO(scherkus): signal error.
-    NOTIMPLEMENTED();
+    // Use LOG(INFO) instead of NOTIMPLEMENTED() to prevent the message being
+    // captured from stdout and contaminates testing.
+    // TODO(scherkus): Implement this properly and signal error (BUG=23447).
+    LOG(INFO) << "Not implemented";
   }
 
   // Notify we're finished seeking.

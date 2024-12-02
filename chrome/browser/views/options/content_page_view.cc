@@ -10,12 +10,13 @@
 #include <vssym32.h>
 
 #include "app/gfx/canvas.h"
+#include "app/gfx/native_theme_win.h"
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
-#include "base/gfx/native_theme.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/sync/sync_status_ui_helper.h"
 #include "chrome/browser/views/clear_browsing_data.h"
 #include "chrome/browser/views/importer_view.h"
 #include "chrome/browser/views/options/options_group_view.h"
@@ -27,11 +28,21 @@
 #include "views/grid_layout.h"
 #include "views/standard_layout.h"
 #include "views/widget/widget.h"
+#include "views/window/window.h"
 
 namespace {
 
 const int kPasswordSavingRadioGroup = 1;
 const int kFormAutofillRadioGroup = 2;
+
+#if defined(BROWSER_SYNC)
+// Background color for the status label when it's showing an error.
+static const SkColor kSyncLabelErrorBgColor = SkColorSetRGB(0xff, 0x9a, 0x9a);
+
+static views::Background* CreateErrorBackground() {
+  return views::Background::CreateSolidBackground(kSyncLabelErrorBgColor);
+}
+#endif
 }  // namespace
 
 ContentPageView::ContentPageView(Profile* profile)
@@ -43,21 +54,39 @@ ContentPageView::ContentPageView(Profile* profile)
       form_autofill_neversave_radio_(NULL),
       themes_group_(NULL),
       themes_reset_button_(NULL),
-      themes_gallery_button_(NULL),
+      themes_gallery_link_(NULL),
       browsing_data_label_(NULL),
       browsing_data_group_(NULL),
       import_button_(NULL),
       clear_data_button_(NULL),
+#if defined(BROWSER_SYNC)
+      sync_group_(NULL),
+      sync_status_label_(NULL),
+      sync_action_link_(NULL),
+      sync_start_stop_button_(NULL),
+      sync_service_(NULL),
+#endif
       OptionsPageView(profile) {
+#if defined(BROWSER_SYNC)
+  if (profile->GetProfileSyncService()) {
+    sync_service_ = profile->GetProfileSyncService();
+    sync_service_->AddObserver(this);
+#endif
+  }
 }
 
 ContentPageView::~ContentPageView() {
+#if defined(BROWSER_SYNC)
+  if (sync_service_)
+    sync_service_->RemoveObserver(this);
+#endif
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 // ContentPageView, views::ButtonListener implementation:
 
-void ContentPageView::ButtonPressed(views::Button* sender) {
+void ContentPageView::ButtonPressed(
+    views::Button* sender, const views::Event& event) {
   if (sender == passwords_asktosave_radio_ ||
       sender == passwords_neversave_radio_) {
     bool enabled = passwords_asktosave_radio_->checked();
@@ -86,19 +115,6 @@ void ContentPageView::ButtonPressed(views::Button* sender) {
   } else if (sender == themes_reset_button_) {
     UserMetricsRecordAction(L"Options_ThemesReset", profile()->GetPrefs());
     profile()->ClearTheme();
-  } else if (sender == themes_gallery_button_) {
-    UserMetricsRecordAction(L"Options_ThemesGallery", profile()->GetPrefs());
-    Browser* browser =
-        BrowserList::FindBrowserWithType(profile(), Browser::TYPE_NORMAL);
-
-    if (!browser || !browser->GetSelectedTabContents()) {
-      browser = Browser::Create(profile());
-      browser->OpenURL(GURL(l10n_util::GetString(IDS_THEMES_GALLERY_URL)),
-                       GURL(), NEW_WINDOW, PageTransition::LINK);
-    } else {
-      browser->AddTabWithURL(GURL(l10n_util::GetString(IDS_THEMES_GALLERY_URL)),
-          GURL(), PageTransition::LINK, true, -1, false, NULL);
-    }
   } else if (sender == import_button_) {
     views::Window::CreateChromeWindow(
       GetWindow()->GetNativeWindow(),
@@ -109,7 +125,43 @@ void ContentPageView::ButtonPressed(views::Button* sender) {
       GetWindow()->GetNativeWindow(),
       gfx::Rect(),
       new ClearBrowsingDataView(profile()))->Show();
+#if defined(BROWSER_SYNC)
+  } else if (sender == sync_start_stop_button_) {
+    DCHECK(sync_service_);
+
+    if (sync_service_->HasSyncSetupCompleted()) {
+      ConfirmMessageBoxDialog::RunWithCustomConfiguration(
+          GetWindow()->GetNativeWindow(),
+          this,
+          l10n_util::GetString(IDS_SYNC_STOP_SYNCING_EXPLANATION_LABEL),
+          l10n_util::GetString(IDS_SYNC_STOP_SYNCING_BUTTON_LABEL),
+          l10n_util::GetString(IDS_SYNC_STOP_SYNCING_CONFIRM_BUTTON_LABEL),
+          l10n_util::GetString(IDS_CANCEL),
+          gfx::Size(views::Window::GetLocalizedContentsSize(
+              IDS_CONFIRM_STOP_SYNCING_DIALOG_WIDTH_CHARS,
+              IDS_CONFIRM_STOP_SYNCING_DIALOG_HEIGHT_LINES)));
+      return;
+    } else {
+      sync_service_->EnableForUser();
+      ProfileSyncService::SyncEvent(ProfileSyncService::START_FROM_OPTIONS);
+    }
+#endif
   }
+}
+
+void ContentPageView::LinkActivated(views::Link* source, int event_flags) {
+  if (source == themes_gallery_link_) {
+    UserMetricsRecordAction(L"Options_ThemesGallery", profile()->GetPrefs());
+    BrowserList::GetLastActive()->OpenURL(
+        GURL(l10n_util::GetString(IDS_THEMES_GALLERY_URL)),
+        GURL(), NEW_FOREGROUND_TAB, PageTransition::LINK);
+    return;
+  }
+#if defined(BROWSER_SYNC)
+  DCHECK_EQ(source, sync_action_link_);
+  DCHECK(sync_service_);
+  sync_service_->ShowLoginDialog();
+#endif
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -127,6 +179,16 @@ void ContentPageView::InitControlLayout() {
   ColumnSet* column_set = layout->AddColumnSet(single_column_view_set_id);
   column_set->AddColumn(GridLayout::FILL, GridLayout::FILL, 1,
                         GridLayout::USE_PREF, 0, 0);
+
+#if defined(BROWSER_SYNC)
+  if (sync_service_) {
+    layout->StartRow(0, single_column_view_set_id);
+    InitSyncGroup();
+    layout->AddView(sync_group_);
+    layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
+  }
+#endif
+
   layout->StartRow(0, single_column_view_set_id);
   InitPasswordSavingGroup();
   layout->AddView(passwords_group_);
@@ -152,6 +214,8 @@ void ContentPageView::InitControlLayout() {
                               profile()->GetPrefs(), this);
   ask_to_save_form_autofill_.Init(prefs::kFormAutofillEnabled,
                                   profile()->GetPrefs(), this);
+  is_using_default_theme_.Init(prefs::kCurrentThemeID,
+                               profile()->GetPrefs(), this);
 }
 
 void ContentPageView::NotifyPrefChanged(const std::wstring* pref_name) {
@@ -169,12 +233,20 @@ void ContentPageView::NotifyPrefChanged(const std::wstring* pref_name) {
       form_autofill_neversave_radio_->SetChecked(true);
     }
   }
+  if (!pref_name || *pref_name == prefs::kCurrentThemeID) {
+    themes_reset_button_->SetEnabled(
+        is_using_default_theme_.GetValue().length() > 0);
+  }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 // ContentsPageView, views::View overrides:
 
 void ContentPageView::Layout() {
+#if defined(BROWSER_SYNC)
+  if (is_initialized())
+    UpdateSyncControls();
+#endif
   // We need to Layout twice - once to get the width of the contents box...
   View::Layout();
   passwords_asktosave_radio_->SetBounds(
@@ -183,9 +255,28 @@ void ContentPageView::Layout() {
       0, 0, passwords_group_->GetContentsWidth(), 0);
   browsing_data_label_->SetBounds(
       0, 0, browsing_data_group_->GetContentsWidth(), 0);
+#if defined(BROWSER_SYNC)
+  if (is_initialized()) {
+    sync_status_label_->SetBounds(
+        0, 0, sync_group_->GetContentsWidth(), 0);
+  }
+#endif
   // ... and twice to get the height of multi-line items correct.
   View::Layout();
 }
+
+
+///////////////////////////////////////////////////////////////////////////////
+// ContentsPageView, ProfileSyncServiceObserver implementation:
+#if defined(BROWSER_SYNC)
+void ContentPageView::OnStateChanged() {
+  // If the UI controls are not yet initialized, then don't do anything. This
+  // can happen if the Options dialog is up, but the Content tab is not yet
+  // clicked.
+  if (is_initialized())
+    Layout();
+}
+#endif
 
 ///////////////////////////////////////////////////////////////////////////////
 // ContentPageView, private:
@@ -268,8 +359,9 @@ void ContentPageView::InitFormAutofillGroup() {
 void ContentPageView::InitThemesGroup() {
   themes_reset_button_ = new views::NativeButton(this,
       l10n_util::GetString(IDS_THEMES_RESET_BUTTON));
-  themes_gallery_button_ = new views::NativeButton(this,
+  themes_gallery_link_ = new views::Link(
       l10n_util::GetString(IDS_THEMES_GALLERY_BUTTON));
+  themes_gallery_link_->SetController(this);
 
   using views::GridLayout;
   using views::ColumnSet;
@@ -288,7 +380,7 @@ void ContentPageView::InitThemesGroup() {
 
   layout->StartRow(0, double_column_view_set_id);
   layout->AddView(themes_reset_button_);
-  layout->AddView(themes_gallery_button_);
+  layout->AddView(themes_gallery_link_);
 
   themes_group_ = new OptionsGroupView(
       contents, l10n_util::GetString(IDS_THEMES_GROUP_NAME),
@@ -339,3 +431,75 @@ void ContentPageView::InitBrowsingDataGroup() {
       contents, l10n_util::GetString(IDS_OPTIONS_BROWSING_DATA_GROUP_NAME),
       L"", true);
 }
+
+void ContentPageView::OnConfirmMessageAccept() {
+  sync_service_->DisableForUser();
+  ProfileSyncService::SyncEvent(ProfileSyncService::STOP_FROM_OPTIONS);
+}
+
+#if defined(BROWSER_SYNC)
+void ContentPageView::InitSyncGroup() {
+  sync_status_label_ = new views::Label;
+  sync_status_label_->SetMultiLine(true);
+  sync_status_label_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
+
+  sync_action_link_ = new views::Link();
+  sync_action_link_->set_collapse_when_hidden(true);
+  sync_action_link_->SetController(this);
+
+  sync_start_stop_button_ = new views::NativeButton(this, std::wstring());
+
+  using views::GridLayout;
+  using views::ColumnSet;
+
+  views::View* contents = new views::View;
+  GridLayout* layout = new GridLayout(contents);
+  contents->SetLayoutManager(layout);
+
+  const int single_column_view_set_id = 0;
+  ColumnSet* column_set = layout->AddColumnSet(single_column_view_set_id);
+  column_set->AddColumn(GridLayout::LEADING, GridLayout::CENTER, 1,
+                        GridLayout::USE_PREF, 0, 0);
+  layout->StartRow(0, single_column_view_set_id);
+  layout->AddView(sync_status_label_);
+  layout->StartRow(0, single_column_view_set_id);
+  layout->AddView(sync_action_link_);
+  layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
+  layout->StartRow(0, single_column_view_set_id);
+  layout->AddView(sync_start_stop_button_);
+
+  sync_group_ = new OptionsGroupView(contents,
+      l10n_util::GetString(IDS_SYNC_OPTIONS_GROUP_NAME), std::wstring(), true);
+}
+
+void ContentPageView::UpdateSyncControls() {
+  DCHECK(sync_service_);
+  std::wstring status_label;
+  std::wstring link_label;
+  std::wstring button_label;
+  bool sync_setup_completed = sync_service_->HasSyncSetupCompleted();
+  bool status_has_error = SyncStatusUIHelper::GetLabels(sync_service_,
+      &status_label, &link_label) == SyncStatusUIHelper::SYNC_ERROR;
+  if (sync_setup_completed) {
+    button_label = l10n_util::GetString(IDS_SYNC_STOP_SYNCING_BUTTON_LABEL);
+  } else if (sync_service_->SetupInProgress()) {
+    button_label = l10n_util::GetString(IDS_SYNC_NTP_SETUP_IN_PROGRESS);
+  } else {
+    button_label = l10n_util::GetString(IDS_SYNC_START_SYNC_BUTTON_LABEL);
+  }
+
+  sync_status_label_->SetText(status_label);
+  sync_start_stop_button_->SetEnabled(!sync_service_->WizardIsVisible());
+  sync_start_stop_button_->SetLabel(button_label);
+  sync_action_link_->SetText(link_label);
+  sync_action_link_->SetVisible(!link_label.empty());
+  if (status_has_error) {
+    sync_status_label_->set_background(CreateErrorBackground());
+    sync_action_link_->set_background(CreateErrorBackground());
+  } else {
+    sync_status_label_->set_background(NULL);
+    sync_action_link_->set_background(NULL);
+  }
+}
+
+#endif  // defined(BROWSER_SYNC)

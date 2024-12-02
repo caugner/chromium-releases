@@ -36,6 +36,9 @@
 
 o3djs.provide('o3djs.io');
 
+o3djs.require('o3djs.texture');
+
+
 /**
  * A Module with various io functions and classes.
  * @namespace
@@ -323,12 +326,12 @@ o3djs.io.loadTextFile = function(url, callback) {
  *
  * function callback(archiveInfo, exception) {
  *   if (!exception) {
- *     pack.createTextureFromRawData(
- *         archiveInfo.getFileByURI('logo.jpg'), true);
- *     pack.createTextureFromRawData(
- *         archiveInfo.getFileByURI('wood/oak.png'), true);
- *     pack.createTextureFromRawData(
- *         archiveInfo.getFileByURI('wood/maple.dds'), true);
+ *     o3djs.texture.createTextureFromRawData(
+ *         pack, archiveInfo.getFileByURI('logo.jpg'), true);
+ *     o3djs.texture.createTextureFromRawData(
+ *         pack, archiveInfo.getFileByURI('wood/oak.png'), true);
+ *     o3djs.texture.createTextureFromRawData(
+ *         pack, archiveInfo.getFileByURI('wood/maple.dds'), true);
  *     archiveInfo.destroy();
  *   } else {
  *     alert(exception);
@@ -494,9 +497,7 @@ o3djs.io.loadArchiveAdvanced = function(pack,
   var request = pack.createArchiveRequest();
   var loadInfo = o3djs.io.createLoadInfo(request, true);
   request.open('GET', url);
-  request.onfileavailable = function() {
-    onFileAvailable(/** @type {!o3d.RawData} */ (request.data));
-  };
+  request.onfileavailable = onFileAvailable;
   /**
    * @ignore
    */
@@ -516,6 +517,93 @@ o3djs.io.loadArchiveAdvanced = function(pack,
   };
   request.send();
   return loadInfo;
+};
+
+/**
+ * Loads RawData.
+ *
+ * RawData is loaded asynchronously.
+ *
+ * @param {!o3d.Pack} pack Pack to create the request in.
+ * @param {string} url URL of raw data to load.
+ * @param {!function(!o3d.FileRequest, o3d.RawData, *): void} callback Callback
+ *     when RawData is loaded. It will be passed the FileRequest, a RawData and
+ *     an exception on error or null on success. The RawData is associated with
+ *     the request so it will stay in memory until you free with request with
+ *     pack.removeObject(request).
+ * @return {!o3djs.io.LoadInfo} A LoadInfo to track progress.
+ * @see o3djs.io.loadTexture
+ * @see o3djs.io.loadBitmaps
+ * @see o3djs.loader.createLoader
+ */
+o3djs.io.loadRawData = function(pack, url, callback) {
+  var request = pack.createFileRequest('RAWDATA');
+  var loadInfo = o3djs.io.createLoadInfo(
+      /** @type {!o3d.FileRequest} */ (request),
+      false);
+  request.open('GET', url, true);
+  /**
+   * @ignore
+   */
+  request.onreadystatechange = function() {
+    if (request.done) {
+      var data = request.data;
+      var success = request.success;
+      var exception = request.error;
+      loadInfo.finish();
+      if (!success && !exception) {
+          exception = 'unknown error loading RawData: ' + url;
+      }
+      callback(request, data, success ? null : exception);
+    }
+  };
+  request.send();
+  return loadInfo;
+};
+
+/**
+ * Loads bitmaps.
+ *
+ * Bitmaps are loaded asynchronously.
+ *
+ * Example:
+ * <pre>
+ * var loadInfo = o3djs.io.loadBitamps(pack,
+ *                                     'http://google.com/someimage.jpg',
+ *                                     callback);
+ *
+ * function callback(bitmaps, exception) {
+ *   if (!exception) {
+ *     o3djs.texture.createTextureFromBitmaps(g_pack, bitmaps, true);
+ *   } else {
+ *     alert(exception);
+ *   }
+ * }
+ * </pre>
+ *
+ *
+ * @param {!o3d.Pack} pack Pack to load texture into.
+ * @param {string} url URL of image to load.
+ * @param {!function(!Array.<!o3d.Bitmap>, *): void} callback Callback when
+ *     image is loaded. It will be passed an array of bitmaps and an exception
+ *     on error or null on success.
+ * @param {boolean} opt_generateMips Generate Mips. Default = true.
+ * @return {!o3djs.io.LoadInfo} A LoadInfo to track progress.
+ * @see o3djs.io.loadTexture
+ * @see o3djs.loader.createLoader
+ */
+o3djs.io.loadBitmaps = function(pack, url, callback, opt_generateMips) {
+  if (typeof opt_generateMips === 'undefined') {
+    opt_generateMips = true;
+  }
+  return o3djs.io.loadRawData(pack, url, function(request, rawData, exception) {
+    var bitmaps = [];
+    if (!exception) {
+      bitmaps = pack.createBitmapsFromRawData(rawData);
+      pack.removeObject(request);
+    }
+    callback(bitmaps, exception);
+  });
 };
 
 /**
@@ -544,34 +632,25 @@ o3djs.io.loadArchiveAdvanced = function(pack,
  * @param {!function(o3d.Texture, *): void} callback Callback when
  *     texture is loaded. It will be passed the texture and an exception on
  *     error or null on success.
+ * @param {boolean} opt_generateMips Generate Mips. Default = true.
+ * @param {boolean} opt_flip Flip texture. Default = true.
  * @return {!o3djs.io.LoadInfo} A LoadInfo to track progress.
- * @see o3djs.io.createLoader
+ * @see o3djs.io.loadBitmaps
+ * @see o3djs.loader.createLoader
  */
-o3djs.io.loadTexture = function(pack, url, callback) {
-  // TODO: change this to get use RawData and Bitmap
-  var request = pack.createFileRequest('TEXTURE');
-  var loadInfo = o3djs.io.createLoadInfo(
-      /** @type {!o3d.FileRequest} */ (request),
-      false);
-  request.open('GET', url, true);
-  /**
-   * @ignore
-   */
-  request.onreadystatechange = function() {
-    if (request.done) {
-      var texture = request.texture;
-      var success = request.success;
-      var exception = request.error;
-      loadInfo.finish();
+o3djs.io.loadTexture = function(
+    pack, url, callback, opt_generateMips, opt_flip) {
+  function onLoaded(request, rawData, exception) {
+    var texture = null;
+    if (!exception) {
+      texture = o3djs.texture.createTextureFromRawData(
+          pack, rawData, opt_generateMips, opt_flip);
       pack.removeObject(request);
-      if (!success && !exception) {
-          exception = 'unknown error loading texture';
-      }
-      callback(texture, success ? null : exception);
     }
+    callback(texture, exception);
   };
-  request.send();
-  return loadInfo;
+
+  return o3djs.io.loadRawData(pack, url, onLoaded);
 };
 
 

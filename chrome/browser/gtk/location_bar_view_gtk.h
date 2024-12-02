@@ -8,19 +8,27 @@
 #include <gtk/gtk.h>
 
 #include <string>
+#include <vector>
 
 #include "base/basictypes.h"
 #include "base/scoped_ptr.h"
+#include "base/scoped_vector.h"
 #include "chrome/browser/autocomplete/autocomplete_edit.h"
 #include "chrome/browser/autocomplete/autocomplete_edit_view_gtk.h"
+#include "chrome/browser/extensions/image_loading_tracker.h"
 #include "chrome/browser/location_bar.h"
+#include "chrome/common/notification_observer.h"
+#include "chrome/common/notification_registrar.h"
 #include "chrome/common/owned_widget_gtk.h"
 #include "chrome/common/page_transition_types.h"
 #include "webkit/glue/window_open_disposition.h"
 
 class AutocompleteEditViewGtk;
-class AutocompletePopupPositioner;
+class BubblePositioner;
+class Browser;
 class CommandUpdater;
+class GtkThemeProvider;
+class ExtensionAction;
 class Profile;
 class SkBitmap;
 class TabContents;
@@ -28,14 +36,16 @@ class ToolbarModel;
 
 class LocationBarViewGtk : public AutocompleteEditController,
                            public LocationBar,
-                           public LocationBarTesting {
+                           public LocationBarTesting,
+                           public NotificationObserver {
  public:
   LocationBarViewGtk(CommandUpdater* command_updater,
                      ToolbarModel* toolbar_model,
-                     AutocompletePopupPositioner* popup_positioner);
+                     const BubblePositioner* bubble_positioner,
+                     Browser* browser_);
   virtual ~LocationBarViewGtk();
 
-  void Init();
+  void Init(bool popup_window_mode);
 
   void SetProfile(Profile* profile);
 
@@ -53,6 +63,7 @@ class LocationBarViewGtk : public AutocompleteEditController,
       PageTransition::Type transition,
       const GURL& alternate_nav_url);
   virtual void OnChanged();
+  virtual void OnSetFocus();
   virtual void OnInputInProgress(bool in_progress);
   virtual SkBitmap GetFavIcon() const;
   virtual std::wstring GetTitle() const;
@@ -67,6 +78,7 @@ class LocationBarViewGtk : public AutocompleteEditController,
   virtual void FocusLocation();
   virtual void FocusSearch();
   virtual void UpdatePageActions();
+  virtual void InvalidatePageActions();
   virtual void SaveStateToContents(TabContents* contents);
   virtual void Revert();
   virtual AutocompleteEditView* location_entry() {
@@ -75,19 +87,91 @@ class LocationBarViewGtk : public AutocompleteEditController,
   virtual LocationBarTesting* GetLocationBarForTesting() { return this; }
 
   // Implement the LocationBarTesting interface.
+  virtual int PageActionCount() { return page_action_views_.size(); }
   virtual int PageActionVisibleCount();
+
+  // Implement the NotificationObserver interface.
+  virtual void Observe(NotificationType type,
+                       const NotificationSource& source,
+                       const NotificationDetails& details);
 
   // Translation between a security level and the background color.  Both the
   // location bar and edit have to manage and match the background color.
   static const GdkColor kBackgroundColorByLevel[3];
 
  private:
+  class PageActionViewGtk : public ImageLoadingTracker::Observer {
+   public:
+    PageActionViewGtk(
+        LocationBarViewGtk* owner, Profile* profile,
+        const ExtensionAction* page_action);
+    virtual ~PageActionViewGtk();
+
+    GtkWidget* widget() { return event_box_.get(); }
+
+    // Called to notify the PageAction that it should determine whether to be
+    // visible or hidden. |contents| is the TabContents that is active, |url|
+    // is the current page URL.
+    void UpdateVisibility(TabContents* contents, GURL url);
+
+    // A callback from ImageLoadingTracker for when the image has loaded.
+    virtual void OnImageLoaded(SkBitmap* image, size_t index);
+
+   private:
+    static gboolean OnButtonPressed(GtkWidget* sender, GdkEventButton* event,
+                                    PageActionViewGtk* page_action_view);
+    static gboolean OnExposeEvent(GtkWidget* widget,
+                                  GdkEventExpose* event,
+                                  PageActionViewGtk* page_action_view);
+
+    // The location bar view that owns us.
+    LocationBarViewGtk* owner_;
+
+    // The current profile (not owned by us).
+    Profile* profile_;
+
+    // The PageAction that this view represents. The PageAction is not owned by
+    // us, it resides in the extension of this particular profile.
+    const ExtensionAction* page_action_;
+
+    // The icons representing different states for the page action.
+    std::vector<GdkPixbuf*> pixbufs_;
+
+    // A cache of the last dynamically generated bitmap and the pixbuf that
+    // corresponds to it. We keep track of both so we can free old pixbufs as
+    // their icons are replaced.
+    SkBitmap* last_icon_skbitmap_;
+    GdkPixbuf* last_icon_pixbuf_;
+
+    // The object that is waiting for the image loading to complete
+    // asynchronously.  It will delete itself once it is done.
+    ImageLoadingTracker* tracker_;
+
+    // The widgets for this page action.
+    OwnedWidgetGtk event_box_;
+    OwnedWidgetGtk image_;
+
+    // The tab id we are currently showing the icon for.
+    int current_tab_id_;
+
+    // The URL we are currently showing the icon for.
+    GURL current_url_;
+
+    DISALLOW_COPY_AND_ASSIGN(PageActionViewGtk);
+  };
+  friend class PageActionViewGtk;
+
   static gboolean HandleExposeThunk(GtkWidget* widget, GdkEventExpose* event,
                                     gpointer userdata) {
     return reinterpret_cast<LocationBarViewGtk*>(userdata)->
         HandleExpose(widget, event);
   }
+
   gboolean HandleExpose(GtkWidget* widget, GdkEventExpose* event);
+
+  static gboolean OnSecurityIconPressed(GtkWidget* sender,
+                                        GdkEventButton* event,
+                                        LocationBarViewGtk* location_bar);
 
   // Set the SSL icon we should be showing.
   void SetSecurityIcon(ToolbarModel::Icon icon);
@@ -99,6 +183,7 @@ class LocationBarViewGtk : public AutocompleteEditController,
 
   // Set the keyword text for the Search BLAH: keyword box.
   void SetKeywordLabel(const std::wstring& keyword);
+
   // Set the keyword text for the "Press tab to search BLAH" hint box.
   void SetKeywordHintLabel(const std::wstring& keyword);
 
@@ -108,16 +193,21 @@ class LocationBarViewGtk : public AutocompleteEditController,
   OwnedWidgetGtk hbox_;
 
   // SSL icons.
-  GtkWidget* security_icon_align_;
+  GtkWidget* security_icon_event_box_;
   GtkWidget* security_lock_icon_image_;
   GtkWidget* security_warning_icon_image_;
   // Toolbar info text (EV cert info).
-  GtkWidget* info_label_align_;
   GtkWidget* info_label_;
 
-  // Tab to search widgets.
-  GtkWidget* tab_to_search_;
+  // Extension page action icons.
+  GtkWidget* page_action_hbox_;
+  ScopedVector<PageActionViewGtk> page_action_views_;
+
+  // Area on the left shown when in tab to search mode.
+  GtkWidget* tab_to_search_box_;
   GtkWidget* tab_to_search_label_;
+
+  // Hint to user that they can tab-to-search by hitting tab.
   GtkWidget* tab_to_search_hint_;
   GtkWidget* tab_to_search_hint_leading_label_;
   GtkWidget* tab_to_search_hint_icon_;
@@ -128,9 +218,10 @@ class LocationBarViewGtk : public AutocompleteEditController,
   Profile* profile_;
   CommandUpdater* command_updater_;
   ToolbarModel* toolbar_model_;
+  Browser* browser_;
 
   // We need to hold on to this just to it pass to the edit.
-  AutocompletePopupPositioner* popup_positioner_;
+  const BubblePositioner* bubble_positioner_;
 
   // When we get an OnAutocompleteAccept notification from the autocomplete
   // edit, we save the input string so we can give it back to the browser on
@@ -145,6 +236,15 @@ class LocationBarViewGtk : public AutocompleteEditController,
 
   // Used schedule a task for the first run info bubble.
   ScopedRunnableMethodFactory<LocationBarViewGtk> first_run_bubble_;
+
+  // When true, the location bar view is read only and also is has a slightly
+  // different presentation (font size / color). This is used for popups.
+  bool popup_window_mode_;
+
+  // Provides colors and rendering mode.
+  GtkThemeProvider* theme_provider_;
+
+  NotificationRegistrar registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(LocationBarViewGtk);
 };

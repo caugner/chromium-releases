@@ -4,7 +4,6 @@
 
 #include "testing/gtest/include/gtest/gtest.h"
 
-#include <atlbase.h>
 #include <windows.h>
 #include <unknwn.h>
 #include <intshcut.h>
@@ -17,9 +16,11 @@
 #include "base/file_util.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
+#include "base/scoped_comptr_win.h"
 #include "base/stl_util-inl.h"
 #include "chrome/browser/importer/ie_importer.h"
 #include "chrome/browser/importer/importer.h"
+#include "chrome/browser/importer/importer_bridge.h"
 #include "chrome/browser/password_manager/ie7_password.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/search_engines/template_url.h"
@@ -48,7 +49,50 @@ class ImporterTest : public testing::Test {
   virtual void TearDown() {
     // Deletes the profile and cleans up the profile directory.
     ASSERT_TRUE(file_util::Delete(test_path_, true));
-    ASSERT_FALSE(file_util::PathExists(test_path_));
+    ASSERT_FALSE(file_util::PathExists(FilePath::FromWStringHack(test_path_)));
+  }
+
+  void Firefox3xImporterTest(std::wstring profile_dir,
+                             ImporterHost::Observer* observer,
+                             ProfileWriter* writer,
+                             bool import_search_plugins) {
+    std::wstring data_path;
+    ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &data_path));
+    file_util::AppendToPath(&data_path, profile_dir + L"\\*");
+    ASSERT_TRUE(file_util::CopyDirectory(data_path, profile_path_, true));
+    ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &data_path));
+    file_util::AppendToPath(&data_path, L"firefox3_nss");
+    ASSERT_TRUE(file_util::CopyDirectory(data_path, profile_path_, false));
+
+    std::wstring search_engine_path = app_path_;
+    file_util::AppendToPath(&search_engine_path, L"searchplugins");
+    CreateDirectory(search_engine_path.c_str(), NULL);
+    if (import_search_plugins) {
+      ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &data_path));
+      file_util::AppendToPath(&data_path, L"firefox3_searchplugins");
+      if (!file_util::PathExists(FilePath::FromWStringHack(data_path))) {
+        // TODO(maruel):  Create search test data that we can open source!
+        LOG(ERROR) << L"Missing internal test data";
+        return;
+      }
+      ASSERT_TRUE(file_util::CopyDirectory(data_path,
+                                           search_engine_path, false));
+    }
+
+    MessageLoop* loop = MessageLoop::current();
+    ProfileInfo profile_info;
+    profile_info.browser_type = FIREFOX3;
+    profile_info.app_path = app_path_;
+    profile_info.source_path = profile_path_;
+    scoped_refptr<ImporterHost> host = new ImporterHost(loop);
+    host->SetObserver(observer);
+    int items = HISTORY | PASSWORDS | FAVORITES;
+    if (import_search_plugins)
+      items = items | SEARCH_ENGINES;
+    loop->PostTask(FROM_HERE, NewRunnableMethod(host.get(),
+        &ImporterHost::StartImportSettings, profile_info,
+        static_cast<Profile*>(NULL), items, writer, true));
+    loop->Run();
   }
 
   MessageLoopForUI message_loop_;
@@ -214,14 +258,13 @@ class TestObserver : public ProfileWriter,
 };
 
 bool CreateUrlFile(std::wstring file, std::wstring url) {
-  CComPtr<IUniformResourceLocator> locator;
-  HRESULT result = locator.CoCreateInstance(CLSID_InternetShortcut, NULL,
-                                            CLSCTX_INPROC_SERVER);
+  ScopedComPtr<IUniformResourceLocator> locator;
+  HRESULT result = locator.CreateInstance(CLSID_InternetShortcut, NULL,
+                                          CLSCTX_INPROC_SERVER);
   if (FAILED(result))
     return false;
-  CComPtr<IPersistFile> persist_file;
-  result = locator->QueryInterface(IID_IPersistFile,
-                                   reinterpret_cast<void**>(&persist_file));
+  ScopedComPtr<IPersistFile> persist_file;
+  result = persist_file.QueryFrom(locator);
   if (FAILED(result))
     return false;
   result = locator->SetURL(url.c_str(), 0);
@@ -234,8 +277,8 @@ bool CreateUrlFile(std::wstring file, std::wstring url) {
 }
 
 void ClearPStoreType(IPStore* pstore, const GUID* type, const GUID* subtype) {
-  CComPtr<IEnumPStoreItems> item;
-  HRESULT result = pstore->EnumItems(0, type, subtype, 0, &item);
+  ScopedComPtr<IEnumPStoreItems, NULL> item;
+  HRESULT result = pstore->EnumItems(0, type, subtype, 0, item.Receive());
   if (result == PST_E_OK) {
     wchar_t* item_name;
     while (SUCCEEDED(item->Next(1, &item_name, 0))) {
@@ -303,7 +346,7 @@ TEST_F(ImporterTest, IEImporter) {
   // Sets up dummy password data.
   HRESULT res;
   #if 0  // This part of the test is disabled. See bug #2466
-  CComPtr<IPStore> pstore;
+  ScopedComPtr<IPStore> pstore;
   HMODULE pstorec_dll;
   GUID type = IEImporter::kUnittestGUID;
   GUID subtype = IEImporter::kUnittestGUID;
@@ -313,7 +356,7 @@ TEST_F(ImporterTest, IEImporter) {
     pstorec_dll = LoadLibrary(L"pstorec.dll");
     PStoreCreateFunc PStoreCreateInstance =
         (PStoreCreateFunc)GetProcAddress(pstorec_dll, "PStoreCreateInstance");
-    res = PStoreCreateInstance(&pstore, 0, 0, 0);
+    res = PStoreCreateInstance(pstore.Receive(), 0, 0, 0);
     ASSERT_TRUE(res == S_OK);
     ClearPStoreType(pstore, &type, &subtype);
     PST_TYPEINFO type_info;
@@ -326,9 +369,9 @@ TEST_F(ImporterTest, IEImporter) {
 #endif
 
   // Sets up a special history link.
-  CComPtr<IUrlHistoryStg2> url_history_stg2;
-  res = url_history_stg2.CoCreateInstance(CLSID_CUrlHistory, NULL,
-                                          CLSCTX_INPROC_SERVER);
+  ScopedComPtr<IUrlHistoryStg2> url_history_stg2;
+  res = url_history_stg2.CreateInstance(CLSID_CUrlHistory, NULL,
+                                        CLSCTX_INPROC_SERVER);
   ASSERT_TRUE(res == S_OK);
   res = url_history_stg2->AddUrl(kIEIdentifyUrl, kIEIdentifyTitle, 0);
   ASSERT_TRUE(res == S_OK);
@@ -603,7 +646,7 @@ TEST_F(ImporterTest, Firefox2Importer) {
   CreateDirectory(search_engine_path.c_str(), NULL);
   ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &data_path));
   file_util::AppendToPath(&data_path, L"firefox2_searchplugins");
-  if (!file_util::PathExists(data_path)) {
+  if (!file_util::PathExists(FilePath::FromWStringHack(data_path))) {
     // TODO(maruel):  Create test data that we can open source!
     LOG(ERROR) << L"Missing internal test data";
     return;
@@ -675,11 +718,18 @@ static const int kDefaultFirefox3KeywordIndex = 8;
 class Firefox3Observer : public ProfileWriter,
                          public ImporterHost::Observer {
  public:
-  Firefox3Observer() : ProfileWriter(NULL) {
-    bookmark_count_ = 0;
-    history_count_ = 0;
-    password_count_ = 0;
-    keyword_count_ = 0;
+  Firefox3Observer()
+      : ProfileWriter(NULL), bookmark_count_(0), history_count_(0),
+        password_count_(0), keyword_count_(0), import_search_engines_(true) {
+  }
+
+  Firefox3Observer(bool import_search_engines)
+      : ProfileWriter(NULL), bookmark_count_(0), history_count_(0),
+        password_count_(0), keyword_count_(0),
+        import_search_engines_(import_search_engines) {
+  }
+
+  ~Firefox3Observer(){
   }
 
   virtual void ImportItemStarted(ImportItem item) {}
@@ -690,11 +740,13 @@ class Firefox3Observer : public ProfileWriter,
     EXPECT_EQ(arraysize(kFirefox3Bookmarks), bookmark_count_);
     EXPECT_EQ(1, history_count_);
     EXPECT_EQ(arraysize(kFirefox3Passwords), password_count_);
-    EXPECT_EQ(arraysize(kFirefox3Keywords), keyword_count_);
-    EXPECT_EQ(kFirefox3Keywords[kDefaultFirefox3KeywordIndex].keyword,
-              default_keyword_);
-    EXPECT_EQ(kFirefox3Keywords[kDefaultFirefox3KeywordIndex].url,
-              default_keyword_url_);
+    if (import_search_engines_) {
+      EXPECT_EQ(arraysize(kFirefox3Keywords), keyword_count_);
+      EXPECT_EQ(kFirefox3Keywords[kDefaultFirefox3KeywordIndex].keyword,
+                default_keyword_);
+      EXPECT_EQ(kFirefox3Keywords[kDefaultFirefox3KeywordIndex].url,
+                default_keyword_url_);
+    }
   }
 
   virtual bool BookmarkModelIsLoaded() const {
@@ -780,42 +832,21 @@ class Firefox3Observer : public ProfileWriter,
   int history_count_;
   int password_count_;
   int keyword_count_;
+  bool import_search_engines_;
   std::wstring default_keyword_;
   std::wstring default_keyword_url_;
 };
 
-TEST_F(ImporterTest, Firefox3Importer) {
-  std::wstring data_path;
-  ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &data_path));
-  file_util::AppendToPath(&data_path, L"firefox3_profile\\*");
-  ASSERT_TRUE(file_util::CopyDirectory(data_path, profile_path_, true));
-  ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &data_path));
-  file_util::AppendToPath(&data_path, L"firefox3_nss");
-  ASSERT_TRUE(file_util::CopyDirectory(data_path, profile_path_, false));
+TEST_F(ImporterTest, Firefox30Importer) {
+  scoped_refptr<Firefox3Observer> observer = new Firefox3Observer();
+  Firefox3xImporterTest(L"firefox3_profile", observer.get(), observer.get(),
+                        true);
+}
 
-  std::wstring search_engine_path = app_path_;
-  file_util::AppendToPath(&search_engine_path, L"searchplugins");
-  CreateDirectory(search_engine_path.c_str(), NULL);
-  ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &data_path));
-  file_util::AppendToPath(&data_path, L"firefox3_searchplugins");
-  if (!file_util::PathExists(data_path)) {
-    // TODO(maruel):  Create test data that we can open source!
-    LOG(ERROR) << L"Missing internal test data";
-    return;
-  }
-  ASSERT_TRUE(file_util::CopyDirectory(data_path, search_engine_path, false));
-
-  MessageLoop* loop = MessageLoop::current();
-  ProfileInfo profile_info;
-  profile_info.browser_type = FIREFOX3;
-  profile_info.app_path = app_path_;
-  profile_info.source_path = profile_path_;
-  scoped_refptr<ImporterHost> host = new ImporterHost(loop);
-  Firefox3Observer* observer = new Firefox3Observer();
-  host->SetObserver(observer);
-  loop->PostTask(FROM_HERE, NewRunnableMethod(host.get(),
-      &ImporterHost::StartImportSettings, profile_info,
-      static_cast<Profile*>(NULL),
-      HISTORY | PASSWORDS | FAVORITES | SEARCH_ENGINES, observer, true));
-  loop->Run();
+TEST_F(ImporterTest, Firefox35Importer) {
+  bool import_search_engines = false;
+  scoped_refptr<Firefox3Observer> observer =
+      new Firefox3Observer(import_search_engines);
+  Firefox3xImporterTest(L"firefox35_profile", observer.get(), observer.get(),
+                        import_search_engines);
 }

@@ -41,12 +41,16 @@ class MockHostResolverBase : public HostResolver {
   virtual ~MockHostResolverBase() {}
 
   // HostResolver methods:
-  virtual int Resolve(const RequestInfo& info, AddressList* addresses,
-                      CompletionCallback* callback, RequestHandle* out_req);
+  virtual int Resolve(const RequestInfo& info,
+                      AddressList* addresses,
+                      CompletionCallback* callback,
+                      RequestHandle* out_req,
+                      LoadLog* load_log);
   virtual void CancelRequest(RequestHandle req);
   virtual void AddObserver(Observer* observer);
   virtual void RemoveObserver(Observer* observer);
-  // TODO(eroman): temp hack for http://crbug.com/15513
+  virtual HostCache* GetHostCache();
+  // TODO(eroman): temp hack for http://crbug.com/18373
   virtual void Shutdown();
 
   RuleBasedHostResolverProc* rules() { return rules_; }

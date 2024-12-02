@@ -13,7 +13,8 @@
 #include "chrome/browser/tab_contents/security_style.h"
 #include "chrome/common/common_param_traits.h"
 #include "chrome/test/automation/automation_constants.h"
-#include "ipc/ipc_message_utils.h"
+#include "net/base/upload_data.h"
+
 
 struct AutomationMsg_Find_Params {
   // Unused value, which exists only for backwards compat.
@@ -230,6 +231,7 @@ struct AutomationURLRequest {
   std::string method;
   std::string referrer;
   std::string extra_request_headers;
+  scoped_refptr<net::UploadData> upload_data;
 };
 
 // Traits for AutomationURLRequest structure to pack/unpack.
@@ -241,12 +243,14 @@ struct ParamTraits<AutomationURLRequest> {
     WriteParam(m, p.method);
     WriteParam(m, p.referrer);
     WriteParam(m, p.extra_request_headers);
+    WriteParam(m, p.upload_data);
   }
   static bool Read(const Message* m, void** iter, param_type* p) {
     return ReadParam(m, iter, &p->url) &&
            ReadParam(m, iter, &p->method) &&
            ReadParam(m, iter, &p->referrer) &&
-           ReadParam(m, iter, &p->extra_request_headers);
+           ReadParam(m, iter, &p->extra_request_headers) &&
+           ReadParam(m, iter, &p->upload_data);
   }
   static void Log(const param_type& p, std::wstring* l) {
     l->append(L"(");
@@ -257,6 +261,8 @@ struct ParamTraits<AutomationURLRequest> {
     LogParam(p.referrer, l);
     l->append(L", ");
     LogParam(p.extra_request_headers, l);
+    l->append(L", ");
+    LogParam(p.upload_data, l);
     l->append(L")");
   }
 };
@@ -266,9 +272,12 @@ struct AutomationURLResponse {
   std::string headers;
   int64 content_length;
   base::Time last_modified;
+  std::string persistent_cookies;
+  std::string redirect_url;
+  int redirect_status;
 };
 
-// Traits for AutomationURLRequest structure to pack/unpack.
+// Traits for AutomationURLResponse structure to pack/unpack.
 template <>
 struct ParamTraits<AutomationURLResponse> {
   typedef AutomationURLResponse param_type;
@@ -277,12 +286,18 @@ struct ParamTraits<AutomationURLResponse> {
     WriteParam(m, p.headers);
     WriteParam(m, p.content_length);
     WriteParam(m, p.last_modified);
+    WriteParam(m, p.persistent_cookies);
+    WriteParam(m, p.redirect_url);
+    WriteParam(m, p.redirect_status);
   }
   static bool Read(const Message* m, void** iter, param_type* p) {
     return ReadParam(m, iter, &p->mime_type) &&
            ReadParam(m, iter, &p->headers) &&
            ReadParam(m, iter, &p->content_length) &&
-           ReadParam(m, iter, &p->last_modified);
+           ReadParam(m, iter, &p->last_modified) &&
+           ReadParam(m, iter, &p->persistent_cookies) &&
+           ReadParam(m, iter, &p->redirect_url) &&
+           ReadParam(m, iter, &p->redirect_status);
   }
   static void Log(const param_type& p, std::wstring* l) {
     l->append(L"(");
@@ -293,6 +308,12 @@ struct ParamTraits<AutomationURLResponse> {
     LogParam(p.content_length, l);
     l->append(L", ");
     LogParam(p.last_modified, l);
+    l->append(L", ");
+    LogParam(p.persistent_cookies, l);
+    l->append(L", ");
+    LogParam(p.redirect_url, l);
+    l->append(L", ");
+    LogParam(p.redirect_status, l);
     l->append(L")");
   }
 };
@@ -303,6 +324,8 @@ struct ExternalTabSettings {
   unsigned int style;
   bool is_off_the_record;
   bool load_requests_via_automation;
+  bool handle_top_level_requests;
+  GURL initial_url;
 };
 
 // Traits for ExternalTabSettings structure to pack/unpack.
@@ -315,13 +338,17 @@ struct ParamTraits<ExternalTabSettings> {
     WriteParam(m, p.style);
     WriteParam(m, p.is_off_the_record);
     WriteParam(m, p.load_requests_via_automation);
+    WriteParam(m, p.handle_top_level_requests);
+    WriteParam(m, p.initial_url);
   }
   static bool Read(const Message* m, void** iter, param_type* p) {
     return ReadParam(m, iter, &p->parent) &&
            ReadParam(m, iter, &p->dimensions) &&
            ReadParam(m, iter, &p->style) &&
            ReadParam(m, iter, &p->is_off_the_record) &&
-           ReadParam(m, iter, &p->load_requests_via_automation);
+           ReadParam(m, iter, &p->load_requests_via_automation) &&
+           ReadParam(m, iter, &p->handle_top_level_requests) &&
+           ReadParam(m, iter, &p->initial_url);
   }
   static void Log(const param_type& p, std::wstring* l) {
     l->append(L"(");
@@ -334,6 +361,61 @@ struct ParamTraits<ExternalTabSettings> {
     LogParam(p.is_off_the_record, l);
     l->append(L", ");
     LogParam(p.load_requests_via_automation, l);
+    l->append(L", ");
+    LogParam(p.handle_top_level_requests, l);
+    l->append(L", ");
+    LogParam(p.initial_url, l);
+    l->append(L")");
+  }
+};
+
+struct NavigationInfo {
+  int navigation_type;
+  int relative_offset;
+  int navigation_index;
+  std::wstring title;
+  GURL url;
+  SecurityStyle security_style;
+  bool has_mixed_content;
+};
+
+// Traits for NavigationInfo structure to pack/unpack.
+template <>
+struct ParamTraits<NavigationInfo> {
+  typedef NavigationInfo param_type;
+  static void Write(Message* m, const param_type& p) {
+    WriteParam(m, p.navigation_type);
+    WriteParam(m, p.relative_offset);
+    WriteParam(m, p.navigation_index);
+    WriteParam(m, p.title);
+    WriteParam(m, p.url);
+    WriteParam(m, p.security_style);
+    WriteParam(m, p.has_mixed_content);
+  }
+  static bool Read(const Message* m, void** iter, param_type* p) {
+    return ReadParam(m, iter, &p->navigation_type) &&
+           ReadParam(m, iter, &p->relative_offset) &&
+           ReadParam(m, iter, &p->navigation_index) &&
+           ReadParam(m, iter, &p->title) &&
+           ReadParam(m, iter, &p->url) &&
+           ReadParam(m, iter, &p->security_style) &&
+           ReadParam(m, iter, &p->has_mixed_content);
+  }
+  static void Log(const param_type& p, std::wstring* l) {
+    l->append(L"(");
+    LogParam(p.navigation_type, l);
+    l->append(L", ");
+    LogParam(p.relative_offset, l);
+    l->append(L", ");
+    LogParam(p.navigation_index, l);
+    l->append(L", ");
+    LogParam(p.title, l);
+    l->append(L", ");
+    LogParam(p.url, l);
+    l->append(L", ");
+    LogParam(p.security_style, l);
+    l->append(L", ");
+    LogParam(p.has_mixed_content, l);
     l->append(L")");
   }
 };

@@ -11,12 +11,14 @@
 #include <windows.h>
 #endif
 
+#include "app/gfx/native_widget_types.h"
 #include "base/basictypes.h"
 #include "base/file_path.h"
-#include "base/gfx/native_widget_types.h"
 #include "base/logging.h"
 #include "base/non_thread_safe.h"
 #include "base/ref_counted.h"
+
+class CommandLine;
 
 // ProcessSingleton ----------------------------------------------------------
 //
@@ -31,9 +33,16 @@
 
 class ProcessSingleton : public NonThreadSafe {
  public:
+  enum NotifyResult {
+    PROCESS_NONE,
+    PROCESS_NOTIFIED,
+    PROFILE_IN_USE,
+  };
+
   explicit ProcessSingleton(const FilePath& user_data_dir);
   ~ProcessSingleton();
 
+  // Notify another process, if available.
   // Returns true if another process was found and notified, false if we
   // should continue with this process.
   // Windows code roughly based on Mozilla.
@@ -41,10 +50,20 @@ class ProcessSingleton : public NonThreadSafe {
   // TODO(brettw): this will not handle all cases. If two process start up too
   // close to each other, the Create() might not yet have happened for the
   // first one, so this function won't find it.
-  bool NotifyOtherProcess();
+  NotifyResult NotifyOtherProcess();
+
+#if defined(OS_LINUX)
+  // Exposed for testing.  We use a timeout on Linux, and in tests we want
+  // this timeout to be short.
+  NotifyResult NotifyOtherProcessWithTimeout(const CommandLine& command_line,
+                                             int timeout_seconds);
+#endif
 
   // Sets ourself up as the singleton instance.
   void Create();
+
+  // Clear any lock state during shutdown.
+  void Cleanup();
 
   // Blocks the dispatch of CopyData messages. foreground_window refers
   // to the window that should be set to the foreground if a CopyData message
@@ -68,6 +87,12 @@ class ProcessSingleton : public NonThreadSafe {
   }
 
  private:
+#if defined(OS_WIN) || defined(OS_LINUX)
+  // Timeout for the current browser process to respond. 20 seconds should be
+  // enough. It's only used in Windows and Linux implementations.
+  static const int kTimeoutInSeconds = 20;
+#endif
+
   bool locked_;
   gfx::NativeWindow foreground_window_;
 
@@ -92,11 +117,11 @@ class ProcessSingleton : public NonThreadSafe {
   HWND remote_window_;  // The HWND_MESSAGE of another browser.
   HWND window_;  // The HWND_MESSAGE window.
 #elif defined(OS_LINUX)
-  // Set up a socket and sockaddr appropriate for messaging.
-  void SetupSocket(int* sock, struct sockaddr_un* addr);
-
   // Path in file system to the socket.
   FilePath socket_path_;
+
+  // Path in file system to the lock.
+  FilePath lock_path_;
 
   // Helper class for linux specific messages.  LinuxWatcher is ref counted
   // because it posts messages between threads.

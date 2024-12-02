@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_BROWSER_COCOA_COCOA_TEST_HELPER
-#define CHROME_BROWSER_COCOA_COCOA_TEST_HELPER
+#ifndef CHROME_BROWSER_COCOA_COCOA_TEST_HELPER_H_
+#define CHROME_BROWSER_COCOA_COCOA_TEST_HELPER_H_
 
 #import <Cocoa/Cocoa.h>
 
@@ -12,7 +12,29 @@
 #include "base/mac_util.h"
 #include "base/path_service.h"
 #import "base/scoped_nsobject.h"
-#include "chrome/common/mac_app_names.h"
+#include "chrome/common/chrome_constants.h"
+
+// Background windows normally will not display things such as focus
+// rings.  This class allows -isKeyWindow to be manipulated to test
+// such things.
+
+@interface CocoaTestHelperWindow : NSWindow {
+ @private
+  BOOL pretendIsKeyWindow_;
+}
+
+// Init a borderless non-deferred window with a backing store.
+- (id)initWithContentRect:(NSRect)contentRect;
+
+// Init with a default frame.
+- (id)init;
+
+// Set value to return for -isKeyWindow.
+- (void)setPretendIsKeyWindow:(BOOL)isKeyWindow;
+
+- (BOOL)isKeyWindow;
+
+@end
 
 // A class that initializes Cocoa and sets up resources for many of our
 // Cocoa controller unit tests. It does several key things:
@@ -22,44 +44,62 @@
 //     as the bundle. If you do not specify a bundle, your test will likely
 //     fail.
 // It currently does not create an autorelease pool, though that can easily be
-// added. If your test wants one, it can derrive from PlatformTest instead of
+// added. If your test wants one, it can derive from PlatformTest instead of
 // testing::Test.
 
-class CocoaTestHelper {
+// Provides the Cocoa goodness without the extraneous window.
+// TODO(shess): It might make more sense to have CocoaTest as a
+// PlatformTest subclass which adds the Cocoa magic, then
+// CocoaViewTest as a further subclass which provides a convenience
+// window.
+class CocoaNoWindowTestHelper {
  public:
-  CocoaTestHelper() {
-    // Look in the Chromium app bundle for resources.
+  CocoaNoWindowTestHelper() {
+    // Look in the framework bundle for resources.
     FilePath path;
     PathService::Get(base::DIR_EXE, &path);
-    path = path.AppendASCII(MAC_BROWSER_APP_NAME);
+    path = path.Append(chrome::kFrameworkName);
     mac_util::SetOverrideAppBundlePath(path);
 
     // Bootstrap Cocoa. It's very unhappy without this.
     [NSApplication sharedApplication];
 
-    // Create a window.
-    NSRect frame = NSMakeRect(0, 0, 800, 600);
-    window_.reset([[NSWindow alloc] initWithContentRect:frame
-                                              styleMask:0
-                                                backing:NSBackingStoreBuffered
-                                                  defer:NO]);
+    // Set the duration of AppKit-evaluated animations (such as frame changes)
+    // to zero for testing purposes. That way they take effect immediately.
+    [[NSAnimationContext currentContext] setDuration:0.0];
+  }
+};
+
+class CocoaTestHelper : public CocoaNoWindowTestHelper {
+ public:
+  CocoaTestHelper() {
+    window_.reset([[CocoaTestHelperWindow alloc] init]);
     if (DebugUtil::BeingDebugged()) {
       [window_ orderFront:nil];
     } else {
       [window_ orderBack:nil];
     }
-
-    // Set the duration of AppKit-evaluated animations (such as frame changes)
-    // to zero for testing purposes. That way they take effect immediately.
-    [[NSAnimationContext currentContext] setDuration:0.0];
   }
 
   // Access the Cocoa window created for the test.
   NSWindow* window() const { return window_.get(); }
   NSView* contentView() const { return [window_ contentView]; }
 
+  // Set |window_| to pretend to be key and make |aView| its
+  // firstResponder.
+  void makeFirstResponder(NSView* aView) {
+    [window_ setPretendIsKeyWindow:YES];
+    [window_ makeFirstResponder:aView];
+  }
+
+  // Clear |window_| firstResponder and stop pretending to be key.
+  void clearFirstResponder() {
+    [window_ makeFirstResponder:nil];
+    [window_ setPretendIsKeyWindow:NO];
+  }
+
  private:
-  scoped_nsobject<NSWindow> window_;
+  scoped_nsobject<CocoaTestHelperWindow> window_;
 };
 
-#endif  // CHROME_BROWSER_COCOA_COCOA_TEST_HELPER
+#endif  // CHROME_BROWSER_COCOA_COCOA_TEST_HELPER_H_

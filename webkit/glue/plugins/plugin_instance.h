@@ -12,17 +12,20 @@
 #include <vector>
 #include <stack>
 
+#include "app/gfx/native_widget_types.h"
 #include "base/basictypes.h"
 #include "base/file_path.h"
-#include "base/gfx/native_widget_types.h"
 #include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
 #include "webkit/glue/plugins/nphostapi.h"
 #include "googleurl/src/gurl.h"
 #include "third_party/npapi/bindings/npapi.h"
 
-class WebPlugin;
 class MessageLoop;
+
+namespace webkit_glue {
+class WebPlugin;
+}
 
 namespace NPAPI
 {
@@ -31,7 +34,6 @@ class PluginHost;
 class PluginStream;
 class PluginStreamUrl;
 class PluginDataStream;
-class MozillaExtensionApi;
 
 // A PluginInstance is an active, running instance of a Plugin.
 // A single plugin may have many PluginInstances.
@@ -88,20 +90,22 @@ class PluginInstance : public base::RefCountedThreadSafe<PluginInstance> {
   void set_transparent(bool value) { transparent_ = value; }
 
   // Get/Set the WebPlugin associated with this instance
-  WebPlugin* webplugin() { return webplugin_; }
-  void set_web_plugin(WebPlugin* webplugin) { webplugin_ = webplugin; }
+  webkit_glue::WebPlugin* webplugin() { return webplugin_; }
+  void set_web_plugin(webkit_glue::WebPlugin* webplugin) {
+    webplugin_ = webplugin;
+  }
 
   // Get the mimeType for this plugin stream
   const std::string &mime_type() { return mime_type_; }
 
   NPAPI::PluginLib* plugin_lib() { return plugin_; }
 
-#if defined(OS_WIN)
-  // Handles a windows native message which this PluginInstance should deal
-  // with.  Returns true if the event is handled, false otherwise.
-  bool HandleEvent(UINT message, WPARAM wParam, LPARAM lParam);
-#elif defined(OS_LINUX)
-  bool HandleEvent(union _XEvent* event);
+#if defined(OS_MACOSX)
+  // Get/Set the Mac NPAPI drawing and event models
+  int drawing_model() { return drawing_model_; }
+  void set_drawing_model(int value) { drawing_model_ = value; }
+  int event_model() { return event_model_; }
+  void set_event_model(int value) { event_model_ = value; }
 #endif
 
   // Creates a stream for sending an URL.  If notify_needed
@@ -110,11 +114,11 @@ class PluginInstance : public base::RefCountedThreadSafe<PluginInstance> {
   // Set object_url to true if the load is for the object tag's
   // url, or false if it's for a url that the plugin
   // fetched through NPN_GetUrl[Notify].
-  PluginStreamUrl *CreateStream(int resource_id,
-                                const std::string &url,
-                                const std::string &mime_type,
+  PluginStreamUrl* CreateStream(int resource_id,
+                                const GURL& url,
+                                const std::string& mime_type,
                                 bool notify_needed,
-                                void *notify_data);
+                                void* notify_data);
 
   // For each instance, we track all streams.  When the
   // instance closes, all remaining streams are also
@@ -135,11 +139,8 @@ class PluginInstance : public base::RefCountedThreadSafe<PluginInstance> {
 
   // WebViewDelegate methods that we implement. This is for handling
   // callbacks during getURLNotify.
-  virtual void DidFinishLoadWithReason(NPReason reason);
-
-  // Helper method to set some persistent data for getURLNotify since
-  // resource fetches happen async.
-  void SetURLLoadData(const GURL& url, intptr_t notify_data);
+  virtual void DidFinishLoadWithReason(const GURL& url, NPReason reason,
+                                       void* notify_data);
 
   // If true, send the Mozilla user agent instead of Chrome's to the plugin.
   bool use_mozilla_user_agent() { return use_mozilla_user_agent_; }
@@ -162,15 +163,15 @@ class PluginInstance : public base::RefCountedThreadSafe<PluginInstance> {
   void NPP_URLNotify(const char *, NPReason, void *);
   NPError NPP_GetValue(NPPVariable, void *);
   NPError NPP_SetValue(NPNVariable, void *);
-  short NPP_HandleEvent(NPEvent *);
+  short NPP_HandleEvent(void*);
   void NPP_Destroy();
   bool NPP_Print(NPPrint* platform_print);
 
-  void SendJavaScriptStream(const std::string& url, const std::wstring& result,
+  void SendJavaScriptStream(const GURL& url, const std::string& result,
                             bool success, bool notify_needed,
                             intptr_t notify_data);
 
-  void DidReceiveManualResponse(const std::string& url,
+  void DidReceiveManualResponse(const GURL& url,
                                 const std::string& mime_type,
                                 const std::string& headers,
                                 uint32 expected_length,
@@ -178,11 +179,6 @@ class PluginInstance : public base::RefCountedThreadSafe<PluginInstance> {
   void DidReceiveManualData(const char* buffer, int length);
   void DidFinishManualLoading();
   void DidManualLoadFail();
-
-  NPError GetServiceManager(void** service_manager);
-
-  static PluginInstance* SetInitializingInstance(PluginInstance* instance);
-  static PluginInstance* GetInitializingInstance();
 
   void PushPopupsEnabledState(bool enabled);
   void PopPopupsEnabledState();
@@ -228,17 +224,17 @@ class PluginInstance : public base::RefCountedThreadSafe<PluginInstance> {
   gfx::PluginWindowHandle                  window_handle_;
   bool                                     windowless_;
   bool                                     transparent_;
-  WebPlugin*                               webplugin_;
+  webkit_glue::WebPlugin*                  webplugin_;
   std::string                              mime_type_;
   GURL                                     get_url_;
   intptr_t                                 get_notify_data_;
   bool                                     use_mozilla_user_agent_;
-#if defined(OS_WIN)
-  scoped_refptr<MozillaExtensionApi>       mozilla_extenstions_;
+#if defined(OS_MACOSX)
+  int                                      drawing_model_;
+  int                                      event_model_;
 #endif
   MessageLoop*                             message_loop_;
   scoped_refptr<PluginStreamUrl>           plugin_data_stream_;
-  GURL                                     instance_url_;
 
   // This flag if true indicates that the plugin data would be passed from
   // webkit. if false indicates that the plugin should download the data.

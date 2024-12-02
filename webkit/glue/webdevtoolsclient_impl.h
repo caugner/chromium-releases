@@ -12,7 +12,6 @@
 #include <wtf/RefPtr.h>
 
 #include "v8.h"
-#include "webkit/glue/cpp_bound_class.h"
 #include "webkit/glue/devtools/devtools_rpc.h"
 #include "webkit/glue/webdevtoolsclient.h"
 
@@ -24,7 +23,6 @@ class String;
 
 class BoundObject;
 class JsDebuggerAgentBoundObj;
-class JsDomAgentBoundObj;
 class JsNetAgentBoundObj;
 class JsToolsAgentBoundObj;
 class ToolsAgentNativeDelegateImpl;
@@ -32,30 +30,34 @@ class WebDevToolsClientDelegate;
 class WebViewImpl;
 
 class WebDevToolsClientImpl : public WebDevToolsClient,
-                              public CppBoundClass,
                               public DevToolsRpc::Delegate {
  public:
   WebDevToolsClientImpl(
       WebViewImpl* web_view_impl,
-      WebDevToolsClientDelegate* delegate);
+      WebDevToolsClientDelegate* delegate,
+      const String& application_locale);
   virtual ~WebDevToolsClientImpl();
 
   // DevToolsRpc::Delegate implementation.
-  virtual void SendRpcMessage(const std::string& class_name,
-                              const std::string& method_name,
-                              const std::string& raw_msg);
+  virtual void SendRpcMessage(const String& class_name,
+                              const String& method_name,
+                              const String& param1,
+                              const String& param2,
+                              const String& param3);
 
   // WebDevToolsClient implementation.
-  virtual void DispatchMessageFromAgent(const std::string& class_name,
-                                        const std::string& method_name,
-                                        const std::string& raw_msg);
+  virtual void DispatchMessageFromAgent(const WebKit::WebString& class_name,
+                                        const WebKit::WebString& method_name,
+                                        const WebKit::WebString& param1,
+                                        const WebKit::WebString& param2,
+                                        const WebKit::WebString& param3);
 
  private:
   void AddResourceSourceToFrame(int resource_id,
                                 String mime_type,
                                 WebCore::Node* frame);
 
-  void ExecuteScript(const std::string& expr);
+  void ExecuteScript(const Vector<String>& v);
   static v8::Handle<v8::Value> JsReset(const v8::Arguments& args);
   static v8::Handle<v8::Value> JsAddSourceToFrame(const v8::Arguments& args);
   static v8::Handle<v8::Value> JsAddResourceSourceToFrame(
@@ -69,15 +71,21 @@ class WebDevToolsClientImpl : public WebDevToolsClient,
   static v8::Handle<v8::Value> JsUndockWindow(const v8::Arguments& args);
   static v8::Handle<v8::Value> JsToggleInspectElementMode(
       const v8::Arguments& args);
+  static v8::Handle<v8::Value> JsGetApplicationLocale(
+      const v8::Arguments& args);
+  static v8::Handle<v8::Value> JsHiddenPanels(
+      const v8::Arguments& args);
+  static v8::Handle<v8::Value> JsDebuggerCommand(
+      const v8::Arguments& args);
 
   WebViewImpl* web_view_impl_;
   WebDevToolsClientDelegate* delegate_;
-  OwnPtr<CppBoundClass> debugger_command_executor_obj_;
+  String application_locale_;
+  OwnPtr<BoundObject> debugger_command_executor_obj_;
   OwnPtr<JsDebuggerAgentBoundObj> debugger_agent_obj_;
-  OwnPtr<JsDomAgentBoundObj> dom_agent_obj_;
   OwnPtr<JsToolsAgentBoundObj> tools_agent_obj_;
   bool loaded_;
-  Vector<std::string> pending_incoming_messages_;
+  Vector<Vector<String> > pending_incoming_messages_;
   OwnPtr<BoundObject> dev_tools_host_;
   OwnPtr<ToolsAgentNativeDelegateImpl> tools_agent_native_delegate_impl_;
   DISALLOW_COPY_AND_ASSIGN(WebDevToolsClientImpl);

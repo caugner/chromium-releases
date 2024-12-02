@@ -1,17 +1,19 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/renderer_host/render_widget_host_view_win.h"
 
 #include "app/gfx/canvas.h"
+#include "app/gfx/gdi_util.h"
 #include "app/l10n_util.h"
 #include "app/l10n_util_win.h"
 #include "app/resource_bundle.h"
 #include "base/command_line.h"
-#include "base/gfx/gdi_util.h"
 #include "base/gfx/rect.h"
 #include "base/histogram.h"
+#include "base/process_util.h"
+#include "base/thread.h"
 #include "base/win_util.h"
 #include "chrome/browser/browser_accessibility_manager.h"
 #include "chrome/browser/browser_process.h"
@@ -29,6 +31,7 @@
 #include "skia/ext/skia_utils_win.h"
 #include "webkit/api/public/WebInputEvent.h"
 #include "webkit/api/public/win/WebInputEventFactory.h"
+#include "views/accessibility/view_accessibility.h"
 #include "views/focus/focus_util_win.h"
 // Included for views::kReflectedMessage - TODO(beng): move this to win_util.h!
 #include "views/widget/widget_win.h"
@@ -38,11 +41,11 @@
 
 using base::TimeDelta;
 using base::TimeTicks;
-
 using WebKit::WebInputEvent;
 using WebKit::WebInputEventFactory;
 using WebKit::WebMouseEvent;
 using WebKit::WebTextDirection;
+using webkit_glue::WebPluginGeometry;
 
 namespace {
 
@@ -170,7 +173,7 @@ class NotifyPluginProcessHostTask : public Task {
     for (ChildProcessHost::Iterator iter(ChildProcessInfo::PLUGIN_PROCESS);
          !iter.Done(); ++iter) {
       PluginProcessHost* plugin = static_cast<PluginProcessHost*>(*iter);
-      if (plugin->GetProcessId() == plugin_process_id) {
+      if (base::GetProcId(plugin->handle()) == plugin_process_id) {
         plugin->AddWindow(parent_);
         return;
       }
@@ -184,6 +187,16 @@ class NotifyPluginProcessHostTask : public Task {
   HWND window_;  // Plugin HWND, created and destroyed in the plugin process.
   HWND parent_;  // Parent HWND, created and destroyed on the browser UI thread.
 };
+
+// Windows callback for OnDestroy to detach the plugin windows.
+BOOL CALLBACK DetachPluginWindowsCallback(HWND window, LPARAM param) {
+  if (WebPluginDelegateImpl::IsPluginDelegateWindow(window) &&
+      !IsHungAppWindow(window)) {
+    ::ShowWindow(window, SW_HIDE);
+    SetParent(window, NULL);
+  }
+  return TRUE;
+}
 
 }  // namespace
 
@@ -325,8 +338,8 @@ void RenderWidgetHostViewWin::MovePluginWindows(
         ::ShowWindow(window, SW_SHOW);  // Window was created hidden.
       } else if (::GetParent(parent) != m_hWnd) {
         // The renderer should only be trying to move windows that are children
-        // of its render widget window.
-        NOTREACHED();
+        // of its render widget window. However, this may happen as a result of
+        // a race condition, so we ignore it and not kill the plugin process.
         continue;
       }
 
@@ -388,6 +401,7 @@ HWND RenderWidgetHostViewWin::ReparentWindow(HWND window) {
     wcex.hIconSm        = 0;
     window_class = RegisterClassEx(&wcex);
   }
+  DCHECK(window_class);
 
   HWND parent = CreateWindowEx(
       WS_EX_LEFT | WS_EX_LTRREADING | WS_EX_RIGHTSCROLLBAR,
@@ -556,10 +570,7 @@ void RenderWidgetHostViewWin::DrawResizeCorner(const gfx::Rect& paint_rect,
     SkBitmap* bitmap = ResourceBundle::GetSharedInstance().
         GetBitmapNamed(IDR_TEXTAREA_RESIZER);
     gfx::Canvas canvas(bitmap->width(), bitmap->height(), false);
-    // TODO(jcampan): This const_cast should not be necessary once the
-    // SKIA API has been changed to return a non-const bitmap.
-    const_cast<SkBitmap&>(canvas.getDevice()->accessBitmap(true)).
-        eraseARGB(0, 0, 0, 0);
+    canvas.getDevice()->accessBitmap(true).eraseARGB(0, 0, 0, 0);
     int x = resize_corner_rect.x() + resize_corner_rect.width() -
         bitmap->width();
     bool rtl_dir = (l10n_util::GetTextDirection() ==
@@ -623,14 +634,14 @@ void RenderWidgetHostViewWin::Destroy() {
 }
 
 void RenderWidgetHostViewWin::SetTooltipText(const std::wstring& tooltip_text) {
-  if (tooltip_text != tooltip_text_) {
-    tooltip_text_ = tooltip_text;
+  // Clamp the tooltip length to kMaxTooltipLength so that we don't
+  // accidentally DOS the user with a mega tooltip (since Windows doesn't seem
+  // to do this itself).
+  const std::wstring& new_tooltip_text =
+      l10n_util::TruncateString(tooltip_text, kMaxTooltipLength);
 
-    // Clamp the tooltip length to kMaxTooltipLength so that we don't
-    // accidentally DOS the user with a mega tooltip (since Windows doesn't seem
-    // to do this itself).
-    if (tooltip_text_.length() > kMaxTooltipLength)
-      tooltip_text_ = tooltip_text_.substr(0, kMaxTooltipLength);
+  if (new_tooltip_text != tooltip_text_) {
+    tooltip_text_ = new_tooltip_text;
 
     // Need to check if the tooltip is already showing so that we don't
     // immediately show the tooltip with no delay when we move the mouse from
@@ -671,6 +682,9 @@ LRESULT RenderWidgetHostViewWin::OnCreate(CREATESTRUCT* create_struct) {
   // Marks that window as supporting mouse-wheel messages rerouting so it is
   // scrolled when under the mouse pointer even if inactive.
   views::SetWindowSupportsRerouteMouseWheel(m_hWnd);
+  // Save away our HWND in the parent window as a property so that the
+  // accessibility code can find it.
+  SetProp(GetParent(), kViewsNativeHostPropForAccessibility, m_hWnd);
   return 0;
 }
 
@@ -686,6 +700,21 @@ void RenderWidgetHostViewWin::OnActivate(UINT action, BOOL minimized,
 }
 
 void RenderWidgetHostViewWin::OnDestroy() {
+  // When a tab is closed all its child plugin windows are destroyed
+  // automatically. This happens before plugins get any notification that its
+  // instances are tearing down.
+  //
+  // Plugins like Quicktime assume that their windows will remain valid as long
+  // as they have plugin instances active. Quicktime crashes in this case
+  // because its windowing code cleans up an internal data structure that the
+  // handler for NPP_DestroyStream relies on.
+  //
+  // The fix is to detach plugin windows from web contents when it is going
+  // away. This will prevent the plugin windows from getting destroyed
+  // automatically. The detached plugin windows will get cleaned up in proper
+  // sequence as part of the usual cleanup when the plugin instance goes away.
+  EnumChildWindows(m_hWnd, DetachPluginWindowsCallback, NULL);
+
   ResetTooltip();
   TrackMouseLeave(false);
 }
@@ -1215,16 +1244,15 @@ LRESULT RenderWidgetHostViewWin::OnGetObject(UINT message, WPARAM wparam,
     if (!browser_accessibility_root_) {
       // Create a new instance of IAccessible. Root id is 1000, to avoid
       // conflicts with the ids used by MSAA.
-      BrowserAccessibilityManager::GetInstance()->
-          CreateAccessibilityInstance(IID_IAccessible, 1000,
-                                      render_widget_host_->routing_id(),
-                                      render_widget_host_->process()->pid(),
-                                      m_hWnd, reinterpret_cast<void **>
-                                          (&browser_accessibility_root_));
+      BrowserAccessibilityManager::GetInstance()->CreateAccessibilityInstance(
+          IID_IAccessible, 1000,
+          render_widget_host_->routing_id(),
+          render_widget_host_->process()->id(),
+          m_hWnd,
+          reinterpret_cast<void **>(browser_accessibility_root_.Receive()));
 
       if (!browser_accessibility_root_) {
         // No valid root found, return with failure.
-        NOTREACHED();
         return static_cast<LRESULT>(0L);
       }
     }

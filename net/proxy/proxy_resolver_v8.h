@@ -15,6 +15,7 @@ class MessageLoop;
 namespace net {
 
 class HostResolver;
+class ProxyResolverJSBindings;
 
 // Implementation of ProxyResolver that uses V8 to evaluate PAC scripts.
 //
@@ -36,67 +37,39 @@ class HostResolver;
 // and does not use locking since it expects to be alone.
 class ProxyResolverV8 : public ProxyResolver {
  public:
-  class JSBindings;
-
   // Constructs a ProxyResolverV8 with custom bindings. ProxyResolverV8 takes
   // ownership of |custom_js_bindings| and deletes it when ProxyResolverV8
   // is destroyed.
-  explicit ProxyResolverV8(JSBindings* custom_js_bindings);
+  explicit ProxyResolverV8(ProxyResolverJSBindings* custom_js_bindings);
 
-  ~ProxyResolverV8();
+  virtual ~ProxyResolverV8();
 
   // ProxyResolver implementation:
-  virtual int GetProxyForURL(const GURL& query_url,
-                             const GURL& /*pac_url*/,
-                             ProxyInfo* results);
-  virtual void SetPacScript(const std::string& bytes);
+  virtual int GetProxyForURL(const GURL& url,
+                             ProxyInfo* results,
+                             CompletionCallback* /*callback*/,
+                             RequestHandle* /*request*/,
+                             LoadLog* load_log);
+  virtual void CancelRequest(RequestHandle request);
+  virtual void PurgeMemory();
 
-  JSBindings* js_bindings() const { return js_bindings_.get(); }
-
-  // Creates a default javascript bindings implementation that will:
-  //   - Send script error messages to LOG(INFO)
-  //   - Send script alert()s to LOG(INFO)
-  //   - Use the provided host resolver to service dnsResolve().
-  //
-  // For clients that need more control (for example, sending the script output
-  // to a UI widget), use the ProxyResolverV8(JSBindings*) and specify your
-  // own bindings.
-  //
-  // |host_resolver| will be used in async mode on |host_resolver_loop|. If
-  // |host_resolver_loop| is NULL, then |host_resolver| will be used in sync
-  // mode on the PAC thread.
-  static JSBindings* CreateDefaultBindings(HostResolver* host_resolver,
-                                           MessageLoop* host_resolver_loop);
+  ProxyResolverJSBindings* js_bindings() const { return js_bindings_.get(); }
 
  private:
   // Context holds the Javascript state for the most recently loaded PAC
   // script. It corresponds with the data from the last call to
   // SetPacScript().
   class Context;
+
+  // ProxyResolver implementation:
+  virtual int SetPacScript(const GURL& /*pac_url*/,
+                           const std::string& bytes_utf8,
+                           CompletionCallback* /*callback*/);
   scoped_ptr<Context> context_;
 
-  scoped_ptr<JSBindings> js_bindings_;
+  scoped_ptr<ProxyResolverJSBindings> js_bindings_;
 
   DISALLOW_COPY_AND_ASSIGN(ProxyResolverV8);
-};
-
-// Interface for the javascript bindings.
-class ProxyResolverV8::JSBindings {
- public:
-  virtual ~JSBindings() {}
-
-  // Handler for "alert(message)"
-  virtual void Alert(const std::string& message) = 0;
-
-  // Handler for "myIpAddress()". Returns empty string on failure.
-  virtual std::string MyIpAddress() = 0;
-
-  // Handler for "dnsResolve(host)". Returns empty string on failure.
-  virtual std::string DnsResolve(const std::string& host) = 0;
-
-  // Handler for when an error is encountered. |line_number| may be -1
-  // if a line number is not applicable to this error.
-  virtual void OnError(int line_number, const std::string& error) = 0;
 };
 
 }  // namespace net

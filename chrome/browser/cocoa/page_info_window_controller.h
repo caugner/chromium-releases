@@ -8,6 +8,7 @@
 #include "base/scoped_ptr.h"
 
 class PageInfoWindowMac;
+class PrefService;
 
 // This NSWindowController subclass implements the Cocoa window for
 // PageInfoWindow. This creates and owns the PageInfoWindowMac subclass.

@@ -5,7 +5,7 @@
 #ifndef CHROME_BROWSER_RENDERER_HOST_RENDER_WIDGET_HOST_VIEW_H_
 #define CHROME_BROWSER_RENDERER_HOST_RENDER_WIDGET_HOST_VIEW_H_
 
-#include "base/gfx/native_widget_types.h"
+#include "app/gfx/native_widget_types.h"
 #include "base/shared_memory.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "webkit/glue/webplugin.h"
@@ -70,7 +70,7 @@ class RenderWidgetHostView {
 
   // Moves all plugin windows as described in the given list.
   virtual void MovePluginWindows(
-      const std::vector<WebPluginGeometry>& plugin_window_moves) = 0;
+      const std::vector<webkit_glue::WebPluginGeometry>& moves) = 0;
 
   // Actually set/take focus to/from the associated View component.
   virtual void Focus() = 0;
@@ -132,10 +132,6 @@ class RenderWidgetHostView {
   // Notifies the View that the renderer text selection has changed.
   virtual void SelectionChanged(const std::string& text) { };
 
-  // Tells the View to get the text from the selection clipboard and send it
-  // back to the renderer asynchronously.
-  virtual void PasteFromSelectionClipboard() { }
-
   // Tells the View whether the context menu is showing. This is used on Linux
   // to suppress updates to webkit focus for the duration of the show.
   virtual void ShowingContextMenu(bool showing) { }
@@ -155,15 +151,15 @@ class RenderWidgetHostView {
 
   // Get the view's window's position on the screen.
   virtual gfx::Rect GetRootWindowRect() = 0;
+
+  // Set the view's active state (i.e., tint state of controls).
+  virtual void SetActive(bool active) = 0;
 #endif
 
 #if defined(OS_LINUX)
-  virtual gfx::PluginWindowHandle CreatePluginContainer(
-      base::ProcessId plugin_process_id) = 0;
-  virtual void DestroyPluginContainer(gfx::PluginWindowHandle container) = 0;
+  virtual void CreatePluginContainer(gfx::PluginWindowHandle id) = 0;
+  virtual void DestroyPluginContainer(gfx::PluginWindowHandle id) = 0;
 #endif
-
-  virtual void PluginProcessCrashed(base::ProcessId pid) { }
 
   void set_activatable(bool activatable) {
     activatable_ = activatable;

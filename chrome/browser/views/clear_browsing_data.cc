@@ -244,6 +244,10 @@ void ClearBrowsingDataView::ViewHierarchyChanged(bool is_add,
 ////////////////////////////////////////////////////////////////////////////////
 // ClearBrowsingDataView, views::DialogDelegate implementation:
 
+int ClearBrowsingDataView::GetDefaultDialogButton() const {
+  return MessageBoxFlags::DIALOGBUTTON_NONE;
+}
+
 std::wstring ClearBrowsingDataView::GetDialogButtonLabel(
     MessageBoxFlags::DialogButton button) const {
   if (button == MessageBoxFlags::DIALOGBUTTON_OK) {
@@ -310,16 +314,13 @@ views::View* ClearBrowsingDataView::GetContentsView() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// ClearBrowsingDataView, views::Combobox::Model implementation:
+// ClearBrowsingDataView, ComboboxModel implementation:
 
-int ClearBrowsingDataView::GetItemCount(views::Combobox* source) {
-  DCHECK(source == time_period_combobox_);
+int ClearBrowsingDataView::GetItemCount() {
   return 4;
 }
 
-std::wstring ClearBrowsingDataView::GetItemAt(views::Combobox* source,
-                                              int index) {
-  DCHECK(source == time_period_combobox_);
+std::wstring ClearBrowsingDataView::GetItemAt(int index) {
   switch (index) {
     case 0: return l10n_util::GetString(IDS_CLEAR_DATA_DAY);
     case 1: return l10n_util::GetString(IDS_CLEAR_DATA_WEEK);
@@ -342,7 +343,8 @@ void ClearBrowsingDataView::ItemChanged(views::Combobox* sender,
 ////////////////////////////////////////////////////////////////////////////////
 // ClearBrowsingDataView, views::ButtonListener implementation:
 
-void ClearBrowsingDataView::ButtonPressed(views::Button* sender) {
+void ClearBrowsingDataView::ButtonPressed(
+    views::Button* sender, const views::Event& event) {
   if (sender == del_history_checkbox_)
     profile_->GetPrefs()->SetBoolean(prefs::kDeleteBrowsingHistory,
         del_history_checkbox_->checked() ? true : false);

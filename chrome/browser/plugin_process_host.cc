@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "app/app_switches.h"
+#include "app/gfx/native_widget_types.h"
 #include "base/command_line.h"
 #if defined(OS_POSIX)
 #include "base/global_descriptors_posix.h"
@@ -20,17 +21,20 @@
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/file_version_info.h"
-#include "base/gfx/native_widget_types.h"
 #include "base/logging.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
 #include "base/scoped_ptr.h"
 #include "base/string_util.h"
 #include "base/thread.h"
+#include "chrome/browser/browser.h"
+#include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/browser_window.h"
 #include "chrome/browser/child_process_security_policy.h"
 #include "chrome/browser/chrome_plugin_browsing_context.h"
 #include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/net/url_request_tracking.h"
 #include "chrome/browser/plugin_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/renderer_host/browser_render_process_host.h"
@@ -45,7 +49,6 @@
 #include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_descriptors.h"
 #include "ipc/ipc_switches.h"
-#include "net/base/cookie_monster.h"
 #include "net/base/file_stream.h"
 #include "net/base/io_buffer.h"
 #include "net/url_request/url_request.h"
@@ -63,11 +66,16 @@
 #endif
 
 #if defined(OS_LINUX)
-#include "base/gfx/gtk_native_view_id_manager.h"
+#include "app/gfx/gtk_native_view_id_manager.h"
+#endif
+
+#if defined(OS_MACOSX)
+#include "base/mac_util.h"
+#include "chrome/common/plugin_carbon_interpose_constants_mac.h"
 #endif
 
 static const char kDefaultPluginFinderURL[] =
-    "http://cache.pack.google.com/edgedl/chrome/plugins/plugins2.xml";
+    "https://dl-ssl.google.com/edgedl/chrome/plugins/plugins2.xml";
 
 #if defined(OS_WIN)
 
@@ -111,19 +119,20 @@ class PluginDownloadUrlHelper : public URLRequest::Delegate {
   gfx::NativeWindow download_file_caller_window_;
 
   std::string download_url_;
-  int download_source_pid_;
+  int download_source_child_unique_id_;
 
   DISALLOW_EVIL_CONSTRUCTORS(PluginDownloadUrlHelper);
 };
 
 PluginDownloadUrlHelper::PluginDownloadUrlHelper(
     const std::string& download_url,
-    int source_pid, gfx::NativeWindow caller_window)
+    int source_child_unique_id,
+    gfx::NativeWindow caller_window)
     : download_file_request_(NULL),
       download_file_buffer_(new net::IOBuffer(kDownloadFileBufferSize)),
       download_file_caller_window_(caller_window),
       download_url_(download_url),
-      download_source_pid_(source_pid) {
+      download_source_child_unique_id_(source_child_unique_id) {
   DCHECK(::IsWindow(caller_window));
   memset(download_file_buffer_->data(), 0, kDownloadFileBufferSize);
   download_file_.reset(new net::FileStream());
@@ -137,8 +146,9 @@ PluginDownloadUrlHelper::~PluginDownloadUrlHelper() {
 }
 
 void PluginDownloadUrlHelper::InitiateDownload() {
-  download_file_request_= new URLRequest(GURL(download_url_), this);
-  download_file_request_->set_origin_pid(download_source_pid_);
+  download_file_request_ = new URLRequest(GURL(download_url_), this);
+  chrome_browser_net::SetOriginProcessUniqueIDForRequest(
+      download_source_child_unique_id_, download_file_request_);
   download_file_request_->set_context(Profile::GetDefaultRequestContext());
   download_file_request_->Start();
 }
@@ -319,11 +329,25 @@ PluginProcessHost::~PluginProcessHost() {
        window_index++) {
     PostMessage(*window_index, WM_CLOSE, 0, 0);
   }
+#elif defined(OS_MACOSX)
+  // If the plugin process crashed but had fullscreen windows open at the time,
+  // make sure that the menu bar is visible.
+  std::set<uint32>::iterator window_index;
+  for (window_index = plugin_fullscreen_windows_set_.begin();
+       window_index != plugin_fullscreen_windows_set_.end();
+       window_index++) {
+    if (MessageLoop::current() ==
+        ChromeThread::GetMessageLoop(ChromeThread::UI)) {
+      mac_util::ReleaseFullScreen();
+    } else {
+      ChromeThread::GetMessageLoop(ChromeThread::UI)->PostTask(FROM_HERE,
+          NewRunnableFunction(mac_util::ReleaseFullScreen));
+    }
+  }
 #endif
 }
 
 bool PluginProcessHost::Init(const WebPluginInfo& info,
-                             const std::string& activex_clsid,
                              const std::wstring& locale) {
   info_ = info;
   set_name(info_.name);
@@ -331,21 +355,26 @@ bool PluginProcessHost::Init(const WebPluginInfo& info,
   if (!CreateChannel())
     return false;
 
-  // build command line for plugin, we have to quote the plugin's path to deal
+  // Build command line for plugin, we have to quote the plugin's path to deal
   // with spaces.
-  const CommandLine& browser_command_line = *CommandLine::ForCurrentProcess();
-  std::wstring exe_path =
-      browser_command_line.GetSwitchValue(switches::kBrowserSubprocessPath);
-  if (exe_path.empty() && !PathService::Get(base::FILE_EXE, &exe_path))
+  FilePath exe_path = GetChildPath();
+  if (exe_path.empty())
     return false;
 
   CommandLine cmd_line(exe_path);
+  // Put the process type and plugin path first so they're easier to see
+  // in process listings using native process management tools.
+  cmd_line.AppendSwitchWithValue(switches::kProcessType,
+                                 switches::kPluginProcess);
+  cmd_line.AppendSwitchWithValue(switches::kPluginPath,
+                                 info.path.ToWStringHack());
+
   if (logging::DialogsAreSuppressed())
     cmd_line.AppendSwitch(switches::kNoErrorDialogs);
 
-  // propagate the following switches to the plugin command line (along with
+  // Propagate the following switches to the plugin command line (along with
   // any associated values) if present in the browser command line
-  static const wchar_t* const switch_names[] = {
+  static const char* const switch_names[] = {
     switches::kPluginStartupDialog,
     switches::kNoSandbox,
     switches::kSafePlugins,
@@ -358,13 +387,14 @@ bool PluginProcessHost::Init(const WebPluginInfo& info,
     switches::kLoggingLevel,
     switches::kLogPluginMessages,
     switches::kUserDataDir,
-    switches::kAllowAllActiveX,
     switches::kEnableDCHECK,
     switches::kSilentDumpOnDCHECK,
     switches::kMemoryProfiling,
     switches::kUseLowFragHeapCrt,
     switches::kEnableStatsTable,
   };
+
+  const CommandLine& browser_command_line = *CommandLine::ForCurrentProcess();
 
   for (size_t i = 0; i < arraysize(switch_names); ++i) {
     if (browser_command_line.HasSwitch(switch_names[i])) {
@@ -392,14 +422,10 @@ bool PluginProcessHost::Init(const WebPluginInfo& info,
   DCHECK(!data_dir.empty());
   cmd_line.AppendSwitchWithValue(switches::kPluginDataDir, data_dir);
 
-  cmd_line.AppendSwitchWithValue(switches::kProcessType,
-                                 switches::kPluginProcess);
-
   cmd_line.AppendSwitchWithValue(switches::kProcessChannelID,
                                  ASCIIToWide(channel_id()));
 
-  cmd_line.AppendSwitchWithValue(switches::kPluginPath,
-                                 info.path.ToWStringHack());
+  SetCrashReporterCommandLine(&cmd_line);
 
   base::ProcessHandle process = 0;
 #if defined(OS_WIN)
@@ -412,8 +438,24 @@ bool PluginProcessHost::Init(const WebPluginInfo& info,
   if (ipcfd > -1)
     fds_to_map.push_back(std::pair<int, int>(
         ipcfd, kPrimaryIPCChannel + base::GlobalDescriptors::kBaseDescriptor));
-  base::LaunchApp(cmd_line.argv(), fds_to_map, false, &process);
-#endif
+  base::environment_vector env;
+#if defined(OS_MACOSX)
+  // Add our interposing library for Carbon. This is stripped back out in
+  // plugin_main.cc, so changes here should be reflected there.
+  std::string interpose_list(plugin_interpose_strings::kInterposeLibraryPath);
+  const char* existing_list =
+      getenv(plugin_interpose_strings::kDYLDInsertLibrariesKey);
+  if (existing_list) {
+    interpose_list.insert(0, ":");
+    interpose_list.insert(0, existing_list);
+  }
+  env.push_back(std::pair<const char*, const char*>(
+      plugin_interpose_strings::kDYLDInsertLibrariesKey,
+      interpose_list.c_str()));
+#endif  // OS_MACOSX
+  if (!base::LaunchApp(cmd_line.argv(), env, fds_to_map, false, &process))
+    return false;
+#endif  // OS_WIN
 
   if (!process)
     return false;
@@ -453,6 +495,16 @@ void PluginProcessHost::OnMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER(PluginProcessHostMsg_MapNativeViewId,
                         OnMapNativeViewId)
 #endif
+#if defined(OS_MACOSX)
+    IPC_MESSAGE_HANDLER(PluginProcessHostMsg_PluginSelectWindow,
+                        OnPluginSelectWindow)
+    IPC_MESSAGE_HANDLER(PluginProcessHostMsg_PluginShowWindow,
+                        OnPluginShowWindow)
+    IPC_MESSAGE_HANDLER(PluginProcessHostMsg_PluginHideWindow,
+                        OnPluginHideWindow)
+    IPC_MESSAGE_HANDLER(PluginProcessHostMsg_PluginDisposeWindow,
+                        OnPluginDisposeWindow)
+#endif
     IPC_MESSAGE_UNHANDLED_ERROR()
   IPC_END_MESSAGE_MAP()
 }
@@ -471,7 +523,7 @@ void PluginProcessHost::OnChannelError() {
   for (size_t i = 0; i < pending_requests_.size(); ++i) {
     ReplyToRenderer(pending_requests_[i].renderer_message_filter_.get(),
                     IPC::ChannelHandle(),
-                    FilePath(),
+                    WebPluginInfo(),
                     pending_requests_[i].reply_msg);
   }
 
@@ -515,7 +567,7 @@ void PluginProcessHost::OnGetCookies(uint32 request_context,
   }
 }
 
-void PluginProcessHost::OnAccessFiles(int process_id,
+void PluginProcessHost::OnAccessFiles(int renderer_id,
                                       const std::vector<std::string>& files,
                                       bool* allowed) {
   ChildProcessSecurityPolicy* policy =
@@ -523,7 +575,7 @@ void PluginProcessHost::OnAccessFiles(int process_id,
 
   for (size_t i = 0; i < files.size(); ++i) {
     const FilePath path = FilePath::FromWStringHack(UTF8ToWide(files[i]));
-    if (!policy->CanUploadFile(process_id, path)) {
+    if (!policy->CanUploadFile(renderer_id, path)) {
       LOG(INFO) << "Denied unauthorized request for file " << files[i];
       *allowed = false;
       return;
@@ -549,10 +601,9 @@ void PluginProcessHost::OnResolveProxyCompleted(IPC::Message* reply_msg,
 void PluginProcessHost::ReplyToRenderer(
     ResourceMessageFilter* renderer_message_filter,
     const IPC::ChannelHandle& channel,
-    const FilePath& plugin_path,
+    const WebPluginInfo& info,
     IPC::Message* reply_msg) {
-  ViewHostMsg_OpenChannelToPlugin::WriteReplyParams(reply_msg, channel,
-                                                    plugin_path);
+  ViewHostMsg_OpenChannelToPlugin::WriteReplyParams(reply_msg, channel, info);
   renderer_message_filter->Send(reply_msg);
 }
 
@@ -571,14 +622,16 @@ void PluginProcessHost::RequestPluginChannel(
   // a deadlock can occur if the plugin creation request from the renderer is
   // a result of a sync message by the plugin process.
   PluginProcessMsg_CreateChannel* msg = new PluginProcessMsg_CreateChannel(
-      renderer_message_filter->GetProcessId(),
+      renderer_message_filter->id(),
       renderer_message_filter->off_the_record());
   msg->set_unblock(true);
   if (Send(msg)) {
     sent_requests_.push(ChannelRequest(
         renderer_message_filter, mime_type, reply_msg));
   } else {
-    ReplyToRenderer(renderer_message_filter, IPC::ChannelHandle(), FilePath(),
+    ReplyToRenderer(renderer_message_filter,
+                    IPC::ChannelHandle(),
+                    WebPluginInfo(),
                     reply_msg);
   }
 }
@@ -589,7 +642,7 @@ void PluginProcessHost::OnChannelCreated(
 
   ReplyToRenderer(request.renderer_message_filter_.get(),
                   channel_handle,
-                  info_.path,
+                  info_,
                   request.reply_msg);
   sent_requests_.pop();
 }

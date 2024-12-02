@@ -2,8 +2,21 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/singleton.h"
 #include "net/base/ev_root_ca_metadata.h"
+
+#if defined(OS_LINUX)
+// Work around https://bugzilla.mozilla.org/show_bug.cgi?id=455424
+// until NSS 3.12.2 comes out and we update to it.
+#define Lock FOO_NSS_Lock
+#include <cert.h>
+#include <pkcs11n.h>
+#include <secerr.h>
+#include <secoid.h>
+#undef Lock
+#endif
+
+#include "base/logging.h"
+#include "base/singleton.h"
 
 namespace net {
 
@@ -30,6 +43,12 @@ static const EVMetadata ev_root_ca_metadata[] = {
   // https://secure.comodo.com/
   { { { 0x66, 0x31, 0xbf, 0x9e, 0xf7, 0x4f, 0x9e, 0xb6, 0xc9, 0xd5,
         0xa6, 0x0c, 0xba, 0x6a, 0xbe, 0xd1, 0xf7, 0xbd, 0xef, 0x7b } },
+    "1.3.6.1.4.1.6449.1.2.1.5.1"
+  },
+  // COMODO ECC Certification Authority
+  // https://comodoecccertificationauthority-ev.comodoca.com/
+  { { { 0x9f, 0x74, 0x4e, 0x9f, 0x2b, 0x4d, 0xba, 0xec, 0x0f, 0x31,
+        0x2c, 0x50, 0xb6, 0x56, 0x3b, 0x8e, 0x2d, 0x93, 0xc3, 0x11 } },
     "1.3.6.1.4.1.6449.1.2.1.5.1"
   },
   // Cybertrust Global Root
@@ -201,8 +220,8 @@ EVRootCAMetadata* EVRootCAMetadata::GetInstance() {
 
 bool EVRootCAMetadata::GetPolicyOID(
     const X509Certificate::Fingerprint& fingerprint,
-    std::string* policy_oid) const {
-  StringMap::const_iterator iter = ev_policy_.find(fingerprint);
+    PolicyOID* policy_oid) const {
+  PolicyOidMap::const_iterator iter = ev_policy_.find(fingerprint);
   if (iter == ev_policy_.end())
     return false;
   *policy_oid = iter->second;
@@ -211,16 +230,41 @@ bool EVRootCAMetadata::GetPolicyOID(
 
 EVRootCAMetadata::EVRootCAMetadata() {
   // Constructs the object from the raw metadata in ev_root_ca_metadata.
-  num_policy_oids_ = arraysize(ev_root_ca_metadata);
-  policy_oids_.reset(new const char*[num_policy_oids_]);
+#if defined(OS_LINUX)
+  for (size_t i = 0; i < arraysize(ev_root_ca_metadata); i++) {
+    const EVMetadata& metadata = ev_root_ca_metadata[i];
+    PRUint8 buf[1024];
+    SECItem oid_item;
+    oid_item.data = buf;
+    oid_item.len = sizeof(buf);
+    SECStatus status = SEC_StringToOID(NULL, &oid_item, metadata.policy_oid, 0);
+    if (status != SECSuccess) {
+      LOG(ERROR) << "Failed to convert to OID: " << metadata.policy_oid;
+      continue;
+    }
+    // Register the OID.
+    SECOidData od;
+    od.oid.len = oid_item.len;
+    od.oid.data = oid_item.data;
+    od.offset = SEC_OID_UNKNOWN;
+    od.desc = metadata.policy_oid;
+    od.mechanism = CKM_INVALID_MECHANISM;
+    od.supportedExtension = INVALID_CERT_EXTENSION;
+    SECOidTag policy = SECOID_AddEntry(&od);
+    DCHECK(policy != SEC_OID_UNKNOWN);
+    ev_policy_[metadata.fingerprint] = policy;
+    policy_oids_.push_back(policy);
+  }
+#else
   for (size_t i = 0; i < arraysize(ev_root_ca_metadata); i++) {
     const EVMetadata& metadata = ev_root_ca_metadata[i];
     ev_policy_[metadata.fingerprint] = metadata.policy_oid;
     // Multiple root CA certs may use the same EV policy OID.  Having
     // duplicates in the policy_oids_ array does no harm, so we don't
     // bother detecting duplicates.
-    policy_oids_[i] = metadata.policy_oid;
+    policy_oids_.push_back(metadata.policy_oid);
   }
+#endif
 }
 
 }  // namespace net

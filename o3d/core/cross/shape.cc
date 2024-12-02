@@ -32,7 +32,6 @@
 
 // This file contains the definition of the Shape class.
 
-#include "core/cross/precompile.h"
 #include "core/cross/shape.h"
 #include "core/cross/param_object.h"
 #include "core/cross/render_node.h"
@@ -78,7 +77,7 @@ ElementArray Shape::GetElements() const {
 
 void Shape::SetElements(const ElementArray& elements) {
   elements_.resize(elements.size());
-  for (int i = 0; i != elements.size(); ++i) {
+  for (unsigned int i = 0; i != elements.size(); ++i) {
     elements_[i] = Element::Ref(elements[i]);
   }
 }

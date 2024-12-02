@@ -13,9 +13,11 @@
 #include "views/widget/widget.h"
 
 ExtensionView::ExtensionView(ExtensionHost* host, Browser* browser)
-    : host_(host), browser_(browser),
-      initialized_(false), pending_preferred_width_(0), container_(NULL),
-      did_insert_css_(false), is_clipped_(false) {
+    : host_(host),
+      browser_(browser),
+      initialized_(false),
+      container_(NULL),
+      is_clipped_(false) {
   host_->set_view(this);
 }
 
@@ -34,9 +36,16 @@ RenderViewHost* ExtensionView::render_view_host() const {
   return host_->render_view_host();
 }
 
-void ExtensionView::SetDidInsertCSS(bool did_insert) {
-  did_insert_css_ = did_insert;
+void ExtensionView::DidStopLoading() {
   ShowIfCompletelyLoaded();
+}
+
+void ExtensionView::SetIsClipped(bool is_clipped) {
+  if (is_clipped_ != is_clipped) {
+    is_clipped_ = is_clipped;
+    if (IsVisible())
+      ShowIfCompletelyLoaded();
+  }
 }
 
 void ExtensionView::SetVisible(bool is_visible) {
@@ -86,24 +95,25 @@ void ExtensionView::CreateWidgetHostView() {
   NOTIMPLEMENTED();
 #endif
 
-  host_->CreateRenderView(view);
+  host_->CreateRenderViewSoon(view);
   SetVisible(false);
-
-  if (!pending_background_.empty()) {
-    render_view_host()->view()->SetBackground(pending_background_);
-    pending_background_.reset();
-  }
 }
 
 void ExtensionView::ShowIfCompletelyLoaded() {
-  // We wait to show the ExtensionView until it has loaded, our parent has
-  // given us a background and css has been inserted into page. These can happen
-  // in different orders.
-  if (!IsVisible() && host_->did_stop_loading() && render_view_host()->view() &&
-      !is_clipped_ && did_insert_css_ &&
-      !render_view_host()->view()->background().empty()) {
+  if (IsVisible() || is_clipped_)
+    return;
+
+  // We wait to show the ExtensionView until it has loaded, and the view has
+  // actually been created. These can happen in different orders.
+  if (host_->did_stop_loading()) {
+    // For toolstrips, also wait until our parent has given us a background.
+    if (host_->GetRenderViewType() == ViewType::EXTENSION_TOOLSTRIP &&
+        render_view_host()->view()->background().empty()) {
+      return;
+    }
     SetVisible(true);
-    DidContentsPreferredWidthChange(pending_preferred_width_);
+
+    UpdatePreferredSize(pending_preferred_size_);
   }
 }
 
@@ -116,7 +126,7 @@ void ExtensionView::CleanUp() {
 }
 
 void ExtensionView::SetBackground(const SkBitmap& background) {
-  if (initialized_ && render_view_host()->view()) {
+  if (render_view_host()->IsRenderViewLive() && render_view_host()->view()) {
     render_view_host()->view()->SetBackground(background);
   } else {
     pending_background_ = background;
@@ -124,14 +134,17 @@ void ExtensionView::SetBackground(const SkBitmap& background) {
   ShowIfCompletelyLoaded();
 }
 
-void ExtensionView::DidContentsPreferredWidthChange(const int pref_width) {
+void ExtensionView::UpdatePreferredSize(const gfx::Size& new_size) {
   // Don't actually do anything with this information until we have been shown.
   // Size changes will not be honored by lower layers while we are hidden.
   if (!IsVisible()) {
-    pending_preferred_width_ = pref_width;
-  } else if (pref_width > 0 && pref_width != GetPreferredSize().width()) {
-    SetPreferredSize(gfx::Size(pref_width, height()));
+    pending_preferred_size_ = new_size;
+    return;
   }
+
+  gfx::Size preferred_size = GetPreferredSize();
+  if (new_size != preferred_size)
+    SetPreferredSize(new_size);
 }
 
 void ExtensionView::ViewHierarchyChanged(bool is_add,
@@ -142,11 +155,6 @@ void ExtensionView::ViewHierarchyChanged(bool is_add,
     CreateWidgetHostView();
 }
 
-void ExtensionView::RecoverCrashedExtension() {
-  CleanUp();
-  CreateWidgetHostView();
-}
-
 void ExtensionView::HandleMouseEvent() {
   if (container_)
     container_->OnExtensionMouseEvent(this);
@@ -155,4 +163,17 @@ void ExtensionView::HandleMouseEvent() {
 void ExtensionView::HandleMouseLeave() {
   if (container_)
     container_->OnExtensionMouseLeave(this);
+}
+
+void ExtensionView::RenderViewCreated() {
+  if (!pending_background_.empty() && render_view_host()->view()) {
+    render_view_host()->view()->SetBackground(pending_background_);
+    pending_background_.reset();
+  }
+}
+
+void ExtensionView::SetPreferredSize(const gfx::Size& size) {
+  views::NativeViewHost::SetPreferredSize(size);
+  if (container_)
+    container_->OnExtensionPreferredSizeChanged(this);
 }

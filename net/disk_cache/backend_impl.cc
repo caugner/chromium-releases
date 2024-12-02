@@ -20,9 +20,6 @@
 #include "net/disk_cache/hash.h"
 #include "net/disk_cache/file.h"
 
-// Uncomment this to use the new eviction algorithm.
-// #define USE_NEW_EVICTION
-
 // This has to be defined before including histogram_macros.h from this file.
 #define NET_DISK_CACHE_BACKEND_IMPL_CC_
 #include "net/disk_cache/histogram_macros.h"
@@ -32,7 +29,7 @@ using base::TimeDelta;
 
 namespace {
 
-const wchar_t* kIndexName = L"index";
+const char* kIndexName = "index";
 const int kMaxOldFolders = 100;
 
 // Seems like ~240 MB correspond to less than 50k entries for 99% of the people.
@@ -68,72 +65,74 @@ size_t GetIndexSize(int table_len) {
 // Returns a fully qualified name from path and name, using a given name prefix
 // and index number. For instance, if the arguments are "/foo", "bar" and 5, it
 // will return "/foo/old_bar_005".
-std::wstring GetPrefixedName(const std::wstring& path, const std::wstring& name,
-                             int index) {
-  std::wstring prefixed(path);
-  std::wstring tmp = StringPrintf(L"%ls%ls_%03d", L"old_", name.c_str(), index);
-  file_util::AppendToPath(&prefixed, tmp);
-  return prefixed;
+FilePath GetPrefixedName(const FilePath& path, const std::string& name,
+                         int index) {
+  std::string tmp = StringPrintf("%s%s_%03d", "old_", name.c_str(), index);
+  return path.AppendASCII(tmp);
 }
 
 // This is a simple Task to cleanup old caches.
 class CleanupTask : public Task {
  public:
-  CleanupTask(const std::wstring& path, const std::wstring& name)
+  CleanupTask(const FilePath& path, const std::string& name)
       : path_(path), name_(name) {}
 
   virtual void Run();
 
  private:
-  std::wstring path_;
-  std::wstring name_;
+  FilePath path_;
+  std::string name_;
   DISALLOW_EVIL_CONSTRUCTORS(CleanupTask);
 };
 
 void CleanupTask::Run() {
   for (int i = 0; i < kMaxOldFolders; i++) {
-    std::wstring to_delete = GetPrefixedName(path_, name_, i);
+    FilePath to_delete = GetPrefixedName(path_, name_, i);
     disk_cache::DeleteCache(to_delete, true);
   }
 }
 
 // Returns a full path to rename the current cache, in order to delete it. path
 // is the current folder location, and name is the current folder name.
-std::wstring GetTempCacheName(const std::wstring& path,
-                              const std::wstring& name) {
+FilePath GetTempCacheName(const FilePath& path, const std::string& name) {
   // We'll attempt to have up to kMaxOldFolders folders for deletion.
   for (int i = 0; i < kMaxOldFolders; i++) {
-    std::wstring to_delete = GetPrefixedName(path, name, i);
+    FilePath to_delete = GetPrefixedName(path, name, i);
     if (!file_util::PathExists(to_delete))
       return to_delete;
   }
-  return std::wstring();
+  return FilePath();
 }
 
 // Moves the cache files to a new folder and creates a task to delete them.
-bool DelayedCacheCleanup(const std::wstring& full_path) {
-  FilePath current_path = FilePath::FromWStringHack(full_path);
-  current_path = current_path.StripTrailingSeparators();
+bool DelayedCacheCleanup(const FilePath& full_path) {
+  FilePath current_path = full_path.StripTrailingSeparators();
 
-  std::wstring path = current_path.DirName().ToWStringHack();
-  std::wstring name = current_path.BaseName().ToWStringHack();
+  FilePath path = current_path.DirName();
+  FilePath name = current_path.BaseName();
+#if defined(OS_POSIX)
+  std::string name_str = name.value();
+#elif defined(OS_WIN)
+  // We created this file so it should only contain ASCII.
+  std::string name_str = WideToASCII(name.value());
+#endif
 
-  std::wstring to_delete = GetTempCacheName(path, name);
+  FilePath to_delete = GetTempCacheName(path, name_str);
   if (to_delete.empty()) {
     LOG(ERROR) << "Unable to get another cache folder";
     return false;
   }
 
-  if (!disk_cache::MoveCache(full_path.c_str(), to_delete.c_str())) {
+  if (!disk_cache::MoveCache(full_path, to_delete)) {
     LOG(ERROR) << "Unable to rename cache folder";
     return false;
   }
 
 #if defined(OS_WIN)
-  WorkerPool::PostTask(FROM_HERE, new CleanupTask(path, name), true);
+  WorkerPool::PostTask(FROM_HERE, new CleanupTask(path, name_str), true);
 #elif defined(OS_POSIX)
   // TODO(rvargas): Use the worker pool.
-  MessageLoop::current()->PostTask(FROM_HERE, new CleanupTask(path, name));
+  MessageLoop::current()->PostTask(FROM_HERE, new CleanupTask(path, name_str));
 #endif
   return true;
 }
@@ -146,17 +145,14 @@ bool InitExperiment(int* current_group) {
     return false;
   }
 
-  *current_group = 9;
-
-  UMA_HISTOGRAM_CACHE_ERROR("DiskCache.Experiment", *current_group);
-
-  // Current experiment already set.
+  // There is no experiment.
+  *current_group = 0;
   return true;
 }
 
 // Initializes the field trial structures to allow performance measurements
 // for the current cache configuration.
-void SetFieldTrialInfo(int experiment_group, int size_group) {
+void SetFieldTrialInfo(int size_group) {
   static bool first = true;
   if (!first)
     return;
@@ -166,13 +162,6 @@ void SetFieldTrialInfo(int experiment_group, int size_group) {
   scoped_refptr<FieldTrial> trial1 = new FieldTrial("CacheSize", 10);
   std::string group1 = StringPrintf("CacheSizeGroup_%d", size_group);
   trial1->AppendGroup(group1, FieldTrial::kAllRemainingProbability);
-
-  if (experiment_group < 6 || experiment_group > 8)
-    return;
-
-  scoped_refptr<FieldTrial> trial2 = new FieldTrial("NewEviction", 10);
-  std::string group2 = StringPrintf("NewEvictionGroup_%d", experiment_group);
-  trial2->AppendGroup(group2, FieldTrial::kAllRemainingProbability);
 }
 
 }  // namespace
@@ -181,40 +170,10 @@ void SetFieldTrialInfo(int experiment_group, int size_group) {
 
 namespace disk_cache {
 
-// If the initialization of the cache fails, and force is true, we will discard
-// the whole cache and create a new one. In order to process a potentially large
-// number of files, we'll rename the cache folder to old_ + original_name +
-// number, (located on the same parent folder), and spawn a worker thread to
-// delete all the files on all the stale cache folders. The whole process can
-// still fail if we are not able to rename the cache folder (for instance due to
-// a sharing violation), and in that case a cache for this profile (on the
-// desired path) cannot be created.
-Backend* CreateCacheBackend(const std::wstring& full_path, bool force,
+Backend* CreateCacheBackend(const FilePath& full_path, bool force,
                             int max_bytes, net::CacheType type) {
-  BackendImpl* cache = new BackendImpl(full_path);
-  cache->SetMaxSize(max_bytes);
-  cache->SetType(type);
-  if (cache->Init())
-    return cache;
-
-  delete cache;
-  if (!force)
-    return NULL;
-
-  if (!DelayedCacheCleanup(full_path))
-    return NULL;
-
-  // The worker thread will start deleting files soon, but the original folder
-  // is not there anymore... let's create a new set of files.
-  cache = new BackendImpl(full_path);
-  cache->SetMaxSize(max_bytes);
-  cache->SetType(type);
-  if (cache->Init())
-    return cache;
-
-  delete cache;
-  LOG(ERROR) << "Unable to create cache";
-  return NULL;
+  // Create a backend without extra flags.
+  return BackendImpl::CreateBackend(full_path, force, max_bytes, type, kNone);
 }
 
 int PreferedCacheSize(int64 available) {
@@ -245,15 +204,51 @@ int PreferedCacheSize(int64 available) {
 
 // ------------------------------------------------------------------------
 
+// If the initialization of the cache fails, and force is true, we will discard
+// the whole cache and create a new one. In order to process a potentially large
+// number of files, we'll rename the cache folder to old_ + original_name +
+// number, (located on the same parent folder), and spawn a worker thread to
+// delete all the files on all the stale cache folders. The whole process can
+// still fail if we are not able to rename the cache folder (for instance due to
+// a sharing violation), and in that case a cache for this profile (on the
+// desired path) cannot be created.
+//
+// Static.
+Backend* BackendImpl::CreateBackend(const FilePath& full_path, bool force,
+                                    int max_bytes, net::CacheType type,
+                                    BackendFlags flags) {
+  BackendImpl* cache = new BackendImpl(full_path);
+  cache->SetMaxSize(max_bytes);
+  cache->SetType(type);
+  cache->SetFlags(flags);
+  if (cache->Init())
+    return cache;
+
+  delete cache;
+  if (!force)
+    return NULL;
+
+  if (!DelayedCacheCleanup(full_path))
+    return NULL;
+
+  // The worker thread will start deleting files soon, but the original folder
+  // is not there anymore... let's create a new set of files.
+  cache = new BackendImpl(full_path);
+  cache->SetMaxSize(max_bytes);
+  cache->SetType(type);
+  cache->SetFlags(flags);
+  if (cache->Init())
+    return cache;
+
+  delete cache;
+  LOG(ERROR) << "Unable to create cache";
+  return NULL;
+}
+
 bool BackendImpl::Init() {
   DCHECK(!init_);
   if (init_)
     return false;
-
-#ifdef USE_NEW_EVICTION
-  new_eviction_ = true;
-  user_flags_ |= kNewEviction;
-#endif
 
   bool create_files = false;
   if (!InitBackingStore(&create_files)) {
@@ -272,11 +267,19 @@ bool BackendImpl::Init() {
   }
 
   init_ = true;
-  if (!InitExperiment(&data_->header.experiment))
-    return false;
 
-  if (data_->header.experiment > 6 && data_->header.experiment < 9)
-    new_eviction_ = true;
+  if (data_->header.experiment != 0 && cache_type_ != net::DISK_CACHE) {
+    // No experiment for other caches.
+    return false;
+  }
+
+  if (!(user_flags_ & disk_cache::kNoRandom)) {
+    // The unit test controls directly what to test.
+    if (!InitExperiment(&data_->header.experiment))
+      return false;
+
+    new_eviction_ = (cache_type_ == net::DISK_CACHE);
+  }
 
   if (!CheckIndex()) {
     ReportError(ERR_INIT_FAILED);
@@ -309,9 +312,9 @@ bool BackendImpl::Init() {
   disabled_ = !rankings_.Init(this, new_eviction_);
   eviction_.Init(this);
 
-  // Setup experiment data only for the main cache.
+  // Setup load-time data only for the main cache.
   if (cache_type() == net::DISK_CACHE)
-    SetFieldTrialInfo(data_->header.experiment, GetSizeGroup());
+    SetFieldTrialInfo(GetSizeGroup());
 
   return !disabled_;
 }
@@ -326,7 +329,7 @@ BackendImpl::~BackendImpl() {
 
   timer_.Stop();
 
-  WaitForPendingIO(&num_pending_io_);
+  File::WaitForPendingIO(&num_pending_io_);
   DCHECK(!num_refs_);
 }
 
@@ -477,7 +480,7 @@ bool BackendImpl::DoomEntry(const std::string& key) {
 bool BackendImpl::DoomAllEntries() {
   if (!num_refs_) {
     PrepareForRestart();
-    DeleteCache(path_.c_str(), false);
+    DeleteCache(path_, false);
     return Init();
   } else {
     if (disabled_)
@@ -609,16 +612,14 @@ void BackendImpl::SetType(net::CacheType type) {
   cache_type_ = type;
 }
 
-std::wstring BackendImpl::GetFileName(Addr address) const {
+FilePath BackendImpl::GetFileName(Addr address) const {
   if (!address.is_separate_file() || !address.is_initialized()) {
     NOTREACHED();
-    return std::wstring();
+    return FilePath();
   }
 
-  std::wstring name(path_);
-  std::wstring tmp = StringPrintf(L"f_%06x", address.FileNumber());
-  file_util::AppendToPath(&name, tmp);
-  return name;
+  std::string tmp = StringPrintf("f_%06x", address.FileNumber());
+  return path_.AppendASCII(tmp);
 }
 
 MappedFile* BackendImpl::File(Addr address) {
@@ -636,13 +637,13 @@ bool BackendImpl::CreateExternalFile(Addr* address) {
       file_number = 1;
       continue;
     }
-    std::wstring name = GetFileName(file_address);
+    FilePath name = GetFileName(file_address);
     int flags = base::PLATFORM_FILE_READ |
                 base::PLATFORM_FILE_WRITE |
                 base::PLATFORM_FILE_CREATE |
                 base::PLATFORM_FILE_EXCLUSIVE_WRITE;
     scoped_refptr<disk_cache::File> file(new disk_cache::File(
-        base::CreatePlatformFile(name.c_str(), flags, NULL)));
+        base::CreatePlatformFile(name, flags, NULL)));
     if (!file->IsValid())
       continue;
 
@@ -740,16 +741,16 @@ void BackendImpl::CacheEntryDestroyed(Addr address) {
   DecreaseNumRefs();
 }
 
-bool BackendImpl::IsOpen(CacheRankingsBlock* rankings) const {
+EntryImpl* BackendImpl::GetOpenEntry(CacheRankingsBlock* rankings) const {
   DCHECK(rankings->HasData());
   EntriesMap::const_iterator it =
       open_entries_.find(rankings->Data()->contents);
   if (it != open_entries_.end()) {
     // We have this entry in memory.
-    return rankings->Data()->pointer == it->second;
+    return it->second;
   }
 
-  return false;
+  return NULL;
 }
 
 int32 BackendImpl::GetCurrentEntryId() const {
@@ -778,7 +779,10 @@ void BackendImpl::TooMuchStorageRequested(int32 size) {
 
 bool BackendImpl::IsLoaded() const {
   CACHE_UMA(COUNTS, "PendingIO", GetSizeGroup(), num_pending_io_);
-  return num_pending_io_ > 10;
+  if (user_flags_ & kNoLoadProtection)
+    return false;
+
+  return num_pending_io_ > 5;
 }
 
 std::string BackendImpl::HistogramName(const char* name, int experiment) const {
@@ -832,13 +836,13 @@ void BackendImpl::FirstEviction() {
   int large_ratio = large_entries_bytes * 100 / data_->header.num_bytes;
   CACHE_UMA(PERCENTAGE, "FirstLargeEntriesRatio", 0, large_ratio);
 
-  if (data_->header.experiment == 8) {
-    CACHE_UMA(PERCENTAGE, "FirstResurrectRatio", 8, stats_.GetResurrectRatio());
-    CACHE_UMA(PERCENTAGE, "FirstNoUseRatio", 8,
+  if (new_eviction_) {
+    CACHE_UMA(PERCENTAGE, "FirstResurrectRatio", 0, stats_.GetResurrectRatio());
+    CACHE_UMA(PERCENTAGE, "FirstNoUseRatio", 0,
               data_->header.lru.sizes[0] * 100 / data_->header.num_entries);
-    CACHE_UMA(PERCENTAGE, "FirstLowUseRatio", 8,
+    CACHE_UMA(PERCENTAGE, "FirstLowUseRatio", 0,
               data_->header.lru.sizes[1] * 100 / data_->header.num_entries);
-    CACHE_UMA(PERCENTAGE, "FirstHighUseRatio", 8,
+    CACHE_UMA(PERCENTAGE, "FirstHighUseRatio", 0,
               data_->header.lru.sizes[2] * 100 / data_->header.num_entries);
   }
 
@@ -927,6 +931,10 @@ void BackendImpl::SetNewEviction() {
   new_eviction_ = true;
 }
 
+void BackendImpl::SetFlags(uint32 flags) {
+  user_flags_ |= flags;
+}
+
 void BackendImpl::ClearRefCountForTest() {
   num_refs_ = 0;
 }
@@ -980,15 +988,14 @@ bool BackendImpl::CreateBackingStore(disk_cache::File* file) {
 bool BackendImpl::InitBackingStore(bool* file_created) {
   file_util::CreateDirectory(path_);
 
-  std::wstring index_name(path_);
-  file_util::AppendToPath(&index_name, kIndexName);
+  FilePath index_name = path_.AppendASCII(kIndexName);
 
   int flags = base::PLATFORM_FILE_READ |
               base::PLATFORM_FILE_WRITE |
               base::PLATFORM_FILE_OPEN_ALWAYS |
               base::PLATFORM_FILE_EXCLUSIVE_WRITE;
   scoped_refptr<disk_cache::File> file(new disk_cache::File(
-      base::CreatePlatformFile(index_name.c_str(), flags, file_created)));
+      base::CreatePlatformFile(index_name, flags, file_created)));
 
   if (!file->IsValid())
     return false;
@@ -1481,29 +1488,27 @@ void BackendImpl::ReportStats() {
     return;
 
   CACHE_UMA(HOURS, "UseTime", 0, static_cast<int>(use_hours));
-  CACHE_UMA(PERCENTAGE, "HitRatio", data_->header.experiment,
-            stats_.GetHitRatio());
+  CACHE_UMA(PERCENTAGE, "HitRatio", 0, stats_.GetHitRatio());
 
   int64 trim_rate = stats_.GetCounter(Stats::TRIM_ENTRY) / use_hours;
   CACHE_UMA(COUNTS, "TrimRate", 0, static_cast<int>(trim_rate));
 
   int avg_size = data_->header.num_bytes / GetEntryCount();
-  CACHE_UMA(COUNTS, "EntrySize", data_->header.experiment, avg_size);
+  CACHE_UMA(COUNTS, "EntrySize", 0, avg_size);
 
   int large_entries_bytes = stats_.GetLargeEntriesSize();
   int large_ratio = large_entries_bytes * 100 / data_->header.num_bytes;
   CACHE_UMA(PERCENTAGE, "LargeEntriesRatio", 0, large_ratio);
 
   if (new_eviction_) {
-    CACHE_UMA(PERCENTAGE, "ResurrectRatio", data_->header.experiment,
-              stats_.GetResurrectRatio());
-    CACHE_UMA(PERCENTAGE, "NoUseRatio", data_->header.experiment,
+    CACHE_UMA(PERCENTAGE, "ResurrectRatio", 0, stats_.GetResurrectRatio());
+    CACHE_UMA(PERCENTAGE, "NoUseRatio", 0,
               data_->header.lru.sizes[0] * 100 / data_->header.num_entries);
-    CACHE_UMA(PERCENTAGE, "LowUseRatio", data_->header.experiment,
+    CACHE_UMA(PERCENTAGE, "LowUseRatio", 0,
               data_->header.lru.sizes[1] * 100 / data_->header.num_entries);
-    CACHE_UMA(PERCENTAGE, "HighUseRatio", data_->header.experiment,
+    CACHE_UMA(PERCENTAGE, "HighUseRatio", 0,
               data_->header.lru.sizes[2] * 100 / data_->header.num_entries);
-    CACHE_UMA(PERCENTAGE, "DeletedRatio", data_->header.experiment,
+    CACHE_UMA(PERCENTAGE, "DeletedRatio", 0,
               data_->header.lru.sizes[4] * 100 / data_->header.num_entries);
   }
 
@@ -1560,10 +1565,7 @@ bool BackendImpl::CheckIndex() {
 
   AdjustMaxCacheSize(data_->header.table_len);
 
-  // We need to avoid integer overflows.
-  DCHECK(max_size_ < kint32max - kint32max / 10);
-  if (data_->header.num_bytes < 0 ||
-      data_->header.num_bytes > max_size_ + max_size_ / 10) {
+  if (data_->header.num_bytes < 0) {
     LOG(ERROR) << "Invalid cache (current) size";
     return false;
   }
@@ -1619,7 +1621,7 @@ int BackendImpl::CheckAllEntries() {
 
 bool BackendImpl::CheckEntry(EntryImpl* cache_entry) {
   RankingsNode* rankings = cache_entry->rankings()->Data();
-  return !rankings->pointer;
+  return !rankings->dummy;
 }
 
 }  // namespace disk_cache

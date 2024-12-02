@@ -10,6 +10,7 @@
 #include <gtk/gtk.h>
 #include <gdk/gdkx.h>
 
+#include "app/gfx/blit.h"
 #include "base/basictypes.h"
 #include "base/file_util.h"
 #include "base/message_loop.h"
@@ -18,7 +19,6 @@
 #include "base/string_util.h"
 #include "webkit/api/public/WebCursorInfo.h"
 #include "webkit/api/public/WebInputEvent.h"
-// #include "webkit/default_plugin/plugin_impl.h"
 #include "webkit/glue/glue_util.h"
 #include "webkit/glue/webplugin.h"
 #include "webkit/glue/plugins/gtk_plugin_container.h"
@@ -28,53 +28,43 @@
 #include "webkit/glue/plugins/plugin_list.h"
 #include "webkit/glue/plugins/plugin_stream_url.h"
 #include "webkit/glue/webkit_glue.h"
-#if defined(OS_LINUX)
+
 #include "third_party/npapi/bindings/npapi_x11.h"
-#endif
 
 using WebKit::WebCursorInfo;
 using WebKit::WebKeyboardEvent;
 using WebKit::WebInputEvent;
 using WebKit::WebMouseEvent;
 
-WebPluginDelegate* WebPluginDelegate::Create(
-    const FilePath& filename,
-    const std::string& mime_type,
-    gfx::PluginWindowHandle containing_view) {
-  scoped_refptr<NPAPI::PluginLib> plugin =
-      NPAPI::PluginLib::CreatePluginLib(filename);
-  if (plugin.get() == NULL)
-    return NULL;
-
-  NPError err = plugin->NP_Initialize();
-  if (err != NPERR_NO_ERROR)
-    return NULL;
-
-  scoped_refptr<NPAPI::PluginInstance> instance =
-      plugin->CreateInstance(mime_type);
-  return new WebPluginDelegateImpl(containing_view, instance.get());
-}
-
 WebPluginDelegateImpl::WebPluginDelegateImpl(
     gfx::PluginWindowHandle containing_view,
     NPAPI::PluginInstance *instance)
-    :
-      windowed_handle_(0),
+    : windowed_handle_(0),
       windowed_did_set_window_(false),
+      windowless_needs_set_window_(true),
       windowless_(false),
       plugin_(NULL),
-      windowless_needs_set_window_(true),
       instance_(instance),
       pixmap_(NULL),
       first_event_time_(-1.0),
+      plug_(NULL),
+      socket_(NULL),
       parent_(containing_view),
       quirks_(0) {
   memset(&window_, 0, sizeof(window_));
   if (instance_->mime_type() == "application/x-shockwave-flash") {
     // Flash is tied to Firefox's whacky behavior with windowless plugins. See
     // comments in WindowlessPaint
-    quirks_ |= PLUGIN_QUIRK_WINDOWLESS_OFFSET_WINDOW_TO_DRAW;
+    quirks_ |= PLUGIN_QUIRK_WINDOWLESS_OFFSET_WINDOW_TO_DRAW
+        | PLUGIN_QUIRK_WINDOWLESS_INVALIDATE_AFTER_SET_WINDOW;
   }
+
+  // TODO(evanm): I played with this for quite a while but couldn't
+  // figure out a way to make Flash not crash unless I didn't call
+  // NPP_SetWindow.
+  // However, after piman's grand refactor of windowed plugins, maybe
+  // this is no longer necessary.
+  quirks_ |= PLUGIN_QUIRK_DONT_SET_NULL_WINDOW_HANDLE_ON_DESTROY;
 }
 
 WebPluginDelegateImpl::~WebPluginDelegateImpl() {
@@ -89,89 +79,23 @@ WebPluginDelegateImpl::~WebPluginDelegateImpl() {
   }
 
   if (pixmap_) {
-    g_object_unref(gdk_drawable_get_colormap(pixmap_));
     g_object_unref(pixmap_);
     pixmap_ = NULL;
   }
 }
 
+void WebPluginDelegateImpl::PlatformInitialize() {
+  gfx::PluginWindowHandle handle =
+      windowless_ ? 0 : gtk_plug_get_id(GTK_PLUG(plug_));
+  plugin_->SetWindow(handle);
+}
+
+void WebPluginDelegateImpl::PlatformDestroyInstance() {
+  // Nothing to do here.
+}
+
 void WebPluginDelegateImpl::PluginDestroyed() {
   delete this;
-}
-
-bool WebPluginDelegateImpl::Initialize(const GURL& url,
-                                       char** argn,
-                                       char** argv,
-                                       int argc,
-                                       WebPlugin* plugin,
-                                       bool load_manually) {
-  plugin_ = plugin;
-
-  instance_->set_web_plugin(plugin);
-  NPAPI::PluginInstance* old_instance =
-      NPAPI::PluginInstance::SetInitializingInstance(instance_);
-
-  bool start_result = instance_->Start(url, argn, argv, argc, load_manually);
-
-  NPAPI::PluginInstance::SetInitializingInstance(old_instance);
-
-  if (!start_result)
-    return false;
-
-  windowless_ = instance_->windowless();
-  if (windowless_) {
-    // For windowless plugins we should set the containing window handle
-    // as the instance window handle. This is what Safari does. Not having
-    // a valid window handle causes subtle bugs with plugins which retreive
-    // the window handle and validate the same. The window handle can be
-    // retreived via NPN_GetValue of NPNVnetscapeWindow.
-    instance_->set_window_handle(parent_);
-    // CreateDummyWindowForActivation();
-    // handle_event_pump_messages_event_ = CreateEvent(NULL, TRUE, FALSE, NULL);
-  } else {
-    if (!WindowedCreatePlugin())
-      return false;
-  }
-
-  plugin->SetWindow(windowed_handle_);
-  plugin_url_ = url.spec();
-
-  return true;
-}
-
-void WebPluginDelegateImpl::DestroyInstance() {
-  if (instance_ && (instance_->npp()->ndata != NULL)) {
-    // Shutdown all streams before destroying so that
-    // no streams are left "in progress".  Need to do
-    // this before calling set_web_plugin(NULL) because the
-    // instance uses the helper to do the download.
-    instance_->CloseStreams();
-
-    // TODO(evanm): I played with this for quite a while but couldn't
-    // figure out a way to make Flash not crash unless I didn't call
-    // NPP_SetWindow.  Perhaps it just should be marked with the quirk
-    // that wraps the NPP_SetWindow call.
-    // window_.window = NULL;
-    // if (!(quirks_ & PLUGIN_QUIRK_DONT_SET_NULL_WINDOW_HANDLE_ON_DESTROY)) {
-    //   instance_->NPP_SetWindow(&window_);
-    // }
-
-    instance_->NPP_Destroy();
-
-    instance_->set_web_plugin(NULL);
-
-    instance_ = 0;
-  }
-}
-
-void WebPluginDelegateImpl::UpdateGeometry(
-    const gfx::Rect& window_rect,
-    const gfx::Rect& clip_rect) {
-  if (windowless_) {
-    WindowlessUpdateGeometry(window_rect, clip_rect);
-  } else {
-    WindowedUpdateGeometry(window_rect, clip_rect);
-  }
 }
 
 void WebPluginDelegateImpl::Paint(cairo_t* context,
@@ -184,92 +108,39 @@ void WebPluginDelegateImpl::Print(cairo_t* context) {
   NOTIMPLEMENTED();
 }
 
-NPObject* WebPluginDelegateImpl::GetPluginScriptableObject() {
-  return instance_->GetPluginScriptableObject();
-}
-
-void WebPluginDelegateImpl::DidFinishLoadWithReason(NPReason reason) {
-  instance()->DidFinishLoadWithReason(reason);
-}
-
-int WebPluginDelegateImpl::GetProcessId() {
-  // We are in process, so the plugin pid is this current process pid.
-  return base::GetCurrentProcId();
-}
-
-void WebPluginDelegateImpl::SendJavaScriptStream(const std::string& url,
-                                                 const std::wstring& result,
-                                                 bool success,
-                                                 bool notify_needed,
-                                                 intptr_t notify_data) {
-  instance()->SendJavaScriptStream(url, result, success, notify_needed,
-                                   notify_data);
-}
-
-void WebPluginDelegateImpl::DidReceiveManualResponse(
-    const std::string& url, const std::string& mime_type,
-    const std::string& headers, uint32 expected_length, uint32 last_modified) {
-  if (!windowless_) {
-    // Calling NPP_WriteReady before NPP_SetWindow causes movies to not load in
-    // Flash.  See http://b/issue?id=892174.
-    DCHECK(windowed_did_set_window_);
-  }
-
-  instance()->DidReceiveManualResponse(url, mime_type, headers,
-                                       expected_length, last_modified);
-}
-
-void WebPluginDelegateImpl::DidReceiveManualData(const char* buffer,
-                                                 int length) {
-  instance()->DidReceiveManualData(buffer, length);
-}
-
-void WebPluginDelegateImpl::DidFinishManualLoading() {
-  instance()->DidFinishManualLoading();
-}
-
-void WebPluginDelegateImpl::DidManualLoadFail() {
-  instance()->DidManualLoadFail();
-}
-
-FilePath WebPluginDelegateImpl::GetPluginPath() {
-  return instance()->plugin_lib()->plugin_info().path;
-}
-
 void WebPluginDelegateImpl::InstallMissingPlugin() {
-  /* XXX NPEvent evt;
-  evt.event = PluginInstallerImpl::kInstallMissingPluginMessage;
-  evt.lParam = 0;
-  evt.wParam = 0;
-  instance()->NPP_HandleEvent(&evt); */
-}
-
-void WebPluginDelegateImpl::WindowedUpdateGeometry(
-    const gfx::Rect& window_rect,
-    const gfx::Rect& clip_rect) {
-  if (WindowedReposition(window_rect, clip_rect) ||
-      !windowed_did_set_window_) {
-    // Let the plugin know that it has been moved
-    WindowedSetWindow();
-  }
+  NOTIMPLEMENTED();
 }
 
 bool WebPluginDelegateImpl::WindowedCreatePlugin() {
   DCHECK(!windowed_handle_);
+  DCHECK(!plug_);
 
-  bool xembed;
+  // NPP_GetValue() will write 4 bytes of data to this variable.  Don't use a
+  // single byte bool, use an int instead.
+  int xembed;
   NPError err = instance_->NPP_GetValue(NPPVpluginNeedsXEmbed, &xembed);
-  DCHECK(err == NPERR_NO_ERROR);
-  if (!xembed) {
-    NOTIMPLEMENTED() << "Windowed plugin but without xembed.";
+  if (err != NPERR_NO_ERROR || !xembed) {
+    NOTIMPLEMENTED() << " windowed plugin but without xembed.";
     return false;
   }
 
-  // Xembed plugins need a window created for them browser-side.
-  // Do that now.
-  windowed_handle_ = plugin_->CreatePluginContainer();
-  if (!windowed_handle_)
-    return false;
+  // Passing 0 as the socket XID creates a plug without plugging it in a socket
+  // yet, so that it can be latter added with gtk_socket_add_id().
+  plug_ = gtk_plug_new(0);
+  gtk_widget_show(plug_);
+  socket_ = gtk_socket_new();
+  gtk_widget_show(socket_);
+  gtk_container_add(GTK_CONTAINER(plug_), socket_);
+  gtk_widget_show_all(plug_);
+
+  // Prevent the plug from being destroyed if the browser kills the container
+  // window.
+  g_signal_connect(plug_, "delete-event", G_CALLBACK(gtk_true), NULL);
+  // Prevent the socket from being destroyed when the plugin removes itself.
+  g_signal_connect(socket_, "plug_removed", G_CALLBACK(gtk_true), NULL);
+
+  windowed_handle_ = gtk_socket_get_id(GTK_SOCKET(socket_));
 
   window_.window = reinterpret_cast<void*>(windowed_handle_);
 
@@ -286,9 +157,12 @@ bool WebPluginDelegateImpl::WindowedCreatePlugin() {
 }
 
 void WebPluginDelegateImpl::WindowedDestroyWindow() {
-  if (windowed_handle_) {
-    plugin_->WillDestroyWindow(windowed_handle_);
+  if (plug_) {
+    plugin_->WillDestroyWindow(gtk_plug_get_id(GTK_PLUG(plug_)));
 
+    gtk_widget_destroy(plug_);
+    plug_ = NULL;
+    socket_ = NULL;
     windowed_handle_ = 0;
   }
 }
@@ -311,6 +185,15 @@ void WebPluginDelegateImpl::WindowedSetWindow() {
 
   if (!windowed_handle_) {
     NOTREACHED();
+    return;
+  }
+
+  // See https://bugzilla.mozilla.org/show_bug.cgi?id=108347
+  // If we call NPP_SetWindow with a <= 0 width or height, problems arise in
+  // Flash (and possibly other plugins).
+  // TODO(piman): the Mozilla code suggests that for the Java plugin, we should
+  // still call NPP_SetWindow in that case. We need to verify that.
+  if (window_rect_.width() <= 0 || window_rect_.height() <= 0) {
     return;
   }
 
@@ -366,7 +249,6 @@ void WebPluginDelegateImpl::EnsurePixmapAtLeastSize(int width, int height) {
       return;  // We are already the appropriate size.
 
     // Otherwise, we need to recreate ourselves.
-    g_object_unref(gdk_drawable_get_colormap(pixmap_));
     g_object_unref(pixmap_);
     pixmap_ = NULL;
   }
@@ -374,26 +256,27 @@ void WebPluginDelegateImpl::EnsurePixmapAtLeastSize(int width, int height) {
   // |sys_visual| is owned by gdk; we shouldn't free it.
   GdkVisual* sys_visual = gdk_visual_get_system();
   pixmap_ = gdk_pixmap_new(NULL,  // use width/height/depth params
-                           width, height, sys_visual->depth);
+                           std::max(1, width), std::max(1, height),
+                           sys_visual->depth);
   GdkColormap* colormap = gdk_colormap_new(gdk_visual_get_system(),
                                            FALSE);
   gdk_drawable_set_colormap(GDK_DRAWABLE(pixmap_), colormap);
+  // The GdkDrawable now owns the GdkColormap.
+  g_object_unref(colormap);
 }
 
 #ifdef DEBUG_RECTANGLES
 namespace {
 
-// Draw a rectangle on a Cairo surface.
+// Draw a rectangle on a Cairo context.
 // Useful for debugging various rectangles involved in drawing plugins.
-void DrawDebugRectangle(cairo_surface_t* surface,
+void DrawDebugRectangle(cairo_t* cairo,
                         const gfx::Rect& rect,
                         float r, float g, float b) {
-  cairo_t* cairo = cairo_create(surface);
   cairo_set_source_rgba(cairo, r, g, b, 0.5);
   cairo_rectangle(cairo, rect.x(), rect.y(),
                   rect.width(), rect.height());
   cairo_stroke(cairo);
-  cairo_destroy(cairo);
 }
 
 }  // namespace
@@ -517,21 +400,19 @@ void WebPluginDelegateImpl::WindowlessPaint(cairo_t* context,
     DCHECK_EQ(err, NPERR_NO_ERROR);
   }
 
+  gfx::Rect pixmap_draw_rect = draw_rect;
+  pixmap_draw_rect.Offset(offset_x, offset_y);
+
   gfx::Rect pixmap_rect(0, 0,
-                        draw_rect.x() + offset_x + draw_rect.width(),
-                        draw_rect.y() + offset_y + draw_rect.height());
+                        pixmap_draw_rect.right(),
+                        pixmap_draw_rect.bottom());
 
   EnsurePixmapAtLeastSize(pixmap_rect.width(), pixmap_rect.height());
 
   // Copy the current image into the pixmap, so the plugin can draw over
   // this background.
   cairo_t* cairo = gdk_cairo_create(pixmap_);
-  cairo_set_source_surface(cairo, cairo_get_target(context),
-                           offset_x, offset_y);
-  cairo_rectangle(cairo, draw_rect.x() + offset_x, draw_rect.y() + offset_y,
-                  draw_rect.width(), draw_rect.height());
-  cairo_clip(cairo);
-  cairo_paint(cairo);
+  BlitContextToContext(cairo, pixmap_draw_rect, context, draw_rect.origin());
   cairo_destroy(cairo);
 
   // Construct the paint message, targeting the pixmap.
@@ -540,10 +421,10 @@ void WebPluginDelegateImpl::WindowlessPaint(cairo_t* context,
   event.type = GraphicsExpose;
   event.display = GDK_DISPLAY();
   event.drawable = GDK_PIXMAP_XID(pixmap_);
-  event.x = draw_rect.x() + offset_x;
-  event.y = draw_rect.y() + offset_y;
-  event.width = draw_rect.width();
-  event.height = draw_rect.height();
+  event.x = pixmap_draw_rect.x();
+  event.y = pixmap_draw_rect.y();
+  event.width = pixmap_draw_rect.width();
+  event.height = pixmap_draw_rect.height();
 
   // Tell the plugin to paint into the pixmap.
   static StatsRate plugin_paint("Plugin.Paint");
@@ -551,6 +432,7 @@ void WebPluginDelegateImpl::WindowlessPaint(cairo_t* context,
   NPError err = instance()->NPP_HandleEvent(&np_event);
   DCHECK_EQ(err, NPERR_NO_ERROR);
 
+  cairo_save(context);
   // Now copy the rendered image pixmap back into the drawing buffer.
   gdk_cairo_set_source_pixmap(context, pixmap_, -offset_x, -offset_y);
   cairo_rectangle(context, draw_rect.x(), draw_rect.y(),
@@ -565,6 +447,7 @@ void WebPluginDelegateImpl::WindowlessPaint(cairo_t* context,
   // Drawing rect = red.
   DrawDebugRectangle(context, draw_rect, 1, 0, 0);
 #endif
+  cairo_restore(context);
 }
 
 void WebPluginDelegateImpl::WindowlessSetWindow(bool force_set_window) {
@@ -596,17 +479,21 @@ void WebPluginDelegateImpl::WindowlessSetWindow(bool force_set_window) {
   NPSetWindowCallbackStruct* extra =
       static_cast<NPSetWindowCallbackStruct*>(window_.ws_info);
   extra->display = GDK_DISPLAY();
-  GdkVisual* visual = gdk_visual_get_system();
-  extra->visual = GDK_VISUAL_XVISUAL(visual);
-  extra->depth = visual->depth;
-  GdkColormap* colormap = gdk_colormap_new(gdk_visual_get_system(), FALSE);
-  extra->colormap = GDK_COLORMAP_XCOLORMAP(colormap);
+  extra->visual = DefaultVisual(GDK_DISPLAY(), 0);
+  extra->depth = DefaultDepth(GDK_DISPLAY(), 0);
+  extra->colormap = DefaultColormap(GDK_DISPLAY(), 0);
 
   if (!force_set_window)
     windowless_needs_set_window_ = false;
 
   NPError err = instance()->NPP_SetWindow(&window_);
   DCHECK(err == NPERR_NO_ERROR);
+  if (quirks_ & PLUGIN_QUIRK_WINDOWLESS_INVALIDATE_AFTER_SET_WINDOW) {
+    // After a NPP_SetWindow, Flash cancels its timer that generates the
+    // invalidates until it gets a paint event, but doesn't explicitly call
+    // NPP_InvalidateRect.
+    plugin_->InvalidateRect(clip_rect_);
+  }
 }
 
 void WebPluginDelegateImpl::SetFocus() {
@@ -719,6 +606,8 @@ static bool NPEventFromWebMouseEvent(const WebMouseEvent& event,
         case WebMouseEvent::ButtonRight:
           button_event.button = Button3;
           break;
+        default:
+          NOTREACHED();
       }
       button_event.same_screen = True;
       break;
@@ -818,36 +707,4 @@ bool WebPluginDelegateImpl::HandleInputEvent(const WebInputEvent& event,
 #endif
 
   return ret;
-}
-
-WebPluginResourceClient* WebPluginDelegateImpl::CreateResourceClient(
-    int resource_id, const std::string &url, bool notify_needed,
-    intptr_t notify_data, intptr_t existing_stream) {
-  // Stream already exists. This typically happens for range requests
-  // initiated via NPN_RequestRead.
-  if (existing_stream) {
-    NPAPI::PluginStream* plugin_stream =
-        reinterpret_cast<NPAPI::PluginStream*>(existing_stream);
-
-    plugin_stream->CancelRequest();
-
-    return plugin_stream->AsResourceClient();
-  }
-
-  if (notify_needed) {
-    instance()->SetURLLoadData(GURL(url.c_str()), notify_data);
-  }
-  std::string mime_type;
-  NPAPI::PluginStreamUrl *stream = instance()->CreateStream(
-      resource_id, url, mime_type, notify_needed,
-      reinterpret_cast<void*>(notify_data));
-  return stream;
-}
-
-void WebPluginDelegateImpl::URLRequestRouted(const std::string&url,
-                                             bool notify_needed,
-                                             intptr_t notify_data) {
-  if (notify_needed) {
-    instance()->SetURLLoadData(GURL(url.c_str()), notify_data);
-  }
 }

@@ -31,8 +31,8 @@
 #include <string>
 #include <list>
 
+#include "app/gfx/native_widget_types.h"
 #include "base/basictypes.h"
-#include "base/gfx/native_widget_types.h"
 #if defined(OS_MACOSX)
 #include "base/lazy_instance.h"
 #endif
@@ -47,9 +47,14 @@
 typedef std::list<gfx::NativeWindow> WindowList;
 
 struct WebPreferences;
-class StringPiece;
+class AccessibilityController;
+class FilePath;
 class TestNavigationEntry;
 class TestNavigationController;
+
+namespace base {
+class StringPiece;
+}
 
 class TestShell {
 public:
@@ -89,7 +94,7 @@ public:
     // cleanup.
     void PlatformCleanUp();
 
-    WebView* webView() {
+    WebKit::WebView* webView() {
       return m_webViewHost.get() ? m_webViewHost->webview() : NULL;
     }
     WebViewHost* webViewHost() { return m_webViewHost.get(); }
@@ -109,6 +114,9 @@ public:
     // We use this to avoid relying on Windows focus during layout test mode.
     void SetFocus(WebWidgetHost* host, bool enable);
 
+    AccessibilityController* accessibility_controller() const {
+      return accessibility_controller_.get();
+    }
     LayoutTestController* layout_test_controller() {
       return layout_test_controller_.get();
     }
@@ -147,8 +155,9 @@ public:
       return layout_test_controller_->AcceptsEditing();
     }
 
-    void LoadURL(const wchar_t* url);
-    void LoadURLForFrame(const wchar_t* url, const wchar_t* frame_name);
+    void LoadFile(const FilePath& file);
+    void LoadURL(const GURL& url);
+    void LoadURLForFrame(const GURL& url, const std::wstring& frame_name);
     void GoBackOrForward(int offset);
     void Reload();
     bool Navigate(const TestNavigationEntry& entry, bool reload);
@@ -166,7 +175,7 @@ public:
     static WindowList* windowList() { return window_list_; }
 
     // If shell is non-null, then *shell is assigned upon successful return
-    static bool CreateNewWindow(const std::wstring& startingURL,
+    static bool CreateNewWindow(const GURL& starting_url,
                                 TestShell** shell = NULL);
 
     static void DestroyWindow(gfx::NativeWindow windowHandle);
@@ -177,8 +186,8 @@ public:
 
     // Implements CreateWebView for TestWebViewDelegate, which in turn
     // is called as a WebViewDelegate.
-    WebView* CreateWebView(WebView* webview);
-    WebKit::WebWidget* CreatePopupWidget(WebView* webview);
+    WebKit::WebView* CreateWebView();
+    WebKit::WebWidget* CreatePopupWidget();
     void ClosePopup();
 
 #if defined(OS_WIN)
@@ -188,7 +197,7 @@ public:
     // Called by the WebView delegate WindowObjectCleared() method, this
     // binds the layout_test_controller_ and other C++ controller classes to
     // window JavaScript objects so they can be accessed by layout tests.
-    virtual void BindJSObjectsToWindow(WebFrame* frame);
+    virtual void BindJSObjectsToWindow(WebKit::WebFrame* frame);
 
     // Runs a layout test.  Loads a single file (specified in params.test_url)
     // into the first available window, then dumps the requested text
@@ -212,7 +221,7 @@ public:
 
     // Writes the image captured from the given web frame to the given file.
     // The returned string is the ASCII-ized MD5 sum of the image.
-    static std::string DumpImage(WebView* view,
+    static std::string DumpImage(skia::PlatformCanvas* canvas,
                                  const std::wstring& file_name,
                                  const std::string& pixel_hash);
 
@@ -234,9 +243,11 @@ public:
     // Get the timeout for running a test.
     static int GetLayoutTestTimeout() { return file_test_timeout_ms_; }
 
-    // Get the timeout for running a test in seconds
-    static int GetLayoutTestTimeoutInSeconds() {
-      return file_test_timeout_ms_ / 1000;
+    // Get the timeout killing an unresponsive TestShell.
+    // Make it a bit longer than the regular timeout to avoid killing the
+    // TestShell process unless we really need to.
+    static int GetLayoutTestTimeoutForWatchDog() {
+      return file_test_timeout_ms_ + 1000;
     }
 
 #if defined(OS_WIN)
@@ -267,10 +278,11 @@ public:
     static void ShowStartupDebuggingDialog();
 
     // This is called indirectly by the network layer to access resources.
-    static StringPiece NetResourceProvider(int key);
+    static base::StringPiece NetResourceProvider(int key);
 
 protected:
-    bool Initialize(const std::wstring& startingURL);
+    bool Initialize(const GURL& starting_url);
+    bool IsSVGTestURL(const GURL& url);
     void SizeToSVG();
     void SizeToDefault();
     void SizeTo(int width, int height);
@@ -316,6 +328,7 @@ private:
     // Default timeout in ms for file page loads when in layout test mode.
     static int file_test_timeout_ms_;
 
+    scoped_ptr<AccessibilityController> accessibility_controller_;
     scoped_ptr<LayoutTestController> layout_test_controller_;
 
     scoped_ptr<EventSendingController> event_sending_controller_;
@@ -324,16 +337,16 @@ private:
 
     scoped_ptr<TestNavigationController> navigation_controller_;
 
-    scoped_refptr<TestWebViewDelegate> delegate_;
-    scoped_refptr<TestWebViewDelegate> popup_delegate_;
+    scoped_ptr<TestWebViewDelegate> delegate_;
+    scoped_ptr<TestWebViewDelegate> popup_delegate_;
 
     const TestParams* test_params_;
 
     // True while a test is preparing to run
-    bool test_is_preparing_;
+    static bool test_is_preparing_;
 
     // True while a test is running
-    bool test_is_pending_;
+    static bool test_is_pending_;
 
     // True if driven from a nested message loop.
     bool is_modal_;

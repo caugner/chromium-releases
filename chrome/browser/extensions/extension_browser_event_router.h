@@ -35,6 +35,10 @@ class ExtensionBrowserEventRouter : public TabStripModelObserver,
   virtual void OnBrowserRemoving(const Browser* browser);
   virtual void OnBrowserSetLastActive(const Browser* browser);
 
+  // Called from Observe() on BROWSER_WINDOW_READY (not a part of
+  // BrowserList::Observer).
+  void OnBrowserWindowReady(const Browser* browser);
+
   // TabStripModelObserver
   void TabInsertedAt(TabContents* contents, int index, bool foreground);
   void TabClosingAt(TabContents* contents, int index);
@@ -48,12 +52,17 @@ class ExtensionBrowserEventRouter : public TabStripModelObserver,
   void TabChangedAt(TabContents* contents, int index, bool loading_only);
   void TabStripEmpty();
 
-  // PageActions.
+  // Page Action execute event.
   void PageActionExecuted(Profile* profile,
-                          std::string extension_id,
-                          std::string page_action_id,
+                          const std::string& extension_id,
+                          const std::string& page_action_id,
                           int tab_id,
-                          std::string url);
+                          const std::string& url,
+                          int button);
+  // Browser Actions execute event.
+  void BrowserActionExecuted(Profile* profile,
+                             const std::string& extension_id,
+                             Browser* browser);
 
   // NotificationObserver.
   void Observe(NotificationType type,

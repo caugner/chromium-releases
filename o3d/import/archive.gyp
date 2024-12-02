@@ -16,6 +16,21 @@
       '../../<(cgdir)/include',
       '../../<(gtestdir)',
     ],
+    'conditions': [
+      ['OS=="linux"',
+        {
+          'include_dirs': [
+            '/usr/include/cairo',
+            '/usr/include/glib-2.0',
+            '/usr/include/gtk-2.0',
+            '/usr/include/pango-1.0',
+            '/usr/lib/glib-2.0/include',
+            '/usr/lib/gtk-2.0/include',
+            '/usr/include/atk-1.0',
+          ],
+        },
+      ],
+    ],
   },
   'targets': [
     {
@@ -37,6 +52,8 @@
         'cross/memory_buffer.h',
         'cross/memory_stream.cc',
         'cross/memory_stream.h',
+        'cross/main_thread_archive_callback_client.cc',
+        'cross/main_thread_archive_callback_client.h',
         'cross/raw_data.cc',
         'cross/raw_data.h',
         'cross/tar_processor.cc',
@@ -44,6 +61,8 @@
         'cross/targz_generator.h',
         'cross/targz_processor.cc',
         'cross/targz_processor.h',
+        'cross/threaded_stream_processor.cc',
+        'cross/threaded_stream_processor.h',
       ],
     },
     {
@@ -61,8 +80,30 @@
           'cross/raw_data_test.cc',
           'cross/tar_processor_test.cc',
           'cross/targz_processor_test.cc',
+          'cross/threaded_stream_processor_test.cc',
         ],
       },
+      'copies': [
+        {
+          'destination': '<(PRODUCT_DIR)/archive_files',
+          'files': [
+            "../tests/archive_files/BumpReflect.fx",
+            "../tests/archive_files/bogus.tar.gz",
+            "../tests/archive_files/keyboard.jpg",
+            "../tests/archive_files/keyboard.jpg.gz",
+            "../tests/archive_files/perc.aif",
+            "../tests/archive_files/test1.tar",
+            "../tests/archive_files/test1.tar.gz",
+            "../tests/archive_files/test2.tar.gz",
+          ],
+        },
+      ],
     },
   ],
 }
+
+# Local Variables:
+# tab-width:2
+# indent-tabs-mode:nil
+# End:
+# vim: set expandtab tabstop=2 shiftwidth=2:

@@ -4,15 +4,14 @@
 
 #import <Cocoa/Cocoa.h>
 
-@protocol AutocompleteTextFieldEditorDelegateMethods
+class AutocompleteTextFieldObserver;
 
-// Delegate -paste: implementation to the field being edited.  If the
-// delegate returns YES, or does not implement the method, NSTextView
-// is called to handle the paste.  The delegate can block the paste
-// (or handle it internally) by returning NO.
-- (BOOL)textShouldPaste:(NSText*)fieldEditor;
-
-@end
+// AutocompleteTextFieldEditor customized the AutocompletTextField
+// field editor (helper text-view used in editing).  It intercepts UI
+// events for forwarding to the core Omnibox code.  It also undoes
+// some of the effects of using styled text in the Omnibox (the text
+// is styled but should not appear that way when copied to the
+// pasteboard).
 
 // Field editor used for the autocomplete field.
 @interface AutocompleteTextFieldEditor : NSTextView {
@@ -25,8 +24,9 @@
 // Same as above, note that this calls through to performCopy.
 - (void)performCut:(NSPasteboard*)pb;
 
-// Called by -paste: to decide whether to forward to superclass.
-// Exposed for unit testing.
-- (BOOL)shouldPaste;
+@end
 
+@interface AutocompleteTextFieldEditor(PrivateTestMethods)
+- (AutocompleteTextFieldObserver*)observer;
+- (void)pasteAndGo:sender;
 @end

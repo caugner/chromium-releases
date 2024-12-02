@@ -18,6 +18,14 @@
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 
+const std::string BEFORE_UNLOAD_HTML =
+    "<html><head><title>beforeunload</title></head><body>"
+    "<script>window.onbeforeunload=function(e){return 'foo'}</script>"
+    "</body></html>";
+
+const std::wstring OPEN_NEW_BEFOREUNLOAD_PAGE =
+    L"w=window.open(); w.onbeforeunload=function(e){return 'foo'};";
+
 namespace {
 
 // Given a page title, returns the expected window caption string.
@@ -33,6 +41,15 @@ std::wstring WindowCaptionFromPageTitle(std::wstring page_title) {
     return l10n_util::GetString(IDS_BROWSER_WINDOW_MAC_TAB_UNTITLED);
   return page_title;
 #endif
+}
+
+// Returns the number of active RenderProcessHosts.
+int CountRenderProcessHosts() {
+  int result = 0;
+  for (RenderProcessHost::iterator i(RenderProcessHost::AllHostsIterator());
+       !i.IsAtEnd(); i.Advance())
+    ++result;
+  return result;
 }
 
 }  // namespace
@@ -84,6 +101,8 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, Title) {
   EXPECT_EQ(WideToUTF16(test_title), tab_title);
 }
 
+#if !defined(OS_MACOSX)
+// TODO(port): BUG16322
 IN_PROC_BROWSER_TEST_F(BrowserTest, JavascriptAlertActivatesTab) {
   GURL url(ui_test_utils::GetTestUrl(L".", L"title1.html"));
   ui_test_utils::NavigateToURL(browser(), url);
@@ -100,6 +119,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, JavascriptAlertActivatesTab) {
   EXPECT_EQ(2, browser()->tab_count());
   EXPECT_EQ(1, browser()->selected_index());
 }
+#endif  // !defined(OS_MACOSX)
 
 // Create 34 tabs and verify that a lot of processes have been created. The
 // exact number of processes depends on the amount of memory. Previously we
@@ -118,8 +138,60 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, ThirtyFourTabs) {
   // See browser\renderer_host\render_process_host.cc for the algorithm to
   // decide how many processes to create.
   if (base::SysInfo::AmountOfPhysicalMemoryMB() >= 2048) {
-    EXPECT_GE(RenderProcessHost::size(), 24U);
+    EXPECT_GE(CountRenderProcessHosts(), 24);
   } else {
-    EXPECT_LE(RenderProcessHost::size(), 23U);
+    EXPECT_LE(CountRenderProcessHosts(), 23);
+  }
+}
+
+// Test for crbug.com/22004.  Reloading a page with a before unload handler and
+// then canceling the dialog should not leave the throbber spinning.
+IN_PROC_BROWSER_TEST_F(BrowserTest, ReloadThenCancelBeforeUnload) {
+  GURL url("data:text/html," + BEFORE_UNLOAD_HTML);
+  ui_test_utils::NavigateToURL(browser(), url);
+
+  // Navigate to another page, but click cancel in the dialog.  Make sure that
+  // the throbber stops spinning.
+  browser()->Reload();
+  AppModalDialog* alert = ui_test_utils::WaitForAppModalDialog();
+  alert->CloseModalDialog();
+  EXPECT_FALSE(browser()->GetSelectedTabContents()->is_loading());
+
+  // Clear the beforeunload handler so the test can easily exit.
+  browser()->GetSelectedTabContents()->render_view_host()->
+      ExecuteJavascriptInWebFrame(L"", L"onbeforeunload=null;");
+}
+
+// Test for crbug.com/11647.  A page closed with window.close() should not have
+// two beforeunload dialogs shown.
+IN_PROC_BROWSER_TEST_F(BrowserTest, SingleBeforeUnloadAfterWindowClose) {
+  browser()->GetSelectedTabContents()->render_view_host()->
+      ExecuteJavascriptInWebFrame(L"", OPEN_NEW_BEFOREUNLOAD_PAGE);
+
+  // Close the new window with JavaScript, which should show a single
+  // beforeunload dialog.  Then show another alert, to make it easy to verify
+  // that a second beforeunload dialog isn't shown.
+  browser()->GetTabContentsAt(0)->render_view_host()->
+      ExecuteJavascriptInWebFrame(L"", L"w.close(); alert('bar');");
+  AppModalDialog* alert = ui_test_utils::WaitForAppModalDialog();
+  alert->AcceptWindow();
+
+  alert = ui_test_utils::WaitForAppModalDialog();
+  EXPECT_FALSE(alert->is_before_unload_dialog());
+  alert->AcceptWindow();
+}
+
+// Test that get_process_idle_time() returns reasonable values when compared
+// with time deltas measured locally.
+IN_PROC_BROWSER_TEST_F(BrowserTest, RenderIdleTime) {
+  base::TimeTicks start = base::TimeTicks::Now();
+  ui_test_utils::NavigateToURL(browser(),
+                               ui_test_utils::GetTestUrl(L".", L"title1.html"));
+  RenderProcessHost::iterator it(RenderProcessHost::AllHostsIterator());
+  for (; !it.IsAtEnd(); it.Advance()) {
+    base::TimeDelta renderer_td =
+        it.GetCurrentValue()->get_child_process_idle_time();
+    base::TimeDelta browser_td = base::TimeTicks::Now() - start;
+    EXPECT_TRUE(browser_td >= renderer_td);
   }
 }

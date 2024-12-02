@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -72,7 +72,6 @@ TextDatabaseManager::TextDatabaseManager(const FilePath& dir,
                                          URLDatabase* url_database,
                                          VisitDatabase* visit_database)
     : dir_(dir),
-      db_(NULL),
       url_database_(url_database),
       visit_database_(visit_database),
       recent_changes_(RecentChangeList::NO_AUTO_EVICT),
@@ -310,8 +309,8 @@ bool TextDatabaseManager::AddPageData(const GURL& url,
                                  ConvertStringForIndexer(title),
                                  ConvertStringForIndexer(body));
 
-  HISTOGRAM_TIMES("History.AddFTSData",
-                  TimeTicks::Now() - beginning_time);
+  UMA_HISTOGRAM_TIMES("History.AddFTSData",
+                      TimeTicks::Now() - beginning_time);
 
   if (history_publisher_)
     history_publisher_->PublishPageContent(visit_time, url, title, body);
@@ -370,7 +369,7 @@ void TextDatabaseManager::DeleteAll() {
   InitDBList();
 
   // Close all open databases.
-  db_cache_.ShrinkToSize(0);
+  db_cache_.Clear();
 
   // Now go through and delete all the files.
   for (DBIdentSet::iterator i = present_databases_.begin();

@@ -44,9 +44,9 @@
 #include <map>
 #include <vector>
 
+#include "app/gfx/native_widget_types.h"
 #include "base/basictypes.h"
 #include "base/file_path.h"
-#include "base/gfx/native_widget_types.h"
 #include "base/hash_tables.h"
 #include "base/lock.h"
 #include "base/ref_counted.h"
@@ -99,11 +99,14 @@ class DownloadFile {
   // Rename the download file. Returns 'true' if the rename was successful.
   bool Rename(const FilePath& full_path);
 
+  // Informs the OS that this file came from the internet.
+  void AnnotateWithSourceInformation();
+
   // Accessors.
   int64 bytes_so_far() const { return bytes_so_far_; }
   int id() const { return id_; }
   FilePath full_path() const { return full_path_; }
-  int render_process_id() const { return render_process_id_; }
+  int child_id() const { return child_id_; }
   int render_view_id() const { return render_view_id_; }
   int request_id() const { return request_id_; }
   bool path_renamed() const { return path_renamed_; }
@@ -131,7 +134,7 @@ class DownloadFile {
   int id_;
 
   // IDs for looking up the tab we are associated with.
-  int render_process_id_;
+  int child_id_;
   int render_view_id_;
 
   // Handle for informing the ResourceDispatcherHost of a UI based cancel.
@@ -201,12 +204,18 @@ class DownloadFileManager
   void RemoveDownloadManager(DownloadManager* manager);
   void RemoveDownload(int id, DownloadManager* manager);
 
+#if !defined(OS_MACOSX)
+  // The open and show methods run on the file thread, which does not work on
+  // Mac OS X (which uses the UI thread for opens).
+
   // Handler for shell operations sent from the UI to the download thread.
   void OnShowDownloadInShell(const FilePath& full_path);
+
   // Handler to open or execute a downloaded file.
   void OnOpenDownloadInShell(const FilePath& full_path,
                              const GURL& url,
                              gfx::NativeView parent_window);
+#endif
 
   // The download manager has provided a final name for a download. Sent from
   // the UI thread and run on the download thread.

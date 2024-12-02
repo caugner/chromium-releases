@@ -7,6 +7,7 @@
 
 #include "app/gfx/font.h"
 #include "third_party/skia/include/core/SkBitmap.h"
+#include "third_party/skia/include/core/SkColor.h"
 #include "views/border.h"
 #include "views/controls/button/custom_button.h"
 
@@ -18,6 +19,10 @@ namespace views {
 //
 //  A Border subclass that paints a TextButton's background layer -
 //  basically the button frame in the hot/pushed states.
+//
+// Note that this type of button is not focusable by default and will not be
+// part of the focus chain.  Call SetFocusable(true) to make it part of the
+// focus chain.
 //
 ////////////////////////////////////////////////////////////////////////////////
 class TextButtonBorder : public Border {
@@ -89,6 +94,7 @@ class TextButton : public CustomButton {
   void ClearMaxTextSize();
 
   void set_max_width(int max_width) { max_width_ = max_width; }
+  void SetFont(const gfx::Font& font);
   void SetEnabledColor(SkColor color);
   void SetDisabledColor(SkColor color);
   void SetHighlightColor(SkColor color);
@@ -101,6 +107,11 @@ class TextButton : public CustomButton {
   virtual gfx::Size GetPreferredSize();
   virtual gfx::Size GetMinimumSize();
   virtual void SetEnabled(bool enabled);
+
+  // Text colors.
+  static const SkColor kEnabledColor;
+  static const SkColor kHighlightColor;
+  static const SkColor kDisabledColor;
 
  protected:
   virtual bool OnMousePressed(const MouseEvent& e);

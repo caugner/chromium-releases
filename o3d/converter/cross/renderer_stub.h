@@ -35,8 +35,8 @@
 // can use it for serialization of the scene graph on all systems
 // without needing graphics.
 
-#ifndef O3D_CONVERTER_CROSS_RENDERER_STUB_H__
-#define O3D_CONVERTER_CROSS_RENDERER_STUB_H__
+#ifndef O3D_CONVERTER_CROSS_RENDERER_STUB_H_
+#define O3D_CONVERTER_CROSS_RENDERER_STUB_H_
 
 #include "core/cross/renderer.h"
 
@@ -54,22 +54,7 @@ class RendererStub : public Renderer {
   virtual void InitCommon();
   virtual void UninitCommon();
   virtual void Destroy();
-  virtual bool BeginDraw();
-  virtual void EndDraw();
-  virtual bool StartRendering();
-  virtual void FinishRendering();
   virtual void Resize(int width, int height);
-  virtual void Clear(const Float4 &color,
-                     bool color_flag,
-                     float depth,
-                     bool depth_flag,
-                     int stencil,
-                     bool stencil_flag);
-  virtual void RenderElement(Element* element,
-                             DrawElement* draw_element,
-                             Material* material,
-                             ParamObject* override,
-                             ParamCache* param_cache);
   virtual Primitive::Ref CreatePrimitive();
   virtual DrawElement::Ref CreateDrawElement();
   virtual VertexBuffer::Ref CreateVertexBuffer();
@@ -79,7 +64,6 @@ class RendererStub : public Renderer {
   virtual RenderDepthStencilSurface::Ref CreateDepthStencilSurface(int width,
                                                                    int height);
   virtual StreamBank::Ref CreateStreamBank();
-  virtual bool SaveScreen(const String& file_name);
   ParamCache *CreatePlatformSpecificParamCache();
   virtual void SetViewportInPixels(int left,
                                    int top,
@@ -87,6 +71,13 @@ class RendererStub : public Renderer {
                                    int height,
                                    float min_z,
                                    float max_z);
+  virtual bool GoFullscreen(const DisplayWindow& display,
+                            int mode_id);
+  virtual bool CancelFullscreen(const DisplayWindow& display,
+                                int width, int height);
+  virtual bool fullscreen() const;
+  virtual void GetDisplayModes(std::vector<DisplayMode> *modes);
+  virtual bool GetDisplayMode(int id, DisplayMode *mode);
 
   // Overridden from Renderer.
   virtual const int* GetRGBAUByteNSwizzleTable();
@@ -95,15 +86,38 @@ class RendererStub : public Renderer {
   explicit RendererStub(ServiceLocator* service_locator);
 
   // Overridden from Renderer.
-  virtual Texture::Ref CreatePlatformSpecificTextureFromBitmap(Bitmap* bitmap);
+  virtual bool PlatformSpecificBeginDraw();
+
+  // Overridden from Renderer.
+  virtual void PlatformSpecificEndDraw();
+
+  // Overridden from Renderer.
+  virtual bool PlatformSpecificStartRendering();
+
+  // Overridden from Renderer.
+  virtual void PlatformSpecificFinishRendering();
+
+  // Overridden from Renderer.
+  virtual void PlatformSpecificPresent();
+
+  // Overridden from Renderer.
+  virtual void PlatformSpecificClear(const Float4 &color,
+                                     bool color_flag,
+                                     float depth,
+                                     bool depth_flag,
+                                     int stencil,
+                                     bool stencil_flag);
 
   // Overridden from Renderer.
   virtual void SetBackBufferPlatformSpecific();
 
   // Overridden from Renderer.
+  virtual void ApplyDirtyStates();
+
+  // Overridden from Renderer.
   virtual void SetRenderSurfacesPlatformSpecific(
-      RenderSurface* surface,
-      RenderDepthStencilSurface* depth_surface);
+      const RenderSurface* surface,
+      const RenderDepthStencilSurface* depth_surface);
 
   // Overridden from Renderer.
   virtual Texture2D::Ref CreatePlatformSpecificTexture2D(
@@ -123,4 +137,4 @@ class RendererStub : public Renderer {
 
 }  // namespace o3d
 
-#endif  // O3D_CONVERTER_CROSS_RENDERER_STUB_H__
+#endif  // O3D_CONVERTER_CROSS_RENDERER_STUB_H_

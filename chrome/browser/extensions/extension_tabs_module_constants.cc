@@ -6,7 +6,6 @@
 
 namespace extension_tabs_module_constants {
 
-const wchar_t kDataKey[] = L"data";
 const wchar_t kFavIconUrlKey[] = L"favIconUrl";
 const wchar_t kFocusedKey[] = L"focused";
 const wchar_t kFromIndexKey[] = L"fromIndex";
@@ -18,7 +17,7 @@ const wchar_t kNewPositionKey[] = L"newPosition";
 const wchar_t kNewWindowIdKey[] = L"newWindowId";
 const wchar_t kOldPositionKey[] = L"oldPosition";
 const wchar_t kOldWindowIdKey[] = L"oldWindowId";
-const wchar_t kPageActionIdKey[] = L"pageActionId";
+const wchar_t kPopulateKey[] = L"populate";
 const wchar_t kSelectedKey[] = L"selected";
 const wchar_t kStatusKey[] = L"status";
 const wchar_t kTabIdKey[] = L"tabId";
@@ -40,22 +39,16 @@ const char kWindowNotFoundError[] = "No window with id: *.";
 const char kTabNotFoundError[] = "No tab with id: *.";
 const char kNoSelectedTabError[] = "No selected tab";
 const char kInvalidUrlError[] = "Invalid url: \"*\".";
+const char kInternalVisibleTabCaptureError[] =
+    "Internal error while trying to capture visible region of the current tab";
+const char kNotImplementedError[] = "This call is not yet implemented";
+const char kCannotAccessPageError[] = "Cannot access contents of url \"*\". "
+    "Extension manifest must request permission to access this host.";
+const char kSupportedInWindowsOnlyError[] = "Supported in Windows only";
 
-const char kGetWindowFunction[] = "windows.get";
-const char kGetCurrentWindowFunction[] = "windows.getCurrent";
-const char kGetLastFocusedWindowFunction[] = "windows.getLastFocused";
-const char kGetAllWindowsFunction[] = "windows.getAll";
-const char kCreateWindowFunction[] = "windows.create";
-const char kUpdateWindowFunction[] = "windows.update";
-const char kRemoveWindowFunction[] = "windows.remove";
-
-const char kGetTabFunction[] = "tabs.get";
-const char kGetSelectedTabFunction[] = "tabs.getSelected";
-const char kGetAllTabsInWindowFunction[] = "tabs.getAllInWindow";
-const char kCreateTabFunction[] = "tabs.create";
-const char kUpdateTabFunction[] = "tabs.update";
-const char kMoveTabFunction[] = "tabs.move";
-const char kRemoveTabFunction[] = "tabs.remove";
-const char kDetectTabLanguageFunction[] = "tabs.detectLanguage";
+const char kNoCodeOrFileToExecuteError[] = "No source code or file specified.";
+const char kMoreThanOneValuesError[] = "There should be only one value (either"
+                                       "code or file) in the second argument.";
+const char kLoadFileError[] = "Failed to load file: \"*\". ";
 
 }  // namespace extension_tabs_module_constants

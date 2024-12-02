@@ -8,42 +8,61 @@
 #include "base/file_util.h"
 #include "base/path_service.h"
 #include "chrome/browser/importer/firefox2_importer.h"
+#include "chrome/browser/importer/firefox_importer_unittest_utils.h"
 #include "chrome/browser/importer/firefox_importer_utils.h"
-#include "chrome/browser/importer/firefox_profile_lock.h"
+#include "chrome/browser/importer/nss_decryptor.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/test/file_test_utils.h"
 
 using base::Time;
 
+// The following 2 tests require the use of the NSSDecryptor, on OSX this needs
+// to run in a separate process, so we use a proxy object so we can share the
+// same test between platforms.
 TEST(FirefoxImporterTest, Firefox2NSS3Decryptor) {
-  std::wstring nss_path;
+  FilePath nss_path;
   ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &nss_path));
-  file_util::AppendToPath(&nss_path, L"firefox2_nss");
-  std::wstring db_path;
+#ifdef OS_MACOSX
+  nss_path = nss_path.AppendASCII("firefox2_nss_mac");
+#else
+  nss_path = nss_path.AppendASCII("firefox2_nss");
+#endif  // !OS_MACOSX
+  FilePath db_path;
   ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &db_path));
-  file_util::AppendToPath(&db_path, L"firefox2_profile");
-  NSSDecryptor decryptor;
-  EXPECT_TRUE(decryptor.Init(nss_path, db_path));
-  EXPECT_EQ(L"hello", decryptor.Decrypt("MDIEEPgAAAAAAAAAAAAAAAAAAAE"
+  db_path = db_path.AppendASCII("firefox2_profile");
+
+  FFUnitTestDecryptorProxy decryptor_proxy;
+  ASSERT_TRUE(decryptor_proxy.Setup(nss_path.ToWStringHack()));
+
+  EXPECT_TRUE(decryptor_proxy.DecryptorInit(nss_path.ToWStringHack(),
+                                            db_path.ToWStringHack()));
+  EXPECT_EQ(L"hello", decryptor_proxy.Decrypt("MDIEEPgAAAAAAAAAAAAAAAAAAAE"
       "wFAYIKoZIhvcNAwcECBJM63MpT9rtBAjMCm7qo/EhlA=="));
   // Test UTF-16 encoding.
-  EXPECT_EQ(L"\x4E2D", decryptor.Decrypt("MDIEEPgAAAAAAAAAAAAAAAAAAAE"
+  EXPECT_EQ(L"\x4E2D", decryptor_proxy.Decrypt("MDIEEPgAAAAAAAAAAAAAAAAAAAE"
       "wFAYIKoZIhvcNAwcECN9OQ5ZFmhb8BAiFo1Z+fUvaIQ=="));
 }
 
 TEST(FirefoxImporterTest, Firefox3NSS3Decryptor) {
-  std::wstring nss_path;
+  FilePath nss_path;
   ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &nss_path));
-  file_util::AppendToPath(&nss_path, L"firefox3_nss");
-  std::wstring db_path;
+#ifdef OS_MACOSX
+  nss_path = nss_path.AppendASCII("firefox3_nss_mac");
+#else
+  nss_path = nss_path.AppendASCII("firefox3_nss");
+#endif  // !OS_MACOSX
+  FilePath db_path;
   ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &db_path));
-  file_util::AppendToPath(&db_path, L"firefox3_profile");
-  NSSDecryptor decryptor;
-  EXPECT_TRUE(decryptor.Init(nss_path, db_path));
-  EXPECT_EQ(L"hello", decryptor.Decrypt("MDIEEPgAAAAAAAAAAAAAAAAAAAE"
+  db_path = db_path.AppendASCII("firefox3_profile");
+
+  FFUnitTestDecryptorProxy decryptor_proxy;
+  ASSERT_TRUE(decryptor_proxy.Setup(nss_path.ToWStringHack()));
+
+  EXPECT_TRUE(decryptor_proxy.DecryptorInit(nss_path.ToWStringHack(),
+                                            db_path.ToWStringHack()));
+  EXPECT_EQ(L"hello", decryptor_proxy.Decrypt("MDIEEPgAAAAAAAAAAAAAAAAAAAE"
       "wFAYIKoZIhvcNAwcECKajtRg4qFSHBAhv9luFkXgDJA=="));
   // Test UTF-16 encoding.
-  EXPECT_EQ(L"\x4E2D", decryptor.Decrypt("MDIEEPgAAAAAAAAAAAAAAAAAAAE"
+  EXPECT_EQ(L"\x4E2D", decryptor_proxy.Decrypt("MDIEEPgAAAAAAAAAAAAAAAAAAAE"
       "wFAYIKoZIhvcNAwcECLWqqiccfQHWBAie74hxnULxlw=="));
 }
 
@@ -151,80 +170,4 @@ TEST(FirefoxImporterTest, Firefox2BookmarkParse) {
   EXPECT_EQ(L"", shortcut);
   EXPECT_EQ(L"", post_data);
   EXPECT_TRUE(Time() == add_date);
-}
-
-// Tests basic functionality and verifies that the lock file is deleted after
-// use.
-TEST(FirefoxImporterTest, ProfileLock) {
-  std::wstring test_path;
-  file_util::CreateNewTempDirectory(L"firefox_profile", &test_path);
-  FilePath lock_file_path = FilePath::FromWStringHack(test_path);
-  FileAutoDeleter deleter(lock_file_path);
-  lock_file_path = lock_file_path.Append(FirefoxProfileLock::kLockFileName);
-
-  scoped_ptr<FirefoxProfileLock> lock;
-  EXPECT_EQ(static_cast<FirefoxProfileLock*>(NULL), lock.get());
-  EXPECT_FALSE(file_util::PathExists(lock_file_path));
-  lock.reset(new FirefoxProfileLock(test_path));
-  EXPECT_TRUE(lock->HasAcquired());
-  EXPECT_TRUE(file_util::PathExists(lock_file_path));
-  lock->Unlock();
-  EXPECT_FALSE(lock->HasAcquired());
-  EXPECT_FALSE(file_util::PathExists(lock_file_path));
-  lock->Lock();
-  EXPECT_TRUE(lock->HasAcquired());
-  EXPECT_TRUE(file_util::PathExists(lock_file_path));
-  lock->Lock();
-  EXPECT_TRUE(lock->HasAcquired());
-  lock->Unlock();
-  EXPECT_FALSE(lock->HasAcquired());
-  EXPECT_FALSE(file_util::PathExists(lock_file_path));
-}
-
-// If for some reason the lock file is left behind by the previous owner, we
-// should still be able to lock it, at least in the Windows implementation.
-TEST(FirefoxImporterTest, ProfileLockOrphaned) {
-  std::wstring test_path;
-  file_util::CreateNewTempDirectory(L"firefox_profile", &test_path);
-  FilePath lock_file_path = FilePath::FromWStringHack(test_path);
-  FileAutoDeleter deleter(lock_file_path);
-  lock_file_path = lock_file_path.Append(FirefoxProfileLock::kLockFileName);
-
-  // Create the orphaned lock file.
-  FILE* lock_file = file_util::OpenFile(lock_file_path, "w");
-  ASSERT_TRUE(lock_file);
-  file_util::CloseFile(lock_file);
-  EXPECT_TRUE(file_util::PathExists(lock_file_path));
-
-  scoped_ptr<FirefoxProfileLock> lock;
-  EXPECT_EQ(static_cast<FirefoxProfileLock*>(NULL), lock.get());
-  lock.reset(new FirefoxProfileLock(test_path));
-  EXPECT_TRUE(lock->HasAcquired());
-  lock->Unlock();
-  EXPECT_FALSE(lock->HasAcquired());
-}
-
-// Tests two locks contending for the same lock file.
-TEST(FirefoxImporterTest, ProfileLockContention) {
-  std::wstring test_path;
-  file_util::CreateNewTempDirectory(L"firefox_profile", &test_path);
-  FileAutoDeleter deleter(FilePath::FromWStringHack(test_path));
-
-  scoped_ptr<FirefoxProfileLock> lock1;
-  EXPECT_EQ(static_cast<FirefoxProfileLock*>(NULL), lock1.get());
-  lock1.reset(new FirefoxProfileLock(test_path));
-  EXPECT_TRUE(lock1->HasAcquired());
-
-  scoped_ptr<FirefoxProfileLock> lock2;
-  EXPECT_EQ(static_cast<FirefoxProfileLock*>(NULL), lock2.get());
-  lock2.reset(new FirefoxProfileLock(test_path));
-  EXPECT_FALSE(lock2->HasAcquired());
-
-  lock1->Unlock();
-  EXPECT_FALSE(lock1->HasAcquired());
-
-  lock2->Lock();
-  EXPECT_TRUE(lock2->HasAcquired());
-  lock2->Unlock();
-  EXPECT_FALSE(lock2->HasAcquired());
 }

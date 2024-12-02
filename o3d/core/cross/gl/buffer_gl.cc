@@ -38,7 +38,6 @@
 // default and buffers are created, locked and managed using the OpenGL
 // "ARB_vertex_buffer_object" extension.
 
-#include "core/cross/precompile.h"
 #include "core/cross/error.h"
 #include "core/cross/gl/buffer_gl.h"
 #include "core/cross/gl/renderer_gl.h"
@@ -57,6 +56,8 @@ GLenum BufferAccessModeToGLenum(Buffer::AccessMode access_mode) {
       return GL_WRITE_ONLY_ARB;
     case Buffer::READ_WRITE:
       return GL_READ_WRITE_ARB;
+    case Buffer::NONE:
+      break;
   }
   DCHECK(false);
   return GL_READ_WRITE_ARB;

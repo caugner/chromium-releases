@@ -88,6 +88,9 @@ class LayoutTestController : public CppBoundClass {
   // the identity of its two arguments in C++.
   void objCIdentityIsEqual(const CppArgumentList& args, CppVariant* result);
 
+  // Changes the cookie policy from the default to allow all cookies.
+  void setAlwaysAcceptCookies(const CppArgumentList& args, CppVariant* result);
+
   // Gives focus to the window.
   void setWindowIsKey(const CppArgumentList& args, CppVariant* result);
 
@@ -112,6 +115,10 @@ class LayoutTestController : public CppBoundClass {
 
   // Delays completion of the test until the policy delegate runs.
   void waitForPolicyDelegate(const CppArgumentList& args, CppVariant* result);
+
+  // Causes WillSendRequest to block redirects.
+  void setWillSendRequestReturnsNullOnRedirect(const CppArgumentList& args,
+                                               CppVariant* result);
 
   // Converts a URL starting with file:///tmp/ to the local mapping.
   void pathToLocalResource(const CppArgumentList& args, CppVariant* result);
@@ -151,6 +158,12 @@ class LayoutTestController : public CppBoundClass {
   void numberOfActiveAnimations(const CppArgumentList& args,
                                 CppVariant* result);
 
+  void disableImageLoading(const CppArgumentList& args,
+                           CppVariant* result);
+
+  void setIconDatabaseEnabled(const CppArgumentList& args,
+                              CppVariant* result);
+
   // The following are only stubs.  TODO(pamg): Implement any of these that
   // are needed to pass the layout tests.
   void dumpAsWebArchive(const CppArgumentList& args, CppVariant* result);
@@ -171,7 +184,8 @@ class LayoutTestController : public CppBoundClass {
   void setPrivateBrowsingEnabled(const CppArgumentList& args, CppVariant* result);
 
   void setXSSAuditorEnabled(const CppArgumentList& args, CppVariant* result);
-  void queueScriptInIsolatedWorld(const CppArgumentList& args, CppVariant* result);
+  void evaluateScriptInIsolatedWorld(const CppArgumentList& args, CppVariant* result);
+  void overridePreference(const CppArgumentList& args, CppVariant* result);
 
   // The fallback method is called when a nonexistent method is called on
   // the layout test controller object.
@@ -179,6 +193,16 @@ class LayoutTestController : public CppBoundClass {
   // do have typos in them) and it allows the script to continue running in
   // that case (as the Mac does).
   void fallbackMethod(const CppArgumentList& args, CppVariant* result);
+
+  // Allows layout tests to call SecurityOrigin::whiteListAccessFromOrigin().
+  void whiteListAccessFromOrigin(const CppArgumentList& args, CppVariant* result);
+
+  // Clears all databases.
+  void clearAllDatabases(const CppArgumentList& args, CppVariant* result);
+
+  // Calls setlocale(LC_ALL, ...) for a specified locale.
+  // Resets between tests.
+  void setPOSIXLocale(const CppArgumentList& args, CppVariant* result);
 
  public:
   // The following methods are not exposed to JavaScript.
@@ -258,6 +282,13 @@ class LayoutTestController : public CppBoundClass {
     std::queue<WorkItem*> queue_;
     bool frozen_;
   };
+
+  // Support for overridePreference.
+  bool CppVariantToBool(const CppVariant&);
+  int32 CppVariantToInt32(const CppVariant&);
+  std::wstring CppVariantToWstring(const CppVariant&);
+
+  void LogErrorToConsole(const std::string& text);
 
   // Non-owning pointer.  The LayoutTestController is owned by the host.
   static TestShell* shell_;

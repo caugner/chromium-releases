@@ -33,8 +33,8 @@
 // This file contains the GAPID3D9 class, implementing the GAPI interface for
 // D3D9.
 
-#ifndef O3D_COMMAND_BUFFER_SERVICE_WIN_D3D9_GAPI_D3D9_H__
-#define O3D_COMMAND_BUFFER_SERVICE_WIN_D3D9_GAPI_D3D9_H__
+#ifndef O3D_COMMAND_BUFFER_SERVICE_WIN_D3D9_GAPI_D3D9_H_
+#define O3D_COMMAND_BUFFER_SERVICE_WIN_D3D9_GAPI_D3D9_H_
 
 #include "command_buffer/common/cross/gapi_interface.h"
 #include "command_buffer/service/win/d3d9/d3d9_utils.h"
@@ -42,6 +42,7 @@
 #include "command_buffer/service/win/d3d9/effect_d3d9.h"
 #include "command_buffer/service/win/d3d9/texture_d3d9.h"
 #include "command_buffer/service/win/d3d9/sampler_d3d9.h"
+#include "command_buffer/service/win/d3d9/render_surface_d3d9.h"
 
 namespace o3d {
 namespace command_buffer {
@@ -53,6 +54,7 @@ class GAPID3D9 : public GAPIInterface {
   virtual ~GAPID3D9();
 
   void set_hwnd(HWND hwnd) { hwnd_ = hwnd; }
+  HWND hwnd() const { return hwnd_; }
 
   // Initializes the graphics context, bound to a window.
   // Returns:
@@ -83,56 +85,56 @@ class GAPID3D9 : public GAPIInterface {
                            float z_max);
 
   // Implements the CreateVertexBuffer function for D3D9.
-  virtual ParseError CreateVertexBuffer(ResourceID id,
+  virtual ParseError CreateVertexBuffer(ResourceId id,
                                         unsigned int size,
                                         unsigned int flags);
 
   // Implements the DestroyVertexBuffer function for D3D9.
-  virtual ParseError DestroyVertexBuffer(ResourceID id);
+  virtual ParseError DestroyVertexBuffer(ResourceId id);
 
   // Implements the SetVertexBufferData function for D3D9.
-  virtual ParseError SetVertexBufferData(ResourceID id,
+  virtual ParseError SetVertexBufferData(ResourceId id,
                                          unsigned int offset,
                                          unsigned int size,
                                          const void *data);
 
   // Implements the GetVertexBufferData function for D3D9.
-  virtual ParseError GetVertexBufferData(ResourceID id,
+  virtual ParseError GetVertexBufferData(ResourceId id,
                                          unsigned int offset,
                                          unsigned int size,
                                          void *data);
 
   // Implements the CreateIndexBuffer function for D3D9.
-  virtual ParseError CreateIndexBuffer(ResourceID id,
+  virtual ParseError CreateIndexBuffer(ResourceId id,
                                        unsigned int size,
                                        unsigned int flags);
 
   // Implements the DestroyIndexBuffer function for D3D9.
-  virtual ParseError DestroyIndexBuffer(ResourceID id);
+  virtual ParseError DestroyIndexBuffer(ResourceId id);
 
   // Implements the SetIndexBufferData function for D3D9.
-  virtual ParseError SetIndexBufferData(ResourceID id,
+  virtual ParseError SetIndexBufferData(ResourceId id,
                                         unsigned int offset,
                                         unsigned int size,
                                         const void *data);
 
   // Implements the GetIndexBufferData function for D3D9.
-  virtual ParseError GetIndexBufferData(ResourceID id,
+  virtual ParseError GetIndexBufferData(ResourceId id,
                                         unsigned int offset,
                                         unsigned int size,
                                         void *data);
 
   // Implements the CreateVertexStruct function for D3D9.
-  virtual ParseError CreateVertexStruct(ResourceID id,
+  virtual ParseError CreateVertexStruct(ResourceId id,
                                         unsigned int input_count);
 
   // Implements the DestroyVertexStruct function for D3D9.
-  virtual ParseError DestroyVertexStruct(ResourceID id);
+  virtual ParseError DestroyVertexStruct(ResourceId id);
 
   // Implements the SetVertexInput function for D3D9.
-  virtual ParseError SetVertexInput(ResourceID vertex_struct_id,
+  virtual ParseError SetVertexInput(ResourceId vertex_struct_id,
                                     unsigned int input_index,
-                                    ResourceID vertex_buffer_id,
+                                    ResourceId vertex_buffer_id,
                                     unsigned int offset,
                                     unsigned int stride,
                                     vertex_struct::Type type,
@@ -140,7 +142,7 @@ class GAPID3D9 : public GAPIInterface {
                                     unsigned int semantic_index);
 
   // Implements the SetVertexStruct function for D3D9.
-  virtual ParseError SetVertexStruct(ResourceID id);
+  virtual ParseError SetVertexStruct(ResourceId id);
 
   // Implements the Draw function for D3D9.
   virtual ParseError Draw(PrimitiveType primitive_type,
@@ -149,89 +151,92 @@ class GAPID3D9 : public GAPIInterface {
 
   // Implements the DrawIndexed function for D3D9.
   virtual ParseError DrawIndexed(PrimitiveType primitive_type,
-                                 ResourceID index_buffer_id,
+                                 ResourceId index_buffer_id,
                                  unsigned int first,
                                  unsigned int count,
                                  unsigned int min_index,
                                  unsigned int max_index);
 
   // Implements the CreateEffect function for D3D9.
-  virtual ParseError CreateEffect(ResourceID id,
+  virtual ParseError CreateEffect(ResourceId id,
                                   unsigned int size,
                                   const void *data);
 
   // Implements the DestroyEffect function for D3D9.
-  virtual ParseError DestroyEffect(ResourceID id);
+  virtual ParseError DestroyEffect(ResourceId id);
 
   // Implements the SetEffect function for D3D9.
-  virtual ParseError SetEffect(ResourceID id);
+  virtual ParseError SetEffect(ResourceId id);
 
   // Implements the GetParamCount function for D3D9.
-  virtual ParseError GetParamCount(ResourceID id,
+  virtual ParseError GetParamCount(ResourceId id,
                                    unsigned int size,
                                    void *data);
 
   // Implements the CreateParam function for D3D9.
-  virtual ParseError CreateParam(ResourceID param_id,
-                                 ResourceID effect_id,
+  virtual ParseError CreateParam(ResourceId param_id,
+                                 ResourceId effect_id,
                                  unsigned int index);
 
   // Implements the CreateParamByName function for D3D9.
-  virtual ParseError CreateParamByName(ResourceID param_id,
-                                       ResourceID effect_id,
+  virtual ParseError CreateParamByName(ResourceId param_id,
+                                       ResourceId effect_id,
                                        unsigned int size,
                                        const void *name);
 
   // Implements the DestroyParam function for D3D9.
-  virtual ParseError DestroyParam(ResourceID id);
+  virtual ParseError DestroyParam(ResourceId id);
 
   // Implements the SetParamData function for D3D9.
-  virtual ParseError SetParamData(ResourceID id,
+  virtual ParseError SetParamData(ResourceId id,
                                   unsigned int size,
                                   const void *data);
 
   // Implements the GetParamDesc function for D3D9.
-  virtual ParseError GetParamDesc(ResourceID id,
+  virtual ParseError GetParamDesc(ResourceId id,
                                   unsigned int size,
                                   void *data);
 
   // Implements the GetStreamCount function for D3D9.
-  virtual ParseError GetStreamCount(ResourceID id,
+  virtual ParseError GetStreamCount(ResourceId id,
                                     unsigned int size,
                                     void *data);
 
   // Implements the GetStreamDesc function for D3D9.
-  virtual ParseError GetStreamDesc(ResourceID id,
+  virtual ParseError GetStreamDesc(ResourceId id,
                                    unsigned int index,
                                    unsigned int size,
                                    void *data);
 
   // Implements the CreateTexture2D function for D3D9.
-  virtual ParseError CreateTexture2D(ResourceID id,
+  virtual ParseError CreateTexture2D(ResourceId id,
                                      unsigned int width,
                                      unsigned int height,
                                      unsigned int levels,
                                      texture::Format format,
-                                     unsigned int flags);
+                                     unsigned int flags,
+                                     bool enable_render_surfaces);
 
   // Implements the CreateTexture3D function for D3D9.
-  virtual ParseError CreateTexture3D(ResourceID id,
+  virtual ParseError CreateTexture3D(ResourceId id,
                                      unsigned int width,
                                      unsigned int height,
                                      unsigned int depth,
                                      unsigned int levels,
                                      texture::Format format,
-                                     unsigned int flags);
+                                     unsigned int flags,
+                                     bool enable_render_surfaces);
 
   // Implements the CreateTextureCube function for D3D9.
-  virtual ParseError CreateTextureCube(ResourceID id,
+  virtual ParseError CreateTextureCube(ResourceId id,
                                        unsigned int side,
                                        unsigned int levels,
                                        texture::Format format,
-                                       unsigned int flags);
+                                       unsigned int flags,
+                                       bool enable_render_surfaces);
 
   // Implements the SetTextureData function for D3D9.
-  virtual ParseError SetTextureData(ResourceID id,
+  virtual ParseError SetTextureData(ResourceId id,
                                     unsigned int x,
                                     unsigned int y,
                                     unsigned int z,
@@ -246,7 +251,7 @@ class GAPID3D9 : public GAPIInterface {
                                     const void *data);
 
   // Implements the GetTextureData function for D3D9.
-  virtual ParseError GetTextureData(ResourceID id,
+  virtual ParseError GetTextureData(ResourceId id,
                                     unsigned int x,
                                     unsigned int y,
                                     unsigned int z,
@@ -261,16 +266,16 @@ class GAPID3D9 : public GAPIInterface {
                                     void *data);
 
   // Implements the DestroyTexture function for D3D9.
-  virtual ParseError DestroyTexture(ResourceID id);
+  virtual ParseError DestroyTexture(ResourceId id);
 
   // Implements the CreateSampler function for D3D9.
-  virtual ParseError CreateSampler(ResourceID id);
+  virtual ParseError CreateSampler(ResourceId id);
 
   // Implements the DestroySampler function for D3D9.
-  virtual ParseError DestroySampler(ResourceID id);
+  virtual ParseError DestroySampler(ResourceId id);
 
   // Implements the SetSamplerStates function for D3D9.
-  virtual ParseError SetSamplerStates(ResourceID id,
+  virtual ParseError SetSamplerStates(ResourceId id,
                                       sampler::AddressingMode addressing_u,
                                       sampler::AddressingMode addressing_v,
                                       sampler::AddressingMode addressing_w,
@@ -280,10 +285,10 @@ class GAPID3D9 : public GAPIInterface {
                                       unsigned int max_anisotropy);
 
   // Implements the SetSamplerBorderColor function for D3D9.
-  virtual ParseError SetSamplerBorderColor(ResourceID id, const RGBA &color);
+  virtual ParseError SetSamplerBorderColor(ResourceId id, const RGBA &color);
 
   // Implements the SetSamplerTexture function for D3D9.
-  virtual ParseError SetSamplerTexture(ResourceID id, ResourceID texture_id);
+  virtual ParseError SetSamplerTexture(ResourceId id, ResourceId texture_id);
 
   // Implements the SetScissor function for D3D9.
   virtual void SetScissor(bool enable,
@@ -342,26 +347,95 @@ class GAPID3D9 : public GAPIInterface {
   // Implements the SetBlendingColor function for D3D9.
   virtual void SetBlendingColor(const RGBA &color);
 
+  // Implements the CreateRenderSurface function for D3D9.
+  virtual ParseError CreateRenderSurface(ResourceId id,
+                                         unsigned int width,
+                                         unsigned int height,
+                                         unsigned int mip_level,
+                                         unsigned int side,
+                                         ResourceId texture_id);
+
+  // Implements the DestroyRenderSurface function for D3D9.
+  virtual ParseError DestroyRenderSurface(ResourceId id);
+
+  // Implements the CreateDepthSurface function for D3D9.
+  virtual ParseError CreateDepthSurface(ResourceId id,
+                                        unsigned int width,
+                                        unsigned int height);
+
+  // Implements teh DestroyDepthSurface function for D3D9.
+  virtual ParseError DestroyDepthSurface(ResourceId id);
+
+  // Implements the SetRenderSurface function for D3D9.
+  virtual ParseError SetRenderSurface(ResourceId render_surface_id,
+                                      ResourceId depth_stencil_id);
+
+  // Implements the SetBackSurfaces function for D3D9.
+  virtual void SetBackSurfaces();
+
   // Gets the D3D9 device.
   IDirect3DDevice9 *d3d_device() const { return d3d_device_; }
 
   // Gets a vertex buffer by resource ID.
-  VertexBufferD3D9 *GetVertexBuffer(ResourceID id) {
+  VertexBufferD3D9 *GetVertexBuffer(ResourceId id) {
     return vertex_buffers_.Get(id);
   }
 
   // Gets a texture by resource ID.
-  TextureD3D9 *GetTexture(ResourceID id) {
+  TextureD3D9 *GetTexture(ResourceId id) {
     return textures_.Get(id);
   }
 
   // Gets a sampler by resource ID.
-  SamplerD3D9 *GetSampler(ResourceID id) {
+  SamplerD3D9 *GetSampler(ResourceId id) {
     return samplers_.Get(id);
   }
 
   EffectD3D9 *current_effect() { return current_effect_; }
+
+  // Direct3D functions cannot be called directly because the DLLs are loaded
+  // dynamically via LoadLibrary. If you need to add another Direct3D function
+  // add another function here, a typedef matching the signature and a member
+  // variable of that type below. Then add code to FindDirect3DFunctions to
+  // get the address of that function out of the DLL and assign it to the
+  // member variable. Be careful to initialize the value of the variable to
+  // NULL in the constructor and to set it to again NULL in Destroy.
+
+  IDirect3D9* Direct3DCreate(UINT version) {
+    DCHECK(direct3d_create9_);
+    return direct3d_create9_(version);
+  }
+
+  HRESULT D3DXGetShaderConstantTable(const DWORD* function,
+                                     LPD3DXCONSTANTTABLE* table) {
+    DCHECK(get_shader_constant_table_);
+    return get_shader_constant_table_(function, table);
+  }
+
+  HRESULT D3DXCreateEffect(LPDIRECT3DDEVICE9 device,
+                           LPCVOID src_data,
+                           UINT src_data_len,
+                           CONST D3DXMACRO * defines,
+                           LPD3DXINCLUDE include,
+                           DWORD flags,
+                           LPD3DXEFFECTPOOL pool,
+                           LPD3DXEFFECT * effect,
+                           LPD3DXBUFFER * compilation_errors) {
+    DCHECK(create_effect_);
+    return create_effect_(device, src_data, src_data_len, defines, include,
+                          flags, pool, effect, compilation_errors);
+  }
+
+  HRESULT D3DXGetShaderInputSemantics(const DWORD* function,
+                                      D3DXSEMANTIC* semantics,
+                                      UINT* count) {
+    DCHECK(get_shader_input_semantics_);
+    return get_shader_input_semantics_(function, semantics, count);
+  }
+
  private:
+  bool FindDirect3DFunctions();
+
   // Validates the current vertex struct to D3D, setting the streams.
   bool ValidateStreams();
   // Validates the current effect to D3D. This sends the effect states to D3D.
@@ -370,15 +444,25 @@ class GAPID3D9 : public GAPIInterface {
   // requires ValidateEffect() to be called before further draws occur.
   void DirtyEffect();
 
+  // Module handle for d3d9.dll.
+  HMODULE d3d_module_;
+
+  // Module handle for d3dx9_n.dll
+  HMODULE d3dx_module_;
+
   LPDIRECT3D9 d3d_;
   LPDIRECT3DDEVICE9 d3d_device_;
   HWND hwnd_;
-  ResourceID current_vertex_struct_;
+  ResourceId current_vertex_struct_;
   bool validate_streams_;
   unsigned int max_vertices_;
-  ResourceID current_effect_id_;
+  ResourceId current_effect_id_;
   bool validate_effect_;
   EffectD3D9 *current_effect_;
+  IDirect3DSurface9* back_buffer_surface_;
+  IDirect3DSurface9* back_buffer_depth_surface_;
+  ResourceId current_surface_id_;
+  ResourceId current_depth_surface_id_;
 
   ResourceMap<VertexBufferD3D9> vertex_buffers_;
   ResourceMap<IndexBufferD3D9> index_buffers_;
@@ -387,9 +471,38 @@ class GAPID3D9 : public GAPIInterface {
   ResourceMap<EffectParamD3D9> effect_params_;
   ResourceMap<TextureD3D9> textures_;
   ResourceMap<SamplerD3D9> samplers_;
+  ResourceMap<RenderSurfaceD3D9> render_surfaces_;
+  ResourceMap<RenderDepthStencilSurfaceD3D9> depth_surfaces_;
+
+  typedef IDirect3D9* (WINAPI *Direct3DCreate9Proc)(UINT version);
+  Direct3DCreate9Proc direct3d_create9_;
+
+  typedef HRESULT (WINAPI *D3DXGetShaderConstantTableProc)(
+      const DWORD* function,
+      LPD3DXCONSTANTTABLE* table);
+  D3DXGetShaderConstantTableProc get_shader_constant_table_;
+
+  typedef HRESULT (WINAPI *D3DXCreateEffectProc)(
+      LPDIRECT3DDEVICE9 device,
+      LPCVOID src_data,
+      UINT src_data_len,
+      CONST D3DXMACRO * defines,
+      LPD3DXINCLUDE include,
+      DWORD flags,
+      LPD3DXEFFECTPOOL pool,
+      LPD3DXEFFECT * effect,
+      LPD3DXBUFFER * compilation_errors);
+  D3DXCreateEffectProc create_effect_;
+
+  typedef HRESULT (WINAPI *D3DXGetShaderInputSemanticsProc)(
+      const DWORD* function,
+      D3DXSEMANTIC* semantics,
+      UINT* count);
+  D3DXGetShaderInputSemanticsProc get_shader_input_semantics_;
 };
 
 }  // namespace command_buffer
 }  // namespace o3d
 
-#endif  // O3D_COMMAND_BUFFER_SERVICE_WIN_D3D9_GAPI_D3D9_H__
+#endif  // O3D_COMMAND_BUFFER_SERVICE_WIN_D3D9_GAPI_D3D9_H_
+

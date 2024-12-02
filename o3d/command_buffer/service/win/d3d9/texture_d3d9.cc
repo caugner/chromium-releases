@@ -40,30 +40,33 @@ namespace o3d {
 namespace command_buffer {
 
 // Converts a texture format to a D3D texture format.
-static D3DFORMAT D3DFormat(texture::Format format) {
+D3DFORMAT TextureD3D9::D3DFormat(texture::Format format) {
   switch (format) {
-    case texture::XRGB8:  return D3DFMT_X8R8G8B8;
-    case texture::ARGB8:  return D3DFMT_A8R8G8B8;
-    case texture::ABGR16F:  return D3DFMT_A16B16G16R16F;
-    case texture::DXT1:  return D3DFMT_DXT1;
+    case texture::kXRGB8:  return D3DFMT_X8R8G8B8;
+    case texture::kARGB8:  return D3DFMT_A8R8G8B8;
+    case texture::kABGR16F:  return D3DFMT_A16B16G16R16F;
+    case texture::kR32F:  return D3DFMT_R32F;
+    case texture::kABGR32F:  return D3DFMT_A32B32G32R32F;
+    case texture::kDXT1:  return D3DFMT_DXT1;
+    // TODO(petersont): Add DXT3/5 support.
     default:  return D3DFMT_UNKNOWN;
   };
 }
 
 // Converts a cube map face to a D3D face.
-static D3DCUBEMAP_FACES D3DFace(texture::Face face) {
+D3DCUBEMAP_FACES TextureD3D9::D3DFace(texture::Face face) {
   switch (face) {
-    case texture::FACE_POSITIVE_X:
+    case texture::kFacePositiveX:
       return D3DCUBEMAP_FACE_POSITIVE_X;
-    case texture::FACE_NEGATIVE_X:
+    case texture::kFaceNegativeX:
       return D3DCUBEMAP_FACE_NEGATIVE_X;
-    case texture::FACE_POSITIVE_Y:
+    case texture::kFacePositiveY:
       return D3DCUBEMAP_FACE_POSITIVE_Y;
-    case texture::FACE_NEGATIVE_Y:
+    case texture::kFaceNegativeY:
       return D3DCUBEMAP_FACE_NEGATIVE_Y;
-    case texture::FACE_POSITIVE_Z:
+    case texture::kFacePositiveZ:
       return D3DCUBEMAP_FACE_POSITIVE_Z;
-    case texture::FACE_NEGATIVE_Z:
+    case texture::kFaceNegativeZ:
       return D3DCUBEMAP_FACE_NEGATIVE_Z;
   }
   LOG(FATAL) << "Not reached.";
@@ -75,7 +78,6 @@ static D3DCUBEMAP_FACES D3DFace(texture::Face face) {
 // Destroys the 2D texture, releasing the D3D texture, and its shadow if any.
 Texture2DD3D9::~Texture2DD3D9() {
   DCHECK(d3d_texture_);
-  d3d_texture_->Release();
   d3d_texture_ = NULL;
   if (d3d_shadow_) {
     d3d_shadow_->Release();
@@ -91,14 +93,28 @@ Texture2DD3D9 *Texture2DD3D9::Create(GAPID3D9 *gapi,
                                      unsigned int height,
                                      unsigned int levels,
                                      texture::Format format,
-                                     unsigned int flags) {
-  DCHECK_GT(width, 0);
-  DCHECK_GT(height, 0);
-  DCHECK_GT(levels, 0);
+                                     unsigned int flags,
+                                     bool enable_render_surfaces) {
+  DCHECK_GT(width, 0U);
+  DCHECK_GT(height, 0U);
+  DCHECK_GT(levels, 0U);
   D3DFORMAT d3d_format = D3DFormat(format);
   IDirect3DDevice9 *device = gapi->d3d_device();
-  if (flags & texture::DYNAMIC) {
-    IDirect3DTexture9 *d3d_texture = NULL;
+  if (enable_render_surfaces) {
+    CComPtr<IDirect3DTexture9> d3d_texture = NULL;
+    HRESULT result = device->CreateTexture(width, height, levels,
+                                           D3DUSAGE_RENDERTARGET, d3d_format,
+                                           D3DPOOL_DEFAULT, &d3d_texture,
+                                           NULL);
+    if (result != D3D_OK) {
+      LOG(ERROR) << "DirectX error when calling CreateTexture: "
+                 << DXGetErrorStringA(result);
+      return NULL;
+    }
+    return new Texture2DD3D9(levels, format, flags, width, height, d3d_texture,
+                             NULL, enable_render_surfaces);
+  } else if (flags & texture::kDynamic) {
+    CComPtr<IDirect3DTexture9> d3d_texture = NULL;
     HRESULT result = device->CreateTexture(width, height, levels,
                                            D3DUSAGE_DYNAMIC, d3d_format,
                                            D3DPOOL_DEFAULT, &d3d_texture,
@@ -108,20 +124,19 @@ Texture2DD3D9 *Texture2DD3D9::Create(GAPID3D9 *gapi,
                  << DXGetErrorStringA(result);
       return NULL;
     }
-    IDirect3DTexture9 *d3d_shadow = NULL;
+    CComPtr<IDirect3DTexture9> d3d_shadow = NULL;
     result = device->CreateTexture(width, height, levels, D3DUSAGE_DYNAMIC,
                                    d3d_format, D3DPOOL_SYSTEMMEM, &d3d_shadow,
                                    NULL);
     if (result != D3D_OK) {
       LOG(ERROR) << "DirectX error when calling CreateTexture: "
                  << DXGetErrorStringA(result);
-      d3d_texture->Release();
       return NULL;
     }
     return new Texture2DD3D9(levels, format, flags, width, height, d3d_texture,
-                             d3d_shadow);
+                             d3d_shadow, enable_render_surfaces);
   } else {
-    IDirect3DTexture9 *d3d_texture = NULL;
+    CComPtr<IDirect3DTexture9> d3d_texture = NULL;
     HRESULT result = device->CreateTexture(width, height, levels, 0, d3d_format,
                                            D3DPOOL_MANAGED, &d3d_texture, NULL);
     if (result != D3D_OK) {
@@ -130,7 +145,7 @@ Texture2DD3D9 *Texture2DD3D9::Create(GAPID3D9 *gapi,
       return NULL;
     }
     return new Texture2DD3D9(levels, format, flags, width, height, d3d_texture,
-                             NULL);
+                             NULL, enable_render_surfaces);
   }
 }
 
@@ -162,7 +177,7 @@ bool Texture2DD3D9::SetData(GAPID3D9 *gapi,
   RECT rect = {volume.x, volume.y, volume.x+volume.width,
                volume.y+volume.height};
   DWORD lock_flags =
-      full_rect && (flags() & texture::DYNAMIC) ? D3DLOCK_DISCARD : 0;
+      full_rect && (flags() & texture::kDynamic) ? D3DLOCK_DISCARD : 0;
   HR(lock_texture->LockRect(level, &locked_rect, full_rect ? NULL : &rect,
                             lock_flags));
 
@@ -218,12 +233,27 @@ bool Texture2DD3D9::GetData(GAPID3D9 *gapi,
   return true;
 }
 
+bool Texture2DD3D9::CreateRenderSurface(int width,
+                                        int height,
+                                        int mip_level,
+                                        int side,
+                                        IDirect3DSurface9** direct3d_surface) {
+  IDirect3DTexture9* d3d_texture =
+      static_cast<IDirect3DTexture9*>(d3d_base_texture());
+  D3DSURFACE_DESC surface_desc;
+  d3d_texture->GetLevelDesc(mip_level, &surface_desc);
+  if (width != surface_desc.Width || height != surface_desc.Height) {
+    return false;
+  }
+  HR(d3d_texture->GetSurfaceLevel(mip_level, direct3d_surface));
+  return true;
+}
+
 // Texture 3D functions
 
 // Destroys the 3D texture.
 Texture3DD3D9::~Texture3DD3D9() {
   DCHECK(d3d_texture_);
-  d3d_texture_->Release();
   d3d_texture_ = NULL;
   if (d3d_shadow_) {
     d3d_shadow_->Release();
@@ -240,15 +270,29 @@ Texture3DD3D9 *Texture3DD3D9::Create(GAPID3D9 *gapi,
                                      unsigned int depth,
                                      unsigned int levels,
                                      texture::Format format,
-                                     unsigned int flags) {
-  DCHECK_GT(width, 0);
-  DCHECK_GT(height, 0);
-  DCHECK_GT(depth, 0);
-  DCHECK_GT(levels, 0);
+                                     unsigned int flags,
+                                     bool enable_render_surfaces) {
+  DCHECK_GT(width, 0U);
+  DCHECK_GT(height, 0U);
+  DCHECK_GT(depth, 0U);
+  DCHECK_GT(levels, 0U);
   D3DFORMAT d3d_format = D3DFormat(format);
   IDirect3DDevice9 *device = gapi->d3d_device();
-  if (flags & texture::DYNAMIC) {
-    IDirect3DVolumeTexture9 *d3d_texture = NULL;
+  if (enable_render_surfaces) {
+    CComPtr<IDirect3DVolumeTexture9> d3d_texture = NULL;
+    HRESULT result = device->CreateVolumeTexture(width, height, depth, levels,
+                                                 D3DUSAGE_RENDERTARGET,
+                                                 d3d_format, D3DPOOL_DEFAULT,
+                                                 &d3d_texture, NULL);
+    if (result != D3D_OK) {
+      LOG(ERROR) << "DirectX error when calling CreateTexture: "
+                 << DXGetErrorStringA(result);
+      return NULL;
+    }
+    return new Texture3DD3D9(levels, format, flags, width, height, depth,
+                             d3d_texture, NULL, enable_render_surfaces);
+  } else if (flags & texture::kDynamic) {
+    CComPtr<IDirect3DVolumeTexture9> d3d_texture = NULL;
     HRESULT result = device->CreateVolumeTexture(width, height, depth, levels,
                                                  D3DUSAGE_DYNAMIC, d3d_format,
                                                  D3DPOOL_DEFAULT, &d3d_texture,
@@ -258,20 +302,19 @@ Texture3DD3D9 *Texture3DD3D9::Create(GAPID3D9 *gapi,
                  << DXGetErrorStringA(result);
       return NULL;
     }
-    IDirect3DVolumeTexture9 *d3d_shadow = NULL;
+    CComPtr<IDirect3DVolumeTexture9> d3d_shadow = NULL;
     result = device->CreateVolumeTexture(width, height, depth, levels,
                                          D3DUSAGE_DYNAMIC, d3d_format,
                                          D3DPOOL_SYSTEMMEM, &d3d_shadow, NULL);
     if (result != D3D_OK) {
       LOG(ERROR) << "DirectX error when calling CreateTexture: "
                  << DXGetErrorStringA(result);
-      d3d_texture->Release();
       return NULL;
     }
     return new Texture3DD3D9(levels, format, flags, width, height, depth,
-                             d3d_texture, d3d_shadow);
+                             d3d_texture, d3d_shadow, enable_render_surfaces);
   } else {
-    IDirect3DVolumeTexture9 *d3d_texture = NULL;
+    CComPtr<IDirect3DVolumeTexture9> d3d_texture = NULL;
     HRESULT result = device->CreateVolumeTexture(width, height, depth, levels,
                                                  D3DUSAGE_DYNAMIC, d3d_format,
                                                  D3DPOOL_MANAGED, &d3d_texture,
@@ -282,7 +325,7 @@ Texture3DD3D9 *Texture3DD3D9::Create(GAPID3D9 *gapi,
       return NULL;
     }
     return new Texture3DD3D9(levels, format, flags, width, height, depth,
-                             d3d_texture, NULL);
+                             d3d_texture, NULL, enable_render_surfaces);
   }
 }
 
@@ -315,7 +358,7 @@ bool Texture3DD3D9::SetData(GAPID3D9 *gapi,
   D3DBOX box = {volume.x, volume.y, volume.z, volume.x+volume.width,
                 volume.y+volume.height, volume.z+volume.depth};
   DWORD lock_flags =
-      full_box && (flags() & texture::DYNAMIC) ? D3DLOCK_DISCARD : 0;
+      full_box && (flags() & texture::kDynamic) ? D3DLOCK_DISCARD : 0;
   HR(lock_texture->LockBox(level, &locked_box, full_box ? NULL : &box,
                            lock_flags));
 
@@ -372,13 +415,22 @@ bool Texture3DD3D9::GetData(GAPID3D9 *gapi,
   return true;
 }
 
+bool Texture3DD3D9::CreateRenderSurface(int width,
+                                        int height,
+                                        int mip_level,
+                                        int side,
+                                        IDirect3DSurface9** direct3d_surface) {
+  // TODO(rlp): Currently unsupported.
+  DCHECK(false);
+  return false;
+}
+
 // Texture Cube functions.
 
 // Destroys the cube map texture, releasing the D3D texture, and its shadow if
 // any.
 TextureCubeD3D9::~TextureCubeD3D9() {
   DCHECK(d3d_texture_);
-  d3d_texture_->Release();
   d3d_texture_ = NULL;
   if (d3d_shadow_) {
     d3d_shadow_->Release();
@@ -393,13 +445,27 @@ TextureCubeD3D9 *TextureCubeD3D9::Create(GAPID3D9 *gapi,
                                          unsigned int side,
                                          unsigned int levels,
                                          texture::Format format,
-                                         unsigned int flags) {
-  DCHECK_GT(side, 0);
-  DCHECK_GT(levels, 0);
+                                         unsigned int flags,
+                                         bool enable_render_surfaces) {
+  DCHECK_GT(side, 0U);
+  DCHECK_GT(levels, 0U);
   D3DFORMAT d3d_format = D3DFormat(format);
   IDirect3DDevice9 *device = gapi->d3d_device();
-  if (flags & texture::DYNAMIC) {
-    IDirect3DCubeTexture9 *d3d_texture = NULL;
+  if (enable_render_surfaces) {
+    CComPtr<IDirect3DCubeTexture9> d3d_texture = NULL;
+    HRESULT result = device->CreateCubeTexture(side, levels,
+                                               D3DUSAGE_RENDERTARGET,
+                                               d3d_format, D3DPOOL_DEFAULT,
+                                               &d3d_texture, NULL);
+    if (result != D3D_OK) {
+      LOG(ERROR) << "DirectX error when calling CreateTexture: "
+                 << DXGetErrorStringA(result);
+      return NULL;
+    }
+    return new TextureCubeD3D9(levels, format, flags, side, d3d_texture, NULL,
+                               enable_render_surfaces);
+  } else if (flags & texture::kDynamic) {
+    CComPtr<IDirect3DCubeTexture9> d3d_texture = NULL;
     HRESULT result = device->CreateCubeTexture(side, levels, D3DUSAGE_DYNAMIC,
                                                d3d_format, D3DPOOL_DEFAULT,
                                                &d3d_texture, NULL);
@@ -408,20 +474,19 @@ TextureCubeD3D9 *TextureCubeD3D9::Create(GAPID3D9 *gapi,
                  << DXGetErrorStringA(result);
       return NULL;
     }
-    IDirect3DCubeTexture9 *d3d_shadow = NULL;
+    CComPtr<IDirect3DCubeTexture9> d3d_shadow = NULL;
     result = device->CreateCubeTexture(side, levels, D3DUSAGE_DYNAMIC,
                                        d3d_format, D3DPOOL_SYSTEMMEM,
                                        &d3d_shadow, NULL);
     if (result != D3D_OK) {
       LOG(ERROR) << "DirectX error when calling CreateTexture: "
                  << DXGetErrorStringA(result);
-      d3d_texture->Release();
       return NULL;
     }
     return new TextureCubeD3D9(levels, format, flags, side, d3d_texture,
-                               d3d_shadow);
+                               d3d_shadow, enable_render_surfaces);
   } else {
-    IDirect3DCubeTexture9 *d3d_texture = NULL;
+    CComPtr<IDirect3DCubeTexture9> d3d_texture = NULL;
     HRESULT result = device->CreateCubeTexture(side, levels, 0, d3d_format,
                                                D3DPOOL_MANAGED, &d3d_texture,
                                                NULL);
@@ -430,7 +495,8 @@ TextureCubeD3D9 *TextureCubeD3D9::Create(GAPID3D9 *gapi,
                  << DXGetErrorStringA(result);
       return NULL;
     }
-    return new TextureCubeD3D9(levels, format, flags, side, d3d_texture, NULL);
+    return new TextureCubeD3D9(levels, format, flags, side, d3d_texture, NULL,
+                               enable_render_surfaces);
   }
 }
 
@@ -463,7 +529,7 @@ bool TextureCubeD3D9::SetData(GAPID3D9 *gapi,
   RECT rect = {volume.x, volume.y, volume.x+volume.width,
                volume.y+volume.height};
   DWORD lock_flags =
-      full_rect && (flags() & texture::DYNAMIC) ? D3DLOCK_DISCARD : 0;
+      full_rect && (flags() & texture::kDynamic) ? D3DLOCK_DISCARD : 0;
   HR(lock_texture->LockRect(d3d_face, level, &locked_rect,
                             full_rect ? NULL : &rect, lock_flags));
 
@@ -520,71 +586,99 @@ bool TextureCubeD3D9::GetData(GAPID3D9 *gapi,
   HR(lock_texture->UnlockRect(d3d_face, level));
   return true;
 }
+
+bool TextureCubeD3D9::CreateRenderSurface(
+    int width,
+    int height,
+    int mip_level,
+    int side,
+    IDirect3DSurface9** direct3d_surface) {
+  IDirect3DCubeTexture9* d3d_cube_texture =
+      static_cast<IDirect3DCubeTexture9*>(d3d_base_texture());
+  D3DSURFACE_DESC surface_desc;
+  d3d_cube_texture->GetLevelDesc(mip_level, &surface_desc);
+  if (width != surface_desc.Width || height != surface_desc.Height ||
+      side < 0 || side > 5) {
+    return false;
+  }
+  HR(d3d_cube_texture->GetCubeMapSurface(
+      D3DFace(static_cast<texture::Face>(side)),
+      mip_level,
+      direct3d_surface));
+  return true;
+}
+
 // GAPID3D9 functions.
 
 // Destroys a texture resource.
-BufferSyncInterface::ParseError GAPID3D9::DestroyTexture(ResourceID id) {
+parse_error::ParseError GAPID3D9::DestroyTexture(ResourceId id) {
   // Dirty effect, because this texture id may be used
   DirtyEffect();
   return textures_.Destroy(id) ?
-      BufferSyncInterface::PARSE_NO_ERROR :
-      BufferSyncInterface::PARSE_INVALID_ARGUMENTS;
+      parse_error::kParseNoError :
+      parse_error::kParseInvalidArguments;
 }
 
 // Creates a 2D texture resource.
-BufferSyncInterface::ParseError GAPID3D9::CreateTexture2D(
-    ResourceID id,
+parse_error::ParseError GAPID3D9::CreateTexture2D(
+    ResourceId id,
     unsigned int width,
     unsigned int height,
     unsigned int levels,
     texture::Format format,
-    unsigned int flags) {
+    unsigned int flags,
+    bool enable_render_surfaces) {
   Texture2DD3D9 *texture = Texture2DD3D9::Create(this, width, height, levels,
-                                                 format, flags);
-  if (!texture) return BufferSyncInterface::PARSE_INVALID_ARGUMENTS;
+                                                 format, flags,
+                                                 enable_render_surfaces);
+  if (!texture) return parse_error::kParseInvalidArguments;
   // Dirty effect, because this texture id may be used
   DirtyEffect();
   textures_.Assign(id, texture);
-  return BufferSyncInterface::PARSE_NO_ERROR;
+  return parse_error::kParseNoError;
 }
 
 // Creates a 3D texture resource.
-BufferSyncInterface::ParseError GAPID3D9::CreateTexture3D(
-    ResourceID id,
+parse_error::ParseError GAPID3D9::CreateTexture3D(
+    ResourceId id,
     unsigned int width,
     unsigned int height,
     unsigned int depth,
     unsigned int levels,
     texture::Format format,
-    unsigned int flags) {
+    unsigned int flags,
+    bool enable_render_surfaces) {
   Texture3DD3D9 *texture = Texture3DD3D9::Create(this, width, height, depth,
-                                                 levels, format, flags);
-  if (!texture) return BufferSyncInterface::PARSE_INVALID_ARGUMENTS;
+                                                 levels, format, flags,
+                                                 enable_render_surfaces);
+  if (!texture) return parse_error::kParseInvalidArguments;
   // Dirty effect, because this texture id may be used
   DirtyEffect();
   textures_.Assign(id, texture);
-  return BufferSyncInterface::PARSE_NO_ERROR;
+  return parse_error::kParseNoError;
 }
 
 // Creates a cube map texture resource.
-BufferSyncInterface::ParseError GAPID3D9::CreateTextureCube(
-    ResourceID id,
+parse_error::ParseError GAPID3D9::CreateTextureCube(
+    ResourceId id,
     unsigned int side,
     unsigned int levels,
     texture::Format format,
-    unsigned int flags) {
+    unsigned int flags,
+    bool enable_render_surfaces) {
   TextureCubeD3D9 *texture = TextureCubeD3D9::Create(this, side, levels,
-                                                     format, flags);
-  if (!texture) return BufferSyncInterface::PARSE_INVALID_ARGUMENTS;
+                                                     format, flags,
+                                                     enable_render_surfaces);
+  if (!texture) return parse_error::kParseInvalidArguments;
   // Dirty effect, because this texture id may be used
   DirtyEffect();
   textures_.Assign(id, texture);
-  return BufferSyncInterface::PARSE_NO_ERROR;
+  return parse_error::kParseNoError;
 }
 
 // Copies the data into a texture resource.
-BufferSyncInterface::ParseError GAPID3D9::SetTextureData(
-    ResourceID id,
+parse_error::ParseError GAPID3D9::SetTextureData(
+    ResourceId id,
     unsigned int x,
     unsigned int y,
     unsigned int z,
@@ -599,17 +693,17 @@ BufferSyncInterface::ParseError GAPID3D9::SetTextureData(
     const void *data) {
   TextureD3D9 *texture = textures_.Get(id);
   if (!texture)
-    return BufferSyncInterface::PARSE_INVALID_ARGUMENTS;
+    return parse_error::kParseInvalidArguments;
   Volume volume = {x, y, z, width, height, depth};
   return texture->SetData(this, volume, level, face, row_pitch, slice_pitch,
                           size, data) ?
-      BufferSyncInterface::PARSE_NO_ERROR :
-      BufferSyncInterface::PARSE_INVALID_ARGUMENTS;
+      parse_error::kParseNoError :
+      parse_error::kParseInvalidArguments;
 }
 
 // Copies the data from a texture resource.
-BufferSyncInterface::ParseError GAPID3D9::GetTextureData(
-    ResourceID id,
+parse_error::ParseError GAPID3D9::GetTextureData(
+    ResourceId id,
     unsigned int x,
     unsigned int y,
     unsigned int z,
@@ -624,12 +718,12 @@ BufferSyncInterface::ParseError GAPID3D9::GetTextureData(
     void *data) {
   TextureD3D9 *texture = textures_.Get(id);
   if (!texture)
-    return BufferSyncInterface::PARSE_INVALID_ARGUMENTS;
+    return parse_error::kParseInvalidArguments;
   Volume volume = {x, y, z, width, height, depth};
   return texture->GetData(this, volume, level, face, row_pitch, slice_pitch,
                           size, data) ?
-      BufferSyncInterface::PARSE_NO_ERROR :
-      BufferSyncInterface::PARSE_INVALID_ARGUMENTS;
+      parse_error::kParseNoError :
+      parse_error::kParseInvalidArguments;
 }
 
 }  // namespace command_buffer

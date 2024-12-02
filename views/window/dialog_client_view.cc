@@ -8,23 +8,29 @@
 #include <windows.h>
 #include <uxtheme.h>
 #include <vsstyle.h>
+#else
+#include <gtk/gtk.h>
 #endif
+
+#include <algorithm>
 
 #include "app/gfx/canvas.h"
 #include "app/gfx/font.h"
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
-#if defined(OS_WIN)
-#include "base/gfx/native_theme.h"
-#endif
+#include "base/keyboard_codes.h"
 #include "grit/app_strings.h"
+#include "skia/ext/skia_utils_gtk.h"
 #include "views/controls/button/native_button.h"
 #include "views/standard_layout.h"
 #include "views/window/dialog_delegate.h"
-#if !defined(OS_WIN)
-#include "views/window/hit_test.h"
-#endif
 #include "views/window/window.h"
+#if defined(OS_WIN)
+#include "app/gfx/native_theme_win.h"
+#else
+#include "views/window/hit_test.h"
+#include "views/widget/widget.h"
+#endif
 
 namespace views {
 
@@ -127,13 +133,9 @@ void DialogClientView::ShowDialogButtons() {
     ok_button_->SetGroup(kButtonGroup);
     if (is_default_button)
       default_button_ = ok_button_;
-#if defined(OS_WIN)
     if (!(buttons & MessageBoxFlags::DIALOGBUTTON_CANCEL))
-      ok_button_->AddAccelerator(Accelerator(VK_ESCAPE, false, false, false));
-#else
-    NOTIMPLEMENTED();
-    // TODO(port): add accelerators
-#endif
+      ok_button_->AddAccelerator(Accelerator(base::VKEY_ESCAPE,
+                                             false, false, false));
     AddChildView(ok_button_);
   }
   if (buttons & MessageBoxFlags::DIALOGBUTTON_CANCEL && !cancel_button_) {
@@ -153,12 +155,8 @@ void DialogClientView::ShowDialogButtons() {
                                       MessageBoxFlags::DIALOGBUTTON_CANCEL,
                                       label, is_default_button);
     cancel_button_->SetGroup(kButtonGroup);
-#if defined(OS_WIN)
-    cancel_button_->AddAccelerator(Accelerator(VK_ESCAPE, false, false, false));
-#else
-    NOTIMPLEMENTED();
-    // TODO(port): add accelerators
-#endif
+    cancel_button_->AddAccelerator(Accelerator(base::VKEY_ESCAPE,
+                                               false, false, false));
     if (is_default_button)
       default_button_ = ok_button_;
     AddChildView(cancel_button_);
@@ -166,12 +164,7 @@ void DialogClientView::ShowDialogButtons() {
   if (!buttons) {
     // Register the escape key as an accelerator which will close the window
     // if there are no dialog buttons.
-#if defined(OS_WIN)
-    AddAccelerator(Accelerator(VK_ESCAPE, false, false, false));
-#else
-    NOTIMPLEMENTED();
-    // TODO(port): add accelerators
-#endif
+    AddAccelerator(Accelerator(base::VKEY_ESCAPE, false, false, false));
   }
 }
 
@@ -258,14 +251,10 @@ bool DialogClientView::CanClose() const {
 }
 
 void DialogClientView::WindowClosing() {
-#if defined(OS_WIN)
   FocusManager* focus_manager = GetFocusManager();
   DCHECK(focus_manager);
   if (focus_manager)
      focus_manager->RemoveFocusChangeListener(this);
-#else
-  NOTIMPLEMENTED();
-#endif
   ClientView::WindowClosing();
 }
 
@@ -282,8 +271,13 @@ void DialogClientView::Paint(gfx::Canvas* canvas) {
 #if defined(OS_WIN)
   FillViewWithSysColor(canvas, this, GetSysColor(COLOR_3DFACE));
 #else
-  NOTIMPLEMENTED();
-  // TODO(port): paint dialog background color
+  GtkWidget* widget = GetWidget()->GetNativeView();
+  if (GTK_IS_WINDOW(widget)) {
+    GtkStyle* window_style = gtk_widget_get_style(widget);
+    canvas->FillRectInt(skia::GdkColorToSkColor(
+                            window_style->bg[GTK_STATE_NORMAL]),
+                        0, 0, width(), height());
+  }
 #endif
 }
 
@@ -308,16 +302,12 @@ void DialogClientView::ViewHierarchyChanged(bool is_add, View* parent,
     ShowDialogButtons();
     ClientView::ViewHierarchyChanged(is_add, parent, child);
 
-#if defined(OS_WIN)
     FocusManager* focus_manager = GetFocusManager();
     // Listen for focus change events so we can update the default button.
     DCHECK(focus_manager);  // bug #1291225: crash reports seem to indicate it
                             // can be NULL.
     if (focus_manager)
       focus_manager->AddFocusChangeListener(this);
-#else
-    NOTIMPLEMENTED();
-#endif
 
     // The "extra view" must be created and installed after the contents view
     // has been inserted into the view hierarchy.
@@ -363,12 +353,8 @@ gfx::Size DialogClientView::GetPreferredSize() {
 }
 
 bool DialogClientView::AcceleratorPressed(const Accelerator& accelerator) {
-#if defined(OS_WIN)
-  DCHECK(accelerator.GetKeyCode() == VK_ESCAPE);  // We only expect Escape key.
-#else
-  NOTIMPLEMENTED();
-  // TODO(port): add accelerators
-#endif
+  // We only expect Escape key.
+  DCHECK(accelerator.GetKeyCode() == base::VKEY_ESCAPE);
   Close();
   return true;
 }
@@ -376,7 +362,8 @@ bool DialogClientView::AcceleratorPressed(const Accelerator& accelerator) {
 ////////////////////////////////////////////////////////////////////////////////
 // DialogClientView, ButtonListener implementation:
 
-void DialogClientView::ButtonPressed(Button* sender) {
+void DialogClientView::ButtonPressed(
+    Button* sender, const views::Event& event) {
   // We NULL check the delegate here since the buttons can receive WM_COMMAND
   // messages even after they (and the window containing us) are destroyed.
   if (!GetDialogDelegate())

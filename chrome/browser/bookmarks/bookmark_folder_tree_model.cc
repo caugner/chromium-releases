@@ -6,14 +6,16 @@
 
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
+#include "chrome/browser/bookmarks/bookmark_model.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 
 BookmarkFolderTreeModel::BookmarkFolderTreeModel(BookmarkModel* model)
     : TreeNodeModel<FolderNode>(new FolderNode(NULL)),
       model_(model),
       recently_bookmarked_node_(new FolderNode(NULL)),
-      search_node_(new FolderNode(NULL)){
+      search_node_(new FolderNode(NULL)) {
   recently_bookmarked_node_->SetTitle(
       l10n_util::GetString(IDS_BOOKMARK_TREE_RECENTLY_BOOKMARKED_NODE_TITLE));
   search_node_->SetTitle(

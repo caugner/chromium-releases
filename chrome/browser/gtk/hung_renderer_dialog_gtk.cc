@@ -6,11 +6,12 @@
 
 #include <gtk/gtk.h>
 
+#include "app/gfx/gtk_util.h"
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
-#include "base/gfx/gtk_util.h"
 #include "base/process_util.h"
 #include "chrome/browser/browser_list.h"
+#include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/gtk_util.h"
 #include "chrome/common/logging_chrome.h"
@@ -127,14 +128,15 @@ void HungRendererDialogGtk::Init() {
   model_ = gtk_list_store_new(COL_COUNT, GDK_TYPE_PIXBUF, G_TYPE_STRING);
   GtkWidget* tree_view = gtk_tree_view_new_with_model(
       GTK_TREE_MODEL(model_));
+  g_object_unref(model_);
   gtk_tree_view_set_headers_visible(GTK_TREE_VIEW(tree_view), FALSE);
   GtkTreeViewColumn* column = gtk_tree_view_column_new();
   GtkCellRenderer* renderer = gtk_cell_renderer_pixbuf_new();
   gtk_tree_view_column_pack_start(column, renderer, FALSE);
-  gtk_tree_view_column_add_attribute(column ,renderer, "pixbuf", COL_FAVICON);
+  gtk_tree_view_column_add_attribute(column, renderer, "pixbuf", COL_FAVICON);
   renderer = gtk_cell_renderer_text_new();
   gtk_tree_view_column_pack_start(column, renderer, TRUE);
-  gtk_tree_view_column_add_attribute(column ,renderer, "text", COL_TITLE);
+  gtk_tree_view_column_add_attribute(column, renderer, "text", COL_TITLE);
 
   gtk_tree_view_append_column(GTK_TREE_VIEW(tree_view), column);
   gtk_container_add(GTK_CONTAINER(scroll_list), tree_view);

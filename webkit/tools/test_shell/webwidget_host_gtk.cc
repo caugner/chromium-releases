@@ -33,6 +33,9 @@ using WebKit::WebWidgetClient;
 
 namespace {
 
+// Used to store a backpointer to WebWidgetHost from our GtkWidget.
+const char kWebWidgetHostKey[] = "webwidgethost";
+
 // In response to an invalidation, we call into WebKit to do layout. On
 // Windows, WM_PAINT is a virtual message so any extra invalidates that come up
 // while it's doing layout are implicitly swallowed as soon as we actually do
@@ -103,6 +106,7 @@ class WebWidgetHostGtkWidget {
     g_signal_connect(widget, "scroll-event",
                      G_CALLBACK(&HandleScroll), host);
 
+    g_object_set_data(G_OBJECT(widget), kWebWidgetHostKey, host);
     return widget;
   }
 
@@ -152,8 +156,12 @@ class WebWidgetHostGtkWidget {
   }
 
   // The GdkWindow was destroyed.
-  static gboolean HandleDestroy(GtkWidget* widget, WebWidgetHost* host) {
-    host->WindowDestroyed();
+  static gboolean HandleDestroy(GtkWidget* widget, void* unused) {
+    // The associated WebWidgetHost instance may have already been destroyed.
+    WebWidgetHost* host = static_cast<WebWidgetHost*>(
+        g_object_get_data(G_OBJECT(widget), kWebWidgetHostKey));
+    if (host)
+      host->WindowDestroyed();
     return FALSE;
   }
 
@@ -163,6 +171,19 @@ class WebWidgetHostGtkWidget {
                                  WebWidgetHost* host) {
     host->webwidget()->handleInputEvent(
         WebInputEventFactory::keyboardEvent(event));
+
+    // In the browser we do a ton of work with IMEs.  This is some minimal
+    // code to make basic text work in test_shell, but doesn't cover IME.
+    // This is a copy of the logic in ProcessUnfilteredKeyPressEvent in
+    // render_widget_host_view_gtk.cc .
+    if (event->type == GDK_KEY_PRESS) {
+      WebKeyboardEvent wke = WebInputEventFactory::keyboardEvent(event);
+      if (wke.text[0]) {
+        wke.type = WebKit::WebInputEvent::Char;
+        host->webwidget()->handleInputEvent(wke);
+      }
+    }
+
     return FALSE;
   }
 
@@ -289,25 +310,29 @@ WebWidgetHost::WebWidgetHost()
     : view_(NULL),
       webwidget_(NULL),
       scroll_dx_(0),
-      scroll_dy_(0),
-      track_mouse_leave_(false) {
+      scroll_dy_(0) {
   set_painting(false);
 }
 
 WebWidgetHost::~WebWidgetHost() {
+  // We may be deleted before the view_. Clear out the signals so that we don't
+  // attempt to invoke something on a deleted object.
+  g_object_set_data(G_OBJECT(view_), kWebWidgetHostKey, NULL);
+  g_signal_handlers_disconnect_matched(view_,
+      G_SIGNAL_MATCH_DATA, 0, 0, NULL, NULL, this);
   webwidget_->close();
 }
 
 void WebWidgetHost::Resize(const gfx::Size &newsize) {
   // The pixel buffer backing us is now the wrong size
   canvas_.reset();
-
+  logical_size_ = newsize;
   webwidget_->resize(newsize);
 }
 
 void WebWidgetHost::Paint() {
-  int width = view_->allocation.width;
-  int height = view_->allocation.height;
+  int width = logical_size_.width();
+  int height = logical_size_.height();
   gfx::Rect client_rect(width, height);
 
   // Allocate a canvas if necessary

@@ -25,65 +25,26 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/render_messages.h"
+#include "chrome/common/nacl_types.h"
 #include "chrome/common/transport_dib.h"
 #include "chrome/renderer/render_view.h"
 #include "ipc/ipc_channel.h"
 #include "ipc/ipc_message_utils.h"
 #include "media/base/media.h"
+#include "native_client/src/trusted/plugin/nacl_entry_points.h"
 #include "webkit/glue/webkit_glue.h"
 
-static size_t GetMaxSharedMemorySize() {
-  static int size = 0;
-#if defined(OS_LINUX)
-  if (size == 0) {
-    std::string contents;
-    file_util::ReadFileToString(FilePath("/proc/sys/kernel/shmmax"), &contents);
-    size = strtoul(contents.c_str(), NULL, 0);
-  }
+#if defined(OS_MACOSX)
+#include "base/mac_util.h"
 #endif
-  return size;
-}
 
 //-----------------------------------------------------------------------------
 
 RenderProcess::RenderProcess()
-    : ChildProcess(new RenderThread()),
-      ALLOW_THIS_IN_INITIALIZER_LIST(shared_mem_cache_cleaner_(
+    : ALLOW_THIS_IN_INITIALIZER_LIST(shared_mem_cache_cleaner_(
           base::TimeDelta::FromSeconds(5),
           this, &RenderProcess::ClearTransportDIBCache)),
       sequence_number_(0) {
-  Init();
-}
-
-RenderProcess::RenderProcess(const std::string& channel_name)
-    : ChildProcess(new RenderThread(channel_name)),
-      ALLOW_THIS_IN_INITIALIZER_LIST(shared_mem_cache_cleaner_(
-          base::TimeDelta::FromSeconds(5),
-          this, &RenderProcess::ClearTransportDIBCache)),
-      sequence_number_(0) {
-  Init();
-}
-
-RenderProcess::~RenderProcess() {
-  // TODO(port)
-  // Try and limit what we pull in for our non-Win unit test bundle
-#ifndef NDEBUG
-  // log important leaked objects
-  webkit_glue::CheckForLeaks();
-#endif
-
-  GetShutDownEvent()->Signal();
-
-  // We need to stop the RenderThread as the clearer_factory_
-  // member could be in use while the object itself is destroyed,
-  // as a result of the containing RenderProcess object being destroyed.
-  // This race condition causes a crash when the renderer process is shutting
-  // down.
-  child_thread()->Stop();
-  ClearTransportDIBCache();
-}
-
-void RenderProcess::Init() {
   in_process_plugins_ = InProcessPlugins();
   for (size_t i = 0; i < arraysize(shared_mem_cache_); ++i)
     shared_mem_cache_[i] = NULL;
@@ -105,17 +66,17 @@ void RenderProcess::Init() {
   }
 #endif
 
-  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
-  if (command_line.HasSwitch(switches::kJavaScriptFlags)) {
-    webkit_glue::SetJavaScriptFlags(
-      command_line.GetSwitchValue(switches::kJavaScriptFlags));
-  }
-
   // Out of process dev tools rely upon auto break behavior.
   webkit_glue::SetJavaScriptFlags(
       L"--debugger-auto-break"
       // Enable lazy in-memory profiling.
       L" --prof --prof-lazy --logfile=* --compress-log");
+
+  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+  if (command_line.HasSwitch(switches::kJavaScriptFlags)) {
+    webkit_glue::SetJavaScriptFlags(
+      command_line.GetSwitchValue(switches::kJavaScriptFlags));
+  }
 
   if (command_line.HasSwitch(switches::kEnableWatchdog)) {
     // TODO(JAR): Need to implement renderer IO msgloop watchdog.
@@ -125,10 +86,38 @@ void RenderProcess::Init() {
     StatisticsRecorder::set_dump_on_exit(true);
   }
 
+#ifndef DISABLE_NACL
+  if (command_line.HasSwitch(switches::kInternalNaCl))
+    RegisterInternalNaClPlugin(RenderProcess::LaunchNaClProcess);
+#endif
+
+  if (!command_line.HasSwitch(switches::kDisableByteRangeSupport)) {
+    webkit_glue::SetMediaCacheEnabled(true);
+  }
+
+#if defined(OS_MACOSX)
+  FilePath bundle_path = mac_util::MainAppBundlePath();
+
+  initialized_media_library_ =
+     media::InitializeMediaLibrary(bundle_path.Append("Libraries"));
+#else
   FilePath module_path;
   initialized_media_library_ =
       PathService::Get(base::DIR_MODULE, &module_path) &&
       media::InitializeMediaLibrary(module_path);
+#endif
+}
+
+RenderProcess::~RenderProcess() {
+  // TODO(port)
+  // Try and limit what we pull in for our non-Win unit test bundle
+#ifndef NDEBUG
+  // log important leaked objects
+  webkit_glue::CheckForLeaks();
+#endif
+
+  GetShutDownEvent()->Signal();
+  ClearTransportDIBCache();
 }
 
 bool RenderProcess::InProcessPlugins() {
@@ -145,6 +134,28 @@ bool RenderProcess::InProcessPlugins() {
 #endif
 }
 
+bool RenderProcess::LaunchNaClProcess(const char* url,
+                                      int imc_fd,
+                                      nacl::Handle* imc_handle,
+                                      nacl::Handle* nacl_process_handle,
+                                      int* nacl_process_id) {
+  // TODO(gregoryd): nacl::FileDescriptor will be soon merged with
+  // base::FileDescriptor
+  nacl::FileDescriptor imc_descriptor;
+  nacl::FileDescriptor nacl_process_descriptor;
+  if (!RenderThread::current()->Send(
+    new ViewHostMsg_LaunchNaCl(ASCIIToWide(url),
+                               imc_fd,
+                               &imc_descriptor,
+                               &nacl_process_descriptor,
+                               nacl_process_id))) {
+    return false;
+  }
+  *imc_handle = NATIVE_HANDLE(imc_descriptor);
+  *nacl_process_handle = NATIVE_HANDLE(nacl_process_descriptor);
+  return true;
+}
+
 // -----------------------------------------------------------------------------
 // Platform specific code for dealing with bitmap transport...
 
@@ -157,7 +168,7 @@ TransportDIB* RenderProcess::CreateTransportDIB(size_t size) {
   // get one.
   TransportDIB::Handle handle;
   IPC::Message* msg = new ViewHostMsg_AllocTransportDIB(size, &handle);
-  if (!child_thread()->Send(msg))
+  if (!main_thread()->Send(msg))
     return NULL;
   if (handle.fd < 0)
     return NULL;
@@ -173,7 +184,7 @@ void RenderProcess::FreeTransportDIB(TransportDIB* dib) {
   // On Mac we need to tell the browser that it can drop a reference to the
   // shared memory.
   IPC::Message* msg = new ViewHostMsg_FreeTransportDIB(dib->id());
-  child_thread()->Send(msg);
+  main_thread()->Send(msg);
 #endif
 
   delete dib;
@@ -187,7 +198,11 @@ skia::PlatformCanvas* RenderProcess::GetDrawingCanvas(
   int width = rect.width();
   int height = rect.height();
   const size_t stride = skia::PlatformCanvas::StrideForWidth(rect.width());
-  const size_t max_size = GetMaxSharedMemorySize();
+#if defined(OS_LINUX)
+  const size_t max_size = base::SysInfo::MaxSharedMemorySize();
+#else
+  const size_t max_size = 0;
+#endif
 
   // If the requested size is too big, reduce the height. Ideally we might like
   // to reduce the width as well to make the size reduction more "balanced", but

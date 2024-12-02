@@ -114,11 +114,18 @@ class Thread : PlatformThread::Delegate {
   // Called just prior to starting the message loop
   virtual void Init() {}
 
+  // Called to start the message loop
+  virtual void Run(MessageLoop* message_loop);
+
   // Called just after the message loop ends
   virtual void CleanUp() {}
 
   static void SetThreadWasQuitProperly(bool flag);
   static bool GetThreadWasQuitProperly();
+
+  void set_message_loop(MessageLoop* message_loop) {
+    message_loop_ = message_loop;
+  }
 
  private:
   // PlatformThread::Delegate methods:
@@ -127,6 +134,10 @@ class Thread : PlatformThread::Delegate {
   // We piggy-back on the startup_data_ member to know if we successfully
   // started the thread.  This way we know that we need to call Join.
   bool thread_was_started() const { return startup_data_ != NULL; }
+
+  // If true, we're in the middle of stopping, and shouldn't access
+  // |message_loop_|. It may non-NULL and invalid.
+  bool stopping_;
 
   // Used to pass data to ThreadMain.
   struct StartupData;

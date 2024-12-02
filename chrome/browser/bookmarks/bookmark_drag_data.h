@@ -11,6 +11,13 @@
 #include "chrome/browser/history/history.h"
 #include "googleurl/src/gurl.h"
 
+// TODO(port): Port this file.
+#if defined(TOOLKIT_VIEWS)
+#include "app/os_exchange_data.h"
+#else
+#include "chrome/common/temp_scaffolding_stubs.h"
+#endif
+
 class BookmarkModel;
 class BookmarkNode;
 class OSExchangeData;
@@ -67,9 +74,24 @@ struct BookmarkDragData {
 
   BookmarkDragData() { }
 
+#if defined(TOOLKIT_VIEWS)
+  static OSExchangeData::CustomFormat GetBookmarkCustomFormat();
+#endif
+
   // Created a BookmarkDragData populated from the arguments.
   explicit BookmarkDragData(const BookmarkNode* node);
   explicit BookmarkDragData(const std::vector<const BookmarkNode*>& nodes);
+
+  // TODO(estade): Port to mac. It should be as simple as removing this ifdef
+  // after the relevant Clipboard functions are implemetned.
+#if !defined(OS_MACOSX)
+  // Writes elements to the clipboard.
+  void WriteToClipboard(Profile* profile) const;
+
+  // Reads bookmarks from the clipboard. Prefers data written via
+  // WriteToClipboard but will also attempt to read a plain bookmark.
+  bool ReadFromClipboard();
+#endif
 
 #if defined(TOOLKIT_VIEWS)
   // Writes elements to data. If there is only one element and it is a URL
@@ -113,6 +135,9 @@ struct BookmarkDragData {
 
   // The actual elements written to the clipboard.
   std::vector<Element> elements;
+
+  // The MIME type for the clipboard format for BookmarkDragData.
+  static const char* kClipboardFormatString;
 
  private:
   // Path of the profile we originated from.

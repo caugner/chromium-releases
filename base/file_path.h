@@ -20,6 +20,8 @@
 //   Linux does not specify an encoding, but in practice, the locale's
 //   character set may be used.
 //
+// For more arcane bits of path trivia, see below.
+//
 // FilePath objects are intended to be used anywhere paths are.  An
 // application may pass FilePath objects around internally, masking the
 // underlying differences between systems, only differing in implementation
@@ -61,11 +63,44 @@
 // |   FilePath log_file_path(kLogFileName);
 // |   [...]
 // | }
+//
+// WARNING: FilePaths should ALWAYS be displayed with LTR directionality, even
+// when the UI language is RTL. This means you always need to pass filepaths
+// through l10n_util::WrapPathWithLTRFormatting() before displaying it in the
+// RTL UI.
+//
+// This is a very common source of bugs, please try to keep this in mind.
+//
+// ARCANE BITS OF PATH TRIVIA
+//
+//  - A double leading slash is actually part of the POSIX standard.  Systems
+//    are allowed to treat // as an alternate root, as Windows does for UNC
+//    (network share) paths.  Most POSIX systems don't do anything special
+//    with two leading slashes, but FilePath handles this case properly
+//    in case it ever comes across such a system.  FilePath needs this support
+//    for Windows UNC paths, anyway.
+//    References:
+//    The Open Group Base Specifications Issue 7, sections 3.266 ("Pathname")
+//    and 4.12 ("Pathname Resolution"), available at:
+//    http://www.opengroup.org/onlinepubs/9699919799/basedefs/V1_chap03.html#tag_03_266
+//    http://www.opengroup.org/onlinepubs/9699919799/basedefs/V1_chap04.html#tag_04_12
+//
+//  - Windows treats c:\\ the same way it treats \\.  This was intended to
+//    allow older applications that require drive letters to support UNC paths
+//    like \\server\share\path, by permitting c:\\server\share\path as an
+//    equivalent.  Since the OS treats these paths specially, FilePath needs
+//    to do the same.  Since Windows can use either / or \ as the separator,
+//    FilePath treats c://, c:\\, //, and \\ all equivalently.
+//    Reference:
+//    The Old New Thing, "Why is a drive letter permitted in front of UNC
+//    paths (sometimes)?", available at:
+//    http://blogs.msdn.com/oldnewthing/archive/2005/11/22/495740.aspx
 
 #ifndef BASE_FILE_PATH_H_
 #define BASE_FILE_PATH_H_
 
 #include <string>
+#include <vector>
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
@@ -150,6 +185,16 @@ class FilePath {
   // parent.
   bool IsParent(const FilePath& child) const;
 
+  // If IsParent(child) holds, appends to path (if non-NULL) the
+  // relative path to child and returns true.  For example, if parent
+  // holds "/Users/johndoe/Library/Application Support", child holds
+  // "/Users/johndoe/Library/Application Support/Google/Chrome/Default", and
+  // *path holds "/Users/johndoe/Library/Caches", then after
+  // parent.AppendRelativePath(child, path) is called *path will hold
+  // "/Users/johndoe/Library/Caches/Google/Chrome/Default".  Otherwise,
+  // returns false.
+  bool AppendRelativePath(const FilePath& child, FilePath* path) const;
+
   // Returns a FilePath corresponding to the directory containing the path
   // named by this object, stripping away the file component.  If this object
   // only contains one component, returns a FilePath identifying
@@ -186,6 +231,7 @@ class FilePath {
   // path == "C:\pics\jojo"     suffix == " (1)", returns "C:\pics\jojo (1)"
   // path == "C:\pics.old\jojo" suffix == " (1)", returns "C:\pics.old\jojo (1)"
   FilePath InsertBeforeExtension(const StringType& suffix) const;
+  FilePath InsertBeforeExtensionASCII(const base::StringPiece& suffix) const;
 
   // Replaces the extension of |file_name| with |extension|.  If |file_name|
   // does not have an extension, them |extension| is added.  If |extension| is
@@ -212,7 +258,8 @@ class FilePath {
   // On Linux, although it can use any 8-bit encoding for paths, we assume that
   // ASCII is a valid subset, regardless of the encoding, since many operating
   // system paths will always be ASCII.
-  FilePath AppendASCII(const StringPiece& component) const WARN_UNUSED_RESULT;
+  FilePath AppendASCII(const base::StringPiece& component)
+      const WARN_UNUSED_RESULT;
 
   // Returns true if this FilePath contains an absolute path.  On Windows, an
   // absolute path begins with either a drive letter specification followed by
@@ -260,14 +307,15 @@ class FilePath {
 #define FILE_PATH_LITERAL(x) L ## x
 #endif  // OS_WIN
 
-// Implement hash function so that we can use FilePaths in hashsets and maps.
+// Provide a hash function so that hash_sets and maps can contain FilePath
+// objects.
 #if defined(COMPILER_GCC)
 namespace __gnu_cxx {
 
 template<>
 struct hash<FilePath> {
-  size_t operator()(const FilePath& f) const {
-    return std::tr1::hash<FilePath::StringType>()(f.value());
+  std::size_t operator()(const FilePath& f) const {
+    return hash<FilePath::StringType>()(f.value());
   }
 };
 

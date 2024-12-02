@@ -4,6 +4,24 @@
 
 #include "build/build_config.h"
 
+// Need to include this before most other files because it defines
+// IPC_MESSAGE_LOG_ENABLED. We need to use it to define
+// IPC_MESSAGE_MACROS_LOG_ENABLED so render_messages.h will generate the
+// ViewMsgLog et al. functions.
+#include "ipc/ipc_message.h"
+
+// On Windows, the about:ipc dialog shows IPCs; on POSIX, we hook up a
+// logger in this file.  (We implement about:ipc on Mac but implement
+// the loggers here anyway).  We need to do this real early to be sure
+// IPC_MESSAGE_MACROS_LOG_ENABLED doesn't get undefined.
+#if defined(OS_POSIX) && defined(IPC_MESSAGE_LOG_ENABLED)
+#define IPC_MESSAGE_MACROS_LOG_ENABLED
+#include "chrome/common/devtools_messages.h"
+#include "chrome/common/plugin_messages.h"
+#include "chrome/common/render_messages.h"
+#include "chrome/common/worker_messages.h"
+#endif
+
 #if defined(OS_WIN)
 #include <windows.h>
 #endif
@@ -16,6 +34,7 @@
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/debug_util.h"
+#include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/path_service.h"
@@ -24,6 +43,8 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/env_vars.h"
+#include "ipc/ipc_logging.h"
+#include "ipc/ipc_message.h"
 
 // When true, this means that error dialogs should not be shown.
 static bool dialogs_are_suppressed_ = false;
@@ -79,12 +100,12 @@ void InitChromeLogging(const CommandLine& command_line,
   // only use OutputDebugString in debug mode
 #ifdef NDEBUG
   bool enable_logging = false;
-  const wchar_t *kInvertLoggingSwitch = switches::kEnableLogging;
+  const char *kInvertLoggingSwitch = switches::kEnableLogging;
   const logging::LoggingDestination kDefaultLoggingMode =
       logging::LOG_ONLY_TO_FILE;
 #else
   bool enable_logging = true;
-  const wchar_t *kInvertLoggingSwitch = switches::kDisableLogging;
+  const char *kInvertLoggingSwitch = switches::kDisableLogging;
   const logging::LoggingDestination kDefaultLoggingMode =
       logging::LOG_TO_BOTH_FILE_AND_SYSTEM_DEBUG_LOG;
 #endif
@@ -94,18 +115,17 @@ void InitChromeLogging(const CommandLine& command_line,
 
   logging::LoggingDestination log_mode;
   if (enable_logging) {
-    log_mode = kDefaultLoggingMode;
+    // Let --enable-logging=stderr force only stderr, particularly useful for
+    // non-debug builds where otherwise you can't get logs to stderr at all.
+    if (command_line.GetSwitchValue(switches::kEnableLogging) == L"stderr")
+      log_mode = logging::LOG_ONLY_TO_SYSTEM_DEBUG_LOG;
+    else
+      log_mode = kDefaultLoggingMode;
   } else {
     log_mode = logging::LOG_NONE;
   }
 
-#if defined(OS_POSIX)
-  std::string log_file_name = WideToUTF8(GetLogFileName());
-#elif defined(OS_WIN)
-  std::wstring log_file_name = GetLogFileName();
-#endif
-
-  logging::InitLogging(log_file_name.c_str(),
+  logging::InitLogging(GetLogFileName().value().c_str(),
                        log_mode,
                        logging::LOCK_LOG_FILE,
                        delete_old_log_file);
@@ -150,16 +170,16 @@ void CleanupChromeLogging() {
   chrome_logging_initialized_ = false;
 }
 
-std::wstring GetLogFileName() {
+FilePath GetLogFileName() {
   std::wstring filename = base::SysInfo::GetEnvVar(env_vars::kLogFileName);
-  if (filename != L"")
-    return filename;
+  if (!filename.empty())
+    return FilePath::FromWStringHack(filename);
 
-  const std::wstring log_filename(L"chrome_debug.log");
-  std::wstring log_path;
+  const FilePath log_filename(FILE_PATH_LITERAL("chrome_debug.log"));
+  FilePath log_path;
 
   if (PathService::Get(chrome::DIR_LOGS, &log_path)) {
-    file_util::AppendToPath(&log_path, log_filename);
+    log_path = log_path.Append(log_filename);
     return log_path;
   } else {
     // error with path service, just use some default file somewhere
@@ -179,11 +199,7 @@ size_t GetFatalAssertions(AssertionList* assertions) {
   size_t assertion_count = 0;
 
   std::ifstream log_file;
-#if defined(OS_WIN)
-  log_file.open(GetLogFileName().c_str());
-#elif defined(OS_POSIX)
-  log_file.open(WideToUTF8(GetLogFileName()).c_str());
-#endif
+  log_file.open(GetLogFileName().value().c_str());
   if (!log_file.is_open())
     return 0;
 

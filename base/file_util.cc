@@ -13,10 +13,9 @@
 
 #include "base/file_path.h"
 #include "base/logging.h"
-#include "base/string_util.h"
-
 #include "base/string_piece.h"
-#include "base/sys_string_conversions.h"
+#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 
 namespace {
 
@@ -46,11 +45,6 @@ bool EnsureEndsWithSeparator(FilePath* path) {
   path_str.append(&FilePath::kSeparators[0], 1);
 
   return true;
-}
-
-void TrimTrailingSeparator(std::wstring* dir) {
-  while (dir->length() > 1 && EndsWithSeparator(dir))
-    dir->resize(dir->length() - 1);
 }
 
 FilePath::StringType GetFileExtensionFromPath(const FilePath& path) {
@@ -323,10 +317,6 @@ bool ContentsEqual(const std::wstring& filename1,
   return ContentsEqual(FilePath::FromWStringHack(filename1),
                        FilePath::FromWStringHack(filename2));
 }
-bool CopyFile(const std::wstring& from_path, const std::wstring& to_path) {
-  return CopyFile(FilePath::FromWStringHack(from_path),
-                  FilePath::FromWStringHack(to_path));
-}
 bool CreateDirectory(const std::wstring& full_path) {
   return CreateDirectory(FilePath::FromWStringHack(full_path));
 }
@@ -343,18 +333,8 @@ bool CreateNewTempDirectory(const std::wstring& prefix,
   *new_temp_path = temp_path.ToWStringHack();
   return true;
 }
-bool CreateTemporaryFileName(std::wstring* temp_file) {
-  FilePath temp_file_path;
-  if (!CreateTemporaryFileName(&temp_file_path))
-    return false;
-  *temp_file = temp_file_path.ToWStringHack();
-  return true;
-}
 bool Delete(const std::wstring& path, bool recursive) {
   return Delete(FilePath::FromWStringHack(path), recursive);
-}
-bool DirectoryExists(const std::wstring& path) {
-  return DirectoryExists(FilePath::FromWStringHack(path));
 }
 bool EndsWithSeparator(std::wstring* path) {
   return EndsWithSeparator(FilePath::FromWStringHack(*path));
@@ -397,18 +377,8 @@ bool GetTempDir(std::wstring* path_str) {
   *path_str = path.ToWStringHack();
   return true;
 }
-bool Move(const std::wstring& from_path, const std::wstring& to_path) {
-  return Move(FilePath::FromWStringHack(from_path),
-              FilePath::FromWStringHack(to_path));
-}
 FILE* OpenFile(const std::wstring& filename, const char* mode) {
   return OpenFile(FilePath::FromWStringHack(filename), mode);
-}
-bool PathExists(const std::wstring& path) {
-  return PathExists(FilePath::FromWStringHack(path));
-}
-bool PathIsWritable(const std::wstring& path) {
-  return PathIsWritable(FilePath::FromWStringHack(path));
 }
 int ReadFile(const std::wstring& filename, char* data, int size) {
   return ReadFile(FilePath::FromWStringHack(filename), data, size);

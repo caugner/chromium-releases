@@ -4,7 +4,6 @@
 
 #include "base/logging.h"
 #include "base/mac_util.h"
-#import "chrome/browser/cocoa/browser_window_controller.h"
 #include "chrome/browser/cocoa/infobar.h"
 #import "chrome/browser/cocoa/infobar_container_controller.h"
 #import "chrome/browser/cocoa/infobar_controller.h"
@@ -34,6 +33,15 @@ class InfoBarNotificationObserver : public NotificationObserver {
         [controller_
           removeInfoBarsForDelegate:Details<InfoBarDelegate>(details).ptr()];
         break;
+      case NotificationType::TAB_CONTENTS_INFOBAR_REPLACED: {
+        typedef std::pair<InfoBarDelegate*, InfoBarDelegate*>
+            InfoBarDelegatePair;
+        InfoBarDelegatePair* delegates =
+            Details<InfoBarDelegatePair>(details).ptr();
+        [controller_
+         replaceInfoBarsForDelegate:delegates->first with:delegates->second];
+        break;
+      }
       default:
         NOTREACHED();  // we don't ask for anything else!
         break;
@@ -64,11 +72,11 @@ class InfoBarNotificationObserver : public NotificationObserver {
 
 @implementation InfoBarContainerController
 - (id)initWithTabStripModel:(TabStripModel*)model
-    browserWindowController:(BrowserWindowController*)controller {
-  DCHECK(controller);
+             resizeDelegate:(id<ViewResizer>)resizeDelegate {
+  DCHECK(resizeDelegate);
   if ((self = [super initWithNibName:@"InfoBarContainer"
                               bundle:mac_util::MainAppBundle()])) {
-    browserController_ = controller;
+    resizeDelegate_ = resizeDelegate;
     tabObserver_.reset(new TabStripModelObserverBridge(model, self));
     infoBarObserver_.reset(new InfoBarNotificationObserver(self));
 
@@ -131,6 +139,8 @@ class InfoBarNotificationObserver : public NotificationObserver {
                    NotificationType::TAB_CONTENTS_INFOBAR_ADDED, source);
     registrar_.Add(infoBarObserver_.get(),
                    NotificationType::TAB_CONTENTS_INFOBAR_REMOVED, source);
+    registrar_.Add(infoBarObserver_.get(),
+                   NotificationType::TAB_CONTENTS_INFOBAR_REPLACED, source);
   }
 
   [self positionInfoBarsAndRedraw];
@@ -146,7 +156,7 @@ class InfoBarNotificationObserver : public NotificationObserver {
 
 - (void)removeInfoBarsForDelegate:(InfoBarDelegate*)delegate {
   for (InfoBarController* controller in
-           [NSArray arrayWithArray:infobarControllers_.get()]) {
+       [NSArray arrayWithArray:infobarControllers_.get()]) {
     if ([controller delegate] == delegate) {
       // This code can be executed while -[InfoBarController closeInfoBar] is
       // still on the stack, so we retain and autorelease the controller to
@@ -156,6 +166,13 @@ class InfoBarNotificationObserver : public NotificationObserver {
       [infobarControllers_ removeObject:controller];
     }
   }
+}
+
+- (void)replaceInfoBarsForDelegate:(InfoBarDelegate*)old_delegate
+                              with:(InfoBarDelegate*)new_delegate {
+  // TODO(rohitrao): This should avoid animation when we add it.
+  [self removeInfoBarsForDelegate:old_delegate];
+  [self addInfoBar:new_delegate];
 }
 
 - (void)removeAllInfoBars {
@@ -185,7 +202,7 @@ class InfoBarNotificationObserver : public NotificationObserver {
     [view setFrame:frame];
   }
 
-  [browserController_ infoBarResized:[self desiredHeight]];
+  [resizeDelegate_ resizeView:[self view] newHeight:[self desiredHeight]];
 }
 
 @end

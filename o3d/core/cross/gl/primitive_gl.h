@@ -36,7 +36,6 @@
 #define O3D_CORE_CROSS_GL_PRIMITIVE_GL_H_
 
 #include <map>
-#include "core/cross/precompile.h"
 #include "core/cross/primitive.h"
 #include "core/cross/gl/param_cache_gl.h"
 
@@ -49,14 +48,13 @@ class PrimitiveGL : public Primitive {
   explicit PrimitiveGL(ServiceLocator* service_locator);
   virtual ~PrimitiveGL();
 
-  // Overridden from Element
-  // Renders this Element using the parameters from override first, followed by
-  // the draw_element, followed by params on this Primitive and material.
-  virtual void Render(Renderer* renderer,
-                      DrawElement* draw_element,
-                      Material* material,
-                      ParamObject* override,
-                      ParamCache* param_cache);
+ protected:
+  // Overridden from Primitive.
+  virtual void PlatformSpecificRender(Renderer* renderer,
+                                      DrawElement* draw_element,
+                                      Material* material,
+                                      ParamObject* override,
+                                      ParamCache* param_cache);
 
  private:
 };

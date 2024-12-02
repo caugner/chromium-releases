@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,9 +6,8 @@
 
 #include "build/build_config.h"
 
+#include "app/gfx/codec/png_codec.h"
 #include "app/gfx/favicon_size.h"
-#include "base/gfx/png_decoder.h"
-#include "base/gfx/png_encoder.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/tab_contents/navigation_controller.h"
@@ -34,8 +33,8 @@ void FavIconHelper::FetchFavIcon(const GURL& url) {
   // Request the favicon from the history service. In parallel to this the
   // renderer is going to notify us (well TabContents) when the favicon url is
   // available.
-  if (GetHistoryService()) {
-    GetHistoryService()->GetFavIconForURL(url_, &cancelable_consumer_,
+  if (GetFaviconService()) {
+    GetFaviconService()->GetFaviconForURL(url_, &cancelable_consumer_,
         NewCallback(this, &FavIconHelper::OnFavIconDataForInitialURL));
   }
 }
@@ -44,8 +43,8 @@ Profile* FavIconHelper::profile() {
   return tab_contents_->profile();
 }
 
-HistoryService* FavIconHelper::GetHistoryService() {
-  return profile()->GetHistoryService(Profile::EXPLICIT_ACCESS);
+FaviconService* FavIconHelper::GetFaviconService() {
+  return profile()->GetFaviconService(Profile::EXPLICIT_ACCESS);
 }
 
 void FavIconHelper::SetFavIcon(
@@ -63,10 +62,10 @@ void FavIconHelper::SetFavIcon(
       (image.width() == kFavIconSize && image.height() == kFavIconSize)
       ? image : ConvertToFavIconSize(image);
 
-  if (GetHistoryService() && !profile()->IsOffTheRecord()) {
+  if (GetFaviconService() && !profile()->IsOffTheRecord()) {
     std::vector<unsigned char> image_data;
-    PNGEncoder::EncodeBGRASkBitmap(sized_image, false, &image_data);
-    GetHistoryService()->SetFavIcon(i->second.url, i->second.fav_icon_url,
+    gfx::PNGCodec::EncodeBGRASkBitmap(sized_image, false, &image_data);
+    GetFaviconService()->SetFavicon(i->second.url, i->second.fav_icon_url,
                                     image_data);
   }
 
@@ -88,7 +87,7 @@ void FavIconHelper::FavIconDownloadFailed(int download_id) {
 void FavIconHelper::UpdateFavIcon(NavigationEntry* entry,
                                   const std::vector<unsigned char>& data) {
   SkBitmap image;
-  PNGDecoder::Decode(&data, &image);
+  gfx::PNGCodec::Decode(&data, &image);
   UpdateFavIcon(entry, image);
 }
 
@@ -113,7 +112,7 @@ void FavIconHelper::UpdateFavIconURL(RenderViewHost* render_view_host,
 
   got_fav_icon_url_ = true;
 
-  if (!GetHistoryService())
+  if (!GetFaviconService())
     return;
 
   if (!fav_icon_expired_ && entry->favicon().is_valid() &&
@@ -151,7 +150,7 @@ NavigationEntry* FavIconHelper::GetEntry() {
 }
 
 void FavIconHelper::OnFavIconDataForInitialURL(
-    HistoryService::Handle handle,
+    FaviconService::Handle handle,
     bool know_favicon,
     scoped_refptr<RefCountedBytes> data,
     bool expired,
@@ -197,12 +196,12 @@ void FavIconHelper::DownloadFavIconOrAskHistory(NavigationEntry* entry) {
   if (fav_icon_expired_) {
     // We have the mapping, but the favicon is out of date. Download it now.
     ScheduleDownload(entry);
-  } else if (GetHistoryService()) {
+  } else if (GetFaviconService()) {
     // We don't know the favicon, but we may have previously downloaded the
     // favicon for another page that shares the same favicon. Ask for the
     // favicon given the favicon URL.
     if (profile()->IsOffTheRecord()) {
-      GetHistoryService()->GetFavIcon(
+      GetFaviconService()->GetFavicon(
           entry->favicon().url(),
           &cancelable_consumer_,
           NewCallback(this, &FavIconHelper::OnFavIconData));
@@ -213,7 +212,7 @@ void FavIconHelper::DownloadFavIconOrAskHistory(NavigationEntry* entry) {
       //    include the mapping between the page url and the favicon url.
       // This is asynchronous. The history service will call back when done.
       // Issue the request and associate the current page ID with it.
-      GetHistoryService()->UpdateFavIconMappingAndFetch(
+      GetFaviconService()->UpdateFaviconMappingAndFetch(
           entry->url(),
           entry->favicon().url(), &cancelable_consumer_,
           NewCallback(this, &FavIconHelper::OnFavIconData));
@@ -222,7 +221,7 @@ void FavIconHelper::DownloadFavIconOrAskHistory(NavigationEntry* entry) {
 }
 
 void FavIconHelper::OnFavIconData(
-    HistoryService::Handle handle,
+    FaviconService::Handle handle,
     bool know_favicon,
     scoped_refptr<RefCountedBytes> data,
     bool expired,

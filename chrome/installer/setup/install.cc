@@ -15,6 +15,7 @@
 #include "chrome/installer/setup/setup_constants.h"
 #include "chrome/installer/util/browser_distribution.h"
 #include "chrome/installer/util/create_reg_key_work_item.h"
+#include "chrome/installer/util/delete_after_reboot_helper.h"
 #include "chrome/installer/util/google_update_constants.h"
 #include "chrome/installer/util/helper.h"
 #include "chrome/installer/util/install_util.h"
@@ -27,6 +28,11 @@
 // Build-time generated include file.
 #include "installer_util_strings.h"
 #include "registered_dlls.h"
+
+#if defined(CHROME_FRAME_BUILD)
+COMPILE_ASSERT(kNumDllsToRegister > 0,
+               Chrome_Frame_DLL_must_be_built_before_setup);
+#endif
 
 namespace {
 
@@ -59,7 +65,8 @@ void AddInstallerCopyTasks(const std::wstring& exe_path,
                            bool system_level) {
   std::wstring installer_dir(installer::GetInstallerPathUnderChrome(
       install_path, new_version));
-  install_list->AddCreateDirWorkItem(installer_dir);
+  install_list->AddCreateDirWorkItem(
+      FilePath::FromWStringHack(installer_dir));
 
   std::wstring exe_dst(installer_dir);
   std::wstring archive_dst(installer_dir);
@@ -93,6 +100,14 @@ void AddUninstallShortcutWorkItems(HKEY reg_root,
                           file_util::GetFilenameFromPath(exe_path));
   uninstall_cmd.append(L"\" --");
   uninstall_cmd.append(installer_util::switches::kUninstall);
+
+#if defined(CHROME_FRAME_BUILD)
+  uninstall_cmd.append(L" --");
+  uninstall_cmd.append(installer_util::switches::kForceUninstall);
+  uninstall_cmd.append(L" --");
+  uninstall_cmd.append(installer_util::switches::kDeleteProfile);
+#endif
+
   if (reg_root == HKEY_LOCAL_MACHINE) {
     uninstall_cmd.append(L" --");
     uninstall_cmd.append(installer_util::switches::kSystemLevel);
@@ -147,12 +162,13 @@ void AddUninstallShortcutWorkItems(HKEY reg_root,
 // only on the first install of Chrome.
 void CopyPreferenceFileForFirstRun(bool system_level,
                                    const std::wstring& prefs_source_path) {
-  std::wstring prefs_dest_path(
+  FilePath prefs_dest_path = FilePath::FromWStringHack(
       installer::GetChromeInstallPath(system_level));
-  file_util::AppendToPath(&prefs_dest_path,
-                          installer_util::kDefaultMasterPrefs);
-  if (!file_util::CopyFile(prefs_source_path, prefs_dest_path))
+  prefs_dest_path = prefs_dest_path.Append(installer_util::kDefaultMasterPrefs);
+  if (!file_util::CopyFile(FilePath::FromWStringHack(prefs_source_path),
+                           prefs_dest_path)) {
     LOG(INFO) << "Failed to copy master preferences.";
+  }
 }
 
 // This method creates Chrome shortcuts in Start->Programs for all users or
@@ -236,6 +252,14 @@ bool CreateOrUpdateChromeShortcuts(const std::wstring& exe_path,
                             file_util::GetFilenameFromPath(exe_path));
     std::wstring arguments(L" --");
     arguments.append(installer_util::switches::kUninstall);
+
+#if defined(CHROME_FRAME_BUILD)
+    arguments.append(L" --");
+    arguments.append(installer_util::switches::kForceUninstall);
+    arguments.append(L" --");
+    arguments.append(installer_util::switches::kDeleteProfile);
+#endif
+
     if (system_install) {
       arguments.append(L" --");
       arguments.append(installer_util::switches::kSystemLevel);
@@ -286,7 +310,7 @@ bool DoPostInstallTasks(HKEY reg_root,
   BrowserDistribution* dist = BrowserDistribution::GetDistribution();
   std::wstring version_key = dist->GetVersionKey();
 
-  if (file_util::PathExists(new_chrome_exe)) {
+  if (file_util::PathExists(FilePath::FromWStringHack(new_chrome_exe))) {
     // Looks like this was in use update. So make sure we update the 'opv' key
     // with the current version that is active and 'cmd' key with the rename
     // command to run.
@@ -442,10 +466,17 @@ bool InstallNewVersion(const std::wstring& exe_path,
   if (reg_root != HKEY_LOCAL_MACHINE && reg_root != HKEY_CURRENT_USER)
     return false;
 
+#if defined(CHROME_FRAME_BUILD)
+  // Make sure that we don't end up deleting installed files on next reboot.
+  if (!RemoveFromMovesPendingReboot(install_path.c_str())) {
+    LOG(ERROR) << "Error accessing pending moves value.";
+  }
+#endif
+
   scoped_ptr<WorkItemList> install_list(WorkItem::CreateWorkItemList());
   // A temp directory that work items need and the actual install directory.
-  install_list->AddCreateDirWorkItem(temp_dir);
-  install_list->AddCreateDirWorkItem(install_path);
+  install_list->AddCreateDirWorkItem(FilePath::FromWStringHack(temp_dir));
+  install_list->AddCreateDirWorkItem(FilePath::FromWStringHack(install_path));
 
   // If it is system level install copy the version folder (since we want to
   // take the permissions of %ProgramFiles% folder) otherwise just move it.
@@ -467,7 +498,7 @@ bool InstallNewVersion(const std::wstring& exe_path,
                                            installer_util::kChromeNewExe);
   BrowserDistribution* dist = BrowserDistribution::GetDistribution();
   RegKey chrome_key(reg_root, dist->GetVersionKey().c_str(), KEY_READ);
-  if (file_util::PathExists(new_chrome_exe))
+  if (file_util::PathExists(FilePath::FromWStringHack(new_chrome_exe)))
     chrome_key.ReadValue(google_update::kRegOldVersionField, current_version);
   if (current_version->empty())
     chrome_key.ReadValue(google_update::kRegVersionField, current_version);
@@ -591,30 +622,36 @@ installer_util::InstallStatus installer::InstallOrUpdateChrome(
       result = installer_util::NEW_VERSION_UPDATED;
     }
 
-    bool create_all_shortcut = false;
-    installer_util::GetDistroBooleanPreference(prefs,
-        installer_util::master_preferences::kCreateAllShortcuts,
-        &create_all_shortcut);
-    bool alt_shortcut = false;
-    installer_util::GetDistroBooleanPreference(prefs,
-        installer_util::master_preferences::kAltShortcutText,
-        &alt_shortcut);
-    if (!CreateOrUpdateChromeShortcuts(exe_path, install_path,
-                                       new_version.GetString(), result,
-                                       system_install, create_all_shortcut,
-                                       alt_shortcut))
-      LOG(WARNING) << "Failed to create/update start menu shortcut.";
+    bool value = false;
+    if (!installer_util::GetDistroBooleanPreference(prefs,
+        installer_util::master_preferences::kDoNotCreateShortcuts, &value) ||
+        !value) {
+      bool create_all_shortcut = false;
+      installer_util::GetDistroBooleanPreference(prefs,
+          installer_util::master_preferences::kCreateAllShortcuts,
+          &create_all_shortcut);
+      bool alt_shortcut = false;
+      installer_util::GetDistroBooleanPreference(prefs,
+          installer_util::master_preferences::kAltShortcutText,
+          &alt_shortcut);
+      if (!CreateOrUpdateChromeShortcuts(exe_path, install_path,
+                                         new_version.GetString(), result,
+                                         system_install, create_all_shortcut,
+                                         alt_shortcut))
+        LOG(WARNING) << "Failed to create/update start menu shortcut.";
+
+      bool make_chrome_default = false;
+      installer_util::GetDistroBooleanPreference(prefs,
+          installer_util::master_preferences::kMakeChromeDefault,
+          &make_chrome_default);
+      RegisterChromeOnMachine(install_path, system_install,
+                              make_chrome_default);
+    }
 
     std::wstring latest_version_to_keep(new_version.GetString());
     if (!current_version.empty())
       latest_version_to_keep.assign(current_version);
     RemoveOldVersionDirs(install_path, latest_version_to_keep);
-
-    bool make_chrome_default = false;
-    installer_util::GetDistroBooleanPreference(prefs,
-        installer_util::master_preferences::kMakeChromeDefault,
-        &make_chrome_default);
-    RegisterChromeOnMachine(install_path, system_install, make_chrome_default);
   }
 
   return result;

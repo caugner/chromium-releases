@@ -36,7 +36,7 @@ class SyncChannel : public ChannelProxy,
               Channel::Listener* listener, MessageFilter* filter,
               MessageLoop* ipc_message_loop, bool create_pipe_now,
               base::WaitableEvent* shutdown_event);
-  ~SyncChannel();
+  virtual ~SyncChannel();
 
   virtual bool Send(Message* message);
   virtual bool SendWithTimeout(Message* message, int timeout_ms);
@@ -91,6 +91,10 @@ class SyncChannel : public ChannelProxy,
     void OnSendTimeout(int message_id);
 
     base::WaitableEvent* shutdown_event() { return shutdown_event_; }
+
+    ReceivedSyncMsgQueue* received_sync_msgs() {
+      return received_sync_msgs_;
+    }
 
    private:
     // IPC::ChannelProxy methods that we override.
@@ -151,7 +155,6 @@ class SyncChannel : public ChannelProxy,
   bool sync_messages_with_no_timeout_allowed_;
 
   // Used to signal events between the IPC and listener threads.
-  base::WaitableEventWatcher send_done_watcher_;
   base::WaitableEventWatcher dispatch_watcher_;
 
   DISALLOW_EVIL_CONSTRUCTORS(SyncChannel);

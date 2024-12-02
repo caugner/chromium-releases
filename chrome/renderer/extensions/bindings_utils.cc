@@ -6,11 +6,15 @@
 
 #include "base/string_util.h"
 #include "chrome/renderer/render_view.h"
-#include "webkit/glue/webframe.h"
+#include "webkit/api/public/WebFrame.h"
+
+using WebKit::WebFrame;
+using WebKit::WebView;
 
 namespace bindings_utils {
 
 const char* kChromeHidden = "chromeHidden";
+const char* kValidateCallbacks = "validateCallbacks";
 
 struct SingletonData {
   ContextList contexts;
@@ -38,6 +42,13 @@ v8::Handle<v8::Value> ExtensionBase::GetChromeHidden(
   if (hidden.IsEmpty() || hidden->IsUndefined()) {
     hidden = v8::Object::New();
     global->SetHiddenValue(v8::String::New(kChromeHidden), hidden);
+
+#ifdef _DEBUG
+    // Tell extension_process_bindings.js to validate callbacks and events
+    // against their schema definitions in api/extension_api.json.
+    v8::Local<v8::Object>::Cast(hidden)
+        ->Set(v8::String::New(kValidateCallbacks), v8::True());
+#endif
   }
 
   DCHECK(hidden->IsObject());
@@ -61,13 +72,22 @@ ContextList GetContextsForExtension(const std::string& extension_id) {
   return contexts;
 }
 
+ContextInfo* GetInfoForCurrentContext() {
+  v8::Local<v8::Context> context = v8::Context::GetCurrent();
+  ContextList::iterator context_iter = FindContext(context);
+  if (context_iter == GetContexts().end())
+    return NULL;
+  else
+    return context_iter->get();
+}
+
 ContextList::iterator FindContext(v8::Handle<v8::Context> context) {
   ContextList& all_contexts = GetContexts();
 
   ContextList::iterator it = all_contexts.begin();
   for (; it != all_contexts.end(); ++it) {
-     if ((*it)->context == context)
-       break;
+    if ((*it)->context == context)
+      break;
   }
 
   return it;
@@ -78,23 +98,23 @@ PendingRequestMap& GetPendingRequestMap() {
 }
 
 RenderView* GetRenderViewForCurrentContext() {
-  WebFrame* webframe = WebFrame::RetrieveFrameForCurrentContext();
+  WebFrame* webframe = WebFrame::frameForCurrentContext();
   DCHECK(webframe) << "RetrieveCurrentFrame called when not in a V8 context.";
   if (!webframe)
     return NULL;
 
-  WebView* webview = webframe->GetView();
+  WebView* webview = webframe->view();
   if (!webview)
     return NULL;  // can happen during closing
 
-  RenderView* renderview = static_cast<RenderView*>(webview->GetDelegate());
+  RenderView* renderview = RenderView::FromWebView(webview);
   DCHECK(renderview) << "Encountered a WebView without a WebViewDelegate";
   return renderview;
 }
 
-void CallFunctionInContext(v8::Handle<v8::Context> context,
-                           const std::string& function_name, int argc,
-                           v8::Handle<v8::Value>* argv) {
+v8::Handle<v8::Value> CallFunctionInContext(v8::Handle<v8::Context> context,
+    const std::string& function_name, int argc,
+    v8::Handle<v8::Value>* argv) {
   v8::Context::Scope context_scope(context);
 
   // Look up the function name, which may be a sub-property like
@@ -109,12 +129,14 @@ void CallFunctionInContext(v8::Handle<v8::Context> context,
   }
   if (value.IsEmpty() || !value->IsFunction()) {
     NOTREACHED();
-    return;
+    return v8::Undefined();
   }
 
   v8::Local<v8::Function> function = v8::Local<v8::Function>::Cast(value);
   if (!function.IsEmpty())
-    function->Call(v8::Object::New(), argc, argv);
+    return function->Call(v8::Object::New(), argc, argv);
+
+  return v8::Undefined();
 }
 
 }  // namespace bindings_utils

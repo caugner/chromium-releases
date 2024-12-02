@@ -1,3 +1,7 @@
+// Copyright (c) 2008 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
 #include <vector>
 
 #include "base/command_line.h"
@@ -45,8 +49,6 @@ class ExtensionStartupTestBase
     extensions_dir_ = profile_dir.AppendASCII("Extensions");
 
     if (enable_extensions_) {
-      command_line->AppendSwitch(switches::kEnableExtensions);
-
       FilePath src_dir;
       PathService::Get(chrome::DIR_TEST_DATA, &src_dir);
       src_dir = src_dir.AppendASCII("extensions").AppendASCII("good");
@@ -55,6 +57,8 @@ class ExtensionStartupTestBase
                           preferences_file_);
       file_util::CopyDirectory(src_dir.AppendASCII("Extensions"),
                                profile_dir, true);  // recursive
+    } else {
+      command_line->AppendSwitch(switches::kDisableExtensions);
     }
 
     if (enable_user_scripts_) {
@@ -87,6 +91,8 @@ class ExtensionStartupTestBase
       case NotificationType::USER_SCRIPTS_UPDATED:
         MessageLoopForUI::current()->Quit();
         break;
+      default:
+        NOTREACHED();
     }
   }
 
@@ -170,11 +176,12 @@ class ExtensionsStartupTest : public ExtensionStartupTestBase {
   }
 };
 
+#if defined(OS_WIN)
 IN_PROC_BROWSER_TEST_F(ExtensionsStartupTest, Test) {
   WaitForServicesToStart(3, true);
   TestInjection(true, true);
 }
-
+#endif  // defined(OS_WIN)
 
 // ExtensionsLoadTest
 // Ensures that we can startup the browser with --load-extension and see them

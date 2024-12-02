@@ -13,7 +13,7 @@
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/renderer_host/render_view_host_factory.h"
 #include "chrome/browser/renderer_host/site_instance.h"
-#include "chrome/browser/tab_contents/test_web_contents.h"
+#include "chrome/browser/tab_contents/test_tab_contents.h"
 #include "chrome/test/testing_profile.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -22,8 +22,6 @@
 #elif defined(OS_POSIX)
 #include "chrome/common/temp_scaffolding_stubs.h"
 #endif
-
-class TestTabContents;
 
 // This file provides a testing framework for mocking out the RenderProcessHost
 // layer. It allows you to test RenderViewHost, TabContents,
@@ -48,7 +46,7 @@ class TestRenderWidgetHostView : public RenderWidgetHostView {
   virtual void SetSize(const gfx::Size& size) {}
   virtual gfx::NativeView GetNativeView() { return NULL; }
   virtual void MovePluginWindows(
-    const std::vector<WebPluginGeometry>& plugin_window_moves) {}
+      const std::vector<webkit_glue::WebPluginGeometry>& moves) {}
 #if defined(OS_WIN)
   virtual void ForwardMouseEventToRenderer(UINT message,
                                            WPARAM wparam,
@@ -79,13 +77,12 @@ class TestRenderWidgetHostView : public RenderWidgetHostView {
                                   const std::vector<WebMenuItem>& items) {}
   virtual gfx::Rect GetWindowRect();
   virtual gfx::Rect GetRootWindowRect();
+  virtual void SetActive(bool active);
 #endif
 
 #if defined(OS_LINUX)
-  virtual gfx::PluginWindowHandle CreatePluginContainer(base::ProcessId) {
-    return 0;
-  }
-  virtual void DestroyPluginContainer(gfx::PluginWindowHandle container) { }
+  virtual void CreatePluginContainer(gfx::PluginWindowHandle id) { }
+  virtual void DestroyPluginContainer(gfx::PluginWindowHandle id) { }
 #endif
 
   bool is_showing() const { return is_showing_; }
@@ -104,8 +101,7 @@ class TestRenderViewHost : public RenderViewHost {
  public:
   TestRenderViewHost(SiteInstance* instance,
                      RenderViewHostDelegate* delegate,
-                     int routing_id,
-                     base::WaitableEvent* modal_dialog_event);
+                     int routing_id);
   virtual ~TestRenderViewHost();
 
   // Testing functions ---------------------------------------------------------
@@ -173,12 +169,10 @@ class TestRenderViewHostFactory : public RenderViewHostFactory {
   virtual RenderViewHost* CreateRenderViewHost(
       SiteInstance* instance,
       RenderViewHostDelegate* delegate,
-      int routing_id,
-      base::WaitableEvent* modal_dialog_event) {
+      int routing_id) {
     // See declaration of render_process_host_factory_ below.
     instance->set_render_process_host_factory(render_process_host_factory_);
-    return new TestRenderViewHost(instance, delegate, routing_id,
-                                  modal_dialog_event);
+    return new TestRenderViewHost(instance, delegate, routing_id);
   }
 
  private:

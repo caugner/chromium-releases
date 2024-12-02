@@ -31,8 +31,6 @@ class WindowGtk : public WidgetGtk, public Window {
                          gfx::NativeWindow other_window);
   virtual void Show();
   virtual void HideWindow();
-  virtual void PushForceHidden();
-  virtual void PopForceHidden();
   virtual void Activate();
   virtual void Close();
   virtual void Maximize();
@@ -45,7 +43,6 @@ class WindowGtk : public WidgetGtk, public Window {
   virtual void SetFullscreen(bool fullscreen);
   virtual bool IsFullscreen() const;
   virtual void EnableClose(bool enable);
-  virtual void DisableInactiveRendering();
   virtual void UpdateWindowTitle();
   virtual void UpdateWindowIcon();
   virtual void SetIsAlwaysOnTop(bool always_on_top);
@@ -69,6 +66,7 @@ class WindowGtk : public WidgetGtk, public Window {
   virtual void OnSizeAllocate(GtkWidget* widget, GtkAllocation* allocation);
   virtual gboolean OnWindowStateEvent(GtkWidget* widget,
                                       GdkEventWindowState* event);
+  virtual gboolean OnLeaveNotify(GtkWidget* widget, GdkEventCrossing* event);
 
  protected:
   // For  the constructor.
@@ -78,7 +76,9 @@ class WindowGtk : public WidgetGtk, public Window {
   explicit WindowGtk(WindowDelegate* window_delegate);
 
   // Initializes the window to the passed in bounds.
-  void Init(const gfx::Rect& bounds);
+  void Init(GtkWindow* parent, const gfx::Rect& bounds);
+
+  virtual void OnDestroy();
 
  private:
   static gboolean CallConfigureEvent(GtkWidget* widget,
@@ -91,8 +91,8 @@ class WindowGtk : public WidgetGtk, public Window {
   // Asks the delegate if any to save the window's location and size.
   void SaveWindowPosition();
 
-  void SetInitialBounds(const gfx::Rect& bounds);
-  void SizeWindowToDefault();
+  void SetInitialBounds(GtkWindow* parent, const gfx::Rect& bounds);
+  void SizeWindowToDefault(GtkWindow* parent);
 
   // Whether or not the window is modal. This comes from the delegate and is
   // cached at Init time to avoid calling back to the delegate from the

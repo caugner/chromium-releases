@@ -31,13 +31,15 @@ void CrxInstaller::Start(const FilePath& crx_path,
                          Extension::Location install_source,
                          const std::string& expected_id,
                          bool delete_crx,
+                         bool allow_privilege_increase,
                          MessageLoop* file_loop,
                          ExtensionsService* frontend,
-                         CrxInstallerClient* client) {
+                         ExtensionInstallUI* client) {
   // Note: We don't keep a reference because this object manages its own
   // lifetime.
   new CrxInstaller(crx_path, install_directory, install_source, expected_id,
-                   delete_crx, file_loop, frontend, client);
+                   delete_crx, allow_privilege_increase, file_loop, frontend,
+                   client);
 }
 
 CrxInstaller::CrxInstaller(const FilePath& crx_path,
@@ -45,14 +47,16 @@ CrxInstaller::CrxInstaller(const FilePath& crx_path,
                            Extension::Location install_source,
                            const std::string& expected_id,
                            bool delete_crx,
+                           bool allow_privilege_increase,
                            MessageLoop* file_loop,
                            ExtensionsService* frontend,
-                           CrxInstallerClient* client)
+                           ExtensionInstallUI* client)
     : crx_path_(crx_path),
       install_directory_(install_directory),
       install_source_(install_source),
       expected_id_(expected_id),
       delete_crx_(delete_crx),
+      allow_privilege_increase_(allow_privilege_increase),
       file_loop_(file_loop),
       ui_loop_(MessageLoop::current()),
       frontend_(frontend),
@@ -120,25 +124,24 @@ void CrxInstaller::OnUnpackSuccess(const FilePath& temp_dir,
   }
 
   if (client_.get()) {
-    DecodeInstallIcon();
-    ui_loop_->PostTask(FROM_HERE, NewRunnableMethod(this,
-        &CrxInstaller::ConfirmInstall));
-  } else {
-    CompleteInstall();
+    FilePath icon_path =
+        extension_->GetIconPath(Extension::EXTENSION_ICON_LARGE).GetFilePath();
+    DecodeInstallIcon(icon_path, &install_icon_);
   }
+  ui_loop_->PostTask(FROM_HERE, NewRunnableMethod(this,
+      &CrxInstaller::ConfirmInstall));
 }
 
-void CrxInstaller::DecodeInstallIcon() {
-  std::map<int, std::string>::const_iterator iter =
-      extension_->icons().find(128);
-  if (iter == extension_->icons().end())
+// static
+void CrxInstaller::DecodeInstallIcon(const FilePath& large_icon_path,
+                                     scoped_ptr<SkBitmap>* result) {
+  if (large_icon_path.empty())
     return;
 
-  FilePath path = extension_->GetResourcePath(iter->second);
   std::string file_contents;
-  if (!file_util::ReadFileToString(path, &file_contents)) {
+  if (!file_util::ReadFileToString(large_icon_path, &file_contents)) {
     LOG(ERROR) << "Could not read icon file: "
-               << WideToUTF8(path.ToWStringHack());
+               << WideToUTF8(large_icon_path.ToWStringHack());
     return;
   }
 
@@ -148,9 +151,9 @@ void CrxInstaller::DecodeInstallIcon() {
   webkit_glue::ImageDecoder decoder;
   scoped_ptr<SkBitmap> decoded(new SkBitmap());
   *decoded = decoder.Decode(data, file_contents.length());
-  if(decoded->empty()) {
+  if (decoded->empty()) {
     LOG(ERROR) << "Could not decode icon file: "
-               << WideToUTF8(path.ToWStringHack());
+               << WideToUTF8(large_icon_path.ToWStringHack());
     return;
   }
 
@@ -161,13 +164,31 @@ void CrxInstaller::DecodeInstallIcon() {
     return;
   }
 
-  install_icon_.reset(decoded.release());
+  result->swap(decoded);
 }
 
 void CrxInstaller::ConfirmInstall() {
-  AddRef();  // balanced in ContinueInstall() and AbortInstall().
+  DCHECK(MessageLoop::current() == ui_loop_);
+  if (frontend_->extension_prefs()->IsExtensionBlacklisted(extension_->id())) {
+    LOG(INFO) << "This extension: " << extension_->id()
+      << " is blacklisted. Install failed.";
+    if (client_.get()) {
+      client_->OnInstallFailure("This extension is blacklisted.");
+    }
+    return;
+  }
 
-  client_->ConfirmInstall(this, extension_.get(), install_icon_.get());
+  current_version_ =
+      frontend_->extension_prefs()->GetVersionString(extension_->id());
+
+  if (client_.get()) {
+    AddRef();  // balanced in ContinueInstall() and AbortInstall().
+    client_->ConfirmInstall(this, extension_.get(), install_icon_.get());
+  } else {
+    file_loop_->PostTask(FROM_HERE, NewRunnableMethod(this,
+      &CrxInstaller::CompleteInstall));
+  }
+  return;
 }
 
 void CrxInstaller::ContinueInstall() {
@@ -193,17 +214,10 @@ void CrxInstaller::CompleteInstall() {
   DCHECK(MessageLoop::current() == file_loop_);
 
   FilePath version_dir;
-  Extension::InstallType install_type = Extension::INSTALL_ERROR;
-  std::string error_msg;
-  if (!extension_file_util::InstallExtension(unpacked_extension_root_,
-                                             install_directory_,
-                                             extension_->id(),
-                                             extension_->VersionString(),
-                                             &version_dir,
-                                             &install_type, &error_msg)) {
-    ReportFailureFromFileThread(error_msg);
-    return;
-  }
+  Extension::InstallType install_type =
+      extension_file_util::CompareToInstalledVersion(
+          install_directory_, extension_->id(), current_version_,
+          extension_->VersionString(), &version_dir);
 
   if (install_type == Extension::DOWNGRADE) {
     ReportFailureFromFileThread("Attempted to downgrade extension.");
@@ -213,6 +227,13 @@ void CrxInstaller::CompleteInstall() {
   if (install_type == Extension::REINSTALL) {
     // We use this as a signal to switch themes.
     ReportOverinstallFromFileThread();
+    return;
+  }
+
+  std::string error_msg;
+  if (!extension_file_util::InstallExtension(unpacked_extension_root_,
+                                             version_dir, &error_msg)) {
+    ReportFailureFromFileThread(error_msg);
     return;
   }
 
@@ -240,9 +261,9 @@ void CrxInstaller::ReportFailureFromUIThread(const std::string& error) {
   DCHECK(MessageLoop::current() == ui_loop_);
 
   NotificationService* service = NotificationService::current();
-  service->Notify(NotificationType::NO_THEME_DETECTED,
+  service->Notify(NotificationType::EXTENSION_INSTALL_ERROR,
                   Source<CrxInstaller>(this),
-                  NotificationService::NoDetails());
+                  Details<const std::string>(&error));
 
   // This isn't really necessary, it is only used because unit tests expect to
   // see errors get reported via this interface.
@@ -251,7 +272,7 @@ void CrxInstaller::ReportFailureFromUIThread(const std::string& error) {
   // rid of this line.
   ExtensionErrorReporter::GetInstance()->ReportError(error, false);  // quiet
 
-  if (client_)
+  if (client_.get())
     client_->OnInstallFailure(error);
 }
 
@@ -285,7 +306,8 @@ void CrxInstaller::ReportSuccessFromUIThread() {
 
   // Tell the frontend about the installation and hand off ownership of
   // extension_ to it.
-  frontend_->OnExtensionInstalled(extension_.release());
+  frontend_->OnExtensionInstalled(extension_.release(),
+                                  allow_privilege_increase_);
 
   // We're done. We don't post any more tasks to ourselves so we are deleted
   // soon.

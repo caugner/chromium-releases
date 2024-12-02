@@ -2,13 +2,18 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_BROWSER_COCOA_ABOUT_WINDOW_CONTROLLER_MAC_H_
-#define CHROME_BROWSER_COCOA_ABOUT_WINDOW_CONTROLLER_MAC_H_
+#ifndef CHROME_BROWSER_COCOA_ABOUT_WINDOW_CONTROLLER_H_
+#define CHROME_BROWSER_COCOA_ABOUT_WINDOW_CONTROLLER_H_
 
 #import <Cocoa/Cocoa.h>
+#include "base/scoped_nsobject.h"
 #import "chrome/app/keystone_glue.h"
 
-@class AppController;
+@class BackgroundTileView;
+class Profile;
+
+// Returns an NSAttributedString that contains the locale specific legal text.
+NSAttributedString* BuildAboutWindowLegalTextBlock();
 
 // A window controller that handles the branded (Chrome.app) about
 // window.  The branded about window has a few features beyond the
@@ -18,13 +23,26 @@
 @interface AboutWindowController : NSWindowController<KeystoneGlueCallbacks> {
  @private
   IBOutlet NSTextField* version_;
-  IBOutlet NSTextField* upToDate_;
-  IBOutlet NSTextField* updateCompleted_;
+  IBOutlet BackgroundTileView* backgroundView_;
+  IBOutlet NSImageView* logoView_;
+  IBOutlet NSView* legalBlock_;
+  IBOutlet NSTextView* legalText_;
+  IBOutlet NSView* updateBlock_;  // Holds everything related to updates
   IBOutlet NSProgressIndicator* spinner_;
+  IBOutlet NSImageView* updateStatusIndicator_;
+  IBOutlet NSTextField* updateText_;
   IBOutlet NSButton* updateNowButton_;
 
   BOOL updateTriggered_;  // Has an update ever been triggered?
+  Profile* profile_;  // Weak, probably the default profile.
+
+  // The version we got told about by Keystone
+  scoped_nsobject<NSString> newVersionAvailable_;
 }
+
+// Initialize the controller with the given profile, but does not show it.
+// Callers still need to call showWindow: to put it on screen.
+- (id)initWithProfile:(Profile*)profile;
 
 // Trigger an update right now, as initiated by a button.
 - (IBAction)updateNow:(id)sender;
@@ -33,13 +51,13 @@
 
 
 @interface AboutWindowController (JustForTesting)
+- (NSTextView*)legalText;
 - (NSButton*)updateButton;
-- (NSTextField*)upToDateTextField;
-- (NSTextField*)updateCompletedTextField;
+- (NSTextField*)updateText;
 @end
 
 
 // NSNotification sent when the about window is closed.
 extern NSString* const kUserClosedAboutNotification;
 
-#endif
+#endif  // CHROME_BROWSER_COCOA_ABOUT_WINDOW_CONTROLLER_H_

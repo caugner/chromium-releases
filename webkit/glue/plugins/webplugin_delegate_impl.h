@@ -10,8 +10,8 @@
 #include <string>
 #include <list>
 
+#include "app/gfx/native_widget_types.h"
 #include "base/file_path.h"
-#include "base/gfx/native_widget_types.h"
 #include "base/gfx/rect.h"
 #include "base/ref_counted.h"
 #include "base/task.h"
@@ -19,7 +19,7 @@
 #include "webkit/glue/webcursor.h"
 #include "webkit/glue/webplugin_delegate.h"
 
-#if defined(OS_LINUX)
+#if defined(USE_X11)
 typedef struct _GdkDrawable GdkPixmap;
 #endif
 
@@ -29,8 +29,27 @@ class PluginInstance;
 
 // An implementation of WebPluginDelegate that proxies all calls to
 // the plugin process.
-class WebPluginDelegateImpl : public WebPluginDelegate {
+class WebPluginDelegateImpl : public webkit_glue::WebPluginDelegate {
  public:
+  enum PluginQuirks {
+    PLUGIN_QUIRK_SETWINDOW_TWICE = 1,  // Win32
+    PLUGIN_QUIRK_THROTTLE_WM_USER_PLUS_ONE = 2,  // Win32
+    PLUGIN_QUIRK_DONT_CALL_WND_PROC_RECURSIVELY = 4,  // Win32
+    PLUGIN_QUIRK_DONT_SET_NULL_WINDOW_HANDLE_ON_DESTROY = 8,  // Win32
+    PLUGIN_QUIRK_DONT_ALLOW_MULTIPLE_INSTANCES = 16,  // Win32
+    PLUGIN_QUIRK_DIE_AFTER_UNLOAD = 32,  // Win32
+    PLUGIN_QUIRK_PATCH_SETCURSOR = 64,  // Win32
+    PLUGIN_QUIRK_BLOCK_NONSTANDARD_GETURL_REQUESTS = 128,  // Win32
+    PLUGIN_QUIRK_WINDOWLESS_OFFSET_WINDOW_TO_DRAW = 256,  // Linux
+    PLUGIN_QUIRK_WINDOWLESS_INVALIDATE_AFTER_SET_WINDOW = 512,  // Linux
+    PLUGIN_QUIRK_NO_WINDOWLESS = 1024,  // Windows
+    PLUGIN_QUIRK_PATCH_REGENUMKEYEXW = 2048, // Windows
+  };
+
+  static WebPluginDelegateImpl* Create(const FilePath& filename,
+                                       const std::string& mime_type,
+                                       gfx::PluginWindowHandle containing_view);
+
   static bool IsPluginDelegateWindow(gfx::NativeWindow window);
   static bool GetPluginNameFromWindow(gfx::NativeWindow window,
                                       std::wstring *plugin_name);
@@ -40,32 +59,28 @@ class WebPluginDelegateImpl : public WebPluginDelegate {
   static bool IsDummyActivationWindow(gfx::NativeWindow window);
 
   // WebPluginDelegate implementation
-  virtual void PluginDestroyed();
   virtual bool Initialize(const GURL& url,
-                          char** argn,
-                          char** argv,
-                          int argc,
-                          WebPlugin* plugin,
+                          const std::vector<std::string>& arg_names,
+                          const std::vector<std::string>& arg_values,
+                          webkit_glue::WebPlugin* plugin,
                           bool load_manually);
+  virtual void PluginDestroyed();
   virtual void UpdateGeometry(const gfx::Rect& window_rect,
                               const gfx::Rect& clip_rect);
   virtual void Paint(gfx::NativeDrawingContext context, const gfx::Rect& rect);
   virtual void Print(gfx::NativeDrawingContext context);
-
-  virtual void SetFocus();  // only called when windowless
-  // only called when windowless
-  // See NPAPI NPP_HandleEvent for more information.
+  virtual void SetFocus();
   virtual bool HandleInputEvent(const WebKit::WebInputEvent& event,
                                 WebKit::WebCursorInfo* cursor);
   virtual NPObject* GetPluginScriptableObject();
-  virtual void DidFinishLoadWithReason(NPReason reason);
+  virtual void DidFinishLoadWithReason(const GURL& url, NPReason reason,
+                                       intptr_t notify_data);
   virtual int GetProcessId();
-
-  virtual void SendJavaScriptStream(const std::string& url,
-                                    const std::wstring& result,
+  virtual void SendJavaScriptStream(const GURL& url,
+                                    const std::string& result,
                                     bool success, bool notify_needed,
                                     intptr_t notify_data);
-  virtual void DidReceiveManualResponse(const std::string& url,
+  virtual void DidReceiveManualResponse(const GURL& url,
                                         const std::string& mime_type,
                                         const std::string& headers,
                                         uint32 expected_length,
@@ -73,27 +88,44 @@ class WebPluginDelegateImpl : public WebPluginDelegate {
   virtual void DidReceiveManualData(const char* buffer, int length);
   virtual void DidFinishManualLoading();
   virtual void DidManualLoadFail();
-  virtual FilePath GetPluginPath();
   virtual void InstallMissingPlugin();
-  virtual WebPluginResourceClient* CreateResourceClient(int resource_id,
-                                                        const std::string &url,
-                                                        bool notify_needed,
-                                                        intptr_t notify_data,
-                                                        intptr_t stream);
+  virtual webkit_glue::WebPluginResourceClient* CreateResourceClient(
+      int resource_id,
+      const GURL& url,
+      bool notify_needed,
+      intptr_t notify_data,
+      intptr_t stream);
+  // End of WebPluginDelegate implementation.
 
-  virtual void URLRequestRouted(const std::string&url, bool notify_needed,
-                                intptr_t notify_data);
-  virtual bool IsWindowless() const { return windowless_ ; }
-  virtual const gfx::Rect& GetRect() const { return window_rect_; }
-  virtual const gfx::Rect& GetClipRect() const { return clip_rect_; }
-  virtual int GetQuirks() const { return quirks_; }
+  bool IsWindowless() const { return windowless_ ; }
+  gfx::Rect GetRect() const { return window_rect_; }
+  gfx::Rect GetClipRect() const { return clip_rect_; }
+
+  // Returns the path for the library implementing this plugin.
+  FilePath GetPluginPath();
+
+  // Returns a combination of PluginQuirks.
+  int GetQuirks() const { return quirks_; }
+
+#if defined(OS_MACOSX)
+  // Informs the delegate that the context used for painting windowless plugins
+  // has changed.
+  void UpdateContext(gfx::NativeDrawingContext context);
+#endif
 
  private:
   friend class DeleteTask<WebPluginDelegateImpl>;
+  friend class webkit_glue::WebPluginDelegate;
 
   WebPluginDelegateImpl(gfx::PluginWindowHandle containing_view,
                         NPAPI::PluginInstance *instance);
   ~WebPluginDelegateImpl();
+
+  // Called by Initialize() for platform-specific initialization.
+  void PlatformInitialize();
+
+  // Called by DestroyInstance(), used for platform-specific destruction.
+  void PlatformDestroyInstance();
 
 #if !defined(OS_MACOSX)
   //--------------------------
@@ -173,7 +205,7 @@ class WebPluginDelegateImpl : public WebPluginDelegate {
   // used by windowed and windowless plugins
   bool windowless_;
 
-  WebPlugin* plugin_;
+  webkit_glue::WebPlugin* plugin_;
   scoped_refptr<NPAPI::PluginInstance> instance_;
 
 #if defined(OS_WIN)
@@ -185,10 +217,17 @@ class WebPluginDelegateImpl : public WebPluginDelegate {
   bool is_calling_wndproc;
 #endif // OS_WIN
 
-#if defined(OS_LINUX)
+#if defined(USE_X11)
   // The pixmap we're drawing into, for a windowless plugin.
   GdkPixmap* pixmap_;
   double first_event_time_;
+
+  // On Linux some plugins assume that the GtkSocket container is in the same
+  // process. So we create a GtkPlug to plug into the browser's container, and
+  // a GtkSocket to hold the plugin. We then send the GtkPlug to the browser
+  // process.
+  GtkWidget* plug_;
+  GtkWidget* socket_;
 
   // Ensure pixmap_ exists and is at least width by height pixels.
   void EnsurePixmapAtLeastSize(int width, int height);
@@ -198,6 +237,10 @@ class WebPluginDelegateImpl : public WebPluginDelegate {
   NPWindow window_;
 #if defined(OS_MACOSX)
   NP_CGContext cg_context_;
+#ifndef NP_NO_QUICKDRAW
+  NP_Port qd_port_;
+  GWorldPtr qd_world_;
+#endif
 #endif
   gfx::Rect window_rect_;
   gfx::Rect clip_rect_;
@@ -259,7 +302,7 @@ class WebPluginDelegateImpl : public WebPluginDelegate {
 
   // Runnable Method Factory used to invoke the OnUserGestureEnd method
   // asynchronously.
-#if !defined(OS_LINUX)
+#if !defined(USE_X11)
   ScopedRunnableMethodFactory<WebPluginDelegateImpl> user_gesture_msg_factory_;
 #endif
 
@@ -272,6 +315,11 @@ class WebPluginDelegateImpl : public WebPluginDelegate {
 
   // SetCursor interceptor for windowless plugins.
   static HCURSOR WINAPI SetCursorPatch(HCURSOR cursor);
+
+  // RegEnumKeyExW interceptor.
+  static LONG WINAPI RegEnumKeyExWPatch(
+      HKEY key, DWORD index, LPWSTR name, LPDWORD name_size, LPDWORD reserved,
+      LPWSTR class_name, LPDWORD class_size, PFILETIME last_write_time);
 #endif
 
 #if defined(OS_MACOSX)
@@ -280,14 +328,16 @@ class WebPluginDelegateImpl : public WebPluginDelegate {
 
   // indicates that it's time to send the plugin a null event
   void OnNullEvent();
+
+  // last mouse position within the plugin's rect (used for null events)
+  int last_mouse_x_;
+  int last_mouse_y_;
 #endif
 
   // Holds the current cursor set by the windowless plugin.
   WebCursor current_windowless_cursor_;
 
-  friend class WebPluginDelegate;
-
-  DISALLOW_EVIL_CONSTRUCTORS(WebPluginDelegateImpl);
+  DISALLOW_COPY_AND_ASSIGN(WebPluginDelegateImpl);
 };
 
 #endif  // #ifndef WEBKIT_GLUE_PLUGIN_WEBPLUGIN_DELEGATE_IMPL_H_

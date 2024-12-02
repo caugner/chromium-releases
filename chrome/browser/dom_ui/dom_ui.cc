@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,6 +18,7 @@
 DOMUI::DOMUI(TabContents* contents)
     : hide_favicon_(false),
       force_bookmark_bar_visible_(false),
+      force_extension_shelf_visible_(false),
       focus_location_bar_by_default_(false),
       should_hide_url_(false),
       link_transition_type_(PageTransition::LINK),
@@ -34,7 +35,7 @@ DOMUI::~DOMUI() {
 // DOMUI, public: -------------------------------------------------------------
 
 void DOMUI::ProcessDOMUIMessage(const std::string& message,
-                                const std::string& content,
+                                const Value* content,
                                 int request_id,
                                 bool has_callback) {
   // Look up the callback for this message.
@@ -43,20 +44,8 @@ void DOMUI::ProcessDOMUIMessage(const std::string& message,
   if (callback == message_callbacks_.end())
     return;
 
-  // Convert the content JSON into a Value.
-  scoped_ptr<Value> value;
-  if (!content.empty()) {
-    value.reset(JSONReader::Read(content, false));
-    if (!value.get()) {
-      // The page sent us something that we didn't understand.
-      // This probably indicates a programming error.
-      NOTREACHED();
-      return;
-    }
-  }
-
   // Forward this message and content on.
-  callback->second->Run(value.get());
+  callback->second->Run(content);
 }
 
 void DOMUI::CallJavascriptFunction(const std::wstring& function_name) {

@@ -40,6 +40,7 @@
 #include "base/at_exit.h"
 #include "base/command_line.h"
 #include "base/file_path.h"
+#include "base/string_util.h"
 #include "converter/cross/converter.h"
 #include "utils/cross/file_path_utils.h"
 
@@ -86,7 +87,9 @@ int CrossMain(int argc, char**argv) {
         << "--no-condition\n"
         << "    Stops the converter from conditioning shaders.\n"
         << "--base-path=<path>\n"
-        << "    Sets the base path for finding textures and other external\n"
+        << "    Sets the path to remove from URIs of external files\n"
+        << "--asset-paths=<comma separted list of paths>\n"
+        << "    Sets the paths for finding textures and other external\n"
         << "    files.\n"
         << "--up-axis=x,y,z\n"
         << "    Converts the file to have this up axis.\n"
@@ -97,19 +100,32 @@ int CrossMain(int argc, char**argv) {
         << "    tri-linear filtering.\n"
         << "--keep-materials\n"
         << "    Stops the converter from changing materials to <constant> if\n"
-        << "    they are used by a mesh that has no normals.\n";
+        << "    they are used by a mesh that has no normals.\n"
+        << "--no-binary\n"
+        << "    Use JSON for buffers, skins, curves instead of binary\n"
+        << "--json-only\n"
+        << "    Don't make a gzipped tar file, just JSON.\n";
     return EXIT_FAILURE;
   }
 
   o3d::converter::Options options;
-  options.condition = !command_line->HasSwitch(L"no-condition");
-  options.pretty_print = command_line->HasSwitch(L"pretty-print");
-  if (command_line->HasSwitch(L"base-path")) {
+  options.condition = !command_line->HasSwitch("no-condition");
+  options.pretty_print = command_line->HasSwitch("pretty-print");
+  options.binary = !command_line->HasSwitch("no-binary");
+  options.json_only = !command_line->HasSwitch("json-only");
+  if (command_line->HasSwitch("base-path")) {
     options.base_path = o3d::WideToFilePath(
-        command_line->GetSwitchValue(L"base-path"));
+        command_line->GetSwitchValue("base-path"));
   }
-  if (command_line->HasSwitch(L"up-axis")) {
-    wstring up_axis_string = command_line->GetSwitchValue(L"up-axis");
+  if (command_line->HasSwitch("asset-paths")) {
+    std::vector<std::wstring> paths;
+    SplitString(command_line->GetSwitchValue("asset-paths"), ',', &paths);
+    for (size_t ii = 0; ii < paths.size(); ++ii) {
+      options.file_paths.push_back(o3d::WideToFilePath(paths[ii]));
+    }
+  }
+  if (command_line->HasSwitch("up-axis")) {
+    wstring up_axis_string = command_line->GetSwitchValue("up-axis");
     int x, y, z;
     if (swscanf(up_axis_string.c_str(), L"%d,%d,%d", &x, &y, &z) != 3) {
       std::cerr << "Invalid --up-axis value. Should be --up-axis=x,y,z\n";

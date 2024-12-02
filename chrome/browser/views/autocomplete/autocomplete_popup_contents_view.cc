@@ -4,10 +4,6 @@
 
 #include "chrome/browser/views/autocomplete/autocomplete_popup_contents_view.h"
 
-#include <objidl.h>
-#include <commctrl.h>
-#include <dwmapi.h>
-
 #include "app/gfx/canvas.h"
 #include "app/gfx/color_utils.h"
 #include "app/gfx/insets.h"
@@ -15,16 +11,24 @@
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
 #include "app/theme_provider.h"
-#include "app/win_util.h"
 #include "base/compiler_specific.h"
-#include "chrome/browser/autocomplete/autocomplete_edit_view_win.h"
+#include "chrome/browser/autocomplete/autocomplete_edit_view.h"
 #include "chrome/browser/autocomplete/autocomplete_popup_model.h"
-#include "chrome/browser/views/autocomplete/autocomplete_popup_win.h"
+#include "chrome/browser/bubble_positioner.h"
+#include "chrome/browser/views/bubble_border.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "third_party/skia/include/core/SkShader.h"
-#include "third_party/icu38/public/common/unicode/ubidi.h"
+#include "third_party/icu/public/common/unicode/ubidi.h"
 #include "views/widget/widget.h"
+
+#if defined(OS_WIN)
+#include <objidl.h>
+#include <commctrl.h>
+#include <dwmapi.h>
+
+#include "app/win_util.h"
+#endif
 
 namespace {
 
@@ -47,21 +51,27 @@ SkColor GetColor(ResultViewState state, ColorKind kind) {
   static bool initialized = false;
   static SkColor colors[NUM_STATES][NUM_KINDS];
   if (!initialized) {
+#if defined(OS_WIN)
     colors[NORMAL][BACKGROUND] = color_utils::GetSysSkColor(COLOR_WINDOW);
     colors[SELECTED][BACKGROUND] = color_utils::GetSysSkColor(COLOR_HIGHLIGHT);
     colors[NORMAL][TEXT] = color_utils::GetSysSkColor(COLOR_WINDOWTEXT);
     colors[SELECTED][TEXT] = color_utils::GetSysSkColor(COLOR_HIGHLIGHTTEXT);
+#else
+    // TODO(beng): source from theme provider.
+    colors[NORMAL][BACKGROUND] = SK_ColorWHITE;
+    colors[SELECTED][BACKGROUND] = SK_ColorBLUE;
+    colors[NORMAL][TEXT] = SK_ColorBLACK;
+    colors[SELECTED][TEXT] = SK_ColorWHITE;
+#endif
     colors[HOVERED][BACKGROUND] =
         color_utils::AlphaBlend(colors[SELECTED][BACKGROUND],
                                 colors[NORMAL][BACKGROUND], 64);
     colors[HOVERED][TEXT] = colors[NORMAL][TEXT];
-    const SkColor kDarkURL = SkColorSetRGB(0, 128, 0);
-    const SkColor kLightURL = SkColorSetRGB(128, 255, 128);
     for (int i = 0; i < NUM_STATES; ++i) {
       colors[i][DIMMED_TEXT] =
           color_utils::AlphaBlend(colors[i][TEXT], colors[i][BACKGROUND], 128);
-      colors[i][URL] = color_utils::PickMoreReadableColor(kDarkURL, kLightURL,
-          colors[i][BACKGROUND]);
+      colors[i][URL] = color_utils::GetReadableColor(SkColorSetRGB(0, 128, 0),
+                                                     colors[i][BACKGROUND]);
     }
     initialized = true;
   }
@@ -146,9 +156,6 @@ class AutocompleteResultView : public views::View {
   // This row's model and model index.
   AutocompleteResultViewModel* model_;
   size_t model_index_;
-
-  // True if the mouse is over this row.
-  bool hot_;
 
   // The font used to derive fonts for rendering the text in this row.
   gfx::Font font_;
@@ -309,7 +316,6 @@ AutocompleteResultView::AutocompleteResultView(
     const gfx::Font& font)
     : model_(model),
       model_index_(model_index),
-      hot_(false),
       font_(font),
       mirroring_context_(new MirroringContext()),
       match_(NULL, 0, false, AutocompleteMatch::URL_WHAT_YOU_TYPED) {
@@ -374,28 +380,24 @@ gfx::Size AutocompleteResultView::GetPreferredSize() {
 }
 
 void AutocompleteResultView::OnMouseEntered(const views::MouseEvent& event) {
-  hot_ = true;
-  SchedulePaint();
+  model_->SetHoveredLine(model_index_);
 }
 
 void AutocompleteResultView::OnMouseMoved(const views::MouseEvent& event) {
-  if (!hot_) {
-    hot_ = true;
-    SchedulePaint();
-  }
+  model_->SetHoveredLine(model_index_);
+  if (event.IsLeftMouseButton())
+    model_->SetSelectedLine(model_index_, false);
 }
 
 void AutocompleteResultView::OnMouseExited(const views::MouseEvent& event) {
-  hot_ = false;
-  SchedulePaint();
+  model_->SetHoveredLine(AutocompletePopupModel::kNoMatch);
 }
 
 bool AutocompleteResultView::OnMousePressed(const views::MouseEvent& event) {
-  if (event.IsOnlyLeftMouseButton()) {
+  if (event.IsLeftMouseButton() || event.IsMiddleMouseButton()) {
     model_->SetHoveredLine(model_index_);
-    model_->SetSelectedLine(model_index_, false);
-  } else if (event.IsOnlyMiddleMouseButton()) {
-    model_->SetHoveredLine(model_index_);
+    if (event.IsLeftMouseButton())
+      model_->SetSelectedLine(model_index_, false);
   }
   return true;
 }
@@ -419,7 +421,7 @@ bool AutocompleteResultView::OnMouseDragged(const views::MouseEvent& event) {
 ResultViewState AutocompleteResultView::GetState() const {
   if (model_->IsSelectedIndex(model_index_))
     return SELECTED;
-  return hot_ ? HOVERED : NORMAL;
+  return model_->IsHoveredIndex(model_index_) ? HOVERED : NORMAL;
 }
 
 SkBitmap* AutocompleteResultView::GetIcon() const {
@@ -571,122 +573,30 @@ void AutocompleteResultView::InitClass() {
   }
 }
 
-class PopupBorder : public views::Border {
- public:
-  PopupBorder() {
-    InitClass();
-  }
-  virtual ~PopupBorder() {}
-
-  // Returns the border radius of the edge of the popup.
-  static int GetBorderRadius() {
-    // We can't safely calculate a border radius by comparing the sizes of the
-    // side and corner images, because either may have been extended in various
-    // directions in order to do more subtle dropshadow fading or other effects.
-    // So we hardcode the most accurate value.
-    return 4;
-  }
-
-  // Overridden from views::Border:
-  virtual void Paint(const views::View& view, gfx::Canvas* canvas) const;
-  virtual void GetInsets(gfx::Insets* insets) const;
-
- private:
-  // Border graphics.
-  static SkBitmap* dropshadow_left_;
-  static SkBitmap* dropshadow_topleft_;
-  static SkBitmap* dropshadow_top_;
-  static SkBitmap* dropshadow_topright_;
-  static SkBitmap* dropshadow_right_;
-  static SkBitmap* dropshadow_bottomright_;
-  static SkBitmap* dropshadow_bottom_;
-  static SkBitmap* dropshadow_bottomleft_;
-
-  static void InitClass();
-
-  DISALLOW_COPY_AND_ASSIGN(PopupBorder);
-};
-
-// static
-SkBitmap* PopupBorder::dropshadow_left_ = NULL;
-SkBitmap* PopupBorder::dropshadow_topleft_ = NULL;
-SkBitmap* PopupBorder::dropshadow_top_ = NULL;
-SkBitmap* PopupBorder::dropshadow_topright_ = NULL;
-SkBitmap* PopupBorder::dropshadow_right_ = NULL;
-SkBitmap* PopupBorder::dropshadow_bottomright_ = NULL;
-SkBitmap* PopupBorder::dropshadow_bottom_ = NULL;
-SkBitmap* PopupBorder::dropshadow_bottomleft_ = NULL;
-
-void PopupBorder::Paint(const views::View& view, gfx::Canvas* canvas) const {
-  int ds_tl_width = dropshadow_topleft_->width();
-  int ds_tl_height = dropshadow_topleft_->height();
-  int ds_tr_width = dropshadow_topright_->width();
-  int ds_tr_height = dropshadow_topright_->height();
-  int ds_br_width = dropshadow_bottomright_->width();
-  int ds_br_height = dropshadow_bottomright_->height();
-  int ds_bl_width = dropshadow_bottomleft_->width();
-  int ds_bl_height = dropshadow_bottomleft_->height();
-
-  canvas->DrawBitmapInt(*dropshadow_topleft_, 0, 0);
-  canvas->TileImageInt(*dropshadow_top_, ds_tl_width, 0,
-                       view.width() - ds_tr_width - ds_tl_width,
-                       dropshadow_top_->height());
-  canvas->DrawBitmapInt(*dropshadow_topright_, view.width() - ds_tr_width, 0);
-  canvas->TileImageInt(*dropshadow_right_,
-                       view.width() - dropshadow_right_->width(),
-                       ds_tr_height, dropshadow_right_->width(),
-                       view.height() - ds_tr_height - ds_br_height);
-  canvas->DrawBitmapInt(*dropshadow_bottomright_, view.width() - ds_br_width,
-                        view.height() - ds_br_height);
-  canvas->TileImageInt(*dropshadow_bottom_, ds_bl_width,
-                       view.height() - dropshadow_bottom_->height(),
-                       view.width() - ds_bl_width - ds_br_width,
-                       dropshadow_bottom_->height());
-  canvas->DrawBitmapInt(*dropshadow_bottomleft_, 0,
-                        view.height() - dropshadow_bottomleft_->height());
-  canvas->TileImageInt(*dropshadow_left_, 0, ds_tl_height,
-                       dropshadow_left_->width(),
-                       view.height() - ds_tl_height - ds_bl_height);
-}
-
-void PopupBorder::GetInsets(gfx::Insets* insets) const {
-  // The left, right and bottom edge image sizes define our insets. The corner
-  // images don't determine this because they can extend in both directions.
-  insets->Set(dropshadow_top_->height(), dropshadow_left_->width(),
-              dropshadow_bottom_->height(), dropshadow_right_->width());
-}
-
-void PopupBorder::InitClass() {
-  static bool initialized = false;
-  if (!initialized) {
-    ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-    dropshadow_left_ = rb.GetBitmapNamed(IDR_OMNIBOX_POPUP_DS_L);
-    dropshadow_topleft_ = rb.GetBitmapNamed(IDR_OMNIBOX_POPUP_DS_TL);
-    dropshadow_top_ = rb.GetBitmapNamed(IDR_OMNIBOX_POPUP_DS_T);
-    dropshadow_topright_ = rb.GetBitmapNamed(IDR_OMNIBOX_POPUP_DS_TR);
-    dropshadow_right_ = rb.GetBitmapNamed(IDR_OMNIBOX_POPUP_DS_R);
-    dropshadow_bottomright_ = rb.GetBitmapNamed(IDR_OMNIBOX_POPUP_DS_BR);
-    dropshadow_bottom_ = rb.GetBitmapNamed(IDR_OMNIBOX_POPUP_DS_B);
-    dropshadow_bottomleft_ = rb.GetBitmapNamed(IDR_OMNIBOX_POPUP_DS_BL);
-    initialized = true;
-  }
-}
-
 ////////////////////////////////////////////////////////////////////////////////
 // AutocompletePopupContentsView, public:
 
 AutocompletePopupContentsView::AutocompletePopupContentsView(
     const gfx::Font& font,
-    AutocompleteEditViewWin* edit_view,
+    AutocompleteEditView* edit_view,
     AutocompleteEditModel* edit_model,
     Profile* profile,
-    AutocompletePopupPositioner* popup_positioner)
-    : model_(new AutocompletePopupModel(this, edit_model, profile)),
+    const BubblePositioner* bubble_positioner)
+#if defined(OS_WIN)
+    : popup_(new AutocompletePopupWin(this)),
+#else
+    : popup_(new AutocompletePopupGtk(this)),
+#endif
+      model_(new AutocompletePopupModel(this, edit_model, profile)),
       edit_view_(edit_view),
-      popup_positioner_(popup_positioner),
+      bubble_positioner_(bubble_positioner),
       result_font_(font.DeriveFont(kEditFontAdjust)),
       ALLOW_THIS_IN_INITIALIZER_LIST(size_animation_(this)) {
-  set_border(new PopupBorder);
+  // The following little dance is required because set_border() requires a
+  // pointer to a non-const object.
+  BubbleBorder* bubble_border = new BubbleBorder;
+  bubble_border_ = bubble_border;
+  set_border(bubble_border);
 }
 
 gfx::Rect AutocompletePopupContentsView::GetPopupBounds() const {
@@ -709,7 +619,7 @@ gfx::Rect AutocompletePopupContentsView::GetPopupBounds() const {
 // AutocompletePopupContentsView, AutocompletePopupView overrides:
 
 bool AutocompletePopupContentsView::IsOpen() const {
-  return (popup_ != NULL);
+  return popup_->IsOpen();
 }
 
 void AutocompletePopupContentsView::InvalidateLine(size_t line) {
@@ -719,10 +629,9 @@ void AutocompletePopupContentsView::InvalidateLine(size_t line) {
 void AutocompletePopupContentsView::UpdatePopupAppearance() {
   if (model_->result().empty()) {
     // No matches, close any existing popup.
-    if (popup_ != NULL) {
+    if (popup_->IsCreated()) {
       size_animation_.Stop();
-      popup_->CloseNow();
-      popup_.reset();
+      popup_->Hide();
     }
     return;
   }
@@ -744,12 +653,10 @@ void AutocompletePopupContentsView::UpdatePopupAppearance() {
   }
 
   // Calculate desired bounds.
-  gfx::Rect new_target_bounds = popup_positioner_->GetPopupBounds();
-  new_target_bounds.set_height(total_child_height);
-  gfx::Insets insets;
-  border()->GetInsets(&insets);
-  new_target_bounds.Inset(-insets.left(), -insets.top(), -insets.right(),
-                          -insets.bottom());
+  gfx::Rect location_stack_bounds =
+      bubble_positioner_->GetLocationStackBounds();
+  gfx::Rect new_target_bounds(bubble_border_->GetBounds(location_stack_bounds,
+      gfx::Size(location_stack_bounds.width(), total_child_height)));
 
   // If we're animating and our target height changes, reset the animation.
   // NOTE: If we just reset blindly on _every_ update, then when the user types
@@ -759,25 +666,23 @@ void AutocompletePopupContentsView::UpdatePopupAppearance() {
     size_animation_.Reset();
   target_bounds_ = new_target_bounds;
 
-  if (popup_ == NULL) {
-    // If the popup is currently closed, we need to create it.
-    popup_.reset(new AutocompletePopupClass(edit_view_, this));
+  if (!popup_->IsCreated()) {
+    // If we've never been shown, we need to create the window.
+    popup_->Init(edit_view_, this);
   } else {
-    // Animate the popup shrinking, but don't animate growing larger since that
-    // would make the popup feel less responsive.
+    // Animate the popup shrinking, but don't animate growing larger (or
+    // appearing for the first time) since that would make the popup feel less
+    // responsive.
     GetWidget()->GetBounds(&start_bounds_, true);
-    if (target_bounds_.height() < start_bounds_.height())
+    if (popup_->IsVisible() &&
+        (target_bounds_.height() < start_bounds_.height()))
       size_animation_.Show();
     else
       start_bounds_ = target_bounds_;
-    popup_->SetBounds(GetPopupBounds());
+    popup_->Show();
   }
 
   SchedulePaint();
-}
-
-void AutocompletePopupContentsView::OnHoverEnabledOrDisabled(bool disabled) {
-  // TODO(beng): remove this from the interface.
 }
 
 void AutocompletePopupContentsView::PaintUpdatesNow() {
@@ -793,6 +698,10 @@ AutocompletePopupModel* AutocompletePopupContentsView::GetModel() {
 
 bool AutocompletePopupContentsView::IsSelectedIndex(size_t index) const {
   return HasMatchAt(index) ? index == model_->selected_line() : false;
+}
+
+bool AutocompletePopupContentsView::IsHoveredIndex(size_t index) const {
+  return HasMatchAt(index) ? index == model_->hovered_line() : false;
 }
 
 void AutocompletePopupContentsView::OpenIndex(
@@ -828,9 +737,7 @@ void AutocompletePopupContentsView::SetSelectedLine(size_t index,
 
 void AutocompletePopupContentsView::AnimationProgressed(
     const Animation* animation) {
-  // We should only be running the animation when the popup is already visible.
-  DCHECK(popup_ != NULL);
-  popup_->SetBounds(GetPopupBounds());
+  popup_->Show();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -917,11 +824,12 @@ void AutocompletePopupContentsView::MakeContentsPath(
            SkIntToScalar(bounding_rect.right()),
            SkIntToScalar(bounding_rect.bottom()));
 
-  SkScalar radius = SkIntToScalar(PopupBorder::GetBorderRadius());
+  SkScalar radius = SkIntToScalar(BubbleBorder::GetCornerRadius());
   path->addRoundRect(rect, radius, radius);
 }
 
 void AutocompletePopupContentsView::UpdateBlurRegion() {
+#if defined(OS_WIN)
   // We only support background blurring on Vista with Aero-Glass enabled.
   if (!win_util::ShouldUseVistaFrame() || !GetWidget())
     return;
@@ -945,6 +853,7 @@ void AutocompletePopupContentsView::UpdateBlurRegion() {
   popup_region.Set(contents_path.CreateHRGN());
   bb.hRgnBlur = popup_region.Get();
   DwmEnableBlurBehindWindow(GetWidget()->GetNativeView(), &bb);
+#endif
 }
 
 void AutocompletePopupContentsView::MakeCanvasTransparent(
@@ -954,4 +863,15 @@ void AutocompletePopupContentsView::MakeCanvasTransparent(
       kGlassPopupAlpha : kOpaquePopupAlpha;
   canvas->drawColor(SkColorSetA(GetColor(NORMAL, BACKGROUND), alpha),
                     SkXfermode::kDstIn_Mode);
+}
+
+// static
+AutocompletePopupView* AutocompletePopupView::CreatePopupView(
+    const gfx::Font& font,
+    AutocompleteEditView* edit_view,
+    AutocompleteEditModel* edit_model,
+    Profile* profile,
+    const BubblePositioner* bubble_positioner) {
+  return new AutocompletePopupContentsView(font, edit_view, edit_model,
+                                           profile, bubble_positioner);
 }

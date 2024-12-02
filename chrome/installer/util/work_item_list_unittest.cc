@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -55,10 +55,10 @@ TEST_F(WorkItemListTest, ExecutionSuccess) {
   scoped_ptr<WorkItemList> work_item_list(WorkItem::CreateWorkItemList());
   scoped_ptr<WorkItem> work_item;
 
-  std::wstring top_dir_to_create(test_dir_.ToWStringHack());
-  file_util::AppendToPath(&top_dir_to_create, L"a");
-  std::wstring dir_to_create(top_dir_to_create);
-  file_util::AppendToPath(&dir_to_create, L"b");
+  FilePath top_dir_to_create(test_dir_);
+  top_dir_to_create = top_dir_to_create.AppendASCII("a");
+  FilePath dir_to_create(top_dir_to_create);
+  dir_to_create = dir_to_create.AppendASCII("b");
   ASSERT_FALSE(file_util::PathExists(dir_to_create));
 
   work_item.reset(reinterpret_cast<WorkItem*>(
@@ -104,10 +104,10 @@ TEST_F(WorkItemListTest, ExecutionFailAndRollback) {
   scoped_ptr<WorkItemList> work_item_list(WorkItem::CreateWorkItemList());
   scoped_ptr<WorkItem> work_item;
 
-  std::wstring top_dir_to_create(test_dir_.ToWStringHack());
-  file_util::AppendToPath(&top_dir_to_create, L"a");
-  std::wstring dir_to_create(top_dir_to_create);
-  file_util::AppendToPath(&dir_to_create, L"b");
+  FilePath top_dir_to_create(test_dir_);
+  top_dir_to_create = top_dir_to_create.AppendASCII("a");
+  FilePath dir_to_create(top_dir_to_create);
+  dir_to_create = dir_to_create.AppendASCII("b");
   ASSERT_FALSE(file_util::PathExists(dir_to_create));
 
   work_item.reset(reinterpret_cast<WorkItem*>(

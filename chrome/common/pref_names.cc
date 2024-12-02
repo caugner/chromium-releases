@@ -25,24 +25,6 @@ const wchar_t kProfileNickname[] = L"profile.nickname";
 // Its value should be unique within the current user data directory.
 const wchar_t kProfileID[] = L"profile.id";
 
-// A boolean value that when true stipulates that the history of the active
-// tab should be shown in its entirety at the start of the list, rather than
-// being mingled based on view time.
-const wchar_t kRecentlyViewedModelBiasActiveTabHistory[] =
-  L"recently_viewed_model.bias_active_tab_history";
-
-// This is a value that defines the selection mode used by the recently
-// viewed pages model to determine how to load the selected item. values are:
-// 0 - the tab that contains or contained the item should be activated, and
-//     the item navigated to within that tab.
-// 1 - if the tab that contains or contained the item is active, the item
-//     should be navigated to, otherwise a new tab is opened with the
-//     selected item only.
-//
-// ... future
-const wchar_t kRecentlyViewedModelSelectionMode[] =
-  L"recently_viewed_model.selection_mode";
-
 // Used to determine if the last session exited cleanly. Set to false when
 // first opened, and to true when closing. On startup if the value is false,
 // it means the profile didn't exit cleanly.
@@ -127,10 +109,6 @@ const wchar_t kWebKitJavaEnabled[] =
 // Boolean which specifies whether the bookmark bar is visible on all tabs.
 const wchar_t kShowBookmarkBar[] = L"bookmark_bar.show_on_all_tabs";
 
-// Boolean which specifies whether the destinations tab should always be on.
-const wchar_t kAlwaysCreateDestinationsTab[] =
-    L"profile.always_create_destinations_tab";
-
 // Boolean that is true if the password manager is on (will record new
 // passwords and fill in known passwords).
 const wchar_t kPasswordManagerEnabled[] = L"profile.password_manager_enabled";
@@ -192,6 +170,35 @@ const wchar_t kDnsStartupPrefetchList[] = L"StartupDNSPrefetchList";
 // sub-resource hostnames).
 // This list is adaptively grown and pruned.
 extern const wchar_t kDnsHostReferralList[] = L"HostReferralList";
+
+#if defined(OS_LINUX)
+// Prefs for SSLConfigServicePref.  Currently, these are only present on
+// and used by Linux.
+extern const wchar_t kCertRevocationCheckingEnabled[] =
+    L"ssl.rev_checking.enabled";
+extern const wchar_t kSSL2Enabled[] = L"ssl.ssl2.enabled";
+extern const wchar_t kSSL3Enabled[] = L"ssl.ssl3.enabled";
+extern const wchar_t kTLS1Enabled[] = L"ssl.tls1.enabled";
+#endif
+
+#if defined(OS_CHROMEOS)
+// A string pref set to the timezone.
+extern const wchar_t kTimeZone[] = L"settings.datetime.timezone";
+
+// A boolean pref set to true if TapToClick is being done in browser.
+extern const wchar_t kTapToClickEnabled[] =
+    L"settings.touchpad.enable_tap_to_click";
+
+// A boolean pref set to true if VertEdgeScroll is being done in browser.
+extern const wchar_t kVertEdgeScrollEnabled[] =
+    L"settings.touchpad.enable_vert_edge_scroll";
+
+// A integer pref for the touchpad speed factor.
+extern const wchar_t kTouchpadSpeedFactor[] = L"settings.touchpad.speed_factor";
+
+// A integer pref for the touchpad sensitivity.
+extern const wchar_t kTouchpadSensitivity[] = L"settings.touchpad.sensitivity";
+#endif
 
 // The disabled messages in IPC logging.
 const wchar_t kIpcDisabledMessages[] = L"ipc_log_disabled_messages";
@@ -268,23 +275,27 @@ const wchar_t kCheckDefaultBrowser[] = L"browser.check_default_browser";
 // true, we draw a custom chrome frame (thicker title bar and blue border).
 const wchar_t kUseCustomChromeFrame[] = L"browser.custom_chrome_frame";
 
+// Boolean that indicates whether the infobar explaining that search can be done
+// directly from the omnibox should be shown.
+const wchar_t kShowOmniboxSearchHint[] = L"browser.show_omnibox_search_hint";
+
 // Integer that counts the number of times the theme promo has left to be
 // shown; this decrements each time the NTP is shown for the first time
 // in a session.
 const wchar_t kNTPThemePromoRemaining[] = L"browser.ntp.theme_promo_remaining";
 
+// The list of origins which are allowed|denied to show desktop notifications.
+const wchar_t kDesktopNotificationAllowedOrigins[] =
+    L"profile.notification_allowed_sites";
+const wchar_t kDesktopNotificationDeniedOrigins[] =
+    L"profile.notification_denied_sites";
+
 // *************** LOCAL STATE ***************
 // These are attached to the machine/installation
-
-// List of profiles that the app knows about from last run.
-const wchar_t kAvailableProfiles[] = L"profiles.available";
 
 // The metrics client GUID and session ID.
 const wchar_t kMetricsClientID[] = L"user_experience_metrics.client_id";
 const wchar_t kMetricsSessionID[] = L"user_experience_metrics.session_id";
-
-// Boolean set to true when we're recording user metrics.
-const wchar_t kMetricsIsRecording[] = L"user_experience_metrics.record";
 
 // Date/time when the current metrics profile ID was created
 // (which hopefully corresponds to first run).
@@ -433,6 +444,11 @@ const wchar_t kTaskManagerWindowPlacement[] = L"task_manager.window_placement";
 // window to restore on startup.
 const wchar_t kPageInfoWindowPlacement[] = L"page_info.window_placement";
 
+// A collection of position, size, and other data relating to the keyword
+// editor window to restore on startup.
+const wchar_t kKeywordEditorWindowPlacement[] =
+    L"keyword_editor.window_placement";
+
 // An integer specifying the total number of bytes to be used by the
 // renderer's in-memory cache of objects.
 const wchar_t kMemoryCacheSize[] = L"renderer.memory_cache.size";
@@ -525,8 +541,20 @@ const wchar_t kNumFoldersInOtherBookmarkFolder[] =
 const wchar_t kNumKeywords[] = L"user_experience_metrics.num_keywords";
 
 // Whether Extensions or User Scripts are enabled.
-const wchar_t kEnableExtensions[] = L"extensions.enabled";
+const wchar_t kDisableExtensions[] = L"extensions.disabled";
 const wchar_t kEnableUserScripts[] = L"extensions.user_scripts_enabled";
+
+// Boolean which specifies whether the Extension Shelf is visible on all tabs.
+const wchar_t kShowExtensionShelf[] = L"extensions.shelf.show_on_all_tabs";
+
+// Time of the last, and next scheduled, extensions auto-update checks.
+const wchar_t kLastExtensionsUpdateCheck[] =
+    L"extensions.autoupdate.last_check";
+const wchar_t kNextExtensionsUpdateCheck[] =
+    L"extensions.autoupdate.next_check";
+// Version number of last blacklist check
+const wchar_t kExtensionBlacklistUpdateVersion[] =
+    L"extensions.blacklistupdate.version";
 
 // New Tab Page URLs that should not be shown as most visited thumbnails.
 const wchar_t kNTPMostVisitedURLsBlacklist[] = L"ntp.most_visited_blacklist";
@@ -557,5 +585,11 @@ const wchar_t kDevToolsOpenDocked[] = L"devtools.open_docked";
 
 // Integer location of the split bar in the browser view.
 const wchar_t kDevToolsSplitLocation[] = L"devtools.split_location";
+
+// 64-bit integer serialization of the base::Time when the last sync occured.
+const wchar_t kSyncLastSyncedTime[] = L"sync.last_synced_time";
+
+// Boolean specifying whether the user finished setting up sync.
+const wchar_t kSyncHasSetupCompleted[] = L"sync.has_setup_completed";
 
 }  // namespace prefs

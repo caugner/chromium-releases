@@ -4,9 +4,10 @@
 
 #include "chrome/browser/gtk/menu_gtk.h"
 
+#include "app/gfx/gtk_util.h"
 #include "app/l10n_util.h"
-#include "base/gfx/gtk_util.h"
 #include "base/logging.h"
+#include "base/message_loop.h"
 #include "base/stl_util-inl.h"
 #include "base/string_util.h"
 #include "chrome/browser/gtk/standard_menus.h"
@@ -15,12 +16,15 @@
 
 using gtk_util::ConvertAcceleratorsFromWindowsStyle;
 
+bool MenuGtk::block_activation_ = false;
+
 MenuGtk::MenuGtk(MenuGtk::Delegate* delegate,
                  const MenuCreateMaterial* menu_data,
                  GtkAccelGroup* accel_group)
     : delegate_(delegate),
       dummy_accel_group_(gtk_accel_group_new()),
-      menu_(gtk_menu_new()) {
+      menu_(gtk_menu_new()),
+      factory_(this) {
   ConnectSignalHandlers();
   BuildMenuIn(menu_.get(), menu_data, accel_group);
 }
@@ -28,7 +32,8 @@ MenuGtk::MenuGtk(MenuGtk::Delegate* delegate,
 MenuGtk::MenuGtk(MenuGtk::Delegate* delegate, bool load)
     : delegate_(delegate),
       dummy_accel_group_(NULL),
-      menu_(gtk_menu_new()) {
+      menu_(gtk_menu_new()),
+      factory_(this) {
   ConnectSignalHandlers();
   if (load)
     BuildMenuFromDelegate();
@@ -36,11 +41,14 @@ MenuGtk::MenuGtk(MenuGtk::Delegate* delegate, bool load)
 
 MenuGtk::~MenuGtk() {
   menu_.Destroy();
+  STLDeleteContainerPointers(submenus_we_own_.begin(), submenus_we_own_.end());
   if (dummy_accel_group_)
     g_object_unref(dummy_accel_group_);
 }
 
 void MenuGtk::ConnectSignalHandlers() {
+  // We connect afterwards because OnMenuShow calls SetMenuItemInfo, which may
+  // take a long time or even start a nested message loop.
   g_signal_connect(menu_.get(), "show", G_CALLBACK(OnMenuShow), this);
   g_signal_connect(menu_.get(), "hide", G_CALLBACK(OnMenuHidden), this);
 }
@@ -106,6 +114,11 @@ void MenuGtk::PopupAsContext(guint32 event_time) {
   gtk_menu_popup(GTK_MENU(menu_.get()), NULL, NULL, NULL, NULL, 3, event_time);
 }
 
+void MenuGtk::PopupAsFromKeyEvent(GtkWidget* widget) {
+  Popup(widget, 0, gtk_get_current_event_time());
+  gtk_menu_shell_select_first(GTK_MENU_SHELL(menu_.get()), FALSE);
+}
+
 void MenuGtk::Cancel() {
   gtk_menu_popdown(GTK_MENU(menu_.get()));
 }
@@ -122,7 +135,7 @@ void MenuGtk::BuildMenuIn(GtkWidget* menu,
     if (menu_data->label_argument) {
       label = l10n_util::GetStringFUTF8(
           menu_data->label_id,
-          WideToUTF16(l10n_util::GetString(menu_data->label_argument)));
+          l10n_util::GetStringUTF16(menu_data->label_argument));
     } else if (menu_data->label_id) {
       label = l10n_util::GetStringUTF8(menu_data->label_id);
     } else if (menu_data->type != MENU_SEPARATOR) {
@@ -161,9 +174,10 @@ void MenuGtk::BuildMenuIn(GtkWidget* menu,
     } else if (menu_data->custom_submenu) {
       gtk_menu_item_set_submenu(GTK_MENU_ITEM(menu_item),
                                 menu_data->custom_submenu->menu_.get());
+      submenus_we_own_.push_back(menu_data->custom_submenu);
     }
 
-    if (accel_group && menu_data->accel_key) {
+    if ((menu_data->only_show || accel_group) && menu_data->accel_key) {
       // If we ever want to let the user do any key remaping, we'll need to
       // change the following so we make a gtk_accel_map which keeps the actual
       // keys.
@@ -198,6 +212,8 @@ GtkWidget* MenuGtk::BuildMenuItemWithImage(const std::string& label,
   gtk_image_menu_item_set_image(GTK_IMAGE_MENU_ITEM(menu_item),
                                 gtk_image_new_from_pixbuf(pixbuf));
   g_object_unref(pixbuf);
+  if (delegate_->AlwaysShowImages())
+    gtk_util::SetAlwaysShowImage(menu_item);
 
   return menu_item;
 }
@@ -222,25 +238,29 @@ void MenuGtk::BuildMenuFromDelegate() {
 
 // static
 void MenuGtk::OnMenuItemActivated(GtkMenuItem* menuitem, MenuGtk* menu) {
+  if (block_activation_)
+    return;
+
   // We receive activation messages when highlighting a menu that has a
   // submenu. Ignore them.
-  if (!gtk_menu_item_get_submenu(menuitem)) {
-    const MenuCreateMaterial* data =
-        reinterpret_cast<const MenuCreateMaterial*>(
-            g_object_get_data(G_OBJECT(menuitem), "menu-data"));
+  if (gtk_menu_item_get_submenu(menuitem))
+    return;
 
-    int id;
-    if (data) {
-      id = data->id;
-    } else {
-      id = reinterpret_cast<int>(g_object_get_data(G_OBJECT(menuitem),
-                                                   "menu-id"));
-    }
+  const MenuCreateMaterial* data =
+      reinterpret_cast<const MenuCreateMaterial*>(
+          g_object_get_data(G_OBJECT(menuitem), "menu-data"));
 
-    // The menu item can still be activated by hotkeys even if it is disabled.
-    if (menu->delegate_->IsCommandEnabled(id))
-      menu->delegate_->ExecuteCommand(id);
+  int id;
+  if (data) {
+    id = data->id;
+  } else {
+    id = reinterpret_cast<intptr_t>(g_object_get_data(G_OBJECT(menuitem),
+                                                      "menu-id"));
   }
+
+  // The menu item can still be activated by hotkeys even if it is disabled.
+  if (menu->delegate_->IsCommandEnabled(id))
+    menu->delegate_->ExecuteCommand(id);
 }
 
 // static
@@ -276,16 +296,24 @@ void MenuGtk::MenuPositionFunc(GtkMenu* menu,
   if (!start_align)
     *x += widget->allocation.width - menu_req.width;
 
-  if (*y + menu_req.height >= screen_rect.height)
+  // If the menu would run off the bottom of the screen, and there is more
+  // screen space up than down, then pop upwards.
+  if (*y + menu_req.height >= screen_rect.height &&
+      *y > screen_rect.height / 2) {
     *y -= menu_req.height;
+  }
 
   *push_in = FALSE;
 }
 
+void MenuGtk::UpdateMenu() {
+  gtk_container_foreach(GTK_CONTAINER(menu_.get()), SetMenuItemInfo, this);
+}
+
 // static
 void MenuGtk::OnMenuShow(GtkWidget* widget, MenuGtk* menu) {
-  gtk_container_foreach(GTK_CONTAINER(menu->menu_.get()),
-                        SetMenuItemInfo, menu);
+  MessageLoop::current()->PostTask(FROM_HERE,
+      menu->factory_.NewRunnableMethod(&MenuGtk::UpdateMenu));
 }
 
 // static
@@ -309,8 +337,8 @@ void MenuGtk::SetMenuItemInfo(GtkWidget* widget, gpointer userdata) {
   if (data) {
     id = data->id;
   } else {
-    id = reinterpret_cast<int>(
-        g_object_get_data(G_OBJECT(widget), "menu-id"));
+    id = reinterpret_cast<intptr_t>(g_object_get_data(G_OBJECT(widget),
+                                    "menu-id"));
   }
 
   if (GTK_IS_CHECK_MENU_ITEM(widget)) {
@@ -320,20 +348,15 @@ void MenuGtk::SetMenuItemInfo(GtkWidget* widget, gpointer userdata) {
     // the underlying "active" property will also call the "activate" handler
     // for this menu item. So we prevent the "activate" handler from
     // being called while we set the checkbox.
-    g_signal_handlers_block_matched(
-        item, G_SIGNAL_MATCH_FUNC,
-        0, 0, NULL,
-        reinterpret_cast<void*>(OnMenuItemActivated),
-        NULL);
-
-    gtk_check_menu_item_set_active(
-        item, menu->delegate_->IsItemChecked(id));
-
-    g_signal_handlers_unblock_matched(
-        item, G_SIGNAL_MATCH_FUNC,
-        0, 0, NULL,
-        reinterpret_cast<void*>(OnMenuItemActivated),
-        NULL);
+    // Why not use one of the glib signal-blocking functions?  Because when we
+    // toggle a radio button, it will deactivate one of the other radio buttons,
+    // which we don't have a pointer to.
+    // Wny not make this a member variable?  Because "menu" is a pointer to the
+    // root of the MenuGtk and we want to disable *all* MenuGtks, including
+    // submenus.
+    block_activation_ = true;
+    gtk_check_menu_item_set_active(item, menu->delegate_->IsItemChecked(id));
+    block_activation_ = false;
   }
 
   if (GTK_IS_MENU_ITEM(widget)) {

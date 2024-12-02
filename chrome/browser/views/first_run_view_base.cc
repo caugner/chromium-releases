@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,9 +30,8 @@
 #include "views/window/client_view.h"
 #include "views/window/window.h"
 
-FirstRunViewBase::FirstRunViewBase(Profile* profile,
-                                   int import_items,
-                                   int dont_import_items)
+FirstRunViewBase::FirstRunViewBase(Profile* profile, bool homepage_defined,
+                                   int import_items, int dont_import_items)
     : preferred_width_(0),
       background_image_(NULL),
       separator_1_(NULL),
@@ -40,6 +39,7 @@ FirstRunViewBase::FirstRunViewBase(Profile* profile,
       separator_2_(NULL),
       importer_host_(NULL),
       profile_(profile),
+      homepage_defined_(homepage_defined),
       import_items_(import_items),
       dont_import_items_(dont_import_items) {
   DCHECK(profile);
@@ -176,10 +176,10 @@ int FirstRunViewBase::GetImportItems() const {
     items = items | PASSWORDS;
   if (!(dont_import_items_ & SEARCH_ENGINES))
     items = items | SEARCH_ENGINES;
-  if (!(dont_import_items_ & HOME_PAGE))
+  if (!homepage_defined_)
     items = items | HOME_PAGE;
   return items;
-}
+};
 
 void FirstRunViewBase::DisableButtons() {
   window()->EnableClose(false);

@@ -5,19 +5,23 @@
 #include "chrome/renderer/render_thread.h"
 
 #include <algorithm>
+#include <map>
 #include <vector>
 
 #include "base/command_line.h"
 #include "base/lazy_instance.h"
+#include "base/logging.h"
+#include "base/nullable_string16.h"
+#include "base/process_util.h"
 #include "base/shared_memory.h"
 #include "base/stats_table.h"
+#include "base/string_util.h"
 #include "base/thread_local.h"
-#include "chrome/common/app_cache/app_cache_context_impl.h"
-#include "chrome/common/app_cache/app_cache_dispatcher.h"
+#include "chrome/common/appcache/appcache_dispatcher.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/db_message_filter.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/renderer_preferences.h"
-#include "chrome/common/notification_service.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/plugin/npobject_util.h"
 // TODO(port)
@@ -28,24 +32,33 @@
 #include "chrome/plugin/plugin_channel_base.h"
 #endif
 #include "chrome/renderer/devtools_agent_filter.h"
+#include "chrome/renderer/extension_groups.h"
 #include "chrome/renderer/extensions/event_bindings.h"
 #include "chrome/renderer/extensions/extension_process_bindings.h"
+#include "chrome/renderer/extensions/js_only_v8_extensions.h"
 #include "chrome/renderer/extensions/renderer_extension_bindings.h"
 #include "chrome/renderer/external_extension.h"
-#include "chrome/renderer/js_only_v8_extensions.h"
 #include "chrome/renderer/loadtimes_extension_bindings.h"
 #include "chrome/renderer/net/render_dns_master.h"
 #include "chrome/renderer/render_process.h"
 #include "chrome/renderer/render_view.h"
 #include "chrome/renderer/renderer_webkitclient_impl.h"
 #include "chrome/renderer/user_script_slave.h"
+#include "ipc/ipc_message.h"
 #include "webkit/api/public/WebCache.h"
+#include "webkit/api/public/WebColor.h"
+#include "webkit/api/public/WebCrossOriginPreflightResultCache.h"
+#include "webkit/api/public/WebFontCache.h"
+#include "webkit/api/public/WebColor.h"
 #include "webkit/api/public/WebKit.h"
+#include "webkit/api/public/WebScriptController.h"
+#include "webkit/api/public/WebStorageEventDispatcher.h"
 #include "webkit/api/public/WebString.h"
 #include "webkit/extensions/v8/benchmarking_extension.h"
 #include "webkit/extensions/v8/gears_extension.h"
 #include "webkit/extensions/v8/interval_extension.h"
 #include "webkit/extensions/v8/playback_extension.h"
+#include "third_party/tcmalloc/tcmalloc/src/google/malloc_extension.h"
 
 #if defined(OS_WIN)
 #include <windows.h>
@@ -53,59 +66,18 @@
 #endif
 
 using WebKit::WebCache;
+using WebKit::WebCrossOriginPreflightResultCache;
+using WebKit::WebFontCache;
 using WebKit::WebString;
+using WebKit::WebStorageEventDispatcher;
+using WebKit::WebView;
 
+namespace {
 static const unsigned int kCacheStatsDelayMS = 2000 /* milliseconds */;
+static const double kInitialIdleHandlerDelayS = 1.0 /* seconds */;
 
 static base::LazyInstance<base::ThreadLocalPointer<RenderThread> > lazy_tls(
     base::LINKER_INITIALIZED);
-
-//-----------------------------------------------------------------------------
-// Methods below are only called on the owner's thread:
-
-// When we run plugins in process, we actually run them on the render thread,
-// which means that we need to make the render thread pump UI events.
-RenderThread::RenderThread()
-    : ChildThread(
-          base::Thread::Options(RenderProcess::InProcessPlugins() ?
-              MessageLoop::TYPE_UI : MessageLoop::TYPE_DEFAULT, kV8StackSize)),
-      plugin_refresh_allowed_(true) {
-}
-
-RenderThread::RenderThread(const std::string& channel_name)
-    : ChildThread(
-          base::Thread::Options(RenderProcess::InProcessPlugins() ?
-              MessageLoop::TYPE_UI : MessageLoop::TYPE_DEFAULT, kV8StackSize)),
-      plugin_refresh_allowed_(true) {
-  SetChannelName(channel_name);
-}
-
-RenderThread::~RenderThread() {
-}
-
-RenderThread* RenderThread::current() {
-  return lazy_tls.Pointer()->Get();
-}
-
-void RenderThread::AddFilter(IPC::ChannelProxy::MessageFilter* filter) {
-  channel()->AddFilter(filter);
-}
-
-void RenderThread::RemoveFilter(IPC::ChannelProxy::MessageFilter* filter) {
-  channel()->RemoveFilter(filter);
-}
-
-void RenderThread::Resolve(const char* name, size_t length) {
-  return dns_master_->Resolve(name, length);
-}
-
-void RenderThread::SendHistograms(int sequence_number) {
-  return histogram_snapshots_->SendHistograms(sequence_number);
-}
-
-static WebAppCacheContext* CreateAppCacheContextForRenderer() {
-  return new AppCacheContextImpl(RenderThread::current());
-}
 
 #if defined(OS_POSIX)
 class SuicideOnChannelErrorFilter : public IPC::ChannelProxy::MessageFilter {
@@ -128,6 +100,18 @@ class SuicideOnChannelErrorFilter : public IPC::ChannelProxy::MessageFilter {
   }
 };
 #endif
+}  // namespace
+
+// When we run plugins in process, we actually run them on the render thread,
+// which means that we need to make the render thread pump UI events.
+RenderThread::RenderThread() {
+  Init();
+}
+
+RenderThread::RenderThread(const std::string& channel_name)
+    : ChildThread(channel_name) {
+  Init();
+}
 
 void RenderThread::Init() {
   lazy_tls.Pointer()->Set(this);
@@ -138,19 +122,22 @@ void RenderThread::Init() {
     CoInitialize(0);
 #endif
 
-  ChildThread::Init();
-  notification_service_.reset(new NotificationService);
-  cache_stats_factory_.reset(
-      new ScopedRunnableMethodFactory<RenderThread>(this));
+  plugin_refresh_allowed_ = true;
+  cache_stats_task_pending_ = false;
+  widget_count_ = 0;
+  hidden_widget_count_ = 0;
+  idle_notification_delay_in_s_ = kInitialIdleHandlerDelayS;
+  task_factory_.reset(new ScopedRunnableMethodFactory<RenderThread>(this));
 
   visited_link_slave_.reset(new VisitedLinkSlave());
   user_script_slave_.reset(new UserScriptSlave());
   dns_master_.reset(new RenderDnsMaster());
   histogram_snapshots_.reset(new RendererHistogramSnapshots());
-  app_cache_dispatcher_.reset(new AppCacheDispatcher());
-  WebAppCacheContext::SetFactory(CreateAppCacheContextForRenderer);
+  appcache_dispatcher_.reset(new AppCacheDispatcher(this));
   devtools_agent_filter_ = new DevToolsAgentFilter();
   AddFilter(devtools_agent_filter_.get());
+  db_message_filter_ = new DBMessageFilter();
+  AddFilter(db_message_filter_.get());
 
 #if defined(OS_POSIX)
   suicide_on_channel_error_filter_ = new SuicideOnChannelErrorFilter;
@@ -158,24 +145,14 @@ void RenderThread::Init() {
 #endif
 }
 
-void RenderThread::CleanUp() {
+RenderThread::~RenderThread() {
   // Shutdown in reverse of the initialization order.
   RemoveFilter(devtools_agent_filter_.get());
-  devtools_agent_filter_ = NULL;
-  WebAppCacheContext::SetFactory(NULL);
-  app_cache_dispatcher_.reset();
-  histogram_snapshots_.reset();
-  dns_master_.reset();
-  user_script_slave_.reset();
-  visited_link_slave_.reset();
-
-  if (webkit_client_.get()) {
+  RemoveFilter(db_message_filter_.get());
+  db_message_filter_ = NULL;
+  if (webkit_client_.get())
     WebKit::shutdown();
-    webkit_client_.reset();
-  }
 
-  notification_service_.reset();
-  ChildThread::CleanUp();
   lazy_tls.Pointer()->Set(NULL);
 
   // TODO(port)
@@ -188,6 +165,50 @@ void RenderThread::CleanUp() {
 #endif
 }
 
+RenderThread* RenderThread::current() {
+  return lazy_tls.Pointer()->Get();
+}
+
+void RenderThread::AddFilter(IPC::ChannelProxy::MessageFilter* filter) {
+  channel()->AddFilter(filter);
+}
+
+void RenderThread::RemoveFilter(IPC::ChannelProxy::MessageFilter* filter) {
+  channel()->RemoveFilter(filter);
+}
+
+void RenderThread::WidgetHidden() {
+  DCHECK(hidden_widget_count_ < widget_count_);
+  hidden_widget_count_++ ;
+  if (widget_count_ && hidden_widget_count_ == widget_count_) {
+    // Reset the delay.
+    idle_notification_delay_in_s_ = kInitialIdleHandlerDelayS;
+
+    // Schedule the IdleHandler to wakeup in a bit.
+    MessageLoop::current()->PostDelayedTask(FROM_HERE,
+        task_factory_->NewRunnableMethod(&RenderThread::IdleHandler),
+        static_cast<int64>(floor(idle_notification_delay_in_s_)) * 1000);
+  }
+}
+
+void RenderThread::WidgetRestored() {
+  DCHECK(hidden_widget_count_ > 0);
+  hidden_widget_count_--;
+
+  // Note: we may have a timer pending to call the IdleHandler (see the
+  // WidgetHidden() code).  But we don't bother to cancel it as it is
+  // benign and won't do anything if the tab is un-hidden when it is
+  // called.
+}
+
+void RenderThread::Resolve(const char* name, size_t length) {
+  return dns_master_->Resolve(name, length);
+}
+
+void RenderThread::SendHistograms(int sequence_number) {
+  return histogram_snapshots_->SendHistograms(sequence_number);
+}
+
 void RenderThread::OnUpdateVisitedLinks(base::SharedMemoryHandle table) {
   DCHECK(base::SharedMemory::IsHandleValid(table)) << "Bad table handle";
   visited_link_slave_->Init(table);
@@ -196,11 +217,11 @@ void RenderThread::OnUpdateVisitedLinks(base::SharedMemoryHandle table) {
 void RenderThread::OnAddVisitedLinks(
     const VisitedLinkSlave::Fingerprints& fingerprints) {
   for (size_t i = 0; i < fingerprints.size(); ++i)
-    WebView::UpdateVisitedLinkState(fingerprints[i]);
+    WebView::updateVisitedLinkState(fingerprints[i]);
 }
 
 void RenderThread::OnResetVisitedLinks() {
-  WebView::ResetVisitedLinkState();
+  WebView::resetVisitedLinkState();
 }
 
 void RenderThread::OnUpdateUserScripts(
@@ -220,9 +241,36 @@ void RenderThread::OnPageActionsUpdated(
   ExtensionProcessBindings::SetPageActions(extension_id, page_actions);
 }
 
+void RenderThread::OnExtensionSetAPIPermissions(
+    const std::string& extension_id,
+    const std::vector<std::string>& permissions) {
+  ExtensionProcessBindings::SetAPIPermissions(extension_id, permissions);
+}
+
+void RenderThread::OnExtensionSetHostPermissions(
+    const GURL& extension_url, const std::vector<URLPattern>& permissions) {
+  ExtensionProcessBindings::SetHostPermissions(extension_url, permissions);
+}
+
+void RenderThread::OnDOMStorageEvent(const string16& key,
+    const NullableString16& old_value, const NullableString16& new_value,
+    const string16& origin, DOMStorageType dom_storage_type) {
+  if (!dom_storage_event_dispatcher_.get()) {
+    dom_storage_event_dispatcher_.reset(WebStorageEventDispatcher::create());
+  }
+  dom_storage_event_dispatcher_->dispatchStorageEvent(key, old_value, new_value,
+      origin, dom_storage_type == DOM_STORAGE_LOCAL);
+}
+
+void RenderThread::OnExtensionSetL10nMessages(
+    const std::string& extension_id,
+    const std::map<std::string, std::string>& l10n_messages) {
+  ExtensionProcessBindings::SetL10nMessages(extension_id, l10n_messages);
+}
+
 void RenderThread::OnControlMessageReceived(const IPC::Message& msg) {
   // App cache messages are handled by a delegate.
-  if (app_cache_dispatcher_->OnMessageReceived(msg))
+  if (appcache_dispatcher_->OnMessageReceived(msg))
     return;
 
   IPC_BEGIN_MESSAGE_MAP(RenderThread, msg)
@@ -230,12 +278,17 @@ void RenderThread::OnControlMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER(ViewMsg_VisitedLink_Add, OnAddVisitedLinks)
     IPC_MESSAGE_HANDLER(ViewMsg_VisitedLink_Reset, OnResetVisitedLinks)
     IPC_MESSAGE_HANDLER(ViewMsg_SetNextPageID, OnSetNextPageID)
+    IPC_MESSAGE_HANDLER(ViewMsg_SetCSSColors, OnSetCSSColors)
     // TODO(port): removed from render_messages_internal.h;
     // is there a new non-windows message I should add here?
     IPC_MESSAGE_HANDLER(ViewMsg_New, OnCreateNewView)
     IPC_MESSAGE_HANDLER(ViewMsg_SetCacheCapacities, OnSetCacheCapacities)
     IPC_MESSAGE_HANDLER(ViewMsg_GetRendererHistograms,
                         OnGetRendererHistograms)
+#if defined(USE_TCMALLOC)
+    IPC_MESSAGE_HANDLER(ViewMsg_GetRendererTcmalloc,
+                        OnGetRendererTcmalloc)
+#endif
     IPC_MESSAGE_HANDLER(ViewMsg_GetCacheResourceStats,
                         OnGetCacheResourceStats)
     IPC_MESSAGE_HANDLER(ViewMsg_UserScripts_UpdatedScripts,
@@ -246,10 +299,23 @@ void RenderThread::OnControlMessageReceived(const IPC::Message& msg) {
                         OnExtensionMessageInvoke)
     IPC_MESSAGE_HANDLER(ViewMsg_Extension_SetFunctionNames,
                         OnSetExtensionFunctionNames)
+    IPC_MESSAGE_HANDLER(ViewMsg_PurgeMemory, OnPurgeMemory)
     IPC_MESSAGE_HANDLER(ViewMsg_PurgePluginListCache,
                         OnPurgePluginListCache)
     IPC_MESSAGE_HANDLER(ViewMsg_Extension_UpdatePageActions,
                         OnPageActionsUpdated)
+    IPC_MESSAGE_HANDLER(ViewMsg_Extension_SetAPIPermissions,
+                        OnExtensionSetAPIPermissions)
+    IPC_MESSAGE_HANDLER(ViewMsg_Extension_SetHostPermissions,
+                        OnExtensionSetHostPermissions)
+    IPC_MESSAGE_HANDLER(ViewMsg_DOMStorageEvent,
+                        OnDOMStorageEvent)
+    IPC_MESSAGE_HANDLER(ViewMsg_Extension_SetL10nMessages,
+                        OnExtensionSetL10nMessages)
+#if defined(IPC_MESSAGE_LOG_ENABLED)
+    IPC_MESSAGE_HANDLER(ViewMsg_SetIPCLoggingEnabled,
+                        OnSetIPCLoggingEnabled)
+#endif
   IPC_END_MESSAGE_MAP()
 }
 
@@ -259,25 +325,35 @@ void RenderThread::OnSetNextPageID(int32 next_page_id) {
   RenderView::SetNextPageID(next_page_id);
 }
 
+// Called when to register CSS Color name->system color mappings.
+// We update the colors one by one and then tell WebKit to refresh all render
+// views.
+void RenderThread::OnSetCSSColors(
+    const std::vector<CSSColors::CSSColorMapping>& colors) {
+  EnsureWebKitInitialized();
+  size_t num_colors = colors.size();
+  scoped_array<WebKit::WebColorName> color_names(
+      new WebKit::WebColorName[num_colors]);
+  scoped_array<WebKit::WebColor> web_colors(new WebKit::WebColor[num_colors]);
+  size_t i = 0;
+  for (std::vector<CSSColors::CSSColorMapping>::const_iterator it =
+          colors.begin();
+       it != colors.end();
+       ++it, ++i) {
+    color_names[i] = it->first;
+    web_colors[i] = it->second;
+  }
+  WebKit::setNamedColors(color_names.get(), web_colors.get(), num_colors);
+}
+
 void RenderThread::OnCreateNewView(gfx::NativeViewId parent_hwnd,
-                                   ModalDialogEvent modal_dialog_event,
                                    const RendererPreferences& renderer_prefs,
                                    const WebPreferences& webkit_prefs,
                                    int32 view_id) {
   EnsureWebKitInitialized();
-
   // When bringing in render_view, also bring in webkit's glue and jsbindings.
-  base::WaitableEvent* waitable_event = new base::WaitableEvent(
-#if defined(OS_WIN)
-      modal_dialog_event.event);
-#else
-      true, false);
-#endif
-
-  // TODO(darin): once we have a RenderThread per RenderView, this will need to
-  // change to assert that we are not creating more than one view.
   RenderView::Create(
-      this, parent_hwnd, waitable_event, MSG_ROUTING_NONE, renderer_prefs,
+      this, parent_hwnd, MSG_ROUTING_NONE, renderer_prefs,
       webkit_prefs, new SharedRenderViewCounter(0), view_id);
 }
 
@@ -300,20 +376,33 @@ void RenderThread::OnGetRendererHistograms(int sequence_number) {
   SendHistograms(sequence_number);
 }
 
+#if defined(USE_TCMALLOC)
+void RenderThread::OnGetRendererTcmalloc() {
+  std::string result;
+  char buffer[1024 * 32];
+  int pid = base::GetCurrentProcId();
+  MallocExtension::instance()->GetStats(buffer, sizeof(buffer));
+  result.append(buffer);
+  Send(new ViewHostMsg_RendererTcmalloc(pid, result));
+}
+#endif
+
 void RenderThread::InformHostOfCacheStats() {
   EnsureWebKitInitialized();
   WebCache::UsageStats stats;
   WebCache::getUsageStats(&stats);
   Send(new ViewHostMsg_UpdatedCacheStats(stats));
+  cache_stats_task_pending_ = false;
 }
 
 void RenderThread::InformHostOfCacheStatsLater() {
   // Rate limit informing the host of our cache stats.
-  if (!cache_stats_factory_->empty())
+  if (cache_stats_task_pending_)
     return;
 
+  cache_stats_task_pending_ = true;
   MessageLoop::current()->PostDelayedTask(FROM_HERE,
-      cache_stats_factory_->NewRunnableMethod(
+      task_factory_->NewRunnableMethod(
           &RenderThread::InformHostOfCacheStats),
       kCacheStatsDelayMS);
 }
@@ -351,6 +440,8 @@ void RenderThread::EnsureWebKitInitialized() {
   webkit_client_.reset(new RendererWebKitClientImpl);
   WebKit::initialize(webkit_client_.get());
 
+  WebKit::enableV8SingleThreadMode();
+
   // chrome: pages should not be accessible by normal content, and should
   // also be unable to script anything but themselves (to help limit the damage
   // that a corrupt chrome: page could cause).
@@ -371,19 +462,29 @@ void RenderThread::EnsureWebKitInitialized() {
   WebKit::registerExtension(extensions_v8::LoadTimesExtension::Get());
   WebKit::registerExtension(extensions_v8::ExternalExtension::Get());
 
-  WebKit::registerExtension(ExtensionProcessBindings::Get(),
-      WebKit::WebString::fromUTF8(chrome::kExtensionScheme));
+  const WebKit::WebString kExtensionScheme =
+      WebKit::WebString::fromUTF8(chrome::kExtensionScheme);
+
+  WebKit::registerExtension(ExtensionProcessBindings::Get(), kExtensionScheme);
+
+  WebKit::registerExtension(BaseJsV8Extension::Get(),
+                            EXTENSION_GROUP_CONTENT_SCRIPTS);
+  WebKit::registerExtension(BaseJsV8Extension::Get(), kExtensionScheme);
+  WebKit::registerExtension(JsonSchemaJsV8Extension::Get(),
+                            EXTENSION_GROUP_CONTENT_SCRIPTS);
+  WebKit::registerExtension(JsonSchemaJsV8Extension::Get(), kExtensionScheme);
+  WebKit::registerExtension(EventBindings::Get(),
+                            EXTENSION_GROUP_CONTENT_SCRIPTS);
+  WebKit::registerExtension(EventBindings::Get(), kExtensionScheme);
+  WebKit::registerExtension(RendererExtensionBindings::Get(),
+                            EXTENSION_GROUP_CONTENT_SCRIPTS);
+  WebKit::registerExtension(RendererExtensionBindings::Get(), kExtensionScheme);
+  WebKit::registerExtension(ExtensionApiTestV8Extension::Get(),
+                            kExtensionScheme);
+  WebKit::registerExtension(ExtensionApiTestV8Extension::Get(),
+                            EXTENSION_GROUP_CONTENT_SCRIPTS);
 
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
-
-  // TODO(aa): Add a way to restrict extensions to the content script context
-  // only so that we don't have to gate these on --enable-extensions.
-  if (command_line.HasSwitch(switches::kEnableExtensions)) {
-    WebKit::registerExtension(BaseJsV8Extension::Get());
-    WebKit::registerExtension(JsonSchemaJsV8Extension::Get());
-    WebKit::registerExtension(EventBindings::Get());
-    WebKit::registerExtension(RendererExtensionBindings::Get());
-  }
 
   if (command_line.HasSwitch(switches::kEnableBenchmarking))
     WebKit::registerExtension(extensions_v8::BenchmarkingExtension::Get());
@@ -396,6 +497,38 @@ void RenderThread::EnsureWebKitInitialized() {
 
   if (RenderProcess::current()->initialized_media_library())
     WebKit::enableMediaPlayer();
+
+  if (command_line.HasSwitch(switches::kEnableWebSockets))
+    WebKit::enableWebSockets();
+}
+
+void RenderThread::IdleHandler() {
+  // It is possible that the timer was set while the widgets were idle,
+  // but that they are no longer idle.  If so, just return.
+  if (!widget_count_ || hidden_widget_count_ < widget_count_)
+    return;
+
+#if defined(OS_WIN)
+  MallocExtension::instance()->ReleaseFreeMemory();
+#endif
+
+  LOG(INFO) << "RenderThread calling v8 IdleNotification for " << this;
+  v8::V8::IdleNotification();
+
+  // Schedule next invocation.
+  // Dampen the delay using the algorithm:
+  //    delay = delay + 1 / (delay + 2)
+  // Using floor(delay) has a dampening effect such as:
+  //    1s, 1, 1, 2, 2, 2, 2, 3, 3, ...
+  // Note that idle_notification_delay_in_s_ would be reset to
+  // kInitialIdleHandlerDelayS in RenderThread::WidgetHidden.
+  idle_notification_delay_in_s_ +=
+      1.0 / (idle_notification_delay_in_s_ + 2.0);
+
+  // Schedule the next timer.
+  MessageLoop::current()->PostDelayedTask(FROM_HERE,
+      task_factory_->NewRunnableMethod(&RenderThread::IdleHandler),
+      static_cast<int64>(floor(idle_notification_delay_in_s_)) * 1000);
 }
 
 void RenderThread::OnExtensionMessageInvoke(const std::string& function_name,
@@ -403,12 +536,39 @@ void RenderThread::OnExtensionMessageInvoke(const std::string& function_name,
   RendererExtensionBindings::Invoke(function_name, args, NULL);
 }
 
-void RenderThread::OnPurgePluginListCache() {
+void RenderThread::OnPurgeMemory() {
+  EnsureWebKitInitialized();
+
+  // Clear the object cache (as much as possible; some live objects cannot be
+  // freed).
+  WebCache::clear();
+
+  // Clear the font/glyph cache.
+  WebFontCache::clear();
+
+  // Clear the Cross-Origin Preflight cache.
+  WebCrossOriginPreflightResultCache::clear();
+
+  // Repeatedly call the V8 idle notification until it returns true ("nothing
+  // more to free").  Note that it makes more sense to do this than to implement
+  // a new "delete everything" pass because object references make it difficult
+  // to free everything possible in just one pass.
+  while (!v8::V8::IdleNotification())
+    ;
+
+#if defined(OS_WIN)
+  // Tell tcmalloc to release any free pages it's still holding.
+  MallocExtension::instance()->ReleaseFreeMemory();
+#endif
+}
+
+void RenderThread::OnPurgePluginListCache(bool reload_pages) {
+  EnsureWebKitInitialized();
   // The call below will cause a GetPlugins call with refresh=true, but at this
   // point we already know that the browser has refreshed its list, so disable
   // refresh temporarily to prevent each renderer process causing the list to be
   // regenerated.
   plugin_refresh_allowed_ = false;
-  WebKit::resetPluginCache();
+  WebKit::resetPluginCache(reload_pages);
   plugin_refresh_allowed_ = true;
 }

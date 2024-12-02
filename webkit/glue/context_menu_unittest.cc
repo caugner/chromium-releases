@@ -10,13 +10,13 @@
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/message_loop.h"
-#include "webkit/glue/webframe.h"
+#include "webkit/api/public/WebView.h"
 #include "webkit/glue/webkit_glue.h"
-#include "webkit/glue/webview.h"
 #include "webkit/tools/test_shell/test_shell_test.h"
 
 using WebKit::WebInputEvent;
 using WebKit::WebMouseEvent;
+using WebKit::WebView;
 
 // Right clicking inside on an iframe should produce a context menu
 class ContextMenuCapturing : public TestShellTest {
@@ -36,13 +36,12 @@ class ContextMenuCapturing : public TestShellTest {
 
 TEST_F(ContextMenuCapturing, ContextMenuCapturing) {
   // Make sure we have no stored mouse event state
-  WebViewDelegate* raw_delegate = test_shell_->webView()->GetDelegate();
-  TestWebViewDelegate* test_delegate = static_cast<TestWebViewDelegate*>(raw_delegate);
+  TestWebViewDelegate* test_delegate = test_shell_->delegate();
   test_delegate->clear_captured_context_menu_events();
   EXPECT_EQ(0U, test_delegate->captured_context_menu_events().size());
 
-  std::wstring test_url = GetTestURL(iframes_data_dir_, "testiframe.html");
-  test_shell_->LoadURL(test_url.c_str());
+  GURL test_url = GetTestURL(iframes_data_dir_, "testiframe.html");
+  test_shell_->LoadURL(test_url);
   test_shell_->WaitTestFinished();
 
   // Create a right click in the center of the iframe. (I'm hoping this will

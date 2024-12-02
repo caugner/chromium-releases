@@ -9,10 +9,12 @@
 
 #include <algorithm>
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
-#include "base/gfx/native_widget_types.h"
+#include "app/gfx/native_widget_types.h"
+#include "app/os_exchange_data.h"
 #include "base/gfx/rect.h"
 #include "base/scoped_ptr.h"
 #include "views/accelerator.h"
@@ -20,17 +22,12 @@
 #include "views/background.h"
 #include "views/border.h"
 
-#if defined(OS_WIN)
-struct IDataObject;
-#endif  // defined(OS_WIN)
-
 namespace gfx {
 class Canvas;
 class Insets;
 class Path;
 }
 
-class OSExchangeData;
 class ViewAccessibilityWrapper;
 class ThemeProvider;
 
@@ -128,6 +125,9 @@ class View : public AcceleratorTarget {
 
   View();
   virtual ~View();
+
+  // Returns the amount of time between double clicks, in milliseconds.
+  static int GetDoubleClickTimeMS();
 
   // Sizing functions
 
@@ -428,6 +428,9 @@ class View : public AcceleratorTarget {
   virtual Widget* GetWidget() const;
 
   // Gets the Widget that most closely contains this View, if any.
+  // NOTE: almost all views displayed on screen have a Widget, but not
+  // necessarily a Window. This is due to widgets being able to create top
+  // level windows (as is done for popups, bubbles and menus).
   virtual Window* GetWindow() const;
 
   // Get the containing RootView
@@ -457,7 +460,9 @@ class View : public AcceleratorTarget {
   // A group id is used to tag views which are part of the same logical group.
   // Focus can be moved between views with the same group using the arrow keys.
   // Groups are currently used to implement radio button mutual exclusion.
+  // The group id is immutable once it's set.
   void SetGroup(int gid);
+  // Returns the group id of the view, or -1 if the id is not set yet.
   int GetGroup() const;
 
   // If this returns true, the views from the same group can each be focused
@@ -742,9 +747,12 @@ class View : public AcceleratorTarget {
   DragController* GetDragController();
 
   // During a drag and drop session when the mouse moves the view under the
-  // mouse is queried to see if it should be a target for the drag and drop
-  // session. A view indicates it is a valid target by returning true from
-  // CanDrop. If a view returns true from CanDrop,
+  // mouse is queried for the drop types it supports by way of the
+  // GetDropFormats methods. If the view returns true and the drag site can
+  // provide data in one of the formats, the view is asked if the drop data
+  // is required before any other drop events are sent. Once the
+  // data is available the view is asked if it supports the drop (by way of
+  // the CanDrop method). If a view returns true from CanDrop,
   // OnDragEntered is sent to the view when the mouse first enters the view,
   // as the mouse moves around within the view OnDragUpdated is invoked.
   // If the user releases the mouse over the view and OnDragUpdated returns a
@@ -755,6 +763,18 @@ class View : public AcceleratorTarget {
   // if it supports the drop (Drop). If the deepest view under
   // the mouse does not support the drop, the ancestors are walked until one
   // is found that supports the drop.
+
+  // Override and return the set of formats that can be dropped on this view.
+  // |formats| is a bitmask of the formats defined bye OSExchangeData::Format.
+  // The default implementation returns false, which means the view doesn't
+  // support dropping.
+  virtual bool GetDropFormats(
+      int* formats,
+      std::set<OSExchangeData::CustomFormat>* custom_formats);
+
+  // Override and return true if the data must be available before any drop
+  // methods should be invoked. The default is false.
+  virtual bool AreDropTypesRequired();
 
   // A view that supports drag and drop must override this and return true if
   // data contains a type that may be dropped on this view.
@@ -1085,7 +1105,7 @@ class View : public AcceleratorTarget {
 
   // Sets the parent View. This is called automatically by AddChild and is
   // thus private.
-  void SetParent(View *parent);
+  void SetParent(View* parent);
 
   // Call ViewHierarchyChanged for all child views on all parents
   void PropagateRemoveNotifications(View* parent);
@@ -1150,7 +1170,7 @@ class View : public AcceleratorTarget {
   gfx::Rect bounds_;
 
   // This view's parent
-  View *parent_;
+  View* parent_;
 
   // This view's children.
   typedef std::vector<View*> ViewList;

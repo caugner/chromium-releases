@@ -32,8 +32,8 @@
 
 // This file contains the definition for resource classes and the resource map.
 
-#ifndef O3D_COMMAND_BUFFER_SERVICE_CROSS_RESOURCE_H__
-#define O3D_COMMAND_BUFFER_SERVICE_CROSS_RESOURCE_H__
+#ifndef O3D_COMMAND_BUFFER_SERVICE_CROSS_RESOURCE_H_
+#define O3D_COMMAND_BUFFER_SERVICE_CROSS_RESOURCE_H_
 
 #include <vector>
 #include "base/scoped_ptr.h"
@@ -103,7 +103,7 @@ class VertexStruct: public Resource {
  public:
   // The representation of an input data stream.
   struct Element {
-    ResourceID vertex_buffer;
+    ResourceId vertex_buffer;
     unsigned int offset;
     unsigned int stride;
     vertex_struct::Type type;
@@ -159,10 +159,12 @@ class Texture: public Resource {
   Texture(texture::Type type,
           unsigned int levels,
           texture::Format format,
+          bool enable_render_surfaces,
           unsigned int flags)
       : type_(type),
         levels_(levels),
         format_(format),
+        render_surfaces_enabled_(enable_render_surfaces),
         flags_(flags) {}
   virtual ~Texture() {}
 
@@ -172,15 +174,35 @@ class Texture: public Resource {
   unsigned int flags() const { return flags_; }
   // Returns the texture format.
   texture::Format format() const { return format_; }
+  // Returns whether the texture supports render surfaces
+  bool render_surfaces_enabled() const { return render_surfaces_enabled_; }
   // Returns the number of mipmap levels in the texture.
   unsigned int levels() const { return levels_; }
  private:
   texture::Type type_;
   unsigned int levels_;
   texture::Format format_;
+  bool render_surfaces_enabled_;
   unsigned int flags_;
   DISALLOW_COPY_AND_ASSIGN(Texture);
 };
+
+// RenderSurface class, representing a render surface/target
+class RenderSurface: public Resource {
+ public:
+  RenderSurface() {}
+ private:
+  DISALLOW_COPY_AND_ASSIGN(RenderSurface);
+};
+
+// RenderSurface class, representing a render surface/target
+class RenderDepthStencilSurface: public Resource {
+ public:
+  RenderDepthStencilSurface() {}
+ private:
+  DISALLOW_COPY_AND_ASSIGN(RenderDepthStencilSurface);
+};
+
 
 // Texture class, representing a sampler resource.
 class Sampler: public Resource {
@@ -200,13 +222,13 @@ class ResourceMapBase {
   // Assigns a resource to a resource ID. Assigning a resource to an ID that
   // already has an existing resource will destroy that existing resource. The
   // map takes ownership of the resource.
-  void Assign(ResourceID id, Resource* resource);
+  void Assign(ResourceId id, Resource* resource);
   // Destroys a resource.
-  bool Destroy(ResourceID id);
+  bool Destroy(ResourceId id);
   // Destroy all resources.
   void DestroyAllResources();
   // Gets a resource by ID.
-  Resource *Get(ResourceID id) {
+  Resource *Get(ResourceId id) {
     return (id < resources_.size()) ? resources_[id] : NULL;
   }
  private:
@@ -224,11 +246,11 @@ template<class T> class ResourceMap {
   // Assigns a resource to a resource ID. Assigning a resource to an ID that
   // already has an existing resource will destroy that existing resource. The
   // map takes ownership of the resource.
-  void Assign(ResourceID id, T* resource) {
+  void Assign(ResourceId id, T* resource) {
     container_.Assign(id, resource);
   }
   // Destroys a resource.
-  bool Destroy(ResourceID id) {
+  bool Destroy(ResourceId id) {
     return container_.Destroy(id);
   }
   // Destroy all resources.
@@ -236,7 +258,7 @@ template<class T> class ResourceMap {
     return container_.DestroyAllResources();
   }
   // Gets a resource by ID.
-  T *Get(ResourceID id) {
+  T *Get(ResourceId id) {
     return down_cast<T*>(container_.Get(id));
   }
  private:
@@ -246,4 +268,4 @@ template<class T> class ResourceMap {
 }  // namespace command_buffer
 }  // namespace o3d
 
-#endif  // O3D_COMMAND_BUFFER_SERVICE_CROSS_RESOURCE_H__
+#endif  // O3D_COMMAND_BUFFER_SERVICE_CROSS_RESOURCE_H_

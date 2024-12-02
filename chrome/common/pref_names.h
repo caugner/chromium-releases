@@ -17,8 +17,6 @@ extern const wchar_t kHomePage[];
 extern const wchar_t kProfileName[];
 extern const wchar_t kProfileNickname[];
 extern const wchar_t kProfileID[];
-extern const wchar_t kRecentlyViewedModelBiasActiveTabHistory[];
-extern const wchar_t kRecentlyViewedModelSelectionMode[];
 extern const wchar_t kSessionExitedCleanly[];
 extern const wchar_t kRestoreOnStartup[];
 extern const wchar_t kURLsToRestoreOnStartup[];
@@ -49,7 +47,6 @@ extern const wchar_t kWebKitInspectorSettings[];
 extern const wchar_t kWebKitUsesUniversalDetector[];
 extern const wchar_t kWebKitTextAreasAreResizable[];
 extern const wchar_t kWebKitJavaEnabled[];
-extern const wchar_t kAlwaysCreateDestinationsTab[];
 extern const wchar_t kPasswordManagerEnabled[];
 extern const wchar_t kFormAutofillEnabled[];
 extern const wchar_t kSafeBrowsingEnabled[];
@@ -65,6 +62,19 @@ extern const wchar_t kAlternateErrorPagesEnabled[];
 extern const wchar_t kDnsPrefetchingEnabled[];
 extern const wchar_t kDnsStartupPrefetchList[];
 extern const wchar_t kDnsHostReferralList[];
+#if defined(OS_LINUX)
+extern const wchar_t kCertRevocationCheckingEnabled[];
+extern const wchar_t kSSL2Enabled[];
+extern const wchar_t kSSL3Enabled[];
+extern const wchar_t kTLS1Enabled[];
+#endif
+#if defined(OS_CHROMEOS)
+extern const wchar_t kTimeZone[];
+extern const wchar_t kTapToClickEnabled[];
+extern const wchar_t kVertEdgeScrollEnabled[];
+extern const wchar_t kTouchpadSpeedFactor[];
+extern const wchar_t kTouchpadSensitivity[];
+#endif
 extern const wchar_t kIpcDisabledMessages[];
 extern const wchar_t kShowHomeButton[];
 extern const wchar_t kShowPageOptionsButtons[];
@@ -101,14 +111,14 @@ extern const wchar_t kCurrentThemeTints[];
 extern const wchar_t kCurrentThemeDisplayProperties[];
 extern const wchar_t kCheckDefaultBrowser[];
 extern const wchar_t kUseCustomChromeFrame[];
+extern const wchar_t kShowOmniboxSearchHint[];
 extern const wchar_t kNTPThemePromoRemaining[];
+extern const wchar_t kDesktopNotificationAllowedOrigins[];
+extern const wchar_t kDesktopNotificationDeniedOrigins[];
 
 // Local state
-extern const wchar_t kAvailableProfiles[];
-
 extern const wchar_t kMetricsClientID[];
 extern const wchar_t kMetricsSessionID[];
-extern const wchar_t kMetricsIsRecording[];
 extern const wchar_t kMetricsClientIDTimestamp[];
 extern const wchar_t kMetricsReportingEnabled[];
 extern const wchar_t kMetricsInitialLogs[];
@@ -155,6 +165,7 @@ extern const wchar_t kUninstallLastObservedRunTimeSec[];
 extern const wchar_t kBrowserWindowPlacement[];
 extern const wchar_t kTaskManagerWindowPlacement[];
 extern const wchar_t kPageInfoWindowPlacement[];
+extern const wchar_t kKeywordEditorWindowPlacement[];
 extern const wchar_t kMemoryCacheSize[];
 
 extern const wchar_t kDownloadDefaultDirectory[];
@@ -194,8 +205,14 @@ extern const wchar_t kNumFoldersInOtherBookmarkFolder[];
 
 extern const wchar_t kNumKeywords[];
 
-extern const wchar_t kEnableExtensions[];
+extern const wchar_t kDisableExtensions[];
 extern const wchar_t kEnableUserScripts[];
+extern const wchar_t kShowExtensionShelf[];
+
+extern const wchar_t kLastExtensionsUpdateCheck[];
+extern const wchar_t kNextExtensionsUpdateCheck[];
+
+extern const wchar_t kExtensionBlacklistUpdateVersion[];
 
 extern const wchar_t kNTPMostVisitedURLsBlacklist[];
 extern const wchar_t kNTPMostVisitedPinnedURLs[];
@@ -206,6 +223,9 @@ extern const wchar_t kNTPShownSections[];
 
 extern const wchar_t kDevToolsOpenDocked[];
 extern const wchar_t kDevToolsSplitLocation[];
+
+extern const wchar_t kSyncLastSyncedTime[];
+extern const wchar_t kSyncHasSetupCompleted[];
 }
 
 #endif  // CHROME_COMMON_PREF_NAMES_H_

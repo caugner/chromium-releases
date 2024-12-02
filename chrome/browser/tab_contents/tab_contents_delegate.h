@@ -5,14 +5,14 @@
 #ifndef CHROME_BROWSER_TAB_CONTENTS_TAB_CONTENTS_DELEGATE_H_
 #define CHROME_BROWSER_TAB_CONTENTS_TAB_CONTENTS_DELEGATE_H_
 
-#include "base/basictypes.h"
-#include "base/gfx/native_widget_types.h"
-#include "base/gfx/rect.h"
+#include <string>
 
+#include "app/gfx/native_widget_types.h"
+#include "base/basictypes.h"
+#include "base/gfx/rect.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
 #include "chrome/common/native_web_keyboard_event.h"
 #include "chrome/common/page_transition_types.h"
-#include "chrome/common/renderer_preferences.h"
 #include "webkit/glue/context_menu.h"
 #include "webkit/glue/window_open_disposition.h"
 
@@ -199,9 +199,6 @@ class TabContentsDelegate {
     return false;
   }
 
-  // Returns the renderer's current preferences settings.
-  RendererPreferences GetRendererPrefs() const { return renderer_preferences_; }
-
   // Shows a confirmation UI that the specified |template_url| is to be added as
   // a search engine.
   virtual void ConfirmAddSearchProvider(const TemplateURL* template_url,
@@ -218,6 +215,12 @@ class TabContentsDelegate {
                             bool show_history) {
   }
 
+  // Returns whether the event is a reserved keyboard shortcut that should not
+  // be sent to the renderer.
+  virtual bool IsReservedAccelerator(const NativeWebKeyboardEvent& event) {
+    return false;
+  }
+
   // Allows delegates to handle unhandled keyboard messages coming back from
   // the renderer.
   // Returns true if the keyboard message was handled.
@@ -225,10 +228,17 @@ class TabContentsDelegate {
     return false;
   }
 
+  // Shows the repost form confirmation dialog box.
+  virtual void ShowRepostFormWarningDialog(TabContents* tab_contents) {}
+
+  // Allows delegate to override navigation to the history entries.
+  // Returns true to allow TabContents to continue with the default processing.
+  virtual bool OnGoToEntryOffset(int offset) {
+    return true;
+  }
+
  protected:
   ~TabContentsDelegate() {}
-  RendererPreferences renderer_preferences_;
-
 };
 
 #endif  // CHROME_BROWSER_TAB_CONTENTS_TAB_CONTENTS_DELEGATE_H_

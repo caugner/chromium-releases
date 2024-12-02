@@ -32,7 +32,6 @@
 
 // This file contains the definition of the Transform class.
 
-#include "core/cross/precompile.h"
 #include "core/cross/transform.h"
 #include "core/cross/renderer.h"
 #include "core/cross/error.h"
@@ -320,7 +319,7 @@ ShapeArray Transform::GetShapes() const {
 
 void Transform::SetShapes(const ShapeArray& shapes) {
   shape_array_.resize(shapes.size());
-  for (int i = 0; i != shapes.size(); ++i) {
+  for (unsigned int i = 0; i != shapes.size(); ++i) {
     shape_array_[i] = Shape::Ref(shapes[i]);
   }
 }

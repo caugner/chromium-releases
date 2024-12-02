@@ -20,8 +20,9 @@
 #include "base/values.h"
 #include "chrome/browser/metrics/metrics_log.h"
 #include "chrome/browser/net/url_fetcher.h"
+#include "chrome/common/child_process_info.h"
 #include "chrome/common/notification_registrar.h"
-#include "webkit/glue/webplugin.h"
+#include "webkit/glue/webplugininfo.h"
 #include "testing/gtest/include/gtest/gtest_prod.h"
 
 class BookmarkModel;
@@ -37,7 +38,19 @@ class TemplateURLModel;
 // reported to the UMA server on next launch.
 struct ChildProcessStats {
  public:
-  ChildProcessStats() : process_launches(0), process_crashes(0), instances(0) {}
+  ChildProcessStats(ChildProcessInfo::ProcessType type)
+      : process_launches(0),
+        process_crashes(0),
+        instances(0),
+        process_type(type) {}
+
+  // This constructor is only used by the map to return some default value for
+  // an index for which no value has been assigned.
+  ChildProcessStats()
+      : process_launches(0),
+      process_crashes(0),
+      instances(0),
+      process_type(ChildProcessInfo::UNKNOWN_PROCESS) {}
 
   // The number of times that the given child process has been launched
   int process_launches;
@@ -49,6 +62,8 @@ struct ChildProcessStats {
   // An instance is a DOM object rendered by this child process during a page
   // load.
   int instances;
+
+  ChildProcessInfo::ProcessType process_type;
 };
 
 class MetricsService : public NotificationObserver,
@@ -99,7 +114,7 @@ class MetricsService : public NotificationObserver,
   void RecordBreakpadHasDebugger(bool has_debugger);
 
   // Callback to let us knew that the plugin list is warmed up.
-  void OnGetPluginListTaskComplete();
+  void OnGetPluginListTaskComplete(const std::vector<WebPluginInfo>& plugins);
 
   // Save any unsent logs into a persistent store in a pref.  We always do this
   // at shutdown, but we can do it as we reduce the list as well.
@@ -320,14 +335,14 @@ class MetricsService : public NotificationObserver,
   // creation time.
   void LogRendererInSandbox(bool on_sandbox_desktop);
 
-  // Set the value in preferences for for the number of bookmarks and folders
+  // Set the value in preferences for the number of bookmarks and folders
   // in node. The pref key for the number of bookmarks in num_bookmarks_key and
   // the pref key for number of folders in num_folders_key.
   void LogBookmarks(const BookmarkNode* node,
                     const wchar_t* num_bookmarks_key,
                     const wchar_t* num_folders_key);
 
-  // Sets preferences for the for the number of bookmarks in model.
+  // Sets preferences for the number of bookmarks in model.
   void LogBookmarks(BookmarkModel* model);
 
   // Records a child process related notification.  These are recorded to an
@@ -401,6 +416,9 @@ class MetricsService : public NotificationObserver,
   // The progession of states made by the browser are recorded in the following
   // state.
   State state_;
+
+  // The list of plugins which was retrieved on the file thread.
+  std::vector<WebPluginInfo> plugins_;
 
   // A log that we are currently transmiting, or about to try to transmit.
   MetricsLog* pending_log_;

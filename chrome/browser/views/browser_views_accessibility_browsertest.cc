@@ -35,6 +35,22 @@ class BrowserViewsAccessibilityTest : public InProcessBrowserTest {
     ::CoUninitialize();
   }
 
+  // Retrieves and initializes an instance of LocationBarView.
+  LocationBarView* GetLocationBarView() {
+    BrowserWindow* browser_window = browser()->window();
+
+    if (!browser_window)
+      return NULL;
+
+    BrowserWindowTesting* browser_window_testing =
+        browser_window->GetBrowserWindowTesting();
+
+    if (!browser_window_testing)
+      return NULL;
+
+    return browser_window_testing->GetLocationBarView();
+  }
+
   // Retrieves and initializes an instance of ToolbarView.
   ToolbarView* GetToolbarView() {
     BrowserWindow* browser_window = browser()->window();
@@ -173,6 +189,16 @@ IN_PROC_BROWSER_TEST_F(BrowserViewsAccessibilityTest, TestStarButtonAccObj) {
       l10n_util::GetString(IDS_ACCNAME_STAR), ROLE_SYSTEM_PUSHBUTTON);
 }
 
+// Retrieve accessibility object for location bar view and verify accessibility
+// info.
+IN_PROC_BROWSER_TEST_F(BrowserViewsAccessibilityTest,
+                       TestLocationBarViewAccObj) {
+  // Verify location bar MSAA name and role.
+  TestViewAccessibilityObject(GetLocationBarView(),
+                              l10n_util::GetString(IDS_ACCNAME_LOCATION),
+                              ROLE_SYSTEM_GROUPING);
+}
+
 // Retrieve accessibility object for Go button and verify accessibility info.
 IN_PROC_BROWSER_TEST_F(BrowserViewsAccessibilityTest, TestGoButtonAccObj) {
   // Verify Go button MSAA name and role.
@@ -187,7 +213,7 @@ IN_PROC_BROWSER_TEST_F(BrowserViewsAccessibilityTest, TestPageMenuAccObj) {
   // Verify Page menu button MSAA name and role.
   TestViewAccessibilityObject(GetToolbarView()->GetViewByID(VIEW_ID_PAGE_MENU),
                               l10n_util::GetString(IDS_ACCNAME_PAGE),
-                              ROLE_SYSTEM_BUTTONDROPDOWN);
+                              ROLE_SYSTEM_BUTTONMENU);
 }
 
 // Retrieve accessibility object for App menu button and verify accessibility
@@ -196,7 +222,7 @@ IN_PROC_BROWSER_TEST_F(BrowserViewsAccessibilityTest, TestAppMenuAccObj) {
   // Verify App menu button MSAA name and role.
   TestViewAccessibilityObject(GetToolbarView()->GetViewByID(VIEW_ID_APP_MENU),
                               l10n_util::GetString(IDS_ACCNAME_APP),
-                              ROLE_SYSTEM_BUTTONDROPDOWN);
+                              ROLE_SYSTEM_BUTTONMENU);
 }
 
 }  // Namespace.

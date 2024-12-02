@@ -6,6 +6,7 @@
 
 #include "net/base/escape.h"
 
+#include "base/i18n/icu_string_conversions.h"
 #include "base/logging.h"
 #include "base/string_util.h"
 
@@ -186,6 +187,16 @@ std::string EscapePath(const std::string& path) {
   return Escape(path, kPathCharmap, false);
 }
 
+// non-printable, non-7bit, and (including space) ?>=<;+'&%$#"![\]^`{|}
+static const Charmap kUrlEscape(
+  0xffffffffL, 0xf80008fdL, 0x78000001L, 0xb8000001L,
+  0xffffffffL, 0xffffffffL, 0xffffffffL, 0xffffffffL
+);
+
+std::string EscapeUrlEncodedData(const std::string& path) {
+  return Escape(path, kUrlEscape, true);
+}
+
 // non-7bit
 static const Charmap kNonASCIICharmap(
   0x00000000L, 0x00000000L, 0x00000000L, 0x00000000L,
@@ -210,8 +221,8 @@ bool EscapeQueryParamValue(const std::wstring& text, const char* codepage,
   // TODO(brettw) bug 1201094: this function should be removed, this "SKIP"
   // behavior is wrong when the character can't be encoded properly.
   std::string encoded;
-  if (!WideToCodepage(text, codepage,
-                      OnStringUtilConversionError::SKIP, &encoded))
+  if (!base::WideToCodepage(text, codepage,
+                            base::OnStringConversionError::SKIP, &encoded))
     return false;
 
   // It's safe to use UTF8ToWide here because Escape should only return
@@ -224,8 +235,8 @@ std::wstring UnescapeAndDecodeURLComponent(const std::string& text,
                                            const char* codepage,
                                            UnescapeRule::Type rules) {
   std::wstring result;
-  if (CodepageToWide(UnescapeURLImpl(text, rules), codepage,
-                     OnStringUtilConversionError::FAIL, &result))
+  if (base::CodepageToWide(UnescapeURLImpl(text, rules), codepage,
+                           base::OnStringConversionError::FAIL, &result))
     return result;          // Character set looks like it's valid.
   return UTF8ToWide(text);  // Return the escaped version when it's not.
 }

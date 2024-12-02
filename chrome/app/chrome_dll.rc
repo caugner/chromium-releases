@@ -34,10 +34,13 @@ IDR_MAINFRAME ACCELERATORS
 BEGIN
     VK_LEFT,        IDC_BACK,                   VIRTKEY, ALT
     VK_BACK,        IDC_BACK,                   VIRTKEY
+    "D",            IDC_BOOKMARK_PAGE,          VIRTKEY, CONTROL
+    "D",            IDC_BOOKMARK_ALL_TABS,      VIRTKEY, CONTROL, SHIFT
     VK_DELETE,      IDC_CLEAR_BROWSING_DATA,    VIRTKEY, CONTROL, SHIFT
     VK_F4,          IDC_CLOSE_TAB,              VIRTKEY, CONTROL
     "W",            IDC_CLOSE_TAB,              VIRTKEY, CONTROL
     "W",            IDC_CLOSE_POPUPS,           VIRTKEY, SHIFT, ALT
+    "W",            IDC_CLOSE_WINDOW,           VIRTKEY, CONTROL, SHIFT
     "F",            IDC_FIND,                   VIRTKEY, CONTROL
     "G",            IDC_FIND_NEXT,              VIRTKEY, CONTROL
     VK_F3,          IDC_FIND_NEXT,              VIRTKEY
@@ -53,7 +56,7 @@ BEGIN
     VK_BACK,        IDC_FORWARD,                VIRTKEY, SHIFT
     VK_F11,         IDC_FULLSCREEN,             VIRTKEY
     VK_F1,          IDC_HELP_PAGE,              VIRTKEY
-    "J",            IDC_JS_CONSOLE,             VIRTKEY, CONTROL, SHIFT
+    "J",            IDC_DEV_TOOLS,              VIRTKEY, CONTROL, SHIFT
     "N",            IDC_NEW_INCOGNITO_WINDOW,   VIRTKEY, CONTROL, SHIFT
     "T",            IDC_NEW_TAB,                VIRTKEY, CONTROL
     "N",            IDC_NEW_WINDOW,             VIRTKEY, CONTROL
@@ -116,9 +119,11 @@ BEGIN
     VK_NUMPAD8,     IDC_SELECT_TAB_7,           VIRTKEY, CONTROL
     "B",            IDC_SHOW_BOOKMARK_BAR,      VIRTKEY, CONTROL
     "B",            IDC_SHOW_BOOKMARK_MANAGER,  VIRTKEY, CONTROL, SHIFT
+    "B",            IDC_SHOW_EXTENSION_SHELF,   VIRTKEY, CONTROL, ALT
     "J",            IDC_SHOW_DOWNLOADS,         VIRTKEY, CONTROL
     "H",            IDC_SHOW_HISTORY,           VIRTKEY, CONTROL
-    "D",            IDC_STAR,                   VIRTKEY, CONTROL
+    "F",            IDC_SHOW_APP_MENU,          VIRTKEY, ALT
+    "E",            IDC_SHOW_PAGE_MENU,         VIRTKEY, ALT
     VK_ESCAPE,      IDC_STOP,                   VIRTKEY
     VK_ESCAPE,      IDC_TASK_MANAGER,           VIRTKEY, SHIFT
     "U",            IDC_VIEW_SOURCE,            VIRTKEY, CONTROL

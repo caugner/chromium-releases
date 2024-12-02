@@ -14,7 +14,7 @@
 
 #include "base/at_exit.h"
 #include "base/command_line.h"
-#include "base/icu_util.h"
+#include "base/i18n/icu_util.h"
 #if defined(OS_MACOSX)
 #include "base/mac_util.h"
 #include "base/path_service.h"
@@ -26,6 +26,7 @@
 #include "webkit/tools/test_shell/simple_resource_loader_bridge.h"
 #include "webkit/tools/test_shell/test_shell.h"
 #include "webkit/tools/test_shell/test_shell_platform_delegate.h"
+#include "webkit/tools/test_shell/test_shell_switches.h"
 #include "webkit/tools/test_shell/test_shell_test.h"
 #include "webkit/tools/test_shell/test_shell_webkit_init.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -57,6 +58,13 @@ int main(int argc, char* argv[]) {
   CommandLine::Init(argc, argv);
   const CommandLine& parsed_command_line = *CommandLine::ForCurrentProcess();
   TestShellPlatformDelegate platform(parsed_command_line);
+
+  // Allow tests to analyze GC information from V8 log, and expose GC
+  // triggering function.
+  std::wstring js_flags =
+      parsed_command_line.GetSwitchValue(test_shell::kJavaScriptFlags);
+  js_flags += L" --logfile=* --log_gc --expose_gc";
+  webkit_glue::SetJavaScriptFlags(js_flags);
 
   // Suppress error dialogs and do not show GP fault error box on Windows.
   TestShell::InitLogging(true, false, false);
@@ -91,7 +99,7 @@ int main(int argc, char* argv[]) {
   TestShell::ShutdownTestShell();
   TestShell::CleanupLogging();
 
-  CommandLine::Terminate();
+  CommandLine::Reset();
 
   return result;
 }

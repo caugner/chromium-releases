@@ -38,7 +38,7 @@
 namespace o3d {
 namespace command_buffer {
 
-using command_buffer::ResourceID;
+using command_buffer::ResourceId;
 
 class IdAllocatorTest : public testing::Test {
  protected:
@@ -58,12 +58,12 @@ TEST_F(IdAllocatorTest, TestBasic) {
   EXPECT_FALSE(allocator->InUse(0));
 
   // Allocate an ID, check that it's in use.
-  ResourceID id1 = allocator->AllocateID();
+  ResourceId id1 = allocator->AllocateID();
   EXPECT_TRUE(allocator->InUse(id1));
 
   // Allocate another ID, check that it's in use, and different from the first
   // one.
-  ResourceID id2 = allocator->AllocateID();
+  ResourceId id2 = allocator->AllocateID();
   EXPECT_TRUE(allocator->InUse(id2));
   EXPECT_NE(id1, id2);
 
@@ -82,9 +82,9 @@ TEST_F(IdAllocatorTest, TestAdvanced) {
   IdAllocator *allocator = id_allocator();
 
   // Allocate a significant number of resources.
-  const int kNumResources = 100;
-  ResourceID ids[kNumResources];
-  for (int i = 0; i < kNumResources; ++i) {
+  const unsigned int kNumResources = 100;
+  ResourceId ids[kNumResources];
+  for (unsigned int i = 0; i < kNumResources; ++i) {
     ids[i] = allocator->AllocateID();
     EXPECT_TRUE(allocator->InUse(ids[i]));
   }
@@ -92,20 +92,20 @@ TEST_F(IdAllocatorTest, TestAdvanced) {
   // Check that the allocation is conservative with resource IDs, that is that
   // the resource IDs don't go over kNumResources - so that the service doesn't
   // have to allocate too many internal structures when the resources are used.
-  for (int i = 0; i < kNumResources; ++i) {
+  for (unsigned int i = 0; i < kNumResources; ++i) {
     EXPECT_GT(kNumResources, ids[i]);
   }
 
   // Check that the next resources are still free.
-  for (int i = 0; i < kNumResources; ++i) {
+  for (unsigned int i = 0; i < kNumResources; ++i) {
     EXPECT_FALSE(allocator->InUse(kNumResources + i));
   }
 
   // Check that a new allocation re-uses the resource we just freed.
-  ResourceID id1 = ids[kNumResources / 2];
+  ResourceId id1 = ids[kNumResources / 2];
   allocator->FreeID(id1);
   EXPECT_FALSE(allocator->InUse(id1));
-  ResourceID id2 = allocator->AllocateID();
+  ResourceId id2 = allocator->AllocateID();
   EXPECT_TRUE(allocator->InUse(id2));
   EXPECT_EQ(id1, id2);
 }

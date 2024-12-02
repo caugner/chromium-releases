@@ -15,13 +15,11 @@
 #include "chrome/browser/renderer_host/render_widget_host_view.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/render_messages.h"
-#include "views/view.h"
 #include "webkit/glue/webcursor.h"
 
-#if defined(OS_WIN)
-#include "base/gfx/gdi_util.h"
-#include "chrome/app/chrome_dll_resource.h"
-#endif  // defined(OS_WIN)
+#if defined(TOOLKIT_VIEWS)
+#include "views/view.h"
+#endif
 
 #if defined (OS_MACOSX)
 #include "webkit/api/public/WebScreenInfo.h"
@@ -129,6 +127,7 @@ void RenderWidgetHost::OnMessageReceived(const IPC::Message &msg) {
     IPC_MESSAGE_HANDLER(ViewHostMsg_HandleInputEvent_ACK, OnMsgInputEventAck)
     IPC_MESSAGE_HANDLER(ViewHostMsg_Focus, OnMsgFocus)
     IPC_MESSAGE_HANDLER(ViewHostMsg_Blur, OnMsgBlur)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_FocusedNodeChanged, OnMsgFocusedNodeChanged)
     IPC_MESSAGE_HANDLER(ViewHostMsg_SetCursor, OnMsgSetCursor)
     IPC_MESSAGE_HANDLER(ViewHostMsg_ImeUpdateStatus, OnMsgImeUpdateStatus)
 #if defined(OS_LINUX)
@@ -221,6 +220,9 @@ void RenderWidgetHost::WasResized() {
   if (new_size == current_size_)
     return;
 
+  if (in_flight_size_ != gfx::Size() && new_size == in_flight_size_)
+    return;
+
   // We don't expect to receive an ACK when the requested size is empty.
   if (!new_size.IsEmpty())
     resize_ack_pending_ = true;
@@ -228,6 +230,8 @@ void RenderWidgetHost::WasResized() {
   if (!Send(new ViewMsg_Resize(routing_id_, new_size,
                                GetRootWindowResizerRect())))
     resize_ack_pending_ = false;
+  else
+    in_flight_size_ = new_size;
 }
 
 void RenderWidgetHost::GotFocus() {
@@ -345,6 +349,9 @@ void RenderWidgetHost::SystemThemeChanged() {
 }
 
 void RenderWidgetHost::ForwardMouseEvent(const WebMouseEvent& mouse_event) {
+  if (process_->ignore_input_events())
+    return;
+
   // Avoid spamming the renderer with mouse move events.  It is important
   // to note that WM_MOUSEMOVE events are anyways synthetic, but since our
   // thread is able to rapidly consume WM_MOUSEMOVE events, we may get way
@@ -364,11 +371,17 @@ void RenderWidgetHost::ForwardMouseEvent(const WebMouseEvent& mouse_event) {
 
 void RenderWidgetHost::ForwardWheelEvent(
     const WebMouseWheelEvent& wheel_event) {
+  if (process_->ignore_input_events())
+    return;
+
   ForwardInputEvent(wheel_event, sizeof(WebMouseWheelEvent));
 }
 
 void RenderWidgetHost::ForwardKeyboardEvent(
     const NativeWebKeyboardEvent& key_event) {
+  if (process_->ignore_input_events())
+    return;
+
   if (key_event.type == WebKeyboardEvent::Char &&
       (key_event.windowsKeyCode == base::VKEY_RETURN ||
        key_event.windowsKeyCode == base::VKEY_SPACE)) {
@@ -381,6 +394,13 @@ void RenderWidgetHost::ForwardKeyboardEvent(
     // Don't add this key to the queue if we have no way to send the message...
     if (!process_->HasConnection())
       return;
+
+    // Tab switching/closing accelerators aren't sent to the renderer to avoid a
+    // hung/malicious renderer from interfering.
+    if (!ShouldSendToRenderer(key_event)) {
+      UnhandledKeyboardEvent(key_event);
+      return;
+    }
 
     // Put all WebKeyboardEvent objects in a queue since we can't trust the
     // renderer and we need to give something to the UnhandledInputEvent
@@ -397,6 +417,8 @@ void RenderWidgetHost::ForwardInputEvent(const WebInputEvent& input_event,
                                          int event_size) {
   if (!process_->HasConnection())
     return;
+
+  DCHECK(!process_->ignore_input_events());
 
   IPC::Message* message = new ViewMsg_HandleInputEvent(routing_id_);
   message->WriteData(
@@ -415,6 +437,12 @@ void RenderWidgetHost::ForwardEditCommand(const std::string& name,
   // We don't need an implementation of this function here since the
   // only place we use this is for the case of dropdown menus and other
   // edge cases for which edit commands don't make sense.
+}
+
+void RenderWidgetHost::ForwardEditCommandsForNextKeyEvent(
+    const EditCommands& edit_commands) {
+  // We don't need an implementation of this function here since this message is
+  // only handled by RenderView.
 }
 
 void RenderWidgetHost::RendererExited() {
@@ -486,6 +514,10 @@ void RenderWidgetHost::ImeCancelComposition() {
 
 gfx::Rect RenderWidgetHost::GetRootWindowResizerRect() const {
   return gfx::Rect();
+}
+
+void RenderWidgetHost::SetActive(bool active) {
+  Send(new ViewMsg_SetActive(routing_id(), active));
 }
 
 void RenderWidgetHost::Destroy() {
@@ -570,6 +602,7 @@ void RenderWidgetHost::OnMsgPaintRect(
   if (is_resize_ack) {
     DCHECK(resize_ack_pending_);
     resize_ack_pending_ = false;
+    in_flight_size_.SetSize(0, 0);
   }
 
   bool is_repaint_ack =
@@ -606,7 +639,7 @@ void RenderWidgetHost::OnMsgPaintRect(
 
   // We don't need to update the view if the view is hidden. We must do this
   // early return after the ACK is sent, however, or the renderer will not send
-  // is more data.
+  // us more data.
   if (is_hidden_)
     return;
 
@@ -723,7 +756,7 @@ void RenderWidgetHost::OnMsgInputEventAck(const IPC::Message& message) {
       if (!message.ReadBool(&iter, &processed))
         process()->ReceivedBadMessage(message.type());
 
-      KeyQueue::value_type front_item = key_queue_.front();
+      NativeWebKeyboardEvent front_item = key_queue_.front();
       key_queue_.pop();
 
       if (!processed) {
@@ -748,6 +781,9 @@ void RenderWidgetHost::OnMsgBlur() {
   }
 }
 
+void RenderWidgetHost::OnMsgFocusedNodeChanged() {
+}
+
 void RenderWidgetHost::OnMsgSetCursor(const WebCursor& cursor) {
   if (!view_) {
     return;
@@ -764,15 +800,12 @@ void RenderWidgetHost::OnMsgImeUpdateStatus(int control,
 
 #if defined(OS_LINUX)
 
-void RenderWidgetHost::OnMsgCreatePluginContainer(
-    base::ProcessId pid,
-    gfx::PluginWindowHandle* container) {
-  *container = view_->CreatePluginContainer(pid);
+void RenderWidgetHost::OnMsgCreatePluginContainer(gfx::PluginWindowHandle id) {
+  view_->CreatePluginContainer(id);
 }
 
-void RenderWidgetHost::OnMsgDestroyPluginContainer(
-    gfx::PluginWindowHandle container) {
-  view_->DestroyPluginContainer(container);
+void RenderWidgetHost::OnMsgDestroyPluginContainer(gfx::PluginWindowHandle id) {
+  view_->DestroyPluginContainer(id);
 }
 
 #elif defined(OS_MACOSX)
@@ -823,12 +856,10 @@ void RenderWidgetHost::PaintBackingStoreRect(TransportDIB* bitmap,
   }
 
   bool needs_full_paint = false;
-  BackingStore* backing_store =
-      BackingStoreManager::PrepareBackingStore(this, view_size,
-                                               process_->process().handle(),
-                                               bitmap, bitmap_rect,
-                                               &needs_full_paint);
-  DCHECK(backing_store != NULL);
+  BackingStoreManager::PrepareBackingStore(this, view_size,
+                                           process_->process().handle(),
+                                           bitmap, bitmap_rect,
+                                           &needs_full_paint);
   if (needs_full_paint) {
     repaint_start_time_ = TimeTicks::Now();
     repaint_ack_pending_ = true;
@@ -857,4 +888,16 @@ void RenderWidgetHost::ScrollBackingStoreRect(TransportDIB* bitmap,
     return;
   backing_store->ScrollRect(process_->process().handle(), bitmap, bitmap_rect,
                             dx, dy, clip_rect, view_size);
+}
+
+void RenderWidgetHost::ToggleSpellPanel(bool is_currently_visible) {
+  Send(new ViewMsg_ToggleSpellPanel(routing_id(), is_currently_visible));
+}
+
+void RenderWidgetHost::Replace(const string16& word) {
+  Send(new ViewMsg_Replace(routing_id_, word));
+}
+
+void RenderWidgetHost::AdvanceToNextMisspelling() {
+  Send(new ViewMsg_AdvanceToNextMisspelling(routing_id_));
 }

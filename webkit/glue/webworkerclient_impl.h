@@ -14,7 +14,6 @@
 #include <wtf/RefPtr.h>
 
 namespace WebCore {
-class MessagePortChannel;
 class ScriptExecutionContext;
 }
 namespace WebKit {
@@ -30,6 +29,10 @@ class WebWorkerClientImpl : public WebCore::WorkerContextProxy,
  public:
   WebWorkerClientImpl(WebCore::Worker* worker);
 
+  // WebCore::WorkerContextProxy Factory.
+  static WebCore::WorkerContextProxy* createWorkerContextProxy(
+      WebCore::Worker* worker);
+
   void set_webworker(WebKit::WebWorker* webworker);
 
   // WebCore::WorkerContextProxy methods:
@@ -41,14 +44,16 @@ class WebWorkerClientImpl : public WebCore::WorkerContextProxy,
                                   const WebCore::String& source_code);
   virtual void terminateWorkerContext();
   virtual void postMessageToWorkerContext(
-      const WebCore::String& message,
-      WTF::PassOwnPtr<WebCore::MessagePortChannel> channel);
+      WTF::PassRefPtr<WebCore::SerializedScriptValue> message,
+      WTF::PassOwnPtr<WebCore::MessagePortChannelArray> channels);
   virtual bool hasPendingActivity() const;
   virtual void workerObjectDestroyed();
 
   // WebWorkerClient methods:
   // These are called on the main WebKit thread.
-  virtual void postMessageToWorkerObject(const WebKit::WebString& message);
+  virtual void postMessageToWorkerObject(
+      const WebKit::WebString& message,
+      const WebKit::WebMessagePortChannelArray& channels);
   virtual void postExceptionToWorkerObject(
       const WebKit::WebString& error_message,
       int line_number,
@@ -65,6 +70,11 @@ class WebWorkerClientImpl : public WebCore::WorkerContextProxy,
   virtual void reportPendingActivity(bool has_pending_activity);
   virtual void workerContextDestroyed();
   virtual WebKit::WebWorker* createWorker(WebKit::WebWorkerClient* client) {
+    return NULL;
+  }
+  virtual WebKit::WebNotificationPresenter* notificationPresenter() {
+    // TODO(johnnyg): Notifications not yet supported in workers.
+    // Coming soon.
     return NULL;
   }
 
@@ -87,7 +97,7 @@ class WebWorkerClientImpl : public WebCore::WorkerContextProxy,
       WebCore::ScriptExecutionContext* context,
       WebWorkerClientImpl* this_ptr,
       const WebCore::String& message,
-      WTF::PassOwnPtr<WebCore::MessagePortChannel> channel);
+      WTF::PassOwnPtr<WebCore::MessagePortChannelArray> channels);
   static void WorkerObjectDestroyedTask(
       WebCore::ScriptExecutionContext* context,
       WebWorkerClientImpl* this_ptr);
@@ -99,7 +109,7 @@ class WebWorkerClientImpl : public WebCore::WorkerContextProxy,
       WebCore::ScriptExecutionContext* context,
       WebWorkerClientImpl* this_ptr,
       const WebCore::String& message,
-      WTF::PassOwnPtr<WebCore::MessagePortChannel> channel);
+      WTF::PassOwnPtr<WebCore::MessagePortChannelArray> channels);
   static void PostExceptionToWorkerObjectTask(
       WebCore::ScriptExecutionContext* context,
       WebWorkerClientImpl* this_ptr,

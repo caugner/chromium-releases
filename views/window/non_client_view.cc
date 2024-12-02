@@ -32,8 +32,7 @@ static const int kClientViewIndex = 1;
 
 NonClientView::NonClientView(Window* frame)
     : frame_(frame),
-      client_view_(NULL),
-      force_aero_glass_frame_(false) {
+      client_view_(NULL) {
 }
 
 NonClientView::~NonClientView() {
@@ -69,11 +68,17 @@ void NonClientView::UpdateFrame() {
 }
 
 bool NonClientView::UseNativeFrame() const {
-  if (force_aero_glass_frame_)
-    return true;
-  // The frame view may always require a custom frame, e.g. Constrained Windows.
-  if (frame_view_.get() && frame_view_->AlwaysUseCustomFrame())
-    return false;
+  if (frame_view_.get()) {
+    // The frame view may always require a native frame, e.g. popups on Vista+
+    // when themes are active.
+    if (frame_view_->AlwaysUseNativeFrame())
+      return true;
+
+    // The frame view may always require a custom frame, e.g. Constrained
+    // Windows.
+    if (frame_view_->AlwaysUseCustomFrame())
+      return false;
+  }
   return frame_->ShouldUseNativeFrame();
 }
 
@@ -187,8 +192,21 @@ views::View* NonClientView::GetViewForPoint(const gfx::Point& point) {
   return View::GetViewForPoint(point);
 }
 
-void NonClientView::ForceAeroGlassFrame() {
-  force_aero_glass_frame_ = true;
+bool NonClientView::GetAccessibleRole(AccessibilityTypes::Role* role) {
+  *role = AccessibilityTypes::ROLE_WINDOW;
+  return true;
+}
+
+bool NonClientView::GetAccessibleName(std::wstring* name) {
+  if (!accessible_name_.empty()) {
+    *name = accessible_name_;
+    return true;
+  }
+  return false;
+}
+
+void NonClientView::SetAccessibleName(const std::wstring& name) {
+  accessible_name_ = name;
 }
 
 ////////////////////////////////////////////////////////////////////////////////

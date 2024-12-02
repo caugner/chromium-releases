@@ -1,10 +1,10 @@
 /*
  * Copyright (C) 2009 Google Inc. All rights reserved.
- * 
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
  * met:
- * 
+ *
  *     * Redistributions of source code must retain the above copyright
  * notice, this list of conditions and the following disclaimer.
  *     * Redistributions in binary form must reproduce the above
@@ -14,7 +14,7 @@
  *     * Neither the name of Google Inc. nor the names of its
  * contributors may be used to endorse or promote products derived from
  * this software without specific prior written permission.
- * 
+ *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
  * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
  * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
@@ -46,11 +46,19 @@ namespace WebKit {
             FormatSmartPaste
         };
 
-        virtual bool isFormatAvailable(Format) = 0;
+        enum Buffer {
+            BufferStandard,
+            // Used on platforms like the X Window System that treat selection
+            // as a type of clipboard.
+            BufferSelection
+        };
 
-        virtual WebString readPlainText() = 0;
-        virtual WebString readHTML(WebURL*) = 0;
+        virtual bool isFormatAvailable(Format, Buffer) = 0;
 
+        virtual WebString readPlainText(Buffer) = 0;
+        virtual WebString readHTML(Buffer, WebURL*) = 0;
+
+        virtual void writePlainText(const WebString&) = 0;
         virtual void writeHTML(
             const WebString& htmlText, const WebURL&,
             const WebString& plainText, bool writeSmartPaste) = 0;
@@ -58,6 +66,9 @@ namespace WebKit {
             const WebURL&, const WebString& title) = 0;
         virtual void writeImage(
             const WebImage&, const WebURL&, const WebString& title) = 0;
+
+    protected:
+        ~WebClipboard() {}
     };
 
 } // namespace WebKit

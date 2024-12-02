@@ -15,9 +15,6 @@ TabContentsView::TabContentsView(TabContents* tab_contents)
       preferred_width_(0) {
 }
 
-void TabContentsView::CreateView() {
-}
-
 void TabContentsView::RenderWidgetHostDestroyed(RenderWidgetHost* host) {
   delegate_view_helper_.RenderWidgetHostDestroyed(host);
 }
@@ -26,15 +23,14 @@ void TabContentsView::RenderViewCreated(RenderViewHost* host) {
   // Default implementation does nothing. Platforms may override.
 }
 
-void TabContentsView::UpdatePreferredWidth(int pref_width) {
-  preferred_width_ = pref_width;
+void TabContentsView::UpdatePreferredSize(const gfx::Size& pref_size) {
+  preferred_width_ = pref_size.width();
 }
 
-void TabContentsView::CreateNewWindow(int route_id,
-                                      base::WaitableEvent* modal_dialog_event) {
-  delegate_view_helper_.CreateNewWindow(route_id, modal_dialog_event,
-                                        tab_contents_->profile(),
-                                        tab_contents_->GetSiteInstance());
+void TabContentsView::CreateNewWindow(int route_id) {
+  delegate_view_helper_.CreateNewWindow(
+      route_id, tab_contents_->profile(), tab_contents_->GetSiteInstance(),
+      DOMUIFactory::GetDOMUIType(tab_contents_->GetURL()), tab_contents_);
 }
 
 void TabContentsView::CreateNewWidget(int route_id, bool activatable) {
@@ -58,6 +54,12 @@ void TabContentsView::ShowCreatedWidget(int route_id,
   RenderWidgetHostView* widget_host_view =
       delegate_view_helper_.GetCreatedWidget(route_id);
   ShowCreatedWidgetInternal(widget_host_view, initial_pos);
+}
+
+bool TabContentsView::IsReservedAccelerator(
+    const NativeWebKeyboardEvent& event) {
+  return tab_contents()->delegate() &&
+         tab_contents()->delegate()->IsReservedAccelerator(event);
 }
 
 RenderWidgetHostView* TabContentsView::CreateNewWidgetInternal(

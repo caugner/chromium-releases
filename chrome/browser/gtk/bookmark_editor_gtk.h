@@ -7,8 +7,14 @@
 
 #include <gtk/gtk.h>
 
+#include <string>
+
+#include "base/scoped_ptr.h"
 #include "chrome/browser/bookmarks/bookmark_editor.h"
-#include "chrome/browser/bookmarks/bookmark_model.h"
+#include "chrome/browser/bookmarks/bookmark_model_observer.h"
+#include "testing/gtest/include/gtest/gtest_prod.h"
+
+class GURL;
 
 // GTK version of the bookmark editor dialog.
 class BookmarkEditorGtk : public BookmarkEditor,
@@ -27,7 +33,7 @@ class BookmarkEditorGtk : public BookmarkEditor,
   BookmarkEditorGtk(GtkWindow* window,
                     Profile* profile,
                     const BookmarkNode* parent,
-                    const BookmarkNode* node,
+                    const EditDetails& details,
                     BookmarkEditor::Configuration configuration,
                     BookmarkEditor::Handler* handler);
 
@@ -84,6 +90,9 @@ class BookmarkEditorGtk : public BookmarkEditor,
   // new group.
   void AddNewGroup(GtkTreeIter* parent, GtkTreeIter* child);
 
+  static void OnSelectionChanged(GtkTreeSelection* treeselection,
+                                 BookmarkEditorGtk* dialog);
+
   static void OnResponse(GtkDialog* dialog, int response_id,
                          BookmarkEditorGtk* window);
 
@@ -102,8 +111,9 @@ class BookmarkEditorGtk : public BookmarkEditor,
   // The dialog to display on screen.
   GtkWidget* dialog_;
   GtkWidget* name_entry_;
-  GtkWidget* url_entry_;
+  GtkWidget* url_entry_;  // This is NULL if IsEditingFolder.
   GtkWidget* tree_view_;
+  GtkWidget* new_folder_button_;
 
   // Helper object that manages the currently selected item in |tree_view_|.
   GtkTreeSelection* tree_selection_;
@@ -119,8 +129,8 @@ class BookmarkEditorGtk : public BookmarkEditor,
   // Initial parent to select. Is only used if node_ is NULL.
   const BookmarkNode* parent_;
 
-  // Node being edited. Is NULL if creating a new node.
-  const BookmarkNode* node_;
+  // Details about the node we're editing.
+  const EditDetails details_;
 
   // Mode used to create nodes from.
   BookmarkModel* bb_model_;

@@ -2,13 +2,22 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#import <Carbon/Carbon.h>
+
 #include "chrome/browser/tab_contents/tab_contents_view_mac.h"
 
-#include "base/sys_string_conversions.h"
+#include <string>
+
 #include "chrome/browser/browser.h" // TODO(beng): this dependency is awful.
-#include "chrome/browser/cocoa/nsimage_cache.h"
+#import "chrome/browser/chrome_application_mac.h"
+#import "chrome/browser/cocoa/focus_tracker.h"
+#import "chrome/browser/cocoa/chrome_browser_window.h"
+#import "chrome/browser/cocoa/browser_window_controller.h"
+#include "chrome/browser/global_keyboard_shortcuts_mac.h"
 #include "chrome/browser/cocoa/sad_tab_view.h"
+#import "chrome/browser/cocoa/web_drag_source.h"
 #import "chrome/browser/cocoa/web_drop_target.h"
+#include "chrome/browser/renderer_host/render_view_host_factory.h"
 #include "chrome/browser/renderer_host/render_widget_host.h"
 #include "chrome/browser/renderer_host/render_widget_host_view_mac.h"
 #include "chrome/browser/tab_contents/render_view_context_menu_mac.h"
@@ -16,17 +25,33 @@
 #include "chrome/common/notification_type.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/render_messages.h"
-#include "net/base/net_util.h"
 #import "third_party/mozilla/include/NSPasteboard+Utils.h"
 
 #include "chrome/common/temp_scaffolding_stubs.h"
 
+using WebKit::WebDragOperation;
+using WebKit::WebDragOperationsMask;
+
+// Ensure that the WebKit::WebDragOperation enum values stay in sync with
+// NSDragOperation constants, since the code below static_casts between 'em.
+#define COMPILE_ASSERT_MATCHING_ENUM(name) \
+  COMPILE_ASSERT(int(NS##name) == int(WebKit::Web##name), enum_mismatch_##name)
+COMPILE_ASSERT_MATCHING_ENUM(DragOperationNone);
+COMPILE_ASSERT_MATCHING_ENUM(DragOperationCopy);
+COMPILE_ASSERT_MATCHING_ENUM(DragOperationLink);
+COMPILE_ASSERT_MATCHING_ENUM(DragOperationGeneric);
+COMPILE_ASSERT_MATCHING_ENUM(DragOperationPrivate);
+COMPILE_ASSERT_MATCHING_ENUM(DragOperationMove);
+COMPILE_ASSERT_MATCHING_ENUM(DragOperationDelete);
+COMPILE_ASSERT_MATCHING_ENUM(DragOperationEvery);
+
 @interface TabContentsViewCocoa (Private)
 - (id)initWithTabContentsViewMac:(TabContentsViewMac*)w;
-- (void)processKeyboardEvent:(NSEvent*)event;
-- (TabContents*)tabContents;
+- (void)processKeyboardEvent:(NativeWebKeyboardEvent*)event;
 - (void)registerDragTypes;
-- (void)setIsDropTarget:(BOOL)isTarget;
+- (void)setCurrentDragOperation:(NSDragOperation)operation;
+- (void)startDragWithDropData:(const WebDropData&)dropData
+            dragOperationMask:(NSDragOperation)operationMask;
 @end
 
 // static
@@ -40,10 +65,7 @@ TabContentsViewMac::TabContentsViewMac(TabContents* tab_contents)
                  Source<TabContents>(tab_contents));
 }
 
-TabContentsViewMac::~TabContentsViewMac() {
-}
-
-void TabContentsViewMac::CreateView() {
+void TabContentsViewMac::CreateView(const gfx::Size& initial_size) {
   TabContentsViewCocoa* view =
       [[TabContentsViewCocoa alloc] initWithTabContentsViewMac:this];
   cocoa_view_.reset(view);
@@ -51,7 +73,16 @@ void TabContentsViewMac::CreateView() {
 
 RenderWidgetHostView* TabContentsViewMac::CreateViewForWidget(
     RenderWidgetHost* render_widget_host) {
-  DCHECK(!render_widget_host->view());
+  if (render_widget_host->view()) {
+    // During testing, the view will already be set up in most cases to the
+    // test view, so we don't want to clobber it with a real one. To verify that
+    // this actually is happening (and somebody isn't accidentally creating the
+    // view twice), we check for the RVH Factory, which will be set when we're
+    // making special ones (which go along with the special views).
+    DCHECK(RenderViewHostFactory::has_factory());
+    return render_widget_host->view();
+  }
+
   RenderWidgetHostViewMac* view =
       new RenderWidgetHostViewMac(render_widget_host);
 
@@ -86,128 +117,22 @@ void TabContentsViewMac::GetContainerBounds(gfx::Rect* out) const {
   *out = [cocoa_view_.get() NSRectToRect:[cocoa_view_.get() bounds]];
 }
 
-// Returns a drag pasteboard filled with the appropriate data. The types are
-// populated in decending order of richness.
-NSPasteboard* TabContentsViewMac::FillDragData(
-    const WebDropData& drop_data) {
-  NSPasteboard* pasteboard = [NSPasteboard pasteboardWithName:NSDragPboard];
-  [pasteboard declareTypes:[NSArray array] owner:nil];
-
-  // HTML.
-  if (!drop_data.text_html.empty()) {
-    [pasteboard addTypes:[NSArray arrayWithObject:NSHTMLPboardType]
-                   owner:nil];
-    [pasteboard setString:base::SysUTF16ToNSString(drop_data.text_html)
-                  forType:NSHTMLPboardType];
-  }
-
-  // URL.
-  if (drop_data.url.is_valid()) {
-    // TODO(pinkerton/jrg): special javascript: handling for bookmark bar. Win
-    // doesn't allow you to drop js: bookmarks on the desktop (since they're
-    // meaningless) but does allow you to drop them on the bookmark bar (where
-    // they're intended to go generally). We need to figure out a private
-    // flavor for Bookmark dragging and then flag this down in the drag source.
-    [pasteboard addTypes:[NSArray arrayWithObject:NSURLPboardType]
-                   owner:nil];
-    NSString* url = base::SysUTF8ToNSString(drop_data.url.spec());
-    NSString* title = base::SysUTF16ToNSString(drop_data.url_title);
-    [pasteboard setURLs:[NSArray arrayWithObject:url]
-             withTitles:[NSArray arrayWithObject:title]];
-  }
-
-  // Files.
-  // TODO(pinkerton): Hook up image drags, data is in drop_data.file_contents.
-  if (!drop_data.file_contents.empty()) {
-#if 0
-    // Images without ALT text will only have a file extension so we need to
-    // synthesize one from the provided extension and URL.
-    std::string filename_utf8 =
-        [base::SysUTF16ToNSString(drop_data.file_description_filename)
-            fileSystemRepresentation];
-    FilePath file_name(filename_utf8);
-    file_name = file_name.BaseName().RemoveExtension();
-    if (file_name.value().empty()) {
-      // Retrieve the name from the URL.
-      file_name = FilePath::FromWStringHack(
-          net::GetSuggestedFilename(drop_data.url, "", "", L""));
-    }
-    std::string file_extension_utf8 =
-        [base::SysUTF16ToNSString(drop_data.file_extension)
-            fileSystemRepresentation];
-    file_name = file_name.ReplaceExtension(file_extension_utf8);
-    NSArray* types = [NSArray arrayWithObjects:NSFileContentsPboardType,
-                                               NSFilenamesPboardType,
-                                               nil];
-    [pasteboard addTypes:types owner:nil];
-    NSArray* file_name_array =
-        [NSArray arrayWithObject:base::SysUTF8ToNSString(file_name.value())];
-    [pasteboard setPropertyList:file_name_array forType:NSFilenamesPboardType];
-    NSData* data = [NSData dataWithBytes:drop_data.file_contents.data()
-                                  length:drop_data.file_contents.length()];
-    [pasteboard setData:data forType:NSFileContentsPboardType];
-#endif
-  }
-
-  // Plain text.
-  if (!drop_data.plain_text.empty()) {
-    [pasteboard addTypes:[NSArray arrayWithObject:NSStringPboardType]
-                   owner:nil];
-    [pasteboard setString:base::SysUTF16ToNSString(drop_data.plain_text)
-                  forType:NSStringPboardType];
-  }
-  return pasteboard;
-}
-
-void TabContentsViewMac::StartDragging(const WebDropData& drop_data) {
-  // We are only allowed to call dragImage:... from inside mouseDragged:, which
-  // we will never be (we're called back async), but it seems that the mouse
-  // event is still always the proper left mouse drag, so everything works out
-  // in the end. However, we occasionally get spurrious "start drag" messages
-  // from the back-end when we shouldn't. If we go through with the drag, Cocoa
-  // asserts in a bad way. Just bail for now until we can figure out the root of
-  // why we're getting the messages.
-  // TODO(pinkerton): http://crbug.com/16811
-  NSEvent* currentEvent = [NSApp currentEvent];
-  if ([currentEvent type] != NSLeftMouseDragged) {
-    LOG(INFO) << "Spurious StartDragging() message";
-    RenderViewHost* rvh = tab_contents()->render_view_host();
-    if (rvh)
-      rvh->DragSourceSystemDragEnded();
-    return;
-  }
-
-  // Create an image to use for the drag.
-  // TODO(pinkerton): Generate the proper image. This one will do in a pinch.
-  NSImage* dragImage = nsimage_cache::ImageNamed(@"nav.pdf");
-
-  NSPasteboard* pasteboard = FillDragData(drop_data);
-
-  // Tell the view to start a drag using |cocoa_view_| as the drag source. The
-  // source will get notified when the drag completes (success or failure) so
-  // it can tell the render view host the drag is done. The drag invokes a
-  // nested event loop, but we need to continue processing events.
-  NSPoint mousePoint = [currentEvent locationInWindow];
-  mousePoint = [cocoa_view_ convertPoint:mousePoint fromView:nil];
+void TabContentsViewMac::StartDragging(const WebDropData& drop_data,
+    WebDragOperationsMask allowed_operations) {
+  // The drag invokes a nested event loop, but we need to continue processing
+  // events.
   MessageLoop::current()->SetNestableTasksAllowed(true);
-  [cocoa_view_ dragImage:dragImage
-                      at:mousePoint
-                  offset:NSZeroSize
-                   event:currentEvent
-              pasteboard:pasteboard
-                  source:cocoa_view_
-               slideBack:YES];
+  NSDragOperation mask = static_cast<NSDragOperation>(allowed_operations);
+  [cocoa_view_ startDragWithDropData:drop_data
+                   dragOperationMask:mask];
   MessageLoop::current()->SetNestableTasksAllowed(false);
-}
-
-void TabContentsViewMac::OnContentsDestroy() {
 }
 
 void TabContentsViewMac::RenderViewCreated(RenderViewHost* host) {
   // We want updates whenever the intrinsic width of the webpage
   // changes. Put the RenderView into that mode.
   int routing_id = host->routing_id();
-  host->Send(new ViewMsg_EnableIntrinsicWidthChangedMode(routing_id));
+  host->Send(new ViewMsg_EnablePreferredSizeChangedMode(routing_id));
 }
 
 void TabContentsViewMac::SetPageTitle(const std::wstring& title) {
@@ -227,12 +152,16 @@ void TabContentsViewMac::OnTabCrashed() {
 }
 
 void TabContentsViewMac::SizeContents(const gfx::Size& size) {
-  // TODO(brettw) this is a hack and should be removed. See tab_contents_view.h.
-  NOTIMPLEMENTED();  // Leaving the hack unimplemented.
+  // TODO(brettw | japhet) This is a hack and should be removed.
+  // See tab_contents_view.h.
+  gfx::Rect rect(gfx::Point(), size);
+  TabContentsViewCocoa* view = cocoa_view_.get();
+  [view setFrame:[view RectToNSRect:rect]];
 }
 
 void TabContentsViewMac::Focus() {
   [[cocoa_view_.get() window] makeFirstResponder:GetContentNativeView()];
+  [[cocoa_view_.get() window] makeKeyAndOrderFront:GetContentNativeView()];
 }
 
 void TabContentsViewMac::SetInitialFocus() {
@@ -243,40 +172,35 @@ void TabContentsViewMac::SetInitialFocus() {
 }
 
 void TabContentsViewMac::StoreFocus() {
-  NSResponder* current_focus = [[cocoa_view_.get() window] firstResponder];
-  if ([current_focus isKindOfClass:[NSView class]]) {
-    NSView* current_focus_view = (NSView*)current_focus;
-
-    if ([current_focus_view isDescendantOf:cocoa_view_.get()]) {
-      latent_focus_view_.reset([current_focus_view retain]);
-      return;
-    }
-  }
-
-  latent_focus_view_.reset();
+  // We're explicitly being asked to store focus, so don't worry if there's
+  // already a view saved.
+  focus_tracker_.reset(
+      [[FocusTracker alloc] initWithWindow:[cocoa_view_ window]]);
 }
 
 void TabContentsViewMac::RestoreFocus() {
   // TODO(avi): Could we be restoring a view that's no longer in the key view
   // chain?
-  if (latent_focus_view_.get()) {
-    [[cocoa_view_ window] makeFirstResponder:latent_focus_view_.get()];
-    latent_focus_view_.reset();
-  } else {
+  if (!(focus_tracker_.get() &&
+        [focus_tracker_ restoreFocusInWindow:[cocoa_view_ window]])) {
+    // Fall back to the default focus behavior if we could not restore focus.
     // TODO(shess): If location-bar gets focus by default, this will
     // select-all in the field.  If there was a specific selection in
     // the field when we navigated away from it, we should restore
     // that selection.
     SetInitialFocus();
   }
+
+  focus_tracker_.reset(nil);
 }
 
-void TabContentsViewMac::UpdateDragCursor(bool is_drop_target) {
-  [cocoa_view_ setIsDropTarget:is_drop_target ? YES : NO];
+void TabContentsViewMac::UpdateDragCursor(WebDragOperation operation) {
+  [cocoa_view_ setCurrentDragOperation: operation];
 }
 
 void TabContentsViewMac::GotFocus() {
-  NOTIMPLEMENTED();
+  // This is only used in the views FocusManager stuff but it bleeds through
+  // all subclasses. http://crbug.com/21875
 }
 
 // This is called when we the renderer asks us to take focus back (i.e., it has
@@ -291,7 +215,8 @@ void TabContentsViewMac::TakeFocus(bool reverse) {
 
 void TabContentsViewMac::HandleKeyboardEvent(
     const NativeWebKeyboardEvent& event) {
-  [cocoa_view_.get() processKeyboardEvent:event.os_event];
+  [cocoa_view_.get() processKeyboardEvent:
+      const_cast<NativeWebKeyboardEvent*>(&event)];
 }
 
 void TabContentsViewMac::ShowContextMenu(const ContextMenuParams& params) {
@@ -347,6 +272,10 @@ void TabContentsViewMac::Observe(NotificationType type,
   }
 }
 
+@interface NSApplication(SPI)
+- (void)_cycleWindowsReversed:(BOOL)reversed;
+@end
+
 @implementation TabContentsViewCocoa
 
 - (id)initWithTabContentsViewMac:(TabContentsViewMac*)w {
@@ -374,19 +303,51 @@ void TabContentsViewMac::Observe(NotificationType type,
   [self registerForDraggedTypes:types];
 }
 
-- (void)setIsDropTarget:(BOOL)isTarget {
-  [dropTarget_ setIsDropTarget:isTarget];
+- (void)setCurrentDragOperation:(NSDragOperation)operation {
+  [dropTarget_ setCurrentOperation:operation];
 }
 
 - (TabContents*)tabContents {
   return tabContentsView_->tab_contents();
 }
 
-- (void)processKeyboardEvent:(NSEvent*)event {
-  if ([event type] == NSKeyDown)
-    [super keyDown:event];
-  else if ([event type] == NSKeyUp)
-    [super keyUp:event];
+- (void)processKeyboardEvent:(NativeWebKeyboardEvent*)wkEvent {
+  if (wkEvent->skip_in_browser)
+    return;
+
+  NSEvent* event = wkEvent->os_event;
+
+  if (!event) {
+    // Char events are synthesized and do not contain a real event. We are not
+    // interested in them anyway.
+    DCHECK(wkEvent->type == WebKit::WebInputEvent::Char);
+    return;
+  }
+
+  // If this tab is no longer active, its window will be |nil|. In that case,
+  // best ignore the event.
+  if (![self window])
+    return;
+  ChromeEventProcessingWindow* window =
+      (ChromeEventProcessingWindow*)[self window];
+  DCHECK([window isKindOfClass:[ChromeEventProcessingWindow class]]);
+
+  // Do not fire shortcuts on key up.
+  if ([event type] == NSKeyDown) {
+    if ([window handleExtraBrowserKeyboardShortcut:event])
+      return;
+    if ([window handleExtraWindowKeyboardShortcut:event])
+      return;
+  }
+
+  // We need to re-dispatch the event, so that it is sent to the menu or other
+  // cocoa mechanisms (such as the cmd-` handler).
+  RenderWidgetHostViewCocoa* rwhv = static_cast<RenderWidgetHostViewCocoa*>(
+      tabContentsView_->GetContentNativeView());
+  DCHECK([rwhv isKindOfClass:[RenderWidgetHostViewCocoa class]]);
+  [rwhv setIgnoreKeyEvents:YES];
+  [window redispatchEvent:event];
+  [rwhv setIgnoreKeyEvents:NO];
 }
 
 - (void)mouseEvent:(NSEvent *)theEvent {
@@ -421,8 +382,27 @@ void TabContentsViewMac::Observe(NotificationType type,
   [self tabContents]->Copy();
 }
 
+- (void)copyToFindPboard:(id)sender {
+  [self tabContents]->CopyToFindPboard();
+}
+
 - (void)paste:(id)sender {
   [self tabContents]->Paste();
+}
+
+- (void)pasteboard:(NSPasteboard*)sender provideDataForType:(NSString*)type {
+  [dragSource_ lazyWriteToPasteboard:sender
+                             forType:type];
+}
+
+- (void)startDragWithDropData:(const WebDropData&)dropData
+            dragOperationMask:(NSDragOperation)operationMask {
+  dragSource_.reset([[WebDragSource alloc]
+          initWithContentsView:self
+                      dropData:&dropData
+                    pasteboard:[NSPasteboard pasteboardWithName:NSDragPboard]
+             dragOperationMask:operationMask]);
+  [dragSource_ startDrag];
 }
 
 // NSDraggingSource methods
@@ -430,52 +410,34 @@ void TabContentsViewMac::Observe(NotificationType type,
 // Returns what kind of drag operations are available. This is a required
 // method for NSDraggingSource.
 - (NSDragOperation)draggingSourceOperationMaskForLocal:(BOOL)isLocal {
-  // TODO(pinkerton): I think this is right...
-  return NSDragOperationCopy;
+  return [dragSource_ draggingSourceOperationMaskForLocal:isLocal];
 }
 
-// Called when a drag initiated in our view ends. We need to make sure that
-// we tell WebCore so that it can go about processing things as normal.
+// Called when a drag initiated in our view ends.
 - (void)draggedImage:(NSImage*)anImage
              endedAt:(NSPoint)screenPoint
            operation:(NSDragOperation)operation {
-  RenderViewHost* rvh = [self tabContents]->render_view_host();
-  if (rvh) {
-    rvh->DragSourceSystemDragEnded();
+  [dragSource_ endDragAt:screenPoint operation:operation];
 
-    // Convert |screenPoint| to view coordinates and flip it.
-    NSPoint localPoint = [self convertPointFromBase:screenPoint];
-    NSRect viewFrame = [self frame];
-    localPoint.y = viewFrame.size.height - localPoint.y;
-    // Flip |screenPoint|.
-    NSRect screenFrame = [[[self window] screen] frame];
-    screenPoint.y = screenFrame.size.height - screenPoint.y;
-
-    if (operation != NSDragOperationNone)
-      rvh->DragSourceEndedAt(localPoint.x, localPoint.y,
-                             screenPoint.x, screenPoint.y);
-    else
-      rvh->DragSourceCancelledAt(localPoint.x, localPoint.y,
-                                 screenPoint.x, screenPoint.y);
-  }
+  // Might as well throw out this object now.
+  dragSource_.reset();
 }
 
-// Called when a drag initiated in our view moves. We need to tell WebCore
-// so it can update anything watching for drag events.
+// Called when a drag initiated in our view moves.
 - (void)draggedImage:(NSImage*)draggedImage movedTo:(NSPoint)screenPoint {
-  RenderViewHost* rvh = [self tabContents]->render_view_host();
-  if (rvh) {
-    // Convert |screenPoint| to view coordinates and flip it.
-    NSPoint localPoint = [self convertPointFromBase:screenPoint];
-    NSRect viewFrame = [self frame];
-    localPoint.y = viewFrame.size.height - localPoint.y;
-    // Flip |screenPoint|.
-    NSRect screenFrame = [[[self window] screen] frame];
-    screenPoint.y = screenFrame.size.height - screenPoint.y;
+  [dragSource_ moveDragTo:screenPoint];
+}
 
-    rvh->DragSourceMovedTo(localPoint.x, localPoint.y,
-                           screenPoint.x, screenPoint.y);
-  }
+// Called when we're informed where a file should be dropped.
+- (NSArray*)namesOfPromisedFilesDroppedAtDestination:(NSURL*)dropDest {
+  if (![dropDest isFileURL])
+    return nil;
+
+  NSString* file_name = [dragSource_ dragPromisedFileTo:[dropDest path]];
+  if (!file_name)
+    return nil;
+
+  return [NSArray arrayWithObject:file_name];
 }
 
 // NSDraggingDestination methods

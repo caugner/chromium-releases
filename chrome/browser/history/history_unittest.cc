@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,10 +20,12 @@
 #include <time.h>
 #include <algorithm>
 
+#include "app/gfx/codec/jpeg_codec.h"
+#include "app/sql/connection.h"
+#include "app/sql/statement.h"
 #include "base/basictypes.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
-#include "base/gfx/jpeg_codec.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/scoped_vector.h"
@@ -39,7 +41,6 @@
 #include "chrome/browser/history/page_usage_data.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/notification_service.h"
-#include "chrome/common/sqlite_utils.h"
 #include "chrome/common/thumbnail_score.h"
 #include "chrome/tools/profiles/thumbnail-inl.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -57,8 +58,8 @@ class HistoryTest;
 // the HistoryTest object.
 template <>
 struct RunnableMethodTraits<history::HistoryTest> {
-  static void RetainCallee(history::HistoryTest* obj) { }
-  static void ReleaseCallee(history::HistoryTest* obj) { }
+  void RetainCallee(history::HistoryTest* obj) { }
+  void ReleaseCallee(history::HistoryTest* obj) { }
 };
 
 namespace history {
@@ -109,7 +110,12 @@ class BackendDelegate : public HistoryBackend::Delegate {
 // HistoryBackend to work.
 class HistoryTest : public testing::Test {
  public:
-  HistoryTest() : history_service_(NULL), db_(NULL) {
+  HistoryTest()
+      : history_service_(NULL),
+        got_thumbnail_callback_(false),
+        redirect_query_success_(false),
+        query_url_success_(false),
+        db_(NULL) {
   }
   ~HistoryTest() {
   }
@@ -662,7 +668,7 @@ TEST_F(HistoryTest, Thumbnails) {
   ASSERT_TRUE(history->Init(history_dir_, NULL));
 
   scoped_ptr<SkBitmap> thumbnail(
-      JPEGCodec::Decode(kGoogleThumbnail, sizeof(kGoogleThumbnail)));
+      gfx::JPEGCodec::Decode(kGoogleThumbnail, sizeof(kGoogleThumbnail)));
   static const double boringness = 0.25;
 
   const GURL url("http://www.google.com/thumbnail_test/");
@@ -681,7 +687,7 @@ TEST_F(HistoryTest, Thumbnails) {
   // compression and we don't have a similarity measure.
   EXPECT_TRUE(thumbnail_data_.size());
   scoped_ptr<SkBitmap> decoded_thumbnail(
-      JPEGCodec::Decode(&thumbnail_data_[0], thumbnail_data_.size()));
+      gfx::JPEGCodec::Decode(&thumbnail_data_[0], thumbnail_data_.size()));
   EXPECT_TRUE(decoded_thumbnail.get());
 
   // Request a nonexistent thumbnail and make sure we get
@@ -733,25 +739,22 @@ TEST(HistoryProfileTest, TypicalProfileVersion) {
 
   int cur_version = HistoryDatabase::GetCurrentVersion();
 
-  sqlite3* db;
-  ASSERT_EQ(SQLITE_OK, OpenSqliteDb(file, &db));
+  sql::Connection db;
+  ASSERT_TRUE(db.Open(file));
 
   {
-    SQLStatement s;
-    ASSERT_EQ(SQLITE_OK, s.prepare(db,
+    sql::Statement s(db.GetUniqueStatement(
         "SELECT value FROM meta WHERE key = 'version'"));
-    EXPECT_EQ(SQLITE_ROW, s.step());
-    int file_version = s.column_int(0);
+    EXPECT_TRUE(s.Step());
+    int file_version = s.ColumnInt(0);
     EXPECT_EQ(cur_version, file_version);
   }
-
-  ASSERT_EQ(SQLITE_OK, sqlite3_close(db));
 }
 
 namespace {
 
 // Use this dummy value to scope the page IDs we give history.
-static const void* kAddArgsScope = (void*)0x12345678;
+static const void* kAddArgsScope = reinterpret_cast<void*>(0x12345678);
 
 // Creates a new HistoryAddPageArgs object for sending to the history database
 // with reasonable defaults and the given NULL-terminated URL string. The

@@ -32,8 +32,8 @@
 
 // This file contains the declarations for Texture2DStub and TextureCUBEStub.
 
-#ifndef O3D_CONVERTER_CROSS_TEXTURE_STUB_H__
-#define O3D_CONVERTER_CROSS_TEXTURE_STUB_H__
+#ifndef O3D_CONVERTER_CROSS_TEXTURE_STUB_H_
+#define O3D_CONVERTER_CROSS_TEXTURE_STUB_H_
 
 #include "core/cross/bitmap.h"
 #include "core/cross/texture.h"
@@ -57,26 +57,17 @@ class Texture2DStub : public Texture2D {
                   height,
                   format,
                   levels,
-                  false,
-                  false,
                   enable_render_surfaces) {}
   virtual ~Texture2DStub() {}
 
-  // Locks the image buffer of a given mipmap level for writing from main
-  // memory.
-  virtual bool Lock(int level, void** texture_data) { return true; }
-
-  // Unlocks this texture and returns it to Stub control.
-  virtual bool Unlock(int level) { return true; }
-
-  // Returns a RenderSurface object associated with a mip_level of a texture.
-  // Parameters:
-  //  mip_level: [in] The mip-level of the surface to be returned.
-  //  pack: [in] The pack in which the surface will reside.
-  // Returns:
-  //  Reference to the RenderSurface object.
-  virtual RenderSurface::Ref GetRenderSurface(int mip_level, Pack *pack) {
-    return RenderSurface::Ref(NULL);
+  // Overridden from Texture2D
+  virtual void SetRect(int level,
+                       unsigned left,
+                       unsigned top,
+                       unsigned width,
+                       unsigned height,
+                       const void* src_data,
+                       int src_pitch) {
   }
 
   // Returns the implementation-specific texture handle for this texture.
@@ -87,6 +78,21 @@ class Texture2DStub : public Texture2D {
   // Gets a RGBASwizzleIndices that contains a mapping from
   // RGBA to the internal format used by the rendering API.
   virtual const RGBASwizzleIndices& GetABGR32FSwizzleIndices();
+
+ protected:
+  // Overridden from Texture2D
+  virtual bool PlatformSpecificLock(
+      int level, void** texture_data, int* pitch, AccessMode mode) {
+    return false;
+  }
+
+  // Overridden from Texture2D
+  virtual bool PlatformSpecificUnlock(int level) { return true; }
+
+  // Overridden from Texture2D
+  virtual RenderSurface::Ref PlatformSpecificGetRenderSurface(int mip_level) {
+    return RenderSurface::Ref(NULL);
+  }
 
  private:
   DISALLOW_COPY_AND_ASSIGN(Texture2DStub);
@@ -106,33 +112,19 @@ class TextureCUBEStub : public TextureCUBE {
                     edge_length,
                     format,
                     levels,
-                    false,
-                    false,
                     enable_render_surfaces) {}
   virtual ~TextureCUBEStub() {}
 
-  // Locks the image buffer of a given face and mipmap level for loading
-  // from main memory.
-  virtual bool Lock(CubeFace face, int level, void** texture_data) {
-    return true;
-  }
-
-  // Unlocks the image buffer of a given face and mipmap level.
-  virtual bool Unlock(CubeFace face, int level) { return true; }
-
-  // Returns a RenderSurface object associated with a given cube face and
-  // mip_level of a texture.
-  // Parameters:
-  //  face: [in] The cube face from which to extract the surface.
-  //  mip_level: [in] The mip-level of the surface to be returned.
-  //  pack: [in] The pack in which the surface will reside.
-  // Returns:
-  //  Reference to the RenderSurface object.
-  virtual RenderSurface::Ref GetRenderSurface(CubeFace face,
-                                              int level,
-                                              Pack* pack) {
-    return RenderSurface::Ref(NULL);
-  }
+  // Overridden from TextureCUBE
+  virtual void SetRect(CubeFace face,
+                       int level,
+                       unsigned dst_left,
+                       unsigned dst_top,
+                       unsigned width,
+                       unsigned height,
+                       const void* src_data,
+                       int src_pitch) {
+  };
 
   // Returns the implementation-specific texture handle for this texture.
   void* GetTextureHandle() const {
@@ -143,10 +135,27 @@ class TextureCUBEStub : public TextureCUBE {
   // RGBA to the internal format used by the rendering API.
   virtual const RGBASwizzleIndices& GetABGR32FSwizzleIndices();
 
+ protected:
+  // Overridden from TextureCUBE
+  virtual bool PlatformSpecificLock(
+      CubeFace face, int level, void** texture_data, int* pitch,
+      AccessMode mode) {
+    return false;
+  }
+
+  // Overridden from TextureCUBE
+  virtual bool PlatformSpecificUnlock(CubeFace face, int level) { return true; }
+
+  // Overridden from TextureCUBE
+  virtual RenderSurface::Ref PlatformSpecificGetRenderSurface(CubeFace face,
+                                                              int mip_level) {
+    return RenderSurface::Ref(NULL);
+  }
+
  private:
   DISALLOW_COPY_AND_ASSIGN(TextureCUBEStub);
 };
 
 }  // namespace o3d
 
-#endif  // O3D_CONVERTER_CROSS_TEXTURE_STUB_H__
+#endif  // O3D_CONVERTER_CROSS_TEXTURE_STUB_H_

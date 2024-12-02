@@ -32,9 +32,9 @@
 
 // This file contains the definition of the Texture class.
 
-#include "core/cross/precompile.h"
 #include "core/cross/texture_base.h"
 #include "core/cross/pack.h"
+#include "core/cross/bitmap.h"
 
 namespace o3d {
 
@@ -47,23 +47,14 @@ const char* Texture::kLevelsParamName =
 Texture::Texture(ServiceLocator* service_locator,
                  Format format,
                  int levels,
-                 bool alpha_is_one,
-                 bool resize_to_pot,
                  bool enable_render_surfaces)
     : ParamObject(service_locator),
-      resize_to_pot_(resize_to_pot),
-      alpha_is_one_(alpha_is_one),
+      alpha_is_one_(false),
       format_(format),
       weak_pointer_manager_(this),
       render_surfaces_enabled_(enable_render_surfaces) {
   RegisterReadOnlyParamRef(kLevelsParamName, &levels_param_);
   levels_param_->set_read_only_value(levels);
-}
-
-void Texture::RegisterSurface(RenderSurface* surface, Pack* pack) {
-  DCHECK(surface);
-  DCHECK(pack);
-  return pack->RegisterObject(surface);
 }
 
 ObjectBase::Ref ParamTexture::Create(ServiceLocator* service_locator) {

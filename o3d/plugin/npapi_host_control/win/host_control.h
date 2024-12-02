@@ -58,6 +58,8 @@
 
 class NPPluginProxy;
 
+const UINT WM_PLUGINASYNCCALL = WM_USER + 100;
+
 // Class implementing an ActiveX control for containing NPAPI plugin-objects.
 // This needs to be CComMultiThreadModel because these objects are concurrently
 // AddRefed and Released from StreamOperation threads.
@@ -90,7 +92,6 @@ class ATL_NO_VTABLE CHostControl
       public IObjectSafetyImpl<CHostControl,
                                INTERFACESAFE_FOR_UNTRUSTED_CALLER |
                                INTERFACESAFE_FOR_UNTRUSTED_DATA>,
-      public IPersistStreamInitImpl<CHostControl>,
       public IPersistPropertyBagImpl<CHostControl>,
       public IPersistStorageImpl<CHostControl>,
       public IConnectionPointContainerImpl<CHostControl>,
@@ -111,6 +112,7 @@ DECLARE_REGISTRY_RESOURCEID(IDR_HOSTCONTROL)
 BEGIN_MSG_MAP(CHostControl)
   MESSAGE_HANDLER(WM_CREATE, OnCreate)
   MESSAGE_HANDLER(WM_DESTROY, OnDestroy)
+  MESSAGE_HANDLER(WM_PLUGINASYNCCALL, OnPluginAsyncCall)
 END_MSG_MAP()
 
 BEGIN_CONNECTION_POINT_MAP(CHostControl)
@@ -137,8 +139,6 @@ BEGIN_COM_MAP(CHostControl)
   COM_INTERFACE_ENTRY(ISupportErrorInfo)
   COM_INTERFACE_ENTRY(IProvideClassInfo)
   COM_INTERFACE_ENTRY(IProvideClassInfo2)
-  COM_INTERFACE_ENTRY(IPersistStreamInit)
-  COM_INTERFACE_ENTRY2(IPersist, IPersistStreamInit)
   COM_INTERFACE_ENTRY(IPersistPropertyBag)
   COM_INTERFACE_ENTRY(IPersistStorage)
   COM_INTERFACE_ENTRY(IConnectionPointContainer)
@@ -170,6 +170,9 @@ END_PROP_MAP()
   // Method overridden from IPersistPropertyBagImpl.
   STDMETHOD(Load(IPropertyBag *pPropBag, IErrorLog *pErrorLog));
 
+  STDMETHOD(SetObjectRects(LPCRECT lprcPosRect,
+                           LPCRECT lprcClipRect));
+
   // Returns the properties associated with the NPPVpluginNameString, and
   // NPPVpluginDescriptionString identifiers of the loaded plug-in.  These
   // properties can be used for plug-in introspection and version-dependent
@@ -179,6 +182,8 @@ END_PROP_MAP()
 
   LRESULT OnCreate(UINT uMsg, WPARAM wParam, LPARAM lParam, BOOL& bHandled);
   LRESULT OnDestroy(UINT uMsg, WPARAM wParam, LPARAM lParam, BOOL& bHandled);
+  LRESULT OnPluginAsyncCall(UINT message, WPARAM w_param, LPARAM l_param,
+                            BOOL& handled);
 
   // Initiates a data transfer, calling back into the hosted plug-in instance
   // on status updates.  Does not block on the transfer.

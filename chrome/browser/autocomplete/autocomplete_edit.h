@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_AUTOCOMPLETE_AUTOCOMPLETE_EDIT_H_
 
 #include "chrome/browser/autocomplete/autocomplete.h"
+#include "chrome/common/notification_registrar.h"
 #include "chrome/common/page_transition_types.h"
 #include "googleurl/src/gurl.h"
 #include "webkit/glue/window_open_disposition.h"
@@ -32,9 +33,9 @@ class AutocompleteEditController {
   // for |url|, which the controller can check for existence.  See comments on
   // AutocompleteResult::GetAlternateNavURL().
   virtual void OnAutocompleteAccept(const GURL& url,
-      WindowOpenDisposition disposition,
-      PageTransition::Type transition,
-      const GURL& alternate_nav_url) = 0;
+                                    WindowOpenDisposition disposition,
+                                    PageTransition::Type transition,
+                                    const GURL& alternate_nav_url) = 0;
 
   // Called when anything has changed that might affect the layout or contents
   // of the views around the edit, including the text of the edit and the
@@ -46,6 +47,9 @@ class AutocompleteEditController {
   // the edit is guaranteed to be showing the permanent text.
   virtual void OnInputInProgress(bool in_progress) = 0;
 
+  // Called whenever the autocomplete edit gets focused.
+  virtual void OnSetFocus() = 0;
+
   // Returns the favicon of the current page.
   virtual SkBitmap GetFavIcon() const = 0;
 
@@ -53,7 +57,7 @@ class AutocompleteEditController {
   virtual std::wstring GetTitle() const = 0;
 };
 
-class AutocompleteEditModel {
+class AutocompleteEditModel : public NotificationObserver {
  public:
   enum KeywordUIState {
     // The user is typing normally.
@@ -96,9 +100,12 @@ class AutocompleteEditModel {
                         Profile* profile);
   ~AutocompleteEditModel();
 
-  void set_popup_model(AutocompletePopupModel* popup_model) {
-    popup_ = popup_model;
-  }
+  void SetPopupModel(AutocompletePopupModel* popup_model);
+
+#ifdef UNIT_TEST
+  // It should only be used by testing code.
+  AutocompletePopupModel* popup_model() const { return popup_; }
+#endif
 
   // Invoked when the profile has changed.
   void SetProfile(Profile* profile);
@@ -163,6 +170,9 @@ class AutocompleteEditModel {
 
   // Navigates to the destination last supplied to CanPasteAndGo.
   void PasteAndGo();
+
+  // Returns the url set by way of CanPasteAndGo.
+  const GURL& paste_and_go_url() const { return paste_and_go_url_; }
 
   // Returns true if this is a paste-and-search rather than paste-and-go (or
   // nothing).
@@ -241,9 +251,9 @@ class AutocompleteEditModel {
   // negative for moving up, positive for moving down.
   void OnUpOrDownKeyPressed(int count);
 
-  // Called back by the AutocompletePopupModel when any relevant data changes.
-  // This rolls together several separate pieces of data into one call so we can
-  // update all the UI efficiently:
+  // Called when any relevant data changes.  This rolls together several
+  // separate pieces of data into one call so we can update all the UI
+  // efficiently:
   //   |text| is either the new temporary text (if |is_temporary_text| is true)
   //     from the user manually selecting a different match, or the inline
   //     autocomplete text (if |is_temporary_text| is false).
@@ -296,6 +306,11 @@ class AutocompleteEditModel {
                           // he intended to hit "ctrl-enter".
   };
 
+  // NotificationObserver
+  virtual void Observe(NotificationType type,
+                       const NotificationSource& source,
+                       const NotificationDetails& details);
+
   // Called whenever user_text_ should change.
   void InternalSetUserText(const std::wstring& text);
 
@@ -314,13 +329,27 @@ class AutocompleteEditModel {
   // not needed).
   GURL GetURLForCurrentText(PageTransition::Type* transition,
                             bool* is_history_what_you_typed_match,
-                            GURL* alternate_nav_url);
+                            GURL* alternate_nav_url) const;
+
+  // Performs a query for only the synchronously available matches for the
+  // current input, sets |transition|, |is_history_what_you_typed_match|, and
+  // |alternate_nav_url| (if applicable) based on the default match, and returns
+  // its url. |transition|, |is_history_what_you_typed_match| and/or
+  // |alternate_nav_url| may be null, in which case they are not updated.
+  //
+  // If there are no matches for the input, leaves the outparams unset and
+  // returns the empty string.
+  GURL URLsForDefaultMatch(PageTransition::Type* transition,
+                           bool* is_history_what_you_typed_match,
+                           GURL* alternate_nav_url) const;
 
   AutocompleteEditView* view_;
 
   AutocompletePopupModel* popup_;
 
   AutocompleteEditController* controller_;
+
+  NotificationRegistrar registrar_;
 
   // Whether the edit has focus.
   bool has_focus_;

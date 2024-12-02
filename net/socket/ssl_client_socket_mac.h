@@ -11,11 +11,14 @@
 #include <vector>
 
 #include "base/scoped_ptr.h"
+#include "net/base/cert_verify_result.h"
 #include "net/base/completion_callback.h"
 #include "net/base/ssl_config_service.h"
 #include "net/socket/ssl_client_socket.h"
 
 namespace net {
+
+class CertVerifier;
 
 // An SSL client socket implemented with Secure Transport.
 class SSLClientSocketMac : public SSLClientSocket {
@@ -42,6 +45,8 @@ class SSLClientSocketMac : public SSLClientSocket {
   // Socket methods:
   virtual int Read(IOBuffer* buf, int buf_len, CompletionCallback* callback);
   virtual int Write(IOBuffer* buf, int buf_len, CompletionCallback* callback);
+  virtual bool SetReceiveBufferSize(int32 size);
+  virtual bool SetSendBufferSize(int32 size);
 
  private:
   void DoCallback(int result);
@@ -50,7 +55,10 @@ class SSLClientSocketMac : public SSLClientSocket {
   int DoLoop(int last_io_result);
   int DoPayloadRead();
   int DoPayloadWrite();
-  int DoHandshake();
+  int DoHandshakeStart();
+  int DoVerifyCert();
+  int DoVerifyCertComplete(int result);
+  int DoHandshakeFinish();
   int DoReadComplete(int result);
   void OnWriteComplete(int result);
 
@@ -78,15 +86,22 @@ class SSLClientSocketMac : public SSLClientSocket {
     STATE_NONE,
     STATE_PAYLOAD_READ,
     STATE_PAYLOAD_WRITE,
-    STATE_HANDSHAKE,
+    STATE_HANDSHAKE_START,
+    STATE_VERIFY_CERT,
+    STATE_VERIFY_CERT_COMPLETE,
+    STATE_HANDSHAKE_FINISH,
     STATE_READ_COMPLETE,
   };
   State next_state_;
   State next_io_state_;
 
-  int server_cert_status_;
+  scoped_refptr<X509Certificate> server_cert_;
+  std::vector<scoped_refptr<X509Certificate> > intermediate_certs_;
+  scoped_ptr<CertVerifier> verifier_;
+  CertVerifyResult server_cert_verify_result_;
 
   bool completed_handshake_;
+  bool handshake_interrupted_;
   SSLContextRef ssl_context_;
 
   // These are buffers for holding data during I/O. The "slop" is the amount of

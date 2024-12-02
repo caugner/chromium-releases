@@ -11,6 +11,7 @@
 #include "chrome/browser/extensions/extension_event_names.h"
 #include "chrome/browser/extensions/extension_message_service.h"
 #include "chrome/browser/extensions/extension_tabs_module_constants.h"
+#include "chrome/browser/extensions/extension_page_actions_module_constants.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/extensions/extension.h"
@@ -18,6 +19,7 @@
 
 namespace events = extension_event_names;
 namespace tab_keys = extension_tabs_module_constants;
+namespace page_action_keys = extension_page_actions_module_constants;
 
 ExtensionBrowserEventRouter::TabEntry::TabEntry()
     : state_(ExtensionTabUtil::TAB_COMPLETE),
@@ -61,7 +63,7 @@ DictionaryValue* ExtensionBrowserEventRouter::TabEntry::UpdateLoadState(
 
 DictionaryValue* ExtensionBrowserEventRouter::TabEntry::DidNavigate(
     const TabContents* contents) {
-  if(!pending_navigate_)
+  if (!pending_navigate_)
     return NULL;
 
   DictionaryValue* changed_properties = new DictionaryValue();
@@ -119,9 +121,25 @@ void ExtensionBrowserEventRouter::OnBrowserAdded(const Browser* browser) {
   // Start listening to TabStripModel events for this browser.
   browser->tabstrip_model()->AddObserver(this);
 
-  DispatchSimpleBrowserEvent(browser->profile(),
-                             ExtensionTabUtil::GetWindowId(browser),
-                             events::kOnWindowCreated);
+  // The window isn't ready at this point, so we defer until it is.
+  registrar_.Add(this, NotificationType::BROWSER_WINDOW_READY,
+      Source<const Browser>(browser));
+}
+
+void ExtensionBrowserEventRouter::OnBrowserWindowReady(const Browser* browser) {
+  ListValue args;
+
+  registrar_.Remove(this, NotificationType::BROWSER_WINDOW_READY,
+      Source<const Browser>(browser));
+
+  DictionaryValue* window_dictionary = ExtensionTabUtil::CreateWindowValue(
+      browser, false);
+  args.Append(window_dictionary);
+
+  std::string json_args;
+  JSONWriter::Write(&args, false, &json_args);
+
+  DispatchEvent(browser->profile(), events::kOnWindowCreated, json_args);
 }
 
 void ExtensionBrowserEventRouter::OnBrowserRemoving(const Browser* browser) {
@@ -226,7 +244,7 @@ void ExtensionBrowserEventRouter::TabClosingAt(TabContents* contents,
   DispatchEvent(contents->profile(), events::kOnTabRemoved, json_args);
 
   int removed_count = tab_entries_.erase(tab_id);
-  DCHECK(removed_count > 0);
+  DCHECK_GT(removed_count, 0);
 
   registrar_.Remove(this, NotificationType::NAV_ENTRY_COMMITTED,
       Source<NavigationController>(&contents->controller()));
@@ -317,6 +335,9 @@ void ExtensionBrowserEventRouter::Observe(NotificationType type,
         Source<NavigationController>(&contents->controller()));
     registrar_.Remove(this, NotificationType::TAB_CONTENTS_DESTROYED,
         Source<TabContents>(contents));
+  } else if (type == NotificationType::BROWSER_WINDOW_READY) {
+    const Browser* browser = Source<const Browser>(source).ptr();
+    OnBrowserWindowReady(browser);
   } else {
     NOTREACHED();
   }
@@ -330,25 +351,41 @@ void ExtensionBrowserEventRouter::TabChangedAt(TabContents* contents,
 
 void ExtensionBrowserEventRouter::TabStripEmpty() { }
 
-void ExtensionBrowserEventRouter::PageActionExecuted(Profile* profile,
-                                                     std::string extension_id,
-                                                     std::string page_action_id,
-                                                     int tab_id,
-                                                     std::string url) {
+void ExtensionBrowserEventRouter::PageActionExecuted(
+    Profile* profile,
+    const std::string& extension_id,
+    const std::string& page_action_id,
+    int tab_id,
+    const std::string& url,
+    int button) {
   ListValue args;
-  DictionaryValue* object_args = new DictionaryValue();
-  object_args->Set(tab_keys::kPageActionIdKey,
-                   Value::CreateStringValue(page_action_id));
+  args.Append(Value::CreateStringValue(page_action_id));
+
   DictionaryValue* data = new DictionaryValue();
   data->Set(tab_keys::kTabIdKey, Value::CreateIntegerValue(tab_id));
   data->Set(tab_keys::kTabUrlKey, Value::CreateStringValue(url));
-  object_args->Set(tab_keys::kDataKey, data);
-
-  args.Append(object_args);
+  data->Set(page_action_keys::kButtonKey, Value::CreateIntegerValue(button));
+  args.Append(data);
 
   std::string json_args;
   JSONWriter::Write(&args, false, &json_args);
 
-  std::string event_name = extension_id + std::string("/") + page_action_id;
+  std::string event_name = std::string("pageAction/") + extension_id;
+  DispatchEvent(profile, event_name.c_str(), json_args);
+}
+
+void ExtensionBrowserEventRouter::BrowserActionExecuted(
+    Profile* profile, const std::string& extension_id, Browser* browser) {
+  TabContents* tab_contents = NULL;
+  int tab_id = 0;
+  if (!ExtensionTabUtil::GetDefaultTab(browser, &tab_contents, &tab_id))
+    return;
+
+  ListValue args;
+  args.Append(ExtensionTabUtil::CreateTabValue(tab_contents));
+  std::string json_args;
+  JSONWriter::Write(&args, false, &json_args);
+
+  std::string event_name = std::string("browserAction/") + extension_id;
   DispatchEvent(profile, event_name.c_str(), json_args);
 }

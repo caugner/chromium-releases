@@ -73,21 +73,21 @@ void RendererStub::Destroy(void) {
   DCHECK(false);
 }
 
-bool RendererStub::BeginDraw(void) {
+bool RendererStub::PlatformSpecificBeginDraw(void) {
   DCHECK(false);
   return true;
 }
 
-void RendererStub::EndDraw(void) {
+void RendererStub::PlatformSpecificEndDraw(void) {
   DCHECK(false);
 }
 
-bool RendererStub::StartRendering(void) {
+bool RendererStub::PlatformSpecificStartRendering(void) {
   DCHECK(false);
   return true;
 }
 
-void RendererStub::FinishRendering(void) {
+void RendererStub::PlatformSpecificFinishRendering(void) {
   DCHECK(false);
 }
 
@@ -95,25 +95,22 @@ void RendererStub::Resize(int, int) {
   DCHECK(false);
 }
 
-void RendererStub::Clear(const Float4 &, bool, float, bool, int, bool) {
-  DCHECK(false);
-}
-
-void RendererStub::RenderElement(Element *,
-                                 DrawElement *,
-                                 Material *,
-                                 ParamObject *,
-                                 ParamCache *) {
+void RendererStub::PlatformSpecificClear(
+  const Float4 &, bool, float, bool, int, bool) {
   DCHECK(false);
 }
 
 void RendererStub::SetRenderSurfacesPlatformSpecific(
-    RenderSurface* surface,
-    RenderDepthStencilSurface* surface_depth) {
+    const RenderSurface* surface,
+    const RenderDepthStencilSurface* surface_depth) {
   DCHECK(false);
 }
 
 void RendererStub::SetBackBufferPlatformSpecific() {
+  DCHECK(false);
+}
+
+void RendererStub::ApplyDirtyStates() {
   DCHECK(false);
 }
 
@@ -139,24 +136,6 @@ Effect::Ref RendererStub::CreateEffect(void) {
 
 Sampler::Ref RendererStub::CreateSampler(void) {
   return Sampler::Ref(new SamplerStub(service_locator()));
-}
-
-Texture::Ref RendererStub::CreatePlatformSpecificTextureFromBitmap(
-    Bitmap *bitmap) {
-  if (bitmap->is_cubemap()) {
-    return Texture::Ref(new TextureCUBEStub(service_locator(),
-                                            bitmap->width(),
-                                            bitmap->format(),
-                                            bitmap->num_mipmaps(),
-                                            false));
-  } else {
-    return Texture::Ref(new Texture2DStub(service_locator(),
-                                          bitmap->width(),
-                                          bitmap->height(),
-                                          bitmap->format(),
-                                          bitmap->num_mipmaps(),
-                                          false));
-  }
 }
 
 Texture2D::Ref RendererStub::CreatePlatformSpecificTexture2D(
@@ -196,17 +175,35 @@ StreamBank::Ref RendererStub::CreateStreamBank() {
   return StreamBank::Ref(new StreamBankStub(service_locator()));
 }
 
-bool RendererStub::SaveScreen(const String &) {
-  DCHECK(false);
-  return true;
-}
-
 ParamCache *RendererStub::CreatePlatformSpecificParamCache(void) {
   return new ParamCacheStub;
 }
 
 void RendererStub::SetViewportInPixels(int, int, int, int, float, float) {
   DCHECK(false);
+}
+
+bool RendererStub::GoFullscreen(const DisplayWindow& display,
+                                int mode_id) {
+  return false;
+}
+
+bool RendererStub::CancelFullscreen(const DisplayWindow& display,
+                                    int width, int height) {
+  return false;
+}
+ 
+bool RendererStub::fullscreen() const { return false; }
+ 
+void RendererStub::GetDisplayModes(std::vector<DisplayMode> *modes) {
+  modes->clear();
+}
+
+bool RendererStub::GetDisplayMode(int id, DisplayMode *mode) {
+  return false;
+}
+
+void RendererStub::PlatformSpecificPresent(void) {
 }
 
 const int* RendererStub::GetRGBAUByteNSwizzleTable() {

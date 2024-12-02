@@ -26,6 +26,10 @@ class BookmarkMenuButton : public views::MenuButton,
   virtual ~BookmarkMenuButton();
 
   // View drop methods.
+  virtual bool GetDropFormats(
+      int* formats,
+      std::set<OSExchangeData::CustomFormat>* custom_formats);
+  virtual bool AreDropTypesRequired();
   virtual bool CanDrop(const OSExchangeData& data);
   virtual int OnDragUpdated(const views::DropTargetEvent& event);
   virtual void OnDragExited();
@@ -35,15 +39,13 @@ class BookmarkMenuButton : public views::MenuButton,
   virtual void BookmarkMenuDeleted(BookmarkMenuController* controller);
 
   // ViewMenuDelegate.
-  virtual void RunMenu(views::View* source,
-                       const gfx::Point& pt,
-                       gfx::NativeView hwnd);
+  virtual void RunMenu(views::View* source, const gfx::Point& pt);
 
  private:
   // Shows the menu.
   void RunMenu(views::View* source,
                const gfx::Point& pt,
-               gfx::NativeView hwnd,
+               gfx::NativeWindow hwnd,
                bool for_drop);
 
   // Returns the bookmark model.

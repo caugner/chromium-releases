@@ -7,9 +7,6 @@
   'variables': {
     'chromium_code': 1,
   },
-  'includes': [
-    '../common.gypi',
-  ],
   'targets': [
     {
       'target_name': 'googleurl',
@@ -17,9 +14,9 @@
       'msvs_guid': 'EF5E94AB-B646-4E5B-A058-52EF07B8351C',
       'dependencies': [
         '../../base/base.gyp:base',
-        '../../third_party/icu38/icu38.gyp:icudata',
-        '../../third_party/icu38/icu38.gyp:icui18n',
-        '../../third_party/icu38/icu38.gyp:icuuc',
+        '../../third_party/icu/icu.gyp:icudata',
+        '../../third_party/icu/icu.gyp:icui18n',
+        '../../third_party/icu/icu.gyp:icuuc',
       ],
       'sources': [
         '../../googleurl/src/gurl.cc',
@@ -62,7 +59,7 @@
       'dependencies': [
         'googleurl',
         '../../testing/gtest.gyp:gtest',
-        '../../third_party/icu38/icu38.gyp:icuuc',
+        '../../third_party/icu/icu.gyp:icuuc',
       ],
       'sources': [
         '../../googleurl/src/gurl_unittest.cc',
@@ -75,3 +72,9 @@
     },
   ],
 }
+
+# Local Variables:
+# tab-width:2
+# indent-tabs-mode:nil
+# End:
+# vim: set expandtab tabstop=2 shiftwidth=2:

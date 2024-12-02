@@ -6,13 +6,15 @@
 
 #include <gtk/gtk.h>
 
+#include "app/gfx/gtk_util.h"
 #include "app/l10n_util.h"
 #include "base/basictypes.h"
-#include "base/gfx/gtk_util.h"
 #include "base/logging.h"
 #include "base/string_util.h"
 #include "chrome/browser/gtk/bookmark_tree_model.h"
 #include "chrome/browser/gtk/bookmark_utils_gtk.h"
+#include "chrome/browser/gtk/gtk_theme_provider.h"
+#include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/profile.h"
@@ -35,16 +37,16 @@ static const int kTreeHeight = 150;
 }  // namespace
 
 // static
-void BookmarkEditor::Show(gfx::NativeView parent_hwnd,
+void BookmarkEditor::Show(gfx::NativeWindow parent_hwnd,
                           Profile* profile,
                           const BookmarkNode* parent,
-                          const BookmarkNode* node,
+                          const EditDetails& details,
                           Configuration configuration,
                           Handler* handler) {
   DCHECK(profile);
   BookmarkEditorGtk* editor =
-      new BookmarkEditorGtk(GTK_WINDOW(gtk_widget_get_toplevel(parent_hwnd)),
-                            profile, parent, node, configuration, handler);
+      new BookmarkEditorGtk(parent_hwnd, profile, parent, details,
+                            configuration, handler);
   editor->Show();
 }
 
@@ -52,13 +54,13 @@ BookmarkEditorGtk::BookmarkEditorGtk(
     GtkWindow* window,
     Profile* profile,
     const BookmarkNode* parent,
-    const BookmarkNode* node,
+    const EditDetails& details,
     BookmarkEditor::Configuration configuration,
     BookmarkEditor::Handler* handler)
     : profile_(profile),
       dialog_(NULL),
       parent_(parent),
-      node_(node),
+      details_(details),
       running_menu_for_root_(false),
       show_tree_(configuration == SHOW_TREE),
       handler_(handler) {
@@ -89,13 +91,13 @@ void BookmarkEditorGtk::Init(GtkWindow* parent_window) {
 
   if (show_tree_) {
     GtkWidget* action_area = GTK_DIALOG(dialog_)->action_area;
-    GtkWidget* new_folder_button = gtk_button_new_with_label(
+    new_folder_button_ = gtk_button_new_with_label(
         l10n_util::GetStringUTF8(IDS_BOOMARK_EDITOR_NEW_FOLDER_BUTTON).c_str());
-    g_signal_connect(new_folder_button, "clicked",
+    g_signal_connect(new_folder_button_, "clicked",
                      G_CALLBACK(OnNewFolderClicked), this);
-    gtk_container_add(GTK_CONTAINER(action_area), new_folder_button);
+    gtk_container_add(GTK_CONTAINER(action_area), new_folder_button_);
     gtk_button_box_set_child_secondary(GTK_BUTTON_BOX(action_area),
-                                       new_folder_button, TRUE);
+                                       new_folder_button_, TRUE);
   }
 
   gtk_dialog_set_default_response(GTK_DIALOG(dialog_), GTK_RESPONSE_ACCEPT);
@@ -107,7 +109,7 @@ void BookmarkEditorGtk::Init(GtkWindow* parent_window) {
   // ||+- GtkLabel ------+ +- GtkEntry |name_entry_| --------------+||
   // |||                 | |                                       |||
   // ||+-----------------+ +---------------------------------------+||
-  // ||+- GtkLabel ------+ +- GtkEntry |url_entry_| ---------------+||
+  // ||+- GtkLabel ------+ +- GtkEntry |url_entry_| ---------------+|| *
   // |||                 | |                                       |||
   // ||+-----------------+ +---------------------------------------+||
   // |+-------------------------------------------------------------+|
@@ -122,58 +124,65 @@ void BookmarkEditorGtk::Init(GtkWindow* parent_window) {
   // ||+-----------------------------------------------------------+||
   // |+-------------------------------------------------------------+|
   // +---------------------------------------------------------------+
+  //
+  // * The url and corresponding label are not shown if creating a new folder.
   GtkWidget* content_area = GTK_DIALOG(dialog_)->vbox;
   gtk_box_set_spacing(GTK_BOX(content_area), gtk_util::kContentAreaSpacing);
 
   GtkWidget* vbox = gtk_vbox_new(FALSE, 12);
 
   name_entry_ = gtk_entry_new();
-  gtk_entry_set_text(GTK_ENTRY(name_entry_),
-                     node_ ? WideToUTF8(node_->GetTitle()).c_str() : "");
+  std::string title;
+  if (details_.type == EditDetails::EXISTING_NODE) {
+    title = WideToUTF8(details_.existing_node->GetTitle());
+  } else if (details_.type == EditDetails::NEW_FOLDER) {
+    title = WideToUTF8(
+        l10n_util::GetString(IDS_BOOMARK_EDITOR_NEW_FOLDER_NAME));
+  }
+  gtk_entry_set_text(GTK_ENTRY(name_entry_), title.c_str());
   g_signal_connect(G_OBJECT(name_entry_), "changed",
                    G_CALLBACK(OnEntryChanged), this);
   gtk_entry_set_activates_default(GTK_ENTRY(name_entry_), TRUE);
 
-  url_entry_ = gtk_entry_new();
-  gtk_entry_set_text(GTK_ENTRY(url_entry_),
-                     node_ ? node_->GetURL().spec().c_str() : "");
-  g_signal_connect(G_OBJECT(url_entry_), "changed",
-                   G_CALLBACK(OnEntryChanged), this);
-  gtk_entry_set_activates_default(GTK_ENTRY(url_entry_), TRUE);
+  GtkWidget* table;
+  if (details_.type != EditDetails::NEW_FOLDER) {
+    url_entry_ = gtk_entry_new();
+    std::string url_spec;
+    if (details_.type == EditDetails::EXISTING_NODE)
+      url_spec = details_.existing_node->GetURL().spec();
+    gtk_entry_set_text(GTK_ENTRY(url_entry_), url_spec.c_str());
+    g_signal_connect(G_OBJECT(url_entry_), "changed",
+                     G_CALLBACK(OnEntryChanged), this);
+    gtk_entry_set_activates_default(GTK_ENTRY(url_entry_), TRUE);
+    table = gtk_util::CreateLabeledControlsGroup(NULL,
+        l10n_util::GetStringUTF8(IDS_BOOMARK_EDITOR_NAME_LABEL).c_str(),
+        name_entry_,
+        l10n_util::GetStringUTF8(IDS_BOOMARK_EDITOR_URL_LABEL).c_str(),
+        url_entry_,
+        NULL);
 
-  GtkWidget* table = gtk_util::CreateLabeledControlsGroup(NULL,
-      l10n_util::GetStringUTF8(IDS_BOOMARK_EDITOR_NAME_LABEL).c_str(),
-      name_entry_,
-      l10n_util::GetStringUTF8(IDS_BOOMARK_EDITOR_URL_LABEL).c_str(),
-      url_entry_,
-      NULL);
+  } else {
+    url_entry_ = NULL;
+    table = gtk_util::CreateLabeledControlsGroup(NULL,
+        l10n_util::GetStringUTF8(IDS_BOOMARK_EDITOR_NAME_LABEL).c_str(),
+        name_entry_,
+        NULL);
+  }
 
   gtk_box_pack_start(GTK_BOX(vbox), table, FALSE, FALSE, 0);
 
   if (show_tree_) {
     GtkTreeIter selected_iter;
-    int64 selected_id = parent_ ? parent_->id() : 0;
+    int64 selected_id = 0;
+    if (details_.type == EditDetails::EXISTING_NODE)
+      selected_id = details_.existing_node->GetParent()->id();
+    else if (parent_)
+      selected_id = parent_->id();
     tree_store_ = bookmark_utils::MakeFolderTreeStore();
-    bookmark_utils::AddToTreeStore(bb_model_, selected_id,
-                                   tree_store_, &selected_iter);
-
-    GtkTreeViewColumn* icon_column =
-        gtk_tree_view_column_new_with_attributes(
-            "", gtk_cell_renderer_pixbuf_new(), "pixbuf",
-             bookmark_utils::FOLDER_ICON, NULL);
-    GtkTreeViewColumn* name_column =
-        gtk_tree_view_column_new_with_attributes(
-            "", gtk_cell_renderer_text_new(), "text",
-             bookmark_utils::FOLDER_NAME, NULL);
-
-    tree_view_ = gtk_tree_view_new_with_model(GTK_TREE_MODEL(tree_store_));
-    // Let |tree_view| own the store.
-    g_object_unref(tree_store_);
-    gtk_tree_view_set_headers_visible(GTK_TREE_VIEW(tree_view_), FALSE);
-    gtk_tree_view_append_column(GTK_TREE_VIEW(tree_view_), icon_column);
-    gtk_tree_view_append_column(GTK_TREE_VIEW(tree_view_), name_column);
+    bookmark_utils::AddToTreeStore(bb_model_, selected_id, tree_store_,
+                                   &selected_iter);
+    tree_view_ = bookmark_utils::MakeTreeViewForStore(tree_store_);
     gtk_widget_set_size_request(tree_view_, kTreeWidth, kTreeHeight);
-
     tree_selection_ = gtk_tree_view_get_selection(GTK_TREE_VIEW(tree_view_));
 
     GtkTreePath* path = NULL;
@@ -199,6 +208,9 @@ void BookmarkEditorGtk::Init(GtkWindow* parent_window) {
     gtk_container_add(GTK_CONTAINER(scroll_window), tree_view_);
 
     gtk_box_pack_start(GTK_BOX(vbox), scroll_window, TRUE, TRUE, 0);
+
+    g_signal_connect(gtk_tree_view_get_selection(GTK_TREE_VIEW(tree_view_)),
+                     "changed", G_CALLBACK(OnSelectionChanged), this);
   }
 
   gtk_box_pack_start(GTK_BOX(content_area), vbox, TRUE, TRUE, 0);
@@ -245,7 +257,8 @@ void BookmarkEditorGtk::BookmarkNodeRemoved(BookmarkModel* model,
                                             const BookmarkNode* parent,
                                             int index,
                                             const BookmarkNode* node) {
-  if ((node_ && node_->HasAncestor(node)) ||
+  if ((details_.type == EditDetails::EXISTING_NODE &&
+       details_.existing_node->HasAncestor(node)) ||
       (parent_ && parent_->HasAncestor(node))) {
     // The node, or its parent was removed. Close the dialog.
     Close();
@@ -266,6 +279,9 @@ void BookmarkEditorGtk::Reset() {
 }
 
 GURL BookmarkEditorGtk::GetInputURL() const {
+  if (!url_entry_)
+    return GURL();  // Happens when we're editing a folder.
+
   std::wstring input = URLFixerUpper::FixupURL(
       UTF8ToWide(gtk_entry_get_text(GTK_ENTRY(url_entry_))), L"");
   return GURL(WideToUTF8(input));
@@ -282,7 +298,7 @@ void BookmarkEditorGtk::ApplyEdits() {
   if (show_tree_) {
     if (!gtk_tree_selection_get_selected(tree_selection_, NULL,
                                          &currently_selected_iter)) {
-      NOTREACHED() << "Something should always be selected";
+      ApplyEdits(NULL);
       return;
     }
   }
@@ -299,9 +315,9 @@ void BookmarkEditorGtk::ApplyEdits(GtkTreeIter* selected_parent) {
   GURL new_url(GetInputURL());
   std::wstring new_title(GetInputTitle());
 
-  if (!show_tree_) {
+  if (!show_tree_ || !selected_parent) {
     bookmark_utils::ApplyEditsWithNoGroupChange(
-        bb_model_, parent_, node_, new_title, new_url, handler_.get());
+        bb_model_, parent_, details_, new_title, new_url, handler_.get());
     return;
   }
 
@@ -317,27 +333,35 @@ void BookmarkEditorGtk::ApplyEdits(GtkTreeIter* selected_parent) {
   }
 
   bookmark_utils::ApplyEditsWithPossibleGroupChange(
-      bb_model_, new_parent, node_, new_title, new_url, handler_.get());
+      bb_model_, new_parent, details_, new_title, new_url, handler_.get());
 }
 
 void BookmarkEditorGtk::AddNewGroup(GtkTreeIter* parent, GtkTreeIter* child) {
   gtk_tree_store_append(tree_store_, child, parent);
   gtk_tree_store_set(
       tree_store_, child,
-      bookmark_utils::FOLDER_ICON,
-      bookmark_utils::GetFolderIcon(),
+      bookmark_utils::FOLDER_ICON, GtkThemeProvider::GetFolderIcon(true),
       bookmark_utils::FOLDER_NAME,
-      l10n_util::GetStringUTF8(IDS_BOOMARK_EDITOR_NEW_FOLDER_NAME).c_str(),
+          l10n_util::GetStringUTF8(IDS_BOOMARK_EDITOR_NEW_FOLDER_NAME).c_str(),
       bookmark_utils::ITEM_ID, static_cast<int64>(0),
+      bookmark_utils::IS_EDITABLE, TRUE,
       -1);
+}
+
+// static
+void BookmarkEditorGtk::OnSelectionChanged(GtkTreeSelection* selection,
+                                           BookmarkEditorGtk* dialog) {
+  if (!gtk_tree_selection_get_selected(dialog->tree_selection_, NULL, NULL))
+    gtk_widget_set_sensitive(dialog->new_folder_button_, FALSE);
+  else
+    gtk_widget_set_sensitive(dialog->new_folder_button_, TRUE);
 }
 
 // static
 void BookmarkEditorGtk::OnResponse(GtkDialog* dialog, int response_id,
                                    BookmarkEditorGtk* window) {
-  if (response_id == GTK_RESPONSE_ACCEPT) {
+  if (response_id == GTK_RESPONSE_ACCEPT)
     window->ApplyEdits();
-  }
 
   window->Close();
 }
@@ -364,16 +388,27 @@ void BookmarkEditorGtk::OnWindowDestroy(GtkWidget* widget,
 // static
 void BookmarkEditorGtk::OnEntryChanged(GtkEditable* entry,
                                        BookmarkEditorGtk* dialog) {
-  const GURL url(dialog->GetInputURL());
-  if (!url.is_valid()) {
-    gtk_widget_modify_base(dialog->url_entry_, GTK_STATE_NORMAL, &kErrorColor);
-    gtk_dialog_set_response_sensitive(GTK_DIALOG(dialog->dialog_),
-                                      GTK_RESPONSE_ACCEPT, FALSE);
+  gboolean can_close = TRUE;
+  if (dialog->details_.type == EditDetails::NEW_FOLDER) {
+    if (dialog->GetInputTitle().empty()) {
+      gtk_widget_modify_base(dialog->name_entry_, GTK_STATE_NORMAL,
+                             &kErrorColor);
+      can_close = FALSE;
+    } else {
+      gtk_widget_modify_base(dialog->name_entry_, GTK_STATE_NORMAL, NULL);
+    }
   } else {
-    gtk_widget_modify_base(dialog->url_entry_, GTK_STATE_NORMAL, NULL);
-    gtk_dialog_set_response_sensitive(GTK_DIALOG(dialog->dialog_),
-                                      GTK_RESPONSE_ACCEPT, TRUE);
+    GURL url(dialog->GetInputURL());
+    if (!url.is_valid()) {
+      gtk_widget_modify_base(dialog->url_entry_, GTK_STATE_NORMAL,
+                             &kErrorColor);
+      can_close = FALSE;
+    } else {
+      gtk_widget_modify_base(dialog->url_entry_, GTK_STATE_NORMAL, NULL);
+    }
   }
+  gtk_dialog_set_response_sensitive(GTK_DIALOG(dialog->dialog_),
+                                    GTK_RESPONSE_ACCEPT, can_close);
 }
 
 // static
@@ -385,7 +420,8 @@ void BookmarkEditorGtk::OnNewFolderClicked(GtkWidget* button,
   if (!gtk_tree_selection_get_selected(dialog->tree_selection_,
                                        NULL,
                                        &iter)) {
-    NOTREACHED() << "Something should always be selected";
+    NOTREACHED() << "Something should always be selected if New Folder " <<
+                    "is clicked";
     return;
   }
 
@@ -395,6 +431,11 @@ void BookmarkEditorGtk::OnNewFolderClicked(GtkWidget* button,
   GtkTreePath* path = gtk_tree_model_get_path(
       GTK_TREE_MODEL(dialog->tree_store_), &new_item_iter);
   gtk_tree_view_expand_to_path(GTK_TREE_VIEW(dialog->tree_view_), path);
-  gtk_tree_selection_select_path(dialog->tree_selection_, path);
+
+  // Make the folder name editable.
+  gtk_tree_view_set_cursor(GTK_TREE_VIEW(dialog->tree_view_), path,
+      gtk_tree_view_get_column(GTK_TREE_VIEW(dialog->tree_view_), 0),
+      TRUE);
+
   gtk_tree_path_free(path);
 }

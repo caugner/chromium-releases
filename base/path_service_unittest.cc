@@ -27,7 +27,7 @@ bool ReturnsValidPath(int dir_type) {
 #if defined(OS_WIN)
 // Function to test DIR_LOCAL_APP_DATA_LOW on Windows XP. Make sure it fails.
 bool ReturnsInvalidPath(int dir_type) {
-  std::wstring path;
+  FilePath path;
   bool result = PathService::Get(base::DIR_LOCAL_APP_DATA_LOW, &path);
   return !result && path.empty();
 }
@@ -47,7 +47,7 @@ TEST_F(PathServiceTest, Get) {
   for (int key = base::DIR_CURRENT; key < base::PATH_END; ++key) {
     EXPECT_PRED1(ReturnsValidPath, key);
   }
-#ifdef OS_WIN
+#if defined(OS_WIN)
   for (int key = base::PATH_WIN_START + 1; key < base::PATH_WIN_END; ++key) {
     if (key == base::DIR_LOCAL_APP_DATA_LOW &&
         win_util::GetWinVersion() < win_util::WINVERSION_VISTA) {
@@ -57,6 +57,10 @@ TEST_F(PathServiceTest, Get) {
     } else {
       EXPECT_TRUE(ReturnsValidPath(key)) << key;
     }
+  }
+#elif defined(OS_MACOSX)
+  for (int key = base::PATH_MAC_START + 1; key < base::PATH_MAC_END; ++key) {
+      EXPECT_PRED1(ReturnsValidPath, key);
   }
 #endif
 }

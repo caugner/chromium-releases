@@ -79,7 +79,7 @@ namespace WebKit {
         WEBKIT_API void reset();
         WEBKIT_API void assign(const WebURLRequest&);
 
-        bool isNull() const { return m_private == 0; }
+        WEBKIT_API bool isNull() const;
 
         WEBKIT_API WebURL url() const;
         WEBKIT_API void setURL(const WebURL&);
@@ -129,9 +129,9 @@ namespace WebKit {
         WEBKIT_API int requestorProcessID() const;
         WEBKIT_API void setRequestorProcessID(int);
 
-        // Allows the request to be matched up with its app cache context.
-        WEBKIT_API int appCacheContextID() const;
-        WEBKIT_API void setAppCacheContextID(int id);
+        // Allows the request to be matched up with its app cache host.
+        WEBKIT_API int appCacheHostID() const;
+        WEBKIT_API void setAppCacheHostID(int id);
 
 #if defined(WEBKIT_IMPLEMENTATION)
         WebCore::ResourceRequest& toMutableResourceRequest();

@@ -12,6 +12,7 @@
 #include <time.h>
 
 #include "base/eintr_wrapper.h"
+#include "base/platform_file.h"
 #include "base/process_util.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
@@ -20,47 +21,31 @@
 #include "base/unix_domain_socket_posix.h"
 #include "chrome/common/sandbox_methods_linux.h"
 #include "webkit/api/public/gtk/WebFontInfo.h"
-#include "webkit/api/public/WebData.h"
-#include "webkit/api/public/WebKit.h"
-#include "webkit/api/public/WebKitClient.h"
 
 #include "SkFontHost_fontconfig_direct.h"
 #include "SkFontHost_fontconfig_ipc.h"
 
-using WebKit::WebClipboard;
-using WebKit::WebData;
+using WebKit::WebCString;
 using WebKit::WebFontInfo;
-using WebKit::WebKitClient;
-using WebKit::WebLocalizedString;
-using WebKit::WebMimeRegistry;
-using WebKit::WebPluginInfo;
-using WebKit::WebPluginListBuilder;
-using WebKit::WebSandboxSupport;
-using WebKit::WebString;
-using WebKit::WebThemeEngine;
 using WebKit::WebUChar;
-using WebKit::WebURL;
-using WebKit::WebURLLoader;
 
 // http://code.google.com/p/chromium/wiki/LinuxSandboxIPC
 
 // BEWARE: code in this file run across *processes* (not just threads).
 
 // This code runs in a child process
-class SandboxIPCProcess : public WebKitClient {
+class SandboxIPCProcess  {
  public:
   // lifeline_fd: this is the read end of a pipe which the browser process
-  //   holds the other end of. If the browser process dies, it's descriptors are
+  //   holds the other end of. If the browser process dies, its descriptors are
   //   closed and we will noticed an EOF on the pipe. That's our signal to exit.
-  // browser_socket: the 'browser's end of the sandbox IPC socketpair. From the
-  //   point of view of the renderer's, it's talking to the browser but this
+  // browser_socket: the browser's end of the sandbox IPC socketpair. From the
+  //   point of view of the renderer, it's talking to the browser but this
   //   object actually services the requests.
   SandboxIPCProcess(int lifeline_fd, int browser_socket)
       : lifeline_fd_(lifeline_fd),
         browser_socket_(browser_socket),
         font_config_(new FontConfigDirect()) {
-    WebKit::initialize(this);
-
     base::InjectiveMultimap multimap;
     multimap.push_back(base::InjectionArc(0, lifeline_fd, false));
     multimap.push_back(base::InjectionArc(0, browser_socket, false));
@@ -99,56 +84,6 @@ class SandboxIPCProcess : public WebKitClient {
       }
     }
   }
-
-  // ---------------------------------------------------------------------------
-  // WebKitClient impl...
-
-  virtual WebClipboard* clipboard() { return NULL; }
-  virtual WebMimeRegistry* mimeRegistry() { return NULL; }
-  virtual WebSandboxSupport* sandboxSupport() { return NULL; }
-  virtual WebThemeEngine* themeEngine() { return NULL; }
-
-  virtual bool getFileSize(const WebString& path, long long& result) {
-    return false;
-  }
-
-  virtual unsigned long long visitedLinkHash(const char*, size_t) { return 0; }
-  virtual bool isLinkVisited(unsigned long long) { return false; }
-
-  virtual void setCookies(const WebURL&, const WebURL&, const WebString&) { }
-  virtual WebString cookies(const WebURL&, const WebURL&) { return WebString(); }
-
-  virtual void prefetchHostName(const WebString&) { }
-
-  virtual WebURLLoader* createURLLoader() { return NULL; }
-
-  virtual void getPluginList(bool refresh, WebPluginListBuilder*) { }
-
-  virtual void decrementStatsCounter(const char*) { }
-  virtual void incrementStatsCounter(const char*) { }
-
-  virtual void traceEventBegin(const char* name, void*, const char*) { }
-  virtual void traceEventEnd(const char* name, void*, const char*) { }
-
-  virtual WebData loadResource(const char*) { return WebData(); }
-  virtual WebString queryLocalizedString(WebLocalizedString::Name) {
-    return WebString();
-  }
-  virtual WebString queryLocalizedString(WebLocalizedString::Name, int) {
-    return WebString();
-  }
-
-  virtual void suddenTerminationChanged(bool) { }
-
-  virtual WebString defaultLocale() { return WebString(); }
-
-  virtual double currentTime() { return 0; }
-
-  virtual void setSharedTimerFiredFunction(void (*)()) { }
-  virtual void setSharedTimerFireTime(double) { }
-  virtual void stopSharedTimer() { }
-
-  virtual void callOnMainThread(void (*)()) { }
 
  private:
   // ---------------------------------------------------------------------------
@@ -276,11 +211,14 @@ class SandboxIPCProcess : public WebKitClient {
       chars[i] = c;
     }
 
-    const WebString family = WebFontInfo::familyForChars(chars.get(), num_chars);
-    const std::string family_utf8 = UTF16ToUTF8(family);
+    WebCString family = WebFontInfo::familyForChars(chars.get(), num_chars);
 
     Pickle reply;
-    reply.WriteString(family_utf8);
+    if (family.data()) {
+      reply.WriteString(family.data());
+    } else {
+      reply.WriteString("");
+    }
     SendRendererReply(fds, reply, -1);
   }
 
@@ -296,14 +234,16 @@ class SandboxIPCProcess : public WebKitClient {
 
     time_t time;
     memcpy(&time, time_string.data(), sizeof(time));
-    struct tm expanded_time;
-    localtime_r(&time, &expanded_time);
+    // We use localtime here because we need the tm_zone field to be filled
+    // out. Since we are a single-threaded process, this is safe.
+    const struct tm* expanded_time = localtime(&time);
 
-    const std::string result_string(reinterpret_cast<char*>(&expanded_time),
-                                    sizeof(expanded_time));
+    const std::string result_string(
+        reinterpret_cast<const char*>(expanded_time), sizeof(struct tm));
 
     Pickle reply;
     reply.WriteString(result_string);
+    reply.WriteString(expanded_time->tm_zone);
     SendRendererReply(fds, reply, -1);
   }
 
@@ -345,7 +285,13 @@ class SandboxIPCProcess : public WebKitClient {
 // Runs on the main thread at startup.
 RenderSandboxHostLinux::RenderSandboxHostLinux() {
   int fds[2];
-  CHECK(socketpair(AF_UNIX, SOCK_DGRAM, 0, fds) == 0);
+  // We use SOCK_SEQPACKET rather than SOCK_DGRAM to prevent the renderer from
+  // sending datagrams to other sockets on the system. The sandbox may prevent
+  // the renderer from calling socket() to create new sockets, but it'll still
+  // inherit some sockets. With PF_UNIX+SOCK_DGRAM, it can call sendmsg to send
+  // a datagram to any (abstract) socket on the same system. With
+  // SOCK_SEQPACKET, this is prevented.
+  CHECK(socketpair(AF_UNIX, SOCK_SEQPACKET, 0, fds) == 0);
 
   renderer_socket_ = fds[0];
   const int browser_socket = fds[1];
@@ -355,8 +301,8 @@ RenderSandboxHostLinux::RenderSandboxHostLinux() {
   const int child_lifeline_fd = pipefds[0];
   childs_lifeline_fd_ = pipefds[1];
 
-  const pid_t child = fork();
-  if (child == 0) {
+  pid_ = fork();
+  if (pid_ == 0) {
     SandboxIPCProcess handler(child_lifeline_fd, browser_socket);
     handler.Run();
     _exit(0);

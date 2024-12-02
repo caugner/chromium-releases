@@ -2,11 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// -----------------------------------------------------------------------------
-// NOTE: If you change this file you need to touch renderer_resources.grd to
-// have your change take effect.
-// -----------------------------------------------------------------------------
-
 var chrome = chrome || {};
 (function () {
   native function GetChromeHidden();
@@ -24,9 +19,24 @@ var chrome = chrome || {};
   //   chrome.tabs.onChanged.addListener(function(data) { alert(data); });
   //   chromeHidden.Event.dispatch("tab-changed", "hi");
   // will result in an alert dialog that says 'hi'.
-  chrome.Event = function(opt_eventName) {
+  chrome.Event = function(opt_eventName, opt_argSchemas) {
     this.eventName_ = opt_eventName;
     this.listeners_ = [];
+
+    // Validate event parameters if we are in debug.     
+    if (opt_argSchemas &&
+        chromeHidden.validateCallbacks &&
+        chromeHidden.validate) {
+
+      this.validate_ = function(args) {
+        try {
+          chromeHidden.validate(args, opt_argSchemas);
+        } catch (exception) {
+          return "Event validation error during " + opt_eventName + " -- " +
+                 exception;
+        }
+      }
+    }
   };
 
   // A map of event names to the event object that is registered to that name.
@@ -45,7 +55,7 @@ var chrome = chrome || {};
       if (args) {
         args = JSON.parse(args);
       }
-      attachedNamedEvents[name].dispatch.apply(
+      return attachedNamedEvents[name].dispatch.apply(
           attachedNamedEvents[name], args);
     }
   };
@@ -90,6 +100,11 @@ var chrome = chrome || {};
     return this.findListeners_(cb) > -1;
   };
 
+  // Test if any callbacks are registered for this event.
+  chrome.Event.prototype.hasListeners = function(cb) {
+    return this.listeners_.length > 0;
+  };
+
   // Returns the index of the given callback if registered, or -1 if not
   // found.
   chrome.Event.prototype.findListener_ = function(cb) {
@@ -106,6 +121,12 @@ var chrome = chrome || {};
   // arguments to this function each listener.
   chrome.Event.prototype.dispatch = function(varargs) {
     var args = Array.prototype.slice.call(arguments);
+    if (this.validate_) {
+      var validationErrors = this.validate_(args);
+      if (validationErrors) {
+        return validationErrors;
+      }
+    }
     for (var i = 0; i < this.listeners_.length; i++) {
       try {
         this.listeners_[i].apply(null, args);

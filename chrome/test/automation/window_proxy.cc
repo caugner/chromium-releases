@@ -16,25 +16,12 @@
 #include "chrome/test/automation/tab_proxy.h"
 #include "googleurl/src/gurl.h"
 
-#if defined(OS_WIN)
-bool WindowProxy::GetHWND(HWND* handle) const {
-  if (!is_valid()) return false;
-
-  if (!handle) {
-    NOTREACHED();
-    return false;
-  }
-
-  return sender_->Send(new AutomationMsg_WindowHWND(0, handle_, handle));
-}
-
-bool WindowProxy::SimulateOSClick(const POINT& click, int flags) {
+bool WindowProxy::SimulateOSClick(const gfx::Point& click, int flags) {
   if (!is_valid()) return false;
 
   return sender_->Send(
       new AutomationMsg_WindowClick(0, handle_, click, flags));
 }
-#endif  // defined(OS_WIN)
 
 bool WindowProxy::GetWindowTitle(string16* text) {
   if (!is_valid()) return false;
@@ -47,7 +34,7 @@ bool WindowProxy::GetWindowTitle(string16* text) {
   return sender_->Send(new AutomationMsg_WindowTitle(0, handle_, text));
 }
 
-bool WindowProxy::SimulateOSKeyPress(wchar_t key, int flags) {
+bool WindowProxy::SimulateOSKeyPress(base::KeyboardCode key, int flags) {
   if (!is_valid()) return false;
 
   return sender_->Send(
@@ -106,6 +93,15 @@ bool WindowProxy::GetViewBoundsWithTimeout(int view_id, gfx::Rect* bounds,
   return result;
 }
 
+bool WindowProxy::GetBounds(gfx::Rect* bounds) {
+  if (!is_valid())
+    return false;
+  bool result = false;
+  sender_->Send(new AutomationMsg_GetWindowBounds(0, handle_, bounds,
+                                                  &result));
+  return result;
+}
+
 bool WindowProxy::SetBounds(const gfx::Rect& bounds) {
   if (!is_valid())
     return false;
@@ -154,5 +150,16 @@ scoped_refptr<BrowserProxy> WindowProxy::GetBrowserWithTimeout(
   // Since there is no scoped_refptr::attach.
   scoped_refptr<BrowserProxy> result;
   result.swap(&browser);
+  return result;
+}
+
+bool WindowProxy::IsMaximized(bool* maximized) {
+  if (!is_valid())
+    return false;
+
+  bool result = false;
+
+  sender_->Send(new AutomationMsg_IsWindowMaximized(0, handle_, maximized,
+                                                    &result));
   return result;
 }

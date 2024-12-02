@@ -32,8 +32,12 @@
 
 // Tests functionality defined in render_node.cc/h
 
-#include "core/cross/client.h"
 #include "tests/common/win/testing_common.h"
+#include "core/cross/render_node.h"
+#include "core/cross/error_status.h"
+#include "core/cross/object_manager.h"
+#include "core/cross/pack.h"
+#include "core/cross/service_dependency.h"
 
 namespace o3d {
 
@@ -95,12 +99,12 @@ TEST_F(RenderNodeBasicTest, SetParent) {
 
   // Check that the node was added as a child to the parent transform
   const RenderNodeArray children = parent->GetChildren();
-  EXPECT_EQ(1, children.size());
+  EXPECT_EQ(1U, children.size());
   EXPECT_EQ(render_node, children[0]);
 
   // Check that SetParent(NULL) works properly too
   render_node->SetParent(NULL);
-  EXPECT_EQ(0, parent->GetChildren().size());
+  EXPECT_EQ(0U, parent->GetChildren().size());
 }
 
 TEST_F(RenderNodeBasicTest, SetParentCyclic) {

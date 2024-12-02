@@ -22,6 +22,7 @@ MSVC_POP_WARNING();
 #include "webkit/api/public/WebRect.h"
 #include "webkit/api/public/WebURL.h"
 #include "webkit/api/public/WebURLRequest.h"
+#include "webkit/api/public/WebViewClient.h"
 #include "webkit/glue/glue_util.h"
 #include "webkit/glue/inspector_client_impl.h"
 #include "webkit/glue/webdevtoolsagent_impl.h"
@@ -41,116 +42,51 @@ static const float kDefaultInspectorYPos = 50;
 static const float kDefaultInspectorHeight = 640;
 static const float kDefaultInspectorWidth = 480;
 
-WebInspectorClient::WebInspectorClient(WebViewImpl* webView)
-  : inspected_web_view_(webView)
-  , inspector_web_view_(0) {
+InspectorClientImpl::InspectorClientImpl(WebViewImpl* webView)
+    : inspected_web_view_(webView) {
   ASSERT(inspected_web_view_);
 }
 
-WebInspectorClient::~WebInspectorClient() {
+InspectorClientImpl::~InspectorClientImpl() {
 }
 
-void WebInspectorClient::inspectorDestroyed() {
-  delete this;
+void InspectorClientImpl::inspectorDestroyed() {
+  // Our lifetime is bound to the WebViewImpl.
 }
 
-Page* WebInspectorClient::createPage() {
-  if (inspected_web_view_->GetWebDevToolsAgentImpl())
-    return NULL;
-
-  WebCore::Page* page;
-
-  if (inspector_web_view_ != NULL) {
-    page = inspector_web_view_->page();
-    ASSERT(page != NULL);
-    if (page != NULL)
-      return page;
-  }
-
-  WebViewDelegate* delegate = inspected_web_view_->GetDelegate();
-  if (!delegate)
-    return NULL;
-  inspector_web_view_ = static_cast<WebViewImpl*>(
-      delegate->CreateWebView(inspected_web_view_, true, GURL()));
-  if (!inspector_web_view_)
-    return NULL;
-
-  inspector_web_view_->main_frame()->LoadRequest(
-      WebURLRequest(webkit_glue::GetInspectorURL()));
-
-  page = inspector_web_view_->page();
-
-  page->chrome()->setToolbarsVisible(false);
-  page->chrome()->setStatusbarVisible(false);
-  page->chrome()->setScrollbarsVisible(false);
-  page->chrome()->setMenubarVisible(false);
-  page->chrome()->setResizable(true);
-
-  // Don't allow inspection of inspector.
-  page->settings()->setDeveloperExtrasEnabled(false);
-  page->settings()->setPrivateBrowsingEnabled(true);
-  page->settings()->setPluginsEnabled(false);
-  page->settings()->setJavaEnabled(false);
-
-  FloatRect windowRect = page->chrome()->windowRect();
-  FloatSize pageSize = page->chrome()->pageRect().size();
-  windowRect.setX(kDefaultInspectorXPos);
-  windowRect.setY(kDefaultInspectorYPos);
-  windowRect.setWidth(kDefaultInspectorHeight);
-  windowRect.setHeight(kDefaultInspectorWidth);
-  page->chrome()->setWindowRect(windowRect);
-
-  page->chrome()->show();
-
-  return page;
+Page* InspectorClientImpl::createPage() {
+  // This method should never be called in Chrome as inspector front-end lives
+  // in a separate process.
+  NOTREACHED();
+  return NULL;
 }
 
-void WebInspectorClient::showWindow() {
-  if (inspected_web_view_->GetWebDevToolsAgentImpl())
-    return;
-
-  InspectorController* inspector = inspected_web_view_->page()->inspectorController();
+void InspectorClientImpl::showWindow() {
+  DCHECK(inspected_web_view_->GetWebDevToolsAgentImpl());
+  InspectorController* inspector =
+      inspected_web_view_->page()->inspectorController();
   inspector->setWindowVisible(true);
-
-  // Notify the webview delegate of how many resources we're inspecting.
-  WebViewDelegate* d = inspected_web_view_->delegate();
-  DCHECK(d);
 }
 
-void WebInspectorClient::closeWindow() {
-  if (inspected_web_view_->GetWebDevToolsAgentImpl())
-    return;
-
-  inspector_web_view_ = NULL;
-
-  hideHighlight();
-
+void InspectorClientImpl::closeWindow() {
   if (inspected_web_view_->page())
     inspected_web_view_->page()->inspectorController()->setWindowVisible(false);
 }
 
-bool WebInspectorClient::windowVisible() {
-  if (inspected_web_view_->GetWebDevToolsAgentImpl())
-    return false;
-
-  if (inspector_web_view_ != NULL) {
-    Page* page = inspector_web_view_->page();
-    ASSERT(page != NULL);
-    if (page != NULL)
-      return true;
-  }
+bool InspectorClientImpl::windowVisible() {
+  DCHECK(inspected_web_view_->GetWebDevToolsAgentImpl());
   return false;
 }
 
-void WebInspectorClient::attachWindow() {
+void InspectorClientImpl::attachWindow() {
   // TODO(jackson): Implement this
 }
 
-void WebInspectorClient::detachWindow() {
+void InspectorClientImpl::detachWindow() {
   // TODO(jackson): Implement this
 }
 
-void WebInspectorClient::setAttachedWindowHeight(unsigned int height) {
+void InspectorClientImpl::setAttachedWindowHeight(unsigned int height) {
   // TODO(dglazkov): Implement this
   NOTIMPLEMENTED();
 }
@@ -161,37 +97,37 @@ static void invalidateNodeBoundingRect(WebViewImpl* web_view) {
   // In order to do so, we'd have to take scrolling into account.
   const WebSize& size = web_view->size();
   WebRect damaged_rect(0, 0, size.width, size.height);
-  if (web_view->GetDelegate())
-    web_view->GetDelegate()->didInvalidateRect(damaged_rect);
+  if (web_view->client())
+    web_view->client()->didInvalidateRect(damaged_rect);
 }
 
-void WebInspectorClient::highlight(Node* node) {
+void InspectorClientImpl::highlight(Node* node) {
   // InspectorController does the actually tracking of the highlighted node
   // and the drawing of the highlight. Here we just make sure to invalidate
   // the rects of the old and new nodes.
   hideHighlight();
 }
 
-void WebInspectorClient::hideHighlight() {
+void InspectorClientImpl::hideHighlight() {
   // TODO: Should be able to invalidate a smaller rect.
   invalidateNodeBoundingRect(inspected_web_view_);
 }
 
-void WebInspectorClient::inspectedURLChanged(const String& newURL) {
+void InspectorClientImpl::inspectedURLChanged(const String& newURL) {
   // TODO(jackson): Implement this
 }
 
-String WebInspectorClient::localizedStringsURL() {
+String InspectorClientImpl::localizedStringsURL() {
   NOTIMPLEMENTED();
   return String();
 }
 
-String WebInspectorClient::hiddenPanels() {
+String InspectorClientImpl::hiddenPanels() {
   // Enumerate tabs that are currently disabled.
   return "scripts,profiles,databases";
 }
 
-void WebInspectorClient::populateSetting(
+void InspectorClientImpl::populateSetting(
     const String& key,
     InspectorController::Setting& setting) {
   LoadSettings();
@@ -199,7 +135,7 @@ void WebInspectorClient::populateSetting(
     setting = settings_->get(key);
 }
 
-void WebInspectorClient::storeSetting(
+void InspectorClientImpl::storeSetting(
     const String& key,
     const InspectorController::Setting& setting) {
   LoadSettings();
@@ -207,19 +143,23 @@ void WebInspectorClient::storeSetting(
   SaveSettings();
 }
 
-void WebInspectorClient::removeSetting(const String& key) {
+void InspectorClientImpl::removeSetting(const String& key) {
   LoadSettings();
   settings_->remove(key);
   SaveSettings();
 }
 
-void WebInspectorClient::LoadSettings() {
+void InspectorClientImpl::inspectorWindowObjectCleared() {
+  NOTIMPLEMENTED();
+}
+
+void InspectorClientImpl::LoadSettings() {
   if (settings_)
     return;
 
   settings_.set(new SettingsMap);
-  String data = webkit_glue::StdWStringToString(
-      inspected_web_view_->GetPreferences().inspector_settings);
+  String data = webkit_glue::WebStringToString(
+      inspected_web_view_->inspectorSettings());
   if (data.isEmpty())
     return;
 
@@ -252,7 +192,7 @@ void WebInspectorClient::LoadSettings() {
   }
 }
 
-void WebInspectorClient::SaveSettings() {
+void InspectorClientImpl::SaveSettings() {
   String data;
   for (SettingsMap::iterator it = settings_->begin(); it != settings_->end();
        ++it) {
@@ -293,6 +233,8 @@ void WebInspectorClient::SaveSettings() {
     data.append(entry);
     data.append("\n");
   }
-  inspected_web_view_->delegate()->UpdateInspectorSettings(
-      webkit_glue::StringToStdWString(data));
+  inspected_web_view_->setInspectorSettings(
+      webkit_glue::StringToWebString(data));
+  if (inspected_web_view_->client())
+    inspected_web_view_->client()->didUpdateInspectorSettings();
 }

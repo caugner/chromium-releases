@@ -41,10 +41,13 @@ class MockRenderThread : public RenderThreadBase {
   virtual bool Send(IPC::Message* msg);
 
   // Our mock thread doesn't do filtering.
-  virtual void AddFilter(IPC::ChannelProxy::MessageFilter* filter) {
-  }
-  virtual void RemoveFilter(IPC::ChannelProxy::MessageFilter* filter) {
-  }
+  virtual void AddFilter(IPC::ChannelProxy::MessageFilter* filter) { }
+  virtual void RemoveFilter(IPC::ChannelProxy::MessageFilter* filter) { }
+
+  // Our mock thread doesn't deal with hidden and restored tabs.
+  virtual void WidgetHidden() { }
+  virtual void WidgetRestored() { }
+
 
   //////////////////////////////////////////////////////////////////////////
   // The following functions are called by the test itself.
@@ -67,7 +70,7 @@ class MockRenderThread : public RenderThreadBase {
   void SendCloseMessage();
 
   // Returns the pseudo-printer instance.
-  const MockPrinter* printer() const { return printer_.get(); }
+  MockPrinter* printer() const { return printer_.get(); }
 
  private:
   // This function operates as a regular IPC listener.
@@ -81,10 +84,18 @@ class MockRenderThread : public RenderThreadBase {
   // The callee expects to be returned a valid channel_id.
   void OnMsgOpenChannelToExtension(
       int routing_id, const std::string& extension_id,
-      const std::string& channel_name, int* port_id);
+      const std::string& source_extension_id,
+      const std::string& target_extension_id, int* port_id);
 
+#if defined(OS_WIN)
   void OnDuplicateSection(base::SharedMemoryHandle renderer_handle,
                           base::SharedMemoryHandle* browser_handle);
+#endif
+
+#if defined(OS_MACOSX)
+  void OnAllocatePDFTransport(size_t buffer_size,
+                              base::SharedMemoryHandle* handle);
+#endif
 
   // The RenderView expects default print settings.
   void OnGetDefaultPrintSettings(ViewMsg_Print_Params* setting);

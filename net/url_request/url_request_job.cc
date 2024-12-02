@@ -122,13 +122,21 @@ void URLRequestJob::ContinueDespiteLastError() {
 
 void URLRequestJob::FollowDeferredRedirect() {
   DCHECK(deferred_redirect_status_code_ != -1);
+
   // NOTE: deferred_redirect_url_ may be invalid, and attempting to redirect to
   // such an URL will fail inside FollowRedirect.  The DCHECK above asserts
   // that we called OnReceivedRedirect.
 
-  FollowRedirect(deferred_redirect_url_, deferred_redirect_status_code_);
+  // It is also possible that FollowRedirect will drop the last reference to
+  // this job, so we need to reset our members before calling it.
+
+  GURL redirect_url = deferred_redirect_url_;
+  int redirect_status_code = deferred_redirect_status_code_;
+
   deferred_redirect_url_ = GURL();
   deferred_redirect_status_code_ = -1;
+
+  FollowRedirect(redirect_url, redirect_status_code);
 }
 
 int64 URLRequestJob::GetByteReadCount() const {
@@ -294,8 +302,8 @@ bool URLRequestJob::ReadFilteredData(int *bytes_read) {
       }
       case Filter::FILTER_ERROR: {
         filter_needs_more_output_space_ = false;
-        // TODO(jar): Figure out a better error code.
-        NotifyDone(URLRequestStatus(URLRequestStatus::FAILED, net::ERR_FAILED));
+        NotifyDone(URLRequestStatus(URLRequestStatus::FAILED,
+                   net::ERR_CONTENT_DECODING_FAILED));
         rv = false;
         break;
       }

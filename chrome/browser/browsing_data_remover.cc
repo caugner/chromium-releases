@@ -22,16 +22,13 @@
 #include "net/url_request/url_request_context.h"
 #include "webkit/glue/password_form.h"
 
-// Done so that we can use invokeLater on BrowsingDataRemovers and not have
+// Done so that we can use PostTask on BrowsingDataRemovers and not have
 // BrowsingDataRemover implement RefCounted.
-template<>
-void RunnableMethodTraits<BrowsingDataRemover>::RetainCallee(
-    BrowsingDataRemover* remover) {
-}
-template<>
-void RunnableMethodTraits<BrowsingDataRemover>::ReleaseCallee(
-    BrowsingDataRemover* remover) {
-}
+template <>
+struct RunnableMethodTraits<BrowsingDataRemover> {
+  void RetainCallee(BrowsingDataRemover* remover) {}
+  void ReleaseCallee(BrowsingDataRemover* remover) {}
+};
 
 bool BrowsingDataRemover::removing_ = false;
 
@@ -110,8 +107,9 @@ void BrowsingDataRemover::Remove(int remove_mask) {
   if (remove_mask & REMOVE_COOKIES) {
     UserMetrics::RecordAction(L"ClearBrowsingData_Cookies", profile_);
     net::CookieMonster* cookie_monster =
-        profile_->GetRequestContext()->cookie_store();
-    cookie_monster->DeleteAllCreatedBetween(delete_begin_, delete_end_, true);
+        profile_->GetRequestContext()->cookie_store()->GetCookieMonster();
+    if (cookie_monster)
+      cookie_monster->DeleteAllCreatedBetween(delete_begin_, delete_end_, true);
   }
 
   if (remove_mask & REMOVE_PASSWORDS) {
@@ -232,8 +230,21 @@ void BrowsingDataRemover::ClearCacheOnIOThread(base::Time delete_begin,
       profile_->GetRequestContext()->http_transaction_factory();
   disk_cache::Backend* cache = factory->GetCache()->disk_cache();
 
-  // The cache can be empty, for example on startup, in which case |cache| will
-  // be null and we don't need to do anything.
+  // |cache| can be null since it is lazily initialized, in this case we do
+  // nothing.
+  if (cache) {
+    if (delete_begin.is_null())
+      cache->DoomAllEntries();
+    else
+      cache->DoomEntriesBetween(delete_begin, delete_end);
+  }
+
+  // Get a pointer to the media cache.
+  factory = profile_->GetRequestContextForMedia()->http_transaction_factory();
+  cache = factory->GetCache()->disk_cache();
+
+  // |cache| can be null since it is lazily initialized, in this case we do
+  // nothing.
   if (cache) {
     if (delete_begin.is_null())
       cache->DoomAllEntries();

@@ -4,14 +4,13 @@
 
 #import "chrome/browser/cocoa/blocked_popup_container_controller.h"
 
-#include "app/l10n_util.h"
+#include "app/l10n_util_mac.h"
+#include "base/nsimage_cache_mac.h"
 #include "base/sys_string_conversions.h"
-#include "chrome/browser/cocoa/nsimage_cache.h"
+#import "chrome/browser/cocoa/bubble_view.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tab_contents/tab_contents_view.h"
 #include "grit/generated_resources.h"
-
-#import "chrome/browser/cocoa/background_gradient_view.h"
 
 // A C++ bridge class that manages the interaction between the C++ interface
 // and the Objective-C view controller that implements the popup blocker.
@@ -50,6 +49,7 @@ class BlockedPopupContainerViewBridge : public BlockedPopupContainerView {
 }
 
 - (void)dealloc {
+  [closeButton_ removeTrackingArea:closeTrackingArea_.get()];
   [view_ removeFromSuperview];
   [[NSNotificationCenter defaultCenter] removeObserver:self];
   [super dealloc];
@@ -68,10 +68,14 @@ class BlockedPopupContainerViewBridge : public BlockedPopupContainerView {
   static const float kCloseBoxPaddingY = 2.0;
   static const float kLabelPaddingX = 5.0;
 
+  NSWindow* window = [[self containingView] window];
+
   // Create it below the parent's bottom edge so we can animate it into place.
   NSRect startFrame = NSMakeRect(0.0, -kHeight, kWidth, kHeight);
-  view_.reset([[BackgroundGradientView alloc] initWithFrame:startFrame]);
+  view_.reset([[BubbleView alloc] initWithFrame:startFrame
+                                  themeProvider:window]);
   [view_ setAutoresizingMask:NSViewMinXMargin | NSViewMaxYMargin];
+  [view_ setCornerFlags:kRoundedTopLeftCorner | kRoundedTopRightCorner];
 
   // Create the text label and position it. We'll resize it later when the
   // label gets updated. The view owns the label, we only hold a weak reference.
@@ -88,11 +92,11 @@ class BlockedPopupContainerViewBridge : public BlockedPopupContainerView {
   [popupButton_ setPreferredEdge:NSMaxYEdge];
   // TODO(pinkerton): no matter what, the arrows always draw in the middle
   // of the button. We can turn off the arrows entirely, but then will the
-  // user ever know to click it? Leave them on for now.
-  //[[popupButton_ cell] setArrowPosition:NSPopUpNoArrow];
+  // user ever know to click it?
+  [[popupButton_ cell] setArrowPosition:NSPopUpNoArrow];
   [[popupButton_ cell] setAltersStateOfSelectedItem:NO];
   // If we don't add this, no title will ever display.
-  [popupButton_ addItemWithTitle:@"placeholder"];
+  [popupButton_ addItemWithTitle:@""];
   [view_ addSubview:popupButton_];
 
   // Register for notifications that the menu is about to display so we can
@@ -108,14 +112,28 @@ class BlockedPopupContainerViewBridge : public BlockedPopupContainerView {
                                  kCloseBoxPaddingY,
                                  kCloseBoxSize,
                                  kCloseBoxSize);
-  NSButton* close = [[[NSButton alloc] initWithFrame:closeFrame] autorelease];
-  [close setAutoresizingMask:NSViewMinXMargin];
-  [close setImage:nsimage_cache::ImageNamed(@"close_bar.pdf")];
-  [close setAlternateImage:nsimage_cache::ImageNamed(@"close_bar_p.pdf")];
-  [close setBordered:NO];
-  [close setTarget:self];
-  [close setAction:@selector(closePopup:)];
-  [view_ addSubview:close];
+  closeButton_.reset([[NSButton alloc] initWithFrame:closeFrame]);
+  [closeButton_ setAutoresizingMask:NSViewMinXMargin];
+  [closeButton_ setButtonType:NSMomentaryChangeButton];
+  [closeButton_ setImage:nsimage_cache::ImageNamed(@"close_bar.pdf")];
+  [closeButton_
+      setAlternateImage:nsimage_cache::ImageNamed(@"close_bar_p.pdf")];
+  [closeButton_ setBordered:NO];
+  [closeButton_ setTarget:self];
+  [closeButton_ setAction:@selector(closePopup:)];
+  [view_ addSubview:closeButton_];
+
+  // Set up the tracking rect for the close button mouseover.  Add it
+  // to the |closeButton_| view, but we'll handle the message ourself.
+  // The mouseover is always enabled, because the close button works
+  // regardless of key/main/active status.
+  closeTrackingArea_.reset(
+      [[NSTrackingArea alloc] initWithRect:[closeButton_ bounds]
+                                   options:NSTrackingMouseEnteredAndExited |
+                                           NSTrackingActiveAlways
+                                     owner:self
+                                  userInfo:nil]);
+  [closeButton_ addTrackingArea:closeTrackingArea_.get()];
 }
 
 // Returns the C++ brige object.
@@ -127,7 +145,10 @@ class BlockedPopupContainerViewBridge : public BlockedPopupContainerView {
 // so that it stays around as the RWHVMac is created/destroyed during
 // navigation.
 - (NSView*)containingView {
-  return container_->GetConstrainingContents(NULL)->view()->GetNativeView();
+  NSView* view = nil;
+  if (container_)
+    view = container_->GetConstrainingContents(NULL)->view()->GetNativeView();
+  return view;
 }
 
 - (void)show {
@@ -157,50 +178,68 @@ class BlockedPopupContainerViewBridge : public BlockedPopupContainerView {
 // Resize the view based on the new label contents. The autoresize mask will
 // take care of resizing everything else.
 - (void)resizeWithLabel:(NSString*)label {
-// TODO(pinkerton): fix this so that it measures the text so that it can
-// be localized.
-#if 0
+  // It would be nice to teach BubbleView to honor -sizeToFit, but it can't
+  // really handle the subviews that get added.  So just measure the string
+  // and pad for the views.
   NSDictionary* attributes =
       [NSDictionary dictionaryWithObjectsAndKeys:
-        NSFontAttributeName, [NSFont systemFontOfSize:25],
+        NSFontAttributeName, [view_ font],
         nil];
   NSSize stringSize = [label sizeWithAttributes:attributes];
+  // Keep the right edge in the same place.
   NSRect frame = [view_ frame];
-  float originalWidth = frame.size.width;
-  frame.size.width = stringSize.width + 16 + 5;
+  CGFloat originalWidth = frame.size.width;
+  frame.size.width =
+      stringSize.width + [closeButton_ frame].size.width +
+      [popupButton_ frame].origin.x + kBubbleViewTextPositionX;
   frame.origin.x -= frame.size.width - originalWidth;
   [view_ setFrame:frame];
-#endif
 }
 
 - (void)update {
-  size_t blockedPopups = container_->GetBlockedPopupCount();
+  size_t blockedNotices = container_->GetBlockedNoticeCount();
+  size_t blockedItems = container_->GetBlockedPopupCount() + blockedNotices;
   NSString* label = nil;
-  if (blockedPopups) {
-    label = base::SysUTF16ToNSString(
-        l10n_util::GetStringFUTF16(IDS_POPUPS_BLOCKED_COUNT,
-                                   UintToString16(blockedPopups)));
+  if (!blockedItems) {
+    label = l10n_util::GetNSString(IDS_POPUPS_UNBLOCKED);
+  } else if (!blockedNotices) {
+    label = l10n_util::GetNSStringF(IDS_POPUPS_BLOCKED_COUNT,
+                                    UintToString16(blockedItems));
   } else {
-    label = base::SysUTF16ToNSString(
-        l10n_util::GetStringUTF16(IDS_POPUPS_UNBLOCKED));
+    label = l10n_util::GetNSStringF(IDS_BLOCKED_NOTICE_COUNT,
+                                    UintToString16(blockedItems));
   }
   [self resizeWithLabel:label];
-  [popupButton_ setTitle:label];
+  [view_ setContent:label];
 }
 
 // Called when the user selects an item from the popup menu. The tag, if below
 // |kImpossibleNumberOfPopups| will be the index into the container's popup
-// array. In that case, we should display the popup. If >=
-// |kImpossibleNumberOfPopups|, it represents a host that we should whitelist.
+// array. In that case, we should display the popup. Otherwise, the tag is
+// either a host we should toggle whitelisting on or a notice (for which we do
+// nothing as yet).
 // |sender| is the NSMenuItem that was chosen.
 - (void)menuAction:(id)sender {
   size_t tag = static_cast<size_t>([sender tag]);
+
+  // Is this a click on a popup?
   if (tag < BlockedPopupContainer::kImpossibleNumberOfPopups) {
     container_->LaunchPopupAtIndex(tag);
-  } else {
-    size_t hostIndex = tag - BlockedPopupContainer::kImpossibleNumberOfPopups;
-    container_->ToggleWhitelistingForHost(hostIndex);
+    return;
   }
+
+  tag -= BlockedPopupContainer::kImpossibleNumberOfPopups;
+
+  // Is this a click on a host?
+  size_t hostCount = container_->GetPopupHostCount();
+  if (tag < hostCount) {
+    container_->ToggleWhitelistingForHost(tag);
+    return;
+  }
+
+  tag -= hostCount;
+
+  // Nothing to do for now for notices.
 }
 
 namespace {
@@ -242,8 +281,8 @@ void GetURLAndTitleForPopup(
   for (size_t i = 0; i < count; ++i) {
     string16 url, title;
     GetURLAndTitleForPopup(container_, i, &url, &title);
-    NSString* titleStr = base::SysUTF16ToNSString(
-        l10n_util::GetStringFUTF16(IDS_POPUP_TITLE_FORMAT, url, title));
+    NSString* titleStr =
+        l10n_util::GetNSStringF(IDS_POPUP_TITLE_FORMAT, url, title);
     scoped_nsobject<NSMenuItem> item(
         [[NSMenuItem alloc] initWithTitle:titleStr
                                    action:@selector(menuAction:)
@@ -259,17 +298,38 @@ void GetURLAndTitleForPopup(
   std::vector<std::string> hosts(container_->GetHosts());
   if (!hosts.empty() && count)
     [menu addItem:[NSMenuItem separatorItem]];
+  size_t first_host = BlockedPopupContainer::kImpossibleNumberOfPopups;
   for (size_t i = 0; i < hosts.size(); ++i) {
-    NSString* titleStr = base::SysUTF8ToNSString(
-        l10n_util::GetStringFUTF8(IDS_POPUP_HOST_FORMAT,
-                                  UTF8ToUTF16(hosts[i])));
+    NSString* titleStr =
+        l10n_util::GetNSStringF(IDS_POPUP_HOST_FORMAT, UTF8ToUTF16(hosts[i]));
     scoped_nsobject<NSMenuItem> item(
         [[NSMenuItem alloc] initWithTitle:titleStr
                                    action:@selector(menuAction:)
                             keyEquivalent:@""]);
     if (container_->IsHostWhitelisted(i))
       [item setState:NSOnState];
-    [item setTag:BlockedPopupContainer::kImpossibleNumberOfPopups + i];
+    [item setTag:first_host + i];
+    [item setTarget:self];
+    [menu addItem:item.get()];
+  }
+
+  // Add the list of notices. We begin tagging these at
+  // |kImpossibleNumberOfPopups + hosts.size()|.
+  size_t notice_count = container_->GetBlockedNoticeCount();
+  if (notice_count && (!hosts.empty() || count))
+    [menu addItem:[NSMenuItem separatorItem]];
+  size_t first_notice = first_host + hosts.size();
+  for (size_t i = 0; i < notice_count; ++i) {
+    std::string host;
+    string16 reason;
+    container_->GetHostAndReasonForNotice(i, &host, &reason);
+    NSString* titleStr =
+        l10n_util::GetNSStringF(IDS_NOTICE_TITLE_FORMAT, UTF8ToUTF16(host));
+    scoped_nsobject<NSMenuItem> item(
+        [[NSMenuItem alloc] initWithTitle:titleStr
+                                   action:@selector(menuAction:)
+                            keyEquivalent:@""]);
+    [item setTag:first_notice + i];
     [item setTarget:self];
     [menu addItem:item.get()];
   }
@@ -284,17 +344,26 @@ void GetURLAndTitleForPopup(
   [[notify object] setMenu:menu];
 }
 
-- (NSView*)view {
+// Only used for testing.
+- (BubbleView*)view {
   return view_.get();
-}
-
-- (NSPopUpButton*)popupButton {
-  return popupButton_;
 }
 
 // Only used for testing.
 - (void)setContainer:(BlockedPopupContainer*)container {
   container_ = container;
+}
+
+// Called when the mouse enters the tracking rect for the close box.
+- (void)mouseEntered:(NSEvent *)theEvent {
+  if ([theEvent trackingArea] == closeTrackingArea_)
+    [closeButton_ setImage:nsimage_cache::ImageNamed(@"close_bar_h.pdf")];
+}
+
+// Called when the mouse exits the tracking rect for the close box.
+- (void)mouseExited:(NSEvent *)theEvent {
+  if ([theEvent trackingArea] == closeTrackingArea_)
+    [closeButton_ setImage:nsimage_cache::ImageNamed(@"close_bar.pdf")];
 }
 
 @end

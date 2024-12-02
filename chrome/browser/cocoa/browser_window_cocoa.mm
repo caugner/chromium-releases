@@ -10,7 +10,11 @@
 #import "chrome/browser/cocoa/browser_window_controller.h"
 #import "chrome/browser/cocoa/clear_browsing_data_controller.h"
 #import "chrome/browser/cocoa/download_shelf_controller.h"
+#import "chrome/browser/cocoa/keyword_editor_cocoa_controller.h"
 #include "chrome/browser/cocoa/page_info_window_mac.h"
+#include "chrome/browser/cocoa/status_bubble_mac.h"
+#include "chrome/browser/cocoa/task_manager_mac.h"
+#import "chrome/browser/cocoa/theme_install_bubble_view.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/download/download_shelf.h"
 #include "chrome/common/notification_service.h"
@@ -24,8 +28,7 @@ BrowserWindowCocoa::BrowserWindowCocoa(Browser* browser,
                                        NSWindow* window)
   : window_(window),
     browser_(browser),
-    controller_(controller),
-    download_shelf_() {
+    controller_(controller) {
   // This pref applies to all windows, so all must watch for it.
   registrar_.Add(this, NotificationType::BOOKMARK_BAR_VISIBILITY_PREF_CHANGED,
                  NotificationService::AllSources());
@@ -51,19 +54,28 @@ void BrowserWindowCocoa::SetBounds(const gfx::Rect& bounds) {
 
 // Callers assume that this doesn't immediately delete the Browser object.
 // The controller implementing the window delegate methods called from
-// |-performClose:| must take precautiions to ensure that.
+// |-performClose:| must take precautions to ensure that.
 void BrowserWindowCocoa::Close() {
-  [window_ orderOut:controller_];
-  [window_ performClose:controller_];
+  // If there is an overlay window, we contain a tab being dragged between
+  // windows. Don't hide the window as it makes the UI extra confused. We can
+  // still close the window, as that will happen when the drag completes.
+  if ([controller_ overlayWindow])
+    [controller_ deferPerformClose];
+  else {
+    // Make sure we hide the window immediately. Even though performClose:
+    // calls orderOut: eventually, it leaves the window on-screen long enough
+    // that we start to see tabs shutting down. http://crbug.com/23959
+    [window_ orderOut:controller_];
+    [window_ performClose:controller_];
+  }
 }
 
 void BrowserWindowCocoa::Activate() {
-  [window_ makeKeyAndOrderFront:controller_];
+  [controller_ activate];
 }
 
 void BrowserWindowCocoa::FlashFrame() {
-  [[NSApplication sharedApplication]
-      requestUserAttention:NSInformationalRequest];
+  [NSApp requestUserAttention:NSInformationalRequest];
 }
 
 bool BrowserWindowCocoa::IsActive() const {
@@ -90,15 +102,22 @@ void BrowserWindowCocoa::SelectedTabToolbarSizeChanged(bool is_animating) {
   // sort on Mac.
 }
 
+void BrowserWindowCocoa::SelectedTabExtensionShelfSizeChanged() {
+  NOTIMPLEMENTED();
+}
+
 void BrowserWindowCocoa::UpdateTitleBar() {
   NSString* newTitle =
       base::SysUTF16ToNSString(browser_->GetWindowTitleForCurrentTab());
 
-  // Window menu
-  [NSApp changeWindowsItem:window_ title:newTitle filename:NO];
+  [window_ setTitle:newTitle];
+}
 
-  // Dock
-  [window_ setMiniwindowTitle:newTitle];
+void BrowserWindowCocoa::ShelfVisibilityChanged() {
+  // Mac doesn't yet support showing the bookmark bar at a different size on
+  // the new tab page. When it does, this method should attempt to relayout the
+  // bookmark bar/extension shelf as their preferred height may have changed.
+  NOTIMPLEMENTED();
 }
 
 void BrowserWindowCocoa::UpdateDevTools() {
@@ -110,14 +129,14 @@ void BrowserWindowCocoa::FocusDevTools() {
 }
 
 void BrowserWindowCocoa::UpdateLoadingAnimations(bool should_animate) {
-  [controller_ updateLoadingAnimations:should_animate ? YES : NO];
+  // Do nothing on Mac.
 }
 
 void BrowserWindowCocoa::SetStarredState(bool is_starred) {
   [controller_ setStarredState:is_starred ? YES : NO];
 }
 
-gfx::Rect BrowserWindowCocoa::GetNormalBounds() const {
+gfx::Rect BrowserWindowCocoa::GetRestoredBounds() const {
   // TODO(pinkerton): not sure if we can get the non-zoomed bounds, or if it
   // really matters. We may want to let Cocoa handle all this for us.
   NSRect frame = [window_ frame];
@@ -184,6 +203,10 @@ void BrowserWindowCocoa::ToggleBookmarkBar() {
   bookmark_utils::ToggleWhenVisible(browser_->profile());
 }
 
+void BrowserWindowCocoa::ToggleExtensionShelf() {
+  NOTIMPLEMENTED();
+}
+
 void BrowserWindowCocoa::AddFindBar(
     FindBarCocoaController* find_bar_cocoa_controller) {
   return [controller_ addFindBar:find_bar_cocoa_controller];
@@ -194,7 +217,7 @@ void BrowserWindowCocoa::ShowAboutChromeDialog() {
 }
 
 void BrowserWindowCocoa::ShowTaskManager() {
-  NOTIMPLEMENTED();
+  TaskManagerMac::Show();
 }
 
 void BrowserWindowCocoa::ShowBookmarkManager() {
@@ -203,7 +226,8 @@ void BrowserWindowCocoa::ShowBookmarkManager() {
 
 void BrowserWindowCocoa::ShowBookmarkBubble(const GURL& url,
                                             bool already_bookmarked) {
-  NOTIMPLEMENTED();
+  [controller_ showBookmarkBubbleForURL:url
+                      alreadyBookmarked:(already_bookmarked ? YES : NO)];
 }
 
 bool BrowserWindowCocoa::IsDownloadShelfVisible() const {
@@ -231,7 +255,7 @@ void BrowserWindowCocoa::ShowImportDialog() {
 }
 
 void BrowserWindowCocoa::ShowSearchEnginesDialog() {
-  NOTIMPLEMENTED();
+  [KeywordEditorCocoaController showKeywordEditor:browser_->profile()];
 }
 
 void BrowserWindowCocoa::ShowPasswordManager() {
@@ -246,9 +270,23 @@ void BrowserWindowCocoa::ShowNewProfileDialog() {
   NOTIMPLEMENTED();
 }
 
-void BrowserWindowCocoa::ConfirmBrowserCloseWithPendingDownloads() {
+void BrowserWindowCocoa::ShowRepostFormWarningDialog(
+    TabContents* tab_contents) {
   NOTIMPLEMENTED();
-  browser_->InProgressDownloadResponse(false);
+}
+
+void BrowserWindowCocoa::ShowHistoryTooNewDialog() {
+  NOTIMPLEMENTED();
+}
+
+void BrowserWindowCocoa::ShowThemeInstallBubble() {
+  ThemeInstallBubbleView::Show(window_);
+}
+
+// We allow closing the window here since the real quit decision on Mac is made
+// in [AppController quit:].
+void BrowserWindowCocoa::ConfirmBrowserCloseWithPendingDownloads() {
+  browser_->InProgressDownloadResponse(true);
 }
 
 void BrowserWindowCocoa::ShowHTMLDialog(HtmlDialogUIDelegate* delegate,
@@ -276,6 +314,20 @@ void BrowserWindowCocoa::ShowPageInfo(Profile* profile,
   PageInfoWindowMac::ShowPageInfo(profile, url, ssl, show_history);
 }
 
+void BrowserWindowCocoa::ShowPageMenu() {
+  // No-op. Mac doesn't support showing the menus via alt keys.
+}
+
+void BrowserWindowCocoa::ShowAppMenu() {
+  // No-op. Mac doesn't support showing the menus via alt keys.
+}
+
+int BrowserWindowCocoa::GetCommandId(const NativeWebKeyboardEvent& event) {
+  // TODO(port): return the command id if this is a keyboard accelerator.
+  // CommandForKeyboardShortcut() doesn't have the full list.
+  return -1;
+}
+
 void BrowserWindowCocoa::Observe(NotificationType type,
                                  const NotificationSource& source,
                                  const NotificationDetails& details) {
@@ -283,7 +335,7 @@ void BrowserWindowCocoa::Observe(NotificationType type,
     // Only the key window gets a direct toggle from the menu.
     // Other windows hear about it from the notification.
     case NotificationType::BOOKMARK_BAR_VISIBILITY_PREF_CHANGED:
-      [controller_ toggleBookmarkBar];
+      [controller_ updateBookmarkBarVisibility];
       break;
     default:
       NOTREACHED();  // we don't ask for anything else!

@@ -32,9 +32,6 @@
 
 // This file contains the implementation for the EventManager class.
 
-// The precompiled header must appear before anything else.
-#include "core/cross/precompile.h"
-
 #include "core/cross/event_manager.h"
 
 #include "core/cross/client.h"
@@ -51,9 +48,14 @@ void EventManager::ProcessQueue() {
     DCHECK(!processing_event_queue_);
     processing_event_queue_ = true;
 #endif
-    const Event& event = event_queue_.front();
-    event_callbacks_[event.type()].Run(event);
+    Event event = event_queue_.front();
+
+    // Pop the event before invoking the callback; the callback might invoke
+    // Client::CleanUp, which empties the event queue. This can happen in Chrome
+    // if it invokes the unload handler when control enters JavaScript.
     event_queue_.pop_front();
+
+    event_callbacks_[event.type()].Run(event);
 #ifndef NDEBUG
     processing_event_queue_ = false;
 #endif
@@ -76,7 +78,12 @@ void EventManager::ClearEventCallback(Event::Type type) {
 void EventManager::AddEventToQueue(const Event& event) {
   // If we're shutting down or there's no callback registered to handle
   // this event type, we drop it.
-  if (valid_ && event_callbacks_[event.type()].IsSet()) {
+  // NOTE:If we have a callback registered for the click event then we allow
+  // MOUSEDOWN and MOUSEUP events through.
+  if (valid_ && (event_callbacks_[event.type()].IsSet() ||
+                 (event_callbacks_[Event::TYPE_CLICK].IsSet() &&
+                  (event.type() == Event::TYPE_MOUSEDOWN ||
+                   event.type() == Event::TYPE_MOUSEUP)))) {
     if (!event_queue_.empty()) {
       switch (event.type()) {
         case Event::TYPE_MOUSEMOVE:
@@ -127,7 +134,8 @@ void EventManager::AddEventToQueue(const Event& event) {
       }
     }
 
-    event_queue_.push_back(event);
+    if (event_callbacks_[event.type()].IsSet())
+      event_queue_.push_back(event);
 
     if (event.type() == Event::TYPE_MOUSEUP) {
       if (mousedown_in_plugin_ && event.in_plugin()) {

@@ -9,14 +9,14 @@
 
 #include "base/basictypes.h"
 #include "chrome/browser/tab_contents/navigation_controller.h"
-#include "third_party/skia/include/core/SkBitmap.h"
 #include "webkit/glue/window_open_disposition.h"
 
 class AlertInfoBarDelegate;
 class ConfirmInfoBarDelegate;
 class InfoBar;
 class LinkInfoBarDelegate;
-class ThemePreviewInfobarDelegate;
+class SkBitmap;
+class ThemeInstalledInfoBarDelegate;
 
 // An interface implemented by objects wishing to control an InfoBar.
 // Implementing this interface is not sufficient to use an InfoBar, since it
@@ -42,6 +42,14 @@ class ThemePreviewInfobarDelegate;
 // AddInfoBar!
 class InfoBarDelegate {
  public:
+  // The type of the infobar. It controls its appearence, such as its background
+  // color.
+  enum Type {
+    INFO_TYPE,
+    WARNING_TYPE,
+    ERROR_TYPE
+  };
+
   // Returns true if the supplied |delegate| is equal to this one. Equality is
   // left to the implementation to define. This function is called by the
   // TabContents when determining whether or not a delegate should be added
@@ -57,6 +65,9 @@ class InfoBarDelegate {
   // navigated somewhere else or reloaded.
   virtual bool ShouldExpire(
       const NavigationController::LoadCommittedDetails& details) const;
+
+  // Called when the user clicks on the close button to dismiss the infobar.
+  virtual void InfoBarDismissed() {}
 
   // Called after the InfoBar is closed. The delegate is free to delete itself
   // at this point.
@@ -85,10 +96,16 @@ class InfoBarDelegate {
     return NULL;
   }
 
-  // Returns a pointer to the ThemePreviewInfobarDelegate interface, if
+  // Returns a pointer to the ThemeInstalledInfoBarDelegate interface, if
   // implemented.
-  virtual ThemePreviewInfobarDelegate* AsThemePreviewInfobarDelegate() {
+  virtual ThemeInstalledInfoBarDelegate* AsThemePreviewInfobarDelegate() {
     return NULL;
+  }
+
+  // Returns the type of the infobar.  The type determines the appearance (such
+  // as background color) of the infobar.
+  virtual Type GetInfoBarType() {
+    return WARNING_TYPE;
   }
 
  protected:
@@ -234,4 +251,4 @@ class SimpleAlertInfoBarDelegate : public AlertInfoBarDelegate {
   DISALLOW_COPY_AND_ASSIGN(SimpleAlertInfoBarDelegate);
 };
 
-#endif  // #ifndef CHROME_BROWSER_TAB_CONTENTS_INFOBAR_DELEGATE_H_
+#endif  // CHROME_BROWSER_TAB_CONTENTS_INFOBAR_DELEGATE_H_

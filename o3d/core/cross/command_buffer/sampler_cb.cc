@@ -43,8 +43,7 @@ namespace o3d {
 
 using command_buffer::CommandBufferEntry;
 using command_buffer::CommandBufferHelper;
-using command_buffer::ResourceID;
-namespace set_sampler_states = command_buffer::set_sampler_states;
+using command_buffer::ResourceId;
 namespace sampler = command_buffer::sampler;
 
 namespace {
@@ -52,30 +51,30 @@ namespace {
 sampler::AddressingMode AddressModeToCB(Sampler::AddressMode o3d_mode) {
   switch (o3d_mode) {
     case Sampler::WRAP:
-      return sampler::WRAP;
+      return sampler::kWrap;
     case Sampler::MIRROR:
-      return sampler::MIRROR_REPEAT;
+      return sampler::kMirrorRepeat;
     case Sampler::CLAMP:
-      return sampler::CLAMP_TO_EDGE;
+      return sampler::kClampToEdge;
     case Sampler::BORDER:
-      return sampler::CLAMP_TO_BORDER;
+      return sampler::kClampToBorder;
     default:
       DLOG(ERROR) << "Unknown Address mode " << static_cast<int>(o3d_mode);
-      return sampler::WRAP;
+      return sampler::kWrap;
   }
 }
 
 sampler::FilteringMode FilterTypeToCB(Sampler::FilterType o3d_mode) {
   switch (o3d_mode) {
     case Sampler::NONE:
-      return sampler::NONE;
+      return sampler::kNone;
     case Sampler::POINT:
-      return sampler::POINT;
+      return sampler::kPoint;
     case Sampler::LINEAR:
     case Sampler::ANISOTROPIC:
-      return sampler::LINEAR;
+      return sampler::kLinear;
     default:
-      return sampler::NONE;
+      return sampler::kNone;
   }
 }
 
@@ -86,15 +85,11 @@ SamplerCB::SamplerCB(ServiceLocator* service_locator, RendererCB* renderer)
       renderer_(renderer) {
   DCHECK(renderer_);
   resource_id_ = renderer_->sampler_ids().AllocateID();
-  CommandBufferEntry args[1];
-  args[0].value_uint32 = resource_id_;
-  renderer_->helper()->AddCommand(command_buffer::CREATE_SAMPLER, 1, args);
+  renderer_->helper()->CreateSampler(resource_id_);
 }
 
 SamplerCB::~SamplerCB() {
-  CommandBufferEntry args[1];
-  args[0].value_uint32 = resource_id_;
-  renderer_->helper()->AddCommand(command_buffer::DESTROY_SAMPLER, 1, args);
+  renderer_->helper()->DestroySampler(resource_id_);
   renderer_->sampler_ids().FreeID(resource_id_);
 }
 
@@ -102,35 +97,32 @@ void SamplerCB::SetTextureAndStates() {
   CommandBufferHelper *helper = renderer_->helper();
   sampler::AddressingMode address_mode_u_cb = AddressModeToCB(address_mode_u());
   sampler::AddressingMode address_mode_v_cb = AddressModeToCB(address_mode_v());
+  sampler::AddressingMode address_mode_w_cb = AddressModeToCB(address_mode_w());
   sampler::FilteringMode mag_filter_cb = FilterTypeToCB(mag_filter());
   sampler::FilteringMode min_filter_cb = FilterTypeToCB(min_filter());
   sampler::FilteringMode mip_filter_cb = FilterTypeToCB(mip_filter());
-  if (mag_filter_cb == sampler::NONE) mag_filter_cb = sampler::POINT;
-  if (min_filter_cb == sampler::NONE) min_filter_cb = sampler::POINT;
-  int max_max_anisotropy = set_sampler_states::MaxAnisotropy::kMask;
+  if (mag_filter_cb == sampler::kNone) mag_filter_cb = sampler::kPoint;
+  if (min_filter_cb == sampler::kNone) min_filter_cb = sampler::kPoint;
+  int max_max_anisotropy =
+      command_buffer::cmd::SetSamplerStates::MaxAnisotropy::kMask;
   unsigned int max_anisotropy_cb =
       std::max(1, std::min(max_max_anisotropy, max_anisotropy()));
   if (min_filter() != Sampler::ANISOTROPIC) {
     max_anisotropy_cb = 1;
   }
-  CommandBufferEntry args[5];
-  args[0].value_uint32 = resource_id_;
-  args[1].value_uint32 =
-      set_sampler_states::AddressingU::MakeValue(address_mode_u_cb) |
-      set_sampler_states::AddressingV::MakeValue(address_mode_v_cb) |
-      set_sampler_states::AddressingW::MakeValue(sampler::WRAP) |
-      set_sampler_states::MagFilter::MakeValue(mag_filter_cb) |
-      set_sampler_states::MinFilter::MakeValue(min_filter_cb) |
-      set_sampler_states::MipFilter::MakeValue(mip_filter_cb) |
-      set_sampler_states::MaxAnisotropy::MakeValue(max_anisotropy_cb);
-  helper->AddCommand(command_buffer::SET_SAMPLER_STATES, 2, args);
+  helper->SetSamplerStates(
+      resource_id_,
+      address_mode_u_cb,
+      address_mode_v_cb,
+      address_mode_w_cb,
+      mag_filter_cb,
+      min_filter_cb,
+      mip_filter_cb,
+      max_anisotropy_cb);
 
   Float4 color = border_color();
-  args[1].value_float = color[0];
-  args[2].value_float = color[1];
-  args[3].value_float = color[2];
-  args[4].value_float = color[3];
-  helper->AddCommand(command_buffer::SET_SAMPLER_BORDER_COLOR, 5, args);
+  helper->SetSamplerBorderColor(resource_id_,
+                                color[0], color[1], color[2], color[3]);
 
   Texture *texture_object = texture();
   if (!texture_object) {
@@ -143,9 +135,9 @@ void SamplerCB::SetTextureAndStates() {
   }
 
   if (texture_object) {
-    args[1].value_uint32 =
-        reinterpret_cast<ResourceID>(texture_object->GetTextureHandle());
-    helper->AddCommand(command_buffer::SET_SAMPLER_TEXTURE, 2, args);
+    helper->SetSamplerTexture(
+        resource_id_,
+        reinterpret_cast<uint32>(texture_object->GetTextureHandle()));
   }
 }
 

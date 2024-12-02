@@ -70,14 +70,30 @@ void UTF8PartsToWideParts(const string& text_utf8,
       UTF8ComponentToWideComponent(text_utf8, parts_utf8.ref);
 }
 
+TrimPositions TrimWhitespaceUTF8(const std::string& input,
+                                 TrimPositions positions,
+                                 std::string* output) {
+  // This implementation is not so fast since it converts the text encoding
+  // twice. Please feel free to file a bug if this function hurts the
+  // performance of Chrome.
+  DCHECK(IsStringUTF8(input));
+  std::wstring input_wide = UTF8ToWide(input);
+  std::wstring output_wide;
+  TrimPositions result = TrimWhitespace(input_wide, positions, &output_wide);
+  *output = WideToUTF8(output_wide);
+  return result;
+}
+
 }  // namespace
 
 // does some basic fixes for input that we want to test for file-ness
 static void PrepareStringForFileOps(const FilePath& text,
                                     FilePath::StringType* output) {
-  TrimWhitespace(text.value(), TRIM_ALL, output);
 #if defined(OS_WIN)
+  TrimWhitespace(text.value(), TRIM_ALL, output);
   replace(output->begin(), output->end(), '/', '\\');
+#else
+  TrimWhitespaceUTF8(text.value(), TRIM_ALL, output);
 #endif
 }
 
@@ -230,7 +246,7 @@ static void FixupPort(const string& text,
 
   // Look for non-digit in port and strip if found.
   string port(text, part.begin, part.len);
-  for (string::iterator i = port.begin(); i != port.end(); ) {
+  for (string::iterator i = port.begin(); i != port.end();) {
     if (IsAsciiDigit(*i))
       ++i;
     else
@@ -430,7 +446,7 @@ string URLFixerUpper::SegmentURL(const string& text,
 string URLFixerUpper::FixupURL(const string& text,
                                const string& desired_tld) {
   string trimmed;
-  TrimWhitespace(text, TRIM_ALL, &trimmed);
+  TrimWhitespaceUTF8(text, TRIM_ALL, &trimmed);
   if (trimmed.empty())
     return string();  // Nothing here.
 

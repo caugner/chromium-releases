@@ -7,12 +7,13 @@
 #include "app/l10n_util.h"
 #include "chrome/browser/profile.h"
 #include "grit/generated_resources.h"
+#include "views/controls/menu/menu_item_view.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 // BookmarkContextMenu, public:
 
 BookmarkContextMenu::BookmarkContextMenu(
-    gfx::NativeView parent_window,
+    gfx::NativeWindow parent_window,
     Profile* profile,
     PageNavigator* page_navigator,
     const BookmarkNode* parent,
@@ -26,6 +27,9 @@ BookmarkContextMenu::BookmarkContextMenu(
       parent_window_(parent_window),
       ALLOW_THIS_IN_INITIALIZER_LIST(menu_(new views::MenuItemView(this))) {
   controller_->BuildMenu();
+}
+
+BookmarkContextMenu::~BookmarkContextMenu() {
 }
 
 void BookmarkContextMenu::RunMenuAt(const gfx::Point& point) {

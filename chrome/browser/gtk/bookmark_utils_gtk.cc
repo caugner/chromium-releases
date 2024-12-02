@@ -4,19 +4,19 @@
 
 #include "chrome/browser/gtk/bookmark_utils_gtk.h"
 
+#include "app/gfx/gtk_util.h"
+#include "app/gtk_dnd_util.h"
+#include "app/l10n_util.h"
 #include "app/resource_bundle.h"
-#include "base/gfx/gtk_util.h"
 #include "base/pickle.h"
 #include "base/string_util.h"
 #include "chrome/browser/bookmarks/bookmark_drag_data.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
+#include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/gtk/gtk_chrome_button.h"
-#include "chrome/browser/gtk/gtk_dnd_util.h"
 #include "chrome/browser/gtk/gtk_theme_provider.h"
 #include "chrome/browser/profile.h"
-#include "grit/app_resources.h"
-#include "grit/generated_resources.h"
-#include "grit/theme_resources.h"
+#include "chrome/common/gtk_util.h"
 
 namespace {
 
@@ -26,6 +26,10 @@ const int kBitsInAByte = 8;
 
 // Maximum number of characters on a bookmark button.
 const size_t kMaxCharsOnAButton = 15;
+
+// Max size of each component of the button tooltips.
+const size_t kMaxTooltipTitleLength = 100;
+const size_t kMaxTooltipURLLength = 400;
 
 // Only used for the background of the drag widget.
 const GdkColor kBackgroundColor = GDK_COLOR_RGB(0xe6, 0xed, 0xf4);
@@ -52,32 +56,19 @@ const char kBookmarkNode[] = "bookmark-node";
 // Spacing between the buttons on the bar.
 const int kBarButtonPadding = 4;
 
-GdkPixbuf* GetFolderIcon() {
-  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-  static GdkPixbuf* default_folder_icon = rb.GetPixbufNamed(
-      IDR_BOOKMARK_BAR_FOLDER);
-  return default_folder_icon;
-}
-
-GdkPixbuf* GetDefaultFavicon() {
-  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-  static GdkPixbuf* default_bookmark_icon = rb.GetPixbufNamed(
-      IDR_DEFAULT_FAVICON);
-  return default_bookmark_icon;
-}
-
-GdkPixbuf* GetPixbufForNode(const BookmarkNode* node, BookmarkModel* model) {
+GdkPixbuf* GetPixbufForNode(const BookmarkNode* node, BookmarkModel* model,
+                            bool native) {
   GdkPixbuf* pixbuf;
 
   if (node->is_url()) {
     if (model->GetFavIcon(node).width() != 0) {
       pixbuf = gfx::GdkPixbufFromSkBitmap(&model->GetFavIcon(node));
     } else {
-      pixbuf = GetDefaultFavicon();
+      pixbuf = GtkThemeProvider::GetDefaultFavicon(native);
       g_object_ref(pixbuf);
     }
   } else {
-    pixbuf = GetFolderIcon();
+    pixbuf = GtkThemeProvider::GetFolderIcon(native);
     g_object_ref(pixbuf);
   }
 
@@ -118,30 +109,43 @@ void ConfigureButtonForNode(const BookmarkNode* node, BookmarkModel* model,
 
   std::string tooltip = BuildTooltipFor(node);
   if (!tooltip.empty())
-    gtk_widget_set_tooltip_text(button, tooltip.c_str());
+    gtk_widget_set_tooltip_markup(button, tooltip.c_str());
 
   // We pack the button manually (rather than using gtk_button_set_*) so that
   // we can have finer control over its label.
-  GdkPixbuf* pixbuf = bookmark_utils::GetPixbufForNode(node, model);
+  GdkPixbuf* pixbuf = bookmark_utils::GetPixbufForNode(node, model,
+                                                       provider->UseGtkTheme());
   GtkWidget* image = gtk_image_new_from_pixbuf(pixbuf);
   g_object_unref(pixbuf);
 
-  GtkWidget* label = gtk_label_new(WideToUTF8(node->GetTitle()).c_str());
-  gtk_label_set_max_width_chars(GTK_LABEL(label), kMaxCharsOnAButton);
-  gtk_label_set_ellipsize(GTK_LABEL(label), PANGO_ELLIPSIZE_END);
-
   GtkWidget* box = gtk_hbox_new(FALSE, kBarButtonPadding);
   gtk_box_pack_start(GTK_BOX(box), image, FALSE, FALSE, 0);
-  gtk_box_pack_start(GTK_BOX(box), label, FALSE, FALSE, 0);
+
+  std::string label_string = WideToUTF8(node->GetTitle());
+  if (!label_string.empty()) {
+    GtkWidget* label = gtk_label_new(label_string.c_str());
+
+    // Ellipsize long bookmark names.
+    if (node != model->other_node()) {
+      gtk_label_set_max_width_chars(GTK_LABEL(label), kMaxCharsOnAButton);
+      gtk_label_set_ellipsize(GTK_LABEL(label), PANGO_ELLIPSIZE_END);
+    }
+
+    gtk_box_pack_start(GTK_BOX(box), label, FALSE, FALSE, 0);
+    SetButtonTextColors(label, provider);
+  }
 
   GtkWidget* alignment = gtk_alignment_new(0.0, 0.0, 1.0, 1.0);
-  gtk_alignment_set_padding(GTK_ALIGNMENT(alignment),
-      kButtonPaddingTop, kButtonPaddingBottom,
-      kButtonPaddingLeft, kButtonPaddingRight);
+  // If we are not showing the label, don't set any padding, so that the icon
+  // will just be centered.
+  if (label_string.c_str()) {
+    gtk_alignment_set_padding(GTK_ALIGNMENT(alignment),
+        kButtonPaddingTop, kButtonPaddingBottom,
+        kButtonPaddingLeft, kButtonPaddingRight);
+  }
   gtk_container_add(GTK_CONTAINER(alignment), box);
   gtk_container_add(GTK_CONTAINER(button), alignment);
 
-  SetButtonTextColors(label, provider);
   g_object_set_data(G_OBJECT(button), bookmark_utils::kBookmarkNode,
                     AsVoid(node));
 
@@ -149,9 +153,32 @@ void ConfigureButtonForNode(const BookmarkNode* node, BookmarkModel* model,
 }
 
 std::string BuildTooltipFor(const BookmarkNode* node) {
-  // TODO(erg): Actually build the tooltip. For now, we punt and just return
-  // the URL.
-  return node->GetURL().possibly_invalid_spec();
+  const std::string& url = node->GetURL().possibly_invalid_spec();
+  const std::string& title = WideToUTF8(node->GetTitle());
+
+  std::string truncated_url = WideToUTF8(l10n_util::TruncateString(
+      UTF8ToWide(url), kMaxTooltipURLLength));
+  gchar* escaped_url_cstr = g_markup_escape_text(truncated_url.c_str(),
+                                                 truncated_url.size());
+  std::string escaped_url(escaped_url_cstr);
+  g_free(escaped_url_cstr);
+
+  std::string tooltip;
+  if (url == title || title.empty()) {
+    return escaped_url;
+  } else {
+    std::string truncated_title = WideToUTF8(l10n_util::TruncateString(
+      node->GetTitle(), kMaxTooltipTitleLength));
+    gchar* escaped_title_cstr = g_markup_escape_text(truncated_title.c_str(),
+                                                     truncated_title.size());
+    std::string escaped_title(escaped_title_cstr);
+    g_free(escaped_title_cstr);
+
+    if (!escaped_url.empty())
+      return std::string("<b>") + escaped_title + "</b>\n" + escaped_url;
+    else
+      return std::string("<b>") + escaped_title + "</b>";
+  }
 }
 
 const BookmarkNode* BookmarkNodeForWidget(GtkWidget* widget) {
@@ -161,17 +188,11 @@ const BookmarkNode* BookmarkNodeForWidget(GtkWidget* widget) {
 
 void SetButtonTextColors(GtkWidget* label, GtkThemeProvider* provider) {
   if (provider->UseGtkTheme()) {
-    gtk_widget_modify_fg(label, GTK_STATE_NORMAL, NULL);
-    gtk_widget_modify_fg(label, GTK_STATE_ACTIVE, NULL);
-    gtk_widget_modify_fg(label, GTK_STATE_PRELIGHT, NULL);
-    gtk_widget_modify_fg(label, GTK_STATE_INSENSITIVE, NULL);
+    gtk_util::SetLabelColor(label, NULL);
   } else {
     GdkColor color = provider->GetGdkColor(
         BrowserThemeProvider::COLOR_BOOKMARK_TEXT);
-    gtk_widget_modify_fg(label, GTK_STATE_NORMAL, &color);
-    gtk_widget_modify_fg(label, GTK_STATE_ACTIVE, &color);
-    gtk_widget_modify_fg(label, GTK_STATE_PRELIGHT, &color);
-    gtk_widget_modify_fg(label, GTK_STATE_INSENSITIVE, &color);
+    gtk_util::SetLabelColor(label, &color);
   }
 }
 
@@ -209,7 +230,7 @@ void WriteBookmarksToSelection(const std::vector<const BookmarkNode*>& nodes,
       for (size_t i = 0; i < nodes.size(); ++i) {
         // If the node is a folder, this will be empty. TODO(estade): figure out
         // if there are any ramifications to passing an empty URI. After a
-        // lttle testing, it seems fine.
+        // little testing, it seems fine.
         const GURL& url = nodes[i]->GetURL();
         // This const cast should be safe as gtk_selection_data_set_uris()
         // makes copies.
@@ -262,15 +283,24 @@ std::vector<const BookmarkNode*> GetNodesFromSelection(
 
 bool CreateNewBookmarkFromNamedUrl(GtkSelectionData* selection_data,
     BookmarkModel* model, const BookmarkNode* parent, int idx) {
-  Pickle data(reinterpret_cast<char*>(selection_data->data),
-              selection_data->length);
-  void* iter = NULL;
-  std::string title_utf8, url_utf8;
-  bool rv = data.ReadString(&iter, &title_utf8);
-  rv = rv && data.ReadString(&iter, &url_utf8);
-  if (rv)
-    model->AddURL(parent, idx, UTF8ToWide(title_utf8), GURL(url_utf8));
-  return rv;
+  GURL url;
+  string16 title;
+  if (!GtkDndUtil::ExtractNamedURL(selection_data, &url, &title))
+    return false;
+
+  model->AddURL(parent, idx, UTF16ToWideHack(title), url);
+  return true;
+}
+
+bool CreateNewBookmarksFromURIList(GtkSelectionData* selection_data,
+    BookmarkModel* model, const BookmarkNode* parent, int idx) {
+  std::vector<GURL> urls;
+  GtkDndUtil::ExtractURIList(selection_data, &urls);
+  for (size_t i = 0; i < urls.size(); ++i) {
+    std::string title = GetNameForURL(urls[i]);
+    model->AddURL(parent, idx++, UTF8ToWide(title), urls[i]);
+  }
+  return true;
 }
 
 }  // namespace bookmark_utils

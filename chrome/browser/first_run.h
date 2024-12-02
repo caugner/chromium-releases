@@ -8,8 +8,8 @@
 #include <string>
 #include <vector>
 
+#include "app/gfx/native_widget_types.h"
 #include "base/basictypes.h"
-#include "base/gfx/native_widget_types.h"
 #include "chrome/browser/browser_process_impl.h"
 
 class CommandLine;
@@ -71,7 +71,8 @@ class FirstRun {
                                        const FilePath& master_prefs_path,
                                        std::vector<std::wstring>* new_tabs,
                                        int* ping_delay,
-                                       int* import_items,
+                                       bool* homepage_defined,
+                                       int* do_import_items,
                                        int* dont_import_items);
 
   // Sets the kShouldShowFirstRunBubble local state pref so that the browser
@@ -93,6 +94,10 @@ class FirstRun {
   // This class is for scoping purposes.
   DISALLOW_IMPLICIT_CONSTRUCTORS(FirstRun);
 };
+
+#if !defined(OS_LINUX) || defined(TOOLKIT_VIEWS)
+// TODO(port): remove on Mac and Linux+views as well.
+// http://code.google.com/p/chromium/issues/detail?id=9295
 
 // This class contains the actions that need to be performed when an upgrade
 // is required. This involves mainly swapping the chrome exe and relaunching
@@ -130,6 +135,7 @@ class Upgrade {
   // |version| can be 0, 1 or 2 and selects what strings to present.
   static TryResult ShowTryChromeDialog(size_t version);
 };
+#endif
 
 // A subclass of BrowserProcessImpl that does not have a GoogleURLTracker
 // so we don't fetch as we have no IO thread (see bug #1292702).
@@ -151,9 +157,16 @@ class FirstRunBrowserProcess : public BrowserProcessImpl {
 // |profile| and perhaps some other tasks.
 // |process_singleton| is used to lock the handling of CopyData messages
 // while the First Run UI is visible.
+// |homepage_defined| true indicates that homepage is defined in master
+// preferences and should not be imported from another browser.
+// |import_items| specifies the items to import, specified in master
+// preferences and will override default behavior of importer.
+// |dont_import_items| specifies the items *not* to import, specified in master
+// preferences and will override default behavior of importer.
 // Returns true if the user clicked "Start", false if the user pressed "Cancel"
 // or closed the dialog.
 bool OpenFirstRunDialog(Profile* profile,
+                        bool homepage_defined,
                         int import_items,
                         int dont_import_items,
                         ProcessSingleton* process_singleton);

@@ -6,6 +6,8 @@
 #define WEBKIT_GLUE_WEBVIEW_IMPL_H_
 
 #include <set>
+#include <string>
+#include <vector>
 
 #include "Page.h"
 
@@ -14,11 +16,17 @@
 #include "skia/ext/platform_canvas.h"
 #include "webkit/api/public/WebPoint.h"
 #include "webkit/api/public/WebSize.h"
+#include "webkit/api/public/WebString.h"
+#include "webkit/api/public/WebView.h"
+#include "webkit/api/src/NotificationPresenterImpl.h"
 #include "webkit/glue/back_forward_list_client_impl.h"
-#include "webkit/glue/image_resource_fetcher.h"
+#include "webkit/glue/chrome_client_impl.h"
+#include "webkit/glue/context_menu_client_impl.h"
+#include "webkit/glue/dragclient_impl.h"
+#include "webkit/glue/editor_client_impl.h"
+#include "webkit/glue/inspector_client_impl.h"
 #include "webkit/glue/webframe_impl.h"
 #include "webkit/glue/webpreferences.h"
-#include "webkit/glue/webview.h"
 
 namespace WebCore {
 class ChromiumDataObject;
@@ -35,19 +43,24 @@ class Widget;
 }
 
 namespace WebKit {
+class WebAccessibilityObject;
 class WebKeyboardEvent;
 class WebMouseEvent;
 class WebMouseWheelEvent;
+class WebSettingsImpl;
+}
+
+namespace webkit_glue {
+class ImageResourceFetcher;
 }
 
 class AutocompletePopupMenuClient;
 class SearchableFormData;
 class WebHistoryItemImpl;
-class WebDevToolsAgent;
 class WebDevToolsAgentImpl;
-class WebViewDelegate;
 
-class WebViewImpl : public WebView, public base::RefCounted<WebViewImpl> {
+class WebViewImpl : public WebKit::WebView,
+                    public base::RefCounted<WebViewImpl> {
  public:
   // WebWidget methods:
   virtual void close();
@@ -69,73 +82,72 @@ class WebViewImpl : public WebView, public base::RefCounted<WebViewImpl> {
   virtual void setTextDirection(WebKit::WebTextDirection direction);
 
   // WebView methods:
-  virtual bool ShouldClose();
-  virtual WebViewDelegate* GetDelegate();
-  virtual void SetDelegate(WebViewDelegate*);
-  virtual void SetUseEditorDelegate(bool value);
-  virtual void SetTabKeyCyclesThroughElements(bool value);
-  virtual WebFrame* GetMainFrame();
-  virtual WebFrame* GetFocusedFrame();
-  virtual void SetFocusedFrame(WebFrame* frame);
-  virtual WebFrame* GetFrameWithName(const std::wstring& name);
-  virtual WebFrame* GetPreviousFrameBefore(WebFrame* frame, bool wrap);
-  virtual WebFrame* GetNextFrameAfter(WebFrame* frame, bool wrap);
-  virtual void ClearFocusedNode();
-  virtual void StopLoading();
-  virtual void SetBackForwardListSize(int size);
-  virtual void SetInitialFocus(bool reverse);
-  virtual bool DownloadImage(int id, const GURL& image_url, int image_size);
-  virtual void SetPreferences(const WebPreferences& preferences);
-  virtual const WebPreferences& GetPreferences();
-  virtual void SetPageEncoding(const std::wstring& encoding_name);
-  virtual std::wstring GetMainFrameEncodingName();
-  virtual void ZoomIn(bool text_only);
-  virtual void ZoomOut(bool text_only);
-  virtual void ResetZoom();
-  virtual void CopyImageAt(int x, int y);
-  virtual void InspectElement(int x, int y);
-  virtual void ShowJavaScriptConsole();
-  virtual void DragSourceCancelledAt(
+  virtual void initializeMainFrame(WebKit::WebFrameClient*);
+  virtual WebKit::WebSettings* settings();
+  virtual WebKit::WebString pageEncoding() const;
+  virtual void setPageEncoding(const WebKit::WebString& encoding);
+  virtual bool isTransparent() const;
+  virtual void setIsTransparent(bool value);
+  virtual bool tabsToLinks() const;
+  virtual void setTabsToLinks(bool value);
+  virtual bool tabKeyCyclesThroughElements() const;
+  virtual void setTabKeyCyclesThroughElements(bool value);
+  virtual bool isActive() const;
+  virtual void setIsActive(bool value);
+  virtual bool dispatchBeforeUnloadEvent();
+  virtual void dispatchUnloadEvent();
+  virtual WebKit::WebFrame* mainFrame();
+  virtual WebKit::WebFrame* findFrameByName(
+      const WebKit::WebString& name, WebKit::WebFrame* relative_to_frame);
+  virtual WebKit::WebFrame* focusedFrame();
+  virtual void setFocusedFrame(WebKit::WebFrame* frame);
+  virtual void setInitialFocus(bool reverse);
+  virtual void clearFocusedNode();
+  virtual void zoomIn(bool text_only);
+  virtual void zoomOut(bool text_only);
+  virtual void zoomDefault();
+  virtual void performMediaPlayerAction(
+      const WebKit::WebMediaPlayerAction& action,
+      const WebKit::WebPoint& location);
+  virtual void copyImageAt(const WebKit::WebPoint& point);
+  virtual void dragSourceEndedAt(
+      const WebKit::WebPoint& client_point,
+      const WebKit::WebPoint& screen_point,
+      WebKit::WebDragOperation operation);
+  virtual void dragSourceMovedTo(
       const WebKit::WebPoint& client_point,
       const WebKit::WebPoint& screen_point);
-  virtual void DragSourceEndedAt(
-      const WebKit::WebPoint& client_point,
-      const WebKit::WebPoint& screen_point);
-  virtual void DragSourceMovedTo(
-      const WebKit::WebPoint& client_point,
-      const WebKit::WebPoint& screen_point);
-  virtual void DragSourceSystemDragEnded();
-  virtual bool DragTargetDragEnter(
+  virtual void dragSourceSystemDragEnded();
+  virtual WebKit::WebDragOperation dragTargetDragEnter(
       const WebKit::WebDragData& drag_data, int identity,
       const WebKit::WebPoint& client_point,
-      const WebKit::WebPoint& screen_point);
-  virtual bool DragTargetDragOver(
+      const WebKit::WebPoint& screen_point,
+      WebKit::WebDragOperationsMask operations_allowed);
+  virtual WebKit::WebDragOperation dragTargetDragOver(
+      const WebKit::WebPoint& client_point,
+      const WebKit::WebPoint& screen_point,
+      WebKit::WebDragOperationsMask operations_allowed);
+  virtual void dragTargetDragLeave();
+  virtual void dragTargetDrop(
       const WebKit::WebPoint& client_point,
       const WebKit::WebPoint& screen_point);
-  virtual void DragTargetDragLeave();
-  virtual void DragTargetDrop(
-      const WebKit::WebPoint& client_point,
-      const WebKit::WebPoint& screen_point);
-  virtual int32 GetDragIdentity();
-  virtual bool SetDropEffect(bool accept);
-  virtual void AutofillSuggestionsForNode(
-      int64 node_id,
-      const std::vector<std::wstring>& suggestions,
-      int default_suggestion_index);
-  virtual void HideAutofillPopup();
-  virtual void SetIgnoreInputEvents(bool new_value);
-
-  virtual WebDevToolsAgent* GetWebDevToolsAgent();
-  WebDevToolsAgentImpl* GetWebDevToolsAgentImpl();
-
-  virtual void SetIsTransparent(bool is_transparent);
-  virtual bool GetIsTransparent() const;
-
-  virtual void MediaPlayerActionAt(int x,
-                                   int y,
-                                   const MediaPlayerAction& action);
+  virtual int dragIdentity();
+  virtual bool setDropEffect(bool accept);
+  virtual void inspectElementAt(const WebKit::WebPoint& point);
+  virtual WebKit::WebString inspectorSettings() const;
+  virtual void setInspectorSettings(const WebKit::WebString& settings);
+  virtual WebKit::WebDevToolsAgent* devToolsAgent();
+  virtual WebKit::WebAccessibilityObject accessibilityObject();
+  virtual void applyAutofillSuggestions(
+      const WebKit::WebNode&,
+      const WebKit::WebVector<WebKit::WebString>& suggestions,
+      int defaultSuggestionIndex);
+  virtual void hideAutofillPopup();
 
   // WebViewImpl
+
+  void SetIgnoreInputEvents(bool new_value);
+  WebDevToolsAgentImpl* GetWebDevToolsAgentImpl();
 
   const WebKit::WebPoint& last_mouse_down_point() const {
       return last_mouse_down_point_;
@@ -148,8 +160,8 @@ class WebViewImpl : public WebView, public base::RefCounted<WebViewImpl> {
 
   static WebViewImpl* FromPage(WebCore::Page* page);
 
-  WebViewDelegate* delegate() {
-    return delegate_;
+  WebKit::WebViewClient* client() {
+    return client_;
   }
 
   // Returns the page object associated with this view.  This may be NULL when
@@ -208,41 +220,63 @@ class WebViewImpl : public WebView, public base::RefCounted<WebViewImpl> {
     return initial_navigation_policy_;
   }
 
+  // Determines whether a page should e.g. be opened in a background tab.
+  // Returns false if it has no opinion, in which case it doesn't set *policy.
+  static bool NavigationPolicyFromMouseEvent(
+      unsigned short button,
+      bool ctrl,
+      bool shift,
+      bool alt,
+      bool meta,
+      WebKit::WebNavigationPolicy* policy);
+
   // Start a system drag and drop operation.
-  void StartDragging(const WebKit::WebDragData& drag_data);
+  void StartDragging(
+      const WebKit::WebPoint& event_pos,
+      const WebKit::WebDragData& drag_data,
+      WebKit::WebDragOperationsMask drag_source_operation_mask);
 
   // Hides the autocomplete popup if it is showing.
   void HideAutoCompletePopup();
+  void AutoCompletePopupDidHide();
 
-  // Converts |x|, |y| from window coordinates to contents coordinates and gets
-  // the underlying Node for them.
-  WebCore::Node* GetNodeForWindowPos(int x, int y);
+#if ENABLE(NOTIFICATIONS)
+  // Returns the provider of desktop notifications.
+  WebKit::NotificationPresenterImpl* GetNotificationPresenter();
+#endif
+
+  // Tries to scroll a frame or any parent of a frame. Returns true if the view
+  // was scrolled.
+  bool PropagateScroll(WebCore::ScrollDirection scroll_direction,
+                       WebCore::ScrollGranularity scroll_granularity);
 
  protected:
-  friend class WebView;  // So WebView::Create can call our constructor
+  friend class WebKit::WebView;  // So WebView::Create can call our constructor
   friend class base::RefCounted<WebViewImpl>;
 
-  // ImageResourceFetcher::Callback.
-  void OnImageFetchComplete(webkit_glue::ImageResourceFetcher* fetcher,
-                            const SkBitmap& bitmap);
-
-  WebViewImpl();
+  WebViewImpl(WebKit::WebViewClient* client);
   ~WebViewImpl();
 
   void ModifySelection(uint32 message,
                        WebCore::Frame* frame,
                        const WebCore::PlatformKeyboardEvent& e);
 
-  WebViewDelegate* delegate_;
+  WebKit::WebViewClient* client_;
+
+  webkit_glue::BackForwardListClientImpl back_forward_list_client_impl_;
+  ChromeClientImpl chrome_client_impl_;
+  ContextMenuClientImpl context_menu_client_impl_;
+  DragClientImpl drag_client_impl_;
+  EditorClientImpl editor_client_impl_;
+  InspectorClientImpl inspector_client_impl_;
+
   WebKit::WebSize size_;
 
   WebKit::WebPoint last_mouse_position_;
   scoped_ptr<WebCore::Page> page_;
 
-  webkit_glue::BackForwardListClientImpl back_forward_list_client_impl_;
-
   // This flag is set when a new navigation is detected.  It is used to satisfy
-  // the corresponding argument to WebViewDelegate::DidCommitLoadForFrame.
+  // the corresponding argument to WebFrameClient::didCommitProvisionalLoad.
   bool observed_new_navigation_;
 #ifndef NDEBUG
   // Used to assert that the new navigation we observed is the same navigation
@@ -252,6 +286,11 @@ class WebViewImpl : public WebView, public base::RefCounted<WebViewImpl> {
 
   // A copy of the WebPreferences object we receive from the browser.
   WebPreferences webprefs_;
+
+  // An object that can be used to manipulate page_->settings() without linking
+  // against WebCore.  This is lazily allocated the first time GetWebSettings()
+  // is called.
+  scoped_ptr<WebKit::WebSettingsImpl> web_settings_;
 
   // A copy of the web drop data object we received from the browser.
   RefPtr<WebCore::ChromiumDataObject> current_drag_data_;
@@ -269,19 +308,12 @@ class WebViewImpl : public WebView, public base::RefCounted<WebViewImpl> {
   void RefreshAutofillPopup();
 
   // Returns true if the view was scrolled.
-  bool ScrollViewWithKeyboard(int key_code);
-
-  // Removes fetcher from the set of pending image fetchers and deletes it.
-  // This is invoked after the download is completed (or fails).
-  void DeleteImageResourceFetcher(webkit_glue::ImageResourceFetcher* fetcher);
+  bool ScrollViewWithKeyboard(int key_code, int modifiers);
 
   // Converts |pos| from window coordinates to contents coordinates and gets
   // the HitTestResult for it.
   WebCore::HitTestResult HitTestResultForWindowPos(
       const WebCore::IntPoint& pos);
-
-  // ImageResourceFetchers schedule via DownloadImage.
-  std::set<webkit_glue::ImageResourceFetcher*> image_fetchers_;
 
   // The point relative to the client area where the mouse was last pressed
   // down. This is used by the drag client to determine what was under the
@@ -330,9 +362,13 @@ class WebViewImpl : public WebView, public base::RefCounted<WebViewImpl> {
     DROP_EFFECT_COPY
   } drop_effect_;
 
-  // When true, the drag data can be dropped onto the current drop target in
-  // this WebView (the drop target can accept the drop).
-  bool drop_accept_;
+  // The available drag operations (copy, move link...) allowed by the source.
+  WebKit::WebDragOperation operations_allowed_;
+
+  // The current drag operation as negotiated by the source and destination.
+  // When not equal to DragOperationNone, the drag data can be dropped onto the
+  // current drop target in this WebView (the drop target can accept the drop).
+  WebKit::WebDragOperation drag_operation_;
 
   // The autocomplete popup.  Kept around and reused every-time new suggestions
   // should be shown.
@@ -349,14 +385,25 @@ class WebViewImpl : public WebView, public base::RefCounted<WebViewImpl> {
   // Whether the webview is rendering transparently.
   bool is_transparent_;
 
+  // Whether the user can press tab to focus links.
+  bool tabs_to_links_;
+
+  // Inspector settings.
+  WebKit::WebString inspector_settings_;
+
+#if ENABLE(NOTIFICATIONS)
+  // The provider of desktop notifications;
+  WebKit::NotificationPresenterImpl notification_presenter_;
+#endif
+
   // HACK: current_input_event is for ChromeClientImpl::show(), until we can fix
   // WebKit to pass enough information up into ChromeClient::show() so we can
   // decide if the window.open event was caused by a middle-mouse click
-public:
+ public:
   static const WebKit::WebInputEvent* current_input_event() {
     return g_current_input_event;
   }
-private:
+ private:
   static const WebKit::WebInputEvent* g_current_input_event;
 
   DISALLOW_COPY_AND_ASSIGN(WebViewImpl);

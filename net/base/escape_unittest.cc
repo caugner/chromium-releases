@@ -7,6 +7,7 @@
 #include "net/base/escape.h"
 
 #include "base/basictypes.h"
+#include "base/i18n/icu_string_conversions.h"
 #include "base/string_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -42,7 +43,7 @@ struct EscapeForHTMLCase {
   const char* expected_output;
 };
 
-}
+}  // namespace
 
 TEST(Escape, EscapeTextForFormSubmission) {
   const EscapeCase escape_cases[] = {
@@ -88,7 +89,7 @@ TEST(Escape, EscapeTextForFormSubmission) {
     test_str.push_back(i);
   }
   std::wstring wide;
-  EXPECT_TRUE(EscapeQueryParamValue(test_str, kCodepageUTF8, &wide));
+  EXPECT_TRUE(EscapeQueryParamValue(test_str, base::kCodepageUTF8, &wide));
   EXPECT_EQ(wide, EscapeQueryParamValueUTF8(test_str));
 }
 
@@ -103,6 +104,21 @@ TEST(Escape, EscapePath) {
     // Escaped
     "%02%0A%1D%20!%22%23$%25&'()*+,-./0123456789%3A;"
     "%3C=%3E%3F@ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    "%5B%5C%5D%5E_%60abcdefghijklmnopqrstuvwxyz"
+    "%7B%7C%7D~%7F%80%FF");
+}
+
+TEST(Escape, EscapeUrlEncodedData) {
+  ASSERT_EQ(
+    // Most of the character space we care about, un-escaped
+    EscapeUrlEncodedData(
+      "\x02\n\x1d !\"#$%&'()*+,-./0123456789:;"
+      "<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+      "[\\]^_`abcdefghijklmnopqrstuvwxyz"
+      "{|}~\x7f\x80\xff"),
+    // Escaped
+    "%02%0A%1D+!%22%23%24%25%26%27()*%2B,-./0123456789:%3B"
+    "%3C%3D%3E%3F%40ABCDEFGHIJKLMNOPQRSTUVWXYZ"
     "%5B%5C%5D%5E_%60abcdefghijklmnopqrstuvwxyz"
     "%7B%7C%7D~%7F%80%FF");
 }

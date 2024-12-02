@@ -7,7 +7,6 @@
 
 #include <string>
 
-#include "base/thread.h"
 #include "chrome/common/child_thread.h"
 
 class GURL;
@@ -16,7 +15,7 @@ class GURL;
 class UtilityThread : public ChildThread {
  public:
   UtilityThread();
-  ~UtilityThread();
+  virtual ~UtilityThread();
 
   // Returns the one utility thread.
   static UtilityThread* current() {
@@ -31,9 +30,8 @@ class UtilityThread : public ChildThread {
   // IPC messages for web resource service.
   void OnUnpackWebResource(const std::string& resource_data);
 
-  // Called by the thread base class
-  virtual void Init();
-  virtual void CleanUp();
+  // IPC for parsing an extensions auto-update manifest xml file.
+  void OnParseUpdateManifest(const std::string& xml);
 
   DISALLOW_COPY_AND_ASSIGN(UtilityThread);
 };

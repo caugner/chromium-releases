@@ -12,7 +12,7 @@ DOMView::DOMView() : initialized_(false), tab_contents_(NULL) {
 }
 
 DOMView::~DOMView() {
-  if (tab_contents_.get())
+  if (native_view())
     Detach();
 }
 
@@ -21,8 +21,8 @@ bool DOMView::Init(Profile* profile, SiteInstance* instance) {
     return true;
 
   initialized_ = true;
-  tab_contents_.reset(new TabContents(profile, instance,
-                                      MSG_ROUTING_NONE, NULL));
+  tab_contents_.reset(
+      new TabContents(profile, instance, MSG_ROUTING_NONE, NULL));
   views::NativeViewHost::Attach(tab_contents_->GetNativeView());
   return true;
 }

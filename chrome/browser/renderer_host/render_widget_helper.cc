@@ -202,43 +202,25 @@ void RenderWidgetHelper::OnCrossSiteClosePageACK(
 void RenderWidgetHelper::CreateNewWindow(int opener_id,
                                          bool user_gesture,
                                          base::ProcessHandle render_process,
-                                         int* route_id,
-                                         ModalDialogEvent* modal_dialog_event) {
+                                         int* route_id) {
   *route_id = GetNextRoutingID();
-
-  ModalDialogEvent modal_dialog_event_internal;
-#if defined(OS_WIN)
-  HANDLE event = CreateEvent(NULL, TRUE, FALSE, NULL);
-  modal_dialog_event_internal.event = event;
-
-  BOOL result = DuplicateHandle(GetCurrentProcess(),
-                                event,
-                                render_process,
-                                &modal_dialog_event->event,
-                                SYNCHRONIZE,
-                                FALSE,
-                                0);
-  DCHECK(result) << "Couldn't duplicate modal dialog event for the renderer.";
-#endif
-
   // Block resource requests until the view is created, since the HWND might be
   // needed if a response ends up creating a plugin.
   resource_dispatcher_host_->BlockRequestsForRoute(
       render_process_id_, *route_id);
 
   ui_loop_->PostTask(FROM_HERE, NewRunnableMethod(
-      this, &RenderWidgetHelper::OnCreateWindowOnUI, opener_id, *route_id,
-      modal_dialog_event_internal));
+      this, &RenderWidgetHelper::OnCreateWindowOnUI, opener_id, *route_id));
 }
 
-void RenderWidgetHelper::OnCreateWindowOnUI(
-    int opener_id, int route_id, ModalDialogEvent modal_dialog_event) {
+void RenderWidgetHelper::OnCreateWindowOnUI(int opener_id, int route_id) {
   RenderViewHost* host = RenderViewHost::FromID(render_process_id_, opener_id);
   if (host)
-    host->CreateNewWindow(route_id, modal_dialog_event);
+    host->CreateNewWindow(route_id);
 
   g_browser_process->io_thread()->message_loop()->PostTask(FROM_HERE,
-      NewRunnableMethod(this, &RenderWidgetHelper::OnCreateWindowOnIO, route_id));
+      NewRunnableMethod(this, &RenderWidgetHelper::OnCreateWindowOnIO,
+                        route_id));
 }
 
 void RenderWidgetHelper::OnCreateWindowOnIO(int route_id) {
@@ -262,36 +244,6 @@ void RenderWidgetHelper::OnCreateWidgetOnUI(
     host->CreateNewWidget(route_id, activatable);
 }
 
-void RenderWidgetHelper::SignalModalDialogEvent(int routing_id) {
-  ui_loop()->PostTask(FROM_HERE,
-      NewRunnableMethod(
-          this, &RenderWidgetHelper::SignalModalDialogEventOnUI,
-          routing_id));
-}
-
-void RenderWidgetHelper::SignalModalDialogEventOnUI(int routing_id) {
-  RenderViewHost* host = RenderViewHost::FromID(render_process_id_,
-                                                routing_id);
-  if (host) {
-    host->SignalModalDialogEvent();
-  }
-}
-
-void RenderWidgetHelper::ResetModalDialogEvent(int routing_id) {
-  ui_loop()->PostTask(FROM_HERE,
-      NewRunnableMethod(
-          this, &RenderWidgetHelper::ResetModalDialogEventOnUI,
-          routing_id));
-}
-
-void RenderWidgetHelper::ResetModalDialogEventOnUI(int routing_id) {
-  RenderViewHost* host = RenderViewHost::FromID(render_process_id_,
-                                                routing_id);
-  if (host) {
-    host->ResetModalDialogEvent();
-  }
-}
-
 #if defined(OS_MACOSX)
 TransportDIB* RenderWidgetHelper::MapTransportDIB(TransportDIB::Id dib_id) {
   AutoLock locked(allocated_dibs_lock_);
@@ -307,12 +259,11 @@ TransportDIB* RenderWidgetHelper::MapTransportDIB(TransportDIB::Id dib_id) {
 
 void RenderWidgetHelper::AllocTransportDIB(
     size_t size, TransportDIB::Handle* result) {
-  base::SharedMemory* shared_memory = new base::SharedMemory();
+  scoped_ptr<base::SharedMemory> shared_memory(new base::SharedMemory());
   if (!shared_memory->Create(L"", false /* read write */,
                              false /* do not open existing */, size)) {
     result->fd = -1;
     result->auto_close = false;
-    delete shared_memory;
     return;
   }
 

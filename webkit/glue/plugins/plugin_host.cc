@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "config.h"
+// Pepper API support should be turned on for this module.
+#define PEPPER_APIS_ENABLED
 
 #include "webkit/glue/plugins/plugin_host.h"
 
@@ -13,9 +14,11 @@
 #include "base/string_util.h"
 #include "base/sys_string_conversions.h"
 #include "net/base/net_util.h"
+#include "webkit/api/public/WebBindings.h"
 #include "webkit/default_plugin/default_plugin_shared.h"
 #include "webkit/glue/glue_util.h"
 #include "webkit/glue/webplugininfo.h"
+#include "webkit/glue/webplugin_delegate.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/plugins/plugin_instance.h"
 #include "webkit/glue/plugins/plugin_lib.h"
@@ -23,6 +26,7 @@
 #include "webkit/glue/plugins/plugin_stream_url.h"
 #include "third_party/npapi/bindings/npruntime.h"
 
+using WebKit::WebBindings;
 
 namespace NPAPI
 {
@@ -77,31 +81,33 @@ void PluginHost::InitializeHostFuncs() {
   host_funcs_.forceredraw = &NPN_ForceRedraw;
 
   // These come from the Javascript Engine
-  host_funcs_.getstringidentifier = NPN_GetStringIdentifier;
-  host_funcs_.getstringidentifiers = NPN_GetStringIdentifiers;
-  host_funcs_.getintidentifier = NPN_GetIntIdentifier;
-  host_funcs_.identifierisstring = NPN_IdentifierIsString;
-  host_funcs_.utf8fromidentifier = NPN_UTF8FromIdentifier;
-  host_funcs_.intfromidentifier = NPN_IntFromIdentifier;
-  host_funcs_.createobject = NPN_CreateObject;
-  host_funcs_.retainobject = NPN_RetainObject;
-  host_funcs_.releaseobject = NPN_ReleaseObject;
-  host_funcs_.invoke = NPN_Invoke;
-  host_funcs_.invokeDefault = NPN_InvokeDefault;
-  host_funcs_.evaluate = NPN_Evaluate;
-  host_funcs_.getproperty = NPN_GetProperty;
-  host_funcs_.setproperty = NPN_SetProperty;
-  host_funcs_.removeproperty = NPN_RemoveProperty;
-  host_funcs_.hasproperty = NPN_HasProperty;
-  host_funcs_.hasmethod = NPN_HasMethod;
-  host_funcs_.releasevariantvalue = NPN_ReleaseVariantValue;
-  host_funcs_.setexception = NPN_SetException;
-  host_funcs_.pushpopupsenabledstate = &NPN_PushPopupsEnabledState;
-  host_funcs_.poppopupsenabledstate = &NPN_PopPopupsEnabledState;
-  host_funcs_.enumerate = &NPN_Enumerate;
-  host_funcs_.pluginthreadasynccall = &NPN_PluginThreadAsyncCall;
-  host_funcs_.construct = &NPN_Construct;
-
+  host_funcs_.getstringidentifier = WebBindings::getStringIdentifier;
+  host_funcs_.getstringidentifiers = WebBindings::getStringIdentifiers;
+  host_funcs_.getintidentifier = WebBindings::getIntIdentifier;
+  host_funcs_.identifierisstring = WebBindings::identifierIsString;
+  host_funcs_.utf8fromidentifier = WebBindings::utf8FromIdentifier;
+  host_funcs_.intfromidentifier = WebBindings::intFromIdentifier;
+  host_funcs_.createobject = WebBindings::createObject;
+  host_funcs_.retainobject = WebBindings::retainObject;
+  host_funcs_.releaseobject = WebBindings::releaseObject;
+  host_funcs_.invoke = WebBindings::invoke;
+  host_funcs_.invokeDefault = WebBindings::invokeDefault;
+  host_funcs_.evaluate = WebBindings::evaluate;
+  host_funcs_.getproperty = WebBindings::getProperty;
+  host_funcs_.setproperty = WebBindings::setProperty;
+  host_funcs_.removeproperty = WebBindings::removeProperty;
+  host_funcs_.hasproperty = WebBindings::hasProperty;
+  host_funcs_.hasmethod = WebBindings::hasMethod;
+  host_funcs_.releasevariantvalue = WebBindings::releaseVariantValue;
+  host_funcs_.setexception = WebBindings::setException;
+  host_funcs_.pushpopupsenabledstate = NPN_PushPopupsEnabledState;
+  host_funcs_.poppopupsenabledstate = NPN_PopPopupsEnabledState;
+  host_funcs_.enumerate = WebBindings::enumerate;
+  host_funcs_.pluginthreadasynccall = NPN_PluginThreadAsyncCall;
+  host_funcs_.construct = WebBindings::construct;
+  host_funcs_.getvalueforurl = NPN_GetValueForURL;
+  host_funcs_.setvalueforurl = NPN_SetValueForURL;
+  host_funcs_.getauthenticationinfo = NPN_GetAuthenticationInfo;
 }
 
 void PluginHost::PatchNPNetscapeFuncs(NPNetscapeFuncs* overrides) {
@@ -610,8 +616,6 @@ void NPN_InvalidateRect(NPP id, NPRect *invalidRect) {
         ::InvalidateRect(plugin->window_handle(), &rect, FALSE);
         return;
       }
-#elif defined(OS_LINUX)
-      NOTIMPLEMENTED();
 #endif
       gfx::Rect rect(invalidRect->left,
                      invalidRect->top,
@@ -658,6 +662,39 @@ void NPN_ForceRedraw(NPP id) {
   NOTIMPLEMENTED();
 }
 
+#if defined(PEPPER_APIS_ENABLED)
+static NPError InitializeRenderContext(NPP id,
+                                       NPRenderType type,
+                                       NPRenderContext* context) {
+  scoped_refptr<NPAPI::PluginInstance> plugin = FindInstance(id);
+  if (plugin) {
+    webkit_glue::WebPluginDelegate* delegate = plugin->webplugin()->delegate();
+    // Set up the renderer for the specified type.
+    return delegate->InitializeRenderContext(type, context);
+  }
+  return NPERR_GENERIC_ERROR;
+}
+
+static NPError FlushRenderContext(NPP id,
+                                  NPRenderContext* context,
+                                  NPFlushRenderContextCallbackPtr callback,
+                                  void* user_data) {
+  scoped_refptr<NPAPI::PluginInstance> plugin = FindInstance(id);
+  if (plugin) {
+    webkit_glue::WebPluginDelegate* delegate = plugin->webplugin()->delegate();
+    // Do the flush.
+    NPError err = delegate->FlushRenderContext(context);
+    // Invoke the callback to inform the caller the work was done.
+    if (callback != NULL) {
+      (*callback)(context, err, user_data);
+    }
+    // Return any errors.
+    return err;
+  }
+  return NPERR_GENERIC_ERROR;
+}
+#endif  // defined(PEPPER_APIS_ENABLED)
+
 NPError NPN_GetValue(NPP id, NPNVariable variable, void *value) {
   // Allows the plugin to query the browser for information
   //
@@ -681,7 +718,7 @@ NPError NPN_GetValue(NPP id, NPNVariable variable, void *value) {
     // described here:
     // <http://www.mozilla.org/projects/plugins/npruntime.html#browseraccess>
     if (np_object) {
-      NPN_RetainObject(np_object);
+      WebBindings::retainObject(np_object);
       void **v = (void **)value;
       *v = np_object;
       rv = NPERR_NO_ERROR;
@@ -698,7 +735,7 @@ NPError NPN_GetValue(NPP id, NPNVariable variable, void *value) {
     // described here:
     // <http://www.mozilla.org/projects/plugins/npruntime.html#browseraccess>
     if (np_object) {
-      NPN_RetainObject(np_object);
+      WebBindings::retainObject(np_object);
       void **v = (void **)value;
       *v = np_object;
       rv = NPERR_NO_ERROR;
@@ -723,19 +760,6 @@ NPError NPN_GetValue(NPP id, NPNVariable variable, void *value) {
   {
     // yes, JS is enabled.
     *((void**)value) = (void*)1;
-    rv = NPERR_NO_ERROR;
-    break;
-  }
-  case NPNVserviceManager:
-  {
-    NPAPI::PluginInstance* instance =
-        NPAPI::PluginInstance::GetInitializingInstance();
-    if (instance) {
-      instance->GetServiceManager(reinterpret_cast<void**>(value));
-    } else {
-      NOTREACHED();
-    }
-
     rv = NPERR_NO_ERROR;
     break;
   }
@@ -774,9 +798,10 @@ NPError NPN_GetValue(NPP id, NPNVariable variable, void *value) {
        default_plugin::MISSING_PLUGIN_USER_STARTED_DOWNLOAD:
   {
     // This is a hack for the default plugin to send notification to renderer.
-    // Because we will check if the plugin is default plugin, we don't need
+    // Even though we check if the plugin is the default plugin, we still need
     // to worry about future standard change that may conflict with the
-    // variable definition.
+    // variable definition, in order to avoid duplicate case clauses in this
+    // big switch statement.
     scoped_refptr<NPAPI::PluginInstance> plugin = FindInstance(id);
     if (plugin->plugin_lib()->plugin_info().path.value() ==
           kDefaultPluginLibraryName) {
@@ -786,23 +811,60 @@ NPError NPN_GetValue(NPP id, NPNVariable variable, void *value) {
     break;
   }
 #if defined(OS_MACOSX)
+  case NPNVpluginDrawingModel:
+  {
+    // return the drawing model that was negotiated when we initialized.
+    scoped_refptr<NPAPI::PluginInstance> plugin = FindInstance(id);
+    *reinterpret_cast<int*>(value) = plugin->drawing_model();
+    rv = NPERR_NO_ERROR;
+    break;
+  }
   case NPNVsupportsQuickDrawBool:
   {
-    // we do not support the QuickDraw drawing model
+    // we do not admit to supporting the QuickDraw drawing model.
     NPBool* supports_qd = reinterpret_cast<NPBool*>(value);
     *supports_qd = FALSE;
     rv = NPERR_NO_ERROR;
     break;
   }
   case NPNVsupportsCoreGraphicsBool:
+  case NPNVsupportsCarbonBool:
   {
-    // we do support (and in fact require) the CoreGraphics drawing model
-    NPBool* supports_cg = reinterpret_cast<NPBool*>(value);
-    *supports_cg = TRUE;
+    // we do support these drawing and event models.
+    NPBool* supports_model = reinterpret_cast<NPBool*>(value);
+    *supports_model = TRUE;
+    rv = NPERR_NO_ERROR;
+    break;
+  }
+  case NPNVsupportsOpenGLBool:
+  case NPNVsupportsCoreAnimationBool:
+  case NPNVsupportsCocoaBool:
+  {
+    // we do not support these drawing and event models.
+    NPBool* supports_model = reinterpret_cast<NPBool*>(value);
+    *supports_model = FALSE;
     rv = NPERR_NO_ERROR;
     break;
   }
 #endif
+#if defined(PEPPER_APIS_ENABLED)
+  case NPNVInitializeRenderContextFunc:
+  {
+    NPInitializeRenderContextPtr* func =
+        reinterpret_cast<NPInitializeRenderContextPtr*>(value);
+    *func = InitializeRenderContext;
+    rv = NPERR_NO_ERROR;
+    break;
+  }
+  case NPNVFlushRenderContextFunc:
+  {
+    NPFlushRenderContextPtr* func =
+        reinterpret_cast<NPFlushRenderContextPtr*>(value);
+    *func = FlushRenderContext;
+    rv = NPERR_NO_ERROR;
+    break;
+  }
+#endif  // defined(PEPPER_APIS_ENABLED)
   default:
   {
     // TODO: implement me
@@ -853,11 +915,31 @@ NPError  NPN_SetValue(NPP id, NPPVariable variable, void *value) {
     DLOG(INFO) << "NPN_SetValue(NPPVpluginKeepLibraryInMemory) is not implemented.";
     return NPERR_GENERIC_ERROR;
 #if defined(OS_MACOSX)
-  case NPNVpluginDrawingModel:
-    // we only support the CoreGraphics drawing model
-    if (reinterpret_cast<int>(value) == NPDrawingModelCoreGraphics)
+  case NPPVpluginDrawingModel:
+  {
+    // we only admit to supporting the CoreGraphics drawing model.  The logic
+    // here is that our QuickDraw plugin support is so rudimentary that we
+    // only want to use it as a fallback to keep plugins from crashing: if
+    // a plugin knows enough to ask, we want them to use CoreGraphics.
+    int model = reinterpret_cast<int>(value);
+    if (model == NPDrawingModelCoreGraphics) {
+      plugin->set_drawing_model(model);
       return NPERR_NO_ERROR;
+    }
     return NPERR_GENERIC_ERROR;
+  }
+  case NPPVpluginEventModel:
+  {
+    // we only support the Carbon event model
+    int model = reinterpret_cast<int>(value);
+    switch (model) {
+      case NPNVsupportsCarbonBool:
+        plugin->set_event_model(model);
+        return NPERR_NO_ERROR;
+        break;
+    }
+    return NPERR_GENERIC_ERROR;
+  }
 #endif
   default:
     // TODO: implement me
@@ -896,12 +978,116 @@ void NPN_PopPopupsEnabledState(NPP id) {
 }
 
 void NPN_PluginThreadAsyncCall(NPP id,
-                         void (*func)(void *),
-                         void *userData) {
+                               void (*func)(void *),
+                               void *userData) {
   scoped_refptr<NPAPI::PluginInstance> plugin = FindInstance(id);
   if (plugin) {
     plugin->PluginThreadAsyncCall(func, userData);
   }
+}
+
+NPError NPN_GetValueForURL(NPP id,
+                           NPNURLVariable variable,
+                           const char *url,
+                           char **value,
+                           uint32_t *len) {
+  if (!id)
+    return NPERR_INVALID_PARAM;
+
+  if (!url || !*url || !len)
+    return NPERR_INVALID_URL;
+
+  *len = 0;
+  std::string result;
+
+  switch (variable) {
+    case NPNURLVProxy: {
+      result = "DIRECT";
+      if (!webkit_glue::FindProxyForUrl(GURL((std::string(url))), &result))
+        return NPERR_GENERIC_ERROR;
+
+      break;
+    }
+    case NPNURLVCookie: {
+      scoped_refptr<NPAPI::PluginInstance> plugin = FindInstance(id);
+      if (!plugin)
+        return NPERR_GENERIC_ERROR;
+
+      webkit_glue::WebPlugin* webplugin = plugin->webplugin();
+      if (!webplugin)
+        return NPERR_GENERIC_ERROR;
+
+      // Bypass third-party cookie blocking by using the url as the policy_url.
+      GURL cookies_url((std::string(url)));
+      result = webplugin->GetCookies(cookies_url, cookies_url);
+      break;
+    }
+    default:
+      return NPERR_GENERIC_ERROR;
+  }
+
+  // Allocate this using the NPAPI allocator. The plugin will call
+  // NPN_Free to free this.
+  *value = static_cast<char*>(NPN_MemAlloc(result.length() + 1));
+  strncpy(*value, result.c_str(), result.length() + 1);
+  *len = result.length();
+
+  return NPERR_NO_ERROR;
+}
+
+NPError NPN_SetValueForURL(NPP id,
+                           NPNURLVariable variable,
+                           const char *url,
+                           const char *value,
+                           uint32_t len) {
+  if (!id)
+    return NPERR_INVALID_PARAM;
+
+  if (!url || !*url)
+    return NPERR_INVALID_URL;
+
+  switch (variable) {
+    case NPNURLVCookie: {
+      scoped_refptr<NPAPI::PluginInstance> plugin = FindInstance(id);
+      if (!plugin)
+        return NPERR_GENERIC_ERROR;
+
+      webkit_glue::WebPlugin* webplugin = plugin->webplugin();
+      if (!webplugin)
+        return NPERR_GENERIC_ERROR;
+
+      std::string cookie(value, len);
+      GURL cookies_url((std::string(url)));
+      webplugin->SetCookie(cookies_url, cookies_url, cookie);
+      return NPERR_NO_ERROR;
+    }
+    case NPNURLVProxy:
+      // We don't support setting proxy values, fall through...
+      break;
+    default:
+      // Fall through and return an error...
+      break;
+  }
+
+  return NPERR_GENERIC_ERROR;
+}
+
+NPError NPN_GetAuthenticationInfo(NPP id,
+                                  const char *protocol,
+                                  const char *host,
+                                  int32_t port,
+                                  const char *scheme,
+                                  const char *realm,
+                                  char **username,
+                                  uint32_t *ulen,
+                                  char **password,
+                                  uint32_t *plen) {
+  if (!id || !protocol || !host || !scheme || !realm || !username ||
+      !ulen || !password || !plen)
+    return NPERR_INVALID_PARAM;
+
+  // TODO: implement me (bug 23928)
+  return NPERR_GENERIC_ERROR;
 }
 
 } // extern "C"

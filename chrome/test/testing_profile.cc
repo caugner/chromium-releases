@@ -4,10 +4,16 @@
 
 #include "chrome/test/testing_profile.h"
 
+#include "build/build_config.h"
 #include "base/string_util.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/history/history_backend.h"
+#include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/common/chrome_constants.h"
+
+#if defined(OS_LINUX) && !defined(TOOLKIT_VIEWS)
+#include "chrome/browser/gtk/gtk_theme_provider.h"
+#endif
 
 using base::Time;
 
@@ -70,6 +76,7 @@ class BookmarkLoadObserver : public BookmarkModelObserver {
 
 TestingProfile::TestingProfile()
     : start_time_(Time::Now()),
+      created_theme_provider_(false),
       has_history_service_(false),
       off_the_record_(false),
       last_session_exited_cleanly_(true) {
@@ -81,6 +88,7 @@ TestingProfile::TestingProfile()
 
 TestingProfile::TestingProfile(int count)
     : start_time_(Time::Now()),
+      created_theme_provider_(false),
       has_history_service_(false),
       off_the_record_(false),
       last_session_exited_cleanly_(true) {
@@ -166,8 +174,22 @@ void TestingProfile::CreateTemplateURLModel() {
   template_url_model_.reset(new TemplateURLModel(this));
 }
 
-void TestingProfile::CreateThemeProvider() {
-  theme_provider_ = new BrowserThemeProvider();
+void TestingProfile::UseThemeProvider(BrowserThemeProvider* theme_provider) {
+  theme_provider->Init(this);
+  created_theme_provider_ = true;
+  theme_provider_.reset(theme_provider);
+}
+
+void TestingProfile::InitThemes() {
+  if (!created_theme_provider_) {
+#if defined(OS_LINUX) && !defined(TOOLKIT_VIEWS)
+    theme_provider_.reset(new GtkThemeProvider);
+#else
+    theme_provider_.reset(new BrowserThemeProvider);
+#endif
+    theme_provider_->Init(this);
+    created_theme_provider_ = true;
+  }
 }
 
 void TestingProfile::BlockUntilHistoryProcessesPendingRequests() {
@@ -177,4 +199,20 @@ void TestingProfile::BlockUntilHistoryProcessesPendingRequests() {
   CancelableRequestConsumer consumer;
   history_service_->ScheduleDBTask(new QuittingHistoryDBTask(), &consumer);
   MessageLoop::current()->Run();
+}
+
+void TestingProfile::CreateProfileSyncService() {
+#if defined(BROWSER_SYNC)
+  if (!profile_sync_service_.get()) {
+    profile_sync_service_.reset(new ProfileSyncService(this));
+    profile_sync_service_->Initialize();
+  }
+#endif
+}
+
+ProfileSyncService* TestingProfile::GetProfileSyncService() {
+#if defined(BROWSER_SYNC)
+  return profile_sync_service_.get();
+#endif
+  return NULL;
 }

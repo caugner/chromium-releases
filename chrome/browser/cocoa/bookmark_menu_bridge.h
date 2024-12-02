@@ -20,17 +20,18 @@
 #ifndef CHROME_BROWSER_COCOA_BOOKMARK_MENU_BRIDGE_H_
 #define CHROME_BROWSER_COCOA_BOOKMARK_MENU_BRIDGE_H_
 
-#include "chrome/browser/bookmarks/bookmark_model.h"
-#include "chrome/browser/browser_list.h"
+#include <map>
+#include "chrome/browser/bookmarks/bookmark_model_observer.h"
 
-class Browser;
+class BookmarkNode;
+class Profile;
 @class NSMenu;
+@class NSMenuItem;
 @class BookmarkMenuCocoaController;
 
-class BookmarkMenuBridge : public BookmarkModelObserver,
-                           public BrowserList::Observer {
+class BookmarkMenuBridge : public BookmarkModelObserver {
  public:
-  BookmarkMenuBridge();
+  BookmarkMenuBridge(Profile* profile);
   virtual ~BookmarkMenuBridge();
 
   // Overridden from BookmarkModelObserver
@@ -55,26 +56,39 @@ class BookmarkMenuBridge : public BookmarkModelObserver,
   virtual void BookmarkNodeChildrenReordered(BookmarkModel* model,
                                              const BookmarkNode* node);
 
-  // Overridden from BrowserList::Observer
-  virtual void OnBrowserAdded(const Browser* browser);
-  virtual void OnBrowserRemoving(const Browser* browser);
-  virtual void OnBrowserSetLastActive(const Browser* browser);
-
   // I wish I has a "friend @class" construct.
   BookmarkModel* GetBookmarkModel();
-  Profile* GetDefaultProfile();
+  Profile* GetProfile();
 
  protected:
   // Clear all bookmarks from the given bookmark menu.
   void ClearBookmarkMenu(NSMenu* menu);
+
+  // Helper for adding the node as a submenu to the menu with the
+  // given title.
+  void AddNodeAsSubmenu(NSMenu* menu,
+                        const BookmarkNode* node,
+                        NSString* title);
 
   // Helper for recursively adding items to our bookmark menu
   // All children of |node| will be added to |menu|.
   // TODO(jrg): add a counter to enforce maximum nodes added
   void AddNodeToMenu(const BookmarkNode* node, NSMenu* menu);
 
+  // This configures an NSMenuItem with all the data from a BookmarkNode. This
+  // is used to update existing menu items, as well as to configure newly
+  // created ones, like in AddNodeToMenu().
+  // |set_title| is optional since it is only needed when we get a
+  // node changed notification.  On initial build of the menu we set
+  // the title as part of alloc/init.
+  void ConfigureMenuItem(const BookmarkNode* node, NSMenuItem* item,
+                         bool set_title);
+
+  // Returns the NSMenuItem for a given BookmarkNode.
+  NSMenuItem* MenuItemForNode(const BookmarkNode* node);
+
   // Return the Bookmark menu.
-  NSMenu* BookmarkMenu();
+  virtual NSMenu* BookmarkMenu();
 
   // Start watching the bookmarks for changes.
   void ObserveBookmarkModel();
@@ -82,8 +96,12 @@ class BookmarkMenuBridge : public BookmarkModelObserver,
  private:
   friend class BookmarkMenuBridgeTest;
 
+  Profile* profile_;  // weak
   BookmarkMenuCocoaController* controller_;  // strong
-  bool observing_;  // are we observing the browser list?
+
+  // In order to appropriately update items in the bookmark menu, without
+  // forcing a rebuild, map the model's nodes to menu items.
+  std::map<const BookmarkNode*, NSMenuItem*> bookmark_nodes_;
 };
 
 #endif  // CHROME_BROWSER_COCOA_BOOKMARK_MENU_BRIDGE_H_

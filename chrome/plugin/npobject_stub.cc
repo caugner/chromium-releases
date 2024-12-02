@@ -8,46 +8,56 @@
 #include "chrome/common/plugin_messages.h"
 #include "chrome/plugin/npobject_util.h"
 #include "chrome/plugin/plugin_channel_base.h"
-#include "chrome/renderer/webplugin_delegate_proxy.h"
+#include "chrome/plugin/plugin_thread.h"
 #include "third_party/npapi/bindings/npapi.h"
 #include "third_party/npapi/bindings/npruntime.h"
+#include "webkit/api/public/WebBindings.h"
+#include "webkit/glue/plugins/plugin_constants_win.h"
+
+using WebKit::WebBindings;
 
 NPObjectStub::NPObjectStub(
     NPObject* npobject,
     PluginChannelBase* channel,
     int route_id,
-    base::WaitableEvent* modal_dialog_event,
+    gfx::NativeViewId containing_window,
     const GURL& page_url)
     : npobject_(npobject),
       channel_(channel),
       route_id_(route_id),
-      valid_(true),
-      web_plugin_delegate_proxy_(NULL),
-      modal_dialog_event_(modal_dialog_event),
+      containing_window_(containing_window),
       page_url_(page_url) {
   channel_->AddRoute(route_id, this, true);
 
   // We retain the object just as PluginHost does if everything was in-process.
-  NPN_RetainObject(npobject_);
+  WebBindings::retainObject(npobject_);
 }
 
 NPObjectStub::~NPObjectStub() {
-  if (web_plugin_delegate_proxy_)
-    web_plugin_delegate_proxy_->DropWindowScriptObject();
-
   channel_->RemoveRoute(route_id_);
-  if (npobject_ && valid_)
-    NPN_ReleaseObject(npobject_);
+  if (npobject_)
+    WebBindings::releaseObject(npobject_);
 }
 
 bool NPObjectStub::Send(IPC::Message* msg) {
   return channel_->Send(msg);
 }
 
+void NPObjectStub::OnPluginDestroyed() {
+  // We null out the underlying NPObject pointer since it's not valid anymore (
+  // ScriptController manually deleted the object).  As a result,
+  // OnMessageReceived won't dispatch any more messages.  Since this includes
+  // OnRelease, this object won't get deleted until OnChannelError which might
+  // not happen for a long time if this renderer process has a long lived
+  // plugin instance to the same process.  So we delete this object manually.
+  npobject_ = NULL;
+  MessageLoop::current()->DeleteSoon(FROM_HERE, this);
+}
+
 void NPObjectStub::OnMessageReceived(const IPC::Message& msg) {
   child_process_logging::ScopedActiveURLSetter url_setter(page_url_);
 
-  if (!valid_) {
+  if (!npobject_) {
     if (msg.is_sync()) {
       // The object could be garbage because the frame has gone away, so
       // just send an error reply to the caller.
@@ -65,7 +75,7 @@ void NPObjectStub::OnMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER_DELAY_REPLY(NPObjectMsg_Invoke, OnInvoke);
     IPC_MESSAGE_HANDLER(NPObjectMsg_HasProperty, OnHasProperty);
     IPC_MESSAGE_HANDLER(NPObjectMsg_GetProperty, OnGetProperty);
-    IPC_MESSAGE_HANDLER(NPObjectMsg_SetProperty, OnSetProperty);
+    IPC_MESSAGE_HANDLER_DELAY_REPLY(NPObjectMsg_SetProperty, OnSetProperty);
     IPC_MESSAGE_HANDLER(NPObjectMsg_RemoveProperty, OnRemoveProperty);
     IPC_MESSAGE_HANDLER(NPObjectMsg_Invalidate, OnInvalidate);
     IPC_MESSAGE_HANDLER(NPObjectMsg_Enumeration, OnEnumeration);
@@ -77,11 +87,9 @@ void NPObjectStub::OnMessageReceived(const IPC::Message& msg) {
 }
 
 void NPObjectStub::OnChannelError() {
-  // When the plugin process is shutting down, all the NPObjectStubs
-  // destructors are called.  However the plugin dll might have already
-  // been released, in which case the NPN_ReleaseObject will cause a crash.
-  npobject_ = NULL;
-  delete this;
+  // If npobject_ is NULLed out, that means a DeleteSoon is happening.
+  if (npobject_)
+    delete this;
 }
 
 void NPObjectStub::OnRelease(IPC::Message* reply_msg) {
@@ -103,7 +111,7 @@ void NPObjectStub::OnHasMethod(const NPIdentifier_Param& name,
       *result = false;
     }
   } else {
-    *result = NPN_HasMethod(0, npobject_, id);
+    *result = WebBindings::hasMethod(0, npobject_, id);
   }
 }
 
@@ -122,7 +130,7 @@ void NPObjectStub::OnInvoke(bool is_default,
   NPVariant* args_var = new NPVariant[arg_count];
   for (int i = 0; i < arg_count; ++i) {
     CreateNPVariant(
-        args[i], local_channel, &(args_var[i]), modal_dialog_event_,
+        args[i], local_channel, &(args_var[i]), containing_window_,
         page_url_);
   }
 
@@ -135,7 +143,7 @@ void NPObjectStub::OnInvoke(bool is_default,
         return_value = false;
       }
     } else {
-      return_value = NPN_InvokeDefault(
+      return_value = WebBindings::invokeDefault(
           0, npobject_, args_var, arg_count, &result_var);
     }
   } else {
@@ -148,18 +156,18 @@ void NPObjectStub::OnInvoke(bool is_default,
         return_value = false;
       }
     } else {
-      return_value = NPN_Invoke(
+      return_value = WebBindings::invoke(
           0, npobject_, id, args_var, arg_count, &result_var);
     }
   }
 
   for (int i = 0; i < arg_count; ++i)
-    NPN_ReleaseVariantValue(&(args_var[i]));
+    WebBindings::releaseVariantValue(&(args_var[i]));
 
   delete[] args_var;
 
   CreateNPVariantParam(
-      result_var, local_channel, &result_param, true, modal_dialog_event_,
+      result_var, local_channel, &result_param, true, containing_window_,
       page_url_);
   NPObjectMsg_Invoke::WriteReplyParams(reply_msg, result_param, return_value);
   local_channel->Send(reply_msg);
@@ -175,7 +183,7 @@ void NPObjectStub::OnHasProperty(const NPIdentifier_Param& name,
       *result = false;
     }
   } else {
-    *result = NPN_HasProperty(0, npobject_, id);
+    *result = WebBindings::hasProperty(0, npobject_, id);
   }
 }
 
@@ -193,34 +201,53 @@ void NPObjectStub::OnGetProperty(const NPIdentifier_Param& name,
       *result = false;
     }
   } else {
-    *result = NPN_GetProperty(0, npobject_, id, &result_var);
+    *result = WebBindings::getProperty(0, npobject_, id, &result_var);
   }
 
   CreateNPVariantParam(
-      result_var, channel_, property, true, modal_dialog_event_, page_url_);
+      result_var, channel_, property, true, containing_window_, page_url_);
 }
 
 void NPObjectStub::OnSetProperty(const NPIdentifier_Param& name,
                                  const NPVariant_Param& property,
-                                 bool* result) {
+                                 IPC::Message* reply_msg) {
+  bool result;
   NPVariant result_var;
   VOID_TO_NPVARIANT(result_var);
   NPIdentifier id = CreateNPIdentifier(name);
   NPVariant property_var;
   CreateNPVariant(
-      property, channel_, &property_var, modal_dialog_event_, page_url_);
+      property, channel_, &property_var, containing_window_, page_url_);
 
   if (IsPluginProcess()) {
     if (npobject_->_class->setProperty) {
-      *result = npobject_->_class->setProperty(npobject_, id, &property_var);
+#if defined(OS_WIN)
+      static std::wstring filename = StringToLowerASCII(
+          PluginThread::current()->plugin_path().BaseName().value());
+      static NPIdentifier fullscreen =
+          WebBindings::getStringIdentifier("fullScreen");
+      if (filename == kNewWMPPlugin && id == fullscreen) {
+        // Workaround for bug 15985, which is if Flash causes WMP to go
+        // full screen a deadlock can occur when WMP calls SetFocus.
+        NPObjectMsg_SetProperty::WriteReplyParams(reply_msg, true);
+        Send(reply_msg);
+        reply_msg = NULL;
+      }
+#endif
+      result = npobject_->_class->setProperty(npobject_, id, &property_var);
     } else {
-      *result = false;
+      result = false;
     }
   } else {
-    *result = NPN_SetProperty(0, npobject_, id, &property_var);
+    result = WebBindings::setProperty(0, npobject_, id, &property_var);
   }
 
-  NPN_ReleaseVariantValue(&property_var);
+  WebBindings::releaseVariantValue(&property_var);
+
+  if (reply_msg) {
+    NPObjectMsg_SetProperty::WriteReplyParams(reply_msg, result);
+    Send(reply_msg);
+  }
 }
 
 void NPObjectStub::OnRemoveProperty(const NPIdentifier_Param& name,
@@ -233,7 +260,7 @@ void NPObjectStub::OnRemoveProperty(const NPIdentifier_Param& name,
       *result = false;
     }
   } else {
-    *result = NPN_RemoveProperty(0, npobject_, id);
+    *result = WebBindings::removeProperty(0, npobject_, id);
   }
 }
 
@@ -254,7 +281,7 @@ void NPObjectStub::OnEnumeration(std::vector<NPIdentifier_Param>* value,
   NPIdentifier* value_np = NULL;
   unsigned int count = 0;
   if (!IsPluginProcess()) {
-    *result = NPN_Enumerate(0, npobject_, &value_np, &count);
+    *result = WebBindings::enumerate(0, npobject_, &value_np, &count);
   } else {
     if (!npobject_->_class->enumerate) {
       *result = false;
@@ -289,7 +316,7 @@ void NPObjectStub::OnConstruct(const std::vector<NPVariant_Param>& args,
   NPVariant* args_var = new NPVariant[arg_count];
   for (int i = 0; i < arg_count; ++i) {
     CreateNPVariant(
-        args[i], local_channel, &(args_var[i]), modal_dialog_event_, page_url_);
+        args[i], local_channel, &(args_var[i]), containing_window_, page_url_);
   }
 
   if (IsPluginProcess()) {
@@ -300,17 +327,17 @@ void NPObjectStub::OnConstruct(const std::vector<NPVariant_Param>& args,
       return_value = false;
     }
   } else {
-    return_value = NPN_Construct(
+    return_value = WebBindings::construct(
         0, npobject_, args_var, arg_count, &result_var);
   }
 
   for (int i = 0; i < arg_count; ++i)
-    NPN_ReleaseVariantValue(&(args_var[i]));
+    WebBindings::releaseVariantValue(&(args_var[i]));
 
   delete[] args_var;
 
   CreateNPVariantParam(
-      result_var, local_channel, &result_param, true, modal_dialog_event_,
+      result_var, local_channel, &result_param, true, containing_window_,
       page_url_);
   NPObjectMsg_Invoke::WriteReplyParams(reply_msg, result_param, return_value);
   local_channel->Send(reply_msg);
@@ -335,12 +362,12 @@ void NPObjectStub::OnEvaluate(const std::string& script,
   script_string.UTF8Characters = script.c_str();
   script_string.UTF8Length = static_cast<unsigned int>(script.length());
 
-  bool return_value = NPN_EvaluateHelper(0, popups_allowed, npobject_,
-                                         &script_string, &result_var);
+  bool return_value = WebBindings::evaluateHelper(0, popups_allowed, npobject_,
+                                                  &script_string, &result_var);
 
   NPVariant_Param result_param;
   CreateNPVariantParam(
-      result_var, local_channel, &result_param, true, modal_dialog_event_,
+      result_var, local_channel, &result_param, true, containing_window_,
       page_url_);
   NPObjectMsg_Evaluate::WriteReplyParams(reply_msg, result_param, return_value);
   local_channel->Send(reply_msg);
@@ -352,5 +379,5 @@ void NPObjectStub::OnSetException(const std::string& message) {
     return;
   }
 
-  NPN_SetException(npobject_, message.c_str());
+  WebBindings::setException(npobject_, message.c_str());
 }

@@ -5,6 +5,7 @@
 #ifndef CHROME_BROWSER_VIEWS_CLEAR_BROWSING_DATA_H_
 #define CHROME_BROWSER_VIEWS_CLEAR_BROWSING_DATA_H_
 
+#include "app/combobox_model.h"
 #include "chrome/browser/browsing_data_remover.h"
 #include "views/controls/button/button.h"
 #include "views/controls/combobox/combobox.h"
@@ -32,7 +33,7 @@ class MessageLoop;
 class ClearBrowsingDataView : public views::View,
                               public views::DialogDelegate,
                               public views::ButtonListener,
-                              public views::Combobox::Model,
+                              public ComboboxModel,
                               public views::Combobox::Listener,
                               public BrowsingDataRemover::Observer {
  public:
@@ -50,9 +51,11 @@ class ClearBrowsingDataView : public views::View,
                             views::View* child);
 
   // Overridden from views::DialogDelegate:
+  virtual int GetDefaultDialogButton() const;
   virtual std::wstring GetDialogButtonLabel(
       MessageBoxFlags::DialogButton button) const;
-  virtual bool IsDialogButtonEnabled(MessageBoxFlags::DialogButton button) const;
+  virtual bool IsDialogButtonEnabled(
+      MessageBoxFlags::DialogButton button) const;
   virtual bool CanResize() const;
   virtual bool CanMaximize() const;
   virtual bool IsAlwaysOnTop() const;
@@ -62,16 +65,16 @@ class ClearBrowsingDataView : public views::View,
   virtual bool Accept();
   virtual views::View* GetContentsView();
 
-  // Overridden from views::Combobox::Model:
-  virtual int GetItemCount(views::Combobox* source);
-  virtual std::wstring GetItemAt(views::Combobox* source, int index);
+  // Overridden from ComboboxModel:
+  virtual int GetItemCount();
+  virtual std::wstring GetItemAt(int index);
 
   // Overridden from views::Combobox::Listener:
   virtual void ItemChanged(views::Combobox* sender, int prev_index,
                            int new_index);
 
   // Overridden from views::ButtonListener:
-  virtual void ButtonPressed(views::Button* sender);
+  virtual void ButtonPressed(views::Button* sender, const views::Event& event);
 
  private:
   // Adds a new check-box as a child to the view.

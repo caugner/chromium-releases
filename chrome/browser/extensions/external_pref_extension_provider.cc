@@ -31,7 +31,7 @@ ExternalPrefExtensionProvider::~ExternalPrefExtensionProvider() {
 }
 
 void ExternalPrefExtensionProvider::SetPreferencesForTesting(
-    std::string json_data_for_testing) {
+    const std::string& json_data_for_testing) {
   JSONStringValueSerializer serializer(json_data_for_testing);
   SetPreferences(&serializer);
 }
@@ -58,7 +58,8 @@ void ExternalPrefExtensionProvider::VisitRegisteredExtension(
       continue;
     }
 
-    if (external_crx.find(FilePath::kParentDirectory) != StringPiece::npos) {
+    if (external_crx.find(FilePath::kParentDirectory) !=
+        base::StringPiece::npos) {
       LOG(WARNING) << "Path traversal not allowed in path: "
                    << external_crx.c_str();
       continue;
@@ -81,7 +82,7 @@ void ExternalPrefExtensionProvider::VisitRegisteredExtension(
 }
 
 Version* ExternalPrefExtensionProvider::RegisteredVersion(
-    std::string id, Extension::Location* location) const {
+    const std::string& id, Extension::Location* location) const {
   DictionaryValue* extension = NULL;
   if (!prefs_->GetDictionary(ASCIIToWide(id), &extension))
     return NULL;

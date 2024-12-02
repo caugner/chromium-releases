@@ -49,6 +49,7 @@ screenshot.
 
 import os
 import time
+import gflags
 import selenium_utilities
 
 
@@ -58,10 +59,11 @@ class SampleTests(selenium_utilities.SeleniumTestCase):
   # TODO: Change to correct object class when NPAPI class is exposed.
   SELENIUM_OBJ_TYPE = "[object HTMLObjectElement]"
 
-  def __init__(self, name, session, browser, test_type=None, sample_path=None,
-               options=None):
+  def __init__(self, name, browser, path_to_html, test_type=None,
+               sample_path=None, options=None):
     selenium_utilities.SeleniumTestCase.__init__(
-        self, name, session, browser, test_type, sample_path, options)
+        self, name, browser, path_to_html, test_type, sample_path,
+        options)
 
   def GenericTest(self):
     """Generically test a sample.
@@ -71,7 +73,7 @@ class SampleTests(selenium_utilities.SeleniumTestCase):
     ready for a screenshot.
     """
     self.RunGenericTest(
-        self.session.browserURL + "/samples/",
+        "/samples/",
         "(typeof(window.g_finished) != 'undefined') && "
         "window.g_finished == true;",
         None)
@@ -86,20 +88,22 @@ class SampleTests(selenium_utilities.SeleniumTestCase):
     """
     # Alias for the selenium session
     s = self.session
-    for i in range(0, 4):
-      for j in range(0, 4):
-        string1 = "%s[%d][%d]" % (matrix1, i, j)
-        string2 = "%s[%d][%d]" % (matrix2, i, j)
-        a = float(s.get_eval(string1))
-        b = float(s.get_eval(string2))
-        self.assertTrue(abs(a - b) < 0.001)
+    mat1_values = s.get_eval(matrix1 + '.toString()').split(',')
+    mat2_values = s.get_eval(matrix2 + '.toString()').split(',')
+    
+    self.assertTrue(len(mat1_values) == 16)
+    self.assertTrue(len(mat2_values) == 16)
+    for i in range(len(mat1_values)):
+      a = float(mat1_values[i])
+      b = float(mat2_values[i])
+      self.assertTrue(abs(a - b) < 0.001)
 
   def TestSampleRotateModel(self):
     """Tests rotatemodel.html."""
 
     # Alias for the selenium session
     s = self.session
-    s.open(s.browserURL + "/samples/rotatemodel.html")
+    s.open(self.GetURL("/samples/rotatemodel.html"))
 
     # wait for sample to be ready.
     s.wait_for_condition("(typeof(window.g_finished) != 'undefined') && "
@@ -168,7 +172,7 @@ class SampleTests(selenium_utilities.SeleniumTestCase):
 
     # Alias for the selenium session
     s = self.session
-    s.open(s.browserURL + "/samples/customcamera.html")
+    s.open(self.GetURL("/samples/customcamera.html"))
 
     # Allow a limited time for the plugin to initialize.
     s.wait_for_condition("typeof(window.g_client) != 'undefined';", 10000)
@@ -177,29 +181,24 @@ class SampleTests(selenium_utilities.SeleniumTestCase):
     self.assertEqual("Tutorial B4: Cameras and events", s.get_title())
     self.assertEqual("null", s.get_eval("window.undefined_symbol_xxxyyy"))
 
-    # Try different views of the camera
-    time.sleep(1)
+    # Try different views of the camera.
+    # Set delay between each operation at 100ms. This is needed for some
+    # versions of IE and Chrome.
+    speed = int(s.get_speed())
+    s.set_speed(100)
     s.type("eyeX", "5")
-    time.sleep(1)
     s.type("eyeY", "5")
-    time.sleep(1)
     s.type("eyeZ", "5")
-    time.sleep(1)
     s.click("btnSet")
 
-    time.sleep(1)
     s.type("eyeX", "2")
-    time.sleep(1)
     s.type("eyeY", "3")
-    time.sleep(1)
     s.type("eyeZ", "2")
-    time.sleep(1)
     s.type("upX", "1")
-    time.sleep(1)
     s.type("upY", "0")
-    time.sleep(1)
     s.click("btnSet")
-    time.sleep(2)
+    # Reset delay to previous value.
+    s.set_speed(speed)
 
     # Capture screenshot
     self.assertTrue(selenium_utilities.TakeScreenShot(s, self.browser,
@@ -214,7 +213,7 @@ class SampleTests(selenium_utilities.SeleniumTestCase):
 
     # Alias for the selenium session
     s = self.session
-    s.open(s.browserURL + "/samples/render-mode.html")
+    s.open(self.GetURL("/samples/render-mode.html"))
 
     # Allow a limited time for the plugin to initialize.
     s.wait_for_condition("typeof(window.g_client) != 'undefined';", 10000)
@@ -252,7 +251,7 @@ class SampleTests(selenium_utilities.SeleniumTestCase):
 
     # Alias for the selenium session
     s = self.session
-    s.open(s.browserURL + "/samples/picking.html")
+    s.open(self.GetURL("/samples/picking.html"))
 
     # wait for sample to be ready.
     s.wait_for_condition("(typeof(window.g_finished) != 'undefined') && "
@@ -283,7 +282,7 @@ class SampleTests(selenium_utilities.SeleniumTestCase):
 
     # Alias for the selenium session
     s = self.session
-    s.open(s.browserURL + "/samples/shader-test.html")
+    s.open(self.GetURL("/samples/shader-test.html"))
 
     # Allow a limited time for the plugin to initialize.
     s.wait_for_condition("typeof(window.g_client) != 'undefined';", 20000)
@@ -312,14 +311,14 @@ class SampleTests(selenium_utilities.SeleniumTestCase):
       s.select("//select[@id='shaderSelect']", ("index=%d" % shader))
       # Take screenshot
       self.assertTrue(selenium_utilities.TakeScreenShot(
-          s, self.browser, "g_client", ("shader-test%d" % shader)))
+          s, self.browser, "g_client", "shader-test%d" % (shader + 1)))
 
   def TestSampleErrorTextureSmall(self):
     """Tests error-texture.html."""
 
     # Alias for the selenium session
     s = self.session
-    s.open(s.browserURL + "/samples/error-texture.html")
+    s.open(self.GetURL("/samples/error-texture.html"))
 
     # Allow a limited time for the plugin to initialize.
     s.wait_for_condition("typeof(window.g_client) != 'undefined';", 30000)
@@ -367,7 +366,7 @@ class SampleTests(selenium_utilities.SeleniumTestCase):
 
     # Alias for the selenium session
     s = self.session
-    s.open(s.browserURL + "/samples/multiple-clients.html")
+    s.open(self.GetURL("/samples/multiple-clients.html"))
 
     # Allow a limited time for the plugin to initialize.  We spot-check the
     # first and last here to make sure the page has basically loaded.  Before we
@@ -413,7 +412,7 @@ class SampleTests(selenium_utilities.SeleniumTestCase):
 
     # Alias for the selenium session
     s = self.session
-    s.open(s.browserURL + "/samples/pingpong/o3dPingPong.html")
+    s.open(self.GetURL("/samples/pingpong/o3dPingPong.html"))
 
     # Sanity checks.
     self.assertEqual("o3dPingPong", s.get_title())
@@ -431,7 +430,7 @@ class SampleTests(selenium_utilities.SeleniumTestCase):
 
     # Alias for the selenium session
     s = self.session
-    s.open(s.browserURL + "/samples/hellocube-textures.html")
+    s.open(self.GetURL("/samples/hellocube-textures.html"))
 
     # Sanity checks.
     self.assertEqual(
@@ -460,7 +459,7 @@ class SampleTests(selenium_utilities.SeleniumTestCase):
 
     # Alias for the selenium session.
     s = self.session
-    s.open(s.browserURL + "/samples/hellocube-textures.html")
+    s.open(self.GetURL("/samples/hellocube-textures.html"))
 
     # Sanity checks.
     self.assertEqual(
@@ -497,7 +496,7 @@ class SampleTests(selenium_utilities.SeleniumTestCase):
 
     # Alias for the selenium session
     s = self.session
-    s.open(s.browserURL + "/samples/archive-textures.html")
+    s.open(self.GetURL("/samples/archive-textures.html"))
 
     # Allow a limited time for the plugin to initialize.
     s.wait_for_condition("typeof(window.g_client) != 'undefined';", 10000)
@@ -513,7 +512,7 @@ class SampleTests(selenium_utilities.SeleniumTestCase):
     # Refresh the page, before waiting for all of the textures to be loaded.
     # This tests that the browser won't hang while processing the
     # no-longer-needed streams.
-    s.open(s.browserURL + "/samples/archive-textures.html")
+    s.open(self.GetURL("/samples/archive-textures.html"))
 
     # Allow a limited time for the plugin to initialize.
     s.wait_for_condition("typeof(window.g_client) != 'undefined';", 10000)

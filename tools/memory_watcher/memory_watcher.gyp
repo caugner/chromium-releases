@@ -3,15 +3,13 @@
 # found in the LICENSE file.
 
 {
-  'includes': [
-    '../../build/common.gypi',
-  ],
   'targets': [
     {
       'target_name': 'memory_watcher',
       'type': 'shared_library',
       'msvs_guid': '3BD81303-4E14-4559-AA69-B30C3BAB08DD',
       'dependencies': [
+        '../../app/app.gyp:*',
         '../../base/base.gyp:base',
       ],
       'defines': [
@@ -19,6 +17,8 @@
       ],
       'include_dirs': [
         '../..',
+        # TODO(beng): move wtl to src/third_party
+        '../../chrome/third_party/wtl/include',
       ],
       'sources': [
         'call_stack.cc',
@@ -39,3 +39,9 @@
     },
   ],
 }
+
+# Local Variables:
+# tab-width:2
+# indent-tabs-mode:nil
+# End:
+# vim: set expandtab tabstop=2 shiftwidth=2:

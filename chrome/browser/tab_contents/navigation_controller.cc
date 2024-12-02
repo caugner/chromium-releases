@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,8 +16,8 @@
 #include "chrome/browser/renderer_host/site_instance.h"
 #include "chrome/browser/sessions/session_types.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
-#include "chrome/browser/tab_contents/repost_form_warning.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/tab_contents/tab_contents_delegate.h"
 #include "chrome/common/navigation_types.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
@@ -29,12 +29,11 @@
 #include "net/base/net_util.h"
 #include "webkit/glue/webkit_glue.h"
 
-#if defined(OS_WIN)
-#include "chrome/browser/tab_contents/repost_form_warning.h"
-#include "chrome/browser/tab_contents/tab_contents_delegate.h"
-#endif
-
 namespace {
+
+const int kInvalidateAllButShelves =
+    0xFFFFFFFF & ~(TabContents::INVALIDATE_BOOKMARK_BAR |
+                   TabContents::INVALIDATE_EXTENSION_SHELF);
 
 // Invoked when entries have been pruned, or removed. For example, if the
 // current entries are [google, digg, yahoo], with the current entry google,
@@ -131,7 +130,7 @@ NavigationController::NavigationController(TabContents* contents,
       max_restored_page_id_(-1),
       ALLOW_THIS_IN_INITIALIZER_LIST(ssl_manager_(this)),
       needs_reload_(false),
-      load_pending_entry_when_active_(false) {
+      user_gesture_observed_(false) {
   DCHECK(profile_);
 }
 
@@ -173,7 +172,7 @@ void NavigationController::Reload(bool check_for_repost) {
     // they really want to do this. If they do, the dialog will call us back
     // with check_for_repost = false.
     tab_contents_->Activate();
-    RunRepostFormWarningDialog(this);
+    tab_contents_->delegate()->ShowRepostFormWarningDialog(tab_contents_);
   } else {
     // Base the navigation on where we are now...
     int current_index = GetCurrentEntryIndex();
@@ -358,11 +357,11 @@ NavigationEntry* NavigationController::CreateNavigationEntry(
   // will actually be loaded. This real URL won't be shown to the user, just
   // used internally.
   GURL loaded_url(url);
-  BrowserURLHandler::RewriteURLIfNecessary(&loaded_url);
+  BrowserURLHandler::RewriteURLIfNecessary(&loaded_url, profile_);
 
   NavigationEntry* entry = new NavigationEntry(NULL, -1, loaded_url, referrer,
                                                string16(), transition);
-  entry->set_display_url(url);
+  entry->set_virtual_url(url);
   entry->set_user_typed_url(url);
   if (url.SchemeIsFile()) {
     std::wstring languages = profile()->GetPrefs()->GetString(
@@ -381,8 +380,7 @@ void NavigationController::AddTransientEntry(NavigationEntry* entry) {
   DiscardTransientEntry();
   entries_.insert(entries_.begin() + index, linked_ptr<NavigationEntry>(entry));
   transient_entry_index_  = index;
-  tab_contents_->NotifyNavigationStateChanged(
-      TabContents::INVALIDATE_EVERYTHING);
+  tab_contents_->NotifyNavigationStateChanged(kInvalidateAllButShelves);
 }
 
 void NavigationController::LoadURL(const GURL& url, const GURL& referrer,
@@ -395,41 +393,6 @@ void NavigationController::LoadURL(const GURL& url, const GURL& referrer,
   LoadEntry(entry);
 }
 
-void NavigationController::LoadURLLazily(const GURL& url,
-                                         const GURL& referrer,
-                                         PageTransition::Type type,
-                                         const std::wstring& title,
-                                         SkBitmap* icon) {
-  NavigationEntry* entry = CreateNavigationEntry(url, referrer, type);
-  entry->set_title(WideToUTF16Hack(title));
-  if (icon)
-    entry->favicon().set_bitmap(*icon);
-
-  DiscardNonCommittedEntriesInternal();
-  pending_entry_ = entry;
-  load_pending_entry_when_active_ = true;
-}
-
-bool NavigationController::LoadingURLLazily() const {
-  return load_pending_entry_when_active_;
-}
-
-const string16& NavigationController::GetLazyTitle() const {
-  if (pending_entry_)
-    return pending_entry_->GetTitleForDisplay(this);
-  else
-    return EmptyString16();
-}
-
-const SkBitmap& NavigationController::GetLazyFavIcon() const {
-  if (pending_entry_) {
-    return pending_entry_->favicon().bitmap();
-  } else {
-    ResourceBundle &rb = ResourceBundle::GetSharedInstance();
-    return *rb.GetBitmapNamed(IDR_DEFAULT_FAVICON);
-  }
-}
-
 void NavigationController::DocumentLoadedInFrame() {
   last_document_loaded_ = base::TimeTicks::Now();
 }
@@ -440,6 +403,7 @@ void NavigationController::OnUserGesture() {
 
 bool NavigationController::RendererDidNavigate(
     const ViewHostMsg_FrameNavigate_Params& params,
+    int extra_invalidate_flags,
     LoadCommittedDetails* details) {
   // Save the previous state before we clobber it.
   if (GetLastCommittedEntry()) {
@@ -517,7 +481,7 @@ bool NavigationController::RendererDidNavigate(
   details->serialized_security_info = params.security_info;
   details->is_content_filtered = params.is_content_filtered;
   details->http_status_code = params.http_status_code;
-  NotifyNavigationEntryCommitted(details);
+  NotifyNavigationEntryCommitted(details, extra_invalidate_flags);
 
   user_gesture_observed_ = false;
 
@@ -526,12 +490,25 @@ bool NavigationController::RendererDidNavigate(
 
 NavigationType::Type NavigationController::ClassifyNavigation(
     const ViewHostMsg_FrameNavigate_Params& params) const {
-  // If a page makes a popup navigated to about blank, and then writes stuff
-  // like a subframe navigated to a real site, we'll get a notification with an
-  // invalid page ID. There's nothing we can do with these, so just ignore them.
   if (params.page_id == -1) {
-    DCHECK(!GetActiveEntry()) << "Got an invalid page ID but we seem to be "
-      " navigated to a valid page. This should be impossible.";
+    // The renderer generates the page IDs, and so if it gives us the invalid
+    // page ID (-1) we know it didn't actually navigate. This happens in a few
+    // cases:
+    //
+    // - If a page makes a popup navigated to about blank, and then writes
+    //   stuff like a subframe navigated to a real page. We'll get the commit
+    //   for the subframe, but there won't be any commit for the outer page.
+    //
+    // - We were also getting these for failed loads (for example, bug 21849).
+    //   The guess is that we get a "load commit" for the alternate error page,
+    //   but that doesn't affect the page ID, so we get the "old" one, which
+    //   could be invalid. This can also happen for a cross-site transition
+    //   that causes us to swap processes. Then the error page load will be in
+    //   a new process with no page IDs ever assigned (and hence a -1 value),
+    //   yet the navigation controller still might have previous pages in its
+    //   list.
+    //
+    // In these cases, there's nothing we can do with them, so ignore.
     return NavigationType::NAV_IGNORE;
   }
 
@@ -684,7 +661,10 @@ void NavigationController::RendererDidNavigateToExistingPage(
   if (entry == pending_entry_)
     DiscardNonCommittedEntriesInternal();
 
-  last_committed_entry_index_ = entry_index;
+  // If a transient entry was removed, the indices might have changed, so we
+  // have to query the entry index again.
+  last_committed_entry_index_ =
+      GetEntryIndexWithPageID(tab_contents_->GetSiteInstance(), params.page_id);
 }
 
 void NavigationController::RendererDidNavigateToSamePage(
@@ -816,7 +796,7 @@ void NavigationController::CommitPendingEntry() {
   details.is_in_page = AreURLsInPageNavigation(details.previous_url,
                                                details.entry->url());
   details.is_main_frame = true;
-  NotifyNavigationEntryCommitted(&details);
+  NotifyNavigationEntryCommitted(&details, 0);
 }
 
 int NavigationController::GetIndexOfEntry(
@@ -858,8 +838,7 @@ void NavigationController::DiscardNonCommittedEntries() {
   // If there was a transient entry, invalidate everything so the new active
   // entry state is shown.
   if (transient) {
-    tab_contents_->NotifyNavigationStateChanged(
-        TabContents::INVALIDATE_EVERYTHING);
+    tab_contents_->NotifyNavigationStateChanged(kInvalidateAllButShelves);
   }
 }
 
@@ -924,7 +903,8 @@ void NavigationController::NavigateToPendingEntry(bool reload) {
 }
 
 void NavigationController::NotifyNavigationEntryCommitted(
-    LoadCommittedDetails* details) {
+    LoadCommittedDetails* details,
+    int extra_invalidate_flags) {
   details->entry = GetActiveEntry();
   NotificationDetails notification_details =
       Details<LoadCommittedDetails>(details);
@@ -938,7 +918,7 @@ void NavigationController::NotifyNavigationEntryCommitted(
   // should be removed, and interested parties should just listen for the
   // notification below instead.
   tab_contents_->NotifyNavigationStateChanged(
-      TabContents::INVALIDATE_EVERYTHING);
+      kInvalidateAllButShelves | extra_invalidate_flags);
 
   NotificationService::current()->Notify(
       NotificationType::NAV_ENTRY_COMMITTED,
@@ -952,14 +932,8 @@ void NavigationController::DisablePromptOnRepost() {
 }
 
 void NavigationController::SetActive(bool is_active) {
-  if (is_active) {
-    if (needs_reload_) {
-      LoadIfNecessary();
-    } else if (load_pending_entry_when_active_) {
-      NavigateToPendingEntry(false);
-      load_pending_entry_when_active_ = false;
-    }
-  }
+  if (is_active && needs_reload_)
+    LoadIfNecessary();
 }
 
 void NavigationController::LoadIfNecessary() {
@@ -1006,6 +980,8 @@ void NavigationController::DiscardTransientEntry() {
   if (transient_entry_index_ == -1)
     return;
   entries_.erase(entries_.begin() + transient_entry_index_);
+  if (last_committed_entry_index_ > transient_entry_index_)
+    last_committed_entry_index_--;
   transient_entry_index_ = -1;
 }
 

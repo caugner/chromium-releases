@@ -49,26 +49,6 @@ bool VolumeSupportsADS(const std::wstring path) {
 
   return false;
 }
-
-// Checks if the ZoneIdentifier is correctly set to "Internet" (3)
-void CheckZoneIdentifier(const std::wstring full_path) {
-  const DWORD kShare = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
-
-  std::wstring path = full_path + L":Zone.Identifier";
-  HANDLE file = CreateFile(path.c_str(), GENERIC_READ, kShare, NULL,
-                           OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-  ASSERT_TRUE(INVALID_HANDLE_VALUE != file);
-
-  char buffer[100] = {0};
-  DWORD read = 0;
-  ASSERT_TRUE(ReadFile(file, buffer, 100, &read, NULL));
-  CloseHandle(file);
-
-  const char kIdentifier[] = "[ZoneTransfer]\nZoneId=3";
-  ASSERT_EQ(arraysize(kIdentifier), read);
-
-  ASSERT_EQ(0, strcmp(kIdentifier, buffer));
-}
 #endif  // defined(OS_WIN)
 
 class DownloadTest : public UITest {
@@ -108,7 +88,7 @@ class DownloadTest : public UITest {
 
   virtual void SetUp() {
     UITest::SetUp();
-    download_prefix_ = FilePath::FromWStringHack(GetDownloadDirectory());
+    download_prefix_ = GetDownloadDirectory();
   }
 
  protected:
@@ -150,17 +130,59 @@ class DownloadTest : public UITest {
     EXPECT_FALSE(file_util::PathExists(download_path));
   }
 
+#if defined(OS_WIN)
+  // Checks if the ZoneIdentifier is correctly set to "Internet" (3)
+  void CheckZoneIdentifier(const std::wstring full_path) {
+    std::wstring path = full_path + L":Zone.Identifier";
+
+    // This polling and sleeping here is a very bad pattern. But due to how
+    // Windows file semantics work it's really hard to do it other way. We are
+    // reading a file written by a different process, using a different handle.
+    // Windows does not guarantee that we will get the same contents even after
+    // the other process closes the handle, flushes the buffers, etc.
+    for (int i = 0; i < 20; i++) {
+      PlatformThread::Sleep(sleep_timeout_ms());
+
+      const DWORD kShare = FILE_SHARE_READ |
+                           FILE_SHARE_WRITE |
+                           FILE_SHARE_DELETE;
+      HANDLE file = CreateFile(path.c_str(), GENERIC_READ, kShare, NULL,
+                               OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+      if (file == INVALID_HANDLE_VALUE)
+        continue;
+
+      char buffer[100] = {0};
+      DWORD read = 0;
+      BOOL read_result = ReadFile(file, buffer, 100, &read, NULL);
+      CloseHandle(file);
+
+      if (!read_result)
+        continue;
+
+      const char kIdentifier[] = "[ZoneTransfer]\nZoneId=3";
+      if (read != arraysize(kIdentifier))
+        continue;
+
+      if (strcmp(kIdentifier, buffer) == 0)
+        return;
+    }
+
+    FAIL() << "Could not detect Internet ZoneIndentifier";
+  }
+#endif  // defined(OS_WIN)
+
   FilePath download_prefix_;
 };
 
 // Download a file with non-viewable content, verify that the
 // download tab opened and the file exists.
-TEST_F(DownloadTest, DownloadMimeType) {
+// This test is flaky. See bug 24889.
+TEST_F(DownloadTest, FLAKY_DownloadMimeType) {
   FilePath file(FILE_PATH_LITERAL("download-test1.lib"));
 
   EXPECT_EQ(1, GetTabCount());
 
-  NavigateToURL(URLRequestMockHTTPJob::GetMockUrl(file.ToWStringHack()));
+  NavigateToURL(URLRequestMockHTTPJob::GetMockUrl(file));
   // No new tabs created, downloads appear in the current tab's download shelf.
   WaitUntilTabCount(1);
 
@@ -185,7 +207,7 @@ TEST_F(DownloadTest, NoDownload) {
 
   EXPECT_EQ(1, GetTabCount());
 
-  NavigateToURL(URLRequestMockHTTPJob::GetMockUrl(file.ToWStringHack()));
+  NavigateToURL(URLRequestMockHTTPJob::GetMockUrl(file));
   WaitUntilTabCount(1);
 
   // Wait to see if the file will be downloaded.
@@ -203,13 +225,14 @@ TEST_F(DownloadTest, NoDownload) {
 // Download a 0-size file with a content-disposition header, verify that the
 // download tab opened and the file exists as the filename specified in the
 // header.  This also ensures we properly handle empty file downloads.
-TEST_F(DownloadTest, ContentDisposition) {
+// See bug http://crbug.com/20809
+TEST_F(DownloadTest, FLAKY_ContentDisposition) {
   FilePath file(FILE_PATH_LITERAL("download-test3.gif"));
   FilePath download_file(FILE_PATH_LITERAL("download-test3-attachment.gif"));
 
   EXPECT_EQ(1, GetTabCount());
 
-  NavigateToURL(URLRequestMockHTTPJob::GetMockUrl(file.ToWStringHack()));
+  NavigateToURL(URLRequestMockHTTPJob::GetMockUrl(file));
   WaitUntilTabCount(1);
 
   // Wait until the file is downloaded.
@@ -232,7 +255,7 @@ TEST_F(DownloadTest, PerWindowShelf) {
 
   EXPECT_EQ(1, GetTabCount());
 
-  NavigateToURL(URLRequestMockHTTPJob::GetMockUrl(file.ToWStringHack()));
+  NavigateToURL(URLRequestMockHTTPJob::GetMockUrl(file));
   WaitUntilTabCount(1);
 
   // Wait until the file is downloaded.
@@ -246,7 +269,7 @@ TEST_F(DownloadTest, PerWindowShelf) {
   EXPECT_TRUE(WaitForDownloadShelfVisible(browser.get()));
 
   // Open a second tab
-  browser->AppendTab(GURL(""));
+  browser->AppendTab(GURL());
   WaitUntilTabCount(2);
 
   // Hide shelf
@@ -292,7 +315,8 @@ TEST_F(DownloadTest, DISABLED_KnownSize) {
 
 // Test that when downloading an item in Incognito mode, we don't crash when
 // closing the last Incognito window (http://crbug.com/13983).
-TEST_F(DownloadTest, IncognitoDownload) {
+// This test is flaky. See bug 24684.
+TEST_F(DownloadTest, FLAKY_IncognitoDownload) {
   // Open a regular window and sanity check default values for window / tab
   // count and shelf visibility.
   scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
@@ -314,8 +338,7 @@ TEST_F(DownloadTest, IncognitoDownload) {
   // Download something.
   FilePath file(FILE_PATH_LITERAL("download-test1.lib"));
   //PlatformThread::Sleep(1000);
-  ASSERT_TRUE(tab->NavigateToURL(
-      URLRequestMockHTTPJob::GetMockUrl(file.ToWStringHack())));
+  ASSERT_TRUE(tab->NavigateToURL(URLRequestMockHTTPJob::GetMockUrl(file)));
   PlatformThread::Sleep(action_timeout_ms());
 
   // Verify that the download shelf is showing for the Incognito window.

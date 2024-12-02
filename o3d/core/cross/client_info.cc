@@ -32,7 +32,6 @@
 
 // This file contains the ClientInfoManager implementation
 
-#include "core/cross/precompile.h"
 #include "core/cross/client_info.h"
 #include <vector>
 #include "base/string_util.h"
@@ -41,6 +40,15 @@
 #include "core/cross/object_manager.h"
 
 namespace o3d {
+
+ClientInfo::ClientInfo()
+    : num_objects_(0),
+      texture_memory_used_(0),
+      buffer_memory_used_(0),
+      software_renderer_(false),
+      non_power_of_two_textures_(false),
+      version_(O3D_PLUGIN_VERSION) {
+}
 
 const InterfaceId ClientInfoManager::kInterfaceId =
     InterfaceTraits<ClientInfoManager>::kInterfaceId;

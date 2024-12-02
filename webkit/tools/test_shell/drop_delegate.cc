@@ -6,10 +6,13 @@
 
 #include "webkit/api/public/WebDragData.h"
 #include "webkit/api/public/WebPoint.h"
+#include "webkit/api/public/WebView.h"
 #include "webkit/glue/webdropdata.h"
-#include "webkit/glue/webview.h"
 
+using WebKit::WebDragOperation;
+using WebKit::WebDragOperationCopy;
 using WebKit::WebPoint;
+using WebKit::WebView;
 
 // BaseDropTarget methods ----------------------------------------------------
 
@@ -22,11 +25,14 @@ DWORD TestDropDelegate::OnDragEnter(IDataObject* data_object,
 
   POINT client_pt = cursor_position;
   ScreenToClient(GetHWND(), &client_pt);
-  bool valid = webview_->DragTargetDragEnter(
+  WebDragOperation op = webview_->dragTargetDragEnter(
       drop_data.ToDragData(), drop_data.identity,
       WebPoint(client_pt.x, client_pt.y),
-      WebPoint(cursor_position.x, cursor_position.y));
-  return valid ? DROPEFFECT_COPY : DROPEFFECT_NONE;
+      WebPoint(cursor_position.x, cursor_position.y),
+      WebDragOperationCopy);
+  // TODO(snej): Pass the real drag operation instead
+  return op ? DROPEFFECT_COPY : DROPEFFECT_NONE;
+  // TODO(snej): Return the real drop effect constant matching 'op'
 }
 
 DWORD TestDropDelegate::OnDragOver(IDataObject* data_object,
@@ -35,14 +41,17 @@ DWORD TestDropDelegate::OnDragOver(IDataObject* data_object,
                                    DWORD effect) {
   POINT client_pt = cursor_position;
   ScreenToClient(GetHWND(), &client_pt);
-  bool valid = webview_->DragTargetDragOver(
+  WebDragOperation op = webview_->dragTargetDragOver(
       WebPoint(client_pt.x, client_pt.y),
-      WebPoint(cursor_position.x, cursor_position.y));
-  return valid ? DROPEFFECT_COPY : DROPEFFECT_NONE;
+      WebPoint(cursor_position.x, cursor_position.y),
+      WebDragOperationCopy);
+  // TODO(snej): Pass the real drag operation instead
+  return op ? DROPEFFECT_COPY : DROPEFFECT_NONE;
+  // TODO(snej): Return the real drop effect constant matching 'op'
 }
 
 void TestDropDelegate::OnDragLeave(IDataObject* data_object) {
-  webview_->DragTargetDragLeave();
+  webview_->dragTargetDragLeave();
 }
 
 DWORD TestDropDelegate::OnDrop(IDataObject* data_object,
@@ -51,7 +60,7 @@ DWORD TestDropDelegate::OnDrop(IDataObject* data_object,
                                DWORD effect) {
   POINT client_pt = cursor_position;
   ScreenToClient(GetHWND(), &client_pt);
-  webview_->DragTargetDrop(
+  webview_->dragTargetDrop(
       WebPoint(client_pt.x, client_pt.y),
       WebPoint(cursor_position.x, cursor_position.y));
 

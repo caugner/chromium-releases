@@ -5,6 +5,8 @@
 #ifndef CHROME_BROWSER_GTK_BACK_FORWARD_MENU_MODEL_GTK_H_
 #define CHROME_BROWSER_GTK_BACK_FORWARD_MENU_MODEL_GTK_H_
 
+#include <string>
+
 #include "base/basictypes.h"
 
 #include "chrome/browser/back_forward_menu_model.h"
@@ -29,6 +31,7 @@ class BackForwardMenuModelGtk : public BackForwardMenuModel,
   virtual bool IsCommandEnabled(int command_id) const;
   virtual void ExecuteCommand(int command_id);
   virtual void StoppedShowing();
+  virtual bool AlwaysShowImages() const;
 
  private:
   BackForwardButtonGtk* button_;

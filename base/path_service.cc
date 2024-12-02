@@ -188,6 +188,7 @@ bool PathService::Get(int key, FilePath* result) {
   return true;
 }
 
+#if defined(OS_WIN)
 // static
 bool PathService::Get(int key, std::wstring* result) {
   // Deprecated compatibility function.
@@ -197,6 +198,7 @@ bool PathService::Get(int key, std::wstring* result) {
   *result = path.ToWStringHack();
   return true;
 }
+#endif
 
 bool PathService::IsOverridden(int key) {
   PathData* path_data = GetPathData();
@@ -229,14 +231,6 @@ bool PathService::Override(int key, const FilePath& path) {
   path_data->cache[key] = file_path;
   path_data->overrides.insert(key);
   return true;
-}
-
-bool PathService::Override(int key, const std::wstring& path) {
-  return Override(key, FilePath::FromWStringHack(path));
-}
-
-bool PathService::SetCurrentDirectory(const std::wstring& current_directory) {
-  return file_util::SetCurrentDirectory(current_directory);
 }
 
 void PathService::RegisterProvider(ProviderFunc func, int key_start,

@@ -9,23 +9,25 @@
 #include "base/base_switches.h"
 #import "base/basictypes.h"
 #include "base/command_line.h"
+#include "base/file_path.h"
+#include "base/file_util.h"
 #import "base/logging.h"
+#include "base/mac_util.h"
 #import "base/scoped_nsautorelease_pool.h"
 #include "base/sys_string_conversions.h"
 #import "breakpad/src/client/mac/Framework/Breakpad.h"
 #include "chrome/common/child_process_logging.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/installer/util/google_update_settings.h"
-
-extern "C" {
 
 namespace {
 
 BreakpadRef gBreakpadRef = NULL;
 
-} // namespace
+}  // namespace
 
-bool IsCrashReporterDisabled() {
-  return gBreakpadRef == NULL;
+bool IsCrashReporterEnabled() {
+  return gBreakpadRef != NULL;
 }
 
 void DestructCrashReporter() {
@@ -40,56 +42,95 @@ void InitCrashReporter() {
   DCHECK(gBreakpadRef == NULL);
   base::ScopedNSAutoreleasePool autorelease_pool;
 
-  // Check for Send stats preference. If preference is not specifically turned
-  // on then disable crash reporting.
-  if (!GoogleUpdateSettings::GetCollectStatsConsent()) {
+  // Check whether the user has consented to stats and crash reporting.  The
+  // browser process can make this determination directly.  Helper processes
+  // may not have access to the disk or to the same data as the browser
+  // process, so the browser passes the consent preference to them on the
+  // command line.
+  NSBundle* main_bundle = mac_util::MainAppBundle();
+  NSDictionary* info_dictionary = [main_bundle infoDictionary];
+  bool is_browser = !mac_util::IsBackgroundOnlyProcess();
+  bool enable_breakpad =
+      is_browser ? GoogleUpdateSettings::GetCollectStatsConsent() :
+                   CommandLine::ForCurrentProcess()->
+                       HasSwitch(switches::kEnableCrashReporter);
+
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kDisableBreakpad)) {
+    enable_breakpad = false;
+  }
+
+  if (!enable_breakpad) {
     LOG(WARNING) << "Breakpad disabled";
     return;
   }
 
-  NSBundle* main_bundle = [NSBundle mainBundle];
+  // Tell Breakpad where crash_inspector and crash_report_sender are.
   NSString* resource_path = [main_bundle resourcePath];
+  NSString *inspector_location =
+      [resource_path stringByAppendingPathComponent:@"crash_inspector"];
+  NSString *reporter_bundle_location =
+      [resource_path stringByAppendingPathComponent:@"crash_report_sender.app"];
+  NSString *reporter_location =
+      [[NSBundle bundleWithPath:reporter_bundle_location] executablePath];
 
-  NSDictionary* info_dictionary = [main_bundle infoDictionary];
-  NSMutableDictionary *breakpad_config = [info_dictionary
-                                             mutableCopy];
-
-  // Tell Breakpad where inspector & crash_reporter are.
-  NSString *inspector_location = [resource_path
-      stringByAppendingPathComponent:@"crash_inspector"];
-  NSString *reporter_bundle_location = [resource_path
-      stringByAppendingPathComponent:@"crash_report_sender.app"];
-  NSString *reporter_location = [[NSBundle
-                                      bundleWithPath:reporter_bundle_location]
-                                     executablePath];
-
+  NSMutableDictionary *breakpad_config =
+      [[info_dictionary mutableCopy] autorelease];
   [breakpad_config setObject:inspector_location
                       forKey:@BREAKPAD_INSPECTOR_LOCATION];
   [breakpad_config setObject:reporter_location
                       forKey:@BREAKPAD_REPORTER_EXE_LOCATION];
 
-  // Init breakpad
-  BreakpadRef breakpad = NULL;
-  breakpad = BreakpadCreate(breakpad_config);
-  if (!breakpad) {
-    LOG(ERROR) << "Breakpad init failed.";
+  // In the main application (the browser process), crashes can be passed to
+  // the system's Crash Reporter.  This allows the system to notify the user
+  // when the application crashes, and provide the user with the option to
+  // restart it.
+  if (is_browser)
+    [breakpad_config setObject:@"NO" forKey:@BREAKPAD_SEND_AND_EXIT];
+
+  // By setting the BREAKPAD_DUMP_LOCATION environment variable, an alternate
+  // location to write brekapad crash dumps can be set.
+  const char* alternate_minidump_location = getenv("BREAKPAD_DUMP_LOCATION");
+  if (alternate_minidump_location) {
+    FilePath alternate_minidump_location_path(alternate_minidump_location);
+    if (!file_util::PathExists(alternate_minidump_location_path)) {
+      LOG(ERROR) << "Directory " << alternate_minidump_location <<
+          " doesn't exist";
+    } else {
+      NSFileManager* file_manager = [NSFileManager defaultManager];
+      size_t minidump_location_len = strlen(alternate_minidump_location);
+      DCHECK(minidump_location_len > 0);
+      NSString* minidump_location = [file_manager
+          stringWithFileSystemRepresentation:alternate_minidump_location
+                                      length:minidump_location_len];
+      [breakpad_config
+          setObject:minidump_location
+             forKey:@BREAKPAD_DUMP_DIRECTORY];
+      if (is_browser) {
+        // Print out confirmation message to the stdout, but only print
+        // from browser process so we don't flood the terminal.
+        LOG(WARNING) << "Breakpad dumps will now be written in " <<
+            alternate_minidump_location;
+      }
+    }
+  }
+
+  // Initialize Breakpad.
+  gBreakpadRef = BreakpadCreate(breakpad_config);
+  if (!gBreakpadRef) {
+    LOG(ERROR) << "Breakpad initializaiton failed";
     return;
   }
 
-  // This needs to be set before calling SetCrashKeyValue().
-  gBreakpadRef = breakpad;
-
-  // Set breakpad MetaData values.
-  // These values are added to the plist when building a branded Chrome.app.
-  NSString* version_str = [info_dictionary objectForKey:@BREAKPAD_VERSION];
-  SetCrashKeyValue(@"ver", version_str);
-  NSString* prod_name_str = [info_dictionary objectForKey:@BREAKPAD_PRODUCT];
-  SetCrashKeyValue(@"prod", prod_name_str);
+  // Set Breakpad metadata values.  These values are added to Info.plist during
+  // the branded Google Chrome.app build.
+  SetCrashKeyValue(@"ver", [info_dictionary objectForKey:@BREAKPAD_VERSION]);
+  SetCrashKeyValue(@"prod", [info_dictionary objectForKey:@BREAKPAD_PRODUCT]);
   SetCrashKeyValue(@"plat", @"OS X");
 
-  // Enable child process crashes to include the page url.
-  child_process_logging::SetCrashKeyFunctions(
-      SetCrashKeyValue, ClearCrashKeyValue);
+  // Enable child process crashes to include the page URL.
+  // TODO: Should this only be done for certain process types?
+  child_process_logging::SetCrashKeyFunctions(SetCrashKeyValue,
+                                              ClearCrashKeyValue);
 }
 
 void InitCrashProcessInfo() {
@@ -98,10 +139,9 @@ void InitCrashProcessInfo() {
   }
 
   // Determine the process type.
-  NSString *process_type = @"browser";
-  const CommandLine& parsed_command_line = *CommandLine::ForCurrentProcess();
+  NSString* process_type = @"browser";
   std::wstring process_type_switch =
-      parsed_command_line.GetSwitchValue(switches::kProcessType);
+      CommandLine::ForCurrentProcess()->GetSwitchValue(switches::kProcessType);
   if (!process_type_switch.empty()) {
     process_type = base::SysWideToNSString(process_type_switch);
   }
@@ -129,6 +169,3 @@ void ClearCrashKeyValue(NSString* key) {
 
   BreakpadRemoveUploadParameter(gBreakpadRef, key);
 }
-
-}
-

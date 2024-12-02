@@ -13,7 +13,7 @@
 
 #if defined(OS_WIN)
 #include <windows.h>
-#elif defined(OS_LINUX)
+#elif defined(USE_X11)
 #include "chrome/common/x11_util.h"
 #endif
 
@@ -69,13 +69,25 @@ class TransportDIB {
     uint32 sequence_num;
   };
   typedef HandleAndSequenceNum Id;
+
+  // Returns a default, invalid handle, that is meant to indicate a missing
+  // Transport DIB.
+  static Handle DefaultHandleValue() { return NULL; }
 #elif defined(OS_MACOSX)
   typedef base::SharedMemoryHandle Handle;
   // On Mac, the inode number of the backing file is used as an id.
   typedef base::SharedMemoryId Id;
-#elif defined(OS_LINUX)
+
+  // Returns a default, invalid handle, that is meant to indicate a missing
+  // Transport DIB.
+  static Handle DefaultHandleValue() { return Handle(); }
+#elif defined(USE_X11)
   typedef int Handle;  // These two ints are SysV IPC shared memory keys
   typedef int Id;
+
+  // Returns a default, invalid handle, that is meant to indicate a missing
+  // Transport DIB.
+  static Handle DefaultHandleValue() { return -1; }
 #endif
 
   // Create a new TransportDIB
@@ -86,6 +98,9 @@ class TransportDIB {
 
   // Map the referenced transport DIB. Returns NULL on failure.
   static TransportDIB* Map(Handle transport_dib);
+
+  // Returns true if the handle is valid.
+  static bool is_valid(Handle dib);
 
   // Returns a canvas using the memory of this TransportDIB. The returned
   // pointer will be owned by the caller. The bitmap will be of the given size,
@@ -108,7 +123,7 @@ class TransportDIB {
   // wire to give this transport DIB to another process.
   Handle handle() const;
 
-#if defined(OS_LINUX)
+#if defined(USE_X11)
   // Map the shared memory into the X server and return an id for the shared
   // segment.
   XID MapToX(Display* connection);
@@ -120,13 +135,15 @@ class TransportDIB {
   explicit TransportDIB(base::SharedMemoryHandle dib);
   base::SharedMemory shared_memory_;
   uint32 sequence_num_;
-#elif defined(OS_LINUX)
+#elif defined(USE_X11)
   int key_;  // SysV shared memory id
   void* address_;  // mapped address
   XID x_shm_;  // X id for the shared segment
   Display* display_;  // connection to the X server
 #endif
   size_t size_;  // length, in bytes
+
+  DISALLOW_COPY_AND_ASSIGN(TransportDIB);
 };
 
 class MessageLoop;

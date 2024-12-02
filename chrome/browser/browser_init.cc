@@ -4,6 +4,8 @@
 
 #include "chrome/browser/browser_init.h"
 
+#include <algorithm>
+
 #if defined(OS_WIN)
 #include "app/win_util.h"
 #endif
@@ -26,9 +28,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_window.h"
 #include "chrome/browser/defaults.h"
-#if defined(OS_WIN)  // TODO(port)
 #include "chrome/browser/extensions/extension_creator.h"
-#endif
 #include "chrome/browser/extensions/extensions_service.h"
 #include "chrome/browser/extensions/user_script_master.h"
 #include "chrome/browser/first_run.h"
@@ -55,6 +55,9 @@
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "grit/theme_resources.h"
+#include "net/http/http_network_layer.h"
+#include "net/base/net_util.h"
+#include "net/url_request/url_request.h"
 #include "webkit/glue/webkit_glue.h"
 
 #if defined(OS_WIN)
@@ -62,6 +65,7 @@
 #endif
 
 #if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/gview_request_interceptor.h"
 #include "chrome/browser/views/tabs/tab_overview_message_listener.h"
 #endif
 
@@ -346,22 +350,35 @@ bool LaunchBrowser(const CommandLine& command_line, Profile* profile,
   // Create the TabOverviewMessageListener so that it can listen for messages
   // regardless of what window has focus.
   TabOverviewMessageListener::instance();
+
+  // Install the GView request interceptor that will redirect requests
+  // of compatible documents (PDF, etc) to the GView document viewer.
+  const CommandLine& parsed_command_line = *CommandLine::ForCurrentProcess();
+  if (parsed_command_line.HasSwitch(switches::kEnableGView)) {
+    GViewRequestInterceptor::GetGViewRequestInterceptor();
+  }
 #endif
   return true;
 }
 
-#if defined(OS_WIN)
 GURL GetWelcomePageURL() {
-  std::wstring welcome_url = l10n_util::GetString(IDS_WELCOME_PAGE_URL);
+  std::string welcome_url = l10n_util::GetStringUTF8(IDS_WELCOME_PAGE_URL);
   return GURL(welcome_url);
 }
+
+void ShowPackExtensionMessage(const std::wstring caption,
+    const std::wstring message) {
+#if defined(OS_WIN)
+  win_util::MessageBox(NULL, message, caption, MB_OK | MB_SETFOREGROUND);
 #else
-GURL GetWelcomePageURL() {
-  // TODO(port): implement welcome page.
-  NOTIMPLEMENTED();
-  return GURL();
-}
+  // Just send caption & text to stdout on mac & linux.
+  std::string out_text = WideToASCII(caption);
+  out_text.append("\n\n");
+  out_text.append(WideToASCII(message));
+  out_text.append("\n");
+  printf("%s", out_text.c_str());
 #endif
+}
 
 }  // namespace
 
@@ -377,6 +394,7 @@ BrowserInit::LaunchWithProfile::LaunchWithProfile(
     const CommandLine& command_line)
         : cur_dir_(cur_dir),
           command_line_(command_line),
+          profile_(NULL),
           browser_init_(NULL) {
 }
 
@@ -386,6 +404,7 @@ BrowserInit::LaunchWithProfile::LaunchWithProfile(
     BrowserInit* browser_init)
         : cur_dir_(cur_dir),
           command_line_(command_line),
+          profile_(NULL),
           browser_init_(browser_init) {
 }
 
@@ -437,32 +456,9 @@ bool BrowserInit::LaunchWithProfile::Launch(Profile* profile,
         browser = BrowserList::GetLastActive();
       OpenURLsInBrowser(browser, process_startup, urls_to_open);
     }
-#if defined(OS_LINUX) && !defined(OS_CHROMEOS) && !defined(TOOLKIT_VIEWS)
-    // TODO(port): Remove ifdef when the Linux splash page is not needed.
-    const CommandLine& parsed_command_line = *CommandLine::ForCurrentProcess();
-    // This can mess up UI tests, so only do it when UI tests aren't running.
-    if (!parsed_command_line.HasSwitch(switches::kHomePage) &&
-        GetURLsFromCommandLine(profile_).empty()) {
-      Browser* browser = BrowserList::GetLastActive();
-      if (browser) {
-        // Only show the splash page if it isn't already showing.
-        bool open_splash = true;
-        for (int i = 0; i < browser->tab_count(); ++i) {
-          if (browser->GetTabContentsAt(i)->GetURL().spec() ==
-              "about:linux-splash") {
-            open_splash = false;
-          }
-        }
-
-        if (open_splash) {
-          browser->OpenURL(GURL("about:linux-splash"), GURL(),
-                           NEW_FOREGROUND_TAB, PageTransition::START_PAGE);
-        }
-      }
-    }
-#endif
     // Check whether we are the default browser.
-    if (!command_line_.HasSwitch(switches::kNoDefaultBrowserCheck))
+    if (process_startup &&
+        !command_line_.HasSwitch(switches::kNoDefaultBrowserCheck))
       CheckDefaultBrowser(profile);
   } else {
     RecordLaunchModeHistogram(LM_AS_WEBAPP);
@@ -517,7 +513,6 @@ bool BrowserInit::LaunchWithProfile::OpenStartupURLs(
         return false;
 
       if (!profile_->DidLastSessionExitCleanly() &&
-          !browser_defaults::kRestoreAfterCrash &&
           !command_line_.HasSwitch(switches::kRestoreLastSession)) {
         // The last session crashed. It's possible automatically loading the
         // page will trigger another crash, locking the user out of chrome.
@@ -554,6 +549,12 @@ Browser* BrowserInit::LaunchWithProfile::OpenURLsInBrowser(
     bool process_startup,
     const std::vector<GURL>& urls) {
   DCHECK(!urls.empty());
+  // If we don't yet have a profile, try to use the one we're given from
+  // |browser|. While we may not end up actually using |browser| (since it
+  // could be a popup window), we can at least use the profile.
+  if (!profile_ && browser)
+    profile_ = browser->profile();
+
   int pin_count = 0;
   if (!browser) {
     std::wstring pin_count_string =
@@ -565,11 +566,17 @@ Browser* BrowserInit::LaunchWithProfile::OpenURLsInBrowser(
     browser = Browser::Create(profile_);
 
   for (size_t i = 0; i < urls.size(); ++i) {
+    // We skip URLs that we'd have to launch an external protocol handler for.
+    // This avoids us getting into an infinite loop asking ourselves to open
+    // a URL, should the handler be (incorrectly) configured to be us. Anyone
+    // asking us to open such a URL should really ask the handler directly.
+    if (!process_startup && !URLRequest::IsHandledURL(urls[i]))
+      continue;
     TabContents* tab = browser->AddTabWithURL(
         urls[i], GURL(), PageTransition::START_PAGE, (i == 0), -1, false, NULL);
     if (i < static_cast<size_t>(pin_count))
       browser->tabstrip_model()->SetTabPinned(browser->tab_count() - 1, true);
-    if (i == 0 && process_startup && !browser_defaults::kSuppressCrashInfoBar)
+    if (profile_ && i == 0 && process_startup)
       AddCrashedInfoBarIfNecessary(tab);
   }
   browser->window()->Show();
@@ -757,7 +764,6 @@ bool BrowserInit::ProcessCmdLineImpl(const CommandLine& command_line,
       // ExtensionCreator depends on base/crypto/rsa_private_key and
       // base/crypto/signature_creator, both of which only have windows
       // implementations.
-#if defined(OS_WIN)
       scoped_ptr<ExtensionCreator> creator(new ExtensionCreator());
       if (creator->Run(src_dir, crx_path, private_key_path,
           output_private_key_path)) {
@@ -775,14 +781,12 @@ bool BrowserInit::ProcessCmdLineImpl(const CommandLine& command_line,
           message = StringPrintf(L"Created the extension:\n\n%ls",
                                  crx_path.ToWStringHack().c_str());
         }
-        win_util::MessageBox(NULL, message, L"Extension Packaging Success",
-                             MB_OK | MB_SETFOREGROUND);
+        ShowPackExtensionMessage(L"Extension Packaging Success", message);
       } else {
-        win_util::MessageBox(NULL, UTF8ToWide(creator->error_message()),
-            L"Extension Packaging Error", MB_OK | MB_SETFOREGROUND);
+        ShowPackExtensionMessage(L"Extension Packaging Error",
+            UTF8ToWide(creator->error_message()));
         return false;
       }
-#endif // defined(OS_WIN)
       return false;
     }
   }
@@ -805,15 +809,14 @@ bool BrowserInit::ProcessCmdLineImpl(const CommandLine& command_line,
                                                  profile, expected_tabs);
   }
 
-  if (command_line.HasSwitch(switches::kInstallExtension)) {
-    std::wstring path_string =
-        command_line.GetSwitchValue(switches::kInstallExtension);
-    FilePath path = FilePath::FromWStringHack(path_string);
-    profile->GetExtensionsService()->InstallExtension(path);
+  if (command_line.HasSwitch(switches::kUseFlip)) {
+    net::HttpNetworkLayer::EnableFlip(true);
+  }
 
-    // If the chrome process was already running, install the extension without
-    // popping up another browser window.
-    silent_launch = !process_startup;
+  if (command_line.HasSwitch(switches::kExplicitlyAllowedPorts)) {
+    std::wstring allowed_ports =
+      command_line.GetSwitchValue(switches::kExplicitlyAllowedPorts);
+    net::SetExplicitlyAllowedPorts(allowed_ports);
   }
 
   // If we don't want to launch a new browser window or tab (in the case

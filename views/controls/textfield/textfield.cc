@@ -4,13 +4,29 @@
 
 #include "views/controls/textfield/textfield.h"
 
+#if defined(OS_LINUX)
+#include <gdk/gdkkeysyms.h>
+#endif
+
 #include "app/gfx/insets.h"
 #if defined(OS_WIN)
 #include "app/win_util.h"
+#include "base/win_util.h"
 #endif
+
+#if defined(OS_LINUX)
+#include "base/keyboard_code_conversion_gtk.h"
+#endif
+#include "base/keyboard_codes.h"
 #include "base/string_util.h"
 #include "views/controls/textfield/native_textfield_wrapper.h"
 #include "views/widget/widget.h"
+
+#if defined(OS_WIN)
+// TODO(beng): this should be removed when the OS_WIN hack from
+// ViewHierarchyChanged is removed.
+#include "views/controls/textfield/native_textfield_win.h"
+#endif
 
 namespace views {
 
@@ -27,6 +43,8 @@ Textfield::Textfield()
       read_only_(false),
       default_width_in_chars_(0),
       draw_border_(true),
+      text_color_(SK_ColorBLACK),
+      use_default_text_color_(true),
       background_color_(SK_ColorWHITE),
       use_default_background_color_(true),
       num_lines_(1),
@@ -41,6 +59,8 @@ Textfield::Textfield(StyleFlags style)
       read_only_(false),
       default_width_in_chars_(0),
       draw_border_(true),
+      text_color_(SK_ColorBLACK),
+      use_default_text_color_(true),
       background_color_(SK_ColorWHITE),
       use_default_background_color_(true),
       num_lines_(1),
@@ -49,8 +69,6 @@ Textfield::Textfield(StyleFlags style)
 }
 
 Textfield::~Textfield() {
-  if (native_wrapper_)
-    delete native_wrapper_;
 }
 
 void Textfield::SetController(Controller* controller) {
@@ -65,6 +83,7 @@ void Textfield::SetReadOnly(bool read_only) {
   read_only_ = read_only;
   if (native_wrapper_) {
     native_wrapper_->UpdateReadOnly();
+    native_wrapper_->UpdateTextColor();
     native_wrapper_->UpdateBackgroundColor();
   }
 }
@@ -77,13 +96,13 @@ bool Textfield::IsMultiLine() const {
   return !!(style_ & STYLE_MULTILINE);
 }
 
-void Textfield::SetText(const std::wstring& text) {
+void Textfield::SetText(const string16& text) {
   text_ = text;
   if (native_wrapper_)
     native_wrapper_->UpdateText();
 }
 
-void Textfield::AppendText(const std::wstring& text) {
+void Textfield::AppendText(const string16& text) {
   text_ += text;
   if (native_wrapper_)
     native_wrapper_->AppendText(text);
@@ -94,9 +113,28 @@ void Textfield::SelectAll() {
     native_wrapper_->SelectAll();
 }
 
+string16 Textfield::GetSelectedText() const {
+  if (native_wrapper_)
+    return native_wrapper_->GetSelectedText();
+  return string16();
+}
+
 void Textfield::ClearSelection() const {
   if (native_wrapper_)
     native_wrapper_->ClearSelection();
+}
+
+void Textfield::SetTextColor(SkColor color) {
+  text_color_ = color;
+  use_default_text_color_ = false;
+  if (native_wrapper_)
+    native_wrapper_->UpdateTextColor();
+}
+
+void Textfield::UseDefaultTextColor() {
+  use_default_text_color_ = true;
+  if (native_wrapper_)
+    native_wrapper_->UpdateTextColor();
 }
 
 void Textfield::SetBackgroundColor(SkColor color) {
@@ -138,45 +176,9 @@ void Textfield::RemoveBorder() {
 }
 
 
-void Textfield::CalculateInsets(gfx::Insets* insets) {
-  DCHECK(insets);
-
-  if (!draw_border_)
-    return;
-
-  // NOTE: One would think GetThemeMargins would return the insets we should
-  // use, but it doesn't. The margins returned by GetThemeMargins are always
-  // 0.
-
-  // This appears to be the insets used by Windows.
-  insets->Set(3, 3, 3, 3);
-}
-
 void Textfield::SyncText() {
   if (native_wrapper_)
     text_ = native_wrapper_->GetText();
-}
-
-// static
-bool Textfield::IsKeystrokeEnter(const Keystroke& key) {
-#if defined(OS_WIN)
-  return key.key == VK_RETURN;
-#else
-  // TODO(port): figure out VK_constants
-  NOTIMPLEMENTED();
-  return false;
-#endif
-}
-
-// static
-bool Textfield::IsKeystrokeEscape(const Keystroke& key) {
-#if defined(OS_WIN)
-  return key.key == VK_ESCAPE;
-#else
-  // TODO(port): figure out VK_constants
-  NOTIMPLEMENTED();
-  return false;
-#endif
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -191,7 +193,8 @@ void Textfield::Layout() {
 
 gfx::Size Textfield::GetPreferredSize() {
   gfx::Insets insets;
-  CalculateInsets(&insets);
+  if (draw_border_ && native_wrapper_)
+    insets = native_wrapper_->CalculateInsets();
   return gfx::Size(font_.GetExpectedTextWidth(default_width_in_chars_) +
                        insets.width(),
                    num_lines_ * font_.height() + insets.height());
@@ -206,17 +209,17 @@ void Textfield::AboutToRequestFocusFromTabTraversal(bool reverse) {
 }
 
 bool Textfield::SkipDefaultKeyEventProcessing(const KeyEvent& e) {
-#if defined(OS_WIN)
   // TODO(hamaji): Figure out which keyboard combinations we need to add here,
   //               similar to LocationBarView::SkipDefaultKeyEventProcessing.
-  const int c = e.GetCharacter();
-  if (c == VK_BACK)
+  base::KeyboardCode key = e.GetKeyCode();
+  if (key == base::VKEY_BACK)
     return true;  // We'll handle BackSpace ourselves.
 
-  // We don't translate accelerators for ALT + NumPad digit, they are used for
-  // entering special characters.  We do translate alt-home.
-  if (e.IsAltDown() && (c != VK_HOME) &&
-      win_util::IsNumPadDigit(c, e.IsExtendedKey()))
+#if defined(OS_WIN)
+  // We don't translate accelerators for ALT + NumPad digit on Windows, they are
+  // used for entering special characters.  We do translate alt-home.
+  if (e.IsAltDown() && (key != base::VKEY_HOME) &&
+      win_util::IsNumPadDigit(key, e.IsExtendedKey()))
     return true;
 #endif
   return false;
@@ -242,25 +245,78 @@ void Textfield::Focus() {
 void Textfield::ViewHierarchyChanged(bool is_add, View* parent, View* child) {
   if (is_add && !native_wrapper_ && GetWidget() && !initialized_) {
     initialized_ = true;
+
+    // The native wrapper's lifetime will be managed by the view hierarchy after
+    // we call AddChildView.
     native_wrapper_ = NativeTextfieldWrapper::CreateWrapper(this);
-    //AddChildView(native_wrapper_->GetView());
+    AddChildView(native_wrapper_->GetView());
     // TODO(beng): Move this initialization to NativeTextfieldWin once it
     //             subclasses NativeControlWin.
     native_wrapper_->UpdateText();
+    native_wrapper_->UpdateTextColor();
     native_wrapper_->UpdateBackgroundColor();
     native_wrapper_->UpdateReadOnly();
     native_wrapper_->UpdateFont();
     native_wrapper_->UpdateEnabled();
     native_wrapper_->UpdateBorder();
 
-    // We need to call Layout here because any previous calls to Layout
-    // will have short-circuited and we don't call AddChildView.
-    Layout();
+#if defined(OS_WIN)
+    // TODO(beng): remove this once NativeTextfieldWin subclasses
+    // NativeControlWin. This is currently called to perform post-AddChildView
+    // initialization for the wrapper. The GTK version subclasses things
+    // correctly and doesn't need this.
+    //
+    // Remove the include for native_textfield_win.h above when you fix this.
+    static_cast<NativeTextfieldWin*>(native_wrapper_)->AttachHack();
+#endif
   }
 }
 
 std::string Textfield::GetClassName() const {
   return kViewClassName;
 }
+
+NativeTextfieldWrapper* Textfield::CreateWrapper() {
+  NativeTextfieldWrapper* native_wrapper =
+      NativeTextfieldWrapper::CreateWrapper(this);
+
+  native_wrapper->UpdateText();
+  native_wrapper->UpdateBackgroundColor();
+  native_wrapper->UpdateReadOnly();
+  native_wrapper->UpdateFont();
+  native_wrapper->UpdateEnabled();
+  native_wrapper->UpdateBorder();
+
+  return native_wrapper;
+}
+
+base::KeyboardCode Textfield::Keystroke::GetKeyboardCode() const {
+#if defined(OS_WIN)
+  return static_cast<base::KeyboardCode>(key_);
+#else
+  return static_cast<base::KeyboardCode>(
+      base::WindowsKeyCodeForGdkKeyCode(event_.keyval));
+#endif
+}
+
+#if defined(OS_WIN)
+bool Textfield::Keystroke::IsControlHeld() const {
+  return win_util::IsCtrlPressed();
+}
+
+bool Textfield::Keystroke::IsShiftHeld() const {
+  return win_util::IsShiftPressed();
+}
+#else
+bool Textfield::Keystroke::IsControlHeld() const {
+  return (event_.state & gtk_accelerator_get_default_mod_mask()) ==
+      GDK_CONTROL_MASK;
+}
+
+bool Textfield::Keystroke::IsShiftHeld() const {
+  return (event_.state & gtk_accelerator_get_default_mod_mask()) ==
+      GDK_SHIFT_MASK;
+}
+#endif
 
 }  // namespace views

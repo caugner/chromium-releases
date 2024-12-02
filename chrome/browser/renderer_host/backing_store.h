@@ -10,11 +10,11 @@
 #include "base/gfx/size.h"
 #include "base/process.h"
 #include "build/build_config.h"
-#include "chrome/common/mru_cache.h"
 
 #if defined(OS_WIN)
 #include <windows.h>
 #elif defined(OS_MACOSX)
+#include "base/scoped_cftyperef.h"
 #include "skia/ext/platform_canvas.h"
 #elif defined(OS_LINUX)
 #include "chrome/common/x11_util.h"
@@ -60,7 +60,16 @@ class BackingStore {
   // Returns true if we should convert to the monitor profile when painting.
   static bool ColorManagementEnabled();
 #elif defined(OS_MACOSX)
-  skia::PlatformCanvas* canvas() { return &canvas_; }
+  // A CGLayer that stores the contents of the backing store, cached in GPU
+  // memory if possible.
+  CGLayerRef cg_layer() { return cg_layer_; }
+  // A CGBitmapContext that stores the contents of the backing store if the
+  // corresponding Cocoa view has not been inserted into an NSWindow yet.
+  CGContextRef cg_bitmap() { return cg_bitmap_; }
+
+  // Paint the layer into a graphics context--if the target is a window,
+  // this should be a GPU->GPU copy (and therefore very fast).
+  void PaintToRect(const gfx::Rect& dest_rect, CGContextRef target);
 #elif defined(OS_LINUX)
   Display* display() const { return display_; }
   XID root_window() const { return root_window_; };
@@ -112,7 +121,8 @@ class BackingStore {
   // Number of bits per pixel of the screen.
   int color_depth_;
 #elif defined(OS_MACOSX)
-  skia::PlatformCanvas canvas_;
+  scoped_cftyperef<CGContextRef> cg_bitmap_;
+  scoped_cftyperef<CGLayerRef> cg_layer_;
 #elif defined(OS_LINUX)
   // Paints the bitmap from the renderer onto the backing store without
   // using Xrender to composite the pixmaps.

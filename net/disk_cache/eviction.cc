@@ -92,7 +92,7 @@ void Eviction::TrimCache(bool empty) {
       break;
     node.reset(next.release());
     next.reset(rankings_->GetPrev(node.get(), Rankings::NO_USE));
-    if (!node->Data()->pointer || empty) {
+    if (node->Data()->dirty != backend_->GetCurrentEntryId() || empty) {
       // This entry is not being used by anybody.
       // Do NOT use node as an iterator after this point.
       rankings_->TrackRankingsBlock(node.get(), false);
@@ -275,7 +275,7 @@ void Eviction::TrimCacheV2(bool empty) {
       node.reset(next[list].release());
       next[list].reset(rankings_->GetPrev(node.get(),
                                           static_cast<Rankings::List>(list)));
-      if (!node->Data()->pointer || empty) {
+      if (node->Data()->dirty != backend_->GetCurrentEntryId() || empty) {
         // This entry is not being used by anybody.
         // Do NOT use node as an iterator after this point.
         rankings_->TrackRankingsBlock(node.get(), false);
@@ -425,7 +425,7 @@ bool Eviction::RemoveDeletedNode(CacheRankingsBlock* node) {
 
   // TODO(rvargas): figure out how to deal with corruption at this point (dirty
   // entries that live in this list).
-  if (node->Data()->pointer) {
+  if (node->Data()->dirty) {
     // We ignore the failure; we're removing the entry anyway.
     entry->Update();
   }
@@ -472,16 +472,16 @@ void Eviction::ReportListStats() {
       rankings_->GetPrev(NULL, Rankings::DELETED));
 
   if (last1.get())
-    CACHE_UMA(AGE, "NoUseAge", header_->experiment,
+    CACHE_UMA(AGE, "NoUseAge", 0,
               Time::FromInternalValue(last1.get()->Data()->last_used));
   if (last2.get())
-    CACHE_UMA(AGE, "LowUseAge", header_->experiment,
+    CACHE_UMA(AGE, "LowUseAge", 0,
               Time::FromInternalValue(last2.get()->Data()->last_used));
   if (last3.get())
-    CACHE_UMA(AGE, "HighUseAge", header_->experiment,
+    CACHE_UMA(AGE, "HighUseAge", 0,
               Time::FromInternalValue(last3.get()->Data()->last_used));
   if (last4.get())
-    CACHE_UMA(AGE, "DeletedAge", header_->experiment,
+    CACHE_UMA(AGE, "DeletedAge", 0,
               Time::FromInternalValue(last4.get()->Data()->last_used));
 }
 

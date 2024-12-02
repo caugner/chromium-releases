@@ -14,24 +14,25 @@ namespace browser_defaults {
 
 #if defined(OS_LINUX)
 
-// Whether the size of the autocomplete's font should be changed.
-extern const bool kForceAutocompleteEditFontSize;
+// Size of the font in pixels used in the autocomplete box for normal windows.
+extern const double kAutocompleteEditFontPixelSize;
+
+// Size of the font in pixels used in the autocomplete box for popup windows.
+extern const double kAutocompleteEditFontPixelSizeInPopup;
 
 // Size of the font used in the autocomplete popup.
 extern const int kAutocompletePopupFontSize;
+
+// Can the user toggle the system title bar?
+extern const bool kCanToggleSystemTitleBar;
 
 #endif
 
 // The default value for session startup.
 extern const SessionStartupPref::Type kDefaultSessionStartupType;
 
-// On launching Chrome should we show the crash info bar if Chrome crashed?
-extern const bool kSuppressCrashInfoBar;
-
-// Should we restore the last session if the user opted to restore the last
-// session on startup and Chrome crashed?
-// TODO(sky): this should be removed once Chrome OS cleanly shuts down Chrome.
-extern const bool kRestoreAfterCrash;
+// Width of pinned tabs.
+extern const int kPinnedTabWidth;
 
 }  // namespace browser_defaults
 

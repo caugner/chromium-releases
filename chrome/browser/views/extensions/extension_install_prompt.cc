@@ -23,26 +23,19 @@ class Profile;
 
 namespace {
 
-const int kRightColumnWidth = 290;
+const int kRightColumnWidth = 270;
+const int kIconSize = 85;
 
 // Implements the extension installation prompt for Windows.
-// TODO(aa): It would be cool to add an "extensions threat level" when we have
-// granular permissions implemented:
-// - red: npapi
-// - orange: access to any domains
-// - yellow: access to browser data
-// - green: nothing
-// We could have a collection of funny descriptions for each color.
 class InstallDialogContent : public views::View, public views::DialogDelegate {
  public:
-  InstallDialogContent(CrxInstaller* crx_installer, Extension* extension,
-                       SkBitmap* icon)
-      : crx_installer_(crx_installer), icon_(NULL) {
-    if (icon) {
-      icon_ = new views::ImageView();
-      icon_->SetImage(*icon);
-      AddChildView(icon_);
-    }
+  InstallDialogContent(ExtensionInstallUI::Delegate* delegate,
+      Extension* extension, SkBitmap* icon, const std::wstring& warning_text)
+          : delegate_(delegate), icon_(NULL) {
+    icon_ = new views::ImageView();
+    icon_->SetImageSize(gfx::Size(kIconSize, kIconSize));
+    icon_->SetImage(*icon);
+    AddChildView(icon_);
 
     heading_ = new views::Label(
         l10n_util::GetStringF(IDS_EXTENSION_PROMPT_HEADING,
@@ -52,25 +45,10 @@ class InstallDialogContent : public views::View, public views::DialogDelegate {
     heading_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
     AddChildView(heading_);
 
-    // Pick a random warning.
-    std::wstring warnings[] = {
-      l10n_util::GetString(IDS_EXTENSION_PROMPT_WARNING_1),
-      l10n_util::GetString(IDS_EXTENSION_PROMPT_WARNING_2),
-      l10n_util::GetString(IDS_EXTENSION_PROMPT_WARNING_3)
-    };
-    warning_ = new views::Label(
-        warnings[base::RandInt(0, arraysize(warnings) - 1)]);
+    warning_ = new views::Label(warning_text);
     warning_->SetMultiLine(true);
     warning_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
     AddChildView(warning_);
-
-    severe_ = new views::Label(
-        l10n_util::GetString(IDS_EXTENSION_PROMPT_WARNING_SEVERE));
-    severe_->SetMultiLine(true);
-    severe_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
-    severe_->SetFont(heading_->GetFont().DeriveFont(0, gfx::Font::BOLD));
-    severe_->SetColor(SK_ColorRED);
-    AddChildView(severe_);
   }
 
  private:
@@ -93,12 +71,12 @@ class InstallDialogContent : public views::View, public views::DialogDelegate {
   }
 
   virtual bool Accept() {
-    crx_installer_->ContinueInstall();
+    delegate_->ContinueInstall();
     return true;
   }
 
   virtual bool Cancel() {
-    crx_installer_->AbortInstall();
+    delegate_->AbortInstall();
     return true;
   }
 
@@ -113,34 +91,25 @@ class InstallDialogContent : public views::View, public views::DialogDelegate {
   // View
   virtual gfx::Size GetPreferredSize() {
     int width = kRightColumnWidth + kPanelHorizMargin + kPanelHorizMargin;
-
-    if (icon_) {
-      width += Extension::EXTENSION_ICON_LARGE;
-      width += kPanelHorizMargin;
-    }
+    width += kIconSize;
+    width += kPanelHorizMargin;
 
     int height = kPanelVertMargin * 2;
     height += heading_->GetHeightForWidth(kRightColumnWidth);
     height += kPanelVertMargin;
     height += warning_->GetHeightForWidth(kRightColumnWidth);
     height += kPanelVertMargin;
-    height += severe_->GetHeightForWidth(kRightColumnWidth);
-    height += kPanelVertMargin;
 
-    return gfx::Size(width, std::max(height,
-        static_cast<int>(Extension::EXTENSION_ICON_LARGE)));
+    return gfx::Size(width, std::max(height, kIconSize + kPanelVertMargin * 2));
   }
 
   virtual void Layout() {
     int x = kPanelHorizMargin;
     int y = kPanelVertMargin;
 
-    if (icon_) {
-      icon_->SetBounds(x, y, Extension::EXTENSION_ICON_LARGE,
-                       Extension::EXTENSION_ICON_LARGE);
-      x += Extension::EXTENSION_ICON_LARGE;
-      x += kPanelHorizMargin;
-    }
+    icon_->SetBounds(x, y, kIconSize, kIconSize);
+    x += kIconSize;
+    x += kPanelHorizMargin;
 
     heading_->SizeToFit(kRightColumnWidth);
     heading_->SetX(x);
@@ -155,40 +124,34 @@ class InstallDialogContent : public views::View, public views::DialogDelegate {
     y += warning_->height();
 
     y += kPanelVertMargin;
-
-    severe_->SizeToFit(kRightColumnWidth);
-    severe_->SetX(x);
-    severe_->SetY(y);
-    y += severe_->height();
   }
 
-  scoped_refptr<CrxInstaller> crx_installer_;
+  ExtensionInstallUI::Delegate* delegate_;
   views::ImageView* icon_;
   views::Label* heading_;
   views::Label* warning_;
-  views::Label* severe_;
 
   DISALLOW_COPY_AND_ASSIGN(InstallDialogContent);
 };
 
 } // namespace
 
-void ExtensionInstallUI::ShowExtensionInstallPrompt(Profile* profile,
-                                                    CrxInstaller* crx_installer,
-                                                    Extension* extension,
-                                                    SkBitmap* icon) {
+void ExtensionInstallUI::ShowExtensionInstallPrompt(
+    Profile* profile, Delegate* delegate, Extension* extension, SkBitmap* icon,
+    const std::wstring& warning_text) {
   Browser* browser = BrowserList::GetLastActiveWithProfile(profile);
   if (!browser) {
-    crx_installer->AbortInstall();
+    delegate->ContinueInstall();
     return;
   }
 
   BrowserWindow* window = browser->window();
   if (!window) {
-    crx_installer->AbortInstall();
+    delegate->AbortInstall();
     return;
   }
 
   views::Window::CreateChromeWindow(window->GetNativeHandle(), gfx::Rect(),
-      new InstallDialogContent(crx_installer, extension, icon))->Show();
+      new InstallDialogContent(delegate, extension, icon,
+                               warning_text))->Show();
 }

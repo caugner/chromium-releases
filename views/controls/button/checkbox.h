@@ -54,11 +54,14 @@ class Checkbox : public NativeButton {
   virtual void WillGainFocus();
   virtual void WillLoseFocus();
 
+  // Overridden from NativeButton:
+  virtual void SetLabel(const std::wstring& label);
+
  protected:
   virtual std::string GetClassName() const;
 
-  // Overridden from NativeButton2:
-  virtual void CreateWrapper();
+  // Overridden from NativeButton:
+  virtual NativeButtonWrapper* CreateWrapper();
   virtual void InitBorder();
 
   // Returns true if the event (in Checkbox coordinates) is within the bounds of
@@ -69,8 +72,8 @@ class Checkbox : public NativeButton {
   // Called from the constructor to create and configure the checkbox label.
   void Init(const std::wstring& label_text);
 
-  // The checkbox's label. We don't use the OS version because of transparency
-  // and sizing issues.
+  // The checkbox's label. We may not be able to use the OS version on some
+  // platforms because of transparency and sizing issues.
   Label* label_;
 
   // True if the checkbox is checked.

@@ -28,6 +28,7 @@ class PluginTest {
   //
   virtual NPError New(uint16 mode, int16 argc, const char* argn[],
                       const char* argv[], NPSavedData* saved);
+  virtual NPError Destroy();
   virtual NPError SetWindow(NPWindow* pNPWindow);
   virtual NPError NewStream(NPMIMEType type, NPStream* stream,
                             NPBool seekable, uint16* stype);
@@ -110,15 +111,16 @@ class PluginTest {
 
   // The NPP Identifier for this plugin instance.
   NPP id() { return id_; }
-  std::string test_id() { return test_id_; }
-  std::string test_name() { return test_name_; }
-
+  std::string test_id() const { return test_id_; }
+  std::string test_name() const { return test_name_; }
+  bool test_completed() const { return test_completed_; }
  private:
   NPP                       id_;
   NPNetscapeFuncs *         host_functions_;
   std::string               test_name_;
   std::string               test_id_;
   std::string               test_status_;
+  bool                      test_completed_;
 };
 
 } // namespace NPAPIClient

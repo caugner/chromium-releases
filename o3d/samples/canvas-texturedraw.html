@@ -45,12 +45,10 @@ O3D Canvas
 <script type="text/javascript" src="o3djs/base.js"></script>
 
 <!-- Our javascript code -->
-<script type="text/javascript">
+<script type="text/javascript" id="o3dscript">
 o3djs.require('o3djs.util');
 o3djs.require('o3djs.io');
 o3djs.require('o3djs.math');
-o3djs.require('o3djs.primitives');
-o3djs.require('o3djs.effect');
 o3djs.require('o3djs.canvas');
 o3djs.require('o3djs.rendergraph');
 
@@ -74,8 +72,6 @@ var g_canvasWidth = 700;
 var g_canvasHeight = 500;
 var g_borderWidth = 50;
 var g_borderHeight = 50;
-var g_pluginWidth;
-var g_pluginHeight;
 var g_clientWidth;
 var g_clientHeight;
 
@@ -132,7 +128,7 @@ function drawCursor(e) {
     g_canvasQuad.canvas.drawBitmap(
         g_brushTexture,
         (offset.x / brushScale - g_brushTexture.width * 0.5),
-        (offset.y / brushScale + g_brushTexture.height * 0.5));
+        (offset.y / brushScale - g_brushTexture.height * 0.5));
     g_canvasQuad.canvas.restoreMatrix();
     g_canvasQuad.updateTexture();
   }
@@ -153,10 +149,9 @@ function changeBrushTexture() {
       if (g_brushTexture) {
         g_pack.removeObject(g_brushTexture);
       }
-
       g_brushTexture = texture;
     }
-  });
+  }, false, false);
 }
 
 /**

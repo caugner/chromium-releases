@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,9 +6,9 @@
 
 #include "app/l10n_util.h"
 #include "base/file_util.h"
+#include "base/i18n/file_util_icu.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
-#include "base/path_service.h"
 #include "base/stl_util-inl.h"
 #include "base/string_util.h"
 #include "base/task.h"
@@ -28,6 +28,8 @@
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tab_contents/tab_util.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/notification_service.h"
+#include "chrome/common/notification_type.h"
 #include "chrome/common/platform_util.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/pref_service.h"
@@ -53,8 +55,10 @@ struct SavePackageParam {
   // Directory path for saving sub resources and sub html frames.
   FilePath dir;
 
-  SavePackageParam(const std::string& mime_type)
-      : current_tab_mime_type(mime_type) { }
+  explicit SavePackageParam(const std::string& mime_type)
+      : current_tab_mime_type(mime_type),
+        save_type(SavePackage::SAVE_TYPE_UNKNOWN) {
+  }
 };
 
 namespace {
@@ -113,6 +117,30 @@ FilePath::StringType StripOrdinalNumber(
   return pure_file_name.substr(0, l_paren_index);
 }
 
+// This task creates a directory and then posts a task on the given thread.
+class CreateDownloadDirectoryTask : public Task {
+ public:
+  CreateDownloadDirectoryTask(const FilePath& save_dir,
+                              Task* follow_up,
+                              MessageLoop* target_thread)
+      : save_dir_(save_dir),
+        follow_up_(follow_up),
+        target_thread_(target_thread) {
+  }
+
+  virtual void Run() {
+    file_util::CreateDirectory(save_dir_);
+    target_thread_->PostTask(FROM_HERE, follow_up_);
+  }
+
+ private:
+  FilePath save_dir_;
+  Task* follow_up_;
+  MessageLoop* target_thread_;
+
+  DISALLOW_COPY_AND_ASSIGN(CreateDownloadDirectoryTask);
+};
+
 }  // namespace
 
 SavePackage::SavePackage(TabContents* web_content,
@@ -130,7 +158,8 @@ SavePackage::SavePackage(TabContents* web_content,
       save_type_(save_type),
       all_save_items_count_(0),
       wait_state_(INITIALIZE),
-      tab_id_(web_content->process()->pid()) {
+      tab_id_(web_content->process()->id()),
+      ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)) {
   DCHECK(web_content);
   const GURL& current_page_url = tab_contents_->GetURL();
   DCHECK(current_page_url.is_valid());
@@ -141,6 +170,7 @@ SavePackage::SavePackage(TabContents* web_content,
          saved_main_file_path_.value().length() <= kMaxFilePathLength);
   DCHECK(!saved_main_directory_path_.empty() &&
          saved_main_directory_path_.value().length() < kMaxFilePathLength);
+  InternalInit();
 }
 
 SavePackage::SavePackage(TabContents* tab_contents)
@@ -150,27 +180,35 @@ SavePackage::SavePackage(TabContents* tab_contents)
       finished_(false),
       user_canceled_(false),
       disk_error_occurred_(false),
+      save_type_(SAVE_TYPE_UNKNOWN),
       all_save_items_count_(0),
       wait_state_(INITIALIZE),
-      tab_id_(tab_contents->process()->pid()) {
+      tab_id_(tab_contents->process()->id()),
+      ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)) {
   const GURL& current_page_url = tab_contents_->GetURL();
   DCHECK(current_page_url.is_valid());
   page_url_ = current_page_url;
+  InternalInit();
 }
 
 // This is for testing use. Set |finished_| as true because we don't want
 // method Cancel to be be called in destructor in test mode.
+// We also don't call InternalInit().
 SavePackage::SavePackage(const FilePath& file_full_path,
                          const FilePath& directory_full_path)
     : file_manager_(NULL),
+      tab_contents_(NULL),
       download_(NULL),
       saved_main_file_path_(file_full_path),
       saved_main_directory_path_(directory_full_path),
       finished_(true),
       user_canceled_(false),
       disk_error_occurred_(false),
+      save_type_(SAVE_TYPE_UNKNOWN),
       all_save_items_count_(0),
-      tab_id_(0) {
+      wait_state_(INITIALIZE),
+      tab_id_(0),
+      ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)) {
   DCHECK(!saved_main_file_path_.empty() &&
          saved_main_file_path_.value().length() <= kMaxFilePathLength);
   DCHECK(!saved_main_directory_path_.empty() &&
@@ -226,6 +264,22 @@ void SavePackage::Cancel(bool user_action) {
   }
 }
 
+// Init() can be called directly, or indirectly via GetSaveInfo(). In both
+// cases, we need file_manager_ to be initialized, so we do this first.
+void SavePackage::InternalInit() {
+  ResourceDispatcherHost* rdh = g_browser_process->resource_dispatcher_host();
+  if (!rdh) {
+    NOTREACHED();
+    return;
+  }
+
+  file_manager_ = rdh->save_file_manager();
+  if (!file_manager_) {
+    NOTREACHED();
+    return;
+  }
+}
+
 // Initialize the SavePackage.
 bool SavePackage::Init() {
   // Set proper running state.
@@ -243,21 +297,9 @@ bool SavePackage::Init() {
 
   request_context_ = profile->GetRequestContext();
 
-  ResourceDispatcherHost* rdh = g_browser_process->resource_dispatcher_host();
-  if (!rdh) {
-    NOTREACHED();
-    return false;
-  }
-
-  file_manager_ = rdh->save_file_manager();
-  if (!file_manager_) {
-    NOTREACHED();
-    return false;
-  }
-
   // Create the fake DownloadItem and display the view.
   download_ = new DownloadItem(1, saved_main_file_path_, 0, page_url_, GURL(),
-      "", FilePath(), Time::Now(), 0, -1, -1, false);
+      "", FilePath(), Time::Now(), 0, -1, -1, false, false);
   download_->set_manager(tab_contents_->profile()->GetDownloadManager());
   tab_contents_->OnStartDownload(download_);
 
@@ -343,7 +385,7 @@ bool SavePackage::GenerateFilename(const std::string& disposition,
     if (ordinal_number > (kMaxFileOrdinalNumber - 1)) {
       // Use a random file from temporary file.
       FilePath temp_file;
-      file_util::CreateTemporaryFileName(&temp_file);
+      file_util::CreateTemporaryFile(&temp_file);
       file_name = temp_file.RemoveExtension().BaseName().value();
       // Get safe pure file name.
       if (!GetSafePureFileName(saved_main_directory_path_,
@@ -435,7 +477,7 @@ void SavePackage::StartSave(const SaveFileCreateInfo* info) {
   // If the save source is from file system, inform SaveFileManager to copy
   // corresponding file to the file path which this SaveItem specifies.
   if (info->save_source == SaveFileCreateInfo::SAVE_FILE_FROM_FILE) {
-    file_manager_->GetSaveLoop()->PostTask(FROM_HERE,
+    file_manager_->file_loop()->PostTask(FROM_HERE,
         NewRunnableMethod(file_manager_,
                           &SaveFileManager::SaveLocalFile,
                           save_item->url(),
@@ -541,7 +583,7 @@ void SavePackage::Stop() {
       it != saved_failed_items_.end(); ++it)
     save_ids.push_back(it->second->save_id());
 
-  file_manager_->GetSaveLoop()->PostTask(FROM_HERE,
+  file_manager_->file_loop()->PostTask(FROM_HERE,
       NewRunnableMethod(file_manager_,
                         &SaveFileManager::RemoveSavedFileFromFileMap,
                         save_ids));
@@ -570,12 +612,12 @@ void SavePackage::CheckFinish() {
     final_names.push_back(std::make_pair(it->first,
                                          it->second->full_path()));
 
-  file_manager_->GetSaveLoop()->PostTask(FROM_HERE,
+  file_manager_->file_loop()->PostTask(FROM_HERE,
       NewRunnableMethod(file_manager_,
                         &SaveFileManager::RenameAllFiles,
                         final_names,
                         dir,
-                        tab_contents_->process()->pid(),
+                        tab_contents_->process()->id(),
                         tab_contents_->render_view_host()->routing_id()));
 }
 
@@ -595,12 +637,17 @@ void SavePackage::Finish() {
        it != saved_failed_items_.end(); ++it)
     save_ids.push_back(it->second->save_id());
 
-  file_manager_->GetSaveLoop()->PostTask(FROM_HERE,
+  file_manager_->file_loop()->PostTask(FROM_HERE,
       NewRunnableMethod(file_manager_,
                         &SaveFileManager::RemoveSavedFileFromFileMap,
                         save_ids));
 
   download_->Finished(all_save_items_count_);
+
+  NotificationService::current()->Notify(
+      NotificationType::SAVE_PACKAGE_SUCCESSFULLY_FINISHED,
+      Source<SavePackage>(this),
+      Details<GURL>(&page_url_));
 }
 
 // Called for updating end state.
@@ -686,7 +733,7 @@ void SavePackage::SaveCanceled(SaveItem* save_item) {
                                 save_item->url(),
                                 this);
   if (save_item->save_id() != -1)
-    file_manager_->GetSaveLoop()->PostTask(FROM_HERE,
+    file_manager_->file_loop()->PostTask(FROM_HERE,
         NewRunnableMethod(file_manager_,
                           &SaveFileManager::CancelSave,
                           save_item->save_id()));
@@ -713,7 +760,7 @@ void SavePackage::SaveNextFile(bool process_all_remaining_items) {
     save_item->Start();
     file_manager_->SaveURL(save_item->url(),
                            save_item->referrer(),
-                           tab_contents_->process()->pid(),
+                           tab_contents_->process()->id(),
                            tab_contents_->render_view_host()->routing_id(),
                            save_item->save_source(),
                            save_item->full_path(),
@@ -728,10 +775,16 @@ void SavePackage::SaveNextFile(bool process_all_remaining_items) {
 void SavePackage::ShowDownloadInShell() {
   DCHECK(file_manager_);
   DCHECK(finished_ && !canceled() && !saved_main_file_path_.empty());
-  file_manager_->GetSaveLoop()->PostTask(FROM_HERE,
+  DCHECK(MessageLoop::current() == file_manager_->ui_loop());
+#if defined(OS_MACOSX)
+  // Mac OS X requires opening downloads on the UI thread.
+  platform_util::ShowItemInFolder(saved_main_file_path_);
+#else
+  file_manager_->file_loop()->PostTask(FROM_HERE,
       NewRunnableMethod(file_manager_,
                         &SaveFileManager::OnShowSavedFileInShell,
                         saved_main_file_path_));
+#endif
 }
 
 // Calculate the percentage of whole save page job.
@@ -848,7 +901,7 @@ void SavePackage::OnReceivedSerializedHtmlData(const GURL& frame_url,
   if (flag == webkit_glue::DomSerializerDelegate::ALL_FRAMES_ARE_FINISHED) {
     for (SaveUrlItemMap::iterator it = in_progress_items_.begin();
          it != in_progress_items_.end(); ++it) {
-      file_manager_->GetSaveLoop()->PostTask(FROM_HERE,
+      file_manager_->file_loop()->PostTask(FROM_HERE,
           NewRunnableMethod(file_manager_,
                             &SaveFileManager::SaveFinished,
                             it->second->save_id(),
@@ -872,7 +925,7 @@ void SavePackage::OnReceivedSerializedHtmlData(const GURL& frame_url,
     memcpy(new_data->data(), data.data(), data.size());
 
     // Call write file functionality in file thread.
-    file_manager_->GetSaveLoop()->PostTask(FROM_HERE,
+    file_manager_->file_loop()->PostTask(FROM_HERE,
         NewRunnableMethod(file_manager_,
                           &SaveFileManager::UpdateSaveProgress,
                           save_item->save_id(),
@@ -882,7 +935,7 @@ void SavePackage::OnReceivedSerializedHtmlData(const GURL& frame_url,
 
   // Current frame is completed saving, call finish in file thread.
   if (flag == webkit_glue::DomSerializerDelegate::CURRENT_FRAME_IS_FINISHED) {
-    file_manager_->GetSaveLoop()->PostTask(FROM_HERE,
+    file_manager_->file_loop()->PostTask(FROM_HERE,
         NewRunnableMethod(file_manager_,
                           &SaveFileManager::SaveFinished,
                           save_item->save_id(),
@@ -1010,18 +1063,11 @@ FilePath SavePackage::GetSaveDirPreference(PrefService* prefs) {
 
   if (!prefs->IsPrefRegistered(prefs::kSaveFileDefaultDirectory)) {
     FilePath default_save_path;
-    if (!prefs->IsPrefRegistered(prefs::kDownloadDefaultDirectory)) {
-      if (!PathService::Get(chrome::DIR_DEFAULT_DOWNLOADS,
-                            &default_save_path)) {
-        NOTREACHED();
-      }
-    } else {
-      StringPrefMember default_download_path;
-      default_download_path.Init(prefs::kDownloadDefaultDirectory,
-                                 prefs, NULL);
-      default_save_path =
-          FilePath::FromWStringHack(default_download_path.GetValue());
-    }
+    StringPrefMember default_download_path;
+    DCHECK(prefs->IsPrefRegistered(prefs::kDownloadDefaultDirectory));
+    default_download_path.Init(prefs::kDownloadDefaultDirectory, prefs, NULL);
+    default_save_path =
+        FilePath::FromWStringHack(default_download_path.GetValue());
     prefs->RegisterFilePathPref(prefs::kSaveFileDefaultDirectory,
                                 default_save_path);
   }
@@ -1035,6 +1081,18 @@ FilePath SavePackage::GetSaveDirPreference(PrefService* prefs) {
 }
 
 void SavePackage::GetSaveInfo() {
+  FilePath save_dir =
+      GetSaveDirPreference(tab_contents_->profile()->GetPrefs());
+
+  file_manager_->file_loop()->PostTask(FROM_HERE,
+      new CreateDownloadDirectoryTask(save_dir,
+          method_factory_.NewRunnableMethod(
+              &SavePackage::ContinueGetSaveInfo, save_dir),
+          MessageLoop::current()));
+  // CreateDownloadDirectoryTask calls ContinueGetSaveInfo() below.
+}
+
+void SavePackage::ContinueGetSaveInfo(FilePath save_dir) {
   // Use "Web Page, Complete" option as default choice of saving page.
   int file_type_index = 2;
   SelectFileDialog::FileTypeInfo file_type_info;
@@ -1048,8 +1106,6 @@ void SavePackage::GetSaveInfo() {
 
   FilePath title =
       FilePath::FromWStringHack(UTF16ToWideHack(tab_contents_->GetTitle()));
-  FilePath save_dir =
-      GetSaveDirPreference(tab_contents_->profile()->GetPrefs());
   FilePath suggested_path =
       save_dir.Append(GetSuggestedNameForSaveAs(title, can_save_as_complete));
 
@@ -1137,10 +1193,12 @@ void SavePackage::ContinueSave(SavePackageParam* param,
 
 // Static
 bool SavePackage::IsSavableURL(const GURL& url) {
-  return url.SchemeIs(chrome::kHttpScheme) ||
-         url.SchemeIs(chrome::kHttpsScheme) ||
-         url.SchemeIs(chrome::kFileScheme) ||
-         url.SchemeIs(chrome::kFtpScheme);
+  for (int i = 0; chrome::kSavableSchemes[i] != NULL; ++i) {
+    if (url.SchemeIs(chrome::kSavableSchemes[i])) {
+      return true;
+    }
+  }
+  return false;
 }
 
 // Static

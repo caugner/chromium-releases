@@ -2,18 +2,23 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "app/gfx/codec/jpeg_codec.h"
 #include "base/file_util.h"
 #include "base/shared_memory.h"
 #include "chrome/common/native_web_keyboard_event.h"
 #include "chrome/common/render_messages.h"
+#include "chrome/renderer/print_web_view_helper.h"
 #include "chrome/test/render_view_test.h"
 #include "net/base/net_errors.h"
 #include "printing/image.h"
 #include "printing/native_metafile.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "webkit/api/public/WebString.h"
 #include "webkit/api/public/WebURLError.h"
 
 using WebKit::WebCompositionCommand;
+using WebKit::WebFrame;
+using WebKit::WebString;
 using WebKit::WebTextDirection;
 using WebKit::WebURLError;
 
@@ -247,8 +252,8 @@ TEST_F(RenderViewTest, ImeComposition) {
       // Retrieve the content of this page and compare it with the expected
       // result.
       const int kMaxOutputCharacters = 128;
-      std::wstring output;
-      GetMainFrame()->GetContentAsPlainText(kMaxOutputCharacters, &output);
+      std::wstring output = UTF16ToWideHack(
+          GetMainFrame()->contentAsText(kMaxOutputCharacters));
       EXPECT_EQ(output, ime_message->result);
     }
   }
@@ -296,8 +301,8 @@ TEST_F(RenderViewTest, OnSetTextDirection) {
     // Copy the document content to std::wstring and compare with the
     // expected result.
     const int kMaxOutputCharacters = 16;
-    std::wstring output;
-    GetMainFrame()->GetContentAsPlainText(kMaxOutputCharacters, &output);
+    std::wstring output = UTF16ToWideHack(
+        GetMainFrame()->contentAsText(kMaxOutputCharacters));
     EXPECT_EQ(output, kTextDirection[i].expected_result);
   }
 }
@@ -305,7 +310,7 @@ TEST_F(RenderViewTest, OnSetTextDirection) {
 // Tests that printing pages work and sending and receiving messages through
 // that channel all works.
 TEST_F(RenderViewTest, OnPrintPages) {
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(OS_MACOSX)
   // Lets simulate a print pages with Hello world.
   LoadHTML("<body><p>Hello World!</p></body>");
   view_->OnPrintPages();
@@ -337,7 +342,7 @@ TEST_F(RenderViewTest, OnPrintPages) {
 
 // Duplicate of OnPrintPagesTest only using javascript to print.
 TEST_F(RenderViewTest, PrintWithJavascript) {
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(OS_MACOSX)
   // HTML contains a call to window.print()
   LoadHTML("<body>Hello<script>window.print()</script>World</body>");
 
@@ -367,7 +372,7 @@ TEST_F(RenderViewTest, PrintWithJavascript) {
 }
 
 TEST_F(RenderViewTest, PrintWithIframe) {
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(OS_MACOSX)
   // Document that populates an iframe..
   const char html[] =
       "<html><body>Lorem Ipsum:"
@@ -381,11 +386,12 @@ TEST_F(RenderViewTest, PrintWithIframe) {
 
   // Find the frame and set it as the focused one.  This should mean that that
   // the printout should only contain the contents of that frame.
-  WebFrame* sub1_frame = view_->webview()->GetFrameWithName(L"sub1");
+  WebFrame* sub1_frame =
+      view_->webview()->findFrameByName(WebString::fromUTF8("sub1"));
   ASSERT_TRUE(sub1_frame);
-  view_->webview()->SetFocusedFrame(sub1_frame);
-  ASSERT_NE(view_->webview()->GetFocusedFrame(),
-            view_->webview()->GetMainFrame());
+  view_->webview()->setFocusedFrame(sub1_frame);
+  ASSERT_NE(view_->webview()->focusedFrame(),
+            view_->webview()->mainFrame());
 
   // Initiate printing.
   view_->OnPrintPages();
@@ -410,14 +416,16 @@ TEST_F(RenderViewTest, PrintWithIframe) {
 // i.e. a simplified version of the PrintingLayoutTextTest UI test.
 namespace {
 // Test cases used in this test.
-const struct {
+struct TestPageData {
   const char* page;
-  int printed_pages;
+  size_t printed_pages;
   int width;
   int height;
   const char* checksum;
   const wchar_t* file;
-} kTestPages[] = {
+};
+
+const TestPageData kTestPages[] = {
   {"<html>"
   "<head>"
   "<meta"
@@ -428,7 +436,13 @@ const struct {
   "<body style=\"background-color: white;\">"
   "<p style=\"font-family: arial;\">Hello World!</p>"
   "</body>",
+#if defined(OS_MACOSX)
+  // Mac printing code compensates for the WebKit scale factor while generating
+  // the metafile, so we expect smaller pages.
+  1, 612, 792,
+#else
   1, 764, 972,
+#endif
   NULL,
   NULL,
   },
@@ -436,7 +450,7 @@ const struct {
 }  // namespace
 
 TEST_F(RenderViewTest, PrintLayoutTest) {
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(OS_MACOSX)
   bool baseline = false;
 
   EXPECT_TRUE(render_thread_.printer() != NULL);
@@ -477,14 +491,57 @@ TEST_F(RenderViewTest, PrintLayoutTest) {
       // Save the source data and the bitmap data into temporary files to
       // create base-line results.
       FilePath source_path;
-      file_util::CreateTemporaryFileName(&source_path);
-      render_thread_.printer()->SaveSource(0, source_path.value());
+      file_util::CreateTemporaryFile(&source_path);
+      render_thread_.printer()->SaveSource(0, source_path);
 
       FilePath bitmap_path;
-      file_util::CreateTemporaryFileName(&bitmap_path);
-      render_thread_.printer()->SaveBitmap(0, bitmap_path.value());
+      file_util::CreateTemporaryFile(&bitmap_path);
+      render_thread_.printer()->SaveBitmap(0, bitmap_path);
     }
   }
+#else
+  NOTIMPLEMENTED();
+#endif
+}
+
+// Print page as bitmap test.
+TEST_F(RenderViewTest, OnPrintPageAsBitmap) {
+#if defined(OS_WIN) || defined(OS_MACOSX)
+  // Lets simulate a print pages with Hello world.
+  LoadHTML("<body><p>Hello world!</p></body>");
+
+  // Grab the printer settings from the printer.
+  ViewMsg_Print_Params print_settings;
+  MockPrinter* printer(render_thread_.printer());
+  printer->GetDefaultPrintSettings(&print_settings);
+  ViewMsg_PrintPage_Params page_params = ViewMsg_PrintPage_Params();
+  page_params.params = print_settings;
+  page_params.page_number = 0;
+
+  // Fetch the image data from the web frame.
+  std::vector<unsigned char> data;
+  view_->print_helper()->PrintPageAsJPEG(page_params,
+                                         view_->webview()->mainFrame(),
+                                         1.0f,
+                                         &data);
+  std::vector<unsigned char> decoded;
+  int w, h;
+  EXPECT_TRUE(gfx::JPEGCodec::Decode(&data[0], data.size(),
+                                     gfx::JPEGCodec::FORMAT_RGBA,
+                                     &decoded, &w, &h));
+
+  // Check if its not 100% white.
+  bool is_white = true;
+  for (int y = 0; y < h; y++) {
+    for (int x = 0; x < w; x++) {
+      unsigned char* px = &decoded[(y * w + x) * 4];
+      if (px[0] != 0xFF && px[1] != 0xFF && px[2] != 0xFF) {
+        is_white = false;
+        break;
+      }
+    }
+  }
+  ASSERT_TRUE(!is_white);
 #else
   NOTIMPLEMENTED();
 #endif
@@ -612,9 +669,8 @@ TEST_F(RenderViewTest, OnHandleKeyboardEvent) {
         // text created from a virtual-key code, a character code, and the
         // modifier-key status.
         const int kMaxOutputCharacters = 1024;
-        std::wstring output;
-        GetMainFrame()->GetContentAsPlainText(kMaxOutputCharacters, &output);
-
+        std::wstring output = UTF16ToWideHack(
+            GetMainFrame()->contentAsText(kMaxOutputCharacters));
         EXPECT_EQ(expected_result, output);
       }
     }
@@ -825,8 +881,8 @@ TEST_F(RenderViewTest, InsertCharacters) {
     // text created from a virtual-key code, a character code, and the
     // modifier-key status.
     const int kMaxOutputCharacters = 4096;
-    std::wstring output;
-    GetMainFrame()->GetContentAsPlainText(kMaxOutputCharacters, &output);
+    std::wstring output = UTF16ToWideHack(
+        GetMainFrame()->contentAsText(kMaxOutputCharacters));
     EXPECT_EQ(kLayouts[i].expected_result, output);
   }
 #else
@@ -852,15 +908,14 @@ TEST_F(RenderViewTest, DidFailProvisionalLoadWithErrorForError) {
 #endif
 
 TEST_F(RenderViewTest, DidFailProvisionalLoadWithErrorForCancellation) {
-  GetMainFrame()->SetInViewSourceMode(true);
+  GetMainFrame()->enableViewSourceMode(true);
   WebURLError error;
   error.domain.fromUTF8("test_domain");
   error.reason = net::ERR_ABORTED;
   error.unreachableURL = GURL("http://foo");
   WebFrame* web_frame = GetMainFrame();
-  WebView* web_view = web_frame->GetView();
   // A cancellation occurred.
-  view_->DidFailProvisionalLoadWithError(web_view, error, web_frame);
+  view_->didFailProvisionalLoad(web_frame, error);
   // Frame should stay in view-source mode.
-  EXPECT_TRUE(web_frame->GetInViewSourceMode());
+  EXPECT_TRUE(web_frame->isViewSourceModeEnabled());
 }

@@ -10,68 +10,76 @@
 #include <wtf/OwnPtr.h>
 
 #include "v8.h"
+#include "webkit/api/public/WebDevToolsAgent.h"
 #include "webkit/glue/devtools/devtools_rpc.h"
-#include "webkit/glue/devtools/dom_agent.h"
+#include "webkit/glue/devtools/apu_agent_delegate.h"
 #include "webkit/glue/devtools/tools_agent.h"
-#include "webkit/glue/webdevtoolsagent.h"
 
 namespace WebCore {
 class Document;
 class Node;
+class ScriptState;
 class String;
+}
+
+namespace WebKit {
+class WebDevToolsAgentClient;
+class WebFrame;
 }
 
 class BoundObject;
 class DebuggerAgentDelegateStub;
 class DebuggerAgentImpl;
-class DomAgentImpl;
-class NetAgentImpl;
 class Value;
-class WebDevToolsAgentDelegate;
-class WebFrame;
 class WebFrameImpl;
 class WebViewImpl;
 
-class WebDevToolsAgentImpl
-    : public WebDevToolsAgent,
-      public ToolsAgent,
-      public DevToolsRpc::Delegate {
+class WebDevToolsAgentImpl : public WebKit::WebDevToolsAgent,
+                             public ToolsAgent,
+                             public DevToolsRpc::Delegate {
  public:
   WebDevToolsAgentImpl(WebViewImpl* web_view_impl,
-      WebDevToolsAgentDelegate* delegate);
+                       WebKit::WebDevToolsAgentClient* client);
   virtual ~WebDevToolsAgentImpl();
 
   // ToolsAgent implementation.
-  virtual void HighlightDOMNode(int node_id);
-  virtual void HideDOMNodeHighlight();
-  virtual void ExecuteUtilityFunction(
+  virtual void DispatchOnInspectorController(
       int call_id,
       const WebCore::String& function_name,
       const WebCore::String& json_args);
-  virtual void ClearConsoleMessages();
+  virtual void DispatchOnInjectedScript(
+      int call_id,
+      const WebCore::String& function_name,
+      const WebCore::String& json_args);
+  virtual void ExecuteVoidJavaScript();
   virtual void GetResourceContent(
       int call_id,
       int identifier);
-  virtual void SetResourceTrackingEnabled(bool enabled, bool always);
 
   // WebDevToolsAgent implementation.
-  virtual void Attach();
-  virtual void Detach();
-  virtual void OnNavigate();
-  virtual void DispatchMessageFromClient(const std::string& class_name,
-                                         const std::string& method_name,
-                                         const std::string& raw_msg);
-  virtual void InspectElement(int x, int y);
+  virtual void attach();
+  virtual void detach();
+  virtual void didNavigate();
+  virtual void dispatchMessageFromFrontend(
+      const WebKit::WebString& class_name,
+      const WebKit::WebString& method_name,
+      const WebKit::WebString& param1,
+      const WebKit::WebString& param2,
+      const WebKit::WebString& param3);
+  virtual void inspectElementAt(const WebKit::WebPoint& point);
+  virtual void setApuAgentEnabled(bool enable);
 
   // DevToolsRpc::Delegate implementation.
-  void SendRpcMessage(const std::string& class_name,
-                      const std::string& method_name,
-                      const std::string& raw_msg);
+  void SendRpcMessage(const WebCore::String& class_name,
+                      const WebCore::String& method_name,
+                      const WebCore::String& param1,
+                      const WebCore::String& param2,
+                      const WebCore::String& param3);
 
   // Methods called by the glue.
   void SetMainFrameDocumentReady(bool ready);
   void DidCommitLoadForFrame(WebViewImpl* webview,
-                             WebFrame* frame,
+                             WebKit::WebFrame* frame,
                              bool is_new_navigation);
 
   void WindowObjectCleared(WebFrameImpl* webframe);
@@ -82,26 +90,35 @@ class WebDevToolsAgentImpl
 
  private:
   static v8::Handle<v8::Value> JsDispatchOnClient(const v8::Arguments& args);
-  static v8::Handle<v8::Value> JsGetNodeForId(const v8::Arguments& args);
+  static v8::Handle<v8::Value> JsDispatchToApu(const v8::Arguments& args);
   void DisposeUtilityContext();
+  void UnhideResourcesPanelIfNecessary();
 
   void InitDevToolsAgentHost();
+  void ResetInspectorFrontendProxy();
+
+  // Creates InspectorBackend v8 wrapper in the utility context so that it's
+  // methods prototype is Function.protoype object from the utility context.
+  // Otherwise some useful methods  defined on Function.prototype(such as bind)
+  // are missing for InspectorController native methods.
+  v8::Local<v8::Object> CreateInspectorBackendV8Wrapper();
 
   int host_id_;
-  WebDevToolsAgentDelegate* delegate_;
+  WebKit::WebDevToolsAgentClient* client_;
   WebViewImpl* web_view_impl_;
-  WebCore::Document* document_;
   OwnPtr<DebuggerAgentDelegateStub> debugger_agent_delegate_stub_;
-  OwnPtr<DomAgentDelegateStub> dom_agent_delegate_stub_;
   OwnPtr<ToolsAgentDelegateStub> tools_agent_delegate_stub_;
   OwnPtr<ToolsAgentNativeDelegateStub> tools_agent_native_delegate_stub_;
   OwnPtr<DebuggerAgentImpl> debugger_agent_impl_;
-  OwnPtr<DomAgentImpl> dom_agent_impl_;
+  OwnPtr<ApuAgentDelegateStub> apu_agent_delegate_stub_;
+  bool apu_agent_enabled_;
+  bool resource_tracking_was_enabled_;
   bool attached_;
   // TODO(pfeldman): This should not be needed once GC styles issue is fixed
   // for matching rules.
   v8::Persistent<v8::Context> utility_context_;
   OwnPtr<BoundObject> devtools_agent_host_;
+  OwnPtr<WebCore::ScriptState> inspector_frontend_script_state_;
   DISALLOW_COPY_AND_ASSIGN(WebDevToolsAgentImpl);
 };
 

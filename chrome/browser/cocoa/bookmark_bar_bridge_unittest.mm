@@ -7,6 +7,7 @@
 #include "chrome/browser/cocoa/browser_test_helper.h"
 #include "chrome/browser/cocoa/cocoa_test_helper.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "testing/platform_test.h"
 
 // TODO(jrg): add OCMock to Chromium to save some typing.
 
@@ -32,15 +33,12 @@ typedef std::pair<GURL,WindowOpenDisposition> OpenInfo;
 
 @implementation FakeBookmarkBarController
 
-- (id)initWithProfile:(Profile*)profile
-           parentView:(NSView*)parentView
-       webContentView:(NSView*)webContentView
-         infoBarsView:(NSView*)infoBarsView {
-  if ((self = [super initWithProfile:profile
-                          parentView:parentView
-                      webContentView:webContentView
-                        infoBarsView:infoBarsView
-                            delegate:self])) {
+- (id)initWithBrowser:(Browser*)browser {
+  if ((self = [super initWithBrowser:browser
+                        initialWidth:100  // arbitrary
+                    compressDelegate:nil
+                      resizeDelegate:nil
+                         urlDelegate:self])) {
     callbacks_.reset([[NSMutableArray alloc] init]);
   }
   return self;
@@ -94,22 +92,17 @@ typedef std::pair<GURL,WindowOpenDisposition> OpenInfo;
 @end
 
 
-class BookmarkBarBridgeTest : public testing::Test {
+class BookmarkBarBridgeTest : public PlatformTest {
  public:
-  BookmarkBarBridgeTest() {
-    NSRect content_frame = NSMakeRect(0, 0, 100, 100);
-    view_.reset([[NSView alloc] initWithFrame:content_frame]);
-  }
-
   CocoaTestHelper cocoa_helper_;
   BrowserTestHelper browser_test_helper_;
-  scoped_nsobject<NSView> view_;
 };
 
 // Call all the callbacks; make sure they are all redirected to the objc object.
 TEST_F(BookmarkBarBridgeTest, TestRedirect) {
-  Profile *profile = browser_test_helper_.profile();
-  BookmarkModel *model = profile->GetBookmarkModel();
+  Browser* browser = browser_test_helper_.browser();
+  Profile* profile = browser_test_helper_.profile();
+  BookmarkModel* model = profile->GetBookmarkModel();
 
   scoped_nsobject<NSView> parentView([[NSView alloc]
                                        initWithFrame:NSMakeRect(0,0,100,100)]);
@@ -119,11 +112,7 @@ TEST_F(BookmarkBarBridgeTest, TestRedirect) {
       [[NSView alloc] initWithFrame:NSMakeRect(0,0,100,100)]);
 
   scoped_nsobject<FakeBookmarkBarController>
-    controller([[FakeBookmarkBarController alloc]
-                 initWithProfile:profile
-                      parentView:parentView.get()
-                  webContentView:webView.get()
-                    infoBarsView:infoBarsView.get()]);
+      controller([[FakeBookmarkBarController alloc] initWithBrowser:browser]);
   EXPECT_TRUE(controller.get());
   scoped_ptr<BookmarkBarBridge> bridge(new BookmarkBarBridge(controller.get(),
                                                              model));

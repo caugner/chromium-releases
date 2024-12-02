@@ -7,15 +7,15 @@
 
 #include <string>
 
+#include "app/gfx/native_widget_types.h"
 #include "base/basictypes.h"
-#include "base/gfx/native_widget_types.h"
 
 // Cross platform access to a modal input window.
 class InputWindowDialog {
  public:
   class Delegate {
    public:
-    virtual ~Delegate() { }
+    virtual ~Delegate() {}
 
     // Checks whether |text| is a valid input string.
     virtual bool IsValid(const std::wstring& text) = 0;
@@ -29,7 +29,7 @@ class InputWindowDialog {
 
   // Creates a new input window dialog parented to |parent|. Ownership of
   // |delegate| is taken by InputWindowDialog or InputWindowDialog's owner.
-  static InputWindowDialog* Create(gfx::NativeView parent,
+  static InputWindowDialog* Create(gfx::NativeWindow parent,
                                    const std::wstring& window_title,
                                    const std::wstring& label,
                                    const std::wstring& contents,
@@ -42,7 +42,7 @@ class InputWindowDialog {
   virtual void Close() = 0;
 
  protected:
-  InputWindowDialog() { }
+  InputWindowDialog() {}
 
  private:
   DISALLOW_COPY_AND_ASSIGN(InputWindowDialog);

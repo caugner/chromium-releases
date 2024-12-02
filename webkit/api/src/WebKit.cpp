@@ -38,7 +38,9 @@
 #include "DOMTimer.h"
 #include "FrameLoader.h"
 #include "Page.h"
-#include "V8Proxy.h"
+#include "SecurityOrigin.h"
+#include "TextEncoding.h"
+#include "WebSocket.h"
 #include "WorkerContextExecutionProxy.h"
 #include <wtf/Assertions.h>
 #include <wtf/Threading.h>
@@ -47,6 +49,7 @@ namespace WebKit {
 
 static WebKitClient* s_webKitClient = 0;
 static bool s_layoutTestMode = false;
+static bool s_databasesEnabled = false;
 
 void initialize(WebKitClient* webKitClient)
 {
@@ -63,6 +66,15 @@ void initialize(WebKitClient* webKitClient)
     // 4ms prevents the CPU from spinning too busily and provides a balance
     // between CPU spinning and the smallest possible interval timer.
     WebCore::DOMTimer::setMinTimerInterval(0.004);
+
+    // There are some code paths (for example, running WebKit in the browser
+    // process and calling into LocalStorage before anything else) where the
+    // UTF8 string encoding tables are used on a background thread before
+    // they're set up.  This is a problem because their set up routines assert
+    // they're running on the main WebKitThread.  It might be possible to make
+    // the initialization thread-safe, but given that so many code paths use
+    // this, initializing this lazily probably doesn't buy us much.
+    WebCore::UTF8Encoding();
 }
 
 void shutdown()
@@ -95,17 +107,6 @@ void registerURLSchemeAsNoAccess(const WebString& scheme)
     WebCore::SecurityOrigin::registerURLSchemeAsNoAccess(scheme);
 }
 
-void registerExtension(v8::Extension* extension)
-{
-    WebCore::V8Proxy::registerExtension(extension, WebString());
-}
-
-void registerExtension(v8::Extension* extension,
-                       const WebString& schemeRestriction)
-{
-    WebCore::V8Proxy::registerExtension(extension, schemeRestriction);
-}
-
 void enableMediaPlayer()
 {
 #if ENABLE(VIDEO)
@@ -113,9 +114,52 @@ void enableMediaPlayer()
 #endif
 }
 
-void resetPluginCache()
+void resetPluginCache(bool reloadPages)
 {
-    WebCore::Page::refreshPlugins(false);
+    WebCore::Page::refreshPlugins(reloadPages);
+}
+
+void enableDatabases()
+{
+#if ENABLE(DATABASE)
+    s_databasesEnabled = true;
+#endif
+}
+
+bool databasesEnabled()
+{
+    return s_databasesEnabled;
+}
+
+void whiteListAccessFromOrigin(const WebURL& sourceOrigin,
+                               const WebString& destinationProtocol,
+                               const WebString& destinationHost,
+                               bool allowDestinationSubdomains)
+{
+    WebCore::SecurityOrigin::whiteListAccessFromOrigin(
+        *WebCore::SecurityOrigin::create(sourceOrigin), destinationProtocol,
+        destinationHost, allowDestinationSubdomains);
+}
+
+void resetOriginAccessWhiteLists()
+{
+    WebCore::SecurityOrigin::resetOriginAccessWhiteLists();
+}
+
+void enableWebSockets()
+{
+#if ENABLE(WEB_SOCKETS)
+    WebCore::WebSocket::setIsAvailable(true);
+#endif
+}
+
+bool webSocketsEnabled()
+{
+#if ENABLE(WEB_SOCKETS)
+    return WebCore::WebSocket::isAvailable();
+#else
+    return false;
+#endif
 }
 
 } // namespace WebKit

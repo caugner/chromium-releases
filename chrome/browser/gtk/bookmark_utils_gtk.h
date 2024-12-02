@@ -21,14 +21,10 @@ extern const char kBookmarkNode[];
 // Padding between the image and the label of a bookmark bar button.
 extern const int kBarButtonPadding;
 
-// These functions do not add a ref to the returned pixbuf, and it should not be
-// unreffed.
-GdkPixbuf* GetFolderIcon();
-GdkPixbuf* GetDefaultFavicon();
-
 // Get the image that is used to represent the node. This function adds a ref
 // to the returned pixbuf, so it requires a matching call to g_object_unref().
-GdkPixbuf* GetPixbufForNode(const BookmarkNode* node, BookmarkModel* model);
+GdkPixbuf* GetPixbufForNode(const BookmarkNode* node, BookmarkModel* model,
+                            bool native);
 
 // Returns a GtkWindow with a visual hierarchy for passing to
 // gtk_drag_set_icon_widget().
@@ -47,8 +43,7 @@ std::string BuildTooltipFor(const BookmarkNode* node);
 // Returns the "bookmark-node" property of |widget| casted to the correct type.
 const BookmarkNode* BookmarkNodeForWidget(GtkWidget* widget);
 
-// This function is a temporary hack to fix fonts on dark system themes.
-// TODO(estade): remove this function.
+// Set the colors on |label| as per the theme.
 void SetButtonTextColors(GtkWidget* label, GtkThemeProvider* provider);
 
 // Drag and drop. --------------------------------------------------------------
@@ -78,6 +73,14 @@ std::vector<const BookmarkNode*> GetNodesFromSelection(
 // Unpickle a new bookmark of the CHROME_NAMED_URL drag type, and put it in
 // the appropriate location in the model.
 bool CreateNewBookmarkFromNamedUrl(
+    GtkSelectionData* selection_data,
+    BookmarkModel* model,
+    const BookmarkNode* parent,
+    int idx);
+
+// Add the URIs in |selection_data| into the model at the given position. They
+// will be added whether or not the URL is valid.
+bool CreateNewBookmarksFromURIList(
     GtkSelectionData* selection_data,
     BookmarkModel* model,
     const BookmarkNode* parent,

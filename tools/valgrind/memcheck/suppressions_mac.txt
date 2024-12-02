@@ -12,31 +12,6 @@
 
 # 1. Third party stuff we have no control over.
 {
-   # See http://code.google.com/p/chromium/issues/detail?id=9565
-   # This should have been handled by platform-specific suppression.
-   # Remove this when https://bugs.kde.org/show_bug.cgi?id=188572 is fixed
-   setenv() leaks on Mac intentionally.
-   Memcheck:Leak
-   ...
-   fun:__setenv
-   fun:setenv$UNIX2003
-}
-{
-   # syslog needs a system suppression on the mac.
-   # See https://bugs.kde.org/show_bug.cgi?id=191192
-   valgrind_bug_191192
-   Memcheck:Param
-   socketcall.sendto(msg)
-   fun:sendto$NOCANCEL$UNIX2003
-   fun:vsyslog
-}
-{
-   # mac ati drivers seem to have problems
-   bug_11280
-   Memcheck:Cond
-   obj:/System/Library/Extensions/ATIRadeonX2000GLDriver.bundle/Contents/MacOS/ATIRadeonX2000GLDriver
-}
-{
    FIXME mac kevent libevent probably needs valgrind hooks
    Memcheck:Param
    kevent(changelist)
@@ -44,16 +19,14 @@
    fun:event_base_new
 }
 {
-   # Mac system library leak?  Only suppress in tests for now.
-   mac_init_appleevents_leak
-   Memcheck:Leak
-   fun:_Znwm
-   fun:sendSimpleEventToSelf
-   fun:aeInitializeFromHIToolbox
-   fun:INIT_AppleEvents
-   fun:_FirstEventTime
-   ...
-   fun:_ZN7testing4Test3RunEv
+   # Mac test_shell_tests.  See http://crbug.com/11134
+   # Doesn't happen on bots, but happens like crazy on the smo
+   # test machine 'caliban'.  Don't delete just because it
+   # doesn't happen on the bots.
+   bug_11134
+   Memcheck:Value4
+   fun:vCMMVectorConvert8BitRGBToRGB
+   fun:_ZNK15CMMConvRGBToRGB7ConvertER8CMM8BitsP14CMMRuntimeInfomm
 }
 {
    # Mac system library bug?  See http://crbug.com/11327
@@ -75,12 +48,12 @@
    # CoreAudio leak.  See http://crbug.com/9351
    bug_9351
    Memcheck:Leak
-   fun:_Znwm
+   fun:_Znw*
    fun:_ZN12HALCADClient19AddPropertyListenerEmPK26AudioObjectPropertyAddressPFlmmS2_PvES3_
    fun:_ZN16HALDefaultDevice22InstallServerListenersEv
    fun:_ZN16HALDefaultDevice10InitializeEv
    fun:_ZN9HALSystem16CheckOutInstanceEv
-   fun:AudioHardwareGetProperty
+   fun:AudioObjectGetPropertyData
    fun:_ZN15AudioManagerMac15HasAudioDevicesEv
 }
 {
@@ -89,31 +62,6 @@
    Memcheck:Leak
    fun:calloc
    fun:CMSSetLabCLUT
-}
-{
-   # ATI driver bug?  See http://crbug.com/11271
-   bug_11271
-   Memcheck:Leak
-   fun:calloc
-   fun:gldCreateBuffer
-   fun:gldPageoffBuffer
-   fun:gldGetString
-   fun:gldGetString
-   fun:gldGetString
-   fun:gldInitDispatch
-   fun:gldGetQueryInfo
-   fun:gldUpdateDispatch
-   fun:gldInitDispatch
-   fun:gliSetCurrentPluginDispatchTable
-   fun:gliAttachDrawableWithOptions
-   fun:cglSetContextScreen
-   fun:cglSetAnyDrawable
-   fun:CGLSetSurface
-   fun:view_draw
-   fun:view_display_link
-   fun:link_callback
-   fun:_ZN13CVDisplayLink9performIOEP11CVTimeStamp
-   fun:_ZN13CVDisplayLink11runIOThreadEv
 }
 {
    # Mac leak in CMOpenOrNewAccess in unit_tests PlatformCanvas_SkLayer_Test,
@@ -128,44 +76,15 @@
    fun:CMOpenOrNewAccess
 }
 {
-   # Mac unit_tests.  See http://crbug.com/11271
-   bug_12640a
-   Memcheck:Cond
-   fun:png_write_find_filter
-   fun:webkit_png_write_row
-   fun:_ZN10PNGEncoder6EncodeEPKhNS_11ColorFormatEiiibPSt6vectorIhSaIhEE
-   ...
-   fun:_ZN24ExtensionsServiceBackend24InstallOrUpdateExtensionERK8FilePathRKSsb
-}
-{
-   # OpenGL.framework init; filed with Apple as rdar://6986771
-   opengl_init_rdar_6986771
-   Memcheck:Cond
-   ...
-   fun:gl_context_init_client_state
-}
-{
-   # Reproducible just launching and quitting TextEdit; filed with Apple as rdar://7004347
-   tsm_leak_rdar_7004347
+   # suddenly very common as of 6 aug 2009
+   bug_11333b
    Memcheck:Leak
-   fun:malloc_zone_malloc
-   fun:_CFRuntimeCreateInstance
-   fun:__CFDictionaryInit
-   fun:utOpenActivateAllSelectedIMInDoc
-   fun:MyActivateTSMDocument
-   fun:ActivateTSMDocument
-}
-{
-   # Looks like an Apple bug; has no visual impact.
-   unitialized_rect_allocated_on_stack_when_reparenting_window_content_views
-   Memcheck:Cond
-   fun:NSRectClip
-   fun:-[NSThemeFrame drawOverlayRect:]
-   ...
-   fun:-[NSWindow makeKeyAndOrderFront:]
-   fun:-[BrowserWindowController setFullscreen:]
-   ...
-   fun:main
+   fun:malloc
+   fun:stdSmartNewPtr
+   fun:stdSmartNewHandle
+   fun:IOCreateAndOpen
+   fun:ScratchInit
+   fun:CMNewAccessFromAnother
 }
 {
    # Tiny one-time leak, widely seen by valgind users; everyone suppresses this.
@@ -180,9 +99,57 @@
    fun:dlopen
    fun:_CFBundleDlfcnCheckLoaded
 }
+{
+   bug_18215
+   Memcheck:Cond
+   fun:_DPSNextEvent
+   fun:-[NSApplication nextEventMatchingMask:untilDate:inMode:dequeue:]
+   fun:-[NSApplication run]
+}
+{
+   bug_18223
+   Memcheck:Cond
+   fun:_ZNK8Security12UnixPlusPlus17StaticForkMonitorclEv
+   fun:_ZN12ocspdGlobals10serverPortEv
+}
+{
+   # Invalid read
+   bug_20508b
+   Memcheck:Addr4
+   fun:_eATSFontGetGlyphIDsForGlyphNames
+   fun:ATSFontGetGlyphIDsForGlyphNames
+   fun:ats_font_get_glyphs_for_glyph_names
+   fun:get_glyphs_for_glyph_names
+}
+{
+   # Nasty invalid write. Reported to Apple as rdar://7240303.
+   bug_18189
+   Memcheck:Addr8
+   fun:sseCGSFill8by1
+   fun:argb32_mark_constshape
+   fun:argb32_mark
+   fun:ripl_BltShape
+   fun:ripc_Render
+   fun:ripc_DrawRects
+   fun:CGContextFillRects
+   fun:CGContextFillRect
+   fun:NSRectFill
+}
 
 # 2. Intentional unit test errors, stuff that is somehow a false positive
 # in our own code, or stuff that is so trivial it's not worth fixing.
+{
+   # NSObject pointers in a static std::map; we do technically leak them, but
+   # only on shutdown, so it's not worth fixing.
+   static_theme_cache
+   Memcheck:Leak
+   fun:calloc
+   fun:_internal_class_createInstanceFromZone
+   fun:_internal_class_createInstance
+   fun:+[NSObject allocWithZone:]
+   fun:+[NSObject alloc]
+   fun:+[GTMTheme(BrowserThemeProviderInitialization) themeWithBrowserThemeProvider:isOffTheRecord:]
+}
 
 # 3. Suppressions for real chromium bugs that are not yet fixed.
 {
@@ -198,136 +165,6 @@
    fun:_ZN7WebCore15GraphicsContext8fillRectERKNS_9FloatRectERKNS_5ColorE
 }
 {
-   # Mac test_shell_tests; skia leak?  See http://crbug.com/9563
-   bug_9563
-   Memcheck:Leak
-   fun:malloc_zone_malloc
-   fun:_CFRuntimeCreateInstance
-   fun:CGTypeCreateInstanceWithAllocator
-   fun:CGTypeCreateInstance
-   fun:CGContextCreateWithDelegate
-   fun:CGContextCreate
-   fun:createBitmapContext
-   fun:CGBitmapContextCreate
-   fun:_ZN4skia23BitmapPlatformDeviceMac6CreateEP9CGContextiib
-}
-{
-   # Mac test_shell_tests; skia leak?   See http://crbug.com/9563
-   bug_9563b
-   Memcheck:Leak
-   fun:malloc_zone_calloc
-   fun:ripc_Initialize
-   fun:__CGBitmapContextDelegateCreate
-   fun:__CGBitmapContextDelegateCreate
-   fun:createBitmapContext
-   fun:CGBitmapContextCreate
-   fun:_ZN4skia23BitmapPlatformDeviceMac6CreateEP9CGContextiib
-}
-{
-   # Mac test_shell_tests.  See http://crbug.com/9563
-   bug_9563d
-   Memcheck:Leak
-   fun:malloc_zone_calloc
-   fun:ripc_Initialize
-   fun:__CGWindowContextDelegateCreate
-   fun:CGWindowContextCreate
-   ...
-   fun:_ZN13TestShellTest5SetUpEv
-}
-{
-   # Mac test_shell_tests.  See http://crbug.com/11134
-   bug_11134
-   Memcheck:Value4
-   fun:vCMMVectorConvert8BitRGBToRGB
-   fun:_ZNK15CMMConvRGBToRGB7ConvertER8CMM8BitsP14CMMRuntimeInfomm
-}
-{
-   bug_12525
-   Memcheck:Cond
-   ...
-   fun:gldGetTextureLevel
-   fun:gldUpdateDispatch
-   fun:glBegin_Exec
-   fun:fe_gl_begin
-   fun:fe_tree_render_apply_1
-   fun:apply_tile_callback
-   fun:fe_gl_texture_tile_map
-   fun:image_buffer_texture_tile_map
-   fun:fe_texture_tile_map
-}
-{
-   # Jump on uninitialized value in OpenGL.framework's GLEngine.bundle
-   bug_12528
-   Memcheck:Cond
-   ...
-   fun:ripc_DrawShading
-   fun:CGContextDrawShading
-}
-{
-   bug_12640b
-   Memcheck:Value4
-   ...
-   fun:png_write_find_filter
-   fun:webkit_png_write_row
-   fun:_ZN10PNGEncoder6EncodeEPKhNS_11ColorFormatEiiibPSt6vectorIhSaIhEE
-   ...
-   fun:_ZN24ExtensionsServiceBackend24InstallOrUpdateExtensionERK8FilePathRKSsb
-}
-{
-   bug_12640c
-   Memcheck:Param
-   write(buf)
-   fun:write$UNIX2003
-   fun:_ZN24ExtensionsServiceBackend19OnExtensionUnpackedERK8FilePathS2_SsbRK15DictionaryValueRKSt6vectorI6Tuple2I8SkBitmapS0_ESaIS9_EE
-}
-{
-   bug_12640d
-   Memcheck:Cond
-   fun:_ZN10PNGEncoder18EncodeBGRASkBitmapERK8SkBitmapbPSt6vectorIhSaIhEE
-   fun:_ZN24ExtensionsServiceBackend19OnExtensionUnpackedERK8FilePathS2_SsbRK15DictionaryValueRKSt6vectorI6Tuple2I8SkBitmapS0_ESaIS9_EE
-   fun:_ZN24ExtensionsServiceBackend14UnpackerClient30OnUnpackExtensionSucceededImplERK15DictionaryValueRKSt6vectorI6Tuple2I8SkBitmap8FilePathESaIS8_EE
-}
-{
-   bug_15819a
-   Memcheck:Cond
-   fun:_ZNK10CMMMtxOnly10ConvertMinE10CMM3x3Type10CMM3x1TypeR12CMMMinBuffermm
-   ...
-   fun:CGContextDrawImage
-   fun:_ZN3gfx17CGImageToSkBitmapEP7CGImage
-}
-{
-   bug_15819b
-   Memcheck:Value4
-   fun:_ZNK10CMMConvLut7ConvertER10CMMMinBitsP14CMMRuntimeInfomm
-   ...
-   fun:CGContextDrawImage
-   fun:_ZN3gfx17CGImageToSkBitmapEP7CGImage
-}
-{
-   bug_16209
-   Memcheck:Leak
-   fun:_Znwm
-   fun:_ZN18RenderWidgetHelper17AllocTransportDIBEmPN4base14FileDescriptorE
-   fun:_ZN21ResourceMessageFilter19OnAllocTransportDIBEmPN4base14FileDescriptorE
-   fun:_Z16DispatchToMethodI21ResourceMessageFilterMS0_FvmPN4base14FileDescriptorEEmS2_EvPT_T0_RK6Tuple1IT1_EPS9_IT2_E
-   fun:_ZN3IPC16MessageWithReplyI6Tuple1ImES1_IRN4base14FileDescriptorEEE8DispatchI21ResourceMessageFilterMS9_FvmPS4_EEEbPKNS_7MessageEPT_T0_
-   fun:_ZN21ResourceMessageFilter17OnMessageReceivedERKN3IPC7MessageE
-   fun:_ZN3IPC12ChannelProxy7Context10TryFiltersERKNS_7MessageE
-   fun:_ZN3IPC11SyncChannel11SyncContext17OnMessageReceivedERKNS_7MessageE
-}
-{
-   bug_16210
-   Memcheck:Leak
-   fun:_Znwm
-   fun:_ZN3IPC11SyncChannelC1ERKSsNS_7Channel4ModeEPNS3_8ListenerEPNS_12ChannelProxy13MessageFilterEP11MessageLoopbPN4base13WaitableEventE
-   fun:_ZN11ChildThread4InitEv
-   fun:_ZN12RenderThread4InitEv
-   fun:_ZN4base6Thread10ThreadMainEv
-   fun:_ZL10ThreadFuncPv
-   fun:_pthread_start
-   fun:thread_start
-}
-{
   bug_17297
   Memcheck:Leak
   fun:malloc
@@ -337,3 +174,135 @@
   fun:+[NSCatalogColor newWithCoder:zone:]
   fun:-[NSColor initWithCoder:]
 }
+{
+   bug_18218
+   Memcheck:Leak
+   fun:malloc
+   fun:__addHandler2
+   fun:__NSFinalizeThreadData
+   fun:_pthread_tsd_cleanup
+   fun:_pthread_exit
+   fun:thread_start
+}
+{
+   bug_20504
+   Memcheck:Leak
+   fun:malloc_zone_calloc
+   fun:_internal_class_createInstanceFromZone
+   fun:+[NSObject allocWithZone:]
+   fun:-[NSCustomObject nibInstantiate]
+   fun:-[NSIBObjectData instantiateObject:]
+   fun:-[NSIBObjectData nibInstantiateWithOwner:topLevelObjects:]
+   fun:loadNib
+   fun:+[NSBundle(NSNibLoading) _loadNibFile:nameTable:withZone:ownerBundle:]
+   fun:+[NSBundle(NSNibLoading) loadNibFile:externalNameTable:withZone:]
+   fun:+[NSBundle(NSNibLoading) loadNibNamed:owner:]
+   fun:_ZN8Platform29WillInitializeMainMessageLoopERK18MainFunctionParams
+}
+{
+   bug_20582
+   Memcheck:Leak
+   fun:_Znw*
+   fun:_ZN4base19MessagePumpLibevent19WatchFileDescriptorEibNS0_4ModeEPNS0_21FileDescriptorWatcherEPNS0_7WatcherE
+   fun:_ZN16MessageLoopForIO19WatchFileDescriptorEibNS_4ModeEPN4base19MessagePumpLibevent21FileDescriptorWatcherEPNS2_7WatcherE
+   fun:_ZN3IPC7Channel11ChannelImpl23ProcessOutgoingMessagesEv
+}
+{
+   bug_20814
+   Memcheck:Addr4
+   fun:_ZN10CLVContextC2EPKvm
+   fun:_Z26getAllCarbonLazyValues2000v
+   fun:CLVVisitValuesForKey
+   fun:INIT_ResourceManager
+   fun:CurResFile
+   fun:_ZN5NPAPI12_GLOBAL__N_124ScopedBundleResourceFileC1EP10__CFBundle
+   ...
+   fun:_ZN5NPAPI12_GLOBAL__N_117ReadSTRPluginInfoERK8FilePathP10__CFBundleP13WebPluginInfo
+   fun:_ZN5NPAPI9PluginLib17ReadWebPluginInfoERK8FilePathP13WebPluginInfo
+}
+{
+   bug_20997
+   Memcheck:Param
+   socketcall.sendmsg(msg.msg_iov[i])
+   fun:sendmsg$UNIX2003
+   fun:_ZN3IPC7Channel11ChannelImpl4SendEPNS_7MessageE
+}
+{
+   bug_21280
+   Memcheck:Leak
+   fun:malloc_zone_malloc
+   ...
+   fun:ATSFontLoadUnicodeCharacterSet
+   ...
+   fun:__NSFontInstanceInfoInitializeMetricsInfo
+   ...
+   fun:-[NSFont boundingRectForGlyph:]
+}
+{
+   bug_21280_b
+   Memcheck:Addr2
+   fun:CFRetain
+   fun:CFDictionarySetValue
+   fun:_ZNK9TBaseFont20SetAttributeInternalEPKvS1_
+   fun:_ZNK9TBaseFont16CopyCharacterSetEv
+   fun:-[__NSFontTypefaceInfo _nominalCharacterCoverage]
+   fun:-[__NSSharedFontInstanceInfo _characterCoverage]
+   fun:__NSFontInstanceInfoInitializeMetricsInfo
+   fun:-[__NSSharedFontInstanceInfo _numberOfGlyphs]
+   fun:-[NSFont boundingRectForGlyph:]
+}
+{
+   bug_21286
+   Memcheck:Leak
+   fun:_Znw*
+   fun:sendSimpleEventToSelf
+   fun:aeInitializeFromHIToolbox
+   fun:INIT_AppleEvents
+}
+{
+   bug_21479
+   Memcheck:Leak
+   fun:malloc_zone_malloc
+   fun:_CFRuntimeCreateInstance
+   fun:CFPasteboardCreate
+   fun:CFPasteboardCreateUnique
+   fun:+[NSPasteboard _pasteboardWithName:]
+   fun:+[NSPasteboard pasteboardWithUniqueName]
+}
+{
+   bug_21479
+   Memcheck:Leak
+   fun:malloc_zone_malloc
+   fun:_CFRuntimeCreateInstance
+   fun:CFPasteboardCreate
+   fun:+[NSPasteboard _pasteboardWithName:]
+   fun:-[FindPasteboard findPboard]
+}
+{
+   bug_22021
+   Memcheck:Leak
+   fun:malloc
+   fun:_ZN3WTF10fastMalloc*
+   ...
+   fun:_ZN7WebCore19V8EventListenerList3addEPNS_15V8EventListenerE
+}
+{
+   bug_22544
+   Memcheck:Leak
+   fun:malloc_zone_malloc
+   fun:_CFRuntimeCreateInstance
+   fun:__CFArrayInit
+   fun:CFArrayCreateMutableCopy
+   fun:_ZN3net22MacTrustedCertificates27CopyTrustedCertificateArrayEv
+   fun:_ZNK3net15X509Certificate6VerifyERKSsiPNS_16CertVerifyResultE
+}
+{
+   bug_23416
+   Memcheck:Leak
+   fun:_Znw*
+   fun:_ZN11webkit_glue16WebURLLoaderImplC2Ev
+   ...
+   fun:_ZN11webkit_glue20ImageResourceFetcherC1ERK4GURLPN6WebKit8WebFrameEiiP14CallbackRunnerI6Tuple2IPS0_RK8SkBitmapEE
+   fun:_ZN10RenderView13DownloadImageEiRK4GURLi
+}
+

@@ -3,16 +3,12 @@
 # found in the LICENSE file.
 
 {
-  'includes': [
-    '../build/common.gypi',
-  ],
   'targets': [
     {
       'target_name': 'skia',
       'type': '<(library)',
       'msvs_guid': 'CD9CA56E-4E94-444C-87D4-58CA1E6F300D',
       'sources': [
-        'precompiled.cc',
         #'../third_party/skia/src/animator/SkAnimate.h',
         #'../third_party/skia/src/animator/SkAnimateActive.cpp',
         #'../third_party/skia/src/animator/SkAnimateActive.h',
@@ -194,6 +190,7 @@
         '../third_party/skia/src/core/SkBlitBWMaskTemplate.h',
         '../third_party/skia/src/core/SkBlitRow.h',
         '../third_party/skia/src/core/SkBlitRow_D16.cpp',
+        '../third_party/skia/src/core/SkBlitRow_D32.cpp',
         '../third_party/skia/src/core/SkBlitRow_D4444.cpp',
         '../third_party/skia/src/core/SkBlitter.cpp',
         '../third_party/skia/src/core/SkBlitter_4444.cpp',
@@ -525,12 +522,19 @@
         'ext/SkMemory_new_handler.cpp',
         'ext/skia_utils.cc',
         'ext/skia_utils.h',
+        'ext/skia_utils_gtk.cc',
+        'ext/skia_utils_gtk.h',
         'ext/skia_utils_mac.mm',
         'ext/skia_utils_mac.h',
         'ext/skia_utils_win.cc',
         'ext/skia_utils_win.h',
         'ext/vector_canvas.cc',
         'ext/vector_canvas.h',
+        'ext/vector_canvas_linux.cc',
+        'ext/vector_canvas_win.cc',
+        'ext/vector_platform_device.h',
+        'ext/vector_platform_device_linux.cc',
+        'ext/vector_platform_device_linux.h',
         'ext/vector_platform_device_win.cc',
         'ext/vector_platform_device_win.h',
       ],
@@ -552,7 +556,6 @@
       ],
       'sources!': [
         '../third_party/skia/include/core/SkTypes.h',
-        'precompiled.cc',
       ],
       'conditions': [
         [ 'OS != "mac"', {
@@ -561,7 +564,7 @@
             ['exclude', '/mac/'] ],
         }],
         [ 'OS != "linux"', {
-          'sources/': [ ['exclude', '_linux\\.(cc|cpp)$'] ],
+          'sources/': [ ['exclude', '_(linux|gtk)\\.(cc|cpp)$'] ],
           'sources!': [
             '../third_party/skia/src/ports/SkFontHost_FreeType.cpp',
             '../third_party/skia/src/ports/SkFontHost_TryeType_Tables.cpp',
@@ -572,12 +575,8 @@
         }],
         [ 'OS != "win"', {
           'sources/': [ ['exclude', '_win\\.(cc|cpp)$'] ],
-          'sources!': [
-            'ext/vector_canvas.cc',
-            'ext/vector_device.cc',
-          ],
         }],
-        [ 'OS == "linux"', {
+        [ 'OS == "linux" or OS == "freebsd"', {
           'dependencies': [
             '../build/linux/system.gyp:gdk',
             '../build/linux/system.gyp:fontconfig',
@@ -603,7 +602,7 @@
             '../third_party/harfbuzz/harfbuzz.gyp:harfbuzz_interface',
           ],
           'defines': [
-            'SK_BUILD_SUBPIXEL',
+            'SK_SUPPORT_LCDTEXT',
           ],
         }],
         [ 'OS == "mac"', {
@@ -625,12 +624,6 @@
             '../third_party/skia/src/ports/SkThread_pthread.cpp',
             '../third_party/skia/src/ports/SkTime_Unix.cc',
           ],
-          'configurations': {
-            'Debug': {
-              'msvs_precompiled_header': 'include/core/SkTypes.h',
-              'msvs_precompiled_source': 'precompiled.cc',
-            },
-          },
           'include_dirs': [
             'config/win',
           ],
@@ -643,7 +636,16 @@
           '../third_party/skia/include/effects',
           'ext',
         ],
+        'mac_framework_dirs': [
+          '$(SDKROOT)/System/Library/Frameworks/ApplicationServices.framework/Frameworks',
+        ],
       },
     },
   ],
 }
+
+# Local Variables:
+# tab-width:2
+# indent-tabs-mode:nil
+# End:
+# vim: set expandtab tabstop=2 shiftwidth=2:

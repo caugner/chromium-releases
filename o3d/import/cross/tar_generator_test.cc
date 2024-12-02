@@ -30,7 +30,6 @@
  */
 
 
-#include "core/cross/client.h"
 #include "import/cross/memory_buffer.h"
 #include "import/cross/memory_stream.h"
 #include "import/cross/tar_generator.h"
@@ -63,15 +62,19 @@ const int kMagicOffset            = 257;
 const int kUserNameOffset         = 265;
 const int kGroupNameOffset        = 297;
 
+const char *kLongLink = "././@LongLink";
 const char *kDirName1 = "test/apples/";
 const char *kDirName2 = "test/oranges/";
 const char *kFileName1 = "test/apples/file1";
 const char *kFileName2 = "test/apples/file2";
 const char *kFileName3 = "test/oranges/file3";
+const char *kFileName4 =
+    "ThisIsAFilenameLongerThen100CharsThisIsAFilenameLongerThen100Chars"
+    "ThisIsAFilenameLongerThen100CharsThisIsAFilenameLongerThen100Chars";
 
 // The first file is less than one block in size
 const char *kFileContents1 =
-    "The cellphone is the world’s most ubiquitous computer.\n"
+    "The cellphone is the world most ubiquitous computer.\n"
     "The four billion cellphones in use around the globe carry personal\n"
     "information, provide access to the Web and are being used more and more\n"
     "to navigate the real world. And as cellphones change how we live,\n"
@@ -87,11 +90,11 @@ const char *kFileContents2 =
     "levels since the credit crisis erupted. Financial shares were battered.\n"
     "And rattled investors clamored to buy rainy-day investments like gold\n"
     "and Treasury debt. It was a global wave of selling spurred by rising\n"
-    "worries about how banks, automakers — entire countries — would fare\n"
+    "worries about how banks, automakers entire countries would fare\n"
     "in a deepening global downturn.\n"
-    "'Nobody believes it’s going get better yet,' said Howard Silverblatt,\n"
-    "senior index analyst at Standard & Poor’s. 'Do you see that light at\n"
-    "the end of the tunnel? Any kind of light? Right now, it’s not there'\n"
+    "'Nobody believes it&'s going get better yet,' said Howard Silverblatt,\n"
+    "senior index analyst at Standard & Poors. 'Do you see that light at\n"
+    "the end of the tunnel? Any kind of light? Right now, it's not there'\n"
     "yet.\n";
 
 // The 3rd file takes one block
@@ -117,6 +120,10 @@ class CallbackClient : public StreamProcessor {
     VALIDATE_DIRECTORY_HEADER2,  // 3rd file is in another directory
     VALIDATE_FILE_HEADER3,
     VALIDATE_FILE_DATA3,
+    VALIDATE_FILE_LONGNAME_HEADER4,  // 4th file has a long name.
+    VALIDATE_FILE_LONGNAME_DATA4,
+    VALIDATE_FILE_HEADER4,
+    VALIDATE_FILE_DATA4,
     FINISHED
   };
 
@@ -124,14 +131,29 @@ class CallbackClient : public StreamProcessor {
       : state_(VALIDATE_DIRECTORY_HEADER1),
         total_bytes_received_(0),
         memory_block_(kBlockSize),
-        write_stream_(memory_block_, kBlockSize) {
+        write_stream_(memory_block_, kBlockSize),
+        closed_(false),
+        success_(false) {
   }
 
-  virtual int     ProcessBytes(MemoryReadStream *stream,
+  virtual Status  ProcessBytes(MemoryReadStream *stream,
                                size_t bytes_to_process);
+
+  virtual void Close(bool success) {
+    closed_ = true;
+    success_ = success;
+  }
 
   size_t          GetTotalBytesReceived() { return total_bytes_received_; }
   int             GetState() { return state_; }
+
+  bool closed() const {
+    return closed_;
+  }
+
+  bool success() const {
+    return success_;
+  }
 
  private:
   bool            IsOctalDigit(uint8 c);
@@ -151,11 +173,13 @@ class CallbackClient : public StreamProcessor {
   size_t              total_bytes_received_;
   MemoryBuffer<uint8> memory_block_;
   MemoryWriteStream   write_stream_;
+  bool                closed_;
+  bool                success_;
 };
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-int CallbackClient::ProcessBytes(MemoryReadStream *stream,
-                                 size_t bytes_to_process) {
+StreamProcessor::Status CallbackClient::ProcessBytes(MemoryReadStream *stream,
+                                                     size_t bytes_to_process) {
   total_bytes_received_ += bytes_to_process;
 
   while (bytes_to_process > 0) {
@@ -213,6 +237,25 @@ int CallbackClient::ProcessBytes(MemoryReadStream *stream,
           ValidateData(memory_block_, kFileContents3);
           break;
 
+        case VALIDATE_FILE_LONGNAME_HEADER4:
+          ValidateHeader(memory_block_, kLongLink, strlen(kFileName4));
+          break;
+
+        case VALIDATE_FILE_LONGNAME_DATA4:
+          ValidateData(memory_block_, kFileName4);
+          break;
+
+        case VALIDATE_FILE_HEADER4: {
+          String first_99_chars(kFileName4, 99);
+          ValidateHeader(memory_block_, first_99_chars.c_str(),
+                         strlen(kFileContents3));
+          break;
+        }
+
+        case VALIDATE_FILE_DATA4:
+          ValidateData(memory_block_, kFileContents3);
+          break;
+
         case FINISHED:
           break;
       }
@@ -227,7 +270,7 @@ int CallbackClient::ProcessBytes(MemoryReadStream *stream,
     bytes_to_process -= bytes_this_time;
   }
 
-  return 0;
+  return IN_PROGRESS;
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -291,7 +334,7 @@ void CallbackClient::ValidateHeader(uint8 *header,
   // Validate length
   int length_in_header;
   sscanf((const char*)header + kFileSizeOffset, "%o", &length_in_header);
-  EXPECT_EQ(file_length, length_in_header);
+  EXPECT_EQ(file_length, static_cast<unsigned>(length_in_header));
 
 
   EXPECT_EQ(0, header[kMaxFilenameSize - 1]);
@@ -316,7 +359,7 @@ void CallbackClient::ValidateHeader(uint8 *header,
 
   // For now we only have directories '5' or normal files '0'
   int link_flag = header[kLinkFlagOffset];
-  EXPECT_TRUE(link_flag == '0' || link_flag == '5');
+  EXPECT_TRUE(link_flag == '0' || link_flag == '5' || link_flag == 'L');
 
   EXPECT_EQ(0, strcmp((const char*)header + kMagicOffset, "ustar  "));
 
@@ -357,30 +400,46 @@ TEST_F(TarGeneratorTest, CreateSimpleArchive) {
   const int kFileLength2 = strlen(kFileContents2);
   const int kFileLength3 = strlen(kFileContents3);
 
-  generator.AddFile(kFileName1, kFileLength1);
+  EXPECT_TRUE(generator.AddFile(kFileName1, kFileLength1));
   MemoryReadStream file1_stream(reinterpret_cast<const uint8*>(kFileContents1),
                                 kFileLength1);
   generator.AddFileBytes(&file1_stream, kFileLength1);
 
-  generator.AddFile(kFileName2, kFileLength2);
+  EXPECT_TRUE(generator.AddFile(kFileName2, kFileLength2));
   MemoryReadStream file2_stream(reinterpret_cast<const uint8*>(kFileContents2),
                                 kFileLength2);
   generator.AddFileBytes(&file2_stream, kFileLength2);
 
-  generator.AddFile(kFileName3, kFileLength3);
+  EXPECT_TRUE(generator.AddFile(kFileName3, kFileLength3));
   MemoryReadStream file3_stream(reinterpret_cast<const uint8*>(kFileContents3),
                                 kFileLength3);
   generator.AddFileBytes(&file3_stream, kFileLength3);
+  EXPECT_TRUE(generator.AddFile(kFileName4, kFileLength3));
+  MemoryReadStream file4_stream(reinterpret_cast<const uint8*>(kFileContents3),
+                                kFileLength3);
+  generator.AddFileBytes(&file4_stream, kFileLength3);
 
-  generator.Finalize();
+  generator.Close(true);
 
   // Verify that the tar byte stream produced is exactly divisible by
   // the block size
   size_t bytes_received = client.GetTotalBytesReceived();
-  EXPECT_EQ(0, bytes_received % kBlockSize);
+  EXPECT_EQ(0U, bytes_received % kBlockSize);
 
   // Make sure the state machine is in the expected state
   EXPECT_EQ(CallbackClient::FINISHED, client.GetState());
+
+  EXPECT_TRUE(client.closed());
+  EXPECT_TRUE(client.success());
+}
+
+TEST_F(TarGeneratorTest, PassesThroughFailure) {
+  CallbackClient client;
+  TarGenerator generator(&client);
+  generator.Close(false);
+
+  EXPECT_TRUE(client.closed());
+  EXPECT_FALSE(client.success());
 }
 
 }  // namespace

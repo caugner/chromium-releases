@@ -42,13 +42,14 @@ In this tutorial, we show how to progressively load in textures from a tar.gz ar
 Progressive Texture Loading
 </title>
 <script type="text/javascript" src="o3djs/base.js"></script>
-<script type="text/javascript">
+<script type="text/javascript" id="o3dscript">
 o3djs.require('o3djs.util');
 o3djs.require('o3djs.math');
 o3djs.require('o3djs.io');
 o3djs.require('o3djs.rendergraph');
 o3djs.require('o3djs.primitives');
-o3djs.require('o3djs.effect');
+o3djs.require('o3djs.material');
+o3djs.require('o3djs.texture');
 
 // Events
 // Run the init() once the page has finished loading.
@@ -70,18 +71,12 @@ var g_textureCount = 0;
 var g_x = -200.0;
 var g_y = -200.0;
 
-function makeShape(texture, effect) {
-  // Create a Material for the effect.
-  var myMaterial = g_pack.createObject('Material');
-
-  // Set the material's drawList for opaque objects.
-  myMaterial.drawList = g_viewInfo.performanceDrawList;
-
-  // Apply our effect to this material.
-  myMaterial.effect = effect;
-
-  // Create the parameters the effect needs on the material.
-  effect.createUniformParameters(myMaterial);
+function makeShape(texture) {
+  // Create a material.
+  var myMaterial = o3djs.material.createMaterialFromFile(
+      g_pack,
+      'shaders/texture-only.shader',
+      g_viewInfo.performanceDrawList);
 
   // Creates a quad.
   var myShape = o3djs.primitives.createPlane(g_pack,
@@ -91,10 +86,10 @@ function makeShape(texture, effect) {
                                              1,  // quads across
                                              1);  // quads down
 
-  // Get the material's sampler parameter and put a sampler on it.
+  // Get the material's sampler parameter, get the sampler on it and set its
+  // texture.
   var sampler_param = myMaterial.getParam('texSampler0');
-  var sampler = g_pack.createObject('Sampler');
-  sampler_param.value = sampler;
+  var sampler = sampler_param.value;
 
   // Set the texture to use.
   sampler.texture = texture;
@@ -141,9 +136,8 @@ function init() {
 /**
  * Spawns a raw-data request, creating a textured quad for each true
  * in the downloaded archive_textures.tar.gz file.
- * @param {Object} effect O3D effect object for created quads.
  */
-function createArchiveRequest(effect) {
+function createArchiveRequest() {
   // Start a request for loading the tar.gz archive containing a bunch of
   // image files.  We'll then make textures from each one...
   var loadInfo = o3djs.io.loadArchiveAdvanced(
@@ -160,7 +154,7 @@ function createArchiveRequest(effect) {
           // request so that it can verify that a page refresh during a
           // download does not crash or hang the browser.
           if (g_repeatDownload) {
-            createArchiveRequest(effect);
+            createArchiveRequest();
           }
           g_finished = true;
         } else {
@@ -173,7 +167,7 @@ function createArchiveRequest(effect) {
     g_streamingStarted = true;
 
     // Create a texture from the RawData object that was just made available.
-    var texture = g_pack.createTextureFromRawData(rawData, true);
+    var texture = o3djs.texture.createTextureFromRawData(g_pack, rawData, true);
 
     // Free the raw data object immediately since we're done with it.
     // If we don't call this the RawData will stay around so we can use it
@@ -206,7 +200,7 @@ function createArchiveRequest(effect) {
     g_fileCount++;
 
     if (texture) {
-      var shape = makeShape(texture, effect);
+      var shape = makeShape(texture);
     }
   }
 }
@@ -263,11 +257,7 @@ function startLoad() {
         [0, 0, 0],   // target
         [0, 0, -1]); // up
 
-    // Create and load the effect.
-    var effect = g_pack.createObject('Effect');
-    o3djs.effect.loadEffect(effect, 'shaders/texture-only.shader');
-
-    createArchiveRequest(effect);
+    createArchiveRequest();
   }, 200);
 }
 

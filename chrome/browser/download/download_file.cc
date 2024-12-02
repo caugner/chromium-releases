@@ -28,7 +28,7 @@
 #include "app/win_util.h"
 #include "chrome/common/win_safe_util.h"
 #elif defined(OS_MACOSX)
-#include "chrome/common/quarantine_mac.h"
+#include "chrome/browser/cocoa/file_metadata.h"
 #endif
 
 // Throttle updates to the UI thread so that a fast moving download doesn't
@@ -60,7 +60,7 @@ DownloadFile::DownloadFile(const DownloadCreateInfo* info)
       source_url_(info->url),
       referrer_url_(info->referrer_url),
       id_(info->download_id),
-      render_process_id_(info->render_process_id),
+      child_id_(info->child_id),
       render_view_id_(info->render_view_id),
       request_id_(info->request_id),
       bytes_so_far_(0),
@@ -73,7 +73,7 @@ DownloadFile::~DownloadFile() {
 }
 
 bool DownloadFile::Initialize() {
-  if (file_util::CreateTemporaryFileName(&full_path_))
+  if (file_util::CreateTemporaryFile(&full_path_))
     return Open("wb");
   return false;
 }
@@ -137,14 +137,22 @@ bool DownloadFile::Open(const char* open_mode) {
   }
 
 #if defined(OS_WIN)
+  AnnotateWithSourceInformation();
+#endif
+  return true;
+}
+
+void DownloadFile::AnnotateWithSourceInformation() {
+#if defined(OS_WIN)
   // Sets the Zone to tell Windows that this file comes from the internet.
   // We ignore the return value because a failure is not fatal.
   win_util::SetInternetZoneIdentifier(full_path_);
 #elif defined(OS_MACOSX)
-  quarantine_mac::AddQuarantineMetadataToFile(full_path_, source_url_,
-                                              referrer_url_);
+  file_metadata::AddQuarantineMetadataToFile(full_path_, source_url_,
+                                             referrer_url_);
+  file_metadata::AddOriginMetadataToFile(full_path_, source_url_,
+                                         referrer_url_);
 #endif
-  return true;
 }
 
 // DownloadFileManager implementation ------------------------------------------
@@ -153,6 +161,8 @@ DownloadFileManager::DownloadFileManager(MessageLoop* ui_loop,
                                          ResourceDispatcherHost* rdh)
     : next_id_(0),
       ui_loop_(ui_loop),
+      file_loop_(NULL),
+      io_loop_(NULL),
       resource_dispatcher_host_(rdh) {
 }
 
@@ -244,7 +254,7 @@ void DownloadFileManager::StartDownload(DownloadCreateInfo* info) {
     // on the UI thread is the safe way to do that.
     ui_loop_->PostTask(FROM_HERE,
         NewRunnableFunction(&DownloadManager::CancelDownloadRequest,
-                            info->render_process_id,
+                            info->child_id,
                             info->request_id));
     delete info;
     delete download;
@@ -370,12 +380,10 @@ void DownloadFileManager::UpdateInProgressDownloads() {
 //              there will be no 'render_process_id' or 'render_view_id'.
 void DownloadFileManager::OnStartDownload(DownloadCreateInfo* info) {
   DCHECK(MessageLoop::current() == ui_loop_);
-  DownloadManager* manager =
-      DownloadManagerFromRenderIds(info->render_process_id,
-                                   info->render_view_id);
+  DownloadManager* manager = DownloadManagerFromRenderIds(info->child_id,
+                                                          info->render_view_id);
   if (!manager) {
-    DownloadManager::CancelDownloadRequest(info->render_process_id,
-                                           info->request_id);
+    DownloadManager::CancelDownloadRequest(info->child_id, info->request_id);
     delete info;
     return;
   }
@@ -526,14 +534,17 @@ void DownloadFileManager::OnDownloadUrl(const GURL& url,
 // Open a download, or show it in a file explorer window. We run on this
 // thread to avoid blocking the UI with (potentially) slow Shell operations.
 // TODO(paulg): File 'stat' operations.
+#if !defined(OS_MACOSX)
 void DownloadFileManager::OnShowDownloadInShell(const FilePath& full_path) {
   DCHECK(MessageLoop::current() == file_loop_);
   platform_util::ShowItemInFolder(full_path);
 }
+#endif
 
 // Launches the selected download using ShellExecute 'open' verb. For windows,
 // if there is a valid parent window, the 'safer' version will be used which can
 // display a modal dialog asking for user consent on dangerous files.
+#if !defined(OS_MACOSX)
 void DownloadFileManager::OnOpenDownloadInShell(const FilePath& full_path,
                                                 const GURL& url,
                                                 gfx::NativeView parent_window) {
@@ -545,9 +556,9 @@ void DownloadFileManager::OnOpenDownloadInShell(const FilePath& full_path,
     return;
   }
 #endif
-
   platform_util::OpenItem(full_path);
 }
+#endif  // OS_MACOSX
 
 // The DownloadManager in the UI thread has provided a final name for the
 // download specified by 'id'. Rename the in progress download, and remove it
@@ -564,6 +575,11 @@ void DownloadFileManager::OnFinalDownloadName(int id,
 
   DownloadFile* download = it->second;
   if (download->Rename(full_path)) {
+#if defined(OS_MACOSX)
+    // Done here because we only want to do this once; see
+    // http://crbug.com/13120 for details.
+    download->AnnotateWithSourceInformation();
+#endif
     ui_loop_->PostTask(FROM_HERE,
         NewRunnableMethod(manager,
                           &DownloadManager::DownloadRenamedToFinalName,
@@ -582,7 +598,7 @@ void DownloadFileManager::OnFinalDownloadName(int id,
     } else {
       ui_loop_->PostTask(FROM_HERE,
           NewRunnableFunction(&DownloadManager::CancelDownloadRequest,
-                              download->render_process_id(),
+                              download->child_id(),
                               download->request_id()));
     }
   }

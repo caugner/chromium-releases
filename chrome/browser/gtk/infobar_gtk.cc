@@ -6,7 +6,7 @@
 
 #include <gtk/gtk.h>
 
-#include "base/gfx/gtk_util.h"
+#include "app/gfx/gtk_util.h"
 #include "base/string_util.h"
 #include "chrome/browser/gtk/custom_button.h"
 #include "chrome/browser/gtk/gtk_chrome_link_button.h"
@@ -92,14 +92,15 @@ InfoBar::InfoBar(InfoBarDelegate* delegate)
     gtk_box_pack_start(GTK_BOX(hbox_), image, FALSE, FALSE, 0);
   }
 
-  close_button_.reset(CustomDrawButton::CloseButton());
+  // TODO(erg): GTK theme the info bar.
+  close_button_.reset(CustomDrawButton::CloseButton(NULL));
   gtk_util::CenterWidgetInHBox(hbox_, close_button_->widget(), true, 0);
   g_signal_connect(close_button_->widget(), "clicked",
                    G_CALLBACK(OnCloseButton), this);
 
   slide_widget_.reset(new SlideAnimatorGtk(border_bin_.get(),
                                            SlideAnimatorGtk::DOWN,
-                                           0, true, this));
+                                           0, true, true, this));
   // We store a pointer back to |this| so we can refer to it from the infobar
   // container.
   g_object_set_data(G_OBJECT(slide_widget_->widget()), "info-bar", this);
@@ -135,8 +136,8 @@ void InfoBar::Close() {
   delete this;
 }
 
-bool InfoBar::IsClosing() {
-  return slide_widget_->IsClosing();
+bool InfoBar::IsAnimating() {
+  return slide_widget_->IsAnimating();
 }
 
 void InfoBar::RemoveInfoBar() const {
@@ -149,6 +150,8 @@ void InfoBar::Closed() {
 
 // static
 void InfoBar::OnCloseButton(GtkWidget* button, InfoBar* info_bar) {
+  if (info_bar->delegate_)
+    info_bar->delegate_->InfoBarDismissed();
   info_bar->RemoveInfoBar();
 }
 
@@ -156,7 +159,7 @@ void InfoBar::OnCloseButton(GtkWidget* button, InfoBar* info_bar) {
 
 class AlertInfoBar : public InfoBar {
  public:
-  AlertInfoBar(AlertInfoBarDelegate* delegate)
+  explicit AlertInfoBar(AlertInfoBarDelegate* delegate)
       : InfoBar(delegate) {
     std::wstring text = delegate->GetMessageText();
     GtkWidget* label = gtk_label_new(WideToUTF8(text).c_str());
@@ -171,7 +174,7 @@ class AlertInfoBar : public InfoBar {
 
 class LinkInfoBar : public InfoBar {
  public:
-  LinkInfoBar(LinkInfoBarDelegate* delegate)
+  explicit LinkInfoBar(LinkInfoBarDelegate* delegate)
       : InfoBar(delegate) {
     size_t link_offset;
     std::wstring display_text =
@@ -181,8 +184,11 @@ class LinkInfoBar : public InfoBar {
     // Create the link button.
     GtkWidget* link_button =
         gtk_chrome_link_button_new(WideToUTF8(link_text).c_str());
+    gtk_chrome_link_button_set_use_gtk_theme(
+        GTK_CHROME_LINK_BUTTON(link_button), FALSE);
     g_signal_connect(link_button, "clicked",
                      G_CALLBACK(OnLinkClick), this);
+    gtk_util::SetButtonTriggersNavigation(link_button);
 
     // If link_offset is npos, we right-align the link instead of embedding it
     // in the text.
@@ -215,8 +221,7 @@ class LinkInfoBar : public InfoBar {
  private:
   static void OnLinkClick(GtkWidget* button, LinkInfoBar* link_info_bar) {
     const GdkEventButton* button_click_event =
-        gtk_chrome_link_button_get_event_for_click(
-            GTK_CHROME_LINK_BUTTON(button));
+        reinterpret_cast<GdkEventButton*>(gtk_get_current_event());
     WindowOpenDisposition disposition = CURRENT_TAB;
     if (button_click_event) {
       disposition = event_utils::DispositionFromEventFlags(
@@ -234,7 +239,7 @@ class LinkInfoBar : public InfoBar {
 
 class ConfirmInfoBar : public AlertInfoBar {
  public:
-  ConfirmInfoBar(ConfirmInfoBarDelegate* delegate)
+  explicit ConfirmInfoBar(ConfirmInfoBarDelegate* delegate)
       : AlertInfoBar(delegate) {
     AddConfirmButton(ConfirmInfoBarDelegate::BUTTON_CANCEL);
     AddConfirmButton(ConfirmInfoBarDelegate::BUTTON_OK);

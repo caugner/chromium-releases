@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,19 +14,27 @@
 #include <string>
 #include <vector>
 
-#include "base/clipboard.h"
+#include "app/clipboard/clipboard.h"
 #include "base/file_path.h"
 #include "base/string16.h"
+#include "webkit/api/public/WebCanvas.h"
 
 class GURL;
 class SkBitmap;
-class StringPiece;
-class WebView;
-class WebFrame;
 struct WebPluginInfo;
 
+namespace base {
+class StringPiece;
+}
+
+namespace skia {
+class PlatformCanvas;
+}
+
 namespace WebKit {
+class WebFrame;
 class WebString;
+class WebView;
 }
 
 namespace webkit_glue {
@@ -40,18 +48,18 @@ void SetJavaScriptFlags(const std::wstring& flags);
 void EnableWebCoreNotImplementedLogging();
 
 // Returns the text of the document element.
-std::wstring DumpDocumentText(WebFrame* web_frame);
+std::wstring DumpDocumentText(WebKit::WebFrame* web_frame);
 
 // Returns the text of the document element and optionally its child frames.
 // If recursive is false, this is equivalent to DumpDocumentText followed by
 // a newline.  If recursive is true, it recursively dumps all frames as text.
-std::wstring DumpFramesAsText(WebFrame* web_frame, bool recursive);
+std::wstring DumpFramesAsText(WebKit::WebFrame* web_frame, bool recursive);
 
 // Returns the renderer's description of its tree (its externalRepresentation).
-std::wstring DumpRenderer(WebFrame* web_frame);
+std::wstring DumpRenderer(WebKit::WebFrame* web_frame);
 
 // Returns a dump of the scroll position of the webframe.
-std::wstring DumpFrameScrollPosition(WebFrame* web_frame, bool recursive);
+std::wstring DumpFrameScrollPosition(WebKit::WebFrame* web_frame, bool recursive);
 
 // Returns a dump of the given history state suitable for implementing the
 // dumpBackForwardList command of the layoutTestController.
@@ -59,7 +67,7 @@ std::wstring DumpHistoryState(const std::string& history_state, int indent,
                               bool is_current);
 
 // Cleans up state left over from the previous test run.
-void ResetBeforeTestRun(WebView* view);
+void ResetBeforeTestRun(WebKit::WebView* view);
 
 // Returns the WebKit version (major.minor).
 std::string GetWebKitVersion();
@@ -103,6 +111,21 @@ bool ShouldForcefullyTerminatePluginProcess();
 // File path string conversions.
 FilePath::StringType WebStringToFilePathString(const WebKit::WebString& str);
 WebKit::WebString FilePathStringToWebString(const FilePath::StringType& str);
+FilePath WebStringToFilePath(const WebKit::WebString& str);
+WebKit::WebString FilePathToWebString(const FilePath& file_path);
+
+// Returns a WebCanvas pointer associated with the given Skia canvas.
+WebKit::WebCanvas* ToWebCanvas(skia::PlatformCanvas*);
+
+// Returns the number of currently-active glyph pages this process is using.
+// There can be many such pages (maps of 256 character -> glyph) so this is
+// used to get memory usage statistics.
+int GetGlyphPageCount();
+
+// Methods to query and enable media cache.
+// TODO(hclam): Remove these methods when the cache is stable enough.
+bool IsMediaCacheEnabled();
+void SetMediaCacheEnabled(bool enabled);
 
 //---- END FUNCTIONS IMPLEMENTED BY WEBKIT/GLUE -------------------------------
 
@@ -129,7 +152,7 @@ string16 GetLocalizedString(int message_id);
 
 // Returns the raw data for a resource.  This resource must have been
 // specified as BINDATA in the relevant .rc file.
-StringPiece GetDataResource(int resource_id);
+base::StringPiece GetDataResource(int resource_id);
 
 #if defined(OS_WIN)
 // Loads and returns a cursor.
@@ -142,23 +165,24 @@ HCURSOR LoadCursor(int cursor_id);
 Clipboard* ClipboardGetClipboard();
 
 // Tests whether the clipboard contains a certain format
-bool ClipboardIsFormatAvailable(const Clipboard::FormatType& format);
+bool ClipboardIsFormatAvailable(const Clipboard::FormatType& format,
+                                Clipboard::Buffer buffer);
 
 // Reads UNICODE text from the clipboard, if available.
-void ClipboardReadText(string16* result);
+void ClipboardReadText(Clipboard::Buffer buffer, string16* result);
 
 // Reads ASCII text from the clipboard, if available.
-void ClipboardReadAsciiText(std::string* result);
+void ClipboardReadAsciiText(Clipboard::Buffer buffer, std::string* result);
 
 // Reads HTML from the clipboard, if available.
-void ClipboardReadHTML(string16* markup, GURL* url);
+void ClipboardReadHTML(Clipboard::Buffer buffer, string16* markup, GURL* url);
 
 // Gets the directory where the application data and libraries exist.  This
 // may be a versioned subdirectory, or it may be the same directory as the
 // GetExeDirectory(), depending on the embedder's implementation.
 // Path is an output parameter to receive the path.
 // Returns true if successful, false otherwise.
-bool GetApplicationDirectory(std::wstring* path);
+bool GetApplicationDirectory(FilePath* path);
 
 // Gets the URL where the inspector's HTML file resides. It must use the
 // protocol returned by GetUIResourceProtocol.
@@ -171,10 +195,10 @@ std::string GetUIResourceProtocol();
 // Gets the directory where the launching executable resides on disk.
 // Path is an output parameter to receive the path.
 // Returns true if successful, false otherwise.
-bool GetExeDirectory(std::wstring* path);
+bool GetExeDirectory(FilePath* path);
 
 // Embedders implement this function to return the list of plugins to Webkit.
-bool GetPlugins(bool refresh, std::vector<WebPluginInfo>* plugins);
+void GetPlugins(bool refresh, std::vector<WebPluginInfo>* plugins);
 
 // Returns true if the plugins run in the same process as the renderer, and
 // false otherwise.
@@ -182,6 +206,10 @@ bool IsPluginRunningInRendererProcess();
 
 // Returns a bool indicating if the Null plugin should be enabled or not.
 bool IsDefaultPluginEnabled();
+
+// Returns true if the protocol implemented to serve |url| supports features
+// required by the media engine.
+bool IsProtocolSupportedForMedia(const GURL& url);
 
 #if defined(OS_WIN)
 // Downloads the file specified by the URL. On sucess a WM_COPYDATA message

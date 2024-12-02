@@ -5,29 +5,32 @@
 {
   'variables': {
     'conditions': [
-      ['OS=="linux"', {'os_include': 'linux'}],
+      ['OS=="linux" or OS=="freebsd"', {'os_include': 'linux'}],
       ['OS=="mac"', {'os_include': 'mac'}],
       ['OS=="win"', {'os_include': 'win32'}],
     ],
     'use_system_libxml%': 0,
   },
-  'includes': [
-    '../../build/common.gypi',
-  ],
   'targets': [
     {
       'target_name': 'libxml',
       'conditions': [
-        ['OS=="linux" and use_system_libxml', {
+        ['(OS=="linux" or OS=="freebsd") and use_system_libxml', {
           'type': 'settings',
           'direct_dependent_settings': {
             'cflags': [
-              '<!@(python ../../build/linux/pkg_config_wrapper.py --cflags libxml-2.0)',
+              '<!@(pkg-config --cflags libxml-2.0)',
+            ],
+            'defines': [
+              'USE_SYSTEM_LIBXML',
             ],
           },
           'link_settings': {
+            'ldflags': [
+              '<!@(pkg-config --libs-only-L --libs-only-other libxml-2.0)',
+            ],
             'libraries': [
-              '<!@(python ../../build/linux/pkg_config_wrapper.py --libs libxml-2.0)',
+              '<!@(pkg-config --libs-only-l libxml-2.0)',
             ],
           },
         }, { # else: OS != "linux" or ! use_system_libxml
@@ -152,11 +155,11 @@
             'include',
           ],
           'dependencies': [
-            '../icu38/icu38.gyp:icuuc',
+            '../icu/icu.gyp:icuuc',
             '../zlib/zlib.gyp:zlib',
           ],
           'export_dependent_settings': [
-            '../icu38/icu38.gyp:icuuc',
+            '../icu/icu.gyp:icuuc',
           ],
           'direct_dependent_settings': {
             'defines': [
@@ -168,6 +171,14 @@
             ],
           },
           'conditions': [
+            ['OS=="linux"', {
+              'link_settings': {
+                'libraries': [
+                  # We need dl for dlopen() and friends.
+                  '-ldl',
+                ],
+              },
+            }],
             ['OS=="mac"', {'defines': ['_REENTRANT']}],
             ['OS=="win"', {
               'product_name': 'libxml2',
@@ -178,52 +189,11 @@
         }],
       ],
     },
-    {
-      'target_name': 'xmlcatalog',
-      'type': 'executable',
-      'sources': [
-        'xmlcatalog.c',
-      ],
-      'include_dirs': [
-        '<(os_include)',
-      ],
-      'dependencies': [
-        'libxml',
-      ],
-      'conditions': [
-        ['OS=="linux"', {
-          'link_settings': {
-            'libraries': [
-              '-ldl',
-              '-lm',
-            ],
-          },
-        }],
-      ],
-    },
-    {
-      'target_name': 'xmllint',
-      'type': 'executable',
-      'sources': [
-        'xmllint.c',
-      ],
-      'include_dirs': [
-        '<(os_include)',
-      ],
-      'dependencies': [
-        'libxml',
-        '../icu38/icu38.gyp:icuuc',
-      ],
-      'conditions': [
-        ['OS=="linux"', {
-          'link_settings': {
-            'libraries': [
-              '-ldl',
-              '-lm',
-            ],
-          },
-        }],
-      ],
-    },
   ],
 }
+
+# Local Variables:
+# tab-width:2
+# indent-tabs-mode:nil
+# End:
+# vim: set expandtab tabstop=2 shiftwidth=2:

@@ -4,9 +4,9 @@
 
 #include "chrome/browser/gtk/download_shelf_gtk.h"
 
+#include "app/gfx/gtk_util.h"
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
-#include "base/gfx/gtk_util.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/download/download_item_model.h"
 #include "chrome/browser/download/download_util.h"
@@ -15,7 +15,6 @@
 #include "chrome/browser/gtk/download_item_gtk.h"
 #include "chrome/browser/gtk/gtk_chrome_link_button.h"
 #include "chrome/browser/gtk/gtk_theme_provider.h"
-#include "chrome/browser/gtk/slide_animator_gtk.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/gtk_util.h"
 #include "chrome/common/notification_service.h"
@@ -40,9 +39,6 @@ const int kLeftPadding = 2;
 // Padding between the right side of the shelf and the close button.
 const int kRightPadding = 10;
 
-// Border color (the top pixel of the shelf).
-const GdkColor kBorderColor = GDK_COLOR_RGB(214, 214, 214);
-
 // Speed of the shelf show/hide animation.
 const int kShelfAnimationDurationMs = 120;
 
@@ -61,9 +57,8 @@ DownloadShelfGtk::DownloadShelfGtk(Browser* browser, GtkWidget* parent)
   // event box so we can color the background.
 
   // Create the top border.
-  GtkWidget* top_border = gtk_event_box_new();
-  gtk_widget_set_size_request(GTK_WIDGET(top_border), 0, 1);
-  gtk_widget_modify_bg(top_border, GTK_STATE_NORMAL, &kBorderColor);
+  top_border_ = gtk_event_box_new();
+  gtk_widget_set_size_request(GTK_WIDGET(top_border_), 0, 1);
 
   // Create |hbox_|.
   hbox_.Own(gtk_hbox_new(FALSE, kDownloadItemPadding));
@@ -79,7 +74,7 @@ DownloadShelfGtk::DownloadShelfGtk(Browser* browser, GtkWidget* parent)
   gtk_container_add(GTK_CONTAINER(padding), hbox_.get());
 
   GtkWidget* vbox = gtk_vbox_new(FALSE, 0);
-  gtk_box_pack_start(GTK_BOX(vbox), top_border, FALSE, FALSE, 0);
+  gtk_box_pack_start(GTK_BOX(vbox), top_border_, FALSE, FALSE, 0);
   gtk_box_pack_start(GTK_BOX(vbox), padding_bg_, FALSE, FALSE, 0);
 
   // Put the shelf in an event box so it gets its own window, which makes it
@@ -88,7 +83,7 @@ DownloadShelfGtk::DownloadShelfGtk(Browser* browser, GtkWidget* parent)
   gtk_container_add(GTK_CONTAINER(shelf_.get()), vbox);
 
   // Create and pack the close button.
-  close_button_.reset(CustomDrawButton::CloseButton());
+  close_button_.reset(CustomDrawButton::CloseButton(theme_provider_));
   gtk_util::CenterWidgetInHBox(hbox_.get(), close_button_->widget(), true, 0);
   g_signal_connect(close_button_->widget(), "clicked",
                    G_CALLBACK(OnButtonClick), this);
@@ -97,8 +92,11 @@ DownloadShelfGtk::DownloadShelfGtk(Browser* browser, GtkWidget* parent)
   std::string link_text =
       l10n_util::GetStringUTF8(IDS_SHOW_ALL_DOWNLOADS);
   GtkWidget* link_button = gtk_chrome_link_button_new(link_text.c_str());
+  gtk_chrome_link_button_set_use_gtk_theme(
+      GTK_CHROME_LINK_BUTTON(link_button), FALSE);
   g_signal_connect(link_button, "clicked",
                    G_CALLBACK(OnButtonClick), this);
+  gtk_util::SetButtonTriggersNavigation(link_button);
   // Until we switch to vector graphics, force the font size.
   // 13.4px == 10pt @ 96dpi
   gtk_util::ForceFontSizePixels(GTK_CHROME_LINK_BUTTON(link_button)->label,
@@ -118,7 +116,7 @@ DownloadShelfGtk::DownloadShelfGtk(Browser* browser, GtkWidget* parent)
   slide_widget_.reset(new SlideAnimatorGtk(shelf_.get(),
                                            SlideAnimatorGtk::UP,
                                            kShelfAnimationDurationMs,
-                                           false, NULL));
+                                           false, true, this));
 
   theme_provider_->InitThemesFor(this);
   registrar_.Add(this, NotificationType::BROWSER_THEME_CHANGED,
@@ -129,6 +127,8 @@ DownloadShelfGtk::DownloadShelfGtk(Browser* browser, GtkWidget* parent)
   // Stick ourselves at the bottom of the parent browser.
   gtk_box_pack_end(GTK_BOX(parent), slide_widget_->widget(),
                    FALSE, FALSE, 0);
+  // Make sure we are at the very end.
+  gtk_box_reorder_child(GTK_BOX(parent), slide_widget_->widget(), 0);
   slide_widget_->Open();
 }
 
@@ -169,6 +169,22 @@ void DownloadShelfGtk::Close() {
   browser_->UpdateDownloadShelfVisibility(false);
 }
 
+void DownloadShelfGtk::Closed() {
+  // When the close animation is complete, remove all completed downloads.
+  size_t i = 0;
+  while (i < download_items_.size()) {
+    DownloadItem* download = download_items_[i]->get_download();
+    bool is_transfer_done = download->state() == DownloadItem::COMPLETE ||
+                            download->state() == DownloadItem::CANCELLED;
+    if (is_transfer_done &&
+        download->safety_state() != DownloadItem::DANGEROUS) {
+      RemoveDownloadItem(download_items_[i]);
+    } else {
+      ++i;
+    }
+  }
+}
+
 void DownloadShelfGtk::Observe(NotificationType type,
                                const NotificationSource& source,
                                const NotificationDetails& details) {
@@ -176,6 +192,9 @@ void DownloadShelfGtk::Observe(NotificationType type,
     GdkColor color = theme_provider_->GetGdkColor(
         BrowserThemeProvider::COLOR_TOOLBAR);
     gtk_widget_modify_bg(padding_bg_, GTK_STATE_NORMAL, &color);
+
+    color = theme_provider_->GetBorderColor();
+    gtk_widget_modify_bg(top_border_, GTK_STATE_NORMAL, &color);
   }
 }
 

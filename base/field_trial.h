@@ -22,7 +22,7 @@
 
 //------------------------------------------------------------------------------
 // Example:  Suppose we have an experiment involving memory, such as determining
-// the impact of memory model command line flags actual memory use.
+// the impact of some pruning algorithm.
 // We assume that we already have a histogram of memory usage, such as:
 
 //   HISTOGRAM_COUNTS("Memory.RendererTotal", count);
@@ -38,9 +38,9 @@
 // int group2 = trial->AppendGroup("_low_mem", 20);   // 2% in _low_mem group.
 // // Take action depending of which group we randomly land in.
 // if (trial->group() == group1)
-//   SetMemoryModel(HIGH);  // Sample setting of browser state.
+//   SetPruningAlgorithm(kType1);  // Sample setting of browser state.
 // else if (trial->group() == group2)
-//   SetMemoryModel(LOW);  // Sample alternate setting.
+//   SetPruningAlgorithm(kType2);  // Sample alternate setting.
 
 // We then modify any histograms we wish to correlate with our experiment to
 // have slighly different names, depending on what group the trial instance
@@ -193,12 +193,11 @@ class FieldTrialList {
   // of the application.  In some experiments it may be useful to discount
   // data that is gathered before the application has reached sufficient
   // stability (example: most DLL have loaded, etc.)
-  static base::Time application_start_time() {
+  static base::TimeTicks application_start_time() {
     if (global_)
       return global_->application_start_time_;
     // For testing purposes only, or when we don't yet have a start time.
-    // TODO(jar): Switch to TimeTicks
-    return base::Time::Now();
+    return base::TimeTicks::Now();
   }
 
  private:
@@ -218,7 +217,7 @@ class FieldTrialList {
   // A helper value made availabel to users, that shows when the FieldTrialList
   // was initialized.  Note that this is a singleton instance, and hence is a
   // good approximation to the start of the process.
-  base::Time application_start_time_;
+  base::TimeTicks application_start_time_;
 
   // Lock for access to registered_.
   Lock lock_;

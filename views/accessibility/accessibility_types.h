@@ -22,12 +22,18 @@ class AccessibilityTypes {
   enum Role {
     ROLE_APPLICATION,
     ROLE_BUTTONDROPDOWN,
+    ROLE_BUTTONMENU,
     ROLE_CLIENT,
+    ROLE_GRAPHIC,
     ROLE_GROUPING,
     ROLE_PAGETAB,
+    ROLE_PAGETABLIST,
     ROLE_PUSHBUTTON,
+    ROLE_SEPARATOR,
     ROLE_TEXT,
-    ROLE_TOOLBAR
+    ROLE_TITLEBAR,
+    ROLE_TOOLBAR,
+    ROLE_WINDOW
   };
 
   // This defines an enumeration of the supported accessibility roles in our

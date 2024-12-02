@@ -38,7 +38,9 @@ namespace o3d {
 namespace command_buffer {
 
 GAPID3D9::GAPID3D9()
-    : d3d_(NULL),
+    : d3d_module_(NULL),
+      d3dx_module_(NULL),
+      d3d_(NULL),
       d3d_device_(NULL),
       hwnd_(NULL),
       current_vertex_struct_(0),
@@ -49,15 +51,29 @@ GAPID3D9::GAPID3D9()
       current_effect_(NULL),
       vertex_buffers_(),
       index_buffers_(),
-      vertex_structs_() {}
+      vertex_structs_(),
+      back_buffer_surface_(NULL),
+      back_buffer_depth_surface_(NULL),
+      current_surface_id_(kInvalidResource),
+      current_depth_surface_id_(kInvalidResource),
+      direct3d_create9_(NULL),
+      get_shader_constant_table_(NULL),
+      create_effect_(NULL),
+      get_shader_input_semantics_(NULL) {}
 
 GAPID3D9::~GAPID3D9() {}
 
 // Initializes a D3D interface and device, and sets basic states.
 bool GAPID3D9::Initialize() {
-  d3d_ = Direct3DCreate9(D3D_SDK_VERSION);
+  if (!FindDirect3DFunctions()) {
+    Destroy();
+    return false;
+  }
+
+  d3d_ = Direct3DCreate(D3D_SDK_VERSION);
   if (NULL == d3d_) {
     LOG(ERROR) << "Failed to create the initial D3D9 Interface";
+    Destroy();
     return false;
   }
   d3d_device_ = NULL;
@@ -125,6 +141,7 @@ bool GAPID3D9::Initialize() {
                                     &d3dpp,
                                     &d3d_device_))) {
     LOG(ERROR) << "Failed to create the D3D Device";
+    Destroy();
     return false;
   }
   // initialise the d3d graphics state.
@@ -143,6 +160,8 @@ void GAPID3D9::Destroy() {
   effect_params_.DestroyAllResources();
   textures_.DestroyAllResources();
   samplers_.DestroyAllResources();
+  render_surfaces_.DestroyAllResources();
+  depth_surfaces_.DestroyAllResources();
   if (d3d_device_) {
     d3d_device_->Release();
     d3d_device_ = NULL;
@@ -151,10 +170,24 @@ void GAPID3D9::Destroy() {
     d3d_->Release();
     d3d_ = NULL;
   }
+  if (d3dx_module_) {
+    FreeLibrary(d3dx_module_);
+    d3dx_module_ = NULL;
+    get_shader_constant_table_ = NULL;
+    create_effect_ = NULL;
+    get_shader_input_semantics_ = NULL;
+  }
+  if (d3d_module_) {
+    FreeLibrary(d3d_module_);
+    d3d_module_ = NULL;
+    direct3d_create9_ = NULL;
+  }
 }
 
 // Begins the frame.
 void GAPID3D9::BeginFrame() {
+  HR(d3d_device_->GetRenderTarget(0, &back_buffer_surface_));
+  HR(d3d_device_->GetDepthStencilSurface(&back_buffer_depth_surface_));
   HR(d3d_device_->BeginScene());
 }
 
@@ -163,6 +196,10 @@ void GAPID3D9::EndFrame() {
   DirtyEffect();
   HR(d3d_device_->EndScene());
   HR(d3d_device_->Present(NULL, NULL, NULL, NULL));
+
+  // Release the back-buffer references.
+  back_buffer_surface_ = NULL;
+  back_buffer_depth_surface_ = NULL;
 }
 
 // Clears the selected buffers.
@@ -170,9 +207,9 @@ void GAPID3D9::Clear(unsigned int buffers,
                      const RGBA &color,
                      float depth,
                      unsigned int stencil) {
-  DWORD flags = (buffers & COLOR ? D3DCLEAR_TARGET : 0) |
-                (buffers & DEPTH ? D3DCLEAR_ZBUFFER : 0) |
-                (buffers & STENCIL ? D3DCLEAR_STENCIL : 0);
+  DWORD flags = (buffers & kColor ? D3DCLEAR_TARGET : 0) |
+                (buffers & kDepth ? D3DCLEAR_ZBUFFER : 0) |
+                (buffers & kStencil ? D3DCLEAR_STENCIL : 0);
   HR(d3d_device_->Clear(0,
                         NULL,
                         flags,
@@ -202,10 +239,59 @@ static unsigned int RGBAToARGB(unsigned int rgba) {
 }
 
 // Sets the current VertexStruct. Just keep track of the ID.
-BufferSyncInterface::ParseError GAPID3D9::SetVertexStruct(ResourceID id) {
+parse_error::ParseError GAPID3D9::SetVertexStruct(ResourceId id) {
   current_vertex_struct_ = id;
   validate_streams_ = true;
-  return BufferSyncInterface::PARSE_NO_ERROR;
+  return parse_error::kParseNoError;
+}
+
+bool GAPID3D9::FindDirect3DFunctions() {
+  d3d_module_ = LoadLibrary(TEXT("d3d9.dll"));
+  if (NULL == d3d_module_) {
+    LOG(ERROR) << "Failed to load d3d9.dll";
+    return false;
+  }
+
+  direct3d_create9_ = reinterpret_cast<Direct3DCreate9Proc>(
+      GetProcAddress(d3d_module_, "Direct3DCreate9"));
+  if (NULL == direct3d_create9_) {
+    LOG(ERROR) << "Failed to find Direct3DCreate9 in d3d9.dll";
+    Destroy();
+    return false;
+  }
+
+  d3dx_module_ = LoadLibrary(TEXT("d3dx9_36.dll"));
+  if (NULL == d3d_module_) {
+    LOG(ERROR) << "Failed to load d3dx9_36.dll";
+    return false;
+  }
+
+  get_shader_constant_table_ = reinterpret_cast<D3DXGetShaderConstantTableProc>(
+      GetProcAddress(d3dx_module_, "D3DXGetShaderConstantTable"));
+  if (NULL == get_shader_constant_table_) {
+    LOG(ERROR) << "Failed to find D3DXGetShaderConstantTable in d3dx9_36.dll";
+    Destroy();
+    return false;
+  }
+
+  create_effect_ = reinterpret_cast<D3DXCreateEffectProc>(
+      GetProcAddress(d3dx_module_, "D3DXCreateEffect"));
+  if (NULL == create_effect_) {
+    LOG(ERROR) << "Failed to find D3DXCreateEffect in d3dx9_36.dll";
+    Destroy();
+    return false;
+  }
+
+  get_shader_input_semantics_ =
+      reinterpret_cast<D3DXGetShaderInputSemanticsProc>(
+          GetProcAddress(d3dx_module_, "D3DXGetShaderInputSemantics"));
+  if (NULL == get_shader_input_semantics_) {
+    LOG(ERROR) << "Failed to find D3DXGetShaderInputSemantics in d3dx9_36.dll";
+    Destroy();
+    return false;
+  }
+
+  return true;
 }
 
 // Sets in D3D the input streams of the current vertex struct.
@@ -222,19 +308,20 @@ bool GAPID3D9::ValidateStreams() {
 }
 
 // Converts a GAPID3D9::PrimitiveType to a D3DPRIMITIVETYPE.
-static D3DPRIMITIVETYPE D3DPrimitive(GAPID3D9::PrimitiveType primitive_type) {
+static D3DPRIMITIVETYPE D3DPrimitive(
+    command_buffer::PrimitiveType primitive_type) {
   switch (primitive_type) {
-    case GAPID3D9::POINTS:
+    case command_buffer::kPoints:
       return D3DPT_POINTLIST;
-    case GAPID3D9::LINES:
+    case command_buffer::kLines:
       return D3DPT_LINELIST;
-    case GAPID3D9::LINE_STRIPS:
+    case command_buffer::kLineStrips:
       return D3DPT_LINESTRIP;
-    case GAPID3D9::TRIANGLES:
+    case command_buffer::kTriangles:
       return D3DPT_TRIANGLELIST;
-    case GAPID3D9::TRIANGLE_STRIPS:
+    case command_buffer::kTriangleStrips:
       return D3DPT_TRIANGLESTRIP;
-    case GAPID3D9::TRIANGLE_FANS:
+    case command_buffer::kTriangleFans:
       return D3DPT_TRIANGLEFAN;
     default:
       LOG(FATAL) << "Invalid primitive type";
@@ -243,62 +330,62 @@ static D3DPRIMITIVETYPE D3DPrimitive(GAPID3D9::PrimitiveType primitive_type) {
 }
 
 // Draws with the current vertex struct.
-BufferSyncInterface::ParseError GAPID3D9::Draw(
+parse_error::ParseError GAPID3D9::Draw(
     PrimitiveType primitive_type,
     unsigned int first,
     unsigned int count) {
   if (validate_streams_ && !ValidateStreams()) {
     // TODO: add proper error management
-    return BufferSyncInterface::PARSE_INVALID_ARGUMENTS;
+    return parse_error::kParseInvalidArguments;
   }
   if (validate_effect_ && !ValidateEffect()) {
     // TODO: add proper error management
-    return BufferSyncInterface::PARSE_INVALID_ARGUMENTS;
+    return parse_error::kParseInvalidArguments;
   }
   DCHECK(current_effect_);
-  if (!current_effect_->CommitParameters(this)) {
-    return BufferSyncInterface::PARSE_INVALID_ARGUMENTS;
+  if (!current_effect_->CommitParameters()) {
+    return parse_error::kParseInvalidArguments;
   }
   if (first + count > max_vertices_) {
     // TODO: add proper error management
-    return BufferSyncInterface::PARSE_INVALID_ARGUMENTS;
+    return parse_error::kParseInvalidArguments;
   }
   HR(d3d_device_->DrawPrimitive(D3DPrimitive(primitive_type), first, count));
-  return BufferSyncInterface::PARSE_NO_ERROR;
+  return parse_error::kParseNoError;
 }
 
 // Draws with the current vertex struct.
-BufferSyncInterface::ParseError GAPID3D9::DrawIndexed(
+parse_error::ParseError GAPID3D9::DrawIndexed(
     PrimitiveType primitive_type,
-    ResourceID index_buffer_id,
+    ResourceId index_buffer_id,
     unsigned int first,
     unsigned int count,
     unsigned int min_index,
     unsigned int max_index) {
   IndexBufferD3D9 *index_buffer = index_buffers_.Get(index_buffer_id);
-  if (!index_buffer) return BufferSyncInterface::PARSE_INVALID_ARGUMENTS;
+  if (!index_buffer) return parse_error::kParseInvalidArguments;
   if (validate_streams_ && !ValidateStreams()) {
     // TODO: add proper error management
-    return BufferSyncInterface::PARSE_INVALID_ARGUMENTS;
+    return parse_error::kParseInvalidArguments;
   }
   if (validate_effect_ && !ValidateEffect()) {
     // TODO: add proper error management
-    return BufferSyncInterface::PARSE_INVALID_ARGUMENTS;
+    return parse_error::kParseInvalidArguments;
   }
   DCHECK(current_effect_);
-  if (!current_effect_->CommitParameters(this)) {
-    return BufferSyncInterface::PARSE_INVALID_ARGUMENTS;
+  if (!current_effect_->CommitParameters()) {
+    return parse_error::kParseInvalidArguments;
   }
   if ((min_index >= max_vertices_) || (max_index > max_vertices_)) {
     // TODO: add proper error management
-    return BufferSyncInterface::PARSE_INVALID_ARGUMENTS;
+    return parse_error::kParseInvalidArguments;
   }
 
   HR(d3d_device_->SetIndices(index_buffer->d3d_index_buffer()));
   HR(d3d_device_->DrawIndexedPrimitive(D3DPrimitive(primitive_type), 0,
                                        min_index, max_index - min_index + 1,
                                        first, count));
-  return BufferSyncInterface::PARSE_NO_ERROR;
+  return parse_error::kParseNoError;
 }
 
 }  // namespace command_buffer

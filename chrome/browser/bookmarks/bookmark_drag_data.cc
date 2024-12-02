@@ -1,32 +1,21 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/bookmarks/bookmark_drag_data.h"
 
-// TODO(port): Port this file.
-#if defined(TOOLKIT_VIEWS)
-#include "app/os_exchange_data.h"
-#else
-#include "chrome/common/temp_scaffolding_stubs.h"
-#endif
+#include "app/clipboard/scoped_clipboard_writer.h"
 #include "base/basictypes.h"
 #include "base/pickle.h"
 #include "base/string_util.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/profile.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/browser/browser_process.h"
+#include "net/base/escape.h"
 
-#if defined(OS_WIN)
-static CLIPFORMAT clipboard_format = 0;
-
-static void RegisterFormat() {
-  if (clipboard_format == 0) {
-    clipboard_format = RegisterClipboardFormat(L"chrome/x-bookmark-entries");
-    DCHECK(clipboard_format);
-  }
-}
-#endif
+const char* BookmarkDragData::kClipboardFormatString =
+    "chromium/x-bookmark-entries";
 
 BookmarkDragData::Element::Element(const BookmarkNode* node)
     : is_url(node->is_url()),
@@ -76,6 +65,21 @@ bool BookmarkDragData::Element::ReadFromPickle(Pickle* pickle,
   return true;
 }
 
+#if defined(TOOLKIT_VIEWS)
+// static
+OSExchangeData::CustomFormat BookmarkDragData::GetBookmarkCustomFormat() {
+  static OSExchangeData::CustomFormat format;
+  static bool format_valid = false;
+
+  if (!format_valid) {
+    format_valid = true;
+    format = OSExchangeData::RegisterCustomFormat(
+        BookmarkDragData::kClipboardFormatString);
+  }
+  return format;
+}
+#endif
+
 BookmarkDragData::BookmarkDragData(const BookmarkNode* node) {
   elements.push_back(Element(node));
 }
@@ -86,10 +90,56 @@ BookmarkDragData::BookmarkDragData(
     elements.push_back(Element(nodes[i]));
 }
 
-#if defined(OS_WIN)
-void BookmarkDragData::Write(Profile* profile, OSExchangeData* data) const {
-  RegisterFormat();
+#if !defined(OS_MACOSX)
+void BookmarkDragData::WriteToClipboard(Profile* profile) const {
+  ScopedClipboardWriter scw(g_browser_process->clipboard());
 
+  // If there is only one element and it is a URL, write the URL to the
+  // clipboard.
+  if (elements.size() == 1 && elements[0].is_url) {
+    string16 title = WideToUTF16Hack(elements[0].title);
+    std::string url = elements[0].url.spec();
+
+    scw.WriteBookmark(title, url);
+    scw.WriteHyperlink(EscapeForHTML(UTF16ToUTF8(title)), url);
+  }
+
+  Pickle pickle;
+  WriteToPickle(profile, &pickle);
+  scw.WritePickledData(pickle, kClipboardFormatString);
+}
+
+bool BookmarkDragData::ReadFromClipboard() {
+  std::string data;
+  Clipboard* clipboard = g_browser_process->clipboard();
+  clipboard->ReadData(kClipboardFormatString, &data);
+
+  if (!data.empty()) {
+    Pickle pickle(data.data(), data.size());
+    if (ReadFromPickle(&pickle))
+      return true;
+  }
+
+  string16 title;
+  std::string url;
+  clipboard->ReadBookmark(&title, &url);
+  if (!url.empty()) {
+    Element element;
+    element.is_url = true;
+    element.url = GURL(url);
+    element.title = UTF16ToWideHack(title);
+
+    elements.clear();
+    elements.push_back(element);
+    return true;
+  }
+
+  return false;
+}
+#endif  // !defined(OS_MACOSX)
+
+#if defined(TOOLKIT_VIEWS)
+void BookmarkDragData::Write(Profile* profile, OSExchangeData* data) const {
   DCHECK(data);
 
   // If there is only one element and it is a URL, write the URL to the
@@ -105,19 +155,17 @@ void BookmarkDragData::Write(Profile* profile, OSExchangeData* data) const {
   Pickle data_pickle;
   WriteToPickle(profile, &data_pickle);
 
-  data->SetPickledData(clipboard_format, data_pickle);
+  data->SetPickledData(GetBookmarkCustomFormat(), data_pickle);
 }
 
 bool BookmarkDragData::Read(const OSExchangeData& data) {
-  RegisterFormat();
-
   elements.clear();
 
   profile_path_.clear();
 
-  if (data.HasFormat(clipboard_format)) {
+  if (data.HasCustomFormat(GetBookmarkCustomFormat())) {
     Pickle drag_data_pickle;
-    if (data.GetPickledData(clipboard_format, &drag_data_pickle)) {
+    if (data.GetPickledData(GetBookmarkCustomFormat(), &drag_data_pickle)) {
       if (!ReadFromPickle(&drag_data_pickle))
         return false;
     }
@@ -132,15 +180,6 @@ bool BookmarkDragData::Read(const OSExchangeData& data) {
   }
 
   return is_valid();
-}
-#elif defined(TOOLKIT_VIEWS)
-void BookmarkDragData::Write(Profile* profile, OSExchangeData* data) const {
-  NOTIMPLEMENTED();
-}
-
-bool BookmarkDragData::Read(const OSExchangeData& data) {
-  NOTIMPLEMENTED();
-  return false;
 }
 #endif
 

@@ -6,24 +6,26 @@
 
 #include <locale>
 
+#include "app/clipboard/clipboard.h"
+#include "app/clipboard/scoped_clipboard_writer.h"
 #include "app/gfx/canvas.h"
 #include "app/l10n_util.h"
 #include "app/l10n_util_win.h"
 #include "app/os_exchange_data.h"
+#include "app/os_exchange_data_provider_win.h"
 #include "app/win_util.h"
 #include "base/base_drag_source.h"
 #include "base/base_drop_target.h"
 #include "base/basictypes.h"
-#include "base/clipboard.h"
 #include "base/iat_patch.h"
+#include "base/keyboard_codes.h"
 #include "base/lazy_instance.h"
 #include "base/ref_counted.h"
-#include "base/scoped_clipboard_writer.h"
 #include "base/string_util.h"
 #include "chrome/app/chrome_dll_resource.h"
 #include "chrome/browser/autocomplete/autocomplete_accessibility.h"
 #include "chrome/browser/autocomplete/autocomplete_popup_model.h"
-#include "chrome/browser/autocomplete/autocomplete_popup_view_win.h"
+#include "chrome/browser/autocomplete/autocomplete_popup_view.h"
 #include "chrome/browser/autocomplete/keyword_provider.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/command_updater.h"
@@ -38,6 +40,7 @@
 #include "chrome/common/notification_service.h"
 #include "googleurl/src/url_util.h"
 #include "grit/generated_resources.h"
+#include "net/base/escape.h"
 #include "skia/ext/skia_utils_win.h"
 #include "views/drag_utils.h"
 #include "views/focus/focus_util_win.h"
@@ -127,7 +130,7 @@ DWORD EditDropTarget::OnDragEnter(IDataObject* data_object,
                                   DWORD key_state,
                                   POINT cursor_position,
                                   DWORD effect) {
-  OSExchangeData os_data(data_object);
+  OSExchangeData os_data(new OSExchangeDataProviderWin(data_object));
   drag_has_url_ = os_data.HasURL();
   drag_has_string_ = !drag_has_url_ && os_data.HasString();
   if (drag_has_url_) {
@@ -177,7 +180,7 @@ DWORD EditDropTarget::OnDrop(IDataObject* data_object,
                              DWORD key_state,
                              POINT cursor_position,
                              DWORD effect) {
-  OSExchangeData os_data(data_object);
+  OSExchangeData os_data(new OSExchangeDataProviderWin(data_object));
 
   if (drag_has_url_) {
     GURL url;
@@ -389,12 +392,10 @@ AutocompleteEditViewWin::AutocompleteEditViewWin(
     Profile* profile,
     CommandUpdater* command_updater,
     bool popup_window_mode,
-    AutocompletePopupPositioner* popup_positioner)
+    const BubblePositioner* bubble_positioner)
     : model_(new AutocompleteEditModel(this, controller, profile)),
-      popup_view_(AutocompletePopupView::CreatePopupView(font, this,
-                                                         model_.get(),
-                                                         profile,
-                                                         popup_positioner)),
+      popup_view_(AutocompletePopupView::CreatePopupView(
+          font, this, model_.get(), profile, bubble_positioner)),
       controller_(controller),
       parent_view_(parent_view),
       toolbar_model_(toolbar_model),
@@ -413,7 +414,7 @@ AutocompleteEditViewWin::AutocompleteEditViewWin(
       drop_highlight_position_(-1),
       background_color_(0),
       scheme_security_level_(ToolbarModel::NORMAL) {
-  model_->set_popup_model(popup_view_->GetModel());
+  model_->SetPopupModel(popup_view_->GetModel());
 
   saved_selection_for_focus_change_.cpMin = -1;
 
@@ -704,6 +705,10 @@ void AutocompleteEditViewWin::ClosePopup() {
   popup_view_->GetModel()->StopAutocomplete();
 }
 
+void AutocompleteEditViewWin::SetFocus() {
+  ::SetFocus(m_hWnd);
+}
+
 IAccessible* AutocompleteEditViewWin::GetIAccessible() {
   if (!autocomplete_accessibility_) {
     CComObject<AutocompleteAccessibility>* accessibility = NULL;
@@ -712,7 +717,7 @@ IAccessible* AutocompleteEditViewWin::GetIAccessible() {
       return NULL;
 
     // Wrap the created object in a smart pointer so it won't leak.
-    CComPtr<IAccessible> accessibility_comptr(accessibility);
+    ScopedComPtr<IAccessible> accessibility_comptr(accessibility);
     if (!SUCCEEDED(accessibility->Initialize(this)))
       return NULL;
 
@@ -861,6 +866,10 @@ bool AutocompleteEditViewWin::OnAfterPossibleChange() {
   return something_changed;
 }
 
+gfx::NativeView AutocompleteEditViewWin::GetNativeView() const {
+  return m_hWnd;
+}
+
 void AutocompleteEditViewWin::PasteAndGo(const std::wstring& text) {
   if (CanPasteAndGo(text))
     model_->PasteAndGo();
@@ -868,11 +877,11 @@ void AutocompleteEditViewWin::PasteAndGo(const std::wstring& text) {
 
 bool AutocompleteEditViewWin::SkipDefaultKeyEventProcessing(
     const views::KeyEvent& e) {
-  int c = e.GetCharacter();
+  base::KeyboardCode key = e.GetKeyCode();
   // We don't process ALT + numpad digit as accelerators, they are used for
   // entering special characters.  We do translate alt-home.
-  if (e.IsAltDown() && (c != VK_HOME) &&
-      win_util::IsNumPadDigit(c, e.IsExtendedKey()))
+  if (e.IsAltDown() && (key != base::VKEY_HOME) &&
+      win_util::IsNumPadDigit(key, e.IsExtendedKey()))
     return true;
 
   // Skip accelerators for key combinations omnibox wants to crack. This list
@@ -882,30 +891,29 @@ bool AutocompleteEditViewWin::SkipDefaultKeyEventProcessing(
   // We cannot return true for all keys because we still need to handle some
   // accelerators (e.g., F5 for reload the page should work even when the
   // Omnibox gets focused).
-  switch (c) {
-    case VK_ESCAPE: {
+  switch (key) {
+    case base::VKEY_ESCAPE: {
       ScopedFreeze freeze(this, GetTextObjectModel());
       return model_->OnEscapeKeyPressed();
     }
 
-    case VK_RETURN:
+    case base::VKEY_RETURN:
       return true;
 
-    case VK_UP:
-    case VK_DOWN:
+    case base::VKEY_UP:
+    case base::VKEY_DOWN:
       return !e.IsAltDown();
 
-    case VK_DELETE:
-    case VK_INSERT:
+    case base::VKEY_DELETE:
+    case base::VKEY_INSERT:
       return !e.IsAltDown() && e.IsShiftDown() && !e.IsControlDown();
 
-    case 'X':
-    case 'V':
+    case base::VKEY_X:
+    case base::VKEY_V:
       return !e.IsAltDown() && e.IsControlDown();
 
-    case VK_BACK:
-    case 0xbb:  // We don't use VK_OEM_PLUS in case the macro isn't defined.
-                // (e.g., we don't have this symbol in embeded environment).
+    case base::VKEY_BACK:
+    case base::VKEY_OEM_PLUS:
       return true;
 
     default:
@@ -1192,7 +1200,8 @@ void AutocompleteEditViewWin::OnCopy() {
         scw.WriteText(UTF8ToWide(url.spec()));
       else
         scw.WriteText(text);
-      scw.WriteHyperlink(text, url.spec());
+      scw.WriteBookmark(text, url.spec());
+      scw.WriteHyperlink(EscapeForHTML(UTF16ToUTF8(text)), url.spec());
       return;
     }
   }
@@ -1217,7 +1226,7 @@ LRESULT AutocompleteEditViewWin::OnGetObject(UINT uMsg,
 
     if (autocomplete_accessibility_) {
       return LresultFromObject(IID_IAccessible, wparam,
-                               autocomplete_accessibility_.p);
+                               autocomplete_accessibility_);
     }
   }
   return 0;
@@ -1873,8 +1882,8 @@ void AutocompleteEditViewWin::GetSelection(CHARRANGE& sel) const {
   ITextDocument* const text_object_model = GetTextObjectModel();
   if (!text_object_model)
     return;
-  CComPtr<ITextSelection> selection;
-  const HRESULT hr = text_object_model->GetSelection(&selection);
+  ScopedComPtr<ITextSelection> selection;
+  const HRESULT hr = text_object_model->GetSelection(selection.Receive());
   DCHECK(hr == S_OK);
   long flags;
   selection->GetFlags(&flags);
@@ -1903,8 +1912,8 @@ void AutocompleteEditViewWin::SetSelection(LONG start, LONG end) {
   ITextDocument* const text_object_model = GetTextObjectModel();
   if (!text_object_model)
     return;
-  CComPtr<ITextSelection> selection;
-  const HRESULT hr = text_object_model->GetSelection(&selection);
+  ScopedComPtr<ITextSelection> selection;
+  const HRESULT hr = text_object_model->GetSelection(selection.Receive());
   DCHECK(hr == S_OK);
   selection->SetFlags(tomSelStartActive);
 }
@@ -1997,13 +2006,15 @@ void AutocompleteEditViewWin::EmphasizeURLComponents() {
   // Set the baseline emphasis.
   CHARFORMAT cf = {0};
   cf.dwMask = CFM_COLOR;
-  cf.dwEffects = 0;
   const bool is_secure = (scheme_security_level_ == ToolbarModel::SECURE);
   // If we're going to emphasize parts of the text, then the baseline state
   // should be "de-emphasized".  If not, then everything should be rendered in
   // the standard text color.
   cf.crTextColor = skia::SkColorToCOLORREF(LocationBarView::GetColor(is_secure,
       emphasize ? LocationBarView::DEEMPHASIZED_TEXT : LocationBarView::TEXT));
+  // NOTE: Don't use SetDefaultCharFormat() instead of the below; that sets the
+  // format that will get applied to text added in the future, not to text
+  // already in the edit.
   SelectAll(false);
   SetSelectionCharFormat(cf);
 
@@ -2091,10 +2102,7 @@ void AutocompleteEditViewWin::DrawSlashForInsecureScheme(
   // it to fully transparent so any antialiasing will look nice when painted
   // atop the edit.
   gfx::Canvas canvas(scheme_rect.Width(), scheme_rect.Height(), false);
-  // TODO (jcampan): This const_cast should not be necessary once the SKIA
-  // API has been changed to return a non-const bitmap.
-  (const_cast<SkBitmap&>(canvas.getDevice()->accessBitmap(true))).
-      eraseARGB(0, 0, 0, 0);
+  canvas.getDevice()->accessBitmap(true).eraseARGB(0, 0, 0, 0);
 
   // Calculate the start and end of the stroke, which are just the lower left
   // and upper right corners of the canvas, inset by the radius of the endcap
@@ -2175,9 +2183,10 @@ void AutocompleteEditViewWin::TextChanged() {
 std::wstring AutocompleteEditViewWin::GetClipboardText() const {
   // Try text format.
   Clipboard* clipboard = g_browser_process->clipboard();
-  if (clipboard->IsFormatAvailable(Clipboard::GetPlainTextWFormatType())) {
+  if (clipboard->IsFormatAvailable(Clipboard::GetPlainTextWFormatType(),
+                                   Clipboard::BUFFER_STANDARD)) {
     std::wstring text;
-    clipboard->ReadText(&text);
+    clipboard->ReadText(Clipboard::BUFFER_STANDARD, &text);
 
     // Note: Unlike in the find popup and textfield view, here we completely
     // remove whitespace strings containing newlines.  We assume users are
@@ -2195,7 +2204,8 @@ std::wstring AutocompleteEditViewWin::GetClipboardText() const {
   // and pastes from the URL bar to itself, the text will get fixed up and
   // cannonicalized, which is not what the user expects.  By pasting in this
   // order, we are sure to paste what the user copied.
-  if (clipboard->IsFormatAvailable(Clipboard::GetUrlWFormatType())) {
+  if (clipboard->IsFormatAvailable(Clipboard::GetUrlWFormatType(),
+                                   Clipboard::BUFFER_STANDARD)) {
     std::string url_str;
     clipboard->ReadBookmark(NULL, &url_str);
     // pass resulting url string through GURL to normalize
@@ -2215,9 +2225,10 @@ ITextDocument* AutocompleteEditViewWin::GetTextObjectModel() const {
   if (!text_object_model_) {
     // This is lazily initialized, instead of being initialized in the
     // constructor, in order to avoid hurting startup performance.
-    CComPtr<IRichEditOle> ole_interface;
+    ScopedComPtr<IRichEditOle, NULL> ole_interface;
     ole_interface.Attach(GetOleInterface());
-    text_object_model_ = ole_interface;
+    if (ole_interface)
+      text_object_model_.QueryFrom(ole_interface);
   }
   return text_object_model_;
 }
@@ -2226,7 +2237,7 @@ void AutocompleteEditViewWin::StartDragIfNecessary(const CPoint& point) {
   if (initiated_drag_ || !win_util::IsDrag(mouse_down_point_, point))
     return;
 
-  scoped_refptr<OSExchangeData> data = new OSExchangeData;
+  OSExchangeData data;
 
   DWORD supported_modes = DROPEFFECT_COPY;
 
@@ -2254,8 +2265,8 @@ void AutocompleteEditViewWin::StartDragIfNecessary(const CPoint& point) {
     std::wstring title;
     SkBitmap favicon;
     model_->GetDataForURLExport(&url, &title, &favicon);
-    drag_utils::SetURLAndDragImage(url, title, favicon, data.get());
-    data->SetURL(url, title);
+    drag_utils::SetURLAndDragImage(url, title, favicon, &data);
+    data.SetURL(url, title);
     supported_modes |= DROPEFFECT_LINK;
     UserMetrics::RecordAction(L"Omnibox_DragURL", model_->profile());
   } else {
@@ -2263,13 +2274,13 @@ void AutocompleteEditViewWin::StartDragIfNecessary(const CPoint& point) {
     UserMetrics::RecordAction(L"Omnibox_DragString", model_->profile());
   }
 
-  data->SetString(GetSelectedText());
+  data.SetString(GetSelectedText());
 
   scoped_refptr<BaseDragSource> drag_source(new BaseDragSource);
   DWORD dropped_mode;
   in_drag_ = true;
-  if (DoDragDrop(data, drag_source, supported_modes, &dropped_mode) ==
-      DRAGDROP_S_DROP) {
+  if (DoDragDrop(OSExchangeDataProviderWin::GetIDataObject(data), drag_source,
+                 supported_modes, &dropped_mode) == DRAGDROP_S_DROP) {
     if ((dropped_mode == DROPEFFECT_MOVE) && (start_text == GetText())) {
       ScopedFreeze freeze(this, GetTextObjectModel());
       OnBeforePossibleChange();

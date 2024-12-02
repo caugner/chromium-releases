@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "app/gfx/native_widget_types.h"
 #include "base/file_path.h"
-#include "base/gfx/native_widget_types.h"
 #include "base/string_util.h"
 #include "base/sys_info.h"
 #include "base/values.h"
@@ -23,18 +23,48 @@
 
 namespace {
 
-class BrowserTest : public UITest {
- protected:
-#if defined(OS_WIN)
-  HWND GetMainWindow() {
-    scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
-    scoped_refptr<WindowProxy> window(browser->GetWindow());
+// Delay to let the browser shut down before trying more brutal methods.
+static const int kWaitForTerminateMsec = 30000;
 
-    HWND window_handle;
-    EXPECT_TRUE(window->GetHWND(&window_handle));
-    return window_handle;
-  }
+class BrowserTest : public UITest {
+
+ protected:
+  void TerminateBrowser() {
+#if defined(OS_WIN)
+    scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
+    ASSERT_TRUE(browser->TerminateSession());
+#elif defined(OS_POSIX)
+    // There's nothing to do here if the browser is not running.
+    if (IsBrowserRunning()) {
+      automation()->SetFilteredInet(false);
+
+      int window_count = 0;
+      EXPECT_TRUE(automation()->GetBrowserWindowCount(&window_count));
+
+      // Now, drop the automation IPC channel so that the automation provider in
+      // the browser notices and drops its reference to the browser process.
+      automation()->Disconnect();
+
+      EXPECT_EQ(kill(process_, SIGTERM), 0);
+
+      // Wait for the browser process to quit. It should have quit when it got
+      // SIGTERM.
+      int timeout = kWaitForTerminateMsec;
+#ifdef WAIT_FOR_DEBUGGER_ON_OPEN
+      timeout = 500000;
 #endif
+      if (!base::WaitForSingleProcess(process_, timeout)) {
+        // We need to force the browser to quit because it didn't quit fast
+        // enough. Take no chance and kill every chrome processes.
+        CleanupAppProcesses();
+      }
+
+      // Don't forget to close the handle
+      base::CloseProcessHandle(process_);
+      process_ = NULL;
+    }
+#endif  // OS_POSIX
+  }
 };
 
 class VisibleBrowserTest : public UITest {
@@ -47,16 +77,18 @@ class VisibleBrowserTest : public UITest {
 #if defined(OS_WIN)
 // The browser should quit quickly if it receives a WM_ENDSESSION message.
 TEST_F(BrowserTest, WindowsSessionEnd) {
+#elif defined(OS_POSIX)
+// The browser should quit gracefully and quickly if it receives a SIGTERM.
+TEST_F(BrowserTest, PosixSessionEnd) {
+#endif
+#if defined(OS_WIN) || defined(OS_POSIX)
   FilePath test_file(test_data_directory_);
   test_file = test_file.AppendASCII("title1.html");
 
   NavigateToURL(net::FilePathToFileURL(test_file));
   PlatformThread::Sleep(action_timeout_ms());
 
-  // Simulate an end of session. Normally this happens when the user
-  // shuts down the pc or logs off.
-  HWND window_handle = GetMainWindow();
-  ASSERT_TRUE(::PostMessageW(window_handle, WM_ENDSESSION, 0, 0));
+  TerminateBrowser();
 
   PlatformThread::Sleep(action_timeout_ms());
   ASSERT_FALSE(IsBrowserRunning());
@@ -82,7 +114,7 @@ TEST_F(BrowserTest, WindowsSessionEnd) {
                                         &exited_cleanly));
   ASSERT_TRUE(exited_cleanly);
 }
-#endif
+#endif  // OS_WIN || OS_POSIX
 
 // Test that scripts can fork a new renderer process for a tab in a particular
 // case (which matches following a link in Gmail).  The script must open a new
@@ -204,7 +236,6 @@ TEST_F(VisibleBrowserTest, WindowOpenClose) {
 }
 #endif
 
-#if defined(OS_WIN)  // only works on Windows for now: http:://crbug.com/15891
 class ShowModalDialogTest : public UITest {
  public:
   ShowModalDialogTest() {
@@ -213,27 +244,47 @@ class ShowModalDialogTest : public UITest {
 };
 
 TEST_F(ShowModalDialogTest, BasicTest) {
-  // Test that a modal dialog is shown.
   FilePath test_file(test_data_directory_);
   test_file = test_file.AppendASCII("showmodaldialog.html");
+
+  // This navigation should show a modal dialog that will be immediately
+  // closed, but the fact that it was shown should be recorded.
   NavigateToURL(net::FilePathToFileURL(test_file));
 
-  ASSERT_TRUE(automation()->WaitForWindowCountToBecome(2, action_timeout_ms()));
+  // At this point the modal dialog should not be showing.
+  int window_count = 0;
+  EXPECT_TRUE(automation()->GetBrowserWindowCount(&window_count));
+  EXPECT_EQ(1, window_count);
 
-  scoped_refptr<BrowserProxy> browser = automation()->GetBrowserWindow(1);
+  // Verify that we set a mark on successful dialog show.
+  scoped_refptr<BrowserProxy> browser = automation()->GetBrowserWindow(0);
+  ASSERT_TRUE(browser.get());
   scoped_refptr<TabProxy> tab = browser->GetActiveTab();
   ASSERT_TRUE(tab.get());
-
   std::wstring title;
   ASSERT_TRUE(tab->GetTabTitle(&title));
-  ASSERT_EQ(title, L"ModalDialogTitle");
-
-  // Test that window.close() works.  Since we don't have a way of executing a
-  // JS function on the page through TabProxy, reload it and use an unload
-  // handler that closes the page.
-  ASSERT_EQ(tab->Reload(), AUTOMATION_MSG_NAVIGATION_SUCCESS);
-  ASSERT_TRUE(automation()->WaitForWindowCountToBecome(1, action_timeout_ms()));
+  ASSERT_EQ(L"SUCCESS", title);
 }
-#endif
+
+class SecurityTest : public UITest {
+ protected:
+  static const int kTestIntervalMs = 250;
+  static const int kTestWaitTimeoutMs = 60 * 1000;
+};
+
+TEST_F(SecurityTest, DisallowFileUrlUniversalAccessTest) {
+  scoped_refptr<TabProxy> tab(GetActiveTab());
+  ASSERT_TRUE(tab.get());
+
+  FilePath test_file(test_data_directory_);
+  test_file = test_file.AppendASCII("fileurl_universalaccess.html");
+
+  GURL url = net::FilePathToFileURL(test_file);
+  ASSERT_TRUE(tab->NavigateToURL(url));
+
+  std::string value = WaitUntilCookieNonEmpty(tab.get(), url,
+        "status", kTestIntervalMs, kTestWaitTimeoutMs);
+  ASSERT_STREQ("Disallowed", value.c_str());
+}
 
 }  // namespace

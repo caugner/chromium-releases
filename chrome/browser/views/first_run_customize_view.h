@@ -1,10 +1,11 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_VIEWS_FIRST_RUN_CUSTOMIZE_VIEW_H_
 #define CHROME_BROWSER_VIEWS_FIRST_RUN_CUSTOMIZE_VIEW_H_
 
+#include "app/combobox_model.h"
 #include "chrome/browser/views/first_run_view_base.h"
 #include "views/controls/button/button.h"
 #include "views/controls/combobox/combobox.h"
@@ -26,7 +27,7 @@ class Profile;
 // some simple customizations during the first run.
 class FirstRunCustomizeView : public FirstRunViewBase,
                               public views::ButtonListener,
-                              public views::Combobox::Model {
+                              public ComboboxModel {
  public:
   class CustomizeViewObserver {
    public:
@@ -40,6 +41,7 @@ class FirstRunCustomizeView : public FirstRunViewBase,
                         ImporterHost* importer_host,
                         CustomizeViewObserver* observer,
                         bool default_browser_checked,
+                        bool homepage_defined,
                         int import_items,
                         int dont_import_items);
   virtual ~FirstRunCustomizeView();
@@ -53,11 +55,11 @@ class FirstRunCustomizeView : public FirstRunViewBase,
   virtual bool Cancel();
 
   // Overridden form views::ButtonListener.
-  virtual void ButtonPressed(views::Button* sender);
+  virtual void ButtonPressed(views::Button* sender, const views::Event& event);
 
-  // Overridden form views::Combobox::Model.
-  virtual int GetItemCount(views::Combobox* source);
-  virtual std::wstring GetItemAt(views::Combobox* source, int index);
+  // Overridden form ComboboxModel.
+  virtual int GetItemCount();
+  virtual std::wstring GetItemAt(int index);
 
   // Overridden from views::WindowDelegate.
   virtual std::wstring GetWindowTitle() const;

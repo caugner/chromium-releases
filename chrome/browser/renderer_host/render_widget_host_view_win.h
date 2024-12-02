@@ -10,6 +10,7 @@
 #include <atlcrack.h>
 #include <atlmisc.h>
 
+#include "base/scoped_comptr_win.h"
 #include "base/task.h"
 #include "chrome/browser/ime_input.h"
 #include "chrome/browser/renderer_host/render_widget_host_view.h"
@@ -114,7 +115,7 @@ class RenderWidgetHostViewWin :
   virtual void SetSize(const gfx::Size& size);
   virtual gfx::NativeView GetNativeView();
   virtual void MovePluginWindows(
-      const std::vector<WebPluginGeometry>& plugin_window_moves);
+      const std::vector<webkit_glue::WebPluginGeometry>& moves);
   virtual void Focus();
   virtual void Blur();
   virtual bool HasFocus();
@@ -271,7 +272,7 @@ class RenderWidgetHostViewWin :
 
   // Instance of accessibility information for the root of the MSAA
   // tree representation of the WebKit render tree.
-  CComPtr<IAccessible> browser_accessibility_root_;
+  ScopedComPtr<IAccessible> browser_accessibility_root_;
 
   // The time at which this view started displaying white pixels as a result of
   // not having anything to paint (empty backing store from renderer). This

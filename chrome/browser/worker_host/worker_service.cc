@@ -10,9 +10,9 @@
 #include "base/thread.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/plugin_service.h"
-#include "chrome/browser/worker_host/worker_process_host.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/browser/renderer_host/resource_message_filter.h"
+#include "chrome/browser/worker_host/worker_process_host.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/worker_messages.h"
@@ -30,8 +30,11 @@ WorkerService::WorkerService()
     : next_worker_route_id_(0),
       resource_dispatcher_host_(NULL),
       ui_loop_(NULL) {
-  // Receive a notification if the message filter is deleted.
+  // Receive a notification if a message filter or WorkerProcessHost is deleted.
   registrar_.Add(this, NotificationType::RESOURCE_MESSAGE_FILTER_SHUTDOWN,
+                 NotificationService::AllSources());
+
+  registrar_.Add(this, NotificationType::WORKER_PROCESS_HOST_SHUTDOWN,
                  NotificationService::AllSources());
 }
 
@@ -45,10 +48,10 @@ WorkerService::~WorkerService() {
 }
 
 bool WorkerService::CreateDedicatedWorker(const GURL &url,
-                                          int renderer_process_id,
+                                          int renderer_id,
                                           int render_view_route_id,
                                           IPC::Message::Sender* sender,
-                                          int sender_pid,
+                                          int sender_id,
                                           int sender_route_id) {
   // Generate a unique route id for the browser-worker communication that's
   // unique among all worker processes.  That way when the worker process sends
@@ -56,11 +59,11 @@ bool WorkerService::CreateDedicatedWorker(const GURL &url,
   // it to.
   WorkerProcessHost::WorkerInstance instance;
   instance.url = url;
-  instance.renderer_process_id = renderer_process_id;
+  instance.renderer_id = renderer_id;
   instance.render_view_route_id = render_view_route_id;
   instance.worker_route_id = next_worker_route_id();
   instance.sender = sender;
-  instance.sender_pid = sender_pid;
+  instance.sender_id = sender_id;
   instance.sender_route_id = sender_route_id;
 
   WorkerProcessHost* worker = NULL;
@@ -89,11 +92,12 @@ bool WorkerService::CreateDedicatedWorker(const GURL &url,
   return true;
 }
 
-void WorkerService::CancelCreateDedicatedWorker(int sender_pid,
+void WorkerService::CancelCreateDedicatedWorker(int sender_id,
                                                 int sender_route_id) {
   for (WorkerProcessHost::Instances::iterator i = queued_workers_.begin();
        i != queued_workers_.end(); ++i) {
-     if (i->sender_pid == sender_pid && i->sender_route_id == sender_route_id) {
+     if (i->sender_id == sender_id &&
+         i->sender_route_id == sender_route_id) {
        queued_workers_.erase(i);
        return;
      }
@@ -108,12 +112,12 @@ void WorkerService::CancelCreateDedicatedWorker(int sender_pid,
     for (WorkerProcessHost::Instances::const_iterator instance =
              worker->instances().begin();
          instance != worker->instances().end(); ++instance) {
-      if (instance->sender_pid == sender_pid &&
+      if (instance->sender_id == sender_id &&
           instance->sender_route_id == sender_route_id) {
         // Fake a worker destroyed message so that WorkerProcessHost cleans up
         // properly.
         WorkerHostMsg_WorkerContextDestroyed msg(sender_route_id);
-        ForwardMessage(msg, sender_pid);
+        ForwardMessage(msg, sender_id);
         return;
       }
     }
@@ -195,7 +199,7 @@ bool WorkerService::CanCreateWorkerProcess(
       total_workers++;
       if (total_workers >= kMaxWorkersWhenSeparate)
         return false;
-      if (cur_instance->renderer_process_id == instance.renderer_process_id &&
+      if (cur_instance->renderer_id == instance.renderer_id &&
           cur_instance->render_view_route_id == instance.render_view_route_id) {
         workers_per_tab++;
         if (workers_per_tab >= kMaxWorkersPerTabWhenSeparate)
@@ -210,12 +214,19 @@ bool WorkerService::CanCreateWorkerProcess(
 void WorkerService::Observe(NotificationType type,
                             const NotificationSource& source,
                             const NotificationDetails& details) {
-  DCHECK(type.value == NotificationType::RESOURCE_MESSAGE_FILTER_SHUTDOWN);
-  ResourceMessageFilter* filter = Source<ResourceMessageFilter>(source).ptr();
-  OnSenderShutdown(filter);
+  if (type.value == NotificationType::RESOURCE_MESSAGE_FILTER_SHUTDOWN) {
+    ResourceMessageFilter* sender = Source<ResourceMessageFilter>(source).ptr();
+    SenderShutdown(sender);
+  } else if (type.value == NotificationType::WORKER_PROCESS_HOST_SHUTDOWN) {
+    WorkerProcessHost* sender = Source<WorkerProcessHost>(source).ptr();
+    SenderShutdown(sender);
+    WorkerProcessDestroyed(sender);
+  } else {
+    NOTREACHED();
+  }
 }
 
-void WorkerService::OnSenderShutdown(IPC::Message::Sender* sender) {
+void WorkerService::SenderShutdown(IPC::Message::Sender* sender) {
   for (ChildProcessHost::Iterator iter(ChildProcessInfo::WORKER_PROCESS);
        !iter.Done(); ++iter) {
     WorkerProcessHost* worker = static_cast<WorkerProcessHost*>(*iter);
@@ -233,7 +244,7 @@ void WorkerService::OnSenderShutdown(IPC::Message::Sender* sender) {
   }
 }
 
-void WorkerService::OnWorkerProcessDestroyed(WorkerProcessHost* process) {
+void WorkerService::WorkerProcessDestroyed(WorkerProcessHost* process) {
   if (queued_workers_.empty())
     return;
 
@@ -253,4 +264,19 @@ void WorkerService::OnWorkerProcessDestroyed(WorkerProcessHost* process) {
       ++i;
     }
   }
+}
+
+const WorkerProcessHost::WorkerInstance* WorkerService::FindWorkerInstance(
+      int worker_process_id) {
+  for (ChildProcessHost::Iterator iter(ChildProcessInfo::WORKER_PROCESS);
+       !iter.Done(); ++iter) {
+    if (iter->id() != worker_process_id)
+        continue;
+
+    WorkerProcessHost* worker = static_cast<WorkerProcessHost*>(*iter);
+    WorkerProcessHost::Instances::const_iterator instance =
+        worker->instances().begin();
+    return instance == worker->instances().end() ? NULL : &*instance;
+  }
+  return NULL;
 }

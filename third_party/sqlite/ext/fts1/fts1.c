@@ -208,7 +208,7 @@ static int safe_isspace(char c){
   return (c&0x80)==0 ? isspace(c) : 0;
 }
 static int safe_tolower(char c){
-  return (c&0x80)==0 ? tolower(c) : c;
+  return (c>='A' && c<='Z') ? (c-'A'+'a') : c;
 }
 static int safe_isalnum(char c){
   return (c&0x80)==0 ? isalnum(c) : 0;
@@ -1214,7 +1214,7 @@ static int sql_step_statement(fulltext_vtab *v, fulltext_statement iStmt,
     if( rc==SQLITE_BUSY ) continue;
     if( rc!=SQLITE_ERROR ) return rc;
 
-    /* If an SQLITE_SCHEMA error has occured, then finalizing this
+    /* If an SQLITE_SCHEMA error has occurred, then finalizing this
      * statement is going to delete the fulltext_vtab structure. If
      * the statement just executed is in the pFulltextStatements[]
      * array, it will be finalized twice. So remove it before

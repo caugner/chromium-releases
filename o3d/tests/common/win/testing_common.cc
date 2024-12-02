@@ -29,14 +29,12 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-
 // Contains windows-specific code for setting up the Client object
 // used in the unit tests.  Defines WinMain and a WindowProc for running
 // the GUnit tests
 
 #include <windows.h>
 #include <Shellapi.h>
-#include <d3dx9.h>
 
 #include "tests/common/win/testing_common.h"
 #include "core/cross/install_check.h"
@@ -50,6 +48,27 @@
 #include "core/cross/renderer.h"
 #include "core/cross/renderer_platform.h"
 #include "core/cross/types.h"
+#include "core/win/display_window_win.h"
+
+#if defined(RENDERER_CB)
+#include "core/cross/command_buffer/renderer_cb.h"
+#include "core/cross/command_buffer/display_window_cb.h"
+#include "gpu_plugin/command_buffer.h"
+#include "gpu_plugin/np_utils/np_browser_stub.h"
+#endif
+
+using o3d::DisplayWindowWindows;
+
+#if defined(RENDERER_CB)
+using o3d::DisplayWindowCB;
+using o3d::gpu_plugin::CommandBuffer;
+using o3d::gpu_plugin::NPObjectPointer;
+using o3d::gpu_plugin::StubNPBrowser;
+using o3d::RendererCBLocal;
+#endif
+
+const int kWindowWidth = 512;
+const int kWindowHeight = 512;
 
 o3d::ServiceLocator* g_service_locator = NULL;
 o3d::DisplayWindow* g_display_window = NULL;
@@ -104,14 +123,17 @@ int WINAPI WinMain(HINSTANCE instance,
   if (!::RegisterClassEx(&wc))
     return false;
 
+  // Leaving this window onscreen leads to a redraw error which makes it
+  // a hassle to debug tests in an IDE, so we place the window somewhere that
+  // won't happen.
   g_window_handle = ::CreateWindowExW(NULL,
                                       wc.lpszClassName,
                                       L"",
                                       WS_OVERLAPPEDWINDOW,
-                                      CW_USEDEFAULT,
-                                      CW_USEDEFAULT,
-                                      512,
-                                      512,
+                                      -1000,
+                                      0,
+                                      kWindowWidth,
+                                      kWindowHeight,
                                       0,
                                       0,
                                       instance,
@@ -151,16 +173,36 @@ int WINAPI WinMain(HINSTANCE instance,
   o3d::Profiler profiler(g_service_locator);
   o3d::Features features(g_service_locator);
 
+  // TODO(apatrick): We can have an NPBrowser in the other configurations when
+  //    we move over to gyp. This is just to avoid having to write scons files
+  //    for np_utils.
+#if defined(RENDERER_CB)
+  StubNPBrowser browser;
+#endif
+
   // create a renderer device based on the current platform
   g_renderer = o3d::Renderer::CreateDefaultRenderer(g_service_locator);
 
   // Initialize the renderer for off-screen rendering if kOffScreenRenderer
   // is in the environment.
   bool success;
-  o3d::DisplayWindowWindows* display_window =
-      new o3d::DisplayWindowWindows();
-  display_window = display_window;
+
+#if defined(RENDERER_CB)
+  const unsigned int kDefaultCommandBufferSize = 256 << 10;
+
+  DisplayWindowCB* display_window = new o3d::DisplayWindowCB;
+  display_window->set_npp(NULL);
+  display_window->set_command_buffer(RendererCBLocal::CreateCommandBuffer(
+      NULL,
+      g_window_handle,
+      kDefaultCommandBufferSize));
+  display_window->set_width(kWindowWidth);
+  display_window->set_height(kWindowHeight);
+#else
+  DisplayWindowWindows* display_window = new o3d::DisplayWindowWindows;
   display_window->set_hwnd(g_window_handle);
+#endif
+
   g_display_window = display_window;
   bool offscreen = (::GetEnvironmentVariableW(kOffScreenRenderer,
                                               NULL, 0) != 0);

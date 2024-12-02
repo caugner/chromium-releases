@@ -24,6 +24,15 @@ const wchar_t kPrefState[] = L"state";
 // The path to the current version's manifest file.
 const wchar_t kPrefPath[] = L"path";
 
+// The dictionary containing the extension's manifest.
+const wchar_t kPrefManifest[] = L"manifest";
+
+// The version number.
+const wchar_t kPrefVersion[] = L"manifest.version";
+
+// Indicates if an extension is blacklisted:
+const wchar_t kPrefBlacklist[] = L"blacklist";
+
 // A preference that tracks extension shelf configuration.  This is a list
 // object read from the Preferences file, containing a list of toolstrip URLs.
 const wchar_t kExtensionShelf[] = L"extensions.shelf";
@@ -40,6 +49,7 @@ InstalledExtensions::~InstalledExtensions() {
 
 void InstalledExtensions::VisitInstalledExtensions(
     InstalledExtensions::Callback *callback) {
+  scoped_ptr<InstalledExtensions::Callback> cleanup(callback);
   DictionaryValue::key_iterator extension_id = extension_data_->begin_keys();
   for (; extension_id != extension_data_->end_keys(); ++extension_id) {
     DictionaryValue* ext;
@@ -47,6 +57,17 @@ void InstalledExtensions::VisitInstalledExtensions(
       LOG(WARNING) << "Invalid pref for extension " << *extension_id;
       NOTREACHED();
       continue;
+    }
+    if (ext->HasKey(kPrefBlacklist)) {
+      bool is_blacklisted = false;
+      if (!ext->GetBoolean(kPrefBlacklist, &is_blacklisted)) {
+        NOTREACHED() << "Invalid blacklist pref:" << *extension_id;
+        continue;
+      }
+      if (is_blacklisted) {
+        LOG(WARNING) << "Blacklisted extension: " << *extension_id;
+        continue;
+      }
     }
     FilePath::StringType path;
     if (!ext->GetString(kPrefPath, &path)) {
@@ -60,9 +81,16 @@ void InstalledExtensions::VisitInstalledExtensions(
       NOTREACHED();
       continue;
     }
+    DictionaryValue* manifest = NULL;
+    if (!ext->GetDictionary(kPrefManifest, &manifest)) {
+      LOG(WARNING) << "Missing manifest for extension " << *extension_id;
+      // Just a warning for now.
+    }
+
     Extension::Location location =
         static_cast<Extension::Location>(location_value);
-    callback->Run(WideToASCII(*extension_id), FilePath(path), location);
+    callback->Run(manifest, WideToASCII(*extension_id), FilePath(path),
+                  location);
   }
 }
 
@@ -131,7 +159,10 @@ void ExtensionPrefs::MakePathsAbsolute(DictionaryValue* dict) {
     }
     FilePath::StringType path_string;
     if (!extension_dict->GetString(kPrefPath, &path_string)) {
-      NOTREACHED();
+      if (!IsBlacklistBitSet(extension_dict)) {
+        // We expect the kPrefPath for non-blacklisted extensions.
+        NOTREACHED();
+      }
       continue;
     }
     DCHECK(!FilePath(path_string).IsAbsolute());
@@ -149,6 +180,83 @@ DictionaryValue* ExtensionPrefs::CopyCurrentExtensions() {
     return copy;
   }
   return new DictionaryValue;
+}
+
+bool ExtensionPrefs::IsBlacklistBitSet(DictionaryValue* ext) {
+  if (!ext->HasKey(kPrefBlacklist)) return false;
+  bool is_blacklisted = false;
+  if (!ext->GetBoolean(kPrefBlacklist, &is_blacklisted)) {
+    NOTREACHED() << "Failed to fetch blacklist flag.";
+    // In case we could not fetch the flag, we consider the extension
+    // is NOT blacklisted.
+    return false;
+  }
+  return is_blacklisted;
+}
+
+bool ExtensionPrefs::IsExtensionBlacklisted(const std::string& extension_id) {
+  const DictionaryValue* extensions = prefs_->GetDictionary(kExtensionsPref);
+  DCHECK(extensions);
+  DictionaryValue* ext = NULL;
+  if (!extensions->GetDictionary(ASCIIToWide(extension_id), &ext)) {
+    // No such extension yet.
+    return false;
+  }
+  return IsBlacklistBitSet(ext);
+}
+
+void ExtensionPrefs::UpdateBlacklist(
+  const std::set<std::string>& blacklist_set) {
+  std::vector<std::string> remove_pref_ids;
+  std::set<std::string> used_id_set;
+  const DictionaryValue* extensions = prefs_->GetDictionary(kExtensionsPref);
+  DCHECK(extensions);
+  DictionaryValue::key_iterator extension_id = extensions->begin_keys();
+  for (; extension_id != extensions->end_keys(); ++extension_id) {
+    DictionaryValue* ext;
+    std::string id = WideToASCII(*extension_id);
+    if (!extensions->GetDictionary(*extension_id, &ext)) {
+      NOTREACHED() << "Invalid pref for extension " << *extension_id;
+      continue;
+    }
+    if (blacklist_set.find(id) == blacklist_set.end()) {
+      if (!IsBlacklistBitSet(ext)) {
+        // This extension is not in blacklist. And it was not blacklisted
+        // before.
+        continue;
+      } else {
+        if (ext->GetSize() == 1) {
+          // We should remove the entry if the only flag here is blacklist.
+          remove_pref_ids.push_back(id);
+        } else {
+          // Remove the blacklist bit.
+          ext->Remove(kPrefBlacklist, NULL);
+        }
+      }
+    } else {
+      if (!IsBlacklistBitSet(ext)) {
+        // Only set the blacklist if it was not set.
+        ext->SetBoolean(kPrefBlacklist, true);
+      }
+      // Keep the record if this extension is already processed.
+      used_id_set.insert(id);
+    }
+  }
+
+  // Iterate the leftovers to set blacklist in pref
+  std::set<std::string>::const_iterator set_itr = blacklist_set.begin();
+  for (; set_itr != blacklist_set.end(); ++set_itr) {
+    if (used_id_set.find(*set_itr) == used_id_set.end()) {
+      UpdateExtensionPref(*set_itr, kPrefBlacklist,
+        Value::CreateBooleanValue(true));
+    }
+  }
+  for (unsigned int i = 0; i < remove_pref_ids.size(); ++i) {
+    DeleteExtensionPrefs(remove_pref_ids[i]);
+  }
+  // Update persistent registry
+  prefs_->ScheduleSavePersistentPrefs();
+  return;
 }
 
 void ExtensionPrefs::GetKilledExtensionIds(std::set<std::string>* killed_ids) {
@@ -205,14 +313,19 @@ void ExtensionPrefs::SetShelfToolstripOrder(const URLList& urls) {
 }
 
 void ExtensionPrefs::OnExtensionInstalled(Extension* extension) {
-  std::string id = extension->id();
-  UpdateExtensionPref(id, kPrefState,
-                      Value::CreateIntegerValue(Extension::ENABLED));
+  const std::string& id = extension->id();
+  // Make sure we don't enable a disabled extension.
+  if (GetExtensionState(extension->id()) != Extension::DISABLED) {
+    UpdateExtensionPref(id, kPrefState,
+                        Value::CreateIntegerValue(Extension::ENABLED));
+  }
   UpdateExtensionPref(id, kPrefLocation,
                       Value::CreateIntegerValue(extension->location()));
   FilePath::StringType path = MakePathRelative(install_directory_,
       extension->path(), NULL);
   UpdateExtensionPref(id, kPrefPath, Value::CreateStringValue(path));
+  UpdateExtensionPref(id, kPrefManifest,
+                      extension->manifest_value()->DeepCopy());
   prefs_->SavePersistentPrefs();
 }
 
@@ -232,12 +345,68 @@ void ExtensionPrefs::OnExtensionUninstalled(const Extension* extension,
   }
 }
 
+Extension::State ExtensionPrefs::GetExtensionState(
+    const std::string& extension_id) {
+  DictionaryValue* extension = GetExtensionPref(extension_id);
+
+  // If the extension doesn't have a pref, it's a --load-extension.
+  if (!extension)
+    return Extension::ENABLED;
+
+  int state = -1;
+  if (!extension->GetInteger(kPrefState, &state) ||
+      state < 0 || state >= Extension::NUM_STATES) {
+    LOG(ERROR) << "Bad or missing pref 'state' for extension '"
+               << extension_id << "'";
+    return Extension::ENABLED;
+  }
+  return static_cast<Extension::State>(state);
+}
+
+void ExtensionPrefs::SetExtensionState(Extension* extension,
+                                       Extension::State state) {
+  UpdateExtensionPref(extension->id(), kPrefState,
+                      Value::CreateIntegerValue(state));
+  prefs_->SavePersistentPrefs();
+}
+
+std::string ExtensionPrefs::GetVersionString(const std::string& extension_id) {
+  DictionaryValue* extension = GetExtensionPref(extension_id);
+  if (!extension)
+    return std::string();
+
+  std::string version;
+  if (!extension->GetString(kPrefVersion, &version)) {
+    LOG(ERROR) << "Bad or missing pref 'version' for extension '"
+               << extension_id << "'";
+  }
+
+  return version;
+}
+
+void ExtensionPrefs::MigrateToPrefs(Extension* extension) {
+  UpdateExtensionPref(extension->id(), kPrefManifest,
+                      extension->manifest_value()->DeepCopy());
+}
+
+FilePath ExtensionPrefs::GetExtensionPath(const std::string& extension_id) {
+  const DictionaryValue* dict = prefs_->GetDictionary(kExtensionsPref);
+  if (!dict || dict->GetSize() == 0)
+    return FilePath();
+
+  std::wstring path;
+  if (!dict->GetString(ASCIIToWide(extension_id) + L"." + kPrefPath, &path))
+    return FilePath();
+
+  return install_directory_.Append(FilePath::FromWStringHack(path));
+}
+
 bool ExtensionPrefs::UpdateExtensionPref(const std::string& extension_id,
                                          const std::wstring& key,
                                          Value* data_value) {
   DictionaryValue* extension = GetOrCreateExtensionPref(extension_id);
   if (!extension->Set(key, data_value)) {
-    NOTREACHED() << L"Cannot modify key: '" << key.c_str()
+    NOTREACHED() << "Cannot modify key: '" << key.c_str()
                  << "' for extension: '" << extension_id.c_str() << "'";
     return false;
   }
@@ -266,3 +435,11 @@ DictionaryValue* ExtensionPrefs::GetOrCreateExtensionPref(
   return extension;
 }
 
+DictionaryValue* ExtensionPrefs::GetExtensionPref(
+    const std::string& extension_id) {
+  const DictionaryValue* dict = prefs_->GetDictionary(kExtensionsPref);
+  DictionaryValue* extension = NULL;
+  std::wstring id = ASCIIToWide(extension_id);
+  dict->GetDictionary(id, &extension);
+  return extension;
+}

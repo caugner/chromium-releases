@@ -8,9 +8,12 @@
 #include "chrome/common/plugin_messages.h"
 #include "chrome/plugin/npobject_proxy.h"
 #include "chrome/plugin/plugin_channel_base.h"
+#include "webkit/api/public/WebBindings.h"
 #include "webkit/glue/plugins/nphostapi.h"
 #include "webkit/glue/plugins/plugin_host.h"
 #include "webkit/glue/webkit_glue.h"
+
+using WebKit::WebBindings;
 
 // true if the current process is a plugin process, false if it's a renderer
 // process.
@@ -138,7 +141,7 @@ void CreateNPVariantParam(const NPVariant& variant,
                           PluginChannelBase* channel,
                           NPVariant_Param* param,
                           bool release,
-                          base::WaitableEvent* modal_dialog_event,
+                          gfx::NativeViewId containing_window,
                           const GURL& page_url) {
   switch (variant.type) {
     case NPVariantType_Void:
@@ -184,7 +187,7 @@ void CreateNPVariantParam(const NPVariant& variant,
           param->type = NPVARIANT_PARAM_OBJECT_ROUTING_ID;
           int route_id = channel->GenerateRouteID();
           new NPObjectStub(
-              variant.value.objectValue, channel, route_id, modal_dialog_event,
+              variant.value.objectValue, channel, route_id, containing_window,
               page_url);
           param->npobject_routing_id = route_id;
           param->npobject_pointer =
@@ -200,13 +203,13 @@ void CreateNPVariantParam(const NPVariant& variant,
   }
 
   if (release)
-    NPN_ReleaseVariantValue(const_cast<NPVariant*>(&variant));
+    WebBindings::releaseVariantValue(const_cast<NPVariant*>(&variant));
 }
 
 void CreateNPVariant(const NPVariant_Param& param,
                      PluginChannelBase* channel,
                      NPVariant* result,
-                     base::WaitableEvent* modal_dialog_event,
+                     gfx::NativeViewId containing_window,
                      const GURL& page_url) {
   switch (param.type) {
     case NPVARIANT_PARAM_VOID:
@@ -240,14 +243,14 @@ void CreateNPVariant(const NPVariant_Param& param,
           NPObjectProxy::Create(channel,
                                 param.npobject_routing_id,
                                 param.npobject_pointer,
-                                modal_dialog_event,
+                                containing_window,
                                 page_url);
       break;
     case NPVARIANT_PARAM_OBJECT_POINTER:
       result->type = NPVariantType_Object;
       result->value.objectValue =
           reinterpret_cast<NPObject*>(param.npobject_pointer);
-      NPN_RetainObject(result->value.objectValue);
+      WebBindings::retainObject(result->value.objectValue);
       break;
     default:
       NOTREACHED();

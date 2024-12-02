@@ -49,6 +49,7 @@
 #include "core/cross/pack.h"
 #include "core/cross/param_operation.h"
 #include "core/cross/primitive.h"
+#include "core/cross/sampler.h"
 #include "core/cross/skin.h"
 #include "core/cross/stream.h"
 #include "import/cross/collada.h"
@@ -126,6 +127,44 @@ Matrix4 FMMatrix44ToMatrix4(const FMMatrix44& fmmatrix44) {
 }
 }  // anonymous namespace
 
+void ColladaDataMap::Clear() {
+  original_data_.clear();
+}
+
+bool ColladaDataMap::AddData(const FilePath& file_path,
+                             const std::string& data,
+                             ServiceLocator* service_locator) {
+  std::pair<OriginalDataMap::iterator, bool> result =
+      original_data_.insert(std::pair<FilePath, std::string>(file_path, data));
+  if (!result.second) {
+    O3D_ERROR(service_locator)
+        << "Attempt to map 2 resources to the same file path:"
+        << FilePathToUTF8(file_path).c_str();
+  }
+  return result.second;
+}
+
+std::vector<FilePath> ColladaDataMap::GetOriginalDataFilenames() const {
+  std::vector<FilePath> result;
+  for (OriginalDataMap::const_iterator iter = original_data_.begin();
+       iter != original_data_.end();
+       ++iter) {
+    result.push_back(iter->first);
+  }
+  return result;
+}
+
+const std::string& ColladaDataMap::GetOriginalData(
+    const FilePath& filename) const {
+  static const std::string empty;
+  OriginalDataMap::const_iterator entry = original_data_.find(filename);
+  if (entry != original_data_.end()) {
+    return entry->second;
+  } else {
+    return empty;
+  }
+}
+
 // Import the given COLLADA file or ZIP file into the given scene.
 // This is the external interface to o3d.
 bool Collada::Import(Pack* pack,
@@ -165,10 +204,10 @@ Collada::Collada(Pack* pack, const Options& options)
       dummy_effect_(NULL),
       dummy_material_(NULL),
       instance_root_(NULL),
+      collada_zip_archive_(NULL),
       cull_enabled_(false),
       cull_front_(false),
       front_cw_(false),
-      collada_zip_archive_(NULL),
       unique_filename_counter_(0) {
 }
 
@@ -178,7 +217,7 @@ Collada::~Collada() {
 
 void Collada::ClearData() {
   textures_.clear();
-  original_data_.clear();
+  original_data_map_.Clear();
   effects_.clear();
   shapes_.clear();
   skinned_shapes_.clear();
@@ -192,26 +231,6 @@ void Collada::ClearData() {
   instance_root_ = NULL;
   base_path_ = FilePath(FilePath::kCurrentDirectory);
   unique_filename_counter_ = 0;
-}
-
-std::vector<FilePath> Collada::GetOriginalDataFilenames() const {
-  std::vector<FilePath> result;
-  for (OriginalDataMap::const_iterator iter = original_data_.begin();
-       iter != original_data_.end();
-       ++iter) {
-    result.push_back(iter->first);
-  }
-  return result;
-}
-
-const std::string& Collada::GetOriginalData(const FilePath& filename) const {
-  static const std::string empty;
-  OriginalDataMap::const_iterator entry = original_data_.find(filename);
-  if (entry != original_data_.end()) {
-    return entry->second;
-  } else {
-    return empty;
-  }
 }
 
 // Import the given COLLADA file or ZIP file under the given parent node.
@@ -508,7 +527,7 @@ bool Collada::BuildFloatAnimation(ParamFloat* result,
       curve->set_pre_infinity(ConvertInfinity(fcd_curve->GetPreInfinity()));
       curve->set_post_infinity(ConvertInfinity(fcd_curve->GetPostInfinity()));
 
-      for (int i = 0; i != fcd_curve->GetKeyCount(); ++i) {
+      for (unsigned int i = 0; i != fcd_curve->GetKeyCount(); ++i) {
         FCDAnimationKey* fcd_key = fcd_curve->GetKey(i);
         switch (fcd_key->interpolation) {
           case FUDaeInterpolation::STEP:
@@ -868,7 +887,8 @@ bool Collada::ImportTreeInstances(FCDocument* doc,
           if (controller->IsSkin()) {
             Shape* shape = GetSkinnedShape(doc,
                                            controller_instance,
-                                           node_instance);
+                                           node_instance,
+                                           transform);
             if (shape) {
               transform->AddShape(shape);
             } else {
@@ -1089,7 +1109,8 @@ Shape* Collada::GetShape(FCDocument* doc,
 
 Shape* Collada::GetSkinnedShape(FCDocument* doc,
                                 FCDControllerInstance* instance,
-                                NodeInstance *parent_node_instance) {
+                                NodeInstance *parent_node_instance,
+                                Transform* parent) {
   Shape* shape = NULL;
   FCDController* controller =
       static_cast<FCDController*>(instance->GetEntity());
@@ -1097,7 +1118,7 @@ Shape* Collada::GetSkinnedShape(FCDocument* doc,
     fm::string id = controller->GetDaeId();
     shape = skinned_shapes_[id.c_str()];
     if (!shape) {
-      shape = BuildSkinnedShape(doc, instance, parent_node_instance);
+      shape = BuildSkinnedShape(doc, instance, parent_node_instance, parent);
       if (!shape)
         return NULL;
       skinned_shapes_[id.c_str()] = shape;
@@ -1108,9 +1129,6 @@ Shape* Collada::GetSkinnedShape(FCDocument* doc,
 
 // Builds an O3D shape node corresponding to a given FCollada geometry
 // instance.
-// Parameters:
-//   doc:                The FCollada document from which to import nodes.
-//   geom_instance:      The FCollada geometry node to be converted.
 Shape* Collada::BuildShape(FCDocument* doc,
                            FCDGeometryInstance* geom_instance,
                            FCDGeometry* geom,
@@ -1293,8 +1311,11 @@ Shape* Collada::BuildShape(FCDocument* doc,
 
 Shape* Collada::BuildSkinnedShape(FCDocument* doc,
                                   FCDControllerInstance* instance,
-                                  NodeInstance *parent_node_instance) {
+                                  NodeInstance *parent_node_instance,
+                                  Transform* parent) {
   // TODO(o3d): Handle chained controllers. Morph->Skin->...
+  // TODO(gman): Change this to correctly create the skin, separate from
+  //     ParamArray and SkinEval so that we can support instanced skins.
   Shape* shape = NULL;
   LOG_ASSERT(doc && instance);
   FCDController* controller =
@@ -1373,6 +1394,8 @@ Shape* Collada::BuildSkinnedShape(FCDocument* doc,
 
     skin_eval->set_skin(skin);
     skin_eval->set_matrices(matrices);
+    skin_eval->GetParam<ParamMatrix4>(SkinEval::kBaseParamName)->Bind(
+        parent->GetParam<ParamMatrix4>(Transform::kWorldMatrixParamName));
 
     // Bind bones to matrices
     size_t num_bones = instance->GetJointCount();
@@ -1512,6 +1535,9 @@ Shape* Collada::BuildSkinnedShape(FCDocument* doc,
               return NULL;
             }
           }
+          default:
+            // do nothing
+            break;
         }
       }
       if (!copied) {
@@ -1600,6 +1626,9 @@ Shape* Collada::BuildSkinnedShape(FCDocument* doc,
                                         source_stream.semantic_index());
             break;
           }
+          default:
+            // do nothing
+            break;
         }
       }
       if (!copied) {
@@ -1654,10 +1683,15 @@ Texture* Collada::BuildTextureFromImage(FCDImage* image) {
       GetRelativePathIfPossible(base_path_, uri, &uri);
     }
 
+    if (!FindFile(options_.file_paths, file_path, &file_path)) {
+      O3D_ERROR(service_locator_) << "Could not find file: " << filename;
+      return NULL;
+    }
+
     tex = Texture::Ref(
         pack_->CreateTextureFromFile(FilePathToUTF8(uri),
                                      file_path,
-                                     Bitmap::UNKNOWN,
+                                     image::UNKNOWN,
                                      options_.generate_mipmaps));
     if (tex) {
       const fstring name(image->GetName());
@@ -1668,7 +1702,7 @@ Texture* Collada::BuildTextureFromImage(FCDImage* image) {
       // Cache the original data by URI so we can recover it later.
       std::string contents;
       file_util::ReadFileToString(file_path, &contents);
-      original_data_[uri] = contents;
+      original_data_map_.AddData(uri, contents, service_locator_);
     }
 
     if (tempfile.size() > 0) ZipArchive::DeleteFile(tempfile);
@@ -1978,7 +2012,10 @@ Effect* Collada::BuildEffect(FCDocument* doc, FCDEffect* collada_effect) {
           }
         } else {
           FilePath temp_path = file_path;
-          GetRelativePathIfPossible(base_path_, temp_path, &temp_path);
+          if (!FindFile(options_.file_paths, temp_path, &temp_path)) {
+            O3D_ERROR(service_locator_) << "Could not find file: " << path;
+            return NULL;
+          }
           file_util::ReadFileToString(temp_path, &effect_string);
         }
       }
@@ -2001,7 +2038,7 @@ Effect* Collada::BuildEffect(FCDocument* doc, FCDEffect* collada_effect) {
       }
       if (options_.keep_original_data) {
         // Cache the original data by URI so we can recover it later.
-        original_data_[file_path] = effect_string;
+        original_data_map_.AddData(file_path, effect_string, service_locator_);
       }
     }
   } else {
@@ -2070,7 +2107,8 @@ Effect* Collada::BuildEffect(FCDocument* doc, FCDEffect* collada_effect) {
               }
               if (options_.keep_original_data) {
                 // Cache the original data by URI so we can recover it later.
-                original_data_[file_path] = effect_string;
+                original_data_map_.AddData(file_path, effect_string,
+                                           service_locator_);
               }
             }
           }
@@ -2414,6 +2452,9 @@ void Collada::AddRenderState(FCDEffectPassState* pass_state, State* state) {
               << "FRONT_AND_BACK culling is unsupported";
           break;
         }
+        case FUDaePassStateFaceType::INVALID:
+          O3D_ERROR(service_locator_) << "INVALID culling type";
+          break;
       }
       UpdateCullingState(state);
       break;
@@ -2605,6 +2646,9 @@ void Collada::AddRenderState(FCDEffectPassState* pass_state, State* state) {
       SetBoolState(state, State::kStencilEnableParamName, value);
       break;
     }
+    default:
+      // do nothing
+      break;
   }
 }
 
@@ -2783,7 +2827,6 @@ void Collada::SetParamsFromMaterial(FCDMaterial* material,
       LOG_ASSERT(p);
       String param_name(p->GetReference());
       // Check for an effect binding
-      FCDEffect* effect = material->GetEffect();
       FCDEffectProfileFX* profile_fx = FindProfileFX(material->GetEffect());
       if (profile_fx) {
         FCDEffectTechnique* technique = profile_fx->GetTechnique(0);

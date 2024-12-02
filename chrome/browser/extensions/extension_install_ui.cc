@@ -7,14 +7,18 @@
 #include <map>
 
 #include "app/l10n_util.h"
+#include "app/resource_bundle.h"
 #include "base/file_util.h"
+#include "base/rand_util.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_window.h"
-#include "chrome/browser/extensions/theme_preview_infobar_delegate.h"
+#include "chrome/browser/extensions/theme_installed_infobar_delegate.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/extensions/extension.h"
+#include "grit/browser_resources.h"
 #include "grit/chromium_strings.h"
+#include "grit/generated_resources.h"
 
 #if defined(OS_WIN)
 #include "app/win_util.h"
@@ -22,13 +26,73 @@
 #include "base/scoped_cftyperef.h"
 #include "base/sys_string_conversions.h"
 #include <CoreFoundation/CFUserNotification.h>
+#elif defined(TOOLKIT_GTK)
+#include "chrome/browser/extensions/gtk_theme_installed_infobar_delegate.h"
+#include "chrome/browser/gtk/gtk_theme_provider.h"
 #endif
 
-ExtensionInstallUI::ExtensionInstallUI(Profile* profile)
-    : profile_(profile), ui_loop_(MessageLoop::current()) {
+namespace {
+
+#if defined(OS_WIN) || defined(TOOLKIT_GTK)
+
+static std::wstring GetInstallWarning(Extension* extension) {
+  // If the extension has a plugin, it's easy: the plugin has the most severe
+  // warning.
+  if (!extension->plugins().empty())
+    return l10n_util::GetString(IDS_EXTENSION_PROMPT_WARNING_NEW_FULL_ACCESS);
+
+  // Otherwise, we go in descending order of severity: all hosts, several hosts,
+  // a single host, no hosts. For each of these, we also have a variation of the
+  // message for when api permissions are also requested.
+  if (extension->HasAccessToAllHosts()) {
+    if (extension->api_permissions().empty())
+      return l10n_util::GetString(IDS_EXTENSION_PROMPT_WARNING_NEW_ALL_HOSTS);
+    else
+      return l10n_util::GetString(
+          IDS_EXTENSION_PROMPT_WARNING_NEW_ALL_HOSTS_AND_BROWSER);
+  }
+
+  const std::set<std::string> hosts = extension->GetEffectiveHostPermissions();
+  if (hosts.size() > 1) {
+    if (extension->api_permissions().empty())
+      return l10n_util::GetString(
+          IDS_EXTENSION_PROMPT_WARNING_NEW_MULTIPLE_HOSTS);
+    else
+      return l10n_util::GetString(
+          IDS_EXTENSION_PROMPT_WARNING_NEW_MULTIPLE_HOSTS_AND_BROWSER);
+  }
+
+  if (hosts.size() == 1) {
+    if (extension->api_permissions().empty())
+      return l10n_util::GetStringF(
+          IDS_EXTENSION_PROMPT_WARNING_NEW_SINGLE_HOST,
+          UTF8ToWide(*hosts.begin()));
+    else
+      return l10n_util::GetStringF(
+          IDS_EXTENSION_PROMPT_WARNING_NEW_SINGLE_HOST_AND_BROWSER,
+          UTF8ToWide(*hosts.begin()));
+  }
+
+  DCHECK(hosts.size() == 0);
+  if (extension->api_permissions().empty())
+    return L"";
+  else
+    return l10n_util::GetString(IDS_EXTENSION_PROMPT_WARNING_NEW_BROWSER);
 }
 
-void ExtensionInstallUI::ConfirmInstall(CrxInstaller* installer,
+#endif
+
+}  // namespace
+
+ExtensionInstallUI::ExtensionInstallUI(Profile* profile)
+    : profile_(profile), ui_loop_(MessageLoop::current())
+#if defined(TOOLKIT_GTK)
+    ,previous_use_gtk_theme_(false)
+#endif
+{
+}
+
+void ExtensionInstallUI::ConfirmInstall(Delegate* delegate,
                                         Extension* extension,
                                         SkBitmap* install_icon) {
   DCHECK(ui_loop_ == MessageLoop::current());
@@ -42,35 +106,73 @@ void ExtensionInstallUI::ConfirmInstall(CrxInstaller* installer,
     if (previous_theme)
       previous_theme_id_ = previous_theme->id();
 
-    installer->ContinueInstall();
+#if defined(TOOLKIT_GTK)
+    // On linux, we also need to take the user's system settings into account
+    // to undo theme installation.
+    previous_use_gtk_theme_ =
+        GtkThemeProvider::GetFrom(profile_)->UseGtkTheme();
+#endif
+
+    delegate->ContinueInstall();
     return;
   }
 
-#if defined(OS_WIN)
-  ShowExtensionInstallPrompt(profile_, installer, extension, install_icon);
+#if defined(OS_WIN) || defined(TOOLKIT_GTK)
+  if (!install_icon) {
+    install_icon = ResourceBundle::GetSharedInstance().GetBitmapNamed(
+        IDR_DEFAULT_EXTENSION_ICON_128);
+  }
+
+  ShowExtensionInstallPrompt(profile_, delegate, extension, install_icon,
+                             GetInstallWarning(extension));
 
 #elif defined(OS_MACOSX)
   // TODO(port): Implement nicer UI.
   // Using CoreFoundation to do this dialog is unimaginably lame but will do
   // until the UI is redone.
-  scoped_cftyperef<CFStringRef> product_name(
-      base::SysWideToCFStringRef(l10n_util::GetString(IDS_PRODUCT_NAME)));
+  scoped_cftyperef<CFStringRef> confirm_title(base::SysWideToCFStringRef(
+      l10n_util::GetString(IDS_EXTENSION_PROMPT_TITLE)));
+
+  // Build the confirmation prompt, including a heading, a random humorous
+  // warning, and a severe warning.
+  const string16& confirm_format(ASCIIToUTF16("$1\n\n$2\n\n$3"));
+  std::vector<string16> subst;
+  subst.push_back(l10n_util::GetStringFUTF16(IDS_EXTENSION_PROMPT_HEADING,
+      UTF8ToUTF16(extension->name())));
+  string16 warnings[] = {
+    l10n_util::GetStringUTF16(IDS_EXTENSION_PROMPT_WARNING_1),
+    l10n_util::GetStringUTF16(IDS_EXTENSION_PROMPT_WARNING_2),
+    l10n_util::GetStringUTF16(IDS_EXTENSION_PROMPT_WARNING_3)
+  };
+  subst.push_back(warnings[base::RandInt(0, arraysize(warnings) - 1)]);
+  subst.push_back(l10n_util::GetStringUTF16(
+      IDS_EXTENSION_PROMPT_WARNING_SEVERE));
+  scoped_cftyperef<CFStringRef> confirm_prompt(base::SysUTF16ToCFStringRef(
+      ReplaceStringPlaceholders(confirm_format, subst, NULL)));
+
+  scoped_cftyperef<CFStringRef> confirm_cancel(base::SysWideToCFStringRef(
+      l10n_util::GetString(IDS_EXTENSION_PROMPT_CANCEL_BUTTON)));
+
   CFOptionFlags response;
-  if (kCFUserNotificationAlternateResponse == CFUserNotificationDisplayAlert(
-      0, kCFUserNotificationCautionAlertLevel, NULL, NULL, NULL,
-      product_name,
-      CFSTR("Are you sure you want to install this extension?\n\n"
-           "This is a temporary message and it will be removed when "
-           "extensions UI is finalized."),
-      NULL, CFSTR("Cancel"), NULL, &response)) {
-    installer->AbortInstall();
+  CFUserNotificationDisplayAlert(
+      0, kCFUserNotificationCautionAlertLevel,
+      NULL, // TODO(port): show the install_icon instead of a default.
+      NULL, NULL, // Sound URL, localization URL.
+      confirm_title,
+      confirm_prompt,
+      NULL, // Default button.
+      confirm_cancel,
+      NULL, // Other button.
+      &response);
+  if (response == kCFUserNotificationAlternateResponse) {
+    delegate->AbortInstall();
   } else {
-    installer->ContinueInstall();
+    delegate->ContinueInstall();
   }
 #else
   // TODO(port): Implement some UI.
   NOTREACHED();
-  installer->ContinueInstall();
+  delegate->ContinueInstall();
 #endif  // OS_*
 }
 
@@ -90,12 +192,14 @@ void ExtensionInstallUI::OnInstallFailure(const std::string& error) {
       base::SysUTF8ToCFStringRef(error));
   CFOptionFlags response;
   CFUserNotificationDisplayAlert(
-      0, kCFUserNotificationCautionAlertLevel, NULL, NULL, NULL,
+      0, kCFUserNotificationNoteAlertLevel, NULL, NULL, NULL,
       CFSTR("Extension Install Error"), message_cf,
       NULL, NULL, NULL, &response);
 #else
-  LOG(ERROR) << "Extension install failed: " << error.c_str();
-  NOTREACHED();
+  GtkWidget* dialog = gtk_message_dialog_new(NULL, GTK_DIALOG_MODAL,
+      GTK_MESSAGE_ERROR, GTK_BUTTONS_OK, "%s", error.c_str());
+  g_signal_connect(dialog, "response", G_CALLBACK(gtk_widget_destroy), NULL);
+  gtk_widget_show_all(dialog);
 #endif
 }
 
@@ -126,8 +230,15 @@ void ExtensionInstallUI::ShowThemeInfoBar(Extension* new_theme) {
   }
 
   // Then either replace that old one or add a new one.
-  InfoBarDelegate* new_delegate = new ThemePreviewInfobarDelegate(tab_contents,
-      new_theme->name(), previous_theme_id_);
+  InfoBarDelegate* new_delegate =
+#if defined(TOOLKIT_GTK)
+      new GtkThemeInstalledInfoBarDelegate(
+          tab_contents,
+          new_theme->name(), previous_theme_id_, previous_use_gtk_theme_);
+#else
+      new ThemeInstalledInfoBarDelegate(tab_contents,
+                                        new_theme->name(), previous_theme_id_);
+#endif
 
   if (old_delegate)
     tab_contents->ReplaceInfoBar(old_delegate, new_delegate);

@@ -202,7 +202,9 @@ bool CheckTextureFormatsSupported(LPDIRECT3D9 d3d,
 // Checks that the graphics device meets the necessary minimum requirements.
 // Note that in the current implementation we're being very lenient with the
 // capabilities we require.
-bool CheckDeviceCaps(LPDIRECT3D9 d3d, Features* features) {
+bool CheckDeviceCaps(LPDIRECT3D9 d3d,
+                     Features* features,
+                     D3DDISPLAYMODE* d3d_display_mode) {
   D3DCAPS9 d3d_caps;
   if (!HR(d3d->GetDeviceCaps(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, &d3d_caps))) {
     LOG(ERROR) << "Failed to get device capabilities.";
@@ -213,9 +215,9 @@ bool CheckDeviceCaps(LPDIRECT3D9 d3d, Features* features) {
   DWORD pixel_shader_version = d3d_caps.PixelShaderVersion;
   if (pixel_shader_version < D3DPS_VERSION(2, 0)) {
     LOG(ERROR) << "Device only supports up to pixel shader version "
-        << D3DSHADER_VERSION_MAJOR(pixel_shader_version) << "."
-        << D3DSHADER_VERSION_MINOR(pixel_shader_version)
-        << ".  Version 2.0 is required.";
+               << D3DSHADER_VERSION_MAJOR(pixel_shader_version) << "."
+               << D3DSHADER_VERSION_MINOR(pixel_shader_version)
+               << ".  Version 2.0 is required.";
     return false;
   }
 
@@ -225,37 +227,37 @@ bool CheckDeviceCaps(LPDIRECT3D9 d3d, Features* features) {
   DWORD required_texture_size = 2048;
   if (max_texture_height < required_texture_size ||
       max_texture_width < required_texture_size) {
-    LOG(ERROR) << "Device only supports up to " << max_texture_height << "x"
+    LOG(ERROR)
+        << "Device only supports up to " << max_texture_height << "x"
         << max_texture_width << " textures.  " << required_texture_size << "x"
         << required_texture_size << " is required.";
     return false;
   }
 
-  D3DDISPLAYMODE d3d_display_mode;
-  if (!HR(d3d->GetAdapterDisplayMode(D3DADAPTER_DEFAULT, &d3d_display_mode)))
+  if (!HR(d3d->GetAdapterDisplayMode(D3DADAPTER_DEFAULT, d3d_display_mode)))
     return false;
 
   // Check that the device supports all the texture formats needed.
-  D3DFORMAT texture_formats[] = {
+  static D3DFORMAT texture_formats[] = {
     D3DFMT_X8R8G8B8, D3DFMT_A8R8G8B8, D3DFMT_DXT1,
     D3DFMT_DXT3, D3DFMT_DXT5
   };
   if (!CheckTextureFormatsSupported(
       d3d,
-      d3d_display_mode.Format,
+      d3d_display_mode->Format,
       texture_formats,
-      sizeof(texture_formats) / sizeof(texture_formats[0]))) {
+      arraysize(texture_formats))) {
     return false;
   }
   if (features->floating_point_textures()) {
-    D3DFORMAT float_texture_formats[] = {
+    static D3DFORMAT float_texture_formats[] = {
       D3DFMT_R32F, D3DFMT_A16B16G16R16F, D3DFMT_A32B32G32R32F
     };
     if (!CheckTextureFormatsSupported(
         d3d,
-        d3d_display_mode.Format,
+        d3d_display_mode->Format,
         float_texture_formats,
-        sizeof(float_texture_formats) / sizeof(float_texture_formats[0]))) {
+        arraysize(float_texture_formats))) {
       return false;
     }
   }
@@ -269,34 +271,44 @@ bool CheckDeviceCaps(LPDIRECT3D9 d3d, Features* features) {
 
   // Check render target formats.
   D3DFORMAT render_target_formats[] = { D3DFMT_X8R8G8B8, D3DFMT_A8R8G8B8 };
-  const int kNumRenderTargetFormats = sizeof(render_target_formats) /
-                                      sizeof(render_target_formats[0]);
+  const int kNumRenderTargetFormats = arraysize(render_target_formats);
   for (int i = 0; i < kNumRenderTargetFormats; ++i) {
     if (!SUCCEEDED(d3d->CheckDeviceFormat(D3DADAPTER_DEFAULT,
                                           D3DDEVTYPE_HAL,
-                                          d3d_display_mode.Format,
+                                          d3d_display_mode->Format,
                                           D3DUSAGE_RENDERTARGET,
                                           D3DRTYPE_TEXTURE,
                                           render_target_formats[i]))) {
       LOG(ERROR) << "Device does not support all required texture formats"
-          << " for render targets.";
+                 << " for render targets.";
       return false;
     }
   }
 
   // Check depth stencil formats.
   D3DFORMAT depth_stencil_formats[] = { D3DFMT_D24S8 };
-  const int kNumDepthStencilFormats = sizeof(depth_stencil_formats) /
-                                      sizeof(depth_stencil_formats[0]);
+  const int kNumDepthStencilFormats = arraysize(depth_stencil_formats);
+  bool success = false;
   for (int i = 0; i < kNumDepthStencilFormats; ++i) {
     if (!SUCCEEDED(d3d->CheckDeviceFormat(D3DADAPTER_DEFAULT,
                                           D3DDEVTYPE_HAL,
-                                          d3d_display_mode.Format,
+                                          d3d_display_mode->Format,
                                           D3DUSAGE_DEPTHSTENCIL,
                                           D3DRTYPE_SURFACE,
                                           depth_stencil_formats[i]))) {
       LOG(ERROR) << "Device does not support all required texture formats"
-          << " for depth/stencil buffers.";
+                 << " for depth/stencil buffers.";
+      return false;
+    }
+    // Now check that it's compatible with the given backbuffer format.
+    if (!SUCCEEDED(d3d->CheckDepthStencilMatch(
+                       D3DADAPTER_DEFAULT,
+                       D3DDEVTYPE_HAL,
+                       d3d_display_mode->Format,
+                       D3DFMT_A8R8G8B8,
+                       D3DFMT_D24S8))) {
+      LOG(ERROR) << "Device does not support all required texture formats"
+                 << " for depth/stencil buffers.";
       return false;
     }
   }
@@ -308,7 +320,8 @@ bool CheckDeviceCaps(LPDIRECT3D9 d3d, Features* features) {
 // NULL if the object cannot be created or if it does not support the caps.
 Renderer::InitStatus CreateDirect3D(Direct3DCreate9_Ptr d3d_create_function,
                                     LPDIRECT3D9* d3d,
-                                    Features* features) {
+                                    Features* features,
+                                    D3DDISPLAYMODE* d3d_display_mode) {
   if (!d3d_create_function) {
     return Renderer::INITIALIZATION_ERROR;
   }
@@ -319,7 +332,7 @@ Renderer::InitStatus CreateDirect3D(Direct3DCreate9_Ptr d3d_create_function,
   }
 
   // Check that the graphics device meets the minimum capabilities.
-  if (!CheckDeviceCaps(*d3d, features)) {
+  if (!CheckDeviceCaps(*d3d, features, d3d_display_mode)) {
     (*d3d)->Release();
     *d3d = NULL;
     return Renderer::GPU_NOT_UP_TO_SPEC;
@@ -355,39 +368,6 @@ bool ForceAntiAliasingOff(LPDIRECT3D9* d3d) {
   return false;
 }
 
-namespace {
-// Returns whether the ForceSoftwareRenderer value of the Software\Google\o3d
-// key is non-zero.
-bool IsForceSoftwareRendererEnabled() {
-  HKEY key;
-  if (FAILED(RegOpenKeyEx(HKEY_CURRENT_USER,
-                          TEXT("Software\\Google\\o3d"),
-                          0,
-                          KEY_READ,
-                          &key))) {
-    return false;
-  }
-
-  bool enabled = false;
-  DWORD type;
-  DWORD value;
-  DWORD size = sizeof(value);
-  if (SUCCEEDED(RegQueryValueEx(key,
-                                TEXT("ForceSoftwareRenderer"),
-                                NULL,
-                                &type,
-                                reinterpret_cast<LPBYTE>(&value),
-                                &size))) {
-    if (type == REG_DWORD && size == sizeof(value) && value) {
-      enabled = true;
-    }
-  }
-  RegCloseKey(key);
-
-  return enabled;
-}
-}
-
 // Helper function that gets the D3D Interface, checks the available
 // multisampling modes and selects the most advanced one available to create
 // a D3D Device with a back buffer containing depth and stencil buffers that
@@ -397,26 +377,27 @@ Renderer::InitStatus InitializeD3D9Context(
     LPDIRECT3D9* d3d,
     LPDIRECT3DDEVICE9* d3d_device,
     D3DPRESENT_PARAMETERS* d3d_present_parameters,
+    D3DDISPLAYMODE* d3d_display_mode,
     bool fullscreen,
     Features* features,
     ServiceLocator* service_locator,
     int* out_width,
     int* out_height) {
-
   // Check registry to see if the developer has opted to force the software
   // renderer.
   Renderer::InitStatus status_hardware;
-  if (IsForceSoftwareRendererEnabled()) {
+  if (Renderer::IsForceSoftwareRenderer()) {
     // Simulate GPU not up to spec.
     status_hardware = Renderer::GPU_NOT_UP_TO_SPEC;
   } else {
     // Create a hardware device.
-    status_hardware = CreateDirect3D(Direct3DCreate9, d3d, features);
+    status_hardware = CreateDirect3D(
+        Direct3DCreate9, d3d, features, d3d_display_mode);
   }
 
   if (status_hardware != Renderer::SUCCESS) {
     Renderer::InitStatus status_software = CreateDirect3D(
-        Direct3DCreate9Software, d3d, features);
+        Direct3DCreate9Software, d3d, features, d3d_display_mode);
 
     // We should not be requiring caps that are not supported by the software
     // renderer.
@@ -438,56 +419,24 @@ Renderer::InitStatus InitializeD3D9Context(
     client_info_manager->SetSoftwareRenderer(true);
   }
 
-  D3DDISPLAYMODE d3ddm;
-  if (!HR((*d3d)->GetAdapterDisplayMode(D3DADAPTER_DEFAULT, &d3ddm)))
-    return Renderer::GPU_NOT_UP_TO_SPEC;
-
-  // NOTE: make sure the backbuffer matches this format, as it is
-  // currently assumed to be 32-bit 8X8R8G8B
-
+  // Note: SwapEffect=DISCARD is req. for multisample to function
   ZeroMemory(d3d_present_parameters, sizeof(*d3d_present_parameters));
   d3d_present_parameters->Windowed               = !fullscreen;
+  d3d_present_parameters->hDeviceWindow          = window;
   d3d_present_parameters->SwapEffect             = D3DSWAPEFFECT_DISCARD;
-  d3d_present_parameters->BackBufferFormat       = d3ddm.Format;
+  d3d_present_parameters->BackBufferFormat       = D3DFMT_A8R8G8B8;
   d3d_present_parameters->EnableAutoDepthStencil = FALSE;
-  d3d_present_parameters->AutoDepthStencilFormat = D3DFMT_UNKNOWN;
+  d3d_present_parameters->AutoDepthStencilFormat = D3DFMT_D24S8;
+  d3d_present_parameters->EnableAutoDepthStencil = TRUE;
   // wait for vsync
   d3d_present_parameters->PresentationInterval   = D3DPRESENT_INTERVAL_ONE;
-
-  // Note: SwapEffect=DISCARD is req. for multisample to function
-  // Note: AutoDepthStencilFormat is 16-bit (not the usual 8-bit)
-  D3DFORMAT depth_stencil_formats[] = { D3DFMT_D24S8, };
-  const int kNumFormats = sizeof(depth_stencil_formats) /
-                          sizeof(depth_stencil_formats[0]);
-  for (int i = 0; i < kNumFormats; ++i) {
-    // Check if this depth/stencil combination is supported.
-    if (SUCCEEDED((*d3d)->CheckDeviceFormat(D3DADAPTER_DEFAULT,
-                                            D3DDEVTYPE_HAL,
-                                            d3ddm.Format,
-                                            D3DUSAGE_DEPTHSTENCIL,
-                                            D3DRTYPE_SURFACE,
-                                            depth_stencil_formats[i]))) {
-      // Now check that it's compatible with the given backbuffer format.
-      if (SUCCEEDED((*d3d)->CheckDepthStencilMatch(
-                        D3DADAPTER_DEFAULT,
-                        D3DDEVTYPE_HAL,
-                        d3ddm.Format,
-                        d3d_present_parameters->BackBufferFormat,
-                        depth_stencil_formats[i]))) {
-        d3d_present_parameters->AutoDepthStencilFormat =
-            depth_stencil_formats[i];
-        d3d_present_parameters->EnableAutoDepthStencil = TRUE;
-        break;
-      }
-    }
-  }
 
   if (features->not_anti_aliased() || ForceAntiAliasingOff(d3d)) {
     d3d_present_parameters->MultiSampleType = D3DMULTISAMPLE_NONE;
     d3d_present_parameters->MultiSampleQuality = 0;
   } else {
     // query multisampling
-    D3DMULTISAMPLE_TYPE multisample_types[] = {
+    static D3DMULTISAMPLE_TYPE multisample_types[] = {
       D3DMULTISAMPLE_5_SAMPLES,
       D3DMULTISAMPLE_4_SAMPLES,
       D3DMULTISAMPLE_2_SAMPLES,
@@ -497,24 +446,24 @@ Renderer::InitStatus InitializeD3D9Context(
     DWORD multisample_quality = 0;
     for (int i = 0; i < arraysize(multisample_types); ++i) {
       // check back-buffer for multisampling at level "i";
-      // back buffer = 32-bit XRGB (i.e. no alpha)
+      // back buffer = 32-bit ARGB
       if (SUCCEEDED((*d3d)->CheckDeviceMultiSampleType(
-                        D3DADAPTER_DEFAULT,
-                        D3DDEVTYPE_HAL,
-                        D3DFMT_X8R8G8B8,
-                        true,  // result is windowed
-                        multisample_types[i],
-                        &multisample_quality))) {
+          D3DADAPTER_DEFAULT,
+          D3DDEVTYPE_HAL,
+          D3DFMT_A8R8G8B8,
+          true,  // result is windowed
+          multisample_types[i],
+          &multisample_quality))) {
         // back buffer succeeded, now check depth-buffer
         // depth buffer = 24-bit, stencil = 8-bit
         // NOTE: 8-bit not 16-bit like the D3DPRESENT_PARAMETERS
         if (SUCCEEDED((*d3d)->CheckDeviceMultiSampleType(
-                          D3DADAPTER_DEFAULT,
-                          D3DDEVTYPE_HAL,
-                          D3DFMT_D24S8,
-                          true,  // result is windowed
-                          multisample_types[i],
-                          &multisample_quality))) {
+            D3DADAPTER_DEFAULT,
+            D3DDEVTYPE_HAL,
+            D3DFMT_D24S8,
+            true,  // result is windowed
+            multisample_types[i],
+            &multisample_quality))) {
           d3d_present_parameters->MultiSampleType = multisample_types[i];
           d3d_present_parameters->MultiSampleQuality = multisample_quality - 1;
           break;
@@ -787,6 +736,16 @@ class IntegerStateHandler : public TypedStateHandler<ParamInteger> {
   }
 };
 
+class ColorWriteStateHandler : public TypedStateHandler<ParamInteger> {
+ public:
+  virtual void SetStateFromTypedParam(RendererD3D9* renderer,
+                                      ParamInteger* param) const {
+    int mask = param->value();
+    HR(renderer->d3d_device()->SetRenderState(D3DRS_COLORWRITEENABLE, mask));
+    renderer->SetWriteMask(mask);
+  }
+};
+
 class AlphaReferenceHandler : public TypedStateHandler<ParamFloat> {
  public:
   virtual void SetStateFromTypedParam(RendererD3D9* renderer,
@@ -883,6 +842,8 @@ RendererD3D9::RendererD3D9(ServiceLocator* service_locator)
       off_screen_surface_(NULL),
       back_buffer_surface_(NULL),
       back_buffer_depth_surface_(NULL),
+      current_d3d_surface_(NULL),
+      current_d3d_depth_surface_(NULL),
       have_device_(false),
       fullscreen_(false),
       fullscreen_message_font_(NULL),
@@ -940,7 +901,7 @@ RendererD3D9::RendererD3D9(ServiceLocator* service_locator)
   AddStateHandler(State::kStencilWriteMaskParamName,
                   new IntegerStateHandler<D3DRS_STENCILWRITEMASK>);
   AddStateHandler(State::kColorWriteEnableParamName,
-                  new IntegerStateHandler<D3DRS_COLORWRITEENABLE>);
+                  new ColorWriteStateHandler);
   AddStateHandler(State::kBlendEquationParamName,
                   new BlendEquationHandler<D3DRS_BLENDOP>);
   AddStateHandler(State::kTwoSidedStencilEnableParamName,
@@ -982,6 +943,7 @@ Renderer::InitStatus RendererD3D9::InitPlatformSpecific(
       &d3d_,
       &d3d_device_,
       &d3d_present_parameters_,
+      &d3d_display_mode_,
       fullscreen_,
       features(),
       service_locator(),
@@ -1004,14 +966,14 @@ Renderer::InitStatus RendererD3D9::InitPlatformSpecific(
 
   const unsigned int kNpotFlags =
       D3DPTEXTURECAPS_POW2 | D3DPTEXTURECAPS_CUBEMAP_POW2;
-  supports_npot_ = ((d3d_caps.TextureCaps & kNpotFlags) == 0);
+  SetSupportsNPOT((d3d_caps.TextureCaps & kNpotFlags) == 0);
 
   SetClientSize(width, height);
   have_device_ = true;
 
   if (!HR(d3d_->CheckDeviceFormat(D3DADAPTER_DEFAULT,
                                   D3DDEVTYPE_HAL,
-                                  d3d_present_parameters_.BackBufferFormat,
+                                  d3d_display_mode_.Format,
                                   D3DUSAGE_DEPTHSTENCIL,
                                   D3DRTYPE_SURFACE,
                                   D3DFMT_D24S8))) {
@@ -1062,36 +1024,29 @@ void RendererD3D9::Destroy() {
   d3d_ = NULL;
 }
 
-void RendererD3D9::Clear(const Float4 &color,
-                         bool color_flag,
-                         float depth,
-                         bool depth_flag,
-                         int stencil,
-                         bool stencil_flag) {
-  // is this safe to call inside BeginScene/EndScene?
-  CComPtr<IDirect3DSurface9> current_surface;
-  if (!HR(d3d_device()->GetRenderTarget(0, &current_surface)))
-    return;
-
-  CComPtr<IDirect3DSurface9> current_depth_surface;
-  if (!HR(d3d_device()->GetDepthStencilSurface(&current_depth_surface)))
-    return;
-
-  // Conditionally clear the properties of the back buffer based on the
-  // argument flags, and the existence of currently bound buffers.
-  HR(d3d_device_->Clear(
+void RendererD3D9::PlatformSpecificClear(const Float4 &color,
+                                         bool color_flag,
+                                         float depth,
+                                         bool depth_flag,
+                                         int stencil,
+                                         bool stencil_flag) {
+  // Conditionally clear the properties of the current render target or back
+  // buffer based on the argument flags, and the existence of currently bound
+  // buffers.
+  if (!HR(d3d_device_->Clear(
          0,
          NULL,
-         ((color_flag && current_surface) ? D3DCLEAR_TARGET  : 0) |
-         ((depth_flag && current_depth_surface) ? D3DCLEAR_ZBUFFER : 0) |
-         ((stencil_flag && current_depth_surface) ? D3DCLEAR_STENCIL : 0),
+         ((current_d3d_surface_ && color_flag) ? D3DCLEAR_TARGET  : 0) |
+         ((current_d3d_depth_surface_ && depth_flag) ? D3DCLEAR_ZBUFFER : 0) |
+         ((current_d3d_depth_surface_ && stencil_flag ? D3DCLEAR_STENCIL : 0)),
          D3DCOLOR_COLORVALUE(color[0],
                              color[1],
                              color[2],
                              color[3]),
          depth,
-         stencil));
-  set_need_to_render(false);
+         stencil))) {
+    DLOG(ERROR) << "Clear Failed.";
+  }
 }
 
 void RendererD3D9::SetViewportInPixels(int left,
@@ -1308,7 +1263,7 @@ void RendererD3D9::TestLostDevice() {
     // Direct3d tells us it is possible to reset the device now..
     // So let's attempt a reset!
     if (ResetDevice()) {
-      lost_resources_callback_manager_.Run();
+      CallLostResourcesCallback();
     }
   }
 }
@@ -1373,44 +1328,75 @@ bool RendererD3D9::GetDisplayMode(int id, DisplayMode *mode) {
   return success;
 }
 
-bool RendererD3D9::SetFullscreen(bool fullscreen,
-                                 const DisplayWindow& display,
-                                 int mode_id) {
-  if (fullscreen != fullscreen_) {
+bool RendererD3D9::GoFullscreen(const DisplayWindow& display,
+                                int mode_id) {
+  if (!fullscreen_) {
     if (d3d_device_) {  // Have we been initialized yet?
       const DisplayWindowWindows& platform_display =
           static_cast<const DisplayWindowWindows&>(display);
       HWND window = platform_display.hwnd();
       int refresh_rate = 0;
-      if (fullscreen) {
-        // Look up the refresh rate.
-        DisplayMode mode;
-        if (!GetDisplayMode(mode_id, &mode)) {
-          LOG(ERROR) << "Failed to GetDisplayMode";
-          return false;
-        }
-        refresh_rate = mode.refresh_rate();
-        showing_fullscreen_message_ = true;
-        fullscreen_message_timer_.GetElapsedTimeAndReset();  // Reset the timer.
-      } else {
-        showing_fullscreen_message_ = false;
+      bool windowed = true;
+
+      // Look up the refresh rate, width and height.
+      DisplayMode mode;
+      if (!GetDisplayMode(mode_id, &mode)) {
+        LOG(ERROR) << "Failed to GetDisplayMode";
+        return false;
       }
+
+      int width = mode.width();
+      int height = mode.height();
+
+      // If fullscreen is requested but the mode is set to
+      // DISPLAY_MODE_DEFAULT then create a non-full-screen window at the
+      // current display resolution.  If any other mode is chosen then the
+      // windows will change mode and create a true full-screen window.
+      if (mode_id != DISPLAY_MODE_DEFAULT) {
+        refresh_rate = mode.refresh_rate();
+        windowed = false;
+      }
+
+      showing_fullscreen_message_ = true;
+      fullscreen_message_timer_.GetElapsedTimeAndReset();  // Reset the timer.
+
       d3d_present_parameters_.FullScreen_RefreshRateInHz = refresh_rate;
       d3d_present_parameters_.hDeviceWindow = window;
-      d3d_present_parameters_.Windowed = !fullscreen;
+      d3d_present_parameters_.Windowed = windowed;
 
       // Check if the window size is zero. Some drivers will fail because of
       // that so we'll force a small size in that case.
-      RECT windowRect;
-      ::GetWindowRect(window, &windowRect);
-      int width = windowRect.right - windowRect.left;
-      int height = windowRect.bottom - windowRect.top;
-
       if (width == 0 || height == 0) {
         width = 16;
         height = 16;
       }
-      fullscreen_ = fullscreen;
+      fullscreen_ = true;
+      Resize(width, height);
+    }
+  }
+  return true;
+}
+
+bool RendererD3D9::CancelFullscreen(const DisplayWindow& display,
+                                    int width,
+                                    int height) {
+  if (fullscreen_) {
+    if (d3d_device_) {  // Have we been initialized yet?
+      const DisplayWindowWindows& platform_display =
+          static_cast<const DisplayWindowWindows&>(display);
+      HWND window = platform_display.hwnd();
+      showing_fullscreen_message_ = false;
+      d3d_present_parameters_.FullScreen_RefreshRateInHz = 0;
+      d3d_present_parameters_.hDeviceWindow = window;
+      d3d_present_parameters_.Windowed = true;
+
+      // Check if the window size is zero. Some drivers will fail because of
+      // that so we'll force a small size in that case.
+      if (width == 0 || height == 0) {
+        width = 16;
+        height = 16;
+      }
+      fullscreen_ = false;
       Resize(width, height);
     }
   }
@@ -1418,55 +1404,90 @@ bool RendererD3D9::SetFullscreen(bool fullscreen,
 }
 
 // Resets the rendering stats and
-bool RendererD3D9::StartRendering() {
-  ++render_frame_count_;
-  transforms_culled_ = 0;
-  transforms_processed_ = 0;
-  draw_elements_culled_ = 0;
-  draw_elements_processed_ = 0;
-  draw_elements_rendered_ = 0;
-  primitives_rendered_ = 0;
-
+bool RendererD3D9::PlatformSpecificStartRendering() {
   // Determine whether the device is lost, resetting if possible.
   TestLostDevice();
 
+  bool result = have_device_;
+  if (result) {
+    bool got_render_target =
+        HR(d3d_device_->GetRenderTarget(0, &back_buffer_surface_));
+    bool got_depth_surface =
+        HR(d3d_device_->GetDepthStencilSurface(&back_buffer_depth_surface_));
+    result = got_render_target && got_depth_surface;
+  }
+
+  if (!result) {
+    back_buffer_surface_ = NULL;
+    back_buffer_depth_surface_ = NULL;
+  }
+
+  current_d3d_surface_ = back_buffer_surface_;
+  current_d3d_depth_surface_ = back_buffer_depth_surface_;
+
+  return result;
+}
+
+// prepares DX9 for rendering PART of the frame. Returns true on success.
+bool RendererD3D9::PlatformSpecificBeginDraw() {
   // Only perform ops with the device if we have it.
   if (have_device_) {
-    // Clear the client if we need to.
-    if (clear_client_) {
-      clear_client_ = false;
-      Clear(Float4(0.5f, 0.5f, 0.5f, 1.0f), true, 1.0f, true, 0, true);
-    }
-    return true;
+    return HR(d3d_device_->BeginScene());
   } else {
     // Return false if we have lost the device.
     return false;
   }
 }
 
-// prepares DX9 for rendering the frame. Returns true on success.
-bool RendererD3D9::BeginDraw() {
-  // Only perform ops with the device if we have it.
+// NOTE: End draw can be called multiple times per frame. If want something
+// to happen only once per frame it belongs in FinishRendering.
+void RendererD3D9::PlatformSpecificEndDraw() {
   if (have_device_) {
-    set_need_to_render(true);
-    if (!HR(d3d_device_->GetRenderTarget(0, &back_buffer_surface_)))
-      return false;
-    if (!HR(d3d_device_->GetDepthStencilSurface(&back_buffer_depth_surface_)))
-      return false;
-    if (!HR(d3d_device_->BeginScene()))
-      return false;
-    // Reset the viewport.
-    SetViewport(Float4(0.0f, 0.0f, 1.0f, 1.0f), Float2(0.0f, 1.0f));
-    return true;
-  } else {
+    HR(d3d_device_->EndScene());
+  }
+}
+
+void RendererD3D9::PlatformSpecificFinishRendering() {
+  current_d3d_surface_ = NULL;
+  current_d3d_depth_surface_ = NULL;
+
+  if (have_device_) {
+    // Release the back-buffer references.
     back_buffer_surface_ = NULL;
     back_buffer_depth_surface_ = NULL;
 
-    // Return false if we have lost the device.
-    return false;
+    if (showing_fullscreen_message_) {
+      // Message should display for 3 seconds after transition to fullscreen.
+      float elapsed_time =
+          fullscreen_message_timer_.GetElapsedTimeWithoutClearing();
+      const float display_duration = 3.5f;
+      if (elapsed_time > display_duration) {
+        showing_fullscreen_message_ = false;
+      } else {
+        if (BeginDraw()) {
+          ShowFullscreenMessage(elapsed_time, display_duration);
+          EndDraw();
+        }
+      }
+    }
   }
 }
 
+void RendererD3D9::PlatformSpecificPresent() {
+  if (have_device_) {
+    // No need to call Present(...) if we are rendering to an off-screen
+    // target.
+    if (!off_screen_surface_) {
+      d3d_device_->Present(NULL, NULL, NULL, NULL);
+    }
+  }
+}
+
+void RendererD3D9::ApplyDirtyStates() {
+}
+
+// TODO(gman): Why is this code in here? Shouldn't this use O3D to render this
+//    instead of D3D?
 void RendererD3D9::ShowFullscreenMessage(float elapsed_time,
     float display_duration) {
   RECT rect;
@@ -1524,59 +1545,13 @@ void RendererD3D9::ShowFullscreenMessage(float elapsed_time,
   d3d_device_->SetRenderState(D3DRS_ZENABLE, z_enable);
 }
 
-// Notifies DX9 that rendering of the frame is complete and swaps the buffers.
-void RendererD3D9::EndDraw() {
-  if (have_device_) {
-    if (showing_fullscreen_message_) {
-      // Message should display for 3 seconds after transition to fullscreen.
-      float elapsed_time =
-          fullscreen_message_timer_.GetElapsedTimeWithoutClearing();
-      const float display_duration = 3.5f;
-      if (elapsed_time > display_duration) {
-        showing_fullscreen_message_ = false;
-      } else {
-        ShowFullscreenMessage(elapsed_time, display_duration);
-      }
-    }
-    HR(d3d_device_->EndScene());
-
-    set_need_to_render(false);
-
-    // Release the back-buffer references.
-    back_buffer_surface_ = NULL;
-    back_buffer_depth_surface_ = NULL;
-  }
-}
-
-void RendererD3D9::FinishRendering() {
-  // No need to call Present(...) if we are rendering to an off-screen
-  // target.
-  if (have_device_ && !off_screen_surface_ && !need_to_render()) {
-    d3d_device_->Present(NULL, NULL, NULL, NULL);
-  }
-}
-
-// Asks the primitive to draw itself.
-void RendererD3D9::RenderElement(Element* element,
-                                 DrawElement* draw_element,
-                                 Material* material,
-                                 ParamObject* override,
-                                 ParamCache* param_cache) {
-  ++draw_elements_rendered_;
-  // If this a new state then reset the old state.
-  State *current_state = material ? material->state() : NULL;
-  PushRenderStates(current_state);
-  element->Render(this, draw_element, material, override, param_cache);
-  PopRenderStates();
-}
-
 void RendererD3D9::SetRenderSurfacesPlatformSpecific(
-    RenderSurface* surface,
-    RenderDepthStencilSurface* surface_depth) {
-  RenderSurfaceD3D9 *d3d_render_surface =
-      down_cast<RenderSurfaceD3D9*>(surface);
-  RenderDepthStencilSurfaceD3D9 *d3d_render_depth_surface =
-      down_cast<RenderDepthStencilSurfaceD3D9*>(surface_depth);
+    const RenderSurface* surface,
+    const RenderDepthStencilSurface* surface_depth) {
+  const RenderSurfaceD3D9 *d3d_render_surface =
+      down_cast<const RenderSurfaceD3D9*>(surface);
+  const RenderDepthStencilSurfaceD3D9 *d3d_render_depth_surface =
+      down_cast<const RenderDepthStencilSurfaceD3D9*>(surface_depth);
 
   IDirect3DSurface9 *d3d_surface =
       d3d_render_surface ? d3d_render_surface->GetSurfaceHandle() : NULL;
@@ -1586,11 +1561,17 @@ void RendererD3D9::SetRenderSurfacesPlatformSpecific(
   // At least one of the surfaces must be non-null.
   DCHECK(d3d_surface || d3d_depth_surface);
 
+  current_d3d_surface_ = d3d_surface;
+  current_d3d_depth_surface_ = d3d_depth_surface;
+
   HR(d3d_device()->SetRenderTarget(0, d3d_surface));
   HR(d3d_device()->SetDepthStencilSurface(d3d_depth_surface));
 }
 
 void RendererD3D9::SetBackBufferPlatformSpecific() {
+  current_d3d_surface_ = back_buffer_surface_;
+  current_d3d_depth_surface_ = back_buffer_depth_surface_;
+
   HR(d3d_device()->SetRenderTarget(0, back_buffer_surface_));
   HR(d3d_device()->SetDepthStencilSurface(back_buffer_depth_surface_));
 }
@@ -1631,30 +1612,6 @@ ParamCache* RendererD3D9::CreatePlatformSpecificParamCache() {
   return new ParamCacheD3D9(service_locator());
 }
 
-// Attempts to create a Texture with the given bitmap, automatically
-// determining whether the to create a 2D texture, cube texture, etc. If
-// creation fails the method returns NULL.
-// Parameters:
-//  bitmap: The bitmap specifying the dimensions, format and content of the
-//          new texture. The created texture takes ownership of the bitmap
-//          data.
-// Returns:
-//  A ref-counted pointer to the texture or NULL if it did not load.
-Texture::Ref RendererD3D9::CreatePlatformSpecificTextureFromBitmap(
-    Bitmap* bitmap) {
-  if (bitmap->is_cubemap()) {
-    return Texture::Ref(TextureCUBED3D9::Create(service_locator(),
-                                                bitmap,
-                                                this,
-                                                false));
-  } else {
-    return Texture::Ref(Texture2DD3D9::Create(service_locator(),
-                                              bitmap,
-                                              this,
-                                              false));
-  }
-}
-
 // Attempts to create a Texture2D with the given specs.  If creation fails
 // then the method returns NULL.
 Texture2D::Ref RendererD3D9::CreatePlatformSpecificTexture2D(
@@ -1663,32 +1620,26 @@ Texture2D::Ref RendererD3D9::CreatePlatformSpecificTexture2D(
     Texture::Format format,
     int levels,
     bool enable_render_surfaces) {
-  Bitmap::Ref bitmap = Bitmap::Ref(new Bitmap(service_locator()));
-  bitmap->set_format(format);
-  bitmap->set_width(width);
-  bitmap->set_height(height);
-  bitmap->set_num_mipmaps(levels);
   return Texture2D::Ref(Texture2DD3D9::Create(service_locator(),
-                                              bitmap,
+                                              format,
+                                              levels,
+                                              width,
+                                              height,
                                               this,
                                               enable_render_surfaces));
 }
 
-// Attempts to create a Texture2D with the given specs.  If creation fails
+// Attempts to create a TextureCUBE with the given specs.  If creation fails
 // then the method returns NULL.
 TextureCUBE::Ref RendererD3D9::CreatePlatformSpecificTextureCUBE(
     int edge_length,
     Texture::Format format,
     int levels,
     bool enable_render_surfaces) {
-  Bitmap::Ref bitmap = Bitmap::Ref(new Bitmap(service_locator()));
-  bitmap->set_format(format);
-  bitmap->set_width(edge_length);
-  bitmap->set_height(edge_length);
-  bitmap->set_num_mipmaps(levels);
-  bitmap->set_is_cubemap(true);
   return TextureCUBE::Ref(TextureCUBED3D9::Create(service_locator(),
-                                                  bitmap,
+                                                  format,
+                                                  levels,
+                                                  edge_length,
                                                   this,
                                                   enable_render_surfaces));
 }
@@ -1706,75 +1657,6 @@ RenderDepthStencilSurface::Ref RendererD3D9::CreateDepthStencilSurface(
                                         width,
                                         height,
                                         depth_constructor));
-}
-
-// Saves a png screenshot 'filename.png'.
-// Returns true on success and false on failure.
-bool RendererD3D9::SaveScreen(const String& file_name) {
-#ifdef TESTING
-  LPDIRECT3DDEVICE9 device = d3d_device();
-  CComPtr<IDirect3DSurface9> system_surface;
-  CComPtr<IDirect3DSurface9> current_surface;
-
-  if (!HR(device->GetRenderTarget(0, &current_surface)))
-    return false;
-
-  D3DSURFACE_DESC surface_description;
-  if (!HR(current_surface->GetDesc(&surface_description)))
-    return false;
-
-  // Construct an intermediate surface with multi-sampling disabled.
-  // This surface is required because GetRenderTargetData(...) will fail
-  // for multi-sampled targets.  One must first down-sample to a
-  // non-multi-sample buffer, and then copy from that intermediate buffer
-  // to a main memory surface.
-  CComPtr<IDirect3DSurface9> intermediate_target;
-  if (!HR(device->CreateRenderTarget(surface_description.Width,
-                                     surface_description.Height,
-                                     surface_description.Format,
-                                     D3DMULTISAMPLE_NONE,
-                                     0,
-                                     FALSE,
-                                     &intermediate_target,
-                                     NULL))) {
-    return false;
-  }
-
-  if (!HR(device->StretchRect(current_surface,
-                              NULL,
-                              intermediate_target,
-                              NULL,
-                              D3DTEXF_NONE))) {
-    return false;
-  }
-
-  if (!HR(device->CreateOffscreenPlainSurface(surface_description.Width,
-                                              surface_description.Height,
-                                              surface_description.Format,
-                                              D3DPOOL_SYSTEMMEM,
-                                              &system_surface,
-                                              NULL))) {
-    return false;
-  }
-
-  if (!HR(device->GetRenderTargetData(intermediate_target, system_surface)))
-    return false;
-
-  // append .png to the end of file_name
-  String png_file_name = file_name;
-  png_file_name.append(String(".png"));
-  // convert file name to utf16
-  std::wstring file_name_utf16 = UTF8ToWide(png_file_name);
-
-  return HR(o3d::D3DXSaveSurfaceToFile(file_name_utf16.c_str(),
-                                       D3DXIFF_PNG,
-                                       system_surface,
-                                       NULL,
-                                       NULL));
-#else
-  // Not a test build, always return false.
-  return false;
-#endif
 }
 
 const int* RendererD3D9::GetRGBAUByteNSwizzleTable() {

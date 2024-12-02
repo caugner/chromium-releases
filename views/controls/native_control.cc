@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,9 @@
 #include <atlframe.h>
 #include <atlmisc.h>
 
+#include "app/gfx/native_theme_win.h"
 #include "app/l10n_util_win.h"
+#include "base/keyboard_codes.h"
 #include "base/logging.h"
 #include "base/win_util.h"
 #include "views/background.h"
@@ -18,7 +20,6 @@
 #include "views/controls/native/native_view_host.h"
 #include "views/focus/focus_manager.h"
 #include "views/widget/widget.h"
-#include "base/gfx/native_theme.h"
 
 namespace views {
 
@@ -122,7 +123,7 @@ class NativeControlContainer : public CWindowImpl<NativeControlContainer,
       parent_->OnDestroy();
   }
 
-  void OnContextMenu(HWND window, const WTL::CPoint& location) {
+  void OnContextMenu(HWND window, const POINT& location) {
     if (parent_)
       parent_->OnContextMenu(location);
   }
@@ -255,7 +256,7 @@ void NativeControl::Layout() {
   }
 }
 
-void NativeControl::OnContextMenu(const CPoint& location) {
+void NativeControl::OnContextMenu(const POINT& location) {
   if (!GetContextMenuController())
     return;
 
@@ -363,8 +364,8 @@ LRESULT CALLBACK NativeControl::NativeControlWndProc(HWND window, UINT message,
   DCHECK(native_control);
 
   if (message == WM_KEYDOWN &&
-      native_control->OnKeyDown(static_cast<int>(w_param))) {
-      return 0;
+      native_control->OnKeyDown(win_util::WinToKeyboardCode(w_param))) {
+    return 0;
   } else if (message == WM_SETFOCUS) {
     // Let the focus manager know that the focus changed.
     FocusManager* focus_manager = native_control->GetFocusManager();

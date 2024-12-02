@@ -22,36 +22,30 @@
 #include "ipc/ipc_message.h"
 #include "webkit/glue/webplugin.h"
 
-namespace base {
-class WaitableEvent;
-}
-
 class PluginChannel;
-class WebPluginDelegate;
+class WebPluginDelegateImpl;
 
 // This is an implementation of WebPlugin that proxies all calls to the
 // renderer.
-class WebPluginProxy : public WebPlugin {
+class WebPluginProxy : public webkit_glue::WebPlugin {
  public:
   // Creates a new proxy for WebPlugin, using the given sender to send the
   // marshalled WebPlugin calls.
   WebPluginProxy(PluginChannel* channel,
                  int route_id,
-                 WebPluginDelegate* delegate,
-                 const GURL& page_url);
+                 const GURL& page_url,
+                 gfx::NativeViewId containing_window);
   ~WebPluginProxy();
 
+  void set_delegate(WebPluginDelegateImpl* d) { delegate_ = d; }
+
   // WebPlugin overrides
-#if defined(OS_LINUX)
-  gfx::PluginWindowHandle CreatePluginContainer();
-#endif
   void SetWindow(gfx::PluginWindowHandle window);
   void WillDestroyWindow(gfx::PluginWindowHandle window);
 #if defined(OS_WIN)
   void SetWindowlessPumpEvent(HANDLE pump_messages_event);
-  // Returns true on success.
-  bool SetModalDialogEvent(HANDLE modal_dialog_event);
 #endif
+
   void CancelResource(int id);
   void Invalidate();
   void InvalidateRect(const gfx::Rect& rect);
@@ -86,10 +80,10 @@ class WebPluginProxy : public WebPlugin {
 
   // Returns a WebPluginResourceClient object given its id, or NULL if no
   // object with that id exists.
-  WebPluginResourceClient* GetResourceClient(int id);
+  webkit_glue::WebPluginResourceClient* GetResourceClient(int id);
 
-  // Returns the process id of the renderer that contains this plugin.
-  int GetRendererProcessId();
+  // Returns the id of the renderer that contains this plugin.
+  int GetRendererId();
 
   // For windowless plugins, paints the given rectangle into the local buffer.
   void Paint(const gfx::Rect& rect);
@@ -121,13 +115,14 @@ class WebPluginProxy : public WebPlugin {
                                 bool notify_needed,
                                 intptr_t notify_data);
 
+  void SetDeferResourceLoading(int resource_id, bool defer);
+
   bool IsOffTheRecord();
 
-  void ResourceClientDeleted(WebPluginResourceClient* resource_client);
+  void ResourceClientDeleted(
+      webkit_glue::WebPluginResourceClient* resource_client);
 
-  base::WaitableEvent* modal_dialog_event() {
-    return modal_dialog_event_.get();
-  }
+  gfx::NativeViewId containing_window() { return containing_window_; }
 
  private:
   bool Send(IPC::Message* msg);
@@ -152,7 +147,8 @@ class WebPluginProxy : public WebPlugin {
   // transform of the local HDC.
   void UpdateTransform();
 
-  typedef base::hash_map<int, WebPluginResourceClient*> ResourceClientMap;
+  typedef base::hash_map<int, webkit_glue::WebPluginResourceClient*>
+      ResourceClientMap;
   ResourceClientMap resource_clients_;
 
   scoped_refptr<PluginChannel> channel_;
@@ -160,10 +156,10 @@ class WebPluginProxy : public WebPlugin {
   uint32 cp_browsing_context_;
   NPObject* window_npobject_;
   NPObject* plugin_element_;
-  WebPluginDelegate* delegate_;
+  WebPluginDelegateImpl* delegate_;
   gfx::Rect damaged_rect_;
   bool waiting_for_paint_;
-  scoped_ptr<base::WaitableEvent> modal_dialog_event_;
+  gfx::NativeViewId containing_window_;
   // The url of the main frame hosting the plugin.
   GURL page_url_;
 
@@ -185,6 +181,11 @@ class WebPluginProxy : public WebPlugin {
   scoped_ptr<TransportDIB> background_dib_;
   scoped_cftyperef<CGContextRef> windowless_context_;
   scoped_cftyperef<CGContextRef> background_context_;
+#elif defined(OS_LINUX)
+  scoped_ptr<TransportDIB> windowless_dib_;
+  scoped_ptr<TransportDIB> background_dib_;
+  scoped_ptr<skia::PlatformCanvas> windowless_canvas_;
+  scoped_ptr<skia::PlatformCanvas> background_canvas_;
 #endif
 
   ScopedRunnableMethodFactory<WebPluginProxy> runnable_method_factory_;

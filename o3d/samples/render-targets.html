@@ -43,7 +43,7 @@ O3D:  Render-Target Sample
 </title>
 <!-- Include sample javascript library functions-->
 <script type="text/javascript" src="o3djs/base.js"></script>
-<script type="text/javascript">
+<script type="text/javascript" id="o3dscript">
 o3djs.require('o3djs.util');
 o3djs.require('o3djs.math');
 o3djs.require('o3djs.rendergraph');
@@ -155,7 +155,7 @@ function initStep2(clientElements) {
   var texture2d = g_pack.createTexture2D(RENDER_TARGET_WIDTH,
                                          RENDER_TARGET_HEIGHT,
                                          g_o3d.Texture.XRGB8, 1, true);
-  var renderSurface = texture2d.getRenderSurface(0, g_pack);
+  var renderSurface = texture2d.getRenderSurface(0);
 
   // Create the depth-stencil buffer required when rendering the teapot.
   var depthSurface = g_pack.createDepthStencilSurface(RENDER_TARGET_WIDTH,

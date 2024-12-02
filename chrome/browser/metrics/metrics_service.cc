@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -162,6 +162,12 @@
 #include <objbase.h>
 #endif
 
+#if defined(USE_SYSTEM_LIBBZ2)
+#include <bzlib.h>
+#else
+#include "third_party/bzip2/bzlib.h"
+#endif
+
 #include "base/file_path.h"
 #include "base/histogram.h"
 #include "base/path_service.h"
@@ -175,7 +181,6 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/load_notification_details.h"
 #include "chrome/browser/memory_details.h"
-#include "chrome/browser/plugin_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/browser/search_engines/template_url.h"
@@ -191,7 +196,7 @@
 #include "chrome/common/render_messages.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/load_flags.h"
-#include "third_party/bzip2/bzlib.h"
+#include "webkit/glue/plugins/plugin_list.h"
 
 #if defined(OS_POSIX)
 // TODO(port): Move these headers above as they are ported.
@@ -283,9 +288,15 @@ class MetricsMemoryDetails : public MemoryDetails {
 };
 
 class MetricsService::GetPluginListTaskComplete : public Task {
+ public:
+  explicit GetPluginListTaskComplete(
+      const std::vector<WebPluginInfo>& plugins) : plugins_(plugins) { }
   virtual void Run() {
-    g_browser_process->metrics_service()->OnGetPluginListTaskComplete();
+    g_browser_process->metrics_service()->OnGetPluginListTaskComplete(plugins_);
   }
+
+ private:
+  std::vector<WebPluginInfo> plugins_;
 };
 
 class MetricsService::GetPluginListTask : public Task {
@@ -295,9 +306,10 @@ class MetricsService::GetPluginListTask : public Task {
 
   virtual void Run() {
     std::vector<WebPluginInfo> plugins;
-    PluginService::GetInstance()->GetPlugins(false, &plugins);
+    NPAPI::PluginList::Singleton()->GetPlugins(false, &plugins);
 
-    callback_loop_->PostTask(FROM_HERE, new GetPluginListTaskComplete());
+    callback_loop_->PostTask(
+        FROM_HERE, new GetPluginListTaskComplete(plugins));
   }
 
  private:
@@ -393,7 +405,7 @@ MetricsService::MetricsService()
       server_permits_upload_(true),
       state_(INITIALIZED),
       pending_log_(NULL),
-      pending_log_text_(""),
+      pending_log_text_(),
       current_fetch_(NULL),
       current_log_(NULL),
       idle_since_last_transmission_(false),
@@ -746,8 +758,10 @@ void MetricsService::InitializeMetricsState() {
   ScheduleNextStateSave();
 }
 
-void MetricsService::OnGetPluginListTaskComplete() {
+void MetricsService::OnGetPluginListTaskComplete(
+    const std::vector<WebPluginInfo>& plugins) {
   DCHECK(state_ == PLUGIN_LIST_REQUESTED);
+  plugins_ = plugins;
   if (state_ == PLUGIN_LIST_REQUESTED)
     state_ = PLUGIN_LIST_ARRIVED;
 }
@@ -766,14 +780,9 @@ std::string MetricsService::GenerateClientID() {
   DCHECK(result == kGUIDSize);
 
   return WideToUTF8(guid_string.substr(1, guid_string.length() - 2));
-#elif defined(LINUX2)
+#else
   uint64 sixteen_bytes[2] = { base::RandUint64(), base::RandUint64() };
   return RandomBytesToGUIDString(sixteen_bytes);
-#else
-  // TODO(cmasone): enable the above for all OS_POSIX platforms once the
-  // first-run dialog text is all up to date.
-  NOTIMPLEMENTED();
-  return std::string();
 #endif
 }
 
@@ -948,10 +957,9 @@ void MetricsService::LogTransmissionTimerDone() {
   details->StartFetch();
 
   // Collect WebCore cache information to put into a histogram.
-  for (RenderProcessHost::iterator it = RenderProcessHost::begin();
-       it != RenderProcessHost::end(); ++it) {
-    it->second->Send(new ViewMsg_GetCacheResourceStats());
-  }
+  for (RenderProcessHost::iterator i(RenderProcessHost::AllHostsIterator());
+       !i.IsAtEnd(); i.Advance())
+    i.GetCurrentValue()->Send(new ViewMsg_GetCacheResourceStats());
 }
 
 void MetricsService::OnMemoryDetailCollectionDone() {
@@ -1122,11 +1130,9 @@ bool MetricsService::TransmissionPermitted() const {
 
 void MetricsService::PrepareInitialLog() {
   DCHECK(state_ == PLUGIN_LIST_ARRIVED);
-  std::vector<WebPluginInfo> plugins;
-  PluginService::GetInstance()->GetPlugins(false, &plugins);
 
   MetricsLog* log = new MetricsLog(client_id_, session_id_);
-  log->RecordEnvironment(plugins, profile_dictionary_.get());
+  log->RecordEnvironment(plugins_, profile_dictionary_.get());
 
   // Histograms only get written to current_log_, so setup for the write.
   MetricsLog* save_log = current_log_;
@@ -1197,9 +1203,11 @@ void MetricsService::PreparePendingLogText() {
   DCHECK(pending_log());
   if (!pending_log_text_.empty())
     return;
-  int original_size = pending_log_->GetEncodedLogSize();
-  pending_log_->GetEncodedLog(WriteInto(&pending_log_text_, original_size),
-                              original_size);
+  int text_size = pending_log_->GetEncodedLogSize();
+
+  // Leave room for the NUL terminator.
+  pending_log_->GetEncodedLog(WriteInto(&pending_log_text_, text_size + 1),
+                              text_size);
 }
 
 void MetricsService::PrepareFetchWithPendingLog() {
@@ -1687,12 +1695,14 @@ void MetricsService::LogChildProcessChange(
     NotificationType type,
     const NotificationSource& source,
     const NotificationDetails& details) {
-  const std::wstring& child_name =
-      Details<ChildProcessInfo>(details)->name();
+  Details<ChildProcessInfo> child_details(details);
+  const std::wstring& child_name = child_details->name();
+
 
   if (child_process_stats_buffer_.find(child_name) ==
       child_process_stats_buffer_.end()) {
-    child_process_stats_buffer_[child_name] = ChildProcessStats();
+    child_process_stats_buffer_[child_name] =
+        ChildProcessStats(child_details->type());
   }
 
   ChildProcessStats& stats = child_process_stats_buffer_[child_name];
@@ -1719,7 +1729,7 @@ void MetricsService::LogChildProcessChange(
 static void CountBookmarks(const BookmarkNode* node,
                            int* bookmarks,
                            int* folders) {
-  if (node->GetType() == BookmarkNode::URL)
+  if (node->type() == BookmarkNode::URL)
     (*bookmarks)++;
   else
     (*folders)++;
@@ -1814,8 +1824,14 @@ void MetricsService::RecordPluginChanges(PrefService* pref) {
   for (std::map<std::wstring, ChildProcessStats>::iterator cache_iter =
            child_process_stats_buffer_.begin();
        cache_iter != child_process_stats_buffer_.end(); ++cache_iter) {
-    std::wstring plugin_name = cache_iter->first;
     ChildProcessStats stats = cache_iter->second;
+
+    // Insert only plugins information into the plugins list.
+    if (ChildProcessInfo::PLUGIN_PROCESS != stats.process_type)
+      continue;
+
+    std::wstring plugin_name = cache_iter->first;
+
     DictionaryValue* plugin_dict = new DictionaryValue;
 
     plugin_dict->SetString(prefs::kStabilityPluginName, plugin_name);

@@ -1,4 +1,4 @@
-#!/bin/sh -x
+#!/bin/sh
 # This script takes libcmt.lib for VS2005 and removes the allocation related 
 # functions from it.
 #
@@ -25,10 +25,11 @@ cp "$LIBCMTPDB" "$OUTDIR"
 LIBCMTSRCPATHVS2005="build\\intel\\mt_obj\\"
 LIBCMTSRCPATHVS2008="f:\\dd\\vctools\\crt_bld\\SELF_X86\\crt\\src\\build\\INTEL\\mt_obj\\"
 
-OBJFILES="malloc.obj free.obj realloc.obj new.obj delete.obj new2.obj delete2.obj align.obj msize.obj heapinit.obj expand.obj heapchk.obj heapwalk.obj heapmin.obj sbheap.obj calloc.obj recalloc.obj calloc_impl.obj new_mode.obj"
+OBJFILES="malloc.obj free.obj realloc.obj new.obj delete.obj new2.obj delete2.obj align.obj msize.obj heapinit.obj expand.obj heapchk.obj heapwalk.obj heapmin.obj sbheap.obj calloc.obj recalloc.obj calloc_impl.obj new_mode.obj newopnt.obj"
 
 for FILE in $OBJFILES
 do
-  LIB /IGNORE:4006,4014,4221 /REMOVE:${LIBCMTSRCPATHVS2005}${FILE} $OUTCMT
-  LIB /IGNORE:4006,4014,4221 /REMOVE:${LIBCMTSRCPATHVS2008}${FILE} $OUTCMT
+  echo ${FILE}
+  LIB /NOLOGO /IGNORE:4006,4014,4221 /REMOVE:${LIBCMTSRCPATHVS2005}${FILE} $OUTCMT
+  LIB /NOLOGO /IGNORE:4006,4014,4221 /REMOVE:${LIBCMTSRCPATHVS2008}${FILE} $OUTCMT
 done

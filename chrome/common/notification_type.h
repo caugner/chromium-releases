@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -169,6 +169,10 @@ class NotificationType {
     // twice).
     RESOURCE_MESSAGE_FILTER_SHUTDOWN,
 
+    // Lets interested observers know when a WorkerProcessHost is being deleted
+    // and can no longer be used.
+    WORKER_PROCESS_HOST_SHUTDOWN,
+
     // Views -------------------------------------------------------------------
 
     // Notification that a view was removed from a view hierarchy.  The source
@@ -178,16 +182,21 @@ class NotificationType {
     // Browser-window ----------------------------------------------------------
 
     // This message is sent after a window has been opened.  The source is a
-    // Source<Browser> with a pointer to the new window.  No details are
+    // Source<Browser> containing the affected Browser.  No details are
     // expected.
     BROWSER_OPENED,
 
+    // This message is sent soon after BROWSER_OPENED, and indicates that
+    // the Browser's |window_| is now non-NULL. The source is a Source<Browser>
+    // containing the affected Browser.  No details are expected.
+    BROWSER_WINDOW_READY,
+
     // This message is sent after a window has been closed.  The source is a
-    // Source<Browser> with a pointer to the closed window.  Details is a
-    // boolean that if true indicates that the application will be closed as a
-    // result of this browser window closure (i.e. this was the last opened
-    // browser window).  Note that the boolean pointed to by Details is only
-    // valid for the duration of this call.
+    // Source<Browser> containing the affected Browser.  Details is a boolean
+    // that if true indicates that the application will be closed as a result of
+    // this browser window closure (i.e. this was the last opened browser
+    // window).  Note that the boolean pointed to by Details is only valid for
+    // the duration of this call.
     BROWSER_CLOSED,
 
     // This message is sent when the last window considered to be an
@@ -208,12 +217,15 @@ class NotificationType {
     // are Details<std::string> and the source is Source<RenderViewHost>.
     TAB_LANGUAGE_DETERMINED,
 
+    // Send after the code is run in specified tab.
+    TAB_CODE_EXECUTED,
+
     // The user has changed the browser theme.
     BROWSER_THEME_CHANGED,
 
-    // Fired when the active window changes.  This is currently only used on
-    // Linux.
-    ACTIVE_WINDOW_CHANGED,
+    // Sent when the renderer returns focus to the browser, as part of focus
+    // traversal. The source is the browser, there are no details.
+    FOCUS_RETURNED_TO_BROWSER,
 
     // Application-modal dialogs -----------------------------------------------
 
@@ -226,6 +238,10 @@ class NotificationType {
     APP_MODAL_DIALOG_CLOSED,
 
     // Tabs --------------------------------------------------------------------
+
+    // Sent when a tab is added to a TabContentsDelegate. The source is the
+    // TabContentsDelegate and the details is the TabContents.
+    TAB_ADDED,
 
     // This notification is sent after a tab has been appended to the
     // tab_strip.  The source is a Source<NavigationController> with a pointer
@@ -298,6 +314,11 @@ class NotificationType {
     // starting and finishing all painting.
     INITIAL_NEW_TAB_UI_LOAD,
 
+    // Used to fire notifications about how long various events took to
+    // complete.  E.g., this is used to get more fine grained timings from the
+    // new tab page.  Details is a MetricEventDurationDetails.
+    METRIC_EVENT_DURATION,
+
     // This notification is sent when a TabContents is being hidden, e.g. due
     // to switching away from this tab.  The source is a Source<TabContents>.
     TAB_CONTENTS_HIDDEN,
@@ -312,7 +333,6 @@ class NotificationType {
     // associated TabContents, and the details is the RenderViewHost
     // pointer.
     RENDER_VIEW_HOST_CREATED_FOR_TAB,
-
 
     // Stuff inside the tabs ---------------------------------------------------
 
@@ -382,12 +402,21 @@ class NotificationType {
     // NoDetails.
     BOOKMARK_BAR_VISIBILITY_PREF_CHANGED,
 
+    // This is sent when the user's preference (for when the extension shelf
+    // should be shown) changes. The source is the profile, and the details are
+    // NoDetails.
+    EXTENSION_SHELF_VISIBILITY_PREF_CHANGED,
+
     // Used to monitor web cache usage by notifying whenever the
     // CacheManagerHost observes new UsageStats. The source will be the
     // RenderProcessHost that corresponds to the new statistics. Details are a
     // UsageStats object sent by the renderer, and should be copied - ptr not
     // guaranteed to be valid after the notification.
     WEB_CACHE_STATS_OBSERVED,
+
+    // The focused element inside a page has changed.  The source is the render
+    // view host for the page, there are no details.
+    FOCUS_CHANGED_IN_PAGE,
 
     // Child Processes ---------------------------------------------------------
 
@@ -438,6 +467,13 @@ class NotificationType {
     // No details are expected.
     AUTH_SUPPLIED,
 
+    // Saved Pages -------------------------------------------------------------
+
+    // Sent when a SavePackage finishes successfully. The source is the
+    // SavePackage, and Details are a GURL containing address of downloaded
+    // page.
+    SAVE_PACKAGE_SUCCESSFULLY_FINISHED,
+
     // History -----------------------------------------------------------------
 
     // Sent when a history service is created on the main thread. This is sent
@@ -477,6 +513,16 @@ class NotificationType {
     // profile, and the details is history::FavIconChangeDetails (see
     // history_notifications.h).
     FAVICON_CHANGED,
+
+    // Sent by history if the history database is too new.  The active browser
+    // window should notify the user of this error.
+    HISTORY_TOO_NEW,
+
+    // Thumbnails---------------------------------------------------------------
+
+    // Set by ThumbnailStore when it was finished loading data from disk on
+    // startup.
+    THUMBNAIL_STORE_READY,
 
     // Bookmarks ---------------------------------------------------------------
 
@@ -529,11 +575,12 @@ class NotificationType {
     // observers should use if they want to see the updated matches.
     AUTOCOMPLETE_CONTROLLER_RESULT_UPDATED,
 
-    // Sent by the autocomplete controller once per query, immediately after
-    // synchronous matches become available.  The details hold the
+    // Sent by the autocomplete controller immediately after synchronous matches
+    // become available, and thereafter at the same time that
+    // AUTOCOMPLETE_CONTROLLER_RESULT_UPDATED is sent.  The details hold the
     // AutocompleteResult that observers should use if they want to see the
-    // synchronous matches.
-    AUTOCOMPLETE_CONTROLLER_SYNCHRONOUS_MATCHES_AVAILABLE,
+    // up-to-date matches.
+    AUTOCOMPLETE_CONTROLLER_DEFAULT_MATCH_UPDATED,
 
     // This is sent when an item of the Omnibox popup is selected. The source
     // is the profile.
@@ -570,6 +617,13 @@ class NotificationType {
     PERSONALIZATION,
     PERSONALIZATION_CREATED,
 
+    // Privacy blacklists ------------------------------------------------------
+
+    // Sent when a privacy blacklist path provider changes the list of its
+    // blacklist paths (like adds/removes items). The details are
+    // a BlacklistPathProvider, and the source is a Profile.
+    PRIVACY_BLACKLIST_PATH_PROVIDER_UPDATED,
+
     // User Scripts ------------------------------------------------------------
 
     // Sent when there are new user scripts available.  The details are a
@@ -583,8 +637,12 @@ class NotificationType {
     // unloaded and reloaded.
     EXTENSIONS_READY,
 
-    // Sent when new extensions are loaded. The details are an ExtensionList*.
-    EXTENSIONS_LOADED,
+    // Sent when a new extension is loaded. The details are an Extension.
+    EXTENSION_LOADED,
+
+    // Sent when attempting to load a new extension, but they are disabled. The
+    // details are an Extension*.
+    EXTENSION_UPDATE_DISABLED,
 
     // Sent when a theme is ready to be installed, so we can alert the user.
     EXTENSION_READY_FOR_INSTALL,
@@ -598,6 +656,10 @@ class NotificationType {
     // Sent when new extensions are installed. The details are an Extension.
     EXTENSION_INSTALLED,
 
+    // An error occured during extension install. The details are a string with
+    // details about why the install failed.
+    EXTENSION_INSTALL_ERROR,
+
     // Sent when an extension is unloaded. This happens when an extension is
     // uninstalled. When we add a disable feature, it will also happen then.
     // The details are an Extension.  Note that when this notification is sent,
@@ -605,26 +667,54 @@ class NotificationType {
     // state.
     EXTENSION_UNLOADED,
 
+    // Same as above, but for a disabled extension.
+    EXTENSION_UNLOADED_DISABLED,
+
     // Sent after a new ExtensionHost is created. The details are
-    // an ExtensionHost*.
+    // an ExtensionHost* and the source is an ExtensionProcessManager*.
     EXTENSION_HOST_CREATED,
 
     // Sent before an ExtensionHost is destroyed. The details are
-    // an ExtensionHost*.
+    // an ExtensionHost* and the source is a Profile*.
     EXTENSION_HOST_DESTROYED,
+
+    // Send by an ExtensionHost when it finished its initial page load.
+    // The details are an ExtensionHost* and the source is a Profile*.
+    EXTENSION_HOST_DID_STOP_LOADING,
 
     // Sent after an extension render process is created and fully functional.
     // The details are an ExtensionHost*.
     EXTENSION_PROCESS_CREATED,
 
     // Sent when extension render process crashes. The details are
-    // an ExtensionHost*.
+    // an ExtensionHost* and the source is an ExtensionsService*.
     EXTENSION_PROCESS_CRASHED,
 
     // Sent when the contents or order of toolstrips in the shelf model change.
     EXTENSION_SHELF_MODEL_CHANGED,
 
+    // Sent when a background page is ready so other components can load.
+    EXTENSION_BACKGROUND_PAGE_READY,
+
+    // Sent when a browser action's state has changed. The source is the
+    // ExtensionAction* that changed. The details are an ExtensionActionState*.
+    EXTENSION_BROWSER_ACTION_UPDATED,
+
+    // Sent by an extension to notify the browser about the results of a unit
+    // test.
+    EXTENSION_TEST_PASSED,
+    EXTENSION_TEST_FAILED,
+
+    // Privacy Blacklist -------------------------------------------------------
+
+    // Sent by the resource dispatcher host when a resource is blocked.
+    BLACKLIST_BLOCKED_RESOURCE,
+
     // Debugging ---------------------------------------------------------------
+
+    // TODO(mpcomplete): Sent to diagnose a bug. Remove when fixed.
+    // http://code.google.com/p/chromium/issues/detail?id=21201
+    EXTENSION_PORT_DELETED_DEBUG,
 
     // Count (must be last) ----------------------------------------------------
     // Used to determine the number of notification types.  Not valid as

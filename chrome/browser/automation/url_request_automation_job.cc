@@ -1,18 +1,45 @@
-// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/automation/url_request_automation_job.h"
 
 #include "base/message_loop.h"
+#include "base/time.h"
 #include "chrome/browser/automation/automation_resource_message_filter.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/renderer_host/resource_dispatcher_host.h"
+#include "chrome/browser/renderer_host/resource_dispatcher_host_request_info.h"
 #include "chrome/test/automation/automation_messages.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
+#include "net/http/http_util.h"
 #include "net/url_request/url_request.h"
+#include "net/url_request/url_request_context.h"
 
+using base::Time;
+using base::TimeDelta;
+
+// The list of filtered headers that are removed from requests sent via
+// StartAsync(). These must be lower case.
+static const char* kFilteredHeaderStrings[] = {
+  "accept",
+  "authorization",
+  "cache-control",
+  "connection",
+  "cookie",
+  "expect",
+  "if-match",
+  "if-modified-since",
+  "if-none-match",
+  "if-range",
+  "if-unmodified-since",
+  "max-forwards",
+  "proxy-authorization",
+  "te",
+  "upgrade",
+  "via"
+};
 
 // This class manages the interception of network requests for automation.
 // It looks at the request, and creates an intercept job if it indicates
@@ -37,15 +64,17 @@ class AutomationRequestInterceptor : public URLRequest::Interceptor {
 
 URLRequestJob* AutomationRequestInterceptor::MaybeIntercept(
     URLRequest* request) {
-  ResourceDispatcherHost::ExtraRequestInfo* request_info =
-      ResourceDispatcherHost::ExtraInfoForRequest(request);
-  if (request_info) {
-    AutomationResourceMessageFilter::AutomationDetails details;
-    if (AutomationResourceMessageFilter::LookupRegisteredRenderView(
-            request_info->process_id, request_info->route_id, &details)) {
-      URLRequestAutomationJob* job = new URLRequestAutomationJob(request,
-          details.tab_handle, details.filter);
-      return job;
+  if (request->url().SchemeIs("http") || request->url().SchemeIs("https")) {
+    ResourceDispatcherHostRequestInfo* request_info =
+        ResourceDispatcherHost::InfoForRequest(request);
+    if (request_info) {
+      AutomationResourceMessageFilter::AutomationDetails details;
+      if (AutomationResourceMessageFilter::LookupRegisteredRenderView(
+              request_info->child_id(), request_info->route_id(), &details)) {
+        URLRequestAutomationJob* job = new URLRequestAutomationJob(request,
+            details.tab_handle, details.filter);
+        return job;
+      }
     }
   }
 
@@ -61,7 +90,7 @@ int URLRequestAutomationJob::instance_count_ = 0;
 URLRequestAutomationJob::URLRequestAutomationJob(
     URLRequest* request, int tab, AutomationResourceMessageFilter* filter)
     : URLRequestJob(request), id_(0), tab_(tab), message_filter_(filter),
-      pending_buf_size_(0) {
+      pending_buf_size_(0), redirect_status_(0) {
   DLOG(INFO) << "URLRequestAutomationJob create. Count: " << ++instance_count_;
   if (message_filter_) {
     id_ = message_filter_->NewRequestId();
@@ -92,8 +121,10 @@ void URLRequestAutomationJob::Start() {
 }
 
 void URLRequestAutomationJob::Kill() {
-  message_filter_->Send(new AutomationMsg_RequestEnd(0, tab_, id_,
-      URLRequestStatus(URLRequestStatus::CANCELED, 0)));
+  if (message_filter_.get()) {
+    message_filter_->Send(new AutomationMsg_RequestEnd(0, tab_, id_,
+        URLRequestStatus(URLRequestStatus::CANCELED, net::ERR_ABORTED)));
+  }
   DisconnectFromMessageFilter();
   URLRequestJob::Kill();
 }
@@ -131,7 +162,19 @@ void URLRequestAutomationJob::GetResponseInfo(net::HttpResponseInfo* info) {
   if (headers_)
     info->headers = headers_;
   if (request_->url().SchemeIsSecure()) {
-    // TODO(joshia): fill up SSL related fields.
+    // Make up a fake certificate for this response since we don't have
+    // access to the real SSL info.
+    const char* kCertIssuer = "Chrome Internal";
+    const int kLifetimeDays = 100;
+
+    info->ssl_info.cert =
+        new net::X509Certificate(request_->url().GetWithEmptyPath().spec(),
+                                 kCertIssuer,
+                                 Time::Now(),
+                                 Time::Now() +
+                                     TimeDelta::FromDays(kLifetimeDays));
+    info->ssl_info.cert_status = 0;
+    info->ssl_info.security_bits = 0;
   }
 }
 
@@ -145,16 +188,20 @@ int URLRequestAutomationJob::GetResponseCode() const {
 
 bool URLRequestAutomationJob::IsRedirectResponse(
     GURL* location, int* http_status_code) {
-  if (!request_->response_headers())
-    return false;
+  static const int kDefaultHttpRedirectResponseCode = 301;
 
-  std::string value;
-  if (!request_->response_headers()->IsRedirect(&value))
-    return false;
+  if (!redirect_url_.empty()) {
+    DLOG_IF(ERROR, redirect_status_ == 0) << "Missing redirect status?";
+    *http_status_code = redirect_status_ ? redirect_status_ :
+                                           kDefaultHttpRedirectResponseCode;
+    *location = GURL(redirect_url_);
+    return true;
+  } else {
+    DCHECK(redirect_status_ == 0)
+        << "Unexpectedly have redirect status but no URL";
+  }
 
-  *location = request_->url().Resolve(value);
-  *http_status_code = request_->response_headers()->response_code();
-  return true;
+  return false;
 }
 
 int URLRequestAutomationJob::MayFilterMessage(const IPC::Message& message) {
@@ -191,8 +238,57 @@ void URLRequestAutomationJob::OnRequestStarted(
   set_expected_content_size(response.content_length);
   mime_type_ = response.mime_type;
 
-  if (!response.headers.empty())
-    headers_ = new net::HttpResponseHeaders(response.headers);
+  redirect_url_ = response.redirect_url;
+  redirect_status_ = response.redirect_status;
+  DCHECK(redirect_status_ == 0 || redirect_status_ == 200 ||
+         (redirect_status_ >= 300 && redirect_status_ < 400));
+
+  GURL url_for_cookies =
+      GURL(redirect_url_.empty() ? request_->url().spec().c_str() :
+          redirect_url_.c_str());
+
+  URLRequestContext* ctx = request_->context();
+
+  if (!response.headers.empty()) {
+    headers_ = new net::HttpResponseHeaders(
+        net::HttpUtil::AssembleRawHeaders(response.headers.data(),
+                                          response.headers.size()));
+    // Parse and set HTTP cookies.
+    const std::string name = "Set-Cookie";
+    std::string value;
+    std::vector<std::string> response_cookies;
+
+    void* iter = NULL;
+    while (headers_->EnumerateHeader(&iter, name, &value)) {
+      if (request_->context()->InterceptCookie(request_, &value))
+        response_cookies.push_back(value);
+    }
+
+    if (response_cookies.size()) {
+      if (ctx && ctx->cookie_store() &&
+          ctx->cookie_policy()->CanSetCookie(
+              url_for_cookies, request_->first_party_for_cookies())) {
+        net::CookieOptions options;
+        options.set_include_httponly();
+        ctx->cookie_store()->SetCookiesWithOptions(url_for_cookies,
+                                                   response_cookies,
+                                                   options);
+      }
+    }
+  }
+
+  if (ctx && ctx->cookie_store() && !response.persistent_cookies.empty() &&
+      ctx->cookie_policy()->CanSetCookie(
+          url_for_cookies, request_->first_party_for_cookies())) {
+    StringTokenizer cookie_parser(response.persistent_cookies, ";");
+
+    while (cookie_parser.GetNext()) {
+      net::CookieOptions options;
+      ctx->cookie_store()->SetCookieWithOptions(url_for_cookies,
+                                                cookie_parser.token(),
+                                                options);
+    }
+  }
 
   NotifyHeadersComplete();
 }
@@ -221,8 +317,23 @@ void URLRequestAutomationJob::OnDataAvailable(
 
 void URLRequestAutomationJob::OnRequestEnd(
     int tab, int id, const URLRequestStatus& status) {
-  DLOG(INFO) << "URLRequestAutomationJob: " <<
-      request_->url().spec() << " - request end. Status: " << status.status();
+#ifndef NDEBUG
+  std::string url;
+  if (request_)
+    url = request_->url().spec();
+  DLOG(INFO) << "URLRequestAutomationJob: "
+      << url << " - request end. Status: " << status.status();
+#endif
+
+  // TODO(tommi): When we hit certificate errors, notify the delegate via
+  // OnSSLCertificateError().  Right now we don't have the certificate
+  // so we don't.  We could possibly call OnSSLCertificateError with a NULL
+  // certificate, but I'm not sure if all implementations expect it.
+  // if (status.status() == URLRequestStatus::FAILED &&
+  //    net::IsCertificateError(status.os_error()) && request_->delegate()) {
+  //  request_->delegate()->OnSSLCertificateError(request_, status.os_error(),
+  //                                              NULL);
+  // }
 
   DisconnectFromMessageFilter();
   NotifyDone(status);
@@ -251,7 +362,7 @@ void URLRequestAutomationJob::Cleanup() {
 
 void URLRequestAutomationJob::StartAsync() {
   DLOG(INFO) << "URLRequestAutomationJob: start request: " <<
-      request_->url().spec();
+      (request_ ? request_->url().spec() : "NULL request");
 
   // If the job is cancelled before we got a chance to start it
   // we have nothing much to do here.
@@ -267,12 +378,30 @@ void URLRequestAutomationJob::StartAsync() {
   // Register this request with automation message filter.
   message_filter_->RegisterRequest(this);
 
+  // Strip unwanted headers.
+  std::string new_request_headers(
+      net::HttpUtil::StripHeaders(request_->extra_request_headers(),
+                                  kFilteredHeaderStrings,
+                                  arraysize(kFilteredHeaderStrings)));
+
+  // Ensure that we do not send username and password fields in the referrer.
+  GURL referrer(request_->GetSanitizedReferrer());
+
+  // The referrer header must be suppressed if the preceding URL was
+  // a secure one and the new one is not.
+  if (referrer.SchemeIsSecure() && !request_->url().SchemeIsSecure()) {
+    DLOG(INFO) <<
+        "Suppressing referrer header since going from secure to non-secure";
+    referrer = GURL();
+  }
+
   // Ask automation to start this request.
   IPC::AutomationURLRequest automation_request = {
     request_->url().spec(),
     request_->method(),
-    request_->referrer(),
-    request_->extra_request_headers()
+    referrer.spec(),
+    new_request_headers,
+    request_->get_upload()
   };
 
   DCHECK(message_filter_);
@@ -286,4 +415,3 @@ void URLRequestAutomationJob::DisconnectFromMessageFilter() {
     message_filter_ = NULL;
   }
 }
-

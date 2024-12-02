@@ -6,33 +6,36 @@
 #define NET_HTTP_HTTP_NETWORK_SESSION_H_
 
 #include "base/ref_counted.h"
+#include "net/base/host_resolver.h"
 #include "net/base/ssl_client_auth_cache.h"
 #include "net/base/ssl_config_service.h"
 #include "net/http/http_auth_cache.h"
+#include "net/proxy/proxy_service.h"
 #include "net/socket/tcp_client_socket_pool.h"
 
 namespace net {
 
 class ClientSocketFactory;
-class HostResolver;
-class ProxyService;
 
 // This class holds session objects used by HttpNetworkTransaction objects.
 class HttpNetworkSession : public base::RefCounted<HttpNetworkSession> {
  public:
   HttpNetworkSession(HostResolver* host_resolver, ProxyService* proxy_service,
-                     ClientSocketFactory* client_socket_factory);
+                     ClientSocketFactory* client_socket_factory,
+                     SSLConfigService* ssl_config_service);
 
   HttpAuthCache* auth_cache() { return &auth_cache_; }
   SSLClientAuthCache* ssl_client_auth_cache() {
     return &ssl_client_auth_cache_;
   }
-  ClientSocketPool* connection_pool() { return connection_pool_; }
+
+  // TCP sockets come from the tcp_socket_pool().
+  TCPClientSocketPool* tcp_socket_pool() { return tcp_socket_pool_; }
+  // SSL sockets come frmo the socket_factory().
+  ClientSocketFactory* socket_factory() { return socket_factory_; }
   HostResolver* host_resolver() { return host_resolver_; }
   ProxyService* proxy_service() { return proxy_service_; }
-#if defined(OS_WIN)
-  SSLConfigService* ssl_config_service() { return &ssl_config_service_; }
-#endif
+  SSLConfigService* ssl_config_service() { return ssl_config_service_; }
 
   static void set_max_sockets_per_group(int socket_count);
 
@@ -49,13 +52,11 @@ class HttpNetworkSession : public base::RefCounted<HttpNetworkSession> {
 
   HttpAuthCache auth_cache_;
   SSLClientAuthCache ssl_client_auth_cache_;
-  scoped_refptr<ClientSocketPool> connection_pool_;
+  scoped_refptr<TCPClientSocketPool> tcp_socket_pool_;
+  ClientSocketFactory* socket_factory_;
   scoped_refptr<HostResolver> host_resolver_;
-  ProxyService* proxy_service_;
-#if defined(OS_WIN)
-  // TODO(port): Port the SSLConfigService class to Linux and Mac OS X.
-  SSLConfigService ssl_config_service_;
-#endif
+  scoped_refptr<ProxyService> proxy_service_;
+  scoped_refptr<SSLConfigService> ssl_config_service_;
 };
 
 }  // namespace net

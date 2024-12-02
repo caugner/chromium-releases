@@ -8,35 +8,52 @@
 
 #define FPL FILE_PATH_LITERAL
 
+#if defined(OS_MACOSX)
+#if defined(GOOGLE_CHROME_BUILD)
+#define PRODUCT_STRING "Google Chrome"
+#define PRODUCT_STRING_W L"Google Chrome"
+#elif defined(CHROMIUM_BUILD)
+#define PRODUCT_STRING "Chromium"
+#define PRODUCT_STRING_W L"Chromium"
+#else
+#error Unknown branding
+#endif
+#endif  // OS_MACOSX
+
 namespace chrome {
 
 // The following should not be used for UI strings; they are meant
 // for system strings only. UI changes should be made in the GRD.
 #if defined(OS_WIN)
 const wchar_t kBrowserProcessExecutableName[] = L"chrome.exe";
+const wchar_t kHelperProcessExecutableName[] = L"chrome.exe";
 #elif defined(OS_LINUX)
 const wchar_t kBrowserProcessExecutableName[] = L"chrome";
+const wchar_t kHelperProcessExecutableName[] = L"chrome";
 #elif defined(OS_MACOSX)
-const wchar_t kBrowserProcessExecutableName[] =
-#if defined(GOOGLE_CHROME_BUILD)
-    L"Google Chrome";
-#else
-    L"Chromium";
-#endif  // GOOGLE_CHROME_BUILD
+const wchar_t kBrowserProcessExecutableName[] = PRODUCT_STRING_W;
+const wchar_t kHelperProcessExecutableName[] = PRODUCT_STRING_W L" Helper";
 #endif  // OS_*
 #if defined(OS_WIN)
 const wchar_t kBrowserProcessExecutablePath[] = L"chrome.exe";
+const FilePath::CharType kHelperProcessExecutablePath[] = FPL("chrome.exe");
 #elif defined(OS_LINUX)
 const wchar_t kBrowserProcessExecutablePath[] = L"chrome";
+const FilePath::CharType kHelperProcessExecutablePath[] = FPL("chrome");
 #elif defined(OS_MACOSX)
 const wchar_t kBrowserProcessExecutablePath[] =
-#if defined(GOOGLE_CHROME_BUILD)
-    L"Google Chrome.app/Contents/MacOS/Google Chrome";
-#else
-    L"Chromium.app/Contents/MacOS/Chromium";
-#endif  // GOOGLE_CHROME_BUILD
+    PRODUCT_STRING_W L".app/Contents/MacOS/" PRODUCT_STRING_W;
+const FilePath::CharType kHelperProcessExecutablePath[] =
+    FPL(PRODUCT_STRING " Helper.app/Contents/MacOS/" PRODUCT_STRING " Helper");
 #endif  // OS_*
-#if defined(GOOGLE_CHROME_BUILD)
+#if defined(OS_MACOSX)
+const FilePath::CharType kFrameworkName[] =
+    FPL(PRODUCT_STRING " Framework.framework");
+#endif  // OS_MACOSX
+#if defined(CHROME_FRAME_BUILD)
+const wchar_t kBrowserAppName[] = L"ChromeFrame";
+const char    kStatsFilename[] = "ChromeFrameStats2";
+#elif defined(GOOGLE_CHROME_BUILD)
 const wchar_t kBrowserAppName[] = L"Chrome";
 const char    kStatsFilename[] = "ChromeStats2";
 #else
@@ -57,8 +74,9 @@ const FilePath::CharType kCacheDirname[] = FPL("Cache");
 const FilePath::CharType kMediaCacheDirname[] = FPL("Media Cache");
 const FilePath::CharType kOffTheRecordMediaCacheDirname[] =
     FPL("Incognito Media Cache");
+const FilePath::CharType kAppCacheDirname[] = FPL("Application Cache");
 const wchar_t kChromePluginDataDirname[] = L"Plugin Data";
-const wchar_t kThemeImagesDirname[] = L"Cached Theme Images";
+const FilePath::CharType kThemeImagesDirname[] = FPL("Cached Theme Images");
 const FilePath::CharType kCookieFilename[] = FPL("Cookies");
 const FilePath::CharType kExtensionsCookieFilename[] = FPL("Extension Cookies");
 const FilePath::CharType kHistoryFilename[] = FPL("History");
@@ -68,10 +86,13 @@ const FilePath::CharType kSafeBrowsingFilename[] = FPL("Safe Browsing");
 // WARNING: SingletonSocket can't contain spaces, because otherwise
 // chrome_process_util_linux would be broken.
 const FilePath::CharType kSingletonSocketFilename[] = FPL("SingletonSocket");
+const FilePath::CharType kSingletonLockFilename[] = FPL("SingletonLock");
 const FilePath::CharType kThumbnailsFilename[] = FPL("Thumbnails");
+const FilePath::CharType kNewTabThumbnailsFilename[] = FPL("Top Thumbnails");
 const wchar_t kUserDataDirname[] = L"User Data";
 const FilePath::CharType kUserScriptsDirname[] = FPL("User Scripts");
 const FilePath::CharType kWebDataFilename[] = FPL("Web Data");
+const FilePath::CharType kPrivacyBlacklistFileName[] = FPL("Privacy Blacklist");
 const FilePath::CharType kBookmarksFileName[] = FPL("Bookmarks");
 const FilePath::CharType kHistoryBookmarksFileName[] =
     FPL("Bookmarks From History");
@@ -98,3 +119,5 @@ const bool kRecordModeEnabled = false;
 #endif
 
 }  // namespace chrome
+
+#undef FPL

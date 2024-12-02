@@ -9,7 +9,9 @@
 #include "chrome/browser/profile.h"
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
+#include "chrome/browser/extensions/extension_toolstrip_api.h"
 #include "chrome/browser/extensions/extensions_service.h"
+#include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/notification_service.h"
 
@@ -18,7 +20,7 @@ ExtensionShelfModel::ExtensionShelfModel(Browser* browser)
   // Watch extensions loaded and unloaded notifications.
   registrar_.Add(this, NotificationType::EXTENSION_UNLOADED,
                  NotificationService::AllSources());
-  registrar_.Add(this, NotificationType::EXTENSIONS_LOADED,
+  registrar_.Add(this, NotificationType::EXTENSION_LOADED,
                  NotificationService::AllSources());
   registrar_.Add(this, NotificationType::EXTENSIONS_READY,
                  NotificationService::AllSources());
@@ -39,10 +41,14 @@ ExtensionShelfModel::ExtensionShelfModel(Browser* browser)
 }
 
 ExtensionShelfModel::~ExtensionShelfModel() {
+  FOR_EACH_OBSERVER(ExtensionShelfModelObserver, observers_,
+                    ShelfModelDeleting());
+
   while (observers_.size())
     observers_.RemoveObserver(observers_.GetElementAt(0));
 
-  STLDeleteContainerPairFirstPointers(toolstrips_.begin(), toolstrips_.end());
+  for (iterator t = toolstrips_.begin(); t != toolstrips_.end(); ++t)
+    delete t->host;
   toolstrips_.clear();
 }
 
@@ -55,27 +61,25 @@ void ExtensionShelfModel::RemoveObserver(
   observers_.RemoveObserver(observer);
 }
 
-void ExtensionShelfModel::AppendToolstrip(ExtensionHost* toolstrip) {
-  InsertToolstripAt(count(), toolstrip, NULL);
+void ExtensionShelfModel::AppendToolstrip(const ToolstripItem& toolstrip) {
+  InsertToolstripAt(count(), toolstrip);
 }
 
 void ExtensionShelfModel::InsertToolstripAt(int index,
-                                            ExtensionHost* toolstrip,
-                                            void* data) {
-  toolstrips_.insert(toolstrips_.begin() + index,
-                     ToolstripItem(toolstrip, data));
+                                            const ToolstripItem& toolstrip) {
+  toolstrips_.insert(toolstrips_.begin() + index, toolstrip);
   if (ready_) {
     FOR_EACH_OBSERVER(ExtensionShelfModelObserver, observers_,
-                      ToolstripInsertedAt(toolstrip, index));
+                      ToolstripInsertedAt(toolstrip.host, index));
   }
 }
 
 void ExtensionShelfModel::RemoveToolstripAt(int index) {
-  ExtensionHost* toolstrip = ToolstripAt(index);
+  ExtensionHost* host = ToolstripAt(index).host;
   FOR_EACH_OBSERVER(ExtensionShelfModelObserver, observers_,
-                    ToolstripRemovingAt(toolstrip, index));
+                    ToolstripRemovingAt(host, index));
   toolstrips_.erase(toolstrips_.begin() + index);
-  delete toolstrip;
+  delete host;
 }
 
 void ExtensionShelfModel::MoveToolstripAt(int index, int to_index) {
@@ -89,49 +93,84 @@ void ExtensionShelfModel::MoveToolstripAt(int index, int to_index) {
   toolstrips_.insert(toolstrips_.begin() + to_index, toolstrip);
 
   FOR_EACH_OBSERVER(ExtensionShelfModelObserver, observers_,
-                    ToolstripMoved(toolstrip.first, index, to_index));
+                    ToolstripMoved(toolstrip.host, index, to_index));
 
   UpdatePrefs();
 }
 
-int ExtensionShelfModel::IndexOfToolstrip(ExtensionHost* toolstrip) {
-  ExtensionToolstrips::iterator i;
-  for (i = toolstrips_.begin(); i != toolstrips_.end(); ++i) {
-    if (i->first == toolstrip)
+int ExtensionShelfModel::IndexOfHost(ExtensionHost* host) {
+  for (iterator i = toolstrips_.begin(); i != toolstrips_.end(); ++i) {
+    if (i->host == host)
       return i - toolstrips_.begin();
   }
   return -1;
 }
 
-ExtensionHost* ExtensionShelfModel::ToolstripAt(int index) {
-  DCHECK(index >= 0);
-  return toolstrips_[index].first;
+ExtensionShelfModel::iterator ExtensionShelfModel::ToolstripForHost(
+    ExtensionHost* host) {
+  for (iterator i = toolstrips_.begin(); i != toolstrips_.end(); ++i) {
+    if (i->host == host)
+      return i;
+  }
+  return toolstrips_.end();
 }
 
-void* ExtensionShelfModel::ToolstripDataAt(int index) {
+const ExtensionShelfModel::ToolstripItem& ExtensionShelfModel::ToolstripAt(
+    int index) {
   DCHECK(index >= 0);
-  return toolstrips_[index].second;
+  return toolstrips_[index];
 }
 
 void ExtensionShelfModel::SetToolstripDataAt(int index, void* data) {
   DCHECK(index >= 0);
-  toolstrips_[index].second = data;
+  toolstrips_[index].data = data;
+}
+
+void ExtensionShelfModel::ExpandToolstrip(iterator toolstrip,
+                                          const GURL& url, int height) {
+  if (toolstrip == end())
+    return;
+  toolstrip->height = height;
+  toolstrip->url = url;
+  FOR_EACH_OBSERVER(ExtensionShelfModelObserver, observers_,
+                    ToolstripChanged(toolstrip));
+  int routing_id = toolstrip->host->render_view_host()->routing_id();
+  ToolstripEventRouter::OnToolstripExpanded(browser_->profile(),
+                                            routing_id,
+                                            url, height);
+  toolstrip->host->SetRenderViewType(ViewType::EXTENSION_MOLE);
+}
+
+void ExtensionShelfModel::CollapseToolstrip(iterator toolstrip,
+                                            const GURL& url) {
+  if (toolstrip == end())
+    return;
+  toolstrip->height = 0;
+  toolstrip->url = url;
+  FOR_EACH_OBSERVER(ExtensionShelfModelObserver, observers_,
+                    ToolstripChanged(toolstrip));
+  int routing_id = toolstrip->host->render_view_host()->routing_id();
+  ToolstripEventRouter::OnToolstripCollapsed(browser_->profile(),
+                                             routing_id,
+                                             url);
+  toolstrip->host->SetRenderViewType(ViewType::EXTENSION_TOOLSTRIP);
 }
 
 void ExtensionShelfModel::Observe(NotificationType type,
                                   const NotificationSource& source,
                                   const NotificationDetails& details) {
   switch (type.value) {
-    case NotificationType::EXTENSIONS_LOADED:
+    case NotificationType::EXTENSION_LOADED:
       if (ready_)
-        AddExtensions(Details<ExtensionList>(details).ptr());
+        AddExtension(Details<Extension>(details).ptr());
       break;
     case NotificationType::EXTENSION_UNLOADED:
       RemoveExtension(Details<Extension>(details).ptr());
       break;
     case NotificationType::EXTENSIONS_READY:
       if (browser_->profile()->GetExtensionsService()) {
-        AddExtensions(browser_->profile()->GetExtensionsService()->extensions());
+        AddExtensions(
+            browser_->profile()->GetExtensionsService()->extensions());
         SortToolstrips();
       }
       ready_ = true;
@@ -154,12 +193,16 @@ void ExtensionShelfModel::AddExtension(Extension* extension) {
   if (!manager)
     return;
 
-  for (std::vector<std::string>::const_iterator toolstrip_path =
+  for (std::vector<Extension::ToolstripInfo>::const_iterator toolstrip =
        extension->toolstrips().begin();
-       toolstrip_path != extension->toolstrips().end(); ++toolstrip_path) {
-    GURL url = extension->GetResourceURL(*toolstrip_path);
-    ExtensionHost* host = manager->CreateView(extension, url, browser_);
-    AppendToolstrip(host);
+       toolstrip != extension->toolstrips().end(); ++toolstrip) {
+    GURL url = toolstrip->toolstrip;
+    ToolstripItem item;
+    item.host = manager->CreateToolstrip(extension, url, browser_);
+    item.info = *toolstrip;
+    item.data = NULL;
+    item.height = 0;
+    AppendToolstrip(item);
   }
 }
 
@@ -174,7 +217,7 @@ void ExtensionShelfModel::AddExtensions(const ExtensionList* extensions) {
 void ExtensionShelfModel::RemoveExtension(Extension* extension) {
   bool changed = false;
   for (int i = count() - 1; i >= 0; --i) {
-    ExtensionHost* t = ToolstripAt(i);
+    ExtensionHost* t = ToolstripAt(i).host;
     if (t->extension()->id() == extension->id()) {
       changed = true;
       RemoveToolstripAt(i);
@@ -194,7 +237,7 @@ void ExtensionShelfModel::UpdatePrefs() {
   // It's easiest to just rebuild the list each time.
   ExtensionPrefs::URLList urls;
   for (int i = 0; i < count(); ++i)
-    urls.push_back(ToolstripAt(i)->GetURL());
+    urls.push_back(ToolstripAt(i).host->GetURL());
   prefs_->SetShelfToolstripOrder(urls);
 
   NotificationService::current()->Notify(
@@ -205,17 +248,17 @@ void ExtensionShelfModel::UpdatePrefs() {
 
 void ExtensionShelfModel::SortToolstrips() {
   ExtensionPrefs::URLList urls = prefs_->GetShelfToolstripOrder();
-  ExtensionToolstrips copy =
-      ExtensionToolstrips(toolstrips_.begin(), toolstrips_.end());
+  ToolstripList copy =
+      ToolstripList(toolstrips_.begin(), toolstrips_.end());
   toolstrips_.clear();
 
   // Go through the urls and find the matching toolstrip, re-adding it to the
   // new list in the proper order.
   for (size_t i = 0; i < urls.size(); ++i) {
     GURL& url = urls[i];
-    for (ExtensionToolstrips::iterator toolstrip = copy.begin();
+    for (iterator toolstrip = copy.begin();
         toolstrip != copy.end(); ++toolstrip) {
-      if (url == (*toolstrip).first->GetURL()) {
+      if (url == toolstrip->host->GetURL()) {
         // Note that it's technically possible for the same URL to appear in
         // multiple toolstrips, so we don't do any testing for uniqueness.
         toolstrips_.push_back(*toolstrip);
@@ -230,7 +273,7 @@ void ExtensionShelfModel::SortToolstrips() {
 
   // Any toolstrips remaining in |copy| were somehow missing from the prefs,
   // so just append them to the end.
-  for (ExtensionToolstrips::iterator toolstrip = copy.begin();
+  for (iterator toolstrip = copy.begin();
       toolstrip != copy.end(); ++toolstrip) {
     toolstrips_.push_back(*toolstrip);
   }

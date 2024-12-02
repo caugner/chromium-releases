@@ -5,8 +5,8 @@
 #ifndef CHROME_BROWSER_PRINTING_PRINTER_QUERY_H_
 #define CHROME_BROWSER_PRINTING_PRINTER_QUERY_H_
 
+#include "app/gfx/native_widget_types.h"
 #include "base/scoped_ptr.h"
-#include "base/ref_counted.h"
 #include "chrome/browser/printing/print_job_worker_owner.h"
 
 class CancelableTask;
@@ -21,8 +21,7 @@ namespace printing {
 class PrintJobWorker;
 
 // Query the printer for settings.
-class PrinterQuery : public base::RefCountedThreadSafe<PrinterQuery>,
-                     public PrintJobWorkerOwner {
+class PrinterQuery : public PrintJobWorkerOwner {
  public:
   // GetSettings() UI parameter.
   enum GetSettingsAskParam {
@@ -34,12 +33,6 @@ class PrinterQuery : public base::RefCountedThreadSafe<PrinterQuery>,
   virtual ~PrinterQuery();
 
   // PrintJobWorkerOwner
-  virtual void AddRef() {
-    return base::RefCountedThreadSafe<PrinterQuery>::AddRef();
-  }
-  virtual void Release() {
-    return base::RefCountedThreadSafe<PrinterQuery>::Release();
-  }
   virtual void GetSettingsDone(const PrintSettings& new_settings,
                                PrintingContext::Result result);
   virtual PrintJobWorker* DetachWorker(PrintJobWorkerOwner* new_owner);
@@ -55,7 +48,7 @@ class PrinterQuery : public base::RefCountedThreadSafe<PrinterQuery>,
   // owner of the print setting dialog box. It is unused when
   // |ask_for_user_settings| is DEFAULTS.
   void GetSettings(GetSettingsAskParam ask_user_for_settings,
-                   HWND parent_window,
+                   gfx::NativeWindow parent_window,
                    int expected_page_count,
                    bool has_selection,
                    CancelableTask* callback);

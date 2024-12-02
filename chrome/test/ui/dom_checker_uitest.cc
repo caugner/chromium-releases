@@ -27,7 +27,7 @@ static const FilePath::CharType kTestDirectory[] =
 static const FilePath::CharType kStartFile[] =
     FILE_PATH_LITERAL("dom_checker.html");
 
-const wchar_t kRunDomCheckerTest[] = L"run-dom-checker-test";
+const char kRunDomCheckerTest[] = "run-dom-checker-test";
 
 class DomCheckerTest : public UITest {
  public:
@@ -224,7 +224,8 @@ TEST_F(DomCheckerTest, File) {
   PrintResults(new_passes, new_failures);
 }
 
-TEST_F(DomCheckerTest, Http) {
+// TODO(arv): http://code.google.com/p/chromium/issues/detail?id=21321
+TEST_F(DomCheckerTest, DISABLED_Http) {
   if (!CommandLine::ForCurrentProcess()->HasSwitch(kRunDomCheckerTest))
     return;
 

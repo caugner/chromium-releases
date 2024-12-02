@@ -60,7 +60,19 @@ o3djs.util.PLUGIN_NAME = 'O3D Plugin';
  * utility libraries.
  * @type {string}
  */
-o3djs.util.REQUIRED_VERSION = '0.1.38.0';
+o3djs.util.REQUIRED_VERSION = '0.1.42.4';
+
+/**
+ * The width an O3D must be to put a failure message inside
+ * @type {number}
+ */
+o3djs.util.MINIMUM_WIDTH_FOR_MESSAGE = 200;
+
+/**
+ * The height an O3D must be to put a failure message inside
+ * @type {number}
+ */
+o3djs.util.MINIMUM_HEIGHT_FOR_MESSAGE = 200;
 
 /**
  * A URL at which to download the client.
@@ -326,6 +338,36 @@ o3djs.util.requiredVersionAvailable = function(requiredVersion) {
 };
 
 /**
+ * Gets all the elements of a certain tag that have a certain id.
+ * @param {string} tag The tag to look for. (eg. 'div').
+ * @param {string} id The id to look for. This can be a regular expression.
+ * @return {!Array.<!Element>} An array of the elements found.
+ */
+o3djs.util.getElementsByTagAndId = function(tag, id) {
+  var elements = [];
+  var allElements = document.getElementsByTagName(tag);
+  for (var ee = 0; ee < allElements.length; ++ee) {
+    var element = allElements[ee];
+    if (element.id && element.id.match(id)) {
+      elements.push(element);
+    }
+  }
+  return elements;
+};
+
+/**
+ * Gets all the Elements that contain or would contain O3D plugin objects.
+ * @param {string} opt_id The id to look for. This can be a regular
+ *     expression. The default is "^o3d".
+ * @param {string} opt_tag The type of tag to look for. The default is "div".
+ */
+o3djs.util.getO3DContainerElements = function(opt_id, opt_tag) {
+  var tag = opt_tag || 'div';
+  var id = opt_id || '^o3d';
+  return o3djs.util.getElementsByTagAndId(tag, id);
+}
+
+/**
  * Offers the user the option to download the plugin.
  *
  * Finds all divs with the id "^o3d" and inserts a message and link
@@ -337,10 +379,8 @@ o3djs.util.requiredVersionAvailable = function(requiredVersion) {
  * @param {string} opt_tag The type of tag to look for. The default is "div".
  */
 o3djs.util.offerPlugin = function(opt_id, opt_tag) {
-  var tag = opt_tag || 'div';
-  var id = opt_id || '^o3d';
   var havePlugin = o3djs.util.requiredVersionAvailable('');
-  var elements = document.getElementsByTagName(tag);
+  var elements = o3djs.util.getO3DContainerElements(opt_id, opt_tag);
   var addedMessage = false;
   // TODO: This needs to be localized OR we could insert a html like
   // <script src="http://google.com/o3d_plugin_dl"></script>
@@ -359,14 +399,12 @@ o3djs.util.offerPlugin = function(opt_id, opt_tag) {
       '</div>'
   for (var ee = 0; ee < elements.length; ++ee) {
     var element = elements[ee];
-    if (element.id && element.id.match(id)) {
-      if (element.clientWidth >= 200 &&
-          element.clientHeight >= 200 &&
-          element.style.display.toLowerCase() != 'none' &&
-          element.style.visibility.toLowerCase() != 'hidden') {
-        addedMessage = true;
-        element.innerHTML = message;
-      }
+    if (element.clientWidth >= o3djs.util.MINIMUM_WIDTH_FOR_MESSAGE &&
+        element.clientHeight >= o3djs.util.MINIMUM_HEIGHT_FOR_MESSAGE &&
+        element.style.display.toLowerCase() != 'none' &&
+        element.style.visibility.toLowerCase() != 'hidden') {
+      addedMessage = true;
+      element.innerHTML = message;
     }
   }
   if (!addedMessage) {
@@ -392,9 +430,7 @@ o3djs.util.offerPlugin = function(opt_id, opt_tag) {
  * @param {string} opt_tag The type of tag to look for. The default is "div".
  */
 o3djs.util.informNoGraphics = function(initStatus, error, opt_id, opt_tag) {
-  var tag = opt_tag || 'div';
-  var id = opt_id || '^o3d';
-  var elements = document.getElementsByTagName(tag);
+  var elements = o3djs.util.getO3DContainerElements(opt_id, opt_tag);
   var addedMessage = false;
   var subMessage;
   var message;
@@ -453,14 +489,12 @@ o3djs.util.informNoGraphics = function(initStatus, error, opt_id, opt_tag) {
   }
   for (var ee = 0; ee < elements.length; ++ee) {
     var element = elements[ee];
-    if (element.id && element.id.match(id)) {
-      if (element.clientWidth >= 200 &&
-          element.clientHeight >= 200 &&
-          element.style.display.toLowerCase() != 'none' &&
-          element.style.visibility.toLowerCase() != 'hidden') {
-        addedMessage = true;
-        element.innerHTML = message;
-      }
+    if (element.clientWidth >= o3djs.util.MINIMUM_WIDTH_FOR_MESSAGE &&
+        element.clientHeight >= o3djs.util.MINIMUM_HEIGHT_FOR_MESSAGE &&
+        element.style.display.toLowerCase() != 'none' &&
+        element.style.visibility.toLowerCase() != 'hidden') {
+      addedMessage = true;
+      element.innerHTML = message;
     }
   }
   if (!addedMessage) {
@@ -517,8 +551,8 @@ o3djs.util.getElementContentById = function(id) {
  * Utility to get an element from the DOM by ID. This must be used from V8
  * in preference to document.getElementById because we do not currently
  * support invoking methods on DOM objects in IE.
- * @param {string} id The Node id.
- * @return {Node} The node or null if not found.
+ * @param {string} id The Element id.
+ * @return {Element} The Element or null if not found.
  */
 o3djs.util.getElementById = function(id) {
   o3djs.BROWSER_ONLY = true;
@@ -527,6 +561,7 @@ o3djs.util.getElementById = function(id) {
 
 /**
  * Identifies a JavaScript engine.
+ * @enum {number}
  */
 o3djs.util.Engine = {
   /**
@@ -667,6 +702,17 @@ o3djs.util.isScriptUri = function(uri) {
 };
 
 /**
+ * Returns whether or not this is a script tag we want. Currently that is
+ * only script tags with an id that starts with "o3d".
+ * @private
+ * @param {!Element} scriptElement The script element to check.
+ * @return {boolean} True if we want this script tag.
+ */
+o3djs.util.isWantedScriptTag_ = function(scriptElement) {
+  return scriptElement.id && scriptElement.id.match(/^o3dscript/);
+};
+
+/**
  * Concatenate the text of all the script tags in the document and invokes
  * the callback when complete. This function is asynchronous if any of the
  * script tags reference JavaScript through a URI.
@@ -680,7 +726,8 @@ o3djs.util.getScriptTagText_ = function() {
     var scriptElement = scriptElements[i];
     if (scriptElement.type === '' ||
         scriptElement.type === 'text/javascript') {
-      if ('text' in scriptElement && scriptElement.text) {
+      if ('text' in scriptElement && scriptElement.text &&
+          o3djs.util.isWantedScriptTag_(scriptElement)) {
         scriptTagText += scriptElement.text;
       }
       if ('src' in scriptElement && scriptElement.src &&
@@ -696,9 +743,9 @@ o3djs.util.getScriptTagText_ = function() {
 };
 
 /**
- * Creates a client element.  In other words it creates an <OBJECT> tag for
- * o3d. Note that the browser may not have initialized the plugin before
- * returning.
+ * Creates a client element.  In other words it creates an <OBJECT> tag for o3d.
+ * <b>Note that the browser may not have initialized the plugin before
+ * returning.</b>
  * @param {!Element} element The DOM element under which the client element
  *    will be appended.
  * @param {string} opt_features A comma separated list of the
@@ -770,6 +817,47 @@ o3djs.util.createClient = function(element, opt_features, opt_requestVersion) {
  * This allows you to specify different features per area. Otherwise you can
  * request features as an argument to this function.
  *
+ * Normally this function handles failure for you but if you want to handle
+ * failure in your own way you can supply a failure callback. Here is an example
+ * of using this function with your own failure callback.
+ *
+ * <pre>
+ * &lt;script type="text/javascript" id="o3dscript"&gt;
+ * o3djs.require('o3djs.util');
+ *
+ * window.onload = init;
+ *
+ * function init() {
+ *  o3djs.util.makeClients(onSuccess, '', undefined, onFailure);
+ * }
+ *
+ * function onFailure(initStatus, error, id, tag) {
+ *   // Get a list of the elements that would have had an O3D plugin object
+ *   // inserted if it had succeed.
+ *   var elements = o3djs.util.getO3DContainerElements(id, tag);
+ *
+ *   switch (initStatus) {
+ *     case o3djs.util.rendererInitStatus.NO_PLUGIN:
+ *       // Tell the user there is no plugin
+ *       ...
+ *       break;
+ *     case o3djs.util.rendererInitStatus.OUT_OF_RESOURCES:
+ *     case o3djs.util.rendererInitStatus.GPU_NOT_UP_TO_SPEC:,
+ *     case o3djs.util.rendererInitStatus.INITIALIZATION_ERROR:
+ *     default:
+ *       // Tell the user there are other issues
+ *       ...
+ *       break;
+ *   }
+ * }
+ *
+ * function onSuccess(o3dElementsArray) {
+ *   // Run your app.
+ *   ...
+ * }
+ * &lt;/script&gt;
+ * </pre>
+ *
  * @param {!function(Array.<!Element>): void} callback Function to call when
  *     client objects have been created.
  * @param {string} opt_features A comma separated list of the
@@ -789,14 +877,17 @@ o3djs.util.createClient = function(element, opt_features, opt_requestVersion) {
  *     "2.4" = require major version 2, minor version 4. If no string is
  *     passed in the version of the needed by this version of the javascript
  *     libraries will be created.
- * @param {!function(!o3d.Renderer.InitStatus, string, string, string): void}
- *     opt_failureCallback Function to call if the plugin does not exist, if the
- *     required version is not installed, or if for some other reason the plugin
- *     can not start. If this function is not specified or is null the default
- *     behavior of leading the user to the download page will be provided.
+ * @param {!function(!o3d.Renderer.InitStatus, string, (string|undefined),
+ *     (string|undefined)): void} opt_failureCallback Function to call if the
+ *     plugin does not exist, if the required version is not installed, or if
+ *     for some other reason the plugin can not start. If this function is not
+ *     specified or is null the default behavior of leading the user to the
+ *     download page will be provided. See o3djs.util.informPluginFailure for an
+ *     example of this type of callback.
  * @param {string} opt_id The id to look for. This can be a regular
  *     expression. The default is "^o3d".
  * @param {string} opt_tag The type of tag to look for. The default is "div".
+ * @see o3djs.util.informPluginFailure
  */
 o3djs.util.makeClients = function(callback,
                                   opt_features,
@@ -804,126 +895,108 @@ o3djs.util.makeClients = function(callback,
                                   opt_failureCallback,
                                   opt_id,
                                   opt_tag) {
-  var tag = opt_tag || 'div';
-  var id = opt_id || '^o3d';
   opt_failureCallback = opt_failureCallback || o3djs.util.informPluginFailure;
   opt_requiredVersion = opt_requiredVersion || o3djs.util.REQUIRED_VERSION;
   if (!o3djs.util.requiredVersionAvailable(opt_requiredVersion)) {
-    opt_failureCallback(o3djs.util.rendererInitStatus.NO_PLUGIN, '', id, tag);
+    opt_failureCallback(o3djs.util.rendererInitStatus.NO_PLUGIN, '',
+                        opt_id, opt_tag);
   } else {
     var clientElements = [];
-    var elements = document.getElementsByTagName(tag);
+    var elements = o3djs.util.getO3DContainerElements(opt_id, opt_tag);
     var mainClientElement = null;
     for (var ee = 0; ee < elements.length; ++ee) {
       var element = elements[ee];
-      if (element.id && element.id.match(id)) {
-        var features = opt_features;
-        if (!features) {
-          var o3d_features = element.getAttribute('o3d_features');
-          if (o3d_features) {
-            features = o3d_features;
-          } else {
-            features = '';
-          }
+      var features = opt_features;
+      if (!features) {
+        var o3d_features = element.getAttribute('o3d_features');
+        if (o3d_features) {
+          features = o3d_features;
+        } else {
+          features = '';
         }
+      }
 
-        var objElem = o3djs.util.createClient(element, features);
-        clientElements.push(objElem);
+      var objElem = o3djs.util.createClient(element, features);
+      clientElements.push(objElem);
 
-        // If the callback is to be invoked in an embedded JavaScript engine,
-        // one element must be identified with the id 'o3d'. This callback
-        // will be invoked in the element identified as such.
-        if (element.id === 'o3d') {
-          mainClientElement = objElem;
-        }
+      // If the callback is to be invoked in an embedded JavaScript engine,
+      // one element must be identified with the id 'o3d'. This callback
+      // will be invoked in the element identified as such.
+      if (element.id === 'o3d') {
+        mainClientElement = objElem;
       }
     }
 
-    // Chrome 1.0 sometimes doesn't create the plugin instance. To work
-    // around this, force a re-layout by changing the plugin size until it
-    // is loaded. We toggle between 1 pixel and 100% until the plugin has
-    // loaded.
-    var chromeWorkaround = o3djs.base.IsChrome10();
-    {
-      // Wait for the browser to initialize the clients.
-      var clearId = window.setInterval(function() {
-        var initStatus = 0;
-        var error = '';
-        var o3d;
+    // Wait for the browser to initialize the clients.
+    var clearId = window.setInterval(function() {
+      var initStatus = 0;
+      var error = '';
+      var o3d;
+      for (var cc = 0; cc < clientElements.length; ++cc) {
+        var element = clientElements[cc];
+        o3d = element.o3d;
+        var ready = o3d &&
+            element.client &&
+            element.client.rendererInitStatus >
+                o3djs.util.rendererInitStatus.UNINITIALIZED;
+        if (!ready) {
+          return;
+        }
+        var status = clientElements[cc].client.rendererInitStatus;
+        // keep the highest status. This is the worst status.
+        if (status > initStatus) {
+          initStatus = status;
+          error = clientElements[cc].client.lastError;
+        }
+      }
+
+      window.clearInterval(clearId);
+
+      // If the plugin could not initialize the graphics delete all of
+      // the plugin objects
+      if (initStatus > 0 && initStatus != o3d.Renderer.SUCCESS) {
         for (var cc = 0; cc < clientElements.length; ++cc) {
-          var element = clientElements[cc];
-          o3d = element.o3d;
-          if (!o3d) {
-            if (chromeWorkaround) {
-              if (element.style.width != '100%') {
-                element.style.width = '100%';
-              } else {
-                element.style.width = '1px';
-              }
+          var clientElement = clientElements[cc];
+          clientElement.parentNode.removeChild(clientElement);
+        }
+        opt_failureCallback(initStatus, error, opt_id, opt_tag);
+      } else {
+        o3djs.base.snapshotProvidedNamespaces();
+
+        // TODO: Is this needed with the new event code?
+        for (var cc = 0; cc < clientElements.length; ++cc) {
+          o3djs.base.initV8(clientElements[cc]);
+          o3djs.event.startKeyboardEventSynthesis(clientElements[cc]);
+          o3djs.error.setDefaultErrorHandler(clientElements[cc].client);
+        }
+        o3djs.base.init(clientElements[0]);
+
+        switch (o3djs.util.mainEngine_) {
+          case o3djs.util.Engine.BROWSER:
+            callback(clientElements);
+            break;
+          case o3djs.util.Engine.V8:
+            if (!mainClientElement) {
+              throw 'V8 engine was requested but there is no element with' +
+                  ' the id "o3d"';
             }
-            return;
-          }
-          if (chromeWorkaround && element.style.width != '100%') {
-            // The plugin has loaded but it may not be the right size yet.
-            element.style.width = '100%';
-            return;
-          }
-          var status = clientElements[cc].client.rendererInitStatus;
-          // keep the highest status. This is the worst status.
-          if (status > initStatus) {
-            initStatus = status;
-            error = clientElements[cc].client.lastError;
-          }
+
+            // Retreive the code from the script tags and eval it in V8 to
+            // duplicate the browser environment.
+            var scriptTagText = o3djs.util.getScriptTagText_();
+            mainClientElement.eval(scriptTagText);
+
+            // Invoke the vallback in V8.
+            o3djs.util.callV8(mainClientElement,
+                              callback,
+                              o3djs.global,
+                              [clientElements]);
+            break;
+          default:
+            throw 'Unknown engine ' + o3djs.util.mainEngine_;
         }
-
-        window.clearInterval(clearId);
-
-        // If the plugin could not initialize the graphics delete all of
-        // the plugin objects
-        if (initStatus > 0 && initStatus != o3d.Renderer.SUCCESS) {
-          for (var cc = 0; cc < clientElements.length; ++cc) {
-            var clientElement = clientElements[cc];
-            clientElement.parentNode.removeChild(clientElement);
-          }
-          opt_failureCallback(initStatus, error, id, tag);
-        } else {
-          o3djs.base.snapshotProvidedNamespaces();
-
-          // TODO: Is this needed with the new event code?
-          for (var cc = 0; cc < clientElements.length; ++cc) {
-            o3djs.base.initV8(clientElements[cc]);
-            o3djs.event.startKeyboardEventSynthesis(clientElements[cc]);
-            o3djs.error.setDefaultErrorHandler(clientElements[cc].client);
-          }
-          o3djs.base.init(clientElements[0]);
-
-          switch (o3djs.util.mainEngine_) {
-            case o3djs.util.Engine.BROWSER:
-              callback(clientElements);
-              break;
-            case o3djs.util.Engine.V8:
-              if (!mainClientElement) {
-                throw 'V8 engine was requested but there is no element with' +
-                    ' the id "o3d"';
-              }
-
-              // Retreive the code from the script tags and eval it in V8 to
-              // duplicate the browser environment.
-              var scriptTagText = o3djs.util.getScriptTagText_();
-              mainClientElement.eval(scriptTagText);
-
-              // Invoke the vallback in V8.
-              o3djs.util.callV8(mainClientElement,
-                                callback,
-                                o3djs.global,
-                                [clientElements]);
-              break;
-            default:
-              throw 'Unknown engine ' + o3djs.util.mainEngine_;
-          }
-        }
-      }, 10);
-    }
+      }
+    }, 10);
   }
 };
 

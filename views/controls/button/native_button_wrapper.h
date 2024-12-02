@@ -5,7 +5,7 @@
 #ifndef VIEWS_CONTROLS_BUTTON_NATIVE_BUTTON_WRAPPER_H_
 #define VIEWS_CONTROLS_BUTTON_NATIVE_BUTTON_WRAPPER_H_
 
-#include "base/gfx/native_widget_types.h"
+#include "app/gfx/native_widget_types.h"
 
 namespace views {
 
@@ -45,6 +45,14 @@ class NativeButtonWrapper {
 
   // Sets the focus to the button.
   virtual void SetFocus() = 0;
+
+  // Returns true if the wrapped NativeButton supplies its own label, false if
+  // the caller needs to provide one.
+  virtual bool UsesNativeLabel() const = 0;
+
+  // Returns true if the wrapped NativeRadioButton supplies its own grouping
+  // mechanism, or false if the radio button needs to provide one.
+  virtual bool UsesNativeRadioButtonGroup() const = 0;
 
   // Returns a handle to the underlying native view for testing.
   virtual gfx::NativeView GetTestingHandle() const = 0;

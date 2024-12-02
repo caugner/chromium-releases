@@ -4,6 +4,7 @@
 
 #include "chrome/browser/extensions/user_script_master.h"
 
+#include <string>
 #include <vector>
 
 #include "base/file_path.h"
@@ -22,15 +23,15 @@
 
 
 // Helper function to parse greasesmonkey headers
-static bool GetDeclarationValue(const StringPiece& line,
-                                const StringPiece& prefix,
+static bool GetDeclarationValue(const base::StringPiece& line,
+                                const base::StringPiece& prefix,
                                 std::string* value) {
   if (!line.starts_with(prefix))
     return false;
 
   std::string temp(line.data() + prefix.length(),
                    line.length() - prefix.length());
-  TrimWhitespace(temp, TRIM_ALL, value);
+  TrimWhitespaceASCII(temp, TRIM_ALL, value);
   return true;
 }
 
@@ -41,39 +42,36 @@ UserScriptMaster::ScriptReloader::ScriptReloader(UserScriptMaster* master)
 
 // static
 bool UserScriptMaster::ScriptReloader::ParseMetadataHeader(
-      const StringPiece& script_text, UserScript* script) {
+      const base::StringPiece& script_text, UserScript* script) {
   // http://wiki.greasespot.net/Metadata_block
-  StringPiece line;
+  base::StringPiece line;
   size_t line_start = 0;
   size_t line_end = 0;
   bool in_metadata = false;
 
-  static const StringPiece kUserScriptBegin("// ==UserScript==");
-  static const StringPiece kUserScriptEng("// ==/UserScript==");
-  static const StringPiece kIncludeDeclaration("// @include ");
-  static const StringPiece kMatchDeclaration("// @match ");
-  static const StringPiece kRunAtDeclaration("// @run-at ");
-  static const StringPiece kRunAtDocumentStartValue("document-start");
-  static const StringPiece kRunAtDocumentEndValue("document-end");
+  static const base::StringPiece kUserScriptBegin("// ==UserScript==");
+  static const base::StringPiece kUserScriptEng("// ==/UserScript==");
+  static const base::StringPiece kIncludeDeclaration("// @include ");
+  static const base::StringPiece kMatchDeclaration("// @match ");
+  static const base::StringPiece kRunAtDeclaration("// @run-at ");
+  static const base::StringPiece kRunAtDocumentStartValue("document-start");
+  static const base::StringPiece kRunAtDocumentEndValue("document-end");
 
   while (line_start < script_text.length()) {
     line_end = script_text.find('\n', line_start);
 
     // Handle the case where there is no trailing newline in the file.
-    if (line_end == std::string::npos) {
+    if (line_end == std::string::npos)
       line_end = script_text.length() - 1;
-    }
 
     line.set(script_text.data() + line_start, line_end - line_start);
 
     if (!in_metadata) {
-      if (line.starts_with(kUserScriptBegin)) {
+      if (line.starts_with(kUserScriptBegin))
         in_metadata = true;
-      }
     } else {
-      if (line.starts_with(kUserScriptEng)) {
+      if (line.starts_with(kUserScriptEng))
         break;
-      }
 
       std::string value;
       if (GetDeclarationValue(line, kIncludeDeclaration, &value)) {
@@ -125,28 +123,33 @@ void UserScriptMaster::ScriptReloader::StartScan(
 
 void UserScriptMaster::ScriptReloader::NotifyMaster(
     base::SharedMemory* memory) {
-  if (!master_) {
-    // The master went away, so these new scripts aren't useful anymore.
+  // The master went away, so these new scripts aren't useful anymore.
+  if (!master_)
     delete memory;
-  } else {
+  else
     master_->NewScriptsAvailable(memory);
-  }
 
   // Drop our self-reference.
   // Balances StartScan().
   Release();
 }
 
-static void LoadScriptContent(UserScript::File* script_file) {
+static bool LoadScriptContent(UserScript::File* script_file) {
   std::string content;
-  file_util::ReadFileToString(script_file->path(), &content);
+  FilePath path = script_file->resource().GetFilePath();
+  if (path.empty() || !file_util::ReadFileToString(path, &content)) {
+    LOG(WARNING) << "Failed to load user script file: " << path.value();
+    return false;
+  }
+
   script_file->set_content(content);
-  LOG(INFO) << "Loaded user script file: " << script_file->path().value();
+  LOG(INFO) << "Loaded user script file: " << path.value();
+  return true;
 }
 
 void UserScriptMaster::ScriptReloader::LoadScriptsFromDirectory(
-    const FilePath script_dir, UserScriptList* result) {
-  // Clear the list. We will populate it with the scrips found in script_dir.
+    const FilePath& script_dir, UserScriptList* result) {
+  // Clear the list. We will populate it with the scripts found in script_dir.
   result->clear();
 
   // Find all the scripts in |script_dir|.
@@ -165,10 +168,13 @@ void UserScriptMaster::ScriptReloader::LoadScriptsFromDirectory(
       // Push single js file in this UserScript.
       GURL url(std::string(chrome::kUserScriptScheme) + ":/" +
           net::FilePathToFileURL(file).ExtractFileName());
-      user_script.js_scripts().push_back(UserScript::File(file, url));
+      ExtensionResource resource(script_dir, file.BaseName());
+      user_script.js_scripts().push_back(UserScript::File(resource, url));
       UserScript::File& script_file = user_script.js_scripts().back();
-      LoadScriptContent(&script_file);
-      ParseMetadataHeader(script_file.GetContent(), &user_script);
+      if (!LoadScriptContent(&script_file))
+        result->pop_back();
+      else
+        ParseMetadataHeader(script_file.GetContent(), &user_script);
     }
   }
 }
@@ -178,34 +184,32 @@ static void LoadLoneScripts(UserScriptList* lone_scripts) {
     UserScript& script = lone_scripts->at(i);
     for (size_t k = 0; k < script.js_scripts().size(); ++k) {
       UserScript::File& script_file = script.js_scripts()[k];
-      if (script_file.GetContent().empty()) {
+      if (script_file.GetContent().empty())
         LoadScriptContent(&script_file);
-      }
     }
     for (size_t k = 0; k < script.css_scripts().size(); ++k) {
       UserScript::File& script_file = script.css_scripts()[k];
-      if (script_file.GetContent().empty()) {
+      if (script_file.GetContent().empty())
         LoadScriptContent(&script_file);
-      }
     }
   }
 }
 
 // Pickle user scripts and return pointer to the shared memory.
-static base::SharedMemory* Serialize(UserScriptList& scripts) {
+static base::SharedMemory* Serialize(const UserScriptList& scripts) {
   Pickle pickle;
   pickle.WriteSize(scripts.size());
   for (size_t i = 0; i < scripts.size(); i++) {
-    UserScript& script = scripts[i];
+    const UserScript& script = scripts[i];
     script.Pickle(&pickle);
     // Write scripts as 'data' so that we can read it out in the slave without
     // allocating a new string.
     for (size_t j = 0; j < script.js_scripts().size(); j++) {
-      StringPiece contents = script.js_scripts()[j].GetContent();
+      base::StringPiece contents = script.js_scripts()[j].GetContent();
       pickle.WriteData(contents.data(), contents.length());
     }
     for (size_t j = 0; j < script.css_scripts().size(); j++) {
-      StringPiece contents = script.css_scripts()[j].GetContent();
+      base::StringPiece contents = script.css_scripts()[j].GetContent();
       pickle.WriteData(contents.data(), contents.length());
     }
   }
@@ -216,9 +220,8 @@ static base::SharedMemory* Serialize(UserScriptList& scripts) {
   if (!shared_memory->Create(std::wstring(),  // anonymous
                              false,  // read-only
                              false,  // open existing
-                             pickle.size())) {
+                             pickle.size()))
     return NULL;
-  }
 
   // Map into our process.
   if (!shared_memory->Map(pickle.size()))
@@ -266,7 +269,7 @@ UserScriptMaster::UserScriptMaster(MessageLoop* worker_loop,
 
   registrar_.Add(this, NotificationType::EXTENSIONS_READY,
                  NotificationService::AllSources());
-  registrar_.Add(this, NotificationType::EXTENSIONS_LOADED,
+  registrar_.Add(this, NotificationType::EXTENSION_LOADED,
                  NotificationService::AllSources());
   registrar_.Add(this, NotificationType::EXTENSION_UNLOADED,
                  NotificationService::AllSources());
@@ -334,22 +337,18 @@ void UserScriptMaster::Observe(NotificationType type,
       extensions_service_ready_ = true;
       StartScan();
       break;
-    case NotificationType::EXTENSIONS_LOADED: {
+    case NotificationType::EXTENSION_LOADED: {
       // TODO(aa): Fix race here. A page could need a content script on startup,
       // before the extension has loaded.  We need to freeze the renderer in
       // that case.
       // See: http://code.google.com/p/chromium/issues/detail?id=11547.
 
       // Add any content scripts inside the extension.
-      ExtensionList* extensions = Details<ExtensionList>(details).ptr();
-      for (ExtensionList::iterator extension_iterator = extensions->begin();
-           extension_iterator != extensions->end(); ++extension_iterator) {
-        Extension* extension = *extension_iterator;
-        const UserScriptList& scripts = extension->content_scripts();
-        for (UserScriptList::const_iterator iter = scripts.begin();
-             iter != scripts.end(); ++iter) {
-          lone_scripts_.push_back(*iter);
-        }
+      Extension* extension = Details<Extension>(details).ptr();
+      const UserScriptList& scripts = extension->content_scripts();
+      for (UserScriptList::const_iterator iter = scripts.begin();
+           iter != scripts.end(); ++iter) {
+        lone_scripts_.push_back(*iter);
       }
       if (extensions_service_ready_)
         StartScan();
@@ -362,9 +361,8 @@ void UserScriptMaster::Observe(NotificationType type,
       UserScriptList new_lone_scripts;
       for (UserScriptList::iterator iter = lone_scripts_.begin();
            iter != lone_scripts_.end(); ++iter) {
-        if (iter->extension_id() != extension->id()) {
+        if (iter->extension_id() != extension->id())
           new_lone_scripts.push_back(*iter);
-        }
       }
       lone_scripts_ = new_lone_scripts;
       StartScan();

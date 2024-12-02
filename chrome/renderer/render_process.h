@@ -8,6 +8,7 @@
 #include "base/timer.h"
 #include "chrome/common/child_process.h"
 #include "chrome/renderer/render_thread.h"
+#include "native_client/src/shared/imc/nacl_imc.h"
 #include "skia/ext/platform_canvas.h"
 
 namespace gfx {
@@ -21,11 +22,7 @@ class TransportDIB;
 // each renderer.
 class RenderProcess : public ChildProcess {
  public:
-  // This constructor grabs the channel name from the command line arguments.
   RenderProcess();
-  // This constructor uses the given channel name.
-  RenderProcess(const std::string& channel_name);
-
   ~RenderProcess();
 
   // Get a canvas suitable for drawing and transporting to the browser
@@ -52,14 +49,18 @@ class RenderProcess : public ChildProcess {
     return static_cast<RenderProcess*>(ChildProcess::current());
   }
 
- protected:
-  friend class RenderThread;
   // Just like in_process_plugins(), but called before RenderProcess is created.
   static bool InProcessPlugins();
 
- private:
-  void Init();
+  // Sends a message to the browser process asking to launch a new NaCl process.
+  // Called from NaCl plugin code.
+  static bool LaunchNaClProcess(const char* url,
+                                int imc_fd,
+                                nacl::Handle* imc_handle,
+                                nacl::Handle* nacl_process_handle,
+                                int* nacl_process_id);
 
+ private:
   // Look in the shared memory cache for a suitable object to reuse.
   //   result: (output) the memory found
   //   size: the resulting memory will be >= this size, in bytes

@@ -6,9 +6,6 @@
   'variables': {
     'chromium_code': 1,
   },
-  'includes': [
-    '../../../build/common.gypi',
-  ],
   'targets': [
     {
       'target_name': 'security_tests',
@@ -24,3 +21,9 @@
     },
   ],
 }
+
+# Local Variables:
+# tab-width:2
+# indent-tabs-mode:nil
+# End:
+# vim: set expandtab tabstop=2 shiftwidth=2:

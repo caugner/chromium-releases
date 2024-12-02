@@ -3,9 +3,12 @@
 // found in the LICENSE file.
 
 #import "chrome/browser/cocoa/find_bar_bridge.h"
+
+#include "base/sys_string_conversions.h"
 #import "chrome/browser/cocoa/find_bar_cocoa_controller.h"
 
-FindBarBridge::FindBarBridge() {
+FindBarBridge::FindBarBridge()
+    : find_bar_controller_(NULL) {
   cocoa_controller_.reset([[FindBarCocoaController alloc] init]);
   [cocoa_controller_ setFindBarBridge:this];
 }
@@ -14,11 +17,11 @@ FindBarBridge::~FindBarBridge() {
 }
 
 void FindBarBridge::Show() {
-  [cocoa_controller_ showFindBar];
+  [cocoa_controller_ showFindBar:YES];  // with animation.
 }
 
 void FindBarBridge::Hide(bool animate) {
-  [cocoa_controller_ hideFindBar];
+  [cocoa_controller_ hideFindBar:(animate ? YES : NO)];
 }
 
 void FindBarBridge::SetFocusAndSelection() {
@@ -30,7 +33,7 @@ void FindBarBridge::ClearResults(const FindNotificationDetails& results) {
 }
 
 void FindBarBridge::SetFindText(const string16& find_text) {
-  [cocoa_controller_ setFindText:find_text];
+  [cocoa_controller_ setFindText:base::SysUTF16ToNSString(find_text)];
 }
 
 void FindBarBridge::UpdateUIForFindResult(const FindNotificationDetails& result,
@@ -52,20 +55,21 @@ void FindBarBridge::MoveWindowIfNecessary(const gfx::Rect& selection_rect,
 }
 
 void FindBarBridge::StopAnimation() {
-  // Do nothing here, this appears necessary only for the windows impl.
+  [cocoa_controller_ stopAnimation];
 }
 
 gfx::Rect FindBarBridge::GetDialogPosition(gfx::Rect avoid_overlapping_rect) {
-  NOTIMPLEMENTED();
+  // http://crbug.com/22036
   return gfx::Rect();
 }
 
 void FindBarBridge::SetDialogPosition(const gfx::Rect& new_pos,
                                       bool no_redraw) {
   // TODO(rohitrao): Do something useful here.  For now, just show the findbar.
-  Show();
+  // http://crbug.com/22036
+  [cocoa_controller_ showFindBar:NO];  // Do not animate.
 }
 
 void FindBarBridge::RestoreSavedFocus() {
-  // http://crbug.com/12657
+  [cocoa_controller_ restoreSavedFocus];
 }

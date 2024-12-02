@@ -10,6 +10,7 @@
 #ifndef CHROME_BROWSER_URL_FETCHER_H_
 #define CHROME_BROWSER_URL_FETCHER_H_
 
+#include "base/leak_tracker.h"
 #include "base/message_loop.h"
 #include "base/ref_counted.h"
 #include "chrome/browser/net/url_fetcher_protect.h"
@@ -52,7 +53,8 @@ class HttpResponseHeaders;
 //       the IO thread goes away, since the URLFetcher destructor requests an
 //       InvokeLater operation on that thread.
 //
-// NOTE: URLFetcher requests will NOT be intercepted.
+// NOTE: By default URLFetcher requests are NOT intercepted, except when
+// interception is explicitly enabled in tests.
 
 class URLFetcher {
  public:
@@ -100,6 +102,13 @@ class URLFetcher {
   static void set_factory(Factory* factory) { factory_ = factory; }
 #endif
 
+  // Normally interception is disabled for URLFetcher, but you can use this
+  // to enable it for tests. Also see the set_factory method for another way
+  // of testing code that uses an URLFetcher.
+  static void enable_interception_for_tests(bool enabled) {
+    g_interception_enabled = enabled;
+  }
+
   // Creates a URLFetcher, ownership returns to the caller. If there is no
   // Factory (the default) this creates and returns a new URLFetcher. See the
   // constructor for a description of the args. |id| may be used during testing
@@ -124,6 +133,9 @@ class URLFetcher {
   // Set one or more load flags as defined in net/base/load_flags.h.  Must be
   // called before the request is started.
   void set_load_flags(int load_flags);
+
+  // Returns the current load flags.
+  int load_flags() const;
 
   // Set extra headers on the request.  Must be called before the request
   // is started.
@@ -162,6 +174,10 @@ class URLFetcher {
   scoped_refptr<Core> core_;
 
   static Factory* factory_;
+
+  base::LeakTracker<URLFetcher> leak_tracker_;
+
+  static bool g_interception_enabled;
 
   DISALLOW_EVIL_CONSTRUCTORS(URLFetcher);
 };

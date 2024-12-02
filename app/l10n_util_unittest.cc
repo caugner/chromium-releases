@@ -4,6 +4,10 @@
 
 #include "build/build_config.h"
 
+#if defined(OS_LINUX)
+#include <cstdlib>
+#endif
+
 #include "app/app_paths.h"
 #include "app/l10n_util.h"
 #if !defined(OS_MACOSX)
@@ -106,7 +110,7 @@ TEST_F(L10nUtilTest, GetAppLocale) {
   EXPECT_TRUE(file_util::CreateNewTempDirectory(
       FILE_PATH_LITERAL("l10n_util_test"),
       &new_locale_dir));
-  PathService::Override(app::DIR_LOCALES, new_locale_dir.ToWStringHack());
+  PathService::Override(app::DIR_LOCALES, new_locale_dir);
   // Make fake locale files.
   std::string filenames[] = {
     "en-US",
@@ -136,6 +140,33 @@ TEST_F(L10nUtilTest, GetAppLocale) {
   // Keep a copy of ICU's default locale before we overwrite it.
   icu::Locale locale = icu::Locale::getDefault();
 
+#if defined(OS_LINUX)
+  // Test the support of LANGUAGE environment variable.
+  SetICUDefaultLocale("en-US");
+  ::setenv("LANGUAGE", "xx:fr_CA", 1);
+  EXPECT_EQ("fr", l10n_util::GetApplicationLocale(L""));
+
+  ::setenv("LANGUAGE", "xx:yy:en_gb.utf-8@quot", 1);
+  EXPECT_EQ("en-GB", l10n_util::GetApplicationLocale(L""));
+
+  ::setenv("LANGUAGE", "xx:zh-hk", 1);
+  EXPECT_EQ("zh-TW", l10n_util::GetApplicationLocale(L""));
+
+  // We emulate gettext's behavior here, which ignores LANG/LC_MESSAGES/LC_ALL
+  // when LANGUAGE is specified. If no language specified in LANGUAGE is valid,
+  // then just fallback to the default language, which is en-US for us.
+  SetICUDefaultLocale("fr-FR");
+  ::setenv("LANGUAGE", "xx:yy", 1);
+  EXPECT_EQ("en-US", l10n_util::GetApplicationLocale(L""));
+
+  ::setenv("LANGUAGE", "/fr:zh_CN", 1);
+  EXPECT_EQ("zh-CN", l10n_util::GetApplicationLocale(L""));
+
+  // Make sure the follow tests won't be affected by LANGUAGE environment
+  // variable.
+  ::unsetenv("LANGUAGE");
+#endif
+
   SetICUDefaultLocale("en-US");
   EXPECT_EQ("en-US", l10n_util::GetApplicationLocale(L""));
 
@@ -148,6 +179,29 @@ TEST_F(L10nUtilTest, GetAppLocale) {
   SetICUDefaultLocale("xx");
   EXPECT_EQ("en-US", l10n_util::GetApplicationLocale(L""));
 
+  SetICUDefaultLocale("es-MX");
+  EXPECT_EQ("es-419", l10n_util::GetApplicationLocale(L""));
+
+  SetICUDefaultLocale("es-AR");
+  EXPECT_EQ("es-419", l10n_util::GetApplicationLocale(L""));
+
+  SetICUDefaultLocale("es-ES");
+  EXPECT_EQ("es", l10n_util::GetApplicationLocale(L""));
+
+  SetICUDefaultLocale("es");
+  EXPECT_EQ("es", l10n_util::GetApplicationLocale(L""));
+
+  SetICUDefaultLocale("zh-HK");
+  EXPECT_EQ("zh-TW", l10n_util::GetApplicationLocale(L""));
+
+  SetICUDefaultLocale("zh-MK");
+  EXPECT_EQ("zh-TW", l10n_util::GetApplicationLocale(L""));
+
+  SetICUDefaultLocale("zh-SG");
+  EXPECT_EQ("zh-CN", l10n_util::GetApplicationLocale(L""));
+
+#if defined(OS_WIN)
+  // We don't allow user prefs for locale on linux/mac.
   SetICUDefaultLocale("en-US");
   EXPECT_EQ("fr", l10n_util::GetApplicationLocale(L"fr"));
   EXPECT_EQ("fr", l10n_util::GetApplicationLocale(L"fr-CA"));
@@ -163,33 +217,15 @@ TEST_F(L10nUtilTest, GetAppLocale) {
   EXPECT_EQ("es", l10n_util::GetApplicationLocale(L"es-ES"));
   EXPECT_EQ("es-419", l10n_util::GetApplicationLocale(L"es-AR"));
 
-  SetICUDefaultLocale("es-MX");
-  EXPECT_EQ("es-419", l10n_util::GetApplicationLocale(L""));
-
   SetICUDefaultLocale("es-AR");
-  EXPECT_EQ("es-419", l10n_util::GetApplicationLocale(L""));
   EXPECT_EQ("es", l10n_util::GetApplicationLocale(L"es"));
 
-  SetICUDefaultLocale("es-ES");
-  EXPECT_EQ("es", l10n_util::GetApplicationLocale(L""));
-
-  SetICUDefaultLocale("es");
-  EXPECT_EQ("es", l10n_util::GetApplicationLocale(L""));
-
   SetICUDefaultLocale("zh-HK");
-  EXPECT_EQ("zh-TW", l10n_util::GetApplicationLocale(L""));
   EXPECT_EQ("zh-CN", l10n_util::GetApplicationLocale(L"zh-CN"));
-
-  SetICUDefaultLocale("zh-MK");
-  EXPECT_EQ("zh-TW", l10n_util::GetApplicationLocale(L""));
-
-  SetICUDefaultLocale("zh-SG");
-  EXPECT_EQ("zh-CN", l10n_util::GetApplicationLocale(L""));
 
   SetICUDefaultLocale("he");
   EXPECT_EQ("en-US", l10n_util::GetApplicationLocale(L"en"));
 
-#if defined(OS_WIN)
   // Oriya should be blocked unless OS is Vista or newer.
   if (win_util::GetWinVersion() < win_util::WINVERSION_VISTA) {
     SetICUDefaultLocale("or");
@@ -202,15 +238,15 @@ TEST_F(L10nUtilTest, GetAppLocale) {
     SetICUDefaultLocale("en-GB");
     EXPECT_EQ("or", l10n_util::GetApplicationLocale(L"or"));
   }
-#endif
+#endif  // defined(OS_WIN)
 
   // Clean up.
-  PathService::Override(app::DIR_LOCALES, orig_locale_dir.ToWStringHack());
+  PathService::Override(app::DIR_LOCALES, orig_locale_dir);
   file_util::Delete(new_locale_dir, true);
   UErrorCode error_code = U_ZERO_ERROR;
   icu::Locale::setDefault(locale, error_code);
 }
-#endif
+#endif  // defined(OS_WIN) || defined(OS_LINUX)
 
 TEST_F(L10nUtilTest, SortStringsUsingFunction) {
   std::vector<StringWrapper*> strings;
@@ -407,6 +443,33 @@ TEST_F(L10nUtilTest, WrapPathWithLTRFormatting) {
   }
 }
 
+typedef struct  {
+    std::wstring raw_filename;
+    std::wstring display_string;
+} StringAndLTRString;
+
+TEST_F(L10nUtilTest, GetDisplayStringInLTRDirectionality) {
+  const StringAndLTRString test_data[] = {
+    { L"test", L"\x202atest\x202c" },
+    { L"test.html", L"\x202atest.html\x202c" },
+    { L"\x05d0\x05d1\x05d2", L"\x202a\x05d0\x05d1\x05d2\x202c" },
+    { L"\x05d0\x05d1\x05d2.txt", L"\x202a\x05d0\x05d1\x05d2.txt\x202c" },
+    { L"\x05d0"L"abc", L"\x202a\x05d0"L"abc\x202c" },
+    { L"\x05d0"L"abc.txt", L"\x202a\x05d0"L"abc.txt\x202c" },
+    { L"abc\x05d0\x05d1", L"\x202a"L"abc\x05d0\x05d1\x202c" },
+    { L"abc\x05d0\x05d1.jpg", L"\x202a"L"abc\x05d0\x05d1.jpg\x202c" },
+  };
+  for (unsigned int i = 0; i < arraysize(test_data); ++i) {
+    std::wstring input = test_data[i].raw_filename;
+    std::wstring expected =
+        l10n_util::GetDisplayStringInLTRDirectionality(&input);
+    if (l10n_util::GetTextDirection() == l10n_util::RIGHT_TO_LEFT)
+      EXPECT_EQ(test_data[i].display_string, expected);
+    else
+      EXPECT_EQ(input, expected);
+  }
+}
+
 TEST_F(L10nUtilTest, GetTextDirection) {
   EXPECT_EQ(l10n_util::RIGHT_TO_LEFT, GetTextDirection("ar"));
   EXPECT_EQ(l10n_util::RIGHT_TO_LEFT, GetTextDirection("ar_EG"));
@@ -433,4 +496,17 @@ TEST_F(L10nUtilTest, GetTextDirection) {
   EXPECT_EQ(l10n_util::LEFT_TO_RIGHT, GetTextDirection("ru"));
   // Japanese that uses multiple scripts
   EXPECT_EQ(l10n_util::LEFT_TO_RIGHT, GetTextDirection("ja"));
+}
+
+// Test upper and lower case string conversion.
+TEST_F(L10nUtilTest, UpperLower) {
+  string16 mixed(ASCIIToUTF16("Text with UPPer & lowER casE."));
+  const string16 expected_lower(ASCIIToUTF16("text with upper & lower case."));
+  const string16 expected_upper(ASCIIToUTF16("TEXT WITH UPPER & LOWER CASE."));
+
+  string16 result = l10n_util::ToLower(mixed);
+  EXPECT_EQ(result, expected_lower);
+
+  result = l10n_util::ToUpper(mixed);
+  EXPECT_EQ(result, expected_upper);
 }

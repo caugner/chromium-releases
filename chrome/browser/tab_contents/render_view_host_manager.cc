@@ -48,15 +48,14 @@ RenderViewHostManager::~RenderViewHostManager() {
 
 void RenderViewHostManager::Init(Profile* profile,
                                  SiteInstance* site_instance,
-                                 int routing_id,
-                                 base::WaitableEvent* modal_dialog_event) {
+                                 int routing_id) {
   // Create a RenderViewHost, once we have an instance.  It is important to
   // immediately give this SiteInstance to a RenderViewHost so that it is
   // ref counted.
   if (!site_instance)
     site_instance = SiteInstance::CreateSiteInstance(profile);
   render_view_host_ = RenderViewHostFactory::Create(
-      site_instance, render_view_delegate_, routing_id, modal_dialog_event);
+      site_instance, render_view_delegate_, routing_id);
   NotificationService::current()->Notify(
       NotificationType::RENDER_VIEW_HOST_CREATED_FOR_TAB,
       Source<RenderViewHostManager>(this),
@@ -146,11 +145,12 @@ bool RenderViewHostManager::ShouldCloseTabOnUnresponsiveRenderer() {
     // handler later finishes, this call will be ignored because the state in
     // CrossSiteResourceHandler will already be cleaned up.)
     ViewMsg_ClosePage_Params params;
-    params.closing_process_id = render_view_host_->process()->pid();
+    params.closing_process_id =
+        render_view_host_->process()->id();
     params.closing_route_id = render_view_host_->routing_id();
     params.for_cross_site_transition = true;
     params.new_render_process_host_id =
-        pending_render_view_host_->process()->pid();
+        pending_render_view_host_->process()->id();
     params.new_request_id = pending_request_id;
     current_host()->process()->CrossSiteClosePageACK(params);
   }
@@ -186,6 +186,11 @@ void RenderViewHostManager::DidNavigateMainFrame(
   }
 }
 
+void RenderViewHostManager::SetDOMUIPostCommit(DOMUI* dom_ui) {
+  DCHECK(!dom_ui_.get());
+  dom_ui_.reset(dom_ui);
+}
+
 void RenderViewHostManager::RendererAbortedProvisionalLoad(
     RenderViewHost* render_view_host) {
   // We used to cancel the pending renderer here for cross-site downloads.
@@ -198,17 +203,6 @@ void RenderViewHostManager::RendererAbortedProvisionalLoad(
   // navigation events.  (That's necessary to support onunload anyway.)  Once
   // we've made that change, we won't create a pending renderer until we know
   // the response is not a download.
-}
-
-void RenderViewHostManager::OnJavaScriptMessageBoxClosed(
-    IPC::Message* reply_msg,
-    bool success,
-    const std::wstring& prompt) {
-  render_view_host_->JavaScriptMessageBoxClosed(reply_msg, success, prompt);
-}
-
-void RenderViewHostManager::OnJavaScriptMessageBoxWindowDestroyed() {
-  render_view_host_->JavaScriptMessageBoxWindowDestroyed();
 }
 
 void RenderViewHostManager::ShouldClosePage(bool for_cross_site_transition,
@@ -414,7 +408,7 @@ bool RenderViewHostManager::CreatePendingRenderView(SiteInstance* instance) {
   }
 
   pending_render_view_host_ = RenderViewHostFactory::Create(
-      instance, render_view_delegate_, MSG_ROUTING_NONE, NULL);
+      instance, render_view_delegate_, MSG_ROUTING_NONE);
   NotificationService::current()->Notify(
       NotificationType::RENDER_VIEW_HOST_CREATED_FOR_TAB,
       Source<RenderViewHostManager>(this),

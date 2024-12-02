@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include <math.h>
 
 #include "app/gfx/canvas.h"
+#include "app/gfx/color_utils.h"
 #include "app/gfx/font.h"
 #include "app/gfx/insets.h"
 #include "app/gfx/text_elider.h"
@@ -18,10 +19,10 @@
 
 namespace views {
 
+// static
 const char Label::kViewClassName[] = "views/Label";
+SkColor Label::kEnabledColor, Label::kDisabledColor;
 
-static const SkColor kEnabledColor = SK_ColorBLACK;
-static const SkColor kDisabledColor = SkColorSetRGB(161, 161, 146);
 static const int kFocusBorderPadding = 1;
 
 Label::Label() {
@@ -37,6 +38,20 @@ Label::Label(const std::wstring& text, const gfx::Font& font) {
 }
 
 void Label::Init(const std::wstring& text, const gfx::Font& font) {
+  static bool initialized = false;
+  if (!initialized) {
+#if defined(OS_WIN)
+    kEnabledColor = color_utils::GetSysSkColor(COLOR_WINDOWTEXT);
+    kDisabledColor = color_utils::GetSysSkColor(COLOR_GRAYTEXT);
+#else
+    // TODO(beng): source from theme provider.
+    kEnabledColor = SK_ColorBLACK;
+    kDisabledColor = SK_ColorGRAY;
+#endif
+
+    initialized = true;
+  }
+
   contains_mouse_ = false;
   font_ = font;
   text_size_valid_ = false;
@@ -85,6 +100,14 @@ gfx::Size Label::GetPreferredSize() {
 
 int Label::ComputeMultiLineFlags() {
   int flags = gfx::Canvas::MULTI_LINE;
+ #if !defined(OS_WIN)
+    // Don't ellide multiline labels on Linux.
+    // Todo(davemoore): Do we depend on elliding multiline text?
+    // Pango insists on limiting the number of lines to one if text is
+    // ellided. You can get around this if you can pass a maximum height
+    // but we don't currently have that data when we call the pango code.
+    flags |= gfx::Canvas::NO_ELLIPSIS;
+ #endif
   if (allow_character_break_)
     flags |= gfx::Canvas::CHARACTER_BREAK;
   switch (horiz_alignment_) {
@@ -101,8 +124,9 @@ int Label::ComputeMultiLineFlags() {
   return flags;
 }
 
-void Label::CalculateDrawStringParams(
-    std::wstring* paint_text, gfx::Rect* text_bounds, int* flags) {
+void Label::CalculateDrawStringParams(std::wstring* paint_text,
+                                      gfx::Rect* text_bounds,
+                                      int* flags) {
   DCHECK(paint_text && text_bounds && flags);
 
   if (url_set_) {

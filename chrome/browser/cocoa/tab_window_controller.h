@@ -20,10 +20,13 @@
 
 #import <Cocoa/Cocoa.h>
 
+#import "base/cocoa_protocols_mac.h"
+#include "base/scoped_nsobject.h"
+
 @class TabStripView;
 @class TabView;
 
-@interface TabWindowController : NSWindowController {
+@interface TabWindowController : NSWindowController<NSWindowDelegate> {
  @private
   IBOutlet NSView* tabContentArea_;
   IBOutlet TabStripView* tabStripView_;
@@ -31,12 +34,15 @@
   NSView* cachedContentView_;  // Used during dragging for identifying which
                                // view is the proper content area in the overlay
                                // (weak)
+  scoped_nsobject<NSMutableSet> lockedTabs_;
+  BOOL closeDeferred_;  // If YES, call performClose: in removeOverlay:.
 }
 @property(readonly, nonatomic) TabStripView* tabStripView;
 @property(readonly, nonatomic) NSView* tabContentArea;
 
 // Used during tab dragging to turn on/off the overlay window when a tab
-// is torn off.
+// is torn off. If -deferPerformClose (below) is used, -removeOverlay will
+// cause the controller to be autoreleased before returning.
 - (void)showOverlay;
 - (void)removeOverlay;
 - (void)removeOverlayAfterDelay:(NSTimeInterval)delay;
@@ -54,13 +60,27 @@
 // new window will be the same size as this window.
 - (TabWindowController*)detachTabToNewWindow:(TabView*)tabView;
 
-// Make room in the tab strip for |tab| at the given x coordinate.
+// Make room in the tab strip for |tab| at the given x coordinate. Will hide the
+// new tab button while there's a placeholder. Subclasses need to call the
+// superclass implementation.
 - (void)insertPlaceholderForTab:(TabView*)tab
                           frame:(NSRect)frame
                   yStretchiness:(CGFloat)yStretchiness;
 
-// Removes the placeholder installed by |-insertPlaceholderForTab:atLocation:|.
+// Removes the placeholder installed by |-insertPlaceholderForTab:atLocation:|
+// and restores the new tab button. Subclasses need to call the superclass
+// implementation.
 - (void)removePlaceholder;
+
+// Show or hide the new tab button. The button is hidden immediately, but
+// waits until the next call to |-layoutTabs| to show it again.
+- (void)showNewTabButton:(BOOL)show;
+
+// Returns whether or not |tab| can still be fully seen in the tab strip or if
+// its current position would cause it be obscured by things such as the edge
+// of the window or the window decorations. Returns YES only if the entire tab
+// is visible. The default implementation always returns YES.
+- (BOOL)isTabFullyVisible:(TabView*)tab;
 
 // Called to check if the receiver can receive dragged tabs from
 // source.  Return YES if so.  The default implementation returns NO.
@@ -91,15 +111,18 @@
 // default implementation returns YES.
 - (BOOL)isNormalWindow;
 
+// Get/set whether a particular tab is draggable between windows.
+- (BOOL)isTabDraggable:(NSView*)tabView;
+- (void)setTab:(NSView*)tabView isDraggable:(BOOL)draggable;
+
+// Tell the window that it needs to call performClose: as soon as the current
+// drag is complete. This prevents a window (and its overlay) from going away
+// during a drag.
+- (void)deferPerformClose;
 
 @end
 
 @interface TabWindowController(ProtectedMethods)
-// A list of all the views that need to move to the overlay window. Subclasses
-// can override this to add more things besides the tab strip. Be sure to
-// call the superclass' version if overridden.
-- (NSArray*)viewsToMoveToOverlay;
-
 // Tells the tab strip to forget about this tab in preparation for it being
 // put into a different tab strip, such as during a drop on another window.
 - (void)detachTabView:(NSView*)view;

@@ -9,5 +9,5 @@ layer at (0,0) size 800x600
           text run at (0,20) width 150: "right square on the right)."
 layer at (8,48) size 200x200
   RenderBlock {DIV} at (0,40) size 200x200 [bgcolor=#00FF00]
-layer at (8,48) size 100x200
+layer at (8,48) size 100x100
   RenderBlock {DIV} at (0,0) size 100x100 [bgcolor=#0000FF]

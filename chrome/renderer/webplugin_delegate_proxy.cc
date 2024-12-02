@@ -1,24 +1,22 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/renderer/webplugin_delegate_proxy.h"
 
-#include "build/build_config.h"
+#include <algorithm>
 
-#if defined(OS_WIN)
-#include <atlbase.h>
-#endif
-
+#include "app/gfx/blit.h"
 #include "app/gfx/canvas.h"
+#include "app/gfx/native_widget_types.h"
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
+#include "base/basictypes.h"
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/ref_counted.h"
 #include "base/string_util.h"
 #include "base/gfx/size.h"
-#include "base/gfx/native_widget_types.h"
 #include "chrome/common/child_process_logging.h"
 #include "chrome/common/plugin_messages.h"
 #include "chrome/common/render_messages.h"
@@ -31,14 +29,15 @@
 #include "grit/renderer_resources.h"
 #include "net/base/mime_util.h"
 #include "printing/native_metafile.h"
+#include "webkit/api/public/WebBindings.h"
 #include "webkit/api/public/WebCursorInfo.h"
 #include "webkit/api/public/WebDragData.h"
+#include "webkit/api/public/WebFrame.h"
 #include "webkit/api/public/WebString.h"
 #include "webkit/api/public/WebVector.h"
-#include "webkit/glue/webframe.h"
+#include "webkit/api/public/WebView.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/webplugin.h"
-#include "webkit/glue/webview.h"
 
 #if defined(OS_POSIX)
 #include "ipc/ipc_channel_posix.h"
@@ -48,26 +47,28 @@
 #include "base/scoped_cftyperef.h"
 #endif
 
+using WebKit::WebBindings;
 using WebKit::WebCursorInfo;
-using WebKit::WebInputEvent;
 using WebKit::WebDragData;
-using WebKit::WebVector;
+using WebKit::WebInputEvent;
 using WebKit::WebString;
+using WebKit::WebVector;
+using WebKit::WebView;
 
 // Proxy for WebPluginResourceClient.  The object owns itself after creation,
 // deleting itself after its callback has been called.
-class ResourceClientProxy : public WebPluginResourceClient {
+class ResourceClientProxy : public webkit_glue::WebPluginResourceClient {
  public:
   ResourceClientProxy(PluginChannelHost* channel, int instance_id)
     : channel_(channel), instance_id_(instance_id), resource_id_(0),
-      notify_needed_(false), notify_data_(NULL),
+      notify_needed_(false), notify_data_(0),
       multibyte_response_expected_(false) {
   }
 
   ~ResourceClientProxy() {
   }
 
-  void Initialize(int resource_id, const std::string &url, bool notify_needed,
+  void Initialize(int resource_id, const GURL& url, bool notify_needed,
                   intptr_t notify_data, intptr_t existing_stream) {
     resource_id_ = resource_id;
     url_ = url;
@@ -97,8 +98,7 @@ class ResourceClientProxy : public WebPluginResourceClient {
                           const std::string& headers,
                           uint32 expected_length,
                           uint32 last_modified,
-                          bool request_is_seekable,
-                          bool* cancel) {
+                          bool request_is_seekable) {
     DCHECK(channel_ != NULL);
     PluginMsg_DidReceiveResponseParams params;
     params.id = resource_id_;
@@ -110,13 +110,12 @@ class ResourceClientProxy : public WebPluginResourceClient {
     // Grab a reference on the underlying channel so it does not get
     // deleted from under us.
     scoped_refptr<PluginChannelHost> channel_ref(channel_);
-    channel_->Send(new PluginMsg_DidReceiveResponse(instance_id_, params,
-                                                    cancel));
+    channel_->Send(new PluginMsg_DidReceiveResponse(instance_id_, params));
   }
 
   void DidReceiveData(const char* buffer, int length, int data_offset) {
     DCHECK(channel_ != NULL);
-    DCHECK(length > 0);
+    DCHECK_GT(length, 0);
     std::vector<char> data;
     data.resize(static_cast<size_t>(length));
     memcpy(&data.front(), buffer, length);
@@ -149,7 +148,7 @@ class ResourceClientProxy : public WebPluginResourceClient {
   scoped_refptr<PluginChannelHost> channel_;
   int instance_id_;
   int resource_id_;
-  std::string url_;
+  GURL url_;
   bool notify_needed_;
   intptr_t notify_data_;
   // Set to true if the response expected is a multibyte response.
@@ -157,70 +156,71 @@ class ResourceClientProxy : public WebPluginResourceClient {
   bool multibyte_response_expected_;
 };
 
-WebPluginDelegateProxy* WebPluginDelegateProxy::Create(
-    const GURL& url,
+WebPluginDelegateProxy::WebPluginDelegateProxy(
     const std::string& mime_type,
-    const std::string& clsid,
-    RenderView* render_view) {
-  return new WebPluginDelegateProxy(mime_type, clsid, render_view);
-}
-
-WebPluginDelegateProxy::WebPluginDelegateProxy(const std::string& mime_type,
-                                               const std::string& clsid,
-                                               RenderView* render_view)
+    const base::WeakPtr<RenderView>& render_view)
     : render_view_(render_view),
       plugin_(NULL),
       windowless_(false),
+      window_(gfx::kNullPluginWindow),
       mime_type_(mime_type),
-      clsid_(clsid),
+      instance_id_(MSG_ROUTING_NONE),
       npobject_(NULL),
-      window_script_object_(NULL),
       sad_plugin_(NULL),
       invalidate_pending_(false),
       transparent_(false),
-      page_url_(render_view_->webview()->GetMainFrame()->GetURL()) {
+      page_url_(render_view_->webview()->mainFrame()->url()) {
 }
 
 WebPluginDelegateProxy::~WebPluginDelegateProxy() {
 }
 
 void WebPluginDelegateProxy::PluginDestroyed() {
-  plugin_ = NULL;
+  if (window_)
+    WillDestroyWindow();
 
-  if (npobject_) {
-    // When we destroy the plugin instance, the NPObjectStub NULLs out its
-    // pointer to the npobject (see NPObjectStub::OnChannelError).  Therefore,
-    // we release the object before destroying the instance to avoid leaking.
-    NPN_ReleaseObject(npobject_);
-    npobject_ = NULL;
+  if (channel_host_) {
+    Send(new PluginMsg_DestroyInstance(instance_id_));
+
+    // Must remove the route after sending the destroy message, since
+    // RemoveRoute can lead to all the outstanding NPObjects being told the
+    // channel went away if this was the last instance.
+    channel_host_->RemoveRoute(instance_id_);
+
+    // Release the channel host now. If we are is the last reference to the
+    // channel, this avoids a race where this renderer asks a new connection to
+    // the same plugin between now and the time 'this' is actually deleted.
+    // Destroying the channel host is what releases the channel name -> FD
+    // association on POSIX, and if we ask for a new connection before it is
+    // released, the plugin will give us a new FD, and we'll assert when trying
+    // to associate it with the channel name.
+    channel_host_ = NULL;
   }
 
   if (window_script_object_) {
     // The ScriptController deallocates this object independent of its ref count
     // to avoid leaks if the plugin forgets to release it.  So mark the object
-    // invalid to avoid accessing it past this point.
-    window_script_object_->set_proxy(NULL);
-    window_script_object_->set_invalid();
+    // invalid to avoid accessing it past this point.  Note: only do this after
+    // the DestroyInstance message in case the window object is scripted by the
+    // plugin in NPP_Destroy.
+    window_script_object_->OnPluginDestroyed();
   }
 
-  if (channel_host_) {
-    channel_host_->RemoveRoute(instance_id_);
-    Send(new PluginMsg_DestroyInstance(instance_id_));
-  }
+  plugin_ = NULL;
 
-  render_view_->PluginDestroyed(this);
   MessageLoop::current()->DeleteSoon(FROM_HERE, this);
 }
 
-bool WebPluginDelegateProxy::Initialize(const GURL& url, char** argn,
-                                        char** argv, int argc,
-                                        WebPlugin* plugin,
-                                        bool load_manually) {
+bool WebPluginDelegateProxy::Initialize(const GURL& url,
+    const std::vector<std::string>& arg_names,
+    const std::vector<std::string>& arg_values,
+    webkit_glue::WebPlugin* plugin,
+    bool load_manually) {
   IPC::ChannelHandle channel_handle;
-  FilePath plugin_path;
+  WebPluginInfo info;
   if (!RenderThread::current()->Send(new ViewHostMsg_OpenChannelToPlugin(
-          url, mime_type_, clsid_, webkit_glue::GetWebKitLocale(),
-          &channel_handle, &plugin_path))) {
+          url, mime_type_, webkit_glue::GetWebKitLocale(),
+          &channel_handle, &info))) {
     return false;
   }
 
@@ -237,10 +237,9 @@ bool WebPluginDelegateProxy::Initialize(const GURL& url, char** argn,
     IPC::AddChannelSocket(channel_handle.name, channel_handle.socket.fd);
 #endif
 
-  MessageLoop* ipc_message_loop = RenderThread::current()->owner_loop();
   scoped_refptr<PluginChannelHost> channel_host =
-      PluginChannelHost::GetPluginChannelHost(channel_handle.name,
-                                              ipc_message_loop);
+      PluginChannelHost::GetPluginChannelHost(
+          channel_handle.name, ChildProcess::current()->io_message_loop());
   if (!channel_host.get())
     return false;
 
@@ -250,7 +249,7 @@ bool WebPluginDelegateProxy::Initialize(const GURL& url, char** argn,
   if (!result)
     return false;
 
-  plugin_path_ = plugin_path;
+  info_ = info;
   channel_host_ = channel_host;
   instance_id_ = instance_id;
 
@@ -261,19 +260,15 @@ bool WebPluginDelegateProxy::Initialize(const GURL& url, char** argn,
   params.containing_window = render_view_->host_window();
   params.url = url;
   params.page_url = page_url_;
-  for (int i = 0; i < argc; ++i) {
-    params.arg_names.push_back(argn[i]);
-    params.arg_values.push_back(argv[i]);
-
-    if (LowerCaseEqualsASCII(params.arg_names.back(), "wmode") &&
-        LowerCaseEqualsASCII(params.arg_values.back(), "transparent")) {
+  params.arg_names = arg_names;
+  params.arg_values = arg_values;
+  for (size_t i = 0; i < arg_names.size(); ++i) {
+    if (LowerCaseEqualsASCII(arg_names[i], "wmode") &&
+        LowerCaseEqualsASCII(arg_values[i], "transparent")) {
       transparent_ = true;
     }
   }
   params.load_manually = load_manually;
-#if defined(OS_WIN)
-  params.modal_dialog_event = render_view_->modal_dialog_event()->handle();
-#endif
 
   plugin_ = plugin;
 
@@ -294,8 +289,8 @@ bool WebPluginDelegateProxy::Send(IPC::Message* msg) {
   return channel_host_->Send(msg);
 }
 
-void WebPluginDelegateProxy::SendJavaScriptStream(const std::string& url,
-                                                  const std::wstring& result,
+void WebPluginDelegateProxy::SendJavaScriptStream(const GURL& url,
+                                                  const std::string& result,
                                                   bool success,
                                                   bool notify_needed,
                                                   intptr_t notify_data) {
@@ -307,7 +302,7 @@ void WebPluginDelegateProxy::SendJavaScriptStream(const std::string& url,
 }
 
 void WebPluginDelegateProxy::DidReceiveManualResponse(
-    const std::string& url, const std::string& mime_type,
+    const GURL& url, const std::string& mime_type,
     const std::string& headers, uint32 expected_length,
     uint32 last_modified) {
   PluginMsg_DidReceiveResponseParams params;
@@ -321,7 +316,7 @@ void WebPluginDelegateProxy::DidReceiveManualResponse(
 
 void WebPluginDelegateProxy::DidReceiveManualData(const char* buffer,
                                                   int length) {
-  DCHECK(length > 0);
+  DCHECK_GT(length, 0);
   std::vector<char> data;
   data.resize(static_cast<size_t>(length));
   memcpy(&data.front(), buffer, length);
@@ -336,10 +331,6 @@ void WebPluginDelegateProxy::DidManualLoadFail() {
   Send(new PluginMsg_DidManualLoadFail(instance_id_));
 }
 
-FilePath WebPluginDelegateProxy::GetPluginPath() {
-  return plugin_path_;
-}
-
 void WebPluginDelegateProxy::InstallMissingPlugin() {
   Send(new PluginMsg_InstallMissingPlugin(instance_id_));
 }
@@ -349,12 +340,6 @@ void WebPluginDelegateProxy::OnMessageReceived(const IPC::Message& msg) {
 
   IPC_BEGIN_MESSAGE_MAP(WebPluginDelegateProxy, msg)
     IPC_MESSAGE_HANDLER(PluginHostMsg_SetWindow, OnSetWindow)
-#if defined(OS_LINUX)
-    IPC_MESSAGE_HANDLER(PluginHostMsg_CreatePluginContainer,
-                        OnCreatePluginContainer)
-    IPC_MESSAGE_HANDLER(PluginHostMsg_DestroyPluginContainer,
-                        OnDestroyPluginContainer)
-#endif
 #if defined(OS_WIN)
     IPC_MESSAGE_HANDLER(PluginHostMsg_SetWindowlessPumpEvent,
                         OnSetWindowlessPumpEvent)
@@ -379,19 +364,26 @@ void WebPluginDelegateProxy::OnMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER(PluginHostMsg_CancelDocumentLoad, OnCancelDocumentLoad)
     IPC_MESSAGE_HANDLER(PluginHostMsg_InitiateHTTPRangeRequest,
                         OnInitiateHTTPRangeRequest)
+    IPC_MESSAGE_HANDLER(PluginHostMsg_DeferResourceLoading,
+                        OnDeferResourceLoading)
     IPC_MESSAGE_UNHANDLED_ERROR()
   IPC_END_MESSAGE_MAP()
 }
 
 void WebPluginDelegateProxy::OnChannelError() {
-  if (plugin_)
+  if (plugin_) {
+    if (window_) {
+      // The actual WebPluginDelegate never got a chance to tell the WebPlugin
+      // its window was going away. Do it on its behalf.
+      WillDestroyWindow();
+    }
     plugin_->Invalidate();
-  render_view_->PluginCrashed(GetProcessId(), plugin_path_);
+  }
+  render_view_->PluginCrashed(GetProcessId(), info_.path);
 }
 
-void WebPluginDelegateProxy::UpdateGeometry(
-                const gfx::Rect& window_rect,
-                const gfx::Rect& clip_rect) {
+void WebPluginDelegateProxy::UpdateGeometry(const gfx::Rect& window_rect,
+                                            const gfx::Rect& clip_rect) {
   plugin_rect_ = window_rect;
 
   bool bitmaps_changed = false;
@@ -417,28 +409,41 @@ void WebPluginDelegateProxy::UpdateGeometry(
     }
   }
 
-  IPC::Message* msg = NULL;
+  PluginMsg_UpdateGeometry_Param param;
+  param.window_rect = window_rect;
+  param.clip_rect = clip_rect;
+  param.windowless_buffer = TransportDIB::DefaultHandleValue();
+  param.background_buffer = TransportDIB::DefaultHandleValue();
+
 #if defined(OS_POSIX)
   // If we're using POSIX mmap'd TransportDIBs, sending the handle across
   // IPC establishes a new mapping rather than just sending a window ID,
   // so only do so if we've actually recreated the shared memory bitmaps.
-  if (!bitmaps_changed) {
-    msg = new PluginMsg_UpdateGeometry(instance_id_, window_rect, clip_rect,
-        TransportDIB::Handle(), TransportDIB::Handle());
-  } else
+  if (bitmaps_changed)
 #endif
-  if (transport_store_.get() && background_store_.get()) {
-    msg = new PluginMsg_UpdateGeometry(instance_id_, window_rect, clip_rect,
-        transport_store_->handle(), background_store_->handle());
-  } else if (transport_store_.get()) {
-    msg = new PluginMsg_UpdateGeometry(instance_id_, window_rect, clip_rect,
-        transport_store_->handle(), TransportDIB::Handle());
-  } else {
-    msg = new PluginMsg_UpdateGeometry(instance_id_, window_rect, clip_rect,
-        TransportDIB::Handle(), TransportDIB::Handle());
+  {
+    if (transport_store_.get())
+      param.windowless_buffer = transport_store_->handle();
+
+    if (background_store_.get())
+      param.background_buffer = background_store_->handle();
   }
 
-  msg->set_unblock(true);
+  IPC::Message* msg;
+#if defined (OS_WIN)
+  std::wstring filename = StringToLowerASCII(info_.path.BaseName().value());
+  if (info_.name.find(L"Windows Media Player") != std::wstring::npos) {
+    // Need to update geometry synchronously with WMP, otherwise if a site
+    // scripts the plugin to start playing while it's in the middle of handling
+    // an update geometry message, videos don't play.  See urls in bug 20260.
+    msg = new PluginMsg_UpdateGeometrySync(instance_id_, param);
+  } else
+#endif
+  {
+    msg = new PluginMsg_UpdateGeometry(instance_id_, param);
+    msg->set_unblock(true);
+  }
+
   Send(msg);
 }
 
@@ -476,13 +481,8 @@ bool WebPluginDelegateProxy::CreateBitmap(
   const size_t stride = skia::PlatformCanvas::StrideForWidth(width);
   const size_t size = stride * height;
 #if defined(OS_LINUX)
-  static unsigned long max_size = 0;
-  if (max_size == 0) {
-    std::string contents;
-    file_util::ReadFileToString(FilePath("/proc/sys/kernel/shmmax"), &contents);
-    max_size = strtoul(contents.c_str(), NULL, 0);
-  }
-  if (size > max_size)
+  memory->reset(TransportDIB::Create(size, 0));
+  if (!memory->get())
     return false;
 #endif
 #if defined(OS_MACOSX)
@@ -501,12 +501,24 @@ bool WebPluginDelegateProxy::CreateBitmap(
   return true;
 }
 
+#if defined(OS_MACOSX)
+// Flips |rect| vertically within an enclosing rect with height |height|.
+// Intended for converting rects between flipped and non-flipped contexts.
+static void FlipRectVerticallyWithHeight(gfx::Rect* rect, int height) {
+  rect->set_y(height - rect->y() - rect->height());
+}
+#endif
+
 void WebPluginDelegateProxy::Paint(gfx::NativeDrawingContext context,
                                    const gfx::Rect& damaged_rect) {
+  // Limit the damaged rectangle to whatever is contained inside the plugin
+  // rectangle, as that's the rectangle that we'll actually draw.
+  gfx::Rect rect = damaged_rect.Intersect(plugin_rect_);
+
   // If the plugin is no longer connected (channel crashed) draw a crashed
   // plugin bitmap
   if (!channel_host_->channel_valid()) {
-    PaintSadPlugin(context, damaged_rect);
+    PaintSadPlugin(context, rect);
     return;
   }
 
@@ -520,31 +532,14 @@ void WebPluginDelegateProxy::Paint(gfx::NativeDrawingContext context,
     return;
   }
 
-  // Limit the damaged rectangle to whatever is contained inside the plugin
-  // rectangle, as that's the rectangle that we'll bitblt to the hdc.
-  gfx::Rect rect = damaged_rect.Intersect(plugin_rect_);
   gfx::Rect offset_rect = rect;
   offset_rect.Offset(-plugin_rect_.x(), -plugin_rect_.y());
 
   bool background_changed = false;
   if (background_store_canvas_.get() && BackgroundChanged(context, rect)) {
     background_changed = true;
-#if defined(OS_WIN)
-    HDC background_hdc =
-        background_store_canvas_->getTopPlatformDevice().getBitmapDC();
-    BitBlt(background_hdc, offset_rect.x(), offset_rect.y(),
-        rect.width(), rect.height(), context, rect.x(), rect.y(), SRCCOPY);
-#elif defined(OS_MACOSX)
-    CGContextRef background_context =
-        background_store_canvas_->getTopPlatformDevice().GetBitmapContext();
-    scoped_cftyperef<CGImageRef>
-        background_image(CGBitmapContextCreateImage(background_context));
-    scoped_cftyperef<CGImageRef> sub_image(
-        CGImageCreateWithImageInRect(background_image, offset_rect.ToCGRect()));
-    CGContextDrawImage(context, rect.ToCGRect(), sub_image);
-#else
-    NOTIMPLEMENTED();
-#endif
+    BlitContextToCanvas(background_store_canvas_.get(), offset_rect,
+                        context, rect.origin());
   }
 
   if (background_changed || !backing_store_painted_.Contains(offset_rect)) {
@@ -552,21 +547,11 @@ void WebPluginDelegateProxy::Paint(gfx::NativeDrawingContext context,
     CopyFromTransportToBacking(offset_rect);
   }
 
-#if defined(OS_WIN)
-  HDC backing_hdc = backing_store_canvas_->getTopPlatformDevice().getBitmapDC();
-  BitBlt(context, rect.x(), rect.y(), rect.width(), rect.height(), backing_hdc,
-      offset_rect.x(), offset_rect.y(), SRCCOPY);
-#elif defined(OS_MACOSX)
-  CGContextRef backing_context =
-      backing_store_canvas_->getTopPlatformDevice().GetBitmapContext();
-  scoped_cftyperef<CGImageRef>
-      backing_image(CGBitmapContextCreateImage(backing_context));
-  scoped_cftyperef<CGImageRef> sub_image(
-      CGImageCreateWithImageInRect(backing_image, offset_rect.ToCGRect()));
-  CGContextDrawImage(context, rect.ToCGRect(), sub_image);
-#else
-  NOTIMPLEMENTED();
+#if defined(OS_MACOSX)
+  FlipRectVerticallyWithHeight(&offset_rect, plugin_rect_.height());
 #endif
+  BlitCanvasToContext(context, rect, backing_store_canvas_.get(),
+                      offset_rect.origin());
 
   if (invalidate_pending_) {
     // Only send the PaintAck message if this paint is in response to an
@@ -578,10 +563,10 @@ void WebPluginDelegateProxy::Paint(gfx::NativeDrawingContext context,
 }
 
 bool WebPluginDelegateProxy::BackgroundChanged(
-    gfx::NativeDrawingContext hdc,
+    gfx::NativeDrawingContext context,
     const gfx::Rect& rect) {
 #if defined(OS_WIN)
-  HBITMAP hbitmap = static_cast<HBITMAP>(GetCurrentObject(hdc, OBJ_BITMAP));
+  HBITMAP hbitmap = static_cast<HBITMAP>(GetCurrentObject(context, OBJ_BITMAP));
   if (hbitmap == NULL) {
     NOTREACHED();
     return true;
@@ -595,7 +580,7 @@ bool WebPluginDelegateProxy::BackgroundChanged(
   }
 
   XFORM xf;
-  if (!GetWorldTransform(hdc, &xf)) {
+  if (!GetWorldTransform(context, &xf)) {
     NOTREACHED();
     return true;
   }
@@ -619,10 +604,102 @@ bool WebPluginDelegateProxy::BackgroundChanged(
     if (memcmp(hdc_row_start, canvas_row_start, row_byte_size) != 0)
       return true;
   }
-
 #else
-  NOTIMPLEMENTED();
+#if defined(OS_MACOSX)
+  // If there is a translation on the content area context, we need to account
+  // for it; the context may be a subset of the full content area with a
+  // transform that makes the coordinates work out.
+  CGAffineTransform transform = CGContextGetCTM(context);
+  bool flipped = fabs(transform.d + 1) < 0.0001;
+  CGFloat context_offset_x = -transform.tx;
+  CGFloat context_offset_y = flipped ? transform.ty -
+                                           CGBitmapContextGetHeight(context)
+                                     : -transform.ty;
+  gfx::Rect full_content_rect(context_offset_x, context_offset_y,
+                              CGBitmapContextGetWidth(context),
+                              CGBitmapContextGetHeight(context));
+#else
+  cairo_surface_t* page_surface = cairo_get_target(context);
+  DCHECK_EQ(cairo_surface_get_type(page_surface), CAIRO_SURFACE_TYPE_IMAGE);
+  DCHECK_EQ(cairo_image_surface_get_format(page_surface), CAIRO_FORMAT_ARGB32);
+
+  // Transform context coordinates into surface coordinates.
+  double page_x_double = rect.x();
+  double page_y_double = rect.y();
+  cairo_user_to_device(context, &page_x_double, &page_y_double);
+  gfx::Rect full_content_rect(0, 0,
+                              cairo_image_surface_get_width(page_surface),
+                              cairo_image_surface_get_height(page_surface));
 #endif
+  // According to comments in the Windows code, the damage rect that we're given
+  // may project outside the image, so intersect their rects.
+  gfx::Rect content_rect = rect.Intersect(full_content_rect);
+
+#if defined(OS_MACOSX)
+  const unsigned char* page_bytes = static_cast<const unsigned char*>(
+      CGBitmapContextGetData(context));
+  int page_stride = CGBitmapContextGetBytesPerRow(context);
+  int page_start_x = content_rect.x() - context_offset_x;
+  int page_start_y = content_rect.y() - context_offset_y;
+
+  CGContextRef bg_context =
+      background_store_canvas_->getTopPlatformDevice().GetBitmapContext();
+  DCHECK_EQ(CGBitmapContextGetBitsPerPixel(context),
+            CGBitmapContextGetBitsPerPixel(bg_context));
+  const unsigned char* bg_bytes = static_cast<const unsigned char*>(
+      CGBitmapContextGetData(bg_context));
+  int full_bg_width = CGBitmapContextGetWidth(bg_context);
+  int full_bg_height = CGBitmapContextGetHeight(bg_context);
+  int bg_stride = CGBitmapContextGetBytesPerRow(bg_context);
+  int bg_last_row = CGBitmapContextGetHeight(bg_context) - 1;
+
+  int bytes_per_pixel = CGBitmapContextGetBitsPerPixel(context) / 8;
+#else
+  const unsigned char* page_bytes = cairo_image_surface_get_data(page_surface);
+  int page_stride = cairo_image_surface_get_stride(page_surface);
+  int page_start_x = static_cast<int>(page_x_double);
+  int page_start_y = static_cast<int>(page_y_double);
+
+  skia::PlatformDevice& device =
+      background_store_canvas_->getTopPlatformDevice();
+  cairo_surface_t* bg_surface = cairo_get_target(device.beginPlatformPaint());
+  DCHECK_EQ(cairo_surface_get_type(bg_surface), CAIRO_SURFACE_TYPE_IMAGE);
+  DCHECK_EQ(cairo_image_surface_get_format(bg_surface), CAIRO_FORMAT_ARGB32);
+  const unsigned char* bg_bytes = cairo_image_surface_get_data(bg_surface);
+  int full_bg_width = cairo_image_surface_get_width(bg_surface);
+  int full_bg_height = cairo_image_surface_get_height(bg_surface);
+  int bg_stride = cairo_image_surface_get_stride(bg_surface);
+
+  int bytes_per_pixel = 4;  // ARGB32 = 4 bytes per pixel.
+#endif
+
+  int damage_width = content_rect.width();
+  int damage_height = content_rect.height();
+
+  int bg_start_x = rect.x() - plugin_rect_.x();
+  int bg_start_y = rect.y() - plugin_rect_.y();
+  // The damage rect is supposed to have been intersected with the plugin rect;
+  // double-check, since if it hasn't we'll walk off the end of the buffer.
+  DCHECK_LE(bg_start_x + damage_width, full_bg_width);
+  DCHECK_LE(bg_start_y + damage_height, full_bg_height);
+
+  int bg_x_byte_offset = bg_start_x * bytes_per_pixel;
+  int page_x_byte_offset = page_start_x * bytes_per_pixel;
+  for (int row = 0; row < damage_height; ++row) {
+    int page_offset = page_stride * (page_start_y + row) + page_x_byte_offset;
+    int bg_y = bg_start_y + row;
+#if defined(OS_MACOSX)
+    // The background buffer is upside down relative to the content.
+    bg_y = bg_last_row - bg_y;
+#endif
+    int bg_offset = bg_stride * bg_y + bg_x_byte_offset;
+    if (memcmp(page_bytes + page_offset,
+               bg_bytes + bg_offset,
+               damage_width * bytes_per_pixel) != 0)
+      return true;
+  }
+#endif
+
   return false;
 }
 
@@ -654,7 +731,7 @@ void WebPluginDelegateProxy::Print(gfx::NativeDrawingContext context) {
 
 NPObject* WebPluginDelegateProxy::GetPluginScriptableObject() {
   if (npobject_)
-    return NPN_RetainObject(npobject_);
+    return WebBindings::retainObject(npobject_);
 
   int route_id = MSG_ROUTING_NONE;
   intptr_t npobject_ptr;
@@ -664,14 +741,15 @@ NPObject* WebPluginDelegateProxy::GetPluginScriptableObject() {
     return NULL;
 
   npobject_ = NPObjectProxy::Create(
-      channel_host_.get(), route_id, npobject_ptr,
-      render_view_->modal_dialog_event(), page_url_);
+      channel_host_.get(), route_id, npobject_ptr, 0, page_url_);
 
-  return NPN_RetainObject(npobject_);
+  return WebBindings::retainObject(npobject_);
 }
 
-void WebPluginDelegateProxy::DidFinishLoadWithReason(NPReason reason) {
-  Send(new PluginMsg_DidFinishLoadWithReason(instance_id_, reason));
+void WebPluginDelegateProxy::DidFinishLoadWithReason(
+    const GURL& url, NPReason reason, intptr_t notify_data) {
+  Send(new PluginMsg_DidFinishLoadWithReason(
+      instance_id_, url, reason, notify_data));
 }
 
 void WebPluginDelegateProxy::SetFocus() {
@@ -701,26 +779,19 @@ int WebPluginDelegateProxy::GetProcessId() {
 
 void WebPluginDelegateProxy::OnSetWindow(gfx::PluginWindowHandle window) {
   windowless_ = !window;
+  window_ = window;
   if (plugin_)
     plugin_->SetWindow(window);
 }
 
-#if defined(OS_LINUX)
-void WebPluginDelegateProxy::OnCreatePluginContainer(
-    gfx::PluginWindowHandle* container) {
-  RenderThread::current()->Send(new ViewHostMsg_CreatePluginContainer(
-      render_view_->routing_id(), GetProcessId(), container));
+void WebPluginDelegateProxy::WillDestroyWindow() {
+  DCHECK(window_);
+  plugin_->WillDestroyWindow(window_);
+  window_ = gfx::kNullPluginWindow;
 }
-
-void WebPluginDelegateProxy::OnDestroyPluginContainer(
-    gfx::PluginWindowHandle container) {
-  RenderThread::current()->Send(new ViewHostMsg_DestroyPluginContainer(
-      render_view_->routing_id(), container));
-}
-#endif
 
 #if defined(OS_WIN)
-  void WebPluginDelegateProxy::OnSetWindowlessPumpEvent(
+void WebPluginDelegateProxy::OnSetWindowlessPumpEvent(
       HANDLE modal_loop_pump_messages_event) {
   DCHECK(modal_loop_pump_messages_event_ == NULL);
 
@@ -755,11 +826,8 @@ void WebPluginDelegateProxy::OnGetWindowScriptNPObject(
 
   // The stub will delete itself when the proxy tells it that it's released, or
   // otherwise when the channel is closed.
-  NPObjectStub* stub = new NPObjectStub(
-      npobject, channel_host_.get(), route_id,
-      render_view_->modal_dialog_event(), page_url_);
-  window_script_object_ = stub;
-  window_script_object_->set_proxy(this);
+  window_script_object_ = (new NPObjectStub(
+      npobject, channel_host_.get(), route_id, 0, page_url_))->AsWeakPtr();
   *success = true;
   *npobject_ptr = reinterpret_cast<intptr_t>(npobject);
 }
@@ -776,8 +844,7 @@ void WebPluginDelegateProxy::OnGetPluginElement(
   // The stub will delete itself when the proxy tells it that it's released, or
   // otherwise when the channel is closed.
   new NPObjectStub(
-      npobject, channel_host_.get(), route_id,
-      render_view_->modal_dialog_event(), page_url_);
+      npobject, channel_host_.get(), route_id, 0, page_url_);
   *success = true;
   *npobject_ptr = reinterpret_cast<intptr_t>(npobject);
 }
@@ -801,9 +868,10 @@ void WebPluginDelegateProxy::OnShowModalHTMLDialog(
     const GURL& url, int width, int height, const std::string& json_arguments,
     std::string* json_retval) {
   DCHECK(json_retval);
-  if (render_view_)
-    render_view_->ShowModalHTMLDialog(url, width, height, json_arguments,
-                                      json_retval);
+  if (render_view_) {
+    render_view_->ShowModalHTMLDialogForPlugin(
+        url, gfx::Size(width, height), json_arguments, json_retval);
+  }
 }
 
 static void EncodeDragData(const WebDragData& data, bool add_data,
@@ -835,7 +903,7 @@ static void EncodeDragData(const WebDragData& data, bool add_data,
     static const char kBackspaceDelimiter('\b');
     if (i != 0)
       utf8.append(1, kBackspaceDelimiter);
-    utf8.append(UTF16ToUTF8(files[i]));
+    utf8.append(files[i].utf8());
   }
 
   STRINGN_TO_NPVARIANT(utf8.data(), utf8.length(), *drag_data);
@@ -857,8 +925,8 @@ void WebPluginDelegateProxy::OnGetDragData(const NPVariant_Param& object,
   int event_id;
   WebDragData data;
   NPObject* event = reinterpret_cast<NPObject*>(object.npobject_pointer);
-  const int32 drag_id = webview->GetDragIdentity();
-  if (!drag_id || !webkit_glue::GetDragData(event, &event_id, &data))
+  const int32 drag_id = webview->dragIdentity();
+  if (!drag_id || !WebBindings::getDragData(event, &event_id, &data))
     return;
 
   NPVariant results[4];
@@ -869,7 +937,7 @@ void WebPluginDelegateProxy::OnGetDragData(const NPVariant_Param& object,
   for (size_t i = 0; i < arraysize(results); ++i) {
     values->push_back(NPVariant_Param());
     CreateNPVariantParam(
-        results[i], NULL, &values->back(), false, NULL, page_url_);
+        results[i], NULL, &values->back(), false, 0, page_url_);
   }
 
   *success = true;
@@ -888,11 +956,11 @@ void WebPluginDelegateProxy::OnSetDropEffect(const NPVariant_Param& object,
     return;
 
   NPObject* event = reinterpret_cast<NPObject*>(object.npobject_pointer);
-  const int32 drag_id = webview->GetDragIdentity();
-  if (!drag_id || !webkit_glue::IsDragEvent(event))
+  const int32 drag_id = webview->dragIdentity();
+  if (!drag_id || !WebBindings::isDragEvent(event))
     return;
 
-  *success = webview->SetDropEffect(effect != 0);
+  *success = webview->setDropEffect(effect != 0);
 }
 
 void WebPluginDelegateProxy::OnMissingPluginStatus(int status) {
@@ -910,6 +978,11 @@ void WebPluginDelegateProxy::PaintSadPlugin(gfx::NativeDrawingContext context,
   const int height = plugin_rect_.height();
 
   gfx::Canvas canvas(width, height, false);
+#if defined(OS_MACOSX)
+  // Flip the canvas, since the context expects flipped data.
+  canvas.translate(0, height);
+  canvas.scale(1, -1);
+#endif
   SkPaint paint;
 
   paint.setStyle(SkPaint::kFill_Style);
@@ -927,23 +1000,7 @@ void WebPluginDelegateProxy::PaintSadPlugin(gfx::NativeDrawingContext context,
                          std::max(0, (width - sad_plugin_->width())/2),
                          std::max(0, (height - sad_plugin_->height())/2));
   }
-
-#if defined(OS_WIN)
-  skia::PlatformDevice& device = canvas.getTopPlatformDevice();
-  device.drawToHDC(context, plugin_rect_.x(), plugin_rect_.y(), NULL);
-#elif defined(OS_LINUX)
-  cairo_t* cairo = canvas.getTopPlatformDevice().beginPlatformPaint();
-  cairo_set_source_surface(cairo, cairo_get_target(context),
-                           plugin_rect_.x(), plugin_rect_.y());
-  cairo_paint(cairo);
-  // We have no endPlatformPaint() on the Linux PlatformDevice.
-  // The cairo_t* is owned by the device.
-#elif defined(OS_MACOSX)
-  canvas.getTopPlatformDevice().DrawToContext(
-      context, plugin_rect_.x(), plugin_rect_.y(), NULL);
-#else
-  NOTIMPLEMENTED();
-#endif
+  BlitCanvasToContext(context, plugin_rect_, &canvas, gfx::Point(0, 0));
 }
 
 void WebPluginDelegateProxy::CopyFromTransportToBacking(const gfx::Rect& rect) {
@@ -952,24 +1009,12 @@ void WebPluginDelegateProxy::CopyFromTransportToBacking(const gfx::Rect& rect) {
   }
 
   // Copy the damaged rect from the transport bitmap to the backing store.
-#if defined(OS_WIN)
-  HDC backing = backing_store_canvas_->getTopPlatformDevice().getBitmapDC();
-  HDC transport = transport_store_canvas_->getTopPlatformDevice().getBitmapDC();
-  BitBlt(backing, rect.x(), rect.y(), rect.width(), rect.height(),
-      transport, rect.x(), rect.y(), SRCCOPY);
-#elif defined(OS_MACOSX)
-  gfx::NativeDrawingContext backing =
-      backing_store_canvas_->getTopPlatformDevice().GetBitmapContext();
-  gfx::NativeDrawingContext transport =
-      transport_store_canvas_->getTopPlatformDevice().GetBitmapContext();
-  scoped_cftyperef<CGImageRef> image(CGBitmapContextCreateImage(transport));
-  scoped_cftyperef<CGImageRef> sub_image(
-      CGImageCreateWithImageInRect(image, rect.ToCGRect()));
-  CGContextDrawImage(backing, rect.ToCGRect(), sub_image);
-#else
-  // TODO(port): probably some new code in TransportDIB should go here.
-  NOTIMPLEMENTED();
+  gfx::Rect dest_rect = rect;
+#if defined(OS_MACOSX)
+  FlipRectVerticallyWithHeight(&dest_rect, plugin_rect_.height());
 #endif
+  BlitCanvasToCanvas(backing_store_canvas_.get(), dest_rect,
+                     transport_store_canvas_.get(), rect.origin());
   backing_store_painted_ = backing_store_painted_.Union(rect);
 }
 
@@ -991,20 +1036,14 @@ void WebPluginDelegateProxy::OnHandleURLRequest(
                             params.popups_allowed);
 }
 
-WebPluginResourceClient* WebPluginDelegateProxy::CreateResourceClient(
-    int resource_id, const std::string &url, bool notify_needed,
+webkit_glue::WebPluginResourceClient*
+WebPluginDelegateProxy::CreateResourceClient(
+    int resource_id, const GURL& url, bool notify_needed,
     intptr_t notify_data, intptr_t npstream) {
   ResourceClientProxy* proxy = new ResourceClientProxy(channel_host_,
                                                        instance_id_);
   proxy->Initialize(resource_id, url, notify_needed, notify_data, npstream);
   return proxy;
-}
-
-void WebPluginDelegateProxy::URLRequestRouted(const std::string& url,
-                                               bool notify_needed,
-                                               intptr_t notify_data) {
-  Send(new PluginMsg_URLRequestRouted(instance_id_, url, notify_needed,
-                                      notify_data));
 }
 
 void WebPluginDelegateProxy::OnCancelDocumentLoad() {
@@ -1017,4 +1056,9 @@ void WebPluginDelegateProxy::OnInitiateHTTPRangeRequest(
   plugin_->InitiateHTTPRangeRequest(url.c_str(), range_info.c_str(),
                                     existing_stream, notify_needed,
                                     notify_data);
+}
+
+void WebPluginDelegateProxy::OnDeferResourceLoading(int resource_id,
+                                                    bool defer) {
+  plugin_->SetDeferResourceLoading(resource_id, defer);
 }

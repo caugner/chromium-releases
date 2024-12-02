@@ -52,7 +52,7 @@
 #include <string>
 #include <vector>
 #include "base/scoped_ptr.h"
-#include "base/cross/std_hash.h"
+#include "base/hash_tables.h"
 #include "core/cross/display_mode.h"
 #include "core/cross/display_window.h"
 #include "core/cross/object_base.h"
@@ -60,18 +60,55 @@
 #include "core/cross/evaluation_counter.h"
 #include "core/cross/class_manager.h"
 #include "core/cross/client_info.h"
+#include "core/cross/cursor.h"
 #include "core/cross/features.h"
 #include "core/cross/object_manager.h"
 #include "core/cross/error.h"
 #include "core/cross/profiler.h"
+#include "plugin/cross/main_thread_task_poster.h"
 #include "plugin/cross/np_v8_bridge.h"
 #include "client_glue.h"
-#include "third_party/nixysa/files/static_glue/npapi/common.h"
+#include "third_party/nixysa/static_glue/npapi/common.h"
 
 namespace o3d {
 class Client;
 class Renderer;
 }
+
+// Hashes the NPClass and ObjectBase types so they can be used in a hash_map.
+#if defined(COMPILER_GCC)
+namespace __gnu_cxx {
+
+template<>
+struct hash<NPClass*> {
+  std::size_t operator()(NPClass* const& ptr) const {
+    return hash<size_t>()(reinterpret_cast<size_t>(ptr));
+  }
+};
+
+template<>
+struct hash<const o3d::ObjectBase::Class*> {
+  std::size_t operator()(const o3d::ObjectBase::Class* const& ptr) const {
+    return hash<size_t>()(reinterpret_cast<size_t>(ptr));
+  }
+};
+
+}  // namespace __gnu_cxx
+#elif defined(COMPILER_MSVC)
+namespace stdext {
+
+template<>
+inline size_t hash_value(NPClass* const& ptr) {
+  return hash_value(reinterpret_cast<size_t>(ptr));
+}
+
+template<>
+inline size_t hash_value(const o3d::ObjectBase::Class* const& ptr) {
+  return hash_value(reinterpret_cast<size_t>(ptr));
+}
+
+}  // namespace stdext
+#endif  // COMPILER
 
 namespace glue {
 class StreamManager;
@@ -85,6 +122,7 @@ using o3d::ClientInfoManager;
 using o3d::EvaluationCounter;
 using o3d::Features;
 using o3d::EvaluationCounter;
+using o3d::MainThreadTaskPoster;
 using o3d::ObjectManager;
 using o3d::Profiler;
 using o3d::Renderer;
@@ -116,10 +154,10 @@ void InitializeGlue(NPP npp);
 typedef glue::namespace_o3d::class_Client::NPAPIObject ClientNPObject;
 
 class PluginObject: public NPObject {
-  typedef o3d::base::hash_map<Id, NPAPIObject *> ClientObjectMap;
-  typedef o3d::base::hash_map<const ObjectBase::Class *, NPClass *>
+  typedef ::base::hash_map<Id, NPAPIObject *> ClientObjectMap;
+  typedef ::base::hash_map<const ObjectBase::Class *, NPClass *>
       ClientToNPClassMap;
-  typedef o3d::base::hash_map<NPClass *, const ObjectBase::Class *>
+  typedef ::base::hash_map<NPClass *, const ObjectBase::Class *>
       NPToClientClassMap;
 
   NPP npp_;
@@ -129,6 +167,7 @@ class PluginObject: public NPObject {
   ClientInfoManager client_info_manager_;
   ObjectManager object_manager_;
   Profiler profiler_;
+  MainThreadTaskPoster main_thread_task_poster_;
   bool fullscreen_;  // Are we rendered fullscreen or in the plugin region?
   Renderer *renderer_;
   Client *client_;
@@ -154,35 +193,23 @@ class PluginObject: public NPObject {
 
  public:
 #ifdef OS_WIN
-  void SetDefaultPluginWindowProc(WNDPROC proc) {
-    default_plugin_window_proc_ = proc;
-  }
-  WNDPROC GetDefaultPluginWindowProc() {
-    return default_plugin_window_proc_;
-  }
   void SetHWnd(HWND hWnd) {
     hWnd_ = hWnd;
   }
   HWND GetHWnd() {
     return hWnd_;
   }
-  void SetFullscreenHWnd(HWND hWnd) {
-    fullscreen_hWnd_ = hWnd;
-  }
-  HWND GetFullscreenHWnd() {
-    return fullscreen_hWnd_;
-  }
-  void SetParentHWnd(HWND hWnd) {
-    parent_hWnd_ = hWnd;
-  }
-  HWND GetParentHWnd() {
-    return parent_hWnd_;
-  }
   void SetPluginHWnd(HWND hWnd) {
     plugin_hWnd_ = hWnd;
   }
   HWND GetPluginHWnd() {
     return plugin_hWnd_;
+  }
+  void SetContentHWnd(HWND hWnd) {
+    content_hWnd_ = hWnd;
+  }
+  HWND GetContentHWnd() {
+    return content_hWnd_;
   }
   bool RecordPaint() {
     bool painted = painted_once_;
@@ -191,8 +218,13 @@ class PluginObject: public NPObject {
   }
   bool got_dblclick() const { return got_dblclick_; }
   void set_got_dblclick(bool got_dblclick) { got_dblclick_ = got_dblclick; }
-#endif
-#ifdef OS_MACOSX
+#elif defined(OS_LINUX)
+  void SetGtkEventSource(GtkWidget *widget);
+  gboolean OnGtkConfigure(GtkWidget *widget,
+                          GdkEventConfigure *configure_event);
+  gboolean OnGtkDelete(GtkWidget *widget,
+                       GdkEvent *configure);
+#elif defined(OS_MACOSX)
   void SetFullscreenOverlayMacWindow(WindowRef window) {
     mac_fullscreen_overlay_window_ = window;
   }
@@ -257,9 +289,14 @@ class PluginObject: public NPObject {
   Time last_click_time_;
 
   // XEmbed mode
+  Window drawable_;
   GtkWidget *gtk_container_;
+  GtkWidget *gtk_fullscreen_container_;
+  GtkWidget *gtk_event_source_;
+  gulong event_handler_id_;
   bool got_double_click_[3];
   guint timeout_id_;
+  bool fullscreen_pending_;
 
   bool draw_;
   bool in_plugin_;
@@ -321,9 +358,9 @@ class PluginObject: public NPObject {
 
   // Make a region of the plugin area that will invoke fullscreen mode if
   // clicked.  The app developer is responsible for communicating this to the
-  // user, as this region has no visible marker.  The user is also responsible
-  // for updating this region if the plugin gets resized, as we don't know
-  // whether or how to scale it.
+  // user, as this region has no visible marker.  The developer is also
+  // responsible for updating this region if the plugin gets resized, as we
+  // don't know whether or how to scale it.
   // Fails if the mode_id supplied isn't valid.  Returns true on success.
   bool SetFullscreenClickRegion(int x, int y, int width, int height,
       int mode_id);
@@ -427,13 +464,11 @@ class PluginObject: public NPObject {
   int fullscreen_region_height_;
   int fullscreen_region_mode_id_;
 #ifdef OS_WIN
-  HWND hWnd_;  // The window we are currenlty drawing to (use this)
-  HWND fullscreen_hWnd_;  // The fullscreen window if we are fullscreen
-  HWND parent_hWnd_;
-  HWND plugin_hWnd_;  // The window we were given inside the browser.
+  HWND hWnd_;          // The window we are currently drawing to (use this).
+  HWND plugin_hWnd_;   // The window we were given inside the browser.
+  HWND content_hWnd_;  // The window containing the D3D or OpenGL content.
   HCURSOR cursors_[o3d::Cursor::NUM_CURSORS];  // loaded windows cursors.
   HCURSOR hCursor_;
-  WNDPROC default_plugin_window_proc_;
   bool painted_once_;
 #endif  // OS_WIN
 };

@@ -6,12 +6,10 @@
   'variables': {
     'chromium_code': 1,
   },
-  'includes': [
-    '../build/common.gypi',
-  ],
   'target_defaults': {
     'conditions': [
       ['OS!="linux"', {'sources/': [['exclude', '/linux/']]}],
+      ['OS!="freebsd"', {'sources/': [['exclude', '/freebsd/']]}],
       ['OS!="mac"', {'sources/': [['exclude', '/mac/']]}],
       ['OS!="win"', {'sources/': [['exclude', '/win/']]}],
     ],
@@ -38,6 +36,8 @@
         'audio/linux/audio_manager_linux.h',
         'audio/linux/alsa_output.cc',
         'audio/linux/alsa_output.h',
+        'audio/linux/alsa_wrapper.cc',
+        'audio/linux/alsa_wrapper.h',
         'audio/mac/audio_manager_mac.cc',
         'audio/mac/audio_manager_mac.h',
         'audio/mac/audio_output_mac.cc',
@@ -57,14 +57,18 @@
         'base/clock_impl.h',
         'base/data_buffer.cc',
         'base/data_buffer.h',
+        'base/djb2.cc',
+        'base/djb2.h',
         'base/factory.h',
         'base/filter_host.h',
         'base/filters.h',
-        'base/media_posix.cc',
-        'base/media_win.cc',
         'base/media.h',
         'base/media_format.cc',
         'base/media_format.h',
+        'base/media_posix.cc',
+        'base/media_switches.cc',
+        'base/media_switches.h',
+        'base/media_win.cc',
         'base/pipeline.h',
         'base/pipeline_impl.cc',
         'base/pipeline_impl.h',
@@ -125,6 +129,14 @@
             ],
           },
         }],
+        ['OS =="freebsd"', {
+          'sources/': [ ['exclude', '_(mac|win)\\.cc$'],
+                        ['exclude', '\\.mm?$' ] ],
+          'link_settings': {
+            'libraries': [
+            ],
+          },
+        }],
         ['OS =="mac"', {
           'link_settings': {
             'libraries': [
@@ -148,18 +160,21 @@
       'dependencies': [
         'media',
         '../base/base.gyp:base',
+        '../base/base.gyp:base_i18n',
         '../testing/gmock.gyp:gmock',
         '../testing/gtest.gyp:gtest',
         '../third_party/ffmpeg/ffmpeg.gyp:ffmpeg',
       ],
       'sources': [
         'audio/audio_util_unittest.cc',
+        'audio/linux/alsa_output_unittest.cc',
         'audio/mac/audio_output_mac_unittest.cc',
         'audio/simple_sources_unittest.cc',
         'audio/win/audio_output_win_unittest.cc',
         'base/buffer_queue_unittest.cc',
         'base/clock_impl_unittest.cc',
         'base/data_buffer_unittest.cc',
+        'base/djb2_unittest.cc',
         'base/mock_ffmpeg.cc',
         'base/mock_ffmpeg.h',
         'base/mock_filter_host.h',
@@ -180,7 +195,7 @@
         'filters/video_renderer_base_unittest.cc',
       ],
       'conditions': [
-        ['OS=="linux"', {
+        ['OS=="linux" or OS=="freebsd"', {
           'dependencies': [
             # Needed for the following #include chain:
             #   base/run_all_unittests.cc
@@ -202,6 +217,8 @@
       ],
       'sources': [
         'bench/bench.cc',
+        'bench/file_protocol.cc',
+        'bench/file_protocol.h',
       ],
     },
     {
@@ -212,6 +229,13 @@
       ],
       'sources': [
         'tools/wav_ola_test.cc'
+      ],
+    },
+    {
+      'target_name': 'qt_faststart',
+      'type': 'executable',
+      'sources': [
+        'tools/qt_faststart.c'
       ],
     },
   ],
@@ -238,7 +262,6 @@
             'player/props.h',
             'player/seek.h',
             'player/resource.h',
-            'player/stdafx.h',
             'player/view.h',
             'player/wtl_renderer.cc',
             'player/wtl_renderer.h',
@@ -248,8 +271,17 @@
               'SubSystem': '2',         # Set /SUBSYSTEM:WINDOWS
             },
           },
+          'defines': [
+            '_CRT_SECURE_NO_WARNINGS=1',
+          ],
         },
       ],
     }],
   ],
 }
+
+# Local Variables:
+# tab-width:2
+# indent-tabs-mode:nil
+# End:
+# vim: set expandtab tabstop=2 shiftwidth=2:

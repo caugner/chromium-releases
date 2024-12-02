@@ -7,6 +7,8 @@
 
 #import <Cocoa/Cocoa.h>
 #include <crt_externs.h>
+#include <mach/mach_init.h>
+#include <mach/task.h>
 #include <spawn.h>
 #include <sys/sysctl.h>
 #include <sys/types.h>
@@ -17,87 +19,33 @@
 #include "base/eintr_wrapper.h"
 #include "base/logging.h"
 #include "base/string_util.h"
+#include "base/sys_string_conversions.h"
 #include "base/time.h"
 
 namespace base {
 
-bool LaunchApp(const std::vector<std::string>& argv,
-               const file_handle_mapping_vector& fds_to_remap,
-               bool wait, ProcessHandle* process_handle) {
-  bool retval = true;
+void RestoreDefaultExceptionHandler() {
+  // This function is tailored to remove the Breakpad exception handler.
+  // exception_mask matches s_exception_mask in
+  // breakpad/src/client/mac/handler/exception_handler.cc
+  const exception_mask_t exception_mask = EXC_MASK_BAD_ACCESS |
+                                          EXC_MASK_BAD_INSTRUCTION |
+                                          EXC_MASK_ARITHMETIC |
+                                          EXC_MASK_BREAKPOINT;
 
-  char* argv_copy[argv.size() + 1];
-  for (size_t i = 0; i < argv.size(); i++) {
-    argv_copy[i] = const_cast<char*>(argv[i].c_str());
-  }
-  argv_copy[argv.size()] = NULL;
-
-  // Make sure we don't leak any FDs to the child process by marking all FDs
-  // as close-on-exec.
-  SetAllFDsToCloseOnExec();
-
-  posix_spawn_file_actions_t file_actions;
-  if (posix_spawn_file_actions_init(&file_actions) != 0) {
-    return false;
-  }
-
-  // Turn fds_to_remap array into a set of dup2 calls.
-  for (file_handle_mapping_vector::const_iterator it = fds_to_remap.begin();
-       it != fds_to_remap.end();
-       ++it) {
-    int src_fd = it->first;
-    int dest_fd = it->second;
-
-    if (src_fd == dest_fd) {
-      int flags = fcntl(src_fd, F_GETFD);
-      if (flags != -1) {
-        fcntl(src_fd, F_SETFD, flags & ~FD_CLOEXEC);
-      }
-    } else {
-      if (posix_spawn_file_actions_adddup2(&file_actions, src_fd, dest_fd) != 0)
-          {
-        posix_spawn_file_actions_destroy(&file_actions);
-        return false;
-      }
-    }
-  }
-
-  int pid = 0;
-  int spawn_succeeded = (posix_spawnp(&pid,
-                                      argv_copy[0],
-                                      &file_actions,
-                                      NULL,
-                                      argv_copy,
-                                      *_NSGetEnviron()) == 0);
-
-  posix_spawn_file_actions_destroy(&file_actions);
-
-  bool process_handle_valid = pid > 0;
-  if (!spawn_succeeded || !process_handle_valid) {
-    retval = false;
-  } else {
-    if (wait)
-      HANDLE_EINTR(waitpid(pid, 0, 0));
-
-    if (process_handle)
-      *process_handle = pid;
-  }
-
-  return retval;
-}
-
-bool LaunchApp(const CommandLine& cl,
-               bool wait, bool start_hidden, ProcessHandle* process_handle) {
-  // TODO(playmobil): Do we need to respect the start_hidden flag?
-  file_handle_mapping_vector no_files;
-  return LaunchApp(cl.argv(), no_files, wait, process_handle);
+  // Setting the exception port to MACH_PORT_NULL may not be entirely
+  // kosher to restore the default exception handler, but in practice,
+  // it results in the exception port being set to Apple Crash Reporter,
+  // the desired behavior.
+  task_set_exception_ports(mach_task_self(), exception_mask, MACH_PORT_NULL,
+                           EXCEPTION_DEFAULT, THREAD_STATE_NONE);
 }
 
 NamedProcessIterator::NamedProcessIterator(const std::wstring& executable_name,
                                            const ProcessFilter* filter)
-  : executable_name_(executable_name),
-    index_of_kinfo_proc_(0),
-    filter_(filter) {
+    : executable_name_(executable_name),
+      index_of_kinfo_proc_(0),
+      filter_(filter) {
   // Get a snapshot of all of my processes (yes, as we loop it can go stale, but
   // but trying to find where we were in a constantly changing list is basically
   // impossible.
@@ -164,7 +112,7 @@ const ProcessEntry* NamedProcessIterator::NextProcessEntry() {
 }
 
 bool NamedProcessIterator::CheckForNextProcess() {
-  std::string executable_name_utf8(WideToUTF8(executable_name_));
+  std::string executable_name_utf8(base::SysWideToUTF8(executable_name_));
 
   std::string data;
   std::string exec_name;
@@ -250,6 +198,17 @@ size_t ProcessMetrics::GetWorkingSetSize() const {
 }
 size_t ProcessMetrics::GetPeakWorkingSetSize() const {
   return 0;
+}
+
+size_t ProcessMetrics::GetPrivateBytes() const {
+  return 0;
+}
+
+void ProcessMetrics::GetCommittedKBytes(CommittedKBytes* usage) const {
+}
+
+bool ProcessMetrics::GetWorkingSetKBytes(WorkingSetKBytes* ws_usage) const {
+  return false;
 }
 
 // ------------------------------------------------------------------------

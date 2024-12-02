@@ -2,18 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef BASE_PATH_SERVICE_H__
-#define BASE_PATH_SERVICE_H__
+#ifndef BASE_PATH_SERVICE_H_
+#define BASE_PATH_SERVICE_H_
 
 #include "build/build_config.h"
-#ifdef OS_WIN
-// TODO(erikkay): this should be removable, but because SetCurrentDirectory
-// is the name of a Windows function, it gets macro-ized to SetCurrentDirectoryW
-// by windows.h, which leads to a different name in the header vs. the impl.
-// Even if we could fix that, it would still hose all callers of the function.
-// The right thing is likely to rename.
-#include <windows.h>
-#endif
 
 #include <string>
 
@@ -34,9 +26,11 @@ class PathService {
   // Returns true if the directory or file was successfully retrieved. On
   // failure, 'path' will not be changed.
   static bool Get(int key, FilePath* path);
+#if defined(OS_WIN)
   // This version, producing a wstring, is deprecated and only kept around
   // until we can fix all callers.
   static bool Get(int key, std::wstring* path);
+#endif
 
   // Overrides the path to a special directory or file.  This cannot be used to
   // change the value of DIR_CURRENT, but that should be obvious.  Also, if the
@@ -49,15 +43,9 @@ class PathService {
   // WARNING: Consumers of PathService::Get may expect paths to be constant
   // over the lifetime of the app, so this method should be used with caution.
   static bool Override(int key, const FilePath& path);
-  // This version, using a wstring, is deprecated and only kept around
-  // until we can fix all callers.
-  static bool Override(int key, const std::wstring& path);
 
   // Return whether a path was overridden.
   static bool IsOverridden(int key);
-
-  // Sets the current directory.
-  static bool SetCurrentDirectory(const std::wstring& current_directory);
 
   // To extend the set of supported keys, you can register a path provider,
   // which is just a function mirroring PathService::Get.  The ProviderFunc
@@ -77,7 +65,6 @@ class PathService {
  private:
   static bool GetFromCache(int key, FilePath* path);
   static void AddToCache(int key, const FilePath& path);
-
 };
 
-#endif // BASE_PATH_SERVICE_H__
+#endif  // BASE_PATH_SERVICE_H_

@@ -9,10 +9,10 @@
 #include <algorithm>
 
 #include "app/gfx/font.h"
+#include "app/gfx/gtk_util.h"
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
 #include "base/basictypes.h"
-#include "base/gfx/gtk_util.h"
 #include "base/gfx/rect.h"
 #include "base/logging.h"
 #include "base/string_util.h"
@@ -20,10 +20,12 @@
 #include "chrome/browser/autocomplete/autocomplete_edit.h"
 #include "chrome/browser/autocomplete/autocomplete_edit_view_gtk.h"
 #include "chrome/browser/autocomplete/autocomplete_popup_model.h"
+#include "chrome/browser/bubble_positioner.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_model.h"
+#include "chrome/common/gtk_util.h"
 #include "chrome/common/notification_service.h"
 #include "grit/theme_resources.h"
 
@@ -235,13 +237,13 @@ GdkPixbuf* IconForMatch(const AutocompleteMatch& match, bool selected) {
 }  // namespace
 
 AutocompletePopupViewGtk::AutocompletePopupViewGtk(
-    AutocompleteEditViewGtk* edit_view,
+    AutocompleteEditView* edit_view,
     AutocompleteEditModel* edit_model,
     Profile* profile,
-    AutocompletePopupPositioner* popup_positioner)
+    const BubblePositioner* bubble_positioner)
     : model_(new AutocompletePopupModel(this, edit_model, profile)),
       edit_view_(edit_view),
-      popup_positioner_(popup_positioner),
+      bubble_positioner_(bubble_positioner),
       window_(gtk_window_new(GTK_WINDOW_POPUP)),
       layout_(NULL),
       opened_(false) {
@@ -285,6 +287,18 @@ AutocompletePopupViewGtk::AutocompletePopupViewGtk(
                    G_CALLBACK(&HandleButtonReleaseThunk), this);
   g_signal_connect(window_, "expose-event",
                    G_CALLBACK(&HandleExposeThunk), this);
+
+  // TODO(erg): There appears to be a bug somewhere in something which shows
+  // itself when we're in NX. Previously, we called
+  // gtk_util::ActAsRoundedWindow() to make this popup have rounded
+  // corners. This worked on the standard xorg server (both locally and
+  // remotely), but broke over NX. My current hypothesis is that it can't
+  // handle shaping top-level windows during an expose event, but I'm not sure
+  // how else to get accurate shaping information.
+  //
+  // r25080 (the original patch that added rounded corners here) should
+  // eventually be cherry picked once I know what's going
+  // on. http://crbug.com/22015.
 }
 
 AutocompletePopupViewGtk::~AutocompletePopupViewGtk() {
@@ -315,10 +329,6 @@ void AutocompletePopupViewGtk::UpdatePopupAppearance() {
   gtk_widget_queue_draw(window_);
 }
 
-void AutocompletePopupViewGtk::OnHoverEnabledOrDisabled(bool disabled) {
-  NOTIMPLEMENTED();
-}
-
 void AutocompletePopupViewGtk::PaintUpdatesNow() {
   // Paint our queued invalidations now, synchronously.
   gdk_window_process_updates(window_->window, FALSE);
@@ -329,18 +339,28 @@ AutocompletePopupModel* AutocompletePopupViewGtk::GetModel() {
 }
 
 void AutocompletePopupViewGtk::Show(size_t num_results) {
-  gfx::Rect rect = popup_positioner_->GetPopupBounds();
+  gfx::Rect rect = bubble_positioner_->GetLocationStackBounds();
+  rect.set_y(rect.bottom());
   rect.set_height((num_results * kHeightPerResult) + (kBorderThickness * 2));
 
   gtk_window_move(GTK_WINDOW(window_), rect.x(), rect.y());
   gtk_widget_set_size_request(window_, rect.width(), rect.height());
   gtk_widget_show(window_);
+  StackWindow();
   opened_ = true;
 }
 
 void AutocompletePopupViewGtk::Hide() {
   gtk_widget_hide(window_);
   opened_ = false;
+}
+
+void AutocompletePopupViewGtk::StackWindow() {
+  gfx::NativeView edit_view = edit_view_->GetNativeView();
+  DCHECK(GTK_IS_WIDGET(edit_view));
+  GtkWidget* toplevel = gtk_widget_get_toplevel(edit_view);
+  DCHECK(GTK_WIDGET_TOPLEVEL(toplevel));
+  gtk_util::StackPopupWindow(window_, toplevel);
 }
 
 size_t AutocompletePopupViewGtk::LineFromY(int y) {
@@ -364,7 +384,7 @@ void AutocompletePopupViewGtk::AcceptLine(size_t line,
 gboolean AutocompletePopupViewGtk::HandleMotion(GtkWidget* widget,
                                                 GdkEventMotion* event) {
   // TODO(deanm): Windows has a bunch of complicated logic here.
-  size_t line = LineFromY(event->y);
+  size_t line = LineFromY(static_cast<int>(event->y));
   // There is both a hovered and selected line, hovered just means your mouse
   // is over it, but selected is what's showing in the location edit.
   model_->SetHoveredLine(line);
@@ -377,7 +397,7 @@ gboolean AutocompletePopupViewGtk::HandleMotion(GtkWidget* widget,
 gboolean AutocompletePopupViewGtk::HandleButtonPress(GtkWidget* widget,
                                                      GdkEventButton* event) {
   // Very similar to HandleMotion.
-  size_t line = LineFromY(event->y);
+  size_t line = LineFromY(static_cast<int>(event->y));
   model_->SetHoveredLine(line);
   if (event->button == 1)
     model_->SetSelectedLine(line, false);
@@ -386,7 +406,7 @@ gboolean AutocompletePopupViewGtk::HandleButtonPress(GtkWidget* widget,
 
 gboolean AutocompletePopupViewGtk::HandleButtonRelease(GtkWidget* widget,
                                                        GdkEventButton* event) {
-  size_t line = LineFromY(event->y);
+  size_t line = LineFromY(static_cast<int>(event->y));
   switch (event->button) {
     case 1:  // Left click.
       AcceptLine(line, CURRENT_TAB);
@@ -465,7 +485,7 @@ gboolean AutocompletePopupViewGtk::HandleExpose(GtkWidget* widget,
     bool has_description = !match.description.empty();
     int text_width = window_rect.width() - (kIconAreaWidth + kRightPadding);
     int allocated_content_width = has_description ?
-        text_width * kContentWidthPercentage : text_width;
+        static_cast<int>(text_width * kContentWidthPercentage) : text_width;
     pango_layout_set_width(layout_, allocated_content_width * PANGO_SCALE);
 
     // Note: We force to URL to LTR for all text directions.
@@ -478,7 +498,7 @@ gboolean AutocompletePopupViewGtk::HandleExpose(GtkWidget* widget,
     actual_content_width /= PANGO_SCALE;
     actual_content_height /= PANGO_SCALE;
 
-    DCHECK_LT(actual_content_height, kHeightPerResult);  // Font is too tall.
+    //DCHECK_LT(actual_content_height, kHeightPerResult);  // Font is too tall.
     // Center the text within the line.
     int content_y = std::max(line_rect.y(),
         line_rect.y() + ((kHeightPerResult - actual_content_height) / 2));
@@ -507,4 +527,15 @@ gboolean AutocompletePopupViewGtk::HandleExpose(GtkWidget* widget,
   g_object_unref(gc);
 
   return TRUE;
+}
+
+// static
+AutocompletePopupView* AutocompletePopupView::CreatePopupView(
+    const gfx::Font& font,
+    AutocompleteEditView* edit_view,
+    AutocompleteEditModel* edit_model,
+    Profile* profile,
+    const BubblePositioner* bubble_positioner) {
+  return new AutocompletePopupViewGtk(edit_view, edit_model, profile,
+                                      bubble_positioner);
 }

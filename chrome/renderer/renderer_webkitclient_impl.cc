@@ -4,15 +4,28 @@
 
 #include "chrome/renderer/renderer_webkitclient_impl.h"
 
+#if defined(USE_SYSTEM_SQLITE)
+#include <sqlite3.h>
+#else
+#include "third_party/sqlite/preprocessed/sqlite3.h"
+#endif
+
 #include "base/command_line.h"
+#include "base/file_path.h"
+#include "base/platform_file.h"
+#include "chrome/common/appcache/appcache_dispatcher.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/db_message_filter.h"
 #include "chrome/common/render_messages.h"
+#include "chrome/common/webmessageportchannel_impl.h"
 #include "chrome/plugin/npobject_util.h"
 #include "chrome/renderer/net/render_dns_master.h"
 #include "chrome/renderer/render_thread.h"
+#include "chrome/renderer/renderer_webstoragenamespace_impl.h"
 #include "chrome/renderer/visitedlink_slave.h"
 #include "webkit/api/public/WebString.h"
 #include "webkit/api/public/WebURL.h"
+#include "webkit/appcache/web_application_cache_host_impl.h"
 #include "webkit/glue/glue_util.h"
 #include "webkit/glue/webkit_glue.h"
 
@@ -20,6 +33,15 @@
 #include "chrome/renderer/renderer_sandbox_support_linux.h"
 #endif
 
+#if defined(OS_POSIX)
+#include "base/file_descriptor_posix.h"
+#endif
+
+using WebKit::WebApplicationCacheHost;
+using WebKit::WebApplicationCacheHostClient;
+using WebKit::WebKitClient;
+using WebKit::WebStorageArea;
+using WebKit::WebStorageNamespace;
 using WebKit::WebString;
 using WebKit::WebURL;
 
@@ -41,11 +63,22 @@ WebKit::WebSandboxSupport* RendererWebKitClientImpl::sandboxSupport() {
 #endif
 }
 
+bool RendererWebKitClientImpl::sandboxEnabled() {
+  // As explained in WebKitClient.h, this function is used to decide whether to
+  // allow file system operations to come out of WebKit or not.  Even if the
+  // sandbox is disabled, there's no reason why the code should act any
+  // differently...unless we're in single process mode.  In which case, we have
+  // no other choice.  WebKitClient.h discourages using this switch unless
+  // absolutely necessary, so hopefully we won't end up with too many code paths
+  // being different in single-process mode.
+  return !CommandLine::ForCurrentProcess()->HasSwitch(switches::kSingleProcess);
+}
+
 bool RendererWebKitClientImpl::getFileSize(const WebString& path,
                                            long long& result) {
   if (RenderThread::current()->Send(new ViewHostMsg_GetFileSize(
       FilePath(webkit_glue::WebStringToFilePathString(path)),
-      &result))) {
+      reinterpret_cast<int64*>(&result)))) {
     return result >= 0;
   } else {
     result = -1;
@@ -62,6 +95,11 @@ unsigned long long RendererWebKitClientImpl::visitedLinkHash(
 
 bool RendererWebKitClientImpl::isLinkVisited(unsigned long long link_hash) {
   return RenderThread::current()->visited_link_slave()->IsVisited(link_hash);
+}
+
+WebKit::WebMessagePortChannel*
+RendererWebKitClientImpl::createMessagePortChannel() {
+  return new WebMessagePortChannelImpl();
 }
 
 void RendererWebKitClientImpl::setCookies(const WebURL& url,
@@ -95,9 +133,41 @@ WebString RendererWebKitClientImpl::defaultLocale() {
 }
 
 void RendererWebKitClientImpl::suddenTerminationChanged(bool enabled) {
+  if (enabled) {
+    // We should not get more enables than disables, but we want it to be a
+    // non-fatal error if it does happen.
+    DCHECK_GT(sudden_termination_disables_, 0);
+    sudden_termination_disables_ = std::max(--sudden_termination_disables_, 0);
+    if (sudden_termination_disables_ != 0)
+      return;
+  } else {
+    sudden_termination_disables_++;
+    if (sudden_termination_disables_ != 1)
+      return;
+  }
+
   RenderThread* thread = RenderThread::current();
   if (thread)  // NULL in unittests.
     thread->Send(new ViewHostMsg_SuddenTerminationChanged(enabled));
+}
+
+WebStorageNamespace* RendererWebKitClientImpl::createLocalStorageNamespace(
+    const WebString& path, unsigned quota) {
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kSingleProcess))
+    return WebStorageNamespace::createLocalStorageNamespace(path, quota);
+  return new RendererWebStorageNamespaceImpl(DOM_STORAGE_LOCAL);
+}
+
+WebStorageNamespace* RendererWebKitClientImpl::createSessionStorageNamespace() {
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kSingleProcess))
+    return WebStorageNamespace::createSessionStorageNamespace();
+  return new RendererWebStorageNamespaceImpl(DOM_STORAGE_SESSION);
+}
+
+WebApplicationCacheHost* RendererWebKitClientImpl::createApplicationCacheHost(
+      WebApplicationCacheHostClient* client) {
+  return new appcache::WebApplicationCacheHostImpl(client,
+      RenderThread::current()->appcache_dispatcher()->backend_proxy());
 }
 
 //------------------------------------------------------------------------------
@@ -165,7 +235,7 @@ WebString RendererWebKitClientImpl::SandboxSupport::getFontFamilyForCharacters(
   const std::map<std::string, std::string>::const_iterator iter =
       unicode_font_families_.find(key);
   if (iter != unicode_font_families_.end())
-    return WebString::fromUTF8(iter->second.data(), iter->second.size());
+    return WebString::fromUTF8(iter->second);
 
   const std::string family_name =
       renderer_sandbox_support::getFontFamilyForCharacters(characters,
@@ -175,3 +245,72 @@ WebString RendererWebKitClientImpl::SandboxSupport::getFontFamilyForCharacters(
 }
 
 #endif
+
+//------------------------------------------------------------------------------
+
+WebKitClient::FileHandle RendererWebKitClientImpl::databaseOpenFile(
+  const WebString& file_name, int desired_flags,
+  WebKitClient::FileHandle* dir_handle) {
+  DBMessageFilter* db_message_filter = DBMessageFilter::GetInstance();
+  int message_id = db_message_filter->GetUniqueID();
+
+  ViewMsg_DatabaseOpenFileResponse_Params default_response =
+#if defined(OS_WIN)
+    { base::kInvalidPlatformFileValue };
+#elif defined(OS_POSIX)
+    { base::FileDescriptor(base::kInvalidPlatformFileValue, true),
+      base::FileDescriptor(base::kInvalidPlatformFileValue, true) };
+#endif
+
+  ViewMsg_DatabaseOpenFileResponse_Params result =
+    db_message_filter->SendAndWait(
+      new ViewHostMsg_DatabaseOpenFile(
+        FilePath(webkit_glue::WebStringToFilePathString(file_name)),
+        desired_flags, message_id),
+      message_id, default_response);
+
+#if defined(OS_WIN)
+  if (dir_handle) {
+    *dir_handle = base::kInvalidPlatformFileValue;
+  }
+  return result.file_handle;
+#elif defined(OS_POSIX)
+  if (dir_handle) {
+    *dir_handle = result.dir_handle.fd;
+  }
+  return result.file_handle.fd;
+#endif
+}
+
+int RendererWebKitClientImpl::databaseDeleteFile(
+  const WebString& file_name, bool sync_dir) {
+  DBMessageFilter* db_message_filter = DBMessageFilter::GetInstance();
+  int message_id = db_message_filter->GetUniqueID();
+  return db_message_filter->SendAndWait(
+    new ViewHostMsg_DatabaseDeleteFile(
+      FilePath(webkit_glue::WebStringToFilePathString(file_name)), sync_dir,
+      message_id),
+    message_id, SQLITE_IOERR_DELETE);
+}
+
+long RendererWebKitClientImpl::databaseGetFileAttributes(
+  const WebString& file_name) {
+  DBMessageFilter* db_message_filter = DBMessageFilter::GetInstance();
+  int message_id = db_message_filter->GetUniqueID();
+  return db_message_filter->SendAndWait(
+    new ViewHostMsg_DatabaseGetFileAttributes(
+      FilePath(webkit_glue::WebStringToFilePathString(file_name)),
+      message_id),
+    message_id, -1L);
+}
+
+long long RendererWebKitClientImpl::databaseGetFileSize(
+  const WebString& file_name) {
+  DBMessageFilter* db_message_filter = DBMessageFilter::GetInstance();
+  int message_id = db_message_filter->GetUniqueID();
+  return db_message_filter->SendAndWait(
+    new ViewHostMsg_DatabaseGetFileSize(
+      FilePath(webkit_glue::WebStringToFilePathString(file_name)),
+      message_id),
+    message_id, 0LL);
+}
