@@ -8,7 +8,7 @@ import {assert} from '//resources/js/assert_ts.js';
 import {loadTimeData} from '//resources/js/load_time_data.js';
 import {Url} from '//resources/mojo/url/mojom/url.mojom-webui.js';
 
-import {ImageQuery, LinkOpenMetadata, MethodType, PromoAction, PromoType} from './companion.mojom-webui.js';
+import {ImageQuery, LinkOpenMetadata, MethodType, PromoAction, PromoType, VisualSearchResult} from './companion.mojom-webui.js';
 import {CompanionProxy, CompanionProxyImpl} from './companion_proxy.js';
 
 /**
@@ -67,6 +67,12 @@ enum ParamType {
 
   // Arguments for sending text find results from browser to iframe.
   CQ_TEXT_FIND_RESULTS = 'cqTextFindResults',
+
+  // Arguments for sending Visual Search results from browser to iframe.
+  VISUAL_SEARCH_PARAMS = 'visualSearchParams',
+
+  // Arguments for sending companion loading state from iframe to browser.
+  COMPANION_LOADING_STATE = 'companionLoadingState',
 }
 
 const companionProxy: CompanionProxy = CompanionProxyImpl.getInstance();
@@ -170,6 +176,36 @@ function initialize() {
         }
       });
 
+  companionProxy.callbackRouter.onNavigationError.addListener(() => {
+    const networkErrorOverlay = document.getElementById('network-error-page');
+    const frame = document.body.querySelector('iframe');
+    assert(frame);
+    assert(networkErrorOverlay);
+
+    // Hide the frame and show the network error overlay.
+    networkErrorOverlay.style.display = 'block';
+    frame.style.display = 'none';
+  });
+
+  // POST dataUris from the Visual Search classification results to the iframe
+  companionProxy.callbackRouter.onDeviceVisualClassificationResult.addListener(
+      (results: VisualSearchResult[]) => {
+        const dataUris = results.map(result => result.dataUri);
+        const message = {
+          [ParamType.METHOD_TYPE]:
+              MethodType.kOnDeviceVisualClassificationResult,
+          [ParamType.VISUAL_SEARCH_PARAMS]: dataUris,
+        };
+
+        const companionOrigin =
+            new URL(loadTimeData.getString('companion_origin')).origin;
+        const frame = document.body.querySelector('iframe');
+        assert(frame);
+        if (frame.contentWindow) {
+          frame.contentWindow.postMessage(message, companionOrigin);
+        }
+      });
+
   companionProxy.callbackRouter.notifyLinkOpen.addListener(
       (openedUrl: Url, metadata: LinkOpenMetadata) => {
         const companionOrigin =
@@ -244,6 +280,9 @@ function onCompanionMessageEvent(event: MessageEvent) {
     urlToOpen.url = data[ParamType.URL_TO_OPEN] || '';
     companionProxy.handler.openUrlInBrowser(
         urlToOpen, data[ParamType.USE_NEW_TAB]);
+  } else if (methodType === MethodType.kCompanionLoadingState) {
+    companionProxy.handler.onLoadingState(
+        data[ParamType.COMPANION_LOADING_STATE]);
   }
 }
 

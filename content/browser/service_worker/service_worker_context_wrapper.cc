@@ -537,7 +537,7 @@ ServiceWorkerExternalRequestResult
 ServiceWorkerContextWrapper::StartingExternalRequest(
     int64_t service_worker_version_id,
     ServiceWorkerExternalRequestTimeoutType timeout_type,
-    const std::string& request_uuid) {
+    const base::Uuid& request_uuid) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (!context())
     return ServiceWorkerExternalRequestResult::kNullContext;
@@ -566,7 +566,7 @@ bool ServiceWorkerContextWrapper::ExecuteScriptForTest(
 ServiceWorkerExternalRequestResult
 ServiceWorkerContextWrapper::FinishedExternalRequest(
     int64_t service_worker_version_id,
-    const std::string& request_uuid) {
+    const base::Uuid& request_uuid) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (!context())
     return ServiceWorkerExternalRequestResult::kNullContext;
@@ -1794,7 +1794,8 @@ ServiceWorkerContextWrapper::GetLoaderFactoryForBrowserInitiatedRequest(
       scope_origin, /*navigation_id=*/absl::nullopt, ukm::kInvalidSourceIdObj,
       &pending_receiver, &header_client, &bypass_redirect_checks,
       /*disable_secure_dns=*/nullptr,
-      /*factory_override=*/nullptr);
+      /*factory_override=*/nullptr,
+      /*navigation_response_task_runner=*/nullptr);
 
   // If we have a version_id, we are fetching a worker main script. We have a
   // DevtoolsAgentHost ready for the worker and we can add the devtools override
@@ -1839,7 +1840,7 @@ ServiceWorkerContextWrapper::GetLoaderFactoryForBrowserInitiatedRequest(
           context()->loader_factory_bundle_for_update_check()->Clone();
 
   if (auto* config = content::WebUIConfigMap::GetInstance().GetConfig(
-          browser_context(), scope_origin)) {
+          browser_context(), scope)) {
     // If this is a Service Worker for a WebUI, the WebUI's URLDataSource
     // needs to be registered. Registering a URLDataSource allows the
     // WebUIURLLoaderFactory below to serve the resources for the WebUI. We

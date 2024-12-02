@@ -40,7 +40,7 @@ class PermissionRequest;
 // When updating, you also need to update:
 //   1) The PermissionRequestType enum in tools/metrics/histograms/enums.xml.
 //   2) The PermissionRequestTypes suffix list in
-//      tools/metrics/histograms/histograms.xml.
+//      tools/metrics/histograms/metadata/histogram_suffixes_list.xml.
 //   3) GetPermissionRequestString below.
 //
 // The usual rules of updating UMA values applies to this enum:
@@ -79,6 +79,7 @@ enum class RequestTypeForUma {
   PERMISSION_FILE_HANDLING = 28,
   PERMISSION_U2F_API_REQUEST = 29,
   PERMISSION_TOP_LEVEL_STORAGE_ACCESS = 30,
+  PERMISSION_MIDI = 31,
   // NUM must be the last value in the enum.
   NUM
 };
@@ -264,14 +265,20 @@ enum class OneTimePermissionEvent {
 
   // Recorded when a one time grant expires because all tabs are either closed
   // or discarded.
-
   ALL_TABS_CLOSED_OR_DISCARDED = 2,
 
   // Recorded when a one time grant expires because the permission was unused in
   // the background.
   EXPIRED_IN_BACKGROUND = 3,
 
-  kMaxValue = EXPIRED_IN_BACKGROUND
+  // Revoked because of the maximum one time permission lifetime
+  // `kOneTimePermissionMaximumLifetime`
+  EXPIRED_AFTER_MAXIMUM_LIFETIME = 4,
+
+  // Recorded when a one time grant expires because the device was suspended.
+  EXPIRED_ON_SUSPEND = 5,
+
+  kMaxValue = EXPIRED_ON_SUSPEND
 };
 
 enum class PermissionAutoRevocationHistory {

@@ -32,7 +32,6 @@
 #import "components/strings/grit/components_strings.h"
 #import "ios/chrome/app/application_delegate/app_state.h"
 #import "ios/chrome/browser/default_browser/utils.h"
-#import "ios/chrome/browser/flags/system_flags.h"
 #import "ios/chrome/browser/ntp/features.h"
 #import "ios/chrome/browser/ntp/new_tab_page_tab_helper.h"
 #import "ios/chrome/browser/ntp/set_up_list.h"
@@ -54,6 +53,7 @@
 #import "ios/chrome/browser/shared/public/commands/open_new_tab_command.h"
 #import "ios/chrome/browser/shared/public/commands/snackbar_commands.h"
 #import "ios/chrome/browser/shared/public/features/features.h"
+#import "ios/chrome/browser/shared/public/features/system_flags.h"
 #import "ios/chrome/browser/shared/ui/util/uikit_ui_util.h"
 #import "ios/chrome/browser/signin/authentication_service.h"
 #import "ios/chrome/browser/signin/authentication_service_factory.h"
@@ -249,6 +249,8 @@ bool CredentialProviderPromoDismissed(PrefService* local_state) {
       _prefObserverBridge->ObserveChangesForPreference(
           prefs::kIosCredentialProviderPromoLastActionTaken,
           &_prefChangeRegistrar);
+      _prefObserverBridge->ObserveChangesForPreference(
+          set_up_list_prefs::kDisabled, &_prefChangeRegistrar);
       if (CredentialProviderPromoDismissed(_localState)) {
         set_up_list_prefs::MarkItemComplete(_localState,
                                             SetUpListItemType::kAutofill);
@@ -301,6 +303,9 @@ bool CredentialProviderPromoDismissed(PrefService* local_state) {
   if (!self.consumer) {
     return;
   }
+  if (IsMagicStackEnabled()) {
+    [self.consumer setMagicStackOrder:[self magicStackOrder]];
+  }
   if (self.returnToRecentTabItem) {
     [self.consumer
         showReturnToRecentTabTileWithConfig:self.returnToRecentTabItem];
@@ -311,7 +316,14 @@ bool CredentialProviderPromoDismissed(PrefService* local_state) {
   if ([self shouldShowSetUpList]) {
     self.setUpList.delegate = self;
     NSArray<SetUpListItemViewData*>* items = [self setUpListItems];
-    [self.consumer showSetUpListWithItems:items];
+    if (IsMagicStackEnabled() && [self.setUpList allItemsComplete]) {
+      SetUpListItemViewData* allSetItem =
+          [[SetUpListItemViewData alloc] initWithType:SetUpListItemType::kAllSet
+                                             complete:NO];
+      [self.consumer showSetUpListWithItems:@[ allSetItem ]];
+    } else {
+      [self.consumer showSetUpListWithItems:items];
+    }
     [self.contentSuggestionsMetricsRecorder recordSetUpListShown];
     for (SetUpListItemViewData* item in items) {
       [self.contentSuggestionsMetricsRecorder
@@ -325,9 +337,6 @@ bool CredentialProviderPromoDismissed(PrefService* local_state) {
   if (![self shouldHideShortcuts] &&
       (IsMagicStackEnabled() || ![self shouldShowSetUpList])) {
     [self.consumer setShortcutTilesWithConfigs:self.actionButtonItems];
-  }
-  if (IsMagicStackEnabled()) {
-    [self.consumer setMagicStackOrder:[self magicStackOrder]];
   }
 }
 
@@ -393,9 +402,6 @@ bool CredentialProviderPromoDismissed(PrefService* local_state) {
 
 - (void)disableSetUpList {
   set_up_list_prefs::DisableSetUpList(_localState);
-  [self.consumer hideSetUpListWithAnimations:^{
-    [self.feedDelegate contentSuggestionsWasUpdated];
-  }];
 }
 
 #pragma mark - IdentityManagerObserverBridgeDelegate
@@ -656,9 +662,54 @@ bool CredentialProviderPromoDismissed(PrefService* local_state) {
   if ([self shouldHideMVTTiles]) {
     return;
   }
+
+  if (IsMagicStackEnabled()) {
+    const base::Value::List& oldMostVisitedSites =
+        _localState->GetList(prefs::kIosLatestMostVisitedSites);
+    base::Value::List freshMostVisitedSites;
+    for (ContentSuggestionsMostVisitedItem* item in self
+             .freshMostVisitedItems) {
+      freshMostVisitedSites.Append(item.URL.spec());
+    }
+    // Don't check for a change in the Most Visited Sites if the device doesn't
+    // have any saved sites to begin with. This will not log for users with no
+    // top sites that have a new top site, but the benefit of not logging for
+    // new installs outweighs it.
+    if (!oldMostVisitedSites.empty()) {
+      [self lookForNewMostVisitedSite:freshMostVisitedSites
+                  oldMostVisitedSites:oldMostVisitedSites];
+    }
+    _localState->SetList(prefs::kIosLatestMostVisitedSites,
+                         std::move(freshMostVisitedSites));
+  }
+
   self.mostVisitedItems = self.freshMostVisitedItems;
   [self.consumer setMostVisitedTilesWithConfigs:self.mostVisitedItems];
   [self.feedDelegate contentSuggestionsWasUpdated];
+}
+
+// Logs a User Action if `freshMostVisitedSites` has at least one site that
+// isn't in `oldMostVisitedSites`.
+- (void)
+    lookForNewMostVisitedSite:(const base::Value::List&)freshMostVisitedSites
+          oldMostVisitedSites:(const base::Value::List&)oldMostVisitedSites {
+  for (auto const& freshSiteURLValue : freshMostVisitedSites) {
+    BOOL freshSiteInOldList = NO;
+    for (auto const& oldSiteURLValue : oldMostVisitedSites) {
+      if (freshSiteURLValue.GetString() == oldSiteURLValue.GetString()) {
+        freshSiteInOldList = YES;
+        break;
+      }
+    }
+    if (!freshSiteInOldList) {
+      // Reset impressions since freshness.
+      _localState->SetInteger(
+          prefs::kIosMagicStackSegmentationMVTImpressionsSinceFreshness, 0);
+      base::RecordAction(
+          base::UserMetricsAction("IOSMostVisitedTopSitesChanged"));
+      return;
+    }
+  }
 }
 
 // Opens the `URL` in a new tab `incognito` or not. `originPoint` is the origin
@@ -683,8 +734,7 @@ bool CredentialProviderPromoDismissed(PrefService* local_state) {
   [self.contentSuggestionsMetricsRecorder
       recordMostVisitedTileOpened:item
                           atIndex:mostVisitedIndex
-                         webState:self.browser->GetWebStateList()
-                                      ->GetActiveWebState()];
+                         webState:self.webState];
 }
 
 // Shows a snackbar with an action to undo the removal of the most visited item
@@ -719,7 +769,7 @@ bool CredentialProviderPromoDismissed(PrefService* local_state) {
 }
 
 - (BOOL)shouldShowWhatsNewActionItem {
-  if (!IsWhatsNewEnabled() || WasWhatsNewUsed()) {
+  if (WasWhatsNewUsed()) {
     return NO;
   }
 
@@ -824,9 +874,15 @@ bool CredentialProviderPromoDismissed(PrefService* local_state) {
       [magicStackModules
           addObject:@(int(ContentSuggestionsModuleType::kCompactedSetUpList))];
     } else {
-      for (SetUpListItem* model in self.setUpList.items) {
+      if ([self.setUpList allItemsComplete]) {
         [magicStackModules
-            addObject:@(int(SetUpListModuleTypeForSetUpListType(model.type)))];
+            addObject:@(int(ContentSuggestionsModuleType::kSetUpListAllSet))];
+      } else {
+        for (SetUpListItem* model in self.setUpList.items) {
+          [magicStackModules
+              addObject:@(int(
+                            SetUpListModuleTypeForSetUpListType(model.type)))];
+        }
       }
     }
   }
@@ -855,6 +911,21 @@ bool CredentialProviderPromoDismissed(PrefService* local_state) {
   }
 
   return YES;
+}
+
+// Returns an array of all possible items in the Set Up List.
+- (NSArray<SetUpListItemViewData*>*)allSetUpListItems {
+  NSArray<SetUpListItem*>* items = [self.setUpList allItems];
+
+  NSMutableArray<SetUpListItemViewData*>* allItems =
+      [[NSMutableArray alloc] init];
+  for (SetUpListItem* model in items) {
+    SetUpListItemViewData* item =
+        [[SetUpListItemViewData alloc] initWithType:model.type
+                                           complete:model.complete];
+    [allItems addObject:item];
+  }
+  return allItems;
 }
 
 // Returns an array of items to display in the Set Up List.
@@ -903,6 +974,12 @@ bool CredentialProviderPromoDismissed(PrefService* local_state) {
       }];
 }
 
+// Hides the Set Up List with an animation.
+- (void)hideSetUpList {
+  [self.consumer hideSetUpListWithAnimations:^{
+    [self.feedDelegate contentSuggestionsWasUpdated];
+  }];
+}
 #pragma mark - Properties
 
 - (NSArray<ContentSuggestionsMostVisitedActionItem*>*)actionButtonItems {
@@ -950,11 +1027,15 @@ bool CredentialProviderPromoDismissed(PrefService* local_state) {
 #pragma mark - PrefObserverDelegate
 
 - (void)onPreferenceChanged:(const std::string&)preferenceName {
-  if (IsIOSSetUpListEnabled() &&
-      preferenceName == prefs::kIosCredentialProviderPromoLastActionTaken &&
-      CredentialProviderPromoDismissed(_localState)) {
-    set_up_list_prefs::MarkItemComplete(_localState,
-                                        SetUpListItemType::kAutofill);
+  if (IsIOSSetUpListEnabled()) {
+    if (preferenceName == prefs::kIosCredentialProviderPromoLastActionTaken &&
+        CredentialProviderPromoDismissed(_localState)) {
+      set_up_list_prefs::MarkItemComplete(_localState,
+                                          SetUpListItemType::kAutofill);
+    } else if (preferenceName == set_up_list_prefs::kDisabled &&
+               set_up_list_prefs::IsSetUpListDisabled(_localState)) {
+      [self hideSetUpList];
+    }
   }
 }
 

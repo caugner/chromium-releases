@@ -56,6 +56,8 @@
 - (void)stop {
   [super stop];
   [self.mediator disconnect];
+  self.mediator = nil;
+  self.accountChooserViewController = nil;
   base::RecordAction(
       base::UserMetricsAction("Signin_BottomSheet_IdentityChooser_Closed"));
 }
