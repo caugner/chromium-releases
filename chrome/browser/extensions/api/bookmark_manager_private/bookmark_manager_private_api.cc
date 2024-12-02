@@ -7,7 +7,7 @@
 #include <vector>
 
 #include "base/json/json_writer.h"
-#include "base/prefs/public/pref_service_base.h"
+#include "base/prefs/pref_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
@@ -22,10 +22,13 @@
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/extension_web_ui.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/bookmarks/bookmark_drag_drop.h"
 #include "chrome/browser/view_type_utils.h"
 #include "chrome/common/pref_names.h"
+#include "components/user_prefs/user_prefs.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #include "content/public/browser/web_ui.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -240,17 +243,17 @@ bool ClipboardBookmarkManagerFunction::CopyOrCut(bool cut) {
   return true;
 }
 
-bool CopyBookmarkManagerFunction::RunImpl() {
+bool BookmarkManagerPrivateCopyFunction::RunImpl() {
   return CopyOrCut(false);
 }
 
-bool CutBookmarkManagerFunction::RunImpl() {
+bool BookmarkManagerPrivateCutFunction::RunImpl() {
   if (!EditBookmarksEnabled())
     return false;
   return CopyOrCut(true);
 }
 
-bool PasteBookmarkManagerFunction::RunImpl() {
+bool BookmarkManagerPrivatePasteFunction::RunImpl() {
   if (!EditBookmarksEnabled())
     return false;
   BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile());
@@ -279,7 +282,7 @@ bool PasteBookmarkManagerFunction::RunImpl() {
   return true;
 }
 
-bool CanPasteBookmarkManagerFunction::RunImpl() {
+bool BookmarkManagerPrivateCanPasteFunction::RunImpl() {
   if (!EditBookmarksEnabled())
     return false;
   BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile());
@@ -293,7 +296,7 @@ bool CanPasteBookmarkManagerFunction::RunImpl() {
   return true;
 }
 
-bool SortChildrenBookmarkManagerFunction::RunImpl() {
+bool BookmarkManagerPrivateSortChildrenFunction::RunImpl() {
   if (!EditBookmarksEnabled())
     return false;
   BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile());
@@ -306,7 +309,7 @@ bool SortChildrenBookmarkManagerFunction::RunImpl() {
   return true;
 }
 
-bool BookmarkManagerGetStringsFunction::RunImpl() {
+bool BookmarkManagerPrivateGetStringsFunction::RunImpl() {
   DictionaryValue* localized_strings = new DictionaryValue();
 
   localized_strings->SetString("title",
@@ -389,7 +392,7 @@ bool BookmarkManagerGetStringsFunction::RunImpl() {
   return true;
 }
 
-bool StartDragBookmarkManagerFunction::RunImpl() {
+bool BookmarkManagerPrivateStartDragFunction::RunImpl() {
   if (!EditBookmarksEnabled())
     return false;
   BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile());
@@ -403,8 +406,8 @@ bool StartDragBookmarkManagerFunction::RunImpl() {
     WebContents* web_contents =
         dispatcher()->delegate()->GetAssociatedWebContents();
     CHECK(web_contents);
-    bookmark_utils::DragBookmarks(profile(), nodes,
-                                  web_contents->GetNativeView());
+    chrome::DragBookmarks(profile(), nodes,
+                          web_contents->GetView()->GetNativeView());
 
     return true;
   } else {
@@ -413,7 +416,7 @@ bool StartDragBookmarkManagerFunction::RunImpl() {
   }
 }
 
-bool DropBookmarkManagerFunction::RunImpl() {
+bool BookmarkManagerPrivateDropFunction::RunImpl() {
   if (!EditBookmarksEnabled())
     return false;
 
@@ -458,9 +461,7 @@ bool DropBookmarkManagerFunction::RunImpl() {
       NOTREACHED() <<"Somehow we're dropping null bookmark data";
       return false;
     }
-    bookmark_utils::PerformBookmarkDrop(profile(),
-                                        *drag_data,
-                                        drop_parent, drop_index);
+    chrome::DropBookmarks(profile(), *drag_data, drop_parent, drop_index);
 
     router->ClearBookmarkNodeData();
     return true;
@@ -470,7 +471,7 @@ bool DropBookmarkManagerFunction::RunImpl() {
   }
 }
 
-bool GetSubtreeBookmarkManagerFunction::RunImpl() {
+bool BookmarkManagerPrivateGetSubtreeFunction::RunImpl() {
   BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile());
   const BookmarkNode* node;
   int64 id;
@@ -500,19 +501,19 @@ bool GetSubtreeBookmarkManagerFunction::RunImpl() {
   return true;
 }
 
-bool CanEditBookmarkManagerFunction::RunImpl() {
-  PrefServiceBase* prefs = PrefServiceBase::FromBrowserContext(profile_);
+bool BookmarkManagerPrivateCanEditFunction::RunImpl() {
+  PrefService* prefs = components::UserPrefs::Get(profile_);
   SetResult(new base::FundamentalValue(
       prefs->GetBoolean(prefs::kEditBookmarksEnabled)));
   return true;
 }
 
-bool RecordLaunchBookmarkFunction::RunImpl() {
+bool BookmarkManagerPrivateRecordLaunchFunction::RunImpl() {
   bookmark_utils::RecordBookmarkLaunch(bookmark_utils::LAUNCH_MANAGER);
   return true;
 }
 
-bool CanOpenNewWindowsBookmarkFunction::RunImpl() {
+bool BookmarkManagerPrivateCanOpenNewWindowsFunction::RunImpl() {
   bool can_open_new_windows = true;
 
 #if defined(OS_WIN)

@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/message_loop.h"
 #include "base/observer_list.h"
@@ -18,7 +18,7 @@
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
-#include "chrome/test/base/testing_pref_service.h"
+#include "chrome/test/base/testing_pref_service_syncable.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
@@ -32,6 +32,7 @@
 
 using ::testing::AtMost;
 using ::testing::Invoke;
+using ::testing::Ref;
 using ::testing::Return;
 using ::testing::ReturnPointee;
 using ::testing::ReturnRef;
@@ -65,14 +66,6 @@ ACTION_P(ScheduleCallback, result) {
   MessageLoop::current()->PostTask(FROM_HERE, base::Bind(arg0, result));
 }
 
-// Matches a safe_browsing::DownloadProtectionService::DownloadInfo that has
-// |url| as the first URL in the |download_url_chain|.
-// Example:
-//   EXPECT_CALL(Foo(InfoMatchinURL(url)))
-MATCHER_P(InfoMatchingURL, url, "DownloadInfo matching URL " + url.spec()) {
-  return url == arg.download_url_chain.front();
-}
-
 // Used with DownloadTestCase. Indicates the type of test case. The expectations
 // for the test is set based on the type.
 enum TestCaseType {
@@ -90,8 +83,9 @@ enum TestCaseExpectOverwrite {
 
 // Used with DownloadTestCase. Type of intermediate filename to expect.
 enum TestCaseExpectIntermediate {
-  EXPECT_CRDOWNLOAD,  // Expect path/to/target.crdownload
-  EXPECT_UNCONFIRMED  // Expect path/to/Unconfirmed xxx.crdownload
+  EXPECT_CRDOWNLOAD,  // Expect path/to/target.crdownload.
+  EXPECT_UNCONFIRMED, // Expect path/to/Unconfirmed xxx.crdownload.
+  EXPECT_TARGET_PATH, // Expect target path.
 };
 
 // Typical download test case. Used with
@@ -144,13 +138,14 @@ class TestDownloadProtectionService
   TestDownloadProtectionService()
       : safe_browsing::DownloadProtectionService(NULL, NULL) {}
   MOCK_METHOD2(CheckClientDownload,
-               void(const DownloadProtectionService::DownloadInfo&,
+               void(content::DownloadItem*,
                     const DownloadProtectionService::CheckDownloadCallback&));
   MOCK_METHOD2(CheckDownloadUrl,
-               void(const DownloadProtectionService::DownloadInfo&,
+               void(const content::DownloadItem&,
                     const DownloadProtectionService::CheckDownloadCallback&));
-  MOCK_CONST_METHOD1(IsSupportedDownload,
-                     bool(const DownloadProtectionService::DownloadInfo&));
+  MOCK_CONST_METHOD2(IsSupportedDownload,
+                     bool(const content::DownloadItem&,
+                          const base::FilePath&));
 };
 #endif
 
@@ -403,7 +398,7 @@ void ChromeDownloadManagerDelegateTest::RunTestCaseWithDownloadItem(
           DownloadProtectionService::DANGEROUS :
           DownloadProtectionService::SAFE;
   EXPECT_CALL(*delegate_->test_download_protection_service(),
-              CheckDownloadUrl(InfoMatchingURL(download_url), _))
+              CheckDownloadUrl(Ref(*item), _))
       .WillOnce(WithArg<1>(ScheduleCallback(url_check_result)));
 
   // Downloads that are flagged as DANGEROUS_URL aren't checked for dangerous
@@ -413,7 +408,7 @@ void ChromeDownloadManagerDelegateTest::RunTestCaseWithDownloadItem(
         (test_case.danger_type ==
          content::DOWNLOAD_DANGER_TYPE_MAYBE_DANGEROUS_CONTENT);
     EXPECT_CALL(*delegate_->test_download_protection_service(),
-                IsSupportedDownload(InfoMatchingURL(download_url)))
+                IsSupportedDownload(Ref(*item), _))
         .WillOnce(Return(maybe_dangerous));
   }
 #else // FULL_SAFE_BROWSING
@@ -493,21 +488,29 @@ void ChromeDownloadManagerDelegateTest::DownloadTargetVerifier(
   EXPECT_EQ(test_case->expected_disposition, disposition);
   EXPECT_EQ(test_case->danger_type, danger_type);
 
-  if (test_case->expected_intermediate == EXPECT_CRDOWNLOAD) {
-    EXPECT_EQ(download_util::GetCrDownloadPath(target_path).value(),
-              intermediate_path.value());
-  } else {
-    // The paths (in English) look like: /path/Unconfirmed xxx.crdownload.
-    // Of this, we only check that the path is:
-    // 1. Not "/path/target.crdownload",
-    // 2. Points to the same directory as the target.
-    // 3. Has extension ".crdownload".
-    EXPECT_NE(download_util::GetCrDownloadPath(target_path).value(),
-              intermediate_path.value());
-    EXPECT_EQ(target_path.DirName().value(),
-              intermediate_path.DirName().value());
-    EXPECT_TRUE(intermediate_path.MatchesExtension(
-        FILE_PATH_LITERAL(".crdownload")));
+  switch (test_case->expected_intermediate) {
+    case EXPECT_CRDOWNLOAD:
+      EXPECT_EQ(download_util::GetCrDownloadPath(target_path).value(),
+                intermediate_path.value());
+      break;
+
+    case EXPECT_UNCONFIRMED:
+      // The paths (in English) look like: /path/Unconfirmed xxx.crdownload.
+      // Of this, we only check that the path is:
+      // 1. Not "/path/target.crdownload",
+      // 2. Points to the same directory as the target.
+      // 3. Has extension ".crdownload".
+      EXPECT_NE(download_util::GetCrDownloadPath(target_path).value(),
+                intermediate_path.value());
+      EXPECT_EQ(target_path.DirName().value(),
+                intermediate_path.DirName().value());
+      EXPECT_TRUE(intermediate_path.MatchesExtension(
+          FILE_PATH_LITERAL(".crdownload")));
+      break;
+
+    case EXPECT_TARGET_PATH:
+      EXPECT_EQ(target_path.value(), intermediate_path.value());
+      break;
   }
 }
 
@@ -587,7 +590,7 @@ TEST_F(ChromeDownloadManagerDelegateTest, StartDownload_Basic) {
       FILE_PATH_LITERAL(""),
       DownloadItem::TARGET_DISPOSITION_OVERWRITE,
 
-      EXPECT_CRDOWNLOAD
+      EXPECT_TARGET_PATH
     },
 
 #if defined(FULL_SAFE_BROWSING)

@@ -30,7 +30,7 @@
   <section>
     <h3 i18n-content="sectionTitleAppearance"></h3>
     <div class="settings-row">
-<if expr="pp_ifdef('chromeos') and pp_ifdef('use_ash')">
+      <if expr="pp_ifdef('chromeos') and pp_ifdef('_google_chrome')">
       <button id="set-wallpaper" i18n-content="setWallpaper"
           guest-visibility="disabled"></button>
 </if>
@@ -144,8 +144,8 @@
         </div>
         <div class="checkbox" guest-visibility="disabled">
           <span class="controlled-setting-with-label">
-            <!-- TODO(estade): metric? -->
             <input id="instant-enabled-control" type="checkbox"
+                metric="Options_InstantEnabled"
                 i18n-values="pref:instant_enabled" dialog-pref>
             <span>
               <!-- TODO(estade) There's a link in here which should not be
@@ -488,7 +488,7 @@
         <input id="enableTranslate" pref="translate.enabled"
             metric="Options_Translate" type="checkbox">
         <span>
-          <label for="enableTranslate"i18n-content="translateEnableTranslate">
+          <label for="enableTranslate" i18n-content="translateEnableTranslate">
           </label>
           <span class="controlled-setting-indicator" pref="translate.enabled">
           </span>
@@ -531,12 +531,16 @@
       </div>
 <if expr="pp_ifdef('chromeos')">
       <div class="checkbox" guest-visibility="disabled">
-        <label>
-          <input type="checkbox"
+        <span class="controlled-setting-with-label">
+          <input id="drive-disabled" type="checkbox"
               pref="gdata.disabled"
               metric="Options_DisableGData">
-          <span i18n-content="disableGData"></span>
-        </label>
+          <span>
+            <label for="drive-disabled" i18n-content="disableGData"></label>
+            <span class="controlled-setting-indicator" pref="gdata.disabled">
+            </span>
+          </span>
+        </span>
       </div>
 </if>
 <if expr="not pp_ifdef('chromeos')">
@@ -612,11 +616,17 @@
       </p>
       <div class="option-name">
         <div class="checkbox">
-          <label>
+          <span class="controlled-setting-with-label">
             <input id="accessibility-should-always-show-menu"
                 pref="settings.a11y.enable_menu" type="checkbox">
-            <span i18n-content="accessibilityAlwaysShowMenu"></span>
-          </label>
+            <span>
+              <label for="accessibility-should-always-show-menu"
+                  i18n-content="accessibilityAlwaysShowMenu">
+              </label>
+              <span class="controlled-setting-indicator"
+                  pref="settings.a11y.enable_menu">
+            </span>
+          </span>
         </div>
       </div>
       <div class="option-name">
@@ -642,10 +652,6 @@
                 pref="settings.a11y.screen_magnifier" type="checkbox">
             <span i18n-content="accessibilityScreenMagnifier"></span>
           </label>
-          <select id="accessibility-screen-magnifier-type-select"
-              class="control" i18n-options="magnifierList" data-type="number"
-              pref="settings.a11y.screen_magnifier_type2">
-          </select>
         </div>
       </div>
       <div class="option-name" id="accessibility-tap-dragging">
@@ -669,11 +675,20 @@
       </button>
     </div>
   </section>
+  <section id="kiosk-section" hidden>
+    <h3 i18n-content="advancedSectionTitleKiosk"></h3>
+    <div>
+      <button id="manage-kiosk-apps-button"
+          i18n-content="manageKioskAppsButton">
+      </button>
+    </div>
+  </section>
 </if>
 </if>
-<if expr="not is_macosx and not pp_ifdef('chromeos')">
-  <section id="background-section">
-    <h3 i18n-content="advancedSectionTitleBackground"></h3>
+<if expr="not pp_ifdef('chromeos')">
+  <section id="system-section">
+    <h3 i18n-content="advancedSectionTitleSystem"></h3>
+<if expr="not is_macosx">
     <div class="checkbox">
       <span class="controlled-setting-with-label">
         <input id="backgroundModeCheckbox" pref="background_mode.enabled"
@@ -688,13 +703,34 @@
         </span>
       </span>
     </div>
+</if>
+    <div class="checkbox">
+      <span class="controlled-setting-with-label">
+        <input id="gpu-mode-checkbox"
+            pref="hardware_acceleration_mode.enabled" type="checkbox">
+        <span>
+          <label for="gpu-mode-checkbox"
+              i18n-content="gpuModeCheckbox">
+          </label>
+          <span id="gpu-mode-reset-restart"
+              i18n-values=".innerHTML:gpuModeResetRestart">
+          </span>
+        </span>
+      </span>
+    </div>
   </section>
 </if>
-</div>  <!-- advanced-settings-container -->
-</div>  <!-- advanced-settings -->
-<footer>
-  <button id="advanced-settings-expander" class="link-button"
-      i18n-content="showAdvancedSettings">
-  </button>
-</footer>
-</div>
+  <section id="managed-user-settings-section" hidden>
+    <h3 i18n-content="managedUsersSectionTitle"></h3>
+    <button id="open-managed-user-settings-button"
+        i18n-content="manageProfilesManagedUserSettings">
+    </button>
+  </section>
+  </div>  <!-- advanced-settings-container -->
+  </div>  <!-- advanced-settings -->
+  <footer>
+    <button id="advanced-settings-expander" class="link-button"
+        i18n-content="showAdvancedSettings">
+    </button>
+  </footer>
+  </div>

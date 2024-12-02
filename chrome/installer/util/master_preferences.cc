@@ -12,9 +12,9 @@
 #include "base/path_service.h"
 #include "base/string_util.h"
 #include "chrome/common/env_vars.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/installer/util/master_preferences_constants.h"
 #include "chrome/installer/util/util_constants.h"
-#include "googleurl/src/gurl.h"
 
 namespace {
 
@@ -23,33 +23,29 @@ const char kFirstRunTabs[] = "first_run_tabs";
 base::LazyInstance<installer::MasterPreferences> g_master_preferences =
     LAZY_INSTANCE_INITIALIZER;
 
-bool GetGURLFromValue(const Value* in_value, GURL* out_value) {
-  if (!in_value || !out_value)
-    return false;
-  std::string url;
-  if (!in_value->GetAsString(&url))
-    return false;
-  GURL gurl(url);
-  *out_value = gurl;
-  return true;
+bool GetURLFromValue(const Value* in_value, std::string* out_value) {
+  return in_value && out_value && in_value->GetAsString(out_value);
 }
 
-std::vector<GURL> GetNamedList(const char* name,
-                               const DictionaryValue* prefs) {
-  std::vector<GURL> list;
+std::vector<std::string> GetNamedList(const char* name,
+                                      const DictionaryValue* prefs) {
+  std::vector<std::string> list;
   if (!prefs)
     return list;
+
   const ListValue* value_list = NULL;
   if (!prefs->GetList(name, &value_list))
     return list;
+
+  list.reserve(value_list->GetSize());
   for (size_t i = 0; i < value_list->GetSize(); ++i) {
     const Value* entry;
-    GURL gurl_entry;
-    if (!value_list->Get(i, &entry) || !GetGURLFromValue(entry, &gurl_entry)) {
+    std::string url_entry;
+    if (!value_list->Get(i, &entry) || !GetURLFromValue(entry, &url_entry)) {
       NOTREACHED();
       break;
     }
-    list.push_back(gurl_entry);
+    list.push_back(url_entry);
   }
   return list;
 }
@@ -77,7 +73,6 @@ namespace installer {
 MasterPreferences::MasterPreferences() : distribution_(NULL),
                                          preferences_read_from_file_(false),
                                          chrome_(true),
-                                         chrome_app_host_(false),
                                          chrome_app_launcher_(false),
                                          chrome_frame_(false),
                                          multi_install_(false) {
@@ -88,7 +83,6 @@ MasterPreferences::MasterPreferences(const CommandLine& cmd_line)
     : distribution_(NULL),
       preferences_read_from_file_(false),
       chrome_(true),
-      chrome_app_host_(false),
       chrome_app_launcher_(false),
       chrome_frame_(false),
       multi_install_(false) {
@@ -99,7 +93,6 @@ MasterPreferences::MasterPreferences(const base::FilePath& prefs_path)
     : distribution_(NULL),
       preferences_read_from_file_(false),
       chrome_(true),
-      chrome_app_host_(false),
       chrome_app_launcher_(false),
       chrome_frame_(false),
       multi_install_(false) {
@@ -119,7 +112,6 @@ MasterPreferences::MasterPreferences(const std::string& prefs)
     : distribution_(NULL),
       preferences_read_from_file_(false),
       chrome_(true),
-      chrome_app_host_(false),
       chrome_app_launcher_(false),
       chrome_frame_(false),
       multi_install_(false) {
@@ -150,8 +142,8 @@ void MasterPreferences::InitializeFromCommandLine(const CommandLine& cmd_line) {
   } translate_switches[] = {
     { installer::switches::kAutoLaunchChrome,
       installer::master_preferences::kAutoLaunchChrome },
-    { installer::switches::kChromeAppHost,
-      installer::master_preferences::kChromeAppHost },
+    { installer::switches::kChromeAppHostDeprecated,
+      installer::master_preferences::kChromeAppHostDeprecated },
     { installer::switches::kChromeAppLauncher,
       installer::master_preferences::kChromeAppLauncher },
     { installer::switches::kChrome,
@@ -241,16 +233,20 @@ void MasterPreferences::InitializeProductFlags() {
   // Make sure we start out with the correct defaults.
   multi_install_ = false;
   chrome_frame_ = false;
-  chrome_app_host_ = false;
   chrome_app_launcher_ = false;
   chrome_ = true;
 
   GetBool(installer::master_preferences::kMultiInstall, &multi_install_);
   GetBool(installer::master_preferences::kChromeFrame, &chrome_frame_);
 
-  GetBool(installer::master_preferences::kChromeAppHost, &chrome_app_host_);
   GetBool(installer::master_preferences::kChromeAppLauncher,
           &chrome_app_launcher_);
+
+  // The deprecated switch --app-host behaves like --app-launcher.
+  bool chrome_app_host = false;
+  GetBool(installer::master_preferences::kChromeAppHostDeprecated,
+          &chrome_app_host);
+  chrome_app_launcher_ = chrome_app_launcher_ || chrome_app_host;
 
   // When multi-install is specified, the checks are pretty simple (in theory):
   // In order to be installed/uninstalled, each product must have its switch
@@ -305,7 +301,7 @@ bool MasterPreferences::GetString(const std::string& name,
   return ret;
 }
 
-std::vector<GURL> MasterPreferences::GetFirstRunTabs() const {
+std::vector<std::string> MasterPreferences::GetFirstRunTabs() const {
   return GetNamedList(kFirstRunTabs, master_dictionary_.get());
 }
 
@@ -314,8 +310,15 @@ bool MasterPreferences::GetExtensionsBlock(DictionaryValue** extensions) const {
       master_preferences::kExtensionsBlock, extensions);
 }
 
+std::string MasterPreferences::GetVariationsSeed() const {
+  std::string variations_seed;
+  master_dictionary_->GetString(prefs::kVariationsSeed, &variations_seed);
+  return variations_seed;
+}
+
 // static
 const MasterPreferences& MasterPreferences::ForCurrentProcess() {
   return g_master_preferences.Get();
 }
-}  // installer_util
+
+}  // namespace installer

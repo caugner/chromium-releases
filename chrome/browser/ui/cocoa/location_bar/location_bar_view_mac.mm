@@ -56,7 +56,6 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/extensions/extension_resource.h"
 #include "chrome/common/extensions/feature_switch.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/notification_service.h"
@@ -103,7 +102,7 @@ LocationBarViewMac::LocationBarViewMac(
                                  OmniboxViewMac::GetFieldFont())),
       plus_decoration_(NULL),
       star_decoration_(new StarDecoration(command_updater)),
-      zoom_decoration_(new ZoomDecoration(toolbar_model)),
+      zoom_decoration_(new ZoomDecoration(this)),
       keyword_hint_decoration_(
           new KeywordHintDecoration(OmniboxViewMac::GetFieldFont())),
       profile_(profile),
@@ -244,6 +243,8 @@ void LocationBarViewMac::SaveStateToContents(WebContents* contents) {
 void LocationBarViewMac::Update(const WebContents* contents,
                                 bool should_restore_state) {
   command_updater_->UpdateCommandEnabled(IDC_BOOKMARK_PAGE, IsStarEnabled());
+  command_updater_->UpdateCommandEnabled(IDC_BOOKMARK_PAGE_FROM_STAR,
+                                         IsStarEnabled());
   UpdateStarDecorationVisibility();
   UpdatePlusDecorationVisibility();
   UpdateZoomDecoration();
@@ -297,6 +298,11 @@ void LocationBarViewMac::OnChanged() {
   location_icon_decoration_->SetImage(image);
   ev_bubble_decoration_->SetImage(image);
   Layout();
+
+  if (browser_->instant_controller()) {
+    browser_->instant_controller()->SetOmniboxBounds(
+        gfx::Rect(NSRectToCGRect([field_ frame])));
+  }
 }
 
 void LocationBarViewMac::OnSelectionBoundsChanged() {
@@ -466,7 +472,8 @@ void LocationBarViewMac::TestPageActionPressed(size_t index) {
 }
 
 void LocationBarViewMac::TestActionBoxMenuItemSelected(int command_id) {
-  plus_decoration_->action_box_button_controller()->ExecuteCommand(command_id);
+  plus_decoration_->action_box_button_controller()->ExecuteCommand(
+      command_id, 0);
 }
 
 bool LocationBarViewMac::GetBookmarkStarVisibility() {
@@ -515,8 +522,8 @@ void LocationBarViewMac::ZoomChangedForActiveTab(bool can_show_bubble) {
   UpdateZoomDecoration();
   OnDecorationsChanged();
 
-  // TODO(dbeam): show a zoom bubble when |can_show_bubble| is true, the zoom
-  // decoration is showing, and the wrench menu isn't showing.
+  if (can_show_bubble && zoom_decoration_->IsVisible())
+    zoom_decoration_->ToggleBubble(YES);
 }
 
 NSPoint LocationBarViewMac::GetActionBoxAnchorPoint() const {
@@ -667,8 +674,7 @@ void LocationBarViewMac::Layout() {
   if (plus_decoration_.get())
     [cell addRightDecoration:plus_decoration_.get()];
   [cell addRightDecoration:star_decoration_.get()];
-  // TODO(dbeam): uncomment when zoom bubble exists.
-  // [cell addRightDecoration:zoom_decoration_.get()];
+  [cell addRightDecoration:zoom_decoration_.get()];
 
   // Note that display order is right to left.
   for (size_t i = 0; i < page_action_decorations_.size(); ++i) {

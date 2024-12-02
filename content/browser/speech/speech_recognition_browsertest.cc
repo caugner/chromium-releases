@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 #include "base/command_line.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/string_number_conversions.h"
@@ -23,9 +23,7 @@
 #include "content/test/content_browser_test_utils.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
 
-
 namespace content {
-
 
 class SpeechRecognitionBrowserTest : public ContentBrowserTest {
  public:
@@ -130,7 +128,7 @@ IN_PROC_BROWSER_TEST_F(SpeechRecognitionBrowserTest, DISABLED_TestCancelAll) {
 
   // Make the renderer crash. This should trigger
   // InputTagSpeechDispatcherHost to cancel all pending sessions.
-  NavigateToURL(shell(), GURL(chrome::kChromeUICrashURL));
+  NavigateToURL(shell(), GURL(kChromeUICrashURL));
 
   EXPECT_TRUE(fake_speech_recognition_manager_.did_cancel_all());
 }

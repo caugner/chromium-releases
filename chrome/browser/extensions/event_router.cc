@@ -24,14 +24,15 @@
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/lazy_background_task_queue.h"
 #include "chrome/browser/extensions/process_map.h"
-#include "chrome/browser/extensions/system_info_event_router.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/api/extension_api.h"
+#include "chrome/common/extensions/background_info.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_messages.h"
+#include "chrome/common/extensions/incognito_handler.h"
 #include "chrome/common/view_type.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
@@ -236,9 +237,6 @@ void EventRouter::OnListenerAdded(const EventListener* listener) {
   if (observer != observers_.end())
     observer->second->OnListenerAdded(details);
 
-  if (SystemInfoEventRouter::IsSystemInfoEvent(event_name))
-    SystemInfoEventRouter::GetInstance()->AddEventListener(event_name);
-
   const Extension* extension = extensions::ExtensionSystem::Get(profile_)->
       extension_service()->GetExtensionById(listener->extension_id,
                                             ExtensionService::INCLUDE_ENABLED);
@@ -264,9 +262,6 @@ void EventRouter::OnListenerRemoved(const EventListener* listener) {
       BrowserThread::IO, FROM_HERE,
       base::Bind(&NotifyEventListenerRemovedOnIOThread,
                  profile_, listener->extension_id, event_name));
-
-  if (SystemInfoEventRouter::IsSystemInfoEvent(event_name))
-    SystemInfoEventRouter::GetInstance()->RemoveEventListener(event_name);
 
   const Extension* extension = extensions::ExtensionSystem::Get(profile_)->
       extension_service()->GetExtensionById(listener->extension_id,
@@ -457,7 +452,7 @@ void EventRouter::DispatchLazyEvent(
     }
 
     if (profile_->HasOffTheRecordProfile() &&
-        extension->incognito_split_mode()) {
+        IncognitoInfo::IsSplitMode(extension)) {
       if (MaybeLoadLazyBackgroundPageToDispatchEvent(
           profile_->GetOffTheRecordProfile(), extension, event)) {
         already_dispatched->insert(
@@ -557,7 +552,7 @@ void EventRouter::IncrementInFlightEvents(Profile* profile,
                                           const Extension* extension) {
   // Only increment in-flight events if the lazy background page is active,
   // because that's the only time we'll get an ACK.
-  if (extension->has_lazy_background_page()) {
+  if (BackgroundInfo::HasLazyBackgroundPage(extension)) {
     ExtensionProcessManager* pm =
         ExtensionSystem::Get(profile)->process_manager();
     ExtensionHost* host = pm->GetBackgroundHostForExtension(extension->id());
@@ -575,8 +570,9 @@ void EventRouter::OnEventAck(Profile* profile,
   // NULL.
   CHECK(host);
   // TODO(mpcomplete): We should never get this message unless
-  // has_lazy_background_page is true. Find out why we're getting it anyway.
-  if (host->extension() && host->extension()->has_lazy_background_page())
+  // HasLazyBackgroundPage is true. Find out why we're getting it anyway.
+  if (host->extension() &&
+      BackgroundInfo::HasLazyBackgroundPage(host->extension()))
     pm->DecrementLazyKeepaliveCount(host->extension());
 }
 
@@ -614,12 +610,13 @@ void EventRouter::Observe(int type,
       // to register the events the extension is interested in.
       const Extension* extension =
           content::Details<const Extension>(details).ptr();
-      if (extension->has_lazy_background_page()) {
+      if (BackgroundInfo::HasLazyBackgroundPage(extension)) {
         LazyBackgroundTaskQueue* queue =
             ExtensionSystem::Get(profile_)->lazy_background_task_queue();
         queue->AddPendingTask(profile_, extension->id(),
                               base::Bind(&DoNothing));
       }
+      break;
     }
     case chrome::NOTIFICATION_EXTENSION_LOADED: {
       // Add all registered lazy listeners to our cache.

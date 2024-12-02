@@ -19,8 +19,8 @@ namespace content {
 class FontLoadingTestCase : public MacSandboxTestCase {
  public:
   FontLoadingTestCase() : font_data_length_(-1) {}
-  virtual bool BeforeSandboxInit();
-  virtual bool SandboxedTest();
+  virtual bool BeforeSandboxInit() OVERRIDE;
+  virtual bool SandboxedTest() OVERRIDE;
  private:
   scoped_ptr<base::SharedMemory> font_shmem_;
   size_t font_data_length_;
@@ -64,7 +64,7 @@ bool FontLoadingTestCase::BeforeSandboxInit() {
 
 bool FontLoadingTestCase::SandboxedTest() {
   base::SharedMemoryHandle shmem_handle;
-  if (!font_shmem_->ShareToProcess(NULL, &shmem_handle)) {
+  if (!font_shmem_->ShareToProcess(base::kNullProcessHandle, &shmem_handle)) {
     LOG(ERROR) << "SharedMemory::ShareToProcess failed";
     return false;
   }

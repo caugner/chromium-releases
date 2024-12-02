@@ -11,8 +11,8 @@
 #include "ash/shell_delegate.h"
 #include "ash/shell_window_ids.h"
 #include "base/bind.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/stringprintf.h"
@@ -71,7 +71,7 @@ void SaveScreenshot(const base::FilePath& screenshot_path,
 }
 
 // TODO(kinaba): crbug.com/140425, remove this ungly #ifdef dispatch.
-#ifdef OS_CHROMEOS
+#if defined(OS_CHROMEOS)
 void SaveScreenshotToDrive(scoped_refptr<base::RefCountedBytes> png_data,
                            drive::DriveFileError error,
                            const base::FilePath& local_path) {
@@ -162,6 +162,13 @@ void ScreenshotTaker::HandleTakeScreenshotForAllRootWindows() {
   std::string screenshot_basename =
       ScreenshotSource::GetScreenshotBaseFilename();
   ash::Shell::RootWindowList root_windows = ash::Shell::GetAllRootWindows();
+  // Reorder root_windows to take the primary root window's snapshot at first.
+  aura::RootWindow* primary_root = ash::Shell::GetPrimaryRootWindow();
+  if (*(root_windows.begin()) != primary_root) {
+    root_windows.erase(std::find(
+        root_windows.begin(), root_windows.end(), primary_root));
+    root_windows.insert(root_windows.begin(), primary_root);
+  }
   for (size_t i = 0; i < root_windows.size(); ++i) {
     aura::RootWindow* root_window = root_windows[i];
     scoped_refptr<base::RefCountedBytes> png_data(new base::RefCountedBytes);

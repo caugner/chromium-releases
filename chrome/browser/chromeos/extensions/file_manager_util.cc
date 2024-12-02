@@ -32,7 +32,7 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
-#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_iterator.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/extensions/application_launch.h"
@@ -98,10 +98,11 @@ const char kActionChoiceUrl[] = FILEBROWSER_URL("action_choice.html");
 
 const char kCRXExtension[] = ".crx";
 const char kPdfExtension[] = ".pdf";
+const char kSwfExtension[] = ".swf";
 // List of file extension we can open in tab.
 const char* kBrowserSupportedExtensions[] = {
 #if defined(GOOGLE_CHROME_BUILD)
-    ".pdf",
+    ".pdf", ".swf",
 #endif
     ".bmp", ".jpg", ".jpeg", ".png", ".webp", ".gif", ".txt", ".html", ".htm",
     ".mhtml", ".mht", ".svg"
@@ -141,6 +142,35 @@ bool IsSupportedGDocsExtension(const char* file_extension) {
 
 bool IsCRXFile(const char* file_extension) {
   return base::strcasecmp(file_extension, kCRXExtension) == 0;
+}
+
+bool IsPepperPluginEnabled(Profile* profile,
+                           const base::FilePath& plugin_path) {
+  content::PepperPluginInfo* pepper_info =
+      PluginService::GetInstance()->GetRegisteredPpapiPluginInfo(plugin_path);
+  if (!pepper_info)
+    return false;
+
+  PluginPrefs* plugin_prefs = PluginPrefs::GetForProfile(profile);
+  if (!plugin_prefs)
+    return false;
+
+  return plugin_prefs->IsPluginEnabled(pepper_info->ToWebPluginInfo());
+}
+
+bool IsPdfPluginEnabled(Profile* profile) {
+  base::FilePath plugin_path;
+  PathService::Get(chrome::FILE_PDF_PLUGIN, &plugin_path);
+  return IsPepperPluginEnabled(profile, plugin_path);
+}
+
+bool IsFlashPluginEnabled(Profile* profile) {
+  base::FilePath plugin_path(
+      CommandLine::ForCurrentProcess()->GetSwitchValueNative(
+          switches::kPpapiFlashPath));
+  if (plugin_path.empty())
+    PathService::Get(chrome::FILE_PEPPER_FLASH_PLUGIN, &plugin_path);
+  return IsPepperPluginEnabled(profile, plugin_path);
 }
 
 // Returns index |ext| has in the |array|. If there is no |ext| in |array|, last
@@ -310,9 +340,8 @@ bool FileManageTabExists(const base::FilePath& path, TAB_REUSE_MODE mode) {
   const GURL origin(chrome::kChromeUIFileManagerURL);
   const std::string ref = std::string("/") + path.value();
 
-  for (BrowserList::const_iterator browser_iterator = BrowserList::begin();
-       browser_iterator != BrowserList::end(); ++browser_iterator) {
-    Browser* browser = *browser_iterator;
+  for (chrome::BrowserIterator it; !it.done(); it.Next()) {
+    Browser* browser = *it;
     TabStripModel* tab_strip = browser->tab_strip_model();
     for (int idx = 0; idx < tab_strip->count(); idx++) {
       content::WebContents* web_contents = tab_strip->GetWebContentsAt(idx);
@@ -379,9 +408,9 @@ void ExecuteHandler(Profile* profile,
   executor->Execute(urls);
 }
 
-void OpenFileBrowser(const base::FilePath& path,
-                     TAB_REUSE_MODE mode,
-                     const std::string& action_id) {
+void OpenFileBrowserImpl(const base::FilePath& path,
+                         TAB_REUSE_MODE mode,
+                         const std::string& action_id) {
   content::RecordAction(UserMetricsAction("ShowFileBrowserFullTab"));
 
   if (FileManageTabExists(path, mode))
@@ -406,14 +435,18 @@ void OpenFileBrowser(const base::FilePath& path,
     arg_value.SetString("action", action_id);
     std::string query;
     base::JSONWriter::Write(&arg_value, &query);
-    url += "?" + net::EscapeUrlEncodedData(query, false);
+    url += "?" +
+        net::EscapeUrlEncodedData(query,
+                                  false);  // Space to %20 instead of +.
   }
   if (!path.empty()) {
     base::FilePath virtual_path;
     if (!ConvertFileToRelativeFileSystemPath(profile, kFileBrowserDomain, path,
                                              &virtual_path))
       return;
-    url += "#/" + net::EscapeUrlEncodedData(virtual_path.value(), false);
+    url += "#/" +
+        net::EscapeUrlEncodedData(virtual_path.value(),
+                                  false);  // Space to %20 instead of +.
   }
 
   ExtensionService* service =
@@ -434,9 +467,8 @@ void OpenFileBrowser(const base::FilePath& path,
 }
 
 Browser* GetBrowserForUrl(GURL target_url) {
-  for (BrowserList::const_iterator browser_iterator = BrowserList::begin();
-       browser_iterator != BrowserList::end(); ++browser_iterator) {
-    Browser* browser = *browser_iterator;
+  for (chrome::BrowserIterator it; !it.done(); it.Next()) {
+    Browser* browser = *it;
     TabStripModel* tab_strip = browser->tab_strip_model();
     for (int idx = 0; idx < tab_strip->count(); idx++) {
       content::WebContents* web_contents = tab_strip->GetWebContentsAt(idx);
@@ -487,7 +519,7 @@ bool ExecuteDefaultHandler(Profile* profile, const base::FilePath& path) {
       // |gallery| tries to put the file url into the tab url but it does not
       // work on Chrome OS.
       // |mount-archive| does not even try.
-      OpenFileBrowser(path, REUSE_SAME_PATH, "");
+      OpenFileBrowserImpl(path, REUSE_SAME_PATH, "");
       return true;
     }
     return ExecuteBuiltinHandler(browser, path, action_id);
@@ -516,8 +548,7 @@ bool ReadSmallFileToString(const base::FilePath& path, std::string* contents) {
 
 // Reads JSON from a Google Docs file, extracts a document url and opens it
 // in a tab.
-void ReadUrlFromGDocOnFileThread(const base::FilePath& file_path) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+void ReadUrlFromGDocOnBlockingPool(const base::FilePath& file_path) {
   std::string contents;
   if (!ReadSmallFileToString(file_path, &contents)) {
     LOG(ERROR) << "Error reading " << file_path.value();
@@ -548,7 +579,7 @@ void ContinueViewItem(Profile* profile,
 
   if (error == base::PLATFORM_FILE_OK) {
     // A directory exists at |path|. Open it with FileBrowser.
-    OpenFileBrowser(path, REUSE_SAME_PATH, "open");
+    OpenFileBrowserImpl(path, REUSE_SAME_PATH, "open");
   } else {
     if (!ExecuteDefaultHandler(profile, path))
       ShowWarningMessageBox(profile, path);
@@ -619,7 +650,9 @@ bool ConvertFileToFileSystemUrl(Profile* profile,
 
   GURL base_url = fileapi::GetFileSystemRootURI(origin_url,
       fileapi::kFileSystemTypeExternal);
-  *url = GURL(base_url.spec() + virtual_path.value());
+  *url = GURL(base_url.spec() +
+              net::EscapeUrlEncodedData(virtual_path.value(),
+                                        false));  // Space to %20 instead of +.
   return true;
 }
 
@@ -692,17 +725,19 @@ GURL GetFileBrowserUrlWithParams(
     arg_value.SetBoolean("includeAllFiles", file_types->include_all_files);
   }
 
-  // Disable showing Drive unless it's specifically supported.
-  arg_value.SetBoolean("disableGData",
-      !file_types || !file_types->support_gdata);
+  // If the caller cannot handle Drive path, the file chooser dialog need to
+  // return resolved local native paths to the selected files.
+  arg_value.SetBoolean("shouldReturnLocalPath",
+                       !file_types || !file_types->support_drive);
 
   std::string json_args;
   base::JSONWriter::Write(&arg_value, &json_args);
 
   // kChromeUIFileManagerURL could not be used since query parameters are not
   // supported for it.
-  std::string url = GetFileBrowserUrl().spec() +
-                    '?' + net::EscapeUrlEncodedData(json_args, false);
+  std::string url = GetFileBrowserUrl().spec() + '?' +
+      net::EscapeUrlEncodedData(json_args,
+                                false);  // Space to %20 instead of +.
   return GURL(url);
 }
 
@@ -741,7 +776,26 @@ string16 GetTitleFromType(ui::SelectFileDialog::Type dialog_type) {
 }
 
 void ViewRemovableDrive(const base::FilePath& path) {
-  OpenFileBrowser(path, REUSE_ANY_FILE_MANAGER, "auto-open");
+  OpenFileBrowserImpl(path, REUSE_ANY_FILE_MANAGER, "auto-open");
+}
+
+void OpenNewWindow(Profile* profile, const GURL& url) {
+  ExtensionService* service = extensions::ExtensionSystem::Get(
+      profile ? profile : ProfileManager::GetDefaultProfileOrOffTheRecord())->
+          extension_service();
+  if (!service)
+    return;
+
+  const extensions::Extension* extension =
+      service->GetExtensionById(kFileBrowserDomain, false);
+  if (!extension)
+    return;
+
+  chrome::AppLaunchParams params(profile, extension,
+                                 extension_misc::LAUNCH_WINDOW,
+                                 NEW_FOREGROUND_TAB);
+  params.override_url = url;
+  chrome::OpenApplication(params);
 }
 
 void OpenActionChoiceDialog(const base::FilePath& path) {
@@ -757,7 +811,8 @@ void OpenActionChoiceDialog(const base::FilePath& path) {
                                            &virtual_path))
     return;
   std::string url = kActionChoiceUrl;
-  url += "#/" + net::EscapeUrlEncodedData(virtual_path.value(), false);
+  url += "#/" + net::EscapeUrlEncodedData(virtual_path.value(),
+                                          false);  // Space to %20 instead of +.
   GURL dialog_url(url);
 
   const gfx::Size screen = ash::Shell::GetScreen()->GetPrimaryDisplay().size();
@@ -768,17 +823,28 @@ void OpenActionChoiceDialog(const base::FilePath& path) {
 
   Browser* browser = GetBrowserForUrl(dialog_url);
 
-  if (!browser) {
-    browser = new Browser(
-        Browser::CreateParams::CreateForApp(Browser::TYPE_POPUP,
-                                            "action_choice",
-                                            bounds,
-                                            profile));
-
-    chrome::AddSelectedTabWithURL(browser, dialog_url,
-                                  content::PAGE_TRANSITION_LINK);
+  if (browser) {
+    browser->window()->Show();
+    return;
   }
-  browser->window()->Show();
+
+  ExtensionService* service = extensions::ExtensionSystem::Get(
+    profile ? profile : ProfileManager::GetDefaultProfileOrOffTheRecord())->
+        extension_service();
+  if (!service)
+    return;
+
+  const extensions::Extension* extension =
+      service->GetExtensionById(kFileBrowserDomain, false);
+  if (!extension)
+    return;
+
+  chrome::AppLaunchParams params(profile, extension,
+                                 extension_misc::LAUNCH_WINDOW,
+                                 NEW_FOREGROUND_TAB);
+  params.override_url = dialog_url;
+  params.override_bounds = bounds;
+  chrome::OpenApplication(params);
 }
 
 void ViewItem(const base::FilePath& path) {
@@ -804,7 +870,11 @@ void ViewItem(const base::FilePath& path) {
 
 void ShowFileInFolder(const base::FilePath& path) {
   // This action changes the selection so we do not reuse existing tabs.
-  OpenFileBrowser(path, REUSE_NEVER, "select");
+  OpenFileBrowserImpl(path, REUSE_NEVER, "select");
+}
+
+void OpenFileBrowser() {
+  OpenFileBrowserImpl(base::FilePath(), REUSE_NEVER, "");
 }
 
 bool ExecuteBuiltinHandler(Browser* browser, const base::FilePath& path,
@@ -817,7 +887,7 @@ bool ExecuteBuiltinHandler(Browser* browser, const base::FilePath& path,
   // For things supported natively by the browser, we should open it
   // in a tab.
   if (IsSupportedBrowserExtension(file_extension.data()) ||
-      ShouldBeOpenedWithPdfPlugin(profile, file_extension.data())) {
+      ShouldBeOpenedWithPlugin(profile, file_extension.data())) {
     GURL page_url = net::FilePathToFileURL(path);
     // Override gdata resource to point to internal handler instead of file:
     // URL.
@@ -852,8 +922,8 @@ bool ExecuteBuiltinHandler(Browser* browser, const base::FilePath& path,
     } else {
       // The file is local (downloaded from an attachment or otherwise copied).
       // Parse the file to extract the Docs url and open this url.
-      BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
-          base::Bind(&ReadUrlFromGDocOnFileThread, path));
+      BrowserThread::PostBlockingPoolTask(
+          FROM_HERE, base::Bind(&ReadUrlFromGDocOnBlockingPool, path));
     }
     return true;
   }
@@ -917,24 +987,13 @@ bool ExecuteBuiltinHandler(Browser* browser, const base::FilePath& path,
   return false;
 }
 
-// If pdf plugin is enabled, we should open pdf files in a tab.
-bool ShouldBeOpenedWithPdfPlugin(Profile* profile, const char* file_extension) {
-  if (base::strcasecmp(file_extension, kPdfExtension) != 0)
-    return false;
-
-  base::FilePath pdf_path;
-  PathService::Get(chrome::FILE_PDF_PLUGIN, &pdf_path);
-
-  content::PepperPluginInfo* pepper_info =
-      PluginService::GetInstance()->GetRegisteredPpapiPluginInfo(pdf_path);
-  if (!pepper_info)
-    return false;
-
-  PluginPrefs* plugin_prefs = PluginPrefs::GetForProfile(profile);
-  if (!plugin_prefs)
-    return false;
-
-  return plugin_prefs->IsPluginEnabled(pepper_info->ToWebPluginInfo());
+// If a bundled plugin is enabled, we should open pdf/swf files in a tab.
+bool ShouldBeOpenedWithPlugin(Profile* profile, const char* file_extension) {
+  if (LowerCaseEqualsASCII(file_extension, kPdfExtension))
+    return IsPdfPluginEnabled(profile);
+  if (LowerCaseEqualsASCII(file_extension, kSwfExtension))
+    return IsFlashPluginEnabled(profile);
+  return false;
 }
 
 ListValue* ProgressStatusVectorToListValue(

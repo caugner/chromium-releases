@@ -4,55 +4,30 @@
 
 #include "chrome/browser/ui/search/search_tab_helper.h"
 
-#include "chrome/browser/google/google_util.h"
-#include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/search_engines/template_url.h"
-#include "chrome/browser/search_engines/template_url_service.h"
-#include "chrome/browser/search_engines/template_url_service_factory.h"
-#include "chrome/browser/ui/search/search.h"
+#include "chrome/browser/search/search.h"
+#include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
-#include "content/public/browser/navigation_controller.h"
-#include "content/public/browser/navigation_details.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
-#include "content/public/browser/web_contents.h"
 
 DEFINE_WEB_CONTENTS_USER_DATA_KEY(chrome::search::SearchTabHelper);
 
 namespace {
 
-bool IsNTP(const GURL& url) {
-  return url.SchemeIs(chrome::kChromeUIScheme) &&
-         url.host() == chrome::kChromeUINewTabHost;
-}
-
-Profile* ProfileFromWebContents(const content::WebContents* web_contents) {
-  return Profile::FromBrowserContext(web_contents->GetBrowserContext());
-}
-
-bool IsSearchEnabled(Profile* profile) {
-  return chrome::search::IsInstantExtendedAPIEnabled(profile);
-}
-
-
-bool IsSearchResults(const GURL& url, Profile* profile) {
-  if (chrome::search::IsForcedInstantURL(url))
+bool IsNTP(const content::WebContents* contents) {
+  // We can't use WebContents::GetURL() because that uses the active entry,
+  // whereas we want the visible entry.
+  const content::NavigationEntry* entry =
+      contents->GetController().GetVisibleEntry();
+  if (entry && entry->GetVirtualURL() == GURL(chrome::kChromeUINewTabURL))
     return true;
 
-  // Profile can be NULL in unit tests.
-  TemplateURLService* template_url_service =
-      TemplateURLServiceFactory::GetForProfile(profile);
-  if (!template_url_service)
-    return false;
+  return chrome::search::IsInstantNTP(contents);
+}
 
-  TemplateURL* template_url = template_url_service->GetDefaultSearchProvider();
-  if (!template_url)
-    return false;
-
-  string16 result;
-  return template_url->HasSearchTermsReplacementKey(url) &&
-      template_url->ExtractSearchTermsFromURL(url, &result) && !result.empty();
+bool IsSearchResults(const content::WebContents* contents) {
+  return !chrome::search::GetSearchTerms(contents).empty();
 }
 
 }  // namespace
@@ -61,9 +36,10 @@ namespace chrome {
 namespace search {
 
 SearchTabHelper::SearchTabHelper(content::WebContents* web_contents)
-    : is_search_enabled_(IsSearchEnabled(ProfileFromWebContents(web_contents))),
+    : WebContentsObserver(web_contents),
+      is_search_enabled_(chrome::search::IsInstantExtendedAPIEnabled()),
       user_input_in_progress_(false),
-      model_(web_contents) {
+      web_contents_(web_contents) {
   if (!is_search_enabled_)
     return;
 
@@ -86,13 +62,14 @@ void SearchTabHelper::OmniboxEditModelChanged(bool user_input_in_progress,
   if (!user_input_in_progress && !cancelling)
     return;
 
-  UpdateModelBasedOnURL(web_contents()->GetURL());
+  UpdateMode();
 }
 
 void SearchTabHelper::NavigationEntryUpdated() {
   if (!is_search_enabled_)
     return;
-  UpdateModelBasedOnURL(web_contents()->GetURL());
+
+  UpdateMode();
 }
 
 void SearchTabHelper::Observe(
@@ -100,18 +77,28 @@ void SearchTabHelper::Observe(
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
   DCHECK_EQ(content::NOTIFICATION_NAV_ENTRY_COMMITTED, type);
-  content::LoadCommittedDetails* committed_details =
-      content::Details<content::LoadCommittedDetails>(details).ptr();
-  UpdateModelBasedOnURL(committed_details->entry->GetVirtualURL());
+  UpdateMode();
 }
 
-void SearchTabHelper::UpdateModelBasedOnURL(const GURL& url) {
+bool SearchTabHelper::OnMessageReceived(const IPC::Message& message) {
+  bool handled = true;
+  IPC_BEGIN_MESSAGE_MAP(SearchTabHelper, message)
+    IPC_MESSAGE_HANDLER(ChromeViewHostMsg_SearchBoxShowBars,
+                        OnSearchBoxShowBars)
+    IPC_MESSAGE_HANDLER(ChromeViewHostMsg_SearchBoxHideBars,
+                        OnSearchBoxHideBars)
+    IPC_MESSAGE_UNHANDLED(handled = false)
+  IPC_END_MESSAGE_MAP()
+  return handled;
+}
+
+void SearchTabHelper::UpdateMode() {
   Mode::Type type = Mode::MODE_DEFAULT;
   Mode::Origin origin = Mode::ORIGIN_DEFAULT;
-  if (IsNTP(url)) {
+  if (IsNTP(web_contents_)) {
     type = Mode::MODE_NTP;
     origin = Mode::ORIGIN_NTP;
-  } else if (IsSearchResults(url, ProfileFromWebContents(web_contents()))) {
+  } else if (IsSearchResults(web_contents_)) {
     type = Mode::MODE_SEARCH_RESULTS;
     origin = Mode::ORIGIN_SEARCH;
   }
@@ -120,8 +107,16 @@ void SearchTabHelper::UpdateModelBasedOnURL(const GURL& url) {
   model_.SetMode(Mode(type, origin));
 }
 
-const content::WebContents* SearchTabHelper::web_contents() const {
-  return model_.web_contents();
+void SearchTabHelper::OnSearchBoxShowBars(int page_id) {
+  if (web_contents()->IsActiveEntry(page_id))
+    model_.SetTopBarsVisible(true);
+}
+
+void SearchTabHelper::OnSearchBoxHideBars(int page_id) {
+  if (web_contents()->IsActiveEntry(page_id)) {
+    model_.SetTopBarsVisible(false);
+    Send(new ChromeViewMsg_SearchBoxBarsHidden(routing_id()));
+  }
 }
 
 }  // namespace search

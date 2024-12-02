@@ -26,6 +26,8 @@ class NativePanelStack {
 
   virtual ~NativePanelStack() {}
 
+  virtual bool IsMinimized() const = 0;
+
  protected:
   friend class StackedPanelCollection;
 
@@ -42,6 +44,10 @@ class NativePanelStack {
 
   // Minimizes all the panels in the stack as a whole via system.
   virtual void Minimize() = 0;
+
+  // Draws or clears the attention via system. The system might choose to
+  // flash the taskbar icon for attention.
+  virtual void DrawSystemAttention(bool draw_attention) = 0;
 };
 
 #endif  // CHROME_BROWSER_UI_PANELS_NATIVE_PANEL_STACK_H_

@@ -39,6 +39,8 @@
       ],
       'sources': [
         # All .cc, .h under views, except unittests
+        'accessibility/native_view_accessibility.cc',
+        'accessibility/native_view_accessibility.h',
         'accessibility/native_view_accessibility_win.cc',
         'accessibility/native_view_accessibility_win.h',
         'accessible_pane_view.cc',
@@ -88,8 +90,6 @@
         'controls/button/radio_button.h',
         'controls/button/text_button.cc',
         'controls/button/text_button.h',
-        'controls/button/chrome_style.cc',
-        'controls/button/chrome_style.h',
         'controls/combobox/combobox.cc',
         'controls/combobox/combobox.h',
         'controls/combobox/combobox_listener.h',
@@ -179,6 +179,8 @@
         'controls/scrollbar/base_scroll_bar_thumb.h',
         'controls/scrollbar/bitmap_scroll_bar.cc',
         'controls/scrollbar/bitmap_scroll_bar.h',
+        'controls/scrollbar/kennedy_scroll_bar.cc',
+        'controls/scrollbar/kennedy_scroll_bar.h',
         'controls/scrollbar/native_scroll_bar_views.cc',
         'controls/scrollbar/native_scroll_bar_views.h',
         'controls/scrollbar/native_scroll_bar_wrapper.h',
@@ -195,11 +197,9 @@
         'controls/slide_out_view.h',
         'controls/slider.cc',
         'controls/slider.h',
-        'controls/tabbed_pane/native_tabbed_pane_views.cc',
-        'controls/tabbed_pane/native_tabbed_pane_views.h',
-        'controls/tabbed_pane/native_tabbed_pane_win.cc',
-        'controls/tabbed_pane/native_tabbed_pane_win.h',
-        'controls/tabbed_pane/native_tabbed_pane_wrapper.h',
+        'controls/styled_label.cc',
+        'controls/styled_label.h',
+        'controls/styled_label_listener.h',
         'controls/tabbed_pane/tabbed_pane.cc',
         'controls/tabbed_pane/tabbed_pane.h',
         'controls/tabbed_pane/tabbed_pane_listener.h',
@@ -234,6 +234,8 @@
         'corewm/compound_event_filter.h',
         'corewm/corewm_switches.cc',
         'corewm/corewm_switches.h',
+        'corewm/cursor_manager.cc',
+        'corewm/cursor_manager.h',
         'corewm/focus_controller.cc',
         'corewm/focus_controller.h',
         'corewm/focus_rules.h',
@@ -241,12 +243,16 @@
         'corewm/image_grid.h',
         'corewm/input_method_event_filter.cc',
         'corewm/input_method_event_filter.h',
+        'corewm/native_cursor_manager.h',
+        'corewm/native_cursor_manager_delegate.h',
         'corewm/shadow.cc',
         'corewm/shadow.h',
         'corewm/shadow_controller.cc',
         'corewm/shadow_controller.h',
         'corewm/shadow_types.cc',
         'corewm/shadow_types.h',
+        'corewm/tooltip_controller.cc',
+        'corewm/tooltip_controller.h',
         'corewm/visibility_controller.cc',
         'corewm/visibility_controller.h',
         'corewm/window_animations.cc',
@@ -314,8 +320,10 @@
         'repeat_controller.h',
         'round_rect_painter.cc',
         'round_rect_painter.h',
-        'touchui/touch_selection_controller.cc',
-        'touchui/touch_selection_controller.h',
+        'touchui/touch_editing_menu.cc',
+        'touchui/touch_editing_menu.h',
+        'touchui/touch_selection_controller_impl.cc',
+        'touchui/touch_selection_controller_impl.h',
         'view.cc',
         'view.h',
         'view_constants.cc',
@@ -328,6 +336,7 @@
         'view_text_utils.cc',
         'view_text_utils.h',
         'view_win.cc',
+        'views_delegate.cc',
         'views_delegate.h',
         'widget/aero_tooltip_manager.cc',
         'widget/aero_tooltip_manager.h',
@@ -337,8 +346,8 @@
         'widget/default_theme_provider.h',
         'widget/desktop_aura/desktop_activation_client.cc',
         'widget/desktop_aura/desktop_activation_client.h',
-        'widget/desktop_aura/desktop_cursor_client.cc',
-        'widget/desktop_aura/desktop_cursor_client.h',
+        'widget/desktop_aura/desktop_capture_client.cc',
+        'widget/desktop_aura/desktop_capture_client.h',
         'widget/desktop_aura/desktop_dispatcher_client.cc',
         'widget/desktop_aura/desktop_dispatcher_client.h',
         'widget/desktop_aura/desktop_drag_drop_client_win.cc',
@@ -349,6 +358,8 @@
         'widget/desktop_aura/desktop_focus_rules.h',
         'widget/desktop_aura/desktop_layout_manager.cc',
         'widget/desktop_aura/desktop_layout_manager.h',
+        'widget/desktop_aura/desktop_native_cursor_manager.cc',
+        'widget/desktop_aura/desktop_native_cursor_manager.h',
         'widget/desktop_aura/desktop_native_widget_aura.cc',
         'widget/desktop_aura/desktop_native_widget_aura.h',
         'widget/desktop_aura/desktop_root_window_host.h',
@@ -407,6 +418,9 @@
         'win/hwnd_message_handler.cc',
         'win/hwnd_message_handler.h',
         'win/hwnd_message_handler_delegate.h',
+        'win/hwnd_util.h',
+        'win/hwnd_util_aurawin.cc',
+        'win/hwnd_util_win.cc',
         'win/scoped_fullscreen_visibility.cc',
         'win/scoped_fullscreen_visibility.h',
         'window/client_view.cc',
@@ -442,6 +456,8 @@
             'widget/aero_tooltip_manager.h',
             'widget/child_window_message_processor.cc',
             'widget/child_window_message_processor.h',
+            'widget/tooltip_manager_win.cc',
+            'widget/tooltip_manager_win.h',
           ],
           'conditions': [
             ['OS=="mac"', {
@@ -492,6 +508,13 @@
             ['include', 'controls/menu/menu_config_win.cc'],
             ['include', 'controls/menu/menu_item_view_win.cc'],
             ['include', 'controls/menu/menu_separator_win.cc'],
+            ['include', 'accessibility/native_view_accessibility_win.cc'],
+            ['include', 'accessibility/native_view_accessibility_win.h'],
+          ],
+        }],
+        ['use_aura==1 and OS=="linux" and chromeos==0', {
+          'dependencies': [
+            '../linux_ui/linux_ui.gyp:linux_ui',
           ],
         }],
         ['OS=="win"', {
@@ -553,6 +576,8 @@
         '..',
       ],
       'sources': [
+        'corewm/tooltip_controller_test_helper.cc',
+        'corewm/tooltip_controller_test_helper.h',
         'test/capture_tracking_view.cc',
         'test/capture_tracking_view.h',
         'test/child_modal_window.cc',
@@ -574,6 +599,8 @@
           ],
         }, {  # use_aura==0
           'sources!': [
+            'corewm/tooltip_controller_test_helper.cc',
+            'corewm/tooltip_controller_test_helper.h',
             'test/child_modal_window.cc',
             'test/child_modal_window.h',
           ],
@@ -638,17 +665,20 @@
         'bubble/bubble_border_unittest.cc',
         'bubble/bubble_delegate_unittest.cc',
         'bubble/bubble_frame_view_unittest.cc',
+        'controls/button/custom_button_unittest.cc',
         'controls/button/image_button_unittest.cc',
         'controls/button/label_button_unittest.cc',
         'controls/combobox/native_combobox_views_unittest.cc',
         'controls/label_unittest.cc',
         'controls/menu/menu_model_adapter_unittest.cc',
+        'controls/native/native_view_host_aura_unittest.cc',
         'controls/native/native_view_host_unittest.cc',
         'controls/progress_bar_unittest.cc',
         'controls/scrollbar/scrollbar_unittest.cc',
         'controls/scroll_view_unittest.cc',
         'controls/single_split_view_unittest.cc',
         'controls/slider_unittest.cc',
+        'controls/styled_label_unittest.cc',
         'controls/tabbed_pane/tabbed_pane_unittest.cc',
         'controls/table/table_utils_unittest.cc',
         'controls/table/table_view_unittest.cc',
@@ -658,11 +688,14 @@
         'controls/textfield/textfield_views_model_unittest.cc',
         'controls/tree/tree_view_unittest.cc',
         'corewm/compound_event_filter_unittest.cc',
+        'corewm/cursor_manager_unittest.cc',
         'corewm/focus_controller_unittest.cc',
         'corewm/image_grid_unittest.cc',
         'corewm/input_method_event_filter_unittest.cc',
         'corewm/shadow_controller_unittest.cc',
+        'corewm/tooltip_controller_unittest.cc',
         'corewm/visibility_controller_unittest.cc',
+        'corewm/window_animations_unittest.cc',
         'focus/focus_manager_test.h',
         'focus/focus_manager_test.cc',
         'focus/focus_manager_unittest.cc',
@@ -670,9 +703,11 @@
         'focus/focus_traversal_unittest.cc',
         'layout/box_layout_unittest.cc',
         'layout/grid_layout_unittest.cc',
+        'touchui/touch_selection_controller_impl_unittest.cc',
         'view_model_unittest.cc',
         'view_model_utils_unittest.cc',
         'view_unittest.cc',
+        'widget/desktop_aura/desktop_capture_client_unittest.cc',
         'widget/native_widget_aura_unittest.cc',
         'widget/native_widget_unittest.cc',
         'widget/native_widget_win_unittest.cc',
@@ -680,6 +715,15 @@
         'run_all_unittests.cc',
       ],
       'conditions': [
+        ['chromeos==0', {
+          'sources!': [
+            'touchui/touch_selection_controller_impl_unittest.cc',
+          ],
+        }, { # use_aura==0
+          'sources/': [
+            ['exclude', 'widget/desktop_aura'],
+          ],
+        }],
         ['OS=="win"', {
           'link_settings': {
             'libraries': [
@@ -696,24 +740,21 @@
             '../../base/allocator/allocator.gyp:allocator',
           ],
         }],
-        ['use_aura==0 and OS=="win"', {
-          'sources/': [
-            ['exclude', 'controls/combobox/native_combobox_views_unittest.cc'],
-          ],
-        }],
         [ 'use_aura==1', {
           'dependencies': [
             '../aura/aura.gyp:aura_test_support',
           ],
-          'sources/': [
-            ['exclude', 'widget/native_widget_win_unittest.cc'],
+          'sources!': [
+            'widget/native_widget_win_unittest.cc',
           ],
-        }, {
+        }, {  # use_aura==0
+          'sources!': [
+            'controls/native/native_view_host_aura_unittest.cc',
+            'widget/native_widget_aura_unittest.cc',
+          ],
           'sources/': [
-            ['exclude', '../aura/test/test_desktop_delegate.cc'],
-            ['exclude', '../aura/test/test_desktop_delegate.h'],
             ['exclude', 'corewm'],
-            ['exclude', 'widget/native_widget_aura_unittest.cc'],
+            ['exclude', 'widget/desktop_aura'],
           ],
         }],
       ],
@@ -795,6 +836,8 @@
           'include_dirs': [
             '../third_party/wtl/include',
           ],
+          # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+          'msvs_disabled_warnings': [ 4267, ],
         }],
       ],
     },  # target_name: views_examples_lib
@@ -888,6 +931,8 @@
           'include_dirs': [
             '../third_party/wtl/include',
           ],
+          # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+          'msvs_disabled_warnings': [ 4267, ],
         }],
       ],
     },  # target_name: views_examples_with_content_lib

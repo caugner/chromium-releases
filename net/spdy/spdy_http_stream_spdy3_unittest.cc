@@ -11,7 +11,6 @@
 #include "crypto/signature_creator.h"
 #include "net/base/asn1_util.h"
 #include "net/base/capturing_net_log.h"
-#include "net/base/default_server_bound_cert_store.h"
 #include "net/base/load_timing_info.h"
 #include "net/base/load_timing_info_test_util.h"
 #include "net/base/upload_data_stream.h"
@@ -23,6 +22,7 @@
 #include "net/spdy/spdy_http_utils.h"
 #include "net/spdy/spdy_session.h"
 #include "net/spdy/spdy_test_util_spdy3.h"
+#include "net/ssl/default_server_bound_cert_store.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using namespace net::test_spdy3;
@@ -73,13 +73,8 @@ class SpdyHttpStreamSpdy3Test : public testing::Test {
   OrderedSocketData* data() { return data_.get(); }
 
  protected:
-  virtual void TearDown() {
-    UploadDataStream::ResetMergeChunks();
+  virtual void TearDown() OVERRIDE {
     MessageLoop::current()->RunUntilIdle();
-  }
-
-  void set_merge_chunks(bool merge) {
-    UploadDataStream::set_merge_chunks(merge);
   }
 
   // Initializes the session using DeterministicSocketData.  It's advisable
@@ -188,7 +183,8 @@ TEST_F(SpdyHttpStreamSpdy3Test, SendRequest) {
 
   ASSERT_EQ(
       OK,
-      http_stream->InitializeStream(&request, net_log, CompletionCallback()));
+      http_stream->InitializeStream(&request, DEFAULT_PRIORITY,
+                                    net_log, CompletionCallback()));
   EXPECT_FALSE(http_stream->GetLoadTimingInfo(&load_timing_info));
 
   EXPECT_EQ(ERR_IO_PENDING, http_stream->SendRequest(headers, &response,
@@ -253,7 +249,8 @@ TEST_F(SpdyHttpStreamSpdy3Test, LoadTimingTwoRequests) {
       new SpdyHttpStream(session_.get(), true));
 
   ASSERT_EQ(OK,
-            http_stream1->InitializeStream(&request1, BoundNetLog(),
+            http_stream1->InitializeStream(&request1, DEFAULT_PRIORITY,
+                                           BoundNetLog(),
                                            CompletionCallback()));
   EXPECT_EQ(ERR_IO_PENDING, http_stream1->SendRequest(headers1, &response1,
                                                       callback1.callback()));
@@ -269,7 +266,8 @@ TEST_F(SpdyHttpStreamSpdy3Test, LoadTimingTwoRequests) {
       new SpdyHttpStream(session_.get(), true));
 
   ASSERT_EQ(OK,
-            http_stream2->InitializeStream(&request2, BoundNetLog(),
+            http_stream2->InitializeStream(&request2, DEFAULT_PRIORITY,
+                                           BoundNetLog(),
                                            CompletionCallback()));
   EXPECT_EQ(ERR_IO_PENDING, http_stream2->SendRequest(headers2, &response2,
                                                       callback2.callback()));
@@ -307,22 +305,17 @@ TEST_F(SpdyHttpStreamSpdy3Test, LoadTimingTwoRequests) {
 }
 
 TEST_F(SpdyHttpStreamSpdy3Test, SendChunkedPost) {
-  set_merge_chunks(false);
-
   scoped_ptr<SpdyFrame> req(ConstructChunkedSpdyPost(NULL, 0));
-  scoped_ptr<SpdyFrame> chunk1(ConstructSpdyBodyFrame(1, false));
-  scoped_ptr<SpdyFrame> chunk2(ConstructSpdyBodyFrame(1, true));
+  scoped_ptr<SpdyFrame> body(ConstructSpdyBodyFrame(1, true));
   MockWrite writes[] = {
     CreateMockWrite(*req.get(), 0),
-    CreateMockWrite(*chunk1, 1),  // POST upload frames
-    CreateMockWrite(*chunk2, 2),
+    CreateMockWrite(*body, 1),  // POST upload frame
   };
   scoped_ptr<SpdyFrame> resp(ConstructSpdyPostSynReply(NULL, 0));
   MockRead reads[] = {
-    CreateMockRead(*resp, 3),
-    CreateMockRead(*chunk1, 4),
-    CreateMockRead(*chunk2, 5),
-    MockRead(SYNCHRONOUS, 0, 6)  // EOF
+    CreateMockRead(*resp, 2),
+    CreateMockRead(*body, 3),
+    MockRead(SYNCHRONOUS, 0, 4)  // EOF
   };
 
   HostPortPair host_port_pair("www.google.com", 80);
@@ -331,8 +324,10 @@ TEST_F(SpdyHttpStreamSpdy3Test, SendChunkedPost) {
                             host_port_pair));
 
   UploadDataStream upload_stream(UploadDataStream::CHUNKED, 0);
-  upload_stream.AppendChunk(kUploadData, kUploadDataSize, false);
-  upload_stream.AppendChunk(kUploadData, kUploadDataSize, true);
+  const int kFirstChunkSize = kUploadDataSize/2;
+  upload_stream.AppendChunk(kUploadData, kFirstChunkSize, false);
+  upload_stream.AppendChunk(kUploadData + kFirstChunkSize,
+                            kUploadDataSize - kFirstChunkSize, true);
 
   HttpRequestInfo request;
   request.method = "POST";
@@ -348,16 +343,18 @@ TEST_F(SpdyHttpStreamSpdy3Test, SendChunkedPost) {
   SpdyHttpStream http_stream(session_.get(), true);
   ASSERT_EQ(
       OK,
-      http_stream.InitializeStream(&request, net_log, CompletionCallback()));
+      http_stream.InitializeStream(&request, DEFAULT_PRIORITY,
+                                   net_log, CompletionCallback()));
 
   EXPECT_EQ(ERR_IO_PENDING, http_stream.SendRequest(
       headers, &response, callback.callback()));
   EXPECT_TRUE(http_session_->spdy_session_pool()->HasSession(pair));
 
-  // This triggers the MockWrite and read 2
+  // This results in writing the post body and reading the response headers.
   callback.WaitForResult();
 
-  // This triggers read 3. The empty read causes the session to shut down.
+  // This triggers reading the body and the EOF, causing the session to shut
+  // down.
   data()->CompleteRead();
   MessageLoop::current()->RunUntilIdle();
 
@@ -371,8 +368,6 @@ TEST_F(SpdyHttpStreamSpdy3Test, SendChunkedPost) {
 // Test to ensure the SpdyStream state machine does not get confused when a
 // chunk becomes available while a write is pending.
 TEST_F(SpdyHttpStreamSpdy3Test, DelayedSendChunkedPost) {
-  set_merge_chunks(false);
-
   const char kUploadData1[] = "12345678";
   const int kUploadData1Size = arraysize(kUploadData1)-1;
   scoped_ptr<SpdyFrame> req(ConstructChunkedSpdyPost(NULL, 0));
@@ -415,9 +410,8 @@ TEST_F(SpdyHttpStreamSpdy3Test, DelayedSendChunkedPost) {
   BoundNetLog net_log;
   scoped_ptr<SpdyHttpStream> http_stream(
       new SpdyHttpStream(session_.get(), true));
-  ASSERT_EQ(OK, http_stream->InitializeStream(&request,
-                                              net_log,
-                                              CompletionCallback()));
+  ASSERT_EQ(OK, http_stream->InitializeStream(&request, DEFAULT_PRIORITY,
+                                              net_log, CompletionCallback()));
 
   TestCompletionCallback callback;
   HttpRequestHeaders headers;
@@ -482,8 +476,6 @@ TEST_F(SpdyHttpStreamSpdy3Test, DelayedSendChunkedPost) {
 // Test the receipt of a WINDOW_UPDATE frame while waiting for a chunk to be
 // made available is handled correctly.
 TEST_F(SpdyHttpStreamSpdy3Test, DelayedSendChunkedPostWithWindowUpdate) {
-  set_merge_chunks(false);
-
   scoped_ptr<SpdyFrame> req(ConstructChunkedSpdyPost(NULL, 0));
   scoped_ptr<SpdyFrame> chunk1(ConstructSpdyBodyFrame(1, true));
   MockWrite writes[] = {
@@ -546,8 +538,8 @@ TEST_F(SpdyHttpStreamSpdy3Test, DelayedSendChunkedPostWithWindowUpdate) {
   BoundNetLog net_log;
   scoped_ptr<SpdyHttpStream> http_stream(
       new SpdyHttpStream(session_.get(), true));
-  ASSERT_EQ(OK, http_stream->InitializeStream(&request, net_log,
-                                              CompletionCallback()));
+  ASSERT_EQ(OK, http_stream->InitializeStream(&request, DEFAULT_PRIORITY,
+                                              net_log, CompletionCallback()));
 
   HttpRequestHeaders headers;
   HttpResponseInfo response;
@@ -625,7 +617,8 @@ TEST_F(SpdyHttpStreamSpdy3Test, SpdyURLTest) {
   scoped_ptr<SpdyHttpStream> http_stream(new SpdyHttpStream(session_, true));
   ASSERT_EQ(
       OK,
-      http_stream->InitializeStream(&request, net_log, CompletionCallback()));
+      http_stream->InitializeStream(&request, DEFAULT_PRIORITY,
+                                    net_log, CompletionCallback()));
 
   EXPECT_EQ(ERR_IO_PENDING, http_stream->SendRequest(headers, &response,
                                                      callback.callback()));
@@ -728,7 +721,7 @@ SpdyFrame* ConstructCredentialRequestFrame(size_t slot, const GURL& url,
     ":version",
     "HTTP/1.1"
   };
-  return ConstructSpdyPacket(
+  return ConstructSpdyFrame(
       syn_headers, NULL, 0, headers, arraysize(headers)/2);
 }
 
@@ -825,7 +818,8 @@ void SpdyHttpStreamSpdy3Test::TestSendCredentials(
       new SpdyHttpStream(session_.get(), true));
   ASSERT_EQ(
       OK,
-      http_stream->InitializeStream(&request, net_log, CompletionCallback()));
+      http_stream->InitializeStream(&request, DEFAULT_PRIORITY,
+                                    net_log, CompletionCallback()));
 
   //  EXPECT_FALSE(session_->NeedsCredentials(request.url));
   //  GURL new_origin(kUrl2);
@@ -844,7 +838,8 @@ void SpdyHttpStreamSpdy3Test::TestSendCredentials(
   request.url = GURL(kUrl2);
   ASSERT_EQ(
       OK,
-      http_stream2->InitializeStream(&request, net_log, CompletionCallback()));
+      http_stream2->InitializeStream(&request, DEFAULT_PRIORITY,
+                                     net_log, CompletionCallback()));
   EXPECT_EQ(ERR_IO_PENDING, http_stream2->SendRequest(headers, &response,
                                                       callback.callback()));
   data.RunFor(2);

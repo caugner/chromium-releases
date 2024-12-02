@@ -15,9 +15,12 @@
 #include "build/build_config.h"
 #include "ipc/ipc_channel.h"
 #include "ipc/ipc_platform_file.h"
+#include "native_client/src/trusted/desc/nacl_desc_base.h"
 #include "native_client/src/trusted/desc/nacl_desc_custom.h"
 #include "native_client/src/trusted/desc/nacl_desc_imc_shm.h"
+#include "native_client/src/trusted/desc/nacl_desc_io.h"
 #include "native_client/src/trusted/desc/nacl_desc_sync_socket.h"
+#include "native_client/src/trusted/desc/nacl_desc_wrapper.h"
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ppapi/proxy/serialized_handle.h"
 
@@ -366,7 +369,7 @@ bool NaClIPCAdapter::OnMessageReceived(const IPC::Message& msg) {
           uint32_t size = iter->size();
           nacl_desc.reset(new NaClDescWrapper(NaClDescImcShmMake(
 #if defined(OS_WIN)
-              reinterpret_cast<const NaClHandle>(shm_handle),
+              shm_handle,
 #else
               shm_handle.fd,
 #endif
@@ -376,7 +379,7 @@ bool NaClIPCAdapter::OnMessageReceived(const IPC::Message& msg) {
         case ppapi::proxy::SerializedHandle::SOCKET: {
           nacl_desc.reset(new NaClDescWrapper(NaClDescSyncSocketMake(
 #if defined(OS_WIN)
-              reinterpret_cast<const NaClHandle>(iter->descriptor())
+              iter->descriptor()
 #else
               iter->descriptor().fd
 #endif
@@ -406,8 +409,13 @@ bool NaClIPCAdapter::OnMessageReceived(const IPC::Message& msg) {
           break;
         }
         case ppapi::proxy::SerializedHandle::FILE:
-          // TODO(raymes): Handle file handles for NaCl.
-          NOTIMPLEMENTED();
+          nacl_desc.reset(new NaClDescWrapper(NaClDescIoDescMakeFromHandle(
+#if defined(OS_WIN)
+              iter->descriptor()
+#else
+              iter->descriptor().fd
+#endif
+          )));
           break;
         case ppapi::proxy::SerializedHandle::INVALID: {
           // Nothing to do. TODO(dmichael): Should we log this? Or is it
@@ -460,6 +468,7 @@ int NaClIPCAdapter::LockedReceive(NaClImcTypedMsgHdr* msg) {
 
 bool NaClIPCAdapter::SendCompleteMessage(const char* buffer,
                                          size_t buffer_len) {
+  lock_.AssertAcquired();
   // The message will have already been validated, so we know it's large enough
   // for our header.
   const NaClMessageHeader* header =
@@ -545,4 +554,3 @@ void NaClIPCAdapter::SaveMessage(const IPC::Message& msg,
   rewritten_msg->SetData(header, msg.payload(), msg.payload_size());
   locked_data_.to_be_received_.push(rewritten_msg);
 }
-

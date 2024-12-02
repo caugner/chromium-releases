@@ -10,9 +10,9 @@
 #include "base/json/json_writer.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/history/history_database.h"
@@ -116,15 +116,29 @@ void BindURLToStatement(const TemplateURLData& data,
   s->BindString(starting_column + 17, data.search_terms_replacement_key);
 }
 
-}  // anonymous namespace
+int table_key = 0;
 
-KeywordTable::KeywordTable(sql::Connection* db, sql::MetaTable* meta_table)
-    : WebDatabaseTable(db, meta_table) {
+WebDatabaseTable::TypeKey GetKey() {
+  return reinterpret_cast<void*>(&table_key);
+}
+
+}  // namespace
+
+KeywordTable::KeywordTable() {
 }
 
 KeywordTable::~KeywordTable() {}
 
-bool KeywordTable::Init() {
+KeywordTable* KeywordTable::FromWebDatabase(WebDatabase* db) {
+  return static_cast<KeywordTable*>(db->GetTable(GetKey()));
+}
+
+WebDatabaseTable::TypeKey KeywordTable::GetTypeKey() const {
+  return GetKey();
+}
+
+bool KeywordTable::Init(sql::Connection* db, sql::MetaTable* meta_table) {
+  WebDatabaseTable::Init(db, meta_table);
   return db_->DoesTableExist("keywords") ||
       db_->Execute("CREATE TABLE keywords ("
                    "id INTEGER PRIMARY KEY,"
@@ -149,6 +163,52 @@ bool KeywordTable::Init() {
 }
 
 bool KeywordTable::IsSyncable() {
+  return true;
+}
+
+bool KeywordTable::MigrateToVersion(int version,
+                                    const std::string& app_locale,
+                                    bool* update_compatible_version) {
+  // Migrate if necessary.
+  switch (version) {
+    case 21:
+      *update_compatible_version = true;
+      return MigrateToVersion21AutoGenerateKeywordColumn();
+    case 25:
+      *update_compatible_version = true;
+      return MigrateToVersion25AddLogoIDColumn();
+    case 26:
+      *update_compatible_version = true;
+      return MigrateToVersion26AddCreatedByPolicyColumn();
+    case 28:
+      *update_compatible_version = true;
+      return MigrateToVersion28SupportsInstantColumn();
+    case 29:
+      *update_compatible_version = true;
+      return MigrateToVersion29InstantURLToSupportsInstant();
+    case 38:
+      *update_compatible_version = true;
+      return MigrateToVersion38AddLastModifiedColumn();
+    case 39:
+      *update_compatible_version = true;
+      return MigrateToVersion39AddSyncGUIDColumn();
+    case 44:
+      *update_compatible_version = true;
+      return MigrateToVersion44AddDefaultSearchProviderBackup();
+    case 45:
+      *update_compatible_version = true;
+      return MigrateToVersion45RemoveLogoIDAndAutogenerateColumns();
+    case 47:
+      *update_compatible_version = true;
+      return MigrateToVersion47AddAlternateURLsColumn();
+    case 48:
+      *update_compatible_version = true;
+      return MigrateToVersion48RemoveKeywordsBackup();
+    case 49:
+      *update_compatible_version = true;
+      return MigrateToVersion49AddSearchTermsReplacementKeyColumn();
+  }
+
   return true;
 }
 

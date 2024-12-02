@@ -5,10 +5,12 @@
 #include "apps/app_restore_service.h"
 
 #include "chrome/browser/extensions/api/app_runtime/app_runtime_api.h"
+#include "chrome/browser/extensions/api/file_handlers/app_file_handler_util.h"
 #include "chrome/browser/extensions/event_router.h"
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
+#include "chrome/browser/extensions/platform_app_launcher.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_set.h"
@@ -47,9 +49,11 @@ void AppRestoreService::HandleStartup(bool should_restore_apps) {
       it != extensions->end(); ++it) {
     const Extension* extension = *it;
     if (extension_prefs->IsExtensionRunning(extension->id())) {
+      std::vector<SavedFileEntry> file_entries;
+      extension_prefs->GetSavedFileEntries(extension->id(), &file_entries);
       RecordAppStop(extension->id());
       if (should_restore_apps)
-        RestoreApp(*it);
+        RestoreApp(*it, file_entries);
     }
   }
 }
@@ -94,10 +98,15 @@ void AppRestoreService::RecordAppStop(const std::string& extension_id) {
   ExtensionPrefs* extension_prefs =
       ExtensionSystem::Get(profile_)->extension_service()->extension_prefs();
   extension_prefs->SetExtensionRunning(extension_id, false);
+  extension_prefs->ClearSavedFileEntries(extension_id);
 }
 
-void AppRestoreService::RestoreApp(const Extension* extension) {
-  AppEventRouter::DispatchOnRestartedEvent(profile_, extension);
+void AppRestoreService::RestoreApp(
+    const Extension* extension,
+    const std::vector<SavedFileEntry>& file_entries) {
+  extensions::RestartPlatformAppWithFileEntries(profile_,
+                                                extension,
+                                                file_entries);
 }
 
 }  // namespace apps

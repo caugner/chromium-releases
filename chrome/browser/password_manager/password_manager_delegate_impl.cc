@@ -7,14 +7,14 @@
 #include "base/memory/singleton.h"
 #include "base/metrics/histogram.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/api/infobars/confirm_infobar_delegate.h"
-#include "chrome/browser/api/infobars/infobar_service.h"
-#include "chrome/browser/autofill/autofill_manager.h"
+#include "chrome/browser/infobars/confirm_infobar_delegate.h"
+#include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/password_manager/password_form_manager.h"
 #include "chrome/browser/password_manager/password_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/sync/one_click_signin_helper.h"
-#include "chrome/common/autofill_messages.h"
+#include "components/autofill/browser/autofill_manager.h"
+#include "components/autofill/common/autofill_messages.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
@@ -166,7 +166,8 @@ void PasswordManagerDelegateImpl::FillPasswordForm(
     const PasswordFormFillData& form_data) {
   AutofillManager* autofill_manager =
       AutofillManager::FromWebContents(web_contents_);
-  bool disable_popup = autofill_manager->HasExternalDelegate();
+  // Browser process will own popup UI, so renderer should not show the popup.
+  bool disable_popup = autofill_manager->IsNativeUiEnabled();
 
   web_contents_->GetRenderViewHost()->Send(
       new AutofillMsg_FillPasswordForm(

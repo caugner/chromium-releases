@@ -21,22 +21,28 @@ cr.define('options', function() {
   BrowserOptions.prototype = {
     __proto__: options.OptionsPage.prototype,
 
-    // State variables.
-    signedIn: false,
+    /**
+     * Keeps track of the state of |start-stop-button|. On chrome, the value is
+     * true when the user is signed in, and on chromeos, when sync setup has
+     * been completed.
+     * @type {boolean}
+     * @private
+     */
+    signedIn_: false,
 
     /**
      * Keeps track of whether |onShowHomeButtonChanged_| has been called. See
      * |onShowHomeButtonChanged_|.
-     * @type {bool}
+     * @type {boolean}
      * @private
      */
     onShowHomeButtonChangedCalled_: false,
 
     /**
      * Track if page initialization is complete.  All C++ UI handlers have the
-     * chance to manipulate page content within their InitializePage mathods.
+     * chance to manipulate page content within their InitializePage methods.
      * This flag is set to true after all initializers have been called.
-     * @type (boolean}
+     * @type {boolean}
      * @private
      */
     initializationComplete_: false,
@@ -80,7 +86,7 @@ cr.define('options', function() {
       this.updateSyncState_(loadTimeData.getValue('syncData'));
 
       $('start-stop-sync').onclick = function(event) {
-        if (self.signedIn)
+        if (self.signedIn_)
           SyncSetupOverlay.showStopSyncingUI();
         else if (cr.isChromeOS)
           SyncSetupOverlay.showSetupUIWithoutLogin();
@@ -163,6 +169,9 @@ cr.define('options', function() {
         // We don't want to see the confirm dialog for instant extended.
         $('instant-enabled-control').removeAttribute('dialog-pref');
         $('instant-enabled-indicator').removeAttribute('dialog-pref');
+        // And we want to upload a different metric name.
+        $('instant-enabled-control').setAttribute(
+            'metric', 'Options_InstantExtendedEnabled');
       }
 
       // Users section.
@@ -194,6 +203,11 @@ cr.define('options', function() {
           if (selectedProfile)
             ManageProfileOverlay.showDeleteDialog(selectedProfile);
         };
+        if (loadTimeData.getBoolean('profileIsManaged')) {
+          $('profiles-create').disabled = true;
+          $('profiles-delete').disabled = true;
+          $('profiles-list').canDeleteItems = false;
+        }
       }
 
       if (cr.isChromeOS) {
@@ -208,6 +222,10 @@ cr.define('options', function() {
         this.username_ = loadTimeData.getString('username');
 
         this.updateAccountPicture_();
+
+        $('account-picture-wrapper').oncontextmenu = function(e) {
+          e.preventDefault();
+        };
 
         $('manage-accounts-button').onclick = function(event) {
           OptionsPage.navigateToPage('accounts');
@@ -286,7 +304,7 @@ cr.define('options', function() {
         $('bluetooth-paired-devices-list').addEventListener('change',
             function() {
           var item = $('bluetooth-paired-devices-list').selectedItem;
-          var disabled = !item || item.connected;
+          var disabled = !item || item.connected || !item.connectable;
           $('bluetooth-reconnect-device').disabled = disabled;
         });
       }
@@ -411,16 +429,6 @@ cr.define('options', function() {
           chrome.send('highContrastChange',
                       [$('accessibility-high-contrast-check').checked]);
         };
-
-        // Disable the magnifier-type dropdown list when the magnifier is
-        // disabled.
-        Preferences.getInstance().addEventListener(
-            'settings.a11y.screen_magnifier',
-            function(event) {
-              $('accessibility-screen-magnifier-type-select').setDisabled(
-                  'magnifier-is-disabled', !event.value.value);
-            });
-
       }
 
       // Display management section (CrOS only).
@@ -436,6 +444,42 @@ cr.define('options', function() {
       if (cr.isChromeOS) {
         $('factory-reset-restart').onclick = function(event) {
           OptionsPage.navigateToPage('factoryResetData');
+        };
+      }
+
+      // Kiosk section (CrOS only).
+      if (cr.isChromeOS) {
+        if (loadTimeData.getBoolean('enableKioskSection')) {
+          $('kiosk-section').hidden = false;
+
+          $('manage-kiosk-apps-button').onclick = function(event) {
+            OptionsPage.navigateToPage('kioskAppsOverlay');
+          };
+        }
+      }
+
+      // System section.
+      if (!cr.isChromeOS) {
+        var updateGpuRestartButton = function() {
+          $('gpu-mode-reset-restart').hidden =
+              loadTimeData.getBoolean('gpuEnabledAtStart') ==
+              $('gpu-mode-checkbox').checked;
+        };
+        Preferences.getInstance().addEventListener(
+            $('gpu-mode-checkbox').getAttribute('pref'),
+            updateGpuRestartButton);
+        $('gpu-mode-reset-restart-button').onclick = function(event) {
+          chrome.send('restartBrowser');
+        };
+        updateGpuRestartButton();
+      }
+
+      if (loadTimeData.getBoolean('managedUsersEnabled') &&
+          loadTimeData.getBoolean('profileIsManaged')) {
+        $('managed-user-settings-section').hidden = false;
+
+        $('open-managed-user-settings-button').onclick = function(event) {
+          OptionsPage.navigateToPage('managedUser');
         };
       }
     },
@@ -671,27 +715,39 @@ cr.define('options', function() {
       }
 
       $('sync-section').hidden = false;
-      this.signedIn = syncData.signedIn;
+
+      if (cr.isChromeOS)
+        this.signedIn_ = syncData.setupCompleted;
+      else
+        this.signedIn_ = syncData.signedIn;
+
       // Display the "setup sync" button if we're signed in and sync is not
       // managed/disabled.
-      $('customize-sync').hidden = !syncData.signedIn ||
-          syncData.managed || !syncData.syncSystemEnabled;
+      $('customize-sync').hidden = !this.signedIn_ ||
+                                   syncData.managed ||
+                                   !syncData.syncSystemEnabled;
 
       var startStopButton = $('start-stop-sync');
-      // Disable the "start/stop syncing" if we're currently signing in, or
-      // if we're already signed in and signout is not allowed.
+      // Disable the "start/stop syncing" button if we're currently signing in,
+      // or if we're already signed in and signout is not allowed.
       startStopButton.disabled = syncData.setupInProgress ||
-          !syncData.signoutAllowed;
+                                 !syncData.signoutAllowed;
       if (!syncData.signoutAllowed)
         $('start-stop-sync-indicator').setAttribute('controlled-by', 'policy');
-      startStopButton.hidden =
-          syncData.setupCompleted && cr.isChromeOS;
+      else
+        $('start-stop-sync-indicator').removeAttribute('controlled-by');
+
+      // Hide the "start/stop syncing" button on Chrome OS if sync has already
+      // been set up, or if it is managed or disabled.
+      startStopButton.hidden = cr.isChromeOS && (syncData.setupCompleted ||
+                                                 syncData.isManaged ||
+                                                 !syncData.syncSystemEnabled);
       startStopButton.textContent =
-          syncData.signedIn ?
+          this.signedIn_ ?
               loadTimeData.getString('syncButtonTextStop') :
-          syncData.setupInProgress ?
-              loadTimeData.getString('syncButtonTextInProgress') :
-              loadTimeData.getString('syncButtonTextStart');
+              syncData.setupInProgress ?
+                  loadTimeData.getString('syncButtonTextInProgress') :
+                  loadTimeData.getString('syncButtonTextStart');
       $('start-stop-sync-indicator').hidden = startStopButton.hidden;
 
       // TODO(estade): can this just be textContent?
@@ -927,13 +983,15 @@ cr.define('options', function() {
       var selectedProfile = profilesList.selectedItem;
       var hasSelection = selectedProfile != null;
       var hasSingleProfile = profilesList.dataModel.length == 1;
+      var isManaged = loadTimeData.getBoolean('profileIsManaged');
       $('profiles-manage').disabled = !hasSelection ||
           !selectedProfile.isCurrentProfile;
       if (hasSelection && !selectedProfile.isCurrentProfile)
         $('profiles-manage').title = loadTimeData.getString('currentUserOnly');
       else
         $('profiles-manage').title = '';
-      $('profiles-delete').disabled = !hasSelection && !hasSingleProfile;
+      $('profiles-delete').disabled = isManaged ||
+                                      (!hasSelection && !hasSingleProfile);
       if (OptionsPage.isSettingsApp()) {
         $('profiles-app-list-switch').disabled = !hasSelection ||
             selectedProfile.isCurrentProfile;
@@ -1335,7 +1393,6 @@ cr.define('options', function() {
           $('bluetooth-paired-devices-list').deleteItemAtIndex(index);
       }
     }
-
   };
 
   //Forward public APIs to private implementations.

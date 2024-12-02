@@ -12,8 +12,8 @@
 #include "base/base_paths.h"
 #include "base/basictypes.h"
 #include "base/debug/debugger.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/mac/bundle_locations.h"
 #include "base/mac/mac_util.h"
@@ -658,14 +658,6 @@ base::StringPiece TestShellWebKitInit::GetDataResource(
   case IDR_SEARCH_CANCEL_PRESSED:
   case IDR_SEARCH_MAGNIFIER:
   case IDR_SEARCH_MAGNIFIER_RESULTS:
-  case IDR_MEDIA_PAUSE_BUTTON:
-  case IDR_MEDIA_PLAY_BUTTON:
-  case IDR_MEDIA_PLAY_BUTTON_DISABLED:
-  case IDR_MEDIA_SOUND_FULL_BUTTON:
-  case IDR_MEDIA_SOUND_NONE_BUTTON:
-  case IDR_MEDIA_SOUND_DISABLED:
-  case IDR_MEDIA_SLIDER_THUMB:
-  case IDR_MEDIA_VOLUME_SLIDER_THUMB:
   case IDR_INPUT_SPEECH:
   case IDR_INPUT_SPEECH_RECORDING:
   case IDR_INPUT_SPEECH_WAITING:

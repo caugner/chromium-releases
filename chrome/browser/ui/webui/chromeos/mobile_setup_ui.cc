@@ -47,6 +47,7 @@
 using chromeos::CellularNetwork;
 using chromeos::CrosLibrary;
 using chromeos::MobileActivator;
+using chromeos::NetworkLibrary;
 using content::BrowserThread;
 using content::RenderViewHost;
 using content::WebContents;
@@ -58,6 +59,7 @@ namespace {
 const char kJsApiStartActivation[] = "startActivation";
 const char kJsApiSetTransactionStatus[] = "setTransactionStatus";
 const char kJsApiPaymentPortalLoad[] = "paymentPortalLoad";
+const char kJsGetDeviceInfo[] = "getDeviceInfo";
 const char kJsApiResultOK[] = "ok";
 
 const char kJsDeviceStatusChangedCallback[] =
@@ -66,6 +68,10 @@ const char kJsPortalFrameLoadFailedCallback[] =
     "mobile.MobileSetup.portalFrameLoadError";
 const char kJsPortalFrameLoadCompletedCallback[] =
     "mobile.MobileSetup.portalFrameLoadCompleted";
+const char kJsGetDeviceInfoCallback[] =
+    "mobile.MobileSetupPortal.onGotDeviceInfo";
+const char kJsConnectivityChangedCallback[] =
+    "mobile.MobileSetupPortal.onConnectivityChanged";
 
 }  // namespace
 
@@ -141,6 +147,7 @@ class MobileSetupUIHTMLSource : public content::URLDataSource {
 class MobileSetupHandler
   : public WebUIMessageHandler,
     public MobileActivator::Observer,
+    public NetworkLibrary::NetworkManagerObserver,
     public base::SupportsWeakPtr<MobileSetupHandler> {
  public:
   MobileSetupHandler();
@@ -150,6 +157,18 @@ class MobileSetupHandler
   virtual void RegisterMessages() OVERRIDE;
 
  private:
+  enum Type {
+    TYPE_UNDETERMINED,
+    // The network is not yet activated, and the webui is in activation flow.
+    TYPE_ACTIVATION,
+    // The network is activated, the webui displays network portal.
+    TYPE_PORTAL,
+    // Same as TYPE_PORTAL, but the network technology is LTE. The webui is
+    // additionally aware of network manager state and whether the portal can be
+    // reached.
+    TYPE_PORTAL_LTE
+  };
+
   // Changes internal state.
   virtual void OnActivationStateChanged(
       CellularNetwork* network,
@@ -160,6 +179,17 @@ class MobileSetupHandler
   void HandleSetTransactionStatus(const ListValue* args);
   void HandleStartActivation(const ListValue* args);
   void HandlePaymentPortalLoad(const ListValue* args);
+  void HandleGetDeviceInfo(const ListValue* args);
+
+  // NetworkLibrary::NetworkManagerObserver implementation.
+  virtual void OnNetworkManagerChanged(NetworkLibrary* network_lib) OVERRIDE;
+
+  // Updates |lte_portal_reachable_| for lte network |network| and notifies
+  // webui of the new state if the reachability changed or |force_notification|
+  // is set.
+  void UpdatePortalReachability(NetworkLibrary* network_lib,
+                                CellularNetwork* network,
+                                bool force_notification);
 
   // Sends message to host registration page with system/user info data.
   void SendDeviceInfo();
@@ -167,6 +197,13 @@ class MobileSetupHandler
   // Converts the currently active CellularNetwork device into a JS object.
   static void GetDeviceInfo(CellularNetwork* network,
                             DictionaryValue* value);
+
+  // Type of the mobilesetup webui deduced from received messages.
+  Type type_;
+  // Whether portal page for lte networks can be reached in current network
+  // connection state. This value is reflected in portal webui for lte networks.
+  // Initial value is true.
+  bool lte_portal_reachable_;
 
   DISALLOW_COPY_AND_ASSIGN(MobileSetupHandler);
 };
@@ -188,19 +225,22 @@ void MobileSetupUIHTMLSource::StartDataRequest(
     const std::string& path,
     bool is_incognito,
     const content::URLDataSource::GotDataCallback& callback) {
-  CellularNetwork* network = !path.size() ? NULL :
-      CrosLibrary::Get()->
-          GetNetworkLibrary()->FindCellularNetworkByPath(path);
-  if (!network || !network->SupportsActivation()) {
+  CellularNetwork* network = NULL;
+  if (!path.empty()) {
+    network = CrosLibrary::Get()->GetNetworkLibrary()->
+        FindCellularNetworkByPath(path);
+  }
+
+  if (!network || (!network->SupportsActivation() && !network->activated())) {
     LOG(WARNING) << "Can't find device to activate for service path " << path;
     scoped_refptr<base::RefCountedBytes> html_bytes(new base::RefCountedBytes);
     callback.Run(html_bytes);
     return;
   }
 
-  LOG(WARNING) << "Activating mobile service " << path;
+  LOG(WARNING) << "Starting mobile setup for " << path;
   DictionaryValue strings;
-  strings.SetString("title", l10n_util::GetStringUTF16(IDS_MOBILE_SETUP_TITLE));
+
   strings.SetString("connecting_header",
                     l10n_util::GetStringFUTF16(IDS_MOBILE_CONNECTING_HEADER,
                         network ? UTF8ToUTF16(network->name()) : string16()));
@@ -214,6 +254,9 @@ void MobileSetupUIHTMLSource::StartDataRequest(
                     l10n_util::GetStringUTF16(IDS_MOBILE_PLEASE_WAIT));
   strings.SetString("completed_text",
                     l10n_util::GetStringUTF16(IDS_MOBILE_COMPLETED_TEXT));
+  strings.SetString("portal_unreachable_header",
+                    l10n_util::GetStringUTF16(IDS_MOBILE_NO_CONNECTION_HEADER));
+  strings.SetString("title", l10n_util::GetStringUTF16(IDS_MOBILE_SETUP_TITLE));
   strings.SetString("close_button",
                     l10n_util::GetStringUTF16(IDS_CLOSE));
   strings.SetString("cancel_button",
@@ -222,11 +265,21 @@ void MobileSetupUIHTMLSource::StartDataRequest(
                     l10n_util::GetStringUTF16(IDS_OK));
   webui::SetFontAndTextDirection(&strings);
 
-  static const base::StringPiece html(
-      ResourceBundle::GetSharedInstance().GetRawDataResource(
-          IDR_MOBILE_SETUP_PAGE_HTML));
-
-  std::string full_html = webui::GetI18nTemplateHtml(html, &strings);
+  // The webui differs based on whether the network is activated or not. If the
+  // network is activated, the webui goes straight to portal. Otherwise the
+  // webui is used for activation flow.
+  std::string full_html;
+  if (network->activated()) {
+    static const base::StringPiece html_for_activated(
+        ResourceBundle::GetSharedInstance().GetRawDataResource(
+            IDR_MOBILE_SETUP_PORTAL_PAGE_HTML));
+    full_html = webui::GetI18nTemplateHtml(html_for_activated, &strings);
+  } else {
+    static const base::StringPiece html_for_non_activated(
+        ResourceBundle::GetSharedInstance().GetRawDataResource(
+            IDR_MOBILE_SETUP_PAGE_HTML));
+    full_html = webui::GetI18nTemplateHtml(html_for_non_activated, &strings);
+  }
 
   callback.Run(base::RefCountedString::TakeString(&full_html));
 }
@@ -236,19 +289,25 @@ void MobileSetupUIHTMLSource::StartDataRequest(
 // MobileSetupHandler
 //
 ////////////////////////////////////////////////////////////////////////////////
-MobileSetupHandler::MobileSetupHandler() {
-  MobileActivator::GetInstance()->AddObserver(this);
+MobileSetupHandler::MobileSetupHandler()
+    : type_(TYPE_UNDETERMINED),
+      lte_portal_reachable_(true) {
 }
 
 MobileSetupHandler::~MobileSetupHandler() {
-  MobileActivator::GetInstance()->RemoveObserver(this);
-  MobileActivator::GetInstance()->TerminateActivation();
+  if (type_ == TYPE_ACTIVATION) {
+    MobileActivator::GetInstance()->RemoveObserver(this);
+    MobileActivator::GetInstance()->TerminateActivation();
+  } else if (type_ == TYPE_PORTAL_LTE) {
+    CrosLibrary::Get()->GetNetworkLibrary()->RemoveNetworkManagerObserver(this);
+  }
 }
 
 void MobileSetupHandler::OnActivationStateChanged(
     CellularNetwork* network,
     MobileActivator::PlanActivationState state,
     const std::string& error_description) {
+  DCHECK_EQ(TYPE_ACTIVATION, type_);
   if (!web_ui())
     return;
 
@@ -272,9 +331,14 @@ void MobileSetupHandler::RegisterMessages() {
   web_ui()->RegisterMessageCallback(kJsApiPaymentPortalLoad,
       base::Bind(&MobileSetupHandler::HandlePaymentPortalLoad,
                  base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(kJsGetDeviceInfo,
+      base::Bind(&MobileSetupHandler::HandleGetDeviceInfo,
+                 base::Unretained(this)));
 }
 
 void MobileSetupHandler::HandleStartActivation(const ListValue* args) {
+  DCHECK_EQ(TYPE_UNDETERMINED, type_);
+
   if (!web_ui())
     return;
 
@@ -284,10 +348,16 @@ void MobileSetupHandler::HandleStartActivation(const ListValue* args) {
 
   LOG(WARNING) << "Starting activation for service " << path;
 
+  type_ = TYPE_ACTIVATION;
+  MobileActivator::GetInstance()->AddObserver(this);
   MobileActivator::GetInstance()->InitiateActivation(path.substr(1));
 }
 
 void MobileSetupHandler::HandleSetTransactionStatus(const ListValue* args) {
+  DCHECK_EQ(TYPE_ACTIVATION, type_);
+  if (!web_ui())
+    return;
+
   const size_t kSetTransactionStatusParamCount = 1;
   if (args->GetSize() != kSetTransactionStatusParamCount)
     return;
@@ -301,6 +371,10 @@ void MobileSetupHandler::HandleSetTransactionStatus(const ListValue* args) {
 }
 
 void MobileSetupHandler::HandlePaymentPortalLoad(const ListValue* args) {
+  // Only activation flow webui is interested in these events.
+  if (type_ != TYPE_ACTIVATION || !web_ui())
+    return;
+
   const size_t kPaymentPortalLoadParamCount = 1;
   if (args->GetSize() != kPaymentPortalLoadParamCount)
     return;
@@ -313,6 +387,89 @@ void MobileSetupHandler::HandlePaymentPortalLoad(const ListValue* args) {
       LowerCaseEqualsASCII(result, kJsApiResultOK));
 }
 
+void MobileSetupHandler::HandleGetDeviceInfo(const ListValue* args) {
+  DCHECK_NE(TYPE_ACTIVATION, type_);
+  if (!web_ui())
+    return;
+
+  std::string path = web_ui()->GetWebContents()->GetURL().path();
+  if (path.empty())
+    return;
+
+  NetworkLibrary* network_lib = CrosLibrary::Get()->GetNetworkLibrary();
+  CellularNetwork* network =
+      network_lib->FindCellularNetworkByPath(path.substr(1));
+  if (!network) {
+    web_ui()->GetWebContents()->Close();
+    return;
+  }
+
+  // If this is the initial call, update the network status and start observing
+  // network changes, but only for LTE networks. The other networks should
+  // ignore network status.
+  if (type_ == TYPE_UNDETERMINED) {
+    if (network->network_technology() == chromeos::NETWORK_TECHNOLOGY_LTE ||
+        network->network_technology() ==
+            chromeos::NETWORK_TECHNOLOGY_LTE_ADVANCED) {
+      type_ = TYPE_PORTAL_LTE;
+      network_lib->AddNetworkManagerObserver(this);
+      // Update the network status and notify the webui. This is the initial
+      // network state so the webui should be notified no matter what.
+      UpdatePortalReachability(network_lib,
+                               network,
+                               true /*force notification*/);
+    } else {
+      type_ = TYPE_PORTAL;
+      // For non-LTE networks network state is ignored, so report the portal is
+      // reachable, so it gets shown.
+      web_ui()->CallJavascriptFunction(kJsConnectivityChangedCallback,
+                                       base::FundamentalValue(true));
+    }
+  }
+
+  DictionaryValue device_info;
+  GetDeviceInfo(network, &device_info);
+  web_ui()->CallJavascriptFunction(kJsGetDeviceInfoCallback, device_info);
+}
+
+void MobileSetupHandler::OnNetworkManagerChanged(NetworkLibrary* network_lib) {
+  if (!web_ui())
+    return;
+
+  std::string path = web_ui()->GetWebContents()->GetURL().path();
+  if (path.empty())
+    return;
+
+  CellularNetwork* network =
+      network_lib->FindCellularNetworkByPath(path.substr(1));
+  if (!network) {
+    LOG(ERROR) << "Service path lost";
+    web_ui()->GetWebContents()->Close();
+    return;
+  }
+
+  UpdatePortalReachability(network_lib, network, false /*force notification*/);
+}
+
+void MobileSetupHandler::UpdatePortalReachability(NetworkLibrary* network_lib,
+                                                  CellularNetwork* network,
+                                                  bool force_notification) {
+  DCHECK(web_ui());
+
+  DCHECK_EQ(type_, TYPE_PORTAL_LTE);
+
+  bool portal_reachable = network->connected() ||
+                          (network_lib->connected_network() &&
+                           network_lib->connected_network()->online());
+
+  if (force_notification || portal_reachable != lte_portal_reachable_) {
+    web_ui()->CallJavascriptFunction(kJsConnectivityChangedCallback,
+                                     base::FundamentalValue(portal_reachable));
+  }
+
+  lte_portal_reachable_ = portal_reachable;
+}
+
 void MobileSetupHandler::GetDeviceInfo(CellularNetwork* network,
                                        DictionaryValue* value) {
   DCHECK(network);
@@ -320,6 +477,8 @@ void MobileSetupHandler::GetDeviceInfo(CellularNetwork* network,
       chromeos::CrosLibrary::Get()->GetNetworkLibrary();
   if (!cros)
     return;
+  value->SetBoolean("activate_over_non_cellular_network",
+                    network->activate_over_non_cellular_network());
   value->SetString("carrier", network->name());
   value->SetString("payment_url", network->payment_url());
   if (network->using_post() && network->post_data().length())

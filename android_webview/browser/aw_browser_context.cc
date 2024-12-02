@@ -4,6 +4,8 @@
 
 #include "android_webview/browser/aw_browser_context.h"
 
+#include "android_webview/browser/aw_quota_manager_bridge.h"
+#include "android_webview/browser/jni_dependency_factory.h"
 #include "android_webview/browser/net/aw_url_request_context_getter.h"
 #include "components/visitedlink/browser/visitedlink_master.h"
 #include "content/public/browser/browser_thread.h"
@@ -42,9 +44,9 @@ class AwResourceContext : public content::ResourceContext {
 
 AwBrowserContext::AwBrowserContext(
     const base::FilePath path,
-    GeolocationPermissionFactoryFn* geolocation_permission_factory)
+    JniDependencyFactory* native_factory)
     : context_storage_path_(path),
-      geolocation_permission_factory_(geolocation_permission_factory) {
+      native_factory_(native_factory) {
 }
 
 AwBrowserContext::~AwBrowserContext() {
@@ -74,21 +76,9 @@ void AwBrowserContext::AddVisitedURLs(const std::vector<GURL>& urls) {
 }
 
 net::URLRequestContextGetter* AwBrowserContext::CreateRequestContext(
-    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-        blob_protocol_handler,
-    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-        file_system_protocol_handler,
-    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-        developer_protocol_handler,
-    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-        chrome_protocol_handler,
-    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-        chrome_devtools_protocol_handler) {
+    content::ProtocolHandlerMap* protocol_handlers) {
   CHECK(url_request_context_getter_);
-  url_request_context_getter_->SetProtocolHandlers(
-      blob_protocol_handler.Pass(), file_system_protocol_handler.Pass(),
-      developer_protocol_handler.Pass(), chrome_protocol_handler.Pass(),
-      chrome_devtools_protocol_handler.Pass());
+  url_request_context_getter_->SetProtocolHandlers(protocol_handlers);
   return url_request_context_getter_.get();
 }
 
@@ -96,18 +86,17 @@ net::URLRequestContextGetter*
 AwBrowserContext::CreateRequestContextForStoragePartition(
     const base::FilePath& partition_path,
     bool in_memory,
-    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-        blob_protocol_handler,
-    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-        file_system_protocol_handler,
-    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-        developer_protocol_handler,
-    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-        chrome_protocol_handler,
-    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-        chrome_devtools_protocol_handler) {
+    content::ProtocolHandlerMap* protocol_handlers) {
   CHECK(url_request_context_getter_);
   return url_request_context_getter_.get();
+}
+
+AwQuotaManagerBridge* AwBrowserContext::GetQuotaManagerBridge() {
+  if (!quota_manager_bridge_) {
+    quota_manager_bridge_.reset(
+        native_factory_->CreateAwQuotaManagerBridge(this));
+  }
+  return quota_manager_bridge_.get();
 }
 
 base::FilePath AwBrowserContext::GetPath() {
@@ -163,7 +152,8 @@ AwBrowserContext::GetDownloadManagerDelegate() {
 content::GeolocationPermissionContext*
 AwBrowserContext::GetGeolocationPermissionContext() {
   if (!geolocation_permission_context_) {
-    geolocation_permission_context_ = (*geolocation_permission_factory_)();
+    geolocation_permission_context_ =
+        native_factory_->CreateGeolocationPermission(this);
   }
   return geolocation_permission_context_;
 }

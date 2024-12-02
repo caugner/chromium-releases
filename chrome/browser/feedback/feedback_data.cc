@@ -4,226 +4,202 @@
 
 #include "chrome/browser/feedback/feedback_data.h"
 
+#include "base/file_util.h"
 #include "base/json/json_string_value_serializer.h"
+#include "base/string_util.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
-#include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/feedback/feedback_util.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/sync/about_sync_util.h"
-#include "chrome/browser/sync/profile_sync_service_factory.h"
-#include "chrome/common/extensions/extension.h"
-#include "chrome/common/extensions/extension_set.h"
 #include "content/public/browser/browser_thread.h"
+
+#if defined(USE_ASH)
+#include "ash/shell.h"
+#include "ash/shell_delegate.h"
+#endif
+
+#if defined(OS_CHROMEOS)
+#include "chrome/common/zip.h"
+#endif
 
 using content::BrowserThread;
 
 #if defined(OS_CHROMEOS)
-// TODO(rkc): Remove all the code that gather sync data and move it to a
-// log data source once crbug.com/138582 is fixed.
 namespace {
 
-const char kExtensionsListKey[] = "extensions";
+const char kLogsFilename[] = "system_logs.txt";
 
-void AddSyncLogs(chromeos::system::LogDictionaryType* logs) {
-  Profile* profile = ProfileManager::GetDefaultProfile();
-  if (!ProfileSyncServiceFactory::GetInstance()->HasProfileSyncService(
-      profile))
-    return;
+const char kMultilineIndicatorString[] = "<multiline>\n";
+const char kMultilineStartString[] = "---------- START ----------\n";
+const char kMultilineEndString[] = "---------- END ----------\n\n";
 
-  ProfileSyncService* service =
-      ProfileSyncServiceFactory::GetInstance()->GetForProfile(profile);
-  scoped_ptr<DictionaryValue> sync_logs(
-      sync_ui_util::ConstructAboutInformation(service));
+std::string LogsToString(chromeos::SystemLogsResponse* sys_info) {
+  std::string syslogs_string;
+  for (chromeos::SystemLogsResponse::const_iterator it = sys_info->begin();
+      it != sys_info->end(); ++it) {
+    std::string key = it->first;
+    std::string value = it->second;
 
-  // Remove credentials section.
-  ListValue* details = NULL;
-  sync_logs->GetList(kDetailsKey, &details);
-  if (!details)
-    return;
-  for (ListValue::iterator it = details->begin();
-      it != details->end(); ++it) {
-    DictionaryValue* dict = NULL;
-    if ((*it)->GetAsDictionary(&dict)) {
-      std::string title;
-      dict->GetString("title", &title);
-      if (title == kCredentialsTitle) {
-        details->Erase(it, NULL);
-        break;
-      }
-    }
-  }
+    TrimString(key, "\n ", &key);
+    TrimString(value, "\n ", &value);
 
-  // Add sync logs to logs.
-  std::string sync_logs_string;
-  JSONStringValueSerializer serializer(&sync_logs_string);
-  serializer.Serialize(*sync_logs.get());
-  (*logs)[kSyncDataKey] = sync_logs_string;
-}
-
-void AddExtensionInfoLogs(chromeos::system::LogDictionaryType* logs) {
-  bool reporting_enabled = false;
-  chromeos::CrosSettings::Get()->GetBoolean(chromeos::kStatsReportingPref,
-                                            &reporting_enabled);
-  if (!reporting_enabled)
-    return;
-
-  Profile* default_profile =
-      g_browser_process->profile_manager()->GetDefaultProfile();
-  if (!default_profile)
-    return;
-
-  ExtensionService* service =
-      extensions::ExtensionSystem::Get(default_profile)->extension_service();
-  if (!service)
-    return;
-
-  std::string extensions_list;
-  const ExtensionSet* extensions = service->extensions();
-  for (ExtensionSet::const_iterator it = extensions->begin();
-       it != extensions->end();
-       ++it) {
-    const extensions::Extension* extension = *it;
-    if (extensions_list.empty()) {
-      extensions_list = extension->name();
+    if (value.find("\n") != std::string::npos) {
+      syslogs_string.append(
+          key + "=" + kMultilineIndicatorString +
+          kMultilineStartString +
+          value + "\n" +
+          kMultilineEndString);
     } else {
-      extensions_list += ", " + extension->name();
+      syslogs_string.append(key + "=" + value + "\n");
     }
   }
-
-  if (!extensions_list.empty())
-    (*logs)[kExtensionsListKey] = extensions_list;
+  return syslogs_string;
 }
 
+bool ZipString(const std::string& logs,
+               std::string* compressed_logs) {
+  base::FilePath temp_path;
+  base::FilePath zip_file;
+
+  // Create a temporary directory, put the logs into a file in it. Create
+  // another temporary file to receive the zip file in.
+  if (!file_util::CreateNewTempDirectory("", &temp_path))
+    return false;
+  if (file_util::WriteFile(
+      temp_path.Append(kLogsFilename), logs.c_str(), logs.size()) == -1)
+    return false;
+  if (!file_util::CreateTemporaryFile(&zip_file))
+    return false;
+
+  if (!zip::Zip(temp_path, zip_file, false))
+    return false;
+
+  if (!file_util::ReadFileToString(zip_file, compressed_logs))
+    return false;
+
+  return true;
 }
+
+void ZipLogs(chromeos::SystemLogsResponse* sys_info,
+             std::string* compressed_logs) {
+  DCHECK(compressed_logs);
+  std::string logs_string = LogsToString(sys_info);
+  if (!ZipString(logs_string, compressed_logs)) {
+    compressed_logs->clear();
+  }
+}
+
+}  // namespace
 #endif // OS_CHROMEOS
 
-FeedbackData::FeedbackData()
-    : profile_(NULL)
+FeedbackData::FeedbackData() : profile_(NULL),
+                               feedback_page_data_complete_(false) {
 #if defined(OS_CHROMEOS)
-    , sys_info_(NULL)
-    , zip_content_(NULL)
-    , sent_report_(false)
-    , send_sys_info_(false)
-#endif
-{
-}
-
-FeedbackData::FeedbackData(Profile* profile,
-                           const std::string& category_tag,
-                           const std::string& page_url,
-                           const std::string& description,
-                           const std::string& user_email,
-                           ScreenshotDataPtr image
-#if defined(OS_CHROMEOS)
-                           , chromeos::system::LogDictionaryType* sys_info
-                           , std::string* zip_content
-                           , const std::string& timestamp
-                           , const std::string& attached_filename
-                           , std::string* attached_filedata
-#endif
-                           ) {
-  UpdateData(profile,
-             category_tag,
-             page_url,
-             description,
-             user_email,
-             image
-#if defined(OS_CHROMEOS)
-             , sys_info
-             , true
-             , timestamp
-             , attached_filename
-             , attached_filedata
-#endif
-             );
-#if defined(OS_CHROMEOS)
-  sys_info_ = sys_info;
-  zip_content_ = zip_content;
+  sys_info_.reset(NULL);
+  attached_filedata_.reset(NULL);
+  send_sys_info_ = true;
+  read_attached_file_complete_ = false;
+  syslogs_collection_complete_ = false;
 #endif
 }
-
 
 FeedbackData::~FeedbackData() {
 }
 
-void FeedbackData::UpdateData(Profile* profile,
-                              const std::string& category_tag,
-                              const std::string& page_url,
-                              const std::string& description,
-                              const std::string& user_email,
-                              ScreenshotDataPtr image
+bool FeedbackData::DataCollectionComplete() {
 #if defined(OS_CHROMEOS)
-                              , const bool send_sys_info
-                              , const bool sent_report
-                              , const std::string& timestamp
-                              , const std::string& attached_filename
-                              , std::string* attached_filedata
-#endif
-                              ) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  profile_ = profile;
-  category_tag_ = category_tag;
-  page_url_ = page_url;
-  description_ = description;
-  user_email_ = user_email;
-  image_ = image;
-#if defined(OS_CHROMEOS)
-  send_sys_info_ = send_sys_info;
-  sent_report_ = sent_report;
-  timestamp_ = timestamp;
-  attached_filename_ = attached_filename;
-  attached_filedata_ = attached_filedata;
+  return (syslogs_collection_complete_ || !send_sys_info_) &&
+      read_attached_file_complete_ &&
+      feedback_page_data_complete_;
+#else
+  return feedback_page_data_complete_;
 #endif
 }
-
 void FeedbackData::SendReport() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  if (DataCollectionComplete())
+    FeedbackUtil::SendReport(this);
+}
+
+void FeedbackData::FeedbackPageDataComplete() {
 #if defined(OS_CHROMEOS)
-  if (sent_report_)
-    return;  // We already received the syslogs and sent the report.
+  if (attached_filename_.size() &&
+      base::FilePath::IsSeparator(attached_filename_[0]) &&
+      !attached_filedata_.get()) {
+    // Read the attached file and then send this report. The allocated string
+    // will be freed in FeedbackUtil::SendReport.
+    attached_filedata_.reset(new std::string);
 
-  // Set send_report_ to ensure that we only send one report.
-  sent_report_ = true;
+    base::FilePath root =
+        ash::Shell::GetInstance()->delegate()->
+            GetCurrentBrowserContext()->GetPath();
+    base::FilePath filepath = root.Append(attached_filename_.substr(1));
+    attached_filename_ = filepath.BaseName().value();
+
+    // Read the file into file_data, then call send report again with the
+    // stripped filename and file data (which will skip this code path).
+    content::BrowserThread::PostTaskAndReply(
+        content::BrowserThread::FILE, FROM_HERE,
+        base::Bind(&FeedbackData::ReadAttachedFile, this, filepath),
+        base::Bind(&FeedbackData::ReadFileComplete, this));
+  } else {
+    read_attached_file_complete_ = true;
+  }
 #endif
-
-  FeedbackUtil::SendReport(*this);
-
-  // Either the report is sent, and and this object may delete itself, or the
-  // report is pending the attached file read, and another FeedbackData has
-  // been created to hold this data - hence delete this object.
-  delete this;
+  feedback_page_data_complete_ = true;
+  SendReport();
 }
 
 #if defined(OS_CHROMEOS)
-// SyslogsComplete may be called before UpdateData, in which case, we do not
-// want to delete the logs that were gathered, and we do not want to send the
-// report either. Instead simply populate |sys_info_| and |zip_content_|.
-void FeedbackData::SyslogsComplete(chromeos::system::LogDictionaryType* logs,
-                                   std::string* zip_content) {
+void FeedbackData::CompressSyslogs(
+    scoped_ptr<chromeos::SystemLogsResponse> sys_info) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  if (sent_report_) {
-    // We already sent the report, just delete the data.
-    if (logs)
-      delete logs;
-    if (zip_content)
-      delete zip_content;
-  } else {
 
-    // TODO(rkc): Move to the correct place once crbug.com/138582 is done.
-    AddSyncLogs(logs);
-    AddExtensionInfoLogs(logs);
+  // We get the pointer first since base::Passed will nullify the scoper, hence
+  // it's not safe to use <scoper>.get() as a parameter to PostTaskAndReply.
+  chromeos::SystemLogsResponse* sys_info_ptr = sys_info.get();
+  std::string* compressed_logs_ptr = new std::string;
+  scoped_ptr<std::string> compressed_logs(compressed_logs_ptr);
+  BrowserThread::PostBlockingPoolTaskAndReply(
+      FROM_HERE,
+      base::Bind(&ZipLogs,
+                 sys_info_ptr,
+                 compressed_logs_ptr),
+      base::Bind(&FeedbackData::SyslogsComplete,
+                 this,
+                 base::Passed(&sys_info),
+                 base::Passed(&compressed_logs)));
+}
 
-    // Will get deleted when SendReport() is called.
-    zip_content_ = zip_content;
-    sys_info_ = logs;
+void FeedbackData::SyslogsComplete(
+    scoped_ptr<chromeos::SystemLogsResponse> sys_info,
+    scoped_ptr<std::string> compressed_logs) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-    if (send_sys_info_) {
-      // We already prepared the report, send it now.
-      this->SendReport();
-    }
+  if (send_sys_info_) {
+    sys_info_ = sys_info.Pass();
+    compressed_logs_ = compressed_logs.Pass();
+    syslogs_collection_complete_ = true;
+    SendReport();
+  }
+}
+
+void FeedbackData::ReadFileComplete() {
+  read_attached_file_complete_ = true;
+  SendReport();
+}
+
+void FeedbackData::StartSyslogsCollection() {
+  chromeos::SystemLogsFetcher* fetcher = new chromeos::SystemLogsFetcher();
+  fetcher->Fetch(base::Bind(&FeedbackData::CompressSyslogs, this));
+}
+
+// private
+void FeedbackData::ReadAttachedFile(const base::FilePath& from) {
+  if (!file_util::ReadFileToString(from, attached_filedata_.get())) {
+    if (attached_filedata_.get())
+      attached_filedata_->clear();
   }
 }
 #endif

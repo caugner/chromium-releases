@@ -7,8 +7,8 @@
 #include "base/callback.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_vector.h"
-#include "base/string_split.h"
 #include "base/string_util.h"
+#include "base/strings/string_split.h"
 #include "base/test/mock_time_provider.h"
 #include "base/threading/thread.h"
 #include "base/time.h"
@@ -1309,10 +1309,8 @@ TEST_F(TemplateURLServiceTest, FailedInit) {
 
   test_util_.ClearModel();
   scoped_refptr<WebDataService> web_service =
-      WebDataServiceFactory::GetForProfile(test_util_.profile(),
-                                           Profile::EXPLICIT_ACCESS);
-  web_service->UnloadDatabase();
-  web_service->set_failed_init(true);
+      WebDataService::FromBrowserContext(test_util_.profile());
+  web_service->ShutdownDatabase();
 
   test_util_.ResetModel(false);
   model()->Load();

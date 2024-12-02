@@ -11,11 +11,11 @@
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/prefs/public/pref_service_base.h"
-#include "base/string_split.h"
+#include "base/prefs/pref_service.h"
 #include "base/string_util.h"
+#include "base/strings/string_split.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/chromeos/input_method/input_method_delegate.h"
+#include "chromeos/ime/input_method_delegate.h"
 #include "grit/generated_resources.h"
 #include "third_party/icu/public/common/unicode/uloc.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -279,9 +279,12 @@ struct CompareLanguageCodesByLanguageName
   icu::Collator* collator_;
 };
 
-}  // namespace
-
-const ExtraLanguage kExtraLanguages[] = {
+// The list of language that do not have associated input methods in IBus.
+// For these languages, we associate input methods here.
+const struct ExtraLanguage {
+  const char* language_code;
+  const char* input_method_id;
+} kExtraLanguages[] = {
   // Language Code  Input Method ID
   { "en-AU", "xkb:us::eng" },  // For Austrailia, use US keyboard layout.
   { "id", "xkb:us::eng" },  // For Indonesian, use US keyboard layout.
@@ -299,6 +302,8 @@ const ExtraLanguage kExtraLanguages[] = {
   // blacklist in src/ui/base/l10n/l10n_util_posix.cc.
 };
 const size_t kExtraLanguagesLength = arraysize(kExtraLanguages);
+
+}  // namespace
 
 InputMethodUtil::InputMethodUtil(
     InputMethodDelegate* delegate,
@@ -516,6 +521,23 @@ string16 InputMethodUtil::GetLanguageDisplayNameFromCode(
 string16 InputMethodUtil::GetLanguageNativeDisplayNameFromCode(
     const std::string& language_code) {
   return l10n_util::GetDisplayNameForLocale(language_code, language_code, true);
+}
+
+std::vector<std::string> InputMethodUtil::GetExtraLanguageCodesFromId(
+    const std::string& input_method_id) const {
+  std::vector<std::string> result;
+  for (size_t i = 0; i < kExtraLanguagesLength; ++i) {
+    if (input_method_id == kExtraLanguages[i].input_method_id)
+      result.push_back(kExtraLanguages[i].language_code);
+  }
+  return result;
+}
+
+std::vector<std::string> InputMethodUtil::GetExtraLanguageCodeList() const {
+  std::vector<std::string> result;
+  for (size_t i = 0; i < kExtraLanguagesLength; ++i)
+    result.push_back(kExtraLanguages[i].language_code);
+  return result;
 }
 
 void InputMethodUtil::SortLanguageCodesByNames(

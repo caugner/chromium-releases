@@ -6,18 +6,16 @@
 
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/ui/views/message_center/web_notification_tray_win.h"
+#include "grit/ui_strings.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/size.h"
-#include "ui/message_center/message_bubble_base.h"
+#include "ui/message_center/views/message_bubble_base.h"
+#include "ui/message_center/views/message_center_bubble.h"
+#include "ui/message_center/views/message_popup_bubble.h"
 #include "ui/views/bubble/bubble_delegate.h"
 #include "ui/views/bubble/tray_bubble_view.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_observer.h"
-
-namespace {
-
-const char kAccessibleNameForBubble[] = "Windows Notification Center";
-
-}
 
 namespace message_center {
 
@@ -26,31 +24,35 @@ namespace internal {
 NotificationBubbleWrapperWin::NotificationBubbleWrapperWin(
     WebNotificationTrayWin* tray,
     scoped_ptr<message_center::MessageBubbleBase> bubble,
-    AnchorType anchor_type)
+    BubbleType bubble_type)
     : bubble_(bubble.Pass()),
+      bubble_type_(bubble_type),
       bubble_view_(NULL),
       bubble_widget_(NULL),
       tray_(tray) {
   // Windows-specific initialization.
   views::TrayBubbleView::AnchorAlignment anchor_alignment =
-      tray->GetAnchorAlignment();
+      tray_->GetAnchorAlignment();
   views::TrayBubbleView::InitParams init_params =
       bubble_->GetInitParams(anchor_alignment);
-  init_params.anchor_type = anchor_type;
   init_params.close_on_deactivate = false;
-  init_params.arrow_alignment =
-      views::BubbleBorder::ALIGN_ARROW_TO_MID_ANCHOR;
+  init_params.arrow_alignment = views::BubbleBorder::ALIGN_EDGE_TO_ANCHOR_EDGE;
+  init_params.arrow_paint_type = views::BubbleBorder::PAINT_NONE;
   // TODO(dewittj): Show big shadow without blocking clicks.
   init_params.shadow = views::BubbleBorder::NO_SHADOW;
 
   bubble_view_ = views::TrayBubbleView::Create(
-      tray->GetBubbleWindowContainer(), NULL, this, &init_params);
+      tray_->GetBubbleWindowContainer(), NULL, this, &init_params);
 
   bubble_widget_ = views::BubbleDelegateView::CreateBubble(bubble_view_);
   bubble_widget_->AddObserver(this);
   bubble_widget_->StackAtTop();
   bubble_widget_->SetAlwaysOnTop(true);
-  bubble_widget_->Activate();
+  // Popups should appear on top of everything, but not disturb the user's
+  // focus since they could appear at any time.  Message Center is always
+  // shown as a result of user action so it can be activated here.
+  if (bubble_type_ != BUBBLE_TYPE_POPUP)
+    bubble_widget_->Activate();
   bubble_view_->InitializeAndShowBubble();
 
   bubble_view_->set_close_on_deactivate(true);
@@ -85,18 +87,16 @@ void NotificationBubbleWrapperWin::OnMouseExitedView() {
 }
 
 string16 NotificationBubbleWrapperWin::GetAccessibleNameForBubble() {
-  // TODO(dewittj): Get a string resource.
-  return ASCIIToUTF16(kAccessibleNameForBubble);
+  return l10n_util::GetStringUTF16(IDS_MESSAGE_CENTER_ACCESSIBLE_NAME);
 }
 
 gfx::Rect NotificationBubbleWrapperWin::GetAnchorRect(
     views::Widget* anchor_widget,
     AnchorType anchor_type,
     AnchorAlignment anchor_alignment) {
-  gfx::Size size = bubble_view_->GetPreferredSize();
-  return tray_->GetAnchorRect(size,
-                              anchor_type,
-                              anchor_alignment);
+  if (bubble_type_ == BUBBLE_TYPE_POPUP)
+    return tray_->GetPopupAnchor();
+  return tray_->GetMessageCenterAnchor();
 }
 
 void NotificationBubbleWrapperWin::HideBubble(

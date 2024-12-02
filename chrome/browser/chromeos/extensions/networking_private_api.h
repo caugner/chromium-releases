@@ -30,31 +30,65 @@ class NetworkingPrivateGetPropertiesFunction : public AsyncExtensionFunction {
   virtual bool RunImpl() OVERRIDE;
 
  private:
-  void ResultCallback(chromeos::DBusMethodCallStatus call_status,
-                      const base::DictionaryValue& result);
+  void GetPropertiesSuccess(const std::string& service_path,
+                            const base::DictionaryValue& result);
+  void GetPropertiesFailed(const std::string& error_name,
+                           scoped_ptr<base::DictionaryValue> error_data);
   DISALLOW_COPY_AND_ASSIGN(NetworkingPrivateGetPropertiesFunction);
 };
 
-// Implements the chrome.networkingPrivate.getVisibleNetworks method.
-class NetworkingPrivateGetVisibleNetworksFunction
-    : public AsyncExtensionFunction {
+// Implements the chrome.networkingPrivate.getState method.
+class NetworkingPrivateGetStateFunction : public AsyncExtensionFunction {
  public:
-  NetworkingPrivateGetVisibleNetworksFunction() {}
-  DECLARE_EXTENSION_FUNCTION("networkingPrivate.getVisibleNetworks",
-                              NETWORKINGPRIVATE_GETVISIBLENETWORKS);
+  NetworkingPrivateGetStateFunction() {}
+  DECLARE_EXTENSION_FUNCTION("networkingPrivate.getState",
+                             NETWORKINGPRIVATE_GETSTATE);
 
  protected:
-  virtual ~NetworkingPrivateGetVisibleNetworksFunction();
+  virtual ~NetworkingPrivateGetStateFunction();
 
   // AsyncExtensionFunction overrides.
   virtual bool RunImpl() OVERRIDE;
 
-  // Gets called when all the results are in.
-  void SendResultCallback(const std::string& error,
-                          scoped_ptr<base::ListValue> result_list);
+ private:
+  DISALLOW_COPY_AND_ASSIGN(NetworkingPrivateGetStateFunction);
+};
+
+// Implements the chrome.networkingPrivate.setProperties method.
+class NetworkingPrivateSetPropertiesFunction : public AsyncExtensionFunction {
+ public:
+  NetworkingPrivateSetPropertiesFunction() {}
+  DECLARE_EXTENSION_FUNCTION("networkingPrivate.setProperties",
+                             NETWORKINGPRIVATE_SETPROPERTIES);
+
+ protected:
+  virtual ~NetworkingPrivateSetPropertiesFunction();
+
+  // AsyncExtensionFunction overrides.
+  virtual bool RunImpl() OVERRIDE;
 
  private:
+  void ErrorCallback(const std::string& error_name,
+                     const scoped_ptr<base::DictionaryValue> error_data);
+  void ResultCallback();
+  DISALLOW_COPY_AND_ASSIGN(NetworkingPrivateSetPropertiesFunction);
+};
 
+// Implements the chrome.networkingPrivate.getVisibleNetworks method.
+class NetworkingPrivateGetVisibleNetworksFunction
+    : public SyncExtensionFunction {
+ public:
+  NetworkingPrivateGetVisibleNetworksFunction() {}
+  DECLARE_EXTENSION_FUNCTION("networkingPrivate.getVisibleNetworks",
+                             NETWORKINGPRIVATE_GETVISIBLENETWORKS);
+
+ protected:
+  virtual ~NetworkingPrivateGetVisibleNetworksFunction();
+
+  // SyncExtensionFunction overrides.
+  virtual bool RunImpl() OVERRIDE;
+
+ private:
   DISALLOW_COPY_AND_ASSIGN(NetworkingPrivateGetVisibleNetworksFunction);
 };
 
@@ -76,8 +110,9 @@ class NetworkingPrivateStartConnectFunction : public AsyncExtensionFunction {
   // itself succeeded, just that the request did.
   void ConnectionStartSuccess();
 
-  void ConnectionStartFailed(const std::string& error_name,
-                             const std::string& error_message);
+  void ConnectionStartFailed(
+      const std::string& error_name,
+      const scoped_ptr<base::DictionaryValue> error_data);
 
   DISALLOW_COPY_AND_ASSIGN(NetworkingPrivateStartConnectFunction);
 };
@@ -101,10 +136,75 @@ class NetworkingPrivateStartDisconnectFunction
   // disconnect itself succeeded, just that the request did.
   void DisconnectionStartSuccess();
 
-  void DisconnectionStartFailed(const std::string& error_name,
-                                const std::string& error_message);
+  void DisconnectionStartFailed(
+      const std::string& error_name,
+      const scoped_ptr<base::DictionaryValue> error_data);
 
   DISALLOW_COPY_AND_ASSIGN(NetworkingPrivateStartDisconnectFunction);
+};
+
+// Implements the chrome.networkingPrivate.verifyDestination method.
+class NetworkingPrivateVerifyDestinationFunction
+    : public AsyncExtensionFunction {
+ public:
+  NetworkingPrivateVerifyDestinationFunction() {}
+  DECLARE_EXTENSION_FUNCTION("networkingPrivate.verifyDestination",
+                             NETWORKINGPRIVATE_VERIFYDESTINATION);
+
+ protected:
+  virtual ~NetworkingPrivateVerifyDestinationFunction();
+
+  // AsyncExtensionFunction overrides.
+  virtual bool RunImpl() OVERRIDE;
+
+  void ResultCallback(bool result);
+  void ErrorCallback(const std::string& error_name, const std::string& error);
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(NetworkingPrivateVerifyDestinationFunction);
+};
+
+// Implements the chrome.networkingPrivate.verifyAndEncryptCredentials method.
+class NetworkingPrivateVerifyAndEncryptCredentialsFunction
+    : public AsyncExtensionFunction {
+ public:
+  NetworkingPrivateVerifyAndEncryptCredentialsFunction() {}
+  DECLARE_EXTENSION_FUNCTION("networkingPrivate.verifyAndEncryptCredentials",
+                             NETWORKINGPRIVATE_VERIFYANDENCRYPTCREDENTIALS);
+
+ protected:
+  virtual ~NetworkingPrivateVerifyAndEncryptCredentialsFunction();
+
+  // AsyncExtensionFunction overrides.
+  virtual bool RunImpl() OVERRIDE;
+
+  void ResultCallback(const std::string& result);
+  void ErrorCallback(const std::string& error_name, const std::string& error);
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(
+      NetworkingPrivateVerifyAndEncryptCredentialsFunction);
+};
+
+// Implements the chrome.networkingPrivate.verifyAndEncryptData method.
+class NetworkingPrivateVerifyAndEncryptDataFunction
+    : public AsyncExtensionFunction {
+ public:
+  NetworkingPrivateVerifyAndEncryptDataFunction() {}
+  DECLARE_EXTENSION_FUNCTION("networkingPrivate.verifyAndEncryptData",
+                             NETWORKINGPRIVATE_VERIFYANDENCRYPTDATA);
+
+ protected:
+  virtual ~NetworkingPrivateVerifyAndEncryptDataFunction();
+
+  // AsyncExtensionFunction overrides.
+  virtual bool RunImpl() OVERRIDE;
+
+  void ResultCallback(const std::string& result);
+  void ErrorCallback(const std::string& error_name, const std::string& error);
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(NetworkingPrivateVerifyAndEncryptDataFunction);
 };
 
 #endif  // CHROME_BROWSER_CHROMEOS_EXTENSIONS_NETWORKING_PRIVATE_API_H_

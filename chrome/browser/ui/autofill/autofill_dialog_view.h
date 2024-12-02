@@ -32,6 +32,9 @@ class AutofillDialogView {
   // a new account, etc.).
   virtual void UpdateAccountChooser() = 0;
 
+  // Updates the button strip based on the current controller state.
+  virtual void UpdateButtonStrip() = 0;
+
   // Called when the contents of a section have changed.
   virtual void UpdateSection(DialogSection section) = 0;
 
@@ -46,12 +49,15 @@ class AutofillDialogView {
   // Returns the state of the "use billing address for shipping" checkbox.
   virtual bool UseBillingForShipping() = 0;
 
+  // Returns true if current input should be saved in Wallet (if it differs).
+  virtual bool SaveDetailsInWallet() = 0;
+
   // Returns true if new or edited autofill details should be saved.
   virtual bool SaveDetailsLocally() = 0;
 
   // Triggers dialog to sign in to Google.
   // Returns a NotificationSource to be used to monitor for sign-in completion.
-  virtual const content::NavigationController& ShowSignIn() = 0;
+  virtual const content::NavigationController* ShowSignIn() = 0;
 
   // Closes out any signin UI and returns to normal operation.
   virtual void HideSignIn() = 0;
@@ -62,6 +68,12 @@ class AutofillDialogView {
 
   // Called when the active suggestions data model changed.
   virtual void ModelChanged() = 0;
+
+  // Simulates the user pressing 'Submit' to accept the dialog.
+  virtual void SubmitForTesting() = 0;
+
+  // Simulates the user pressing 'Cancel' to abort the dialog.
+  virtual void CancelForTesting() = 0;
 
   // Factory function to create the dialog (implemented once per view
   // implementation). |controller| will own the created dialog.

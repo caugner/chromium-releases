@@ -25,17 +25,9 @@ namespace android_webview {
 class AwRenderViewHostExt : public content::WebContentsObserver,
                             public base::NonThreadSafe {
  public:
-  class Client {
-   public:
-    virtual void OnPictureUpdated(int process_id, int render_view_id) = 0;
-
-   protected:
-    virtual ~Client() {}
-  };
-
   // To send receive messages to a RenderView we take the WebContents instance,
   // as it internally handles RenderViewHost instances changing underneath us.
-  AwRenderViewHostExt(content::WebContents* contents, Client* client);
+  AwRenderViewHostExt(content::WebContents* contents);
   virtual ~AwRenderViewHostExt();
 
   // |result| will be invoked with the outcome of the request.
@@ -58,13 +50,21 @@ class AwRenderViewHostExt : public content::WebContentsObserver,
   // the corresponding public WebView API is as well.
   const AwHitTestData& GetLastHitTestData() const;
 
-  // Enables updating picture piles on every new frame.
-  // OnPictureUpdated is called when a new picture is available,
-  // stored by renderer id in RendererPictureMap.
-  void EnableCapturePictureCallback(bool enabled);
+  // Set whether fixed layout mode is enabled. Must be updated together
+  // with WebSettings.viewport_enabled.
+  // TODO(mnaganov): Leave only one setting. See the comments on
+  //   https://bugs.webkit.org/show_bug.cgi?id=109946
+  void SetEnableFixedLayoutMode(bool enable);
 
-  // Captures the latest available picture pile synchronously.
-  void CapturePictureSync();
+  // Sets the zoom level for text only. Used in layout modes other than
+  // Text Autosizing.
+  void SetTextZoomLevel(double level);
+
+  void ResetScrollAndScaleState();
+
+  // Sets the initial page scale. This overrides initial scale set by
+  // the meta viewport tag.
+  void SetInitialPageScale(double page_scale_factor);
 
  private:
   // content::WebContentsObserver implementation.
@@ -88,8 +88,6 @@ class AwRenderViewHostExt : public content::WebContentsObserver,
   AwHitTestData last_hit_test_data_;
 
   bool has_new_hit_test_data_;
-
-  Client* client_;
 
   DISALLOW_COPY_AND_ASSIGN(AwRenderViewHostExt);
 };

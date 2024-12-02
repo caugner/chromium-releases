@@ -7,13 +7,13 @@
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/string_split.h"
 #include "base/string_util.h"
+#include "base/strings/string_split.h"
 #include "base/values.h"
+#include "chrome/test/chromedriver/chrome/status.h"
 #include "chrome/test/chromedriver/command_executor.h"
 #include "chrome/test/chromedriver/command_names.h"
 #include "chrome/test/chromedriver/server/http_response.h"
-#include "chrome/test/chromedriver/status.h"
 #include "chrome/test/chromedriver/util.h"
 
 namespace {
@@ -39,8 +39,9 @@ CommandMapping::~CommandMapping() {}
 // static
 scoped_ptr<HttpHandler::CommandMap> HttpHandler::CreateCommandMap() {
   CommandMapping commands[] = {
-      CommandMapping(kPost, "session", internal::kNewSessionIdCommand),
-      CommandMapping(kGet, "session/:sessionId", CommandNames::kNewSession),
+      CommandMapping(kPost, "session", CommandNames::kNewSession),
+      CommandMapping(kGet, "session/:sessionId",
+                     CommandNames::kGetSessionCapabilities),
       CommandMapping(kDelete, "session/:sessionId", CommandNames::kQuit),
       CommandMapping(kGet, "session/:sessionId/window_handle",
                      CommandNames::kGetCurrentWindowHandle),
@@ -298,18 +299,6 @@ bool HttpHandler::HandleWebDriverCommand(
     ++iter;
   }
 
-  if (iter->name == internal::kNewSessionIdCommand) {
-    // Creating a session involves a HTTP request to /session, which is
-    // supposed to redirect to /session/:sessionId, which returns the
-    // session info. Thus, the create new session command actually is split
-    // between two HTTP requests. For this first request, we just redirect
-    // to a new unique session ID. On the second request the create new
-    // session command will be invoked.
-    *response = HttpResponse(HttpResponse::kSeeOther);
-    response->AddHeader("Location", url_base_ + "session/" + GenerateId());
-    return true;
-  }
-
   if (request.method == kPost && request.body.length()) {
     base::DictionaryValue* body_params;
     scoped_ptr<base::Value> parsed_body(base::JSONReader::Read(request.body));
@@ -333,6 +322,15 @@ bool HttpHandler::HandleWebDriverCommand(
     return true;
   }
 
+  if (iter->name == CommandNames::kNewSession && status == kOk) {
+    // Creating a session involves a HTTP request to /session, which is
+    // supposed to redirect to /session/:sessionId, which returns the
+    // session info.
+    *response = HttpResponse(HttpResponse::kSeeOther);
+    response->AddHeader("Location", url_base_ + "session/" + out_session_id);
+    return true;
+  }
+
   base::DictionaryValue body_params;
   body_params.SetInteger("status", status);
   body_params.Set("value", value.release());
@@ -346,8 +344,6 @@ bool HttpHandler::HandleWebDriverCommand(
 }
 
 namespace internal {
-
-const char kNewSessionIdCommand[] = "chromedriver:newSessionIdCommand";
 
 bool MatchesCommand(HttpMethod method,
                     const std::string& path,

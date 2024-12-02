@@ -5,6 +5,7 @@
 #include <dlfcn.h>
 
 #include <algorithm>
+#include <limits>
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
@@ -1533,6 +1534,11 @@ static void ShiftRightAndInsert(H264Picture::PtrVector *v,
                                 int from,
                                 int to,
                                 H264Picture* pic) {
+  // Security checks, do not disable in Debug mode.
+  CHECK(from <= to);
+  CHECK(to <= std::numeric_limits<int>::max() - 2);
+  // Additional checks. Debug mode ok.
+  DCHECK(v);
   DCHECK(pic);
   DCHECK((to + 1 == static_cast<int>(v->size())) ||
          (to + 2 == static_cast<int>(v->size())));
@@ -2063,6 +2069,12 @@ static int LevelToMaxDpbMbs(int level) {
 bool VaapiH264Decoder::ProcessSPS(int sps_id) {
   const H264SPS* sps = parser_.GetSPS(sps_id);
   DCHECK(sps);
+
+  if (sps->frame_mbs_only_flag == 0) {
+    // Fields/interlaced video not supported.
+    DVLOG(1) << "frame_mbs_only_flag != 1 not supported";
+    return false;
+  }
 
   if (sps->gaps_in_frame_num_value_allowed_flag) {
     DVLOG(1) << "Gaps in frame numbers not supported";

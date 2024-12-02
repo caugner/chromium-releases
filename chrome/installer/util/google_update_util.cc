@@ -11,12 +11,12 @@
 
 #include "base/command_line.h"
 #include "base/environment.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/process_util.h"
 #include "base/string16.h"
-#include "base/string_split.h"
+#include "base/strings/string_split.h"
 #include "base/time.h"
 #include "base/win/registry.h"
 #include "base/win/scoped_handle.h"
@@ -43,7 +43,7 @@ bool IsGoogleUpdatePresent(bool system_install) {
 
 // Returns GoogleUpdateSetup.exe's executable path at specified level.
 // or an empty path if none is found.
-FilePath GetGoogleUpdateSetupExe(bool system_install) {
+base::FilePath GetGoogleUpdateSetupExe(bool system_install) {
   const HKEY root_key = system_install ? HKEY_LOCAL_MACHINE : HKEY_CURRENT_USER;
   RegKey update_key;
 
@@ -182,6 +182,11 @@ bool EnsureUserLevelGoogleUpdatePresent() {
     string16 cmd_string;
     if (!GetUserLevelGoogleUpdateInstallCommandLine(&cmd_string)) {
       LOG(ERROR) << "Cannot find Google Update at system-level.";
+      // Ideally we should return false. However, this case should not be
+      // encountered by regular users, and developers (who often installs
+      // Chrome without Google Update) may be unduly impeded by this case.
+      // Therefore we return true.
+      success = true;
     } else {
       success = LaunchProcessAndWaitWithTimeout(cmd_string,
           base::TimeDelta::FromMilliseconds(INFINITE));

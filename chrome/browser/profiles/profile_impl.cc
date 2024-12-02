@@ -9,8 +9,8 @@
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/environment.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
 #include "base/prefs/json_pref_store.h"
@@ -55,7 +55,6 @@
 #include "chrome/browser/plugins/plugin_prefs.h"
 #include "chrome/browser/prefs/browser_prefs.h"
 #include "chrome/browser/prefs/chrome_pref_service_factory.h"
-#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/prefs/pref_service_syncable.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/prerender/prerender_manager_factory.h"
@@ -81,6 +80,8 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/startup_metric_utils.h"
 #include "chrome/common/url_constants.h"
+#include "components/user_prefs/pref_registry_syncable.h"
+#include "components/user_prefs/user_prefs.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/dom_storage_context.h"
 #include "content/public/browser/host_zoom_map.h"
@@ -95,10 +96,12 @@
 
 #if defined(ENABLE_CONFIGURATION_POLICY)
 #include "chrome/browser/policy/browser_policy_connector.h"
-#include "chrome/browser/policy/managed_mode_policy_provider.h"
 #if !defined(OS_CHROMEOS)
-#include "chrome/browser/policy/user_cloud_policy_manager.h"
-#include "chrome/browser/policy/user_cloud_policy_manager_factory.h"
+#include "chrome/browser/policy/cloud/user_cloud_policy_manager.h"
+#include "chrome/browser/policy/cloud/user_cloud_policy_manager_factory.h"
+#endif
+#if defined(ENABLE_MANAGED_USERS)
+#include "chrome/browser/policy/managed_mode_policy_provider.h"
 #endif
 #else
 #include "chrome/browser/policy/policy_service_stub.h"
@@ -276,6 +279,12 @@ void ProfileImpl::RegisterUserPrefs(PrefRegistrySyncable* registry) {
   registry->RegisterBooleanPref(prefs::kSavingBrowserHistoryDisabled,
                                 false,
                                 PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterBooleanPref(prefs::kAllowDeletingBrowserHistory,
+                                true,
+                                PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterBooleanPref(prefs::kSigninAllowed,
+                                true,
+                                PrefRegistrySyncable::UNSYNCABLE_PREF);
   registry->RegisterBooleanPref(prefs::kForceSafeSearch,
                                 false,
                                 PrefRegistrySyncable::UNSYNCABLE_PREF);
@@ -370,11 +379,13 @@ ProfileImpl::ProfileImpl(
     cloud_policy_manager_->Init();
   }
 #endif
+#if defined(ENABLE_MANAGED_USERS)
   managed_mode_policy_provider_ =
       policy::ManagedModePolicyProvider::Create(this,
                                                 sequenced_task_runner,
                                                 force_immediate_policy_load);
   managed_mode_policy_provider_->Init();
+#endif
   policy_service_ =
       g_browser_process->browser_policy_connector()->CreatePolicyService(this);
 #else
@@ -385,7 +396,7 @@ ProfileImpl::ProfileImpl(
          create_mode == CREATE_MODE_SYNCHRONOUS);
   bool async_prefs = create_mode == CREATE_MODE_ASYNCHRONOUS;
 
-  Profile::RegisterUserPrefs(pref_registry_);
+  chrome::RegisterUserPrefs(pref_registry_);
 
   {
     // On startup, preference loading is always synchronous so a scoped timer
@@ -400,6 +411,8 @@ ProfileImpl::ProfileImpl(
             ExtensionPrefValueMapFactory::GetForProfile(this), false),
         pref_registry_,
         async_prefs));
+    // Register on BrowserContext.
+    components::UserPrefs::Set(this, prefs_.get());
   }
 
   startup_metric_utils::ScopedSlowStartupUMA
@@ -568,15 +581,14 @@ void ProfileImpl::InitHostZoomMap() {
       prefs_->GetDictionary(prefs::kPerHostZoomLevels);
   // Careful: The returned value could be NULL if the pref has never been set.
   if (host_zoom_dictionary != NULL) {
-    for (DictionaryValue::key_iterator i(host_zoom_dictionary->begin_keys());
-         i != host_zoom_dictionary->end_keys(); ++i) {
-      const std::string& host(*i);
+    for (DictionaryValue::Iterator i(*host_zoom_dictionary); !i.IsAtEnd();
+         i.Advance()) {
+      const std::string& host(i.key());
       double zoom_level = 0;
 
-      bool success = host_zoom_dictionary->GetDoubleWithoutPathExpansion(
-          host, &zoom_level);
+      bool success = i.value().GetAsDouble(&zoom_level);
       DCHECK(success);
-      host_zoom_map->SetZoomLevel(host, zoom_level);
+      host_zoom_map->SetZoomLevelForHost(host, zoom_level);
     }
   }
 
@@ -632,7 +644,7 @@ ProfileImpl::~ProfileImpl() {
   if (host_content_settings_map_)
     host_content_settings_map_->ShutdownOnUIThread();
 
-#if defined(ENABLE_CONFIGURATION_POLICY)
+#if defined(ENABLE_MANAGED_USERS)
   if (managed_mode_policy_provider_)
     managed_mode_policy_provider_->Shutdown();
 #endif
@@ -706,10 +718,6 @@ void ProfileImpl::OnPrefsLoaded(bool success) {
     return;
   }
 
-  // TODO(joi): Registration can move to the constructor once it
-  // doesn't need the PrefService parameter.
-  chrome::RegisterUserPrefs(prefs_.get(), pref_registry_);
-
   // TODO(mirandac): remove migration code after 6 months (crbug.com/69995).
   if (g_browser_process->local_state())
     chrome::MigrateBrowserPrefs(this, g_browser_process->local_state());
@@ -780,7 +788,7 @@ Profile::ExitType ProfileImpl::GetLastSessionExitType() {
 }
 
 policy::ManagedModePolicyProvider* ProfileImpl::GetManagedModePolicyProvider() {
-#if defined(ENABLE_CONFIGURATION_POLICY)
+#if defined(ENABLE_MANAGED_USERS)
   return managed_mode_policy_provider_.get();
 #else
   return NULL;
@@ -816,22 +824,9 @@ base::FilePath ProfileImpl::GetPrefFilePath() {
 }
 
 net::URLRequestContextGetter* ProfileImpl::CreateRequestContext(
-    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-        blob_protocol_handler,
-    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-        file_system_protocol_handler,
-    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-        developer_protocol_handler,
-    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-        chrome_protocol_handler,
-    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-        chrome_devtools_protocol_handler) {
+    content::ProtocolHandlerMap* protocol_handlers) {
   return io_data_.CreateMainRequestContextGetter(
-      blob_protocol_handler.Pass(),
-      file_system_protocol_handler.Pass(),
-      developer_protocol_handler.Pass(),
-      chrome_protocol_handler.Pass(),
-      chrome_devtools_protocol_handler.Pass(),
+      protocol_handlers,
       g_browser_process->local_state(),
       g_browser_process->io_thread());
 }
@@ -883,20 +878,9 @@ net::URLRequestContextGetter*
 ProfileImpl::CreateRequestContextForStoragePartition(
     const base::FilePath& partition_path,
     bool in_memory,
-    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-        blob_protocol_handler,
-    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-        file_system_protocol_handler,
-    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-        developer_protocol_handler,
-    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-        chrome_protocol_handler,
-    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-        chrome_devtools_protocol_handler) {
+    content::ProtocolHandlerMap* protocol_handlers) {
   return io_data_.CreateIsolatedAppRequestContextGetter(
-      partition_path, in_memory, blob_protocol_handler.Pass(),
-      file_system_protocol_handler.Pass(), developer_protocol_handler.Pass(),
-      chrome_protocol_handler.Pass(), chrome_devtools_protocol_handler.Pass());
+      partition_path, in_memory, protocol_handlers);
 }
 
 net::SSLConfigService* ProfileImpl::GetSSLConfigService() {
@@ -976,18 +960,20 @@ void ProfileImpl::OnDefaultZoomLevelChanged() {
       pref_change_registrar_.prefs()->GetDouble(prefs::kDefaultZoomLevel));
 }
 
-void ProfileImpl::OnZoomLevelChanged(const std::string& host) {
-  if (host.empty())
+void ProfileImpl::OnZoomLevelChanged(
+    const HostZoomMap::ZoomLevelChange& change) {
+
+  if (change.mode != HostZoomMap::ZOOM_CHANGED_FOR_HOST)
     return;
   HostZoomMap* host_zoom_map = HostZoomMap::GetForBrowserContext(this);
-  double level = host_zoom_map->GetZoomLevel(host);
+  double level = change.zoom_level;
   DictionaryPrefUpdate update(prefs_.get(), prefs::kPerHostZoomLevels);
   DictionaryValue* host_zoom_dictionary = update.Get();
   if (level == host_zoom_map->GetDefaultZoomLevel()) {
-    host_zoom_dictionary->RemoveWithoutPathExpansion(host, NULL);
+    host_zoom_dictionary->RemoveWithoutPathExpansion(change.host, NULL);
   } else {
     host_zoom_dictionary->SetWithoutPathExpansion(
-        host, Value::CreateDoubleValue(level));
+        change.host, Value::CreateDoubleValue(level));
   }
 }
 

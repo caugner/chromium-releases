@@ -4,6 +4,8 @@
 
 #include "android_webview/browser/net/aw_url_request_context_getter.h"
 
+#include <vector>
+
 #include "android_webview/browser/aw_browser_context.h"
 #include "android_webview/browser/aw_request_interceptor.h"
 #include "android_webview/browser/net/aw_network_delegate.h"
@@ -13,6 +15,7 @@
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/url_constants.h"
+#include "net/cookies/cookie_store.h"
 #include "net/http/http_cache.h"
 #include "net/proxy/proxy_service.h"
 #include "net/url_request/data_protocol_handler.h"
@@ -55,9 +58,6 @@ void AwURLRequestContextGetter::Init() {
       content::GetContentClient()->browser()->GetAcceptLangs(
           browser_context_)));
 
-  builder.set_accept_charset(
-      net::HttpUtil::GenerateAcceptCharsetHeader("utf-8"));
-
   url_request_context_.reset(builder.Build());
 
   // TODO(mnaganov): Fix URLRequestContextBuilder to use proper threads.
@@ -72,6 +72,12 @@ void AwURLRequestContextGetter::Init() {
           BrowserThread::GetMessageLoopProxyForThread(BrowserThread::CACHE)));
   main_http_factory_.reset(main_cache);
   url_request_context_->set_http_transaction_factory(main_cache);
+
+  // The CookieMonster must be passed here so it happens synchronously to
+  // the main thread initialization (to avoid race condition in another
+  // thread trying to access the CookieManager API).
+  DidCreateCookieMonster(
+      url_request_context_->cookie_store()->GetCookieMonster());
 }
 
 void AwURLRequestContextGetter::PopulateNetworkSessionParams(
@@ -99,36 +105,60 @@ net::URLRequestContext* AwURLRequestContextGetter::GetURLRequestContext() {
     set_protocol = job_factory->SetProtocolHandler(
         chrome::kDataScheme, new net::DataProtocolHandler());
     DCHECK(set_protocol);
-    DCHECK(blob_protocol_handler_);
     set_protocol = job_factory->SetProtocolHandler(
-        chrome::kBlobScheme, blob_protocol_handler_.release());
+        chrome::kBlobScheme, protocol_handlers_[chrome::kBlobScheme].release());
     DCHECK(set_protocol);
-    DCHECK(file_system_protocol_handler_);
     set_protocol = job_factory->SetProtocolHandler(
-        chrome::kFileSystemScheme, file_system_protocol_handler_.release());
+        chrome::kFileSystemScheme,
+        protocol_handlers_[chrome::kFileSystemScheme].release());
     DCHECK(set_protocol);
-    DCHECK(chrome_protocol_handler_);
     set_protocol = job_factory->SetProtocolHandler(
-        chrome::kChromeUIScheme, chrome_protocol_handler_.release());
+        chrome::kChromeUIScheme,
+        protocol_handlers_[chrome::kChromeUIScheme].release());
     DCHECK(set_protocol);
-    DCHECK(chrome_devtools_protocol_handler_);
     set_protocol = job_factory->SetProtocolHandler(
         chrome::kChromeDevToolsScheme,
-        chrome_devtools_protocol_handler_.release());
+        protocol_handlers_[chrome::kChromeDevToolsScheme].release());
     DCHECK(set_protocol);
-    // Create a chain of URLRequestJobFactories.  Keep |job_factory_| pointed
-    // at the beginning of the chain.
-    job_factory_ = CreateAndroidJobFactoryAndCookieMonster(
-        url_request_context_.get(), job_factory.Pass());
-    job_factory_.reset(new net::ProtocolInterceptJobFactory(
-        job_factory_.Pass(),
-        scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>(
-            new AwRequestInterceptor())));
-    job_factory_.reset(new net::ProtocolInterceptJobFactory(
-        job_factory_.Pass(),
-        developer_protocol_handler_.Pass()));
+    protocol_handlers_.clear();
+
+    // Create a chain of URLRequestJobFactories. The handlers will be invoked
+    // in the order in which they appear in the protocol_handlers vector.
+    typedef std::vector<net::URLRequestJobFactory::ProtocolHandler*>
+        ProtocolHandlerVector;
+    ProtocolHandlerVector protocol_interceptors;
+
+    // Note that even though the content:// scheme handler is created here,
+    // it cannot be used by child processes until access to it is granted via
+    // ChildProcessSecurityPolicy::GrantScheme(). This is done in
+    // AwContentBrowserClient.
+    protocol_interceptors.push_back(
+        CreateAndroidContentProtocolHandler().release());
+    protocol_interceptors.push_back(
+        CreateAndroidAssetFileProtocolHandler().release());
+    // The AwRequestInterceptor must come after the content and asset file job
+    // factories. This for WebViewClassic compatibility where it was not
+    // possible to intercept resource loads to resolvable content:// and
+    // file:// URIs.
+    // This logical dependency is also the reason why the Content
+    // ProtocolHandler has to be added as a ProtocolInterceptJobFactory rather
+    // than via SetProtocolHandler.
+    protocol_interceptors.push_back(new AwRequestInterceptor());
+
+    // The chain of responsibility will execute the handlers in reverse to the
+    // order in which the elements of the chain are created.
+    job_factory_ = job_factory.PassAs<net::URLRequestJobFactory>();
+    for (ProtocolHandlerVector::reverse_iterator
+             i = protocol_interceptors.rbegin();
+         i != protocol_interceptors.rend();
+         ++i) {
+      job_factory_.reset(new net::ProtocolInterceptJobFactory(
+          job_factory_.Pass(), make_scoped_ptr(*i)));
+    }
+
     url_request_context_->set_job_factory(job_factory_.get());
   }
+
   return url_request_context_.get();
 }
 
@@ -138,21 +168,8 @@ AwURLRequestContextGetter::GetNetworkTaskRunner() const {
 }
 
 void AwURLRequestContextGetter::SetProtocolHandlers(
-    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-        blob_protocol_handler,
-    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-        file_system_protocol_handler,
-    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-        developer_protocol_handler,
-    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-        chrome_protocol_handler,
-    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-        chrome_devtools_protocol_handler) {
-  blob_protocol_handler_ = blob_protocol_handler.Pass();
-  file_system_protocol_handler_ = file_system_protocol_handler.Pass();
-  developer_protocol_handler_ = developer_protocol_handler.Pass();
-  chrome_protocol_handler_ = chrome_protocol_handler.Pass();
-  chrome_devtools_protocol_handler_ = chrome_devtools_protocol_handler.Pass();
+    content::ProtocolHandlerMap* protocol_handlers) {
+  std::swap(protocol_handlers_, *protocol_handlers);
 }
 
 }  // namespace android_webview

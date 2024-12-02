@@ -18,7 +18,6 @@
 #include "base/path_service.h"
 #include "base/sequenced_task_runner.h"
 #include "base/utf_string_conversions.h"  // TODO(viettrungluu): delete me.
-#include "chrome/browser/extensions/crx_file.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -32,6 +31,9 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/utility_process_host.h"
 #include "crypto/signature_verifier.h"
+#include "extensions/common/constants.h"
+#include "extensions/common/crx_file.h"
+#include "extensions/common/id_util.h"
 #include "grit/generated_resources.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -557,8 +559,7 @@ bool SandboxedUnpacker::ValidateSignature() {
       std::string(reinterpret_cast<char*>(&key.front()), key.size());
   base::Base64Encode(public_key, &public_key_);
 
-  if (!Extension::GenerateId(public_key, &extension_id_))
-    return false;
+  extension_id_ = id_util::GenerateId(public_key);
 
   return true;
 }
@@ -610,7 +611,7 @@ DictionaryValue* SandboxedUnpacker::RewriteManifestFile(
   }
 
   base::FilePath manifest_path =
-      extension_root_.Append(Extension::kManifestFilename);
+      extension_root_.Append(kManifestFilename);
   if (!file_util::WriteFile(manifest_path,
                             manifest_json.data(), manifest_json.size())) {
     // Error saving manifest.json.
@@ -733,10 +734,9 @@ bool SandboxedUnpacker::RewriteCatalogFiles() {
   }
 
   // Write our parsed catalogs back to disk.
-  for (DictionaryValue::key_iterator key_it = catalogs.begin_keys();
-       key_it != catalogs.end_keys(); ++key_it) {
-    DictionaryValue* catalog;
-    if (!catalogs.GetDictionaryWithoutPathExpansion(*key_it, &catalog)) {
+  for (DictionaryValue::Iterator it(catalogs); !it.IsAtEnd(); it.Advance()) {
+    const DictionaryValue* catalog = NULL;
+    if (!it.value().GetAsDictionary(&catalog)) {
       // Invalid catalog data.
       ReportFailure(
           INVALID_CATALOG_DATA,
@@ -749,8 +749,8 @@ bool SandboxedUnpacker::RewriteCatalogFiles() {
     // TODO(viettrungluu): Fix the |FilePath::FromWStringHack(UTF8ToWide())|
     // hack and remove the corresponding #include.
     base::FilePath relative_path =
-        base::FilePath::FromWStringHack(UTF8ToWide(*key_it));
-    relative_path = relative_path.Append(Extension::kMessagesFilename);
+        base::FilePath::FromWStringHack(UTF8ToWide(it.key()));
+    relative_path = relative_path.Append(kMessagesFilename);
     if (relative_path.IsAbsolute() || relative_path.ReferencesParent()) {
       // Invalid path for catalog.
       ReportFailure(

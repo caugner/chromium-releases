@@ -24,67 +24,6 @@ using content::GpuDataManager;
 
 namespace gpu_util {
 
-// The BrowserMonitor class is used to track the number of currently open
-// browser windows, so that the gpu can be notified when they are created or
-// destroyed. We only count tabbed windows for this purpose.
-
-// There's no BrowserList on Android/
-#if !defined(OS_ANDROID)
-class BrowserMonitor : public chrome::BrowserListObserver {
- public:
-  static BrowserMonitor* GetInstance() {
-    static BrowserMonitor* instance = NULL;
-    if (!instance)
-      instance = new BrowserMonitor;
-    return instance;
-  }
-
-  void Install() {
-    if (!installed_) {
-      BrowserList::AddObserver(this);
-      installed_ = true;
-    }
-  }
-
-  void Uninstall() {
-    if (installed_) {
-      BrowserList::RemoveObserver(this);
-      installed_ = false;
-    }
-  }
-
- private:
-  BrowserMonitor() : num_browsers_(0), installed_(false) {
-  }
-
-  virtual ~BrowserMonitor() {
-  }
-
-  // BrowserListObserver implementation.
-  virtual void OnBrowserAdded(Browser* browser) OVERRIDE {
-    if (browser->type() == Browser::TYPE_TABBED)
-      content::GpuDataManager::GetInstance()->SetWindowCount(++num_browsers_);
-  }
-
-  virtual void OnBrowserRemoved(Browser* browser) OVERRIDE {
-    if (browser->type() == Browser::TYPE_TABBED)
-      content::GpuDataManager::GetInstance()->SetWindowCount(--num_browsers_);
-  }
-
-  uint32 num_browsers_;
-  bool installed_;
-};
-
-void InstallBrowserMonitor() {
-  BrowserMonitor::GetInstance()->Install();
-}
-
-void UninstallBrowserMonitor() {
-  BrowserMonitor::GetInstance()->Uninstall();
-}
-
-#endif // !defined(OS_ANDROID)
-
 void DisableCompositingFieldTrial() {
   base::FieldTrial* trial =
       base::FieldTrialList::Find(content::kGpuCompositingFieldTrialName);
@@ -156,9 +95,16 @@ void InitializeCompositingFieldTrial() {
   // http://crbug.com/133602 for mac
   // http://crbug.com/140866 for linux
 
-#if defined(OS_WIN) || defined(OS_MACOSX)
+#if defined(OS_WIN)
     // Enable threaded compositing on Windows.
   threaded_compositing_probability = kDivisor;
+#elif defined(OS_MACOSX)
+  chrome::VersionInfo::Channel channel = chrome::VersionInfo::GetChannel();
+  if (channel == chrome::VersionInfo::CHANNEL_CANARY ||
+      channel == chrome::VersionInfo::CHANNEL_DEV) {
+    // Enable force-compositing-mode on the Mac.
+    force_compositing_mode_probability = kDivisor;
+  }
 #endif
 
   int force_compositing_group = trial->AppendGroup(

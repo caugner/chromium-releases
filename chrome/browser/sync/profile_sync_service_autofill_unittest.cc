@@ -20,8 +20,6 @@
 #include "base/synchronization/waitable_event.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/autofill/autofill_common_test.h"
-#include "chrome/browser/autofill/personal_data_manager.h"
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
@@ -42,10 +40,13 @@
 #include "chrome/browser/webdata/autofill_entry.h"
 #include "chrome/browser/webdata/autofill_profile_syncable_service.h"
 #include "chrome/browser/webdata/autofill_table.h"
-#include "chrome/browser/webdata/web_data_service.h"
+#include "chrome/browser/webdata/autofill_web_data_service_impl.h"
 #include "chrome/browser/webdata/web_data_service_factory.h"
+#include "chrome/browser/webdata/web_data_service_test_util.h"
 #include "chrome/browser/webdata/web_database.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "components/autofill/browser/autofill_common_test.h"
+#include "components/autofill/browser/personal_data_manager.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/test/test_browser_thread.h"
 #include "google_apis/gaia/gaia_constants.h"
@@ -94,7 +95,7 @@ class HistoryService;
 
 class AutofillTableMock : public AutofillTable {
  public:
-  AutofillTableMock() : AutofillTable(NULL, NULL) {}
+  AutofillTableMock() : AutofillTable() {}
   MOCK_METHOD2(RemoveFormElement,
                bool(const string16& name, const string16& value));  // NOLINT
   MOCK_METHOD1(GetAllAutofillEntries,
@@ -119,18 +120,11 @@ MATCHER_P(MatchProfiles, profile, "") {
   return (profile.Compare(arg) == 0);
 }
 
-
 class WebDatabaseFake : public WebDatabase {
  public:
-  explicit WebDatabaseFake(AutofillTable* autofill_table)
-      : autofill_table_(autofill_table) {}
-
-  virtual AutofillTable* GetAutofillTable() OVERRIDE {
-    return autofill_table_;
+  explicit WebDatabaseFake(AutofillTable* autofill_table) {
+    AddTable(autofill_table);
   }
-
- private:
-  AutofillTable* autofill_table_;
 };
 
 class ProfileSyncServiceAutofillTest;
@@ -150,15 +144,41 @@ syncer::ModelType GetModelType<AutofillProfile>() {
   return syncer::AUTOFILL_PROFILE;
 }
 
-class WebDataServiceFake : public WebDataService {
+class TokenWebDataServiceFake : public WebDataService {
  public:
-  WebDataServiceFake()
-      : web_database_(NULL),
-        syncable_service_created_or_destroyed_(false, false) {
+  TokenWebDataServiceFake()
+      : WebDataService() {
   }
 
-  static scoped_refptr<RefcountedProfileKeyedService> Build(Profile* profile) {
-    return new WebDataServiceFake;
+  virtual bool IsDatabaseLoaded() OVERRIDE {
+    return true;
+  }
+
+  virtual WebDataService::Handle GetAllTokens(
+      WebDataServiceConsumer* consumer) OVERRIDE {
+    // TODO(tim): It would be nice if WebDataService was injected on
+    // construction of TokenService rather than fetched by Initialize so that
+    // this isn't necessary (we could pass a NULL service). We currently do
+    // return it via EXPECT_CALLs, but without depending on order-of-
+    // initialization (which seems way more fragile) we can't tell which
+    // component is asking at what time, and some components in these Autofill
+    // tests require a WebDataService.
+    return 0;
+  }
+
+ private:
+  virtual ~TokenWebDataServiceFake() {}
+
+  DISALLOW_COPY_AND_ASSIGN(TokenWebDataServiceFake);
+};
+
+class WebDataServiceFake : public AutofillWebDataServiceImpl {
+ public:
+  WebDataServiceFake()
+      : AutofillWebDataServiceImpl(
+            NULL, WebDataServiceBase::ProfileErrorCallback()),
+        web_database_(NULL),
+        syncable_service_created_or_destroyed_(false, false) {
   }
 
   void SetDatabase(WebDatabase* web_database) {
@@ -191,34 +211,6 @@ class WebDataServiceFake : public WebDataService {
     return web_database_;
   }
 
-  virtual WebDataService::Handle GetAllTokens(
-      WebDataServiceConsumer* consumer) OVERRIDE {
-    // TODO(tim): It would be nice if WebDataService was injected on
-    // construction of TokenService rather than fetched by Initialize so that
-    // this isn't necessary (we could pass a NULL service). We currently do
-    // return it via EXPECT_CALLs, but without depending on order-of-
-    // initialization (which seems way more fragile) we can't tell which
-    // component is asking at what time, and some components in these Autofill
-    // tests require a WebDataService.
-    return 0;
-  }
-
-  virtual AutocompleteSyncableService*
-      GetAutocompleteSyncableService() const OVERRIDE {
-    EXPECT_TRUE(BrowserThread::CurrentlyOn(BrowserThread::DB));
-    EXPECT_TRUE(autocomplete_syncable_service_);
-
-    return autocomplete_syncable_service_;
-  }
-
-  virtual AutofillProfileSyncableService*
-      GetAutofillProfileSyncableService() const OVERRIDE {
-    EXPECT_TRUE(BrowserThread::CurrentlyOn(BrowserThread::DB));
-    EXPECT_TRUE(autofill_profile_syncable_service_);
-
-    return autofill_profile_syncable_service_;
-  }
-
   virtual void ShutdownOnUIThread() OVERRIDE {}
 
  private:
@@ -227,33 +219,35 @@ class WebDataServiceFake : public WebDataService {
   void CreateSyncableService() {
     ASSERT_TRUE(BrowserThread::CurrentlyOn(BrowserThread::DB));
     // These services are deleted in DestroySyncableService().
-    autocomplete_syncable_service_ = new AutocompleteSyncableService(this);
-    autofill_profile_syncable_service_ =
-        new AutofillProfileSyncableService(this);
+    AutocompleteSyncableService::CreateForWebDataService(this);
+    AutofillProfileSyncableService::CreateForWebDataService(this);
     syncable_service_created_or_destroyed_.Signal();
   }
 
   void DestroySyncableService() {
     ASSERT_TRUE(BrowserThread::CurrentlyOn(BrowserThread::DB));
-    delete autofill_profile_syncable_service_;
-    delete autocomplete_syncable_service_;
+    WebDataServiceBase::ShutdownOnDBThread();
     syncable_service_created_or_destroyed_.Signal();
   }
 
   WebDatabase* web_database_;
 
-  // We own the syncable services, but don't use a |scoped_ptr| because the
-  // lifetime must be managed on the DB thread.
-  AutocompleteSyncableService* autocomplete_syncable_service_;
-  AutofillProfileSyncableService* autofill_profile_syncable_service_;
   WaitableEvent syncable_service_created_or_destroyed_;
+
+  DISALLOW_COPY_AND_ASSIGN(WebDataServiceFake);
 };
+
+ProfileKeyedService* BuildMockWebDataServiceWrapper(Profile* profile) {
+  return new MockWebDataServiceWrapper(
+      new TokenWebDataServiceFake(),
+      new WebDataServiceFake());
+}
 
 ACTION_P(MakeAutocompleteSyncComponents, wds) {
   EXPECT_TRUE(BrowserThread::CurrentlyOn(BrowserThread::DB));
   if (!BrowserThread::CurrentlyOn(BrowserThread::DB))
     return base::WeakPtr<syncer::SyncableService>();
-  return wds->GetAutocompleteSyncableService()->AsWeakPtr();
+  return AutocompleteSyncableService::FromWebDataService(wds)->AsWeakPtr();
 }
 
 ACTION_P(ReturnNewDataTypeManagerWithDebugListener, debug_listener) {
@@ -282,7 +276,7 @@ ACTION_P(MakeAutofillProfileSyncComponents, wds) {
   EXPECT_TRUE(BrowserThread::CurrentlyOn(BrowserThread::DB));
   if (!BrowserThread::CurrentlyOn(BrowserThread::DB))
     return base::WeakPtr<syncer::SyncableService>();;
-  return wds->GetAutofillProfileSyncableService()->AsWeakPtr();
+  return AutofillProfileSyncableService::FromWebDataService(wds)->AsWeakPtr();
 }
 
 class AbstractAutofillFactory {
@@ -293,7 +287,7 @@ class AbstractAutofillFactory {
       ProfileSyncService* service) = 0;
   virtual void SetExpectation(ProfileSyncComponentsFactoryMock* factory,
                               ProfileSyncService* service,
-                              WebDataService* wds,
+                              AutofillWebDataService* wds,
                               DataTypeController* dtc) = 0;
   virtual ~AbstractAutofillFactory() {}
 };
@@ -309,7 +303,7 @@ class AutofillEntryFactory : public AbstractAutofillFactory {
 
   virtual void SetExpectation(ProfileSyncComponentsFactoryMock* factory,
                               ProfileSyncService* service,
-                              WebDataService* wds,
+                              AutofillWebDataService* wds,
                               DataTypeController* dtc) OVERRIDE {
     EXPECT_CALL(*factory, CreateGenericChangeProcessor(_,_,_,_)).
         WillOnce(MakeGenericChangeProcessor());
@@ -331,7 +325,7 @@ class AutofillProfileFactory : public AbstractAutofillFactory {
 
   virtual void SetExpectation(ProfileSyncComponentsFactoryMock* factory,
                               ProfileSyncService* service,
-                              WebDataService* wds,
+                              AutofillWebDataService* wds,
                               DataTypeController* dtc) OVERRIDE {
     EXPECT_CALL(*factory, CreateGenericChangeProcessor(_,_,_,_)).
         WillOnce(MakeGenericChangeProcessor());
@@ -343,17 +337,32 @@ class AutofillProfileFactory : public AbstractAutofillFactory {
   }
 };
 
-class PersonalDataManagerMock: public PersonalDataManager {
+class MockPersonalDataManager : public PersonalDataManager {
  public:
-  static ProfileKeyedService* Build(Profile* profile) {
-    return new PersonalDataManagerMock;
-  }
-
   MOCK_CONST_METHOD0(IsDataLoaded, bool());
   MOCK_METHOD0(LoadProfiles, void());
   MOCK_METHOD0(LoadCreditCards, void());
   MOCK_METHOD0(Refresh, void());
 };
+
+class MockPersonalDataManagerService : public PersonalDataManagerService {
+ public:
+  static ProfileKeyedService* Build(Profile* profile) {
+    return new MockPersonalDataManagerService();
+  }
+
+  MockPersonalDataManagerService() {}
+  virtual ~MockPersonalDataManagerService() {}
+
+  virtual MockPersonalDataManager* GetPersonalDataManager() OVERRIDE {
+    return &personal_data_manager_;
+  }
+
+ private:
+  MockPersonalDataManager personal_data_manager_;
+  DISALLOW_COPY_AND_ASSIGN(MockPersonalDataManagerService);
+};
+
 template <class T> class AddAutofillHelper;
 
 class ProfileSyncServiceAutofillTest
@@ -395,13 +404,21 @@ class ProfileSyncServiceAutofillTest
     profile_.reset(new ProfileMock());
     profile_->CreateRequestContext();
     web_database_.reset(new WebDatabaseFake(&autofill_table_));
-    web_data_service_ = static_cast<WebDataServiceFake*>(
-        WebDataServiceFactory::GetInstance()->SetTestingFactoryAndUse(
-            profile_.get(), WebDataServiceFake::Build).get());
+    MockWebDataServiceWrapper* wrapper =
+        static_cast<MockWebDataServiceWrapper*>(
+            WebDataServiceFactory::GetInstance()->SetTestingFactoryAndUse(
+                profile_.get(), BuildMockWebDataServiceWrapper));
+    web_data_service_ =
+        static_cast<WebDataServiceFake*>(wrapper->GetAutofillWebData().get());
     web_data_service_->SetDatabase(web_database_.get());
-    personal_data_manager_ = static_cast<PersonalDataManagerMock*>(
-        PersonalDataManagerFactory::GetInstance()->SetTestingFactoryAndUse(
-            profile_.get(), PersonalDataManagerMock::Build));
+
+    MockPersonalDataManagerService* personal_data_manager_service =
+        static_cast<MockPersonalDataManagerService*>(
+            PersonalDataManagerFactory::GetInstance()->SetTestingFactoryAndUse(
+                profile_.get(), MockPersonalDataManagerService::Build));
+    personal_data_manager_ =
+        personal_data_manager_service->GetPersonalDataManager();
+
     token_service_ = static_cast<TokenService*>(
         TokenServiceFactory::GetInstance()->SetTestingFactoryAndUse(
             profile_.get(), BuildTokenService));
@@ -636,7 +653,7 @@ class ProfileSyncServiceAutofillTest
   AutofillTableMock autofill_table_;
   scoped_ptr<WebDatabaseFake> web_database_;
   scoped_refptr<WebDataServiceFake> web_data_service_;
-  PersonalDataManagerMock* personal_data_manager_;
+  MockPersonalDataManager* personal_data_manager_;
   syncer::DataTypeAssociationStats association_stats_;
   base::WeakPtrFactory<DataTypeDebugInfoListener> debug_ptr_factory_;
 };
@@ -1115,7 +1132,8 @@ TEST_F(ProfileSyncServiceAutofillTest, ProcessUserChangeAddEntry) {
   scoped_refptr<ThreadNotifier> notifier(new ThreadNotifier(
       db_thread_.DeprecatedGetThreadObject()));
   notifier->Notify(chrome::NOTIFICATION_AUTOFILL_ENTRIES_CHANGED,
-                   content::Source<WebDataService>(web_data_service_.get()),
+                   content::Source<AutofillWebDataService>(
+                        web_data_service_.get()),
                    content::Details<AutofillChangeList>(&changes));
 
   std::vector<AutofillEntry> new_sync_entries;
@@ -1145,7 +1163,8 @@ TEST_F(ProfileSyncServiceAutofillTest, ProcessUserChangeAddProfile) {
   scoped_refptr<ThreadNotifier> notifier(new ThreadNotifier(
       db_thread_.DeprecatedGetThreadObject()));
   notifier->Notify(chrome::NOTIFICATION_AUTOFILL_PROFILE_CHANGED,
-                   content::Source<WebDataService>(web_data_service_.get()),
+                   content::Source<AutofillWebDataService>(
+                        web_data_service_.get()),
                    content::Details<AutofillProfileChange>(&change));
 
   std::vector<AutofillProfile> new_sync_profiles;
@@ -1179,7 +1198,8 @@ TEST_F(ProfileSyncServiceAutofillTest, ProcessUserChangeUpdateEntry) {
   scoped_refptr<ThreadNotifier> notifier(new ThreadNotifier(
       db_thread_.DeprecatedGetThreadObject()));
   notifier->Notify(chrome::NOTIFICATION_AUTOFILL_ENTRIES_CHANGED,
-                   content::Source<WebDataService>(web_data_service_.get()),
+                   content::Source<AutofillWebDataService>(
+                        web_data_service_.get()),
                    content::Details<AutofillChangeList>(&changes));
 
   std::vector<AutofillEntry> new_sync_entries;
@@ -1209,7 +1229,8 @@ TEST_F(ProfileSyncServiceAutofillTest, ProcessUserChangeRemoveEntry) {
   scoped_refptr<ThreadNotifier> notifier(new ThreadNotifier(
       db_thread_.DeprecatedGetThreadObject()));
   notifier->Notify(chrome::NOTIFICATION_AUTOFILL_ENTRIES_CHANGED,
-                   content::Source<WebDataService>(web_data_service_.get()),
+                   content::Source<AutofillWebDataService>(
+                        web_data_service_.get()),
                    content::Details<AutofillChangeList>(&changes));
 
   std::vector<AutofillEntry> new_sync_entries;
@@ -1248,7 +1269,8 @@ TEST_F(ProfileSyncServiceAutofillTest, ProcessUserChangeRemoveProfile) {
   scoped_refptr<ThreadNotifier> notifier(new ThreadNotifier(
       db_thread_.DeprecatedGetThreadObject()));
   notifier->Notify(chrome::NOTIFICATION_AUTOFILL_PROFILE_CHANGED,
-                   content::Source<WebDataService>(web_data_service_.get()),
+                   content::Source<AutofillWebDataService>(
+                        web_data_service_.get()),
                    content::Details<AutofillProfileChange>(&change));
 
   std::vector<AutofillProfile> new_sync_profiles;

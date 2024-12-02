@@ -31,7 +31,7 @@ import java.util.concurrent.Callable;
 /**
  *  Tests for ContentView methods that don't fall into any other category.
  */
-public class ContentViewMiscTest extends AndroidWebViewTestBase {
+public class ContentViewMiscTest extends AwTestBase {
 
     private TestAwContentsClient mContentsClient;
     private AwContents mAwContents;
@@ -45,41 +45,6 @@ public class ContentViewMiscTest extends AndroidWebViewTestBase {
                 createAwTestContainerViewOnMainSync(mContentsClient);
         mAwContents = testContainerView.getAwContents();
         mContentViewCore = testContainerView.getContentViewCore();
-    }
-
-    /*
-     * @SmallTest
-     * @Feature({"Android-WebView"})
-     * BUG 162967
-     */
-    @FlakyTest
-    public void testFlingScroll() throws Throwable {
-        final String testPage = UrlUtils.encodeHtmlDataUri(
-                "<html><head><style>body { width: 5000px; height: 5000px; }</head>" +
-                "<body></body></html>");
-
-        // Test flinging in the y axis
-        loadUrlSync(mAwContents , mContentsClient.getOnPageFinishedHelper(), testPage);
-        assertEquals(0, mContentViewCore.getNativeScrollYForTest());
-        ThreadUtils.runOnUiThread(new Runnable() {
-            @Override
-            public void run() {
-                mContentViewCore.flingScroll(0, 2000);
-            }
-        });
-        Thread.sleep(1000);
-        assertNotSame(0, mContentViewCore.getNativeScrollYForTest());
-
-        // Test flinging in the x axis
-        assertEquals(0, mContentViewCore.getNativeScrollXForTest());
-        ThreadUtils.runOnUiThread(new Runnable() {
-            @Override
-            public void run() {
-                mContentViewCore.flingScroll(2000, 0);
-            }
-        });
-        Thread.sleep(1000);
-        assertNotSame(0, mContentViewCore.getNativeScrollXForTest());
     }
 
     @SmallTest

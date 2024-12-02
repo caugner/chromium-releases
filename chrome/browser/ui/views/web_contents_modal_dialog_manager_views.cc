@@ -9,6 +9,7 @@
 #include "chrome/browser/ui/views/constrained_window_views.h"
 #include "chrome/browser/ui/web_contents_modal_dialog_manager.h"
 #include "ui/views/widget/widget.h"
+#include "ui/views/widget/widget_delegate.h"
 #include "ui/views/widget/widget_observer.h"
 
 #if defined(USE_AURA)
@@ -32,8 +33,8 @@ class NativeWebContentsModalDialogManagerViews
       public views::WidgetObserver {
  public:
   NativeWebContentsModalDialogManagerViews(
-      WebContentsModalDialogManager* manager)
-      : manager_(manager) {
+      NativeWebContentsModalDialogManagerDelegate* native_delegate)
+      : native_delegate_(native_delegate) {
   }
 
   virtual ~NativeWebContentsModalDialogManagerViews() {
@@ -45,8 +46,8 @@ class NativeWebContentsModalDialogManagerViews
   }
 
   // NativeWebContentsModalDialogManager overrides
-  virtual void ManageDialog(gfx::NativeWindow window) OVERRIDE {
-    views::Widget* widget = GetWidget(window);
+  virtual void ManageDialog(NativeWebContentsModalDialog dialog) OVERRIDE {
+    views::Widget* widget = GetWidget(dialog);
     widget->AddObserver(this);
     observed_widgets_.insert(widget);
     widget->set_movement_disabled(true);
@@ -74,31 +75,50 @@ class NativeWebContentsModalDialogManagerViews
 #endif
   }
 
-  virtual void CloseDialog(gfx::NativeWindow window) OVERRIDE {
-    views::Widget* widget = GetWidget(window);
+  virtual void ShowDialog(NativeWebContentsModalDialog dialog) OVERRIDE {
+    GetWidget(dialog)->Show();
+    FocusDialog(dialog);
+  }
+
+  virtual void CloseDialog(NativeWebContentsModalDialog dialog) OVERRIDE {
+    GetWidget(dialog)->Close();
+  }
+
+  virtual void FocusDialog(NativeWebContentsModalDialog dialog) OVERRIDE {
+    views::Widget* widget = GetWidget(dialog);
+    if (widget->widget_delegate() &&
+        widget->widget_delegate()->GetInitiallyFocusedView())
+      widget->widget_delegate()->GetInitiallyFocusedView()->RequestFocus();
+#if defined(USE_ASH)
+    // We don't necessarily have a RootWindow yet.
+    if (widget->GetNativeView()->GetRootWindow())
+      widget->GetNativeView()->Focus();
+#endif
+  }
+
+  virtual void PulseDialog(NativeWebContentsModalDialog dialog) OVERRIDE {
+  }
+
+  // views::WidgetObserver overrides
+  virtual void OnWidgetClosing(views::Widget* widget) OVERRIDE {
 #if defined(USE_ASH)
     gfx::NativeView view = platform_util::GetParent(widget->GetNativeView());
     // Allow the parent to animate again.
     if (view && view->parent())
       view->parent()->ClearProperty(aura::client::kAnimationsDisabledKey);
 #endif
-    widget->Close();
-  }
-
-  // views::WidgetObserver overrides
-  virtual void OnWidgetClosing(views::Widget* widget) OVERRIDE {
-    manager_->WillClose(static_cast<ConstrainedWindowViews*>(widget));
+    native_delegate_->WillClose(widget->GetNativeView());
     observed_widgets_.erase(widget);
   }
 
  private:
-  static views::Widget* GetWidget(gfx::NativeWindow window) {
-    views::Widget* widget = views::Widget::GetWidgetForNativeWindow(window);
+  static views::Widget* GetWidget(NativeWebContentsModalDialog dialog) {
+    views::Widget* widget = views::Widget::GetWidgetForNativeWindow(dialog);
     DCHECK(widget);
     return widget;
   }
 
-  WebContentsModalDialogManager* manager_;
+  NativeWebContentsModalDialogManagerDelegate* native_delegate_;
   std::set<views::Widget*> observed_widgets_;
 
   DISALLOW_COPY_AND_ASSIGN(NativeWebContentsModalDialogManagerViews);
@@ -107,6 +127,7 @@ class NativeWebContentsModalDialogManagerViews
 }  // namespace
 
 NativeWebContentsModalDialogManager* WebContentsModalDialogManager::
-CreateNativeManager(WebContentsModalDialogManager* manager) {
-  return new NativeWebContentsModalDialogManagerViews(manager);
+CreateNativeManager(
+    NativeWebContentsModalDialogManagerDelegate* native_delegate) {
+  return new NativeWebContentsModalDialogManagerViews(native_delegate);
 }

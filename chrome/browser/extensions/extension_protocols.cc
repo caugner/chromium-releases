@@ -7,7 +7,7 @@
 #include <algorithm>
 
 #include "base/compiler_specific.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
@@ -19,15 +19,17 @@
 #include "build/build_config.h"
 #include "chrome/browser/extensions/extension_info_map.h"
 #include "chrome/browser/extensions/image_loader.h"
-#include "chrome/browser/net/chrome_url_request_context.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/extensions/api/icons/icons_handler.h"
+#include "chrome/common/extensions/background_info.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_file_util.h"
-#include "chrome/common/extensions/extension_resource.h"
+#include "chrome/common/extensions/incognito_handler.h"
 #include "chrome/common/extensions/web_accessible_resources_handler.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/resource_request_info.h"
 #include "extensions/common/constants.h"
+#include "extensions/common/extension_resource.h"
 #include "googleurl/src/url_util.h"
 #include "grit/component_extension_resources_map.h"
 #include "net/base/mime_util.h"
@@ -168,9 +170,11 @@ class GeneratedBackgroundPageJob : public net::URLRequestSimpleJob {
     *charset = "utf-8";
 
     *data = "<!DOCTYPE html>\n<body>\n";
-    for (size_t i = 0; i < extension_->background_scripts().size(); ++i) {
+    const std::vector<std::string>& background_scripts =
+        extensions::BackgroundInfo::GetBackgroundScripts(extension_);
+    for (size_t i = 0; i < background_scripts.size(); ++i) {
       *data += "<script src=\"";
-      *data += extension_->background_scripts()[i];
+      *data += background_scripts[i];
       *data += "\"></script>\n";
     }
 
@@ -188,7 +192,7 @@ class GeneratedBackgroundPageJob : public net::URLRequestSimpleJob {
   net::HttpResponseInfo response_info_;
 };
 
-void ReadResourceFilePath(const ExtensionResource& resource,
+void ReadResourceFilePath(const extensions::ExtensionResource& resource,
                           base::FilePath* file_path) {
   *file_path = resource.GetFilePath();
 }
@@ -238,7 +242,7 @@ class URLRequestExtensionJob : public net::URLRequestFileJob {
   }
 
   net::HttpResponseInfo response_info_;
-  ExtensionResource resource_;
+  extensions::ExtensionResource resource_;
   base::WeakPtrFactory<URLRequestExtensionJob> weak_factory_;
 };
 
@@ -254,7 +258,7 @@ bool ExtensionCanLoadInIncognito(const ResourceRequestInfo* info,
   if (info->GetResourceType() == ResourceType::MAIN_FRAME) {
     const Extension* extension =
         extension_info_map->extensions().GetByID(extension_id);
-    return extension && extension->incognito_split_mode();
+    return extension && extensions::IncognitoInfo::IsSplitMode(extension);
   }
 
   return true;
@@ -295,7 +299,7 @@ bool URLIsForExtensionIcon(const GURL& url, const Extension* extension) {
   DCHECK_EQ(url.host(), extension->id());
   DCHECK(path.length() > 0 && path[0] == '/');
   path = path.substr(1);
-  return extension->icons().ContainsPath(path);
+  return extensions::IconsInfo::GetIcons(extension).ContainsPath(path);
 }
 
 class ExtensionProtocolHandler

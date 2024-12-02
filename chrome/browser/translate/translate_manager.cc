@@ -12,12 +12,12 @@
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
-#include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
+#include "base/strings/string_split.h"
 #include "base/values.h"
-#include "chrome/browser/api/infobars/infobar_service.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_contents/language_state.h"
 #include "chrome/browser/tab_contents/tab_util.h"
@@ -227,9 +227,10 @@ void TranslateManager::SetSupportedLanguages(const std::string& language_list) {
   std::set<std::string>* supported_languages = supported_languages_.Pointer();
   supported_languages->clear();
   // ... and replace it with the values we just fetched from the server.
-  DictionaryValue::key_iterator iter = target_languages->begin_keys();
-  for (; iter != target_languages->end_keys(); ++iter)
-    supported_languages_.Pointer()->insert(*iter);
+  for (DictionaryValue::Iterator iter(*target_languages); !iter.IsAtEnd();
+       iter.Advance()) {
+    supported_languages_.Pointer()->insert(iter.key());
+  }
 }
 
 // static
@@ -393,9 +394,13 @@ void TranslateManager::OnURLFetchComplete(const net::URLFetcher* source) {
           GetRawDataResource(IDR_TRANSLATE_JS);
       DCHECK(translate_script_.empty());
       str.CopyToString(&translate_script_);
+      std::string argument = "('";
+      std::string api_key = google_apis::GetAPIKey();
+      argument += net::EscapeQueryParamValue(api_key, true);
+      argument += "');\n";
       std::string data;
       source->GetResponseAsString(&data);
-      translate_script_ += "\n" + data;
+      translate_script_ += argument + data;
       // We'll expire the cached script after some time, to make sure long
       // running browsers still get fixes that might get pushed with newer
       // scripts.
@@ -719,7 +724,7 @@ bool TranslateManager::IsAcceptLanguage(WebContents* web_contents,
   return iter->second.count(language) != 0;
 }
 
-void TranslateManager::InitAcceptLanguages(PrefServiceBase* prefs) {
+void TranslateManager::InitAcceptLanguages(PrefService* prefs) {
   // We have been asked for this profile, build the languages.
   std::string accept_langs_str = prefs->GetString(prefs::kAcceptLanguages);
   std::vector<std::string> accept_langs_list;

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,9 @@
 #include <iterator>
 #include <string>
 
+#include "chrome/common/extensions/api/plugins/plugins_handler.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/manifest_handlers/content_scripts_handler.h"
 #include "chrome/common/extensions/manifest_url_handler.h"
 #include "chrome/common/extensions/permissions/permissions_info.h"
 #include "content/public/common/url_constants.h"
@@ -66,7 +68,6 @@ const char* kNonPermissionFunctionNames[] = {
   "app.getDetails",
   "app.getDetailsForFrame",
   "app.getIsInstalled",
-  "app.install",
   "app.installState",
   "app.runningState",
   "management.getPermissionWarningsByManifest",
@@ -225,20 +226,9 @@ bool PermissionSet::operator==(
 }
 
 bool PermissionSet::Contains(const PermissionSet& set) const {
-  // Every set includes the empty set.
-  if (set.IsEmpty())
-    return true;
-
-  if (!apis_.Contains(set.apis()))
-      return false;
-
-  if (!explicit_hosts().Contains(set.explicit_hosts()))
-    return false;
-
-  if (!scriptable_hosts().Contains(set.scriptable_hosts()))
-    return false;
-
-  return true;
+  return apis_.Contains(set.apis()) &&
+         explicit_hosts().Contains(set.explicit_hosts()) &&
+         scriptable_hosts().Contains(set.scriptable_hosts());
 }
 
 std::set<std::string> PermissionSet::GetAPIsAsStrings() const {
@@ -522,6 +512,10 @@ std::set<std::string> PermissionSet::GetDistinctHosts(
 }
 
 void PermissionSet::InitImplicitPermissions() {
+  // The downloads permission implies the internal version as well.
+  if (apis_.find(APIPermission::kDownloads) != apis_.end())
+    apis_.insert(APIPermission::kDownloadsInternal);
+
   // The webRequest permission implies the internal version as well.
   if (apis_.find(APIPermission::kWebRequest) != apis_.end())
     apis_.insert(APIPermission::kWebRequestInternal);
@@ -534,15 +528,17 @@ void PermissionSet::InitImplicitPermissions() {
 void PermissionSet::InitImplicitExtensionPermissions(
     const extensions::Extension* extension) {
   // Add the implied permissions.
-  if (!extension->plugins().empty())
+  if (extensions::PluginInfo::HasPlugins(extension))
     apis_.insert(APIPermission::kPlugin);
+
   if (!ManifestURL::GetDevToolsPage(extension).is_empty())
     apis_.insert(APIPermission::kDevtools);
 
   // Add the scriptable hosts.
   for (extensions::UserScriptList::const_iterator content_script =
-           extension->content_scripts().begin();
-       content_script != extension->content_scripts().end(); ++content_script) {
+           ContentScriptsInfo::GetContentScripts(extension).begin();
+       content_script != ContentScriptsInfo::GetContentScripts(extension).end();
+       ++content_script) {
     URLPatternSet::const_iterator pattern =
         content_script->url_patterns().begin();
     for (; pattern != content_script->url_patterns().end(); ++pattern)

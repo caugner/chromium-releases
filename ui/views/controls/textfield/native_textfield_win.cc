@@ -155,25 +155,6 @@ bool NativeTextfieldWin::IsDoubleClick(const POINT& origin,
       (abs(current.y - origin.y) <= (GetSystemMetrics(SM_CYDOUBLECLK) / 2));
 }
 
-// static
-bool NativeTextfieldWin::IsNumPadDigit(int key_code, bool extended_key) {
-  if (key_code >= VK_NUMPAD0 && key_code <= VK_NUMPAD9)
-    return true;
-
-  // Check for num pad keys without NumLock.
-  // Note: there is no easy way to know if a the key that was pressed comes from
-  //       the num pad or the rest of the keyboard.  Investigating how
-  //       TranslateMessage() generates the WM_KEYCHAR from an
-  //       ALT + <NumPad sequences> it appears it looks at the extended key flag
-  //       (which is on if the key pressed comes from one of the 3 clusters to
-  //       the left of the numeric keypad).  So we use it as well.
-  return !extended_key &&
-            ((key_code >= VK_PRIOR && key_code <= VK_DOWN) ||  // All keys but 5
-                                                               // and 0.
-            (key_code == VK_CLEAR) ||  // Key 5.
-            (key_code == VK_INSERT));  // Key 0.
-}
-
 void NativeTextfieldWin::AttachHack() {
   // See the code in textfield.cc that calls this for why this is here.
   container_view_->set_focus_view(textfield_);
@@ -356,11 +337,10 @@ bool NativeTextfieldWin::IsIMEComposing() const {
   return composition_size > 0;
 }
 
-void NativeTextfieldWin::GetSelectedRange(ui::Range* range) const {
+ui::Range NativeTextfieldWin::GetSelectedRange() const {
   // TODO(tommi): Implement.
   NOTIMPLEMENTED();
-  range->set_start(0);
-  range->set_end(0);
+  return ui::Range();
 }
 
 void NativeTextfieldWin::SelectRange(const ui::Range& range) {
@@ -368,9 +348,10 @@ void NativeTextfieldWin::SelectRange(const ui::Range& range) {
   NOTIMPLEMENTED();
 }
 
-void NativeTextfieldWin::GetSelectionModel(gfx::SelectionModel* sel) const {
+gfx::SelectionModel NativeTextfieldWin::GetSelectionModel() const {
   // TODO(tommi): Implement.
   NOTIMPLEMENTED();
+  return gfx::SelectionModel();
 }
 
 void NativeTextfieldWin::SelectSelectionModel(const gfx::SelectionModel& sel) {
@@ -444,7 +425,7 @@ int NativeTextfieldWin::GetTextfieldBaseline() const {
 }
 
 void NativeTextfieldWin::ExecuteTextCommand(int command_id) {
-  ExecuteCommand(command_id);
+  ExecuteCommand(command_id, 0);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -485,7 +466,7 @@ bool NativeTextfieldWin::GetAcceleratorForCommandId(int command_id,
   return container_view_->GetWidget()->GetAccelerator(command_id, accelerator);
 }
 
-void NativeTextfieldWin::ExecuteCommand(int command_id) {
+void NativeTextfieldWin::ExecuteCommand(int command_id, int event_flags) {
   ScopedFreeze freeze(this, GetTextObjectModel());
   OnBeforePossibleChange();
   switch (command_id) {
@@ -636,10 +617,10 @@ void NativeTextfieldWin::OnCopy() {
 
   const string16 text(GetSelectedText());
   if (!text.empty()) {
-    ui::ScopedClipboardWriter scw(
-        ui::Clipboard::GetForCurrentThread(),
-        ui::Clipboard::BUFFER_STANDARD);
-    scw.WriteText(text);
+    ui::ScopedClipboardWriter(ui::Clipboard::GetForCurrentThread(),
+                              ui::Clipboard::BUFFER_STANDARD).WriteText(text);
+    if (TextfieldController* controller = textfield_->GetController())
+      controller->OnAfterCutOrCopy();
   }
 }
 

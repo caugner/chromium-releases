@@ -88,7 +88,7 @@ AppListMainView::AppListMainView(AppListViewDelegate* delegate,
                                         kInnerPadding,
                                         kInnerPadding));
 
-  search_box_view_ = new SearchBoxView(this);
+  search_box_view_ = new SearchBoxView(this, delegate);
   AddChildView(search_box_view_);
 
   contents_view_ = new ContentsView(this, pagination_model);
@@ -128,6 +128,10 @@ void AppListMainView::ShowAppListWhenReady() {
 
 void AppListMainView::Close() {
   icon_loading_wait_timer_.Stop();
+}
+
+void AppListMainView::Prerender() {
+  contents_view_->Prerender();
 }
 
 void AppListMainView::PreloadIcons(PaginationModel* pagination_model,

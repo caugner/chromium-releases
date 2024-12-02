@@ -31,6 +31,7 @@
 
 #if defined(USE_AURA)
 #include "ui/aura/env.h"
+#include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
 #endif
 
@@ -57,7 +58,8 @@ namespace views {
 namespace {
 
 // The spacing offset for the bubble tip.
-const int kBubbleTipSize = 10;
+const int kBubbleTipSizeLeftRight = 12;
+const int kBubbleTipSizeTopBottom = 11;
 
 // Returns true if the mnemonic of |menu| matches key.
 bool MatchesMnemonic(MenuItemView* menu, char16 key) {
@@ -283,6 +285,7 @@ MenuItemView* MenuController::Run(Widget* parent,
   exit_type_ = EXIT_NONE;
   possible_drag_ = false;
   drag_in_progress_ = false;
+  closing_event_time_ = base::TimeDelta();
 
   bool nested_menu = showing_;
   if (showing_) {
@@ -461,9 +464,17 @@ void MenuController::OnMouseReleased(SubmenuView* source,
   possible_drag_ = false;
   DCHECK(blocking_run_);
   MenuPart part = GetMenuPart(source, event.location());
-  if (event.IsRightMouseButton() && (part.type == MenuPart::MENU_ITEM &&
-                                     part.menu)) {
-    if (ShowContextMenu(part.menu, source, event))
+  if (event.IsRightMouseButton() && part.type == MenuPart::MENU_ITEM) {
+    MenuItemView* menu = part.menu;
+    // |menu| is NULL means this event is from an empty menu or a separator.
+    // If it is from an empty menu, use parent context menu instead of that.
+    if (menu == NULL &&
+        part.submenu->child_count() == 1 &&
+        part.submenu->child_at(0)->id()
+           == views::MenuItemView::kEmptyMenuItemViewID)
+      menu = part.parent;
+
+    if (menu != NULL && ShowContextMenu(menu, source, event))
       return;
   }
 
@@ -805,12 +816,20 @@ void MenuController::SetSelectionOnPointerDown(SubmenuView* source,
   if (part.type == MenuPart::NONE ||
       (part.type == MenuPart::MENU_ITEM && part.menu &&
        part.menu->GetRootMenuItem() != state_.item->GetRootMenuItem())) {
+    // Remember the time when we repost the event. The owner can then use this
+    // to figure out if this menu was finished with the same click which is
+    // sent to it thereafter. Note that the time stamp front he event cannot be
+    // used since the reposting will set a new timestamp when the event gets
+    // processed. As such it is better to take the current time which will be
+    // closer to the time when it arrives again in the menu handler.
+    closing_event_time_ = ui::EventTimeForNow();
+
     // Mouse wasn't pressed over any menu, or the active menu, cancel.
 
+#if defined(OS_WIN) && !defined(USE_AURA)
     // We're going to close and we own the mouse capture. We need to repost the
     // mouse down, otherwise the window the user clicked on won't get the
     // event.
-#if (defined(OS_WIN) && !defined(USE_AURA)) || defined(USE_X11)
     RepostEvent(source, event);
 #endif
 
@@ -827,6 +846,15 @@ void MenuController::SetSelectionOnPointerDown(SubmenuView* source,
         exit_type = EXIT_OUTERMOST;
     }
     Cancel(exit_type);
+
+#if defined(USE_AURA)
+    // We're going to exit the menu and want to repost the event so that is
+    // is handled normally after the context menu has exited. We call
+    // RepostEvent after Cancel so that mouse capture has been released so
+    // that finding the event target is unaffected by the current capture.
+    RepostEvent(source, event);
+#endif
+
     return;
   }
 
@@ -1064,7 +1092,8 @@ MenuController::MenuController(ui::NativeTheme* theme,
       active_mouse_view_(NULL),
       delegate_(delegate),
       message_loop_depth_(0),
-      menu_config_(theme) {
+      menu_config_(theme),
+      closing_event_time_(base::TimeDelta()) {
   active_instance_ = this;
 }
 
@@ -1752,20 +1781,20 @@ gfx::Rect MenuController::CalculateBubbleMenuBounds(MenuItemView* item,
     // between the display corner and the target area + the tip size.
     if (state_.anchor == MenuItemView::BUBBLE_LEFT) {
       max_width = owner_bounds.x() - state_.monitor_bounds.x() +
-                  kBubbleTipSize;
+                  kBubbleTipSizeLeftRight;
     } else if (state_.anchor == MenuItemView::BUBBLE_RIGHT) {
       max_width = state_.monitor_bounds.right() - owner_bounds.right() +
-                  kBubbleTipSize;
+                  kBubbleTipSizeLeftRight;
     } else if (state_.anchor == MenuItemView::BUBBLE_ABOVE) {
       max_height = owner_bounds.y() - state_.monitor_bounds.y() +
-                   kBubbleTipSize;
+                   kBubbleTipSizeTopBottom;
     } else if (state_.anchor == MenuItemView::BUBBLE_BELOW) {
       max_height = state_.monitor_bounds.bottom() - owner_bounds.bottom() +
-                   kBubbleTipSize;
+                   kBubbleTipSizeTopBottom;
     }
     // The space for the menu to cover should never get empty.
-    DCHECK_GE(max_width, kBubbleTipSize);
-    DCHECK_GE(max_height, kBubbleTipSize);
+    DCHECK_GE(max_width, kBubbleTipSizeLeftRight);
+    DCHECK_GE(max_height, kBubbleTipSizeTopBottom);
     pref.set_width(std::min(pref.width(), max_width));
     pref.set_height(std::min(pref.height(), max_height));
   }
@@ -1777,9 +1806,9 @@ gfx::Rect MenuController::CalculateBubbleMenuBounds(MenuItemView* item,
   if (state_.anchor == MenuItemView::BUBBLE_ABOVE ||
       state_.anchor == MenuItemView::BUBBLE_BELOW) {
     if (state_.anchor == MenuItemView::BUBBLE_ABOVE)
-      y = owner_bounds.y() - pref.height() + kBubbleTipSize;
+      y = owner_bounds.y() - pref.height() + kBubbleTipSizeTopBottom;
     else
-      y = owner_bounds.bottom() - kBubbleTipSize;
+      y = owner_bounds.bottom() - kBubbleTipSizeTopBottom;
 
     x = owner_bounds.CenterPoint().x() - pref.width() / 2;
     int x_old = x;
@@ -1792,9 +1821,9 @@ gfx::Rect MenuController::CalculateBubbleMenuBounds(MenuItemView* item,
         pref.width() / 2 - x + x_old);
   } else {
     if (state_.anchor == MenuItemView::BUBBLE_RIGHT)
-      x = owner_bounds.right() - kBubbleTipSize;
+      x = owner_bounds.right() - kBubbleTipSizeLeftRight;
     else
-      x = owner_bounds.x() - pref.width() + kBubbleTipSize;
+      x = owner_bounds.x() - pref.width() + kBubbleTipSizeLeftRight;
 
     y = owner_bounds.CenterPoint().y() - pref.height() / 2;
     int y_old = y;
@@ -2066,25 +2095,13 @@ void MenuController::RepostEvent(SubmenuView* source,
     }
   }
 }
-#elif defined(USE_X11)
+#elif defined(USE_AURA)
 void MenuController::RepostEvent(SubmenuView* source,
                                  const ui::LocatedEvent& event) {
-  if (!state_.item) {
-    // We some times get an event after closing all the menus. Ignore it.
-    // Make sure the menu is in fact not visible. If the menu is visible, then
-    // we're in a bad state where we think the menu isn't visibile but it is.
-    DCHECK(!source->GetWidget()->IsVisible());
-    return;
-  }
-  if (!event.native_event())
-    return;
-  // We putback the X11 event. We set the "send_event" field in the
-  // XEvent. Otherwise a mouse click would generate a double click
-  // event. The field "send_event" is in the same place for all event
-  // types so we can use "xany" regardless of type.
-  XEvent xevent = *event.native_event();
-  xevent.xany.send_event = True;
-  XPutBackEvent(xevent.xany.display, &xevent);
+  aura::RootWindow* root_window =
+      source->GetWidget()->GetNativeWindow()->GetRootWindow();
+  DCHECK(root_window);
+  root_window->RepostEvent(event);
 }
 #endif
 

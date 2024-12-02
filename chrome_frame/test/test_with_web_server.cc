@@ -5,7 +5,9 @@
 #include "chrome_frame/test/test_with_web_server.h"
 
 #include "base/base_paths.h"
+#include "base/file_util.h"
 #include "base/file_version_info.h"
+#include "base/files/memory_mapped_file.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/path_service.h"
 #include "base/stringprintf.h"
@@ -1016,7 +1018,7 @@ TEST_F(ChromeFrameTestWithWebServer, FullTabModeIE_TestDownloadFromForm) {
     virtual bool GetCustomHeaders(std::string* headers) const {
       if (!is_post_)
         return false;
-      *headers = StringPrintf(
+      *headers = base::StringPrintf(
           "HTTP/1.1 200 OK\r\n"
           "Content-Disposition: attachment;filename=\"test.txt\"\r\n"
           "Content-Type: application/text\r\n"
@@ -1083,4 +1085,15 @@ TEST_F(ChromeFrameTestWithWebServer, FullTabModeIE_TestDownloadFromForm) {
 
   EXPECT_EQ(1, response->get_request_count());
   EXPECT_EQ(1, response->post_request_count());
+}
+
+// This test loads a large page and ensures that the full page contents are
+// actually loaded via a self-validating HTML page. This is done due to a bug
+// whereby the middle of the response stream would sometimes be truncated when
+// loading a CF document. See http://crbug.com/178421 for details.
+TEST_F(ChromeFrameTestWithWebServer, FullTabModeIE_LargePageLoad) {
+  const wchar_t kLargePageLoadPage[] =
+      L"chrome_frame_large_page.html";
+
+  SimpleBrowserTest(IE, kLargePageLoadPage);
 }

@@ -7,7 +7,7 @@
 #include <algorithm>
 
 #include "ash/launcher/launcher_button_host.h"
-#include "ash/wm/shelf_layout_manager.h"
+#include "ash/shelf/shelf_layout_manager.h"
 #include "grit/ash_resources.h"
 #include "skia/ext/image_operations.h"
 #include "ui/base/accessibility/accessible_view_state.h"
@@ -34,7 +34,7 @@ const int kHopSpacing = 2;
 const int kIconPad = 8;
 const int kHopUpMS = 0;
 const int kHopDownMS = 200;
-const int kAttentionThrobDurationMS = 1000;
+const int kAttentionThrobDurationMS = 800;
 
 bool ShouldHop(int state) {
   return state & ash::internal::LauncherButton::STATE_HOVERED ||
@@ -42,32 +42,104 @@ bool ShouldHop(int state) {
       state & ash::internal::LauncherButton::STATE_FOCUSED;
 }
 
+// Simple AnimationDelegate that owns a single ThrobAnimation instance to
+// keep all Draw Attention animations in sync.
+class LauncherButtonAnimation : public ui::AnimationDelegate {
+ public:
+  class Observer {
+   public:
+    virtual void AnimationProgressed() = 0;
+
+   protected:
+    virtual ~Observer() {}
+  };
+
+  static LauncherButtonAnimation* GetInstance() {
+    static LauncherButtonAnimation* s_instance = new LauncherButtonAnimation();
+    return s_instance;
+  }
+
+  void AddObserver(Observer* observer) {
+    observers_.AddObserver(observer);
+  }
+
+  void RemoveObserver(Observer* observer) {
+    observers_.RemoveObserver(observer);
+    if (observers_.size() == 0)
+      animation_.Stop();
+  }
+
+  int GetAlpha() {
+    return GetThrobAnimation().CurrentValueBetween(0, 255);
+  }
+
+  double GetAnimation() {
+    return GetThrobAnimation().GetCurrentValue();
+  }
+
+ private:
+  LauncherButtonAnimation()
+    : ALLOW_THIS_IN_INITIALIZER_LIST(animation_(this)) {
+    animation_.SetThrobDuration(kAttentionThrobDurationMS);
+    animation_.SetTweenType(ui::Tween::SMOOTH_IN_OUT);
+  }
+
+  virtual ~LauncherButtonAnimation() {
+  }
+
+  ui::ThrobAnimation& GetThrobAnimation() {
+    if (!animation_.is_animating()) {
+      animation_.Reset();
+      animation_.StartThrobbing(-1 /*throb indefinitely*/);
+    }
+    return animation_;
+  }
+
+  // ui::AnimationDelegate
+  void AnimationProgressed(const ui::Animation* animation) {
+    if (animation != &animation_)
+      return;
+    if (!animation_.is_animating())
+      return;
+    FOR_EACH_OBSERVER(Observer, observers_, AnimationProgressed());
+  }
+
+  ui::ThrobAnimation animation_;
+  ObserverList<Observer> observers_;
+
+  DISALLOW_COPY_AND_ASSIGN(LauncherButtonAnimation);
+};
+
 }  // namespace
 
 namespace ash {
-
 namespace internal {
 
 ////////////////////////////////////////////////////////////////////////////////
 // LauncherButton::BarView
 
 class LauncherButton::BarView : public views::ImageView,
-                                public ui::AnimationDelegate {
+                                public LauncherButtonAnimation::Observer {
  public:
-  BarView() : ALLOW_THIS_IN_INITIALIZER_LIST(animation_(this)) {
-    animation_.SetThrobDuration(kAttentionThrobDurationMS);
-    animation_.SetTweenType(ui::Tween::SMOOTH_IN_OUT);
+  BarView(LauncherButton* host)
+      : host_(host),
+        show_attention_(false) {
   }
 
-  // View overrides.
+  ~BarView() {
+    if (show_attention_)
+      LauncherButtonAnimation::GetInstance()->RemoveObserver(this);
+  }
+
+  // View
   virtual bool HitTestRect(const gfx::Rect& rect) const OVERRIDE {
     // Allow Mouse...() messages to go to the parent view.
     return false;
   }
 
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE {
-    if (animation_.is_animating()) {
-      int alpha = animation_.CurrentValueBetween(0, 255);
+    if (show_attention_) {
+      int alpha = LauncherButtonAnimation::GetInstance()->GetAlpha();
       canvas->SaveLayerAlpha(alpha);
       views::ImageView::OnPaint(canvas);
       canvas->Restore();
@@ -76,23 +148,54 @@ class LauncherButton::BarView : public views::ImageView,
     }
   }
 
-  // ui::AnimationDelegate overrides.
-  virtual void AnimationProgressed(const ui::Animation* animation) OVERRIDE {
+  // LauncherButtonAnimation::Observer
+  virtual void AnimationProgressed() OVERRIDE {
+    UpdateBounds();
     SchedulePaint();
   }
 
+  void SetBarBoundsRect(const gfx::Rect& bounds) {
+    base_bounds_ = bounds;
+    UpdateBounds();
+  }
+
   void ShowAttention(bool show) {
-    if (show) {
-      // It's less disruptive if we don't start the pulsing at 0.
-      animation_.Reset(0.375);
-      animation_.StartThrobbing(-1);
-    } else {
-      animation_.Reset(0.0);
+    if (show_attention_ != show) {
+      show_attention_ = show;
+      if (show_attention_)
+        LauncherButtonAnimation::GetInstance()->AddObserver(this);
+      else
+        LauncherButtonAnimation::GetInstance()->RemoveObserver(this);
     }
+    UpdateBounds();
   }
 
  private:
-  ui::ThrobAnimation animation_;
+  void UpdateBounds() {
+    gfx::Rect bounds = base_bounds_;
+    if (show_attention_) {
+      // Scale from .35 to 1.0 of the total width (which is wider than the
+      // visible width of the image, so the animation "rests" briefly at full
+      // visible width.
+      double animation = LauncherButtonAnimation::GetInstance()->GetAnimation();
+      double scale = (.35 + .65 * animation);
+      if (host_->shelf_layout_manager()->GetAlignment() ==
+          SHELF_ALIGNMENT_BOTTOM) {
+        bounds.set_width(base_bounds_.width() * scale);
+        int x_offset = (base_bounds_.width() - bounds.width()) / 2;
+        bounds.set_x(base_bounds_.x() + x_offset);
+      } else {
+        bounds.set_height(base_bounds_.height() * scale);
+        int y_offset = (base_bounds_.height() - bounds.height()) / 2;
+        bounds.set_y(base_bounds_.y() + y_offset);
+      }
+    }
+    SetBoundsRect(bounds);
+  }
+
+  LauncherButton* host_;
+  bool show_attention_;
+  gfx::Rect base_bounds_;
 
   DISALLOW_COPY_AND_ASSIGN(BarView);
 };
@@ -130,9 +233,10 @@ LauncherButton::LauncherButton(views::ButtonListener* listener,
     : CustomButton(listener),
       host_(host),
       icon_view_(NULL),
-      bar_(new BarView),
+      bar_(new BarView(this)),
       state_(STATE_NORMAL),
-      shelf_layout_manager_(shelf_layout_manager) {
+      shelf_layout_manager_(shelf_layout_manager),
+      destroyed_flag_(NULL) {
   set_accessibility_focusable(true);
 
   const gfx::ShadowValue kShadows[] = {
@@ -146,6 +250,8 @@ LauncherButton::LauncherButton(views::ButtonListener* listener,
 }
 
 LauncherButton::~LauncherButton() {
+  if (destroyed_flag_)
+    *destroyed_flag_ = true;
 }
 
 void LauncherButton::SetShadowedImage(const gfx::ImageSkia& image) {
@@ -192,12 +298,9 @@ void LauncherButton::AddState(State state) {
           icon_view_->layer()->GetAnimator());
       scoped_setter.SetTransitionDuration(
           base::TimeDelta::FromMilliseconds(kHopUpMS));
-      state_ |= state;
-      UpdateState();
-    } else {
-      state_ |= state;
-      UpdateState();
     }
+    state_ |= state;
+    UpdateState();
     if (state & STATE_ATTENTION)
       bar_->ShowAttention(true);
   }
@@ -211,12 +314,9 @@ void LauncherButton::ClearState(State state) {
       scoped_setter.SetTweenType(ui::Tween::LINEAR);
       scoped_setter.SetTransitionDuration(
           base::TimeDelta::FromMilliseconds(kHopDownMS));
-      state_ &= ~state;
-      UpdateState();
-    } else {
-      state_ &= ~state;
-      UpdateState();
     }
+    state_ &= ~state;
+    UpdateState();
     if (state & STATE_ATTENTION)
       bar_->ShowAttention(false);
   }
@@ -224,6 +324,25 @@ void LauncherButton::ClearState(State state) {
 
 gfx::Rect LauncherButton::GetIconBounds() const {
   return icon_view_->bounds();
+}
+
+void LauncherButton::ShowContextMenu(const gfx::Point& p,
+                                     bool is_mouse_gesture) {
+  if (!context_menu_controller())
+    return;
+
+  bool destroyed = false;
+  destroyed_flag_ = &destroyed;
+
+  CustomButton::ShowContextMenu(p, is_mouse_gesture);
+
+  if (!destroyed) {
+    destroyed_flag_ = NULL;
+    // The menu will not propagate mouse events while its shown. To address,
+    // the hover state gets cleared once the menu was shown (and this was not
+    // destroyed).
+    ClearState(STATE_HOVERED);
+  }
 }
 
 bool LauncherButton::OnMousePressed(const ui::MouseEvent& event) {
@@ -273,10 +392,9 @@ void LauncherButton::GetAccessibleState(ui::AccessibleViewState* state) {
 
 void LauncherButton::Layout() {
   const gfx::Rect button_bounds(GetContentsBounds());
-  int x_offset = 0, y_offset = 0;
-  gfx::Rect icon_bounds;
-
-  if (shelf_layout_manager_->IsHorizontalAlignment()) {
+   int x_offset = 0, y_offset = 0;
+   gfx::Rect icon_bounds;
+   if (shelf_layout_manager_->IsHorizontalAlignment()) {
     icon_bounds.SetRect(
         button_bounds.x(), button_bounds.y() + kIconPad,
         button_bounds.width(), kIconSize);
@@ -295,7 +413,8 @@ void LauncherButton::Layout() {
 
   icon_bounds.Offset(x_offset, y_offset);
   icon_view_->SetBoundsRect(icon_bounds);
-  bar_->SetBoundsRect(GetContentsBounds());
+  bar_->SetBarBoundsRect(GetContentsBounds());
+  UpdateState();
 }
 
 void LauncherButton::ChildPreferredSizeChanged(views::View* child) {
@@ -359,36 +478,42 @@ bool LauncherButton::IsShelfHorizontal() const {
 }
 
 void LauncherButton::UpdateState() {
-  if (state_ == STATE_NORMAL) {
-    bar_->SetVisible(false);
+  // Even if not shown, the activation state image has an influence on the
+  // layout. To avoid any odd movement we assign a bitmap here.
+  int bar_id;
+  if (state_ & (STATE_ACTIVE | STATE_ATTENTION))
+    bar_id = IDR_AURA_LAUNCHER_UNDERLINE_ACTIVE;
+  else if (state_ & (STATE_HOVERED | STATE_FOCUSED))
+    bar_id = IDR_AURA_LAUNCHER_UNDERLINE_HOVER;
+  else
+    bar_id = IDR_AURA_LAUNCHER_UNDERLINE_RUNNING;
+
+  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+  const gfx::ImageSkia* image = rb.GetImageNamed(bar_id).ToImageSkia();
+  if (SHELF_ALIGNMENT_BOTTOM == shelf_layout_manager_->GetAlignment()) {
+    bar_->SetImage(*image);
   } else {
-    int bar_id;
-    if (state_ & STATE_ACTIVE) {
-      bar_id = IDR_AURA_LAUNCHER_UNDERLINE_ACTIVE;
-    } else if (state_ & (STATE_HOVERED | STATE_FOCUSED | STATE_ATTENTION)) {
-      bar_id = IDR_AURA_LAUNCHER_UNDERLINE_HOVER;
-    } else {
-      bar_id = IDR_AURA_LAUNCHER_UNDERLINE_RUNNING;
-    }
-    ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-    const gfx::ImageSkia* image = rb.GetImageNamed(bar_id).ToImageSkia();
-    if(SHELF_ALIGNMENT_BOTTOM == shelf_layout_manager_->GetAlignment())
-      bar_->SetImage(*image);
-    else
-      bar_->SetImage(gfx::ImageSkiaOperations::CreateRotatedImage(*image,
-          shelf_layout_manager_->SelectValueForShelfAlignment(
-              SkBitmapOperations::ROTATION_270_CW,
-              SkBitmapOperations::ROTATION_270_CW,
-              SkBitmapOperations::ROTATION_90_CW,
-              SkBitmapOperations::ROTATION_180_CW)));
-    bar_->SetVisible(true);
+    bar_->SetImage(gfx::ImageSkiaOperations::CreateRotatedImage(*image,
+        shelf_layout_manager_->SelectValueForShelfAlignment(
+            SkBitmapOperations::ROTATION_90_CW,
+            SkBitmapOperations::ROTATION_90_CW,
+            SkBitmapOperations::ROTATION_270_CW,
+            SkBitmapOperations::ROTATION_180_CW)));
   }
-  bool rtl = base::i18n::IsRTL();
+
+  bar_->SetVisible(state_ != STATE_NORMAL);
+
+  icon_view_->SetHorizontalAlignment(
+      shelf_layout_manager_->PrimaryAxisValue(views::ImageView::CENTER,
+                                              views::ImageView::LEADING));
+  icon_view_->SetVerticalAlignment(
+      shelf_layout_manager_->PrimaryAxisValue(views::ImageView::LEADING,
+                                              views::ImageView::CENTER));
   bar_->SetHorizontalAlignment(
       shelf_layout_manager_->SelectValueForShelfAlignment(
           views::ImageView::CENTER,
-          rtl ? views::ImageView::TRAILING : views::ImageView::LEADING,
-          rtl ? views::ImageView::LEADING : views::ImageView::TRAILING,
+          views::ImageView::LEADING,
+          views::ImageView::TRAILING,
           views::ImageView::CENTER));
   bar_->SetVerticalAlignment(
       shelf_layout_manager_->SelectValueForShelfAlignment(
@@ -396,10 +521,6 @@ void LauncherButton::UpdateState() {
           views::ImageView::CENTER,
           views::ImageView::CENTER,
           views::ImageView::LEADING));
-
-  // Force bar to layout as alignment may have changed but not bounds.
-  bar_->Layout();
-  Layout();
   bar_->SchedulePaint();
   SchedulePaint();
 }

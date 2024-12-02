@@ -6,43 +6,53 @@
 #define CC_TEST_FAKE_LAYER_TREE_HOST_CLIENT_H_
 
 #include "base/memory/scoped_ptr.h"
-#include "cc/font_atlas.h"
-#include "cc/input_handler.h"
-#include "cc/layer_tree_host.h"
+#include "cc/input/input_handler.h"
+#include "cc/test/fake_context_provider.h"
 #include "cc/test/fake_output_surface.h"
+#include "cc/trees/layer_tree_host.h"
 
 namespace cc {
 
-class FakeLayerImplTreeHostClient : public LayerTreeHostClient {
-public:
-    FakeLayerImplTreeHostClient(bool useSoftwareRendering = false, bool useDelegatingRenderer = false)
-        : m_useSoftwareRendering(useSoftwareRendering)
-        , m_useDelegatingRenderer(useDelegatingRenderer)
-    {
-    }
+class FakeLayerTreeHostClient : public LayerTreeHostClient {
+ public:
+  enum RendererOptions {
+    DIRECT_3D,
+    DIRECT_SOFTWARE,
+    DELEGATED_3D,
+    DELEGATED_SOFTWARE
+  };
+  FakeLayerTreeHostClient(RendererOptions options);
+  virtual ~FakeLayerTreeHostClient();
 
-    virtual void willBeginFrame() OVERRIDE { }
-    virtual void didBeginFrame() OVERRIDE { }
-    virtual void animate(double monotonicFrameBeginTime) OVERRIDE { }
-    virtual void layout() OVERRIDE { }
-    virtual void applyScrollAndScale(gfx::Vector2d scrollDelta, float pageScale) OVERRIDE { }
+  virtual void WillBeginFrame() OVERRIDE {}
+  virtual void DidBeginFrame() OVERRIDE {}
+  virtual void Animate(double frame_begin_time) OVERRIDE {}
+  virtual void Layout() OVERRIDE {}
+  virtual void ApplyScrollAndScale(gfx::Vector2d scroll_delta,
+                                   float page_scale) OVERRIDE {}
 
-    virtual scoped_ptr<OutputSurface> createOutputSurface() OVERRIDE;
-    virtual void didRecreateOutputSurface(bool success) OVERRIDE { }
-    virtual scoped_ptr<InputHandler> createInputHandler() OVERRIDE;
-    virtual void willCommit() OVERRIDE { }
-    virtual void didCommit() OVERRIDE { }
-    virtual void didCommitAndDrawFrame() OVERRIDE { }
-    virtual void didCompleteSwapBuffers() OVERRIDE { }
+  virtual scoped_ptr<OutputSurface> CreateOutputSurface() OVERRIDE;
+  virtual void DidRecreateOutputSurface(bool success) OVERRIDE {}
+  virtual scoped_ptr<InputHandler> CreateInputHandler() OVERRIDE;
+  virtual void WillCommit() OVERRIDE {}
+  virtual void DidCommit() OVERRIDE {}
+  virtual void DidCommitAndDrawFrame() OVERRIDE {}
+  virtual void DidCompleteSwapBuffers() OVERRIDE {}
 
-    // Used only in the single-threaded path.
-    virtual void scheduleComposite() OVERRIDE { }
+  // Used only in the single-threaded path.
+  virtual void ScheduleComposite() OVERRIDE {}
 
-    virtual scoped_ptr<FontAtlas> createFontAtlas() OVERRIDE;
+  virtual scoped_refptr<cc::ContextProvider>
+      OffscreenContextProviderForMainThread() OVERRIDE;
+  virtual scoped_refptr<cc::ContextProvider>
+      OffscreenContextProviderForCompositorThread() OVERRIDE;
 
-private:
-    bool m_useSoftwareRendering;
-    bool m_useDelegatingRenderer;
+ private:
+  bool use_software_rendering_;
+  bool use_delegating_renderer_;
+
+  scoped_refptr<FakeContextProvider> main_thread_contexts_;
+  scoped_refptr<FakeContextProvider> compositor_thread_contexts_;
 };
 
 }  // namespace cc

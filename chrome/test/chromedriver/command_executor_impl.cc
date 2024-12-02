@@ -8,7 +8,11 @@
 #include "base/callback.h"
 #include "base/message_loop.h"
 #include "base/message_loop_proxy.h"
+#include "base/stringprintf.h"
+#include "base/sys_info.h"
 #include "base/values.h"
+#include "chrome/test/chromedriver/chrome/status.h"
+#include "chrome/test/chromedriver/chrome/version.h"
 #include "chrome/test/chromedriver/command_names.h"
 #include "chrome/test/chromedriver/commands.h"
 #include "chrome/test/chromedriver/element_commands.h"
@@ -16,12 +20,18 @@
 #include "chrome/test/chromedriver/session.h"
 #include "chrome/test/chromedriver/session_commands.h"
 #include "chrome/test/chromedriver/session_map.h"
-#include "chrome/test/chromedriver/status.h"
 #include "chrome/test/chromedriver/window_commands.h"
 
 #if defined(OS_MACOSX)
 #include "base/mac/scoped_nsautorelease_pool.h"
 #endif
+
+namespace {
+
+const char kLocalStorage[] = "localStorage";
+const char kSessionStorage[] = "sessionStorage";
+
+}  // namespace
 
 CommandExecutorImpl::CommandExecutorImpl()
     : io_thread_("ChromeDriver IO") {}
@@ -53,6 +63,32 @@ void CommandExecutorImpl::Init() {
       base::Bind(&ExecuteClearElement);
   element_command_map[CommandNames::kSendKeysToElement] =
       base::Bind(&ExecuteSendKeysToElement);
+  element_command_map[CommandNames::kSubmitElement] =
+      base::Bind(&ExecuteSubmitElement);
+  element_command_map[CommandNames::kGetElementText] =
+      base::Bind(&ExecuteGetElementText);
+  element_command_map[CommandNames::kGetElementValue] =
+      base::Bind(&ExecuteGetElementValue);
+  element_command_map[CommandNames::kGetElementTagName] =
+      base::Bind(&ExecuteGetElementTagName);
+  element_command_map[CommandNames::kIsElementSelected] =
+      base::Bind(&ExecuteIsElementSelected);
+  element_command_map[CommandNames::kIsElementEnabled] =
+      base::Bind(&ExecuteIsElementEnabled);
+  element_command_map[CommandNames::kIsElementDisplayed] =
+      base::Bind(&ExecuteIsElementDisplayed);
+  element_command_map[CommandNames::kGetElementLocation] =
+      base::Bind(&ExecuteGetElementLocation);
+  element_command_map[CommandNames::kGetElementLocationOnceScrolledIntoView] =
+      base::Bind(&ExecuteGetElementLocationOnceScrolledIntoView);
+  element_command_map[CommandNames::kGetElementSize] =
+      base::Bind(&ExecuteGetElementSize);
+  element_command_map[CommandNames::kGetElementAttribute] =
+      base::Bind(&ExecuteGetElementAttribute);
+  element_command_map[CommandNames::kGetElementValueOfCssProperty] =
+      base::Bind(&ExecuteGetElementValueOfCSSProperty);
+  element_command_map[CommandNames::kElementEquals] =
+      base::Bind(&ExecuteElementEquals);
 
   // Commands which require a window.
   typedef std::map<std::string, WindowCommand> WindowCommandMap;
@@ -66,10 +102,14 @@ void CommandExecutorImpl::Init() {
   window_command_map[CommandNames::kGet] = base::Bind(&ExecuteGet);
   window_command_map[CommandNames::kExecuteScript] =
       base::Bind(&ExecuteExecuteScript);
+  window_command_map[CommandNames::kExecuteAsyncScript] =
+      base::Bind(&ExecuteExecuteAsyncScript);
   window_command_map[CommandNames::kSwitchToFrame] =
       base::Bind(&ExecuteSwitchToFrame);
   window_command_map[CommandNames::kGetTitle] =
       base::Bind(&ExecuteGetTitle);
+  window_command_map[CommandNames::kGetPageSource] =
+      base::Bind(&ExecuteGetPageSource);
   window_command_map[CommandNames::kFindElement] =
       base::Bind(&ExecuteFindElement, 50);
   window_command_map[CommandNames::kFindElements] =
@@ -92,6 +132,46 @@ void CommandExecutorImpl::Init() {
       base::Bind(&ExecuteMouseButtonUp);
   window_command_map[CommandNames::kMouseDoubleClick] =
       base::Bind(&ExecuteMouseDoubleClick);
+  window_command_map[CommandNames::kGetActiveElement] =
+      base::Bind(&ExecuteGetActiveElement);
+  window_command_map[CommandNames::kGetStatus] =
+      base::Bind(&ExecuteGetAppCacheStatus);
+  window_command_map[CommandNames::kIsBrowserOnline] =
+      base::Bind(&ExecuteIsBrowserOnline);
+  window_command_map[CommandNames::kGetLocalStorageItem] =
+      base::Bind(&ExecuteGetStorageItem, kLocalStorage);
+  window_command_map[CommandNames::kGetLocalStorageKeys] =
+      base::Bind(&ExecuteGetStorageKeys, kLocalStorage);
+  window_command_map[CommandNames::kSetLocalStorageItem] =
+      base::Bind(&ExecuteSetStorageItem, kLocalStorage);
+  window_command_map[CommandNames::kRemoveLocalStorageItem] =
+      base::Bind(&ExecuteRemoveStorageItem, kLocalStorage);
+  window_command_map[CommandNames::kClearLocalStorage] =
+      base::Bind(&ExecuteClearStorage, kLocalStorage);
+  window_command_map[CommandNames::kGetLocalStorageSize] =
+      base::Bind(&ExecuteGetStorageSize, kLocalStorage);
+  window_command_map[CommandNames::kGetSessionStorageItem] =
+      base::Bind(&ExecuteGetStorageItem, kSessionStorage);
+  window_command_map[CommandNames::kGetSessionStorageKey] =
+      base::Bind(&ExecuteGetStorageKeys, kSessionStorage);
+  window_command_map[CommandNames::kSetSessionStorageItem] =
+      base::Bind(&ExecuteSetStorageItem, kSessionStorage);
+  window_command_map[CommandNames::kRemoveSessionStorageItem] =
+      base::Bind(&ExecuteRemoveStorageItem, kSessionStorage);
+  window_command_map[CommandNames::kClearSessionStorage] =
+      base::Bind(&ExecuteClearStorage, kSessionStorage);
+  window_command_map[CommandNames::kGetSessionStorageSize] =
+      base::Bind(&ExecuteGetStorageSize, kSessionStorage);
+  window_command_map[CommandNames::kScreenshot] =
+      base::Bind(&ExecuteScreenshot);
+  window_command_map[CommandNames::kGetCookies] =
+      base::Bind(&ExecuteGetCookies);
+  window_command_map[CommandNames::kAddCookie] =
+      base::Bind(&ExecuteAddCookie);
+  window_command_map[CommandNames::kDeleteCookie] =
+      base::Bind(&ExecuteDeleteCookie);
+  window_command_map[CommandNames::kDeleteAllCookies] =
+      base::Bind(&ExecuteDeleteAllCookies);
 
   // Commands which require a session.
   typedef std::map<std::string, SessionCommand> SessionCommandMap;
@@ -102,14 +182,36 @@ void CommandExecutorImpl::Init() {
     session_command_map[it->first] =
         base::Bind(&ExecuteWindowCommand, it->second);
   }
+  session_command_map[CommandNames::kGetSessionCapabilities] =
+      base::Bind(&ExecuteGetSessionCapabilities, &session_map_);
   session_command_map[CommandNames::kQuit] =
       base::Bind(&ExecuteQuit, &session_map_);
   session_command_map[CommandNames::kGetCurrentWindowHandle] =
       base::Bind(&ExecuteGetCurrentWindowHandle);
+  session_command_map[CommandNames::kClose] =
+      base::Bind(&ExecuteClose, &session_map_);
   session_command_map[CommandNames::kGetWindowHandles] =
       base::Bind(&ExecuteGetWindowHandles);
+  session_command_map[CommandNames::kSwitchToWindow] =
+      base::Bind(&ExecuteSwitchToWindow);
   session_command_map[CommandNames::kSetTimeout] =
       base::Bind(&ExecuteSetTimeout);
+  session_command_map[CommandNames::kSetScriptTimeout] =
+      base::Bind(&ExecuteSetScriptTimeout);
+  session_command_map[CommandNames::kImplicitlyWait] =
+      base::Bind(&ExecuteImplicitlyWait);
+  session_command_map[CommandNames::kGetAlert] =
+      base::Bind(&ExecuteGetAlert);
+  session_command_map[CommandNames::kGetAlertText] =
+      base::Bind(&ExecuteGetAlertText);
+  session_command_map[CommandNames::kSetAlertValue] =
+      base::Bind(&ExecuteSetAlertValue);
+  session_command_map[CommandNames::kAcceptAlert] =
+      base::Bind(&ExecuteAcceptAlert);
+  session_command_map[CommandNames::kDismissAlert] =
+      base::Bind(&ExecuteDismissAlert);
+  session_command_map[CommandNames::kIsLoading] =
+      base::Bind(&ExecuteIsLoading);
 
   // Wrap SessionCommand into non-session Command.
   base::Callback<Status(
@@ -158,6 +260,12 @@ void CommandExecutorImpl::ExecuteCommand(
   }
   *status_code = status.code();
   if (status.IsError()) {
+    status.AddDetails(base::StringPrintf(
+        "Driver info: chromedriver=%s,platform=%s %s %s",
+        kChromeDriverVersion,
+        base::SysInfo::OperatingSystemName().c_str(),
+        base::SysInfo::OperatingSystemVersion().c_str(),
+        base::SysInfo::OperatingSystemArchitecture().c_str()));
     scoped_ptr<base::DictionaryValue> error(new base::DictionaryValue());
     error->SetString("message", status.message());
     value->reset(error.release());

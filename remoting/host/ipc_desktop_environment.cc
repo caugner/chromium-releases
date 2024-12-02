@@ -6,103 +6,98 @@
 
 #include <utility>
 
-#include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "base/process_util.h"
 #include "base/single_thread_task_runner.h"
-#include "ipc/ipc_channel_proxy.h"
+#include "ipc/ipc_sender.h"
 #include "media/video/capture/screen/screen_capturer.h"
 #include "remoting/host/audio_capturer.h"
 #include "remoting/host/chromoting_messages.h"
+#include "remoting/host/client_session_control.h"
+#include "remoting/host/desktop_session.h"
 #include "remoting/host/desktop_session_proxy.h"
-#include "remoting/host/event_executor.h"
+#include "remoting/host/input_injector.h"
+#include "remoting/host/screen_controls.h"
 
 namespace remoting {
 
 IpcDesktopEnvironment::IpcDesktopEnvironment(
+    scoped_refptr<base::SingleThreadTaskRunner> audio_task_runner,
     scoped_refptr<base::SingleThreadTaskRunner> caller_task_runner,
+    scoped_refptr<base::SingleThreadTaskRunner> capture_task_runner,
     scoped_refptr<base::SingleThreadTaskRunner> io_task_runner,
-    const std::string& client_jid,
-    const base::Closure& disconnect_callback,
-    base::WeakPtr<DesktopSessionConnector> desktop_session_connector)
-    : caller_task_runner_(caller_task_runner),
-      connected_(false),
-      desktop_session_connector_(desktop_session_connector),
-      desktop_session_proxy_(new DesktopSessionProxy(caller_task_runner,
-                                                     io_task_runner,
-                                                     client_jid,
-                                                     disconnect_callback)) {
-  DCHECK(caller_task_runner_->BelongsToCurrentThread());
+    base::WeakPtr<ClientSessionControl> client_session_control,
+    base::WeakPtr<DesktopSessionConnector> desktop_session_connector,
+    bool virtual_terminal) {
+  DCHECK(caller_task_runner->BelongsToCurrentThread());
+
+  desktop_session_proxy_ = new DesktopSessionProxy(audio_task_runner,
+                                                   caller_task_runner,
+                                                   io_task_runner,
+                                                   capture_task_runner,
+                                                   client_session_control);
+
+  desktop_session_proxy_->ConnectToDesktopSession(desktop_session_connector,
+                                                  virtual_terminal);
 }
 
 IpcDesktopEnvironment::~IpcDesktopEnvironment() {
-  DCHECK(caller_task_runner_->BelongsToCurrentThread());
-
-  if (connected_ && desktop_session_connector_)
-    desktop_session_connector_->DisconnectTerminal(desktop_session_proxy_);
 }
 
-scoped_ptr<AudioCapturer> IpcDesktopEnvironment::CreateAudioCapturer(
-    scoped_refptr<base::SingleThreadTaskRunner> audio_task_runner) {
-  DCHECK(caller_task_runner_->BelongsToCurrentThread());
-
-  ConnectToDesktopSession();
-  return desktop_session_proxy_->CreateAudioCapturer(audio_task_runner);
+scoped_ptr<AudioCapturer> IpcDesktopEnvironment::CreateAudioCapturer() {
+  return desktop_session_proxy_->CreateAudioCapturer();
 }
 
-scoped_ptr<EventExecutor> IpcDesktopEnvironment::CreateEventExecutor(
-    scoped_refptr<base::SingleThreadTaskRunner> input_task_runner,
-    scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner) {
-  DCHECK(caller_task_runner_->BelongsToCurrentThread());
-
-  ConnectToDesktopSession();
-  return desktop_session_proxy_->CreateEventExecutor(input_task_runner,
-                                                     ui_task_runner);
+scoped_ptr<InputInjector> IpcDesktopEnvironment::CreateInputInjector() {
+  return desktop_session_proxy_->CreateInputInjector();
 }
 
-scoped_ptr<media::ScreenCapturer> IpcDesktopEnvironment::CreateVideoCapturer(
-    scoped_refptr<base::SingleThreadTaskRunner> capture_task_runner,
-    scoped_refptr<base::SingleThreadTaskRunner> encode_task_runner) {
-  DCHECK(caller_task_runner_->BelongsToCurrentThread());
-
-  ConnectToDesktopSession();
-  return desktop_session_proxy_->CreateVideoCapturer(capture_task_runner,
-                                                     encode_task_runner);
+scoped_ptr<ScreenControls> IpcDesktopEnvironment::CreateScreenControls() {
+  return desktop_session_proxy_->CreateScreenControls();
 }
 
-void IpcDesktopEnvironment::ConnectToDesktopSession() {
-  DCHECK(caller_task_runner_->BelongsToCurrentThread());
-
-  if (!connected_) {
-    connected_ = true;
-    desktop_session_connector_->ConnectTerminal(desktop_session_proxy_);
-  }
+scoped_ptr<media::ScreenCapturer> IpcDesktopEnvironment::CreateVideoCapturer() {
+  return desktop_session_proxy_->CreateVideoCapturer();
 }
 
 IpcDesktopEnvironmentFactory::IpcDesktopEnvironmentFactory(
+    scoped_refptr<base::SingleThreadTaskRunner> audio_task_runner,
     scoped_refptr<base::SingleThreadTaskRunner> caller_task_runner,
+    scoped_refptr<base::SingleThreadTaskRunner> capture_task_runner,
     scoped_refptr<base::SingleThreadTaskRunner> io_task_runner,
-    IPC::ChannelProxy* daemon_channel)
-    : caller_task_runner_(caller_task_runner),
+    IPC::Sender* daemon_channel)
+    : audio_task_runner_(audio_task_runner),
+      caller_task_runner_(caller_task_runner),
+      capture_task_runner_(capture_task_runner),
       io_task_runner_(io_task_runner),
+      curtain_activated_(false),
       daemon_channel_(daemon_channel),
       connector_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)),
       next_id_(0) {
 }
 
 IpcDesktopEnvironmentFactory::~IpcDesktopEnvironmentFactory() {
+}
+
+void IpcDesktopEnvironmentFactory::SetActivated(bool activated) {
   DCHECK(caller_task_runner_->BelongsToCurrentThread());
+
+  curtain_activated_ = activated;
 }
 
 scoped_ptr<DesktopEnvironment> IpcDesktopEnvironmentFactory::Create(
-    const std::string& client_jid,
-    const base::Closure& disconnect_callback) {
+    base::WeakPtr<ClientSessionControl> client_session_control) {
   DCHECK(caller_task_runner_->BelongsToCurrentThread());
 
-  return scoped_ptr<DesktopEnvironment>(new IpcDesktopEnvironment(
-      caller_task_runner_, io_task_runner_, client_jid, disconnect_callback,
-      connector_factory_.GetWeakPtr()));
+  return scoped_ptr<DesktopEnvironment>(
+      new IpcDesktopEnvironment(audio_task_runner_,
+                                caller_task_runner_,
+                                capture_task_runner_,
+                                io_task_runner_,
+                                client_session_control,
+                                connector_factory_.GetWeakPtr(),
+                                curtain_activated_));
 }
 
 bool IpcDesktopEnvironmentFactory::SupportsAudioCapture() const {
@@ -112,7 +107,9 @@ bool IpcDesktopEnvironmentFactory::SupportsAudioCapture() const {
 }
 
 void IpcDesktopEnvironmentFactory::ConnectTerminal(
-    scoped_refptr<DesktopSessionProxy> desktop_session_proxy) {
+    DesktopSessionProxy* desktop_session_proxy,
+    const ScreenResolution& resolution,
+    bool virtual_terminal) {
   DCHECK(caller_task_runner_->BelongsToCurrentThread());
 
   int id = next_id_++;
@@ -121,16 +118,18 @@ void IpcDesktopEnvironmentFactory::ConnectTerminal(
   CHECK(inserted);
 
   VLOG(1) << "Network: registered desktop environment " << id;
-  daemon_channel_->Send(new ChromotingNetworkHostMsg_ConnectTerminal(id));
+
+  daemon_channel_->Send(new ChromotingNetworkHostMsg_ConnectTerminal(
+      id, resolution, virtual_terminal));
 }
 
 void IpcDesktopEnvironmentFactory::DisconnectTerminal(
-    scoped_refptr<DesktopSessionProxy> desktop_session_proxy) {
+    DesktopSessionProxy* desktop_session_proxy) {
   DCHECK(caller_task_runner_->BelongsToCurrentThread());
 
   ActiveConnectionsList::iterator i;
   for (i = active_connections_.begin(); i != active_connections_.end(); ++i) {
-    if (i->second.get() == desktop_session_proxy.get())
+    if (i->second == desktop_session_proxy)
       break;
   }
 
@@ -140,6 +139,23 @@ void IpcDesktopEnvironmentFactory::DisconnectTerminal(
 
     VLOG(1) << "Network: unregistered desktop environment " << id;
     daemon_channel_->Send(new ChromotingNetworkHostMsg_DisconnectTerminal(id));
+  }
+}
+
+void IpcDesktopEnvironmentFactory::SetScreenResolution(
+    DesktopSessionProxy* desktop_session_proxy,
+    const ScreenResolution& resolution) {
+  DCHECK(caller_task_runner_->BelongsToCurrentThread());
+
+  ActiveConnectionsList::iterator i;
+  for (i = active_connections_.begin(); i != active_connections_.end(); ++i) {
+    if (i->second == desktop_session_proxy)
+      break;
+  }
+
+  if (i != active_connections_.end()) {
+    daemon_channel_->Send(new ChromotingNetworkDaemonMsg_SetScreenResolution(
+        i->first, resolution));
   }
 }
 
@@ -179,7 +195,7 @@ void IpcDesktopEnvironmentFactory::OnTerminalDisconnected(int terminal_id) {
 
   ActiveConnectionsList::iterator i = active_connections_.find(terminal_id);
   if (i != active_connections_.end()) {
-    scoped_refptr<DesktopSessionProxy> desktop_session_proxy = i->second;
+    DesktopSessionProxy* desktop_session_proxy = i->second;
     active_connections_.erase(i);
 
     // Disconnect the client session.

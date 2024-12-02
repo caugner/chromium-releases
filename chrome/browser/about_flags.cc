@@ -4,21 +4,26 @@
 
 #include "chrome/browser/about_flags.h"
 
+#include <string.h>
+
 #include <algorithm>
 #include <iterator>
 #include <map>
 #include <set>
+#include <utility>
 
+#include "apps/switches.h"
 #include "base/command_line.h"
 #include "base/memory/singleton.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "cc/switches.h"
+#include "cc/base/switches.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/common/chrome_content_client.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/chrome_version_info.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/user_metrics.h"
 #include "grit/chromium_strings.h"
@@ -40,10 +45,6 @@
 #include "ash/ash_switches.h"
 #endif
 
-#if defined(USE_AURA)
-#include "ui/aura/aura_switches.h"
-#endif
-
 #if defined(OS_CHROMEOS)
 #include "chromeos/chromeos_switches.h"
 #endif
@@ -54,11 +55,18 @@ namespace about_flags {
 
 // Macros to simplify specifying the type.
 #define SINGLE_VALUE_TYPE_AND_VALUE(command_line_switch, switch_value) \
-    Experiment::SINGLE_VALUE, command_line_switch, switch_value, NULL, 0
+    Experiment::SINGLE_VALUE, \
+    command_line_switch, switch_value, NULL, NULL, NULL, 0
 #define SINGLE_VALUE_TYPE(command_line_switch) \
     SINGLE_VALUE_TYPE_AND_VALUE(command_line_switch, "")
+#define ENABLE_DISABLE_VALUE_TYPE_AND_VALUE(enable_switch, enable_value, \
+                                            disable_switch, disable_value) \
+    Experiment::ENABLE_DISABLE_VALUE, enable_switch, enable_value, \
+    disable_switch, disable_value, NULL, 3
+#define ENABLE_DISABLE_VALUE_TYPE(enable_switch, disable_switch) \
+    ENABLE_DISABLE_VALUE_TYPE_AND_VALUE(enable_switch, "", disable_switch, "")
 #define MULTI_VALUE_TYPE(choices) \
-    Experiment::MULTI_VALUE, "", "", choices, arraysize(choices)
+    Experiment::MULTI_VALUE, NULL, NULL, NULL, NULL, choices, arraysize(choices)
 
 namespace {
 
@@ -116,14 +124,6 @@ const Experiment::Choice kOmniboxInlineHistoryQuickProviderChoices[] = {
     switches::kOmniboxInlineHistoryQuickProviderProhibited }
 };
 
-const Experiment::Choice kFixedPositionCreatesStackingContextChoices[] = {
-  { IDS_GENERIC_EXPERIMENT_CHOICE_DEFAULT, "", "" },
-  { IDS_GENERIC_EXPERIMENT_CHOICE_ENABLED,
-    switches::kEnableFixedPositionCreatesStackingContext, ""},
-  { IDS_GENERIC_EXPERIMENT_CHOICE_DISABLED,
-    switches::kDisableFixedPositionCreatesStackingContext, ""}
-};
-
 const Experiment::Choice kEnableCompositingForFixedPositionChoices[] = {
   { IDS_GENERIC_EXPERIMENT_CHOICE_DEFAULT, "", "" },
   { IDS_GENERIC_EXPERIMENT_CHOICE_ENABLED,
@@ -134,30 +134,6 @@ const Experiment::Choice kEnableCompositingForFixedPositionChoices[] = {
     switches::kEnableHighDpiCompositingForFixedPosition, ""}
 };
 
-const Experiment::Choice kForceCompositingModeChoices[] = {
-  { IDS_GENERIC_EXPERIMENT_CHOICE_DEFAULT, "", "" },
-  { IDS_GENERIC_EXPERIMENT_CHOICE_ENABLED,
-    switches::kForceCompositingMode, ""},
-  { IDS_GENERIC_EXPERIMENT_CHOICE_DISABLED,
-    switches::kDisableForceCompositingMode, ""}
-};
-
-const Experiment::Choice kThreadedCompositingModeChoices[] = {
-  { IDS_GENERIC_EXPERIMENT_CHOICE_DEFAULT, "", "" },
-  { IDS_GENERIC_EXPERIMENT_CHOICE_DISABLED,
-    switches::kDisableThreadedCompositing, ""},
-  { IDS_GENERIC_EXPERIMENT_CHOICE_ENABLED,
-    switches::kEnableThreadedCompositing, ""}
-};
-
-const Experiment::Choice kForceAcceleratedOverflowScrollModeChoices[] = {
-  { IDS_GENERIC_EXPERIMENT_CHOICE_DEFAULT, "", "" },
-  { IDS_GENERIC_EXPERIMENT_CHOICE_DISABLED,
-    switches::kDisableAcceleratedOverflowScroll, ""},
-  { IDS_GENERIC_EXPERIMENT_CHOICE_ENABLED,
-    switches::kEnableAcceleratedOverflowScroll, ""}
-};
-
 const Experiment::Choice kGDIPresentChoices[] = {
   { IDS_GENERIC_EXPERIMENT_CHOICE_DEFAULT, "", "" },
   { IDS_FLAGS_PRESENT_WITH_GDI_FIRST_SHOW,
@@ -165,7 +141,6 @@ const Experiment::Choice kGDIPresentChoices[] = {
   { IDS_FLAGS_PRESENT_WITH_GDI_ALL_SHOW,
     switches::kDoAllShowPresentWithGDI, ""}
 };
-
 
 const Experiment::Choice kTouchEventsChoices[] = {
   { IDS_GENERIC_EXPERIMENT_CHOICE_AUTOMATIC, "", "" },
@@ -187,14 +162,6 @@ const Experiment::Choice kTouchOptimizedUIChoices[] = {
     switches::kTouchOptimizedUIDisabled }
 };
 
-const Experiment::Choice kAsyncDnsChoices[] = {
-  { IDS_GENERIC_EXPERIMENT_CHOICE_DEFAULT, "", "" },
-  { IDS_GENERIC_EXPERIMENT_CHOICE_DISABLED,
-    switches::kDisableAsyncDns, ""},
-  { IDS_GENERIC_EXPERIMENT_CHOICE_ENABLED,
-    switches::kEnableAsyncDns, ""}
-};
-
 const Experiment::Choice kNaClDebugMaskChoices[] = {
   { IDS_GENERIC_EXPERIMENT_CHOICE_DEFAULT, "", "" },
   // Secure shell can be used on ChromeOS for forwarding the TCP port opened by
@@ -204,30 +171,6 @@ const Experiment::Choice kNaClDebugMaskChoices[] = {
       switches::kNaClDebugMask, "!*://*/*ssh_client.nmf" },
   { IDS_NACL_DEBUG_MASK_CHOICE_INCLUDE_DEBUG,
       switches::kNaClDebugMask, "*://*/*debug.nmf" }
-};
-
-const Experiment::Choice kActionBoxChoices[] = {
-  { IDS_GENERIC_EXPERIMENT_CHOICE_DEFAULT, "", "" },
-  { IDS_GENERIC_EXPERIMENT_CHOICE_DISABLED,
-    switches::kActionBox, "0"},
-  { IDS_GENERIC_EXPERIMENT_CHOICE_ENABLED,
-    switches::kActionBox, "1"}
-};
-
-const Experiment::Choice kScriptBubbleChoices[] = {
-  { IDS_GENERIC_EXPERIMENT_CHOICE_DEFAULT, "", "" },
-  { IDS_GENERIC_EXPERIMENT_CHOICE_DISABLED,
-    switches::kScriptBubble, "0"},
-  { IDS_GENERIC_EXPERIMENT_CHOICE_ENABLED,
-    switches::kScriptBubble, "1"}
-};
-
-const Experiment::Choice kTabCaptureChoices[] = {
-  { IDS_GENERIC_EXPERIMENT_CHOICE_DEFAULT, "", "" },
-  { IDS_GENERIC_EXPERIMENT_CHOICE_DISABLED,
-    switches::kTabCapture, "0"},
-  { IDS_GENERIC_EXPERIMENT_CHOICE_ENABLED,
-    switches::kTabCapture, "1"}
 };
 
 #if defined(OS_CHROMEOS)
@@ -246,7 +189,16 @@ const Experiment::Choice kChromeCaptivePortalDetectionChoices[] = {
   { IDS_FLAGS_SHILL_CAPTIVE_PORTAL_DETECTOR,
     switches::kDisableChromeCaptivePortalDetector, ""}
 };
+
 #endif
+
+const Experiment::Choice kImplSidePaintingChoices[] = {
+  { IDS_GENERIC_EXPERIMENT_CHOICE_DEFAULT, "", "" },
+  { IDS_GENERIC_EXPERIMENT_CHOICE_ENABLED,
+    cc::switches::kEnableImplSidePainting, ""},
+  { IDS_GENERIC_EXPERIMENT_CHOICE_DISABLED,
+    cc::switches::kDisableImplSidePainting, ""}
+};
 
 // RECORDING USER METRICS FOR FLAGS:
 // -----------------------------------------------------------------------------
@@ -283,6 +235,15 @@ const Experiment::Choice kChromeCaptivePortalDetectionChoices[] = {
 //
 // When adding a new choice, add it to the end of the list.
 const Experiment kExperiments[] = {
+#if defined(OS_ANDROID)
+  {
+     "enable-spdy-proxy-auth",
+     IDS_FLAGS_ENABLE_SPDY_PROXY_AUTH_NAME,
+     IDS_FLAGS_ENABLE_SPDY_PROXY_AUTH_DESCRIPTION,
+     kOsAndroid,
+     SINGLE_VALUE_TYPE(switches::kEnableSpdyProxyAuth)
+  },
+#endif
   {
     "expose-for-tabs",  // FLAGS:RECORD_UMA
     IDS_FLAGS_TABPOSE_NAME,
@@ -328,13 +289,6 @@ const Experiment kExperiments[] = {
   },
 #endif  // OS_WIN
   {
-    "crxless-web-apps",
-    IDS_FLAGS_CRXLESS_WEB_APPS_NAME,
-    IDS_FLAGS_CRXLESS_WEB_APPS_DESCRIPTION,
-    kOsDesktop,
-    SINGLE_VALUE_TYPE(switches::kEnableCrxlessWebApps)
-  },
-  {
     "ignore-gpu-blacklist",
     IDS_FLAGS_IGNORE_GPU_BLACKLIST_NAME,
     IDS_FLAGS_IGNORE_GPU_BLACKLIST_DESCRIPTION,
@@ -346,21 +300,24 @@ const Experiment kExperiments[] = {
     IDS_FLAGS_FORCE_COMPOSITING_MODE_NAME,
     IDS_FLAGS_FORCE_COMPOSITING_MODE_DESCRIPTION,
     kOsMac | kOsWin | kOsLinux,
-    MULTI_VALUE_TYPE(kForceCompositingModeChoices)
+    ENABLE_DISABLE_VALUE_TYPE(switches::kForceCompositingMode,
+                              switches::kDisableForceCompositingMode)
   },
   {
     "threaded-compositing-mode",
     IDS_FLAGS_THREADED_COMPOSITING_MODE_NAME,
     IDS_FLAGS_THREADED_COMPOSITING_MODE_DESCRIPTION,
     kOsDesktop & ~kOsCrOS,
-    MULTI_VALUE_TYPE(kThreadedCompositingModeChoices)
+    ENABLE_DISABLE_VALUE_TYPE(switches::kEnableThreadedCompositing,
+                              switches::kDisableThreadedCompositing)
   },
   {
     "force-accelerated-composited-scrolling",
      IDS_FLAGS_FORCE_ACCELERATED_OVERFLOW_SCROLL_MODE_NAME,
      IDS_FLAGS_FORCE_ACCELERATED_OVERFLOW_SCROLL_MODE_DESCRIPTION,
      kOsAll,
-     MULTI_VALUE_TYPE(kForceAcceleratedOverflowScrollModeChoices)
+     ENABLE_DISABLE_VALUE_TYPE(switches::kEnableAcceleratedOverflowScroll,
+                               switches::kDisableAcceleratedOverflowScroll)
   },
   {
     "present-with-GDI",
@@ -377,13 +334,6 @@ const Experiment kExperiments[] = {
     SINGLE_VALUE_TYPE(switches::kDisableAccelerated2dCanvas)
   },
   {
-    "disable-deferred-2d-canvas",
-    IDS_FLAGS_DISABLE_DEFERRED_2D_CANVAS_NAME,
-    IDS_FLAGS_DISABLE_DEFERRED_2D_CANVAS_DESCRIPTION,
-    kOsAll,
-    SINGLE_VALUE_TYPE(switches::kDisableDeferred2dCanvas)
-  },
-  {
     "disable-threaded-animation",
     IDS_FLAGS_DISABLE_THREADED_ANIMATION_NAME,
     IDS_FLAGS_DISABLE_THREADED_ANIMATION_DESCRIPTION,
@@ -395,14 +345,14 @@ const Experiment kExperiments[] = {
     IDS_FLAGS_COMPOSITED_LAYER_BORDERS,
     IDS_FLAGS_COMPOSITED_LAYER_BORDERS_DESCRIPTION,
     kOsAll,
-    SINGLE_VALUE_TYPE(switches::kShowCompositedLayerBorders)
+    SINGLE_VALUE_TYPE(cc::switches::kShowCompositedLayerBorders)
   },
   {
     "show-fps-counter",
     IDS_FLAGS_SHOW_FPS_COUNTER,
     IDS_FLAGS_SHOW_FPS_COUNTER_DESCRIPTION,
     kOsAll,
-    SINGLE_VALUE_TYPE(switches::kShowFPSCounter)
+    SINGLE_VALUE_TYPE(cc::switches::kShowFPSCounter)
   },
   {
     "accelerated-filters",
@@ -456,7 +406,9 @@ const Experiment kExperiments[] = {
     IDS_FLAGS_FIXED_POSITION_CREATES_STACKING_CONTEXT_NAME,
     IDS_FLAGS_FIXED_POSITION_CREATES_STACKING_CONTEXT_DESCRIPTION,
     kOsAll,
-    MULTI_VALUE_TYPE(kFixedPositionCreatesStackingContextChoices)
+    ENABLE_DISABLE_VALUE_TYPE(
+        switches::kEnableFixedPositionCreatesStackingContext,
+        switches::kDisableFixedPositionCreatesStackingContext)
   },
   {
     "enable-compositing-for-fixed-position",
@@ -511,11 +463,33 @@ const Experiment kExperiments[] = {
     SINGLE_VALUE_TYPE(switches::kEnableExperimentalExtensionApis)
   },
   {
+    "extensions-on-chrome-urls",
+    IDS_FLAGS_EXTENSIONS_ON_CHROME_URLS_NAME,
+    IDS_FLAGS_EXTENSIONS_ON_CHROME_URLS_DESCRIPTION,
+    kOsAll,
+    SINGLE_VALUE_TYPE(switches::kExtensionsOnChromeURLs)
+  },
+  {
+    "enable-adview",
+    IDS_FLAGS_ENABLE_ADVIEW_NAME,
+    IDS_FLAGS_ENABLE_ADVIEW_DESCRIPTION,
+    kOsDesktop,
+    SINGLE_VALUE_TYPE(switches::kEnableAdview)
+  },
+  {
+    "enable-adview-src-attribute",
+    IDS_FLAGS_ENABLE_ADVIEW_SRC_ATTRIBUTE_NAME,
+    IDS_FLAGS_ENABLE_ADVIEW_SRC_ATTRIBUTE_DESCRIPTION,
+    kOsDesktop,
+    SINGLE_VALUE_TYPE(switches::kEnableAdviewSrcAttribute)
+  },
+  {
     "action-box",
     IDS_FLAGS_ACTION_BOX_NAME,
     IDS_FLAGS_ACTION_BOX_DESCRIPTION,
     kOsDesktop,
-    MULTI_VALUE_TYPE(kActionBoxChoices),
+    ENABLE_DISABLE_VALUE_TYPE_AND_VALUE(switches::kActionBox, "1",
+                                        switches::kActionBox, "0")
   },
   {
     "script-badges",
@@ -529,7 +503,8 @@ const Experiment kExperiments[] = {
     IDS_FLAGS_SCRIPT_BUBBLE_NAME,
     IDS_FLAGS_SCRIPT_BUBBLE_DESCRIPTION,
     kOsDesktop,
-    MULTI_VALUE_TYPE(kScriptBubbleChoices),
+    ENABLE_DISABLE_VALUE_TYPE_AND_VALUE(switches::kScriptBubble, "1",
+                                        switches::kScriptBubble, "0")
   },
   {
     "apps-new-install-bubble",
@@ -564,7 +539,8 @@ const Experiment kExperiments[] = {
     IDS_FLAGS_ENABLE_INSTANT_EXTENDED_API,
     IDS_FLAGS_ENABLE_INSTANT_EXTENDED_API_DESCRIPTION,
     kOsDesktop,
-    SINGLE_VALUE_TYPE(switches::kEnableInstantExtendedAPI)
+    ENABLE_DISABLE_VALUE_TYPE(switches::kEnableInstantExtendedAPI,
+                              switches::kDisableInstantExtendedAPI)
   },
   {
     "static-ip-config",
@@ -586,18 +562,11 @@ const Experiment kExperiments[] = {
     SINGLE_VALUE_TYPE(switches::kShowAutofillTypePredictions)
   },
   {
-    "sync-tab-favicons",
-    IDS_FLAGS_SYNC_TAB_FAVICONS_NAME,
-    IDS_FLAGS_SYNC_TAB_FAVICONS_DESCRIPTION,
+    "enable-sync-favicons",
+    IDS_FLAGS_ENABLE_SYNC_FAVICONS_NAME,
+    IDS_FLAGS_ENABLE_SYNC_FAVICONS_DESCRIPTION,
     kOsAll,
-    SINGLE_VALUE_TYPE(switches::kSyncTabFavicons)
-  },
-  {
-    "sync-app-notifications",
-    IDS_FLAGS_SYNC_APP_NOTIFICATIONS_NAME,
-    IDS_FLAGS_SYNC_APP_NOTIFICATIONS_DESCRIPTION,
-    kOsDesktop,
-    SINGLE_VALUE_TYPE(switches::kDisableSyncAppNotifications)
+    SINGLE_VALUE_TYPE(switches::kEnableSyncFavicons)
   },
   {
     "sync-keystore-encryption",
@@ -611,7 +580,8 @@ const Experiment kExperiments[] = {
     IDS_FLAGS_ENABLE_GESTURE_TAP_HIGHLIGHTING_NAME,
     IDS_FLAGS_ENABLE_GESTURE_TAP_HIGHLIGHTING_DESCRIPTION,
     kOsLinux | kOsCrOS,
-    SINGLE_VALUE_TYPE(switches::kEnableGestureTapHighlight)
+    ENABLE_DISABLE_VALUE_TYPE(switches::kEnableGestureTapHighlight,
+                              switches::kDisableGestureTapHighlight)
   },
   {
     "enable-smooth-scrolling",  // FLAGS:RECORD_UMA
@@ -651,13 +621,6 @@ const Experiment kExperiments[] = {
     SINGLE_VALUE_TYPE(switches::kEnablePanels)
   },
   {
-    "enable-panel-stacking",
-    IDS_FLAGS_ENABLE_PANEL_STACKING_NAME,
-    IDS_FLAGS_ENABLE_PANEL_STACKING_DESCRIPTION,
-    kOsDesktop,
-    SINGLE_VALUE_TYPE(switches::kEnablePanelStacking)
-  },
-  {
     // See http://crbug.com/120416 for how to remove this flag.
     "save-page-as-mhtml",  // FLAGS:RECORD_UMA
     IDS_FLAGS_SAVE_PAGE_AS_MHTML_NAME,
@@ -673,18 +636,19 @@ const Experiment kExperiments[] = {
     SINGLE_VALUE_TYPE(switches::kEnableAutologin)
   },
   {
-    "enable-spdy3",
-    IDS_FLAGS_ENABLE_SPDY3_NAME,
-    IDS_FLAGS_ENABLE_SPDY3_DESCRIPTION,
+    "enable-spdy31",
+    IDS_FLAGS_ENABLE_SPDY31_NAME,
+    IDS_FLAGS_ENABLE_SPDY31_DESCRIPTION,
     kOsAll,
-    SINGLE_VALUE_TYPE(switches::kEnableSpdy3)
+    SINGLE_VALUE_TYPE(switches::kEnableSpdy31)
   },
   {
     "enable-async-dns",
     IDS_FLAGS_ENABLE_ASYNC_DNS_NAME,
     IDS_FLAGS_ENABLE_ASYNC_DNS_DESCRIPTION,
     kOsWin | kOsMac | kOsLinux | kOsCrOS,
-    MULTI_VALUE_TYPE(kAsyncDnsChoices)
+    ENABLE_DISABLE_VALUE_TYPE(switches::kEnableAsyncDns,
+                              switches::kDisableAsyncDns)
   },
   {
     "disable-media-source",
@@ -730,22 +694,18 @@ const Experiment kExperiments[] = {
     SINGLE_VALUE_TYPE(ash::switches::kAshDisableAutoWindowPlacement)
   },
   {
-    "ash-enable-per-app-launcher",
-    IDS_FLAGS_ASH_ENABLE_PER_APP_LAUNCHER_NAME,
-    IDS_FLAGS_ASH_ENABLE_PER_APP_LAUNCHER_DESCRIPTION,
+    "ash-disable-per-app-launcher",
+    IDS_FLAGS_ASH_DISABLE_PER_APP_LAUNCHER_NAME,
+    IDS_FLAGS_ASH_DISABLE_PER_APP_LAUNCHER_DESCRIPTION,
     kOsWin | kOsLinux | kOsCrOS,
-    SINGLE_VALUE_TYPE(ash::switches::kAshEnablePerAppLauncher)
+    SINGLE_VALUE_TYPE(ash::switches::kAshDisablePerAppLauncher)
   },
 #endif
   {
     "per-tile-painting",
     IDS_FLAGS_PER_TILE_PAINTING_NAME,
     IDS_FLAGS_PER_TILE_PAINTING_DESCRIPTION,
-#if defined(USE_SKIA)
     kOsMac | kOsLinux | kOsCrOS,
-#else
-    0,
-#endif
     SINGLE_VALUE_TYPE(cc::switches::kEnablePerTilePainting)
   },
   {
@@ -825,6 +785,13 @@ const Experiment kExperiments[] = {
     SINGLE_VALUE_TYPE(switches::kEnableDevToolsExperiments)
   },
   {
+    "silent-debugger-extension-api",
+    IDS_FLAGS_SILENT_DEBUGGER_EXTENSION_API_NAME,
+    IDS_FLAGS_SILENT_DEBUGGER_EXTENSION_API_DESCRIPTION,
+    kOsDesktop,
+    SINGLE_VALUE_TYPE(switches::kSilentDebuggerExtensionAPI)
+  },
+  {
     "enable-suggestions-ntp",
     IDS_FLAGS_NTP_SUGGESTIONS_PAGE_NAME,
     IDS_FLAGS_NTP_SUGGESTIONS_PAGE_DESCRIPTION,
@@ -853,13 +820,6 @@ const Experiment kExperiments[] = {
     MULTI_VALUE_TYPE(kTouchOptimizedUIChoices)
   },
   {
-    "enable-webkit-text-subpixel-positioning",
-    IDS_FLAGS_ENABLE_WEBKIT_TEXT_SUBPIXEL_POSITIONING_NAME,
-    IDS_FLAGS_ENABLE_WEBKIT_TEXT_SUBPIXEL_POSITIONING_DESCRIPTION,
-    kOsCrOS,
-    SINGLE_VALUE_TYPE(gfx::switches::kEnableWebkitTextSubpixelPositioning)
-  },
-  {
     "disable-touch-adjustment",
     IDS_DISABLE_TOUCH_ADJUSTMENT_NAME,
     IDS_DISABLE_TOUCH_ADJUSTMENT_DESCRIPTION,
@@ -871,7 +831,8 @@ const Experiment kExperiments[] = {
     IDS_ENABLE_TAB_CAPTURE_NAME,
     IDS_ENABLE_TAB_CAPTURE_DESCRIPTION,
     kOsWin | kOsMac | kOsLinux | kOsCrOS,
-    MULTI_VALUE_TYPE(kTabCaptureChoices)
+    ENABLE_DISABLE_VALUE_TYPE_AND_VALUE(switches::kTabCapture, "1",
+                                        switches::kTabCapture, "0")
   },
 #if defined(OS_CHROMEOS)
   {
@@ -993,20 +954,6 @@ const Experiment kExperiments[] = {
 #endif  // defined(USE_ASH)
 #if defined(OS_CHROMEOS)
   {
-    "disable-new-oobe",
-    IDS_FLAGS_DISABLE_NEW_OOBE,
-    IDS_FLAGS_DISABLE_NEW_OOBE_DESCRIPTION,
-    kOsCrOS,
-    SINGLE_VALUE_TYPE(switches::kDisableNewOobe),
-  },
-  {
-      "disable-new-password-changed-dialog",
-      IDS_FLAGS_DISABLE_NEW_PASSWORD_CHANGED_DIALOG,
-      IDS_FLAGS_DISABLE_NEW_PASSWORD_CHANGED_DIALOG_DESCRIPTION,
-      kOsCrOS,
-      SINGLE_VALUE_TYPE(switches::kDisableNewPasswordChangedDialog),
-  },
-  {
     "disable-boot-animation",
     IDS_FLAGS_DISABLE_BOOT_ANIMATION,
     IDS_FLAGS_DISABLE_BOOT_ANIMATION_DESCRIPTION,
@@ -1056,26 +1003,27 @@ const Experiment kExperiments[] = {
     SINGLE_VALUE_TYPE(ash::switches::kAshDisableLauncherPerDisplay),
   },
   {
-    "enable-app-mode",
-    IDS_FLAGS_ENABLE_KIOSK_APPS_NAME,
-    IDS_FLAGS_ENABLE_KIOSK_APPS_DESCRIPTION,
+    "disable-app-mode",
+    IDS_FLAGS_DISABLE_KIOSK_APPS_NAME,
+    IDS_FLAGS_DISABLE_KIOSK_APPS_DESCRIPTION,
     kOsCrOS,
-    SINGLE_VALUE_TYPE(switches::kEnableAppMode),
+    SINGLE_VALUE_TYPE(switches::kDisableAppMode),
+  },
+  {
+    "disable-force-fullscreen-app",
+    IDS_FLAGS_DISABLE_FULLSCREEN_APP_NAME,
+    IDS_FLAGS_DISABLE_FULLSCREEN_APP_DESCRIPTION,
+    kOsCrOS,
+    SINGLE_VALUE_TYPE(switches::kDisableFullscreenApp),
   },
 #endif  // defined(OS_CHROMEOS)
   {
-    "enable-views-textfield",
-    IDS_FLAGS_ENABLE_VIEWS_TEXTFIELD_NAME,
-    IDS_FLAGS_ENABLE_VIEWS_TEXTFIELD_DESCRIPTION,
+    "views-textfield",
+    IDS_FLAGS_VIEWS_TEXTFIELD_NAME,
+    IDS_FLAGS_VIEWS_TEXTFIELD_DESCRIPTION,
     kOsWin,
-    SINGLE_VALUE_TYPE(switches::kEnableViewsTextfield),
-  },
-  {
-    "old-checkbox-style",
-    IDS_FLAGS_OLD_CHECKBOX_STYLE,
-    IDS_FLAGS_OLD_CHECKBOX_STYLE_DESCRIPTION,
-    kOsLinux | kOsCrOS,
-    SINGLE_VALUE_TYPE(switches::kOldCheckboxStyle),
+    ENABLE_DISABLE_VALUE_TYPE(switches::kEnableViewsTextfield,
+                              switches::kDisableViewsTextfield),
   },
   {
     "enable-new-dialog-style",
@@ -1100,13 +1048,6 @@ const Experiment kExperiments[] = {
   },
 #endif
   {
-    "enable-webaudio-input",
-    IDS_FLAGS_ENABLE_WEBAUDIO_INPUT_NAME,
-    IDS_FLAGS_ENABLE_WEBAUDIO_INPUT_DESCRIPTION,
-    kOsDesktop,
-    SINGLE_VALUE_TYPE(switches::kEnableWebAudioInput),
-  },
-  {
     "enable-contacts",
     IDS_FLAGS_ENABLE_CONTACTS_NAME,
     IDS_FLAGS_ENABLE_CONTACTS_DESCRIPTION,
@@ -1120,11 +1061,11 @@ const Experiment kExperiments[] = {
     kOsCrOS,
     SINGLE_VALUE_TYPE(ash::switches::kAshEnableAdvancedGestures),
   },
-  { "ash-enable-tab-scrubbing",
-    IDS_FLAGS_ENABLE_TAB_SCRUBBING_NAME,
-    IDS_FLAGS_ENABLE_TAB_SCRUBBING_DESCRIPTION,
+  { "ash-disable-tab-scrubbing",
+    IDS_FLAGS_DISABLE_TAB_SCRUBBING_NAME,
+    IDS_FLAGS_DISABLE_TAB_SCRUBBING_DESCRIPTION,
     kOsCrOS,
-    SINGLE_VALUE_TYPE(switches::kAshEnableTabScrubbing),
+    SINGLE_VALUE_TYPE(switches::kAshDisableTabScrubbing),
   },
   { "ash-enable-workspace-scrubbing",
     IDS_FLAGS_ENABLE_WORKSPACE_SCRUBBING_NAME,
@@ -1132,11 +1073,11 @@ const Experiment kExperiments[] = {
     kOsCrOS,
     SINGLE_VALUE_TYPE(ash::switches::kAshEnableWorkspaceScrubbing),
   },
-  { "ash-immersive-mode",
-    IDS_FLAGS_ASH_IMMERSIVE_MODE_NAME,
-    IDS_FLAGS_ASH_IMMERSIVE_MODE_DESCRIPTION,
+  { "ash-immersive-fullscreen",
+    IDS_FLAGS_ASH_IMMERSIVE_FULLSCREEN_NAME,
+    IDS_FLAGS_ASH_IMMERSIVE_FULLSCREEN_DESCRIPTION,
     kOsCrOS,
-    SINGLE_VALUE_TYPE(ash::switches::kAshImmersiveMode),
+    SINGLE_VALUE_TYPE(ash::switches::kAshImmersiveFullscreen),
   },
 #if defined(OS_LINUX)
   { "ash-enable-memory-monitor",
@@ -1148,11 +1089,11 @@ const Experiment kExperiments[] = {
 #endif
 #endif
 #if defined(OS_CHROMEOS)
-  { "ash-enable-new-network-status-area",
-    IDS_FLAGS_ASH_ENABLE_NEW_NETWORK_STATUS_AREA_NAME,
-    IDS_FLAGS_ASH_ENABLE_NEW_NETWORK_STATUS_AREA_DESCRIPTION,
+  { "ash-disable-new-network-status-area",
+    IDS_FLAGS_ASH_DISABLE_NEW_NETWORK_STATUS_AREA_NAME,
+    IDS_FLAGS_ASH_DISABLE_NEW_NETWORK_STATUS_AREA_DESCRIPTION,
     kOsCrOS,
-    SINGLE_VALUE_TYPE(ash::switches::kAshEnableNewNetworkStatusArea),
+    SINGLE_VALUE_TYPE(ash::switches::kAshDisableNewNetworkStatusArea),
   },
   {
     "enable-carrier-switching",
@@ -1184,21 +1125,10 @@ const Experiment kExperiments[] = {
     SINGLE_VALUE_TYPE(switches::kEnablePasswordGeneration)
   },
   {
-    "crash-on-gpu-hang",
-    IDS_FLAGS_CRASH_ON_GPU_HANG_NAME,
-    IDS_FLAGS_CRASH_ON_GPU_HANG_DESCRIPTION,
-    kOsAll,
-    SINGLE_VALUE_TYPE(switches::kCrashOnGpuHang)
-  },
-  {
     "enable-deferred-image-decoding",
     IDS_FLAGS_ENABLE_DEFERRED_IMAGE_DECODING_NAME,
     IDS_FLAGS_ENABLE_DEFERRED_IMAGE_DECODING_DESCRIPTION,
-#if defined(USE_SKIA)
     kOsMac | kOsLinux | kOsCrOS,
-#else
-    0,
-#endif
     SINGLE_VALUE_TYPE(switches::kEnableDeferredImageDecoding)
   },
   {
@@ -1209,25 +1139,18 @@ const Experiment kExperiments[] = {
     SINGLE_VALUE_TYPE(switches::kPerformanceMonitorGathering)
   },
   {
-    "enable-new-autofill-ui",
-    IDS_FLAGS_ENABLE_NEW_AUTOFILL_UI_NAME,
-    IDS_FLAGS_ENABLE_NEW_AUTOFILL_UI_DESCRIPTION,
+    "enable-native-autofill-ui",
+    IDS_FLAGS_ENABLE_NATIVE_AUTOFILL_UI_NAME,
+    IDS_FLAGS_ENABLE_NATIVE_AUTOFILL_UI_DESCRIPTION,
     kOsDesktop,
-    SINGLE_VALUE_TYPE(switches::kEnableNewAutofillUi)
-  },
-  {
-    "enable-new-autofill-heuristics",
-    IDS_FLAGS_ENABLE_NEW_AUTOFILL_HEURISTICS_NAME,
-    IDS_FLAGS_ENABLE_NEW_AUTOFILL_HEURISTICS_DESCRIPTION,
-    kOsAll,
-    SINGLE_VALUE_TYPE(switches::kEnableNewAutofillHeuristics)
+    SINGLE_VALUE_TYPE(switches::kEnableNativeAutofillUi)
   },
   {
     "show-app-list-shortcut",
     IDS_FLAGS_SHOW_APP_LIST_SHORTCUT_NAME,
     IDS_FLAGS_SHOW_APP_LIST_SHORTCUT_DESCRIPTION,
     kOsWin,
-    SINGLE_VALUE_TYPE(switches::kShowAppListShortcut)
+    SINGLE_VALUE_TYPE(apps::switches::kShowAppListShortcut)
   },
   {
     "enable-experimental-form-filling",
@@ -1236,21 +1159,26 @@ const Experiment kExperiments[] = {
     kOsWin | kOsCrOS,
     SINGLE_VALUE_TYPE(switches::kEnableExperimentalFormFilling)
   },
-#if defined(USE_AURA)
   {
-    "enable-overscroll-history-navigation",
-    IDS_FLAGS_ENABLE_OVERSCROLL_HISTORY_NAVIGATION_NAME,
-    IDS_FLAGS_ENABLE_OVERSCROLL_HISTORY_NAVIGATION_DESCRIPTION,
-    kOsAll,
-    SINGLE_VALUE_TYPE(switches::kEnableOverscrollHistoryNavigation)
+    "wallet-service-use-prod",
+    IDS_FLAGS_ENABLE_WALLET_PRODUCTION_SERVICE_NAME,
+    IDS_FLAGS_ENABLE_WALLET_PRODUCTION_SERVICE_DESCRIPTION,
+    kOsCrOS | kOsWin,
+    SINGLE_VALUE_TYPE(switches::kWalletServiceUseProd)
   },
-#endif
   {
     "enable-touch-drag-drop",
     IDS_FLAGS_ENABLE_TOUCH_DRAG_DROP_NAME,
     IDS_FLAGS_ENABLE_TOUCH_DRAG_DROP_DESCRIPTION,
     kOsWin | kOsCrOS,
     SINGLE_VALUE_TYPE(switches::kEnableTouchDragDrop)
+  },
+  {
+    "enable-touch-editing",
+    IDS_FLAGS_ENABLE_TOUCH_EDITING_NAME,
+    IDS_FLAGS_ENABLE_TOUCH_EDITING_DESCRIPTION,
+    kOsCrOS,
+    SINGLE_VALUE_TYPE(switches::kEnableTouchEditing)
   },
 #if defined(ENABLE_MESSAGE_CENTER)
   {
@@ -1275,6 +1203,57 @@ const Experiment kExperiments[] = {
     kOsDesktop,
     SINGLE_VALUE_TYPE(switches::kEnableUserMediaScreenCapturing)
   },
+  {
+    "enable-apps-devtool-app",
+    IDS_FLAGS_ENABLE_APPS_DEVTOOL_APP_NAME,
+    IDS_FLAGS_ENABLE_APPS_DEVTOOL_APP_DESCRIPTION,
+    kOsDesktop,
+    SINGLE_VALUE_TYPE(switches::kAppsDevtool)
+  },
+  {
+    "impl-side-painting",
+    IDS_FLAGS_IMPL_SIDE_PAINTING_NAME,
+    IDS_FLAGS_IMPL_SIDE_PAINTING_DESCRIPTION,
+    kOsAndroid | kOsLinux | kOsCrOS,
+    MULTI_VALUE_TYPE(kImplSidePaintingChoices)
+  },
+  // TODO(sky): ifdef needed until focus sorted out in DesktopNativeWidgetAura.
+#if !defined(USE_AURA)
+  {
+    "track-active-visit-time",
+    IDS_FLAGS_TRACK_ACTIVE_VISIT_TIME_NAME,
+    IDS_FLAGS_TRACK_ACTIVE_VISIT_TIME_DESCRIPTION,
+    kOsWin,
+    SINGLE_VALUE_TYPE(switches::kTrackActiveVisitTime)
+  },
+#endif
+#if defined(OS_ANDROID)
+  {
+    "disable-gesture-requirement-for-media-playback",
+    IDS_FLAGS_DISABLE_GESTURE_REQUIREMENT_FOR_MEDIA_PLAYBACK_NAME,
+    IDS_FLAGS_DISABLE_GESTURE_REQUIREMENT_FOR_MEDIA_PLAYBACK_DESCRIPTION,
+    kOsAndroid,
+    SINGLE_VALUE_TYPE(switches::kDisableGestureRequirementForMediaPlayback)
+  },
+#endif
+#if defined(OS_CHROMEOS)
+  {
+    "enable-experimental-bluetooth",
+    IDS_FLAGS_ENABLE_EXPERIMENTAL_BLUETOOTH_NAME,
+    IDS_FLAGS_ENABLE_EXPERIMENTAL_BLUETOOTH_DESCRIPTION,
+    kOsCrOS,
+    SINGLE_VALUE_TYPE(chromeos::switches::kEnableExperimentalBluetooth)
+  },
+#endif
+#if defined(ENABLE_GOOGLE_NOW)
+  {
+    "enable-google-now",
+    IDS_FLAGS_ENABLE_GOOGLE_NOW_INTEGRATION_NAME,
+    IDS_FLAGS_ENABLE_GOOGLE_NOW_INTEGRATION_DESCRIPTION,
+    kOsWin | kOsCrOS,
+    SINGLE_VALUE_TYPE(switches::kEnableGoogleNowIntegration)
+  },
+#endif
 };
 
 const Experiment* experiments = kExperiments;
@@ -1290,6 +1269,7 @@ class FlagsState {
       PrefService* prefs, const std::string& internal_name, bool enable);
   void RemoveFlagsSwitches(
       std::map<std::string, CommandLine::StringType>* switch_list);
+  void ResetAllFlags(PrefService* prefs);
   void reset();
 
   // Returns the singleton instance of this class
@@ -1338,22 +1318,15 @@ void SetEnabledFlags(
   }
 }
 
-// Returns the name used in prefs for the choice at the specified index.
-std::string NameForChoice(const Experiment& e, int index) {
-  DCHECK_EQ(Experiment::MULTI_VALUE, e.type);
-  DCHECK_LT(index, e.num_choices);
-  return std::string(e.internal_name) + about_flags::testing::kMultiSeparator +
-      base::IntToString(index);
-}
-
 // Adds the internal names for the specified experiment to |names|.
 void AddInternalName(const Experiment& e, std::set<std::string>* names) {
   if (e.type == Experiment::SINGLE_VALUE) {
     names->insert(e.internal_name);
   } else {
-    DCHECK_EQ(Experiment::MULTI_VALUE, e.type);
+    DCHECK(e.type == Experiment::MULTI_VALUE ||
+           e.type == Experiment::ENABLE_DISABLE_VALUE);
     for (int i = 0; i < e.num_choices; ++i)
-      names->insert(NameForChoice(e, i));
+      names->insert(e.NameForChoice(i));
   }
 }
 
@@ -1370,6 +1343,14 @@ bool ValidateExperiment(const Experiment& e) {
       DCHECK(e.choices);
       DCHECK(e.choices[0].command_line_switch);
       DCHECK_EQ('\0', e.choices[0].command_line_switch[0]);
+      break;
+    case Experiment::ENABLE_DISABLE_VALUE:
+      DCHECK_EQ(3, e.num_choices);
+      DCHECK(!e.choices);
+      DCHECK(e.command_line_switch);
+      DCHECK(e.command_line_value);
+      DCHECK(e.disable_command_line_switch);
+      DCHECK(e.disable_command_line_value);
       break;
     default:
       NOTREACHED();
@@ -1434,15 +1415,14 @@ void GetSanitizedEnabledFlagsForCurrentPlatform(
 // Returns the Value representing the choice data in the specified experiment.
 Value* CreateChoiceData(const Experiment& experiment,
                         const std::set<std::string>& enabled_experiments) {
-  DCHECK_EQ(Experiment::MULTI_VALUE, experiment.type);
+  DCHECK(experiment.type == Experiment::MULTI_VALUE ||
+         experiment.type == Experiment::ENABLE_DISABLE_VALUE);
   ListValue* result = new ListValue;
   for (int i = 0; i < experiment.num_choices; ++i) {
-    const Experiment::Choice& choice = experiment.choices[i];
     DictionaryValue* value = new DictionaryValue;
-    std::string name = NameForChoice(experiment, i);
-    value->SetString("description",
-                     l10n_util::GetStringUTF16(choice.description_id));
+    const std::string name = experiment.NameForChoice(i);
     value->SetString("internal_name", name);
+    value->SetString("description", experiment.DescriptionForChoice(i));
     value->SetBoolean("selected", enabled_experiments.count(name) > 0);
     result->Append(value);
   }
@@ -1450,6 +1430,32 @@ Value* CreateChoiceData(const Experiment& experiment,
 }
 
 }  // namespace
+
+std::string Experiment::NameForChoice(int index) const {
+  DCHECK(type == Experiment::MULTI_VALUE ||
+         type == Experiment::ENABLE_DISABLE_VALUE);
+  DCHECK_LT(index, num_choices);
+  return std::string(internal_name) + testing::kMultiSeparator +
+         base::IntToString(index);
+}
+
+string16 Experiment::DescriptionForChoice(int index) const {
+  DCHECK(type == Experiment::MULTI_VALUE ||
+         type == Experiment::ENABLE_DISABLE_VALUE);
+  DCHECK_LT(index, num_choices);
+  int description_id;
+  if (type == Experiment::ENABLE_DISABLE_VALUE) {
+    const int kEnableDisableDescriptionIds[] = {
+      IDS_GENERIC_EXPERIMENT_CHOICE_DEFAULT,
+      IDS_GENERIC_EXPERIMENT_CHOICE_ENABLED,
+      IDS_GENERIC_EXPERIMENT_CHOICE_DISABLED,
+    };
+    description_id = kEnableDisableDescriptionIds[index];
+  } else {
+    description_id = choices[index].description_id;
+  }
+  return l10n_util::GetStringUTF16(description_id);
+}
 
 void ConvertFlagsToSwitches(PrefService* prefs, CommandLine* command_line) {
   FlagsState::GetInstance()->ConvertFlagsToSwitches(prefs, command_line);
@@ -1464,6 +1470,15 @@ ListValue* GetFlagsExperimentsData(PrefService* prefs) {
   ListValue* experiments_data = new ListValue();
   for (size_t i = 0; i < num_experiments; ++i) {
     const Experiment& experiment = experiments[i];
+
+#if defined(OS_ANDROID)
+    // Special case enable-spdy-proxy-auth, because it should only
+    // be available on Dev and Beta channels.
+    if (!strcmp("enable-spdy-proxy-auth", experiment.internal_name) &&
+        chrome::VersionInfo::GetChannel() ==
+            chrome::VersionInfo::CHANNEL_STABLE)
+      continue;
+#endif
 
     DictionaryValue* data = new DictionaryValue();
     data->SetString("internal_name", experiment.internal_name);
@@ -1486,6 +1501,7 @@ ListValue* GetFlagsExperimentsData(PrefService* prefs) {
             enabled_experiments.count(experiment.internal_name) > 0);
         break;
       case Experiment::MULTI_VALUE:
+      case Experiment::ENABLE_DISABLE_VALUE:
         data->Set("choices", CreateChoiceData(experiment, enabled_experiments));
         break;
       default:
@@ -1509,6 +1525,10 @@ void SetExperimentEnabled(
 void RemoveFlagsSwitches(
     std::map<std::string, CommandLine::StringType>* switch_list) {
   FlagsState::GetInstance()->RemoveFlagsSwitches(switch_list);
+}
+
+void ResetAllFlags(PrefService* prefs) {
+  FlagsState::GetInstance()->ResetAllFlags(prefs);
 }
 
 int GetCurrentPlatform() {
@@ -1548,6 +1568,17 @@ void RecordUMAStatistics(const PrefService* prefs) {
 
 namespace {
 
+typedef std::map<std::string, std::pair<std::string, std::string> >
+    NameToSwitchAndValueMap;
+
+void SetFlagToSwitchMapping(const std::string& key,
+                            const std::string& switch_name,
+                            const std::string& switch_value,
+                            NameToSwitchAndValueMap* name_to_switch_map) {
+  DCHECK(name_to_switch_map->end() == name_to_switch_map->find(key));
+  (*name_to_switch_map)[key] = std::make_pair(switch_name, switch_value);
+}
+
 void FlagsState::ConvertFlagsToSwitches(
     PrefService* prefs, CommandLine* command_line) {
   if (command_line->HasSwitch(switches::kNoExperiments))
@@ -1557,21 +1588,27 @@ void FlagsState::ConvertFlagsToSwitches(
 
   GetSanitizedEnabledFlagsForCurrentPlatform(prefs, &enabled_experiments);
 
-  typedef std::map<std::string, std::pair<std::string, std::string> >
-      NameToSwitchAndValueMap;
   NameToSwitchAndValueMap name_to_switch_map;
   for (size_t i = 0; i < num_experiments; ++i) {
     const Experiment& e = experiments[i];
     if (e.type == Experiment::SINGLE_VALUE) {
-      name_to_switch_map[e.internal_name] =
-          std::pair<std::string, std::string>(e.command_line_switch,
-                                              e.command_line_value);
+      SetFlagToSwitchMapping(e.internal_name, e.command_line_switch,
+                             e.command_line_value, &name_to_switch_map);
+    } else if (e.type == Experiment::MULTI_VALUE) {
+      for (int j = 0; j < e.num_choices; ++j) {
+        SetFlagToSwitchMapping(e.NameForChoice(j),
+                               e.choices[j].command_line_switch,
+                               e.choices[j].command_line_value,
+                               &name_to_switch_map);
+      }
     } else {
-      for (int j = 0; j < e.num_choices; ++j)
-        name_to_switch_map[NameForChoice(e, j)] =
-            std::pair<std::string, std::string>(
-                e.choices[j].command_line_switch,
-                e.choices[j].command_line_value);
+      DCHECK_EQ(e.type, Experiment::ENABLE_DISABLE_VALUE);
+      SetFlagToSwitchMapping(e.NameForChoice(0), std::string(), std::string(),
+                             &name_to_switch_map);
+      SetFlagToSwitchMapping(e.NameForChoice(1), e.command_line_switch,
+                             e.command_line_value, &name_to_switch_map);
+      SetFlagToSwitchMapping(e.NameForChoice(2), e.disable_command_line_switch,
+                             e.disable_command_line_value, &name_to_switch_map);
     }
   }
 
@@ -1609,9 +1646,7 @@ bool FlagsState::IsRestartNeededToCommitChanges() {
 
 void FlagsState::SetExperimentEnabled(
     PrefService* prefs, const std::string& internal_name, bool enable) {
-  needs_restart_ = true;
-
-  size_t at_index = internal_name.find(about_flags::testing::kMultiSeparator);
+  size_t at_index = internal_name.find(testing::kMultiSeparator);
   if (at_index != std::string::npos) {
     DCHECK(enable);
     // We're being asked to enable a multi-choice experiment. Disable the
@@ -1624,7 +1659,7 @@ void FlagsState::SetExperimentEnabled(
     if (internal_name != experiment_name + "@0") {
       std::set<std::string> enabled_experiments;
       GetSanitizedEnabledFlags(prefs, &enabled_experiments);
-      enabled_experiments.insert(internal_name);
+      needs_restart_ |= enabled_experiments.insert(internal_name).second;
       SetEnabledFlags(prefs, enabled_experiments);
     }
     return;
@@ -1644,19 +1679,20 @@ void FlagsState::SetExperimentEnabled(
 
   if (e->type == Experiment::SINGLE_VALUE) {
     if (enable)
-      enabled_experiments.insert(internal_name);
+      needs_restart_ |= enabled_experiments.insert(internal_name).second;
     else
-      enabled_experiments.erase(internal_name);
+      needs_restart_ |= (enabled_experiments.erase(internal_name) > 0);
   } else {
     if (enable) {
       // Enable the first choice.
-      enabled_experiments.insert(NameForChoice(*e, 0));
+      needs_restart_ |= enabled_experiments.insert(e->NameForChoice(0)).second;
     } else {
       // Find the currently enabled choice and disable it.
       for (int i = 0; i < e->num_choices; ++i) {
-        std::string choice_name = NameForChoice(*e, i);
+        std::string choice_name = e->NameForChoice(i);
         if (enabled_experiments.find(choice_name) !=
             enabled_experiments.end()) {
+          needs_restart_ = true;
           enabled_experiments.erase(choice_name);
           // Continue on just in case there's a bug and more than one
           // experiment for this choice was enabled.
@@ -1674,6 +1710,13 @@ void FlagsState::RemoveFlagsSwitches(
            it = flags_switches_.begin(); it != flags_switches_.end(); ++it) {
     switch_list->erase(it->first);
   }
+}
+
+void FlagsState::ResetAllFlags(PrefService* prefs) {
+  needs_restart_ = true;
+
+  std::set<std::string> no_experiments;
+  SetEnabledFlags(prefs, no_experiments);
 }
 
 void FlagsState::reset() {

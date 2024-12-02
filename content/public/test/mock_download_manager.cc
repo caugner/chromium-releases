@@ -4,14 +4,14 @@
 
 #include "content/public/test/mock_download_manager.h"
 
-#include "content/browser/download/byte_stream.h"
+#include "content/browser/byte_stream.h"
 #include "content/browser/download/download_create_info.h"
 
 namespace content {
 
 MockDownloadManager::CreateDownloadItemAdapter::CreateDownloadItemAdapter(
-    const FilePath& current_path,
-    const FilePath& target_path,
+    const base::FilePath& current_path,
+    const base::FilePath& target_path,
     const std::vector<GURL>& url_chain,
     const GURL& referrer_url,
     const base::Time& start_time,
@@ -65,7 +65,7 @@ bool MockDownloadManager::CreateDownloadItemAdapter::operator==(
           state == rhs.state &&
           danger_type == rhs.danger_type &&
           interrupt_reason == rhs.interrupt_reason &&
-          opened == opened);
+          opened == rhs.opened);
 }
 
 MockDownloadManager::MockDownloadManager() {}
@@ -79,8 +79,8 @@ DownloadItem* MockDownloadManager::StartDownload(
 }
 
 DownloadItem* MockDownloadManager::CreateDownloadItem(
-    const FilePath& current_path,
-    const FilePath& target_path,
+    const base::FilePath& current_path,
+    const base::FilePath& target_path,
     const std::vector<GURL>& url_chain,
     const GURL& referrer_url,
     const base::Time& start_time,

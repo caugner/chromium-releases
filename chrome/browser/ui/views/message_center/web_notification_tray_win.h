@@ -16,7 +16,7 @@ class StatusIcon;
 namespace message_center {
 class MessageCenter;
 class MessageCenterBubble;
-class MessagePopupBubble;
+class MessagePopupCollection;
 }
 
 namespace views {
@@ -35,7 +35,6 @@ class NotificationBubbleWrapperWin;
 // tray icon on click.
 class WebNotificationTrayWin
     : public message_center::MessageCenterTrayDelegate,
-      public ui::SimpleMenuModel::Delegate,
       public StatusIconObserver {
  public:
   WebNotificationTrayWin();
@@ -55,25 +54,17 @@ class WebNotificationTrayWin
   // These are forwarded to WebNotificationTrayWin by
   // NotificationBubbleWrapperWin classes since they don't have enough
   // context to provide the required data for TrayBubbleView::Delegate.
-  gfx::Rect GetAnchorRect(
-      gfx::Size preferred_size,
-      views::TrayBubbleView::AnchorType anchor_type,
-      views::TrayBubbleView::AnchorAlignment anchor_alignment);
+  gfx::Rect GetMessageCenterAnchor();
+  gfx::Rect GetPopupAnchor();
   gfx::NativeView GetBubbleWindowContainer();
   views::TrayBubbleView::AnchorAlignment GetAnchorAlignment();
 
   // StatusIconObserver implementation.
   virtual void OnStatusIconClicked() OVERRIDE;
 
+  // Changes the icon and hovertext based on number of unread notifications.
+  void UpdateStatusIcon();
   void HideBubbleWithView(const views::TrayBubbleView* bubble_view);
-
-  // SimpleMenuModel::Delegate implementation.
-  virtual bool IsCommandIdChecked(int command_id) const OVERRIDE;
-  virtual bool IsCommandIdEnabled(int command_id) const OVERRIDE;
-  virtual bool GetAcceleratorForCommandId(
-      int command_id,
-      ui::Accelerator* accelerator) OVERRIDE;
-  virtual void ExecuteCommand(int command_id) OVERRIDE;
 
  private:
   FRIEND_TEST_ALL_PREFIXES(WebNotificationTrayWinTest, WebNotifications);
@@ -83,19 +74,16 @@ class WebNotificationTrayWin
                            ManyMessageCenterNotifications);
   FRIEND_TEST_ALL_PREFIXES(WebNotificationTrayWinTest, ManyPopupNotifications);
 
-  void UpdateAnchorRect();
   void AddQuietModeMenu(StatusIcon* status_icon);
-  message_center::MessagePopupBubble* GetPopupBubbleForTest();
   message_center::MessageCenterBubble* GetMessageCenterBubbleForTest();
 
-  scoped_ptr<internal::NotificationBubbleWrapperWin> popup_bubble_;
   scoped_ptr<internal::NotificationBubbleWrapperWin> message_center_bubble_;
+  scoped_ptr<message_center::MessagePopupCollection> popup_collection_;
 
   StatusIcon* status_icon_;
   bool message_center_visible_;
   scoped_ptr<MessageCenterTray> message_center_tray_;
-  gfx::Rect message_center_anchor_rect_;
-  gfx::Rect popup_anchor_rect_;
+  gfx::Point mouse_click_point_;
 
   DISALLOW_COPY_AND_ASSIGN(WebNotificationTrayWin);
 };

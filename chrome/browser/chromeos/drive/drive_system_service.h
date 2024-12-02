@@ -13,6 +13,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "chrome/browser/chromeos/drive/drive_file_error.h"
+#include "chrome/browser/chromeos/drive/drive_file_system_util.h"
 #include "chrome/browser/profiles/profile_keyed_service.h"
 #include "chrome/browser/profiles/profile_keyed_service_factory.h"
 #include "sync/notifier/invalidation_handler.h"
@@ -35,6 +36,7 @@ class DriveFileSystemProxy;
 class DriveWebAppsRegistry;
 class DriveSyncClient;
 class DrivePrefetcher;
+class DriveResourceMetadata;
 class EventLogger;
 class FileWriteHelper;
 class StaleCacheFilesRemover;
@@ -93,12 +95,6 @@ class DriveSystemService : public ProfileKeyedService,
       const syncer::ObjectIdInvalidationMap& invalidation_map) OVERRIDE;
 
  private:
-  // Used to destroy DriveCache with scoped_ptr.
-  struct DriveCacheDeleter {
-   public:
-    void operator()(DriveCache* cache) const;
-  };
-
   // Returns true if Drive is enabled.
   // Must be called on UI thread.
   bool IsDriveEnabled();
@@ -108,13 +104,24 @@ class DriveSystemService : public ProfileKeyedService,
   // Unregisters drive mount point from File API.
   void RemoveDriveMountPoint();
 
-  // Adds back the drive mount point. Used to implement ClearCache().
+  // Reinitializes |resource_metadata_|.
+  // Used to implement ClearCacheAndRemountFileSystem().
+  void ReinitializeResourceMetadataAfterClearCache(
+      const base::Callback<void(bool)>& callback,
+      bool success);
+
+  // Adds back the drive mount point.
+  // Used to implement ClearCacheAndRemountFileSystem().
   void AddBackDriveMountPoint(const base::Callback<void(bool)>& callback,
-                              bool success);
+                              DriveFileError error);
 
   // Called when cache initialization is done. Continues initialization if
   // the cache initialization is successful.
-  void OnCacheInitialized(bool success);
+  void InitializeAfterCacheInitialized(bool success);
+
+  // Called when resource metadata initialization is done. Continues
+  // initialization if resource metadata initialization is successful.
+  void InitializeAfterResourceMetadataInitialized(DriveFileError error);
 
   // Disables Drive. Used to disable Drive when needed (ex. initialization of
   // the Drive cache failed).
@@ -132,10 +139,11 @@ class DriveSystemService : public ProfileKeyedService,
 
   scoped_refptr<base::SequencedTaskRunner> blocking_task_runner_;
   scoped_ptr<EventLogger> event_logger_;
-  scoped_ptr<DriveCache, DriveCacheDeleter> cache_;
+  scoped_ptr<DriveCache, util::DestroyHelper> cache_;
   scoped_ptr<google_apis::DriveServiceInterface> drive_service_;
   scoped_ptr<google_apis::DriveUploader> uploader_;
   scoped_ptr<DriveWebAppsRegistry> webapps_registry_;
+  scoped_ptr<DriveResourceMetadata, util::DestroyHelper> resource_metadata_;
   scoped_ptr<DriveFileSystemInterface> file_system_;
   scoped_ptr<FileWriteHelper> file_write_helper_;
   scoped_ptr<DriveDownloadHandler> download_handler_;

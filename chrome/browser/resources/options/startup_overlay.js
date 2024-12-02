@@ -60,7 +60,7 @@ cr.define('options', function() {
 
       var suggestionList = new cr.ui.AutocompleteList();
       suggestionList.autoExpands = true;
-      suggestionList.suggestionUpdateRequestCallback =
+      suggestionList.requestSuggestions =
           this.requestAutocompleteSuggestions_.bind(this);
       $('startup-overlay').appendChild(suggestionList);
       this.autocompleteList_ = suggestionList;
@@ -125,9 +125,7 @@ cr.define('options', function() {
     updateStartupPages_: function(pages) {
       var model = new ArrayDataModel(pages);
       // Add a "new page" row.
-      model.push({
-        'modelIndex': '-1'
-      });
+      model.push({modelIndex: -1});
       $('startupPagesList').dataModel = model;
     },
 

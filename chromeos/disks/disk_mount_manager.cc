@@ -83,14 +83,17 @@ class DiskMountManagerImpl : public DiskMountManager {
 
   // DiskMountManager override.
   virtual void UnmountPath(const std::string& mount_path,
-                           UnmountOptions options) OVERRIDE {
+                           UnmountOptions options,
+                           const UnmountPathCallback& callback) OVERRIDE {
     UnmountChildMounts(mount_path);
     cros_disks_client_->Unmount(mount_path, options,
                                 base::Bind(&DiskMountManagerImpl::OnUnmountPath,
                                            weak_ptr_factory_.GetWeakPtr(),
+                                           callback,
                                            true),
                                 base::Bind(&DiskMountManagerImpl::OnUnmountPath,
                                            weak_ptr_factory_.GetWeakPtr(),
+                                           callback,
                                            false));
   }
 
@@ -111,24 +114,17 @@ class DiskMountManagerImpl : public DiskMountManager {
       return;
     }
 
-    if (formatting_pending_.find(device_path) != formatting_pending_.end()) {
-      LOG(ERROR) << "Formatting is already pending: " << mount_path;
-      OnFormatDevice(device_path, false);
-      return;
-    }
-
-    // Formatting process continues, after unmounting.
-    formatting_pending_.insert(device_path);
-    UnmountPath(disk->second->mount_path(), UNMOUNT_OPTIONS_NONE);
+    UnmountPath(disk->second->mount_path(),
+                UNMOUNT_OPTIONS_NONE,
+                base::Bind(&DiskMountManagerImpl::OnUnmountPathForFormat,
+                           weak_ptr_factory_.GetWeakPtr(),
+                           device_path));
   }
 
   // DiskMountManager override.
-  virtual void UnmountDeviceRecursive(
+  virtual void UnmountDeviceRecursively(
       const std::string& device_path,
-      UnmountDeviceRecursiveCallbackType callback,
-      void* user_data) OVERRIDE {
-    bool success = true;
-    std::string error_message;
+      const UnmountDeviceRecursivelyCallbackType& callback) OVERRIDE {
     std::vector<std::string> devices_to_unmount;
 
     // Get list of all devices to unmount.
@@ -140,36 +136,46 @@ class DiskMountManagerImpl : public DiskMountManager {
         devices_to_unmount.push_back(it->second->mount_path());
       }
     }
+
     // We should detect at least original device.
     if (devices_to_unmount.empty()) {
       if (disks_.find(device_path) == disks_.end()) {
-        success = false;
-        error_message = kDeviceNotFound;
-      } else {
-        // Nothing to unmount.
-        callback(user_data, true);
+        LOG(WARNING) << "Unmount recursive request failed for device "
+                     << device_path << ", with error: " << kDeviceNotFound;
+        callback.Run(false);
         return;
       }
+
+      // Nothing to unmount.
+      callback.Run(true);
+      return;
     }
-    if (success) {
-      // We will send the same callback data object to all Unmount calls and use
-      // it to syncronize callbacks.
-      UnmountDeviceRecursiveCallbackData* cb_data =
-          new UnmountDeviceRecursiveCallbackData(user_data, callback,
-                                                 devices_to_unmount.size());
-      for (size_t i = 0; i < devices_to_unmount.size(); ++i) {
-        cros_disks_client_->Unmount(
-            devices_to_unmount[i],
-            UNMOUNT_OPTIONS_NONE,
-            base::Bind(&DiskMountManagerImpl::OnUnmountDeviceRecursive,
-                       weak_ptr_factory_.GetWeakPtr(), cb_data, true),
-            base::Bind(&DiskMountManagerImpl::OnUnmountDeviceRecursive,
-                       weak_ptr_factory_.GetWeakPtr(), cb_data, false));
-      }
-    } else {
-      LOG(WARNING) << "Unmount recursive request failed for device "
-                   << device_path << ", with error: " << error_message;
-      callback(user_data, false);
+
+    // We will send the same callback data object to all Unmount calls and use
+    // it to syncronize callbacks.
+    // Note: this implementation has a potential memory leak issue. For
+    // example if this instance is destructed before all the callbacks for
+    // Unmount are invoked, the memory pointed by |cb_data| will be leaked.
+    // It is because the UnmountDeviceRecursivelyCallbackData keeps how
+    // many times OnUnmountDeviceRecursively callback is called and when
+    // all the callbacks are called, |cb_data| will be deleted in the method.
+    // However destructing the instance before all callback invocations will
+    // cancel all pending callbacks, so that the |cb_data| would never be
+    // deleted.
+    // Fortunately, in the real scenario, the instance will be destructed
+    // only for ShutDown. So, probably the memory would rarely be leaked.
+    // TODO(hidehiko): Fix the issue.
+    UnmountDeviceRecursivelyCallbackData* cb_data =
+        new UnmountDeviceRecursivelyCallbackData(
+            callback, devices_to_unmount.size());
+    for (size_t i = 0; i < devices_to_unmount.size(); ++i) {
+      cros_disks_client_->Unmount(
+          devices_to_unmount[i],
+          UNMOUNT_OPTIONS_NONE,
+          base::Bind(&DiskMountManagerImpl::OnUnmountDeviceRecursively,
+                     weak_ptr_factory_.GetWeakPtr(), cb_data, true),
+          base::Bind(&DiskMountManagerImpl::OnUnmountDeviceRecursively,
+                     weak_ptr_factory_.GetWeakPtr(), cb_data, false));
     }
   }
 
@@ -226,18 +232,16 @@ class DiskMountManagerImpl : public DiskMountManager {
   }
 
  private:
-  struct UnmountDeviceRecursiveCallbackData {
-    void* user_data;
-    UnmountDeviceRecursiveCallbackType callback;
-    size_t pending_callbacks_count;
-
-    UnmountDeviceRecursiveCallbackData(void* ud,
-                                       UnmountDeviceRecursiveCallbackType cb,
-                                       int count)
-        : user_data(ud),
-          callback(cb),
-          pending_callbacks_count(count) {
+  struct UnmountDeviceRecursivelyCallbackData {
+    UnmountDeviceRecursivelyCallbackData(
+        const UnmountDeviceRecursivelyCallbackType& in_callback,
+        int in_num_pending_callbacks)
+        : callback(in_callback),
+          num_pending_callbacks(in_num_pending_callbacks) {
     }
+
+    const UnmountDeviceRecursivelyCallbackType callback;
+    size_t num_pending_callbacks;
   };
 
   // Unmounts all mount points whose source path is transitively parented by
@@ -253,26 +257,33 @@ class DiskMountManagerImpl : public DiskMountManager {
          ++it) {
       if (StartsWithASCII(it->second.source_path, mount_path,
                           true /*case sensitive*/)) {
-        UnmountPath(it->second.mount_path, UNMOUNT_OPTIONS_NONE);
+        // TODO(tbarzic): Handle the case where this fails.
+        UnmountPath(it->second.mount_path,
+                    UNMOUNT_OPTIONS_NONE,
+                    UnmountPathCallback());
       }
     }
   }
 
-  // Callback for UnmountDeviceRecursive.
-  void OnUnmountDeviceRecursive(UnmountDeviceRecursiveCallbackData* cb_data,
-                                bool success,
-                                const std::string& mount_path) {
+  // Callback for UnmountDeviceRecursively.
+  void OnUnmountDeviceRecursively(
+      UnmountDeviceRecursivelyCallbackData* cb_data,
+      bool success,
+      const std::string& mount_path) {
     if (success) {
       // Do standard processing for Unmount event.
-      OnUnmountPath(true, mount_path);
+      OnUnmountPath(UnmountPathCallback(), true, mount_path);
       LOG(INFO) << mount_path <<  " unmounted.";
     }
     // This is safe as long as all callbacks are called on the same thread as
-    // UnmountDeviceRecursive.
-    cb_data->pending_callbacks_count--;
+    // UnmountDeviceRecursively.
+    cb_data->num_pending_callbacks--;
 
-    if (cb_data->pending_callbacks_count == 0) {
-      cb_data->callback(cb_data->user_data, success);
+    if (cb_data->num_pending_callbacks == 0) {
+      // This code has a problem that the |success| status used here is for the
+      // last "unmount" callback, but not whether all unmounting is succeeded.
+      // TODO(hidehiko): Fix the issue.
+      cb_data->callback.Run(success);
       delete cb_data;
     }
   }
@@ -319,10 +330,17 @@ class DiskMountManagerImpl : public DiskMountManager {
   }
 
   // Callback for UnmountPath.
-  void OnUnmountPath(bool success, const std::string& mount_path) {
+  void OnUnmountPath(const UnmountPathCallback& callback,
+                     bool success,
+                     const std::string& mount_path) {
     MountPointMap::iterator mount_points_it = mount_points_.find(mount_path);
-    if (mount_points_it == mount_points_.end())
+    if (mount_points_it == mount_points_.end()) {
+      // The path was unmounted, but not as a result of this unmount request,
+      // so return error.
+      if (!callback.is_null())
+        callback.Run(MOUNT_ERROR_INTERNAL);
       return;
+    }
 
     NotifyMountStatusUpdate(
         UNMOUNTING,
@@ -343,15 +361,17 @@ class DiskMountManagerImpl : public DiskMountManager {
         disk_iter->second->clear_mount_path();
     }
 
-    FormatTaskSet::iterator format_iter = formatting_pending_.find(path);
-    // Check if there is a formatting scheduled.
-    if (format_iter != formatting_pending_.end()) {
-      formatting_pending_.erase(format_iter);
-      if (success && disk_iter != disks_.end()) {
-        FormatUnmountedDevice(path);
-      } else {
-        OnFormatDevice(path, false);
-      }
+    if (!callback.is_null())
+      callback.Run(success ? MOUNT_ERROR_NONE : MOUNT_ERROR_INTERNAL);
+  }
+
+  void OnUnmountPathForFormat(const std::string& device_path,
+                              MountError error_code) {
+    if (error_code == MOUNT_ERROR_NONE &&
+        disks_.find(device_path) != disks_.end()) {
+      FormatUnmountedDevice(device_path);
+    } else {
+      OnFormatDevice(device_path, false);
     }
   }
 
@@ -584,14 +604,6 @@ class DiskMountManagerImpl : public DiskMountManager {
 
   typedef std::set<std::string> SystemPathPrefixSet;
   SystemPathPrefixSet system_path_prefixes_;
-
-  // A map from device path (e.g. /sys/devices/pci0000:00/.../sdb/sdb1)) to file
-  // path (e.g. /dev/sdb).
-  // Devices in this map are supposed to be formatted, but are currently waiting
-  // to be unmounted. When device is in this map, the formatting process HAVEN'T
-  // started yet.
-  typedef std::set<std::string> FormatTaskSet;
-  FormatTaskSet formatting_pending_;
 
   base::WeakPtrFactory<DiskMountManagerImpl> weak_ptr_factory_;
 

@@ -37,7 +37,8 @@ class APP_LIST_EXPORT AppListView : public views::BubbleDelegateView,
                     PaginationModel* pagination_model,
                     views::View* anchor,
                     const gfx::Point& anchor_point,
-                    views::BubbleBorder::ArrowLocation arrow_location);
+                    views::BubbleBorder::ArrowLocation arrow_location,
+                    bool border_accepts_events);
 
   void SetBubbleArrowLocation(
       views::BubbleBorder::ArrowLocation arrow_location);
@@ -54,6 +55,11 @@ class APP_LIST_EXPORT AppListView : public views::BubbleDelegateView,
 
   // Overridden from views::View:
   virtual gfx::Size GetPreferredSize() OVERRIDE;
+
+  // WidgetDelegate overrides:
+  virtual bool ShouldHandleSystemCommands() const OVERRIDE;
+
+  void Prerender();
 
  private:
   // Overridden from views::WidgetDelegateView:

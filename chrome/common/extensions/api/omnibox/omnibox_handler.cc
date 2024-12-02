@@ -8,8 +8,6 @@
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/common/extensions/api/commands/commands_handler.h"
-#include "chrome/common/extensions/api/extension_action/action_info.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/extensions/manifest.h"
@@ -30,15 +28,6 @@ const std::string& OmniboxInfo::GetKeyword(const Extension* extension) {
   return info ? info->keyword : EmptyString();
 }
 
-// static
-bool OmniboxInfo::IsVerboseInstallMessage(const Extension* extension) {
-  return !GetKeyword(extension).empty() ||
-      ActionInfo::GetBrowserActionInfo(extension) ||
-      (extension->page_action_info() &&
-       (CommandsInfo::GetPageActionCommand(extension) ||
-        !extension->page_action_info()->default_icon.empty()));
-}
-
 OmniboxHandler::OmniboxHandler() {
 }
 
@@ -57,6 +46,10 @@ bool OmniboxHandler::Parse(Extension* extension, string16* error) {
   }
   extension->SetManifestData(extension_manifest_keys::kOmnibox, info.release());
   return true;
+}
+
+const std::vector<std::string> OmniboxHandler::Keys() const {
+  return SingleKey(extension_manifest_keys::kOmnibox);
 }
 
 }  // namespace extensions

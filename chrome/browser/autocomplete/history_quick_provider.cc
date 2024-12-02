@@ -17,7 +17,6 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/autocomplete/autocomplete_field_trial.h"
 #include "chrome/browser/autocomplete/autocomplete_result.h"
 #include "chrome/browser/autocomplete/history_url_provider.h"
 #include "chrome/browser/history/history_database.h"
@@ -27,7 +26,12 @@
 #include "chrome/browser/history/in_memory_url_index_types.h"
 #include "chrome/browser/history/scored_history_match.h"
 #include "chrome/browser/net/url_fixer_upper.h"
+#include "chrome/browser/omnibox/omnibox_field_trial.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/search/search.h"
+#include "chrome/browser/search_engines/template_url.h"
+#include "chrome/browser/search_engines/template_url_service.h"
+#include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
@@ -79,7 +83,7 @@ HistoryQuickProvider::HistoryQuickProvider(
 
     // For the field trial stuff to work correctly, we must be running
     // on the same thread as the thread that created the field trial,
-    // which happens via a call to AutocompleteFieldTrial::Active in
+    // which happens via a call to OmniboxFieldTrial::Active in
     // chrome_browser_main.cc on the main thread.  Let's check this to
     // be sure.  We check "if we've heard of the UI thread then we'd better
     // be on it."  The first part is necessary so unit tests pass.  (Many
@@ -88,9 +92,8 @@ HistoryQuickProvider::HistoryQuickProvider(
     DCHECK(!content::BrowserThread::IsWellKnownThread(
                content::BrowserThread::UI) ||
            content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
-    if (AutocompleteFieldTrial::InDisallowInlineHQPFieldTrial()) {
-      if (AutocompleteFieldTrial::
-          InDisallowInlineHQPFieldTrialExperimentGroup()) {
+    if (OmniboxFieldTrial::InDisallowInlineHQPFieldTrial()) {
+      if (OmniboxFieldTrial::InDisallowInlineHQPFieldTrialExperimentGroup()) {
         always_prevent_inline_autocomplete_ = true;
         inlining_option = INLINING_FIELD_TRIAL_EXPERIMENT_GROUP;
       } else {
@@ -290,6 +293,12 @@ void HistoryQuickProvider::DoAutocomplete() {
   // visited URLs to beat out any longer URLs, no matter how frequently
   // they're visited.)  The strength of this last reduction depends on the
   // likely score for the URL-what-you-typed result.
+
+  // |template_url_service| or |template_url| can be NULL in unit tests.
+  TemplateURLService* template_url_service =
+      TemplateURLServiceFactory::GetForProfile(profile_);
+  TemplateURL* template_url = template_url_service ?
+      template_url_service->GetDefaultSearchProvider() : NULL;
   int max_match_score = (PreventInlineAutocomplete(autocomplete_input_) ||
       !matches.begin()->can_inline) ?
       (AutocompleteResult::kLowestDefaultScore - 1) :
@@ -301,11 +310,17 @@ void HistoryQuickProvider::DoAutocomplete() {
   for (ScoredHistoryMatches::const_iterator match_iter = matches.begin();
        match_iter != matches.end(); ++match_iter) {
     const ScoredHistoryMatch& history_match(*match_iter);
-    // Set max_match_score to the score we'll assign this result:
-    max_match_score = std::min(max_match_score, history_match.raw_score);
-    matches_.push_back(QuickMatchToACMatch(history_match, max_match_score));
-    // Mark this max_match_score as being used:
-    max_match_score--;
+    // Culls results corresponding to queries from the default search engine.
+    // These are low-quality, difficult-to-understand matches for users, and the
+    // SearchProvider should surface past queries in a better way anyway.
+    if (!template_url ||
+        !template_url->IsSearchURL(history_match.url_info.url())) {
+      // Set max_match_score to the score we'll assign this result:
+      max_match_score = std::min(max_match_score, history_match.raw_score);
+      matches_.push_back(QuickMatchToACMatch(history_match, max_match_score));
+      // Mark this max_match_score as being used:
+      max_match_score--;
+    }
   }
 }
 

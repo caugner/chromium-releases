@@ -76,6 +76,10 @@ class TestPackageExecutable(TestPackage):
     export_string += 'export GCOV_PREFIX_STRIP=%s\n' % depth
     return export_string
 
+  def ClearApplicationState(self):
+    """Clear the application state."""
+    self.adb.KillAllBlocking(self.test_suite_basename, 30)
+
   def GetAllTests(self):
     """Returns a list of all tests available in the test suite."""
     all_tests = self.adb.RunShellCommand(
@@ -119,7 +123,7 @@ class TestPackageExecutable(TestPackage):
     """Runs all the tests and checks for failures.
 
     Returns:
-      A TestResults object.
+      A TestRunResults object.
     """
     args = ['adb', '-s', self.device, 'shell', 'sh',
             constants.TEST_EXECUTABLE_DIR + '/chrome_test_runner.sh']

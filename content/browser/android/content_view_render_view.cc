@@ -11,7 +11,7 @@
 #include "base/lazy_instance.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
-#include "cc/layer.h"
+#include "cc/layers/layer.h"
 #include "content/browser/android/content_view_core_impl.h"
 #include "content/public/browser/android/compositor.h"
 #include "content/public/browser/android/content_view_layer_renderer.h"
@@ -60,16 +60,11 @@ void ContentViewRenderView::SetCurrentContentView(
 void ContentViewRenderView::SurfaceCreated(
     JNIEnv* env, jobject obj, jobject jsurface) {
   InitCompositor();
-  ANativeWindow* native_window = ANativeWindow_fromSurface(env, jsurface);
-  if (!native_window)
-    return;
-
-  compositor_->SetWindowSurface(native_window);
-  ANativeWindow_release(native_window);
+  compositor_->SetSurface(jsurface);
 }
 
 void ContentViewRenderView::SurfaceDestroyed(JNIEnv* env, jobject obj) {
-  compositor_->SetWindowSurface(NULL);
+  compositor_->SetSurface(NULL);
 }
 
 void ContentViewRenderView::SurfaceSetSize(

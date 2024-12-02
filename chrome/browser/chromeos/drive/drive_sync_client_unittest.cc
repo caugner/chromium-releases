@@ -8,8 +8,8 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
@@ -19,9 +19,9 @@
 #include "base/threading/sequenced_worker_pool.h"
 #include "chrome/browser/chromeos/drive/drive.pb.h"
 #include "chrome/browser/chromeos/drive/drive_file_system_util.h"
-#include "chrome/browser/chromeos/drive/drive_sync_client_observer.h"
 #include "chrome/browser/chromeos/drive/drive_test_util.h"
 #include "chrome/browser/chromeos/drive/mock_drive_file_system.h"
+#include "chrome/browser/google_apis/test_util.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_profile.h"
@@ -62,25 +62,6 @@ class MockNetworkChangeNotifier : public net::NetworkChangeNotifier {
                      net::NetworkChangeNotifier::ConnectionType());
 };
 
-class TestObserver : public DriveSyncClientObserver {
- public:
-  TestObserver() : start_count_(0), idle_count_(0), stop_count_(0) {}
-
-  // DriveSyncClientObserver overrides.
-  virtual void OnSyncTaskStarted() OVERRIDE { ++start_count_; }
-  virtual void OnSyncClientStopped() OVERRIDE { ++stop_count_; }
-  virtual void OnSyncClientIdle() OVERRIDE { ++idle_count_; }
-
-  int start_count() const { return start_count_; }
-  int stop_count() const { return stop_count_; }
-  int idle_count() const { return idle_count_; }
-
- private:
-  int start_count_;
-  int idle_count_;
-  int stop_count_;
-};
-
 }  // namespace
 
 class DriveSyncClientTest : public testing::Test {
@@ -100,22 +81,21 @@ class DriveSyncClientTest : public testing::Test {
     // Initialize the cache.
     scoped_refptr<base::SequencedWorkerPool> pool =
         content::BrowserThread::GetBlockingPool();
-    cache_ = new DriveCache(
+    cache_.reset(new DriveCache(
         temp_dir_.path(),
         pool->GetSequencedTaskRunner(pool->GetSequenceToken()),
-        NULL /* free_disk_space_getter */);
-    bool cache_initialization_success = false;
+        NULL /* free_disk_space_getter */));
+    bool success = false;
     cache_->RequestInitialize(
-        base::Bind(&test_util::CopyResultFromInitializeCacheCallback,
-                   &cache_initialization_success));
+        google_apis::test_util::CreateCopyResultCallback(&success));
     google_apis::test_util::RunBlockingPoolTask();
-    ASSERT_TRUE(cache_initialization_success);
+    ASSERT_TRUE(success);
     SetUpCache();
 
     // Initialize the sync client.
     sync_client_.reset(new DriveSyncClient(profile_.get(),
                                            mock_file_system_.get(),
-                                           cache_));
+                                           cache_.get()));
 
     EXPECT_CALL(*mock_file_system_, AddObserver(sync_client_.get())).Times(1);
     EXPECT_CALL(*mock_file_system_,
@@ -124,16 +104,13 @@ class DriveSyncClientTest : public testing::Test {
     // Disable delaying so that DoSyncLoop() starts immediately.
     sync_client_->set_delay_for_testing(base::TimeDelta::FromSeconds(0));
     sync_client_->Initialize();
-    sync_client_->AddObserver(&observer_);
   }
 
   virtual void TearDown() OVERRIDE {
     // The sync client should be deleted before NetworkLibrary, as the sync
     // client registers itself as observer of NetworkLibrary.
-    sync_client_->RemoveObserver(&observer_);
     sync_client_.reset();
-    cache_->Destroy();
-    google_apis::test_util::RunBlockingPoolTask();
+    cache_.reset();
     mock_network_change_notifier_.reset();
   }
 
@@ -150,20 +127,17 @@ class DriveSyncClientTest : public testing::Test {
     // Prepare 3 pinned-but-not-present files.
     DriveFileError error = DRIVE_FILE_OK;
     cache_->Pin("resource_id_not_fetched_foo", "",
-                base::Bind(&test_util::CopyErrorCodeFromFileOperationCallback,
-                           &error));
+                google_apis::test_util::CreateCopyResultCallback(&error));
     google_apis::test_util::RunBlockingPoolTask();
     EXPECT_EQ(DRIVE_FILE_OK, error);
 
     cache_->Pin("resource_id_not_fetched_bar", "",
-                base::Bind(&test_util::CopyErrorCodeFromFileOperationCallback,
-                           &error));
+                google_apis::test_util::CreateCopyResultCallback(&error));
     google_apis::test_util::RunBlockingPoolTask();
     EXPECT_EQ(DRIVE_FILE_OK, error);
 
     cache_->Pin("resource_id_not_fetched_baz", "",
-                base::Bind(&test_util::CopyErrorCodeFromFileOperationCallback,
-                           &error));
+                google_apis::test_util::CreateCopyResultCallback(&error));
     google_apis::test_util::RunBlockingPoolTask();
     EXPECT_EQ(DRIVE_FILE_OK, error);
 
@@ -173,13 +147,11 @@ class DriveSyncClientTest : public testing::Test {
     base::FilePath cache_file_path;
     cache_->Store(resource_id_fetched, md5_fetched, temp_file,
                   DriveCache::FILE_OPERATION_COPY,
-                  base::Bind(&test_util::CopyErrorCodeFromFileOperationCallback,
-                             &error));
+                  google_apis::test_util::CreateCopyResultCallback(&error));
     google_apis::test_util::RunBlockingPoolTask();
     EXPECT_EQ(DRIVE_FILE_OK, error);
     cache_->Pin(resource_id_fetched, md5_fetched,
-                base::Bind(&test_util::CopyErrorCodeFromFileOperationCallback,
-                           &error));
+                google_apis::test_util::CreateCopyResultCallback(&error));
     google_apis::test_util::RunBlockingPoolTask();
     EXPECT_EQ(DRIVE_FILE_OK, error);
 
@@ -188,24 +160,21 @@ class DriveSyncClientTest : public testing::Test {
     const std::string md5_dirty = "";  // Don't care.
     cache_->Store(resource_id_dirty, md5_dirty, temp_file,
                   DriveCache::FILE_OPERATION_COPY,
-                  base::Bind(&test_util::CopyErrorCodeFromFileOperationCallback,
-                             &error));
+                  google_apis::test_util::CreateCopyResultCallback(&error));
     google_apis::test_util::RunBlockingPoolTask();
     EXPECT_EQ(DRIVE_FILE_OK, error);
     cache_->Pin(resource_id_dirty, md5_dirty,
-                base::Bind(&test_util::CopyErrorCodeFromFileOperationCallback,
-                           &error));
+                google_apis::test_util::CreateCopyResultCallback(&error));
     google_apis::test_util::RunBlockingPoolTask();
     EXPECT_EQ(DRIVE_FILE_OK, error);
     cache_->MarkDirty(
         resource_id_dirty, md5_dirty,
-        base::Bind(&test_util::CopyErrorCodeFromFileOperationCallback, &error));
+        google_apis::test_util::CreateCopyResultCallback(&error));
     google_apis::test_util::RunBlockingPoolTask();
     EXPECT_EQ(DRIVE_FILE_OK, error);
     cache_->CommitDirty(
         resource_id_dirty, md5_dirty,
-        base::Bind(&test_util::CopyErrorCodeFromFileOperationCallback,
-                   &error));
+        google_apis::test_util::CreateCopyResultCallback(&error));
     google_apis::test_util::RunBlockingPoolTask();
     EXPECT_EQ(DRIVE_FILE_OK, error);
   }
@@ -215,14 +184,12 @@ class DriveSyncClientTest : public testing::Test {
   void SetExpectationForGetFileByResourceId(const std::string& resource_id) {
     EXPECT_CALL(*mock_file_system_,
                 GetFileByResourceId(resource_id, _, _, _))
-        .WillOnce(DoAll(
-            InvokeWithoutArgs(this,
-                              &DriveSyncClientTest::VerifyStartNotified),
+        .WillOnce(
             MockGetFileByResourceId(
                 DRIVE_FILE_OK,
                 base::FilePath::FromUTF8Unsafe("local_path_does_not_matter"),
                 std::string("mime_type_does_not_matter"),
-                REGULAR_FILE)));
+                REGULAR_FILE));
   }
 
   // Sets the expectation for MockDriveFileSystem::UpdateFileByResourceId(),
@@ -273,22 +240,15 @@ class DriveSyncClientTest : public testing::Test {
                                           resource_id);
   }
 
-  // Helper function for verifying that observer is correctly notified the
-  // start of sync client in SetExpectationForGetFileByResourceId.
-  void VerifyStartNotified() {
-    EXPECT_GT(observer_.start_count(), 0);
-  }
-
  protected:
   MessageLoopForUI message_loop_;
   content::TestBrowserThread ui_thread_;
   base::ScopedTempDir temp_dir_;
   scoped_ptr<TestingProfile> profile_;
   scoped_ptr<StrictMock<MockDriveFileSystem> > mock_file_system_;
-  DriveCache* cache_;
+  scoped_ptr<DriveCache, test_util::DestroyHelperForTests> cache_;
   scoped_ptr<DriveSyncClient> sync_client_;
   scoped_ptr<MockNetworkChangeNotifier> mock_network_change_notifier_;
-  TestObserver observer_;
 };
 
 TEST_F(DriveSyncClientTest, StartInitialScan) {
@@ -365,20 +325,6 @@ TEST_F(DriveSyncClientTest, ExistingPinnedFiles) {
   SetExpectationForGetFileByResourceId("resource_id_fetched");
 
   google_apis::test_util::RunBlockingPoolTask();
-}
-
-TEST_F(DriveSyncClientTest, ObserveRunAllTaskQueue) {
-  AddResourceIdToFetch("resource_id_foo");
-  AddResourceIdToFetch("resource_id_bar");
-
-  // Starts the sync queue, and eventually notifies the idle state.
-  SetExpectationForGetFileByResourceId("resource_id_foo");
-  SetExpectationForGetFileByResourceId("resource_id_bar");
-
-  google_apis::test_util::RunBlockingPoolTask();
-
-  EXPECT_EQ(1, observer_.idle_count());
-  EXPECT_EQ(2, observer_.start_count());
 }
 
 }  // namespace drive

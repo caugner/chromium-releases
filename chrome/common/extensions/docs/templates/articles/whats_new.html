@@ -6,6 +6,36 @@ This page lists the API and manifest changes
 made in recent releases.
 </p>
 
+<h2 id="26"> Google Chrome 26 </h2>
+
+<h4> New APIs </h4>
+  <ul>
+    <li>The
+      <a href="activeTab.html">activeTab permission</a>
+      gives an extension temporary access
+      to the currently active tab
+      when the user invokes the extension.</li>
+  </ul>
+
+<h2 id="25"> Google Chrome 25 </h2>
+
+<h4> New APIs </h4>
+  <ul>
+    <li>The
+      <a href="commands.html">commands API</a>
+      lets you add keyboard shortcuts
+      that trigger actions in your extension.</li>
+  </ul>
+
+<h2 id="25"> Google Chrome 24 </h2>
+
+<h4> New APIs </h4>
+  <ul>
+    <li>The
+      <a href="pushMessaging.html">pushMessaging API</a>
+      lets you send message data to users of your app or extension.</li>
+  </ul>
+
 <h2 id="22"> Google Chrome 22 </h2>
 
 <h4> New APIs </h4>
@@ -162,7 +192,7 @@ made in recent releases.
     <li>The <a href="devtools.html">developer tools APIs</a>
       provide support for extending Chrome Developer Tools.
       The inspected window API lets you interact with the inspected window.
-      The network API lets you retrive information about network requests.
+      The network API lets you retrieve information about network requests.
       The panels API lets you add panels and sidebars.
     <li>The <a href="pageCapture.html">page capture API</a>
       lets you save a tab as MHTML.
@@ -196,8 +226,6 @@ made in recent releases.
 
 <h4> Additions to existing APIs </h4>
   <ul>
-    <li>The $ref:windows.WINDOW_ID_CURRENT
-    now has a <code>WINDOW_ID_CURRENT</code> property.
     <li>The <code>chrome.tabs</code>
     $ref:tabs.create and
     $ref:tabs.update methods
@@ -301,13 +329,13 @@ made in recent releases.
     to specify the <code>tabID</code> for the
     $ref:tabs.update method.
     When not provided,
-    the <code>tabID</code> defaults
+    the <code>tabId</code> defaults
     to the selected tab of the current window.
     <li>External extension files on Mac OS can now be owned by users
     within a wheel group (or an admin group).
     <li>The "experimental" permission is no longer required
     for the
-    $ref:windows.Window type.
+    $ref:[windows.Window "panel"] type.
     By default, the "panel" type creates a popup
     unless the <code>--enable-panels</code> flag is set.
   </ul>
@@ -426,7 +454,7 @@ made in recent releases.
       For details, see
       <a href="content_scripts.html#match-patterns-globs">Match patterns and globs</a>.
     <li>New "clipboardRead" and "clipboardWrite"
-      <a href="manifest.html#permissions">permissions</a>
+      <a href="declare_permissions.html">permissions</a>
       specify capabilities for <code>document.execCommand()</code>.
   </ul>
 
@@ -482,7 +510,7 @@ made in recent releases.
       $ref:tabs.captureVisibleTab
       on just any tab.
       Instead, you now must have
-      <a href="manifest.html#permissions">host permission</a>
+      <a href="declare_permissions.html">host permission</a>
       for the URL displayed by that tab.
       To get the previous behavior,
       specify <code>&lt;all_urls></code> for the host permission.
@@ -508,7 +536,7 @@ made in recent releases.
 
 <h4> Manifest changes </h4>
   <ul>
-    <li>The new <a href="manifest.html#bg">background</a> permission
+    <li>The new <a href="declare_permissions.html#bg">background</a> permission
       extends the life of Chrome,
       allowing your extension or app
       to run even when Chrome has no windows open.

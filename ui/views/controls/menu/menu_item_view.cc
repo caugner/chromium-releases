@@ -112,7 +112,7 @@ MenuItemView::MenuItemView(MenuDelegate* delegate)
 }
 
 void MenuItemView::ChildPreferredSizeChanged(View* child) {
-  pref_size_.SetSize(0, 0);
+  invalidate_dimensions();
   PreferredSizeChanged();
 }
 
@@ -312,13 +312,13 @@ MenuItemView* MenuItemView::AppendMenuItemFromModel(ui::MenuModel* model,
                                                     int index,
                                                     int id) {
   gfx::Image icon;
+  model->GetIconAt(index, &icon);
   string16 label;
   ui::MenuSeparatorType separator_style = ui::NORMAL_SEPARATOR;
   MenuItemView::Type type;
   ui::MenuModel::ItemType menu_type = model->GetTypeAt(index);
   switch (menu_type) {
     case ui::MenuModel::TYPE_COMMAND:
-      model->GetIconAt(index, &icon);
       type = MenuItemView::NORMAL;
       label = model->GetLabelAt(index);
       break;
@@ -331,11 +331,11 @@ MenuItemView* MenuItemView::AppendMenuItemFromModel(ui::MenuModel* model,
       label = model->GetLabelAt(index);
       break;
     case ui::MenuModel::TYPE_SEPARATOR:
+      icon = gfx::Image();
       type = MenuItemView::SEPARATOR;
       separator_style = model->GetSeparatorTypeAt(index);
       break;
     case ui::MenuModel::TYPE_SUBMENU:
-      model->GetIconAt(index, &icon);
       type = MenuItemView::SUBMENU;
       label = model->GetLabelAt(index);
       break;
@@ -378,7 +378,7 @@ SubmenuView* MenuItemView::GetSubmenu() const {
 
 void MenuItemView::SetTitle(const string16& title) {
   title_ = title;
-  pref_size_.SetSize(0, 0);  // Triggers preferred size recalculation.
+  invalidate_dimensions();  // Triggers preferred size recalculation.
 }
 
 void MenuItemView::SetSelected(bool selected) {
@@ -428,9 +428,16 @@ void MenuItemView::OnPaint(gfx::Canvas* canvas) {
 }
 
 gfx::Size MenuItemView::GetPreferredSize() {
-  if (pref_size_.IsEmpty())
-    pref_size_ = CalculatePreferredSize();
-  return pref_size_;
+  const MenuItemDimensions& dimensions(GetDimensions());
+  return gfx::Size(dimensions.standard_width + dimensions.children_width,
+                   dimensions.height);
+}
+
+const MenuItemView::MenuItemDimensions& MenuItemView::GetDimensions() {
+  if (!is_dimensions_valid())
+    dimensions_ = CalculateDimensions();
+  DCHECK(is_dimensions_valid());
+  return dimensions_;
 }
 
 MenuController* MenuItemView::GetMenuController() {
@@ -553,6 +560,8 @@ void MenuItemView::Layout() {
       gfx::Size size = icon_view_->GetPreferredSize();
       int x = config.item_left_margin + left_icon_margin_ +
               (icon_area_width_ - size.width()) / 2;
+      if (type_ == CHECKBOX || type_ == RADIO)
+        x = label_start_;
       int y =
           (height() + GetTopMargin() - GetBottomMargin() - size.height()) / 2;
       icon_view_->SetPosition(gfx::Point(x, y));
@@ -564,8 +573,7 @@ void MenuItemView::SetMargins(int top_margin, int bottom_margin) {
   top_margin_ = top_margin;
   bottom_margin_ = bottom_margin;
 
-  // invalidate GetPreferredSize() cache
-  pref_size_.SetSize(0,0);
+  invalidate_dimensions();
 }
 
 const MenuConfig& MenuItemView::GetMenuConfig() const {
@@ -595,7 +603,8 @@ MenuItemView::MenuItemView(MenuItemView* parent,
       left_icon_margin_(0),
       right_icon_margin_(0),
       requested_menu_position_(POSITION_BEST_FIT),
-      actual_menu_position_(requested_menu_position_) {
+      actual_menu_position_(requested_menu_position_),
+      use_right_margin_(true) {
   Init(parent, command, type, NULL);
 }
 
@@ -771,18 +780,19 @@ void MenuItemView::PaintButtonCommon(gfx::Canvas* canvas,
                              bottom_margin - config.check_height) / 2;
   int icon_height = config.check_height;
   int available_height = height() - top_margin - bottom_margin;
-
+  MenuDelegate *delegate = GetDelegate();
   // Render the background. As MenuScrollViewContainer draws the background, we
   // only need the background when we want it to look different, as when we're
   // selected.
   ui::NativeTheme* native_theme = GetNativeTheme();
   SkColor override_color;
-  if (GetDelegate() &&
-      GetDelegate()->GetBackgroundColor(GetCommand(),
-                                        render_selection,
-                                        &override_color)) {
+  if (delegate && delegate->GetBackgroundColor(GetCommand(),
+                                               render_selection,
+                                               &override_color)) {
     canvas->DrawColor(override_color);
   } else if (render_selection) {
+    // TODO(erg): The following doesn't actually get the focused menu item
+    // background for times when we want to match the native OS.
     if (ui::NativeTheme::IsNewMenuStyleEnabled()) {
       gfx::Rect item_bounds(0, 0, width(), height());
       AdjustBoundsForRTLUI(&item_bounds);
@@ -796,7 +806,7 @@ void MenuItemView::PaintButtonCommon(gfx::Canvas* canvas,
   }
 
   // Render the check.
-  if (type_ == CHECKBOX && GetDelegate()->IsItemChecked(GetCommand())) {
+  if (type_ == CHECKBOX && delegate->IsItemChecked(GetCommand())) {
     const gfx::ImageSkia* check = GetMenuCheckImage();
     // Don't use config.check_width here as it's padded
     // to force more padding (AURA).
@@ -805,7 +815,7 @@ void MenuItemView::PaintButtonCommon(gfx::Canvas* canvas,
     canvas->DrawImageInt(*check, check_bounds.x(), check_bounds.y());
   } else if (type_ == RADIO) {
     const gfx::ImageSkia* image =
-        GetRadioButtonImage(GetDelegate()->IsItemChecked(GetCommand()));
+        GetRadioButtonImage(delegate->IsItemChecked(GetCommand()));
     gfx::Rect radio_bounds(icon_x,
                            top_margin +
                            (height() - top_margin - bottom_margin -
@@ -820,11 +830,22 @@ void MenuItemView::PaintButtonCommon(gfx::Canvas* canvas,
   SkColor fg_color = native_theme->GetSystemColor(
       enabled() ? ui::NativeTheme::kColorId_EnabledMenuItemForegroundColor
           : ui::NativeTheme::kColorId_DisabledMenuItemForegroundColor);
+  SkColor override_foreground_color;
+  if (delegate && delegate->GetForegroundColor(GetCommand(),
+                                               render_selection,
+                                               &override_foreground_color))
+    fg_color = override_foreground_color;
 
   const gfx::Font& font = GetFont();
   int accel_width = parent_menu_item_->GetSubmenu()->max_accelerator_width();
   int label_start = label_start_ + left_icon_margin_ + right_icon_margin_;
-  int width = this->width() - item_right_margin_ - label_start - accel_width;
+  if ((type_ == CHECKBOX || type_ == RADIO) && icon_view_)
+    label_start += icon_view_->size().width() + config.icon_to_label_padding;
+
+  int width = this->width() - label_start - accel_width -
+      (!delegate ||
+       delegate->ShouldReserveSpaceForSubmenuIndicator() ?
+           item_right_margin_ : config.arrow_to_edge_padding);
   gfx::Rect text_bounds(label_start, top_margin, width, available_height);
   text_bounds.set_x(GetMirroredXForRect(text_bounds));
   int flags = GetDrawStringFlags();
@@ -935,7 +956,7 @@ gfx::Size MenuItemView::GetChildPreferredSize() {
   return gfx::Size(width, height);
 }
 
-MenuItemView::MenuItemDimensions MenuItemView::GetPreferredDimensions() {
+MenuItemView::MenuItemDimensions MenuItemView::CalculateDimensions() {
   gfx::Size child_size = GetChildPreferredSize();
 
   MenuItemDimensions dimensions;
@@ -983,12 +1004,6 @@ MenuItemView::MenuItemDimensions MenuItemView::GetPreferredDimensions() {
   dimensions.height = std::max(dimensions.height,
       GetMenuConfig().item_min_height);
   return dimensions;
-}
-
-gfx::Size MenuItemView::CalculatePreferredSize() {
-  MenuItemView::MenuItemDimensions dimensions = GetPreferredDimensions();
-  return gfx::Size(dimensions.standard_width + dimensions.children_width,
-                   dimensions.height);
 }
 
 string16 MenuItemView::GetAcceleratorText() {

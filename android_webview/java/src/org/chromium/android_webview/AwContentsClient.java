@@ -8,14 +8,18 @@ import android.graphics.Bitmap;
 import android.graphics.Picture;
 import android.graphics.Rect;
 import android.graphics.RectF;
+import android.net.http.SslError;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.Message;
 import android.util.Log;
 import android.view.KeyEvent;
+import android.view.View;
 import android.webkit.ConsoleMessage;
 import android.webkit.GeolocationPermissions;
+import android.webkit.SslErrorHandler;
 import android.webkit.ValueCallback;
+import android.webkit.WebChromeClient;
 
 import org.chromium.content.browser.ContentViewClient;
 import org.chromium.content.browser.ContentViewCore;
@@ -42,6 +46,8 @@ public abstract class AwContentsClient extends ContentViewClient {
         new AwContentsClientCallbackHelper(this);
 
     private AwWebContentsObserver mWebContentsObserver;
+
+    private double mDIPScale;
 
     //--------------------------------------------------------------------------------------------
     //                        Adapter for WebContentsDelegate methods.
@@ -197,6 +203,10 @@ public abstract class AwContentsClient extends ContentViewClient {
         mWebContentsObserver = new AwWebContentsObserver(contentViewCore);
     }
 
+    void setDIPScale(double dipScale) {
+        mDIPScale = dipScale;
+    }
+
     final AwWebContentsDelegate getWebContentsDelegate() {
         return mWebContentsDelegateAdapter;
     }
@@ -228,6 +238,8 @@ public abstract class AwContentsClient extends ContentViewClient {
     public abstract void onReceivedHttpAuthRequest(AwHttpAuthHandler handler,
             String host, String realm);
 
+    public abstract void onReceivedSslError(ValueCallback<Boolean> callback, SslError error);
+
     public abstract void onReceivedLoginRequest(String realm, String account, String args);
 
     public abstract void onFormResubmission(Message dontResend, Message resend);
@@ -239,6 +251,12 @@ public abstract class AwContentsClient extends ContentViewClient {
             GeolocationPermissions.Callback callback);
 
     public abstract void onGeolocationPermissionsHidePrompt();
+
+    public final void onScaleChanged(float oldScale, float newScale) {
+        onScaleChangedScaled((float)(oldScale * mDIPScale), (float)(newScale * mDIPScale));
+    }
+
+    public abstract void onScaleChangedScaled(float oldScale, float newScale);
 
     protected abstract void handleJsAlert(String url, String message, JsResultReceiver receiver);
 
@@ -254,19 +272,32 @@ public abstract class AwContentsClient extends ContentViewClient {
 
     protected abstract void onCloseWindow();
 
-    // TODO(acleung): Make abstract when landed in Android
-    public void onReceivedTouchIconUrl(String url, boolean precomposed) { }
+    public abstract void onReceivedTouchIconUrl(String url, boolean precomposed);
 
-    // TODO(acleung): Make abstract when landed in Android
-    public void onReceivedIcon(Bitmap bitmap) { }
+    public abstract void onReceivedIcon(Bitmap bitmap);
 
     protected abstract void onRequestFocus();
+
+    protected abstract View getVideoLoadingProgressView();
+
+    public abstract void onPageStarted(String url);
+
+    public abstract void onPageFinished(String url);
+
+    public abstract void onReceivedError(int errorCode, String description, String failingUrl);
+
+    public abstract void onShowCustomView(View view,
+           int requestedOrientation, WebChromeClient.CustomViewCallback callback);
+
+    // TODO (michaelbai): This method should be abstract, having empty body here
+    // makes the merge to the Android easy.
+    public void onHideCustomView() {
+    }
 
     //--------------------------------------------------------------------------------------------
     //                              Other WebView-specific methods
     //--------------------------------------------------------------------------------------------
     //
-
     public abstract void onFindResultReceived(int activeMatchOrdinal, int numberOfMatches,
             boolean isDoneCounting);
 
@@ -275,12 +306,6 @@ public abstract class AwContentsClient extends ContentViewClient {
      * @param picture New picture.
      */
     public abstract void onNewPicture(Picture picture);
-
-    public abstract void onPageStarted(String url);
-
-    public abstract void onPageFinished(String url);
-
-    public abstract void onReceivedError(int errorCode, String description, String failingUrl);
 
     //--------------------------------------------------------------------------------------------
     //             Stuff that we ignore since it only makes sense for Chrome browser

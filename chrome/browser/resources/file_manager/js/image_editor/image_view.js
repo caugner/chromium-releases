@@ -2,11 +2,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+'use strict';
+
 /**
  * The overlay displaying the image.
+ *
  * @param {HTMLElement} container The container element.
  * @param {Viewport} viewport The viewport.
  * @param {MetadataCache} metadataCache The metadataCache.
+ * @constructor
  */
 function ImageView(container, viewport, metadataCache) {
   this.container_ = container;
@@ -35,7 +39,9 @@ function ImageView(container, viewport, metadataCache) {
 
   /**
    * The element displaying the current content.
+   *
    * @type {HTMLCanvasElement|HTMLVideoElement}
+   * @private
    */
   this.screenImage_ = null;
 
@@ -96,7 +102,7 @@ ImageView.prototype = {__proto__: ImageBuffer.Overlay.prototype};
 
 /**
  * Draw below overlays with the default zIndex.
- * @return {number} Z-index
+ * @return {number} Z-index.
  */
 ImageView.prototype.getZIndex = function() { return -1 };
 
@@ -230,7 +236,7 @@ ImageView.prototype.paintDeviceRect = function(deviceRect, canvas, imageRect) {
  * Create an overlay canvas with properties similar to the screen canvas.
  * Useful for showing quick feedback when editing.
  *
- * @return {HTMLCanvasElement} Overlay canvas
+ * @return {HTMLCanvasElement} Overlay canvas.
  */
 ImageView.prototype.createOverlayCanvas = function() {
   var canvas = this.document_.createElement('canvas');
@@ -328,12 +334,12 @@ ImageView.prototype.load = function(url, metadata, effect,
       if (displayCallback) displayCallback();
     }
 
-    function onVideoLoad(error) {
+    var onVideoLoad = function(error) {
       video.removeEventListener('loadedmetadata', onVideoLoadSuccess);
       video.removeEventListener('error', onVideoLoadError);
       displayMainImage(ImageView.LOAD_TYPE_VIDEO_FILE, videoPreview, video,
           error);
-    }
+    };
     var onVideoLoadError = onVideoLoad.bind(this, 'VIDEO_ERROR');
     var onVideoLoadSuccess = onVideoLoad.bind(this, null);
 
@@ -346,6 +352,11 @@ ImageView.prototype.load = function(url, metadata, effect,
     video.load();
     return;
   }
+
+  // Cache has to be evicted in advance, so the returned cached image is not
+  // evicted later by the prefetched image.
+  this.contentCache_.evictLRU();
+
   var cached = this.contentCache_.getItem(this.contentID_);
   if (cached) {
     displayMainImage(ImageView.LOAD_TYPE_CACHED_FULL,
@@ -524,11 +535,11 @@ ImageView.prototype.unload = function(zoomToRect) {
 /**
  *
  * @param {HTMLCanvasElement|HTMLVideoElement} content The image element.
- * @param {boolean} opt_reuseScreenCanvas True if it is OK to reuse the screen
- *   resolution canvas.
- * @param {number} opt_width Image width.
- * @param {number} opt_height Image height.
- * @param {boolean} opt_preview True if the image is a preview (not full res).
+ * @param {boolean=} opt_reuseScreenCanvas True if it is OK to reuse the screen
+ *     resolution canvas.
+ * @param {number=} opt_width Image width.
+ * @param {number=} opt_height Image height.
+ * @param {boolean=} opt_preview True if the image is a preview (not full res).
  * @private
  */
 ImageView.prototype.replaceContent_ = function(
@@ -622,10 +633,10 @@ ImageView.prototype.updateThumbnail_ = function(canvas) {
  * Replace the displayed image, possibly with slide-in animation.
  *
  * @param {HTMLCanvasElement|HTMLVideoElement} content The image element.
- * @param {object} opt_effect Transition effect object.
- * @param {number} opt_width Image width.
- * @param {number} opt_height Image height.
- * @param {boolean} opt_preview True if the image is a preview (not full res).
+ * @param {Object=} opt_effect Transition effect object.
+ * @param {number=} opt_width Image width.
+ * @param {number=} opt_height Image height.
+ * @param {boolean=} opt_preview True if the image is a preview (not full res).
  */
 ImageView.prototype.replace = function(
     content, opt_effect, opt_width, opt_height, opt_preview) {
@@ -662,7 +673,7 @@ ImageView.prototype.replace = function(
 
 /**
  * @param {HTMLCanvasElement|HTMLVideoElement} element The element to transform.
- * @param {ImageView.Effect} opt_effect The effect to apply.
+ * @param {ImageView.Effect=} opt_effect The effect to apply.
  * @param {number=} opt_duration Transition duration.
  */
 ImageView.prototype.setTransform = function(element, opt_effect, opt_duration) {
@@ -770,6 +781,7 @@ ImageView.prototype.animateAndReplace = function(canvas, imageCropRect) {
  * Generic cache with a limited capacity and LRU eviction.
  *
  * @param {number} capacity Maximum number of cached item.
+ * @constructor
  */
 ImageView.Cache = function(capacity) {
   this.capacity_ = capacity;
@@ -781,24 +793,21 @@ ImageView.Cache = function(capacity) {
  * Fetch the item from the cache.
  *
  * @param {string} id The item ID.
- * @return {object} The cached item.
+ * @return {Object} The cached item.
  */
 ImageView.Cache.prototype.getItem = function(id) { return this.map_[id] };
 
 /**
  * Put the item into the cache.
  * @param {string} id The item ID.
- * @param {object} item The item object.
- * @param {boolean} opt_keepLRU True if the LRU order should not be modified.
+ * @param {Object} item The item object.
+ * @param {boolean=} opt_keepLRU True if the LRU order should not be modified.
  */
 ImageView.Cache.prototype.putItem = function(id, item, opt_keepLRU) {
   var pos = this.order_.indexOf(id);
 
   if ((pos >= 0) != (id in this.map_))
     throw new Error('Inconsistent cache state');
-
-  if ((pos >= 0) && (item != this.map_[id]))
-    this.deleteItem_(this.map_[id]);
 
   if (id in this.map_) {
     if (!opt_keepLRU) {
@@ -811,6 +820,8 @@ ImageView.Cache.prototype.putItem = function(id, item, opt_keepLRU) {
     this.order_.push(id);
   }
 
+  if ((pos >= 0) && (item != this.map_[id]))
+    this.deleteItem_(this.map_[id]);
   this.map_[id] = item;
 
   if (this.order_.length > this.capacity_)
@@ -848,7 +859,8 @@ ImageView.Cache.prototype.renameItem = function(oldId, newId) {
 
 /**
  * Disposes an object.
- * @param {object} item The item object.
+ *
+ * @param {Object} item The item object.
  * @private
  */
 ImageView.Cache.prototype.deleteItem_ = function(item) {
@@ -865,8 +877,9 @@ ImageView.Cache.prototype.deleteItem_ = function(item) {
 
 /**
  * Base class for effects.
+ *
  * @param {number} duration Duration in ms.
- * @param {string} opt_timing CSS transition timing function name.
+ * @param {string=} opt_timing CSS transition timing function name.
  * @constructor
  */
 ImageView.Effect = function(duration, opt_timing) {
@@ -942,7 +955,7 @@ ImageView.Effect.None.prototype.transform = function(element) {
  * Slide effect.
  *
  * @param {number} direction -1 for left, 1 for right.
- * @param {boolean} opt_slow True if slow (as in slideshow).
+ * @param {boolean=} opt_slow True if slow (as in slideshow).
  * @constructor
  */
 ImageView.Effect.Slide = function Slide(direction, opt_slow) {
@@ -982,9 +995,9 @@ ImageView.Effect.Slide.prototype.transform = function(element) {
  * should be given in device coordinates (accounting for devicePixelRatio).
  *
  * @param {Rect} deviceTargetRect Target rectangle.
- * @param {Rect} opt_deviceOriginalRect Original rectangle. If omitted,
- *   the full viewport will be used at the time of |transform| call.
- * @param {number} opt_duration Duration in ms.
+ * @param {Rect=} opt_deviceOriginalRect Original rectangle. If omitted,
+ *     the full viewport will be used at the time of |transform| call.
+ * @param {number=} opt_duration Duration in ms.
  * @constructor
  */
 ImageView.Effect.Zoom = function(

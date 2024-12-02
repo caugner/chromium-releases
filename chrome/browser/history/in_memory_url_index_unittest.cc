@@ -6,8 +6,8 @@
 #include <fstream>
 
 #include "base/auto_reset.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
@@ -27,6 +27,7 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/base/history_index_restore_observer.h"
 #include "chrome/test/base/testing_profile.h"
+#include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/test/test_browser_thread.h"
@@ -121,6 +122,7 @@ class InMemoryURLIndexTest : public testing::Test {
   content::TestBrowserThread ui_thread_;
   content::TestBrowserThread file_thread_;
   TestingProfile profile_;
+  HistoryService* history_service_;
 
   scoped_ptr<InMemoryURLIndex> url_index_;
   HistoryDatabase* history_database_;
@@ -173,8 +175,9 @@ const std::set<std::string>& InMemoryURLIndexTest::scheme_whitelist() {
 }
 
 bool InMemoryURLIndexTest::UpdateURL(const URLRow& row) {
-  return GetPrivateData()->UpdateURL(row, url_index_->languages_,
-                                     url_index_->scheme_whitelist_);
+  return GetPrivateData()->UpdateURL(
+      history_service_, row, url_index_->languages_,
+      url_index_->scheme_whitelist_);
 }
 
 bool InMemoryURLIndexTest::DeleteURL(const GURL& url) {
@@ -185,14 +188,13 @@ void InMemoryURLIndexTest::SetUp() {
   // We cannot access the database until the backend has been loaded.
   profile_.CreateHistoryService(true, false);
   profile_.CreateBookmarkModel(true);
-  profile_.BlockUntilBookmarkModelLoaded();
+  ui_test_utils::WaitForBookmarkModelToLoad(&profile_);
   profile_.BlockUntilHistoryProcessesPendingRequests();
   profile_.BlockUntilHistoryIndexIsRefreshed();
-  HistoryService* history_service =
-      HistoryServiceFactory::GetForProfile(&profile_,
-                                           Profile::EXPLICIT_ACCESS);
-  ASSERT_TRUE(history_service);
-  HistoryBackend* backend = history_service->history_backend_.get();
+  history_service_ = HistoryServiceFactory::GetForProfile(
+      &profile_, Profile::EXPLICIT_ACCESS);
+  ASSERT_TRUE(history_service_);
+  HistoryBackend* backend = history_service_->history_backend_.get();
   history_database_ = backend->db();
 
   // Create and populate a working copy of the URL history database.
@@ -226,9 +228,8 @@ void InMemoryURLIndexTest::SetUp() {
     }
     transaction.Commit();
   }
-  proto_file.close();
 
-  // Update the last_visit_time table column
+  // Update the last_visit_time table column in the "urls" table
   // such that it represents a time relative to 'now'.
   sql::Statement statement(db.GetUniqueStatement(
       "SELECT" HISTORY_URL_ROW_FIELDS "FROM urls;"));
@@ -246,6 +247,26 @@ void InMemoryURLIndexTest::SetUp() {
         last_visit -= day_delta;
       row.set_last_visit(last_visit);
       history_database_->UpdateURLRow(row.id(), row);
+    }
+    transaction.Commit();
+  }
+
+  // Update the visit_time table column in the "visits" table
+  // such that it represents a time relative to 'now'.
+  statement.Assign(db.GetUniqueStatement(
+      "SELECT" HISTORY_VISIT_ROW_FIELDS "FROM visits;"));
+  ASSERT_TRUE(statement.is_valid());
+  {
+    sql::Transaction transaction(&db);
+    transaction.Begin();
+    while (statement.Step()) {
+      VisitRow row;
+      history_database_->FillVisitRow(statement, &row);
+      base::Time last_visit = time_right_now;
+      for (int64 i = row.visit_time.ToInternalValue(); i > 0; --i)
+        last_visit -= day_delta;
+      row.visit_time = last_visit;
+      history_database_->UpdateVisitRow(row);
     }
     transaction.Commit();
   }
@@ -348,12 +369,20 @@ void InMemoryURLIndexTest::ExpectPrivateDataEqual(
     // gtest and STLPort in the Android build. See
     // http://code.google.com/p/googletest/issues/detail?id=359
     ASSERT_TRUE(actual_info != actual.history_info_map_.end());
-    const URLRow& expected_row(expected_info->second);
-    const URLRow& actual_row(actual_info->second);
+    const URLRow& expected_row(expected_info->second.url_row);
+    const URLRow& actual_row(actual_info->second.url_row);
     EXPECT_EQ(expected_row.visit_count(), actual_row.visit_count());
     EXPECT_EQ(expected_row.typed_count(), actual_row.typed_count());
     EXPECT_EQ(expected_row.last_visit(), actual_row.last_visit());
     EXPECT_EQ(expected_row.url(), actual_row.url());
+    const VisitInfoVector& expected_visits(expected_info->second.visits);
+    const VisitInfoVector& actual_visits(actual_info->second.visits);
+    EXPECT_EQ(expected_visits.size(), actual_visits.size());
+    for (size_t i = 0;
+         i < std::min(expected_visits.size(), actual_visits.size()); ++i) {
+      EXPECT_EQ(expected_visits[i].first, actual_visits[i].first);
+      EXPECT_EQ(expected_visits[i].second, actual_visits[i].second);
+    }
   }
 
   for (WordStartsMap::const_iterator expected_starts =
@@ -455,7 +484,7 @@ TEST_F(InMemoryURLIndexTest, Retrieval) {
   EXPECT_FALSE(matches[0].can_inline);
 
   // Search which should result in very poor result.
-  matches = url_index_->HistoryItemsForTerms(ASCIIToUTF16("z y x"),
+  matches = url_index_->HistoryItemsForTerms(ASCIIToUTF16("qui c"),
                                              string16::npos);
   ASSERT_EQ(1U, matches.size());
   // The results should have a poor score.
@@ -474,6 +503,14 @@ TEST_F(InMemoryURLIndexTest, Retrieval) {
   EXPECT_EQ(30, matches[0].url_info.id());
   EXPECT_FALSE(matches[0].can_inline);
 
+  // Check that URLs are not escaped an escape time.
+  matches = url_index_->HistoryItemsForTerms(ASCIIToUTF16("1% wikipedia"),
+                                             string16::npos);
+  ASSERT_EQ(1U, matches.size());
+  EXPECT_EQ(35, matches[0].url_info.id());
+  EXPECT_EQ("http://en.wikipedia.org/wiki/1%25_rule_(Internet_culture)",
+            matches[0].url_info.url().spec());
+
   // Verify that a single term can appear multiple times in the URL and as long
   // as one starts the URL it is still inlined.
   matches = url_index_->HistoryItemsForTerms(ASCIIToUTF16("fubar"),
@@ -487,9 +524,6 @@ TEST_F(InMemoryURLIndexTest, Retrieval) {
 }
 
 TEST_F(InMemoryURLIndexTest, CursorPositionRetrieval) {
-  base::AutoReset<bool> use_cursor_position(
-      &GetPrivateData()->use_cursor_position_, true);
-
   // See if a very specific term with no cursor gives an empty result.
   ScoredHistoryMatches matches = url_index_->HistoryItemsForTerms(
       ASCIIToUTF16("DrudReport"), string16::npos);
@@ -578,11 +612,10 @@ TEST_F(InMemoryURLIndexTest, URLPrefixMatching) {
   ASSERT_EQ(1U, matches.size());
   EXPECT_TRUE(matches[0].can_inline);
 
-  // "www.cnn.com" - found, cannot inline
+  // "ww.cnn.com" - not found because we don't allow ww as a mid-term match
   matches = url_index_->HistoryItemsForTerms(ASCIIToUTF16("ww.cnn.com"),
                                              string16::npos);
-  ASSERT_EQ(1U, matches.size());
-  EXPECT_TRUE(!matches[0].can_inline);
+  ASSERT_EQ(0U, matches.size());
 
   // "http://www.cnn.com" - found, can inline
   matches =
@@ -591,12 +624,12 @@ TEST_F(InMemoryURLIndexTest, URLPrefixMatching) {
   ASSERT_EQ(1U, matches.size());
   EXPECT_TRUE(matches[0].can_inline);
 
-  // "tp://www.cnn.com" - found, cannot inline
+  // "tp://www.cnn.com" - not found because we don't allow tp as a mid-term
+  // match
   matches =
       url_index_->HistoryItemsForTerms(ASCIIToUTF16("tp://www.cnn.com"),
                                        string16::npos);
-  ASSERT_EQ(1U, matches.size());
-  EXPECT_TRUE(!matches[0].can_inline);
+  ASSERT_EQ(0U, matches.size());
 }
 
 TEST_F(InMemoryURLIndexTest, ProperStringMatching) {
@@ -636,7 +669,7 @@ TEST_F(InMemoryURLIndexTest, HugeResultSet) {
 
 TEST_F(InMemoryURLIndexTest, TitleSearch) {
   // Signal if someone has changed the test DB.
-  EXPECT_EQ(28U, GetPrivateData()->history_info_map_.size());
+  EXPECT_EQ(29U, GetPrivateData()->history_info_map_.size());
 
   // Ensure title is being searched.
   ScoredHistoryMatches matches = url_index_->HistoryItemsForTerms(
@@ -918,6 +951,48 @@ TEST_F(InMemoryURLIndexTest, WhitelistedURLs) {
   }
 }
 
+TEST_F(InMemoryURLIndexTest, ReadVisitsFromHistory) {
+  const HistoryInfoMap& history_info_map = GetPrivateData()->history_info_map_;
+
+  // Check (for URL with id 1) that the number of visits and their
+  // transition types are what we expect.  We don't bother checking
+  // the timestamps because it's too much trouble.  (The timestamps go
+  // through a transformation in InMemoryURLIndexTest::SetUp().  We
+  // assume that if the count and transitions show up with the right
+  // information, we're getting the right information from the history
+  // database file.)
+  HistoryInfoMap::const_iterator entry = history_info_map.find(1);
+  ASSERT_TRUE(entry != history_info_map.end());
+  {
+    const VisitInfoVector& visits = entry->second.visits;
+    EXPECT_EQ(3u, visits.size());
+    EXPECT_EQ(0u, visits[0].second);
+    EXPECT_EQ(1u, visits[1].second);
+    EXPECT_EQ(0u, visits[2].second);
+  }
+
+  // Ditto but for URL with id 35.
+  entry = history_info_map.find(35);
+  ASSERT_TRUE(entry != history_info_map.end());
+  {
+    const VisitInfoVector& visits = entry->second.visits;
+    EXPECT_EQ(2u, visits.size());
+    EXPECT_EQ(1u, visits[0].second);
+    EXPECT_EQ(1u, visits[1].second);
+  }
+
+  // The URL with id 32 has many visits listed in the database, but we
+  // should only read the most recent 10 (which are all transition type 0).
+  entry = history_info_map.find(32);
+  ASSERT_TRUE(entry != history_info_map.end());
+  {
+    const VisitInfoVector& visits = entry->second.visits;
+    EXPECT_EQ(10u, visits.size());
+    for (size_t i = 0; i < visits.size(); ++i)
+      EXPECT_EQ(0u, visits[i].second);
+  }
+}
+
 TEST_F(InMemoryURLIndexTest, CacheSaveRestore) {
   base::ScopedTempDir temp_directory;
   ASSERT_TRUE(temp_directory.CreateUniqueTempDir());
@@ -936,6 +1011,10 @@ TEST_F(InMemoryURLIndexTest, CacheSaveRestore) {
   EXPECT_FALSE(private_data.history_id_word_map_.empty());
   EXPECT_FALSE(private_data.history_info_map_.empty());
   EXPECT_FALSE(private_data.word_starts_map_.empty());
+
+  // Make sure the data we have was built from history.  (Version 0
+  // means rebuilt from history.)
+  EXPECT_EQ(0, private_data.restored_cache_version_);
 
   // Capture the current private data for later comparison to restored data.
   scoped_refptr<URLIndexPrivateData> old_data(private_data.Duplicate());
@@ -966,6 +1045,11 @@ TEST_F(InMemoryURLIndexTest, CacheSaveRestore) {
   EXPECT_TRUE(restore_observer.succeeded());
 
   URLIndexPrivateData& new_data(*GetPrivateData());
+
+  // Make sure the data we have was reloaded from cache.  (Version 0
+  // means rebuilt from history; anything else means restored from
+  // a cache version.)
+  EXPECT_GT(new_data.restored_cache_version_, 0);
 
   // Compare the captured and restored for equality.
   ExpectPrivateDataEqual(*old_data, new_data);

@@ -14,6 +14,7 @@ class InputMethodEventFilter;
 }  // namespace views
 
 namespace ash {
+class AshNativeCursorManager;
 class Shell;
 class LauncherModel;
 
@@ -36,7 +37,10 @@ public:
   internal::SystemGestureEventFilter* system_gesture_event_filter();
   internal::WorkspaceController* workspace_controller();
   internal::ScreenPositionController* screen_position_controller();
+  AshNativeCursorManager* ash_native_cursor_manager();
   LauncherModel* launcher_model();
+
+  void DisableOutputConfiguratorAnimation();
 
  private:
   Shell* shell_;  // not owned

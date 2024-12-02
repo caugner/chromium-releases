@@ -6,7 +6,7 @@
 #define CC_TEST_FAKE_CONTENT_LAYER_IMPL_H_
 
 #include "base/memory/scoped_ptr.h"
-#include "cc/tiled_layer_impl.h"
+#include "cc/layers/tiled_layer_impl.h"
 
 namespace cc {
 
@@ -25,7 +25,7 @@ class FakeContentLayerImpl : public TiledLayerImpl {
   }
   void reset_lost_output_surface_count() { lost_output_surface_count_ = 0; }
 
-  virtual void didLoseOutputSurface() OVERRIDE;
+  virtual void DidLoseOutputSurface() OVERRIDE;
 
  private:
   explicit FakeContentLayerImpl(LayerTreeImpl* tree_impl, int id);

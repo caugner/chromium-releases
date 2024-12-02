@@ -23,8 +23,8 @@ struct OpenURLParams;
 namespace components {
 
 enum WebContentsDelegateLogLevel {
-  // Equivalent of WebCore::WebConsoleMessage::LevelTip.
-  WEB_CONTENTS_DELEGATE_LOG_LEVEL_TIP = 0,
+  // Equivalent of WebCore::WebConsoleMessage::LevelDebug.
+  WEB_CONTENTS_DELEGATE_LOG_LEVEL_DEBUG = 0,
   // Equivalent of WebCore::WebConsoleMessage::LevelLog.
   WEB_CONTENTS_DELEGATE_LOG_LEVEL_LOG = 1,
   // Equivalent of WebCore::WebConsoleMessage::LevelWarning.
@@ -69,6 +69,8 @@ class WebContentsDelegateAndroid : public content::WebContentsDelegate {
   virtual void LoadingStateChanged(content::WebContents* source) OVERRIDE;
   virtual void LoadProgressChanged(content::WebContents* source,
                                    double load_progress) OVERRIDE;
+  virtual void RendererUnresponsive(content::WebContents* source) OVERRIDE;
+  virtual void RendererResponsive(content::WebContents* source) OVERRIDE;
   virtual void CloseContents(content::WebContents* source) OVERRIDE;
   virtual void MoveContents(content::WebContents* source,
                             const gfx::Rect& pos) OVERRIDE;

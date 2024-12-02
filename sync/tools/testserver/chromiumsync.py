@@ -28,6 +28,8 @@ import dictionary_specifics_pb2
 import get_updates_caller_info_pb2
 import extension_setting_specifics_pb2
 import extension_specifics_pb2
+import favicon_image_specifics_pb2
+import favicon_tracking_specifics_pb2
 import history_delete_directive_specifics_pb2
 import nigori_specifics_pb2
 import password_specifics_pb2
@@ -65,7 +67,9 @@ ALL_TYPES = (
     SYNCED_NOTIFICATION,
     THEME,
     TYPED_URL,
-    EXTENSION_SETTINGS) = range(21)
+    EXTENSION_SETTINGS,
+    FAVICON_IMAGES,
+    FAVICON_TRACKING) = range(23)
 
 # An enumeration on the frequency at which the server should send errors
 # to the client. This would be specified by the url that triggers the error.
@@ -93,6 +97,8 @@ SYNC_TYPE_TO_DESCRIPTOR = {
     EXPERIMENTS: SYNC_TYPE_FIELDS['experiments'],
     EXTENSION_SETTINGS: SYNC_TYPE_FIELDS['extension_setting'],
     EXTENSIONS: SYNC_TYPE_FIELDS['extension'],
+    FAVICON_IMAGES: SYNC_TYPE_FIELDS['favicon_image'],
+    FAVICON_TRACKING: SYNC_TYPE_FIELDS['favicon_tracking'],
     HISTORY_DELETE_DIRECTIVE: SYNC_TYPE_FIELDS['history_delete_directive'],
     NIGORI: SYNC_TYPE_FIELDS['nigori'],
     PASSWORD: SYNC_TYPE_FIELDS['password'],
@@ -410,6 +416,13 @@ class UpdateSieve(object):
     return [datatype for datatype, timestamp in self._state.iteritems()
             if timestamp == 0]
 
+  def GetCreateMobileBookmarks(self):
+    """Return true if the client has requested to create the 'Mobile Bookmarks'
+       folder.
+    """
+    return (self._original_request.HasField('create_mobile_bookmarks_folder')
+            and self._original_request.create_mobile_bookmarks_folder)
+
   def SaveProgress(self, new_timestamp, get_updates_response):
     """Write the new_timestamp or new_progress_marker fields to a response."""
     if self._original_request.from_progress_marker:
@@ -449,7 +462,7 @@ class SyncDataModel(object):
                     parent_tag='google_chrome_bookmarks', sync_type=BOOKMARK),
       PermanentItem('synced_bookmarks', name='Synced Bookmarks',
                     parent_tag='google_chrome_bookmarks', sync_type=BOOKMARK,
-                    create_by_default=False),  # Must be True in the iOS tree.
+                    create_by_default=False),
       PermanentItem('google_chrome_autofill', name='Autofill',
                     parent_tag=ROOT_ID, sync_type=AUTOFILL),
       PermanentItem('google_chrome_autofill_profiles', name='Autofill Profiles',
@@ -467,6 +480,14 @@ class SyncDataModel(object):
                     name='History Delete Directives',
                     parent_tag=ROOT_ID,
                     sync_type=HISTORY_DELETE_DIRECTIVE),
+      PermanentItem('google_chrome_favicon_images',
+                    name='Favicon Images',
+                    parent_tag=ROOT_ID,
+                    sync_type=FAVICON_IMAGES),
+      PermanentItem('google_chrome_favicon_tracking',
+                    name='Favicon Tracking',
+                    parent_tag=ROOT_ID,
+                    sync_type=FAVICON_TRACKING),
       PermanentItem('google_chrome_nigori', name='Nigori',
                     parent_tag=ROOT_ID, sync_type=NIGORI),
       PermanentItem('google_chrome_passwords', name='Passwords',
@@ -683,7 +704,14 @@ class SyncDataModel(object):
     if not sieve.HasAnyTimestamp():
       return (0, [], 0)
     min_timestamp = sieve.GetMinTimestamp()
-    self._CreateDefaultPermanentItems(sieve.GetFirstTimeTypes())
+    first_time_types = sieve.GetFirstTimeTypes()
+    self._CreateDefaultPermanentItems(first_time_types)
+    # Mobile bookmark folder is not created by default, create it only when
+    # client requested it.
+    if (sieve.GetCreateMobileBookmarks() and
+        first_time_types.count(BOOKMARK) > 0):
+      self.TriggerCreateSyncedBookmarks()
+
     change_log = sorted(self._entries.values(),
                         key=operator.attrgetter('version'))
     new_changes = [x for x in change_log if x.version > min_timestamp]

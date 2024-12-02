@@ -33,10 +33,14 @@ class MockDiskMountManager : public DiskMountManager {
   MOCK_METHOD0(RequestMountInfoRefresh, void(void));
   MOCK_METHOD4(MountPath, void(const std::string&, const std::string&,
                                const std::string&, MountType));
-  MOCK_METHOD2(UnmountPath, void(const std::string&, UnmountOptions));
+  MOCK_METHOD3(UnmountPath, void(const std::string&,
+                                 UnmountOptions,
+                                 const DiskMountManager::UnmountPathCallback&));
   MOCK_METHOD1(FormatMountedDevice, void(const std::string&));
-  MOCK_METHOD3(UnmountDeviceRecursive, void(const std::string&,
-      DiskMountManager::UnmountDeviceRecursiveCallbackType, void*));
+  MOCK_METHOD2(
+      UnmountDeviceRecursively,
+      void(const std::string&,
+           const DiskMountManager::UnmountDeviceRecursivelyCallbackType&));
 
   // Invokes fake device insert events.
   void NotifyDeviceInsertEvents();
@@ -48,7 +52,7 @@ class MockDiskMountManager : public DiskMountManager {
   void SetupDefaultReplies();
 
   // Creates a fake disk entry for the mounted device. This function is
-  // primarily for RemovableDeviceNotificationsTest.
+  // primarily for StorageMonitorTest.
   void CreateDiskEntryForMountDevice(
       const DiskMountManager::MountPointInfo& mount_info,
       const std::string& device_id,
@@ -59,7 +63,7 @@ class MockDiskMountManager : public DiskMountManager {
       uint64 total_size_in_bytes);
 
   // Removes the fake disk entry associated with the mounted device. This
-  // function is primarily for RemovableDeviceNotificationsTest.
+  // function is primarily for StorageMonitorTest.
   void RemoveDiskEntryForMountDevice(
       const DiskMountManager::MountPointInfo& mount_info);
 

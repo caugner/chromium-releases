@@ -9,14 +9,15 @@
 #include "base/file_util.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
-#include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "base/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "chrome/common/child_process_logging.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/chrome_process_type.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/pepper_flash.h"
@@ -85,6 +86,11 @@ const uint32 kGTalkPluginPermissions = ppapi::PERMISSION_PRIVATE |
 #if defined(WIDEVINE_CDM_AVAILABLE)
 const char kWidevineCdmPluginExtension[] = "";
 const uint32 kWidevineCdmPluginPermissions = ppapi::PERMISSION_PRIVATE |
+#if defined(OS_CHROMEOS)
+// TODO(xhwang): Make permission requirements the same on all OS.
+// See http://crbug.com/222252
+                                             ppapi::PERMISSION_FLASH |
+#endif  // !defined(OS_CHROMEOS)
                                              ppapi::PERMISSION_DEV;
 #endif  // WIDEVINE_CDM_AVAILABLE
 
@@ -382,6 +388,7 @@ void ChromeContentClient::AddAdditionalSchemes(
   standard_schemes->push_back(kExtensionResourceScheme);
   savable_schemes->push_back(kExtensionResourceScheme);
   standard_schemes->push_back(chrome::kChromeSearchScheme);
+  savable_schemes->push_back(chrome::kChromeSearchScheme);
 #if defined(OS_CHROMEOS)
   standard_schemes->push_back(kCrosScheme);
 #endif
@@ -436,6 +443,20 @@ base::RefCountedStaticMemory* ChromeContentClient::GetDataResourceBytes(
 
 gfx::Image& ChromeContentClient::GetNativeImageNamed(int resource_id) const {
   return ResourceBundle::GetSharedInstance().GetNativeImageNamed(resource_id);
+}
+
+std::string ChromeContentClient::GetProcessTypeNameInEnglish(int type) {
+  switch(type) {
+    case PROCESS_TYPE_PROFILE_IMPORT:
+      return "Profile Import helper";
+    case PROCESS_TYPE_NACL_LOADER:
+      return "Native Client module";
+    case PROCESS_TYPE_NACL_BROKER:
+      return "Native Client broker";
+  }
+
+  DCHECK(false) << "Unknown child process type!";
+  return "Unknown"; 
 }
 
 #if defined(OS_MACOSX) && !defined(OS_IOS)

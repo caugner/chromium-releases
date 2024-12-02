@@ -28,6 +28,7 @@ typedef struct _XDisplay Display;
 typedef unsigned long Cursor;
 typedef struct _XcursorImage XcursorImage;
 typedef struct _XImage XImage;
+typedef struct _XGC *GC;
 
 #if defined(TOOLKIT_GTK)
 typedef struct _GdkDrawable GdkWindow;
@@ -77,6 +78,10 @@ int GetDefaultScreen(Display* display);
 // Returns an X11 Cursor, sharable across the process.
 // |cursor_shape| is an X font cursor shape, see XCreateFontCursor().
 UI_EXPORT ::Cursor GetXCursor(int cursor_shape);
+
+// Resets the cache used by GetXCursor(). Only useful for tests that may delete
+// the display.
+UI_EXPORT void ResetXCursorCache();
 
 #if defined(USE_AURA)
 // Creates a custom X cursor from the image. This takes ownership of image. The
@@ -262,11 +267,6 @@ UI_EXPORT void PutARGBImage(Display* display,
 void FreePicture(Display* display, XID picture);
 void FreePixmap(Display* display, XID pixmap);
 
-// Gets the list of the output displaying device handles via XRandR, and sets to
-// |outputs|.  Returns false if it fails to get the list and |outputs| is
-// cleared.
-UI_EXPORT bool GetOutputDeviceHandles(std::vector<XID>* outputs);
-
 // Gets some useful data from the specified output device, such like
 // manufacturer's ID, product code, and human readable name. Returns false if it
 // fails to get those data and doesn't touch manufacturer ID/product code/name.
@@ -299,14 +299,6 @@ UI_EXPORT bool ParseOutputOverscanFlag(const unsigned char* prop,
                                        unsigned long nitems,
                                        bool* flag);
 
-// Gets the names of the all displays physically connected to the system.
-UI_EXPORT std::vector<std::string> GetDisplayNames(
-    const std::vector<XID>& output_id);
-
-// Gets the name of outputs given by |output_id|.
-UI_EXPORT std::vector<std::string> GetOutputNames(
-    const std::vector<XID>& output_id);
-
 enum WindowManagerName {
   WM_UNKNOWN,
   WM_BLACKBOX,
@@ -316,6 +308,7 @@ enum WindowManagerName {
   WM_ICE_WM,
   WM_KWIN,
   WM_METACITY,
+  WM_MUFFIN,
   WM_MUTTER,
   WM_OPENBOX,
   WM_XFWM4,

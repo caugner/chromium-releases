@@ -18,6 +18,7 @@
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #include "ui/gfx/insets.h"
 #include "ui/views/layout/fill_layout.h"
 #include "ui/views/widget/widget.h"
@@ -203,14 +204,10 @@ ExtensionPopup* ExtensionPopup::ShowPopup(
 }
 
 void ExtensionPopup::ShowBubble() {
-  Show();
-
-  // Request focus for the View. Without this, the FocusManager gets confused.
-  host()->view()->SetVisible(true);
-  host()->view()->RequestFocus();
+  GetWidget()->Show();
 
   // Focus on the host contents when the bubble is first shown.
-  host()->host_contents()->Focus();
+  host()->host_contents()->GetView()->Focus();
 
   // Listen for widget focus changes after showing (used for non-aura win).
   views::WidgetFocusManager::GetInstance()->AddFocusChangeListener(this);

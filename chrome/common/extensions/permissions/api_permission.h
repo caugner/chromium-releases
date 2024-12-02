@@ -39,9 +39,9 @@ class APIPermission {
 
     // Real permissions.
     kActiveTab,
+    kAdView,
     kAlarms,
     kAppCurrentWindowInternal,
-    kAppNotifications,
     kAppRuntime,
     kAppWindow,
     kAudioCapture,
@@ -67,6 +67,7 @@ class APIPermission {
     kDeveloperPrivate,
     kDevtools,
     kDownloads,
+    kDownloadsInternal,
     kEchoPrivate,
     kExperimental,
     kFileBrowserHandler,
@@ -87,11 +88,13 @@ class APIPermission {
     kMediaGalleriesPrivate,
     kMediaPlayerPrivate,
     kMetricsPrivate,
+    kNativeMessaging,
     kNetworkingPrivate,
     kNotification,
     kPageCapture,
     kPointerLock,
     kPlugin,
+    kPower,
     kPrivacy,
     kProxy,
     kPushMessaging,
@@ -101,6 +104,7 @@ class APIPermission {
     kSessionRestore,
     kSocket,
     kStorage,
+    kStreamsPrivate,
     kSyncFileSystem,
     kSystemPrivate,
     kSystemIndicator,
@@ -217,7 +221,7 @@ class APIPermissionInfo {
     // Indicates that extensions cannot specify the permission as optional.
     kFlagCannotBeOptional = 1 << 3,
 
-    // Indicates that extensions cannot specify the permission as optional.
+    // Indicates that extensions must specify the permission as optional.
     kFlagMustBeOptional = 1 << 4
   };
 

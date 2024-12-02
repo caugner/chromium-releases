@@ -13,9 +13,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "chrome/browser/extensions/active_tab_permission_granter.h"
-#include "chrome/browser/extensions/app_notify_channel_setup.h"
 #include "chrome/browser/extensions/extension_function_dispatcher.h"
-#include "chrome/browser/extensions/image_loading_tracker.h"
 #include "chrome/common/web_apps.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -29,6 +27,10 @@ namespace content {
 struct LoadCommittedDetails;
 }
 
+namespace gfx {
+class Image;
+}
+
 namespace extensions {
 class Extension;
 class LocationBarController;
@@ -40,7 +42,6 @@ class ScriptExecutor;
 // Per-tab extension helper. Also handles non-extension apps.
 class TabHelper : public content::WebContentsObserver,
                   public ExtensionFunctionDispatcher::Delegate,
-                  public AppNotifyChannelSetup::Delegate,
                   public base::SupportsWeakPtr<TabHelper>,
                   public content::NotificationObserver,
                   public content::WebContentsUserData<TabHelper> {
@@ -178,15 +179,10 @@ class TabHelper : public content::WebContentsObserver,
 
   // Message handlers.
   void OnDidGetApplicationInfo(int32 page_id, const WebApplicationInfo& info);
-  void OnInstallApplication(const WebApplicationInfo& info);
   void OnInlineWebstoreInstall(int install_id,
                                int return_route_id,
                                const std::string& webstore_item_id,
                                const GURL& requestor_url);
-  void OnGetAppNotifyChannel(const GURL& requestor_url,
-                             const std::string& client_id,
-                             int return_route_id,
-                             int callback_id);
   void OnGetAppInstallState(const GURL& requestor_url,
                             int return_route_id,
                             int callback_id);
@@ -199,8 +195,8 @@ class TabHelper : public content::WebContentsObserver,
 
   // App extensions related methods:
 
-  // Resets app_icon_ and if |extension| is non-null creates a new
-  // ImageLoadingTracker to load the extension's image.
+  // Resets app_icon_ and if |extension| is non-null uses ImageLoader to load
+  // the extension's image asynchronously.
   void UpdateExtensionAppIcon(const Extension* extension);
 
   const Extension* GetExtension(const std::string& extension_app_id);
@@ -212,12 +208,6 @@ class TabHelper : public content::WebContentsObserver,
                                        int return_route_id,
                                        bool success,
                                        const std::string& error);
-
-  // AppNotifyChannelSetup::Delegate.
-  virtual void AppNotifyChannelSetupComplete(
-      const std::string& channel_id,
-      const std::string& error,
-      const AppNotifyChannelSetup* setup) OVERRIDE;
 
   // content::NotificationObserver.
   virtual void Observe(int type,

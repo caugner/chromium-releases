@@ -8,6 +8,8 @@
 // included file but that's all right since any javascript file should start
 // with a copyright comment anyway.
 
+//<include src="../../../image_loader/client.js"/>
+
 //<include src="../../../../../../ui/webui/resources/js/load_time_data.js"/>
 //<include src="../../../../../../ui/webui/resources/js/util.js"/>
 //<include src="../../../../../../ui/webui/resources/js/i18n_template_no_process.js"/>
@@ -26,6 +28,9 @@
 //<include src="../../../../../../ui/webui/resources/js/cr/ui/list.js"/>
 //<include src="../../../../../../ui/webui/resources/js/cr/ui/grid.js"/>
 
+(function() {
+// 'strict mode' is invoked for this scope.
+
 //<include src="../util.js"/>
 //<include src="../file_type.js"/>
 //<include src="../directory_contents.js"/>
@@ -40,3 +45,9 @@
 //<include src="importing_dialog.js"/>
 //<include src="tile_view.js"/>
 //<include src="photo_import.js"/>
+
+// Exports
+window.ImageUtil = ImageUtil;
+window.FileCopyManagerWrapper = FileCopyManagerWrapper;
+
+})();

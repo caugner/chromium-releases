@@ -13,10 +13,10 @@
 #include "base/json/json_writer.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/rand_util.h"
-#include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "base/third_party/icu/icu_utf.h"
 #include "chrome/common/automation_id.h"
 #include "chrome/common/zip.h"
@@ -312,13 +312,13 @@ struct ZipEntry {
 
     // End of central directory.
     stream.WriteUInt32(kEndOfCentralDirSignature);
-    stream.WriteUInt16(0); // num of this disk
-    stream.WriteUInt16(0); // disk where cd starts
-    stream.WriteUInt16(1); // number of cds on this disk
-    stream.WriteUInt16(1); // total cds
-    stream.WriteUInt32(cd_size); // size of cd
-    stream.WriteUInt32(entry_size); // offset of cd
-    stream.WriteUInt16(0); // comment len
+    stream.WriteUInt16(0);  // num of this disk
+    stream.WriteUInt16(0);  // disk where cd starts
+    stream.WriteUInt16(1);  // number of cds on this disk
+    stream.WriteUInt16(1);  // total cds
+    stream.WriteUInt32(cd_size);  // size of cd
+    stream.WriteUInt32(entry_size);  // offset of cd
+    stream.WriteUInt16(0);  // comment len
 
     return stream.buffer();
   }
@@ -409,19 +409,17 @@ void TruncateString(std::string* data) {
 
 // Truncates all strings contained in the given value.
 void TruncateContainedStrings(Value* value) {
-  ListValue* list;
-  if (value->IsType(Value::TYPE_DICTIONARY)) {
-    DictionaryValue* dict = static_cast<DictionaryValue*>(value);
-    DictionaryValue::key_iterator key = dict->begin_keys();
-    for (; key != dict->end_keys(); ++key) {
-      Value* child;
-      if (!dict->GetWithoutPathExpansion(*key, &child))
-        continue;
+  ListValue* list = NULL;
+  DictionaryValue* dict = NULL;
+  if (value->GetAsDictionary(&dict)) {
+    for (DictionaryValue::Iterator it(*dict); !it.IsAtEnd(); it.Advance()) {
       std::string data;
-      if (child->GetAsString(&data)) {
+      if (it.value().GetAsString(&data)) {
         TruncateString(&data);
-        dict->SetWithoutPathExpansion(*key, Value::CreateStringValue(data));
+        dict->SetWithoutPathExpansion(it.key(), new base::StringValue(data));
       } else {
+        Value* child = NULL;
+        dict->GetWithoutPathExpansion(it.key(), &child);
         TruncateContainedStrings(child);
       }
     }
@@ -433,7 +431,7 @@ void TruncateContainedStrings(Value* value) {
       std::string data;
       if (child->GetAsString(&data)) {
         TruncateString(&data);
-        list->Set(i, Value::CreateStringValue(data));
+        list->Set(i, new base::StringValue(data));
       } else {
         TruncateContainedStrings(child);
       }
@@ -449,7 +447,7 @@ std::string JsonStringifyForDisplay(const Value* value) {
     std::string data;
     value->GetAsString(&data);
     TruncateString(&data);
-    copy.reset(Value::CreateStringValue(data));
+    copy.reset(new base::StringValue(data));
   } else {
     copy.reset(value->DeepCopy());
     TruncateContainedStrings(copy.get());

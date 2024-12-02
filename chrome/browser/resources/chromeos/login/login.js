@@ -7,7 +7,24 @@
  * TODO(xiyuan): Refactoring this to get a better structure.
  */
 
-var localStrings = new LocalStrings();
+<include src="../user_images_grid.js"></include>
+<include src="apps_menu.js"></include>
+<include src="bubble.js"></include>
+<include src="display_manager.js"></include>
+<include src="header_bar.js"></include>
+<include src="network_dropdown.js"></include>
+<include src="oobe_screen_oauth_enrollment.js"></include>
+<include src="oobe_screen_user_image.js"></include>
+<include src="oobe_screen_reset.js"></include>
+<include src="screen_wrong_hwid.js"></include>
+<include src="screen_account_picker.js"></include>
+<include src="screen_gaia_signin.js"></include>
+<include src="screen_error_message.js"></include>
+<include src="screen_tpm_error.js"></include>
+<include src="screen_password_changed.js"></include>
+<include src="screen_locally_managed_user_creation.js"></include>
+<include src="oobe_screen_terms_of_service.js"></include>
+<include src="user_pod_row.js"></include>
 
 cr.define('cr.ui', function() {
   var DisplayManager = cr.ui.login.DisplayManager;
@@ -33,6 +50,7 @@ cr.define('cr.ui', function() {
    */
   Oobe.initialize = function() {
     DisplayManager.initialize();
+    oobe.WrongHWIDScreen.register();
     login.AccountPickerScreen.register();
     login.GaiaSigninScreen.register();
     oobe.OAuthEnrollmentScreen.register();
@@ -41,7 +59,7 @@ cr.define('cr.ui', function() {
     login.ErrorMessageScreen.register();
     login.TPMErrorMessageScreen.register();
     login.PasswordChangedScreen.register();
-    login.ManagedUserCreationScreen.register();
+    login.LocallyManagedUserCreationScreen.register();
     oobe.TermsOfServiceScreen.register();
 
     cr.ui.Bubble.decorate($('bubble'));
@@ -258,9 +276,14 @@ cr.define('cr.ui', function() {
    * @param {string} termsOfService The terms of service, as plain text.
    */
   Oobe.setTermsOfService = function(termsOfService) {
-    $('terms-of-service').classList.remove('tos-loading');
-    $('tos-content-main').textContent = termsOfService;
-    $('tos-accept-button').disabled = false;
+    oobe.TermsOfServiceScreen.setTermsOfService(termsOfService);
+  };
+
+  /**
+   * Clears password field in user-pod.
+   */
+  Oobe.clearUserPodPassword = function() {
+    DisplayManager.clearUserPodPassword();
   };
 
   // Export

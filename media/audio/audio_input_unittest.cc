@@ -11,6 +11,11 @@
 #include "media/audio/audio_manager_base.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+#if defined(OS_ANDROID)
+#include "base/android/jni_android.h"
+#include "media/audio/audio_manager_base.h"
+#endif
+
 namespace media {
 
 static const int kSamplingRate = 8000;
@@ -39,7 +44,7 @@ class TestInputCallback : public AudioInputStream::AudioInputCallback {
     }
   }
   virtual void OnClose(AudioInputStream* stream) OVERRIDE {}
-  virtual void OnError(AudioInputStream* stream, int code) OVERRIDE {
+  virtual void OnError(AudioInputStream* stream) OVERRIDE {
     ++had_error_;
   }
   // Returns how many times OnData() has been called.
@@ -67,6 +72,11 @@ static bool CanRunAudioTests(AudioManager* audio_man) {
 }
 
 static AudioInputStream* CreateTestAudioInputStream(AudioManager* audio_man) {
+#if defined(OS_ANDROID)
+  bool ret = media::AudioManagerBase::RegisterAudioManager(
+                 base::android::AttachCurrentThread());
+  EXPECT_TRUE(ret);
+#endif
   AudioInputStream* ais = audio_man->MakeAudioInputStream(
       AudioParameters(AudioParameters::AUDIO_PCM_LINEAR, CHANNEL_LAYOUT_STEREO,
                       kSamplingRate, 16, kSamplesPerPacket),

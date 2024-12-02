@@ -11,8 +11,8 @@
 #include "base/basictypes.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/json/json_reader.h"
 #include "base/logging.h"
 #include "base/message_loop_proxy.h"
@@ -44,6 +44,8 @@ namespace {
 const char kDriveSpecialRootPath[] = "/special";
 
 const char kDriveMountPointPath[] = "/special/drive";
+
+const char kDriveMyDriveMountPointPath[] = "/special/drive/root";
 
 const base::FilePath::CharType* kDriveMountPointPathComponents[] = {
   "/", "special", "drive"
@@ -129,6 +131,25 @@ void OnGetEntryInfoByResourceId(Profile* profile,
 
 }  // namespace
 
+
+const base::FilePath& GetDriveGrandRootPath() {
+  CR_DEFINE_STATIC_LOCAL(base::FilePath, grand_root_path,
+      (base::FilePath::FromUTF8Unsafe(util::kDriveGrandRootDirName)));
+  return grand_root_path;
+}
+
+const base::FilePath& GetDriveMyDriveRootPath() {
+  CR_DEFINE_STATIC_LOCAL(base::FilePath, drive_root_path,
+      (base::FilePath::FromUTF8Unsafe(util::kDriveMyDriveRootPath)));
+  return drive_root_path;
+}
+
+const base::FilePath& GetDriveOtherDirPath() {
+  CR_DEFINE_STATIC_LOCAL(base::FilePath, other_root_path,
+      (base::FilePath::FromUTF8Unsafe(util::kDriveOtherDirPath)));
+  return other_root_path;
+}
+
 const base::FilePath& GetDriveMountPointPath() {
   CR_DEFINE_STATIC_LOCAL(base::FilePath, drive_mount_path,
       (base::FilePath::FromUTF8Unsafe(kDriveMountPointPath)));
@@ -145,6 +166,12 @@ const base::FilePath& GetSpecialRemoteRootPath() {
   CR_DEFINE_STATIC_LOCAL(base::FilePath, drive_mount_path,
       (base::FilePath::FromUTF8Unsafe(kDriveSpecialRootPath)));
   return drive_mount_path;
+}
+
+const base::FilePath& GetDriveMyDriveMountPointPath() {
+  CR_DEFINE_STATIC_LOCAL(base::FilePath, drive_mydrive_mount_path,
+      (base::FilePath::FromUTF8Unsafe(kDriveMyDriveMountPointPath)));
+  return drive_mydrive_mount_path;
 }
 
 GURL GetFileResourceUrl(const std::string& resource_id,
@@ -197,6 +224,31 @@ void ModifyDriveFileResourceUrl(Profile* profile,
 bool IsUnderDriveMountPoint(const base::FilePath& path) {
   return GetDriveMountPointPath() == path ||
          GetDriveMountPointPath().IsParent(path);
+}
+
+bool NeedsNamespaceMigration(const base::FilePath& path) {
+  return false;
+  // TODO(haruki): Update this along with http://crbug.com/174233.
+  //  return IsUnderDriveMountPoint(path) &&
+  //      !(GetDriveMyDriveMountPointPath() == path ||
+  //          GetDriveMyDriveMountPointPath().IsParent(path));
+}
+
+base::FilePath ConvertToMyDriveNamespace(const base::FilePath& path) {
+  // Double check the path.
+  // TODO(haruki): Update this with DCHECK(NeedsNamespaceMigration(path)).
+  DCHECK(IsUnderDriveMountPoint(path) &&
+         !(GetDriveMyDriveMountPointPath() == path ||
+           GetDriveMyDriveMountPointPath().IsParent(path)));
+
+  // Need to migrate "/special/drive(.*)" to "/special/drive/root(.*)".
+  // Append the relative path from "/special/drive".
+  base::FilePath new_path(GetDriveMyDriveMountPointPath());
+  GetDriveMountPointPath().AppendRelativePath(path, &new_path);
+  DVLOG(1) << "Migrate download.default_directory setting from "
+      << path.AsUTF8Unsafe() << " to " << new_path.AsUTF8Unsafe();
+  DCHECK(!NeedsNamespaceMigration(new_path));
+  return new_path;
 }
 
 base::FilePath ExtractDrivePath(const base::FilePath& path) {
@@ -373,6 +425,9 @@ void ConvertPlatformFileInfoToProto(const base::PlatformFileInfo& file_info,
   proto->set_last_modified(file_info.last_modified.ToInternalValue());
   proto->set_last_accessed(file_info.last_accessed.ToInternalValue());
   proto->set_creation_time(file_info.creation_time.ToInternalValue());
+}
+
+void EmptyFileOperationCallback(DriveFileError error) {
 }
 
 }  // namespace util

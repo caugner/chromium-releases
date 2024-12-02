@@ -7,14 +7,13 @@
 #include <vector>
 
 #include "base/command_line.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/path_service.h"
 #include "base/stringprintf.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/extensions/app_shortcut_manager.h"
 #include "chrome/browser/extensions/component_loader.h"
 #include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/extension_creator.h"
@@ -28,14 +27,15 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/extensions/native_app_window.h"
-#include "chrome/browser/ui/extensions/shell_window.h"
 #include "chrome/browser/ui/omnibox/location_bar.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
+#include "chrome/common/extensions/extension_manifest_constants.h"
+#include "chrome/common/extensions/extension_set.h"
+#include "chrome/common/extensions/manifest_handler.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
@@ -43,6 +43,7 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/test/browser_test_utils.h"
+#include "extensions/common/constants.h"
 #include "sync/api/string_ordinal.h"
 
 using extensions::Extension;
@@ -78,6 +79,20 @@ Profile* ExtensionBrowserTest::profile() {
   return profile_;
 }
 
+// static
+const Extension* ExtensionBrowserTest::GetExtensionByPath(
+    const ExtensionSet* extensions, const base::FilePath& path) {
+  base::FilePath extension_path = path;
+  EXPECT_TRUE(file_util::AbsolutePath(&extension_path));
+  for (ExtensionSet::const_iterator iter = extensions->begin();
+       iter != extensions->end(); ++iter) {
+    if ((*iter)->path() == extension_path) {
+      return *iter;
+    }
+  }
+  return NULL;
+}
+
 void ExtensionBrowserTest::SetUpCommandLine(CommandLine* command_line) {
   PathService::Get(chrome::DIR_TEST_DATA, &test_data_dir_);
   test_data_dir_ = test_data_dir_.AppendASCII("extensions");
@@ -90,6 +105,10 @@ void ExtensionBrowserTest::SetUpCommandLine(CommandLine* command_line) {
                                   "TestUser@gmail.com");
   command_line->AppendSwitchASCII(switches::kLoginProfile, "user");
 #endif
+}
+
+void ExtensionBrowserTest::SetUpOnMainThread() {
+  InProcessBrowserTest::SetUpOnMainThread();
 }
 
 const Extension* ExtensionBrowserTest::LoadExtensionWithFlags(
@@ -111,16 +130,7 @@ const Extension* ExtensionBrowserTest::LoadExtensionWithFlags(
 
   // Find the loaded extension by its path. See crbug.com/59531 for why
   // we cannot just use last_loaded_extension_id_.
-  base::FilePath extension_path = path;
-  file_util::AbsolutePath(&extension_path);
-  const Extension* extension = NULL;
-  for (ExtensionSet::const_iterator iter = service->extensions()->begin();
-       iter != service->extensions()->end(); ++iter) {
-    if ((*iter)->path() == extension_path) {
-      extension = *iter;
-      break;
-    }
-  }
+  const Extension* extension = GetExtensionByPath(service->extensions(), path);
   if (!extension)
     return NULL;
 
@@ -128,7 +138,7 @@ const Extension* ExtensionBrowserTest::LoadExtensionWithFlags(
     const std::vector<extensions::InstallWarning>& install_warnings =
         extension->install_warnings();
     if (!install_warnings.empty()) {
-      std::string install_warnings_message = StringPrintf(
+      std::string install_warnings_message = base::StringPrintf(
           "Unexpected warnings when loading test extension %s:\n",
           path.AsUTF8Unsafe().c_str());
 
@@ -199,15 +209,17 @@ const Extension* ExtensionBrowserTest::LoadExtensionIncognito(
                                 kFlagEnableFileAccess | kFlagEnableIncognito);
 }
 
-const Extension* ExtensionBrowserTest::LoadExtensionAsComponent(
-    const base::FilePath& path) {
+const Extension* ExtensionBrowserTest::LoadExtensionAsComponentWithManifest(
+    const base::FilePath& path,
+    const base::FilePath::CharType* manifest_relative_path) {
   ExtensionService* service = extensions::ExtensionSystem::Get(
       profile())->extension_service();
 
   std::string manifest;
-  if (!file_util::ReadFileToString(path.Append(Extension::kManifestFilename),
-                                   &manifest))
+  if (!file_util::ReadFileToString(path.Append(manifest_relative_path),
+                                   &manifest)) {
     return NULL;
+  }
 
   std::string extension_id = service->component_loader()->Add(manifest, path);
   const Extension* extension = service->extensions()->GetByID(extension_id);
@@ -215,6 +227,12 @@ const Extension* ExtensionBrowserTest::LoadExtensionAsComponent(
     return NULL;
   last_loaded_extension_id_ = extension->id();
   return extension;
+}
+
+const Extension* ExtensionBrowserTest::LoadExtensionAsComponent(
+    const base::FilePath& path) {
+  return LoadExtensionAsComponentWithManifest(path,
+                                              extensions::kManifestFilename);
 }
 
 base::FilePath ExtensionBrowserTest::PackExtension(

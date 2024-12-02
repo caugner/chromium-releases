@@ -17,6 +17,8 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/extension_system_factory.h"
+#include "chrome/browser/extensions/token_cache/token_cache_service.h"
+#include "chrome/browser/extensions/token_cache/token_cache_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/token_service.h"
 #include "chrome/browser/signin/token_service_factory.h"
@@ -40,6 +42,7 @@ namespace {
 const char kChannelIdSeparator[] = "/";
 const char kUserNotSignedIn[] = "The user is not signed in.";
 const char kTokenServiceNotAvailable[] = "Failed to get token service.";
+const int kObfuscatedGaiaIdTimeoutInDays = 30;
 }
 
 namespace extensions {
@@ -65,6 +68,11 @@ void PushMessagingEventRouter::OnMessage(const std::string& extension_id,
   glue::Message message;
   message.subchannel_id = subchannel;
   message.payload = payload;
+
+  DVLOG(2) << "PushMessagingEventRouter::OnMessage"
+           << " payload = '" << payload
+           << "' subchannel = '" << subchannel
+           << "' extension = '" << extension_id << "'";
 
   scoped_ptr<base::ListValue> args(glue::OnMessage::Create(message));
   scoped_ptr<extensions::Event> event(new extensions::Event(
@@ -125,10 +133,14 @@ bool PushMessagingGetChannelIdFunction::StartGaiaIdFetch() {
       token_service->GetOAuth2LoginRefreshToken();
   fetcher_.reset(new ObfuscatedGaiaIdFetcher(context, this, refresh_token));
 
+  // Get the token cache and see if we have already cached a Gaia Id.
+  TokenCacheService* token_cache =
+      TokenCacheServiceFactory::GetForProfile(profile());
+
   // Check the cache, if we already have a gaia ID, use it instead of
   // fetching the ID over the network.
   const std::string& gaia_id =
-      token_service->GetTokenForService(GaiaConstants::kObfuscatedGaiaId);
+      token_cache->RetrieveToken(GaiaConstants::kObfuscatedGaiaId);
   if (!gaia_id.empty()) {
     ReportResult(gaia_id, std::string());
     return true;
@@ -173,11 +185,12 @@ void PushMessagingGetChannelIdFunction::ReportResult(
   // Cache the obfuscated ID locally. It never changes for this user,
   // and if we call the web API too often, we get errors due to rate limiting.
   if (!gaia_id.empty()) {
-    TokenService* token_service = TokenServiceFactory::GetForProfile(profile());
-    if (token_service) {
-      token_service->AddAuthTokenManually(GaiaConstants::kObfuscatedGaiaId,
-                                          gaia_id);
-    }
+    base::TimeDelta timeout =
+        base::TimeDelta::FromDays(kObfuscatedGaiaIdTimeoutInDays);
+    TokenCacheService* token_cache =
+        TokenCacheServiceFactory::GetForProfile(profile());
+    token_cache->StoreToken(GaiaConstants::kObfuscatedGaiaId, gaia_id,
+                            timeout);
   }
 
   // Balanced in RunImpl.
@@ -222,9 +235,12 @@ void PushMessagingGetChannelIdFunction::OnObfuscatedGaiaIdFetchFailure(
   }
 
   ReportResult(std::string(), error_text);
+  DVLOG(1) << "GetChannelId status: '" << error_text << "'";
 }
 
 PushMessagingAPI::PushMessagingAPI(Profile* profile) : profile_(profile) {
+  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_INSTALLED,
+                 content::Source<Profile>(profile_->GetOriginalProfile()));
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_LOADED,
                  content::Source<Profile>(profile_->GetOriginalProfile()));
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED,
@@ -269,6 +285,13 @@ void PushMessagingAPI::Observe(int type,
         pss, event_router_.get()));
   }
   switch (type) {
+    case chrome::NOTIFICATION_EXTENSION_INSTALLED: {
+      const Extension* extension = content::Details<Extension>(details).ptr();
+      if (extension->HasAPIPermission(APIPermission::kPushMessaging)) {
+        handler_->SuppressInitialInvalidationsForExtension(extension->id());
+      }
+      break;
+    }
     case chrome::NOTIFICATION_EXTENSION_LOADED: {
       const Extension* extension = content::Details<Extension>(details).ptr();
       if (extension->HasAPIPermission(APIPermission::kPushMessaging)) {

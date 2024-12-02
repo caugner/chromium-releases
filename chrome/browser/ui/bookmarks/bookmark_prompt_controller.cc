@@ -74,10 +74,10 @@ const ExperimentDateRange* GetExperimentDateRange() {
   switch (chrome::VersionInfo::GetChannel()) {
     case chrome::VersionInfo::CHANNEL_BETA:
     case chrome::VersionInfo::CHANNEL_DEV: {
-      // Experiment date range for M25 Beta/Dev
+      // Experiment date range for M26 Beta/Dev
       static const ExperimentDateRange kBetaAndDevRange = {
-        { 2013, 1, 0, 17, 0, 0, 0, 0 },   // Jan 17, 2013
-        { 2013, 2, 0, 18, 0, 0, 0, 0 },   // Feb 17, 2013
+        { 2013, 3, 0, 1, 0, 0, 0, 0 },   // Mar 1, 2013
+        { 2013, 4, 0, 1, 0, 0, 0, 0 },   // Apr 1, 2013
       };
       return &kBetaAndDevRange;
     }
@@ -90,10 +90,10 @@ const ExperimentDateRange* GetExperimentDateRange() {
       return &kCanaryRange;
     }
     case chrome::VersionInfo::CHANNEL_STABLE: {
-      // TODO(yosin) We'll update stable date range once release date is fixed.
+      // Experiment date range for M26 Stable.
       static const ExperimentDateRange kStableRange = {
-        { 2013, 1, 0, 17, 0, 0, 0, 0 },  // Jan 17, 2013
-        { 2013, 2, 0, 18, 0, 0, 0, 0 },  // Feb 17, 2013
+        { 2013, 4, 0, 5, 0, 0, 0, 0 },  // Apr 5, 2013
+        { 2013, 5, 0, 5, 0, 0, 0, 0 },  // May 5, 2013
       };
       return &kStableRange;
     }
@@ -202,7 +202,7 @@ void BookmarkPromptController::ClosingBookmarkPrompt() {
 
 // static
 void BookmarkPromptController::DisableBookmarkPrompt(
-    PrefServiceBase* prefs) {
+    PrefService* prefs) {
   UMA_HISTOGRAM_ENUMERATION("BookmarkPrompt.DisabledReason",
                             PROMPT_DISABLED_REASON_BY_MANUAL,
                             PROMPT_DISABLED_REASON_LIMIT);
@@ -231,8 +231,8 @@ bool BookmarkPromptController::IsEnabled() {
           date_range->expiration_date.month,
           date_range->expiration_date.day_of_month, NULL));
   trial->UseOneTimeRandomization();
-  trial->AppendGroup(kBookmarkPromptControlGroup, 99);
-  trial->AppendGroup(kBookmarkPromptExperimentGroup, 1);
+  trial->AppendGroup(kBookmarkPromptControlGroup, 10);
+  trial->AppendGroup(kBookmarkPromptExperimentGroup, 10);
 
   chrome_variations::AssociateGoogleVariationID(
       chrome_variations::GOOGLE_UPDATE_SERVICE,

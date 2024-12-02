@@ -101,6 +101,8 @@ class PPAPITest : public PPAPITestBase {
 
   virtual std::string BuildQuery(const std::string& base,
                                  const std::string& test_case) OVERRIDE;
+ protected:
+  bool in_process_;  // Controls the --ppapi-in-process switch.
 };
 
 // Variant of PPAPITest that runs plugins out-of-process to test proxy
@@ -127,6 +129,13 @@ class PPAPINaClNewlibTest : public PPAPINaClTest {
 
 // NaCl plugin test runner for GNU-libc runtime.
 class PPAPINaClGLibcTest : public PPAPINaClTest {
+ public:
+  virtual std::string BuildQuery(const std::string& base,
+                                 const std::string& test_case) OVERRIDE;
+};
+
+// NaCl plugin test runner for the PNaCl + Newlib runtime.
+class PPAPINaClPNaClTest : public PPAPINaClTest {
  public:
   virtual std::string BuildQuery(const std::string& base,
                                  const std::string& test_case) OVERRIDE;

@@ -13,11 +13,11 @@
 #include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/command_line.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
+#include "base/metrics/histogram.h"
 #include "base/sequenced_task_runner.h"
 #include "base/single_thread_task_runner.h"
-#include "base/metrics/histogram.h"
 #include "base/string_number_conversions.h"
 #include "base/sys_info.h"
 #include "base/task_runner_util.h"
@@ -168,6 +168,13 @@ const int QuotaManager::kPerHostTemporaryPortion = 5;  // 20%
 
 const char QuotaManager::kDatabaseName[] = "QuotaManager";
 
+// Preserve kMinimumPreserveForSystem disk space for system book-keeping
+// when returning the quota to unlimited apps/extensions.
+// TODO(kinuko): This should be like 10% of the actual disk space.
+// For now we simply use a constant as getting the disk size needs
+// platform-dependent code. (http://crbug.com/178976)
+const int64 QuotaManager::kMinimumPreserveForSystem = 1024 * kMBytes;
+
 const int QuotaManager::kThresholdOfErrorsToBeBlacklisted = 3;
 
 const int QuotaManager::kEvictionIntervalInMilliSeconds =
@@ -178,6 +185,20 @@ const int QuotaManager::kEvictionIntervalInMilliSeconds =
 // and by multiple apps.
 int64 QuotaManager::kSyncableStorageDefaultHostQuota = 500 * kMBytes;
 
+int64 CalculateQuotaForInstalledApp(
+    int64 available_disk_space, int64 usage, int64 quota) {
+  if (available_disk_space < QuotaManager::kMinimumPreserveForSystem) {
+    // No more space; cap the quota to the current usage.
+    return usage;
+  }
+
+  available_disk_space -= QuotaManager::kMinimumPreserveForSystem;
+  if (available_disk_space < quota - usage)
+    return available_disk_space + usage;
+
+  return quota;
+}
+
 // Callback translators.
 void CallGetUsageAndQuotaCallback(
     const QuotaManager::GetUsageAndQuotaCallback& callback,
@@ -185,19 +206,37 @@ void CallGetUsageAndQuotaCallback(
     bool is_installed_app,
     QuotaStatusCode status,
     const QuotaAndUsage& quota_and_usage) {
-  int64 usage;
-  int64 quota;
-
-  if (unlimited) {
-    usage = quota_and_usage.unlimited_usage;
-    quota = is_installed_app ? quota_and_usage.available_disk_space :
-        QuotaManager::kNoLimit;
-  } else {
-    usage = quota_and_usage.usage;
-    quota = quota_and_usage.quota;
+  // Regular limited case.
+  if (!unlimited) {
+    if (is_installed_app) {
+      // Cap the quota by the available disk space.
+      callback.Run(status, quota_and_usage.usage,
+                   CalculateQuotaForInstalledApp(
+                       quota_and_usage.available_disk_space,
+                       quota_and_usage.usage,
+                       quota_and_usage.quota));
+      return;
+    }
+    callback.Run(status, quota_and_usage.usage, quota_and_usage.quota);
+    return;
   }
 
-  callback.Run(status, usage, quota);
+  int64 usage = quota_and_usage.unlimited_usage;
+
+  // Unlimited case: for non-installed apps just return unlimited quota.
+  // TODO(kinuko): We should probably always return the capped disk space
+  // for internal quota clients (while we still would not want to expose
+  // the actual usage to webapps). http://crbug.com/179040
+  if (!is_installed_app) {
+    callback.Run(status, usage, QuotaManager::kNoLimit);
+    return;
+  }
+
+  // For installed unlimited apps.
+  callback.Run(status, usage,
+               CalculateQuotaForInstalledApp(
+                   quota_and_usage.available_disk_space,
+                   usage, QuotaManager::kNoLimit));
 }
 
 void CallQuotaCallback(

@@ -11,8 +11,12 @@
       -- path. Until then, use an invisible non-whitespace character.
       -->
     <title>&#xFEFF;</title>
+
+    <meta name="google" value="notranslate">
+
     <link rel="stylesheet" href="../../../../ui/webui/resources/css/dialogs.css"></link>
     <link rel="stylesheet" href="../../../../ui/webui/resources/css/list.css"></link>
+    <link rel="stylesheet" href="../../../../ui/webui/resources/css/tree.css"></link>
     <link rel="stylesheet" href="../../../../ui/webui/resources/css/table.css"></link>
     <link rel="stylesheet" href="../../../../ui/webui/resources/css/menu.css"></link>
 
@@ -31,6 +35,8 @@
            so we want to parse it as early as possible -->
       <script src="js/metrics.js"></script>
 
+      <script src="../image_loader/client.js"></script>
+
       <script src="../../../../ui/webui/resources/js/load_time_data.js"></script>
       <script src="../../../../ui/webui/resources/js/cr.js"></script>
       <script src="../../../../ui/webui/resources/js/util.js"></script>
@@ -47,6 +53,9 @@
       <script src="../../../../ui/webui/resources/js/cr/ui/list_single_selection_model.js"></script>
       <script src="../../../../ui/webui/resources/js/cr/ui/list_selection_controller.js"></script>
       <script src="../../../../ui/webui/resources/js/cr/ui/list.js"></script>
+      <script src="../../../../ui/webui/resources/js/cr/ui/tree.js"></script>
+      <script src="../../../../ui/webui/resources/css/tree.css.js"></script>
+      <script src="../../../../ui/webui/resources/js/cr/ui/autocomplete_list.js"></script>
 
       <script src="../../../../ui/webui/resources/js/cr/ui/splitter.js"></script>
       <script src="../../../../ui/webui/resources/js/cr/ui/table/table_splitter.js"></script>
@@ -85,6 +94,7 @@
       <script src="js/file_tasks.js"></script>
       <script src="js/file_transfer_controller.js"></script>
       <script src="js/file_type.js"></script>
+      <script src="js/sidebar.js"></script>
       <script src="js/volume_manager.js"></script>
       <script src="js/media/media_util.js"></script>
       <script src="js/metadata/metadata_cache.js"></script>
@@ -113,6 +123,10 @@
                shortcut="U+007F"></command>
       <command id="newfolder" i18n-values="label:NEW_FOLDER_BUTTON_LABEL"
                shortcut="U+0045-Ctrl"></command>
+      <command id="newwindow" i18n-values="label:NEW_WINDOW_BUTTON_LABEL"
+          ></command>
+      <command id="change-default-app"
+          i18n-values="label:CHANGE_DEFAULT_APP_BUTTON_LABEL" hidden></command>
 
       <command id="search" shortcut="U+0046-Ctrl"></command>
 
@@ -169,7 +183,11 @@
       <menuitem command="#format"></menuitem>
     </menu>
 
-    <menu id="gear-menu" class="chrome-menu">
+    <menu id="gear-menu" class="chrome-menu" showShortcuts>
+      <menuitem command="#newwindow"></menuitem>
+      <menuitem command="#newfolder"></menuitem>
+      <menuitem command="#change-default-app"></menuitem>
+      <hr>
       <menuitem id="drive-sync-settings"
           i18n-content=DRIVE_MOBILE_CONNECTION_OPTION></menuitem>
       <menuitem id="drive-hosted-settings"
@@ -202,7 +220,7 @@
     <div class=dialog-title invisibleif="full-page">[TITLE]</div>
     <div class=dialog-container>
       <div class=dialog-sidebar>
-        <list id="roots-list" tabindex="8"></list>
+        <tree id="directory-tree" tabindex="8"></tree>
       </div>
       <div class=sidebar-splitter></div>
       <div class=dialog-main>
@@ -210,7 +228,6 @@
           <div id="dir-breadcrumbs" class="breadcrumbs"></div>
           <input id="search-box" type="search" tabindex="9"
               i18n-values="aria-label:SEARCH_TEXT_LABEL">
-
           <div class="right buttonbar">
             <div>
               <button class="left small" id="detail-view" tabindex="10"
@@ -234,7 +251,11 @@
 
         </div>
         <div class="drive-welcome header"></div>
-        <div class="drive-space-warning" hidden></div>
+        <div class="volume-warning" id="volume-space-warning" hidden></div>
+        <div class="volume-warning" id="drive-auth-failed-warning" hidden>
+          <div class="drive-icon"></div>
+          <div class="drive-text" id="drive-auth-failed-warning-text"></div>
+        </div>
         <div class=dialog-body>
           <div class=filelist-panel>
             <div id="list-container">

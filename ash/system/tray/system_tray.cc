@@ -5,13 +5,13 @@
 #include "ash/system/tray/system_tray.h"
 
 #include "ash/ash_switches.h"
+#include "ash/shelf/shelf_layout_manager.h"
 #include "ash/shell.h"
 #include "ash/shell/panel_window.h"
 #include "ash/shell_window_ids.h"
 #include "ash/system/audio/tray_volume.h"
 #include "ash/system/bluetooth/tray_bluetooth.h"
 #include "ash/system/brightness/tray_brightness.h"
-#include "ash/system/chromeos/tray_display.h"
 #include "ash/system/date/tray_date.h"
 #include "ash/system/drive/tray_drive.h"
 #include "ash/system/ime/tray_ime.h"
@@ -32,7 +32,6 @@
 #include "ash/system/tray_update.h"
 #include "ash/system/user/login_status.h"
 #include "ash/system/user/tray_user.h"
-#include "ash/wm/shelf_layout_manager.h"
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/timer.h"
@@ -56,11 +55,16 @@
 #include "ash/system/chromeos/network/tray_network.h"
 #include "ash/system/chromeos/network/tray_sms.h"
 #include "ash/system/chromeos/network/tray_vpn.h"
+#include "ash/system/chromeos/screen_capture/tray_screen_capture.h"
+#include "ash/system/chromeos/tray_display.h"
 #endif
 
 using views::TrayBubbleView;
 
 namespace ash {
+
+// The minimum width of the system tray menu width.
+const int kMinimumSystemTrayMenuWidth = 300;
 
 namespace internal {
 
@@ -78,6 +82,7 @@ class SystemBubbleWrapper {
   void InitView(TrayBackgroundView* tray,
                 views::View* anchor,
                 TrayBubbleView::InitParams* init_params) {
+    DCHECK(anchor);
     user::LoginStatus login_status =
         Shell::GetInstance()->system_tray_delegate()->GetUserLoginStatus();
     bubble_->InitView(anchor, login_status, init_params);
@@ -150,6 +155,7 @@ void SystemTray::CreateItems(SystemTrayDelegate* delegate) {
   AddTrayItem(new internal::TrayLocale(this));
 #if defined(OS_CHROMEOS)
   AddTrayItem(new internal::TrayDisplay(this));
+  AddTrayItem(new internal::TrayScreenCapture(this));
 #endif
   AddTrayItem(new internal::TrayVolume(this));
   AddTrayItem(new internal::TrayBrightness(this));
@@ -236,6 +242,7 @@ void SystemTray::HideNotificationView(SystemTrayItem* item) {
 
 void SystemTray::UpdateAfterLoginStatusChange(user::LoginStatus login_status) {
   DestroySystemBubble();
+  UpdateNotificationBubble();
 
   for (std::vector<SystemTrayItem*>::iterator it = items_.begin();
       it != items_.end();
@@ -269,6 +276,10 @@ bool SystemTray::HasSystemBubble() const {
   return system_bubble_.get() != NULL;
 }
 
+bool SystemTray::HasNotificationBubble() const {
+  return notification_bubble_.get() != NULL;
+}
+
 internal::SystemTrayBubble* SystemTray::GetSystemBubble() {
   if (!system_bubble_.get())
     return NULL;
@@ -289,10 +300,17 @@ bool SystemTray::IsMouseInNotificationBubble() const {
       Shell::GetScreen()->GetCursorScreenPoint());
 }
 
-bool SystemTray::CloseBubbleForTest() const {
+bool SystemTray::CloseSystemBubbleForTest() const {
   if (!system_bubble_.get())
     return false;
   system_bubble_->bubble()->Close();
+  return true;
+}
+
+bool SystemTray::CloseNotificationBubbleForTest() const {
+  if (!notification_bubble_.get())
+    return false;
+  notification_bubble_->bubble()->Close();
   return true;
 }
 
@@ -358,24 +376,29 @@ void SystemTray::ShowItems(const std::vector<SystemTrayItem*>& items,
   if (system_bubble_.get() && creation_type == BUBBLE_USE_EXISTING) {
     system_bubble_->bubble()->UpdateView(items, bubble_type);
   } else {
+    // The menu width is fixed, and it is a per language setting.
+    int menu_width = std::max(kMinimumSystemTrayMenuWidth,
+        Shell::GetInstance()->system_tray_delegate()->GetSystemTrayMenuWidth());
+
     TrayBubbleView::InitParams init_params(TrayBubbleView::ANCHOR_TYPE_TRAY,
                                            GetAnchorAlignment(),
-                                           kTrayPopupMinWidth,
+                                           menu_width,
                                            kTrayPopupMaxWidth);
     init_params.can_activate = can_activate;
-    init_params.close_on_deactivate = false;
     if (detailed) {
       // This is the case where a volume control or brightness control bubble
       // is created.
       init_params.max_height = default_bubble_height_;
       init_params.arrow_color = kBackgroundColor;
     } else {
-      init_params.arrow_color = kHeaderBackgroundColorDark;
+      init_params.arrow_color = kHeaderBackgroundColor;
     }
     init_params.arrow_offset = arrow_offset;
     // For Volume and Brightness we don't want to show an arrow when
     // they are shown in a bubble by themselves.
-    init_params.hide_arrow = items.size() == 1 && items[0]->ShouldHideArrow();
+    init_params.arrow_paint_type = views::BubbleBorder::PAINT_NORMAL;
+    if (items.size() == 1 && items[0]->ShouldHideArrow())
+      init_params.arrow_paint_type = views::BubbleBorder::PAINT_TRANSPARENT;
     SystemTrayBubble* bubble = new SystemTrayBubble(this, items, bubble_type);
     system_bubble_.reset(new internal::SystemBubbleWrapper(bubble));
     system_bubble_->InitView(this, tray_container(), &init_params);
@@ -407,7 +430,7 @@ void SystemTray::UpdateNotificationBubble() {
       this, notification_items_, SystemTrayBubble::BUBBLE_TYPE_NOTIFICATION);
   views::View* anchor;
   TrayBubbleView::AnchorType anchor_type;
-  if (system_bubble_.get()) {
+  if (system_bubble_.get() && system_bubble_->bubble_view()) {
     anchor = system_bubble_->bubble_view();
     anchor_type = TrayBubbleView::ANCHOR_TYPE_BUBBLE;
   } else {

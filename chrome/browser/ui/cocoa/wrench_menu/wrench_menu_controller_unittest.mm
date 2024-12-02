@@ -6,22 +6,22 @@
 #include "base/sys_string_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
+#include "chrome/browser/search/search.h"
 #include "chrome/browser/sync/glue/session_model_associator.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/ui/cocoa/cocoa_profile_test.h"
-#import "chrome/browser/ui/cocoa/toolbar/toolbar_controller.h"
 #include "chrome/browser/ui/cocoa/run_loop_testing.h"
+#import "chrome/browser/ui/cocoa/toolbar/toolbar_controller.h"
 #import "chrome/browser/ui/cocoa/view_resizer_pong.h"
 #import "chrome/browser/ui/cocoa/wrench_menu/wrench_menu_controller.h"
-#include "chrome/browser/ui/search/search.h"
-#include "chrome/browser/ui/toolbar/recent_tabs_sub_menu_model.h"
 #include "chrome/browser/ui/toolbar/recent_tabs_builder_test_helper.h"
+#include "chrome/browser/ui/toolbar/recent_tabs_sub_menu_model.h"
 #include "chrome/browser/ui/toolbar/wrench_menu_model.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "testing/gmock/include/gmock/gmock.h"
-#include "testing/gtest_mac.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "testing/gtest_mac.h"
 #include "testing/platform_test.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -39,7 +39,7 @@ class MockWrenchMenuModel : public WrenchMenuModel {
     // short-circuits the parent destructor to avoid this crash.
     tab_strip_model_ = NULL;
   }
-  MOCK_METHOD1(ExecuteCommand, void(int command_id));
+  MOCK_METHOD2(ExecuteCommand, void(int command_id, int event_flags));
 };
 
 class WrenchMenuControllerTest : public CocoaProfileTest {
@@ -77,7 +77,7 @@ TEST_F(WrenchMenuControllerTest, DispatchSimple) {
   [button setTag:IDC_ZOOM_PLUS];
 
   // Set fake model to test dispatching.
-  EXPECT_CALL(*fake_model_, ExecuteCommand(IDC_ZOOM_PLUS));
+  EXPECT_CALL(*fake_model_, ExecuteCommand(IDC_ZOOM_PLUS, 0));
   [controller() setModel:fake_model_.get()];
 
   [controller() dispatchWrenchMenuCommand:button.get()];
@@ -109,7 +109,7 @@ TEST_F(WrenchMenuControllerTest, RecentTabsFavIcon) {
   NSString* title = l10n_util::GetNSStringWithFixup(IDS_RECENT_TABS_MENU);
   NSMenu* recent_tabs_menu = [[menu itemWithTitle:title] submenu];
   EXPECT_TRUE(recent_tabs_menu);
-  EXPECT_EQ(4, [recent_tabs_menu numberOfItems]);
+  EXPECT_EQ(6, [recent_tabs_menu numberOfItems]);
 
   // Send a icon changed event and verify that the icon is updated.
   gfx::Image icon(ResourceBundle::GetSharedInstance().GetNativeImageNamed(
@@ -155,7 +155,7 @@ TEST_F(WrenchMenuControllerTest, RecentTabsElideTitle) {
   NSString* title = l10n_util::GetNSStringWithFixup(IDS_RECENT_TABS_MENU);
   NSMenu* recent_tabs_menu = [[menu itemWithTitle:title] submenu];
   EXPECT_TRUE(recent_tabs_menu);
-  EXPECT_EQ(5, [recent_tabs_menu numberOfItems]);
+  EXPECT_EQ(7, [recent_tabs_menu numberOfItems]);
 
   // Index 0: restore tabs menu item.
   NSString* restore_tab_label = l10n_util::FixUpWindowsStyleLabel(

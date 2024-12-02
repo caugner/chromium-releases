@@ -1,11 +1,12 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/common/extensions/extension.h"
 
-#include "base/file_path.h"
+#include "base/command_line.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/format_macros.h"
 #include "base/json/json_file_value_serializer.h"
 #include "base/path_service.h"
@@ -13,24 +14,29 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/api/commands/commands_handler.h"
-#include "chrome/common/extensions/api/extension_action/action_info.h"
+#include "chrome/common/extensions/api/plugins/plugins_handler.h"
+#include "chrome/common/extensions/background_info.h"
 #include "chrome/common/extensions/command.h"
 #include "chrome/common/extensions/extension_file_util.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
-#include "chrome/common/extensions/extension_resource.h"
 #include "chrome/common/extensions/features/feature.h"
+#include "chrome/common/extensions/incognito_handler.h"
 #include "chrome/common/extensions/manifest.h"
 #include "chrome/common/extensions/manifest_handler.h"
+#include "chrome/common/extensions/manifest_handlers/content_scripts_handler.h"
 #include "chrome/common/extensions/permissions/api_permission.h"
 #include "chrome/common/extensions/permissions/permission_set.h"
 #include "chrome/common/extensions/permissions/socket_permission.h"
 #include "chrome/common/extensions/permissions/usb_device_permission.h"
 #include "chrome/common/url_constants.h"
 #include "extensions/common/error_utils.h"
+#include "extensions/common/extension_resource.h"
+#include "extensions/common/id_util.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/mime_sniffer.h"
-#include "net/base/mock_host_resolver.h"
+#include "net/dns/mock_host_resolver.h"
 #include "skia/ext/image_operations.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -97,36 +103,21 @@ static scoped_refptr<Extension> LoadManifestStrict(
   return LoadManifest(dir, test_file, Extension::NO_FLAGS);
 }
 
-static scoped_ptr<ActionInfo> LoadAction(
-    const std::string& manifest) {
-  scoped_refptr<Extension> extension = LoadManifest("page_action",
-      manifest);
-  EXPECT_TRUE(extension->page_action_info());
-  if (extension->page_action_info()) {
-    return make_scoped_ptr(new ActionInfo(
-        *extension->page_action_info()));
-  }
-  ADD_FAILURE() << "Expected manifest in " << manifest
-                << " to include a page_action section.";
-  return scoped_ptr<ActionInfo>();
-}
-
-static void LoadActionAndExpectError(const std::string& manifest,
-                                     const std::string& expected_error) {
-  std::string error;
-  scoped_refptr<Extension> extension = LoadManifestUnchecked("page_action",
-      manifest, Manifest::INTERNAL, Extension::NO_FLAGS, &error);
-  EXPECT_FALSE(extension);
-  EXPECT_EQ(expected_error, error);
-}
-
-}
+}  // namespace
 
 class ExtensionTest : public testing::Test {
  protected:
   virtual void SetUp() OVERRIDE {
-    ManifestHandler::Register(extension_manifest_keys::kCommands,
-                              make_linked_ptr(new CommandsHandler));
+    testing::Test::SetUp();
+    (new BackgroundManifestHandler)->Register();
+    (new CommandsHandler)->Register();
+    (new ContentScriptsHandler)->Register();
+    (new PluginsHandler)->Register();
+    (new IncognitoHandler)->Register();
+  }
+
+  virtual void TearDown() OVERRIDE {
+    ManifestHandler::ClearRegistryForTesting();
   }
 };
 
@@ -137,10 +128,11 @@ TEST_F(ExtensionTest, LocationValuesTest) {
   ASSERT_EQ(1, Manifest::INTERNAL);
   ASSERT_EQ(2, Manifest::EXTERNAL_PREF);
   ASSERT_EQ(3, Manifest::EXTERNAL_REGISTRY);
-  ASSERT_EQ(4, Manifest::LOAD);
+  ASSERT_EQ(4, Manifest::UNPACKED);
   ASSERT_EQ(5, Manifest::COMPONENT);
   ASSERT_EQ(6, Manifest::EXTERNAL_PREF_DOWNLOAD);
   ASSERT_EQ(7, Manifest::EXTERNAL_POLICY_DOWNLOAD);
+  ASSERT_EQ(8, Manifest::COMMAND_LINE);
 }
 
 TEST_F(ExtensionTest, LocationPriorityTest) {
@@ -214,112 +206,6 @@ TEST_F(ExtensionTest, GetAbsolutePathNoError) {
             extension->GetResource("test.js").GetFilePath().value());
 }
 
-TEST_F(ExtensionTest, LoadPageActionHelper) {
-  scoped_ptr<ActionInfo> action;
-
-  // First try with an empty dictionary.
-  action = LoadAction("page_action_empty.json");
-  ASSERT_TRUE(action != NULL);
-
-  // Now setup some values to use in the action.
-  const std::string id("MyExtensionActionId");
-  const std::string name("MyExtensionActionName");
-  std::string img1("image1.png");
-
-  action = LoadAction("page_action.json");
-  ASSERT_TRUE(NULL != action.get());
-  ASSERT_EQ(id, action->id);
-
-  // No title, so fall back to name.
-  ASSERT_EQ(name, action->default_title);
-  ASSERT_EQ(img1,
-            action->default_icon.Get(extension_misc::EXTENSION_ICON_ACTION,
-                                     ExtensionIconSet::MATCH_EXACTLY));
-
-  // Same test with explicitly set type.
-  action = LoadAction("page_action_type.json");
-  ASSERT_TRUE(NULL != action.get());
-
-  // Try an action without id key.
-  action = LoadAction("page_action_no_id.json");
-  ASSERT_TRUE(NULL != action.get());
-
-  // Then try without the name key. It's optional, so no error.
-  action = LoadAction("page_action_no_name.json");
-  ASSERT_TRUE(NULL != action.get());
-  ASSERT_TRUE(action->default_title.empty());
-
-  // Then try without the icon paths key.
-  action = LoadAction("page_action_no_icon.json");
-  ASSERT_TRUE(NULL != action.get());
-
-  // Now test that we can parse the new format for page actions.
-  const std::string kTitle("MyExtensionActionTitle");
-  const std::string kIcon("image1.png");
-  const std::string kPopupHtmlFile("a_popup.html");
-
-  action = LoadAction("page_action_new_format.json");
-  ASSERT_TRUE(action.get());
-  ASSERT_EQ(kTitle, action->default_title);
-  ASSERT_FALSE(action->default_icon.empty());
-
-  // Invalid title should give an error even with a valid name.
-  LoadActionAndExpectError("page_action_invalid_title.json",
-      errors::kInvalidPageActionDefaultTitle);
-
-  // Invalid name should give an error only with no title.
-  action = LoadAction("page_action_invalid_name.json");
-  ASSERT_TRUE(NULL != action.get());
-  ASSERT_EQ(kTitle, action->default_title);
-
-  LoadActionAndExpectError("page_action_invalid_name_no_title.json",
-      errors::kInvalidPageActionName);
-
-  // Test that keys "popup" and "default_popup" both work, but can not
-  // be used at the same time.
-  // These tests require an extension_url, so we also load the manifest.
-
-  // Only use "popup", expect success.
-  scoped_refptr<Extension> extension = LoadManifest("page_action",
-             "page_action_popup.json");
-  action = LoadAction("page_action_popup.json");
-  ASSERT_TRUE(NULL != action.get());
-  ASSERT_STREQ(
-      extension->url().Resolve(kPopupHtmlFile).spec().c_str(),
-      action->default_popup_url.spec().c_str());
-
-  // Use both "popup" and "default_popup", expect failure.
-  LoadActionAndExpectError("page_action_popup_and_default_popup.json",
-      ErrorUtils::FormatErrorMessage(
-          errors::kInvalidPageActionOldAndNewKeys,
-          keys::kPageActionDefaultPopup,
-          keys::kPageActionPopup));
-
-  // Use only "default_popup", expect success.
-  extension = LoadManifest("page_action", "page_action_popup.json");
-  action = LoadAction("page_action_default_popup.json");
-  ASSERT_TRUE(NULL != action.get());
-  ASSERT_STREQ(
-      extension->url().Resolve(kPopupHtmlFile).spec().c_str(),
-      action->default_popup_url.spec().c_str());
-
-  // Setting default_popup to "" is the same as having no popup.
-  action = LoadAction("page_action_empty_default_popup.json");
-  ASSERT_TRUE(NULL != action.get());
-  EXPECT_TRUE(action->default_popup_url.is_empty());
-  ASSERT_STREQ(
-      "",
-      action->default_popup_url.spec().c_str());
-
-  // Setting popup to "" is the same as having no popup.
-  action = LoadAction("page_action_empty_popup.json");
-
-  ASSERT_TRUE(NULL != action.get());
-  EXPECT_TRUE(action->default_popup_url.is_empty());
-  ASSERT_STREQ(
-      "",
-      action->default_popup_url.spec().c_str());
-}
 
 TEST_F(ExtensionTest, IdIsValid) {
   EXPECT_TRUE(Extension::IdIsValid("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
@@ -333,32 +219,6 @@ TEST_F(ExtensionTest, IdIsValid) {
   EXPECT_FALSE(Extension::IdIsValid("abcdefghijklmnopabcdefghijklmno0"));
 }
 
-TEST_F(ExtensionTest, GenerateID) {
-  const uint8 public_key_info[] = {
-    0x30, 0x81, 0x9f, 0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7,
-    0x0d, 0x01, 0x01, 0x01, 0x05, 0x00, 0x03, 0x81, 0x8d, 0x00, 0x30, 0x81,
-    0x89, 0x02, 0x81, 0x81, 0x00, 0xb8, 0x7f, 0x2b, 0x20, 0xdc, 0x7c, 0x9b,
-    0x0c, 0xdc, 0x51, 0x61, 0x99, 0x0d, 0x36, 0x0f, 0xd4, 0x66, 0x88, 0x08,
-    0x55, 0x84, 0xd5, 0x3a, 0xbf, 0x2b, 0xa4, 0x64, 0x85, 0x7b, 0x0c, 0x04,
-    0x13, 0x3f, 0x8d, 0xf4, 0xbc, 0x38, 0x0d, 0x49, 0xfe, 0x6b, 0xc4, 0x5a,
-    0xb0, 0x40, 0x53, 0x3a, 0xd7, 0x66, 0x09, 0x0f, 0x9e, 0x36, 0x74, 0x30,
-    0xda, 0x8a, 0x31, 0x4f, 0x1f, 0x14, 0x50, 0xd7, 0xc7, 0x20, 0x94, 0x17,
-    0xde, 0x4e, 0xb9, 0x57, 0x5e, 0x7e, 0x0a, 0xe5, 0xb2, 0x65, 0x7a, 0x89,
-    0x4e, 0xb6, 0x47, 0xff, 0x1c, 0xbd, 0xb7, 0x38, 0x13, 0xaf, 0x47, 0x85,
-    0x84, 0x32, 0x33, 0xf3, 0x17, 0x49, 0xbf, 0xe9, 0x96, 0xd0, 0xd6, 0x14,
-    0x6f, 0x13, 0x8d, 0xc5, 0xfc, 0x2c, 0x72, 0xba, 0xac, 0xea, 0x7e, 0x18,
-    0x53, 0x56, 0xa6, 0x83, 0xa2, 0xce, 0x93, 0x93, 0xe7, 0x1f, 0x0f, 0xe6,
-    0x0f, 0x02, 0x03, 0x01, 0x00, 0x01
-  };
-
-  std::string extension_id;
-  EXPECT_TRUE(
-      Extension::GenerateId(
-          std::string(reinterpret_cast<const char*>(&public_key_info[0]),
-                      arraysize(public_key_info)),
-          &extension_id));
-  EXPECT_EQ("melddjfinppjdikinhbgehiennejpfhp", extension_id);
-}
 
 // This test ensures that the mimetype sniffing code stays in sync with the
 // actual crx files that we test other parts of the system with.
@@ -496,91 +356,6 @@ TEST_F(ExtensionTest, SocketPermissions) {
         "239.255.255.250", 1900));
 }
 
-// Returns a copy of |source| resized to |size| x |size|.
-static SkBitmap ResizedCopy(const SkBitmap& source, int size) {
-  return skia::ImageOperations::Resize(source,
-                                       skia::ImageOperations::RESIZE_LANCZOS3,
-                                       size,
-                                       size);
-}
-
-static bool SizeEquals(const SkBitmap& bitmap, const gfx::Size& size) {
-  return bitmap.width() == size.width() && bitmap.height() == size.height();
-}
-
-TEST_F(ExtensionTest, ImageCaching) {
-  base::FilePath path;
-  ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &path));
-  path = path.AppendASCII("extensions");
-
-  // Initialize the Extension.
-  std::string errors;
-  DictionaryValue values;
-  values.SetString(keys::kName, "test");
-  values.SetString(keys::kVersion, "0.1");
-  scoped_refptr<Extension> extension(Extension::Create(
-      path, Manifest::INVALID_LOCATION, values, Extension::NO_FLAGS, &errors));
-  ASSERT_TRUE(extension.get());
-
-  // Create an ExtensionResource pointing at an icon.
-  base::FilePath icon_relative_path(FILE_PATH_LITERAL("icon3.png"));
-  ExtensionResource resource(extension->id(),
-                             extension->path(),
-                             icon_relative_path);
-
-  // Read in the icon file.
-  base::FilePath icon_absolute_path =
-      extension->path().Append(icon_relative_path);
-  std::string raw_png;
-  ASSERT_TRUE(file_util::ReadFileToString(icon_absolute_path, &raw_png));
-  SkBitmap image;
-  ASSERT_TRUE(gfx::PNGCodec::Decode(
-      reinterpret_cast<const unsigned char*>(raw_png.data()),
-      raw_png.length(),
-      &image));
-
-  // Make sure the icon file is the size we expect.
-  gfx::Size original_size(66, 66);
-  ASSERT_EQ(image.width(), original_size.width());
-  ASSERT_EQ(image.height(), original_size.height());
-
-  // Create two resized versions at size 16x16 and 24x24.
-  SkBitmap image16 = ResizedCopy(image, 16);
-  SkBitmap image24 = ResizedCopy(image, 24);
-
-  gfx::Size size16(16, 16);
-  gfx::Size size24(24, 24);
-
-  // Cache the 16x16 copy.
-  EXPECT_FALSE(extension->HasCachedImage(resource, size16));
-  extension->SetCachedImage(resource, image16, original_size);
-  EXPECT_TRUE(extension->HasCachedImage(resource, size16));
-  EXPECT_TRUE(SizeEquals(extension->GetCachedImage(resource, size16), size16));
-  EXPECT_FALSE(extension->HasCachedImage(resource, size24));
-  EXPECT_FALSE(extension->HasCachedImage(resource, original_size));
-
-  // Cache the 24x24 copy.
-  extension->SetCachedImage(resource, image24, original_size);
-  EXPECT_TRUE(extension->HasCachedImage(resource, size24));
-  EXPECT_TRUE(SizeEquals(extension->GetCachedImage(resource, size24), size24));
-  EXPECT_FALSE(extension->HasCachedImage(resource, original_size));
-
-  // Cache the original, and verify that it gets returned when we ask for a
-  // max_size that is larger than the original.
-  gfx::Size size128(128, 128);
-  EXPECT_TRUE(image.width() < size128.width() &&
-              image.height() < size128.height());
-  extension->SetCachedImage(resource, image, original_size);
-  EXPECT_TRUE(extension->HasCachedImage(resource, original_size));
-  EXPECT_TRUE(extension->HasCachedImage(resource, size128));
-  EXPECT_TRUE(SizeEquals(extension->GetCachedImage(resource, original_size),
-                         original_size));
-  EXPECT_TRUE(SizeEquals(extension->GetCachedImage(resource, size128),
-                         original_size));
-  EXPECT_EQ(extension->GetCachedImage(resource, original_size).getPixels(),
-            extension->GetCachedImage(resource, size128).getPixels());
-}
-
 // This tests the API permissions with an empty manifest (one that just
 // specifies a name and a version and nothing else).
 TEST_F(ExtensionTest, ApiPermissions) {
@@ -708,34 +483,58 @@ TEST_F(ExtensionTest, WantsFileAccess) {
   extension = LoadManifest("permissions", "content_script_all_urls.json");
   EXPECT_TRUE(extension->wants_file_access());
   EXPECT_FALSE(extension->CanExecuteScriptOnPage(
-      file_url, file_url, -1, &extension->content_scripts()[0], NULL));
+      file_url,
+      file_url,
+      -1,
+      &ContentScriptsInfo::GetContentScripts(extension)[0],
+      NULL));
   extension = LoadManifest("permissions", "content_script_all_urls.json",
       Extension::ALLOW_FILE_ACCESS);
   EXPECT_TRUE(extension->wants_file_access());
   EXPECT_TRUE(extension->CanExecuteScriptOnPage(
-      file_url, file_url, -1, &extension->content_scripts()[0], NULL));
+      file_url,
+      file_url,
+      -1,
+      &ContentScriptsInfo::GetContentScripts(extension)[0],
+      NULL));
 
   // file:///* content script match
   extension = LoadManifest("permissions", "content_script_file_scheme.json");
   EXPECT_TRUE(extension->wants_file_access());
   EXPECT_FALSE(extension->CanExecuteScriptOnPage(
-      file_url, file_url, -1, &extension->content_scripts()[0], NULL));
+      file_url,
+      file_url,
+      -1,
+      &ContentScriptsInfo::GetContentScripts(extension)[0],
+      NULL));
   extension = LoadManifest("permissions", "content_script_file_scheme.json",
       Extension::ALLOW_FILE_ACCESS);
   EXPECT_TRUE(extension->wants_file_access());
   EXPECT_TRUE(extension->CanExecuteScriptOnPage(
-      file_url, file_url, -1, &extension->content_scripts()[0], NULL));
+      file_url,
+      file_url,
+      -1,
+      &ContentScriptsInfo::GetContentScripts(extension)[0],
+      NULL));
 
   // http://* content script match
   extension = LoadManifest("permissions", "content_script_http_scheme.json");
   EXPECT_FALSE(extension->wants_file_access());
   EXPECT_FALSE(extension->CanExecuteScriptOnPage(
-      file_url, file_url, -1, &extension->content_scripts()[0], NULL));
+      file_url,
+      file_url,
+      -1,
+      &ContentScriptsInfo::GetContentScripts(extension)[0],
+      NULL));
   extension = LoadManifest("permissions", "content_script_http_scheme.json",
       Extension::ALLOW_FILE_ACCESS);
   EXPECT_FALSE(extension->wants_file_access());
   EXPECT_FALSE(extension->CanExecuteScriptOnPage(
-      file_url, file_url, -1, &extension->content_scripts()[0], NULL));
+      file_url,
+      file_url,
+      -1,
+      &ContentScriptsInfo::GetContentScripts(extension)[0],
+      NULL));
 }
 
 TEST_F(ExtensionTest, ExtraFlags) {
@@ -775,7 +574,7 @@ class ExtensionScriptAndCaptureVisibleTest : public testing::Test {
         file_url("file:///foo/bar"),
         favicon_url("chrome://favicon/http://www.google.com"),
         extension_url("chrome-extension://" +
-            Extension::GenerateIdForPath(
+            id_util::GenerateIdForPath(
                 base::FilePath(FILE_PATH_LITERAL("foo")))),
         settings_url("chrome://settings"),
         about_url("about:flags") {
@@ -863,11 +662,10 @@ class ExtensionScriptAndCaptureVisibleTest : public testing::Test {
 };
 
 TEST_F(ExtensionScriptAndCaptureVisibleTest, Permissions) {
-  scoped_refptr<Extension> extension;
-
   // Test <all_urls> for regular extensions.
-  extension = LoadManifestStrict("script_and_capture",
+  scoped_refptr<Extension> extension = LoadManifestStrict("script_and_capture",
       "extension_regular_all.json");
+
   EXPECT_TRUE(Allowed(extension, http_url));
   EXPECT_TRUE(Allowed(extension, https_url));
   EXPECT_TRUE(Blocked(extension, file_url));
@@ -918,6 +716,103 @@ TEST_F(ExtensionScriptAndCaptureVisibleTest, Permissions) {
       "extension_chrome_favicon_wildcard.json");
   EXPECT_TRUE(Blocked(extension, settings_url));
   EXPECT_TRUE(CaptureOnly(extension, favicon_url));
+  EXPECT_TRUE(Blocked(extension, about_url));
+  EXPECT_TRUE(extension->HasHostPermission(favicon_url));
+
+  // Having http://favicon should not give you chrome://favicon
+  extension = LoadManifestStrict("script_and_capture",
+      "extension_http_favicon.json");
+  EXPECT_TRUE(Blocked(extension, settings_url));
+  EXPECT_TRUE(Blocked(extension, favicon_url));
+
+  // Component extensions with <all_urls> should get everything.
+  extension = LoadManifest("script_and_capture", "extension_component_all.json",
+      Manifest::COMPONENT, Extension::NO_FLAGS);
+  EXPECT_TRUE(Allowed(extension, http_url));
+  EXPECT_TRUE(Allowed(extension, https_url));
+  EXPECT_TRUE(Allowed(extension, settings_url));
+  EXPECT_TRUE(Allowed(extension, about_url));
+  EXPECT_TRUE(Allowed(extension, favicon_url));
+  EXPECT_TRUE(extension->HasHostPermission(favicon_url));
+
+  // Component extensions should only get access to what they ask for.
+  extension = LoadManifest("script_and_capture",
+      "extension_component_google.json", Manifest::COMPONENT,
+      Extension::NO_FLAGS);
+  EXPECT_TRUE(Allowed(extension, http_url));
+  EXPECT_TRUE(Blocked(extension, https_url));
+  EXPECT_TRUE(Blocked(extension, file_url));
+  EXPECT_TRUE(Blocked(extension, settings_url));
+  EXPECT_TRUE(Blocked(extension, favicon_url));
+  EXPECT_TRUE(Blocked(extension, about_url));
+  EXPECT_TRUE(Blocked(extension, extension_url));
+  EXPECT_FALSE(extension->HasHostPermission(settings_url));
+}
+
+
+TEST_F(ExtensionScriptAndCaptureVisibleTest, PermissionsWithChromeURLsEnabled) {
+  CommandLine::ForCurrentProcess()->AppendSwitch(
+      switches::kExtensionsOnChromeURLs);
+
+  scoped_refptr<Extension> extension;
+
+  // Test <all_urls> for regular extensions.
+  extension = LoadManifestStrict("script_and_capture",
+      "extension_regular_all.json");
+  EXPECT_TRUE(Allowed(extension, http_url));
+  EXPECT_TRUE(Allowed(extension, https_url));
+  EXPECT_TRUE(Blocked(extension, file_url));
+  EXPECT_TRUE(Blocked(extension, settings_url));
+  EXPECT_TRUE(Allowed(extension, favicon_url));  // chrome:// requested
+  EXPECT_TRUE(Blocked(extension, about_url));
+  EXPECT_TRUE(Blocked(extension, extension_url));
+
+  // Test access to iframed content.
+  GURL within_extension_url = extension->GetResourceURL("page.html");
+  EXPECT_TRUE(AllowedScript(extension, http_url, http_url_with_path));
+  EXPECT_TRUE(AllowedScript(extension, https_url, http_url_with_path));
+  EXPECT_TRUE(AllowedScript(extension, http_url, within_extension_url));
+  EXPECT_TRUE(AllowedScript(extension, https_url, within_extension_url));
+  EXPECT_TRUE(BlockedScript(extension, http_url, extension_url));
+  EXPECT_TRUE(BlockedScript(extension, https_url, extension_url));
+
+  EXPECT_FALSE(extension->HasHostPermission(settings_url));
+  EXPECT_FALSE(extension->HasHostPermission(about_url));
+  EXPECT_TRUE(extension->HasHostPermission(favicon_url));
+
+  // Test * for scheme, which implies just the http/https schemes.
+  extension = LoadManifestStrict("script_and_capture",
+      "extension_wildcard.json");
+  EXPECT_TRUE(Allowed(extension, http_url));
+  EXPECT_TRUE(Allowed(extension, https_url));
+  EXPECT_TRUE(Blocked(extension, settings_url));
+  EXPECT_TRUE(Blocked(extension, about_url));
+  EXPECT_TRUE(Blocked(extension, file_url));
+  EXPECT_TRUE(Blocked(extension, favicon_url));
+  extension = LoadManifest("script_and_capture",
+      "extension_wildcard_settings.json");
+  EXPECT_TRUE(Blocked(extension, settings_url));
+
+  // Having chrome://*/ should work for regular extensions with the flag
+  // enabled.
+  std::string error;
+  extension = LoadManifestUnchecked("script_and_capture",
+                                    "extension_wildcard_chrome.json",
+                                    Manifest::INTERNAL, Extension::NO_FLAGS,
+                                    &error);
+  EXPECT_FALSE(extension == NULL);
+  EXPECT_TRUE(Blocked(extension, http_url));
+  EXPECT_TRUE(Blocked(extension, https_url));
+  EXPECT_TRUE(Allowed(extension, settings_url));
+  EXPECT_TRUE(Blocked(extension, about_url));
+  EXPECT_TRUE(Blocked(extension, file_url));
+  EXPECT_TRUE(Allowed(extension, favicon_url));  // chrome:// requested
+
+  // Having chrome://favicon/* should not give you chrome://*
+  extension = LoadManifestStrict("script_and_capture",
+      "extension_chrome_favicon_wildcard.json");
+  EXPECT_TRUE(Blocked(extension, settings_url));
+  EXPECT_TRUE(Allowed(extension, favicon_url));  // chrome:// requested
   EXPECT_TRUE(Blocked(extension, about_url));
   EXPECT_TRUE(extension->HasHostPermission(favicon_url));
 
@@ -1032,21 +927,6 @@ TEST_F(ExtensionScriptAndCaptureVisibleTest, TabSpecific) {
   EXPECT_TRUE(AllowedExclusivelyOnTab(extension, no_urls, 0));
   EXPECT_TRUE(AllowedExclusivelyOnTab(extension, no_urls, 1));
   EXPECT_TRUE(AllowedExclusivelyOnTab(extension, no_urls, 2));
-}
-
-TEST_F(ExtensionTest, GenerateId) {
-  std::string result;
-  EXPECT_TRUE(Extension::GenerateId("", &result));
-
-  EXPECT_TRUE(Extension::GenerateId("test", &result));
-  EXPECT_EQ(result, "jpignaibiiemhngfjkcpokkamffknabf");
-
-  EXPECT_TRUE(Extension::GenerateId("_", &result));
-  EXPECT_EQ(result, "ncocknphbhhlhkikpnnlmbcnbgdempcd");
-
-  EXPECT_TRUE(Extension::GenerateId(
-      "this_string_is_longer_than_a_single_sha256_hash_digest", &result));
-  EXPECT_EQ(result, "jimneklojkjdibfkgiiophfhjhbdgcfi");
 }
 
 namespace {

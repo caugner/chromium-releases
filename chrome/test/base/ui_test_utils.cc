@@ -12,8 +12,8 @@
 #include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/command_line.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/json/json_reader.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
@@ -25,6 +25,7 @@
 #include "base/values.h"
 #include "chrome/browser/autocomplete/autocomplete_controller.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
+#include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/extension_action.h"
 #include "chrome/browser/history/history_service_factory.h"
@@ -36,6 +37,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/browser_iterator.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/browser_window.h"
@@ -157,7 +159,7 @@ base::FilePath GetSnapshotFileName(const base::FilePath& snapshot_directory) {
   base::Time::Exploded the_time;
 
   base::Time::Now().LocalExplode(&the_time);
-  std::string filename(StringPrintf("%s%04d%02d%02d%02d%02d%02d%s",
+  std::string filename(base::StringPrintf("%s%04d%02d%02d%02d%02d%02d%s",
       kSnapshotBaseName, the_time.year, the_time.month, the_time.day_of_month,
       the_time.hour, the_time.minute, the_time.second, kSnapshotExtension));
 
@@ -167,7 +169,7 @@ base::FilePath GetSnapshotFileName(const base::FilePath& snapshot_directory) {
     std::string suffix;
     base::FilePath trial_file;
     do {
-      suffix = StringPrintf(" (%d)", ++index);
+      suffix = base::StringPrintf(" (%d)", ++index);
       trial_file = snapshot_file.InsertBeforeExtensionASCII(suffix);
     } while (file_util::PathExists(trial_file));
     snapshot_file = trial_file;
@@ -192,7 +194,7 @@ bool GetCurrentTabTitle(const Browser* browser, string16* title) {
 void WaitForNavigations(NavigationController* controller,
                         int number_of_navigations) {
   content::TestNavigationObserver observer(
-      content::Source<NavigationController>(controller), NULL,
+      content::Source<NavigationController>(controller),
       number_of_navigations);
   base::RunLoop run_loop;
   observer.WaitForObservation(
@@ -225,7 +227,7 @@ Browser* OpenURLOffTheRecord(Profile* profile, const GURL& url) {
 
 void NavigateToURL(chrome::NavigateParams* params) {
   content::TestNavigationObserver observer(
-      content::NotificationService::AllSources(), NULL, 1);
+      content::NotificationService::AllSources(), 1);
   chrome::Navigate(params);
   base::RunLoop run_loop;
   observer.WaitForObservation(
@@ -256,15 +258,11 @@ static void NavigateToURLWithDispositionBlockUntilNavigationsComplete(
       &tab_strip->GetActiveWebContents()->GetController() : NULL;
   content::TestNavigationObserver same_tab_observer(
       content::Source<NavigationController>(controller),
-      NULL,
       number_of_navigations);
 
   std::set<Browser*> initial_browsers;
-  for (std::vector<Browser*>::const_iterator iter = BrowserList::begin();
-       iter != BrowserList::end();
-       ++iter) {
-    initial_browsers.insert(*iter);
-  }
+  for (chrome::BrowserIterator it; !it.done(); it.Next())
+    initial_browsers.insert(*it);
 
   content::WindowedNotificationObserver tab_added_observer(
       chrome::NOTIFICATION_TAB_ADDED,
@@ -429,6 +427,10 @@ void WaitForBookmarkModelToLoad(BookmarkModel* model) {
   ASSERT_TRUE(model->IsLoaded());
 }
 
+void WaitForBookmarkModelToLoad(Profile* profile) {
+  WaitForBookmarkModelToLoad(BookmarkModelFactory::GetForProfile(profile));
+}
+
 void WaitForTemplateURLServiceToLoad(TemplateURLService* service) {
   if (service->loaded())
     return;
@@ -477,13 +479,10 @@ void SendToOmniboxAndSubmit(LocationBar* location_bar,
 }
 
 Browser* GetBrowserNotInSet(std::set<Browser*> excluded_browsers) {
-  for (BrowserList::const_iterator iter = BrowserList::begin();
-       iter != BrowserList::end();
-       ++iter) {
-    if (excluded_browsers.find(*iter) == excluded_browsers.end())
-      return *iter;
+  for (chrome::BrowserIterator it; !it.done(); it.Next()) {
+    if (excluded_browsers.find(*it) == excluded_browsers.end())
+      return *it;
   }
-
   return NULL;
 }
 
@@ -525,7 +524,8 @@ BrowserAddedObserver::BrowserAddedObserver()
     : notification_observer_(
           chrome::NOTIFICATION_BROWSER_OPENED,
           content::NotificationService::AllSources()) {
-  original_browsers_.insert(BrowserList::begin(), BrowserList::end());
+  for (chrome::BrowserIterator it; !it.done(); it.Next())
+    original_browsers_.insert(*it);
 }
 
 BrowserAddedObserver::~BrowserAddedObserver() {
@@ -534,7 +534,7 @@ BrowserAddedObserver::~BrowserAddedObserver() {
 Browser* BrowserAddedObserver::WaitForSingleNewBrowser() {
   notification_observer_.Wait();
   // Ensure that only a single new browser has appeared.
-  EXPECT_EQ(original_browsers_.size() + 1, BrowserList::size());
+  EXPECT_EQ(original_browsers_.size() + 1, chrome::GetTotalBrowserCount());
   return GetBrowserNotInSet(original_browsers_);
 }
 

@@ -63,6 +63,10 @@ struct MasterPrefs {
   MasterPrefs();
   ~MasterPrefs();
 
+  // TODO(macourteau): as part of the master preferences refactoring effort,
+  // remove items from here which are being stored temporarily only to be later
+  // dumped into local_state. Also see related TODO in chrome_browser_main.cc.
+
   int ping_delay;
   bool homepage_defined;
   int do_import_items;
@@ -71,6 +75,8 @@ struct MasterPrefs {
   bool suppress_first_run_default_browser_prompt;
   std::vector<GURL> new_tabs;
   std::vector<GURL> bookmarks;
+  std::string variations_seed;
+  std::string suppress_default_browser_prompt_for_version;
 };
 
 // Returns true if this is the first time chrome is run for this user.
@@ -96,15 +102,28 @@ bool RemoveSentinel();
 // Returns false if the pref service could not be retrieved.
 bool SetShowFirstRunBubblePref(FirstRunBubbleOptions show_bubble_option);
 
-// Sets the kShouldShowWelcomePage local state pref so that the browser
-// loads the welcome tab once the message loop gets going. Returns false
-// if the pref could not be set.
-bool SetShowWelcomePagePref();
+// Sets a flag that will cause ShouldShowWelcomePage to return true
+// exactly once, so that the browser loads the welcome tab once the
+// message loop gets going.
+void SetShouldShowWelcomePage();
 
-// Sets the kAutofillPersonalDataManagerFirstRun local state pref so that the
-// browser loads PersonalDataManager once the main message loop gets going.
-// Returns false if the pref could not be set.
-bool SetPersonalDataManagerFirstRunPref();
+// Returns true if the welcome page should be shown.
+//
+// This will return true only once: The first time it is called after
+// SetShouldShowWelcomePage() is called.
+bool ShouldShowWelcomePage();
+
+// Sets a flag that will cause ShouldDoPersonalDataManagerFirstRun()
+// to return true exactly once, so that the browser loads
+// PersonalDataManager once the main message loop gets going.
+void SetShouldDoPersonalDataManagerFirstRun();
+
+// Returns true if the autofill personal data manager first-run action
+// should be taken.
+//
+// This will return true only once, the first time it is called after
+// SetShouldDoPersonalDataManagerFirstRun() is called.
+bool ShouldDoPersonalDataManagerFirstRun();
 
 // Log a metric for the "FirstRun.SearchEngineBubble" histogram.
 void LogFirstRunMetric(FirstRunBubbleMetric metric);
@@ -128,6 +147,11 @@ void AutoImport(Profile* profile,
 // Does remaining first run tasks for |profile| and makes Chrome default browser
 // if |make_chrome_default|. This can pop the first run consent dialog on linux.
 void DoPostImportTasks(Profile* profile, bool make_chrome_default);
+
+// Whether a first-run import was triggered before the browser mainloop began.
+// This is used in testing to verify import startup actions that occur before
+// an observer can be registered in the test.
+bool DidPerformProfileImport(bool* exited_successfully);
 
 // Imports bookmarks and/or browser items (depending on platform support)
 // in this process. This function is paired with first_run::ImportSettings().

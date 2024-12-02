@@ -137,10 +137,8 @@ class WallpaperManagerBrowserTest : public CrosInProcessBrowserTest,
 // The large resolution wallpaper should be loaded when a large external screen
 // is hooked up. If the external screen is smaller than small wallpaper
 // resolution, do not load large resolution wallpaper.
-//
-// Temporarily disabled due to metacity switch: http://crbug.com/167114
 IN_PROC_BROWSER_TEST_F(WallpaperManagerBrowserTest,
-                       DISABLED_LoadLargeWallpaperForLargeExternalScreen) {
+                       LoadLargeWallpaperForLargeExternalScreen) {
   LogIn(kTestUser1);
   WaitAsyncWallpaperLoad();
   gfx::ImageSkia wallpaper = controller_->GetWallpaper();
@@ -152,6 +150,10 @@ IN_PROC_BROWSER_TEST_F(WallpaperManagerBrowserTest,
 
   // Hook up another 800x600 display.
   UpdateDisplay("800x600,800x600");
+#if !defined(GOOGLE_CHROME_BUILD)
+  // wallpaper.width() < 800, expect to reload wallpaper.
+  WaitAsyncWallpaperLoad();
+#endif
   // The small resolution wallpaper is expected.
   EXPECT_EQ(kExpectedSmallWallpaperWidth, wallpaper.width());
   EXPECT_EQ(kExpectedSmallWallpaperHeight, wallpaper.height());
@@ -183,10 +185,8 @@ IN_PROC_BROWSER_TEST_F(WallpaperManagerBrowserTest,
 
 // This test is similar to LoadLargeWallpaperForExternalScreen test. Instead of
 // testing default wallpaper, it tests custom wallpaper.
-//
-// Temporarily disabled due to metacity switch: http://crbug.com/167114
 IN_PROC_BROWSER_TEST_F(WallpaperManagerBrowserTest,
-                       DISABLED_LoadCustomLargeWallpaperForLargeExternalScreen) {
+                       LoadCustomLargeWallpaperForLargeExternalScreen) {
   WallpaperManager* wallpaper_manager = WallpaperManager::Get();
   LogIn(kTestUser1);
   // Wait for default wallpaper loaded.
@@ -231,6 +231,10 @@ IN_PROC_BROWSER_TEST_F(WallpaperManagerBrowserTest,
 
   // Hook up another 800x600 display.
   UpdateDisplay("800x600,800x600");
+#if !defined(GOOGLE_CHROME_BUILD)
+  // wallpaper.width() < 800, expect to reload wallpaper.
+  WaitAsyncWallpaperLoad();
+#endif
   // The small resolution custom wallpaper is expected.
   EXPECT_EQ(kExpectedSmallWallpaperWidth, wallpaper.width());
   EXPECT_EQ(kExpectedSmallWallpaperHeight, wallpaper.height());

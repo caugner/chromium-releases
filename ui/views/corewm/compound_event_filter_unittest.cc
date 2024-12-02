@@ -53,13 +53,16 @@ class TestCursorClient : public aura::client::CursorClient {
     return mouse_events_enabled_;
   }
 
-  virtual void SetDeviceScaleFactor(float scale_factor) OVERRIDE {
+  virtual void SetDisplay(const gfx::Display& display) OVERRIDE {
   }
 
   virtual void LockCursor() OVERRIDE {
   }
 
   virtual void UnlockCursor() OVERRIDE {
+  }
+
+  virtual void SetCursorResourceModule(const string16& module_name) OVERRIDE {
   }
 
  private:
@@ -166,6 +169,35 @@ TEST_F(CompoundEventFilterTest, FilterConsumedGesture) {
 
   compound_filter->RemoveHandler(gesure_handler.get());
   aura::Env::GetInstance()->AddPreTargetHandler(compound_filter.get());
+}
+
+// Verifies we don't attempt to hide the mouse when the mouse is down and a
+// touch event comes in.
+TEST_F(CompoundEventFilterTest, DontHideWhenMouseDown) {
+  aura::test::EventGenerator event_generator(root_window());
+
+  scoped_ptr<CompoundEventFilter> compound_filter(new CompoundEventFilter);
+  aura::Env::GetInstance()->AddPreTargetHandler(compound_filter.get());
+  aura::test::TestWindowDelegate delegate;
+  scoped_ptr<aura::Window> window(CreateTestWindowWithDelegate(&delegate, 1234,
+      gfx::Rect(5, 5, 100, 100), root_window()));
+  window->Show();
+
+  TestCursorClient cursor_client;
+  aura::client::SetCursorClient(root_window(), &cursor_client);
+
+  // Move and press the mouse over the window.
+  event_generator.MoveMouseTo(10, 10);
+  EXPECT_TRUE(cursor_client.IsMouseEventsEnabled());
+  event_generator.PressLeftButton();
+  EXPECT_TRUE(cursor_client.IsMouseEventsEnabled());
+  EXPECT_TRUE(aura::Env::GetInstance()->is_mouse_button_down());
+
+  // Do a touch event. As the mouse button is down this should not disable mouse
+  // events.
+  event_generator.PressTouch();
+  EXPECT_TRUE(cursor_client.IsMouseEventsEnabled());
+  aura::Env::GetInstance()->RemovePreTargetHandler(compound_filter.get());
 }
 
 }  // namespace corewm

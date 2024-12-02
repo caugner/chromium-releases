@@ -34,6 +34,8 @@ class NavigationController;
 
 namespace extensions {
 
+class Manifest;
+
 // Downloads and installs extensions from the web store.
 class WebstoreInstaller :public content::NotificationObserver,
                          public content::DownloadItem::Observer,
@@ -88,7 +90,7 @@ class WebstoreInstaller :public content::NotificationObserver,
     Profile* profile;
 
     // The expected manifest, before localization.
-    scoped_ptr<base::DictionaryValue> parsed_manifest;
+    scoped_ptr<Manifest> manifest;
 
     // Whether to use a bubble notification when an app is installed, instead of
     // the default behavior of transitioning to the new tab page.
@@ -102,9 +104,6 @@ class WebstoreInstaller :public content::NotificationObserver,
     // installation, the dialog is shown earlier, before any download is done,
     // so there's no need to show it again.
     bool skip_install_dialog;
-
-    // Whether we should record an oauth2 grant for the extensions.
-    bool record_oauth2_grant;
 
     // Whether we should enable the launcher before installing the app.
     bool enable_launcher;

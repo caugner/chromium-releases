@@ -10,7 +10,8 @@
 #include "ash/system/chromeos/network/network_list_detailed_view.h"
 #include "ash/system/chromeos/network/network_list_detailed_view_base.h"
 #include "ash/system/chromeos/network/network_state_list_detailed_view.h"
-#include "ash/system/chromeos/network/tray_network_state_observer.h"
+#include "ash/system/chromeos/network/network_state_notifier.h"
+#include "ash/system/chromeos/network/network_tray_delegate.h"
 #include "ash/system/tray/system_tray.h"
 #include "ash/system/tray/system_tray_delegate.h"
 #include "ash/system/tray/system_tray_notifier.h"
@@ -20,7 +21,6 @@
 #include "ash/system/tray/tray_notification_view.h"
 #include "base/command_line.h"
 #include "base/utf_string_conversions.h"
-#include "chromeos/network/network_configuration_handler.h"
 #include "chromeos/network/network_state.h"
 #include "chromeos/network/network_state_handler.h"
 #include "grit/ash_resources.h"
@@ -34,20 +34,23 @@
 #include "ui/views/layout/box_layout.h"
 #include "ui/views/widget/widget.h"
 
+using ash::internal::TrayNetwork;
+using ash::NetworkObserver;
+using chromeos::NetworkState;
+using chromeos::NetworkStateHandler;
+
 namespace {
 
-using ash::internal::TrayNetwork;
-
-int GetMessageIcon(
-    TrayNetwork::MessageType message_type,
-    TrayNetwork::NetworkType network_type) {
+int GetMessageIcon(NetworkObserver::MessageType message_type,
+                   NetworkObserver::NetworkType network_type) {
   switch(message_type) {
-    case TrayNetwork::ERROR_CONNECT_FAILED:
-      if (TrayNetwork::NETWORK_CELLULAR == network_type)
+    case NetworkObserver::ERROR_CONNECT_FAILED:
+      if (NetworkObserver::NETWORK_CELLULAR == network_type)
         return IDR_AURA_UBER_TRAY_CELLULAR_NETWORK_FAILED;
       else
         return IDR_AURA_UBER_TRAY_NETWORK_FAILED;
-    case TrayNetwork::MESSAGE_DATA_PROMO:
+    case NetworkObserver::ERROR_OUT_OF_CREDITS:
+    case NetworkObserver::MESSAGE_DATA_PROMO:
       if (network_type == TrayNetwork::NETWORK_CELLULAR_LTE)
         return IDR_AURA_UBER_TRAY_NOTIFICATION_LTE;
       else
@@ -58,14 +61,12 @@ int GetMessageIcon(
 }
 
 bool UseNewNetworkHandlers() {
-  return CommandLine::ForCurrentProcess()->HasSwitch(
-      ash::switches::kAshEnableNewNetworkStatusArea);
+  return !CommandLine::ForCurrentProcess()->HasSwitch(
+      ash::switches::kAshDisableNewNetworkStatusArea) &&
+      NetworkStateHandler::IsInitialized();
 }
 
 }  // namespace
-
-using chromeos::NetworkState;
-using chromeos::NetworkStateHandler;
 
 namespace ash {
 namespace internal {
@@ -77,7 +78,7 @@ class NetworkMessages {
   struct Message {
     Message() : delegate(NULL) {}
     Message(NetworkTrayDelegate* in_delegate,
-            TrayNetwork::NetworkType network_type,
+            NetworkObserver::NetworkType network_type,
             const string16& in_title,
             const string16& in_message,
             const std::vector<string16>& in_links) :
@@ -87,12 +88,12 @@ class NetworkMessages {
         message(in_message),
         links(in_links) {}
     NetworkTrayDelegate* delegate;
-    TrayNetwork::NetworkType network_type_;
+    NetworkObserver::NetworkType network_type_;
     string16 title;
     string16 message;
     std::vector<string16> links;
   };
-  typedef std::map<TrayNetwork::MessageType, Message> MessageMap;
+  typedef std::map<NetworkObserver::MessageType, Message> MessageMap;
 
   MessageMap& messages() { return messages_; }
   const MessageMap& messages() const { return messages_; }
@@ -116,7 +117,6 @@ class NetworkTrayView : public TrayItemView,
     NetworkIconInfo info;
     if (UseNewNetworkHandlers()) {
       UpdateNetworkStateHandlerIcon();
-      network_icon::NetworkIconAnimation::GetInstance()->AddObserver(this);
     } else {
       Shell::GetInstance()->system_tray_delegate()->
           GetMostRelevantNetworkIcon(&info, false);
@@ -141,10 +141,16 @@ class NetworkTrayView : public TrayItemView,
     NetworkStateHandler* handler = NetworkStateHandler::Get();
     gfx::ImageSkia image;
     string16 name;
+    bool animating = false;
     network_tray_->GetNetworkStateHandlerImageAndLabel(
-        network_icon::ICON_TYPE_TRAY, &image, &name);
+        network_icon::ICON_TYPE_TRAY, &image, &name, &animating);
     bool show_in_tray = !image.isNull();
     UpdateIcon(show_in_tray, image);
+    if (animating)
+      network_icon::NetworkIconAnimation::GetInstance()->AddObserver(this);
+    else
+      network_icon::NetworkIconAnimation::GetInstance()->RemoveObserver(this);
+    // Update accessibility.
     const NetworkState* connected_network = handler->ConnectedNetworkByType(
         NetworkStateHandler::kMatchTypeNonVirtual);
     if (connected_network)
@@ -202,8 +208,6 @@ class NetworkDefaultView : public TrayItemMore,
       : TrayItemMore(network_tray, show_more),
         network_tray_(network_tray) {
     Update();
-    if (UseNewNetworkHandlers())
-      network_icon::NetworkIconAnimation::GetInstance()->AddObserver(this);
   }
 
   virtual ~NetworkDefaultView() {
@@ -215,8 +219,13 @@ class NetworkDefaultView : public TrayItemMore,
     if (UseNewNetworkHandlers()) {
       gfx::ImageSkia image;
       string16 label;
+      bool animating = false;
       network_tray_->GetNetworkStateHandlerImageAndLabel(
-          network_icon::ICON_TYPE_DEFAULT_VIEW, &image, &label);
+          network_icon::ICON_TYPE_DEFAULT_VIEW, &image, &label, &animating);
+      if (animating)
+        network_icon::NetworkIconAnimation::GetInstance()->AddObserver(this);
+      else
+        network_icon::NetworkIconAnimation::GetInstance()->RemoveObserver(this);
       SetImage(&image);
       SetLabel(label);
       SetAccessibleName(label);
@@ -295,7 +304,7 @@ class NetworkMessageView : public views::View,
                            public views::LinkListener {
  public:
   NetworkMessageView(TrayNetwork* tray_network,
-                     TrayNetwork::MessageType message_type,
+                     NetworkObserver::MessageType message_type,
                      const NetworkMessages::Message& network_msg)
       : tray_network_(tray_network),
         message_type_(message_type),
@@ -339,13 +348,13 @@ class NetworkMessageView : public views::View,
     tray_network_->LinkClicked(message_type_, source->id());
   }
 
-  TrayNetwork::MessageType message_type() const { return message_type_; }
-  TrayNetwork::NetworkType network_type() const { return network_type_; }
+  NetworkObserver::MessageType message_type() const { return message_type_; }
+  NetworkObserver::NetworkType network_type() const { return network_type_; }
 
  private:
   TrayNetwork* tray_network_;
-  TrayNetwork::MessageType message_type_;
-  TrayNetwork::NetworkType network_type_;
+  NetworkObserver::MessageType message_type_;
+  NetworkObserver::NetworkType network_type_;
 
   DISALLOW_COPY_AND_ASSIGN(NetworkMessageView);
 };
@@ -406,14 +415,16 @@ TrayNetwork::TrayNetwork(SystemTray* system_tray)
       detailed_(NULL),
       notification_(NULL),
       messages_(new tray::NetworkMessages()),
-      request_wifi_view_(false),
-      uninitialized_msg_(0) {
+      request_wifi_view_(false) {
   if (UseNewNetworkHandlers())
     network_state_observer_.reset(new TrayNetworkStateObserver(this));
+  if (NetworkStateHandler::IsInitialized())
+    network_state_notifier_.reset(new NetworkStateNotifier());
   Shell::GetInstance()->system_tray_notifier()->AddNetworkObserver(this);
 }
 
 TrayNetwork::~TrayNetwork() {
+  network_state_notifier_.reset();
   Shell::GetInstance()->system_tray_notifier()->RemoveNetworkObserver(this);
 }
 
@@ -444,7 +455,8 @@ views::View* TrayNetwork::CreateDetailedView(user::LoginStatus status) {
     request_wifi_view_ = false;
   } else {
     if (UseNewNetworkHandlers()) {
-      detailed_ = new tray::NetworkStateListDetailedView(this, status);
+      detailed_ = new tray::NetworkStateListDetailedView(
+          this, tray::NetworkStateListDetailedView::LIST_TYPE_NETWORK, status);
     } else {
       detailed_ = new tray::NetworkListDetailedView(
           this, status, IDS_ASH_STATUS_TRAY_NETWORK);
@@ -495,13 +507,15 @@ void TrayNetwork::OnNetworkRefresh(const NetworkIconInfo& info) {
 }
 
 void TrayNetwork::SetNetworkMessage(NetworkTrayDelegate* delegate,
-                                   MessageType message_type,
-                                   NetworkType network_type,
-                                   const string16& title,
-                                   const string16& message,
-                                   const std::vector<string16>& links) {
+                                    MessageType message_type,
+                                    NetworkType network_type,
+                                    const string16& title,
+                                    const string16& message,
+                                    const std::vector<string16>& links) {
   messages_->messages()[message_type] = tray::NetworkMessages::Message(
       delegate, network_type, title, message, links);
+  if (!Shell::GetInstance()->system_tray_delegate()->IsOobeCompleted())
+    return;
   if (notification_)
     notification_->Update();
   else
@@ -521,8 +535,7 @@ void TrayNetwork::ClearNetworkMessage(MessageType message_type) {
 }
 
 void TrayNetwork::OnWillToggleWifi() {
-  if (UseNewNetworkHandlers())
-    return;  // Handled in TrayNetworkStateObserver::NetworkManagerChanged()
+  // Triggered by a user action (e.g. keyboard shortcut)
   if (!detailed_ ||
       detailed_->GetViewType() == tray::NetworkDetailedView::WIFI_VIEW) {
     request_wifi_view_ = true;
@@ -530,72 +543,75 @@ void TrayNetwork::OnWillToggleWifi() {
   }
 }
 
-void TrayNetwork::TrayNetworkUpdated() {
+void TrayNetwork::NetworkStateChanged(bool list_changed) {
   if (tray_  && UseNewNetworkHandlers())
     tray_->UpdateNetworkStateHandlerIcon();
   if (default_)
     default_->Update();
-}
-
-void TrayNetwork::NetworkServiceChanged(const chromeos::NetworkState* network) {
-  if (!network->IsConnectingState())
-    connecting_networks_.erase(network->path());
-}
-
-void TrayNetwork::ConnectToNetwork(const std::string& service_path) {
-  DCHECK(UseNewNetworkHandlers());
-  const NetworkState* network =
-      NetworkStateHandler::Get()->GetNetworkState(service_path);
-  if (!network)
-    return;
-  if (!network->IsConnectedState()) {
-    chromeos::NetworkConfigurationHandler::Get()->Connect(
-        service_path,
-        base::Bind(&base::DoNothing),
-        chromeos::network_handler::ErrorCallback());
-    connecting_networks_.insert(service_path);
-  } else {
-    // This will show the settings UI for a connected network.
-    // TODO(stevenjb): Change the API to explicitly show network settings.
-    Shell::GetInstance()->system_tray_delegate()->ConnectToNetwork(
-        service_path);
+  if (detailed_) {
+    if (list_changed)
+      detailed_->NetworkListChanged();
+    else
+      detailed_->ManagerChanged();
   }
 }
 
-bool TrayNetwork::HasConnectingNetwork(const std::string& service_path) {
-  return connecting_networks_.count(service_path) > 0;
+void TrayNetwork::NetworkServiceChanged(const chromeos::NetworkState* network) {
+  if (detailed_)
+    detailed_->NetworkServiceChanged(network);
 }
 
 void TrayNetwork::GetNetworkStateHandlerImageAndLabel(
     network_icon::IconType icon_type,
     gfx::ImageSkia* image,
-    string16* label) {
+    string16* label,
+    bool* animating) {
   NetworkStateHandler* handler = NetworkStateHandler::Get();
-  const NetworkState* network = handler->ConnectedNetworkByType(
+  const NetworkState* connected_network = handler->ConnectedNetworkByType(
       NetworkStateHandler::kMatchTypeNonVirtual);
-  if (network && network->type() == flimflam::kTypeEthernet &&
-      icon_type == network_icon::ICON_TYPE_TRAY) {
-    *image = gfx::ImageSkia();  // Don't show ethernet in the tray.
-    return;
-  }
   const NetworkState* connecting_network = handler->ConnectingNetworkByType(
       NetworkStateHandler::kMatchTypeWireless);
+  if (!connecting_network && icon_type == network_icon::ICON_TYPE_TRAY)
+    connecting_network = handler->ConnectingNetworkByType(flimflam::kTypeVPN);
+
+  const NetworkState* network;
   // If we are connecting to a network, and there is either no connected
   // network, or the connection was user requested, use the connecting
   // network.
   if (connecting_network &&
-      (!network ||
-       HasConnectingNetwork(connecting_network->path()))) {
+      (!connected_network ||
+       handler->connecting_network() == connecting_network->path())) {
     network = connecting_network;
+  } else {
+    network = connected_network;
+  }
+
+  // Don't show ethernet in the tray
+  if (icon_type == network_icon::ICON_TYPE_TRAY &&
+      network && network->type() == flimflam::kTypeEthernet) {
+    *image = gfx::ImageSkia();
+    *animating = false;
+    return;
+  }
+
+  if (!network) {
+    // If no connecting network, check if we are activating a network.
+    const NetworkState* mobile_network = handler->FirstNetworkByType(
+        NetworkStateHandler::kMatchTypeMobile);
+    if (mobile_network && (mobile_network->activation_state() ==
+                           flimflam::kActivationStateActivating)) {
+      network = mobile_network;
+    }
   }
   if (!network) {
     // If no connecting network, check for cellular initializing.
-    int uninitialized_msg = GetUninitializedMsg();
+    int uninitialized_msg = network_icon::GetCellularUninitializedMsg();
     if (uninitialized_msg != 0) {
       *image = network_icon::GetImageForConnectingNetwork(
           icon_type, flimflam::kTypeCellular);
       if (label)
         *label = l10n_util::GetStringUTF16(uninitialized_msg);
+      *animating = true;
     } else {
       // Otherwise show the disconnected wifi icon.
       *image = network_icon::GetImageForDisconnectedNetwork(
@@ -604,43 +620,22 @@ void TrayNetwork::GetNetworkStateHandlerImageAndLabel(
         *label = l10n_util::GetStringUTF16(
             IDS_ASH_STATUS_TRAY_NETWORK_NOT_CONNECTED);
       }
+      *animating = false;
     }
     return;
   }
+  *animating = network->IsConnectingState();
   // Get icon and label for connected or connecting network.
   *image = network_icon::GetImageForNetwork(network, icon_type);
   if (label)
     *label = network_icon::GetLabelForNetwork(network, icon_type);
 }
 
-int TrayNetwork::GetUninitializedMsg() {
-  NetworkStateHandler* handler = NetworkStateHandler::Get();
-  if (handler->TechnologyUninitialized(
-          NetworkStateHandler::kMatchTypeMobile)) {
-    uninitialized_msg_ = IDS_ASH_STATUS_TRAY_INITIALIZING_CELLULAR;
-    uninitialized_state_time_ = base::Time::Now();
-    return uninitialized_msg_;
-  } else if (handler->GetScanningByType(
-      NetworkStateHandler::kMatchTypeMobile)) {
-    uninitialized_msg_ = IDS_ASH_STATUS_TRAY_CELLULAR_SCANNING;
-    uninitialized_state_time_ = base::Time::Now();
-    return uninitialized_msg_;
-  }
-  // There can be a delay between leaving the Initializing state and when
-  // a Cellular device shows up, so keep showing the initializing
-  // animation for a bit to avoid flashing the disconnect icon.
-  const int kInitializingDelaySeconds = 1;
-  base::TimeDelta dtime = base::Time::Now() - uninitialized_state_time_;
-  if (dtime.InSeconds() < kInitializingDelaySeconds)
-    return uninitialized_msg_;
-  return 0;
-}
-
 void TrayNetwork::LinkClicked(MessageType message_type, int link_id) {
   tray::NetworkMessages::MessageMap::const_iterator iter =
       messages()->messages().find(message_type);
   if (iter != messages()->messages().end() && iter->second.delegate)
-    iter->second.delegate->NotificationLinkClicked(link_id);
+    iter->second.delegate->NotificationLinkClicked(message_type, link_id);
 }
 
 }  // namespace internal

@@ -17,6 +17,7 @@ class AutofillEntry;
 class AutofillProfile;
 class AutofillTableTest;
 class CreditCard;
+class WebDatabase;
 
 struct FormFieldData;
 
@@ -114,10 +115,18 @@ class Time;
 //
 class AutofillTable : public WebDatabaseTable {
  public:
-  AutofillTable(sql::Connection* db, sql::MetaTable* meta_table);
+  AutofillTable();
   virtual ~AutofillTable();
-  virtual bool Init() OVERRIDE;
+
+  // Retrieves the AutofillTable* owned by |database|.
+  static AutofillTable* FromWebDatabase(WebDatabase* db);
+
+  virtual WebDatabaseTable::TypeKey GetTypeKey() const OVERRIDE;
+  virtual bool Init(sql::Connection* db, sql::MetaTable* meta_table) OVERRIDE;
   virtual bool IsSyncable() OVERRIDE;
+  virtual bool MigrateToVersion(int version,
+                                const std::string& app_locale,
+                                bool* update_compatible_version) OVERRIDE;
 
   // Records the form elements in |elements| in the database in the
   // autofill table.  A list of all added and updated autofill entries

@@ -13,8 +13,11 @@
 #include "chrome/browser/ui/webui/extensions/extension_settings_handler.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/manifest_handler.h"
+#include "chrome/common/extensions/manifest_handlers/content_scripts_handler.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/test/test_browser_thread.h"
+#include "extensions/common/constants.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using extensions::Extension;
@@ -28,6 +31,8 @@ class ExtensionUITest : public testing::Test {
 
  protected:
   virtual void SetUp() OVERRIDE {
+    testing::Test::SetUp();
+
     // Create an ExtensionService and ManagementPolicy to inject into the
     // ExtensionSettingsHandler.
     profile_.reset(new TestingProfile());
@@ -40,6 +45,8 @@ class ExtensionUITest : public testing::Test {
 
     handler_.reset(new ExtensionSettingsHandler(extension_service_,
                                                 management_policy_));
+
+    (new extensions::ContentScriptsHandler)->Register();
   }
 
   virtual void TearDown() OVERRIDE {
@@ -47,6 +54,8 @@ class ExtensionUITest : public testing::Test {
     profile_.reset();
     // Execute any pending deletion tasks.
     message_loop_.RunUntilIdle();
+    extensions::ManifestHandler::ClearRegistryForTesting();
+    testing::Test::TearDown();
   }
 
   static DictionaryValue* DeserializeJSONTestData(const base::FilePath& path,
@@ -66,7 +75,7 @@ class ExtensionUITest : public testing::Test {
     std::string error;
 
     base::FilePath manifest_path = extension_path.Append(
-        Extension::kManifestFilename);
+        extensions::kManifestFilename);
     scoped_ptr<DictionaryValue> extension_data(DeserializeJSONTestData(
         manifest_path, &error));
     EXPECT_EQ("", error);
@@ -100,21 +109,14 @@ class ExtensionUITest : public testing::Test {
     std::string paths_details = " - expected (" +
         expected_output_path.MaybeAsASCII() + ") vs. actual (" +
         extension_path.MaybeAsASCII() + ")";
-    for (DictionaryValue::key_iterator key = expected_output_data->begin_keys();
-        key != expected_output_data->end_keys();
-        ++key) {
-      Value* expected_value = NULL;
+    for (DictionaryValue::Iterator field(*expected_output_data);
+         !field.IsAtEnd(); field.Advance()) {
+      const Value* expected_value = &field.value();
       Value* actual_value = NULL;
-      EXPECT_TRUE(expected_output_data->Get(*key, &expected_value)) <<
-          *key + " is missing" + paths_details;
-      EXPECT_TRUE(actual_output_data->Get(*key, &actual_value)) <<
-          *key + " is missing" + paths_details;
-      if (expected_value == NULL) {
-        EXPECT_EQ(NULL, actual_value) << *key + paths_details;
-      } else {
-        EXPECT_TRUE(expected_value->Equals(actual_value)) << *key +
-            paths_details;
-      }
+      EXPECT_TRUE(actual_output_data->Get(field.key(), &actual_value)) <<
+          field.key() + " is missing" + paths_details;
+      EXPECT_TRUE(expected_value->Equals(actual_value)) << field.key() +
+          paths_details;
     }
   }
 
@@ -189,7 +191,7 @@ TEST_F(ExtensionUITest, GenerateExtensionsJSONData) {
   CompareExpectedAndActualOutput(extension_path, pages, expected_output_path);
 }
 
-// Test that using Manifest::LOAD for the extension location triggers the
+// Test that using Manifest::UNPACKED for the extension location triggers the
 // correct values in the details, including location, order, and allow_reload.
 TEST_F(ExtensionUITest, LocationLoadPropagation) {
   base::FilePath data_test_dir_path, extension_path;
@@ -205,7 +207,7 @@ TEST_F(ExtensionUITest, LocationLoadPropagation) {
 
   scoped_ptr<DictionaryValue> extension_details(
       CreateExtensionDetailViewFromPath(
-          extension_path, pages, Manifest::LOAD));
+          extension_path, pages, Manifest::UNPACKED));
 
   bool ui_allow_reload = false;
   bool ui_is_unpacked = false;
@@ -221,7 +223,7 @@ TEST_F(ExtensionUITest, LocationLoadPropagation) {
 
 // Test that using Manifest::EXTERNAL_PREF for the extension location triggers
 // the correct values in the details, including location, order, and
-// allow_reload.  Contrast to Manifest::LOAD, which has somewhat different
+// allow_reload.  Contrast to Manifest::UNPACKED, which has somewhat different
 // values.
 TEST_F(ExtensionUITest, LocationExternalPrefPropagation) {
   base::FilePath data_test_dir_path, extension_path;
@@ -266,7 +268,7 @@ TEST_F(ExtensionUITest, PathPropagation) {
 
   scoped_ptr<DictionaryValue> extension_details(
       CreateExtensionDetailViewFromPath(
-          extension_path, pages, Manifest::LOAD));
+          extension_path, pages, Manifest::UNPACKED));
 
   base::FilePath::StringType ui_path;
 

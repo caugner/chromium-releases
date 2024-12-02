@@ -5,13 +5,13 @@
 #include "chrome/browser/chromeos/extensions/file_browser_event_router.h"
 
 #include "base/bind.h"
+#include "base/file_util.h"
 #include "base/json/json_writer.h"
 #include "base/message_loop.h"
+#include "base/prefs/pref_change_registrar.h"
 #include "base/prefs/pref_service.h"
-#include "base/prefs/public/pref_change_registrar.h"
 #include "base/stl_util.h"
 #include "base/values.h"
-#include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/drive/drive_cache.h"
 #include "chrome/browser/chromeos/drive/drive_file_system_interface.h"
 #include "chrome/browser/chromeos/drive/drive_file_system_util.h"
@@ -21,6 +21,7 @@
 #include "chrome/browser/chromeos/login/base_login_display_host.h"
 #include "chrome/browser/chromeos/login/screen_locker.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
+#include "chrome/browser/chromeos/net/connectivity_state_helper.h"
 #include "chrome/browser/extensions/event_names.h"
 #include "chrome/browser/extensions/event_router.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -29,8 +30,11 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
+#include "chromeos/dbus/cros_disks_client.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/power_manager_client.h"
+#include "chromeos/dbus/session_manager_client.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_source.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -75,6 +79,28 @@ const char* MountErrorToString(chromeos::MountError error) {
       return "error_unknown";
     case chromeos::MOUNT_ERROR_INTERNAL:
       return "error_internal";
+    case chromeos::MOUNT_ERROR_INVALID_ARGUMENT:
+      return "error_invalid_argument";
+    case chromeos::MOUNT_ERROR_INVALID_PATH:
+      return "error_invalid_path";
+    case chromeos::MOUNT_ERROR_PATH_ALREADY_MOUNTED:
+      return "error_path_already_mounted";
+    case chromeos::MOUNT_ERROR_PATH_NOT_MOUNTED:
+      return "error_path_not_mounted";
+    case chromeos::MOUNT_ERROR_DIRECTORY_CREATION_FAILED:
+      return "error_directory_creation_failed";
+    case chromeos::MOUNT_ERROR_INVALID_MOUNT_OPTIONS:
+      return "error_invalid_mount_options";
+    case chromeos::MOUNT_ERROR_INVALID_UNMOUNT_OPTIONS:
+      return "error_invalid_unmount_options";
+    case chromeos::MOUNT_ERROR_INSUFFICIENT_PERMISSIONS:
+      return "error_insufficient_permissions";
+    case chromeos::MOUNT_ERROR_MOUNT_PROGRAM_NOT_FOUND:
+      return "error_mount_program_not_found";
+    case chromeos::MOUNT_ERROR_MOUNT_PROGRAM_FAILED:
+      return "error_mount_program_failed";
+    case chromeos::MOUNT_ERROR_INVALID_DEVICE_PATH:
+      return "error_invalid_device_path";
     case chromeos::MOUNT_ERROR_UNKNOWN_FILESYSTEM:
       return "error_unknown_filesystem";
     case chromeos::MOUNT_ERROR_UNSUPPORTED_FILESYSTEM:
@@ -85,9 +111,8 @@ const char* MountErrorToString(chromeos::MountError error) {
       return "error_authentication";
     case chromeos::MOUNT_ERROR_PATH_UNMOUNTED:
       return "error_path_unmounted";
-    default:
-      NOTREACHED();
   }
+  NOTREACHED();
   return "";
 }
 
@@ -105,18 +130,24 @@ void RelayFileWatcherCallbackToUIThread(
 // seconds. This is to give DiskManager time to process device removed/added
 // events (events for the devices that were present before suspend should not
 // trigger any new notifications or file manager windows).
+// The delegate will go into the same state after screen is unlocked. Cros-disks
+// will not send events while the screen is locked. The events will be postponed
+// until the screen is unlocked. These have to be handled too.
 class SuspendStateDelegateImpl
     : public chromeos::PowerManagerClient::Observer,
+      public chromeos::SessionManagerClient::Observer,
       public FileBrowserEventRouter::SuspendStateDelegate {
  public:
   SuspendStateDelegateImpl()
       : is_resuming_(false),
         weak_factory_(this) {
     DBusThreadManager::Get()->GetPowerManagerClient()->AddObserver(this);
+    DBusThreadManager::Get()->GetSessionManagerClient()->AddObserver(this);
   }
 
   virtual ~SuspendStateDelegateImpl() {
     DBusThreadManager::Get()->GetPowerManagerClient()->RemoveObserver(this);
+    DBusThreadManager::Get()->GetSessionManagerClient()->RemoveObserver(this);
   }
 
   // chromeos::PowerManagerClient::Observer implementation.
@@ -128,6 +159,20 @@ class SuspendStateDelegateImpl
   // chromeos::PowerManagerClient::Observer implementation.
   virtual void SystemResumed(const base::TimeDelta& sleep_duration) OVERRIDE {
     is_resuming_ = true;
+    // Undo any previous resets.
+    weak_factory_.InvalidateWeakPtrs();
+    base::MessageLoopProxy::current()->PostDelayedTask(
+        FROM_HERE,
+        base::Bind(&SuspendStateDelegateImpl::Reset,
+                   weak_factory_.GetWeakPtr()),
+        base::TimeDelta::FromSeconds(5));
+  }
+
+  // chromeos::SessionManagerClient::Observer implementation.
+  virtual void ScreenIsUnlocked() OVERRIDE {
+    is_resuming_ = true;
+    // Undo any previous resets.
+    weak_factory_.InvalidateWeakPtrs();
     base::MessageLoopProxy::current()->PostDelayedTask(
         FROM_HERE,
         base::Bind(&SuspendStateDelegateImpl::Reset,
@@ -142,7 +187,7 @@ class SuspendStateDelegateImpl
 
   // FileBrowserEventRouter::SuspendStateDelegate implementation.
   virtual bool DiskWasPresentBeforeSuspend(
-      const chromeos::disks::DiskMountManager::Disk& disk) const OVERRIDE {
+      const DiskMountManager::Disk& disk) const OVERRIDE {
     // TODO(tbarzic): Implement this. Blocked on http://crbug.com/153338.
     return false;
   }
@@ -157,6 +202,30 @@ class SuspendStateDelegateImpl
   base::WeakPtrFactory<SuspendStateDelegateImpl> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(SuspendStateDelegateImpl);
+};
+
+void DirectoryExistsOnBlockingPool(const base::FilePath& directory_path,
+                                   const base::Closure& success_callback,
+                                   const base::Closure& failure_callback) {
+  DCHECK(BrowserThread::GetBlockingPool()->RunsTasksOnCurrentThread());
+
+  if (file_util::DirectoryExists(directory_path))
+    BrowserThread::PostTask(BrowserThread::UI, FROM_HERE, success_callback);
+  else
+    BrowserThread::PostTask(BrowserThread::UI, FROM_HERE, failure_callback);
+};
+
+void DirectoryExistsOnUIThread(const base::FilePath& directory_path,
+                               const base::Closure& success_callback,
+                               const base::Closure& failure_callback) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  content::BrowserThread::PostBlockingPoolTask(
+      FROM_HERE,
+      base::Bind(&DirectoryExistsOnBlockingPool,
+                 directory_path,
+                 success_callback,
+                 failure_callback));
 };
 
 }  // namespace
@@ -203,14 +272,10 @@ void FileBrowserEventRouter::Shutdown() {
     system_service->drive_service()->RemoveObserver(this);
   }
 
-  chromeos::CrosLibrary* cros_library = chromeos::CrosLibrary::Get();
-  if (cros_library) {
-    chromeos::NetworkLibrary* network_library =
-        cros_library->GetNetworkLibrary();
-    if (network_library)
-      network_library->RemoveNetworkManagerObserver(this);
+  if (chromeos::ConnectivityStateHelper::IsInitialized()) {
+    chromeos::ConnectivityStateHelper::Get()->
+        RemoveNetworkManagerObserver(this);
   }
-
   profile_ = NULL;
 }
 
@@ -236,14 +301,10 @@ void FileBrowserEventRouter::ObserveFileSystemEvents() {
     system_service->file_system()->AddObserver(this);
   }
 
-  chromeos::CrosLibrary* cros_library = chromeos::CrosLibrary::Get();
-  if (cros_library) {
-    chromeos::NetworkLibrary* network_library =
-        cros_library->GetNetworkLibrary();
-    if (network_library)
-     network_library->AddNetworkManagerObserver(this);
+  if (chromeos::ConnectivityStateHelper::IsInitialized()) {
+    chromeos::ConnectivityStateHelper::Get()->
+        AddNetworkManagerObserver(this);
   }
-
   suspend_state_delegate_.reset(new SuspendStateDelegateImpl());
 
   pref_change_registrar_->Init(profile_->GetPrefs());
@@ -434,7 +495,9 @@ void FileBrowserEventRouter::OnMountEvent(
     // If a new device was mounted, a new File manager window may need to be
     // opened.
     if (error_code == chromeos::MOUNT_ERROR_NONE)
-      ShowRemovableDeviceInFileManager(mount_info.mount_path);
+      ShowRemovableDeviceInFileManager(
+          *disk,
+          base::FilePath::FromUTF8Unsafe(mount_info.mount_path));
   } else if (mount_info.mount_type == chromeos::MOUNT_TYPE_ARCHIVE) {
     // Clear the "mounted" state for archive files in gdata cache
     // when mounting failed or unmounting succeeded.
@@ -445,7 +508,7 @@ void FileBrowserEventRouter::OnMountEvent(
           DriveSystemServiceFactory::GetForProfile(profile_);
       drive::DriveCache* cache =
           system_service ? system_service->cache() : NULL;
-      if (cache)
+      if (cache && cache->IsUnderDriveCacheDirectory(source_path))
         cache->MarkAsUnmounted(source_path, base::Bind(&OnMarkAsUnmounted));
     }
   }
@@ -462,8 +525,7 @@ void FileBrowserEventRouter::OnFormatEvent(
   }
 }
 
-void FileBrowserEventRouter::OnNetworkManagerChanged(
-    chromeos::NetworkLibrary* network_library) {
+void FileBrowserEventRouter::NetworkManagerChanged() {
   if (!profile_ ||
       !extensions::ExtensionSystem::Get(profile_)->event_router()) {
     NOTREACHED();
@@ -488,7 +550,8 @@ void FileBrowserEventRouter::OnExternalStorageDisabledChanged() {
       LOG(INFO) << "Unmounting " << it->second.mount_path
                 << " because of policy.";
       manager->UnmountPath(it->second.mount_path,
-                           chromeos::UNMOUNT_OPTIONS_NONE);
+                           chromeos::UNMOUNT_OPTIONS_NONE,
+                           DiskMountManager::UnmountPathCallback());
     }
   }
 }
@@ -653,7 +716,6 @@ void FileBrowserEventRouter::DispatchMountEvent(
       mount_info_value->SetString("mountPath",
                                   "/" + relative_mount_path.value());
     } else {
-      LOG(ERROR) << "Mount path is not accessible: " << mount_info.mount_path;
       mount_info_value->SetString("status",
           MountErrorToString(chromeos::MOUNT_ERROR_PATH_UNMOUNTED));
     }
@@ -666,16 +728,39 @@ void FileBrowserEventRouter::DispatchMountEvent(
 }
 
 void FileBrowserEventRouter::ShowRemovableDeviceInFileManager(
-    const std::string& mount_path) {
+    const DiskMountManager::Disk& disk, const base::FilePath& mount_path) {
   // Do not attempt to open File Manager while the login is in progress or
   // the screen is locked.
   if (chromeos::BaseLoginDisplayHost::default_host() ||
       chromeos::ScreenLocker::default_screen_locker())
     return;
 
-  // To enable Photo Import call file_manager_util::OpenActionChoiceDialog
-  // instead.
-  file_manager_util::ViewRemovableDrive(base::FilePath(mount_path));
+  // According to DCF (Design rule of Camera File system) by JEITA / CP-3461
+  // cameras should have pictures located in the DCIM root directory.
+  const base::FilePath dcim_path = mount_path.Append(
+      FILE_PATH_LITERAL("DCIM"));
+
+  // TODO(mtomasz): Temporarily for M26. Remove it on M27.
+  // If an external photo importer is installed, then do not show the action
+  // choice dialog.
+  ExtensionService* service =
+      extensions::ExtensionSystem::Get(profile_)->extension_service();
+  if (!service)
+    return;
+  const std::string kExternalPhotoImporterExtensionId =
+      "efjnaogkjbogokcnohkmnjdojkikgobo";
+  const bool external_photo_importer_available =
+      service->GetExtensionById(kExternalPhotoImporterExtensionId,
+                                false /* include_disable */) != NULL;
+
+  // If there is no DCIM folder or an external photo importer is not available,
+  // then launch Files.app.
+  DirectoryExistsOnUIThread(
+      dcim_path,
+      external_photo_importer_available ?
+        base::Bind(&base::DoNothing) :
+        base::Bind(&file_manager_util::ViewRemovableDrive, mount_path),
+      base::Bind(&file_manager_util::ViewRemovableDrive, mount_path));
 }
 
 void FileBrowserEventRouter::OnDiskAdded(
@@ -713,13 +798,10 @@ void FileBrowserEventRouter::OnDiskRemoved(
   VLOG(1) << "Disk removed: " << disk->device_path();
 
   if (!disk->mount_path().empty()) {
-    if (!suspend_state_delegate_->SystemIsResuming()) {
-      notifications_->ShowNotification(
-          FileBrowserNotifications::DEVICE_HARD_UNPLUG,
-          disk->system_path_prefix());
-    }
     DiskMountManager::GetInstance()->UnmountPath(
-        disk->mount_path(), chromeos::UNMOUNT_OPTIONS_LAZY);
+        disk->mount_path(),
+        chromeos::UNMOUNT_OPTIONS_LAZY,
+        DiskMountManager::UnmountPathCallback());
   }
 }
 

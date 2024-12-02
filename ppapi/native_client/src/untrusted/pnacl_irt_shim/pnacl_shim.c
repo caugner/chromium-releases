@@ -1,4 +1,4 @@
-/* Copyright (c) 2012 The Chromium Authors. All rights reserved.
+/* Copyright (c) 2013 The Chromium Authors. All rights reserved.
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
@@ -26,7 +26,10 @@
 #include "ppapi/c/dev/ppb_testing_dev.h"
 #include "ppapi/c/dev/ppb_text_input_dev.h"
 #include "ppapi/c/dev/ppb_trace_event_dev.h"
+#include "ppapi/c/dev/ppb_truetype_font_dev.h"
 #include "ppapi/c/dev/ppb_url_util_dev.h"
+#include "ppapi/c/dev/ppb_var_array_dev.h"
+#include "ppapi/c/dev/ppb_var_dictionary_dev.h"
 #include "ppapi/c/dev/ppb_video_capture_dev.h"
 #include "ppapi/c/dev/ppb_video_decoder_dev.h"
 #include "ppapi/c/dev/ppb_view_dev.h"
@@ -41,6 +44,8 @@
 #include "ppapi/c/dev/ppp_video_decoder_dev.h"
 #include "ppapi/c/dev/ppp_widget_dev.h"
 #include "ppapi/c/dev/ppp_zoom_dev.h"
+#include "ppapi/c/extensions/dev/ppb_alarms_dev.h"
+#include "ppapi/c/extensions/dev/ppb_events_dev.h"
 #include "ppapi/c/ppb_audio.h"
 #include "ppapi/c/ppb_audio_config.h"
 #include "ppapi/c/ppb_console.h"
@@ -114,8 +119,14 @@
 
 /* Use local strcmp to avoid dependency on libc. */
 static int mystrcmp(const char* s1, const char *s2) {
-  while((*s1 && *s2) && (*s1++ == *s2++));
-  return *(--s1) - *(--s2);
+  while (1) {
+    if (*s1 == 0) break;
+    if (*s2 == 0) break;
+    if (*s1 != *s2) break;
+    ++s1;
+    ++s2;
+  }
+  return (int)(*s1) - (int)(*s2);
 }
 
 /* BEGIN Declarations for all Wrapper Infos */
@@ -177,7 +188,7 @@ static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_Buffer_Dev_0_4;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_Crypto_Dev_0_1;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_CursorControl_Dev_0_4;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_DeviceRef_Dev_0_1;
-static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_DirectoryReader_Dev_0_5;
+static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_DirectoryReader_Dev_0_6;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_FileChooser_Dev_0_5;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_FileChooser_Dev_0_6;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_Find_Dev_0_3;
@@ -198,7 +209,10 @@ static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_Testing_Dev_0_91;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_TextInput_Dev_0_1;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_TextInput_Dev_0_2;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_Trace_Event_Dev_0_1;
+static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_TrueTypeFont_Dev_0_1;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_URLUtil_Dev_0_6;
+static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_VarArray_Dev_0_1;
+static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_VarDictionary_Dev_0_1;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_VideoCapture_Dev_0_2;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_VideoCapture_Dev_0_3;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_VideoDecoder_Dev_0_16;
@@ -246,6 +260,7 @@ static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_Talk_Private_1_0;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_TCPServerSocket_Private_0_1;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_TCPSocket_Private_0_3;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_TCPSocket_Private_0_4;
+static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_TCPSocket_Private_0_5;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_UDPSocket_Private_0_2;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_UDPSocket_Private_0_3;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_UDPSocket_Private_0_4;
@@ -256,6 +271,8 @@ static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPP_Flash_BrowserOperations_1
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPP_Flash_BrowserOperations_1_2;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPP_Flash_BrowserOperations_1_3;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPP_Instance_Private_0_1;
+static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_Ext_Alarms_Dev_0_1;
+static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_Ext_Events_Dev_0_1;
 /* END Declarations for all Wrapper Infos. */
 
 /* Not generating wrapper methods for PPB_Audio_1_0 */
@@ -1632,27 +1649,27 @@ struct PP_Var Pnacl_M18_PPB_DeviceRef_Dev_GetName(PP_Resource device_ref) {
 
 /* End wrapper methods for PPB_DeviceRef_Dev_0_1 */
 
-/* Begin wrapper methods for PPB_DirectoryReader_Dev_0_5 */
+/* Begin wrapper methods for PPB_DirectoryReader_Dev_0_6 */
 
 static __attribute__((pnaclcall))
-PP_Resource Pnacl_M13_PPB_DirectoryReader_Dev_Create(PP_Resource directory_ref) {
-  const struct PPB_DirectoryReader_Dev_0_5 *iface = Pnacl_WrapperInfo_PPB_DirectoryReader_Dev_0_5.real_iface;
+PP_Resource Pnacl_M27_PPB_DirectoryReader_Dev_Create(PP_Resource directory_ref) {
+  const struct PPB_DirectoryReader_Dev_0_6 *iface = Pnacl_WrapperInfo_PPB_DirectoryReader_Dev_0_6.real_iface;
   return iface->Create(directory_ref);
 }
 
 static __attribute__((pnaclcall))
-PP_Bool Pnacl_M13_PPB_DirectoryReader_Dev_IsDirectoryReader(PP_Resource resource) {
-  const struct PPB_DirectoryReader_Dev_0_5 *iface = Pnacl_WrapperInfo_PPB_DirectoryReader_Dev_0_5.real_iface;
+PP_Bool Pnacl_M27_PPB_DirectoryReader_Dev_IsDirectoryReader(PP_Resource resource) {
+  const struct PPB_DirectoryReader_Dev_0_6 *iface = Pnacl_WrapperInfo_PPB_DirectoryReader_Dev_0_6.real_iface;
   return iface->IsDirectoryReader(resource);
 }
 
 static __attribute__((pnaclcall))
-int32_t Pnacl_M13_PPB_DirectoryReader_Dev_GetNextEntry(PP_Resource directory_reader, struct PP_DirectoryEntry_Dev* entry, struct PP_CompletionCallback callback) {
-  const struct PPB_DirectoryReader_Dev_0_5 *iface = Pnacl_WrapperInfo_PPB_DirectoryReader_Dev_0_5.real_iface;
-  return iface->GetNextEntry(directory_reader, entry, callback);
+int32_t Pnacl_M27_PPB_DirectoryReader_Dev_ReadEntries(PP_Resource directory_reader, struct PP_ArrayOutput output, struct PP_CompletionCallback callback) {
+  const struct PPB_DirectoryReader_Dev_0_6 *iface = Pnacl_WrapperInfo_PPB_DirectoryReader_Dev_0_6.real_iface;
+  return iface->ReadEntries(directory_reader, output, callback);
 }
 
-/* End wrapper methods for PPB_DirectoryReader_Dev_0_5 */
+/* End wrapper methods for PPB_DirectoryReader_Dev_0_6 */
 
 /* Begin wrapper methods for PPB_FileChooser_Dev_0_5 */
 
@@ -1980,6 +1997,46 @@ uint32_t Pnacl_M18_PPB_Testing_Dev_GetLiveVars(struct PP_Var live_vars[], uint32
 
 /* Not generating wrapper methods for PPB_Trace_Event_Dev_0_1 */
 
+/* Begin wrapper methods for PPB_TrueTypeFont_Dev_0_1 */
+
+static __attribute__((pnaclcall))
+int32_t Pnacl_M26_PPB_TrueTypeFont_Dev_GetFontFamilies(PP_Instance instance, struct PP_ArrayOutput output, struct PP_CompletionCallback callback) {
+  const struct PPB_TrueTypeFont_Dev_0_1 *iface = Pnacl_WrapperInfo_PPB_TrueTypeFont_Dev_0_1.real_iface;
+  return iface->GetFontFamilies(instance, output, callback);
+}
+
+static __attribute__((pnaclcall))
+PP_Resource Pnacl_M26_PPB_TrueTypeFont_Dev_Create(PP_Instance instance, const struct PP_TrueTypeFontDesc_Dev* desc) {
+  const struct PPB_TrueTypeFont_Dev_0_1 *iface = Pnacl_WrapperInfo_PPB_TrueTypeFont_Dev_0_1.real_iface;
+  return iface->Create(instance, desc);
+}
+
+static __attribute__((pnaclcall))
+PP_Bool Pnacl_M26_PPB_TrueTypeFont_Dev_IsFont(PP_Resource resource) {
+  const struct PPB_TrueTypeFont_Dev_0_1 *iface = Pnacl_WrapperInfo_PPB_TrueTypeFont_Dev_0_1.real_iface;
+  return iface->IsFont(resource);
+}
+
+static __attribute__((pnaclcall))
+int32_t Pnacl_M26_PPB_TrueTypeFont_Dev_Describe(PP_Resource font, struct PP_TrueTypeFontDesc_Dev* desc, struct PP_CompletionCallback callback) {
+  const struct PPB_TrueTypeFont_Dev_0_1 *iface = Pnacl_WrapperInfo_PPB_TrueTypeFont_Dev_0_1.real_iface;
+  return iface->Describe(font, desc, callback);
+}
+
+static __attribute__((pnaclcall))
+int32_t Pnacl_M26_PPB_TrueTypeFont_Dev_GetTableTags(PP_Resource font, struct PP_ArrayOutput output, struct PP_CompletionCallback callback) {
+  const struct PPB_TrueTypeFont_Dev_0_1 *iface = Pnacl_WrapperInfo_PPB_TrueTypeFont_Dev_0_1.real_iface;
+  return iface->GetTableTags(font, output, callback);
+}
+
+static __attribute__((pnaclcall))
+int32_t Pnacl_M26_PPB_TrueTypeFont_Dev_GetTable(PP_Resource font, uint32_t table, int32_t offset, int32_t max_data_length, struct PP_ArrayOutput output, struct PP_CompletionCallback callback) {
+  const struct PPB_TrueTypeFont_Dev_0_1 *iface = Pnacl_WrapperInfo_PPB_TrueTypeFont_Dev_0_1.real_iface;
+  return iface->GetTable(font, table, offset, max_data_length, output, callback);
+}
+
+/* End wrapper methods for PPB_TrueTypeFont_Dev_0_1 */
+
 /* Begin wrapper methods for PPB_URLUtil_Dev_0_6 */
 
 static __attribute__((pnaclcall))
@@ -2031,6 +2088,80 @@ struct PP_Var Pnacl_M17_PPB_URLUtil_Dev_GetPluginInstanceURL(PP_Instance instanc
 }
 
 /* End wrapper methods for PPB_URLUtil_Dev_0_6 */
+
+/* Begin wrapper methods for PPB_VarArray_Dev_0_1 */
+
+static __attribute__((pnaclcall))
+struct PP_Var Pnacl_M27_PPB_VarArray_Dev_Create(void) {
+  const struct PPB_VarArray_Dev_0_1 *iface = Pnacl_WrapperInfo_PPB_VarArray_Dev_0_1.real_iface;
+  return iface->Create();
+}
+
+static __attribute__((pnaclcall))
+struct PP_Var Pnacl_M27_PPB_VarArray_Dev_Get(struct PP_Var array, uint32_t index) {
+  const struct PPB_VarArray_Dev_0_1 *iface = Pnacl_WrapperInfo_PPB_VarArray_Dev_0_1.real_iface;
+  return iface->Get(array, index);
+}
+
+static __attribute__((pnaclcall))
+PP_Bool Pnacl_M27_PPB_VarArray_Dev_Set(struct PP_Var array, uint32_t index, struct PP_Var value) {
+  const struct PPB_VarArray_Dev_0_1 *iface = Pnacl_WrapperInfo_PPB_VarArray_Dev_0_1.real_iface;
+  return iface->Set(array, index, value);
+}
+
+static __attribute__((pnaclcall))
+uint32_t Pnacl_M27_PPB_VarArray_Dev_GetLength(struct PP_Var array) {
+  const struct PPB_VarArray_Dev_0_1 *iface = Pnacl_WrapperInfo_PPB_VarArray_Dev_0_1.real_iface;
+  return iface->GetLength(array);
+}
+
+static __attribute__((pnaclcall))
+PP_Bool Pnacl_M27_PPB_VarArray_Dev_SetLength(struct PP_Var array, uint32_t length) {
+  const struct PPB_VarArray_Dev_0_1 *iface = Pnacl_WrapperInfo_PPB_VarArray_Dev_0_1.real_iface;
+  return iface->SetLength(array, length);
+}
+
+/* End wrapper methods for PPB_VarArray_Dev_0_1 */
+
+/* Begin wrapper methods for PPB_VarDictionary_Dev_0_1 */
+
+static __attribute__((pnaclcall))
+struct PP_Var Pnacl_M27_PPB_VarDictionary_Dev_Create(void) {
+  const struct PPB_VarDictionary_Dev_0_1 *iface = Pnacl_WrapperInfo_PPB_VarDictionary_Dev_0_1.real_iface;
+  return iface->Create();
+}
+
+static __attribute__((pnaclcall))
+struct PP_Var Pnacl_M27_PPB_VarDictionary_Dev_Get(struct PP_Var dict, struct PP_Var key) {
+  const struct PPB_VarDictionary_Dev_0_1 *iface = Pnacl_WrapperInfo_PPB_VarDictionary_Dev_0_1.real_iface;
+  return iface->Get(dict, key);
+}
+
+static __attribute__((pnaclcall))
+PP_Bool Pnacl_M27_PPB_VarDictionary_Dev_Set(struct PP_Var dict, struct PP_Var key, struct PP_Var value) {
+  const struct PPB_VarDictionary_Dev_0_1 *iface = Pnacl_WrapperInfo_PPB_VarDictionary_Dev_0_1.real_iface;
+  return iface->Set(dict, key, value);
+}
+
+static __attribute__((pnaclcall))
+void Pnacl_M27_PPB_VarDictionary_Dev_Delete(struct PP_Var dict, struct PP_Var key) {
+  const struct PPB_VarDictionary_Dev_0_1 *iface = Pnacl_WrapperInfo_PPB_VarDictionary_Dev_0_1.real_iface;
+  iface->Delete(dict, key);
+}
+
+static __attribute__((pnaclcall))
+PP_Bool Pnacl_M27_PPB_VarDictionary_Dev_HasKey(struct PP_Var dict, struct PP_Var key) {
+  const struct PPB_VarDictionary_Dev_0_1 *iface = Pnacl_WrapperInfo_PPB_VarDictionary_Dev_0_1.real_iface;
+  return iface->HasKey(dict, key);
+}
+
+static __attribute__((pnaclcall))
+struct PP_Var Pnacl_M27_PPB_VarDictionary_Dev_GetKeys(struct PP_Var dict) {
+  const struct PPB_VarDictionary_Dev_0_1 *iface = Pnacl_WrapperInfo_PPB_VarDictionary_Dev_0_1.real_iface;
+  return iface->GetKeys(dict);
+}
+
+/* End wrapper methods for PPB_VarDictionary_Dev_0_1 */
 
 /* Begin wrapper methods for PPB_VideoCapture_Dev_0_2 */
 
@@ -3248,6 +3379,88 @@ void Pnacl_M20_PPB_TCPSocket_Private_Disconnect(PP_Resource tcp_socket) {
 
 /* End wrapper methods for PPB_TCPSocket_Private_0_4 */
 
+/* Begin wrapper methods for PPB_TCPSocket_Private_0_5 */
+
+static __attribute__((pnaclcall))
+PP_Resource Pnacl_M27_PPB_TCPSocket_Private_Create(PP_Instance instance) {
+  const struct PPB_TCPSocket_Private_0_5 *iface = Pnacl_WrapperInfo_PPB_TCPSocket_Private_0_5.real_iface;
+  return iface->Create(instance);
+}
+
+static __attribute__((pnaclcall))
+PP_Bool Pnacl_M27_PPB_TCPSocket_Private_IsTCPSocket(PP_Resource resource) {
+  const struct PPB_TCPSocket_Private_0_5 *iface = Pnacl_WrapperInfo_PPB_TCPSocket_Private_0_5.real_iface;
+  return iface->IsTCPSocket(resource);
+}
+
+static __attribute__((pnaclcall))
+int32_t Pnacl_M27_PPB_TCPSocket_Private_Connect(PP_Resource tcp_socket, const char* host, uint16_t port, struct PP_CompletionCallback callback) {
+  const struct PPB_TCPSocket_Private_0_5 *iface = Pnacl_WrapperInfo_PPB_TCPSocket_Private_0_5.real_iface;
+  return iface->Connect(tcp_socket, host, port, callback);
+}
+
+static __attribute__((pnaclcall))
+int32_t Pnacl_M27_PPB_TCPSocket_Private_ConnectWithNetAddress(PP_Resource tcp_socket, const struct PP_NetAddress_Private* addr, struct PP_CompletionCallback callback) {
+  const struct PPB_TCPSocket_Private_0_5 *iface = Pnacl_WrapperInfo_PPB_TCPSocket_Private_0_5.real_iface;
+  return iface->ConnectWithNetAddress(tcp_socket, addr, callback);
+}
+
+static __attribute__((pnaclcall))
+PP_Bool Pnacl_M27_PPB_TCPSocket_Private_GetLocalAddress(PP_Resource tcp_socket, struct PP_NetAddress_Private* local_addr) {
+  const struct PPB_TCPSocket_Private_0_5 *iface = Pnacl_WrapperInfo_PPB_TCPSocket_Private_0_5.real_iface;
+  return iface->GetLocalAddress(tcp_socket, local_addr);
+}
+
+static __attribute__((pnaclcall))
+PP_Bool Pnacl_M27_PPB_TCPSocket_Private_GetRemoteAddress(PP_Resource tcp_socket, struct PP_NetAddress_Private* remote_addr) {
+  const struct PPB_TCPSocket_Private_0_5 *iface = Pnacl_WrapperInfo_PPB_TCPSocket_Private_0_5.real_iface;
+  return iface->GetRemoteAddress(tcp_socket, remote_addr);
+}
+
+static __attribute__((pnaclcall))
+int32_t Pnacl_M27_PPB_TCPSocket_Private_SSLHandshake(PP_Resource tcp_socket, const char* server_name, uint16_t server_port, struct PP_CompletionCallback callback) {
+  const struct PPB_TCPSocket_Private_0_5 *iface = Pnacl_WrapperInfo_PPB_TCPSocket_Private_0_5.real_iface;
+  return iface->SSLHandshake(tcp_socket, server_name, server_port, callback);
+}
+
+static __attribute__((pnaclcall))
+PP_Resource Pnacl_M27_PPB_TCPSocket_Private_GetServerCertificate(PP_Resource tcp_socket) {
+  const struct PPB_TCPSocket_Private_0_5 *iface = Pnacl_WrapperInfo_PPB_TCPSocket_Private_0_5.real_iface;
+  return iface->GetServerCertificate(tcp_socket);
+}
+
+static __attribute__((pnaclcall))
+PP_Bool Pnacl_M27_PPB_TCPSocket_Private_AddChainBuildingCertificate(PP_Resource tcp_socket, PP_Resource certificate, PP_Bool is_trusted) {
+  const struct PPB_TCPSocket_Private_0_5 *iface = Pnacl_WrapperInfo_PPB_TCPSocket_Private_0_5.real_iface;
+  return iface->AddChainBuildingCertificate(tcp_socket, certificate, is_trusted);
+}
+
+static __attribute__((pnaclcall))
+int32_t Pnacl_M27_PPB_TCPSocket_Private_Read(PP_Resource tcp_socket, char* buffer, int32_t bytes_to_read, struct PP_CompletionCallback callback) {
+  const struct PPB_TCPSocket_Private_0_5 *iface = Pnacl_WrapperInfo_PPB_TCPSocket_Private_0_5.real_iface;
+  return iface->Read(tcp_socket, buffer, bytes_to_read, callback);
+}
+
+static __attribute__((pnaclcall))
+int32_t Pnacl_M27_PPB_TCPSocket_Private_Write(PP_Resource tcp_socket, const char* buffer, int32_t bytes_to_write, struct PP_CompletionCallback callback) {
+  const struct PPB_TCPSocket_Private_0_5 *iface = Pnacl_WrapperInfo_PPB_TCPSocket_Private_0_5.real_iface;
+  return iface->Write(tcp_socket, buffer, bytes_to_write, callback);
+}
+
+static __attribute__((pnaclcall))
+void Pnacl_M27_PPB_TCPSocket_Private_Disconnect(PP_Resource tcp_socket) {
+  const struct PPB_TCPSocket_Private_0_5 *iface = Pnacl_WrapperInfo_PPB_TCPSocket_Private_0_5.real_iface;
+  iface->Disconnect(tcp_socket);
+}
+
+static __attribute__((pnaclcall))
+int32_t Pnacl_M27_PPB_TCPSocket_Private_SetOption(PP_Resource tcp_socket, PP_TCPSocketOption_Private name, struct PP_Var value, struct PP_CompletionCallback callback) {
+  const struct PPB_TCPSocket_Private_0_5 *iface = Pnacl_WrapperInfo_PPB_TCPSocket_Private_0_5.real_iface;
+  return iface->SetOption(tcp_socket, name, value, callback);
+}
+
+/* End wrapper methods for PPB_TCPSocket_Private_0_5 */
+
 /* Begin wrapper methods for PPB_UDPSocket_Private_0_2 */
 
 static __attribute__((pnaclcall))
@@ -3527,6 +3740,56 @@ static struct PP_Var Pnacl_M18_PPP_Instance_Private_GetInstanceObject(PP_Instanc
 }
 
 /* End wrapper methods for PPP_Instance_Private_0_1 */
+
+/* Begin wrapper methods for PPB_Ext_Alarms_Dev_0_1 */
+
+static __attribute__((pnaclcall))
+void Pnacl_M27_PPB_Ext_Alarms_Dev_Create(PP_Instance instance, struct PP_Var name, PP_Ext_Alarms_AlarmCreateInfo_Dev alarm_info) {
+  const struct PPB_Ext_Alarms_Dev_0_1 *iface = Pnacl_WrapperInfo_PPB_Ext_Alarms_Dev_0_1.real_iface;
+  iface->Create(instance, name, alarm_info);
+}
+
+static __attribute__((pnaclcall))
+int32_t Pnacl_M27_PPB_Ext_Alarms_Dev_Get(PP_Instance instance, struct PP_Var name, PP_Ext_Alarms_Alarm_Dev* alarm, struct PP_CompletionCallback callback) {
+  const struct PPB_Ext_Alarms_Dev_0_1 *iface = Pnacl_WrapperInfo_PPB_Ext_Alarms_Dev_0_1.real_iface;
+  return iface->Get(instance, name, alarm, callback);
+}
+
+static __attribute__((pnaclcall))
+int32_t Pnacl_M27_PPB_Ext_Alarms_Dev_GetAll(PP_Instance instance, PP_Ext_Alarms_Alarm_Dev_Array* alarms, struct PP_CompletionCallback callback) {
+  const struct PPB_Ext_Alarms_Dev_0_1 *iface = Pnacl_WrapperInfo_PPB_Ext_Alarms_Dev_0_1.real_iface;
+  return iface->GetAll(instance, alarms, callback);
+}
+
+static __attribute__((pnaclcall))
+void Pnacl_M27_PPB_Ext_Alarms_Dev_Clear(PP_Instance instance, struct PP_Var name) {
+  const struct PPB_Ext_Alarms_Dev_0_1 *iface = Pnacl_WrapperInfo_PPB_Ext_Alarms_Dev_0_1.real_iface;
+  iface->Clear(instance, name);
+}
+
+static __attribute__((pnaclcall))
+void Pnacl_M27_PPB_Ext_Alarms_Dev_ClearAll(PP_Instance instance) {
+  const struct PPB_Ext_Alarms_Dev_0_1 *iface = Pnacl_WrapperInfo_PPB_Ext_Alarms_Dev_0_1.real_iface;
+  iface->ClearAll(instance);
+}
+
+/* End wrapper methods for PPB_Ext_Alarms_Dev_0_1 */
+
+/* Begin wrapper methods for PPB_Ext_Events_Dev_0_1 */
+
+static __attribute__((pnaclcall))
+uint32_t Pnacl_M27_PPB_Ext_Events_Dev_AddListener(PP_Instance instance, struct PP_Ext_EventListener listener) {
+  const struct PPB_Ext_Events_Dev_0_1 *iface = Pnacl_WrapperInfo_PPB_Ext_Events_Dev_0_1.real_iface;
+  return iface->AddListener(instance, listener);
+}
+
+static __attribute__((pnaclcall))
+void Pnacl_M27_PPB_Ext_Events_Dev_RemoveListener(PP_Instance instance, uint32_t listener_id) {
+  const struct PPB_Ext_Events_Dev_0_1 *iface = Pnacl_WrapperInfo_PPB_Ext_Events_Dev_0_1.real_iface;
+  iface->RemoveListener(instance, listener_id);
+}
+
+/* End wrapper methods for PPB_Ext_Events_Dev_0_1 */
 
 /* Not generating wrapper interface for PPB_Audio_1_0 */
 
@@ -3876,10 +4139,10 @@ struct PPB_DeviceRef_Dev_0_1 Pnacl_Wrappers_PPB_DeviceRef_Dev_0_1 = {
     .GetName = (struct PP_Var (*)(PP_Resource device_ref))&Pnacl_M18_PPB_DeviceRef_Dev_GetName
 };
 
-struct PPB_DirectoryReader_Dev_0_5 Pnacl_Wrappers_PPB_DirectoryReader_Dev_0_5 = {
-    .Create = (PP_Resource (*)(PP_Resource directory_ref))&Pnacl_M13_PPB_DirectoryReader_Dev_Create,
-    .IsDirectoryReader = (PP_Bool (*)(PP_Resource resource))&Pnacl_M13_PPB_DirectoryReader_Dev_IsDirectoryReader,
-    .GetNextEntry = (int32_t (*)(PP_Resource directory_reader, struct PP_DirectoryEntry_Dev* entry, struct PP_CompletionCallback callback))&Pnacl_M13_PPB_DirectoryReader_Dev_GetNextEntry
+struct PPB_DirectoryReader_Dev_0_6 Pnacl_Wrappers_PPB_DirectoryReader_Dev_0_6 = {
+    .Create = (PP_Resource (*)(PP_Resource directory_ref))&Pnacl_M27_PPB_DirectoryReader_Dev_Create,
+    .IsDirectoryReader = (PP_Bool (*)(PP_Resource resource))&Pnacl_M27_PPB_DirectoryReader_Dev_IsDirectoryReader,
+    .ReadEntries = (int32_t (*)(PP_Resource directory_reader, struct PP_ArrayOutput output, struct PP_CompletionCallback callback))&Pnacl_M27_PPB_DirectoryReader_Dev_ReadEntries
 };
 
 struct PPB_FileChooser_Dev_0_5 Pnacl_Wrappers_PPB_FileChooser_Dev_0_5 = {
@@ -3975,6 +4238,15 @@ struct PPB_Testing_Dev_0_91 Pnacl_Wrappers_PPB_Testing_Dev_0_91 = {
 
 /* Not generating wrapper interface for PPB_Trace_Event_Dev_0_1 */
 
+struct PPB_TrueTypeFont_Dev_0_1 Pnacl_Wrappers_PPB_TrueTypeFont_Dev_0_1 = {
+    .GetFontFamilies = (int32_t (*)(PP_Instance instance, struct PP_ArrayOutput output, struct PP_CompletionCallback callback))&Pnacl_M26_PPB_TrueTypeFont_Dev_GetFontFamilies,
+    .Create = (PP_Resource (*)(PP_Instance instance, const struct PP_TrueTypeFontDesc_Dev* desc))&Pnacl_M26_PPB_TrueTypeFont_Dev_Create,
+    .IsFont = (PP_Bool (*)(PP_Resource resource))&Pnacl_M26_PPB_TrueTypeFont_Dev_IsFont,
+    .Describe = (int32_t (*)(PP_Resource font, struct PP_TrueTypeFontDesc_Dev* desc, struct PP_CompletionCallback callback))&Pnacl_M26_PPB_TrueTypeFont_Dev_Describe,
+    .GetTableTags = (int32_t (*)(PP_Resource font, struct PP_ArrayOutput output, struct PP_CompletionCallback callback))&Pnacl_M26_PPB_TrueTypeFont_Dev_GetTableTags,
+    .GetTable = (int32_t (*)(PP_Resource font, uint32_t table, int32_t offset, int32_t max_data_length, struct PP_ArrayOutput output, struct PP_CompletionCallback callback))&Pnacl_M26_PPB_TrueTypeFont_Dev_GetTable
+};
+
 struct PPB_URLUtil_Dev_0_6 Pnacl_Wrappers_PPB_URLUtil_Dev_0_6 = {
     .Canonicalize = (struct PP_Var (*)(struct PP_Var url, struct PP_URLComponents_Dev* components))&Pnacl_M17_PPB_URLUtil_Dev_Canonicalize,
     .ResolveRelativeToURL = (struct PP_Var (*)(struct PP_Var base_url, struct PP_Var relative_string, struct PP_URLComponents_Dev* components))&Pnacl_M17_PPB_URLUtil_Dev_ResolveRelativeToURL,
@@ -3984,6 +4256,23 @@ struct PPB_URLUtil_Dev_0_6 Pnacl_Wrappers_PPB_URLUtil_Dev_0_6 = {
     .DocumentCanAccessDocument = (PP_Bool (*)(PP_Instance active, PP_Instance target))&Pnacl_M17_PPB_URLUtil_Dev_DocumentCanAccessDocument,
     .GetDocumentURL = (struct PP_Var (*)(PP_Instance instance, struct PP_URLComponents_Dev* components))&Pnacl_M17_PPB_URLUtil_Dev_GetDocumentURL,
     .GetPluginInstanceURL = (struct PP_Var (*)(PP_Instance instance, struct PP_URLComponents_Dev* components))&Pnacl_M17_PPB_URLUtil_Dev_GetPluginInstanceURL
+};
+
+struct PPB_VarArray_Dev_0_1 Pnacl_Wrappers_PPB_VarArray_Dev_0_1 = {
+    .Create = (struct PP_Var (*)(void))&Pnacl_M27_PPB_VarArray_Dev_Create,
+    .Get = (struct PP_Var (*)(struct PP_Var array, uint32_t index))&Pnacl_M27_PPB_VarArray_Dev_Get,
+    .Set = (PP_Bool (*)(struct PP_Var array, uint32_t index, struct PP_Var value))&Pnacl_M27_PPB_VarArray_Dev_Set,
+    .GetLength = (uint32_t (*)(struct PP_Var array))&Pnacl_M27_PPB_VarArray_Dev_GetLength,
+    .SetLength = (PP_Bool (*)(struct PP_Var array, uint32_t length))&Pnacl_M27_PPB_VarArray_Dev_SetLength
+};
+
+struct PPB_VarDictionary_Dev_0_1 Pnacl_Wrappers_PPB_VarDictionary_Dev_0_1 = {
+    .Create = (struct PP_Var (*)(void))&Pnacl_M27_PPB_VarDictionary_Dev_Create,
+    .Get = (struct PP_Var (*)(struct PP_Var dict, struct PP_Var key))&Pnacl_M27_PPB_VarDictionary_Dev_Get,
+    .Set = (PP_Bool (*)(struct PP_Var dict, struct PP_Var key, struct PP_Var value))&Pnacl_M27_PPB_VarDictionary_Dev_Set,
+    .Delete = (void (*)(struct PP_Var dict, struct PP_Var key))&Pnacl_M27_PPB_VarDictionary_Dev_Delete,
+    .HasKey = (PP_Bool (*)(struct PP_Var dict, struct PP_Var key))&Pnacl_M27_PPB_VarDictionary_Dev_HasKey,
+    .GetKeys = (struct PP_Var (*)(struct PP_Var dict))&Pnacl_M27_PPB_VarDictionary_Dev_GetKeys
 };
 
 struct PPB_VideoCapture_Dev_0_2 Pnacl_Wrappers_PPB_VideoCapture_Dev_0_2 = {
@@ -4283,6 +4572,22 @@ struct PPB_TCPSocket_Private_0_4 Pnacl_Wrappers_PPB_TCPSocket_Private_0_4 = {
     .Disconnect = (void (*)(PP_Resource tcp_socket))&Pnacl_M20_PPB_TCPSocket_Private_Disconnect
 };
 
+struct PPB_TCPSocket_Private_0_5 Pnacl_Wrappers_PPB_TCPSocket_Private_0_5 = {
+    .Create = (PP_Resource (*)(PP_Instance instance))&Pnacl_M27_PPB_TCPSocket_Private_Create,
+    .IsTCPSocket = (PP_Bool (*)(PP_Resource resource))&Pnacl_M27_PPB_TCPSocket_Private_IsTCPSocket,
+    .Connect = (int32_t (*)(PP_Resource tcp_socket, const char* host, uint16_t port, struct PP_CompletionCallback callback))&Pnacl_M27_PPB_TCPSocket_Private_Connect,
+    .ConnectWithNetAddress = (int32_t (*)(PP_Resource tcp_socket, const struct PP_NetAddress_Private* addr, struct PP_CompletionCallback callback))&Pnacl_M27_PPB_TCPSocket_Private_ConnectWithNetAddress,
+    .GetLocalAddress = (PP_Bool (*)(PP_Resource tcp_socket, struct PP_NetAddress_Private* local_addr))&Pnacl_M27_PPB_TCPSocket_Private_GetLocalAddress,
+    .GetRemoteAddress = (PP_Bool (*)(PP_Resource tcp_socket, struct PP_NetAddress_Private* remote_addr))&Pnacl_M27_PPB_TCPSocket_Private_GetRemoteAddress,
+    .SSLHandshake = (int32_t (*)(PP_Resource tcp_socket, const char* server_name, uint16_t server_port, struct PP_CompletionCallback callback))&Pnacl_M27_PPB_TCPSocket_Private_SSLHandshake,
+    .GetServerCertificate = (PP_Resource (*)(PP_Resource tcp_socket))&Pnacl_M27_PPB_TCPSocket_Private_GetServerCertificate,
+    .AddChainBuildingCertificate = (PP_Bool (*)(PP_Resource tcp_socket, PP_Resource certificate, PP_Bool is_trusted))&Pnacl_M27_PPB_TCPSocket_Private_AddChainBuildingCertificate,
+    .Read = (int32_t (*)(PP_Resource tcp_socket, char* buffer, int32_t bytes_to_read, struct PP_CompletionCallback callback))&Pnacl_M27_PPB_TCPSocket_Private_Read,
+    .Write = (int32_t (*)(PP_Resource tcp_socket, const char* buffer, int32_t bytes_to_write, struct PP_CompletionCallback callback))&Pnacl_M27_PPB_TCPSocket_Private_Write,
+    .Disconnect = (void (*)(PP_Resource tcp_socket))&Pnacl_M27_PPB_TCPSocket_Private_Disconnect,
+    .SetOption = (int32_t (*)(PP_Resource tcp_socket, PP_TCPSocketOption_Private name, struct PP_Var value, struct PP_CompletionCallback callback))&Pnacl_M27_PPB_TCPSocket_Private_SetOption
+};
+
 struct PPB_UDPSocket_Private_0_2 Pnacl_Wrappers_PPB_UDPSocket_Private_0_2 = {
     .Create = (PP_Resource (*)(PP_Instance instance_id))&Pnacl_M17_PPB_UDPSocket_Private_Create,
     .IsUDPSocket = (PP_Bool (*)(PP_Resource resource_id))&Pnacl_M17_PPB_UDPSocket_Private_IsUDPSocket,
@@ -4349,6 +4654,19 @@ struct PPP_ContentDecryptor_Private_0_6 Pnacl_Wrappers_PPP_ContentDecryptor_Priv
 
 struct PPP_Instance_Private_0_1 Pnacl_Wrappers_PPP_Instance_Private_0_1 = {
     .GetInstanceObject = (struct PP_Var (*)(PP_Instance instance))&Pnacl_M18_PPP_Instance_Private_GetInstanceObject
+};
+
+struct PPB_Ext_Alarms_Dev_0_1 Pnacl_Wrappers_PPB_Ext_Alarms_Dev_0_1 = {
+    .Create = (void (*)(PP_Instance instance, struct PP_Var name, PP_Ext_Alarms_AlarmCreateInfo_Dev alarm_info))&Pnacl_M27_PPB_Ext_Alarms_Dev_Create,
+    .Get = (int32_t (*)(PP_Instance instance, struct PP_Var name, PP_Ext_Alarms_Alarm_Dev* alarm, struct PP_CompletionCallback callback))&Pnacl_M27_PPB_Ext_Alarms_Dev_Get,
+    .GetAll = (int32_t (*)(PP_Instance instance, PP_Ext_Alarms_Alarm_Dev_Array* alarms, struct PP_CompletionCallback callback))&Pnacl_M27_PPB_Ext_Alarms_Dev_GetAll,
+    .Clear = (void (*)(PP_Instance instance, struct PP_Var name))&Pnacl_M27_PPB_Ext_Alarms_Dev_Clear,
+    .ClearAll = (void (*)(PP_Instance instance))&Pnacl_M27_PPB_Ext_Alarms_Dev_ClearAll
+};
+
+struct PPB_Ext_Events_Dev_0_1 Pnacl_Wrappers_PPB_Ext_Events_Dev_0_1 = {
+    .AddListener = (uint32_t (*)(PP_Instance instance, struct PP_Ext_EventListener listener))&Pnacl_M27_PPB_Ext_Events_Dev_AddListener,
+    .RemoveListener = (void (*)(PP_Instance instance, uint32_t listener_id))&Pnacl_M27_PPB_Ext_Events_Dev_RemoveListener
 };
 
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_Audio_1_0 = {
@@ -4693,9 +5011,9 @@ static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_DeviceRef_Dev_0_1 = {
   .real_iface = NULL
 };
 
-static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_DirectoryReader_Dev_0_5 = {
-  .iface_macro = PPB_DIRECTORYREADER_DEV_INTERFACE_0_5,
-  .wrapped_iface = (void *) &Pnacl_Wrappers_PPB_DirectoryReader_Dev_0_5,
+static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_DirectoryReader_Dev_0_6 = {
+  .iface_macro = PPB_DIRECTORYREADER_DEV_INTERFACE_0_6,
+  .wrapped_iface = (void *) &Pnacl_Wrappers_PPB_DirectoryReader_Dev_0_6,
   .real_iface = NULL
 };
 
@@ -4819,9 +5137,27 @@ static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_Trace_Event_Dev_0_1 = {
   .real_iface = NULL
 };
 
+static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_TrueTypeFont_Dev_0_1 = {
+  .iface_macro = PPB_TRUETYPEFONT_DEV_INTERFACE_0_1,
+  .wrapped_iface = (void *) &Pnacl_Wrappers_PPB_TrueTypeFont_Dev_0_1,
+  .real_iface = NULL
+};
+
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_URLUtil_Dev_0_6 = {
   .iface_macro = PPB_URLUTIL_DEV_INTERFACE_0_6,
   .wrapped_iface = (void *) &Pnacl_Wrappers_PPB_URLUtil_Dev_0_6,
+  .real_iface = NULL
+};
+
+static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_VarArray_Dev_0_1 = {
+  .iface_macro = PPB_VAR_ARRAY_DEV_INTERFACE_0_1,
+  .wrapped_iface = (void *) &Pnacl_Wrappers_PPB_VarArray_Dev_0_1,
+  .real_iface = NULL
+};
+
+static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_VarDictionary_Dev_0_1 = {
+  .iface_macro = PPB_VAR_DICTIONARY_DEV_INTERFACE_0_1,
+  .wrapped_iface = (void *) &Pnacl_Wrappers_PPB_VarDictionary_Dev_0_1,
   .real_iface = NULL
 };
 
@@ -5107,6 +5443,12 @@ static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_TCPSocket_Private_0_4 = {
   .real_iface = NULL
 };
 
+static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_TCPSocket_Private_0_5 = {
+  .iface_macro = PPB_TCPSOCKET_PRIVATE_INTERFACE_0_5,
+  .wrapped_iface = (void *) &Pnacl_Wrappers_PPB_TCPSocket_Private_0_5,
+  .real_iface = NULL
+};
+
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_UDPSocket_Private_0_2 = {
   .iface_macro = PPB_UDPSOCKET_PRIVATE_INTERFACE_0_2,
   .wrapped_iface = (void *) &Pnacl_Wrappers_PPB_UDPSocket_Private_0_2,
@@ -5167,6 +5509,18 @@ static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPP_Instance_Private_0_1 = {
   .real_iface = NULL
 };
 
+static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_Ext_Alarms_Dev_0_1 = {
+  .iface_macro = PPB_EXT_ALARMS_DEV_INTERFACE_0_1,
+  .wrapped_iface = (void *) &Pnacl_Wrappers_PPB_Ext_Alarms_Dev_0_1,
+  .real_iface = NULL
+};
+
+static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_Ext_Events_Dev_0_1 = {
+  .iface_macro = PPB_EXT_EVENTS_DEV_INTERFACE_0_1,
+  .wrapped_iface = (void *) &Pnacl_Wrappers_PPB_Ext_Events_Dev_0_1,
+  .real_iface = NULL
+};
+
 static struct __PnaclWrapperInfo *s_ppb_wrappers[] = {
   &Pnacl_WrapperInfo_PPB_Audio_1_0,
   &Pnacl_WrapperInfo_PPB_AudioConfig_1_0,
@@ -5219,7 +5573,7 @@ static struct __PnaclWrapperInfo *s_ppb_wrappers[] = {
   &Pnacl_WrapperInfo_PPB_Crypto_Dev_0_1,
   &Pnacl_WrapperInfo_PPB_CursorControl_Dev_0_4,
   &Pnacl_WrapperInfo_PPB_DeviceRef_Dev_0_1,
-  &Pnacl_WrapperInfo_PPB_DirectoryReader_Dev_0_5,
+  &Pnacl_WrapperInfo_PPB_DirectoryReader_Dev_0_6,
   &Pnacl_WrapperInfo_PPB_FileChooser_Dev_0_5,
   &Pnacl_WrapperInfo_PPB_FileChooser_Dev_0_6,
   &Pnacl_WrapperInfo_PPB_Find_Dev_0_3,
@@ -5240,7 +5594,10 @@ static struct __PnaclWrapperInfo *s_ppb_wrappers[] = {
   &Pnacl_WrapperInfo_PPB_TextInput_Dev_0_1,
   &Pnacl_WrapperInfo_PPB_TextInput_Dev_0_2,
   &Pnacl_WrapperInfo_PPB_Trace_Event_Dev_0_1,
+  &Pnacl_WrapperInfo_PPB_TrueTypeFont_Dev_0_1,
   &Pnacl_WrapperInfo_PPB_URLUtil_Dev_0_6,
+  &Pnacl_WrapperInfo_PPB_VarArray_Dev_0_1,
+  &Pnacl_WrapperInfo_PPB_VarDictionary_Dev_0_1,
   &Pnacl_WrapperInfo_PPB_VideoCapture_Dev_0_2,
   &Pnacl_WrapperInfo_PPB_VideoCapture_Dev_0_3,
   &Pnacl_WrapperInfo_PPB_VideoDecoder_Dev_0_16,
@@ -5276,11 +5633,14 @@ static struct __PnaclWrapperInfo *s_ppb_wrappers[] = {
   &Pnacl_WrapperInfo_PPB_TCPServerSocket_Private_0_1,
   &Pnacl_WrapperInfo_PPB_TCPSocket_Private_0_3,
   &Pnacl_WrapperInfo_PPB_TCPSocket_Private_0_4,
+  &Pnacl_WrapperInfo_PPB_TCPSocket_Private_0_5,
   &Pnacl_WrapperInfo_PPB_UDPSocket_Private_0_2,
   &Pnacl_WrapperInfo_PPB_UDPSocket_Private_0_3,
   &Pnacl_WrapperInfo_PPB_UDPSocket_Private_0_4,
   &Pnacl_WrapperInfo_PPB_UMA_Private_0_1,
   &Pnacl_WrapperInfo_PPB_X509Certificate_Private_0_1,
+  &Pnacl_WrapperInfo_PPB_Ext_Alarms_Dev_0_1,
+  &Pnacl_WrapperInfo_PPB_Ext_Events_Dev_0_1,
   NULL
 };
 

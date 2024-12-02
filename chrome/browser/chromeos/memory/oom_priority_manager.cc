@@ -27,9 +27,12 @@
 #include "chrome/browser/chromeos/memory/low_memory_observer.h"
 #include "chrome/browser/memory_details.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_iterator.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_iterator.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/tabs/tab_utils.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
@@ -163,6 +166,7 @@ void OomMemoryDetails::OnDetailsAvailable() {
 OomPriorityManager::TabStats::TabStats()
   : is_app(false),
     is_reloadable_ui(false),
+    is_playing_audio(false),
     is_pinned(false),
     is_selected(false),
     is_discarded(false),
@@ -231,13 +235,13 @@ std::vector<string16> OomPriorityManager::GetTabTitles() {
   for ( ; it != stats.end(); ++it) {
     string16 str;
     str.reserve(4096);
-    str += it->title;
-    str += ASCIIToUTF16(" (");
     int score = pid_to_oom_score_[it->renderer_handle];
     str += base::IntToString16(score);
-    str += ASCIIToUTF16(")");
+    str += ASCIIToUTF16(" - ");
+    str += it->title;
     str += ASCIIToUTF16(it->is_app ? " app" : "");
     str += ASCIIToUTF16(it->is_reloadable_ui ? " reloadable_ui" : "");
+    str += ASCIIToUTF16(it->is_playing_audio ? " playing_audio" : "");
     str += ASCIIToUTF16(it->is_pinned ? " pinned" : "");
     str += ASCIIToUTF16(it->is_discarded ? " discarded" : "");
     titles.push_back(str);
@@ -296,9 +300,8 @@ bool OomPriorityManager::IsReloadableUI(const GURL& url) {
 }
 
 bool OomPriorityManager::DiscardTabById(int64 target_web_contents_id) {
-  for (BrowserList::const_iterator browser_iterator = BrowserList::begin();
-       browser_iterator != BrowserList::end(); ++browser_iterator) {
-    Browser* browser = *browser_iterator;
+  for (chrome::BrowserIterator it; !it.done(); it.Next()) {
+    Browser* browser = *it;
     TabStripModel* model = browser->tab_strip_model();
     for (int idx = 0; idx < model->count(); idx++) {
       // Can't discard tabs that are already discarded or active.
@@ -413,11 +416,8 @@ void OomPriorityManager::PurgeBrowserMemory() {
 
 int OomPriorityManager::GetTabCount() const {
   int tab_count = 0;
-  for (BrowserList::const_iterator browser_it = BrowserList::begin();
-      browser_it != BrowserList::end(); ++browser_it) {
-    Browser* browser = *browser_it;
-    tab_count += browser->tab_strip_model()->count();
-  }
+  for (chrome::BrowserIterator it; !it.done(); it.Next())
+    tab_count += it->tab_strip_model()->count();
   return tab_count;
 }
 
@@ -442,6 +442,10 @@ bool OomPriorityManager::CompareTabStats(TabStats first,
   // window and we don't want to discard that.
   if (first.is_app != second.is_app)
     return first.is_app;
+
+  // Protect streaming audio and video conferencing tabs.
+  if (first.is_playing_audio != second.is_playing_audio)
+    return first.is_playing_audio;
 
   // TODO(jamescook): Incorporate sudden_termination_allowed into the sort
   // order.  We don't do this now because pages with unload handlers set
@@ -531,7 +535,7 @@ void OomPriorityManager::Observe(int type,
 // 2) last time a tab was selected
 // 3) is the tab currently selected
 void OomPriorityManager::AdjustOomPriorities() {
-  if (BrowserList::size() == 0)
+  if (BrowserList::GetInstance(chrome::HOST_DESKTOP_TYPE_ASH)->empty())
     return;
 
   // Check for a discontinuity in time caused by the machine being suspended.
@@ -559,9 +563,11 @@ OomPriorityManager::TabStatsList OomPriorityManager::GetTabStatsOnUIThread() {
   TabStatsList stats_list;
   stats_list.reserve(32);  // 99% of users have < 30 tabs open
   bool browser_active = true;
+  const BrowserList* ash_browser_list =
+      BrowserList::GetInstance(chrome::HOST_DESKTOP_TYPE_ASH);
   for (BrowserList::const_reverse_iterator browser_iterator =
-           BrowserList::begin_last_active();
-       browser_iterator != BrowserList::end_last_active();
+           ash_browser_list->begin_last_active();
+       browser_iterator != ash_browser_list->end_last_active();
        ++browser_iterator) {
     Browser* browser = *browser_iterator;
     bool is_browser_for_app = browser->is_app();
@@ -572,6 +578,7 @@ OomPriorityManager::TabStatsList OomPriorityManager::GetTabStatsOnUIThread() {
         TabStats stats;
         stats.is_app = is_browser_for_app;
         stats.is_reloadable_ui = IsReloadableUI(contents->GetURL());
+        stats.is_playing_audio = chrome::IsPlayingAudio(contents);
         stats.is_pinned = model->IsTabPinned(i);
         stats.is_selected = browser_active && model->IsTabSelected(i);
         stats.is_discarded = model->IsTabDiscarded(i);

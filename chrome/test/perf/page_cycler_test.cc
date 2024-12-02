@@ -4,8 +4,8 @@
 
 #include "base/basictypes.h"
 #include "base/command_line.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
 #include "base/string_piece.h"
@@ -297,14 +297,12 @@ class PageCyclerTest : public UIPerfTest {
 
  protected:
   bool print_times_only_;
-
- private:
   int num_test_iterations_;
 };
 
 class PageCyclerReferenceTest : public PageCyclerTest {
  public:
-  void SetUp() {
+  virtual void SetUp() {
     UseReferenceBuild();
     PageCyclerTest::SetUp();
   }
@@ -344,6 +342,17 @@ class PageCyclerExtensionWebRequestTest : public PageCyclerExtensionTest {
   {
     // Enable experimental extension APIs for webrequest tests.
     launch_arguments_.AppendSwitch(switches::kEnableExperimentalExtensionApis);
+  }
+};
+
+class PageCyclerAccessibilityTest : public PageCyclerTest {
+ public:
+  PageCyclerAccessibilityTest()
+      : PageCyclerTest()
+  {
+    // Enable accessibility support, to compare the performance overhead
+    // when accessibility is enabled to when it's off.
+    launch_arguments_.AppendSwitch(switches::kForceRendererAccessibility);
   }
 };
 
@@ -411,15 +420,15 @@ class PageCyclerDatabaseTest : public PageCyclerTest {
     print_times_only_ = true;
   }
 
-  virtual base::FilePath GetDataPath(const char* name) {
+  virtual base::FilePath GetDataPath(const char* name) OVERRIDE {
     return GetDatabaseDataPath(name);
   }
 
-  virtual bool HasErrors(const std::string timings) {
+  virtual bool HasErrors(const std::string timings) OVERRIDE {
     return HasDatabaseErrors(timings);
   }
 
-  virtual int GetTestIterations() {
+  virtual int GetTestIterations() OVERRIDE {
     return kDatabaseTestIterations;
   }
 };
@@ -430,15 +439,15 @@ class PageCyclerDatabaseReferenceTest : public PageCyclerReferenceTest {
     print_times_only_ = true;
   }
 
-  virtual base::FilePath GetDataPath(const char* name) {
+  virtual base::FilePath GetDataPath(const char* name) OVERRIDE {
     return GetDatabaseDataPath(name);
   }
 
-  virtual bool HasErrors(const std::string timings) {
+  virtual bool HasErrors(const std::string timings) OVERRIDE {
     return HasDatabaseErrors(timings);
   }
 
-  virtual int GetTestIterations() {
+  virtual int GetTestIterations() OVERRIDE {
     return kDatabaseTestIterations;
   }
 };
@@ -449,15 +458,15 @@ class PageCyclerIndexedDatabaseTest : public PageCyclerTest {
     print_times_only_ = true;
   }
 
-  virtual base::FilePath GetDataPath(const char* name) {
+  virtual base::FilePath GetDataPath(const char* name) OVERRIDE {
     return GetIndexedDatabaseDataPath(name);
   }
 
-  virtual bool HasErrors(const std::string timings) {
+  virtual bool HasErrors(const std::string timings) OVERRIDE {
     return HasDatabaseErrors(timings);
   }
 
-  virtual int GetTestIterations() {
+  virtual int GetTestIterations() OVERRIDE {
     return kIDBTestIterations;
   }
 };
@@ -468,15 +477,15 @@ class PageCyclerIndexedDatabaseReferenceTest : public PageCyclerReferenceTest {
     print_times_only_ = true;
   }
 
-  virtual base::FilePath GetDataPath(const char* name) {
+  virtual base::FilePath GetDataPath(const char* name) OVERRIDE {
     return GetIndexedDatabaseDataPath(name);
   }
 
-  virtual bool HasErrors(const std::string timings) {
+  virtual bool HasErrors(const std::string timings) OVERRIDE {
     return HasDatabaseErrors(timings);
   }
 
-  virtual int GetTestIterations() {
+  virtual int GetTestIterations() OVERRIDE {
     return kIDBTestIterations;
   }
 };
@@ -663,5 +672,15 @@ PAGE_CYCLER_DATABASE_TESTS("pseudo-random-transactions",
 
 // Indexed DB tests.
 PAGE_CYCLER_IDB_TESTS("basic_insert", BasicInsert);
+
+// Tests with accessibility enabled.
+TEST_F(PageCyclerAccessibilityTest, MozFileWithAccessibilityEnabled) {
+  num_test_iterations_ = 1;
+  RunTest("times", "moz", false);
+}
+
+TEST_F(PageCyclerAccessibilityTest, MorejsFileWithAccessibilityEnabled) {
+  RunTest("times", "morejs", false);
+}
 
 }  // namespace

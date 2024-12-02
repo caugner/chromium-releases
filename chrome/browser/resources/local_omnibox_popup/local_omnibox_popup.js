@@ -2,6 +2,31 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+/**
+ * @fileoverview Support for omnibox behavior in offline mode or when API
+ * features are not supported on the server.
+ */
+
+// ==========================================================
+//  Enums.
+// ==========================================================
+
+/**
+ * Possible behaviors for navigateContentWindow.
+ * @enum {number}
+ */
+var WindowOpenDisposition = {
+  CURRENT_TAB: 1,
+  NEW_BACKGROUND_TAB: 2
+};
+
+/**
+ * The JavaScript button event value for a middle click.
+ * @type {number}
+ * @const
+ */
+var MIDDLE_MOUSE_BUTTON = 1;
+
 // =============================================================================
 //                               Util functions
 // =============================================================================
@@ -12,6 +37,28 @@
  * @const
  */
 var MAX_SUGGESTIONS_TO_SHOW = 5;
+
+/**
+ * Assume any native suggestion with a score higher than this value has been
+ * inlined by the browser.
+ * @type {number}
+ * @const
+ */
+var INLINE_SUGGESTION_THRESHOLD = 1200;
+
+/**
+ * Suggestion provider type corresponding to a verbatim URL suggestion.
+ * @type {string}
+ * @const
+ */
+var VERBATIM_URL_TYPE = 'url-what-you-typed';
+
+/**
+ * Suggestion provider type corresponding to a verbatim search suggestion.
+ * @type {string}
+ * @const
+ */
+var VERBATIM_SEARCH_TYPE = 'search-what-you-typed';
 
 /**
  * The omnibox input value during the last onnativesuggestions event.
@@ -36,6 +83,15 @@ var restrictedIds = [];
 var selectedIndex = -1;
 
 /**
+ * Shortcut for document.getElementById.
+ * @param {string} id of the element.
+ * @return {HTMLElement} with the id.
+ */
+function $(id) {
+  return document.getElementById(id);
+}
+
+/**
  * Displays a suggestion.
  * @param {Object} suggestion The suggestion to render.
  * @param {HTMLElement} box The html element to add the suggestion to.
@@ -44,8 +100,8 @@ var selectedIndex = -1;
 function addSuggestionToBox(suggestion, box, select) {
   var suggestionDiv = document.createElement('div');
   suggestionDiv.classList.add('suggestion');
-  if (select)
-    suggestionDiv.classList.add('selected');
+  suggestionDiv.classList.toggle('selected', select);
+  suggestionDiv.classList.toggle('search', suggestion.is_search);
 
   var contentsContainer = document.createElement('div');
   contentsContainer.className = 'contents';
@@ -53,8 +109,8 @@ function addSuggestionToBox(suggestion, box, select) {
   contentsContainer.appendChild(contents);
   suggestionDiv.appendChild(contentsContainer);
   var restrictedId = suggestion.rid;
-  suggestionDiv.onclick = function() {
-    handleSuggestionClick(restrictedId);
+  suggestionDiv.onclick = function(event) {
+    handleSuggestionClick(restrictedId, event);
   };
 
   restrictedIds.push(restrictedId);
@@ -72,8 +128,7 @@ function renderSuggestions(nativeSuggestions) {
 
   for (var i = 0, length = nativeSuggestions.length;
        i < Math.min(MAX_SUGGESTIONS_TO_SHOW, length); ++i) {
-    // Select the first suggestion.
-    addSuggestionToBox(nativeSuggestions[i], box, i == 0);
+    addSuggestionToBox(nativeSuggestions[i], box, i == selectedIndex);
   }
 }
 
@@ -91,6 +146,21 @@ function clearSuggestions() {
  */
 function getDropdownHeight() {
   return $('suggestions-box-container').offsetHeight;
+}
+
+/**
+ * @param {Object} suggestion A suggestion.
+ * @param {boolean} inVerbatimMode Are we in verbatim mode?
+ * @return {boolean} True if the suggestion should be selected.
+ */
+function shouldSelectSuggestion(suggestion, inVerbatimMode) {
+  var isVerbatimUrl = suggestion.type == VERBATIM_URL_TYPE;
+  var inlinableSuggestion = suggestion.type != VERBATIM_SEARCH_TYPE &&
+      suggestion.rankingData.relevance > INLINE_SUGGESTION_THRESHOLD;
+  // Verbatim URLs should always be selected. Otherwise, select suggestions
+  // with a high enough score unless we are in verbatim mode (e.g. backspacing
+  // away).
+  return isVerbatimUrl || (!inVerbatimMode && inlinableSuggestion);
 }
 
 /**
@@ -134,26 +204,20 @@ function updateSelectedSuggestion(increment) {
  function getApiObjectHandle() {
   if (window.cideb)
     return window.cideb;
-  if (window.navigator && window.navigator.searchBox)
-    return window.navigator.searchBox;
-  if (window.chrome && window.chrome.searchBox)
-    return window.chrome.searchBox;
+  if (window.navigator && window.navigator.embeddedSearch &&
+      window.navigator.embeddedSearch.searchBox)
+    return window.navigator.embeddedSearch.searchBox;
+  if (window.chrome && window.chrome.embeddedSearch &&
+      window.chrome.embeddedSearch.searchBox)
+    return window.chrome.embeddedSearch.searchBox;
   return null;
 }
 
 /**
- * chrome.searchBox.onnativesuggestions implementation.
+ * Updates suggestions in response to a onchange or onnativesuggestions call.
  */
-function handleNativeSuggestions() {
+function updateSuggestions() {
   var apiHandle = getApiObjectHandle();
-
-  // Used to workaround repeated undesired asynchronous onnativesuggestions
-  // events and the fact that when a suggestion is clicked, the omnibox unfocus
-  // can cause onnativesuggestions to fire, preventing the suggestion onclick
-  // from registering.
-  if (lastInputValue == apiHandle.value && $('suggestionsBox')) {
-    return;
-  }
   lastInputValue = apiHandle.value;
 
   clearSuggestions();
@@ -162,14 +226,13 @@ function handleNativeSuggestions() {
     nativeSuggestions.sort(function(a, b) {
       return b.rankingData.relevance - a.rankingData.relevance;
     });
+    if (shouldSelectSuggestion(nativeSuggestions[0], apiHandle.verbatim))
+      selectedIndex = 0;
     renderSuggestions(nativeSuggestions);
-    selectedIndex = 0;
-    apiHandle.setRestrictedAutocompleteText(
-        nativeSuggestions[selectedIndex].rid);
   }
 
   var height = getDropdownHeight();
-  apiHandle.show(2, height);
+  apiHandle.showOverlay(height);
 }
 
 /**
@@ -177,26 +240,47 @@ function handleNativeSuggestions() {
  */
 function appendSuggestionStyles() {
   var apiHandle = getApiObjectHandle();
+  var isRtl = apiHandle.rtl;
+  var startMargin = apiHandle.startMargin;
   var style = document.createElement('style');
   style.type = 'text/css';
   style.id = 'suggestionStyle';
   style.textContent =
-      '.suggestion {' +
-      '  -webkit-margin-start: ' + apiHandle.startMargin + 'px;' +
-      '  -webkit-margin-end: ' + apiHandle.endMargin + 'px;' +
+      '.suggestion, ' +
+      '.suggestion.search {' +
+      '  background-position: ' +
+          (isRtl ? '-webkit-calc(100% - 5px)' : '5px') + ' 4px;' +
+      '  -webkit-margin-start: ' + startMargin + 'px;' +
+      '  -webkit-margin-end: ' +
+          (window.innerWidth - apiHandle.width - startMargin) + 'px;' +
       '  font: ' + apiHandle.fontSize + 'px "' + apiHandle.font + '";' +
       '}';
   document.querySelector('head').appendChild(style);
+  window.removeEventListener('resize', appendSuggestionStyles);
+}
+
+/**
+ * Extract the desired navigation behavior from a click event.
+ * @param {Event} event The click event.
+ * @return {WindowOpenDisposition} The desired behavior for
+ *     navigateContentWindow.
+ */
+function getDispositionFromClick(event) {
+  if (event.button == MIDDLE_MOUSE_BUTTON)
+    return WindowOpenDisposition.NEW_BACKGROUND_TAB;
+  return WindowOpenDisposition.CURRENT_TAB;
 }
 
 /**
  * Handles suggestion clicks.
  * @param {integer} restrictedId The restricted id of the suggestion being
  *     clicked.
+ * @param {Event} event The click event.
  */
-function handleSuggestionClick(restrictedId) {
+function handleSuggestionClick(restrictedId, event) {
   clearSuggestions();
-  getApiObjectHandle().navigateContentWindow(restrictedId);
+  getApiObjectHandle().navigateContentWindow(restrictedId,
+                                             getDispositionFromClick(event));
 }
 
 /**
@@ -215,7 +299,7 @@ function handleKeyPress(e) {
 }
 
 /**
- * chrome.searchBox.onsubmit implementation.
+ * chrome.searchBox.embeddedSearch.onsubmit implementation.
  */
 function onSubmit() {
 }
@@ -225,11 +309,13 @@ function onSubmit() {
  */
 function setUpApi() {
   var apiHandle = getApiObjectHandle();
-  apiHandle.onnativesuggestions = handleNativeSuggestions;
+  apiHandle.onnativesuggestions = updateSuggestions;
+  apiHandle.onchange = updateSuggestions;
   apiHandle.onkeypress = handleKeyPress;
   apiHandle.onsubmit = onSubmit;
-  appendSuggestionStyles();
-
+  $('suggestions-box-container').dir = apiHandle.rtl ? 'rtl' : 'ltr';
+  // Delay adding these styles until the window width is available.
+  window.addEventListener('resize', appendSuggestionStyles);
   if (apiHandle.nativeSuggestions.length)
     handleNativeSuggestions();
 }

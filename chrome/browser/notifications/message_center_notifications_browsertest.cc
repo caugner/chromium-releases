@@ -28,10 +28,8 @@ class MessageCenterNotificationsTest : public InProcessBrowserTest {
   virtual void SetUpCommandLine(CommandLine* command_line) {
     // This switch enables the new piping of Notifications through Message
     // Center.
-#if defined(ENABLE_MESSAGE_CENTER)
     command_line->AppendSwitch(
-        message_center::switches::kEnableRichNotifications);
-#endif
+      message_center::switches::kEnableRichNotifications);
   }
 
   MessageCenterNotificationManager* manager() {
@@ -92,6 +90,10 @@ class MessageCenterNotificationsTest : public InProcessBrowserTest {
   }
 };
 
+// TODO(rsesek): Implement Message Center on Mac and get these tests passing
+// for real. http://crbug.com/179904
+#if !defined(OS_MACOSX)
+
 IN_PROC_BROWSER_TEST_F(MessageCenterNotificationsTest, RetrieveBaseParts) {
   // Make sure comamnd-line switch has an effect.
   EXPECT_TRUE(NotificationUIManager::DelegatesToMessageCenter());
@@ -126,3 +128,4 @@ IN_PROC_BROWSER_TEST_F(MessageCenterNotificationsTest, ButtonClickedDelegate) {
   delegate->Release();
 }
 
+#endif  // !defined(OS_MACOSX)

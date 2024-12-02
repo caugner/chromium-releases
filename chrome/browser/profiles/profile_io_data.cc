@@ -58,7 +58,6 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/resource_context.h"
 #include "extensions/common/constants.h"
-#include "net/base/server_bound_cert_service.h"
 #include "net/cookies/canonical_cookie.h"
 #include "net/cookies/cookie_monster.h"
 #include "net/http/http_transaction_factory.h"
@@ -66,9 +65,11 @@
 #include "net/proxy/proxy_config_service_fixed.h"
 #include "net/proxy/proxy_script_fetcher_impl.h"
 #include "net/proxy/proxy_service.h"
+#include "net/ssl/server_bound_cert_service.h"
 #include "net/url_request/data_protocol_handler.h"
 #include "net/url_request/file_protocol_handler.h"
 #include "net/url_request/ftp_protocol_handler.h"
+#include "net/url_request/protocol_intercept_job_factory.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_file_job.h"
 #include "net/url_request/url_request_job_factory_impl.h"
@@ -189,12 +190,13 @@ bool IsSupportedDevToolsURL(const GURL& url, base::FilePath* path) {
   return true;
 }
 
-class DebugDevToolsInterceptor : public net::URLRequestJobFactory::Interceptor {
+class DebugDevToolsInterceptor
+    : public net::URLRequestJobFactory::ProtocolHandler {
  public:
   DebugDevToolsInterceptor() {}
   virtual ~DebugDevToolsInterceptor() {}
 
-  virtual net::URLRequestJob* MaybeIntercept(
+  virtual net::URLRequestJob* MaybeCreateJob(
       net::URLRequest* request,
       net::NetworkDelegate* network_delegate) const OVERRIDE {
     base::FilePath path;
@@ -202,23 +204,6 @@ class DebugDevToolsInterceptor : public net::URLRequestJobFactory::Interceptor {
       return new net::URLRequestFileJob(request, network_delegate, path);
 
     return NULL;
-  }
-
-  virtual net::URLRequestJob* MaybeInterceptRedirect(
-        const GURL& location,
-        net::URLRequest* request,
-        net::NetworkDelegate* network_delegate) const OVERRIDE {
-    return NULL;
-  }
-
-  virtual net::URLRequestJob* MaybeInterceptResponse(
-      net::URLRequest* request,
-      net::NetworkDelegate* network_delegate) const OVERRIDE {
-    return NULL;
-  }
-
-  virtual bool WillHandleProtocol(const std::string& protocol) const {
-    return protocol == chrome::kChromeDevToolsScheme;
   }
 };
 #endif  // defined(DEBUG_DEVTOOLS)
@@ -320,6 +305,9 @@ void ProfileIOData::InitializeOnUIThread(Profile* profile) {
 
     sync_disabled_.Init(prefs::kSyncManaged, pref_service);
     sync_disabled_.MoveToThread(io_message_loop_proxy);
+
+    signin_allowed_.Init(prefs::kSigninAllowed, pref_service);
+    signin_allowed_.MoveToThread(io_message_loop_proxy);
   }
 
   // The URLBlacklistManager has to be created on the UI thread to register
@@ -391,8 +379,12 @@ ProfileIOData::ProfileParams::~ProfileParams() {}
 
 ProfileIOData::ProfileIOData(bool is_incognito)
     : initialized_(false),
+#if defined(ENABLE_NOTIFICATIONS)
+      notification_service_(NULL),
+#endif
       ALLOW_THIS_IN_INITIALIZER_LIST(
           resource_context_(new ResourceContext(this))),
+      load_time_stats_(NULL),
       initialized_on_UI_thread_(false),
       is_incognito_(is_incognito) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
@@ -439,6 +431,7 @@ bool ProfileIOData::IsHandledProtocol(const std::string& scheme) {
     chrome::kBlobScheme,
     chrome::kFileSystemScheme,
     chrome::kExtensionResourceScheme,
+    chrome::kChromeSearchScheme,
   };
   for (size_t i = 0; i < arraysize(kProtocolList); ++i) {
     if (scheme == kProtocolList[i])
@@ -447,6 +440,7 @@ bool ProfileIOData::IsHandledProtocol(const std::string& scheme) {
   return net::URLRequest::IsHandledProtocol(scheme);
 }
 
+// static
 bool ProfileIOData::IsHandledURL(const GURL& url) {
   if (!url.is_valid()) {
     // We handle error cases.
@@ -454,6 +448,21 @@ bool ProfileIOData::IsHandledURL(const GURL& url) {
   }
 
   return IsHandledProtocol(url.scheme());
+}
+
+// static
+void ProfileIOData::InstallProtocolHandlers(
+    net::URLRequestJobFactoryImpl* job_factory,
+    content::ProtocolHandlerMap* protocol_handlers) {
+  for (content::ProtocolHandlerMap::iterator it =
+           protocol_handlers->begin();
+       it != protocol_handlers->end();
+       ++it) {
+    bool set_protocol = job_factory->SetProtocolHandler(
+        it->first, it->second.release());
+    DCHECK(set_protocol);
+  }
+  protocol_handlers->clear();
 }
 
 content::ResourceContext* ProfileIOData::GetResourceContext() const {
@@ -482,16 +491,7 @@ ChromeURLRequestContext* ProfileIOData::GetIsolatedAppRequestContext(
     const StoragePartitionDescriptor& partition_descriptor,
     scoped_ptr<ProtocolHandlerRegistry::JobInterceptorFactory>
         protocol_handler_interceptor,
-    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-        blob_protocol_handler,
-    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-        file_system_protocol_handler,
-    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-        developer_protocol_handler,
-    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-        chrome_protocol_handler,
-    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-        chrome_devtools_protocol_handler) const {
+    content::ProtocolHandlerMap* protocol_handlers) const {
   DCHECK(initialized_);
   ChromeURLRequestContext* context = NULL;
   if (ContainsKey(app_request_context_map_, partition_descriptor)) {
@@ -499,9 +499,7 @@ ChromeURLRequestContext* ProfileIOData::GetIsolatedAppRequestContext(
   } else {
     context = AcquireIsolatedAppRequestContext(
         main_context, partition_descriptor, protocol_handler_interceptor.Pass(),
-        blob_protocol_handler.Pass(), file_system_protocol_handler.Pass(),
-        developer_protocol_handler.Pass(), chrome_protocol_handler.Pass(),
-        chrome_devtools_protocol_handler.Pass());
+        protocol_handlers);
     app_request_context_map_[partition_descriptor] = context;
   }
   DCHECK(context);
@@ -608,20 +606,10 @@ std::string ProfileIOData::GetSSLSessionCacheShard() {
   // new profile, we'll get a fresh SSL session cache which is separate from
   // the other profiles.
   static unsigned ssl_session_cache_instance = 0;
-  return StringPrintf("profile/%u", ssl_session_cache_instance++);
+  return base::StringPrintf("profile/%u", ssl_session_cache_instance++);
 }
 
-void ProfileIOData::Init(
-    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-        blob_protocol_handler,
-    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-        file_system_protocol_handler,
-    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-        developer_protocol_handler,
-    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-        chrome_protocol_handler,
-    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-        chrome_devtools_protocol_handler) const {
+void ProfileIOData::Init(content::ProtocolHandlerMap* protocol_handlers) const {
   // The basic logic is implemented here. The specific initialization
   // is done in InitializeInternal(), implemented by subtypes. Static helper
   // functions have been provided to assist in common operations.
@@ -668,10 +656,13 @@ void ProfileIOData::Init(
       new chrome_browser_net::ChromeFraudulentCertificateReporter(
           main_request_context_.get()));
 
+  // NOTE: Proxy service uses the default io thread network delegate, not the
+  // delegate just created.
   proxy_service_.reset(
       ProxyServiceFactory::CreateProxyService(
           io_thread->net_log(),
           io_thread_globals->proxy_script_fetcher_context.get(),
+          io_thread_globals->system_network_delegate.get(),
           profile_params_->proxy_config_service.release(),
           command_line));
 
@@ -703,12 +694,7 @@ void ProfileIOData::Init(
   managed_mode_url_filter_ = profile_params_->managed_mode_url_filter;
 #endif
 
-  InitializeInternal(profile_params_.get(),
-                     blob_protocol_handler.Pass(),
-                     file_system_protocol_handler.Pass(),
-                     developer_protocol_handler.Pass(),
-                     chrome_protocol_handler.Pass(),
-                     chrome_devtools_protocol_handler.Pass());
+  InitializeInternal(profile_params_.get(), protocol_handlers);
 
   profile_params_.reset();
   initialized_ = true;
@@ -766,16 +752,20 @@ scoped_ptr<net::URLRequestJobFactory> ProfileIOData::SetUpJobFactoryDefaults(
                                   ftp_auth_cache));
 #endif  // !defined(DISABLE_FTP_SUPPORT)
 
+  scoped_ptr<net::URLRequestJobFactory> top_job_factory =
+      job_factory.PassAs<net::URLRequestJobFactory>();
 #if defined(DEBUG_DEVTOOLS)
-  job_factory->AddInterceptor(new DebugDevToolsInterceptor());
+  top_job_factory.reset(new net::ProtocolInterceptJobFactory(
+      top_job_factory.Pass(),
+      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>(
+          new DebugDevToolsInterceptor)));
 #endif
 
   if (protocol_handler_interceptor) {
-    protocol_handler_interceptor->Chain(
-        job_factory.PassAs<net::URLRequestJobFactory>());
+    protocol_handler_interceptor->Chain(top_job_factory.Pass());
     return protocol_handler_interceptor.PassAs<net::URLRequestJobFactory>();
   } else {
-    return job_factory.PassAs<net::URLRequestJobFactory>();
+    return top_job_factory.Pass();
   }
 }
 
@@ -798,6 +788,7 @@ void ProfileIOData::ShutdownOnUIThread() {
   safe_browsing_enabled_.Destroy();
   printing_enabled_.Destroy();
   sync_disabled_.Destroy();
+  signin_allowed_.Destroy();
   session_startup_pref_.Destroy();
 #if defined(ENABLE_CONFIGURATION_POLICY)
   if (url_blacklist_manager_.get())
@@ -837,7 +828,7 @@ void ProfileIOData::PopulateNetworkSessionParams(
   params->ssl_session_cache_shard = GetSSLSessionCacheShard();
   params->ssl_config_service = context->ssl_config_service();
   params->http_auth_handler_factory = context->http_auth_handler_factory();
-  params->network_delegate = context->network_delegate();
+  params->network_delegate = network_delegate();
   params->http_server_properties = context->http_server_properties();
   params->net_log = context->net_log();
 }

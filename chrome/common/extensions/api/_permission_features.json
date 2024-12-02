@@ -8,6 +8,10 @@
     "extension_types": ["extension", "packaged_app"],
     "min_manifest_version": 2
   },
+  "adview": {
+    "channel": "dev",
+    "extension_types": ["platform_app"]
+  },
   "alarms": {
     "channel": "stable",
     "extension_types": ["extension", "packaged_app", "platform_app"],
@@ -27,11 +31,7 @@
     "location": "component",
     "whitelist": "lphgohfeebnhcpiohjndkgbhhkoapkjc" // Apps Debugger
   },
-  "appNotifications": {
-    "channel": "stable",
-    "extension_types": ["packaged_app", "hosted_app"]
-  },
-    "autotestPrivate": {
+  "autotestPrivate": {
     "channel": "stable",
     "extension_types": ["extension", "packaged_app"],
     "location": "component"
@@ -123,10 +123,18 @@
     "channel": "trunk",
     "extension_types": ["extension"]
   },
-  "declarativeWebRequest": {
-    "channel": "beta",
-    "extension_types": ["extension", "packaged_app"]
-  },
+  "declarativeWebRequest": [
+    {
+      "channel": "beta",
+      "extension_types": ["extension", "packaged_app"]
+    },
+    {
+      "channel": "stable",
+      "extension_types": ["extension", "packaged_app"],
+      // Legacy Browser Support (remove once this API hits stable).
+      "whitelist": ["heildphpnddilhkemkielfhnkaagiabh"]
+    }
+  ],
   "downloads": {
     "channel": "dev",
     "extension_types": [
@@ -137,9 +145,11 @@
     "channel": "stable",
     "extension_types": ["extension"],
     "whitelist": [
-      "pkedcjkdefgpdelpbcmbmeomcjbeemfm",  // CV
-      "fmfcbgogabcbclcofgocippekhfcmgfj",  // CV Staging
-      "hfaagokkkhdbgiakmmlclaapfelnkoah"   // CV Canary
+      "pkedcjkdefgpdelpbcmbmeomcjbeemfm",  // Trusted Tester
+      "fmfcbgogabcbclcofgocippekhfcmgfj",  // Staging
+      "hfaagokkkhdbgiakmmlclaapfelnkoah",  // Canary
+      "F155646B5D1CA545F7E1E4E20D573DFDD44C2540",  // Trusted Tester (public)
+      "16CA7A47AAE4BE49B1E75A6B960C3875E945B264"   // Release
     ]
   },
   "experimental": {
@@ -157,20 +167,28 @@
     "extension_types": ["extension", "packaged_app"],
     "location": "component"
   },
-  "fileSystem": {
+  "fileSystem": [{
     "channel": "stable",
     "extension_types": ["platform_app"]
-  },
-  "fileSystem.write": {
+  },{
+    "channel": "stable",
+    "extension_types": ["extension"],
+    "whitelist": [ "2FC374607C2DF285634B67C64A2E356C607091C3" ]
+  }],
+  "fileSystem.write": [{
     "channel": "stable",
     "extension_types": ["platform_app"]
-  },
+  },{
+    "channel": "stable",
+    "extension_types": ["extension"],
+    "whitelist": [ "2FC374607C2DF285634B67C64A2E356C607091C3" ]
+  }],
   "fontSettings": {
     "channel": "stable",
     "extension_types": ["extension", "packaged_app"]
   },
   "fullscreen": {
-    "channel": "dev",
+    "channel": "stable",
     "extension_types": ["platform_app"]
   },
   "geolocation": {
@@ -224,14 +242,15 @@
     "channel": "stable",
     "extension_types": [ "platform_app" ]
   },
-  // TODO(thestig) Remove this as part of http:://crbug.com/144496
+  // TODO(thestig) Remove this as part of http://crbug.com/144496
   "mediaGalleriesPrivate": {
     "channel": "stable",
     "extension_types": [ "platform_app" ],
     "whitelist": [
-      "ebpbnabdhheoknfklmpddcdijjkmklkp",
-      "efjnaogkjbogokcnohkmnjdojkikgobo",
-      "ejegoaikibpmikoejfephaneibodccma"
+      "dhgjflpimlbndbpamnkoepaacagejgda",
+      "ebpbnabdhheoknfklmpddcdijjkmklkp",  // G+ Photos staging
+      "efjnaogkjbogokcnohkmnjdojkikgobo",  // G+ Photos prod
+      "ejegoaikibpmikoejfephaneibodccma"   // G+ Photos dev
     ]
   },
   "mediaPlayerPrivate": {
@@ -249,15 +268,47 @@
       // doesn't hurt anything.
       "hhaomjibdihmijegdhdafkllkbggdgoj",  // File manager
       "gbkeegbaiigmenfmjfclcdgdpimamgkj",  // Quickoffice
-      "ionpfmkccalenbmnddpbmocokhaknphg"   // Quickoffice dev
+      "ionpfmkccalenbmnddpbmocokhaknphg",  // Quickoffice dev
+      "bpmcpldpdmajfigpchkicefoigmkfalc",  // Quickoffice component extension
+      "ehibbfinohgbchlgdbfpikodjaojhccn"   // Editor
     ]
   },
+  "nativeMessaging": [
+    {
+      "channel": "beta",
+      "extension_types": [
+        "extension", "packaged_app", "platform_app"
+      ]
+    },
+    {
+      "channel": "stable",
+      "extension_types": [
+        "extension", "packaged_app", "platform_app"
+      ],
+      "whitelist": [
+        "gbchcmhmhahfdphkhkmpfmihenigjmpp",  // Chrome Remote Desktop
+        "kgngmbheleoaphbjbaiobfdepmghbfah",  // Dogfood Chrome Remote Desktop
+        "odkaodonbgfohohmklejpjiejmcipmib",  // QA Chrome Remote Desktop
+        "ojoimpklfciegopdfgeenehpalipignm"   // Chromoting canary
+      ]
+    }
+  ],
   "networkingPrivate": {
     "channel": "dev",
     "extension_types": ["extension", "packaged_app"],
-    "location": "component"
+    "whitelist": [
+      "pkedcjkdefgpdelpbcmbmeomcjbeemfm",  // Trusted Tester
+      "fmfcbgogabcbclcofgocippekhfcmgfj",  // Staging
+      "hfaagokkkhdbgiakmmlclaapfelnkoah",  // Canary
+      "F155646B5D1CA545F7E1E4E20D573DFDD44C2540",  // Trusted Tester (public)
+      "16CA7A47AAE4BE49B1E75A6B960C3875E945B264"   // Release
+
+    ]
   },
   "notifications": {
+    // Note that the chrome.notifications API is currently restricted
+    // to dev channel, extension/platform_app. This isn't done through
+    // this file, but rather on a method-by-method basis.
     "channel": "stable",
     "extension_types": [
       "extension", "packaged_app", "hosted_app", "platform_app"
@@ -279,6 +330,12 @@
   "plugin": {
     "channel": "stable",
     "extension_types": ["extension", "packaged_app"]
+  },
+  "power": {
+    "channel": "stable",
+    "extension_types": [
+      "extension", "hosted_app", "packaged_app", "platform_app"
+    ]
   },
   "privacy": {
     "channel": "stable",
@@ -306,8 +363,7 @@
   // values to verify restrictions.
   "runtime": {
     "channel": "stable",
-    "extension_types": ["extension", "packaged_app", "platform_app"],
-    "min_manifest_version": 2
+    "extension_types": ["extension", "packaged_app", "platform_app"]
   },
   "screensaver": {
     "channel": "stable",
@@ -321,12 +377,23 @@
     "channel": "dev",
     "extension_types": ["extension", "packaged_app"]
   },
+  "streamsPrivate": {
+    "channel": "stable",
+    "extension_types": ["extension", "packaged_app", "platform_app"],
+    "whitelist": [
+      "oickdpebdnfbgkcaoklfcdhjniefkcji",  // browser_tests
+      "gbkeegbaiigmenfmjfclcdgdpimamgkj",  // QuickOffice
+      "ionpfmkccalenbmnddpbmocokhaknphg",  // QuickOffice Dev
+      "bpmcpldpdmajfigpchkicefoigmkfalc",  // Quickoffice component extension
+      "ehibbfinohgbchlgdbfpikodjaojhccn"   // Editor
+    ]
+  },
   "socket": {
     "channel": "stable",
     "extension_types": ["platform_app"]
   },
   "syncFileSystem": {
-    "channel": "dev",
+    "channel": "stable",
     "extension_types": ["platform_app"]
   },
   "systemIndicator": {
@@ -353,14 +420,16 @@
   },
   "tabCapture": [{
     "channel": "dev",
-    "extension_types": ["extension", "packaged_app"]
+    "extension_types": ["extension", "packaged_app", "platform_app"]
   }, {
     "channel": "stable",
     "extension_types": ["extension", "packaged_app"],
     "whitelist": [
-      "pkedcjkdefgpdelpbcmbmeomcjbeemfm",  // CV
-      "fmfcbgogabcbclcofgocippekhfcmgfj",  // CV Staging
-      "hfaagokkkhdbgiakmmlclaapfelnkoah"   // CV Canary
+      "pkedcjkdefgpdelpbcmbmeomcjbeemfm",  // Trusted Tester
+      "fmfcbgogabcbclcofgocippekhfcmgfj",  // Staging
+      "hfaagokkkhdbgiakmmlclaapfelnkoah",  // Canary
+      "F155646B5D1CA545F7E1E4E20D573DFDD44C2540",  // Trusted Tester (public)
+      "16CA7A47AAE4BE49B1E75A6B960C3875E945B264"   // Release
     ]
   }],
   "terminalPrivate": {
@@ -390,11 +459,11 @@
     ]
   },
   "usb": {
-    "channel": "dev",
+    "channel": "stable",
     "extension_types": ["platform_app"]
   },
   "usbDevices": {
-    "channel": "dev",
+    "channel": "stable",
     "extension_types": ["platform_app"]
   },
   "videoCapture": {

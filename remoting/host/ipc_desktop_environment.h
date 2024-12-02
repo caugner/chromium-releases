@@ -13,6 +13,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "remoting/host/curtain_mode.h"
 #include "remoting/host/desktop_environment.h"
 #include "remoting/host/desktop_session_connector.h"
 
@@ -21,12 +22,14 @@ class SingleThreadTaskRunner;
 }  // base
 
 namespace IPC {
-class ChannelProxy;
+class Sender;
 }  // namespace IPC
 
 namespace remoting {
 
+class ClientSessionControl;
 class DesktopSessionProxy;
+class ScreenResolution;
 
 // A variant of desktop environment integrating with the desktop by means of
 // a helper process and talking to that process via IPC.
@@ -36,37 +39,22 @@ class IpcDesktopEnvironment : public DesktopEnvironment {
   // a desktop session, to be notified every time the desktop process is
   // restarted.
   IpcDesktopEnvironment(
+      scoped_refptr<base::SingleThreadTaskRunner> audio_task_runner,
       scoped_refptr<base::SingleThreadTaskRunner> caller_task_runner,
+      scoped_refptr<base::SingleThreadTaskRunner> capture_task_runner,
       scoped_refptr<base::SingleThreadTaskRunner> io_task_runner,
-      const std::string& client_jid,
-      const base::Closure& disconnect_callback,
-      base::WeakPtr<DesktopSessionConnector> desktop_session_connector);
+      base::WeakPtr<ClientSessionControl> client_session_control,
+      base::WeakPtr<DesktopSessionConnector> desktop_session_connector,
+      bool virtual_terminal);
   virtual ~IpcDesktopEnvironment();
 
   // DesktopEnvironment implementation.
-  virtual scoped_ptr<AudioCapturer> CreateAudioCapturer(
-      scoped_refptr<base::SingleThreadTaskRunner> audio_task_runner) OVERRIDE;
-  virtual scoped_ptr<EventExecutor> CreateEventExecutor(
-      scoped_refptr<base::SingleThreadTaskRunner> input_task_runner,
-      scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner) OVERRIDE;
-  virtual scoped_ptr<media::ScreenCapturer> CreateVideoCapturer(
-      scoped_refptr<base::SingleThreadTaskRunner> capture_task_runner,
-      scoped_refptr<base::SingleThreadTaskRunner> encode_task_runner) OVERRIDE;
+  virtual scoped_ptr<AudioCapturer> CreateAudioCapturer() OVERRIDE;
+  virtual scoped_ptr<InputInjector> CreateInputInjector() OVERRIDE;
+  virtual scoped_ptr<ScreenControls> CreateScreenControls() OVERRIDE;
+  virtual scoped_ptr<media::ScreenCapturer> CreateVideoCapturer() OVERRIDE;
 
  private:
-  // Binds DesktopSessionProxy to a desktop session if it is not bound already.
-  void ConnectToDesktopSession();
-
-  // Task runner on which public methods of this class should be called.
-  scoped_refptr<base::SingleThreadTaskRunner> caller_task_runner_;
-
-  // True if |desktop_session_proxy_| is connected to a desktop session.
-  bool connected_;
-
-  // Used to bind to a desktop session and receive notifications every time
-  // the desktop process is replaced.
-  base::WeakPtr<DesktopSessionConnector> desktop_session_connector_;
-
   scoped_refptr<DesktopSessionProxy> desktop_session_proxy_;
 
   DISALLOW_COPY_AND_ASSIGN(IpcDesktopEnvironment);
@@ -75,28 +63,38 @@ class IpcDesktopEnvironment : public DesktopEnvironment {
 // Used to create IpcDesktopEnvironment objects integrating with the desktop via
 // a helper process and talking to that process via IPC.
 class IpcDesktopEnvironmentFactory
-    : public DesktopEnvironmentFactory,
+    : public CurtainMode,
+      public DesktopEnvironmentFactory,
       public DesktopSessionConnector {
  public:
   // Passes a reference to the IPC channel connected to the daemon process and
   // relevant task runners. |daemon_channel| must outlive this object.
   IpcDesktopEnvironmentFactory(
+      scoped_refptr<base::SingleThreadTaskRunner> audio_task_runner,
       scoped_refptr<base::SingleThreadTaskRunner> caller_task_runner,
+      scoped_refptr<base::SingleThreadTaskRunner> capture_task_runner,
       scoped_refptr<base::SingleThreadTaskRunner> io_task_runner,
-      IPC::ChannelProxy* daemon_channel);
+      IPC::Sender* daemon_channel);
   virtual ~IpcDesktopEnvironmentFactory();
+
+  // CurtainMode implementation.
+  virtual void SetActivated(bool activated) OVERRIDE;
 
   // DesktopEnvironmentFactory implementation.
   virtual scoped_ptr<DesktopEnvironment> Create(
-      const std::string& client_jid,
-      const base::Closure& disconnect_callback) OVERRIDE;
+      base::WeakPtr<ClientSessionControl> client_session_control) OVERRIDE;
   virtual bool SupportsAudioCapture() const OVERRIDE;
 
   // DesktopSessionConnector implementation.
   virtual void ConnectTerminal(
-      scoped_refptr<DesktopSessionProxy> desktop_session_proxy) OVERRIDE;
+      DesktopSessionProxy* desktop_session_proxy,
+      const ScreenResolution& resolution,
+      bool virtual_terminal) OVERRIDE;
   virtual void DisconnectTerminal(
-      scoped_refptr<DesktopSessionProxy> desktop_session_proxy) OVERRIDE;
+      DesktopSessionProxy* desktop_session_proxy) OVERRIDE;
+  virtual void SetScreenResolution(
+      DesktopSessionProxy* desktop_session_proxy,
+      const ScreenResolution& resolution) OVERRIDE;
   virtual void OnDesktopSessionAgentAttached(
       int terminal_id,
       base::ProcessHandle desktop_process,
@@ -104,18 +102,27 @@ class IpcDesktopEnvironmentFactory
   virtual void OnTerminalDisconnected(int terminal_id) OVERRIDE;
 
  private:
-  // Task runner on which public methods of this class should be called.
+  // Used to run the audio capturer.
+  scoped_refptr<base::SingleThreadTaskRunner> audio_task_runner_;
+
+  // Task runner on which methods of DesktopEnvironmentFactory interface should
+  // be called.
   scoped_refptr<base::SingleThreadTaskRunner> caller_task_runner_;
+
+  // Used to run the video capturer.
+  scoped_refptr<base::SingleThreadTaskRunner> capture_task_runner_;
 
   // Task runner used for running background I/O.
   scoped_refptr<base::SingleThreadTaskRunner> io_task_runner_;
 
+  // True if curtain mode is activated.
+  bool curtain_activated_;
+
   // IPC channel connected to the daemon process.
-  IPC::ChannelProxy* daemon_channel_;
+  IPC::Sender* daemon_channel_;
 
   // List of DesktopEnvironment instances we've told the daemon process about.
-  typedef std::map<int, scoped_refptr<DesktopSessionProxy> >
-      ActiveConnectionsList;
+  typedef std::map<int, DesktopSessionProxy*> ActiveConnectionsList;
   ActiveConnectionsList active_connections_;
 
   // Factory for weak pointers to DesktopSessionConnector interface.

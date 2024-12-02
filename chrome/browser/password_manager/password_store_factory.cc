@@ -10,13 +10,13 @@
 #include "chrome/browser/password_manager/login_database.h"
 #include "chrome/browser/password_manager/password_store.h"
 #include "chrome/browser/password_manager/password_store_default.h"
-#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/profiles/profile_dependency_manager.h"
 #include "chrome/browser/webdata/web_data_service.h"
 #include "chrome/browser/webdata/web_data_service_factory.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 
 #if defined(OS_WIN)
 #include "chrome/browser/password_manager/password_store_win.h"
@@ -113,7 +113,7 @@ PasswordStoreFactory::BuildServiceInstanceFor(Profile* profile) const {
 #if defined(OS_WIN)
   ps = new PasswordStoreWin(
       login_db, profile,
-      WebDataServiceFactory::GetForProfile(profile, Profile::IMPLICIT_ACCESS));
+      WebDataService::FromBrowserContext(profile));
 #elif defined(OS_MACOSX)
   if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kUseMockKeychain)) {
     ps = new PasswordStoreMac(new crypto::MockAppleKeychain(), login_db);

@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 #include "base/command_line.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
@@ -39,7 +39,7 @@ class ExtensionManagementApiBrowserTest : public ExtensionBrowserTest {
     if (!background_host)
       return false;
     background_host->host_contents()->GetController().LoadURL(
-        GURL(chrome::kChromeUICrashURL), content::Referrer(),
+        GURL(content::kChromeUICrashURL), content::Referrer(),
         content::PAGE_TRANSITION_LINK, std::string());
     extension_crash_observer.Wait();
     return true;

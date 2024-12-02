@@ -14,6 +14,8 @@
 
 namespace chromeos {
 
+struct UserCredentials;
+
 class LoginFailure {
  public:
   enum FailureReason {
@@ -56,7 +58,7 @@ class LoginFailure {
     return LoginFailure(NETWORK_AUTH_FAILED, error);
   }
 
-  static LoginFailure None() {
+  static LoginFailure LoginFailureNone() {
     return LoginFailure(NONE);
   }
 
@@ -67,7 +69,7 @@ class LoginFailure {
       case COULD_NOT_MOUNT_CRYPTOHOME:
         return "Could not mount cryptohome.";
       case COULD_NOT_UNMOUNT_CRYPTOHOME:
-        return "Could not mount cryptohome.";
+        return "Could not unmount cryptohome.";
       case COULD_NOT_MOUNT_TMPFS:
         return "Could not mount tmpfs.";
       case LOGIN_TIMED_OUT:
@@ -115,12 +117,11 @@ class LoginStatusConsumer {
   // Unless overridden for special processing, this should always call
   // OnLoginSuccess with the magic |kRetailModeUserEMail| constant.
   virtual void OnRetailModeLoginSuccess();
-  // The current login attempt has succeeded for
-  // |username|/|password|.  If |pending_requests| is false, we're totally done.
+  // The current login attempt has succeeded for |credentials|.
+  // If |pending_requests| is false, we're totally done.
   // If it's true, we will still have some more results to report later.
   virtual void OnLoginSuccess(
-      const std::string& username,
-      const std::string& password,
+      const UserCredentials& credentials,
       bool pending_requests,
       bool using_oauth) = 0;
   // The current guest login attempt has succeeded.

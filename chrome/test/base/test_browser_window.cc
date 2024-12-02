@@ -50,6 +50,10 @@ bool TestBrowserWindow::IsMinimized() const {
   return false;
 }
 
+bool TestBrowserWindow::ShouldHideUIForFullscreen() const {
+  return false;
+}
+
 bool TestBrowserWindow::IsFullscreen() const {
   return false;
 }
@@ -165,11 +169,6 @@ class TestBrowserWindowOwner : public chrome::BrowserListObserver {
 };
 
 }  // namespace
-
-Browser* CreateBrowserWithTestWindowForProfile(Profile* profile) {
-  Browser::CreateParams params(profile);
-  return CreateBrowserWithTestWindowForParams(&params);
-}
 
 Browser* CreateBrowserWithTestWindowForParams(Browser::CreateParams* params) {
   TestBrowserWindow* window = new TestBrowserWindow;

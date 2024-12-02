@@ -27,28 +27,20 @@ const int kDialogMessageWidthPixel = 300;
 // The margin width from the error message to the edge of the dialog.
 const int kDialogMessageMarginWidthPixel = 5;
 
-DisplayErrorDialog* g_instance = NULL;
-
 }  // namespace
 
 // static
-void  DisplayErrorDialog::ShowDialog() {
-  if (g_instance) {
-    DCHECK(g_instance->GetWidget());
-    g_instance->GetWidget()->StackAtTop();
-    g_instance->GetWidget()->Activate();
-    return;
-  }
-
+DisplayErrorDialog* DisplayErrorDialog::ShowDialog(
+    chromeos::OutputState new_state) {
   gfx::Screen* screen = Shell::GetScreen();
   const gfx::Display& target_display =
       (screen->GetNumDisplays() > 1) ?
       ScreenAsh::GetSecondaryDisplay() : screen->GetPrimaryDisplay();
 
-  g_instance = new DisplayErrorDialog();
+  DisplayErrorDialog* dialog = new DisplayErrorDialog(new_state);
   views::Widget* widget = new views::Widget;
   views::Widget::InitParams params(views::Widget::InitParams::TYPE_WINDOW);
-  params.delegate = g_instance;
+  params.delegate = dialog;
   // Makes |widget| belong to the target display.  Size and location are
   // fixed by CenterWindow() below.
   params.bounds = target_display.bounds();
@@ -62,12 +54,23 @@ void  DisplayErrorDialog::ShowDialog() {
   widget->GetNativeView()->SetName("DisplayErrorDialog");
   widget->CenterWindow(widget->GetRootView()->GetPreferredSize());
   widget->Show();
+  return dialog;
 }
 
-DisplayErrorDialog::DisplayErrorDialog() {
+void DisplayErrorDialog::UpdateMessageForState(
+    chromeos::OutputState new_state) {
+  int message_id = (new_state == chromeos::STATE_DUAL_MIRROR) ?
+      IDS_ASH_DISPLAY_FAILURE_ON_MIRRORING :
+      IDS_ASH_DISPLAY_FAILURE_ON_NON_MIRRORING;
+  label_->SetText(l10n_util::GetStringUTF16(message_id));
+  label_->SizeToFit(kDialogMessageWidthPixel);
+  Layout();
+  SchedulePaint();
+}
+
+DisplayErrorDialog::DisplayErrorDialog(chromeos::OutputState new_state) {
   Shell::GetInstance()->display_controller()->AddObserver(this);
-  label_ = new views::Label(
-      l10n_util::GetStringUTF16(IDS_ASH_DISPLAY_FAILURE_ON_MIRRORING));
+  label_ = new views::Label();
   AddChildView(label_);
 
   label_->SetMultiLine(true);
@@ -77,12 +80,12 @@ DisplayErrorDialog::DisplayErrorDialog() {
       kDialogMessageMarginWidthPixel,
       kDialogMessageMarginWidthPixel,
       kDialogMessageMarginWidthPixel));
-  label_->SizeToFit(kDialogMessageWidthPixel);
+
+  UpdateMessageForState(new_state);
 }
 
 DisplayErrorDialog::~DisplayErrorDialog() {
   Shell::GetInstance()->display_controller()->RemoveObserver(this);
-  g_instance = NULL;
 }
 
 int DisplayErrorDialog::GetDialogButtons() const {
@@ -101,9 +104,32 @@ void DisplayErrorDialog::OnDisplayConfigurationChanging() {
   GetWidget()->Close();
 }
 
-// static
-DisplayErrorDialog* DisplayErrorDialog::GetInstanceForTest() {
-  return g_instance;
+DisplayErrorObserver::DisplayErrorObserver()
+    : dialog_(NULL) {
+}
+
+DisplayErrorObserver::~DisplayErrorObserver() {
+  DCHECK(!dialog_);
+}
+
+void DisplayErrorObserver::OnDisplayModeChangeFailed(
+    chromeos::OutputState new_state) {
+  if (dialog_) {
+    DCHECK(dialog_->GetWidget());
+    dialog_->UpdateMessageForState(new_state);
+    dialog_->GetWidget()->StackAtTop();
+    dialog_->GetWidget()->Activate();
+  } else {
+    dialog_ = DisplayErrorDialog::ShowDialog(new_state);
+    dialog_->GetWidget()->AddObserver(this);
+  }
+}
+
+void DisplayErrorObserver::OnWidgetClosing(views::Widget* widget) {
+  DCHECK(dialog_);
+  DCHECK_EQ(dialog_->GetWidget(), widget);
+  widget->RemoveObserver(this);
+  dialog_ = NULL;
 }
 
 }  // namespace internal

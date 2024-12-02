@@ -8,7 +8,7 @@
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
-#include "base/prefs/public/pref_change_registrar.h"
+#include "base/prefs/pref_change_registrar.h"
 #include "base/threading/thread.h"
 
 template <typename T> struct DefaultSingletonTraits;
@@ -99,6 +99,10 @@ class AudioHandler {
   PrefService* local_state_;  // not owned
 
   PrefChangeRegistrar pref_change_registrar_;
+
+  // Track state for triggering callbacks
+  double volume_percent_;
+  bool muted_;
 
   DISALLOW_COPY_AND_ASSIGN(AudioHandler);
 };

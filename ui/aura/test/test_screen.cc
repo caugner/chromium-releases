@@ -4,23 +4,27 @@
 
 #include "ui/aura/test/test_screen.h"
 
-#include "base/command_line.h"
 #include "base/logging.h"
-#include "ui/aura/aura_switches.h"
-#include "ui/aura/display_util.h"
 #include "ui/aura/env.h"
 #include "ui/aura/root_window.h"
+#include "ui/aura/root_window_host.h"
 #include "ui/aura/window.h"
 #include "ui/gfx/native_widget_types.h"
+#include "ui/gfx/rect_conversions.h"
 #include "ui/gfx/screen.h"
 
 namespace aura {
 
-TestScreen::TestScreen() : root_window_(NULL) {
-  const std::string size_str =
-      CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
-          switches::kAuraHostWindowSize);
-  display_ = aura::CreateDisplayFromSpec(size_str);
+// static
+TestScreen* TestScreen::Create() {
+  // Use (0,0) because the desktop aura tests are executed in
+  // native environment where the display's origin is (0,0).
+  return new TestScreen(gfx::Rect(0, 0, 800, 600));
+}
+
+// static
+TestScreen* TestScreen::CreateFullscreen() {
+  return new TestScreen(gfx::Rect(RootWindowHost::GetNativeScreenSize()));
 }
 
 TestScreen::~TestScreen() {
@@ -31,9 +35,15 @@ RootWindow* TestScreen::CreateRootWindowForPrimaryDisplay() {
   root_window_ = new RootWindow(RootWindow::CreateParams(display_.bounds()));
   root_window_->AddObserver(this);
   root_window_->Init();
-  if (UseFullscreenHostWindow())
-    root_window_->ConfineCursorToWindow();
   return root_window_;
+}
+
+void TestScreen::SetDeviceScaleFactor(float device_scale_factor) {
+  gfx::Rect bounds = display_.bounds();
+  gfx::Rect bounds_in_pixel = gfx::ToNearestRect(
+      gfx::ScaleRect(bounds, display_.device_scale_factor()));
+  display_.SetScaleAndBounds(device_scale_factor, bounds_in_pixel);
+  root_window_->OnHostResized(bounds_in_pixel.size());
 }
 
 bool TestScreen::IsDIPEnabled() {
@@ -42,10 +52,8 @@ bool TestScreen::IsDIPEnabled() {
 
 void TestScreen::OnWindowBoundsChanged(
     Window* window, const gfx::Rect& old_bounds, const gfx::Rect& new_bounds) {
-  if (!UseFullscreenHostWindow()) {
-    DCHECK_EQ(root_window_, window);
-    display_.SetSize(new_bounds.size());
-  }
+  DCHECK_EQ(root_window_, window);
+  display_.SetSize(new_bounds.size());
 }
 
 void TestScreen::OnWindowDestroying(Window* window) {
@@ -87,6 +95,12 @@ void TestScreen::AddObserver(gfx::DisplayObserver* observer) {
 }
 
 void TestScreen::RemoveObserver(gfx::DisplayObserver* observer) {
+}
+
+TestScreen::TestScreen(const gfx::Rect& screen_bounds) : root_window_(NULL) {
+  static int64 synthesized_display_id = 2000;
+  display_.set_id(synthesized_display_id++);
+  display_.SetScaleAndBounds(1.0f, screen_bounds);
 }
 
 }  // namespace aura

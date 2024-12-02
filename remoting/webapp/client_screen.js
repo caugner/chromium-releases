@@ -136,6 +136,7 @@ function onClientStateChange_(oldState, newState) {
       showConnectError_(remoting.Error.MISSING_PLUGIN);
       break;
   }
+  remoting.clientSession.disconnect(false);
   remoting.clientSession.removePlugin();
   remoting.clientSession = null;
 }
@@ -158,10 +159,6 @@ function showConnectError_(errorTag) {
     remoting.setMode(remoting.AppMode.CLIENT_CONNECT_FAILED_IT2ME);
   } else {
     remoting.setMode(remoting.AppMode.CLIENT_CONNECT_FAILED_ME2ME);
-  }
-  if (remoting.clientSession) {
-    remoting.clientSession.disconnect(false);
-    remoting.clientSession = null;
   }
 }
 
@@ -195,8 +192,8 @@ function updateStatistics_() {
 }
 
 /**
- * Shows PIN entry screen localized to include the host name, and registers
- * a host-specific one-shot event handler for the form submission.
+ * Entry-point for Me2Me connections, handling showing of the host-upgrade nag
+ * dialog if necessary.
  *
  * @param {string} hostId The unique id of the host.
  * @return {void} Nothing.
@@ -207,26 +204,68 @@ remoting.connectMe2Me = function(hostId) {
     showConnectError_(remoting.Error.HOST_IS_OFFLINE);
     return;
   }
+  var webappVersion = chrome.runtime.getManifest().version;
+  if (remoting.Host.needsUpdate(host, webappVersion)) {
+    var needsUpdateMessage =
+        document.getElementById('host-needs-update-message');
+    l10n.localizeElementFromTag(needsUpdateMessage,
+                                /*i18n-content*/'HOST_NEEDS_UPDATE_TITLE',
+                                host.hostName);
+    /** @type {Element} */
+    var connect = document.getElementById('host-needs-update-connect-button');
+    /** @type {Element} */
+    var cancel = document.getElementById('host-needs-update-cancel-button');
+    /** @param {Event} event */
+    var onClick = function(event) {
+      connect.removeEventListener('click', onClick, false);
+      cancel.removeEventListener('click', onClick, false);
+      if (event.target == connect) {
+        remoting.connectMe2MeHostVersionAcknowledged_(host);
+      } else {
+        window.location.replace(chrome.extension.getURL('main.html'));
+      }
+    }
+    connect.addEventListener('click', onClick, false);
+    cancel.addEventListener('click', onClick, false);
+    remoting.setMode(remoting.AppMode.CLIENT_HOST_NEEDS_UPGRADE);
+  } else {
+    remoting.connectMe2MeHostVersionAcknowledged_(host);
+  }
+};
 
+/**
+ * Shows PIN entry screen localized to include the host name, and registers
+ * a host-specific one-shot event handler for the form submission.
+ *
+ * @param {remoting.Host} host The Me2Me host to which to connect.
+ * @return {void} Nothing.
+ */
+remoting.connectMe2MeHostVersionAcknowledged_ = function(host) {
   remoting.connector = new remoting.SessionConnector(
       document.getElementById('session-mode'),
       remoting.onConnected,
       showConnectError_);
-  /** @type {Element} */
-  var pinForm = document.getElementById('pin-form');
-  /** @param {Event} event */
-  var onSubmit = function(event) {
-    pinForm.removeEventListener('submit', onSubmit, false);
-    var pin = document.getElementById('pin-entry').value;
-    remoting.connector.connectMe2Me(host, pin);
-    remoting.setMode(remoting.AppMode.CLIENT_CONNECTING);
-    event.preventDefault();
-  };
-  pinForm.addEventListener('submit', onSubmit, false);
+  remoting.setMode(remoting.AppMode.CLIENT_CONNECTING);
 
-  var message = document.getElementById('pin-message');
-  l10n.localizeElement(message, host.hostName);
-  remoting.setMode(remoting.AppMode.CLIENT_PIN_PROMPT);
+  /** @param {function(string):void} onPinFetched */
+  var requestPin = function(onPinFetched) {
+    /** @type {Element} */
+    var pinForm = document.getElementById('pin-form');
+    /** @param {Event} event */
+    var onSubmit = function(event) {
+      event.preventDefault();
+      pinForm.removeEventListener('submit', onSubmit, false);
+      var pin = document.getElementById('pin-entry').value;
+      remoting.setMode(remoting.AppMode.CLIENT_CONNECTING);
+      onPinFetched(pin);
+    };
+    pinForm.addEventListener('submit', onSubmit, false);
+
+    var message = document.getElementById('pin-message');
+    l10n.localizeElement(message, host.hostName);
+    remoting.setMode(remoting.AppMode.CLIENT_PIN_PROMPT);
+  };
+  remoting.connector.connectMe2Me(host, requestPin);
 };
 
 /** @param {remoting.ClientSession} clientSession */
@@ -235,6 +274,8 @@ remoting.onConnected = function(clientSession) {
   remoting.clientSession = clientSession;
   remoting.clientSession.setOnStateChange(onClientStateChange_);
   setConnectionInterruptedButtonsText_();
+  var connectedTo = document.getElementById('connected-to');
+  connectedTo.innerText = clientSession.hostDisplayName;
   remoting.setMode(remoting.AppMode.IN_SESSION);
   remoting.toolbar.center();
   remoting.toolbar.preview();

@@ -37,6 +37,7 @@
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
+#include "chrome/browser/themes/theme_properties.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_command_controller.h"
 #include "chrome/browser/ui/browser_commands.h"
@@ -71,9 +72,9 @@
 #include "chrome/common/badge_util.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/extensions/api/icons/icons_handler.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
-#include "chrome/common/extensions/extension_resource.h"
 #include "chrome/common/extensions/feature_switch.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/navigation_entry.h"
@@ -386,7 +387,7 @@ void LocationBarViewGtk::Init(bool popup_window_mode) {
 
   // Now initialize the OmniboxViewGtk.
   location_entry_.reset(new OmniboxViewGtk(this, toolbar_model_, browser_,
-      command_updater_, popup_window_mode_, hbox_.get()));
+      browser_->profile(), command_updater_, popup_window_mode_, hbox_.get()));
   location_entry_->Init();
 
   g_signal_connect(hbox_.get(), "expose-event",
@@ -484,13 +485,9 @@ void LocationBarViewGtk::Init(bool popup_window_mode) {
     // TODO(mpcomplete): should we hide this if ShouldOnlyShowLocation()==true?
     action_box_button_.reset(new ActionBoxButtonGtk(browser_));
 
-    // TODO(mpcomplete): Figure out why CustomDrawButton is offset 3 pixels.
-    // This offset corrects the strange offset of CustomDrawButton.
-    const int kMagicActionBoxYOffset = 3;
     GtkWidget* alignment = gtk_alignment_new(0, 0, 1, 1);
     gtk_alignment_set_padding(GTK_ALIGNMENT(alignment),
-                              0, kMagicActionBoxYOffset,
-                              0, InnerPadding());
+                              0, 0, 0, InnerPadding());
     gtk_container_add(GTK_CONTAINER(alignment), action_box_button_->widget());
 
     gtk_box_pack_end(GTK_BOX(hbox_.get()), alignment,
@@ -1023,7 +1020,7 @@ void LocationBarViewGtk::TestPageActionPressed(size_t index) {
 
 void LocationBarViewGtk::TestActionBoxMenuItemSelected(int command_id) {
   action_box_button_->action_box_button_controller()->
-      ExecuteCommand(command_id);
+      ExecuteCommand(command_id, 0);
 }
 
 bool LocationBarViewGtk::GetBookmarkStarVisibility() {
@@ -1047,7 +1044,7 @@ void LocationBarViewGtk::Observe(int type,
         gtk_widget_modify_bg(tab_to_search_box_, GTK_STATE_NORMAL, NULL);
 
         GdkColor border_color = theme_service_->GetGdkColor(
-            ThemeService::COLOR_FRAME);
+            ThemeProperties::COLOR_FRAME);
         gtk_util::SetRoundedWindowBorderColor(tab_to_search_box_, border_color);
 
         gtk_util::UndoForceFontSize(security_info_label_);
@@ -1578,6 +1575,8 @@ void LocationBarViewGtk::UpdateStarIcon() {
   bool star_enabled = !toolbar_model_->GetInputInProgress() &&
                       edit_bookmarks_enabled_.GetValue();
   command_updater_->UpdateCommandEnabled(IDC_BOOKMARK_PAGE, star_enabled);
+  command_updater_->UpdateCommandEnabled(IDC_BOOKMARK_PAGE_FROM_STAR,
+                                         star_enabled);
   if (extensions::FeatureSwitch::action_box()->IsEnabled() && !starred_) {
     star_enabled = false;
   }
@@ -1809,8 +1808,8 @@ LocationBarViewGtk::PageActionViewGtk::PageActionViewGtk(
           this)) {
   event_box_.Own(gtk_event_box_new());
   gtk_widget_set_size_request(event_box_.get(),
-                              Extension::kPageActionIconMaxSize,
-                              Extension::kPageActionIconMaxSize);
+                              extensions::IconsInfo::kPageActionIconMaxSize,
+                              extensions::IconsInfo::kPageActionIconMaxSize);
 
   // Make the event box not visible so it does not paint a background.
   gtk_event_box_set_visible_window(GTK_EVENT_BOX(event_box_.get()), FALSE);

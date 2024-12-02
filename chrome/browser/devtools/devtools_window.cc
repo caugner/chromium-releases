@@ -17,16 +17,16 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/file_select_helper.h"
-#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/prefs/pref_service_syncable.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/session_tab_helper.h"
+#include "chrome/browser/themes/theme_properties.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_iterator.h"
-#include "chrome/browser/ui/browser_list_impl.h"
+#include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -36,6 +36,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/child_process_security_policy.h"
 #include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/devtools_client_host.h"
@@ -48,6 +49,7 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_contents_view.h"
 #include "content/public/common/bindings_policy.h"
 #include "content/public/common/content_client.h"
@@ -92,6 +94,25 @@ const int kMinDevToolsHeight = 50;
 const int kMinDevToolsWidth = 150;
 const int kMinContentsSize = 50;
 
+class DevToolsWindow::InspectedWebContentsObserver
+  : public content::WebContentsObserver {
+ public:
+  explicit InspectedWebContentsObserver(content::WebContents* web_contents)
+    : WebContentsObserver(web_contents) {
+    }
+
+  content::WebContents* Get() { return web_contents(); }
+};
+
+// static
+std::string DevToolsWindow::GetDevToolsWindowPlacementPrefKey() {
+  std::string wp_key;
+  wp_key.append(prefs::kBrowserWindowPlacement);
+  wp_key.append("_");
+  wp_key.append(kDevToolsApp);
+  return wp_key;
+}
+
 // static
 void DevToolsWindow::RegisterUserPrefs(PrefRegistrySyncable* registry) {
   registry->RegisterBooleanPref(prefs::kDevToolsOpenDocked,
@@ -104,6 +125,9 @@ void DevToolsWindow::RegisterUserPrefs(PrefRegistrySyncable* registry) {
                                    PrefRegistrySyncable::UNSYNCABLE_PREF);
   registry->RegisterDictionaryPref(prefs::kDevToolsFileSystemPaths,
                                    PrefRegistrySyncable::UNSYNCABLE_PREF);
+
+  registry->RegisterDictionaryPref(GetDevToolsWindowPlacementPrefKey().c_str(),
+                                   PrefRegistrySyncable::UNSYNCABLE_PREF);
 }
 
 // static
@@ -114,7 +138,7 @@ DevToolsWindow* DevToolsWindow::GetDockedInstanceForInspectedTab(
 
   if (!DevToolsAgentHost::HasFor(inspected_web_contents->GetRenderViewHost()))
     return NULL;
-  scoped_refptr<DevToolsAgentHost> agent(DevToolsAgentHost::GetFor(
+  scoped_refptr<DevToolsAgentHost> agent(DevToolsAgentHost::GetOrCreateFor(
       inspected_web_contents->GetRenderViewHost()));
   DevToolsManager* manager = DevToolsManager::GetInstance();
   DevToolsClientHost* client_host = manager->GetDevToolsClientHostFor(agent);
@@ -181,13 +205,12 @@ void DevToolsWindow::InspectElement(RenderViewHost* inspected_rvh,
                                     int x,
                                     int y) {
   scoped_refptr<DevToolsAgentHost> agent(
-      DevToolsAgentHost::GetFor(inspected_rvh));
-  DevToolsManager::GetInstance()->InspectElement(agent, x, y);
+      DevToolsAgentHost::GetOrCreateFor(inspected_rvh));
+  agent->InspectElement(x, y);
   // TODO(loislo): we should initiate DevTools window opening from within
   // renderer. Otherwise, we still can hit a race condition here.
   OpenDevToolsWindow(inspected_rvh);
 }
-
 
 DevToolsWindow* DevToolsWindow::Create(
     Profile* profile,
@@ -216,7 +239,6 @@ DevToolsWindow::DevToolsWindow(WebContents* web_contents,
                                RenderViewHost* inspected_rvh,
                                DevToolsDockSide dock_side)
     : profile_(profile),
-      inspected_web_contents_(NULL),
       web_contents_(web_contents),
       browser_(NULL),
       dock_side_(dock_side),
@@ -251,7 +273,8 @@ DevToolsWindow::DevToolsWindow(WebContents* web_contents,
           ThemeServiceFactory::GetForProfile(profile_)));
   // There is no inspected_rvh in case of shared workers.
   if (inspected_rvh)
-    inspected_web_contents_ = WebContents::FromRenderViewHost(inspected_rvh);
+    inspected_contents_observer_.reset(new InspectedWebContentsObserver(
+        WebContents::FromRenderViewHost(inspected_rvh)));
 }
 
 DevToolsWindow::~DevToolsWindow() {
@@ -261,6 +284,12 @@ DevToolsWindow::~DevToolsWindow() {
                                               this);
   DCHECK(it != instances.end());
   instances.erase(it);
+}
+
+content::WebContents* DevToolsWindow::GetInspectedWebContents() {
+  if (!inspected_contents_observer_)
+    return NULL;
+  return inspected_contents_observer_->Get();
 }
 
 void DevToolsWindow::InspectedContentsClosing() {
@@ -367,6 +396,14 @@ int DevToolsWindow::GetHeight(int container_height) {
   return height_;
 }
 
+int DevToolsWindow::GetMinimumWidth() {
+  return kMinDevToolsWidth;
+}
+
+int DevToolsWindow::GetMinimumHeight() {
+  return kMinDevToolsHeight;
+}
+
 void DevToolsWindow::SetWidth(int width) {
   width_ = width;
   profile_->GetPrefs()->SetInteger(prefs::kDevToolsVSplitLocation, width);
@@ -382,21 +419,8 @@ RenderViewHost* DevToolsWindow::GetRenderViewHost() {
 }
 
 void DevToolsWindow::CreateDevToolsBrowser() {
-  // TODO(pfeldman): Make browser's getter for this key static.
-  std::string wp_key;
-  wp_key.append(prefs::kBrowserWindowPlacement);
-  wp_key.append("_");
-  wp_key.append(kDevToolsApp);
-
+  std::string wp_key = GetDevToolsWindowPlacementPrefKey();
   PrefService* prefs = profile_->GetPrefs();
-  scoped_refptr<PrefRegistrySyncable> registry(
-      static_cast<PrefRegistrySyncable*>(prefs->DeprecatedGetPrefRegistry()));
-  // TODO(joi): All registration should be done up front.
-  if (!prefs->FindPreference(wp_key.c_str())) {
-    registry->RegisterDictionaryPref(wp_key.c_str(),
-                                     PrefRegistrySyncable::UNSYNCABLE_PREF);
-  }
-
   const DictionaryValue* wp_pref = prefs->GetDictionary(wp_key.c_str());
   if (!wp_pref || wp_pref->empty()) {
     DictionaryPrefUpdate update(prefs, wp_key.c_str());
@@ -409,7 +433,12 @@ void DevToolsWindow::CreateDevToolsBrowser() {
     defaults->SetBoolean("always_on_top", false);
   }
 
-  browser_ = new Browser(Browser::CreateParams::CreateForDevTools(profile_));
+  chrome::HostDesktopType host_desktop_type =
+      chrome::GetHostDesktopTypeForNativeView(
+          web_contents_->GetView()->GetNativeView());
+
+  browser_ = new Browser(Browser::CreateParams::CreateForDevTools(
+                             profile_, host_desktop_type));
   browser_->tab_strip_model()->AddWebContents(
       web_contents_, -1, content::PAGE_TRANSITION_AUTO_TOPLEVEL,
       TabStripModel::ADD_ACTIVE);
@@ -417,12 +446,13 @@ void DevToolsWindow::CreateDevToolsBrowser() {
 
 bool DevToolsWindow::FindInspectedBrowserAndTabIndex(Browser** browser,
                                                      int* tab) {
-  if (!inspected_web_contents_)
+  content::WebContents* inspected_web_contents = GetInspectedWebContents();
+  if (!inspected_web_contents)
     return false;
 
   for (chrome::BrowserIterator it; !it.done(); it.Next()) {
     int tab_index = it->tab_strip_model()->GetIndexOfWebContents(
-        inspected_web_contents_);
+        inspected_web_contents);
     if (tab_index != TabStripModel::kNoTab) {
       *browser = *it;
       *tab = tab_index;
@@ -457,9 +487,10 @@ void DevToolsWindow::UpdateFrontendDockSide() {
 
 
 void DevToolsWindow::AddDevToolsExtensionsToClient() {
-  if (inspected_web_contents_) {
+  content::WebContents* inspected_web_contents = GetInspectedWebContents();
+  if (inspected_web_contents) {
     SessionTabHelper* session_tab_helper =
-        SessionTabHelper::FromWebContents(inspected_web_contents_);
+        SessionTabHelper::FromWebContents(inspected_web_contents);
     if (session_tab_helper) {
       base::FundamentalValue tabId(session_tab_helper->session_id().id());
       CallClientFunction("WebInspector.setInspectedTabId", &tabId);
@@ -494,9 +525,29 @@ void DevToolsWindow::AddDevToolsExtensionsToClient() {
 
 WebContents* DevToolsWindow::OpenURLFromTab(WebContents* source,
                                             const OpenURLParams& params) {
-  if (inspected_web_contents_)
-    return inspected_web_contents_->OpenURL(params);
-  return NULL;
+  if (!params.url.SchemeIs(chrome::kChromeDevToolsScheme)) {
+    content::WebContents* inspected_web_contents = GetInspectedWebContents();
+    if (inspected_web_contents)
+      return inspected_web_contents->OpenURL(params);
+    return NULL;
+  }
+
+  DevToolsManager* manager = DevToolsManager::GetInstance();
+  scoped_refptr<DevToolsAgentHost> agent_host(
+      manager->GetDevToolsAgentHostFor(frontend_host_.get()));
+  if (!agent_host)
+    return NULL;
+  manager->ClientHostClosing(frontend_host_.get());
+  manager->RegisterDevToolsClientHostFor(agent_host, frontend_host_.get());
+
+  chrome::NavigateParams nav_params(profile_, params.url, params.transition);
+  FillNavigateParamsFromOpenURLParams(&nav_params, params);
+  nav_params.source_contents = source;
+  nav_params.tabstrip_add_types = TabStripModel::ADD_NONE;
+  nav_params.window_action = chrome::NavigateParams::SHOW_WINDOW;
+  nav_params.user_gesture = true;
+  chrome::Navigate(&nav_params);
+  return nav_params.target_contents;
 }
 
 void DevToolsWindow::CallClientFunction(const std::string& function_name,
@@ -568,7 +619,7 @@ void DevToolsWindow::DoAction() {
 std::string SkColorToRGBAString(SkColor color) {
   // We convert the alpha using DoubleToString because StringPrintf will use
   // locale specific formatters (e.g., use , instead of . in German).
-  return StringPrintf("rgba(%d,%d,%d,%s)", SkColorGetR(color),
+  return base::StringPrintf("rgba(%d,%d,%d,%s)", SkColorGetR(color),
       SkColorGetG(color), SkColorGetB(color),
       base::DoubleToString(SkColorGetA(color) / 255.0).c_str());
 }
@@ -581,15 +632,15 @@ GURL DevToolsWindow::GetDevToolsUrl(Profile* profile,
   CHECK(tp);
 
   SkColor color_toolbar =
-      tp->GetColor(ThemeService::COLOR_TOOLBAR);
+      tp->GetColor(ThemeProperties::COLOR_TOOLBAR);
   SkColor color_tab_text =
-      tp->GetColor(ThemeService::COLOR_BOOKMARK_TEXT);
+      tp->GetColor(ThemeProperties::COLOR_BOOKMARK_TEXT);
 
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
   bool experiments_enabled =
       command_line.HasSwitch(switches::kEnableDevToolsExperiments);
 
-  std::string url_string = StringPrintf("%sdevtools.html?"
+  std::string url_string = base::StringPrintf("%sdevtools.html?"
       "dockSide=%s&toolbarColor=%s&textColor=%s%s%s",
       chrome::kChromeUIDevToolsURL,
       SideToString(dock_side).c_str(),
@@ -605,10 +656,10 @@ void DevToolsWindow::UpdateTheme() {
   CHECK(tp);
 
   SkColor color_toolbar =
-      tp->GetColor(ThemeService::COLOR_TOOLBAR);
+      tp->GetColor(ThemeProperties::COLOR_TOOLBAR);
   SkColor color_tab_text =
-      tp->GetColor(ThemeService::COLOR_BOOKMARK_TEXT);
-  std::string command = StringPrintf(
+      tp->GetColor(ThemeProperties::COLOR_BOOKMARK_TEXT);
+  std::string command = base::StringPrintf(
       "InspectorFrontendAPI.setToolbarColors(\"%s\", \"%s\")",
       SkColorToRGBAString(color_toolbar).c_str(),
       SkColorToRGBAString(color_tab_text).c_str());
@@ -622,8 +673,9 @@ void DevToolsWindow::AddNewContents(WebContents* source,
                                     const gfx::Rect& initial_pos,
                                     bool user_gesture,
                                     bool* was_blocked) {
-  if (inspected_web_contents_) {
-    inspected_web_contents_->GetDelegate()->AddNewContents(
+  content::WebContents* inspected_web_contents = GetInspectedWebContents();
+  if (inspected_web_contents) {
+    inspected_web_contents->GetDelegate()->AddNewContents(
         source, new_contents, disposition, initial_pos, user_gesture,
         was_blocked);
   }
@@ -660,7 +712,7 @@ DevToolsWindow* DevToolsWindow::ToggleDevToolsWindow(
     bool force_open,
     DevToolsToggleAction action) {
   scoped_refptr<DevToolsAgentHost> agent(
-      DevToolsAgentHost::GetFor(inspected_rvh));
+      DevToolsAgentHost::GetOrCreateFor(inspected_rvh));
   DevToolsManager* manager = DevToolsManager::GetInstance();
   DevToolsClientHost* host = manager->GetDevToolsClientHostFor(agent);
   DevToolsWindow* window = AsDevToolsWindow(host);
@@ -762,7 +814,8 @@ void DevToolsWindow::SetDockSide(const std::string& side) {
   bool dock_requested = requested_side != DEVTOOLS_DOCK_SIDE_UNDOCKED;
   bool is_docked = IsDocked();
 
-  if (dock_requested && (!inspected_web_contents_ ||
+  content::WebContents* inspected_web_contents = GetInspectedWebContents();
+  if (dock_requested && (!inspected_web_contents ||
       !GetInspectedBrowserWindow() || IsInspectedBrowserPopupOrPanel())) {
       // Cannot dock, avoid window flashing due to close-reopen cycle.
     return;
@@ -808,8 +861,9 @@ void DevToolsWindow::OpenInNewTab(const std::string& url) {
                        NEW_FOREGROUND_TAB,
                        content::PAGE_TRANSITION_LINK,
                        false /* is_renderer_initiated */);
-  if (inspected_web_contents_) {
-    inspected_web_contents_->OpenURL(params);
+  content::WebContents* inspected_web_contents = GetInspectedWebContents();
+  if (inspected_web_contents) {
+    inspected_web_contents->OpenURL(params);
   } else {
     chrome::HostDesktopType host_desktop_type;
     if (browser_) {
@@ -821,9 +875,9 @@ void DevToolsWindow::OpenInNewTab(const std::string& url) {
       host_desktop_type = chrome::GetActiveDesktop();
     }
 
-    const chrome::BrowserListImpl* browser_list =
-        chrome::BrowserListImpl::GetInstance(host_desktop_type);
-    for (chrome::BrowserListImpl::const_iterator it = browser_list->begin();
+    const BrowserList* browser_list =
+        BrowserList::GetInstance(host_desktop_type);
+    for (BrowserList::const_iterator it = browser_list->begin();
          it != browser_list->end(); ++it) {
       if ((*it)->type() == Browser::TYPE_TABBED) {
         (*it)->OpenURL(params);
@@ -862,19 +916,19 @@ DictionaryValue* CreateFileSystemValue(
 } // namespace
 
 void DevToolsWindow::RequestFileSystems() {
-  CHECK(content::HasWebUIScheme(web_contents_->GetURL()));
+  CHECK(web_contents_->GetURL().SchemeIs(chrome::kChromeDevToolsScheme));
   file_helper_->RequestFileSystems(
       Bind(&DevToolsWindow::FileSystemsLoaded, weak_factory_.GetWeakPtr()));
 }
 
 void DevToolsWindow::AddFileSystem() {
-  CHECK(content::HasWebUIScheme(web_contents_->GetURL()));
+  CHECK(web_contents_->GetURL().SchemeIs(chrome::kChromeDevToolsScheme));
   file_helper_->AddFileSystem(
       Bind(&DevToolsWindow::FileSystemAdded, weak_factory_.GetWeakPtr()));
 }
 
 void DevToolsWindow::RemoveFileSystem(const std::string& file_system_path) {
-  CHECK(content::HasWebUIScheme(web_contents_->GetURL()));
+  CHECK(web_contents_->GetURL().SchemeIs(chrome::kChromeDevToolsScheme));
   file_helper_->RemoveFileSystem(file_system_path);
   StringValue file_system_path_value(file_system_path);
   CallClientFunction("InspectorFrontendAPI.fileSystemRemoved",
@@ -916,8 +970,9 @@ void DevToolsWindow::FileSystemAdded(
 }
 
 content::JavaScriptDialogManager* DevToolsWindow::GetJavaScriptDialogManager() {
-  if (inspected_web_contents_ && inspected_web_contents_->GetDelegate()) {
-    return inspected_web_contents_->GetDelegate()->
+  content::WebContents* inspected_web_contents = GetInspectedWebContents();
+  if (inspected_web_contents && inspected_web_contents->GetDelegate()) {
+    return inspected_web_contents->GetDelegate()->
         GetJavaScriptDialogManager();
   }
   return content::WebContentsDelegate::GetJavaScriptDialogManager();
@@ -939,11 +994,12 @@ void DevToolsWindow::WebContentsFocused(WebContents* contents) {
 }
 
 void DevToolsWindow::UpdateBrowserToolbar() {
-  if (!inspected_web_contents_)
+  content::WebContents* inspected_web_contents = GetInspectedWebContents();
+  if (!inspected_web_contents)
     return;
   BrowserWindow* inspected_window = GetInspectedBrowserWindow();
   if (inspected_window)
-    inspected_window->UpdateToolbar(inspected_web_contents_, false);
+    inspected_window->UpdateToolbar(inspected_web_contents, false);
 }
 
 bool DevToolsWindow::IsDocked() {

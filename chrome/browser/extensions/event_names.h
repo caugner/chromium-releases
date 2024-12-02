@@ -59,6 +59,7 @@ extern const char kOnDialError[];
 extern const char kOnDownloadCreated[];
 extern const char kOnDownloadChanged[];
 extern const char kOnDownloadErased[];
+extern const char kOnDownloadDeterminingFilename[];
 
 // Settings.
 extern const char kOnSettingsChanged[];
@@ -85,8 +86,8 @@ extern const char kOnPushMessage[];
 extern const char kOnCpuUpdated[];
 extern const char kOnDisplayChanged[];
 extern const char kOnStorageAvailableCapacityChanged[];
-extern const char kOnStorageAdded[];
-extern const char kOnStorageRemoved[];
+extern const char kOnStorageAttached[];
+extern const char kOnStorageDetached[];
 
 // System Indicator icon.
 extern const char kOnSystemIndicatorClicked[];

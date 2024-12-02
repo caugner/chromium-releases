@@ -15,6 +15,7 @@ size_t RegisterChromeCrashKeys();
 
 // Crash Key Name Constants ////////////////////////////////////////////////////
 
+#if defined(OS_MACOSX)
 namespace mac {
 
 // Used to report the first Cocoa/Mac NSException and its backtrace.
@@ -25,8 +26,9 @@ extern const char kFirstNSExceptionTrace[];
 extern const char kLastNSException[];
 extern const char kLastNSExceptionTrace[];
 
-// Records the current NSException as it's being created.
+// Records the current NSException as it is being created, and its backtrace.
 extern const char kNSException[];
+extern const char kNSExceptionTrace[];
 
 // In the CrApplication, records information about the current event's
 // target-action.
@@ -38,6 +40,7 @@ extern const char kZombie[];
 extern const char kZombieTrace[];
 
 }  // namespace mac
+#endif
 
 }  // namespace crash_keys
 

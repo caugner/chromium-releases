@@ -13,8 +13,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "base/memory/weak_ptr.h"
-#include "base/prefs/public/pref_member.h"
-#include "chrome/browser/extensions/image_loading_tracker.h"
+#include "base/prefs/pref_member.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/cocoa/omnibox/omnibox_view_mac.h"
 #include "chrome/browser/ui/omnibox/location_bar.h"
@@ -39,6 +38,7 @@ class SeparatorDecoration;
 class StarDecoration;
 class ToolbarModel;
 class ZoomDecoration;
+class ZoomDecorationTest;
 
 // A C++ bridge class that represents the location bar UI element to
 // the portable code.  Wires up an OmniboxViewMac instance to
@@ -180,9 +180,11 @@ class LocationBarViewMac : public LocationBar,
                        const content::NotificationDetails& details) OVERRIDE;
 
   Browser* browser() const { return browser_; }
+  ToolbarModel* toolbar_model() const { return toolbar_model_; }
 
  private:
   friend LocationBarViewMacBrowserTest;
+  friend ZoomDecorationTest;
 
   // Posts |notification| to the default notification center.
   void PostNotification(NSString* notification);

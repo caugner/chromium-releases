@@ -13,6 +13,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
 #include "base/process.h"
+#include "chrome/browser/extensions/api/messaging/native_process_launcher.h"
 #include "content/public/browser/browser_thread.h"
 
 namespace net {
@@ -26,8 +27,6 @@ class IOBufferWithSize;
 
 namespace extensions {
 
-class NativeProcessLauncher;
-
 // Manages the native side of a connection between an extension and a native
 // process.
 //
@@ -40,27 +39,29 @@ class NativeMessageProcessHost
 #endif  // !defined(OS_POSIX)
  {
  public:
-  // Interface for classes that which to recieve messages from the native
-  // process.
+  // Interface for the object that receives messages from the native process.
   class Client {
    public:
     virtual ~Client() {}
     // Called on the UI thread.
     virtual void PostMessageFromNativeProcess(int port_id,
                                               const std::string& message) = 0;
-    virtual void CloseChannel(int port_id, bool error) = 0;
+    virtual void CloseChannel(int port_id,
+                              const std::string& error_message) = 0;
   };
 
   virtual ~NativeMessageProcessHost();
 
   static scoped_ptr<NativeMessageProcessHost> Create(
       base::WeakPtr<Client> weak_client_ui,
+      const std::string& source_extension_id,
       const std::string& native_host_name,
       int destination_port);
 
   // Create using specified |launcher|. Used in tests.
   static scoped_ptr<NativeMessageProcessHost> CreateWithLauncher(
       base::WeakPtr<Client> weak_client_ui,
+      const std::string& source_extension_id,
       const std::string& native_host_name,
       int destination_port,
       scoped_ptr<NativeProcessLauncher> launcher);
@@ -80,6 +81,7 @@ class NativeMessageProcessHost
 
  private:
   NativeMessageProcessHost(base::WeakPtr<Client> weak_client_ui,
+                           const std::string& source_extension_id,
                            const std::string& native_host_name,
                            int destination_port,
                            scoped_ptr<NativeProcessLauncher> launcher);
@@ -88,10 +90,9 @@ class NativeMessageProcessHost
   void LaunchHostProcess();
 
   // Callback for NativeProcessLauncher::Launch().
-  void OnHostProcessLaunched(
-      base::ProcessHandle native_process_handle,
-      base::PlatformFile read_file,
-      base::PlatformFile write_file);
+  void OnHostProcessLaunched(NativeProcessLauncher::LaunchResult result,
+                             base::PlatformFile read_file,
+                             base::PlatformFile write_file);
 
   // Helper methods to read incoming messages.
   void WaitRead();
@@ -105,16 +106,15 @@ class NativeMessageProcessHost
   void HandleWriteResult(int result);
   void OnWritten(int result);
 
-  // Called when we've failed to start the native host or failed to read or
-  // write to/from it. Closes IO pipes and schedules CloseChannel() call.
-  void OnError();
-
   // Closes the connection. Called from OnError() and destructor.
-  void Close();
+  void Close(const std::string& error_message);
 
   // The Client messages will be posted to. Should only be accessed from the
   // UI thread.
   base::WeakPtr<Client> weak_client_ui_;
+
+  // ID of the calling extension.
+  std::string source_extension_id_;
 
   // Name of the native messaging host.
   std::string native_host_name_;
@@ -129,9 +129,6 @@ class NativeMessageProcessHost
   // Set to true after the native messaging connection has been stopped, e.g.
   // due to an error.
   bool closed_;
-
-  // Handle of the native host process.
-  base::ProcessHandle native_process_handle_;
 
   // Input stream handle and reader.
   base::PlatformFile read_file_;

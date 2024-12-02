@@ -8,6 +8,7 @@
 #include <set>
 
 #include "base/hash_tables.h"
+#include "net/quic/crypto/crypto_handshake.h"
 #include "net/quic/test_tools/quic_test_utils.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -87,7 +88,7 @@ class QuicSessionTest : public ::testing::Test {
  protected:
   QuicSessionTest()
       : guid_(1),
-        connection_(new MockConnection(guid_, IPEndPoint())),
+        connection_(new MockConnection(guid_, IPEndPoint(), false)),
         session_(connection_, true) {
   }
 
@@ -198,6 +199,17 @@ TEST_F(QuicSessionTest, OnCanWriteWithClosedStream) {
   EXPECT_TRUE(session_.OnCanWrite());
 }
 
+TEST_F(QuicSessionTest, SendGoAway) {
+  // After sending a GoAway, ensure new incoming streams cannot be created and
+  // result in a RST being sent.
+  EXPECT_CALL(*connection_,
+              SendGoAway(QUIC_PEER_GOING_AWAY, 0u, "Going Away."));
+  session_.SendGoAway(QUIC_PEER_GOING_AWAY, "Going Away.");
+  EXPECT_TRUE(session_.goaway_sent());
+
+  EXPECT_CALL(*connection_, SendRstStream(3u, QUIC_PEER_GOING_AWAY));
+  EXPECT_FALSE(session_.GetIncomingReliableStream(3u));
+}
 }  // namespace
 }  // namespace test
 }  // namespace net

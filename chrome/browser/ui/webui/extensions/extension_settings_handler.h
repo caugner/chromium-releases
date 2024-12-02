@@ -10,13 +10,13 @@
 #include <vector>
 
 #include "base/memory/scoped_ptr.h"
-#include "base/prefs/public/pref_change_registrar.h"
+#include "base/prefs/pref_change_registrar.h"
 #include "base/scoped_observer.h"
+#include "chrome/browser/extensions/extension_install_prompt.h"
 #include "chrome/browser/extensions/extension_install_ui.h"
 #include "chrome/browser/extensions/extension_uninstall_dialog.h"
 #include "chrome/browser/extensions/extension_warning_service.h"
 #include "chrome/browser/extensions/requirements_checker.h"
-#include "chrome/common/extensions/extension_resource.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -66,6 +66,7 @@ class ExtensionSettingsHandler
       public content::NotificationObserver,
       public content::WebContentsObserver,
       public ui::SelectFileDialog::Listener,
+      public ExtensionInstallPrompt::Delegate,
       public ExtensionUninstallDialog::Delegate,
       public extensions::ExtensionWarningService::Observer,
       public base::SupportsWeakPtr<ExtensionSettingsHandler> {
@@ -85,8 +86,9 @@ class ExtensionSettingsHandler
 
   void GetLocalizedValues(content::WebUIDataSource* source);
 
-  // content::WebContentsObserver implementation, which reloads all unpacked
-  // extensions whenever chrome://extensions is reloaded.
+  // content::WebContentsObserver implementation.
+  virtual void RenderViewDeleted(
+      content::RenderViewHost* render_view_host) OVERRIDE;
   virtual void NavigateToPendingEntry(
       const GURL& url,
       content::NavigationController::ReloadType reload_type) OVERRIDE;
@@ -121,8 +123,19 @@ class ExtensionSettingsHandler
   // extensions::ExtensionWarningService::Observer implementation.
   virtual void ExtensionWarningsChanged() OVERRIDE;
 
+  // ExtensionInstallPrompt::Delegate implementation.
+  virtual void InstallUIProceed() OVERRIDE;
+  virtual void InstallUIAbort(bool user_initiated) OVERRIDE;
+
   // Helper method that reloads all unpacked extensions.
   void ReloadUnpackedExtensions();
+
+  // Callback for "setElevated" message.
+  void ManagedUserSetElevated(const base::ListValue* args);
+
+  // If the authentication of the managed user was successful,
+  // it gives this information back to the UI.
+  void PassphraseDialogCallback(bool success);
 
   // Callback for "requestExtensionsData" message.
   void HandleRequestExtensionsData(const base::ListValue* args);
@@ -156,6 +169,9 @@ class ExtensionSettingsHandler
 
   // Callback for "options" message.
   void HandleOptionsMessage(const base::ListValue* args);
+
+  // Callback for "permissions" message.
+  void HandlePermissionsMessage(const base::ListValue* args);
 
   // Callback for "showButton" message.
   void HandleShowButtonMessage(const base::ListValue* args);
@@ -222,7 +238,7 @@ class ExtensionSettingsHandler
   // notification.
   bool ignore_notifications_;
 
-  // The page may be refreshed in response to a RENDER_VIEW_HOST_DELETED,
+  // The page may be refreshed in response to a RenderViewHost being destroyed,
   // but the iteration over RenderViewHosts will include the host because the
   // notification is sent when it is in the process of being deleted (and before
   // it is removed from the process). Keep a pointer to it so we can exclude
@@ -238,12 +254,14 @@ class ExtensionSettingsHandler
   content::NotificationRegistrar registrar_;
 
   PrefChangeRegistrar pref_registrar_;
-  PrefChangeRegistrar local_state_pref_registrar_;
 
   // This will not be empty when a requirements check is in progress. Doing
   // another Check() before the previous one is complete will cause the first
   // one to abort.
   scoped_ptr<extensions::RequirementsChecker> requirements_checker_;
+
+  // The UI for showing what permissions the extension has.
+  scoped_ptr<ExtensionInstallPrompt> prompt_;
 
   ScopedObserver<extensions::ExtensionWarningService,
                  extensions::ExtensionWarningService::Observer>

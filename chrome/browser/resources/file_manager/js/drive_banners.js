@@ -2,26 +2,31 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+'use strict';
+
 /**
- * Responsible for showing banners in the file list.
+ * Responsible for showing following banners in the file list.
+ *  - WelcomeBanner
+ *  - AuthFailBanner
  * @param {DirectoryModel} directoryModel The model.
  * @param {VolumeManager} volumeManager The manager.
  * @param {DOMDocument} document HTML document.
+ * @param {boolean} showOffers True if we should show offer banners.
  * @constructor
  */
-function FileListBannerController(directoryModel, volumeManager, document) {
+function FileListBannerController(
+    directoryModel, volumeManager, document, showOffers) {
   this.directoryModel_ = directoryModel;
   this.volumeManager_ = volumeManager;
   this.document_ = document;
+  this.showOffers_ = showOffers;
   this.driveEnabled_ = false;
 
-  var board = str('CHROMEOS_RELEASE_BOARD');
-  if (!board.match(/^x86-(mario|zgb|alex)/i) && !board.match(/^stout/i))
-    this.checkPromoAvailable_();
-  else
-    this.newWelcome_ = false;
+  this.initializeWelcomeBanner_();
+  this.privateOnDirectoryChangedBound_ =
+      this.privateOnDirectoryChanged_.bind(this);
 
-  var handler = this.checkSpaceAndShowBanner_.bind(this);
+  var handler = this.checkSpaceAndMaybeShowWelcomeBanner_.bind(this);
   this.directoryModel_.addEventListener('scan-completed', handler);
   this.directoryModel_.addEventListener('rescan-completed', handler);
   this.directoryModel_.addEventListener('directory-changed',
@@ -30,6 +35,8 @@ function FileListBannerController(directoryModel, volumeManager, document) {
   this.unmountedPanel_ = this.document_.querySelector('#unmounted-panel');
   this.volumeManager_.addEventListener('drive-status-changed',
         this.updateDriveUnmountedPanel_.bind(this));
+  this.volumeManager_.addEventListener('drive-connection-changed',
+        this.onDriveConnectionChanged_.bind(this));
 
   util.storage.onChanged.addListener(this.onStorageChange_.bind(this));
   this.welcomeHeaderCounter_ = WELCOME_HEADER_COUNTER_LIMIT;
@@ -41,6 +48,16 @@ function FileListBannerController(directoryModel, volumeManager, document) {
     this.warningDismissedCounter_ =
         parseInt(values[WARNING_DISMISSED_KEY]) || 0;
   }.bind(this));
+
+  this.authFailedBanner_ =
+      this.document_.querySelector('#drive-auth-failed-warning');
+  var authFailedText = this.authFailedBanner_.querySelector('.drive-text');
+  authFailedText.innerHTML = util.htmlUnescape(str('DRIVE_NOT_REACHED'));
+  authFailedText.querySelector('a').addEventListener('click', function(e) {
+    chrome.fileBrowserPrivate.logoutUser();
+    e.preventDefault();
+  });
+  this.maybeShowAuthFailBanner_();
 }
 
 /**
@@ -92,6 +109,18 @@ var GOOGLE_DRIVE_ERROR_HELP_URL =
     'https://support.google.com/chromeos/?p=filemanager_driveerror';
 
 /**
+ * Initializes the banner to promote DRIVE.
+ * This method must be called before any of showing banner functions, and
+ * also before registering them as callbacks.
+ * @private
+ */
+FileListBannerController.prototype.initializeWelcomeBanner_ = function() {
+  this.useNewWelcomeBanner_ = (!util.boardIs('x86-mario') &&
+                               !util.boardIs('x86-zgb') &&
+                               !util.boardIs('x86-alex'));
+};
+
+/**
  * @param {number} value How many times the Drive Welcome header banner
  * has shown.
  * @private
@@ -130,12 +159,21 @@ FileListBannerController.prototype.onStorageChange_ = function(changes,
 };
 
 /**
+ * Invoked when the drive connection status is change in the volume manager.
+ * @private
+ */
+FileListBannerController.prototype.onDriveConnectionChanged_ = function() {
+  this.maybeShowAuthFailBanner_();
+};
+
+/**
  * @param {string} type 'none'|'page'|'header'.
  * @param {string} messageId Reource ID of the message.
  * @private
  */
-FileListBannerController.prototype.showBanner_ = function(type, messageId) {
-  this.showDriveWelcome_(type);
+FileListBannerController.prototype.prepareAndShowWelcomeBanner_ =
+    function(type, messageId) {
+  this.showWelcomeBanner_(type);
 
   var container = this.document_.querySelector('.drive-welcome.' + type);
   if (container.firstElementChild)
@@ -153,7 +191,7 @@ FileListBannerController.prototype.showBanner_ = function(type, messageId) {
   util.createChild(wrapper, 'drive-welcome-icon');
 
   var close = util.createChild(wrapper, 'cr-dialog-close');
-  close.addEventListener('click', this.closeBanner_.bind(this));
+  close.addEventListener('click', this.closeWelcomeBanner_.bind(this));
 
   var message = util.createChild(wrapper, 'drive-welcome-message');
 
@@ -165,11 +203,14 @@ FileListBannerController.prototype.showBanner_ = function(type, messageId) {
   var links = util.createChild(message, 'drive-welcome-links');
 
   var more;
-  if (this.newWelcome_) {
-    title.textContent = str('DRIVE_WELCOME_TITLE_ALTERNATIVE');
+  if (this.useNewWelcomeBanner_) {
+    var welcomeTitle = str('DRIVE_WELCOME_TITLE_ALTERNATIVE');
+    if (util.boardIs('link'))
+      welcomeTitle = str('DRIVE_WELCOME_TITLE_ALTERNATIVE_1TB');
+    title.textContent = welcomeTitle;
     more = util.createChild(links,
         'drive-welcome-button drive-welcome-start', 'a');
-    more.textContent = str('DRIVE_WELCOME_GET_STARTED');
+    more.textContent = str('DRIVE_WELCOME_CHECK_ELIGIBILITY');
     more.href = GOOGLE_DRIVE_REDEEM;
   } else {
     title.textContent = str('DRIVE_WELCOME_TITLE');
@@ -180,79 +221,33 @@ FileListBannerController.prototype.showBanner_ = function(type, messageId) {
   more.target = '_blank';
 
   var dismiss;
-  if (this.newWelcome_)
+  if (this.useNewWelcomeBanner_)
     dismiss = util.createChild(links, 'drive-welcome-button');
   else
     dismiss = util.createChild(links, 'plain-link');
 
   dismiss.classList.add('drive-welcome-dismiss');
   dismiss.textContent = str('DRIVE_WELCOME_DISMISS');
-  dismiss.addEventListener('click', this.closeBanner_.bind(this));
+  dismiss.addEventListener('click', this.closeWelcomeBanner_.bind(this));
 
   this.previousDirWasOnDrive_ = false;
 };
 
 /**
- * Desides whether to show a banner and if so which one.
- * @private
- */
-FileListBannerController.prototype.maybeShowBanner_ = function() {
-  if (!this.isOnDrive()) {
-    this.cleanupDriveWelcome_();
-    this.previousDirWasOnDrive_ = false;
-    return;
-  }
-
-  if (this.welcomeHeaderCounter_ >= WELCOME_HEADER_COUNTER_LIMIT ||
-      !this.directoryModel_.isDriveMounted())
-    return;
-
-  if (this.directoryModel_.getFileList().length == 0 &&
-      this.welcomeHeaderCounter_ == 0) {
-    // Only show the full page banner if the header banner was never shown.
-    // Do not increment the counter.
-    // The timeout below is required because sometimes another
-    // 'rescan-completed' event arrives shortly with non-empty file list.
-    var self = this;
-    setTimeout(this.preparePromo_.bind(this, function() {
-      var container = self.document_.querySelector('.dialog-container');
-      if (self.isOnDrive() &&
-          self.welcomeHeaderCounter_ == 0) {
-        self.showBanner_('page', 'DRIVE_WELCOME_TEXT_LONG');
-      }
-    }, 2000));
-  } else if (this.welcomeHeaderCounter_ < WELCOME_HEADER_COUNTER_LIMIT) {
-    // We do not want to increment the counter when the user navigates
-    // between different directories on Drive, but we increment the counter
-    // once anyway to prevent the full page banner from showing.
-     if (!this.previousDirWasOnDrive_ || this.welcomeHeaderCounter_ == 0) {
-       var self = this;
-       this.setWelcomeHeaderCounter_(this.welcomeHeaderCounter_ + 1);
-       this.preparePromo_(function() {
-         self.showBanner_('header', 'DRIVE_WELCOME_TEXT_SHORT');
-       });
-     }
-   } else {
-     this.closeBanner_();
-   }
-   this.previousDirWasOnDrive_ = true;
-};
-
-/**
  * Show or hide the "Low Google Drive space" warning.
  * @param {boolean} show True if the box need to be shown.
- * @param {object} sizeStats Size statistics. Should be defined when showing the
+ * @param {Object} sizeStats Size statistics. Should be defined when showing the
  *     warning.
  * @private
  */
 FileListBannerController.prototype.showLowDriveSpaceWarning_ =
       function(show, sizeStats) {
-  var box = this.document_.querySelector('.drive-space-warning');
+  var box = this.document_.querySelector('#volume-space-warning');
 
   // Avoid showing two banners.
   // TODO(kaznacheev): Unify the low space warning and the promo header.
   if (show)
-    this.cleanupDriveWelcome_();
+    this.cleanupWelcomeBanner_();
 
   if (box.hidden == !show)
     return;
@@ -304,103 +299,95 @@ FileListBannerController.prototype.showLowDriveSpaceWarning_ =
     this.requestRelayout_(100);
   }
 };
-
-/**
- * Start or stop monitoring free space depending on the new value of current
- * directory path. In case the space is low shows a warning box.
- * @param {string} currentPath New path to the current directory.
- * @private
- */
-FileListBannerController.prototype.checkFreeSpace_ = function(currentPath) {
-  var self = this;
-  var scheduleCheck = function(timeout, root, threshold) {
-    if (self.checkFreeSpaceTimer_) {
-      clearTimeout(self.checkFreeSpaceTimer_);
-      self.checkFreeSpaceTimer_ = null;
-    }
-
-    if (timeout) {
-      self.checkFreeSpaceTimer_ = setTimeout(
-          doCheck, timeout, root, threshold);
-    }
-  };
-
-  var doCheck = function(root, threshold) {
-    // Remember our invocation timer, because getSizeStats is long and
-    // asynchronous call.
-    var selfTimer = self.checkFreeSpaceTimer_;
-
-    chrome.fileBrowserPrivate.getSizeStats(
-        util.makeFilesystemUrl(root),
-        function(sizeStats) {
-          // If new check started while we were in async getSizeStats call,
-          // then we shouldn't do anything.
-          if (selfTimer != self.checkFreeSpaceTimer_)
-            return;
-
-          // sizeStats is undefined, if some error occurs.
-          var ratio = (sizeStats && sizeStats.totalSizeKB > 0) ?
-              sizeStats.remainingSizeKB / sizeStats.totalSizeKB : 1;
-
-          var lowDiskSpace = ratio < threshold;
-
-          if (root == RootDirectory.DOWNLOADS)
-            self.showLowDownloadsSpaceWarning_(lowDiskSpace);
-          else
-            self.showLowDriveSpaceWarning_(lowDiskSpace, sizeStats);
-
-          // If disk space is low, check it more often. User can delete files
-          // manually and we should not bother her with warning in this case.
-          scheduleCheck(lowDiskSpace ? 1000 * 5 : 1000 * 30, root, threshold);
-        });
-  };
-
-  // TODO(kaznacheev): Unify the two low space warning.
-  var root = PathUtil.getRootPath(currentPath);
-  if (root === RootDirectory.DOWNLOADS) {
-    scheduleCheck(500, root, 0.2);
-    this.showLowDriveSpaceWarning_(false);
-  } else if (root === RootDirectory.DRIVE) {
-    scheduleCheck(500, root, 0.1);
-    this.showLowDownloadsSpaceWarning_(false);
-  } else {
-    scheduleCheck(0);
-
-    this.showLowDownloadsSpaceWarning_(false);
-    this.showLowDriveSpaceWarning_(false);
-  }
-};
-
 /**
  * Closes the Drive Welcome banner.
  * @private
  */
-FileListBannerController.prototype.closeBanner_ = function() {
-  this.cleanupDriveWelcome_();
+FileListBannerController.prototype.closeWelcomeBanner_ = function() {
+  this.cleanupWelcomeBanner_();
   // Stop showing the welcome banner.
   this.setWelcomeHeaderCounter_(WELCOME_HEADER_COUNTER_LIMIT);
 };
 
 /**
- * Shows or hides the Low Disck Space banner.
+ * Shows or hides the welcome banner for drive.
  * @private
  */
-FileListBannerController.prototype.checkSpaceAndShowBanner_ = function() {
+FileListBannerController.prototype.checkSpaceAndMaybeShowWelcomeBanner_ =
+    function() {
+  if (!this.isOnDrive()) {
+    // We are not on the drive file system. Do not show (close) the welcome
+    // banner.
+    this.cleanupWelcomeBanner_();
+    this.previousDirWasOnDrive_ = false;
+    return;
+  }
+
+  if (this.welcomeHeaderCounter_ >= WELCOME_HEADER_COUNTER_LIMIT ||
+      !this.directoryModel_.isDriveMounted()) {
+    // The banner is already shown enough times or the drive FS is not mounted.
+    // So, do nothing here.
+    return;
+  }
+
+  if (!this.showOffers_) {
+    // Because it is not necessary to show the offer, set
+    // |useNewWelcomeBanner_| false here. Note that it probably should be able
+    // to do this in the constructor, but there remains non-trivial path,
+    // which may be causes |useNewWelcomeBanner_| == true's behavior even
+    // if |showOffers_| is false.
+    // TODO(hidehiko): Make sure if it is expected or not, and simplify
+    // |showOffers_| if possible.
+    this.useNewWelcomeBanner_ = false;
+  }
+
   var self = this;
-  this.preparePromo_(function() {
-    if (self.newWelcome_ && self.isOnDrive()) {
-      chrome.fileBrowserPrivate.getSizeStats(
-          util.makeFilesystemUrl(self.directoryModel_.getCurrentRootPath()),
-          function(result) {
-            // Already >= 100 GB.
-            if (result && result.totalSizeKB >= 100 * 1024 * 1024)
-              self.newWelcome_ = false;
-            self.maybeShowBanner_();
-          });
-    } else {
-      self.maybeShowBanner_();
+  if (self.useNewWelcomeBanner_) {
+    // getSizeStats for Drive file system accesses to the server, so we should
+    // minimize the invocation.
+    chrome.fileBrowserPrivate.getSizeStats(
+        util.makeFilesystemUrl(self.directoryModel_.getCurrentRootPath()),
+        function(result) {
+          var offerSpaceKb = util.boardIs('link') ?
+              1024 * 1024 * 1024 :  // 1TB.
+              100 * 1024 * 1024;  // 100GB.
+          if (result && result.totalSizeKB >= offerSpaceKb) {
+            self.useNewWelcomeBanner_ = false;
+          }
+          self.maybeShowWelcomeBanner_();
+        });
+  } else {
+    self.maybeShowWelcomeBanner_();
+  }
+};
+
+/**
+ * Decides which banner should be shown, and show it. This method is designed
+ * to be called only from checkSpaceAndMaybeShowWelcomeBanner_.
+ * @private
+ */
+FileListBannerController.prototype.maybeShowWelcomeBanner_ = function() {
+  if (this.directoryModel_.getFileList().length == 0 &&
+      this.welcomeHeaderCounter_ == 0) {
+    // Only show the full page banner if the header banner was never shown.
+    // Do not increment the counter.
+    // The timeout below is required because sometimes another
+    // 'rescan-completed' event arrives shortly with non-empty file list.
+    setTimeout(function() {
+      if (this.isOnDrive() && this.welcomeHeaderCounter_ == 0) {
+        this.prepareAndShowWelcomeBanner_('page', 'DRIVE_WELCOME_TEXT_LONG');
+      }
+    }.bind(this), 2000);
+  } else {
+    // We do not want to increment the counter when the user navigates
+    // between different directories on Drive, but we increment the counter
+    // once anyway to prevent the full page banner from showing.
+    if (!this.previousDirWasOnDrive_ || this.welcomeHeaderCounter_ == 0) {
+      this.setWelcomeHeaderCounter_(this.welcomeHeaderCounter_ + 1);
+      this.prepareAndShowWelcomeBanner_('header', 'DRIVE_WELCOME_TEXT_SHORT');
     }
-  });
+  }
+  this.previousDirWasOnDrive_ = true;
 };
 
 /**
@@ -415,7 +402,7 @@ FileListBannerController.prototype.isOnDrive = function() {
  * @param {string} type 'page'|'head'|'none'.
  * @private
  */
-FileListBannerController.prototype.showDriveWelcome_ = function(type) {
+FileListBannerController.prototype.showWelcomeBanner_ = function(type) {
   var container = this.document_.querySelector('.dialog-container');
   if (container.getAttribute('drive-welcome') != type) {
     container.setAttribute('drive-welcome', type);
@@ -430,22 +417,115 @@ FileListBannerController.prototype.showDriveWelcome_ = function(type) {
  * @private
  */
 FileListBannerController.prototype.onDirectoryChanged_ = function(event) {
-  this.checkFreeSpace_(this.directoryModel_.getCurrentDirPath());
+  var root = PathUtil.getTopDirectory(event.newDirEntry.fullPath);
+  // Show (or hide) the low space warning.
+  this.maybeShowLowSpaceWarning_(root);
 
-  if (!this.isOnDrive())
-    this.cleanupDriveWelcome_();
+  // Add or remove listener to show low space warning, if necessary.
+  var isLowSpaceWarningTarget = this.isLowSpaceWarningTarget_(root);
+  var previousRoot = PathUtil.getTopDirectory(event.previousDirEntry.fullPath);
+  if (isLowSpaceWarningTarget !== this.isLowSpaceWarningTarget_(previousRoot)) {
+    if (isLowSpaceWarningTarget) {
+      chrome.fileBrowserPrivate.onDirectoryChanged.addListener(
+          this.privateOnDirectoryChangedBound_);
+    } else {
+      chrome.fileBrowserPrivate.onDirectoryChanged.removeListener(
+          this.privateOnDirectoryChangedBound_);
+    }
+  }
+
+  if (!this.isOnDrive()) {
+    this.cleanupWelcomeBanner_();
+    this.authFailedBanner_.hidden = true;
+  }
 
   this.updateDriveUnmountedPanel_();
-  if (this.isOnDrive())
+  if (this.isOnDrive()) {
     this.unmountedPanel_.classList.remove('retry-enabled');
+    this.maybeShowAuthFailBanner_();
+  }
+};
+
+/**
+ * @param {string} root Root directory to be checked.
+ * @return {boolean} true if the file system specified by |root| is a target
+ *     to show low space warning. Otherwise false.
+ * @private
+ */
+FileListBannerController.prototype.isLowSpaceWarningTarget_ = function(root) {
+  return (root == RootDirectory.DOWNLOADS || root == RootDirectory.DRIVE);
+};
+
+/**
+ * Callback which is invoked when the file system has been changed.
+ * @param {Object} event chrome.fileBrowserPrivate.onDirectoryChanged event.
+ * @private
+ */
+FileListBannerController.prototype.privateOnDirectoryChanged_ = function(
+    event) {
+  var currentRoot = PathUtil.getTopDirectory(
+      this.directoryModel_.getCurrentDirPath());
+  var eventRoot = PathUtil.getTopDirectory(
+      util.extractFilePath(event.directoryUrl));
+  if (currentRoot == eventRoot) {
+    // The file system we are currently on is changed.
+    // So, check the free space.
+    this.maybeShowLowSpaceWarning_(eventRoot);
+  }
+};
+
+/**
+ * Shows or hides the low space warning.
+ * @param {string} root Root directory of the file system, which we are
+ *     interested in.
+ * @private
+ */
+FileListBannerController.prototype.maybeShowLowSpaceWarning_ = function(root) {
+  // TODO(kaznacheev): Unify the two low space warning.
+  var threshold = 0;
+  if (root === RootDirectory.DOWNLOADS) {
+    this.showLowDriveSpaceWarning_(false);
+    threshold = 0.2;
+  } else if (root === RootDirectory.DRIVE) {
+    this.showLowDownloadsSpaceWarning_(false);
+    threshold = 0.1;
+  } else {
+    // If the current file system is neither the DOWNLOAD nor the DRIVE,
+    // just hide the warning.
+    this.showLowDownloadsSpaceWarning_(false);
+    this.showLowDriveSpaceWarning_(false);
+    return;
+  }
+
+  var self = this;
+  chrome.fileBrowserPrivate.getSizeStats(
+      util.makeFilesystemUrl(root),
+      function(sizeStats) {
+        var currentRoot = PathUtil.getTopDirectory(
+            self.directoryModel_.getCurrentDirPath());
+        if (root != currentRoot) {
+          // This happens when the current directory is moved during requesting
+          // the file system size. Just ignore it.
+          return;
+        }
+
+        // sizeStats is undefined, if some error occurs.
+        var remainingRatio = (sizeStats && sizeStats.totalSizeKB > 0) ?
+            (sizeStats.remainingSizeKB / sizeStats.totalSizeKB) : 1;
+        var isLowDiskSpace = remainingRatio < threshold;
+        if (root == RootDirectory.DOWNLOADS)
+          self.showLowDownloadsSpaceWarning_(isLowDiskSpace);
+        else
+          self.showLowDriveSpaceWarning_(isLowDiskSpace, sizeStats);
+      });
 };
 
 /**
  * removes the Drive Welcome banner.
  * @private
  */
-FileListBannerController.prototype.cleanupDriveWelcome_ = function() {
-  this.showDriveWelcome_('none');
+FileListBannerController.prototype.cleanupWelcomeBanner_ = function() {
+  this.showWelcomeBanner_('none');
 };
 
 /**
@@ -545,7 +625,7 @@ FileListBannerController.prototype.updateDriveUnmountedPanel_ = function() {
         this.welcomeHeaderCounter_ == 0) {
       // Do not increment banner counter in order to not prevent the full
       // page banner of being shown (otherwise it would never be shown).
-      this.showBanner_('header', 'DRIVE_WELCOME_TEXT_SHORT');
+      this.showWelcomeBanner_('header', 'DRIVE_WELCOME_TEXT_SHORT');
     }
     if (status == VolumeManager.DriveStatus.ERROR)
       this.unmountedPanel_.classList.add('retry-enabled');
@@ -558,26 +638,19 @@ FileListBannerController.prototype.updateDriveUnmountedPanel_ = function() {
 };
 
 /**
- * Detects what type of promo should be shown.
+ * Updates the visibility of Drive Connection Warning banner, retrieving the
+ * current connection information.
  * @private
  */
-FileListBannerController.prototype.checkPromoAvailable_ = function() {
-  this.newWelcome_ = true;
-  if (this.promoCallbacks_) {
-    for (var i = 0; i < this.promoCallbacks_.length; i++)
-      this.promoCallbacks_[i]();
-    this.promoCallbacks_ = undefined;
-  }
-};
-
-/**
- * @param {Function} completeCallback To be called (may be directly) when
- *                                    this.newWelcome_ get ready.
- * @private
- */
-FileListBannerController.prototype.preparePromo_ = function(completeCallback) {
-  if (this.newWelcome_ !== undefined)
-    completeCallback();
-  else
-    (this.promoCallbacks_ = this.promoCallbacks_ || []).push(completeCallback);
+FileListBannerController.prototype.maybeShowAuthFailBanner_ = function() {
+  var connection = this.volumeManager_.getDriveConnectionState();
+  var reasons = connection.reasons;
+  var showDriveNotReachedMessage =
+      this.isOnDrive() &&
+      connection.type == VolumeManager.DriveConnectionType.OFFLINE &&
+      // Show the banner only when authentication fails. Don't show it when the
+      // drive service is disabled.
+      reasons.indexOf(VolumeManager.DriveConnectionReason.NOT_READY) != -1 &&
+      reasons.indexOf(VolumeManager.DriveConnectionReason.NO_SERVICE) == -1;
+  this.authFailedBanner_.hidden = !showDriveNotReachedMessage;
 };

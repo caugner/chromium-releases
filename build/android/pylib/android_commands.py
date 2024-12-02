@@ -18,20 +18,19 @@ import sys
 import tempfile
 import time
 
+import cmd_helper
+import constants
 import io_stats_parser
 try:
   import pexpect
 except:
   pexpect = None
 
-CHROME_SRC = os.path.join(
-    os.path.abspath(os.path.dirname(__file__)), '..', '..', '..')
-
-sys.path.append(os.path.join(CHROME_SRC, 'third_party', 'android_testrunner'))
+sys.path.append(os.path.join(
+    constants.CHROME_DIR, 'third_party', 'android_testrunner'))
 import adb_interface
-
-import cmd_helper
-import errors  #  is under ../../../third_party/android_testrunner/errors.py
+import am_instrument_parser
+import errors
 
 
 # Pattern to search for the next whole line of pexpect output and capture it
@@ -205,6 +204,7 @@ class AndroidCommands(object):
     self._device = device
     self._logcat = None
     self.logcat_process = None
+    self._logcat_tmpoutfile = None
     self._pushed_files = []
     self._device_utc_offset = self.RunShellCommand('date +%z')[0]
     self._md5sum_path = ''
@@ -214,6 +214,15 @@ class AndroidCommands(object):
   def Adb(self):
     """Returns our AdbInterface to avoid us wrapping all its methods."""
     return self._adb
+
+  def IsOnline(self):
+    """Checks whether the device is online.
+
+    Returns:
+      True if device is in 'device' mode, False otherwise.
+    """
+    out = self._adb.SendCommand('get-state')
+    return out.strip() == 'device'
 
   def IsRootEnabled(self):
     """Checks if root is enabled on the device."""
@@ -632,11 +641,13 @@ class AndroidCommands(object):
 
   def ClearApplicationState(self, package):
     """Closes and clears all state for the given |package|."""
-    self.CloseApplication(package)
-    self.RunShellCommand('su -c rm -r /data/data/%s/app_*' % package)
-    self.RunShellCommand('su -c rm -r /data/data/%s/cache/*' % package)
-    self.RunShellCommand('su -c rm -r /data/data/%s/files/*' % package)
-    self.RunShellCommand('su -c rm -r /data/data/%s/shared_prefs/*' % package)
+    # Check that the package exists before clearing it. Necessary because
+    # calling pm clear on a package that doesn't exist may never return.
+    pm_path_output  = self.RunShellCommand('pm path ' + package)
+    # The path output only contains anything if and only if the package exists.
+    if pm_path_output:
+      self.CloseApplication(package)
+      self.RunShellCommand('pm clear ' + package)
 
   def SendKeyEvent(self, keycode):
     """Sends keycode to the device.
@@ -694,8 +705,8 @@ class AndroidCommands(object):
 
   def GetFileContents(self, filename, log_result=False):
     """Gets contents from the file specified by |filename|."""
-    return self.RunShellCommand('if [ -f "' + filename + '" ]; then cat "' +
-                                filename + '"; fi', log_result=log_result)
+    return self.RunShellCommand('cat "%s" 2>/dev/null' % filename,
+                                log_result=log_result)
 
   def SetFileContents(self, filename, contents):
     """Writes |contents| to the file specified by |filename|."""
@@ -713,6 +724,24 @@ class AndroidCommands(object):
         self.GetExternalStorage() + '/' + base_name % i):
       i += 1
     return self.GetExternalStorage() + '/' + base_name % i
+
+  def CanAccessProtectedFileContents(self):
+    """Returns True if Get/SetProtectedFileContents would work via "su".
+
+    Devices running user builds don't have adb root, but may provide "su" which
+    can be used for accessing protected files.
+    """
+    r = self.RunShellCommand('su -c cat /dev/null')
+    return r == [] or r[0].strip() == ''
+
+  def GetProtectedFileContents(self, filename, log_result=False):
+    """Gets contents from the protected file specified by |filename|.
+
+    This is less efficient than GetFileContents, but will work for protected
+    files and device files.
+    """
+    # Run the script as root
+    return self.RunShellCommand('su -c cat "%s" 2> /dev/null' % filename)
 
   def SetProtectedFileContents(self, filename, contents):
     """Writes |contents| to the protected file specified by |filename|.
@@ -809,6 +838,12 @@ class AndroidCommands(object):
     build_type = self.RunShellCommand('getprop ro.build.type')[0]
     assert build_type
     return build_type
+
+  def GetProductModel(self):
+    """Returns the namve of the product model (e.g. "Galaxy Nexus") """
+    model = self.RunShellCommand('getprop ro.product.model')[0]
+    assert model
+    return model
 
   def StartMonitoringLogcat(self, clear=True, logfile=None, filters=None):
     """Starts monitoring the output of logcat, for use with WaitForLogMatch.
@@ -922,8 +957,9 @@ class AndroidCommands(object):
       self._adb.SendCommand('logcat -c')
     logcat_command = 'adb %s logcat -v threadtime %s' % (self._adb._target_arg,
                                                          ' '.join(filters))
+    self._logcat_tmpoutfile = tempfile.TemporaryFile(bufsize=0)
     self.logcat_process = subprocess.Popen(logcat_command, shell=True,
-                                           stdout=subprocess.PIPE)
+                                           stdout=self._logcat_tmpoutfile)
 
   def StopRecordingLogcat(self):
     """Stops an existing logcat recording subprocess and returns output.
@@ -939,8 +975,11 @@ class AndroidCommands(object):
     # Otherwise the communicate may return incomplete output due to pipe break.
     if self.logcat_process.poll() is None:
       self.logcat_process.kill()
-    (output, _) = self.logcat_process.communicate()
+    self.logcat_process.wait()
     self.logcat_process = None
+    self._logcat_tmpoutfile.seek(0)
+    output = self._logcat_tmpoutfile.read()
+    self._logcat_tmpoutfile.close()
     return output
 
   def SearchLogcatRecord(self, record, message, thread_id=None, proc_id=None,
@@ -1042,7 +1081,8 @@ class AndroidCommands(object):
     usage_dict = collections.defaultdict(int)
     smaps = collections.defaultdict(dict)
     current_smap = ''
-    for line in self.GetFileContents('/proc/%s/smaps' % pid, log_result=False):
+    for line in self.GetProtectedFileContents('/proc/%s/smaps' % pid,
+                                              log_result=False):
       items = line.split()
       # See man 5 proc for more details. The format is:
       # address perms offset dev inode pathname
@@ -1062,8 +1102,8 @@ class AndroidCommands(object):
       # Presumably the process died between ps and calling this method.
       logging.warning('Could not find memory usage for pid ' + str(pid))
 
-    for line in self.GetFileContents('/d/nvmap/generic-0/clients',
-                                     log_result=False):
+    for line in self.GetProtectedFileContents('/d/nvmap/generic-0/clients',
+                                              log_result=False):
       match = re.match(NVIDIA_MEMORY_INFO_RE, line)
       if match and match.group('pid') == pid:
         usage_bytes = int(match.group('usage_bytes'))
@@ -1177,6 +1217,50 @@ class AndroidCommands(object):
     binary on the device (ex.: md5sum_bin).
     """
     self._util_wrapper = util_wrapper
+
+  def RunInstrumentationTest(self, test, test_package, instr_args, timeout):
+    """Runs a single instrumentation test.
+
+    Args:
+      test: Test class/method.
+      test_package: Package name of test apk.
+      instr_args: Extra key/value to pass to am instrument.
+      timeout: Timeout time in seconds.
+
+    Returns:
+      An instance of am_instrument_parser.TestResult object.
+    """
+    instrumentation_path = ('%s/android.test.InstrumentationTestRunner' %
+                            test_package)
+    args_with_filter = dict(instr_args)
+    args_with_filter['class'] = test
+    logging.info(args_with_filter)
+    (raw_results, _) = self._adb.StartInstrumentation(
+        instrumentation_path=instrumentation_path,
+        instrumentation_args=args_with_filter,
+        timeout_time=timeout)
+    assert len(raw_results) == 1
+    return raw_results[0]
+
+  def RunUIAutomatorTest(self, test, test_package, timeout):
+    """Runs a single uiautomator test.
+
+    Args:
+      test: Test class/method.
+      test_package: Name of the test jar.
+      timeout: Timeout time in seconds.
+
+    Returns:
+      An instance of am_instrument_parser.TestResult object.
+    """
+    cmd = 'uiautomator runtest %s -e class %s' % (test_package, test)
+    logging.info('>>> $' + cmd)
+    output = self._adb.SendShellCommand(cmd, timeout_time=timeout)
+    # uiautomator doesn't fully conform to the instrumenation test runner
+    # convention and doesn't terminate with INSTRUMENTATION_CODE.
+    # Just assume the first result is valid.
+    (test_results, _) = am_instrument_parser.ParseAmInstrumentOutput(output)
+    return test_results[0]
 
 
 class NewLineNormalizer(object):

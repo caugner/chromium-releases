@@ -79,9 +79,8 @@ AUAudioOutputStream::AUAudioOutputStream(
   DVLOG(1) << "Desired ouput format: " << format_;
 
   // Calculate the number of sample frames per callback.
-  number_of_frames_ = params.GetBytesPerBuffer() / format_.mBytesPerPacket;
+  number_of_frames_ = params.frames_per_buffer();
   DVLOG(1) << "Number of frames per callback: " << number_of_frames_;
-  CHECK_EQ(number_of_frames_, GetAudioHardwareBufferSize());
 }
 
 AUAudioOutputStream::~AUAudioOutputStream() {
@@ -97,7 +96,7 @@ bool AUAudioOutputStream::Open() {
                                                &size,
                                                &output_device_id_);
   if (result != noErr || output_device_id_ == kAudioObjectUnknown) {
-    OSSTATUS_DLOG(WARNING, result)
+    OSSTATUS_DLOG(ERROR, result)
         << "Could not get default audio output device.";
     return false;
   }
@@ -117,13 +116,13 @@ bool AUAudioOutputStream::Open() {
 
   result = AudioComponentInstanceNew(comp, &output_unit_);
   if (result != noErr) {
-    OSSTATUS_DLOG(WARNING, result) << "AudioComponentInstanceNew() failed.";
+    OSSTATUS_DLOG(ERROR, result) << "AudioComponentInstanceNew() failed.";
     return false;
   }
 
   result = AudioUnitInitialize(output_unit_);
   if (result != noErr) {
-    OSSTATUS_DLOG(WARNING, result) << "AudioUnitInitialize() failed.";
+    OSSTATUS_DLOG(ERROR, result) << "AudioUnitInitialize() failed.";
     return false;
   }
 
@@ -145,7 +144,7 @@ bool AUAudioOutputStream::Configure() {
       &input,
       sizeof(input));
   if (result != noErr) {
-    OSSTATUS_DLOG(WARNING, result)
+    OSSTATUS_DLOG(ERROR, result)
       << "AudioUnitSetProperty(kAudioUnitProperty_SetRenderCallback) failed.";
     return false;
   }
@@ -159,7 +158,7 @@ bool AUAudioOutputStream::Configure() {
       &format_,
       sizeof(format_));
   if (result != noErr) {
-    OSSTATUS_DLOG(WARNING, result)
+    OSSTATUS_DLOG(ERROR, result)
         << "AudioUnitSetProperty(kAudioUnitProperty_StreamFormat) failed.";
     return false;
   }
@@ -167,8 +166,16 @@ bool AUAudioOutputStream::Configure() {
   // Set the buffer frame size.
   // WARNING: Setting this value changes the frame size for all audio units in
   // the current process.  It's imperative that the input and output frame sizes
-  // be the same as audio_util::GetAudioHardwareBufferSize().
+  // be the same as the frames_per_buffer() returned by
+  // GetDefaultOutputStreamParameters.
   // See http://crbug.com/154352 for details.
+  const AudioParameters hw_params =
+      manager_->GetDefaultOutputStreamParameters();
+  if (number_of_frames_ != static_cast<size_t>(hw_params.frames_per_buffer())) {
+    DLOG(ERROR) << "Audio buffer size does not match hardware buffer size.";
+    return false;
+  }
+
   UInt32 buffer_size = number_of_frames_;
   result = AudioUnitSetProperty(
       output_unit_,
@@ -178,7 +185,7 @@ bool AUAudioOutputStream::Configure() {
       &buffer_size,
       sizeof(buffer_size));
   if (result != noErr) {
-    OSSTATUS_DLOG(WARNING, result)
+    OSSTATUS_DLOG(ERROR, result)
         << "AudioUnitSetProperty(kAudioDevicePropertyBufferFrameSize) failed.";
     return false;
   }
@@ -203,19 +210,21 @@ void AUAudioOutputStream::Start(AudioSourceCallback* callback) {
   }
 
   stopped_ = false;
-  source_ = callback;
+  {
+    base::AutoLock auto_lock(source_lock_);
+    source_ = callback;
+  }
 
   AudioOutputUnitStart(output_unit_);
 }
 
 void AUAudioOutputStream::Stop() {
-  // We request a synchronous stop, so the next call can take some time. In
-  // the windows implementation we block here as well.
   if (stopped_)
     return;
 
   AudioOutputUnitStop(output_unit_);
 
+  base::AutoLock auto_lock(source_lock_);
   source_ = NULL;
   stopped_ = true;
 }
@@ -254,14 +263,27 @@ OSStatus AUAudioOutputStream::Render(UInt32 number_of_frames,
   // or smaller than the value set during Configure().  In this case either
   // audio input or audio output will be broken, so just output silence.
   // TODO(crogers): Figure out what can trigger a change in |number_of_frames|.
-  // See http://crbug.com/1543 for details.
-   if (number_of_frames != static_cast<UInt32>(audio_bus_->frames())) {
-     memset(audio_data, 0, number_of_frames * format_.mBytesPerFrame);
-     return noErr;
-   }
+  // See http://crbug.com/154352 for details.
+  if (number_of_frames != static_cast<UInt32>(audio_bus_->frames())) {
+    memset(audio_data, 0, number_of_frames * format_.mBytesPerFrame);
+    return noErr;
+  }
 
-  int frames_filled = source_->OnMoreData(
-      audio_bus_.get(), AudioBuffersState(0, hardware_pending_bytes));
+  int frames_filled = 0;
+  {
+    // Render() shouldn't be called except between AudioOutputUnitStart() and
+    // AudioOutputUnitStop() calls, but crash reports have shown otherwise:
+    // http://crbug.com/178765.  We use |source_lock_| to prevent races and
+    // crashes in Render() when |source_| is cleared.
+    base::AutoLock auto_lock(source_lock_);
+    if (!source_) {
+      memset(audio_data, 0, number_of_frames * format_.mBytesPerFrame);
+      return noErr;
+    }
+
+    frames_filled = source_->OnMoreData(
+        audio_bus_.get(), AudioBuffersState(0, hardware_pending_bytes));
+  }
 
   // Note: If this ever changes to output raw float the data must be clipped and
   // sanitized since it may come from an untrusted source such as NaCl.

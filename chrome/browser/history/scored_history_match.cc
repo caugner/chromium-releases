@@ -13,20 +13,19 @@
 #include <math.h>
 
 #include "base/command_line.h"
-#include "base/i18n/case_conversion.h"
 #include "base/metrics/histogram.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/api/bookmarks/bookmark_service.h"
-#include "chrome/browser/autocomplete/autocomplete_field_trial.h"
 #include "chrome/browser/autocomplete/history_url_provider.h"
 #include "chrome/browser/autocomplete/url_prefix.h"
+#include "chrome/browser/bookmarks/bookmark_service.h"
+#include "chrome/browser/omnibox/omnibox_field_trial.h"
 #include "chrome/common/chrome_switches.h"
 #include "content/public/browser/browser_thread.h"
 
 namespace history {
 
-// The maximum score any candidate result can achieve.
+// The maximum score any candidate match can achieve.
 const int kMaxTotalScore = 1425;
 
 // Score ranges used to get a 'base' score for each of the scoring factors
@@ -41,21 +40,21 @@ const int kScoreRank[] = { 1450, 1200, 900, 400 };
 
 bool ScoredHistoryMatch::initialized_ = false;
 bool ScoredHistoryMatch::use_new_scoring = false;
-bool ScoredHistoryMatch::only_count_matches_at_word_boundaries = false;
 bool ScoredHistoryMatch::also_do_hup_like_scoring = false;
+int ScoredHistoryMatch::max_assigned_score_for_non_inlineable_matches = -1;
 
 ScoredHistoryMatch::ScoredHistoryMatch()
     : raw_score(0),
       can_inline(false) {
   if (!initialized_) {
     InitializeNewScoringField();
-    InitializeOnlyCountMatchesAtWordBoundariesField();
-    InitializeAlsoDoHUPLikeScoringField();
+    InitializeAlsoDoHUPLikeScoringFieldAndMaxScoreField();
     initialized_ = true;
   }
 }
 
 ScoredHistoryMatch::ScoredHistoryMatch(const URLRow& row,
+                                       const std::string& languages,
                                        const string16& lower_string,
                                        const String16Vector& terms,
                                        const RowWordStarts& word_starts,
@@ -66,8 +65,7 @@ ScoredHistoryMatch::ScoredHistoryMatch(const URLRow& row,
       can_inline(false) {
   if (!initialized_) {
     InitializeNewScoringField();
-    InitializeOnlyCountMatchesAtWordBoundariesField();
-    InitializeAlsoDoHUPLikeScoringField();
+    InitializeAlsoDoHUPLikeScoringFieldAndMaxScoreField();
     initialized_ = true;
   }
 
@@ -77,8 +75,8 @@ ScoredHistoryMatch::ScoredHistoryMatch(const URLRow& row,
 
   // Figure out where each search term appears in the URL and/or page title
   // so that we can score as well as provide autocomplete highlighting.
-  string16 url = base::i18n::ToLower(UTF8ToUTF16(gurl.spec()));
-  string16 title = base::i18n::ToLower(row.title());
+  string16 url = CleanUpUrlForMatching(gurl, languages);
+  string16 title = CleanUpTitleForMatching(row.title());
   int term_num = 0;
   for (String16Vector::const_iterator iter = terms.begin(); iter != terms.end();
        ++iter, ++term_num) {
@@ -102,7 +100,7 @@ ScoredHistoryMatch::ScoredHistoryMatch(const URLRow& row,
   url_matches = SortAndDeoverlapMatches(url_matches);
   title_matches = SortAndDeoverlapMatches(title_matches);
 
-  // We can inline autocomplete a result if:
+  // We can inline autocomplete a match if:
   //  1) there is only one search term
   //  2) AND the match begins immediately after one of the prefixes in
   //     URLPrefix such as http://www and https:// (note that one of these
@@ -225,7 +223,7 @@ ScoredHistoryMatch::ScoredHistoryMatch(const URLRow& row,
   }
 
   if (also_do_hup_like_scoring && can_inline) {
-    // HistoryURL-provider-like scoring gives any result that is
+    // HistoryURL-provider-like scoring gives any match that is
     // capable of being inlined a certain minimum score.  Some of these
     // are given a higher score that lets them be shown in inline.
     // This test here derives from the test in
@@ -250,9 +248,9 @@ ScoredHistoryMatch::ScoredHistoryMatch(const URLRow& row,
     // create/promote host-only suggestions (even if they've never
     // been typed).  The code is complicated and we don't try to
     // duplicate the logic here.  Instead, we handle a simple case: in
-    // low-typed-count ranges, give host-only results (i.e.,
+    // low-typed-count ranges, give host-only matches (i.e.,
     // http://www.foo.com/ vs. http://www.foo.com/bar.html) a boost so
-    // that the host-only result outscores all the other results that
+    // that the host-only match outscores all the other matches that
     // would normally have the same base score.  This behavior is not
     // identical to what happens in HistoryURLProvider even in these
     // low typed count ranges--sometimes it will create/promote when
@@ -266,6 +264,13 @@ ScoredHistoryMatch::ScoredHistoryMatch(const URLRow& row,
 
     // Incorporate hup_like_score into raw_score.
     raw_score = std::max(raw_score, hup_like_score);
+  }
+
+  // If this match is not inlineable and there's a cap on the maximum
+  // score that can be given to non-inlineable matches, apply the cap.
+  if (!can_inline && (max_assigned_score_for_non_inlineable_matches != -1)) {
+    raw_score = std::min(max_assigned_score_for_non_inlineable_matches,
+                         raw_score);
   }
 }
 
@@ -282,18 +287,14 @@ int ScoredHistoryMatch::ScoreComponentForMatches(
     const TermMatches& provided_matches,
     const WordStarts& word_starts,
     size_t max_length) {
-  if (provided_matches.empty())
+  if (provided_matches.empty() || (max_length == 0))
     return 0;
 
-  TermMatches matches_at_word_boundaries;
-  if (only_count_matches_at_word_boundaries) {
-    MakeTermMatchesOnlyAtWordBoundaries(provided_matches, word_starts,
-                                        &matches_at_word_boundaries);
-  }
   // The actual matches we'll use for matching.  This is |provided_matches|
-  // with all the matches not at a word boundary removed (if told to do so).
-  const TermMatches& matches = only_count_matches_at_word_boundaries ?
-      matches_at_word_boundaries : provided_matches;
+  // with all the matches not at a word boundary removed.
+  TermMatches matches;
+  MakeTermMatchesOnlyAtWordBoundaries(provided_matches, word_starts,
+                                      &matches);
 
   if (matches.empty())
     return 0;
@@ -691,7 +692,7 @@ void ScoredHistoryMatch::InitializeNewScoringField() {
 
     // For the field trial stuff to work correctly, we must be running
     // on the same thread as the thread that created the field trial,
-    // which happens via a call to AutocompleteFieldTrial::Active in
+    // which happens via a call to OmniboxFieldTrial::Active in
     // chrome_browser_main.cc on the main thread.  Let's check this to
     // be sure.  We check "if we've heard of the UI thread then we'd better
     // be on it."  The first part is necessary so unit tests pass.  (Many
@@ -700,9 +701,8 @@ void ScoredHistoryMatch::InitializeNewScoringField() {
     DCHECK(!content::BrowserThread::IsWellKnownThread(
                content::BrowserThread::UI) ||
            content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
-    if (AutocompleteFieldTrial::InHQPNewScoringFieldTrial()) {
-      if (AutocompleteFieldTrial::
-          InHQPNewScoringFieldTrialExperimentGroup()) {
+    if (OmniboxFieldTrial::InHQPNewScoringFieldTrial()) {
+      if (OmniboxFieldTrial::InHQPNewScoringFieldTrialExperimentGroup()) {
         new_scoring_option = NEW_SCORING_FIELD_TRIAL_EXPERIMENT_GROUP;
         use_new_scoring = true;
       } else {
@@ -723,18 +723,23 @@ void ScoredHistoryMatch::InitializeNewScoringField() {
       new_scoring_option, NUM_OPTIONS);
 }
 
-void ScoredHistoryMatch::InitializeOnlyCountMatchesAtWordBoundariesField() {
-  only_count_matches_at_word_boundaries =
-      AutocompleteFieldTrial::
-          InHQPOnlyCountMatchesAtWordBoundariesFieldTrial() &&
-      AutocompleteFieldTrial::
-          InHQPOnlyCountMatchesAtWordBoundariesFieldTrialExperimentGroup();
-}
-
-void ScoredHistoryMatch::InitializeAlsoDoHUPLikeScoringField() {
+void ScoredHistoryMatch::InitializeAlsoDoHUPLikeScoringFieldAndMaxScoreField() {
   also_do_hup_like_scoring =
-      AutocompleteFieldTrial::InHQPReplaceHUPScoringFieldTrial() &&
-      AutocompleteFieldTrial::InHQPReplaceHUPScoringFieldTrialExperimentGroup();
+      OmniboxFieldTrial::InHQPReplaceHUPScoringFieldTrial() &&
+      OmniboxFieldTrial::InHQPReplaceHUPScoringFieldTrialExperimentGroup();
+  // When doing HUP-like scoring, don't allow a non-inlineable match
+  // to beat the score of good inlineable matches.  This is a problem
+  // because if a non-inlineable match ends up with the highest score
+  // from HistoryQuick provider, all HistoryQuick matches get demoted
+  // to non-inlineable scores (scores less than 1200).  Without
+  // HUP-like-scoring, these results would actually come from the HUP
+  // and not be demoted, thus outscoring the demoted HQP results.
+  // When the HQP provides these, we need to clamp the non-inlineable
+  // results to preserve this behavior.
+  if (also_do_hup_like_scoring) {
+    max_assigned_score_for_non_inlineable_matches =
+        HistoryURLProvider::kScoreForBestInlineableResult - 1;
+  }
 }
 
 }  // namespace history

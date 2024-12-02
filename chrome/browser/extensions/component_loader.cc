@@ -8,12 +8,11 @@
 #include "base/file_util.h"
 #include "base/json/json_string_value_serializer.h"
 #include "base/path_service.h"
+#include "base/prefs/pref_change_registrar.h"
 #include "base/prefs/pref_notifier.h"
 #include "base/prefs/pref_service.h"
-#include "base/prefs/public/pref_change_registrar.h"
-#include "chrome/browser/browser_process.h"
+#include "chrome/browser/defaults.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
@@ -22,8 +21,10 @@
 #include "chrome/common/extensions/extension_file_util.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/pref_names.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
+#include "extensions/common/id_util.h"
 #include "grit/browser_resources.h"
 #include "ui/base/resource/resource_bundle.h"
 
@@ -50,10 +51,9 @@ std::string GenerateId(const DictionaryValue* manifest,
                        const base::FilePath& path) {
   std::string raw_key;
   std::string id_input;
-  std::string id;
   CHECK(manifest->GetString(extension_manifest_keys::kPublicKey, &raw_key));
   CHECK(Extension::ParsePEMKeyBytes(raw_key, &id_input));
-  CHECK(Extension::GenerateId(id_input, &id));
+  std::string id = id_util::GenerateId(id_input);
   return id;
 }
 
@@ -71,8 +71,8 @@ ComponentLoader::ComponentExtensionInfo::ComponentExtensionInfo(
 }
 
 ComponentLoader::ComponentLoader(ExtensionServiceInterface* extension_service,
-                                 PrefServiceBase* profile_prefs,
-                                 PrefServiceBase* local_state)
+                                 PrefService* profile_prefs,
+                                 PrefService* local_state)
     : profile_prefs_(profile_prefs),
       local_state_(local_state),
       extension_service_(extension_service) {
@@ -254,6 +254,22 @@ void ComponentLoader::AddFileManagerExtension() {
 #endif  // defined(FILE_MANAGER_EXTENSION)
 }
 
+void ComponentLoader::AddImageLoaderExtension() {
+#if defined(IMAGE_LOADER_EXTENSION)
+#ifndef NDEBUG
+  const CommandLine* command_line = CommandLine::ForCurrentProcess();
+  if (command_line->HasSwitch(switches::kImageLoaderExtensionPath)) {
+    base::FilePath image_loader_extension_path(
+        command_line->GetSwitchValuePath(switches::kImageLoaderExtensionPath));
+    Add(IDR_IMAGE_LOADER_MANIFEST, image_loader_extension_path);
+    return;
+  }
+#endif  // NDEBUG
+  Add(IDR_IMAGE_LOADER_MANIFEST,
+      base::FilePath(FILE_PATH_LITERAL("image_loader")));
+#endif  // defined(IMAGE_LOADER_EXTENSION)
+}
+
 #if defined(OS_CHROMEOS)
 void ComponentLoader::AddGaiaAuthExtension() {
   const CommandLine* command_line = CommandLine::ForCurrentProcess();
@@ -304,12 +320,12 @@ void ComponentLoader::AddChromeApp() {
   // required in case LoadAll() is called again.
   DictionaryValue* manifest = ParseManifest(manifest_contents);
 
-  // Update manifest to use a proper name.
-  manifest->SetString(extension_manifest_keys::kName,
-                      l10n_util::GetStringUTF8(IDS_SHORT_PRODUCT_NAME));
-
-  if (manifest)
+  if (manifest) {
+    // Update manifest to use a proper name.
+    manifest->SetString(extension_manifest_keys::kName,
+                        l10n_util::GetStringUTF8(IDS_SHORT_PRODUCT_NAME));
     Add(manifest, base::FilePath(FILE_PATH_LITERAL("chrome_app")));
+  }
 #endif
 }
 
@@ -384,12 +400,13 @@ void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
   if (!skip_session_components) {
     // Apps Debugger
     if (CommandLine::ForCurrentProcess()->HasSwitch(
-        switches::kAppsDebugger)) {
+        switches::kAppsDevtool)) {
       Add(IDR_APPS_DEBUGGER_MANIFEST,
           base::FilePath(FILE_PATH_LITERAL("apps_debugger")));
     }
 
     AddFileManagerExtension();
+    AddImageLoaderExtension();
 
 #if defined(ENABLE_SETTINGS_APP)
     Add(IDR_SETTINGS_APP_MANIFEST,
@@ -399,8 +416,20 @@ void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
 
 #if defined(OS_CHROMEOS)
   if (!skip_session_components) {
+#if defined(GOOGLE_CHROME_BUILD)
     Add(IDR_WALLPAPERMANAGER_MANIFEST,
         base::FilePath(FILE_PATH_LITERAL("chromeos/wallpaper_manager")));
+
+    if (browser_defaults::enable_component_quick_office) {
+      // Don't load Quickoffice component extension in Guest mode because
+      // it doesn't work in Incognito mode due to disabled temp fs.
+      // TODO(dpolukhin): enable Quickoffice in Guest mode.
+      if (!command_line->HasSwitch(switches::kGuestSession)) {
+        Add(IDR_QUICK_OFFICE_MANIFEST, base::FilePath(FILE_PATH_LITERAL(
+                                  "/usr/share/chromeos-assets/quick_office")));
+      }
+    }
+#endif  // defined(OFFICIAL_BUILD)
 
     base::FilePath echo_extension_path(FILE_PATH_LITERAL(
         "/usr/share/chromeos-assets/echo"));
@@ -409,6 +438,9 @@ void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
           command_line->GetSwitchValuePath(switches::kEchoExtensionPath);
     }
     Add(IDR_ECHO_MANIFEST, echo_extension_path);
+
+    Add(IDR_NETWORK_CONFIGURATION_MANIFEST,
+        base::FilePath(FILE_PATH_LITERAL("chromeos/network_configuration")));
   }
 
   // Load ChromeVox extension now if spoken feedback is enabled.
@@ -417,7 +449,7 @@ void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
         base::FilePath(extension_misc::kChromeVoxExtensionPath);
     Add(IDR_CHROMEVOX_MANIFEST, path);
   }
-#endif
+#endif  // defined(OS_CHROMEOS)
 
 #if defined(ENABLE_GOOGLE_NOW)
   if (CommandLine::ForCurrentProcess()->HasSwitch(

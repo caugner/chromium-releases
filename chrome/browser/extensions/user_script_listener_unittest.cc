@@ -95,7 +95,7 @@ scoped_refptr<Extension> LoadExtension(const std::string& filename,
   scoped_ptr<DictionaryValue> value(LoadManifestFile(path, error));
   if (!value.get())
     return NULL;
-  return Extension::Create(path.DirName(), Manifest::LOAD, *value,
+  return Extension::Create(path.DirName(), Manifest::UNPACKED, *value,
                            Extension::NO_FLAGS, error);
 }
 
@@ -159,7 +159,7 @@ class UserScriptListenerTest : public ExtensionServiceTestBase {
                                         net::TestURLRequestContext* context) {
     GURL url(url_string);
     net::TestURLRequest* request =
-        new net::TestURLRequest(url, delegate, context);
+        new net::TestURLRequest(url, delegate, context, NULL);
 
     ResourceThrottle* throttle =
         listener_->CreateResourceThrottle(url, ResourceType::MAIN_FRAME);
@@ -325,7 +325,7 @@ TEST_F(UserScriptListenerTest, ResumeBeforeStart) {
   net::TestURLRequestContext context;
   GURL url(kMatchingUrl);
   scoped_ptr<net::TestURLRequest> request(
-      new net::TestURLRequest(url, &delegate, &context));
+      new net::TestURLRequest(url, &delegate, &context, NULL));
 
   ResourceThrottle* throttle =
       listener_->CreateResourceThrottle(url, ResourceType::MAIN_FRAME);

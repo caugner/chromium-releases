@@ -34,13 +34,19 @@ AutofillPopupViewViews::AutofillPopupViewViews(
       observing_widget_(NULL) {}
 
 AutofillPopupViewViews::~AutofillPopupViewViews() {
-  if (observing_widget_)
-    observing_widget_->RemoveObserver(this);
+  if (controller_) {
+    controller_->ViewDestroyed();
 
-  controller_->ViewDestroyed();
+    HideInternal();
+  }
 }
 
 void AutofillPopupViewViews::Hide() {
+  // The controller is no longer valid after it hides us.
+  controller_ = NULL;
+
+  HideInternal();
+
   if (GetWidget()) {
     // This deletes |this|.
     GetWidget()->Close();
@@ -70,7 +76,7 @@ void AutofillPopupViewViews::OnMouseCaptureLost() {
 }
 
 bool AutofillPopupViewViews::OnMouseDragged(const ui::MouseEvent& event) {
-  if (HitTestPoint(gfx::Point(event.x(), event.y()))) {
+  if (HitTestPoint(event.location())) {
     controller_->MouseHovered(event.x(), event.y());
 
     // We must return true in order to get future OnMouseDragged and
@@ -99,14 +105,14 @@ bool AutofillPopupViewViews::OnMousePressed(const ui::MouseEvent& event) {
 void AutofillPopupViewViews::OnMouseReleased(const ui::MouseEvent& event) {
   // We only care about the left click.
   if (event.IsOnlyLeftMouseButton() &&
-      HitTestPoint(gfx::Point(event.x(), event.y())))
+      HitTestPoint(event.location()))
     controller_->MouseClicked(event.x(), event.y());
 }
 
 void AutofillPopupViewViews::OnWidgetBoundsChanged(
     views::Widget* widget,
     const gfx::Rect& new_bounds) {
-  Hide();
+  controller_->Hide();
 }
 
 void AutofillPopupViewViews::Show() {
@@ -117,12 +123,9 @@ void AutofillPopupViewViews::Show() {
     views::Widget* widget = new views::Widget;
     views::Widget::InitParams params(views::Widget::InitParams::TYPE_POPUP);
     params.delegate = this;
-    params.transparent = true;
     params.parent = controller_->container_view();
     widget->Init(params);
     widget->SetContentsView(this);
-    widget->SetBounds(controller_->popup_bounds());
-    widget->Show();
 
     // Setup an observer to check for when the browser moves or changes size,
     // since the popup should always be hidden in those cases.
@@ -134,6 +137,7 @@ void AutofillPopupViewViews::Show() {
   set_border(views::Border::CreateSolidBorder(kBorderThickness, kBorderColor));
 
   UpdateBoundsAndRedrawPopup();
+  GetWidget()->Show();
 }
 
 void AutofillPopupViewViews::InvalidateRow(size_t row) {
@@ -145,19 +149,30 @@ void AutofillPopupViewViews::UpdateBoundsAndRedrawPopup() {
   SchedulePaint();
 }
 
+void AutofillPopupViewViews::HideInternal() {
+  AutofillPopupView::Hide();
+
+  if (observing_widget_)
+    observing_widget_->RemoveObserver(this);
+}
+
 void AutofillPopupViewViews::DrawAutofillEntry(gfx::Canvas* canvas,
                                                int index,
                                                const gfx::Rect& entry_rect) {
-  // TODO(csharp): support RTL
-
   if (controller_->selected_line() == index)
     canvas->FillRect(entry_rect, kHoveredBackgroundColor);
+
+  bool is_rtl = base::i18n::IsRTL();
+  int value_text_width = controller_->GetNameFontForRow(index).GetStringWidth(
+      controller_->names()[index]);
+  int value_content_x = is_rtl ?
+      entry_rect.width() - value_text_width - kEndPadding : kEndPadding;
 
   canvas->DrawStringInt(
       controller_->names()[index],
       controller_->GetNameFontForRow(index),
       kValueTextColor,
-      kEndPadding,
+      value_content_x,
       entry_rect.y(),
       canvas->GetStringWidth(controller_->names()[index],
                              controller_->GetNameFontForRow(index)),
@@ -165,40 +180,28 @@ void AutofillPopupViewViews::DrawAutofillEntry(gfx::Canvas* canvas,
       gfx::Canvas::TEXT_ALIGN_CENTER);
 
   // Use this to figure out where all the other Autofill items should be placed.
-  int x_align_left = entry_rect.width() - kEndPadding;
-
-  // Draw the delete icon, if one is needed.
-  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-  int row_height = controller_->GetRowBounds(index).height();
-  if (controller_->CanDelete(index)) {
-    x_align_left -= kDeleteIconWidth;
-
-    // TODO(csharp): Create a custom resource for the delete icon.
-    // http://crbug.com/131801
-    canvas->DrawImageInt(
-        *rb.GetImageSkiaNamed(IDR_CLOSE_BAR),
-        x_align_left,
-        entry_rect.y() + (row_height - kDeleteIconHeight) / 2);
-
-    x_align_left -= kIconPadding;
-  }
+  int x_align_left = is_rtl ? kEndPadding : entry_rect.width() - kEndPadding;
 
   // Draw the Autofill icon, if one exists
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+  int row_height = controller_->GetRowBounds(index).height();
   if (!controller_->icons()[index].empty()) {
     int icon = controller_->GetIconResourceID(controller_->icons()[index]);
     DCHECK_NE(-1, icon);
     int icon_y = entry_rect.y() + (row_height - kAutofillIconHeight) / 2;
 
-    x_align_left -= kAutofillIconWidth;
+    x_align_left += is_rtl ? 0 : -kAutofillIconWidth;
 
     canvas->DrawImageInt(*rb.GetImageSkiaNamed(icon), x_align_left, icon_y);
 
-    x_align_left -= kIconPadding;
+    x_align_left += is_rtl ? kAutofillIconWidth + kIconPadding : -kIconPadding;
   }
 
   // Draw the name text.
-  x_align_left -= canvas->GetStringWidth(controller_->subtexts()[index],
-                                         controller_->subtext_font());
+  if (!is_rtl) {
+    x_align_left -= canvas->GetStringWidth(controller_->subtexts()[index],
+                                           controller_->subtext_font());
+  }
 
   canvas->DrawStringInt(
       controller_->subtexts()[index],

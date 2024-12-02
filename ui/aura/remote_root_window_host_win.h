@@ -146,6 +146,8 @@ class AURA_EXPORT RemoteRootWindowHostWin : public RootWindowHost {
   virtual void ToggleFullScreen() OVERRIDE;
   virtual gfx::Rect GetBounds() const OVERRIDE;
   virtual void SetBounds(const gfx::Rect& bounds) OVERRIDE;
+  virtual gfx::Insets GetInsets() const OVERRIDE;
+  virtual void SetInsets(const gfx::Insets& insets) OVERRIDE;
   virtual gfx::Point GetLocationOnNativeScreen() const OVERRIDE;
   virtual void SetCapture() OVERRIDE;
   virtual void ReleaseCapture() OVERRIDE;
@@ -165,6 +167,18 @@ class AURA_EXPORT RemoteRootWindowHostWin : public RootWindowHost {
   virtual void PostNativeEvent(const base::NativeEvent& native_event) OVERRIDE;
   virtual void OnDeviceScaleFactorChanged(float device_scale_factor) OVERRIDE;
   virtual void PrepareForShutdown() OVERRIDE;
+
+  // Helper function to dispatch a keyboard message to the desired target.
+  // The default target is the RootWindowHostDelegate. For nested message loop
+  // invocations we post a synthetic keyboard message directly into the message
+  // loop. The dispatcher for the nested loop would then decide how this
+  // message is routed.
+  void DispatchKeyboardMessage(ui::EventType type,
+                               uint32 vkey,
+                               uint32 repeat_count,
+                               uint32 scan_code,
+                               uint32 flags,
+                               bool is_character);
 
   RootWindowHostDelegate* delegate_;
   IPC::Sender* host_;

@@ -6,17 +6,21 @@
 
 #include <android/bitmap.h>
 #include <android/native_window_jni.h>
+#include <map>
 
+#include "base/android/jni_android.h"
+#include "base/android/scoped_java_ref.h"
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
-#include "cc/font_atlas.h"
-#include "cc/input_handler.h"
-#include "cc/layer.h"
-#include "cc/layer_tree_host.h"
-#include "cc/output_surface.h"
-#include "cc/thread_impl.h"
+#include "base/synchronization/lock.h"
+#include "cc/base/thread_impl.h"
+#include "cc/input/input_handler.h"
+#include "cc/layers/layer.h"
+#include "cc/output/context_provider.h"
+#include "cc/output/output_surface.h"
+#include "cc/trees/layer_tree_host.h"
 #include "content/browser/gpu/browser_gpu_channel_host_factory.h"
 #include "content/browser/gpu/gpu_surface_tracker.h"
 #include "content/browser/renderer_host/image_transport_factory_android.h"
@@ -25,9 +29,9 @@
 #include "content/common/gpu/client/webgraphicscontext3d_command_buffer_impl.h"
 #include "content/common/gpu/gpu_process_launch_causes.h"
 #include "content/public/common/content_switches.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebGraphicsContext3D.h"
 #include "third_party/khronos/GLES2/gl2.h"
 #include "third_party/khronos/GLES2/gl2ext.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebGraphicsContext3D.h"
 #include "ui/gfx/android/java_bitmap.h"
 #include "webkit/glue/webthread_impl.h"
 #include "webkit/gpu/webgraphicscontext3d_in_process_impl.h"
@@ -38,52 +42,30 @@ class JavaBitmap;
 
 namespace {
 
+// Used for drawing directly to the screen. Bypasses resizing and swaps.
+class DirectOutputSurface : public cc::OutputSurface {
+ public:
+  DirectOutputSurface(scoped_ptr<WebKit::WebGraphicsContext3D> context3d)
+      : cc::OutputSurface(context3d.Pass()) {}
+
+  virtual void Reshape(gfx::Size size) OVERRIDE {}
+  virtual void PostSubBuffer(gfx::Rect rect) OVERRIDE {}
+  virtual void SwapBuffers() OVERRIDE {}
+};
+
 static bool g_initialized = false;
 static webkit_glue::WebThreadImpl* g_impl_thread = NULL;
 static bool g_use_direct_gl = false;
 
-// Adapts a pure WebGraphicsContext3D into a cc::OutputSurface.
-class WebGraphicsContextToOutputSurfaceAdapter : public cc::OutputSurface {
- public:
-  explicit WebGraphicsContextToOutputSurfaceAdapter(
-      WebKit::WebGraphicsContext3D* context)
-      : context3d_(context),
-        client_(0) {
-  }
-
-  virtual bool BindToClient(cc::OutputSurfaceClient* client) OVERRIDE {
-    DCHECK(client);
-    if (!context3d_->makeContextCurrent())
-      return false;
-    client_ = client;
-    return true;
-  }
-
-  virtual const struct Capabilities& Capabilities() const OVERRIDE {
-    return capabilities_;
-  }
-
-  virtual WebKit::WebGraphicsContext3D* Context3D() const OVERRIDE {
-    return context3d_.get();
-  }
-
-  virtual cc::SoftwareOutputDevice* SoftwareDevice() const OVERRIDE {
-    return NULL;
-  }
-
-  virtual void SendFrameToParentCompositor(
-      cc::CompositorFrame*) OVERRIDE {
-  }
-
- private:
-  scoped_ptr<WebKit::WebGraphicsContext3D> context3d_;
-  struct Capabilities capabilities_;
-  cc::OutputSurfaceClient* client_;
-};
-
 } // anonymous namespace
 
 namespace content {
+
+typedef std::map<int, base::android::ScopedJavaGlobalRef<jobject> >
+    SurfaceMap;
+static base::LazyInstance<SurfaceMap>
+    g_surface_map = LAZY_INSTANCE_INITIALIZER;
+static base::LazyInstance<base::Lock> g_surface_map_lock;
 
 // static
 Compositor* Compositor::Create(Client* client) {
@@ -121,8 +103,19 @@ bool CompositorImpl::UsesDirectGL() {
   return g_use_direct_gl;
 }
 
+// static
+jobject CompositorImpl::GetSurface(int surface_id) {
+  base::AutoLock lock(g_surface_map_lock.Get());
+  SurfaceMap* surfaces = g_surface_map.Pointer();
+  SurfaceMap::iterator it = surfaces->find(surface_id);
+  jobject jsurface = it == surfaces->end() ? NULL : it->second.obj();
+
+  LOG_IF(WARNING, !jsurface) << "No surface for surface id " << surface_id;
+  return jsurface;
+}
+
 CompositorImpl::CompositorImpl(Compositor::Client* client)
-    : root_layer_(cc::Layer::create()),
+    : root_layer_(cc::Layer::Create()),
       has_transparent_background_(false),
       window_(NULL),
       surface_id_(0),
@@ -136,12 +129,12 @@ CompositorImpl::~CompositorImpl() {
 
 void CompositorImpl::Composite() {
   if (host_.get())
-    host_->composite();
+    host_->Composite(base::TimeTicks::Now());
 }
 
 void CompositorImpl::SetRootLayer(scoped_refptr<cc::Layer> root_layer) {
-  root_layer_->removeAllChildren();
-  root_layer_->addChild(root_layer);
+  root_layer_->RemoveAllChildren();
+  root_layer_->AddChild(root_layer);
 }
 
 void CompositorImpl::SetWindowSurface(ANativeWindow* window) {
@@ -161,8 +154,28 @@ void CompositorImpl::SetWindowSurface(ANativeWindow* window) {
     surface_id_ = tracker->AddSurfaceForNativeWidget(window);
     tracker->SetSurfaceHandle(
         surface_id_,
-        gfx::GLSurfaceHandle(gfx::kDummyPluginWindow, false));
+        gfx::GLSurfaceHandle(gfx::kNullPluginWindow, gfx::NATIVE_DIRECT));
     SetVisible(true);
+  }
+}
+
+void CompositorImpl::SetSurface(jobject surface) {
+  JNIEnv* env = base::android::AttachCurrentThread();
+  base::android::ScopedJavaLocalRef<jobject> j_surface(env, surface);
+  if (surface) {
+    ANativeWindow* window = ANativeWindow_fromSurface(env, surface);
+    SetWindowSurface(window);
+    ANativeWindow_release(window);
+    {
+      base::AutoLock lock(g_surface_map_lock.Get());
+      g_surface_map.Get().insert(std::make_pair(surface_id_, j_surface));
+    }
+  } else {
+    {
+      base::AutoLock lock(g_surface_map_lock.Get());
+      g_surface_map.Get().erase(surface_id_);
+    }
+    SetWindowSurface(NULL);
   }
 }
 
@@ -171,29 +184,35 @@ void CompositorImpl::SetVisible(bool visible) {
     host_.reset();
   } else if (!host_.get()) {
     cc::LayerTreeSettings settings;
-    settings.refreshRate = 60.0;
-    settings.implSidePainting = false;
-    settings.calculateTopControlsPosition = false;
-    settings.topControlsHeight = 0.f;
+    settings.refresh_rate = 60.0;
+    settings.impl_side_painting = false;
+    settings.calculate_top_controls_position = false;
+    settings.top_controls_height = 0.f;
+    settings.use_memory_management = false;
 
     // Do not clear the framebuffer when rendering into external GL contexts
     // like Android View System's.
     if (UsesDirectGL())
-      settings.shouldClearRootRenderPass = false;
+      settings.should_clear_root_render_pass = false;
 
     scoped_ptr<cc::Thread> impl_thread;
     if (g_impl_thread)
-      impl_thread = cc::ThreadImpl::createForDifferentThread(
+      impl_thread = cc::ThreadImpl::CreateForDifferentThread(
           g_impl_thread->message_loop()->message_loop_proxy());
 
-    host_ = cc::LayerTreeHost::create(this, settings, impl_thread.Pass());
-    host_->setRootLayer(root_layer_);
+    host_ = cc::LayerTreeHost::Create(this, settings, impl_thread.Pass());
+    host_->SetRootLayer(root_layer_);
 
-    host_->setVisible(true);
-    host_->setSurfaceReady();
-    host_->setViewportSize(size_, size_);
-    host_->setHasTransparentBackground(has_transparent_background_);
+    host_->SetVisible(true);
+    host_->SetSurfaceReady();
+    host_->SetViewportSize(size_, size_);
+    host_->set_has_transparent_background(has_transparent_background_);
   }
+}
+
+void CompositorImpl::setDeviceScaleFactor(float factor) {
+  if (host_)
+    host_->SetDeviceScaleFactor(factor);
 }
 
 void CompositorImpl::SetWindowBounds(const gfx::Size& size) {
@@ -202,19 +221,19 @@ void CompositorImpl::SetWindowBounds(const gfx::Size& size) {
 
   size_ = size;
   if (host_)
-    host_->setViewportSize(size, size);
-  root_layer_->setBounds(size);
+    host_->SetViewportSize(size, size);
+  root_layer_->SetBounds(size);
 }
 
 void CompositorImpl::SetHasTransparentBackground(bool flag) {
   has_transparent_background_ = flag;
   if (host_.get())
-    host_->setHasTransparentBackground(flag);
+    host_->set_has_transparent_background(flag);
 }
 
 bool CompositorImpl::CompositeAndReadback(void *pixels, const gfx::Rect& rect) {
   if (host_.get())
-    return host_->compositeAndReadback(pixels, rect);
+    return host_->CompositeAndReadback(pixels, rect);
   else
     return false;
 }
@@ -294,28 +313,23 @@ bool CompositorImpl::CopyTextureToBitmap(WebKit::WebGLId texture_id,
   return true;
 }
 
-void CompositorImpl::animate(double monotonicFrameBeginTime) {
-}
-
-void CompositorImpl::layout() {
-}
-
-void CompositorImpl::applyScrollAndScale(gfx::Vector2d scrollDelta,
-                                         float pageScale) {
-}
-
-scoped_ptr<cc::OutputSurface> CompositorImpl::createOutputSurface() {
+scoped_ptr<cc::OutputSurface> CompositorImpl::CreateOutputSurface() {
   if (g_use_direct_gl) {
     WebKit::WebGraphicsContext3D::Attributes attrs;
     attrs.shareResources = false;
     attrs.noAutomaticFlushes = true;
-    scoped_ptr<webkit::gpu::WebGraphicsContext3DInProcessImpl> context(
+    scoped_ptr<WebKit::WebGraphicsContext3D> context(
         webkit::gpu::WebGraphicsContext3DInProcessImpl::CreateForWindow(
             attrs,
             window_,
             NULL));
-    return scoped_ptr<cc::OutputSurface>(
-        new WebGraphicsContextToOutputSurfaceAdapter(context.release()));
+
+    if (!window_) {
+      return scoped_ptr<cc::OutputSurface>(
+          new DirectOutputSurface(context.Pass()));
+    }
+
+    return make_scoped_ptr(new cc::OutputSurface(context.Pass()));
   } else {
     DCHECK(window_ && surface_id_);
     WebKit::WebGraphicsContext3D::Attributes attrs;
@@ -335,34 +349,39 @@ scoped_ptr<cc::OutputSurface> CompositorImpl::createOutputSurface() {
       LOG(ERROR) << "Failed to create 3D context for compositor.";
       return scoped_ptr<cc::OutputSurface>();
     }
-    return scoped_ptr<cc::OutputSurface>(
-        new WebGraphicsContextToOutputSurfaceAdapter(context.release()));
+    return make_scoped_ptr(new cc::OutputSurface(
+        context.PassAs<WebKit::WebGraphicsContext3D>()));
   }
 }
 
-scoped_ptr<cc::InputHandler> CompositorImpl::createInputHandler() {
+scoped_ptr<cc::InputHandler> CompositorImpl::CreateInputHandler() {
   return scoped_ptr<cc::InputHandler>();
 }
 
-void CompositorImpl::didRecreateOutputSurface(bool success) {
-}
-
-void CompositorImpl::didCommit() {
-}
-
-void CompositorImpl::didCommitAndDrawFrame() {
-}
-
-void CompositorImpl::didCompleteSwapBuffers() {
+void CompositorImpl::DidCompleteSwapBuffers() {
   client_->OnSwapBuffersCompleted();
 }
 
-void CompositorImpl::scheduleComposite() {
+void CompositorImpl::ScheduleComposite() {
   client_->ScheduleComposite();
 }
 
-scoped_ptr<cc::FontAtlas> CompositorImpl::createFontAtlas() {
-  return scoped_ptr<cc::FontAtlas>();
+scoped_refptr<cc::ContextProvider>
+CompositorImpl::OffscreenContextProviderForMainThread() {
+  // There is no support for offscreen contexts, or compositor filters that
+  // would require them in this compositor instance. If they are needed,
+  // then implement a context provider that provides contexts from
+  // ImageTransportSurfaceAndroid.
+  return NULL;
+}
+
+scoped_refptr<cc::ContextProvider>
+CompositorImpl::OffscreenContextProviderForCompositorThread() {
+  // There is no support for offscreen contexts, or compositor filters that
+  // would require them in this compositor instance. If they are needed,
+  // then implement a context provider that provides contexts from
+  // ImageTransportSurfaceAndroid.
+  return NULL;
 }
 
 void CompositorImpl::OnViewContextSwapBuffersPosted() {

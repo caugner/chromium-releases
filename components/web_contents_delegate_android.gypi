@@ -42,7 +42,6 @@
             '../content/content.gyp:content_java',
           ],
           'variables': {
-            'package_name': 'web_contents_delegate_android',
             'java_in_dir': 'web_contents_delegate_android/android/java',
           },
           'includes': [ '../build/java.gypi' ],
@@ -55,7 +54,7 @@
             'web_contents_delegate_android/android/java/src/org/chromium/components/web_contents_delegate_android/WebContentsDelegateAndroid.java',
           ],
           'variables': {
-            'jni_gen_dir': 'web_contents_delegate_android',
+            'jni_gen_package': 'web_contents_delegate_android',
           },
           'includes': [ '../build/jni_generator.gypi' ],
         },

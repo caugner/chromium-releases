@@ -8,12 +8,12 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/prefs/public/pref_member.h"
-#include "chrome/browser/api/sync/profile_sync_service_observer.h"
+#include "base/prefs/pref_member.h"
 #include "chrome/browser/printing/cloud_print/cloud_print_setup_handler.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_service_observer.h"
 #include "chrome/browser/shell_integration.h"
+#include "chrome/browser/sync/profile_sync_service_observer.h"
 #include "chrome/browser/ui/webui/options/options_ui.h"
 #include "ui/base/models/table_model_observer.h"
 #include "ui/shell_dialogs/select_file_dialog.h"
@@ -21,7 +21,7 @@
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/system/pointer_device_observer.h"
 #else
-#include "base/prefs/public/pref_change_registrar.h"
+#include "base/prefs/pref_change_registrar.h"
 #endif  // defined(OS_CHROMEOS)
 
 class AutocompleteController;
@@ -55,6 +55,9 @@ class BrowserOptionsHandler
 
   // ProfileSyncServiceObserver implementation.
   virtual void OnStateChanged() OVERRIDE;
+
+  // Will be called when the kSigninAllowed pref has changed.
+  void OnSigninAllowedPrefChange();
 
   // ShellIntegration::DefaultWebClientObserver implementation.
   virtual void SetDefaultWebClientUIState(
@@ -177,6 +180,9 @@ class BrowserOptionsHandler
   // the "Use TLS 1.0" checkbox.
   void HandleUseTLS1Checkbox(const ListValue* args);
 
+  // Callback for the "restartBrowser" message. Restores all tabs on restart.
+  void HandleRestartBrowser(const ListValue* args);
+
 #if !defined(OS_CHROMEOS)
   // Callback for the "showNetworkProxySettings" message. This will invoke
   // an appropriate dialog for configuring proxy settings.
@@ -272,9 +278,6 @@ class BrowserOptionsHandler
   // Used to get WeakPtr to self for use on the UI thread.
   base::WeakPtrFactory<BrowserOptionsHandler> weak_ptr_factory_;
 
-  // True if the multiprofiles switch is enabled.
-  bool multiprofile_;
-
   scoped_refptr<ui::SelectFileDialog> select_folder_dialog_;
 
 #if !defined(OS_CHROMEOS)
@@ -288,9 +291,7 @@ class BrowserOptionsHandler
   IntegerPrefMember default_font_size_;
   DoublePrefMember default_zoom_level_;
 
-#if !defined(OS_CHROMEOS)
-  PrefChangeRegistrar proxy_prefs_;
-#endif  // !defined(OS_CHROMEOS)
+  PrefChangeRegistrar profile_pref_registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserOptionsHandler);
 };

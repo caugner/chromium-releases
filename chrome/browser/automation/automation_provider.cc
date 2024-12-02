@@ -10,7 +10,7 @@
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/debug/trace_event.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_string_value_serializer.h"
 #include "base/json/json_writer.h"
@@ -33,8 +33,6 @@
 #include "chrome/browser/automation/automation_resource_message_filter.h"
 #include "chrome/browser/automation/automation_tab_tracker.h"
 #include "chrome/browser/automation/automation_window_tracker.h"
-#include "chrome/browser/bookmarks/bookmark_model.h"
-#include "chrome/browser/bookmarks/bookmark_storage.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browsing_data/browsing_data_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_remover.h"
@@ -428,7 +426,7 @@ bool AutomationProvider::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(AutomationMsg_BeginTracing, BeginTracing)
     IPC_MESSAGE_HANDLER_DELAY_REPLY(AutomationMsg_EndTracing, EndTracing)
     IPC_MESSAGE_HANDLER(AutomationMsg_GetTracingOutput, GetTracingOutput)
-#if defined(OS_WIN) && !defined(USE_AURA)
+#if defined(OS_WIN)
     // These are for use with external tabs.
     IPC_MESSAGE_HANDLER(AutomationMsg_CreateExternalTab, CreateExternalTab)
     IPC_MESSAGE_HANDLER(AutomationMsg_ProcessUnhandledAccelerator,
@@ -770,7 +768,10 @@ void AutomationProvider::JavaScriptStressTestControl(int tab_handle,
 void AutomationProvider::BeginTracing(const std::string& categories,
                                       bool* success) {
   tracing_data_.trace_output.clear();
-  *success = TraceController::GetInstance()->BeginTracing(this, categories);
+  *success = TraceController::GetInstance()->BeginTracing(
+      this,
+      categories,
+      base::debug::TraceLog::RECORD_UNTIL_FULL);
 }
 
 void AutomationProvider::EndTracing(IPC::Message* reply_message) {

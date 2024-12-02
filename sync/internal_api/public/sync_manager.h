@@ -10,7 +10,7 @@
 
 #include "base/basictypes.h"
 #include "base/callback_forward.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "base/task_runner.h"
 #include "base/threading/thread_checker.h"
@@ -353,6 +353,11 @@ class SYNC_EXPORT SyncManager {
   // Forwards to the underlying notifier (see comments in invalidator.h).
   virtual void UnregisterInvalidationHandler(
       InvalidationHandler* handler) = 0;
+
+  // Forwards to the underlying notifier (see comments in invalidator.h).
+  virtual void AcknowledgeInvalidation(
+      const invalidation::ObjectId& id,
+      const syncer::AckHandle& ack_handle) = 0;
 
   // Put the syncer in normal mode ready to perform nudges and polls.
   virtual void StartSyncingNormally(

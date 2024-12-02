@@ -13,12 +13,12 @@
 #include "content/public/browser/web_contents_user_data.h"
 #include "ui/gfx/native_widget_types.h"
 
-class WebContentsModalDialog;
 class WebContentsModalDialogManagerDelegate;
 
 // Per-WebContents class to manage WebContents-modal dialogs.
 class WebContentsModalDialogManager
-    : public content::WebContentsObserver,
+    : public NativeWebContentsModalDialogManagerDelegate,
+      public content::WebContentsObserver,
       public content::WebContentsUserData<WebContentsModalDialogManager> {
  public:
   virtual ~WebContentsModalDialogManager();
@@ -27,14 +27,11 @@ class WebContentsModalDialogManager
   void set_delegate(WebContentsModalDialogManagerDelegate* d) { delegate_ = d; }
 
   static NativeWebContentsModalDialogManager* CreateNativeManager(
-      WebContentsModalDialogManager* manager);
+      NativeWebContentsModalDialogManagerDelegate* native_delegate);
 
-  // Adds the given dialog to the list of child dialogs. The dialog will notify
-  // via WillClose() when it is being destroyed.
-  void AddDialog(WebContentsModalDialog* dialog);
-
-  // Called when a WebContentsModalDialogs we own is about to be closed.
-  void WillClose(WebContentsModalDialog* dialog);
+  // Shows the dialog as a web contents modal dialog. The dialog will notify via
+  // WillClose() when it is being destroyed.
+  void ShowDialog(NativeWebContentsModalDialog dialog);
 
   // Blocks/unblocks interaction with renderer process.
   void BlockWebContentsInteraction(bool blocked);
@@ -45,6 +42,13 @@ class WebContentsModalDialogManager
   // Focus the topmost modal dialog.  IsShowingDialog() must be true when
   // calling this function.
   void FocusTopmostDialog();
+
+  // Overriden from NativeWebContentsModalDialogManagerDelegate:
+  virtual content::WebContents* GetWebContents() const OVERRIDE;
+  // Called when a WebContentsModalDialogs we own is about to be closed.
+  virtual void WillClose(NativeWebContentsModalDialog dialog) OVERRIDE;
+
+  // Overridden from WebContentsModalDialog:
 
   // For testing.
   class TestApi {
@@ -67,7 +71,7 @@ class WebContentsModalDialogManager
   explicit WebContentsModalDialogManager(content::WebContents* web_contents);
   friend class content::WebContentsUserData<WebContentsModalDialogManager>;
 
-  typedef std::deque<WebContentsModalDialog*> WebContentsModalDialogList;
+  typedef std::deque<NativeWebContentsModalDialog> WebContentsModalDialogList;
 
   // Returns the number of dialogs in this tab.
   size_t dialog_count() const { return child_dialogs_.size(); }
@@ -100,6 +104,9 @@ class WebContentsModalDialogManager
 
   // All active dialogs.
   WebContentsModalDialogList child_dialogs_;
+
+  // True while closing the dialogs on WebContents close.
+  bool closing_all_dialogs_;
 
   DISALLOW_COPY_AND_ASSIGN(WebContentsModalDialogManager);
 };

@@ -6,10 +6,10 @@
 
 #include "base/test/values_test_util.h"
 #include "base/values.h"
-#include "cc/content_layer.h"
-#include "cc/layer.h"
-#include "cc/nine_patch_layer.h"
-#include "cc/solid_color_layer.h"
+#include "cc/layers/content_layer.h"
+#include "cc/layers/layer.h"
+#include "cc/layers/nine_patch_layer.h"
+#include "cc/layers/solid_color_layer.h"
 
 namespace cc {
 
@@ -37,9 +37,9 @@ scoped_refptr<Layer> ParseTreeFromValue(base::Value* val,
 
   scoped_refptr<Layer> new_layer;
   if (layer_type == "SolidColorLayer") {
-    new_layer = SolidColorLayer::create();
+    new_layer = SolidColorLayer::Create();
   } else if (layer_type == "ContentLayer") {
-    new_layer = ContentLayer::create(content_client);
+    new_layer = ContentLayer::Create(content_client);
   } else if (layer_type == "NinePatchLayer") {
     success &= dict->GetList("ImageAperture", &list);
     int aperture_x, aperture_y, aperture_width, aperture_height;
@@ -53,40 +53,40 @@ scoped_refptr<Layer> ParseTreeFromValue(base::Value* val,
     success &= list->GetInteger(0, &image_width);
     success &= list->GetInteger(1, &image_height);
 
-    scoped_refptr<NinePatchLayer> nine_patch_layer = NinePatchLayer::create();
+    scoped_refptr<NinePatchLayer> nine_patch_layer = NinePatchLayer::Create();
 
     SkBitmap bitmap;
     bitmap.setConfig(SkBitmap::kARGB_8888_Config, image_width, image_height);
     bitmap.allocPixels(NULL, NULL);
-    nine_patch_layer->setBitmap(bitmap,
+    nine_patch_layer->SetBitmap(bitmap,
         gfx::Rect(aperture_x, aperture_y, aperture_width, aperture_height));
 
     new_layer = nine_patch_layer;
   } else {  // Type "Layer" or "unknown"
-    new_layer = Layer::create();
+    new_layer = Layer::Create();
   }
-  new_layer->setAnchorPoint(gfx::Point());
-  new_layer->setPosition(gfx::PointF(position_x, position_y));
-  new_layer->setBounds(gfx::Size(width, height));
-  new_layer->setIsDrawable(draws_content);
+  new_layer->SetAnchorPoint(gfx::Point());
+  new_layer->SetPosition(gfx::PointF(position_x, position_y));
+  new_layer->SetBounds(gfx::Size(width, height));
+  new_layer->SetIsDrawable(draws_content);
 
   double opacity;
   if (dict->GetDouble("Opacity", &opacity))
-    new_layer->setOpacity(opacity);
+    new_layer->SetOpacity(opacity);
 
   success &= dict->GetList("DrawTransform", &list);
   double transform[16];
   for (int i = 0; i < 16; ++i)
     success &= list->GetDouble(i, &transform[i]);
 
-  gfx::Transform gfxTransform;
-  gfxTransform.matrix().setColMajord(transform);
-  new_layer->setTransform(gfxTransform);
+  gfx::Transform layer_transform;
+  layer_transform.matrix().setColMajord(transform);
+  new_layer->SetTransform(layer_transform);
 
   success &= dict->GetList("Children", &list);
   for (ListValue::const_iterator it = list->begin();
        it != list->end(); ++it) {
-    new_layer->addChild(ParseTreeFromValue(*it, content_client));
+    new_layer->AddChild(ParseTreeFromValue(*it, content_client));
   }
 
   if (!success)

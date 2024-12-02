@@ -13,7 +13,6 @@
 #include "base/logging.h"
 #include "base/mac/mac_util.h"
 #include "base/mac/scoped_cftyperef.h"
-#import "base/mac/scoped_nsautorelease_pool.h"
 #import "base/memory/scoped_nsobject.h"
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
@@ -23,13 +22,10 @@
 #include "base/sys_string_conversions.h"
 #include "base/utf_string_conversions.h"
 #import "content/browser/accessibility/browser_accessibility_cocoa.h"
-#include "content/browser/accessibility/browser_accessibility_manager.h"
-#include "content/browser/plugin_process_host.h"
-#import "content/browser/renderer_host/accelerated_plugin_view_mac.h"
+#include "content/browser/accessibility/browser_accessibility_manager_mac.h"
 #include "content/browser/renderer_host/backing_store_mac.h"
 #include "content/browser/renderer_host/backing_store_manager.h"
 #include "content/browser/renderer_host/compositing_iosurface_mac.h"
-#include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #import "content/browser/renderer_host/render_widget_host_view_mac_editcommand_helper.h"
 #import "content/browser/renderer_host/text_input_client_mac.h"
@@ -38,6 +34,7 @@
 #include "content/common/gpu/gpu_messages.h"
 #include "content/common/plugin_messages.h"
 #include "content/common/view_messages.h"
+#include "content/port/browser/render_widget_host_view_frame_subscriber.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #import "content/public/browser/render_widget_host_view_mac_delegate.h"
@@ -47,7 +44,6 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/mac/WebInputEventFactory.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/mac/WebScreenInfoFactory.h"
 #import "third_party/mozilla/ComplexTextInputPanel.h"
-#include "third_party/skia/include/core/SkColor.h"
 #import "ui/base/cocoa/fullscreen_window_manager.h"
 #import "ui/base/cocoa/underlay_opengl_hosting_window.h"
 #include "ui/base/keycodes/keyboard_codes.h"
@@ -403,6 +399,16 @@ void RenderWidgetHostViewMac::SetAllowOverlappingViews(bool overlapping) {
 ///////////////////////////////////////////////////////////////////////////////
 // RenderWidgetHostViewMac, RenderWidgetHostView implementation:
 
+bool RenderWidgetHostViewMac::OnMessageReceived(const IPC::Message& message) {
+  bool handled = true;
+  IPC_BEGIN_MESSAGE_MAP(RenderWidgetHostViewMac, message)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_PluginFocusChanged, OnPluginFocusChanged)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_StartPluginIme, OnStartPluginIme)
+    IPC_MESSAGE_UNHANDLED(handled = false)
+  IPC_END_MESSAGE_MAP()
+  return handled;
+}
+
 void RenderWidgetHostViewMac::InitAsChild(
     gfx::NativeView parent_view) {
 }
@@ -465,13 +471,37 @@ void RenderWidgetHostViewMac::InitAsFullscreen(
   [cocoa_view_ setCanBeKeyView:YES];
   [cocoa_view_ setFrame:[[pepper_fullscreen_window_ contentView] bounds]];
   [cocoa_view_ setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
+  // If the pepper fullscreen window isn't opaque then there are performance
+  // issues when it's on the discrete GPU and the Chrome window is being drawn
+  // to. http://crbug.com/171911
+  [pepper_fullscreen_window_ setOpaque:YES];
+
+  // Note that this forms a reference cycle between the fullscreen window and
+  // the rwhvmac: The PepperFlashFullscreenWindow retains cocoa_view_,
+  // but cocoa_view_ keeps pepper_fullscreen_window_ in an instance variable.
+  // This cycle is normally broken when -keyEvent: receives an <esc> key, which
+  // explicitly calls Shutdown on the render_widget_host_, which calls
+  // Destroy() on RWHVMac, which drops the reference to
+  // pepper_fullscreen_window_.
   [[pepper_fullscreen_window_ contentView] addSubview:cocoa_view_];
 
+  // Note that this keeps another reference to pepper_fullscreen_window_.
   fullscreen_window_manager_.reset([[FullscreenWindowManager alloc]
       initWithWindow:pepper_fullscreen_window_.get()
        desiredScreen:screen]);
   [fullscreen_window_manager_ enterFullscreenMode];
   [pepper_fullscreen_window_ makeKeyAndOrderFront:nil];
+}
+
+void RenderWidgetHostViewMac::release_pepper_fullscreen_window_for_testing() {
+  // See comment in InitAsFullscreen(): There is a reference cycle between
+  // rwhvmac and fullscreen window, which is usually broken by hitting <esc>.
+  // Tests that test pepper fullscreen mode without sending an <esc> event
+  // need to call this method to break the reference cycle.
+  [fullscreen_window_manager_ exitFullscreenMode];
+  fullscreen_window_manager_.reset();
+  [pepper_fullscreen_window_ close];
+  pepper_fullscreen_window_.reset();
 }
 
 RenderWidgetHost* RenderWidgetHostViewMac::GetRenderWidgetHost() const {
@@ -582,49 +612,10 @@ gfx::NativeViewAccessible RenderWidgetHostViewMac::GetNativeViewAccessible() {
 void RenderWidgetHostViewMac::MovePluginWindows(
     const gfx::Vector2d& scroll_offset,
     const std::vector<webkit::npapi::WebPluginGeometry>& moves) {
-  TRACE_EVENT0("browser", "RenderWidgetHostViewMac::MovePluginWindows");
-  CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  // Handle movement of accelerated plugins, which are the only "windowed"
-  // plugins that exist on the Mac.
-  for (std::vector<webkit::npapi::WebPluginGeometry>::const_iterator iter =
-           moves.begin();
-       iter != moves.end();
-       ++iter) {
-    webkit::npapi::WebPluginGeometry geom = *iter;
-
-    AcceleratedPluginView* view = ViewForPluginWindowHandle(geom.window);
-    DCHECK(view);
-    if (!view)
-      continue;
-
-    if (geom.rects_valid) {
-      gfx::Rect rect = geom.window_rect;
-      if (geom.visible) {
-        rect.set_x(rect.x() + geom.clip_rect.x());
-        rect.set_y(rect.y() + geom.clip_rect.y());
-        rect.set_width(geom.clip_rect.width());
-        rect.set_height(geom.clip_rect.height());
-      }
-      NSRect new_rect([cocoa_view_ flipRectToNSRect:rect]);
-      [view setFrame:new_rect];
-      NSMutableArray* cutout_rects =
-          [NSMutableArray arrayWithCapacity:geom.cutout_rects.size()];
-      for (unsigned int i = 0; i < geom.cutout_rects.size(); ++i) {
-        // Convert to NSRect, and flip vertically.
-        NSRect cutout_rect = NSRectFromCGRect(geom.cutout_rects[i].ToCGRect());
-        cutout_rect.origin.y = new_rect.size.height - NSMaxY(cutout_rect);
-        [cutout_rects addObject:[NSValue valueWithRect:cutout_rect]];
-      }
-      [view setCutoutRects:cutout_rects];
-      [view setNeedsDisplay:YES];
-    }
-
-    plugin_container_manager_.SetPluginContainerGeometry(geom);
-
-    BOOL visible =
-        plugin_container_manager_.SurfaceShouldBeVisible(geom.window);
-    [view setHidden:!visible];
-  }
+  // Must be overridden, but unused on this platform. Core Animation
+  // plugins are drawn by the GPU process (through the compositor),
+  // and Core Graphics plugins are drawn by the renderer process.
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 }
 
 void RenderWidgetHostViewMac::Focus() {
@@ -706,12 +697,6 @@ void RenderWidgetHostViewMac::TextInputStateChanged(
   }
 }
 
-void RenderWidgetHostViewMac::SelectionBoundsChanged(
-    const ViewHostMsg_SelectionBounds_Params& params) {
-  if (params.anchor_rect == params.focus_rect)
-    caret_rect_ = params.anchor_rect;
-}
-
 void RenderWidgetHostViewMac::ImeCancelComposition() {
   [cocoa_view_ cancelComposition];
 }
@@ -781,13 +766,6 @@ void RenderWidgetHostViewMac::RenderViewGone(base::TerminationStatus status,
 
 void RenderWidgetHostViewMac::Destroy() {
   AckPendingSwapBuffers();
-
-  for (NSView* subview in [cocoa_view_ subviews]) {
-    if ([subview isKindOfClass:[AcceleratedPluginView class]]) {
-      [static_cast<AcceleratedPluginView*>(subview)
-          onRenderWidgetHostViewGone];
-    }
-  }
 
   [[NSNotificationCenter defaultCenter]
       removeObserver:cocoa_view_
@@ -891,6 +869,15 @@ void RenderWidgetHostViewMac::SelectionChanged(const string16& text,
   RenderWidgetHostViewBase::SelectionChanged(text, offset, range);
 }
 
+void RenderWidgetHostViewMac::SelectionBoundsChanged(
+    const ViewHostMsg_SelectionBounds_Params& params) {
+  if (params.anchor_rect == params.focus_rect)
+    caret_rect_ = params.anchor_rect;
+}
+
+void RenderWidgetHostViewMac::ScrollOffsetChanged() {
+}
+
 void RenderWidgetHostViewMac::SetShowingContextMenu(bool showing) {
   RenderWidgetHostViewBase::SetShowingContextMenu(showing);
 
@@ -943,39 +930,64 @@ void RenderWidgetHostViewMac::CopyFromCompositingSurface(
   gfx::Size dst_pixel_size = gfx::ToFlooredSize(
       gfx::ScaleSize(dst_size, scale));
 
-  SkBitmap output;
-  output.setConfig(SkBitmap::kARGB_8888_Config,
-                   dst_pixel_size.width(), dst_pixel_size.height());
-  if (!output.allocPixels())
-    return;
-  output.setIsOpaque(true);
-
   scoped_callback_runner.Release();
 
-  // Convert |src_subrect| from the views coordinate (upper-left origin) into
-  // the OpenGL coordinate (lower-left origin).
-  gfx::Rect src_gl_subrect = src_subrect;
-  src_gl_subrect.set_y(GetViewBounds().height() - src_subrect.bottom());
-
-  gfx::Rect src_pixel_gl_subrect = gfx::ToEnclosingRect(
-      gfx::ScaleRect(src_gl_subrect, scale));
-  compositing_iosurface_->CopyTo(
-      src_pixel_gl_subrect,
-      dst_pixel_size,
-      output,
-      callback);
+  compositing_iosurface_->CopyTo(GetScaledOpenGLPixelRect(src_subrect),
+                                 ScaleFactor(cocoa_view_),
+                                 dst_pixel_size,
+                                 callback);
 }
 
 void RenderWidgetHostViewMac::CopyFromCompositingSurfaceToVideoFrame(
       const gfx::Rect& src_subrect,
       const scoped_refptr<media::VideoFrame>& target,
       const base::Callback<void(bool)>& callback) {
-  NOTIMPLEMENTED();
-  callback.Run(false);
+  base::ScopedClosureRunner scoped_callback_runner(base::Bind(callback, false));
+  if (!render_widget_host_->is_accelerated_compositing_active() ||
+      !compositing_iosurface_.get() ||
+      !compositing_iosurface_->HasIOSurface())
+    return;
+
+  if (!target) {
+    NOTREACHED();
+    return;
+  }
+
+  if (target->format() != media::VideoFrame::YV12 &&
+      target->format() != media::VideoFrame::I420) {
+    NOTREACHED();
+    return;
+  }
+
+  if (src_subrect.IsEmpty())
+    return;
+
+  scoped_callback_runner.Release();
+  compositing_iosurface_->CopyToVideoFrame(
+      GetScaledOpenGLPixelRect(src_subrect),
+      ScaleFactor(cocoa_view_),
+      target,
+      callback);
 }
 
 bool RenderWidgetHostViewMac::CanCopyToVideoFrame() const {
-  return false;
+  return (!render_widget_host_->GetBackingStore(false) &&
+          render_widget_host_->is_accelerated_compositing_active() &&
+          compositing_iosurface_.get() &&
+          compositing_iosurface_->HasIOSurface());
+}
+
+bool RenderWidgetHostViewMac::CanSubscribeFrame() const {
+  return true;
+}
+
+void RenderWidgetHostViewMac::BeginFrameSubscription(
+    scoped_ptr<RenderWidgetHostViewFrameSubscriber> subscriber) {
+  frame_subscriber_ = subscriber.Pass();
+}
+
+void RenderWidgetHostViewMac::EndFrameSubscription() {
+  frame_subscriber_.reset();
 }
 
 // Sets whether or not to accept first responder status.
@@ -1002,14 +1014,6 @@ void RenderWidgetHostViewMac::KillSelf() {
   }
 }
 
-void RenderWidgetHostViewMac::PluginFocusChanged(bool focused, int plugin_id) {
-  [cocoa_view_ pluginFocusChanged:(focused ? YES : NO) forPlugin:plugin_id];
-}
-
-void RenderWidgetHostViewMac::StartPluginIme() {
-  [cocoa_view_ setPluginImeActive:YES];
-}
-
 bool RenderWidgetHostViewMac::PostProcessEventForPluginIme(
     const NativeWebKeyboardEvent& event) {
   // Check WebInputEvent type since multiple types of events can be sent into
@@ -1031,100 +1035,33 @@ void RenderWidgetHostViewMac::PluginImeCompositionCompleted(
   }
 }
 
-gfx::PluginWindowHandle
-RenderWidgetHostViewMac::AllocateFakePluginWindowHandle(bool opaque,
-                                                        bool root) {
-  CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-
-  // |render_widget_host_| is set to NULL when |RWHVMac::Destroy()| has
-  // completed. If |AllocateFakePluginWindowHandle()| is called after that,
-  // we will crash when the AcceleratedPluginView we allocate below is
-  // destroyed.
-  DCHECK(render_widget_host_);
-
-  // Create an NSView to host the plugin's/compositor's pixels.
-  gfx::PluginWindowHandle handle =
-      plugin_container_manager_.AllocateFakePluginWindowHandle(opaque, root);
-
-  scoped_nsobject<AcceleratedPluginView> plugin_view(
-      [[AcceleratedPluginView alloc] initWithRenderWidgetHostViewMac:this
-                                                        pluginHandle:handle]);
-  [plugin_view setHidden:YES];
-
-  [cocoa_view_ addSubview:plugin_view];
-  plugin_views_[handle] = plugin_view;
-
-  return handle;
-}
-
-void RenderWidgetHostViewMac::DestroyFakePluginWindowHandle(
-    gfx::PluginWindowHandle window) {
-  CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  PluginViewMap::iterator it = plugin_views_.find(window);
-  DCHECK(plugin_views_.end() != it);
-  if (plugin_views_.end() == it) {
-    return;
-  }
-  [it->second removeFromSuperview];
-  plugin_views_.erase(it);
-
-  // The view's dealloc will call DeallocFakePluginWindowHandle(), which will
-  // remove the handle from |plugin_container_manager_|. This code path is
-  // taken if a plugin is removed, but the RWHVMac itself stays alive.
-}
-
-// This is called by AcceleratedPluginView's -dealloc.
-void RenderWidgetHostViewMac::DeallocFakePluginWindowHandle(
-    gfx::PluginWindowHandle window) {
-  plugin_container_manager_.DestroyFakePluginWindowHandle(window);
-}
-
-AcceleratedPluginView* RenderWidgetHostViewMac::ViewForPluginWindowHandle(
-    gfx::PluginWindowHandle window) {
-  PluginViewMap::iterator it = plugin_views_.find(window);
-  DCHECK(plugin_views_.end() != it);
-  if (plugin_views_.end() == it)
-    return nil;
-  return it->second;
-}
-
-void RenderWidgetHostViewMac::AcceleratedSurfaceSetIOSurface(
-    gfx::PluginWindowHandle window,
-    int32 width,
-    int32 height,
-    uint64 io_surface_identifier) {
-  CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  plugin_container_manager_.SetSizeAndIOSurface(window,
-                                                width,
-                                                height,
-                                                io_surface_identifier);
-}
-
-void RenderWidgetHostViewMac::AcceleratedSurfaceSetTransportDIB(
-    gfx::PluginWindowHandle window,
-    int32 width,
-    int32 height,
-    TransportDIB::Handle transport_dib) {
-  CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  plugin_container_manager_.SetSizeAndTransportDIB(window,
-                                                   width,
-                                                   height,
-                                                   transport_dib);
-}
-
 bool RenderWidgetHostViewMac::CompositorSwapBuffers(uint64 surface_handle,
                                                     const gfx::Size& size) {
   if (is_hidden_)
     return true;
 
-  // TODO(shess) If the view does not have a window, or the window
-  // does not have backing, the IOSurface will log "invalid drawable"
-  // in -setView:.  It is not clear how this code is reached with such
-  // a case, so record some info into breakpad (some subset of
-  // browsers are likely to crash later for unrelated reasons).
-  // http://crbug.com/148882
   NSWindow* window = [cocoa_view_ window];
   if ([window windowNumber] <= 0) {
+    // There is no window to present so capturing during present won't work.
+    // We check if frame subscriber wants this frame and capture manually.
+    if (compositing_iosurface_.get() && frame_subscriber_.get()) {
+      scoped_refptr<media::VideoFrame> frame;
+      RenderWidgetHostViewFrameSubscriber::DeliverFrameCallback callback;
+      if (frame_subscriber_->ShouldCaptureFrame(&frame, &callback)) {
+        compositing_iosurface_->SetIOSurface(surface_handle, size);
+        compositing_iosurface_->CopyToVideoFrame(
+            gfx::Rect(size), ScaleFactor(cocoa_view_), frame,
+            base::Bind(callback, base::Time::Now()));
+        return true;
+      }
+    }
+
+    // TODO(shess) If the view does not have a window, or the window
+    // does not have backing, the IOSurface will log "invalid drawable"
+    // in -setView:.  It is not clear how this code is reached with such
+    // a case, so record some info into breakpad (some subset of
+    // browsers are likely to crash later for unrelated reasons).
+    // http://crbug.com/148882
     const char* const kCrashKey = "rwhvm_window";
     if (!window) {
       base::debug::SetCrashKeyValue(kCrashKey, "Missing window");
@@ -1165,7 +1102,8 @@ bool RenderWidgetHostViewMac::CompositorSwapBuffers(uint64 surface_handle,
   // later.
   if (!about_to_validate_and_paint_) {
     compositing_iosurface_->DrawIOSurface(cocoa_view_,
-                                          ScaleFactor(cocoa_view_));
+                                          ScaleFactor(cocoa_view_),
+                                          frame_subscriber_.get());
   }
   return true;
 }
@@ -1176,6 +1114,8 @@ void RenderWidgetHostViewMac::AckPendingSwapBuffers() {
     if (pending_swap_buffers_acks_.front().first != 0) {
       AcceleratedSurfaceMsg_BufferPresented_Params ack_params;
       ack_params.sync_point = 0;
+      if (compositing_iosurface_.get())
+        ack_params.renderer_id = compositing_iosurface_->GetRendererID();
       RenderWidgetHostImpl::AcknowledgeBufferPresent(
           pending_swap_buffers_acks_.front().first,
           pending_swap_buffers_acks_.front().second,
@@ -1338,27 +1278,8 @@ void RenderWidgetHostViewMac::AcceleratedSurfaceBuffersSwapped(
   pending_swap_buffers_acks_.push_back(std::make_pair(params.route_id,
                                                       gpu_host_id));
 
-  // Compositor window is always gfx::kNullPluginWindow.
-  // TODO(jbates) http://crbug.com/105344 This will be removed when there are no
-  // plugin windows.
-  if (params.window == gfx::kNullPluginWindow) {
-    if (CompositorSwapBuffers(params.surface_handle, params.size))
-      AckPendingSwapBuffers();
-  } else {
-    // Deprecated accelerated plugin code path.
-    AcceleratedPluginView* view = ViewForPluginWindowHandle(params.window);
-    DCHECK(view);
-    if (view) {
-      plugin_container_manager_.SetSurfaceWasPaintedTo(params.window,
-                                                       params.surface_handle);
-
-      // The surface is hidden until its first paint, to not show garbage.
-      if (plugin_container_manager_.SurfaceShouldBeVisible(params.window))
-        [view setHidden:NO];
-      [view drawView];
-    }
+  if (CompositorSwapBuffers(params.surface_handle, params.size))
     AckPendingSwapBuffers();
-  }
 }
 
 void RenderWidgetHostViewMac::AcceleratedSurfacePostSubBuffer(
@@ -1371,34 +1292,17 @@ void RenderWidgetHostViewMac::AcceleratedSurfacePostSubBuffer(
   pending_swap_buffers_acks_.push_back(std::make_pair(params.route_id,
                                                       gpu_host_id));
 
-  // Compositor window is always gfx::kNullPluginWindow.
-  // TODO(jbates) http://crbug.com/105344 This will be removed when there are no
-  // plugin windows.
-  if (params.window == gfx::kNullPluginWindow) {
-    if (CompositorSwapBuffers(params.surface_handle, params.surface_size))
-      AckPendingSwapBuffers();
-  } else {
-    // Deprecated accelerated plugin code path.
-    AcceleratedPluginView* view = ViewForPluginWindowHandle(params.window);
-    DCHECK(view);
-    if (view) {
-      plugin_container_manager_.SetSurfaceWasPaintedTo(
-          params.window,
-          params.surface_handle,
-          gfx::Rect(params.x, params.y, params.width, params.height));
-
-      // The surface is hidden until its first paint, to not show garbage.
-      if (plugin_container_manager_.SurfaceShouldBeVisible(params.window))
-        [view setHidden:NO];
-      [view drawView];
-    }
+  if (CompositorSwapBuffers(params.surface_handle, params.surface_size))
     AckPendingSwapBuffers();
-  }
 }
 
 void RenderWidgetHostViewMac::AcceleratedSurfaceSuspend() {
   if (compositing_iosurface_.get())
     compositing_iosurface_->UnrefIOSurface();
+}
+
+void RenderWidgetHostViewMac::AcceleratedSurfaceRelease() {
+  compositing_iosurface_.reset();
 }
 
 bool RenderWidgetHostViewMac::HasAcceleratedSurface(
@@ -1408,10 +1312,6 @@ bool RenderWidgetHostViewMac::HasAcceleratedSurface(
          compositing_iosurface_->HasIOSurface() &&
          (desired_size.IsEmpty() ||
           compositing_iosurface_->io_surface_size() == desired_size);
-}
-
-void RenderWidgetHostViewMac::AcceleratedSurfaceRelease() {
-  compositing_iosurface_.reset();
 }
 
 void RenderWidgetHostViewMac::AboutToWaitForBackingStoreMsg() {
@@ -1438,34 +1338,9 @@ gfx::Rect RenderWidgetHostViewMac::GetBoundsInRootWindow() {
 }
 
 gfx::GLSurfaceHandle RenderWidgetHostViewMac::GetCompositingSurface() {
-  // Compositor window is always gfx::kNullPluginWindow.
-  // TODO(jbates) http://crbug.com/105344 This will be removed when there are no
-  // plugin windows.
-  return gfx::GLSurfaceHandle(gfx::kNullPluginWindow, true);
-}
-
-void RenderWidgetHostViewMac::DrawAcceleratedSurfaceInstance(
-      CGLContextObj context,
-      gfx::PluginWindowHandle plugin_handle,
-      NSSize size) {
-  TRACE_EVENT0("browser",
-      "RenderWidgetHostViewMac::DrawAcceleratedSurfaceInstance");
-  // Called on the display link thread.
-  CGLSetCurrentContext(context);
-
-  glMatrixMode(GL_PROJECTION);
-  glLoadIdentity();
-  // Note that we place the origin at the upper left corner with +y
-  // going down
-  glOrtho(0, size.width, size.height, 0, -1, 1);
-  glMatrixMode(GL_MODELVIEW);
-  glLoadIdentity();
-
-  plugin_container_manager_.Draw(context, plugin_handle);
-}
-
-void RenderWidgetHostViewMac::ForceTextureReload() {
-  plugin_container_manager_.ForceTextureReload();
+  // TODO(kbr): may be able to eliminate PluginWindowHandle argument
+  // completely on Mac OS.
+  return gfx::GLSurfaceHandle(gfx::kNullPluginWindow, gfx::NATIVE_TRANSPORT);
 }
 
 void RenderWidgetHostViewMac::SetHasHorizontalScrollbar(
@@ -1512,6 +1387,14 @@ void RenderWidgetHostViewMac::UnhandledWheelEvent(
     const WebKit::WebMouseWheelEvent& event) {
   [cocoa_view_ gotUnhandledWheelEvent];
 }
+
+bool RenderWidgetHostViewMac::Send(IPC::Message* message) {
+  if (render_widget_host_)
+    return render_widget_host_->Send(message);
+  delete message;
+  return false;
+}
+
 
 void RenderWidgetHostViewMac::ShutdownHost() {
   weak_factory_.InvalidateWeakPtrs();
@@ -1626,9 +1509,9 @@ void RenderWidgetHostViewMac::OnAccessibilityNotifications(
     const std::vector<AccessibilityHostMsg_NotificationParams>& params) {
   if (!GetBrowserAccessibilityManager()) {
     SetBrowserAccessibilityManager(
-        BrowserAccessibilityManager::CreateEmptyDocument(
+        new BrowserAccessibilityManagerMac(
             cocoa_view_,
-            static_cast<AccessibilityNodeData::State>(0),
+            BrowserAccessibilityManagerMac::GetEmptyDocument(),
             NULL));
   }
   GetBrowserAccessibilityManager()->OnAccessibilityNotifications(params);
@@ -1644,6 +1527,24 @@ void RenderWidgetHostViewMac::SetTextInputActive(bool active) {
     if (text_input_type_ == ui::TEXT_INPUT_TYPE_PASSWORD)
       DisablePasswordInput();
   }
+}
+
+void RenderWidgetHostViewMac::OnPluginFocusChanged(bool focused,
+                                                   int plugin_id) {
+  [cocoa_view_ pluginFocusChanged:(focused ? YES : NO) forPlugin:plugin_id];
+}
+
+void RenderWidgetHostViewMac::OnStartPluginIme() {
+  [cocoa_view_ setPluginImeActive:YES];
+}
+
+gfx::Rect RenderWidgetHostViewMac::GetScaledOpenGLPixelRect(
+    const gfx::Rect& rect) {
+  gfx::Rect src_gl_subrect = rect;
+  src_gl_subrect.set_y(GetViewBounds().height() - rect.bottom());
+
+  return gfx::ToEnclosingRect(gfx::ScaleRect(src_gl_subrect,
+                                             ScaleFactor(cocoa_view_)));
 }
 
 }  // namespace content
@@ -2387,7 +2288,7 @@ void RenderWidgetHostViewMac::SetTextInputActive(bool active) {
     }
 
     renderWidgetHostView_->compositing_iosurface_->DrawIOSurface(
-        self, ScaleFactor(self));
+        self, ScaleFactor(self), renderWidgetHostView_->frame_subscriber());
     return;
   }
 
@@ -3213,7 +3114,6 @@ extern NSString *NSTextInputReplacementRangeAttributeName;
         lastWindow_ = newWindow;
         renderWidgetHostView_->WindowFrameChanged();
       }
-      renderWidgetHostView_->ForceTextureReload();
     }
   }
 
@@ -3275,6 +3175,20 @@ extern NSString *NSTextInputReplacementRangeAttributeName;
   if (renderWidgetHostView_->render_widget_host_->IsRenderView()) {
     static_cast<RenderViewHostImpl*>(
         renderWidgetHostView_->render_widget_host_)->PasteAndMatchStyle();
+  }
+}
+
+- (void)selectAll:(id)sender {
+  // editCommand_helper_ adds implementations for most NSResponder methods
+  // dynamically. But the renderer side only sends selection results back to
+  // the browser if they were triggered by a keyboard event or went through
+  // one of the Select methods on RWH. Since selectAll: is called from the
+  // menu handler, neither is true.
+  // Explicitly call SelectAll() here to make sure the renderer returns
+  // selection results.
+  if (renderWidgetHostView_->render_widget_host_->IsRenderView()) {
+    static_cast<RenderViewHostImpl*>(
+        renderWidgetHostView_->render_widget_host_)->SelectAll();
   }
 }
 

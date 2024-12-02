@@ -13,19 +13,29 @@
 #include "extensions/common/constants.h"
 #include "grit/renderer_resources.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebFileSystem.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebFileSystemType.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "webkit/fileapi/file_system_types.h"
 #include "webkit/fileapi/file_system_util.h"
 
-namespace {
+namespace extensions {
 
-static v8::Handle<v8::Value> GetIsolatedFileSystem(
+FileSystemNatives::FileSystemNatives(v8::Handle<v8::Context> context)
+    : ObjectBackedNativeHandler(context) {
+  RouteFunction("GetFileEntry",
+      base::Bind(&FileSystemNatives::GetFileEntry, base::Unretained(this)));
+  RouteFunction("GetIsolatedFileSystem",
+      base::Bind(&FileSystemNatives::GetIsolatedFileSystem,
+                 base::Unretained(this)));
+}
+
+v8::Handle<v8::Value> FileSystemNatives::GetIsolatedFileSystem(
     const v8::Arguments& args) {
   DCHECK(args.Length() == 1 || args.Length() == 2);
   DCHECK(args[0]->IsString());
   std::string file_system_id(*v8::String::Utf8Value(args[0]));
-  WebKit::WebFrame* webframe = WebKit::WebFrame::frameForCurrentContext();
+  WebKit::WebFrame* webframe = WebKit::WebFrame::frameForContext(v8_context());
   DCHECK(webframe);
 
   GURL context_url =
@@ -49,16 +59,17 @@ static v8::Handle<v8::Value> GetIsolatedFileSystem(
       optional_root_name));
 
   return webframe->createFileSystem(
-      WebKit::WebFileSystem::TypeIsolated,
+      WebKit::WebFileSystemTypeIsolated,
       WebKit::WebString::fromUTF8(name),
       WebKit::WebString::fromUTF8(root));
 }
 
-static v8::Handle<v8::Value> GetFileEntry(const v8::Arguments& args) {
+v8::Handle<v8::Value> FileSystemNatives::GetFileEntry(
+    const v8::Arguments& args) {
   DCHECK(args.Length() == 5);
   DCHECK(args[0]->IsString());
   std::string type_string = *v8::String::Utf8Value(args[0]->ToString());
-  WebKit::WebFileSystem::Type type;
+  WebKit::WebFileSystemType type;
   bool is_valid_type = fileapi::GetFileSystemPublicType(type_string, &type);
   DCHECK(is_valid_type);
   if (is_valid_type == false) {
@@ -77,7 +88,7 @@ static v8::Handle<v8::Value> GetFileEntry(const v8::Arguments& args) {
   DCHECK(args[4]->IsBoolean());
   bool is_directory = args[4]->BooleanValue();
 
-  WebKit::WebFrame* webframe = WebKit::WebFrame::frameForCurrentContext();
+  WebKit::WebFrame* webframe = WebKit::WebFrame::frameForContext(v8_context());
   DCHECK(webframe);
   return webframe->createFileEntry(
       type,
@@ -85,16 +96,6 @@ static v8::Handle<v8::Value> GetFileEntry(const v8::Arguments& args) {
       WebKit::WebString::fromUTF8(file_system_root_url),
       WebKit::WebString::fromUTF8(file_path_string),
       is_directory);
-}
-
-}  // namespace
-
-namespace extensions {
-
-FileSystemNatives::FileSystemNatives()
-    : ChromeV8Extension(NULL) {
-  RouteStaticFunction("GetFileEntry", &GetFileEntry);
-  RouteStaticFunction("GetIsolatedFileSystem", &GetIsolatedFileSystem);
 }
 
 }  // namespace extensions

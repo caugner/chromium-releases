@@ -448,7 +448,8 @@ class NotificationBridge
 }
 
 - (void)zoomChangedForActiveTab:(BOOL)canShowBubble {
-  locationBarView_->ZoomChangedForActiveTab(canShowBubble ? true : false);
+  locationBarView_->ZoomChangedForActiveTab(
+      canShowBubble && ![wrenchMenuController_ isMenuOpen]);
 }
 
 - (void)setIsLoading:(BOOL)isLoading force:(BOOL)force {
@@ -782,7 +783,7 @@ class NotificationBridge
   // If the input is plain text, classify the input and make the URL.
   AutocompleteMatch match;
   AutocompleteClassifierFactory::GetForProfile(browser_->profile())->Classify(
-      base::SysNSStringToUTF16(text), string16(), false, false, &match, NULL);
+      base::SysNSStringToUTF16(text), false, false, &match, NULL);
   GURL url(match.destination_url);
 
   OpenURLParams params(

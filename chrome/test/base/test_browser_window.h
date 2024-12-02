@@ -59,6 +59,7 @@ class TestBrowserWindow : public BrowserWindow {
   virtual void UpdateFullscreenExitBubbleContent(
       const GURL& url,
       FullscreenExitBubbleType bubble_type) OVERRIDE {}
+  virtual bool ShouldHideUIForFullscreen() const OVERRIDE;
   virtual bool IsFullscreen() const OVERRIDE;
 #if defined(OS_WIN)
   virtual void SetMetroSnapMode(bool enable) OVERRIDE {}
@@ -94,8 +95,6 @@ class TestBrowserWindow : public BrowserWindow {
                                         Profile* profile) OVERRIDE {}
   virtual void ToggleBookmarkBar() OVERRIDE {}
   virtual void ShowUpdateChromeDialog() OVERRIDE {}
-  virtual void ShowTaskManager() OVERRIDE {}
-  virtual void ShowBackgroundPages() OVERRIDE {}
   virtual void ShowBookmarkBubble(const GURL& url,
                                   bool already_bookmarked) OVERRIDE {}
   virtual void ShowChromeToMobileBubble() OVERRIDE {}
@@ -150,8 +149,7 @@ class TestBrowserWindow : public BrowserWindow {
 
 namespace chrome {
 
-// Helpers that handle the lifetime of TestBrowserWindow instances.
-Browser* CreateBrowserWithTestWindowForProfile(Profile* profile);
+// Helper that handle the lifetime of TestBrowserWindow instances.
 Browser* CreateBrowserWithTestWindowForParams(Browser::CreateParams* params);
 
 }  // namespace chrome

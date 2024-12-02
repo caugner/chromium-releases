@@ -19,11 +19,6 @@
 namespace chrome {
 
 void AddBlankTabAt(Browser* browser, int index, bool foreground) {
-  // TODO(scottmg): http://crbug.com/128578
-  // This is necessary because WebContentsViewAura doesn't have enough context
-  // to get the right StackingClient (and therefore parent window) otherwise.
-  ScopedForceDesktopType force_desktop_type(browser->host_desktop_type());
-
   // Time new tab page creation time.  We keep track of the timing data in
   // WebContents, but we want to include the time it takes to create the
   // WebContents object too.
@@ -75,8 +70,8 @@ void AddWebContents(Browser* browser,
     }
 
     // Handle blocking of popups.
-    if ((disposition == NEW_POPUP || disposition == NEW_FOREGROUND_TAB) &&
-        !user_gesture &&
+    if ((disposition == NEW_POPUP || disposition == NEW_FOREGROUND_TAB ||
+         disposition == NEW_BACKGROUND_TAB) && !user_gesture &&
         !CommandLine::ForCurrentProcess()->HasSwitch(
             switches::kDisablePopupBlocking)) {
       // Unrequested popups from normal pages are constrained unless they're in

@@ -6,7 +6,7 @@
 
 #include "base/basictypes.h"
 #include "base/bind.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/lazy_instance.h"
 #include "base/location.h"
 #include "base/strings/string_number_conversions.h"
@@ -16,10 +16,12 @@
 #include "chrome/browser/extensions/event_names.h"
 #include "chrome/browser/extensions/event_router.h"
 #include "chrome/browser/extensions/extension_function.h"
+#include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
-#include "chrome/browser/media_gallery/media_file_system_registry.h"
-#include "chrome/browser/media_gallery/media_galleries_preferences.h"
-#include "chrome/common/extensions/api/media_galleries_private.h"
+#include "chrome/browser/extensions/media_galleries_handler.h"
+#include "chrome/browser/media_galleries/media_file_system_registry.h"
+#include "chrome/browser/media_galleries/media_galleries_preferences.h"
+#include "chrome/browser/profiles/profile.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_view_host.h"
 
@@ -31,6 +33,8 @@ namespace RemoveGalleryWatch =
     extensions::api::media_galleries_private::RemoveGalleryWatch;
 namespace GetAllGalleryWatch =
     extensions::api::media_galleries_private::GetAllGalleryWatch;
+namespace EjectDevice =
+    extensions::api::media_galleries_private::EjectDevice;
 
 namespace {
 
@@ -46,14 +50,14 @@ void HandleProfileShutdownOnFileThread(void* profile_id) {
 // Gets the |gallery_file_path| and |gallery_pref_id| of the gallery specified
 // by the |gallery_id|. Returns true and set |gallery_file_path| and
 // |gallery_pref_id| if the |gallery_id| is valid and returns false otherwise.
-bool GetGalleryFilePathAndId(int gallery_id,
+bool GetGalleryFilePathAndId(const std::string& gallery_id,
                              Profile* profile,
                              const Extension* extension,
                              base::FilePath* gallery_file_path,
                              chrome::MediaGalleryPrefId* gallery_pref_id) {
-  if (gallery_id < 0)
+  chrome::MediaGalleryPrefId pref_id;
+  if (!base::StringToUint64(gallery_id, &pref_id))
     return false;
-  chrome::MediaGalleryPrefId pref_id = static_cast<uint64>(gallery_id);
   chrome::MediaFileSystemRegistry* registry =
       g_browser_process->media_file_system_registry();
    base::FilePath file_path(
@@ -77,6 +81,7 @@ MediaGalleriesPrivateAPI::MediaGalleriesPrivateAPI(Profile* profile)
     : profile_(profile),
       tracker_(profile) {
   DCHECK(profile_);
+  (new MediaGalleriesHandlerParser)->Register();
   ExtensionSystem::Get(profile_)->event_router()->RegisterObserver(
       this, event_names::kOnAttachEventName);
   ExtensionSystem::Get(profile_)->event_router()->RegisterObserver(
@@ -188,7 +193,7 @@ void MediaGalleriesPrivateAddGalleryWatchFunction::HandleResponse(
     bool success) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
   extensions::api::media_galleries_private::AddGalleryWatchResult result;
-  result.gallery_id = gallery_id;
+  result.gallery_id = base::Uint64ToString(gallery_id);
   result.success = success;
   SetResult(result.ToValue().release());
   if (success) {
@@ -255,7 +260,7 @@ bool MediaGalleriesPrivateGetAllGalleryWatchFunction::RunImpl() {
   if (!render_view_host() || !render_view_host()->GetProcess())
     return false;
 
-  std::vector<int> result;
+  std::vector<std::string> result;
 #if defined(OS_WIN)
   GalleryWatchStateTracker* state_tracker =
       MediaGalleriesPrivateAPI::Get(profile_)->GetGalleryWatchStateTracker();
@@ -264,8 +269,7 @@ bool MediaGalleriesPrivateGetAllGalleryWatchFunction::RunImpl() {
   for (chrome::MediaGalleryPrefIdSet::const_iterator iter =
            gallery_ids.begin();
        iter != gallery_ids.end(); ++iter) {
-    if (*iter < kint32max)
-      result.push_back(*iter);
+    result.push_back(base::Uint64ToString(*iter));
   }
 #endif
   results_ = GetAllGalleryWatch::Results::Create(result);
@@ -290,6 +294,111 @@ bool MediaGalleriesPrivateRemoveAllGalleryWatchFunction::RunImpl() {
       MediaGalleriesPrivateAPI::Get(profile_)->GetGalleryWatchStateTracker();
   state_tracker->RemoveAllGalleryWatchersForExtension(extension_id());
 #endif
+  return true;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+//              MediaGalleriesPrivateEjectDeviceFunction                     //
+///////////////////////////////////////////////////////////////////////////////
+
+MediaGalleriesPrivateEjectDeviceFunction::
+~MediaGalleriesPrivateEjectDeviceFunction() {
+}
+
+bool MediaGalleriesPrivateEjectDeviceFunction::RunImpl() {
+  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+
+  scoped_ptr<EjectDevice::Params> params(EjectDevice::Params::Create(*args_));
+  EXTENSION_FUNCTION_VALIDATE(params.get());
+
+  chrome::StorageMonitor* monitor = chrome::StorageMonitor::GetInstance();
+  std::string device_id_str =
+      monitor->GetDeviceIdForTransientId(params->device_id);
+  if (device_id_str == "") {
+    HandleResponse(chrome::StorageMonitor::EJECT_NO_SUCH_DEVICE);
+    return true;
+  }
+
+  monitor->EjectDevice(
+      device_id_str,
+      base::Bind(&MediaGalleriesPrivateEjectDeviceFunction::HandleResponse,
+                 this));
+
+  return true;
+}
+
+void MediaGalleriesPrivateEjectDeviceFunction::HandleResponse(
+    chrome::StorageMonitor::EjectStatus status) {
+  using extensions::api::media_galleries_private::
+      EJECT_DEVICE_RESULT_CODE_FAILURE;
+  using extensions::api::media_galleries_private::
+      EJECT_DEVICE_RESULT_CODE_IN_USE;
+  using extensions::api::media_galleries_private::
+      EJECT_DEVICE_RESULT_CODE_NO_SUCH_DEVICE;
+  using extensions::api::media_galleries_private::
+      EJECT_DEVICE_RESULT_CODE_SUCCESS;
+  using extensions::api::media_galleries_private::EjectDeviceResultCode;
+
+  EjectDeviceResultCode result = EJECT_DEVICE_RESULT_CODE_FAILURE;
+  if (status == chrome::StorageMonitor::EJECT_OK)
+    result = EJECT_DEVICE_RESULT_CODE_SUCCESS;
+  if (status == chrome::StorageMonitor::EJECT_IN_USE)
+    result = EJECT_DEVICE_RESULT_CODE_IN_USE;
+  if (status == chrome::StorageMonitor::EJECT_NO_SUCH_DEVICE)
+    result = EJECT_DEVICE_RESULT_CODE_NO_SUCH_DEVICE;
+
+  SetResult(base::StringValue::CreateStringValue(
+      api::media_galleries_private::ToString(result)));
+  SendResponse(true);
+}
+
+///////////////////////////////////////////////////////////////////////////////
+//              MediaGalleriesPrivateGetHandlersFunction                     //
+///////////////////////////////////////////////////////////////////////////////
+
+MediaGalleriesPrivateGetHandlersFunction::
+~MediaGalleriesPrivateGetHandlersFunction() {
+}
+
+bool MediaGalleriesPrivateGetHandlersFunction::RunImpl() {
+  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+
+  ExtensionService* service =
+      extensions::ExtensionSystem::Get(profile_)->extension_service();
+  DCHECK(service);
+
+  ListValue* result_list = new ListValue();
+
+  for (ExtensionSet::const_iterator iter = service->extensions()->begin();
+       iter != service->extensions()->end();
+       ++iter) {
+    const Extension* extension = *iter;
+    if (profile_->IsOffTheRecord() &&
+        !service->IsIncognitoEnabled(extension->id()))
+      continue;
+
+    MediaGalleriesHandler::List* handler_list =
+        MediaGalleriesHandler::GetHandlers(extension);
+    if (!handler_list)
+      continue;
+
+    for (MediaGalleriesHandler::List::const_iterator action_iter =
+             handler_list->begin();
+         action_iter != handler_list->end();
+         ++action_iter) {
+      const MediaGalleriesHandler* action = action_iter->get();
+      DictionaryValue* handler = new DictionaryValue();
+      handler->SetString("extensionId", action->extension_id());
+      handler->SetString("id", action->id());
+      handler->SetString("title", action->title());
+      handler->SetString("iconUrl", action->icon_path());
+      result_list->Append(handler);
+    }
+  }
+
+  SetResult(result_list);
+  SendResponse(true);
+
   return true;
 }
 

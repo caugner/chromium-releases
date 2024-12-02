@@ -115,6 +115,8 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
                                       const GURL& url,
                                       const GURL& first_party_for_cookies,
                                       const std::string& value) OVERRIDE;
+  virtual bool AllowBrowserPlugin(WebKit::WebPluginContainer* container) const
+      OVERRIDE;
 
   // TODO(mpcomplete): remove after we collect histogram data.
   // http://crbug.com/100411
@@ -163,8 +165,7 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
   static bool IsNaClAllowed(const GURL& manifest_url,
                             const GURL& top_url,
                             bool is_nacl_unrestricted,
-                            bool is_extension_unrestricted,
-                            bool is_extension_from_webstore,
+                            const extensions::Extension* extension,
                             WebKit::WebPluginParams* params);
 
   scoped_ptr<ChromeRenderProcessObserver> chrome_observer_;

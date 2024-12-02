@@ -10,8 +10,8 @@
 #include "ash/system/tray/system_tray_notifier.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/singleton.h"
+#include "base/prefs/pref_member.h"
 #include "base/prefs/pref_service.h"
-#include "base/prefs/public/pref_member.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -99,7 +99,7 @@ class MagnificationManagerImpl : public MagnificationManager,
       return;
 
     DCHECK(type == ash::MAGNIFIER_FULL || type == ash::MAGNIFIER_PARTIAL);
-    type_ = type;
+    type_ = ash::MAGNIFIER_FULL;  // (leave out for full magnifier)
 
     if (profile_) {
       PrefService* prefs = profile_->GetPrefs();
@@ -109,13 +109,6 @@ class MagnificationManagerImpl : public MagnificationManager,
     }
 
     NotifyMagnifierChanged();
-
-    if (enabled_) {
-      ash::Shell::GetInstance()->magnification_controller()->SetEnabled(
-          type_ == ash::MAGNIFIER_FULL);
-      ash::Shell::GetInstance()->partial_magnification_controller()->SetEnabled(
-          type_ == ash::MAGNIFIER_PARTIAL);
-    }
   }
 
   virtual void SaveScreenMagnifierScale(double scale) OVERRIDE {
@@ -152,17 +145,7 @@ class MagnificationManagerImpl : public MagnificationManager,
   }
 
   ash::MagnifierType GetMagnifierTypeFromPref() {
-    if (!profile_)
-      return ash::kDefaultMagnifierType;
-
-    DCHECK(profile_->GetPrefs());
-    ash::MagnifierType type = static_cast<ash::MagnifierType>(
-        profile_->GetPrefs()->GetInteger(prefs::kScreenMagnifierType));
-
-    if (type == ash::MAGNIFIER_FULL || type == ash::MAGNIFIER_PARTIAL)
-      return type;
-
-    return ash::kDefaultMagnifierType;
+    return ash::MAGNIFIER_FULL;
   }
 
   void SetProfile(Profile* profile) {

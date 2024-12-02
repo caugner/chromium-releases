@@ -9,15 +9,16 @@
 #include <map>
 #include <string>
 
+#include "ash/display/display_controller.h"
 #include "ash/launcher/launcher_delegate.h"
 #include "ash/launcher/launcher_model_observer.h"
 #include "ash/launcher/launcher_types.h"
-#include "ash/shelf_types.h"
+#include "ash/shelf/shelf_types.h"
 #include "ash/shell_observer.h"
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/prefs/public/pref_change_registrar.h"
+#include "base/prefs/pref_change_registrar.h"
 #include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/prefs/pref_service_syncable_observer.h"
 #include "chrome/browser/ui/ash/app_sync_ui_state_observer.h"
@@ -56,13 +57,15 @@ class WebContents;
 // * App shell windows have ShellWindowLauncherItemController, owned by
 //   ShellWindowLauncherController.
 // * Shortcuts have no LauncherItemController.
-class ChromeLauncherControllerPerBrowser : public ash::LauncherModelObserver,
-                                           public ash::ShellObserver,
-                                           public ChromeLauncherController,
-                                           public content::NotificationObserver,
-                                           public PrefServiceSyncableObserver,
-                                           public AppSyncUIStateObserver,
-                                           public ExtensionEnableFlowDelegate {
+class ChromeLauncherControllerPerBrowser
+    : public ash::LauncherModelObserver,
+      public ash::ShellObserver,
+      public ash::DisplayController::Observer,
+      public ChromeLauncherController,
+      public content::NotificationObserver,
+      public PrefServiceSyncableObserver,
+      public AppSyncUIStateObserver,
+      public ExtensionEnableFlowDelegate {
  public:
   ChromeLauncherControllerPerBrowser(Profile* profile,
                                      ash::LauncherModel* model);
@@ -117,6 +120,15 @@ class ChromeLauncherControllerPerBrowser : public ash::LauncherModelObserver,
   // Returns true if the specified item can be pinned or unpinned. Only apps can
   // be pinned.
   virtual bool IsPinnable(ash::LauncherID id) const OVERRIDE;
+
+  // If there is no launcher item in the launcher for application |app_id|, one
+  // gets created. The (existing or created) launcher items get then locked
+  // against a users un-pinning removal.
+  virtual void LockV1AppWithID(const std::string& app_id) OVERRIDE;
+
+  // A previously locked launcher item of type |app_id| gets unlocked. If the
+  // lock count reaches 0 and the item is not pinned it will go away.
+  virtual void UnlockV1AppWithID(const std::string& app_id) OVERRIDE;
 
   // Requests that the launcher item controller specified by |id| open a new
   // instance of the app.  |event_flags| holds the flags of the event which
@@ -225,7 +237,7 @@ class ChromeLauncherControllerPerBrowser : public ash::LauncherModelObserver,
 
   // Returns the extension identified by |app_id|.
   virtual const extensions::Extension* GetExtensionForAppID(
-      const std::string& app_id) OVERRIDE;
+      const std::string& app_id) const OVERRIDE;
 
   // ash::LauncherDelegate overrides:
   virtual void OnBrowserShortcutClicked(int event_flags) OVERRIDE;
@@ -235,10 +247,12 @@ class ChromeLauncherControllerPerBrowser : public ash::LauncherModelObserver,
   virtual string16 GetTitle(const ash::LauncherItem& item) OVERRIDE;
   virtual ui::MenuModel* CreateContextMenu(
       const ash::LauncherItem& item, aura::RootWindow* root) OVERRIDE;
-  virtual ui::MenuModel* CreateApplicationMenu(
-      const ash::LauncherItem& item) OVERRIDE;
+  virtual ash::LauncherMenuModel* CreateApplicationMenu(
+      const ash::LauncherItem& item,
+      int event_flags) OVERRIDE;
   virtual ash::LauncherID GetIDByWindow(aura::Window* window) OVERRIDE;
   virtual bool IsDraggable(const ash::LauncherItem& item) OVERRIDE;
+  virtual bool ShouldShowTooltip(const ash::LauncherItem& item) OVERRIDE;
 
   // ash::LauncherModelObserver overrides:
   virtual void LauncherItemAdded(int index) OVERRIDE;
@@ -256,6 +270,10 @@ class ChromeLauncherControllerPerBrowser : public ash::LauncherModelObserver,
   // ash::ShellObserver overrides:
   virtual void OnShelfAlignmentChanged(aura::RootWindow* root_window) OVERRIDE;
 
+  // ash::DisplayController::Observer overrides:
+  virtual void OnDisplayConfigurationChanging() OVERRIDE;
+  virtual void OnDisplayConfigurationChanged() OVERRIDE;
+
   // PrefServiceSyncableObserver overrides:
   virtual void OnIsSyncingChanged() OVERRIDE;
 
@@ -266,7 +284,7 @@ class ChromeLauncherControllerPerBrowser : public ash::LauncherModelObserver,
   virtual void ExtensionEnableFlowFinished() OVERRIDE;
   virtual void ExtensionEnableFlowAborted(bool user_initiated) OVERRIDE;
 
-  // ash::AppIconLoader overrides:
+  // extensions::AppIconLoader overrides:
   virtual void SetAppImage(const std::string& app_id,
                            const gfx::ImageSkia& image) OVERRIDE;
 
@@ -282,7 +300,8 @@ class ChromeLauncherControllerPerBrowser : public ash::LauncherModelObserver,
   // Sets the AppTabHelper/AppIconLoader, taking ownership of the helper class.
   // These are intended for testing.
   virtual void SetAppTabHelperForTest(AppTabHelper* helper) OVERRIDE;
-  virtual void SetAppIconLoaderForTest(ash::AppIconLoader* loader) OVERRIDE;
+  virtual void SetAppIconLoaderForTest(
+      extensions::AppIconLoader* loader) OVERRIDE;
   virtual const std::string& GetAppIdFromLauncherIdForTest(
       ash::LauncherID id) OVERRIDE;
 
@@ -356,7 +375,7 @@ class ChromeLauncherControllerPerBrowser : public ash::LauncherModelObserver,
   scoped_ptr<AppTabHelper> app_tab_helper_;
 
   // Used to load the image for an app item.
-  scoped_ptr<ash::AppIconLoader> app_icon_loader_;
+  scoped_ptr<extensions::AppIconLoader> app_icon_loader_;
 
   content::NotificationRegistrar notification_registrar_;
 

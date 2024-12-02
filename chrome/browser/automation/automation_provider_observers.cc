@@ -23,8 +23,6 @@
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/app/chrome_command_ids.h"
-#include "chrome/browser/api/infobars/confirm_infobar_delegate.h"
-#include "chrome/browser/api/infobars/infobar_service.h"
 #include "chrome/browser/automation/automation_provider.h"
 #include "chrome/browser/automation/automation_provider_json.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
@@ -39,6 +37,8 @@
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/history/top_sites.h"
+#include "chrome/browser/infobars/confirm_infobar_delegate.h"
+#include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/metrics/metric_event_duration_details.h"
 #include "chrome/browser/notifications/balloon.h"
 #include "chrome/browser/notifications/balloon_collection.h"
@@ -55,7 +55,7 @@
 #include "chrome/browser/sessions/tab_restore_service_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_iterator.h"
-#include "chrome/browser/ui/browser_list_impl.h"
+#include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/find_bar/find_notification_details.h"
 #include "chrome/browser/ui/host_desktop.h"
@@ -357,8 +357,8 @@ void NavigationNotificationObserver::ConditionMet(
             &dict);
       } else {
         AutomationJSONReply(automation_, reply_message_.release()).SendError(
-            StringPrintf("Navigation failed with error code=%d.",
-                         navigation_result));
+            base::StringPrintf("Navigation failed with error code=%d.",
+                               navigation_result));
       }
     } else {
       IPC::ParamTraits<int>::Write(
@@ -635,7 +635,7 @@ void ExtensionReadyNotificationObserver::Observe(
       // Only track an internal or unpacked extension load.
       extensions::Manifest::Location location = loaded_extension->location();
       if (location != extensions::Manifest::INTERNAL &&
-          location != extensions::Manifest::LOAD)
+          !extensions::Manifest::IsUnpackedLocation(location))
         return;
       extension_ = loaded_extension;
       if (!DidExtensionViewsStopLoading(manager_))
@@ -821,7 +821,7 @@ void BrowserClosedNotificationObserver::Observe(
   }
 
   // The automation layer doesn't support non-native desktops.
-  int browser_count = static_cast<int>(chrome::BrowserListImpl::GetInstance(
+  int browser_count = static_cast<int>(BrowserList::GetInstance(
                           chrome::HOST_DESKTOP_TYPE_NATIVE)->size());
   // We get the notification before the browser is removed from the BrowserList.
   bool app_closing = browser_count == 1;
@@ -871,7 +871,7 @@ void BrowserCountChangeNotificationObserver::Observe(
          type == chrome::NOTIFICATION_BROWSER_CLOSED);
 
   // The automation layer doesn't support non-native desktops.
-  int current_count = static_cast<int>(chrome::BrowserListImpl::GetInstance(
+  int current_count = static_cast<int>(BrowserList::GetInstance(
                           chrome::HOST_DESKTOP_TYPE_NATIVE)->size());
   if (type == chrome::NOTIFICATION_BROWSER_CLOSED) {
     // At the time of the notification the browser being closed is not removed
@@ -1881,7 +1881,7 @@ std::vector<DictionaryValue*>* GetAppInfoFromExtensions(
     // Only return information about extensions that are actually apps.
     if ((*ext)->is_app()) {
       DictionaryValue* app_info = new DictionaryValue();
-      AppLauncherHandler::CreateAppInfo(*ext, NULL, ext_service, app_info);
+      AppLauncherHandler::CreateAppInfo(*ext, ext_service, app_info);
       app_info->SetBoolean("is_component_extension",
           (*ext)->location() == extensions::Manifest::COMPONENT);
 
@@ -2558,8 +2558,10 @@ void ProcessInfoObserver::OnDetailsAvailable() {
       std::string process_type = "Unknown";
       // The following condition avoids a DCHECK in debug builds when the
       // process type passed to |GetTypeNameInEnglish| is unknown.
-      if (iterator->type != content::PROCESS_TYPE_UNKNOWN)
-        process_type = content::GetProcessTypeNameInEnglish(iterator->type);
+      if (iterator->process_type != content::PROCESS_TYPE_UNKNOWN) {
+        process_type =
+            content::GetProcessTypeNameInEnglish(iterator->process_type);
+      }
       proc_data->SetString("child_process_type", process_type);
 
       // Renderer type, if this is a renderer process.

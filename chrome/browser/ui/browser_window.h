@@ -120,6 +120,10 @@ class BrowserWindow : public BaseWindow {
       const GURL& url,
       FullscreenExitBubbleType bubble_type) = 0;
 
+  // Windows and GTK remove the top controls in fullscreen, but Mac and Ash
+  // keep the controls in a slide-down panel.
+  virtual bool ShouldHideUIForFullscreen() const = 0;
+
   // Returns true if the fullscreen bubble is visible.
   virtual bool IsFullscreenBubbleVisible() const = 0;
 
@@ -199,12 +203,6 @@ class BrowserWindow : public BaseWindow {
 
   // Shows the Update Recommended dialog box.
   virtual void ShowUpdateChromeDialog() = 0;
-
-  // Shows the Task manager.
-  virtual void ShowTaskManager() = 0;
-
-  // Shows task information related to background pages.
-  virtual void ShowBackgroundPages() = 0;
 
   // Shows the Bookmark bubble. |url| is the URL being bookmarked,
   // |already_bookmarked| is true if the url is already bookmarked.
@@ -362,7 +360,7 @@ class BrowserWindow : public BaseWindow {
       autofill::PasswordGenerator* password_generator) = 0;
 
  protected:
-  friend void browser::CloseAllBrowsers();
+  friend void chrome::CloseAllBrowsers();
   friend class BrowserView;
   virtual void DestroyBrowser() = 0;
 };

@@ -7,7 +7,6 @@
 #include "chrome/browser/extensions/activity_log.h"
 #include "chrome/browser/extensions/api/declarative/rules_registry_service.h"
 #include "chrome/browser/extensions/api/declarative_content/content_rules_registry.h"
-#include "chrome/browser/extensions/app_notify_channel_ui.h"
 #include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/extension_action.h"
 #include "chrome/browser/extensions/extension_action_manager.h"
@@ -19,7 +18,7 @@
 #include "chrome/browser/extensions/script_badge_controller.h"
 #include "chrome/browser/extensions/script_bubble_controller.h"
 #include "chrome/browser/extensions/script_executor.h"
-#include "chrome/browser/extensions/webstore_standalone_installer.h"
+#include "chrome/browser/extensions/webstore_inline_installer.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/session_id.h"
 #include "chrome/browser/sessions/session_tab_helper.h"
@@ -27,11 +26,11 @@
 #include "chrome/browser/ui/web_applications/web_app_ui.h"
 #include "chrome/browser/web_applications/web_app.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/extensions/api/icons/icons_handler.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_icon_set.h"
 #include "chrome/common/extensions/extension_messages.h"
-#include "chrome/common/extensions/extension_resource.h"
 #include "chrome/common/extensions/feature_switch.h"
 #include "content/public/browser/invalidate_type.h"
 #include "content/public/browser/navigation_controller.h"
@@ -45,6 +44,7 @@
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
+#include "extensions/common/extension_resource.h"
 #include "ui/gfx/image/image.h"
 
 using content::NavigationController;
@@ -232,12 +232,8 @@ bool TabHelper::OnMessageReceived(const IPC::Message& message) {
   IPC_BEGIN_MESSAGE_MAP(TabHelper, message)
     IPC_MESSAGE_HANDLER(ExtensionHostMsg_DidGetApplicationInfo,
                         OnDidGetApplicationInfo)
-    IPC_MESSAGE_HANDLER(ExtensionHostMsg_InstallApplication,
-                        OnInstallApplication)
     IPC_MESSAGE_HANDLER(ExtensionHostMsg_InlineWebstoreInstall,
                         OnInlineWebstoreInstall)
-    IPC_MESSAGE_HANDLER(ExtensionHostMsg_GetAppNotifyChannel,
-                        OnGetAppNotifyChannel)
     IPC_MESSAGE_HANDLER(ExtensionHostMsg_GetAppInstallState,
                         OnGetAppInstallState);
     IPC_MESSAGE_HANDLER(ExtensionHostMsg_Request, OnRequest)
@@ -293,21 +289,6 @@ void TabHelper::OnDidGetApplicationInfo(int32 page_id,
 #endif
 }
 
-void TabHelper::OnInstallApplication(const WebApplicationInfo& info) {
-  Profile* profile =
-      Profile::FromBrowserContext(web_contents()->GetBrowserContext());
-  ExtensionService* extension_service = profile->GetExtensionService();
-  if (!extension_service)
-    return;
-
-  ExtensionInstallPrompt* prompt = NULL;
-  if (extension_service->show_extensions_prompts())
-    prompt = new ExtensionInstallPrompt(web_contents());
-  scoped_refptr<CrxInstaller> installer(
-      CrxInstaller::Create(extension_service, prompt));
-  installer->InstallWebApp(info);
-}
-
 void TabHelper::OnInlineWebstoreInstall(
     int install_id,
     int return_route_id,
@@ -316,63 +297,13 @@ void TabHelper::OnInlineWebstoreInstall(
   WebstoreStandaloneInstaller::Callback callback =
       base::Bind(&TabHelper::OnInlineInstallComplete, base::Unretained(this),
                  install_id, return_route_id);
-  scoped_refptr<WebstoreStandaloneInstaller> installer(
-      new WebstoreStandaloneInstaller(
+  scoped_refptr<WebstoreInlineInstaller> installer(
+      new WebstoreInlineInstaller(
           web_contents(),
           webstore_item_id,
-          WebstoreStandaloneInstaller::REQUIRE_VERIFIED_SITE,
-          WebstoreStandaloneInstaller::INLINE_PROMPT,
           requestor_url,
           callback));
   installer->BeginInstall();
-}
-
-void TabHelper::OnGetAppNotifyChannel(const GURL& requestor_url,
-                                      const std::string& client_id,
-                                      int return_route_id,
-                                      int callback_id) {
-  // Check for permission first.
-  Profile* profile =
-      Profile::FromBrowserContext(web_contents()->GetBrowserContext());
-  ExtensionService* extension_service = profile->GetExtensionService();
-  ProcessMap* process_map = extension_service->process_map();
-  content::RenderProcessHost* process = web_contents()->GetRenderProcessHost();
-  const Extension* extension =
-      extension_service->GetInstalledApp(requestor_url);
-
-  std::string error;
-  if (!extension ||
-      !extension->HasAPIPermission(APIPermission::kAppNotifications) ||
-      !process_map->Contains(extension->id(), process->GetID()))
-    error = kPermissionError;
-
-  // Make sure the extension can cross to the main profile, if called from an
-  // an incognito window.
-  if (profile->IsOffTheRecord() &&
-      !extension_service->CanCrossIncognito(extension))
-    error = extension_misc::kAppNotificationsIncognitoError;
-
-  if (!error.empty()) {
-    Send(new ExtensionMsg_GetAppNotifyChannelResponse(
-        return_route_id, "", error, callback_id));
-    return;
-  }
-
-  AppNotifyChannelUI* ui = AppNotifyChannelUI::Create(
-      profile, web_contents(), extension->name(),
-      AppNotifyChannelUI::NOTIFICATION_INFOBAR);
-
-  scoped_refptr<AppNotifyChannelSetup> channel_setup(
-      new AppNotifyChannelSetup(profile,
-                                extension->id(),
-                                client_id,
-                                requestor_url,
-                                return_route_id,
-                                callback_id,
-                                ui,
-                                this->AsWeakPtr()));
-  channel_setup->Start();
-  // We'll get called back in AppNotifyChannelSetupComplete.
 }
 
 void TabHelper::OnGetAppInstallState(const GURL& requestor_url,
@@ -395,26 +326,6 @@ void TabHelper::OnGetAppInstallState(const GURL& requestor_url,
 
   Send(new ExtensionMsg_GetAppInstallStateResponse(
       return_route_id, state, callback_id));
-}
-
-void TabHelper::AppNotifyChannelSetupComplete(
-    const std::string& channel_id,
-    const std::string& error,
-    const AppNotifyChannelSetup* setup) {
-  CHECK(setup);
-
-  // If the setup was successful, record that fact in ExtensionService.
-  if (!channel_id.empty() && error.empty()) {
-    Profile* profile =
-        Profile::FromBrowserContext(web_contents()->GetBrowserContext());
-    ExtensionService* service = profile->GetExtensionService();
-    if (service->GetExtensionById(setup->extension_id(), true))
-      service->SetAppNotificationSetupDone(setup->extension_id(),
-                                           setup->client_id());
-  }
-
-  Send(new ExtensionMsg_GetAppNotifyChannelResponse(
-      setup->return_route_id(), channel_id, error, setup->callback_id()));
 }
 
 void TabHelper::OnRequest(const ExtensionHostMsg_Request_Params& request) {
@@ -470,7 +381,8 @@ void TabHelper::UpdateExtensionAppIcon(const Extension* extension) {
     extensions::ImageLoader* loader = extensions::ImageLoader::Get(profile);
     loader->LoadImageAsync(
         extension,
-        extension->GetIconResource(extension_misc::EXTENSION_ICON_SMALLISH,
+        IconsInfo::GetIconResource(extension,
+                                   extension_misc::EXTENSION_ICON_SMALLISH,
                                    ExtensionIconSet::MATCH_EXACTLY),
         gfx::Size(extension_misc::EXTENSION_ICON_SMALLISH,
                   extension_misc::EXTENSION_ICON_SMALLISH),

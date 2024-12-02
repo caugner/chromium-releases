@@ -6,33 +6,57 @@
 #include "base/prefs/pref_service.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/browser/api/infobars/confirm_infobar_delegate.h"
+#include "chrome/browser/infobars/confirm_infobar_delegate.h"
 #include "chrome/browser/infobars/infobar.h"
 #include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/managed_mode/managed_mode.h"
+#include "chrome/browser/managed_mode/managed_mode_interstitial.h"
 #include "chrome/browser/managed_mode/managed_user_service.h"
 #include "chrome/browser/managed_mode/managed_user_service_factory.h"
-#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/web_contents_modal_dialog_manager.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/interstitial_page.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "grit/generated_resources.h"
+#include "ui/base/l10n/l10n_util.h"
 
 using content::InterstitialPage;
 using content::NavigationController;
 using content::NavigationEntry;
 using content::WebContents;
+
+namespace {
+
+class InterstitialObserver : public content::WebContentsObserver {
+ public:
+  InterstitialObserver(content::WebContents* web_contents,
+                       const base::Closure& callback)
+      : WebContentsObserver(web_contents),
+        callback_(callback) {
+  }
+
+  virtual void DidDetachInterstitialPage() OVERRIDE {
+    callback_.Run();
+  }
+
+ private:
+  base::Closure callback_;
+
+  DISALLOW_COPY_AND_ASSIGN(InterstitialObserver);
+};
 
 // TODO(sergiu): Make the webkit error message disappear when navigating to an
 // interstitial page. The message states: "Not allowed to load local resource:
@@ -92,12 +116,26 @@ class ManagedModeBlockModeTest : public InProcessBrowserTest {
     ASSERT_EQ(page_type, entry->GetPageType());
   }
 
-  // Checks if the current number of shown infobars is equal to |expected|.
-  void CheckNumberOfInfobars(unsigned int expected) {
-    EXPECT_EQ(expected,
-              InfoBarService::FromWebContents(
-                  browser()->tab_strip_model()->GetActiveWebContents())->
-                      GetInfoBarCount());
+  bool IsPreviewInfobarPresent() {
+    return IsInfobarPresent(IDS_MANAGED_MODE_PREVIEW_MESSAGE);
+  }
+
+  bool IsAlreadyAddedInfobarPresent() {
+    return IsInfobarPresent(IDS_MANAGED_MODE_ALREADY_ADDED_MESSAGE);
+  }
+
+  // Checks whether the correct infobar is present.
+  bool IsInfobarPresent(int message_id) {
+    InfoBarService* service = InfoBarService::FromWebContents(
+        browser()->tab_strip_model()->GetActiveWebContents());
+
+    for (unsigned int i = 0; i < service->GetInfoBarCount(); ++i) {
+      ConfirmInfoBarDelegate* delegate =
+          service->GetInfoBarDelegateAt(i)->AsConfirmInfoBarDelegate();
+      if (delegate->GetMessageText() == l10n_util::GetStringUTF16(message_id))
+        return true;
+    }
+    return false;
   }
 
   // Acts on the interstitial and infobar according to the values set to
@@ -119,7 +157,10 @@ class ManagedModeBlockModeTest : public InProcessBrowserTest {
       interstitial_page->Proceed();
       observer.Wait();
       infobar_added.Wait();
-      CheckNumberOfInfobars(1u);
+      if (infobar_action == INFOBAR_ALREADY_ADDED)
+        ASSERT_TRUE(IsAlreadyAddedInfobarPresent());
+      else
+        ASSERT_TRUE(IsPreviewInfobarPresent());
 
       InfoBarDelegate* info_bar_delegate =
           content::Details<InfoBarAddedDetails>(infobar_added.details()).ptr();
@@ -135,10 +176,14 @@ class ManagedModeBlockModeTest : public InProcessBrowserTest {
 
       switch (infobar_action) {
         case INFOBAR_ACCEPT:
-          confirm_info_bar_delegate->Accept();
+          confirm_info_bar_delegate->InfoBarDismissed();
+          ASSERT_TRUE(confirm_info_bar_delegate->Accept());
+          infobar_service->RemoveInfoBar(confirm_info_bar_delegate);
           break;
         case INFOBAR_CANCEL:
-          confirm_info_bar_delegate->Cancel();
+          confirm_info_bar_delegate->InfoBarDismissed();
+          ASSERT_FALSE(confirm_info_bar_delegate->Cancel());
+          infobar_service->RemoveInfoBar(confirm_info_bar_delegate);
           break;
         case INFOBAR_ALREADY_ADDED:
           confirm_info_bar_delegate->InfoBarDismissed();
@@ -151,13 +196,14 @@ class ManagedModeBlockModeTest : public InProcessBrowserTest {
 
       infobar_removed.Wait();
     } else {
-      content::WindowedNotificationObserver observer(
-          content::NOTIFICATION_INTERSTITIAL_DETACHED,
-          content::Source<WebContents>(tab));
+      scoped_refptr<content::MessageLoopRunner> loop_runner(
+          new content::MessageLoopRunner);
+      InterstitialObserver observer(tab, loop_runner->QuitClosure());
       interstitial_page->DontProceed();
-      observer.Wait();
+      loop_runner->Run();
     }
-    CheckNumberOfInfobars(0);
+    EXPECT_FALSE(IsPreviewInfobarPresent());
+    EXPECT_FALSE(IsAlreadyAddedInfobarPresent());
   }
 
  protected:
@@ -333,10 +379,11 @@ IN_PROC_BROWSER_TEST_F(ManagedModeBlockModeTest,
             managed_user_service_->GetManualBehaviorForHost("www.example.com"));
 }
 
-// Tests whether going back after being shown an interstitial works. No
-// websites should be added to the whitelist.
+// Tests whether going back after being shown an interstitial works. The user
+// goes back by using the button on the interstitial. No websites should be
+// added to the whitelist.
 IN_PROC_BROWSER_TEST_F(ManagedModeBlockModeTest,
-                       SimpleURLNotInAnyListsGoBack) {
+                       SimpleURLNotInAnyListsGoBackOnInterstitial) {
   GURL test_url("http://www.example.com/files/simple.html");
   ui_test_utils::NavigateToURL(browser(), test_url);
 
@@ -346,7 +393,27 @@ IN_PROC_BROWSER_TEST_F(ManagedModeBlockModeTest,
   ActOnInterstitialAndInfobar(tab, INTERSTITIAL_DONTPROCEED,
                                    INFOBAR_NOT_USED);
 
-  EXPECT_EQ(tab->GetURL().spec(), "about:blank");
+  EXPECT_EQ("about:blank", tab->GetURL().spec());
+
+  EXPECT_EQ(ManagedUserService::MANUAL_NONE,
+            managed_user_service_->GetManualBehaviorForHost("www.example.com"));
+}
+
+// Tests whether going back after being shown an interstitial works. The user
+// previews the page and then goes back by using the button on the infobar. No
+// websites should be added to the whitelist.
+IN_PROC_BROWSER_TEST_F(ManagedModeBlockModeTest,
+                       SimpleURLNotInAnyListsGoBackOnInfobar) {
+  GURL test_url("http://www.example.com/files/simple.html");
+  ui_test_utils::NavigateToURL(browser(), test_url);
+
+  WebContents* tab = browser()->tab_strip_model()->GetActiveWebContents();
+
+  CheckShownPageIsInterstitial(tab);
+  ActOnInterstitialAndInfobar(tab, INTERSTITIAL_PROCEED,
+                                   INFOBAR_CANCEL);
+
+  EXPECT_EQ("about:blank", tab->GetURL().spec());
 
   EXPECT_EQ(ManagedUserService::MANUAL_NONE,
             managed_user_service_->GetManualBehaviorForHost("www.example.com"));
@@ -375,7 +442,7 @@ IN_PROC_BROWSER_TEST_F(ManagedModeBlockModeTest,
 
   // An interstitial should not show up.
   CheckShownPageIsNotInterstitial(tab);
-  CheckNumberOfInfobars(0);
+  EXPECT_FALSE(IsPreviewInfobarPresent());
 }
 
 // Same as above just that it reloads the page instead of navigating to another
@@ -398,8 +465,8 @@ IN_PROC_BROWSER_TEST_F(ManagedModeBlockModeTest,
 
   // Expect that the page shows up and not an interstitial.
   CheckShownPageIsNotInterstitial(tab);
-  CheckNumberOfInfobars(0);
-  EXPECT_EQ(tab->GetURL().spec(), test_url.spec());
+  EXPECT_FALSE(IsPreviewInfobarPresent());
+  EXPECT_EQ(test_url.spec(), tab->GetURL().spec());
 }
 
 // The test navigates to a page, the interstitial is shown and preview is
@@ -432,21 +499,21 @@ IN_PROC_BROWSER_TEST_F(ManagedModeBlockModeTest,
 
   // Wait for the infobar and check that it is there.
   infobar_added.Wait();
-  CheckNumberOfInfobars(1u);
+  EXPECT_TRUE(IsPreviewInfobarPresent());
 
   // Navigate to a URL on the same host.
   test_url = GURL("http://www.example.com/files/english_page.html");
   ui_test_utils::NavigateToURL(browser(), test_url);
 
   // Check that the infobar is still there.
-  CheckNumberOfInfobars(1u);
+  EXPECT_TRUE(IsPreviewInfobarPresent());
 
   // Navigate to another URL on the same host.
   test_url = GURL("http://www.example.com/files/french_page.html");
   ui_test_utils::NavigateToURL(browser(), test_url);
 
   // Check that the infobar is still there.
-  CheckNumberOfInfobars(1u);
+  EXPECT_TRUE(IsPreviewInfobarPresent());
 
   InfoBarDelegate* info_bar_delegate =
       content::Details<InfoBarAddedDetails>(infobar_added.details()).ptr();
@@ -459,10 +526,14 @@ IN_PROC_BROWSER_TEST_F(ManagedModeBlockModeTest,
       content::NotificationService::AllSources());
 
   // Finally accept the infobar and see that it is gone.
-  confirm_info_bar_delegate->Accept();
+  confirm_info_bar_delegate->InfoBarDismissed();
+  ASSERT_TRUE(confirm_info_bar_delegate->Accept());
+  InfoBarService* infobar_service =
+      InfoBarService::FromWebContents(tab);
+  infobar_service->RemoveInfoBar(confirm_info_bar_delegate);
   infobar_removed.Wait();
 
-  CheckNumberOfInfobars(0);
+  EXPECT_FALSE(IsPreviewInfobarPresent());
 
   EXPECT_EQ(ManagedUserService::MANUAL_ALLOW,
             managed_user_service_->GetManualBehaviorForHost("www.example.com"));
@@ -498,7 +569,7 @@ IN_PROC_BROWSER_TEST_F(ManagedModeBlockModeTest,
 
   // Wait for the infobar and check that it is there.
   infobar_added.Wait();
-  CheckNumberOfInfobars(1u);
+  EXPECT_TRUE(IsPreviewInfobarPresent());
   CheckShownPageIsNotInterstitial(tab);
 
   // Navigate to another URL on a different host.
@@ -506,7 +577,7 @@ IN_PROC_BROWSER_TEST_F(ManagedModeBlockModeTest,
   ui_test_utils::NavigateToURL(browser(), test_url);
 
   CheckShownPageIsInterstitial(tab);
-  CheckNumberOfInfobars(0);
+  EXPECT_FALSE(IsPreviewInfobarPresent());
 
   ActOnInterstitialAndInfobar(tab, INTERSTITIAL_PROCEED, INFOBAR_ACCEPT);
 
@@ -516,3 +587,30 @@ IN_PROC_BROWSER_TEST_F(ManagedModeBlockModeTest,
             managed_user_service_->GetManualBehaviorForHost(
                 "www.new-example.com"));
 }
+
+// Now check that the passphrase dialog is shown when a passphrase is specified
+// and the user clicks on the preview button.
+IN_PROC_BROWSER_TEST_F(ManagedModeBlockModeTest,
+                       PreviewAuthenticationRequired) {
+  // Set a passphrase.
+  PrefService* pref_service = browser()->profile()->GetPrefs();
+  pref_service->SetString(prefs::kManagedModeLocalPassphrase, "test");
+
+  // Navigate to an URL which should be blocked.
+  GURL test_url("http://www.example.com/files/simple.html");
+  ui_test_utils::NavigateToURL(browser(), test_url);
+  WebContents* tab = browser()->tab_strip_model()->GetActiveWebContents();
+  InterstitialPage* interstitial_page = tab->GetInterstitialPage();
+
+  // Get the ManagedModeInterstitial delegate.
+  content::InterstitialPageDelegate* delegate =
+      interstitial_page->GetDelegateForTesting();
+
+  // Simulate the click on the "preview" button.
+  delegate->CommandReceived("\"preview\"");
+  WebContentsModalDialogManager* web_contents_modal_dialog_manager =
+      WebContentsModalDialogManager::FromWebContents(tab);
+  EXPECT_TRUE(web_contents_modal_dialog_manager->IsShowingDialog());
+}
+
+}  // namespace

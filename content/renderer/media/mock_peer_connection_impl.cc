@@ -9,12 +9,12 @@
 
 #include "base/logging.h"
 
+using testing::_;
 using webrtc::AudioTrackInterface;
 using webrtc::CreateSessionDescriptionObserver;
 using webrtc::DtmfSenderInterface;
 using webrtc::DtmfSenderObserverInterface;
 using webrtc::IceCandidateInterface;
-using webrtc::LocalMediaStreamInterface;
 using webrtc::MediaConstraintsInterface;
 using webrtc::MediaStreamInterface;
 using webrtc::PeerConnectionInterface;
@@ -42,7 +42,7 @@ class MockStreamCollection : public webrtc::StreamCollectionInterface {
       const std::string& id) OVERRIDE {
     for (size_t i = 0; i < streams_.size(); ++i) {
       webrtc::MediaStreamTrackInterface* track =
-          streams_.at(i)->audio_tracks()->Find(id);
+          streams_.at(i)->FindAudioTrack(id);
       if (track)
         return track;
     }
@@ -52,7 +52,7 @@ class MockStreamCollection : public webrtc::StreamCollectionInterface {
       const std::string& id) OVERRIDE {
     for (size_t i = 0; i < streams_.size(); ++i) {
       webrtc::MediaStreamTrackInterface* track =
-          streams_.at(i)->video_tracks()->Find(id);
+          streams_.at(i)->FindVideoTrack(id);
       if (track)
         return track;
     }
@@ -144,7 +144,7 @@ class MockDtmfSender : public DtmfSenderInterface {
   virtual void UnregisterObserver() OVERRIDE {
     observer_ = NULL;
   }
-  virtual bool CanInsertDtmf() {
+  virtual bool CanInsertDtmf() OVERRIDE {
     return true;
   }
   virtual bool InsertDtmf(const std::string& tones, int duration,
@@ -184,7 +184,12 @@ MockPeerConnectionImpl::MockPeerConnectionImpl(
       remote_streams_(new talk_base::RefCountedObject<MockStreamCollection>),
       hint_audio_(false),
       hint_video_(false),
+      getstats_result_(true),
       sdp_mline_index_(-1) {
+  ON_CALL(*this, SetLocalDescription(_, _)).WillByDefault(testing::Invoke(
+      this, &MockPeerConnectionImpl::SetLocalDescriptionWorker));
+  ON_CALL(*this, SetRemoteDescription(_, _)).WillByDefault(testing::Invoke(
+      this, &MockPeerConnectionImpl::SetRemoteDescriptionWorker));
 }
 
 MockPeerConnectionImpl::~MockPeerConnectionImpl() {}
@@ -232,6 +237,9 @@ MockPeerConnectionImpl::CreateDataChannel(const std::string& label,
 bool MockPeerConnectionImpl::GetStats(
     webrtc::StatsObserver* observer,
     webrtc::MediaStreamTrackInterface* track) {
+  if (!getstats_result_)
+    return false;
+
   std::vector<webrtc::StatsReport> reports;
   webrtc::StatsReport report;
   report.id = "1234";
@@ -298,7 +306,7 @@ void MockPeerConnectionImpl::SetLocalDescriptionWorker(
   local_desc_.reset(desc);
 }
 
-void MockPeerConnectionImpl::SetRemoteDescription(
+void MockPeerConnectionImpl::SetRemoteDescriptionWorker(
     SetSessionDescriptionObserver* observer,
     SessionDescriptionInterface* desc) {
   desc->ToString(&description_sdp_);

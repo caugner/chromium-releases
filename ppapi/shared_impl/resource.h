@@ -28,7 +28,6 @@
   F(PPB_BrowserFont_Singleton_API) \
   F(PPB_BrowserFont_Trusted_API) \
   F(PPB_Buffer_API) \
-  F(PPB_BufferTrusted_API) \
   F(PPB_DeviceRef_API) \
   F(PPB_DirectoryReader_API) \
   F(PPB_FileChooser_API) \
@@ -54,11 +53,12 @@
   F(PPB_MessageLoop_API) \
   F(PPB_NetworkList_Private_API) \
   F(PPB_NetworkMonitor_Private_API) \
-  F(PPB_PDFFont_API) \
   F(PPB_Printing_API) \
   F(PPB_ResourceArray_API) \
   F(PPB_Scrollbar_API) \
   F(PPB_Talk_Private_API) \
+  F(PPB_TrueTypeFont_API) \
+  F(PPB_TrueTypeFont_Singleton_API) \
   F(PPB_TCPServerSocket_Private_API) \
   F(PPB_TCPSocket_Private_API) \
   F(PPB_UDPSocket_Private_API) \
@@ -205,6 +205,14 @@ class PPAPI_SHARED_EXPORT Resource : public base::RefCounted<Resource> {
  protected:
   // Logs a message to the console from this resource.
   void Log(PP_LogLevel level, const std::string& message);
+
+  // Removes the resource from the ResourceTracker's tables. This normally
+  // happens as part of Resource destruction, but if a subclass destructor
+  // has a risk of re-entering destruction via the ResourceTracker, it can
+  // call this explicitly to get rid of the table entry before continuing
+  // with the destruction. If the resource is not in the ResourceTracker's
+  // tables, silently does nothing. See http://crbug.com/159429.
+  void RemoveFromResourceTracker();
 
   // Notifications for subclasses.
   virtual void LastPluginRefWasDeleted() {}

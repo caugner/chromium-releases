@@ -12,6 +12,7 @@
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
+#include "chrome/browser/google_apis/drive_api_parser.h"
 #include "chrome/browser/google_apis/drive_uploader.h"
 #include "chrome/browser/google_apis/gdata_wapi_service.h"
 #include "chrome/browser/google_apis/gdata_wapi_url_generator.h"
@@ -26,7 +27,11 @@ namespace sync_file_system {
 
 namespace {
 
-const char kRootResourceId[] = "";
+enum ParentType {
+  PARENT_TYPE_ROOT_OR_EMPTY,
+  PARENT_TYPE_DIRECTORY,
+};
+
 const char kSyncRootDirectoryName[] = "Chrome Syncable FileSystem";
 const char kMimeTypeOctetStream[] = "application/octet-stream";
 
@@ -34,58 +39,67 @@ const char kMimeTypeOctetStream[] = "application/octet-stream";
 const base::FilePath::CharType kDummyDrivePath[] =
     FILE_PATH_LITERAL("/dummy/drive/path");
 
+void EmptyGDataErrorCodeCallback(google_apis::GDataErrorCode error) {}
+
 bool HasParentLinkTo(const ScopedVector<google_apis::Link>& links,
-                     const GURL& parent_link) {
-  bool should_not_have_parent = parent_link.is_empty();
+                     GURL parent_link,
+                     ParentType parent_type) {
+  bool has_parent = false;
 
   for (ScopedVector<google_apis::Link>::const_iterator itr = links.begin();
        itr != links.end(); ++itr) {
     if ((*itr)->type() == google_apis::Link::LINK_PARENT) {
-      if (should_not_have_parent)
-        return false;
+      has_parent = true;
       if ((*itr)->href().GetOrigin() == parent_link.GetOrigin() &&
           (*itr)->href().path() == parent_link.path())
         return true;
     }
   }
 
-  return should_not_have_parent;
+  return parent_type == PARENT_TYPE_ROOT_OR_EMPTY && !has_parent;
 }
 
 struct TitleAndParentQuery
     : std::unary_function<const google_apis::ResourceEntry*, bool> {
   TitleAndParentQuery(const std::string& title,
-                      const GURL& parent_link)
+                      const GURL& parent_link,
+                      ParentType parent_type)
       : title(title),
-        parent_link(parent_link) {
+        parent_link(parent_link),
+        parent_type(parent_type) {
   }
 
   bool operator()(const google_apis::ResourceEntry* entry) const {
     return entry->title() == title &&
-        HasParentLinkTo(entry->links(), parent_link);
+        HasParentLinkTo(entry->links(), parent_link, parent_type);
   }
 
   const std::string& title;
   const GURL& parent_link;
+  ParentType parent_type;
 };
 
 void FilterEntriesByTitleAndParent(
     ScopedVector<google_apis::ResourceEntry>* entries,
     const std::string& title,
-    const GURL& parent_link) {
+    const GURL& parent_link,
+    ParentType parent_type) {
   typedef ScopedVector<google_apis::ResourceEntry>::iterator iterator;
   iterator itr = std::partition(entries->begin(), entries->end(),
-                                TitleAndParentQuery(title, parent_link));
+                                TitleAndParentQuery(title, parent_link,
+                                                    parent_type));
   entries->erase(itr, entries->end());
 }
 
 google_apis::ResourceEntry* GetDocumentByTitleAndParent(
     const ScopedVector<google_apis::ResourceEntry>& entries,
     const std::string& title,
-    const GURL& parent_link) {
+    const GURL& parent_link,
+    ParentType parent_type) {
   typedef ScopedVector<google_apis::ResourceEntry>::const_iterator iterator;
   iterator found = std::find_if(entries.begin(), entries.end(),
-                                TitleAndParentQuery(title, parent_link));
+                                TitleAndParentQuery(title, parent_link,
+                                                    parent_type));
   if (found != entries.end())
     return *found;
   return NULL;
@@ -110,7 +124,8 @@ void UploadResultAdapter(
 
 DriveFileSyncClient::DriveFileSyncClient(Profile* profile)
     : url_generator_(GURL(
-          google_apis::GDataWapiUrlGenerator::kBaseUrlForProduction)) {
+          google_apis::GDataWapiUrlGenerator::kBaseUrlForProduction)),
+      upload_next_key_(0) {
   drive_service_.reset(new google_apis::GDataWapiService(
       profile->GetRequestContext(),
       GURL(google_apis::GDataWapiUrlGenerator::kBaseUrlForProduction),
@@ -136,7 +151,8 @@ DriveFileSyncClient::DriveFileSyncClient(
     const GURL& base_url,
     scoped_ptr<google_apis::DriveServiceInterface> drive_service,
     scoped_ptr<google_apis::DriveUploaderInterface> drive_uploader)
-    : url_generator_(base_url) {
+    : url_generator_(base_url),
+      upload_next_key_(0) {
   drive_service_ = drive_service.Pass();
   drive_service_->Initialize(profile);
   drive_service_->AddObserver(this);
@@ -170,10 +186,10 @@ void DriveFileSyncClient::GetDriveDirectoryForSyncRoot(
 
   std::string directory_name(kSyncRootDirectoryName);
   SearchFilesInDirectory(
-      kRootResourceId,
+      std::string(),
       FormatTitleQuery(directory_name),
       base::Bind(&DriveFileSyncClient::DidGetDirectory, AsWeakPtr(),
-                 kRootResourceId, directory_name, callback));
+                 std::string(), directory_name, callback));
 }
 
 void DriveFileSyncClient::GetDriveDirectoryForOrigin(
@@ -207,18 +223,24 @@ void DriveFileSyncClient::DidGetDirectory(
   }
 
   GURL parent_link;
-  if (!parent_resource_id.empty())
+  ParentType parent_type = PARENT_TYPE_DIRECTORY;
+  if (parent_resource_id.empty()) {
+    parent_link = ResourceIdToResourceLink(
+        drive_service_->GetRootResourceId());
+    parent_type = PARENT_TYPE_ROOT_OR_EMPTY;
+  } else {
     parent_link = ResourceIdToResourceLink(parent_resource_id);
+  }
   std::string title(directory_name);
   google_apis::ResourceEntry* entry = GetDocumentByTitleAndParent(
-      feed->entries(), title, parent_link);
+      feed->entries(), title, parent_link, parent_type);
   if (!entry) {
     DVLOG(2) << "Directory not found. Creating: " << directory_name;
 
     // If the |parent_resource_id| is empty, create a directory under the root
     // directory. So here we use the result of GetRootResourceId() for such a
     // case.
-    std::string resource_id = parent_resource_id.empty() ?
+    std::string resource_id = parent_type == PARENT_TYPE_ROOT_OR_EMPTY ?
         drive_service_->GetRootResourceId() : parent_resource_id;
     drive_service_->AddNewDirectory(
         resource_id, directory_name,
@@ -231,6 +253,9 @@ void DriveFileSyncClient::DidGetDirectory(
   // TODO(tzik): Handle error.
   DCHECK_EQ(google_apis::ENTRY_KIND_FOLDER, entry->kind());
   DCHECK_EQ(directory_name, entry->title());
+
+  if (entry->title() == kSyncRootDirectoryName)
+    EnsureSyncRootIsNotInMyDrive(entry->resource_id());
 
   callback.Run(error, entry->resource_id());
 }
@@ -270,19 +295,30 @@ void DriveFileSyncClient::DidEnsureUniquenessForCreateDirectory(
   //   the conflict was resolved.
   //
 
-  if (error == google_apis::HTTP_FOUND) {
+  if (error == google_apis::HTTP_FOUND)
     error = google_apis::HTTP_CREATED;
+
+  if (error != google_apis::HTTP_SUCCESS &&
+      error != google_apis::HTTP_CREATED) {
+    callback.Run(error, std::string());
+    return;
   }
+
+  DCHECK(entry) << "No entry: " << error;
+
+  if (entry->title() == kSyncRootDirectoryName)
+    EnsureSyncRootIsNotInMyDrive(entry->resource_id());
+
   callback.Run(error, entry->resource_id());
 }
 
 void DriveFileSyncClient::GetLargestChangeStamp(
     const ChangeStampCallback& callback) {
   DCHECK(CalledOnValidThread());
-  DVLOG(2) << "Getting largest changestamp";
+  DVLOG(2) << "Getting largest change id";
 
-  drive_service_->GetAccountMetadata(
-      base::Bind(&DriveFileSyncClient::DidGetAccountMetadata,
+  drive_service_->GetAboutResource(
+      base::Bind(&DriveFileSyncClient::DidGetAboutResource,
                  AsWeakPtr(), callback));
 }
 
@@ -298,22 +334,22 @@ void DriveFileSyncClient::GetResourceEntry(
                  AsWeakPtr(), callback));
 }
 
-void DriveFileSyncClient::DidGetAccountMetadata(
+void DriveFileSyncClient::DidGetAboutResource(
     const ChangeStampCallback& callback,
     google_apis::GDataErrorCode error,
-    scoped_ptr<google_apis::AccountMetadataFeed> metadata) {
+    scoped_ptr<google_apis::AboutResource> about_resource) {
   DCHECK(CalledOnValidThread());
 
-  int64 largest_changestamp = 0;
+  int64 largest_change_id = 0;
   if (error == google_apis::HTTP_SUCCESS) {
-    DCHECK(metadata);
-    largest_changestamp = metadata->largest_changestamp();
-    DVLOG(2) << "Got largest changestamp: " << largest_changestamp;
+    DCHECK(about_resource);
+    largest_change_id = about_resource->largest_change_id();
+    DVLOG(2) << "Got largest change id: " << largest_change_id;
   } else {
-    DVLOG(2) << "Error on getting largest changestamp: " << error;
+    DVLOG(2) << "Error on getting largest change id: " << error;
   }
 
-  callback.Run(error, largest_changestamp);
+  callback.Run(error, largest_change_id);
 }
 
 void DriveFileSyncClient::SearchFilesInDirectory(
@@ -403,12 +439,22 @@ void DriveFileSyncClient::UploadNewFile(
            << directory_resource_id << "] with title ["
            << title << "]";
 
-  drive_service_->GetResourceEntry(
+  std::string mime_type;
+  if (!net::GetWellKnownMimeTypeFromExtension(
+          local_file_path.Extension(), &mime_type))
+    mime_type = kMimeTypeOctetStream;
+
+  UploadKey upload_key = RegisterUploadCallback(callback);
+  ResourceEntryCallback did_upload_callback =
+      base::Bind(&DriveFileSyncClient::DidUploadNewFile, AsWeakPtr(),
+                 directory_resource_id, title, upload_key);
+  drive_uploader_->UploadNewFile(
       directory_resource_id,
-      base::Bind(&DriveFileSyncClient::DidGetResourceEntry,
-                 AsWeakPtr(),
-                 base::Bind(&DriveFileSyncClient::UploadNewFileInternal,
-                            AsWeakPtr(), local_file_path, title, callback)));
+      base::FilePath(kDummyDrivePath),
+      local_file_path,
+      title,
+      mime_type,
+      base::Bind(&UploadResultAdapter, did_upload_callback));
 }
 
 void DriveFileSyncClient::UploadExistingFile(
@@ -434,12 +480,40 @@ void DriveFileSyncClient::DeleteFile(
   DCHECK(CalledOnValidThread());
   DVLOG(2) << "Deleting file: " << resource_id;
 
-  drive_service_->GetResourceEntry(
+  // Load actual remote_file_md5 to check for conflict before deletion.
+  if (!remote_file_md5.empty()) {
+    drive_service_->GetResourceEntry(
+        resource_id,
+        base::Bind(&DriveFileSyncClient::DidGetResourceEntry,
+                   AsWeakPtr(),
+                   base::Bind(&DriveFileSyncClient::DeleteFileInternal,
+                              AsWeakPtr(), remote_file_md5, callback)));
+    return;
+  }
+
+  // Expected remote_file_md5 is empty so do a force delete.
+  drive_service_->DeleteResource(
       resource_id,
-      base::Bind(&DriveFileSyncClient::DidGetResourceEntry,
-                 AsWeakPtr(),
-                 base::Bind(&DriveFileSyncClient::DeleteFileInternal,
-                            AsWeakPtr(), remote_file_md5, callback)));
+      std::string(),
+      base::Bind(&DriveFileSyncClient::DidDeleteFile,
+                 AsWeakPtr(), callback));
+  return;
+}
+
+GURL DriveFileSyncClient::ResourceIdToResourceLink(
+    const std::string& resource_id) const {
+  return url_generator_.GenerateEditUrl(resource_id);
+}
+
+void DriveFileSyncClient::EnsureSyncRootIsNotInMyDrive(
+    const std::string& sync_root_resource_id) const {
+  DCHECK(CalledOnValidThread());
+  DVLOG(2) << "Ensuring the sync root directory is not in 'My Drive'.";
+
+  drive_service_->RemoveResourceFromDirectory(
+      drive_service_->GetRootResourceId(),
+      sync_root_resource_id,
+      base::Bind(&EmptyGDataErrorCodeCallback));
 }
 
 // static
@@ -453,11 +527,6 @@ GURL DriveFileSyncClient::DirectoryTitleToOrigin(const std::string& title) {
   return extensions::Extension::GetBaseURLFromExtensionId(title);
 }
 
-GURL DriveFileSyncClient::ResourceIdToResourceLink(
-    const std::string& resource_id) const {
-  return url_generator_.GenerateEditUrl(resource_id);
-}
-
 void DriveFileSyncClient::OnReadyToPerformOperations() {
   DCHECK(CalledOnValidThread());
   FOR_EACH_OBSERVER(DriveFileSyncClientObserver, observers_, OnAuthenticated());
@@ -466,9 +535,16 @@ void DriveFileSyncClient::OnReadyToPerformOperations() {
 void DriveFileSyncClient::OnConnectionTypeChanged(
     net::NetworkChangeNotifier::ConnectionType type) {
   DCHECK(CalledOnValidThread());
-  if (type != net::NetworkChangeNotifier::CONNECTION_NONE)
+  if (type != net::NetworkChangeNotifier::CONNECTION_NONE) {
     FOR_EACH_OBSERVER(DriveFileSyncClientObserver,
                       observers_, OnNetworkConnected());
+    return;
+  }
+  // We're now disconnected, reset the drive_uploader_ to force stop
+  // uploading, otherwise the uploader may get stuck.
+  // TODO(kinuko): Check the uploader behavior if it's the expected behavior
+  // (http://crbug.com/223818)
+  CancelAllUploads(google_apis::GDATA_NO_CONNECTION);
 }
 
 void DriveFileSyncClient::DidGetResourceList(
@@ -578,46 +654,14 @@ void DriveFileSyncClient::DidDownloadFile(
   callback.Run(error, downloaded_file_md5);
 }
 
-void DriveFileSyncClient::UploadNewFileInternal(
-    const base::FilePath& local_file_path,
-    const std::string& title,
-    const UploadFileCallback& callback,
-    google_apis::GDataErrorCode error,
-    scoped_ptr<google_apis::ResourceEntry> parent_directory_entry) {
-  DCHECK(CalledOnValidThread());
-
-  if (error != google_apis::HTTP_SUCCESS) {
-    DVLOG(2) << "Error on getting parent resource id for upload: " << error;
-    callback.Run(error, std::string(), std::string());
-    return;
-  }
-  DCHECK(parent_directory_entry);
-  DVLOG(2) << "Got resource entry of parent directory for upload";
-
-  std::string mime_type;
-  if (!net::GetWellKnownMimeTypeFromExtension(
-          local_file_path.Extension(), &mime_type))
-    mime_type = kMimeTypeOctetStream;
-
-  ResourceEntryCallback did_upload_callback =
-      base::Bind(&DriveFileSyncClient::DidUploadNewFile, AsWeakPtr(),
-                 parent_directory_entry->resource_id(), title, callback);
-  drive_uploader_->UploadNewFile(
-      parent_directory_entry->GetLinkByType(
-          google_apis::Link::LINK_RESUMABLE_CREATE_MEDIA)->href(),
-      base::FilePath(kDummyDrivePath),
-      local_file_path,
-      title,
-      mime_type,
-      base::Bind(&UploadResultAdapter, did_upload_callback));
-}
-
 void DriveFileSyncClient::DidUploadNewFile(
     const std::string& parent_resource_id,
     const std::string& title,
-    const UploadFileCallback& callback,
+    UploadKey upload_key,
     google_apis::GDataErrorCode error,
     scoped_ptr<google_apis::ResourceEntry> entry) {
+  UploadFileCallback callback = GetAndUnregisterUploadCallback(upload_key);
+  DCHECK(!callback.is_null());
   if (error != google_apis::HTTP_SUCCESS &&
       error != google_apis::HTTP_CREATED) {
     DVLOG(2) << "Error on uploading new file: " << error;
@@ -684,7 +728,7 @@ void DriveFileSyncClient::UploadExistingFileInternal(
 
   // If remote file's hash value is different from the expected one, conflict
   // might have occurred.
-  if (remote_file_md5 != entry->file_md5()) {
+  if (!remote_file_md5.empty() && remote_file_md5 != entry->file_md5()) {
     DVLOG(2) << "Conflict detected before uploading existing file";
     callback.Run(google_apis::HTTP_CONFLICT, std::string(), std::string());
     return;
@@ -695,12 +739,12 @@ void DriveFileSyncClient::UploadExistingFileInternal(
           local_file_path.Extension(), &mime_type))
     mime_type = kMimeTypeOctetStream;
 
+  UploadKey upload_key = RegisterUploadCallback(callback);
   ResourceEntryCallback did_upload_callback =
       base::Bind(&DriveFileSyncClient::DidUploadExistingFile,
-                 AsWeakPtr(), callback);
+                 AsWeakPtr(), upload_key);
   drive_uploader_->UploadExistingFile(
-      entry->GetLinkByType(
-          google_apis::Link::LINK_RESUMABLE_EDIT_MEDIA)->href(),
+      entry->resource_id(),
       base::FilePath(kDummyDrivePath),
       local_file_path,
       mime_type,
@@ -708,11 +752,17 @@ void DriveFileSyncClient::UploadExistingFileInternal(
       base::Bind(&UploadResultAdapter, did_upload_callback));
 }
 
+bool DriveFileSyncClient::IsAuthenticated() const {
+  return drive_service_->HasRefreshToken();
+}
+
 void DriveFileSyncClient::DidUploadExistingFile(
-    const UploadFileCallback& callback,
+    UploadKey upload_key,
     google_apis::GDataErrorCode error,
     scoped_ptr<google_apis::ResourceEntry> entry) {
   DCHECK(CalledOnValidThread());
+  UploadFileCallback callback = GetAndUnregisterUploadCallback(upload_key);
+  DCHECK(!callback.is_null());
   if (error != google_apis::HTTP_SUCCESS) {
     DVLOG(2) << "Error on uploading existing file: " << error;
     callback.Run(error, std::string(), std::string());
@@ -740,7 +790,7 @@ void DriveFileSyncClient::DeleteFileInternal(
 
   // If remote file's hash value is different from the expected one, conflict
   // might have occurred.
-  if (remote_file_md5 != entry->file_md5()) {
+  if (!remote_file_md5.empty() && remote_file_md5 != entry->file_md5()) {
     DVLOG(2) << "Conflict detected before deleting file";
     callback.Run(google_apis::HTTP_CONFLICT);
     return;
@@ -798,11 +848,18 @@ void DriveFileSyncClient::DidListEntriesToEnsureUniqueness(
   // This filtering is needed only on WAPI. Once we move to Drive API we can
   // drop this.
   GURL parent_link;
-  if (!parent_resource_id.empty())
+  ParentType parent_type = PARENT_TYPE_DIRECTORY;
+  if (parent_resource_id.empty()) {
+    parent_link = ResourceIdToResourceLink(
+        drive_service_->GetRootResourceId());
+    parent_type = PARENT_TYPE_ROOT_OR_EMPTY;
+  } else {
     parent_link = ResourceIdToResourceLink(parent_resource_id);
+  }
   ScopedVector<google_apis::ResourceEntry> entries;
   entries.swap(*feed->mutable_entries());
-  FilterEntriesByTitleAndParent(&entries, expected_title, parent_link);
+  FilterEntriesByTitleAndParent(&entries, expected_title, parent_link,
+                                parent_type);
 
   if (entries.empty()) {
     DVLOG(2) << "Uploaded file is not found";
@@ -824,9 +881,9 @@ void DriveFileSyncClient::DidListEntriesToEnsureUniqueness(
     entries.back() = NULL;
     entries.get().pop_back();
 
-    DeleteEntries(entries.Pass(),
-                  base::Bind(&EntryAdapter, base::Passed(&earliest_entry),
-                             callback));
+    DeleteEntriesForEnsuringTitleUniqueness(
+        entries.Pass(),
+        base::Bind(&EntryAdapter, base::Passed(&earliest_entry), callback));
     return;
   }
 
@@ -837,7 +894,7 @@ void DriveFileSyncClient::DidListEntriesToEnsureUniqueness(
   callback.Run(google_apis::HTTP_FOUND, entry.Pass());
 }
 
-void DriveFileSyncClient::DeleteEntries(
+void DriveFileSyncClient::DeleteEntriesForEnsuringTitleUniqueness(
     ScopedVector<google_apis::ResourceEntry> entries,
     const GDataErrorCallback& callback) {
   DCHECK(CalledOnValidThread());
@@ -852,14 +909,17 @@ void DriveFileSyncClient::DeleteEntries(
   entries.back() = NULL;
   entries.get().pop_back();
 
+  // We don't care conflicts here as other clients may be also deleting this
+  // file, so passing an empty etag.
   drive_service_->DeleteResource(
       entry->resource_id(),
-      entry->etag(),
-      base::Bind(&DriveFileSyncClient::DidDeleteEntry, AsWeakPtr(),
-                 base::Passed(&entries), callback));
+      std::string(),  // empty etag
+      base::Bind(
+          &DriveFileSyncClient::DidDeleteEntriesForEnsuringTitleUniqueness,
+          AsWeakPtr(), base::Passed(&entries), callback));
 }
 
-void DriveFileSyncClient::DidDeleteEntry(
+void DriveFileSyncClient::DidDeleteEntriesForEnsuringTitleUniqueness(
     ScopedVector<google_apis::ResourceEntry> entries,
     const GDataErrorCallback& callback,
     google_apis::GDataErrorCode error) {
@@ -873,7 +933,38 @@ void DriveFileSyncClient::DidDeleteEntry(
   }
 
   DVLOG(2) << "Deletion completed";
-  DeleteEntries(entries.Pass(), callback);
+  DeleteEntriesForEnsuringTitleUniqueness(entries.Pass(), callback);
+}
+
+DriveFileSyncClient::UploadKey DriveFileSyncClient::RegisterUploadCallback(
+    const UploadFileCallback& callback) {
+  const bool inserted = upload_callback_map_.insert(
+      std::make_pair(upload_next_key_, callback)).second;
+  CHECK(inserted);
+  return upload_next_key_++;
+}
+
+DriveFileSyncClient::UploadFileCallback
+DriveFileSyncClient::GetAndUnregisterUploadCallback(
+    UploadKey key) {
+  UploadFileCallback callback;
+  UploadCallbackMap::iterator found = upload_callback_map_.find(key);
+  if (found == upload_callback_map_.end())
+    return callback;
+  callback = found->second;
+  upload_callback_map_.erase(found);
+  return callback;
+}
+
+void DriveFileSyncClient::CancelAllUploads(google_apis::GDataErrorCode error) {
+  if (upload_callback_map_.empty())
+    return;
+  for (UploadCallbackMap::iterator iter = upload_callback_map_.begin();
+       iter != upload_callback_map_.end(); ++iter) {
+    iter->second.Run(error, std::string(), std::string());
+  }
+  upload_callback_map_.clear();
+  drive_uploader_.reset(new google_apis::DriveUploader(drive_service_.get()));
 }
 
 }  // namespace sync_file_system

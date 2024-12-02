@@ -5,12 +5,12 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/path_service.h"
+#include "base/prefs/pref_member.h"
 #include "base/prefs/pref_service.h"
-#include "base/prefs/public/pref_member.h"
 #include "base/test/test_file_util.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/download/chrome_download_manager_delegate.h"
@@ -377,7 +377,8 @@ SavePageBrowserTest::~SavePageBrowserTest() {
 }
 
 // Disabled on Windows due to flakiness. http://crbug.com/162323
-#if defined(OS_WIN)
+// TODO(linux_aura) http://crbug.com/163931
+#if defined(OS_WIN) || (defined(OS_LINUX) && !defined(OS_CHROMEOS) && defined(USE_AURA))
 #define MAYBE_SaveHTMLOnly DISABLED_SaveHTMLOnly
 #else
 #define MAYBE_SaveHTMLOnly SaveHTMLOnly
@@ -408,7 +409,8 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, MAYBE_SaveHTMLOnly) {
 }
 
 // Disabled on Windows due to flakiness. http://crbug.com/162323
-#if defined(OS_WIN)
+// TODO(linux_aura) http://crbug.com/163931
+#if defined(OS_WIN) || (defined(OS_LINUX) && !defined(OS_CHROMEOS) && defined(USE_AURA))
 #define MAYBE_SaveHTMLOnlyCancel DISABLED_SaveHTMLOnlyCancel
 #else
 #define MAYBE_SaveHTMLOnlyCancel SaveHTMLOnlyCancel
@@ -473,7 +475,8 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, SaveHTMLOnlyTabDestroy) {
 }
 
 // Disabled on Windows due to flakiness. http://crbug.com/162323
-#if defined(OS_WIN)
+// TODO(linux_aura) http://crbug.com/163931
+#if defined(OS_WIN) || (defined(OS_LINUX) && !defined(OS_CHROMEOS) && defined(USE_AURA))
 #define MAYBE_SaveViewSourceHTMLOnly DISABLED_SaveViewSourceHTMLOnly
 #else
 #define MAYBE_SaveViewSourceHTMLOnly SaveViewSourceHTMLOnly
@@ -512,7 +515,8 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, MAYBE_SaveViewSourceHTMLOnly) {
 }
 
 // Disabled on Windows due to flakiness. http://crbug.com/162323
-#if defined(OS_WIN)
+// TODO(linux_aura) http://crbug.com/163931
+#if defined(OS_WIN) || (defined(OS_LINUX) && !defined(OS_CHROMEOS) && defined(USE_AURA))
 #define MAYBE_SaveCompleteHTML DISABLED_SaveCompleteHTML
 #else
 #define MAYBE_SaveCompleteHTML SaveCompleteHTML
@@ -606,7 +610,8 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, NoSave) {
 }
 
 // Disabled on Windows due to flakiness. http://crbug.com/162323
-#if defined(OS_WIN)
+// TODO(linux_aura) http://crbug.com/163931
+#if defined(OS_WIN) || (defined(OS_LINUX) && !defined(OS_CHROMEOS) && defined(USE_AURA))
 #define MAYBE_FileNameFromPageTitle DISABLED_FileNameFromPageTitle
 #else
 #define MAYBE_FileNameFromPageTitle FileNameFromPageTitle
@@ -649,7 +654,8 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, MAYBE_FileNameFromPageTitle) {
 }
 
 // Disabled on Windows due to flakiness. http://crbug.com/162323
-#if defined(OS_WIN)
+// TODO(linux_aura) http://crbug.com/163931
+#if defined(OS_WIN) || (defined(OS_LINUX) && !defined(OS_CHROMEOS) && defined(USE_AURA))
 #define MAYBE_RemoveFromList DISABLED_RemoveFromList
 #else
 #define MAYBE_RemoveFromList RemoveFromList
@@ -770,6 +776,30 @@ IN_PROC_BROWSER_TEST_F(SavePageAsMHTMLBrowserTest, SavePageAsMHTML) {
   int64 actual_file_size = -1;
   EXPECT_TRUE(file_util::GetFileSize(full_file_name, &actual_file_size));
   EXPECT_LE(kFileSizeMin, actual_file_size);
+}
+
+IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, SavePageBrowserTest_NonMHTML) {
+#if defined(OS_CHROMEOS)
+  SavePackageFilePickerChromeOS::SetShouldPromptUser(false);
+#else
+  SavePackageFilePicker::SetShouldPromptUser(false);
+#endif
+  GURL url("data:text/plain,foo");
+  ui_test_utils::NavigateToURL(browser(), url);
+  scoped_refptr<content::MessageLoopRunner> loop_runner(
+      new content::MessageLoopRunner);
+  SavePackageFinishedObserver observer(
+      content::BrowserContext::GetDownloadManager(browser()->profile()),
+      loop_runner->QuitClosure());
+  chrome::SavePage(browser());
+  loop_runner->Run();
+  base::FilePath download_dir = DownloadPrefs::FromDownloadManager(
+      GetDownloadManager())->DownloadPath();
+  base::FilePath filename = download_dir.AppendASCII("dataurl.txt");
+  EXPECT_TRUE(file_util::PathExists(filename));
+  std::string contents;
+  EXPECT_TRUE(file_util::ReadFileToString(filename, &contents));
+  EXPECT_EQ("foo", contents);
 }
 
 }  // namespace

@@ -5,8 +5,8 @@
 #include "chrome/browser/prefs/chrome_pref_service_factory.h"
 
 #include "base/bind.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/metrics/histogram.h"
 #include "base/prefs/default_pref_store.h"
 #include "base/prefs/json_pref_store.h"
@@ -17,10 +17,9 @@
 #include "chrome/browser/policy/configuration_policy_pref_store.h"
 #include "chrome/browser/prefs/command_line_pref_store.h"
 #include "chrome/browser/prefs/pref_model_associator.h"
-#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/prefs/pref_service_syncable_builder.h"
-#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/profile_error_dialog.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "grit/chromium_strings.h"
@@ -92,11 +91,6 @@ void PrepareBuilder(
 }
 
 }  // namespace
-
-// TODO(joi): Find a better home for this.
-PrefServiceBase* PrefServiceBase::FromBrowserContext(BrowserContext* context) {
-  return static_cast<Profile*>(context)->GetPrefs();
-}
 
 namespace chrome_prefs {
 

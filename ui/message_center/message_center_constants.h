@@ -15,8 +15,15 @@ MESSAGE_CENTER_EXPORT extern const int kNotificationPreferredImageSize;
 MESSAGE_CENTER_EXPORT extern const int kNotificationButtonIconSize;
 MESSAGE_CENTER_EXPORT extern const int kSettingsIconSize;
 
+extern const int kNotificationWidth;
+
 extern const int kNotificationMaximumImageHeight;
 extern const size_t kNotificationMaximumItems;
+
+extern const int kAutocloseHighPriorityDelaySeconds;
+extern const int kAutocloseDefaultDelaySeconds;
+
+extern const int kMarginBetweenItems;
 
 }  // namespace message_center
 

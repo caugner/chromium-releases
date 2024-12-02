@@ -39,6 +39,7 @@
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/url_data_source.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #include "content/public/browser/web_ui.h"
 #include "grit/generated_resources.h"
 #include "net/base/net_util.h"
@@ -141,6 +142,7 @@ DictionaryValue* CreateDownloadItemValue(
       download_item->GetTotalBytes()));
   file_value->SetBoolean("file_externally_removed",
                          download_item->GetFileExternallyRemoved());
+  file_value->SetBoolean("retry", false); // Overridden below if needed.
 
   if (download_item->IsInProgress()) {
     if (download_item->IsDangerous()) {
@@ -184,8 +186,12 @@ DictionaryValue* CreateDownloadItemValue(
         static_cast<int>(download_item->GetReceivedBytes()));
     file_value->SetString("last_reason_text",
                           download_model.GetInterruptReasonText());
+    if (content::DOWNLOAD_INTERRUPT_REASON_CRASH ==
+        download_item->GetLastReason())
+      file_value->SetBoolean("retry", true);
   } else if (download_item->IsCancelled()) {
     file_value->SetString("state", "CANCELLED");
+    file_value->SetBoolean("retry", true);
   } else if (download_item->IsComplete()) {
     DCHECK(!download_item->IsDangerous());
     file_value->SetString("state", "COMPLETE");
@@ -344,7 +350,7 @@ void DownloadsDOMHandler::HandleDrag(const base::ListValue* args) {
     return;
   gfx::Image* icon = g_browser_process->icon_manager()->LookupIcon(
       file->GetTargetFilePath(), IconLoader::NORMAL);
-  gfx::NativeView view = web_contents->GetNativeView();
+  gfx::NativeView view = web_contents->GetView()->GetNativeView();
   {
     // Enable nested tasks during DnD, while |DragDownload()| blocks.
     MessageLoop::ScopedNestableTaskAllower allow(MessageLoop::current());
@@ -410,6 +416,12 @@ void DownloadsDOMHandler::HandleClearAll(const base::ListValue* args) {
   // download manager as well.
   if (original_notifier_.get() && original_notifier_->GetManager())
     original_notifier_->GetManager()->RemoveAllDownloads();
+
+  // downloads.js always clears the display and relies on HandleClearAll to
+  // ScheduleSendCurrentDownloads(). If any downloads are removed, then
+  // OnDownloadRemoved() will call it, but if no downloads are actually removed,
+  // then HandleClearAll needs to call it manually.
+  ScheduleSendCurrentDownloads();
 }
 
 void DownloadsDOMHandler::HandleOpenDownloadsFolder(

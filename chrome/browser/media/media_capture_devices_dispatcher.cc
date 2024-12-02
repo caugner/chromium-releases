@@ -4,15 +4,26 @@
 
 #include "chrome/browser/media/media_capture_devices_dispatcher.h"
 
+#include "base/command_line.h"
+#include "base/logging.h"
 #include "base/prefs/pref_service.h"
+#include "base/sha1.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/utf_string_conversions.h"
+#include "chrome/browser/media/audio_stream_indicator.h"
 #include "chrome/browser/media/media_stream_capture_indicator.h"
-#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/media_stream_infobar_delegate.h"
+#include "chrome/browser/ui/simple_message_box.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/media_devices_monitor.h"
 #include "content/public/common/media_stream_request.h"
+#include "grit/generated_resources.h"
+#include "ui/base/l10n/l10n_util.h"
 
 using content::BrowserThread;
 using content::MediaStreamDevices;
@@ -35,8 +46,33 @@ const content::MediaStreamDevice* FindDefaultDeviceWithId(
   return &(*devices.begin());
 };
 
-}  // namespace
+// This is a short-term solution to allow testing of the the Screen Capture API
+// with Google Hangouts in M27.
+// TODO(sergeyu): Remove this whitelist as soon as possible.
+bool IsOriginWhitelistedForScreenCapture(const GURL& origin) {
+#if defined(OFFICIAL_BUILD)
+  if (// Google Hangouts.
+      origin.spec() == "https://staging.talkgadget.google.com/" ||
+      origin.spec() == "https://plus.google.com/" ||
+      origin.spec() == "chrome-extension://pkedcjkdefgpdelpbcmbmeomcjbeemfm/" ||
+      origin.spec() == "chrome-extension://fmfcbgogabcbclcofgocippekhfcmgfj/" ||
+      origin.spec() == "chrome-extension://hfaagokkkhdbgiakmmlclaapfelnkoah/") {
+    return true;
+  }
+  // Check against hashed origins.
+  const std::string origin_hash = base::SHA1HashString(origin.spec());
+  DCHECK_EQ(origin_hash.length(), base::kSHA1Length);
+  const std::string hexencoded_origin_hash =
+      base::HexEncode(origin_hash.data(), origin_hash.length());
+  return
+      hexencoded_origin_hash == "3C2705BC432E7C51CA8553FDC5BEE873FF2468EE" ||
+      hexencoded_origin_hash == "50F02B8A668CAB274527D58356F07C2143080FCC";
+#else
+  return false;
+#endif
+}
 
+}  // namespace
 
 MediaCaptureDevicesDispatcher* MediaCaptureDevicesDispatcher::GetInstance() {
   return Singleton<MediaCaptureDevicesDispatcher>::get();
@@ -44,24 +80,19 @@ MediaCaptureDevicesDispatcher* MediaCaptureDevicesDispatcher::GetInstance() {
 
 MediaCaptureDevicesDispatcher::MediaCaptureDevicesDispatcher()
     : devices_enumerated_(false),
-      media_stream_capture_indicator_(new MediaStreamCaptureIndicator()) {}
+      media_stream_capture_indicator_(new MediaStreamCaptureIndicator()),
+      audio_stream_indicator_(new AudioStreamIndicator()) {}
 
 MediaCaptureDevicesDispatcher::~MediaCaptureDevicesDispatcher() {}
 
 void MediaCaptureDevicesDispatcher::RegisterUserPrefs(
-    PrefService* user_prefs,
     PrefRegistrySyncable* registry) {
-  // TODO(joi): Get rid of the need for PrefService param above.
-  if (!user_prefs->FindPreference(prefs::kDefaultAudioCaptureDevice)) {
-    registry->RegisterStringPref(prefs::kDefaultAudioCaptureDevice,
-                                 std::string(),
-                                 PrefRegistrySyncable::UNSYNCABLE_PREF);
-  }
-  if (!user_prefs->FindPreference(prefs::kDefaultVideoCaptureDevice)) {
-    registry->RegisterStringPref(prefs::kDefaultVideoCaptureDevice,
-                                 std::string(),
-                                 PrefRegistrySyncable::UNSYNCABLE_PREF);
-  }
+  registry->RegisterStringPref(prefs::kDefaultAudioCaptureDevice,
+                               std::string(),
+                               PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterStringPref(prefs::kDefaultVideoCaptureDevice,
+                               std::string(),
+                               PrefRegistrySyncable::UNSYNCABLE_PREF);
 }
 
 void MediaCaptureDevicesDispatcher::AddObserver(Observer* observer) {
@@ -97,6 +128,50 @@ MediaCaptureDevicesDispatcher::GetVideoCaptureDevices() {
     devices_enumerated_ = true;
   }
   return video_devices_;
+}
+
+void MediaCaptureDevicesDispatcher::RequestAccess(
+    content::WebContents* web_contents,
+    const content::MediaStreamRequest& request,
+    const content::MediaResponseCallback& callback) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  // Handle regular media requests first.
+  if (request.video_type != content::MEDIA_SCREEN_VIDEO_CAPTURE) {
+    MediaStreamInfoBarDelegate::Create(web_contents, request, callback);
+    return;
+  }
+
+  content::MediaStreamDevices devices;
+
+  bool screen_capture_enabled =
+      CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableUserMediaScreenCapturing) ||
+      IsOriginWhitelistedForScreenCapture(request.security_origin);
+  // Deny request automatically in the following cases:
+  //  1. Screen capturing is not enabled via command line switch.
+  //  2. Audio capture was requested (it's not supported yet).
+  //  3. Request from a page that was not loaded from a secure origin or
+  //     extension.
+  if (screen_capture_enabled &&
+      request.audio_type == content::MEDIA_NO_SERVICE &&
+      (request.security_origin.SchemeIsSecure() ||
+       request.security_origin.SchemeIs("chrome-extension"))) {
+    string16 application_name = UTF8ToUTF16(request.security_origin.spec());
+    chrome::MessageBoxResult result = chrome::ShowMessageBox(
+        NULL,
+        l10n_util::GetStringFUTF16(IDS_MEDIA_SCREEN_CAPTURE_CONFIRMATION_TITLE,
+                                   application_name),
+        l10n_util::GetStringFUTF16(IDS_MEDIA_SCREEN_CAPTURE_CONFIRMATION_TEXT,
+                                   application_name),
+        chrome::MESSAGE_BOX_TYPE_QUESTION);
+    if (result == chrome::MESSAGE_BOX_RESULT_YES) {
+      devices.push_back(content::MediaStreamDevice(
+          content::MEDIA_SCREEN_VIDEO_CAPTURE, std::string(), "Screen"));
+    }
+  }
+
+  callback.Run(devices);
 }
 
 void MediaCaptureDevicesDispatcher::GetDefaultDevicesForProfile(
@@ -149,14 +224,19 @@ scoped_refptr<MediaStreamCaptureIndicator>
   return media_stream_capture_indicator_;
 }
 
+scoped_refptr<AudioStreamIndicator>
+MediaCaptureDevicesDispatcher::GetAudioStreamIndicator() {
+  return audio_stream_indicator_;
+}
+
 void MediaCaptureDevicesDispatcher::OnCaptureDevicesOpened(
     int render_process_id,
     int render_view_id,
-    const content::MediaStreamDevices& devices) {
+    const content::MediaStreamDevices& devices,
+    const base::Closure& close_callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  media_stream_capture_indicator_->CaptureDevicesOpened(render_process_id,
-                                                        render_view_id,
-                                                        devices);
+  media_stream_capture_indicator_->CaptureDevicesOpened(
+      render_process_id, render_view_id, devices, close_callback);
 }
 
 void MediaCaptureDevicesDispatcher::OnCaptureDevicesClosed(
@@ -200,6 +280,14 @@ void MediaCaptureDevicesDispatcher::OnMediaRequestStateChanged(
           base::Unretained(this), render_process_id, render_view_id, device,
           state));
 
+}
+
+void MediaCaptureDevicesDispatcher::OnAudioStreamPlayingChanged(
+    int render_process_id, int render_view_id, int stream_id, bool playing) {
+  audio_stream_indicator_->UpdateWebContentsStatus(render_process_id,
+                                                   render_view_id,
+                                                   stream_id,
+                                                   playing);
 }
 
 void MediaCaptureDevicesDispatcher::UpdateAudioDevicesOnUIThread(
