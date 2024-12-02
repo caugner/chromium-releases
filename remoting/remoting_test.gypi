@@ -10,7 +10,6 @@
       'type': 'static_library',
       'dependencies': [
         '../base/base.gyp:base',
-        '../components/components.gyp:policy_component_test_support',
         '../net/net.gyp:net_test_support',
         '../testing/gmock.gyp:gmock',
         '../testing/gtest.gyp:gtest',
@@ -114,6 +113,11 @@
             ['exclude', '^host/'],
           ]
         }],
+        ['configuration_policy == 1', {
+          'dependencies': [
+            '../components/components.gyp:policy_component_test_support',
+          ],
+        }],
       ],
     },
     {
@@ -161,7 +165,7 @@
       ],
       'sources': [
         'test/app_remoting_test_driver.cc',
-        'test/app_remoting_test_driver_environment_app_details.cc',
+        'test/app_remoting_sample_test_driver_environment.cc',
       ],
     },  # end of target 'ar_sample_test_driver'
 
@@ -176,7 +180,6 @@
         '../base/base.gyp:base',
         '../base/base.gyp:base_i18n',
         '../base/base.gyp:test_support_base',
-        '../components/components.gyp:policy',
         '../ipc/ipc.gyp:ipc',
         '../net/net.gyp:net_test_support',
         '../ppapi/ppapi.gyp:ppapi_cpp',
@@ -214,7 +217,6 @@
         'base/capabilities_unittest.cc',
         'base/compound_buffer_unittest.cc',
         'base/rate_counter_unittest.cc',
-        'base/resources_unittest.cc',
         'base/rsa_key_pair_unittest.cc',
         'base/run_all_unittests.cc',
         'base/running_average_unittest.cc',
@@ -278,6 +280,7 @@
         'host/register_support_host_request_unittest.cc',
         'host/remote_input_filter_unittest.cc',
         'host/resizing_host_observer_unittest.cc',
+        'host/resources_unittest.cc',
         'host/screen_resolution_unittest.cc',
         'host/server_log_entry_host_unittest.cc',
         'host/setup/me2me_native_messaging_host.cc',
@@ -337,24 +340,13 @@
         'signaling/xmpp_signal_strategy_unittest.cc',
         'test/access_token_fetcher_unittest.cc',
         'test/app_remoting_report_issue_request_unittest.cc',
+        'test/app_remoting_test_driver_environment_unittest.cc',
         'test/chromoting_test_driver_environment_unittest.cc',
         'test/connection_time_observer_unittest.cc',
         'test/host_list_fetcher_unittest.cc',
         'test/remote_host_info_fetcher_unittest.cc',
         'test/test_chromoting_client_unittest.cc',
         'test/test_video_renderer_unittest.cc',
-
-        # TODO(sergeyu): app_remoting_test_driver_environment_unittest.cc
-        # depends on ar_test_driver_common target and that target implicitly
-        # depends on app_remoting_test_driver_environment_app_details.cc to
-        # allow some parameters to be overridden (i.e. *app_details.cc file can
-        # be replace with a different one). This means that app_deails.cc file
-        # has to be included here explicitly. Fix
-        # app_remoting_test_driver_environment.cc to avoid this implicit
-        # dependency on *app_details.cc .
-        # http://crbug.com/510887
-        'test/app_remoting_test_driver_environment_app_details.cc',
-        'test/app_remoting_test_driver_environment_unittest.cc',
       ],
       'conditions': [
         [ 'OS=="win"', {
@@ -402,12 +394,16 @@
           'sources/': [
             ['exclude', '^codec/'],
             ['exclude', '^host/'],
-            ['exclude', '^base/resources_unittest\\.cc$'],
           ]
         }],
         [ 'OS == "linux" and use_allocator!="none"', {
           'dependencies': [
             '../base/allocator/allocator.gyp:allocator',
+          ],
+        }],
+        ['configuration_policy == 1', {
+          'dependencies': [
+            '../components/components.gyp:policy',
           ],
         }],
       ],  # end of 'conditions'

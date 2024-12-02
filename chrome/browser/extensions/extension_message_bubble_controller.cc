@@ -9,7 +9,6 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/extensions/extension_message_bubble.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
@@ -83,9 +82,8 @@ ExtensionMessageBubbleController::Delegate::get_acknowledged_flag_pref_name()
   return acknowledged_pref_name_;
 }
 
-void
-ExtensionMessageBubbleController::Delegate::set_acknowledged_flag_pref_name(
-    std::string pref_name) {
+void ExtensionMessageBubbleController::Delegate::
+    set_acknowledged_flag_pref_name(const std::string& pref_name) {
   acknowledged_pref_name_ = pref_name;
 }
 
@@ -169,8 +167,10 @@ void ExtensionMessageBubbleController::HighlightExtensionsIfNecessary() {
   }
 }
 
-void ExtensionMessageBubbleController::Show(ExtensionMessageBubble* bubble) {
-  bubble->Show();
+void ExtensionMessageBubbleController::OnShown() {
+  std::set<Profile*>* profiles = delegate_->GetProfileSet();
+  if (profiles)
+    profiles->insert(profile()->GetOriginalProfile());
 }
 
 void ExtensionMessageBubbleController::OnBubbleAction() {

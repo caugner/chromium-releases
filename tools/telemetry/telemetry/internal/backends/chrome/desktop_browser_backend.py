@@ -8,12 +8,15 @@ import heapq
 import logging
 import os
 import os.path
+import random
 import re
 import shutil
 import subprocess as subprocess
 import sys
 import tempfile
 import time
+
+from catapult_base import cloud_storage
 
 from telemetry.internal.util import binary_manager
 from telemetry.core import exceptions
@@ -146,7 +149,7 @@ class DesktopBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
       logging.error(
           'Failed to run %s --no-window --dump-dir=%s --pip-name=%s' % (
             command, self._tmp_minidump_dir, self._GetCrashServicePipeName()))
-      logging.error('Running on platform: %s and arch: %s.' %os_name, arch_name)
+      logging.error('Running on platform: %s and arch: %s.', os_name, arch_name)
       raise
     return crash_service
 
@@ -215,6 +218,10 @@ class DesktopBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
         args.append('--ppapi-flash-path=%s' % self._flash_path)
       if not self.browser_options.dont_override_profile:
         args.append('--user-data-dir=%s' % self._tmp_profile_dir)
+    trace_config_file = (self.platform_backend.tracing_controller_backend
+                         .GetChromeTraceConfigFile())
+    if trace_config_file:
+      args.append('--trace-config-file=%s' % trace_config_file)
     return args
 
   def Start(self):
@@ -243,6 +250,11 @@ class DesktopBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
 
     try:
       self._WaitForBrowserToComeUp()
+      # browser is foregrounded by default on Windows and Linux, but not Mac.
+      if self.browser.platform.GetOSName() == 'mac':
+        subprocess.Popen([
+          'osascript', '-e', ('tell application "%s" to activate' %
+                              self._executable)])
       self._InitDevtoolsClientBackend()
       if self._supports_extensions:
         self._WaitForExtensionsToLoad()
@@ -427,7 +439,7 @@ class DesktopBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
 
       logging.info('Dumping breakpad symbols.')
       generate_breakpad_symbols_path = os.path.join(
-          util.GetChromiumSrcDir(), "components", "crash",
+          util.GetChromiumSrcDir(), "components", "crash", "content",
           "tools", "generate_breakpad_symbols.py")
       cmd = [
           sys.executable,
@@ -446,6 +458,20 @@ class DesktopBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
     return subprocess.check_output([stackwalk, minidump, symbols_path],
                                    stderr=open(os.devnull, 'w'))
 
+  def _UploadMinidumpToCloudStorage(self, minidump_path):
+    """ Upload minidump_path to cloud storage and return the cloud storage url.
+    """
+    remote_path = ('minidump-%s-%i.dmp' %
+                   (datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S'),
+                    random.randint(0, 1000000)))
+    try:
+      return cloud_storage.Insert(cloud_storage.TELEMETRY_OUTPUT, remote_path,
+                                  minidump_path)
+    except cloud_storage.CloudStorageError as err:
+      logging.error('Cloud storage error while trying to upload dump: %s' %
+                    repr(err))
+      return '<Missing link>'
+
   def GetStackTrace(self):
     most_recent_dump = self._GetMostRecentMinidump()
     if not most_recent_dump:
@@ -455,9 +481,10 @@ class DesktopBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
     logging.info('minidump found: %s' % most_recent_dump)
     stack = self._GetStackFromMinidump(most_recent_dump)
     if not stack:
-      return 'Failed to symbolize minidump. Returning browser stdout:\n' + (
-          self.GetStandardOutput())
-
+      cloud_storage_link = self._UploadMinidumpToCloudStorage(most_recent_dump)
+      return ('Failed to symbolize minidump. Raw stack is uploaded to cloud '
+              'storage: %s. Returning browser stdout:\n%s' % (
+                  cloud_storage_link, self.GetStandardOutput()))
     return stack
 
   def __del__(self):

@@ -290,8 +290,18 @@ UniquePosition GetUpdatePosition(const sync_pb::SyncEntity& update,
   if (!(SyncerProtoUtil::ShouldMaintainPosition(update))) {
     return UniquePosition::CreateInvalid();
   } else if (update.has_unique_position()) {
-    return UniquePosition::FromProto(update.unique_position());
-  } else if (update.has_position_in_parent()) {
+    UniquePosition proto_position =
+        UniquePosition::FromProto(update.unique_position());
+    if (proto_position.IsValid()) {
+      return proto_position;
+    }
+  }
+
+  // Now, there are two cases hit here.
+  // 1. Did not receive unique_position for this update.
+  // 2. Received unique_position, but it is invalid(ex. empty).
+  // And we will create a valid position for this two cases.
+  if (update.has_position_in_parent()) {
     return UniquePosition::FromInt64(update.position_in_parent(), suffix);
   } else {
     LOG(ERROR) << "No position information in update. This is a server bug.";

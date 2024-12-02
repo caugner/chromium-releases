@@ -15,7 +15,7 @@
 #include "base/strings/string_piece.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/media/media_stream_infobar_delegate.h"
+#include "chrome/browser/media/media_stream_devices_controller.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search/hotword_service.h"
 #include "chrome/browser/search/hotword_service_factory.h"
@@ -26,6 +26,7 @@
 #include "chrome/browser/ui/app_list/start_page_observer.h"
 #include "chrome/browser/ui/app_list/start_page_service_factory.h"
 #include "chrome/browser/ui/browser_navigator.h"
+#include "chrome/browser/ui/browser_navigator_params.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/scoped_tabbed_browser_displayer.h"
 #include "chrome/common/chrome_switches.h"
@@ -156,7 +157,8 @@ class StartPageService::StartPageWebContentsDelegate
       content::WebContents* web_contents,
       const content::MediaStreamRequest& request,
       const content::MediaResponseCallback& callback) override {
-    if (MediaStreamInfoBarDelegate::Create(web_contents, request, callback))
+    MediaStreamDevicesController controller(web_contents, request, callback);
+    if (controller.IsAskingForVideo() || controller.IsAskingForAudio())
       NOTREACHED() << "Media stream not allowed for WebUI";
   }
 
@@ -576,6 +578,19 @@ void StartPageService::DidNavigateMainFrame(
   // Set to have a zoom level of 0, which corresponds to 100%, so the
   // contents aren't affected by the browser's default zoom level.
   ui_zoom::ZoomController::FromWebContents(contents_.get())->SetZoomLevel(0);
+}
+
+void StartPageService::DidFailProvisionalLoad(
+    content::RenderFrameHost* render_frame_host,
+    const GURL& validated_url,
+    int error_code,
+    const base::string16& error_description,
+    bool was_ignored_by_handler) {
+  // This avoids displaying a "Webpage Blocked" error or similar (which can
+  // happen if the URL is blacklisted by enterprise policy).
+  content::BrowserThread::PostTask(content::BrowserThread::UI, FROM_HERE,
+                                   base::Bind(&StartPageService::UnloadContents,
+                                              weak_factory_.GetWeakPtr()));
 }
 
 void StartPageService::WebUILoaded() {

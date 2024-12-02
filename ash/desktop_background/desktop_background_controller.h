@@ -25,6 +25,10 @@ namespace aura {
 class Window;
 }
 
+namespace base {
+class SequencedWorkerPool;
+}
+
 namespace wallpaper {
 class WallpaperResizer;
 }
@@ -47,7 +51,8 @@ class ASH_EXPORT DesktopBackgroundController
     BACKGROUND_IMAGE,
   };
 
-  DesktopBackgroundController();
+  explicit DesktopBackgroundController(
+      base::SequencedWorkerPool* blocking_pool);
   ~DesktopBackgroundController() override;
 
   BackgroundMode desktop_background_mode() const {
@@ -155,9 +160,11 @@ class ASH_EXPORT DesktopBackgroundController
 
   gfx::Size current_max_display_size_;
 
-  base::OneShotTimer<DesktopBackgroundController> timer_;
+  base::OneShotTimer timer_;
 
   int wallpaper_reload_delay_;
+
+  base::SequencedWorkerPool* blocking_pool_;
 
   DISALLOW_COPY_AND_ASSIGN(DesktopBackgroundController);
 };

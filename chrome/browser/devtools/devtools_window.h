@@ -112,6 +112,11 @@ class DevToolsWindow : public DevToolsUIBindings::Delegate,
                              int x,
                              int y);
 
+  // Creates and opens the front-end API channel to applicable front-end in a
+  // form of devtools agent host.
+  static content::DevToolsExternalAgentProxyDelegate*
+      CreateWebSocketAPIChannel(const std::string& path);
+
   // Sets closure to be called after load is done. If already loaded, calls
   // closure immediately.
   void SetLoadCompletedCallback(const base::Closure& closure);
@@ -120,12 +125,15 @@ class DevToolsWindow : public DevToolsUIBindings::Delegate,
   bool ForwardKeyboardEvent(const content::NativeWebKeyboardEvent& event);
 
   // Reloads inspected web contents as if it was triggered from DevTools.
-  void ReloadInspectedWebContents(bool ignore_cache);
+  // Returns true if it has successfully handled reload, false if the caller
+  // is to proceed reload without DevTools interception.
+  bool ReloadInspectedWebContents(bool ignore_cache);
 
-  // content::WebContentsDelegate overrides.
   content::WebContents* OpenURLFromTab(
       content::WebContents* source,
       const content::OpenURLParams& params) override;
+
+  void ShowCertificateViewer(int certificate_id);
 
   // BeforeUnload interception ////////////////////////////////////////////////
 

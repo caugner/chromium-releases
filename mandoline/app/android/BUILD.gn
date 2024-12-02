@@ -20,11 +20,14 @@ executable("mandoline_runner") {
   deps = [
     ":jni_headers",
     "//base",
+    "//build/config/sanitizers:deps",
     "//mandoline/ui/desktop_ui/public/interfaces",
     "//mojo/common",
     "//mojo/environment:chromium",
+    "//mojo/package_manager",
     "//mojo/runner:lib",
     "//mojo/runner:mojo_runner_lib",
+    "//mojo/shell",
   ]
 
   sources = [
@@ -80,8 +83,8 @@ copy_ex("copy_mandoline_assets") {
     deps += [ "//mandoline/ui" ]
 
     args += [
-      "--files=" + rebase_path("$root_out_dir/browser", root_build_dir),
       "--files=" + rebase_path("$root_out_dir/omnibox", root_build_dir),
+      "--files=" + rebase_path("$root_out_dir/phone_ui", root_build_dir),
     ]
   }
 }

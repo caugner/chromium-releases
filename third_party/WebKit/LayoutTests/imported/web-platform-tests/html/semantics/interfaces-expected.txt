@@ -5,8 +5,8 @@ PASS Interfaces for acronym
 PASS Interfaces for ACRONYM 
 PASS Interfaces for address 
 PASS Interfaces for ADDRESS 
-PASS Interfaces for applet 
-PASS Interfaces for APPLET 
+FAIL Interfaces for applet assert_equals: Element applet should have HTMLAppletElement as its primary interface. expected "[object HTMLAppletElement]" but got "[object HTMLUnknownElement]"
+FAIL Interfaces for APPLET assert_equals: Element APPLET should have HTMLAppletElement as its primary interface. expected "[object HTMLAppletElement]" but got "[object HTMLUnknownElement]"
 PASS Interfaces for audio 
 PASS Interfaces for AUDIO 
 PASS Interfaces for b 
@@ -237,8 +237,12 @@ PASS Interfaces for meter
 PASS Interfaces for METER 
 PASS Interfaces for ruby 
 PASS Interfaces for RUBY 
+PASS Interfaces for rb 
+PASS Interfaces for RB 
 PASS Interfaces for rt 
 PASS Interfaces for RT 
+PASS Interfaces for rtc 
+PASS Interfaces for RTC 
 PASS Interfaces for rp 
 PASS Interfaces for RP 
 PASS Interfaces for figure 
@@ -253,8 +257,6 @@ FAIL Interfaces for command assert_equals: Element command should have HTMLComma
 FAIL Interfaces for COMMAND assert_equals: Element COMMAND should have HTMLCommandElement as its primary interface. expected "[object HTMLCommandElement]" but got "[object HTMLElement]"
 PASS Interfaces for nextid 
 PASS Interfaces for NEXTID 
-PASS Interfaces for rb 
-PASS Interfaces for RB 
 PASS Interfaces for bdi 
 PASS Interfaces for BDI 
 FAIL Interfaces for data assert_equals: Element data should have HTMLDataElement as its primary interface. expected "[object HTMLDataElement]" but got "[object HTMLUnknownElement]"

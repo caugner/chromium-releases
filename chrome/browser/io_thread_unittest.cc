@@ -107,17 +107,17 @@ TEST_F(IOThreadTest, SpdyFieldTrialSpdy31Enabled) {
 TEST_F(IOThreadTest, SpdyFieldTrialSpdy4Enabled) {
   field_trial_group_ = "Spdy4Enabled";
   ConfigureSpdyGlobals();
-  EXPECT_THAT(globals_.next_protos,
-              ElementsAre(net::kProtoHTTP11, net::kProtoSPDY31,
-                          net::kProtoHTTP2_14, net::kProtoHTTP2));
+  EXPECT_THAT(
+      globals_.next_protos,
+      ElementsAre(net::kProtoHTTP11, net::kProtoSPDY31, net::kProtoHTTP2));
 }
 
 TEST_F(IOThreadTest, SpdyFieldTrialDefault) {
   field_trial_group_ = "";
   ConfigureSpdyGlobals();
-  EXPECT_THAT(globals_.next_protos,
-              ElementsAre(net::kProtoHTTP11, net::kProtoSPDY31,
-                          net::kProtoHTTP2_14, net::kProtoHTTP2));
+  EXPECT_THAT(
+      globals_.next_protos,
+      ElementsAre(net::kProtoHTTP11, net::kProtoSPDY31, net::kProtoHTTP2));
 }
 
 TEST_F(IOThreadTest, SpdyFieldTrialParametrized) {
@@ -136,14 +136,6 @@ TEST_F(IOThreadTest, SpdyCommandLineUseSpdyOff) {
   field_trial_group_ = "Spdy4Enabled";
   ConfigureSpdyGlobals();
   EXPECT_EQ(0u, globals_.next_protos.size());
-}
-
-TEST_F(IOThreadTest, SpdyCommandLineUseSpdyDisableAltProtocols) {
-  command_line_.AppendSwitchASCII("use-spdy", "no-alt-protocols");
-  ConfigureSpdyGlobals();
-  bool use_alternative_services = true;
-  globals_.use_alternative_services.CopyToIfSet(&use_alternative_services);
-  EXPECT_FALSE(use_alternative_services);
 }
 
 TEST_F(IOThreadTest, DisableQuicByDefault) {
@@ -180,6 +172,7 @@ TEST_F(IOThreadTest, EnableQuicFromFieldTrialGroup) {
   EXPECT_FALSE(params.use_alternative_services);
   EXPECT_EQ(0, params.quic_max_number_of_lossy_connections);
   EXPECT_EQ(1.0f, params.quic_packet_loss_threshold);
+  EXPECT_FALSE(params.quic_delay_tcp_race);
   EXPECT_FALSE(IOThread::ShouldEnableQuicForDataReductionProxy());
 }
 
@@ -234,6 +227,27 @@ TEST_F(IOThreadTest, EnableQuicFromCommandLine) {
   EXPECT_TRUE(params.enable_quic);
   EXPECT_TRUE(params.enable_quic_for_proxies);
   EXPECT_FALSE(IOThread::ShouldEnableQuicForDataReductionProxy());
+}
+
+TEST_F(IOThreadTest, EnableAlternativeServicesFromCommandLineWithQuicDisabled) {
+  command_line_.AppendSwitch("enable-alternative-services");
+
+  ConfigureQuicGlobals();
+  net::HttpNetworkSession::Params params;
+  InitializeNetworkSessionParams(&params);
+  EXPECT_FALSE(params.enable_quic);
+  EXPECT_TRUE(params.use_alternative_services);
+}
+
+TEST_F(IOThreadTest, EnableAlternativeServicesFromCommandLineWithQuicEnabled) {
+  command_line_.AppendSwitch("enable-quic");
+  command_line_.AppendSwitch("enable-alternative-services");
+
+  ConfigureQuicGlobals();
+  net::HttpNetworkSession::Params params;
+  InitializeNetworkSessionParams(&params);
+  EXPECT_TRUE(params.enable_quic);
+  EXPECT_TRUE(params.use_alternative_services);
 }
 
 TEST_F(IOThreadTest, EnableInsecureQuicFromFieldTrialParams) {
@@ -434,6 +448,15 @@ TEST_F(IOThreadTest, QuicReceiveBufferSize) {
   net::HttpNetworkSession::Params params;
   InitializeNetworkSessionParams(&params);
   EXPECT_EQ(2097152, params.quic_socket_receive_buffer_size);
+}
+
+TEST_F(IOThreadTest, QuicDelayTcpConnection) {
+  field_trial_group_ = "Enabled";
+  field_trial_params_["delay_tcp_race"] = "true";
+  ConfigureQuicGlobals();
+  net::HttpNetworkSession::Params params;
+  InitializeNetworkSessionParams(&params);
+  EXPECT_TRUE(params.quic_delay_tcp_race);
 }
 
 TEST_F(IOThreadTest, AlternativeServiceProbabilityThresholdFromFlag) {

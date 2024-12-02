@@ -29,6 +29,7 @@ include_rules = [
   "+third_party/WebKit/public/platform/WebString.h",
   "+third_party/WebKit/public/platform/linux/WebFallbackFont.h",
   "+third_party/WebKit/public/platform/linux/WebFontRenderStyle.h",
+  "+third_party/WebKit/public/platform/mac/MacScrollTypes.h",
   "+third_party/WebKit/public/platform/modules/bluetooth/WebBluetoothError.h",
   "+third_party/WebKit/public/platform/modules/indexeddb/WebIDBTypes.h",
   "+third_party/WebKit/public/platform/modules/notifications/WebNotificationPermission.h",
@@ -59,6 +60,7 @@ include_rules = [
   "+third_party/WebKit/public/web/WebTreeScopeType.h",
   "+third_party/WebKit/public/web/WebWindowFeatures.h",
   "+third_party/WebKit/public/web/mac/WebScrollbarTheme.h",
+  "+third_party/WebKit/public/web/win/WebFontRendering.h"
 ]
 
 specific_include_rules = {

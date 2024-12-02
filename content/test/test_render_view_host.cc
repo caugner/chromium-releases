@@ -128,7 +128,7 @@ gfx::Rect TestRenderWidgetHostView::GetViewBounds() const {
 void TestRenderWidgetHostView::CopyFromCompositingSurface(
     const gfx::Rect& src_subrect,
     const gfx::Size& dst_size,
-    ReadbackRequestCallback& callback,
+    const ReadbackRequestCallback& callback,
     const SkColorType preferred_color_type) {
   callback.Run(SkBitmap(), content::READBACK_FAILED);
 }
@@ -176,6 +176,12 @@ bool TestRenderWidgetHostView::PostProcessEventForPluginIme(
 
 #endif
 
+bool TestRenderWidgetHostView::GetScreenColorProfile(
+    std::vector<char>* color_profile) {
+  DCHECK(color_profile->empty());
+  return false;
+}
+
 gfx::Rect TestRenderWidgetHostView::GetBoundsInRootWindow() {
   return gfx::Rect();
 }
@@ -184,11 +190,6 @@ void TestRenderWidgetHostView::OnSwapCompositorFrame(
     uint32 output_surface_id,
     scoped_ptr<cc::CompositorFrame> frame) {
   did_swap_compositor_frame_ = true;
-}
-
-
-gfx::GLSurfaceHandle TestRenderWidgetHostView::GetCompositingSurface() {
-  return gfx::GLSurfaceHandle();
 }
 
 bool TestRenderWidgetHostView::LockMouse() {
@@ -213,8 +214,8 @@ TestRenderViewHost::TestRenderViewHost(
     SiteInstance* instance,
     RenderViewHostDelegate* delegate,
     RenderWidgetHostDelegate* widget_delegate,
-    int routing_id,
-    int main_frame_routing_id,
+    int32 routing_id,
+    int32 main_frame_routing_id,
     bool swapped_out)
     : RenderViewHostImpl(instance,
                          delegate,

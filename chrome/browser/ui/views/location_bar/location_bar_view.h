@@ -11,6 +11,7 @@
 #include "base/compiler_specific.h"
 #include "base/prefs/pref_member.h"
 #include "chrome/browser/extensions/extension_context_menu_model.h"
+#include "chrome/browser/ssl/security_state_model.h"
 #include "chrome/browser/ui/location_bar/location_bar.h"
 #include "chrome/browser/ui/omnibox/chrome_omnibox_edit_controller.h"
 #include "chrome/browser/ui/search/search_model_observer.h"
@@ -48,10 +49,6 @@ class StarView;
 class TemplateURLService;
 class TranslateIconView;
 class ZoomView;
-
-namespace content {
-struct SSLStatus;
-}
 
 namespace views {
 class BubbleDelegateView;
@@ -109,9 +106,10 @@ class LocationBarView : public LocationBar,
         GetContentSettingBubbleModelDelegate() = 0;
 
     // Shows permissions and settings for the given web contents.
-    virtual void ShowWebsiteSettings(content::WebContents* web_contents,
-                                     const GURL& url,
-                                     const content::SSLStatus& ssl) = 0;
+    virtual void ShowWebsiteSettings(
+        content::WebContents* web_contents,
+        const GURL& url,
+        const SecurityStateModel::SecurityInfo& security_info) = 0;
 
    protected:
     virtual ~Delegate() {}
@@ -142,7 +140,7 @@ class LocationBarView : public LocationBar,
 
   // Returns the appropriate color for the desired kind, based on the user's
   // system theme.
-  SkColor GetColor(connection_security::SecurityLevel security_level,
+  SkColor GetColor(SecurityStateModel::SecurityLevel security_level,
                    ColorKind kind) const;
 
   // Returns the delegate.
@@ -223,11 +221,14 @@ class LocationBarView : public LocationBar,
 
   // Returns the position and width that the popup should be, and also the left
   // edge that the results should align themselves to (which will leave some
-  // border on the left of the popup).
+  // border on the left of the popup). |top_edge_overlap| specifies the number
+  // of pixels the top edge of the popup should overlap the bottom edge of
+  // the toolbar.
   void GetOmniboxPopupPositioningInfo(gfx::Point* top_left_screen_coord,
                                       int* popup_width,
                                       int* left_margin,
-                                      int* right_margin);
+                                      int* right_margin,
+                                      int top_edge_overlap);
 
   // Updates the controller, and, if |contents| is non-null, restores saved
   // state that the tab holds.
@@ -401,7 +402,7 @@ class LocationBarView : public LocationBar,
   // Our delegate.
   Delegate* delegate_;
 
-  // Object used to paint the border.
+  // Object used to paint the border. Not used for material design.
   scoped_ptr<views::Painter> border_painter_;
 
   // An icon to the left of the edit field.

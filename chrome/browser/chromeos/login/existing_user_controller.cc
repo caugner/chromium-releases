@@ -693,8 +693,6 @@ void ExistingUserController::OnPasswordChangeDetected() {
 
   if (auth_status_consumer_)
     auth_status_consumer_->OnPasswordChangeDetected();
-
-  display_email_.clear();
 }
 
 void ExistingUserController::WhiteListCheckFailed(const std::string& email) {
@@ -901,7 +899,7 @@ void ExistingUserController::StartPublicSessionAutoLoginTimer() {
 
   // Start the auto-login timer.
   if (!auto_login_timer_)
-    auto_login_timer_.reset(new base::OneShotTimer<ExistingUserController>);
+    auto_login_timer_.reset(new base::OneShotTimer);
 
   auto_login_timer_->Start(
       FROM_HERE,

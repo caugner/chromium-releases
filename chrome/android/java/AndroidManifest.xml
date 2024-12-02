@@ -300,7 +300,6 @@ by a child template that "extends" this file.
         </activity>
         <activity android:name="org.chromium.chrome.browser.enhancedbookmarks.EnhancedBookmarkEditActivity"
             android:theme="@style/EnhancedBookmarkDialogWhite"
-            android:label="@string/edit_bookmark"
             android:windowSoftInputMode="stateHidden"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|mcc|mnc" >
         </activity>
@@ -437,7 +436,12 @@ by a child template that "extends" this file.
             </intent-filter>
         </receiver>
 
-        <!-- Precache service. -->
+        <!-- Precache service.
+        Not enabled on Stable or Work channels. This is currently an experiment
+        on beta channel (crbug/309216) but the mere existence of these can lead
+        to some process churn, so omit them while not relevant. b/24776372
+        -->
+        {% if channel in ['default', 'canary', 'dev', 'beta'] %}
         <service android:name="org.chromium.chrome.browser.precache.PrecacheService"
             android:exported="false" />
         <receiver android:name="org.chromium.chrome.browser.precache.PrecacheServiceLauncher">
@@ -447,6 +451,7 @@ by a child template that "extends" this file.
                 <action android:name="android.net.conn.CONNECTIVITY_CHANGE" />
             </intent-filter>
         </receiver>
+        {% endif %}
 
         <receiver android:name="org.chromium.chrome.browser.firstrun.ToSAckedReceiver"
             android:permission="{{ manifest_package }}.TOS_ACKED">
@@ -486,7 +491,7 @@ by a child template that "extends" this file.
             android:exported="false" />
             
         <!-- Receiver for GCM messages. -->
-        <receiver android:name="com.google.android.gms.gcm.GcmReceiver"
+        <receiver android:name="org.chromium.chrome.browser.services.gcm.ChromeGcmReceiver"
             android:exported="true"
             android:permission="com.google.android.c2dm.permission.SEND">
             <intent-filter>
@@ -625,7 +630,7 @@ by a child template that "extends" this file.
         <!--  Receiver for lock screen input when casting -->
         <receiver android:name="org.chromium.chrome.browser.media.remote.LockScreenTransportControl$MediaButtonIntentReceiver"/>
 
-        <service android:name="org.chromium.chrome.browser.media.MediaNotificationService"
+        <service android:name="org.chromium.chrome.browser.media.MediaCaptureNotificationService"
             android:exported="false"/>
         <service android:name="org.chromium.chrome.browser.media.ui.NotificationMediaPlaybackControls$ListenerService"
             android:exported="false">

@@ -30,9 +30,11 @@ device::BluetoothUUID BluetoothUUIDWithCBUUID(CBUUID* uuid) {
 }  // namespace
 
 BluetoothLowEnergyDeviceMac::BluetoothLowEnergyDeviceMac(
+    BluetoothAdapterMac* adapter,
     CBPeripheral* peripheral,
     NSDictionary* advertisement_data,
-    int rssi) {
+    int rssi)
+    : BluetoothDeviceMac(adapter) {
   DCHECK(BluetoothAdapterMac::IsLowEnergyAvailable());
   identifier_ = GetPeripheralIdentifier(peripheral);
   hash_address_ = GetPeripheralHashAddress(peripheral);
@@ -112,6 +114,10 @@ bool BluetoothLowEnergyDeviceMac::IsPaired() const {
 }
 
 bool BluetoothLowEnergyDeviceMac::IsConnected() const {
+  return IsGattConnected();
+}
+
+bool BluetoothLowEnergyDeviceMac::IsGattConnected() const {
   return (GetPeripheralState() == CBPeripheralStateConnected);
 }
 
@@ -217,6 +223,18 @@ NSDate* BluetoothLowEnergyDeviceMac::GetLastUpdateTime() const {
 
 std::string BluetoothLowEnergyDeviceMac::GetDeviceName() const {
   return base::SysNSStringToUTF8([peripheral_ name]);
+}
+
+void BluetoothLowEnergyDeviceMac::CreateGattConnectionImpl() {
+  // Mac implementation does not yet use the default CreateGattConnection
+  // implementation. http://crbug.com/520774
+  NOTIMPLEMENTED();
+}
+
+void BluetoothLowEnergyDeviceMac::DisconnectGatt() {
+  // Mac implementation does not yet use the default CreateGattConnection
+  // implementation. http://crbug.com/520774
+  NOTIMPLEMENTED();
 }
 
 // static

@@ -23,6 +23,7 @@ namespace remoting {
 namespace protocol {
 class ClipboardEvent;
 class CursorShapeInfo;
+class PerformanceTracker;
 }  // namespace protocol
 
 class ChromotingJniRuntime;
@@ -83,7 +84,7 @@ class ChromotingJniInstance
   void SendMouseWheelEvent(int delta_x, int delta_y);
 
   // Sends the provided keyboard scan code to the host.
-  bool SendKeyEvent(int key_code, bool key_down);
+  bool SendKeyEvent(int scan_code, int key_code, bool key_down);
 
   void SendTextEvent(const std::string& text);
 
@@ -91,10 +92,6 @@ class ChromotingJniInstance
   void EnableVideoChannel(bool enable);
 
   void SendClientMessage(const std::string& type, const std::string& data);
-
-  // Records paint time for statistics logging, if enabled. May be called from
-  // any thread.
-  void RecordPaintTime(int64 paint_time_ms);
 
   // ClientUserInterface implementation.
   void OnConnectionState(protocol::ConnectionToHost::State state,
@@ -149,6 +146,7 @@ class ChromotingJniInstance
 
   // This group of variables is to be used on the network thread.
   scoped_ptr<ClientContext> client_context_;
+  scoped_ptr<protocol::PerformanceTracker> perf_tracker_;
   scoped_ptr<JniFrameConsumer> view_;
   scoped_ptr<VideoRenderer> video_renderer_;
   scoped_ptr<protocol::Authenticator> authenticator_;

@@ -8,6 +8,7 @@
 #include "base/callback_forward.h"
 #include "chrome/browser/lifetime/browser_close_manager.h"
 #include "chrome/browser/signin/chrome_signin_helper.h"
+#include "chrome/browser/ssl/security_state_model.h"
 #include "chrome/browser/translate/chrome_translate_client.h"
 #include "chrome/browser/ui/bookmarks/bookmark_bar.h"
 #include "chrome/browser/ui/browser.h"
@@ -32,13 +33,13 @@ class Profile;
 class ProfileResetGlobalError;
 class StatusBubble;
 class TemplateURL;
+class ToolbarActionsBar;
 
 struct WebApplicationInfo;
 
 namespace content {
 class WebContents;
 struct NativeWebKeyboardEvent;
-struct SSLStatus;
 }
 
 namespace extensions {
@@ -179,6 +180,9 @@ class BrowserWindow : public ui::BaseWindow {
   // Focuses the toolbar (for accessibility).
   virtual void FocusToolbar() = 0;
 
+  // Returns the ToolbarActionsBar associated with the window, if any.
+  virtual ToolbarActionsBar* GetToolbarActionsBar() = 0;
+
   // Called from toolbar subviews during their show/hide animations.
   virtual void ToolbarSizeChanged(bool is_animating) = 0;
 
@@ -251,11 +255,6 @@ class BrowserWindow : public ui::BaseWindow {
       translate::TranslateErrors::Type error_type,
       bool is_user_gesture) = 0;
 
-  // Create a session recovery bubble if the last session crashed. It also
-  // offers the option to enable metrics reporting if it's not already enabled.
-  // Returns true if a bubble is created, returns false if nothing is created.
-  virtual bool ShowSessionCrashedBubble() = 0;
-
   // Shows the profile reset bubble on the platforms that support it.
   virtual bool IsProfileResetBubbleSupported() const = 0;
   virtual GlobalErrorBubbleViewBase* ShowProfileResetBubble(
@@ -306,10 +305,11 @@ class BrowserWindow : public ui::BaseWindow {
   // url of the page/frame the info applies to, |ssl| is the SSL information for
   // that page/frame.  If |show_history| is true, a section showing how many
   // times that URL has been visited is added to the page info.
-  virtual void ShowWebsiteSettings(Profile* profile,
-                                   content::WebContents* web_contents,
-                                   const GURL& url,
-                                   const content::SSLStatus& ssl) = 0;
+  virtual void ShowWebsiteSettings(
+      Profile* profile,
+      content::WebContents* web_contents,
+      const GURL& url,
+      const SecurityStateModel::SecurityInfo& security_info) = 0;
 
   // Shows the app menu (for accessibility).
   virtual void ShowAppMenu() = 0;

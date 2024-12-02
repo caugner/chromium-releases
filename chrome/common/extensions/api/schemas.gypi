@@ -16,6 +16,7 @@
       'automation.idl',
       'automation_internal.idl',
       'autotest_private.idl',
+      'bluetooth_low_energy.idl',
       'bookmark_manager_private.json',
       'bookmarks.json',
       'braille_display_private.idl',
@@ -69,6 +70,7 @@
       'permissions.json',
       'preferences_private.json',
       'reading_list_private.json',
+      'resources_private.idl',
       'screenlock_private.idl',
       'search_engines_private.idl',
       'sessions.json',
@@ -107,6 +109,8 @@
     # ChromeOS-specific schemas.
     'chromeos_schema_files': [
       'cast_devices_private.idl',
+      'certificate_provider.idl',
+      'certificate_provider_internal.idl',
       'echo_private.json',
       'enterprise_device_attributes.idl',
       'enterprise_platform_keys.idl',

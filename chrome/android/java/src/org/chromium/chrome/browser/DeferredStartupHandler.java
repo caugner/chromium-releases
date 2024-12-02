@@ -18,8 +18,9 @@ import org.chromium.chrome.browser.bookmarkswidget.BookmarkThumbnailWidgetProvid
 import org.chromium.chrome.browser.crash.CrashFileManager;
 import org.chromium.chrome.browser.crash.MinidumpUploadService;
 import org.chromium.chrome.browser.download.DownloadManagerService;
-import org.chromium.chrome.browser.media.MediaNotificationService;
+import org.chromium.chrome.browser.media.MediaCaptureNotificationService;
 import org.chromium.chrome.browser.partnerbookmarks.PartnerBookmarksShim;
+import org.chromium.chrome.browser.physicalweb.PhysicalWeb;
 import org.chromium.chrome.browser.precache.PrecacheLauncher;
 import org.chromium.chrome.browser.preferences.ChromePreferenceManager;
 import org.chromium.chrome.browser.preferences.privacy.PrivacyPreferencesManager;
@@ -114,7 +115,7 @@ public class DeferredStartupHandler {
         ShareHelper.clearSharedScreenshots(application);
 
         // Clear any media notifications that existed when Chrome was last killed.
-        MediaNotificationService.clearMediaNotifications(application);
+        MediaCaptureNotificationService.clearMediaNotifications(application);
 
         startModerateBindingManagementIfNeeded(application);
 
@@ -124,6 +125,11 @@ public class DeferredStartupHandler {
         } else if (customTabsTrialGroupName.equals("Enabled")
                 || customTabsTrialGroupName.equals("DisablePrerender")) {
             ChromePreferenceManager.getInstance(application).setCustomTabsEnabled(true);
+        }
+
+        // Start Physical Web
+        if (PhysicalWeb.featureIsEnabled()) {
+            PhysicalWeb.startPhysicalWeb(application);
         }
 
         mDeferredStartupComplete = true;

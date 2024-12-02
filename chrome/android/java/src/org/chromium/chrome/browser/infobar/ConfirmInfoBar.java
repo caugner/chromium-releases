@@ -202,7 +202,7 @@ public class ConfirmInfoBar extends InfoBar {
             mConfirmListener.onConfirmInfoBarButtonClicked(this, isPrimaryButton);
         }
 
-        int action = isPrimaryButton ? InfoBar.ACTION_TYPE_OK : InfoBar.ACTION_TYPE_CANCEL;
-        onButtonClicked(action, "");
+        int action = isPrimaryButton ? ActionType.OK : ActionType.CANCEL;
+        onButtonClicked(action);
     }
 }

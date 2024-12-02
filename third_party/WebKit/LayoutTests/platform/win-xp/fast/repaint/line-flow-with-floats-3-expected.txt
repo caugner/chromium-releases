@@ -6,23 +6,17 @@
       "contentsOpaque": true,
       "drawsContent": true,
       "repaintRects": [
-        [372, 383, 48, 80],
-        [356, 383, 64, 80],
+        [372, 383, 48, 81],
+        [356, 383, 64, 81],
         [353, 440, 15, 59],
         [352, 380, 2, 19],
         [303, 420, 67, 19],
         [65, 400, 289, 39],
         [65, 380, 304, 59],
         [14, 420, 339, 39],
-        [8, 340, 418, 259]
+        [8, 380, 418, 219]
       ],
       "paintInvalidationClients": [
-        "InlineTextBox 'other parts of\n'",
-        "InlineTextBox 'the ground, Alice soon came to the conclusion that it'",
-        "RootInlineBox",
-        "InlineTextBox 'was a very\n'",
-        "InlineTextBox 'difficult game indeed.\n'",
-        "RootInlineBox",
         "InlineTextBox 'The players all played at once without waiting\n'",
         "InlineTextBox 'for'",
         "RootInlineBox",

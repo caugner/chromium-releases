@@ -62,6 +62,10 @@ class QuicSpdyServerStreamPeer : public QuicSpdyServerStream {
     return stream->body_;
   }
 
+  static const int content_length(QuicSpdyServerStream* stream) {
+    return stream->content_length_;
+  }
+
   static const SpdyHeaderBlock& headers(QuicSpdyServerStream* stream) {
     return stream->request_headers_;
   }
@@ -113,7 +117,7 @@ class QuicSpdyServerStreamTest : public ::testing::TestWithParam<QuicVersion> {
     return QuicSpdyServerStreamPeer::body(stream_.get());
   }
 
-  const string& StreamHeadersValue(const string& key) {
+  StringPiece StreamHeadersValue(const string& key) {
     return (*stream_->mutable_headers())[key];
   }
 
@@ -219,6 +223,60 @@ TEST_P(QuicSpdyServerStreamTest, TestSendErrorResponse) {
   QuicSpdyServerStreamPeer::SendErrorResponse(stream_.get());
   EXPECT_TRUE(stream_->read_side_closed());
   EXPECT_TRUE(stream_->write_side_closed());
+}
+
+TEST_P(QuicSpdyServerStreamTest, InvalidMultipleContentLength) {
+  SpdyHeaderBlock request_headers;
+  // \000 is a way to write the null byte when followed by a literal digit.
+  request_headers["content-length"] = StringPiece("11\00012", 5);
+
+  headers_string_ =
+      SpdyUtils::SerializeUncompressedHeaders(request_headers, GetParam());
+
+  EXPECT_CALL(session_, WritevData(_, _, _, _, _, _))
+      .Times(AnyNumber())
+      .WillRepeatedly(Invoke(ConsumeAllData));
+
+  stream_->OnStreamHeaders(headers_string_);
+  stream_->OnStreamHeadersComplete(false, headers_string_.size());
+
+  EXPECT_TRUE(stream_->read_side_closed());
+  EXPECT_TRUE(stream_->write_side_closed());
+}
+
+TEST_P(QuicSpdyServerStreamTest, InvalidLeadingNullContentLength) {
+  SpdyHeaderBlock request_headers;
+  // \000 is a way to write the null byte when followed by a literal digit.
+  request_headers["content-length"] = StringPiece("\00012", 3);
+
+  headers_string_ =
+      SpdyUtils::SerializeUncompressedHeaders(request_headers, GetParam());
+
+  EXPECT_CALL(session_, WritevData(_, _, _, _, _, _))
+      .Times(AnyNumber())
+      .WillRepeatedly(Invoke(ConsumeAllData));
+
+  stream_->OnStreamHeaders(headers_string_);
+  stream_->OnStreamHeadersComplete(false, headers_string_.size());
+
+  EXPECT_TRUE(stream_->read_side_closed());
+  EXPECT_TRUE(stream_->write_side_closed());
+}
+
+TEST_P(QuicSpdyServerStreamTest, ValidMultipleContentLength) {
+  SpdyHeaderBlock request_headers;
+  // \000 is a way to write the null byte when followed by a literal digit.
+  request_headers["content-length"] = StringPiece("11\00011", 5);
+
+  headers_string_ =
+      SpdyUtils::SerializeUncompressedHeaders(request_headers, GetParam());
+
+  stream_->OnStreamHeaders(headers_string_);
+  stream_->OnStreamHeadersComplete(false, headers_string_.size());
+
+  EXPECT_EQ(11, QuicSpdyServerStreamPeer::content_length(stream_.get()));
+  EXPECT_FALSE(stream_->read_side_closed());
+  EXPECT_FALSE(stream_->write_side_closed());
 }
 
 TEST_P(QuicSpdyServerStreamTest, InvalidHeadersWithFin) {

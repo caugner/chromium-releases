@@ -6,8 +6,6 @@
   'variables': {
     'chromium_code': 1,
     'chromecast_branding%': 'public',
-    'libcast_media_gyp%': '',
-    'use_default_libcast_media%': 1,
   },
   'target_defaults': {
     'include_dirs': [
@@ -15,7 +13,7 @@
     ],
   },
   'targets': [
-    # TODO(gunsch): delete this target once Chromecast M44/earlier is obsolete.
+    # TODO(slan): delete this target once Chromecast M44/earlier is obsolete.
     # See: b/21639416
     {
       'target_name': 'libffmpegsumo',
@@ -23,13 +21,28 @@
       'sources': ['empty.cc'],
     },
     {
+      'target_name': 'media_audio',
+      'type': '<(component)',
+      'dependencies': [
+        '../../media/media.gyp:media',
+      ],
+      'sources': [
+        'audio/cast_audio_manager.cc',
+        'audio/cast_audio_manager.h',
+        'audio/cast_audio_manager_factory.cc',
+        'audio/cast_audio_manager_factory.h',
+        'audio/cast_audio_output_stream.cc',
+        'audio/cast_audio_output_stream.h',
+      ],
+    },
+    {
       'target_name': 'media_base',
       'type': '<(component)',
       'dependencies': [
+        'libcast_media_1.0',
         '../../base/base.gyp:base',
         '../../crypto/crypto.gyp:crypto',
         '../../third_party/widevine/cdm/widevine_cdm.gyp:widevine_cdm_version_h',
-        '<(libcast_media_gyp):libcast_media_1.0',
       ],
       'sources': [
         'base/decrypt_context_impl.cc',
@@ -46,6 +59,8 @@
         'base/media_message_loop.h',
         'base/switching_media_renderer.cc',
         'base/switching_media_renderer.h',
+        'base/video_plane_controller.cc',
+        'base/video_plane_controller.h',
       ],
       'conditions': [
         ['chromecast_branding!="public"', {
@@ -118,14 +133,13 @@
         'cma/base/media_task_runner.cc',
         'cma/base/media_task_runner.h',
         'cma/base/simple_media_task_runner.cc',
-        'cma/base/simple_media_task_runner.h',         
+        'cma/base/simple_media_task_runner.h',
       ],
     },
     {
       'target_name': 'default_cma_backend',
       'type': '<(component)',
       'dependencies': [
-        '../chromecast.gyp:cast_base',
         '../../base/base.gyp:base',
       ],
       'include_dirs': [
@@ -252,6 +266,7 @@
         'cma_ipc_streamer',
         'cma_pipeline',
         'default_cma_backend',
+        'media_audio',
         'media_cdm',
       ],
     },
@@ -272,6 +287,7 @@
         '../../ui/gfx/gfx.gyp:gfx_test_support',
       ],
       'sources': [
+        'audio/cast_audio_output_stream_unittest.cc',
         'cdm/chromecast_init_data_unittest.cc',
         'cma/backend/audio_video_pipeline_device_unittest.cc',
         'cma/base/balanced_media_task_runner_unittest.cc',
@@ -299,25 +315,21 @@
         'cma/test/run_all_unittests.cc',
       ],
     },
+    { # Target for OEM partners to override media shared library, i.e.
+      # libcast_media_1.0.so. This target is only used to build executables
+      # with correct linkage information.
+      'target_name': 'libcast_media_1.0',
+      'type': 'shared_library',
+      'dependencies': [
+        '../../chromecast/chromecast.gyp:cast_public_api',
+        'default_cma_backend'
+      ],
+      'include_dirs': [
+        '../..',
+      ],
+      'sources': [
+        'base/cast_media_default.cc',
+      ],
+    }
   ], # end of targets
-  'conditions': [
-    ['use_default_libcast_media==1', {
-      'targets': [
-        {
-          'target_name': 'libcast_media_1.0',
-          'type': 'shared_library',
-          'dependencies': [
-            '../../chromecast/chromecast.gyp:cast_public_api',
-            'default_cma_backend'
-          ],
-          'include_dirs': [
-            '../..',
-          ],
-          'sources': [
-            'base/cast_media_default.cc',
-          ],
-        }
-      ]
-    }],
-  ],
 }

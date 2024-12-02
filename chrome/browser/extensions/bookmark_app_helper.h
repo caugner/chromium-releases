@@ -69,9 +69,10 @@ class BookmarkAppHelper : public content::NotificationObserver {
       const std::vector<BitmapAndSource>& bitmaps,
       const std::set<int>& sizes);
 
-  // Adds a square container icon of |output_size| pixels to |bitmaps| by
-  // drawing the given |letter| into a rounded background of |color|.
-  // Does nothing if an icon of |output_size| already exists in |bitmaps|.
+  // Adds a square container icon of |output_size| and 2 * |output_size| pixels
+  // to |bitmaps| by drawing the given |letter| into a rounded background of
+  // |color|. For each size, if an icon of the requested size already exists in
+  // |bitmaps|, nothing will happen.
   static void GenerateIcon(std::map<int, BitmapAndSource>* bitmaps,
                            int output_size,
                            SkColor color,
@@ -156,7 +157,7 @@ class BookmarkAppHelper : public content::NotificationObserver {
 };
 
 // Creates or updates a bookmark app from the given |web_app_info|. Icons will
-// not be downloaded so only supplied icon data will be used.
+// be downloaded from the icon URLs provided in |web_app_info|.
 void CreateOrUpdateBookmarkApp(ExtensionService* service,
                                WebApplicationInfo* web_app_info);
 

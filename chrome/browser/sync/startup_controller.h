@@ -11,7 +11,7 @@
 #include "sync/internal_api/public/base/model_type.h"
 
 class ProfileOAuth2TokenService;
-class SupervisedUserSigninManagerWrapper;
+class SigninManagerWrapper;
 
 namespace sync_driver {
 class SyncPrefs;
@@ -38,7 +38,7 @@ class StartupController {
   StartupController(ProfileSyncServiceStartBehavior start_behavior,
                     const ProfileOAuth2TokenService* token_service,
                     const sync_driver::SyncPrefs* sync_prefs,
-                    const SupervisedUserSigninManagerWrapper* signin,
+                    const SigninManagerWrapper* signin,
                     base::Closure start_backend);
   ~StartupController();
 
@@ -63,7 +63,7 @@ class StartupController {
   void Reset(const syncer::ModelTypeSet registered_types);
 
   void set_setup_in_progress(bool in_progress);
-  bool setup_in_progress() const { return setup_in_progress_; }
+  bool IsSetupInProgress() const { return setup_in_progress_; }
   bool auto_start_enabled() const { return auto_start_enabled_; }
   base::Time start_backend_time() const { return start_backend_time_; }
   std::string GetBackendInitializationStateString() const;
@@ -107,7 +107,7 @@ class StartupController {
 
   const ProfileOAuth2TokenService* token_service_;
 
-  const SupervisedUserSigninManagerWrapper* signin_;
+  const SigninManagerWrapper* signin_;
 
   // The callback we invoke when it's time to call expensive
   // startup routines for the sync backend.

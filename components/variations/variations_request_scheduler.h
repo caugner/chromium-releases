@@ -12,7 +12,7 @@
 
 class PrefService;
 
-namespace chrome_variations {
+namespace variations {
 
 // A helper class that makes VariationsService requests at the correct times.
 class VariationsRequestScheduler {
@@ -41,6 +41,9 @@ class VariationsRequestScheduler {
   // |task| is the closure to call when the scheduler deems ready.
   explicit VariationsRequestScheduler(const base::Closure& task);
 
+  // Returns the time interval between variations seed fetches.
+  base::TimeDelta GetFetchPeriod() const;
+
   // Getter for derived classes.
   base::Closure task() const;
 
@@ -54,14 +57,14 @@ class VariationsRequestScheduler {
   // The timer used to repeatedly ping the server. Keep this as an instance
   // member so if VariationsRequestScheduler goes out of scope, the timer is
   // automatically canceled.
-  base::RepeatingTimer<VariationsRequestScheduler> timer_;
+  base::RepeatingTimer timer_;
 
   // A one-shot timer used for scheduling out-of-band fetches.
-  base::OneShotTimer<VariationsRequestScheduler> one_shot_timer_;
+  base::OneShotTimer one_shot_timer_;
 
   DISALLOW_COPY_AND_ASSIGN(VariationsRequestScheduler);
 };
 
-}  // namespace chrome_variations
+}  // namespace variations
 
 #endif  // COMPONENTS_VARIATIONS_VARIATIONS_REQUEST_SCHEDULER_H_

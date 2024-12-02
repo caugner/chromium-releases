@@ -268,7 +268,6 @@ GL_APICALL void         GL_APIENTRY glUnmapTexSubImage2DCHROMIUM (const void* me
 GL_APICALL void         GL_APIENTRY glResizeCHROMIUM (GLuint width, GLuint height, GLfloat scale_factor);
 GL_APICALL const GLchar* GL_APIENTRY glGetRequestableExtensionsCHROMIUM (void);
 GL_APICALL void         GL_APIENTRY glRequestExtensionCHROMIUM (const char* extension);
-GL_APICALL void         GL_APIENTRY glRateLimitOffscreenContextCHROMIUM (void);
 GL_APICALL void         GL_APIENTRY glGetProgramInfoCHROMIUM (GLidProgram program, GLsizeiNotNegative bufsize, GLsizei* size, void* info);
 GL_APICALL void         GL_APIENTRY glGetUniformBlocksCHROMIUM (GLidProgram program, GLsizeiNotNegative bufsize, GLsizei* size, void* info);
 GL_APICALL void         GL_APIENTRY glGetTransformFeedbackVaryingsCHROMIUM (GLidProgram program, GLsizeiNotNegative bufsize, GLsizei* size, void* info);
@@ -304,10 +303,6 @@ GL_APICALL void         GL_APIENTRY glBindTexImage2DCHROMIUM (GLenumTextureBindT
 GL_APICALL void         GL_APIENTRY glReleaseTexImage2DCHROMIUM (GLenumTextureBindTarget target, GLint imageId);
 GL_APICALL void         GL_APIENTRY glTraceBeginCHROMIUM (const char* category_name, const char* trace_name);
 GL_APICALL void         GL_APIENTRY glTraceEndCHROMIUM (void);
-GL_APICALL void         GL_APIENTRY glAsyncTexSubImage2DCHROMIUM (GLenumTextureTarget target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenumTextureFormat format, GLenumPixelType type, const void* data);
-GL_APICALL void         GL_APIENTRY glAsyncTexImage2DCHROMIUM (GLenumTextureTarget target, GLint level, GLenumTextureInternalFormat internalformat, GLsizei width, GLsizei height, GLintTextureBorder border, GLenumTextureFormat format, GLenumPixelType type, const void* pixels);
-GL_APICALL void         GL_APIENTRY glWaitAsyncTexImage2DCHROMIUM (GLenumTextureTarget target);
-GL_APICALL void         GL_APIENTRY glWaitAllAsyncTexImage2DCHROMIUM (void);
 GL_APICALL void         GL_APIENTRY glDiscardFramebufferEXT (GLenum target, GLsizei count, const GLenum* attachments);
 GL_APICALL void         GL_APIENTRY glLoseContextCHROMIUM (GLenumResetStatus current, GLenumResetStatus other);
 GL_APICALL GLuint       GL_APIENTRY glInsertSyncPointCHROMIUM (void);
@@ -340,3 +335,6 @@ GL_APICALL GLenum	GL_APIENTRY glGetGraphicsResetStatusKHR (void);
 
 // Extension KHR_blend_equation_advanced
 GL_APICALL void GL_APIENTRY glBlendBarrierKHR (void);
+
+// Extension GL_CHROMIUM_screen_space_antialiasing
+GL_APICALL void GL_APIENTRY glApplyScreenSpaceAntialiasingCHROMIUM (void);

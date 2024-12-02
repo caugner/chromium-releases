@@ -30,8 +30,9 @@
 #include "ui/base/theme_provider.h"
 #include "ui/events/event.h"
 #include "ui/gfx/canvas.h"
+#include "ui/gfx/color_palette.h"
 #include "ui/gfx/paint_vector_icon.h"
-#include "ui/gfx/vector_icons_public2.h"
+#include "ui/gfx/vector_icons_public.h"
 #include "ui/native_theme/common_theme.h"
 #include "ui/native_theme/native_theme.h"
 #include "ui/resources/grit/ui_resources.h"
@@ -543,12 +544,9 @@ void FindBarView::InitViewsForMaterial() {
   } button_images[] = {
       {find_previous_button_, gfx::VectorIconId::FIND_PREV},
       {find_next_button_, gfx::VectorIconId::FIND_NEXT},
-      {close_button_, gfx::VectorIconId::FIND_CLOSE},
+      {close_button_, gfx::VectorIconId::BAR_CLOSE},
   };
 
-  SkColor grey;
-  ui::CommonThemeGetSystemColor(ui::NativeTheme::kColorId_ChromeIconGrey,
-                                &grey);
   for (size_t i = 0; i < arraysize(button_images); ++i) {
     views::ImageButton* button = button_images[i].button;
     button->SetBorder(views::Border::CreateEmptyBorder(
@@ -557,10 +555,11 @@ void FindBarView::InitViewsForMaterial() {
     button->SetImageAlignment(views::ImageButton::ALIGN_CENTER,
                               views::ImageButton::ALIGN_MIDDLE);
 
-    gfx::ImageSkia image = gfx::CreateVectorIcon(button_images[i].id, 16, grey);
+    gfx::ImageSkia image =
+        gfx::CreateVectorIcon(button_images[i].id, 16, gfx::kChromeIconGrey);
     button->SetImage(views::CustomButton::STATE_NORMAL, &image);
     image = gfx::CreateVectorIcon(button_images[i].id, 16,
-                                  SkColorSetA(grey, 0xff / 2));
+                                  SkColorSetA(gfx::kChromeIconGrey, 0xff / 2));
     button->SetImage(views::CustomButton::STATE_DISABLED, &image);
   }
 

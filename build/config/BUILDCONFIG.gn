@@ -111,14 +111,6 @@ if (current_os == "") {
 #   even if the value is overridden, which is wasteful. See first bullet.
 
 declare_args() {
-  # How many symbols to include in the build. This affects the performance of
-  # the build since the symbols are large and dealing with them is slow.
-  #   2 means regular build with symbols.
-  #   1 means minimal symbols, usually enough for backtraces only.
-  #   0 means no symbols.
-  #   -1 means auto-set (off in release, regular in debug).
-  symbol_level = -1
-
   # Component build.
   is_component_build = false
 
@@ -133,24 +125,9 @@ declare_args() {
   is_clang = current_os == "mac" || current_os == "ios" ||
              current_os == "linux" || current_os == "chromeos"
 
-  # Compile for Address Sanitizer to find memory bugs.
-  is_asan = false
-
-  # Compile for Leak Sanitizer to find leaks.
-  is_lsan = false
-
-  # Compile for Memory Sanitizer to find uninitialized reads.
-  is_msan = false
-
-  # Compile for Thread Sanitizer to find threading bugs.
-  is_tsan = false
-
-  if (current_os == "chromeos") {
-    # Allows the target toolchain to be injected as arguments. This is needed
-    # to support the CrOS build system which supports per-build-configuration
-    # toolchains.
-    cros_use_custom_toolchain = false
-  }
+  # Allows the path to a custom target toolchain to be injected as a single
+  # argument, and set as the default toolchain.
+  custom_toolchain = ""
 
   # DON'T ADD MORE FLAGS HERE. Read the comment above.
 }
@@ -356,16 +333,6 @@ if (!is_chromeos) {
 set_sources_assignment_filter(sources_assignment_filter)
 
 # =============================================================================
-# BUILD OPTIONS
-# =============================================================================
-
-# These Sanitizers all imply using the Clang compiler. On Windows they either
-# don't work or work differently.
-if (!is_clang && (is_asan || is_lsan || is_tsan || is_msan)) {
-  is_clang = true
-}
-
-# =============================================================================
 # TARGET DEFAULTS
 # =============================================================================
 #
@@ -382,14 +349,16 @@ _native_compiler_configs = [
   "//build/config/compiler:compiler_arm_fpu",
   "//build/config/compiler:chromium_code",
   "//build/config/compiler:default_include_dirs",
+  "//build/config/compiler:default_optimization",
+  "//build/config/compiler:default_symbols",
   "//build/config/compiler:no_rtti",
   "//build/config/compiler:runtime_library",
+  "//build/config/sanitizers:default_sanitizer_flags",
 ]
 if (is_win) {
   _native_compiler_configs += [
     "//build/config/win:lean_and_mean",
     "//build/config/win:nominmax",
-    "//build/config/win:sdk",
     "//build/config/win:unicode",
     "//build/config/win:winver",
   ]
@@ -405,58 +374,24 @@ if (is_posix) {
   ]
 }
 
-if (is_linux) {
-  _native_compiler_configs += [ "//build/config/linux:sdk" ]
-} else if (is_mac) {
-  _native_compiler_configs += [ "//build/config/mac:sdk" ]
-} else if (is_ios) {
-  _native_compiler_configs += [ "//build/config/ios:sdk" ]
-} else if (is_android) {
-  _native_compiler_configs += [ "//build/config/android:sdk" ]
+if (is_android) {
+  _native_compiler_configs +=
+      [ "//build/config/android:default_cygprofile_instrumentation" ]
 }
 
-if (is_clang) {
+if (is_clang && !is_nacl) {
   _native_compiler_configs += [
     "//build/config/clang:find_bad_constructs",
     "//build/config/clang:extra_warnings",
   ]
 }
 
-# Optimizations and debug checking.
+# Debug/release-related defines.
 if (is_debug) {
   _native_compiler_configs += [ "//build/config:debug" ]
-  _default_optimization_config = "//build/config/compiler:no_optimize"
 } else {
   _native_compiler_configs += [ "//build/config:release" ]
-  _default_optimization_config = "//build/config/compiler:optimize"
 }
-_native_compiler_configs += [ _default_optimization_config ]
-
-# If it wasn't manually set, set to an appropriate default.
-if (symbol_level == -1) {
-  # Linux is slowed by having symbols as part of the target binary, whereas
-  # Mac and Windows have them separate, so in Release Linux, default them off.
-  if (is_debug || !is_linux) {
-    symbol_level = 2
-  } else if (is_asan || is_lsan || is_tsan || is_msan) {
-    # Sanitizers require symbols for filename suppressions to work.
-    symbol_level = 1
-  } else {
-    symbol_level = 0
-  }
-}
-
-# Symbol setup.
-if (symbol_level == 2) {
-  _default_symbols_config = "//build/config/compiler:symbols"
-} else if (symbol_level == 1) {
-  _default_symbols_config = "//build/config/compiler:minimal_symbols"
-} else if (symbol_level == 0) {
-  _default_symbols_config = "//build/config/compiler:no_symbols"
-} else {
-  assert(false, "Bad value for symbol_level.")
-}
-_native_compiler_configs += [ _default_symbols_config ]
 
 # Windows linker setup for EXEs and DLLs.
 if (is_win) {
@@ -546,6 +481,7 @@ set_defaults("test") {
 # doing cross-compiles. When not cross-compiling, this will be the same as the
 # default toolchain.
 
+_default_toolchain = ""
 if (is_win) {
   # On windows we use the same toolchain for host and target by default.
   if (is_clang) {
@@ -555,11 +491,11 @@ if (is_win) {
   }
 
   if (current_os == "win") {
-    set_default_toolchain("$host_toolchain")
+    _default_toolchain = host_toolchain
   } else if (current_cpu == "x64") {  # WinRT x64
-    set_default_toolchain("//build/toolchain/win:winrt_x64")
+    _default_toolchain = "//build/toolchain/win:winrt_x64"
   } else if (current_cpu == "x86") {  # WinRT x86
-    set_default_toolchain("//build/toolchain/win:winrt_x86")
+    _default_toolchain = "//build/toolchain/win:winrt_x86"
   }
 } else if (is_android) {
   if (host_os == "linux") {
@@ -575,33 +511,38 @@ if (is_win) {
     assert(false, "Unknown host for android cross compile")
   }
   if (is_clang) {
-    set_default_toolchain("//build/toolchain/android:clang_$current_cpu")
+    _default_toolchain = "//build/toolchain/android:clang_$current_cpu"
   } else {
-    set_default_toolchain("//build/toolchain/android:$current_cpu")
+    _default_toolchain = "//build/toolchain/android:$current_cpu"
   }
 } else if (is_linux) {
   if (is_clang) {
     host_toolchain = "//build/toolchain/linux:clang_$host_cpu"
-    set_default_toolchain("//build/toolchain/linux:clang_$current_cpu")
+    _default_toolchain = "//build/toolchain/linux:clang_$current_cpu"
   } else {
     host_toolchain = "//build/toolchain/linux:$host_cpu"
-    set_default_toolchain("//build/toolchain/linux:$current_cpu")
-  }
-  if (is_chromeos && cros_use_custom_toolchain) {
-    set_default_toolchain("//build/toolchain/cros:target")
+    _default_toolchain = "//build/toolchain/linux:$current_cpu"
   }
 } else if (is_mac) {
   host_toolchain = "//build/toolchain/mac:clang_x64"
-  set_default_toolchain(host_toolchain)
+  _default_toolchain = host_toolchain
 } else if (is_ios) {
   host_toolchain = "//build/toolchain/mac:clang_x64"
-  set_default_toolchain("//build/toolchain/mac:ios_clang_arm")
+  _default_toolchain = "//build/toolchain/mac:ios_clang_arm"
 } else if (is_nacl) {
   # TODO(GYP): This will need to change when we get NaCl working
   # on multiple platforms, but this whole block of code (how we define
   # host_toolchain) needs to be reworked regardless to key off of host_os
   # and host_cpu rather than the is_* variables.
   host_toolchain = "//build/toolchain/linux:clang_x64"
+}
+
+# If a custom toolchain has been set in the args, set it as default. Otherwise,
+# set the default toolchain for the platform (if any).
+if (custom_toolchain != "") {
+  set_default_toolchain(custom_toolchain)
+} else if (_default_toolchain != "") {
+  set_default_toolchain(_default_toolchain)
 }
 
 # ==============================================================================

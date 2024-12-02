@@ -2,6 +2,8 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//build/config/compiler/compiler.gni")
+import("//build/config/sanitizers/sanitizers.gni")
 import("//build/config/ui.gni")
 import("//testing/test.gni")
 
@@ -41,6 +43,8 @@ component("base") {
     "cocoa/base_view.mm",
     "cocoa/cocoa_base_utils.h",
     "cocoa/cocoa_base_utils.mm",
+    "cocoa/command_dispatcher.h",
+    "cocoa/command_dispatcher.mm",
     "cocoa/constrained_window/constrained_window_animation.h",
     "cocoa/constrained_window/constrained_window_animation.mm",
     "cocoa/controls/blue_label_button.h",
@@ -87,6 +91,7 @@ component("base") {
     "cocoa/tracking_area.mm",
     "cocoa/underlay_opengl_hosting_window.h",
     "cocoa/underlay_opengl_hosting_window.mm",
+    "cocoa/user_interface_item_command_handler.h",
     "cocoa/view_description.h",
     "cocoa/view_description.mm",
     "cocoa/window_size_constants.h",
@@ -396,7 +401,7 @@ component("base") {
   }
 
   if (is_linux) {
-    configs += [ "//build/config/linux:fontconfig" ]
+    deps += [ "//build/linux:fontconfig" ]
   }
 
   if (use_glib) {

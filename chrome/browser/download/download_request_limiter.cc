@@ -6,13 +6,11 @@
 
 #include "base/bind.h"
 #include "base/stl_util.h"
+#include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
-#include "chrome/browser/download/download_permission_request.h"
-#include "chrome/browser/download/download_request_infobar_delegate.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_contents/tab_util.h"
-#include "chrome/browser/ui/website_settings/permission_bubble_manager.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
@@ -25,6 +23,13 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "url/gurl.h"
+
+#if defined(OS_ANDROID)
+#include "chrome/browser/download/download_request_infobar_delegate.h"
+#else
+#include "chrome/browser/download/download_permission_request.h"
+#include "chrome/browser/ui/website_settings/permission_bubble_manager.h"
+#endif
 
 using content::BrowserThread;
 using content::NavigationController;
@@ -46,11 +51,11 @@ DownloadRequestLimiter::TabDownloadState::TabDownloadState(
       &contents->GetController());
   registrar_.Add(this, content::NOTIFICATION_NAV_ENTRY_PENDING,
                  notification_source);
-  NavigationEntry* active_entry = originating_web_contents ?
-      originating_web_contents->GetController().GetActiveEntry() :
-      contents->GetController().GetActiveEntry();
-  if (active_entry)
-    initial_page_host_ = active_entry->GetURL().host();
+  NavigationEntry* last_entry = originating_web_contents ?
+      originating_web_contents->GetController().GetLastCommittedEntry() :
+      contents->GetController().GetLastCommittedEntry();
+  if (last_entry)
+    initial_page_host_ = last_entry->GetURL().host();
 }
 
 DownloadRequestLimiter::TabDownloadState::~TabDownloadState() {
@@ -94,11 +99,12 @@ void DownloadRequestLimiter::TabDownloadState::DidGetUserGesture() {
     return;
   }
 
-  bool promptable = (InfoBarService::FromWebContents(web_contents()) != NULL);
-  if (PermissionBubbleManager::Enabled()) {
-    promptable =
-        (PermissionBubbleManager::FromWebContents(web_contents()) != NULL);
-  }
+#if defined(OS_ANDROID)
+  bool promptable = InfoBarService::FromWebContents(web_contents()) != nullptr;
+#else
+  bool promptable =
+      PermissionBubbleManager::FromWebContents(web_contents()) != nullptr;
+#endif
 
   // See PromptUserForDownload(): if there's no InfoBarService, then
   // DOWNLOADS_NOT_ALLOWED is functionally equivalent to PROMPT_BEFORE_DOWNLOAD.
@@ -127,20 +133,19 @@ void DownloadRequestLimiter::TabDownloadState::PromptUserForDownload(
   if (is_showing_prompt())
     return;
 
-  if (PermissionBubbleManager::Enabled()) {
-    PermissionBubbleManager* bubble_manager =
-        PermissionBubbleManager::FromWebContents(web_contents_);
-    if (bubble_manager) {
-      bubble_manager->AddRequest(new DownloadPermissionRequest(
-          factory_.GetWeakPtr()));
-    } else {
-      Cancel();
-    }
-    return;
-  }
-
+#if defined(OS_ANDROID)
   DownloadRequestInfoBarDelegate::Create(
       InfoBarService::FromWebContents(web_contents_), factory_.GetWeakPtr());
+#else
+  PermissionBubbleManager* bubble_manager =
+      PermissionBubbleManager::FromWebContents(web_contents_);
+  if (bubble_manager) {
+    bubble_manager->AddRequest(new DownloadPermissionRequest(
+        factory_.GetWeakPtr()));
+  } else {
+    Cancel();
+  }
+#endif
 }
 
 void DownloadRequestLimiter::TabDownloadState::SetContentSetting(
@@ -358,8 +363,9 @@ void DownloadRequestLimiter::OnCanDownloadDecided(
 
 HostContentSettingsMap* DownloadRequestLimiter::GetContentSettings(
     content::WebContents* contents) {
-  return content_settings_ ? content_settings_ : Profile::FromBrowserContext(
-      contents->GetBrowserContext())->GetHostContentSettingsMap();
+  return content_settings_ ? content_settings_ :
+      HostContentSettingsMapFactory::GetForProfile(
+          Profile::FromBrowserContext(contents->GetBrowserContext()));
 }
 
 void DownloadRequestLimiter::CanDownloadImpl(

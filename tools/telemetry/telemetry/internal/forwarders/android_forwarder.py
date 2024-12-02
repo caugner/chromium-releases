@@ -2,6 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import atexit
 import logging
 import os
 import re
@@ -20,8 +21,8 @@ try:
 except ImportError:
   forwarder = None
 
-from pylib.device import device_errors
-from pylib.device import device_utils
+from devil.android import device_errors
+from devil.android import device_utils
 
 
 class AndroidForwarderFactory(forwarders.ForwarderFactory):
@@ -56,6 +57,14 @@ class AndroidForwarderFactory(forwarders.ForwarderFactory):
       except Exception:
         logging.warning('Exception raised while listing tcp sockets.')
 
+      logging.warning('Alive webpagereplay instances:')
+      try:
+        for line in subprocess.check_output(['ps', '-ef']).splitlines():
+          if 'webpagereplay' in line:
+            logging.warning('  %s', line)
+      except Exception:
+        logging.warning('Exception raised while listing WPR intances.')
+
       raise
 
   @property
@@ -81,13 +90,16 @@ class AndroidForwarder(forwarders.Forwarder):
             p.local_port,
             forwarder.Forwarder.DevicePortForHostPort(p.local_port))
         if p else None for p in port_pairs])
+    atexit.register(self.Close)
     # TODO(tonyg): Verify that each port can connect to host.
 
   def Close(self):
-    for port_pair in self._port_pairs:
-      if port_pair:
-        forwarder.Forwarder.UnmapDevicePort(port_pair.remote_port, self._device)
-    super(AndroidForwarder, self).Close()
+    if self._forwarding:
+      for port_pair in self._port_pairs:
+        if port_pair:
+          forwarder.Forwarder.UnmapDevicePort(
+              port_pair.remote_port, self._device)
+      super(AndroidForwarder, self).Close()
 
 
 class AndroidRndisForwarder(forwarders.Forwarder):
@@ -108,6 +120,7 @@ class AndroidRndisForwarder(forwarders.Forwarder):
       # Need to override routing policy again since call to setifdns
       # sometimes resets policy table
       self._rndis_configurator.OverrideRoutingPolicy()
+    atexit.register(self.Close)
     # TODO(tonyg): Verify that each port can connect to host.
 
   @property
@@ -115,9 +128,10 @@ class AndroidRndisForwarder(forwarders.Forwarder):
     return self._host_ip
 
   def Close(self):
-    self._rndis_configurator.RestoreRoutingPolicy()
-    self._SetDns(*self._original_dns)
-    self._RestoreDefaultGateway()
+    if self._forwarding:
+      self._rndis_configurator.RestoreRoutingPolicy()
+      self._SetDns(*self._original_dns)
+      self._RestoreDefaultGateway()
     super(AndroidRndisForwarder, self).Close()
 
   def _RedirectPorts(self, port_pairs):
@@ -410,15 +424,19 @@ doit &
     """
     my_device = str(self._device)
     addresses = []
-    for device_serial in android_device.GetDeviceSerials():
-      device = device_utils.DeviceUtils(device_serial)
-      if device_serial == my_device:
-        excluded = excluded_iface
-      else:
-        excluded = 'no interfaces excluded on other devices'
-      addresses += [line.split()[3]
-                    for line in device.RunShellCommand('ip -o -4 addr')
-                    if excluded not in line]
+    for device_serial in android_device.GetDeviceSerials(None):
+      try:
+        device = device_utils.DeviceUtils(device_serial)
+        if device_serial == my_device:
+          excluded = excluded_iface
+        else:
+          excluded = 'no interfaces excluded on other devices'
+        addresses += [line.split()[3]
+                      for line in device.RunShellCommand('ip -o -4 addr')
+                      if excluded not in line]
+      except device_errors.CommandFailedError:
+        logging.warning('Unable to determine IP addresses for %s',
+                        device_serial)
     return addresses
 
   def _ConfigureNetwork(self, device_iface, host_iface):

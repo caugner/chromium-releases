@@ -188,17 +188,27 @@ base.deepCopy = function(value) {
  * @template T
  */
 base.copyWithoutNullFields = function(input) {
-  /** @const {!Object} */
   var result = {};
-  if (input) {
-    for (var field in input) {
-      var value = /** @type {*} */ (input[field]);
+  base.mergeWithoutNullFields(result, input);
+  return result;
+};
+
+/**
+ * Merge non-null fields of |src| into |dest|.
+ *
+ * @param {!Object<T>} dest
+ * @param {Object<?T>|undefined} src
+ * @template T
+ */
+base.mergeWithoutNullFields = function(dest, src) {
+  if (src) {
+    for (var field in src) {
+      var value = /** @type {*} */ (src[field]);
       if (value != null) {
-        result[field] = value;
+        dest[field] = base.deepCopy(value);
       }
     }
   }
-  return result;
 };
 
 /**
@@ -402,6 +412,30 @@ base.Promise.negate = function(promise) {
  */
 base.Promise.withTimeout = function(promise, delay, opt_defaultValue) {
   return Promise.race([promise, base.Promise.sleep(delay, opt_defaultValue)]);
+};
+
+/**
+ * Creates a promise that will be rejected if it is not fulfilled within a
+ * certain timeframe.
+ *
+ * This function creates a result promise |R|.  If |promise| is fulfilled
+ * (i.e. resolved or rejected) within |delay| milliseconds, then |R|
+ * is resolved or rejected, respectively.  Otherwise, |R| is rejected with
+ * |opt_defaultError|.
+ *
+ * @param {!Promise<T>} promise The promise to wrap.
+ * @param {number} delay The number of milliseconds to wait.
+ * @param {*=} opt_defaultError The default error used to reject the promise.
+ * @return {!Promise<T>} A new promise.
+ * @template T
+ */
+base.Promise.rejectAfterTimeout = function(promise, delay, opt_defaultError) {
+  return Promise.race([
+    promise,
+    base.Promise.sleep(delay).then(function() {
+      return Promise.reject(opt_defaultError);
+    })
+  ]);
 };
 
 /**
@@ -645,9 +679,7 @@ base.DomEventHook.prototype.dispose = function() {
 /**
   * An event hook implementation for Chrome Events.
   *
-  * @param {ChromeEvent|
-  *         chrome.contextMenus.ClickedEvent|
-  *         chrome.app.runtime.LaunchEvent} src
+  * @param {ChromeEvent|chrome.contextMenus.ClickedEvent|ChromeObjectEvent} src
   * @param {!Function} listener
   *
   * @constructor
@@ -816,4 +848,16 @@ base.resizeWindowToContent = function(opt_centerWindow) {
     appWindow.outerBounds.left = Math.round((screenWidth - width) / 2);
     appWindow.outerBounds.top = Math.round((screenHeight - height) / 2);
   }
+};
+
+/**
+ * @return {boolean} Whether NaCL is enabled in chrome://plugins.
+ */
+base.isNaclEnabled = function() {
+  for (var i = 0; i < navigator.mimeTypes.length; i++) {
+    if (navigator.mimeTypes.item(i).type == 'application/x-pnacl') {
+      return true;
+    }
+  }
+  return false;
 };

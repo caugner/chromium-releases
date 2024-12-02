@@ -102,7 +102,9 @@ void TabListSceneLayer::PutLayer(JNIEnv* env,
                                  jfloat saturation,
                                  jfloat brightness,
                                  jboolean show_toolbar,
+                                 jint toolbar_background_color,
                                  jboolean anonymize_toolbar,
+                                 jint toolbar_textbox_background_color,
                                  jfloat toolbar_alpha,
                                  jfloat toolbar_y_offset,
                                  jfloat side_border_scale,
@@ -137,11 +139,12 @@ void TabListSceneLayer::PutLayer(JNIEnv* env,
       alpha, border_alpha, contour_alpha, shadow_alpha, close_alpha,
       border_scale, saturation, brightness, close_btn_width,
       static_to_view_blend, content_width, content_height, content_width,
-      visible_content_height, show_toolbar, anonymize_toolbar, toolbar_alpha,
+      visible_content_height, show_toolbar, toolbar_background_color,
+      anonymize_toolbar, toolbar_textbox_background_color, toolbar_alpha,
       toolbar_y_offset, side_border_scale, attach_content, inset_border);
 
   if (attach_content) {
-    gfx::RectF self(own_tree_->position(), own_tree_->bounds());
+    gfx::RectF self(own_tree_->position(), gfx::SizeF(own_tree_->bounds()));
     gfx::RectF content(x, y, width, height);
 
     content_obscures_self_ |= content.Contains(self);
@@ -200,7 +203,7 @@ scoped_refptr<TabLayer> TabListSceneLayer::GetNextLayer(bool incognito) {
   return layer;
 }
 
-static jlong Init(JNIEnv* env, jobject jobj) {
+static jlong Init(JNIEnv* env, const JavaParamRef<jobject>& jobj) {
   // This will automatically bind to the Java object and pass ownership there.
   TabListSceneLayer* scene_layer = new TabListSceneLayer(env, jobj);
   return reinterpret_cast<intptr_t>(scene_layer);

@@ -11,6 +11,7 @@
 #include "base/mac/scoped_nsobject.h"
 #include "base/memory/scoped_ptr.h"
 #import "components/autofill/ios/browser/js_suggestion_manager.h"
+#import "components/autofill/ios/browser/keyboard_accessory_metrics_logger.h"
 #import "ios/chrome/browser/autofill/form_input_accessory_view.h"
 #import "ios/chrome/browser/autofill/form_suggestion_view.h"
 #import "ios/chrome/browser/passwords/password_generation_utils.h"
@@ -50,6 +51,17 @@ NSArray* FindDescendantsOfClass(UIView* root, Class klass) {
   return descendants;
 }
 
+// Returns true if |item|'s action name contains |actionName|.
+bool ItemActionMatchesName(UIBarButtonItem* item, NSString* actionName) {
+  SEL itemAction = [item action];
+  if (!itemAction)
+    return false;
+  NSString* itemActionName = NSStringFromSelector(itemAction);
+
+  // We don't do a strict string match for the action name.
+  return [itemActionName rangeOfString:actionName].location != NSNotFound;
+}
+
 // Finds all UIToolbarItems associated with a given UIToolbar |toolbar| with
 // action selectors with a name that containts the action name specified by
 // |actionName|.
@@ -58,13 +70,7 @@ NSArray* FindToolbarItemsForActionName(UIToolbar* toolbar,
   NSMutableArray* toolbarItems = [NSMutableArray array];
 
   for (UIBarButtonItem* item in [toolbar items]) {
-    SEL itemAction = [item action];
-    if (!itemAction)
-      continue;
-    NSString* itemActionName = NSStringFromSelector(itemAction);
-
-    // We don't do a strict string match for the action name.
-    if ([itemActionName rangeOfString:actionName].location != NSNotFound)
+    if (ItemActionMatchesName(item, actionName))
       [toolbarItems addObject:item];
   }
 
@@ -85,6 +91,32 @@ NSArray* FindDescendantToolbarItemsForActionName(UIView* root,
 
   return descendants;
 }
+
+#if defined(__IPHONE_9_0) && __IPHONE_OS_VERSION_MAX_ALLOWED >= __IPHONE_9_0
+NSArray* FindDescendantToolbarItemsForActionName(
+    UITextInputAssistantItem* inputAssistantItem,
+    NSString* actionName) {
+  NSMutableArray* toolbarItems = [NSMutableArray array];
+
+  base::scoped_nsobject<NSMutableArray> buttonGroupsGroup(
+      [[NSMutableArray alloc] init]);
+  if (inputAssistantItem.leadingBarButtonGroups)
+    [buttonGroupsGroup addObject:inputAssistantItem.leadingBarButtonGroups];
+  if (inputAssistantItem.trailingBarButtonGroups)
+    [buttonGroupsGroup addObject:inputAssistantItem.trailingBarButtonGroups];
+  for (NSArray* buttonGroups in buttonGroupsGroup.get()) {
+    for (UIBarButtonItemGroup* group in buttonGroups) {
+      NSArray* items = group.barButtonItems;
+      for (UIBarButtonItem* item in items) {
+        if (ItemActionMatchesName(item, actionName))
+          [toolbarItems addObject:item];
+      }
+    }
+  }
+
+  return toolbarItems;
+}
+#endif
 
 // Computes the frame of each part of the accessory view of the keyboard. It is
 // assumed that the keyboard has either two parts (when it is split) or one part
@@ -194,6 +226,10 @@ bool ComputeFramesOfKeyboardParts(UIView* inputAccessoryView,
 
   // The object that manages the currently-shown custom accessory view.
   base::WeakNSProtocol<id<FormInputAccessoryViewProvider>> _currentProvider;
+
+  // Logs UMA metrics for the keyboard accessory.
+  scoped_ptr<autofill::KeyboardAccessoryMetricsLogger>
+      _keyboardAccessoryMetricsLogger;
 }
 
 - (instancetype)initWithWebState:(web::WebState*)webState
@@ -218,6 +254,8 @@ bool ComputeFramesOfKeyboardParts(UIView* inputAccessoryView,
         new web::WebStateObserverBridge(webState, self));
     _providers.reset([providers copy]);
     _suggestionsHaveBeenShown = NO;
+    _keyboardAccessoryMetricsLogger.reset(
+        new autofill::KeyboardAccessoryMetricsLogger());
   }
   return self;
 }
@@ -312,8 +350,9 @@ bool ComputeFramesOfKeyboardParts(UIView* inputAccessoryView,
     _suggestionsHaveBeenShown = YES;
 
     CGFloat height = autofill::kInputAccessoryHeight;
-    CGRect frame = CGRectMake(_keyboardFrame.origin.x, -height,
-                              _keyboardFrame.size.width, height);
+    CGRect contentFrame = self.webViewProxy.frame;
+    CGRect frame = CGRectMake(contentFrame.origin.x, -height,
+                              contentFrame.size.width, height);
     _customAccessoryView.reset(
         [[FormInputAccessoryView alloc] initWithFrame:frame customView:view]);
     UIView* keyboardView = [self getKeyboardView];
@@ -325,7 +364,7 @@ bool ComputeFramesOfKeyboardParts(UIView* inputAccessoryView,
     [self restoreDefaultInputAccessoryView];
     CGRect leftFrame;
     CGRect rightFrame;
-    UIView* inputAccessoryView = [self.webViewProxy getKeyboardAccessory];
+    UIView* inputAccessoryView = [self.webViewProxy keyboardAccessory];
     if (ComputeFramesOfKeyboardParts(inputAccessoryView, &leftFrame,
                                      &rightFrame)) {
       [self hideSubviewsInOriginalAccessoryView:inputAccessoryView];
@@ -349,7 +388,13 @@ bool ComputeFramesOfKeyboardParts(UIView* inputAccessoryView,
   [_hiddenOriginalSubviews removeAllObjects];
 }
 
-- (void)closeKeyboard {
+- (void)closeKeyboardWithButtonPress {
+  [self closeKeyboardWithoutButtonPress];
+  if (_currentProvider && [_currentProvider getLogKeyboardAccessoryMetrics])
+    _keyboardAccessoryMetricsLogger->OnCloseButtonPressed();
+}
+
+- (void)closeKeyboardWithoutButtonPress {
   BOOL performedAction =
       [self executeFormAssistAction:autofill::kFormSuggestionAssistButtonDone];
 
@@ -363,12 +408,23 @@ bool ComputeFramesOfKeyboardParts(UIView* inputAccessoryView,
 }
 
 - (BOOL)executeFormAssistAction:(NSString*)actionName {
-  UIView* inputAccessoryView = [self.webViewProxy getKeyboardAccessory];
-  if (!inputAccessoryView)
-    return NO;
-
-  NSArray* descendants =
-      FindDescendantToolbarItemsForActionName(inputAccessoryView, actionName);
+  NSArray* descendants = nil;
+  if (base::ios::IsRunningOnIOS9OrLater() && IsIPadIdiom()) {
+#if defined(__IPHONE_9_0) && __IPHONE_OS_VERSION_MAX_ALLOWED >= __IPHONE_9_0
+    UITextInputAssistantItem* inputAssistantItem =
+        [self.webViewProxy inputAssistantItem];
+    if (!inputAssistantItem)
+      return NO;
+    descendants =
+        FindDescendantToolbarItemsForActionName(inputAssistantItem, actionName);
+#endif
+  } else {
+    UIView* inputAccessoryView = [self.webViewProxy keyboardAccessory];
+    if (!inputAccessoryView)
+      return NO;
+    descendants =
+        FindDescendantToolbarItemsForActionName(inputAccessoryView, actionName);
+  }
 
   if (![descendants count])
     return NO;
@@ -391,7 +447,13 @@ bool ComputeFramesOfKeyboardParts(UIView* inputAccessoryView,
 #pragma mark -
 #pragma mark FormInputAccessoryViewDelegate
 
-- (void)selectPreviousElement {
+- (void)selectPreviousElementWithButtonPress {
+  [self selectPreviousElementWithoutButtonPress];
+  if (_currentProvider && [_currentProvider getLogKeyboardAccessoryMetrics])
+    _keyboardAccessoryMetricsLogger->OnPreviousButtonPressed();
+}
+
+- (void)selectPreviousElementWithoutButtonPress {
   BOOL performedAction =
       [self executeFormAssistAction:
                 autofill::kFormSuggestionAssistButtonPreviousElement];
@@ -404,7 +466,13 @@ bool ComputeFramesOfKeyboardParts(UIView* inputAccessoryView,
   }
 }
 
-- (void)selectNextElement {
+- (void)selectNextElementWithButtonPress {
+  [self selectNextElementWithoutButtonPress];
+  if (_currentProvider && [_currentProvider getLogKeyboardAccessoryMetrics])
+    _keyboardAccessoryMetricsLogger->OnNextButtonPressed();
+}
+
+- (void)selectNextElementWithoutButtonPress {
   BOOL performedAction = [self
       executeFormAssistAction:autofill::kFormSuggestionAssistButtonNextElement];
 
@@ -469,6 +537,9 @@ bool ComputeFramesOfKeyboardParts(UIView* inputAccessoryView,
     _currentProvider.reset();
   }
   [self restoreDefaultInputAccessoryView];
+
+  _keyboardAccessoryMetricsLogger.reset(
+      new autofill::KeyboardAccessoryMetricsLogger());
 }
 
 - (void)retrieveAccessoryViewForForm:(const std::string&)formName

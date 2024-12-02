@@ -11,7 +11,6 @@
 <translation id="1065552602950927991">Ongeldige invoer.</translation>
 <translation id="1082209053475788238">Geen vorige kop voor niveau 6.</translation>
 <translation id="1088219014394087294">Geen koppen.</translation>
-<translation id="1092366490857960994">Tekst bewerken, cijferinvoer</translation>
 <translation id="1106741348836243114">Geluidsfeedback (earcons) in- of uitschakelen.</translation>
 <translation id="1120743664840974483">{"a": "alfa", "b": "bravo", "c": "charlie", "d": "delta", "e": "echo", "f": "foxtrot", "g": "golf", "h": "hotel", "i": "india", "j": "juliett","k": "kilo", "l": "lima", "m": "mike", "n": "november", "o": "oscar","p": "papa", "q": "quebec", "r": "romeo", "s": "sierra", "t": "tango", "u": "uniform", "v": "victor", "w": "whiskey","x": "xray", "y": "yankee", "z": "zulu"}</translation>
 <translation id="113582498867142724"><ph name="TAG" />-collectie met <ph name="NUM" /> items</translation>
@@ -19,7 +18,6 @@
 <translation id="1157782847298808853">Help bij toetsenbord</translation>
 <translation id="1157843803349774103"><ph name="VALUE" />, <ph name="NAME" />, keuzelijst met invoervak</translation>
 <translation id="1167230103353892028"><ph name="NAME" />, menu-item, met submenu</translation>
-<translation id="1167523994081052608">!</translation>
 <translation id="1177863135347784049">Aangepast</translation>
 <translation id="1188858454923323853">aanvullend</translation>
 <translation id="1206619573307042055">marquee</translation>
@@ -37,7 +35,6 @@
 <translation id="1346748346194534595">Rechts</translation>
 <translation id="136718599399906424">Volgende rij van tabel</translation>
 <translation id="1383876407941801731">Zoeken</translation>
-<translation id="1384553361428699420">xx</translation>
 <translation id="1385214448885562192">Druk op Enter om door te gaan of op Escape om te annuleren. Druk op de pijl-omlaag voor het volgende resultaat en op de pijl-omhoog voor het vorige resultaat.</translation>
 <translation id="1396114365388024581">tablst</translation>
 <translation id="1439316808600711881">regio</translation>
@@ -96,7 +93,6 @@
 <translation id="2100350898815792233">Volledige interpunctie</translation>
 <translation id="2119965627982867824">spnbtn</translation>
 <translation id="2121067395472282800">toegangstoets: <ph name="KEY" /></translation>
-<translation id="2149594028072271924">x</translation>
 <translation id="2155457205053847599">Wijzig de huidige tabel voor zespuntsbraille door een optie te selecteren in de onderstaande lijst.</translation>
 <translation id="2169714232367507776">Klikken op huidig item</translation>
 <translation id="2188751878842439466">{COUNT,plural, =1{haakje sluiten}other{# haakjes sluiten}}</translation>
@@ -142,7 +138,6 @@
 <translation id="27527859628328957">Springen naar volgend actief item</translation>
 <translation id="2770781857296573485">Groepsverkenning openen</translation>
 <translation id="2777845298774924149">Afgesloten</translation>
-<translation id="2788135150614412178">+</translation>
 <translation id="2800204403141299078">Niet meer verschillende elementen.</translation>
 <translation id="2800780099804980316">Geen vorige kop voor niveau 1.</translation>
 <translation id="2811204574343810641">Rij</translation>
@@ -194,7 +189,6 @@
 <translation id="3226035351387556942">chk</translation>
 <translation id="3229375994964697375">Bezochte link</translation>
 <translation id="323731244387692321">Help voor ChromeVox-toetsenbord openen</translation>
-<translation id="324093695619034148">( )</translation>
 <translation id="3241052487511142956">Vorige bezochte link</translation>
 <translation id="3286390186030710347">Schuifregelaar</translation>
 <translation id="3299925995433437805">Geen volgende bezochte link.</translation>
@@ -274,7 +268,6 @@
 <translation id="3665563998540286755"><ph name="VALUE" />, keuzelijst</translation>
 <translation id="3687295507293856493">Schat de kop van de kolom van de huidige cel</translation>
 <translation id="3692274950075847560">Z:<ph name="RESULT" /></translation>
-<translation id="3705722231355495246">-</translation>
 <translation id="3712520970944678024">Spraak beheren</translation>
 <translation id="3716845769494773620">Meerdere regels</translation>
 <translation id="3731746171184829332">Geen vorige kop.</translation>
@@ -283,7 +276,6 @@
 <translation id="3793710123303304873">Dialoogvenster afgesloten.</translation>
 <translation id="3795836767122514678">+{COUNT,plural, =1{#}other{#}}</translation>
 <translation id="3801735343383419236">Automatisch lijst aanvullen</translation>
-<translation id="3806689594022048154">-&gt;</translation>
 <translation id="3810838688059735925">Videobestanden</translation>
 <translation id="3816633764618089385">Volgende media</translation>
 <translation id="3819376190738087562">Geen sprongen.</translation>
@@ -328,7 +320,6 @@
 <translation id="4255943572433203166">Gebruik de opties hieronder om ChromeVox aan te passen. Wijzigingen worden onmiddellijk van kracht.</translation>
 <translation id="4271220233568730077">Volgende wiskundige uitdrukking</translation>
 <translation id="4271521365602459209">Geen andere resultaten.</translation>
-<translation id="4271999187965566439">(x)</translation>
 <translation id="4287520460805643128">Geen volgend artikel.</translation>
 <translation id="4289540628985791613">Overzicht</translation>
 <translation id="4300318234632215983">De URL achter een link melden</translation>
@@ -348,7 +339,6 @@
 <translation id="4529987814483543472">Klassieke toetsenbordindeling</translation>
 <translation id="4532633738839459153">{COUNT,plural, =1{slash}other{# slashes}}</translation>
 <translation id="4547556996012970016">Volgende kop voor niveau 5</translation>
-<translation id="4554899522007042510">Helderheid <ph name="BRIGHTNESS" /> procent</translation>
 <translation id="4562381607973973258">Koptekst</translation>
 <translation id="4591507479202817876">, geselecteerd</translation>
 <translation id="4597532268155981612">formulier</translation>
@@ -367,6 +357,7 @@
 <translation id="4759716709594980008">ChromeOS-toetsenbordverkenner</translation>
 <translation id="4763296182459741068">Omloop naar beneden</translation>
 <translation id="4763480195061959176">video</translation>
+<translation id="479989351350248267">zoeken</translation>
 <translation id="481165870889056555">De titel van de huidige pagina melden</translation>
 <translation id="4826415162591436065">Verder navigeren</translation>
 <translation id="4826604887384865800">Volgende sprong</translation>
@@ -378,11 +369,9 @@
 <translation id="4867316986324544967">TTS-registratie inschakelen</translation>
 <translation id="4877261390094455813">Een zoekopdracht opgeven.</translation>
 <translation id="4886524826165775965"><ph name="INDEX" />/<ph name="TOTAL" /></translation>
-<translation id="4894355468197982314">=</translation>
 <translation id="489907760999452556">Interne link</translation>
 <translation id="4953585991029886728">Tekst bewerken</translation>
 <translation id="4954534434583049121">Vorig blok met geciteerde tekst</translation>
-<translation id="4970377555447282413">Een vergrote weergave van de pagina-inhoud weergeven.</translation>
 <translation id="4973717656530883744">Min. <ph name="X" /></translation>
 <translation id="4973762002207131920">Overgeschakeld naar <ph name="KEY" />.</translation>
 <translation id="4975416682604111799">milliseconden</translation>
@@ -584,6 +573,7 @@
 <translation id="7181697990050180700">Pas de sneltoetsen voor vaak gebruikte opdrachten aan door deze in de bijbehorende velden hieronder te typen.</translation>
 <translation id="7203150201908454328">Uitgevouwen</translation>
 <translation id="7210211103303402262">minuten</translation>
+<translation id="7217912842225915592">+<ph name="NUM" /></translation>
 <translation id="7221740160534240920">regel</translation>
 <translation id="7226216518520804442">lijst</translation>
 <translation id="72393384879519786">Kop</translation>
@@ -692,6 +682,7 @@
 <translation id="8540054775867439484">Omloop naar boven</translation>
 <translation id="8548973727659841685">Teken</translation>
 <translation id="8561322612995434619">heeft pop-up</translation>
+<translation id="8571096049907249734">multisel</translation>
 <translation id="8584721346566392021">k5</translation>
 <translation id="8587549812518406253">Volgend item in de lijst</translation>
 <translation id="860150890330522909">selectievakje <ph name="NAME" /> aangevinkt</translation>
@@ -704,8 +695,6 @@
 <translation id="8664519043722036194">seconden</translation>
 <translation id="867187640362843212">Kop 5</translation>
 <translation id="8697111817566059991">{COUNT,plural, =1{pijpteken}other{# verticale pijptekens}}</translation>
-<translation id="8722779018229123609">(-)</translation>
-<translation id="8723726026961763755">Het systeem is bijgewerkt. Opnieuw starten wordt aanbevolen.</translation>
 <translation id="8735450637152821465">Selectie beginnen</translation>
 <translation id="8743786158317878347">gestructureerde inhoud openen, zoals tabellen</translation>
 <translation id="8747966237988593539">Geordende lijst</translation>

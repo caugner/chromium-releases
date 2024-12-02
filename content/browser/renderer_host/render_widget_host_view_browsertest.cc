@@ -207,7 +207,7 @@ class CompositingRenderWidgetHostViewBrowserTest
     : public RenderWidgetHostViewBrowserTest,
       public testing::WithParamInterface<CompositingMode> {
  public:
-  explicit CompositingRenderWidgetHostViewBrowserTest()
+  CompositingRenderWidgetHostViewBrowserTest()
       : compositing_mode_(GetParam()) {}
 
   void SetUp() override {
@@ -333,11 +333,6 @@ IN_PROC_BROWSER_TEST_P(CompositingRenderWidgetHostViewBrowserTest,
                        FrameSubscriberTest) {
   SET_UP_SURFACE_OR_PASS_TEST(NULL);
   RenderWidgetHostViewBase* const view = GetRenderWidgetHostView();
-  if (!view->CanSubscribeFrame()) {
-    LOG(WARNING) << ("Blindly passing this test: Frame subscription not "
-                     "supported on this platform.");
-    return;
-  }
 
   base::RunLoop run_loop;
   scoped_ptr<RenderWidgetHostViewFrameSubscriber> subscriber(
@@ -520,7 +515,7 @@ class CompositingRenderWidgetHostViewBrowserTestTabCapture
 
   GURL TestUrl() override { return GURL(test_url_); }
 
-  void SetTestUrl(std::string url) { test_url_ = url; }
+  void SetTestUrl(const std::string& url) { test_url_ = url; }
 
   // Loads a page two boxes side-by-side, each half the width of
   // |html_rect_size|, and with different background colors. The test then
@@ -619,18 +614,16 @@ class CompositingRenderWidgetHostViewBrowserTestTabCapture
         rwhv->CopyFromCompositingSurfaceToVideoFrame(
             copy_rect, video_frame, callback);
       } else {
-        if (IsDelegatedRendererEnabled()) {
-          if (!content::GpuDataManager::GetInstance()
-                   ->CanUseGpuBrowserCompositor()) {
-            // Skia rendering can cause color differences, particularly in the
-            // middle two columns.
-            SetAllowableError(2);
-            SetExcludeRect(gfx::Rect(
-                output_size.width() / 2 - 1, 0, 2, output_size.height()));
-          }
+        if (!content::GpuDataManager::GetInstance()
+                 ->CanUseGpuBrowserCompositor()) {
+          // Skia rendering can cause color differences, particularly in the
+          // middle two columns.
+          SetAllowableError(2);
+          SetExcludeRect(gfx::Rect(output_size.width() / 2 - 1, 0, 2,
+                                   output_size.height()));
         }
 
-        ReadbackRequestCallback callback =
+        const ReadbackRequestCallback callback =
             base::Bind(&CompositingRenderWidgetHostViewBrowserTestTabCapture::
                            ReadbackRequestCallbackTest,
                        base::Unretained(this),
@@ -851,8 +844,7 @@ IN_PROC_BROWSER_TEST_P(
   gfx::Size html_rect_size(200, 150);
   gfx::Rect copy_rect(200, 150);
   // Scale the output size so that, internally, scaling is not occurring.
-  gfx::Size output_size =
-      gfx::ToRoundedSize(gfx::ScaleSize(copy_rect.size(), scale()));
+  gfx::Size output_size = gfx::ScaleToRoundedSize(copy_rect.size(), scale());
   bool video_frame = false;
   PerformTestWithLeftRightRects(html_rect_size,
                                 copy_rect,
@@ -869,8 +861,7 @@ IN_PROC_BROWSER_TEST_P(
       gfx::Rect(gfx::Rect(html_rect_size).CenterPoint() - gfx::Vector2d(45, 30),
                 gfx::Size(90, 60));
   // Scale the output size so that, internally, scaling is not occurring.
-  gfx::Size output_size =
-      gfx::ToRoundedSize(gfx::ScaleSize(copy_rect.size(), scale()));
+  gfx::Size output_size = gfx::ScaleToRoundedSize(copy_rect.size(), scale());
   bool video_frame = false;
   PerformTestWithLeftRightRects(html_rect_size,
                                 copy_rect,
@@ -898,8 +889,7 @@ IN_PROC_BROWSER_TEST_P(
   gfx::Size html_rect_size(200, 150);
   gfx::Rect copy_rect(200, 150);
   // Scale the output size so that, internally, scaling is not occurring.
-  gfx::Size output_size =
-      gfx::ToRoundedSize(gfx::ScaleSize(copy_rect.size(), scale()));
+  gfx::Size output_size = gfx::ScaleToRoundedSize(copy_rect.size(), scale());
   bool video_frame = true;
   PerformTestWithLeftRightRects(html_rect_size,
                                 copy_rect,
@@ -916,8 +906,7 @@ IN_PROC_BROWSER_TEST_P(
       gfx::Rect(gfx::Rect(html_rect_size).CenterPoint() - gfx::Vector2d(45, 30),
                 gfx::Size(90, 60));
   // Scale the output size so that, internally, scaling is not occurring.
-  gfx::Size output_size =
-      gfx::ToRoundedSize(gfx::ScaleSize(copy_rect.size(), scale()));
+  gfx::Size output_size = gfx::ScaleToRoundedSize(copy_rect.size(), scale());
   bool video_frame = true;
   PerformTestWithLeftRightRects(html_rect_size,
                                 copy_rect,

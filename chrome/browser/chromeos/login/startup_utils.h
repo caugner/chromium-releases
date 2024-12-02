@@ -11,6 +11,10 @@
 
 class PrefRegistrySimple;
 
+namespace base {
+class TimeDelta;
+}
+
 namespace chromeos {
 
 // Static utility methods used at startup time to get/change bits of device
@@ -31,6 +35,9 @@ class StartupUtils {
 
   // Stores the next pending OOBE screen in case it will need to be resumed.
   static void SaveOobePendingScreen(const std::string& screen);
+
+  // Returns the time since the Oobe flag file was created.
+  static base::TimeDelta GetTimeSinceOobeFlagFileCreation();
 
   // Returns device registration completion status, i.e. second part of OOBE.
   static bool IsDeviceRegistered();

@@ -9,11 +9,11 @@ import android.app.ActivityManager;
 import android.app.SearchManager;
 import android.content.Context;
 import android.content.Intent;
+import android.graphics.Color;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.SystemClock;
 import android.text.TextUtils;
-import android.util.Log;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.View.OnClickListener;
@@ -22,7 +22,9 @@ import android.view.Window;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
 
+import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.CommandLine;
+import org.chromium.base.Log;
 import org.chromium.base.MemoryPressureListener;
 import org.chromium.base.TraceEvent;
 import org.chromium.base.VisibleForTesting;
@@ -54,6 +56,7 @@ import org.chromium.chrome.browser.firstrun.FirstRunFlowSequencer;
 import org.chromium.chrome.browser.firstrun.FirstRunSignInProcessor;
 import org.chromium.chrome.browser.firstrun.FirstRunStatus;
 import org.chromium.chrome.browser.metrics.LaunchMetrics;
+import org.chromium.chrome.browser.metrics.StartupMetrics;
 import org.chromium.chrome.browser.metrics.UmaUtils;
 import org.chromium.chrome.browser.ntp.NativePageAssassin;
 import org.chromium.chrome.browser.omaha.OmahaClient;
@@ -236,7 +239,7 @@ public class ChromeTabbedActivity extends ChromeActivity implements OverviewMode
 
     private void refreshSignIn() {
         if (mIsOnFirstRun) return;
-        android.util.Log.i(TAG, "in refreshSignIn before starting the sign-in processor");
+        Log.i(TAG, "in refreshSignIn before starting the sign-in processor");
         FirstRunSignInProcessor.start(this);
     }
 
@@ -295,6 +298,7 @@ public class ChromeTabbedActivity extends ChromeActivity implements OverviewMode
     public void onResumeWithNative() {
         super.onResumeWithNative();
         CookiesFetcher.restoreCookies(this);
+        StartupMetrics.getInstance().recordHistogram(false);
     }
 
     @Override
@@ -313,6 +317,13 @@ public class ChromeTabbedActivity extends ChromeActivity implements OverviewMode
         } catch (IllegalArgumentException e) {
             // This may happen when onStop get called very early in UI test.
         }
+        StartupMetrics.getInstance().recordHistogram(true);
+    }
+
+    @Override
+    public void onStart() {
+        super.onStart();
+        StartupMetrics.getInstance().updateIntent(getIntent());
     }
 
     @Override
@@ -398,7 +409,7 @@ public class ChromeTabbedActivity extends ChromeActivity implements OverviewMode
                 mLayoutManager = new LayoutManagerChromePhone(compositorViewHolder,
                         new StackLayoutFactory());
             }
-
+            mLayoutManager.setEnableAnimations(DeviceClassManager.enableAnimations(this));
             mLayoutManager.addOverviewModeObserver(this);
 
             // TODO(yusufo): get rid of findViewById(R.id.url_bar).
@@ -749,7 +760,7 @@ public class ChromeTabbedActivity extends ChromeActivity implements OverviewMode
                     ChromeTabbedActivity.INTENT_EXTRA_TEST_RENDER_PROCESS_LIMIT, -1);
             if (value != -1) {
                 String[] args = new String[1];
-                args[0] = "--" + ChromeSwitches.RENDER_PROCESS_LIMIT
+                args[0] = "--" + ContentSwitches.RENDER_PROCESS_LIMIT
                         + "=" + Integer.toString(value);
                 commandLine.appendSwitchesAndArguments(args);
             }
@@ -815,10 +826,10 @@ public class ChromeTabbedActivity extends ChromeActivity implements OverviewMode
 
         final boolean isIntentActionMain = getIntent() != null
                 && TextUtils.equals(getIntent().getAction(), Intent.ACTION_MAIN);
-        android.util.Log.i(TAG, "begin FirstRunFlowSequencer.checkIfFirstRunIsNecessary");
+        Log.i(TAG, "begin FirstRunFlowSequencer.checkIfFirstRunIsNecessary");
         final Intent freIntent = FirstRunFlowSequencer.checkIfFirstRunIsNecessary(
                 this, isIntentActionMain);
-        android.util.Log.i(TAG, "end FirstRunFlowSequencer.checkIfFirstRunIsNecessary");
+        Log.i(TAG, "end FirstRunFlowSequencer.checkIfFirstRunIsNecessary");
         if (freIntent == null) return;
 
         mIsOnFirstRun = true;
@@ -920,6 +931,7 @@ public class ChromeTabbedActivity extends ChromeActivity implements OverviewMode
                 getCompositorViewHolder().hideKeyboard(new Runnable() {
                     @Override
                     public void run() {
+                        StartupMetrics.getInstance().recordOpenedBookmarks();
                         if (!EnhancedBookmarkUtils.showEnhancedBookmarkIfEnabled(
                                 ChromeTabbedActivity.this)) {
                             currentTab.loadUrl(new LoadUrlParams(
@@ -956,8 +968,6 @@ public class ChromeTabbedActivity extends ChromeActivity implements OverviewMode
             } else {
                 RecordUserAction.record("MobileShortcutFindInPage");
             }
-        } else if (id == R.id.show_menu) {
-            showMenu();
         } else if (id == R.id.focus_url_bar) {
             boolean isUrlBarVisible = !mLayoutManager.overviewVisible()
                     && (!isTablet() || getCurrentTabModel().getCount() != 0);
@@ -995,14 +1005,7 @@ public class ChromeTabbedActivity extends ChromeActivity implements OverviewMode
             return true;
         }
 
-        if (isFullscreenVideoPlaying()) {
-            ContentVideoView.getContentVideoView().exitFullscreen(false);
-            Log.i(TAG, "handleBackPressed() - exit fullscreen video");
-            return true;
-        }
-
-        if (getFullscreenManager().getPersistentFullscreenMode()) {
-            getFullscreenManager().setPersistentFullscreenMode(false);
+        if (exitFullscreenIfShowing()) {
             Log.i(TAG, "handleBackPressed() - exit fullscreen");
             return true;
         }
@@ -1240,10 +1243,10 @@ public class ChromeTabbedActivity extends ChromeActivity implements OverviewMode
         return super.shouldShowAppMenu();
     }
 
-    private boolean showMenu() {
-        if (!mUIInitialized || isFullscreenVideoPlaying()) return false;
-        getAppMenuHandler().showAppMenu(null, false);
-        return true;
+    @Override
+    protected void showAppMenuForKeyboardEvent() {
+        if (!mUIInitialized || isFullscreenVideoPlaying()) return;
+        super.showAppMenuForKeyboardEvent();
     }
 
     private boolean isFullscreenVideoPlaying() {
@@ -1271,16 +1274,27 @@ public class ChromeTabbedActivity extends ChromeActivity implements OverviewMode
     public void onOverviewModeStartedShowing(boolean showToolbar) {
         if (mFindToolbarManager != null) mFindToolbarManager.hideToolbar();
         if (getAssistStatusHandler() != null) getAssistStatusHandler().updateAssistState();
+        ApiCompatibilityUtils.setStatusBarColor(getWindow(), Color.BLACK);
+        StartupMetrics.getInstance().recordOpenedTabSwitcher();
     }
 
     @Override
     public void onOverviewModeFinishedShowing() {}
 
     @Override
-    public void onOverviewModeStartedHiding(boolean showToolbar, boolean delayAnimation) {}
+    public void onOverviewModeStartedHiding(boolean showToolbar, boolean delayAnimation) {
+    }
 
     @Override
     public void onOverviewModeFinishedHiding() {
         if (getAssistStatusHandler() != null) getAssistStatusHandler().updateAssistState();
+        if (getActivityTab() != null) {
+            setStatusBarColor(getActivityTab(), getActivityTab().getThemeColor());
+        }
+    }
+
+    @Override
+    protected void setStatusBarColor(Tab tab, int color) {
+        super.setStatusBarColor(tab, isInOverviewMode() ? Color.BLACK : color);
     }
 }

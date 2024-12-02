@@ -221,15 +221,8 @@ void AwResourceDispatcherHostDelegate::RequestBeginning(
   throttles->push_back(new IoThreadClientThrottle(
       request_info->GetChildID(), request_info->GetRenderFrameID(), request));
 
-  // We allow intercepting only navigations within main frames. This
-  // is used to post onPageStarted. We handle shouldOverrideUrlLoading
-  // via a sync IPC.
-  if (resource_type == content::RESOURCE_TYPE_MAIN_FRAME) {
-    throttles->push_back(InterceptNavigationDelegate::CreateThrottleFor(
-        request));
-  } else {
+  if (resource_type != content::RESOURCE_TYPE_MAIN_FRAME)
     InterceptNavigationDelegate::UpdateUserGestureCarryoverInfo(request);
-  }
 }
 
 void AwResourceDispatcherHostDelegate::OnRequestRedirected(

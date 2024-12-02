@@ -20,6 +20,7 @@ import android.widget.ScrollView;
 import android.widget.Spinner;
 import android.widget.TextView;
 
+import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.chrome.R;
 
 import java.io.ByteArrayInputStream;
@@ -76,7 +77,7 @@ class CertificateViewer implements OnItemSelectedListener {
 
         TextView title = new TextView(mContext);
         title.setText(R.string.certtitle);
-        title.setTextAppearance(mContext, android.R.style.TextAppearance_Large);
+        ApiCompatibilityUtils.setTextAppearance(title, android.R.style.TextAppearance_Large);
         title.setTypeface(title.getTypeface(), Typeface.BOLD);
         title.setPadding(mPadding, mPadding, mPadding, mPadding / 2);
         dialogContainer.addView(title);
@@ -185,7 +186,8 @@ class CertificateViewer implements OnItemSelectedListener {
         t.setPadding(mPadding, mPadding / 2, mPadding, 0);
         t.setText(label);
         t.setTypeface(Typeface.defaultFromStyle(Typeface.BOLD));
-        t.setTextColor(mContext.getResources().getColor(R.color.connection_info_popup_text));
+        t.setTextColor(ApiCompatibilityUtils.getColor(mContext.getResources(),
+                R.color.connection_info_popup_text));
         certificateView.addView(t);
         return t;
     }
@@ -194,7 +196,8 @@ class CertificateViewer implements OnItemSelectedListener {
         TextView t = new TextView(mContext);
         t.setText(value);
         t.setPadding(mPadding, 0, mPadding, mPadding / 2);
-        t.setTextColor(mContext.getResources().getColor(R.color.connection_info_popup_text));
+        t.setTextColor(ApiCompatibilityUtils.getColor(mContext.getResources(),
+                R.color.connection_info_popup_text));
         certificateView.addView(t);
     }
 

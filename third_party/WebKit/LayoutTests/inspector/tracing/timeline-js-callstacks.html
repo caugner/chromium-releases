@@ -267,7 +267,8 @@ function test()
                 "stackTrace": [
                     { "functionName": "a", "callUID": "a", "scriptId": 1 },
                     { "functionName": "l", "callUID": "l", "scriptId": 1 },
-                    { "functionName": "f", "callUID": "f", "scriptId": 1 }
+                    { "functionName": "f", "callUID": "f", "scriptId": 1 },
+                    { "functionName": "sin", "callUID": "sin", "scriptId": 2, "url": "native math.js" }
                 ]
             }
         },
@@ -286,7 +287,8 @@ function test()
                 "stackTrace": [
                     { "functionName": "a", "callUID": "a", "scriptId": 1 },
                     { "functionName": "l", "callUID": "l", "scriptId": 1 },
-                    { "functionName": "f", "callUID": "f", "scriptId": 1 }
+                    { "functionName": "f", "callUID": "f", "scriptId": 1 },
+                    { "functionName": "sin", "callUID": "sin", "scriptId": 2, "url": "native math.js" }
                 ]
             }
         },
@@ -559,7 +561,7 @@ function test()
     InspectorTest.addResult("");
     tracingTimelineModel._setMainThreadEvents(events);
     var filters = [
-        WebInspector.TimelineUIUtils.hiddenEventsFilter(),
+        WebInspector.TimelineUIUtils.visibleEventsFilter(),
         new WebInspector.ExcludeTopLevelFilter()
     ];
     var treeTopDown = WebInspector.TimelineModel.buildTopDownTree(events, 0, Infinity, filters, WebInspector.TimelineTreeView.eventId);

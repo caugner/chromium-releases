@@ -69,9 +69,6 @@ class BasicNetworkDelegate : public net::NetworkDelegateImpl {
 
   void OnResponseStarted(net::URLRequest* request) override {}
 
-  void OnRawBytesRead(const net::URLRequest& request,
-                      int bytes_read) override {}
-
   void OnCompleted(net::URLRequest* request, bool started) override {}
 
   void OnURLRequestDestroyed(net::URLRequest* request) override {}
@@ -129,8 +126,8 @@ void URLRequestContextAdapter::Initialize(
 }
 
 void URLRequestContextAdapter::InitRequestContextOnMainThread() {
-  proxy_config_service_.reset(net::ProxyService::CreateSystemProxyConfigService(
-      GetNetworkTaskRunner(), NULL));
+  proxy_config_service_ = net::ProxyService::CreateSystemProxyConfigService(
+      GetNetworkTaskRunner(), NULL);
   GetNetworkTaskRunner()->PostTask(
       FROM_HERE,
       base::Bind(&URLRequestContextAdapter::InitRequestContextOnNetworkThread,
@@ -142,11 +139,20 @@ void URLRequestContextAdapter::InitRequestContextOnNetworkThread() {
   DCHECK(config_);
   // TODO(mmenke):  Add method to have the builder enable SPDY.
   net::URLRequestContextBuilder context_builder;
-  context_builder.set_network_delegate(new BasicNetworkDelegate());
-  context_builder.set_proxy_config_service(proxy_config_service_.get());
+
+  // TODO(mef): Remove this work around for crbug.com/543366 once it is fixed.
+  net::URLRequestContextBuilder::HttpNetworkSessionParams
+      custom_http_network_session_params;
+  custom_http_network_session_params.use_alternative_services = false;
+  context_builder.set_http_network_session_params(
+      custom_http_network_session_params);
+
+  context_builder.set_network_delegate(
+      make_scoped_ptr(new BasicNetworkDelegate()));
+  context_builder.set_proxy_config_service(proxy_config_service_.Pass());
   config_->ConfigureURLRequestContextBuilder(&context_builder);
 
-  context_.reset(context_builder.Build());
+  context_ = context_builder.Build().Pass();
 
   if (config_->enable_sdch) {
     DCHECK(context_->sdch_manager());

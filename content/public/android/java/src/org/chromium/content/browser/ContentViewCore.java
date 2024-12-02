@@ -14,7 +14,6 @@ import android.content.ContextWrapper;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.res.Configuration;
-import android.database.ContentObserver;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Rect;
@@ -70,8 +69,6 @@ import org.chromium.content.browser.input.JoystickScrollProvider;
 import org.chromium.content.browser.input.LegacyPastePopupMenu;
 import org.chromium.content.browser.input.PastePopupMenu;
 import org.chromium.content.browser.input.PastePopupMenu.PastePopupMenuDelegate;
-import org.chromium.content.browser.input.PopupTouchHandleDrawable;
-import org.chromium.content.browser.input.PopupTouchHandleDrawable.PopupTouchHandleDrawableDelegate;
 import org.chromium.content.browser.input.SelectPopup;
 import org.chromium.content.browser.input.SelectPopupDialog;
 import org.chromium.content.browser.input.SelectPopupDropdown;
@@ -498,10 +495,6 @@ public class ContentViewCore implements
     private PastePopupMenu mPastePopupMenu;
     private boolean mWasPastePopupShowingOnInsertionDragStart;
 
-    private PopupTouchHandleDrawableDelegate mTouchHandleDelegate;
-
-    private PositionObserver mPositionObserver;
-
     // Size of the viewport in physical pixels as set from onSizeChanged.
     private int mViewportWidthPix;
     private int mViewportHeightPix;
@@ -560,9 +553,6 @@ public class ContentViewCore implements
     // This is desirable behavior for a browser window, but not for an embedded
     // WebView.
     private boolean mShouldSetAccessibilityFocusOnPageLoad;
-
-    // Allows us to dynamically respond when the accessibility script injection flag changes.
-    private ContentObserver mAccessibilityScriptInjectionObserver;
 
     // Temporary notification to tell onSizeChanged to focus a form element,
     // because the OSK was just brought up.
@@ -815,8 +805,9 @@ public class ContentViewCore implements
                                 } else if (hasFocus() && resultCode
                                         == InputMethodManager.RESULT_UNCHANGED_SHOWN) {
                                     // If the OSK was already there, focus the form immediately.
-                                    assert mWebContents != null;
-                                    mWebContents.scrollFocusedEditableNodeIntoView();
+                                    if (mWebContents != null) {
+                                        mWebContents.scrollFocusedEditableNodeIntoView();
+                                    }
                                 }
                             }
                         };
@@ -898,7 +889,6 @@ public class ContentViewCore implements
             }
 
             mContainerView = containerView;
-            mPositionObserver = new ViewPositionObserver(mContainerView);
             mContainerView.setClickable(true);
             mViewAndroidDelegate.updateCurrentContainerView(mContainerView);
             for (ContainerViewObserver observer : mContainerViewObservers) {
@@ -1026,24 +1016,16 @@ public class ContentViewCore implements
         mNativeContentViewCore = 0;
         mJavaScriptInterfaces.clear();
         mRetainedJavaScriptObjects.clear();
-        unregisterAccessibilityContentObserver();
+        for (mGestureStateListenersIterator.rewind(); mGestureStateListenersIterator.hasNext();) {
+            mGestureStateListenersIterator.next().onDestroyed();
+        }
         mGestureStateListeners.clear();
         ScreenOrientationListener.getInstance().removeObserver(this);
-        mPositionObserver.clearListener();
         mContainerViewObservers.clear();
         hidePopupsAndPreserveSelection();
         mPastePopupMenu = null;
 
         // See warning in javadoc before adding more clean up code here.
-    }
-
-    private void unregisterAccessibilityContentObserver() {
-        if (mAccessibilityScriptInjectionObserver == null) {
-            return;
-        }
-        getContext().getContentResolver().unregisterContentObserver(
-                mAccessibilityScriptInjectionObserver);
-        mAccessibilityScriptInjectionObserver = null;
     }
 
     /**
@@ -1198,6 +1180,15 @@ public class ContentViewCore implements
         return onTouchEventImpl(event, isTouchHandleEvent);
     }
 
+    /**
+     * Called by PopupWindow-based touch handles.
+     * @param event the MotionEvent targeting the handle.
+     */
+    public boolean onTouchHandleEvent(MotionEvent event) {
+        final boolean isTouchHandleEvent = true;
+        return onTouchEventImpl(event, isTouchHandleEvent);
+    }
+
     private boolean onTouchEventImpl(MotionEvent event, boolean isTouchHandleEvent) {
         TraceEvent.begin("onTouchEvent");
         try {
@@ -1263,28 +1254,29 @@ public class ContentViewCore implements
                 || eventAction == MotionEvent.ACTION_POINTER_UP;
     }
 
+    /**
+     * @return Whether a scroll targeting web content is in progress.
+     */
     public boolean isScrollInProgress() {
-        return mTouchScrollInProgress || mPotentiallyActiveFlingCount > 0
-                || getContentViewClient().isExternalScrollActive();
+        return mTouchScrollInProgress || mPotentiallyActiveFlingCount > 0;
     }
 
-    @SuppressWarnings("unused")
-    @CalledByNative
-    private void onFlingStartEventConsumed(int vx, int vy) {
-        mTouchScrollInProgress = false;
-        mPotentiallyActiveFlingCount++;
-        for (mGestureStateListenersIterator.rewind();
-                    mGestureStateListenersIterator.hasNext();) {
-            mGestureStateListenersIterator.next().onFlingStartGesture(
-                    vx, vy, computeVerticalScrollOffset(), computeVerticalScrollExtent());
-        }
+    private void setTouchScrollInProgress(boolean inProgress) {
+        if (mTouchScrollInProgress == inProgress) return;
+        mTouchScrollInProgress = inProgress;
         updateActionModeVisibility();
     }
 
     @SuppressWarnings("unused")
     @CalledByNative
-    private void onFlingStartEventHadNoConsumer(int vx, int vy) {
-        mTouchScrollInProgress = false;
+    private void onFlingStartEventConsumed(int vx, int vy) {
+        mPotentiallyActiveFlingCount++;
+        setTouchScrollInProgress(false);
+        for (mGestureStateListenersIterator.rewind();
+                    mGestureStateListenersIterator.hasNext();) {
+            mGestureStateListenersIterator.next().onFlingStartGesture(
+                    vx, vy, computeVerticalScrollOffset(), computeVerticalScrollExtent());
+        }
     }
 
     @SuppressWarnings("unused")
@@ -1296,11 +1288,10 @@ public class ContentViewCore implements
     @SuppressWarnings("unused")
     @CalledByNative
     private void onScrollBeginEventAck() {
-        mTouchScrollInProgress = true;
+        setTouchScrollInProgress(true);
         hidePastePopup();
         mZoomControlsDelegate.invokeZoomPicker();
         updateGestureStateListener(GestureEventType.SCROLL_START);
-        updateActionModeVisibility();
     }
 
     @SuppressWarnings("unused")
@@ -1316,10 +1307,8 @@ public class ContentViewCore implements
     @SuppressWarnings("unused")
     @CalledByNative
     private void onScrollEndEventAck() {
-        if (!mTouchScrollInProgress) return;
-        mTouchScrollInProgress = false;
+        setTouchScrollInProgress(false);
         updateGestureStateListener(GestureEventType.SCROLL_END);
-        updateActionModeVisibility();
     }
 
     @SuppressWarnings("unused")
@@ -1370,6 +1359,12 @@ public class ContentViewCore implements
         nativeDoubleTap(mNativeContentViewCore, timeMs, x, y);
     }
 
+    /**
+     * Flings the viewport with velocity vector (velocityX, velocityY).
+     * @param timeMs the current time.
+     * @param velocityX fling speed in x-axis.
+     * @param velocityY fling speed in y-axis.
+     */
     public void flingViewport(long timeMs, int velocityX, int velocityY) {
         if (mNativeContentViewCore == 0) return;
         nativeFlingCancel(mNativeContentViewCore, timeMs);
@@ -1417,9 +1412,6 @@ public class ContentViewCore implements
                     listener.onFlingEndGesture(
                             computeVerticalScrollOffset(),
                             computeVerticalScrollExtent());
-                    break;
-                case GestureEventType.FLING_CANCEL:
-                    listener.onFlingCancelGesture();
                     break;
                 case GestureEventType.SCROLL_START:
                     listener.onScrollStarted(
@@ -1534,7 +1526,6 @@ public class ContentViewCore implements
     @SuppressLint("MissingSuperCall")
     public void onDetachedFromWindow() {
         mZoomControlsDelegate.dismissZoomPicker();
-        unregisterAccessibilityContentObserver();
 
         ScreenOrientationListener.getInstance().removeObserver(this);
         GamepadList.onDetachedFromWindow();
@@ -1687,6 +1678,9 @@ public class ContentViewCore implements
     public void onWindowFocusChanged(boolean hasWindowFocus) {
         if (!hasWindowFocus) resetGestureDetection();
         if (mActionMode != null) mActionMode.onWindowFocusChanged(hasWindowFocus);
+        for (mGestureStateListenersIterator.rewind(); mGestureStateListenersIterator.hasNext();) {
+            mGestureStateListenersIterator.next().onWindowFocusChanged(hasWindowFocus);
+        }
     }
 
     public void onFocusChanged(boolean gainFocus) {
@@ -2089,6 +2083,21 @@ public class ContentViewCore implements
                 }
 
                 @Override
+                public void processText(Intent intent) {
+                    assert Build.VERSION.SDK_INT >= Build.VERSION_CODES.M;
+
+                    final String query = sanitizeQuery(getSelectedText(), MAX_SEARCH_QUERY_LENGTH);
+                    if (TextUtils.isEmpty(query)) return;
+
+                    intent.putExtra(Intent.EXTRA_PROCESS_TEXT, query);
+                    try {
+                        getContext().startActivity(intent);
+                    } catch (android.content.ActivityNotFoundException ex) {
+                        // If no app handles it, do nothing.
+                    }
+                }
+
+                @Override
                 public void search() {
                     final String query = sanitizeQuery(getSelectedText(), MAX_SEARCH_QUERY_LENGTH);
                     if (TextUtils.isEmpty(query)) return;
@@ -2201,8 +2210,8 @@ public class ContentViewCore implements
     }
 
     private ActionMode startActionMode(boolean allowFallbackIfFloatingActionModeCreationFails) {
-        WebActionModeCallback callback = getContentViewClient().getWebActionModeCallback(
-                mContainerView.getContext(), mActionHandler);
+        WebActionModeCallback callback =
+                new WebActionModeCallback(mContainerView.getContext(), mActionHandler);
         if (supportsFloatingActionMode()) {
             ActionMode actionMode = startFloatingActionMode(callback);
             if (actionMode != null) return actionMode;
@@ -2512,7 +2521,7 @@ public class ContentViewCore implements
     @SuppressWarnings("unused")
     @CalledByNative
     private void showSelectPopup(long nativeSelectPopupSourceFrame, Rect bounds, String[] items,
-            int[] enabled, boolean multiple, int[] selectedIndices) {
+            int[] enabled, boolean multiple, int[] selectedIndices, boolean rightAligned) {
         if (mContainerView.getParent() == null || mContainerView.getVisibility() != View.VISIBLE) {
             mNativeSelectPopupSourceFrame = nativeSelectPopupSourceFrame;
             selectPopupMenuItems(null);
@@ -2528,7 +2537,8 @@ public class ContentViewCore implements
             popupItems.add(new SelectPopupItem(items[i], enabled[i]));
         }
         if (DeviceFormFactor.isTablet(mContext) && !multiple && !isTouchExplorationEnabled()) {
-            mSelectPopup = new SelectPopupDropdown(this, popupItems, bounds, selectedIndices);
+            mSelectPopup = new SelectPopupDropdown(
+                    this, popupItems, bounds, selectedIndices, rightAligned);
         } else {
             mSelectPopup = new SelectPopupDialog(this, popupItems, multiple, selectedIndices);
         }
@@ -2563,36 +2573,6 @@ public class ContentViewCore implements
     @CalledByNative
     private MotionEventSynthesizer createMotionEventSynthesizer() {
         return new MotionEventSynthesizer(this);
-    }
-
-    @SuppressWarnings("unused")
-    @CalledByNative
-    private PopupTouchHandleDrawable createPopupTouchHandleDrawable() {
-        if (mTouchHandleDelegate == null) {
-            mTouchHandleDelegate = new PopupTouchHandleDrawableDelegate() {
-                @Override
-                public View getParent() {
-                    return getContainerView();
-                }
-
-                @Override
-                public PositionObserver getParentPositionObserver() {
-                    return mPositionObserver;
-                }
-
-                @Override
-                public boolean onTouchHandleEvent(MotionEvent event) {
-                    final boolean isTouchHandleEvent = true;
-                    return onTouchEventImpl(event, isTouchHandleEvent);
-                }
-
-                @Override
-                public boolean isScrollInProgress() {
-                    return ContentViewCore.this.isScrollInProgress();
-                }
-            };
-        }
-        return new PopupTouchHandleDrawable(mTouchHandleDelegate);
     }
 
     /**
@@ -3003,8 +2983,7 @@ public class ContentViewCore implements
         return null;
     }
 
-    // @TargetApi(Build.VERSION_CODES.M) TODO(sgurun) add method document once API is public
-    // crbug/512264
+    @TargetApi(Build.VERSION_CODES.M)
     public void onProvideVirtualStructure(final ViewStructure structure) {
         // Do not collect accessibility tree in incognito mode
         if (getWebContents().isIncognito()) {
@@ -3033,6 +3012,7 @@ public class ContentViewCore implements
     // When creating the View structure, the left and top are relative to the parent node.
     // The X scroll is not used, rather compensated through X-position, while the Y scroll
     // is provided.
+    @TargetApi(Build.VERSION_CODES.M)
     private void createVirtualStructure(ViewStructure viewNode, AccessibilitySnapshotNode node,
             int parentX, int parentY) {
         viewNode.setClassName(node.className);
@@ -3198,12 +3178,10 @@ public class ContentViewCore implements
         final boolean touchScrollInProgress = mTouchScrollInProgress;
         final int potentiallyActiveFlingCount = mPotentiallyActiveFlingCount;
 
-        mTouchScrollInProgress = false;
+        setTouchScrollInProgress(false);
         mPotentiallyActiveFlingCount = 0;
-
         if (touchScrollInProgress) updateGestureStateListener(GestureEventType.SCROLL_END);
         if (potentiallyActiveFlingCount > 0) updateGestureStateListener(GestureEventType.FLING_END);
-        updateActionModeVisibility();
     }
 
     private float getWheelScrollFactorInPixels() {
@@ -3236,11 +3214,10 @@ public class ContentViewCore implements
     private void onNativeFlingStopped() {
         // Note that mTouchScrollInProgress should normally be false at this
         // point, but we reset it anyway as another failsafe.
-        mTouchScrollInProgress = false;
+        setTouchScrollInProgress(false);
         if (mPotentiallyActiveFlingCount <= 0) return;
         mPotentiallyActiveFlingCount--;
         updateGestureStateListener(GestureEventType.FLING_END);
-        updateActionModeVisibility();
     }
 
     @Override

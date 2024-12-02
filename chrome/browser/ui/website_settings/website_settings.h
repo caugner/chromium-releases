@@ -7,6 +7,7 @@
 
 #include "base/strings/string16.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
+#include "chrome/browser/ssl/security_state_model.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_types.h"
 #include "content/public/common/signed_certificate_timestamp_id_and_status.h"
@@ -14,11 +15,10 @@
 
 namespace content {
 class CertStore;
-struct SSLStatus;
+class WebContents;
 }
 
 class ChromeSSLHostStateDelegate;
-class InfoBarService;
 class HostContentSettingsMap;
 class Profile;
 class WebsiteSettingsUI;
@@ -37,9 +37,10 @@ class WebsiteSettings : public TabSpecificContentSettings::SiteDataObserver {
   enum SiteConnectionStatus {
     SITE_CONNECTION_STATUS_UNKNOWN = 0,      // No status available.
     SITE_CONNECTION_STATUS_ENCRYPTED,        // Connection is encrypted.
-    SITE_CONNECTION_STATUS_MIXED_CONTENT,    // Site has unencrypted content.
+    SITE_CONNECTION_STATUS_MIXED_CONTENT,    // Non-secure passive content.
+    SITE_CONNECTION_STATUS_MIXED_SCRIPT,     // Non-secure active content.
     SITE_CONNECTION_STATUS_UNENCRYPTED,      // Connection is not encrypted.
-    SITE_CONNECTION_STATUS_ENCRYPTED_ERROR,  // Connection error occured.
+    SITE_CONNECTION_STATUS_ENCRYPTED_ERROR,  // Connection error occurred.
     SITE_CONNECTION_STATUS_INTERNAL_PAGE,    // Internal site.
   };
 
@@ -66,7 +67,8 @@ class WebsiteSettings : public TabSpecificContentSettings::SiteDataObserver {
     SITE_IDENTITY_STATUS_ADMIN_PROVIDED_CERT,
     // The website provided a valid certificate, but the certificate or chain
     // is using a deprecated signature algorithm.
-    SITE_IDENTITY_STATUS_DEPRECATED_SIGNATURE_ALGORITHM,
+    SITE_IDENTITY_STATUS_DEPRECATED_SIGNATURE_ALGORITHM_MINOR,
+    SITE_IDENTITY_STATUS_DEPRECATED_SIGNATURE_ALGORITHM_MAJOR,
   };
 
   // UMA statistics for WebsiteSettings. Do not reorder or remove existing
@@ -92,9 +94,9 @@ class WebsiteSettings : public TabSpecificContentSettings::SiteDataObserver {
   WebsiteSettings(WebsiteSettingsUI* ui,
                   Profile* profile,
                   TabSpecificContentSettings* tab_specific_content_settings,
-                  InfoBarService* infobar_service,
+                  content::WebContents* web_contents,
                   const GURL& url,
-                  const content::SSLStatus& ssl,
+                  const SecurityStateModel::SecurityInfo& security_info,
                   content::CertStore* cert_store);
   ~WebsiteSettings() override;
 
@@ -138,9 +140,8 @@ class WebsiteSettings : public TabSpecificContentSettings::SiteDataObserver {
 
  private:
   // Initializes the |WebsiteSettings|.
-  void Init(Profile* profile,
-            const GURL& url,
-            const content::SSLStatus& ssl);
+  void Init(const GURL& url,
+            const SecurityStateModel::SecurityInfo& security_info);
 
   // Sets (presents) the information about the site's permissions in the |ui_|.
   void PresentSitePermissions();
@@ -152,14 +153,14 @@ class WebsiteSettings : public TabSpecificContentSettings::SiteDataObserver {
   // in the |ui_|.
   void PresentSiteIdentity();
 
-  // The website settings UI displays information and controls for site
-  // specific data (local stored objects like cookies), site specific
-  // permissions (location, popup, plugin, etc.  permissions) and site specific
+  // The website settings UI displays information and controls for site-
+  // specific data (local stored objects like cookies), site-specific
+  // permissions (location, pop-up, plugin, etc. permissions) and site-specific
   // information (identity, connection status, etc.).
   WebsiteSettingsUI* ui_;
 
-  // The infobar service of the active tab.
-  InfoBarService* infobar_service_;
+  // The WebContents of the active tab.
+  content::WebContents* web_contents_;
 
   // The flag that controls whether an infobar is displayed after the website
   // settings UI is closed or not.
@@ -224,6 +225,8 @@ class WebsiteSettings : public TabSpecificContentSettings::SiteDataObserver {
   ChromeSSLHostStateDelegate* chrome_ssl_host_state_delegate_;
 
   bool did_revoke_user_ssl_decisions_;
+
+  Profile* profile_;
 
   DISALLOW_COPY_AND_ASSIGN(WebsiteSettings);
 };

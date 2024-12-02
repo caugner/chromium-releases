@@ -122,6 +122,8 @@ enum DriveSyncErrorType {
   delete_without_permission,
   // Google Drive is temporarily unavailable.
   service_unavailable,
+  // There is no server space to sync a file.
+  no_server_space,
   // Miscellaneous errors other than listed above.
   misc
 };
@@ -450,6 +452,7 @@ dictionary Preferences {
   boolean searchSuggestEnabled;
   boolean use24hourClock;
   boolean allowRedeemOffers;
+  DOMString timezone;
 };
 
 dictionary PreferencesChange {
@@ -632,7 +635,7 @@ callback ComputeChecksumCallback = void(DOMString checksum);
 callback GetProvidingExtensionsCallback = void(ProvidingExtension[] extensions);
 
 // |actions| List of actions.
-callback GetEntryActionsCallback = void(fileSystemProvider.Action[] actions);
+callback GetCustomActionsCallback = void(fileSystemProvider.Action[] actions);
 
 interface Functions {
   // Logout the current user for navigating to the re-authentication screen for
@@ -647,7 +650,7 @@ interface Functions {
   // |entries| Array of entries
   // |callback|
   [nocompile]
-  static void executeTask(DOMString taskId, 
+  static void executeTask(DOMString taskId,
                           [instanceof=Entry] object[] entries,
                           ExecuteTaskCallback callback);
 
@@ -941,18 +944,18 @@ interface Functions {
   // an error via chrome.runtime.lastError.
   static void configureVolume(DOMString volumeId, SimpleCallback callback);
 
-  // Requests list of actions for the specified file. If not possible, then an
+  // Requests list of custom actions for the specified entries. If not possible,
+  // then an error via chrome.runtime.lastError is returned.
+  [nocompile]
+  static void getCustomActions([instanceof=Entry] object[] entries,
+                               GetCustomActionsCallback callback);
+
+  // Executes a custom action for a set of entries. If not possible, then an
   // error via chrome.runtime.lastError is returned.
   [nocompile]
-  static void getEntryActions([instanceof=Entry] object entry,
-                              GetEntryActionsCallback callback);
-
-  // Executes the entry action. If not possible, then an error via
-  // chrome.runtime.lastError is returned.
-  [nocompile]
-  static void executeEntryAction([instanceof=Entry] object entry,
-                                 DOMString actionId,
-                                 SimpleCallback callback);
+  static void executeCustomAction([instanceof=Entry] object[] entries,
+                                  DOMString actionId,
+                                  SimpleCallback callback);
 };
 
 interface Events {

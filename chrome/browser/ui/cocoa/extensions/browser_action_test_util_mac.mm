@@ -182,10 +182,12 @@ bool BrowserActionTestUtil::ActionButtonWantsToRun(size_t index) {
   return [GetButton(browser_, test_helper_.get(), index) wantsToRunForTesting];
 }
 
-bool BrowserActionTestUtil::OverflowedActionButtonWantsToRun() {
-  return [[[BrowserWindowController browserWindowControllerForWindow:
-      browser_->window()->GetNativeWindow()] toolbarController]
-          overflowedToolbarActionWantsToRun];
+void BrowserActionTestUtil::SetWidth(int width) {
+  BrowserActionsContainerView* containerView =
+      [GetController(browser_, test_helper_.get()) containerView];
+  NSRect frame = [containerView frame];
+  frame.size.width = width;
+  [containerView setFrame:frame];
 }
 
 ToolbarActionsBar* BrowserActionTestUtil::GetToolbarActionsBar() {

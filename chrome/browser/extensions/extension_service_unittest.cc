@@ -66,7 +66,6 @@
 #include "chrome/browser/extensions/updater/extension_updater.h"
 #include "chrome/browser/policy/profile_policy_connector.h"
 #include "chrome/browser/policy/profile_policy_connector_factory.h"
-#include "chrome/browser/prefs/pref_service_syncable.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/common/chrome_constants.h"
@@ -78,10 +77,11 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/scoped_browser_locale.h"
-#include "chrome/test/base/testing_pref_service_syncable.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/crx_file/id_util.h"
 #include "components/pref_registry/pref_registry_syncable.h"
+#include "components/syncable_prefs/pref_service_syncable.h"
+#include "components/syncable_prefs/testing_pref_service_syncable.h"
 #include "content/public/browser/dom_storage_context.h"
 #include "content/public/browser/gpu_data_manager.h"
 #include "content/public/browser/indexed_db_context.h"
@@ -792,10 +792,10 @@ class ExtensionServiceTest : public extensions::ExtensionServiceTestBase,
   // set for extension |id|.
   void GrantAllOptionalPermissions(const std::string& id) {
     const Extension* extension = service()->GetInstalledExtension(id);
-    scoped_refptr<const PermissionSet> all_optional_permissions =
+    const PermissionSet& all_optional_permissions =
         extensions::PermissionsParser::GetOptionalPermissions(extension);
     extensions::PermissionsUpdater perms_updater(profile());
-    perms_updater.AddPermissions(extension, all_optional_permissions.get());
+    perms_updater.AddPermissions(extension, all_optional_permissions);
   }
 
   // Helper method to set up a WindowedNotificationObserver to wait for a
@@ -1167,8 +1167,8 @@ class ExtensionServiceTest : public extensions::ExtensionServiceTestBase,
   }
 
  protected:
-  typedef extensions::ExtensionManagementPrefUpdater<TestingPrefServiceSyncable>
-      ManagementPrefUpdater;
+  typedef extensions::ExtensionManagementPrefUpdater<
+      syncable_prefs::TestingPrefServiceSyncable> ManagementPrefUpdater;
   extensions::ExtensionList loaded_;
   std::string unloaded_id_;
   UnloadedExtensionInfo::Reason unloaded_reason_;
@@ -1320,7 +1320,7 @@ TEST_F(ExtensionServiceTest, LoadAllExtensionsFromDirectorySuccess) {
   AddPattern(&expected_patterns, "https://*.google.com/*");
   EXPECT_EQ(
       expected_patterns,
-      extension->permissions_data()->active_permissions()->explicit_hosts());
+      extension->permissions_data()->active_permissions().explicit_hosts());
 
   EXPECT_EQ(std::string(good1), loaded_[1]->id());
   EXPECT_EQ(std::string("My extension 2"), loaded_[1]->name());
@@ -1851,9 +1851,7 @@ TEST_F(ExtensionServiceTest, GrantedPermissions) {
 
   // Make sure there aren't any granted permissions before the
   // extension is installed.
-  scoped_refptr<PermissionSet> known_perms(
-      prefs->GetGrantedPermissions(permissions_crx));
-  EXPECT_FALSE(known_perms.get());
+  EXPECT_FALSE(prefs->GetGrantedPermissions(permissions_crx).get());
 
   const Extension* extension = PackAndInstallCRX(path, pem_path, INSTALL_NEW);
 
@@ -1869,7 +1867,8 @@ TEST_F(ExtensionServiceTest, GrantedPermissions) {
   AddPattern(&expected_host_perms, "http://*.google.com.hk/*");
   AddPattern(&expected_host_perms, "http://www.example.com/*");
 
-  known_perms = prefs->GetGrantedPermissions(extension->id());
+  scoped_ptr<const PermissionSet> known_perms =
+      prefs->GetGrantedPermissions(extension->id());
   EXPECT_TRUE(known_perms.get());
   EXPECT_FALSE(known_perms->IsEmpty());
   EXPECT_EQ(expected_api_perms, known_perms->apis());
@@ -1898,9 +1897,7 @@ TEST_F(ExtensionServiceTest, DefaultAppsGrantedPermissions) {
 
   // Make sure there aren't any granted permissions before the
   // extension is installed.
-  scoped_refptr<PermissionSet> known_perms(
-      prefs->GetGrantedPermissions(permissions_crx));
-  EXPECT_FALSE(known_perms.get());
+  EXPECT_FALSE(prefs->GetGrantedPermissions(permissions_crx).get());
 
   const Extension* extension = PackAndInstallCRX(
       path, pem_path, INSTALL_NEW, Extension::WAS_INSTALLED_BY_DEFAULT);
@@ -1912,7 +1909,8 @@ TEST_F(ExtensionServiceTest, DefaultAppsGrantedPermissions) {
   // Verify that the valid API permissions have been recognized.
   expected_api_perms.insert(APIPermission::kTab);
 
-  known_perms = prefs->GetGrantedPermissions(extension->id());
+  scoped_ptr<const PermissionSet> known_perms =
+      prefs->GetGrantedPermissions(extension->id());
   EXPECT_TRUE(known_perms.get());
   EXPECT_FALSE(known_perms->IsEmpty());
   EXPECT_EQ(expected_api_perms, known_perms->apis());
@@ -1935,8 +1933,8 @@ TEST_F(ExtensionServiceTest, GrantedFullAccessPermissions) {
   EXPECT_EQ(1u, registry()->enabled_extensions().size());
   ExtensionPrefs* prefs = ExtensionPrefs::Get(profile());
 
-  scoped_refptr<PermissionSet> permissions(
-      prefs->GetGrantedPermissions(extension->id()));
+  scoped_ptr<const PermissionSet> permissions =
+      prefs->GetGrantedPermissions(extension->id());
   EXPECT_FALSE(permissions->IsEmpty());
   EXPECT_TRUE(permissions->HasEffectiveFullAccess());
   EXPECT_FALSE(permissions->apis().empty());
@@ -1998,8 +1996,8 @@ TEST_F(ExtensionServiceTest, GrantedAPIAndHostPermissions) {
   ASSERT_TRUE(service()->IsExtensionEnabled(extension_id));
   ASSERT_FALSE(prefs->DidExtensionEscalatePermissions(extension_id));
 
-  scoped_refptr<PermissionSet> current_perms(
-      prefs->GetGrantedPermissions(extension_id));
+  scoped_ptr<const PermissionSet> current_perms =
+      prefs->GetGrantedPermissions(extension_id);
   ASSERT_TRUE(current_perms.get());
   ASSERT_FALSE(current_perms->IsEmpty());
   ASSERT_FALSE(current_perms->HasEffectiveFullAccess());
@@ -2893,8 +2891,8 @@ TEST_F(ExtensionServiceTest, LoadExtensionsWithPlugins) {
   EXPECT_TRUE(registry()->enabled_extensions().Contains(good2));
 
   // Make sure the granted permissions have been setup.
-  scoped_refptr<PermissionSet> permissions(
-      ExtensionPrefs::Get(profile())->GetGrantedPermissions(good1));
+  scoped_ptr<const PermissionSet> permissions =
+      ExtensionPrefs::Get(profile())->GetGrantedPermissions(good1);
   EXPECT_FALSE(permissions->IsEmpty());
   EXPECT_TRUE(permissions->HasEffectiveFullAccess());
   EXPECT_FALSE(permissions->apis().empty());
@@ -2948,6 +2946,7 @@ TEST_F(ExtensionServiceTest, AddPendingExtensionFromSync) {
       service()->pending_extension_manager()->AddFromSync(
           kFakeId,
           kFakeUpdateURL,
+          base::Version(),
           &IsExtension,
           kFakeRemoteInstall,
           kFakeInstalledByCustodian));
@@ -2972,18 +2971,21 @@ TEST_F(ExtensionServiceTest, AddPendingExtensionFromSync) {
 namespace {
 const char kGoodId[] = "ldnnhddmnhbkjipkidpdiheffobcpfmf";
 const char kGoodUpdateURL[] = "http://good.update/url";
+const char kGoodVersion[] = "1";
 const bool kGoodIsFromSync = true;
 const bool kGoodRemoteInstall = false;
 const bool kGoodInstalledByCustodian = false;
 }  // namespace
 
-// Test updating a pending extension.
+// Test installing a pending extension (this goes through
+// ExtensionService::UpdateExtension).
 TEST_F(ExtensionServiceTest, UpdatePendingExtension) {
   InitializeEmptyExtensionService();
   EXPECT_TRUE(
       service()->pending_extension_manager()->AddFromSync(
           kGoodId,
           GURL(kGoodUpdateURL),
+          base::Version(kGoodVersion),
           &IsExtension,
           kGoodRemoteInstall,
           kGoodInstalledByCustodian));
@@ -2995,7 +2997,37 @@ TEST_F(ExtensionServiceTest, UpdatePendingExtension) {
   EXPECT_FALSE(service()->pending_extension_manager()->IsIdPending(kGoodId));
 
   const Extension* extension = service()->GetExtensionById(kGoodId, true);
-  ASSERT_TRUE(extension);
+  EXPECT_TRUE(extension);
+}
+
+TEST_F(ExtensionServiceTest, UpdatePendingExtensionWrongVersion) {
+  InitializeEmptyExtensionService();
+  base::Version other_version("0.1");
+  ASSERT_TRUE(other_version.IsValid());
+  ASSERT_FALSE(other_version.Equals(base::Version(kGoodVersion)));
+  EXPECT_TRUE(
+      service()->pending_extension_manager()->AddFromSync(
+          kGoodId,
+          GURL(kGoodUpdateURL),
+          other_version,
+          &IsExtension,
+          kGoodRemoteInstall,
+          kGoodInstalledByCustodian));
+  EXPECT_TRUE(service()->pending_extension_manager()->IsIdPending(kGoodId));
+
+  base::FilePath path = data_dir().AppendASCII("good.crx");
+  // After installation, the extension should be disabled, because it's missing
+  // permissions.
+  UpdateExtension(kGoodId, path, DISABLED);
+
+  EXPECT_TRUE(
+      ExtensionPrefs::Get(profile())->DidExtensionEscalatePermissions(kGoodId));
+
+  // It should still have been installed though.
+  EXPECT_FALSE(service()->pending_extension_manager()->IsIdPending(kGoodId));
+
+  const Extension* extension = service()->GetExtensionById(kGoodId, true);
+  EXPECT_TRUE(extension);
 }
 
 namespace {
@@ -3011,7 +3043,7 @@ bool IsTheme(const Extension* extension) {
 TEST_F(ExtensionServiceTest, DISABLED_UpdatePendingTheme) {
   InitializeEmptyExtensionService();
   EXPECT_TRUE(service()->pending_extension_manager()->AddFromSync(
-      theme_crx, GURL(), &IsTheme, false, false));
+      theme_crx, GURL(), base::Version(), &IsTheme, false, false));
   EXPECT_TRUE(service()->pending_extension_manager()->IsIdPending(theme_crx));
 
   base::FilePath path = data_dir().AppendASCII("theme.crx");
@@ -3074,6 +3106,7 @@ TEST_F(ExtensionServiceTest, UpdatePendingExternalCrxWinsOverSync) {
       service()->pending_extension_manager()->AddFromSync(
           kGoodId,
           GURL(kGoodUpdateURL),
+          base::Version(),
           &IsExtension,
           kGoodRemoteInstall,
           kGoodInstalledByCustodian));
@@ -3105,6 +3138,7 @@ TEST_F(ExtensionServiceTest, UpdatePendingExternalCrxWinsOverSync) {
       service()->pending_extension_manager()->AddFromSync(
           kGoodId,
           GURL(kGoodUpdateURL),
+          base::Version(),
           &IsExtension,
           kGoodRemoteInstall,
           kGoodInstalledByCustodian));
@@ -3122,7 +3156,7 @@ TEST_F(ExtensionServiceTest, UpdatePendingExternalCrxWinsOverSync) {
 TEST_F(ExtensionServiceTest, UpdatePendingCrxThemeMismatch) {
   InitializeEmptyExtensionService();
   EXPECT_TRUE(service()->pending_extension_manager()->AddFromSync(
-      theme_crx, GURL(), &IsExtension, false, false));
+      theme_crx, GURL(), base::Version(), &IsExtension, false, false));
 
   EXPECT_TRUE(service()->pending_extension_manager()->IsIdPending(theme_crx));
 
@@ -3147,6 +3181,7 @@ TEST_F(ExtensionServiceTest, UpdatePendingExtensionFailedShouldInstallTest) {
       service()->pending_extension_manager()->AddFromSync(
           kGoodId,
           GURL(kGoodUpdateURL),
+          base::Version(),
           &IsTheme,
           kGoodRemoteInstall,
           kGoodInstalledByCustodian));
@@ -4245,8 +4280,8 @@ TEST_F(ExtensionServiceTest, PolicyBlockedPermissionPolicyUpdate) {
   GrantAllOptionalPermissions(ext2);
   GrantAllOptionalPermissions(ext2_forced);
 
-  scoped_refptr<const PermissionSet> active_permissions(
-      ExtensionPrefs::Get(profile())->GetActivePermissions(ext1));
+  scoped_ptr<const PermissionSet> active_permissions =
+      ExtensionPrefs::Get(profile())->GetActivePermissions(ext1);
   EXPECT_TRUE(active_permissions->HasAPIPermission(
       extensions::APIPermission::kDownloads));
 
@@ -5933,6 +5968,8 @@ TEST_F(ExtensionServiceTest, IgnoreSyncChangesWhenLocalStateIsMoreRecent) {
   ProfileSyncService* sync_service =
       ProfileSyncServiceFactory::GetForProfile(profile());
   sync_service->SetSyncSetupCompleted();
+  // Make sure ExtensionSyncService is created, so it'll be notified of changes.
+  extension_sync_service();
 
   service()->Init();
   ASSERT_TRUE(service()->is_ready());
@@ -6577,8 +6614,8 @@ TEST_F(ExtensionServiceTest, ProcessSyncDataNewExtension) {
                                                            : DISABLED);
     EXPECT_EQ(test_case.expect_disable_reasons,
               prefs->GetDisableReasons(good_crx));
-    scoped_refptr<PermissionSet> permissions(
-        prefs->GetGrantedPermissions(good_crx));
+    scoped_ptr<const PermissionSet> permissions =
+        prefs->GetGrantedPermissions(good_crx);
     EXPECT_EQ(test_case.expect_permissions_granted, !permissions->IsEmpty());
     ASSERT_FALSE(service()->pending_extension_manager()->IsIdPending(good_crx));
 
@@ -6645,24 +6682,32 @@ TEST_F(ExtensionServiceTest, ProcessSyncDataVersionCheck) {
   ext_specifics->set_id(good_crx);
   ext_specifics->set_enabled(true);
 
+  const base::Version installed_version =
+      *service()->GetInstalledExtension(good_crx)->version();
+
   {
-    ext_specifics->set_version(
-        service()->GetInstalledExtension(good_crx)->version()->GetString());
+    ext_specifics->set_version(installed_version.GetString());
     syncer::SyncData sync_data =
         syncer::SyncData::CreateLocalData(good_crx, "Name", specifics);
     syncer::SyncChange sync_change(FROM_HERE,
                                    syncer::SyncChange::ACTION_UPDATE,
                                    sync_data);
-    syncer::SyncChangeList list(1);
-    list[0] = sync_change;
+    syncer::SyncChangeList list(1, sync_change);
 
     // Should do nothing if extension version == sync version.
     extension_sync_service()->ProcessSyncChanges(FROM_HERE, list);
     EXPECT_FALSE(service()->updater()->WillCheckSoon());
+    // Make sure the version we'll send back to sync didn't change.
+    syncer::SyncDataList data =
+        extension_sync_service()->GetAllSyncData(syncer::EXTENSIONS);
+    ASSERT_EQ(1u, data.size());
+    scoped_ptr<ExtensionSyncData> extension_data =
+        ExtensionSyncData::CreateFromSyncData(data[0]);
+    ASSERT_TRUE(extension_data);
+    EXPECT_TRUE(installed_version.Equals(extension_data->version()));
   }
 
-  // Should do nothing if extension version > sync version (but see
-  // the TODO in ProcessExtensionSyncData).
+  // Should do nothing if extension version > sync version.
   {
     ext_specifics->set_version("0.0.0.0");
     syncer::SyncData sync_data =
@@ -6670,26 +6715,43 @@ TEST_F(ExtensionServiceTest, ProcessSyncDataVersionCheck) {
     syncer::SyncChange sync_change(FROM_HERE,
                                    syncer::SyncChange::ACTION_UPDATE,
                                    sync_data);
-    syncer::SyncChangeList list(1);
-    list[0] = sync_change;
+    syncer::SyncChangeList list(1, sync_change);
 
     extension_sync_service()->ProcessSyncChanges(FROM_HERE, list);
     EXPECT_FALSE(service()->updater()->WillCheckSoon());
+    // Make sure the version we'll send back to sync didn't change.
+    syncer::SyncDataList data =
+        extension_sync_service()->GetAllSyncData(syncer::EXTENSIONS);
+    ASSERT_EQ(1u, data.size());
+    scoped_ptr<ExtensionSyncData> extension_data =
+        ExtensionSyncData::CreateFromSyncData(data[0]);
+    ASSERT_TRUE(extension_data);
+    EXPECT_TRUE(installed_version.Equals(extension_data->version()));
   }
 
   // Should kick off an update if extension version < sync version.
   {
-    ext_specifics->set_version("9.9.9.9");
+    const base::Version new_version("9.9.9.9");
+    ext_specifics->set_version(new_version.GetString());
     syncer::SyncData sync_data =
         syncer::SyncData::CreateLocalData(good_crx, "Name", specifics);
     syncer::SyncChange sync_change(FROM_HERE,
                                    syncer::SyncChange::ACTION_UPDATE,
                                    sync_data);
-    syncer::SyncChangeList list(1);
-    list[0] = sync_change;
+    syncer::SyncChangeList list(1, sync_change);
 
     extension_sync_service()->ProcessSyncChanges(FROM_HERE, list);
     EXPECT_TRUE(service()->updater()->WillCheckSoon());
+    // Make sure that we'll send the NEW version back to sync, even though we
+    // haven't actually updated yet. This is to prevent the data in sync from
+    // flip-flopping back and forth until all clients are up to date.
+    syncer::SyncDataList data =
+        extension_sync_service()->GetAllSyncData(syncer::EXTENSIONS);
+    ASSERT_EQ(1u, data.size());
+    scoped_ptr<ExtensionSyncData> extension_data =
+        ExtensionSyncData::CreateFromSyncData(data[0]);
+    ASSERT_TRUE(extension_data);
+    EXPECT_TRUE(new_version.Equals(extension_data->version()));
   }
 
   EXPECT_FALSE(service()->pending_extension_manager()->IsIdPending(good_crx));
@@ -6897,8 +6959,8 @@ TEST_F(ExtensionServiceTest, ProcessSyncDataPermissionApproval) {
     }
     ASSERT_TRUE(registry()->enabled_extensions().Contains(id));
 
-    scoped_refptr<PermissionSet> granted_permissions_v1(
-        prefs->GetGrantedPermissions(id));
+    scoped_ptr<const PermissionSet> granted_permissions_v1 =
+        prefs->GetGrantedPermissions(id);
 
     // Update to a new version with increased permissions.
     UpdateExtension(id, crx_path_v2, DISABLED);
@@ -6914,8 +6976,8 @@ TEST_F(ExtensionServiceTest, ProcessSyncDataPermissionApproval) {
         id, Extension::DISABLE_PERMISSIONS_INCREASE));
 
     // No new permissions should have been granted.
-    scoped_refptr<PermissionSet> granted_permissions_v2(
-        prefs->GetGrantedPermissions(id));
+    scoped_ptr<const PermissionSet> granted_permissions_v2 =
+        prefs->GetGrantedPermissions(id);
     ASSERT_EQ(*granted_permissions_v1, *granted_permissions_v2);
 
     // Now a sync update comes in.
@@ -6937,11 +6999,11 @@ TEST_F(ExtensionServiceTest, ProcessSyncDataPermissionApproval) {
 
     // Check expectations.
     EXPECT_TRUE(registry()->GetExtensionById(id, ExtensionRegistry::ENABLED));
-    scoped_refptr<PermissionSet> granted_permissions(
-        prefs->GetGrantedPermissions(id));
+    scoped_ptr<const PermissionSet> granted_permissions =
+        prefs->GetGrantedPermissions(id);
     if (test_case.expect_permissions_granted) {
-      scoped_refptr<PermissionSet> active_permissions(
-          prefs->GetActivePermissions(id));
+      scoped_ptr<const PermissionSet> active_permissions =
+          prefs->GetActivePermissions(id);
       EXPECT_EQ(*granted_permissions, *active_permissions);
     } else {
       EXPECT_EQ(*granted_permissions, *granted_permissions_v1);
@@ -7632,6 +7694,7 @@ class ExtensionSourcePriorityTest : public ExtensionServiceTest {
     return service()->pending_extension_manager()->AddFromSync(
         crx_id_,
         GURL(kGoodUpdateURL),
+        base::Version(),
         &IsExtension,
         kGoodRemoteInstall,
         kGoodInstalledByCustodian);

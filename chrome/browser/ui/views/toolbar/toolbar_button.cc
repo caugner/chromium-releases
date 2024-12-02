@@ -8,7 +8,7 @@
 #include "base/location.h"
 #include "base/single_thread_task_runner.h"
 #include "base/thread_task_runner_handle.h"
-#include "chrome/browser/themes/theme_properties.h"
+#include "chrome/browser/ui/views/layout_constants.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "ui/accessibility/ax_view_state.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -59,19 +59,18 @@ gfx::Size ToolbarButton::GetPreferredSize() const {
   gfx::Size size(image()->GetPreferredSize());
   gfx::Size label_size = label()->GetPreferredSize();
   if (label_size.width() > 0) {
-    const int horizontal_item_padding = GetThemeProvider()->GetDisplayProperty(
-        ThemeProperties::PROPERTY_LOCATION_BAR_HORIZONTAL_PADDING);
-    size.Enlarge(label_size.width() + horizontal_item_padding, 0);
+    size.Enlarge(
+        label_size.width() + GetLayoutConstant(LOCATION_BAR_HORIZONTAL_PADDING),
+        0);
   }
   // For non-material assets the entire size of the button is captured in the
   // image resource. For Material Design the excess whitespace is being removed
   // from the image assets. Enlarge the button by the theme provided insets.
   if (ui::MaterialDesignController::IsModeMaterial()) {
     ui::ThemeProvider* provider = GetThemeProvider();
-    if (provider && provider->UsingSystemTheme()) {
-      int inset = provider->GetDisplayProperty(
-          ThemeProperties::PROPERTY_TOOLBAR_BUTTON_BORDER_INSET);
-      size.Enlarge(2 * inset, 2 * inset);
+    if (provider) {
+      gfx::Insets insets(GetLayoutInsets(TOOLBAR_BUTTON));
+      size.Enlarge(insets.width(), insets.height());
     }
   }
   return size;
@@ -79,7 +78,19 @@ gfx::Size ToolbarButton::GetPreferredSize() const {
 
 void ToolbarButton::Layout() {
   LabelButton::Layout();
-  LayoutInkDrop();
+
+  // Sizes for the the ink drop.
+  const int kInkDropLargeSize = 32;
+  const int kInkDropLargeCornerRadius = 5;
+  const int kInkDropSmallSize = 24;
+  const int kInkDropSmallCornerRadius = 2;
+
+  ink_drop_animation_controller_->SetInkDropSize(
+      gfx::Size(kInkDropLargeSize, kInkDropLargeSize),
+      kInkDropLargeCornerRadius,
+      gfx::Size(kInkDropSmallSize, kInkDropSmallSize),
+      kInkDropSmallCornerRadius);
+  ink_drop_animation_controller_->SetInkDropCenter(CalculateInkDropCenter());
 }
 
 bool ToolbarButton::OnMousePressed(const ui::MouseEvent& event) {
@@ -99,8 +110,11 @@ bool ToolbarButton::OnMousePressed(const ui::MouseEvent& event) {
         base::TimeDelta::FromMilliseconds(kMenuTimerDelay));
   }
 
-  ink_drop_animation_controller_->AnimateToState(
-      views::InkDropState::ACTION_PENDING);
+  // views::Button actions are only triggered by left and middle mouse clicks.
+  if (event.IsLeftMouseButton() || event.IsMiddleMouseButton()) {
+    ink_drop_animation_controller_->AnimateToState(
+        views::InkDropState::ACTION_PENDING);
+  }
 
   return LabelButton::OnMousePressed(event);
 }
@@ -162,10 +176,13 @@ void ToolbarButton::OnGestureEvent(ui::GestureEvent* event) {
       event->SetHandled();
       break;
     case ui::ET_GESTURE_LONG_PRESS:
-      ink_drop_state = views::InkDropState::SLOW_ACTION;
+      ink_drop_state = views::InkDropState::SLOW_ACTION_PENDING;
       break;
     case ui::ET_GESTURE_TAP:
       ink_drop_state = views::InkDropState::QUICK_ACTION;
+      break;
+    case ui::ET_GESTURE_LONG_TAP:
+      ink_drop_state = views::InkDropState::SLOW_ACTION;
       break;
     case ui::ET_GESTURE_END:
     case ui::ET_GESTURE_TAP_CANCEL:
@@ -190,12 +207,8 @@ ToolbarButton::CreateDefaultBorder() const {
       views::LabelButton::CreateDefaultBorder();
 
   ui::ThemeProvider* provider = GetThemeProvider();
-  if (provider && provider->UsingSystemTheme()) {
-    // Theme provided insets.
-    int inset = provider->GetDisplayProperty(
-        ThemeProperties::PROPERTY_TOOLBAR_BUTTON_BORDER_INSET);
-    border->set_insets(gfx::Insets(inset, inset, inset, inset));
-  }
+  if (provider && provider->UsingSystemTheme())
+    border->set_insets(GetLayoutInsets(TOOLBAR_BUTTON));
 
   return border.Pass();
 }
@@ -236,8 +249,14 @@ bool ToolbarButton::ShouldEnterPushedState(const ui::Event& event) {
              ui::EF_RIGHT_MOUSE_BUTTON) & event.flags()) != 0);
 }
 
+void ToolbarButton::NotifyClick(const ui::Event& event) {
+  LabelButton::NotifyClick(event);
+  ink_drop_animation_controller_->AnimateToState(
+      views::InkDropState::QUICK_ACTION);
+}
+
 bool ToolbarButton::ShouldShowMenu() {
-  return model_ != NULL;
+  return model_ != nullptr;
 }
 
 void ToolbarButton::ShowDropDownMenu(ui::MenuSourceType source_type) {
@@ -282,51 +301,48 @@ void ToolbarButton::ShowDropDownMenu(ui::MenuSourceType source_type) {
 
   menu_showing_ = true;
 
+  ink_drop_animation_controller_->AnimateToState(
+      views::InkDropState::ACTIVATED);
+
   // Create and run menu.  Display an empty menu if model is NULL.
+  views::MenuRunner::RunResult result;
   if (model_.get()) {
     views::MenuModelAdapter menu_delegate(model_.get());
     menu_delegate.set_triggerable_event_flags(triggerable_event_flags());
     menu_runner_.reset(new views::MenuRunner(menu_delegate.CreateMenu(),
                                              views::MenuRunner::HAS_MNEMONICS));
-    views::MenuRunner::RunResult result =
-        menu_runner_->RunMenuAt(GetWidget(),
-                                NULL,
-                                gfx::Rect(menu_position, gfx::Size(0, 0)),
-                                views::MENU_ANCHOR_TOPLEFT,
-                                source_type);
-    if (result == views::MenuRunner::MENU_DELETED)
-      return;
+    result = menu_runner_->RunMenuAt(GetWidget(), nullptr,
+                                     gfx::Rect(menu_position, gfx::Size(0, 0)),
+                                     views::MENU_ANCHOR_TOPLEFT, source_type);
   } else {
     views::MenuDelegate menu_delegate;
     views::MenuItemView* menu = new views::MenuItemView(&menu_delegate);
     menu_runner_.reset(
         new views::MenuRunner(menu, views::MenuRunner::HAS_MNEMONICS));
-    views::MenuRunner::RunResult result =
-        menu_runner_->RunMenuAt(GetWidget(),
-                                NULL,
-                                gfx::Rect(menu_position, gfx::Size(0, 0)),
-                                views::MENU_ANCHOR_TOPLEFT,
-                                source_type);
-    if (result == views::MenuRunner::MENU_DELETED)
-      return;
+    result = menu_runner_->RunMenuAt(GetWidget(), nullptr,
+                                     gfx::Rect(menu_position, gfx::Size(0, 0)),
+                                     views::MENU_ANCHOR_TOPLEFT, source_type);
   }
+  if (result == views::MenuRunner::MENU_DELETED)
+    return;
 
-  ink_drop_animation_controller_->AnimateToState(views::InkDropState::HIDDEN);
+  ink_drop_animation_controller_->AnimateToState(
+      views::InkDropState::DEACTIVATED);
 
   menu_showing_ = false;
 
   // Need to explicitly clear mouse handler so that events get sent
   // properly after the menu finishes running. If we don't do this, then
   // the first click to other parts of the UI is eaten.
-  SetMouseHandler(NULL);
+  SetMouseHandler(nullptr);
 
   // Set the state back to normal after the drop down menu is closed.
   if (state_ != STATE_DISABLED)
     SetState(STATE_NORMAL);
 }
 
-void ToolbarButton::LayoutInkDrop() {
-  ink_drop_animation_controller_->SetInkDropSize(size());
+gfx::Point ToolbarButton::CalculateInkDropCenter() const {
+  return GetLocalBounds().CenterPoint();
 }
 
 const char* ToolbarButton::GetClassName() const {

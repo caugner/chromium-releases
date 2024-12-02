@@ -4,7 +4,8 @@
 
 #include "chrome/browser/sync/glue/synced_tab_delegate.h"
 
-#include "chrome/browser/sync/glue/synced_window_delegate.h"
+#include "base/logging.h"
+#include "chrome/browser/sync/glue/synced_session_util.h"
 #include "chrome/browser/ui/sync/tab_contents_synced_tab_delegate.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/navigation_entry.h"
@@ -13,6 +14,9 @@
 using browser_sync::SyncedTabDelegate;
 
 namespace browser_sync {
+
+SyncedTabDelegate::SyncedTabDelegate() {}
+SyncedTabDelegate::~SyncedTabDelegate() {}
 
 content::NavigationEntry* SyncedTabDelegate::GetCurrentEntryMaybePending()
     const {
@@ -25,7 +29,7 @@ content::NavigationEntry* SyncedTabDelegate::GetEntryAtIndexMaybePending(
 }
 
 bool SyncedTabDelegate::ShouldSync() const {
-  if (GetSyncedWindowDelegate() == NULL)
+  if (GetSyncedWindowDelegate() == nullptr)
     return false;
 
   // Is there a valid NavigationEntry?
@@ -44,10 +48,7 @@ bool SyncedTabDelegate::ShouldSync() const {
     }
     const GURL& virtual_url = entry->GetVirtualURL();
 
-    if (virtual_url.is_valid() &&
-        !virtual_url.SchemeIs(content::kChromeUIScheme) &&
-        !virtual_url.SchemeIs(chrome::kChromeNativeScheme) &&
-        !virtual_url.SchemeIsFile()) {
+    if (ShouldSyncURL(virtual_url)) {
       found_valid_url = true;
     } else if (virtual_url == GURL(chrome::kChromeUIHistoryURL)) {
       // The history page is treated specially as we want it to trigger syncable
@@ -58,8 +59,16 @@ bool SyncedTabDelegate::ShouldSync() const {
   return found_valid_url;
 }
 
+void SyncedTabDelegate::SetSyncedWindowGetter(
+    scoped_ptr<SyncedWindowDelegatesGetter> getter) {
+  synced_window_getter_.reset(getter.release());
+}
+
 const SyncedWindowDelegate* SyncedTabDelegate::GetSyncedWindowDelegate() const {
-  return SyncedWindowDelegate::FindById(GetWindowId());
+  if (!synced_window_getter_) {
+    NOTREACHED();
+  }
+  return synced_window_getter_->FindById(GetWindowId());
 }
 
 }  // namespace browser_sync

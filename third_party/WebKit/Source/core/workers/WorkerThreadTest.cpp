@@ -5,6 +5,7 @@
 #include "config.h"
 #include "core/workers/WorkerThread.h"
 
+#include "bindings/core/v8/V8GCController.h"
 #include "core/inspector/ConsoleMessage.h"
 #include "core/workers/WorkerReportingProxy.h"
 #include "core/workers/WorkerThreadStartupData.h"
@@ -23,6 +24,7 @@ using testing::Mock;
 namespace blink {
 
 namespace {
+
 class MockWorkerLoaderProxyProvider : public WorkerLoaderProxyProvider {
 public:
     MockWorkerLoaderProxyProvider() { }
@@ -62,8 +64,8 @@ class FakeWorkerGlobalScope : public WorkerGlobalScope {
 public:
     typedef WorkerGlobalScope Base;
 
-    FakeWorkerGlobalScope(const KURL& url, const String& userAgent, WorkerThread* thread, const SecurityOrigin* starterOrigin, PassOwnPtrWillBeRawPtr<WorkerClients> workerClients)
-        : WorkerGlobalScope(url, userAgent, thread, monotonicallyIncreasingTime(), starterOrigin, workerClients)
+    FakeWorkerGlobalScope(const KURL& url, const String& userAgent, WorkerThread* thread, PassOwnPtr<SecurityOrigin::PrivilegeData> starterOriginPrivilegeData, PassOwnPtrWillBeRawPtr<WorkerClients> workerClients)
+        : WorkerGlobalScope(url, userAgent, thread, monotonicallyIncreasingTime(), starterOriginPrivilegeData, workerClients)
         , m_thread(thread)
     {
     }
@@ -109,12 +111,15 @@ public:
     {
         return *m_thread;
     }
-
-    MOCK_METHOD1(doIdleGc, bool(double deadlineSeconds));
+    void willDestroyIsolate() override
+    {
+        V8GCController::collectAllGarbageForTesting(v8::Isolate::GetCurrent());
+        WorkerThread::willDestroyIsolate();
+    }
 
     PassRefPtrWillBeRawPtr<WorkerGlobalScope> createWorkerGlobalScope(PassOwnPtr<WorkerThreadStartupData> startupData) override
     {
-        return adoptRefWillBeNoop(new FakeWorkerGlobalScope(startupData->m_scriptURL, startupData->m_userAgent, this, startupData->m_starterOrigin, startupData->m_workerClients.release()));
+        return adoptRefWillBeNoop(new FakeWorkerGlobalScope(startupData->m_scriptURL, startupData->m_userAgent, this, startupData->m_starterOriginPrivilegeData.release(), startupData->m_workerClients.release()));
     }
 
     void waitUntilScriptLoaded()
@@ -137,7 +142,7 @@ void notifyScriptLoadedEventToWorkerThreadForTest(WorkerThread* thread)
     static_cast<WorkerThreadForTest*>(thread)->scriptLoaded();
 }
 
-class WakeupTask : public WebThread::Task {
+class WakeupTask : public WebTaskRunner::Task {
 public:
     WakeupTask() { }
 
@@ -146,7 +151,7 @@ public:
     void run() override { }
 };
 
-class PostDelayedWakeupTask : public WebThread::Task {
+class PostDelayedWakeupTask : public WebTaskRunner::Task {
 public:
     PostDelayedWakeupTask(WebScheduler* scheduler, long long delay) : m_scheduler(scheduler), m_delay(delay) { }
 
@@ -154,14 +159,14 @@ public:
 
     void run() override
     {
-        m_scheduler->postTimerTask(FROM_HERE, new WakeupTask(), m_delay);
+        m_scheduler->timerTaskRunner()->postDelayedTask(FROM_HERE, new WakeupTask(), m_delay);
     }
 
     WebScheduler* m_scheduler; // Not owned.
     long long m_delay;
 };
 
-class SignalTask : public WebThread::Task {
+class SignalTask : public WebTaskRunner::Task {
 public:
     SignalTask(WebWaitableEvent* completionEvent) : m_completionEvent(completionEvent) { }
 
@@ -254,7 +259,7 @@ TEST_F(WorkerThreadTest, StartAndStopImmediately)
 {
     EXPECT_CALL(*m_mockWorkerReportingProxy, workerGlobalScopeStarted(_))
         .Times(AtMost(1));
-    EXPECT_CALL(*m_mockWorkerReportingProxy, didEvaluateWorkerScript(true))
+    EXPECT_CALL(*m_mockWorkerReportingProxy, didEvaluateWorkerScript(_))
         .Times(AtMost(1));
     EXPECT_CALL(*m_mockWorkerReportingProxy, workerThreadTerminated())
         .Times(AtMost(1));
@@ -280,60 +285,6 @@ TEST_F(WorkerThreadTest, StartAndStopOnScriptLoaded)
         .Times(AtMost(1));
     startWithSourceCode(source);
     m_workerThread->waitUntilScriptLoaded();
-    m_workerThread->terminateAndWait();
-}
-
-class RepeatingTask : public WebThread::Task {
-public:
-    RepeatingTask(WebScheduler* scheduler, WebWaitableEvent* completion)
-        : RepeatingTask(scheduler, completion, 0) { }
-
-    ~RepeatingTask() override { }
-
-    void run() override
-    {
-        m_taskCount++;
-        if (m_taskCount == 10)
-            m_completion->signal();
-
-        m_scheduler->postTimerTask(
-            FROM_HERE, new RepeatingTask(m_scheduler, m_completion, m_taskCount), 0ul);
-        m_scheduler->postLoadingTask(FROM_HERE, new WakeupTask());
-
-    }
-
-private:
-    RepeatingTask(WebScheduler* scheduler, WebWaitableEvent* completion, int taskCount)
-        : m_scheduler(scheduler)
-        , m_completion(completion)
-        , m_taskCount(taskCount)
-        { }
-
-    WebScheduler* m_scheduler; // Not owned.
-    WebWaitableEvent* m_completion;
-    int m_taskCount;
-};
-
-TEST_F(WorkerThreadTest, GcDoesNotOccurWhenNotIdle)
-{
-    OwnPtr<WebWaitableEvent> completion = adoptPtr(Platform::current()->createWaitableEvent());
-
-    EXPECT_CALL(*m_workerThread, doIdleGc(_)).Times(0);
-
-    expectWorkerLifetimeReportingCalls();
-    start();
-    waitForInit();
-
-    WebScheduler* scheduler = m_workerThread->backingThread().platformThread().scheduler();
-
-    // Post a repeating task that should prevent any GC from happening.
-    scheduler->postLoadingTask(FROM_HERE, new RepeatingTask(scheduler, completion.get()));
-
-    completion->wait();
-
-    // Make sure doIdleGc has not been called by this stage.
-    Mock::VerifyAndClearExpectations(m_workerThread.get());
-
     m_workerThread->terminateAndWait();
 }
 

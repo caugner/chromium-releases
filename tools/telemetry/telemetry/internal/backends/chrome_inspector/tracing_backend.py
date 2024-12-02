@@ -5,6 +5,7 @@
 import json
 import logging
 import socket
+import sys
 import time
 
 from telemetry import decorators
@@ -33,8 +34,71 @@ class TracingUnexpectedResponseException(Exception):
   pass
 
 
+
+def IsInspectorWebsocketAvailable(port):
+  """Returns True if inspector websocket is available on the given port."""
+  inspector_websocket_instance = inspector_websocket.InspectorWebsocket()
+  try:
+    return _IsInspectorWebsocketAvailable(inspector_websocket_instance, port)
+  finally:
+    inspector_websocket_instance.Disconnect()
+
+def _IsInspectorWebsocketAvailable(inspector_websocket_instance, port):
+  try:
+    inspector_websocket_instance.Connect(
+        'ws://127.0.0.1:%i/devtools/browser' % port)
+  except websocket.WebSocketException:
+    return False
+  except socket.error:
+    return False
+  except Exception as e:
+    sys.stderr.write('Unidentified exception while checking if wesocket is'
+                     'available on port %i. Exception message: %s\n' %
+                     (port, e.message))
+    return False
+  else:
+    return True
+
+
+class _DevToolsStreamReader(object):
+  def __init__(self, inspector_socket, stream_handle):
+    self._inspector_websocket = inspector_socket
+    self._handle = stream_handle
+    self._callback = None
+    self._data = None
+
+  def Read(self, callback):
+    # Do not allow the instance of this class to be reused, as
+    # we only read data sequentially at the moment, so a stream
+    # can only be read once.
+    assert not self._callback
+    self._data = ''
+    self._callback = callback
+    self._ReadChunkFromStream()
+
+  def _ReadChunkFromStream(self):
+    # Limit max block size to avoid fragmenting memory in sock.recv(),
+    # (see https://github.com/liris/websocket-client/issues/163 for details)
+    req = {'method': 'IO.read', 'params': {
+        'handle': self._handle, 'size': 16384}}
+    self._inspector_websocket.AsyncRequest(req, self._GotChunkFromStream)
+
+  def _GotChunkFromStream(self, response):
+    if 'error' in response:
+      raise TracingUnrecoverableException(
+          'Reading trace failed: %s' % response['error']['message'])
+    result = response['result']
+    self._data += result['data']
+    if not result.get('eof', False):
+      self._ReadChunkFromStream()
+      return
+    req = {'method': 'IO.close', 'params': {'handle': self._handle}}
+    self._inspector_websocket.SendAndIgnoreResponse(req)
+    self._callback(self._data)
+
+
 class TracingBackend(object):
-  def __init__(self, devtools_port):
+  def __init__(self, devtools_port, is_tracing_running=False):
     self._inspector_websocket = inspector_websocket.InspectorWebsocket()
     self._inspector_websocket.RegisterDomain(
         'Tracing', self._NotificationHandler)
@@ -42,7 +106,7 @@ class TracingBackend(object):
     self._inspector_websocket.Connect(
         'ws://127.0.0.1:%i/devtools/browser' % devtools_port)
     self._trace_events = []
-    self._is_tracing_running = False
+    self._is_tracing_running = is_tracing_running
     self._has_received_all_tracing_data = False
 
   @property
@@ -66,7 +130,8 @@ class TracingBackend(object):
     req = {
       'method': 'Tracing.start',
       'params': {
-        'options': trace_options.GetTraceOptionsStringForChromeDevtool()
+        'options': trace_options.GetTraceOptionsStringForChromeDevtool(),
+        'transferMode': 'ReturnAsStream'
       }
     }
     if custom_categories:
@@ -130,6 +195,45 @@ class TracingBackend(object):
     result = response['result']
     return result['dumpGuid'] if result['success'] else None
 
+  def SetMemoryPressureNotificationsSuppressed(self, suppressed, timeout=30):
+    """Enable/disable suppressing memory pressure notifications.
+
+    Args:
+      suppressed: If true, memory pressure notifications will be suppressed.
+      timeout: The timeout in seconds.
+
+    Raises:
+      TracingTimeoutException: If more than |timeout| seconds has passed
+      since the last time any data is received.
+      TracingUnrecoverableException: If there is a websocket error.
+      TracingUnexpectedResponseException: If the response contains an error
+      or does not contain the expected result.
+    """
+    request = {
+      'method': 'Memory.setPressureNotificationsSuppressed',
+      'params': {
+        'suppressed': suppressed
+      }
+    }
+    try:
+      response = self._inspector_websocket.SyncRequest(request, timeout)
+    except websocket.WebSocketTimeoutException:
+      raise TracingTimeoutException
+    except (socket.error, websocket.WebSocketException,
+            inspector_websocket.WebSocketDisconnected):
+      raise TracingUnrecoverableException
+
+    if 'error' in response:
+      code = response['error']['code']
+      if code == inspector_websocket.InspectorWebsocket.METHOD_NOT_FOUND_CODE:
+        logging.warning('Memory.setPressureNotificationsSuppressed DevTools '
+                        'method not supported by the browser')
+      else:
+        raise TracingUnexpectedResponseException(
+            'Inspector returned unexpected response for '
+            'Memory.setPressureNotificationsSuppressed:\n' +
+            json.dumps(response, indent=2))
+
   def _CollectTracingData(self, timeout):
     """Collects tracing data. Assumes that Tracing.end has already been sent.
 
@@ -165,15 +269,22 @@ class TracingBackend(object):
   def _NotificationHandler(self, res):
     if 'Tracing.dataCollected' == res.get('method'):
       value = res.get('params', {}).get('value')
-      if type(value) in [str, unicode]:
-        self._trace_events.append(value)
-      elif type(value) is list:
-        self._trace_events.extend(value)
-      else:
-        logging.warning('Unexpected type in tracing data')
+      self._trace_events.extend(value)
     elif 'Tracing.tracingComplete' == res.get('method'):
-      self._has_received_all_tracing_data = True
-      return True
+      stream_handle = res.get('params', {}).get('stream')
+      if not stream_handle:
+        self._has_received_all_tracing_data = True
+        return
+
+      if self._trace_events:
+        raise TracingUnexpectedResponseException(
+            'Got both dataCollected events and a stream from server')
+      reader = _DevToolsStreamReader(self._inspector_websocket, stream_handle)
+      reader.Read(self._ReceivedAllTraceDataFromStream)
+
+  def _ReceivedAllTraceDataFromStream(self, data):
+    self._trace_events = json.loads(data)
+    self._has_received_all_tracing_data = True
 
   def Close(self):
     self._inspector_websocket.Disconnect()

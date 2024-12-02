@@ -26,13 +26,12 @@ Polymer({
 
   properties: {
     /**
-     * The network state associated with the element.
-     * @type {?CrOnc.NetworkStateProperties}
+     * The network properties associated with the element.
+     * @type {!CrOnc.NetworkProperties|undefined}
      */
-    networkState: {
+    networkProperties: {
       type: Object,
-      value: null,
-      observer: 'networkStateChanged_'
+      observer: 'networkPropertiesChanged_'
     },
 
     /** Set to true when a PUK is required to unlock the SIM. */
@@ -54,16 +53,16 @@ Polymer({
 
   sendSimLockEnabled_: false,
 
-  /** Polymer networkState changed method. */
-  networkStateChanged_: function() {
-    if (!this.networkState || !this.networkState.Cellular)
+  /** Polymer networkProperties changed method. */
+  networkPropertiesChanged_: function() {
+    if (!this.networkProperties || !this.networkProperties.Cellular)
       return;
-    var simLockStatus = this.networkState.Cellular.SIMLockStatus;
+    var simLockStatus = this.networkProperties.Cellular.SIMLockStatus;
     this.pukRequired =
-        simLockStatus && simLockStatus.LockType == CrOnc.LockType.PUK;
+        !!simLockStatus && simLockStatus.LockType == CrOnc.LockType.PUK;
   },
 
-  /** Polymer networkState changed method. */
+  /** Polymer networkProperties changed method. */
   pukRequiredChanged_: function() {
     if (this.$.unlockPukDialog.opened) {
       if (this.pukRequired)
@@ -99,9 +98,9 @@ Polymer({
     this.$.unlockPuk.focus();
   },
 
-  /** Polymer networkState changed method. */
+  /** Polymer networkProperties changed method. */
   onSimLockEnabledChange_: function(event) {
-    if (!this.networkState || !this.networkState.Cellular)
+    if (!this.networkProperties || !this.networkProperties.Cellular)
       return;
     this.sendSimLockEnabled_ = event.target.checked;
     this.error = ErrorType.NONE;
@@ -124,7 +123,7 @@ Polymer({
    * @private
    */
   sendEnterPin_: function(event) {
-    var guid = this.networkState && this.networkState.GUID;
+    var guid = this.networkProperties && this.networkProperties.GUID;
     if (!guid)
       return;
 
@@ -132,10 +131,10 @@ Polymer({
     if (!this.validatePin_(pin))
       return;
 
-    var /** @type {?CrOnc.CellularSimState} */ simState = {
-      requirePin: this.sendSimLockEnabled_,
-      currentPin: pin
-    };
+    var simState = /** @type {!CrOnc.CellularSimState} */({
+      currentPin: pin,
+      requirePin: this.sendSimLockEnabled_
+    });
     chrome.networkingPrivate.setCellularSimState(guid, simState, function() {
       if (chrome.runtime.lastError) {
         this.error = ErrorType.INCORRECT_PIN;
@@ -152,7 +151,7 @@ Polymer({
    * @private
    */
   onChangePin_: function(event) {
-    if (!this.networkState || !this.networkState.Cellular)
+    if (!this.networkProperties || !this.networkProperties.Cellular)
       return;
     this.error = ErrorType.NONE;
     this.$.changePinDialog.open();
@@ -176,7 +175,7 @@ Polymer({
    * @private
    */
   sendChangePin_: function(event) {
-    var guid = this.networkState && this.networkState.GUID;
+    var guid = this.networkProperties && this.networkProperties.GUID;
     if (!guid)
       return;
 
@@ -184,11 +183,11 @@ Polymer({
     if (!this.validatePin_(newPin, this.$.changePinNew2.value))
       return;
 
-    var /** @type {?CrOnc.CellularSimState} */ simState = {
+    var simState = /** @type {!CrOnc.CellularSimState} */({
       requirePin: true,
       currentPin: this.$.changePinOld.value,
       newPin: newPin
-    };
+    });
     chrome.networkingPrivate.setCellularSimState(guid, simState, function() {
       if (chrome.runtime.lastError) {
         this.error = ErrorType.INCORRECT_PIN;
@@ -225,7 +224,7 @@ Polymer({
    * @private
    */
   sendUnlockPin_: function(event) {
-    var guid = this.networkState && this.networkState.GUID;
+    var guid = this.networkProperties && this.networkProperties.GUID;
     if (!guid)
       return;
     var pin = this.$.unlockPin.value;
@@ -270,7 +269,7 @@ Polymer({
    * @private
    */
   sendUnlockPuk_: function(event) {
-    var guid = this.networkState && this.networkState.GUID;
+    var guid = this.networkProperties && this.networkProperties.GUID;
     if (!guid)
       return;
 
@@ -292,22 +291,22 @@ Polymer({
   },
 
   /**
-   * @param {?CrOnc.NetworkStateProperties} state
+   * @param {!CrOnc.NetworkProperties|undefined} networkProperties
    * @return {boolean} True if the Cellular SIM is locked.
    * @private
    */
-  isSimLocked_: function(state) {
-    return state && CrOnc.isSimLocked(state);
+  isSimLocked_: function(networkProperties) {
+    return !!networkProperties && CrOnc.isSimLocked(networkProperties);
   },
 
   /**
-   * @param {?CrOnc.NetworkStateProperties} state
+   * @param {!CrOnc.NetworkProperties|undefined} networkProperties
    * @return {string} The message for the number of retries left.
    * @private
    */
-  getRetriesLeftMsg_: function(state) {
+  getRetriesLeftMsg_: function(networkProperties) {
     var retriesLeft =
-        this.get('Cellular.SIMLockStatus.RetriesLeft', state) || 0;
+        this.get('Cellular.SIMLockStatus.RetriesLeft', networkProperties) || 0;
     // TODO(stevenjb): Localize
     return 'Retries left: ' + retriesLeft.toString();
   },
@@ -318,7 +317,7 @@ Polymer({
    * @private
    */
   showError_: function(error) {
-    return error && error != ErrorType.NONE;
+    return !!error && error != ErrorType.NONE;
   },
 
   /**
@@ -342,20 +341,20 @@ Polymer({
   },
 
   /**
-   * Checks whether |pin1| is of the proper length and if pin2 is not
-   * undefined, whether pin1 and pin2 match. On any failure, sets |this.error|
-   * and returns false.
+   * Checks whether |pin1| is of the proper length and if opt_pin2 is not
+   * undefined, whether pin1 and opt_pin2 match. On any failure, sets
+   * |this.error| and returns false.
    * @param {string} pin1
-   * @param {string|undefined} pin2
+   * @param {string=} opt_pin2
    * @return {boolean} True if the pins match and are of minimum length.
    * @private
    */
-  validatePin_: function(pin1, pin2) {
+  validatePin_: function(pin1, opt_pin2) {
     if (pin1.length < PIN_MIN_LENGTH) {
       this.error = ErrorType.INVALID_PIN;
       return false;
     }
-    if (pin2 != undefined && pin1 != pin2) {
+    if (opt_pin2 != undefined && pin1 != opt_pin2) {
       this.error = ErrorType.MISMATCHED_PIN;
       return false;
     }

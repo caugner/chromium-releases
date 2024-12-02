@@ -132,7 +132,7 @@ def write_ninja(path, options):
       cflags.extend(['-O2', '-g0'])
 
     cflags.extend(['-D_FILE_OFFSET_BITS=64', '-pthread', '-pipe'])
-    cflags_cc.extend(['-std=gnu++11', '-Wno-c++11-narrowing'])
+    cflags_cc.extend(['-std=c++11', '-Wno-c++11-narrowing'])
 
   static_libraries = {
       'base': {'sources': [], 'tool': 'cxx'},
@@ -242,12 +242,12 @@ def write_ninja(path, options):
       'base/time/time.cc',
       'base/timer/elapsed_timer.cc',
       'base/timer/timer.cc',
-      'base/trace_event/malloc_dump_provider.cc',
       'base/trace_event/memory_allocator_dump.cc',
       'base/trace_event/memory_allocator_dump_guid.cc',
       'base/trace_event/memory_dump_manager.cc',
       'base/trace_event/memory_dump_request_args.cc',
       'base/trace_event/memory_dump_session_state.cc',
+      'base/trace_event/memory_profiler_allocation_context.cc',
       'base/trace_event/process_memory_dump.cc',
       'base/trace_event/process_memory_maps.cc',
       'base/trace_event/process_memory_maps_dump_provider.cc',
@@ -337,6 +337,7 @@ def write_ninja(path, options):
         'base/strings/sys_string_conversions_posix.cc',
         'base/sys_info_linux.cc',
         'base/threading/platform_thread_linux.cc',
+        'base/trace_event/malloc_dump_provider.cc',
     ])
     static_libraries['libevent']['include_dirs'].extend([
         os.path.join(SRC_ROOT, 'third_party', 'libevent', 'linux')
@@ -351,6 +352,8 @@ def write_ninja(path, options):
         'base/base_paths_mac.mm',
         'base/files/file_util_mac.mm',
         'base/mac/bundle_locations.mm',
+        'base/mac/call_with_eh_frame.cc',
+        'base/mac/call_with_eh_frame_asm.S',
         'base/mac/foundation_util.mm',
         'base/mac/mach_logging.cc',
         'base/mac/scoped_mach_port.cc',
@@ -358,6 +361,7 @@ def write_ninja(path, options):
         'base/message_loop/message_pump_mac.mm',
         'base/process/process_handle_mac.cc',
         'base/process/process_iterator_mac.cc',
+        'base/process/process_metrics_mac.cc',
         'base/strings/sys_string_conversions_mac.mm',
         'base/time/time_mac.cc',
         'base/threading/platform_thread_mac.mm',

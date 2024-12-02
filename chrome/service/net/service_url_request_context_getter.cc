@@ -97,9 +97,9 @@ ServiceURLRequestContextGetter::ServiceURLRequestContextGetter()
     : user_agent_(MakeUserAgentForServiceProcess()),
       network_task_runner_(g_service_process->io_task_runner()) {
   DCHECK(g_service_process);
-  proxy_config_service_.reset(net::ProxyService::CreateSystemProxyConfigService(
+  proxy_config_service_ = net::ProxyService::CreateSystemProxyConfigService(
       g_service_process->io_task_runner(),
-      g_service_process->file_task_runner()));
+      g_service_process->file_task_runner());
 }
 
 net::URLRequestContext*
@@ -108,9 +108,9 @@ ServiceURLRequestContextGetter::GetURLRequestContext() {
     net::URLRequestContextBuilder builder;
     builder.set_user_agent(user_agent_);
     builder.set_accept_language("en-us,fr");
-    builder.set_proxy_config_service(proxy_config_service_.release());
+    builder.set_proxy_config_service(proxy_config_service_.Pass());
     builder.set_throttling_enabled(true);
-    url_request_context_.reset(builder.Build());
+    url_request_context_ = builder.Build().Pass();
   }
   return url_request_context_.get();
 }

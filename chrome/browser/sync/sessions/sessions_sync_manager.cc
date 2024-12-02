@@ -6,14 +6,16 @@
 
 #include "base/metrics/field_trial.h"
 #include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/favicon/favicon_service_factory.h"
+#include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search/search.h"
 #include "chrome/browser/sync/glue/synced_tab_delegate.h"
-#include "chrome/browser/sync/glue/synced_window_delegate.h"
-#include "chrome/browser/sync/sessions/synced_window_delegates_getter.h"
 #include "chrome/common/url_constants.h"
 #include "components/sessions/content/content_serialized_navigation_builder.h"
+#include "components/sync_driver/glue/synced_window_delegate.h"
 #include "components/sync_driver/local_device_info_provider.h"
+#include "components/sync_driver/sessions/synced_window_delegates_getter.h"
 #include "content/public/browser/favicon_status.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_details.h"
@@ -73,8 +75,15 @@ bool SessionsRecencyComparator(const sync_driver::SyncedSession* s1,
 SessionsSyncManager::SessionsSyncManager(
     Profile* profile,
     LocalDeviceInfoProvider* local_device,
-    scoped_ptr<LocalSessionEventRouter> router)
-    : favicon_cache_(profile, kMaxSyncFavicons),
+    scoped_ptr<LocalSessionEventRouter> router,
+    scoped_ptr<SyncedWindowDelegatesGetter> synced_window_getter)
+    : favicon_cache_(FaviconServiceFactory::GetForProfile(
+                         profile,
+                         ServiceAccessType::EXPLICIT_ACCESS),
+                     HistoryServiceFactory::GetForProfile(
+                         profile,
+                         ServiceAccessType::EXPLICIT_ACCESS),
+                     kMaxSyncFavicons),
       local_tab_pool_out_of_sync_(true),
       sync_prefs_(profile->GetPrefs()),
       profile_(profile),
@@ -82,8 +91,8 @@ SessionsSyncManager::SessionsSyncManager(
       local_session_header_node_id_(TabNodePool::kInvalidTabNodeID),
       stale_session_threshold_days_(kDefaultStaleSessionThresholdDays),
       local_event_router_(router.Pass()),
-      synced_window_getter_(new SyncedWindowDelegatesGetter()) {
-}
+      synced_window_getter_(synced_window_getter.Pass()),
+      page_revisit_broadcaster_(this, profile) {}
 
 LocalSessionEventRouter::~LocalSessionEventRouter() {}
 
@@ -348,6 +357,8 @@ void SessionsSyncManager::AssociateTab(SyncedTabDelegate* const tab,
   if (new_url != tab_link->url()) {
     tab_link->set_url(new_url);
     favicon_cache_.OnFaviconVisited(new_url, GetCurrentFaviconURL(*tab));
+    page_revisit_broadcaster_.OnPageVisit(
+        new_url, tab->GetCurrentEntryMaybePending()->GetTransitionType());
   }
 
   session_tracker_.GetSession(current_machine_tag())->modified_time =
@@ -529,13 +540,16 @@ syncer::SyncError SessionsSyncManager::ProcessSyncChanges(
           // get deleted.
           DisassociateForeignSession(session.session_tag());
         }
-        continue;
+        break;
       case syncer::SyncChange::ACTION_ADD:
       case syncer::SyncChange::ACTION_UPDATE:
         if (current_machine_tag() == session.session_tag()) {
           // We should only ever receive a change to our own machine's session
           // info if encryption was turned on. In that case, the data is still
           // the same, so we can ignore.
+          // TODO(skym): Is it really safe to return here? Why not continue?
+          // Couldn't there be multiple SessionSpecifics in the SyncChangeList
+          // that contain different session tags?
           LOG(WARNING) << "Dropping modification to local session.";
           return syncer::SyncError();
         }
@@ -586,6 +600,8 @@ bool SessionsSyncManager::InitFromSyncModel(
   for (syncer::SyncDataList::const_iterator it = sync_data.begin();
        it != sync_data.end();
        ++it) {
+    // TODO(skym): Why don't we ever look at data.change_type()? Why is this
+    // code path so much different from ProcessSyncChanges?
     const syncer::SyncData& data = *it;
     DCHECK(data.GetSpecifics().has_session());
     const sync_pb::SessionSpecifics& specifics = data.GetSpecifics().session();
@@ -633,9 +649,9 @@ void SessionsSyncManager::UpdateTrackerWithForeignSession(
   sync_driver::SyncedSession* foreign_session =
       session_tracker_.GetSession(foreign_session_tag);
   if (specifics.has_header()) {
-    // Read in the header data for this foreign session.
-    // Header data contains window information and ordered tab id's for each
-    // window.
+    // Read in the header data for this foreign session. Header data is
+    // essentially a collection of windows, each of which has an ordered id list
+    // for their tabs.
 
     if (!IsValidSessionHeader(specifics.header())) {
       LOG(WARNING) << "Ignoring foreign session node with invalid header "

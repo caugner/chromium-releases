@@ -7,30 +7,30 @@
 
 #include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
-#include "components/view_manager/public/cpp/view_manager_delegate.h"
-#include "components/view_manager/public/cpp/view_observer.h"
-#include "mandoline/tab/public/cpp/web_view.h"
-#include "mandoline/tab/public/interfaces/web_view.mojom.h"
+#include "components/mus/public/cpp/view_observer.h"
+#include "components/mus/public/cpp/view_tree_delegate.h"
+#include "components/mus/public/interfaces/view_tree_host.mojom.h"
+#include "components/web_view/public/cpp/web_view.h"
+#include "components/web_view/public/interfaces/web_view.mojom.h"
 // TODO(beng): move this file somewhere common.
 #include "mandoline/ui/desktop_ui/public/interfaces/launch_handler.mojom.h"
 #include "mojo/application/public/cpp/application_delegate.h"
 #include "mojo/application/public/cpp/interface_factory.h"
 #include "mojo/common/weak_binding_set.h"
 
-namespace mojo {
+namespace mus {
 class View;
-class ViewManagerInit;
 }
 
 namespace mandoline {
 
-class PhoneBrowserApplicationDelegate :
-    public mojo::ApplicationDelegate,
-    public LaunchHandler,
-    public mojo::ViewManagerDelegate,
-    public mojo::ViewObserver,
-    public web_view::mojom::WebViewClient,
-    public mojo::InterfaceFactory<LaunchHandler> {
+class PhoneBrowserApplicationDelegate
+    : public mojo::ApplicationDelegate,
+      public LaunchHandler,
+      public mus::ViewTreeDelegate,
+      public mus::ViewObserver,
+      public web_view::mojom::WebViewClient,
+      public mojo::InterfaceFactory<LaunchHandler> {
  public:
   PhoneBrowserApplicationDelegate();
   ~PhoneBrowserApplicationDelegate() override;
@@ -44,29 +44,35 @@ class PhoneBrowserApplicationDelegate :
   // Overridden from LaunchHandler:
   void LaunchURL(const mojo::String& url) override;
 
-  // Overridden from mojo::ViewManagerDelegate:
-  void OnEmbed(mojo::View* root) override;
-  void OnViewManagerDestroyed(mojo::ViewManager* view_manager) override;
+  // Overridden from mus::ViewTreeDelegate:
+  void OnEmbed(mus::View* root) override;
+  void OnConnectionLost(mus::ViewTreeConnection* connection) override;
 
-  // Overridden from mojo::ViewObserver:
-  void OnViewBoundsChanged(mojo::View* view,
+  // Overridden from mus::ViewObserver:
+  void OnViewBoundsChanged(mus::View* view,
                            const mojo::Rect& old_bounds,
                            const mojo::Rect& new_bounds) override;
 
   // Overridden from web_view::mojom::WebViewClient:
-  void TopLevelNavigate(mojo::URLRequestPtr request) override;
-  void LoadingStateChanged(bool is_loading) override;
-  void ProgressChanged(double progress) override;
+  void TopLevelNavigateRequest(mojo::URLRequestPtr request) override;
+  void TopLevelNavigationStarted(const mojo::String& url) override;
+  void LoadingStateChanged(bool is_loading, double progress) override;
+  void BackForwardChanged(web_view::mojom::ButtonState back_button,
+                          web_view::mojom::ButtonState forward_button) override;
+  void TitleChanged(const mojo::String& title) override;
 
   // Overridden from mojo::InterfaceFactory<LaunchHandler>:
   void Create(mojo::ApplicationConnection* connection,
               mojo::InterfaceRequest<LaunchHandler> request) override;
 
   mojo::ApplicationImpl* app_;
-  scoped_ptr<mojo::ViewManagerInit> init_;
+  mojo::ViewTreeHostPtr host_;
 
-  mojo::View* content_;
+  mus::View* root_;
+  mus::View* content_;
   web_view::WebView web_view_;
+
+  mojo::String default_url_;
 
   mojo::WeakBindingSet<LaunchHandler> launch_handler_bindings_;
 

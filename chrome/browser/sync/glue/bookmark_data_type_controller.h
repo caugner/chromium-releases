@@ -9,9 +9,11 @@
 
 #include "base/compiler_specific.h"
 #include "base/scoped_observer.h"
-#include "chrome/browser/sync/glue/frontend_data_type_controller.h"
 #include "components/bookmarks/browser/base_bookmark_model_observer.h"
 #include "components/history/core/browser/history_service_observer.h"
+#include "components/sync_driver/frontend_data_type_controller.h"
+
+class ProfileSyncService;
 
 namespace browser_sync {
 
@@ -20,9 +22,7 @@ class BookmarkDataTypeController : public FrontendDataTypeController,
                                    public bookmarks::BaseBookmarkModelObserver,
                                    public history::HistoryServiceObserver {
  public:
-  BookmarkDataTypeController(ProfileSyncComponentsFactory* profile_sync_factory,
-                             Profile* profile,
-                             ProfileSyncService* sync_service);
+  explicit BookmarkDataTypeController(sync_driver::SyncClient* sync_client);
 
   // FrontendDataTypeController:
   syncer::ModelType type() const override;

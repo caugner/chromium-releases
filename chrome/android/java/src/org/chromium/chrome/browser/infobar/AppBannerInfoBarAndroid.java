@@ -16,6 +16,7 @@ import android.widget.ImageView;
 import android.widget.RatingBar;
 import android.widget.TextView;
 
+import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.ApplicationStatus;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.chrome.R;
@@ -70,7 +71,7 @@ public class AppBannerInfoBarAndroid extends ConfirmInfoBar implements View.OnCl
         mIconView = layout.getIcon();
 
         Resources res = getContext().getResources();
-        int iconSize = res.getDimensionPixelSize(R.dimen.app_banner_icon_size);
+        int iconSize = res.getDimensionPixelSize(R.dimen.webapp_home_screen_icon_size);
         int iconSpacing = res.getDimensionPixelSize(R.dimen.app_banner_icon_spacing);
         layout.setIconSizeAndSpacing(iconSize, iconSize, iconSpacing);
 
@@ -90,7 +91,8 @@ public class AppBannerInfoBarAndroid extends ConfirmInfoBar implements View.OnCl
             layout.setCustomViewInButtonRow(playLogo);
 
             ratingView.setRating(mAppData.rating());
-            layout.getPrimaryButton().setButtonColor(getContext().getResources().getColor(
+            layout.getPrimaryButton().setButtonColor(ApiCompatibilityUtils.getColor(
+                    getContext().getResources(),
                     R.color.app_banner_install_button_bg));
             mTitleView.setContentDescription(context.getString(
                     R.string.app_banner_view_native_app_accessibility, mAppTitle,

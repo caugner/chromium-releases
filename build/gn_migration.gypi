@@ -249,7 +249,7 @@
         }],
         ['use_ash==1', {
           'dependencies': [
-            '../ash/ash.gyp:ash_shell',
+            '../ash/ash.gyp:ash_shell_with_content',
             '../ash/ash.gyp:ash_unittests',
           ],
         }],
@@ -289,10 +289,6 @@
             '../base/base.gyp:chromium_android_linker',
             '../breakpad/breakpad.gyp:dump_syms',
             '../build/android/rezip.gyp:rezip_apk_jar',
-            '../chrome/chrome.gyp:chrome_public_apk',
-            '../chrome/chrome.gyp:chrome_public_test_apk',
-            '../chrome/chrome.gyp:chrome_shell_apk',
-            '../chrome/chrome.gyp:chromedriver_webview_shell_apk',
             #"//clank" TODO(GYP) - conditional somehow?
             '../tools/imagediff/image_diff.gyp:image_diff#host',
             '../tools/telemetry/telemetry.gyp:bitmaptools#host',
@@ -353,6 +349,13 @@
             '../tools/gn/gn.gyp:gn_unittests',
             '../ui/app_list/app_list.gyp:app_list_unittests',
             '../url/url.gyp:url_unittests',
+          ],
+        }],
+        ['OS=="android" and chromecast==0', {
+          'dependencies': [
+            '../chrome/chrome.gyp:chrome_public_apk',
+            '../chrome/chrome.gyp:chrome_public_test_apk',
+            '../chrome/chrome.gyp:chromedriver_webview_shell_apk',
           ],
         }],
         ['OS=="android" or OS=="linux"', {
@@ -419,7 +422,7 @@
 
             # TODO(GYP): remove these when the corresponding root targets work.
             #"//cc/blink",
-            #"//components/ui/zoom:ui_zoom",
+            #"//components/ui/zoom",
             #"//content",
             #"//content/test:test_support",
             #"//device/battery",
@@ -513,6 +516,7 @@
             '../google_apis/google_apis.gyp:google_apis_unittests_run',
             '../gpu/gpu.gyp:gpu_unittests_run',
             '../ipc/ipc.gyp:ipc_tests_run',
+            '../media/blink/media_blink.gyp:media_blink_unittests_run',
             '../media/cast/cast.gyp:cast_unittests_run',
             '../media/media.gyp:media_unittests_run',
             '../media/midi/midi.gyp:midi_unittests_run',
@@ -522,9 +526,15 @@
             '../skia/skia_tests.gyp:skia_unittests_run',
             '../sql/sql.gyp:sql_unittests_run',
             '../sync/sync.gyp:sync_unit_tests_run',
+            '../third_party/WebKit/Source/platform/blink_platform_tests.gyp:blink_heap_unittests_run',
+            '../third_party/WebKit/Source/platform/blink_platform_tests.gyp:blink_platform_unittests_run',
+            '../third_party/WebKit/Source/web/web_tests.gyp:webkit_unit_tests_run',
+            '../third_party/WebKit/Source/wtf/wtf_tests.gyp:wtf_unittests_run',
             '../third_party/cacheinvalidation/cacheinvalidation.gyp:cacheinvalidation_unittests_run',
             '../third_party/mojo/mojo_edk_tests.gyp:mojo_public_bindings_unittests_run',
             '../third_party/mojo/mojo_edk_tests.gyp:mojo_public_environment_unittests_run',
+            '../third_party/mojo/mojo_edk_tests.gyp:mojo_public_system_unittests_run',
+            '../third_party/mojo/mojo_edk_tests.gyp:mojo_public_utility_unittests_run',
             '../tools/gn/gn.gyp:gn_unittests_run',
             '../ui/accessibility/accessibility.gyp:accessibility_unittests_run',
             '../ui/app_list/app_list.gyp:app_list_unittests_run',
@@ -641,7 +651,6 @@
         ['OS=="win"', {
           'dependencies': [
             # TODO(GYP): All of these targets still need to be converted.
-            '../base/base.gyp:debug_message',
             '../chrome/chrome.gyp:app_shim',
             '../chrome/chrome.gyp:gcapi_dll',
             '../chrome/chrome.gyp:gcapi_test',

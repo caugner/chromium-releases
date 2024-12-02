@@ -110,7 +110,6 @@ CommandUtil.getElementVolumeInfo = function(element, fileManager) {
 /**
  * @param {!FileManager} fileManager
  * @return {VolumeInfo}
- * @private
  */
 CommandUtil.getCurrentVolumeInfo = function(fileManager) {
   var currentDirEntry = fileManager.directoryModel.getCurrentDirEntry();
@@ -184,7 +183,7 @@ CommandUtil.getPinTargetEntries = function() {
     hasDirectory = hasDirectory || entry.isDirectory;
     if (!entry || hasDirectory)
       return false;
-    var metadata = fileManager.getMetadataModel().getCache(
+    var metadata = fileManager.metadataModel.getCache(
         [entry], ['hosted', 'pinned'])[0];
     if (metadata.hosted)
       return false;
@@ -219,8 +218,10 @@ CommandUtil.forceDefaultHandler = function(node, commandId) {
     event.cancelBubble = true;
   });
   node.addEventListener('canExecute', function(event) {
-    if (event.command.id === commandId)
-      event.canExecute = document.queryCommandEnabled(event.command.id);
+    if (event.command.id !== commandId)
+      return;
+    event.canExecute = document.queryCommandEnabled(event.command.id);
+    event.command.setHidden(false);
   });
 };
 
@@ -285,6 +286,23 @@ CommandUtil.getOnlyOneSelectedDirectory = function(selection) {
   if (!selection.entries[0].isDirectory)
     return null;
   return /** @type {!DirectoryEntry} */(selection.entries[0]);
+};
+
+/**
+ * If entry is fake or root entry, we don't show menu item for it.
+ * @param {VolumeManagerWrapper} volumeManager
+ * @param {(!Entry|!FakeEntry)} entry Entry or a fake entry.
+ * @return {boolean} True if we should show menu item for the entry.
+ */
+CommandUtil.shouldShowMenuItemForEntry = function(volumeManager, entry) {
+  if (!volumeManager || util.isFakeEntry(entry))
+    return false;
+
+  var volumeInfo = volumeManager.getVolumeInfo(entry);
+  if (!volumeInfo)
+    return false;
+
+  return volumeInfo.displayRoot !== entry;
 };
 
 /**
@@ -401,8 +419,9 @@ CommandHandler.COMMANDS_['unmount'] = /** @type {Command} */ ({
           '', str('UNMOUNT_FAILED'), null, null, null);
     };
 
-    var volumeInfo = CommandUtil.getElementVolumeInfo(
-        event.target, fileManager);
+    var volumeInfo =
+        CommandUtil.getElementVolumeInfo(event.target, fileManager) ||
+        CommandUtil.getCurrentVolumeInfo(fileManager);
     if (!volumeInfo) {
       errorCallback();
       return;
@@ -418,8 +437,9 @@ CommandHandler.COMMANDS_['unmount'] = /** @type {Command} */ ({
    * @this {CommandHandler}
    */
   canExecute: function(event, fileManager) {
-    var volumeInfo = CommandUtil.getElementVolumeInfo(
-        event.target, fileManager);
+    var volumeInfo =
+        CommandUtil.getElementVolumeInfo(event.target, fileManager) ||
+        CommandUtil.getCurrentVolumeInfo(fileManager);
     if (!volumeInfo) {
       event.canExecute = false;
       event.command.setHidden(true);
@@ -497,86 +517,125 @@ CommandHandler.COMMANDS_['format'] = /** @type {Command} */ ({
  * Initiates new folder creation.
  * @type {Command}
  */
-CommandHandler.COMMANDS_['new-folder'] = /** @type {Command} */ ({
+CommandHandler.COMMANDS_['new-folder'] = (function() {
+  /**
+   * @constructor
+   * @struct
+   */
+  var NewFolderCommand = function() {};
+
   /**
    * @param {!Event} event Command event.
    * @param {!FileManager} fileManager FileManager to use.
    */
-  execute: function(event, fileManager) {
-    var defaultName = str('DEFAULT_NEW_FOLDER_NAME');
+  NewFolderCommand.prototype.execute = function(event, fileManager) {
+    var targetDirectory;
+    var executedFromDirectoryTree;
 
-    // Find a name that doesn't exist in the data model.
-    var files = fileManager.directoryModel.getFileList();
-    var hash = {};
-    for (var i = 0; i < files.length; i++) {
-      var name = files.item(i).name;
-      // Filtering names prevents from conflicts with prototype's names
-      // and '__proto__'.
-      if (name.substring(0, defaultName.length) == defaultName)
-        hash[name] = 1;
+    if (event.target instanceof DirectoryTree) {
+      targetDirectory = event.target.selectedItem.entry;
+      executedFromDirectoryTree = true;
+    } else if (event.target instanceof DirectoryItem) {
+      targetDirectory = event.target.entry;
+      executedFromDirectoryTree = true;
+    } else {
+      targetDirectory = fileManager.directoryModel.getCurrentDirEntry();
+      executedFromDirectoryTree = false;
     }
 
-    var baseName = defaultName;
-    var separator = '';
-    var suffix = '';
-    var index = '';
-
-    var advance = function() {
-      separator = ' (';
-      suffix = ')';
-      index++;
-    };
-
-    var current = function() {
-      return baseName + separator + index + suffix;
-    };
-
-    // Accessing hasOwnProperty is safe since hash properties filtered.
-    while (hash.hasOwnProperty(current())) {
-      advance();
-    }
-
-    var list = fileManager.ui.listContainer.currentList;
-
-    var onSuccess = function(entry) {
-      metrics.recordUserAction('CreateNewFolder');
-      list.selectedItem = entry;
-
-      fileManager.ui.listContainer.endBatchUpdates();
-
-      fileManager.namingController.initiateRename();
-    };
-
-    var onError = function(error) {
-      fileManager.ui.listContainer.endBatchUpdates();
-
-      fileManager.ui.alertDialog.show(
-          strf('ERROR_CREATING_FOLDER',
-               current(),
-               util.getFileErrorString(error.name)),
-          null, null);
-    };
-
-    var onAbort = function() {
-      fileManager.ui.listContainer.endBatchUpdates();
-    };
-
-    fileManager.ui.listContainer.startBatchUpdates();
-    fileManager.directoryModel.createDirectory(
-        current(), onSuccess, onError, onAbort);
-  },
-  /**
-   * @param {!Event} event Command event.
-   * @param {!FileManager} fileManager FileManager to use.
-   */
-  canExecute: function(event, fileManager) {
     var directoryModel = fileManager.directoryModel;
-    event.canExecute = !fileManager.isOnReadonlyDirectory() &&
-                       !fileManager.namingController.isRenamingInProgress() &&
-                       !directoryModel.isSearching() &&
-                       !directoryModel.isScanning();
-  }
-});
+    var directoryTree = fileManager.ui.directoryTree;
+    var listContainer = fileManager.ui.listContainer;
+
+    this.generateNewDirectoryName_(targetDirectory).then(function(newName) {
+      if (!executedFromDirectoryTree)
+        listContainer.startBatchUpdates();
+
+      return new Promise(targetDirectory.getDirectory.bind(targetDirectory,
+          newName,
+          {create: true, exclusive: true})).then(function(newDirectory) {
+            metrics.recordUserAction('CreateNewFolder');
+
+            // Select new directory and start rename operation.
+            if (executedFromDirectoryTree) {
+              directoryTree.updateAndSelectNewDirectory(
+                  targetDirectory, newDirectory);
+              fileManager.getDirectoryTreeNamingController().attachAndStart(
+                  assert(fileManager.ui.directoryTree.selectedItem));
+            } else {
+              directoryModel.updateAndSelectNewDirectory(
+                  newDirectory).then(function() {
+                listContainer.endBatchUpdates();
+                fileManager.namingController.initiateRename();
+              }, function() {
+                listContainer.endBatchUpdates();
+              });
+            }
+          }, function(error) {
+            if (!executedFromDirectoryTree)
+              listContainer.endBatchUpdates();
+
+            fileManager.ui.alertDialog.show(
+                strf('ERROR_CREATING_FOLDER',
+                     newName,
+                     util.getFileErrorString(error.name)),
+                null, null);
+          });
+    });
+  };
+
+  /**
+   * Generates new directory name.
+   * @param {!DirectoryEntry} parentDirectory
+   * @param {number=} opt_index
+   * @private
+   */
+  NewFolderCommand.prototype.generateNewDirectoryName_ = function(
+      parentDirectory, opt_index) {
+    var index = opt_index || 0;
+
+    var defaultName = str('DEFAULT_NEW_FOLDER_NAME');
+    var newName = index === 0 ? defaultName :
+        defaultName + ' (' + index + ')';
+
+    return new Promise(parentDirectory.getDirectory.bind(
+        parentDirectory, newName, {create: false})).then(function(newEntry) {
+      return this.generateNewDirectoryName_(parentDirectory, index + 1);
+    }.bind(this)).catch(function() {
+      return newName;
+    });
+  };
+
+  /**
+   * @param {!Event} event Command event.
+   * @param {!FileManager} fileManager FileManager to use.
+   */
+  NewFolderCommand.prototype.canExecute = function(event, fileManager) {
+    if (event.target instanceof DirectoryItem ||
+        event.target instanceof DirectoryTree) {
+      var entry = CommandUtil.getCommandEntry(event.target);
+      if (!entry || !CommandUtil.shouldShowMenuItemForEntry(
+          fileManager.volumeManager, entry)) {
+        event.canExecute = false;
+        event.command.setHidden(true);
+        return;
+      }
+
+      var locationInfo = fileManager.volumeManager.getLocationInfo(entry);
+      event.canExecute = locationInfo && !locationInfo.isReadOnly;
+      event.command.setHidden(false);
+    } else {
+      var directoryModel = fileManager.directoryModel;
+      event.canExecute = !fileManager.isOnReadonlyDirectory() &&
+                         !fileManager.namingController.isRenamingInProgress() &&
+                         !directoryModel.isSearching() &&
+                         !directoryModel.isScanning();
+      event.command.setHidden(false);
+    }
+  };
+
+  return new NewFolderCommand();
+})();
 
 /**
  * Initiates new window creation.
@@ -702,7 +761,8 @@ CommandHandler.COMMANDS_['delete'] = (function() {
       // Execute might be called without a call of canExecute method,
       // e.g. called directly from code. Double check here not to delete
       // undeletable entries.
-      if (this.containsFakeOrRootEntry_(entries, fileManager) ||
+      if (!entries.every(CommandUtil.shouldShowMenuItemForEntry.bind(
+              null, fileManager.volumeManager)) ||
           this.containsReadOnlyEntry_(entries, fileManager))
         return;
 
@@ -723,7 +783,8 @@ CommandHandler.COMMANDS_['delete'] = (function() {
       var entries = CommandUtil.getCommandEntries(event.target);
 
       // If entries contain fake or root entry, hide delete option.
-      if (this.containsFakeOrRootEntry_(entries, fileManager)) {
+      if (!entries.every(CommandUtil.shouldShowMenuItemForEntry.bind(
+              null, fileManager.volumeManager))) {
         event.canExecute = false;
         event.command.setHidden(true);
         return;
@@ -732,24 +793,6 @@ CommandHandler.COMMANDS_['delete'] = (function() {
       event.canExecute = entries.length > 0 &&
           !this.containsReadOnlyEntry_(entries, fileManager);
       event.command.setHidden(false);
-    },
-
-    /**
-     * @param {!Array<!Entry>} entries
-     * @param {!FileManager} fileManager
-     * @return {boolean} True if entries contain fake or root entry.
-     */
-    containsFakeOrRootEntry_: function(entries, fileManager) {
-      return entries.some(function(entry) {
-        if (util.isFakeEntry(entry))
-          return true;
-
-        var volumeInfo = fileManager.volumeManager.getVolumeInfo(entry);
-        if (!volumeInfo)
-          return true;
-
-        return volumeInfo.displayRoot === entry;
-      });
     },
 
     /**
@@ -786,8 +829,11 @@ CommandHandler.COMMANDS_['paste'] = /** @type {Command} */ ({
    */
   canExecute: function(event, fileManager) {
     var fileTransferController = fileManager.fileTransferController;
-    event.canExecute = (fileTransferController &&
-        fileTransferController.queryPasteCommandEnabled());
+
+    event.canExecute = !!fileTransferController &&
+        fileTransferController.queryPasteCommandEnabled(
+            fileManager.directoryModel.getCurrentDirEntry());
+
     // Hide this command if only one folder is selected.
     event.command.setHidden(!!CommandUtil.getOnlyOneSelectedDirectory(
         fileManager.getSelection()));
@@ -804,15 +850,18 @@ CommandHandler.COMMANDS_['paste-into-folder'] = /** @type {Command} */ ({
    * @param {!FileManager} fileManager FileManager to use.
    */
   execute: function(event, fileManager) {
-    var selection = fileManager.getSelection();
-    var dest = CommandUtil.getOnlyOneSelectedDirectory(selection);
-    if (!dest) return;
+    var entries = CommandUtil.getCommandEntries(event.target);
+    if (entries.length !== 1 || !entries[0].isDirectory ||
+        !CommandUtil.shouldShowMenuItemForEntry(
+            fileManager.volumeManager, entries[0])) {
+      return;
+    }
 
     // This handler tweaks the Event object for 'paste' event so that
     // the FileTransferController can distinguish this 'paste-into-folder'
     // command and know the destination directory.
     var handler = function(inEvent) {
-      inEvent.destDirectory = dest;
+      inEvent.destDirectory = entries[0];
     };
     fileManager.document.addEventListener('paste', handler, true);
     fileManager.document.execCommand('paste');
@@ -823,12 +872,22 @@ CommandHandler.COMMANDS_['paste-into-folder'] = /** @type {Command} */ ({
    * @param {!FileManager} fileManager FileManager to use.
    */
   canExecute: function(event, fileManager) {
+    var entries = CommandUtil.getCommandEntries(event.target);
+
+    // Show this item only when one directory is selected.
+    if (entries.length !== 1 || !entries[0].isDirectory ||
+        !CommandUtil.shouldShowMenuItemForEntry(
+            fileManager.volumeManager, entries[0])) {
+      event.canExecute = false;
+      event.command.setHidden(true);
+      return;
+    }
+
     var fileTransferController = fileManager.fileTransferController;
-    event.canExecute = (fileTransferController &&
-        fileTransferController.queryPasteCommandEnabled());
-    // Hide this command unless only one folder is selected.
-    event.command.setHidden(!CommandUtil.getOnlyOneSelectedDirectory(
-        fileManager.getSelection()));
+    var directoryEntry = /** @type {DirectoryEntry|FakeEntry} */ (entries[0]);
+    event.canExecute = !!fileTransferController &&
+        fileTransferController.queryPasteCommandEnabled(directoryEntry);
+    event.command.setHidden(false);
   }
 });
 
@@ -845,18 +904,36 @@ CommandHandler.COMMANDS_['rename'] = /** @type {Command} */ ({
    * @param {!FileManager} fileManager FileManager to use.
    */
   execute: function(event, fileManager) {
-    fileManager.namingController.initiateRename();
+    if (event.target instanceof DirectoryTree) {
+      var directoryTree = event.target;
+      assert(fileManager.getDirectoryTreeNamingController()).attachAndStart(
+          assert(directoryTree.selectedItem));
+    } else if (event.target instanceof DirectoryItem) {
+      var directoryItem = event.target;
+      assert(fileManager.getDirectoryTreeNamingController()).attachAndStart(
+          directoryItem);
+    } else {
+      fileManager.namingController.initiateRename();
+    }
   },
   /**
    * @param {!Event} event Command event.
    * @param {!FileManager} fileManager FileManager to use.
    */
   canExecute: function(event, fileManager) {
-    var selection = fileManager.getSelection();
-    event.canExecute = !fileManager.namingController.isRenamingInProgress() &&
-                       !fileManager.isOnReadonlyDirectory() &&
-                       selection &&
-                       selection.totalCount == 1;
+    var entries = CommandUtil.getCommandEntries(event.target);
+    if (entries.length === 0 ||
+        !CommandUtil.shouldShowMenuItemForEntry(
+            fileManager.volumeManager, entries[0])) {
+      event.canExecute = false;
+      event.command.setHidden(true);
+      return;
+    }
+
+    var locationInfo = fileManager.volumeManager.getLocationInfo(entries[0]);
+    event.canExecute = entries.length === 1 && !!locationInfo &&
+        !locationInfo.isReadOnly;
+    event.command.setHidden(false);
   }
 });
 
@@ -922,15 +999,15 @@ CommandHandler.COMMANDS_['drive-go-to-drive'] = /** @type {Command} */ ({
 });
 
 /**
- * Opens a file with default action.
+ * Opens a file with default task.
  * @type {Command}
  */
-CommandHandler.COMMANDS_['default-action'] = /** @type {Command} */ ({
+CommandHandler.COMMANDS_['default-task'] = /** @type {Command} */ ({
   execute: function(event, fileManager) {
-    fileManager.taskController.executeDefaultAction();
+    fileManager.taskController.executeDefaultTask();
   },
   canExecute: function(event, fileManager) {
-    var canExecute = fileManager.taskController.canExecuteDefaultAction();
+    var canExecute = fileManager.taskController.canExecuteDefaultTask();
     event.canExecute = canExecute;
     event.command.setHidden(!canExecute);
   }
@@ -946,8 +1023,7 @@ CommandHandler.COMMANDS_['open-with'] = /** @type {Command} */ ({
    * @param {!FileManager} fileManager FileManager to use.
    */
   execute: function(event, fileManager) {
-    var tasks = fileManager.getSelection().tasks;
-    if (tasks) {
+    fileManager.taskController.getFileTasks().then(function(tasks) {
       tasks.showTaskPicker(fileManager.ui.defaultTaskPicker,
           str('OPEN_WITH_BUTTON_LABEL'),
           '',
@@ -955,7 +1031,11 @@ CommandHandler.COMMANDS_['open-with'] = /** @type {Command} */ ({
             tasks.execute(task.taskId);
           },
           false);
-    }
+    })
+    .catch(function(error) {
+      if (error)
+        console.error(error.stack || error);
+    });
   },
   /**
    * @param {!Event} event Command event.
@@ -1035,7 +1115,7 @@ CommandHandler.COMMANDS_['toggle-pinned'] = /** @type {Command} */ ({
       return;
     var currentEntry;
     var error = false;
-    var metadataModel = fileManager.getMetadataModel();
+    var metadataModel = fileManager.metadataModel;
     var steps = {
       // Pick an entry and pin it.
       start: function() {

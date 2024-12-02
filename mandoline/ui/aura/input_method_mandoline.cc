@@ -4,7 +4,7 @@
 
 #include "mandoline/ui/aura/input_method_mandoline.h"
 
-#include "components/view_manager/public/cpp/view.h"
+#include "components/mus/public/cpp/view.h"
 #include "mojo/converters/ime/ime_type_converters.h"
 #include "ui/base/ime/text_input_client.h"
 #include "ui/events/event.h"
@@ -17,7 +17,7 @@ namespace mandoline {
 
 InputMethodMandoline::InputMethodMandoline(
     ui::internal::InputMethodDelegate* delegate,
-    mojo::View* view)
+    mus::View* view)
     : view_(view) {
   SetDelegate(delegate);
 }

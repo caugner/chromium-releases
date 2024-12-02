@@ -29,19 +29,6 @@ using trace_analyzer::TraceEventVector;
 
 namespace {
 
-// TODO(phoglund): hackhackhack: work around error with result reporting.
-// Remove this when http://crbug.com/517977 is solved.
-
-class WebRtcHack : public content::WebRtcContentBrowserTest {
-};
-
-IN_PROC_BROWSER_TEST_F(WebRtcHack, PrintSomeResults) {
-  printf("*RESULT VideoCaptureDeviceClient: sample_duration= [0, 0,] us\n");
-  printf("*RESULT VideoCaptureDeviceClient: interarrival_time= [0, 0,] us\n");
-}
-
-// TODO(phoglund): end hackhackhack.
-
 static const char kGetUserMediaAndStop[] = "getUserMediaAndStop";
 static const char kGetUserMediaAndGetStreamUp[] = "getUserMediaAndGetStreamUp";
 static const char kGetUserMediaAndAnalyseAndStop[] =
@@ -88,17 +75,10 @@ std::string GenerateGetUserMediaWithOptionalSourceID(
 
 namespace content {
 
-#if DCHECK_IS_ON() && defined(OS_WIN)
-// Flaky under win debug configs: http://crbug.com/517977.
-#define MAYBE_WebRtcGetUserMediaBrowserTest DISABLED_WebRtcGetUserMediaBrowserTest
-#else
-#define MAYBE_WebRtcGetUserMediaBrowserTest WebRtcGetUserMediaBrowserTest
-#endif
-
-class MAYBE_WebRtcGetUserMediaBrowserTest: public WebRtcContentBrowserTest {
+class WebRtcGetUserMediaBrowserTest: public WebRtcContentBrowserTest {
  public:
-  MAYBE_WebRtcGetUserMediaBrowserTest() : trace_log_(NULL) {}
-  ~MAYBE_WebRtcGetUserMediaBrowserTest() override {}
+  WebRtcGetUserMediaBrowserTest() : trace_log_(NULL) {}
+  ~WebRtcGetUserMediaBrowserTest() override {}
 
   void StartTracing() {
     CHECK(trace_log_ == NULL) << "Can only can start tracing once";
@@ -118,7 +98,7 @@ class MAYBE_WebRtcGetUserMediaBrowserTest: public WebRtcContentBrowserTest {
     trace_log_->SetDisabled();
     message_loop_runner_ = new MessageLoopRunner;
     trace_log_->Flush(base::Bind(
-        &MAYBE_WebRtcGetUserMediaBrowserTest::OnTraceDataCollected,
+        &WebRtcGetUserMediaBrowserTest::OnTraceDataCollected,
         base::Unretained(this)));
     message_loop_runner_->Run();
   }
@@ -218,10 +198,9 @@ class MAYBE_WebRtcGetUserMediaBrowserTest: public WebRtcContentBrowserTest {
 
     int error_code;
     std::string error_message;
-    scoped_ptr<base::Value> value(
-        base::JSONReader::DeprecatedReadAndReturnError(
-            devices_as_json, base::JSON_ALLOW_TRAILING_COMMAS, &error_code,
-            &error_message));
+    scoped_ptr<base::Value> value = base::JSONReader::ReadAndReturnError(
+        devices_as_json, base::JSON_ALLOW_TRAILING_COMMAS, &error_code,
+        &error_message);
 
     ASSERT_TRUE(value.get() != NULL) << error_message;
     EXPECT_EQ(value->GetType(), base::Value::TYPE_LIST);
@@ -265,7 +244,7 @@ class MAYBE_WebRtcGetUserMediaBrowserTest: public WebRtcContentBrowserTest {
 #else
 #define MAYBE_GetVideoStreamAndStop GetVideoStreamAndStop
 #endif
-IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcGetUserMediaBrowserTest,
+IN_PROC_BROWSER_TEST_F(WebRtcGetUserMediaBrowserTest,
                        MAYBE_GetVideoStreamAndStop) {
   ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
 
@@ -284,7 +263,7 @@ IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcGetUserMediaBrowserTest,
 #define MAYBE_RenderSameTrackMediastreamAndStop \
   RenderSameTrackMediastreamAndStop
 #endif
-IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcGetUserMediaBrowserTest,
+IN_PROC_BROWSER_TEST_F(WebRtcGetUserMediaBrowserTest,
                        MAYBE_RenderSameTrackMediastreamAndStop) {
   ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
 
@@ -296,7 +275,7 @@ IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcGetUserMediaBrowserTest,
                          kRenderSameTrackMediastreamAndStop));
 }
 
-IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcGetUserMediaBrowserTest,
+IN_PROC_BROWSER_TEST_F(WebRtcGetUserMediaBrowserTest,
                        RenderClonedMediastreamAndStop) {
   ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
 
@@ -309,7 +288,7 @@ IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcGetUserMediaBrowserTest,
                          kRenderClonedMediastreamAndStop));
 }
 
-IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcGetUserMediaBrowserTest,
+IN_PROC_BROWSER_TEST_F(WebRtcGetUserMediaBrowserTest,
                        kRenderClonedTrackMediastreamAndStop) {
   ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
 
@@ -321,7 +300,7 @@ IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcGetUserMediaBrowserTest,
                          kRenderClonedTrackMediastreamAndStop));
 }
 
-IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcGetUserMediaBrowserTest,
+IN_PROC_BROWSER_TEST_F(WebRtcGetUserMediaBrowserTest,
                        kRenderDuplicatedMediastreamAndStop) {
   ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
 
@@ -333,7 +312,7 @@ IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcGetUserMediaBrowserTest,
                           kRenderDuplicatedMediastreamAndStop));
 }
 
-IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcGetUserMediaBrowserTest,
+IN_PROC_BROWSER_TEST_F(WebRtcGetUserMediaBrowserTest,
                        GetAudioAndVideoStreamAndStop) {
   ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
 
@@ -344,7 +323,7 @@ IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcGetUserMediaBrowserTest,
       "%s({video: true, audio: true});", kGetUserMediaAndStop));
 }
 
-IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcGetUserMediaBrowserTest,
+IN_PROC_BROWSER_TEST_F(WebRtcGetUserMediaBrowserTest,
                        GetAudioAndVideoStreamAndClone) {
   ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
 
@@ -354,8 +333,11 @@ IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcGetUserMediaBrowserTest,
   ExecuteJavascriptAndWaitForOk("getUserMediaAndClone();");
 }
 
-IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcGetUserMediaBrowserTest,
-                       RenderVideoTrackInMultipleTagsAndPause) {
+// Test fails under Android, http://crbug.com/524388
+// Test fails under MSan
+// Flaky everywhere else: http://crbug.com/523152
+IN_PROC_BROWSER_TEST_F(WebRtcGetUserMediaBrowserTest,
+                       DISABLED_RenderVideoTrackInMultipleTagsAndPause) {
   ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
 
   GURL url(embedded_test_server()->GetURL("/media/getusermedia.html"));
@@ -364,9 +346,7 @@ IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcGetUserMediaBrowserTest,
   ExecuteJavascriptAndWaitForOk("getUserMediaAndRenderInSeveralVideoTags();");
 }
 
-
-
-IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcGetUserMediaBrowserTest,
+IN_PROC_BROWSER_TEST_F(WebRtcGetUserMediaBrowserTest,
                        GetUserMediaWithMandatorySourceID) {
   ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
 
@@ -391,7 +371,7 @@ IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcGetUserMediaBrowserTest,
   }
 }
 
-IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcGetUserMediaBrowserTest,
+IN_PROC_BROWSER_TEST_F(WebRtcGetUserMediaBrowserTest,
                        GetUserMediaWithInvalidMandatorySourceID) {
   ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
 
@@ -424,7 +404,7 @@ IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcGetUserMediaBrowserTest,
           video_ids[0])));
 }
 
-IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcGetUserMediaBrowserTest,
+IN_PROC_BROWSER_TEST_F(WebRtcGetUserMediaBrowserTest,
                        GetUserMediaWithInvalidOptionalSourceID) {
   ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
 
@@ -457,7 +437,7 @@ IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcGetUserMediaBrowserTest,
           video_ids[0])));
 }
 
-IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcGetUserMediaBrowserTest,
+IN_PROC_BROWSER_TEST_F(WebRtcGetUserMediaBrowserTest,
                        TwoGetUserMediaAndStop) {
   ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
 
@@ -468,7 +448,7 @@ IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcGetUserMediaBrowserTest,
       "twoGetUserMediaAndStop({video: true, audio: true});");
 }
 
-IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcGetUserMediaBrowserTest,
+IN_PROC_BROWSER_TEST_F(WebRtcGetUserMediaBrowserTest,
                        TwoGetUserMediaWithEqualConstraints) {
   std::string constraints1 = "{video: true, audio: true}";
   const std::string& constraints2 = constraints1;
@@ -478,7 +458,7 @@ IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcGetUserMediaBrowserTest,
                                                   expected_result);
 }
 
-IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcGetUserMediaBrowserTest,
+IN_PROC_BROWSER_TEST_F(WebRtcGetUserMediaBrowserTest,
                        TwoGetUserMediaWithSecondVideoCropped) {
   std::string constraints1 = "{video: true}";
   std::string constraints2 = "{video: {mandatory: {maxHeight: 360}}}";
@@ -495,7 +475,7 @@ IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcGetUserMediaBrowserTest,
 #define MAYBE_TwoGetUserMediaWithFirstHdSecondVga \
   TwoGetUserMediaWithFirstHdSecondVga
 #endif
-IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcGetUserMediaBrowserTest,
+IN_PROC_BROWSER_TEST_F(WebRtcGetUserMediaBrowserTest,
                        MAYBE_TwoGetUserMediaWithFirstHdSecondVga) {
   std::string constraints1 =
       "{video: {mandatory: {maxWidth:1280 , minWidth:1280 , maxHeight: 720,\
@@ -516,7 +496,7 @@ IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcGetUserMediaBrowserTest,
     TwoGetUserMediaWithFirst1080pSecondVga
 #endif
 
-IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcGetUserMediaBrowserTest,
+IN_PROC_BROWSER_TEST_F(WebRtcGetUserMediaBrowserTest,
                        MAYBE_TwoGetUserMediaWithFirst1080pSecondVga) {
   std::string constraints1 =
       "{video: {mandatory: {maxWidth:1920 , minWidth:1920 , maxHeight: 1080,\
@@ -536,7 +516,7 @@ IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcGetUserMediaBrowserTest,
 #define MAYBE_TwoGetUserMediaAndVerifyFrameRate \
   TwoGetUserMediaAndVerifyFrameRate
 #endif
-IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcGetUserMediaBrowserTest,
+IN_PROC_BROWSER_TEST_F(WebRtcGetUserMediaBrowserTest,
                        MAYBE_TwoGetUserMediaAndVerifyFrameRate) {
   ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
 
@@ -555,7 +535,7 @@ IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcGetUserMediaBrowserTest,
   ExecuteJavascriptAndWaitForOk(command);
 }
 
-IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcGetUserMediaBrowserTest,
+IN_PROC_BROWSER_TEST_F(WebRtcGetUserMediaBrowserTest,
                        GetUserMediaWithTooHighVideoConstraintsValues) {
   ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
 
@@ -578,7 +558,7 @@ IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcGetUserMediaBrowserTest,
 // This test makes two getUserMedia requests, one with impossible constraints
 // that should trigger an error, and one with valid constraints. The test
 // verifies getUserMedia can succeed after being given impossible constraints.
-IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcGetUserMediaBrowserTest,
+IN_PROC_BROWSER_TEST_F(WebRtcGetUserMediaBrowserTest,
                        TwoGetUserMediaAndCheckCallbackAfterFailure) {
   ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
 
@@ -610,7 +590,7 @@ IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcGetUserMediaBrowserTest,
 // performance traces from VideoCaptureController colorspace conversion and
 // potential resizing.
 IN_PROC_BROWSER_TEST_F(
-    MAYBE_WebRtcGetUserMediaBrowserTest,
+    WebRtcGetUserMediaBrowserTest,
     TraceVideoCaptureControllerPerformanceDuringGetUserMedia) {
   RunGetUserMediaAndCollectMeasures(
       10,
@@ -626,7 +606,7 @@ IN_PROC_BROWSER_TEST_F(
 #define MAYBE_TestGetUserMediaAspectRatio4To3 TestGetUserMediaAspectRatio4To3
 #endif
 // This test calls getUserMedia and checks for aspect ratio behavior.
-IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcGetUserMediaBrowserTest,
+IN_PROC_BROWSER_TEST_F(WebRtcGetUserMediaBrowserTest,
                        MAYBE_TestGetUserMediaAspectRatio4To3) {
   ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
 
@@ -648,7 +628,7 @@ IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcGetUserMediaBrowserTest,
 #define MAYBE_TestGetUserMediaAspectRatio16To9 TestGetUserMediaAspectRatio16To9
 #endif
 // This test calls getUserMedia and checks for aspect ratio behavior.
-IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcGetUserMediaBrowserTest,
+IN_PROC_BROWSER_TEST_F(WebRtcGetUserMediaBrowserTest,
                        MAYBE_TestGetUserMediaAspectRatio16To9) {
   ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
 
@@ -670,7 +650,7 @@ IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcGetUserMediaBrowserTest,
 #define MAYBE_TestGetUserMediaAspectRatio1To1 TestGetUserMediaAspectRatio1To1
 #endif
 // This test calls getUserMedia and checks for aspect ratio behavior.
-IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcGetUserMediaBrowserTest,
+IN_PROC_BROWSER_TEST_F(WebRtcGetUserMediaBrowserTest,
                        MAYBE_TestGetUserMediaAspectRatio1To1) {
   ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
 
@@ -686,7 +666,7 @@ IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcGetUserMediaBrowserTest,
 
 // This test calls getUserMedia in an iframe and immediately close the iframe
 // in the scope of the success callback.
-IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcGetUserMediaBrowserTest,
+IN_PROC_BROWSER_TEST_F(WebRtcGetUserMediaBrowserTest,
                        AudioInIFrameAndCloseInSuccessCb) {
   ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
 
@@ -698,7 +678,7 @@ IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcGetUserMediaBrowserTest,
   ExecuteJavascriptAndWaitForOk(call);
 }
 
-IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcGetUserMediaBrowserTest,
+IN_PROC_BROWSER_TEST_F(WebRtcGetUserMediaBrowserTest,
                        VideoInIFrameAndCloseInSuccessCb) {
   ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
 
@@ -712,7 +692,7 @@ IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcGetUserMediaBrowserTest,
 
 // This test calls getUserMedia in an iframe and immediately close the iframe
 // in the scope of the failure callback.
-IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcGetUserMediaBrowserTest,
+IN_PROC_BROWSER_TEST_F(WebRtcGetUserMediaBrowserTest,
                        VideoWithBadConstraintsInIFrameAndCloseInFailureCb) {
   ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
 
@@ -732,7 +712,7 @@ IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcGetUserMediaBrowserTest,
   ExecuteJavascriptAndWaitForOk(call);
 }
 
-IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcGetUserMediaBrowserTest,
+IN_PROC_BROWSER_TEST_F(WebRtcGetUserMediaBrowserTest,
                        InvalidSourceIdInIFrameAndCloseInFailureCb) {
   ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
 

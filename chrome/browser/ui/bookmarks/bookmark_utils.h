@@ -12,7 +12,6 @@
 #include "ui/base/window_open_disposition.h"
 #include "ui/gfx/native_widget_types.h"
 
-class Browser;
 class GURL;
 class PrefService;
 class Profile;
@@ -24,8 +23,11 @@ struct BookmarkNodeData;
 
 namespace content {
 class BrowserContext;
-class PageNavigator;
 class WebContents;
+}
+
+namespace gfx {
+class ImageSkia;
 }
 
 namespace ui {
@@ -33,48 +35,6 @@ class DropTargetEvent;
 }
 
 namespace chrome {
-
-// Number of bookmarks we'll open before prompting the user to see if they
-// really want to open all.
-//
-// NOTE: treat this as a const. It is not const so unit tests can change the
-// value.
-extern int num_bookmark_urls_before_prompting;
-
-// Opens all the bookmarks in |nodes| that are of type url and all the child
-// bookmarks that are of type url for folders in |nodes|. |initial_disposition|
-// dictates how the first URL is opened, all subsequent URLs are opened as
-// background tabs. |navigator| is used to open the URLs.
-void OpenAll(gfx::NativeWindow parent,
-             content::PageNavigator* navigator,
-             const std::vector<const bookmarks::BookmarkNode*>& nodes,
-             WindowOpenDisposition initial_disposition,
-             content::BrowserContext* browser_context);
-
-// Convenience for OpenAll() with a single BookmarkNode.
-void OpenAll(gfx::NativeWindow parent,
-             content::PageNavigator* navigator,
-             const bookmarks::BookmarkNode* node,
-             WindowOpenDisposition initial_disposition,
-             content::BrowserContext* browser_context);
-
-// Asks the user before deleting a non-empty bookmark folder.
-bool ConfirmDeleteBookmarkNode(const bookmarks::BookmarkNode* node,
-                               gfx::NativeWindow window);
-
-// Shows the bookmark all tabs dialog.
-void ShowBookmarkAllTabsDialog(Browser* browser);
-
-// Returns true if OpenAll() can open at least one bookmark of type url
-// in |selection|.
-bool HasBookmarkURLs(
-    const std::vector<const bookmarks::BookmarkNode*>& selection);
-
-// Returns true if OpenAll() can open at least one bookmark of type url
-// in |selection| with incognito mode.
-bool HasBookmarkURLsAllowedInIncognitoMode(
-    const std::vector<const bookmarks::BookmarkNode*>& selection,
-    content::BrowserContext* browser_context);
 
 // Returns the bookmarkable URL for |web_contents|.
 // This is normally the current URL, but when the page is the Instant Extended
@@ -145,6 +105,13 @@ bool IsValidBookmarkDropLocation(Profile* profile,
                                  const bookmarks::BookmarkNodeData& data,
                                  const bookmarks::BookmarkNode* drop_parent,
                                  int index);
+
+#if defined(TOOLKIT_VIEWS)
+// TODO(estade): If Mac wants to use these, return gfx::Image instead.
+gfx::ImageSkia GetBookmarkFolderIcon();
+gfx::ImageSkia GetBookmarkSupervisedFolderIcon();
+gfx::ImageSkia GetBookmarkManagedFolderIcon();
+#endif
 
 }  // namespace chrome
 

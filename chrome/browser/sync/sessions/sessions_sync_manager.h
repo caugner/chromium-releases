@@ -14,11 +14,12 @@
 #include "base/gtest_prod_util.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
-#include "chrome/browser/sync/glue/favicon_cache.h"
 #include "chrome/browser/sync/glue/synced_session_tracker.h"
-#include "components/sessions/session_id.h"
-#include "components/sessions/session_types.h"
+#include "chrome/browser/sync/sessions/page_revisit_broadcaster.h"
+#include "components/sessions/core/session_id.h"
+#include "components/sessions/core/session_types.h"
 #include "components/sync_driver/device_info.h"
+#include "components/sync_driver/favicon_cache.h"
 #include "components/sync_driver/glue/synced_session.h"
 #include "components/sync_driver/open_tabs_ui_delegate.h"
 #include "components/sync_driver/sync_prefs.h"
@@ -87,9 +88,11 @@ class SessionsSyncManager : public syncer::SyncableService,
                             public sync_driver::OpenTabsUIDelegate,
                             public LocalSessionEventHandler {
  public:
-  SessionsSyncManager(Profile* profile,
-                      sync_driver::LocalDeviceInfoProvider* local_device,
-                      scoped_ptr<LocalSessionEventRouter> router);
+  SessionsSyncManager(
+      Profile* profile,
+      sync_driver::LocalDeviceInfoProvider* local_device,
+      scoped_ptr<LocalSessionEventRouter> router,
+      scoped_ptr<SyncedWindowDelegatesGetter> synced_window_getter);
   ~SessionsSyncManager() override;
 
   // syncer::SyncableService implementation.
@@ -384,6 +387,9 @@ class SessionsSyncManager : public syncer::SyncableService,
 
   scoped_ptr<LocalSessionEventRouter> local_event_router_;
   scoped_ptr<SyncedWindowDelegatesGetter> synced_window_getter_;
+
+  // Owns revisiting instrumentation logic for page visit events.
+  PageRevisitBroadcaster page_revisit_broadcaster_;
 
   DISALLOW_COPY_AND_ASSIGN(SessionsSyncManager);
 };

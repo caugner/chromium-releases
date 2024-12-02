@@ -164,6 +164,53 @@ WRAPPED_INSTANTIATE_TEST_CASE_P(
                       "deleteMenuItemIsDisabledWhenNoItemIsSelected"),
         TestParameter(NOT_IN_GUEST_MODE, "deleteOneItemFromToolbar")));
 
+#if defined(DISABLE_SLOW_FILESAPP_TESTS)
+#define MAYBE_DirectoryTreeContextMenu DISABLED_DirectoryTreeContextMenu
+#else
+#define MAYBE_DirectoryTreeContextMenu DirectoryTreeContextMenu
+#endif
+WRAPPED_INSTANTIATE_TEST_CASE_P(
+    MAYBE_DirectoryTreeContextMenu,
+    FileManagerBrowserTest,
+    ::testing::Values(
+        TestParameter(NOT_IN_GUEST_MODE,
+                      "copyFromDirectoryTreeWithContextMenu"),
+        TestParameter(IN_GUEST_MODE, "copyFromDirectoryTreeWithContextMenu"),
+        TestParameter(NOT_IN_GUEST_MODE,
+                      "copyFromDirectoryTreeWithKeyboardShortcut"),
+        TestParameter(IN_GUEST_MODE,
+                      "copyFromDirectoryTreeWithKeyboardShortcut"),
+        TestParameter(NOT_IN_GUEST_MODE, "cutFromDirectoryTreeWithContextMenu"),
+        TestParameter(IN_GUEST_MODE, "cutFromDirectoryTreeWithContextMenu"),
+        TestParameter(NOT_IN_GUEST_MODE,
+                      "cutFromDirectoryTreeWithKeyboardShortcut"),
+        TestParameter(IN_GUEST_MODE,
+                      "cutFromDirectoryTreeWithKeyboardShortcut"),
+        TestParameter(NOT_IN_GUEST_MODE,
+                      "pasteIntoFolderFromDirectoryTreeWithContextMenu"),
+        TestParameter(IN_GUEST_MODE,
+                      "pasteIntoFolderFromDirectoryTreeWithContextMenu"),
+        TestParameter(NOT_IN_GUEST_MODE,
+                      "renameDirectoryFromDirectoryTreeWithContextMenu"),
+        TestParameter(IN_GUEST_MODE,
+                      "renameDirectoryFromDirectoryTreeWithContextMenu"),
+        TestParameter(NOT_IN_GUEST_MODE,
+                      "renameDirectoryFromDirectoryTreeWithKeyboardShortcut"),
+        TestParameter(IN_GUEST_MODE,
+                      "renameDirectoryFromDirectoryTreeWithKeyboardShortcut"),
+        TestParameter(NOT_IN_GUEST_MODE,
+                      "renameDirectoryToEmptyStringFromDirectoryTree"),
+        TestParameter(IN_GUEST_MODE,
+                      "renameDirectoryToEmptyStringFromDirectoryTree"),
+        TestParameter(NOT_IN_GUEST_MODE,
+                      "renameDirectoryToExistingOneFromDirectoryTree"),
+        TestParameter(IN_GUEST_MODE,
+                      "renameDirectoryToExistingOneFromDirectoryTree"),
+        TestParameter(NOT_IN_GUEST_MODE,
+                      "createDirectoryFromDirectoryTreeWithContextMenu"),
+        TestParameter(NOT_IN_GUEST_MODE,
+                      "createDirectoryFromDirectoryTreeWithKeyboardShortcut")));
+
 // Fails on official build. http://crbug.com/429294
 #if defined(DISABLE_SLOW_FILESAPP_TESTS) || defined(OFFICIAL_BUILD)
 #define MAYBE_DriveSpecific DISABLED_DriveSpecific
@@ -286,17 +333,17 @@ WRAPPED_INSTANTIATE_TEST_CASE_P(
                                     "executeDefaultTaskOnDrive")));
 
 #if defined(DISABLE_SLOW_FILESAPP_TESTS)
-#define MAYBE_DefaultActionDialog DISABLED_DefaultActionDialog
+#define MAYBE_DefaultTaskDialog DISABLED_DefaultTaskDialog
 #else
-#define MAYBE_DefaultActionDialog DefaultActionDialog
+#define MAYBE_DefaultTaskDialog DefaultTaskDialog
 #endif
 WRAPPED_INSTANTIATE_TEST_CASE_P(
-    MAYBE_DefaultActionDialog,
+    MAYBE_DefaultTaskDialog,
     FileManagerBrowserTest,
     ::testing::Values(
-        TestParameter(NOT_IN_GUEST_MODE, "defaultActionDialogOnDownloads"),
-        TestParameter(IN_GUEST_MODE, "defaultActionDialogOnDownloads"),
-        TestParameter(NOT_IN_GUEST_MODE, "defaultActionDialogOnDrive")));
+        TestParameter(NOT_IN_GUEST_MODE, "defaultTaskDialogOnDownloads"),
+        TestParameter(IN_GUEST_MODE, "defaultTaskDialogOnDownloads"),
+        TestParameter(NOT_IN_GUEST_MODE, "defaultTaskDialogOnDrive")));
 
 #if defined(DISABLE_SLOW_FILESAPP_TESTS)
 #define MAYBE_GenericTask DISABLED_GenericTask
@@ -334,8 +381,7 @@ WRAPPED_INSTANTIATE_TEST_CASE_P(
     ::testing::Values(TestParameter(NOT_IN_GUEST_MODE, "sortColumns"),
                       TestParameter(IN_GUEST_MODE, "sortColumns")));
 
-// http://crbug.com/508949
-#if defined(MEMORY_SANITIZER)
+#if defined(DISABLE_SLOW_FILESAPP_TESTS)
 #define MAYBE_TabIndex DISABLED_TabIndex
 #else
 #define MAYBE_TabIndex TabIndex
@@ -355,8 +401,7 @@ WRAPPED_INSTANTIATE_TEST_CASE_P(
     FileManagerBrowserTest,
     ::testing::Values(TestParameter(NOT_IN_GUEST_MODE, "tabindexFocus")));
 
-// http://crbug.com/508949
-#if defined(MEMORY_SANITIZER)
+#if defined(DISABLE_SLOW_FILESAPP_TESTS)
 #define MAYBE_TabindexFocusDownloads DISABLED_TabindexFocusDownloads
 #else
 #define MAYBE_TabindexFocusDownloads TabindexFocusDownloads
@@ -381,10 +426,7 @@ WRAPPED_INSTANTIATE_TEST_CASE_P(
                                     "tabindexFocusDirectorySelected")));
 
 // Fails on official cros trunk build. http://crbug.com/480491
-#if defined(OFFICIAL_BUILD)
-#define MAYBE_TabindexOpenDialog DISABLED_TabindexOpenDialog
-#elif defined(MEMORY_SANITIZER)
-// http://crbug.com/508949
+#if defined(DISABLE_SLOW_FILESAPP_TESTS) || defined(OFFICIAL_BUILD)
 #define MAYBE_TabindexOpenDialog DISABLED_TabindexOpenDialog
 #else
 #define MAYBE_TabindexOpenDialog TabindexOpenDialog
@@ -398,10 +440,7 @@ WRAPPED_INSTANTIATE_TEST_CASE_P(
         TestParameter(IN_GUEST_MODE, "tabindexOpenDialogDownloads")));
 
 // Fails on official build. http://crbug.com/482121.
-#if defined(OFFICIAL_BUILD)
-#define MAYBE_TabindexSaveFileDialog DISABLED_TabindexSaveFileDialog
-#elif defined(MEMORY_SANITIZER)
-// http://crbug.com/508949
+#if defined(DISABLE_SLOW_FILESAPP_TESTS) || defined(OFFICIAL_BUILD)
 #define MAYBE_TabindexSaveFileDialog DISABLED_TabindexSaveFileDialog
 #else
 #define MAYBE_TabindexSaveFileDialog TabindexSaveFileDialog
@@ -464,8 +503,7 @@ WRAPPED_INSTANTIATE_TEST_CASE_P(
                       TestParameter(IN_GUEST_MODE, "showGridViewDownloads"),
                       TestParameter(NOT_IN_GUEST_MODE, "showGridViewDrive")));
 
-// http://crbug.com/508949
-#if defined(MEMORY_SANITIZER)
+#if defined(DISABLE_SLOW_FILESAPP_TESTS)
 #define MAYBE_Providers DISABLED_Providers
 #else
 #define MAYBE_Providers Providers

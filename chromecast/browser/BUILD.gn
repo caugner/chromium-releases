@@ -45,10 +45,8 @@ source_set("browser") {
     "metrics/cast_stability_metrics_provider.h",
     "pref_service_helper.cc",
     "pref_service_helper.h",
-    "service/cast_service.cc",
-    "service/cast_service.h",
-    "service/cast_service_android.cc",
-    "service/cast_service_android.h",
+    "service/cast_service_simple.cc",
+    "service/cast_service_simple.h",
     "url_request_context_factory.cc",
     "url_request_context_factory.h",
   ]
@@ -57,16 +55,8 @@ source_set("browser") {
     sources += [
       "cast_content_browser_client_simple.cc",
       "cast_network_delegate_simple.cc",
-      "devtools/remote_debugging_server_simple.cc",
       "pref_service_helper_simple.cc",
     ]
-
-    if (!is_android) {
-      sources += [
-        "service/cast_service_simple.cc",
-        "service/cast_service_simple.h",
-      ]
-    }
   }
 
   deps = [
@@ -78,13 +68,14 @@ source_set("browser") {
     "//chromecast/app:resources",
     "//chromecast/base",
     "//chromecast/base:cast_sys_info",
+    "//chromecast/base:cast_version",
     "//chromecast/common",
     "//chromecast/graphics",
     "//chromecast/media",
     "//chromecast/net",
-    "//chromecast/public",
-    "//components/crash/app",
-    "//components/crash/browser",
+    "//chromecast/service",
+    "//components/crash/content/app",
+    "//components/crash/content/browser",
     "//components/devtools_http_handler:devtools_http_handler",
     "//components/metrics",
     "//components/metrics:gpu",
@@ -98,6 +89,7 @@ source_set("browser") {
     "//media",
     "//ipc",
     "//net",
+    "//ui/aura",
     "//ui/base",
     "//ui/compositor",
     "//ui/gl",

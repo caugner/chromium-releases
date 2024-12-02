@@ -25,10 +25,6 @@ using Command = DataConsumerHandleTestUtil::Command;
 using ReplayingHandle = DataConsumerHandleTestUtil::ReplayingHandle;
 using MockFetchDataLoaderClient = DataConsumerHandleTestUtil::MockFetchDataLoaderClient;
 
-using Result = WebDataConsumerHandle::Result;
-const WebDataConsumerHandle::Flags kNone = WebDataConsumerHandle::FlagNone;
-const Result kDone = WebDataConsumerHandle::Done;
-
 class BodyStreamBufferTest : public ::testing::Test {
 public:
     BodyStreamBufferTest()
@@ -44,74 +40,18 @@ protected:
     OwnPtr<DummyPageHolder> m_page;
 };
 
-TEST_F(BodyStreamBufferTest, CreateNullBodyStreamBuffer)
-{
-    BodyStreamBuffer* buffer = new BodyStreamBuffer();
-    EXPECT_FALSE(buffer->hasBody());
-    EXPECT_FALSE(buffer->isLocked());
-    EXPECT_FALSE(buffer->hasPendingActivity());
-    EXPECT_TRUE(buffer->stream());
-}
-
-TEST_F(BodyStreamBufferTest, LockNullBodyStreamBuffer)
-{
-    BodyStreamBuffer* buffer = new BodyStreamBuffer();
-    size_t size;
-
-    OwnPtr<FetchDataConsumerHandle> handle = buffer->lock(executionContext());
-
-    EXPECT_FALSE(buffer->hasBody());
-    EXPECT_FALSE(buffer->isLocked());
-    EXPECT_TRUE(buffer->hasPendingActivity());
-    ASSERT_TRUE(handle);
-
-    OwnPtr<FetchDataConsumerHandle::Reader> reader = handle->obtainReader(nullptr);
-    ASSERT_TRUE(reader);
-    Result r =reader->read(nullptr, 0, kNone, &size);
-    EXPECT_EQ(kDone, r);
-    reader = nullptr;
-}
-
-TEST_F(BodyStreamBufferTest, LoadNullBodyStreamBuffer)
-{
-    Checkpoint checkpoint;
-    MockFetchDataLoaderClient* client = MockFetchDataLoaderClient::create();
-
-    InSequence s;
-    EXPECT_CALL(checkpoint, Call(1));
-    EXPECT_CALL(*client, didFetchDataLoadedString(String("")));
-    EXPECT_CALL(checkpoint, Call(2));
-
-    BodyStreamBuffer* buffer = new BodyStreamBuffer();
-    buffer->startLoading(executionContext(), FetchDataLoader::createLoaderAsString(), client);
-
-    EXPECT_FALSE(buffer->hasBody());
-    EXPECT_FALSE(buffer->isLocked());
-    EXPECT_TRUE(buffer->hasPendingActivity());
-
-    checkpoint.Call(1);
-    testing::runPendingTasks();
-    checkpoint.Call(2);
-
-    EXPECT_FALSE(buffer->hasBody());
-    EXPECT_FALSE(buffer->isLocked());
-    EXPECT_FALSE(buffer->hasPendingActivity());
-}
-
 TEST_F(BodyStreamBufferTest, LockBodyStreamBuffer)
 {
     OwnPtr<FetchDataConsumerHandle> handle = createFetchDataConsumerHandleFromWebHandle(createWaitingDataConsumerHandle());
     FetchDataConsumerHandle* rawHandle = handle.get();
     BodyStreamBuffer* buffer = new BodyStreamBuffer(handle.release());
 
-    EXPECT_TRUE(buffer->hasBody());
     EXPECT_FALSE(buffer->isLocked());
     EXPECT_FALSE(buffer->hasPendingActivity());
 
     OwnPtr<FetchDataConsumerHandle> handle2 = buffer->lock(executionContext());
 
     ASSERT_EQ(rawHandle, handle2.get());
-    EXPECT_TRUE(buffer->hasBody());
     EXPECT_TRUE(buffer->isLocked());
     EXPECT_TRUE(buffer->hasPendingActivity());
 }
@@ -133,7 +73,6 @@ TEST_F(BodyStreamBufferTest, LoadBodyStreamBufferAsArrayBuffer)
     BodyStreamBuffer* buffer = new BodyStreamBuffer(createFetchDataConsumerHandleFromWebHandle(handle.release()));
     buffer->startLoading(executionContext(), FetchDataLoader::createLoaderAsArrayBuffer(), client);
 
-    EXPECT_TRUE(buffer->hasBody());
     EXPECT_TRUE(buffer->isLocked());
     EXPECT_TRUE(buffer->hasPendingActivity());
 
@@ -141,7 +80,6 @@ TEST_F(BodyStreamBufferTest, LoadBodyStreamBufferAsArrayBuffer)
     testing::runPendingTasks();
     checkpoint.Call(2);
 
-    EXPECT_TRUE(buffer->hasBody());
     EXPECT_FALSE(buffer->isLocked());
     EXPECT_FALSE(buffer->hasPendingActivity());
     EXPECT_EQ("hello", String(static_cast<const char*>(arrayBuffer->data()), arrayBuffer->byteLength()));
@@ -164,7 +102,6 @@ TEST_F(BodyStreamBufferTest, LoadBodyStreamBufferAsBlob)
     BodyStreamBuffer* buffer = new BodyStreamBuffer(createFetchDataConsumerHandleFromWebHandle(handle.release()));
     buffer->startLoading(executionContext(), FetchDataLoader::createLoaderAsBlobHandle("text/plain"), client);
 
-    EXPECT_TRUE(buffer->hasBody());
     EXPECT_TRUE(buffer->isLocked());
     EXPECT_TRUE(buffer->hasPendingActivity());
 
@@ -172,7 +109,6 @@ TEST_F(BodyStreamBufferTest, LoadBodyStreamBufferAsBlob)
     testing::runPendingTasks();
     checkpoint.Call(2);
 
-    EXPECT_TRUE(buffer->hasBody());
     EXPECT_FALSE(buffer->isLocked());
     EXPECT_FALSE(buffer->hasPendingActivity());
     EXPECT_EQ(5u, blobDataHandle->size());
@@ -194,7 +130,6 @@ TEST_F(BodyStreamBufferTest, LoadBodyStreamBufferAsString)
     BodyStreamBuffer* buffer = new BodyStreamBuffer(createFetchDataConsumerHandleFromWebHandle(handle.release()));
     buffer->startLoading(executionContext(), FetchDataLoader::createLoaderAsString(), client);
 
-    EXPECT_TRUE(buffer->hasBody());
     EXPECT_TRUE(buffer->isLocked());
     EXPECT_TRUE(buffer->hasPendingActivity());
 
@@ -202,7 +137,6 @@ TEST_F(BodyStreamBufferTest, LoadBodyStreamBufferAsString)
     testing::runPendingTasks();
     checkpoint.Call(2);
 
-    EXPECT_TRUE(buffer->hasBody());
     EXPECT_FALSE(buffer->isLocked());
     EXPECT_FALSE(buffer->hasPendingActivity());
 }
@@ -224,7 +158,6 @@ TEST_F(BodyStreamBufferTest, LockClosedHandle)
     EXPECT_TRUE(handle2);
     EXPECT_FALSE(buffer->isLocked());
     EXPECT_TRUE(buffer->hasPendingActivity());
-    EXPECT_TRUE(buffer->hasBody());
 }
 
 TEST_F(BodyStreamBufferTest, LoadClosedHandle)
@@ -276,7 +209,6 @@ TEST_F(BodyStreamBufferTest, LockErroredHandle)
     EXPECT_TRUE(handle2);
     EXPECT_FALSE(buffer->isLocked());
     EXPECT_TRUE(buffer->hasPendingActivity());
-    EXPECT_TRUE(buffer->hasBody());
 }
 
 TEST_F(BodyStreamBufferTest, LoadErroredHandle)

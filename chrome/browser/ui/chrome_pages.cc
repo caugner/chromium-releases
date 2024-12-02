@@ -13,7 +13,7 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
-#include "chrome/browser/ui/browser_navigator.h"
+#include "chrome/browser/ui/browser_navigator_params.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/extensions/app_launch_params.h"
 #include "chrome/browser/ui/extensions/application_launch.h"
@@ -237,9 +237,9 @@ GURL GetSettingsUrl(const std::string& sub_page) {
 
 bool IsSettingsSubPage(const GURL& url, const std::string& sub_page) {
   return (url.SchemeIs(content::kChromeUIScheme) &&
-          (url.host() == chrome::kChromeUISettingsHost ||
-           url.host() == chrome::kChromeUISettingsFrameHost) &&
-          url.path() == "/" + sub_page);
+          (url.host_piece() == chrome::kChromeUISettingsHost ||
+           url.host_piece() == chrome::kChromeUISettingsFrameHost) &&
+          url.path_piece() == "/" + sub_page);
 }
 
 bool IsTrustedPopupWindowWithScheme(const Browser* browser,
@@ -332,11 +332,11 @@ void ShowAboutChrome(Browser* browser) {
   content::RecordAction(UserMetricsAction("AboutChrome"));
   if (::switches::SettingsWindowEnabled()) {
     SettingsWindowManager::GetInstance()->ShowChromePageForProfile(
-        browser->profile(), GURL(kChromeUIUberURL));
+        browser->profile(), GURL(kChromeUIHelpURL));
     return;
   }
   NavigateParams params(
-      GetSingletonTabNavigateParams(browser, GURL(kChromeUIUberURL)));
+      GetSingletonTabNavigateParams(browser, GURL(kChromeUIHelpURL)));
   params.path_behavior = NavigateParams::IGNORE_AND_NAVIGATE;
   ShowSingletonTabOverwritingNTP(browser, params);
 }
@@ -370,8 +370,14 @@ void ShowBrowserSignin(Browser* browser, signin_metrics::Source source) {
   // away from Chrome, and accidentally close the avatar bubble. The same will
   // happen if we had to switch browser windows to show the sign in page. In
   // this case, fallback to the full-tab signin page.
-  if (switches::IsNewAvatarMenu() &&
-      source != signin_metrics::SOURCE_APP_LAUNCHER && !switched_browser) {
+  bool show_avatar_bubble =
+      source != signin_metrics::SOURCE_APP_LAUNCHER && !switched_browser;
+#if defined(OS_CHROMEOS)
+  // ChromeOS doesn't have the avatar bubble.
+  show_avatar_bubble = false;
+#endif
+
+  if (show_avatar_bubble) {
     browser->window()->ShowAvatarBubbleFromAvatarButton(
         BrowserWindow::AVATAR_BUBBLE_MODE_SIGNIN,
         signin::ManageAccountsParams());

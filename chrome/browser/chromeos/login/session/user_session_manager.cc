@@ -32,6 +32,7 @@
 #include "chrome/browser/chromeos/base/locale_util.h"
 #include "chrome/browser/chromeos/boot_times_recorder.h"
 #include "chrome/browser/chromeos/first_run/first_run.h"
+#include "chrome/browser/chromeos/first_run/goodies_displayer.h"
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
 #include "chrome/browser/chromeos/login/auth/chrome_cryptohome_authenticator.h"
 #include "chrome/browser/chromeos/login/chrome_restart_request.h"
@@ -62,7 +63,6 @@
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/net/crl_set_fetcher.h"
 #include "chrome/browser/net/nss_context.h"
-#include "chrome/browser/pref_service_flags_storage.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -88,6 +88,7 @@
 #include "chromeos/network/portal_detector/network_portal_detector_strategy.h"
 #include "chromeos/settings/cros_settings_names.h"
 #include "components/component_updater/component_updater_service.h"
+#include "components/flags_ui/pref_service_flags_storage.h"
 #include "components/policy/core/common/cloud/cloud_policy_constants.h"
 #include "components/session_manager/core/session_manager.h"
 #include "components/signin/core/browser/account_tracker_service.h"
@@ -237,7 +238,7 @@ void OnGetNSSCertDatabaseForUser(net::NSSCertDatabase* database) {
 // Returns new CommandLine with per-user flags.
 base::CommandLine CreatePerSessionCommandLine(Profile* profile) {
   base::CommandLine user_flags(base::CommandLine::NO_PROGRAM);
-  about_flags::PrefServiceFlagsStorage flags_storage_(profile->GetPrefs());
+  flags_ui::PrefServiceFlagsStorage flags_storage_(profile->GetPrefs());
   about_flags::ConvertFlagsToSwitches(&flags_storage_, &user_flags,
                                       about_flags::kAddSentinels);
   return user_flags;
@@ -323,8 +324,8 @@ UserSessionStateObserver::~UserSessionStateObserver() {
 
 // static
 UserSessionManager* UserSessionManager::GetInstance() {
-  return Singleton<UserSessionManager,
-      DefaultSingletonTraits<UserSessionManager> >::get();
+  return base::Singleton<UserSessionManager, base::DefaultSingletonTraits<
+                                                 UserSessionManager>>::get();
 }
 
 // static
@@ -350,6 +351,7 @@ void UserSessionManager::OverrideHomedir() {
 void UserSessionManager::RegisterPrefs(PrefRegistrySimple* registry) {
   registry->RegisterStringPref(prefs::kRLZBrand, std::string());
   registry->RegisterBooleanPref(prefs::kRLZDisabled, false);
+  registry->RegisterBooleanPref(prefs::kCanShowOobeGoodiesPage, true);
 }
 
 UserSessionManager::UserSessionManager()
@@ -475,8 +477,8 @@ void UserSessionManager::DelegateDeleted(UserSessionManagerDelegate* delegate) {
 void UserSessionManager::PerformPostUserLoggedInActions() {
   user_manager::UserManager* user_manager = user_manager::UserManager::Get();
   if (user_manager->GetLoggedInUsers().size() == 1) {
-    if (NetworkPortalDetector::IsInitialized()) {
-      NetworkPortalDetector::Get()->SetStrategy(
+    if (network_portal_detector::IsInitialized()) {
+      network_portal_detector::GetInstance()->SetStrategy(
           PortalDetectorStrategy::STRATEGY_ID_SESSION);
     }
   }
@@ -697,8 +699,7 @@ bool UserSessionManager::RestartToApplyPerSessionFlagsIfNeed(
 }
 
 bool UserSessionManager::NeedsToUpdateEasyUnlockKeys() const {
-  return EasyUnlockService::IsSignInEnabled() &&
-         !user_context_.GetUserID().empty() &&
+  return !user_context_.GetUserID().empty() &&
          user_manager::User::TypeHasGaiaAccount(user_context_.GetUserType()) &&
          user_context_.GetKey() && !user_context_.GetKey()->GetSecret().empty();
 }
@@ -835,7 +836,7 @@ void UserSessionManager::ChildAccountStatusReceivedCallback(Profile* profile) {
 }
 
 void UserSessionManager::StopChildStatusObserving(Profile* profile) {
-  if (!waiting_for_child_account_status_ &&
+  if (waiting_for_child_account_status_ &&
       !SessionStartupPref::TypeIsManaged(profile->GetPrefs())) {
     InitializeStartUrls();
   }
@@ -966,7 +967,7 @@ void UserSessionManager::InitProfilePreferences(
     if (gaia_id.empty()) {
       AccountTrackerService* account_tracker =
           AccountTrackerServiceFactory::GetForProfile(profile);
-      AccountTrackerService::AccountInfo info =
+      AccountInfo info =
           account_tracker->FindAccountInfoByEmail(user_context.GetUserID());
       gaia_id = info.gaia;
       DCHECK(!gaia_id.empty());
@@ -1138,6 +1139,9 @@ void UserSessionManager::FinalizePrepareProfile(Profile* profile) {
   // launch browser.
   bool browser_launched = InitializeUserSession(profile);
 
+  // If needed, create browser observer to display first run OOBE Goodies page.
+  first_run::GoodiesDisplayer::Init();
+
   // TODO(nkostylev): This pointer should probably never be NULL, but it looks
   // like OnProfileCreated() may be getting called before
   // UserSessionManager::PrepareProfile() has set |delegate_| when Chrome is
@@ -1181,7 +1185,7 @@ void UserSessionManager::InitializeStartUrls() const {
 
   if (can_show_getstarted_guide && should_show_getstarted_guide) {
     // Don't open default Chrome window if we're going to launch the first-run
-    // app. Because we dont' want the first-run app to be hidden in the
+    // app. Because we don't want the first-run app to be hidden in the
     // background.
     base::CommandLine::ForCurrentProcess()->AppendSwitch(
         ::switches::kSilentLaunch);
@@ -1453,7 +1457,7 @@ void UserSessionManager::RestorePendingUserSessions() {
 }
 
 void UserSessionManager::NotifyPendingUserSessionsRestoreFinished() {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   user_sessions_restored_ = true;
   user_sessions_restore_in_progress_ = false;
   FOR_EACH_OBSERVER(chromeos::UserSessionStateObserver,
@@ -1755,6 +1759,7 @@ bool UserSessionManager::TokenHandlesEnabled() {
 void UserSessionManager::Shutdown() {
   token_handle_fetcher_.reset();
   token_handle_util_.reset();
+  first_run::GoodiesDisplayer::Delete();
 }
 
 void UserSessionManager::CreateTokenUtilIfMissing() {

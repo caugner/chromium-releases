@@ -14,12 +14,9 @@
 #include "sandbox/linux/bpf_dsl/bpf_dsl.h"
 #include "sandbox/linux/bpf_dsl/bpf_dsl_impl.h"
 #include "sandbox/linux/bpf_dsl/codegen.h"
-#include "sandbox/linux/bpf_dsl/dump_bpf.h"
-#include "sandbox/linux/bpf_dsl/errorcode.h"
 #include "sandbox/linux/bpf_dsl/policy.h"
 #include "sandbox/linux/bpf_dsl/seccomp_macros.h"
 #include "sandbox/linux/bpf_dsl/syscall_set.h"
-#include "sandbox/linux/bpf_dsl/verifier.h"
 #include "sandbox/linux/system_headers/linux_filter.h"
 #include "sandbox/linux/system_headers/linux_seccomp.h"
 #include "sandbox/linux/system_headers/linux_syscalls.h"
@@ -93,7 +90,6 @@ PolicyCompiler::PolicyCompiler(const Policy* policy, TrapRegistry* registry)
       registry_(registry),
       escapepc_(0),
       panic_func_(DefaultPanic),
-      conds_(),
       gen_(),
       has_unsafe_traps_(HasUnsafeTraps(policy_)) {
   DCHECK(policy);
@@ -102,7 +98,7 @@ PolicyCompiler::PolicyCompiler(const Policy* policy, TrapRegistry* registry)
 PolicyCompiler::~PolicyCompiler() {
 }
 
-scoped_ptr<CodeGen::Program> PolicyCompiler::Compile(bool verify) {
+CodeGen::Program PolicyCompiler::Compile() {
   CHECK(policy_->InvalidSyscall()->IsDeny())
       << "Policies should deny invalid system calls";
 
@@ -121,21 +117,7 @@ scoped_ptr<CodeGen::Program> PolicyCompiler::Compile(bool verify) {
   }
 
   // Assemble the BPF filter program.
-  scoped_ptr<CodeGen::Program> program(new CodeGen::Program());
-  gen_.Compile(AssemblePolicy(), program.get());
-
-  // Make sure compilation resulted in a BPF program that executes
-  // correctly. Otherwise, there is an internal error in our BPF compiler.
-  // There is really nothing the caller can do until the bug is fixed.
-  if (verify) {
-    const char* err = nullptr;
-    if (!Verifier::VerifyBPF(this, *program, *policy_, &err)) {
-      DumpBPF::PrintProgram(*program);
-      LOG(FATAL) << err;
-    }
-  }
-
-  return program.Pass();
+  return gen_.Compile(AssemblePolicy());
 }
 
 void PolicyCompiler::DangerousSetEscapePC(uint64_t escapepc) {
@@ -199,7 +181,7 @@ CodeGen::Node PolicyCompiler::MaybeAddEscapeHatch(CodeGen::Node rest) {
 }
 
 CodeGen::Node PolicyCompiler::DispatchSyscall() {
-  // Evaluate all possible system calls and group their ErrorCodes into
+  // Evaluate all possible system calls and group their Nodes into
   // ranges of identical codes.
   Ranges ranges;
   FindRanges(&ranges);
@@ -239,7 +221,7 @@ void PolicyCompiler::FindRanges(Ranges* ranges) {
   // int32_t, but BPF instructions always operate on unsigned quantities. We
   // deal with this disparity by enumerating from MIN_SYSCALL to MAX_SYSCALL,
   // and then verifying that the rest of the number range (both positive and
-  // negative) all return the same ErrorCode.
+  // negative) all return the same Node.
   const CodeGen::Node invalid_node = CompileResult(policy_->InvalidSyscall());
   uint32_t old_sysnum = 0;
   CodeGen::Node old_node =
@@ -291,68 +273,54 @@ CodeGen::Node PolicyCompiler::AssembleJumpTable(Ranges::const_iterator start,
 }
 
 CodeGen::Node PolicyCompiler::CompileResult(const ResultExpr& res) {
-  return RetExpression(res->Compile(this));
+  return res->Compile(this);
 }
 
-CodeGen::Node PolicyCompiler::RetExpression(const ErrorCode& err) {
-  switch (err.error_type()) {
-    case ErrorCode::ET_COND:
-      return CondExpression(err);
-    case ErrorCode::ET_SIMPLE:
-    case ErrorCode::ET_TRAP:
-      return gen_.MakeInstruction(BPF_RET + BPF_K, err.err());
-    default:
-      LOG(FATAL)
-          << "ErrorCode is not suitable for returning from a BPF program";
-      return CodeGen::kNullNode;
-  }
-}
-
-CodeGen::Node PolicyCompiler::CondExpression(const ErrorCode& cond) {
-  // Sanity check that |cond| makes sense.
-  CHECK(cond.argno_ >= 0 && cond.argno_ < 6) << "Invalid argument number "
-                                             << cond.argno_;
-  CHECK(cond.width_ == ErrorCode::TP_32BIT ||
-        cond.width_ == ErrorCode::TP_64BIT)
-      << "Invalid argument width " << cond.width_;
-  CHECK_NE(0U, cond.mask_) << "Zero mask is invalid";
-  CHECK_EQ(cond.value_, cond.value_ & cond.mask_)
-      << "Value contains masked out bits";
+CodeGen::Node PolicyCompiler::MaskedEqual(int argno,
+                                          size_t width,
+                                          uint64_t mask,
+                                          uint64_t value,
+                                          CodeGen::Node passed,
+                                          CodeGen::Node failed) {
+  // Sanity check that arguments make sense.
+  CHECK(argno >= 0 && argno < 6) << "Invalid argument number " << argno;
+  CHECK(width == 4 || width == 8) << "Invalid argument width " << width;
+  CHECK_NE(0U, mask) << "Zero mask is invalid";
+  CHECK_EQ(value, value & mask) << "Value contains masked out bits";
   if (sizeof(void*) == 4) {
-    CHECK_EQ(ErrorCode::TP_32BIT, cond.width_)
-        << "Invalid width on 32-bit platform";
+    CHECK_EQ(4U, width) << "Invalid width on 32-bit platform";
   }
-  if (cond.width_ == ErrorCode::TP_32BIT) {
-    CHECK_EQ(0U, cond.mask_ >> 32) << "Mask exceeds argument size";
-    CHECK_EQ(0U, cond.value_ >> 32) << "Value exceeds argument size";
+  if (width == 4) {
+    CHECK_EQ(0U, mask >> 32) << "Mask exceeds argument size";
+    CHECK_EQ(0U, value >> 32) << "Value exceeds argument size";
   }
-
-  CodeGen::Node passed = RetExpression(*cond.passed_);
-  CodeGen::Node failed = RetExpression(*cond.failed_);
 
   // We want to emit code to check "(arg & mask) == value" where arg, mask, and
   // value are 64-bit values, but the BPF machine is only 32-bit. We implement
   // this by independently testing the upper and lower 32-bits and continuing to
   // |passed| if both evaluate true, or to |failed| if either evaluate false.
-  return CondExpressionHalf(cond,
-                            UpperHalf,
-                            CondExpressionHalf(cond, LowerHalf, passed, failed),
-                            failed);
+  return MaskedEqualHalf(argno, width, mask, value, ArgHalf::UPPER,
+                         MaskedEqualHalf(argno, width, mask, value,
+                                         ArgHalf::LOWER, passed, failed),
+                         failed);
 }
 
-CodeGen::Node PolicyCompiler::CondExpressionHalf(const ErrorCode& cond,
-                                                 ArgHalf half,
-                                                 CodeGen::Node passed,
-                                                 CodeGen::Node failed) {
-  if (cond.width_ == ErrorCode::TP_32BIT && half == UpperHalf) {
+CodeGen::Node PolicyCompiler::MaskedEqualHalf(int argno,
+                                              size_t width,
+                                              uint64_t full_mask,
+                                              uint64_t full_value,
+                                              ArgHalf half,
+                                              CodeGen::Node passed,
+                                              CodeGen::Node failed) {
+  if (width == 4 && half == ArgHalf::UPPER) {
     // Special logic for sanity checking the upper 32-bits of 32-bit system
     // call arguments.
 
     // TODO(mdempsky): Compile Unexpected64bitArgument() just per program.
-    CodeGen::Node invalid_64bit = RetExpression(Unexpected64bitArgument());
+    CodeGen::Node invalid_64bit = Unexpected64bitArgument();
 
-    const uint32_t upper = SECCOMP_ARG_MSB_IDX(cond.argno_);
-    const uint32_t lower = SECCOMP_ARG_LSB_IDX(cond.argno_);
+    const uint32_t upper = SECCOMP_ARG_MSB_IDX(argno);
+    const uint32_t lower = SECCOMP_ARG_LSB_IDX(argno);
 
     if (sizeof(void*) == 4) {
       // On 32-bit platforms, the upper 32-bits should always be 0:
@@ -395,10 +363,11 @@ CodeGen::Node PolicyCompiler::CondExpressionHalf(const ErrorCode& cond,
                 invalid_64bit)));
   }
 
-  const uint32_t idx = (half == UpperHalf) ? SECCOMP_ARG_MSB_IDX(cond.argno_)
-                                           : SECCOMP_ARG_LSB_IDX(cond.argno_);
-  const uint32_t mask = (half == UpperHalf) ? cond.mask_ >> 32 : cond.mask_;
-  const uint32_t value = (half == UpperHalf) ? cond.value_ >> 32 : cond.value_;
+  const uint32_t idx = (half == ArgHalf::UPPER) ? SECCOMP_ARG_MSB_IDX(argno)
+                                                : SECCOMP_ARG_LSB_IDX(argno);
+  const uint32_t mask = (half == ArgHalf::UPPER) ? full_mask >> 32 : full_mask;
+  const uint32_t value =
+      (half == ArgHalf::UPPER) ? full_value >> 32 : full_value;
 
   // Emit a suitable instruction sequence for (arg & mask) == value.
 
@@ -453,12 +422,12 @@ CodeGen::Node PolicyCompiler::CondExpressionHalf(const ErrorCode& cond,
               BPF_JMP + BPF_JEQ + BPF_K, value, passed, failed)));
 }
 
-ErrorCode PolicyCompiler::Unexpected64bitArgument() {
-  return panic_func_("Unexpected 64bit argument detected")->Compile(this);
+CodeGen::Node PolicyCompiler::Unexpected64bitArgument() {
+  return CompileResult(panic_func_("Unexpected 64bit argument detected"));
 }
 
-ErrorCode PolicyCompiler::Error(int err) {
-  if (has_unsafe_traps_) {
+CodeGen::Node PolicyCompiler::Return(uint32_t ret) {
+  if (has_unsafe_traps_ && (ret & SECCOMP_RET_ACTION) == SECCOMP_RET_ERRNO) {
     // When inside an UnsafeTrap() callback, we want to allow all system calls.
     // This means, we must conditionally disable the sandbox -- and that's not
     // something that kernel-side BPF filters can do, as they cannot inspect
@@ -468,17 +437,18 @@ ErrorCode PolicyCompiler::Error(int err) {
     // The performance penalty for this extra round-trip to user-space is not
     // actually that bad, as we only ever pay it for denied system calls; and a
     // typical program has very few of these.
-    return Trap(ReturnErrno, reinterpret_cast<void*>(err), true);
+    return Trap(ReturnErrno, reinterpret_cast<void*>(ret & SECCOMP_RET_DATA),
+                true);
   }
 
-  return ErrorCode(err);
+  return gen_.MakeInstruction(BPF_RET + BPF_K, ret);
 }
 
-ErrorCode PolicyCompiler::Trap(TrapRegistry::TrapFnc fnc,
-                               const void* aux,
-                               bool safe) {
+CodeGen::Node PolicyCompiler::Trap(TrapRegistry::TrapFnc fnc,
+                                   const void* aux,
+                                   bool safe) {
   uint16_t trap_id = registry_->Add(fnc, aux, safe);
-  return ErrorCode(trap_id, fnc, aux, safe);
+  return gen_.MakeInstruction(BPF_RET + BPF_K, SECCOMP_RET_TRAP + trap_id);
 }
 
 bool PolicyCompiler::IsRequiredForUnsafeTrap(int sysno) {
@@ -488,20 +458,6 @@ bool PolicyCompiler::IsRequiredForUnsafeTrap(int sysno) {
     }
   }
   return false;
-}
-
-ErrorCode PolicyCompiler::CondMaskedEqual(int argno,
-                                          ErrorCode::ArgType width,
-                                          uint64_t mask,
-                                          uint64_t value,
-                                          const ErrorCode& passed,
-                                          const ErrorCode& failed) {
-  return ErrorCode(argno,
-                   width,
-                   mask,
-                   value,
-                   &*conds_.insert(passed).first,
-                   &*conds_.insert(failed).first);
 }
 
 }  // namespace bpf_dsl

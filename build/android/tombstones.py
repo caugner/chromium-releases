@@ -10,7 +10,6 @@
 # Assumes tombstone file was created with current symbols.
 
 import datetime
-import itertools
 import logging
 import multiprocessing
 import os
@@ -19,11 +18,10 @@ import subprocess
 import sys
 import optparse
 
-from pylib.device import adb_wrapper
-from pylib.device import device_blacklist
-from pylib.device import device_errors
-from pylib.device import device_utils
-from pylib.utils import run_tests_helper
+from devil.android import device_blacklist
+from devil.android import device_errors
+from devil.android import device_utils
+from devil.utils import run_tests_helper
 
 
 _TZ_UTC = {'TZ': 'UTC'}
@@ -237,10 +235,9 @@ def main():
                          'crash stacks.')
   options, _ = parser.parse_args()
 
-  if options.blacklist_file:
-    blacklist = device_blacklist.Blacklist(options.blacklist_file)
-  else:
-    blacklist = None
+  blacklist = (device_blacklist.Blacklist(options.blacklist_file)
+               if options.blacklist_file
+               else None)
 
   if options.device:
     devices = [device_utils.DeviceUtils(options.device)]

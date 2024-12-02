@@ -109,8 +109,6 @@ public class ContextualSearchLayout extends ContextualSearchSupportedLayout {
 
         resetLayout();
         createBaseLayoutTab(mBaseTab);
-
-        mSearchPanel.createPromoView();
     }
 
     /**

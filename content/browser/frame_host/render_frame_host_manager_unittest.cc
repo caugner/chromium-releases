@@ -1494,7 +1494,7 @@ TEST_F(RenderFrameHostManagerTest, DisownOpener) {
   EXPECT_NE(site_instance1, rfh2->GetSiteInstance());
 
   // Disown the opener from rfh2.
-  rfh2->DidDisownOpener();
+  rfh2->DidChangeOpener(MSG_ROUTING_NONE);
 
   // Ensure the opener is cleared.
   EXPECT_FALSE(contents()->HasOpener());
@@ -1515,7 +1515,7 @@ TEST_F(RenderFrameHostManagerTest, DisownSameSiteOpener) {
   EXPECT_TRUE(contents()->HasOpener());
 
   // Disown the opener from rfh1.
-  rfh1->DidDisownOpener();
+  rfh1->DidChangeOpener(MSG_ROUTING_NONE);
 
   // Ensure the opener is cleared even if it is in the same process.
   EXPECT_FALSE(contents()->HasOpener());
@@ -1549,7 +1549,7 @@ TEST_F(RenderFrameHostManagerTest, DisownOpenerDuringNavigation) {
   contents()->GetMainFrame()->PrepareForCommit();
 
   // Disown the opener from rfh2.
-  rfh2->DidDisownOpener();
+  rfh2->DidChangeOpener(MSG_ROUTING_NONE);
 
   // Ensure the opener is cleared.
   EXPECT_FALSE(contents()->HasOpener());
@@ -1586,7 +1586,7 @@ TEST_F(RenderFrameHostManagerTest, DisownOpenerAfterNavigation) {
   TestRenderFrameHost* rfh2 = main_test_rfh();
   EXPECT_NE(site_instance1, rfh2->GetSiteInstance());
 
-  // Commit a back navigation before the DidDisownOpener message arrives.
+  // Commit a back navigation before the DidChangeOpener message arrives.
   contents()->GetController().GoBack();
   contents()->GetMainFrame()->PrepareForCommit();
   const NavigationEntry* entry1 = contents()->GetController().GetPendingEntry();
@@ -1594,7 +1594,7 @@ TEST_F(RenderFrameHostManagerTest, DisownOpenerAfterNavigation) {
       entry1->GetPageID(), entry1->GetUniqueID(), false, entry1->GetURL());
 
   // Disown the opener from rfh2.
-  rfh2->DidDisownOpener();
+  rfh2->DidChangeOpener(MSG_ROUTING_NONE);
   EXPECT_FALSE(contents()->HasOpener());
 }
 
@@ -2060,12 +2060,18 @@ TEST_F(RenderFrameHostManagerTest,
   }
 }
 
+class RenderFrameHostManagerTestWithSiteIsolation
+    : public RenderFrameHostManagerTest {
+ public:
+  RenderFrameHostManagerTestWithSiteIsolation() {
+    IsolateAllSitesForTesting(base::CommandLine::ForCurrentProcess());
+  }
+};
+
 // Test that a pending RenderFrameHost in a non-root frame tree node is properly
 // deleted when the node is detached. Motivated by http://crbug.com/441357 and
 // http://crbug.com/444955.
-TEST_F(RenderFrameHostManagerTest, DetachPendingChild) {
-  IsolateAllSitesForTesting(base::CommandLine::ForCurrentProcess());
-
+TEST_F(RenderFrameHostManagerTestWithSiteIsolation, DetachPendingChild) {
   const GURL kUrlA("http://www.google.com/");
   const GURL kUrlB("http://webkit.org/");
 
@@ -2186,9 +2192,8 @@ TEST_F(RenderFrameHostManagerTest, DetachPendingChild) {
 // Two tabs in the same process crash. The first tab is reloaded, and the second
 // tab navigates away without reloading. The second tab's navigation shouldn't
 // mess with the first tab's content. Motivated by http://crbug.com/473714.
-TEST_F(RenderFrameHostManagerTest, TwoTabsCrashOneReloadsOneLeaves) {
-  IsolateAllSitesForTesting(base::CommandLine::ForCurrentProcess());
-
+TEST_F(RenderFrameHostManagerTestWithSiteIsolation,
+       TwoTabsCrashOneReloadsOneLeaves) {
   const GURL kUrl1("http://www.google.com/");
   const GURL kUrl2("http://webkit.org/");
   const GURL kUrl3("http://whatwg.org/");
@@ -2298,8 +2303,16 @@ TEST_F(RenderFrameHostManagerTest, CreateOpenerProxiesWithCycleOnOpenerChain) {
   EXPECT_EQ(tab2_proxy->GetRoutingID(), tab1_opener_routing_id);
   EXPECT_EQ(tab1_proxy->GetRoutingID(), tab2_opener_routing_id);
 
-  // TODO(alexmos): Because of the cycle, tab2 will require a separate opener
-  // update IPC.  Verify that this IPC is sent once it's implemented.
+  // Setting tab2_proxy's opener required an extra IPC message to be set, since
+  // the opener's routing ID wasn't available when tab2_proxy was created.
+  // Verify that this IPC was sent and that it passed correct routing ID.
+  const IPC::Message* message =
+      rfh2->GetProcess()->sink().GetUniqueMessageMatching(
+          FrameMsg_UpdateOpener::ID);
+  EXPECT_TRUE(message);
+  FrameMsg_UpdateOpener::Param params;
+  EXPECT_TRUE(FrameMsg_UpdateOpener::Read(message, &params));
+  EXPECT_EQ(tab2_opener_routing_id, base::get<0>(params));
 }
 
 // Test that opener proxies are created properly when the opener points
@@ -2337,9 +2350,16 @@ TEST_F(RenderFrameHostManagerTest, CreateOpenerProxiesWhenOpenerPointsToSelf) {
       opener_manager->GetOpenerRoutingID(rfh2->GetSiteInstance());
   EXPECT_EQ(opener_proxy->GetRoutingID(), opener_routing_id);
 
-  // TODO(alexmos): Because of the cycle, setting the opener in opener_proxy
-  // will require a separate opener update IPC.  Verify that this IPC is sent
-  // once it's implemented.
+  // Setting the opener in opener_proxy required an extra IPC message, since
+  // the opener's routing ID wasn't available when opener_proxy was created.
+  // Verify that this IPC was sent and that it passed correct routing ID.
+  const IPC::Message* message =
+      rfh2->GetProcess()->sink().GetUniqueMessageMatching(
+          FrameMsg_UpdateOpener::ID);
+  EXPECT_TRUE(message);
+  FrameMsg_UpdateOpener::Param params;
+  EXPECT_TRUE(FrameMsg_UpdateOpener::Read(message, &params));
+  EXPECT_EQ(opener_routing_id, base::get<0>(params));
 }
 
 // Build the following frame opener graph and see that it can be properly

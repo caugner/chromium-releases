@@ -80,7 +80,7 @@ class ZeroSuggestPrefetcher : public AutocompleteControllerDelegate {
   void OnResultChanged(bool default_match_changed) override;
 
   scoped_ptr<AutocompleteController> controller_;
-  base::OneShotTimer<ZeroSuggestPrefetcher> expire_timer_;
+  base::OneShotTimer expire_timer_;
 };
 
 ZeroSuggestPrefetcher::ZeroSuggestPrefetcher(Profile* profile)
@@ -222,7 +222,9 @@ void AutocompleteControllerAndroid::OnSuggestionSelected(
       content::WebContents::FromJavaWebContents(j_web_contents);
 
   OmniboxLog log(
-      input_.text(),
+      // For zero suggest, record an empty input string instead of the
+      // current URL.
+      input_.from_omnibox_focus() ? base::string16() : input_.text(),
       false, /* don't know */
       input_.type(),
       true,
@@ -295,7 +297,7 @@ AutocompleteControllerAndroid::Factory::GetForProfile(
 
 AutocompleteControllerAndroid::Factory*
 AutocompleteControllerAndroid::Factory::GetInstance() {
-  return Singleton<AutocompleteControllerAndroid::Factory>::get();
+  return base::Singleton<AutocompleteControllerAndroid::Factory>::get();
 }
 
 content::BrowserContext*
@@ -403,7 +405,7 @@ AutocompleteControllerAndroid::ClassifyPage(const GURL& gurl,
   const std::string& url = gurl.spec();
 
   if (gurl.SchemeIs(content::kChromeUIScheme) &&
-      gurl.host() == chrome::kChromeUINewTabHost) {
+      gurl.host_piece() == chrome::kChromeUINewTabHost) {
     return OmniboxEventProto::NTP;
   }
 
@@ -508,7 +510,9 @@ AutocompleteControllerAndroid::GetTopSynchronousResult(
   return BuildOmniboxSuggestion(env, *result.begin());
 }
 
-static jlong Init(JNIEnv* env, jobject obj, jobject jprofile) {
+static jlong Init(JNIEnv* env,
+                  const JavaParamRef<jobject>& obj,
+                  const JavaParamRef<jobject>& jprofile) {
   Profile* profile = ProfileAndroid::FromProfileAndroid(jprofile);
   if (!profile)
     return 0;
@@ -518,11 +522,13 @@ static jlong Init(JNIEnv* env, jobject obj, jobject jprofile) {
   return reinterpret_cast<intptr_t>(native_bridge);
 }
 
-static jstring QualifyPartialURLQuery(
-    JNIEnv* env, jclass clazz, jstring jquery) {
+static ScopedJavaLocalRef<jstring> QualifyPartialURLQuery(
+    JNIEnv* env,
+    const JavaParamRef<jclass>& clazz,
+    const JavaParamRef<jstring>& jquery) {
   Profile* profile = ProfileManager::GetActiveUserProfile();
   if (!profile)
-    return NULL;
+    return ScopedJavaLocalRef<jstring>();
   AutocompleteMatch match;
   base::string16 query_string(ConvertJavaStringToUTF16(env, jquery));
   AutocompleteClassifierFactory::GetForProfile(profile)->Classify(
@@ -533,19 +539,20 @@ static jstring QualifyPartialURLQuery(
       &match,
       NULL);
   if (!match.destination_url.is_valid())
-    return NULL;
+    return ScopedJavaLocalRef<jstring>();
 
   // Only return a URL if the match is a URL type.
   if (match.type != AutocompleteMatchType::URL_WHAT_YOU_TYPED &&
       match.type != AutocompleteMatchType::HISTORY_URL &&
       match.type != AutocompleteMatchType::NAVSUGGEST)
-    return NULL;
+    return ScopedJavaLocalRef<jstring>();
 
   // As we are returning to Java, it is fine to call Release().
-  return ConvertUTF8ToJavaString(env, match.destination_url.spec()).Release();
+  return ConvertUTF8ToJavaString(env, match.destination_url.spec());
 }
 
-static void PrefetchZeroSuggestResults(JNIEnv* env, jclass clazz) {
+static void PrefetchZeroSuggestResults(JNIEnv* env,
+                                       const JavaParamRef<jclass>& clazz) {
   Profile* profile = ProfileManager::GetActiveUserProfile();
   if (!profile)
     return;

@@ -14,6 +14,8 @@
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/bookmarks/bookmark_utils.h"
+#include "chrome/browser/ui/bookmarks/bookmark_utils_desktop.h"
+#include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/locale_settings.h"
 #include "components/bookmarks/browser/bookmark_model.h"
@@ -49,17 +51,6 @@ namespace {
 const SkColor kErrorColor = SkColorSetRGB(0xFF, 0xBC, 0xBC);
 
 }  // namespace
-
-// static
-void BookmarkEditor::Show(gfx::NativeWindow parent_window,
-                          Profile* profile,
-                          const EditDetails& details,
-                          Configuration configuration) {
-  DCHECK(profile);
-  BookmarkEditorView* editor = new BookmarkEditorView(profile,
-      details.parent_node, details, configuration);
-  editor->Show(parent_window);
-}
 
 BookmarkEditorView::BookmarkEditorView(
     Profile* profile,
@@ -356,8 +347,8 @@ void BookmarkEditorView::Init() {
   const int buttons_column_set_id = 2;
 
   views::ColumnSet* column_set = layout->AddColumnSet(labels_column_set_id);
-  column_set->AddColumn(GridLayout::LEADING, GridLayout::CENTER, 0,
-                        GridLayout::USE_PREF, 0, 0);
+  column_set->AddColumn(views::kControlLabelGridAlignment, GridLayout::CENTER,
+                        0, GridLayout::USE_PREF, 0, 0);
   column_set->AddPaddingColumn(0, views::kRelatedControlHorizontalSpacing);
   column_set->AddColumn(GridLayout::FILL, GridLayout::CENTER, 1,
                         GridLayout::USE_PREF, 0, 0);
@@ -654,3 +645,17 @@ void BookmarkEditorView::EditorTreeModel::SetTitle(
   if (!title.empty())
     ui::TreeNodeModel<EditorNode>::SetTitle(node, title);
 }
+
+namespace chrome {
+
+void ShowBookmarkEditorViews(gfx::NativeWindow parent_window,
+                             Profile* profile,
+                             const BookmarkEditor::EditDetails& details,
+                             BookmarkEditor::Configuration configuration) {
+  DCHECK(profile);
+  BookmarkEditorView* editor = new BookmarkEditorView(
+      profile, details.parent_node, details, configuration);
+  editor->Show(parent_window);
+}
+
+}  // namespace chrome

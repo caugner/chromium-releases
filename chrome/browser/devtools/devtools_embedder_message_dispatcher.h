@@ -66,6 +66,12 @@ class DevToolsEmbedderMessageDispatcher {
     virtual void ZoomOut() = 0;
     virtual void ResetZoom() = 0;
     virtual void SetDevicesUpdatesEnabled(bool enabled) = 0;
+    virtual void SetDevicesDiscoveryConfig(
+        bool discover_usb_devices,
+        bool port_forwarding_enabled,
+        const std::string& port_forwarding_config) = 0;
+    virtual void PerformActionOnRemotePage(const std::string& page_id,
+                                           const std::string& action) = 0;
     virtual void GetPreferences(const DispatchCallback& callback) = 0;
     virtual void SetPreference(const std::string& name,
                                const std::string& value) = 0;
@@ -78,6 +84,7 @@ class DevToolsEmbedderMessageDispatcher {
     virtual void SendJsonRequest(const DispatchCallback& callback,
                                  const std::string& browser_id,
                                  const std::string& url) = 0;
+    virtual void SendFrontendAPINotification(const std::string& message) = 0;
   };
 
   using DispatchCallback = Delegate::DispatchCallback;

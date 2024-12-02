@@ -2,7 +2,7 @@
 
 *This page is automatically generated from* `gn help --markdown all`.
 
-## **--args**: Specifies build arguments overrides.
+## **\--args**: Specifies build arguments overrides.
 
 ```
   See "gn help buildargs" for an overview of how build arguments work.
@@ -40,7 +40,7 @@
 
 
 ```
-## **--[no]color**: Forces colored output on or off.
+## **\--[no]color**: Forces colored output on or off.
 
 ```
   Normally GN will try to detect whether it is outputting to a terminal
@@ -58,7 +58,7 @@
 
 
 ```
-## **--dotfile**: Override the name of the ".gn" file.
+## **\--dotfile**: Override the name of the ".gn" file.
 
 ```
   Normally GN loads the ".gn"file  from the source root for some basic
@@ -70,9 +70,9 @@
 
 
 ```
-## **--markdown**: write the output in the Markdown format.
+## **\--markdown**: write the output in the Markdown format.
 
-## **--[no]color**: Forces colored output on or off.
+## **\--[no]color**: Forces colored output on or off.
 
 ```
   Normally GN will try to detect whether it is outputting to a terminal
@@ -97,7 +97,7 @@
 
 
 ```
-## **--root**: Explicitly specify source root.
+## **\--root**: Explicitly specify source root.
 
 ```
   Normally GN will look up in the directory tree from the current
@@ -119,7 +119,7 @@
 
 
 ```
-## **--runtime-deps-list-file**: Save runtime dependencies for targets in file.
+## **\--runtime-deps-list-file**: Save runtime dependencies for targets in file.
 
 ```
   --runtime-deps-list-file=<filename>
@@ -154,7 +154,26 @@
 
 
 ```
-## **--time**: Outputs a summary of how long everything took.
+## **\--threads**: Specify number of worker threads.
+
+```
+  GN runs many threads to load and run build files. This can make
+  debugging challenging. Or you may want to experiment with different
+  values to see how it affects performance.
+
+  The parameter is the number of worker threads. This does not count the
+  main thread (so there are always at least two).
+
+```
+
+### **Examples**
+
+```
+  gen gen out/Default --threads=1
+
+
+```
+## **\--time**: Outputs a summary of how long everything took.
 
 ```
   Hopefully self-explanatory.
@@ -168,7 +187,7 @@
 
 
 ```
-## **--tracelog**: Writes a Chrome-compatible trace log to the given file.
+## **\--tracelog**: Writes a Chrome-compatible trace log to the given file.
 
 ```
   The trace log will show file loads, executions, scripts, and writes.
@@ -194,7 +213,7 @@
 
 
 ```
-## **gn args <out_dir> [--list] [--short] [--args]**
+## **gn args <out_dir> [\--list] [\--short] [\--args]**
 
 ```
   See also "gn help buildargs" for a more high-level overview of how
@@ -259,7 +278,7 @@
 
 
 ```
-## **gn check <out_dir> [<label_pattern>] [--force]**
+## **gn check <out_dir> [<label_pattern>] [\--force]**
 
 ```
   "gn check" is the same thing as "gn gen" with the "--check" flag
@@ -309,7 +328,7 @@
 
 
 ```
-## **gn desc <out_dir> <target label> [<what to show>] [--blame]**
+## **gn desc <out_dir> <target label> [<what to show>] [\--blame]**
 
 ```
   Displays information about a given labeled target for the given build.
@@ -474,7 +493,7 @@
 
 
 ```
-## **gn format [--dump-tree] [--in-place] [--stdin] BUILD.gn**
+## **gn format [\--dump-tree] [\--in-place] [\--stdin] BUILD.gn**
 
 ```
   Formats .gn file to a standard format.
@@ -527,7 +546,7 @@
   Or it can be a directory relative to the current directory such as:
       out/foo
 
-  See "gn help" for the common command-line switches.
+  See "gn help switches" for the common command-line switches.
 
 
 ```
@@ -538,7 +557,7 @@
 
 
 ```
-## **gn ls <out_dir> [<label_pattern>] [--all-toolchains] [--as=...]**
+## **gn ls <out_dir> [<label_pattern>] [\--all-toolchains] [\--as=...]**
 ```
       [--type=...] [--testonly=...]
 
@@ -642,7 +661,7 @@
 
 
 ```
-## **gn refs <out_dir> (<label_pattern>|<label>|<file>|@<response_file>)* [--all]**
+## **gn refs <out_dir> (<label_pattern>|<label>|<file>|@<response_file>)* [\--all]**
 ```
         [--all-toolchains] [--as=...] [--testonly=...] [--type=...]
 
@@ -843,7 +862,7 @@
 ### **Variables**
 
 ```
-  args, data, data_deps, depfile, deps, outputs*, script*,
+  args, console, data, data_deps, depfile, deps, outputs*, script*,
   inputs, sources
   * = required
 
@@ -930,7 +949,7 @@
 ### **Variables**
 
 ```
-  args, data, data_deps, depfile, deps, outputs*, script*,
+  args, console, data, data_deps, depfile, deps, outputs*, script*,
   inputs, sources*
   * = required
 
@@ -1010,7 +1029,7 @@
 ### **Variables valid in a config definition**:
 ```
   Flags: cflags, cflags_c, cflags_cc, cflags_objc, cflags_objcc,
-         defines, include_dirs, ldflags, lib_dirs, libs
+         defines, include_dirs, ldflags, lib_dirs, libs,
          precompiled_header, precompiled_source
 
 ```
@@ -1045,15 +1064,15 @@
   reference the output or generated intermediate file directories,
   respectively.
 
-  Both "sources" and "outputs" must be specified. Sources can
+  Both "sources" and "outputs" must be specified. Sources can include
   as many files as you want, but there can only be one item in the
   outputs list (plural is used for the name for consistency with
   other target types).
 
   If there is more than one source file, your output name should specify
-  a mapping from each source files to output file names using source
+  a mapping from each source file to an output file name using source
   expansion (see "gn help source_expansion"). The placeholders will
-  will look like "{{source_name_part}}", for example.
+  look like "{{source_name_part}}", for example.
 
 ```
 
@@ -1209,7 +1228,7 @@
 
 ```
   Flags: cflags, cflags_c, cflags_cc, cflags_objc, cflags_objcc,
-         defines, include_dirs, ldflags, lib_dirs, libs
+         defines, include_dirs, ldflags, lib_dirs, libs,
          precompiled_header, precompiled_source
   Deps: data_deps, deps, forward_dependent_configs_from, public_deps
   Dependent configs: all_dependent_configs, public_configs
@@ -1250,6 +1269,69 @@
   a
   b
   c
+
+
+```
+## **forward_variables_from**: Copies variables from a different scope.
+
+```
+  forward_variables_from(from_scope, variable_list_or_star)
+
+  Copies the given variables from the given scope to the local scope
+  if they exist. This is normally used in the context of templates to
+  use the values of variables defined in the template invocation to
+  a template-defined target.
+
+  The variables in the given variable_list will be copied if they exist
+  in the given scope or any enclosing scope. If they do not exist,
+  nothing will happen and they be left undefined in the current scope.
+
+  As a special case, if the variable_list is a string with the value of
+  "*", all variables from the given scope will be copied. "*" only
+  copies variables set directly on the from_scope, not enclosing ones.
+  Otherwise it would duplicate all global variables.
+
+  When an explicit list of variables is supplied, if the variable exists
+  in the current (destination) scope already, an error will be thrown.
+  If "*" is specified, variables in the current scope will be
+  clobbered (the latter is important because most targets have an
+  implicit configs list, which means it wouldn't work at all if it
+  didn't clobber).
+
+  The sources assignment filter (see "gn help set_sources_assignment_filter")
+  is never applied by this function. It's assumed than any desired
+  filtering was already done when sources was set on the from_scope.
+
+```
+
+### **Examples**
+
+```
+  # This is a common action template. It would invoke a script with
+  # some given parameters, and wants to use the various types of deps
+  # and the visibility from the invoker if it's defined. It also injects
+  # an additional dependency to all targets.
+  template("my_test") {
+    action(target_name) {
+      forward_variables_from(invoker, [ "data_deps", "deps",
+                                        "public_deps", "visibility" ])
+      # Add our test code to the dependencies.
+      # "deps" may or may not be defined at this point.
+      if (defined(deps)) {
+        deps += [ "//tools/doom_melon" ]
+      } else {
+        deps = [ "//tools/doom_melon" ]
+      }
+    }
+  }
+
+  # This is a template around either a target whose type depends on a
+  # global variable. It forwards all values from the invoker.
+  template("my_wrapper") {
+    target(my_wrapper_target_type, target_name) {
+      forward_variables_from(invoker, "*")
+    }
+ }
 
 
 ```
@@ -1386,7 +1468,7 @@
 
   "abspath"
       The full absolute path name to the file or directory. It will be
-      resolved relative to the currebt directory, and then the source-
+      resolved relative to the current directory, and then the source-
       absolute version will be returned. If the input is system-
       absolute, the same input will be returned.
         "foo/bar.txt" => "//mydir/foo/bar.txt"
@@ -1921,7 +2003,7 @@
 
 ```
   Flags: cflags, cflags_c, cflags_cc, cflags_objc, cflags_objcc,
-         defines, include_dirs, ldflags, lib_dirs, libs
+         defines, include_dirs, ldflags, lib_dirs, libs,
          precompiled_header, precompiled_source
   Deps: data_deps, deps, forward_dependent_configs_from, public_deps
   Dependent configs: all_dependent_configs, public_configs
@@ -1962,7 +2044,7 @@
 
 ```
   Flags: cflags, cflags_c, cflags_cc, cflags_objc, cflags_objcc,
-         defines, include_dirs, ldflags, lib_dirs, libs
+         defines, include_dirs, ldflags, lib_dirs, libs,
          precompiled_header, precompiled_source
   Deps: data_deps, deps, forward_dependent_configs_from, public_deps
   Dependent configs: all_dependent_configs, public_configs
@@ -1986,12 +2068,47 @@
 
 ```
   Flags: cflags, cflags_c, cflags_cc, cflags_objc, cflags_objcc,
-         defines, include_dirs, ldflags, lib_dirs, libs
+         defines, include_dirs, ldflags, lib_dirs, libs,
          precompiled_header, precompiled_source
   Deps: data_deps, deps, forward_dependent_configs_from, public_deps
   Dependent configs: all_dependent_configs, public_configs
   General: check_includes, configs, data, inputs, output_name,
            output_extension, public, sources, testonly, visibility
+
+
+```
+## **target**: Declare an target with the given programmatic type.
+
+```
+  target(target_type_string, target_name_string) { ... }
+
+  The target() function is a way to invoke a built-in target or template
+  with a type determined at runtime. This is useful for cases where the
+  type of a target might not be known statically.
+
+  Only templates and built-in target functions are supported for the
+  target_type_string parameter. Arbitrary functions, configs, and
+  toolchains are not supported.
+
+  The call:
+    target("source_set", "doom_melon") {
+  Is equivalent to:
+    source_set("doom_melon") {
+
+```
+
+### **Example**
+
+```
+  if (foo_build_as_shared) {
+    my_type = "shared_library"
+  } else {
+    my_type = "source_set"
+  }
+
+  target(my_type, "foo") {
+    ...
+  }
 
 
 ```
@@ -2011,7 +2128,7 @@
 
 ```
 
-### **More details**:
+### **Variables and templates**:
 
 ```
   When you call template() it creates a closure around all variables
@@ -2027,6 +2144,19 @@
   current directory will be that of the invoking code, since typically
   that code specifies the file names. This means all files internal
   to the template should use absolute names.
+
+  A template will typically forward some or all variables from the
+  invoking scope to a target that it defines. Often, such variables
+  might be optional. Use the pattern:
+
+    if (defined(invoker.deps)) {
+      deps = invoker.deps
+    }
+
+  The function forward_variables_from() provides a shortcut to forward
+  one or more or possibly all variables in this manner:
+
+    forward_variables_from(invoker, ["deps", "public_deps"])
 
 ```
 
@@ -2046,8 +2176,8 @@
   have globally unique names, or you will get collisions.
 
   Access the invoking name in your template via the implicit
-  "target_name" variable. This should also be the basis of how other
-  targets that a template expands to to ensure uniquness.
+  "target_name" variable. This should also be the basis for how other
+  targets that a template expands to ensure uniqueness.
 
   A typical example would be a template that defines an action to
   generate some source files, and a source_set to compile that source.
@@ -2302,13 +2432,14 @@
 
         Type of precompiled headers. If undefined or the empty string,
         precompiled headers will not be used for this tool. Otherwise
-        use "msvc" which is the only currently supported value.
+        use "gcc" or "msvc".
 
         For precompiled headers to be used for a given target, the
         target (or a config applied to it) must also specify a
         "precompiled_header" and, for "msvc"-style headers, a
-        "precompiled_source" value.
-
+        "precompiled_source" value. If the type is "gcc", then both
+        "precompiled_header" and "precompiled_source" must resolve
+        to the same file, despite the different formats required for each.
         See "gn help precompiled_header" for more.
 
     restat  [boolean]
@@ -2734,7 +2865,7 @@
 
 ```
 
-### **Example**:
+### **Example**
 
 ```
   if (current_toolchain == "//build:64_bit_toolchain") {
@@ -2849,7 +2980,7 @@
 
 ```
 
-### **Example**:
+### **Example**
 
 ```
   action("myscript") {
@@ -2911,7 +3042,7 @@
 
 ```
 
-### **Example**:
+### **Example**
 
 ```
   action("myscript") {
@@ -2984,7 +3115,7 @@
 
 ```
 
-### **Example**:
+### **Example**
 
 ```
   action("myscript") {
@@ -3014,7 +3145,7 @@
 
 ```
 
-### **Ordering of flags and values**:
+### **Ordering of flags and values**
 
 ```
   1. Those set on the current target (not in a config).
@@ -3098,7 +3229,7 @@
 
 ```
 
-### **Ordering of flags and values**:
+### **Ordering of flags and values**
 
 ```
   1. Those set on the current target (not in a config).
@@ -3131,7 +3262,7 @@
 
 ```
 
-### **Ordering of flags and values**:
+### **Ordering of flags and values**
 
 ```
   1. Those set on the current target (not in a config).
@@ -3164,7 +3295,7 @@
 
 ```
 
-### **Ordering of flags and values**:
+### **Ordering of flags and values**
 
 ```
   1. Those set on the current target (not in a config).
@@ -3197,7 +3328,7 @@
 
 ```
 
-### **Ordering of flags and values**:
+### **Ordering of flags and values**
 
 ```
   1. Those set on the current target (not in a config).
@@ -3230,7 +3361,7 @@
 
 ```
 
-### **Ordering of flags and values**:
+### **Ordering of flags and values**
 
 ```
   1. Those set on the current target (not in a config).
@@ -3327,15 +3458,25 @@
 
 
 ```
-## **configs**: Configs applying to this target.
+## **configs**: Configs applying to this target or config.
 
 ```
   A list of config labels.
 
-  The include_dirs, defines, etc. in each config are appended in the
-  order they appear to the compile command for each file in the target.
-  They will appear after the include_dirs, defines, etc. that the target
-  sets directly.
+```
+
+### **Configs on a target**
+
+```
+  When used on a target, the include_dirs, defines, etc. in each config
+  are appended in the order they appear to the compile command for each
+  file in the target. They will appear after the include_dirs, defines,
+  etc. that the target sets directly.
+
+  Since configs apply after the values set on a target, directly setting
+  a compiler flag will prepend it to the command line. If you want to
+  append a flag instead, you can put that flag in a one-off config and
+  append that config to the target's configs list.
 
   The build configuration script will generally set up the default
   configs applying to a given target type (see "set_defaults").
@@ -3344,7 +3485,32 @@
 
 ```
 
-### **Ordering of flags and values**:
+### **Configs on a config**
+
+```
+  It is possible to create composite configs by specifying configs on a
+  config. One might do this to forward values, or to factor out blocks
+  of settings from very large configs into more manageable named chunks.
+
+  In this case, the composite config is expanded to be the concatenation
+  of its own values, and in order, the values from its sub-configs
+  *before* anything else happens. This has some ramifications:
+
+   - A target has no visibility into a config's sub-configs. Target
+     code only sees the name of the composite config. It can't remove
+     sub-configs or opt in to only parts of it. The composite config may
+     not even be defined before the target is.
+
+   - You can get duplication of values if a config is listed twice, say,
+     on a target and in a sub-config that also applies. In other cases,
+     the configs applying to a target are de-duped. It's expected that
+     if a config is listed as a sub-config that it is only used in that
+     context. (Note that it's possible to fix this and de-dupe, but it's
+     not normally relevant and complicates the implementation.)
+
+```
+
+### **Ordering of flags and values**
 
 ```
   1. Those set on the current target (not in a config).
@@ -3363,11 +3529,57 @@
 
 ```
 
-### **Example**:
+### **Example**
+
 ```
-  static_library("foo") {
-    configs -= "//build:no_rtti"  # Don't use the default RTTI config.
-    configs += ":mysettings"      # Add some of our own settings.
+  # Configs on a target.
+  source_set("foo") {
+    # Don't use the default RTTI config that BUILDCONFIG applied to us.
+    configs -= [ "//build:no_rtti" ]
+
+    # Add some of our own settings.
+    configs += [ ":mysettings" ]
+  }
+
+  # Create a default_optimization config that forwards to one of a set
+  # of more specialized configs depending on build flags. This pattern
+  # is useful because it allows a target to opt in to either a default
+  # set, or a more specific set, while avoid duplicating the settings in
+  # two places.
+  config("super_optimization") {
+    cflags = [ ... ]
+  }
+  config("default_optimization") {
+    if (optimize_everything) {
+      configs = [ ":super_optimization" ]
+    } else {
+      configs = [ ":no_optimization" ]
+    }
+  }
+
+
+```
+## **console**: Run this action in the console pool.
+
+```
+  Boolean. Defaults to false.
+
+  Actions marked "console = true" will be run in the built-in ninja
+  "console" pool. They will have access to real stdin and stdout, and
+  output will not be buffered by ninja. This can be useful for
+  long-running actions with progress logs, or actions that require user 
+  input.
+
+  Only one console pool target can run at any one time in Ninja. Refer
+  to the Ninja documentation on the console pool for more info.
+
+```
+
+### **Example**
+
+```
+  action("long_action_with_progress_logs") {
+    console = true
   }
 
 
@@ -3407,8 +3619,8 @@
   A list of target labels.
 
   Specifies dependencies of a target that are not actually linked into
-  the current target. Such dependencies will built and will be available
-  at runtime.
+  the current target. Such dependencies will be built and will be
+  available at runtime.
 
   This is normally used for things like plugins or helper programs that
   a target needs at runtime.
@@ -3417,7 +3629,8 @@
 
 ```
 
-### **Example**:
+### **Example**
+
 ```
   executable("foo") {
     deps = [ "//base" ]
@@ -3436,7 +3649,7 @@
 
 ```
 
-### **Ordering of flags and values**:
+### **Ordering of flags and values**
 
 ```
   1. Those set on the current target (not in a config).
@@ -3455,7 +3668,8 @@
 
 ```
 
-### **Example**:
+### **Example**
+
 ```
   defines = [ "AWESOME_FEATURE", "LOG_LEVEL=3" ]
 
@@ -3478,7 +3692,8 @@
 
 ```
 
-### **Example**:
+### **Example**
+
 ```
   action_foreach("myscript_target") {
     script = "myscript.py"
@@ -3500,10 +3715,7 @@
   A list of target labels.
 
   Specifies private dependencies of a target. Shared and dynamic
-  libraries will be linked into the current target. Other target types
-  that can't be linked (like actions and groups) listed in "deps" will
-  be treated as "data_deps". Likewise, if the current target isn't
-  linkable, then all deps will be treated as "data_deps".
+  libraries will be linked into the current target.
 
   These dependencies are private in that it does not grant dependent
   targets the ability to include headers from the dependency, and direct
@@ -3575,7 +3787,7 @@
 
 ```
 
-### **Ordering of flags and values**:
+### **Ordering of flags and values**
 
 ```
   1. Those set on the current target (not in a config).
@@ -3594,7 +3806,8 @@
 
 ```
 
-### **Example**:
+### **Example**
+
 ```
   include_dirs = [ "src/include", "//third_party/foo" ]
 
@@ -3619,10 +3832,10 @@
   uses via imports (the main script itself will be an implcit dependency
   of the action so need not be listed).
 
-  For action targets, inputs should be the entire set of inputs the
-  script needs. For action_foreach targets, inputs should be the set of
-  dependencies that don't change. These will be applied to each script
-  invocation over the sources.
+  For action targets, inputs and sources are treated the same, but from
+  a style perspective, it's recommended to follow the same rule as
+  action_foreach and put helper files in the inputs, and the data used
+  by the script (if any) in sources.
 
   Note that another way to declare input dependencies from an action
   is to have the action write a depfile (see "gn help depfile"). This
@@ -3633,6 +3846,26 @@
 
 ```
 
+### **Script input gotchas**
+
+```
+  It may be tempting to write a script that enumerates all files in a
+  directory as inputs. Don't do this! Even if you specify all the files
+  in the inputs or sources in the GN target (or worse, enumerate the
+  files in an exec_script call when running GN, which will be slow), the
+  dependencies will be broken.
+
+  The problem happens if a file is ever removed because the inputs are
+  not listed on the command line to the script. Because the script
+  hasn't changed and all inputs are up-to-date, the script will not
+  re-run and you will get a stale build. Instead, either list all
+  inputs on the command line to the script, or if there are many, create
+  a separate list file that the script reads. As long as this file is
+  listed in the inputs, the build will detect when it has changed in any
+  way and the action will re-run.
+
+```
+
 ### **Inputs for binary targets**
 
 ```
@@ -3640,6 +3873,14 @@
   Normally, all actions that a target depends on will be run before any
   files in a target are compiled. So if you depend on generated headers,
   you do not typically need to list them in the inputs section.
+
+  Inputs for binary targets will be treated as order-only dependencies,
+  meaning that they will be forced up-to-date before compiling or
+  any files in the target, but changes in the inputs will not
+  necessarily force the target to compile. This is because it is
+  expected that the compiler will report the precise list of input
+  dependencies required to recompile each file once the initial build
+  is done.
 
 ```
 
@@ -3667,6 +3908,25 @@
   to dependent targets, put them in a config and set it in the
   all_dependent_configs or public_configs.
 
+```
+
+### **Ordering of flags and values**
+
+```
+  1. Those set on the current target (not in a config).
+  2. Those set on the "configs" on the target in order that the
+     configs appear in the list.
+  3. Those set on the "all_dependent_configs" on the target in order
+     that the configs appear in the list.
+  4. Those set on the "public_configs" on the target in order that
+     those configs appear in the list.
+  5. all_dependent_configs pulled from dependencies, in the order of
+     the "deps" list. This is done recursively. If a config appears
+     more than once, only the first occurance will be used.
+  6. public_configs pulled from dependencies, in the order of the
+     "deps" list. If a dependency is public, they will be applied
+     recursively.
+
 
 ```
 ## **lib_dirs**: Additional library directories.
@@ -3686,7 +3946,7 @@
 
 ```
 
-### **Ordering of flags and values**:
+### **Ordering of flags and values**
 
 ```
   1. Those set on the current target (not in a config).
@@ -3705,7 +3965,8 @@
 
 ```
 
-### **Example**:
+### **Example**
+
 ```
   lib_dirs = [ "/usr/lib/foo", "lib/doom_melon" ]
 
@@ -3739,7 +4000,7 @@
 
 ```
 
-### **Ordering of flags and values**:
+### **Ordering of flags and values**
 
 ```
   1. Those set on the current target (not in a config).
@@ -3758,7 +4019,8 @@
 
 ```
 
-### **Examples**:
+### **Examples**
+
 ```
   On Windows:
     libs = [ "ctl3d.lib" ]
@@ -3775,6 +4037,35 @@
   override the name (for example to use "libfreetype.so.6" instead
   of libfreetype.so on Linux).
 
+  This value should not include a leading dot. If undefined or empty,
+  the default_output_extension specified on the tool will be used.
+  The output_extension will be used in the "{{output_extension}}"
+  expansion which the linker tool will generally use to specify the
+  output file name. See "gn help tool".
+
+```
+
+### **Example**
+
+```
+  shared_library("freetype") {
+    if (is_linux) {
+      # Call the output "libfreetype.so.6"
+      output_extension = "so.6"
+    }
+    ...
+  }
+
+  # On Windows, generate a "mysettings.cpl" control panel applet.
+  # Control panel applets are actually special shared libraries.
+  if (is_win) {
+    shared_library("mysettings") {
+      output_extension = "cpl"
+      ...
+    }
+  }
+
+
 ```
 ## **output_name**: Define a name for the output file other than the default.
 
@@ -3788,13 +4079,17 @@
 
   The output name should have no extension or prefixes, these will be
   added using the default system rules. For example, on Linux an output
-  name of "foo" will produce a shared library "libfoo.so".
+  name of "foo" will produce a shared library "libfoo.so". There
+  is no way to override the output prefix of a linker tool on a per-
+  target basis. If you need more flexibility, create a copy target
+  to produce the file you want.
 
   This variable is valid for all binary output target types.
 
 ```
 
-### **Example**:
+### **Example**
+
 ```
   static_library("doom_melon") {
     output_name = "fluffy_bunny"
@@ -3806,13 +4101,26 @@
 
 ```
   Outputs is valid for "copy", "action", and "action_foreach"
-  target types and indicates the resulting files. The values may contain
-  source expansions to generate the output names from the sources (see
-  "gn help source_expansion").
+  target types and indicates the resulting files. Outputs must always
+  refer to files in the build directory.
 
-  For copy targets, the outputs is the destination for the copied
-  file(s). For actions, the outputs should be the list of files
-  generated by the script.
+  copy
+    Copy targets should have exactly one entry in the outputs list. If
+    there is exactly one source, this can be a literal file name or a
+    source expansion. If there is more than one source, this must
+    contain a source expansion to map a single input name to a single
+    output name. See "gn help copy".
+
+  action_foreach
+    Action_foreach targets must always use source expansions to map
+    input files to output files. There can be more than one output,
+    which means that each invocation of the script will produce a set of
+    files (presumably based on the name of the input file). See
+    "gn help action_foreach".
+
+  action
+    Action targets (excluding action_foreach) must list literal output
+    file(s) with no source expansions. See "gn help action".
 
 
 ```
@@ -3914,7 +4222,8 @@
 
 ```
 
-### **Examples**:
+### **Examples**
+
 ```
   These exact files are public:
     public = [ "foo.h", "bar.h" ]
@@ -3944,7 +4253,7 @@
 
 ```
 
-### **Ordering of flags and values**:
+### **Ordering of flags and values**
 
 ```
   1. Those set on the current target (not in a config).
@@ -4031,7 +4340,42 @@
 ## **sources**: Source files for a target
 
 ```
-  A list of files relative to the current buildfile.
+  A list of files. Non-absolute paths will be resolved relative to the
+  current build file.
+
+```
+
+### **Sources for binary targets**
+
+```
+  For binary targets (source sets, executables, and libraries), the
+  known file types will be compiled with the associated tools. Unknown
+  file types and headers will be skipped. However, you should still
+  list all C/C+ header files so GN knows about the existance of those
+  files for the purposes of include checking.
+
+  As a special case, a file ending in ".def" will be treated as a
+  Windows module definition file. It will be appended to the link
+  line with a preceeding "/DEF:" string. There must be at most one
+  .def file in a target and they do not cross dependency boundaries
+  (so specifying a .def file in a static library or source set will have
+  no effect on the executable or shared library they're linked into).
+
+```
+
+### **Sources for non-binary targets**
+
+```
+  action_foreach
+    The sources are the set of files that the script will be executed
+    over. The script will run once per file.
+
+  action
+    The sources will be treated the same as inputs. See "gn help inputs"
+    for more information and usage advice.
+
+  copy
+    The source are the source files to copy.
 
 
 ```
@@ -4341,10 +4685,11 @@
   A string literal represents a string value consisting of the quoted
   characters with possible escape sequences and variable expansions.
 
-      string    = `"` { char | escape | expansion } `"` .
-      escape    = `\` ( "$" | `"` | char ) .
-      expansion = "$" ( identifier | "{" identifier "}" ) .
-      char      = /* any character except "$", `"`, or newline */ .
+      string           = `"` { char | escape | expansion } `"` .
+      escape           = `\` ( "$" | `"` | char ) .
+      BracketExpansion = "{" ( identifier | ArrayAccess | ScopeAccess ) "}" .
+      expansion        = "$" ( identifier | BracketExpansion ) .
+      char             = /* any character except "$", `"`, or newline */ .
 
   After a backslash, certain sequences represent special characters:
 
@@ -4383,11 +4728,12 @@
       Block         = "{" StatementList "}" .
       StatementList = { Statement } .
 
+      ArrayAccess = identifier "[" { identifier | integer } "]" .
+      ScopeAccess = identifier "." identifier .
       Expr        = UnaryExpr | Expr BinaryOp Expr .
       UnaryExpr   = PrimaryExpr | UnaryOp UnaryExpr .
       PrimaryExpr = identifier | integer | string | Call
-                  | identifier "[" Expr "]"
-                  | identifier "." identifier
+                  | ArrayAccess | ScopeAccess
                   | "(" Expr ")"
                   | "[" [ ExprList [ "," ] ] "]" .
       ExprList    = Expr { "," Expr } .
@@ -4512,7 +4858,7 @@
 
 ```
 
-### **Details**
+### **Executables**
 
 ```
   Executable targets and those executable targets' transitive
@@ -4520,6 +4866,11 @@
   "data_deps". Otherwise, GN assumes that the executable (and
   everything it requires) is a build-time dependency only.
 
+```
+
+### **Actions and copies**
+
+```
   Action and copy targets that are listed as "data_deps" will have all
   of their outputs and data files considered as runtime dependencies.
   Action and copy targets that are "deps" or "public_deps" will have
@@ -4527,6 +4878,35 @@
   targets can list an output file in both the "outputs" and "data"
   lists to force an output file as a runtime dependency in all cases.
 
+  The different rules for deps and data_deps are to express build-time
+  (deps) vs. run-time (data_deps) outputs. If GN counted all build-time
+  copy steps as data dependencies, there would be a lot of extra stuff,
+  and if GN counted all run-time dependencies as regular deps, the
+  build's parallelism would be unnecessarily constrained.
+
+  This rule can sometimes lead to unintuitive results. For example,
+  given the three targets:
+    A  --[data_deps]-->  B  --[deps]-->  ACTION
+  GN would say that A does not have runtime deps on the result of the
+  ACTION, which is often correct. But the purpose of the B target might
+  be to collect many actions into one logic unit, and the "data"-ness
+  of A's dependency is lost. Solutions:
+
+   - List the outputs of the action in it's data section (if the
+     results of that action are always runtime files).
+   - Have B list the action in data_deps (if the outputs of the actions
+     are always runtime files).
+   - Have B list the action in both deps and data deps (if the outputs
+     might be used in both contexts and you don't care about unnecessary
+     entries in the list of files required at runtime).
+   - Split B into run-time and build-time versions with the appropriate
+     "deps" for each.
+
+```
+
+### **Static libraries and source sets**
+
+```
   The results of static_library or source_set targets are not considered
   runtime dependencies since these are assumed to be intermediate
   targets only. If you need to list a static library as a runtime
@@ -4534,10 +4914,16 @@
   current platform and list it in the "data" list of a target
   (possibly on the static library target itself).
 
+```
+
+### **Multiple outputs**
+
+```
   When a tool produces more than one output, only the first output
   is considered. For example, a shared library target may produce a
   .dll and a .lib file on Windows. Only the .dll file will be considered
-  a runtime dependency.
+  a runtime dependency. This applies only to linker tools, scripts and
+  copy steps with multiple outputs will also get all outputs listed.
 
 
 ```
@@ -4664,17 +5050,18 @@
 
 ```
 
-**  --args**: Specifies build arguments overrides.
-**  --color**: Force colored output.
-**  --dotfile**: Override the name of the ".gn" file.
-**  --markdown**: write the output in the Markdown format.
-**  --nocolor**: Force non-colored output.
+**  \--args**: Specifies build arguments overrides.
+**  \--color**: Force colored output.
+**  \--dotfile**: Override the name of the ".gn" file.
+**  \--markdown**: write the output in the Markdown format.
+**  \--nocolor**: Force non-colored output.
 **  -q**: Quiet mode. Don't print output on success.
-**  --root**: Explicitly specify source root.
-**  --runtime-deps-list-file**: Save runtime dependencies for targets in file.
-**  --time**: Outputs a summary of how long everything took.
-**  --tracelog**: Writes a Chrome-compatible trace log to the given file.
+**  \--root**: Explicitly specify source root.
+**  \--runtime-deps-list-file**: Save runtime dependencies for targets in file.
+**  \--threads**: Specify number of worker threads.
+**  \--time**: Outputs a summary of how long everything took.
+**  \--tracelog**: Writes a Chrome-compatible trace log to the given file.
 **  -v**: Verbose logging.
-**  --version**: Prints the GN version number and exits.
+**  \--version**: Prints the GN version number and exits.
 
 ```

@@ -13,8 +13,6 @@ source_set("metrics") {
     "client_info.h",
     "cloned_install_detector.cc",
     "cloned_install_detector.h",
-    "compression_utils.cc",
-    "compression_utils.h",
     "daily_event.cc",
     "daily_event.h",
     "drive_metrics_provider.cc",
@@ -55,6 +53,11 @@ source_set("metrics") {
     "metrics_switches.h",
     "persisted_logs.cc",
     "persisted_logs.h",
+    "stability_metrics_helper.cc",
+    "stability_metrics_helper.h",
+    "system_memory_stats_recorder.h",
+    "system_memory_stats_recorder_linux.cc",
+    "system_memory_stats_recorder_win.cc",
     "url_constants.cc",
     "url_constants.h",
   ]
@@ -66,8 +69,8 @@ source_set("metrics") {
     "//base",
     "//base:i18n",
     "//base:prefs",
+    "//components/compression",
     "//components/variations",
-    "//third_party/zlib",
   ]
 
   if (is_chromeos) {
@@ -79,22 +82,24 @@ source_set("metrics") {
   }
 }
 
-# GYP version: components/metrics.gypi:metrics_gpu
-source_set("gpu") {
-  sources = [
-    "gpu/gpu_metrics_provider.cc",
-    "gpu/gpu_metrics_provider.h",
-  ]
+if (!is_ios) {
+  # GYP version: components/metrics.gypi:metrics_gpu
+  source_set("gpu") {
+    sources = [
+      "gpu/gpu_metrics_provider.cc",
+      "gpu/gpu_metrics_provider.h",
+    ]
 
-  public_deps = [
-    ":metrics",
-  ]
-  deps = [
-    "//base",
-    "//content/public/browser",
-    "//gpu/config",
-    "//ui/gfx",
-  ]
+    public_deps = [
+      ":metrics",
+    ]
+    deps = [
+      "//base",
+      "//content/public/browser",
+      "//gpu/config",
+      "//ui/gfx",
+    ]
+  }
 }
 
 # GYP version: components/metrics.gypi:metrics_net
@@ -104,6 +109,8 @@ static_library("net") {
     "net/net_metrics_log_uploader.h",
     "net/network_metrics_provider.cc",
     "net/network_metrics_provider.h",
+    "net/version_utils.cc",
+    "net/version_utils.h",
     "net/wifi_access_point_info_provider.cc",
     "net/wifi_access_point_info_provider.h",
     "net/wifi_access_point_info_provider_chromeos.cc",
@@ -115,31 +122,35 @@ static_library("net") {
   ]
   deps = [
     "//base",
+    "//components/data_use_measurement/core",
+    "//components/version_info",
     "//net",
     "//url",
   ]
 }
 
-# GYP version: components/metrics.gypi:metrics_profiler
-source_set("profiler") {
-  sources = [
-    "profiler/profiler_metrics_provider.cc",
-    "profiler/profiler_metrics_provider.h",
-    "profiler/tracking_synchronizer.cc",
-    "profiler/tracking_synchronizer.h",
-    "profiler/tracking_synchronizer_observer.cc",
-    "profiler/tracking_synchronizer_observer.h",
-  ]
+if (!is_ios) {
+  # GYP version: components/metrics.gypi:metrics_profiler
+  source_set("profiler") {
+    sources = [
+      "profiler/profiler_metrics_provider.cc",
+      "profiler/profiler_metrics_provider.h",
+      "profiler/tracking_synchronizer.cc",
+      "profiler/tracking_synchronizer.h",
+      "profiler/tracking_synchronizer_observer.cc",
+      "profiler/tracking_synchronizer_observer.h",
+    ]
 
-  public_deps = [
-    ":metrics",
-  ]
-  deps = [
-    "//base",
-    "//components/variations",
-    "//content/public/browser",
-    "//content/public/common",
-  ]
+    public_deps = [
+      ":metrics",
+    ]
+    deps = [
+      "//base",
+      "//components/variations",
+      "//content/public/browser",
+      "//content/public/common",
+    ]
+  }
 }
 
 # GYP version: components/metrics.gypi:metrics_test_support
@@ -178,10 +189,8 @@ source_set("unit_tests") {
   testonly = true
   sources = [
     "call_stack_profile_metrics_provider_unittest.cc",
-    "compression_utils_unittest.cc",
     "daily_event_unittest.cc",
     "drive_metrics_provider_unittest.cc",
-    "gpu/gpu_metrics_provider_unittest.cc",
     "histogram_encoder_unittest.cc",
     "machine_id_provider_win_unittest.cc",
     "metrics_hashes_unittest.cc",
@@ -192,21 +201,34 @@ source_set("unit_tests") {
     "metrics_state_manager_unittest.cc",
     "net/net_metrics_log_uploader_unittest.cc",
     "persisted_logs_unittest.cc",
-    "profiler/profiler_metrics_provider_unittest.cc",
-    "profiler/tracking_synchronizer_unittest.cc",
+    "stability_metrics_helper_unittest.cc",
   ]
 
   deps = [
-    ":gpu",
     ":metrics",
     ":net",
-    ":profiler",
     ":test_support",
     "//base:prefs_test_support",
     "//base/test:test_support",
     "//components/variations",
-    "//content/public/common",
     "//testing/gtest",
   ]
+
+  if (!is_ios) {
+    deps += [
+      "//content/public/common",
+      ":gpu",
+      ":profiler",
+    ]
+    sources += [
+      "gpu/gpu_metrics_provider_unittest.cc",
+      "profiler/profiler_metrics_provider_unittest.cc",
+      "profiler/tracking_synchronizer_unittest.cc",
+    ]
+  }
+  if (is_linux) {
+    sources += [ "serialization/serialization_utils_unittest.cc" ]
+    deps += [ ":serialization" ]
+  }
 }
 # TODO(GYP): metrics_chromeos

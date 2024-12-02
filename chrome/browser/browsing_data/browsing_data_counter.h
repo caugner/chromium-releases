@@ -9,6 +9,7 @@
 
 #include "base/callback.h"
 #include "base/prefs/pref_member.h"
+#include "chrome/browser/browsing_data/browsing_data_remover.h"
 #include "chrome/browser/profiles/profile.h"
 
 class BrowsingDataCounter {
@@ -28,15 +29,18 @@ class BrowsingDataCounter {
   // The profile associated with this counter.
   Profile* GetProfile() const;
 
- protected:
-  // Called when some conditions have changed and the counting should be
-  // restarted, e.g. when the deletion preference changed state or when
-  // we were notified of data changes.
-  void RestartCounting();
+  // Restarts the counter. Will be called automatically if the counting needs
+  // to be restarted, e.g. when the deletion preference changes state or when
+  // we are notified of data changes.
+  void Restart();
 
+ protected:
   // Should be called from |Count| by any overriding class to indicate that
   // counting is finished and report the |result|.
   void ReportResult(uint32 result);
+
+  // Calculates the beginning of the counting period as |period_| before now.
+  base::Time GetPeriodStart();
 
  private:
   // Called after the class is initialized by calling |Init|.
@@ -56,8 +60,9 @@ class BrowsingDataCounter {
   // If false, we will not count it.
   BooleanPrefMember pref_;
 
-  // Whether this counter is currently in the process of counting.
-  bool counting_ = false;
+  // The integer preference describing the time period for which this data type
+  // is to be deleted.
+  IntegerPrefMember period_;
 
   // Whether this class was properly initialized by calling |Init|.
   bool initialized_ = false;

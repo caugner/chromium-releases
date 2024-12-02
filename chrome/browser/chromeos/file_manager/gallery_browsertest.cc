@@ -67,6 +67,20 @@ IN_PROC_BROWSER_TEST_F(GalleryBrowserTestInGuestMode,
   StartTest();
 }
 
+#if defined(DISABLE_SLOW_FILESAPP_TESTS)
+#define MAYBE_OpenMultipleImagesAndSwitchToSlideModeOnDownloads \
+  DISABLED_OpenMultipleImagesAndSwitchToSlideModeOnDownloads
+#else
+#define MAYBE_OpenMultipleImagesAndSwitchToSlideModeOnDownloads \
+  OpenMultipleImagesAndSwitchToSlideModeOnDownloads
+#endif
+IN_PROC_BROWSER_TEST_F(
+    GalleryBrowserTest,
+    MAYBE_OpenMultipleImagesAndSwitchToSlideModeOnDownloads) {
+  set_test_case_name("openMultipleImagesAndChangeToSlideModeOnDownloads");
+  StartTest();
+}
+
 IN_PROC_BROWSER_TEST_F(GalleryBrowserTest, OpenMultipleImagesOnDrive) {
   set_test_case_name("openMultipleImagesOnDrive");
   StartTest();
@@ -93,6 +107,22 @@ IN_PROC_BROWSER_TEST_F(GalleryBrowserTestInGuestMode,
 
 IN_PROC_BROWSER_TEST_F(GalleryBrowserTest, TraverseSlideImagesOnDrive) {
   set_test_case_name("traverseSlideImagesOnDrive");
+  StartTest();
+}
+
+IN_PROC_BROWSER_TEST_F(GalleryBrowserTestInGuestMode,
+                       TraverseSlideThumbnailsOnDownloads) {
+  set_test_case_name("traverseSlideThumbnailsOnDownloads");
+  StartTest();
+}
+
+IN_PROC_BROWSER_TEST_F(GalleryBrowserTest, TraverseSlideThumbnailsOnDownloads) {
+  set_test_case_name("traverseSlideThumbnailsOnDownloads");
+  StartTest();
+}
+
+IN_PROC_BROWSER_TEST_F(GalleryBrowserTest, TraverseSlideThumbnailsOnDrive) {
+  set_test_case_name("traverseSlideThumbnailsOnDrive");
   StartTest();
 }
 
@@ -140,6 +170,38 @@ IN_PROC_BROWSER_TEST_F(GalleryBrowserTestInGuestMode, DeleteImageOnDownloads) {
 #endif
 IN_PROC_BROWSER_TEST_F(GalleryBrowserTest, MAYBE_DeleteImageOnDrive) {
   set_test_case_name("deleteImageOnDrive");
+  StartTest();
+}
+
+#if defined(DISABLE_SLOW_FILESAPP_TESTS)
+#define MAYBE_CheckAvailabilityOfShareButtonOnDownloads \
+  DISABLED_CheckAvailabilityOfShareButtonOnDownloads
+#else
+#define MAYBE_CheckAvailabilityOfShareButtonOnDownloads \
+  CheckAvailabilityOfShareButtonOnDownloads
+#endif
+IN_PROC_BROWSER_TEST_F(GalleryBrowserTest,
+                       MAYBE_CheckAvailabilityOfShareButtonOnDownloads) {
+  set_test_case_name("checkAvailabilityOfShareButtonOnDownloads");
+  StartTest();
+}
+
+IN_PROC_BROWSER_TEST_F(GalleryBrowserTestInGuestMode,
+                       MAYBE_CheckAvailabilityOfShareButtonOnDownloads) {
+  set_test_case_name("checkAvailabilityOfShareButtonOnDownloads");
+  StartTest();
+}
+
+#if defined(DISABLE_SLOW_FILESAPP_TESTS)
+#define MAYBE_CheckAvailabilityOfShareButtonOnDrive \
+  DISABLED_CheckAvailabilityOfShareButtonOnDrive
+#else
+#define MAYBE_CheckAvailabilityOfShareButtonOnDrive \
+  CheckAvailabilityOfShareButtonOnDrive
+#endif
+IN_PROC_BROWSER_TEST_F(GalleryBrowserTest,
+                       MAYBE_CheckAvailabilityOfShareButtonOnDrive) {
+  set_test_case_name("checkAvailabilityOfShareButtonOnDrive");
   StartTest();
 }
 
@@ -210,6 +272,33 @@ IN_PROC_BROWSER_TEST_F(GalleryBrowserTest, MAYBE_ExposureImageOnDrive) {
   StartTest();
 }
 
+#if defined(DISABLE_SLOW_FILESAPP_TESTS)
+#define MAYBE_EnableDisableOverwriteOriginalCheckboxOnDownloads \
+  DISABLED_EnableDisableOverwriteOriginalCheckboxOnDownloads
+#else
+#define MAYBE_EnableDisableOverwriteOriginalCheckboxOnDownloads \
+  EnableDisableOverwriteOriginalCheckboxOnDownloads
+#endif
+IN_PROC_BROWSER_TEST_F(
+    GalleryBrowserTest,
+    MAYBE_EnableDisableOverwriteOriginalCheckboxOnDownloads) {
+  set_test_case_name("enableDisableOverwriteOriginalCheckboxOnDownloads");
+  StartTest();
+}
+
+#if defined(DISABLE_SLOW_FILESAPP_TESTS)
+#define MAYBE_EnableDisableOverwriteOriginalCheckboxOnDrive \
+  DISABLED_EnableDisableOverwriteOriginalCheckboxOnDrive
+#else
+#define MAYBE_EnableDisableOverwriteOriginalCheckboxOnDrive \
+  EnableDisableOverwriteOriginalCheckboxOnDrive
+#endif
+IN_PROC_BROWSER_TEST_F(GalleryBrowserTest,
+                       MAYBE_EnableDisableOverwriteOriginalCheckboxOnDrive) {
+  set_test_case_name("enableDisableOverwriteOriginalCheckboxOnDrive");
+  StartTest();
+}
+
 IN_PROC_BROWSER_TEST_F(GalleryBrowserTest,
                        RenameImageInThumbnailModeOnDownloads) {
   set_test_case_name("renameImageInThumbnailModeOnDownloads");
@@ -247,10 +336,15 @@ IN_PROC_BROWSER_TEST_F(GalleryBrowserTest,
   StartTest();
 }
 
-// Since this test case uses newly added test utility function after M46, this
-// test case doesn't work on M46.
+#if defined(DISABLE_SLOW_FILESAPP_TESTS)
+#define MAYBE_DeleteAllImagesInThumbnailModeWithEnterKey \
+  DISABLED_DeleteAllImagesInThumbnailModeWithEnterKey
+#else
+#define MAYBE_DeleteAllImagesInThumbnailModeWithEnterKey \
+  DeleteAllImagesInThumbnailModeWithEnterKey
+#endif
 IN_PROC_BROWSER_TEST_F(GalleryBrowserTest,
-                       DISABLED_DeleteAllImagesInThumbnailModeWithEnterKey) {
+                       MAYBE_DeleteAllImagesInThumbnailModeWithEnterKey) {
   set_test_case_name("deleteAllImagesInThumbnailModeWithEnterKey");
   StartTest();
 }
@@ -305,6 +399,38 @@ IN_PROC_BROWSER_TEST_F(GalleryBrowserTest,
 IN_PROC_BROWSER_TEST_F(GalleryBrowserTest,
                        MAYBE_SelectMultipleImagesWithShiftKeyOnDownloads) {
   set_test_case_name("selectMultipleImagesWithShiftKeyOnDownloads");
+  StartTest();
+}
+
+IN_PROC_BROWSER_TEST_F(GalleryBrowserTestInGuestMode,
+                       SlideshowTraversalOnDownloads) {
+  set_test_case_name("slideshowTraversalOnDownloads");
+  StartTest();
+}
+
+IN_PROC_BROWSER_TEST_F(GalleryBrowserTest, SlideshowTraversalOnDownloads) {
+  set_test_case_name("slideshowTraversalOnDownloads");
+  StartTest();
+}
+
+IN_PROC_BROWSER_TEST_F(GalleryBrowserTest, SlideshowTraversalOnDrive) {
+  set_test_case_name("slideshowTraversalOnDrive");
+  StartTest();
+}
+
+IN_PROC_BROWSER_TEST_F(GalleryBrowserTestInGuestMode,
+                       StopStartSlideshowOnDownloads) {
+  set_test_case_name("stopStartSlideshowOnDownloads");
+  StartTest();
+}
+
+IN_PROC_BROWSER_TEST_F(GalleryBrowserTest, StopStartSlideshowOnDownloads) {
+  set_test_case_name("stopStartSlideshowOnDownloads");
+  StartTest();
+}
+
+IN_PROC_BROWSER_TEST_F(GalleryBrowserTest, StopStartSlideshowOnDrive) {
+  set_test_case_name("stopStartSlideshowOnDrive");
   StartTest();
 }
 

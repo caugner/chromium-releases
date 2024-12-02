@@ -6,8 +6,7 @@
 #include "modules/fetch/FetchFormDataConsumerHandle.h"
 
 #include "core/dom/DOMTypedArray.h"
-#include "core/html/DOMFormData.h"
-#include "core/html/FormDataList.h"
+#include "core/html/FormData.h"
 #include "core/loader/ThreadableLoader.h"
 #include "core/loader/ThreadableLoaderClient.h"
 #include "core/testing/DummyPageHolder.h"
@@ -76,9 +75,9 @@ protected:
     OwnPtr<DummyPageHolder> m_page;
 };
 
-PassRefPtr<FormData> complexFormData()
+PassRefPtr<EncodedFormData> complexFormData()
 {
-    RefPtr<FormData> data = FormData::create();
+    RefPtr<EncodedFormData> data = EncodedFormData::create();
 
     data->appendData("foo", 3);
     data->appendFileRange("/foo/bar/baz", 3, 4, 5);
@@ -94,7 +93,7 @@ PassRefPtr<FormData> complexFormData()
     return data.release();
 }
 
-void verifyComplexFormData(FormData* data)
+void verifyComplexFormData(EncodedFormData* data)
 {
     const auto& elements = data->elements();
     if (4 != elements.size()) {
@@ -180,7 +179,7 @@ TEST_F(FetchFormDataConsumerHandleTest, ReadFromArrayBufferView)
 
 TEST_F(FetchFormDataConsumerHandleTest, ReadFromSimplFormData)
 {
-    RefPtr<FormData> data = FormData::create();
+    RefPtr<EncodedFormData> data = EncodedFormData::create();
     data->appendData("foo", 3);
     data->appendData("hoge", 4);
 
@@ -194,7 +193,7 @@ TEST_F(FetchFormDataConsumerHandleTest, ReadFromSimplFormData)
 
 TEST_F(FetchFormDataConsumerHandleTest, ReadFromComplexFormData)
 {
-    RefPtr<FormData> data = complexFormData();
+    RefPtr<EncodedFormData> data = complexFormData();
     OwnPtr<ReplayingHandle> src = ReplayingHandle::create();
     src->add(Command(Command::Data, "bar"));
     src->add(Command(Command::Done));
@@ -212,7 +211,7 @@ TEST_F(FetchFormDataConsumerHandleTest, ReadFromComplexFormData)
 
 TEST_F(FetchFormDataConsumerHandleTest, TwoPhaseReadFromComplexFormData)
 {
-    RefPtr<FormData> data = complexFormData();
+    RefPtr<EncodedFormData> data = complexFormData();
     OwnPtr<ReplayingHandle> src = ReplayingHandle::create();
     src->add(Command(Command::Data, "bar"));
     src->add(Command(Command::Done));
@@ -239,7 +238,7 @@ TEST_F(FetchFormDataConsumerHandleTest, DrainAsFormDataFromString)
 {
     OwnPtr<FetchDataConsumerHandle> handle = FetchFormDataConsumerHandle::create(String("hello, world"));
     OwnPtr<FetchDataConsumerHandle::Reader> reader = handle->obtainReader(nullptr);
-    RefPtr<FormData> formData = reader->drainAsFormData();
+    RefPtr<EncodedFormData> formData = reader->drainAsFormData();
     ASSERT_TRUE(formData);
     EXPECT_TRUE(formData->isSafeToSendToAnotherThread());
     EXPECT_EQ("hello, world", formData->flattenToString());
@@ -254,7 +253,7 @@ TEST_F(FetchFormDataConsumerHandleTest, DrainAsFormDataFromArrayBuffer)
 {
     OwnPtr<FetchDataConsumerHandle> handle = FetchFormDataConsumerHandle::create(DOMArrayBuffer::create("foo", 3));
     OwnPtr<FetchDataConsumerHandle::Reader> reader = handle->obtainReader(nullptr);
-    RefPtr<FormData> formData = reader->drainAsFormData();
+    RefPtr<EncodedFormData> formData = reader->drainAsFormData();
     ASSERT_TRUE(formData);
     EXPECT_TRUE(formData->isSafeToSendToAnotherThread());
     EXPECT_EQ("foo", formData->flattenToString());
@@ -262,14 +261,14 @@ TEST_F(FetchFormDataConsumerHandleTest, DrainAsFormDataFromArrayBuffer)
 
 TEST_F(FetchFormDataConsumerHandleTest, DrainAsFormDataFromSimpleFormData)
 {
-    DOMFormData* data = DOMFormData::create(UTF8Encoding());
+    FormData* data = FormData::create(UTF8Encoding());
     data->append("name1", "value1");
     data->append("name2", "value2");
-    RefPtr<FormData> inputFormData = data->createMultiPartFormData();
+    RefPtr<EncodedFormData> inputFormData = data->encodeMultiPartFormData();
 
     OwnPtr<FetchDataConsumerHandle> handle = FetchFormDataConsumerHandle::create(document(), inputFormData);
     OwnPtr<FetchDataConsumerHandle::Reader> reader = handle->obtainReader(nullptr);
-    RefPtr<FormData> outputFormData = reader->drainAsFormData();
+    RefPtr<EncodedFormData> outputFormData = reader->drainAsFormData();
     ASSERT_TRUE(outputFormData);
     EXPECT_TRUE(outputFormData->isSafeToSendToAnotherThread());
     EXPECT_NE(outputFormData.get(), inputFormData.get());
@@ -278,11 +277,11 @@ TEST_F(FetchFormDataConsumerHandleTest, DrainAsFormDataFromSimpleFormData)
 
 TEST_F(FetchFormDataConsumerHandleTest, DrainAsFormDataFromComplexFormData)
 {
-    RefPtr<FormData> inputFormData = complexFormData();
+    RefPtr<EncodedFormData> inputFormData = complexFormData();
 
     OwnPtr<FetchDataConsumerHandle> handle = FetchFormDataConsumerHandle::create(document(), inputFormData);
     OwnPtr<FetchDataConsumerHandle::Reader> reader = handle->obtainReader(nullptr);
-    RefPtr<FormData> outputFormData = reader->drainAsFormData();
+    RefPtr<EncodedFormData> outputFormData = reader->drainAsFormData();
     ASSERT_TRUE(outputFormData);
     EXPECT_TRUE(outputFormData->isSafeToSendToAnotherThread());
     EXPECT_NE(outputFormData.get(), inputFormData.get());
@@ -295,7 +294,7 @@ TEST_F(FetchFormDataConsumerHandleTest, ZeroByteReadDoesNotAffectDraining)
     OwnPtr<FetchDataConsumerHandle::Reader> reader = handle->obtainReader(nullptr);
     size_t readSize;
     EXPECT_EQ(kOk, reader->read(nullptr, 0, kNone, &readSize));
-    RefPtr<FormData> formData = reader->drainAsFormData();
+    RefPtr<EncodedFormData> formData = reader->drainAsFormData();
     ASSERT_TRUE(formData);
     EXPECT_TRUE(formData->isSafeToSendToAnotherThread());
     EXPECT_EQ("hello, world", formData->flattenToString());
@@ -338,7 +337,7 @@ TEST_F(FetchFormDataConsumerHandleTest, ZeroByteReadDoesNotAffectDrainingForComp
     EXPECT_EQ(kShouldWait, reader->read(nullptr, 0, kNone, &readSize));
     testing::runPendingTasks();
     EXPECT_EQ(kOk, reader->read(nullptr, 0, kNone, &readSize));
-    RefPtr<FormData> formData = reader->drainAsFormData();
+    RefPtr<EncodedFormData> formData = reader->drainAsFormData();
     ASSERT_TRUE(formData);
     EXPECT_TRUE(formData->isSafeToSendToAnotherThread());
     verifyComplexFormData(formData.get());

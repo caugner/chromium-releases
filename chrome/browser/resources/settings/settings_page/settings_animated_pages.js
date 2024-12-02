@@ -4,66 +4,89 @@
 
 /**
  * @fileoverview
- * 'cr-settings-animated-pages' is a container for a page and animated subpages.
- * It provides a set of common behaviors and animations. Notably, it provides
- * an 'inSubpage' property that indicates when a subpage is active.
+ * 'settings-animated-pages' is a container for a page and animated subpages.
+ * It provides a set of common behaviors and animations.
  *
  * Example:
  *
- *    <cr-settings-animated-pages>
+ *    <settings-animated-pages current-route="{{currentRoute}}"
+          route-root="advanced/privacy" redirect-root-route-to="advanced">
  *      <!-- Insert your section controls here -->
- *    </cr-settings-animated-pages>
+ *    </settings-animated-pages>
  *
  * @group Chrome Settings Elements
- * @element cr-settings-animated-pages
+ * @element settings-animated-pages
  */
 Polymer({
-  is: 'cr-settings-animated-pages',
+  is: 'settings-animated-pages',
 
   properties: {
-    inSubpage: {
-      type: Boolean,
+    /**
+     * Contains the current route.
+     */
+    currentRoute: {
+      type: Object,
       notify: true,
-      observer: 'inSubpageChanged_',
+      observer: 'currentRouteChanged_',
+    },
+
+    /**
+     * Routes with this section activate this element. For instance, if this
+     * property is 'search', and currentRoute.section is also set to 'search',
+     * this element will display the subpage in currentRoute.subpage.
+     */
+    section: {
+      type: String,
     },
   },
 
+  /** @override */
   created: function() {
-    this.history_ = ['main'];
+    this.addEventListener('subpage-back', function() {
+      assert(this.currentRoute.section == this.section);
+      assert(this.currentRoute.subpage.length >= 1);
+
+      this.setSubpageChain(this.currentRoute.subpage.slice(0, -1));
+    }.bind(this));
   },
 
   /** @private */
-  inSubpageChanged_: function() {
-    this.classList.toggle('in-subpage', this.inSubpage);
-  },
+  currentRouteChanged_: function(newRoute, oldRoute) {
+    // route.section is only non-empty when the user is within a subpage.
+    // When the user is not in a subpage, but on the Basic page, route.section
+    // is an empty string.
+    var newRouteIsSubpage = newRoute && newRoute.section == this.section;
+    var oldRouteIsSubpage = oldRoute && oldRoute.section == this.section;
 
-  navigateTo: function(page) {
-    if (this.inSubpage) {
-      this.$.animatedPages.exitAnimation = 'slide-left-animation';
-      this.$.animatedPages.entryAnimation = 'slide-from-right-animation';
-    } else {
+    if (!newRouteIsSubpage || !oldRouteIsSubpage ||
+        newRoute.subpage.length == oldRoute.subpage.length) {
+      // If two routes are at the same level, or if either the new or old route
+      // is not a subpage, fade in and out.
       this.$.animatedPages.exitAnimation = 'fade-out-animation';
       this.$.animatedPages.entryAnimation = 'fade-in-animation';
+    } else {
+      // For transitioning between subpages at different levels, slide.
+      if (newRoute.subpage.length > oldRoute.subpage.length) {
+        this.$.animatedPages.exitAnimation = 'slide-left-animation';
+        this.$.animatedPages.entryAnimation = 'slide-from-right-animation';
+      } else {
+        this.$.animatedPages.exitAnimation = 'slide-right-animation';
+        this.$.animatedPages.entryAnimation = 'slide-from-left-animation';
+      }
     }
 
-    this.history_.push(page);
-    this.inSubpage = true;
-
-    this.$.animatedPages.selected = page;
+    this.$.animatedPages.selected =
+        newRouteIsSubpage ? newRoute.subpage.slice(-1)[0] : '';
   },
 
-  back: function() {
-    this.history_.pop();
-    this.inSubpage = this.history_.length > 1;
-
-    if (this.inSubpage) {
-      this.$.animatedPages.exitAnimation = 'slide-right-animation';
-      this.$.animatedPages.entryAnimation = 'slide-from-left-animation';
-    } else {
-      this.$.animatedPages.exitAnimation = 'fade-out-animation';
-      this.$.animatedPages.entryAnimation = 'fade-in-animation';
-    }
-
-    this.$.animatedPages.selected = this.history_.slice(-1)[0];
+  /**
+   * Buttons in this pageset should use this method to transition to subpages.
+   */
+  setSubpageChain: function(subpage) {
+    this.currentRoute = {
+      page: this.currentRoute.page,
+      section: subpage.length > 0 ? this.section : '',
+      subpage: subpage,
+    };
   },
 });

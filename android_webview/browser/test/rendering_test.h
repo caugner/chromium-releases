@@ -36,7 +36,6 @@ class RenderingTest : public testing::Test,
   void DetachFunctorFromView() override;
   gfx::Point GetLocationOnScreen() override;
   void ScrollContainerViewTo(gfx::Vector2d new_value) override {}
-  bool IsSmoothScrollingActive() const override;
   void UpdateScrollState(gfx::Vector2d max_scroll_offset,
                          gfx::SizeF contents_size_dip,
                          float page_scale_factor,
@@ -47,7 +46,7 @@ class RenderingTest : public testing::Test,
   void ParentDrawConstraintsUpdated(
       const ParentCompositorDrawConstraints& draw_constraints) override {}
   // WindowHooks overrides.
-  void WillOnDraw() override {}
+  void WillOnDraw() override;
   void DidOnDraw(bool success) override {}
   void WillSyncOnRT(SharedRendererState* functor) override {}
   void DidSyncOnRT(SharedRendererState* functor) override {}
@@ -68,6 +67,7 @@ class RenderingTest : public testing::Test,
   void InitializeCompositor();
   void Attach();
   void EndTest();
+  void SetCompositorFrame();
 
   scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner_;
   scoped_ptr<BrowserViewRenderer> browser_view_renderer_;

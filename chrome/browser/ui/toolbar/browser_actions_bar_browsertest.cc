@@ -60,8 +60,12 @@ BrowserActionsBarBrowserTest::~BrowserActionsBarBrowserTest() {
 
 void BrowserActionsBarBrowserTest::SetUpCommandLine(
     base::CommandLine* command_line) {
-  ToolbarActionsBar::disable_animations_for_testing_ = true;
   ExtensionBrowserTest::SetUpCommandLine(command_line);
+  ToolbarActionsBar::disable_animations_for_testing_ = true;
+  // These tests are deliberately testing behavior without the redesign.
+  // Forcefully disable it.
+  override_redesign_.reset(new extensions::FeatureSwitch::ScopedOverride(
+      extensions::FeatureSwitch::extension_action_redesign(), false));
 }
 
 void BrowserActionsBarBrowserTest::SetUpOnMainThread() {
@@ -110,9 +114,11 @@ BrowserActionsBarRedesignBrowserTest::~BrowserActionsBarRedesignBrowserTest() {
 void BrowserActionsBarRedesignBrowserTest::SetUpCommandLine(
     base::CommandLine* command_line) {
   BrowserActionsBarBrowserTest::SetUpCommandLine(command_line);
-  enable_redesign_.reset(new extensions::FeatureSwitch::ScopedOverride(
-      extensions::FeatureSwitch::extension_action_redesign(),
-      true));
+  // Override to force the redesign. Completely clear the previous override
+  // first, since doing so resets the value of the switch.
+  override_redesign_.reset();
+  override_redesign_.reset(new extensions::FeatureSwitch::ScopedOverride(
+      extensions::FeatureSwitch::extension_action_redesign(), true));
 }
 
 // Test the basic functionality.
@@ -314,34 +320,11 @@ IN_PROC_BROWSER_TEST_F(BrowserActionsBarRedesignBrowserTest,
 
   // Reduce the visible icon count so that the extension is hidden.
   toolbar_model()->SetVisibleIconCount(3);
-  EXPECT_FALSE(browser_actions_bar()->OverflowedActionButtonWantsToRun());
 
-  // Make the extension want to run, and verify that the overflow button (the
-  // wrench) has the correct UI. Then, make the extension not want to run and
-  // verify it goes away.
+  // The extension should want to run whether or not it's hidden.
   action->SetIsVisible(tab_id, true);
   extension_action_api->NotifyChange(action, web_contents, profile());
-  EXPECT_TRUE(browser_actions_bar()->OverflowedActionButtonWantsToRun());
-  action->SetIsVisible(tab_id, false);
-  extension_action_api->NotifyChange(action, web_contents, profile());
-  EXPECT_FALSE(browser_actions_bar()->OverflowedActionButtonWantsToRun());
-
-  // Make the extension want to run again, and then move it out of the overflow
-  // menu. This should stop the wrench menu from having the special UI.
-  action->SetIsVisible(tab_id, true);
-  extension_action_api->NotifyChange(action, web_contents, profile());
-  EXPECT_TRUE(browser_actions_bar()->OverflowedActionButtonWantsToRun());
-  toolbar_model()->SetVisibleIconCount(4);
-  EXPECT_FALSE(browser_actions_bar()->OverflowedActionButtonWantsToRun());
-
-  // Adjusting the visible count down should mean an overflowed action wants
-  // to run again. Removing the action that wants to run should result in
-  // no overflowed action wanting to run.
-  toolbar_model()->SetVisibleIconCount(3);
-  EXPECT_TRUE(browser_actions_bar()->OverflowedActionButtonWantsToRun());
-  extension_service()->DisableExtension(page_action_extension->id(),
-                                        extensions::Extension::DISABLE_NONE);
-  EXPECT_FALSE(browser_actions_bar()->OverflowedActionButtonWantsToRun());
+  EXPECT_TRUE(browser_actions_bar()->ActionButtonWantsToRun(3));
 }
 
 IN_PROC_BROWSER_TEST_F(BrowserActionsBarBrowserTest,

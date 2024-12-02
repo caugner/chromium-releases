@@ -29,6 +29,7 @@
 #include "chrome/browser/safe_browsing/protocol_parser.h"
 #include "chrome/browser/safe_browsing/safe_browsing_util.h"
 #include "net/url_request/url_fetcher_delegate.h"
+#include "net/url_request/url_request_status.h"
 #include "url/gurl.h"
 
 namespace net {
@@ -151,6 +152,15 @@ class SafeBrowsingProtocolManager : public net::URLFetcherDelegate,
   // hash is triggered by download related lookup.
   static void RecordGetHashResult(bool is_download,
                                   ResultType result_type);
+
+  // Record HTTP response code when there's no error in fetching an HTTP
+  // request, and the error code, when there is.
+  // |metric_name| is the name of the UMA metric to record the response code or
+  // error code against, |status| represents the status of the HTTP request, and
+  // |response code| represents the HTTP response code received from the server.
+  static void RecordHttpResponseOrErrorCode(
+      const char* metric_name, const net::URLRequestStatus& status,
+      int response_code);
 
   // Returns whether another update is currently scheduled.
   bool IsUpdateScheduled() const;
@@ -311,24 +321,16 @@ class SafeBrowsingProtocolManager : public net::URLFetcherDelegate,
   // For managing the next earliest time to query the SafeBrowsing servers for
   // updates.
   base::TimeDelta next_update_interval_;
-  base::OneShotTimer<SafeBrowsingProtocolManager> update_timer_;
+  base::OneShotTimer update_timer_;
 
   // timeout_timer_ is used to interrupt update requests which are taking
   // too long.
-  base::OneShotTimer<SafeBrowsingProtocolManager> timeout_timer_;
+  base::OneShotTimer timeout_timer_;
 
   // All chunk requests that need to be made.
   std::deque<ChunkUrl> chunk_request_urls_;
 
   HashRequests hash_requests_;
-
-  // The next scheduled update has special behavior for the first 2 requests.
-  enum UpdateRequestState {
-    FIRST_REQUEST = 0,
-    SECOND_REQUEST,
-    NORMAL_REQUEST
-  };
-  UpdateRequestState update_state_;
 
   // True if the service has been given an add/sub chunk but it hasn't been
   // added to the database yet.

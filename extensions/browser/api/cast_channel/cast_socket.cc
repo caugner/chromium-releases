@@ -103,9 +103,10 @@ CastSocketImpl::CastSocketImpl(const std::string& owner_extension_id,
       keep_alive_(keep_alive),
       logger_(logger),
       connect_timeout_(timeout),
-      connect_timeout_timer_(new base::OneShotTimer<CastSocketImpl>),
+      connect_timeout_timer_(new base::OneShotTimer),
       is_canceled_(false),
       device_capabilities_(device_capabilities),
+      audio_only_(false),
       connect_state_(proto::CONN_STATE_START_CONNECT),
       error_state_(CHANNEL_ERROR_NONE),
       ready_state_(READY_STATE_NONE),
@@ -151,6 +152,10 @@ bool CastSocketImpl::keep_alive() const {
   return keep_alive_;
 }
 
+bool CastSocketImpl::audio_only() const {
+  return audio_only_;
+}
+
 scoped_ptr<net::TCPClientSocket> CastSocketImpl::CreateTcpSocket() {
   net::AddressList addresses(ip_endpoint_);
   return scoped_ptr<net::TCPClientSocket>(
@@ -173,7 +178,7 @@ scoped_ptr<net::SSLClientSocket> CastSocketImpl::CreateSslSocket(
     logger_->LogSocketEvent(channel_id_, proto::SSL_CERT_WHITELISTED);
   }
 
-  cert_verifier_.reset(net::CertVerifier::CreateDefault());
+  cert_verifier_ = net::CertVerifier::CreateDefault();
   transport_security_state_.reset(new net::TransportSecurityState);
   net::SSLClientSocketContext context;
   // CertVerifier and TransportSecurityState are owned by us, not the
@@ -225,9 +230,11 @@ bool CastSocketImpl::ExtractPeerCert(std::string* cert) {
 }
 
 bool CastSocketImpl::VerifyChannelPolicy(const AuthResult& result) {
-  if ((device_capabilities_ & CastDeviceCapability::VIDEO_OUT) != 0 &&
-      (result.channel_policies & AuthResult::POLICY_AUDIO_ONLY) != 0) {
-    LOG(ERROR) << "Audio only policy enforced";
+  audio_only_ = (result.channel_policies & AuthResult::POLICY_AUDIO_ONLY) != 0;
+  if (audio_only_ &&
+      (device_capabilities_ & CastDeviceCapability::VIDEO_OUT) != 0) {
+    LOG(ERROR)
+        << "Audio only channel policy enforced for video out capable device";
     logger_->LogSocketEventWithDetails(
         channel_id_, proto::CHANNEL_POLICY_ENFORCED, std::string());
     return false;

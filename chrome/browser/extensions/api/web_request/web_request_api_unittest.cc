@@ -27,11 +27,11 @@
 #include "chrome/browser/extensions/event_router_forwarder.h"
 #include "chrome/browser/net/chrome_network_delegate.h"
 #include "chrome/test/base/testing_browser_process.h"
-#include "chrome/test/base/testing_pref_service_syncable.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
 #include "components/about_handler/about_protocol_handler.h"
 #include "components/content_settings/core/browser/cookie_settings.h"
+#include "components/syncable_prefs/testing_pref_service_syncable.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "extensions/browser/api/web_request/upload_data_presenter.h"
@@ -238,8 +238,9 @@ TEST_F(ExtensionWebRequestTest, BlockingEventPrecedenceRedirect) {
       ipc_sender_factory.GetWeakPtr());
 
   net::URLRequestJobFactoryImpl job_factory;
-  job_factory.SetProtocolHandler(url::kAboutScheme,
-                                 new about_handler::AboutProtocolHandler());
+  job_factory.SetProtocolHandler(
+      url::kAboutScheme,
+      make_scoped_ptr(new about_handler::AboutProtocolHandler()));
   context_->set_job_factory(&job_factory);
 
   GURL redirect_url("about:redirected");
@@ -591,8 +592,7 @@ TEST_F(ExtensionWebRequestTest, AccessRequestBodyData) {
   // Contents of formData.
   const char kFormData[] =
       "{\"A\":[\"test text\"],\"B\":[\"\"],\"C\":[\"test password\"]}";
-  scoped_ptr<const base::Value> form_data(
-      base::JSONReader::DeprecatedRead(kFormData));
+  scoped_ptr<const base::Value> form_data = base::JSONReader::Read(kFormData);
   ASSERT_TRUE(form_data.get() != NULL);
   ASSERT_TRUE(form_data->GetType() == base::Value::TYPE_DICTIONARY);
   // Contents of raw.
@@ -1286,6 +1286,7 @@ TEST(ExtensionWebRequestHelpersTest, TestCalculateOnHeadersReceivedDelta) {
       "Key1: Value1\r\n"
       "Key2: Value2, Bar\r\n"
       "Key3: Value3\r\n"
+      "Key5: Value5, end5\r\n"
       "\r\n";
   scoped_refptr<net::HttpResponseHeaders> base_headers(
       new net::HttpResponseHeaders(
@@ -1297,6 +1298,7 @@ TEST(ExtensionWebRequestHelpersTest, TestCalculateOnHeadersReceivedDelta) {
   new_headers.push_back(ResponseHeader("Key2", "Value1"));  // Modified
   // Key3 is deleted
   new_headers.push_back(ResponseHeader("Key4", "Value4"));  // Added
+  new_headers.push_back(ResponseHeader("Key5", "Value5, end5"));  // Unchanged
   GURL effective_new_url;
 
   scoped_ptr<EventResponseDelta> delta(

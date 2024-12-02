@@ -4,9 +4,7 @@
 
 import logging
 
-from pylib import constants
 from pylib import content_settings
-from pylib.device import device_errors
 
 _LOCK_SCREEN_SETTINGS_PATH = '/data/system/locksettings.db'
 _ALTERNATE_LOCK_SCREEN_SETTINGS_PATH = (

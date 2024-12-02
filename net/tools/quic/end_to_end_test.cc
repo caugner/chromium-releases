@@ -91,7 +91,8 @@ struct TestParams {
              bool use_fec,
              bool client_supports_stateless_rejects,
              bool server_uses_stateless_rejects_if_peer_supported,
-             QuicTag congestion_control_tag)
+             QuicTag congestion_control_tag,
+             bool auto_tune_flow_control_window)
       : client_supported_versions(client_supported_versions),
         server_supported_versions(server_supported_versions),
         negotiated_version(negotiated_version),
@@ -99,7 +100,8 @@ struct TestParams {
         client_supports_stateless_rejects(client_supports_stateless_rejects),
         server_uses_stateless_rejects_if_peer_supported(
             server_uses_stateless_rejects_if_peer_supported),
-        congestion_control_tag(congestion_control_tag) {}
+        congestion_control_tag(congestion_control_tag),
+        auto_tune_flow_control_window(auto_tune_flow_control_window) {}
 
   friend ostream& operator<<(ostream& os, const TestParams& p) {
     os << "{ server_supported_versions: "
@@ -113,7 +115,9 @@ struct TestParams {
        << p.server_uses_stateless_rejects_if_peer_supported;
     os << " use_fec: " << p.use_fec;
     os << " congestion_control_tag: "
-       << QuicUtils::TagToString(p.congestion_control_tag) << " }";
+       << QuicUtils::TagToString(p.congestion_control_tag);
+    os << " auto_tune_flow_control_window: " << p.auto_tune_flow_control_window
+       << " }";
     return os;
   }
 
@@ -124,6 +128,7 @@ struct TestParams {
   bool client_supports_stateless_rejects;
   bool server_uses_stateless_rejects_if_peer_supported;
   QuicTag congestion_control_tag;
+  bool auto_tune_flow_control_window;
 };
 
 // Constructs various test permutations.
@@ -137,14 +142,18 @@ vector<TestParams> GetTestParams() {
   // to do 0-RTT across incompatible versions. Chromium only supports
   // a single version at a time anyway. :)
   QuicVersionVector all_supported_versions = QuicSupportedVersions();
-  QuicVersionVector client_version_buckets[2];
+  QuicVersionVector client_version_buckets[3];
   for (const QuicVersion version : all_supported_versions) {
     if (version <= QUIC_VERSION_24) {
       // SPDY/4 compression but SPDY/3 headers
       client_version_buckets[0].push_back(version);
-    } else {
+    } else if (version <= QUIC_VERSION_25) {
       // SPDY/4
       client_version_buckets[1].push_back(version);
+    } else {
+      // QUIC_VERSION_26 changes the kdf in a way that is incompatible with
+      // version negotiation across the version 26 boundary.
+      client_version_buckets[2].push_back(version);
     }
   }
 
@@ -154,31 +163,36 @@ vector<TestParams> GetTestParams() {
   for (const QuicTag congestion_control_tag : {kRENO, kQBIC}) {
     for (const bool use_fec : {false, true}) {
       for (const QuicVersionVector& client_versions : client_version_buckets) {
-        for (bool client_supports_stateless_rejects : {true, false}) {
-          for (bool server_uses_stateless_rejects_if_peer_supported :
-               {true, false}) {
-            CHECK(!client_versions.empty());
-            // Add an entry for server and client supporting all versions.
-            params.push_back(
-                TestParams(client_versions, all_supported_versions,
-                           client_versions.front(), use_fec,
-                           client_supports_stateless_rejects,
-                           server_uses_stateless_rejects_if_peer_supported,
-                           congestion_control_tag));
+        // A number of end to end tests fail when stateless rejects are enabled
+        // *and* there are more than two QUIC versions.
+        // TODO(b/23745998) Re-enable client stateless reject support.
+        for (bool client_supports_stateless_rejects : {false}) {
+          // TODO(b/23745998) Re-enable server stateless reject support.
+          for (bool server_uses_stateless_rejects_if_peer_supported : {false}) {
+            for (bool auto_tune_flow_control_window : {true, false}) {
+              CHECK(!client_versions.empty());
+              // Add an entry for server and client supporting all versions.
+              params.push_back(TestParams(
+                  client_versions, all_supported_versions,
+                  client_versions.front(), use_fec,
+                  client_supports_stateless_rejects,
+                  server_uses_stateless_rejects_if_peer_supported,
+                  congestion_control_tag, auto_tune_flow_control_window));
 
-            // Test client supporting all versions and server supporting 1
-            // version. Simulate an old server and exercise version downgrade in
-            // the client. Protocol negotiation should occur. Skip the i = 0
-            // case because it is essentially the same as the default case.
-            for (const QuicVersion version : client_versions) {
-              QuicVersionVector server_supported_versions;
-              server_supported_versions.push_back(version);
-              params.push_back(
-                  TestParams(client_versions, server_supported_versions,
-                             server_supported_versions.front(), use_fec,
-                             client_supports_stateless_rejects,
-                             server_uses_stateless_rejects_if_peer_supported,
-                             congestion_control_tag));
+              // Test client supporting all versions and server supporting 1
+              // version. Simulate an old server and exercise version downgrade
+              // in the client. Protocol negotiation should occur. Skip the i =
+              // 0 case because it is essentially the same as the default case.
+              for (const QuicVersion version : client_versions) {
+                QuicVersionVector server_supported_versions;
+                server_supported_versions.push_back(version);
+                params.push_back(TestParams(
+                    client_versions, server_supported_versions,
+                    server_supported_versions.front(), use_fec,
+                    client_supports_stateless_rejects,
+                    server_uses_stateless_rejects_if_peer_supported,
+                    congestion_control_tag, auto_tune_flow_control_window));
+              }
             }
           }
         }
@@ -313,6 +327,10 @@ class EndToEndTest : public ::testing::TestWithParam<TestParams> {
     }
     if (GetParam().client_supports_stateless_rejects) {
       copt.push_back(kSREJ);
+    }
+    if (GetParam().auto_tune_flow_control_window) {
+      copt.push_back(kAFCW);
+      copt.push_back(kIFW5);
     }
     client_config_.SetConnectionOptionsToSend(copt);
 
@@ -462,6 +480,14 @@ class EndToEndTest : public ::testing::TestWithParam<TestParams> {
   bool BothSidesSupportStatelessRejects() {
     return (GetParam().server_uses_stateless_rejects_if_peer_supported &&
             GetParam().client_supports_stateless_rejects);
+  }
+
+  void ExpectFlowControlsSynced(QuicFlowController* client,
+                                QuicFlowController* server) {
+    EXPECT_EQ(QuicFlowControllerPeer::SendWindowSize(client),
+              QuicFlowControllerPeer::ReceiveWindowSize(server));
+    EXPECT_EQ(QuicFlowControllerPeer::ReceiveWindowSize(client),
+              QuicFlowControllerPeer::SendWindowSize(server));
   }
 
   bool initialized_;
@@ -880,6 +906,32 @@ TEST_P(EndToEndTest, StatelessRejectWithPacketLoss) {
   // should succeed.
   server_writer_->set_fake_drop_first_n_packets(1);
   ASSERT_EQ(!BothSidesSupportStatelessRejects(), Initialize());
+}
+
+TEST_P(EndToEndTest, SetInitialReceivedConnectionOptions) {
+  QuicTagVector initial_received_options;
+  initial_received_options.push_back(kTBBR);
+  initial_received_options.push_back(kIW10);
+  initial_received_options.push_back(kPRST);
+  EXPECT_TRUE(server_config_.SetInitialReceivedConnectionOptions(
+      initial_received_options));
+
+  ASSERT_TRUE(Initialize());
+  client_->client()->WaitForCryptoHandshakeConfirmed();
+  server_thread_->WaitForCryptoHandshakeConfirmed();
+
+  EXPECT_FALSE(server_config_.SetInitialReceivedConnectionOptions(
+      initial_received_options));
+
+  // Verify that server's configuration is correct.
+  server_thread_->Pause();
+  EXPECT_TRUE(server_config_.HasReceivedConnectionOptions());
+  EXPECT_TRUE(
+      ContainsQuicTag(server_config_.ReceivedConnectionOptions(), kTBBR));
+  EXPECT_TRUE(
+      ContainsQuicTag(server_config_.ReceivedConnectionOptions(), kIW10));
+  EXPECT_TRUE(
+      ContainsQuicTag(server_config_.ReceivedConnectionOptions(), kPRST));
 }
 
 TEST_P(EndToEndTest, CorrectlyConfiguredFec) {
@@ -1333,9 +1385,6 @@ class WrongAddressWriter : public QuicPacketWriterWrapper {
 };
 
 TEST_P(EndToEndTest, ConnectionMigrationClientIPChanged) {
-  // Allow client IP migration during an established QUIC connection.
-  ValueRestore<bool> old_flag(&FLAGS_quic_allow_ip_migration, true);
-
   ASSERT_TRUE(Initialize());
 
   EXPECT_EQ(kFooResponseBody, client_->SendSynchronousRequest("/foo"));
@@ -1353,29 +1402,6 @@ TEST_P(EndToEndTest, ConnectionMigrationClientIPChanged) {
   // Send a request using the new socket.
   EXPECT_EQ(kBarResponseBody, client_->SendSynchronousRequest("/bar"));
   EXPECT_EQ(200u, client_->response_headers()->parsed_response_code());
-}
-
-TEST_P(EndToEndTest, ConnectionMigrationClientIPChangedUnsupported) {
-  // Tests that the client's IP can not change during an established QUIC
-  // connection. If it changes, the connection is closed by the server as we
-  // do not yet support IP migration.
-  ValueRestore<bool> old_flag(&FLAGS_quic_allow_ip_migration, false);
-
-  ASSERT_TRUE(Initialize());
-
-  EXPECT_EQ(kFooResponseBody, client_->SendSynchronousRequest("/foo"));
-  EXPECT_EQ(200u, client_->response_headers()->parsed_response_code());
-
-  WrongAddressWriter* writer = new WrongAddressWriter();
-
-  writer->set_writer(new QuicDefaultPacketWriter(client_->client()->fd()));
-  QuicConnectionPeer::SetWriter(client_->client()->session()->connection(),
-                                writer, /* owns_writer= */ true);
-
-  client_->SendSynchronousRequest("/bar");
-
-  EXPECT_EQ(QUIC_STREAM_CONNECTION_ERROR, client_->stream_error());
-  EXPECT_EQ(QUIC_ERROR_MIGRATING_ADDRESS, client_->connection_error());
 }
 
 TEST_P(EndToEndTest, ConnectionMigrationClientPortChanged) {
@@ -1438,8 +1464,10 @@ TEST_P(EndToEndTest, DifferentFlowControlWindows) {
   set_client_initial_stream_flow_control_receive_window(kClientStreamIFCW);
   set_client_initial_session_flow_control_receive_window(kClientSessionIFCW);
 
-  const uint32 kServerStreamIFCW = 654321;
-  const uint32 kServerSessionIFCW = 765432;
+  uint32 kServerStreamIFCW =
+      GetParam().auto_tune_flow_control_window ? 32 * 1024 : 654321;
+  uint32 kServerSessionIFCW =
+      GetParam().auto_tune_flow_control_window ? 48 * 1024 : 765432;
   set_server_initial_stream_flow_control_receive_window(kServerStreamIFCW);
   set_server_initial_session_flow_control_receive_window(kServerSessionIFCW);
 
@@ -1487,8 +1515,10 @@ TEST_P(EndToEndTest, DifferentFlowControlWindows) {
 TEST_P(EndToEndTest, HeadersAndCryptoStreamsNoConnectionFlowControl) {
   // The special headers and crypto streams should be subject to per-stream flow
   // control limits, but should not be subject to connection level flow control.
-  const uint32 kStreamIFCW = 123456;
-  const uint32 kSessionIFCW = 234567;
+  const uint32 kStreamIFCW =
+      GetParam().auto_tune_flow_control_window ? 32 * 1024 : 123456;
+  const uint32 kSessionIFCW =
+      GetParam().auto_tune_flow_control_window ? 48 * 1024 : 234567;
   set_client_initial_stream_flow_control_receive_window(kStreamIFCW);
   set_client_initial_session_flow_control_receive_window(kSessionIFCW);
   set_server_initial_stream_flow_control_receive_window(kStreamIFCW);
@@ -1532,6 +1562,47 @@ TEST_P(EndToEndTest, HeadersAndCryptoStreamsNoConnectionFlowControl) {
       session->flow_controller();
   EXPECT_EQ(kSessionIFCW, QuicFlowControllerPeer::ReceiveWindowSize(
       server_connection_flow_controller));
+  server_thread_->Resume();
+}
+
+TEST_P(EndToEndTest, FlowControlsSynced) {
+  const uint32 kClientIFCW = 64 * 1024;
+  const uint32 kServerIFCW = 1024 * 1024;
+  const float kSessionToStreamRatio = 1.5;
+  set_client_initial_stream_flow_control_receive_window(kClientIFCW);
+  set_client_initial_session_flow_control_receive_window(kSessionToStreamRatio *
+                                                         kClientIFCW);
+  set_server_initial_stream_flow_control_receive_window(kServerIFCW);
+  set_server_initial_session_flow_control_receive_window(kSessionToStreamRatio *
+                                                         kServerIFCW);
+
+  ASSERT_TRUE(Initialize());
+
+  client_->client()->WaitForCryptoHandshakeConfirmed();
+  server_thread_->WaitForCryptoHandshakeConfirmed();
+
+  server_thread_->Pause();
+  QuicSpdySession* const client_session = client_->client()->session();
+  QuicDispatcher* dispatcher =
+      QuicServerPeer::GetDispatcher(server_thread_->server());
+  QuicSpdySession* server_session = dispatcher->session_map().begin()->second;
+
+  ExpectFlowControlsSynced(client_session->flow_controller(),
+                           server_session->flow_controller());
+  ExpectFlowControlsSynced(
+      QuicSessionPeer::GetCryptoStream(client_session)->flow_controller(),
+      QuicSessionPeer::GetCryptoStream(server_session)->flow_controller());
+  ExpectFlowControlsSynced(
+      QuicSpdySessionPeer::GetHeadersStream(client_session)->flow_controller(),
+      QuicSpdySessionPeer::GetHeadersStream(server_session)->flow_controller());
+
+  EXPECT_EQ(static_cast<float>(QuicFlowControllerPeer::ReceiveWindowSize(
+                client_session->flow_controller())) /
+                QuicFlowControllerPeer::ReceiveWindowSize(
+                    QuicSpdySessionPeer::GetHeadersStream(client_session)
+                        ->flow_controller()),
+            kSessionToStreamRatio);
+
   server_thread_->Resume();
 }
 
@@ -1639,7 +1710,7 @@ TEST_P(EndToEndTest, ServerSendPublicResetWithDifferentConnectionId) {
   header.public_header.connection_id = incorrect_connection_id;
   header.public_header.reset_flag = true;
   header.public_header.version_flag = false;
-  header.rejected_sequence_number = 10101;
+  header.rejected_packet_number = 10101;
   QuicFramer framer(server_supported_versions_, QuicTime::Zero(),
                     Perspective::IS_SERVER);
   scoped_ptr<QuicEncryptedPacket> packet(framer.BuildPublicResetPacket(header));
@@ -1674,7 +1745,7 @@ TEST_P(EndToEndTest, ClientSendPublicResetWithDifferentConnectionId) {
   header.public_header.connection_id = incorrect_connection_id;
   header.public_header.reset_flag = true;
   header.public_header.version_flag = false;
-  header.rejected_sequence_number = 10101;
+  header.rejected_packet_number = 10101;
   QuicFramer framer(server_supported_versions_, QuicTime::Zero(),
                     Perspective::IS_CLIENT);
   scoped_ptr<QuicEncryptedPacket> packet(framer.BuildPublicResetPacket(header));
@@ -1816,7 +1887,7 @@ TEST_P(EndToEndTest, BadEncryptedData) {
   scoped_ptr<QuicEncryptedPacket> packet(ConstructEncryptedPacket(
       client_->client()->session()->connection()->connection_id(), false, false,
       1, "At least 20 characters.", PACKET_8BYTE_CONNECTION_ID,
-      PACKET_6BYTE_SEQUENCE_NUMBER));
+      PACKET_6BYTE_PACKET_NUMBER));
   // Damage the encrypted data.
   string damaged_packet(packet->data(), packet->length());
   damaged_packet[30] ^= 0x01;

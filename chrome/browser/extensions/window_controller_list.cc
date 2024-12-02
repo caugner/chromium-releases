@@ -10,7 +10,7 @@
 #include "chrome/browser/extensions/chrome_extension_function_details.h"
 #include "chrome/browser/extensions/window_controller_list_observer.h"
 #include "chrome/common/extensions/api/windows.h"
-#include "components/sessions/session_id.h"
+#include "components/sessions/core/session_id.h"
 #include "extensions/browser/extension_function.h"
 #include "ui/base/base_window.h"
 
@@ -21,7 +21,7 @@ namespace extensions {
 
 // static
 WindowControllerList* WindowControllerList::GetInstance() {
-  return Singleton<WindowControllerList>::get();
+  return base::Singleton<WindowControllerList>::get();
 }
 
 WindowControllerList::WindowControllerList() {
@@ -56,8 +56,7 @@ void WindowControllerList::RemoveObserver(
 }
 
 WindowController* WindowControllerList::FindWindowById(int id) const {
-  return FindWindowByIdWithFilter(id,
-                                  WindowController::GetDefaultWindowFilter());
+  return FindWindowByIdWithFilter(id, WindowController::GetAllWindowFilter());
 }
 
 WindowController* WindowControllerList::FindWindowByIdWithFilter(
@@ -71,28 +70,25 @@ WindowController* WindowControllerList::FindWindowByIdWithFilter(
   return nullptr;
 }
 
-WindowController* WindowControllerList::FindWindowForFunctionById(
-    const UIThreadExtensionFunction* function,
-    int id) const {
-  return FindWindowForFunctionByIdWithFilter(
-      function, id, WindowController::GetDefaultWindowFilter());
-}
-
 WindowController* WindowControllerList::FindWindowForFunctionByIdWithFilter(
     const UIThreadExtensionFunction* function,
     int id,
     WindowController::TypeFilter filter) const {
-  WindowController* controller = FindWindowByIdWithFilter(id, filter);
-  if (controller &&
-      windows_util::CanOperateOnWindow(function, controller, filter))
-    return controller;
+  for (ControllerList::const_iterator iter = windows().begin();
+       iter != windows().end(); ++iter) {
+    if ((*iter)->GetWindowId() == id) {
+      if (windows_util::CanOperateOnWindow(function, *iter, filter))
+        return *iter;
+      return nullptr;
+    }
+  }
   return nullptr;
 }
 
 WindowController* WindowControllerList::CurrentWindowForFunction(
     const UIThreadExtensionFunction* function) const {
-  return CurrentWindowForFunctionWithFilter(
-      function, WindowController::GetDefaultWindowFilter());
+  return CurrentWindowForFunctionWithFilter(function,
+                                            WindowController::kNoWindowFilter);
 }
 
 WindowController* WindowControllerList::CurrentWindowForFunctionWithFilter(

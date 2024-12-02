@@ -5,6 +5,7 @@
     <script src="../resources/js-test.js"></script>
     <script src="resources/compatibility.js"></script>
     <script src="resources/audio-testing.js"></script>
+    <title>Test Interpolation for AudioParam.setValueCurveAtTime</title>
   </head>
 
   <body>
@@ -50,16 +51,16 @@
         curveDuration: 300 / sampleRate,
         curveLength: 2,
         fullGainTime: 0.75,
-        maxErrorThreshold: 0,
-        snrThreshold: 10000
+        maxErrorThreshold: 5.961e-8,
+        snrThreshold: 172.068
       }, {
         // Increase the curve length
         curveStartTime: 256 / sampleRate,
         curveDuration: 300 / sampleRate,
         curveLength: 3,
         fullGainTime: 0.75,
-        maxErrorThreshold: 0,
-        snrThreshold: 10000
+        maxErrorThreshold: 5.961e-8,
+        snrThreshold: 172.068
       }, {
         // Increase the curve length
         curveStartTime: 256 / sampleRate,
@@ -67,7 +68,7 @@
         curveLength: 16,
         fullGainTime: 0.75,
         maxErrorThreshold: 5.961e-8,
-        snrThreshold: 172.746
+        snrThreshold: 170.012
       }, {
         // Increase the curve length
         curveStartTime: 256 / sampleRate,
@@ -75,7 +76,7 @@
         curveLength: 100,
         fullGainTime: 0.75,
         maxErrorThreshold: 5.961e-8,
-        snrThreshold: 172.799
+        snrThreshold: 170.196
       }, {
         // Corner case with duration less than a frame!
         curveStartTime: 256 / sampleRate,
@@ -107,7 +108,7 @@
         curveLength: 1000,
         fullGainTime: 0.75,
         maxErrorThreshold: 5.961e-8,
-        snrThreshold: 155.310
+        snrThreshold: 152.800
       }];
 
       // Creates a function based on the test config that is suitable for use by defineTask().
@@ -217,7 +218,7 @@
          var expected = new Float32Array(testDurationFrames);
 
          var curveStartFrame = config.curveStartTime * sampleRate;
-         var curveEndFrame = Math.floor((config.curveStartTime + config.curveDuration) * sampleRate);
+         var curveEndFrame = (config.curveStartTime + config.curveDuration) * sampleRate;
          var fullGainFrame = config.fullGainTime * sampleRate;
 
          var k;

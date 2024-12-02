@@ -10,6 +10,7 @@ goog.provide('Output');
 goog.provide('Output.EventType');
 
 goog.require('AutomationUtil.Dir');
+goog.require('EarconEngine');
 goog.require('cursors.Cursor');
 goog.require('cursors.Range');
 goog.require('cursors.Unit');
@@ -91,51 +92,51 @@ Output.SPACE = ' ';
  */
 Output.ROLE_INFO_ = {
   alert: {
-    msgId: 'aria_role_alert',
+    msgId: 'role_alert',
     earconId: 'ALERT_NONMODAL',
   },
   alertDialog: {
-    msgId: 'aria_role_alertdialog'
+    msgId: 'role_alertdialog'
   },
   article: {
-    msgId: 'aria_role_article',
+    msgId: 'role_article',
     inherits: 'abstractContainer'
   },
   application: {
-    msgId: 'aria_role_application',
+    msgId: 'role_application',
     inherits: 'abstractContainer'
   },
   banner: {
-    msgId: 'aria_role_banner',
+    msgId: 'role_banner',
     inherits: 'abstractContainer'
   },
   button: {
-    msgId: 'tag_button',
+    msgId: 'role_button',
     earconId: 'BUTTON'
   },
   buttonDropDown: {
-    msgId: 'tag_button',
+    msgId: 'role_button',
     earconId: 'BUTTON'
   },
   cell: {
-    msgId: 'aria_role_gridcell'
+    msgId: 'role_gridcell'
   },
   checkBox: {
-    msgId: 'input_type_checkbox'
+    msgId: 'role_checkbox'
   },
   columnHeader: {
-    msgId: 'aria_role_columnheader',
+    msgId: 'role_columnheader',
     inherits: 'abstractContainer'
   },
   comboBox: {
-    msgId: 'aria_role_combobox'
+    msgId: 'role_combobox'
   },
   complementary: {
-    msgId: 'aria_role_complementary',
+    msgId: 'role_complementary',
     inherits: 'abstractContainer'
   },
   contentInfo: {
-    msgId: 'aria_role_contentinfo',
+    msgId: 'role_contentinfo',
     inherits: 'abstractContainer'
   },
   date: {
@@ -143,143 +144,143 @@ Output.ROLE_INFO_ = {
     inherits: 'abstractContainer'
   },
   definition: {
-    msgId: 'aria_role_definition',
+    msgId: 'role_definition',
     inherits: 'abstractContainer'
   },
   dialog: {
-    msgId: 'dialog'
+    msgId: 'role_dialog'
   },
   directory: {
-    msgId: 'aria_role_directory',
+    msgId: 'role_directory',
     inherits: 'abstractContainer'
   },
   document: {
-    msgId: 'aria_role_document',
+    msgId: 'role_document',
     inherits: 'abstractContainer'
   },
   form: {
-    msgId: 'aria_role_form',
+    msgId: 'role_form',
     inherits: 'abstractContainer'
   },
   grid: {
-    msgId: 'aria_role_grid'
+    msgId: 'role_grid'
   },
   group: {
-    msgId: 'aria_role_group'
+    msgId: 'role_group'
   },
   heading: {
-    msgId: 'aria_role_heading',
+    msgId: 'role_heading',
   },
   image: {
-    msgId: 'aria_role_img',
+    msgId: 'role_img',
   },
   inputTime: {
     msgId: 'input_type_time',
     inherits: 'abstractContainer'
   },
   link: {
-    msgId: 'tag_link',
+    msgId: 'role_link',
     earconId: 'LINK'
   },
   listBox: {
-    msgId: 'aria_role_listbox',
+    msgId: 'role_listbox',
     earconId: 'LISTBOX'
   },
   listBoxOption: {
-    msgId: 'aria_role_listitem',
+    msgId: 'role_listitem',
     earconId: 'LIST_ITEM'
   },
   listItem: {
-    msgId: 'aria_role_listitem',
+    msgId: 'role_listitem',
     earconId: 'LIST_ITEM'
   },
   log: {
-    msgId: 'aria_role_log',
+    msgId: 'role_log',
   },
   main: {
-    msgId: 'aria_role_main',
+    msgId: 'role_main',
     inherits: 'abstractContainer'
   },
   marquee: {
-    msgId: 'aria_role_marquee',
+    msgId: 'role_marquee',
   },
   math: {
-    msgId: 'aria_role_math',
+    msgId: 'role_math',
     inherits: 'abstractContainer'
   },
   menu: {
-    msgId: 'aria_role_menu'
+    msgId: 'role_menu'
   },
   menuBar: {
-    msgId: 'aria_role_menubar',
+    msgId: 'role_menubar',
   },
   menuItem: {
-    msgId: 'aria_role_menuitem'
+    msgId: 'role_menuitem'
   },
   menuItemCheckBox: {
-    msgId: 'aria_role_menuitemcheckbox'
+    msgId: 'role_menuitemcheckbox'
   },
   menuItemRadio: {
-    msgId: 'aria_role_menuitemradio'
+    msgId: 'role_menuitemradio'
   },
   menuListOption: {
-    msgId: 'aria_role_menuitem'
+    msgId: 'role_menuitem'
   },
   menuListPopup: {
-    msgId: 'aria_role_menu'
+    msgId: 'role_menu'
   },
   navigation: {
-    msgId: 'aria_role_navigation',
+    msgId: 'role_navigation',
     inherits: 'abstractContainer'
   },
   note: {
-    msgId: 'aria_role_note',
+    msgId: 'role_note',
     inherits: 'abstractContainer'
   },
   popUpButton: {
-    msgId: 'tag_button',
+    msgId: 'role_button',
     earcon: 'LISTBOX'
   },
   radioButton: {
-    msgId: 'input_type_radio'
+    msgId: 'role_radio'
   },
   radioGroup: {
-    msgId: 'aria_role_radiogroup',
+    msgId: 'role_radiogroup',
   },
   region: {
-    msgId: 'aria_role_region',
+    msgId: 'role_region',
     inherits: 'abstractContainer'
   },
   rowHeader: {
-    msgId: 'aria_role_rowheader',
+    msgId: 'role_rowheader',
     inherits: 'abstractContainer'
   },
   scrollBar: {
-    msgId: 'aria_role_scrollbar',
+    msgId: 'role_scrollbar',
   },
   search: {
-    msgId: 'aria_role_search',
+    msgId: 'role_search',
     inherits: 'abstractContainer'
   },
   separator: {
-    msgId: 'aria_role_separator',
+    msgId: 'role_separator',
     inherits: 'abstractContainer'
   },
   spinButton: {
-    msgId: 'aria_role_spinbutton',
+    msgId: 'role_spinbutton',
     earconId: 'LISTBOX'
   },
   status: {
-    msgId: 'aria_role_status'
+    msgId: 'role_status'
   },
   tab: {
-    msgId: 'aria_role_tab'
+    msgId: 'role_tab'
   },
   tabList: {
-    msgId: 'aria_role_tablist'
+    msgId: 'role_tablist'
   },
   tabPanel: {
-    msgId: 'aria_role_tabpanel'
+    msgId: 'role_tabpanel'
   },
   textBox: {
     msgId: 'input_type_text',
@@ -294,16 +295,16 @@ Output.ROLE_INFO_ = {
     inherits: 'abstractContainer'
   },
   timer: {
-    msgId: 'aria_role_timer'
+    msgId: 'role_timer'
   },
   toolbar: {
-    msgId: 'aria_role_toolbar'
+    msgId: 'role_toolbar'
   },
   tree: {
-    msgId: 'aria_role_tree'
+    msgId: 'role_tree'
   },
   treeItem: {
-    msgId: 'aria_role_treeitem'
+    msgId: 'role_treeitem'
   }
 };
 
@@ -356,6 +357,21 @@ Output.STATE_INFO_ = {
 };
 
 /**
+ * Maps input types to message IDs.
+ * @const {Object<string>}
+ * @private
+ */
+Output.INPUT_TYPE_MESSAGE_IDS_ = {
+  'email': 'input_type_email',
+  'number': 'input_type_number',
+  'password': 'input_type_password',
+  'search': 'input_type_search',
+  'tel': 'input_type_number',
+  'text': 'input_type_text',
+  'url': 'input_type_url',
+};
+
+/**
  * Rules specifying format of AutomationNodes for output.
  * @type {!Object<Object<Object<string>>>}
  */
@@ -383,6 +399,10 @@ Output.RULES = {
     },
     dialog: {
       enter: '$name $role'
+    },
+    div: {
+      enter: '$name',
+      speak: '$name'
     },
     grid: {
       enter: '$name $role'
@@ -419,7 +439,7 @@ Output.RULES = {
           '@describe_index($indexInParent, $parentChildCount)'
     },
     menuListOption: {
-      speak: '$name $value @aria_role_menuitem ' +
+      speak: '$name $value @role_menuitem ' +
           '@describe_index($indexInParent, $parentChildCount)'
     },
     paragraph: {
@@ -446,14 +466,14 @@ Output.RULES = {
       speak: '@describe_slider($value, $name) $help'
     },
     staticText: {
-      speak: '$value $name'
+      speak: '$value='
     },
     tab: {
       speak: '@describe_tab($name)'
     },
     textField: {
       speak: '$name $value $if(' +
-          '$inputType, @input_type_+$inputType, @input_type_text)',
+          '$inputType, $inputType, $role)',
       braille: ''
     },
     toolbar: {
@@ -492,7 +512,7 @@ Output.RULES = {
   alert: {
     default: {
       speak: '!doNotInterrupt ' +
-          '@aria_role_alert $name $earcon(ALERT_NONMODAL) $descendants'
+          '@role_alert $name $earcon(ALERT_NONMODAL) $descendants'
     }
   }
 };
@@ -526,7 +546,7 @@ Output.EarconAction.prototype = {
 
   /** @override */
   run: function() {
-    cvox.ChromeVox.earcons.playEarcon(cvox.AbstractEarcons[this.earconId]);
+    cvox.ChromeVox.earcons.playEarcon(cvox.Earcon[this.earconId]);
   }
 };
 
@@ -797,7 +817,8 @@ Output.prototype = {
             }
           }
           // Annotate this as a name so we don't duplicate names from ancestors.
-          if (node.role == chrome.automation.RoleType.inlineTextBox)
+          if (node.role == chrome.automation.RoleType.inlineTextBox ||
+              node.role == chrome.automation.RoleType.staticText)
             token = 'name';
           options.annotation.push(token);
           this.append_(buff, text, options);
@@ -873,13 +894,22 @@ Output.prototype = {
           var info = Output.ROLE_INFO_[node.role];
           if (info) {
             if (this.formatOptions_.braille)
-              msg = cvox.ChromeVox.msgs.getMsg(info.msgId + '_brl');
+              msg = Msgs.getMsg(info.msgId + '_brl');
             else
-              msg = cvox.ChromeVox.msgs.getMsg(info.msgId);
+              msg = Msgs.getMsg(info.msgId);
           } else {
             console.error('Missing role info for ' + node.role);
           }
           this.append_(buff, msg, options);
+        } else if (token == 'inputType') {
+          if (!node.inputType)
+            return;
+          options.annotation.push(token);
+          var msgId = Output.INPUT_TYPE_MESSAGE_IDS_[node.inputType] ||
+              'input_type_text';
+          if (this.formatOptions_.braille)
+            msgId = msgId + '_brl';
+          this.append_(buff, Msgs.getMsg(msgId), options);
         } else if (token == 'tableRowIndex' ||
             token == 'tableCellColumnIndex') {
           var value = node[token];
@@ -911,7 +941,7 @@ Output.prototype = {
           var msgId =
               this.formatOptions_.braille ? resolvedInfo.msgId + '_brl' :
               resolvedInfo.msgId;
-          var msg = cvox.ChromeVox.msgs.getMsg(msgId);
+          var msg = Msgs.getMsg(msgId);
           this.append_(buff, msg, options);
         } else if (tree.firstChild) {
           // Custom functions.
@@ -968,10 +998,10 @@ Output.prototype = {
             curArg = curArg.nextSibling;
           }
         }
-        var msg = cvox.ChromeVox.msgs.getMsg(msgId, msgArgs);
+        var msg = Msgs.getMsg(msgId, msgArgs);
         try {
           if (this.formatOptions_.braille)
-            msg = cvox.ChromeVox.msgs.getMsg(msgId + '_brl', msgArgs) || msg;
+            msg = Msgs.getMsg(msgId + '_brl', msgArgs) || msg;
         } catch(e) {}
 
         if (!msg) {

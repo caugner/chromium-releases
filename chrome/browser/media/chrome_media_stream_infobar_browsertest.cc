@@ -6,6 +6,7 @@
 #include "base/files/file_util.h"
 #include "base/strings/stringprintf.h"
 #include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/media/media_stream_devices_controller.h"
 #include "chrome/browser/media/webrtc_browsertest_base.h"
 #include "chrome/browser/media/webrtc_browsertest_common.h"
@@ -57,16 +58,6 @@ class MediaStreamPermissionTest : public WebRtcTestBase {
     const char kMainWebrtcTestHtmlPage[] =
         "files/webrtc/webrtc_jsep01_test.html";
     return test_server()->GetURL(kMainWebrtcTestHtmlPage);
-  }
-
-  // Executes stopLocalStream() in the test page, which frees up an already
-  // acquired mediastream.
-  bool StopLocalStream(content::WebContents* tab_contents) {
-    std::string result;
-    bool ok = content::ExecuteScriptAndExtractString(
-        tab_contents, "stopLocalStream()", &result);
-    DCHECK(ok);
-    return result.compare("ok-stopped") == 0;
   }
 
  private:
@@ -146,7 +137,7 @@ IN_PROC_BROWSER_TEST_F(MediaStreamPermissionTest,
   GetUserMediaAndExpectAutoDenyWithoutPrompt(tab_contents);
 
   HostContentSettingsMap* settings_map =
-      browser()->profile()->GetHostContentSettingsMap();
+      HostContentSettingsMapFactory::GetForProfile(browser()->profile());
 
   settings_map->ClearSettingsForOneType(CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC);
   settings_map->ClearSettingsForOneType(

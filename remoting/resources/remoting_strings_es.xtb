@@ -16,6 +16,7 @@ Los ordenadores remotos con teclados que no estén en inglés norteamericano pue
 Para obtener información sobre la privacidad, consulta la Política de privacidad de Google (http://goo.gl/SyrVzj) y la Política de privacidad de Chrome (http://goo.gl/0uXE5d).</translation>
 <translation id="1324095856329524885">(esta función aún no está disponible para tu ordenador)</translation>
 <translation id="1342297293546459414">Permite ver y controlar un ordenador compartido.</translation>
+<translation id="1389790901665088353">Descargar programa de instalación del host de Escritorio remoto de Chrome</translation>
 <translation id="1450760146488584666">El objeto seleccionado no existe.</translation>
 <translation id="1480046233931937785">Créditos</translation>
 <translation id="1520828917794284345">Ajustar el tamaño del escritorio</translation>
@@ -64,7 +65,8 @@ Para obtener información sobre la privacidad, consulta la Política de privacid
 <translation id="2353140552984634198">Puedes acceder de forma segura a este ordenador con Chromoting.</translation>
 <translation id="2359808026110333948">Continuar</translation>
 <translation id="2366718077645204424">No se puede establecer conexión con el host. Es probable que el error se deba a la configuración de la red que se está utilizando.</translation>
-<translation id="2498359688066513246">Ayuda y opiniones</translation>
+<translation id="2370754117186920852"><ph name="OPTIONAL_OFFLINE_REASON" /> Visto por última vez online <ph name="RELATIVE_TIMESTAMP" />.</translation>
+<translation id="2498359688066513246">Ayuda y sugerencias</translation>
 <translation id="2499160551253595098">Ayúdanos a mejorar la aplicación Escritorio remoto de Chrome autorizando la recopilación de estadísticas de uso e informes sobre fallos.</translation>
 <translation id="2512228156274966424">NOTA: Para asegurarte de que estén disponibles todas las combinaciones de teclas, puedes configurar la aplicación Escritorio remoto de Chrome para que se abra como una ventana.</translation>
 <translation id="2540992418118313681">¿Quieres compartir este ordenador para que otro usuario pueda acceder a él y controlarlo?</translation>
@@ -83,6 +85,7 @@ Para obtener información sobre la privacidad, consulta la Política de privacid
 <translation id="2919669478609886916">Actualmente estás compartiendo este ordenador con otro usuario. ¿Quieres seguir compartiéndolo?</translation>
 <translation id="2921543551052660690">Anteriormente, iniciaste sesión como <ph name="USER_NAME" /> (<ph name="USER_EMAIL" />). Para acceder a los ordenadores de esa cuenta, <ph name="LINK_BEGIN" />inicia sesión en Chromium<ph name="LINK_END" /> con dicha cuenta y vuelve a instalar Chromoting.</translation>
 <translation id="2926340305933667314">No se ha podido inhabilitar el acceso remoto a este ordenador. Vuelve a intentarlo más tarde.</translation>
+<translation id="2930135165929238380">Faltan algunos componentes requeridos. Accede a chrome://plugins y comprueba que Native Client está habilitado.</translation>
 <translation id="2939145106548231838">Autenticarse en host</translation>
 <translation id="2998137343848432918">• Pantalla de créditos añadida.
 • Se ha solucionado un problema al cambiar al modo de pantalla completa con el teclado visible.</translation>
@@ -109,6 +112,7 @@ Para obtener información sobre la privacidad, consulta la Política de privacid
 <translation id="3596628256176442606">Este servicio permite las conexiones entrantes de los clientes de Chromoting.</translation>
 <translation id="3606997049964069799">No has iniciado sesión en Chromium. Inicia sesión y vuelve a intentarlo.</translation>
 <translation id="3649256019230929621">Minimizar ventana</translation>
+<translation id="369442766917958684">No conectado</translation>
 <translation id="3776024066357219166">Ha finalizado tu sesión en Escritorio remoto de Chrome.</translation>
 <translation id="3785447812627779171">Host de
 Chromoting</translation>
@@ -144,6 +148,7 @@ Chromoting</translation>
 <translation id="4572065712096155137">Acceso</translation>
 <translation id="4573676252416618192">Host de Escritorio
 remoto de Chrome</translation>
+<translation id="4619978527973181021">Aceptar e instalar</translation>
 <translation id="4703799847237267011">Ha finalizado tu sesión en Chromoting.</translation>
 <translation id="4736223761657662401">Historial de conexiones</translation>
 <translation id="4741792197137897469">Error de autenticación. Vuelve a iniciar sesión en Chrome.</translation>
@@ -156,6 +161,7 @@ remoto de Chrome</translation>
 <translation id="4913529628896049296">esperando conexión...</translation>
 <translation id="4918086044614829423">Aceptar</translation>
 <translation id="492843737083352574">Tengo problemas con mi teclado o con el ratón.</translation>
+<translation id="4973800994433240357">Al descargar el programa de instalación del host de Chromoting, aceptas las <ph name="LINK_BEGIN" />Condiciones de Servicio<ph name="LINK_END" /> de Google.</translation>
 <translation id="5064360042339518108"><ph name="HOSTNAME" /> (sin conexión)</translation>
 <translation id="5070121137485264635">El host remoto requiere tu autenticación en un sitio web de terceros. Para continuar, debes conceder a la aplicación Escritorio remoto de Chrome permisos adicionales para acceder a la siguiente dirección:</translation>
 <translation id="5156271271724754543">Debes introducir el mismo PIN en los dos cuadros.</translation>
@@ -168,6 +174,7 @@ remoto de Chrome</translation>
 <translation id="5308380583665731573">Conexiones</translation>
 <translation id="5363265567587775042">Pregunta al usuario el ordenador al que se quiere acceder para hacer clic en <ph name="SHARE" /> y proporcionar el código de acceso.</translation>
 <translation id="5379087427956679853">Escritorio remoto de Chrome permite compartir de forma segura tu ordenador a través de Internet. Ambos usuarios deben estar ejecutando la aplicación Escritorio remoto de Chrome, que está disponible en la página <ph name="URL" />.</translation>
+<translation id="5394895745784982830">Para Mac (OS X 10.6 y versiones superiores)</translation>
 <translation id="5397086374758643919">Programa de desinstalación del host de Escritorio remoto de Chrome</translation>
 <translation id="5419185025274123272">No se ha podido restablecer la aplicación. Puedes seguir enviando un informe de errores.</translation>
 <translation id="544077782045763683">El host se ha desconectado.</translation>
@@ -183,6 +190,7 @@ remoto de Chrome</translation>
 <translation id="579702532610384533">Reconectar</translation>
 <translation id="5843054235973879827">¿Por qué es segura esta operación?</translation>
 <translation id="5859141382851488196">Nueva ventana…</translation>
+<translation id="5885438903806970186">Online.</translation>
 <translation id="6001953797859482435">Preferencias del host de Escritorio remoto de Chrome</translation>
 <translation id="6011539954251327702">Chromoting permite compartir de forma segura tu ordenador a través de Internet. Ambos usuarios deben estar ejecutando la aplicación Chromoting, que está disponible en la página <ph name="URL" />.</translation>
 <translation id="6040143037577758943">Cerrar</translation>
@@ -219,6 +227,7 @@ remoto de Chrome</translation>
 <translation id="6930242544192836755">Duración</translation>
 <translation id="6939719207673461467">Mostrar/ocultar teclado.</translation>
 <translation id="6944854424004126054">Restaura la ventana</translation>
+<translation id="6962773374262604195">Para Windows (XP y versiones superiores)</translation>
 <translation id="6965382102122355670">Aceptar</translation>
 <translation id="6985691951107243942">¿Seguro que quieres inhabilitar las conexiones remotas con <ph name="HOSTNAME" />? Si cambias de opinión, tendrás que volver a habilitar las conexiones desde ese ordenador.</translation>
 <translation id="6998989275928107238">Para</translation>
@@ -248,6 +257,7 @@ remoto de Chrome</translation>
 <translation id="7869445566579231750">No tienes permiso para ejecutar esta aplicación.</translation>
 <translation id="7948001860594368197">Opciones de pantalla</translation>
 <translation id="7970576581263377361">Error de autenticación. Vuelve a iniciar sesión en Chromium.</translation>
+<translation id="8041721485428375115">Al descargar el programa de instalación del host de Escritorio remoto de Chrome, aceptas las <ph name="LINK_BEGIN" />Condiciones de Servicio<ph name="LINK_END" /> de Google.</translation>
 <translation id="8073845705237259513">Para utilizar la aplicación Escritorio remoto de Chrome, debes añadir una cuenta de Google al dispositivo.</translation>
 <translation id="80739703311984697">El host remoto requiere tu autenticación en un sitio web de terceros. Para continuar, debes conceder a Chromoting permisos adicionales para acceder a la siguiente dirección:</translation>
 <translation id="809687642899217504">Mis ordenadores</translation>
@@ -271,6 +281,7 @@ remoto de Chrome</translation>
 <translation id="8642984861538780905">Aceptable</translation>
 <translation id="8712909229180978490">No puedo ver mis archivos guardados online en Google Drive.</translation>
 <translation id="8759753423332885148">Más información</translation>
+<translation id="8791202241915690908">Descargar programa de instalación del host de Chromoting</translation>
 <translation id="894763922177556086">Buena</translation>
 <translation id="897805526397249209">Para habilitar conexiones remotas con otro ordenador, instala Chromoting en él y haz clic en <ph name="BUTTON_NAME" />.</translation>
 <translation id="8998327464021325874">Controlador de host de Escritorio remoto de Chrome</translation>

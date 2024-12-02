@@ -7,7 +7,6 @@
 
 #include <vector>
 
-#include "base/gtest_prod_util.h"
 #include "components/omnibox/browser/autocomplete_match.h"
 #include "components/omnibox/browser/suggestion_answer.h"
 #include "third_party/skia/include/core/SkColor.h"
@@ -64,8 +63,12 @@ class OmniboxResultView : public views::View,
 
   void Invalidate();
 
+  // Invoked when this result view has been selected.
+  void OnSelected();
+
   // views::View:
   gfx::Size GetPreferredSize() const override;
+  void GetAccessibleState(ui::AXViewState* state) override;
 
   ResultViewState GetState() const;
 
@@ -171,6 +174,13 @@ class OmniboxResultView : public views::View,
                               const base::string16& text,
                               int text_type,
                               bool is_bold);
+
+  // Returns the necessary margin, if any, at the start and end of the view.
+  // This allows us to keep the icon and text in the view aligned with the
+  // location bar contents. For a left-to-right language, StartMargin()
+  // and EndMargin() correspond to the left and right margins, respectively.
+  int StartMargin() const;
+  int EndMargin() const;
 
   static int default_icon_size_;
 

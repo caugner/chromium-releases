@@ -73,14 +73,6 @@ void WebLayerTreeViewImplForTesting::setViewportSize(
   layer_tree_host_->SetViewportSize(device_viewport_size);
 }
 
-WebSize WebLayerTreeViewImplForTesting::layoutViewportSize() const {
-  return layer_tree_host_->device_viewport_size();
-}
-
-WebSize WebLayerTreeViewImplForTesting::deviceViewportSize() const {
-  return layer_tree_host_->device_viewport_size();
-}
-
 void WebLayerTreeViewImplForTesting::setDeviceScaleFactor(
     float device_scale_factor) {
   layer_tree_host_->SetDeviceScaleFactor(device_scale_factor);
@@ -122,10 +114,6 @@ void WebLayerTreeViewImplForTesting::setNeedsAnimate() {
 }
 
 void WebLayerTreeViewImplForTesting::didStopFlinging() {}
-
-void WebLayerTreeViewImplForTesting::finishAllRendering() {
-  layer_tree_host_->FinishAllRendering();
-}
 
 void WebLayerTreeViewImplForTesting::setDeferCommits(bool defer_commits) {
   layer_tree_host_->SetDeferCommits(defer_commits);

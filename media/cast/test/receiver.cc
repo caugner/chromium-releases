@@ -75,7 +75,7 @@ void GetPorts(uint16* tx_port, uint16* rx_port) {
   *rx_port = static_cast<uint16>(rx_input.GetIntInput());
 }
 
-std::string GetIpAddress(const std::string display_text) {
+std::string GetIpAddress(const std::string& display_text) {
   test::InputBuilder input(display_text, DEFAULT_SEND_IP, INT_MIN, INT_MAX);
   std::string ip_address = input.GetStringInput();
   // Ensure IP address is either the default value or in correct form.
@@ -517,7 +517,7 @@ class NaivePlayer : public InProcessReceiver,
   base::TimeTicks last_popped_video_playout_time_;
   int64 num_video_frames_processed_;
 
-  base::OneShotTimer<NaivePlayer> video_playout_timer_;
+  base::OneShotTimer video_playout_timer_;
 
   // Audio playout queue, synchronized by |audio_lock_|.
   base::Lock audio_lock_;

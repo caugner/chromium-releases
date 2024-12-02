@@ -14,7 +14,7 @@
 #include "chrome/browser/metrics/chrome_metrics_service_client.h"
 #include "chrome/browser/metrics/metrics_reporting_state.h"
 #include "chrome/browser/metrics/variations/chrome_variations_service_client.h"
-#include "chrome/browser/metrics/variations/variations_service.h"
+#include "chrome/browser/metrics/variations/generated_resources_map.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser_otr_state.h"
@@ -24,6 +24,7 @@
 #include "components/metrics/metrics_service.h"
 #include "components/metrics/metrics_state_manager.h"
 #include "components/rappor/rappor_service.h"
+#include "components/variations/service/variations_service.h"
 #include "content/public/browser/browser_thread.h"
 
 #if defined(OS_CHROMEOS)
@@ -62,13 +63,15 @@ rappor::RapporService* MetricsServicesManager::GetRapporService() {
   return rappor_service_.get();
 }
 
-chrome_variations::VariationsService*
-MetricsServicesManager::GetVariationsService() {
+variations::VariationsService* MetricsServicesManager::GetVariationsService() {
   DCHECK(thread_checker_.CalledOnValidThread());
   if (!variations_service_) {
-    variations_service_ = chrome_variations::VariationsService::Create(
+    variations_service_ = variations::VariationsService::Create(
         make_scoped_ptr(new ChromeVariationsServiceClient()), local_state_,
-        GetMetricsStateManager());
+        GetMetricsStateManager(), switches::kDisableBackgroundNetworking,
+        variations::UIStringOverrider(chrome_variations::kResourceHashes,
+                                      chrome_variations::kResourceIndices,
+                                      chrome_variations::kNumResources));
   }
   return variations_service_.get();
 }
@@ -93,7 +96,8 @@ metrics::MetricsStateManager* MetricsServicesManager::GetMetricsStateManager() {
   if (!metrics_state_manager_) {
     metrics_state_manager_ = metrics::MetricsStateManager::Create(
         local_state_,
-        base::Bind(&ChromeMetricsServiceAccessor::IsMetricsReportingEnabled),
+        base::Bind(
+            &ChromeMetricsServiceAccessor::IsMetricsAndCrashReportingEnabled),
         base::Bind(&PostStoreMetricsClientInfo),
         base::Bind(&GoogleUpdateSettings::LoadMetricsClientInfo));
   }
@@ -170,5 +174,6 @@ void MetricsServicesManager::UpdateRunningServices() {
 
 void MetricsServicesManager::UpdateUploadPermissions(bool may_upload) {
   return UpdatePermissions(
-      ChromeMetricsServiceAccessor::IsMetricsReportingEnabled(), may_upload);
+      ChromeMetricsServiceAccessor::IsMetricsAndCrashReportingEnabled(),
+      may_upload);
 }

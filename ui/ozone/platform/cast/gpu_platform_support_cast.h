@@ -5,6 +5,7 @@
 #ifndef UI_OZONE_PLATFORM_CAST_GPU_PLATFORM_SUPPORT_CAST_H_
 #define UI_OZONE_PLATFORM_CAST_GPU_PLATFORM_SUPPORT_CAST_H_
 
+#include "base/macros.h"
 #include "ui/ozone/public/gpu_platform_support.h"
 
 namespace ui {
@@ -14,8 +15,8 @@ class SurfaceFactoryCast;
 // GpuPlatformSupport implementation for use with OzonePlatformCast.
 class GpuPlatformSupportCast : public GpuPlatformSupport {
  public:
-  explicit GpuPlatformSupportCast(SurfaceFactoryCast* parent)
-      : parent_(parent) {}
+  explicit GpuPlatformSupportCast(SurfaceFactoryCast* parent);
+  ~GpuPlatformSupportCast() override;
 
   // GpuPlatformSupport implementation:
   void OnChannelEstablished(IPC::Sender* sender) override {}

@@ -1326,10 +1326,15 @@ class TLSConnection(TLSRecordLayer):
         serverHello.create(self.version, getRandomBytes(32), sessionID, \
                             cipherSuite, CertificateType.x509, tackExt,
                             nextProtos)
-        serverHello.channel_id = clientHello.channel_id
+        serverHello.channel_id = \
+            clientHello.channel_id and settings.enableChannelID
         serverHello.extended_master_secret = \
             clientHello.extended_master_secret and \
             settings.enableExtendedMasterSecret
+        for param in clientHello.tb_client_params:
+            if param in settings.supportedTokenBindingParams:
+                serverHello.tb_params = param
+                break
         if clientHello.support_signed_cert_timestamps:
             serverHello.signed_cert_timestamps = signedCertTimestamps
         if clientHello.status_request:
@@ -1387,7 +1392,7 @@ class TLSConnection(TLSRecordLayer):
         for result in self._serverFinished(premasterSecret, 
                                 clientHello.random, serverHello.random,
                                 cipherSuite, settings.cipherImplementations,
-                                nextProtos, clientHello.channel_id,
+                                nextProtos, serverHello.channel_id,
                                 serverHello.extended_master_secret):
                 if result in (0,1): yield result
                 else: break

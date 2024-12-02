@@ -3,15 +3,14 @@
 <script src="../../http/tests/inspector/inspector-test.js"></script>
 <script src="../../http/tests/inspector/timeline-test.js"></script>
 <script>
-
 function performActions(callback)
 {
-    var element = document.getElementById("animation");
-    var requestId = window.requestAnimationFrame(animationFrameCallback, element);
+    var requestId = window.requestAnimationFrame(animationFrameCallback);
     function animationFrameCallback()
     {
         window.cancelAnimationFrame(requestId);
-        callback();
+        if (callback)
+            callback();
     }
 }
 
@@ -21,16 +20,15 @@ function test()
 
     function finish()
     {
-        InspectorTest.printTimelineRecords("RequestAnimationFrame");
-        InspectorTest.printTimelineRecords("FireAnimationFrame");
-        InspectorTest.printTimelineRecords("CancelAnimationFrame");
+        InspectorTest.printTimelineRecordsWithDetails("RequestAnimationFrame");
+        InspectorTest.printTimelineRecordsWithDetails("FireAnimationFrame");
+        InspectorTest.printTimelineRecordsWithDetails("CancelAnimationFrame");
         InspectorTest.completeTest();
     }
 }
 
 if (!window.testRunner)
     setTimeout(performActions, 2000);
-
 </script>
 </head>
 
@@ -38,9 +36,5 @@ if (!window.testRunner)
 <p>
 Tests the Timeline events for Animation Frame feature
 </p>
-<div id="animation">
-
-</div>
-
 </body>
 </html>

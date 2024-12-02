@@ -17,7 +17,9 @@ import android.os.Bundle;
 import android.os.IBinder;
 import android.os.Parcel;
 import android.os.RemoteException;
-import android.support.v7.app.ActionBarActivity;
+import android.support.v4.app.NavUtils;
+import android.support.v7.app.AppCompatActivity;
+import android.support.v7.widget.Toolbar;
 import android.text.TextUtils;
 import android.util.Log;
 import android.view.Menu;
@@ -31,7 +33,7 @@ import org.chromium.ui.UiUtils;
 /**
  * The Activity for showing the Help screen.
  */
-public class HelpActivity extends ActionBarActivity {
+public class HelpActivity extends AppCompatActivity {
     private static final String PLAY_STORE_URL = "market://details?id=";
     private static final String CREDITS_URL = "file:///android_res/raw/credits.html";
 
@@ -115,9 +117,13 @@ public class HelpActivity extends ActionBarActivity {
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        mWebView = new WebView(this);
-        setContentView(mWebView);
+        setContentView(R.layout.help);
+        mWebView = (WebView) findViewById(R.id.web_view);
 
+        Toolbar toolbar = (Toolbar) findViewById(R.id.toolbar);
+        setSupportActionBar(toolbar);
+
+        getSupportActionBar().setDisplayHomeAsUpEnabled(true);
         getSupportActionBar().setTitle(getString(R.string.actionbar_help_title));
 
         CharSequence appName = getTitle();
@@ -162,6 +168,10 @@ public class HelpActivity extends ActionBarActivity {
     @Override
     public boolean onOptionsItemSelected(MenuItem item) {
         int id = item.getItemId();
+        if (id == android.R.id.home) {
+            NavUtils.navigateUpFromSameTask(this);
+            return true;
+        }
         if (id == R.id.actionbar_feedback) {
             sendFeedback();
             return true;

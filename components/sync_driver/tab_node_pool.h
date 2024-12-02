@@ -10,8 +10,7 @@
 #include <string>
 
 #include "base/basictypes.h"
-#include "base/gtest_prod_util.h"
-#include "components/sessions/session_id.h"
+#include "components/sessions/core/session_id.h"
 #include "sync/api/sync_change_processor.h"
 
 namespace syncer {
@@ -40,7 +39,7 @@ namespace browser_sync {
 
 class TabNodePool {
  public:
-   TabNodePool();
+  TabNodePool();
   ~TabNodePool();
   enum InvalidTab {
     kInvalidTabID = -1
@@ -56,7 +55,7 @@ class TabNodePool {
   static const int kInvalidTabNodeID;
 
   // Build a sync tag from tab_node_id.
-  static std::string TabIdToTag(const std::string machine_tag,
+  static std::string TabIdToTag(const std::string& machine_tag,
                                 int tab_node_id);
 
   // Returns the tab_node_id for the next free tab node. If none are available,

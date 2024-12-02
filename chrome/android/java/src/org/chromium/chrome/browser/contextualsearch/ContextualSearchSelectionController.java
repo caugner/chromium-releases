@@ -154,6 +154,7 @@ public class ContextualSearchSelectionController {
      */
     void handleSelectionChanged(String selection) {
         if (mDidExpandSelection) {
+            mSelectedText = selection;
             mDidExpandSelection = false;
             return;
         }
@@ -168,7 +169,7 @@ public class ContextualSearchSelectionController {
                 return;
             }
         }
-        if (selection != null && !selection.isEmpty()) {
+        if (!selection.isEmpty()) {
             unscheduleInvalidTapNotification();
         }
 
@@ -179,7 +180,7 @@ public class ContextualSearchSelectionController {
             handleSelection(selection, mSelectionType);
             mWasTapGestureDetected = false;
         } else {
-            mHandler.handleSelectionModification(selection, mX, mY);
+            mHandler.handleSelectionModification(selection, isValidSelection(selection), mX, mY);
         }
     }
 
@@ -196,6 +197,8 @@ public class ContextualSearchSelectionController {
                 mWasTapGestureDetected = false;
                 mSelectionType = SelectionType.LONG_PRESS;
                 shouldHandleSelection = true;
+                // Since we're showing pins, we don't care if the previous tap was invalid anymore.
+                unscheduleInvalidTapNotification();
                 break;
             case SelectionEventType.SELECTION_HANDLES_CLEARED:
                 mHandler.handleSelectionDismissal();
@@ -298,8 +301,6 @@ public class ContextualSearchSelectionController {
      *                           the search term.
      */
     void adjustSelection(int selectionStartAdjust, int selectionEndAdjust) {
-        if (ContextualSearchFieldTrial.isSelectionExpansionDisabled()) return;
-
         // TODO(donnd): add code to verify that the selection is still valid before changing it.
         // crbug.com/508354
 

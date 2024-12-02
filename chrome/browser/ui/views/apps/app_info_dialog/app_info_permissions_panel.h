@@ -7,6 +7,7 @@
 
 #include <vector>
 
+#include "base/gtest_prod_util.h"
 #include "chrome/browser/ui/views/apps/app_info_dialog/app_info_panel.h"
 #include "extensions/common/permissions/permission_message_provider.h"
 
@@ -50,7 +51,7 @@ class AppInfoPermissionsPanel : public AppInfoPanel {
   void LayoutPermissionsList();
 
   bool HasActivePermissionMessages() const;
-  extensions::CoalescedPermissionMessages GetActivePermissionMessages() const;
+  extensions::PermissionMessages GetActivePermissionMessages() const;
 
   int GetRetainedFileCount() const;
   base::string16 GetRetainedFileHeading() const;

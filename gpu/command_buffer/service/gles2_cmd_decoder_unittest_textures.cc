@@ -9,9 +9,6 @@
 #include "gpu/command_buffer/common/gles2_cmd_format.h"
 #include "gpu/command_buffer/common/gles2_cmd_utils.h"
 #include "gpu/command_buffer/common/id_allocator.h"
-#include "gpu/command_buffer/service/async_pixel_transfer_delegate_mock.h"
-#include "gpu/command_buffer/service/async_pixel_transfer_manager.h"
-#include "gpu/command_buffer/service/async_pixel_transfer_manager_mock.h"
 #include "gpu/command_buffer/service/cmd_buffer_engine.h"
 #include "gpu/command_buffer/service/context_group.h"
 #include "gpu/command_buffer/service/context_state.h"
@@ -403,6 +400,90 @@ TEST_P(GLES2DecoderTest, TexSubImage2DBadArgs) {
            kInvalidSharedMemoryOffset,
            GL_FALSE);
   EXPECT_NE(error::kNoError, ExecuteCmd(cmd));
+}
+
+TEST_P(GLES3DecoderTest, TexSubImage2DTypesDoNotMatchUnsizedFormat) {
+  const int kWidth = 16;
+  const int kHeight = 8;
+  DoBindTexture(GL_TEXTURE_2D, client_texture_id_, kServiceTextureId);
+  DoTexImage2D(GL_TEXTURE_2D,
+               1,
+               GL_RGBA,
+               kWidth,
+               kHeight,
+               0,
+               GL_RGBA,
+               GL_UNSIGNED_SHORT_4_4_4_4,
+               kSharedMemoryId,
+               kSharedMemoryOffset);
+  EXPECT_CALL(*gl_,
+              TexSubImage2D(GL_TEXTURE_2D,
+                            1,
+                            1,
+                            0,
+                            kWidth - 1,
+                            kHeight,
+                            GL_RGBA,
+                            GL_UNSIGNED_BYTE,
+                            shared_memory_address_))
+      .Times(1)
+      .RetiresOnSaturation();
+  TexSubImage2D cmd;
+  cmd.Init(GL_TEXTURE_2D,
+           1,
+           1,
+           0,
+           kWidth - 1,
+           kHeight,
+           GL_RGBA,
+           GL_UNSIGNED_BYTE,
+           kSharedMemoryId,
+           kSharedMemoryOffset,
+           GL_FALSE);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+}
+
+TEST_P(GLES3DecoderTest, TexSubImage2DTypesDoNotMatchSizedFormat) {
+  const int kWidth = 16;
+  const int kHeight = 8;
+  DoBindTexture(GL_TEXTURE_2D, client_texture_id_, kServiceTextureId);
+  DoTexImage2D(GL_TEXTURE_2D,
+               1,
+               GL_RGBA4,
+               kWidth,
+               kHeight,
+               0,
+               GL_RGBA,
+               GL_UNSIGNED_BYTE,
+               kSharedMemoryId,
+               kSharedMemoryOffset);
+  EXPECT_CALL(*gl_,
+              TexSubImage2D(GL_TEXTURE_2D,
+                            1,
+                            1,
+                            0,
+                            kWidth - 1,
+                            kHeight,
+                            GL_RGBA,
+                            GL_UNSIGNED_SHORT_4_4_4_4,
+                            shared_memory_address_))
+      .Times(1)
+      .RetiresOnSaturation();
+  TexSubImage2D cmd;
+  cmd.Init(GL_TEXTURE_2D,
+           1,
+           1,
+           0,
+           kWidth - 1,
+           kHeight,
+           GL_RGBA,
+           GL_UNSIGNED_SHORT_4_4_4_4,
+           kSharedMemoryId,
+           kSharedMemoryOffset,
+           GL_FALSE);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
 }
 
 TEST_P(GLES2DecoderTest, CopyTexSubImage2DValidArgs) {
@@ -2185,6 +2266,9 @@ TEST_P(GLES2DecoderTest, ProduceAndConsumeTextureCHROMIUM) {
   DoBindTexture(GL_TEXTURE_2D, kNewClientId, kNewServiceId);
 
   // Assigns and binds original service size texture ID.
+  EXPECT_CALL(*gl_, BindTexture(GL_TEXTURE_2D, 0))
+      .Times(1)
+      .RetiresOnSaturation();
   EXPECT_CALL(*gl_, DeleteTextures(1, _)).Times(1).RetiresOnSaturation();
   EXPECT_CALL(*gl_, BindTexture(GL_TEXTURE_2D, kServiceTextureId))
       .Times(1)
@@ -3219,6 +3303,39 @@ TEST_P(GLES2DecoderCompressedFormatsTest, GetCompressedTextureFormatsPVRTC) {
 TEST_P(GLES2DecoderCompressedFormatsTest, GetCompressedTextureFormatsETC1) {
   const GLenum formats[] = {GL_ETC1_RGB8_OES};
   CheckFormats("GL_OES_compressed_ETC1_RGB8_texture", formats, 1);
+}
+
+TEST_P(GLES2DecoderCompressedFormatsTest, GetCompressedTextureFormatsASTC) {
+  const GLenum formats[] = {
+      GL_COMPRESSED_RGBA_ASTC_4x4_KHR,
+      GL_COMPRESSED_RGBA_ASTC_5x4_KHR,
+      GL_COMPRESSED_RGBA_ASTC_5x5_KHR,
+      GL_COMPRESSED_RGBA_ASTC_6x5_KHR,
+      GL_COMPRESSED_RGBA_ASTC_6x6_KHR,
+      GL_COMPRESSED_RGBA_ASTC_8x5_KHR,
+      GL_COMPRESSED_RGBA_ASTC_8x6_KHR,
+      GL_COMPRESSED_RGBA_ASTC_8x8_KHR,
+      GL_COMPRESSED_RGBA_ASTC_10x5_KHR,
+      GL_COMPRESSED_RGBA_ASTC_10x6_KHR,
+      GL_COMPRESSED_RGBA_ASTC_10x8_KHR,
+      GL_COMPRESSED_RGBA_ASTC_10x10_KHR,
+      GL_COMPRESSED_RGBA_ASTC_12x10_KHR,
+      GL_COMPRESSED_RGBA_ASTC_12x12_KHR,
+      GL_COMPRESSED_SRGB8_ALPHA8_ASTC_4x4_KHR,
+      GL_COMPRESSED_SRGB8_ALPHA8_ASTC_5x4_KHR,
+      GL_COMPRESSED_SRGB8_ALPHA8_ASTC_5x5_KHR,
+      GL_COMPRESSED_SRGB8_ALPHA8_ASTC_6x5_KHR,
+      GL_COMPRESSED_SRGB8_ALPHA8_ASTC_6x6_KHR,
+      GL_COMPRESSED_SRGB8_ALPHA8_ASTC_8x5_KHR,
+      GL_COMPRESSED_SRGB8_ALPHA8_ASTC_8x6_KHR,
+      GL_COMPRESSED_SRGB8_ALPHA8_ASTC_8x8_KHR,
+      GL_COMPRESSED_SRGB8_ALPHA8_ASTC_10x5_KHR,
+      GL_COMPRESSED_SRGB8_ALPHA8_ASTC_10x6_KHR,
+      GL_COMPRESSED_SRGB8_ALPHA8_ASTC_10x8_KHR,
+      GL_COMPRESSED_SRGB8_ALPHA8_ASTC_10x10_KHR,
+      GL_COMPRESSED_SRGB8_ALPHA8_ASTC_12x10_KHR,
+      GL_COMPRESSED_SRGB8_ALPHA8_ASTC_12x12_KHR};
+  CheckFormats("GL_KHR_texture_compression_astc_ldr", formats, 28);
 }
 
 TEST_P(GLES2DecoderManualInitTest, GetNoCompressedTextureFormats) {

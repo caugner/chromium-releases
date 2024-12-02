@@ -15,12 +15,17 @@
 #include "base/memory/scoped_vector.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
+#include "base/scoped_observer.h"
+#include "components/bookmarks/browser/base_bookmark_model_observer.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/offline_pages/offline_page_archiver.h"
 
 class GURL;
 namespace base {
 class SequencedTaskRunner;
+}
+namespace bookmarks {
+class BookmarkModel;
 }
 
 namespace offline_pages {
@@ -45,11 +50,12 @@ class OfflinePageMetadataStore;
 //
 // TODO(fgorski): Things to describe:
 // * how to cancel requests and what to expect
-class OfflinePageModel : public KeyedService {
+class OfflinePageModel : public KeyedService,
+                         public bookmarks::BaseBookmarkModelObserver {
  public:
   // Result of saving a page offline.
   // A Java counterpart will be generated for this enum.
-  // GENERATED_JAVA_ENUM_PACKAGE: org.chromium.components.offline_pages
+  // GENERATED_JAVA_ENUM_PACKAGE: org.chromium.components.offlinepages
   enum class SavePageResult {
     SUCCESS,
     CANCELLED,
@@ -58,22 +64,28 @@ class OfflinePageModel : public KeyedService {
     ARCHIVE_CREATION_FAILED,
     STORE_FAILURE,
     ALREADY_EXISTS,
+    // NOTE: always keep this entry at the end. Add new result types only
+    // immediately above this line. Make sure to update the corresponding
+    // histogram enum accordingly.
+    RESULT_COUNT,
   };
 
   // Result of deleting an offline page.
   // A Java counterpart will be generated for this enum.
-  // GENERATED_JAVA_ENUM_PACKAGE: org.chromium.components.offline_pages
+  // GENERATED_JAVA_ENUM_PACKAGE: org.chromium.components.offlinepages
   enum class DeletePageResult {
     SUCCESS,
     CANCELLED,
     STORE_FAILURE,
     DEVICE_FAILURE,
     NOT_FOUND,
+    // NOTE: always keep this entry at the end. Add new result types only
+    // immediately above this line. Make sure to update the corresponding
+    // histogram enum accordingly.
+    RESULT_COUNT,
   };
 
   // Result of loading all pages.
-  // A Java counterpart will be generated for this enum.
-  // GENERATED_JAVA_ENUM_PACKAGE: org.chromium.components.offline_pages
   enum class LoadResult {
     SUCCESS,
     CANCELLED,
@@ -99,6 +111,12 @@ class OfflinePageModel : public KeyedService {
       const scoped_refptr<base::SequencedTaskRunner>& task_runner);
   ~OfflinePageModel() override;
 
+  // Starts the OfflinePageModel and registers it as a BookmarkModelObserver.
+  // Calling this method is optional, but offline pages will not be deleted
+  // when the bookmark is deleted, i.e. due to sync, until this method is
+  // called.
+  void Start(bookmarks::BookmarkModel* model);
+
   // KeyedService implementation.
   void Shutdown() override;
 
@@ -111,6 +129,11 @@ class OfflinePageModel : public KeyedService {
                 int64 bookmark_id,
                 scoped_ptr<OfflinePageArchiver> archiver,
                 const SavePageCallback& callback);
+
+  // Marks that the offline page related to the passed |bookmark_id| has been
+  // accessed. Its access info, including last access time and access count,
+  // will be updated. Requires that the model is loaded.
+  void MarkPageAccessed(int64 bookmark_id);
 
   // Deletes an offline page related to the passed |bookmark_id|. Requires that
   // the model is loaded.
@@ -125,11 +148,13 @@ class OfflinePageModel : public KeyedService {
   // Gets all available offline pages. Requires that the model is loaded.
   const std::vector<OfflinePageItem> GetAllPages() const;
 
-  // Gets an offline page associated with a specified |bookmark_id|. Returns
-  // true if a matching offline page exists, and |offline_page| will be updated
-  // with corresponding value, or false, if no offline page was found.
-  bool GetPageByBookmarkId(int64 bookmark_id,
-                           OfflinePageItem* offline_page) const;
+  // Gets pages that should be removed to clean up storage. Requires that the
+  // model is loaded.
+  const std::vector<OfflinePageItem> GetPagesToCleanUp() const;
+
+  // Returns an offline page associated with a specified |bookmark_id|. nullptr
+  // is returned if not found.
+  const OfflinePageItem* GetPageByBookmarkId(int64 bookmark_id) const;
 
   // Returns an offline page that is stored as |offline_url|. nullptr is
   // returned if not found.
@@ -142,6 +167,14 @@ class OfflinePageModel : public KeyedService {
 
  private:
   typedef ScopedVector<OfflinePageArchiver> PendingArchivers;
+
+  // BaseBookmarkModelObserver:
+  void BookmarkModelChanged() override;
+  void BookmarkNodeRemoved(bookmarks::BookmarkModel* model,
+                           const bookmarks::BookmarkNode* parent,
+                           int old_index,
+                           const bookmarks::BookmarkNode* node,
+                           const std::set<GURL>& removed_urls) override;
 
   // Callback for loading pages from the offline page metadata store.
   void OnLoadDone(bool success,
@@ -172,6 +205,11 @@ class OfflinePageModel : public KeyedService {
   void OnRemoveOfflinePagesDone(const std::vector<int64>& bookmark_ids,
                                 const DeletePageCallback& callback,
                                 bool success);
+  void InformDeletePageDone(const DeletePageCallback& callback,
+                            DeletePageResult result);
+
+  void OnUpdateOfflinePageDone(const OfflinePageItem& offline_page_item,
+                               bool success);
 
   // Persistent store for offline page metadata.
   scoped_ptr<OfflinePageMetadataStore> store_;
@@ -188,6 +226,12 @@ class OfflinePageModel : public KeyedService {
 
   // Pending archivers owned by this model.
   PendingArchivers pending_archivers_;
+
+  // Delayed tasks that should be invoked after the loading is done.
+  std::vector<base::Closure> delayed_tasks_;
+
+  ScopedObserver<bookmarks::BookmarkModel, bookmarks::BookmarkModelObserver>
+      scoped_observer_;
 
   base::WeakPtrFactory<OfflinePageModel> weak_ptr_factory_;
 

@@ -1,6 +1,6 @@
 layer at (0,0) size 800x600 scrollHeight 610
   LayoutView at (0,0) size 800x600
-layer at (0,0) size 800x610 backgroundClip at (0,0) size 800x600 clip at (0,0) size 800x600 outlineClip at (0,0) size 800x600
+layer at (0,0) size 800x610 backgroundClip at (0,0) size 800x600 clip at (0,0) size 800x600
   LayoutBlockFlow {HTML} at (0,0) size 800x610
     LayoutBlockFlow {BODY} at (8,10) size 784x592
       LayoutTable {TABLE} at (10,0) size 118x100 [border: (1px solid #000000)]
@@ -133,8 +133,6 @@ layer at (0,0) size 800x610 backgroundClip at (0,0) size 800x600 clip at (0,0) s
                       LayoutTableCell {TD} at (42,2) size 38x22 [r=0 c=1 rs=1 cs=1]
                         LayoutText {#text} at (1,1) size 36x19
                           text run at (1,1) width 36: "Cell 2"
-              LayoutBlockFlow (anonymous) at (0,26) size 116x0
-                LayoutText {#text} at (0,0) size 0x0
               LayoutBlockFlow {TR} at (0,26) size 116x26
                 LayoutTable (anonymous) at (0,0) size 82x26
                   LayoutTableSection (anonymous) at (0,0) size 82x26
@@ -145,8 +143,6 @@ layer at (0,0) size 800x610 backgroundClip at (0,0) size 800x600 clip at (0,0) s
                       LayoutTableCell {TD} at (42,2) size 38x22 [r=0 c=1 rs=1 cs=1]
                         LayoutText {#text} at (1,1) size 36x19
                           text run at (1,1) width 36: "Cell 4"
-              LayoutBlockFlow (anonymous) at (0,52) size 116x0
-                LayoutText {#text} at (0,0) size 0x0
       LayoutTable (anonymous) at (0,390) size 302x202
         LayoutTableSection (anonymous) at (0,0) size 302x202
           LayoutTableRow (anonymous) at (0,0) size 302x202

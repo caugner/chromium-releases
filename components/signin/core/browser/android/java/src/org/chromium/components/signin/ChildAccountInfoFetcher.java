@@ -5,18 +5,12 @@
 package org.chromium.components.signin;
 
 import android.accounts.Account;
-import android.accounts.AccountManagerCallback;
-import android.accounts.AccountManagerFuture;
-import android.accounts.AuthenticatorException;
-import android.accounts.OperationCanceledException;
 import android.content.Context;
 
 import org.chromium.base.ApplicationStatus;
-import org.chromium.base.Log;
 import org.chromium.base.annotations.CalledByNative;
+import org.chromium.sync.signin.AccountManagerDelegate.Callback;
 import org.chromium.sync.signin.AccountManagerHelper;
-
-import java.io.IOException;
 
 /**
  * ChildAccountInfoFetcher for the Android platform.
@@ -30,34 +24,16 @@ public final class ChildAccountInfoFetcher {
     }
 
     @CalledByNative
-    private static void fetch(final long nativeAccountFetcherService, final String accountId) {
+    private static void fetch(final long nativeAccountFetcherService, final String accountId,
+            final String accountName) {
         Context app = ApplicationStatus.getApplicationContext();
         assert app != null;
         AccountManagerHelper helper = AccountManagerHelper.get(app);
-        Account[] accounts = helper.getGoogleAccounts();
-        Account candidate_account = null;
-        for (Account account : accounts) {
-            if (account.name.equals(accountId)) {
-                candidate_account = account;
-                break;
-            }
-        }
-        if (candidate_account == null) {
-            nativeSetIsChildAccount(nativeAccountFetcherService, accountId, false);
-            return;
-        }
-        helper.checkChildAccount(candidate_account, new AccountManagerCallback<Boolean>() {
+        Account account = helper.createAccountFromName(accountName);
+        helper.checkChildAccount(account, new Callback<Boolean>() {
             @Override
-            public void run(AccountManagerFuture<Boolean> future) {
-                assert future.isDone();
-                try {
-                    boolean isChildAccount = future.getResult();
-                    nativeSetIsChildAccount(nativeAccountFetcherService, accountId, isChildAccount);
-                } catch (AuthenticatorException | IOException e) {
-                    Log.e(TAG, "Error while fetching child account info: ", e);
-                } catch (OperationCanceledException e) {
-                    Log.e(TAG, "Child account info fetch was cancelled. This should not happen.");
-                }
+            public void gotResult(Boolean isChildAccount) {
+                nativeSetIsChildAccount(nativeAccountFetcherService, accountId, isChildAccount);
             }
         });
     }

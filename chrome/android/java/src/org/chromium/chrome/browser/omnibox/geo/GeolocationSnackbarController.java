@@ -82,7 +82,8 @@ public class GeolocationSnackbarController implements SnackbarController {
         String settings = context.getResources().getString(R.string.preferences);
         int durationMs = DeviceClassManager.isAccessibilityModeEnabled(view.getContext())
                 ? ACCESSIBILITY_SNACKBAR_DURATION_MS : SNACKBAR_DURATION_MS;
-        final Snackbar snackbar = Snackbar.make(message, new GeolocationSnackbarController())
+        final GeolocationSnackbarController controller = new GeolocationSnackbarController();
+        final Snackbar snackbar = Snackbar.make(message, controller)
                 .setAction(settings, view)
                 .setSingleLine(false)
                 .setDuration(durationMs);
@@ -90,7 +91,7 @@ public class GeolocationSnackbarController implements SnackbarController {
         view.postDelayed(new Runnable() {
             @Override
             public void run() {
-                snackbarManager.dismissSnackbar(false);
+                snackbarManager.dismissSnackbars(controller);
                 snackbarManager.showSnackbar(snackbar);
                 setGeolocationSnackbarShown(context);
             }
@@ -114,7 +115,7 @@ public class GeolocationSnackbarController implements SnackbarController {
         // Don't show the snackbar if location is disabled for google.com, since X-Geo won't be sent
         // unless the user explicitly reenables location for google.com.
         Uri searchUri = Uri.parse(TemplateUrlService.getInstance().getUrlForSearchQuery("foo"));
-        if (GeolocationHeader.isLocationDisabledForUrl(searchUri)) return true;
+        if (GeolocationHeader.isLocationDisabledForUrl(searchUri, false)) return true;
 
         return false;
     }

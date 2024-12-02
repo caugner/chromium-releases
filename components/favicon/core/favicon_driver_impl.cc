@@ -70,31 +70,6 @@ void FaviconDriverImpl::FetchFavicon(const GURL& url) {
     large_icon_handler_->FetchFavicon(url);
 }
 
-void FaviconDriverImpl::SaveFavicon() {
-  GURL active_url = GetActiveURL();
-  if (active_url.is_empty())
-    return;
-
-  // Make sure the page is in history, otherwise adding the favicon does
-  // nothing.
-  if (!history_service_)
-    return;
-  history_service_->AddPageNoVisitForBookmark(active_url, GetActiveTitle());
-
-  if (!favicon_service_)
-    return;
-  if (!GetActiveFaviconValidity())
-    return;
-  GURL favicon_url = GetActiveFaviconURL();
-  if (favicon_url.is_empty())
-    return;
-  gfx::Image image = GetActiveFaviconImage();
-  if (image.IsEmpty())
-    return;
-  favicon_service_->SetFavicons(active_url, favicon_url, favicon_base::FAVICON,
-                                image);
-}
-
 void FaviconDriverImpl::DidDownloadFavicon(
     int id,
     int http_status_code,
@@ -123,9 +98,17 @@ bool FaviconDriverImpl::IsBookmarked(const GURL& url) {
   return bookmark_model_ && bookmark_model_->IsBookmarked(url);
 }
 
-void FaviconDriverImpl::OnFaviconAvailable(const gfx::Image& image,
+void FaviconDriverImpl::OnFaviconAvailable(const GURL& page_url,
                                            const GURL& icon_url,
+                                           const gfx::Image& image,
                                            bool is_active_favicon) {
+  // Check whether the active URL has changed since FetchFavicon() was called.
+  // On iOS only, the active URL can change between calls to FetchFavicon().
+  // For instance, FetchFavicon() is not synchronously called when the active
+  // URL changes as a result of CRWSessionController::goToEntry().
+  if (page_url != GetActiveURL())
+    return;
+
   if (is_active_favicon) {
     bool icon_url_changed = GetActiveFaviconURL() != icon_url;
     // No matter what happens, we need to mark the favicon as being set.
@@ -166,13 +149,14 @@ void FaviconDriverImpl::SetFaviconOutOfDateForPage(const GURL& url,
 }
 
 void FaviconDriverImpl::OnUpdateFaviconURL(
+    const GURL& page_url,
     const std::vector<FaviconURL>& candidates) {
   DCHECK(!candidates.empty());
-  favicon_handler_->OnUpdateFaviconURL(candidates);
+  favicon_handler_->OnUpdateFaviconURL(page_url, candidates);
   if (touch_icon_handler_.get())
-    touch_icon_handler_->OnUpdateFaviconURL(candidates);
+    touch_icon_handler_->OnUpdateFaviconURL(page_url, candidates);
   if (large_icon_handler_.get())
-    large_icon_handler_->OnUpdateFaviconURL(candidates);
+    large_icon_handler_->OnUpdateFaviconURL(page_url, candidates);
 }
 
 }  // namespace favicon

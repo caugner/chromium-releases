@@ -63,13 +63,15 @@ static_library("common") {
     "//components/cloud_devices/common",
     "//components/component_updater",
     "//components/content_settings/core/common",
-    "//components/crash_keys",
+    "//components/crash/core/common",
     "//components/favicon_base",
     "//components/gcm_driver/common",
     "//components/json_schema",
     "//components/metrics",
+    "//components/metrics:net",
     "//components/omnibox/common",
     "//components/policy:policy_component_common",
+    "//components/strings",
     "//components/translate/core/common",
     "//components/url_formatter",
     "//components/variations",
@@ -105,6 +107,7 @@ static_library("common") {
       "//components/password_manager/core/common",
       "//components/signin/core/common",
       "//components/translate/content/common",
+      "//media",
       "//ipc",
       "//third_party/re2",
       "//third_party/widevine/cdm:version_h",
@@ -142,20 +145,12 @@ static_library("common") {
     deps += [ "//breakpad:client" ]
   }
   if (is_win || is_mac || is_chromeos) {
-    if (use_openssl) {
-      sources += rebase_path(
-              gypi_values.chrome_common_networking_private_sources_openssl,
-              ".",
-              "//chrome")
+    sources += rebase_path(gypi_values.chrome_common_networking_private_sources,
+                           ".",
+                           "//chrome")
 
-      # networking_private_crypto_openssl.cc depends on boringssl.
-      deps += [ "//third_party/boringssl" ]
-    } else {
-      sources +=
-          rebase_path(gypi_values.chrome_common_networking_private_sources_nss,
-                      ".",
-                      "//chrome")
-    }
+    # networking_private_crypto.cc depends on boringssl.
+    deps += [ "//third_party/boringssl" ]
   }
   if (is_mac) {
     sources +=

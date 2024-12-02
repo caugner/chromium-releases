@@ -4,13 +4,16 @@
 
 #include "components/sync_driver/fake_sync_service.h"
 
+#include "base/values.h"
 #include "sync/internal_api/public/base_transaction.h"
+#include "sync/internal_api/public/sessions/sync_session_snapshot.h"
 #include "sync/internal_api/public/user_share.h"
 
 namespace sync_driver {
 
-FakeSyncService::FakeSyncService() : error_(GoogleServiceAuthError::NONE) {
-}
+FakeSyncService::FakeSyncService()
+    : error_(GoogleServiceAuthError::NONE),
+      user_share_(make_scoped_ptr(new syncer::UserShare())) {}
 
 FakeSyncService::~FakeSyncService() {
 }
@@ -66,14 +69,14 @@ void FakeSyncService::OnUserChoseDatatypes(bool sync_everything,
 void FakeSyncService::SetSyncSetupCompleted() {
 }
 
-bool FakeSyncService::FirstSetupInProgress() const {
+bool FakeSyncService::IsFirstSetupInProgress() const {
   return false;
 }
 
 void FakeSyncService::SetSetupInProgress(bool setup_in_progress) {
 }
 
-bool FakeSyncService::setup_in_progress() const {
+bool FakeSyncService::IsSetupInProgress() const {
   return false;
 }
 
@@ -89,7 +92,7 @@ bool FakeSyncService::HasUnrecoverableError() const {
   return false;
 }
 
-bool FakeSyncService::backend_initialized() const {
+bool FakeSyncService::IsBackendInitialized() const {
   return false;
 }
 
@@ -112,6 +115,10 @@ bool FakeSyncService::IsUsingSecondaryPassphrase() const {
 void FakeSyncService::EnableEncryptEverything() {
 }
 
+bool FakeSyncService::IsEncryptEverythingEnabled() const {
+  return false;
+}
+
 void FakeSyncService::SetEncryptionPassphrase(const std::string& passphrase,
                                               PassphraseType type) {
 }
@@ -126,8 +133,18 @@ bool FakeSyncService::IsCryptographerReady(
 }
 
 syncer::UserShare* FakeSyncService::GetUserShare() const {
-  return new syncer::UserShare();
+  return user_share_.get();
 }
+
+LocalDeviceInfoProvider* FakeSyncService::GetLocalDeviceInfoProvider() const {
+  return nullptr;
+}
+
+void FakeSyncService::RegisterDataTypeController(
+      sync_driver::DataTypeController* data_type_controller) {
+}
+
+void FakeSyncService::ReenableDatatype(syncer::ModelType type) {}
 
 bool FakeSyncService::IsPassphraseRequired() const {
   return false;
@@ -136,5 +153,66 @@ bool FakeSyncService::IsPassphraseRequired() const {
 syncer::ModelTypeSet FakeSyncService::GetEncryptedDataTypes() const {
   return syncer::ModelTypeSet();
 }
+
+FakeSyncService::SyncTokenStatus FakeSyncService::GetSyncTokenStatus() const {
+  return FakeSyncService::SyncTokenStatus();
+}
+
+std::string FakeSyncService::QuerySyncStatusSummaryString() {
+  return "";
+}
+
+bool FakeSyncService::QueryDetailedSyncStatus(syncer::SyncStatus* result) {
+  return false;
+}
+
+base::string16 FakeSyncService::GetLastSyncedTimeString() const {
+  return base::string16();
+}
+
+std::string FakeSyncService::GetBackendInitializationStateString() const {
+  return std::string();
+}
+
+syncer::sessions::SyncSessionSnapshot FakeSyncService::GetLastSessionSnapshot()
+    const {
+  return syncer::sessions::SyncSessionSnapshot();
+}
+
+base::Value* FakeSyncService::GetTypeStatusMap() const {
+  return new base::ListValue();
+}
+
+const GURL& FakeSyncService::sync_service_url() const {
+  return sync_service_url_;
+}
+
+std::string FakeSyncService::unrecoverable_error_message() const {
+  return unrecoverable_error_message_;
+}
+
+tracked_objects::Location FakeSyncService::unrecoverable_error_location()
+    const {
+  return tracked_objects::Location();
+}
+
+void FakeSyncService::AddProtocolEventObserver(
+    browser_sync::ProtocolEventObserver* observer) {}
+
+void FakeSyncService::RemoveProtocolEventObserver(
+    browser_sync::ProtocolEventObserver* observer) {}
+
+void FakeSyncService::AddTypeDebugInfoObserver(
+    syncer::TypeDebugInfoObserver* observer) {}
+
+void FakeSyncService::RemoveTypeDebugInfoObserver(
+    syncer::TypeDebugInfoObserver* observer) {}
+
+base::WeakPtr<syncer::JsController> FakeSyncService::GetJsController() {
+  return base::WeakPtr<syncer::JsController>();
+}
+
+void FakeSyncService::GetAllNodes(
+    const base::Callback<void(scoped_ptr<base::ListValue>)>& callback) {}
 
 }  // namespace sync_driver

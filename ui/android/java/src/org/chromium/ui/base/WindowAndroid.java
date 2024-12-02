@@ -16,7 +16,6 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
-import android.os.Handler;
 import android.os.Process;
 import android.util.Log;
 import android.util.SparseArray;
@@ -24,6 +23,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.accessibility.AccessibilityManager;
 
+import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
 import org.chromium.ui.VSyncMonitor;
@@ -49,6 +49,7 @@ public class WindowAndroid {
         TouchExplorationMonitor() {
             mTouchExplorationListener =
                     new AccessibilityManager.TouchExplorationStateChangeListener() {
+                @Override
                 public void onTouchExplorationStateChanged(boolean enabled) {
                     mIsTouchExplorationEnabled =
                             mAccessibilityManager.isTouchExplorationEnabled();
@@ -99,6 +100,8 @@ public class WindowAndroid {
     // On KitKat and higher, a class that monitors the touch exploration state.
     private TouchExplorationMonitor mTouchExplorationMonitor;
 
+    private AndroidPermissionDelegate mPermissionDelegate;
+
     /**
      * An interface to notify listeners of changes in the soft keyboard's visibility.
      */
@@ -121,7 +124,8 @@ public class WindowAndroid {
 
     /**
      * @return true if onVSync handler is executing.
-     * @see org.chromium.ui.VSyncMonitor#isInsideVSync().
+     *
+     * @see org.chromium.ui.VSyncMonitor#isInsideVSync()
      */
     public boolean isInsideVSync() {
         return mVSyncMonitor.isInsideVSync();
@@ -139,6 +143,14 @@ public class WindowAndroid {
         mVSyncMonitor = new VSyncMonitor(context, mVSyncListener);
         mAccessibilityManager = (AccessibilityManager)
                 context.getSystemService(Context.ACCESSIBILITY_SERVICE);
+    }
+
+    /**
+     * Set the delegate that will handle android permissions requests.
+     */
+    @VisibleForTesting
+    public void setAndroidPermissionDelegate(AndroidPermissionDelegate delegate) {
+        mPermissionDelegate = delegate;
     }
 
     /**
@@ -222,7 +234,9 @@ public class WindowAndroid {
      * @return Whether access to the permission is granted.
      */
     @CalledByNative
-    public boolean hasPermission(String permission) {
+    public final boolean hasPermission(String permission) {
+        if (mPermissionDelegate != null) return mPermissionDelegate.hasPermission(permission);
+
         return mApplicationContext.checkPermission(permission, Process.myPid(), Process.myUid())
                 == PackageManager.PERMISSION_GRANTED;
     }
@@ -240,10 +254,32 @@ public class WindowAndroid {
      * @return Whether the requesting the permission is allowed.
      */
     @CalledByNative
-    public boolean canRequestPermission(String permission) {
+    public final boolean canRequestPermission(String permission) {
+        if (mPermissionDelegate != null) {
+            return mPermissionDelegate.canRequestPermission(permission);
+        }
+
         Log.w(TAG, "Cannot determine the request permission state as the context "
                 + "is not an Activity");
         assert false : "Failed to determine the request permission state using a WindowAndroid "
+                + "without an Activity";
+        return false;
+    }
+
+    /**
+     * Determine whether the specified permission is revoked by policy.
+     *
+     * @param permission The permission name.
+     * @return Whether the permission is revoked by policy and the user has no ability to change it.
+     */
+    public final boolean isPermissionRevokedByPolicy(String permission) {
+        if (mPermissionDelegate != null) {
+            return mPermissionDelegate.isPermissionRevokedByPolicy(permission);
+        }
+
+        Log.w(TAG, "Cannot determine the policy permission state as the context "
+                + "is not an Activity");
+        assert false : "Failed to determine the policy permission state using a WindowAndroid "
                 + "without an Activity";
         return false;
     }
@@ -253,29 +289,14 @@ public class WindowAndroid {
      * @param permissions The list of permissions to request access to.
      * @param callback The callback to be notified whether the permissions were granted.
      */
-    public void requestPermissions(String[] permissions, PermissionCallback callback) {
+    public final void requestPermissions(String[] permissions, PermissionCallback callback) {
+        if (mPermissionDelegate != null) {
+            mPermissionDelegate.requestPermissions(permissions, callback);
+            return;
+        }
+
         Log.w(TAG, "Cannot request permissions as the context is not an Activity");
         assert false : "Failed to request permissions using a WindowAndroid without an Activity";
-    }
-
-    /**
-     * Determine whether access to file is granted.
-     */
-    public boolean hasFileAccess() {
-        return true;
-    }
-
-    /**
-     * Requests the access to files.
-     * @param callback The callback to be notified whether access were granted.
-     */
-    public void requestFileAccess(final FileAccessCallback callback) {
-        new Handler().post(new Runnable() {
-            @Override
-            public void run() {
-                callback.onFileAccessResult(false);
-            }
-        });
     }
 
     /**
@@ -413,17 +434,6 @@ public class WindowAndroid {
     }
 
     /**
-     * Callback for file access requests.
-     */
-    public interface FileAccessCallback {
-        /**
-         * Called upon completing a file access request.
-         * @param granted Whether file access is granted.
-         */
-        void onFileAccessResult(boolean granted);
-    }
-
-    /**
      * Tests that an activity is available to handle the passed in intent.
      * @param  intent The intent to check.
      * @return True if an activity is available to process this intent when started, meaning that
@@ -486,7 +496,7 @@ public class WindowAndroid {
     }
 
     /**
-     * {@see setKeyboardAccessoryView(ViewGroup)}.
+     * @see #setKeyboardAccessoryView(ViewGroup)
      */
     public ViewGroup getKeyboardAccessoryView() {
         return mKeyboardAccessoryView;
@@ -500,7 +510,8 @@ public class WindowAndroid {
 
     /**
      * Adds a listener that is updated of keyboard visibility changes. This works as a best guess.
-     * {@see UiUtils.isKeyboardShowing}
+     *
+     * @see org.chromium.ui.UiUtils#isKeyboardShowing(Context, View)
      */
     public void addKeyboardVisibilityListener(KeyboardVisibilityListener listener) {
         if (mKeyboardVisibilityListeners.isEmpty()) {
@@ -510,7 +521,7 @@ public class WindowAndroid {
     }
 
     /**
-     * {@see addKeyboardVisibilityListener()}.
+     * @see #addKeyboardVisibilityListener(KeyboardVisibilityListener)
      */
     public void removeKeyboardVisibilityListener(KeyboardVisibilityListener listener) {
         mKeyboardVisibilityListeners.remove(listener);

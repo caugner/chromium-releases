@@ -34,6 +34,10 @@ class SpellCheckerSessionBridge {
                                 jintArray offset_array,
                                 jintArray length_array);
 
+  // Sets the handle to the Java SpellCheckerSessionBridge object to null,
+  // marking the Java object for garbage collection.
+  void DisconnectSession();
+
  private:
   struct SpellingRequest {
     SpellingRequest(int route_id, int identifier, const base::string16& text);
@@ -50,6 +54,7 @@ class SpellCheckerSessionBridge {
   scoped_ptr<SpellingRequest> pending_request_;
 
   base::android::ScopedJavaGlobalRef<jobject> java_object_;
+  bool java_object_initialization_failed_;
 
   DISALLOW_COPY_AND_ASSIGN(SpellCheckerSessionBridge);
 };

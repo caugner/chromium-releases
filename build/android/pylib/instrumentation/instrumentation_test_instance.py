@@ -8,20 +8,18 @@ import pickle
 import re
 import sys
 
-from pylib import cmd_helper
+from devil.android import apk_helper
+from devil.android import md5sum
 from pylib import constants
-from pylib import flag_changer
 from pylib.base import base_test_result
 from pylib.base import test_instance
 from pylib.instrumentation import test_result
 from pylib.instrumentation import instrumentation_parser
-from pylib.utils import apk_helper
-from pylib.utils import md5sum
 from pylib.utils import proguard
 
 sys.path.append(
     os.path.join(constants.DIR_SOURCE_ROOT, 'build', 'util', 'lib', 'common'))
-import unittest_util
+import unittest_util # pylint: disable=import-error
 
 # Ref: http://developer.android.com/reference/android/app/Activity.html
 _ACTIVITY_RESULT_CANCELED = 0
@@ -30,6 +28,8 @@ _ACTIVITY_RESULT_OK = -1
 _DEFAULT_ANNOTATIONS = [
     'Smoke', 'SmallTest', 'MediumTest', 'LargeTest',
     'EnormousTest', 'IntegrationTest']
+_EXCLUDE_UNLESS_REQUESTED_ANNOTATIONS = [
+    'DisabledTest', 'FlakyTest']
 _EXTRA_ENABLE_HTTP_SERVER = (
     'org.chromium.chrome.test.ChromeInstrumentationTestRunner.'
         + 'EnableTestHttpServer')
@@ -139,12 +139,15 @@ class InstrumentationTestInstance(test_instance.TestInstance):
   def __init__(self, args, isolate_delegate, error_func):
     super(InstrumentationTestInstance, self).__init__()
 
+    self._additional_apks = []
     self._apk_under_test = None
+    self._apk_under_test_permissions = None
     self._package_info = None
     self._suite = None
     self._test_apk = None
     self._test_jar = None
     self._test_package = None
+    self._test_permissions = None
     self._test_runner = None
     self._test_support_apk = None
     self._initializeApkAttributes(args, error_func)
@@ -180,6 +183,9 @@ class InstrumentationTestInstance(test_instance.TestInstance):
     if not os.path.exists(self._apk_under_test):
       error_func('Unable to find APK under test: %s' % self._apk_under_test)
 
+    apk = apk_helper.ApkHelper(self._apk_under_test)
+    self._apk_under_test_permissions = apk.GetPermissions()
+
     if args.test_apk.endswith('.apk'):
       self._suite = os.path.splitext(os.path.basename(args.test_apk))[0]
       self._test_apk = args.test_apk
@@ -203,6 +209,7 @@ class InstrumentationTestInstance(test_instance.TestInstance):
 
     apk = apk_helper.ApkHelper(self.test_apk)
     self._test_package = apk.GetPackageName()
+    self._test_permissions = apk.GetPermissions()
     self._test_runner = apk.GetInstrumentationName()
 
     self._package_info = None
@@ -211,6 +218,11 @@ class InstrumentationTestInstance(test_instance.TestInstance):
         self._package_info = package_info
     if not self._package_info:
       logging.warning('Unable to find package info for %s', self._test_package)
+
+    for apk in args.additional_apks:
+      if not os.path.exists(apk):
+        error_func('Unable to find additional APK: %s' % apk)
+    self._additional_apks = args.additional_apks
 
   def _initializeDataDependencyAttributes(self, args, isolate_delegate):
     self._data_deps = []
@@ -258,6 +270,12 @@ class InstrumentationTestInstance(test_instance.TestInstance):
     else:
       self._excluded_annotations = {}
 
+    self._excluded_annotations.update(
+        {
+          a: None for a in _EXCLUDE_UNLESS_REQUESTED_ANNOTATIONS
+          if a not in self._annotations
+        })
+
   def _initializeFlagAttributes(self, args):
     self._flags = ['--disable-fre', '--enable-test-intents']
     # TODO(jbudorick): Transition "--device-flags" to "--device-flags-file"
@@ -282,8 +300,16 @@ class InstrumentationTestInstance(test_instance.TestInstance):
       self._driver_apk = None
 
   @property
+  def additional_apks(self):
+    return self._additional_apks
+
+  @property
   def apk_under_test(self):
     return self._apk_under_test
+
+  @property
+  def apk_under_test_permissions(self):
+   return self._apk_under_test_permissions
 
   @property
   def flags(self):
@@ -326,6 +352,10 @@ class InstrumentationTestInstance(test_instance.TestInstance):
     return self._test_package
 
   @property
+  def test_permissions(self):
+    return self._test_permissions
+
+  @property
   def test_runner(self):
     return self._test_runner
 
@@ -339,7 +369,7 @@ class InstrumentationTestInstance(test_instance.TestInstance):
       self._isolate_delegate.Remap(
           self._isolate_abs_path, self._isolated_abs_path)
       self._isolate_delegate.MoveOutputDeps()
-      self._data_deps.extend([(constants.ISOLATE_DEPS_DIR, None)])
+      self._data_deps.extend([(self._isolate_delegate.isolate_deps_dir, None)])
 
     # TODO(jbudorick): Convert existing tests that depend on the --test-data
     # mechanism to isolate, then remove this.
@@ -359,7 +389,7 @@ class InstrumentationTestInstance(test_instance.TestInstance):
     try:
       tests = self._GetTestsFromPickle(pickle_path, self.test_jar)
     except self.ProguardPickleException as e:
-      logging.info('Getting tests from JAR via proguard. (%s)' % str(e))
+      logging.info('Getting tests from JAR via proguard. (%s)', str(e))
       tests = self._GetTestsFromProguard(self.test_jar)
       self._SaveTestsToPickle(pickle_path, self.test_jar, tests)
     return self._InflateTests(self._FilterTests(tests))
@@ -388,6 +418,7 @@ class InstrumentationTestInstance(test_instance.TestInstance):
       logging.error(pickle_data)
       raise self.ProguardPickleException(str(e))
 
+  # pylint: disable=no-self-use
   def _GetTestsFromProguard(self, jar_path):
     p = proguard.Dump(jar_path)
 

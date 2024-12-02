@@ -27,7 +27,7 @@
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/geometry/safe_integer_conversions.h"
 #include "ui/gfx/paint_vector_icon.h"
-#include "ui/gfx/vector_icons_public2.h"
+#include "ui/gfx/vector_icons_public.h"
 #include "ui/views/background.h"
 #include "ui/views/controls/button/checkbox.h"
 #include "ui/views/controls/combobox/combobox.h"
@@ -250,7 +250,7 @@ void CardUnmaskPromptViews::Layout() {
 
   // The progress overlay extends from the top of the input row
   // to the bottom of the content area.
-  gfx::RectF input_rect = input_row_->GetContentsBounds();
+  gfx::RectF input_rect = gfx::RectF(input_row_->GetContentsBounds());
   View::ConvertRectToTarget(input_row_, this, &input_rect);
   input_rect.set_height(contents_bounds.height());
   contents_bounds.Intersect(gfx::ToNearestRect(input_rect));

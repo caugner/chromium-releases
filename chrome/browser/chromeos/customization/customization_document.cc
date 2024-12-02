@@ -277,8 +277,9 @@ StartupCustomizationDocument::StartupCustomizationDocument(
 StartupCustomizationDocument::~StartupCustomizationDocument() {}
 
 StartupCustomizationDocument* StartupCustomizationDocument::GetInstance() {
-  return Singleton<StartupCustomizationDocument,
-      DefaultSingletonTraits<StartupCustomizationDocument> >::get();
+  return base::Singleton<
+      StartupCustomizationDocument,
+      base::DefaultSingletonTraits<StartupCustomizationDocument>>::get();
 }
 
 void StartupCustomizationDocument::Init(
@@ -323,11 +324,11 @@ void StartupCustomizationDocument::Init(
   }
 
   // If manifest doesn't exist still apply values from VPD.
-  statistics_provider->GetMachineStatistic(kInitialLocaleAttr,
+  statistics_provider->GetMachineStatistic(system::kInitialLocaleKey,
                                            &initial_locale_);
-  statistics_provider->GetMachineStatistic(kInitialTimezoneAttr,
+  statistics_provider->GetMachineStatistic(system::kInitialTimezoneKey,
                                            &initial_timezone_);
-  statistics_provider->GetMachineStatistic(kKeyboardLayoutAttr,
+  statistics_provider->GetMachineStatistic(system::kKeyboardLayoutKey,
                                            &keyboard_layout_);
   configured_locales_ = base::SplitString(
       initial_locale_, ",", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
@@ -427,8 +428,9 @@ ServicesCustomizationDocument* ServicesCustomizationDocument::GetInstance() {
   if (g_test_services_customization_document)
     return g_test_services_customization_document;
 
-  return Singleton<ServicesCustomizationDocument,
-      DefaultSingletonTraits<ServicesCustomizationDocument> >::get();
+  return base::Singleton<
+      ServicesCustomizationDocument,
+      base::DefaultSingletonTraits<ServicesCustomizationDocument>>::get();
 }
 
 // static

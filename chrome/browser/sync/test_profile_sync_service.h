@@ -20,7 +20,6 @@
 
 class Profile;
 class ProfileOAuth2TokenService;
-class ProfileSyncComponentsFactory;
 class ProfileSyncComponentsFactoryMock;
 
 ACTION(ReturnNewDataTypeManager) {
@@ -38,6 +37,7 @@ class SyncBackendHostForProfileSyncTest : public SyncBackendHostImpl {
  public:
   SyncBackendHostForProfileSyncTest(
       Profile* profile,
+      const scoped_refptr<base::SingleThreadTaskRunner>& ui_thread,
       invalidation::InvalidationService* invalidator,
       const base::WeakPtr<sync_driver::SyncPrefs>& sync_prefs,
       base::Closure callback);
@@ -72,7 +72,6 @@ class TestProfileSyncService : public ProfileSyncService {
   // TODO(tim): Add ability to inject TokenService alongside SigninManager.
   // TODO(rogerta): what does above comment mean?
   TestProfileSyncService(
-      scoped_ptr<ProfileSyncComponentsFactory> factory,
       Profile* profile,
       SigninManagerBase* signin,
       ProfileOAuth2TokenService* oauth2_token_service,
@@ -89,7 +88,7 @@ class TestProfileSyncService : public ProfileSyncService {
   static TestProfileSyncService* BuildAutoStartAsyncInit(
       Profile* profile, base::Closure callback);
 
-  ProfileSyncComponentsFactoryMock* components_factory_mock();
+  ProfileSyncComponentsFactoryMock* GetSyncApiComponentFactoryMock();
 
   syncer::TestIdFactory* id_factory();
 

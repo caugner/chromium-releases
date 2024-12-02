@@ -7,6 +7,7 @@
 #include "device/bluetooth/bluetooth_adapter.h"
 #include "device/bluetooth/bluetooth_adapter_mac.h"
 #include "device/bluetooth/bluetooth_discovery_session.h"
+#include "device/bluetooth/bluetooth_discovery_session_outcome.h"
 #include "device/bluetooth/bluetooth_low_energy_device_mac.h"
 #include "device/bluetooth/test/mock_bluetooth_central_manager_mac.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -122,7 +123,7 @@ class BluetoothAdapterMacTest : public testing::Test {
     adapter_mac_->AddDiscoverySession(
         discovery_filter,
         base::Bind(&BluetoothAdapterMacTest::Callback, base::Unretained(this)),
-        base::Bind(&BluetoothAdapterMacTest::ErrorCallback,
+        base::Bind(&BluetoothAdapterMacTest::DiscoveryErrorCallback,
                    base::Unretained(this)));
   }
 
@@ -130,7 +131,7 @@ class BluetoothAdapterMacTest : public testing::Test {
     adapter_mac_->RemoveDiscoverySession(
         discovery_filter,
         base::Bind(&BluetoothAdapterMacTest::Callback, base::Unretained(this)),
-        base::Bind(&BluetoothAdapterMacTest::ErrorCallback,
+        base::Bind(&BluetoothAdapterMacTest::DiscoveryErrorCallback,
                    base::Unretained(this)));
   }
 
@@ -139,6 +140,9 @@ class BluetoothAdapterMacTest : public testing::Test {
   // Generic callbacks.
   void Callback() { ++callback_count_; }
   void ErrorCallback() { ++error_callback_count_; }
+  void DiscoveryErrorCallback(UMABluetoothDiscoverySessionOutcome) {
+    ++error_callback_count_;
+  }
 
  protected:
   scoped_refptr<base::TestSimpleTaskRunner> ui_task_runner_;
@@ -302,7 +306,7 @@ TEST_F(BluetoothAdapterMacTest, UpdateDevicesRemovesLowEnergyDevice) {
       CreateAdvertisementData());
 
   BluetoothLowEnergyDeviceMac* device = new BluetoothLowEnergyDeviceMac(
-      mock_peripheral, advertisement_data, kTestRssi);
+      adapter_mac_, mock_peripheral, advertisement_data, kTestRssi);
   SetDeviceTimeGreaterThanTimeout(device);
 
   EXPECT_EQ(0, NumDevices());

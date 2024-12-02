@@ -2,6 +2,8 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//chromecast/chromecast.gni")
+
 source_set("graphics") {
   sources = [
     "cast_screen.cc",
@@ -12,5 +14,21 @@ source_set("graphics") {
     "//ui/aura",
     "//ui/gfx",
     "//ui/gfx/geometry",
+  ]
+}
+
+shared_library("libcast_graphics_1.0") {
+  sources = [
+    "cast_egl_platform_default.cc",
+    "graphics_properties_default.cc",
+    "osd_plane_default.cc",
+  ]
+
+  public_deps = [
+    "//chromecast/public",
+  ]
+
+  deps = [
+    "//base",
   ]
 }

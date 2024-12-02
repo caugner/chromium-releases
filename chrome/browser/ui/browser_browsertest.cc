@@ -32,7 +32,7 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/search/search.h"
 #include "chrome/browser/sessions/session_service_factory.h"
-#include "chrome/browser/ssl/connection_security.h"
+#include "chrome/browser/ssl/security_state_model.h"
 #include "chrome/browser/translate/chrome_translate_client.h"
 #include "chrome/browser/translate/cld_data_harness.h"
 #include "chrome/browser/translate/cld_data_harness_factory.h"
@@ -41,7 +41,6 @@
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_iterator.h"
-#include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_ui_prefs.h"
 #include "chrome/browser/ui/browser_window.h"
@@ -66,7 +65,7 @@
 #include "components/app_modal/javascript_app_modal_dialog.h"
 #include "components/app_modal/native_app_modal_dialog.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
-#include "components/sessions/base_session_service_test_helper.h"
+#include "components/sessions/core/base_session_service_test_helper.h"
 #include "components/translate/core/browser/language_state.h"
 #include "components/translate/core/common/language_detection_details.h"
 #include "content/public/browser/favicon_status.h"
@@ -86,6 +85,7 @@
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/common/frame_navigate_params.h"
 #include "content/public/common/renderer_preferences.h"
+#include "content/public/common/ssl_status.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_navigation_observer.h"
@@ -194,7 +194,7 @@ class MockTabStripModelObserver : public TabStripModelObserver {
 
 // Causes the browser to swap processes on a redirect to an HTTPS URL.
 class TransferHttpsRedirectsContentBrowserClient
-    : public chrome::ChromeContentBrowserClient {
+    : public ChromeContentBrowserClient {
  public:
   bool ShouldSwapProcessesForRedirect(
       content::ResourceContext* resource_context,
@@ -387,7 +387,8 @@ class SecurityStyleTestObserver : public WebContentsObserver {
 // Check that |observer|'s latest event was for an expired certificate
 // and that it saw the proper SecurityStyle and explanations.
 void CheckBrokenSecurityStyle(const SecurityStyleTestObserver& observer,
-                              int error) {
+                              int error,
+                              Browser* browser) {
   EXPECT_EQ(content::SECURITY_STYLE_AUTHENTICATION_BROKEN,
             observer.latest_security_style());
 
@@ -404,13 +405,20 @@ void CheckBrokenSecurityStyle(const SecurityStyleTestObserver& observer,
   EXPECT_EQ(l10n_util::GetStringFUTF8(
                 IDS_CERTIFICATE_CHAIN_ERROR_DESCRIPTION_FORMAT, error_string),
             expired_explanation.broken_explanations[0].description);
+
+  // Check the associated certificate id.
+  int cert_id = browser->tab_strip_model()->GetActiveWebContents()->
+      GetController().GetActiveEntry()->GetSSL().cert_id;
+  EXPECT_EQ(cert_id,
+            expired_explanation.broken_explanations[0].cert_id);
 }
 
 // Checks that the given |secure_explanations| contains appropriate
 // an appropriate explanation if the certificate status is valid.
 void CheckSecureExplanations(
     const std::vector<content::SecurityStyleExplanation>& secure_explanations,
-    CertificateStatus cert_status) {
+    CertificateStatus cert_status,
+    Browser* browser) {
   if (cert_status != VALID_CERTIFICATE) {
     EXPECT_EQ(0u, secure_explanations.size());
     return;
@@ -421,6 +429,9 @@ void CheckSecureExplanations(
             secure_explanations[0].summary);
   EXPECT_EQ(l10n_util::GetStringUTF8(IDS_VALID_SERVER_CERTIFICATE_DESCRIPTION),
             secure_explanations[0].description);
+  int cert_id = browser->tab_strip_model()->GetActiveWebContents()->
+      GetController().GetActiveEntry()->GetSSL().cert_id;
+  EXPECT_EQ(cert_id, secure_explanations[0].cert_id);
 }
 
 }  // namespace
@@ -1341,10 +1352,6 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, CommandCreateAppShortcutInvalid) {
   ui_test_utils::NavigateToURL(browser(), history_url);
   EXPECT_FALSE(command_updater->IsCommandEnabled(IDC_CREATE_SHORTCUTS));
 
-  GURL downloads_url(chrome::kChromeUIDownloadsURL);
-  ui_test_utils::NavigateToURL(browser(), downloads_url);
-  EXPECT_FALSE(command_updater->IsCommandEnabled(IDC_CREATE_SHORTCUTS));
-
   GURL blank_url(url::kAboutBlankURL);
   ui_test_utils::NavigateToURL(browser(), blank_url);
   EXPECT_FALSE(command_updater->IsCommandEnabled(IDC_CREATE_SHORTCUTS));
@@ -1633,10 +1640,6 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, PageLanguageDetection) {
 // Chromeos defaults to restoring the last session, so this test isn't
 // applicable.
 #if !defined(OS_CHROMEOS)
-#if defined(OS_MACOSX)
-// Crashy, http://crbug.com/38522
-#define RestorePinnedTabs DISABLED_RestorePinnedTabs
-#endif
 // Makes sure pinned tabs are restored correctly on start.
 IN_PROC_BROWSER_TEST_F(BrowserTest, RestorePinnedTabs) {
   ASSERT_TRUE(test_server()->Start());
@@ -2981,7 +2984,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, SecurityStyleChangedObserver) {
   ASSERT_EQ(0u, mixed_content_explanation.warning_explanations.size());
   ASSERT_EQ(0u, mixed_content_explanation.broken_explanations.size());
   CheckSecureExplanations(mixed_content_explanation.secure_explanations,
-                          VALID_CERTIFICATE);
+                          VALID_CERTIFICATE, browser());
   EXPECT_TRUE(mixed_content_explanation.scheme_is_cryptographic);
   EXPECT_TRUE(mixed_content_explanation.displayed_insecure_content);
   EXPECT_FALSE(mixed_content_explanation.ran_insecure_content);
@@ -2998,9 +3001,9 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, SecurityStyleChangedObserver) {
   // interstitial should fire.
   content::WaitForInterstitialAttach(web_contents);
   EXPECT_TRUE(web_contents->ShowingInterstitialPage());
-  CheckBrokenSecurityStyle(observer, net::ERR_CERT_DATE_INVALID);
+  CheckBrokenSecurityStyle(observer, net::ERR_CERT_DATE_INVALID, browser());
   CheckSecureExplanations(observer.latest_explanations().secure_explanations,
-                          INVALID_CERTIFICATE);
+                          INVALID_CERTIFICATE, browser());
   EXPECT_TRUE(observer.latest_explanations().scheme_is_cryptographic);
   EXPECT_FALSE(observer.latest_explanations().displayed_insecure_content);
   EXPECT_FALSE(observer.latest_explanations().ran_insecure_content);
@@ -3014,7 +3017,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, SecurityStyleChangedObserver) {
   EXPECT_EQ(0u, observer.latest_explanations().warning_explanations.size());
   EXPECT_EQ(0u, observer.latest_explanations().broken_explanations.size());
   CheckSecureExplanations(observer.latest_explanations().secure_explanations,
-                          VALID_CERTIFICATE);
+                          VALID_CERTIFICATE, browser());
   EXPECT_TRUE(observer.latest_explanations().scheme_is_cryptographic);
   EXPECT_FALSE(observer.latest_explanations().displayed_insecure_content);
   EXPECT_FALSE(observer.latest_explanations().ran_insecure_content);
@@ -3024,9 +3027,9 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, SecurityStyleChangedObserver) {
   ui_test_utils::NavigateToURL(browser(), expired_url);
   content::WaitForInterstitialAttach(web_contents);
   EXPECT_TRUE(web_contents->ShowingInterstitialPage());
-  CheckBrokenSecurityStyle(observer, net::ERR_CERT_DATE_INVALID);
+  CheckBrokenSecurityStyle(observer, net::ERR_CERT_DATE_INVALID, browser());
   CheckSecureExplanations(observer.latest_explanations().secure_explanations,
-                          INVALID_CERTIFICATE);
+                          INVALID_CERTIFICATE, browser());
   EXPECT_TRUE(observer.latest_explanations().scheme_is_cryptographic);
   EXPECT_FALSE(observer.latest_explanations().displayed_insecure_content);
   EXPECT_FALSE(observer.latest_explanations().ran_insecure_content);
@@ -3040,9 +3043,9 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, SecurityStyleChangedObserver) {
   // through because once the interstitial is clicked through, all URLs
   // for this host will remain in a broken state.
   ProceedThroughInterstitial(web_contents);
-  CheckBrokenSecurityStyle(observer, net::ERR_CERT_DATE_INVALID);
+  CheckBrokenSecurityStyle(observer, net::ERR_CERT_DATE_INVALID, browser());
   CheckSecureExplanations(observer.latest_explanations().secure_explanations,
-                          INVALID_CERTIFICATE);
+                          INVALID_CERTIFICATE, browser());
   EXPECT_TRUE(observer.latest_explanations().scheme_is_cryptographic);
   EXPECT_FALSE(observer.latest_explanations().displayed_insecure_content);
   EXPECT_FALSE(observer.latest_explanations().ran_insecure_content);
@@ -3079,7 +3082,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, SecurityStyleChangedObserverGoBack) {
   EXPECT_EQ(0u, observer.latest_explanations().warning_explanations.size());
   EXPECT_EQ(0u, observer.latest_explanations().broken_explanations.size());
   CheckSecureExplanations(observer.latest_explanations().secure_explanations,
-                          VALID_CERTIFICATE);
+                          VALID_CERTIFICATE, browser());
   EXPECT_TRUE(observer.latest_explanations().scheme_is_cryptographic);
   EXPECT_FALSE(observer.latest_explanations().displayed_insecure_content);
   EXPECT_FALSE(observer.latest_explanations().ran_insecure_content);
@@ -3097,11 +3100,13 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, SecurityStyleChangedObserverGoBack) {
 
   content::WaitForInterstitialAttach(web_contents);
   EXPECT_TRUE(web_contents->ShowingInterstitialPage());
-  CheckBrokenSecurityStyle(observer, net::ERR_CERT_COMMON_NAME_INVALID);
+  CheckBrokenSecurityStyle(observer, net::ERR_CERT_COMMON_NAME_INVALID,
+                           browser());
   ProceedThroughInterstitial(web_contents);
-  CheckBrokenSecurityStyle(observer, net::ERR_CERT_COMMON_NAME_INVALID);
+  CheckBrokenSecurityStyle(observer, net::ERR_CERT_COMMON_NAME_INVALID,
+                           browser());
   CheckSecureExplanations(observer.latest_explanations().secure_explanations,
-                          INVALID_CERTIFICATE);
+                          INVALID_CERTIFICATE, browser());
   EXPECT_TRUE(observer.latest_explanations().scheme_is_cryptographic);
   EXPECT_FALSE(observer.latest_explanations().displayed_insecure_content);
   EXPECT_FALSE(observer.latest_explanations().ran_insecure_content);
@@ -3117,8 +3122,73 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, SecurityStyleChangedObserverGoBack) {
   EXPECT_EQ(0u, observer.latest_explanations().warning_explanations.size());
   EXPECT_EQ(0u, observer.latest_explanations().broken_explanations.size());
   CheckSecureExplanations(observer.latest_explanations().secure_explanations,
-                          VALID_CERTIFICATE);
+                          VALID_CERTIFICATE, browser());
   EXPECT_TRUE(observer.latest_explanations().scheme_is_cryptographic);
   EXPECT_FALSE(observer.latest_explanations().displayed_insecure_content);
   EXPECT_FALSE(observer.latest_explanations().ran_insecure_content);
 }
+
+namespace {
+class JSBooleanResultGetter {
+ public:
+  JSBooleanResultGetter() = default;
+  void OnJsExecutionDone(base::Closure callback, const base::Value* value) {
+    js_result_.reset(value->DeepCopy());
+    callback.Run();
+  }
+  bool GetResult() const {
+    bool res;
+    CHECK(js_result_);
+    CHECK(js_result_->GetAsBoolean(&res));
+    return res;
+  }
+
+ private:
+  scoped_ptr<base::Value> js_result_;
+  DISALLOW_COPY_AND_ASSIGN(JSBooleanResultGetter);
+};
+
+void CheckDisplayModeMQ(
+    const base::string16& display_mode,
+    content::WebContents* web_contents) {
+  base::string16 funtcion =
+      ASCIIToUTF16("(function() {return window.matchMedia('(display-mode: ") +
+      display_mode + ASCIIToUTF16(")').matches;})();");
+  JSBooleanResultGetter js_result_getter;
+  // Execute the JS to run the tests, and wait until it has finished.
+  base::RunLoop run_loop;
+  web_contents->GetMainFrame()->ExecuteJavaScriptForTests(
+      funtcion,
+      base::Bind(&JSBooleanResultGetter::OnJsExecutionDone,
+          base::Unretained(&js_result_getter), run_loop.QuitClosure()));
+  run_loop.Run();
+  EXPECT_TRUE(js_result_getter.GetResult());
+}
+}  // namespace
+
+// flaky new test: http://crbug.com/471703
+IN_PROC_BROWSER_TEST_F(BrowserTest, DISABLED_ChangeDisplayMode) {
+  CheckDisplayModeMQ(
+      ASCIIToUTF16("browser"),
+      browser()->tab_strip_model()->GetActiveWebContents());
+
+  Profile* profile = ProfileManager::GetActiveUserProfile();
+  ui_test_utils::BrowserAddedObserver browser_added_observer;
+  Browser* app_browser = CreateBrowserForApp("blah", profile);
+  browser_added_observer.WaitForSingleNewBrowser();
+  auto app_contents = app_browser->tab_strip_model()->GetActiveWebContents();
+  CheckDisplayModeMQ(ASCIIToUTF16("standalone"), app_contents);
+
+  app_browser->window()->EnterFullscreen(
+      GURL(), EXCLUSIVE_ACCESS_BUBBLE_TYPE_BROWSER_FULLSCREEN_EXIT_INSTRUCTION,
+      false);
+
+  // Sync navigation just to make sure IPC has passed (updated
+  // display mode is delivered to RP).
+  content::TestNavigationObserver observer(app_contents, 1);
+  ui_test_utils::NavigateToURL(app_browser, GURL(url::kAboutBlankURL));
+  observer.Wait();
+
+  CheckDisplayModeMQ(ASCIIToUTF16("fullscreen"), app_contents);
+}
+

@@ -50,24 +50,14 @@ class PasswordManagerClient {
   // The default return value is false.
   virtual bool IsAutomaticPasswordSavingEnabled() const;
 
-  // If the password manager should work for the current page. Default
-  // always returns true.
-  virtual bool IsPasswordManagementEnabledForCurrentPage() const;
+  // Is saving new data for password autofill and filling of saved data enabled
+  // for the current profile and page? For example, saving is disabled in
+  // Incognito mode.
+  virtual bool IsSavingAndFillingEnabledForCurrentPage() const;
 
-  // Is saving new data for password autofill enabled for the current profile
-  // and page? For example, saving new data is disabled in Incognito mode,
-  // whereas filling data is not. Also, saving data is disabled in the presence
-  // of SSL errors on a page.
-  virtual bool IsSavingEnabledForCurrentPage() const;
-
-  // Return the username that the user is syncing with. Should return an empty
-  // string if sync is not enabled for passwords.
-  virtual std::string GetSyncUsername() const = 0;
-
-  // Returns true if |username| and signon |realm| correspond to the account
-  // which is syncing.
-  virtual bool IsSyncAccountCredential(const std::string& username,
-                                       const std::string& realm) const = 0;
+  // Checks if filling is enabled for the current page. Filling is disabled when
+  // password manager is disabled, or in the presence of SSL errors on a page.
+  virtual bool IsFillingEnabledForCurrentPage() const;
 
   // Informs the embedder of a password form that can be saved or updated in
   // password store if the user allows it. The embedder is not required to
@@ -118,10 +108,12 @@ class PasswordManagerClient {
 
   // Called when a password is autofilled. |best_matches| contains the
   // PasswordForm into which a password was filled: the client may choose to
-  // save this to the PasswordStore, for example. Default implementation is a
+  // save this to the PasswordStore, for example. |origin| is the origin of the
+  // form into which a password was filled. Default implementation is a
   // noop.
   virtual void PasswordWasAutofilled(
-      const autofill::PasswordFormMap& best_matches) const;
+      const autofill::PasswordFormMap& best_matches,
+      const GURL& origin) const;
 
   // Called when password autofill is blocked by the blacklist. |best_matches|
   // contains the PasswordForm that flags the current site as being on the
@@ -138,6 +130,7 @@ class PasswordManagerClient {
 
   // Reports whether and how passwords are synced in the embedder. The default
   // implementation always returns NOT_SYNCING_PASSWORDS.
+  // TODO(vabr): Factor this out of the client to the sync layer.
   virtual PasswordSyncState GetPasswordSyncState() const;
 
   // Only for clients which registered with a LogRouter: If called with
@@ -182,11 +175,8 @@ class PasswordManagerClient {
 
   virtual const GURL& GetLastCommittedEntryURL() const = 0;
 
-  // Creates a filter for PasswordFormManager to process password store
-  // response. One filter should be created for every batch of store results for
-  // a single observed form. The filter results should not be cached.
-  virtual scoped_ptr<password_manager::CredentialsFilter>
-  CreateStoreResultFilter() const = 0;
+  // Use this to filter credentials before handling them in password manager.
+  virtual const CredentialsFilter* GetStoreResultFilter() const = 0;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(PasswordManagerClient);

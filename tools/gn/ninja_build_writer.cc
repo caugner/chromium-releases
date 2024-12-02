@@ -76,6 +76,44 @@ std::string GetSelfInvocationCommand(const BuildSettings* build_settings) {
   return cmdline.GetCommandLineString();
 #endif
 }
+
+OutputFile GetTargetOutputFile(const Target* target) {
+  OutputFile result(target->dependency_output_file());
+
+  // The output files may have leading "./" so normalize those away.
+  NormalizePath(&result.value());
+  return result;
+}
+
+// Given an output that appears more than once, generates an error message
+// that describes the problem and which targets generate it.
+Err GetDuplicateOutputError(const std::vector<const Target*>& all_targets,
+                            const OutputFile& bad_output) {
+  std::vector<const Target*> matches;
+  for (const Target* target : all_targets) {
+    if (GetTargetOutputFile(target) == bad_output)
+      matches.push_back(target);
+  }
+
+  // There should always be at least two targets generating this file for this
+  // function to be called in the first place.
+  DCHECK(matches.size() >= 2);
+  std::string matches_string;
+  for (const Target* target : matches)
+    matches_string += "  " + target->label().GetUserVisibleName(false) + "\n";
+
+  Err result(matches[0]->defined_from(), "Duplicate output file.",
+      "Two or more targets generate the same output:\n  " +
+      bad_output.value() + "\n"
+      "This is normally the result of either overriding the output name or\n"
+      "having two shared libraries or executables in different directories\n"
+      "with the same name (since all such targets will be written to the root\n"
+      "output directory).\n\nCollisions:\n" + matches_string);
+  for (size_t i = 1; i < matches.size(); i++)
+    result.AppendSubErr(Err(matches[i]->defined_from(), "Collision."));
+  return result;
+}
+
 }  // namespace
 
 NinjaBuildWriter::NinjaBuildWriter(
@@ -142,23 +180,10 @@ bool NinjaBuildWriter::RunAndWriteFile(
 void NinjaBuildWriter::WriteNinjaRules() {
   out_ << "rule gn\n";
   out_ << "  command = " << GetSelfInvocationCommand(build_settings_) << "\n";
-  out_ << "  description = Regenerating ninja files\n";
-  out_ << "  restat = 1\n\n";
+  out_ << "  description = Regenerating ninja files\n\n";
 
-  // This rule will regenerate the ninja files when any input file has changed,
-  // or is missing.
-  out_ << "build build.ninja";
-
-  // Other files read by the build.
-  EscapeOptions path_escaping;
-  path_escaping.mode = ESCAPE_NINJA_COMMAND;
-  std::vector<SourceFile> written_files = g_scheduler->GetWrittenFiles();
-  for (const auto& written_file : written_files)
-    out_ << " " << EscapeString(RebasePath(written_file.value(),
-        build_settings_->build_dir(), build_settings_->root_path_utf8()),
-        path_escaping, nullptr);
-
-  out_ << ": gn\n"
+  // This rule will regenerate the ninja files when any input file has changed.
+  out_ << "build build.ninja: gn\n"
        << "  generator = 1\n"
        << "  depfile = build.ninja.d\n";
 
@@ -242,11 +267,9 @@ bool NinjaBuildWriter::WritePhonyAndAllRules(Err* err) {
 
   for (const auto& target : default_toolchain_targets_) {
     const Label& label = target->label();
-    OutputFile target_file(target->dependency_output_file());
-    // The output files may have leading "./" so normalize those away.
-    NormalizePath(&target_file.value());
+    OutputFile target_file = GetTargetOutputFile(target);
     if (!target_files.insert(target_file.value()).second) {
-      *err = Err(Location(), "Duplicate rules for " + target_file.value());
+      *err = GetDuplicateOutputError(default_toolchain_targets_, target_file);
       return false;
     }
 

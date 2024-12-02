@@ -31,7 +31,7 @@ void RecordSignatureVerificationTime(size_t file_index,
 
   base::HistogramBase* signature_verification_time_histogram =
       base::Histogram::FactoryTimeGet(
-          std::string(kHistogramName) + base::IntToString(file_index),
+          std::string(kHistogramName) + base::SizeTToString(file_index),
           base::TimeDelta::FromMilliseconds(1),
           base::TimeDelta::FromSeconds(20),
           50,
@@ -80,6 +80,15 @@ void VerifyBinaryIntegrity(scoped_ptr<IncidentReceiver> incident_receiver) {
 
       // Send the report.
       incident_receiver->AddIncidentForProcess(
+          make_scoped_ptr(new BinaryIntegrityIncident(incident.Pass())));
+    } else {
+      // The binary is integral, remove previous report so that next incidents
+      // for the binary will be reported.
+      scoped_ptr<ClientIncidentReport_IncidentData_BinaryIntegrityIncident>
+          incident(
+              new ClientIncidentReport_IncidentData_BinaryIntegrityIncident());
+      incident->set_file_basename(binary_path.BaseName().AsUTF8Unsafe());
+      incident_receiver->ClearIncidentForProcess(
           make_scoped_ptr(new BinaryIntegrityIncident(incident.Pass())));
     }
   }

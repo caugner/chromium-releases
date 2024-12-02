@@ -29,6 +29,9 @@ class RemoteSafeBrowsingDatabaseManager : public SafeBrowsingDatabaseManager {
   // SafeBrowsingDatabaseManager implementation
   //
 
+  bool IsSupported() const override;
+  bool ChecksAreAlwaysAsync() const override;
+  bool CanCheckResourceType(content::ResourceType resource_type) const override;
   bool CanCheckUrl(const GURL& url) const override;
   bool download_protection_enabled() const override;
   bool CheckBrowseUrl(const GURL& url, Client* client) override;
@@ -61,6 +64,9 @@ class RemoteSafeBrowsingDatabaseManager : public SafeBrowsingDatabaseManager {
   // Requests currently outstanding.  This owns the ptrs.
   std::vector<ClientRequest*> current_requests_;
   bool enabled_;
+
+  std::set<content::ResourceType> resource_types_to_check_;
+  bool is_android_field_trial_enabled_;
 
   friend class base::RefCountedThreadSafe<RemoteSafeBrowsingDatabaseManager>;
   DISALLOW_COPY_AND_ASSIGN(RemoteSafeBrowsingDatabaseManager);

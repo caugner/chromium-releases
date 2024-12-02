@@ -13,7 +13,7 @@ namespace chrome {
 class BrowserTabStripModelDelegate;
 
 namespace android {
-class ChromeWebContentsDelegateAndroid;
+class TabWebContentsDelegateAndroid;
 }
 }
 
@@ -25,7 +25,7 @@ class PrerenderContents;
 // (or the equivalent on Android). The TabHelpers class allows specific classes
 // to attach the set of tab helpers that is used for tab contents.
 //
-// https://www.chromium.org/developers/design-documents/tab-helpers
+// https://chromium.googlesource.com/chromium/src/+/master/docs/tab_helpers.md
 //
 // TODO(avi): This list is rather large, and for most callers it's due to the
 // fact that they need tab helpers attached early to deal with arbitrary
@@ -41,7 +41,7 @@ class TabHelpers {
 
   // These are the Android equivalents of the two classes above.
   friend class TabAndroid;
-  friend class chrome::android::ChromeWebContentsDelegateAndroid;
+  friend class chrome::android::TabWebContentsDelegateAndroid;
 
   // chrome::Navigate creates WebContents that are destined for the tab strip,
   // and that might have WebUI that immediately calls back into random tab

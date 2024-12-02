@@ -4,27 +4,40 @@
 
 #include "chrome/browser/notifications/platform_notification_service_impl.h"
 
+#include "base/command_line.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/metrics/user_metrics_action.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/notifications/desktop_notification_profile_util.h"
 #include "chrome/browser/notifications/notification_object_proxy.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
 #include "chrome/browser/notifications/persistent_notification_delegate.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_io_data.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/chrome_pages.h"
+#include "chrome/browser/ui/scoped_tabbed_browser_displayer.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/grit/generated_resources.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/common/content_settings.h"
+#include "components/content_settings/core/common/content_settings_types.h"
 #include "components/url_formatter/url_formatter.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/desktop_notification_delegate.h"
 #include "content/public/browser/notification_event_dispatcher.h"
 #include "content/public/browser/platform_notification_context.h"
 #include "content/public/browser/storage_partition.h"
+#include "content/public/browser/user_metrics.h"
 #include "content/public/common/platform_notification_data.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
 #include "ui/message_center/notifier_settings.h"
+#include "ui/resources/grit/ui_resources.h"
 #include "url/url_constants.h"
 
 #if defined(ENABLE_EXTENSIONS)
@@ -74,7 +87,7 @@ void CancelNotification(const std::string& id, ProfileID profile_id) {
 // static
 PlatformNotificationServiceImpl*
 PlatformNotificationServiceImpl::GetInstance() {
-  return Singleton<PlatformNotificationServiceImpl>::get();
+  return base::Singleton<PlatformNotificationServiceImpl>::get();
 }
 
 PlatformNotificationServiceImpl::PlatformNotificationServiceImpl()
@@ -88,6 +101,9 @@ void PlatformNotificationServiceImpl::OnPersistentNotificationClick(
     const GURL& origin,
     int action_index) const {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  content::RecordAction(
+      base::UserMetricsAction("Notifications.Persistent.Clicked"));
+
   content::NotificationEventDispatcher::GetInstance()
       ->DispatchNotificationClickEvent(
             browser_context,
@@ -102,6 +118,9 @@ void PlatformNotificationServiceImpl::OnPersistentNotificationClose(
     int64_t persistent_notification_id,
     const GURL& origin) const {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  content::RecordAction(
+      base::UserMetricsAction("Notifications.Persistent.Closed"));
+
   PlatformNotificationContext* context =
       BrowserContext::GetStoragePartitionForSite(browser_context, origin)
           ->GetPlatformNotificationContext();
@@ -224,8 +243,10 @@ void PlatformNotificationServiceImpl::DisplayNotification(
 
   Profile* profile = Profile::FromBrowserContext(browser_context);
   DCHECK(profile);
+  DCHECK_EQ(0u, notification_data.actions.size());
 
-  NotificationObjectProxy* proxy = new NotificationObjectProxy(delegate.Pass());
+  NotificationObjectProxy* proxy =
+      new NotificationObjectProxy(browser_context, delegate.Pass());
   Notification notification = CreateNotificationFromData(
       profile, origin, icon, notification_data, proxy);
 
@@ -236,7 +257,7 @@ void PlatformNotificationServiceImpl::DisplayNotification(
                    notification.delegate_id(),
                    NotificationUIManager::GetProfileID(profile));
 
-  profile->GetHostContentSettingsMap()->UpdateLastUsage(
+  HostContentSettingsMapFactory::GetForProfile(profile)->UpdateLastUsage(
       origin, origin, CONTENT_SETTINGS_TYPE_NOTIFICATIONS);
 }
 
@@ -251,8 +272,12 @@ void PlatformNotificationServiceImpl::DisplayPersistentNotification(
   Profile* profile = Profile::FromBrowserContext(browser_context);
   DCHECK(profile);
 
+  // The notification settings button will be appended after the developer-
+  // supplied buttons, available in |notification_data.actions|.
+  int settings_button_index = notification_data.actions.size();
   PersistentNotificationDelegate* delegate = new PersistentNotificationDelegate(
-      browser_context, persistent_notification_id, origin);
+      browser_context, persistent_notification_id, origin,
+      settings_button_index);
 
   Notification notification = CreateNotificationFromData(
       profile, origin, icon, notification_data, delegate);
@@ -262,8 +287,10 @@ void PlatformNotificationServiceImpl::DisplayPersistentNotification(
   persistent_notifications_[persistent_notification_id] = notification.id();
 
   GetNotificationUIManager()->Add(notification, profile);
+  content::RecordAction(
+      base::UserMetricsAction("Notifications.Persistent.Shown"));
 
-  profile->GetHostContentSettingsMap()->UpdateLastUsage(
+  HostContentSettingsMapFactory::GetForProfile(profile)->UpdateLastUsage(
       origin, origin, CONTENT_SETTINGS_TYPE_NOTIFICATIONS);
 }
 
@@ -305,8 +332,15 @@ bool PlatformNotificationServiceImpl::GetDisplayedPersistentNotifications(
   if (!profile || profile->AsTestingProfile())
     return false;  // Tests will not have a message center.
 
+  // There may not be a notification ui manager when another feature erroneously
+  // instantiates a storage partition when the browser process is shutting down.
+  // TODO(peter): Remove in favor of a DCHECK when crbug.com/546745 is fixed.
+  NotificationUIManager* ui_manager = GetNotificationUIManager();
+  if (!ui_manager)
+    return false;
+
   // TODO(peter): Filter for persistent notifications only.
-  *displayed_notifications = GetNotificationUIManager()->GetAllIdsByProfile(
+  *displayed_notifications = ui_manager->GetAllIdsByProfile(
       NotificationUIManager::GetProfileID(profile));
 
   return true;
@@ -338,13 +372,35 @@ Notification PlatformNotificationServiceImpl::CreateNotificationFromData(
   notification.set_silent(notification_data.silent);
 
   std::vector<message_center::ButtonInfo> buttons;
+
+  // Developer supplied buttons.
   for (const auto& action : notification_data.actions)
     buttons.push_back(message_center::ButtonInfo(action.title));
 
+// Android always includes the settings button in all notifications, whereas for
+// desktop only web (not extensions) notifications do.
+#if !defined(OS_ANDROID)
+  // The notification Settings button always comes at the end.
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kNotificationSettingsButton)) {
+    message_center::ButtonInfo settings_button = message_center::ButtonInfo(
+        l10n_util::GetStringUTF16(IDS_NOTIFICATION_SETTINGS));
+    settings_button.icon =
+        ui::ResourceBundle::GetSharedInstance().GetImageNamed(
+            IDR_NOTIFICATION_SETTINGS);
+    buttons.push_back(settings_button);
+  }
+#endif  // !defined(OS_ANDROID)
+
   notification.set_buttons(buttons);
 
-  // Web Notifications do not timeout.
-  notification.set_never_timeout(true);
+  notification.set_is_web_notification(true);
+
+  // On desktop, notifications with require_interaction==true stay on-screen
+  // rather than minimizing to the notification center after a timeout.
+  // On mobile, this is ignored (notifications are minimized at all times).
+  if (notification_data.require_interaction)
+    notification.set_never_timeout(true);
 
   return notification;
 }
@@ -355,6 +411,23 @@ PlatformNotificationServiceImpl::GetNotificationUIManager() const {
     return notification_ui_manager_for_tests_;
 
   return g_browser_process->notification_ui_manager();
+}
+
+bool PlatformNotificationServiceImpl::OpenNotificationSettings(
+    BrowserContext* browser_context) {
+#if !defined(OS_ANDROID)
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kNotificationSettingsButton)) {
+    Profile* profile = Profile::FromBrowserContext(browser_context);
+    DCHECK(profile);
+    chrome::ScopedTabbedBrowserDisplayer browser_displayer(
+        profile, chrome::GetActiveDesktop());
+    chrome::ShowContentSettingsExceptions(browser_displayer.browser(),
+                                          CONTENT_SETTINGS_TYPE_NOTIFICATIONS);
+    return true;
+  }
+#endif  // !defined(OS_ANDROID)
+  return false;
 }
 
 void PlatformNotificationServiceImpl::SetNotificationUIManagerForTesting(

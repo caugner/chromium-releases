@@ -72,7 +72,7 @@ class CaptureCallback : public blink::WebCompositeAndReadbackAsyncCallback {
   }
 
   // WebCompositeAndReadbackAsyncCallback implementation.
-  virtual void didCompositeAndReadback(const SkBitmap& bitmap);
+  void didCompositeAndReadback(const SkBitmap& bitmap) override;
 
  private:
   base::Callback<void(const SkBitmap&)> callback_;
@@ -92,7 +92,7 @@ class LayoutAndPaintCallback : public blink::WebLayoutAndPaintAsyncCallback {
   void set_wait_for_popup(bool wait) { wait_for_popup_ = wait; }
 
   // WebLayoutAndPaintAsyncCallback implementation.
-  virtual void didLayoutAndPaint();
+  void didLayoutAndPaint() override;
 
  private:
   base::Closure callback_;
@@ -281,8 +281,9 @@ const char* WebNavigationPolicyToString(blink::WebNavigationPolicy policy) {
       return kPolicyNewWindow;
     case blink::WebNavigationPolicyNewPopup:
       return kPolicyNewPopup;
+    default:
+      return kIllegalString;
   }
-  return kIllegalString;
 }
 
 std::string DumpFrameHeaderIfNeeded(blink::WebFrame* frame) {
@@ -812,11 +813,17 @@ void WebTestProxyBase::PostAccessibilityEvent(const blink::WebAXObject& obj,
     case blink::WebAXEventChildrenChanged:
       event_name = "ChildrenChanged";
       break;
+    case blink::WebAXEventDocumentSelectionChanged:
+      event_name = "DocumentSelectionChanged";
+      break;
     case blink::WebAXEventFocus:
       event_name = "Focus";
       break;
     case blink::WebAXEventHide:
       event_name = "Hide";
+      break;
+    case blink::WebAXEventHover:
+      event_name = "Hover";
       break;
     case blink::WebAXEventInvalidStatusChanged:
       event_name = "InvalidStatusChanged";
@@ -1158,8 +1165,7 @@ void WebTestProxyBase::DidFinishLoad(blink::WebLocalFrame* frame) {
   CheckDone(frame, LoadFinished);
 }
 
-void WebTestProxyBase::DidDetectXSS(blink::WebLocalFrame* frame,
-                                    const blink::WebURL& insecure_url,
+void WebTestProxyBase::DidDetectXSS(const blink::WebURL& insecure_url,
                                     bool did_block_entire_page) {
   if (test_interfaces_->GetTestRunner()->shouldDumpFrameLoadCallbacks())
     delegate_->PrintMessage("didDetectXSS\n");

@@ -7,7 +7,6 @@
 #include "base/location.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
-#include "chrome/browser/sync/glue/ui_model_worker.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/sync_driver/change_processor_mock.h"
 #include "content/public/browser/browser_thread.h"
@@ -72,8 +71,11 @@ class SyncBackendRegistrarTest : public testing::Test {
 
   void SetUp() override {
     test_user_share_.SetUp();
-    registrar_.reset(new SyncBackendRegistrar("test", &profile_,
-                                              scoped_ptr<base::Thread>()));
+    registrar_.reset(new SyncBackendRegistrar(
+        "test", &profile_, scoped_ptr<base::Thread>(),
+        BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI),
+        BrowserThread::GetMessageLoopProxyForThread(BrowserThread::DB),
+        BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE)));
     sync_thread_ = registrar_->sync_thread();
   }
 
@@ -299,7 +301,13 @@ class TestRegistrar : public SyncBackendRegistrar {
  public:
   explicit TestRegistrar(Profile* profile,
                          SyncBackendRegistrarShutdownTest* test)
-      : SyncBackendRegistrar("test", profile, scoped_ptr<base::Thread>()),
+      : SyncBackendRegistrar(
+            "test",
+            profile,
+            scoped_ptr<base::Thread>(),
+            BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI),
+            BrowserThread::GetMessageLoopProxyForThread(BrowserThread::DB),
+            BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE)),
         test_(test) {}
 
   ~TestRegistrar() override { test_->PostQuitOnUIMessageLoop(); }

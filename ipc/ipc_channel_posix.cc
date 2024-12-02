@@ -7,6 +7,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -37,6 +38,7 @@
 #include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/synchronization/lock.h"
+#include "ipc/attachment_broker.h"
 #include "ipc/ipc_descriptors.h"
 #include "ipc/ipc_listener.h"
 #include "ipc/ipc_logging.h"
@@ -94,9 +96,7 @@ namespace {
 
 class PipeMap {
  public:
-  static PipeMap* GetInstance() {
-    return Singleton<PipeMap>::get();
-  }
+  static PipeMap* GetInstance() { return base::Singleton<PipeMap>::get(); }
 
   ~PipeMap() {
     // Shouldn't have left over pipes.
@@ -138,7 +138,7 @@ class PipeMap {
   typedef std::map<std::string, int> ChannelToFDMap;
   ChannelToFDMap map_;
 
-  friend struct DefaultSingletonTraits<PipeMap>;
+  friend struct base::DefaultSingletonTraits<PipeMap>;
 #if defined(OS_ANDROID)
   friend void ::IPC::Channel::NotifyProcessForkedForTesting();
 #endif
@@ -183,8 +183,7 @@ int ChannelPosix::global_pid_ = 0;
 
 ChannelPosix::ChannelPosix(const IPC::ChannelHandle& channel_handle,
                            Mode mode,
-                           Listener* listener,
-                           AttachmentBroker* broker)
+                           Listener* listener)
     : ChannelReader(listener),
       mode_(mode),
       peer_pid_(base::kNullProcessId),
@@ -193,8 +192,7 @@ ChannelPosix::ChannelPosix(const IPC::ChannelHandle& channel_handle,
       message_send_bytes_written_(0),
       pipe_name_(channel_handle.name),
       in_dtor_(false),
-      must_unlink_(false),
-      broker_(broker) {
+      must_unlink_(false) {
   if (!CreatePipe(channel_handle)) {
     // The pipe may have been closed already.
     const char *modestr = (mode_ & MODE_SERVER_FLAG) ? "server" : "client";
@@ -205,6 +203,7 @@ ChannelPosix::ChannelPosix(const IPC::ChannelHandle& channel_handle,
 
 ChannelPosix::~ChannelPosix() {
   in_dtor_ = true;
+  CleanUp();
   Close();
 }
 
@@ -440,7 +439,7 @@ bool ChannelPosix::ProcessOutgoingMessages() {
 
       // DCHECK_LE above already checks that
       // num_fds < kMaxDescriptorsPerMessage so no danger of overflow.
-      msg->header()->num_fds = static_cast<uint16>(num_fds);
+      msg->header()->num_fds = static_cast<uint16_t>(num_fds);
     }
 
     if (bytes_written == 1) {
@@ -524,7 +523,7 @@ bool ChannelPosix::Send(Message* message) {
 }
 
 AttachmentBroker* ChannelPosix::GetAttachmentBroker() {
-  return broker_;
+  return AttachmentBroker::GetGlobal();
 }
 
 int ChannelPosix::GetClientFileDescriptor() const {
@@ -812,7 +811,7 @@ bool ChannelPosix::ShouldDispatchInputMessage(Message* msg) {
 // This will read from the input_fds_ (READWRITE mode only) and read more
 // handles from the FD pipe if necessary.
 bool ChannelPosix::GetNonBrokeredAttachments(Message* msg) {
-  uint16 header_fds = msg->header()->num_fds;
+  uint16_t header_fds = msg->header()->num_fds;
   if (!header_fds)
     return true;  // Nothing to do.
 
@@ -1020,10 +1019,8 @@ void ChannelPosix::ResetSafely(base::ScopedFD* fd) {
 // static
 scoped_ptr<Channel> Channel::Create(const IPC::ChannelHandle& channel_handle,
                                     Mode mode,
-                                    Listener* listener,
-                                    AttachmentBroker* broker) {
-  return make_scoped_ptr(
-      new ChannelPosix(channel_handle, mode, listener, broker));
+                                    Listener* listener) {
+  return make_scoped_ptr(new ChannelPosix(channel_handle, mode, listener));
 }
 
 // static

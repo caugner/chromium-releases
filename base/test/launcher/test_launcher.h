@@ -181,6 +181,10 @@ class TestLauncher {
   // Maximum number of retries per iteration.
   size_t retry_limit_;
 
+  // If true will not early exit nor skip retries even if too many tests are
+  // broken.
+  bool force_run_broken_tests_;
+
   // Tests to retry in this iteration.
   std::set<std::string> tests_to_retry_;
 
@@ -190,7 +194,7 @@ class TestLauncher {
   TestResultsTracker results_tracker_;
 
   // Watchdog timer to make sure we do not go without output for too long.
-  DelayTimer<TestLauncher> watchdog_timer_;
+  DelayTimer watchdog_timer_;
 
   // Number of jobs to run in parallel.
   size_t parallel_jobs_;

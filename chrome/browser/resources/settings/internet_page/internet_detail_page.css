@@ -2,12 +2,12 @@
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file. */
 
-#outerDiv {
-  -webkit-margin-end: 40px;
-}
-
 #titleDiv {
   margin-bottom: 10px;
+}
+
+#outerDiv {
+  margin: 0 40px;
 }
 
 #networkIcon {
@@ -26,7 +26,7 @@
   font-size: 20px;
 }
 
-#networkState.connected {
+#networkState[connected] {
   color: green;
 }
 
@@ -42,7 +42,12 @@
   margin-bottom: 8px;
 }
 
-#advancedDiv cr-button {
+#preferButton {
+  margin: 0 7px 8px -2px;
+  padding: 0
+}
+
+#advancedDiv paper-button {
   --paper-button: {
     text-align: start;
   };
@@ -52,7 +57,7 @@
   max-width: 500px;
 }
 
-cr-checkbox {
+paper-checkbox {
   margin-bottom: 10px;
 }
 

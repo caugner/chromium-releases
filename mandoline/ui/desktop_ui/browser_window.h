@@ -5,18 +5,16 @@
 #ifndef MANDOLINE_UI_DESKTOP_UI_BROWSER_WINDOW_H_
 #define MANDOLINE_UI_DESKTOP_UI_BROWSER_WINDOW_H_
 
-#include "components/view_manager/public/cpp/view_manager.h"
-#include "components/view_manager/public/cpp/view_manager_delegate.h"
-#include "components/view_manager/public/cpp/view_manager_init.h"
-#include "components/view_manager/public/interfaces/view_manager_root.mojom.h"
-#include "mandoline/tab/public/cpp/web_view.h"
-#include "mandoline/tab/public/interfaces/web_view.mojom.h"
+#include "components/mus/public/cpp/view_tree_connection.h"
+#include "components/mus/public/cpp/view_tree_delegate.h"
+#include "components/mus/public/interfaces/view_tree_host.mojom.h"
+#include "components/web_view/public/cpp/web_view.h"
+#include "components/web_view/public/interfaces/web_view.mojom.h"
 #include "mandoline/ui/aura/aura_init.h"
 #include "mandoline/ui/desktop_ui/public/interfaces/omnibox.mojom.h"
 #include "mandoline/ui/desktop_ui/public/interfaces/view_embedder.mojom.h"
 #include "mojo/application/public/cpp/interface_factory.h"
 #include "mojo/common/weak_binding_set.h"
-#include "ui/views/controls/button/button.h"
 #include "ui/views/layout/layout_manager.h"
 #include "url/gurl.h"
 
@@ -26,40 +24,49 @@ class Shell;
 class View;
 }
 
-namespace views {
-class LabelButton;
-}
-
 namespace mandoline {
 
 class BrowserManager;
 class ProgressView;
+class ToolbarView;
 
-class BrowserWindow : public mojo::ViewManagerDelegate,
-                      public mojo::ViewManagerRootClient,
+class BrowserWindow : public mus::ViewTreeDelegate,
+                      public mojo::ViewTreeHostClient,
                       public web_view::mojom::WebViewClient,
                       public ViewEmbedder,
                       public mojo::InterfaceFactory<ViewEmbedder>,
-                      public views::LayoutManager,
-                      public views::ButtonListener {
+                      public views::LayoutManager {
  public:
-  BrowserWindow(mojo::ApplicationImpl* app, BrowserManager* manager);
-  ~BrowserWindow() override;
+  BrowserWindow(mojo::ApplicationImpl* app,
+                mojo::ViewTreeHostFactory* host_factory,
+                BrowserManager* manager);
 
   void LoadURL(const GURL& url);
+  void Close();
+
+  void ShowOmnibox();
+  void GoBack();
+  void GoForward();
 
  private:
-  // Overridden from mojo::ViewManagerDelegate:
-  void OnEmbed(mojo::View* root) override;
-  void OnViewManagerDestroyed(mojo::ViewManager* view_manager) override;
+  ~BrowserWindow() override;
 
-  // Overridden from ViewManagerRootClient:
-  void OnAccelerator(mojo::EventPtr event) override;
+  float DIPSToPixels(float value) const;
+
+  // Overridden from mus::ViewTreeDelegate:
+  void OnEmbed(mus::View* root) override;
+  void OnConnectionLost(mus::ViewTreeConnection* connection) override;
+
+  // Overridden from ViewTreeHostClient:
+  void OnAccelerator(uint32_t id, mojo::EventPtr event) override;
 
   // Overridden from web_view::mojom::WebViewClient:
-  void TopLevelNavigate(mojo::URLRequestPtr request) override;
-  void LoadingStateChanged(bool is_loading) override;
-  void ProgressChanged(double progress) override;
+  void TopLevelNavigateRequest(mojo::URLRequestPtr request) override;
+  void TopLevelNavigationStarted(const mojo::String& url) override;
+  void LoadingStateChanged(bool is_loading, double progress) override;
+  void BackForwardChanged(web_view::mojom::ButtonState back_button,
+                          web_view::mojom::ButtonState forward_button) override;
+  void TitleChanged(const mojo::String& title) override;
 
   // Overridden from ViewEmbedder:
   void Embed(mojo::URLRequestPtr request) override;
@@ -73,22 +80,19 @@ class BrowserWindow : public mojo::ViewManagerDelegate,
   gfx::Size GetPreferredSize(const views::View* view) const override;
   void Layout(views::View* host) override;
 
-  // Overridden from views::ButtonListener:
-  void ButtonPressed(views::Button* sender, const ui::Event& event) override;
-
-  void Init(mojo::View* root);
-  void ShowOmnibox();
-  void EmbedOmnibox(mojo::ApplicationConnection* connection);
+  void Init(mus::View* root);
+  void EmbedOmnibox();
 
   mojo::ApplicationImpl* app_;
   scoped_ptr<AuraInit> aura_init_;
-  mojo::ViewManagerInit view_manager_init_;
+  mojo::ViewTreeHostPtr host_;
+  mojo::Binding<ViewTreeHostClient> host_client_binding_;
   BrowserManager* manager_;
-  views::LabelButton* omnibox_launcher_;
+  ToolbarView* toolbar_view_;
   ProgressView* progress_bar_;
-  mojo::View* root_;
-  mojo::View* content_;
-  mojo::View* omnibox_view_;
+  mus::View* root_;
+  mus::View* content_;
+  mus::View* omnibox_view_;
 
   mojo::WeakBindingSet<ViewEmbedder> view_embedder_bindings_;
 

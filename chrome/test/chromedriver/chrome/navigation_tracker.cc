@@ -45,6 +45,31 @@ NavigationTracker::~NavigationTracker() {}
 
 Status NavigationTracker::IsPendingNavigation(const std::string& frame_id,
                                               bool* is_pending) {
+  if (!IsExpectingFrameLoadingEvents()) {
+    // Some DevTools commands (e.g. Input.dispatchMouseEvent) are handled in the
+    // browser process, and may cause the renderer process to start a new
+    // navigation. We need to call Runtime.evaluate to force a roundtrip to the
+    // renderer process, and make sure that we notice any pending navigations
+    // (see crbug.com/524079).
+    base::DictionaryValue params;
+    params.SetString("expression", "1");
+    scoped_ptr<base::DictionaryValue> result;
+    Status status = client_->SendCommandAndGetResult(
+        "Runtime.evaluate", params, &result);
+    int value = 0;
+    if (status.code() == kDisconnected) {
+      // If we receive a kDisconnected status code from Runtime.evaluate, don't
+      // wait for pending navigations to complete, since we won't see any more
+      // events from it until we reconnect.
+      *is_pending = false;
+      return Status(kOk);
+    } else if (status.IsError() ||
+               !result->GetInteger("result.value", &value) ||
+               value != 1) {
+      return Status(kUnknownError, "cannot determine loading status", status);
+    }
+  }
+
   if (loading_state_ == kUnknown) {
     // In the case that a http request is sent to server to fetch the page
     // content and the server hasn't responded at all, a dummy page is created

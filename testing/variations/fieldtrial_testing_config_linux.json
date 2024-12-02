@@ -1,5 +1,35 @@
 {
+    "AutofillClassifier": [
+        {
+            "group_name": "Enabled"
+        }
+    ],
+    "AutofillFieldMetadata": [
+        {
+            "group_name": "Enabled"
+        }
+    ],
     "CaptivePortalInterstitial": [
+        {
+            "group_name": "Enabled"
+        }
+    ],
+    "ChromotingQUIC": [
+        {
+            "group_name": "Enabled"
+        }
+    ],
+    "EnableGoogleCachedCopyTextExperiment": [
+        {
+            "group_name": "Button"
+        }
+    ],
+    "EnableSessionCrashedBubbleUI": [
+        {
+            "group_name": "Enabled"
+        }
+    ],
+    "ExtensionActionRedesign": [
         {
             "group_name": "Enabled"
         }
@@ -9,7 +39,7 @@
             "group_name": "Enabled"
         }
     ],
-    "RefreshTokenDeviceId": [
+    "PluginPowerSaver": [
         {
             "group_name": "Enabled"
         }
@@ -18,8 +48,13 @@
         {
             "group_name": "Enabled",
             "params": {
-              "alternate_protocol_probability_threshold": "0.01"
+                "alternate_protocol_probability_threshold": "0.01"
             }
+        }
+    ],
+    "RefreshTokenDeviceId": [
+        {
+            "group_name": "Enabled"
         }
     ],
     "ReportCertificateErrors": [
@@ -51,6 +86,17 @@
             "group_name": "DontShowAndDontSend"
         }
     ],
+    "SafeBrowsingReportPhishingErrorLink": [
+        {
+            "group_name": "Enabled"
+        },
+        {
+            "group_name": "Control"
+        },
+        {
+            "group_name": "Disabled"
+        }
+    ],
     "SdchPersistence": [
         {
             "group_name": "Enabled"
@@ -64,7 +110,7 @@
             "group_name": "Disabled"
         }
     ],
-    "AutofillFieldMetadata": [
+    "TabSyncByRecency": [
         {
             "group_name": "Enabled"
         }

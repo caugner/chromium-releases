@@ -404,9 +404,12 @@ interface MessagePort
     method start
     setter onmessage
 interface NetworkInformation
+    getter downlinkMax
+    getter onchange
     getter ontypechange
     getter type
     method constructor
+    setter onchange
     setter ontypechange
 interface Notification
     getter actions
@@ -419,6 +422,7 @@ interface Notification
     getter onclose
     getter onerror
     getter onshow
+    getter requireInteraction
     getter silent
     getter tag
     getter title
@@ -433,6 +437,11 @@ interface NotificationEvent
     getter action
     getter notification
     method constructor
+interface PerformanceObserverEntryList
+    method constructor
+    method getEntries
+    method getEntriesByName
+    method getEntriesByType
 interface PeriodicSyncEvent
     getter registration
     method constructor
@@ -453,7 +462,6 @@ interface PeriodicSyncRegistration
 interface PermissionStatus
     getter onchange
     getter state
-    getter status
     method constructor
     setter onchange
 interface Permissions
@@ -480,9 +488,9 @@ interface PushMessageData
     method json
     method text
 interface PushSubscription
-    getter curve25519dh
     getter endpoint
     method constructor
+    method getKey
     method toJSON
     method unsubscribe
 interface ReadableByteStream
@@ -548,36 +556,7 @@ interface ServicePortConnectEvent
     method constructor
     method respondWith
 interface ServiceWorkerGlobalScope
-    getter clients
-    getter onactivate
-    getter oncrossoriginmessage
-    getter onfetch
-    getter ongeofenceenter
-    getter ongeofenceleave
-    getter oninstall
-    getter onmessage
-    getter onnotificationclick
-    getter onnotificationerror
-    getter onperiodicsync
-    getter onpush
-    getter onsync
-    getter registration
-    method close
     method constructor
-    method fetch
-    method skipWaiting
-    setter onactivate
-    setter oncrossoriginmessage
-    setter onfetch
-    setter ongeofenceenter
-    setter ongeofenceleave
-    setter oninstall
-    setter onmessage
-    setter onnotificationclick
-    setter onnotificationerror
-    setter onperiodicsync
-    setter onpush
-    setter onsync
 interface ServiceWorkerRegistration
     getter geofencing
     getter onupdatefound
@@ -846,6 +825,36 @@ interface webkitIDBTransaction
     setter onabort
     setter oncomplete
     setter onerror
+global object
+    getter caches
+    getter clients
+    getter onactivate
+    getter oncrossoriginmessage
+    getter onfetch
+    getter ongeofenceenter
+    getter ongeofenceleave
+    getter oninstall
+    getter onmessage
+    getter onnotificationclick
+    getter onperiodicsync
+    getter onpush
+    getter onsync
+    getter registration
+    method close
+    method fetch
+    method gc
+    method skipWaiting
+    setter onactivate
+    setter oncrossoriginmessage
+    setter onfetch
+    setter ongeofenceenter
+    setter ongeofenceleave
+    setter oninstall
+    setter onmessage
+    setter onnotificationclick
+    setter onperiodicsync
+    setter onpush
+    setter onsync
 This is a testharness.js-based test.
 PASS Verify the interface of ServiceWorkerGlobalScope 
 Harness: the test ran to completion.

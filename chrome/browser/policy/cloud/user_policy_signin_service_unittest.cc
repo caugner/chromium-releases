@@ -23,7 +23,6 @@
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/signin/test_signin_client_builder.h"
 #include "chrome/test/base/testing_browser_process.h"
-#include "chrome/test/base/testing_pref_service_syncable.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/policy/core/browser/browser_policy_connector.h"
 #include "components/policy/core/common/cloud/cloud_external_data_manager.h"
@@ -36,6 +35,7 @@
 #include "components/signin/core/browser/fake_account_fetcher_service.h"
 #include "components/signin/core/browser/fake_profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_manager.h"
+#include "components/syncable_prefs/testing_pref_service_syncable.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
@@ -127,7 +127,9 @@ class UserPolicySigninServiceTest : public testing::Test {
 #endif
     service->RegisterForPolicy(
         kTestUser,
-#if !defined(OS_ANDROID)
+#if defined(OS_ANDROID)
+        kTestGaiaId,
+#else
         "mock_oauth_token",
 #endif
         base::Bind(&UserPolicySigninServiceTest::OnRegisterCompleted,
@@ -152,8 +154,8 @@ class UserPolicySigninServiceTest : public testing::Test {
 
     // Create a testing profile with cloud-policy-on-signin enabled, and bring
     // up a UserCloudPolicyManager with a MockUserCloudPolicyStore.
-    scoped_ptr<TestingPrefServiceSyncable> prefs(
-        new TestingPrefServiceSyncable());
+    scoped_ptr<syncable_prefs::TestingPrefServiceSyncable> prefs(
+        new syncable_prefs::TestingPrefServiceSyncable());
     chrome::RegisterUserProfilePrefs(prefs->registry());
 
     // UserCloudPolicyManagerFactory isn't a real
@@ -164,7 +166,8 @@ class UserPolicySigninServiceTest : public testing::Test {
     UserCloudPolicyManagerFactory::GetInstance()->RegisterTestingFactory(
         BuildCloudPolicyManager);
     TestingProfile::Builder builder;
-    builder.SetPrefService(scoped_ptr<PrefServiceSyncable>(prefs.Pass()));
+    builder.SetPrefService(
+        scoped_ptr<syncable_prefs::PrefServiceSyncable>(prefs.Pass()));
     builder.AddTestingFactory(SigninManagerFactory::GetInstance(),
                               BuildFakeSigninManagerBase);
     builder.AddTestingFactory(ProfileOAuth2TokenServiceFactory::GetInstance(),
@@ -201,7 +204,7 @@ class UserPolicySigninServiceTest : public testing::Test {
         TestingBrowserProcess::GetGlobal();
     testing_browser_process->SetLocalState(NULL);
     local_state_.reset();
-    testing_browser_process->SetBrowserPolicyConnector(NULL);
+    testing_browser_process->ShutdownBrowserPolicyConnector();
     base::RunLoop run_loop;
     run_loop.RunUntilIdle();
   }

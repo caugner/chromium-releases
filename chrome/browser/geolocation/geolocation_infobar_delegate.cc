@@ -7,31 +7,29 @@
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/infobars/core/infobar.h"
-#include "components/url_formatter/url_formatter.h"
+#include "components/url_formatter/elide_url.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
-
 // static
 infobars::InfoBar* GeolocationInfoBarDelegate::Create(
     InfoBarService* infobar_service,
-    PermissionQueueController* controller,
-    const PermissionRequestID& id,
     const GURL& requesting_frame,
-    const std::string& display_languages) {
+    const std::string& display_languages,
+    const PermissionSetCallback& callback) {
   return infobar_service->AddInfoBar(infobar_service->CreateConfirmInfoBar(
       scoped_ptr<ConfirmInfoBarDelegate>(new GeolocationInfoBarDelegate(
-          controller, id, requesting_frame, display_languages))));
+          requesting_frame, display_languages, callback))));
 }
 
 GeolocationInfoBarDelegate::GeolocationInfoBarDelegate(
-    PermissionQueueController* controller,
-    const PermissionRequestID& id,
     const GURL& requesting_frame,
-    const std::string& display_languages)
-    : PermissionInfobarDelegate(controller, id, requesting_frame,
-                                CONTENT_SETTINGS_TYPE_GEOLOCATION),
+    const std::string& display_languages,
+    const PermissionSetCallback& callback)
+    : PermissionInfobarDelegate(requesting_frame,
+                                CONTENT_SETTINGS_TYPE_GEOLOCATION,
+                                callback),
       requesting_frame_(requesting_frame),
       display_languages_(display_languages) {
 }
@@ -39,16 +37,12 @@ GeolocationInfoBarDelegate::GeolocationInfoBarDelegate(
 GeolocationInfoBarDelegate::~GeolocationInfoBarDelegate() {
 }
 
-int GeolocationInfoBarDelegate::GetIconID() const {
+int GeolocationInfoBarDelegate::GetIconId() const {
   return IDR_INFOBAR_GEOLOCATION;
 }
 
 base::string16 GeolocationInfoBarDelegate::GetMessageText() const {
-  return l10n_util::GetStringFUTF16(
-      IDS_GEOLOCATION_INFOBAR_QUESTION,
-      url_formatter::FormatUrl(
-          requesting_frame_, display_languages_,
-          url_formatter::kFormatUrlOmitUsernamePassword |
-              url_formatter::kFormatUrlOmitTrailingSlashOnBareHostname,
-          net::UnescapeRule::SPACES, nullptr, nullptr, nullptr));
+  return l10n_util::GetStringFUTF16(IDS_GEOLOCATION_INFOBAR_QUESTION,
+                                    url_formatter::FormatUrlForSecurityDisplay(
+                                        requesting_frame_, display_languages_));
 }

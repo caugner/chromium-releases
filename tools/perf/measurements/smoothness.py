@@ -5,6 +5,7 @@
 from telemetry.page import page_test
 from telemetry.timeline import tracing_category_filter
 from telemetry.web_perf import timeline_based_measurement
+from telemetry.web_perf.metrics import smoothness
 
 
 class _CustomResultsWrapper(timeline_based_measurement.ResultsWrapperInterface):
@@ -39,30 +40,27 @@ class Smoothness(page_test.PageTest):
     options.AppendExtraBrowserArgs('--running-performance-benchmark')
 
   def WillNavigateToPage(self, page, tab):
-    # Collect garbage from previous run several times to make the results more
-    # stable.
-    for _ in xrange(0, 5):
-      tab.CollectGarbage()
-    tracing_controller = tab.browser.platform.tracing_controller
     # FIXME: Remove webkit.console when blink.console lands in chromium and
     # the ref builds are updated. crbug.com/386847
     custom_categories = [
         'webkit.console', 'blink.console', 'benchmark', 'trace_event_overhead']
     category_filter = tracing_category_filter.TracingCategoryFilter(
         ','.join(custom_categories))
+
+    options = timeline_based_measurement.Options(category_filter)
+    options.SetTimelineBasedMetrics([smoothness.SmoothnessMetric()])
+    for delay in page.GetSyntheticDelayCategories():
+      options.category_filter.AddSyntheticDelay(delay)
     self._tbm = timeline_based_measurement.TimelineBasedMeasurement(
-        timeline_based_measurement.Options(category_filter),
-        self._results_wrapper)
-    self._tbm.WillRunStoryForPageTest(
-        tracing_controller, page.GetSyntheticDelayCategories())
+        options, self._results_wrapper)
+    self._tbm.WillRunStory(tab.browser.platform)
 
   def ValidateAndMeasurePage(self, _, tab, results):
-    tracing_controller = tab.browser.platform.tracing_controller
-    self._tbm.MeasureForPageTest(tracing_controller, results)
+    self._tbm.Measure(tab.browser.platform, results)
 
   def DidRunPage(self, platform):
     if self._tbm:
-      self._tbm.DidRunStoryForPageTest(platform.tracing_controller)
+      self._tbm.DidRunStory(platform)
 
 
 class Repaint(Smoothness):

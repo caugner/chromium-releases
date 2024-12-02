@@ -12,7 +12,7 @@
 #include "components/proximity_auth/ble/bluetooth_low_energy_device_whitelist.h"
 #include "components/proximity_auth/connection_finder.h"
 #include "components/proximity_auth/cryptauth/mock_cryptauth_client.h"
-#include "components/proximity_auth/proximity_auth_client.h"
+#include "components/proximity_auth/mock_proximity_auth_client.h"
 #include "components/proximity_auth/screenlock_bridge.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -24,6 +24,8 @@ using testing::Return;
 namespace proximity_auth {
 
 namespace {
+
+const char kTestUser[] = "example@gmail.com";
 
 class MockConnectionFinder : public ConnectionFinder {
  public:
@@ -61,25 +63,6 @@ class MockLockHandler : public ScreenlockBridge::LockHandler {
   DISALLOW_COPY_AND_ASSIGN(MockLockHandler);
 };
 
-const char kTestUser[] = "example@gmail.com";
-
-class MockProximityAuthClient : public ProximityAuthClient {
- public:
-  MockProximityAuthClient() {}
-  ~MockProximityAuthClient() override {}
-
-  // ProximityAuthClient:
-  std::string GetAuthenticatedUsername() const override { return kTestUser; }
-
-  MOCK_METHOD1(UpdateScreenlockState,
-               void(proximity_auth::ScreenlockState state));
-  MOCK_METHOD1(FinalizeUnlock, void(bool success));
-  MOCK_METHOD1(FinalizeSignin, void(const std::string& secret));
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(MockProximityAuthClient);
-};
-
 }  // namespace
 
 class ProximityAuthBleSystemTestable : public ProximityAuthBleSystem {
@@ -87,11 +70,9 @@ class ProximityAuthBleSystemTestable : public ProximityAuthBleSystem {
   ProximityAuthBleSystemTestable(
       ScreenlockBridge* screenlock_bridge,
       ProximityAuthClient* proximity_auth_client,
-      scoped_ptr<CryptAuthClientFactory> cryptauth_client_factory,
       PrefService* pref_service)
       : ProximityAuthBleSystem(screenlock_bridge,
                                proximity_auth_client,
-                               cryptauth_client_factory.Pass(),
                                pref_service) {}
 
   ConnectionFinder* CreateConnectionFinder() override {
@@ -108,13 +89,11 @@ class ProximityAuthBleSystemTest : public testing::Test {
   void SetUp() override {
     BluetoothLowEnergyDeviceWhitelist::RegisterPrefs(pref_service_.registry());
 
-    scoped_ptr<CryptAuthClientFactory> cryptauth_client_factory(
-        new MockCryptAuthClientFactory(
-            MockCryptAuthClientFactory::MockType::MAKE_NICE_MOCKS));
-
     proximity_auth_system_.reset(new ProximityAuthBleSystemTestable(
-        ScreenlockBridge::Get(), &proximity_auth_client_,
-        cryptauth_client_factory.Pass(), &pref_service_));
+        ScreenlockBridge::Get(), &proximity_auth_client_, &pref_service_));
+
+    ON_CALL(proximity_auth_client_, GetAuthenticatedUsername())
+        .WillByDefault(Return(kTestUser));
   }
 
   // Injects the thread's TaskRunner for testing.

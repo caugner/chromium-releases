@@ -216,7 +216,7 @@ class TestRunnerBindings : public gin::Wrappable<TestRunnerBindings> {
   void SetXSSAuditorEnabled(bool enabled);
   void SetAllowUniversalAccessFromFileURLs(bool allow);
   void SetAllowFileAccessFromFileURLs(bool allow);
-  void OverridePreference(const std::string key, v8::Local<v8::Value> value);
+  void OverridePreference(const std::string& key, v8::Local<v8::Value> value);
   void SetAcceptLanguages(const std::string& accept_languages);
   void SetPluginsEnabled(bool enabled);
   void DumpEditingCallbacks();
@@ -292,9 +292,13 @@ class TestRunnerBindings : public gin::Wrappable<TestRunnerBindings> {
   void CopyImageAtAndCapturePixelsAsyncThen(int x,
                                             int y,
                                             v8::Local<v8::Function> callback);
-  void SetCustomTextOutput(std::string output);
+  void SetCustomTextOutput(const std::string& output);
   void SetViewSourceForFrame(const std::string& name, bool enabled);
   void SetBluetoothMockDataSet(const std::string& dataset_name);
+  void SetBluetoothManualChooser();
+  void GetBluetoothManualChooserEvents(v8::Local<v8::Function> callback);
+  void SendBluetoothManualChooserEvent(const std::string& event,
+                                       const std::string& argument);
   void SetGeofencingMockProvider(bool service_available);
   void ClearGeofencingMockProvider();
   void SetGeofencingMockPosition(double latitude, double longitude);
@@ -566,8 +570,16 @@ gin::ObjectTemplateBuilder TestRunnerBindings::GetObjectTemplateBuilder(
                  &TestRunnerBindings::SetCustomTextOutput)
       .SetMethod("setViewSourceForFrame",
                  &TestRunnerBindings::SetViewSourceForFrame)
+      // The 4 Bluetooth functions are specified at
+      // https://webbluetoothcg.github.io/web-bluetooth/tests/.
       .SetMethod("setBluetoothMockDataSet",
                  &TestRunnerBindings::SetBluetoothMockDataSet)
+      .SetMethod("setBluetoothManualChooser",
+                 &TestRunnerBindings::SetBluetoothManualChooser)
+      .SetMethod("getBluetoothManualChooserEvents",
+                 &TestRunnerBindings::GetBluetoothManualChooserEvents)
+      .SetMethod("sendBluetoothManualChooserEvent",
+                 &TestRunnerBindings::SendBluetoothManualChooserEvent)
       .SetMethod("forceNextWebGLContextCreationToFail",
                  &TestRunnerBindings::ForceNextWebGLContextCreationToFail)
       .SetMethod("forceNextDrawingBufferCreationToFail",
@@ -1042,7 +1054,7 @@ void TestRunnerBindings::SetAllowFileAccessFromFileURLs(bool allow) {
     runner_->SetAllowFileAccessFromFileURLs(allow);
 }
 
-void TestRunnerBindings::OverridePreference(const std::string key,
+void TestRunnerBindings::OverridePreference(const std::string& key,
                                             v8::Local<v8::Value> value) {
   if (runner_)
     runner_->OverridePreference(key, value);
@@ -1333,6 +1345,24 @@ void TestRunnerBindings::SetBluetoothMockDataSet(const std::string& name) {
     runner_->SetBluetoothMockDataSet(name);
 }
 
+void TestRunnerBindings::SetBluetoothManualChooser() {
+  if (runner_)
+    runner_->SetBluetoothManualChooser();
+}
+
+void TestRunnerBindings::GetBluetoothManualChooserEvents(
+    v8::Local<v8::Function> callback) {
+  if (runner_)
+    return runner_->GetBluetoothManualChooserEvents(callback);
+}
+
+void TestRunnerBindings::SendBluetoothManualChooserEvent(
+    const std::string& event,
+    const std::string& argument) {
+  if (runner_)
+    runner_->SendBluetoothManualChooserEvent(event, argument);
+}
+
 void TestRunnerBindings::SetPOSIXLocale(const std::string& locale) {
   if (runner_)
     runner_->SetPOSIXLocale(locale);
@@ -1420,7 +1450,7 @@ void TestRunnerBindings::CopyImageAtAndCapturePixelsAsyncThen(
     runner_->CopyImageAtAndCapturePixelsAsyncThen(x, y, callback);
 }
 
-void TestRunnerBindings::SetCustomTextOutput(std::string output) {
+void TestRunnerBindings::SetCustomTextOutput(const std::string& output) {
   runner_->setCustomTextOutput(output);
 }
 
@@ -1754,7 +1784,7 @@ std::string TestRunner::customDumpText() const {
   return custom_text_output_;
 }
 
-void TestRunner::setCustomTextOutput(std::string text) {
+void TestRunner::setCustomTextOutput(const std::string& text) {
   custom_text_output_ = text;
   has_custom_text_output_ = true;
 }
@@ -2524,7 +2554,7 @@ void TestRunner::SetAllowFileAccessFromFileURLs(bool allow) {
   delegate_->ApplyPreferences();
 }
 
-void TestRunner::OverridePreference(const std::string key,
+void TestRunner::OverridePreference(const std::string& key,
                                     v8::Local<v8::Value> value) {
   TestPreferences* prefs = delegate_->Preferences();
   if (key == "WebKitDefaultFontSize") {
@@ -2543,8 +2573,6 @@ void TestRunner::OverridePreference(const std::string key,
     prefs->loads_images_automatically = value->BooleanValue();
   } else if (key == "WebKitPluginsEnabled") {
     prefs->plugins_enabled = value->BooleanValue();
-  } else if (key == "WebKitJavaEnabled") {
-    prefs->java_enabled = value->BooleanValue();
   } else if (key == "WebKitOfflineWebApplicationCacheEnabled") {
     prefs->offline_web_application_cache_enabled = value->BooleanValue();
   } else if (key == "WebKitTabToLinksPreferenceKey") {
@@ -2814,6 +2842,23 @@ void TestRunner::SetBluetoothMockDataSet(const std::string& name) {
   delegate_->SetBluetoothMockDataSet(name);
 }
 
+void TestRunner::SetBluetoothManualChooser() {
+  delegate_->SetBluetoothManualChooser();
+}
+
+void TestRunner::GetBluetoothManualChooserEvents(
+    v8::Local<v8::Function> callback) {
+  scoped_ptr<InvokeCallbackTask> task(new InvokeCallbackTask(this, callback));
+  return delegate_->GetBluetoothManualChooserEvents(
+      base::Bind(&TestRunner::GetBluetoothManualChooserEventsCallback,
+                 weak_factory_.GetWeakPtr(), base::Passed(&task)));
+}
+
+void TestRunner::SendBluetoothManualChooserEvent(const std::string& event,
+                                                 const std::string& argument) {
+  delegate_->SendBluetoothManualChooserEvent(event, argument);
+}
+
 void TestRunner::SetGeofencingMockProvider(bool service_available) {
   delegate_->SetGeofencingMockProvider(service_available);
 }
@@ -3018,6 +3063,28 @@ void TestRunner::DispatchBeforeInstallPromptCallback(
   argv[0] = v8::Boolean::New(isolate, canceled);
 
   task->SetArguments(1, argv);
+  InvokeCallback(task.Pass());
+}
+
+void TestRunner::GetBluetoothManualChooserEventsCallback(
+    scoped_ptr<InvokeCallbackTask> task,
+    const std::vector<std::string>& events) {
+  // Build the V8 context.
+  v8::Isolate* isolate = blink::mainThreadIsolate();
+  v8::HandleScope handle_scope(isolate);
+  v8::Local<v8::Context> context =
+      web_view_->mainFrame()->mainWorldScriptContext();
+  if (context.IsEmpty())
+    return;
+  v8::Context::Scope context_scope(context);
+
+  // Convert the argument.
+  v8::Local<v8::Value> arg[1];
+  if (!gin::TryConvertToV8(isolate, events, &arg[0]))
+    return;
+
+  // Call the callback.
+  task->SetArguments(1, arg);
   InvokeCallback(task.Pass());
 }
 

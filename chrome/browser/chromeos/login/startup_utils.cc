@@ -87,6 +87,7 @@ void StartupUtils::MarkOobeCompleted() {
   SaveBoolPreferenceForced(prefs::kEnrollmentRecoveryRequired, false);
 }
 
+// static
 void StartupUtils::SaveOobePendingScreen(const std::string& screen) {
   SaveStringPreferenceForced(prefs::kOobeScreenPending, screen);
 }
@@ -108,13 +109,22 @@ static base::FilePath GetOobeCompleteFlagPath() {
   }
 }
 
+// static
+base::TimeDelta StartupUtils::GetTimeSinceOobeFlagFileCreation() {
+  const base::FilePath oobe_complete_flag_path = GetOobeCompleteFlagPath();
+  base::File::Info file_info;
+  if (base::GetFileInfo(oobe_complete_flag_path, &file_info))
+    return base::Time::Now() - file_info.creation_time;
+  return base::TimeDelta();
+}
+
 static void CreateOobeCompleteFlagFile() {
   // Create flag file for boot-time init scripts.
-  base::FilePath oobe_complete_path = GetOobeCompleteFlagPath();
-  if (!base::PathExists(oobe_complete_path)) {
-    FILE* oobe_flag_file = base::OpenFile(oobe_complete_path, "w+b");
+  const base::FilePath oobe_complete_flag_path = GetOobeCompleteFlagPath();
+  if (!base::PathExists(oobe_complete_flag_path)) {
+    FILE* oobe_flag_file = base::OpenFile(oobe_complete_flag_path, "w+b");
     if (oobe_flag_file == NULL)
-      DLOG(WARNING) << oobe_complete_path.value() << " doesn't exist.";
+      DLOG(WARNING) << oobe_complete_flag_path.value() << " doesn't exist.";
     else
       base::CloseFile(oobe_flag_file);
   }
@@ -137,8 +147,8 @@ bool StartupUtils::IsDeviceRegistered() {
     // Pref is not set. For compatibility check flag file. It causes blocking
     // IO on UI thread. But it's required for update from old versions.
     base::ThreadRestrictions::ScopedAllowIO allow_io;
-    base::FilePath oobe_complete_flag_file_path = GetOobeCompleteFlagPath();
-    bool file_exists = base::PathExists(oobe_complete_flag_file_path);
+    const base::FilePath oobe_complete_flag_path = GetOobeCompleteFlagPath();
+    bool file_exists = base::PathExists(oobe_complete_flag_path);
     SaveIntegerPreferenceForced(prefs::kDeviceRegistered, file_exists ? 1 : 0);
     return file_exists;
   }

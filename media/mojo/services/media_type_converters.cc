@@ -132,15 +132,21 @@ ASSERT_ENUM_EQ_RAW(DemuxerStream::Status,
 ASSERT_ENUM_EQ_RAW(VideoPixelFormat,
                    PIXEL_FORMAT_UNKNOWN,
                    VIDEO_FORMAT_UNKNOWN);
-ASSERT_ENUM_EQ_RAW(VideoPixelFormat, PIXEL_FORMAT_YV12, VIDEO_FORMAT_YV12);
 ASSERT_ENUM_EQ_RAW(VideoPixelFormat, PIXEL_FORMAT_I420, VIDEO_FORMAT_I420);
+ASSERT_ENUM_EQ_RAW(VideoPixelFormat, PIXEL_FORMAT_YV12, VIDEO_FORMAT_YV12);
 ASSERT_ENUM_EQ_RAW(VideoPixelFormat, PIXEL_FORMAT_YV16, VIDEO_FORMAT_YV16);
 ASSERT_ENUM_EQ_RAW(VideoPixelFormat, PIXEL_FORMAT_YV12A, VIDEO_FORMAT_YV12A);
 ASSERT_ENUM_EQ_RAW(VideoPixelFormat, PIXEL_FORMAT_YV24, VIDEO_FORMAT_YV24);
 ASSERT_ENUM_EQ_RAW(VideoPixelFormat, PIXEL_FORMAT_NV12, VIDEO_FORMAT_NV12);
+ASSERT_ENUM_EQ_RAW(VideoPixelFormat, PIXEL_FORMAT_NV21, VIDEO_FORMAT_NV21);
+ASSERT_ENUM_EQ_RAW(VideoPixelFormat, PIXEL_FORMAT_UYVY, VIDEO_FORMAT_UYVY);
+ASSERT_ENUM_EQ_RAW(VideoPixelFormat, PIXEL_FORMAT_YUY2, VIDEO_FORMAT_YUY2);
 ASSERT_ENUM_EQ_RAW(VideoPixelFormat, PIXEL_FORMAT_ARGB, VIDEO_FORMAT_ARGB);
 ASSERT_ENUM_EQ_RAW(VideoPixelFormat, PIXEL_FORMAT_XRGB, VIDEO_FORMAT_XRGB);
-ASSERT_ENUM_EQ_RAW(VideoPixelFormat, PIXEL_FORMAT_UYVY, VIDEO_FORMAT_UYVY);
+ASSERT_ENUM_EQ_RAW(VideoPixelFormat, PIXEL_FORMAT_RGB24, VIDEO_FORMAT_RGB24);
+ASSERT_ENUM_EQ_RAW(VideoPixelFormat, PIXEL_FORMAT_RGB32, VIDEO_FORMAT_RGB32);
+ASSERT_ENUM_EQ_RAW(VideoPixelFormat, PIXEL_FORMAT_MJPEG, VIDEO_FORMAT_MJPEG);
+ASSERT_ENUM_EQ_RAW(VideoPixelFormat, PIXEL_FORMAT_MT21, VIDEO_FORMAT_MT21);
 ASSERT_ENUM_EQ_RAW(VideoPixelFormat, PIXEL_FORMAT_MAX, VIDEO_FORMAT_FORMAT_MAX);
 
 // ColorSpace.
@@ -155,6 +161,7 @@ ASSERT_ENUM_EQ_RAW(ColorSpace, COLOR_SPACE_MAX, COLOR_SPACE_MAX);
 // VideoCodec
 ASSERT_ENUM_EQ_RAW(VideoCodec, kUnknownVideoCodec, VIDEO_CODEC_UNKNOWN);
 ASSERT_ENUM_EQ(VideoCodec, kCodec, VIDEO_CODEC_, H264);
+ASSERT_ENUM_EQ(VideoCodec, kCodec, VIDEO_CODEC_, HEVC);
 ASSERT_ENUM_EQ(VideoCodec, kCodec, VIDEO_CODEC_, VC1);
 ASSERT_ENUM_EQ(VideoCodec, kCodec, VIDEO_CODEC_, MPEG2);
 ASSERT_ENUM_EQ(VideoCodec, kCodec, VIDEO_CODEC_, MPEG4);
@@ -412,10 +419,9 @@ media::interfaces::AudioDecoderConfigPtr TypeConverter<
   config->channel_layout =
       static_cast<media::interfaces::ChannelLayout>(input.channel_layout());
   config->samples_per_second = input.samples_per_second();
-  if (input.extra_data()) {
-    std::vector<uint8_t> data(input.extra_data(),
-                              input.extra_data() + input.extra_data_size());
-    config->extra_data.Swap(&data);
+  if (!input.extra_data().empty()) {
+    std::vector<uint8_t> extra_data = input.extra_data();
+    config->extra_data.Swap(&extra_data);
   }
   config->seek_preroll_usec = input.seek_preroll().InMicroseconds();
   config->codec_delay = input.codec_delay();
@@ -433,10 +439,7 @@ TypeConverter<media::AudioDecoderConfig,
       static_cast<media::AudioCodec>(input->codec),
       static_cast<media::SampleFormat>(input->sample_format),
       static_cast<media::ChannelLayout>(input->channel_layout),
-      input->samples_per_second,
-      input->extra_data.size() ? &input->extra_data.front() : NULL,
-      input->extra_data.size(),
-      input->is_encrypted,
+      input->samples_per_second, input->extra_data, input->is_encrypted,
       base::TimeDelta::FromMicroseconds(input->seek_preroll_usec),
       input->codec_delay);
   return config;
@@ -458,11 +461,7 @@ media::interfaces::VideoDecoderConfigPtr TypeConverter<
   config->coded_size = Size::From(input.coded_size());
   config->visible_rect = Rect::From(input.visible_rect());
   config->natural_size = Size::From(input.natural_size());
-  if (input.extra_data()) {
-    std::vector<uint8_t> data(input.extra_data(),
-                              input.extra_data() + input.extra_data_size());
-    config->extra_data.Swap(&data);
-  }
+  config->extra_data = mojo::Array<uint8>::From(input.extra_data());
   config->is_encrypted = input.is_encrypted();
   return config.Pass();
 }
@@ -479,9 +478,8 @@ TypeConverter<media::VideoDecoderConfig,
       static_cast<media::VideoPixelFormat>(input->format),
       static_cast<media::ColorSpace>(input->color_space),
       input->coded_size.To<gfx::Size>(), input->visible_rect.To<gfx::Rect>(),
-      input->natural_size.To<gfx::Size>(),
-      input->extra_data.size() ? &input->extra_data.front() : NULL,
-      input->extra_data.size(), input->is_encrypted);
+      input->natural_size.To<gfx::Size>(), input->extra_data,
+      input->is_encrypted);
   return config;
 }
 

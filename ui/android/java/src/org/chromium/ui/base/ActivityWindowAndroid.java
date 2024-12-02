@@ -15,6 +15,7 @@ import android.content.pm.PackageManager.NameNotFoundException;
 import android.content.pm.PermissionInfo;
 import android.os.Build;
 import android.os.Handler;
+import android.os.Process;
 import android.preference.PreferenceManager;
 import android.text.TextUtils;
 import android.util.SparseArray;
@@ -22,7 +23,6 @@ import android.view.View;
 
 import org.chromium.base.ActivityState;
 import org.chromium.base.ApplicationStatus;
-import org.chromium.base.BuildInfo;
 import org.chromium.ui.UiUtils;
 
 import java.lang.ref.WeakReference;
@@ -70,6 +70,8 @@ public class ActivityWindowAndroid
         if (listenToActivityState) {
             ApplicationStatus.registerStateListenerForActivity(this, activity);
         }
+
+        setAndroidPermissionDelegate(new ActivityAndroidPermissionDelegate());
     }
 
     @Override
@@ -179,63 +181,6 @@ public class ActivityWindowAndroid
         return PERMISSION_QUERIED_KEY_PREFIX + permissionQueriedKey;
     }
 
-    @Override
-    public boolean canRequestPermission(String permission) {
-        if (!BuildInfo.isMncOrLater()) return false;
-
-        Activity activity = mActivityRef.get();
-        if (activity == null) return false;
-
-        // TODO(tedchoc): Child classes are currently required to determine whether we have
-        //                previously requested the permission before but the user did not
-        //                select "Never ask again".  Merge with this class when possible.
-
-        // Check whether we have ever asked for this permission by checking whether we saved
-        // a preference associated with it before.
-        String permissionQueriedKey = getHasRequestedPermissionKey(permission);
-        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(activity);
-        if (!prefs.getBoolean(permissionQueriedKey, false)) return true;
-
-        return false;
-    }
-
-    @Override
-    public void requestPermissions(
-            final String[] permissions, final PermissionCallback callback) {
-        if (requestPermissionsInternal(permissions, callback)) return;
-
-        // If the permission request was not sent successfully, just post a response to the
-        // callback with whatever the current permission state is for all the requested
-        // permissions.  The response is posted to keep the async behavior of this method
-        // consistent.
-        mHandler.post(new Runnable() {
-            @Override
-            public void run() {
-                int[] results = new int[permissions.length];
-                for (int i = 0; i < permissions.length; i++) {
-                    results[i] = hasPermission(permissions[i])
-                            ? PackageManager.PERMISSION_GRANTED
-                            : PackageManager.PERMISSION_DENIED;
-                }
-                callback.onRequestPermissionsResult(permissions, results);
-            }
-        });
-    }
-
-    /**
-     * Issues the permission request and returns whether it was sent successfully.
-     */
-    private boolean requestPermissionsInternal(String[] permissions, PermissionCallback callback) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return false;
-        Activity activity = mActivityRef.get();
-        if (activity == null) return false;
-
-        int requestCode = generateNextRequestCode();
-        mOutstandingPermissionRequests.put(requestCode, callback);
-        activity.requestPermissions(permissions, requestCode);
-        return true;
-    }
-
     /**
      * Responds to a pending permission result.
      * @param requestCode The unique code for the permission request.
@@ -293,5 +238,86 @@ public class ActivityWindowAndroid
         mOutstandingIntents.put(requestCode, callback);
         mIntentErrors.put(
                 requestCode, errorId == null ? null : mApplicationContext.getString(errorId));
+    }
+
+    private class ActivityAndroidPermissionDelegate implements AndroidPermissionDelegate {
+        @Override
+        public boolean hasPermission(String permission) {
+            return mApplicationContext.checkPermission(permission, Process.myPid(), Process.myUid())
+                    == PackageManager.PERMISSION_GRANTED;
+        }
+
+        @Override
+        public boolean canRequestPermission(String permission) {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return false;
+
+            Activity activity = mActivityRef.get();
+            if (activity == null) return false;
+
+            if (isPermissionRevokedByPolicy(permission)) {
+                return false;
+            }
+
+            if (activity.shouldShowRequestPermissionRationale(permission)) {
+                return true;
+            }
+
+            // Check whether we have ever asked for this permission by checking whether we saved
+            // a preference associated with it before.
+            String permissionQueriedKey = getHasRequestedPermissionKey(permission);
+            SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(activity);
+            if (!prefs.getBoolean(permissionQueriedKey, false)) return true;
+
+            return false;
+        }
+
+        @Override
+        public boolean isPermissionRevokedByPolicy(String permission) {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return false;
+
+            Activity activity = mActivityRef.get();
+            if (activity == null) return false;
+
+            return activity.getPackageManager().isPermissionRevokedByPolicy(
+                    permission, activity.getPackageName());
+        }
+
+        @Override
+        public void requestPermissions(
+                final String[] permissions, final PermissionCallback callback) {
+            if (requestPermissionsInternal(permissions, callback)) return;
+
+            // If the permission request was not sent successfully, just post a response to the
+            // callback with whatever the current permission state is for all the requested
+            // permissions.  The response is posted to keep the async behavior of this method
+            // consistent.
+            mHandler.post(new Runnable() {
+                @Override
+                public void run() {
+                    int[] results = new int[permissions.length];
+                    for (int i = 0; i < permissions.length; i++) {
+                        results[i] = hasPermission(permissions[i])
+                                ? PackageManager.PERMISSION_GRANTED
+                                : PackageManager.PERMISSION_DENIED;
+                    }
+                    callback.onRequestPermissionsResult(permissions, results);
+                }
+            });
+        }
+
+        /**
+         * Issues the permission request and returns whether it was sent successfully.
+         */
+        private boolean requestPermissionsInternal(
+                String[] permissions, PermissionCallback callback) {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return false;
+            Activity activity = mActivityRef.get();
+            if (activity == null) return false;
+
+            int requestCode = generateNextRequestCode();
+            mOutstandingPermissionRequests.put(requestCode, callback);
+            activity.requestPermissions(permissions, requestCode);
+            return true;
+        }
     }
 }

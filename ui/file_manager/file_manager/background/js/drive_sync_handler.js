@@ -8,7 +8,6 @@
  *     progressing items.
  * @constructor
  * @extends {cr.EventTarget}
- * @suppress {checkStructDictInheritance}
  * @struct
  */
 function DriveSyncHandler(progressCenter) {
@@ -228,6 +227,9 @@ DriveSyncHandler.prototype.onDriveSyncError_ = function(event) {
         break;
       case 'service_unavailable':
         item.message = str('SYNC_SERVICE_UNAVAILABLE_ERROR');
+        break;
+      case 'no_server_space':
+        item.message = strf('SYNC_NO_SERVER_SPACE', entry.name);
         break;
       case 'misc':
         item.message = strf('SYNC_MISC_ERROR', entry.name);

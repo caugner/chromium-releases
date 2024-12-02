@@ -111,6 +111,14 @@ bool GetLocalCertificatesDir(const base::FilePath& certificates_dir,
   return true;
 }
 
+scoped_ptr<base::ListValue> GetTokenBindingParams(std::vector<int> params) {
+  scoped_ptr<base::ListValue> values(new base::ListValue());
+  for (int param : params) {
+    values->Append(new base::FundamentalValue(param));
+  }
+  return values;
+}
+
 }  // namespace
 
 BaseTestServer::SSLOptions::SSLOptions()
@@ -126,9 +134,9 @@ BaseTestServer::SSLOptions::SSLOptions()
       fallback_scsv_enabled(false),
       staple_ocsp_response(false),
       ocsp_server_unavailable(false),
-      enable_npn(false),
-      alert_after_handshake(false) {
-}
+      alert_after_handshake(false),
+      disable_channel_id(false),
+      disable_extended_master_secret(false) {}
 
 BaseTestServer::SSLOptions::SSLOptions(
     BaseTestServer::SSLOptions::ServerCertificate cert)
@@ -144,9 +152,9 @@ BaseTestServer::SSLOptions::SSLOptions(
       fallback_scsv_enabled(false),
       staple_ocsp_response(false),
       ocsp_server_unavailable(false),
-      enable_npn(false),
-      alert_after_handshake(false) {
-}
+      alert_after_handshake(false),
+      disable_channel_id(false),
+      disable_extended_master_secret(false) {}
 
 BaseTestServer::SSLOptions::~SSLOptions() {}
 
@@ -544,10 +552,28 @@ bool BaseTestServer::GenerateArguments(base::DictionaryValue* arguments) const {
       arguments->Set("ocsp-server-unavailable",
                      base::Value::CreateNullValue());
     }
-    if (ssl_options_.enable_npn)
-      arguments->Set("enable-npn", base::Value::CreateNullValue());
+    if (!ssl_options_.npn_protocols.empty()) {
+      scoped_ptr<base::ListValue> npn_protocols(new base::ListValue());
+      for (const std::string& proto : ssl_options_.npn_protocols) {
+        npn_protocols->Append(new base::StringValue(proto));
+      }
+      arguments->Set("npn-protocols", npn_protocols.Pass());
+    }
     if (ssl_options_.alert_after_handshake)
       arguments->Set("alert-after-handshake", base::Value::CreateNullValue());
+
+    if (ssl_options_.disable_channel_id)
+      arguments->Set("disable-channel-id", base::Value::CreateNullValue());
+    if (ssl_options_.disable_extended_master_secret) {
+      arguments->Set("disable-extended-master-secret",
+                     base::Value::CreateNullValue());
+    }
+    if (!ssl_options_.supported_token_binding_params.empty()) {
+      scoped_ptr<base::ListValue> token_binding_params(new base::ListValue());
+      arguments->Set(
+          "token-binding-params",
+          GetTokenBindingParams(ssl_options_.supported_token_binding_params));
+    }
   }
 
   return GenerateAdditionalArguments(arguments);

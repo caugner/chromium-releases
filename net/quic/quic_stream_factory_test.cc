@@ -12,6 +12,7 @@
 #include "net/dns/mock_host_resolver.h"
 #include "net/http/http_response_headers.h"
 #include "net/http/http_response_info.h"
+#include "net/http/http_server_properties_impl.h"
 #include "net/http/http_util.h"
 #include "net/http/transport_security_state.h"
 #include "net/quic/crypto/crypto_handshake.h"
@@ -28,6 +29,7 @@
 #include "net/quic/test_tools/quic_test_utils.h"
 #include "net/quic/test_tools/test_task_runner.h"
 #include "net/socket/socket_test_util.h"
+#include "net/spdy/spdy_session_test_util.h"
 #include "net/spdy/spdy_test_utils.h"
 #include "net/ssl/channel_id_service.h"
 #include "net/ssl/default_channel_id_store.h"
@@ -148,6 +150,30 @@ class QuicStreamFactoryPeer {
     return factory->IsQuicDisabled(port);
   }
 
+  static bool GetDelayTcpRace(QuicStreamFactory* factory) {
+    return factory->delay_tcp_race_;
+  }
+
+  static void SetDelayTcpRace(QuicStreamFactory* factory, bool delay_tcp_race) {
+    factory->delay_tcp_race_ = delay_tcp_race;
+  }
+
+  static void SetYieldAfterPackets(QuicStreamFactory* factory,
+                                   int yield_after_packets) {
+    factory->yield_after_packets_ = yield_after_packets;
+  }
+
+  static void SetYieldAfterDuration(QuicStreamFactory* factory,
+                                    QuicTime::Delta yield_after_duration) {
+    factory->yield_after_duration_ = yield_after_duration;
+  }
+
+  static void SetHttpServerProperties(
+      QuicStreamFactory* factory,
+      base::WeakPtr<HttpServerProperties> http_server_properties) {
+    factory->http_server_properties_ = http_server_properties;
+  }
+
   static size_t GetNumberOfActiveJobs(QuicStreamFactory* factory,
                                       const QuicServerId& server_id) {
     return (factory->active_jobs_[server_id]).size();
@@ -173,6 +199,22 @@ class QuicStreamFactoryPeer {
 
   static int GetNumPublicResetsPostHandshake(QuicStreamFactory* factory) {
     return factory->num_public_resets_post_handshake_;
+  }
+
+  static void InitializeQuicSupportedServersAtStartup(
+      QuicStreamFactory* factory) {
+    factory->InitializeQuicSupportedServersAtStartup();
+  }
+
+  static bool GetQuicSupportedServersAtStartupInitialzied(
+      QuicStreamFactory* factory) {
+    return factory->quic_supported_servers_at_startup_initialzied_;
+  }
+
+  static bool SupportsQuicAtStartUp(QuicStreamFactory* factory,
+                                    HostPortPair host_port_pair) {
+    return ContainsKey(factory->quic_supported_servers_at_startup_,
+                       host_port_pair);
   }
 };
 
@@ -229,6 +271,7 @@ class QuicStreamFactoryTest : public ::testing::TestWithParam<TestParams> {
                  nullptr,
                  channel_id_service_.get(),
                  &transport_security_state_,
+                 /*SocketPerformanceWatcherFactory*/ nullptr,
                  &crypto_client_stream_factory_,
                  &random_generator_,
                  clock_,
@@ -249,6 +292,7 @@ class QuicStreamFactoryTest : public ::testing::TestWithParam<TestParams> {
                  /*threshold_timeouts_with_open_streams=*/2,
                  /*threshold_pulic_resets_post_handshake=*/2,
                  /*receive_buffer_size=*/0,
+                 /*delay_tcp_race=*/false,
                  QuicTagVector()),
         host_port_pair_(kDefaultServerHostName, kDefaultServerPort),
         is_https_(false),
@@ -328,6 +372,11 @@ class QuicStreamFactoryTest : public ::testing::TestWithParam<TestParams> {
     EXPECT_TRUE(socket_data.AllReadDataConsumed());
     EXPECT_TRUE(socket_data.AllWriteDataConsumed());
     return port;
+  }
+
+  scoped_ptr<QuicEncryptedPacket> ConstructConnectionClosePacket(
+      QuicPacketNumber num) {
+    return maker_.MakeConnectionClosePacket(num);
   }
 
   scoped_ptr<QuicEncryptedPacket> ConstructRstPacket() {
@@ -1344,6 +1393,62 @@ TEST_P(QuicStreamFactoryTest, OnIPAddressChanged) {
   EXPECT_EQ(ERR_NETWORK_CHANGED,
             stream->ReadResponseHeaders(callback_.callback()));
   EXPECT_TRUE(factory_.require_confirmation());
+
+  // Now attempting to request a stream to the same origin should create
+  // a new session.
+
+  QuicStreamRequest request2(&factory_);
+  EXPECT_EQ(ERR_IO_PENDING,
+            request2.Request(host_port_pair_, is_https_, privacy_mode_,
+                             /*cert_verify_flags=*/0, host_port_pair_.host(),
+                             "GET", net_log_, callback_.callback()));
+
+  EXPECT_EQ(OK, callback_.WaitForResult());
+  stream = request2.ReleaseStream();
+  stream.reset();  // Will reset stream 3.
+
+  EXPECT_TRUE(socket_data.AllReadDataConsumed());
+  EXPECT_TRUE(socket_data.AllWriteDataConsumed());
+  EXPECT_TRUE(socket_data2.AllReadDataConsumed());
+  EXPECT_TRUE(socket_data2.AllWriteDataConsumed());
+}
+
+TEST_P(QuicStreamFactoryTest, OnSSLConfigChanged) {
+  MockRead reads[] = {
+      MockRead(ASYNC, 0, 0)  // EOF
+  };
+  scoped_ptr<QuicEncryptedPacket> rst(ConstructRstPacket());
+  std::vector<MockWrite> writes;
+  writes.push_back(MockWrite(ASYNC, rst->data(), rst->length(), 1));
+  DeterministicSocketData socket_data(reads, arraysize(reads),
+                                      writes.empty() ? nullptr : &writes[0],
+                                      writes.size());
+  socket_factory_.AddSocketDataProvider(&socket_data);
+  socket_data.StopAfter(1);
+
+  MockRead reads2[] = {
+      MockRead(ASYNC, 0, 0)  // EOF
+  };
+  DeterministicSocketData socket_data2(reads2, arraysize(reads2), nullptr, 0);
+  socket_factory_.AddSocketDataProvider(&socket_data2);
+  socket_data2.StopAfter(1);
+
+  QuicStreamRequest request(&factory_);
+  EXPECT_EQ(ERR_IO_PENDING,
+            request.Request(host_port_pair_, is_https_, privacy_mode_,
+                            /*cert_verify_flags=*/0, host_port_pair_.host(),
+                            "GET", net_log_, callback_.callback()));
+
+  EXPECT_EQ(OK, callback_.WaitForResult());
+  scoped_ptr<QuicHttpStream> stream = request.ReleaseStream();
+  HttpRequestInfo request_info;
+  EXPECT_EQ(OK, stream->InitializeStream(&request_info, DEFAULT_PRIORITY,
+                                         net_log_, CompletionCallback()));
+
+  factory_.OnSSLConfigChanged();
+  EXPECT_EQ(ERR_CERT_DATABASE_CHANGED,
+            stream->ReadResponseHeaders(callback_.callback()));
+  EXPECT_FALSE(factory_.require_confirmation());
 
   // Now attempting to request a stream to the same origin should create
   // a new session.
@@ -2481,6 +2586,189 @@ TEST_P(QuicStreamFactoryTest, TimeoutsWithOpenStreamsTwoOfFour) {
   EXPECT_TRUE(socket_data3.AllWriteDataConsumed());
   EXPECT_TRUE(socket_data4.AllReadDataConsumed());
   EXPECT_TRUE(socket_data4.AllWriteDataConsumed());
+}
+
+TEST_P(QuicStreamFactoryTest, EnableDelayTcpRace) {
+  bool delay_tcp_race = QuicStreamFactoryPeer::GetDelayTcpRace(&factory_);
+  QuicStreamFactoryPeer::SetDelayTcpRace(&factory_, false);
+  MockRead reads[] = {
+      MockRead(ASYNC, OK, 0),
+  };
+  DeterministicSocketData socket_data(reads, arraysize(reads), nullptr, 0);
+  socket_factory_.AddSocketDataProvider(&socket_data);
+  socket_data.StopAfter(1);
+
+  // Set up data in HttpServerProperties.
+  scoped_ptr<HttpServerProperties> http_server_properties(
+      new HttpServerPropertiesImpl());
+  QuicStreamFactoryPeer::SetHttpServerProperties(
+      &factory_, http_server_properties->GetWeakPtr());
+
+  const AlternativeService alternative_service1(QUIC, host_port_pair_.host(),
+                                                host_port_pair_.port());
+  AlternativeServiceInfoVector alternative_service_info_vector;
+  base::Time expiration = base::Time::Now() + base::TimeDelta::FromDays(1);
+  alternative_service_info_vector.push_back(
+      AlternativeServiceInfo(alternative_service1, 1.0, expiration));
+
+  http_server_properties->SetAlternativeServices(
+      host_port_pair_, alternative_service_info_vector);
+
+  ServerNetworkStats stats1;
+  stats1.srtt = base::TimeDelta::FromMicroseconds(10);
+  http_server_properties->SetServerNetworkStats(host_port_pair_, stats1);
+
+  crypto_client_stream_factory_.set_handshake_mode(
+      MockCryptoClientStream::ZERO_RTT);
+  host_resolver_.set_synchronous_mode(true);
+  host_resolver_.rules()->AddIPLiteralRule(host_port_pair_.host(),
+                                           "192.168.0.1", "");
+
+  QuicStreamRequest request(&factory_);
+  EXPECT_EQ(ERR_IO_PENDING,
+            request.Request(host_port_pair_, is_https_, privacy_mode_,
+                            /*cert_verify_flags=*/0, host_port_pair_.host(),
+                            "POST", net_log_, callback_.callback()));
+
+  // If we don't delay TCP connection, then time delay should be 0.
+  EXPECT_FALSE(factory_.delay_tcp_race());
+  EXPECT_EQ(base::TimeDelta(), request.GetTimeDelayForWaitingJob());
+
+  // Enable |delay_tcp_race_| param and verify delay is one RTT and that
+  // server supports QUIC.
+  QuicStreamFactoryPeer::SetDelayTcpRace(&factory_, true);
+  EXPECT_TRUE(factory_.delay_tcp_race());
+  EXPECT_EQ(base::TimeDelta::FromMicroseconds(15),
+            request.GetTimeDelayForWaitingJob());
+
+  // Confirm the handshake and verify that the stream is created.
+  crypto_client_stream_factory_.last_stream()->SendOnCryptoHandshakeEvent(
+      QuicSession::HANDSHAKE_CONFIRMED);
+
+  EXPECT_EQ(OK, callback_.WaitForResult());
+
+  scoped_ptr<QuicHttpStream> stream = request.ReleaseStream();
+  EXPECT_TRUE(stream.get());
+  EXPECT_TRUE(socket_data.AllReadDataConsumed());
+  EXPECT_TRUE(socket_data.AllWriteDataConsumed());
+  QuicStreamFactoryPeer::SetDelayTcpRace(&factory_, delay_tcp_race);
+}
+
+TEST_P(QuicStreamFactoryTest, QuicSupportedServersAtStartup) {
+  factory_.set_quic_server_info_factory(&quic_server_info_factory_);
+  QuicStreamFactoryPeer::SetTaskRunner(&factory_, runner_.get());
+
+  // Set up data in HttpServerProperties.
+  scoped_ptr<HttpServerProperties> http_server_properties(
+      new HttpServerPropertiesImpl());
+  QuicStreamFactoryPeer::SetHttpServerProperties(
+      &factory_, http_server_properties->GetWeakPtr());
+
+  const AlternativeService alternative_service1(QUIC, host_port_pair_.host(),
+                                                host_port_pair_.port());
+  AlternativeServiceInfoVector alternative_service_info_vector;
+  base::Time expiration = base::Time::Now() + base::TimeDelta::FromDays(1);
+  alternative_service_info_vector.push_back(
+      AlternativeServiceInfo(alternative_service1, 1.0, expiration));
+
+  http_server_properties->SetAlternativeServices(
+      host_port_pair_, alternative_service_info_vector);
+
+  QuicStreamFactoryPeer::InitializeQuicSupportedServersAtStartup(&factory_);
+  EXPECT_TRUE(
+      QuicStreamFactoryPeer::GetQuicSupportedServersAtStartupInitialzied(
+          &factory_));
+  EXPECT_TRUE(
+      QuicStreamFactoryPeer::SupportsQuicAtStartUp(&factory_, host_port_pair_));
+}
+
+TEST_P(QuicStreamFactoryTest, YieldAfterPackets) {
+  QuicStreamFactoryPeer::SetYieldAfterPackets(&factory_, 0);
+
+  scoped_ptr<QuicEncryptedPacket> close_packet(
+      ConstructConnectionClosePacket(0));
+  std::vector<MockRead> reads;
+  reads.push_back(
+      MockRead(SYNCHRONOUS, close_packet->data(), close_packet->length(), 0));
+  reads.push_back(MockRead(ASYNC, OK, 1));
+  DeterministicSocketData socket_data(&reads[0], reads.size(), nullptr, 0);
+  socket_factory_.AddSocketDataProvider(&socket_data);
+  socket_data.StopAfter(1);
+
+  crypto_client_stream_factory_.set_handshake_mode(
+      MockCryptoClientStream::ZERO_RTT);
+  host_resolver_.set_synchronous_mode(true);
+  host_resolver_.rules()->AddIPLiteralRule(host_port_pair_.host(),
+                                           "192.168.0.1", "");
+
+  // Set up the TaskObserver to verify QuicPacketReader::StartReading posts a
+  // task.
+  // TODO(rtenneti): Change SpdySessionTestTaskObserver to NetTestTaskObserver??
+  SpdySessionTestTaskObserver observer("quic_packet_reader.cc", "StartReading");
+
+  QuicStreamRequest request(&factory_);
+  EXPECT_EQ(OK, request.Request(host_port_pair_, is_https_, privacy_mode_,
+                                /*cert_verify_flags=*/0, host_port_pair_.host(),
+                                "GET", net_log_, callback_.callback()));
+
+  // Call run_loop so that QuicPacketReader::OnReadComplete() gets called.
+  base::RunLoop run_loop;
+  run_loop.RunUntilIdle();
+
+  // Verify task that the observer's executed_count is 1, which indicates
+  // QuicPacketReader::StartReading() has posted only one task and yielded the
+  // read.
+  EXPECT_EQ(1u, observer.executed_count());
+
+  scoped_ptr<QuicHttpStream> stream = request.ReleaseStream();
+  EXPECT_TRUE(stream.get());
+  EXPECT_TRUE(socket_data.AllReadDataConsumed());
+  EXPECT_TRUE(socket_data.AllWriteDataConsumed());
+}
+
+TEST_P(QuicStreamFactoryTest, YieldAfterDuration) {
+  QuicStreamFactoryPeer::SetYieldAfterDuration(
+      &factory_, QuicTime::Delta::FromMilliseconds(-1));
+
+  scoped_ptr<QuicEncryptedPacket> close_packet(
+      ConstructConnectionClosePacket(0));
+  std::vector<MockRead> reads;
+  reads.push_back(
+      MockRead(SYNCHRONOUS, close_packet->data(), close_packet->length(), 0));
+  reads.push_back(MockRead(ASYNC, OK, 1));
+  DeterministicSocketData socket_data(&reads[0], reads.size(), nullptr, 0);
+  socket_factory_.AddSocketDataProvider(&socket_data);
+  socket_data.StopAfter(1);
+
+  crypto_client_stream_factory_.set_handshake_mode(
+      MockCryptoClientStream::ZERO_RTT);
+  host_resolver_.set_synchronous_mode(true);
+  host_resolver_.rules()->AddIPLiteralRule(host_port_pair_.host(),
+                                           "192.168.0.1", "");
+
+  // Set up the TaskObserver to verify QuicPacketReader::StartReading posts a
+  // task.
+  // TODO(rtenneti): Change SpdySessionTestTaskObserver to NetTestTaskObserver??
+  SpdySessionTestTaskObserver observer("quic_packet_reader.cc", "StartReading");
+
+  QuicStreamRequest request(&factory_);
+  EXPECT_EQ(OK, request.Request(host_port_pair_, is_https_, privacy_mode_,
+                                /*cert_verify_flags=*/0, host_port_pair_.host(),
+                                "GET", net_log_, callback_.callback()));
+
+  // Call run_loop so that QuicPacketReader::OnReadComplete() gets called.
+  base::RunLoop run_loop;
+  run_loop.RunUntilIdle();
+
+  // Verify task that the observer's executed_count is 1, which indicates
+  // QuicPacketReader::StartReading() has posted only one task and yielded the
+  // read.
+  EXPECT_EQ(1u, observer.executed_count());
+
+  scoped_ptr<QuicHttpStream> stream = request.ReleaseStream();
+  EXPECT_TRUE(stream.get());
+  EXPECT_TRUE(socket_data.AllReadDataConsumed());
+  EXPECT_TRUE(socket_data.AllWriteDataConsumed());
 }
 
 }  // namespace test

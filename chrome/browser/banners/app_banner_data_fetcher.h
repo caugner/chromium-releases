@@ -57,7 +57,8 @@ class AppBannerDataFetcher
 
   AppBannerDataFetcher(content::WebContents* web_contents,
                        base::WeakPtr<Delegate> weak_delegate,
-                       int ideal_icon_size);
+                       int ideal_icon_size_in_dp,
+                       int minimum_icon_size_in_dp);
 
   // Begins creating a banner for the URL being displayed by the Delegate's
   // WebContents.
@@ -119,10 +120,6 @@ class AppBannerDataFetcher
   void OnRequestShowAppBanner(content::RenderFrameHost* render_frame_host,
                               int request_id);
 
-  // Called when it is determined that the webapp has fulfilled the initial
-  // criteria of having a manifest and a service worker.
-  void OnHasServiceWorker(content::WebContents* web_contents);
-
   content::WebContents* GetWebContents();
   virtual std::string GetAppIdentifier();
   const content::Manifest& web_app_data() { return web_app_data_; }
@@ -142,6 +139,10 @@ class AppBannerDataFetcher
   void OnDidGetManifest(const content::Manifest& manifest);
   void OnDidCheckHasServiceWorker(bool has_service_worker);
   void OnAppIconFetched(const SkBitmap& bitmap);
+
+  // Called when it is determined that the webapp has fulfilled the initial
+  // criteria of having a manifest and a service worker.
+  void OnHasServiceWorker(content::WebContents* web_contents);
 
   // Returns whether the given web app has already been installed.
   // Implemented on desktop platforms only.
@@ -169,8 +170,9 @@ class AppBannerDataFetcher
   static bool IsManifestValidForWebApp(const content::Manifest& manifest,
                                        content::WebContents* web_contents);
 
-  const int ideal_icon_size_;
   const base::WeakPtr<Delegate> weak_delegate_;
+  const int ideal_icon_size_in_dp_;
+  const int minimum_icon_size_in_dp_;
   base::ObserverList<Observer> observer_list_;
   bool is_active_;
   bool was_canceled_by_page_;

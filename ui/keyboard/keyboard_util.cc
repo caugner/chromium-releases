@@ -14,6 +14,8 @@
 #include "base/strings/string16.h"
 #include "grit/keyboard_resources.h"
 #include "grit/keyboard_resources_map.h"
+#include "media/audio/audio_manager.h"
+#include "ui/aura/client/aura_constants.h"
 #include "ui/aura/window_tree_host.h"
 #include "ui/base/ime/input_method.h"
 #include "ui/base/ime/text_input_client.h"
@@ -36,7 +38,7 @@ const char kKeyUp[] = "keyup";
 void SendProcessKeyEvent(ui::EventType type,
                          aura::WindowTreeHost* host) {
   ui::KeyEvent event(type, ui::VKEY_PROCESSKEY, ui::DomCode::NONE,
-                     ui::EF_IS_SYNTHESIZED, ui::DomKey::PROCESS, 0,
+                     ui::EF_IS_SYNTHESIZED, ui::DomKey::PROCESS,
                      ui::EventTimeForNow());
   ui::EventDispatchDetails details =
       host->event_processor()->OnEventFromSource(&event);
@@ -192,17 +194,15 @@ bool IsFloatingVirtualKeyboardEnabled() {
 }
 
 bool IsGestureTypingEnabled() {
-  std::string keyboard_switch =
-      base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
-          switches::kGestureTyping);
-  return keyboard_switch == switches::kGestureTypingEnabled;
+  return base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+      switches::kGestureTyping) != switches::kGestureTypingDisabled;
 }
 
 bool IsGestureEditingEnabled() {
   std::string keyboard_switch =
       base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
           switches::kGestureEditing);
-  return keyboard_switch == switches::kGestureEditingEnabled;
+  return keyboard_switch != switches::kGestureEditingDisabled;
 }
 
 bool IsSmartDeployEnabled() {
@@ -213,7 +213,8 @@ bool IsSmartDeployEnabled() {
 }
 
 bool IsVoiceInputEnabled() {
-  return !base::CommandLine::ForCurrentProcess()->HasSwitch(
+  return media::AudioManager::Get()->HasAudioInputDevices() &&
+      !base::CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kDisableVoiceInput);
 }
 
@@ -260,17 +261,16 @@ bool MoveCursor(int swipe_direction,
   if (domcodex != ui::DomCode::NONE) {
     ui::KeyboardCode codex = ui::VKEY_UNKNOWN;
     ui::DomKey domkeyx = ui::DomKey::NONE;
-    base::char16 cx;
-    ignore_result(DomCodeToUsLayoutMeaning(domcodex, ui::EF_NONE, &domkeyx,
-                                           &cx, &codex));
+    ignore_result(DomCodeToUsLayoutDomKey(domcodex, ui::EF_NONE, &domkeyx,
+                                          &codex));
     ui::KeyEvent press_event(ui::ET_KEY_PRESSED, codex, domcodex,
-                             modifier_flags, domkeyx, cx,
+                             modifier_flags, domkeyx,
                              ui::EventTimeForNow());
     ui::EventDispatchDetails details =
         host->event_processor()->OnEventFromSource(&press_event);
     CHECK(!details.dispatcher_destroyed);
     ui::KeyEvent release_event(ui::ET_KEY_RELEASED, codex, domcodex,
-                               modifier_flags, domkeyx, cx,
+                               modifier_flags, domkeyx,
                                ui::EventTimeForNow());
     details = host->event_processor()->OnEventFromSource(&release_event);
     CHECK(!details.dispatcher_destroyed);
@@ -280,17 +280,16 @@ bool MoveCursor(int swipe_direction,
   if (domcodey != ui::DomCode::NONE) {
     ui::KeyboardCode codey = ui::VKEY_UNKNOWN;
     ui::DomKey domkeyy = ui::DomKey::NONE;
-    base::char16 cy;
-    ignore_result(DomCodeToUsLayoutMeaning(domcodey, ui::EF_NONE, &domkeyy,
-                                           &cy, &codey));
+    ignore_result(DomCodeToUsLayoutDomKey(domcodey, ui::EF_NONE, &domkeyy,
+                                          &codey));
     ui::KeyEvent press_event(ui::ET_KEY_PRESSED, codey, domcodey,
-                             modifier_flags, domkeyy, cy,
+                             modifier_flags, domkeyy,
                              ui::EventTimeForNow());
     ui::EventDispatchDetails details =
         host->event_processor()->OnEventFromSource(&press_event);
     CHECK(!details.dispatcher_destroyed);
     ui::KeyEvent release_event(ui::ET_KEY_RELEASED, codey, domcodey,
-                               modifier_flags, domkeyy, cy,
+                               modifier_flags, domkeyy,
                                ui::EventTimeForNow());
     details = host->event_processor()->OnEventFromSource(&release_event);
     CHECK(!details.dispatcher_destroyed);

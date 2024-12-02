@@ -113,7 +113,7 @@ class FlashDOMHandler : public WebUIMessageHandler,
   void OnTimeout();
 
   // A timer to keep track of when the data fetching times out.
-  base::OneShotTimer<FlashDOMHandler> timeout_;
+  base::OneShotTimer timeout_;
 
   // Crash list.
   scoped_refptr<CrashUploadList> upload_list_;
@@ -294,7 +294,7 @@ void FlashDOMHandler::MaybeRespondToPage() {
   // Crash information.
   AddPair(list, base::string16(), "--- Crash data ---");
   bool crash_reporting_enabled =
-      ChromeMetricsServiceAccessor::IsCrashReportingEnabled();
+      ChromeMetricsServiceAccessor::IsMetricsAndCrashReportingEnabled();
   if (crash_reporting_enabled) {
     std::vector<CrashUploadList::UploadInfo> crashes;
     upload_list_->GetUploads(10, &crashes);

@@ -870,6 +870,13 @@ size_t DisplayManager::GetNumDisplays() const {
   return active_display_list_.size();
 }
 
+bool DisplayManager::IsActiveDisplayId(int64 display_id) const {
+  return std::find_if(active_display_list_.begin(), active_display_list_.end(),
+                      [display_id](const gfx::Display& display) {
+                        return display.id() == display_id;
+                      }) != active_display_list_.end();
+}
+
 bool DisplayManager::IsInMirrorMode() const {
   return mirroring_display_id_ != gfx::Display::kInvalidDisplayID;
 }
@@ -1292,8 +1299,8 @@ gfx::Display DisplayManager::CreateMirroringDisplayFromDisplayInfoById(
 
   gfx::Display new_display(display_info.id());
   new_display.SetScaleAndBounds(
-      1.0f, gfx::Rect(origin, gfx::ToFlooredSize(gfx::ScaleSize(
-                                  display_info.size_in_pixel(), scale))));
+      1.0f, gfx::Rect(origin, gfx::ScaleToFlooredSize(
+                                  display_info.size_in_pixel(), scale)));
   new_display.set_touch_support(display_info.touch_support());
   return new_display;
 }

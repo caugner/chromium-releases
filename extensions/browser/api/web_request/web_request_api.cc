@@ -8,6 +8,7 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/debug/alias.h"
 #include "base/json/json_writer.h"
 #include "base/lazy_instance.h"
 #include "base/macros.h"
@@ -178,9 +179,9 @@ bool IsRequestFromExtension(const net::URLRequest* request,
 void ExtractRequestRoutingInfo(const net::URLRequest* request,
                                int* render_process_host_id,
                                int* routing_id) {
-  if (!request->GetUserData(NULL))
-    return;
   const ResourceRequestInfo* info = ResourceRequestInfo::ForRequest(request);
+  if (!info)
+    return;
   *render_process_host_id = info->GetChildID();
   *routing_id = info->GetRouteID();
 }
@@ -206,10 +207,10 @@ void ExtractRequestInfoDetails(const net::URLRequest* request,
                                int* render_process_host_id,
                                int* routing_id,
                                ResourceType* resource_type) {
-  if (!request->GetUserData(NULL))
+  const ResourceRequestInfo* info = ResourceRequestInfo::ForRequest(request);
+  if (!info)
     return;
 
-  const ResourceRequestInfo* info = ResourceRequestInfo::ForRequest(request);
   *frame_id = info->GetRenderFrameID();
   *is_main_frame = info->IsMainFrame();
   *parent_frame_id = info->GetParentRenderFrameID();
@@ -712,7 +713,7 @@ ExtensionWebRequestEventRouter::RequestFilter::~RequestFilter() {
 
 // static
 ExtensionWebRequestEventRouter* ExtensionWebRequestEventRouter::GetInstance() {
-  return Singleton<ExtensionWebRequestEventRouter>::get();
+  return base::Singleton<ExtensionWebRequestEventRouter>::get();
 }
 
 ExtensionWebRequestEventRouter::ExtensionWebRequestEventRouter()
@@ -1224,6 +1225,20 @@ void ExtensionWebRequestEventRouter::OnURLRequestDestroyed(
 
   request_time_tracker_->LogRequestEndTime(request->identifier(),
                                            base::Time::Now());
+}
+
+void ExtensionWebRequestEventRouter::OnURLRequestJobOrphaned(
+    void* browser_context,
+    const net::URLRequest* request) {
+  // See https://crbug.com/289715. While a URLRequest is blocking on an
+  // extension, it may not orphan jobs unless OnURLRequestDestroyed is called
+  // first.
+  //
+  // TODO(davidben): Remove this when the crash has been diagnosed.
+  char url_buf[128];
+  base::strlcpy(url_buf, request->url().spec().c_str(), arraysize(url_buf));
+  base::debug::Alias(url_buf);
+  CHECK_EQ(0u, blocked_requests_.count(request->identifier()));
 }
 
 void ExtensionWebRequestEventRouter::ClearPendingCallbacks(

@@ -7,51 +7,36 @@
 
 #include <string>
 
-#include "chrome/browser/permissions/permission_request_id.h"
-#include "components/infobars/core/confirm_infobar_delegate.h"
-#include "url/gurl.h"
+#include "chrome/browser/permissions/permission_infobar_delegate.h"
 
-class PermissionQueueController;
 class InfoBarService;
 
-// TODO(toyoshim): Much more code can be shared with GeolocationInfoBarDelegate.
-// http://crbug.com/266743
-
-class ProtectedMediaIdentifierInfoBarDelegate : public ConfirmInfoBarDelegate {
+class ProtectedMediaIdentifierInfoBarDelegate
+    : public PermissionInfobarDelegate {
  public:
   // Creates a protected media identifier infobar and delegate and adds the
   // infobar to |infobar_service|.  Returns the infobar if it was successfully
   // added.
-  static infobars::InfoBar* Create(InfoBarService* infobar_service,
-                                   PermissionQueueController* controller,
-                                   const PermissionRequestID& id,
-                                   const GURL& requesting_frame,
-                                   const std::string& display_languages);
+  static infobars::InfoBar* Create(
+    InfoBarService* infobar_service,
+    const GURL& requesting_frame,
+    const std::string& display_languages,
+    const PermissionSetCallback& callback);
 
  protected:
-  ProtectedMediaIdentifierInfoBarDelegate(PermissionQueueController* controller,
-                                          const PermissionRequestID& id,
-                                          const GURL& requesting_frame,
-                                          const std::string& display_languages);
+  ProtectedMediaIdentifierInfoBarDelegate(
+      const GURL& requesting_frame,
+      const std::string& display_languages,
+      const PermissionSetCallback& callback);
   ~ProtectedMediaIdentifierInfoBarDelegate() override;
-
-  // Calls back to the controller to inform it of the user's decision.
-  void SetPermission(bool update_content_setting, bool allowed);
 
  private:
   // ConfirmInfoBarDelegate:
-  Type GetInfoBarType() const override;
-  int GetIconID() const override;
-  void InfoBarDismissed() override;
+  int GetIconId() const override;
   base::string16 GetMessageText() const override;
-  base::string16 GetButtonLabel(InfoBarButton button) const override;
-  bool Accept() override;
-  bool Cancel() override;
   base::string16 GetLinkText() const override;
-  bool LinkClicked(WindowOpenDisposition disposition) override;
+  GURL GetLinkURL() const override;
 
-  PermissionQueueController* controller_;
-  const PermissionRequestID id_;
   GURL requesting_frame_;
   std::string display_languages_;
 

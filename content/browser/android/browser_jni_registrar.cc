@@ -9,6 +9,7 @@
 #include "content/browser/accessibility/browser_accessibility_android.h"
 #include "content/browser/accessibility/browser_accessibility_manager_android.h"
 #include "content/browser/android/background_sync_launcher_android.h"
+#include "content/browser/android/background_sync_network_observer_android.h"
 #include "content/browser/android/browser_startup_controller.h"
 #include "content/browser/android/child_process_launcher_android.h"
 #include "content/browser/android/composited_touch_handle_drawable.h"
@@ -40,6 +41,7 @@
 #include "content/browser/screen_orientation/screen_orientation_delegate_android.h"
 #include "content/browser/speech/speech_recognizer_impl_android.h"
 #include "content/browser/time_zone_monitor_android.h"
+#include "content/browser/vr/android/cardboard/cardboard_vr_device.h"
 #include "content/browser/web_contents/web_contents_android.h"
 #include "mojo/android/system/core_impl.h"
 
@@ -49,9 +51,16 @@ base::android::RegistrationMethod kContentRegisteredMethods[] = {
      content::AndroidLocationApiAdapter::RegisterGeolocationService},
     {"BackgroundSyncLauncherAndroid",
      content::BackgroundSyncLauncherAndroid::RegisterLauncher},
+    {"BackgroundSyncNetworkObserverAndroid",
+     content::BackgroundSyncNetworkObserverAndroid::Observer::
+         RegisterNetworkObserver},
     {"BrowserAccessibilityManager",
      content::RegisterBrowserAccessibilityManager},
     {"BrowserStartupController", content::RegisterBrowserStartupController},
+#if defined(ENABLE_WEBVR)
+    {"CardboardVRDevice",
+     content::CardboardVRDevice::RegisterCardboardVRDevice},
+#endif
     {"ChildProcessLauncher", content::RegisterChildProcessLauncher},
     {"ContentReadbackHandler",
      content::ContentReadbackHandler::RegisterContentReadbackHandler},

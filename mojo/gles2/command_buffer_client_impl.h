@@ -6,13 +6,15 @@
 #define MOJO_GLES2_COMMAND_BUFFER_CLIENT_IMPL_H_
 
 #include <map>
+#include <vector>
 
 #include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
-#include "components/view_manager/public/interfaces/command_buffer.mojom.h"
+#include "components/mus/public/interfaces/command_buffer.mojom.h"
 #include "gpu/command_buffer/client/gpu_control.h"
 #include "gpu/command_buffer/common/command_buffer.h"
 #include "gpu/command_buffer/common/command_buffer_shared.h"
+#include "third_party/mojo/src/mojo/public/cpp/bindings/binding.h"
 
 namespace base {
 class RunLoop;
@@ -33,6 +35,7 @@ class CommandBufferClientImpl : public mojo::CommandBufferLostContextObserver,
  public:
   explicit CommandBufferClientImpl(
       CommandBufferDelegate* delegate,
+      const std::vector<int32_t>& attribs,
       const MojoAsyncWaiter* async_waiter,
       mojo::ScopedMessagePipeHandle command_buffer_handle);
   ~CommandBufferClientImpl() override;
@@ -71,6 +74,8 @@ class CommandBufferClientImpl : public mojo::CommandBufferLostContextObserver,
   uint32 CreateStreamTexture(uint32 texture_id) override;
   void SetLock(base::Lock*) override;
   bool IsGpuChannelLost() override;
+  gpu::CommandBufferNamespace GetNamespaceID() const override;
+  uint64_t GetCommandBufferID() const override;
 
  private:
   class SyncClientImpl;
@@ -85,6 +90,7 @@ class CommandBufferClientImpl : public mojo::CommandBufferLostContextObserver,
   gpu::CommandBufferSharedState* shared_state() const { return shared_state_; }
 
   CommandBufferDelegate* delegate_;
+  std::vector<int32_t> attribs_;
   mojo::Binding<mojo::CommandBufferLostContextObserver> observer_binding_;
   mojo::CommandBufferPtr command_buffer_;
   scoped_ptr<SyncClientImpl> sync_client_impl_;

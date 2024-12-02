@@ -8,9 +8,9 @@
 
 #include "android_webview/browser/aw_browser_context.h"
 #include "android_webview/browser/aw_content_browser_client.h"
-#include "android_webview/browser/aw_request_interceptor.h"
 #include "android_webview/browser/net/aw_http_user_agent_settings.h"
 #include "android_webview/browser/net/aw_network_delegate.h"
+#include "android_webview/browser/net/aw_request_interceptor.h"
 #include "android_webview/browser/net/aw_url_request_job_factory.h"
 #include "android_webview/browser/net/init_native_callback.h"
 #include "android_webview/common/aw_content_client.h"
@@ -64,7 +64,7 @@ void ApplyCmdlineOverridesToURLRequestContextBuilder(
             net::HostResolver::CreateDefaultResolver(NULL)));
     host_resolver->SetRulesFromString(
         command_line.GetSwitchValueASCII(switches::kHostResolverRules));
-    builder->set_host_resolver(host_resolver.release());
+    builder->set_host_resolver(host_resolver.Pass());
   }
 }
 
@@ -116,29 +116,31 @@ scoped_ptr<net::URLRequestJobFactory> CreateJobFactory(
   // AwContentBrowserClient::IsHandledURL.
   bool set_protocol = aw_job_factory->SetProtocolHandler(
       url::kFileScheme,
-      new net::FileProtocolHandler(
-          content::BrowserThread::GetBlockingPool()->
-              GetTaskRunnerWithShutdownBehavior(
-                  base::SequencedWorkerPool::SKIP_ON_SHUTDOWN)));
+      make_scoped_ptr(new net::FileProtocolHandler(
+          content::BrowserThread::GetBlockingPool()
+              ->GetTaskRunnerWithShutdownBehavior(
+                  base::SequencedWorkerPool::SKIP_ON_SHUTDOWN))));
   DCHECK(set_protocol);
   set_protocol = aw_job_factory->SetProtocolHandler(
-      url::kDataScheme, new net::DataProtocolHandler());
+      url::kDataScheme, make_scoped_ptr(new net::DataProtocolHandler()));
   DCHECK(set_protocol);
   set_protocol = aw_job_factory->SetProtocolHandler(
       url::kBlobScheme,
-      (*protocol_handlers)[url::kBlobScheme].release());
+      make_scoped_ptr((*protocol_handlers)[url::kBlobScheme].release()));
   DCHECK(set_protocol);
   set_protocol = aw_job_factory->SetProtocolHandler(
       url::kFileSystemScheme,
-      (*protocol_handlers)[url::kFileSystemScheme].release());
+      make_scoped_ptr((*protocol_handlers)[url::kFileSystemScheme].release()));
   DCHECK(set_protocol);
   set_protocol = aw_job_factory->SetProtocolHandler(
       content::kChromeUIScheme,
-      (*protocol_handlers)[content::kChromeUIScheme].release());
+      make_scoped_ptr(
+          (*protocol_handlers)[content::kChromeUIScheme].release()));
   DCHECK(set_protocol);
   set_protocol = aw_job_factory->SetProtocolHandler(
       content::kChromeDevToolsScheme,
-      (*protocol_handlers)[content::kChromeDevToolsScheme].release());
+      make_scoped_ptr(
+          (*protocol_handlers)[content::kChromeDevToolsScheme].release()));
   DCHECK(set_protocol);
   protocol_handlers->clear();
 
@@ -203,9 +205,11 @@ void AwURLRequestContextGetter::InitializeURLRequestContext() {
   DCHECK(browser_context);
 
   builder.set_network_delegate(
-      browser_context->GetDataReductionProxyIOData()->CreateNetworkDelegate(
-          aw_network_delegate.Pass(),
-          false /* No UMA is produced to track bypasses. */ ).release());
+      browser_context->GetDataReductionProxyIOData()
+          ->CreateNetworkDelegate(
+              aw_network_delegate.Pass(),
+              false /* No UMA is produced to track bypasses. */)
+          .Pass());
 #if !defined(DISABLE_FTP_SUPPORT)
   builder.set_ftp_enabled(false);  // Android WebView does not support ftp yet.
 #endif
@@ -213,15 +217,13 @@ void AwURLRequestContextGetter::InitializeURLRequestContext() {
   // Android provides a local HTTP proxy that handles all the proxying.
   // Create the proxy without a resolver since we rely on this local HTTP proxy.
   // TODO(sgurun) is this behavior guaranteed through SDK?
-  builder.set_proxy_service(
-      net::ProxyService::CreateWithoutProxyResolver(
-          proxy_config_service_.release(),
-          net_log_.get()));
+  builder.set_proxy_service(net::ProxyService::CreateWithoutProxyResolver(
+      proxy_config_service_.Pass(), net_log_.get()));
   builder.set_net_log(net_log_.get());
   builder.SetCookieAndChannelIdStores(cookie_store_, NULL);
   ApplyCmdlineOverridesToURLRequestContextBuilder(&builder);
 
-  url_request_context_.reset(builder.Build());
+  url_request_context_ = builder.Build().Pass();
   // TODO(mnaganov): Fix URLRequestContextBuilder to use proper threads.
   net::HttpNetworkSession::Params network_session_params;
 

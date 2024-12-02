@@ -9,7 +9,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "ui/gfx/paint_vector_icon.h"
-#include "ui/gfx/vector_icons_public2.h"
+#include "ui/gfx/vector_icons_public.h"
 #include "ui/views/border.h"
 #include "ui/views/controls/button/blue_button.h"
 #include "ui/views/controls/button/button.h"
@@ -37,7 +37,9 @@ class VectorIconGallery : public View,
         file_chooser_(new Textfield()),
         file_go_button_(new BlueButton(this, base::ASCIIToUTF16("Render"))),
         vector_id_(0),
-        size_(32),
+        // 36dp is one of the natural sizes for MD icons, and corresponds
+        // roughly to a 32dp usable area.
+        size_(36),
         color_(SK_ColorRED) {
     AddChildView(size_input_);
     AddChildView(color_input_);
@@ -80,8 +82,9 @@ class VectorIconGallery : public View,
   // View implementation.
   bool OnMousePressed(const ui::MouseEvent& event) override {
     if (GetEventHandlerForPoint(event.location()) == image_view_container_) {
-      vector_id_ = ((vector_id_ + 1) %
-                    static_cast<int>(gfx::VectorIconId::VECTOR_ICON_NONE));
+      int increment = event.IsOnlyRightMouseButton() ? -1 : 1;
+      int icon_count = static_cast<int>(gfx::VectorIconId::VECTOR_ICON_NONE);
+      vector_id_ = (icon_count + vector_id_ + increment) % icon_count;
       UpdateImage();
       return true;
     }

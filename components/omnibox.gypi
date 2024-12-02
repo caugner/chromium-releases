@@ -19,11 +19,12 @@
         '../ui/gfx/gfx.gyp:gfx',
         '../url/url.gyp:url_lib',
         'bookmarks_browser',
-        'crash_keys',  # TODO(mpearson): remove once 464926 is fixed.
+        'crash_core_common',  # TODO(mpearson): remove once 464926 is fixed.
         'metrics',
         'component_metrics_proto',
         'components_resources.gyp:components_resources',
         'components_strings.gyp:components_strings',
+        'data_use_measurement_core',
         'history_core_browser',
         'keyed_service_core',
         'omnibox_common',

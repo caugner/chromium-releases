@@ -78,6 +78,9 @@ class IncidentReportingService : public content::NotificationObserver {
   // dropped at destruction.
   ~IncidentReportingService() override;
 
+  // Returns true if incident reporting is enabled for the given profile.
+  static bool IsEnabledForProfile(Profile* profile);
+
   // Returns an object by which external components can add an incident to the
   // service. The object may outlive the service, but will no longer have any
   // effect after the service is deleted.
@@ -164,6 +167,13 @@ class IncidentReportingService : public content::NotificationObserver {
   // Adds |incident_data| relating to the optional |profile| to the service.
   void AddIncident(Profile* profile, scoped_ptr<Incident> incident);
 
+  // Clears all data associated with the |incident| relating to the optional
+  // |profile|.
+  void ClearIncident(Profile* profile, scoped_ptr<Incident> incident);
+
+  // Returns true if there are incidents waiting to be sent.
+  bool HasIncidentsToUpload() const;
+
   // Begins processing a report. If processing is already underway, ensures that
   // collection tasks have completed or are running.
   void BeginReportProcessing();
@@ -219,10 +229,12 @@ class IncidentReportingService : public content::NotificationObserver {
   void OnLastDownloadFound(
       scoped_ptr<ClientIncidentReport_DownloadDetails> last_download);
 
-  // Uploads an incident report if all data collection is complete. Incidents
-  // originating from profiles that do not participate in safe browsing are
-  // dropped.
-  void UploadIfCollectionComplete();
+  // Processes all received incidents once all data collection is
+  // complete. Incidents originating from profiles that do not participate in
+  // safe browsing are dropped, incidents that have already been reported are
+  // pruned, and prune state is cleared for incidents that are now clear. Report
+  // upload is started if any incidents remain.
+  void ProcessIncidentsIfCollectionComplete();
 
   // Cancels all uploads, discarding all reports and responses in progress.
   void CancelAllReportUploads();
@@ -285,7 +297,7 @@ class IncidentReportingService : public content::NotificationObserver {
 
   // A timer upon the firing of which the service will report received
   // incidents.
-  base::DelayTimer<IncidentReportingService> collation_timer_;
+  base::DelayTimer collation_timer_;
 
   // The report currently being assembled. This becomes non-NULL when an initial
   // incident is reported, and returns to NULL when the report is sent for
@@ -319,6 +331,10 @@ class IncidentReportingService : public content::NotificationObserver {
   // An object that asynchronously searches for the most recent binary download.
   // Non-NULL while such a search is outstanding.
   scoped_ptr<LastDownloadFinder> last_download_finder_;
+
+  // True if IncidentReportingService is enabled at the process level, by a
+  // field trial.
+  bool enabled_by_field_trial_;
 
   // A factory for handing out weak pointers for IncidentReceiver objects.
   base::WeakPtrFactory<IncidentReportingService> receiver_weak_ptr_factory_;

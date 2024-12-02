@@ -10,9 +10,11 @@
 #include <string>
 
 #include "base/android/jni_weak_ref.h"
+#include "base/android/scoped_java_ref.h"
 #include "base/callback.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/time/time.h"
+#include "components/signin/core/browser/account_tracker_service.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "google_apis/gaia/google_service_auth_error.h"
 #include "google_apis/gaia/oauth2_token_service_delegate.h"
@@ -35,16 +37,13 @@ class OAuth2TokenServiceDelegateAndroid : public OAuth2TokenServiceDelegate {
   static OAuth2TokenServiceDelegateAndroid* Create();
 
   // Returns a reference to the Java instance of this service.
-  static jobject GetForProfile(JNIEnv* env,
-                               jclass clazz,
-                               jobject j_profile_android);
+  static base::android::ScopedJavaLocalRef<jobject>
+  GetForProfile(JNIEnv* env, jclass clazz, jobject j_profile_android);
 
   // Called by the TestingProfile class to disable account validation in
   // tests.  This prevents the token service from trying to look up system
   // accounts which requires special permission.
   static void set_is_testing_profile() { is_testing_profile_ = true; }
-
-  void Initialize();
 
   // OAuth2TokenServiceDelegate overrides:
   bool RefreshTokenIsAvailable(const std::string& account_id) const override;
@@ -53,8 +52,8 @@ class OAuth2TokenServiceDelegateAndroid : public OAuth2TokenServiceDelegate {
                        const GoogleServiceAuthError& error) override;
   std::vector<std::string> GetAccounts() override;
 
-  // Lists account at the OS level.
-  std::vector<std::string> GetSystemAccounts();
+  // Lists account names at the OS level.
+  std::vector<std::string> GetSystemAccountNames();
 
   void ValidateAccounts(JNIEnv* env,
                         jobject obj,
@@ -87,9 +86,12 @@ class OAuth2TokenServiceDelegateAndroid : public OAuth2TokenServiceDelegate {
   // OA2TService aware accounts.
   void RevokeAllCredentials() override;
 
+  void LoadCredentials(const std::string& primary_account_id) override;
+
  protected:
   friend class ProfileOAuth2TokenServiceFactory;
-  OAuth2TokenServiceDelegateAndroid();
+  OAuth2TokenServiceDelegateAndroid(
+      AccountTrackerService* account_tracker_service);
   ~OAuth2TokenServiceDelegateAndroid() override;
 
   OAuth2AccessTokenFetcher* CreateAccessTokenFetcher(
@@ -112,10 +114,20 @@ class OAuth2TokenServiceDelegateAndroid : public OAuth2TokenServiceDelegate {
   void FireRefreshTokensLoaded() override;
 
  private:
+  std::string MapAccountIdToAccountName(const std::string& account_id) const;
+  std::string MapAccountNameToAccountId(const std::string& account_name) const;
+
   struct ErrorInfo {
     ErrorInfo();
     explicit ErrorInfo(const GoogleServiceAuthError& error);
     GoogleServiceAuthError error;
+  };
+
+  enum RefreshTokenLoadStatus {
+    RT_LOAD_NOT_START,
+    RT_WAIT_FOR_VALIDATION,
+    RT_HAS_BEEN_VALIDATED,
+    RT_LOADED
   };
 
   // Return whether |signed_in_account| is valid and we have access
@@ -133,6 +145,9 @@ class OAuth2TokenServiceDelegateAndroid : public OAuth2TokenServiceDelegate {
 
   // Maps account_id to the last error for that account.
   std::map<std::string, ErrorInfo> errors_;
+
+  AccountTrackerService* account_tracker_service_;
+  RefreshTokenLoadStatus fire_refresh_token_loaded_;
 
   static bool is_testing_profile_;
 

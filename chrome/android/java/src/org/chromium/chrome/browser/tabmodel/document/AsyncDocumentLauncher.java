@@ -9,7 +9,9 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
 
+import org.chromium.base.Log;
 import org.chromium.base.ThreadUtils;
+import org.chromium.chrome.browser.ChromeApplication;
 import org.chromium.chrome.browser.document.ChromeLauncherActivity;
 import org.chromium.chrome.browser.document.DocumentActivity;
 import org.chromium.chrome.browser.document.IncognitoDocumentActivity;
@@ -23,6 +25,8 @@ import java.util.ArrayList;
  * that our task exists before firing the next Intent.
  */
 public class AsyncDocumentLauncher {
+    private static final String TAG = "cr.document.AsyncLaunc";
+
     /**
      * Milliseconds to wait for Android to acknowledge that our Activity's task exists.
      * This value is empirically defined because Android doesn't let us know when it finishes
@@ -43,7 +47,8 @@ public class AsyncDocumentLauncher {
         private final int mParentId;
         private final AsyncTabCreationParams mAsyncParams;
         private int mLaunchedId;
-        private long mLaunchTimestamp;
+        private long mTimestampAtLaunch;
+        private int mTabCountAtLaunch;
 
         public LaunchRunnable(boolean incognito, int parentId, AsyncTabCreationParams asyncParams) {
             mIsIncognito = incognito;
@@ -54,24 +59,33 @@ public class AsyncDocumentLauncher {
 
         /** Starts an Activity to with the stored parameters. */
         public void launch() {
+            mTabCountAtLaunch = ChromeApplication.getDocumentTabModelSelector().getTotalTabCount();
+
             final Activity parentActivity = ActivityDelegate.getActivityForTabId(mParentId);
             mLaunchedId = ChromeLauncherActivity.launchDocumentInstance(
                     parentActivity, mIsIncognito, mAsyncParams);
-            mLaunchTimestamp = SystemClock.elapsedRealtime();
-            run();
+
+            if (mLaunchedId == Tab.INVALID_TAB_ID) {
+                Log.e(TAG, "Failed to launch document.");
+                finishLaunch();
+            } else {
+                mTimestampAtLaunch = SystemClock.elapsedRealtime();
+                run();
+            }
         }
 
         @Override
         public void run() {
             // Check if the Activity was already launched.
+            DocumentTabModelSelector selector = ChromeApplication.getDocumentTabModelSelector();
             for (Entry task : mActivityDelegate.getTasksFromRecents(mIsIncognito)) {
-                if (task.tabId == mLaunchedId) {
+                if (task.tabId == mLaunchedId && selector.getTotalTabCount() > mTabCountAtLaunch) {
                     finishLaunch();
                     return;
                 }
             }
 
-            if (SystemClock.elapsedRealtime() - mLaunchTimestamp > MAX_WAIT_MS) {
+            if (SystemClock.elapsedRealtime() - mTimestampAtLaunch > MAX_WAIT_MS) {
                 // Check if the launch is taking excessively long.  This will likely make the
                 // previous tab disappear, but it's better than making the user wait.
                 finishLaunch();

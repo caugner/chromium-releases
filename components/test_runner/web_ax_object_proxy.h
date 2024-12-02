@@ -89,6 +89,7 @@ class WebAXObjectProxy : public gin::Wrappable<WebAXObjectProxy> {
 
   bool IsEnabled();
   bool IsRequired();
+  bool IsEditable();
   bool IsRichlyEditable();
   bool IsFocused();
   bool IsFocusable();
@@ -138,6 +139,8 @@ class WebAXObjectProxy : public gin::Wrappable<WebAXObjectProxy> {
   std::string ColumnIndexRange();
   v8::Local<v8::Object> CellForColumnAndRow(int column, int row);
   void SetSelectedTextRange(int selection_start, int length);
+  void SetSelection(v8::Local<v8::Value> anchor_object, int anchor_offset,
+                    v8::Local<v8::Value> focus_object, int focus_offset);
   bool IsAttributeSettable(const std::string& attribute);
   bool IsPressActionSupported();
   bool IsIncrementActionSupported();
@@ -147,6 +150,7 @@ class WebAXObjectProxy : public gin::Wrappable<WebAXObjectProxy> {
   void Decrement();
   void ShowMenu();
   void Press();
+  bool SetValue(const std::string& value);
   bool IsEqual(v8::Local<v8::Object> proxy);
   void SetNotificationListener(v8::Local<v8::Function> callback);
   void UnsetNotificationListener();

@@ -11,6 +11,7 @@ import android.animation.ObjectAnimator;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.os.Handler;
+import android.text.TextUtils;
 import android.util.AttributeSet;
 import android.view.GestureDetector;
 import android.view.MotionEvent;
@@ -40,7 +41,7 @@ public class AccessibilityTabModelListItem extends FrameLayout implements OnClic
     private static final int CLOSE_ANIMATION_DURATION_MS = 100;
     private static final int DEFAULT_ANIMATION_DURATION_MS = 300;
     private static final int VELOCITY_SCALING_FACTOR = 150;
-    private static final int CLOSE_TIMEOUT_MS = 2000;
+    private static final int CLOSE_TIMEOUT_MS = 4000;
 
     private int mCloseAnimationDurationMs;
     private int mDefaultAnimationDurationMs;
@@ -261,8 +262,12 @@ public class AccessibilityTabModelListItem extends FrameLayout implements OnClic
     }
 
     private void updateTabTitle() {
-        String title = mTab != null ? mTab.getTitle() : null;
-        if (title == null || title.isEmpty()) {
+        String title = null;
+        if (mTab != null) {
+            title = mTab.getTitle();
+            if (TextUtils.isEmpty(title)) title = mTab.getUrl();
+        }
+        if (TextUtils.isEmpty(title)) {
             title = getContext().getResources().getString(R.string.tab_loading_default_title);
         }
 

@@ -44,9 +44,9 @@ config("sender_config") {
   include_dirs = [ "src" ]
 }
 
-# {micro,mini}dump_stackwalk and minidump_dump are tool-type executables that do
-# not build on iOS.
-if (current_toolchain == host_toolchain && !is_win) {
+# {micro,mini}dump_stackwalk and minidump_dump are tool-type executables
+# that do not build on Windows.
+if (!is_win && current_toolchain == host_toolchain) {
   # Contains the code shared by both {micro,mini}dump_stackwalk.
   static_library("stackwalk_common") {
     sources = [
@@ -138,6 +138,7 @@ if (current_toolchain == host_toolchain && !is_win) {
 
     deps = [
       ":stackwalk_common",
+      "//build/config/sanitizers:deps",
     ]
 
     defines = [ "BPLOG_MINIMUM_SEVERITY=SEVERITY_ERROR" ]
@@ -157,6 +158,7 @@ if (current_toolchain == host_toolchain && !is_win) {
 
     deps = [
       ":stackwalk_common",
+      "//build/config/sanitizers:deps",
     ]
 
     defines = [ "BPLOG_MINIMUM_SEVERITY=SEVERITY_ERROR" ]
@@ -198,6 +200,10 @@ if (current_toolchain == host_toolchain && !is_win) {
     # There are some warnings in this code.
     configs -= [ "//build/config/compiler:chromium_code" ]
     configs += [ "//build/config/compiler:no_chromium_code" ]
+
+    deps = [
+      "//build/config/sanitizers:deps",
+    ]
   }
 }
 
@@ -256,9 +262,13 @@ if (current_toolchain == host_toolchain && is_mac) {
       # not crash at -Os.  To play it safe, dump_syms is always built
       # at -O0 until this can be sorted out.
       # http://code.google.com/p/google-breakpad/issues/detail?id=329
-      configs -= [ "//build/config/compiler:optimize" ]
+      configs -= [ "//build/config/compiler:default_optimization" ]
       cflags += [ "-O0" ]
     }
+
+    deps = [
+      "//build/config/sanitizers:deps",
+    ]
   }
 
   executable("symupload") {
@@ -273,6 +283,10 @@ if (current_toolchain == host_toolchain && is_mac) {
 
     configs -= [ "//build/config/compiler:chromium_code" ]
     configs += [ "//build/config/compiler:no_chromium_code" ]
+
+    deps = [
+      "//build/config/sanitizers:deps",
+    ]
   }
 }
 
@@ -326,6 +340,7 @@ if (is_mac) {
 
     deps = [
       ":utilities",
+      "//build/config/sanitizers:deps",
     ]
   }
 
@@ -383,6 +398,10 @@ if (is_linux) {
     configs += [ ":tools_config" ]
 
     libs = [ "dl" ]
+
+    deps = [
+      "//build/config/sanitizers:deps",
+    ]
   }
 }
 
@@ -443,6 +462,10 @@ if (is_linux || is_android) {
       defines = [ "HAVE_A_OUT_H" ]
 
       include_dirs = [ "src" ]
+
+      deps = [
+        "//build/config/sanitizers:deps",
+      ]
     }
   }
 
@@ -628,6 +651,7 @@ if (is_linux) {
     ]
     deps = [
       ":processor_support",
+      "//build/config/sanitizers:deps",
     ]
 
     include_dirs = [ "src" ]
@@ -649,6 +673,7 @@ if (is_linux) {
 
     deps = [
       ":client",
+      "//build/config/sanitizers:deps",
     ]
 
     include_dirs = [ "src" ]
@@ -668,6 +693,7 @@ if (is_linux) {
 
     deps = [
       ":client",
+      "//build/config/sanitizers:deps",
     ]
   }
 
@@ -678,6 +704,7 @@ if (is_linux) {
 
     deps = [
       ":client",
+      "//build/config/sanitizers:deps",
     ]
 
     include_dirs = [ "src" ]
@@ -746,6 +773,13 @@ if (is_win) {
     public_configs = [ ":client_config" ]
   }
 
+  config("breakpad_handler_warnings") {
+    if (is_clang) {
+      # See https://code.google.com/p/google-breakpad/issues/detail?id=658.
+      cflags = [ "-Wno-reorder" ]
+    }
+  }
+
   source_set("breakpad_handler") {
     configs += [ ":handler_config" ]
     if (is_win) {
@@ -770,13 +804,6 @@ if (is_win) {
       "src/common/windows/string_utils-inl.h",
       "src/google_breakpad/common/minidump_format.h",
     ]
-    config("breakpad_handler_warnings") {
-      if (is_clang) {
-        # See https://code.google.com/p/google-breakpad/issues/detail?id=658.
-        cflags = [ "-Wno-reorder" ]
-      }
-    }
-
     configs += [ ":breakpad_handler_warnings" ]
   }
 

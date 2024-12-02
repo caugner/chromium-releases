@@ -72,6 +72,7 @@ if (is_mac) {  # TODO(GYP) Mac build of remoting host.
       "//remoting/base",
       "//remoting/protocol",
       "//remoting/resources",
+      "//ui/base",
       "//ui/events/platform",
       "//ui/events:dom_keycode_converter",
     ]
@@ -89,8 +90,8 @@ if (is_mac) {  # TODO(GYP) Mac build of remoting host.
         "//build/config/linux:x11",
         "//build/config/linux:xrandr",
       ]
-      if (!is_chromeos) {
-        deps += [ "//build/config/linux/gtk" ]
+      if (is_desktop_linux) {
+        deps += [ "//build/config/linux/gtk2" ]
       }
     } else {
       sources -= [
@@ -283,6 +284,7 @@ if (is_mac) {  # TODO(GYP) Mac build of remoting host.
       "register_support_host_request_unittest.cc",
       "remote_input_filter_unittest.cc",
       "resizing_host_observer_unittest.cc",
+      "resources_unittest.cc",
       "screen_resolution_unittest.cc",
       "server_log_entry_host_unittest.cc",
       "setup/me2me_native_messaging_host_unittest.cc",
@@ -408,6 +410,7 @@ if (is_mac) {  # TODO(GYP) Mac build of remoting host.
       ]
 
       deps = [
+        "//build/config/sanitizers:deps",
         "//remoting/host/setup",
       ]
 
@@ -436,7 +439,6 @@ if (is_mac) {  # TODO(GYP) Mac build of remoting host.
       deps = [
         "//base",
         "//base:i18n",
-        "//components/policy",
         "//components/policy:policy_component_common",
         "//net",
         "//remoting/base",
@@ -445,14 +447,18 @@ if (is_mac) {  # TODO(GYP) Mac build of remoting host.
         "//third_party/webrtc/modules/desktop_capture",
       ]
 
+      if (enable_configuration_policy) {
+        deps += [ "//components/policy" ]
+      }
+
       if (enable_webrtc) {
         deps += [ "//third_party/libjingle:libjingle_webrtc" ]
       }
 
-      if (is_linux) {
-        deps += [ "//build/config/linux/gtk" ]
+      if (is_desktop_linux) {
+        deps += [ "//build/config/linux/gtk2" ]
       }
-      if (is_linux || is_mac) {
+      if ((is_linux && !is_chromeos) || is_mac) {
         libs = [ "pam" ]
       }
     }
@@ -467,6 +473,7 @@ if (is_mac) {  # TODO(GYP) Mac build of remoting host.
         deps = [
           ":remoting_me2me_host_static",
           ":credits",
+          "//build/config/sanitizers:deps",
         ]
       }
     }

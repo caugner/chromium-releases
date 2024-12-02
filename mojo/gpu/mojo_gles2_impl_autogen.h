@@ -652,7 +652,6 @@ class MojoGLES2Impl : public gpu::gles2::GLES2Interface {
                       GLfloat scale_factor) override;
   const GLchar* GetRequestableExtensionsCHROMIUM() override;
   void RequestExtensionCHROMIUM(const char* extension) override;
-  void RateLimitOffscreenContextCHROMIUM() override;
   void GetProgramInfoCHROMIUM(GLuint program,
                               GLsizei bufsize,
                               GLsizei* size,
@@ -760,26 +759,6 @@ class MojoGLES2Impl : public gpu::gles2::GLES2Interface {
   void TraceBeginCHROMIUM(const char* category_name,
                           const char* trace_name) override;
   void TraceEndCHROMIUM() override;
-  void AsyncTexSubImage2DCHROMIUM(GLenum target,
-                                  GLint level,
-                                  GLint xoffset,
-                                  GLint yoffset,
-                                  GLsizei width,
-                                  GLsizei height,
-                                  GLenum format,
-                                  GLenum type,
-                                  const void* data) override;
-  void AsyncTexImage2DCHROMIUM(GLenum target,
-                               GLint level,
-                               GLenum internalformat,
-                               GLsizei width,
-                               GLsizei height,
-                               GLint border,
-                               GLenum format,
-                               GLenum type,
-                               const void* pixels) override;
-  void WaitAsyncTexImage2DCHROMIUM(GLenum target) override;
-  void WaitAllAsyncTexImage2DCHROMIUM() override;
   void DiscardFramebufferEXT(GLenum target,
                              GLsizei count,
                              const GLenum* attachments) override;
@@ -835,6 +814,7 @@ class MojoGLES2Impl : public gpu::gles2::GLES2Interface {
                                           GLenum coverMode) override;
   GLenum GetGraphicsResetStatusKHR() override;
   void BlendBarrierKHR() override;
+  void ApplyScreenSpaceAntialiasingCHROMIUM() override;
 
  private:
   MojoGLES2Context context_;

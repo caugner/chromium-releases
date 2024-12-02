@@ -39,19 +39,18 @@ if (enable_nacl) {
       "//ppapi/proxy:ipc",
       "//ppapi/shared_impl",
       "//third_party/mojo/src/mojo/edk/embedder",
+      # TODO(use_chrome_edk): so that EDK in third_party can choose the EDK in
+      # src/mojo if the command line flag is specified. It has to since we can
+      # only have one definition of the Mojo primitives.
+      "//mojo/edk/embedder",
     ]
 
     if (enable_nacl_untrusted) {
-      data_deps = [
-        # TODO(GYP): handle other architectures correctly.
-        "//ppapi/native_client:nacl_irt(//native_client/build/toolchain/nacl:irt_x64)",
-      ]
+      data_deps = [ "//ppapi/native_client:irt" ]
     }
     if (enable_pnacl) {
-      data_deps += [
-        # TODO(GYP): handle other architectures correctly.
-        "//ppapi/native_client/src/untrusted/pnacl_support_extension",
-      ]
+      data_deps +=
+          [ "//ppapi/native_client/src/untrusted/pnacl_support_extension" ]
     }
   }
 
@@ -188,6 +187,7 @@ if (enable_nacl) {
         ":nacl_linux",
         ":nacl_switches",
         "//base",
+        "//build/config/sanitizers:deps",
         "//content/public/common",
         "//crypto",
         "//ipc",
@@ -196,10 +196,6 @@ if (enable_nacl) {
       cflags = [ "-fPIE" ]
 
       ldflags = [ "-pie" ]
-
-      if (!use_openssl) {
-        deps += [ "//sandbox/linux:libc_urandom_override" ]
-      }
     }
 
     source_set("nacl_linux") {
@@ -270,6 +266,8 @@ if (enable_nacl) {
   }
 } else {
   group("nacl") {
+  }
+  group("nacl_helper") {
   }
 }
 

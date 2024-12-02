@@ -23,9 +23,7 @@ class Rect;
 //
 // Notification display design note: if the #simplified-fullscreen-ui flag is
 // enabled, the bubble has the following behaviour:
-// - Upon taking exclusive access, wait kDebounceNotificationsTimeMs, then for
-//   user input, before displaying the bubble.
-// - The bubble is shown for kIdleTimeMs, then hides.
+// - The bubble is shown for kInitialDelayMs, then hides.
 // - After a bubble has been shown, notifications are suppressed for
 //   kSnoozeNotificationsTimeMs, to avoid bothering the user. After this time
 //   has elapsed, the next user input re-displays the bubble.
@@ -40,17 +38,14 @@ class ExclusiveAccessBubble : public gfx::AnimationDelegate {
   static const int kPaddingPx;        // Amount of padding around the link
   static const int kInitialDelayMs;   // Initial time bubble remains onscreen
   static const int kIdleTimeMs;       // Time before mouse idle triggers hide
-  // See notification display design note above.
-  static const int kDebounceNotificationsTimeMs;
   static const int kSnoozeNotificationsTimeMs;
   static const int kPositionCheckHz;  // How fast to check the mouse position
+  // Height of region triggering slide-in.
   static const int kSlideInRegionHeightPx;
-  // Height of region triggering
-  // slide-in
-  static const int kPopupTopPx;          // Space between the popup and the top
-                                         // of the screen.
   static const int kSlideInDurationMs;   // Duration of slide-in animation
   static const int kSlideOutDurationMs;  // Duration of slide-out animation
+  // Space between the popup and the top of the screen (excluding shadow).
+  static const int kPopupTopPx;
 
   // Returns the current desirable rect for the popup window.  If
   // |ignore_animation_state| is true this returns the rect assuming the popup
@@ -107,25 +102,29 @@ class ExclusiveAccessBubble : public gfx::AnimationDelegate {
   ExclusiveAccessBubbleType bubble_type_;
 
  private:
+  // Shows the bubble and sets up timers to auto-hide and prevent re-showing for
+  // a certain snooze time.
+  void ShowAndStartTimers();
+
   // When this timer is active, prevent the bubble from hiding. This ensures it
   // will be displayed for a minimum amount of time (which can be extended by
   // the user moving the mouse to the top of the screen and holding it there).
-  base::OneShotTimer<ExclusiveAccessBubble> hide_timeout_;
+  base::OneShotTimer hide_timeout_;
 
   // Timer to see how long the mouse has been idle.
-  base::OneShotTimer<ExclusiveAccessBubble> idle_timeout_;
+  base::OneShotTimer idle_timeout_;
 
   // When this timer has elapsed, on the next mouse input, we will notify the
   // user about any currently active exclusive access. This is used to enact
   // both the initial debounce period, and the snooze period before re-notifying
   // the user (see notification display design note above).
-  base::OneShotTimer<ExclusiveAccessBubble> suppress_notify_timeout_;
+  base::OneShotTimer suppress_notify_timeout_;
 
   // Timer to poll the current mouse position.  We can't just listen for mouse
   // events without putting a non-empty HWND onscreen (or hooking Windows, which
   // has other problems), so instead we run a low-frequency poller to see if the
   // user has moved in or out of our show/hide regions.
-  base::RepeatingTimer<ExclusiveAccessBubble> mouse_position_checker_;
+  base::RepeatingTimer mouse_position_checker_;
 
   // The most recently seen mouse position, in screen coordinates.  Used to see
   // if the mouse has moved since our last check.

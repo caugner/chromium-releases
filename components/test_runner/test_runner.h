@@ -87,7 +87,7 @@ class TestRunner : public WebTestRunner,
   void ClearDevToolsLocalStorage();
   void setShouldDumpAsText(bool);
   void setShouldDumpAsMarkup(bool);
-  void setCustomTextOutput(std::string text);
+  void setCustomTextOutput(const std::string& text);
   void setShouldGeneratePixelResults(bool);
   void setShouldDumpFrameLoadCallbacks(bool);
   void setShouldDumpPingLoaderCallbacks(bool);
@@ -329,7 +329,7 @@ class TestRunner : public WebTestRunner,
   void SetXSSAuditorEnabled(bool enabled);
   void SetAllowUniversalAccessFromFileURLs(bool allow);
   void SetAllowFileAccessFromFileURLs(bool allow);
-  void OverridePreference(const std::string key, v8::Local<v8::Value> value);
+  void OverridePreference(const std::string& key, v8::Local<v8::Value> value);
 
   // Modify accept_languages in RendererPreferences.
   void SetAcceptLanguages(const std::string& accept_languages);
@@ -521,8 +521,25 @@ class TestRunner : public WebTestRunner,
   void SetColorProfile(const std::string& name,
                        v8::Local<v8::Function> callback);
 
-  // Change the bluetooth test data while running a layout test.
+  // Change the bluetooth test data while running a layout test and resets the
+  // chooser to accept the first device.
   void SetBluetoothMockDataSet(const std::string& name);
+
+  // Makes the Bluetooth chooser record its input and wait for instructions from
+  // the test program on how to proceed.
+  void SetBluetoothManualChooser();
+
+  // Calls |callback| with a DOMString[] representing the events recorded since
+  // the last call to this function.
+  void GetBluetoothManualChooserEvents(v8::Local<v8::Function> callback);
+
+  // Calls the BluetoothChooser::EventHandler with the arguments here. Valid
+  // event strings are:
+  //  * "cancel" - simulates the user canceling the chooser.
+  //  * "select" - simulates the user selecting a device whose device ID is in
+  //               |argument|.
+  void SendBluetoothManualChooserEvent(const std::string& event,
+                                       const std::string& argument);
 
   // Enables mock geofencing service while running a layout test.
   // |service_available| indicates if the mock service should mock geofencing
@@ -607,6 +624,9 @@ class TestRunner : public WebTestRunner,
                              const SkBitmap& snapshot);
   void DispatchBeforeInstallPromptCallback(scoped_ptr<InvokeCallbackTask> task,
                                            bool canceled);
+  void GetBluetoothManualChooserEventsCallback(
+      scoped_ptr<InvokeCallbackTask> task,
+      const std::vector<std::string>& events);
 
   void CheckResponseMimeType();
   void CompleteNotifyDone();

@@ -27,12 +27,15 @@ namespace {
 // This class is a Client::Buffer that allocates and frees the requested |size|.
 class MockBuffer : public VideoCaptureDevice::Client::Buffer {
  public:
-  MockBuffer(int buffer_id, size_t size)
-      : id_(buffer_id), size_(size), data_(new uint8[size_]) {}
+  MockBuffer(int buffer_id, size_t mapped_size)
+      : id_(buffer_id),
+        mapped_size_(mapped_size),
+        data_(new uint8[mapped_size]) {}
   ~MockBuffer() override { delete[] data_; }
 
   int id() const override { return id_; }
-  size_t size() const override { return size_; }
+  gfx::Size dimensions() const override { return gfx::Size(); }
+  size_t mapped_size() const override { return mapped_size_; }
   void* data(int plane) override { return data_; }
   ClientBuffer AsClientBuffer(int plane) override { return nullptr; }
 #if defined(OS_POSIX)
@@ -43,7 +46,7 @@ class MockBuffer : public VideoCaptureDevice::Client::Buffer {
 
  private:
   const int id_;
-  const size_t size_;
+  const size_t mapped_size_;
   uint8* const data_;
 };
 
@@ -76,11 +79,11 @@ class MockClient : public VideoCaptureDevice::Client {
 
   // Virtual methods for capturing using Client's Buffers.
   scoped_ptr<Buffer> ReserveOutputBuffer(const gfx::Size& dimensions,
-                                         media::VideoCapturePixelFormat format,
+                                         media::VideoPixelFormat format,
                                          media::VideoPixelStorage storage) {
-    EXPECT_TRUE((format == media::VIDEO_CAPTURE_PIXEL_FORMAT_ARGB &&
+    EXPECT_TRUE((format == media::PIXEL_FORMAT_ARGB &&
                  storage == media::PIXEL_STORAGE_CPU) ||
-                (format == media::VIDEO_CAPTURE_PIXEL_FORMAT_I420 &&
+                (format == media::PIXEL_FORMAT_I420 &&
                  storage == media::PIXEL_STORAGE_GPUMEMORYBUFFER));
     EXPECT_GT(dimensions.GetArea(), 0);
     const VideoCaptureFormat frame_format(dimensions, 0.0, format);
@@ -97,7 +100,7 @@ class MockClient : public VideoCaptureDevice::Client {
       const scoped_refptr<media::VideoFrame>& frame,
       const base::TimeTicks& timestamp) {
     VideoCaptureFormat format(frame->natural_size(), 30.0,
-                              VIDEO_CAPTURE_PIXEL_FORMAT_I420);
+                              PIXEL_FORMAT_I420);
     frame_cb_.Run(format);
   }
 
@@ -213,23 +216,19 @@ TEST_F(FakeVideoCaptureDeviceTest, GetDeviceSupportedFormats) {
     ASSERT_EQ(supported_formats.size(), 4u);
     EXPECT_EQ(supported_formats[0].frame_size.width(), 320);
     EXPECT_EQ(supported_formats[0].frame_size.height(), 240);
-    EXPECT_EQ(supported_formats[0].pixel_format,
-              VIDEO_CAPTURE_PIXEL_FORMAT_I420);
+    EXPECT_EQ(supported_formats[0].pixel_format, PIXEL_FORMAT_I420);
     EXPECT_GE(supported_formats[0].frame_rate, 20.0);
     EXPECT_EQ(supported_formats[1].frame_size.width(), 640);
     EXPECT_EQ(supported_formats[1].frame_size.height(), 480);
-    EXPECT_EQ(supported_formats[1].pixel_format,
-              VIDEO_CAPTURE_PIXEL_FORMAT_I420);
+    EXPECT_EQ(supported_formats[1].pixel_format, PIXEL_FORMAT_I420);
     EXPECT_GE(supported_formats[1].frame_rate, 20.0);
     EXPECT_EQ(supported_formats[2].frame_size.width(), 1280);
     EXPECT_EQ(supported_formats[2].frame_size.height(), 720);
-    EXPECT_EQ(supported_formats[2].pixel_format,
-              VIDEO_CAPTURE_PIXEL_FORMAT_I420);
+    EXPECT_EQ(supported_formats[2].pixel_format, PIXEL_FORMAT_I420);
     EXPECT_GE(supported_formats[2].frame_rate, 20.0);
     EXPECT_EQ(supported_formats[3].frame_size.width(), 1920);
     EXPECT_EQ(supported_formats[3].frame_size.height(), 1080);
-    EXPECT_EQ(supported_formats[3].pixel_format,
-              VIDEO_CAPTURE_PIXEL_FORMAT_I420);
+    EXPECT_EQ(supported_formats[3].pixel_format, PIXEL_FORMAT_I420);
     EXPECT_GE(supported_formats[3].frame_rate, 20.0);
   }
 }

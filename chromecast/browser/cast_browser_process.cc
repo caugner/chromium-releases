@@ -11,11 +11,11 @@
 #include "chromecast/browser/cast_resource_dispatcher_host_delegate.h"
 #include "chromecast/browser/devtools/remote_debugging_server.h"
 #include "chromecast/browser/metrics/cast_metrics_service_client.h"
-#include "chromecast/browser/service/cast_service.h"
 #include "chromecast/net/connectivity_checker.h"
+#include "chromecast/service/cast_service.h"
 
 #if defined(OS_ANDROID)
-#include "components/crash/browser/crash_dump_manager_android.h"
+#include "components/crash/content/browser/crash_dump_manager_android.h"
 #endif  // defined(OS_ANDROID)
 
 #if defined(USE_AURA)

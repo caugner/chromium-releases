@@ -73,6 +73,7 @@ void FillChannelInfo(const CastSocket& socket, ChannelInfo* channel_info) {
   channel_info->ready_state = socket.ready_state();
   channel_info->error_state = socket.error_state();
   channel_info->keep_alive = socket.keep_alive();
+  channel_info->audio_only = socket.audio_only();
 }
 
 // Fills |error_info| from |error_state| and |last_errors|.
@@ -89,8 +90,6 @@ void FillErrorInfo(ChannelError error_state,
   }
   if (last_errors.net_return_value <= 0)
     error_info->net_return_value.reset(new int(last_errors.net_return_value));
-  if (last_errors.nss_error_code < 0)
-    error_info->nss_error_code.reset(new int(last_errors.nss_error_code));
 }
 
 bool IsValidConnectInfoPort(const ConnectInfo& connect_info) {

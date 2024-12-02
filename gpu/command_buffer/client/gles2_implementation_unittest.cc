@@ -137,6 +137,8 @@ class MockTransferBuffer : public TransferBufferInterface {
   RingBuffer::Offset GetOffset(void* pointer) const override;
   void DiscardBlock(void* p) override;
   void FreePendingToken(void* p, unsigned int /* token */) override;
+  unsigned int GetSize() const override;
+  unsigned int GetFreeSize() const override;
 
   size_t MaxTransferBufferSize() {
     return size_ - result_size_;
@@ -307,6 +309,14 @@ void MockTransferBuffer::DiscardBlock(void* p) {
 void MockTransferBuffer::FreePendingToken(void* p, unsigned int /* token */) {
   EXPECT_EQ(last_alloc_, p);
   last_alloc_ = NULL;
+}
+
+unsigned int MockTransferBuffer::GetSize() const {
+  return 0;
+}
+
+unsigned int MockTransferBuffer::GetFreeSize() const {
+  return 0;
 }
 
 // API wrapper for Buffers.
@@ -569,7 +579,8 @@ class GLES2ImplementationTest : public testing::Test {
 
   bool Initialize(const ContextInitOptions& init_options) {
     bool success = true;
-    share_group_ = new ShareGroup(init_options.bind_generates_resource_client);
+    share_group_ = new ShareGroup(init_options.bind_generates_resource_client,
+                                  0 /* tracing_id */);
 
     for (int i = 0; i < kNumTestContexts; i++) {
       if (!test_contexts_[i].Initialize(
@@ -2636,15 +2647,6 @@ TEST_F(GLES2ImplementationTest, TextureInvalidArguments) {
 
   ClearCommands();
 
-  gl_->AsyncTexImage2DCHROMIUM(
-      kTarget, kLevel, kFormat, kWidth, kHeight, kInvalidBorder, kFormat, kType,
-      NULL);
-
-  EXPECT_TRUE(NoCommandsWritten());
-  EXPECT_EQ(GL_INVALID_VALUE, CheckError());
-
-  ClearCommands();
-
   // Checking for CompressedTexImage2D argument validation is a bit tricky due
   // to (runtime-detected) compression formats. Try to infer the error with an
   // aux check.
@@ -3355,7 +3357,7 @@ TEST_F(GLES2ImplementationTest, QueryCounterEXT) {
   QueryTracker::Query* query = GetQuery(id1);
   ASSERT_TRUE(query != NULL);
   expected_query_counter_cmds.query_counter.Init(
-      GL_TIMESTAMP_EXT, id1, query->shm_id(), query->shm_offset(),
+      id1, GL_TIMESTAMP_EXT, query->shm_id(), query->shm_offset(),
       query->submit_count());
   EXPECT_EQ(0, memcmp(&expected_query_counter_cmds, commands,
                       sizeof(expected_query_counter_cmds)));
@@ -3368,7 +3370,7 @@ TEST_F(GLES2ImplementationTest, QueryCounterEXT) {
   QueryTracker::Query* query2 = GetQuery(id2);
   ASSERT_TRUE(query2 != NULL);
   expected_query_counter_cmds.query_counter.Init(
-      GL_TIMESTAMP_EXT, id2, query2->shm_id(), query2->shm_offset(),
+      id2, GL_TIMESTAMP_EXT, query2->shm_id(), query2->shm_offset(),
       query2->submit_count());
   EXPECT_EQ(0, memcmp(&expected_query_counter_cmds, commands,
                       sizeof(expected_query_counter_cmds)));
@@ -3381,7 +3383,7 @@ TEST_F(GLES2ImplementationTest, QueryCounterEXT) {
   EXPECT_EQ(GL_NO_ERROR, CheckError());
   EXPECT_NE(old_submit_count, query->submit_count());
   expected_query_counter_cmds.query_counter.Init(
-      GL_TIMESTAMP_EXT, id1, query->shm_id(), query->shm_offset(),
+      id1, GL_TIMESTAMP_EXT, query->shm_id(), query->shm_offset(),
       query->submit_count());
   EXPECT_EQ(0, memcmp(&expected_query_counter_cmds, commands,
                       sizeof(expected_query_counter_cmds)));

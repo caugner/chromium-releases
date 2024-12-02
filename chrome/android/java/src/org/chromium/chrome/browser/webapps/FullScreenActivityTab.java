@@ -29,6 +29,7 @@ import org.chromium.chrome.browser.contextmenu.ContextMenuPopulator;
 import org.chromium.chrome.browser.tab.ChromeTab;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabUma.TabCreationState;
+import org.chromium.chrome.browser.tab.TabWebContentsDelegateAndroid;
 import org.chromium.chrome.browser.tabmodel.TabModel.TabLaunchType;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.browser.WebContents;
@@ -231,7 +232,7 @@ public class FullScreenActivityTab extends ChromeTab {
             @Override
             public boolean onItemSelected(ContextMenuHelper helper, ContextMenuParams params,
                     int itemId) {
-                if (itemId == org.chromium.chrome.R.id.contextmenu_copy_link_address_text) {
+                if (itemId == org.chromium.chrome.R.id.contextmenu_copy_link_address) {
                     String url = params.getUnfilteredLinkUrl();
                     mClipboard.setText(url, url);
                     return true;
@@ -274,7 +275,7 @@ public class FullScreenActivityTab extends ChromeTab {
             @Override
             public void buildContextMenu(ContextMenu menu, Context context,
                     ContextMenuParams params) {
-                menu.add(Menu.NONE, org.chromium.chrome.R.id.contextmenu_copy_link_address_text,
+                menu.add(Menu.NONE, org.chromium.chrome.R.id.contextmenu_copy_link_address,
                         Menu.NONE, org.chromium.chrome.R.string.contextmenu_copy_link_address);
 
                 String linkText = params.getLinkText();
@@ -308,11 +309,14 @@ public class FullScreenActivityTab extends ChromeTab {
 
     @Override
     protected FullScreenTabWebContentsDelegateAndroid createWebContentsDelegate() {
-        return new FullScreenTabWebContentsDelegateAndroid();
+        return new FullScreenTabWebContentsDelegateAndroid(this, mActivity);
     }
 
-    private class FullScreenTabWebContentsDelegateAndroid
-            extends TabChromeWebContentsDelegateAndroidImpl {
+    private class FullScreenTabWebContentsDelegateAndroid extends TabWebContentsDelegateAndroid {
+        public FullScreenTabWebContentsDelegateAndroid(Tab tab, ChromeActivity activity) {
+            super(tab, activity);
+        }
+
         @Override
         public void activateContents() {
             if (!(mActivity instanceof WebappActivity)) return;

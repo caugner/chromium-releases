@@ -83,14 +83,7 @@ QuicTimeWaitListManager::QuicTimeWaitListManager(
     QuicConnectionHelperInterface* helper,
     const QuicVersionVector& supported_versions)
     : time_wait_period_(
-          // If FLAGS_increase_time_wait_list is not set and
-          // FLAGS_quic_time_wait_list_seconds has the new default value (200),
-          // replace it with the old default value (5).
-          !FLAGS_increase_time_wait_list &&
-                  FLAGS_quic_time_wait_list_seconds == 200
-              ? QuicTime::Delta::FromSeconds(5)
-              : QuicTime::Delta::FromSeconds(
-                    FLAGS_quic_time_wait_list_seconds)),
+          QuicTime::Delta::FromSeconds(FLAGS_quic_time_wait_list_seconds)),
       connection_id_clean_up_alarm_(
           helper->CreateAlarm(new ConnectionIdCleanUpAlarm(this))),
       clock_(helper->GetClock()),
@@ -126,15 +119,8 @@ void QuicTimeWaitListManager::AddConnectionIdToTimeWait(
     connection_id_map_.erase(it);
   }
   TrimTimeWaitListIfNeeded();
-  DCHECK_LT(
-      num_connections(),
-      // If FLAGS_increase_time_wait_list is not set and
-      // FLAGS_quic_time_wait_list_max_connections has the new default
-      // value (600000), replace it with the old default value (50000).
-      !FLAGS_increase_time_wait_list &&
-              FLAGS_quic_time_wait_list_max_connections == 600000
-          ? static_cast<size_t>(50000)
-          : static_cast<size_t>(FLAGS_quic_time_wait_list_max_connections));
+  DCHECK_LT(num_connections(),
+            static_cast<size_t>(FLAGS_quic_time_wait_list_max_connections));
   ConnectionIdData data(num_packets, version, clock_->ApproximateNow(),
                         close_packet, connection_rejected_statelessly);
   connection_id_map_.insert(std::make_pair(connection_id, data));
@@ -170,7 +156,7 @@ void QuicTimeWaitListManager::ProcessPacket(
     const IPEndPoint& server_address,
     const IPEndPoint& client_address,
     QuicConnectionId connection_id,
-    QuicPacketSequenceNumber sequence_number,
+    QuicPacketNumber packet_number,
     const QuicEncryptedPacket& /*packet*/) {
   DCHECK(IsConnectionIdInTimeWait(connection_id));
   DVLOG(1) << "Processing " << connection_id << " in time wait state.";
@@ -190,10 +176,8 @@ void QuicTimeWaitListManager::ProcessPacket(
     // Takes ownership of the packet.
     SendOrQueuePacket(queued_packet);
   } else if (!connection_data->connection_rejected_statelessly) {
-    SendPublicReset(server_address,
-                    client_address,
-                    connection_id,
-                    sequence_number);
+    SendPublicReset(server_address, client_address, connection_id,
+                    packet_number);
   } else {
     DVLOG(3) << "Time wait list not sending response for connection "
              << connection_id << " due to previous stateless reject.";
@@ -211,12 +195,12 @@ void QuicTimeWaitListManager::SendPublicReset(
     const IPEndPoint& server_address,
     const IPEndPoint& client_address,
     QuicConnectionId connection_id,
-    QuicPacketSequenceNumber rejected_sequence_number) {
+    QuicPacketNumber rejected_packet_number) {
   QuicPublicResetPacket packet;
   packet.public_header.connection_id = connection_id;
   packet.public_header.reset_flag = true;
   packet.public_header.version_flag = false;
-  packet.rejected_sequence_number = rejected_sequence_number;
+  packet.rejected_packet_number = rejected_packet_number;
   // TODO(satyamshekhar): generate a valid nonce for this connection_id.
   packet.nonce_proof = 1010101;
   packet.client_address = client_address;
@@ -322,16 +306,8 @@ void QuicTimeWaitListManager::TrimTimeWaitListIfNeeded() {
   if (FLAGS_quic_time_wait_list_max_connections < 0) {
     return;
   }
-  size_t temp_max_connections =
-      static_cast<size_t>(FLAGS_quic_time_wait_list_max_connections);
-  // If FLAGS_increase_time_wait_list is not set and
-  // FLAGS_quic_time_wait_list_max_connections has the new default value
-  // (600000), replace it with the old default value (50000).
-  if (!FLAGS_increase_time_wait_list &&
-      FLAGS_quic_time_wait_list_max_connections == 600000) {
-    temp_max_connections = static_cast<size_t>(50000);
-  }
-  while (num_connections() >= temp_max_connections) {
+  while (num_connections() >=
+         static_cast<size_t>(FLAGS_quic_time_wait_list_max_connections)) {
     MaybeExpireOldestConnection(QuicTime::Infinite());
   }
 }

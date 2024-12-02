@@ -8,6 +8,7 @@
 #include <list>
 #include <string>
 
+#include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/ui/views/tabs/tab_renderer_data.h"
@@ -68,8 +69,10 @@ class Tab : public gfx::AnimationDelegate,
   void set_detached() { detached_ = true; }
   bool detached() const { return detached_; }
 
+  SkColor button_color() const { return button_color_; }
+
   // Sets the container all animations run from.
-  void set_animation_container(gfx::AnimationContainer* container);
+  void SetAnimationContainer(gfx::AnimationContainer* container);
 
   // Returns true if this tab is the active tab.
   bool IsActive() const;
@@ -196,6 +199,8 @@ class Tab : public gfx::AnimationDelegate,
   bool GetHitTestMask(gfx::Path* mask) const override;
 
   // views::View:
+  void ViewHierarchyChanged(
+      const ViewHierarchyChangedDetails& details) override;
   void OnPaint(gfx::Canvas* canvas) override;
   void Layout() override;
   void OnThemeChanged() override;
@@ -257,6 +262,10 @@ class Tab : public gfx::AnimationDelegate,
   // Returns whether the Tab should display a close button.
   bool ShouldShowCloseBox() const;
 
+  // Returns whether the tab should be rendered as a normal tab as opposed to a
+  // pinned tab.
+  bool ShouldRenderAsNormalTab() const;
+
   // Gets the throb value for the tab. When a tab is not selected the
   // active background is drawn at |GetThrobValue()|%. This is used for hover,
   // mini tab title change and pulsing.
@@ -275,8 +284,19 @@ class Tab : public gfx::AnimationDelegate,
   // Returns true if the crash animation is currently running.
   bool IsPerformingCrashAnimation() const;
 
+  // Recalculates the correct |button_color_| and resets the title, media
+  // indicator, and close button colors if necessary.  This should be called any
+  // time the theme or active state may have changed.
+  void OnButtonColorMaybeChanged();
+
   // Schedules repaint task for icon.
   void ScheduleIconPaint();
+
+  // Returns a |path| containing the region that matches the bitmap display of
+  // this tab, for input event hit testing.  Set |include_top_shadow| to include
+  // the mostly-transparent shadow pixels above the top edge of the tab in the
+  // path.
+  void GetHitTestMaskHelper(bool include_top_shadow, gfx::Path* path) const;
 
   // Returns the rectangle for the light bar in immersive mode.
   gfx::Rect GetImmersiveBarRect() const;
@@ -286,15 +306,8 @@ class Tab : public gfx::AnimationDelegate,
                           int* tab_id,
                           int* frame_id) const;
 
-  // Returns |media_indicator_button_|, creating it on-demand.
-  MediaIndicatorButton* GetMediaIndicatorButton();
-
   // Performs a one-time initialization of static resources such as tab images.
   static void InitTabResources();
-
-  // Returns the minimum possible size of a single unselected Tab, not
-  // including considering touch mode.
-  static gfx::Size GetBasicMinimumUnselectedSize();
 
   // Loads the images to be used for the tab background.
   static void LoadTabImages();
@@ -352,8 +365,8 @@ class Tab : public gfx::AnimationDelegate,
 
   scoped_refptr<gfx::AnimationContainer> animation_container_;
 
+  MediaIndicatorButton* media_indicator_button_;
   views::ImageButton* close_button_;
-  MediaIndicatorButton* media_indicator_button_;  // NULL until first use.
   views::Label* title_;
 
   bool tab_activated_with_last_tap_down_;
@@ -389,8 +402,8 @@ class Tab : public gfx::AnimationDelegate,
   // detect when it changes and layout appropriately.
   bool showing_close_button_;
 
-  // The current color of the close button.
-  SkColor close_button_color_;
+  // The current color of the media indicator and close button icons.
+  SkColor button_color_;
 
   // As the majority of the tabs are inactive, and painting tabs is slowish,
   // we cache a handful of the inactive tab backgrounds here.
