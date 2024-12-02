@@ -26,11 +26,6 @@ interface AnimationEvent : Event
     getter animationName
     getter elapsedTime
     method constructor
-interface AppBannerPromptResult
-    attribute @@toStringTag
-    getter outcome
-    getter platform
-    method constructor
 interface ApplicationCache : EventTarget
     attribute @@toStringTag
     attribute CHECKING
@@ -1101,6 +1096,7 @@ interface Document : Node
     getter ontouchend
     getter ontouchmove
     getter ontouchstart
+    getter onvisibilitychange
     getter onvolumechange
     getter onwaiting
     getter onwebkitfullscreenchange
@@ -1265,6 +1261,7 @@ interface Document : Node
     setter ontouchend
     setter ontouchmove
     setter ontouchstart
+    setter onvisibilitychange
     setter onvolumechange
     setter onwaiting
     setter onwebkitfullscreenchange
@@ -1820,6 +1817,11 @@ interface HTMLDListElement : HTMLElement
     getter compact
     method constructor
     setter compact
+interface HTMLDataElement : HTMLElement
+    attribute @@toStringTag
+    getter value
+    method constructor
+    setter value
 interface HTMLDataListElement : HTMLElement
     attribute @@toStringTag
     getter options
@@ -2545,6 +2547,7 @@ interface HTMLMediaElement : HTMLElement
     getter webkitVideoDecodedByteCount
     method addTextTrack
     method canPlayType
+    method captureStream
     method constructor
     method load
     method pause
@@ -3032,6 +3035,11 @@ interface HTMLTextAreaElement : HTMLElement
     setter selectionStart
     setter value
     setter wrap
+interface HTMLTimeElement : HTMLElement
+    attribute @@toStringTag
+    getter dateTime
+    method constructor
+    setter dateTime
 interface HTMLTitleElement : HTMLElement
     attribute @@toStringTag
     getter text
@@ -3585,9 +3593,11 @@ interface MediaSource : EventTarget
     getter readyState
     getter sourceBuffers
     method addSourceBuffer
+    method clearLiveSeekableRange
     method constructor
     method endOfStream
     method removeSourceBuffer
+    method setLiveSeekableRange
     setter duration
     setter onsourceclose
     setter onsourceended
@@ -4063,6 +4073,7 @@ interface Performance : EventTarget
     getter memory
     getter navigation
     getter onresourcetimingbufferfull
+    getter timeOrigin
     getter timing
     method clearMarks
     method clearMeasures
@@ -4405,7 +4416,6 @@ interface RTCPeerConnection : EventTarget
     method getReceivers
     method getRemoteStreams
     method getStats
-    method getStreamById
     method removeStream
     method setConfiguration
     method setLocalDescription
@@ -5346,7 +5356,6 @@ interface SVGNumberList
 interface SVGPathElement : SVGGeometryElement
     attribute @@toStringTag
     method constructor
-    method getPathSegAtLength
 interface SVGPatternElement : SVGElement
     attribute @@toStringTag
     getter height
@@ -5768,7 +5777,6 @@ interface SharedWorker : EventTarget
     attribute @@toStringTag
     getter onerror
     getter port
-    getter workerStart
     method constructor
     setter onerror
 interface SourceBuffer : EventTarget
@@ -6255,11 +6263,15 @@ interface VisualViewport : EventTarget
     getter height
     getter offsetLeft
     getter offsetTop
+    getter onresize
+    getter onscroll
     getter pageLeft
     getter pageTop
     getter scale
     getter width
     method constructor
+    setter onresize
+    setter onscroll
 interface WaveShaperNode : AudioNode
     attribute @@toStringTag
     getter curve
@@ -7827,7 +7839,6 @@ interface webkitRTCPeerConnection : EventTarget
     method getReceivers
     method getRemoteStreams
     method getStats
-    method getStreamById
     method removeStream
     method setConfiguration
     method setLocalDescription

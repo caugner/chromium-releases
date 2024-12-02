@@ -1,5 +1,5 @@
 (async function(testRunner) {
-  let {page, session, dp} = await testRunner.startBlank('Tests that Runtime.callFunctionOn works with awaitPromise flag.');
+  var {page, session, dp} = await testRunner.startBlank('Tests that Runtime.callFunctionOn works with awaitPromise flag.');
 
   function dumpResult(result) {
     if (result.exceptionDetails && result.exceptionDetails.scriptId)
@@ -10,7 +10,7 @@
       result.exceptionDetails.exceptionId = 0;
       result.exceptionDetails.exception.objectId = 0;
     }
-    testRunner.logObject(result);
+    testRunner.log(result);
   }
 
   async function callFunctionOn(objectExpression, functionDeclaration, argumentExpressions, returnByValue, generatePreview, awaitPromise) {
@@ -29,7 +29,7 @@
         callArguments.push({});
       } else {
         testRunner.log('Unexpected argument object:');
-        testRunner.logObject(result);
+        testRunner.log(result);
         testRunner.completeTest();
       }
     }
@@ -76,10 +76,10 @@
           '({a : 1})',
           '(function() { return 239; })',
           [],
-          /* returnByValue */ false,
+          /* returnByValue */ true,
           /* generatePreview */ false,
           /* awaitPromise */ true);
-      testRunner.logObject(result.error);
+      dumpResult(result.result);
     },
 
     async function testFunctionReturnResolvedPromiseReturnByValue() {

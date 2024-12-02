@@ -7,11 +7,16 @@
 
   await TestRunner.loadModule('console_test_runner');
   await TestRunner.loadModule('elements_test_runner');
-  await TestRunner.loadPanel('console');
+  await TestRunner.showPanel('console');
   await TestRunner.loadHTML(`
     <p id='foo'>
       Tests that command line api works.
     </p><p id='bar'></p>
+  `);
+
+  await TestRunner.evaluateInPagePromise(`
+    function Foo() {}
+    foo = new Foo();
   `);
 
   var expressions = [
@@ -26,7 +31,8 @@
     `String($$('p'))`,
     `String($$('p', document.body))`,
     `String($('foo'))`,
-    `console.assert(keys(window).indexOf('__commandLineAPI') === -1)`
+    `console.assert(keys(window).indexOf('__commandLineAPI') === -1)`,
+    'queryObjects(Foo)'
   ];
 
   ElementsTestRunner.selectNodeWithId('foo', step1);
@@ -41,13 +47,15 @@
     ConsoleTestRunner.evaluateInConsole(expression, step1);
   }
 
-  function step2() {
-    function assertNoBoundCommandLineAPI() {
-      ['__commandLineAPI', '__scopeChainForEval'].forEach(function(name) {
-        console.assert(!(name in window), 'FAIL: Should be no ' + name);
-      });
-    }
-    TestRunner.evaluateInPage(assertNoBoundCommandLineAPI, step3);
+  async function step2() {
+    await TestRunner.evaluateInPagePromise(`
+      (function assertNoBoundCommandLineAPI() {
+        ['__commandLineAPI', '__scopeChainForEval'].forEach(function(name) {
+          console.assert(!(name in window), 'FAIL: Should be no ' + name);
+        });
+      })();
+    `);
+    step3();
   }
 
   function step3() {

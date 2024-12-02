@@ -307,6 +307,7 @@ html element audio
     property autoplay
     property buffered
     property canPlayType
+    property captureStream
     property controls
     property controlsList
     property crossOrigin
@@ -427,6 +428,8 @@ html element command
 html element content
     property getDistributedNodes
     property select
+html element data
+    property value
 html element datalist
     property options
 html element dd
@@ -983,6 +986,8 @@ html element thead
     property insertRow
     property rows
     property vAlign
+html element time
+    property dateTime
 html element title
     property text
 html element tr
@@ -1028,6 +1033,7 @@ html element video
     property autoplay
     property buffered
     property canPlayType
+    property captureStream
     property controls
     property controlsList
     property crossOrigin

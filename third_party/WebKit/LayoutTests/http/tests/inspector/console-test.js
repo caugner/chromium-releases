@@ -229,13 +229,15 @@ InspectorTest.dumpConsoleMessagesWithClasses = function(sortMessages) {
 InspectorTest.dumpConsoleClassesBrief = function()
 {
     var messageViews = Console.ConsoleView.instance()._visibleViewMessages;
-    for (var i = 0; i < messageViews.length; ++i)
-        InspectorTest.addResult(messageViews[i].toMessageElement().className);
+    for (var i = 0; i < messageViews.length; ++i) {
+        var repeatText = messageViews[i].repeatCount() > 1 ? (' x' + messageViews[i].repeatCount()) : '';
+        InspectorTest.addResult(messageViews[i].toMessageElement().className + repeatText);
+    }
 }
 
 InspectorTest.dumpConsoleCounters = function()
 {
-    var counter = Main.Main.WarningErrorCounter._instanceForTest;
+    var counter = ConsoleCounters.WarningErrorCounter._instanceForTest;
     for (var index = 0; index < counter._titles.length; ++index)
         InspectorTest.addResult(counter._titles[index]);
     InspectorTest.dumpConsoleClassesBrief();
