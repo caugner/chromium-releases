@@ -324,6 +324,9 @@ HRESULT TSFTextStore::GetTextExt(TsViewCookie view_cookie,
     return TS_E_INVALIDPOS;
   }
 
+  TRACE_EVENT1("ime", "TSFTextStore::GetTextExt", "start, end",
+               std::to_string(acp_start) + ", " + std::to_string(acp_end));
+
   // According to a behavior of notepad.exe and wordpad.exe, top left corner of
   // rect indicates a first character's one, and bottom right corner of rect
   // indicates a last character's one.
@@ -395,11 +398,14 @@ HRESULT TSFTextStore::GetTextExt(TsViewCookie view_cookie,
       result_rect = gfx::Rect(text_input_client_->GetCaretBounds());
     }
   }
+  TRACE_EVENT1("ime", "TSFTextStore::GetTextExt", "DIP rect",
+               result_rect->ToString());
+
   *rect = display::win::ScreenWin::DIPToScreenRect(window_handle_,
                                                    result_rect.value())
               .ToRECT();
   *clipped = FALSE;
-  TRACE_EVENT1("ime", "TSFTextStore::GetTextExt", "selection_bounding_rect",
+  TRACE_EVENT1("ime", "TSFTextStore::GetTextExt", "screen rect",
                gfx::Rect(*rect).ToString());
   return S_OK;
 }
@@ -1455,6 +1461,12 @@ void TSFTextStore::CommitTextAndEndCompositionIfAny(size_t old_size,
   } else {
     text_input_client_->ClearCompositionText();
   }
+
+  if (!selection_.is_empty() && !is_selection_interim_char_ &&
+      selection_.GetMax() <= string_buffer_document_.size()) {
+    text_input_client_->SetEditableSelectionRange(selection_);
+  }
+
   // Notify accessibility about this committed composition
   text_input_client_->SetActiveCompositionForAccessibility(
       replace_text_range_, new_committed_string,

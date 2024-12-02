@@ -272,6 +272,15 @@ ScriptPromise MediaDevices::SendUserMediaRequest(
   return promise;
 }
 
+ScriptPromise MediaDevices::getDisplayMediaSet(
+    ScriptState* script_state,
+    const MediaStreamConstraints* options,
+    ExceptionState& exception_state) {
+  exception_state.ThrowDOMException(DOMExceptionCode::kNotSupportedError,
+                                    "Not implemented.");
+  return ScriptPromise();
+}
+
 ScriptPromise MediaDevices::getDisplayMedia(
     ScriptState* script_state,
     const MediaStreamConstraints* options,
@@ -650,14 +659,11 @@ void MediaDevices::DevicesEnumerated(
 }
 
 void MediaDevices::OnDispatcherHostConnectionError() {
-  // Move the set to a local variable to prevent script execution in Reject()
-  // from invalidating the iterator used by the loop.
-  HeapHashSet<Member<ScriptPromiseResolver>> requests;
-  requests_.swap(requests);
-  for (ScriptPromiseResolver* resolver : requests) {
+  for (ScriptPromiseResolver* resolver : requests_) {
     resolver->Reject(MakeGarbageCollected<DOMException>(
         DOMExceptionCode::kAbortError, "enumerateDevices() failed."));
   }
+  requests_.clear();
   dispatcher_host_.reset();
 
   if (connection_error_test_callback_)

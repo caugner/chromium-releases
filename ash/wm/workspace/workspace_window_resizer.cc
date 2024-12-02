@@ -713,21 +713,9 @@ void WorkspaceWindowResizer::Drag(const gfx::PointF& location_in_parent,
             // Update the maximized window so that it looks like it has been
             // restored (i.e. update the caption buttons and height of the
             // browser frame).
-
-            // TODO(http://crbug.com/1200599): Speculative, remove if not fixed.
-            // Change window property kFrameRestoreLookKey or window bounds may
-            // cause the window being destroyed during the drag and return early
-            // if that's the case.
-            base::WeakPtr<WorkspaceWindowResizer> resizer(
-                weak_ptr_factory_.GetWeakPtr());
             window_state()->window()->SetProperty(kFrameRestoreLookKey, true);
-            if (!resizer)
-              return;
             CrossFadeAnimation(window_state()->window(), bounds,
                                /*maximize=*/false);
-            if (!resizer)
-              return;
-
             base::RecordAction(
                 base::UserMetricsAction("WindowDrag_Unmaximize"));
           } else if (window_state()->IsSnapped()) {
@@ -878,10 +866,14 @@ void WorkspaceWindowResizer::CompleteDrag() {
     switch (snap_type_) {
       case SnapType::kPrimary:
         type = WM_EVENT_SNAP_PRIMARY;
+        window_state()->set_snap_action_source(
+            WindowSnapActionSource::kDragWindowToEdgeToSnap);
         base::RecordAction(base::UserMetricsAction("WindowDrag_MaximizeLeft"));
         break;
       case SnapType::kSecondary:
         type = WM_EVENT_SNAP_SECONDARY;
+        window_state()->set_snap_action_source(
+            WindowSnapActionSource::kDragWindowToEdgeToSnap);
         base::RecordAction(base::UserMetricsAction("WindowDrag_MaximizeRight"));
         break;
       case SnapType::kMaximize:
@@ -1667,6 +1659,9 @@ void WorkspaceWindowResizer::SetWindowStateTypeFromGesture(
     case WindowStateType::kPrimarySnapped:
       if (window_state->CanSnap()) {
         window_state->SetRestoreBoundsInParent(restore_bounds_for_gesture_);
+        window_state->set_snap_action_source(
+            WindowSnapActionSource::kDragWindowToEdgeToSnap);
+
         const WMEvent event(WM_EVENT_SNAP_PRIMARY);
         window_state->OnWMEvent(&event);
       }
@@ -1674,6 +1669,9 @@ void WorkspaceWindowResizer::SetWindowStateTypeFromGesture(
     case WindowStateType::kSecondarySnapped:
       if (window_state->CanSnap()) {
         window_state->SetRestoreBoundsInParent(restore_bounds_for_gesture_);
+        window_state->set_snap_action_source(
+            WindowSnapActionSource::kDragWindowToEdgeToSnap);
+
         const WMEvent event(WM_EVENT_SNAP_SECONDARY);
         window_state->OnWMEvent(&event);
       }

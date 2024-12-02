@@ -181,7 +181,7 @@ For å åpne Chrome-menyen, trykk på Alt+F.</translation>
 <translation id="2203046366315513658">Reduser verdien</translation>
 <translation id="2216790501338699346">Nettadresse for link: <ph name="LINK_URL" /></translation>
 <translation id="2220205454259065436">Flytt bakover ett tegn</translation>
-<translation id="2220529011494928058">Rapporter et problem</translation>
+<translation id="2220529011494928058">Rapportér et problem</translation>
 <translation id="2243633977138166243">Trykk på venstre- eller høyrepilen for å navigere; trykk på Enter for å aktivere</translation>
 <translation id="224426591676115802">Tale er ikke tilgjengelig for dette språket: <ph name="LANGUAGE" /></translation>
 <translation id="2247700577781885251">Avslutter læremodus</translation>
@@ -618,7 +618,6 @@ For å åpne Chrome-menyen, trykk på Alt+F.</translation>
 <translation id="5170206230005240598">Punktskrift-teksting er slått på</translation>
 <translation id="5183440668879371625">Punktskrift – forrige linje</translation>
 <translation id="5189244881767082992">Linje</translation>
-<translation id="5234747236692380506">skriv <ph name="TEXT" /></translation>
 <translation id="5263034204789987535">Lys maisgul</translation>
 <translation id="5263344797180442561">h2</translation>
 <translation id="528468243742722775">Avslutt</translation>
@@ -794,6 +793,7 @@ For å åpne Chrome-menyen, trykk på Alt+F.</translation>
 <translation id="641759969622533235">{COUNT,plural, =1{kolon}other{# kolontegn}}</translation>
 <translation id="6444046323172968959">Varseldialog</translation>
 <translation id="6452403590345320472">Innhold</translation>
+<translation id="6457542714329819968">type</translation>
 <translation id="6468049171101508116">Neste-knappen</translation>
 <translation id="646954774886932461">Stikkordregister</translation>
 <translation id="6475604559827479857">Farge for fremheving av ord:</translation>

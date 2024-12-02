@@ -26,6 +26,7 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/no_destructor.h"
 #include "base/notreached.h"
+#include "base/observer_list.h"
 #include "base/rand_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -188,7 +189,7 @@ void MergeUpdateIntoExistingModelAnnotations(
 }  // namespace
 
 std::u16string FormatUrlForRedirectComparison(const GURL& url) {
-  url::Replacements<char> remove_port;
+  GURL::Replacements remove_port;
   remove_port.ClearPort();
   return url_formatter::FormatUrl(
       url.ReplaceComponents(remove_port),
@@ -286,15 +287,6 @@ HistoryBackend::~HistoryBackend() {
 
   // Release stashed embedder object before cleaning up the databases.
   supports_user_data_helper_.reset();
-
-  // Clear the error callback. The error callback that is installed does not
-  // process an error immediately, rather it uses a PostTask() with `this`. As
-  // `this` is being deleted, scheduling a PostTask() with `this` would be
-  // fatal (use-after-free). Additionally, as we're in shutdown, there isn't
-  // much point in trying to handle the error. If the error is really fatal,
-  // we'll cleanup the next time the backend is created.
-  if (db_)
-    db_->reset_error_callback();
 
   // First close the databases before optionally running the "destroy" task.
   CloseAllDatabases();
