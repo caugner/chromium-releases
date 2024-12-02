@@ -18,6 +18,7 @@
 #include "base/functional/bind.h"
 #include "base/location.h"
 #include "base/memory/ptr_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_split.h"
 #include "base/strings/utf_string_conversions.h"
@@ -48,6 +49,7 @@
 #include "ui/accessibility/accessibility_switches.h"
 #include "ui/accessibility/ax_enum_util.h"
 #include "ui/accessibility/ax_event_intent.h"
+#include "ui/accessibility/ax_mode_histogram_logger.h"
 #include "ui/accessibility/ax_node.h"
 #include "ui/accessibility/ax_role_properties.h"
 #include "ui/accessibility/ax_tree_id.h"
@@ -113,7 +115,7 @@ class ScopedFreezeAXTreeSource {
   }
 
  private:
-  blink::WebAXContext* context_;
+  raw_ptr<blink::WebAXContext, ExperimentalRenderer> context_;
 };
 
 RenderAccessibilityImpl::RenderAccessibilityImpl(
@@ -126,7 +128,7 @@ RenderAccessibilityImpl::RenderAccessibilityImpl(
       plugin_tree_source_(nullptr),
       ukm_timer_(std::make_unique<base::ElapsedTimer>()),
       last_ukm_source_id_(ukm::kInvalidSourceId),
-      serialize_post_lifecycle_(true) {
+      serialize_post_lifecycle_(serialize_post_lifecycle) {
   mojo::Remote<ukm::mojom::UkmRecorderFactory> factory;
   content::RenderThread::Get()->BindHostReceiver(
       factory.BindNewPipeAndPassReceiver());
@@ -266,6 +268,11 @@ void RenderAccessibilityImpl::AccessibilityModeChanged(const ui::AXMode& mode) {
 
   DCHECK(ax_context_);
   DCHECK_EQ(accessibility_mode_, ax_context_->GetAXMode());
+
+  // Log individual mode flags transitioning to the set state, as well as usage
+  // of named bundles of node flags.
+  ui::RecordAccessibilityModeHistograms(ui::AXHistogramPrefix::kBlink,
+                                        accessibility_mode_, old_mode);
 
   // Build (or rebuild) the accessibility tree with the new mode.
   if (was_on) {
@@ -469,11 +476,10 @@ void RenderAccessibilityImpl::PerformAction(const ui::AXActionData& data) {
       // not change.
       if (!ax_image_annotator_) {
         CreateAXImageAnnotator();
-        // Walk the tree to discover images, and mark them dirty so that
-        // they get added to the annotator.
+        // Rebuild the document tree so that images become annotated.
         DCHECK(ax_context_);
         ScopedFreezeAXTreeSource freeze(ax_context_.get());
-        ax_context_->MarkAllImageAXObjectsDirty();
+        ax_context_->MarkDocumentDirty();
       }
       break;
     case ax::mojom::Action::kSignalEndOfTest:
