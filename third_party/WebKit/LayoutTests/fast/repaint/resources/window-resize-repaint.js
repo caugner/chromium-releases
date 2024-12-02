@@ -11,12 +11,7 @@ var repaintRects = "";
 
 if (window.internals) {
     internals.settings.setUseDefaultImageInterpolationQuality(true);
-    // TODO(wangxianzhu): Some spv2 tests crash with under-invalidation-checking
-    // because the extra display items between Subsequence/EndSubsequence for
-    // under-invalidation checking breaks paint chunks. Should fix this when fixing
-    // crbug.com/596983.
-    if (!internals.runtimeFlags.slimmingPaintV2Enabled)
-        internals.runtimeFlags.slimmingPaintUnderInvalidationCheckingEnabled = true;
+    internals.runtimeFlags.slimmingPaintUnderInvalidationCheckingEnabled = true;
 }
 
 function doTest() {
@@ -38,6 +33,8 @@ function doTest() {
 if (window.testRunner) {
     testRunner.useUnfortunateSynchronousResizeMode();
     testRunner.waitUntilDone();
-    window.resizeTo(testSizes[0].width, testSizes[0].height);
-    testRunner.layoutAndPaintAsyncThen(doTest);
+    onload = function() {
+        window.resizeTo(testSizes[0].width, testSizes[0].height);
+        testRunner.layoutAndPaintAsyncThen(doTest);
+    };
 }

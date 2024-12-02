@@ -370,6 +370,8 @@ class Serializer {
    * @param {number} childIndex
    */
   handleSelection(parentNode, childIndex) {
+    if (this.selection_.isNone)
+      return;
     if (parentNode === this.selection_.focusNode &&
         childIndex === this.selection_.focusOffset) {
       this.emit('|');
@@ -388,6 +390,8 @@ class Serializer {
   handleCharacterData(node) {
     /** @type {string} */
     const text = node.nodeValue;
+    if (this.selection_.isNone)
+      return this.emit(text);
     /** @type {number} */
     const anchorOffset = this.selection_.anchorOffset;
     /** @type {number} */
@@ -462,9 +466,10 @@ class Serializer {
    * @param {!HTMLDocument} document
    */
   serialize(document) {
-    if (this.selection_.isNone)
-      return document.body.firstChild.outerHTML;
-    this.serializeChildren(document.body);
+    if (document.body)
+        this.serializeChildren(document.body);
+    else
+        this.serializeInternal(document.documentElement);
     return this.strings_.join('');
   }
 
@@ -511,12 +516,16 @@ class Sample {
   constructor(sampleText) {
     /** @const @type {!HTMLIFame} */
     this.iframe_ = document.createElement('iframe');
+    if (!document.body)
+        document.body = document.createElement("body");
     document.body.appendChild(this.iframe_);
     /** @const @type {!HTMLDocument} */
     this.document_ = this.iframe_.contentDocument;
     /** @const @type {!Selection} */
     this.selection_ = this.iframe_.contentWindow.getSelection();
     this.selection_.document = this.document_;
+    this.selection_.document.offsetLeft = this.iframe_.offsetLeft;
+    this.selection_.document.offsetTop = this.iframe_.offsetTop;
 
     this.load(sampleText);
   }
@@ -534,7 +543,7 @@ class Sample {
   load(sampleText) {
     const anchorMarker = sampleText.indexOf('^');
     const focusMarker = sampleText.indexOf('|');
-    if (focusMarker < 0) {
+    if (focusMarker < 0 && anchorMarker >= 0) {
       throw new Error(`You should specify caret position in "${sampleText}".`);
     }
     if (focusMarker != sampleText.lastIndexOf('|')) {
@@ -578,8 +587,6 @@ class Sample {
 }
 
 function assembleDescription() {
-  const RE_TEST_FUNCTION =
-      new RegExp('at Object.test \\(.*?([^/]+?):(\\d+):(\\d+)\\)');
   function getStack() {
     let stack;
     try {
@@ -589,11 +596,14 @@ function assembleDescription() {
     }
     return stack
   }
+
+  const RE_IN_ASSERT_SELECTION = new RegExp('assert_selection\\.js');
   for (const line of getStack()) {
-    const match = RE_TEST_FUNCTION.exec(line);
-    if (!match)
-      continue;
-    return `${match[1]}(${match[2]})`;
+    const match = RE_IN_ASSERT_SELECTION.exec(line);
+    if (!match) {
+      const RE_LAYOUTTESTS = new RegExp('LayoutTests.*');
+      return RE_LAYOUTTESTS.exec(line);
+    }
   }
   return '';
 }
@@ -626,6 +636,19 @@ function checkExpectedText(expectedText) {
 }
 
 /**
+ * @param {string} str1
+ * @param {string} str2
+ * @return {string}
+ */
+function commonPrefixOf(str1, str2) {
+  for (let index = 0; index < str1.length; ++index) {
+    if (str1[index] !== str2[index])
+      return str1.substr(0, index);
+  }
+  return str1;
+}
+
+/**
  * @param {string} inputText
  * @param {function(!Selection)|string}
  * @param {string} expectedText
@@ -641,7 +664,7 @@ function assertSelection(
   if (typeof(tester) === 'function') {
     tester.call(window, sample.selection);
   } else if (typeof(tester) === 'string') {
-    const strings = tester.split(' ');
+    const strings = tester.split(/ (.+)/);
     sample.document.execCommand(strings[0], false, strings[1]);
   } else {
     throw new Error(`Invalid tester: ${tester}`);
@@ -650,9 +673,14 @@ function assertSelection(
   const actualText = sample.serialize();
   // We keep sample HTML when assertion is false for ease of debugging test
   // case.
-  if (actualText === expectedText)
+  if (actualText === expectedText) {
     sample.remove();
-  assert_equals(actualText, expectedText, description);
+    return;
+  }
+  throw new Error(`${description}\n` +
+    `\t expected ${expectedText},\n` +
+    `\t but got  ${actualText},\n` +
+    `\t sameupto ${commonPrefixOf(expectedText, actualText)}`);
 }
 
 // Export symbols

@@ -193,9 +193,7 @@ void ChromeAppDelegate::InitWebContents(content::WebContents* web_contents) {
   extensions::ChromeExtensionWebContentsObserver::CreateForWebContents(
       web_contents);
 
-  // Kiosk app supports zooming.
-  if (chrome::IsRunningInForcedAppMode())
-    zoom::ZoomController::CreateForWebContents(web_contents);
+  zoom::ZoomController::CreateForWebContents(web_contents);
 }
 
 void ChromeAppDelegate::RenderViewCreated(
@@ -218,7 +216,7 @@ void ChromeAppDelegate::RenderViewCreated(
 
 void ChromeAppDelegate::ResizeWebContents(content::WebContents* web_contents,
                                           const gfx::Size& size) {
-  ::ResizeWebContents(web_contents, size);
+  ::ResizeWebContents(web_contents, gfx::Rect(size));
 }
 
 content::WebContents* ChromeAppDelegate::OpenURLFromTab(

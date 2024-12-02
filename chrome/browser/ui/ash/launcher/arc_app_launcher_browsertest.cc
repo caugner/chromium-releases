@@ -2,14 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ash/shelf/shelf_delegate.h"
+#include "ash/common/shelf/shelf_delegate.h"
+#include "ash/common/wm_shell.h"
 #include "ash/shelf/shelf_util.h"
-#include "ash/shell.h"
 #include "ash/wm/window_util.h"
 #include "base/macros.h"
 #include "base/run_loop.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/ui/app_list/app_list_service.h"
+#include "chrome/browser/ui/app_list/app_list_syncable_service.h"
+#include "chrome/browser/ui/app_list/app_list_syncable_service_factory.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_list_prefs.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_utils.h"
 #include "chrome/browser/ui/ash/launcher/arc_app_deferred_launcher_controller.h"
@@ -45,7 +47,8 @@ const char kTestAppName[] = "Test Arc App";
 const char kTestAppName2[] = "Test Arc App 2";
 const char kTestAppPackage[] = "test.arc.app.package";
 const char kTestAppActivity[] = "test.arc.app.package.activity";
-const char kTestAppActivity2[] = "test.arc.app.package.activity2";
+const char kTestAppActivity2[] = "test.arc.gitapp.package.activity2";
+constexpr int kAppAnimatedThresholdMs = 100;
 
 std::string GetTestApp1Id() {
   return ArcAppListPrefs::GetAppId(kTestAppPackage, kTestAppActivity);
@@ -76,9 +79,47 @@ mojo::Array<arc::mojom::AppInfoPtr> GetTestAppsList(bool multi_app) {
   return mojo::Array<arc::mojom::AppInfoPtr>::From(apps);
 }
 
-ash::ShelfDelegate* shelf_delegate() {
-  return ash::Shell::GetInstance()->GetShelfDelegate();
+ChromeLauncherController* chrome_controller() {
+  return ChromeLauncherController::instance();
 }
+
+ash::ShelfDelegate* shelf_delegate() {
+  return ash::WmShell::Get()->shelf_delegate();
+}
+
+class AppAnimatedWaiter {
+ public:
+  explicit AppAnimatedWaiter(const std::string& app_id) : app_id_(app_id) {}
+
+  void Wait() {
+    const base::TimeDelta threshold =
+        base::TimeDelta::FromMilliseconds(kAppAnimatedThresholdMs);
+    ArcAppDeferredLauncherController* controller =
+        chrome_controller()->GetArcDeferredLauncher();
+    while (controller->GetActiveTime(app_id_) < threshold) {
+      base::RunLoop().RunUntilIdle();
+    }
+  }
+
+ private:
+  const std::string app_id_;
+};
+
+enum TestAction {
+  TEST_ACTION_START,  // Start app on app appears.
+  TEST_ACTION_EXIT,   // Exit Chrome during animation.
+  TEST_ACTION_CLOSE,  // Close item during animation.
+};
+
+// Test parameters include TestAction and pin/unpin state.
+typedef std::tr1::tuple<TestAction, bool> TestParameter;
+
+TestParameter build_test_parameter[] = {
+    TestParameter(TEST_ACTION_START, false),
+    TestParameter(TEST_ACTION_EXIT, false),
+    TestParameter(TEST_ACTION_CLOSE, false),
+    TestParameter(TEST_ACTION_START, true),
+};
 
 }  // namespace
 
@@ -166,9 +207,109 @@ class ArcAppLauncherBrowserTest : public ExtensionBrowserTest {
   DISALLOW_COPY_AND_ASSIGN(ArcAppLauncherBrowserTest);
 };
 
+class ArcAppDeferredLauncherBrowserTest
+    : public ArcAppLauncherBrowserTest,
+      public testing::WithParamInterface<TestParameter> {
+ public:
+  ArcAppDeferredLauncherBrowserTest() {}
+  ~ArcAppDeferredLauncherBrowserTest() override {}
+
+ protected:
+  bool is_pinned() const { return std::tr1::get<1>(GetParam()); }
+
+  TestAction test_action() const { return std::tr1::get<0>(GetParam()); }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(ArcAppDeferredLauncherBrowserTest);
+};
+
+// This tests simulates normal workflow for starting Arc app in deferred mode.
+IN_PROC_BROWSER_TEST_P(ArcAppDeferredLauncherBrowserTest, StartAppDeferred) {
+  // Install app to remember existing apps.
+  StartInstance();
+  InstallTestApps(false);
+  SendPackageAdded(false);
+
+  const std::string app_id = GetTestApp1Id();
+  if (is_pinned()) {
+    shelf_delegate()->PinAppWithID(app_id);
+    EXPECT_TRUE(shelf_delegate()->GetShelfIDForAppID(app_id));
+  } else {
+    EXPECT_FALSE(shelf_delegate()->GetShelfIDForAppID(app_id));
+  }
+
+  StopInstance();
+  std::unique_ptr<ArcAppListPrefs::AppInfo> app_info =
+      app_prefs()->GetApp(app_id);
+  EXPECT_FALSE(app_info);
+
+  // Restart instance. App should be taken from prefs but its state is non-ready
+  // currently.
+  StartInstance();
+  app_info = app_prefs()->GetApp(app_id);
+  ASSERT_TRUE(app_info);
+  EXPECT_FALSE(app_info->ready);
+  if (is_pinned())
+    EXPECT_TRUE(shelf_delegate()->GetShelfIDForAppID(app_id));
+  else
+    EXPECT_FALSE(shelf_delegate()->GetShelfIDForAppID(app_id));
+
+  // Launching non-ready Arc app creates item on shelf and spinning animation.
+  arc::LaunchApp(profile(), app_id);
+  EXPECT_TRUE(shelf_delegate()->GetShelfIDForAppID(app_id));
+  AppAnimatedWaiter(app_id).Wait();
+
+  switch (test_action()) {
+    case TEST_ACTION_START:
+      // Now simulates that Arc is started and app list is refreshed. This
+      // should stop animation and delete icon from the shelf.
+      InstallTestApps(false);
+      SendPackageAdded(false);
+      EXPECT_TRUE(chrome_controller()
+                      ->GetArcDeferredLauncher()
+                      ->GetActiveTime(app_id)
+                      .is_zero());
+      if (is_pinned())
+        EXPECT_TRUE(shelf_delegate()->GetShelfIDForAppID(app_id));
+      else
+        EXPECT_FALSE(shelf_delegate()->GetShelfIDForAppID(app_id));
+      break;
+    case TEST_ACTION_EXIT:
+      // Just exist Chrome.
+      break;
+    case TEST_ACTION_CLOSE:
+      // Close item during animation.
+      {
+        LauncherItemController* controller =
+            chrome_controller()->GetLauncherItemController(
+                shelf_delegate()->GetShelfIDForAppID(app_id));
+        ASSERT_TRUE(controller);
+        controller->Close();
+        EXPECT_TRUE(chrome_controller()
+                        ->GetArcDeferredLauncher()
+                        ->GetActiveTime(app_id)
+                        .is_zero());
+        if (is_pinned())
+          EXPECT_TRUE(shelf_delegate()->GetShelfIDForAppID(app_id));
+        else
+          EXPECT_FALSE(shelf_delegate()->GetShelfIDForAppID(app_id));
+      }
+      break;
+  }
+}
+
+INSTANTIATE_TEST_CASE_P(ArcAppDeferredLauncherBrowserTestInstance,
+                        ArcAppDeferredLauncherBrowserTest,
+                        ::testing::ValuesIn(build_test_parameter));
+
 // This tests validates pin state on package update and remove.
 IN_PROC_BROWSER_TEST_F(ArcAppLauncherBrowserTest, PinOnPackageUpdateAndRemove) {
   StartInstance();
+
+  // Make use app list sync service is started. Normally it is started when
+  // sycing is initialized.
+  app_list::AppListSyncableServiceFactory::GetForProfile(profile())->GetModel();
+
   InstallTestApps(true);
   SendPackageAdded(false);
 

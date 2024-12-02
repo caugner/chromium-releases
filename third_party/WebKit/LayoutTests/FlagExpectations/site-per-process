@@ -41,13 +41,6 @@ http/tests/security/mixedContent/active-subresource-in-http-iframe-not-blocked.h
 http/tests/security/mixedContent/insecure-iframe-in-iframe.html [ Failure ]
 http/tests/security/mixedContent/insecure-iframe-in-main-frame-allowed.html [ Failure ]
 
-# https://crbug.com/585171 - iframe restored from history should be excluded from performance entries.
-http/tests/misc/resource-timing-iframe-restored-from-history.html [ Failure Timeout ]
-
-# https://crbug.com/585194 - back/forward lists look different with --site-per-process
-http/tests/navigation/back-to-dynamic-iframe.html [ Failure Timeout ]
-http/tests/navigation/back-to-redirect-with-frame.php [ Failure ]
-
 # https://crbug.com/585188 - testRunner.addOriginAccessWhitelistEntry is not replicated to OOPIFs.
 http/tests/xmlhttprequest/origin-whitelisting-all.html [ Failure ]
 http/tests/xmlhttprequest/origin-whitelisting-ip-addresses.html [ Failure ]
@@ -68,8 +61,9 @@ http/tests/w3c/webperf/submission/Intel/resource-timing/test_resource_timing_cro
 http/tests/w3c/webperf/submission/Intel/resource-timing/test_resource_timing_cross_origin_resource_request.html [ Timeout ]
 http/tests/w3c/webperf/submission/Intel/resource-timing/test_resource_timing_timing_allow_cross_origin_resource_request.html [ Timeout ]
 
-# https://crbug.com/585501 - csp directives are not replicated to OOPIFs
-http/tests/security/contentSecurityPolicy/frame-src-child-frame-navigates-to-blocked-origin.html [ Failure ]
+# https://crbug.com/611232 - CSP checks from remote parent frame do not properly report violations
+http/tests/security/contentSecurityPolicy/frame-src-child-frame-navigates-to-blocked-origin.html [ Timeout ]
+http/tests/security/contentSecurityPolicy/1.1/plugintypes-affects-cross-site-child-disallowed.html [ Failure ]
 
 # https://crbug.com/615156 - Need to make IntersectionObserver work with OOPIFs.
 http/tests/intersection-observer/iframe-cross-origin.html [ Timeout ]

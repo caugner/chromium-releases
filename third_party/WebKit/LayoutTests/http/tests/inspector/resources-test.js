@@ -11,30 +11,30 @@ InspectorTest.requestURLComparer = function(r1, r2)
 InspectorTest.runAfterCachedResourcesProcessed = function(callback)
 {
     if (!InspectorTest.resourceTreeModel._cachedResourcesProcessed)
-        InspectorTest.resourceTreeModel.addEventListener(WebInspector.ResourceTreeModel.EventTypes.CachedResourcesLoaded, callback);
+        InspectorTest.resourceTreeModel.addEventListener(WebInspector.ResourceTreeModel.Events.CachedResourcesLoaded, callback);
     else
         callback();
 }
 
 InspectorTest.runAfterResourcesAreFinished = function(resourceURLs, callback)
 {
-    var resourceURLsMap = resourceURLs.keySet();
+    var resourceURLsMap = new Set(resourceURLs);
 
     function checkResources()
     {
-        for (url in resourceURLsMap) {
+        for (var url of resourceURLsMap) {
             var resource = InspectorTest.resourceMatchingURL(url);
             if (resource)
-                delete resourceURLsMap[url];
+                resourceURLsMap.delete(url);
         }
-        if (!Object.keys(resourceURLsMap).length) {
-            InspectorTest.resourceTreeModel.removeEventListener(WebInspector.ResourceTreeModel.EventTypes.ResourceAdded, checkResources);
+        if (!resourceURLsMap.size) {
+            InspectorTest.resourceTreeModel.removeEventListener(WebInspector.ResourceTreeModel.Events.ResourceAdded, checkResources);
             callback();
         }
     }
     checkResources();
-    if (Object.keys(resourceURLsMap).length)
-        InspectorTest.resourceTreeModel.addEventListener(WebInspector.ResourceTreeModel.EventTypes.ResourceAdded, checkResources);
+    if (resourceURLsMap.size)
+        InspectorTest.resourceTreeModel.addEventListener(WebInspector.ResourceTreeModel.Events.ResourceAdded, checkResources);
 }
 
 InspectorTest.showResource = function(resourceURL, callback)
@@ -58,7 +58,7 @@ InspectorTest.showResource = function(resourceURL, callback)
         if (sourceFrame.loaded)
             callbackWrapper(sourceFrame);
         else
-            InspectorTest.addSniffer(sourceFrame, "onTextEditorContentLoaded", callbackWrapper.bind(null, sourceFrame));
+            InspectorTest.addSniffer(sourceFrame, "onTextEditorContentSet", callbackWrapper.bind(null, sourceFrame));
     }
     InspectorTest.runAfterResourcesAreFinished([resourceURL], showResourceCallback);
 }

@@ -21,14 +21,14 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/sync/api/sync_change_processor.h"
+#include "components/sync/api/sync_data.h"
+#include "components/sync/api/sync_merge_result.h"
+#include "components/sync/protocol/sync.pb.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/uninstall_reason.h"
 #include "extensions/common/constants.h"
-#include "sync/api/sync_change_processor.h"
-#include "sync/api/sync_data.h"
-#include "sync/api/sync_merge_result.h"
-#include "sync/protocol/sync.pb.h"
 #include "ui/app_list/app_list_folder_item.h"
 #include "ui/app_list/app_list_item.h"
 #include "ui/app_list/app_list_model.h"
@@ -37,9 +37,11 @@
 #include "ui/base/l10n/l10n_util.h"
 
 #if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/arc/arc_auth_service.h"
 #include "chrome/browser/chromeos/file_manager/app_id.h"
 #include "chrome/browser/chromeos/genius_app/app_id.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_item.h"
+#include "chrome/browser/ui/app_list/arc/arc_app_list_prefs.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_model_builder.h"
 #endif
 
@@ -219,6 +221,17 @@ class AppListSyncableService::ModelObserver : public AppListModelObserver {
     // deleted when the last item is removed (in PruneEmptySyncFolders()).
     if (item->GetItemType() == AppListFolderItem::kItemType)
       return;
+
+#if defined(OS_CHROMEOS)
+    if (item->GetItemType() == ArcAppItem::kItemType) {
+      // Don't sync remove changes coming as result of disabling Arc.
+      const arc::ArcAuthService* auth_service = arc::ArcAuthService::Get();
+      DCHECK(auth_service);
+      if (!auth_service->IsArcEnabled())
+        return;
+    }
+#endif
+
     owner_->RemoveSyncItem(item->id());
   }
 
@@ -263,7 +276,8 @@ AppListSyncableService::~AppListSyncableService() {
   model_observer_.reset();
   model_pref_updater_.reset();
 
-  STLDeleteContainerPairSecondPointers(sync_items_.begin(), sync_items_.end());
+  base::STLDeleteContainerPairSecondPointers(sync_items_.begin(),
+                                             sync_items_.end());
 }
 
 void AppListSyncableService::BuildModel() {
@@ -622,7 +636,7 @@ void AppListSyncableService::PruneEmptySyncFolders() {
     SyncItem* sync_item = (iter++)->second;
     if (sync_item->item_type != sync_pb::AppListSpecifics::TYPE_FOLDER)
       continue;
-    if (!ContainsKey(parent_ids, sync_item->item_id))
+    if (!base::ContainsKey(parent_ids, sync_item->item_id))
       DeleteSyncItem(sync_item);
   }
 }
@@ -945,7 +959,7 @@ AppListSyncableService::SyncItem*
 AppListSyncableService::CreateSyncItem(
     const std::string& item_id,
     sync_pb::AppListSpecifics::AppListItemType item_type) {
-  DCHECK(!ContainsKey(sync_items_, item_id));
+  DCHECK(!base::ContainsKey(sync_items_, item_id));
   SyncItem* sync_item = new SyncItem(item_id, item_type);
   sync_items_[item_id] = sync_item;
   return sync_item;
@@ -1046,6 +1060,12 @@ syncer::StringOrdinal AppListSyncableService::GetOemFolderPos() {
 }
 
 bool AppListSyncableService::AppIsOem(const std::string& id) {
+#if defined(OS_CHROMEOS)
+  const ArcAppListPrefs* arc_prefs = ArcAppListPrefs::Get(profile_);
+  if (arc_prefs && arc_prefs->IsOem(id))
+    return true;
+#endif
+
   if (!extension_system_->extension_service())
     return false;
   const extensions::Extension* extension =

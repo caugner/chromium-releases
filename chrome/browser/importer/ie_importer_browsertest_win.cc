@@ -22,6 +22,7 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
+#include "base/run_loop.h"
 #include "base/stl_util.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_util.h"
@@ -322,7 +323,7 @@ class TestObserver : public ProfileWriter,
     // TODO(jcampan): bug 1169230: we should test keyword importing for IE.
     // In order to do that we'll probably need to mock the Windows registry.
     NOTREACHED();
-    STLDeleteContainerPointers(template_url.begin(), template_url.end());
+    base::STLDeleteContainerPointers(template_url.begin(), template_url.end());
   }
 
   void AddFavicons(const favicon_base::FaviconUsageDataList& usage) override {
@@ -521,7 +522,7 @@ IN_PROC_BROWSER_TEST_F(IEImporterBrowserTest, IEImporter) {
       browser()->profile(),
       importer::HISTORY | importer::PASSWORDS | importer::FAVORITES,
       observer);
-  base::MessageLoop::current()->Run();
+  base::RunLoop().Run();
 
   // Cleans up.
   url_history_stg2->DeleteUrl(kIEIdentifyUrl, 0);
@@ -599,7 +600,7 @@ IN_PROC_BROWSER_TEST_F(IEImporterBrowserTest,
         browser()->profile(),
         importer::FAVORITES,
         observer);
-    base::MessageLoop::current()->Run();
+    base::RunLoop().Run();
   }
 }
 
@@ -626,7 +627,7 @@ IN_PROC_BROWSER_TEST_F(IEImporterBrowserTest, IE7ImporterPasswordsTest) {
       browser()->profile(),
       importer::PASSWORDS,
       observer);
-  base::MessageLoop::current()->Run();
+  base::RunLoop().Run();
 }
 
 IN_PROC_BROWSER_TEST_F(IEImporterBrowserTest, IEImporterHomePageTest) {
@@ -652,6 +653,6 @@ IN_PROC_BROWSER_TEST_F(IEImporterBrowserTest, IEImporterHomePageTest) {
       browser()->profile(),
       importer::HOME_PAGE,
       observer);
-  base::MessageLoop::current()->Run();
+  base::RunLoop().Run();
 }
 

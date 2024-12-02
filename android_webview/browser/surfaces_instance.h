@@ -38,16 +38,14 @@ class SurfacesInstance : public base::RefCounted<SurfacesInstance>,
  public:
   static scoped_refptr<SurfacesInstance> GetOrCreateInstance();
 
-  std::unique_ptr<cc::SurfaceIdAllocator> CreateSurfaceIdAllocator();
+  uint32_t AllocateSurfaceClientId();
   cc::SurfaceManager* GetSurfaceManager();
-  void SetBackingFrameBufferObject(int framebuffer_binding_ext);
 
   void DrawAndSwap(const gfx::Size& viewport,
                    const gfx::Rect& clip,
                    const gfx::Transform& transform,
                    const gfx::Size& frame_size,
-                   const cc::SurfaceId& child_id,
-                   const ScopedAppGLStateRestore& gl_state);
+                   const cc::SurfaceId& child_id);
 
   void AddChildId(const cc::SurfaceId& child_id);
   void RemoveChildId(const cc::SurfaceId& child_id);
@@ -61,6 +59,10 @@ class SurfacesInstance : public base::RefCounted<SurfacesInstance>,
   // cc::DisplayClient overrides.
   void DisplayOutputSurfaceLost() override {}
   void DisplaySetMemoryPolicy(const cc::ManagedMemoryPolicy& policy) override {}
+  void DisplayWillDrawAndSwap(
+      bool will_draw_and_swap,
+      const cc::RenderPassList& render_passes) override {}
+  void DisplayDidDrawAndSwap() override {}
 
   // cc::SurfaceFactoryClient implementation.
   void ReturnResources(const cc::ReturnedResourceArray& resources) override;
@@ -68,9 +70,8 @@ class SurfacesInstance : public base::RefCounted<SurfacesInstance>,
 
   void SetEmptyRootFrame();
 
-  uint32_t next_surface_id_namespace_;
+  uint32_t next_surface_client_id_;
 
-  scoped_refptr<AwGLSurface> gl_surface_;
   std::unique_ptr<cc::SurfaceManager> surface_manager_;
   std::unique_ptr<cc::Display> display_;
   std::unique_ptr<cc::SurfaceIdAllocator> surface_id_allocator_;

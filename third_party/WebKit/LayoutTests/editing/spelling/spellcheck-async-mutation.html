@@ -29,9 +29,8 @@ description(
 );
 
 var jsTestIsAsync = true;
-
-if (window.internals)
-    internals.settings.setUnifiedTextCheckerEnabled(true);
+if (window.testRunner)
+    testRunner.setMockSpellCheckerEnabled(true);
 
 var sourceIds = ['source'];
 var destElems = ['textarea', 'input', 'contenteditable'];

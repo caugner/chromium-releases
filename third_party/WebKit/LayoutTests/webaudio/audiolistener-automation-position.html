@@ -181,11 +181,11 @@
         var prefix = 'Distance model: "' + options.distanceModel.model + '"';
         prefix += ', rolloff: ' + options.distanceModel.rolloff;
         success = Should(prefix + ": left channel", actualLeft, {
-            verbose: true
+            precision: 5
           })
           .beCloseToArray(expectedLeft, 0) && success;
         success = Should(prefix + ": right channel", actualRight, {
-            verbose: true
+            precision: 5
           })
           .beCloseToArray(expectedRight, 0) && success;
 

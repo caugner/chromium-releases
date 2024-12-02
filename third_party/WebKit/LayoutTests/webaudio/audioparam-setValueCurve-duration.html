@@ -1,10 +1,10 @@
 <!doctype html>
 <html>
   <head>
+    <script src="../resources/js-test.js"></script>
     <script src="resources/compatibility.js"></script>
     <script src="resources/audio-testing.js"></script>
     <script src="resources/audioparam-testing.js"></script>
-    <script src="../resources/js-test.js"></script>
     <title>Test setValueCurveAtTime with Huge Duration</title>
   </head>
 
@@ -52,7 +52,9 @@
 
            var message = "setValueCurve([" + curve + "], 0, " + duration + ")";
 
-           success = Should("Max amplitude of " + message, max).beLessThanOrEqualTo(expectedMax);
+           success = Should("Max amplitude of " + message, max, {
+             brief: true
+           }).beLessThanOrEqualTo(expectedMax);
 
            if (success)
              testPassed(message + " correctly rendered.")

@@ -18,6 +18,8 @@ class BrowserContext;
 namespace arc {
 
 extern const char kPlayStoreAppId[];
+extern const char kPlayStorePackage[];
+extern const char kPlayStoreActivity[];
 extern const char kSettingsAppId[];
 
 using CanHandleResolutionCallback = base::Callback<void(bool)>;
@@ -41,6 +43,15 @@ bool LaunchApp(content::BrowserContext* context,
 bool LaunchAppWithRect(content::BrowserContext* context,
                        const std::string& app_id,
                        const gfx::Rect& target_rect);
+
+// Sets task active.
+void SetTaskActive(int task_id);
+
+// Closes the task.
+void CloseTask(int task_id);
+
+// Open TalkBack settings window.
+void ShowTalkBackSettings();
 
 // Tests if the application can use the given target resolution.
 // The callback will receive the information once known.

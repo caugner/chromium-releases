@@ -75,6 +75,10 @@ enum class ProvisioningResult : int {
   // ARC instance is stopped during the sign in procedure.
   ARC_STOPPED = 16,
 
+  // ARC instance did not report sign in status within a reasonable amount of
+  // time.
+  OVERALL_SIGN_IN_TIMEOUT = 17,
+
   // The size of this enum; keep last.
   SIZE,
 };
@@ -82,7 +86,7 @@ enum class ProvisioningResult : int {
 void UpdateOptInActionUMA(OptInActionType type);
 void UpdateOptInCancelUMA(OptInCancelReason reason);
 void UpdateEnabledStateUMA(bool enabled);
-void UpdateProvisioningResultUMA(ProvisioningResult result);
+void UpdateProvisioningResultUMA(ProvisioningResult result, bool managed);
 void UpdateProvisioningTiming(const base::TimeDelta& elapsed_time,
                               bool success,
                               bool managed);

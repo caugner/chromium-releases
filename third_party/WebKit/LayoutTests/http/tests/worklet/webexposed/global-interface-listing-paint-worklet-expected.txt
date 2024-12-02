@@ -24,6 +24,11 @@ CONSOLE MESSAGE: line 137:     getter vmax
 CONSOLE MESSAGE: line 137:     getter vmin
 CONSOLE MESSAGE: line 137:     getter vw
 CONSOLE MESSAGE: line 137:     method constructor
+CONSOLE MESSAGE: line 137: interface CSSImageValue : CSSResourceValue
+CONSOLE MESSAGE: line 137:     getter intrinsicHeight
+CONSOLE MESSAGE: line 137:     getter intrinsicRatio
+CONSOLE MESSAGE: line 137:     getter intrinsicWidth
+CONSOLE MESSAGE: line 137:     method constructor
 CONSOLE MESSAGE: line 137: interface CSSKeywordValue : CSSStyleValue
 CONSOLE MESSAGE: line 137:     getter keywordValue
 CONSOLE MESSAGE: line 137:     method constructor
@@ -34,7 +39,7 @@ CONSOLE MESSAGE: line 137:     method constructor
 CONSOLE MESSAGE: line 137:     method divide
 CONSOLE MESSAGE: line 137:     method multiply
 CONSOLE MESSAGE: line 137:     method subtract
-CONSOLE MESSAGE: line 137: interface CSSMatrix : CSSTransformComponent
+CONSOLE MESSAGE: line 137: interface CSSMatrixTransformComponent : CSSTransformComponent
 CONSOLE MESSAGE: line 137:     getter a
 CONSOLE MESSAGE: line 137:     getter b
 CONSOLE MESSAGE: line 137:     getter c
@@ -68,6 +73,9 @@ CONSOLE MESSAGE: line 137: interface CSSPositionValue : CSSStyleValue
 CONSOLE MESSAGE: line 137:     getter x
 CONSOLE MESSAGE: line 137:     getter y
 CONSOLE MESSAGE: line 137:     method constructor
+CONSOLE MESSAGE: line 137: interface CSSResourceValue : CSSStyleValue
+CONSOLE MESSAGE: line 137:     getter state
+CONSOLE MESSAGE: line 137:     method constructor
 CONSOLE MESSAGE: line 137: interface CSSRotation : CSSTransformComponent
 CONSOLE MESSAGE: line 137:     getter angle
 CONSOLE MESSAGE: line 137:     getter x
@@ -92,6 +100,12 @@ CONSOLE MESSAGE: line 137: interface CSSStyleValue
 CONSOLE MESSAGE: line 137:     static method parse
 CONSOLE MESSAGE: line 137:     getter cssText
 CONSOLE MESSAGE: line 137:     method constructor
+CONSOLE MESSAGE: line 137: interface CSSTokenStreamValue : CSSStyleValue
+CONSOLE MESSAGE: line 137:     method constructor
+CONSOLE MESSAGE: line 137:     method entries
+CONSOLE MESSAGE: line 137:     method forEach
+CONSOLE MESSAGE: line 137:     method keys
+CONSOLE MESSAGE: line 137:     method values
 CONSOLE MESSAGE: line 137: interface CSSTransformComponent
 CONSOLE MESSAGE: line 137:     getter cssText
 CONSOLE MESSAGE: line 137:     method asMatrix
@@ -108,6 +122,13 @@ CONSOLE MESSAGE: line 137: interface CSSTranslation : CSSTransformComponent
 CONSOLE MESSAGE: line 137:     getter x
 CONSOLE MESSAGE: line 137:     getter y
 CONSOLE MESSAGE: line 137:     getter z
+CONSOLE MESSAGE: line 137:     method constructor
+CONSOLE MESSAGE: line 137: interface CSSURLImageValue : CSSImageValue
+CONSOLE MESSAGE: line 137:     getter url
+CONSOLE MESSAGE: line 137:     method constructor
+CONSOLE MESSAGE: line 137: interface CSSVariableReferenceValue
+CONSOLE MESSAGE: line 137:     getter fallback
+CONSOLE MESSAGE: line 137:     getter variable
 CONSOLE MESSAGE: line 137:     method constructor
 CONSOLE MESSAGE: line 137: interface CountQueuingStrategy
 CONSOLE MESSAGE: line 137:     method constructor

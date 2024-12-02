@@ -127,10 +127,10 @@ void ExternalProviderImpl::SetPrefs(base::DictionaryValue* prefs) {
 
   RetrieveExtensionsFromPrefs(&external_update_url_extensions,
                               &external_file_extensions);
-  for (const auto& extension : external_update_url_extensions)
+  for (auto* extension : external_update_url_extensions)
     service_->OnExternalExtensionUpdateUrlFound(*extension, true);
 
-  for (const auto& extension : external_file_extensions)
+  for (auto* extension : external_file_extensions)
     service_->OnExternalExtensionFileFound(*extension);
 
   service_->OnExternalProviderReady(this);
@@ -247,7 +247,7 @@ void ExternalProviderImpl::RetrieveExtensionsFromPrefs(
         if (supported_locales->GetString(j, &current_locale) &&
             l10n_util::IsValidLocaleSyntax(current_locale)) {
           current_locale = l10n_util::NormalizeLocale(current_locale);
-          if (ContainsValue(browser_locales, current_locale)) {
+          if (base::ContainsValue(browser_locales, current_locale)) {
             locale_supported = true;
             break;
           }
@@ -343,7 +343,8 @@ void ExternalProviderImpl::RetrieveExtensionsFromPrefs(
         path = base_path.Append(external_crx);
       }
 
-      std::unique_ptr<Version> version(new Version(external_version));
+      std::unique_ptr<base::Version> version(
+          new base::Version(external_version));
       if (!version->IsValid()) {
         LOG(WARNING) << "Malformed extension dictionary for extension: "
                      << extension_id.c_str() << ".  Invalid version string \""
@@ -402,7 +403,7 @@ bool ExternalProviderImpl::HasExtension(
 bool ExternalProviderImpl::GetExtensionDetails(
     const std::string& id,
     Manifest::Location* location,
-    std::unique_ptr<Version>* version) const {
+    std::unique_ptr<base::Version>* version) const {
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   CHECK(prefs_.get());
   CHECK(ready_);
@@ -422,7 +423,7 @@ bool ExternalProviderImpl::GetExtensionDetails(
       return false;
 
     if (version)
-      version->reset(new Version(external_version));
+      version->reset(new base::Version(external_version));
 
   } else {
     NOTREACHED();  // Chrome should not allow prefs to get into this state.
@@ -443,9 +444,9 @@ bool ExternalProviderImpl::HandleMinProfileVersion(
   if (profile_ &&
       extension->GetString(kMinProfileCreatedByVersion,
                            &min_profile_created_by_version)) {
-    Version profile_version(
+    base::Version profile_version(
         profile_->GetPrefs()->GetString(prefs::kProfileCreatedByVersion));
-    Version min_version(min_profile_created_by_version);
+    base::Version min_version(min_profile_created_by_version);
     if (min_version.IsValid() && profile_version.CompareTo(min_version) < 0) {
       unsupported_extensions->insert(extension_id);
       VLOG(1) << "Skip installing (or uninstall) external extension: "

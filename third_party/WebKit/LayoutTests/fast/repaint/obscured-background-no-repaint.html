@@ -1,7 +1,5 @@
 <html>
 <head>
-<script src="../../resources/run-after-layout-and-paint.js"></script>
-<script src="resources/text-based-repaint.js"></script>
 <style type="text/css">
     #test1 div {
         height: 100px;
@@ -46,42 +44,82 @@
 </style>
 <script>
     // Test that obscured animated gif does not trigger repaints.
-    if (window.testRunner)
+    if (window.testRunner) {
         testRunner.waitUntilDone();
-    window.testIsAsync = true;
-    function repaintTest()
-    {
-        runAfterLayoutAndPaint(finishRepaintTest);
+        testRunner.dumpAsText();
+    }
+
+    if (window.internals) {
+        internals.settings.setUseDefaultImageInterpolationQuality(true);
+        internals.runtimeFlags.slimmingPaintUnderInvalidationCheckingEnabled = true;
+    }
+
+    function finish() {
+        var layerTree = window.internals.layerTreeAsText(document, internals.LAYER_TREE_INCLUDES_PAINT_INVALIDATIONS);
+        var invalidations = JSON.parse(layerTree).objectPaintInvalidations;
+        // Passes if there is no invalidations other than imgForAdvanceImageAnimation,
+        // or only invalidations because of background obscuration change.
+        // This is because before the delayed image decoder finishes decoding the image,
+        // we first assume the image is not opaque. If the image is found actually opaque
+        // after decoding, the background obscuration status of covered elements will
+        // change and cause paint invalidation.
+        var invalidatedObjects = {};
+        if (invalidations) {
+            for (var i = 0; i < invalidations.length; ++i) {
+                var object = invalidations[i].object;
+                if (object.indexOf('imgForAdvanceImageAnimation') != -1)
+                    continue;
+                if ((object.indexOf('target3') != -1 || object.indexOf('target4') != -1) && invalidations[i].reason == 'background obscuration change')
+                    continue;
+                invalidatedObjects[object] = true;
+            }
+        }
+
+        if (Object.keys(invalidatedObjects).length)
+            output.textContent = 'FAIL: Unexpected paint invalidations: ' + JSON.stringify(invalidatedObjects) + '\n' + layerTree;
+        else
+            output.textContent = 'PASS';
+        testRunner.notifyDone();
     }
 
     function start() {
         if (!window.testRunner || !window.internals)
             return;
 
-        var img = new Image();
-        img.onload = runRepaintTest;
-        img.src = "resources/animated.gif";
+        // Ensure the deferred decoder has decoded resources/apple.jpg.
+        testRunner.capturePixelsAsyncThen(function() {
+            internals.startTrackingRepaints(document);
+            internals.advanceImageAnimation(imgForAdvanceImageAnimation);
+            testRunner.layoutAndPaintAsyncThen(function() {
+                internals.advanceImageAnimation(imgForAdvanceImageAnimation);
+                testRunner.layoutAndPaintAsyncThen(function() {
+                    internals.advanceImageAnimation(imgForAdvanceImageAnimation);
+                    testRunner.layoutAndPaintAsyncThen(finish);
+                });
+            });
+        });
     }
+
 </script>
 </head>
 <body onload="start()">
 <div id="test1">
-    <div class="parent">
+    <div id="target1" class="parent">
         <div class="child">
         </div>
     </div>
 </div>
 <div id="test2">
-    <div class="parent">
+    <div id="target2" class="parent">
         <div class="child">
         </div>
     </div>
 </div>
 <div id="test3">
-    <img src="resources/apple.jpg">
+    <img id="target3" src="resources/apple.jpg">
 </div>
 <div id="test4">
-    <div class="parent">
+    <div id="target4" class="parent">
         <a>
             <div></div>
             <div>
@@ -90,5 +128,7 @@
         </a>
     </div>
 </div>
+<img id="imgForAdvanceImageAnimation" src="resources/animated.gif">
+<pre id="output"></pre>
 </body>
 </html>

@@ -75,6 +75,25 @@ InspectorTest.sendCommandOrDie = function(command, properties, callback)
     }
 }
 
+InspectorTest.sendCommandPromise = function(method, params)
+{
+    var callback;
+    var promise = new Promise(fulfill => callback = fulfill);
+    InspectorTest.sendCommand(method, params, callback);
+    return promise;
+}
+
+InspectorTest.waitForEventPromise = function(eventName)
+{
+    return new Promise(fulfill => InspectorTest.eventHandler[eventName] = fullfillAndClearListener.bind(null, fulfill));
+
+    function fullfillAndClearListener(fulfill, result)
+    {
+        fulfill(result);
+        delete InspectorTest.eventHandler[eventName];
+    }
+}
+
 InspectorTest.domUndo = function(callback)
 {
     InspectorTest.sendCommandOrDie("DOM.undo", {}, callback);
@@ -275,28 +294,9 @@ InspectorTest.evaluateInPage = function(string, callback)
     });
 };
 
-InspectorTest._asyncCallbacks = {};
-InspectorTest._asyncCallbackId = 0;
-
-InspectorTest.evaluateInPageAsync = function(string, callback)
+InspectorTest.evaluateInPageAsync = function(expression)
 {
-    var id = ++InspectorTest._asyncCallbackId;
-    InspectorTest._asyncCallbacks[id] = callback;
-    var callbackString = "testRunner.evaluateInWebInspector.bind(testRunner, 42, \"InspectorTest._evaluateInPageAsyncCompleted(" + id + ")\")";
-    var code = string.replace("%callback", callbackString);
-    InspectorTest.evaluateInPage(code);
-};
-
-InspectorTest._evaluateInPageAsyncCompleted = function(id)
-{
-    var callback = InspectorTest._asyncCallbacks[id];
-    delete InspectorTest._asyncCallbacks[id];
-    if (!callback) {
-        InspectorTest.log("Error: no callback for async function");
-        InspectorTest.completeTest();
-        return;
-    }
-    callback();
+    return InspectorTest.sendCommandPromise("Runtime.evaluate", { "expression": expression, awaitPromise: true, returnByValue: true }).then((message) => message.result.result.value);
 }
 
 InspectorTest.completeTestIfError = function(messageObject)
@@ -367,61 +367,6 @@ InspectorTest.pageReloaded = function()
     delete InspectorTest._pageLoadedCallback;
     if (callback)
         callback();
-}
-
-var lastPromiseEvalId = 0;
-var pendingPromiseEvalRequests = {};
-
-/**
- * The given function should take two callback paraters before the arguments:
- *  * resolve - called when successful (with optional result)
- *  * reject  - called when there was a failure (with optional error)
- */
-InspectorTest.invokePageFunctionPromise = function(functionName, parameters)
-{
-    return new Promise(function(resolve, reject) {
-        var id = ++lastPromiseEvalId;
-        pendingPromiseEvalRequests[id] = { resolve: InspectorTest.safeWrap(resolve), reject: InspectorTest.safeWrap(reject) };
-
-        var jsonParameters = [];
-        for (var i = 0; i < parameters.length; ++i)
-            jsonParameters.push(JSON.stringify(parameters[i]));
-        var asyncEvalWrapper = function(callId, functionName, argumentsArray)
-        {
-            function evalCallbackResolve(result)
-            {
-                testRunner.evaluateInWebInspector(2, "InspectorTest.didInvokePageFunctionPromise(" + callId + ", " + JSON.stringify(result) + ", true);");
-            }
-
-            function evalCallbackReject(result)
-            {
-                testRunner.evaluateInWebInspector(2, "InspectorTest.didInvokePageFunctionPromise(" + callId + ", " + JSON.stringify(result) + ", false);");
-            }
-
-            var args = [evalCallbackResolve, evalCallbackReject].concat(argumentsArray.map(JSON.stringify));
-            var functionCall = functionName + ".call(null, " + args.join(", ") + ")";
-            try {
-                eval(functionCall);
-            } catch(e) {
-                InspectorTest.log("Error: " + e);
-                evalCallbackReject(e);
-            }
-        }
-        var pageRequest = "(" + asyncEvalWrapper.toString() + ")(" + id + ", unescape('" + escape(functionName) + "'), [" + jsonParameters.join(", ") + "])";
-        InspectorTest.evaluateInPage(pageRequest);
-    });
-}
-
-InspectorTest.didInvokePageFunctionPromise = function(callId, value, didResolve)
-{
-    var callbacks = pendingPromiseEvalRequests[callId];
-    if (!callbacks) {
-        InspectorTest.log("Missing callback for async eval " + callId + ", perhaps callback invoked twice?");
-        return;
-    }
-    var callback = didResolve ? callbacks.resolve : callbacks.reject;
-    delete pendingPromiseEvalRequests[callId];
-    callback(value);
 }
 
 window.addEventListener("load", InspectorTest.readyForTest.bind(InspectorTest), false);

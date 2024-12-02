@@ -26,29 +26,103 @@
         {
           "object": "LayoutBR BR",
           "rect": [58, 238, 10, 10],
-          "reason": "bounds change"
+          "reason": "became visible"
         },
         {
           "object": "LayoutBR BR",
           "rect": [48, 218, 10, 10],
-          "reason": "bounds change"
+          "reason": "became visible"
         },
         {
           "object": "LayoutBR BR",
           "rect": [48, 198, 10, 10],
-          "reason": "bounds change"
+          "reason": "became visible"
         },
         {
           "object": "LayoutBR BR",
           "rect": [18, 228, 10, 10],
-          "reason": "bounds change"
+          "reason": "became visible"
         },
         {
           "object": "LayoutBR BR",
           "rect": [18, 208, 10, 10],
-          "reason": "bounds change"
+          "reason": "became visible"
         }
       ]
+    }
+  ],
+  "objectPaintInvalidations": [
+    {
+      "object": "LayoutBlockFlow HTML",
+      "reason": "selection"
+    },
+    {
+      "object": "LayoutBlockFlow BODY",
+      "reason": "selection"
+    },
+    {
+      "object": "LayoutText #text",
+      "reason": "selection"
+    },
+    {
+      "object": "InlineTextBox 'Foo'",
+      "reason": "selection"
+    },
+    {
+      "object": "LayoutBR BR",
+      "reason": "became visible"
+    },
+    {
+      "object": "InlineTextBox '\n'",
+      "reason": "became visible"
+    },
+    {
+      "object": "LayoutBR BR",
+      "reason": "became visible"
+    },
+    {
+      "object": "InlineTextBox '\n'",
+      "reason": "became visible"
+    },
+    {
+      "object": "LayoutText #text",
+      "reason": "selection"
+    },
+    {
+      "object": "InlineTextBox 'Bar'",
+      "reason": "selection"
+    },
+    {
+      "object": "LayoutBR BR",
+      "reason": "became visible"
+    },
+    {
+      "object": "InlineTextBox '\n'",
+      "reason": "became visible"
+    },
+    {
+      "object": "LayoutBR BR",
+      "reason": "became visible"
+    },
+    {
+      "object": "InlineTextBox '\n'",
+      "reason": "became visible"
+    },
+    {
+      "object": "LayoutText #text",
+      "reason": "selection"
+    },
+    {
+      "object": "InlineTextBox 'Bazz'",
+      "reason": "selection"
+    },
+    {
+      "object": "LayoutBR BR",
+      "reason": "became visible"
+    },
+    {
+      "object": "InlineTextBox '\n'",
+      "reason": "became visible"
     }
   ]
 }
