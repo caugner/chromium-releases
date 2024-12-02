@@ -244,6 +244,7 @@ std::unique_ptr<ImageProcessorBackend> V4L2ImageProcessorBackend::Create(
     VideoRotation relative_rotation,
     ErrorCB error_cb,
     scoped_refptr<base::SequencedTaskRunner> backend_task_runner) {
+
   for (const auto& output_mode : preferred_output_modes) {
     auto image_processor = V4L2ImageProcessorBackend::CreateWithOutputMode(
         device, num_buffers, input_config, output_config, output_mode,

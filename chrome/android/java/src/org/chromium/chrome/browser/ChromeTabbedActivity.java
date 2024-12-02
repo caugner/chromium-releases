@@ -102,7 +102,6 @@ import org.chromium.chrome.browser.incognito.IncognitoStartup;
 import org.chromium.chrome.browser.incognito.IncognitoTabLauncher;
 import org.chromium.chrome.browser.incognito.IncognitoTabSnapshotController;
 import org.chromium.chrome.browser.incognito.IncognitoUtils;
-import org.chromium.chrome.browser.infobar.DataReductionPromoInfoBar;
 import org.chromium.chrome.browser.infobar.SyncErrorInfoBar;
 import org.chromium.chrome.browser.layouts.LayoutStateProvider;
 import org.chromium.chrome.browser.lifecycle.ActivityLifecycleDispatcher;
@@ -125,6 +124,7 @@ import org.chromium.chrome.browser.paint_preview.StartupPaintPreviewHelper;
 import org.chromium.chrome.browser.paint_preview.StartupPaintPreviewHelperSupplier;
 import org.chromium.chrome.browser.partnercustomizations.PartnerBrowserCustomizations;
 import org.chromium.chrome.browser.preferences.ChromePreferenceKeys;
+import org.chromium.chrome.browser.preferences.SharedPreferencesManager;
 import org.chromium.chrome.browser.profiles.OTRProfileID;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.profiles.ProfileManager;
@@ -164,6 +164,7 @@ import org.chromium.chrome.browser.tasks.EngagementTimeUtil;
 import org.chromium.chrome.browser.tasks.JourneyManager;
 import org.chromium.chrome.browser.tasks.ReturnToChromeExperimentsUtil;
 import org.chromium.chrome.browser.tasks.TasksUma;
+import org.chromium.chrome.browser.tasks.tab_management.CloseAllTabsDialog;
 import org.chromium.chrome.browser.tasks.tab_management.TabGroupUi;
 import org.chromium.chrome.browser.tasks.tab_management.TabManagementDelegate;
 import org.chromium.chrome.browser.tasks.tab_management.TabManagementModuleProvider;
@@ -190,6 +191,7 @@ import org.chromium.components.browser_ui.util.BrowserControlsVisibilityDelegate
 import org.chromium.components.browser_ui.util.ComposedBrowserControlsVisibilityDelegate;
 import org.chromium.components.embedder_support.util.UrlConstants;
 import org.chromium.components.embedder_support.util.UrlUtilities;
+import org.chromium.components.embedder_support.util.UrlUtilitiesJni;
 import org.chromium.components.feature_engagement.EventConstants;
 import org.chromium.components.messages.MessageDispatcherProvider;
 import org.chromium.components.profile_metrics.BrowserProfileType;
@@ -677,10 +679,6 @@ public class ChromeTabbedActivity extends ChromeActivity<ChromeActivityComponent
             // clang-format off
             mLayoutManager = new LayoutManagerChromePhone(compositorViewHolder, mContentContainer,
                     mStartSurfaceSupplier.get(), getTabContentManagerSupplier(),
-                    () -> {
-                        if (!getCompositorViewHolderSupplier().hasValue()) return null;
-                        return getCompositorViewHolderSupplier().get().getLayerTitleCache();
-                    },
                     mOverviewModeBehaviorSupplier,
                     mRootUiCoordinator::getTopUiThemeColorProvider, mJankTracker);
             mLayoutStateProviderOneshotSupplier.set(mLayoutManager);
@@ -705,10 +703,6 @@ public class ChromeTabbedActivity extends ChromeActivity<ChromeActivityComponent
             // clang-format off
             mLayoutManager = new LayoutManagerChromeTablet(compositorViewHolder, mContentContainer,
                     mStartSurfaceSupplier.get(), getTabContentManagerSupplier(),
-                    () -> {
-                        if (!getCompositorViewHolderSupplier().hasValue()) return null;
-                        return getCompositorViewHolderSupplier().get().getLayerTitleCache();
-                    },
                     mOverviewModeBehaviorSupplier,
                     mRootUiCoordinator::getTopUiThemeColorProvider, mJankTracker);
             mLayoutStateProviderOneshotSupplier.set(mLayoutManager);
@@ -887,6 +881,19 @@ public class ChromeTabbedActivity extends ChromeActivity<ChromeActivityComponent
 
         mIntentHandlingTimeMs = SystemClock.uptimeMillis();
         super.onNewIntent(intent);
+
+        // When onNewIntent() comes, calling launchIntent() may trigger a static layout is
+        // showing without even canceling the overview layout which is about to show. It
+        // leaves the StartSurfaceState to be SHOWING_START instead of NOT_SHOWN, since
+        // hiding the overview layout won't be called. Thus we need to reset the
+        // StartSurfaceState to prevent it being a wrong state. See crbug.com/1298740.
+        if (ReturnToChromeExperimentsUtil.isStartSurfaceEnabled(this)
+                && getCurrentTabModel().getCount() > 0 && !isTablet()
+                && !shouldShowOverviewPageOnStart() && !isInOverviewMode()
+                && mStartSurfaceSupplier.get() != null) {
+            mStartSurfaceSupplier.get().getController().setOverviewState(
+                    StartSurfaceState.NOT_SHOWN, NewTabPageLaunchOrigin.UNKNOWN);
+        }
     }
 
     @Override
@@ -966,6 +973,7 @@ public class ChromeTabbedActivity extends ChromeActivity<ChromeActivityComponent
         mLocaleManager.stopObservingPhoneChanges();
 
         NavigationPredictorBridge.onPause();
+        StartSurfaceUserData.getInstance().setUnusedTabRestoredAtStartup(false);
 
         super.onPauseWithNative();
     }
@@ -974,7 +982,7 @@ public class ChromeTabbedActivity extends ChromeActivity<ChromeActivityComponent
     public void onStopWithNative() {
         super.onStopWithNative();
 
-        mTabModelOrchestrator.saveState();
+        saveState();
         mHasDeterminedOverviewStateForCurrentSession = false;
     }
 
@@ -1618,11 +1626,11 @@ public class ChromeTabbedActivity extends ChromeActivity<ChromeActivityComponent
                 this::supportsFindInPage, getTabCreatorManagerSupplier(), getFullscreenManager(),
                 getCompositorViewHolderSupplier(), getTabContentManagerSupplier(),
                 getOverviewModeBehaviorSupplier(), this::getSnackbarManager, getActivityType(),
-                this::isInOverviewMode, this::isWarmOnResume, /* appMenuDelegate= */ this,
-                /* statusBarColorProvider= */ this, mEphemeralTabCoordinatorSupplier,
-                getIntentRequestTracker(), getControlContainerHeightResource(),
-                this::getInsetObserverView, this::backShouldCloseTab,
-                getTabReparentingControllerSupplier(),
+                this::isInOverviewMode, this::isWarmOnResume,
+                /* appMenuDelegate= */ this, /* statusBarColorProvider= */ this,
+                mEphemeralTabCoordinatorSupplier, getIntentRequestTracker(),
+                getControlContainerHeightResource(), this::getInsetObserverView,
+                this::backShouldCloseTab, getTabReparentingControllerSupplier(),
                 // TODO(sinansahin): This currently only checks for incognito extras in the intent.
                 // We should make it more robust by using more signals.
                 IntentHandler.hasAnyIncognitoExtra(getIntent().getExtras()));
@@ -1821,9 +1829,6 @@ public class ChromeTabbedActivity extends ChromeActivity<ChromeActivityComponent
                 if (!navigation.hasCommitted() || !navigation.isInPrimaryMainFrame()) {
                     return;
                 }
-                DataReductionPromoInfoBar.maybeLaunchPromoInfoBar(ChromeTabbedActivity.this,
-                        tab.getWebContents(), navigation.getUrl(), tab.isShowingErrorPage(),
-                        navigation.isFragmentNavigation(), navigation.httpStatusCode());
                 if (SyncErrorPromptUtils.isMessageUiEnabled()) {
                     SyncErrorMessage.maybeShowMessageUi(
                             getWindowAndroid(), ChromeTabbedActivity.this);
@@ -2059,12 +2064,24 @@ public class ChromeTabbedActivity extends ChromeActivity<ChromeActivityComponent
             getCurrentTabModel().closeTab(currentTab, true, false, true);
             RecordUserAction.record("MobileTabClosed");
         } else if (id == R.id.close_all_tabs_menu_id) {
-            // Close both incognito and normal tabs
-            getTabModelSelector().closeAllTabs();
+            if (ChromeFeatureList.isEnabled(ChromeFeatureList.CLOSE_ALL_TABS_MODAL_DIALOG)) {
+                CloseAllTabsDialog.show(this, getModalDialogManagerSupplier(),
+                        () -> getTabModelSelector().closeAllTabs(), /*isIncognito=*/false);
+            } else {
+                // Close both incognito and normal tabs.
+                getTabModelSelector().closeAllTabs();
+            }
             RecordUserAction.record("MobileMenuCloseAllTabs");
         } else if (id == R.id.close_all_incognito_tabs_menu_id) {
-            // Close only incognito tabs
-            getTabModelSelector().getModel(true).closeAllTabs();
+            if (ChromeFeatureList.isEnabled(ChromeFeatureList.CLOSE_ALL_TABS_MODAL_DIALOG)) {
+                CloseAllTabsDialog.show(this, getModalDialogManagerSupplier(),
+                        ()
+                                -> getTabModelSelector().getModel(true).closeAllTabs(),
+                        /*isIncognito=*/true);
+            } else {
+                // Close only incognito tabs
+                getTabModelSelector().getModel(true).closeAllTabs();
+            }
             RecordUserAction.record("MobileMenuCloseAllIncognitoTabs");
         } else if (id == R.id.focus_url_bar) {
             boolean isUrlBarVisible = !mOverviewModeController.overviewVisible()
@@ -2672,6 +2689,14 @@ public class ChromeTabbedActivity extends ChromeActivity<ChromeActivityComponent
     @VisibleForTesting
     public void saveState() {
         mTabModelOrchestrator.saveState();
+
+        // Save whether the current tab is a search result page into preferences.
+        Tab currentStandardTab = TabModelUtils.getCurrentTab(mTabModelSelector.getModel(false));
+        SharedPreferencesManager.getInstance().writeBoolean(
+                ChromePreferenceKeys.IS_LAST_VISITED_TAB_SRP,
+                currentStandardTab != null
+                        && UrlUtilitiesJni.get().isGoogleSearchUrl(
+                                currentStandardTab.getUrl().getSpec()));
     }
 
     @Override
