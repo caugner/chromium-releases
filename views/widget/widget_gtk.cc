@@ -22,6 +22,7 @@
 #include "views/widget/default_theme_provider.h"
 #include "views/widget/drop_target_gtk.h"
 #include "views/widget/gtk_views_fixed.h"
+#include "views/widget/gtk_views_window.h"
 #include "views/widget/root_view.h"
 #include "views/widget/tooltip_manager_gtk.h"
 #include "views/widget/widget_delegate.h"
@@ -245,7 +246,8 @@ WidgetGtk::WidgetGtk(Type type)
       has_focus_(false),
       delegate_(NULL),
       always_on_top_(false),
-      is_double_buffered_(false) {
+      is_double_buffered_(false),
+      should_handle_menu_key_release_(false) {
   static bool installed_message_loop_observer = false;
   if (!installed_message_loop_observer) {
     installed_message_loop_observer = true;
@@ -329,7 +331,7 @@ void WidgetGtk::RemoveChild(GtkWidget* child) {
   // closed.
   if (GTK_IS_CONTAINER(window_contents_)) {
     gtk_container_remove(GTK_CONTAINER(window_contents_), child);
-    gtk_views_fixed_set_use_allocated_size(child, false);
+    gtk_views_fixed_set_widget_size(child, 0, 0);
   }
 }
 
@@ -338,9 +340,7 @@ void WidgetGtk::ReparentChild(GtkWidget* child) {
 }
 
 void WidgetGtk::PositionChild(GtkWidget* child, int x, int y, int w, int h) {
-  GtkAllocation alloc = { x, y, w, h };
-  gtk_widget_size_allocate(child, &alloc);
-  gtk_views_fixed_set_use_allocated_size(child, true);
+  gtk_views_fixed_set_widget_size(child, w, h);
   gtk_fixed_move(GTK_FIXED(window_contents_), child, x, y);
 }
 
@@ -425,6 +425,18 @@ void WidgetGtk::ResetDropTarget() {
 RootView* WidgetGtk::GetRootViewForWidget(GtkWidget* widget) {
   gpointer user_data = g_object_get_data(G_OBJECT(widget), "root-view");
   return static_cast<RootView*>(user_data);
+}
+
+void WidgetGtk::GetRequestedSize(gfx::Size* out) const {
+  int width, height;
+  if (GTK_IS_VIEWS_FIXED(widget_) &&
+      gtk_views_fixed_get_widget_size(GetNativeView(), &width, &height)) {
+    out->SetSize(width, height);
+  } else {
+    GtkRequisition requisition;
+    gtk_widget_get_child_requisition(GetNativeView(), &requisition);
+    out->SetSize(requisition.width, requisition.height);
+  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -545,9 +557,9 @@ void WidgetGtk::Init(GtkWidget* parent,
   // See views::Views::Focus and views::FocusManager::ClearNativeFocus
   // for more details.
   g_signal_connect(widget_, "key_press_event",
-                   G_CALLBACK(&OnKeyPressThunk), this);
+                   G_CALLBACK(&OnKeyEventThunk), this);
   g_signal_connect(widget_, "key_release_event",
-                   G_CALLBACK(&OnKeyReleaseThunk), this);
+                   G_CALLBACK(&OnKeyEventThunk), this);
 
   // Drag and drop.
   gtk_drag_dest_set(window_contents_, static_cast<GtkDestDefaults>(0),
@@ -860,6 +872,39 @@ void WidgetGtk::ClearNativeFocus() {
   gtk_window_set_focus(GTK_WINDOW(GetNativeView()), NULL);
 }
 
+bool WidgetGtk::HandleKeyboardEvent(GdkEventKey* event) {
+  if (!focus_manager_)
+    return false;
+
+  KeyEvent key(event);
+  int key_code = key.GetKeyCode();
+  bool handled = false;
+
+  // Always reset |should_handle_menu_key_release_| unless we are handling a
+  // VKEY_MENU key release event. It ensures that VKEY_MENU accelerator can only
+  // be activated when handling a VKEY_MENU key release event which is preceded
+  // by an unhandled VKEY_MENU key press event.
+  if (key_code != app::VKEY_MENU || event->type != GDK_KEY_RELEASE)
+    should_handle_menu_key_release_ = false;
+
+  if (event->type == GDK_KEY_PRESS) {
+    // VKEY_MENU is triggered by key release event.
+    // FocusManager::OnKeyEvent() returns false when the key has been consumed.
+    if (key_code != app::VKEY_MENU)
+      handled = !focus_manager_->OnKeyEvent(key);
+    else
+      should_handle_menu_key_release_ = true;
+  } else if (key_code == app::VKEY_MENU && should_handle_menu_key_release_ &&
+             (key.GetFlags() & ~Event::EF_ALT_DOWN) == 0) {
+    // Trigger VKEY_MENU when only this key is pressed and released, and both
+    // press and release events are not handled by others.
+    Accelerator accelerator(app::VKEY_MENU, false, false, false);
+    handled = focus_manager_->ProcessAccelerator(accelerator);
+  }
+
+  return handled;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // WidgetGtk, protected:
 
@@ -1087,6 +1132,8 @@ gboolean WidgetGtk::OnFocusIn(GtkWidget* widget, GdkEventFocus* event) {
     return false;  // This is the second focus-in event in a row, ignore it.
   has_focus_ = true;
 
+  should_handle_menu_key_release_ = false;
+
   if (type_ == TYPE_CHILD)
     return false;
 
@@ -1113,14 +1160,45 @@ gboolean WidgetGtk::OnFocusOut(GtkWidget* widget, GdkEventFocus* event) {
   return false;
 }
 
-gboolean WidgetGtk::OnKeyPress(GtkWidget* widget, GdkEventKey* event) {
-  KeyEvent key_event(event);
-  return root_view_->ProcessKeyEvent(key_event);
-}
+gboolean WidgetGtk::OnKeyEvent(GtkWidget* widget, GdkEventKey* event) {
+  KeyEvent key(event);
 
-gboolean WidgetGtk::OnKeyRelease(GtkWidget* widget, GdkEventKey* event) {
-  KeyEvent key_event(event);
-  return root_view_->ProcessKeyEvent(key_event);
+  // Always reset |should_handle_menu_key_release_| unless we are handling a
+  // VKEY_MENU key release event. It ensures that VKEY_MENU accelerator can only
+  // be activated when handling a VKEY_MENU key release event which is preceded
+  // by an unhandled VKEY_MENU key press event. See also HandleKeyboardEvent().
+  if (key.GetKeyCode() != app::VKEY_MENU || event->type != GDK_KEY_RELEASE)
+    should_handle_menu_key_release_ = false;
+
+  bool handled = false;
+
+  // Dispatch the key event to View hierarchy first.
+  handled = root_view_->ProcessKeyEvent(key);
+
+  // Dispatch the key event to native GtkWidget hierarchy.
+  // To prevent GtkWindow from handling the key event as a keybinding, we need
+  // to bypass GtkWindow's default key event handler and dispatch the event
+  // here.
+  if (!handled && GTK_IS_WINDOW(widget))
+    handled = gtk_window_propagate_key_event(GTK_WINDOW(widget), event);
+
+  // On Linux, in order to handle VKEY_MENU (Alt) accelerator key correctly and
+  // avoid issues like: http://crbug.com/40966 and http://crbug.com/49701, we
+  // should only send the key event to the focus manager if it's not handled by
+  // any View or native GtkWidget.
+  // The flow is different when the focus is in a RenderWidgetHostViewGtk, which
+  // always consumes the key event and send it back to us later by calling
+  // HandleKeyboardEvent() directly, if it's not handled by webkit.
+  if (!handled)
+    handled = HandleKeyboardEvent(event);
+
+  // Dispatch the key event for bindings processing.
+  if (!handled && GTK_IS_WINDOW(widget))
+    handled = gtk_bindings_activate_event(GTK_OBJECT(widget), event);
+
+  // Always return true for toplevel window to prevents GtkWindow's default key
+  // event handler.
+  return GTK_IS_WINDOW(widget) ? true : handled;
 }
 
 gboolean WidgetGtk::OnQueryTooltip(GtkWidget* widget,
@@ -1335,8 +1413,22 @@ void WidgetGtk::CreateGtkWidget(GtkWidget* parent, const gfx::Rect& bounds) {
       DCHECK(GTK_WIDGET_REALIZED(widget_));
       gdk_window_set_composited(widget_->window, true);
     }
+    if (parent && !bounds.size().IsEmpty()) {
+      // Make sure that an widget is given it's initial size before
+      // we're done initializing, to take care of some potential
+      // corner cases when programmatically arranging hierarchies as
+      // seen in
+      // http://code.google.com/p/chromium-os/issues/detail?id=5987
+
+      // This can't be done without a parent present, or stale data
+      // might show up on the screen as seen in
+      // http://code.google.com/p/chromium/issues/detail?id=53870
+      GtkAllocation alloc = { 0, 0, bounds.width(), bounds.height() };
+      gtk_widget_size_allocate(widget_, &alloc);
+    }
   } else {
-    widget_ = gtk_window_new(
+    // Use our own window class to override GtkWindow's move_focus method.
+    widget_ = gtk_views_window_new(
         (type_ == TYPE_WINDOW || type_ == TYPE_DECORATED_WINDOW) ?
         GTK_WINDOW_TOPLEVEL : GTK_WINDOW_POPUP);
     gtk_widget_set_name(widget_, "views-gtkwidget-window");

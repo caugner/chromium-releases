@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "base/command_line.h"
+#include "base/field_trial.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/nullable_string16.h"
@@ -17,13 +18,19 @@
 #include "base/shared_memory.h"
 #include "base/stats_table.h"
 #include "base/string_util.h"
+#include "base/task.h"
 #include "base/thread_local.h"
+#include "base/trace_event.h"
+#include "base/utf_string_conversions.h"
+#include "base/values.h"
 #include "chrome/common/appcache/appcache_dispatcher.h"
 #include "chrome/common/child_process_logging.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/db_message_filter.h"
+#include "chrome/common/dom_storage_common.h"
 #include "chrome/common/plugin_messages.h"
 #include "chrome/common/render_messages.h"
+#include "chrome/common/render_messages_params.h"
 #include "chrome/common/renderer_preferences.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/common/web_database_observer_impl.h"
@@ -39,11 +46,15 @@
 #include "chrome/renderer/cookie_message_filter.h"
 #include "chrome/renderer/devtools_agent_filter.h"
 #include "chrome/renderer/extension_groups.h"
+#include "chrome/renderer/extensions/chrome_app_bindings.h"
+#include "chrome/renderer/extensions/extension_renderer_info.h"
 #include "chrome/renderer/extensions/event_bindings.h"
 #include "chrome/renderer/extensions/extension_process_bindings.h"
 #include "chrome/renderer/extensions/js_only_v8_extensions.h"
 #include "chrome/renderer/extensions/renderer_extension_bindings.h"
 #include "chrome/renderer/external_extension.h"
+#include "chrome/renderer/gpu_channel_host.h"
+#include "chrome/renderer/gpu_video_service_host.h"
 #include "chrome/renderer/indexed_db_dispatcher.h"
 #include "chrome/renderer/loadtimes_extension_bindings.h"
 #include "chrome/renderer/net/renderer_net_predictor.h"
@@ -51,14 +62,16 @@
 #include "chrome/renderer/render_process_impl.h"
 #include "chrome/renderer/render_view.h"
 #include "chrome/renderer/render_view_visitor.h"
-#include "chrome/renderer/renderer_webindexeddatabase_impl.h"
+#include "chrome/renderer/renderer_histogram_snapshots.h"
+#include "chrome/renderer/renderer_webidbfactory_impl.h"
 #include "chrome/renderer/renderer_webkitclient_impl.h"
 #include "chrome/renderer/spellchecker/spellcheck.h"
 #include "chrome/renderer/user_script_slave.h"
+#include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_message.h"
 #include "ipc/ipc_platform_file.h"
 #include "net/base/net_util.h"
-#include "third_party/sqlite/preprocessed/sqlite3.h"
+#include "third_party/sqlite/sqlite3.h"
 #include "third_party/tcmalloc/chromium/src/google/malloc_extension.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebCache.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebColor.h"
@@ -72,9 +85,9 @@
 #include "third_party/WebKit/WebKit/chromium/public/WebSecurityPolicy.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebStorageEventDispatcher.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebString.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebView.h"
 #include "webkit/extensions/v8/benchmarking_extension.h"
 #include "webkit/extensions/v8/gears_extension.h"
-#include "webkit/extensions/v8/interval_extension.h"
 #include "webkit/extensions/v8/playback_extension.h"
 #include "v8/include/v8.h"
 
@@ -107,6 +120,9 @@ static const unsigned int kCacheStatsDelayMS = 2000 /* milliseconds */;
 static const double kInitialIdleHandlerDelayS = 1.0 /* seconds */;
 static const double kInitialExtensionIdleHandlerDelayS = 5.0 /* seconds */;
 static const int64 kMaxExtensionIdleHandlerDelayS = 5*60 /* seconds */;
+
+static const int kPrelauchGpuPercentage = 5;
+static const int kPrelauchGpuProcessDelayMS = 10000;
 
 // Keep the global RenderThread in a TLS slot so it is impossible to access
 // incorrectly from the wrong thread.
@@ -203,6 +219,8 @@ RenderThread::RenderThread(const std::string& channel_name)
 }
 
 void RenderThread::Init() {
+  TRACE_EVENT_BEGIN("RenderThread::Init", 0, "");
+
   lazy_tls.Pointer()->Set(this);
 #if defined(OS_WIN)
   // If you are running plugins in this thread you need COM active but in
@@ -251,11 +269,24 @@ void RenderThread::Init() {
 
   // Establish a channel to the GPU process asynchronously if requested. If the
   // channel is established in time, EstablishGpuChannelSync will not block when
-  // it is later called.
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kPrelaunchGpuProcess)) {
-    EstablishGpuChannel();
+  // it is later called. Delays by a fixed period of time to avoid loading the
+  // GPU immediately in an attempt to not slow startup time.
+  scoped_refptr<FieldTrial> prelaunch_trial(
+      new FieldTrial("PrelaunchGpuProcessExperiment", 100));
+  int prelaunch_group = prelaunch_trial->AppendGroup("prelaunch_gpu_process",
+                                                     kPrelauchGpuPercentage);
+  if (prelaunch_group == prelaunch_trial->group() ||
+      CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kPrelaunchGpuProcess)) {
+    message_loop()->PostDelayedTask(FROM_HERE,
+                                    task_factory_->NewRunnableMethod(
+                                        &RenderThread::EstablishGpuChannel),
+                                    kPrelauchGpuProcessDelayMS);
   }
+
+  GpuVideoServiceHost::get()->OnRendererThreadInit(MessageLoop::current());
+
+  TRACE_EVENT_END("RenderThread::Init", 0, "");
 }
 
 RenderThread::~RenderThread() {
@@ -267,6 +298,10 @@ RenderThread::~RenderThread() {
   RemoveFilter(db_message_filter_.get());
   db_message_filter_ = NULL;
   RemoveFilter(devtools_agent_filter_.get());
+
+  // Shutdown the file thread if it's running.
+  if (file_thread_.get())
+    file_thread_->Stop();
 
   if (webkit_client_.get())
     WebKit::shutdown();
@@ -390,11 +425,13 @@ bool RenderThread::Send(IPC::Message* msg) {
 void RenderThread::AddRoute(int32 routing_id,
                             IPC::Channel::Listener* listener) {
   widget_count_++;
+  child_process_logging::SetNumberOfViews(widget_count_);
   return ChildThread::AddRoute(routing_id, listener);
 }
 
 void RenderThread::RemoveRoute(int32 routing_id) {
   widget_count_--;
+  child_process_logging::SetNumberOfViews(widget_count_);
   return ChildThread::RemoveRoute(routing_id);
 }
 
@@ -476,15 +513,9 @@ void RenderThread::OnSetExtensionFunctionNames(
   ExtensionProcessBindings::SetFunctionNames(names);
 }
 
-void RenderThread::OnExtensionExtentsUpdated(
-    const ViewMsg_ExtensionExtentsUpdated_Params& params) {
-  extension_extents_.resize(params.extension_apps.size());
-  for (size_t i = 0; i < params.extension_apps.size(); ++i) {
-    extension_extents_[i].extension_id = params.extension_apps[i].extension_id;
-    extension_extents_[i].web_extent = params.extension_apps[i].web_extent;
-    extension_extents_[i].browse_extent =
-        params.extension_apps[i].browse_extent;
-  }
+void RenderThread::OnExtensionsUpdated(
+    const ViewMsg_ExtensionsUpdated_Params& params) {
+  ExtensionRendererInfo::UpdateExtensions(params);
 }
 
 void RenderThread::OnPageActionsUpdated(
@@ -511,8 +542,9 @@ void RenderThread::OnExtensionSetHostPermissions(
 }
 
 void RenderThread::OnExtensionSetIncognitoEnabled(
-    const std::string& extension_id, bool enabled) {
-  ExtensionProcessBindings::SetIncognitoEnabled(extension_id, enabled);
+    const std::string& extension_id, bool enabled, bool incognito_split_mode) {
+  ExtensionProcessBindings::SetIncognitoEnabled(extension_id, enabled,
+                                                incognito_split_mode);
 }
 
 void RenderThread::OnDOMStorageEvent(
@@ -563,8 +595,8 @@ void RenderThread::OnControlMessageReceived(const IPC::Message& msg) {
                         OnExtensionMessageInvoke)
     IPC_MESSAGE_HANDLER(ViewMsg_Extension_SetFunctionNames,
                         OnSetExtensionFunctionNames)
-    IPC_MESSAGE_HANDLER(ViewMsg_ExtensionExtentsUpdated,
-                        OnExtensionExtentsUpdated)
+    IPC_MESSAGE_HANDLER(ViewMsg_ExtensionsUpdated,
+                        OnExtensionsUpdated)
     IPC_MESSAGE_HANDLER(ViewMsg_PurgeMemory, OnPurgeMemory)
     IPC_MESSAGE_HANDLER(ViewMsg_PurgePluginListCache,
                         OnPurgePluginListCache)
@@ -704,6 +736,10 @@ void RenderThread::ClearCache() {
   Send(new ViewHostMsg_ClearCache(&rv));
 }
 
+void RenderThread::EnableSpdy(bool enable) {
+  Send(new ViewHostMsg_EnableSpdy(enable));
+}
+
 void RenderThread::UpdateActiveExtensions() {
   // In single-process mode, the browser process reports the active extensions.
   if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kSingleProcess))
@@ -806,38 +842,52 @@ void RenderThread::EnsureWebKitInitialized() {
   WebScriptController::registerExtension(extensions_v8::GearsExtension::Get());
 #endif
   WebScriptController::registerExtension(
-      extensions_v8::IntervalExtension::Get());
-  WebScriptController::registerExtension(
       extensions_v8::LoadTimesExtension::Get());
+  WebScriptController::registerExtension(
+      extensions_v8::ChromeAppExtension::Get());
   WebScriptController::registerExtension(
       extensions_v8::ExternalExtension::Get());
 
-  const WebKit::WebString kExtensionScheme =
-      WebKit::WebString::fromUTF8(chrome::kExtensionScheme);
+  // TODO(rafaelw). Note that extension-related v8 extensions are being
+  // bound currently based on is_extension_process_. This means that
+  // non-extension renderers that slip into an extension process (for example,
+  // an extension page opening an iframe) will be extension bindings setup.
+  // This should be relatively rare, and the offending page won't be able to
+  // make extension API requests because it'll be denied on both sides of
+  // the renderer by a permission check. However, this is still fairly lame
+  // and we should consider implementing a V8Proxy delegate that calls out
+  // to the render thread and makes a decision as to whether to bind these
+  // extensions based on the frame's url.
+  // See: crbug.com/53610.
 
-  WebScriptController::registerExtension(
-      ExtensionProcessBindings::Get(), kExtensionScheme);
+  if (is_extension_process_)
+    WebScriptController::registerExtension(ExtensionProcessBindings::Get());
 
   WebScriptController::registerExtension(
       BaseJsV8Extension::Get(), EXTENSION_GROUP_CONTENT_SCRIPTS);
-  WebScriptController::registerExtension(
-      BaseJsV8Extension::Get(), kExtensionScheme);
+  if (is_extension_process_)
+    WebScriptController::registerExtension(BaseJsV8Extension::Get());
+
   WebScriptController::registerExtension(
       JsonSchemaJsV8Extension::Get(), EXTENSION_GROUP_CONTENT_SCRIPTS);
-  WebScriptController::registerExtension(JsonSchemaJsV8Extension::Get(),
-                                         kExtensionScheme);
+  if (is_extension_process_)
+    WebScriptController::registerExtension(JsonSchemaJsV8Extension::Get());
+
   WebScriptController::registerExtension(
       EventBindings::Get(), EXTENSION_GROUP_CONTENT_SCRIPTS);
-  WebScriptController::registerExtension(EventBindings::Get(),
-                                         kExtensionScheme);
+  if (is_extension_process_)
+    WebScriptController::registerExtension(EventBindings::Get());
+
   WebScriptController::registerExtension(
       RendererExtensionBindings::Get(), EXTENSION_GROUP_CONTENT_SCRIPTS);
-  WebScriptController::registerExtension(
-      RendererExtensionBindings::Get(), kExtensionScheme);
-  WebScriptController::registerExtension(
-      ExtensionApiTestV8Extension::Get(), kExtensionScheme);
+  if (is_extension_process_)
+    WebScriptController::registerExtension(RendererExtensionBindings::Get());
+
   WebScriptController::registerExtension(
       ExtensionApiTestV8Extension::Get(), EXTENSION_GROUP_CONTENT_SCRIPTS);
+  if (is_extension_process_)
+      WebScriptController::registerExtension(
+          ExtensionApiTestV8Extension::Get());
 
   web_database_observer_impl_.reset(new WebDatabaseObserverImpl(this));
   WebKit::WebDatabase::setObserver(web_database_observer_impl_.get());
@@ -893,6 +943,18 @@ void RenderThread::EnsureWebKitInitialized() {
 
   WebRuntimeFeatures::enableTouch(
       command_line.HasSwitch(switches::kEnableTouch));
+
+  WebRuntimeFeatures::enableDeviceMotion(
+      command_line.HasSwitch(switches::kEnableDeviceMotion));
+
+  WebRuntimeFeatures::enableDeviceOrientation(
+      !command_line.HasSwitch(switches::kDisableDeviceOrientation));
+
+  WebRuntimeFeatures::enableSpeechInput(
+      command_line.HasSwitch(switches::kEnableSpeechInput));
+
+  WebRuntimeFeatures::enableFileSystem(
+      command_line.HasSwitch(switches::kEnableFileSystem));
 }
 
 void RenderThread::IdleHandler() {
@@ -1028,23 +1090,12 @@ void RenderThread::OnGpuChannelEstablished(
   }
 }
 
-std::string RenderThread::GetExtensionIdByURL(const GURL& url) {
-  if (url.SchemeIs(chrome::kExtensionScheme))
-    return url.host();
-
-  for (size_t i = 0; i < extension_extents_.size(); ++i) {
-    if (extension_extents_[i].web_extent.ContainsURL(url))
-      return extension_extents_[i].extension_id;
+scoped_refptr<base::MessageLoopProxy>
+RenderThread::GetFileThreadMessageLoopProxy() {
+  DCHECK(message_loop() == MessageLoop::current());
+  if (!file_thread_.get()) {
+    file_thread_.reset(new base::Thread("Renderer::FILE"));
+    file_thread_->Start();
   }
-
-  return std::string();
-}
-
-std::string RenderThread::GetExtensionIdByBrowseExtent(const GURL& url) {
-  for (size_t i = 0; i < extension_extents_.size(); ++i) {
-    if (extension_extents_[i].browse_extent.ContainsURL(url))
-      return extension_extents_[i].extension_id;
-  }
-
-  return std::string();
+  return file_thread_->message_loop_proxy();
 }

@@ -33,12 +33,14 @@
 #include "chrome/browser/sync/engine/syncer.h"
 #include "chrome/browser/sync/engine/syncer_thread.h"
 #include "chrome/browser/sync/notifier/server_notifier_thread.h"
+#include "chrome/browser/sync/protocol/app_specifics.pb.h"
 #include "chrome/browser/sync/protocol/autofill_specifics.pb.h"
 #include "chrome/browser/sync/protocol/bookmark_specifics.pb.h"
 #include "chrome/browser/sync/protocol/extension_specifics.pb.h"
 #include "chrome/browser/sync/protocol/nigori_specifics.pb.h"
 #include "chrome/browser/sync/protocol/password_specifics.pb.h"
 #include "chrome/browser/sync/protocol/preference_specifics.pb.h"
+#include "chrome/browser/sync/protocol/session_specifics.pb.h"
 #include "chrome/browser/sync/protocol/service_constants.h"
 #include "chrome/browser/sync/protocol/sync.pb.h"
 #include "chrome/browser/sync/protocol/theme_specifics.pb.h"
@@ -252,6 +254,11 @@ int64 BaseNode::GetExternalId() const {
   return GetEntry()->Get(syncable::LOCAL_EXTERNAL_ID);
 }
 
+const sync_pb::AppSpecifics& BaseNode::GetAppSpecifics() const {
+  DCHECK(GetModelType() == syncable::APPS);
+  return GetEntry()->Get(SPECIFICS).GetExtension(sync_pb::app);
+}
+
 const sync_pb::AutofillSpecifics& BaseNode::GetAutofillSpecifics() const {
   DCHECK(GetModelType() == syncable::AUTOFILL);
   return GetEntry()->Get(SPECIFICS).GetExtension(sync_pb::autofill);
@@ -293,6 +300,11 @@ const sync_pb::ExtensionSpecifics& BaseNode::GetExtensionSpecifics() const {
   return GetEntry()->Get(SPECIFICS).GetExtension(sync_pb::extension);
 }
 
+const sync_pb::SessionSpecifics& BaseNode::GetSessionSpecifics() const {
+  DCHECK(GetModelType() == syncable::SESSIONS);
+  return GetEntry()->Get(SPECIFICS).GetExtension(sync_pb::session);
+}
+
 syncable::ModelType BaseNode::GetModelType() const {
   return GetEntry()->GetModelType();
 }
@@ -324,6 +336,12 @@ void WriteNode::SetURL(const GURL& url) {
   sync_pb::BookmarkSpecifics new_value = GetBookmarkSpecifics();
   new_value.set_url(url.spec());
   SetBookmarkSpecifics(new_value);
+}
+
+void WriteNode::SetAppSpecifics(
+    const sync_pb::AppSpecifics& new_value) {
+  DCHECK(GetModelType() == syncable::APPS);
+  PutAppSpecificsAndMarkForSyncing(new_value);
 }
 
 void WriteNode::SetAutofillSpecifics(
@@ -391,6 +409,14 @@ void WriteNode::SetThemeSpecifics(
   PutThemeSpecificsAndMarkForSyncing(new_value);
 }
 
+
+void WriteNode::SetSessionSpecifics(
+    const sync_pb::SessionSpecifics& new_value) {
+  DCHECK(GetModelType() == syncable::SESSIONS);
+  PutSessionSpecificsAndMarkForSyncing(new_value);
+}
+
+
 void WriteNode::PutPasswordSpecificsAndMarkForSyncing(
     const sync_pb::PasswordSpecifics& new_value) {
   sync_pb::EntitySpecifics entity_specifics;
@@ -417,6 +443,13 @@ void WriteNode::SetExtensionSpecifics(
   PutExtensionSpecificsAndMarkForSyncing(new_value);
 }
 
+void WriteNode::PutAppSpecificsAndMarkForSyncing(
+    const sync_pb::AppSpecifics& new_value) {
+  sync_pb::EntitySpecifics entity_specifics;
+  entity_specifics.MutableExtension(sync_pb::app)->CopyFrom(new_value);
+  PutSpecificsAndMarkForSyncing(entity_specifics);
+}
+
 void WriteNode::PutThemeSpecificsAndMarkForSyncing(
     const sync_pb::ThemeSpecifics& new_value) {
   sync_pb::EntitySpecifics entity_specifics;
@@ -437,6 +470,15 @@ void WriteNode::PutExtensionSpecificsAndMarkForSyncing(
   entity_specifics.MutableExtension(sync_pb::extension)->CopyFrom(new_value);
   PutSpecificsAndMarkForSyncing(entity_specifics);
 }
+
+
+void WriteNode::PutSessionSpecificsAndMarkForSyncing(
+    const sync_pb::SessionSpecifics& new_value) {
+  sync_pb::EntitySpecifics entity_specifics;
+  entity_specifics.MutableExtension(sync_pb::session)->CopyFrom(new_value);
+  PutSpecificsAndMarkForSyncing(entity_specifics);
+}
+
 
 void WriteNode::PutSpecificsAndMarkForSyncing(
     const sync_pb::EntitySpecifics& specifics) {
@@ -847,7 +889,7 @@ class BridgedGaiaAuthenticator : public gaia::GaiaAuthenticator {
   }
 
   virtual int GetBackoffDelaySeconds(int current_backoff_delay) {
-    return AllStatus::GetRecommendedDelaySeconds(current_backoff_delay);
+    return SyncerThread::GetRecommendedDelaySeconds(current_backoff_delay);
   }
  private:
   const std::string gaia_source_;
@@ -874,7 +916,8 @@ class SyncManager::SyncInternal
         notification_pending_(false),
         initialized_(false),
         use_chrome_async_socket_(false),
-        notification_method_(browser_sync::kDefaultNotificationMethod) {
+        notification_method_(browser_sync::kDefaultNotificationMethod),
+        ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)) {
     DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
   }
 
@@ -898,7 +941,9 @@ class SyncManager::SyncInternal
             const char* user_agent,
             const std::string& lsid,
             const bool use_chrome_async_socket,
-            browser_sync::NotificationMethod notification_method);
+            const bool try_ssltcp_first,
+            browser_sync::NotificationMethod notification_method,
+            const std::string& restored_key_for_bootstrapping);
 
   // Tell sync engine to submit credentials to GAIA for verification.
   // Successful GAIA authentication will kick off the following chain of events:
@@ -1015,22 +1060,6 @@ class SyncManager::SyncInternal
   // Called only by our NetworkChangeNotifier.
   virtual void OnIPAddressChanged();
 
- private:
-  // Try to authenticate using a LSID cookie.
-  void AuthenticateWithLsid(const std::string& lsid);
-
-  // Try to authenticate using persisted credentials from a previous successful
-  // authentication. If no such credentials exist, calls OnAuthError on the
-  // client to collect credentials. Otherwise, there exist local credentials
-  // that were once used for a successful auth, so we'll try to re-use these.
-  // Failure of that attempt will be communicated as normal using OnAuthError.
-  // Since this entry point will bypass normal GAIA authentication and try to
-  // authenticate directly with the sync service using a cached token,
-  // authentication failure will generally occur due to expired credentials, or
-  // possibly because of a password change.
-  bool AuthenticateForUser(const std::string& username,
-                           const std::string& auth_token);
-
   bool InitialSyncEndedForAllEnabledTypes() {
     syncable::ScopedDirLookup lookup(dir_manager(), username_for_share());
     if (!lookup.good()) {
@@ -1047,6 +1076,22 @@ class SyncManager::SyncInternal
     }
     return true;
   }
+
+ private:
+  // Try to authenticate using a LSID cookie.
+  void AuthenticateWithLsid(const std::string& lsid);
+
+  // Try to authenticate using persisted credentials from a previous successful
+  // authentication. If no such credentials exist, calls OnAuthError on the
+  // client to collect credentials. Otherwise, there exist local credentials
+  // that were once used for a successful auth, so we'll try to re-use these.
+  // Failure of that attempt will be communicated as normal using OnAuthError.
+  // Since this entry point will bypass normal GAIA authentication and try to
+  // authenticate directly with the sync service using a cached token,
+  // authentication failure will generally occur due to expired credentials, or
+  // possibly because of a password change.
+  bool AuthenticateForUser(const std::string& username,
+                           const std::string& auth_token);
 
   // Helper to call OnAuthError when no authentication credentials are
   // available.
@@ -1111,6 +1156,14 @@ class SyncManager::SyncInternal
         return false;
     }
     return true;
+  }
+
+  void CheckServerReachable() {
+    if (connection_manager()) {
+      connection_manager()->CheckServerReachable();
+    } else {
+      NOTREACHED() << "Should be valid connection manager!";
+    }
   }
 
   // We couple the DirectoryManager and username together in a UserShare member
@@ -1195,6 +1248,8 @@ class SyncManager::SyncInternal
 
   bool use_chrome_async_socket_;
   browser_sync::NotificationMethod notification_method_;
+
+  ScopedRunnableMethodFactory<SyncManager::SyncInternal> method_factory_;
 };
 const int SyncManager::SyncInternal::kDefaultNudgeDelayMilliseconds = 200;
 const int SyncManager::SyncInternal::kPreferencesNudgeDelayMilliseconds = 2000;
@@ -1218,7 +1273,9 @@ bool SyncManager::Init(const FilePath& database_location,
                        const char* user_agent,
                        const char* lsid,
                        bool use_chrome_async_socket,
-                       browser_sync::NotificationMethod notification_method) {
+                       bool try_ssltcp_first,
+                       browser_sync::NotificationMethod notification_method,
+                       const std::string& restored_key_for_bootstrapping) {
   DCHECK(post_factory);
   LOG(INFO) << "SyncManager starting Init...";
   string server_string(sync_server_and_path);
@@ -1237,13 +1294,19 @@ bool SyncManager::Init(const FilePath& database_location,
                      user_agent,
                      lsid,
                      use_chrome_async_socket,
-                     notification_method);
+                     try_ssltcp_first,
+                     notification_method,
+                     restored_key_for_bootstrapping);
 }
 
 void SyncManager::Authenticate(const char* username, const char* password,
     const char* captcha) {
   data_->Authenticate(std::string(username), std::string(password),
                       std::string(captcha));
+}
+
+bool SyncManager::InitialSyncEndedForAllEnabledTypes() {
+  return data_->InitialSyncEndedForAllEnabledTypes();
 }
 
 void SyncManager::StartSyncing() {
@@ -1287,7 +1350,9 @@ bool SyncManager::SyncInternal::Init(
     const char* user_agent,
     const std::string& lsid,
     bool use_chrome_async_socket,
-    browser_sync::NotificationMethod notification_method) {
+    bool try_ssltcp_first,
+    browser_sync::NotificationMethod notification_method,
+    const std::string& restored_key_for_bootstrapping) {
 
   LOG(INFO) << "Starting SyncInternal initialization.";
 
@@ -1310,6 +1375,8 @@ bool SyncManager::SyncInternal::Init(
   directory_manager_hookup_.reset(NewEventListenerHookup(
       share_.dir_manager->channel(), this,
           &SyncInternal::HandleDirectoryManagerEvent));
+  share_.dir_manager->cryptographer()->Bootstrap(
+      restored_key_for_bootstrapping);
 
   string client_id = user_settings_->GetClientId();
   connection_manager_.reset(new SyncAPIServerConnectionManager(
@@ -1322,15 +1389,18 @@ bool SyncManager::SyncInternal::Init(
   net::NetworkChangeNotifier::AddObserver(this);
   // TODO(akalin): CheckServerReachable() can block, which may cause jank if we
   // try to shut down sync.  Fix this.
-  connection_manager()->CheckServerReachable();
+  core_message_loop_->PostTask(FROM_HERE,
+      method_factory_.NewRunnableMethod(&SyncInternal::CheckServerReachable));
 
   // NOTIFICATION_SERVER uses a substantially different notification method, so
   // it has its own MediatorThread implementation.  Everything else just uses
   // MediatorThreadImpl.
   notifier::MediatorThread* mediator_thread =
       (notification_method == browser_sync::NOTIFICATION_SERVER) ?
-      new sync_notifier::ServerNotifierThread(use_chrome_async_socket) :
-      new notifier::MediatorThreadImpl(use_chrome_async_socket);
+      new sync_notifier::ServerNotifierThread(use_chrome_async_socket,
+                                              try_ssltcp_first) :
+      new notifier::MediatorThreadImpl(use_chrome_async_socket,
+                                       try_ssltcp_first);
   const bool kInitializeSsl = true;
   const bool kConnectImmediately = false;
   talk_mediator_.reset(new TalkMediatorImpl(mediator_thread, kInitializeSsl,
@@ -1373,7 +1443,7 @@ bool SyncManager::SyncInternal::Init(
           dir_manager(), model_safe_worker_registrar);
 
   // The SyncerThread takes ownership of |context|.
-  syncer_thread_ = new SyncerThread(context, &allstatus_);
+  syncer_thread_ = new SyncerThread(context);
   allstatus_.WatchSyncerThread(syncer_thread());
 
   // Subscribe to the syncer thread's channel.
@@ -1496,7 +1566,8 @@ bool SyncManager::SyncInternal::AuthenticateForUser(
   // We optimize by opening the directory before the "fresh" authentication
   // attempt completes so that we can immediately begin processing changes.
   if (!dir_manager()->Open(username_for_share())) {
-    DCHECK(false) << "Had last known user but could not open directory";
+    if (observer_)
+      observer_->OnStopSyncingPermanently();
     return false;
   }
 
@@ -1540,7 +1611,10 @@ void SyncManager::SyncInternal::SetPassphrase(
     cryptographer->GetKeys(specifics.mutable_encrypted());
     node.SetNigoriSpecifics(specifics);
   }
-  observer_->OnPassphraseAccepted();
+
+  std::string bootstrap_token;
+  cryptographer->GetBootstrapToken(&bootstrap_token);
+  observer_->OnPassphraseAccepted(bootstrap_token);
 }
 
 SyncManager::~SyncManager() {
@@ -1560,6 +1634,8 @@ void SyncManager::Shutdown() {
 }
 
 void SyncManager::SyncInternal::Shutdown() {
+  method_factory_.RevokeAll();
+
   // We NULL out talk_mediator_ so that any tasks pumped below do not
   // trigger further XMPP actions.
   //
@@ -1572,7 +1648,6 @@ void SyncManager::SyncInternal::Shutdown() {
   // example, and cause initialization to continue, which is bad.
   if (auth_watcher_) {
     auth_watcher_->Shutdown();
-    auth_watcher_ = NULL;
     authwatcher_hookup_.reset();
   }
 
@@ -1582,6 +1657,15 @@ void SyncManager::SyncInternal::Shutdown() {
     }
     syncer_event_.reset();
     syncer_thread_ = NULL;
+  }
+
+  // TODO(chron): Since the auth_watcher_ is held by the sync session state,
+  //              we release the ref here after the syncer is deallocated.
+  //              In reality the SyncerSessionState's pointer to the
+  //              authwatcher should be ref counted, but for M6 we use this
+  //              lower risk fix so it's deallocated on the original thread.
+  if (auth_watcher_) {
+    auth_watcher_ = NULL;
   }
 
   // Shutdown the xmpp buzz connection.
@@ -1635,6 +1719,13 @@ void SyncManager::SyncInternal::HandleDirectoryManagerEvent(
   LOG(INFO) << "Sync internal handling a directory manager event";
   if (syncable::DirectoryManagerEvent::OPENED == event.what_happened) {
      DCHECK(!initialized()) << "Should only happen once";
+     if (username_for_share().empty()) {
+       share_.authenticated_name = event.dirname;
+     }
+     DCHECK(LowerCaseEqualsASCII(username_for_share(),
+         StringToLowerASCII(event.dirname).c_str()))
+         << "username_for_share= " << username_for_share()
+         << ", event.dirname= " << event.dirname;
      MarkAndNotifyInitializationComplete();
   }
 }
@@ -1829,7 +1920,6 @@ void SyncManager::SyncInternal::HandleChannelEvent(const SyncerEvent& event) {
   // Notifications are sent at the end of every sync cycle, regardless of
   // whether we should sync again.
   if (event.what_happened == SyncerEvent::SYNC_CYCLE_ENDED) {
-
     ModelSafeRoutingInfo enabled_types;
     registrar_->GetModelSafeRoutingInfo(&enabled_types);
     if (enabled_types.count(syncable::PASSWORDS) > 0) {
@@ -1844,16 +1934,14 @@ void SyncManager::SyncInternal::HandleChannelEvent(const SyncerEvent& event) {
         }
         const sync_pb::NigoriSpecifics& nigori = node.GetNigoriSpecifics();
         if (!nigori.encrypted().blob().empty()) {
-          if (cryptographer->CanDecrypt(nigori.encrypted())) {
-            cryptographer->SetKeys(nigori.encrypted());
-          } else {
-            cryptographer->SetPendingKeys(nigori.encrypted());
-          }
+          DCHECK(!cryptographer->CanDecrypt(nigori.encrypted()));
+          cryptographer->SetPendingKeys(nigori.encrypted());
         }
       }
+
       // If we've completed a sync cycle and the cryptographer isn't ready yet,
       // prompt the user for a passphrase.
-      if (!cryptographer->is_ready()) {
+      if (!cryptographer->is_ready() || cryptographer->has_pending_keys()) {
         observer_->OnPassphraseRequired();
       }
     }
@@ -2052,7 +2140,8 @@ void SyncManager::SyncInternal::OnIncomingNotification(
        browser_sync::kSyncServiceUrl)) {
     LOG(INFO) << "P2P: Updates on server, pushing syncer";
     if (syncer_thread()) {
-      syncer_thread()->NudgeSyncer(0, SyncerThread::kNotification);
+      // Introduce a delay to help coalesce initial notifications.
+      syncer_thread()->NudgeSyncer(250, SyncerThread::kNotification);
     }
     allstatus_.IncrementNotificationsReceived();
   } else {
@@ -2137,6 +2226,11 @@ BaseTransaction::~BaseTransaction() {
 UserShare* SyncManager::GetUserShare() const {
   DCHECK(data_->initialized()) << "GetUserShare requires initialization!";
   return data_->GetUserShare();
+}
+
+bool SyncManager::HasUnsyncedItems() const {
+  sync_api::ReadTransaction trans(GetUserShare());
+  return (trans.GetWrappedTrans()->directory()->unsynced_entity_count() != 0);
 }
 
 }  // namespace sync_api

@@ -41,8 +41,9 @@ var MostVisited = (function() {
     return Array.prototype.indexOf.call(nodes, el);
   }
 
-  function MostVisited(el, useSmallGrid, visible) {
+  function MostVisited(el, miniview, useSmallGrid, visible) {
     this.element = el;
+    this.miniview = miniview;
     this.useSmallGrid_ = useSmallGrid;
     this.visible_ = visible;
 
@@ -54,6 +55,10 @@ var MostVisited = (function() {
 
     document.addEventListener('DOMContentLoaded',
                               bind(this.ensureSmallGridCorrect, this));
+
+    // Commands
+    document.addEventListener('command', bind(this.handleCommand_, this));
+    document.addEventListener('canExecute', bind(this.handleCanExecute_, this));
 
     // DND
     el.addEventListener('dragstart', bind(this.handleDragStart_, this));
@@ -99,6 +104,13 @@ var MostVisited = (function() {
       this.data[sourceIndex] = destinationData;
     },
 
+    updateSettingsLink: function(hasBlacklistedUrls) {
+      if (hasBlacklistedUrls)
+        $('most-visited-settings').classList.add('has-blacklist');
+      else
+        $('most-visited-settings').classList.remove('has-blacklist');
+    },
+
     blacklist: function(el) {
       var self = this;
       var url = el.href;
@@ -121,7 +133,11 @@ var MostVisited = (function() {
 
       // Send 'getMostVisitedPages' with a callback since we want to find the
       // new page and add that in the place of the removed page.
-      chromeSend('getMostVisited', [], 'mostVisitedPages', function(data) {
+      chromeSend('getMostVisited', [], 'mostVisitedPages',
+                 function(data, firstRun, hasBlacklistedUrls) {
+        // Update settings link.
+        self.updateSettingsLink(hasBlacklistedUrls);
+
         // Find new item.
         var newItem;
         for (var i = 0; i < data.length; i++) {
@@ -254,6 +270,7 @@ var MostVisited = (function() {
       var w = thumbWidth + 2 * borderWidth + 2 * marginWidth;
       var h = thumbHeight + 40 + 2 * marginHeight;
       var sumWidth = cols * w  - 2 * marginWidth;
+      var topSpacing = 10;
 
       var rtl = isRtl();
       var rects = [];
@@ -265,7 +282,7 @@ var MostVisited = (function() {
           var left = rtl ? sumWidth - col * w - thumbWidth - 2 * borderWidth :
               col * w;
 
-          var top = row * h;
+          var top = row * h + topSpacing;
 
           rects[i] = {left: left, top: top};
         }
@@ -296,6 +313,23 @@ var MostVisited = (function() {
 
     getRectByIndex_: function(index) {
       return this.getMostVisitedLayoutRects_()[index];
+    },
+
+    // Commands
+
+    handleCommand_: function(e) {
+      var commandId = e.command.id;
+      switch (commandId) {
+        case 'clear-all-blacklisted':
+          this.clearAllBlacklisted();
+          chrome.send('getMostVisited');
+          break;
+      }
+    },
+
+    handleCanExecute_: function(e) {
+      if (e.command.id == 'clear-all-blacklisted')
+        e.canExecute = true;
     },
 
     // DND
@@ -501,6 +535,7 @@ var MostVisited = (function() {
       // On setting we need to update the items
       this.data_ = data;
       this.updateMostVisited_();
+      this.updateMiniview_();
     },
 
     updateMostVisited_: function() {
@@ -553,6 +588,30 @@ var MostVisited = (function() {
         titleDiv.style.backgroundImage = url(faviconUrl);
         titleDiv.dir = d.direction;
       }
+    },
+
+    updateMiniview_: function() {
+      this.miniview.textContent = '';
+      var data = this.data.slice(0, MAX_MINIVIEW_ITEMS);
+      for (var i = 0, item; item = data[i]; i++) {
+        if (item.filler) {
+          continue;
+        }
+
+        var span = document.createElement('span');
+        var a = span.appendChild(document.createElement('a'));
+        a.href = item.url;
+        a.textContent = item.title;
+        a.style.backgroundImage = url('chrome://favicon/' + item.url);
+        a.className = 'item';
+        this.miniview.appendChild(span);
+
+        if ((a.offsetLeft + a.offsetWidth) > this.miniview.offsetWidth) {
+          this.miniview.removeChild(span);
+          return;
+        }
+      }
+      updateMiniviewClipping(this.miniview);
     },
 
     handleClick_: function(e) {

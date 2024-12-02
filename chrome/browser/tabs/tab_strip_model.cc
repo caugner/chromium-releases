@@ -82,6 +82,13 @@ void TabStripModelObserver::TabReplacedAt(TabContents* old_contents,
                                           int index) {
 }
 
+void TabStripModelObserver::TabReplacedAt(TabContents* old_contents,
+                                          TabContents* new_contents,
+                                          int index,
+                                          TabReplaceType type) {
+  TabReplacedAt(old_contents, new_contents, index);
+}
+
 void TabStripModelObserver::TabPinnedStateChanged(TabContents* contents,
                                                   int index) {
 }
@@ -121,9 +128,6 @@ TabStripModel::TabStripModel(TabStripModelDelegate* delegate, Profile* profile)
   registrar_.Add(this,
                  NotificationType::EXTENSION_UNLOADED,
                  Source<Profile>(profile_));
-  registrar_.Add(this,
-                 NotificationType::EXTENSION_APP_TOOLBAR_VISIBILITY_CHANGED,
-                 NotificationService::AllSources());
   order_controller_ = new TabStripModelOrderController(this);
 }
 
@@ -188,8 +192,9 @@ void TabStripModel::InsertTabContentsAt(int index,
                                         TabContents* contents,
                                         int add_types) {
   bool foreground = add_types & ADD_SELECTED;
-  index = ConstrainInsertionIndex(index, contents->is_app() ||
-                                  add_types & ADD_PINNED);
+  // Force app tabs to be pinned.
+  bool pin = contents->is_app() || add_types & ADD_PINNED;
+  index = ConstrainInsertionIndex(index, pin);
 
   // In tab dragging situations, if the last tab in the window was detached
   // then the user aborted the drag, we will have the |closing_all_| member
@@ -202,7 +207,7 @@ void TabStripModel::InsertTabContentsAt(int index,
   // since the old contents and the new contents will be the same...
   TabContents* selected_contents = GetSelectedTabContents();
   TabContentsData* data = new TabContentsData(contents);
-  data->pinned = (add_types & ADD_PINNED) == ADD_PINNED;
+  data->pinned = pin;
   if ((add_types & ADD_INHERIT_GROUP) && selected_contents) {
     if (foreground) {
       // Forget any existing relationships, we don't want to make things too
@@ -235,6 +240,13 @@ void TabStripModel::InsertTabContentsAt(int index,
     ChangeSelectedContentsFrom(selected_contents, index, false);
 }
 
+void TabStripModel::ReplaceTabContentsAt(
+    int index,
+    TabContents* new_contents,
+    TabStripModelObserver::TabReplaceType type) {
+  delete ReplaceTabContentsAtImpl(index, new_contents, type);
+}
+
 void TabStripModel::ReplaceNavigationControllerAt(
     int index, NavigationController* controller) {
   // This appears to be OK with no flicker since no redraw event
@@ -262,13 +274,14 @@ TabContents* TabStripModel::DetachTabContentsAt(int index) {
   next_selected_index = IndexOfNextNonPhantomTab(next_selected_index, -1);
   if (!HasNonPhantomTabs())
     closing_all_ = true;
-  TabStripModelObservers::Iterator iter(observers_);
-  while (TabStripModelObserver* obs = iter.GetNext()) {
-    obs->TabDetachedAt(removed_contents, index);
-    if (!HasNonPhantomTabs())
-      obs->TabStripEmpty();
-  }
-  if (HasNonPhantomTabs()) {
+  FOR_EACH_OBSERVER(TabStripModelObserver, observers_,
+      TabDetachedAt(removed_contents, index));
+  if (!HasNonPhantomTabs()) {
+    // TabDetachedAt() might unregister observers, so send |TabStripEmtpy()| in
+    // a second pass.
+    FOR_EACH_OBSERVER(TabStripModelObserver, observers_,
+        TabStripEmpty());
+  } else {
     if (index == selected_index_) {
       ChangeSelectedContentsFrom(removed_contents, next_selected_index, false);
     } else if (index < selected_index_) {
@@ -487,6 +500,11 @@ void TabStripModel::SetTabPinned(int index, bool pinned) {
     return;
 
   if (IsAppTab(index)) {
+    if (!pinned) {
+      // App tabs should always be pinned.
+      NOTREACHED();
+      return;
+    }
     // Changing the pinned state of an app tab doesn't effect it's mini-tab
     // status.
     contents_data_[index]->pinned = pinned;
@@ -526,16 +544,6 @@ bool TabStripModel::IsMiniTab(int index) const {
 bool TabStripModel::IsAppTab(int index) const {
   TabContents* contents = GetTabContentsAt(index);
   return contents && contents->is_app();
-}
-
-bool TabStripModel::IsToolbarVisible(int index) const {
-  Extension* extension_app = GetTabContentsAt(index)->extension_app();
-  if (!extension_app)
-    return true;
-
-  ExtensionsService* service = profile()->GetExtensionsService();
-  ExtensionPrefs* prefs = service->extension_prefs();
-  return prefs->AreAppTabToolbarsVisible(extension_app->id());
 }
 
 bool TabStripModel::IsPhantomTab(int index) const {
@@ -669,14 +677,6 @@ void TabStripModel::MoveTabPrevious() {
   MoveTabContentsAt(selected_index_, new_index, true);
 }
 
-Browser* TabStripModel::TearOffTabContents(TabContents* detached_contents,
-                                           const gfx::Rect& window_bounds,
-                                           const DockInfo& dock_info) {
-  DCHECK(detached_contents);
-  return delegate_->CreateNewStripWithContents(detached_contents, window_bounds,
-                                               dock_info);
-}
-
 // Context menu functions.
 bool TabStripModel::IsContextMenuCommandEnabled(
     int context_index, ContextMenuCommand command_id) const {
@@ -707,9 +707,7 @@ bool TabStripModel::IsContextMenuCommandEnabled(
     case CommandRestoreTab:
       return delegate_->CanRestoreTab();
     case CommandTogglePinned:
-      return true;
-    case CommandToggleToolbar:
-      return true;
+      return !IsAppTab(context_index);
     case CommandBookmarkAllTabs:
       return delegate_->CanBookmarkAllTabs();
     case CommandUseVerticalTabs:
@@ -795,32 +793,6 @@ void TabStripModel::ExecuteContextMenuCommand(
       }
       break;
     }
-    case CommandToggleToolbar: {
-      UserMetrics::RecordAction(
-          UserMetricsAction("TabContextMenu_ToggleToolbar"),
-          profile_);
-
-      SelectTabContentsAt(context_index, true);
-
-      Extension* extension_app =
-          GetTabContentsAt(context_index)->extension_app();
-      if (!extension_app)
-        break;
-
-      ExtensionsService* service = profile()->GetExtensionsService();
-      ExtensionPrefs* prefs = service->extension_prefs();
-      bool new_val = !prefs->AreAppTabToolbarsVisible(extension_app->id());
-      prefs->SetAppTabToolbarVisibility(extension_app->id(), new_val);
-
-      // There might be multiple browsers displaying this app, so we send a
-      // notification to update them all.
-      NotificationService::current()->Notify(
-          NotificationType::EXTENSION_APP_TOOLBAR_VISIBILITY_CHANGED,
-          Source<Extension>(extension_app),
-          Details<bool>(&new_val));
-
-      break;
-    }
 
     case CommandBookmarkAllTabs: {
       UserMetrics::RecordAction(
@@ -904,17 +876,6 @@ void TabStripModel::Observe(NotificationType type,
           InternalCloseTab(contents, i, false);
         }
       }
-      break;
-    }
-
-    case NotificationType::EXTENSION_APP_TOOLBAR_VISIBILITY_CHANGED: {
-      Extension* extension = Source<Extension>(source).ptr();
-      bool* value = Details<bool>(details).ptr();
-      TabContents* selected = GetSelectedTabContents();
-
-      if (selected && selected->extension_app() == extension)
-        delegate_->SetToolbarVisibility(*value);
-
       break;
     }
 
@@ -1097,14 +1058,10 @@ bool TabStripModel::ShouldMakePhantomOnClose(int index) {
 }
 
 void TabStripModel::MakePhantom(int index) {
-  TabContents* old_contents = GetContentsAt(index);
-  TabContents* new_contents = old_contents->CloneAndMakePhantom();
-
-  contents_data_[index]->contents = new_contents;
-
-  // And notify observers.
-  FOR_EACH_OBSERVER(TabStripModelObserver, observers_,
-                    TabReplacedAt(old_contents, new_contents, index));
+  // MakePhantom is called when the TabContents is being destroyed so we don't
+  // need to do anything with the returned value from ReplaceTabContentsAtImpl.
+  ReplaceTabContentsAtImpl(index, GetContentsAt(index)->CloneAndMakePhantom(),
+                           TabStripModelObserver::REPLACE_MADE_PHANTOM);
 
   if (selected_index_ == index && HasNonPhantomTabs()) {
     // Change the selection, otherwise we're going to force the phantom tab
@@ -1148,4 +1105,21 @@ bool TabStripModel::OpenerMatches(const TabContentsData* data,
                                   const NavigationController* opener,
                                   bool use_group) {
   return data->opener == opener || (use_group && data->group == opener);
+}
+
+TabContents* TabStripModel::ReplaceTabContentsAtImpl(
+    int index,
+    TabContents* new_contents,
+    TabStripModelObserver::TabReplaceType type) {
+  // TODO: this should reset group/opener of any tabs that point at
+  // old_contents.
+  DCHECK(ContainsIndex(index));
+
+  TabContents* old_contents = GetContentsAt(index);
+
+  contents_data_[index]->contents = new_contents;
+
+  FOR_EACH_OBSERVER(TabStripModelObserver, observers_,
+                    TabReplacedAt(old_contents, new_contents, index, type));
+  return old_contents;
 }

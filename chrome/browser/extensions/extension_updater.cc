@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,23 +9,23 @@
 
 #include "base/logging.h"
 #include "base/file_util.h"
-#include "base/file_version_info.h"
 #include "base/histogram.h"
 #include "base/rand_util.h"
 #include "base/sha2.h"
 #include "base/stl_util-inl.h"
+#include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/time.h"
 #include "base/thread.h"
 #include "base/version.h"
-#include "chrome/app/chrome_version_info.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/extension_error_reporter.h"
 #include "chrome/browser/extensions/extensions_service.h"
-#include "chrome/browser/pref_service.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/utility_process_host.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/chrome_version_info.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/pref_names.h"
@@ -34,9 +34,7 @@
 #include "net/base/load_flags.h"
 #include "net/url_request/url_request_status.h"
 
-#if defined(OS_WIN)
-#include "base/registry.h"
-#elif defined(OS_MACOSX)
+#if defined(OS_MACOSX)
 #include "base/sys_string_conversions.h"
 #endif
 
@@ -105,8 +103,8 @@ bool ManifestFetchData::AddExtension(std::string id, std::string version,
   parts.push_back("uc");
 
   if (ShouldPing(days)) {
-    parts.push_back("ping=" + EscapeQueryParamValue("r=" + IntToString(days),
-                                                    true));
+    parts.push_back("ping=" +
+        EscapeQueryParamValue("r=" + base::IntToString(days), true));
   }
 
   std::string extra = full_url_.has_query() ? "&" : "?";
@@ -159,10 +157,18 @@ ManifestFetchesBuilder::ManifestFetchesBuilder(
 }
 
 void ManifestFetchesBuilder::AddExtension(const Extension& extension) {
+  // Skip extensions with empty update URLs converted from user
+  // scripts.
+  if (extension.converted_from_user_script() &&
+      extension.update_url().is_empty()) {
+    return;
+  }
+
   AddExtensionData(extension.location(),
                    extension.id(),
                    *extension.version(),
-                   extension.is_theme(),
+                   (extension.is_theme() ? PendingExtensionInfo::THEME
+                                         : PendingExtensionInfo::EXTENSION),
                    extension.update_url());
 }
 
@@ -174,8 +180,13 @@ void ManifestFetchesBuilder::AddPendingExtension(
   // non-zero versions).
   scoped_ptr<Version> version(
       Version::GetVersionFromString("0.0.0.0"));
-  AddExtensionData(Extension::INTERNAL, id, *version,
-                   info.is_theme, info.update_url);
+
+  Extension::Location location =
+      (info.is_from_sync ? Extension::INTERNAL
+                         : Extension::EXTERNAL_PREF_DOWNLOAD);
+
+  AddExtensionData(location, id, *version,
+                   info.expected_crx_type, info.update_url);
 }
 
 void ManifestFetchesBuilder::ReportStats() const {
@@ -209,8 +220,9 @@ void ManifestFetchesBuilder::AddExtensionData(
     Extension::Location location,
     const std::string& id,
     const Version& version,
-    bool is_theme,
+    PendingExtensionInfo::ExpectedCrxType crx_type,
     GURL update_url) {
+
   // Only internal and external extensions can be autoupdated.
   if (location != Extension::INTERNAL &&
       !Extension::IsExternalLocation(location)) {
@@ -242,7 +254,7 @@ void ManifestFetchesBuilder::AddExtensionData(
     url_stats_.other_url_count++;
   }
 
-  if (is_theme) {
+  if (crx_type == PendingExtensionInfo::THEME) {
     url_stats_.theme_count++;
   }
 
@@ -335,7 +347,7 @@ ExtensionUpdater::~ExtensionUpdater() {
 }
 
 static void EnsureInt64PrefRegistered(PrefService* prefs,
-                                      const wchar_t name[]) {
+                                      const char name[]) {
   if (!prefs->FindPreference(name))
     prefs->RegisterInt64Pref(name, 0);
 }
@@ -556,7 +568,8 @@ void ExtensionUpdater::ProcessBlacklist(const std::string& data) {
   // Verify sha256 hash value.
   char sha256_hash_value[base::SHA256_LENGTH];
   base::SHA256HashString(data, sha256_hash_value, base::SHA256_LENGTH);
-  std::string hash_in_hex = HexEncode(sha256_hash_value, base::SHA256_LENGTH);
+  std::string hash_in_hex = base::HexEncode(sha256_hash_value,
+                                            base::SHA256_LENGTH);
 
   if (current_extension_fetch_.package_hash != hash_in_hex) {
     NOTREACHED() << "Fetched blacklist checksum is not as expected. "
@@ -761,11 +774,10 @@ std::vector<int> ExtensionUpdater::DetermineUpdates(
     if (update->browser_min_version.length() > 0) {
       // First determine the browser version if we haven't already.
       if (!browser_version.get()) {
-        scoped_ptr<FileVersionInfo> version_info(
-            chrome_app::GetChromeVersionInfo());
-        if (version_info.get()) {
+        chrome::VersionInfo version_info;
+        if (version_info.is_valid()) {
           browser_version.reset(Version::GetVersionFromString(
-              version_info->product_version()));
+                                    version_info.Version()));
         }
       }
       scoped_ptr<Version> browser_min_version(

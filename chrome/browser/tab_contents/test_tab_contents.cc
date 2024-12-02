@@ -4,13 +4,16 @@
 
 #include "chrome/browser/tab_contents/test_tab_contents.h"
 
+#include "chrome/browser/browser_url_handler.h"
+#include "chrome/browser/renderer_host/mock_render_process_host.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
+#include "chrome/browser/renderer_host/site_instance.h"
 #include "chrome/browser/renderer_host/test/test_render_view_host.h"
 #include "chrome/browser/tab_contents/infobar_delegate.h"
 #include "chrome/common/notification_service.h"
 
 TestTabContents::TestTabContents(Profile* profile, SiteInstance* instance)
-    : TabContents(profile, instance, MSG_ROUTING_NONE, NULL),
+    : TabContents(profile, instance, MSG_ROUTING_NONE, NULL, NULL),
       transition_cross_site(false) {
   // Listen for infobar events so we can call InfoBarClosed() on the infobar
   // delegates and give them an opportunity to delete themselves.  (Since we
@@ -50,8 +53,7 @@ TestRenderViewHost* TestTabContents::pending_rvh() {
 bool TestTabContents::CreateRenderViewForRenderManager(
     RenderViewHost* render_view_host) {
   // This will go to a TestRenderViewHost.
-  render_view_host->CreateRenderView(profile()->GetRequestContext(),
-                                     string16());
+  render_view_host->CreateRenderView(string16());
   return true;
 }
 
@@ -60,4 +62,15 @@ TabContents* TestTabContents::Clone() {
       profile(), SiteInstance::CreateSiteInstance(profile()));
   tc->controller().CopyStateFrom(controller_);
   return tc;
+}
+
+void TestTabContents::NavigateAndCommit(const GURL& url) {
+  controller().LoadURL(url, GURL(), 0);
+  GURL loaded_url(url);
+  bool reverse_on_redirect = false;
+  BrowserURLHandler::RewriteURLIfNecessary(
+      &loaded_url, profile(), &reverse_on_redirect);
+  static_cast<TestRenderViewHost*>(render_view_host())->SendNavigate(
+      static_cast<MockRenderProcessHost*>(render_view_host()->process())->
+      max_page_id() + 1, loaded_url);
 }

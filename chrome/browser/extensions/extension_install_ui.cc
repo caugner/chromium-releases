@@ -10,7 +10,7 @@
 #include "app/resource_bundle.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
-#include "base/rand_util.h"
+#include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_list.h"
@@ -29,9 +29,9 @@
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_action.h"
 #include "chrome/common/extensions/extension_resource.h"
+#include "chrome/common/extensions/url_pattern.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/url_constants.h"
-#include "grit/browser_resources.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -63,6 +63,9 @@ const int ExtensionInstallUI::kButtonIds[NUM_PROMPT_TYPES] = {
 
 namespace {
 
+// Size of extension icon in top left of dialog.
+const int kIconSize = 69;
+
 static void GetV2Warnings(Extension* extension,
                           std::vector<string16>* warnings) {
   if (!extension->plugins().empty()) {
@@ -77,29 +80,31 @@ static void GetV2Warnings(Extension* extension,
     warnings->push_back(
         l10n_util::GetStringUTF16(IDS_EXTENSION_PROMPT2_WARNING_ALL_HOSTS));
   } else {
-    std::set<std::string> hosts = extension->GetEffectiveHostPermissions();
+    std::vector<std::string> hosts =
+        ExtensionInstallUI::GetDistinctHostsForDisplay(
+            extension->GetEffectiveHostPermissions().patterns());
     if (hosts.size() == 1) {
       warnings->push_back(
           l10n_util::GetStringFUTF16(IDS_EXTENSION_PROMPT2_WARNING_1_HOST,
-                                     UTF8ToUTF16(*hosts.begin())));
+                                     UTF8ToUTF16(hosts[0])));
     } else if (hosts.size() == 2) {
       warnings->push_back(
           l10n_util::GetStringFUTF16(IDS_EXTENSION_PROMPT2_WARNING_2_HOSTS,
-                                     UTF8ToUTF16(*hosts.begin()),
-                                     UTF8ToUTF16(*(++hosts.begin()))));
+                                     UTF8ToUTF16(hosts[0]),
+                                     UTF8ToUTF16(hosts[1])));
     } else if (hosts.size() == 3) {
       warnings->push_back(
           l10n_util::GetStringFUTF16(IDS_EXTENSION_PROMPT2_WARNING_3_HOSTS,
-                                     UTF8ToUTF16(*hosts.begin()),
-                                     UTF8ToUTF16(*(++hosts.begin())),
-                                     UTF8ToUTF16(*(++++hosts.begin()))));
+                                     UTF8ToUTF16(hosts[0]),
+                                     UTF8ToUTF16(hosts[1]),
+                                     UTF8ToUTF16(hosts[2])));
     } else if (hosts.size() >= 4) {
       warnings->push_back(
           l10n_util::GetStringFUTF16(
               IDS_EXTENSION_PROMPT2_WARNING_4_OR_MORE_HOSTS,
-              UTF8ToUTF16(*hosts.begin()),
-              UTF8ToUTF16(*(++hosts.begin())),
-              IntToString16(hosts.size() - 2)));
+              UTF8ToUTF16(hosts[0]),
+              UTF8ToUTF16(hosts[1]),
+              base::IntToString16(hosts.size() - 2)));
     }
   }
 
@@ -122,6 +127,22 @@ static void GetV2Warnings(Extension* extension,
 
 }  // namespace
 
+std::vector<std::string> ExtensionInstallUI::GetDistinctHostsForDisplay(
+    const std::vector<URLPattern>& host_patterns) {
+  // Vector because we later want to access these by index.
+  std::vector<std::string> distinct_hosts;
+
+  for (size_t i = 0; i < host_patterns.size(); ++i) {
+    std::string candidate = host_patterns[i].host();
+    if (std::find(distinct_hosts.begin(), distinct_hosts.end(), candidate) ==
+                  distinct_hosts.end()) {
+      distinct_hosts.push_back(candidate);
+    }
+  }
+
+  return distinct_hosts;
+}
+
 ExtensionInstallUI::ExtensionInstallUI(Profile* profile)
     : profile_(profile),
       ui_loop_(MessageLoop::current()),
@@ -130,6 +151,9 @@ ExtensionInstallUI::ExtensionInstallUI(Profile* profile)
       delegate_(NULL),
       prompt_type_(NUM_PROMPT_TYPES),
       ALLOW_THIS_IN_INITIALIZER_LIST(tracker_(this)) {}
+
+ExtensionInstallUI::~ExtensionInstallUI() {
+}
 
 void ExtensionInstallUI::ConfirmInstall(Delegate* delegate,
                                         Extension* extension) {
@@ -198,7 +222,8 @@ void ExtensionInstallUI::OnInstallSuccess(Extension* extension) {
       url += "/#";
       url += hash_params;
       browser->AddTabWithURL(GURL(url), GURL(), PageTransition::TYPED, -1,
-                             TabStripModel::ADD_SELECTED, NULL, std::string());
+                             TabStripModel::ADD_SELECTED, NULL, std::string(),
+                             NULL);
     }
 
     return;
@@ -249,8 +274,13 @@ void ExtensionInstallUI::OnImageLoaded(
   else
     icon_ = SkBitmap();
   if (icon_.empty()) {
-    icon_ = *ResourceBundle::GetSharedInstance().GetBitmapNamed(
-        IDR_EXTENSION_DEFAULT_ICON);
+    if (extension_->is_app()) {
+      icon_ = *ResourceBundle::GetSharedInstance().GetBitmapNamed(
+          IDR_APP_DEFAULT_ICON);
+    } else {
+      icon_ = *ResourceBundle::GetSharedInstance().GetBitmapNamed(
+          IDR_EXTENSION_DEFAULT_ICON);
+    }
   }
 
   switch (prompt_type_) {
@@ -264,15 +294,13 @@ void ExtensionInstallUI::OnImageLoaded(
 
       std::vector<string16> warnings;
       GetV2Warnings(extension_, &warnings);
-      ShowExtensionInstallUIPrompt2Impl(
-          profile_, delegate_, extension_, &icon_, warnings);
+      ShowExtensionInstallUIPrompt2Impl(profile_, delegate_, extension_, &icon_,
+                                        warnings);
       break;
     }
     case UNINSTALL_PROMPT: {
-      string16 message =
-          l10n_util::GetStringUTF16(IDS_EXTENSION_UNINSTALL_CONFIRMATION);
       ShowExtensionInstallUIPromptImpl(profile_, delegate_, extension_, &icon_,
-          message, UNINSTALL_PROMPT);
+                                       UNINSTALL_PROMPT);
       break;
     }
     default:
@@ -331,10 +359,9 @@ void ExtensionInstallUI::ShowConfirmation(PromptType prompt_type) {
   // Load the image asynchronously. For the response, check OnImageLoaded.
   prompt_type_ = prompt_type;
   ExtensionResource image =
-      extension_->GetIconPath(Extension::EXTENSION_ICON_LARGE);
+      extension_->GetIconResource(Extension::EXTENSION_ICON_LARGE);
   tracker_.LoadImage(extension_, image,
-                     gfx::Size(Extension::EXTENSION_ICON_LARGE,
-                               Extension::EXTENSION_ICON_LARGE),
+                     gfx::Size(kIconSize, kIconSize),
                      ImageLoadingTracker::DONT_CACHE);
 }
 
@@ -349,9 +376,11 @@ void ExtensionInstallUI::ShowGenericExtensionInstalledInfoBar(
   if (!tab_contents)
     return;
 
-  std::wstring msg = l10n_util::GetStringF(IDS_EXTENSION_INSTALLED_HEADING,
-                                           UTF8ToWide(new_extension->name())) +
-         L" " + l10n_util::GetString(IDS_EXTENSION_INSTALLED_MANAGE_INFO_MAC);
+  string16 msg =
+      l10n_util::GetStringFUTF16(IDS_EXTENSION_INSTALLED_HEADING,
+                                 UTF8ToUTF16(new_extension->name())) +
+      UTF8ToUTF16(" ") +
+      l10n_util::GetStringUTF16(IDS_EXTENSION_INSTALLED_MANAGE_INFO_MAC);
   InfoBarDelegate* delegate = new SimpleAlertInfoBarDelegate(
       tab_contents, msg, new SkBitmap(icon_), true);
   tab_contents->AddInfoBar(delegate);

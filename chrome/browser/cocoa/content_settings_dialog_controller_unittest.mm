@@ -9,7 +9,9 @@
 #include "chrome/browser/cocoa/browser_test_helper.h"
 #include "chrome/browser/cocoa/cocoa_test_helper.h"
 #include "chrome/browser/geolocation/geolocation_content_settings_map.h"
+#include "chrome/browser/host_content_settings_map.h"
 #include "chrome/browser/notifications/desktop_notification_service.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/pref_names.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
@@ -56,7 +58,9 @@ TEST_F(ContentSettingsDialogControllerTest, CookieSetting) {
 
   settingsMap_->SetDefaultContentSetting(CONTENT_SETTINGS_TYPE_COOKIES,
                                          CONTENT_SETTING_BLOCK);
-  EXPECT_EQ([controller_ cookieSettingIndex], kCookieDisabledIndex);
+  // Since the cookie prompt is disabled per default, the index of the block
+  // radio is actually 1 == kCookieAskIndex.
+  EXPECT_EQ([controller_ cookieSettingIndex], kCookieAskIndex);
 
   // Change dialog property, check setting.
   NSInteger setting;
@@ -65,7 +69,9 @@ TEST_F(ContentSettingsDialogControllerTest, CookieSetting) {
       settingsMap_->GetDefaultContentSetting(CONTENT_SETTINGS_TYPE_COOKIES);
   EXPECT_EQ(setting, CONTENT_SETTING_ALLOW);
 
-  [controller_ setCookieSettingIndex:kCookieDisabledIndex];
+  // Since the cookie prompt is disabled per default, the index of the block
+  // radio is actually 1 == kCookieAskIndex.
+  [controller_ setCookieSettingIndex:kCookieAskIndex];
   setting =
       settingsMap_->GetDefaultContentSetting(CONTENT_SETTINGS_TYPE_COOKIES);
   EXPECT_EQ(setting, CONTENT_SETTING_BLOCK);
