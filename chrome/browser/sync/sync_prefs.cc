@@ -28,7 +28,9 @@ SyncPrefs::SyncPrefs(PrefService* pref_service)
     RegisterPreferences();
     // Watch the preference that indicates sync is managed so we can take
     // appropriate action.
-    pref_sync_managed_.Init(prefs::kSyncManaged, pref_service_, this);
+    pref_sync_managed_.Init(prefs::kSyncManaged, pref_service_,
+                            base::Bind(&SyncPrefs::OnSyncManagedPrefChanged,
+                                       base::Unretained(this)));
   }
 }
 
@@ -263,25 +265,10 @@ void SyncPrefs::AcknowledgeSyncedTypes(syncer::ModelTypeSet types) {
   pref_service_->Set(prefs::kSyncAcknowledgedSyncTypes, *value);
 }
 
-void SyncPrefs::Observe(int type,
-                        const content::NotificationSource& source,
-                        const content::NotificationDetails& details) {
+void SyncPrefs::OnSyncManagedPrefChanged() {
   DCHECK(CalledOnValidThread());
-  DCHECK(content::Source<PrefService>(pref_service_) == source);
-  switch (type) {
-    case chrome::NOTIFICATION_PREF_CHANGED: {
-      const std::string* pref_name =
-          content::Details<const std::string>(details).ptr();
-      if (*pref_name == prefs::kSyncManaged) {
-        FOR_EACH_OBSERVER(SyncPrefObserver, sync_pref_observers_,
-                          OnSyncManagedPrefChange(*pref_sync_managed_));
-      }
-      break;
-    }
-    default:
-      NOTREACHED();
-      break;
-  }
+  FOR_EACH_OBSERVER(SyncPrefObserver, sync_pref_observers_,
+                    OnSyncManagedPrefChange(*pref_sync_managed_));
 }
 
 void SyncPrefs::SetManagedForTest(bool is_managed) {
@@ -308,6 +295,9 @@ void SyncPrefs::RegisterPrefGroups() {
   pref_groups_[syncer::EXTENSIONS].Put(syncer::EXTENSION_SETTINGS);
 
   pref_groups_[syncer::PREFERENCES].Put(syncer::SEARCH_ENGINES);
+
+  // TODO(akalin): Revisit this once UI lands.
+  pref_groups_[syncer::SESSIONS].Put(syncer::HISTORY_DELETE_DIRECTIVES);
 }
 
 void SyncPrefs::RegisterPreferences() {

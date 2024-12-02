@@ -165,6 +165,13 @@ ImageEditor.prototype.executeWhenReady = function(callback) {
 };
 
 /**
+ * @return {boolean} True if undo queue is not empty.
+ */
+ImageEditor.prototype.canUndo = function() {
+  return this.commandQueue_ && this.commandQueue_.canUndo();
+};
+
+  /**
  * Undo the recently executed command.
  */
 ImageEditor.prototype.undo = function() {
@@ -911,8 +918,7 @@ ImageEditor.Toolbar.prototype.addLabel = function(name) {
  */
 ImageEditor.Toolbar.prototype.addButton = function(
     name, handler, opt_class) {
-  var button = this.create_('div');
-  button.classList.add('button');
+  var button = this.create_('button');
   if (opt_class) button.classList.add(opt_class);
   button.textContent = this.displayStringFunction_(name);
   button.addEventListener('click', handler, false);

@@ -9,9 +9,9 @@
 #include <sys/uio.h>
 #include <sys/socket.h>
 
-#include "base/eintr_wrapper.h"
 #include "base/logging.h"
 #include "base/pickle.h"
+#include "base/posix/eintr_wrapper.h"
 #include "base/stl_util.h"
 
 const size_t UnixDomainSocket::kMaxFileDescriptors = 16;
@@ -43,7 +43,14 @@ bool UnixDomainSocket::SendMsg(int fd,
     msg.msg_controllen = cmsg->cmsg_len;
   }
 
-  const ssize_t r = HANDLE_EINTR(sendmsg(fd, &msg, 0));
+  // When available, take advantage of MSG_NOSIGNAL to avoid
+  // a SIGPIPE if the other end breaks the connection.
+#if defined(MSG_NOSIGNAL)
+  const int flags = MSG_NOSIGNAL;
+#else
+  const int flags = 0;
+#endif
+  const ssize_t r = HANDLE_EINTR(sendmsg(fd, &msg, flags));
   const bool ret = static_cast<ssize_t>(length) == r;
   delete[] control_buffer;
   return ret;

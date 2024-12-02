@@ -111,20 +111,15 @@ def buildWebApp(buildtype, version, mimetype, destination, zip_path, plugin,
   # Copy all the locales, preserving directory structure
   destination_locales = os.path.join(destination, "_locales")
   os.mkdir(destination_locales , 0775)
-  chromium_locale_dir = "/_locales/"
-  chrome_locale_dir = "/_locales.official/"
+  locale_dir = "/_locales/"
   for current_locale in locales:
-    pos = current_locale.find(chromium_locale_dir)
-    locale_len = len(chromium_locale_dir)
+    pos = current_locale.find(locale_dir)
     if (pos == -1):
-      pos = current_locale.find(chrome_locale_dir)
-      locale_len = len(chrome_locale_dir)
-    if (pos == -1):
-      raise "Missing locales directory in " + current_locale
-    subtree = current_locale[pos+locale_len:]
+      raise Exception("Missing locales directory in " + current_locale)
+    subtree = current_locale[pos + len(locale_dir):]
     pos = subtree.find("/")
     if (pos == -1):
-      raise "Malformed locale: " + current_locale
+      raise Exception("Malformed locale: " + current_locale)
     locale_id = subtree[:pos]
     messages = subtree[pos+1:]
     destination_dir = os.path.join(destination_locales, locale_id)
@@ -150,14 +145,15 @@ def buildWebApp(buildtype, version, mimetype, destination, zip_path, plugin,
       f.write("placeholder for %s" % (name))
       f.close()
 
-  # Copy the plugin.
-  pluginName = os.path.basename(plugin)
-  newPluginPath = os.path.join(destination, pluginName)
-  if os.path.isdir(plugin):
-    # On Mac we have a directory.
-    shutil.copytree(plugin, newPluginPath)
-  else:
-    shutil.copy2(plugin, newPluginPath)
+  # Copy the plugin. On some platforms (e.g. ChromeOS) plugin compilation may be
+  # disabled, in which case we don't need to copy anything.
+  if plugin:
+    newPluginPath = os.path.join(destination, pluginName)
+    if os.path.isdir(plugin):
+      # On Mac we have a directory.
+      shutil.copytree(plugin, newPluginPath)
+    else:
+      shutil.copy2(plugin, newPluginPath)
 
   # Strip the linux build.
   if ((platform.system() == 'Linux') and (buildtype == 'Official')):
@@ -174,16 +170,17 @@ def buildWebApp(buildtype, version, mimetype, destination, zip_path, plugin,
                  mimetype)
 
   # Set the correct OAuth2 redirect URL.
-  baseUrl = (
-      'https://chromoting-oauth.talkgadget.google.com/'
-      'talkgadget/oauth/chrome-remote-desktop')
+  scheme = 'https://'
+  urlSuffix = '.talkgadget.google.com/talkgadget/oauth/chrome-remote-desktop'
+  url = scheme + 'chromoting-oauth' + urlSuffix
+  urlPattern = scheme + '*' + urlSuffix
   if (buildtype == 'Official'):
     oauth2RedirectUrlJs = (
-        "'" + baseUrl + "/rel/' + chrome.i18n.getMessage('@@extension_id')")
-    oauth2RedirectUrlJson = baseUrl + '/rel/*'
+        "'" + url + "/rel/' + chrome.i18n.getMessage('@@extension_id')")
+    oauth2RedirectUrlJson = urlPattern + '/rel/*'
   else:
-    oauth2RedirectUrlJs = "'" + baseUrl + "/dev'"
-    oauth2RedirectUrlJson = baseUrl + '/dev*'
+    oauth2RedirectUrlJs = "'" + url + "/dev'"
+    oauth2RedirectUrlJson = urlPattern  + '/dev*'
   findAndReplace(os.path.join(destination, 'plugin_settings.js'),
                  "'OAUTH2_REDIRECT_URL'",
                  oauth2RedirectUrlJs)

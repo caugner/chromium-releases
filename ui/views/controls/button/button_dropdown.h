@@ -6,6 +6,7 @@
 #define UI_VIEWS_CONTROLS_BUTTON_BUTTON_DROPDOWN_H_
 
 #include "base/memory/weak_ptr.h"
+#include "ui/views/context_menu_controller.h"
 #include "ui/views/controls/button/image_button.h"
 
 namespace ui {
@@ -24,7 +25,8 @@ class MenuRunner;
 // display a menu
 //
 ////////////////////////////////////////////////////////////////////////////////
-class VIEWS_EXPORT ButtonDropDown : public ImageButton {
+class VIEWS_EXPORT ButtonDropDown : public ImageButton,
+                                    public ContextMenuController {
  public:
   // The button's class name.
   static const char kViewClassName[];
@@ -47,11 +49,12 @@ class VIEWS_EXPORT ButtonDropDown : public ImageButton {
   // Showing the drop down results in a MouseCaptureLost, we need to ignore it.
   virtual void OnMouseCaptureLost() OVERRIDE {}
   virtual void OnMouseExited(const ui::MouseEvent& event) OVERRIDE;
-  // Display the right-click menu, as triggered by the keyboard, for instance.
-  // Using the member function ShowDropDownMenu for the actual display.
-  virtual void ShowContextMenu(const gfx::Point& p,
-                               bool is_mouse_gesture) OVERRIDE;
+  virtual void OnGestureEvent(ui::GestureEvent* event) OVERRIDE;
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
+
+  // Overridden from views::ContextMenuController
+  virtual void ShowContextMenuForView(View* source,
+                                      const gfx::Point& point) OVERRIDE;
 
  protected:
   // Overridden from CustomButton. Returns true if the button should become

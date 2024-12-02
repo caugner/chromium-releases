@@ -26,6 +26,9 @@
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
+#include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/browser_navigator.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/webui/signin/login_ui_service.h"
 #include "chrome/browser/ui/webui/signin/login_ui_service_factory.h"
 #include "chrome/browser/ui/webui/sync_promo/sync_promo_ui.h"
@@ -184,13 +187,26 @@ bool IsKeystoreEncryptionEnabled() {
       switches::kSyncKeystoreEncryption);
 }
 
+void BringTabToFront(WebContents* web_contents) {
+  Browser* browser = chrome::FindBrowserWithWebContents(web_contents);
+  if (browser) {
+    TabStripModel* tab_strip_model = browser->tab_strip_model();
+    if (tab_strip_model) {
+      int index = tab_strip_model->GetIndexOfWebContents(web_contents);
+      if (index != TabStripModel::kNoTab)
+        tab_strip_model->ActivateTabAt(index, false);
+    }
+  }
+}
+
 }  // namespace
 
 SyncSetupHandler::SyncSetupHandler(ProfileManager* profile_manager)
     : configuring_sync_(false),
       profile_manager_(profile_manager),
       last_signin_error_(GoogleServiceAuthError::NONE),
-      retry_on_signin_failure_(true) {
+      retry_on_signin_failure_(true),
+      active_gaia_signin_tab_(NULL) {
 }
 
 SyncSetupHandler::~SyncSetupHandler() {
@@ -377,9 +393,11 @@ void SyncSetupHandler::DisplayConfigureSync(bool show_advanced,
 
     service->UnsuppressAndStart();
     DisplaySpinner();
+
     // To listen to the token available notifications, start SigninTracker.
     signin_tracker_.reset(
-        new SigninTracker(GetProfile(), this,
+        new SigninTracker(GetProfile(),
+                          this,
                           SigninTracker::SERVICES_INITIALIZING));
     return;
   }
@@ -470,6 +488,10 @@ void SyncSetupHandler::DisplayConfigureSync(bool show_advanced,
       args.SetString(
           "fullEncryptionBody",
           GetStringUTF16(IDS_SYNC_FULL_ENCRYPTION_BODY_CUSTOM));
+    } else {
+      args.SetString(
+          "fullEncryptionBody",
+          GetStringUTF16(IDS_SYNC_FULL_ENCRYPTION_DATA));
     }
   } else {
     args.SetBoolean("usePassphrase", service->IsUsingSecondaryPassphrase());
@@ -478,6 +500,12 @@ void SyncSetupHandler::DisplayConfigureSync(bool show_advanced,
   StringValue page("configure");
   web_ui()->CallJavascriptFunction(
       "SyncSetupOverlay.showSyncSetupPage", page, args);
+
+  if (SyncPromoUI::UseWebBasedSigninFlow()) {
+    // Make sure the tab used for the Gaia sign in does not cover the settings
+    // tab.
+    FocusUI();
+  }
 }
 
 void SyncSetupHandler::ConfigureSyncDone() {
@@ -554,15 +582,40 @@ SigninManager* SyncSetupHandler::GetSignin() const {
 }
 
 void SyncSetupHandler::DisplayGaiaLogin(bool fatal_error) {
-  retry_on_signin_failure_ = true;
-  DisplayGaiaLoginWithErrorMessage(string16(), fatal_error);
+  if (SyncPromoUI::UseWebBasedSigninFlow()) {
+    // Advanced options are no longer being configured if the login screen is
+    // visible. If the user exits the signin wizard after this without
+    // configuring sync, CloseSyncSetup() will ensure they are logged out.
+    configuring_sync_ = false;
+
+    DisplayGaiaLoginInNewTab();
+    signin_tracker_.reset(
+        new SigninTracker(GetProfile(), this,
+                          SigninTracker::WAITING_FOR_GAIA_VALIDATION));
+  } else {
+    retry_on_signin_failure_ = true;
+    DisplayGaiaLoginWithErrorMessage(string16(), fatal_error);
+  }
+}
+
+void SyncSetupHandler::DisplayGaiaLoginInNewTab() {
+  DCHECK(!active_gaia_signin_tab_);
+  GURL url(SyncPromoUI::GetSyncPromoURL(GURL(),
+      SyncPromoUI::SOURCE_SETTINGS, false));
+  Browser* browser = chrome::FindBrowserWithWebContents(
+      web_ui()->GetWebContents());
+  active_gaia_signin_tab_ = browser->OpenURL(
+      content::OpenURLParams(url, content::Referrer(), SINGLETON_TAB,
+                              content::PAGE_TRANSITION_AUTO_BOOKMARK,
+                              false));
+  content::WebContentsObserver::Observe(active_gaia_signin_tab_);
 }
 
 void SyncSetupHandler::DisplayGaiaLoginWithErrorMessage(
     const string16& error_message, bool fatal_error) {
-  // We are no longer configuring sync if the login screen is visible.
-  // If the user exits the signin wizard after this without configuring sync,
-  // CloseSyncSetup() will ensure they are logged out.
+  // Advanced options are no longer being configured if the login screen is
+  // visible. If the user exits the signin wizard after this without
+  // configuring sync, CloseSyncSetup() will ensure they are logged out.
   configuring_sync_ = false;
 
   string16 local_error_message(error_message);
@@ -690,6 +743,9 @@ void SyncSetupHandler::DisplayGaiaSuccessAndClose() {
 
 void SyncSetupHandler::DisplayGaiaSuccessAndSettingUp() {
   RecordSignin();
+  if (SyncPromoUI::UseWebBasedSigninFlow())
+    CloseGaiaSigninPage();
+
   web_ui()->CallJavascriptFunction("SyncSetupOverlay.showSuccessAndSettingUp");
 }
 
@@ -785,11 +841,18 @@ void SyncSetupHandler::SigninFailed(const GoogleServiceAuthError& error) {
   backend_start_timer_.reset();
 
   last_signin_error_ = error;
-  // Got a failed signin - this is either just a typical auth error, or a
-  // sync error (treat sync errors as "fatal errors" - i.e. non-auth errors).
-  // On ChromeOS, this condition can happen when auth token is invalid and
-  // cannot start sync backend.
-  if (retry_on_signin_failure_) {
+
+  // If using web-based sign in flow, don't show the gaia sign in page again
+  // since there is no way to show the user an error message.
+  if (SyncPromoUI::UseWebBasedSigninFlow()) {
+    CloseSyncSetup();
+  } else if (retry_on_signin_failure_) {
+    // Got a failed signin - this is either just a typical auth error, or a
+    // sync error (treat sync errors as "fatal errors" - i.e. non-auth errors).
+    // On ChromeOS, this condition can happen when auth token is invalid and
+    // cannot start sync backend.
+    // If using web-based sign in flow, don't show the gaia sign in page again
+    // since there is no way to show the user an error message.
     DisplayGaiaLogin(GetSyncService()->HasUnrecoverableError());
   } else {
     // TODO(peria): Show error dialog for prompting sign in and out on
@@ -990,13 +1053,12 @@ void SyncSetupHandler::CloseSyncSetup() {
             ProfileSyncService::CANCEL_FROM_SIGNON_WITHOUT_AUTH);
       }
     }
+
     // Let the various services know that we're no longer active.
     GetLoginUIService()->LoginUIClosed(this);
   }
 
   if (sync_service) {
-    sync_service->SetSetupInProgress(false);
-
     // Make sure user isn't left half-logged-in (signed in, but without sync
     // started up). If the user hasn't finished setting up sync, then sign out
     // and shut down sync.
@@ -1007,6 +1069,7 @@ void SyncSetupHandler::CloseSyncSetup() {
       browser_sync::SyncPrefs sync_prefs(GetProfile()->GetPrefs());
       sync_prefs.SetStartSuppressed(true);
     }
+    sync_service->SetSetupInProgress(false);
   }
 
   // Reset the attempted email address and error, otherwise the sync setup
@@ -1040,6 +1103,7 @@ void SyncSetupHandler::OpenSyncSetup(bool force_login) {
   //    logged in.
   // 6) One-click signin (credentials are already available, so should display
   //    sync configure UI, not login UI).
+  // 7) ChromeOS re-enable after disabling sync.
   if (force_login ||
       !service->IsSyncEnabledAndLoggedIn() ||
       service->GetAuthError().state() != GoogleServiceAuthError::NONE) {
@@ -1048,11 +1112,13 @@ void SyncSetupHandler::OpenSyncSetup(bool force_login) {
     DisplayGaiaLogin(false);
   } else {
     // User is already logged in. They must have brought up the config wizard
-    // via the "Advanced..." button or through One-Click signin (cases 5/6).
+    // via the "Advanced..." button or through One-Click signin (cases 5/6), or
+    // they are re-enabling sync on Chrome OS.
     DisplayConfigureSync(true, false);
   }
 
-  ShowSetupUI();
+  if (!SyncPromoUI::UseWebBasedSigninFlow())
+    ShowSetupUI();
 }
 
 void SyncSetupHandler::OpenConfigureSync() {
@@ -1065,13 +1131,23 @@ void SyncSetupHandler::OpenConfigureSync() {
 
 void SyncSetupHandler::FocusUI() {
   DCHECK(IsActiveLogin());
-  WebContents* web_contents = web_ui()->GetWebContents();
-  web_contents->GetDelegate()->ActivateContents(web_contents);
+  if (SyncPromoUI::UseWebBasedSigninFlow() && signin_tracker_) {
+    BringTabToFront(active_gaia_signin_tab_);
+  } else {
+    WebContents* web_contents = web_ui()->GetWebContents();
+    web_contents->GetDelegate()->ActivateContents(web_contents);
+  }
 }
 
 void SyncSetupHandler::CloseUI() {
   DCHECK(IsActiveLogin());
   CloseOverlay();
+}
+
+void SyncSetupHandler::WebContentsDestroyed(
+    content::WebContents* web_contents) {
+  DCHECK(active_gaia_signin_tab_);
+  CloseSyncSetup();
 }
 
 // Private member functions.
@@ -1094,6 +1170,28 @@ void SyncSetupHandler::CloseOverlay() {
 
   CloseSyncSetup();
   web_ui()->CallJavascriptFunction("OptionsPage.closeOverlay");
+}
+
+void SyncSetupHandler::CloseGaiaSigninPage() {
+  if (active_gaia_signin_tab_) {
+    content::WebContentsObserver::Observe(NULL);
+
+    Browser* browser = chrome::FindBrowserWithWebContents(
+        active_gaia_signin_tab_);
+    if (browser) {
+      TabStripModel* tab_strip_model = browser->tab_strip_model();
+      if (tab_strip_model) {
+        int index = tab_strip_model->GetIndexOfWebContents(
+            active_gaia_signin_tab_);
+        if (index != TabStripModel::kNoTab) {
+          tab_strip_model->ExecuteContextMenuCommand(
+              index, TabStripModel::CommandCloseTab);
+        }
+      }
+    }
+  }
+
+  active_gaia_signin_tab_ = NULL;
 }
 
 bool SyncSetupHandler::IsLoginAuthDataValid(const std::string& username,

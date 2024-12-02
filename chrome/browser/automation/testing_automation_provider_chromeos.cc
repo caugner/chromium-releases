@@ -33,9 +33,8 @@
 #include "chrome/browser/chromeos/login/webui_login_display.h"
 #include "chrome/browser/chromeos/login/webui_login_display_host.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
-#include "chrome/browser/chromeos/options/take_photo_dialog.h"
-#include "chrome/browser/chromeos/proxy_cros_settings_parser.h"
 #include "chrome/browser/chromeos/proxy_config_service_impl.h"
+#include "chrome/browser/chromeos/proxy_cros_settings_parser.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/settings/cros_settings_names.h"
 #include "chrome/browser/chromeos/system/timezone_settings.h"
@@ -409,7 +408,7 @@ void TestingAutomationProvider::AddLoginEventObserver(
 
 void TestingAutomationProvider::SignOut(DictionaryValue* args,
                                         IPC::Message* reply_message) {
-  ash::Shell::GetInstance()->tray_delegate()->SignOut();
+  ash::Shell::GetInstance()->system_tray_delegate()->SignOut();
   // Sign out has the side effect of restarting the session_manager
   // and chrome, thereby severing the automation channel, so it's
   // not really necessary to send a reply back. The next line is
@@ -1220,8 +1219,7 @@ void TestingAutomationProvider::EnrollEnterpriseDevice(
     return;
   }
   // Set up an observer (it will delete itself).
-  new EnrollmentObserver(this, reply_message, enroll_screen->GetActor(),
-                         enroll_screen);
+  new EnrollmentObserver(this, reply_message, enroll_screen);
   enroll_screen->GetActor()->SubmitTestCredentials(user, password);
 }
 
@@ -1346,7 +1344,8 @@ void TestingAutomationProvider::EnableSpokenFeedback(
   }
 
   if (user_manager->IsUserLoggedIn()) {
-    chromeos::accessibility::EnableSpokenFeedback(enabled, NULL);
+    chromeos::accessibility::EnableSpokenFeedback(
+        enabled, NULL, ash::A11Y_NOTIFICATION_NONE);
   } else {
     ExistingUserController* controller =
         ExistingUserController::current_controller();
@@ -1354,7 +1353,9 @@ void TestingAutomationProvider::EnableSpokenFeedback(
         static_cast<chromeos::WebUILoginDisplayHost*>(
             controller->login_display_host());
     chromeos::accessibility::EnableSpokenFeedback(
-        enabled, webui_login_display_host->GetOobeUI()->web_ui());
+        enabled,
+        webui_login_display_host->GetOobeUI()->web_ui(),
+        ash::A11Y_NOTIFICATION_NONE);
   }
 
   reply.SendSuccess(return_value.get());
@@ -1487,23 +1488,6 @@ void TestingAutomationProvider::OpenCrosh(DictionaryValue* args,
   new NavigationNotificationObserver(
       NULL, this, reply_message, 1, false, true);
   ash::Shell::GetInstance()->delegate()->OpenCrosh();
-}
-
-void TestingAutomationProvider::CaptureProfilePhoto(
-    Browser* browser,
-    DictionaryValue* args,
-    IPC::Message* reply_message) {
-  chromeos::TakePhotoDialog* take_photo_dialog =
-      new chromeos::TakePhotoDialog(NULL);
-
-  // Set up an observer (it will delete itself).
-  take_photo_dialog->AddObserver(new PhotoCaptureObserver(
-      this, reply_message));
-
-  views::Widget* window = views::Widget::CreateWindowWithParent(
-      take_photo_dialog, browser->window()->GetNativeWindow());
-  window->SetAlwaysOnTop(true);
-  window->Show();
 }
 
 void TestingAutomationProvider::AddChromeosObservers() {

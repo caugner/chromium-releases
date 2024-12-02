@@ -5,8 +5,8 @@
 #ifndef UI_VIEWS_NATIVE_THEME_DELEGATE_H_
 #define UI_VIEWS_NATIVE_THEME_DELEGATE_H_
 
-#include "ui/base/native_theme/native_theme.h"
 #include "ui/gfx/rect.h"
+#include "ui/native_theme/native_theme.h"
 #include "ui/views/views_export.h"
 
 namespace views {
@@ -15,7 +15,7 @@ namespace views {
 // theme states.  This delegate can be used to control a native theme Border
 // or Painter object.
 //
-// If animation is onging, the native theme border or painter will
+// If animation is ongoing, the native theme border or painter will
 // composite the foreground state over the backgroud state using an alpha
 // between 0 and 255 based on the current value of the animation.
 class VIEWS_EXPORT NativeThemeDelegate {

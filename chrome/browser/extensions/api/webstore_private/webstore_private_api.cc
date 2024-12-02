@@ -16,7 +16,9 @@
 #include "chrome/browser/extensions/extension_function_dispatcher.h"
 #include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/webstore_installer.h"
+#include "chrome/browser/gpu/gpu_feature_checker.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/signin/token_service.h"
@@ -26,13 +28,13 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension_constants.h"
-#include "chrome/common/extensions/extension_error_utils.h"
 #include "chrome/common/extensions/extension_l10n_util.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/gpu_data_manager.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/web_contents.h"
+#include "extensions/common/error_utils.h"
 #include "google_apis/gaia/gaia_constants.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -420,7 +422,7 @@ bool CompleteInstallFunction::RunImpl() {
   scoped_ptr<WebstoreInstaller::Approval> approval(
       g_pending_approvals.Get().PopApproval(profile(), id));
   if (!approval.get()) {
-    error_ = ExtensionErrorUtils::FormatErrorMessage(
+    error_ = ErrorUtils::FormatErrorMessage(
         kNoPreviousBeginInstallWithManifestError, id);
     return false;
   }
@@ -472,7 +474,8 @@ bool GetBrowserLoginFunction::RunImpl() {
 }
 
 bool GetStoreLoginFunction::RunImpl() {
-  ExtensionService* service = profile_->GetExtensionService();
+  ExtensionService* service =
+      extensions::ExtensionSystem::Get(profile_)->extension_service();
   ExtensionPrefs* prefs = service->extension_prefs();
   std::string login;
   if (prefs->GetWebStoreLogin(&login)) {
@@ -486,7 +489,8 @@ bool GetStoreLoginFunction::RunImpl() {
 bool SetStoreLoginFunction::RunImpl() {
   std::string login;
   EXTENSION_FUNCTION_VALIDATE(args_->GetString(0, &login));
-  ExtensionService* service = profile_->GetExtensionService();
+  ExtensionService* service =
+      extensions::ExtensionSystem::Get(profile_)->extension_service();
   ExtensionPrefs* prefs = service->extension_prefs();
   prefs->SetWebStoreLogin(login);
   return true;

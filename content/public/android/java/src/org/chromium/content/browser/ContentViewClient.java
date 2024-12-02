@@ -34,6 +34,21 @@ public class ContentViewClient {
     public void onUpdateTitle(String title) {
     }
 
+    /**
+      * Lets client listen on the scaling changes on delayed, throttled
+      * and best-effort basis. Used for WebView.onScaleChanged.
+      */
+    public void onScaleChanged(float oldScale, float newScale) {
+    }
+
+    /**
+     * Notifies the client that the position of the top controls has changed.
+     * @param topControlsOffsetY The Y offset of the top controls.
+     * @param contentOffsetY The Y offset of the content.
+     */
+    public void onOffsetsForFullscreenChanged(float topControlsOffsetY, float contentOffsetY) {
+    }
+
     public void onTabCrash() {
     }
 

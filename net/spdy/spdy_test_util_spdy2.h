@@ -19,6 +19,7 @@
 #include "net/http/http_transaction_factory.h"
 #include "net/proxy/proxy_service.h"
 #include "net/socket/socket_test_util.h"
+#include "net/spdy/spdy_session.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_storage.h"
 
@@ -339,8 +340,7 @@ int CombineFrames(const SpdyFrame** frames, int num_frames,
 
 // Helper to manage the lifetimes of the dependencies for a
 // HttpNetworkTransaction.
-class SpdySessionDependencies {
- public:
+struct SpdySessionDependencies {
   // Default set of dependencies -- "null" proxy service.
   SpdySessionDependencies();
 
@@ -353,6 +353,8 @@ class SpdySessionDependencies {
       SpdySessionDependencies* session_deps);
   static HttpNetworkSession* SpdyCreateSessionDeterministic(
       SpdySessionDependencies* session_deps);
+  static HttpNetworkSession::Params CreateSessionParams(
+      SpdySessionDependencies* session_deps);
 
   // NOTE: host_resolver must be ordered before http_auth_handler_factory.
   scoped_ptr<MockHostResolverBase> host_resolver;
@@ -363,7 +365,12 @@ class SpdySessionDependencies {
   scoped_ptr<DeterministicMockClientSocketFactory> deterministic_socket_factory;
   scoped_ptr<HttpAuthHandlerFactory> http_auth_handler_factory;
   HttpServerPropertiesImpl http_server_properties;
+  bool enable_ip_pooling;
+  bool enable_compression;
+  bool enable_ping;
+  SpdySession::TimeFunc time_func;
   std::string trusted_spdy_proxy;
+  NetLog* net_log;
 };
 
 class SpdyURLRequestContext : public URLRequestContext {
@@ -409,16 +416,6 @@ class SpdySessionPoolPeer {
   SpdySessionPool* const pool_;
 
   DISALLOW_COPY_AND_ASSIGN(SpdySessionPoolPeer);
-};
-
-// Helper to manage the state of a number of SPDY global variables.
-class SpdyTestStateHelper {
- public:
-  SpdyTestStateHelper();
-  ~SpdyTestStateHelper();
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(SpdyTestStateHelper);
 };
 
 }  // namespace test_spdy2

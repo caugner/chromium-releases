@@ -81,7 +81,6 @@ class TestWebKitPlatformSupport :
   virtual WebKit::WebThemeEngine *themeEngine() OVERRIDE;
 #endif
 
-  virtual WebKit::WebSharedWorkerRepository* sharedWorkerRepository() OVERRIDE;
   virtual WebKit::WebGraphicsContext3D* createOffscreenGraphicsContext3D(
       const WebKit::WebGraphicsContext3D::Attributes&);
   virtual bool canAccelerate2dCanvas();
@@ -129,18 +128,23 @@ class TestWebKitPlatformSupport :
       size_t before_index,
       const WebKit::WebString& locale) OVERRIDE;
 
+  virtual WebKit::WebGestureCurve* createFlingAnimationCurve(
+      int device_source,
+      const WebKit::WebFloatPoint& velocity,
+      const WebKit::WebSize& cumulative_scroll) OVERRIDE;
+
  private:
   TestShellWebMimeRegistryImpl mime_registry_;
   MockWebClipboardImpl mock_clipboard_;
   webkit_glue::WebFileUtilitiesImpl file_utilities_;
-  ScopedTempDir appcache_dir_;
+  base::ScopedTempDir appcache_dir_;
   SimpleAppCacheSystem appcache_system_;
   SimpleDatabaseSystem database_system_;
   SimpleDomStorageSystem dom_storage_system_;
   SimpleWebCookieJarImpl cookie_jar_;
   scoped_refptr<TestShellWebBlobRegistryImpl> blob_registry_;
   SimpleFileSystem file_system_;
-  ScopedTempDir file_system_root_;
+  base::ScopedTempDir file_system_root_;
   WebURLLoaderMockFactory url_loader_factory_;
   bool unit_test_mode_;
   WebKit::WebGamepads gamepad_data_;

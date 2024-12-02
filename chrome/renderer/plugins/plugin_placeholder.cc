@@ -39,7 +39,6 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebPoint.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebVector.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "webkit/glue/webpreferences.h"
 #include "webkit/plugins/npapi/plugin_list.h"
@@ -107,10 +106,15 @@ PluginPlaceholder* PluginPlaceholder::CreateMissingPlugin(
     const WebPluginParams& params) {
   const base::StringPiece template_html(
       ResourceBundle::GetSharedInstance().GetRawDataResource(
-          IDR_BLOCKED_PLUGIN_HTML, ui::SCALE_FACTOR_NONE));
+          IDR_BLOCKED_PLUGIN_HTML));
 
   DictionaryValue values;
+#if defined(ENABLE_PLUGIN_INSTALLATION)
   values.SetString("message", l10n_util::GetStringUTF8(IDS_PLUGIN_SEARCHING));
+#else
+  values.SetString("message",
+      l10n_util::GetStringUTF8(IDS_PLUGIN_NOT_SUPPORTED));
+#endif
 
   std::string html_data =
       jstemplate_builder::GetI18nTemplateHtml(template_html, &values);
@@ -123,8 +127,6 @@ PluginPlaceholder* PluginPlaceholder::CreateMissingPlugin(
   RenderThread::Get()->Send(new ChromeViewHostMsg_FindMissingPlugin(
       missing_plugin->routing_id(), missing_plugin->CreateRoutingId(),
       params.mimeType.utf8()));
-#else
-  missing_plugin->OnDidNotFindMissingPlugin();
 #endif
   return missing_plugin;
 }
@@ -138,7 +140,7 @@ PluginPlaceholder* PluginPlaceholder::CreateErrorPlugin(
 
   const base::StringPiece template_html(
       ResourceBundle::GetSharedInstance().GetRawDataResource(
-          IDR_BLOCKED_PLUGIN_HTML, ui::SCALE_FACTOR_NONE));
+          IDR_BLOCKED_PLUGIN_HTML));
   std::string html_data =
       jstemplate_builder::GetI18nTemplateHtml(template_html, &values);
 
@@ -170,7 +172,7 @@ PluginPlaceholder* PluginPlaceholder::CreateBlockedPlugin(
 
   const base::StringPiece template_html(
       ResourceBundle::GetSharedInstance().GetRawDataResource(
-          template_id, ui::SCALE_FACTOR_NONE));
+          template_id));
 
   DCHECK(!template_html.empty()) << "unable to load template. ID: "
                                  << template_id;
@@ -193,7 +195,7 @@ PluginPlaceholder* PluginPlaceholder::CreateMobileYoutubePlugin(
     const WebPluginParams& params) {
   const base::StringPiece template_html(
       ResourceBundle::GetSharedInstance().GetRawDataResource(
-          IDR_MOBILE_YOUTUBE_PLUGIN_HTML, ui::SCALE_FACTOR_NONE));
+          IDR_MOBILE_YOUTUBE_PLUGIN_HTML));
 
   DictionaryValue values;
   values.SetString("video_id", GetYoutubeVideoId(params));
@@ -408,11 +410,11 @@ void PluginPlaceholder::WillDestroyPlugin() {
   delete this;
 }
 
+#if defined(ENABLE_PLUGIN_INSTALLATION)
 void PluginPlaceholder::OnDidNotFindMissingPlugin() {
   SetMessage(l10n_util::GetStringUTF16(IDS_PLUGIN_NOT_FOUND));
 }
 
-#if defined(ENABLE_PLUGIN_INSTALLATION)
 void PluginPlaceholder::OnFoundMissingPlugin(const string16& plugin_name) {
   if (status_->value == ChromeViewHostMsg_GetPluginInfo_Status::kNotFound)
     SetMessage(l10n_util::GetStringFUTF16(IDS_PLUGIN_FOUND, plugin_name));
@@ -615,7 +617,7 @@ void PluginPlaceholder::OpenYoutubeUrlCallback(const CppArgumentList& args,
   request.initialize();
   request.setURL(url);
   render_view()->LoadURLExternally(
-      frame_, request, WebKit::WebNavigationPolicyCurrentTab);
+      frame_, request, WebKit::WebNavigationPolicyNewForegroundTab);
 }
 
 bool PluginPlaceholder::IsValidYouTubeVideo(const std::string& path) {

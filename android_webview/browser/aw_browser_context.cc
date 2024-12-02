@@ -42,7 +42,8 @@ AwBrowserContext::GetRequestContextForRenderProcess(
 
 net::URLRequestContextGetter*
 AwBrowserContext::GetRequestContextForStoragePartition(
-    const std::string& partition_id) {
+    const FilePath& partition_path,
+    bool in_memory) {
   return GetRequestContext();
 }
 
@@ -58,7 +59,8 @@ AwBrowserContext::GetMediaRequestContextForRenderProcess(
 
 net::URLRequestContextGetter*
 AwBrowserContext::GetMediaRequestContextForStoragePartition(
-        const std::string& partition_id) {
+    const FilePath& partition_path,
+    bool in_memory) {
   return GetRequestContext();
 }
 
@@ -68,10 +70,7 @@ content::ResourceContext* AwBrowserContext::GetResourceContext() {
 
 content::DownloadManagerDelegate*
 AwBrowserContext::GetDownloadManagerDelegate() {
-  // TODO(boliu): Implement intercepting downloads for DownloadListener and
-  // maybe put a NOTREACHED if it is indeed never needed.
-  NOTIMPLEMENTED();
-  return NULL;
+  return &download_manager_delegate_;
 }
 
 content::GeolocationPermissionContext*

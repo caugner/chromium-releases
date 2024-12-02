@@ -22,13 +22,20 @@ ModelNeutralState::ModelNeutralState()
       last_get_key_result(UNSET),
       last_download_updates_result(UNSET),
       commit_result(UNSET),
-      conflicts_resolved(false),
       items_committed(false),
       debug_info_sent(false),
       num_server_changes_remaining(0) {
 }
 
 ModelNeutralState::~ModelNeutralState() {}
+
+bool HasSyncerError(const ModelNeutralState& state) {
+  const bool get_key_error = SyncerErrorIsError(state.last_get_key_result);
+  const bool download_updates_error =
+      SyncerErrorIsError(state.last_download_updates_result);
+  const bool commit_error = SyncerErrorIsError(state.commit_result);
+  return get_key_error || download_updates_error || commit_error;
+}
 
 }  // namespace sessions
 }  // namespace syncer

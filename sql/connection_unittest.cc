@@ -3,10 +3,10 @@
 // found in the LICENSE file.
 
 #include "base/file_util.h"
-#include "base/scoped_temp_dir.h"
+#include "base/files/scoped_temp_dir.h"
 #include "sql/connection.h"
-#include "sql/statement.h"
 #include "sql/meta_table.h"
+#include "sql/statement.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/sqlite/sqlite3.h"
 
@@ -30,7 +30,7 @@ class SQLConnectionTest : public testing::Test {
   }
 
  private:
-  ScopedTempDir temp_dir_;
+  base::ScopedTempDir temp_dir_;
   sql::Connection db_;
 };
 
@@ -186,7 +186,7 @@ TEST_F(SQLConnectionTest, Raze) {
   {
     sql::Statement s(db().GetUniqueStatement("PRAGMA auto_vacuum"));
     ASSERT_TRUE(s.Step());
-    // auto_vacuum must be preserved across a Raze.
+    // The new database has the same auto_vacuum as a fresh database.
     EXPECT_EQ(pragma_auto_vacuum, s.ColumnInt(0));
   }
 }

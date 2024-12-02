@@ -11,6 +11,7 @@
 #include "chrome/browser/chromeos/drive/drive_file_system_util.h"
 #include "chrome/browser/chromeos/drive/file_system/drive_operations.h"
 #include "chrome/browser/chromeos/drive/file_system/remove_operation.h"
+#include "chrome/browser/google_apis/gdata_wapi_parser.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/pref_names.h"
@@ -31,33 +32,30 @@ DriveScheduler::JobInfo::JobInfo(JobType in_job_type, FilePath in_file_path)
       total_bytes(0),
       file_path(in_file_path),
       state(STATE_NONE) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 }
 
 DriveScheduler::QueueEntry::QueueEntry(JobType in_job_type,
                                        FilePath in_file_path)
-    : job_info(TYPE_REMOVE, in_file_path) {
+    : job_info(in_job_type, in_file_path),
+      is_recursive(false) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 }
 
 DriveScheduler::QueueEntry::~QueueEntry() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 }
 
-DriveScheduler::RemoveJobPrivate::RemoveJobPrivate(
-    bool in_is_recursive,
-    FileOperationCallback in_callback)
-    : is_recursive(in_is_recursive),
-      callback(in_callback) {
-}
-
-DriveScheduler::RemoveJobPrivate::~RemoveJobPrivate() {
-}
-
-DriveScheduler::DriveScheduler(Profile* profile,
-                               file_system::DriveOperations* drive_operations)
+DriveScheduler::DriveScheduler(
+    Profile* profile,
+    google_apis::DriveServiceInterface* drive_service,
+    file_system::DriveOperations* drive_operations)
     : job_loop_is_running_(false),
       next_job_id_(0),
       throttle_count_(0),
       disable_throttling_(false),
       drive_operations_(drive_operations),
+      drive_service_(drive_service),
       profile_(profile),
       weak_ptr_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)),
       initialized_(false) {
@@ -82,20 +80,155 @@ void DriveScheduler::Initialize() {
   initialized_ = true;
 }
 
-void DriveScheduler::Remove(const FilePath& file_path,
-                            bool is_recursive,
-                            const FileOperationCallback& callback) {
+void DriveScheduler::GetAccountMetadata(
+    const google_apis::GetAccountMetadataCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(!callback.is_null());
 
-  QueueEntry* new_job = new QueueEntry(TYPE_REMOVE, file_path);
-  new_job->remove_private.reset(new RemoveJobPrivate(is_recursive, callback));
+  scoped_ptr<QueueEntry> new_job(
+      new QueueEntry(TYPE_GET_ACCOUNT_METADATA, FilePath()));
+  new_job->get_account_metadata_callback = callback;
 
-  QueueJob(new_job);
+  QueueJob(new_job.Pass());
 
   StartJobLoop();
 }
 
-int DriveScheduler::QueueJob(QueueEntry* job) {
+void DriveScheduler::GetApplicationInfo(
+    const google_apis::GetDataCallback& callback) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(!callback.is_null());
+
+  scoped_ptr<QueueEntry> new_job(
+      new QueueEntry(TYPE_GET_APPLICATION_INFO, FilePath()));
+  new_job->get_data_callback = callback;
+
+  QueueJob(new_job.Pass());
+
+  StartJobLoop();
+}
+
+void DriveScheduler::Copy(const FilePath& src_file_path,
+                          const FilePath& dest_file_path,
+                          const FileOperationCallback& callback) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(!callback.is_null());
+
+  scoped_ptr<QueueEntry> new_job(new QueueEntry(TYPE_COPY, src_file_path));
+  new_job->dest_file_path = dest_file_path;
+  new_job->file_operation_callback = callback;
+
+  QueueJob(new_job.Pass());
+
+  StartJobLoop();
+}
+
+void DriveScheduler::GetResourceList(
+    const GURL& feed_url,
+    int64 start_changestamp,
+    const std::string& search_query,
+    bool shared_with_me,
+    const std::string& directory_resource_id,
+    const google_apis::GetResourceListCallback& callback) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(!callback.is_null());
+
+  scoped_ptr<QueueEntry> new_job(
+      new QueueEntry(TYPE_GET_RESOURCE_LIST, FilePath()));
+  new_job->feed_url = feed_url;
+  new_job->start_changestamp = start_changestamp;
+  new_job->search_query = search_query;
+  new_job->shared_with_me = shared_with_me;
+  new_job->directory_resource_id = directory_resource_id;
+  new_job->get_resource_list_callback = callback;
+
+  QueueJob(new_job.Pass());
+
+  StartJobLoop();
+}
+
+void DriveScheduler::TransferFileFromRemoteToLocal(
+    const FilePath& remote_src_file_path,
+    const FilePath& local_dest_file_path,
+    const FileOperationCallback& callback) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(!callback.is_null());
+
+  scoped_ptr<QueueEntry> new_job(new QueueEntry(TYPE_TRANSFER_REMOTE_TO_LOCAL,
+                                                remote_src_file_path));
+  new_job->dest_file_path = local_dest_file_path;
+  new_job->file_operation_callback = callback;
+
+  QueueJob(new_job.Pass());
+
+  StartJobLoop();
+}
+
+void DriveScheduler::TransferFileFromLocalToRemote(
+    const FilePath& local_src_file_path,
+    const FilePath& remote_dest_file_path,
+    const FileOperationCallback& callback) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(!callback.is_null());
+
+  scoped_ptr<QueueEntry> new_job(new QueueEntry(TYPE_TRANSFER_LOCAL_TO_REMOTE,
+                                                local_src_file_path));
+  new_job->dest_file_path = remote_dest_file_path;
+  new_job->file_operation_callback = callback;
+
+  QueueJob(new_job.Pass());
+
+  StartJobLoop();
+}
+
+void DriveScheduler::TransferRegularFile(
+    const FilePath& local_src_file_path,
+    const FilePath& remote_dest_file_path,
+    const FileOperationCallback& callback) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(!callback.is_null());
+
+  scoped_ptr<QueueEntry> new_job(new QueueEntry(TYPE_TRANSFER_REGULAR_FILE,
+                                                local_src_file_path));
+  new_job->dest_file_path = remote_dest_file_path;
+  new_job->file_operation_callback = callback;
+
+  QueueJob(new_job.Pass());
+
+  StartJobLoop();
+}
+
+void DriveScheduler::Move(const FilePath& src_file_path,
+                          const FilePath& dest_file_path,
+                          const FileOperationCallback& callback) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(!callback.is_null());
+
+  scoped_ptr<QueueEntry> new_job(new QueueEntry(TYPE_MOVE, src_file_path));
+  new_job->dest_file_path = dest_file_path;
+  new_job->file_operation_callback = callback;
+
+  QueueJob(new_job.Pass());
+
+  StartJobLoop();
+}
+
+void DriveScheduler::Remove(const FilePath& file_path,
+                            bool is_recursive,
+                            const FileOperationCallback& callback) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(!callback.is_null());
+
+  scoped_ptr<QueueEntry> new_job(new QueueEntry(TYPE_REMOVE, file_path));
+  new_job->is_recursive = is_recursive;
+  new_job->file_operation_callback = callback;
+
+  QueueJob(new_job.Pass());
+
+  StartJobLoop();
+}
+
+int DriveScheduler::QueueJob(scoped_ptr<QueueEntry> job) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   int job_id = next_job_id_;
@@ -104,8 +237,8 @@ int DriveScheduler::QueueJob(QueueEntry* job) {
 
   queue_.push_back(job_id);
 
-  DCHECK(job_info_.find(job_id) == job_info_.end());
-  job_info_[job_id] = make_linked_ptr(job);
+  DCHECK(job_info_map_.find(job_id) == job_info_map_.end());
+  job_info_map_[job_id] = make_linked_ptr(job.release());
 
   return job_id;
 }
@@ -131,29 +264,111 @@ void DriveScheduler::DoJobLoop() {
   int job_id = queue_.front();
   queue_.pop_front();
 
-  JobMap::iterator job_iter = job_info_.find(job_id);
-  DCHECK(job_iter != job_info_.end());
+  JobMap::iterator job_iter = job_info_map_.find(job_id);
+  DCHECK(job_iter != job_info_map_.end());
 
   JobInfo& job_info = job_iter->second->job_info;
   job_info.state = STATE_RUNNING;
+  const QueueEntry* queue_entry = job_iter->second.get();
 
   switch (job_info.job_type) {
-    case TYPE_REMOVE: {
-      DCHECK(job_iter->second->remove_private.get());
-
-      drive_operations_->Remove(
-          job_info.file_path,
-          job_iter->second->remove_private->is_recursive,
-          base::Bind(&DriveScheduler::OnRemoveDone,
+    case TYPE_GET_ACCOUNT_METADATA: {
+      drive_service_->GetAccountMetadata(
+          base::Bind(&DriveScheduler::OnGetAccountMetadataJobDone,
                      weak_ptr_factory_.GetWeakPtr(),
                      job_id));
     }
     break;
-  }
 
+    case TYPE_GET_APPLICATION_INFO: {
+      drive_service_->GetApplicationInfo(
+          base::Bind(&DriveScheduler::OnGetDataJobDone,
+                     weak_ptr_factory_.GetWeakPtr(),
+                     job_id));
+    }
+    break;
+
+    case TYPE_COPY: {
+      drive_operations_->Copy(
+          job_info.file_path,
+          queue_entry->dest_file_path,
+          base::Bind(&DriveScheduler::OnFileOperationJobDone,
+                     weak_ptr_factory_.GetWeakPtr(),
+                     job_id));
+    }
+    break;
+
+    case TYPE_GET_RESOURCE_LIST: {
+      drive_service_->GetResourceList(
+          queue_entry->feed_url,
+          queue_entry->start_changestamp,
+          queue_entry->search_query,
+          queue_entry->shared_with_me,
+          queue_entry->directory_resource_id,
+          base::Bind(&DriveScheduler::OnGetResourceListJobDone,
+                     weak_ptr_factory_.GetWeakPtr(),
+                     job_id));
+    }
+    break;
+
+    case TYPE_MOVE: {
+      drive_operations_->Move(
+          job_info.file_path,
+          queue_entry->dest_file_path,
+          base::Bind(&DriveScheduler::OnFileOperationJobDone,
+                     weak_ptr_factory_.GetWeakPtr(),
+                     job_id));
+    }
+    break;
+
+    case TYPE_REMOVE: {
+      drive_operations_->Remove(
+          job_info.file_path,
+          queue_entry->is_recursive,
+          base::Bind(&DriveScheduler::OnFileOperationJobDone,
+                     weak_ptr_factory_.GetWeakPtr(),
+                     job_id));
+    }
+    break;
+
+    case TYPE_TRANSFER_LOCAL_TO_REMOTE: {
+      drive_operations_->TransferFileFromLocalToRemote(
+          job_info.file_path,
+          queue_entry->dest_file_path,
+          base::Bind(&DriveScheduler::OnFileOperationJobDone,
+                     weak_ptr_factory_.GetWeakPtr(),
+                     job_id));
+    }
+    break;
+
+    case TYPE_TRANSFER_REGULAR_FILE: {
+      drive_operations_->TransferRegularFile(
+          job_info.file_path,
+          queue_entry->dest_file_path,
+          base::Bind(&DriveScheduler::OnFileOperationJobDone,
+                     weak_ptr_factory_.GetWeakPtr(),
+                     job_id));
+    }
+    break;
+
+    case TYPE_TRANSFER_REMOTE_TO_LOCAL: {
+      drive_operations_->TransferFileFromRemoteToLocal(
+          job_info.file_path,
+          queue_entry->dest_file_path,
+          base::Bind(&DriveScheduler::OnFileOperationJobDone,
+                     weak_ptr_factory_.GetWeakPtr(),
+                     job_id));
+    }
+    break;
+
+    // There is no default case so that there will be a compiler error if a type
+    // is added but unhandled.
+  }
 }
 
 bool DriveScheduler::ShouldStopJobLoop() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
   // Should stop if the gdata feature was disabled while running the fetch
   // loop.
   if (profile_->GetPrefs()->GetBoolean(prefs::kDisableDrive))
@@ -163,11 +378,15 @@ bool DriveScheduler::ShouldStopJobLoop() {
   if (net::NetworkChangeNotifier::IsOffline())
     return true;
 
+  // TODO(zork): This is a temporary fix for crbug.com/172270.  It should be
+  // re-enabled once it's merged.
+  //
   // Should stop if the current connection is on cellular network, and
   // fetching is disabled over cellular.
-  if (profile_->GetPrefs()->GetBoolean(prefs::kDisableDriveOverCellular) &&
-      util::IsConnectionTypeCellular())
-    return true;
+  // if (profile_->GetPrefs()->GetBoolean(prefs::kDisableDriveOverCellular) &&
+  //    net::NetworkChangeNotifier::IsConnectionCellular(
+  //        net::NetworkChangeNotifier::GetConnectionType()))
+  //  return true;
 
   return false;
 }
@@ -199,35 +418,116 @@ void DriveScheduler::ThrottleAndContinueJobLoop() {
 void DriveScheduler::ResetThrottleAndContinueJobLoop() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
+  // Post a task to continue the job loop.  This allows us to finish handling
+  // the current job before starting the next one.
   throttle_count_ = 0;
-  DoJobLoop();
+  base::MessageLoopProxy::current()->PostTask(FROM_HERE,
+      base::Bind(&DriveScheduler::DoJobLoop,
+                 weak_ptr_factory_.GetWeakPtr()));
 }
 
-void DriveScheduler::OnRemoveDone(int job_id, DriveFileError error) {
-  JobMap::iterator job_iter = job_info_.find(job_id);
-  DCHECK(job_iter != job_info_.end());
+scoped_ptr<DriveScheduler::QueueEntry> DriveScheduler::OnJobDone(
+    int job_id,
+    DriveFileError error) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  JobMap::iterator job_iter = job_info_map_.find(job_id);
+  DCHECK(job_iter != job_info_map_.end());
 
   // Retry, depending on the error.
-  if (error == DRIVE_FILE_ERROR_THROTTLED ||
-      error == DRIVE_FILE_ERROR_NO_CONNECTION) {
+  if (error == DRIVE_FILE_ERROR_THROTTLED) {
     job_iter->second->job_info.state = STATE_RETRY;
 
     // Requeue the job.
     queue_.push_back(job_id);
     ThrottleAndContinueJobLoop();
-  } else {
-    DCHECK(job_iter->second->remove_private.get());
 
-    // Handle the callback.
-    if (!job_iter->second->remove_private->callback.is_null()) {
-      MessageLoop::current()->PostTask(FROM_HERE,
-          base::Bind(job_iter->second->remove_private->callback, error));
-    }
+    return scoped_ptr<DriveScheduler::QueueEntry>();
+  } else {
+    scoped_ptr<DriveScheduler::QueueEntry> job_info(job_iter->second.release());
 
     // Delete the job.
-    job_info_.erase(job_id);
+    job_info_map_.erase(job_id);
     ResetThrottleAndContinueJobLoop();
+
+    return job_info.Pass();
   }
+}
+
+void DriveScheduler::OnFileOperationJobDone(int job_id, DriveFileError error) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  scoped_ptr<DriveScheduler::QueueEntry> job_info = OnJobDone(job_id, error);
+
+  if (!job_info)
+    return;
+
+  // Handle the callback.
+  base::MessageLoopProxy::current()->PostTask(
+      FROM_HERE,
+      base::Bind(job_info->file_operation_callback, error));
+}
+
+void DriveScheduler::OnGetResourceListJobDone(
+    int job_id,
+    google_apis::GDataErrorCode error,
+    scoped_ptr<google_apis::ResourceList> resource_list) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  DriveFileError drive_error(util::GDataToDriveFileError(error));
+
+  scoped_ptr<QueueEntry> job_info = OnJobDone(job_id, drive_error);
+
+  if (!job_info)
+    return;
+
+  // Handle the callback.
+  base::MessageLoopProxy::current()->PostTask(
+      FROM_HERE,
+      base::Bind(job_info->get_resource_list_callback,
+                 error,
+                 base::Passed(&resource_list)));
+}
+
+void DriveScheduler::OnGetAccountMetadataJobDone(
+    int job_id,
+    google_apis::GDataErrorCode error,
+    scoped_ptr<google_apis::AccountMetadataFeed> account_metadata) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  DriveFileError drive_error(util::GDataToDriveFileError(error));
+
+  scoped_ptr<QueueEntry> job_info = OnJobDone(job_id, drive_error);
+
+  if (!job_info)
+    return;
+
+  // Handle the callback.
+  base::MessageLoopProxy::current()->PostTask(
+      FROM_HERE,
+      base::Bind(job_info->get_account_metadata_callback,
+                 error,
+                 base::Passed(&account_metadata)));
+}
+
+void DriveScheduler::OnGetDataJobDone(int job_id,
+                                      google_apis::GDataErrorCode error,
+                                      scoped_ptr<base::Value> feed_data) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  DriveFileError drive_error(util::GDataToDriveFileError(error));
+
+  scoped_ptr<QueueEntry> job_info = OnJobDone(job_id, drive_error);
+
+  if (!job_info)
+    return;
+
+  // Handle the callback.
+  base::MessageLoopProxy::current()->PostTask(
+      FROM_HERE,
+      base::Bind(job_info->get_data_callback,
+                 error,
+                 base::Passed(&feed_data)));
 }
 
 void DriveScheduler::OnConnectionTypeChanged(

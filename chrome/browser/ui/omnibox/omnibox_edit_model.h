@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,6 @@
 #include "base/time.h"
 #include "chrome/browser/autocomplete/autocomplete_controller_delegate.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
-#include "chrome/common/instant_types.h"
 #include "chrome/common/metrics/proto/omnibox_event.pb.h"
 #include "content/public/common/page_transition_types.h"
 #include "googleurl/src/gurl.h"
@@ -21,6 +20,7 @@
 
 class AutocompleteController;
 class AutocompleteResult;
+struct InstantSuggestion;
 class OmniboxEditController;
 class OmniboxPopupModel;
 class OmniboxView;
@@ -31,19 +31,48 @@ class Image;
 class Rect;
 }
 
+// Omnibox focus state.
+enum OmniboxFocusState {
+  // Not focused.
+  OMNIBOX_FOCUS_NONE,
+
+  // Visibly focused.
+  OMNIBOX_FOCUS_VISIBLE,
+
+  // Invisibly focused, i.e. focused with a hidden caret.
+  OMNIBOX_FOCUS_INVISIBLE,
+};
+
+// Reasons why the Omnibox focus state could change.
+enum OmniboxFocusChangeReason {
+  // Includes any explicit changes to focus. (e.g. user clicking to change
+  // focus, user tabbing to change focus, any explicit calls to SetFocus,
+  // etc.)
+  OMNIBOX_FOCUS_CHANGE_EXPLICIT,
+
+  // Focus changed to restore state from a tab the user switched to.
+  OMNIBOX_FOCUS_CHANGE_TAB_SWITCH,
+
+  // Focus changed because user started typing. This only happens when focus
+  // state is INVISIBLE (and this results in a change to VISIBLE).
+  OMNIBOX_FOCUS_CHANGE_TYPING,
+};
+
 class OmniboxEditModel : public AutocompleteControllerDelegate {
  public:
   struct State {
     State(bool user_input_in_progress,
           const string16& user_text,
           const string16& keyword,
-          bool is_keyword_hint);
+          bool is_keyword_hint,
+          OmniboxFocusState focus_state);
     ~State();
 
     bool user_input_in_progress;
     const string16 user_text;
     const string16 keyword;
     const bool is_keyword_hint;
+    OmniboxFocusState focus_state;
   };
 
   OmniboxEditModel(OmniboxView* view,
@@ -189,7 +218,11 @@ class OmniboxEditModel : public AutocompleteControllerDelegate {
                  const GURL& alternate_nav_url,
                  size_t index);
 
-  bool has_focus() const { return has_focus_; }
+  OmniboxFocusState focus_state() const { return focus_state_; }
+  bool has_focus() const { return focus_state_ != OMNIBOX_FOCUS_NONE; }
+  bool is_caret_visible() const {
+    return focus_state_ == OMNIBOX_FOCUS_VISIBLE;
+  }
 
   // Accessors for keyword-related state (see comments on keyword_ and
   // is_keyword_hint_).
@@ -212,6 +245,18 @@ class OmniboxEditModel : public AutocompleteControllerDelegate {
   // Called when the view is gaining focus.  |control_down| is whether the
   // control key is down (at the time we're gaining focus).
   void OnSetFocus(bool control_down);
+
+  // Sets the visibility of the caret in the omnibox, if it has focus. The
+  // visibility of the caret is reset to visible if either
+  //   - The user starts typing, or
+  //   - We explicitly focus the omnibox again.
+  // The latter case must be handled in three separate places--OnSetFocus(),
+  // OmniboxView::SetFocus(), and the mouse handlers in OmniboxView. See
+  // accompanying comments for why each of these is necessary.
+  //
+  // Caret visibility is tracked per-tab and updates automatically upon
+  // switching tabs.
+  void SetCaretVisibility(bool visible);
 
   // Sent before |OnKillFocus| and before the popup is closed.
   void OnWillKillFocus(gfx::NativeView view_gaining_focus);
@@ -273,8 +318,9 @@ class OmniboxEditModel : public AutocompleteControllerDelegate {
                              bool just_deleted_text,
                              bool allow_keyword_ui_change);
 
-  // Invoked when the popup is going to change its bounds to |bounds|.
-  void PopupBoundsChangedTo(const gfx::Rect& bounds);
+  // Invoked when the popup has changed its bounds to |bounds|. |bounds| here
+  // is in screen coordinates.
+  void OnPopupBoundsChanged(const gfx::Rect& bounds);
 
  private:
   enum PasteState {
@@ -393,6 +439,12 @@ class OmniboxEditModel : public AutocompleteControllerDelegate {
                                    AutocompleteMatch* match,
                                    GURL* alternate_nav_url) const;
 
+  // If focus_state_ does not match |state|, we update it and notify the
+  // InstantController about the change (passing along the |reason| for the
+  // change). If the caret visibility changes, we call ApplyCaretVisibility() on
+  // the view.
+  void SetFocusState(OmniboxFocusState state, OmniboxFocusChangeReason reason);
+
   scoped_ptr<AutocompleteController> autocomplete_controller_;
 
   OmniboxView* view_;
@@ -401,8 +453,7 @@ class OmniboxEditModel : public AutocompleteControllerDelegate {
 
   OmniboxEditController* controller_;
 
-  // Whether the edit has focus.
-  bool has_focus_;
+  OmniboxFocusState focus_state_;
 
   // The URL of the currently displayed page.
   string16 permanent_text_;
@@ -499,6 +550,11 @@ class OmniboxEditModel : public AutocompleteControllerDelegate {
   // reverted, which triggers resetting Instant. We don't want to update Instant
   // in this case, so we use the flag to determine if this is happening.
   bool in_revert_;
+
+  // InstantController needs this in extended mode to distinguish the case in
+  // which it should instruct a committed search results page to revert to
+  // showing results for the original query.
+  bool in_escape_handler_;
 
   // Indicates if the upcoming autocomplete search is allowed to be treated as
   // an exact keyword match.  If this is true then keyword mode will be

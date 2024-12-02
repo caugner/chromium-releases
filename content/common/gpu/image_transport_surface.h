@@ -14,7 +14,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "ipc/ipc_channel.h"
+#include "ipc/ipc_listener.h"
 #include "ipc/ipc_message.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/rect.h"
@@ -22,6 +22,7 @@
 #include "ui/gl/gl_surface.h"
 #include "ui/surface/transport_dib.h"
 
+struct AcceleratedSurfaceMsg_BufferPresented_Params;
 struct GpuHostMsg_AcceleratedSurfaceNew_Params;
 struct GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params;
 struct GpuHostMsg_AcceleratedSurfacePostSubBuffer_Params;
@@ -33,7 +34,7 @@ class GLSurface;
 
 namespace gpu {
 class GpuScheduler;
-struct RefCountedCounter;
+class PreemptionFlag;
 namespace gles2 {
 class GLES2Decoder;
 }
@@ -60,11 +61,10 @@ class ImageTransportSurface {
  public:
   ImageTransportSurface();
 
-  virtual void OnBufferPresented(bool presented, uint32 sync_point) = 0;
+  virtual void OnBufferPresented(
+      const AcceleratedSurfaceMsg_BufferPresented_Params& params) = 0;
   virtual void OnResizeViewACK() = 0;
   virtual void OnResize(gfx::Size size) = 0;
-  virtual void OnSetFrontSurfaceIsProtected(bool is_protected,
-                                            uint32 protection_state_id);
 
   // Creates the appropriate surface depending on the GL implementation.
   static scoped_refptr<gfx::GLSurface>
@@ -88,7 +88,9 @@ class ImageTransportSurface {
   DISALLOW_COPY_AND_ASSIGN(ImageTransportSurface);
 };
 
-class ImageTransportHelper : public IPC::Listener {
+class ImageTransportHelper
+    : public IPC::Listener,
+      public base::SupportsWeakPtr<ImageTransportHelper> {
  public:
   // Takes weak pointers to objects that outlive the helper.
   ImageTransportHelper(ImageTransportSurface* surface,
@@ -114,14 +116,16 @@ class ImageTransportHelper : public IPC::Listener {
   void SendAcceleratedSurfaceRelease(
       GpuHostMsg_AcceleratedSurfaceRelease_Params params);
   void SendResizeView(const gfx::Size& size);
+  void SendUpdateVSyncParameters(
+      base::TimeTicks timebase, base::TimeDelta interval);
 
   // Whether or not we should execute more commands.
   void SetScheduled(bool is_scheduled);
 
   void DeferToFence(base::Closure task);
 
-  void SetPreemptByCounter(
-      scoped_refptr<gpu::RefCountedCounter> preempt_by_counter);
+  void SetPreemptByFlag(
+      scoped_refptr<gpu::PreemptionFlag> preemption_flag);
 
   // Make the surface's context current.
   bool MakeCurrent();
@@ -139,10 +143,9 @@ class ImageTransportHelper : public IPC::Listener {
   gpu::gles2::GLES2Decoder* Decoder();
 
   // IPC::Message handlers.
-  void OnBufferPresented(bool presented, uint32 sync_point);
+  void OnBufferPresented(
+      const AcceleratedSurfaceMsg_BufferPresented_Params& params);
   void OnResizeViewACK();
-  void OnSetFrontSurfaceIsProtected(bool is_protected,
-                                    uint32 protection_state_id);
 
   // Backbuffer resize callback.
   void Resize(gfx::Size size);
@@ -177,14 +180,18 @@ class PassThroughImageTransportSurface
   virtual bool OnMakeCurrent(gfx::GLContext* context) OVERRIDE;
 
   // ImageTransportSurface implementation.
-  virtual void OnBufferPresented(bool presented,
-                                 uint32 sync_point) OVERRIDE;
+  virtual void OnBufferPresented(
+      const AcceleratedSurfaceMsg_BufferPresented_Params& params) OVERRIDE;
   virtual void OnResizeViewACK() OVERRIDE;
   virtual void OnResize(gfx::Size size) OVERRIDE;
   virtual gfx::Size GetSize() OVERRIDE;
 
  protected:
   virtual ~PassThroughImageTransportSurface();
+
+  // If updated vsync parameters can be determined, send this information to
+  // the browser.
+  virtual void SendVSyncUpdateIfAvailable();
 
  private:
   scoped_ptr<ImageTransportHelper> helper_;

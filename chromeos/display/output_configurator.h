@@ -5,6 +5,8 @@
 #ifndef CHROMEOS_DISPLAY_OUTPUT_CONFIGURATOR_H_
 #define CHROMEOS_DISPLAY_OUTPUT_CONFIGURATOR_H_
 
+#include <vector>
+
 #include "base/basictypes.h"
 #include "base/event_types.h"
 #include "base/observer_list.h"
@@ -99,34 +101,67 @@ class CHROMEOS_EXPORT OutputConfigurator : public MessageLoop::Dispatcher {
   // Tells if the output specified by |name| is for internal display.
   static bool IsInternalOutputName(const std::string& name);
 
+  // Set all the displays into pre-suspend mode; usually this means configure
+  // them for their resume state. This allows faster resume on machines where
+  // display configuration is slow.
+  void SuspendDisplays();
+
  private:
   // Fires OnDisplayModeChanged() event to the observers.
   void NotifyOnDisplayChanged();
 
-  // Fills output parameters |one| and |two| with properties of
-  // first two connected outputs found on |display| and |screen|.
-  int GetDualOutputs(Display* display,
-                     XRRScreenResources* screen,
-                     OutputSnapshot* one,
-                     OutputSnapshot* two);
+  // Returns a vector filled with properties of the first two connected outputs
+  // found on |display| and |screen|.
+  std::vector<OutputSnapshot> GetDualOutputs(Display* display,
+                                             XRRScreenResources* screen);
 
-  // Should be called if the internal (built-in) output didn't advertise a mode
-  // which would be capable to support mirror mode.
-  // Relies on hardware panel fitting support,
-  // returns immediately if it is not available.
-  // Tries to add the native mode of the external output to the internal output,
-  // assuming panel fitter hardware will take care of scaling and letterboxing.
-  // The RROutput IDs |output_one| and |output_two| are used
-  // to look up the modes and configure the internal output,
-  // |output_one_mode| and |output_two_mode| are the out-parameters
-  // for the modes on the two outputs which will have same resolution.
-  // Returns false if it fails to configure the internal output appropriately.
-  bool AddMirrorModeToInternalOutput(Display* display,
-                                     XRRScreenResources* screen,
-                                     RROutput output_one,
-                                     RROutput output_two,
-                                     RRMode* output_one_mode,
-                                     RRMode* output_two_mode);
+  // Looks for a mode on internal and external outputs having same resolution.
+  // |display| and |screen| parameters are needed for some XRandR calls.
+  // |internal_info| and |external_info| are used to search for the modes.
+  // |internal_output_id| is used to create a new mode, if applicable.
+  // |try_creating|=true will enable creating panel-fitting mode
+  // on the |internal_info| output instead of
+  // only searching for a matching mode. Note: it may lead to a crash,
+  // if |internal_info| is not capable of panel fitting.
+  // |preserve_aspect|=true will limit the search / creation
+  // only to the modes having the native aspect ratio of |external_info|.
+  // |internal_mirror_mode| and |external_mirror_mode| are the out-parameters
+  // for the modes on the two outputs which will have the same resolution.
+  // Returns false if no mode appropriate for mirroring has been found/created.
+  bool FindOrCreateMirrorMode(Display* display,
+                              XRRScreenResources* screen,
+                              XRROutputInfo* internal_info,
+                              XRROutputInfo* external_info,
+                              RROutput internal_output_id,
+                              bool try_creating,
+                              bool preserve_aspect,
+                              RRMode* internal_mirror_mode,
+                              RRMode* external_mirror_mode);
+
+  // Searches for touchscreens among input devices,
+  // and tries to match them up to screens in |outputs|.
+  // |display| and |screen| are used to make X calls.
+  // |outputs| is an array of detected screens.
+  // If a touchscreen with same resolution as an output's native mode
+  // is detected, its id will be stored in this output.
+  void GetTouchscreens(Display* display,
+                       XRRScreenResources* screen,
+                       std::vector<OutputSnapshot>& outputs);
+
+  // Configures X to the state specified in |new_state|.
+  // |display|, |screen| and |window| are used to change X configuration.
+  // |new_state| is the state to enter.
+  // |outputs| contains information on the currently configured state,
+  // as well as how to apply the new state.
+  bool EnterState(Display* display,
+                  XRRScreenResources* screen,
+                  Window window,
+                  OutputState new_state,
+                  const std::vector<OutputSnapshot>& outputs);
+
+  // Outputs UMA metrics of previous state (the state that is being left).
+  // Updates |mirror_mode_preserved_aspect_| and |last_enter_state_time_|.
+  void RecordPreviousStateUMA();
 
   // Tells if the output specified by |output_info| is for internal display.
   static bool IsInternalOutput(const XRROutputInfo* output_info);
@@ -161,6 +196,16 @@ class CHROMEOS_EXPORT OutputConfigurator : public MessageLoop::Dispatcher {
   // The timer to delay sending the notification of OnDisplayChanged(). See also
   // the comments in Dispatch().
   scoped_ptr<base::OneShotTimer<OutputConfigurator> > notification_timer_;
+
+  // Next 3 members are used for UMA of time spent in various states.
+  // Indicates that current OutputSnapshot has aspect preserving mirror mode.
+  bool mirror_mode_will_preserve_aspect_;
+
+  // Indicates that last entered mirror mode preserved aspect.
+  bool mirror_mode_preserved_aspect_;
+
+  // Indicates the time at which |output_state_| was entered.
+  base::TimeTicks last_enter_state_time_;
 
   DISALLOW_COPY_AND_ASSIGN(OutputConfigurator);
 };

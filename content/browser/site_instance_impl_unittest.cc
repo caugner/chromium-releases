@@ -143,8 +143,8 @@ class SiteInstanceTest : public testing::Test {
     // We don't just do this in TearDown() because we create TestBrowserContext
     // objects in each test, which will be destructed before
     // TearDown() is called.
-    MessageLoop::current()->RunAllPending();
-    message_loop_.RunAllPending();
+    MessageLoop::current()->RunUntilIdle();
+    message_loop_.RunUntilIdle();
   }
 
  private:
@@ -250,9 +250,9 @@ TEST_F(SiteInstanceTest, SiteInstanceDestructor) {
                                                &site_delete_counter,
                                                &browsing_delete_counter);
   {
-    scoped_ptr<WebContentsImpl> web_contents(
-        WebContentsImpl::Create(browser_context.get(), instance,
-                                MSG_ROUTING_NONE, NULL));
+    scoped_ptr<WebContentsImpl> web_contents(static_cast<WebContentsImpl*>(
+        WebContents::Create(WebContents::CreateParams(
+            browser_context.get(), instance))));
     EXPECT_EQ(1, site_delete_counter);
     EXPECT_EQ(1, browsing_delete_counter);
   }
@@ -365,9 +365,11 @@ TEST_F(SiteInstanceTest, GetSiteForURL) {
   test_url = GURL("file:///C:/Downloads/");
   EXPECT_EQ(GURL(), SiteInstanceImpl::GetSiteForURL(NULL, test_url));
 
-  test_url = GURL("guest://abc123");
-  EXPECT_EQ(GURL("guest://abc123"), SiteInstanceImpl::GetSiteForURL(
-      NULL, test_url));
+  std::string guest_url(chrome::kGuestScheme);
+  guest_url.append("://abc123");
+  test_url = GURL(guest_url);
+  EXPECT_EQ(test_url, SiteInstanceImpl::GetSiteForURL(NULL, test_url));
+
   // TODO(creis): Do we want to special case file URLs to ensure they have
   // either no site or a special "file://" site?  We currently return
   // "file://home/" as the site, which seems broken.
@@ -636,6 +638,65 @@ TEST_F(SiteInstanceTest, HasWrongProcessForURL) {
 
   EXPECT_FALSE(instance->HasSite());
   EXPECT_TRUE(instance->GetSiteURL().is_empty());
+
+  instance->SetSite(GURL("http://evernote.com/"));
+  EXPECT_TRUE(instance->HasSite());
+
+  // Check prior to "assigning" a process to the instance, which is expected
+  // to return false due to not being attached to any process yet.
+  EXPECT_FALSE(instance->HasWrongProcessForURL(GURL("http://google.com")));
+
+  // The call to GetProcess actually creates a new real process, which works
+  // fine, but might be a cause for problems in different contexts.
+  host.reset(instance->GetProcess());
+  EXPECT_TRUE(host.get() != NULL);
+  EXPECT_TRUE(instance->HasProcess());
+
+  EXPECT_FALSE(instance->HasWrongProcessForURL(GURL("http://evernote.com")));
+  EXPECT_FALSE(instance->HasWrongProcessForURL(
+      GURL("javascript:alert(document.location.href);")));
+
+  EXPECT_TRUE(instance->HasWrongProcessForURL(GURL("chrome://settings")));
+
+  // Test that WebUI SiteInstances reject normal web URLs.
+  const GURL webui_url("chrome://settings");
+  scoped_refptr<SiteInstanceImpl> webui_instance(static_cast<SiteInstanceImpl*>(
+      SiteInstance::Create(browser_context.get())));
+  webui_instance->SetSite(webui_url);
+  scoped_ptr<RenderProcessHost> webui_host(webui_instance->GetProcess());
+
+  // Simulate granting WebUI bindings for the process.
+  ChildProcessSecurityPolicyImpl::GetInstance()->GrantWebUIBindings(
+      webui_host->GetID());
+
+  EXPECT_TRUE(webui_instance->HasProcess());
+  EXPECT_FALSE(webui_instance->HasWrongProcessForURL(webui_url));
+  EXPECT_TRUE(webui_instance->HasWrongProcessForURL(GURL("http://google.com")));
+
+  // WebUI uses process-per-site, so another instance will use the same process
+  // even if we haven't called GetProcess yet.  Make sure HasWrongProcessForURL
+  // doesn't crash (http://crbug.com/137070).
+  scoped_refptr<SiteInstanceImpl> webui_instance2(
+      static_cast<SiteInstanceImpl*>(
+          SiteInstance::Create(browser_context.get())));
+  webui_instance2->SetSite(webui_url);
+  EXPECT_FALSE(webui_instance2->HasWrongProcessForURL(webui_url));
+  EXPECT_TRUE(
+      webui_instance2->HasWrongProcessForURL(GURL("http://google.com")));
+
+  DrainMessageLoops();
+}
+
+// Test to ensure that HasWrongProcessForURL behaves properly even when
+// --site-per-process is used (http://crbug.com/160671).
+TEST_F(SiteInstanceTest, HasWrongProcessForURLInSitePerProcess) {
+  CommandLine::ForCurrentProcess()->AppendSwitch(
+      switches::kSitePerProcess);
+
+  scoped_ptr<TestBrowserContext> browser_context(new TestBrowserContext());
+  scoped_ptr<RenderProcessHost> host;
+  scoped_refptr<SiteInstanceImpl> instance(static_cast<SiteInstanceImpl*>(
+      SiteInstance::Create(browser_context.get())));
 
   instance->SetSite(GURL("http://evernote.com/"));
   EXPECT_TRUE(instance->HasSite());

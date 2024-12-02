@@ -17,8 +17,8 @@ string16 MenuDelegate::GetLabel(int id) const {
   return string16();
 }
 
-const gfx::Font& MenuDelegate::GetLabelFont(int id) const {
-  return MenuConfig::instance().font;
+const gfx::Font* MenuDelegate::GetLabelFont(int id) const {
+  return NULL;
 }
 
 string16 MenuDelegate::GetTooltipText(int id,
@@ -55,6 +55,11 @@ bool MenuDelegate::ShouldCloseAllMenusOnExecute(int id) {
 
 void MenuDelegate::ExecuteCommand(int id, int mouse_event_flags) {
   ExecuteCommand(id);
+}
+
+bool MenuDelegate::ShouldExecuteCommandWithoutClosingMenu(int id,
+                                                          const ui::Event& e) {
+  return false;
 }
 
 bool MenuDelegate::IsTriggerableEvent(MenuItemView* source,

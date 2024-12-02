@@ -7,6 +7,7 @@
 #include "base/command_line.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/lazy_instance.h"
 #include "base/metrics/histogram.h"
 #include "base/platform_file.h"
 #include "base/shared_memory.h"
@@ -86,8 +87,6 @@ using WebKit::WebIDBFactory;
 using WebKit::WebKitPlatformSupport;
 using WebKit::WebMediaStreamCenter;
 using WebKit::WebMediaStreamCenterClient;
-using WebKit::WebPeerConnection00Handler;
-using WebKit::WebPeerConnection00HandlerClient;
 using WebKit::WebRTCPeerConnectionHandler;
 using WebKit::WebRTCPeerConnectionHandlerClient;
 using WebKit::WebStorageNamespace;
@@ -98,6 +97,8 @@ using WebKit::WebVector;
 namespace content {
 
 static bool g_sandbox_enabled = true;
+base::LazyInstance<WebGamepads>::Leaky g_test_gamepads =
+    LAZY_INSTANCE_INITIALIZER;
 
 //------------------------------------------------------------------------------
 
@@ -652,9 +653,14 @@ WebBlobRegistry* RendererWebKitPlatformSupportImpl::blobRegistry() {
 //------------------------------------------------------------------------------
 
 void RendererWebKitPlatformSupportImpl::sampleGamepads(WebGamepads& gamepads) {
-  if (!gamepad_shared_memory_reader_.get())
-    gamepad_shared_memory_reader_.reset(new GamepadSharedMemoryReader);
-  gamepad_shared_memory_reader_->SampleGamepads(gamepads);
+  if (g_test_gamepads == 0) {
+    if (!gamepad_shared_memory_reader_.get())
+      gamepad_shared_memory_reader_.reset(new GamepadSharedMemoryReader);
+    gamepad_shared_memory_reader_->SampleGamepads(gamepads);
+  } else {
+    gamepads = g_test_gamepads.Get();
+    return;
+  }
 }
 
 WebKit::WebString RendererWebKitPlatformSupportImpl::userAgent(
@@ -671,22 +677,6 @@ void RendererWebKitPlatformSupportImpl::GetPlugins(
 }
 
 //------------------------------------------------------------------------------
-
-WebPeerConnection00Handler*
-RendererWebKitPlatformSupportImpl::createPeerConnection00Handler(
-    WebPeerConnection00HandlerClient* client) {
-  RenderThreadImpl* render_thread = RenderThreadImpl::current();
-  DCHECK(render_thread);
-  if (!render_thread)
-    return NULL;
-#if defined(ENABLE_WEBRTC)
-  MediaStreamDependencyFactory* rtc_dependency_factory =
-      render_thread->GetMediaStreamDependencyFactory();
-  return rtc_dependency_factory->CreatePeerConnectionHandlerJsep(client);
-#else
-  return NULL;
-#endif  // defined(ENABLE_WEBRTC)
-}
 
 WebRTCPeerConnectionHandler*
 RendererWebKitPlatformSupportImpl::createRTCPeerConnectionHandler(
@@ -722,6 +712,12 @@ bool RendererWebKitPlatformSupportImpl::SetSandboxEnabledForTesting(
   bool was_enabled = g_sandbox_enabled;
   g_sandbox_enabled = enable;
   return was_enabled;
+}
+
+// static
+void RendererWebKitPlatformSupportImpl::SetMockGamepadsForTesting(
+    const WebGamepads& pads) {
+  g_test_gamepads.Get() = pads;
 }
 
 GpuChannelHostFactory*

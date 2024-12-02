@@ -17,11 +17,11 @@
 #include <vector>
 
 #include "base/command_line.h"
-#include "base/eintr_wrapper.h"
 #include "base/linux_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/singleton.h"
 #include "base/pickle.h"
+#include "base/posix/eintr_wrapper.h"
 #include "base/posix/unix_domain_socket.h"
 #include "base/process_util.h"
 #include "base/shared_memory.h"
@@ -391,8 +391,10 @@ class SandboxIPCProcess  {
                                      PickleIterator iter,
                                      std::vector<int>& fds) {
     base::SharedMemoryCreateOptions options;
-    if (!pickle.ReadUInt32(&iter, &options.size))
+    uint32_t size;
+    if (!pickle.ReadUInt32(&iter, &size))
       return;
+    options.size = size;
     if (!pickle.ReadBool(&iter, &options.executable))
       return;
     int shm_fd = -1;

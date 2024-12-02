@@ -4,19 +4,13 @@
 
 #include "base/message_loop.h"
 #include "base/test/test_suite.h"
-#include "cc/test/test_webkit_platform.h"
+#include "cc/test/cc_test_suite.h"
 #include "testing/gmock/include/gmock/gmock.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/Platform.h"
 
 int main(int argc, char** argv) {
   ::testing::InitGoogleMock(&argc, argv);
-  TestSuite test_suite(argc, argv);
-  cc::TestWebKitPlatform platform;
-  MessageLoop message_loop;
-  WebKit::Platform::initialize(&platform);
+  cc::CCTestSuite test_suite(argc, argv);
   int result = test_suite.Run();
-  WebKit::Platform::shutdown();
 
   return result;
 }
-

@@ -24,14 +24,15 @@
 #include "content/browser/gpu/gpu_process_host_ui_shim.h"
 #include "content/browser/histogram_synchronizer.h"
 #include "content/browser/in_process_webkit/webkit_thread.h"
+#include "content/browser/loader/resource_dispatcher_host_impl.h"
 #include "content/browser/net/browser_online_state_observer.h"
 #include "content/browser/plugin_service_impl.h"
 #include "content/browser/renderer_host/media/media_stream_manager.h"
-#include "content/browser/renderer_host/resource_dispatcher_host_impl.h"
 #include "content/browser/speech/speech_recognition_manager_impl.h"
 #include "content/browser/trace_controller_impl.h"
 #include "content/public/browser/browser_main_parts.h"
 #include "content/public/browser/browser_shutdown.h"
+#include "content/public/browser/compositor_util.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/common/content_switches.h"
@@ -47,6 +48,12 @@
 
 #if defined(USE_AURA)
 #include "content/browser/renderer_host/image_transport_factory.h"
+#endif
+
+#if defined(OS_ANDROID)
+#include "base/android/jni_android.h"
+#include "content/browser/android/surface_texture_peer_browser_impl.h"
+#include "content/browser/device_orientation/data_fetcher_impl_android.h"
 #endif
 
 #if defined(OS_WIN)
@@ -161,6 +168,9 @@ static void GLibLogHandler(const gchar* log_domain,
                << "http://crosbug.com/15496";
   } else if (strstr(message, "XDG_RUNTIME_DIR variable not set")) {
     LOG(ERROR) << message << " (http://bugs.chromium.org/97293)";
+  } else if (strstr(message, "Attempting to store changes into") ||
+             strstr(message, "Attempting to set the permissions of")) {
+    LOG(ERROR) << message << " (http://bugs.chromium.org/161366)";
   } else {
     LOG(DFATAL) << log_domain << ": " << message;
   }
@@ -342,7 +352,6 @@ void BrowserMainLoop::MainMessageLoopStart() {
   }
 
   online_state_observer_.reset(new BrowserOnlineStateObserver);
-  media_stream_manager_.reset(new MediaStreamManager(audio_manager_.get()));
 
   // Prior to any processing happening on the io thread, we create the
   // plugin service as it is predominantly used from the io thread,
@@ -357,6 +366,13 @@ void BrowserMainLoop::MainMessageLoopStart() {
 
   if (parts_.get())
     parts_->PostMainMessageLoopStart();
+
+#if defined(OS_ANDROID)
+  SurfaceTexturePeer::InitInstance(new SurfaceTexturePeerBrowserImpl(
+      parameters_.command_line.HasSwitch(
+          switches::kMediaPlayerInRenderProcess)));
+  DataFetcherImplAndroid::Init(base::android::AttachCurrentThread());
+#endif
 }
 
 void BrowserMainLoop::CreateThreads() {
@@ -449,23 +465,6 @@ void BrowserMainLoop::CreateThreads() {
 
   if (parts_.get())
     parts_->PreMainMessageLoopRun();
-
-#if !defined(OS_IOS)
-  // When running the GPU thread in-process, avoid optimistically starting it
-  // since creating the GPU thread races against creation of the one-and-only
-  // ChildProcess instance which is created by the renderer thread.
-  if (GpuDataManagerImpl::GetInstance()->GpuAccessAllowed() &&
-      !parsed_command_line_.HasSwitch(switches::kDisableGpuProcessPrelaunch) &&
-      !parsed_command_line_.HasSwitch(switches::kSingleProcess) &&
-      !parsed_command_line_.HasSwitch(switches::kInProcessGPU)) {
-    TRACE_EVENT_INSTANT0("gpu", "Post task to launch GPU process");
-    BrowserThread::PostTask(
-        BrowserThread::IO, FROM_HERE, base::Bind(
-            base::IgnoreResult(&GpuProcessHost::Get),
-            GpuProcessHost::GPU_PROCESS_KIND_SANDBOXED,
-            CAUSE_FOR_GPU_LAUNCH_BROWSER_STARTUP));
-  }
-#endif  // !defined(OS_IOS)
 
   // If the UI thread blocks, the whole UI is unresponsive.
   // Do not allow disk IO from the UI thread.
@@ -656,6 +655,9 @@ void BrowserMainLoop::BrowserThreadsStarted() {
   // RDH needs the IO thread to be created.
   resource_dispatcher_host_.reset(new ResourceDispatcherHostImpl());
 
+  // MediaStreamManager needs the IO thread to be created.
+  media_stream_manager_.reset(new MediaStreamManager(audio_manager_.get()));
+
   // Initialize the GpuDataManager before we set up the MessageLoops because
   // otherwise we'll trigger the assertion about doing IO on the UI thread.
   GpuDataManagerImpl::GetInstance()->Initialize();
@@ -677,6 +679,22 @@ void BrowserMainLoop::BrowserThreadsStarted() {
   allowed_clipboard_threads.push_back(io_thread_->thread_id());
 #endif
   ui::Clipboard::SetAllowedThreads(allowed_clipboard_threads);
+
+  // When running the GPU thread in-process, avoid optimistically starting it
+  // since creating the GPU thread races against creation of the one-and-only
+  // ChildProcess instance which is created by the renderer thread.
+  if (GpuDataManagerImpl::GetInstance()->GpuAccessAllowed() &&
+      content::IsForceCompositingModeEnabled() &&
+      !parsed_command_line_.HasSwitch(switches::kDisableGpuProcessPrelaunch) &&
+      !parsed_command_line_.HasSwitch(switches::kSingleProcess) &&
+      !parsed_command_line_.HasSwitch(switches::kInProcessGPU)) {
+    TRACE_EVENT_INSTANT0("gpu", "Post task to launch GPU process");
+    BrowserThread::PostTask(
+        BrowserThread::IO, FROM_HERE, base::Bind(
+            base::IgnoreResult(&GpuProcessHost::Get),
+            GpuProcessHost::GPU_PROCESS_KIND_SANDBOXED,
+            CAUSE_FOR_GPU_LAUNCH_BROWSER_STARTUP));
+  }
 #endif  // !defined(OS_IOS)
 }
 

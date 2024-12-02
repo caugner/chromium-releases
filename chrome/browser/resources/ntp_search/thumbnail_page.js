@@ -10,15 +10,18 @@ cr.define('ntp', function() {
 
   /**
    * Creates a new Thumbnail object for tiling.
+   * @param {Object=} opt_data The data representing the thumbnail.
    * @constructor
    * @extends {Tile}
    * @extends {HTMLAnchorElement}
-   * @param {Object} config Tile page configuration object.
    */
-  function Thumbnail(config) {
+  function Thumbnail(opt_data) {
     var el = cr.doc.createElement('a');
     el.__proto__ = Thumbnail.prototype;
-    el.initialize(config);
+    el.initialize();
+
+    if (opt_data)
+      el.data = opt_data;
 
     return el;
   }
@@ -28,9 +31,8 @@ cr.define('ntp', function() {
 
     /**
      * Initializes a Thumbnail.
-     * @param {Object} config TilePage configuration object.
      */
-    initialize: function(config) {
+    initialize: function() {
       Tile.prototype.initialize.apply(this, arguments);
       this.classList.add('thumbnail');
       this.addEventListener('mouseover', this.handleMouseOver_);
@@ -56,8 +58,9 @@ cr.define('ntp', function() {
      * Update the appearance of this tile according to |data|.
      * @param {Object} data A dictionary of relevant data for the page.
      */
-    setData: function(data) {
-      Tile.prototype.setData.apply(this, arguments);
+    set data(data) {
+      Object.getOwnPropertyDescriptor(Tile.prototype, 'data').set.apply(this,
+          arguments);
 
       this.formatThumbnail_(data);
     },
@@ -85,9 +88,12 @@ cr.define('ntp', function() {
       if (banner)
         thumbnailImage.removeChild(banner);
 
-      var favicon = thumbnailImage.querySelector('.thumbnail-favicon');
-      if (favicon)
-        thumbnailImage.removeChild(favicon);
+      var favicon = this.querySelector('.thumbnail-favicon') ||
+                    this.ownerDocument.createElement('div');
+      favicon.className = 'thumbnail-favicon';
+      favicon.style.backgroundImage =
+          url('chrome://favicon/size/16/' + dataUrl);
+      this.appendChild(favicon);
 
       var self = this;
       var image = new Image();
@@ -103,13 +109,6 @@ cr.define('ntp', function() {
         // TODO(jeremycho): Consult with UX on URL truncation.
         banner.textContent = dataUrl.replace(/^(http:\/\/)?(www\.)?|\/$/gi, '');
         thumbnailImage.appendChild(banner);
-
-        favicon = thumbnailImage.querySelector('.thumbnail-favicon') ||
-            self.ownerDocument.createElement('div');
-        favicon.className = 'thumbnail-favicon';
-        favicon.style.backgroundImage =
-            url('chrome://favicon/size/16/' + dataUrl);
-        thumbnailImage.appendChild(favicon);
       };
 
       var thumbnailUrl = ntp.getThumbnailUrl(dataUrl);
@@ -162,27 +161,16 @@ cr.define('ntp', function() {
   ThumbnailPage.prototype = {
     __proto__: TilePage.prototype,
 
-    config_: {
-      // The width of a cell.
-      cellWidth: 132,
-      // The start margin of a cell (left or right according to text direction).
-      cellMarginStart: 18,
-      // The border panel horizontal margin.
-      bottomPanelHorizontalMargin: 100,
-      // The height of the tile row.
-      rowHeight: 105,
-      // The maximum number of Tiles to be displayed.
-      maxTileCount: 10
-    },
-
     /**
      * Initializes a ThumbnailPage.
      */
     initialize: function() {
+      TilePage.prototype.initialize.apply(this, arguments);
+
       this.classList.add('thumbnail-page');
     },
 
-    /** @inheritDoc */
+    /** @override */
     shouldAcceptDrag: function(e) {
       return false;
     },

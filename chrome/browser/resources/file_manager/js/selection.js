@@ -19,7 +19,8 @@ function Selection(fileManager, indexes) {
   this.showBytes = false;
   this.allGDataFilesPresent = false,
   this.iconType = null;
-
+  this.cancelled_ = false;
+  this.bytesKnown = false;
 
   // Synchronously compute what we can.
   for (var i = 0; i < this.indexes.length; i++) {
@@ -40,7 +41,6 @@ function Selection(fileManager, indexes) {
 
     if (entry.isFile) {
       this.fileCount += 1;
-      this.showBytes |= !FileType.isHosted(entry);
     } else {
       this.directoryCount += 1;
     }
@@ -80,17 +80,53 @@ Selection.prototype.createTasks = function(callback) {
  * @param {function} callback The callback.
  */
 Selection.prototype.computeBytes = function(callback) {
-  var onProps = function(props) {
-    for (var index = 0; index < this.entries.length; index++) {
-      var filesystem = props[index];
-      if (this.entries[index].isFile) {
-        this.bytes += filesystem.size;
-      }
+  if (this.entries.length == 0) {
+    this.bytesKnown = true;
+    this.bytes = 0;
+    return;
+  }
+
+  var countdown = this.entries.length;
+  var pendingMetadataCount = 0;
+
+  var maybeDone = function() {
+    if (countdown == 0 && pendingMetadataCount == 0 && !this.cancelled_) {
+      this.bytesKnown = true;
+      callback();
     }
-    callback();
   }.bind(this);
 
-  this.fileManager_.metadataCache_.get(this.entries, 'filesystem', onProps);
+  var onProps = function(filesystem) {
+    this.bytes += filesystem.size;
+    pendingMetadataCount--;
+    maybeDone();
+  }.bind(this);
+
+  var onEntry = function(entry) {
+    if (entry) {
+      if (entry.isFile) {
+        this.showBytes |= !FileType.isHosted(entry);
+        pendingMetadataCount++;
+        this.fileManager_.metadataCache_.get(entry, 'filesystem', onProps);
+      }
+    } else {
+      countdown--;
+      maybeDone();
+    }
+    return !this.cancelled_;
+  }.bind(this);
+
+  for (var index = 0; index < this.entries.length; index++) {
+    util.forEachEntryInTree(this.entries[index], onEntry);
+  }
+};
+
+/**
+ * Cancels any async computation.
+ * @private
+ */
+Selection.prototype.cancelComputing_ = function() {
+  this.cancelled_ = true;
 };
 
 /**
@@ -102,11 +138,20 @@ function SelectionHandler(fileManager) {
   // TODO(dgozman): create a shared object with most of UI elements.
   this.okButton_ = fileManager.okButton_;
   this.filenameInput_ = fileManager.filenameInput_;
-  this.previewPanel_ = fileManager.previewPanel_;
-  this.previewThumbnails_ = fileManager.previewThumbnails_;
-  this.previewSummary_ = fileManager.previewSummary_;
+
+  this.previewPanel_ = fileManager.dialogDom_.querySelector('.preview-panel');
+  this.previewThumbnails_ = this.previewPanel_.
+      querySelector('.preview-thumbnails');
+  this.previewSummary_ = this.previewPanel_.querySelector('.preview-summary');
+  this.previewText_ = this.previewSummary_.querySelector('.preview-text');
+  this.calculatingSize_ = this.previewSummary_.
+      querySelector('.calculating-size');
+  this.calculatingSize_.textContent = str('CALCULATING_SIZE');
+
   this.searchBreadcrumbs_ = fileManager.searchBreadcrumbs_;
   this.taskItems_ = fileManager.taskItems_;
+
+  this.animationTimeout_ = null;
 }
 
 /**
@@ -128,9 +173,8 @@ SelectionHandler.IMAGE_HOVER_PREVIEW_SIZE = 200;
 SelectionHandler.prototype.onSelectionChanged = function(event) {
   var indexes =
       this.fileManager_.getCurrentList().selectionModel.selectedIndexes;
+  if (this.selection) this.selection.cancelComputing_();
   var selection = this.selection = new Selection(this.fileManager_, indexes);
-
-  this.updateSelectionCheckboxes_(event);
 
   if (this.fileManager_.dialogType == DialogType.SELECT_SAVEAS_FILE) {
     // If this is a save-as dialog, copy the selected file into the filename
@@ -156,10 +200,12 @@ SelectionHandler.prototype.onSelectionChanged = function(event) {
   if (!indexes.length) {
     this.updatePreviewPanelVisibility_();
     this.updatePreviewPanelText_();
+    this.fileManager_.updateContextMenuActionItems(null, false);
     return;
   }
 
-  this.previewSummary_.textContent = str('COMPUTING_SELECTION');
+  this.previewText_.textContent = str('COMPUTING_SELECTION');
+  this.hideCalculating_();
 
   // The rest of the selection properties are computed via (sometimes lengthy)
   // asynchronous calls. We initiate these calls after a timeout. If the
@@ -185,68 +231,10 @@ SelectionHandler.prototype.onSelectionChanged = function(event) {
  */
 SelectionHandler.prototype.clearUI = function() {
   this.previewThumbnails_.textContent = '';
+  this.previewText_.textContent = '';
+  this.hideCalculating_();
   this.taskItems_.hidden = true;
   this.okButton_.disabled = true;
-};
-
-/**
- * Update the selection checkboxes.
- * @param {Event} event The event.
- * @private
- */
-SelectionHandler.prototype.updateSelectionCheckboxes_ = function(event) {
-  var fm = this.fileManager_;
-  if (!fm.showCheckboxes_)
-    return;
-
-  if (event && event.changes) {
-    for (var i = 0; i < event.changes.length; i++) {
-      // Turn off any checkboxes for items that are no longer selected.
-      var selectedIndex = event.changes[i].index;
-      var listItem = fm.currentList_.getListItemByIndex(selectedIndex);
-      if (!listItem) {
-        // When changing directories, we get notified about list items
-        // that are no longer there.
-        continue;
-      }
-
-      if (!event.changes[i].selected) {
-        var checkbox = listItem.querySelector('input[type="checkbox"]');
-        checkbox.checked = false;
-      }
-    }
-  } else {
-    var checkboxes = fm.currentList_.querySelectorAll('input[type="checkbox"]');
-    for (var i = 0; i < checkboxes.length; i++) {
-      checkboxes[i].checked = false;
-    }
-  }
-
-  for (var i = 0; i < this.selection.entries.length; i++) {
-    var selectedIndex = this.selection.indexes[i];
-    var listItem = fm.currentList_.getListItemByIndex(selectedIndex);
-    if (listItem)
-      listItem.querySelector('input[type="checkbox"]').checked = true;
-  }
-
-  this.updateSelectAllCheckboxState();
-};
-
-/**
- * Update check and disable states of the 'Select all' checkbox.
- * @param {HTMLInputElement=} opt_checkbox The checkbox. If not passed, using
- *     the default one.
- */
-SelectionHandler.prototype.updateSelectAllCheckboxState = function(
-    opt_checkbox) {
-  var checkbox = opt_checkbox ||
-      this.fileManager_.document_.getElementById('select-all-checkbox');
-  if (!checkbox) return;
-
-  var dm = this.fileManager_.getFileList();
-  checkbox.checked = this.selection && dm.length > 0 &&
-                     dm.length == this.selection.totalCount;
-  checkbox.disabled = dm.length == 0;
 };
 
 /**
@@ -311,6 +299,31 @@ SelectionHandler.prototype.updatePreviewPanelVisibility_ = function() {
   var self = this;
   var fm = this.fileManager_;
 
+  var stopHidingAndShow = function() {
+    clearTimeout(self.hidingTimeout_);
+    self.hidingTimeout_ = 0;
+    setVisibility('visible');
+  };
+
+  var startHiding = function() {
+    setVisibility('hiding');
+    self.hidingTimeout_ = setTimeout(function() {
+        self.hidingTimeout_ = 0;
+        setVisibility('hidden');
+        fm.onResize_();
+      }, 250);
+  };
+
+  var show = function() {
+    setVisibility('visible');
+    self.previewThumbnails_.textContent = '';
+    fm.onResize_();
+  };
+
+  var setVisibility = function(visibility) {
+    panel.setAttribute('visibility', visibility);
+  };
+
   switch (state) {
     case 'visible':
       if (!mustBeVisible)
@@ -326,31 +339,14 @@ SelectionHandler.prototype.updatePreviewPanelVisibility_ = function() {
       if (mustBeVisible)
         show();
   }
+};
 
-  function stopHidingAndShow() {
-    clearTimeout(self.hidingTimeout_);
-    self.hidingTimeout_ = 0;
-    setVisibility('visible');
-  }
-
-  function startHiding() {
-    setVisibility('hiding');
-    self.hidingTimeout_ = setTimeout(function() {
-        self.hidingTimeout_ = 0;
-        setVisibility('hidden');
-        fm.onResize_();
-      }, 250);
-  }
-
-  function show() {
-    setVisibility('visible');
-    self.previewThumbnails_.textContent = '';
-    fm.onResize_();
-  }
-
-  function setVisibility(visibility) {
-    panel.setAttribute('visibility', visibility);
-  }
+/**
+ * @return {boolean} True if space reserverd for the preview panel.
+ * @private
+ */
+SelectionHandler.prototype.isPreviewPanelVisibile_ = function() {
+  return this.previewPanel_.getAttribute('visibility') != 'hidden';
 };
 
 /**
@@ -359,28 +355,78 @@ SelectionHandler.prototype.updatePreviewPanelVisibility_ = function() {
  */
 SelectionHandler.prototype.updatePreviewPanelText_ = function() {
   var selection = this.selection;
-  var bytes = util.bytesToSi(selection.bytes);
-  var text = '';
   if (selection.totalCount == 0) {
     // We dont want to change the string during preview panel animating away.
     return;
-  } else if (selection.fileCount == 1 && selection.directoryCount == 0) {
-    text = selection.entries[0].name;
-    if (selection.showBytes) text += ', ' + bytes;
-  } else if (selection.fileCount == 0 && selection.directoryCount == 1) {
+  }
+
+  var text = '';
+  if (selection.totalCount == 1) {
     text = selection.entries[0].name;
   } else if (selection.directoryCount == 0) {
-    text = strf('MANY_FILES_SELECTED', selection.fileCount, bytes);
-    // TODO(dgozman): change the string to not contain ", $2".
-    if (!selection.showBytes) text = text.substring(0, text.lastIndexOf(','));
+    text = strf('MANY_FILES_SELECTED', selection.fileCount);
   } else if (selection.fileCount == 0) {
     text = strf('MANY_DIRECTORIES_SELECTED', selection.directoryCount);
   } else {
-    text = strf('MANY_ENTRIES_SELECTED', selection.totalCount, bytes);
-    // TODO(dgozman): change the string to not contain ", $2".
-    if (!selection.showBytes) text = text.substring(0, text.lastIndexOf(','));
+    text = strf('MANY_ENTRIES_SELECTED', selection.totalCount);
   }
-  this.previewSummary_.textContent = text;
+
+  if (selection.bytesKnown) {
+    this.hideCalculating_();
+    if (selection.showBytes) {
+      var bytes = util.bytesToSi(selection.bytes);
+      text += ', ' + bytes;
+    }
+  } else {
+    this.showCalculating_();
+  }
+
+  this.previewText_.textContent = text;
+};
+
+/**
+ * Displays the 'calculating size' label.
+ * @private
+ */
+SelectionHandler.prototype.showCalculating_ = function() {
+  if (this.animationTimeout_) {
+    clearTimeout(this.animationTimeout_);
+    this.animationTimeout_ = null;
+  }
+
+  var dotCount = 0;
+
+  var advance = function() {
+    this.animationTimeout_ = setTimeout(advance, 1000);
+
+    var s = this.calculatingSize_.textContent;
+    s = s.replace(/(\.)+$/, '');
+    for (var i = 0; i < dotCount; i++) {
+      s += '.';
+    }
+    this.calculatingSize_.textContent = s;
+
+    dotCount = (dotCount + 1) % 3;
+  }.bind(this);
+
+  var start = function() {
+    this.calculatingSize_.hidden = false;
+    advance();
+  }.bind(this);
+
+  this.animationTimeout_ = setTimeout(start, 500);
+};
+
+/**
+ * Hides the 'calculating size' label.
+ * @private
+ */
+SelectionHandler.prototype.hideCalculating_ = function() {
+  if (this.animationTimeout_) {
+    clearTimeout(this.animationTimeout_);
+    this.animationTimeout_ = null;
+  }
+  this.calculatingSize_.hidden = true;
 };
 
 /**
@@ -405,9 +451,14 @@ SelectionHandler.prototype.updateSelectionAsync = function(selection) {
   }
 
   // Update the UI.
+  var wasVisible = this.isPreviewPanelVisibile_();
   this.updatePreviewPanelVisibility_();
   this.updateSearchBreadcrumbs_();
   this.fileManager_.updateContextMenuActionItems(null, false);
+  if (!wasVisible && this.selection.totalCount == 1) {
+    var list = this.fileManager_.getCurrentList();
+    list.scrollIndexIntoView(list.selectionModel.selectedIndex);
+  }
 
   // Sync the commands availability.
   var commands = this.fileManager_.dialogDom_.querySelectorAll('command');
@@ -420,6 +471,7 @@ SelectionHandler.prototype.updateSelectionAsync = function(selection) {
     this.updatePreviewPanelText_();
   }.bind(this);
   selection.computeBytes(onBytes);
+  this.updatePreviewPanelText_();
 
   // Inform tests it's OK to click buttons now.
   chrome.test.sendMessage('selection-change-complete');
@@ -476,14 +528,15 @@ SelectionHandler.prototype.showPreviewThumbnails_ = function(selection) {
       selection.tasks.executeDefault();
   }
 
+  var doc = this.fileManager_.document_;
   for (var i = 0; i < selection.entries.length; i++) {
     var entry = selection.entries[i];
 
     if (thumbnailCount < SelectionHandler.MAX_PREVIEW_THUMBNAIL_COUNT) {
-      var box = this.fileManager_.document_.createElement('div');
+      var box = doc.createElement('div');
       box.className = 'thumbnail';
       if (thumbnailCount == 0) {
-        var zoomed = this.fileManager_.document_.createElement('div');
+        var zoomed = doc.createElement('div');
         zoomed.hidden = true;
         thumbnails.push(zoomed);
         function onFirstThumbnailLoaded(img, transform) {
@@ -493,12 +546,10 @@ SelectionHandler.prototype.showPreviewThumbnails_ = function(selection) {
           }
           onThumbnailLoaded();
         }
-        var thumbnail = this.fileManager_.renderThumbnailBox_(
-            entry, true, onFirstThumbnailLoaded);
+        var thumbnail = this.renderThumbnail_(entry, onFirstThumbnailLoaded);
         zoomed.addEventListener('click', thumbnailClickHandler);
       } else {
-        var thumbnail = this.fileManager_.renderThumbnailBox_(
-            entry, true, onThumbnailLoaded);
+        var thumbnail = this.renderThumbnail_(entry, onThumbnailLoaded);
       }
       thumbnailCount++;
       box.appendChild(thumbnail);
@@ -512,6 +563,20 @@ SelectionHandler.prototype.showPreviewThumbnails_ = function(selection) {
   forcedShowTimeout = setTimeout(showThumbnails,
       FileManager.THUMBNAIL_SHOW_DELAY);
   onThumbnailLoaded();
+};
+
+/**
+ * Renders a thumbnail for the buttom panel.
+ * @param {Entry} entry Entry to render for.
+ * @param {Function} callback Callend when image loaded.
+ * @return {HTMLDivElement} Created element.
+ * @private
+ */
+SelectionHandler.prototype.renderThumbnail_ = function(entry, callback) {
+  var thumbnail = this.fileManager_.document_.createElement('div');
+  FileGrid.decorateThumbnailBox(thumbnail, entry,
+      this.fileManager_.metadataCache_, true, callback);
+  return thumbnail;
 };
 
 /**

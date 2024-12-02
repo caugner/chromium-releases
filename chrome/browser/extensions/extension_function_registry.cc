@@ -5,9 +5,9 @@
 #include "chrome/browser/extensions/extension_function_registry.h"
 
 #include "chrome/browser/accessibility/accessibility_extension_api.h"
-#include "chrome/browser/bookmarks/bookmark_extension_api.h"
 #include "chrome/browser/bookmarks/bookmark_manager_extension_api.h"
 #include "chrome/browser/extensions/api/app/app_api.h"
+#include "chrome/browser/extensions/api/bookmarks/bookmark_api.h"
 #include "chrome/browser/extensions/api/browsing_data/browsing_data_api.h"
 #include "chrome/browser/extensions/api/cloud_print_private/cloud_print_private_api.h"
 #include "chrome/browser/extensions/api/commands/commands.h"
@@ -20,18 +20,18 @@
 #include "chrome/browser/extensions/api/extension_action/extension_page_actions_api.h"
 #include "chrome/browser/extensions/api/extension_action/extension_script_badge_api.h"
 #include "chrome/browser/extensions/api/font_settings/font_settings_api.h"
+#include "chrome/browser/extensions/api/history/history_api.h"
 #include "chrome/browser/extensions/api/identity/identity_api.h"
 #include "chrome/browser/extensions/api/i18n/i18n_api.h"
 #include "chrome/browser/extensions/api/idle/idle_api.h"
 #include "chrome/browser/extensions/api/managed_mode/managed_mode_api.h"
 #include "chrome/browser/extensions/api/management/management_api.h"
 #include "chrome/browser/extensions/api/metrics/metrics.h"
-#include "chrome/browser/extensions/api/offscreen_tabs/offscreen_tabs_api.h"
+#include "chrome/browser/extensions/api/module/module.h"
 #include "chrome/browser/extensions/api/omnibox/omnibox_api.h"
 #include "chrome/browser/extensions/api/page_capture/page_capture_api.h"
 #include "chrome/browser/extensions/api/permissions/permissions_api.h"
 #include "chrome/browser/extensions/api/preference/preference_api.h"
-#include "chrome/browser/extensions/api/processes/processes_api.h"
 #include "chrome/browser/extensions/api/record/record_api.h"
 #include "chrome/browser/extensions/api/runtime/runtime_api.h"
 #include "chrome/browser/extensions/api/serial/serial_api.h"
@@ -39,15 +39,13 @@
 #include "chrome/browser/extensions/api/tabs/execute_code_in_tab_function.h"
 #include "chrome/browser/extensions/api/tabs/tabs.h"
 #include "chrome/browser/extensions/api/test/test_api.h"
+#include "chrome/browser/extensions/api/top_sites/top_sites_api.h"
 #include "chrome/browser/extensions/api/web_navigation/web_navigation_api.h"
 #include "chrome/browser/extensions/api/web_request/web_request_api.h"
 #include "chrome/browser/extensions/api/web_socket_proxy_private/web_socket_proxy_private_api.h"
 #include "chrome/browser/extensions/api/webstore_private/webstore_private_api.h"
-#include "chrome/browser/extensions/extension_module.h"
 #include "chrome/browser/extensions/settings/settings_api.h"
 #include "chrome/browser/extensions/system/system_api.h"
-#include "chrome/browser/history/history_extension_api.h"
-#include "chrome/browser/history/top_sites_extension_api.h"
 #include "chrome/browser/infobars/infobar_extension_api.h"
 #include "chrome/browser/rlz/rlz_extension_api.h"
 #include "chrome/browser/speech/extension_api/tts_engine_extension_api.h"
@@ -56,7 +54,7 @@
 #include "chrome/common/extensions/api/generated_api.h"
 
 #if defined(TOOLKIT_VIEWS)
-#include "chrome/browser/extensions/extension_input_api.h"
+#include "chrome/browser/extensions/api/input/input.h"
 #endif
 
 #if defined(OS_CHROMEOS)
@@ -64,12 +62,12 @@
 #include "chrome/browser/chromeos/extensions/file_browser_handler_api.h"
 #include "chrome/browser/chromeos/extensions/file_browser_private_api.h"
 #include "chrome/browser/chromeos/extensions/info_private_api.h"
+#include "chrome/browser/chromeos/extensions/input_method_api.h"
 #include "chrome/browser/chromeos/extensions/power/power_api.h"
 #include "chrome/browser/chromeos/extensions/wallpaper_private_api.h"
 #include "chrome/browser/chromeos/media/media_player_extension_api.h"
 #include "chrome/browser/extensions/api/input_ime/input_ime_api.h"
 #include "chrome/browser/extensions/api/terminal/terminal_private_api.h"
-#include "chrome/browser/extensions/extension_input_method_api.h"
 #endif
 
 // static
@@ -161,17 +159,19 @@ void ExtensionFunctionRegistry::ResetFunctions() {
   RegisterFunction<RemoveWebSQLFunction>();
 
   // Bookmarks.
-  RegisterFunction<GetBookmarksFunction>();
-  RegisterFunction<GetBookmarkChildrenFunction>();
-  RegisterFunction<GetBookmarkRecentFunction>();
-  RegisterFunction<GetBookmarkTreeFunction>();
-  RegisterFunction<GetBookmarkSubTreeFunction>();
-  RegisterFunction<SearchBookmarksFunction>();
-  RegisterFunction<RemoveBookmarkFunction>();
-  RegisterFunction<RemoveTreeBookmarkFunction>();
-  RegisterFunction<CreateBookmarkFunction>();
-  RegisterFunction<MoveBookmarkFunction>();
-  RegisterFunction<UpdateBookmarkFunction>();
+  RegisterFunction<extensions::GetBookmarksFunction>();
+  RegisterFunction<extensions::GetBookmarkChildrenFunction>();
+  RegisterFunction<extensions::GetBookmarkRecentFunction>();
+  RegisterFunction<extensions::GetBookmarkTreeFunction>();
+  RegisterFunction<extensions::GetBookmarkSubTreeFunction>();
+  RegisterFunction<extensions::ImportBookmarksFunction>();
+  RegisterFunction<extensions::ExportBookmarksFunction>();
+  RegisterFunction<extensions::SearchBookmarksFunction>();
+  RegisterFunction<extensions::RemoveBookmarkFunction>();
+  RegisterFunction<extensions::RemoveTreeBookmarkFunction>();
+  RegisterFunction<extensions::CreateBookmarkFunction>();
+  RegisterFunction<extensions::MoveBookmarkFunction>();
+  RegisterFunction<extensions::UpdateBookmarkFunction>();
 
   // Infobars.
   RegisterFunction<ShowInfoBarFunction>();
@@ -181,8 +181,6 @@ void ExtensionFunctionRegistry::ResetFunctions() {
   RegisterFunction<CutBookmarkManagerFunction>();
   RegisterFunction<PasteBookmarkManagerFunction>();
   RegisterFunction<CanPasteBookmarkManagerFunction>();
-  RegisterFunction<ImportBookmarksFunction>();
-  RegisterFunction<ExportBookmarksFunction>();
   RegisterFunction<SortChildrenBookmarkManagerFunction>();
   RegisterFunction<BookmarkManagerGetStringsFunction>();
   RegisterFunction<StartDragBookmarkManagerFunction>();
@@ -192,24 +190,20 @@ void ExtensionFunctionRegistry::ResetFunctions() {
   RegisterFunction<CanOpenNewWindowsBookmarkFunction>();
 
   // History
-  RegisterFunction<AddUrlHistoryFunction>();
-  RegisterFunction<DeleteAllHistoryFunction>();
-  RegisterFunction<DeleteRangeHistoryFunction>();
-  RegisterFunction<DeleteUrlHistoryFunction>();
-  RegisterFunction<GetMostVisitedHistoryFunction>();
-  RegisterFunction<GetVisitsHistoryFunction>();
-  RegisterFunction<SearchHistoryFunction>();
+  RegisterFunction<extensions::AddUrlHistoryFunction>();
+  RegisterFunction<extensions::DeleteAllHistoryFunction>();
+  RegisterFunction<extensions::DeleteRangeHistoryFunction>();
+  RegisterFunction<extensions::DeleteUrlHistoryFunction>();
+  RegisterFunction<extensions::GetMostVisitedHistoryFunction>();
+  RegisterFunction<extensions::GetVisitsHistoryFunction>();
+  RegisterFunction<extensions::SearchHistoryFunction>();
 
   // Idle
-  RegisterFunction<extensions::ExtensionIdleQueryStateFunction>();
+  RegisterFunction<extensions::IdleQueryStateFunction>();
+  RegisterFunction<extensions::IdleSetDetectionIntervalFunction>();
 
   // I18N.
   RegisterFunction<GetAcceptLanguagesFunction>();
-
-  // Processes.
-  RegisterFunction<extensions::GetProcessIdForTabFunction>();
-  RegisterFunction<extensions::TerminateFunction>();
-  RegisterFunction<extensions::GetProcessInfoFunction>();
 
   // Metrics.
   RegisterFunction<extensions::MetricsRecordUserActionFunction>();
@@ -222,8 +216,8 @@ void ExtensionFunctionRegistry::ResetFunctions() {
   RegisterFunction<extensions::MetricsRecordMediumTimeFunction>();
   RegisterFunction<extensions::MetricsRecordLongTimeFunction>();
 
-  // RLZ.
-#if defined(ENABLE_RLZ)
+  // RLZ (not supported on ChromeOS yet).
+#if defined(ENABLE_RLZ) && !defined(OS_CHROMEOS)
   RegisterFunction<RlzRecordProductEventFunction>();
   RegisterFunction<RlzGetAccessPointRlzFunction>();
   RegisterFunction<RlzSendFinancialPingFunction>();
@@ -284,7 +278,7 @@ void ExtensionFunctionRegistry::ResetFunctions() {
 
 #if defined(TOOLKIT_VIEWS)
   // Input.
-  RegisterFunction<SendKeyboardEventInputFunction>();
+  RegisterFunction<extensions::SendKeyboardEventInputFunction>();
 #endif
 
 #if defined(OS_CHROMEOS)
@@ -297,8 +291,7 @@ void ExtensionFunctionRegistry::ResetFunctions() {
   RegisterFunction<extensions::SetCursorPositionFunction>();
   RegisterFunction<extensions::SetMenuItemsFunction>();
   RegisterFunction<extensions::UpdateMenuItemsFunction>();
-
-  RegisterFunction<extensions::InputEventHandled>();
+  RegisterFunction<extensions::KeyEventHandled>();
 
   // Power
   RegisterFunction<extensions::power::RequestKeepAwakeFunction>();
@@ -321,9 +314,9 @@ void ExtensionFunctionRegistry::ResetFunctions() {
   RegisterFunction<UninstallFunction>();
 
   // Extension module.
-  RegisterFunction<SetUpdateUrlDataFunction>();
-  RegisterFunction<IsAllowedIncognitoAccessFunction>();
-  RegisterFunction<IsAllowedFileSchemeAccessFunction>();
+  RegisterFunction<extensions::SetUpdateUrlDataFunction>();
+  RegisterFunction<extensions::IsAllowedIncognitoAccessFunction>();
+  RegisterFunction<extensions::IsAllowedFileSchemeAccessFunction>();
 
   // WebstorePrivate.
   RegisterFunction<extensions::GetBrowserLoginFunction>();
@@ -386,9 +379,11 @@ void ExtensionFunctionRegistry::ResetFunctions() {
   RegisterFunction<SetPreferencesFunction>();
   RegisterFunction<SearchDriveFunction>();
   RegisterFunction<ClearDriveCacheFunction>();
+  RegisterFunction<ReloadDriveFunction>();
   RegisterFunction<GetNetworkConnectionStateFunction>();
   RegisterFunction<RequestDirectoryRefreshFunction>();
   RegisterFunction<SetLastModifiedFunction>();
+  RegisterFunction<ZipSelectionFunction>();
 
   // FileBrowserHandler.
   RegisterFunction<FileHandlerSelectFileFunction>();
@@ -401,11 +396,17 @@ void ExtensionFunctionRegistry::ResetFunctions() {
 
   // WallpaperManagerPrivate functions.
   RegisterFunction<WallpaperStringsFunction>();
+  RegisterFunction<WallpaperSetWallpaperIfExistFunction>();
   RegisterFunction<WallpaperSetWallpaperFunction>();
   RegisterFunction<WallpaperSetCustomWallpaperFunction>();
+  RegisterFunction<WallpaperMinimizeInactiveWindowsFunction>();
+  RegisterFunction<WallpaperRestoreMinimizedWindowsFunction>();
+  RegisterFunction<WallpaperGetThumbnailFunction>();
+  RegisterFunction<WallpaperSaveThumbnailFunction>();
+  RegisterFunction<WallpaperGetOfflineWallpaperListFunction>();
 
   // InputMethod
-  RegisterFunction<GetInputMethodFunction>();
+  RegisterFunction<extensions::GetInputMethodFunction>();
 
   // Echo
   RegisterFunction<GetRegistrationCodeFunction>();
@@ -474,7 +475,7 @@ void ExtensionFunctionRegistry::ResetFunctions() {
   RegisterFunction<extensions::PageCaptureSaveAsMHTMLFunction>();
 
   // TopSites
-  RegisterFunction<GetTopSitesFunction>();
+  RegisterFunction<extensions::GetTopSitesFunction>();
 
   // Serial
   RegisterFunction<extensions::SerialOpenFunction>();
@@ -499,18 +500,10 @@ void ExtensionFunctionRegistry::ResetFunctions() {
   RegisterFunction<extensions::RemoveRulesFunction>();
   RegisterFunction<extensions::GetRulesFunction>();
 
-  // Experimental Offscreen Tabs
-  RegisterFunction<CreateOffscreenTabFunction>();
-  RegisterFunction<GetOffscreenTabFunction>();
-  RegisterFunction<GetAllOffscreenTabFunction>();
-  RegisterFunction<RemoveOffscreenTabFunction>();
-  RegisterFunction<SendKeyboardEventOffscreenTabFunction>();
-  RegisterFunction<SendMouseEventOffscreenTabFunction>();
-  RegisterFunction<ToDataUrlOffscreenTabFunction>();
-  RegisterFunction<UpdateOffscreenTabFunction>();
-
   // Runtime
   RegisterFunction<extensions::RuntimeGetBackgroundPageFunction>();
+  RegisterFunction<extensions::RuntimeReloadFunction>();
+  RegisterFunction<extensions::RuntimeRequestUpdateCheckFunction>();
 
   // Generated APIs
   extensions::api::GeneratedFunctionRegistry::RegisterAll(this);

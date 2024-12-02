@@ -43,10 +43,11 @@ namespace browser_sync {
 
 class ChangeProcessor;
 class ChromeSyncNotificationBridge;
-struct Experiments;
 class InvalidatorStorage;
 class SyncBackendRegistrar;
 class SyncPrefs;
+class SyncedDeviceTracker;
+struct Experiments;
 
 // SyncFrontend is the interface used by SyncBackendHost to communicate with
 // the entity that created it and, presumably, is interested in sync-related
@@ -66,6 +67,8 @@ class SyncFrontend : public syncer::InvalidationHandler {
   // is initialized only if |success| is true.
   virtual void OnBackendInitialized(
       const syncer::WeakHandle<syncer::JsBackend>& js_backend,
+      const syncer::WeakHandle<syncer::DataTypeDebugInfoListener>&
+          debug_info_listener,
       bool success) = 0;
 
   // The backend queried the server recently and received some updates.
@@ -178,7 +181,7 @@ class SyncBackendHost : public BackendDataTypeConfigurer {
           report_unrecoverable_error_function);
 
   // Called on |frontend_loop| to update SyncCredentials.
-  void UpdateCredentials(const syncer::SyncCredentials& credentials);
+  virtual void UpdateCredentials(const syncer::SyncCredentials& credentials);
 
   // Registers the underlying frontend for the given IDs to the underlying
   // notifier.  This lasts until StopSyncingForShutdown() is called.
@@ -282,6 +285,9 @@ class SyncBackendHost : public BackendDataTypeConfigurer {
 
   void GetModelSafeRoutingInfo(syncer::ModelSafeRoutingInfo* out) const;
 
+  // Fetches the DeviceInfo tracker.
+  virtual SyncedDeviceTracker* GetSyncedDeviceTracker() const;
+
  protected:
   // The types and functions below are protected so that test
   // subclasses can use them.
@@ -356,9 +362,12 @@ class SyncBackendHost : public BackendDataTypeConfigurer {
       const base::Callback<void(syncer::ModelTypeSet)>& ready_task);
 
   // Called when the SyncManager has been constructed and initialized.
+  // Stores |js_backend| and |debug_info_listener| on the UI thread for
+  // consumption when initialization is complete.
   virtual void HandleSyncManagerInitializationOnFrontendLoop(
       const syncer::WeakHandle<syncer::JsBackend>& js_backend,
-      bool success,
+      const syncer::WeakHandle<syncer::DataTypeDebugInfoListener>&
+          debug_info_listener,
       syncer::ModelTypeSet restored_types);
 
   SyncFrontend* frontend() { return frontend_; }
@@ -370,17 +379,14 @@ class SyncBackendHost : public BackendDataTypeConfigurer {
   // An enum representing the steps to initializing the SyncBackendHost.
   enum InitializationState {
     NOT_ATTEMPTED,
-    CREATING_SYNC_MANAGER,  // We're waiting for the first callback from the
-                            // sync thread to inform us that the sync manager
-                            // has been created.
-    NOT_INITIALIZED,        // Initialization hasn't completed, but we've
-                            // constructed a SyncManager.
-    DOWNLOADING_NIGORI,     // The SyncManager is initialized, but
-                            // we're fetching sync encryption information.
-    ASSOCIATING_NIGORI,     // The SyncManager is initialized, and we
-                            // have the sync encryption information, but we
-                            // have to update the local encryption state.
-    INITIALIZED,            // Initialization is complete.
+    CREATING_SYNC_MANAGER,     // We're waiting for the first callback from the
+                               // sync thread to inform us that the sync
+                               // manager has been created.
+    NOT_INITIALIZED,           // Initialization hasn't completed, but we've
+                               // constructed a SyncManager.
+    INITIALIZATING_CONTROL_TYPES,  // Downloading control types and
+                               // initializing their handlers.
+    INITIALIZED,               // Initialization is complete.
   };
 
   // Checks if we have received a notice to turn on experimental datatypes
@@ -388,8 +394,9 @@ class SyncBackendHost : public BackendDataTypeConfigurer {
   // Note: it is illegal to call this before the backend is initialized.
   void AddExperimentalTypes();
 
-  // Downloading of nigori failed and will be retried.
-  void OnNigoriDownloadRetry();
+  // Downloading of control types failed and will be retried. Invokes the
+  // frontend's sync configure retry method.
+  void HandleControlTypesDownloadRetry();
 
   // InitializationComplete passes through the SyncBackendHost to forward
   // on to |frontend_|, and so that tests can intercept here if they need to
@@ -469,11 +476,6 @@ class SyncBackendHost : public BackendDataTypeConfigurer {
   void HandleConnectionStatusChangeOnFrontendLoop(
       syncer::ConnectionStatus status);
 
-  // Called when configuration of the Nigori node has completed as
-  // part of the initialization process.
-  void HandleNigoriConfigurationCompletedOnFrontendLoop(
-      syncer::ModelTypeSet failed_configuration_types);
-
   // syncer::InvalidationHandler-like functions.
   void HandleInvalidatorStateChangeOnFrontendLoop(
       syncer::InvalidatorState state);
@@ -542,11 +544,12 @@ class SyncBackendHost : public BackendDataTypeConfigurer {
   // UI-thread cache of the last SyncSessionSnapshot received from syncapi.
   syncer::sessions::SyncSessionSnapshot last_snapshot_;
 
-  // Temporary holder for the javascript backend. Set by
+  // Temporary holder of sync manager's initialization results. Set by
   // HandleSyncManagerInitializationOnFrontendLoop, and consumed when we pass
   // it via OnBackendInitialized in the final state of
   // HandleInitializationCompletedOnFrontendLoop.
   syncer::WeakHandle<syncer::JsBackend> js_backend_;
+  syncer::WeakHandle<syncer::DataTypeDebugInfoListener> debug_info_listener_;
 
   DISALLOW_COPY_AND_ASSIGN(SyncBackendHost);
 };

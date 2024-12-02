@@ -17,6 +17,7 @@
 #include "base/process_util.h"
 #include "base/string16.h"
 #include "base/string_number_conversions.h"
+#include "base/string_util.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/thread.h"
 #include "base/time.h"
@@ -27,7 +28,6 @@
 #include "chrome/browser/memory_details.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
@@ -38,6 +38,7 @@
 #include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/zygote_host_linux.h"
+#include "ui/base/text/bytes_formatting.h"
 
 using base::TimeDelta;
 using base::TimeTicks;
@@ -78,7 +79,7 @@ const int kFocusedTabScoreAdjustIntervalMs = 500;
 
 // Returns a unique ID for a WebContents.  Do not cast back to a pointer, as
 // the WebContents could be deleted if the user closed the tab.
-int64 IdFromTabContents(WebContents* web_contents) {
+int64 IdFromWebContents(WebContents* web_contents) {
   return reinterpret_cast<int64>(web_contents);
 }
 
@@ -110,8 +111,14 @@ void OomMemoryDetails::OnDetailsAvailable() {
   TimeDelta delta = TimeTicks::Now() - start_time_;
   // These logs are collected by user feedback reports.  We want them to help
   // diagnose user-reported problems with frequently discarded tabs.
+  std::string log_string = ToLogString();
+  base::SystemMemoryInfoKB memory;
+  if (base::GetSystemMemoryInfo(&memory) && memory.gem_size != -1) {
+    log_string += "Graphics ";
+    log_string += UTF16ToASCII(ui::FormatBytes(memory.gem_size));
+  }
   LOG(WARNING) << "OOM details (" << delta.InMilliseconds() << " ms):\n"
-      << ToLogString();
+      << log_string;
   if (g_browser_process && g_browser_process->oom_priority_manager())
     g_browser_process->oom_priority_manager()->DiscardTab();
   // Delete ourselves so we don't have to worry about OomPriorityManager
@@ -233,15 +240,15 @@ bool OomPriorityManager::DiscardTabById(int64 target_web_contents_id) {
       // Can't discard tabs that are already discarded or active.
       if (model->IsTabDiscarded(idx) || (model->active_index() == idx))
         continue;
-      WebContents* web_contents = model->GetTabContentsAt(idx)->web_contents();
-      int64 web_contents_id = IdFromTabContents(web_contents);
+      WebContents* web_contents = model->GetWebContentsAt(idx);
+      int64 web_contents_id = IdFromWebContents(web_contents);
       if (web_contents_id == target_web_contents_id) {
         LOG(WARNING) << "Discarding tab " << idx
             << " id " << target_web_contents_id;
         // Record statistics before discarding because we want to capture the
         // memory state that lead to the discard.
         RecordDiscardStatistics();
-        model->DiscardTabContentsAt(idx);
+        model->DiscardWebContentsAt(idx);
         return true;
       }
     }
@@ -280,9 +287,22 @@ void OomPriorityManager::RecordDiscardStatistics() {
   // Record Chrome's concept of system memory usage at the time of the discard.
   base::SystemMemoryInfoKB memory;
   if (base::GetSystemMemoryInfo(&memory)) {
+    // TODO(jamescook): Remove this after R25 is deployed to stable. It does
+    // not have sufficient resolution in the 2-4 GB range and does not properly
+    // account for graphics memory on ARM. Replace with MemAllocatedMB below.
     int mem_anonymous_mb = (memory.active_anon + memory.inactive_anon) / 1024;
     EXPERIMENT_HISTOGRAM_MEGABYTES("Tabs.Discard.MemAnonymousMB",
                                    mem_anonymous_mb);
+
+    // On Intel, graphics objects are in anonymous pages, but on ARM they are
+    // not. For a total "allocated count" add in graphics pages on ARM.
+    int mem_allocated_mb = mem_anonymous_mb;
+#if defined(ARCH_CPU_ARM_FAMILY)
+    if (memory.gem_size != -1)
+      mem_allocated_mb += memory.gem_size / 1024 / 1024;
+#endif
+    EXPERIMENT_CUSTOM_COUNTS("Tabs.Discard.MemAllocatedMB", mem_allocated_mb,
+                             256, 32768, 50)
 
     int mem_available_mb =
         (memory.active_file + memory.inactive_file + memory.free) / 1024;
@@ -444,7 +464,7 @@ OomPriorityManager::TabStatsList OomPriorityManager::GetTabStatsOnUIThread() {
     bool is_browser_for_app = browser->is_app();
     const TabStripModel* model = browser->tab_strip_model();
     for (int i = 0; i < model->count(); i++) {
-      WebContents* contents = model->GetTabContentsAt(i)->web_contents();
+      WebContents* contents = model->GetWebContentsAt(i);
       if (!contents->IsCrashed()) {
         TabStats stats;
         stats.is_app = is_browser_for_app;
@@ -454,7 +474,7 @@ OomPriorityManager::TabStatsList OomPriorityManager::GetTabStatsOnUIThread() {
         stats.last_selected = contents->GetLastSelectedTime();
         stats.renderer_handle = contents->GetRenderProcessHost()->GetHandle();
         stats.title = contents->GetTitle();
-        stats.tab_contents_id = IdFromTabContents(contents);
+        stats.tab_contents_id = IdFromWebContents(contents);
         stats_list.push_back(stats);
       }
     }

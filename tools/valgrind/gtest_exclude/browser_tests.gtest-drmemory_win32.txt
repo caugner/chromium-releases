@@ -4,6 +4,7 @@
 #
 # The list is too long for gtest_filter, so we exclude the whole
 # test case if any of its tests failed.
+*FLAKY*
 
 # Timeout (400000 ms) Tests
 NaClBrowserTestGLibc.*
@@ -30,7 +31,6 @@ IsolatedAppTest.*
 ProxyBrowserTest.*
 RedirectTest.*
 SafeBrowsingBlockingPageTest.*
-SafeBrowsingBlockingPageV2Test.*
 SSLUITest.*
 SSLUITestIgnoreCertErrors.*
 # DrM-i#1052-c#3
@@ -161,6 +161,93 @@ ExtensionPageCaptureApiTest.*
 # DrM-i#1052-c#22
 WebUIAssertionsTest.*
 WebUIBrowserAsyncGenDeferredTest.*
+# DrM-i#1052-c#29
+ExtensionManagementApiBrowserTest.*
+RestoreOnStartupPolicyTestInstance*
+# DrM-i#1052-c#30
+CollectedCookiesTest.*
+InfoBarsTest.*
+CookiePolicyBrowserTest.*
+ExtensionIconSourceTest.*
+WebstoreStandaloneInstallUnpackFailureTest.*
+ExtensionManagementApiTest.*
+FastShutdown.*
+IPBTP/InProcessBrowserTestP.*
+FormStructureBrowserTest.*
+AutomationMiscBrowserTest.*
+# DrM-i#1052-c#31
+ExtensionApiNewTabTest.*
+RestoreOnStartupPolicyTestInstance*
+# DrM-i#1052-c#33
+TabCaptureApiTest.*
+TopSitesExtensionTest.*
+# DrM-#i1052-c#34
+HistoryWebUITest.*
+SettingsFormatWebUITest.*
+TaskManagerNotificationBrowserTest.*
+ContinueWhereILeftOffTest.*
+RestartTest.*
+WebUIBrowserAsyncTest.*
+Mock4JSWebUITestFails.*
+Mock4JSWebUITest.*
+HelpPageWebUITest.*
+ChromeSendWebUITest.*
+ChromeSendPassthroughWebUITest.*
+EditDictionaryWebUITest.*
+GeolocationAccessTokenStoreTest.*
+NativeServicesBrowserTest.*
+ChromeRenderProcessHostTest.*
+BaseHistoryWebUITest.*
+SettingsFormatWebUITest.*
+ChromeMainTest.*
+AutofillPopupViewBrowserTest.*
+# DrM-i#1052-c#35
+WebUIBrowserExpectFailTest.*
+EncodingAliases/BrowserEncodingTest.*
+ExtensionSettingsWebUITest.*
+CrashRecoveryBrowserTest.*
+TracingBrowserTest.*
+LocaleTestDanish.*
+LocaleTestHebrew.*
+RegisterProtocolHandlerBrowserTest.*
+ServiceProcessControlBrowserTest.*
+SpeechRecognitionBubbleTest.*
+SpeechInputExtensionApiTest.*
+# DrM-i#1052-c#36
+DownloadDangerPromptTest.*
+TtsApiTest.*
+RequirementsCheckerBrowserTest.*
+ToolbarImporterUtilsTest.*
+# DrM-i#1052-c#37
+ExtensionCrxInstallerTest.*
+ExtensionDisabledGlobalErrorTest.*
+ExtensionTabsTest.*
+ExtensionModuleApiTest.*
+ExperimentalApiTest.*
+LocaleTestTraditionalChinese.*
+# DrM-i#1052-c#38
+FileSystemApiTest.*
+WebIntentPickerControllerIncognitoBrowserTest.*
+GlobalErrorServiceBrowserTest.*
+PerformanceMonitorUncleanExitBrowserTest.*
+PerformanceMonitorSessionRestoreBrowserTest.*
+AppNotificationTest.*
+ExtensionCloudPrintPrivateApiTest.*
+ViewSourceTest.*
+CommandLineWebstoreInstall.*
+BluetoothApiTest.*
+MediaGalleriesPrivateApiTest.*
+SerialApiTest.*
+ExtensionManagementTest.*
+ExtensionManagementApiEscalationTest.*
+ExtensionContextMenuBrowserLazyTest.*
+SystemInfoDisplayApiTest.*
+# DrM-i#1052-c#39
+ExtensionIdltestApiTest.*
+# DrM-i#1052-c#40
+SearchProviderTest.*
+PushMessagingApiTest.*
+BookmarkBrowsertest.*
 
 # Failed tests from debug build
 # DrM-i#1052-c#21
@@ -205,3 +292,22 @@ PolicyStatisticsCollectorTest.*
 HistoryExtensionApiTest.*
 # DrM-i#1052-c#27
 SystemInfoStorageApiTest.*
+# DrM-i#1052-c#28
+PanelExtensionBrowserTest.*
+ToolbarViewTest.*
+# DrM-i#1052-c#32
+ExtensionOverrideTest.*
+# DrM-i#1052-c#35
+EncodingAliases/BrowserEncodingTest.*
+ChromeRenderProcessHostTestWithCommandLine.*
+PlatformAppDevToolsBrowserTest.*
+# DrM-i#1052-c#36
+LocalePolicyTest.*
+ClipboardApiTest.*
+ExtensionDevToolsBrowserTest.*
+# DrM-i#1052-c#37
+IFrameTest.*
+# DrM-i#1052-c#39
+CloudPrintPolicyTest.*
+# DrM-i#1052-c#40
+TranslateManagerTest.*

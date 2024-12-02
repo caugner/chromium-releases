@@ -12,6 +12,7 @@
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/sync/glue/data_type_manager_impl.h"
 #include "chrome/browser/sync/invalidations/invalidator_storage.h"
+#include "chrome/browser/sync/profile_sync_components_factory_mock.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/sync_prefs.h"
 #include "chrome/test/base/profile_mock.h"
@@ -24,7 +25,7 @@ class Task;
 class TestProfileSyncService;
 
 ACTION(ReturnNewDataTypeManager) {
-  return new browser_sync::DataTypeManagerImpl(arg0, arg1, arg2);
+  return new browser_sync::DataTypeManagerImpl(arg0, arg1, arg2, arg3);
 }
 
 namespace browser_sync {
@@ -48,6 +49,9 @@ class SyncBackendHostForProfileSyncTest : public SyncBackendHost {
 
   MOCK_METHOD1(RequestNudge, void(const tracked_objects::Location&));
 
+  virtual void UpdateCredentials(
+      const syncer::SyncCredentials& credentials) OVERRIDE;
+
   virtual void RequestConfigureSyncer(
       syncer::ConfigureReason reason,
       syncer::ModelTypeSet types_to_config,
@@ -57,12 +61,11 @@ class SyncBackendHostForProfileSyncTest : public SyncBackendHost {
 
   virtual void HandleSyncManagerInitializationOnFrontendLoop(
       const syncer::WeakHandle<syncer::JsBackend>& js_backend,
-      bool success,
+      const syncer::WeakHandle<syncer::DataTypeDebugInfoListener>&
+          debug_info_listener,
       syncer::ModelTypeSet restored_types) OVERRIDE;
 
   static void SetHistoryServiceExpectations(ProfileMock* profile);
-
-  void SetInitialSyncEndedForAllTypes();
 
   void EmitOnInvalidatorStateChange(syncer::InvalidatorState state);
   void EmitOnIncomingInvalidation(
@@ -73,12 +76,31 @@ class SyncBackendHostForProfileSyncTest : public SyncBackendHost {
   virtual void InitCore(const DoInitializeOptions& options) OVERRIDE;
 
  private:
+  void ContinueInitialization(
+      const syncer::WeakHandle<syncer::JsBackend>& js_backend,
+      const syncer::WeakHandle<syncer::DataTypeDebugInfoListener>&
+          debug_info_listener,
+      syncer::ModelTypeSet restored_types);
+
+  base::WeakPtrFactory<SyncBackendHostForProfileSyncTest> weak_ptr_factory_;
+
   syncer::TestIdFactory& id_factory_;
+
+  // Invoked at the start of HandleSyncManagerInitializationOnFrontendLoop.
+  // Allows extra initialization work to be performed before the backend comes
+  // up.
   base::Closure& callback_;
+
+  // Saved closure in case we failed the initial download but then received
+  // new credentials. Holds the results of
+  // HandleSyncManagerInitializationOnFrontendLoop, and if
+  // |fail_initial_download_| was true, finishes the initialization process
+  // once we receive new credentials.
+  base::Closure initial_download_closure_;
+  bool fail_initial_download_;
 
   bool set_initial_sync_ended_on_init_;
   bool synchronous_init_;
-  bool fail_initial_download_;
   syncer::StorageOption storage_option_;
 };
 
@@ -86,8 +108,6 @@ class SyncBackendHostForProfileSyncTest : public SyncBackendHost {
 
 class TestProfileSyncService : public ProfileSyncService {
  public:
-  // |callback| can be used to populate nodes before the OnBackendInitialized
-  // callback fires.
   // TODO(tim): Remove |synchronous_backend_initialization|, and add ability to
   // inject TokenService alongside SigninManager.
   TestProfileSyncService(
@@ -95,13 +115,14 @@ class TestProfileSyncService : public ProfileSyncService {
       Profile* profile,
       SigninManager* signin,
       ProfileSyncService::StartBehavior behavior,
-      bool synchronous_backend_initialization,
-      const base::Closure& callback);
+      bool synchronous_backend_initialization);
 
   virtual ~TestProfileSyncService();
 
   virtual void OnBackendInitialized(
       const syncer::WeakHandle<syncer::JsBackend>& backend,
+      const syncer::WeakHandle<syncer::DataTypeDebugInfoListener>&
+          debug_info_listener,
       bool success) OVERRIDE;
 
   virtual void OnConfigureDone(
@@ -110,13 +131,25 @@ class TestProfileSyncService : public ProfileSyncService {
   // We implement our own version to avoid some DCHECKs.
   virtual syncer::UserShare* GetUserShare() const OVERRIDE;
 
+  static ProfileKeyedService* BuildAutoStartAsyncInit(Profile* profile);
+
+  ProfileSyncComponentsFactoryMock* components_factory_mock();
+
   // If this is called, configuring data types will require a syncer
   // nudge.
   void dont_set_initial_sync_ended_on_init();
   void set_synchronous_sync_configuration();
 
+  // Fails initial download until a new auth token is provided.
   void fail_initial_download();
+
   void set_storage_option(syncer::StorageOption option);
+
+  // |callback| can be used to populate nodes before the OnBackendInitialized
+  // callback fires.
+  void set_backend_init_callback(const base::Closure& callback) {
+    callback_ = callback;
+  }
 
   syncer::TestIdFactory* id_factory();
 

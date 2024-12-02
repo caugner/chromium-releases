@@ -12,20 +12,9 @@ MockBrowserPlugin::MockBrowserPlugin(
     RenderViewImpl* render_view,
     WebKit::WebFrame* frame,
     const WebKit::WebPluginParams& params)
-    : BrowserPlugin(id, render_view, frame, params),
-      transport_dib_next_sequence_number_(0) {
+    : BrowserPlugin(id, render_view, frame, params) {
 }
 
 MockBrowserPlugin::~MockBrowserPlugin() {}
-
-TransportDIB* MockBrowserPlugin::CreateTransportDIB(const size_t size) {
-  return TransportDIB::Create(size, transport_dib_next_sequence_number_++);
-}
-
-void MockBrowserPlugin::FreeDamageBuffer() {
-  DCHECK(damage_buffer_);
-  RenderProcess::current()->FreeTransportDIB(damage_buffer_);
-  damage_buffer_ = NULL;
-}
 
 }  // namespace content

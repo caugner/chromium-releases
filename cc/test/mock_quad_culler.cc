@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "config.h"
-
 #include "cc/test/mock_quad_culler.h"
 
 namespace cc {
@@ -26,7 +24,7 @@ MockQuadCuller::~MockQuadCuller()
 
 bool MockQuadCuller::append(scoped_ptr<DrawQuad> drawQuad, AppendQuadsData&)
 {
-    if (!drawQuad->quadRect().IsEmpty()) {
+    if (!drawQuad->rect.IsEmpty()) {
         m_activeQuadList.append(drawQuad.Pass());
         return true;
     }
@@ -35,11 +33,9 @@ bool MockQuadCuller::append(scoped_ptr<DrawQuad> drawQuad, AppendQuadsData&)
 
 SharedQuadState* MockQuadCuller::useSharedQuadState(scoped_ptr<SharedQuadState> sharedQuadState)
 {
-    sharedQuadState->id = m_activeSharedQuadStateList.size();
-
     SharedQuadState* rawPtr = sharedQuadState.get();
     m_activeSharedQuadStateList.append(sharedQuadState.Pass());
     return rawPtr;
 }
 
-} // namespace cc
+}  // namespace cc

@@ -14,14 +14,20 @@
 
 namespace IPC {
 class Message;
-class SyncMessage;
 }
 
 namespace gfx {
 class Point;
+class Rect;
 class Size;
 }
 
+namespace WebKit {
+class WebInputEvent;
+}
+
+struct BrowserPluginHostMsg_AutoSize_Params;
+struct BrowserPluginHostMsg_CreateGuest_Params;
 struct BrowserPluginHostMsg_ResizeGuest_Params;
 struct WebDropData;
 
@@ -56,17 +62,19 @@ class BrowserPluginEmbedderHelper : public RenderViewHostObserver {
  private:
   // Message handlers.
   void OnCreateGuest(int instance_id,
-                     const std::string& storage_partition_id,
-                     bool persist_storage,
-                     bool focused,
-                     bool visible);
-  void OnNavigateGuest(int instance_id,
-                       const std::string& src,
-                       const BrowserPluginHostMsg_ResizeGuest_Params& params);
+                     const BrowserPluginHostMsg_CreateGuest_Params& params);
+  void OnNavigateGuest(int instance_id, const std::string& src);
   void OnResizeGuest(int instance_id,
                      const BrowserPluginHostMsg_ResizeGuest_Params& params);
-  void OnUpdateRectACK(int instance_id, int message_id, const gfx::Size& size);
-  void OnHandleInputEvent(const IPC::SyncMessage& message, bool* handled);
+  void OnUpdateRectACK(
+      int instance_id,
+      int message_id,
+      const BrowserPluginHostMsg_AutoSize_Params& auto_size_params,
+      const BrowserPluginHostMsg_ResizeGuest_Params& resize_guest_params);
+  void OnSwapBuffersACK(int route_id, int gpu_host_id, uint32 sync_point);
+  void OnHandleInputEvent(int instance_id,
+                          const gfx::Rect& guest_window_rect,
+                          const WebKit::WebInputEvent* input_event);
   void OnSetFocus(int instance_id, bool focused);
   void OnPluginDestroyed(int instance_id);
   void OnGo(int instance_id, int relative_index);
@@ -79,6 +87,13 @@ class BrowserPluginEmbedderHelper : public RenderViewHostObserver {
                           const WebDropData& drop_data,
                           WebKit::WebDragOperationsMask drag_mask,
                           const gfx::Point& location);
+  void OnSetAutoSize(
+      int instance_id,
+      const BrowserPluginHostMsg_AutoSize_Params& auto_size_params,
+      const BrowserPluginHostMsg_ResizeGuest_Params& resize_guest_params);
+  void OnPluginAtPositionResponse(int instance_id,
+                                  int request_id,
+                                  const gfx::Point& position);
 
   BrowserPluginEmbedder* embedder_;
 

@@ -12,7 +12,6 @@
 
 #include "base/callback_forward.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/memory/weak_ptr.h"
 #include "base/platform_file.h"
 #include "chrome/browser/chromeos/drive/drive.pb.h"
 #include "chrome/browser/google_apis/gdata_wapi_parser.h"
@@ -20,11 +19,8 @@
 namespace drive {
 
 class DriveDirectory;
-class DriveDirectoryProto;
-class DriveEntryProto;
 class DriveFile;
 class DriveResourceMetadata;
-class PlatformFileInfoProto;
 
 // Used to read a directory from the file system.
 // If |error| is not DRIVE_FILE_OK, |entries| is set to NULL.
@@ -46,16 +42,6 @@ class DriveEntry {
 
   // Serialize/Parse to/from string via proto classes.
   void SerializeToString(std::string* serialized_proto) const;
-
-  // Converts the proto representation to the platform file.
-  static void ConvertProtoToPlatformFileInfo(
-      const PlatformFileInfoProto& proto,
-      base::PlatformFileInfo* file_info);
-
-  // Converts the platform file info to the proto representation.
-  static void ConvertPlatformFileInfoToProto(
-      const base::PlatformFileInfo& file_info,
-      PlatformFileInfoProto* proto);
 
   // Converts to/from proto. Only handles the common part (i.e. does not
   // touch |file_specific_info|).
@@ -99,7 +85,7 @@ class DriveEntry {
   const GURL& edit_url() const { return edit_url_; }
 
   // The resource id of the parent folder. This piece of information is needed
-  // to pair files from change feeds with their directory parents withing the
+  // to pair files from change feeds with their directory parents within the
   // existing file system snapshot (DriveResourceMetadata::resource_map_).
   const std::string& parent_resource_id() const { return parent_resource_id_; }
 

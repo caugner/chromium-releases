@@ -16,7 +16,6 @@
 #include "chrome/browser/chromeos/drive/drive_cache_observer.h"
 #include "chrome/browser/chromeos/drive/drive_file_system_observer.h"
 #include "chrome/browser/chromeos/drive/drive_resource_metadata.h"
-#include "content/public/browser/notification_observer.h"
 #include "net/base/network_change_notifier.h"
 
 class Profile;
@@ -45,7 +44,6 @@ class DriveSyncClientObserver;
 class DriveSyncClient
     : public DriveFileSystemObserver,
       public DriveCacheObserver,
-      public content::NotificationObserver,
       public net::NetworkChangeNotifier::ConnectionTypeObserver {
  public:
   // Types of sync tasks.
@@ -135,16 +133,16 @@ class DriveSyncClient
   bool ShouldStopSyncLoop();
 
   // Called when the resource IDs of files in the backlog are obtained.
-  void OnGetResourceIdsOfBacklog(
-      const std::vector<std::string>& to_fetch,
-      const std::vector<std::string>& to_upload);
+  void OnGetResourceIdsOfBacklog(const std::vector<std::string>* to_fetch,
+                                 const std::vector<std::string>* to_upload);
 
-  // Called when the resource IDs of pinned files are obtained.
-  void OnGetResourceIdsOfExistingPinnedFiles(
-    const std::vector<std::string>& resource_ids);
+  // Called when the resource ID of a pinned file is obtained.
+  void OnGetResourceIdOfExistingPinnedFile(const std::string& resource_id,
+                                           const DriveCacheEntry& cache_entry);
 
   // Called when a file entry is obtained.
   void OnGetEntryInfoByResourceId(const std::string& resource_id,
+                                  const DriveCacheEntry& cache_entry,
                                   DriveFileError error,
                                   const FilePath& file_path,
                                   scoped_ptr<DriveEntryProto> entry_proto);
@@ -156,14 +154,10 @@ class DriveSyncClient
                        const DriveCacheEntry& cache_entry);
 
   // Called when an existing cache entry and the local files are removed.
-  void OnRemove(DriveFileError error,
-                const std::string& resource_id,
-                const std::string& md5);
+  void OnRemove(const std::string& resource_id, DriveFileError error);
 
   // Called when a file is pinned.
-  void OnPinned(DriveFileError error,
-                const std::string& resource_id,
-                const std::string& md5);
+  void OnPinned(const std::string& resource_id, DriveFileError error);
 
   // Called when the file for |resource_id| is fetched.
   // Calls DoSyncLoop() to go back to the sync loop.
@@ -178,10 +172,8 @@ class DriveSyncClient
   void OnUploadFileComplete(const std::string& resource_id,
                             DriveFileError error);
 
-  // content::NotificationObserver override.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  // Called on prefs changes.
+  void OnDriveSyncPreferenceChanged();
 
   // net::NetworkChangeNotifier::ConnectionTypeObserver override.
   virtual void OnConnectionTypeChanged(

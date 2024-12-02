@@ -20,8 +20,9 @@ namespace internal {
 
 class ShelfLayoutManager;
 class WorkspaceControllerTestHelper;
+class WorkspaceCycler;
 class WorkspaceEventHandler;
-class WorkspaceManager2;
+class WorkspaceManager;
 
 // WorkspaceController acts as a central place that ties together all the
 // various workspace pieces.
@@ -46,15 +47,19 @@ class ASH_EXPORT WorkspaceController
   void DoInitialAnimation();
 
   // aura::client::ActivationChangeObserver overrides:
-  virtual void OnWindowActivated(aura::Window* window,
-                                 aura::Window* old_active) OVERRIDE;
+  virtual void OnWindowActivated(aura::Window* gained_active,
+                                 aura::Window* lost_active) OVERRIDE;
 
  private:
   friend class WorkspaceControllerTestHelper;
 
   aura::Window* viewport_;
 
-  scoped_ptr<WorkspaceManager2> workspace_manager_;
+  scoped_ptr<WorkspaceManager> workspace_manager_;
+
+  // Cycles through the WorkspaceManager's workspaces in response to a three
+  // finger vertical scroll.
+  scoped_ptr<WorkspaceCycler> workspace_cycler_;
 
   DISALLOW_COPY_AND_ASSIGN(WorkspaceController);
 };

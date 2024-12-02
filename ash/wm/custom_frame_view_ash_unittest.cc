@@ -7,13 +7,14 @@
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/wm/maximize_bubble_controller.h"
+#include "ash/wm/property_util.h"
 #include "ash/wm/window_util.h"
 #include "ash/wm/workspace/frame_maximize_button.h"
 #include "ash/wm/workspace/snap_sizer.h"
 #include "base/command_line.h"
 #include "ui/aura/aura_switches.h"
 #include "ui/aura/client/aura_constants.h"
-#include "ui/aura/focus_manager.h"
+#include "ui/aura/client/focus_client.h"
 #include "ui/aura/test/event_generator.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
@@ -172,7 +173,8 @@ TEST_F(CustomFrameViewAshTest, ResizeButtonDrag) {
     EXPECT_FALSE(ash::wm::IsWindowMaximized(window));
     EXPECT_FALSE(ash::wm::IsWindowMinimized(window));
     internal::SnapSizer sizer(window, center,
-        internal::SnapSizer::RIGHT_EDGE);
+        internal::SnapSizer::RIGHT_EDGE,
+        internal::SnapSizer::OTHER_INPUT);
     EXPECT_EQ(sizer.target_bounds().ToString(), window->bounds().ToString());
   }
 
@@ -188,7 +190,8 @@ TEST_F(CustomFrameViewAshTest, ResizeButtonDrag) {
     EXPECT_FALSE(ash::wm::IsWindowMaximized(window));
     EXPECT_FALSE(ash::wm::IsWindowMinimized(window));
     internal::SnapSizer sizer(window, center,
-        internal::SnapSizer::LEFT_EDGE);
+        internal::SnapSizer::LEFT_EDGE,
+        internal::SnapSizer::OTHER_INPUT);
     EXPECT_EQ(sizer.target_bounds().ToString(), window->bounds().ToString());
   }
 
@@ -220,9 +223,9 @@ TEST_F(CustomFrameViewAshTest, ResizeButtonDrag) {
 
     EXPECT_FALSE(ash::wm::IsWindowMaximized(window));
     EXPECT_FALSE(ash::wm::IsWindowMinimized(window));
-    internal::SnapSizer sizer(window, center,
-        internal::SnapSizer::RIGHT_EDGE);
-    EXPECT_EQ(sizer.target_bounds().ToString(), window->bounds().ToString());
+    // This is a short resizing distance and different touch behavior
+    // applies which leads in half of the screen being used.
+    EXPECT_EQ("400,0 400x552", window->bounds().ToString());
   }
 
   // Snap left.
@@ -238,7 +241,8 @@ TEST_F(CustomFrameViewAshTest, ResizeButtonDrag) {
     EXPECT_FALSE(ash::wm::IsWindowMaximized(window));
     EXPECT_FALSE(ash::wm::IsWindowMinimized(window));
     internal::SnapSizer sizer(window, center,
-        internal::SnapSizer::LEFT_EDGE);
+        internal::SnapSizer::LEFT_EDGE,
+        internal::SnapSizer::OTHER_INPUT);
     EXPECT_EQ(sizer.target_bounds().ToString(), window->bounds().ToString());
   }
 
@@ -259,6 +263,61 @@ TEST_F(CustomFrameViewAshTest, ResizeButtonDrag) {
 
   widget->Close();
 }
+
+// Tests Left/Right snapping with resize button touch dragging - which should
+// trigger dependent on the available drag distance.
+TEST_F(CustomFrameViewAshTest, TouchDragResizeCloseToCornerDiffersFromMouse) {
+  views::Widget* widget = CreateWidget();
+  aura::Window* window = widget->GetNativeWindow();
+  CustomFrameViewAsh* frame = custom_frame_view_ash(widget);
+  CustomFrameViewAsh::TestApi test(frame);
+  views::View* view = test.maximize_button();
+
+  gfx::Rect work_area = widget->GetWorkAreaBoundsInScreen();
+  gfx::Rect bounds = window->bounds();
+  bounds.set_x(work_area.width() - bounds.width());
+  widget->SetBounds(bounds);
+
+  gfx::Point start_point = view->GetBoundsInScreen().CenterPoint();
+  // We want to move all the way to the right (the few pixels we have).
+  gfx::Point end_point = gfx::Point(work_area.width(), start_point.y());
+
+  aura::test::EventGenerator generator(window->GetRootWindow(), start_point);
+
+  EXPECT_TRUE(ash::wm::IsWindowNormal(window));
+
+  // Snap right with a touch drag.
+  generator.GestureScrollSequence(start_point,
+                                  end_point,
+                                  base::TimeDelta::FromMilliseconds(100),
+                                  10);
+  RunAllPendingInMessageLoop();
+
+  EXPECT_FALSE(ash::wm::IsWindowMaximized(window));
+  EXPECT_FALSE(ash::wm::IsWindowMinimized(window));
+  gfx::Rect touch_result = window->bounds();
+  EXPECT_NE(bounds.ToString(), touch_result.ToString());
+
+  // Set the position back to where it was before and re-try with a mouse.
+  widget->SetBounds(bounds);
+
+  generator.MoveMouseTo(start_point);
+  generator.PressLeftButton();
+  generator.MoveMouseTo(end_point, 10);
+  generator.ReleaseLeftButton();
+  RunAllPendingInMessageLoop();
+
+  EXPECT_FALSE(ash::wm::IsWindowMaximized(window));
+  EXPECT_FALSE(ash::wm::IsWindowMinimized(window));
+  gfx::Rect mouse_result = window->bounds();
+
+  // The difference between the two operations should be that the mouse
+  // operation should have just started to resize and the touch operation is
+  // already all the way down to the smallest possible size.
+  EXPECT_NE(mouse_result.ToString(), touch_result.ToString());
+  EXPECT_GT(mouse_result.width(), touch_result.width());
+}
+
 
 // Test that closing the (browser) window with an opened balloon does not
 // crash the system. In other words: Make sure that shutting down the frame
@@ -369,7 +428,8 @@ TEST_F(CustomFrameViewAshTest, MaximizeLeftByButton) {
   EXPECT_FALSE(ash::wm::IsWindowMaximized(window));
   EXPECT_FALSE(ash::wm::IsWindowMinimized(window));
   internal::SnapSizer sizer(window, button_pos,
-                            internal::SnapSizer::LEFT_EDGE);
+                            internal::SnapSizer::LEFT_EDGE,
+                            internal::SnapSizer::OTHER_INPUT);
   sizer.SelectDefaultSizeAndDisableResize();
   EXPECT_EQ(sizer.target_bounds().ToString(), window->bounds().ToString());
 }
@@ -389,14 +449,15 @@ TEST_F(CustomFrameViewAshTest, MaximizeKeepFocus) {
   EXPECT_FALSE(maximize_button->maximizer());
   EXPECT_TRUE(ash::wm::IsWindowNormal(window));
 
-  aura::Window* active = window->GetFocusManager()->GetFocusedWindow();
+  aura::Window* active =
+      aura::client::GetFocusClient(window)->GetFocusedWindow();
 
   // Move the mouse cursor over the button to bring up the maximizer bubble.
   generator.MoveMouseTo(button_pos);
   EXPECT_TRUE(maximize_button->maximizer());
 
   // Check that the focused window is still the same.
-  EXPECT_EQ(active, window->GetFocusManager()->GetFocusedWindow());
+  EXPECT_EQ(active, aura::client::GetFocusClient(window)->GetFocusedWindow());
 }
 
 TEST_F(CustomFrameViewAshTest, MaximizeTap) {
@@ -544,7 +605,7 @@ TEST_F(CustomFrameViewAshTest, MaximizeLeftRestore) {
   EXPECT_EQ(new_bounds.width(), initial_bounds.width());
   EXPECT_EQ(new_bounds.height(), initial_bounds.height());
   // Make sure that there is no restore rectangle left.
-  EXPECT_EQ(NULL, window->GetProperty(aura::client::kRestoreBoundsKey));
+  EXPECT_EQ(NULL, GetRestoreBoundsInScreen(window));
 }
 
 // Maximize, left/right maximize and then restore should works.
@@ -577,7 +638,7 @@ TEST_F(CustomFrameViewAshTest, MaximizeMaximizeLeftRestore) {
   EXPECT_EQ(new_bounds.width(), initial_bounds.width());
   EXPECT_EQ(new_bounds.height(), initial_bounds.height());
   // Make sure that there is no restore rectangle left.
-  EXPECT_EQ(NULL, window->GetProperty(aura::client::kRestoreBoundsKey));
+  EXPECT_EQ(NULL, GetRestoreBoundsInScreen(window));
 }
 
 // Left/right maximize, maximize and then restore should work.
@@ -605,7 +666,7 @@ TEST_F(CustomFrameViewAshTest, MaximizeLeftMaximizeRestore) {
   EXPECT_EQ(new_bounds.width(), initial_bounds.width());
   EXPECT_EQ(new_bounds.height(), initial_bounds.height());
   // Make sure that there is no restore rectangle left.
-  EXPECT_EQ(NULL, window->GetProperty(aura::client::kRestoreBoundsKey));
+  EXPECT_EQ(NULL, GetRestoreBoundsInScreen(window));
 }
 
 // Test that minimizing the window per keyboard closes the maximize bubble.

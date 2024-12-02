@@ -15,22 +15,12 @@ ServiceProcessStateTest.Singleton
 # http://crbug.com/88221
 ConnectionTesterTest.DeleteWhileInProgress
 
-# Failing on Chromium OS. http://crbug.com/104826
-GViewRequestInterceptorTest.DoNotInterceptDownload
-
 # Fails under Heapcheck http://crbug.com/93027
 ProcessWatcherTest.ImmediateTermination
-
-# Fails under Heapcheck http://crbug.com/104566
-GViewRequestInterceptorTest.DoNotInterceptPdfWhenEnabled
 
 # Two memory leaks with too inconcrete stacks http://crbug.com/114988
 BookmarkEditorGtkTest.ModelsMatch
 BookmarkEditorGtkTest.MoveToNewParent
-
-# fails with gmock errors
-# http://crbug.com/117796
-SyncNewNonFrontendDataTypeControllerTest.StartAfterSyncShutdown
 
 # Randomly fails on the linux heapcheck bot
 HistoryQuickProviderTest.*
@@ -41,10 +31,8 @@ AppNotificationManagerSyncTest.*
 # Timing out all over the place. Disabling for now. http://crbug.com/149715
 ExtensionWebRequestTest.*
 
-# http://crbug.com/155541 - hangs during these tests
-TemplateURLServiceSyncTest.*
-
 # Don't run FLAKY or FAILS tests under the heapchecker.
 # They may cause flaky leak reports and timeouts.
 *FLAKY_*
 *FAILS_*
+

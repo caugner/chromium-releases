@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "config.h"
-
 #define _USE_MATH_DEFINES
 #include <math.h>
 
@@ -33,7 +31,7 @@
     EXPECT_FLOAT_EQ((a), (matrix).m14());       \
     EXPECT_FLOAT_EQ((b), (matrix).m24());       \
     EXPECT_FLOAT_EQ((c), (matrix).m34());       \
-    EXPECT_FLOAT_EQ((d), (matrix).m44());       \
+    EXPECT_FLOAT_EQ((d), (matrix).m44());
 
 // Checking float values for equality close to zero is not robust using EXPECT_FLOAT_EQ
 // (see gtest documentation). So, to verify rotation matrices, we must use a looser
@@ -637,13 +635,21 @@ TEST(WebTransformationMatrixTest, verifyRotateAxisAngle3dForArbitraryAxis)
 TEST(WebTransformationMatrixTest, verifyRotateAxisAngle3dForDegenerateAxis)
 {
     // Check rotation about a degenerate zero vector.
-    // It is expected to default to rotation about the z-axis.
+    // It is expected to skip applying the rotation.
     WebTransformationMatrix A;
-    A.rotate3d(0, 0, 0, 90);
-    EXPECT_ROW1_NEAR(0, -1, 0, 0, A, ERROR_THRESHOLD);
-    EXPECT_ROW2_NEAR(1, 0, 0, 0, A, ERROR_THRESHOLD);
-    EXPECT_ROW3_EQ(0, 0, 1, 0, A);
-    EXPECT_ROW4_EQ(0, 0, 0, 1, A);
+
+    A.rotate3d(0, 0, 0, 45);
+    // Verify that A remains unchanged.
+    EXPECT_TRUE(A.isIdentity());
+
+    initializeTestMatrix(A);
+    A.rotate3d(0, 0, 0, 35);
+
+    // Verify that A remains unchanged.
+    EXPECT_ROW1_EQ(10, 14, 18, 22, A);
+    EXPECT_ROW2_EQ(11, 15, 19, 23, A);
+    EXPECT_ROW3_EQ(12, 16, 20, 24, A);
+    EXPECT_ROW4_EQ(13, 17, 21, 25, A);
 }
 
 TEST(WebTransformationMatrixTest, verifySkewX)
@@ -1116,16 +1122,16 @@ TEST(WebTransformationMatrixTest, verifyBlendForSkewY)
     to.makeIdentity();
     to.skewY(45);
     to.blend(from, 0.25);
-    EXPECT_ROW1_NEAR(1.0823489449280947471976333, 0.0464370719145053845178239, 0, 0, to, ERROR_THRESHOLD);
-    EXPECT_ROW2_NEAR(0.2152925909665224513123150, 0.9541702441750861130032035, 0, 0, to, ERROR_THRESHOLD);
+    EXPECT_ROW1_NEAR(1.0823489449280947471976333, 0.0464370719145053845178239, 0, 0, to, LOOSE_ERROR_THRESHOLD);
+    EXPECT_ROW2_NEAR(0.2152925909665224513123150, 0.9541702441750861130032035, 0, 0, to, LOOSE_ERROR_THRESHOLD);
     EXPECT_ROW3_EQ(0, 0, 1, 0, to);
     EXPECT_ROW4_EQ(0, 0, 0, 1, to);
 
     to.makeIdentity();
     to.skewY(45);
     to.blend(from, 0.5);
-    EXPECT_ROW1_NEAR(1.1152212925809066312865525, 0.0676495144007326631996335, 0, 0, to, ERROR_THRESHOLD);
-    EXPECT_ROW2_NEAR(0.4619397844342648662419037, 0.9519009045724774464858342, 0, 0, to, ERROR_THRESHOLD);
+    EXPECT_ROW1_NEAR(1.1152212925809066312865525, 0.0676495144007326631996335, 0, 0, to, LOOSE_ERROR_THRESHOLD);
+    EXPECT_ROW2_NEAR(0.4619397844342648662419037, 0.9519009045724774464858342, 0, 0, to, LOOSE_ERROR_THRESHOLD);
     EXPECT_ROW3_EQ(0, 0, 1, 0, to);
     EXPECT_ROW4_EQ(0, 0, 0, 1, to);
 

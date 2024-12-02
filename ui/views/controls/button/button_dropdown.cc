@@ -38,6 +38,7 @@ ButtonDropDown::ButtonDropDown(ButtonListener* listener, ui::MenuModel* model)
       menu_showing_(false),
       y_position_on_lbuttondown_(0),
       ALLOW_THIS_IN_INITIALIZER_LIST(show_menu_factory_(this)) {
+  set_context_menu_controller(this);
 }
 
 ButtonDropDown::~ButtonDropDown() {
@@ -99,12 +100,6 @@ void ButtonDropDown::OnMouseReleased(const ui::MouseEvent& event) {
 
   if (IsTriggerableEvent(event))
     show_menu_factory_.InvalidateWeakPtrs();
-
-  if (enabled() && event.IsRightMouseButton() &&
-      HitTestPoint(event.location())) {
-    show_menu_factory_.InvalidateWeakPtrs();
-    ShowDropDownMenu();
-  }
 }
 
 std::string ButtonDropDown::GetClassName() const {
@@ -115,15 +110,18 @@ void ButtonDropDown::OnMouseExited(const ui::MouseEvent& event) {
   // Starting a drag results in a MouseExited, we need to ignore it.
   // A right click release triggers an exit event. We want to
   // remain in a PUSHED state until the drop down menu closes.
-  if (state_ != BS_DISABLED && !InDrag() && state_ != BS_PUSHED)
-    SetState(BS_NORMAL);
+  if (state_ != STATE_DISABLED && !InDrag() && state_ != STATE_PRESSED)
+    SetState(STATE_NORMAL);
 }
 
-void ButtonDropDown::ShowContextMenu(const gfx::Point& p,
-                                     bool is_mouse_gesture) {
-  show_menu_factory_.InvalidateWeakPtrs();
-  ShowDropDownMenu();
-  SetState(BS_HOT);
+void ButtonDropDown::OnGestureEvent(ui::GestureEvent* event) {
+  if (menu_showing_) {
+    // While dropdown menu is showing the button should not handle gestures.
+    event->StopPropagation();
+    return;
+  }
+
+  ImageButton::OnGestureEvent(event);
 }
 
 void ButtonDropDown::GetAccessibleState(ui::AccessibleViewState* state) {
@@ -131,6 +129,15 @@ void ButtonDropDown::GetAccessibleState(ui::AccessibleViewState* state) {
   state->role = ui::AccessibilityTypes::ROLE_BUTTONDROPDOWN;
   state->default_action = l10n_util::GetStringUTF16(IDS_APP_ACCACTION_PRESS);
   state->state = ui::AccessibilityTypes::STATE_HASPOPUP;
+}
+
+void ButtonDropDown::ShowContextMenuForView(View* source,
+                                            const gfx::Point& point) {
+  if (!enabled())
+    return;
+
+  show_menu_factory_.InvalidateWeakPtrs();
+  ShowDropDownMenu();
 }
 
 bool ButtonDropDown::ShouldEnterPushedState(const ui::Event& event) {
@@ -171,7 +178,7 @@ void ButtonDropDown::ShowDropDownMenu() {
     menu_position.set_x(left_bound);
 
   // Make the button look depressed while the menu is open.
-  SetState(BS_PUSHED);
+  SetState(STATE_PRESSED);
 
   menu_showing_ = true;
 
@@ -208,8 +215,8 @@ void ButtonDropDown::ShowDropDownMenu() {
   SetMouseHandler(NULL);
 
   // Set the state back to normal after the drop down menu is closed.
-  if (state_ != BS_DISABLED)
-    SetState(BS_NORMAL);
+  if (state_ != STATE_DISABLED)
+    SetState(STATE_NORMAL);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

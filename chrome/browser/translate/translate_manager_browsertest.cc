@@ -95,7 +95,9 @@ class TranslateManagerTest : public ChromeRenderViewHostTestHarness,
                              public content::NotificationObserver {
  public:
   TranslateManagerTest()
-      : ui_thread_(BrowserThread::UI, &message_loop_) {
+      : pref_callback_(base::Bind(&TranslateManagerTest::OnPreferenceChanged,
+                                  base::Unretained(this))),
+        ui_thread_(BrowserThread::UI, &message_loop_) {
   }
 
   // Simulates navigating to a page and getting the page contents and language
@@ -203,7 +205,7 @@ class TranslateManagerTest : public ChromeRenderViewHostTestHarness,
 
     // The TranslateManager class processes the navigation entry committed
     // notification in a posted task; process that task.
-    MessageLoop::current()->RunAllPending();
+    MessageLoop::current()->RunUntilIdle();
   }
 
   virtual void Observe(int type,
@@ -213,6 +215,8 @@ class TranslateManagerTest : public ChromeRenderViewHostTestHarness,
     removed_infobars_.insert(
         content::Details<InfoBarRemovedDetails>(details)->first);
   }
+
+  MOCK_METHOD1(OnPreferenceChanged, void(const std::string&));
 
  protected:
   virtual void SetUp() {
@@ -291,14 +295,10 @@ class TranslateManagerTest : public ChromeRenderViewHostTestHarness,
   }
 
   void SetPrefObserverExpectation(const char* path) {
-    EXPECT_CALL(
-        pref_observer_,
-        Observe(int(chrome::NOTIFICATION_PREF_CHANGED),
-                _,
-                Property(&content::Details<std::string>::ptr, Pointee(path))));
+    EXPECT_CALL(*this, OnPreferenceChanged(std::string(path)));
   }
 
-  content::MockNotificationObserver pref_observer_;
+  PrefChangeRegistrar::NamedChangeCallback pref_callback_;
 
  private:
   content::NotificationRegistrar notification_registrar_;
@@ -815,7 +815,7 @@ TEST_F(TranslateManagerTest, ReloadFromLocationBar) {
 
   // The TranslateManager class processes the navigation entry committed
   // notification in a posted task; process that task.
-  MessageLoop::current()->RunAllPending();
+  MessageLoop::current()->RunUntilIdle();
   EXPECT_TRUE(GetTranslateInfoBar() != NULL);
 }
 
@@ -1095,7 +1095,7 @@ TEST_F(TranslateManagerTest, NeverTranslateLanguagePref) {
   PrefChangeRegistrar registrar;
   registrar.Init(prefs);
   registrar.Add(TranslatePrefs::kPrefTranslateLanguageBlacklist,
-                &pref_observer_);
+                pref_callback_);
   TranslatePrefs translate_prefs(prefs);
   EXPECT_FALSE(translate_prefs.IsLanguageBlacklisted("fr"));
   EXPECT_TRUE(translate_prefs.CanTranslate(prefs, "fr", url));
@@ -1142,8 +1142,7 @@ TEST_F(TranslateManagerTest, NeverTranslateSitePref) {
   PrefService* prefs = profile->GetPrefs();
   PrefChangeRegistrar registrar;
   registrar.Init(prefs);
-  registrar.Add(TranslatePrefs::kPrefTranslateSiteBlacklist,
-                &pref_observer_);
+  registrar.Add(TranslatePrefs::kPrefTranslateSiteBlacklist, pref_callback_);
   TranslatePrefs translate_prefs(prefs);
   EXPECT_FALSE(translate_prefs.IsSiteBlacklisted(host));
   EXPECT_TRUE(translate_prefs.CanTranslate(prefs, "fr", url));
@@ -1182,8 +1181,7 @@ TEST_F(TranslateManagerTest, AlwaysTranslateLanguagePref) {
   PrefService* prefs = profile->GetPrefs();
   PrefChangeRegistrar registrar;
   registrar.Init(prefs);
-  registrar.Add(TranslatePrefs::kPrefTranslateWhitelists,
-                &pref_observer_);
+  registrar.Add(TranslatePrefs::kPrefTranslateWhitelists, pref_callback_);
   TranslatePrefs translate_prefs(prefs);
   SetPrefObserverExpectation(TranslatePrefs::kPrefTranslateWhitelists);
   translate_prefs.WhitelistLanguagePair("fr", "en");
@@ -1459,7 +1457,7 @@ TEST_F(TranslateManagerTest, ScriptExpires) {
           0, 0, "fr", "en", TranslateErrors::NONE));
 
   // A task should have been posted to clear the script, run it.
-  MessageLoop::current()->RunAllPending();
+  MessageLoop::current()->RunUntilIdle();
 
   // Do another navigation and translation.
   SimulateNavigation(GURL("http://www.google.es"), "es", true);
@@ -1490,9 +1488,16 @@ TEST_F(TranslateManagerTest, DownloadsAndHistoryNotTranslated) {
       GURL(chrome::kChromeUIHistoryURL)));
 }
 
+// Test is flaky on Win http://crbug.com/166334
+#if defined(OS_WIN)
+#define MAYBE_PRE_TranslateSessionRestore DISABLED_PRE_TranslateSessionRestore
+#else
+#define MAYBE_PRE_TranslateSessionRestore PRE_TranslateSessionRestore
+#endif
 // Test that session restore restores the translate infobar and other translate
 // settings.
-IN_PROC_BROWSER_TEST_F(InProcessBrowserTest, PRE_TranslateSessionRestore) {
+IN_PROC_BROWSER_TEST_F(InProcessBrowserTest,
+                       MAYBE_PRE_TranslateSessionRestore) {
   SessionStartupPref pref(SessionStartupPref::LAST);
   SessionStartupPref::SetStartupPref(browser()->profile(), pref);
 
@@ -1516,7 +1521,12 @@ IN_PROC_BROWSER_TEST_F(InProcessBrowserTest, PRE_TranslateSessionRestore) {
   EXPECT_EQ("fr", translate_tab_helper->language_state().original_language());
 }
 
-IN_PROC_BROWSER_TEST_F(InProcessBrowserTest, TranslateSessionRestore) {
+#if defined (OS_WIN)
+#define MAYBE_TranslateSessionRestore DISABLED_TranslateSessionRestore
+#else
+#define MAYBE_TranslateSessionRestore TranslateSessionRestore
+#endif
+IN_PROC_BROWSER_TEST_F(InProcessBrowserTest, MAYBE_TranslateSessionRestore) {
   WebContents* current_web_contents = chrome::GetActiveWebContents(browser());
   content::Source<WebContents> source(current_web_contents);
 

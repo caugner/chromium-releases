@@ -11,6 +11,8 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "net/base/mime_util.h"
+#include "net/base/net_export.h"
 
 namespace net {
 namespace android {
@@ -32,6 +34,13 @@ enum VerifyResult {
 VerifyResult VerifyX509CertChain(const std::vector<std::string>& cert_chain,
                                  const std::string& auth_type);
 
+// Adds a certificate as a root trust certificate to the trust manager.
+// |cert| is DER encoded certificate, |len| is its length in bytes.
+void AddTestRootCertificate(const uint8* cert, size_t len);
+
+// Removes all root certificates added by |AddTestRootCertificate| calls.
+void ClearTestRootCertificates();
+
 // Helper for the <keygen> handler. Passes the DER-encoded key  pair via
 // JNI to the Credentials store. Note that the public key must be a DER
 // encoded SubjectPublicKeyInfo (X.509), as returned by i2d_PUBKEY()
@@ -45,6 +54,12 @@ bool StoreKeyPair(const uint8* public_key,
                   size_t public_len,
                   const uint8* private_key,
                   size_t private_len);
+
+// Helper used to pass the DER-encoded bytes of an X.509 certificate or
+// a PKCS#12 archive holding a private key to the CertInstaller activity.
+void StoreCertificate(net::CertificateMimeType cert_type,
+                      const void* data,
+                      size_t data_len);
 
 // Returns true if it can determine that only loopback addresses are configured.
 // i.e. if only 127.0.0.1 and ::1 are routable.
@@ -63,7 +78,7 @@ bool GetMimeTypeFromExtension(const std::string& extension,
                               std::string* result);
 
 // Register JNI methods
-bool RegisterNetworkLibrary(JNIEnv* env);
+NET_EXPORT bool RegisterNetworkLibrary(JNIEnv* env);
 
 }  // namespace android
 }  // namespace net

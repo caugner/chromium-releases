@@ -2,10 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CCAnimationTestCommon_h
-#define CCAnimationTestCommon_h
+#ifndef CC_TEST_ANIMATION_TEST_COMMON_H_
+#define CC_TEST_ANIMATION_TEST_COMMON_H_
 
-#include "IntSize.h"
 #include "cc/active_animation.h"
 #include "cc/animation_curve.h"
 #include "cc/layer_animation_controller.h"
@@ -15,7 +14,7 @@ class LayerImpl;
 class Layer;
 }
 
-namespace WebKitTests {
+namespace cc {
 
 class FakeFloatAnimationCurve : public cc::FloatAnimationCurve {
 public:
@@ -70,23 +69,23 @@ public:
     virtual int id() const OVERRIDE;
     virtual void setOpacityFromAnimation(float) OVERRIDE;
     virtual float opacity() const OVERRIDE;
-    virtual void setTransformFromAnimation(const WebKit::WebTransformationMatrix&) OVERRIDE;
-    virtual const WebKit::WebTransformationMatrix& transform() const OVERRIDE;
+    virtual void setTransformFromAnimation(const gfx::Transform&) OVERRIDE;
+    virtual const gfx::Transform& transform() const OVERRIDE;
 
 private:
     float m_opacity;
-    WebKit::WebTransformationMatrix m_transform;
+    gfx::Transform m_transform;
 };
 
-void addOpacityTransitionToController(cc::LayerAnimationController&, double duration, float startOpacity, float endOpacity, bool useTimingFunction);
-void addAnimatedTransformToController(cc::LayerAnimationController&, double duration, int deltaX, int deltaY);
+int addOpacityTransitionToController(cc::LayerAnimationController&, double duration, float startOpacity, float endOpacity, bool useTimingFunction);
+int addAnimatedTransformToController(cc::LayerAnimationController&, double duration, int deltaX, int deltaY);
 
-void addOpacityTransitionToLayer(cc::Layer&, double duration, float startOpacity, float endOpacity, bool useTimingFunction);
-void addOpacityTransitionToLayer(cc::LayerImpl&, double duration, float startOpacity, float endOpacity, bool useTimingFunction);
+int addOpacityTransitionToLayer(cc::Layer&, double duration, float startOpacity, float endOpacity, bool useTimingFunction);
+int addOpacityTransitionToLayer(cc::LayerImpl&, double duration, float startOpacity, float endOpacity, bool useTimingFunction);
 
-void addAnimatedTransformToLayer(cc::Layer&, double duration, int deltaX, int deltaY);
-void addAnimatedTransformToLayer(cc::LayerImpl&, double duration, int deltaX, int deltaY);
+int addAnimatedTransformToLayer(cc::Layer&, double duration, int deltaX, int deltaY);
+int addAnimatedTransformToLayer(cc::LayerImpl&, double duration, int deltaX, int deltaY);
 
-} // namespace WebKitTests
+}  // namespace cc
 
-#endif // CCAnimationTesctCommon_h
+#endif  // CC_TEST_ANIMATION_TEST_COMMON_H_

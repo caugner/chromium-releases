@@ -20,7 +20,6 @@
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/extensions/state_store.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
 #include "content/public/browser/notification_details.h"
@@ -613,7 +612,7 @@ void MenuManager::ExecuteCommand(Profile* profile,
   DictionaryValue* properties = new DictionaryValue();
   SetIdKeyValue(properties, "menuItemId", item->id());
   if (item->parent_id())
-    SetIdKeyValue(properties, "parentMenuItemId", item->id());
+    SetIdKeyValue(properties, "parentMenuItemId", *item->parent_id());
 
   switch (params.media_type) {
     case WebKit::WebContextMenuData::MediaTypeImage:
@@ -675,14 +674,20 @@ void MenuManager::ExecuteCommand(Profile* profile,
         active_tab_permission_granter()->GrantIfRequested(extension);
   }
 
-  event_router->DispatchEventToExtension(
-      item->extension_id(), event_names::kOnContextMenus,
-      scoped_ptr<ListValue>(args->DeepCopy()), profile, GURL(),
-      EventRouter::USER_GESTURE_ENABLED);
-  event_router->DispatchEventToExtension(
-      item->extension_id(), event_names::kOnContextMenuClicked,
-      args.Pass(), profile, GURL(),
-      EventRouter::USER_GESTURE_ENABLED);
+  {
+    scoped_ptr<Event> event(new Event(event_names::kOnContextMenus,
+                                      scoped_ptr<ListValue>(args->DeepCopy())));
+    event->restrict_to_profile = profile;
+    event->user_gesture = EventRouter::USER_GESTURE_ENABLED;
+    event_router->DispatchEventToExtension(item->extension_id(), event.Pass());
+  }
+  {
+    scoped_ptr<Event> event(new Event(event_names::kOnContextMenuClicked,
+                                      args.Pass()));
+    event->restrict_to_profile = profile;
+    event->user_gesture = EventRouter::USER_GESTURE_ENABLED;
+    event_router->DispatchEventToExtension(item->extension_id(), event.Pass());
+  }
 }
 
 void MenuManager::SanitizeRadioList(const MenuItem::List& item_list) {
@@ -808,6 +813,24 @@ void MenuManager::Observe(int type,
 const SkBitmap& MenuManager::GetIconForExtension(
     const std::string& extension_id) {
   return icon_manager_.GetIcon(extension_id);
+}
+
+void MenuManager::RemoveAllIncognitoContextItems() {
+  // Get all context menu items with "incognito" set to "split".
+  std::set<MenuItem::Id> items_to_remove;
+  std::map<MenuItem::Id, MenuItem*>::const_iterator iter;
+  for (iter = items_by_id_.begin();
+       iter != items_by_id_.end();
+       ++iter) {
+    if (iter->first.incognito)
+      items_to_remove.insert(iter->first);
+  }
+
+  std::set<MenuItem::Id>::iterator remove_iter;
+  for (remove_iter = items_to_remove.begin();
+       remove_iter != items_to_remove.end();
+       ++remove_iter)
+    RemoveContextMenuItem(*remove_iter);
 }
 
 MenuItem::Id::Id()

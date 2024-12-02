@@ -21,6 +21,7 @@ namespace proxy {
 
 namespace {
 
+#if !defined(OS_NACL)
 void HandleMessage(PP_Instance instance, PP_Var message_data) {
   HostDispatcher* dispatcher = HostDispatcher::GetForInstance(instance);
   if (!dispatcher || (message_data.type == PP_VARTYPE_OBJECT)) {
@@ -39,6 +40,10 @@ void HandleMessage(PP_Instance instance, PP_Var message_data) {
 static const PPP_Messaging messaging_interface = {
   &HandleMessage
 };
+#else
+// The NaCl plugin doesn't need the host side interface - stub it out.
+static const PPP_Messaging messaging_interface = {};
+#endif  // !defined(OS_NACL)
 
 InterfaceProxy* CreateMessagingProxy(Dispatcher* dispatcher) {
   return new PPP_Messaging_Proxy(dispatcher);
@@ -71,6 +76,9 @@ const InterfaceProxy::Info* PPP_Messaging_Proxy::GetInfo() {
 }
 
 bool PPP_Messaging_Proxy::OnMessageReceived(const IPC::Message& msg) {
+  if (!dispatcher()->IsPlugin())
+    return false;
+
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(PPP_Messaging_Proxy, msg)
     IPC_MESSAGE_HANDLER(PpapiMsg_PPPMessaging_HandleMessage,

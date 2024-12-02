@@ -5,10 +5,19 @@
 #include "ppapi/proxy/serialized_structs.h"
 
 #include "base/pickle.h"
+#include "base/platform_file.h"
+#include "base/shared_memory.h"
+#include "build/build_config.h"
+#include "ipc/ipc_platform_file.h"
 #include "ppapi/c/dev/ppb_font_dev.h"
 #include "ppapi/c/pp_file_info.h"
 #include "ppapi/c/pp_rect.h"
+#include "ppapi/c/trusted/ppb_browser_font_trusted.h"
 #include "ppapi/shared_impl/var.h"
+
+#if defined(OS_NACL)
+#include <unistd.h>
+#endif
 
 namespace ppapi {
 namespace proxy {
@@ -40,12 +49,38 @@ void SerializedFontDescription::SetFromPPFontDescription(
   word_spacing = desc.word_spacing;
 }
 
+void SerializedFontDescription::SetFromPPBrowserFontDescription(
+    const PP_BrowserFont_Trusted_Description& desc) {
+  StringVar* string_var = StringVar::FromPPVar(desc.face);
+  face = string_var ? string_var->value() : std::string();
+
+  family = desc.family;
+  size = desc.size;
+  weight = desc.weight;
+  italic = desc.italic;
+  small_caps = desc.small_caps;
+  letter_spacing = desc.letter_spacing;
+  word_spacing = desc.word_spacing;
+}
+
 void SerializedFontDescription::SetToPPFontDescription(
     PP_FontDescription_Dev* desc) const {
   desc->face = StringVar::StringToPPVar(face);
   desc->family = static_cast<PP_FontFamily_Dev>(family);
   desc->size = size;
   desc->weight = static_cast<PP_FontWeight_Dev>(weight);
+  desc->italic = italic;
+  desc->small_caps = small_caps;
+  desc->letter_spacing = letter_spacing;
+  desc->word_spacing = word_spacing;
+}
+
+void SerializedFontDescription::SetToPPBrowserFontDescription(
+    PP_BrowserFont_Trusted_Description* desc) const {
+  desc->face = StringVar::StringToPPVar(face);
+  desc->family = static_cast<PP_BrowserFont_Trusted_Family>(family);
+  desc->size = size;
+  desc->weight = static_cast<PP_BrowserFont_Trusted_Weight>(weight);
   desc->italic = italic;
   desc->small_caps = small_caps;
   desc->letter_spacing = letter_spacing;
@@ -99,11 +134,44 @@ SerializedHandle::SerializedHandle(
 }
 
 bool SerializedHandle::IsHandleValid() const {
-  if (type_ == SHARED_MEMORY)
-    return base::SharedMemory::IsHandleValid(shm_handle_);
-  else if (type_ == SOCKET || type_ == CHANNEL_HANDLE)
-    return !(IPC::InvalidPlatformFileForTransit() == descriptor_);
+  switch (type_) {
+    case SHARED_MEMORY:
+      return base::SharedMemory::IsHandleValid(shm_handle_);
+    case SOCKET:
+    case CHANNEL_HANDLE:
+    case FILE:
+      return !(IPC::InvalidPlatformFileForTransit() == descriptor_);
+    case INVALID:
+      return false;
+    // No default so the compiler will warn us if a new type is added.
+  }
   return false;
+}
+
+void SerializedHandle::Close() {
+  if (IsHandleValid()) {
+    switch (type_) {
+      case INVALID:
+        NOTREACHED();
+        break;
+      case SHARED_MEMORY:
+        base::SharedMemory::CloseHandle(shm_handle_);
+        break;
+      case SOCKET:
+      case CHANNEL_HANDLE:
+      case FILE:
+        base::PlatformFile file =
+            IPC::PlatformFileForTransitToPlatformFile(descriptor_);
+#if !defined(OS_NACL)
+        base::ClosePlatformFile(file);
+#else
+        close(file);
+#endif
+        break;
+      // No default so the compiler will warn us if a new type is added.
+    }
+  }
+  *this = SerializedHandle();
 }
 
 // static
@@ -135,6 +203,7 @@ bool SerializedHandle::ReadHeader(PickleIterator* iter, Header* hdr) {
     }
     case SOCKET:
     case CHANNEL_HANDLE:
+    case FILE:
     case INVALID:
       valid_type = true;
       break;

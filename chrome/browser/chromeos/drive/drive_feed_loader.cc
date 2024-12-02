@@ -6,11 +6,10 @@
 
 #include <set>
 
+#include "base/callback.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/format_macros.h"
-#include "base/json/json_reader.h"
-#include "base/json/json_writer.h"
 #include "base/metrics/histogram.h"
 #include "base/stringprintf.h"
 #include "base/threading/sequenced_worker_pool.h"
@@ -19,10 +18,10 @@
 #include "chrome/browser/chromeos/drive/drive_feed_loader_observer.h"
 #include "chrome/browser/chromeos/drive/drive_feed_processor.h"
 #include "chrome/browser/chromeos/drive/drive_file_system_util.h"
+#include "chrome/browser/chromeos/drive/drive_scheduler.h"
 #include "chrome/browser/chromeos/drive/drive_webapps_registry.h"
 #include "chrome/browser/google_apis/drive_api_parser.h"
-#include "chrome/browser/google_apis/drive_service_interface.h"
-#include "chrome/browser/google_apis/gdata_util.h"
+#include "chrome/browser/google_apis/drive_api_util.h"
 #include "chrome/common/chrome_switches.h"
 #include "content/public/browser/browser_thread.h"
 
@@ -32,8 +31,6 @@ namespace drive {
 
 namespace {
 
-const FilePath::CharType kAccountMetadataFile[] =
-    FILE_PATH_LITERAL("account_metadata.json");
 const FilePath::CharType kFilesystemProtoFile[] =
     FILE_PATH_LITERAL("file_system.pb");
 const FilePath::CharType kResourceMetadataDBFile[] =
@@ -64,42 +61,18 @@ SerializationTimetable kSerializeTimetable[] = {
 
 // Loads the file at |path| into the string |serialized_proto| on a blocking
 // thread.
-void LoadProtoOnBlockingPool(const FilePath& path,
-                             LoadRootFeedParams* params) {
+DriveFileError LoadProtoOnBlockingPool(const FilePath& path,
+                                       base::Time* last_modified,
+                                       std::string* serialized_proto) {
   base::PlatformFileInfo info;
-  if (!file_util::GetFileInfo(path, &info)) {
-    params->load_error = DRIVE_FILE_ERROR_NOT_FOUND;
-    return;
-  }
-  params->last_modified = info.last_modified;
-  if (!file_util::ReadFileToString(path, &params->proto)) {
+  if (!file_util::GetFileInfo(path, &info))
+    return DRIVE_FILE_ERROR_NOT_FOUND;
+  *last_modified = info.last_modified;
+  if (!file_util::ReadFileToString(path, serialized_proto)) {
     LOG(WARNING) << "Proto file not found at " << path.value();
-    params->load_error = DRIVE_FILE_ERROR_NOT_FOUND;
-    return;
+    return DRIVE_FILE_ERROR_NOT_FOUND;
   }
-  params->load_error = DRIVE_FILE_OK;
-}
-
-// Saves json file content content in |feed| to |file_pathname| on blocking
-// pool. Used for debugging.
-void SaveFeedOnBlockingPoolForDebugging(
-    const FilePath& file_path,
-    scoped_ptr<base::Value> feed) {
-  std::string json;
-  base::JSONWriter::WriteWithOptions(feed.get(),
-                                     base::JSONWriter::OPTIONS_PRETTY_PRINT,
-                                     &json);
-
-  int file_size = static_cast<int>(json.length());
-  if (file_util::WriteFile(file_path, json.data(), file_size) != file_size) {
-    LOG(WARNING) << "Drive metadata file can't be stored at "
-                 << file_path.value();
-    if (!file_util::Delete(file_path, true)) {
-      LOG(WARNING) << "Drive metadata file can't be deleted at "
-                   << file_path.value();
-      return;
-    }
-  }
+  return DRIVE_FILE_OK;
 }
 
 // Returns true if file system is due to be serialized on disk based on it
@@ -139,61 +112,104 @@ bool UseLevelDB() {
   return false;
 }
 
-// Run params->feed_load_callback with |error|.
-void RunFeedLoadCallback(scoped_ptr<LoadFeedParams> params,
-                         DriveFileError error) {
-  // Need a reference before calling Pass().
-  const LoadDocumentFeedCallback& feed_load_callback =
-      params->feed_load_callback;
-  feed_load_callback.Run(params.Pass(), error);
-}
-
-// Parses a google_apis::DocumentFeed from |data|.
-void ParseFeedOnBlockingPool(
-    scoped_ptr<base::Value> data,
-    scoped_ptr<google_apis::DocumentFeed>* out_current_feed) {
-  DCHECK(out_current_feed);
-  out_current_feed->reset(
-      google_apis::DocumentFeed::ExtractAndParse(*data).release());
+// Parses a google_apis::ResourceList from |data|.
+scoped_ptr<google_apis::ResourceList> ParseFeedOnBlockingPool(
+    scoped_ptr<base::Value> data) {
+  return google_apis::ResourceList::ExtractAndParse(*data);
 }
 
 }  // namespace
 
-LoadFeedParams::LoadFeedParams(
-    const LoadDocumentFeedCallback& feed_load_callback)
-    : start_changestamp(0),
-      root_feed_changestamp(0),
-      load_subsequent_feeds(true),
-      feed_load_callback(feed_load_callback) {
-  DCHECK(!feed_load_callback.is_null());
-}
+// Set of parameters sent to LoadFromServer.
+//
+// Value of |start_changestamp| determines the type of feed to load - 0 means
+// root feed, every other value would trigger delta feed.
+//
+// Loaded feed may be partial due to size limit on a single feed. In that case,
+// the loaded feed will have next feed url set. Iff |load_subsequent_feeds|
+// parameter is set, feed loader will load all subsequent feeds.
+//
+// If invoked as a part of content search, query will be set in |search_query|.
+// If |feed_to_load| is set, this is feed url that will be used to load feed.
+//
+// When all feeds are loaded, |feed_load_callback| is invoked with the retrieved
+// feeds. |feed_load_callback| must not be null.
+struct DriveFeedLoader::LoadFeedParams {
+  explicit LoadFeedParams(const LoadFeedListCallback& feed_load_callback)
+      : start_changestamp(0),
+        shared_with_me(false),
+        load_subsequent_feeds(true),
+        feed_load_callback(feed_load_callback) {}
 
-LoadFeedParams::~LoadFeedParams() {
-}
+  // Runs this->feed_load_callback with |error|.
+  void RunFeedLoadCallback(DriveFileError error) {
+    feed_load_callback.Run(feed_list, error);
+  }
 
-LoadRootFeedParams::LoadRootFeedParams(
-    const FileOperationCallback& callback)
-    : load_error(DRIVE_FILE_OK),
-      load_start_time(base::Time::Now()),
-      callback(callback) {
-}
+  // Changestamps are positive numbers in increasing order. The difference
+  // between two changestamps is proportional equal to number of items in
+  // delta feed between them - bigger the difference, more likely bigger
+  // number of items in delta feeds.
+  int64 start_changestamp;
+  std::string search_query;
+  bool shared_with_me;
+  std::string directory_resource_id;
+  GURL feed_to_load;
+  bool load_subsequent_feeds;
+  const LoadFeedListCallback feed_load_callback;
+  ScopedVector<google_apis::ResourceList> feed_list;
+  scoped_ptr<GetResourceListUiState> ui_state;
+};
 
-LoadRootFeedParams::~LoadRootFeedParams() {
-}
+// Defines set of parameters sent to callback OnProtoLoaded().
+struct DriveFeedLoader::LoadRootFeedParams {
+  explicit LoadRootFeedParams(const FileOperationCallback& callback)
+      : load_start_time(base::Time::Now()),
+        callback(callback) {}
 
-// Defines set of parameters sent to callback OnNotifyDocumentFeedFetched().
+  std::string proto;
+  base::Time last_modified;
+  // Time when filesystem began to be loaded from disk.
+  base::Time load_start_time;
+  const FileOperationCallback callback;
+};
+
+// Defines parameters sent to UpdateMetadataFromFeedAfterLoadFromServer().
+//
+// In the case of loading the root feed we use |root_feed_changestamp| as its
+// initial changestamp value since it does not come with that info.
+//
+// On initial feed load for Drive API, remember root ID for
+// DriveResourceData initialization later in UpdateFromFeed().
+struct DriveFeedLoader::UpdateMetadataParams {
+  UpdateMetadataParams(bool is_delta_feed,
+                       int64 feed_changestamp,
+                       const std::string& root_resource_id,
+                       const FileOperationCallback& callback)
+      : is_delta_feed(is_delta_feed),
+        feed_changestamp(feed_changestamp),
+        root_resource_id(root_resource_id),
+        callback(callback) {}
+
+  const bool is_delta_feed;
+  const int64 feed_changestamp;
+  const std::string root_resource_id;
+  const FileOperationCallback callback;
+};
+
+// Defines set of parameters sent to callback OnNotifyResourceListFetched().
 // This is a trick to update the number of fetched documents frequently on
 // UI. Due to performance reason, we need to fetch a number of files at
 // a time. However, it'll take long time, and a user has no way to know
 // the current update state. In order to make users comfortable,
 // we increment the number of fetched documents with more frequent but smaller
 // steps than actual fetching.
-struct GetDocumentsUiState {
-  explicit GetDocumentsUiState(base::TimeTicks start_time)
+struct DriveFeedLoader::GetResourceListUiState {
+  explicit GetResourceListUiState(base::TimeTicks start_time)
       : num_fetched_documents(0),
         num_showing_documents(0),
         start_time(start_time),
-        weak_ptr_factory(this) {
+        ALLOW_THIS_IN_INITIALIZER_LIST(weak_ptr_factory(this)) {
   }
 
   // The number of fetched documents.
@@ -208,17 +224,17 @@ struct GetDocumentsUiState {
   // Time elapsed since the feed fetching was started.
   base::TimeDelta feed_fetching_elapsed_time;
 
-  base::WeakPtrFactory<GetDocumentsUiState> weak_ptr_factory;
+  base::WeakPtrFactory<GetResourceListUiState> weak_ptr_factory;
 };
 
 DriveFeedLoader::DriveFeedLoader(
     DriveResourceMetadata* resource_metadata,
-    google_apis::DriveServiceInterface* drive_service,
-    DriveWebAppsRegistryInterface* webapps_registry,
+    DriveScheduler* scheduler,
+    DriveWebAppsRegistry* webapps_registry,
     DriveCache* cache,
     scoped_refptr<base::SequencedTaskRunner> blocking_task_runner)
     : resource_metadata_(resource_metadata),
-      drive_service_(drive_service),
+      scheduler_(scheduler),
       webapps_registry_(webapps_registry),
       cache_(cache),
       blocking_task_runner_(blocking_task_runner),
@@ -245,35 +261,26 @@ void DriveFeedLoader::ReloadFromServerIfNeeded(
   DCHECK(!callback.is_null());
   DVLOG(1) << "ReloadFromServerIfNeeded local_changestamp="
            << resource_metadata_->largest_changestamp()
-           << ", origin=" << resource_metadata_->origin();
+           << ", loaded=" << resource_metadata_->loaded();
 
   // Sets the refreshing flag, so that the caller does not send refresh requests
-  // in parallel (see DriveFileSystem::CheckForUpdates).
-  //
-  // Corresponding "refresh_ = false" is reached as follows.
-  // - Control flows to OnGetAboutResource / OnGetAccountMetadata, in which,
-  //   - if feed is up to date, "refresh_ = false" and return.
-  //   - otherwise always call LoadFromServer() with callback function
-  //     OnFeedFromServerLoaded. There we do "refresh_ = false".
+  // in parallel (see DriveFileSystem::CheckForUpdates). Corresponding
+  // "refresh_ = false" is in OnGetAccountMetadata when the cached feed is up to
+  // date, or in OnFeedFromServerLoaded called back from LoadFromServer().
   refreshing_ = true;
+
+  if (google_apis::util::IsDriveV2ApiEnabled()) {
+    // Drive v2 needs a separate application list fetch operation.
+    // TODO(haruki): Application list rarely changes and is not necessarily
+    // refreshed as often as files.
+    scheduler_->GetApplicationInfo(
+        base::Bind(&DriveFeedLoader::OnGetApplicationList,
+                   weak_ptr_factory_.GetWeakPtr()));
+  }
 
   // First fetch the latest changestamp to see if there were any new changes
   // there at all.
-  if (google_apis::util::IsDriveV2ApiEnabled()) {
-    drive_service_->GetAccountMetadata(
-        base::Bind(&DriveFeedLoader::OnGetAboutResource,
-                   weak_ptr_factory_.GetWeakPtr(),
-                   callback));
-    // Drive v2 needs a separate application list fetch operation.
-    // TODO(kochi): Application list rarely changes and is not necessarily
-    // refreshed as often as files.
-    drive_service_->GetApplicationInfo(
-        base::Bind(&DriveFeedLoader::OnGetApplicationList,
-                   weak_ptr_factory_.GetWeakPtr()));
-    return;
-  }
-
-  drive_service_->GetAccountMetadata(
+  scheduler_->GetAccountMetadata(
       base::Bind(&DriveFeedLoader::OnGetAccountMetadata,
                  weak_ptr_factory_.GetWeakPtr(),
                  callback));
@@ -282,55 +289,28 @@ void DriveFeedLoader::ReloadFromServerIfNeeded(
 void DriveFeedLoader::OnGetAccountMetadata(
     const FileOperationCallback& callback,
     google_apis::GDataErrorCode status,
-    scoped_ptr<base::Value> feed_data) {
+    scoped_ptr<google_apis::AccountMetadataFeed> account_metadata) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!callback.is_null());
   DCHECK(refreshing_);
 
   int64 local_changestamp = resource_metadata_->largest_changestamp();
+  int64 remote_changestamp = 0;
+  std::string root_id;
 
-  scoped_ptr<LoadFeedParams> params(new LoadFeedParams(
-      base::Bind(&DriveFeedLoader::OnFeedFromServerLoaded,
-                 weak_ptr_factory_.GetWeakPtr())));
-  params->start_changestamp = local_changestamp > 0 ? local_changestamp + 1 : 0;
-  params->load_finished_callback = callback;
-
-  DriveFileError error = util::GDataToDriveFileError(status);
-  if (error != DRIVE_FILE_OK) {
-    // Get changes starting from the next changestamp from what we have locally.
-    LoadFromServer(params.Pass());
-    return;
+  // When account metadata successfully fetched, parse the latest changestamp.
+  if (util::GDataToDriveFileError(status) == DRIVE_FILE_OK) {
+    DCHECK(account_metadata);
+    webapps_registry_->UpdateFromFeed(*account_metadata);
+    remote_changestamp = account_metadata->largest_changestamp();
   }
 
-  scoped_ptr<google_apis::AccountMetadataFeed> account_metadata;
-  if (feed_data.get()) {
-    account_metadata = google_apis::AccountMetadataFeed::CreateFrom(*feed_data);
-#ifndef NDEBUG
-    // Save account metadata feed for analysis.
-    const FilePath path =
-        cache_->GetCacheDirectoryPath(DriveCache::CACHE_TYPE_META).Append(
-            kAccountMetadataFile);
-    google_apis::util::PostBlockingPoolSequencedTask(
-        FROM_HERE,
-        blocking_task_runner_,
-        base::Bind(&SaveFeedOnBlockingPoolForDebugging,
-                   path, base::Passed(&feed_data)));
-#endif
-  }
-
-  if (!account_metadata.get()) {
-    LoadFromServer(params.Pass());
-    return;
-  }
-
-  webapps_registry_->UpdateFromFeed(*account_metadata.get());
-
-  if (local_changestamp >= account_metadata->largest_changestamp()) {
-    if (local_changestamp > account_metadata->largest_changestamp()) {
+  if (remote_changestamp > 0 && local_changestamp >= remote_changestamp) {
+    if (local_changestamp > remote_changestamp) {
       LOG(WARNING) << "Cached client feed is fresher than server, client = "
                    << local_changestamp
                    << ", server = "
-                   << account_metadata->largest_changestamp();
+                   << remote_changestamp;
     }
 
     // No changes detected, tell the client that the loading was successful.
@@ -340,62 +320,16 @@ void DriveFeedLoader::OnGetAccountMetadata(
   }
 
   // Load changes from the server.
-  params->root_feed_changestamp = account_metadata->largest_changestamp();
-  LoadFromServer(params.Pass());
-}
-
-void DriveFeedLoader::OnGetAboutResource(
-    const FileOperationCallback& callback,
-    google_apis::GDataErrorCode status,
-    scoped_ptr<base::Value> feed_data) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  DCHECK(!callback.is_null());
-  DCHECK(refreshing_);
-
-  int64 local_changestamp = resource_metadata_->largest_changestamp();
-
-  scoped_ptr<LoadFeedParams> params(new LoadFeedParams(
-      base::Bind(&DriveFeedLoader::OnFeedFromServerLoaded,
-                 weak_ptr_factory_.GetWeakPtr())));
-  params->start_changestamp = local_changestamp > 0 ? local_changestamp + 1 : 0;
-  params->load_finished_callback = callback;
-
-  DriveFileError error = util::GDataToDriveFileError(status);
-  if (error != DRIVE_FILE_OK) {
-    // Get changes starting from the next changestamp from what we have locally.
-    LoadFromServer(params.Pass());
-    return;
-  }
-
-  scoped_ptr<google_apis::AboutResource> about_resource;
-  if (feed_data.get())
-    about_resource = google_apis::AboutResource::CreateFrom(*feed_data);
-
-  if (!about_resource.get()) {
-    LoadFromServer(params.Pass());
-    return;
-  }
-
-  int64 largest_changestamp = about_resource->largest_change_id();
-  resource_metadata_->InitializeRootEntry(about_resource->root_folder_id());
-
-  if (local_changestamp >= largest_changestamp) {
-    if (local_changestamp > largest_changestamp) {
-      LOG(WARNING) << "Cached client feed is fresher than server, client = "
-                   << local_changestamp
-                   << ", server = "
-                   << largest_changestamp;
-    }
-
-    // No changes detected, tell the client that the loading was successful.
-    refreshing_ = false;
-    callback.Run(DRIVE_FILE_OK);
-    return;
-  }
-
-  // Load changes from the server.
-  params->root_feed_changestamp = largest_changestamp;
-  LoadFromServer(params.Pass());
+  int64 start_changestamp = local_changestamp > 0 ? local_changestamp + 1 : 0;
+  scoped_ptr<LoadFeedParams> load_params(new LoadFeedParams(
+      base::Bind(&DriveFeedLoader::UpdateMetadataFromFeedAfterLoadFromServer,
+                 weak_ptr_factory_.GetWeakPtr(),
+                 UpdateMetadataParams(start_changestamp != 0,  // is_delta_feed
+                                      remote_changestamp,
+                                      root_id,
+                                      callback))));
+  load_params->start_changestamp = start_changestamp;
+  LoadFromServer(load_params.Pass());
 }
 
 void DriveFeedLoader::OnGetApplicationList(google_apis::GDataErrorCode status,
@@ -421,32 +355,21 @@ void DriveFeedLoader::LoadFromServer(scoped_ptr<LoadFeedParams> params) {
 
   // base::Passed() may get evaluated first, so get a pointer to params.
   LoadFeedParams* params_ptr = params.get();
-  if (google_apis::util::IsDriveV2ApiEnabled()) {
-    drive_service_->GetDocuments(
-        params_ptr->feed_to_load,
-        params_ptr->start_changestamp,
-        std::string(),  // No search query.
-        std::string(),  // No directory resource ID.
-        base::Bind(&DriveFeedLoader::OnGetChangelist,
-                   weak_ptr_factory_.GetWeakPtr(),
-                   base::Passed(&params),
-                   start_time));
-  } else {
-    drive_service_->GetDocuments(
-        params_ptr->feed_to_load,
-        params_ptr->start_changestamp,
-        params_ptr->search_query,
-        params_ptr->directory_resource_id,
-        base::Bind(&DriveFeedLoader::OnGetDocuments,
-                   weak_ptr_factory_.GetWeakPtr(),
-                   base::Passed(&params),
-                   start_time));
-  }
+  scheduler_->GetResourceList(
+      params_ptr->feed_to_load,
+      params_ptr->start_changestamp,
+      params_ptr->search_query,
+      params_ptr->shared_with_me,
+      params_ptr->directory_resource_id,
+      base::Bind(&DriveFeedLoader::OnGetResourceList,
+                 weak_ptr_factory_.GetWeakPtr(),
+                 base::Passed(&params),
+                 start_time));
 }
 
 void DriveFeedLoader::LoadDirectoryFromServer(
     const std::string& directory_resource_id,
-    const LoadDocumentFeedCallback& feed_load_callback) {
+    const LoadFeedListCallback& feed_load_callback) {
   DCHECK(!feed_load_callback.is_null());
 
   scoped_ptr<LoadFeedParams> params(new LoadFeedParams(feed_load_callback));
@@ -456,50 +379,47 @@ void DriveFeedLoader::LoadDirectoryFromServer(
 
 void DriveFeedLoader::SearchFromServer(
     const std::string& search_query,
+    bool shared_with_me,
     const GURL& next_feed,
-    const LoadDocumentFeedCallback& feed_load_callback) {
+    const LoadFeedListCallback& feed_load_callback) {
   DCHECK(!feed_load_callback.is_null());
 
   scoped_ptr<LoadFeedParams> params(new LoadFeedParams(feed_load_callback));
   params->search_query = search_query;
+  params->shared_with_me = shared_with_me;
   params->feed_to_load = next_feed;
   params->load_subsequent_feeds = false;
   LoadFromServer(params.Pass());
 }
 
-void DriveFeedLoader::OnFeedFromServerLoaded(scoped_ptr<LoadFeedParams> params,
-                                             DriveFileError error) {
+void DriveFeedLoader::UpdateMetadataFromFeedAfterLoadFromServer(
+    const UpdateMetadataParams& params,
+    const ScopedVector<google_apis::ResourceList>& feed_list,
+    DriveFileError error) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  DCHECK(!params->load_finished_callback.is_null());
+  DCHECK(!params.callback.is_null());
   DCHECK(refreshing_);
 
-  if (error == DRIVE_FILE_OK) {
-    UpdateFromFeed(params->feed_list,
-                   params->start_changestamp,
-                   params->root_feed_changestamp);
-  }
-  refreshing_ = false;
-
   if (error != DRIVE_FILE_OK) {
-    params->load_finished_callback.Run(error);
+    refreshing_ = false;
+    params.callback.Run(error);
     return;
   }
 
-  // Save file system metadata to disk.
-  SaveFileSystem();
-
-  // Tell the client that the loading was successful.
-  params->load_finished_callback.Run(DRIVE_FILE_OK);
-
-  FOR_EACH_OBSERVER(DriveFeedLoaderObserver,
-                    observers_,
-                    OnFeedFromServerLoaded());
+  UpdateFromFeed(feed_list,
+                 params.is_delta_feed,
+                 params.feed_changestamp,
+                 params.root_resource_id,
+                 base::Bind(&DriveFeedLoader::OnUpdateFromFeed,
+                            weak_ptr_factory_.GetWeakPtr(),
+                            params.callback));
 }
 
-void DriveFeedLoader::OnGetDocuments(scoped_ptr<LoadFeedParams> params,
-                                     base::TimeTicks start_time,
-                                     google_apis::GDataErrorCode status,
-                                     scoped_ptr<base::Value> data) {
+void DriveFeedLoader::OnGetResourceList(
+    scoped_ptr<LoadFeedParams> params,
+    base::TimeTicks start_time,
+    google_apis::GDataErrorCode status,
+    scoped_ptr<google_apis::ResourceList> resource_list) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   if (params->feed_list.empty()) {
@@ -508,50 +428,19 @@ void DriveFeedLoader::OnGetDocuments(scoped_ptr<LoadFeedParams> params,
   }
 
   DriveFileError error = util::GDataToDriveFileError(status);
-  if (error == DRIVE_FILE_OK &&
-      (!data.get() || data->GetType() != Value::TYPE_DICTIONARY)) {
-    error = DRIVE_FILE_ERROR_FAILED;
-  }
-
   if (error != DRIVE_FILE_OK) {
-    RunFeedLoadCallback(params.Pass(), error);
+    params->RunFeedLoadCallback(error);
     return;
   }
-
-  scoped_ptr<google_apis::DocumentFeed>* current_feed =
-      new scoped_ptr<google_apis::DocumentFeed>;
-  google_apis::util::PostBlockingPoolSequencedTaskAndReply(
-      FROM_HERE,
-      blocking_task_runner_,
-      base::Bind(&ParseFeedOnBlockingPool,
-                 base::Passed(&data),
-                 current_feed),
-      base::Bind(&DriveFeedLoader::OnParseFeed,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 base::Passed(&params),
-                 start_time,
-                 base::Owned(current_feed)));
-}
-
-void DriveFeedLoader::OnParseFeed(
-    scoped_ptr<LoadFeedParams> params,
-    base::TimeTicks start_time,
-    scoped_ptr<google_apis::DocumentFeed>* current_feed) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  DCHECK(current_feed);
-
-  if (!current_feed->get()) {
-    RunFeedLoadCallback(params.Pass(), DRIVE_FILE_ERROR_FAILED);
-    return;
-  }
+  DCHECK(resource_list);
 
   GURL next_feed_url;
   const bool has_next_feed_url =
       params->load_subsequent_feeds &&
-      (*current_feed)->GetNextFeedURL(&next_feed_url);
+      resource_list->GetNextFeedURL(&next_feed_url);
 
   // Add the current feed to the list of collected feeds for this directory.
-  params->feed_list.push_back(current_feed->release());
+  params->feed_list.push_back(resource_list.release());
 
   // Compute and notify the number of entries fetched so far.
   int num_accumulated_entries = 0;
@@ -561,9 +450,9 @@ void DriveFeedLoader::OnParseFeed(
   // Check if we need to collect more data to complete the directory list.
   if (has_next_feed_url && !next_feed_url.is_empty()) {
     // Post an UI update event to make the UI smoother.
-    GetDocumentsUiState* ui_state = params->ui_state.get();
+    GetResourceListUiState* ui_state = params->ui_state.get();
     if (ui_state == NULL) {
-      ui_state = new GetDocumentsUiState(base::TimeTicks::Now());
+      ui_state = new GetResourceListUiState(base::TimeTicks::Now());
       params->ui_state.reset(ui_state);
     }
     DCHECK(ui_state);
@@ -573,7 +462,7 @@ void DriveFeedLoader::OnParseFeed(
       // Currently the UI update is stopped. Start UI periodic callback.
       base::MessageLoopProxy::current()->PostTask(
           FROM_HERE,
-          base::Bind(&DriveFeedLoader::OnNotifyDocumentFeedFetched,
+          base::Bind(&DriveFeedLoader::OnNotifyResourceListFetched,
                      weak_ptr_factory_.GetWeakPtr(),
                      ui_state->weak_ptr_factory.GetWeakPtr()));
     }
@@ -584,12 +473,13 @@ void DriveFeedLoader::OnParseFeed(
     // pointer so we can use it bellow.
     LoadFeedParams* params_ptr = params.get();
     // Kick off the remaining part of the feeds.
-    drive_service_->GetDocuments(
+    scheduler_->GetResourceList(
         next_feed_url,
         params_ptr->start_changestamp,
         params_ptr->search_query,
+        params_ptr->shared_with_me,
         params_ptr->directory_resource_id,
-        base::Bind(&DriveFeedLoader::OnGetDocuments,
+        base::Bind(&DriveFeedLoader::OnGetResourceList,
                    weak_ptr_factory_.GetWeakPtr(),
                    base::Passed(&params),
                    start_time));
@@ -598,120 +488,17 @@ void DriveFeedLoader::OnParseFeed(
 
   // Notify the observers that all document feeds are fetched.
   FOR_EACH_OBSERVER(DriveFeedLoaderObserver, observers_,
-                    OnDocumentFeedFetched(num_accumulated_entries));
+                    OnResourceListFetched(num_accumulated_entries));
 
   UMA_HISTOGRAM_TIMES("Drive.EntireFeedLoadTime",
                       base::TimeTicks::Now() - start_time);
 
   // Run the callback so the client can process the retrieved feeds.
-  RunFeedLoadCallback(params.Pass(), DRIVE_FILE_OK);
+  params->RunFeedLoadCallback(DRIVE_FILE_OK);
 }
 
-void DriveFeedLoader::OnGetChangelist(scoped_ptr<LoadFeedParams> params,
-                                      base::TimeTicks start_time,
-                                      google_apis::GDataErrorCode status,
-                                      scoped_ptr<base::Value> data) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-
-  if (params->feed_list.empty()) {
-    UMA_HISTOGRAM_TIMES("Drive.InitialFeedLoadTime",
-                        base::TimeTicks::Now() - start_time);
-  }
-
-  DriveFileError error = util::GDataToDriveFileError(status);
-  if (error == DRIVE_FILE_OK &&
-      (!data.get() || data->GetType() != Value::TYPE_DICTIONARY)) {
-    error = DRIVE_FILE_ERROR_FAILED;
-  }
-
-  if (error != DRIVE_FILE_OK) {
-    RunFeedLoadCallback(params.Pass(), error);
-    return;
-  }
-
-  GURL next_feed_url;
-  scoped_ptr<google_apis::ChangeList> current_feed(
-      google_apis::ChangeList::CreateFrom(*data));
-  if (!current_feed.get()) {
-    RunFeedLoadCallback(params.Pass(), DRIVE_FILE_ERROR_FAILED);
-    return;
-  }
-  const bool has_next_feed = !current_feed->next_page_token().empty();
-
-#ifndef NDEBUG
-  // Save initial root feed for analysis.
-  std::string file_name =
-      base::StringPrintf("DEBUG_changelist_%" PRId64 ".json",
-                         params->start_changestamp);
-  google_apis::util::PostBlockingPoolSequencedTask(
-      FROM_HERE,
-      blocking_task_runner_,
-      base::Bind(&SaveFeedOnBlockingPoolForDebugging,
-                 cache_->GetCacheDirectoryPath(
-                     DriveCache::CACHE_TYPE_META).Append(file_name),
-                 base::Passed(&data)));
-#endif
-
-  // Add the current feed to the list of collected feeds for this directory.
-  scoped_ptr<google_apis::DocumentFeed> feed =
-      google_apis::DocumentFeed::CreateFromChangeList(*current_feed);
-  params->feed_list.push_back(feed.release());
-
-  // Compute and notify the number of entries fetched so far.
-  int num_accumulated_entries = 0;
-  for (size_t i = 0; i < params->feed_list.size(); ++i)
-    num_accumulated_entries += params->feed_list[i]->entries().size();
-
-  // Check if we need to collect more data to complete the directory list.
-  if (has_next_feed) {
-    // Post an UI update event to make the UI smoother.
-    GetDocumentsUiState* ui_state = params->ui_state.get();
-    if (ui_state == NULL) {
-      ui_state = new GetDocumentsUiState(base::TimeTicks::Now());
-      params->ui_state.reset(ui_state);
-    }
-    DCHECK(ui_state);
-
-    if ((ui_state->num_fetched_documents - ui_state->num_showing_documents)
-        < kFetchUiUpdateStep) {
-      // Currently the UI update is stopped. Start UI periodic callback.
-      base::MessageLoopProxy::current()->PostTask(
-          FROM_HERE,
-          base::Bind(&DriveFeedLoader::OnNotifyDocumentFeedFetched,
-                     weak_ptr_factory_.GetWeakPtr(),
-                     ui_state->weak_ptr_factory.GetWeakPtr()));
-    }
-    ui_state->num_fetched_documents = num_accumulated_entries;
-    ui_state->feed_fetching_elapsed_time = base::TimeTicks::Now() - start_time;
-
-    // Kick off the remaining part of the feeds.
-    // Extract the pointer so we can use it bellow.
-    LoadFeedParams* params_ptr = params.get();
-    drive_service_->GetDocuments(
-        current_feed->next_link(),
-        params_ptr->start_changestamp,
-        std::string(),  // No search query.
-        std::string(),  // No directory resource ID.
-        base::Bind(&DriveFeedLoader::OnGetChangelist,
-                   weak_ptr_factory_.GetWeakPtr(),
-                   base::Passed(&params),
-                   start_time));
-    return;
-  }
-
-  // Notify the observers that all document feeds are fetched.
-  FOR_EACH_OBSERVER(DriveFeedLoaderObserver, observers_,
-                    OnDocumentFeedFetched(num_accumulated_entries));
-
-  UMA_HISTOGRAM_TIMES("Drive.EntireFeedLoadTime",
-                      base::TimeTicks::Now() - start_time);
-
-  // Run the callback so the client can process the retrieved feeds.
-  RunFeedLoadCallback(params.Pass(), error);
-}
-
-void DriveFeedLoader::OnNotifyDocumentFeedFetched(
-    base::WeakPtr<GetDocumentsUiState> ui_state) {
+void DriveFeedLoader::OnNotifyResourceListFetched(
+    base::WeakPtr<GetResourceListUiState> ui_state) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   if (!ui_state) {
@@ -727,7 +514,7 @@ void DriveFeedLoader::OnNotifyDocumentFeedFetched(
       ui_state->num_fetched_documents) {
     ui_state->num_showing_documents += kFetchUiUpdateStep;
     FOR_EACH_OBSERVER(DriveFeedLoaderObserver, observers_,
-                      OnDocumentFeedFetched(ui_state->num_showing_documents));
+                      OnResourceListFetched(ui_state->num_showing_documents));
 
     int num_remaining_ui_updates =
         (ui_state->num_fetched_documents - ui_state->num_showing_documents)
@@ -746,7 +533,7 @@ void DriveFeedLoader::OnNotifyDocumentFeedFetched(
 
       base::MessageLoopProxy::current()->PostDelayedTask(
           FROM_HERE,
-          base::Bind(&DriveFeedLoader::OnNotifyDocumentFeedFetched,
+          base::Bind(&DriveFeedLoader::OnNotifyResourceListFetched,
                      weak_ptr_factory_.GetWeakPtr(),
                      ui_state->weak_ptr_factory.GetWeakPtr()),
           interval);
@@ -757,13 +544,13 @@ void DriveFeedLoader::OnNotifyDocumentFeedFetched(
 void DriveFeedLoader::LoadFromCache(const FileOperationCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!callback.is_null());
-  DCHECK(resource_metadata_->origin() == UNINITIALIZED);
+  DCHECK(!resource_metadata_->loaded());
 
   // Sets the refreshing flag, so that the caller does not send refresh requests
   // in parallel (see DriveFileSystem::LoadFeedIfNeeded).
   //
   // Corresponding unset is in ContinueWithInitializedResourceMetadata, where
-  // all the control pathes reach.
+  // all the control paths reach.
   refreshing_ = true;
 
   LoadRootFeedParams* params = new LoadRootFeedParams(callback);
@@ -777,32 +564,36 @@ void DriveFeedLoader::LoadFromCache(const FileOperationCallback& callback) {
             base::Owned(params)));
   } else {
     path = path.Append(kFilesystemProtoFile);
-    BrowserThread::GetBlockingPool()->PostTaskAndReply(FROM_HERE,
-        base::Bind(&LoadProtoOnBlockingPool, path, params),
+    base::PostTaskAndReplyWithResult(
+        BrowserThread::GetBlockingPool(),
+        FROM_HERE,
+        base::Bind(&LoadProtoOnBlockingPool,
+                   path, &params->last_modified, &params->proto),
         base::Bind(&DriveFeedLoader::OnProtoLoaded,
                    weak_ptr_factory_.GetWeakPtr(),
                    base::Owned(params)));
   }
 }
 
-void DriveFeedLoader::OnProtoLoaded(LoadRootFeedParams* params) {
+void DriveFeedLoader::OnProtoLoaded(LoadRootFeedParams* params,
+                                    DriveFileError error) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(refreshing_);
 
   // Update directory structure only if everything is OK and we haven't yet
   // received the feed from the server yet.
-  if (params->load_error == DRIVE_FILE_OK) {
+  if (error == DRIVE_FILE_OK) {
     DVLOG(1) << "ParseFromString";
     if (resource_metadata_->ParseFromString(params->proto)) {
       resource_metadata_->set_last_serialized(params->last_modified);
       resource_metadata_->set_serialized_size(params->proto.size());
     } else {
-      params->load_error = DRIVE_FILE_ERROR_FAILED;
+      error = DRIVE_FILE_ERROR_FAILED;
       LOG(WARNING) << "Parse of cached proto file failed";
     }
   }
 
-  ContinueWithInitializedResourceMetadata(params, params->load_error);
+  ContinueWithInitializedResourceMetadata(params, error);
 }
 
 void DriveFeedLoader::ContinueWithInitializedResourceMetadata(
@@ -837,40 +628,86 @@ void DriveFeedLoader::SaveFileSystem() {
     resource_metadata_->SerializeToString(serialized_proto.get());
     resource_metadata_->set_last_serialized(base::Time::Now());
     resource_metadata_->set_serialized_size(serialized_proto->size());
-    google_apis::util::PostBlockingPoolSequencedTask(
+    blocking_task_runner_->PostTask(
         FROM_HERE,
-        blocking_task_runner_,
         base::Bind(&SaveProtoOnBlockingPool, path,
                    base::Passed(serialized_proto.Pass())));
   }
 }
 
 void DriveFeedLoader::UpdateFromFeed(
-    const ScopedVector<google_apis::DocumentFeed>& feed_list,
-    int64 start_changestamp,
-    int64 root_feed_changestamp) {
+    const ScopedVector<google_apis::ResourceList>& feed_list,
+    bool is_delta_feed,
+    int64 root_feed_changestamp,
+    const std::string& root_resource_id,
+    const base::Closure& update_finished_callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(!update_finished_callback.is_null());
   DVLOG(1) << "Updating directory with a feed";
 
-  std::set<FilePath> changed_dirs;
+  if (!is_delta_feed) {
+    // This is a full fetch and on full fetch the root has to be initialized
+    // before children are added by DriveFeedProcessor.
+    if (google_apis::util::IsDriveV2ApiEnabled()) {
+      resource_metadata_->InitializeRootEntry(root_resource_id);
+    } else {
+      // Use fixed root resource ID for WAPI.
+      resource_metadata_->InitializeRootEntry(kWAPIRootDirectoryResourceId);
+    }
+  }
 
-  DriveFeedProcessor feed_processor(resource_metadata_);
-  feed_processor.ApplyFeeds(
-      feed_list,
-      start_changestamp,
-      root_feed_changestamp,
-      &changed_dirs);
-
+  feed_processor_.reset(new DriveFeedProcessor(resource_metadata_));
   // Don't send directory content change notification while performing
   // the initial content retrieval.
-  const bool should_notify_directory_changed = (start_changestamp != 0);
-  if (should_notify_directory_changed) {
-    for (std::set<FilePath>::iterator dir_iter = changed_dirs.begin();
-        dir_iter != changed_dirs.end(); ++dir_iter) {
+  const bool should_notify_changed_directories = is_delta_feed;
+
+  feed_processor_->ApplyFeeds(
+      feed_list,
+      is_delta_feed,
+      root_feed_changestamp,
+      base::Bind(&DriveFeedLoader::NotifyDirectoryChanged,
+                 weak_ptr_factory_.GetWeakPtr(),
+                 should_notify_changed_directories,
+                 update_finished_callback));
+}
+
+void DriveFeedLoader::NotifyDirectoryChanged(
+    bool should_notify_changed_directories,
+    const base::Closure& update_finished_callback) {
+  DCHECK(feed_processor_.get());
+  DCHECK(!update_finished_callback.is_null());
+
+  if (should_notify_changed_directories) {
+    for (std::set<FilePath>::iterator dir_iter =
+            feed_processor_->changed_dirs().begin();
+        dir_iter != feed_processor_->changed_dirs().end();
+        ++dir_iter) {
       FOR_EACH_OBSERVER(DriveFeedLoaderObserver, observers_,
                         OnDirectoryChanged(*dir_iter));
     }
   }
+
+  update_finished_callback.Run();
+
+  // Cannot delete feed_processor_ yet because we are in on_complete_callback_,
+  // which is owned by feed_processor_.
+}
+
+void DriveFeedLoader::OnUpdateFromFeed(
+    const FileOperationCallback& load_finished_callback) {
+  DCHECK(!load_finished_callback.is_null());
+
+  refreshing_ = false;
+
+  // Save file system metadata to disk.
+  SaveFileSystem();
+
+  // Run the callback now that the filesystem is ready.
+  load_finished_callback.Run(DRIVE_FILE_OK);
+
+  FOR_EACH_OBSERVER(DriveFeedLoaderObserver,
+                    observers_,
+                    OnFeedFromServerLoaded());
 }
 
 }  // namespace drive

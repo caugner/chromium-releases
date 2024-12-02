@@ -187,7 +187,7 @@ void ShortcutsProviderTest::SetUp() {
 void ShortcutsProviderTest::TearDown() {
   // Run all pending tasks or else some threads hold on to the message loop
   // and prevent it from being deleted.
-  message_loop_.RunAllPending();
+  message_loop_.RunUntilIdle();
   provider_ = NULL;
 }
 
@@ -225,8 +225,8 @@ void ShortcutsProviderTest::RunTest(const string16 text,
                                    std::string expected_top_result) {
   std::sort(expected_urls.begin(), expected_urls.end());
 
-  MessageLoop::current()->RunAllPending();
-  AutocompleteInput input(text, string16(), false, false, true,
+  MessageLoop::current()->RunUntilIdle();
+  AutocompleteInput input(text, string16::npos, string16(), false, false, true,
                           AutocompleteInput::ALL_MATCHES);
   provider_->Start(input, false);
   EXPECT_TRUE(provider_->done());

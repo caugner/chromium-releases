@@ -21,7 +21,7 @@
 
 class GURL;
 class Profile;
-class NativeShellWindow;
+class NativeAppWindow;
 
 namespace content {
 class WebContents;
@@ -44,22 +44,27 @@ class ShellWindow : public content::NotificationObserver,
                     public ImageLoadingTracker::Observer,
                     public extensions::ExtensionKeybindingRegistry::Delegate {
  public:
-  struct CreateParams {
-    enum Frame {
-      FRAME_CHROME, // Chrome-style window frame.
-      FRAME_NONE, // Frameless window.
-    };
+  enum WindowType {
+    WINDOW_TYPE_DEFAULT,  // Default shell window
+    WINDOW_TYPE_PANEL,  // OS controlled panel window (Ash only)
+  };
 
+  enum Frame {
+    FRAME_CHROME,  // Chrome-style window frame.
+    FRAME_NONE,  // Frameless window.
+  };
+
+  struct CreateParams {
     CreateParams();
     ~CreateParams();
 
+    WindowType window_type;
     Frame frame;
-    // Specify the initial bounds of the window. If empty, the window will be a
-    // default size.
+
+    // Specify the initial content bounds of the window (excluding any window
+    // decorations). INT_MIN designates 'unspecified' for any coordinate, and
+    // should be replaced with a default value.
     gfx::Rect bounds;
-    // Specify if bounds should be restored from a previous time.
-    bool restore_position;
-    bool restore_size;
 
     gfx::Size minimum_size;
     gfx::Size maximum_size;
@@ -87,15 +92,15 @@ class ShellWindow : public content::NotificationObserver,
   const SessionID& session_id() const { return session_id_; }
   const extensions::Extension* extension() const { return extension_; }
   content::WebContents* web_contents() const { return web_contents_.get(); }
+  WindowType window_type() const { return window_type_; }
   Profile* profile() const { return profile_; }
   const gfx::Image& app_icon() const { return app_icon_; }
+  const GURL& app_icon_url() { return app_icon_url_; }
 
-  BaseWindow* GetBaseWindow();
-  gfx::NativeWindow GetNativeWindow() {
-    return GetBaseWindow()->GetNativeWindow();
-  }
+  NativeAppWindow* GetBaseWindow();
+  gfx::NativeWindow GetNativeWindow();
 
-  // NativeShellWindows should call this to determine what the window's title
+  // NativeAppWindows should call this to determine what the window's title
   // is on startup and from within UpdateWindowTitle().
   virtual string16 GetTitle() const;
 
@@ -103,8 +108,12 @@ class ShellWindow : public content::NotificationObserver,
   // invoke this method instead of using "delete this".
   void OnNativeClose();
 
-  // Save the window position in the prefs.
-  virtual void SaveWindowPosition();
+  // Should be called by native implementations when the window size, position,
+  // or minimized/maximized state has changed.
+  void OnNativeWindowChanged();
+
+  // Specifies a url for the launcher icon.
+  void SetAppIconUrl(const GURL& icon_url);
 
  protected:
   ShellWindow(Profile* profile,
@@ -157,6 +166,9 @@ class ShellWindow : public content::NotificationObserver,
   virtual void HandleKeyboardEvent(
       content::WebContents* source,
       const content::NativeWebKeyboardEvent& event) OVERRIDE;
+  virtual void RequestToLockMouse(content::WebContents* web_contents,
+                                  bool user_gesture,
+                                  bool last_unlocked_by_target) OVERRIDE;
 
   // content::NotificationObserver implementation.
   virtual void Observe(int type,
@@ -166,6 +178,7 @@ class ShellWindow : public content::NotificationObserver,
   // ExtensionFunctionDispatcher::Delegate implementation.
   virtual extensions::WindowController* GetExtensionWindowController() const
       OVERRIDE;
+  virtual content::WebContents* GetAssociatedWebContents() const OVERRIDE;
 
   // Message handlers.
   void OnRequest(const ExtensionHostMsg_Request_Params& params);
@@ -173,6 +186,9 @@ class ShellWindow : public content::NotificationObserver,
   // Helper method to add a message to the renderer's DevTools console.
   void AddMessageToDevToolsConsole(content::ConsoleMessageLevel level,
                                    const std::string& message);
+
+  // Saves the window geometry/position.
+  void SaveWindowPosition();
 
   virtual void UpdateDraggableRegions(
     const std::vector<extensions::DraggableRegion>& regions);
@@ -189,6 +205,16 @@ class ShellWindow : public content::NotificationObserver,
   virtual extensions::ActiveTabPermissionGranter*
       GetActiveTabPermissionGranter() OVERRIDE;
 
+  // Callback from web_contents()->DownloadFavicon.
+  void DidDownloadFavicon(int id,
+                          const GURL& image_url,
+                          bool errored,
+                          int requested_size,
+                          const std::vector<SkBitmap>& bitmaps);
+
+  // Updates the app image to |image|, called from image loader callback.
+  void UpdateAppIcon(const gfx::Image& image);
+
   Profile* profile_;  // weak pointer - owned by ProfileManager.
   // weak pointer - owned by ExtensionService.
   const extensions::Extension* extension_;
@@ -199,16 +225,23 @@ class ShellWindow : public content::NotificationObserver,
 
   const SessionID session_id_;
   scoped_ptr<content::WebContents> web_contents_;
+  WindowType window_type_;
   content::NotificationRegistrar registrar_;
   ExtensionFunctionDispatcher extension_function_dispatcher_;
 
-  // Icon showed in the task bar.
+  // Icon shown in the task bar.
   gfx::Image app_icon_;
 
-  // Used for loading app_icon_.
+  // Used for loading app_icon_ from the extension.
   scoped_ptr<ImageLoadingTracker> app_icon_loader_;
 
-  scoped_ptr<NativeShellWindow> native_window_;
+  // Icon URL to be used for setting the app icon. If not empty, app_icon_ will
+  // be fetched and set using this URL.
+  GURL app_icon_url_;
+
+  scoped_ptr<NativeAppWindow> native_app_window_;
+
+  base::WeakPtrFactory<ShellWindow> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(ShellWindow);
 };

@@ -24,11 +24,11 @@
 #include <string>
 
 #include "base/command_line.h"
-#include "base/eintr_wrapper.h"
 #include "base/file_path.h"
-#include "base/global_descriptors_posix.h"
 #include "base/linux_util.h"
 #include "base/path_service.h"
+#include "base/posix/eintr_wrapper.h"
+#include "base/posix/global_descriptors.h"
 #include "base/process_util.h"
 #include "base/string_util.h"
 #include "breakpad/src/client/linux/handler/exception_handler.h"
@@ -432,16 +432,10 @@ bool FinalizeCrashDoneAndroid() {
   __android_log_write(ANDROID_LOG_WARN, kGoogleBreakpad,
                       android_build_info->package_version_code());
   __android_log_write(ANDROID_LOG_WARN, kGoogleBreakpad,
-                      CHROME_SYMBOLS_ID);
+                      CHROME_BUILD_ID);
   __android_log_write(ANDROID_LOG_WARN, kGoogleBreakpad,
                       "### ### ### ### ### ### ### ### ### ### ### ### ###");
   return false;
-}
-
-bool CrashDoneNonBrowserAndroid(const MinidumpDescriptor& minidump,
-                                void* context,
-                                bool succeeded) {
-  return FinalizeCrashDoneAndroid();
 }
 #endif
 
@@ -534,12 +528,14 @@ void EnableCrashDumping(bool unattended) {
     strncpy(g_crash_log_path, logfile_str.c_str(), crash_log_path_len);
   }
   DCHECK(!g_breakpad);
+  MinidumpDescriptor minidump_descriptor(dumps_path.value());
+  minidump_descriptor.set_size_limit(kMaxMinidumpFileSize);
 #if defined(OS_ANDROID)
   unattended = true;  // Android never uploads directly.
 #endif
   if (unattended) {
     g_breakpad = new ExceptionHandler(
-        MinidumpDescriptor(dumps_path.value()),
+        minidump_descriptor,
         NULL,
         CrashDoneNoUpload,
         NULL,
@@ -551,7 +547,7 @@ void EnableCrashDumping(bool unattended) {
 #if !defined(OS_ANDROID)
   // Attended mode
   g_breakpad = new ExceptionHandler(
-      MinidumpDescriptor(dumps_path.value()),
+      minidump_descriptor,
       NULL,
       CrashDoneUpload,
       NULL,
@@ -596,7 +592,7 @@ bool CrashDoneInProcessNoUpload(
   info.upload = false;
   info.process_start_time = g_process_start_time;
   HandleCrashDump(info);
-  return true;
+  return FinalizeCrashDoneAndroid();
 }
 
 void EnableNonBrowserCrashDumping(int minidump_fd) {
@@ -825,8 +821,7 @@ void HandleCrashDump(const BreakpadInfo& info) {
   size_t log_size;
   uint8_t* log_data;
   // Load the AddressSanitizer log into log_data.
-  LoadDataFromFile(allocator, info, info.log_filename,
-                   &logfd, &log_data, &log_size);
+  LoadDataFromFile(allocator, info.log_filename, &logfd, &log_data, &log_size);
 #endif
 
   // We need to build a MIME block for uploading to the server. Since we are
@@ -1068,15 +1063,26 @@ void HandleCrashDump(const BreakpadInfo& info) {
 
   // If GPU info is known, send it.
   if (*child_process_logging::g_gpu_vendor_id) {
+#if !defined(OS_ANDROID)
     static const char vendor_msg[] = "gpu-venid";
     static const char device_msg[] = "gpu-devid";
+#endif
+    static const char gl_vendor_msg[] = "gpu-gl-vendor";
+    static const char gl_renderer_msg[] = "gpu-gl-renderer";
     static const char driver_msg[] = "gpu-driver";
     static const char psver_msg[] = "gpu-psver";
     static const char vsver_msg[] = "gpu-vsver";
 
+#if !defined(OS_ANDROID)
     writer.AddPairString(vendor_msg, child_process_logging::g_gpu_vendor_id);
     writer.AddBoundary();
     writer.AddPairString(device_msg, child_process_logging::g_gpu_device_id);
+    writer.AddBoundary();
+#endif
+    writer.AddPairString(gl_vendor_msg, child_process_logging::g_gpu_gl_vendor);
+    writer.AddBoundary();
+    writer.AddPairString(gl_renderer_msg,
+                         child_process_logging::g_gpu_gl_renderer);
     writer.AddBoundary();
     writer.AddPairString(driver_msg, child_process_logging::g_gpu_driver_ver);
     writer.AddBoundary();

@@ -45,9 +45,9 @@ namespace ui {
 class Accelerator;
 class Compositor;
 class Layer;
+class NativeTheme;
 class OSExchangeData;
 class ThemeProvider;
-enum TouchStatus;
 }
 
 namespace views {
@@ -141,9 +141,10 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
     InitParams();
     explicit InitParams(Type type);
 
-    // If |parent_widget| is non-null, its native view is returned, otherwise
-    // |parent| is returned.
-    gfx::NativeView GetParent() const;
+
+    // Will return the first of the following that isn't NULL: the native view,
+    // |parent|, |context|.
+    gfx::NativeView GetContext() const;
 
     Type type;
     // If NULL, a default implementation will be constructed.
@@ -173,7 +174,6 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
     // Should the widget be double buffered? Default is false.
     bool double_buffer;
     gfx::NativeView parent;
-    Widget* parent_widget;
     // Specifies the initial bounds of the Widget. Default is empty, which means
     // the NativeWidget may specify a default size. If the parent is specified,
     // |bounds| is in the parent's coordinate system. If the parent is not
@@ -191,6 +191,14 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
     // Only used by NativeWidgetAura. Specifies the type of layer for the
     // aura::Window. Default is LAYER_TEXTURED.
     ui::LayerType layer_type;
+    // Only used by Aura. Provides a context window whose RootWindow is
+    // consulted during widget creation to determine where in the Window
+    // hierarchy this widget should be placed. (This is separate from |parent|;
+    // if you pass a RootWindow to |parent|, your window will be parented to
+    // |parent|. If you pass a RootWindow to |context|, we ask that RootWindow
+    // where it wants your window placed.) NULL is not allowed if you are using
+    // aura.
+    gfx::NativeView context;
   };
 
   Widget();
@@ -205,6 +213,15 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   static Widget* CreateWindowWithParentAndBounds(WidgetDelegate* delegate,
                                                  gfx::NativeWindow parent,
                                                  const gfx::Rect& bounds);
+
+  // Creates a decorated window Widget in the same desktop context as
+  // |context|.
+  static Widget* CreateWindowWithContext(WidgetDelegate* delegate,
+                                         gfx::NativeView context);
+  static Widget* CreateWindowWithContextAndBounds(WidgetDelegate* delegate,
+                                                  gfx::NativeView context,
+                                                  const gfx::Rect& bounds);
+
 
   // Enumerates all windows pertaining to us and notifies their
   // view hierarchies that the locale has changed.
@@ -331,7 +348,7 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   // the move completes. |drag_offset| is the offset from the top left corner
   // of the window to the point where the cursor is dragging, and is used to
   // offset the bounds of the window from the cursor.
-  MoveLoopResult RunMoveLoop(const gfx::Point& drag_offset);
+  MoveLoopResult RunMoveLoop(const gfx::Vector2d& drag_offset);
 
   // Stops a previously started move loop. This is not immediate.
   void EndMoveLoop();
@@ -432,6 +449,12 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   // Returns the ThemeProvider that provides theme resources for this Widget.
   virtual ui::ThemeProvider* GetThemeProvider() const;
 
+  ui::NativeTheme* GetNativeTheme() {
+    return const_cast<ui::NativeTheme*>(
+        const_cast<const Widget*>(this)->GetNativeTheme());
+  }
+  const ui::NativeTheme* GetNativeTheme() const;
+
   // Returns the FocusManager for this widget.
   // Note that all widgets in a widget hierarchy share the same focus manager.
   FocusManager* GetFocusManager();
@@ -450,7 +473,8 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   void RunShellDrag(View* view,
                     const ui::OSExchangeData& data,
                     const gfx::Point& location,
-                    int operation);
+                    int operation,
+                    ui::DragDropTypes::DragEventSource source);
 
   // Returns the view that requested the current drag operation via
   // RunShellDrag(), or NULL if there is no such view or drag operation.
@@ -539,8 +563,8 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   ui::Compositor* GetCompositor();
 
   // Invokes method of same name on the NativeWidget.
-  void CalculateOffsetToAncestorWithLayer(gfx::Point* offset,
-                                          ui::Layer** layer_parent);
+  gfx::Vector2d CalculateOffsetToAncestorWithLayer(
+      ui::Layer** layer_parent);
 
   // Invokes method of same name on the NativeWidget.
   void ReorderLayers();
@@ -643,12 +667,12 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
       const gfx::Rect& dirty_region) OVERRIDE;
   virtual void OnNativeWidgetPaint(gfx::Canvas* canvas) OVERRIDE;
   virtual int GetNonClientComponent(const gfx::Point& point) OVERRIDE;
-  virtual bool OnKeyEvent(const ui::KeyEvent& event) OVERRIDE;
-  virtual bool OnMouseEvent(const ui::MouseEvent& event) OVERRIDE;
+  virtual void OnKeyEvent(ui::KeyEvent* event) OVERRIDE;
+  virtual void OnMouseEvent(ui::MouseEvent* event) OVERRIDE;
   virtual void OnMouseCaptureLost() OVERRIDE;
-  virtual ui::TouchStatus OnTouchEvent(const ui::TouchEvent& event) OVERRIDE;
-  virtual ui::EventResult OnGestureEvent(
-      const ui::GestureEvent& event) OVERRIDE;
+  virtual void OnTouchEvent(ui::TouchEvent* event) OVERRIDE;
+  virtual void OnScrollEvent(ui::ScrollEvent* event) OVERRIDE;
+  virtual void OnGestureEvent(ui::GestureEvent* event) OVERRIDE;
   virtual bool ExecuteCommand(int command_id) OVERRIDE;
   virtual InputMethod* GetInputMethodDirect() OVERRIDE;
   virtual const std::vector<ui::Layer*>& GetRootLayers() OVERRIDE;

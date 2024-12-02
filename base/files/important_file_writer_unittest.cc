@@ -7,9 +7,9 @@
 #include "base/compiler_specific.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/scoped_temp_dir.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
-#include "base/scoped_temp_dir.h"
 #include "base/threading/thread.h"
 #include "base/time.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -105,8 +105,7 @@ TEST_F(ImportantFileWriterTest, DoScheduledWrite) {
   EXPECT_EQ("foo", GetFileContent(writer.path()));
 }
 
-// Flaky - http://crbug.com/109292
-TEST_F(ImportantFileWriterTest, DISABLED_BatchingWrites) {
+TEST_F(ImportantFileWriterTest, BatchingWrites) {
   ImportantFileWriter writer(file_,
                              MessageLoopProxy::current());
   writer.set_commit_interval(TimeDelta::FromMilliseconds(25));

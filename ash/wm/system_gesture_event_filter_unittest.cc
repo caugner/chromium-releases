@@ -6,13 +6,14 @@
 
 #include "ash/accelerators/accelerator_controller.h"
 #include "ash/ash_switches.h"
-#include "ash/display/multi_display_manager.h"
+#include "ash/display/display_manager.h"
 #include "ash/launcher/launcher.h"
 #include "ash/launcher/launcher_model.h"
 #include "ash/shell.h"
 #include "ash/system/brightness/brightness_control_delegate.h"
 #include "ash/system/tray/system_tray_delegate.h"
 #include "ash/test/ash_test_base.h"
+#include "ash/test/shell_test_api.h"
 #include "ash/test/test_launcher_delegate.h"
 #include "ash/volume_control_delegate.h"
 #include "ash/wm/gestures/long_press_affordance_handler.h"
@@ -20,7 +21,6 @@
 #include "base/command_line.h"
 #include "base/time.h"
 #include "base/timer.h"
-#include "ui/aura/env.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/test/event_generator.h"
 #include "ui/aura/test/test_windows.h"
@@ -135,7 +135,7 @@ class SystemGestureEventFilterTest : public AshTestBase {
   virtual ~SystemGestureEventFilterTest() {}
 
   internal::LongPressAffordanceHandler* GetLongPressAffordance() {
-    Shell::TestApi shell_test(Shell::GetInstance());
+    ShellTestApi shell_test(Shell::GetInstance());
     return shell_test.system_gesture_event_filter()->
         long_press_affordance_.get();
   }
@@ -162,8 +162,7 @@ class SystemGestureEventFilterTest : public AshTestBase {
         ::switches::kEnableBezelTouch);
     test::AshTestBase::SetUp();
     // Enable brightness key.
-    static_cast<internal::MultiDisplayManager*>(
-        aura::Env::GetInstance()->display_manager())->
+    Shell::GetInstance()->display_manager()->
         SetFirstDisplayAsInternalDisplayForTest();
   }
 
@@ -187,7 +186,7 @@ ui::GestureEvent* CreateGesture(ui::EventType type,
 TEST_F(SystemGestureEventFilterTest, TapOutsideRootWindow) {
   aura::RootWindow* root_window = Shell::GetPrimaryRootWindow();
 
-  Shell::TestApi shell_test(Shell::GetInstance());
+  test::ShellTestApi shell_test(Shell::GetInstance());
 
   const int kTouchId = 5;
 
@@ -204,7 +203,7 @@ TEST_F(SystemGestureEventFilterTest, TapOutsideRootWindow) {
 
   // Without the event filter, the touch shouldn't be consumed by the
   // system event handler.
-  Shell::GetInstance()->RemoveEnvEventFilter(
+  Shell::GetInstance()->RemovePreTargetHandler(
       shell_test.system_gesture_event_filter());
 
   scoped_ptr<ui::GestureEvent> event2(CreateGesture(
@@ -286,7 +285,7 @@ TEST_F(SystemGestureEventFilterTest, DeviceControl) {
 
   DummyVolumeControlDelegate* delegateVolume =
       new DummyVolumeControlDelegate();
-  ash::Shell::GetInstance()->tray_delegate()->SetVolumeControlDelegate(
+  ash::Shell::GetInstance()->system_tray_delegate()->SetVolumeControlDelegate(
       scoped_ptr<VolumeControlDelegate>(delegateVolume).Pass());
 
   const int kTouchId = 5;

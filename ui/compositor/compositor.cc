@@ -5,16 +5,20 @@
 #include "ui/compositor/compositor.h"
 
 #include <algorithm>
+#include <deque>
 
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/message_loop.h"
+#include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
+#include "cc/font_atlas.h"
+#include "cc/input_handler.h"
+#include "cc/layer.h"
+#include "cc/layer_tree_host.h"
+#include "cc/output_surface.h"
+#include "cc/thread_impl.h"
 #include "third_party/skia/include/core/SkBitmap.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/Platform.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebCompositorSupport.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebFloatPoint.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebCompositorOutputSurface.h"
 #include "ui/compositor/compositor_observer.h"
 #include "ui/compositor/compositor_switches.h"
 #include "ui/compositor/dip_util.h"
@@ -24,7 +28,6 @@
 #include "ui/gl/gl_implementation.h"
 #include "ui/gl/gl_surface.h"
 #include "ui/gl/gl_switches.h"
-#include "webkit/glue/webthread_impl.h"
 #include "webkit/gpu/webgraphicscontext3d_in_process_impl.h"
 
 #if defined(OS_CHROMEOS)
@@ -36,13 +39,77 @@ namespace {
 const double kDefaultRefreshRate = 60.0;
 const double kTestRefreshRate = 100.0;
 
-webkit_glue::WebThreadImpl* g_compositor_thread = NULL;
+enum SwapType {
+  DRAW_SWAP,
+  READPIXELS_SWAP,
+};
+
+base::Thread* g_compositor_thread = NULL;
 
 bool test_compositor_enabled = false;
 
 ui::ContextFactory* g_context_factory = NULL;
 
 const int kCompositorLockTimeoutMs = 67;
+
+// Adapts a pure WebGraphicsContext3D into a cc::OutputSurface.
+class WebGraphicsContextToOutputSurfaceAdapter
+    : public cc::OutputSurface {
+ public:
+  explicit WebGraphicsContextToOutputSurfaceAdapter(
+      WebKit::WebGraphicsContext3D* context)
+      : context3D_(context),
+        client_(NULL) {
+  }
+
+  virtual bool BindToClient(
+      cc::OutputSurfaceClient* client) OVERRIDE {
+    DCHECK(client);
+    if (!context3D_->makeContextCurrent())
+      return false;
+    client_ = client;
+    return true;
+  }
+
+  virtual const struct Capabilities& Capabilities() const OVERRIDE {
+    return capabilities_;
+  }
+
+  virtual WebKit::WebGraphicsContext3D* Context3D() const OVERRIDE {
+    return context3D_.get();
+  }
+
+  virtual cc::SoftwareOutputDevice* SoftwareDevice() const OVERRIDE {
+    return NULL;
+  }
+
+  virtual void SendFrameToParentCompositor(
+      const cc::CompositorFrame&) OVERRIDE {
+  }
+
+ private:
+  scoped_ptr<WebKit::WebGraphicsContext3D> context3D_;
+  struct Capabilities capabilities_;
+  cc::OutputSurfaceClient* client_;
+};
+
+class PendingSwap {
+ public:
+  PendingSwap(SwapType type, ui::PostedSwapQueue* posted_swaps);
+  ~PendingSwap();
+
+  SwapType type() const { return type_; }
+  bool posted() const { return posted_; }
+
+ private:
+  friend class ui::PostedSwapQueue;
+
+  SwapType type_;
+  bool posted_;
+  ui::PostedSwapQueue* posted_swaps_;
+
+  DISALLOW_COPY_AND_ASSIGN(PendingSwap);
+};
 
 }  // namespace
 
@@ -86,9 +153,10 @@ bool DefaultContextFactory::Initialize() {
   return true;
 }
 
-WebKit::WebGraphicsContext3D* DefaultContextFactory::CreateContext(
+cc::OutputSurface* DefaultContextFactory::CreateOutputSurface(
     Compositor* compositor) {
-  return CreateContextCommon(compositor, false);
+  return new WebGraphicsContextToOutputSurfaceAdapter(
+      CreateContextCommon(compositor, false));
 }
 
 WebKit::WebGraphicsContext3D* DefaultContextFactory::CreateOffscreenContext() {
@@ -128,8 +196,8 @@ WebKit::WebGraphicsContext3D* DefaultContextFactory::CreateContextCommon(
 }
 
 Texture::Texture(bool flipped, const gfx::Size& size, float device_scale_factor)
-    : flipped_(flipped),
-      size_(size),
+    : size_(size),
+      flipped_(flipped),
       device_scale_factor_(device_scale_factor) {
 }
 
@@ -155,32 +223,109 @@ void CompositorLock::CancelLock() {
   compositor_ = NULL;
 }
 
+class PostedSwapQueue {
+ public:
+  PostedSwapQueue() : pending_swap_(NULL) {
+  }
+
+  ~PostedSwapQueue() {
+    DCHECK(!pending_swap_);
+  }
+
+  SwapType NextPostedSwap() const {
+    return queue_.front();
+  }
+
+  bool AreSwapsPosted() const {
+    return !queue_.empty();
+  }
+
+  int NumSwapsPosted(SwapType type) const {
+    int count = 0;
+    for (std::deque<SwapType>::const_iterator it = queue_.begin();
+         it != queue_.end(); ++it) {
+      if (*it == type)
+        count++;
+    }
+    return count;
+  }
+
+  void PostSwap() {
+    DCHECK(pending_swap_);
+    queue_.push_back(pending_swap_->type());
+    pending_swap_->posted_ = true;
+  }
+
+  void EndSwap() {
+    queue_.pop_front();
+  }
+
+ private:
+  friend class ::PendingSwap;
+
+  PendingSwap* pending_swap_;
+  std::deque<SwapType> queue_;
+
+  DISALLOW_COPY_AND_ASSIGN(PostedSwapQueue);
+};
+
+}  // namespace ui
+
+namespace {
+
+PendingSwap::PendingSwap(SwapType type, ui::PostedSwapQueue* posted_swaps)
+    : type_(type), posted_(false), posted_swaps_(posted_swaps) {
+  // Only one pending swap in flight.
+  DCHECK_EQ(static_cast<PendingSwap*>(NULL), posted_swaps_->pending_swap_);
+  posted_swaps_->pending_swap_ = this;
+}
+
+PendingSwap::~PendingSwap() {
+  DCHECK_EQ(this, posted_swaps_->pending_swap_);
+  posted_swaps_->pending_swap_ = NULL;
+}
+
+}  // namespace
+
+namespace ui {
+
 Compositor::Compositor(CompositorDelegate* delegate,
                        gfx::AcceleratedWidget widget)
     : delegate_(delegate),
       root_layer_(NULL),
       widget_(widget),
-      swap_posted_(false),
+      posted_swaps_(new PostedSwapQueue()),
       device_scale_factor_(0.0f),
       last_started_frame_(0),
       last_ended_frame_(0),
       disable_schedule_composite_(false),
       compositor_lock_(NULL) {
-  WebKit::WebCompositorSupport* compositor_support =
-      WebKit::Platform::current()->compositorSupport();
-  root_web_layer_.reset(compositor_support->createLayer());
-  WebKit::WebLayerTreeView::Settings settings;
+  root_web_layer_ = cc::Layer::create();
+  root_web_layer_->setAnchorPoint(gfx::PointF(0.f, 0.f));
+
   CommandLine* command_line = CommandLine::ForCurrentProcess();
-  settings.showFPSCounter =
+  cc::LayerTreeSettings settings;
+  settings.initialDebugState.showFPSCounter =
       command_line->HasSwitch(switches::kUIShowFPSCounter);
-  settings.showPlatformLayerTree =
+  settings.initialDebugState.showPlatformLayerTree =
       command_line->HasSwitch(switches::kUIShowLayerTree);
   settings.refreshRate =
       test_compositor_enabled ? kTestRefreshRate : kDefaultRefreshRate;
+  settings.initialDebugState.showDebugBorders =
+      command_line->HasSwitch(switches::kUIShowLayerBorders);
+  settings.partialSwapEnabled =
+      command_line->HasSwitch(switches::kUIEnablePartialSwap);
+  settings.perTilePaintingEnabled =
+      command_line->HasSwitch(switches::kUIEnablePerTilePainting);
 
-  root_web_layer_->setAnchorPoint(WebKit::WebFloatPoint(0.f, 0.f));
-  host_.reset(compositor_support->createLayerTreeView(this, *root_web_layer_,
-                                                      settings));
+  scoped_ptr<cc::Thread> thread;
+  if (g_compositor_thread) {
+    thread = cc::ThreadImpl::createForDifferentThread(
+        g_compositor_thread->message_loop_proxy());
+  }
+
+  host_ = cc::LayerTreeHost::create(this, settings, thread.Pass());
+  host_->setRootLayer(root_web_layer_);
   host_->setSurfaceReady();
 }
 
@@ -202,36 +347,25 @@ Compositor::~Compositor() {
 }
 
 void Compositor::Initialize(bool use_thread) {
-  CommandLine* command_line = CommandLine::ForCurrentProcess();
-  WebKit::WebCompositorSupport* compositor_support =
-      WebKit::Platform::current()->compositorSupport();
-  // These settings must be applied before we initialize the compositor.
-  compositor_support->setPartialSwapEnabled(
-      command_line->HasSwitch(switches::kUIEnablePartialSwap));
-  compositor_support->setPerTilePaintingEnabled(
-      command_line->HasSwitch(switches::kUIEnablePerTilePainting));
-  if (use_thread)
-    g_compositor_thread = new webkit_glue::WebThreadImpl("Browser Compositor");
-  compositor_support->initialize(g_compositor_thread);
+  if (use_thread) {
+    g_compositor_thread = new base::Thread("Browser Compositor");
+    g_compositor_thread->Start();
+  }
 }
 
 void Compositor::Terminate() {
-  WebKit::Platform::current()->compositorSupport()->shutdown();
   if (g_compositor_thread) {
+    g_compositor_thread->Stop();
     delete g_compositor_thread;
     g_compositor_thread = NULL;
   }
 }
 
 void Compositor::ScheduleDraw() {
-  if (g_compositor_thread) {
-    // TODO(nduca): Temporary while compositor calls
-    // compositeImmediately() directly.
-    layout();
+  if (g_compositor_thread)
     host_->composite();
-  } else if (delegate_) {
+  else if (delegate_)
     delegate_->ScheduleDraw();
-  }
 }
 
 void Compositor::SetRootLayer(Layer* root_layer) {
@@ -244,7 +378,7 @@ void Compositor::SetRootLayer(Layer* root_layer) {
     root_layer_->SetCompositor(this);
   root_web_layer_->removeAllChildren();
   if (root_layer_)
-    root_web_layer_->addChild(root_layer_->web_layer());
+    root_web_layer_->addChild(root_layer_->cc_layer());
 }
 
 void Compositor::SetHostHasTransparentBackground(
@@ -253,17 +387,20 @@ void Compositor::SetHostHasTransparentBackground(
 }
 
 void Compositor::Draw(bool force_clear) {
+  DCHECK(!g_compositor_thread);
+
   if (!root_layer_)
     return;
 
   last_started_frame_++;
-  if (!g_compositor_thread && !IsLocked()) {
+  PendingSwap pending_swap(DRAW_SWAP, posted_swaps_.get());
+  if (!IsLocked()) {
     // TODO(nduca): Temporary while compositor calls
     // compositeImmediately() directly.
     layout();
     host_->composite();
   }
-  if (!g_compositor_thread && !swap_posted_)
+  if (!pending_swap.posted())
     NotifyEnd();
 }
 
@@ -282,17 +419,17 @@ bool Compositor::ReadPixels(SkBitmap* bitmap,
   SkAutoLockPixels lock_image(*bitmap);
   unsigned char* pixels = static_cast<unsigned char*>(bitmap->getPixels());
   CancelCompositorLock();
+  PendingSwap pending_swap(READPIXELS_SWAP, posted_swaps_.get());
   return host_->compositeAndReadback(pixels, bounds_in_pixel);
 }
 
 void Compositor::SetScaleAndSize(float scale, const gfx::Size& size_in_pixel) {
   DCHECK_GT(scale, 0);
-  if (size_in_pixel.IsEmpty() || scale <= 0)
-    return;
-  size_ = size_in_pixel;
-  host_->setViewportSize(size_in_pixel);
-  root_web_layer_->setBounds(size_in_pixel);
-
+  if (!size_in_pixel.IsEmpty()) {
+    size_ = size_in_pixel;
+    host_->setViewportSize(size_in_pixel, size_in_pixel);
+    root_web_layer_->setBounds(size_in_pixel);
+  }
   if (device_scale_factor_ != scale) {
     device_scale_factor_ = scale;
     if (root_layer_)
@@ -313,26 +450,42 @@ bool Compositor::HasObserver(CompositorObserver* observer) {
 }
 
 void Compositor::OnSwapBuffersPosted() {
-  swap_posted_ = true;
+  DCHECK(!g_compositor_thread);
+  posted_swaps_->PostSwap();
 }
 
 void Compositor::OnSwapBuffersComplete() {
-  DCHECK(swap_posted_);
-  swap_posted_ = false;
-  NotifyEnd();
+  DCHECK(!g_compositor_thread);
+  DCHECK(posted_swaps_->AreSwapsPosted());
+  DCHECK_GE(1, posted_swaps_->NumSwapsPosted(DRAW_SWAP));
+  if (posted_swaps_->NextPostedSwap() == DRAW_SWAP)
+    NotifyEnd();
+  posted_swaps_->EndSwap();
 }
 
 void Compositor::OnSwapBuffersAborted() {
-  if (swap_posted_) {
-    swap_posted_ = false;
-    NotifyEnd();
+  DCHECK(!g_compositor_thread);
+  DCHECK_GE(1, posted_swaps_->NumSwapsPosted(DRAW_SWAP));
+
+  // We've just lost the context, so unwind all posted_swaps.
+  while (posted_swaps_->AreSwapsPosted()) {
+    if (posted_swaps_->NextPostedSwap() == DRAW_SWAP)
+      NotifyEnd();
+    posted_swaps_->EndSwap();
   }
+
   FOR_EACH_OBSERVER(CompositorObserver,
                     observer_list_,
                     OnCompositingAborted(this));
 }
 
-void Compositor::updateAnimations(double frameBeginTime) {
+void Compositor::willBeginFrame() {
+}
+
+void Compositor::didBeginFrame() {
+}
+
+void Compositor::animate(double frameBeginTime) {
 }
 
 void Compositor::layout() {
@@ -344,65 +497,31 @@ void Compositor::layout() {
   disable_schedule_composite_ = false;
 }
 
-void Compositor::applyScrollAndScale(const WebKit::WebSize& scrollDelta,
-                                     float scaleFactor) {
+void Compositor::applyScrollAndScale(gfx::Vector2d scrollDelta,
+                                     float pageScale) {
 }
 
-// Adapts a pure WebGraphicsContext3D into a WebCompositorOutputSurface.
-class WebGraphicsContextToOutputSurfaceAdapter :
-    public WebKit::WebCompositorOutputSurface {
-public:
-    explicit WebGraphicsContextToOutputSurfaceAdapter(
-        WebKit::WebGraphicsContext3D* context)
-        : m_context3D(context)
-        , m_client(0)
-    {
-    }
-
-    virtual bool bindToClient(
-        WebKit::WebCompositorOutputSurfaceClient* client) OVERRIDE
-    {
-        DCHECK(client);
-        if (!m_context3D->makeContextCurrent())
-            return false;
-        m_client = client;
-        return true;
-    }
-
-    virtual const Capabilities& capabilities() const OVERRIDE
-    {
-        return m_capabilities;
-    }
-
-    virtual WebKit::WebGraphicsContext3D* context3D() const OVERRIDE
-    {
-        return m_context3D.get();
-    }
-
-    virtual void sendFrameToParentCompositor(
-        const WebKit::WebCompositorFrame&) OVERRIDE
-    {
-    }
-
-private:
-    scoped_ptr<WebKit::WebGraphicsContext3D> m_context3D;
-    Capabilities m_capabilities;
-    WebKit::WebCompositorOutputSurfaceClient* m_client;
-};
-
-WebKit::WebCompositorOutputSurface* Compositor::createOutputSurface() {
+scoped_ptr<cc::OutputSurface> Compositor::createOutputSurface() {
   if (test_compositor_enabled) {
     ui::TestWebGraphicsContext3D* test_context =
       new ui::TestWebGraphicsContext3D();
     test_context->Initialize();
-    return new WebGraphicsContextToOutputSurfaceAdapter(test_context);
+    return scoped_ptr<cc::OutputSurface>(
+        new WebGraphicsContextToOutputSurfaceAdapter(test_context));
   } else {
-    return new WebGraphicsContextToOutputSurfaceAdapter(
-        ContextFactory::GetInstance()->CreateContext(this));
+    return scoped_ptr<cc::OutputSurface>(
+        ContextFactory::GetInstance()->CreateOutputSurface(this));
   }
 }
 
 void Compositor::didRecreateOutputSurface(bool success) {
+}
+
+scoped_ptr<cc::InputHandler> Compositor::createInputHandler() {
+  return scoped_ptr<cc::InputHandler>();
+}
+
+void Compositor::willCommit() {
 }
 
 void Compositor::didCommit() {
@@ -419,12 +538,17 @@ void Compositor::didCommitAndDrawFrame() {
 }
 
 void Compositor::didCompleteSwapBuffers() {
+  DCHECK(g_compositor_thread);
   NotifyEnd();
 }
 
 void Compositor::scheduleComposite() {
   if (!disable_schedule_composite_)
     ScheduleDraw();
+}
+
+scoped_ptr<cc::FontAtlas> Compositor::createFontAtlas() {
+  return scoped_ptr<cc::FontAtlas>();
 }
 
 scoped_refptr<CompositorLock> Compositor::GetCompositorLock() {

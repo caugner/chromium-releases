@@ -8,6 +8,7 @@
 #include <string>
 
 #include "base/compiler_specific.h"
+#include "base/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "content/public/browser/content_browser_client.h"
 
@@ -25,8 +26,7 @@ class ShellContentBrowserClient : public ContentBrowserClient {
   // ContentBrowserClient overrides.
   virtual BrowserMainParts* CreateBrowserMainParts(
       const MainFunctionParams& parameters) OVERRIDE;
-  virtual void RenderViewHostCreated(
-      RenderViewHost* render_view_host) OVERRIDE;
+  virtual void RenderProcessHostCreated(RenderProcessHost* host) OVERRIDE;
   virtual void AppendExtraCommandLineSwitches(CommandLine* command_line,
                                               int child_process_id) OVERRIDE;
   virtual void OverrideWebkitPrefs(RenderViewHost* render_view_host,
@@ -37,6 +37,13 @@ class ShellContentBrowserClient : public ContentBrowserClient {
   virtual std::string GetDefaultDownloadName() OVERRIDE;
   virtual WebContentsViewDelegate* GetWebContentsViewDelegate(
       WebContents* web_contents) OVERRIDE;
+  virtual bool CanCreateWindow(
+      const GURL& opener_url,
+      const GURL& source_origin,
+      WindowContainerType container_type,
+      ResourceContext* context,
+      int render_process_id,
+      bool* no_javascript_access) OVERRIDE;
 
 #if defined(OS_ANDROID)
   virtual void GetAdditionalMappedFilesForChildProcess(
@@ -57,6 +64,8 @@ class ShellContentBrowserClient : public ContentBrowserClient {
  private:
   scoped_ptr<ShellResourceDispatcherHostDelegate>
       resource_dispatcher_host_delegate_;
+
+  FilePath webkit_source_dir_;
 
   ShellBrowserMainParts* shell_browser_main_parts_;
 };

@@ -2,7 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/command_line.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_shutdown.h"
@@ -20,11 +19,11 @@
 #include "chrome/browser/chromeos/login/mock_update_screen.h"
 #include "chrome/browser/chromeos/login/network_screen.h"
 #include "chrome/browser/chromeos/login/reset_screen.h"
+#include "chrome/browser/chromeos/login/test_login_utils.h"
 #include "chrome/browser/chromeos/login/user_image_screen.h"
 #include "chrome/browser/chromeos/login/view_screen.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/login/wizard_in_process_browser_test.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "grit/generated_resources.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -262,8 +261,6 @@ IN_PROC_BROWSER_TEST_F(WizardControllerFlowTest,
   EnterpriseEnrollmentScreen* screen =
       WizardController::default_controller()->GetEnterpriseEnrollmentScreen();
   EXPECT_EQ(screen, WizardController::default_controller()->current_screen());
-  std::string user;
-  EXPECT_FALSE(screen->IsAutoEnrollment(&user));
   OnExit(ScreenObserver::ENTERPRISE_ENROLLMENT_COMPLETED);
 
   EXPECT_FALSE(ExistingUserController::current_controller() == NULL);
@@ -271,10 +268,7 @@ IN_PROC_BROWSER_TEST_F(WizardControllerFlowTest,
 
 IN_PROC_BROWSER_TEST_F(WizardControllerFlowTest,
                        ControlFlowEnterpriseAutoEnrollmentCompleted) {
-  CommandLine::ForCurrentProcess()->AppendSwitchASCII(
-      switches::kLoginScreen,
-      WizardController::kLoginScreenName);
-
+  WizardController::default_controller()->SkipImageSelectionForTesting();
   EXPECT_EQ(WizardController::default_controller()->GetNetworkScreen(),
             WizardController::default_controller()->current_screen());
   EXPECT_CALL(*mock_update_screen_, StartUpdate()).Times(0);
@@ -295,15 +289,13 @@ IN_PROC_BROWSER_TEST_F(WizardControllerFlowTest,
   EnterpriseEnrollmentScreen* screen =
       WizardController::default_controller()->GetEnterpriseEnrollmentScreen();
   EXPECT_EQ(screen, WizardController::default_controller()->current_screen());
-  std::string user;
-  EXPECT_TRUE(screen->IsAutoEnrollment(&user));
   // This is the main expectation: after auto-enrollment, login is resumed.
   EXPECT_CALL(mock_consumer, OnLoginSuccess(_, _, _, _)).Times(1);
   OnExit(ScreenObserver::ENTERPRISE_AUTO_MAGIC_ENROLLMENT_COMPLETED);
   // Prevent browser launch when the profile is prepared:
   browser_shutdown::SetTryingToQuit(true);
   // Run the tasks posted to complete the login:
-  MessageLoop::current()->RunAllPending();
+  MessageLoop::current()->RunUntilIdle();
 }
 
 IN_PROC_BROWSER_TEST_F(WizardControllerFlowTest, ControlFlowResetScreen) {

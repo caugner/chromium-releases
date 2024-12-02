@@ -7,7 +7,6 @@
 #include <string>
 
 #include "base/bind.h"
-#include "base/command_line.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
@@ -19,11 +18,12 @@
 #include "chrome/browser/chromeos/login/screen_locker.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/settings/cros_settings_names.h"
+#include "chrome/browser/policy/browser_policy_connector.h"
+#include "chrome/browser/policy/device_local_account_policy_service.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/session_manager_client.h"
@@ -58,9 +58,6 @@ LoginPerformer::LoginPerformer(Delegate* delegate)
       screen_lock_requested_(false),
       initial_online_auth_pending_(false),
       auth_mode_(AUTH_MODE_INTERNAL),
-      using_oauth_(
-          !CommandLine::ForCurrentProcess()->HasSwitch(
-              switches::kSkipOAuthLogin)),
       ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
   DCHECK(default_performer_ == NULL)
       << "LoginPerformer should have only one instance.";
@@ -71,6 +68,8 @@ LoginPerformer::~LoginPerformer() {
   DVLOG(1) << "Deleting LoginPerformer";
   DCHECK(default_performer_ != NULL) << "Default instance should exist.";
   default_performer_ = NULL;
+  if (authenticator_)
+    authenticator_->SetConsumer(NULL);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -119,11 +118,11 @@ void LoginPerformer::OnLoginFailure(const LoginFailure& failure) {
   }
 }
 
-void LoginPerformer::OnDemoUserLoginSuccess() {
+void LoginPerformer::OnRetailModeLoginSuccess() {
   content::RecordAction(
       UserMetricsAction("Login_DemoUserLoginSuccess"));
 
-  LoginStatusConsumer::OnDemoUserLoginSuccess();
+  LoginStatusConsumer::OnRetailModeLoginSuccess();
 }
 
 void LoginPerformer::OnLoginSuccess(
@@ -132,72 +131,32 @@ void LoginPerformer::OnLoginSuccess(
     bool pending_requests,
     bool using_oauth) {
   content::RecordAction(UserMetricsAction("Login_Success"));
-  // 0 - Login success offline and online. It's a new user. or it's an
-  //     existing user and offline auth took longer than online auth.
-  // 1 - Login success offline only. It's an existing user login.
+  // The value of |pending_requests| indicates:
+  // 0 - New regular user, login success offline and online.
+  //     - or -
+  //     Existing regular user, login success offline and online, offline
+  //     authentication took longer than online authentication.
+  //     - or -
+  //     Public account user, login successful.
+  // 1 - Existing regular user, login success offline only.
   UMA_HISTOGRAM_ENUMERATION("Login.SuccessReason", pending_requests, 2);
 
   VLOG(1) << "LoginSuccess, pending_requests " << pending_requests;
-  if (delegate_) {
-    // After delegate_->OnLoginSuccess(...) is called, delegate_ releases
-    // LoginPerformer ownership. LP now manages it's lifetime on its own.
-    // 2 things could make it exist longer:
-    // 1. ScreenLock active (pending correct new password input)
-    // 2. Pending online auth request.
-    if (!pending_requests)
-      MessageLoop::current()->DeleteSoon(FROM_HERE, this);
-    else
-      initial_online_auth_pending_ = true;
+  DCHECK(delegate_);
+  // After delegate_->OnLoginSuccess(...) is called, delegate_ releases
+  // LoginPerformer ownership. LP now manages it's lifetime on its own.
+  // 2 things could make it exist longer:
+  // 1. ScreenLock active (pending correct new password input)
+  // 2. Pending online auth request.
+  if (!pending_requests)
+    MessageLoop::current()->DeleteSoon(FROM_HERE, this);
+  else
+    initial_online_auth_pending_ = true;
 
-    delegate_->OnLoginSuccess(username,
-                              password,
-                              pending_requests,
-                              using_oauth);
-    return;
-  } else {
-    // Online login has succeeded.
-    DCHECK(!pending_requests)
-        << "Pending request w/o delegate_ should not happen!";
-    // It is not guaranted, that profile creation has been finished yet. So use
-    // async version here.
-    ProfileManager::CreateDefaultProfileAsync(
-        base::Bind(&LoginPerformer::OnProfileCreated,
-                   weak_factory_.GetWeakPtr()));
-  }
-}
-
-void LoginPerformer::OnProfileCreated(
-    Profile* profile,
-    Profile::CreateStatus status) {
-  CHECK(profile);
-  switch (status) {
-    case Profile::CREATE_STATUS_INITIALIZED:
-      break;
-    case Profile::CREATE_STATUS_CREATED:
-      return;
-    case Profile::CREATE_STATUS_FAIL:
-    default:
-      NOTREACHED();
-      return;
-  }
-
-  if (using_oauth_)
-    LoginUtils::Get()->StartTokenServices(profile);
-
-  // Don't unlock screen if it was locked while we're waiting
-  // for initial online auth.
-  if (ScreenLocker::default_screen_locker() &&
-      !initial_online_auth_pending_) {
-    DVLOG(1) << "Online login OK - unlocking screen.";
-    RequestScreenUnlock();
-    // Do not delete itself just yet, wait for unlock.
-    // See ResolveScreenUnlocked().
-    return;
-  }
-  initial_online_auth_pending_ = false;
-  // There's nothing else that's holding LP from deleting itself -
-  // no ScreenLock, no pending requests.
-  MessageLoop::current()->DeleteSoon(FROM_HERE, this);
+  delegate_->OnLoginSuccess(username,
+                            password,
+                            pending_requests,
+                            using_oauth);
 }
 
 void LoginPerformer::OnOffTheRecordLoginSuccess() {
@@ -308,11 +267,11 @@ void LoginPerformer::PerformLogin(const std::string& username,
   }
 }
 
-void LoginPerformer::LoginDemoUser() {
+void LoginPerformer::LoginRetailMode() {
   authenticator_ = LoginUtils::Get()->CreateAuthenticator(this);
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      base::Bind(&Authenticator::LoginDemoUser, authenticator_.get()));
+      base::Bind(&Authenticator::LoginRetailMode, authenticator_.get()));
 }
 
 void LoginPerformer::LoginOffTheRecord() {
@@ -320,6 +279,26 @@ void LoginPerformer::LoginOffTheRecord() {
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
       base::Bind(&Authenticator::LoginOffTheRecord, authenticator_.get()));
+}
+
+void LoginPerformer::LoginAsPublicAccount(const std::string& username) {
+  // Login is not allowed if policy could not be loaded for the account.
+  policy::DeviceLocalAccountPolicyService* policy_service =
+      g_browser_process->browser_policy_connector()->
+          GetDeviceLocalAccountPolicyService();
+  if (!policy_service ||
+      !policy_service->IsPolicyAvailableForAccount(username)) {
+    DCHECK(delegate_);
+    if (delegate_)
+      delegate_->PolicyLoadFailed();
+    return;
+  }
+
+  authenticator_ = LoginUtils::Get()->CreateAuthenticator(this);
+  BrowserThread::PostTask(
+      BrowserThread::UI, FROM_HERE,
+      base::Bind(&Authenticator::LoginAsPublicAccount, authenticator_.get(),
+                 username));
 }
 
 void LoginPerformer::RecoverEncryptedData(const std::string& old_password) {
@@ -349,6 +328,8 @@ void LoginPerformer::RequestScreenLock() {
     ResolveScreenLocked();
   } else {
     screen_lock_requested_ = true;
+    // TODO(antrim) : additional logging for crbug/173178
+    LOG(WARNING) << "Requesting screen lock from LoginPerformer";
     DBusThreadManager::Get()->GetSessionManagerClient()->RequestLockScreen();
   }
 }

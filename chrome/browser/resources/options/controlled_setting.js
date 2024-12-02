@@ -32,11 +32,14 @@ cr.define('options', function() {
       }
 
       this.className = 'controlled-setting-indicator';
-      this.tabIndex = 0;
-      this.setAttribute('role', 'button');
-      this.addEventListener('click', this);
-      this.addEventListener('keydown', this);
-      this.addEventListener('mousedown', this);
+      this.location = cr.ui.ArrowLocation.TOP_END;
+      this.image = document.createElement('div');
+      this.image.tabIndex = 0;
+      this.image.setAttribute('role', 'button');
+      this.image.addEventListener('click', this);
+      this.image.addEventListener('keydown', this);
+      this.image.addEventListener('mousedown', this);
+      this.appendChild(this.image);
     },
 
     /**
@@ -54,14 +57,10 @@ cr.define('options', function() {
      * @type {boolean}
      */
     get showingBubble() {
-      return !!this.showingBubble_;
+      return this.image.classList.contains('showing-bubble');
     },
     set showingBubble(showing) {
-      if (showing)
-        this.classList.add('showing-bubble');
-      else
-        this.classList.remove('showing-bubble');
-      this.showingBubble_ = showing;
+      this.image.classList.toggle('showing-bubble', showing);
     },
 
     /**
@@ -185,7 +184,7 @@ cr.define('options', function() {
           content.appendChild(container);
         }
 
-        OptionsPage.showBubble(content, this);
+        OptionsPage.showBubble(content, this.image, this, this.location);
       }
     },
   };

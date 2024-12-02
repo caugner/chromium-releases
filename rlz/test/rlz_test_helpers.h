@@ -10,8 +10,8 @@
 #include "base/compiler_specific.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-#if defined(OS_MACOSX)
-#include "base/scoped_temp_dir.h"
+#if defined(OS_POSIX)
+#include "base/files/scoped_temp_dir.h"
 #endif
 
 class RlzLibTestNoMachineState : public ::testing::Test {
@@ -20,8 +20,8 @@ class RlzLibTestNoMachineState : public ::testing::Test {
   virtual void TearDown() OVERRIDE;
 
 
-#if defined(OS_MACOSX)
- ScopedTempDir temp_dir_;
+#if defined(OS_POSIX)
+ base::ScopedTempDir temp_dir_;
 #endif
 };
 

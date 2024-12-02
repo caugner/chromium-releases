@@ -42,10 +42,6 @@
   var PointerOverlay = options.PointerOverlay;
   var UIAccountTweaks = uiAccountTweaks.UIAccountTweaks;
 </if>
-<if expr="pp_ifdef('chromeos') and pp_ifdef('use_ash')">
-  <include src="chromeos/set_wallpaper_options.js"></include>
-  var SetWallpaperOptions = options.SetWallpaperOptions;
-</if>
 <if expr="pp_ifdef('use_nss')">
   <include src="certificate_tree.js"></include>
   <include src="certificate_manager.js"></include>
@@ -75,14 +71,18 @@
 <include src="content_settings_ui.js"></include>
 <include src="cookies_list.js"></include>
 <include src="cookies_view.js"></include>
-<include src="cookies_view_app.js"></include>
 <include src="factory_reset_overlay.js"></include>
+<include src="managed_user_settings.js"></include>
 <include src="font_settings.js"></include>
 <include src="handler_options.js"></include>
 <include src="handler_options_list.js"></include>
 <include src="home_page_overlay.js"></include>
 <include src="import_data_overlay.js"></include>
 <include src="language_add_language_overlay.js"></include>
+<if expr="not is_macosx">
+  <include src="language_dictionary_overlay_word_list.js"></include>
+  <include src="language_dictionary_overlay.js"></include>
+</if>
 <include src="language_list.js"></include>
 <include src="language_options.js"></include>
 <include src="manage_profile_overlay.js"></include>
@@ -99,3 +99,6 @@
 <include src="../sync_setup_overlay.js"></include>
 <include src="../uber/uber_utils.js"></include>
 <include src="options.js"></include>
+<if expr="pp_ifdef('enable_settings_app')">
+  <include src="options_settings_app.js"></include>
+</if>

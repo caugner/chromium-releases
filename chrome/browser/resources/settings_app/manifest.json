@@ -8,6 +8,8 @@
 
   "icons": {
     "16": "settings_app_icon_16.png",
+    "32": "settings_app_icon_32.png",
+    "48": "settings_app_icon_48.png",
     "128": "settings_app_icon_128.png"
   },
   "app": {
@@ -18,5 +20,6 @@
   "permissions": [
     "chrome://settings-frame/"
   ],
-  "display_in_launcher": true
+  "display_in_launcher": true,
+  "display_in_new_tab_page": false
 }

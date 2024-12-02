@@ -68,9 +68,10 @@ class PolicyWatcherLinux : public PolicyWatcher {
 
     if (!config_dir_.empty() &&
         !watcher_->Watch(
-            config_dir_,
-            new FilePathWatcherDelegate(weak_factory_.GetWeakPtr()))) {
-      OnFilePathError(config_dir_);
+            config_dir_, false,
+            base::Bind(&PolicyWatcherLinux::OnFilePathChanged,
+                       weak_factory_.GetWeakPtr()))) {
+      OnFilePathChanged(config_dir_, true);
     }
 
     // There might have been changes to the directory in the time between
@@ -87,46 +88,15 @@ class PolicyWatcherLinux : public PolicyWatcher {
     watcher_.reset();
   }
 
-  // Called by FilePathWatcherDelegate.
-  virtual void OnFilePathError(const FilePath& path) {
-    LOG(ERROR) << "PolicyWatcherLinux on " << path.value()
-               << " failed.";
-  }
-
-  // Called by FilePathWatcherDelegate.
-  virtual void OnFilePathChanged(const FilePath& path) {
+ private:
+  void OnFilePathChanged(const FilePath& path, bool error) {
     DCHECK(OnPolicyWatcherThread());
 
-    Reload();
+    if (!error)
+      Reload();
+    else
+      LOG(ERROR) << "PolicyWatcherLinux on " << path.value() << " failed.";
   }
-
- private:
-  // Needed to avoid refcounting PolicyWatcherLinux.
-  class FilePathWatcherDelegate :
-    public base::files::FilePathWatcher::Delegate {
-   public:
-    FilePathWatcherDelegate(base::WeakPtr<PolicyWatcherLinux> policy_watcher)
-        : policy_watcher_(policy_watcher) {
-    }
-
-    virtual void OnFilePathError(const FilePath& path) {
-      if (policy_watcher_) {
-        policy_watcher_->OnFilePathError(path);
-      }
-    }
-
-    virtual void OnFilePathChanged(const FilePath& path) {
-      if (policy_watcher_) {
-        policy_watcher_->OnFilePathChanged(path);
-      }
-    }
-
-   protected:
-    virtual ~FilePathWatcherDelegate() {}
-
-   private:
-    base::WeakPtr<PolicyWatcherLinux> policy_watcher_;
-  };
 
   base::Time GetLastModification() {
     DCHECK(OnPolicyWatcherThread());
@@ -156,8 +126,8 @@ class PolicyWatcherLinux : public PolicyWatcher {
     return last_modification;
   }
 
-  // Caller owns the value.
-  DictionaryValue* Load() {
+  // Returns NULL if the policy dictionary couldn't be read.
+  scoped_ptr<DictionaryValue> Load() {
     DCHECK(OnPolicyWatcherThread());
     // Enumerate the files and sort them lexicographically.
     std::set<FilePath> files;
@@ -168,7 +138,7 @@ class PolicyWatcherLinux : public PolicyWatcher {
       files.insert(config_file_path);
 
     // Start with an empty dictionary and merge the files' contents.
-    DictionaryValue* policy = new DictionaryValue();
+    scoped_ptr<DictionaryValue> policy(new DictionaryValue());
     for (std::set<FilePath>::iterator config_file_iter = files.begin();
          config_file_iter != files.end(); ++config_file_iter) {
       JSONFileValueSerializer deserializer(*config_file_iter);
@@ -180,17 +150,17 @@ class PolicyWatcherLinux : public PolicyWatcher {
       if (!value.get()) {
         LOG(WARNING) << "Failed to read configuration file "
                      << config_file_iter->value() << ": " << error_msg;
-        continue;
+        return scoped_ptr<DictionaryValue>();
       }
       if (!value->IsType(Value::TYPE_DICTIONARY)) {
         LOG(WARNING) << "Expected JSON dictionary in configuration file "
                      << config_file_iter->value();
-        continue;
+        return scoped_ptr<DictionaryValue>();
       }
       policy->MergeDictionary(static_cast<DictionaryValue*>(value.get()));
     }
 
-    return policy;
+    return policy.Pass();
   }
 
   void Reload() {
@@ -210,10 +180,15 @@ class PolicyWatcherLinux : public PolicyWatcher {
     }
 
     // Load the policy definitions.
-    scoped_ptr<DictionaryValue> new_policy(Load());
-    UpdatePolicies(new_policy.get());
-
-    ScheduleFallbackReloadTask();
+    scoped_ptr<DictionaryValue> new_policy = Load();
+    if (new_policy.get()) {
+      UpdatePolicies(new_policy.get());
+      ScheduleFallbackReloadTask();
+    } else {
+      // A failure to load policy definitions is probably temporary, so try
+      // again soon.
+      ScheduleReloadTask(base::TimeDelta::FromSeconds(kSettleIntervalSeconds));
+    }
   }
 
   bool IsSafeToReloadPolicy(const base::Time& now, base::TimeDelta* delay) {

@@ -13,7 +13,7 @@
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/platform_file.h"
-#include "chrome/browser/api/prefs/pref_member.h"
+#include "base/prefs/public/pref_member.h"
 #include "chrome/browser/autofill/personal_data_manager.h"
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/browser_process.h"
@@ -64,7 +64,7 @@
 #include "net/http/infinite_cache.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
-#include "webkit/dom_storage/dom_storage_context.h"
+#include "webkit/dom_storage/dom_storage_types.h"
 #include "webkit/quota/quota_manager.h"
 #include "webkit/quota/quota_types.h"
 #include "webkit/quota/special_storage_policy.h"
@@ -136,17 +136,19 @@ BrowsingDataRemover::BrowsingDataRemover(Profile* profile,
       media_context_getter_(profile->GetMediaRequestContext()),
       deauthorize_content_licenses_request_id_(0),
       waiting_for_clear_cache_(false),
-      waiting_for_clear_nacl_cache_(false),
+      waiting_for_clear_content_licenses_(false),
       waiting_for_clear_cookies_count_(0),
+      waiting_for_clear_form_(false),
       waiting_for_clear_history_(false),
+      waiting_for_clear_hostname_resolution_cache_(false),
       waiting_for_clear_local_storage_(false),
-      waiting_for_clear_session_storage_(false),
+      waiting_for_clear_nacl_cache_(false),
+      waiting_for_clear_network_predictor_(false),
       waiting_for_clear_networking_history_(false),
-      waiting_for_clear_server_bound_certs_(false),
       waiting_for_clear_plugin_data_(false),
       waiting_for_clear_quota_managed_data_(false),
-      waiting_for_clear_content_licenses_(false),
-      waiting_for_clear_form_(false),
+      waiting_for_clear_server_bound_certs_(false),
+      waiting_for_clear_session_storage_(false),
       remove_mask_(0),
       remove_origin_(GURL()),
       origin_set_mask_(0) {
@@ -239,20 +241,29 @@ void BrowsingDataRemover::RemoveImpl(int remove_mask,
             base::Time() : delete_end_;
       history_service->ExpireHistoryBetween(restrict_urls,
           delete_begin_, history_end_,
-          &request_consumer_,
           base::Bind(&BrowsingDataRemover::OnHistoryDeletionDone,
-                     base::Unretained(this)));
+                     base::Unretained(this)),
+          &history_task_tracker_);
     }
 
     // Need to clear the host cache and accumulated speculative data, as it also
     // reveals some history: we have no mechanism to track when these items were
     // created, so we'll clear them all. Better safe than sorry.
     if (g_browser_process->io_thread()) {
-      waiting_for_clear_networking_history_ = true;
+      waiting_for_clear_hostname_resolution_cache_ = true;
       BrowserThread::PostTask(
           BrowserThread::IO, FROM_HERE,
-          base::Bind(&BrowsingDataRemover::ClearNetworkingHistory,
-                     base::Unretained(this), g_browser_process->io_thread()));
+          base::Bind(
+              &BrowsingDataRemover::ClearHostnameResolutionCacheOnIOThread,
+              base::Unretained(this),
+              g_browser_process->io_thread()));
+    }
+    if (profile_->GetNetworkPredictor()) {
+      waiting_for_clear_network_predictor_ = true;
+      BrowserThread::PostTask(
+          BrowserThread::IO, FROM_HERE,
+          base::Bind(&BrowsingDataRemover::ClearNetworkPredictorOnIOThread,
+                     base::Unretained(this)));
     }
 
     // As part of history deletion we also delete the auto-generated keywords.
@@ -331,7 +342,7 @@ void BrowsingDataRemover::RemoveImpl(int remove_mask,
                      base::Unretained(this), base::Unretained(rq_context)));
     }
 
-#if defined(ENABLE_SAFE_BROWSING)
+#if defined(FULL_SAFE_BROWSING) || defined(MOBILE_SAFE_BROWSING)
     // Clear the safebrowsing cookies only if time period is for "all time".  It
     // doesn't make sense to apply the time period of deleting in the last X
     // hours/days to the safebrowsing cookies since they aren't the result of
@@ -395,6 +406,7 @@ void BrowsingDataRemover::RemoveImpl(int remove_mask,
                    base::Unretained(this)));
   }
 
+#if defined(ENABLE_PLUGINS)
   // Plugin is data not separated for protected and unprotected web origins. We
   // check the origin_set_mask_ to prevent unintended deletion.
   if (remove_mask & REMOVE_PLUGIN_DATA &&
@@ -408,6 +420,7 @@ void BrowsingDataRemover::RemoveImpl(int remove_mask,
         plugin_data_remover_->StartRemoving(delete_begin_);
     watcher_.StartWatching(event, this);
   }
+#endif
 
   if (remove_mask & REMOVE_PASSWORDS) {
     content::RecordAction(UserMetricsAction("ClearBrowsingData_Passwords"));
@@ -477,6 +490,7 @@ void BrowsingDataRemover::RemoveImpl(int remove_mask,
     }
   }
 
+#if defined(ENABLE_PLUGINS)
   if (remove_mask & REMOVE_CONTENT_LICENSES) {
     content::RecordAction(
         UserMetricsAction("ClearBrowsingData_ContentLicenses"));
@@ -489,12 +503,15 @@ void BrowsingDataRemover::RemoveImpl(int remove_mask,
     deauthorize_content_licenses_request_id_ =
         pepper_flash_settings_manager_->DeauthorizeContentLicenses();
   }
+#endif
 
-  // Also delete cached network related data (like TransportSecurityState,
-  // HttpServerProperties data).
-  profile_->ClearNetworkingHistorySince(delete_begin_);
-
-  NotifyAndDeleteIfDone();
+  // Always wipe accumulated network related data (TransportSecurityState and
+  // HttpServerPropertiesManager data).
+  waiting_for_clear_networking_history_ = true;
+  profile_->ClearNetworkingHistorySince(
+      delete_begin_,
+      base::Bind(&BrowsingDataRemover::OnClearedNetworkingHistory,
+                 base::Unretained(this)));
 }
 
 void BrowsingDataRemover::AddObserver(Observer* observer) {
@@ -555,7 +572,9 @@ bool BrowsingDataRemover::AllDone() {
       !waiting_for_clear_plugin_data_ &&
       !waiting_for_clear_quota_managed_data_ &&
       !waiting_for_clear_content_licenses_ &&
-      !waiting_for_clear_form_;
+      !waiting_for_clear_form_ &&
+      !waiting_for_clear_hostname_resolution_cache_ &&
+      !waiting_for_clear_network_predictor_;
 }
 
 void BrowsingDataRemover::Observe(int type,
@@ -595,17 +614,34 @@ void BrowsingDataRemover::NotifyAndDeleteIfDone() {
   MessageLoop::current()->DeleteSoon(FROM_HERE, this);
 }
 
-void BrowsingDataRemover::ClearedNetworkHistory() {
-  waiting_for_clear_networking_history_ = false;
-
+void BrowsingDataRemover::OnClearedHostnameResolutionCache() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  waiting_for_clear_hostname_resolution_cache_ = false;
   NotifyAndDeleteIfDone();
 }
 
-void BrowsingDataRemover::ClearNetworkingHistory(IOThread* io_thread) {
-  // This function should be called on the IO thread.
+void BrowsingDataRemover::ClearHostnameResolutionCacheOnIOThread(
+    IOThread* io_thread) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
   io_thread->ClearHostCache();
+
+  // Notify the UI thread that we are done.
+  BrowserThread::PostTask(
+      BrowserThread::UI,
+      FROM_HERE,
+      base::Bind(&BrowsingDataRemover::OnClearedHostnameResolutionCache,
+                 base::Unretained(this)));
+}
+
+void BrowsingDataRemover::OnClearedNetworkPredictor() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  waiting_for_clear_network_predictor_ = false;
+  NotifyAndDeleteIfDone();
+}
+
+void BrowsingDataRemover::ClearNetworkPredictorOnIOThread() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
   chrome_browser_net::Predictor* predictor = profile_->GetNetworkPredictor();
   if (predictor) {
@@ -615,9 +651,16 @@ void BrowsingDataRemover::ClearNetworkingHistory(IOThread* io_thread) {
 
   // Notify the UI thread that we are done.
   BrowserThread::PostTask(
-      BrowserThread::UI, FROM_HERE,
-      base::Bind(&BrowsingDataRemover::ClearedNetworkHistory,
+      BrowserThread::UI,
+      FROM_HERE,
+      base::Bind(&BrowsingDataRemover::OnClearedNetworkPredictor,
                  base::Unretained(this)));
+}
+
+void BrowsingDataRemover::OnClearedNetworkingHistory() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  waiting_for_clear_networking_history_ = false;
+  NotifyAndDeleteIfDone();
 }
 
 void BrowsingDataRemover::ClearedCache() {
@@ -763,8 +806,7 @@ void BrowsingDataRemover::ClearLocalStorageOnUIThread() {
 }
 
 void BrowsingDataRemover::OnGotLocalStorageUsageInfo(
-    const std::vector<
-        dom_storage::DomStorageContext::LocalStorageUsageInfo>& infos) {
+    const std::vector<dom_storage::LocalStorageUsageInfo>& infos) {
   DCHECK(waiting_for_clear_local_storage_);
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
@@ -793,8 +835,7 @@ void BrowsingDataRemover::ClearSessionStorageOnUIThread() {
 }
 
 void BrowsingDataRemover::OnGotSessionStorageUsageInfo(
-    const std::vector<
-        dom_storage::DomStorageContext::SessionStorageUsageInfo>& infos) {
+    const std::vector<dom_storage::SessionStorageUsageInfo>& infos) {
   DCHECK(waiting_for_clear_session_storage_);
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
@@ -907,6 +948,7 @@ void BrowsingDataRemover::OnWaitableEventSignaled(
   NotifyAndDeleteIfDone();
 }
 
+#if defined(ENABLE_PLUGINS)
 void BrowsingDataRemover::OnDeauthorizeContentLicensesCompleted(
     uint32 request_id,
     bool /* success */) {
@@ -916,6 +958,7 @@ void BrowsingDataRemover::OnDeauthorizeContentLicensesCompleted(
   waiting_for_clear_content_licenses_ = false;
   NotifyAndDeleteIfDone();
 }
+#endif
 
 void BrowsingDataRemover::OnClearedCookies(int num_deleted) {
   if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
@@ -949,6 +992,12 @@ void BrowsingDataRemover::ClearServerBoundCertsOnIOThread(
       rq_context->GetURLRequestContext()->server_bound_cert_service();
   server_bound_cert_service->GetCertStore()->DeleteAllCreatedBetween(
       delete_begin_, delete_end_);
+  // Need to close open SSL connections which may be using the channel ids we
+  // are deleting.
+  // TODO(mattm): http://crbug.com/166069 Make the server bound cert
+  // service/store have observers that can notify relevant things directly.
+  rq_context->GetURLRequestContext()->ssl_config_service()->
+      NotifySSLConfigChange();
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
       base::Bind(&BrowsingDataRemover::OnClearedServerBoundCerts,

@@ -18,8 +18,8 @@
 
 #if defined(OS_WIN)
 #include "skia/ext/skia_utils_win.h"
-#include "ui/base/native_theme/native_theme_win.h"
 #include "ui/gfx/platform_font_win.h"
+#include "ui/native_theme/native_theme_win.h"
 #endif
 
 namespace views {
@@ -54,19 +54,9 @@ const int kMinWidthDLUs = 50;
 const int kMinHeightDLUs = 14;
 #endif
 
-int PrefixTypeToCanvasType(TextButton::PrefixType type) {
-  switch (type) {
-    case TextButton::PREFIX_HIDE:
-      return gfx::Canvas::HIDE_PREFIX;
-    case TextButton::PREFIX_SHOW:
-      return gfx::Canvas::SHOW_PREFIX;
-    case TextButton::PREFIX_NONE:
-      return 0;
-    default:
-      NOTREACHED();
-      return 0;
-  }
-}
+// The default hot and pushed button image IDs; normal has none by default.
+const int kHotImages[] = IMAGE_GRID(IDR_TEXTBUTTON_HOVER);
+const int kPushedImages[] = IMAGE_GRID(IDR_TEXTBUTTON_PRESSED);
 
 }  // namespace
 
@@ -79,50 +69,77 @@ const char NativeTextButton::kViewClassName[] = "views/NativeTextButton";
 
 ////////////////////////////////////////////////////////////////////////////////
 //
-// TextButtonBorder - constructors, destructors, initialization
+// TextButtonBorder
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-TextButtonBorder::TextButtonBorder()
-    : vertical_padding_(kPreferredPaddingVertical) {
-  set_hot_set(BorderImages(BorderImages::kHot));
-  set_pushed_set(BorderImages(BorderImages::kPushed));
+TextButtonBorder::TextButtonBorder() {
 }
 
 TextButtonBorder::~TextButtonBorder() {
 }
 
+gfx::Insets TextButtonBorder::GetInsets() const {
+  return insets_;
+}
+
+void TextButtonBorder::SetInsets(const gfx::Insets& insets) {
+  insets_ = insets;
+}
+
+TextButtonBorder* TextButtonBorder::AsTextButtonBorder() {
+  return this;
+}
+
+const TextButtonBorder* TextButtonBorder::AsTextButtonBorder() const {
+  return this;
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 //
-// TextButtonBorder - painting
+// TextButtonDefaultBorder - constructors, destructors, initialization
 //
 ////////////////////////////////////////////////////////////////////////////////
-void TextButtonBorder::Paint(const View& view, gfx::Canvas* canvas) const {
+
+TextButtonDefaultBorder::TextButtonDefaultBorder()
+    : vertical_padding_(kPreferredPaddingVertical) {
+  set_hot_painter(Painter::CreateImageGridPainter(kHotImages));
+  set_pushed_painter(Painter::CreateImageGridPainter(kPushedImages));
+  SetInsets(gfx::Insets(vertical_padding_, kPreferredPaddingHorizontal,
+                        vertical_padding_, kPreferredPaddingHorizontal));
+}
+
+TextButtonDefaultBorder::~TextButtonDefaultBorder() {
+}
+
+////////////////////////////////////////////////////////////////////////////////
+//
+// TextButtonDefaultBorder - painting
+//
+////////////////////////////////////////////////////////////////////////////////
+void TextButtonDefaultBorder::Paint(const View& view, gfx::Canvas* canvas) {
   const TextButton* button = static_cast<const TextButton*>(&view);
   int state = button->state();
 
-  const BorderImages* set = &normal_set_;
+  Painter* painter = normal_painter_.get();
   if (button->show_multiple_icon_states() &&
-      ((state == TextButton::BS_HOT) || (state == TextButton::BS_PUSHED)))
-    set = (state == TextButton::BS_HOT) ? &hot_set_ : &pushed_set_;
-  if (!set->top_left.isNull()) {
+      ((state == TextButton::STATE_HOVERED) ||
+       (state == TextButton::STATE_PRESSED))) {
+    painter = (state == TextButton::STATE_HOVERED) ?
+        hot_painter_.get() : pushed_painter_.get();
+  }
+  if (painter) {
     if (button->GetAnimation()->is_animating()) {
       // TODO(pkasting): Really this should crossfade between states so it could
       // handle the case of having a non-NULL |normal_set_|.
       canvas->SaveLayerAlpha(static_cast<uint8>(
           button->GetAnimation()->CurrentValueBetween(0, 255)));
-      set->Paint(view.GetLocalBounds(), canvas);
+      painter->Paint(canvas, view.size());
       canvas->Restore();
     } else {
-      set->Paint(view.GetLocalBounds(), canvas);
+      painter->Paint(canvas, view.size());
     }
   }
-}
-
-void TextButtonBorder::GetInsets(gfx::Insets* insets) const {
-  insets->Set(vertical_padding_, kPreferredPaddingHorizontal,
-              vertical_padding_, kPreferredPaddingHorizontal);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -134,15 +151,18 @@ void TextButtonBorder::GetInsets(gfx::Insets* insets) const {
 TextButtonNativeThemeBorder::TextButtonNativeThemeBorder(
     NativeThemeDelegate* delegate)
     : delegate_(delegate) {
+  SetInsets(gfx::Insets(kPreferredNativeThemePaddingVertical,
+                        kPreferredNativeThemePaddingHorizontal,
+                        kPreferredNativeThemePaddingVertical,
+                        kPreferredNativeThemePaddingHorizontal));
 }
 
 TextButtonNativeThemeBorder::~TextButtonNativeThemeBorder() {
 }
 
-void TextButtonNativeThemeBorder::Paint(const View& view,
-                                        gfx::Canvas* canvas) const {
+void TextButtonNativeThemeBorder::Paint(const View& view, gfx::Canvas* canvas) {
+  const ui::NativeTheme* theme = view.GetNativeTheme();
   const TextButtonBase* tb = static_cast<const TextButton*>(&view);
-  const ui::NativeTheme* native_theme = ui::NativeTheme::instance();
   ui::NativeTheme::Part part = delegate_->GetThemePart();
   gfx::Rect rect(delegate_->GetThemePaintRect());
 
@@ -153,30 +173,21 @@ void TextButtonNativeThemeBorder::Paint(const View& view,
     ui::NativeTheme::ExtraParams prev_extra;
     ui::NativeTheme::State prev_state =
         delegate_->GetBackgroundThemeState(&prev_extra);
-    native_theme->Paint(canvas->sk_canvas(), part, prev_state, rect,
-                        prev_extra);
+    theme->Paint(canvas->sk_canvas(), part, prev_state, rect, prev_extra);
 
     // Composite foreground state above it.
     ui::NativeTheme::ExtraParams extra;
     ui::NativeTheme::State state = delegate_->GetForegroundThemeState(&extra);
     int alpha = delegate_->GetThemeAnimation()->CurrentValueBetween(0, 255);
     canvas->SaveLayerAlpha(static_cast<uint8>(alpha));
-    native_theme->Paint(canvas->sk_canvas(), part, state, rect, extra);
+    theme->Paint(canvas->sk_canvas(), part, state, rect, extra);
     canvas->Restore();
   } else {
     ui::NativeTheme::ExtraParams extra;
     ui::NativeTheme::State state = delegate_->GetThemeState(&extra);
-    native_theme->Paint(canvas->sk_canvas(), part, state, rect, extra);
+    theme->Paint(canvas->sk_canvas(), part, state, rect, extra);
   }
 }
-
-void TextButtonNativeThemeBorder::GetInsets(gfx::Insets* insets) const {
-  insets->Set(kPreferredNativeThemePaddingVertical,
-              kPreferredNativeThemePaddingHorizontal,
-              kPreferredNativeThemePaddingVertical,
-              kPreferredNativeThemePaddingHorizontal);
-}
-
 
 ////////////////////////////////////////////////////////////////////////////////
 // TextButtonBase, public:
@@ -186,16 +197,6 @@ TextButtonBase::TextButtonBase(ButtonListener* listener, const string16& text)
       alignment_(ALIGN_LEFT),
       font_(ResourceBundle::GetSharedInstance().GetFont(
           ResourceBundle::BaseFont)),
-      color_(ui::NativeTheme::instance()->GetSystemColor(
-          ui::NativeTheme::kColorId_TextButtonEnabledColor)),
-      color_enabled_(ui::NativeTheme::instance()->GetSystemColor(
-          ui::NativeTheme::kColorId_TextButtonEnabledColor)),
-      color_disabled_(ui::NativeTheme::instance()->GetSystemColor(
-          ui::NativeTheme::kColorId_TextButtonDisabledColor)),
-      color_highlight_(ui::NativeTheme::instance()->GetSystemColor(
-          ui::NativeTheme::kColorId_TextButtonHighlightColor)),
-      color_hover_(ui::NativeTheme::instance()->GetSystemColor(
-          ui::NativeTheme::kColorId_TextButtonHoverColor)),
       has_text_shadow_(false),
       active_text_shadow_color_(0),
       inactive_text_shadow_color_(0),
@@ -206,8 +207,13 @@ TextButtonBase::TextButtonBase(ButtonListener* listener, const string16& text)
       show_multiple_icon_states_(true),
       is_default_(false),
       multi_line_(false),
-      prefix_type_(PREFIX_NONE) {
+      use_enabled_color_from_theme_(true),
+      use_disabled_color_from_theme_(true),
+      use_highlight_color_from_theme_(true),
+      use_hover_color_from_theme_(true) {
   SetText(text);
+  // OnNativeThemeChanged sets the color member variables.
+  TextButtonBase::OnNativeThemeChanged(GetNativeTheme());
   SetAnimationDuration(kHoverAnimationDurationMs);
 }
 
@@ -240,20 +246,24 @@ void TextButtonBase::SetFont(const gfx::Font& font) {
 
 void TextButtonBase::SetEnabledColor(SkColor color) {
   color_enabled_ = color;
+  use_enabled_color_from_theme_ = false;
   UpdateColor();
 }
 
 void TextButtonBase::SetDisabledColor(SkColor color) {
   color_disabled_ = color;
+  use_disabled_color_from_theme_ = false;
   UpdateColor();
 }
 
 void TextButtonBase::SetHighlightColor(SkColor color) {
   color_highlight_ = color;
+  use_highlight_color_from_theme_ = false;
 }
 
 void TextButtonBase::SetHoverColor(SkColor color) {
   color_hover_ = color;
+  use_hover_color_from_theme_ = false;
 }
 
 void TextButtonBase::SetTextShadowColors(SkColor active_color,
@@ -371,24 +381,21 @@ void TextButtonBase::CalculateTextSize(gfx::Size* text_size, int max_width) {
 }
 
 int TextButtonBase::ComputeCanvasStringFlags() const {
-  int flags = PrefixTypeToCanvasType(prefix_type_);
+  if (!multi_line_)
+    return 0;
 
-  if (multi_line_) {
-    flags |= gfx::Canvas::MULTI_LINE;
-
-    switch (alignment_) {
-      case ALIGN_LEFT:
-        flags |= gfx::Canvas::TEXT_ALIGN_LEFT;
-        break;
-      case ALIGN_RIGHT:
-        flags |= gfx::Canvas::TEXT_ALIGN_RIGHT;
-        break;
-      case ALIGN_CENTER:
-        flags |= gfx::Canvas::TEXT_ALIGN_CENTER;
-        break;
-    }
+  int flags = gfx::Canvas::MULTI_LINE;
+  switch (alignment_) {
+    case ALIGN_LEFT:
+      flags |= gfx::Canvas::TEXT_ALIGN_LEFT;
+      break;
+    case ALIGN_RIGHT:
+      flags |= gfx::Canvas::TEXT_ALIGN_RIGHT;
+      break;
+    case ALIGN_CENTER:
+      flags |= gfx::Canvas::TEXT_ALIGN_CENTER;
+      break;
   }
-
   return flags;
 }
 
@@ -401,7 +408,7 @@ void TextButtonBase::GetExtraParams(
   params->button.has_border = false;
   params->button.classic_state = 0;
   params->button.background_color =
-      ui::NativeTheme::instance()->GetSystemColor(
+      GetNativeTheme()->GetSystemColor(
           ui::NativeTheme::kColorId_TextButtonBackgroundColor);
 }
 
@@ -457,7 +464,8 @@ void TextButtonBase::PaintButton(gfx::Canvas* canvas, PaintButtonMode mode) {
     text_bounds.set_x(GetMirroredXForRect(text_bounds));
 
     SkColor text_color = (show_multiple_icon_states_ &&
-        (state() == BS_HOT || state() == BS_PUSHED)) ? color_hover_ : color_;
+        (state() == STATE_HOVERED || state() == STATE_PRESSED)) ?
+            color_hover_ : color_;
 
     int draw_string_flags = gfx::Canvas::DefaultCanvasTextAlignment() |
         ComputeCanvasStringFlags();
@@ -515,6 +523,26 @@ std::string TextButtonBase::GetClassName() const {
   return kViewClassName;
 }
 
+void TextButtonBase::OnNativeThemeChanged(const ui::NativeTheme* theme) {
+  if (use_enabled_color_from_theme_) {
+    color_enabled_ = theme->GetSystemColor(
+        ui::NativeTheme::kColorId_TextButtonEnabledColor);
+  }
+  if (use_disabled_color_from_theme_) {
+    color_disabled_ = theme->GetSystemColor(
+        ui::NativeTheme::kColorId_TextButtonDisabledColor);
+  }
+  if (use_highlight_color_from_theme_) {
+    color_highlight_ = theme->GetSystemColor(
+        ui::NativeTheme::kColorId_TextButtonHighlightColor);
+  }
+  if (use_hover_color_from_theme_) {
+    color_hover_ = theme->GetSystemColor(
+        ui::NativeTheme::kColorId_TextButtonHoverColor);
+  }
+  UpdateColor();
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // TextButtonBase, NativeThemeDelegate overrides:
 
@@ -526,13 +554,13 @@ ui::NativeTheme::State TextButtonBase::GetThemeState(
     ui::NativeTheme::ExtraParams* params) const {
   GetExtraParams(params);
   switch(state()) {
-    case BS_DISABLED:
+    case STATE_DISABLED:
       return ui::NativeTheme::kDisabled;
-    case BS_NORMAL:
+    case STATE_NORMAL:
       return ui::NativeTheme::kNormal;
-    case BS_HOT:
+    case STATE_HOVERED:
       return ui::NativeTheme::kHovered;
-    case BS_PUSHED:
+    case STATE_PRESSED:
       return ui::NativeTheme::kPressed;
     default:
       NOTREACHED() << "Unknown state: " << state();
@@ -541,14 +569,13 @@ ui::NativeTheme::State TextButtonBase::GetThemeState(
 }
 
 const ui::Animation* TextButtonBase::GetThemeAnimation() const {
-#if defined(USE_AURA)
-  return hover_animation_.get();
-#elif defined(OS_WIN)
-  return ui::NativeThemeWin::instance()->IsThemingActive()
-      ? hover_animation_.get() : NULL;
-#else
-  return hover_animation_.get();
+#if defined(OS_WIN)
+  if (GetNativeTheme() == ui::NativeThemeWin::instance()) {
+    return ui::NativeThemeWin::instance()->IsThemingActive() ?
+        hover_animation_.get() : NULL;
+  }
 #endif
+  return hover_animation_.get();
 }
 
 ui::NativeTheme::State TextButtonBase::GetBackgroundThemeState(
@@ -576,7 +603,7 @@ TextButton::TextButton(ButtonListener* listener, const string16& text)
       has_pushed_icon_(false),
       icon_text_spacing_(kDefaultIconTextSpacing),
       ignore_minimum_size_(true) {
-  set_border(new TextButtonBorder);
+  set_border(new TextButtonDefaultBorder);
   set_focus_border(FocusBorder::CreateDashedFocusBorder(kFocusRectInset,
                                                         kFocusRectInset,
                                                         kFocusRectInset,
@@ -704,9 +731,9 @@ gfx::Rect TextButton::GetTextBounds() const {
 
 const gfx::ImageSkia& TextButton::GetImageToPaint() const {
   if (show_multiple_icon_states_) {
-    if (has_hover_icon_ && (state() == BS_HOT))
+    if (has_hover_icon_ && (state() == STATE_HOVERED))
       return icon_hover_;
-    if (has_pushed_icon_ && (state() == BS_PUSHED))
+    if (has_pushed_icon_ && (state() == STATE_PRESSED))
       return icon_pushed_;
   }
   return icon_;
@@ -730,12 +757,7 @@ NativeTextButton::NativeTextButton(ButtonListener* listener,
 }
 
 void NativeTextButton::Init() {
-#if defined(OS_WIN)
-  // Use applicable Windows system colors.
-  color_enabled_ = skia::COLORREFToSkColor(GetSysColor(COLOR_BTNTEXT));
-  color_disabled_ = skia::COLORREFToSkColor(GetSysColor(COLOR_GRAYTEXT));
-  color_hover_ = color_ = color_enabled_;
-#endif
+  SetThemeSpecificState(GetNativeTheme());
   set_border(new TextButtonNativeThemeBorder(this));
 #if !defined(OS_WIN)
   // Paint nothing, focus will be indicated with a border highlight drawn by
@@ -755,18 +777,46 @@ std::string NativeTextButton::GetClassName() const {
   return kViewClassName;
 }
 
+void NativeTextButton::OnNativeThemeChanged(const ui::NativeTheme* theme) {
+  SetThemeSpecificState(theme);
+}
+
+void NativeTextButton::SetThemeSpecificState(const ui::NativeTheme* theme) {
+#if defined(OS_WIN)
+  if (theme == ui::NativeThemeWin::instance()) {
+    if (use_enabled_color_from_theme())
+      set_color_enabled(skia::COLORREFToSkColor(GetSysColor(COLOR_BTNTEXT)));
+    if (use_disabled_color_from_theme())
+      set_color_disabled(skia::COLORREFToSkColor(GetSysColor(COLOR_GRAYTEXT)));
+    if (use_hover_color_from_theme())
+      set_color_hover(skia::COLORREFToSkColor(GetSysColor(COLOR_BTNTEXT)));
+    UpdateColor();
+    set_focus_border(FocusBorder::CreateDashedFocusBorder(kFocusRectInset,
+                                                          kFocusRectInset,
+                                                          kFocusRectInset,
+                                                          kFocusRectInset));
+  } else {
+    // Paint nothing, focus will be indicated with a border highlight drawn by
+    // NativeThemeBase::PaintButton.
+    set_focus_border(NULL);
+  }
+#endif
+}
+
 void NativeTextButton::GetExtraParams(
     ui::NativeTheme::ExtraParams* params) const {
   TextButton::GetExtraParams(params);
   params->button.has_border = true;
-#if !defined(OS_WIN)
   // Windows may paint a dotted focus rect in
   // NativeTextButton::OnPaintFocusBorder. To avoid getting two focus
-  // indications (A dotted rect and a highlighted border) only set is_focused on
-  // non windows platforms.
+  // indications (A dotted rect and a highlighted border) only set |is_focused|
+  // when not using NativeThemeWin.
+#if defined(OS_WIN)
+  if (GetNativeTheme() == ui::NativeThemeWin::instance())
+    return;
+#endif
   params->button.is_focused = HasFocus() &&
       (focusable() || IsAccessibilityFocusable());
-#endif
 }
 
 }  // namespace views

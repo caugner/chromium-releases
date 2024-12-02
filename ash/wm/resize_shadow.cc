@@ -4,7 +4,6 @@
 
 #include "ash/wm/resize_shadow.h"
 
-#include "ash/wm/image_grid.h"
 #include "base/time.h"
 #include "grit/ash_resources.h"
 #include "ui/aura/window.h"
@@ -12,13 +11,14 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/compositor/layer.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
+#include "ui/views/corewm/image_grid.h"
 
 namespace {
 
 // Final opacity for resize effect.
 const float kShadowTargetOpacity = 0.25f;
 // Animation time for resize effect in milliseconds.
-const int kShadowAnimationDurationMs = 200;
+const int kShadowAnimationDurationMs = 100;
 
 // Sets up a layer as invisible and fully transparent, without animating.
 void InitLayer(ui::Layer* layer) {
@@ -49,7 +49,7 @@ ResizeShadow::~ResizeShadow() {}
 void ResizeShadow::Init(aura::Window* window) {
   // Set up our image grid and images.
   ResourceBundle& res = ResourceBundle::GetSharedInstance();
-  image_grid_.reset(new ImageGrid);
+  image_grid_.reset(new views::corewm::ImageGrid);
   image_grid_->SetImages(
       &res.GetImageNamed(IDR_AURA_RESIZE_SHADOW_TOP_LEFT),
       &res.GetImageNamed(IDR_AURA_RESIZE_SHADOW_TOP),

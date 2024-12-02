@@ -13,8 +13,9 @@
 #include "base/memory/weak_ptr.h"
 #include "base/sequenced_task_runner_helpers.h"
 #include "googleurl/src/gurl.h"
-#include "ipc/ipc_channel.h"
+#include "ipc/ipc_listener.h"
 #include "ipc/ipc_message.h"
+#include "ipc/ipc_sender.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/rect.h"
 #include "ui/surface/transport_dib.h"
@@ -32,10 +33,6 @@ class SkBitmap;
 
 namespace base {
 class WaitableEvent;
-}
-
-namespace skia {
-class PlatformCanvas;
 }
 
 namespace webkit {
@@ -143,14 +140,15 @@ class WebPluginDelegateProxy
     ~SharedBitmap();
 
     scoped_ptr<TransportDIB> dib;
-    scoped_ptr<skia::PlatformCanvas> canvas;
+    scoped_ptr<SkCanvas> canvas;
   };
 
   // Message handlers for messages that proxy WebPlugin methods, which
   // we translate into calls to the real WebPlugin.
   void OnSetWindow(gfx::PluginWindowHandle window);
 #if defined(OS_WIN)
-  void OnSetWindowlessPumpEvent(HANDLE modal_loop_pump_messages_event);
+  void OnSetWindowlessData(HANDLE modal_loop_pump_messages_event,
+                           gfx::NativeViewId dummy_activation_window);
   void OnNotifyIMEStatus(const int input_mode, const gfx::Rect& caret_rect);
 #endif
   void OnCompleteURL(const std::string& url_in, std::string* url_out,
@@ -206,11 +204,6 @@ class WebPluginDelegateProxy
   // Draw a graphic indicating a crashed plugin.
   void PaintSadPlugin(WebKit::WebCanvas* canvas, const gfx::Rect& rect);
 
-  // Returns true if the given rectangle is different in the native drawing
-  // context and the current background bitmap.
-  bool BackgroundChanged(gfx::NativeDrawingContext context,
-                         const gfx::Rect& rect);
-
   // Copies the given rectangle from the back-buffer transport_stores_ bitmap to
   // the front-buffer transport_stores_ bitmap.
   void CopyFromBackBufferToFrontBuffer(const gfx::Rect& rect);
@@ -230,11 +223,11 @@ class WebPluginDelegateProxy
     return 1 - front_buffer_index_;
   }
 
-  skia::PlatformCanvas* front_buffer_canvas() const {
+  SkCanvas* front_buffer_canvas() const {
     return transport_stores_[front_buffer_index()].canvas.get();
   }
 
-  skia::PlatformCanvas* back_buffer_canvas() const {
+  SkCanvas* back_buffer_canvas() const {
     return transport_stores_[back_buffer_index()].canvas.get();
   }
 
@@ -250,12 +243,12 @@ class WebPluginDelegateProxy
   // Creates a process-local memory section and canvas. PlatformCanvas on
   // Windows only works with a DIB, not arbitrary memory.
   bool CreateLocalBitmap(std::vector<uint8>* memory,
-                         scoped_ptr<skia::PlatformCanvas>* canvas);
+                         scoped_ptr<SkCanvas>* canvas);
 #endif
 
   // Creates a shared memory section and canvas.
   bool CreateSharedBitmap(scoped_ptr<TransportDIB>* memory,
-                          scoped_ptr<skia::PlatformCanvas>* canvas);
+                          scoped_ptr<SkCanvas>* canvas);
 
   // Called for cleanup during plugin destruction. Normally right before the
   // plugin window gets destroyed, or when the plugin has crashed (at which
@@ -281,6 +274,9 @@ class WebPluginDelegateProxy
   bool uses_shared_bitmaps_;
 #if defined(OS_MACOSX)
   bool uses_compositor_;
+#elif defined(OS_WIN)
+  // Used for windowless plugins so that keyboard activation works.
+  gfx::NativeViewId dummy_activation_window_;
 #endif
   gfx::PluginWindowHandle window_;
   scoped_refptr<PluginChannelHost> channel_host_;
@@ -294,8 +290,8 @@ class WebPluginDelegateProxy
   NPObject* npobject_;
   base::WeakPtr<NPObjectStub> window_script_object_;
 
-  // Event passed in by the plugin process and is used to decide if
-  // messages need to be pumped in the NPP_HandleEvent sync call.
+  // Event passed in by the plugin process and is used to decide if messages
+  // need to be pumped in the NPP_HandleEvent sync call.
   scoped_ptr<base::WaitableEvent> modal_loop_pump_messages_event_;
 
   // Bitmap for crashed plugin
@@ -304,17 +300,10 @@ class WebPluginDelegateProxy
   // True if we got an invalidate from the plugin and are waiting for a paint.
   bool invalidate_pending_;
 
-  // Used to desynchronize windowless painting.  When WebKit paints, we bitblt
-  // from our front buffer store of what the plugin rectangle looks like.  The
-  // plugin paints into the back buffer store, and we swap the buffers when we
-  // get an invalidate from it.  The background bitmap is used for transparent
-  // plugins, as they need the background data during painting.
-  bool transparent_;
   // The index in the transport_stores_ array of the current front buffer
   // (i.e., the buffer to display).
   int front_buffer_index_;
   SharedBitmap transport_stores_[2];
-  SharedBitmap background_store_;
   // This lets us know the total portion of the transport store that has been
   // painted since the buffers were created.
   gfx::Rect transport_store_painted_;

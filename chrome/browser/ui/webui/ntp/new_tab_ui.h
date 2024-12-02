@@ -99,9 +99,12 @@ class NewTabUI : public content::WebUIController,
  private:
   FRIEND_TEST_ALL_PREFIXES(NewTabUITest, UpdateUserPrefsVersion);
 
+  // content::NotificationObserver implementation.
   virtual void Observe(int type,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
+
+  void OnShowBookmarkBarChanged();
 
   // Reset the CSS caches.
   void InitializeCSSCaches();

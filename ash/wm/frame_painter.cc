@@ -34,6 +34,9 @@
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
 
+using aura::RootWindow;
+using aura::Window;
+
 namespace {
 // TODO(jamescook): Border is specified to be a single pixel overlapping
 // the web content and may need to be built into the shadow layers instead.
@@ -62,7 +65,10 @@ const int kCloseButtonOffsetX = 0;
 const int kCloseButtonOffsetY = 0;
 // The size and close buttons are designed to slightly overlap in order
 // to do fancy hover highlighting.
-const int kButtonOverlap = 1;
+const int kSizeButtonOffsetX = -1;
+// Space between size and immersive buttons.
+// TODO(jamescook): Adjust for final art.
+const int kImmersiveButtonOffsetX = 2;
 // In the pre-Ash era the web content area had a frame along the left edge, so
 // user-generated theme images for the new tab page assume they are shifted
 // right relative to the header.  Now that we have removed the left edge frame
@@ -99,12 +105,21 @@ void TileRoundRect(gfx::Canvas* canvas,
   canvas->DrawImageInPath(image, -image_inset_x, 0, path, paint);
 }
 
+// Returns true if |child| and all ancestors are visible.
+bool IsVisibleToRoot(Window* child) {
+  for (Window* window = child; window; window = window->parent()) {
+    // We must use TargetVisibility() because windows animate in and out and
+    // IsVisible() also tracks the layer visibility state.
+    if (!window->TargetVisibility())
+      return false;
+  }
+  return true;
+}
 // Returns true if |window| is a visible, normal window.
 bool IsVisibleNormalWindow(aura::Window* window) {
-  // We must use TargetVisibility() because windows animate in and out and
-  // IsVisible() also tracks the layer visibility state.
+  // Test visibility up to root in case the whole workspace is hidden.
   return window &&
-    window->TargetVisibility() &&
+    IsVisibleToRoot(window) &&
     (window->type() == aura::client::WINDOW_TYPE_NORMAL ||
      window->type() == aura::client::WINDOW_TYPE_PANEL);
 }
@@ -127,6 +142,7 @@ FramePainter::FramePainter()
       window_icon_(NULL),
       size_button_(NULL),
       close_button_(NULL),
+      immersive_button_(NULL),
       window_(NULL),
       button_separator_(NULL),
       top_left_corner_(NULL),
@@ -210,6 +226,19 @@ void FramePainter::Init(views::Widget* frame,
   UpdateSoloWindowFramePainter(NULL);
 }
 
+// static
+void FramePainter::UpdateSoloWindowHeader(RootWindow* root_window) {
+  // Use a separate function here so callers outside of FramePainter don't need
+  // to know about "ignorable_window".
+  UpdateSoloWindowInRoot(root_window, NULL /* ignorable_window */);
+}
+
+void FramePainter::AddImmersiveButton(views::ToggleImageButton* button) {
+  DCHECK(button);
+  immersive_button_ = button;
+  immersive_button_->SetVisible(frame_->IsMaximized());
+}
+
 gfx::Rect FramePainter::GetBoundsForClientView(
     int top_height,
     const gfx::Rect& window_bounds) const {
@@ -274,6 +303,10 @@ int FramePainter::NonClientHitTest(views::NonClientFrameView* view,
   if (size_button_->visible() &&
       size_button_->GetMirroredBounds().Contains(point))
     return HTMAXBUTTON;
+  if (immersive_button_ &&
+      immersive_button_->visible() &&
+      immersive_button_->GetMirroredBounds().Contains(point))
+    return HTCLIENT;  // No special constant, but cannot be HTCAPTION.
 
   // Caption is a safe default.
   return HTCAPTION;
@@ -287,19 +320,29 @@ gfx::Size FramePainter::GetMinimumSize(views::NonClientFrameView* view) {
   // Ensure we have enough space for the window icon and buttons.  We allow
   // the title string to collapse to zero width.
   int title_width = GetTitleOffsetX() +
-      size_button_->width() -
-      kButtonOverlap +
-      close_button_->width();
+      size_button_->width() + kSizeButtonOffsetX +
+      close_button_->width() + kCloseButtonOffsetX;
+  if (immersive_button_)
+    title_width += immersive_button_->width() + kImmersiveButtonOffsetX;
   if (title_width > min_size.width())
     min_size.set_width(title_width);
   return min_size;
 }
 
+gfx::Size FramePainter::GetMaximumSize(views::NonClientFrameView* view) {
+  return frame_->client_view()->GetMaximumSize();
+}
+
 int FramePainter::GetRightInset() const {
   gfx::Size close_size = close_button_->GetPreferredSize();
   gfx::Size size_button_size = size_button_->GetPreferredSize();
-  return close_size.width() + kCloseButtonOffsetX + size_button_size.width() -
-      kButtonOverlap;
+  int inset = close_size.width() + kCloseButtonOffsetX +
+      size_button_size.width() + kSizeButtonOffsetX;
+  if (immersive_button_) {
+    gfx::Size immersive_size = immersive_button_->GetPreferredSize();
+    inset += immersive_size.width() + kImmersiveButtonOffsetX;
+  }
+  return inset;
 }
 
 int FramePainter::GetThemeBackgroundXInset() const {
@@ -516,6 +559,17 @@ void FramePainter::LayoutHeader(views::NonClientFrameView* view,
                     IDR_AURA_WINDOW_MAXIMIZE_P);
   }
 
+  if (immersive_button_) {
+    SetButtonImages(immersive_button_,
+                    IDR_AURA_WINDOW_IMMERSIVE_ENTER,
+                    IDR_AURA_WINDOW_IMMERSIVE_ENTER_H,
+                    IDR_AURA_WINDOW_IMMERSIVE_ENTER_P);
+    SetToggledButtonImages(immersive_button_,
+                           IDR_AURA_WINDOW_IMMERSIVE_EXIT,
+                           IDR_AURA_WINDOW_IMMERSIVE_EXIT_H,
+                           IDR_AURA_WINDOW_IMMERSIVE_EXIT_P);
+  }
+
   gfx::Size close_size = close_button_->GetPreferredSize();
   close_button_->SetBounds(
       view->width() - close_size.width() - kCloseButtonOffsetX,
@@ -525,10 +579,20 @@ void FramePainter::LayoutHeader(views::NonClientFrameView* view,
 
   gfx::Size size_button_size = size_button_->GetPreferredSize();
   size_button_->SetBounds(
-      close_button_->x() - size_button_size.width() + kButtonOverlap,
+      close_button_->x() - size_button_size.width() - kSizeButtonOffsetX,
       close_button_->y(),
       size_button_size.width(),
       size_button_size.height());
+
+  if (immersive_button_) {
+    gfx::Size immersive_size = immersive_button_->GetPreferredSize();
+    // TODO(jamescook): Fix layout when we have real art.
+    immersive_button_->SetBounds(
+        size_button_->x() - immersive_size.width() - kImmersiveButtonOffsetX,
+        size_button_->y(),
+        immersive_size.width(),
+        immersive_size.height());
+  }
 
   if (window_icon_)
     window_icon_->SetBoundsRect(
@@ -568,6 +632,10 @@ void FramePainter::OnWindowPropertyChanged(aura::Window* window,
         gfx::Insets(kResizeInsideBoundsSize, kResizeInsideBoundsSize,
                     kResizeInsideBoundsSize, kResizeInsideBoundsSize));
   }
+
+  // Immersive button only shows in maximized windows.
+  if (immersive_button_)
+    immersive_button_->SetVisible(frame_->IsMaximized());
 }
 
 void FramePainter::OnWindowVisibilityChanged(aura::Window* window,
@@ -633,12 +701,25 @@ void FramePainter::SetButtonImages(views::ImageButton* button,
                                    int hot_image_id,
                                    int pushed_image_id) {
   ui::ThemeProvider* theme_provider = frame_->GetThemeProvider();
-  button->SetImage(views::CustomButton::BS_NORMAL,
+  button->SetImage(views::CustomButton::STATE_NORMAL,
                    theme_provider->GetImageSkiaNamed(normal_image_id));
-  button->SetImage(views::CustomButton::BS_HOT,
+  button->SetImage(views::CustomButton::STATE_HOVERED,
                    theme_provider->GetImageSkiaNamed(hot_image_id));
-  button->SetImage(views::CustomButton::BS_PUSHED,
+  button->SetImage(views::CustomButton::STATE_PRESSED,
                    theme_provider->GetImageSkiaNamed(pushed_image_id));
+}
+
+void FramePainter::SetToggledButtonImages(views::ToggleImageButton* button,
+                                          int normal_image_id,
+                                          int hot_image_id,
+                                          int pushed_image_id) {
+  ui::ThemeProvider* theme_provider = frame_->GetThemeProvider();
+  button->SetToggledImage(views::CustomButton::STATE_NORMAL,
+                          theme_provider->GetImageSkiaNamed(normal_image_id));
+  button->SetToggledImage(views::CustomButton::STATE_HOVERED,
+                          theme_provider->GetImageSkiaNamed(hot_image_id));
+  button->SetToggledImage(views::CustomButton::STATE_PRESSED,
+                          theme_provider->GetImageSkiaNamed(pushed_image_id));
 }
 
 int FramePainter::GetTitleOffsetX() const {
@@ -716,11 +797,13 @@ bool FramePainter::UseSoloWindowHeader() {
   return (root->GetProperty(internal::kSoloWindowFramePainterKey) == this);
 }
 
-FramePainter* FramePainter::GetSoloPainterInRoot(
-    aura::Window* ignorable_window) {
-  DCHECK(instances_);
+// static
+FramePainter* FramePainter::GetSoloPainterInRoot(RootWindow* root_window,
+                                                 Window* ignorable_window) {
+  // Can be NULL in tests that don't use FramePainter windows.
+  if (!instances_)
+    return NULL;
 
-  aura::RootWindow* root_window = window_->GetRootWindow();
   FramePainter* painter = NULL;
   for (std::set<FramePainter*>::const_iterator it = instances_->begin();
        it != instances_->end();
@@ -748,27 +831,31 @@ FramePainter* FramePainter::GetSoloPainterInRoot(
   return painter;
 }
 
-void FramePainter::UpdateSoloWindowFramePainter(
-    aura::Window* ignorable_window) {
-  aura::RootWindow* root = window_->GetRootWindow();
+// static
+void FramePainter::UpdateSoloWindowInRoot(RootWindow* root,
+                                          Window* ignorable_window) {
   if (!root)
     return;
 
   FramePainter* old_solo_painter = root->GetProperty(
       internal::kSoloWindowFramePainterKey);
-  FramePainter* new_solo_painter = GetSoloPainterInRoot(ignorable_window);
+  FramePainter* new_solo_painter = GetSoloPainterInRoot(root, ignorable_window);
   if (old_solo_painter != new_solo_painter) {
     if (old_solo_painter && old_solo_painter->frame_ &&
         old_solo_painter->frame_->non_client_view()) {
       old_solo_painter->frame_->non_client_view()->SchedulePaint();
     }
-    window_->GetRootWindow()->SetProperty(
-        internal::kSoloWindowFramePainterKey, new_solo_painter);
+    root->SetProperty(internal::kSoloWindowFramePainterKey, new_solo_painter);
     if (new_solo_painter && new_solo_painter->frame_ &&
         new_solo_painter->frame_->non_client_view()) {
       new_solo_painter->frame_->non_client_view()->SchedulePaint();
     }
   }
+}
+
+void FramePainter::UpdateSoloWindowFramePainter(
+    aura::Window* ignorable_window) {
+  UpdateSoloWindowInRoot(window_->GetRootWindow(), ignorable_window);
 }
 
 void FramePainter::SchedulePaintForHeader() {

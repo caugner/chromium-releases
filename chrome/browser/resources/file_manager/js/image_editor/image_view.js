@@ -327,6 +327,16 @@ ImageView.prototype.load = function(url, metadata, effect,
       this.replace(video, effect); // Show the poster immediately.
       if (displayCallback) displayCallback();
     }
+
+    function onVideoLoad(error) {
+      video.removeEventListener('loadedmetadata', onVideoLoadSuccess);
+      video.removeEventListener('error', onVideoLoadError);
+      displayMainImage(ImageView.LOAD_TYPE_VIDEO_FILE, videoPreview, video,
+          error);
+    }
+    var onVideoLoadError = onVideoLoad.bind(this, 'VIDEO_ERROR');
+    var onVideoLoadSuccess = onVideoLoad.bind(this, null);
+
     video.addEventListener('loadedmetadata', onVideoLoadSuccess);
     video.addEventListener('error', onVideoLoadError);
 
@@ -334,15 +344,6 @@ ImageView.prototype.load = function(url, metadata, effect,
     video.src = (navigator.onLine && metadata.streaming &&
                  metadata.streaming.url) || url;
     video.load();
-
-    function onVideoLoad(opt_error) {
-      video.removeEventListener('loadedmetadata', onVideoLoadSuccess);
-      video.removeEventListener('error', onVideoLoadError);
-      displayMainImage(ImageView.LOAD_TYPE_VIDEO_FILE, videoPreview, video,
-          opt_error);
-    }
-    var onVideoLoadError = onVideoLoad.bind(this, 'VIDEO_ERROR');
-    var onVideoLoadSuccess = onVideoLoad.bind(this, null);
     return;
   }
   var cached = this.contentCache_.getItem(this.contentID_);
@@ -358,8 +359,10 @@ ImageView.prototype.load = function(url, metadata, effect,
       // the full res image to make editing possible, but we can report now.
       ImageUtil.metrics.recordInterval(ImageUtil.getMetricName('DisplayTime'));
     } else if ((!effect || (effect.constructor.name == 'Slide')) &&
-        metadata.thumbnail && metadata.thumbnail.url) {
+        metadata.thumbnail && metadata.thumbnail.url &&
+        !(metadata.media && ImageUtil.ImageLoader.isTooLarge(metadata.media))) {
       // Only show thumbnails if there is no effect or the effect is Slide.
+      // Also no thumbnail if the image is too large to be loaded.
       this.imageLoader_.load(
           metadata.thumbnail.url,
           function(url, callback) { callback(metadata.thumbnail.transform); },

@@ -9,6 +9,7 @@
 
 #include "base/compiler_specific.h"
 #include "chrome/browser/media_gallery/media_galleries_dialog_controller.h"
+#include "ui/views/controls/button/button.h"
 #include "ui/views/window/dialog_delegate.h"
 
 class ConstrainedWindowViews;
@@ -42,7 +43,7 @@ class MediaGalleriesDialogViews : public MediaGalleriesDialog,
   virtual views::View* GetContentsView() OVERRIDE;
   virtual string16 GetDialogButtonLabel(ui::DialogButton button) const OVERRIDE;
   virtual bool IsDialogButtonEnabled(ui::DialogButton button) const OVERRIDE;
-  virtual bool UseChromeStyle() const OVERRIDE;
+  virtual ui::ModalType GetModalType() const OVERRIDE;
   virtual views::View* GetExtraView() OVERRIDE;
   virtual bool Cancel() OVERRIDE;
   virtual bool Accept() OVERRIDE;
@@ -58,8 +59,7 @@ class MediaGalleriesDialogViews : public MediaGalleriesDialog,
 
   // Adds a checkbox or updates an existing checkbox. Returns true if a new one
   // was added.
-  bool AddOrUpdateGallery(const MediaGalleryPrefInfo* gallery,
-                          bool permitted);
+  bool AddOrUpdateGallery(const MediaGalleryPrefInfo* gallery, bool permitted);
 
   MediaGalleriesDialogController* controller_;
 
@@ -82,9 +82,6 @@ class MediaGalleriesDialogViews : public MediaGalleriesDialog,
 
   // True if the user has pressed accept.
   bool accepted_;
-
-  // True if using the new "chrome style" constrained dialogs.
-  bool enable_chrome_style_;
 
   DISALLOW_COPY_AND_ASSIGN(MediaGalleriesDialogViews);
 };

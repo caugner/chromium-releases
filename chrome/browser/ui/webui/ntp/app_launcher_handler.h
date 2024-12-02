@@ -9,10 +9,10 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "base/prefs/public/pref_change_registrar.h"
-#include "chrome/browser/common/cancelable_request.h"
 #include "chrome/browser/extensions/extension_install_prompt.h"
 #include "chrome/browser/extensions/extension_uninstall_dialog.h"
 #include "chrome/browser/favicon/favicon_service.h"
+#include "chrome/common/cancelable_task_tracker.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "content/public/browser/notification_observer.h"
@@ -154,11 +154,13 @@ class AppLauncherHandler : public content::WebUIMessageHandler,
   ExtensionInstallPrompt* GetExtensionInstallPrompt();
 
   // Continuation for installing a bookmark app after favicon lookup.
-  void OnFaviconForApp(FaviconService::Handle handle,
+  void OnFaviconForApp(scoped_ptr<AppInstallInfo> install_info,
                        const history::FaviconImageResult& image_result);
 
   // Sends |highlight_app_id_| to the js.
   void SetAppToBeHighlighted();
+
+  void OnPreferenceChanged();
 
   // The apps are represented in the extensions model, which
   // outlives us since it's owned by our containing profile.
@@ -199,8 +201,8 @@ class AppLauncherHandler : public content::WebUIMessageHandler,
   // when the app is added to the page (via getAppsCallback or appAdded).
   std::string highlight_app_id_;
 
-  // Hold state for favicon requests.
-  CancelableRequestConsumerTSimple<AppInstallInfo*> favicon_consumer_;
+  // Used for favicon loading tasks.
+  CancelableTaskTracker cancelable_task_tracker_;
 
   DISALLOW_COPY_AND_ASSIGN(AppLauncherHandler);
 };

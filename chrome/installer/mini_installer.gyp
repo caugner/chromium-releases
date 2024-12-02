@@ -266,7 +266,8 @@
                 #'--setup_exe_format=DIFF',
                 #'--diff_algorithm=COURGETTE',
               ],
-              'message': 'Create installer archive'
+              'message': 'Create installer archive',
+              'msvs_cygwin_shell': 1,
             },
           ],
         },

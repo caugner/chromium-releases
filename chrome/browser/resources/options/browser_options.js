@@ -33,8 +33,15 @@ cr.define('options', function() {
     onShowHomeButtonChangedCalled_: false,
 
     /**
-     * @inheritDoc
+     * Track if page initialization is complete.  All C++ UI handlers have the
+     * chance to manipulate page content within their InitializePage mathods.
+     * This flag is set to true after all initializers have been called.
+     * @type (boolean}
+     * @private
      */
+    initializationComplete_: false,
+
+    /** @override */
     initializePage: function() {
       OptionsPage.prototype.initializePage.call(this);
       var self = this;
@@ -151,6 +158,12 @@ cr.define('options', function() {
       };
       $('default-search-engine').addEventListener('change',
           this.setDefaultSearchEngine_);
+      if (loadTimeData.getValue('instant_enabled') ==
+          'instant_extended.enabled') {
+        // We don't want to see the confirm dialog for instant extended.
+        $('instant-enabled-control').removeAttribute('dialog-pref');
+        $('instant-enabled-indicator').removeAttribute('dialog-pref');
+      }
 
       // Users section.
       if (loadTimeData.valueExists('profilesInfo')) {
@@ -233,7 +246,7 @@ cr.define('options', function() {
       if ($('metricsReportingEnabled')) {
         $('metricsReportingEnabled').onclick = function(event) {
           chrome.send('metricsReportingCheckboxAction',
-              [String(event.target.checked)]);
+              [String(event.currentTarget.checked)]);
         };
       }
 
@@ -391,11 +404,6 @@ cr.define('options', function() {
           chrome.send('highContrastChange',
                       [$('accessibility-high-contrast-check').checked]);
         };
-
-        $('accessibility-screen-magnifier-check').onchange = function(event) {
-          chrome.send('screenMagnifierChange',
-                      [$('accessibility-screen-magnifier-check').checked]);
-        };
       }
 
       // Display management section (CrOS only).
@@ -415,11 +423,19 @@ cr.define('options', function() {
       }
     },
 
-    /**
-     * @inheritDoc
-     */
+    /** @override */
     didShowPage: function() {
       $('search-field').focus();
+    },
+
+   /**
+    * Called after all C++ UI handlers have called InitializePage to notify
+    * that initialization is complete.
+    * @private
+    */
+    notifyInitializationComplete_: function() {
+      this.initializationComplete_ = true;
+      cr.dispatchSimpleEvent(document, 'initializationComplete');
     },
 
     /**
@@ -458,6 +474,42 @@ cr.define('options', function() {
     },
 
     /**
+     * Shows the given section.
+     * @param {HTMLElement} section The section to be shown.
+     * @param {HTMLElement} container The container for the section. Must be
+     *     inside of |section|.
+     * @param {boolean} animate Indicate if the expansion should be animated.
+     * @private
+     */
+    showSection_: function(section, container, animate) {
+      if (animate)
+        this.addTransitionEndListener_(section);
+
+      // Unhide
+      section.hidden = false;
+
+      var expander = function() {
+        // Reveal the section using a WebKit transition if animating.
+        if (animate) {
+          section.classList.add('sliding');
+          section.style.height = container.offsetHeight + 'px';
+        } else {
+          section.style.height = 'auto';
+        }
+        // Force an update of the list of paired Bluetooth devices.
+        if (cr.isChromeOS)
+          $('bluetooth-paired-devices-list').refresh();
+      };
+
+      // Delay starting the transition if animating so that hidden change will
+      // be processed.
+      if (animate)
+        setTimeout(expander, 0);
+      else
+        expander();
+      },
+
+    /**
      * Shows the given section, with animation.
      * @param {HTMLElement} section The section to be shown.
      * @param {HTMLElement} container The container for the section. Must be
@@ -465,22 +517,7 @@ cr.define('options', function() {
      * @private
      */
     showSectionWithAnimation_: function(section, container) {
-      this.addTransitionEndListener_(section);
-
-      // Unhide
-      section.hidden = false;
-
-      // Delay starting the transition so that hidden change will be
-      // processed.
-      setTimeout(function() {
-        // Reveal the section using a WebKit transition.
-        section.classList.add('sliding');
-        section.style.height =
-            container.offsetHeight + 'px';
-        // Force an update of the list of paired Bluetooth devices.
-        if (cr.isChromeOS)
-           $('bluetooth-paired-devices-list').refresh();
-      }, 0);
+      this.showSection_(section, container, /*animate */ true);
     },
 
     /**
@@ -510,6 +547,51 @@ cr.define('options', function() {
         this.showSectionWithAnimation_(section, container);
       else
         this.hideSectionWithAnimation_(section, container);
+    },
+
+    /**
+     * Scrolls the settings page to make the section visible auto-expanding
+     * advanced settings if required.  The transition is not animated.  This
+     * method is used to ensure that a section associated with an overlay
+     * is visible when the overlay is closed.
+     * @param {!Element} section  The section to make visible.
+     * @private
+     */
+    scrollToSection_: function(section) {
+      var advancedSettings = $('advanced-settings');
+      var container = $('advanced-settings-container');
+      if (advancedSettings.hidden && section.parentNode == container) {
+        this.showSection_($('advanced-settings'),
+                          $('advanced-settings-container'),
+                          /* animate */ false);
+        this.updateAdvancedSettingsExpander_();
+      }
+
+      if (!this.initializationComplete_) {
+        var self = this;
+        var callback = function() {
+           document.removeEventListener('initializationComplete', callback);
+           self.scrollToSection_(section);
+        };
+        document.addEventListener('initializationComplete', callback);
+        return;
+      }
+
+      var pageContainer = $('page-container');
+      var pageTop = parseFloat(pageContainer.style.top);
+      var topSection = document.querySelector('#page-container section');
+      var pageHeight = document.body.scrollHeight - topSection.offsetTop;
+      var sectionTop = section.offsetTop;
+      var sectionHeight = section.offsetHeight;
+      var marginBottom = window.getComputedStyle(section).marginBottom;
+      if (marginBottom)
+        sectionHeight += parseFloat(marginBottom);
+      if (pageHeight - pageTop < sectionTop + sectionHeight) {
+        pageContainer.oldScrollTop = sectionTop + sectionHeight - pageHeight;
+        var verticalPosition = pageContainer.getBoundingClientRect().top -
+            pageContainer.oldScrollTop;
+        pageContainer.style.top = verticalPosition + 'px';
+      }
     },
 
     /**
@@ -586,7 +668,7 @@ cr.define('options', function() {
           syncData.setupInProgress ?
               loadTimeData.getString('syncButtonTextInProgress') :
               loadTimeData.getString('syncButtonTextStart');
-
+      $('start-stop-sync-indicator').hidden = startStopButton.hidden;
 
       // TODO(estade): can this just be textContent?
       $('sync-status-text').innerHTML = syncData.statusText;
@@ -1099,14 +1181,6 @@ cr.define('options', function() {
     },
 
     /**
-     * Set the initial state of the screen magnifier checkbox.
-     * @private
-     */
-    setScreenMagnifierCheckboxState_: function(checked) {
-      $('accessibility-screen-magnifier-check').checked = checked;
-    },
-
-    /**
      * Set the initial state of the virtual keyboard checkbox.
      * @private
      */
@@ -1123,11 +1197,12 @@ cr.define('options', function() {
     },
 
     /**
-     * Show/hide touchpad settings slider.
+     * Show/hide touchpad-related settings.
      * @private
      */
     showTouchpadControls_: function(show) {
       $('touchpad-settings').hidden = !show;
+      $('accessibility-tap-dragging').hidden = !show;
     },
 
     /**
@@ -1139,7 +1214,7 @@ cr.define('options', function() {
     },
 
     /**
-     * Activate the bluetooth settings section on the System settings page.
+     * Activate the Bluetooth settings section on the System settings page.
      * @private
      */
     showBluetoothSettings_: function() {
@@ -1147,7 +1222,7 @@ cr.define('options', function() {
     },
 
     /**
-     * Dectivates the bluetooth settings section from the System settings page.
+     * Dectivates the Bluetooth settings section from the System settings page.
      * @private
      */
     hideBluetoothSettings_: function() {
@@ -1155,7 +1230,7 @@ cr.define('options', function() {
     },
 
     /**
-     * Sets the state of the checkbox indicating if bluetooth is turned on. The
+     * Sets the state of the checkbox indicating if Bluetooth is turned on. The
      * state of the "Find devices" button and the list of discovered devices may
      * also be affected by a change to the state.
      * @param {boolean} checked Flag Indicating if Bluetooth is turned on.
@@ -1176,14 +1251,14 @@ cr.define('options', function() {
     },
 
     /**
-     * Adds an element to the list of available bluetooth devices. If an element
+     * Adds an element to the list of available Bluetooth devices. If an element
      * with a matching address is found, the existing element is updated.
      * @param {{name: string,
      *          address: string,
      *          paired: boolean,
      *          bonded: boolean,
      *          connected: boolean}} device
-     *     Decription of the bluetooth device.
+     *     Decription of the Bluetooth device.
      * @private
      */
     addBluetoothDevice_: function(device) {
@@ -1235,8 +1310,10 @@ cr.define('options', function() {
     'getCurrentProfile',
     'getStartStopSyncButton',
     'hideBluetoothSettings',
+    'notifyInitializationComplete',
     'removeBluetoothDevice',
     'removeCloudPrintConnectorSection',
+    'scrollToSection',
     'setAutoOpenFileTypesDisplayed',
     'setBluetoothState',
     'setFontSize',
@@ -1246,7 +1323,6 @@ cr.define('options', function() {
     'setMetricsReportingSettingVisibility',
     'setPasswordGenerationSettingVisibility',
     'setProfilesInfo',
-    'setScreenMagnifierCheckboxState',
     'setSpokenFeedbackCheckboxState',
     'setThemesResetButtonEnabled',
     'setVirtualKeyboardCheckboxState',

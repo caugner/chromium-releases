@@ -7,6 +7,7 @@
 
 #include "base/callback_forward.h"
 #include "base/hash_tables.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/supports_user_data.h"
 #include "content/common/content_export.h"
 
@@ -39,8 +40,7 @@ class CONTENT_EXPORT BrowserContext : public base::SupportsUserData {
  public:
   // Used in ForEachStoragePartition(). The first argument is the partition id.
   // The second argument is the StoragePartition object for that partition id.
-  typedef base::Callback<void(const std::string&, StoragePartition*)>
-      StoragePartitionCallback;
+  typedef base::Callback<void(StoragePartition*)> StoragePartitionCallback;
 
   static DownloadManager* GetDownloadManager(BrowserContext* browser_context);
 
@@ -51,6 +51,17 @@ class CONTENT_EXPORT BrowserContext : public base::SupportsUserData {
   static void ForEachStoragePartition(
       BrowserContext* browser_context,
       const StoragePartitionCallback& callback);
+  static void AsyncObliterateStoragePartition(
+      BrowserContext* browser_context,
+      const GURL& site,
+      const base::Closure& on_gc_required);
+
+  // This function clears the contents of |active_paths| but does not take
+  // ownership of the pointer.
+  static void GarbageCollectStoragePartitions(
+      BrowserContext* browser_context,
+      scoped_ptr<base::hash_set<FilePath> > active_paths,
+      const base::Closure& done);
 
   // DON'T USE THIS. GetDefaultStoragePartition() is going away.
   // Use GetStoragePartition() instead. Ask ajwong@ if you have problems.
@@ -94,7 +105,8 @@ class CONTENT_EXPORT BrowserContext : public base::SupportsUserData {
       int renderer_child_id) = 0;
 
   virtual net::URLRequestContextGetter* GetRequestContextForStoragePartition(
-      const std::string& partition_id) = 0;
+      const FilePath& partition_path,
+      bool in_memory) = 0;
 
   // Returns the default request context for media resources associated with
   // this context.
@@ -107,7 +119,8 @@ class CONTENT_EXPORT BrowserContext : public base::SupportsUserData {
       int renderer_child_id) = 0;
   virtual net::URLRequestContextGetter*
       GetMediaRequestContextForStoragePartition(
-          const std::string& partition_id) = 0;
+          const FilePath& partition_path,
+          bool in_memory) = 0;
 
   // Returns the resource context.
   virtual ResourceContext* GetResourceContext() = 0;

@@ -24,12 +24,10 @@
 #include "chrome/browser/infobars/infobar.h"
 #include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/webui/chrome_web_ui_controller_factory.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/api/debugger.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/extensions/extension_error_utils.h"
 #include "content/public/browser/devtools_agent_host_registry.h"
 #include "content/public/browser/devtools_client_host.h"
 #include "content/public/browser/devtools_manager.h"
@@ -38,6 +36,7 @@
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_client.h"
+#include "extensions/common/error_utils.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "webkit/glue/webkit_glue.h"
@@ -48,6 +47,7 @@ using content::DevToolsClientHost;
 using content::DevToolsManager;
 using content::WebContents;
 using extensions::api::debugger::Debuggee;
+using extensions::ErrorUtils;
 
 namespace keys = debugger_api_constants;
 namespace Attach = extensions::api::debugger::Attach;
@@ -102,14 +102,14 @@ class ExtensionDevToolsClientHost : public DevToolsClientHost,
                             const std::string& method,
                             SendCommand::Params::CommandParams* command_params);
 
-  // Mark methods below determine the connection termination reason.
-  void MarkAsReplaced();
+  // Marks connection as to-be-terminated by the user.
   void MarkAsDismissed();
 
   // DevToolsClientHost interface
   virtual void InspectedContentsClosing() OVERRIDE;
   virtual void DispatchOnInspectorFrontend(const std::string& message) OVERRIDE;
   virtual void ContentsReplaced(WebContents* web_contents) OVERRIDE;
+  virtual void ReplacedWithAnotherClient() OVERRIDE;
   virtual void FrameNavigating(const std::string& url) OVERRIDE {}
 
  private:
@@ -151,16 +151,6 @@ class AttachedClientHosts {
 
   void Remove(ExtensionDevToolsClientHost* client_host) {
     client_hosts_.erase(client_host);
-  }
-
-  ExtensionDevToolsClientHost* AsExtensionDevToolsClientHost(
-      DevToolsClientHost* client_host) {
-    for (std::set<DevToolsClientHost*>::iterator it = client_hosts_.begin();
-         it != client_hosts_.end(); ++it) {
-      if (client_host == *it)
-        return static_cast<ExtensionDevToolsClientHost*>(*it);
-    }
-    return NULL;
   }
 
   ExtensionDevToolsClientHost* Lookup(WebContents* contents) {
@@ -252,6 +242,10 @@ void ExtensionDevToolsClientHost::ContentsReplaced(WebContents* web_contents) {
   web_contents_ = web_contents;
 }
 
+void ExtensionDevToolsClientHost::ReplacedWithAnotherClient() {
+  detach_reason_ = OnDetach::REASON_REPLACED_WITH_DEVTOOLS;
+}
+
 void ExtensionDevToolsClientHost::Close() {
   DevToolsManager::GetInstance()->ClientHostClosing(this);
   delete this;
@@ -276,10 +270,6 @@ void ExtensionDevToolsClientHost::SendMessageToBackend(
   DevToolsManager::GetInstance()->DispatchOnInspectorBackend(this, json_args);
 }
 
-void ExtensionDevToolsClientHost::MarkAsReplaced() {
-  detach_reason_ = OnDetach::REASON_REPLACED_WITH_DEVTOOLS;
-}
-
 void ExtensionDevToolsClientHost::MarkAsDismissed() {
   detach_reason_ = OnDetach::REASON_CANCELED_BY_USER;
 }
@@ -293,9 +283,11 @@ void ExtensionDevToolsClientHost::SendDetachedEvent() {
     debuggee.tab_id = tab_id_;
     scoped_ptr<base::ListValue> args(OnDetach::Create(debuggee,
                                                       detach_reason_));
+    scoped_ptr<extensions::Event> event(new extensions::Event(
+        keys::kOnDetach, args.Pass()));
+    event->restrict_to_profile = profile;
     extensions::ExtensionSystem::Get(profile)->event_router()->
-        DispatchEventToExtension(extension_id_, keys::kOnDetach, args.Pass(),
-                                 profile, GURL());
+        DispatchEventToExtension(extension_id_, event.Pass());
   }
 }
 
@@ -348,9 +340,11 @@ void ExtensionDevToolsClientHost::DispatchOnInspectorFrontend(
       params.additional_properties.Swap(params_value);
 
     scoped_ptr<ListValue> args(OnEvent::Create(debuggee, method_name, params));
+    scoped_ptr<extensions::Event> event(new extensions::Event(
+        keys::kOnEvent, args.Pass()));
+    event->restrict_to_profile = profile;
     extensions::ExtensionSystem::Get(profile)->event_router()->
-        DispatchEventToExtension(extension_id_, keys::kOnEvent, args.Pass(),
-                                 profile, GURL());
+        DispatchEventToExtension(extension_id_, event.Pass());
   } else {
     SendCommandDebuggerFunction* function = pending_requests_[id];
     if (!function)
@@ -412,23 +406,23 @@ DebuggerFunction::DebuggerFunction()
       client_host_(0) {
 }
 
-bool DebuggerFunction::InitTabContents() {
-  // Find the TabContents that contains this tab id.
+bool DebuggerFunction::InitWebContents() {
+  // Find the WebContents that contains this tab id.
   contents_ = NULL;
-  TabContents* tab_contents = NULL;
+  WebContents* web_contents = NULL;
   bool result = ExtensionTabUtil::GetTabById(
-      tab_id_, profile(), include_incognito(), NULL, NULL, &tab_contents, NULL);
-  if (!result || !tab_contents) {
-    error_ = ExtensionErrorUtils::FormatErrorMessage(
+      tab_id_, profile(), include_incognito(), NULL, NULL, &web_contents, NULL);
+  if (!result || !web_contents) {
+    error_ = ErrorUtils::FormatErrorMessage(
         keys::kNoTabError,
         base::IntToString(tab_id_));
     return false;
   }
-  contents_ = tab_contents->web_contents();
+  contents_ = web_contents;
 
   if (content::GetContentClient()->HasWebUIScheme(
           contents_->GetURL())) {
-    error_ = ExtensionErrorUtils::FormatErrorMessage(
+    error_ = ErrorUtils::FormatErrorMessage(
         keys::kAttachToWebUIError,
         contents_->GetURL().scheme());
     return false;
@@ -438,7 +432,7 @@ bool DebuggerFunction::InitTabContents() {
 }
 
 bool DebuggerFunction::InitClientHost() {
-  if (!InitTabContents())
+  if (!InitWebContents())
     return false;
 
   // Don't fetch rvh from the contents since it'll be wrong upon navigation.
@@ -447,7 +441,7 @@ bool DebuggerFunction::InitClientHost() {
   if (!client_host_ ||
       !client_host_->MatchesContentsAndExtensionId(contents_,
                                                    GetExtension()->id())) {
-    error_ = ExtensionErrorUtils::FormatErrorMessage(
+    error_ = ErrorUtils::FormatErrorMessage(
         keys::kNotAttachedError,
         base::IntToString(tab_id_));
     return false;
@@ -464,12 +458,12 @@ bool AttachDebuggerFunction::RunImpl() {
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
   tab_id_ = params->target.tab_id;
-  if (!InitTabContents())
+  if (!InitWebContents())
     return false;
 
   if (!webkit_glue::IsInspectorProtocolVersionSupported(
       params->required_version)) {
-    error_ = ExtensionErrorUtils::FormatErrorMessage(
+    error_ = ErrorUtils::FormatErrorMessage(
         keys::kProtocolVersionNotSupportedError,
         params->required_version);
     return false;
@@ -481,7 +475,7 @@ bool AttachDebuggerFunction::RunImpl() {
       GetDevToolsClientHostFor(agent);
 
   if (client_host != NULL) {
-    error_ = ExtensionErrorUtils::FormatErrorMessage(
+    error_ = ErrorUtils::FormatErrorMessage(
         keys::kAlreadyAttachedError,
         base::IntToString(tab_id_));
     return false;
@@ -545,13 +539,4 @@ void SendCommandDebuggerFunction::SendResponseBody(
 
   results_ = SendCommand::Results::Create(result);
   SendResponse(true);
-}
-
-// static
-void DebuggerApi::MarkDevToolsClientHostAsReplaced(
-    DevToolsClientHost* client_host) {
-  ExtensionDevToolsClientHost* host = AttachedClientHosts::GetInstance()->
-      AsExtensionDevToolsClientHost(client_host);
-  if (host)
-    host->MarkAsReplaced();
 }

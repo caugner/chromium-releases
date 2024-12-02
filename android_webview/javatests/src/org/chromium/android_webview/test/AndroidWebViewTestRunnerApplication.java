@@ -6,39 +6,26 @@ package org.chromium.android_webview.test;
 
 import android.app.Application;
 
-import org.chromium.base.PathUtils;
-import org.chromium.content.app.LibraryLoader;
+import org.chromium.android_webview.AwBrowserProcess;
 import org.chromium.content.browser.ResourceExtractor;
 import org.chromium.content.common.CommandLine;
 
 public class AndroidWebViewTestRunnerApplication extends Application {
 
-    /**
-     * The name of the library to load.
-     */
-    private static final String NATIVE_LIBRARY = "webviewchromium";
-
-    /** The minimum set of .pak files Chrome needs. */
-    private static final String[] CHROME_MANDATORY_PAKS = {
-        "chrome.pak", "chrome_100_percent.pak", "en-US.pak",
+    /** The minimum set of .pak files the test runner needs. */
+    private static final String[] MANDATORY_PAKS = {
+        "webviewchromium.pak", "webviewchromium_strings.pak"
     };
-
-    private static final String PRIVATE_DATA_DIRECTORY_SUFFIX = "webview";
 
     @Override
     public void onCreate() {
         super.onCreate();
-        initializeApplicationParameters();
-    }
 
-    /** Handles initializing the common application parameters. */
-    private static void initializeApplicationParameters() {
         CommandLine.initFromFile("/data/local/chrome-command-line");
-        PathUtils.setPrivateDataDirectorySuffix(PRIVATE_DATA_DIRECTORY_SUFFIX);
-        // We don't need to extract any paks because for WebView, they are
-        // in the system image.
-        ResourceExtractor.setMandatoryPaksToExtract(CHROME_MANDATORY_PAKS);
-        LibraryLoader.setLibraryToLoad(NATIVE_LIBRARY);
-        LibraryLoader.loadAndInitSync();
+
+        ResourceExtractor.setMandatoryPaksToExtract(MANDATORY_PAKS);
+        ResourceExtractor.setExtractImplicitLocaleForTesting(false);
+        AwBrowserProcess.loadLibrary();
+        AwBrowserProcess.start(this);
     }
 }

@@ -22,6 +22,7 @@
 
 class NetPrefObserver;
 class PrefService;
+class PrefServiceBase;
 class PromoResourceService;
 class SSLConfigServiceManager;
 
@@ -33,12 +34,20 @@ class Preferences;
 }
 #endif
 
+namespace base {
+class SequencedTaskRunner;
+}
+
 namespace content {
 class SpeechRecognitionPreferences;
 }
 
 namespace extensions {
 class ExtensionSystem;
+}
+
+namespace policy {
+class UserCloudPolicyManager;
 }
 
 // The default profile implementation.
@@ -60,13 +69,15 @@ class ProfileImpl : public Profile,
   virtual net::URLRequestContextGetter* GetRequestContextForRenderProcess(
       int renderer_child_id) OVERRIDE;
   virtual net::URLRequestContextGetter* GetRequestContextForStoragePartition(
-      const std::string& partition_id) OVERRIDE;
+      const FilePath& partition_path,
+      bool in_memory) OVERRIDE;
   virtual net::URLRequestContextGetter* GetMediaRequestContext() OVERRIDE;
   virtual net::URLRequestContextGetter* GetMediaRequestContextForRenderProcess(
       int renderer_child_id) OVERRIDE;
   virtual net::URLRequestContextGetter*
       GetMediaRequestContextForStoragePartition(
-          const std::string& partition_id) OVERRIDE;
+          const FilePath& partition_path,
+          bool in_memory) OVERRIDE;
   virtual content::ResourceContext* GetResourceContext() OVERRIDE;
   virtual content::GeolocationPermissionContext*
       GetGeolocationPermissionContext() OVERRIDE;
@@ -75,6 +86,7 @@ class ProfileImpl : public Profile,
   virtual quota::SpecialStoragePolicy* GetSpecialStoragePolicy() OVERRIDE;
 
   // Profile implementation:
+  virtual scoped_refptr<base::SequencedTaskRunner> GetIOTaskRunner() OVERRIDE;
   virtual std::string GetProfileName() OVERRIDE;
   virtual bool IsOffTheRecord() const OVERRIDE;
   virtual Profile* GetOffTheRecordProfile() OVERRIDE;
@@ -87,7 +99,6 @@ class ProfileImpl : public Profile,
   virtual ExtensionSpecialStoragePolicy*
       GetExtensionSpecialStoragePolicy() OVERRIDE;
   virtual GAIAInfoUpdateService* GetGAIAInfoUpdateService() OVERRIDE;
-  virtual policy::UserCloudPolicyManager* GetUserCloudPolicyManager() OVERRIDE;
   virtual policy::ManagedModePolicyProvider*
       GetManagedModePolicyProvider() OVERRIDE;
   virtual policy::PolicyService* GetPolicyService() OVERRIDE;
@@ -104,7 +115,9 @@ class ProfileImpl : public Profile,
   virtual FilePath last_selected_directory() OVERRIDE;
   virtual void set_last_selected_directory(const FilePath& path) OVERRIDE;
   virtual chrome_browser_net::Predictor* GetNetworkPredictor() OVERRIDE;
-  virtual void ClearNetworkingHistorySince(base::Time time) OVERRIDE;
+  virtual void ClearNetworkingHistorySince(
+      base::Time time,
+      const base::Closure& completion) OVERRIDE;
   virtual GURL GetHomePage() OVERRIDE;
   virtual bool WasCreatedByVersionOrLater(const std::string& version) OVERRIDE;
   virtual void SetExitType(ExitType exit_type) OVERRIDE;
@@ -139,12 +152,18 @@ class ProfileImpl : public Profile,
 
   ProfileImpl(const FilePath& path,
               Delegate* delegate,
-              CreateMode create_mode);
+              CreateMode create_mode,
+              base::SequencedTaskRunner* sequenced_task_runner);
 
   // Does final initialization. Should be called after prefs were loaded.
   void DoFinalInit(bool is_new_profile);
 
   void InitHostZoomMap();
+
+  void OnDefaultZoomLevelChanged();
+
+  void OnInitializationCompleted(PrefServiceBase* pref_service,
+                                 bool succeeded);
 
   // Does final prefs initialization and calls Init().
   void OnPrefsLoaded(bool success);
@@ -191,8 +210,10 @@ class ProfileImpl : public Profile,
   // |prefs_| depends on |policy_service_|, which depends on
   // |user_cloud_policy_manager_| and |managed_mode_policy_provider_|.
   // TODO(bauerb, mnissler): Once |prefs_| is a ProfileKeyedService, these
-  // should become ProfileKeyedServices as well.
+  // should become proper ProfileKeyedServices as well.
+#if !defined(OS_CHROMEOS)
   scoped_ptr<policy::UserCloudPolicyManager> cloud_policy_manager_;
+#endif
   scoped_ptr<policy::ManagedModePolicyProvider> managed_mode_policy_provider_;
 #endif
   scoped_ptr<policy::PolicyService> policy_service_;

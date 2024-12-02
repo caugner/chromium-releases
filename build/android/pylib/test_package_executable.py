@@ -20,8 +20,8 @@ class TestPackageExecutable(TestPackage):
 
   _TEST_RUNNER_RET_VAL_FILE = 'gtest_retval'
 
-  def __init__(self, adb, device, test_suite, timeout, rebaseline,
-               performance_test, cleanup_test_files, tool, dump_debug_info,
+  def __init__(self, adb, device, test_suite, timeout,
+               cleanup_test_files, tool, dump_debug_info,
                symbols_dir=None):
     """
     Args:
@@ -29,17 +29,13 @@ class TestPackageExecutable(TestPackage):
       device: Device to run the tests.
       test_suite: A specific test suite to run, empty to run all.
       timeout: Timeout for each test.
-      rebaseline: Whether or not to run tests in isolation and update the
-          filter.
-      performance_test: Whether or not performance test(s).
       cleanup_test_files: Whether or not to cleanup test files on device.
       tool: Name of the Valgrind tool.
       dump_debug_info: A debug_info object.
       symbols_dir: Directory to put the stripped binaries.
     """
     TestPackage.__init__(self, adb, device, test_suite, timeout,
-                         rebaseline, performance_test, cleanup_test_files,
-                         tool, dump_debug_info)
+                         cleanup_test_files, tool, dump_debug_info)
     self.symbols_dir = symbols_dir
 
   def _GetGTestReturnCode(self):
@@ -48,7 +44,7 @@ class TestPackageExecutable(TestPackage):
     ret_code_file = tempfile.NamedTemporaryFile()
     try:
       if not self.adb.Adb().Pull(
-          self.adb.GetExternalStorage() + '/' +
+          constants.TEST_EXECUTABLE_DIR + '/' +
           TestPackageExecutable._TEST_RUNNER_RET_VAL_FILE,
           ret_code_file.name):
         logging.critical('Unable to pull gtest ret val file %s',

@@ -10,24 +10,24 @@
 #include <vector>
 
 #include "base/memory/linked_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/time.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/api/content_settings/content_settings_store.h"
 #include "chrome/browser/extensions/extension_prefs_scope.h"
 #include "chrome/browser/extensions/extension_scoped_prefs.h"
-#include "chrome/browser/extensions/management_policy.h"
 #include "chrome/browser/media_gallery/media_galleries_preferences.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/extensions/url_pattern_set.h"
+#include "extensions/common/url_pattern_set.h"
 #include "sync/api/string_ordinal.h"
 
 class ExtensionPrefValueMap;
 class ExtensionSorting;
 class PrefService;
-class URLPatternSet;
 
 namespace extensions {
 class ExtensionPrefsUninstallExtension;
+class URLPatternSet;
 struct ExtensionOmniboxSuggestion;
 
 // Class for managing global and per-extension preferences.
@@ -46,7 +46,6 @@ struct ExtensionOmniboxSuggestion;
 //       PrefValueStore::extension_prefs(), which this class populates and
 //       maintains as the underlying extensions change.
 class ExtensionPrefs : public ContentSettingsStore::Observer,
-                       public ManagementPolicy::Provider,
                        public ExtensionScopedPrefs {
  public:
   // Key name for a preference that keeps track of per-extension settings. This
@@ -75,21 +74,44 @@ class ExtensionPrefs : public ContentSettingsStore::Observer,
     LAUNCH_DEFAULT = LAUNCH_REGULAR
   };
 
-  // Does not assume ownership of |prefs| and |extension_pref_value_map|.
-  // Note that you must call Init() to finalize construction.
-  ExtensionPrefs(PrefService* prefs,
-                 const FilePath& root_dir,
-                 ExtensionPrefValueMap* extension_pref_value_map);
+  // Creates base::Time classes. The default implementation is just to return
+  // the current time, but tests can inject alternative implementations.
+  class TimeProvider {
+   public:
+    TimeProvider();
+
+    virtual ~TimeProvider();
+
+    // By default, returns the current time (base::Time::Now()).
+    virtual base::Time GetCurrentTime() const;
+
+   private:
+    DISALLOW_COPY_AND_ASSIGN(TimeProvider);
+  };
+
+  // Creates and initializes an ExtensionPrefs object.
+  // Does not take ownership of |prefs| and |extension_pref_value_map|.
+  static scoped_ptr<ExtensionPrefs> Create(
+      PrefService* prefs,
+      const FilePath& root_dir,
+      ExtensionPrefValueMap* extension_pref_value_map,
+      bool extensions_disabled);
+
+  // A version of Create which allows injection of a custom base::Time provider.
+  // Use this as needed for testing.
+  static scoped_ptr<ExtensionPrefs> Create(
+      PrefService* prefs,
+      const FilePath& root_dir,
+      ExtensionPrefValueMap* extension_pref_value_map,
+      bool extensions_disabled,
+      scoped_ptr<TimeProvider> time_provider);
+
   virtual ~ExtensionPrefs();
 
   // Returns all installed extensions from extension preferences provided by
   // |pref_service|. This is exposed for ProtectedPrefsWatcher because it needs
   // access to the extension ID list before the ExtensionService is initialized.
   static ExtensionIdList GetExtensionsFrom(const PrefService* pref_service);
-
-  // If |extensions_disabled| is true, extension controlled preferences and
-  // content settings do not become effective.
-  void Init(bool extensions_disabled);
 
   // Returns a copy of the Extensions prefs.
   // TODO(erikkay) Remove this so that external consumers don't need to be
@@ -153,6 +175,13 @@ class ExtensionPrefs : public ContentSettingsStore::Observer,
                            Extension::DisableReason disable_reason);
   void ClearDisableReasons(const std::string& extension_id);
 
+  // Gets the set of extensions that have been blacklisted in prefs.
+  std::set<std::string> GetBlacklistedExtensions();
+
+  // Sets whether the extension with |id| is blacklisted.
+  void SetExtensionBlacklisted(const std::string& extension_id,
+                               bool is_blacklisted);
+
   // Returns the version string for the currently installed extension, or
   // the empty string if not found.
   std::string GetVersionString(const std::string& extension_id);
@@ -167,8 +196,13 @@ class ExtensionPrefs : public ContentSettingsStore::Observer,
   // Returns base extensions install directory.
   const FilePath& install_directory() const { return install_directory_; }
 
-  // Updates the prefs based on the blacklist.
-  void UpdateBlacklist(const std::set<std::string>& blacklist_set);
+  // Returns whether the extension with |id| has its blacklist bit set.
+  //
+  // WARNING: this only checks the extension's entry in prefs, so by definition
+  // can only check extensions that prefs knows about. There may be other
+  // sources of blacklist information, such as safebrowsing. You probably want
+  // to use Blacklist::GetBlacklistedIDs rather than this method.
+  bool IsExtensionBlacklisted(const std::string& id) const;
 
   // Based on extension id, checks prefs to see if it is orphaned.
   bool IsExtensionOrphaned(const std::string& id);
@@ -180,6 +214,10 @@ class ExtensionPrefs : public ContentSettingsStore::Observer,
   // Whether the user has acknowledged an external extension.
   bool IsExternalExtensionAcknowledged(const std::string& extension_id);
   void AcknowledgeExternalExtension(const std::string& extension_id);
+
+  // Whether the extension has been marked as excluded from the the sideload
+  // wipeout initiative.
+  bool IsExternalExtensionExcludedFromWipeout(const std::string& extension_id);
 
   // Whether the user has acknowledged a blacklisted extension.
   bool IsBlacklistedExtensionAcknowledged(const std::string& extension_id);
@@ -205,16 +243,6 @@ class ExtensionPrefs : public ContentSettingsStore::Observer,
   // Whether app notifications are disabled for the given app.
   bool IsAppNotificationDisabled(const std::string& extension_id) const;
   void SetAppNotificationDisabled(const std::string& extension_id, bool value);
-
-  // ManagementPolicy::Provider
-  // These methods apply admin policy to extensions.
-  virtual std::string GetDebugPolicyProviderName() const OVERRIDE;
-  virtual bool UserMayLoad(const Extension* extension,
-                           string16* error) const OVERRIDE;
-  virtual bool UserMayModifySettings(const Extension* extension,
-                                     string16* error) const OVERRIDE;
-  virtual bool MustRemainEnabled(const Extension* extension,
-                                 string16* error) const OVERRIDE;
 
   // Checks if extensions are blacklisted by default, by policy.
   // The ManagementPolicy::Provider methods also take this into account, and
@@ -320,7 +348,7 @@ class ExtensionPrefs : public ContentSettingsStore::Observer,
 
   // Get the launch type preference.  If no preference is set, return
   // |default_pref_value|.
-  LaunchType GetLaunchType(const std::string& extension_id,
+  LaunchType GetLaunchType(const Extension* extension,
                            LaunchType default_pref_value);
 
   void SetLaunchType(const std::string& extension_id, LaunchType launch_type);
@@ -347,33 +375,34 @@ class ExtensionPrefs : public ContentSettingsStore::Observer,
   // version directory and the location. Blacklisted extensions won't be saved
   // and neither will external extensions the user has explicitly uninstalled.
   // Caller takes ownership of returned structure.
-  ExtensionsInfo* GetInstalledExtensionsInfo() const;
+  scoped_ptr<ExtensionsInfo> GetInstalledExtensionsInfo() const;
 
   // Returns the ExtensionInfo from the prefs for the given extension. If the
   // extension is not present, NULL is returned.
-  ExtensionInfo* GetInstalledExtensionInfo(
+  scoped_ptr<ExtensionInfo> GetInstalledExtensionInfo(
       const std::string& extension_id) const;
 
   // We've downloaded an updated .crx file for the extension, but are waiting
   // for idle time to install it.
-  void SetIdleInstallInfo(const std::string& extension_id,
-                          const FilePath& crx_path,
-                          const std::string& version,
-                          const base::Time& fetch_time);
+  void SetDelayedInstallInfo(const Extension* extension,
+                             Extension::State initial_state,
+                             const syncer::StringOrdinal& page_ordinal);
 
-  // Removes any idle install information we have for the given |extension_id|.
-  // Returns true if there was info to remove; false otherwise.
-  bool RemoveIdleInstallInfo(const std::string& extension_id);
+  // Removes any delayed install information we have for the given
+  // |extension_id|. Returns true if there was info to remove; false otherwise.
+  bool RemoveDelayedInstallInfo(const std::string& extension_id);
 
-  // If we have idle install information for |extension_id|, this puts it into
-  // the out parameters and returns true. Otherwise returns false.
-  bool GetIdleInstallInfo(const std::string& extension_id,
-                          FilePath* crx_path,
-                          std::string* version,
-                          base::Time* fetch_time);
+  // Update the prefs to finish the update for an extension.
+  bool FinishDelayedInstallInfo(const std::string& extension_id);
 
-  // Returns the extension id's that have idle install information.
-  std::set<std::string> GetIdleInstallInfoIds();
+  // Returns the ExtensionInfo from the prefs for delayed install information
+  // for |extension_id|, if we have any. Otherwise returns NULL.
+  scoped_ptr<ExtensionInfo> GetDelayedInstallInfo(
+      const std::string& extension_id) const;
+
+  // Returns information about all the extensions that have delayed install
+  // information.
+  scoped_ptr<ExtensionsInfo> GetAllDelayedInstallInfo() const;
 
   // We allow the web store to set a string containing login information when a
   // purchase is made, so that when a user logs into sync with a different
@@ -474,13 +503,32 @@ class ExtensionPrefs : public ContentSettingsStore::Observer,
   // prefs::kExtensionAllowedInstallSites for more information.
   URLPatternSet GetAllowedInstallSites();
 
- protected:
-  // For unit testing. Enables injecting an artificial clock that is used
-  // to query the current time, when an extension is installed.
-  virtual base::Time GetCurrentTime() const;
+  // Schedules garbage collection of an extension's on-disk data on the next
+  // start of this ExtensionService. Applies only to extensions with isolated
+  // storage.
+  void SetNeedsStorageGarbageCollection(bool value);
+  bool NeedsStorageGarbageCollection();
+
+  // Used by ShellWindowGeometryCache to persist its cache. These methods
+  // should not be called directly.
+  const base::DictionaryValue* GetGeometryCache(
+        const std::string& extension_id) const;
+  void SetGeometryCache(const std::string& extension_id,
+                        scoped_ptr<base::DictionaryValue> cache);
 
  private:
-  friend class ExtensionPrefsUninstallExtension;  // Unit test.
+  friend class ExtensionPrefsBlacklistedExtensions;  // Unit test.
+  friend class ExtensionPrefsUninstallExtension;     // Unit test.
+
+  // See the Create methods.
+  ExtensionPrefs(PrefService* prefs,
+                 const FilePath& root_dir,
+                 ExtensionPrefValueMap* extension_pref_value_map,
+                 scoped_ptr<TimeProvider> time_provider);
+
+  // If |extensions_disabled| is true, extension controlled preferences and
+  // content settings do not become effective.
+  void Init(bool extensions_disabled);
 
   // extensions::ContentSettingsStore::Observer methods:
   virtual void OnContentSettingChanged(const std::string& extension_id,
@@ -573,6 +621,25 @@ class ExtensionPrefs : public ContentSettingsStore::Observer,
   void SetExtensionPrefFromVector(const char* pref,
                                   const ExtensionIdList& extension_ids);
 
+  // Helper function to populate |extension_dict| with the values needed
+  // by a newly installed extension. Work is broken up between this
+  // function and FinishExtensionInfoPrefs() to accomodate delayed
+  // installations.
+  void PopulateExtensionInfoPrefs(const Extension* extension,
+                                  const base::Time install_time,
+                                  Extension::State initial_state,
+                                  DictionaryValue* extension_dict);
+
+  // Helper function to complete initialization of the values in
+  // |extension_dict| for an extension install. Also see
+  // PopulateExtensionInfoPrefs().
+  void FinishExtensionInfoPrefs(
+      const std::string& extension_id,
+      const base::Time install_time,
+      bool needs_sort_ordinal,
+      const syncer::StringOrdinal& suggested_page_ordinal,
+      DictionaryValue* extension_dict);
+
   // The pref service specific to this set of extension prefs. Owned by profile.
   PrefService* prefs_;
 
@@ -587,6 +654,8 @@ class ExtensionPrefs : public ContentSettingsStore::Observer,
   scoped_ptr<ExtensionSorting> extension_sorting_;
 
   scoped_refptr<ContentSettingsStore> content_settings_store_;
+
+  scoped_ptr<TimeProvider> time_provider_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionPrefs);
 };

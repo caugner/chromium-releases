@@ -40,6 +40,7 @@ public abstract class AwContentsClient extends ContentViewClient {
     //                        Adapter for WebContentsDelegate methods.
     //--------------------------------------------------------------------------------------------
 
+    // TODO(mkosiba): Merge with handler in AwContents.
     class WebContentsDelegateAdapter extends AwWebContentsDelegate {
 
         // The message ids.
@@ -122,12 +123,7 @@ public abstract class AwContentsClient extends ContentViewClient {
 
         @Override
         public void closeContents() {
-            // TODO: implement
-        }
-
-        @Override
-        public void onUrlStarredChanged(boolean starred) {
-            // TODO: implement
+            AwContentsClient.this.onCloseWindow();
         }
 
         @Override
@@ -136,16 +132,21 @@ public abstract class AwContentsClient extends ContentViewClient {
             Message resend = mHandler.obtainMessage(CONTINUE_PENDING_RELOAD, contentViewCore);
             AwContentsClient.this.onFormResubmission(dontResend, resend);
         }
+
+        @Override
+        public boolean addNewContents(boolean isDialog, boolean isUserGesture) {
+            return AwContentsClient.this.onCreateWindow(isDialog, isUserGesture);
+        }
+
+        @Override
+        public void activateContents() {
+            AwContentsClient.this.onRequestFocus();
+        }
     }
 
     class AwWebContentsObserver extends WebContentsObserverAndroid {
         public AwWebContentsObserver(ContentViewCore contentViewCore) {
             super(contentViewCore);
-        }
-
-        @Override
-        public void didStartLoading(String url) {
-            AwContentsClient.this.onPageStarted(url);
         }
 
         @Override
@@ -172,10 +173,18 @@ public abstract class AwContentsClient extends ContentViewClient {
             AwContentsClient.this.onReceivedError(
                     ErrorCodeConversionHelper.convertErrorCode(errorCode), description, failingUrl);
         }
+
+        @Override
+        public void didNavigateAnyFrame(String url, String baseUrl, boolean isReload) {
+            AwContentsClient.this.doUpdateVisitedHistory(url, isReload);
+        }
+
     }
 
     void installWebContentsObserver(ContentViewCore contentViewCore) {
-        assert mWebContentsObserver == null;
+        if (mWebContentsObserver != null) {
+            mWebContentsObserver.detachFromWebContents();
+        }
         mWebContentsObserver = new AwWebContentsObserver(contentViewCore);
     }
 
@@ -186,7 +195,9 @@ public abstract class AwContentsClient extends ContentViewClient {
     //--------------------------------------------------------------------------------------------
     //             WebView specific methods that map directly to WebViewClient / WebChromeClient
     //--------------------------------------------------------------------------------------------
-    //
+
+    // TODO(boliu): Make this abstract.
+    public void doUpdateVisitedHistory(String url, boolean isReload) {}
 
     public abstract void onProgressChanged(int progress);
 
@@ -205,15 +216,24 @@ public abstract class AwContentsClient extends ContentViewClient {
 
     public abstract void onFormResubmission(Message dontResend, Message resend);
 
+    public abstract void onDownloadStart(String url, String userAgent, String contentDisposition,
+            String mimeType, long contentLength);
+
     protected abstract void handleJsAlert(String url, String message, JsResultReceiver receiver);
 
     protected abstract void handleJsBeforeUnload(String url, String message,
-                                                 JsResultReceiver receiver);
+            JsResultReceiver receiver);
 
     protected abstract void handleJsConfirm(String url, String message, JsResultReceiver receiver);
 
     protected abstract void handleJsPrompt(String url, String message, String defaultValue,
             JsPromptResultReceiver receiver);
+
+    protected abstract boolean onCreateWindow(boolean isDialog, boolean isUserGesture);
+
+    protected abstract void onCloseWindow();
+
+    protected abstract void onRequestFocus();
 
     //--------------------------------------------------------------------------------------------
     //                              Other WebView-specific methods

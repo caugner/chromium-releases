@@ -41,21 +41,20 @@ char kInterruptReasonCounter[] = {
 };
 const size_t kInterruptReasonCount = ARRAYSIZE_UNSAFE(kInterruptReasonCounter);
 
-// DownloadItemModel with mocks several methods.
-class TestDownloadItemModel : public DownloadItemModel {
- public:
-  explicit TestDownloadItemModel(content::DownloadItem* download)
-      : DownloadItemModel(download) {
-  }
+// Default target path for a mock download item in DownloadItemModelTest.
+const FilePath::CharType kDefaultTargetFilePath[] =
+    FILE_PATH_LITERAL("/foo/bar/foo.bar");
 
-  MOCK_CONST_METHOD0(IsDriveDownload, bool());
-  MOCK_CONST_METHOD0(GetTotalBytes, int64());
-  MOCK_CONST_METHOD0(GetCompletedBytes, int64());
-};
+const FilePath::CharType kDefaultDisplayFileName[] =
+    FILE_PATH_LITERAL("foo.bar");
+
+// Default URL for a mock download item in DownloadItemModelTest.
+const char kDefaultURL[] = "http://example.com/foo.bar";
 
 class DownloadItemModelTest : public testing::Test {
  public:
-  DownloadItemModelTest() {}
+  DownloadItemModelTest()
+      : model_(&item_) {}
 
   virtual ~DownloadItemModelTest() {
   }
@@ -75,22 +74,15 @@ class DownloadItemModelTest : public testing::Test {
     ON_CALL(item_, GetState())
         .WillByDefault(Return(content::DownloadItem::IN_PROGRESS));
     ON_CALL(item_, GetURL())
-        .WillByDefault(ReturnRefOfCopy(GURL("http://example.com/foo.bar")));
+        .WillByDefault(ReturnRefOfCopy(GURL(kDefaultURL)));
     ON_CALL(item_, GetFileNameToReportUser())
-        .WillByDefault(Return(FilePath(FILE_PATH_LITERAL("foo.bar"))));
+        .WillByDefault(Return(FilePath(kDefaultDisplayFileName)));
+    ON_CALL(item_, GetTargetFilePath())
+        .WillByDefault(ReturnRefOfCopy(FilePath(kDefaultTargetFilePath)));
     ON_CALL(item_, GetTargetDisposition())
         .WillByDefault(
             Return(content::DownloadItem::TARGET_DISPOSITION_OVERWRITE));
     ON_CALL(item_, IsPaused()).WillByDefault(Return(false));
-
-    // Setup the model:
-    model_.reset(new NiceMock<TestDownloadItemModel>(&item_));
-    ON_CALL(*model_.get(), IsDriveDownload())
-        .WillByDefault(Return(false));
-    ON_CALL(*model_.get(), GetTotalBytes())
-        .WillByDefault(Return(2));
-    ON_CALL(*model_.get(), GetCompletedBytes())
-        .WillByDefault(Return(1));
   }
 
   void SetupInterruptedDownloadItem(content::DownloadInterruptReason reason) {
@@ -109,14 +101,13 @@ class DownloadItemModelTest : public testing::Test {
     return item_;
   }
 
-  TestDownloadItemModel& model() {
-    return *model_;
+  DownloadItemModel& model() {
+    return model_;
   }
 
  private:
-  scoped_ptr<TestDownloadItemModel> model_;
-
   NiceMock<content::MockDownloadItem> item_;
+  DownloadItemModel model_;
 };
 
 }  // namespace
@@ -134,45 +125,45 @@ TEST_F(DownloadItemModelTest, InterruptedStatus) {
     { content::DOWNLOAD_INTERRUPT_REASON_NONE,
       "1/2 B" },
     { content::DOWNLOAD_INTERRUPT_REASON_FILE_FAILED,
-      "1/2 B Download Error" },
+      "Failed - Download error" },
     { content::DOWNLOAD_INTERRUPT_REASON_FILE_ACCESS_DENIED,
-      "1/2 B Insufficient Permissions" },
+      "Failed - Insufficient permissions" },
     { content::DOWNLOAD_INTERRUPT_REASON_FILE_NO_SPACE,
-      "1/2 B Disk Full" },
+      "Failed - Disk full" },
     { content::DOWNLOAD_INTERRUPT_REASON_FILE_NAME_TOO_LONG,
-      "1/2 B Path Too Long" },
+      "Failed - Path too long" },
     { content::DOWNLOAD_INTERRUPT_REASON_FILE_TOO_LARGE,
-      "1/2 B File Too Large" },
+      "Failed - File too large" },
     { content::DOWNLOAD_INTERRUPT_REASON_FILE_VIRUS_INFECTED,
-      "1/2 B Virus Detected" },
+      "Failed - Virus detected" },
     { content::DOWNLOAD_INTERRUPT_REASON_FILE_BLOCKED,
-      "1/2 B Blocked" },
+      "Failed - Blocked" },
     { content::DOWNLOAD_INTERRUPT_REASON_FILE_SECURITY_CHECK_FAILED,
-      "1/2 B Virus Scan Failed" },
+      "Failed - Virus scan failed" },
     { content::DOWNLOAD_INTERRUPT_REASON_FILE_TRANSIENT_ERROR,
-      "1/2 B System Busy" },
+      "Failed - System busy" },
     { content::DOWNLOAD_INTERRUPT_REASON_NETWORK_FAILED,
-      "1/2 B Network Error" },
+      "Failed - Network error" },
     { content::DOWNLOAD_INTERRUPT_REASON_NETWORK_TIMEOUT,
-      "1/2 B Network Timeout" },
+      "Failed - Network timeout" },
     { content::DOWNLOAD_INTERRUPT_REASON_NETWORK_DISCONNECTED,
-      "1/2 B Network Disconnected" },
+      "Failed - Network disconnected" },
     { content::DOWNLOAD_INTERRUPT_REASON_NETWORK_SERVER_DOWN,
-      "1/2 B Server Unavailable" },
+      "Failed - Server unavailable" },
     { content::DOWNLOAD_INTERRUPT_REASON_SERVER_FAILED,
-      "1/2 B Server Problem" },
+      "Failed - Server problem" },
     { content::DOWNLOAD_INTERRUPT_REASON_SERVER_NO_RANGE,
-      "1/2 B Download Error" },
+      "Failed - Download error" },
     { content::DOWNLOAD_INTERRUPT_REASON_SERVER_PRECONDITION,
-      "1/2 B Download Error" },
+      "Failed - Download error" },
     { content::DOWNLOAD_INTERRUPT_REASON_SERVER_BAD_CONTENT,
-      "1/2 B No File" },
+      "Failed - No file" },
     { content::DOWNLOAD_INTERRUPT_REASON_USER_CANCELED,
       "Cancelled" },
     { content::DOWNLOAD_INTERRUPT_REASON_USER_SHUTDOWN,
-      "1/2 B Shutdown" },
+      "Failed - Shutdown" },
     { content::DOWNLOAD_INTERRUPT_REASON_CRASH,
-      "1/2 B Shutdown" },
+      "Failed - Shutdown" },
   };
   COMPILE_ASSERT(kInterruptReasonCount == ARRAYSIZE_UNSAFE(kTestCases),
                  interrupt_reason_mismatch);
@@ -202,39 +193,39 @@ TEST_F(DownloadItemModelTest, InterruptTooltip) {
     { content::DOWNLOAD_INTERRUPT_REASON_NONE,
       "foo.bar" },
     { content::DOWNLOAD_INTERRUPT_REASON_FILE_FAILED,
-      "foo.bar\nDownload Error" },
+      "foo.bar\nDownload error" },
     { content::DOWNLOAD_INTERRUPT_REASON_FILE_ACCESS_DENIED,
-      "foo.bar\nInsufficient Permissions" },
+      "foo.bar\nInsufficient permissions" },
     { content::DOWNLOAD_INTERRUPT_REASON_FILE_NO_SPACE,
-      "foo.bar\nDisk Full" },
+      "foo.bar\nDisk full" },
     { content::DOWNLOAD_INTERRUPT_REASON_FILE_NAME_TOO_LONG,
-      "foo.bar\nPath Too Long" },
+      "foo.bar\nPath too long" },
     { content::DOWNLOAD_INTERRUPT_REASON_FILE_TOO_LARGE,
-      "foo.bar\nFile Too Large" },
+      "foo.bar\nFile too large" },
     { content::DOWNLOAD_INTERRUPT_REASON_FILE_VIRUS_INFECTED,
-      "foo.bar\nVirus Detected" },
+      "foo.bar\nVirus detected" },
     { content::DOWNLOAD_INTERRUPT_REASON_FILE_BLOCKED,
       "foo.bar\nBlocked" },
     { content::DOWNLOAD_INTERRUPT_REASON_FILE_SECURITY_CHECK_FAILED,
-      "foo.bar\nVirus Scan Failed" },
+      "foo.bar\nVirus scan failed" },
     { content::DOWNLOAD_INTERRUPT_REASON_FILE_TRANSIENT_ERROR,
-      "foo.bar\nSystem Busy" },
+      "foo.bar\nSystem busy" },
     { content::DOWNLOAD_INTERRUPT_REASON_NETWORK_FAILED,
-      "foo.bar\nNetwork Error" },
+      "foo.bar\nNetwork error" },
     { content::DOWNLOAD_INTERRUPT_REASON_NETWORK_TIMEOUT,
-      "foo.bar\nNetwork Timeout" },
+      "foo.bar\nNetwork timeout" },
     { content::DOWNLOAD_INTERRUPT_REASON_NETWORK_DISCONNECTED,
-      "foo.bar\nNetwork Disconnected" },
+      "foo.bar\nNetwork disconnected" },
     { content::DOWNLOAD_INTERRUPT_REASON_NETWORK_SERVER_DOWN,
-      "foo.bar\nServer Unavailable" },
+      "foo.bar\nServer unavailable" },
     { content::DOWNLOAD_INTERRUPT_REASON_SERVER_FAILED,
-      "foo.bar\nServer Problem" },
+      "foo.bar\nServer problem" },
     { content::DOWNLOAD_INTERRUPT_REASON_SERVER_NO_RANGE,
-      "foo.bar\nDownload Error" },
+      "foo.bar\nDownload error" },
     { content::DOWNLOAD_INTERRUPT_REASON_SERVER_PRECONDITION,
-      "foo.bar\nDownload Error" },
+      "foo.bar\nDownload error" },
     { content::DOWNLOAD_INTERRUPT_REASON_SERVER_BAD_CONTENT,
-      "foo.bar\nNo File" },
+      "foo.bar\nNo file" },
     { content::DOWNLOAD_INTERRUPT_REASON_USER_CANCELED,
       "foo.bar" },
     { content::DOWNLOAD_INTERRUPT_REASON_USER_SHUTDOWN,
@@ -284,7 +275,6 @@ TEST_F(DownloadItemModelTest, InProgressStatus) {
     bool  time_remaining_known;         // If TimeRemaining() is known.
     bool  open_when_complete;           // GetOpenWhenComplete().
     bool  is_paused;                    // IsPaused().
-    bool  is_drive_download;            // Is Drive download?
     const char* expected_status;        // Expected status text.
   } kTestCases[] = {
     // These are all the valid combinations of the above fields for a download
@@ -300,61 +290,30 @@ TEST_F(DownloadItemModelTest, InProgressStatus) {
     //         .-- .TimeRemaining() is known.
     //        |       .-- .GetOpenWhenComplete()
     //        |      |      .---- .IsPaused()
-    //        |      |      |      .---- Is Drive download?
-    { 0, 0, false, false, false, false, "Starting..." },
-    { 1, 0, false, false, false, false, "1 B" },
-    { 0, 2, false, false, false, false, "Starting..." },
-    { 1, 2, false, false, false, false, "1/2 B" },
-    { 0, 2, true,  false, false, false, "0/2 B, 10 secs left" },
-    { 1, 2, true,  false, false, false, "1/2 B, 10 secs left" },
-    { 0, 0, false, true,  false, false, "Opening when complete" },
-    { 1, 0, false, true,  false, false, "Opening when complete" },
-    { 0, 2, false, true,  false, false, "Opening when complete" },
-    { 1, 2, false, true,  false, false, "Opening when complete" },
-    { 0, 2, true,  true,  false, false, "Opening in 10 secs..." },
-    { 1, 2, true,  true,  false, false, "Opening in 10 secs..." },
-    { 0, 0, false, false, true,  false, "0 B, Paused" },
-    { 1, 0, false, false, true,  false, "1 B, Paused" },
-    { 0, 2, false, false, true,  false, "0/2 B, Paused" },
-    { 1, 2, false, false, true,  false, "1/2 B, Paused" },
-    { 0, 2, true,  false, true,  false, "0/2 B, Paused" },
-    { 1, 2, true,  false, true,  false, "1/2 B, Paused" },
-    { 0, 0, false, true,  true,  false, "0 B, Paused" },
-    { 1, 0, false, true,  true,  false, "1 B, Paused" },
-    { 0, 2, false, true,  true,  false, "0/2 B, Paused" },
-    { 1, 2, false, true,  true,  false, "1/2 B, Paused" },
-    { 0, 2, true,  true,  true,  false, "0/2 B, Paused" },
-    { 1, 2, true,  true,  true,  false, "1/2 B, Paused" },
-#if defined(OS_CHROMEOS)
-    // For Drive downloads, .TimeRemaining() is ignored since the actual time
-    // remaining should come from the upload portion. Currently that
-    // functionality is missing. So the |time_remaining_known| == true test
-    // cases are equivalent to the |time_remaining_known| == false test cases.
-    { 0, 0, false, false, false, true,  "Downloading..." },
-    { 1, 0, false, false, false, true,  "1 B" },
-    { 0, 2, false, false, false, true,  "Downloading..." },
-    { 1, 2, false, false, false, true,  "1/2 B" },
-    { 0, 2, true,  false, false, true,  "Downloading..." },
-    { 1, 2, true,  false, false, true,  "1/2 B" },
-    { 0, 0, false, true,  false, true,  "Opening when complete" },
-    { 1, 0, false, true,  false, true,  "Opening when complete" },
-    { 0, 2, false, true,  false, true,  "Opening when complete" },
-    { 1, 2, false, true,  false, true,  "Opening when complete" },
-    { 0, 2, true,  true,  false, true,  "Opening when complete" },
-    { 1, 2, true,  true,  false, true,  "Opening when complete" },
-    { 0, 0, false, false, true,  true,  "0 B, Paused" },
-    { 1, 0, false, false, true,  true,  "1 B, Paused" },
-    { 0, 2, false, false, true,  true,  "0/2 B, Paused" },
-    { 1, 2, false, false, true,  true,  "1/2 B, Paused" },
-    { 0, 2, true,  false, true,  true,  "0/2 B, Paused" },
-    { 1, 2, true,  false, true,  true,  "1/2 B, Paused" },
-    { 0, 0, false, true,  true,  true,  "0 B, Paused" },
-    { 1, 0, false, true,  true,  true,  "1 B, Paused" },
-    { 0, 2, false, true,  true,  true,  "0/2 B, Paused" },
-    { 1, 2, false, true,  true,  true,  "1/2 B, Paused" },
-    { 0, 2, true,  true,  true,  true,  "0/2 B, Paused" },
-    { 1, 2, true,  true,  true,  true,  "1/2 B, Paused" },
-#endif
+    { 0, 0, false, false, false, "Starting..." },
+    { 1, 0, false, false, false, "1 B" },
+    { 0, 2, false, false, false, "Starting..." },
+    { 1, 2, false, false, false, "1/2 B" },
+    { 0, 2, true,  false, false, "0/2 B, 10 secs left" },
+    { 1, 2, true,  false, false, "1/2 B, 10 secs left" },
+    { 0, 0, false, true,  false, "Opening when complete" },
+    { 1, 0, false, true,  false, "Opening when complete" },
+    { 0, 2, false, true,  false, "Opening when complete" },
+    { 1, 2, false, true,  false, "Opening when complete" },
+    { 0, 2, true,  true,  false, "Opening in 10 secs..." },
+    { 1, 2, true,  true,  false, "Opening in 10 secs..." },
+    { 0, 0, false, false, true,  "0 B, Paused" },
+    { 1, 0, false, false, true,  "1 B, Paused" },
+    { 0, 2, false, false, true,  "0/2 B, Paused" },
+    { 1, 2, false, false, true,  "1/2 B, Paused" },
+    { 0, 2, true,  false, true,  "0/2 B, Paused" },
+    { 1, 2, true,  false, true,  "1/2 B, Paused" },
+    { 0, 0, false, true,  true,  "0 B, Paused" },
+    { 1, 0, false, true,  true,  "1 B, Paused" },
+    { 0, 2, false, true,  true,  "0/2 B, Paused" },
+    { 1, 2, false, true,  true,  "1/2 B, Paused" },
+    { 0, 2, true,  true,  true,  "0/2 B, Paused" },
+    { 1, 2, true,  true,  true,  "1/2 B, Paused" },
   };
 
   SetupDownloadItemDefaults();
@@ -363,12 +322,10 @@ TEST_F(DownloadItemModelTest, InProgressStatus) {
     TestCase& test_case = kTestCases[i];
     Mock::VerifyAndClearExpectations(&item());
     Mock::VerifyAndClearExpectations(&model());
-    EXPECT_CALL(model(), GetCompletedBytes())
+    EXPECT_CALL(item(), GetReceivedBytes())
         .WillRepeatedly(Return(test_case.received_bytes));
-    EXPECT_CALL(model(), GetTotalBytes())
+    EXPECT_CALL(item(), GetTotalBytes())
         .WillRepeatedly(Return(test_case.total_bytes));
-    EXPECT_CALL(model(), IsDriveDownload())
-        .WillRepeatedly(Return(test_case.is_drive_download));
     EXPECT_CALL(item(), TimeRemaining(_))
         .WillRepeatedly(testing::DoAll(
             testing::SetArgPointee<0>(base::TimeDelta::FromSeconds(10)),
@@ -381,4 +338,18 @@ TEST_F(DownloadItemModelTest, InProgressStatus) {
     EXPECT_STREQ(test_case.expected_status,
                  UTF16ToUTF8(model().GetStatusText()).c_str());
   }
+}
+
+TEST_F(DownloadItemModelTest, ShouldShowInShelf) {
+  SetupDownloadItemDefaults();
+
+  // By default the download item should be displayable on the shelf.
+  EXPECT_TRUE(model().ShouldShowInShelf());
+
+  // Once explicitly set, ShouldShowInShelf() should return the explicit value.
+  model().SetShouldShowInShelf(false);
+  EXPECT_FALSE(model().ShouldShowInShelf());
+
+  model().SetShouldShowInShelf(true);
+  EXPECT_TRUE(model().ShouldShowInShelf());
 }

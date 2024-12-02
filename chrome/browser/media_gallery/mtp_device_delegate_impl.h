@@ -5,23 +5,23 @@
 #ifndef CHROME_BROWSER_MEDIA_GALLERY_MTP_DEVICE_DELEGATE_IMPL_H_
 #define CHROME_BROWSER_MEDIA_GALLERY_MTP_DEVICE_DELEGATE_IMPL_H_
 
-#include "build/build_config.h"
 #include "webkit/fileapi/media/mtp_device_file_system_config.h"
 
 #if !defined(SUPPORT_MTP_DEVICE_FILESYSTEM)
 #error "Media file system is not supported for this platform."
 #endif
 
-#if defined(OS_LINUX)  // Implies OS_CHROMEOS
-#include "chrome/browser/media_gallery/mtp_device_delegate_impl_linux.h"
-#endif
+#include "base/file_path.h"
+#include "webkit/fileapi/media/mtp_device_delegate.h"
 
 namespace chrome {
 
-// TODO(kmadhusu): Implement mtp device delegates on other platforms.
-#if defined(OS_LINUX)  // Implies OS_CHROMEOS
-typedef class MtpDeviceDelegateImplLinux MtpDeviceDelegateImpl;
-#endif
+typedef base::Callback<void(fileapi::MTPDeviceDelegate*)>
+    CreateMTPDeviceDelegateCallback;
+
+void CreateMTPDeviceDelegate(const FilePath::StringType& device_location,
+                             base::SequencedTaskRunner* media_task_runner,
+                             const CreateMTPDeviceDelegateCallback& callback);
 
 }  // namespace chrome
 

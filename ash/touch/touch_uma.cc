@@ -7,10 +7,12 @@
 #include "ash/shell_delegate.h"
 #include "base/metrics/histogram.h"
 #include "base/stringprintf.h"
+#include "ui/aura/env.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_property.h"
 #include "ui/base/events/event.h"
+#include "ui/base/events/event_utils.h"
 #include "ui/gfx/point_conversions.h"
 
 #if defined(USE_XI2_MT)
@@ -71,6 +73,7 @@ enum UMAEventType {
   UMA_ET_GESTURE_SCROLL_UPDATE_4P,
   UMA_ET_GESTURE_PINCH_UPDATE_3,
   UMA_ET_GESTURE_PINCH_UPDATE_4P,
+  UMA_ET_GESTURE_LONG_TAP,
   // NOTE: Add new event types only immediately above this line. Make sure to
   // update the enum list in tools/histogram/histograms.xml accordingly.
   UMA_ET_COUNT
@@ -218,6 +221,8 @@ UMAEventType UMAEventTypeFromEvent(const ui::Event& event) {
     }
     case ui::ET_GESTURE_LONG_PRESS:
       return UMA_ET_GESTURE_LONG_PRESS;
+    case ui::ET_GESTURE_LONG_TAP:
+      return UMA_ET_GESTURE_LONG_TAP;
     case ui::ET_GESTURE_MULTIFINGER_SWIPE: {
       const ui::GestureEvent& gesture =
           static_cast<const ui::GestureEvent&>(event);
@@ -243,7 +248,9 @@ UMAEventType UMAEventTypeFromEvent(const ui::Event& event) {
 namespace ash {
 namespace internal {
 
-TouchUMA::TouchUMA() {
+TouchUMA::TouchUMA()
+    : touch_in_progress_(false),
+      burst_length_(0) {
 }
 
 TouchUMA::~TouchUMA() {
@@ -280,6 +287,8 @@ void TouchUMA::RecordTouchEvent(aura::Window* target,
       static_cast<int>(std::max(event.radius_x(), event.radius_y())),
       1, 500, 100);
 
+  UpdateBurstData(event);
+
   WindowTouchDetails* details = target->GetProperty(kWindowTouchDetails);
   if (!details) {
     details = new WindowTouchDetails;
@@ -314,7 +323,7 @@ void TouchUMA::RecordTouchEvent(aura::Window* target,
     position = ui::EventLocationFromNative(event.native_event());
 #endif
     position = gfx::ToFlooredPoint(
-        position.Scale(1. / target->layer()->device_scale_factor()));
+        gfx::ScalePoint(position, 1. / target->layer()->device_scale_factor()));
   }
 
   position.set_x(std::min(bounds.width() - 1, std::max(0, position.x())));
@@ -381,6 +390,28 @@ void TouchUMA::RecordTouchEvent(aura::Window* target,
 
     details->last_move_time_[event.touch_id()] = event.time_stamp();
     details->last_touch_position_[event.touch_id()] = event.location();
+  }
+}
+
+void TouchUMA::UpdateBurstData(const ui::TouchEvent& event) {
+  if (event.type() == ui::ET_TOUCH_PRESSED) {
+    if (!touch_in_progress_) {
+      base::TimeDelta difference = event.time_stamp() - last_touch_down_time_;
+      if (difference > base::TimeDelta::FromMilliseconds(250)) {
+        if (burst_length_) {
+          UMA_HISTOGRAM_COUNTS_100("Ash.TouchStartBurst",
+                                   std::min(burst_length_, 100));
+        }
+        burst_length_ = 1;
+      } else {
+        ++burst_length_;
+      }
+    }
+    touch_in_progress_ = true;
+    last_touch_down_time_ = event.time_stamp();
+  } else if (event.type() == ui::ET_TOUCH_RELEASED) {
+    if (!aura::Env::GetInstance()->is_touch_down())
+      touch_in_progress_ = false;
   }
 }
 

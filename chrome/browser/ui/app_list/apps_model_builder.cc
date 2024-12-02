@@ -10,6 +10,7 @@
 #include "base/auto_reset.h"
 #include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/app_list/extension_app_item.h"
@@ -45,7 +46,8 @@ AppsModelBuilder::AppsModelBuilder(Profile* profile,
       model_(model),
       ignore_changes_(false) {
   extensions::ExtensionPrefs* extension_prefs =
-      profile_->GetExtensionService()->extension_prefs();
+      extensions::ExtensionSystem::Get(profile_)->extension_service()->
+          extension_prefs();
 
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_LOADED,
       content::Source<Profile>(profile_));
@@ -57,7 +59,9 @@ AppsModelBuilder::AppsModelBuilder(Profile* profile,
       content::Source<Profile>(profile_));
 
   pref_change_registrar_.Init(extension_prefs->pref_service());
-  pref_change_registrar_.Add(extensions::ExtensionPrefs::kExtensionsPref, this);
+  pref_change_registrar_.Add(extensions::ExtensionPrefs::kExtensionsPref,
+                             base::Bind(&AppsModelBuilder::ResortApps,
+                                        base::Unretained(this)));
 
   model_->AddObserver(this);
 }
@@ -74,7 +78,8 @@ void AppsModelBuilder::Build() {
 }
 
 void AppsModelBuilder::PopulateApps() {
-  ExtensionService* service = profile_->GetExtensionService();
+  ExtensionService* service =
+      extensions::ExtensionSystem::Get(profile_)->extension_service();
   if (!service)
     return;
 
@@ -82,7 +87,7 @@ void AppsModelBuilder::PopulateApps() {
   const ExtensionSet* extensions = service->extensions();
   for (ExtensionSet::const_iterator app = extensions->begin();
        app != extensions->end(); ++app) {
-    if ((*app)->ShouldDisplayInLauncher())
+    if ((*app)->ShouldDisplayInAppLauncher())
       apps.push_back(new ExtensionAppItem(profile_, *app, controller_));
   }
 
@@ -108,7 +113,7 @@ void AppsModelBuilder::ResortApps() {
 
   std::sort(apps.begin(), apps.end(), &AppPrecedes);
 
-  AutoReset<bool> auto_reset(&ignore_changes_, true);
+  base::AutoReset<bool> auto_reset(&ignore_changes_, true);
 
   // Adjusts the order of apps as needed in |model_| based on |apps|.
   for (size_t i = 0; i < apps.size(); ++i) {
@@ -180,7 +185,7 @@ void AppsModelBuilder::Observe(int type,
     case chrome::NOTIFICATION_EXTENSION_LOADED: {
       const Extension* extension =
           content::Details<const Extension>(details).ptr();
-      if (!extension->ShouldDisplayInLauncher())
+      if (!extension->ShouldDisplayInAppLauncher())
         return;
 
       if (FindApp(extension->id()) != -1)
@@ -206,10 +211,6 @@ void AppsModelBuilder::Observe(int type,
     case chrome::NOTIFICATION_APP_INSTALLED_TO_APPLIST: {
       highlight_app_id_ = *content::Details<const std::string>(details).ptr();
       HighlightApp();
-      break;
-    }
-    case chrome::NOTIFICATION_PREF_CHANGED: {
-      ResortApps();
       break;
     }
     default:

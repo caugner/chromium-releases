@@ -18,9 +18,9 @@
 #include "base/string16.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/extension_icon_manager.h"
-#include "chrome/common/extensions/url_pattern_set.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "extensions/common/url_pattern_set.h"
 
 
 class Profile;
@@ -314,6 +314,9 @@ class MenuManager : public content::NotificationObserver,
   // items are ignored.
   void ReadFromStorage(const std::string& extension_id,
                        scoped_ptr<base::Value> value);
+
+  // Removes all "incognito" "split" mode context items.
+  void RemoveAllIncognitoContextItems();
 
  private:
   FRIEND_TEST_ALL_PREFIXES(MenuManagerTest, DeleteParent);

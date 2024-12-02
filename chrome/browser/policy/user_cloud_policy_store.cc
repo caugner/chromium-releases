@@ -13,6 +13,7 @@
 #include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "content/public/browser/browser_thread.h"
+#include "policy/policy_constants.h"
 
 namespace em = enterprise_management;
 
@@ -44,10 +45,9 @@ const FilePath::CharType kPolicyDir[] = FILE_PATH_LITERAL("Policy");
 // File in the above directory for storing user policy data.
 const FilePath::CharType kPolicyCacheFile[] = FILE_PATH_LITERAL("User Policy");
 
-// Loads policy from the backing file (must be called via a task on
-// the FILE thread). Returns a PolicyLoadStruct with the results of the fetch.
-policy::PolicyLoadResult LoadPolicyFromDiskOnFileThread(const FilePath& path) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::FILE));
+// Loads policy from the backing file. Returns a PolicyLoadResult with the
+// results of the fetch.
+policy::PolicyLoadResult LoadPolicyFromDisk(const FilePath& path) {
   policy::PolicyLoadResult result;
   // If the backing file does not exist, just return.
   if (!file_util::PathExists(path)) {
@@ -98,7 +98,35 @@ UserCloudPolicyStore::UserCloudPolicyStore(Profile* profile,
       backing_file_path_(path) {
 }
 
-UserCloudPolicyStore::~UserCloudPolicyStore() {
+UserCloudPolicyStore::~UserCloudPolicyStore() {}
+
+// static
+scoped_ptr<UserCloudPolicyStore> UserCloudPolicyStore::Create(
+    Profile* profile) {
+  FilePath path =
+      profile->GetPath().Append(kPolicyDir).Append(kPolicyCacheFile);
+  return make_scoped_ptr(new UserCloudPolicyStore(profile, path));
+}
+
+void UserCloudPolicyStore::LoadImmediately() {
+  DVLOG(1) << "Initiating immediate policy load from disk";
+  // Cancel any pending Load/Store/Validate operations.
+  weak_factory_.InvalidateWeakPtrs();
+  // Load the policy from disk...
+  PolicyLoadResult result = LoadPolicyFromDisk(backing_file_path_);
+  // ...and install it, reporting success/failure to any observers.
+  PolicyLoaded(false, result);
+}
+
+void UserCloudPolicyStore::Clear() {
+  content::BrowserThread::PostTask(
+      content::BrowserThread::FILE, FROM_HERE,
+      base::Bind(base::IgnoreResult(&file_util::Delete),
+                 backing_file_path_,
+                 false));
+  policy_.reset();
+  policy_map_.Clear();
+  NotifyStoreLoaded();
 }
 
 void UserCloudPolicyStore::Load() {
@@ -110,12 +138,13 @@ void UserCloudPolicyStore::Load() {
   // complete.
   content::BrowserThread::PostTaskAndReplyWithResult(
       content::BrowserThread::FILE, FROM_HERE,
-      base::Bind(&LoadPolicyFromDiskOnFileThread, backing_file_path_),
+      base::Bind(&LoadPolicyFromDisk, backing_file_path_),
       base::Bind(&UserCloudPolicyStore::PolicyLoaded,
-                 weak_factory_.GetWeakPtr()));
+                 weak_factory_.GetWeakPtr(), true));
 }
 
-void UserCloudPolicyStore::PolicyLoaded(PolicyLoadResult result) {
+void UserCloudPolicyStore::PolicyLoaded(bool validate_in_background,
+                                        PolicyLoadResult result) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
   switch (result.status) {
     case LOAD_RESULT_LOAD_ERROR:
@@ -133,6 +162,7 @@ void UserCloudPolicyStore::PolicyLoaded(PolicyLoadResult result) {
       scoped_ptr<em::PolicyFetchResponse> cloud_policy(
           new em::PolicyFetchResponse(result.policy));
       Validate(cloud_policy.Pass(),
+               validate_in_background,
                base::Bind(
                    &UserCloudPolicyStore::InstallLoadedPolicyAfterValidation,
                    weak_factory_.GetWeakPtr()));
@@ -158,16 +188,9 @@ void UserCloudPolicyStore::InstallLoadedPolicyAfterValidation(
   DVLOG(1) << "Device ID: " << validator->policy_data()->device_id();
 
   InstallPolicy(validator->policy_data().Pass(), validator->payload().Pass());
+  FilterDisallowedPolicies();
   status_ = STATUS_OK;
   NotifyStoreLoaded();
-}
-
-void UserCloudPolicyStore::RemoveStoredPolicy() {
-  content::BrowserThread::PostTask(
-      content::BrowserThread::FILE, FROM_HERE,
-      base::Bind(base::IgnoreResult(&file_util::Delete),
-                 backing_file_path_,
-                 false));
 }
 
 void UserCloudPolicyStore::Store(const em::PolicyFetchResponse& policy) {
@@ -177,24 +200,34 @@ void UserCloudPolicyStore::Store(const em::PolicyFetchResponse& policy) {
   scoped_ptr<em::PolicyFetchResponse> policy_copy(
       new em::PolicyFetchResponse(policy));
   Validate(policy_copy.Pass(),
+           true,
            base::Bind(&UserCloudPolicyStore::StorePolicyAfterValidation,
                       weak_factory_.GetWeakPtr()));
 }
 
 void UserCloudPolicyStore::Validate(
     scoped_ptr<em::PolicyFetchResponse> policy,
+    bool validate_in_background,
     const UserCloudPolicyValidator::CompletionCallback& callback) {
   // Configure the validator.
   scoped_ptr<UserCloudPolicyValidator> validator =
-      CreateValidator(policy.Pass(), callback);
-  SigninManager* signin = SigninManagerFactory::GetForProfile(profile_);
-  std::string username = signin->GetAuthenticatedUsername();
-  DCHECK(!username.empty());
-  validator->ValidateUsername(username);
+      CreateValidator(policy.Pass());
+  SigninManager* signin = SigninManagerFactory::GetForProfileIfExists(profile_);
+  if (signin) {
+    std::string username = signin->GetAuthenticatedUsername();
+    DCHECK(!username.empty());
+    validator->ValidateUsername(username);
+  }
 
-  // Start validation. The Validator will free itself once validation is
-  // complete.
-  validator.release()->StartValidation();
+  if (validate_in_background) {
+    // Start validation in the background. The Validator will free itself once
+    // validation is complete.
+    validator.release()->StartValidation(callback);
+  } else {
+    // Run validation immediately and invoke the callback with the results.
+    validator->RunValidation();
+    callback.Run(validator.get());
+  }
 }
 
 void UserCloudPolicyStore::StorePolicyAfterValidation(
@@ -214,16 +247,17 @@ void UserCloudPolicyStore::StorePolicyAfterValidation(
       base::Bind(&StorePolicyToDiskOnFileThread,
                  backing_file_path_, *validator->policy()));
   InstallPolicy(validator->policy_data().Pass(), validator->payload().Pass());
+  FilterDisallowedPolicies();
   status_ = STATUS_OK;
   NotifyStoreLoaded();
 }
 
-// static
-scoped_ptr<CloudPolicyStore> CloudPolicyStore::CreateUserPolicyStore(
-    Profile* profile) {
-  FilePath path =
-      profile->GetPath().Append(kPolicyDir).Append(kPolicyCacheFile);
-  return scoped_ptr<CloudPolicyStore>(new UserCloudPolicyStore(profile, path));
+void UserCloudPolicyStore::FilterDisallowedPolicies() {
+  // We don't yet allow setting SyncDisabled in desktop cloud policy, because
+  // it causes the user to be signed out which then removes the cloud policy.
+  // TODO(atwilson): Remove this once we support signing in with sync disabled
+  // (http://crbug.com/166148).
+  policy_map_.Erase(key::kSyncDisabled);
 }
 
 }  // namespace policy

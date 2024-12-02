@@ -14,6 +14,7 @@
 #include "ui/gfx/rect.h"
 #include "ui/gfx/screen.h"
 #include "ui/gfx/size.h"
+#include "ui/gfx/text_utils.h"
 #include "ui/gfx/transform.h"
 #include "ui/views/background.h"
 #include "ui/views/controls/button/button.h"
@@ -171,7 +172,7 @@ class ContextMenuButtonBackground : public Background {
   virtual void Paint(gfx::Canvas* canvas, View* view) const OVERRIDE {
     CustomButton::ButtonState state = static_cast<CustomButton*>(view)->state();
     SkColor background_color, border_color;
-    if (state == CustomButton::BS_NORMAL) {
+    if (state == CustomButton::STATE_NORMAL) {
       background_color = SkColorSetARGB(102, 255, 255, 255);
       border_color = SkColorSetARGB(36, 0, 0, 0);
     } else {
@@ -253,14 +254,15 @@ class TouchSelectionControllerImpl::TouchContextMenuView
     points[0].iset(0, 0);
     points[1].iset(0, height());
 
-    SkShader* shader = SkGradientShader::CreateLinear(points,
-        kGradientColors, kGradientPoints, arraysize(kGradientPoints),
-        SkShader::kRepeat_TileMode);
+    skia::RefPtr<SkShader> shader = skia::AdoptRef(
+        SkGradientShader::CreateLinear(
+            points, kGradientColors, kGradientPoints,
+            arraysize(kGradientPoints),
+            SkShader::kRepeat_TileMode));
     DCHECK(shader);
 
     SkPaint paint;
-    paint.setShader(shader);
-    shader->unref();
+    paint.setShader(shader.get());
 
     paint.setStyle(SkPaint::kFill_Style);
     paint.setXfermodeMode(SkXfermode::kSrc_Mode);
@@ -287,11 +289,10 @@ class TouchSelectionControllerImpl::TouchContextMenuView
     for (size_t i = 0; i < arraysize(kContextMenuCommands); i++) {
       int command_id = kContextMenuCommands[i];
       if (controller_->IsCommandIdEnabled(command_id)) {
-        TextButton* button = new TextButton(
-            this, l10n_util::GetStringUTF16(command_id));
+        TextButton* button = new TextButton(this, gfx::RemoveAcceleratorChar(
+            l10n_util::GetStringUTF16(command_id), '&', NULL, NULL));
         button->set_focusable(true);
         button->set_request_focus_on_press(false);
-        button->set_prefix_type(TextButton::PREFIX_HIDE);
         button->SetEnabledColor(MenuConfig::instance().text_color);
         button->set_background(new ContextMenuButtonBackground());
         button->set_alignment(TextButton::ALIGN_CENTER);

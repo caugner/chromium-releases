@@ -15,8 +15,10 @@
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/google/google_util.h"
+#include "chrome/browser/policy/browser_policy_connector.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/profile_sync_service.h"
@@ -25,7 +27,6 @@
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/bookmarks/bookmark_bar_constants.h"
 #include "chrome/browser/ui/search/search.h"
-#include "chrome/browser/ui/search/search_ui.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_page_handler.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
@@ -49,7 +50,6 @@
 #include "grit/theme_resources.h"
 #include "ui/base/animation/animation.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/theme_provider.h"
 #include "ui/gfx/color_utils.h"
@@ -84,14 +84,6 @@ const char kSyncServiceHelpUrl[] =
 const char kHelpContentUrl[] =
     "https://www.google.com/support/chrome/";
 
-// The "background-position" CSS style key and value delimiter, as specified in
-// new_tab_theme.css for html element as $3.
-const char kCSSBackgroundPositionKey[] = "background-position: ";
-// sizeof(const char[]) includes null-terminated character, so subtract 1 to get
-// its string length.
-const int kCSSBackgroundPositionKeyLen = sizeof(kCSSBackgroundPositionKey) - 1;
-const char kCSSBackgroundPositionDelimiter[] = ";";
-
 string16 GetUrlWithLang(const GURL& url) {
   return ASCIIToUTF16(google_util::AppendGoogleLocaleParam(url).spec());
 }
@@ -117,15 +109,52 @@ std::string SkColorToRGBComponents(SkColor color) {
       SkColorGetB(color));
 }
 
-SkColor MaybeInvertColor(SkColor color) {
-  // If web contents are being inverted because the system is in high-contrast
-  // mode, any system theme colors we use must be inverted too to cancel out.
-  return gfx::IsInvertedColorScheme() ? color_utils::InvertColor(color) : color;
-}
-
 SkColor GetThemeColor(ui::ThemeProvider* tp, int id) {
   SkColor color = tp->GetColor(id);
-  return MaybeInvertColor(color);
+  // If web contents are being inverted because the system is in high-contrast
+  // mode, any system theme colors we use must be inverted too to cancel out.
+  return gfx::IsInvertedColorScheme() ?
+      color_utils::InvertColor(color) : color;
+}
+
+// Get the CSS string for the background position on the new tab page for the
+// states when the bar is attached or detached.
+std::string GetNewTabBackgroundCSS(const ui::ThemeProvider* theme_provider,
+                                   bool bar_attached,
+                                   bool is_ntp_search) {
+  int alignment;
+  theme_provider->GetDisplayProperty(
+      ThemeService::NTP_BACKGROUND_ALIGNMENT, &alignment);
+
+  // TODO(glen): This is a quick workaround to hide the notused.png image when
+  // no image is provided - we don't have time right now to figure out why
+  // this is painting as white.
+  // http://crbug.com/17593
+  if (!theme_provider->HasCustomImage(IDR_THEME_NTP_BACKGROUND)) {
+    return "-64px";
+  }
+
+  // For instant extended API i.e. |is_ntp_search| is true, bookmark bar is
+  // always detached at bottom of content view in the y-direction, floating on
+  // top of it in the z-order, and not showing any part of the theme background
+  // image, so the content view should show the entire theme background image as
+  // is, with no vertical offset.
+  if (bar_attached || is_ntp_search)
+    return ThemeService::AlignmentToString(alignment);
+
+  if (alignment & ThemeService::ALIGN_TOP) {
+    // The bar is detached, so we must offset the background by the bar size
+    // if it's a top-aligned bar.
+    int offset = chrome::kNTPBookmarkBarHeight;
+
+    if (alignment & ThemeService::ALIGN_LEFT)
+      return "left " + base::IntToString(-offset) + "px";
+    else if (alignment & ThemeService::ALIGN_RIGHT)
+      return "right " + base::IntToString(-offset) + "px";
+    return "center " + base::IntToString(-offset) + "px";
+  }
+
+  return ThemeService::AlignmentToString(alignment);
 }
 
 // How the background image on the new tab page should be tiled (see tiling
@@ -141,29 +170,22 @@ std::string GetNewTabBackgroundTilingCSS(
 }  // namespace
 
 NTPResourceCache::NTPResourceCache(Profile* profile)
-    : profile_(profile),
-      is_swipe_tracking_from_scroll_events_enabled_(false),
-      css_background_y_pos_(0) {
+    : profile_(profile), is_swipe_tracking_from_scroll_events_enabled_(false) {
   registrar_.Add(this, chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
                  content::Source<ThemeService>(
                      ThemeServiceFactory::GetForProfile(profile)));
   registrar_.Add(this, chrome::NOTIFICATION_PROMO_RESOURCE_STATE_CHANGED,
                  content::NotificationService::AllSources());
 
-  if (chrome::search::IsInstantExtendedAPIEnabled(profile_)) {
-    registrar_.Add(
-        this,
-        chrome::NOTIFICATION_NTP_BACKGROUND_THEME_Y_POS_CHANGED,
-        content::Source<Profile>(profile_));
-  }
+  base::Closure callback = base::Bind(&NTPResourceCache::OnPreferenceChanged,
+                                      base::Unretained(this));
 
   // Watch for pref changes that cause us to need to invalidate the HTML cache.
   pref_change_registrar_.Init(profile_->GetPrefs());
-  pref_change_registrar_.Add(prefs::kSyncAcknowledgedSyncTypes, this);
-  pref_change_registrar_.Add(prefs::kShowBookmarkBar, this);
-  pref_change_registrar_.Add(prefs::kNtpShownPage, this);
-  pref_change_registrar_.Add(prefs::kSyncPromoShowNTPBubble, this);
-  pref_change_registrar_.Add(prefs::kInstantUIShowWhiteNTP, this);
+  pref_change_registrar_.Add(prefs::kSyncAcknowledgedSyncTypes, callback);
+  pref_change_registrar_.Add(prefs::kShowBookmarkBar, callback);
+  pref_change_registrar_.Add(prefs::kNtpShownPage, callback);
+  pref_change_registrar_.Add(prefs::kSyncPromoShowNTPBubble, callback);
 }
 
 NTPResourceCache::~NTPResourceCache() {}
@@ -210,8 +232,8 @@ base::RefCountedMemory* NTPResourceCache::GetNewTabCSS(bool is_incognito) {
 }
 
 void NTPResourceCache::Observe(int type,
-    const content::NotificationSource& source,
-    const content::NotificationDetails& details) {
+                               const content::NotificationSource& source,
+                               const content::NotificationDetails& details) {
   // Invalidate the cache.
   if (chrome::NOTIFICATION_BROWSER_THEME_CHANGED == type ||
       chrome::NOTIFICATION_PROMO_RESOURCE_STATE_CHANGED == type) {
@@ -219,19 +241,17 @@ void NTPResourceCache::Observe(int type,
     new_tab_html_ = NULL;
     new_tab_incognito_css_ = NULL;
     new_tab_css_ = NULL;
-  } else if (chrome::NOTIFICATION_PREF_CHANGED == type) {
-    // A change occurred to one of the preferences we care about, so flush the
-    // cache.
-    new_tab_incognito_html_ = NULL;
-    new_tab_html_ = NULL;
-    new_tab_css_ = NULL;
-  } else if (chrome::NOTIFICATION_NTP_BACKGROUND_THEME_Y_POS_CHANGED == type) {
-    css_background_y_pos_ = *(content::Details<int>(details).ptr());
-    if (new_tab_css_.get())
-      UpdateNewTabCSSBackgroundPosition();
   } else {
     NOTREACHED();
   }
+}
+
+void NTPResourceCache::OnPreferenceChanged() {
+  // A change occurred to one of the preferences we care about, so flush the
+  // cache.
+  new_tab_incognito_html_ = NULL;
+  new_tab_html_ = NULL;
+  new_tab_css_ = NULL;
 }
 
 void NTPResourceCache::CreateNewTabIncognitoHTML() {
@@ -247,6 +267,23 @@ void NTPResourceCache::CreateNewTabIncognitoHTML() {
     new_tab_message_ids = IDS_NEW_TAB_GUEST_SESSION_MESSAGE;
     new_tab_html_idr = IDR_GUEST_SESSION_TAB_HTML;
     new_tab_link = kLearnMoreGuestSessionUrl;
+
+    std::string enterprise_domain =
+        g_browser_process->browser_policy_connector()->GetEnterpriseDomain();
+    if (!enterprise_domain.empty()) {
+      // Device is enterprise enrolled.
+      localized_strings.SetString("enterpriseInfoVisible", "true");
+      string16 enterprise_info = l10n_util::GetStringFUTF16(
+          IDS_DEVICE_OWNED_BY_NOTICE,
+          UTF8ToUTF16(enterprise_domain));
+      localized_strings.SetString("enterpriseInfoMessage", enterprise_info);
+      localized_strings.SetString("learnMore",
+          l10n_util::GetStringUTF16(IDS_LEARN_MORE));
+      localized_strings.SetString("enterpriseInfoHintLink",
+          GetUrlWithLang(GURL(chrome::kLearnMoreEnterpriseURL)));
+    } else {
+      localized_strings.SetString("enterpriseInfoVisible", "false");
+    }
   }
 #endif
   localized_strings.SetString("content",
@@ -265,7 +302,7 @@ void NTPResourceCache::CreateNewTabIncognitoHTML() {
 
   static const base::StringPiece incognito_tab_html(
       ResourceBundle::GetSharedInstance().GetRawDataResource(
-          new_tab_html_idr, ui::SCALE_FACTOR_NONE));
+          new_tab_html_idr));
 
   std::string full_html = jstemplate_builder::GetI18nTemplateHtml(
       incognito_tab_html, &localized_strings);
@@ -423,8 +460,7 @@ void NTPResourceCache::CreateNewTabHTML() {
   // Load the new tab page appropriate for this build
   base::StringPiece new_tab_html(ResourceBundle::GetSharedInstance().
       GetRawDataResource(chrome::search::IsInstantExtendedAPIEnabled(profile_) ?
-                             IDR_NEW_TAB_SEARCH_HTML : IDR_NEW_TAB_4_HTML,
-                         ui::SCALE_FACTOR_NONE));
+                         IDR_NEW_TAB_SEARCH_HTML : IDR_NEW_TAB_4_HTML));
   jstemplate_builder::UseVersion2 version2;
   std::string full_html =
       jstemplate_builder::GetI18nTemplateHtml(new_tab_html, &load_time_data);
@@ -446,16 +482,18 @@ void NTPResourceCache::CreateNewTabIncognitoCSS() {
   subst.push_back(
       profile_->GetPrefs()->GetString(prefs::kCurrentThemeID));  // $1
 
+  bool is_ntp_search = chrome::search::IsInstantExtendedAPIEnabled(profile_);
+
   // Colors.
   subst.push_back(SkColorToRGBAString(color_background));  // $2
-  subst.push_back(GetNewTabBackgroundCSS(tp, false));  // $3
-  subst.push_back(GetNewTabBackgroundCSS(tp, true));  // $4
+  subst.push_back(GetNewTabBackgroundCSS(tp, false, is_ntp_search));  // $3
+  subst.push_back(GetNewTabBackgroundCSS(tp, true, is_ntp_search));  // $4
   subst.push_back(GetNewTabBackgroundTilingCSS(tp));  // $5
 
   // Get our template.
   static const base::StringPiece new_tab_theme_css(
       ResourceBundle::GetSharedInstance().GetRawDataResource(
-      IDR_NEW_INCOGNITO_TAB_THEME_CSS, ui::SCALE_FACTOR_NONE));
+          IDR_NEW_INCOGNITO_TAB_THEME_CSS));
 
   // Create the string from our template and the replacements.
   std::string full_css = ReplaceStringPlaceholders(
@@ -469,8 +507,8 @@ void NTPResourceCache::CreateNewTabCSS() {
   DCHECK(tp);
 
   // Get our theme colors
-  SkColor color_background = MaybeInvertColor(
-      chrome::search::GetNTPBackgroundColor(profile_));
+  SkColor color_background =
+      GetThemeColor(tp, ThemeService::COLOR_NTP_BACKGROUND);
   SkColor color_text = GetThemeColor(tp, ThemeService::COLOR_NTP_TEXT);
   SkColor color_link = GetThemeColor(tp, ThemeService::COLOR_NTP_LINK);
   SkColor color_link_underline =
@@ -520,10 +558,12 @@ void NTPResourceCache::CreateNewTabCSS() {
   subst.push_back(
       profile_->GetPrefs()->GetString(prefs::kCurrentThemeID));  // $1
 
+  bool is_ntp_search = chrome::search::IsInstantExtendedAPIEnabled(profile_);
+
   // Colors.
   subst.push_back(SkColorToRGBAString(color_background));  // $2
-  subst.push_back(GetNewTabBackgroundCSS(tp, false));  // $3
-  subst.push_back(GetNewTabBackgroundCSS(tp, true));  // $4
+  subst.push_back(GetNewTabBackgroundCSS(tp, false, is_ntp_search));  // $3
+  subst.push_back(GetNewTabBackgroundCSS(tp, true, is_ntp_search));  // $4
   subst.push_back(GetNewTabBackgroundTilingCSS(tp));  // $5
   subst.push_back(SkColorToRGBAString(color_header));  // $6
   subst.push_back(SkColorToRGBAString(color_header_gradient_light));  // $7
@@ -549,93 +589,11 @@ void NTPResourceCache::CreateNewTabCSS() {
 
   // Get our template.
   static const base::StringPiece new_tab_theme_css(
-      ResourceBundle::GetSharedInstance().GetRawDataResource(
-          chrome::search::IsInstantExtendedAPIEnabled(profile_) ?
-              IDR_NEW_TAB_SEARCH_THEME_CSS : IDR_NEW_TAB_4_THEME_CSS,
-          ui::SCALE_FACTOR_NONE));
+      ResourceBundle::GetSharedInstance().GetRawDataResource(is_ntp_search ?
+          IDR_NEW_TAB_SEARCH_THEME_CSS : IDR_NEW_TAB_4_THEME_CSS));
 
   // Create the string from our template and the replacements.
   std::string css_string;
   css_string = ReplaceStringPlaceholders(new_tab_theme_css, subst, NULL);
   new_tab_css_ = base::RefCountedString::TakeString(&css_string);
-}
-
-std::string NTPResourceCache::GetNewTabBackgroundCSS(
-    const ui::ThemeProvider* theme_provider,
-    bool bar_attached) {
-  int alignment;
-  bool has_alignment = theme_provider->GetDisplayProperty(
-      ThemeService::NTP_BACKGROUND_ALIGNMENT, &alignment);
-  DCHECK(has_alignment);
-
-  // TODO(glen): This is a quick workaround to hide the notused.png image when
-  // no image is provided - we don't have time right now to figure out why
-  // this is painting as white.
-  // http://crbug.com/17593
-  if (!theme_provider->HasCustomImage(IDR_THEME_NTP_BACKGROUND))
-    return "-64px";
-
-  if (bar_attached)
-    return ThemeService::AlignmentToString(alignment);
-
-  // Determine the vertical offset of the background position for content view.
-  // The content view always occupies the full width of the parent, so there's
-  // no need for horizontal offset.
-  std::string background_position_y =
-      GetNewTabBackgroundPositionY(css_background_y_pos_, alignment);
-
-  std::string horizontal_alignment = ThemeService::kAlignmentCenter;
-  if (alignment & ThemeService::ALIGN_LEFT)
-    horizontal_alignment = ThemeService::kAlignmentLeft;
-  else if (alignment & ThemeService::ALIGN_RIGHT)
-    horizontal_alignment = ThemeService::kAlignmentRight;
-  return horizontal_alignment + " " + background_position_y;
-}
-
-// static
-std::string NTPResourceCache::GetNewTabBackgroundPositionY(int y_pos,
-                                                           int alignment) {
-  int offset = y_pos;
-  // If offset is 0, either we didn't get a notification via
-  // chrome::NOTIFICATION_NTP_BACKGROUND_THEME_Y_POS_CHANGED or we got one to
-  // set offset to 0; set offset only for top-aligned theme images.
-  if (offset == 0 && alignment & ThemeService::ALIGN_TOP) {
-    // The bar is detached, so we must offset the background by the bar size
-    // if it's a top-aligned bar.
-    offset = chrome::kNTPBookmarkBarHeight;
-  }
-
-  if (offset != 0)
-    return base::IntToString(-offset) + "px";
-
-  if (alignment & ThemeService::ALIGN_TOP)
-    return ThemeService::kAlignmentTop;
-
-  if (alignment & ThemeService::ALIGN_BOTTOM)
-    return ThemeService::kAlignmentBottom;
-
-  return ThemeService::kAlignmentCenter;
-}
-
-void NTPResourceCache::UpdateNewTabCSSBackgroundPosition() {
-  DCHECK(new_tab_css_.get());
-
-  // Replace background-position style of html element (i.e. $3 in
-  // new_tab_theme.css) in current css string.
-  base::RefCountedString* curr_css_string =
-      static_cast<base::RefCountedString*>(new_tab_css_.get());
-  std::string new_css_string(curr_css_string->data());
-  size_t background_pos_start = new_css_string.find(kCSSBackgroundPositionKey);
-  DCHECK(background_pos_start != std::string::npos);
-  background_pos_start += kCSSBackgroundPositionKeyLen;
-  size_t background_pos_end = new_css_string.find(
-      kCSSBackgroundPositionDelimiter, background_pos_start);
-  DCHECK(background_pos_end != std::string::npos);
-  std::string new_background_pos = GetNewTabBackgroundCSS(
-      ThemeServiceFactory::GetForProfile(profile_), false);
-  new_css_string.replace(background_pos_start,
-                         background_pos_end - background_pos_start,
-                         new_background_pos);
-
-  new_tab_css_ = base::RefCountedString::TakeString(&new_css_string);
 }

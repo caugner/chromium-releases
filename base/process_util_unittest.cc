@@ -8,11 +8,12 @@
 
 #include "base/command_line.h"
 #include "base/debug/alias.h"
-#include "base/eintr_wrapper.h"
+#include "base/debug/stack_trace.h"
 #include "base/file_path.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
+#include "base/posix/eintr_wrapper.h"
 #include "base/process_util.h"
 #include "base/test/multiprocess_test.h"
 #include "base/test/test_timeouts.h"
@@ -70,6 +71,12 @@ const int kExpectedStillRunningExitCode = 0x102;
 const int kExpectedKilledExitCode = 1;
 #else
 const int kExpectedStillRunningExitCode = 0;
+#endif
+
+#if defined(OS_WIN)
+// HeapQueryInformation function pointer.
+typedef BOOL (WINAPI* HeapQueryFn)  \
+    (HANDLE, HEAP_INFORMATION_CLASS, PVOID, SIZE_T, PSIZE_T);
 #endif
 
 // Sleeps until file filename is created.
@@ -284,7 +291,7 @@ TEST_F(ProcessUtilTest, MAYBE_GetTerminationStatusCrash) {
   base::CloseProcessHandle(handle);
 
   // Reset signal handlers back to "normal".
-  base::EnableInProcessStackDumping();
+  base::debug::EnableInProcessStackDumping();
   remove(signal_file.c_str());
 }
 #endif  // !defined(OS_MACOSX)
@@ -382,17 +389,29 @@ TEST_F(ProcessUtilTest, EnableLFH) {
     if (!no_debug_env || strcmp(no_debug_env, "1"))
       return;
   }
+  HMODULE kernel32 = GetModuleHandle(L"kernel32.dll");
+  ASSERT_TRUE(kernel32 != NULL);
+  HeapQueryFn heap_query = reinterpret_cast<HeapQueryFn>(GetProcAddress(
+      kernel32,
+      "HeapQueryInformation"));
+
+  // On Windows 2000, the function is not exported. This is not a reason to
+  // fail but we won't be able to retrieves information about the heap, so we
+  // should stop here.
+  if (heap_query == NULL)
+    return;
+
   HANDLE heaps[1024] = { 0 };
   unsigned number_heaps = GetProcessHeaps(1024, heaps);
   EXPECT_GT(number_heaps, 0u);
   for (unsigned i = 0; i < number_heaps; ++i) {
     ULONG flag = 0;
     SIZE_T length;
-    ASSERT_NE(0, HeapQueryInformation(heaps[i],
-                                      HeapCompatibilityInformation,
-                                      &flag,
-                                      sizeof(flag),
-                                      &length));
+    ASSERT_NE(0, heap_query(heaps[i],
+                            HeapCompatibilityInformation,
+                            &flag,
+                            sizeof(flag),
+                            &length));
     // If flag is 0, the heap is a standard heap that does not support
     // look-asides. If flag is 1, the heap supports look-asides. If flag is 2,
     // the heap is a low-fragmentation heap (LFH). Note that look-asides are not

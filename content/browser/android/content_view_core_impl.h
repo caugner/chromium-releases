@@ -7,6 +7,7 @@
 
 #include <vector>
 
+#include "base/android/jni_android.h"
 #include "base/android/jni_helper.h"
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
@@ -39,6 +40,7 @@ class ContentViewCoreImpl : public ContentViewCore,
   ContentViewCoreImpl(JNIEnv* env,
                       jobject obj,
                       bool hardware_accelerated,
+                      bool input_events_delivered_at_vsync,
                       WebContents* web_contents,
                       ui::WindowAndroid* window_android);
 
@@ -47,12 +49,15 @@ class ContentViewCoreImpl : public ContentViewCore,
   virtual base::android::ScopedJavaLocalRef<jobject> GetContainerViewDelegate()
       OVERRIDE;
   virtual WebContents* GetWebContents() const OVERRIDE;
-  virtual ui::WindowAndroid* GetWindowAndroid() OVERRIDE;
+  virtual ui::WindowAndroid* GetWindowAndroid() const OVERRIDE;
+  virtual scoped_refptr<cc::Layer> GetLayer() const OVERRIDE;
   virtual void LoadUrl(NavigationController::LoadURLParams& params) OVERRIDE;
   virtual void OnWebPreferencesUpdated() OVERRIDE;
   virtual jint GetCurrentRenderProcessId(JNIEnv* env, jobject obj) OVERRIDE;
   virtual void ShowPastePopup(int x, int y) OVERRIDE;
-  virtual unsigned int GetScaledContentTexture(const gfx::Size& size) OVERRIDE;
+  virtual unsigned int GetScaledContentTexture(
+      float scale,
+      gfx::Size* out_size) OVERRIDE;
 
   // --------------------------------------------------------------------------
   // Methods called from Java via JNI
@@ -120,6 +125,7 @@ class ContentViewCoreImpl : public ContentViewCore,
                  jint y,
                  jboolean disambiguation_popup_tap);
   void ShowPressState(JNIEnv* env, jobject obj, jlong time_ms, jint x, jint y);
+  void ShowPressCancel(JNIEnv* env, jobject obj, jlong time_ms, jint x, jint y);
   void DoubleTap(JNIEnv* env, jobject obj, jlong time_ms, jint x, jint y) ;
   void LongPress(JNIEnv* env,
                  jobject obj,
@@ -138,6 +144,7 @@ class ContentViewCoreImpl : public ContentViewCore,
   void SelectBetweenCoordinates(JNIEnv* env, jobject obj,
                                         jint x1, jint y1,
                                         jint x2, jint y2);
+  void MoveCaret(JNIEnv* env, jobject obj, jint x, jint y);
 
   jboolean CanGoBack(JNIEnv* env, jobject obj);
   jboolean CanGoForward(JNIEnv* env, jobject obj);
@@ -173,7 +180,7 @@ class ContentViewCoreImpl : public ContentViewCore,
                               jobject obj,
                               jobject object,
                               jstring name,
-                              jboolean require_annotation);
+                              jclass safe_annotation_clazz);
   void RemoveJavascriptInterface(JNIEnv* env, jobject obj, jstring name);
   int GetNavigationHistory(JNIEnv* env, jobject obj, jobject context);
   void UpdateVSyncParameters(JNIEnv* env, jobject obj, jlong timebase_micros,
@@ -181,6 +188,16 @@ class ContentViewCoreImpl : public ContentViewCore,
   jboolean PopulateBitmapFromCompositor(JNIEnv* env,
                                         jobject obj,
                                         jobject jbitmap);
+  void SetSize(JNIEnv* env, jobject obj, jint width, jint height);
+  jboolean IsRenderWidgetHostViewReady(JNIEnv* env, jobject obj);
+
+  void ShowInterstitialPage(JNIEnv* env,
+                            jobject obj,
+                            jstring jurl,
+                            jint delegate);
+  jboolean IsShowingInterstitialPage(JNIEnv* env, jobject obj);
+
+  jboolean ConsumePendingRendererFrame(JNIEnv* env, jobject obj);
 
   // --------------------------------------------------------------------------
   // Public methods that call to Java via JNI
@@ -198,6 +215,8 @@ class ContentViewCoreImpl : public ContentViewCore,
   void UpdateContentSize(int width, int height);
   void UpdateScrollOffsetAndPageScaleFactor(int x, int y, float scale);
   void UpdatePageScaleLimits(float minimum_scale, float maximum_scale);
+  void UpdateOffsetsForFullscreen(float controls_offset_y,
+                                  float content_offset_y);
   void ImeUpdateAdapter(int native_ime_adapter, int text_input_type,
                         const std::string& text,
                         int selection_start, int selection_end,
@@ -206,7 +225,7 @@ class ContentViewCoreImpl : public ContentViewCore,
   void SetTitle(const string16& title);
 
   bool HasFocus();
-  void ConfirmTouchEvent(bool handled);
+  void ConfirmTouchEvent(InputEventAckState ack_result);
   void HasTouchEventHandlers(bool need_touch_events);
   void OnSelectionChanged(const std::string& text);
   void OnSelectionBoundsChanged(
@@ -215,14 +234,30 @@ class ContentViewCoreImpl : public ContentViewCore,
 
   void StartContentIntent(const GURL& content_url);
 
+  // Shows the disambiguation popup
+  // |target_rect|   --> window coordinates which |zoomed_bitmap| represents
+  // |zoomed_bitmap| --> magnified image of potential touch targets
+  void ShowDisambiguationPopup(
+      const gfx::Rect& target_rect, const SkBitmap& zoomed_bitmap);
+
+  // Creates a java-side smooth scroller. Used by
+  // chrome.gpuBenchmarking.smoothScrollBy.
+  base::android::ScopedJavaLocalRef<jobject> CreateSmoothScroller(
+      bool scroll_down, int mouse_event_x, int mouse_event_y);
+
   // --------------------------------------------------------------------------
   // Methods called from native code
   // --------------------------------------------------------------------------
 
   gfx::Rect GetBounds() const;
 
+  void AttachLayer(scoped_refptr<cc::Layer> layer);
+  void RemoveLayer(scoped_refptr<cc::Layer> layer);
+  void DidProduceRendererFrame();
+
  private:
   class ContentViewUserData;
+
   friend class ContentViewUserData;
   virtual ~ContentViewCoreImpl();
 
@@ -246,6 +281,7 @@ class ContentViewCoreImpl : public ContentViewCore,
   float DpiScale() const;
   WebKit::WebGestureEvent MakeGestureEvent(WebKit::WebInputEvent::Type type,
                                            long time_ms, int x, int y) const;
+  void UpdateVSyncFlagOnInputEvent(WebKit::WebInputEvent* event) const;
 
   void DeleteScaledSnapshotTexture();
 
@@ -261,8 +297,18 @@ class ContentViewCoreImpl : public ContentViewCore,
   // display in the ContentViewCore.
   WebContentsImpl* web_contents_;
 
+  // A compositor layer containing any layer that should be shown.
+  scoped_refptr<cc::Layer> root_layer_;
+
   // Whether the renderer backing this ContentViewCore has crashed.
   bool tab_crashed_;
+
+  // Whether input events will be consistently delivered at vsync time.
+  bool input_events_delivered_at_vsync_;
+
+  // Whether a new frame from the renderer is waiting to be displayed by the
+  // browser compositor.
+  bool renderer_frame_pending_;
 
   float dpi_scale_;
 

@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "config.h"
-
 #include "cc/layer_animation_controller.h"
 
 #include "cc/active_animation.h"
@@ -11,17 +9,14 @@
 #include "cc/test/animation_test_common.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include <public/WebTransformationMatrix.h>
+#include "ui/gfx/transform.h"
 
-using namespace cc;
-using namespace WebKitTests;
-using WebKit::WebTransformationMatrix;
-
+namespace cc {
 namespace {
 
-void expectTranslateX(double translateX, const WebTransformationMatrix& matrix)
+void expectTranslateX(double translateX, const gfx::Transform& matrix)
 {
-    EXPECT_FLOAT_EQ(translateX, matrix.m41());
+    EXPECT_FLOAT_EQ(translateX, matrix.matrix().getDouble(0, 3));
 }
 
 scoped_ptr<ActiveAnimation> createActiveAnimation(scoped_ptr<AnimationCurve> curve, int id, ActiveAnimation::TargetProperty property)
@@ -69,7 +64,7 @@ TEST(LayerAnimationControllerTest, doNotClobberStartTimes)
 
     // Synchronize the start times.
     EXPECT_EQ(1u, events.size());
-    controller->notifyAnimationStarted(events[0]);
+    controller->OnAnimationStarted(events[0]);
     EXPECT_EQ(controller->getActiveAnimation(0, ActiveAnimation::Opacity)->startTime(), controllerImpl->getActiveAnimation(0, ActiveAnimation::Opacity)->startTime());
 
     // Start the animation on the main thread. Should not affect the start time.
@@ -126,7 +121,7 @@ TEST(LayerAnimationControllerTest, doNotSyncFinishedAnimation)
 
     EXPECT_FALSE(controllerImpl->getActiveAnimation(0, ActiveAnimation::Opacity));
 
-    addOpacityTransitionToController(*controller, 1, 0, 1, false);
+    int animationId = addOpacityTransitionToController(*controller, 1, 0, 1, false);
 
     controller->pushAnimationUpdatesTo(controllerImpl.get());
 
@@ -135,17 +130,17 @@ TEST(LayerAnimationControllerTest, doNotSyncFinishedAnimation)
 
     // Notify main thread controller that the animation has started.
     AnimationEvent animationStartedEvent(AnimationEvent::Started, 0, 0, ActiveAnimation::Opacity, 0);
-    controller->notifyAnimationStarted(animationStartedEvent);
+    controller->OnAnimationStarted(animationStartedEvent);
 
     // Force animation to complete on impl thread.
-    controllerImpl->removeAnimation(0);
+    controllerImpl->removeAnimation(animationId);
 
-    EXPECT_FALSE(controllerImpl->getActiveAnimation(0, ActiveAnimation::Opacity));
+    EXPECT_FALSE(controllerImpl->getActiveAnimation(animationId, ActiveAnimation::Opacity));
 
     controller->pushAnimationUpdatesTo(controllerImpl.get());
 
     // Even though the main thread has a 'new' animation, it should not be pushed because the animation has already completed on the impl thread.
-    EXPECT_FALSE(controllerImpl->getActiveAnimation(0, ActiveAnimation::Opacity));
+    EXPECT_FALSE(controllerImpl->getActiveAnimation(animationId, ActiveAnimation::Opacity));
 }
 
 // Tests that transitioning opacity from 0 to 1 works as expected.
@@ -191,7 +186,7 @@ TEST(LayerAnimationControllerTest, AnimationsWaitingForStartTimeDoNotFinishIfThe
     EXPECT_EQ(0, dummy.opacity());
 
     // Send the synchronized start time.
-    controller->notifyAnimationStarted(AnimationEvent(AnimationEvent::Started, 0, 1, ActiveAnimation::Opacity, 2));
+    controller->OnAnimationStarted(AnimationEvent(AnimationEvent::Started, 0, 1, ActiveAnimation::Opacity, 2));
     controller->animate(5, events.get());
     EXPECT_EQ(1, dummy.opacity());
     EXPECT_FALSE(controller->hasActiveAnimation());
@@ -558,4 +553,5 @@ TEST(LayerAnimationControllerTest, ForceSyncWhenSynchronizedStartTimeNeeded)
     EXPECT_EQ(ActiveAnimation::WaitingForTargetAvailability, activeAnimation->runState());
 }
 
-} // namespace
+}  // namespace
+}  // namespace cc

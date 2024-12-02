@@ -7,6 +7,14 @@
 namespace ash {
 namespace switches {
 
+// Enables an animated transition from the boot splash screen (Chrome logo on a
+// white background) to the login screen.  Implies
+// |kAshCopyHostBackgroundAtBoot| and doesn't make much sense if used in
+// conjunction with |kDisableBootAnimation| (since the transition begins at the
+// same time as the white/grayscale login screen animation).
+const char kAshAnimateFromBootSplashScreen[] =
+    "ash-animate-from-boot-splash-screen";
+
 // Variation of boot animation that uses Tween::EASE_OUT_2.
 const char kAshBootAnimationFunction2[] = "ash-boot-animation-function2";
 
@@ -25,6 +33,15 @@ const char kAshCopyHostBackgroundAtBoot[] = "ash-copy-host-background-at-boot";
 // Enable keyboard shortcuts useful for debugging.
 const char kAshDebugShortcuts[] = "ash-debug-shortcuts";
 
+// Disable support for auto window placement.
+const char kAshDisableAutoWindowPlacement[] =
+    "ash-enable-auto-window-placement";
+
+// Disables the limitter to throttle how quickly a user
+// can change display settings.
+const char kAshDisableDisplayChangeLimiter[] =
+    "ash-disable-display-change-limiter";
+
 // Disables boot animation v2, go back to v1.
 const char kAshDisableBootAnimation2[] = "ash-disable-boot-animation2";
 
@@ -34,17 +51,32 @@ const char kAshDisablePanelFitting[] = "ash-disable-panel-fitting";
 // Enable advanced gestures (e.g. for window management).
 const char kAshEnableAdvancedGestures[] = "ash-enable-advanced-gestures";
 
+// Enable workspace switching via a three finger vertical scroll.
+const char kAshEnableWorkspaceScrubbing[] = "ash-enable-workspace-scrubbing";
+
+#if defined(OS_LINUX)
+// Enable memory monitoring.
+const char kAshEnableMemoryMonitor[] = "ash-enable-memory-monitor";
+#endif
+
+// Enable the per application grouping version of the launcher.
+const char kAshEnablePerAppLauncher[] = "ash-enable-per-app-launcher";
+
 // Enables the Oak tree viewer.
 const char kAshEnableOak[] = "ash-enable-oak";
 
 // Enables showing the tray bubble by dragging on the shelf.
 const char kAshEnableTrayDragging[] = "ash-enable-tray-dragging";
 
+// Enables experimental "immersive" mode, a nearly-fullscreen view of the web
+// content without a tab strip or omnibox.
+const char kAshImmersive[] = "ash-immersive";
+
 // Enables creating a launcher per display.
 const char kAshLauncherPerDisplay[] = "ash-launcher-per-display";
 
 // If present new lock animations are enabled.
-const char kAshNewLockAnimationsEnabled[] = "ash-new-lock-animations-enabled";
+const char kAshDisableNewLockAnimations[] = "ash-disable-new-lock-animations";
 
 // Specifies the layout mode and offsets for the secondary display for
 // testing. The format is "<t|r|b|l>,<offset>" where t=TOP, r=RIGHT,
@@ -54,12 +86,6 @@ const char kAshSecondaryDisplayLayout[] = "ash-secondary-display-layout";
 
 // Enables the heads-up display for tracking touch points.
 const char kAshTouchHud[] = "ash-touch-hud";
-
-// If present animations are disabled.
-const char kAshWindowAnimationsDisabled[] = "ash-window-animations-disabled";
-
-// Use Google-style dialog box frames.
-const char kAuraGoogleDialogFrames[] = "aura-google-dialog-frames";
 
 // (Most) Chrome OS hardware reports ACPI power button releases correctly.
 // Standard hardware reports releases immediately after presses.  If set, we

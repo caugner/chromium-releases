@@ -58,18 +58,27 @@ chrome.app.runtime.onLaunched.addListener(function() {
      }));
    },
 
-   function testUpdateWindowWidth() {
+   function testCreateWindowContentSize() {
      chrome.app.window.create('test.html',
-         {width:512, height:384, frame:'custom'},
-         callbackPass(function(win) {
-       chrome.test.assertEq(512, win.contentWindow.innerWidth);
-       chrome.test.assertEq(384, win.contentWindow.innerHeight);
-       var oldWidth = win.contentWindow.outerWidth;
-       var oldHeight = win.contentWindow.outerHeight;
-       win.contentWindow.resizeBy(-256, 0);
-       chrome.test.assertEq(oldWidth - 256, win.contentWindow.outerWidth);
-       chrome.test.assertEq(oldHeight, win.contentWindow.outerHeight);
-       win.contentWindow.close();
+         { bounds: { width: 250, height: 200 } }, callbackPass(function(win) {
+       chrome.test.assertEq(250, win.contentWindow.innerWidth);
+       chrome.test.assertEq(200, win.contentWindow.innerHeight);
+       win.close();
+     }));
+   },
+
+   function testSetBoundsContentSize() {
+     chrome.app.window.create('test.html',
+         { bounds: { width: 250, height: 200 } }, callbackPass(function(win) {
+       var b = win.getBounds();
+       win.setBounds({width: 400, height: 450})
+       // Listen to onresize here rather than win.onBoundsChanged, because
+       // onBoundsChanged is fired before the web contents are resized.
+       win.contentWindow.onresize = callbackPass(function() {
+         chrome.test.assertEq(400, win.contentWindow.innerWidth);
+         chrome.test.assertEq(450, win.contentWindow.innerHeight);
+         win.close();
+       });
      }));
    },
 
@@ -79,6 +88,95 @@ chrome.app.runtime.onLaunched.addListener(function() {
          // Mission accomplished.
        }));
        win.contentWindow.close();
+     }));
+   },
+
+   function testMinSize() {
+     chrome.app.window.create('test.html', {
+       bounds: { width: 250, height: 250 },
+       minWidth: 400, minHeight: 450
+     }, callbackPass(function(win) {
+       var w = win.contentWindow;
+       chrome.test.assertEq(400, w.innerWidth);
+       chrome.test.assertEq(450, w.innerHeight);
+       w.close();
+     }));
+   },
+
+   function testMaxSize() {
+     chrome.app.window.create('test.html', {
+       bounds: { width: 250, height: 250 },
+       maxWidth: 200, maxHeight: 150
+     }, callbackPass(function(win) {
+       var w = win.contentWindow;
+       chrome.test.assertEq(200, w.innerWidth);
+       chrome.test.assertEq(150, w.innerHeight);
+       w.close();
+     }));
+   },
+
+   function testMinAndMaxSize() {
+     chrome.app.window.create('test.html', {
+       bounds: { width: 250, height: 250 },
+       minWidth: 400, minHeight: 450,
+       maxWidth: 200, maxHeight: 150
+     }, callbackPass(function(win) {
+       var w = win.contentWindow;
+       chrome.test.assertEq(400, w.innerWidth);
+       chrome.test.assertEq(450, w.innerHeight);
+       w.close();
+     }));
+   },
+
+   function testMinSizeRestore() {
+     chrome.app.window.create('test.html', {
+       bounds: { width: 250, height: 250 },
+       minWidth: 400, minHeight: 450,
+       id: 'test-id', singleton: false
+     }, callbackPass(function(win) {
+       var w = win.contentWindow;
+       chrome.test.assertEq(400, w.innerWidth);
+       chrome.test.assertEq(450, w.innerHeight);
+       w.close();
+
+       chrome.app.window.create('test.html', {
+         bounds: { width: 250, height: 250 },
+         minWidth: 500, minHeight: 550,
+         id: 'test-id', singleton: false
+       }, callbackPass(function(win) {
+         var w = win.contentWindow;
+         chrome.test.assertEq(500, w.innerWidth);
+         chrome.test.assertEq(550, w.innerHeight);
+         w.close();
+       }));
+     }));
+   },
+
+   function testSingleton() {
+     chrome.app.window.create('test.html', {
+       id: 'singleton-id'
+     }, callbackPass(function(win) {
+       var w = win.contentWindow;
+
+       chrome.app.window.create('test.html', {
+         id: 'singleton-id'
+       }, callbackPass(function(win) {
+         var w2 = win.contentWindow;
+
+         chrome.test.assertTrue(w === w2);
+
+         chrome.app.window.create('test.html', {
+           id: 'singleton-id', singleton: false
+         }, callbackPass(function(win) {
+           var w3 = win.contentWindow;
+
+           chrome.test.assertFalse(w === w3);
+
+           w.close();
+           w2.close();
+           w3.close();
+         }));
+       }));
      }));
    },
 

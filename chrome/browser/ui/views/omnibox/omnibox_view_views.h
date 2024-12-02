@@ -108,6 +108,7 @@ class OmniboxViewViews
   virtual void SelectAll(bool reversed) OVERRIDE;
   virtual void UpdatePopup() OVERRIDE;
   virtual void SetFocus() OVERRIDE;
+  virtual void ApplyCaretVisibility() OVERRIDE;
   virtual void OnTemporaryTextMaybeChanged(
       const string16& display_text,
       bool save_original_selection) OVERRIDE;
@@ -137,10 +138,15 @@ class OmniboxViewViews
   virtual void OnAfterUserAction(views::Textfield* sender) OVERRIDE;
   virtual void OnAfterCutOrCopy() OVERRIDE;
   virtual void OnWriteDragData(ui::OSExchangeData* data) OVERRIDE;
+  virtual void AppendDropFormats(
+      int* formats,
+      std::set<ui::OSExchangeData::CustomFormat>* custom_formats) OVERRIDE;
+  virtual int OnDrop(const ui::OSExchangeData& data) OVERRIDE;
   virtual void UpdateContextMenu(ui::SimpleMenuModel* menu_contents) OVERRIDE;
   virtual bool IsCommandIdEnabled(int command_id) const OVERRIDE;
   virtual bool IsItemForCommandIdDynamic(int command_id) const OVERRIDE;
   virtual string16 GetLabelForCommandId(int command_id) const OVERRIDE;
+  virtual bool HandlesCommand(int command_id) const OVERRIDE;
   virtual void ExecuteCommand(int command_id) OVERRIDE;
 
 #if defined(OS_CHROMEOS)
@@ -152,6 +158,8 @@ class OmniboxViewViews
 #endif
 
  private:
+  class AutocompleteTextfield;
+
   // Return the number of characers in the current buffer.
   virtual int GetOmniboxTextLength() const OVERRIDE;
   size_t GetTextLength() const;
@@ -168,6 +176,14 @@ class OmniboxViewViews
 
   // Copy the URL instead of the text in the textfield into clipboard.
   void CopyURL();
+
+  // Paste text from the clipboard into the omnibox.
+  // Textfields implementation of Paste() pastes the contents of the clipboard
+  // as is. We want to strip whitespace and other things (see GetClipboardText()
+  // for details).
+  // It is assumed this is invoked after a call to OnBeforePossibleChange() and
+  // that after invoking this OnAfterPossibleChange() is invoked.
+  void OnPaste();
 
   views::Textfield* textfield_;
 

@@ -15,7 +15,6 @@
 #include "base/prefs/public/pref_change_registrar.h"
 #include "chrome/browser/printing/cloud_print/cloud_print_setup_handler.h"
 #include "chrome/browser/profiles/profile_keyed_service.h"
-#include "content/public/browser/notification_observer.h"
 
 class Profile;
 class ServiceProcessControl;
@@ -28,8 +27,7 @@ struct CloudPrintProxyInfo;
 // running in the service process.
 class CloudPrintProxyService
     : public CloudPrintSetupHandlerDelegate,
-      public ProfileKeyedService,
-      public content::NotificationObserver {
+      public ProfileKeyedService {
  public:
   explicit CloudPrintProxyService(Profile* profile);
   virtual ~CloudPrintProxyService();
@@ -62,11 +60,6 @@ class CloudPrintProxyService
 
   // CloudPrintSetupHandler::Delegate implementation.
   virtual void OnCloudPrintSetupClosed() OVERRIDE;
-
-  // content::NotificationObserver implementation.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
 
  private:
   // NotificationDelegate implementation for the token expired notification.

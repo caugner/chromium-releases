@@ -76,6 +76,8 @@ struct ContentSettings::FieldIds {
         GetFieldID(env, clazz, "mAllowFileAccessFromFileURLs", "Z");
     java_script_can_open_windows_automatically =
         GetFieldID(env, clazz, "mJavaScriptCanOpenWindowsAutomatically", "Z");
+    support_multiple_windows =
+        GetFieldID(env, clazz, "mSupportMultipleWindows", "Z");
     dom_storage_enabled =
         GetFieldID(env, clazz, "mDomStorageEnabled", "Z");
   }
@@ -100,6 +102,7 @@ struct ContentSettings::FieldIds {
   jfieldID allow_universal_access_from_file_urls;
   jfieldID allow_file_access_from_file_urls;
   jfieldID java_script_can_open_windows_automatically;
+  jfieldID support_multiple_windows;
   jfieldID dom_storage_enabled;
 };
 
@@ -139,8 +142,9 @@ void ContentSettings::SyncFromNativeImpl() {
   RenderViewHost* render_view_host = web_contents()->GetRenderViewHost();
   WebPreferences prefs = render_view_host->GetDelegate()->GetWebkitPrefs();
 
-  // TODO(mnaganov): Hook LayoutAlgorithm.NARROW_COLUMNS up to
-  // prefs.text_autosizing_enabled
+  Java_ContentSettings_setTextAutosizingEnabled(
+      env, obj, prefs.text_autosizing_enabled);
+  CheckException(env);
 
   env->SetIntField(
       obj,
@@ -236,8 +240,17 @@ void ContentSettings::SyncFromNativeImpl() {
       prefs.javascript_can_open_windows_automatically);
   CheckException(env);
 
+  env->SetBooleanField(
+      obj,
+      field_ids_->support_multiple_windows,
+      prefs.supports_multiple_windows);
+  CheckException(env);
+
   Java_ContentSettings_setPluginsDisabled(env, obj, !prefs.plugins_enabled);
   CheckException(env);
+
+  // We don't need to sync AppCache settings to Java, because there are
+  // no getters for them in the API.
 
   env->SetBooleanField(
       obj,
@@ -259,8 +272,8 @@ void ContentSettings::SyncToNativeImpl() {
   RenderViewHost* render_view_host = web_contents()->GetRenderViewHost();
   WebPreferences prefs = render_view_host->GetDelegate()->GetWebkitPrefs();
 
-  // TODO(mnaganov): Hook prefs.text_autosizing_enabled up to
-  // LayoutAlgorithm.NARROW_COLUMNS
+  prefs.text_autosizing_enabled =
+      Java_ContentSettings_getTextAutosizingEnabled(env, obj);
 
   int text_size_percent = env->GetIntField(obj, field_ids_->text_size_percent);
   prefs.font_scale_factor = text_size_percent / 100.0f;
@@ -337,7 +350,13 @@ void ContentSettings::SyncToNativeImpl() {
   prefs.javascript_can_open_windows_automatically = env->GetBooleanField(
       obj, field_ids_->java_script_can_open_windows_automatically);
 
+  prefs.supports_multiple_windows = env->GetBooleanField(
+      obj, field_ids_->support_multiple_windows);
+
   prefs.plugins_enabled = !Java_ContentSettings_getPluginsDisabled(env, obj);
+
+  prefs.application_cache_enabled =
+      Java_ContentSettings_getAppCacheEnabled(env, obj);
 
   prefs.local_storage_enabled = env->GetBooleanField(
       obj, field_ids_->dom_storage_enabled);

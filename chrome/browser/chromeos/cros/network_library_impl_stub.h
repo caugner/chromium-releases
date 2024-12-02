@@ -64,6 +64,7 @@ class NetworkLibraryImplStub : public NetworkLibraryImplBase {
   virtual void SetCellularDataRoamingAllowed(bool new_value) OVERRIDE;
   virtual void SetCarrier(const std::string& carrier,
                           const NetworkOperationCallback& completed) OVERRIDE;
+  virtual void ResetModem() OVERRIDE;
   virtual bool IsCellularAlwaysInRoaming() OVERRIDE;
   virtual void RequestNetworkScan() OVERRIDE;
 
@@ -75,7 +76,11 @@ class NetworkLibraryImplStub : public NetworkLibraryImplBase {
 
   virtual void EnableOfflineMode(bool enable) OVERRIDE;
 
-  virtual NetworkIPConfigVector GetIPConfigs(
+  virtual void GetIPConfigs(
+      const std::string& device_path,
+      HardwareAddressFormat format,
+      const NetworkGetIPConfigsCallback& callback) OVERRIDE;
+  virtual NetworkIPConfigVector GetIPConfigsAndBlock(
       const std::string& device_path,
       std::string* hardware_address,
       HardwareAddressFormat format) OVERRIDE;
@@ -87,9 +92,12 @@ class NetworkLibraryImplStub : public NetworkLibraryImplBase {
                                int dhcp_usage_mask) OVERRIDE;
 
  private:
+  void CompleteWifiInit();
+  void CompleteCellularInit();
   void AddStubNetwork(Network* network, NetworkProfileType profile_type);
   void AddStubRememberedNetwork(Network* network);
   void ConnectToNetwork(Network* network);
+  void ScanCompleted();
 
   std::string ip_address_;
   std::string hardware_address_;
@@ -97,11 +105,11 @@ class NetworkLibraryImplStub : public NetworkLibraryImplBase {
   std::string pin_;
   bool pin_required_;
   bool pin_entered_;
-  int64 connect_delay_ms_;
   int network_priority_order_;
   WifiNetworkVector disabled_wifi_networks_;
   CellularNetworkVector disabled_cellular_networks_;
   WimaxNetworkVector disabled_wimax_networks_;
+  base::WeakPtrFactory<NetworkLibraryImplStub> weak_pointer_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(NetworkLibraryImplStub);
 };

@@ -4,6 +4,7 @@
 
 #include "content/renderer/pepper/mock_renderer_ppapi_host.h"
 
+#include "ui/gfx/point.h"
 
 namespace content {
 
@@ -27,6 +28,12 @@ bool MockRendererPpapiHost::IsValidInstance(PP_Instance instance) const {
   return instance == pp_instance_;
 }
 
+webkit::ppapi::PluginInstance* MockRendererPpapiHost::GetPluginInstance(
+    PP_Instance instance) const {
+  NOTIMPLEMENTED();
+  return NULL;
+}
+
 RenderView* MockRendererPpapiHost::GetRenderViewForInstance(
     PP_Instance instance) const {
   if (instance == pp_instance_)
@@ -40,8 +47,36 @@ WebKit::WebPluginContainer* MockRendererPpapiHost::GetContainerForInstance(
   return NULL;
 }
 
+webkit::ppapi::PluginDelegate::PlatformGraphics2D*
+MockRendererPpapiHost::GetPlatformGraphics2D(PP_Resource resource) {
+  NOTIMPLEMENTED();
+  return NULL;
+}
+
 bool MockRendererPpapiHost::HasUserGesture(PP_Instance instance) const {
   return has_user_gesture_;
+}
+
+int MockRendererPpapiHost::GetRoutingIDForWidget(PP_Instance instance) const {
+  return 0;
+}
+
+gfx::Point MockRendererPpapiHost::PluginPointToRenderView(
+    PP_Instance instance,
+    const gfx::Point& pt) const {
+  return gfx::Point();
+}
+
+IPC::PlatformFileForTransit MockRendererPpapiHost::ShareHandleWithRemote(
+    base::PlatformFile handle,
+    bool should_close_source) {
+  NOTIMPLEMENTED();
+  return IPC::InvalidPlatformFileForTransit();
+}
+
+bool MockRendererPpapiHost::IsRunningInProcess() const {
+  NOTIMPLEMENTED();
+  return false;
 }
 
 }  // namespace content

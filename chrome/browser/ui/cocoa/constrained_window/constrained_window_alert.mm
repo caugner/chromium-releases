@@ -5,12 +5,12 @@
 #import "chrome/browser/ui/cocoa/constrained_window/constrained_window_alert.h"
 
 #import "base/logging.h"
+#import "chrome/browser/ui/chrome_style.h"
 #import "chrome/browser/ui/cocoa/constrained_window/constrained_window_button.h"
 #import "chrome/browser/ui/cocoa/constrained_window/constrained_window_control_utils.h"
 #import "chrome/browser/ui/cocoa/constrained_window/constrained_window_custom_window.h"
 #import "chrome/browser/ui/cocoa/hover_close_button.h"
 #import "chrome/browser/ui/constrained_window.h"
-#import "chrome/browser/ui/constrained_window_constants.h"
 #include "skia/ext/skia_utils_mac.h"
 #include "third_party/GTM/AppKit/GTMUILocalizerAndLayoutTweaker.h"
 #include "ui/base/cocoa/window_size_constants.h"
@@ -33,7 +33,8 @@ const CGFloat kButtonGap = 6;
 // Positions the accessory view starting at yPos. Returns the new value of yPos.
 - (CGFloat)layoutAccessoryViewAtYPos:(CGFloat)yPos;
 // Update the position of the close button.
-- (void)layoutCloseButtonWithWindowWidth:(CGFloat)windowWidth;
+- (void)layoutCloseButtonWithWindowWidth:(CGFloat)windowWidth
+                            windowHeight:(CGFloat)windowHeight;
 @end
 
 @implementation ConstrainedWindowAlert
@@ -64,7 +65,7 @@ const CGFloat kButtonGap = 6;
   [informativeTextField_ setAttributedStringValue:
       constrained_window::GetAttributedLabelString(
           string,
-          ConstrainedWindowConstants::kTextFontStyle,
+          chrome_style::kTextFontStyle,
           NSNaturalTextAlignment,
           NSLineBreakByWordWrapping)];
 }
@@ -77,7 +78,7 @@ const CGFloat kButtonGap = 6;
   [messageTextField_ setAttributedStringValue:
       constrained_window::GetAttributedLabelString(
           string,
-          ConstrainedWindowConstants::kTitleFontStyle,
+          chrome_style::kTitleFontStyle,
           NSNaturalTextAlignment,
           NSLineBreakByWordWrapping)];
 }
@@ -135,49 +136,52 @@ const CGFloat kButtonGap = 6;
   CGFloat windowWidth = buttonWidth;
   if (accessoryView_.get())
     windowWidth = std::max(windowWidth, NSWidth([accessoryView_ frame]));
-  windowWidth += ConstrainedWindowConstants::kHorizontalPadding * 2;
+  windowWidth += chrome_style::kHorizontalPadding * 2;
   windowWidth = std::max(windowWidth, kWindowMinWidth);
 
   // Layout controls.
   [self layoutButtonsWithWindowWidth:windowWidth];
   CGFloat curY = [buttons_ count] ? NSMaxY([[buttons_ lastObject] frame])
-      : ConstrainedWindowConstants::kClientBottomPadding;
+      : chrome_style::kClientBottomPadding;
   curY = [self layoutAccessoryViewAtYPos:curY];
   curY = [self layoutTextField:informativeTextField_
                           yPos:curY
                    windowWidth:windowWidth];
   CGFloat availableMessageWidth =
-      windowWidth - ConstrainedWindow::GetCloseButtonSize() - kButtonGap;
+      windowWidth - chrome_style::GetCloseButtonSize() - kButtonGap;
   curY = [self layoutTextField:messageTextField_
                           yPos:curY
                    windowWidth:availableMessageWidth];
-  [self layoutCloseButtonWithWindowWidth:windowWidth];
+
+  CGFloat windowHeight = curY + chrome_style::kTitleTopPadding;
+  [self layoutCloseButtonWithWindowWidth:windowWidth
+                            windowHeight:windowHeight];
 
   // Update window frame.
-  curY += ConstrainedWindowConstants::kTitleTopPadding;
-  [window_ setFrame:NSMakeRect(0, 0, windowWidth, curY)
-            display:NO];
+  NSRect windowFrame = NSMakeRect(0, 0, windowWidth, windowHeight);
+  windowFrame = [window_ frameRectForContentRect:windowFrame];
+  [window_ setFrame:windowFrame display:NO];
 }
 
 - (void)layoutButtonsWithWindowWidth:(CGFloat)windowWidth {
   // Layout first 2 button right to left.
-  CGFloat curX = windowWidth - ConstrainedWindowConstants::kHorizontalPadding;
+  CGFloat curX = windowWidth - chrome_style::kHorizontalPadding;
   const int buttonCount = [buttons_ count];
   for (int i = 0; i < std::min(2, buttonCount); ++i) {
     NSButton* button = [buttons_ objectAtIndex:i];
     NSRect rect = [button frame];
     rect.origin.x = curX - NSWidth(rect);
-    rect.origin.y = ConstrainedWindowConstants::kClientBottomPadding;
+    rect.origin.y = chrome_style::kClientBottomPadding;
     [button setFrameOrigin:rect.origin];
     curX = NSMinX(rect) - kButtonGap;
   }
 
   // Layout remaining buttons left to right.
-  curX = ConstrainedWindowConstants::kHorizontalPadding;
+  curX = chrome_style::kHorizontalPadding;
   for (int i = buttonCount - 1; i >= 2; --i) {
     NSButton* button = [buttons_ objectAtIndex:i];
     [button setFrameOrigin:
-        NSMakePoint(curX, ConstrainedWindowConstants::kClientBottomPadding)];
+        NSMakePoint(curX, chrome_style::kClientBottomPadding)];
     curX += NSMaxX([button frame]) + kButtonGap;
   }
 }
@@ -192,10 +196,10 @@ const CGFloat kButtonGap = 6;
 
   [textField setHidden:NO];
   NSRect rect;
-  rect.origin.y = yPos + ConstrainedWindowConstants::kRowPadding;
-  rect.origin.x = ConstrainedWindowConstants::kHorizontalPadding;
+  rect.origin.y = yPos + chrome_style::kRowPadding;
+  rect.origin.x = chrome_style::kHorizontalPadding;
   rect.size.width = windowWidth -
-      ConstrainedWindowConstants::kHorizontalPadding * 2;
+      chrome_style::kHorizontalPadding * 2;
   rect.size.height = 1;
   [textField setFrame:rect];
   [GTMUILocalizerAndLayoutTweaker sizeToFitFixedWidthTextField:textField];
@@ -206,19 +210,21 @@ const CGFloat kButtonGap = 6;
   if (!accessoryView_.get())
     return yPos;
   NSRect frame = [accessoryView_ frame];
-  frame.origin.y = yPos + ConstrainedWindowConstants::kRowPadding;
-  frame.origin.x = ConstrainedWindowConstants::kHorizontalPadding;
+  frame.origin.y = yPos + chrome_style::kRowPadding;
+  frame.origin.x = chrome_style::kHorizontalPadding;
   [accessoryView_ setFrameOrigin:frame.origin];
   return NSMaxY(frame);
 }
 
-- (void)layoutCloseButtonWithWindowWidth:(CGFloat)windowWidth {
+- (void)layoutCloseButtonWithWindowWidth:(CGFloat)windowWidth
+                            windowHeight:(CGFloat)windowHeight {
   NSRect frame;
-  frame.size.width = ConstrainedWindow::GetCloseButtonSize();
-  frame.size.height = ConstrainedWindow::GetCloseButtonSize();
+  frame.size.width = chrome_style::GetCloseButtonSize();
+  frame.size.height = chrome_style::GetCloseButtonSize();
   frame.origin.x = windowWidth -
-      ConstrainedWindowConstants::kHorizontalPadding - NSWidth(frame);
-  frame.origin.y = NSMaxY([messageTextField_ frame]) - NSHeight(frame);
+      chrome_style::kCloseButtonPadding - NSWidth(frame);
+  frame.origin.y = windowHeight -
+      chrome_style::kCloseButtonPadding - NSHeight(frame);
   [closeButton_ setFrame:frame];
 }
 

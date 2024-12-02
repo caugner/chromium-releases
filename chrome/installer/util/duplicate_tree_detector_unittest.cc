@@ -3,15 +3,15 @@
 // found in the LICENSE file.
 
 #include <windows.h>
-#include <shellapi.h>
 
 #include <fstream>
 
 #include "base/file_util.h"
-#include "base/scoped_temp_dir.h"
+#include "base/files/scoped_temp_dir.h"
 #include "base/string16.h"
 #include "base/string_util.h"
 #include "chrome/installer/util/duplicate_tree_detector.h"
+#include "chrome/installer/util/installer_util_test_common.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
@@ -57,31 +57,11 @@ class DuplicateTreeDetectorTest : public testing::Test {
     CreateTextFile(f2.MaybeAsASCII(), text_content_2_);
     ASSERT_TRUE(file_util::PathExists(f2));
 
-    CopyFileHierarchy(d1, second_root);
+    ASSERT_TRUE(installer::test::CopyFileHierarchy(d1, second_root));
   }
 
-  // Copies the hierarcy in |from| to |to|.
-  void CopyFileHierarchy(const FilePath& from, const FilePath& to) {
-    // In SHFILEOPSTRUCT below, |pFrom| and |pTo| have to be double-null
-    // terminated: http://msdn.microsoft.com/library/bb759795.aspx
-    string16 double_null_from(from.value());
-    double_null_from.push_back(L'\0');
-    string16 double_null_to(to.value());
-    double_null_to.push_back(L'\0');
-
-    SHFILEOPSTRUCT file_op = {};
-    file_op.wFunc = FO_COPY;
-    file_op.pFrom = double_null_from.c_str();
-    file_op.pTo = double_null_to.c_str();
-    file_op.fFlags = FOF_NO_UI;
-
-    ASSERT_EQ(0, SHFileOperation(&file_op));
-
-    ASSERT_FALSE(file_op.fAnyOperationsAborted);
-  }
-
-  ScopedTempDir temp_source_dir_;
-  ScopedTempDir temp_dest_dir_;
+  base::ScopedTempDir temp_source_dir_;
+  base::ScopedTempDir temp_dest_dir_;
 
   static const wchar_t text_content_1_[];
   static const wchar_t text_content_2_[];
@@ -164,7 +144,7 @@ TEST_F(DuplicateTreeDetectorTest, TestSingleFiles) {
   // This file should be the same.
   FilePath dest_file(temp_dest_dir_.path());
   dest_file = dest_file.AppendASCII("F1");
-  CopyFileHierarchy(source_file, dest_file);
+  ASSERT_TRUE(installer::test::CopyFileHierarchy(source_file, dest_file));
 
   // This file should be different.
   FilePath other_file(temp_dest_dir_.path());

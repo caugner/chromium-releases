@@ -4,8 +4,10 @@ include_rules = [
   "+chrome/installer",
   "+chrome/tools/profiles",  # For history unit tests.
   "+chromeos",
+  "+content/components",
   "+content/public/browser",
-  "+device",
+  "+device/bluetooth",
+  "+extensions/common",
   "+google/cacheinvalidation",  # Sync invalidation API protobuf files.
   "+google_apis",
   "+google_update",
@@ -28,6 +30,7 @@ include_rules = [
   "+sync/notifier",  # Sync invalidation API files.
   "+sync/protocol",  # Sync protobuf files.
   "+third_party/cros_system_api",
+  "+win8/util",
   "+xib_localizers", # For generated mac localization helpers
 
   # TODO(stuartmorgan): Remove these by refactoring necessary code out of
@@ -36,7 +39,7 @@ include_rules = [
   "+webkit/appcache",
   "+webkit/blob",
   "+webkit/database",
-  "+webkit/dom_storage",
+  "+webkit/dom_storage/dom_storage_types.h",
   "+webkit/fileapi",
   "+webkit/plugins",  # Defines some types that are marshalled over IPC.
   "+webkit/quota",

@@ -10,8 +10,8 @@
 #include "base/compiler_specific.h"
 #include "base/message_loop.h"
 #include "base/message_loop_proxy.h"
-#include "ppapi/c/dev/ppb_message_loop_dev.h"
 #include "ppapi/c/pp_errors.h"
+#include "ppapi/c/ppb_message_loop.h"
 #include "ppapi/proxy/plugin_dispatcher.h"
 #include "ppapi/proxy/plugin_globals.h"
 #include "ppapi/shared_impl/proxy_lock.h"
@@ -27,15 +27,15 @@ typedef thunk::EnterResource<PPB_MessageLoop_API> EnterMessageLoop;
 }
 
 MessageLoopResource::MessageLoopResource(PP_Instance instance)
-    : Resource(OBJECT_IS_PROXY, instance),
+    : MessageLoopShared(instance),
       nested_invocations_(0),
       destroyed_(false),
       should_destroy_(false),
       is_main_thread_loop_(false) {
 }
 
-MessageLoopResource::MessageLoopResource(ForMainThread)
-    : Resource(Resource::Untracked()),
+MessageLoopResource::MessageLoopResource(ForMainThread for_main_thread)
+    : MessageLoopShared(for_main_thread),
       nested_invocations_(0),
       destroyed_(false),
       should_destroy_(false),
@@ -45,14 +45,12 @@ MessageLoopResource::MessageLoopResource(ForMainThread)
 
   // This must be called only once, so the slot must be empty.
   CHECK(!PluginGlobals::Get()->msg_loop_slot());
-  base::ThreadLocalStorage::Slot* slot =
-      new base::ThreadLocalStorage::Slot(&ReleaseMessageLoop);
+  // We don't add a reference for TLS here, so we don't release it. Instead,
+  // this loop is owned by PluginGlobals. Contrast with AttachToCurrentThread
+  // where we register ReleaseMessageLoop with TLS and call AddRef.
+  base::ThreadLocalStorage::Slot* slot = new base::ThreadLocalStorage::Slot();
   PluginGlobals::Get()->set_msg_loop_slot(slot);
 
-  // Take a ref to the MessageLoop on behalf of the TLS. Note that this is an
-  // internal ref and not a plugin ref so the plugin can't accidentally
-  // release it. This is released by ReleaseMessageLoop().
-  AddRef();
   slot->Set(this);
 
   loop_proxy_ = base::MessageLoopProxy::current();
@@ -80,7 +78,7 @@ int32_t MessageLoopResource::AttachToCurrentThread() {
     if (slot->Get())
       return PP_ERROR_INPROGRESS;
   }
-  // TODO(brettw) check that the current thread can support a message loop.
+  // TODO(dmichael) check that the current thread can support a message loop.
 
   // Take a ref to the MessageLoop on behalf of the TLS. Note that this is an
   // internal ref and not a plugin ref so the plugin can't accidentally
@@ -140,20 +138,24 @@ int32_t MessageLoopResource::PostQuit(PP_Bool should_destroy) {
   if (PP_ToBool(should_destroy))
     should_destroy_ = true;
 
-  if (IsCurrent())
+  if (IsCurrent() && nested_invocations_ > 0)
     loop_->Quit();
   else
     PostClosure(FROM_HERE, MessageLoop::QuitClosure(), 0);
   return PP_OK;
 }
 
-void MessageLoopResource::DetachFromThread() {
-  // Never detach the main thread from its loop resource. Other plugin instances
-  // might need it.
-  if (is_main_thread_loop_)
-    return;
+// static
+MessageLoopResource* MessageLoopResource::GetCurrent() {
+  PluginGlobals* globals = PluginGlobals::Get();
+  if (!globals->msg_loop_slot())
+    return NULL;
+  return reinterpret_cast<MessageLoopResource*>(
+      globals->msg_loop_slot()->Get());
+}
 
-  // Note that the message loop must be destroyed on the thread is was created
+void MessageLoopResource::DetachFromThread() {
+  // Note that the message loop must be destroyed on the thread it was created
   // on.
   loop_proxy_ = NULL;
   loop_.reset();
@@ -196,6 +198,7 @@ void MessageLoopResource::ReleaseMessageLoop(void* value) {
 // -----------------------------------------------------------------------------
 
 PP_Resource Create(PP_Instance instance) {
+  ProxyAutoLock lock;
   // Validate the instance.
   PluginDispatcher* dispatcher = PluginDispatcher::GetForInstance(instance);
   if (!dispatcher)
@@ -204,16 +207,16 @@ PP_Resource Create(PP_Instance instance) {
 }
 
 PP_Resource GetForMainThread() {
+  ProxyAutoLock lock;
   return PluginGlobals::Get()->loop_for_main_thread()->GetReference();
 }
 
 PP_Resource GetCurrent() {
-  PluginGlobals* globals = PluginGlobals::Get();
-  if (!globals->msg_loop_slot())
-    return 0;
-  MessageLoopResource* loop = reinterpret_cast<MessageLoopResource*>(
-      globals->msg_loop_slot()->Get());
-  return loop->GetReference();
+  ProxyAutoLock lock;
+  Resource* resource = MessageLoopResource::GetCurrent();
+  if (resource)
+    return resource->GetReference();
+  return 0;
 }
 
 int32_t AttachToCurrentThread(PP_Resource message_loop) {
@@ -246,7 +249,7 @@ int32_t PostQuit(PP_Resource message_loop, PP_Bool should_destroy) {
   return PP_ERROR_BADRESOURCE;
 }
 
-const PPB_MessageLoop_Dev_0_1 ppb_message_loop_interface = {
+const PPB_MessageLoop_1_0 ppb_message_loop_interface = {
   &Create,
   &GetForMainThread,
   &GetCurrent,
@@ -264,7 +267,7 @@ PPB_MessageLoop_Proxy::~PPB_MessageLoop_Proxy() {
 }
 
 // static
-const PPB_MessageLoop_Dev_0_1* PPB_MessageLoop_Proxy::GetInterface() {
+const PPB_MessageLoop_1_0* PPB_MessageLoop_Proxy::GetInterface() {
   return &ppb_message_loop_interface;
 }
 

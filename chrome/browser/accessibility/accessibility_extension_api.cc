@@ -16,10 +16,9 @@
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "chrome/common/extensions/extension_error_utils.h"
 #include "content/public/browser/notification_service.h"
+#include "extensions/common/error_utils.h"
 
 namespace keys = extension_accessibility_api_constants;
 
@@ -165,9 +164,10 @@ void ExtensionAccessibilityEventRouter::DispatchEvent(
     scoped_ptr<base::ListValue> event_args) {
   if (enabled_ && profile &&
       extensions::ExtensionSystem::Get(profile)->event_router()) {
+    scoped_ptr<extensions::Event> event(new extensions::Event(
+        event_name, event_args.Pass()));
     extensions::ExtensionSystem::Get(profile)->event_router()->
-        DispatchEventToRenderers(event_name, event_args.Pass(), NULL, GURL(),
-                                 extensions::EventFilteringInfo());
+        BroadcastEvent(event.Pass());
   }
 }
 
@@ -200,11 +200,11 @@ bool GetAlertsForTabFunction::RunImpl() {
   EXTENSION_FUNCTION_VALIDATE(args_->GetInteger(0, &tab_id));
 
   TabStripModel* tab_strip = NULL;
-  TabContents* contents = NULL;
+  content::WebContents* contents = NULL;
   int tab_index = -1;
   if (!ExtensionTabUtil::GetTabById(tab_id, profile(), include_incognito(),
                                     NULL, &tab_strip, &contents, &tab_index)) {
-    error_ = ExtensionErrorUtils::FormatErrorMessage(
+    error_ = extensions::ErrorUtils::FormatErrorMessage(
         extensions::tabs_constants::kTabNotFoundError,
         base::IntToString(tab_id));
     return false;
@@ -213,7 +213,7 @@ bool GetAlertsForTabFunction::RunImpl() {
   ListValue* alerts_value = new ListValue;
 
   InfoBarTabHelper* infobar_helper =
-      InfoBarTabHelper::FromWebContents(contents->web_contents());
+      InfoBarTabHelper::FromWebContents(contents);
   for (size_t i = 0; i < infobar_helper->GetInfoBarCount(); ++i) {
     // TODO(hashimoto): Make other kind of alerts available.  crosbug.com/24281
     InfoBarDelegate* infobar_delegate = infobar_helper->GetInfoBarDelegateAt(i);

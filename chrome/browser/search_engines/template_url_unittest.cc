@@ -15,6 +15,10 @@
 #include "chrome/browser/google/google_util.h"
 #endif
 
+#if defined(OS_ANDROID)
+#include "chrome/browser/search_engines/search_terms_data_android.h"
+#endif
+
 // TestSearchTermsData --------------------------------------------------------
 
 // Simple implementation of SearchTermsData.
@@ -431,6 +435,42 @@ TEST_F(TemplateURLTest, ReplaceAssistedQueryStats) {
   }
 }
 
+// Tests replacing cursor position.
+TEST_F(TemplateURLTest, ReplaceCursorPosition) {
+  struct TestData {
+    const string16 search_term;
+    size_t cursor_position;
+    const std::string url;
+    const std::string expected_result;
+  } test_data[] = {
+    { ASCIIToUTF16("foo"),
+      string16::npos,
+      "{google:baseURL}?{searchTerms}&{google:cursorPosition}",
+      "http://www.google.com/?foo&" },
+    { ASCIIToUTF16("foo"),
+      2,
+      "{google:baseURL}?{searchTerms}&{google:cursorPosition}",
+      "http://www.google.com/?foo&cp=2&" },
+    { ASCIIToUTF16("foo"),
+      15,
+      "{google:baseURL}?{searchTerms}&{google:cursorPosition}",
+      "http://www.google.com/?foo&cp=15&" },
+  };
+  TemplateURLData data;
+  data.input_encodings.push_back("UTF-8");
+  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(test_data); ++i) {
+    data.SetURL(test_data[i].url);
+    TemplateURL url(NULL, data);
+    EXPECT_TRUE(url.url_ref().IsValid());
+    ASSERT_TRUE(url.url_ref().SupportsReplacement());
+    TemplateURLRef::SearchTermsArgs search_terms_args(test_data[i].search_term);
+    search_terms_args.cursor_position = test_data[i].cursor_position;
+    GURL result(url.url_ref().ReplaceSearchTerms(search_terms_args));
+    ASSERT_TRUE(result.is_valid());
+    EXPECT_EQ(test_data[i].expected_result, result.spec());
+  }
+}
+
 TEST_F(TemplateURLTest, Suggestions) {
   struct TestData {
     const int accepted_suggestion;
@@ -438,9 +478,9 @@ TEST_F(TemplateURLTest, Suggestions) {
     const std::string expected_result;
   } test_data[] = {
     { TemplateURLRef::NO_SUGGESTIONS_AVAILABLE, string16(),
-      "http://bar/foo?q=foobar" },
+      "http://bar/foo?aq=f&q=foobar" },
     { TemplateURLRef::NO_SUGGESTIONS_AVAILABLE, ASCIIToUTF16("foo"),
-      "http://bar/foo?q=foobar" },
+      "http://bar/foo?aq=f&q=foobar" },
     { TemplateURLRef::NO_SUGGESTION_CHOSEN, string16(),
       "http://bar/foo?aq=f&q=foobar" },
     { TemplateURLRef::NO_SUGGESTION_CHOSEN, ASCIIToUTF16("foo"),
@@ -467,7 +507,6 @@ TEST_F(TemplateURLTest, Suggestions) {
   }
 }
 
-#if defined(OS_WIN) || defined(OS_MACOSX)
 TEST_F(TemplateURLTest, RLZ) {
   string16 rlz_string;
 #if defined(ENABLE_RLZ)
@@ -476,6 +515,10 @@ TEST_F(TemplateURLTest, RLZ) {
       !google_util::IsOrganic(brand)) {
     RLZTracker::GetAccessPointRlz(RLZTracker::CHROME_OMNIBOX, &rlz_string);
   }
+#elif defined(OS_ANDROID)
+  SearchTermsDataAndroid::rlz_parameter_value_.Get() =
+      ASCIIToUTF16("android_test");
+  rlz_string = SearchTermsDataAndroid::rlz_parameter_value_.Get();
 #endif
 
   TemplateURLData data;
@@ -492,7 +535,6 @@ TEST_F(TemplateURLTest, RLZ) {
   expected_url += "x";
   EXPECT_EQ(expected_url, result.spec());
 }
-#endif
 
 TEST_F(TemplateURLTest, HostAndSearchTermKey) {
   struct TestData {
@@ -641,6 +683,34 @@ TEST_F(TemplateURLTest, ParseURLNestedParameter) {
   EXPECT_EQ(TemplateURLRef::SEARCH_TERMS, replacements[0].type);
   EXPECT_TRUE(valid);
 }
+
+#if defined(OS_ANDROID)
+TEST_F(TemplateURLTest, SearchClient) {
+  const std::string base_url_str("http://google.com/?");
+  const std::string terms_str("{searchTerms}&{google:searchClient}");
+  const std::string full_url_str = base_url_str + terms_str;
+  const string16 terms(ASCIIToUTF16(terms_str));
+  UIThreadSearchTermsData::SetGoogleBaseURL(base_url_str);
+
+  TemplateURLData data;
+  data.SetURL(full_url_str);
+  TemplateURL url(NULL, data);
+  EXPECT_TRUE(url.url_ref().IsValid());
+  ASSERT_TRUE(url.url_ref().SupportsReplacement());
+  TemplateURLRef::SearchTermsArgs search_terms_args(ASCIIToUTF16("foobar"));
+
+  // Check that the URL is correct when a client is not present.
+  GURL result(url.url_ref().ReplaceSearchTerms(search_terms_args));
+  ASSERT_TRUE(result.is_valid());
+  EXPECT_EQ("http://google.com/?foobar&", result.spec());
+
+  // Check that the URL is correct when a client is present.
+  SearchTermsDataAndroid::search_client_.Get() = "android_test";
+  GURL result_2(url.url_ref().ReplaceSearchTerms(search_terms_args));
+  ASSERT_TRUE(result_2.is_valid());
+  EXPECT_EQ("http://google.com/?foobar&client=android_test&", result_2.spec());
+}
+#endif
 
 TEST_F(TemplateURLTest, GetURLNoInstantURL) {
   TemplateURLData data;

@@ -4,14 +4,21 @@
 
 #include "ppapi/proxy/proxy_channel.h"
 
+#include "base/logging.h"
+#include "base/process_util.h"
 #include "ipc/ipc_platform_file.h"
 #include "ipc/ipc_test_sink.h"
+
+#if defined(OS_NACL)
+#include <unistd.h>
+#endif
 
 namespace ppapi {
 namespace proxy {
 
 ProxyChannel::ProxyChannel()
     : delegate_(NULL),
+      peer_pid_(base::kNullProcessId),
       test_sink_(NULL) {
 }
 
@@ -20,9 +27,11 @@ ProxyChannel::~ProxyChannel() {
 }
 
 bool ProxyChannel::InitWithChannel(Delegate* delegate,
+                                   base::ProcessId peer_pid,
                                    const IPC::ChannelHandle& channel_handle,
                                    bool is_client) {
   delegate_ = delegate;
+  peer_pid_ = peer_pid;
   IPC::Channel::Mode mode = is_client ? IPC::Channel::MODE_CLIENT
                                       : IPC::Channel::MODE_SERVER;
   channel_.reset(new IPC::SyncChannel(channel_handle, mode, this,
@@ -34,6 +43,9 @@ bool ProxyChannel::InitWithChannel(Delegate* delegate,
 void ProxyChannel::InitWithTestSink(IPC::TestSink* test_sink) {
   DCHECK(!test_sink_);
   test_sink_ = test_sink;
+#if !defined(OS_NACL)
+  peer_pid_ = base::GetCurrentProcId();
+#endif
 }
 
 void ProxyChannel::OnChannelError() {
@@ -51,9 +63,18 @@ IPC::PlatformFileForTransit ProxyChannel::ShareHandleWithRemote(
       base::PlatformFile handle,
       bool should_close_source) {
   // Channel could be closed if the plugin crashes.
-  if (!channel_.get())
+  if (!channel_.get()) {
+    if (should_close_source) {
+#if !defined(OS_NACL)
+      base::ClosePlatformFile(handle);
+#else
+      close(handle);
+#endif
+    }
     return IPC::InvalidPlatformFileForTransit();
-  return delegate_->ShareHandleWithRemote(handle, *channel_,
+  }
+  DCHECK(peer_pid_ != base::kNullProcessId);
+  return delegate_->ShareHandleWithRemote(handle, peer_pid_,
                                           should_close_source);
 }
 

@@ -9,7 +9,9 @@
 
 namespace content {
 
-MockBrowserPluginManager::MockBrowserPluginManager() {
+MockBrowserPluginManager::MockBrowserPluginManager(
+    RenderViewImpl* render_view)
+    : BrowserPluginManager(render_view) {
 }
 
 MockBrowserPluginManager::~MockBrowserPluginManager() {
@@ -19,10 +21,10 @@ BrowserPlugin* MockBrowserPluginManager::CreateBrowserPlugin(
     RenderViewImpl* render_view,
     WebKit::WebFrame* frame,
     const WebKit::WebPluginParams& params) {
-  return new MockBrowserPlugin(browser_plugin_counter_++,
-                           render_view,
-                           frame,
-                           params);
+  return new MockBrowserPlugin(++browser_plugin_counter_,
+                               render_view,
+                               frame,
+                               params);
 }
 
 void MockBrowserPluginManager::Cleanup() {
@@ -50,13 +52,13 @@ bool MockBrowserPluginManager::Send(IPC::Message* msg) {
       reply_deserializer_.reset(
           static_cast<IPC::SyncMessage*>(msg)->GetReplyDeserializer());
     }
-    OnControlMessageReceived(*msg);
+    OnMessageReceived(*msg);
   }
   delete msg;
   return true;
 }
 
-bool MockBrowserPluginManager::OnControlMessageReceived(
+bool MockBrowserPluginManager::OnMessageReceived(
     const IPC::Message& message) {
   // Save the message in the sink.
   sink_.OnMessageReceived(message);

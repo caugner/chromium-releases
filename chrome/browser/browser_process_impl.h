@@ -19,9 +19,7 @@
 #include "base/prefs/public/pref_change_registrar.h"
 #include "base/threading/non_thread_safe.h"
 #include "base/timer.h"
-#include "chrome/browser/api/prefs/pref_member.h"
 #include "chrome/browser/browser_process.h"
-#include "content/public/browser/notification_observer.h"
 
 class ChromeNetLog;
 class ChromeResourceDispatcherHostDelegate;
@@ -32,17 +30,26 @@ class RemoteDebuggingServer;
 class PluginsResourceService;
 #endif
 
+namespace base {
+class SequencedTaskRunner;
+}
+
 namespace policy {
 class BrowserPolicyConnector;
 class PolicyService;
 };
 
+#if defined(OS_WIN) && defined(USE_AURA)
+class MetroViewerProcessHost;
+#endif
+
 // Real implementation of BrowserProcess that creates and returns the services.
 class BrowserProcessImpl : public BrowserProcess,
-                           public base::NonThreadSafe,
-                           public content::NotificationObserver {
+                           public base::NonThreadSafe {
  public:
-  explicit BrowserProcessImpl(const CommandLine& command_line);
+  // |local_state_task_runner| must be a shutdown-blocking task runner.
+  BrowserProcessImpl(base::SequencedTaskRunner* local_state_task_runner,
+                     const CommandLine& command_line);
   virtual ~BrowserProcessImpl();
 
   // Called before the browser threads are created.
@@ -79,6 +86,7 @@ class BrowserProcessImpl : public BrowserProcess,
   virtual policy::BrowserPolicyConnector* browser_policy_connector() OVERRIDE;
   virtual policy::PolicyService* policy_service() OVERRIDE;
   virtual IconManager* icon_manager() OVERRIDE;
+  virtual GLStringManager* gl_string_manager() OVERRIDE;
   virtual RenderWidgetSnapshotTaker* GetRenderWidgetSnapshotTaker() OVERRIDE;
   virtual AutomationProviderList* GetAutomationProviderList() OVERRIDE;
   virtual void CreateDevToolsHttpProtocolHandler(
@@ -104,7 +112,6 @@ class BrowserProcessImpl : public BrowserProcess,
   virtual SafeBrowsingService* safe_browsing_service() OVERRIDE;
   virtual safe_browsing::ClientSideDetectionService*
       safe_browsing_detection_service() OVERRIDE;
-  virtual bool plugin_finder_disabled() const OVERRIDE;
 
 #if (defined(OS_WIN) || defined(OS_LINUX)) && !defined(OS_CHROMEOS)
   virtual void StartAutoupdateTimer() OVERRIDE;
@@ -114,11 +121,11 @@ class BrowserProcessImpl : public BrowserProcess,
   virtual prerender::PrerenderTracker* prerender_tracker() OVERRIDE;
   virtual ComponentUpdateService* component_updater() OVERRIDE;
   virtual CRLSetFetcher* crl_set_fetcher() OVERRIDE;
-
-  // content::NotificationObserver implementation.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  virtual BookmarkPromptController* bookmark_prompt_controller() OVERRIDE;
+  virtual chrome::MediaFileSystemRegistry*
+      media_file_system_registry() OVERRIDE;
+  virtual void PlatformSpecificCommandLineProcessing(
+      const CommandLine& command_line) OVERRIDE;
 
  private:
   void CreateMetricsService();
@@ -172,12 +179,19 @@ class BrowserProcessImpl : public BrowserProcess,
   bool created_icon_manager_;
   scoped_ptr<IconManager> icon_manager_;
 
+  scoped_ptr<GLStringManager> gl_string_manager_;
+
   scoped_refptr<extensions::EventRouterForwarder>
       extension_event_router_forwarder_;
 
 #if !defined(OS_ANDROID)
   scoped_ptr<RemoteDebuggingServer> remote_debugging_server_;
+
+  // Bookmark prompt controller displays the prompt for frequently visited URL.
+  scoped_ptr<BookmarkPromptController> bookmark_prompt_controller_;
 #endif
+
+  scoped_ptr<chrome::MediaFileSystemRegistry> media_file_system_registry_;
 
   scoped_refptr<printing::PrintPreviewTabController>
       print_preview_tab_controller_;
@@ -225,6 +239,9 @@ class BrowserProcessImpl : public BrowserProcess,
 
   scoped_refptr<DownloadRequestLimiter> download_request_limiter_;
 
+  // Sequenced task runner for local state related I/O tasks.
+  const scoped_refptr<base::SequencedTaskRunner> local_state_task_runner_;
+
   // Ensures that the observers of plugin/print disable/enable state
   // notifications are properly added and removed.
   PrefChangeRegistrar pref_change_registrar_;
@@ -238,9 +255,6 @@ class BrowserProcessImpl : public BrowserProcess,
 
   scoped_ptr<ChromeResourceDispatcherHostDelegate>
       resource_dispatcher_host_delegate_;
-
-  // Monitors the state of the 'DisablePluginFinder' policy.
-  scoped_ptr<BooleanPrefMember> plugin_finder_disabled_pref_;
 
 #if (defined(OS_WIN) || defined(OS_LINUX)) && !defined(OS_CHROMEOS)
   base::RepeatingTimer<BrowserProcessImpl> autoupdate_timer_;
@@ -263,6 +277,15 @@ class BrowserProcessImpl : public BrowserProcess,
 #if defined(ENABLE_PLUGIN_INSTALLATION)
   scoped_refptr<PluginsResourceService> plugins_resource_service_;
 #endif
+
+#if defined(OS_WIN) && defined(USE_AURA)
+  void PerformInitForWindowsAura(const CommandLine& command_line);
+
+  // Hosts the channel for the Windows 8 metro viewer process which runs in
+  // the ASH environment.
+  scoped_ptr<MetroViewerProcessHost> metro_viewer_process_host_;
+#endif
+
   // TODO(eroman): Remove this when done debugging 113031. This tracks
   // the callstack which released the final module reference count.
   base::debug::StackTrace release_last_reference_callstack_;

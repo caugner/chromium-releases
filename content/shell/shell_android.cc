@@ -34,8 +34,7 @@ void Shell::PlatformEnableUIControl(UIControl control, bool is_enabled) {
 
 void Shell::PlatformSetAddressBarURL(const GURL& url) {
   JNIEnv* env = AttachCurrentThread();
-  ScopedJavaLocalRef<jstring> j_url =
-        ConvertUTF8ToJavaString(env, url.spec());
+  ScopedJavaLocalRef<jstring> j_url = ConvertUTF8ToJavaString(env, url.spec());
   Java_Shell_onUpdateUrl(env, java_object_.obj(), j_url.obj());
 }
 
@@ -45,7 +44,7 @@ void Shell::PlatformSetIsLoading(bool loading) {
 }
 
 void Shell::PlatformCreateWindow(int width, int height) {
-  java_object_.Reset(AttachCurrentThread(), CreateShellView());
+  java_object_.Reset(AttachCurrentThread(), CreateShellView(this));
 }
 
 void Shell::PlatformSetContents() {
@@ -67,17 +66,22 @@ void Shell::LoadProgressChanged(WebContents* source, double progress) {
   Java_Shell_onLoadProgressChanged(env, java_object_.obj(), progress);
 }
 
+void Shell::PlatformToggleFullscreenModeForTab(WebContents* web_contents,
+                                               bool enter_fullscreen) {
+  JNIEnv* env = AttachCurrentThread();
+  Java_Shell_toggleFullscreenModeForTab(
+      env, java_object_.obj(), enter_fullscreen);
+}
+
+bool Shell::PlatformIsFullscreenForTabOrPending(
+    const WebContents* web_contents) const {
+  JNIEnv* env = AttachCurrentThread();
+  return Java_Shell_isFullscreenForTabOrPending(env, java_object_.obj());
+}
+
 void Shell::Close() {
   // TODO(tedchoc): Implement Close method for android shell
   NOTIMPLEMENTED();
-}
-
-void Shell::AttachLayer(WebContents* web_contents, WebKit::WebLayer* layer) {
-  ShellAttachLayer(layer);
-}
-
-void Shell::RemoveLayer(WebContents* web_contents, WebKit::WebLayer* layer) {
-  ShellRemoveLayer(layer);
 }
 
 // static

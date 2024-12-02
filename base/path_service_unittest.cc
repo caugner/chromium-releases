@@ -5,13 +5,13 @@
 #include "base/path_service.h"
 
 #include "base/basictypes.h"
-#include "base/file_util.h"
 #include "base/file_path.h"
-#include "base/scoped_temp_dir.h"
+#include "base/file_util.h"
+#include "base/files/scoped_temp_dir.h"
 #include "base/string_util.h"
 #include "build/build_config.h"
-#include "testing/gtest/include/gtest/gtest.h"
 #include "testing/gtest/include/gtest/gtest-spi.h"
+#include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
 
 #if defined(OS_WIN)
@@ -28,32 +28,41 @@ namespace {
 bool ReturnsValidPath(int dir_type) {
   FilePath path;
   bool result = PathService::Get(dir_type, &path);
+  // Some paths might not exist on some platforms in which case confirming
+  // |result| is true and !path.empty() is the best we can do.
+  bool check_path_exists = true;
 #if defined(OS_POSIX)
   // If chromium has never been started on this account, the cache path may not
   // exist.
   if (dir_type == base::DIR_CACHE)
-    return result && !path.empty();
+    check_path_exists = false;
 #endif
 #if defined(OS_LINUX)
   // On the linux try-bots: a path is returned (e.g. /home/chrome-bot/Desktop),
   // but it doesn't exist.
   if (dir_type == base::DIR_USER_DESKTOP)
-    return result && !path.empty();
+    check_path_exists = false;
 #endif
 #if defined(OS_WIN)
-  // On Windows XP, the Quick Launch folder for the "Default User" doesn't exist
-  // by default. At least confirm that the path returned begins with the
-  // Default User's profile path.
-  if (dir_type == base::DIR_DEFAULT_USER_QUICK_LAUNCH &&
-      base::win::GetVersion() < base::win::VERSION_VISTA) {
-    wchar_t default_profile_path[MAX_PATH];
-    DWORD size = arraysize(default_profile_path);
-    return (result &&
-            ::GetDefaultUserProfileDirectory(default_profile_path, &size) &&
-            StartsWith(path.value(), default_profile_path, false));
+  if (dir_type == base::DIR_DEFAULT_USER_QUICK_LAUNCH) {
+    // On Windows XP, the Quick Launch folder for the "Default User" doesn't
+    // exist by default. At least confirm that the path returned begins with the
+    // Default User's profile path.
+    if (base::win::GetVersion() < base::win::VERSION_VISTA) {
+      wchar_t default_profile_path[MAX_PATH];
+      DWORD size = arraysize(default_profile_path);
+      return (result &&
+              ::GetDefaultUserProfileDirectory(default_profile_path, &size) &&
+              StartsWith(path.value(), default_profile_path, false));
+    }
+  } else if (dir_type == base::DIR_TASKBAR_PINS) {
+    // There is no pinned-to-taskbar shortcuts prior to Win7.
+    if (base::win::GetVersion() < base::win::VERSION_WIN7)
+      check_path_exists = false;
   }
 #endif
-  return result && !path.empty() && file_util::PathExists(path);
+  return result && !path.empty() && (!check_path_exists ||
+                                     file_util::PathExists(path));
 }
 
 #if defined(OS_WIN)
@@ -130,7 +139,7 @@ TEST_F(PathServiceTest, Get) {
 // are supposed to do.
 TEST_F(PathServiceTest, Override) {
   int my_special_key = 666;
-  ScopedTempDir temp_dir;
+  base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
   FilePath fake_cache_dir(temp_dir.path().AppendASCII("cache"));
   // PathService::Override should always create the path provided if it doesn't
@@ -153,7 +162,7 @@ TEST_F(PathServiceTest, Override) {
 // Check if multiple overrides can co-exist.
 TEST_F(PathServiceTest, OverrideMultiple) {
   int my_special_key = 666;
-  ScopedTempDir temp_dir;
+  base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
   FilePath fake_cache_dir1(temp_dir.path().AppendASCII("1"));
   EXPECT_TRUE(PathService::Override(my_special_key, fake_cache_dir1));
@@ -183,7 +192,7 @@ TEST_F(PathServiceTest, RemoveOverride) {
   EXPECT_TRUE(PathService::Get(base::DIR_TEMP, &original_user_data_dir));
   EXPECT_FALSE(PathService::RemoveOverride(base::DIR_TEMP));
 
-  ScopedTempDir temp_dir;
+  base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
   EXPECT_TRUE(PathService::Override(base::DIR_TEMP, temp_dir.path()));
   FilePath new_user_data_dir;

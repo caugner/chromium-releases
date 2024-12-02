@@ -11,10 +11,10 @@ AppListControllerDelegateAsh::AppListControllerDelegateAsh() {}
 
 AppListControllerDelegateAsh::~AppListControllerDelegateAsh() {}
 
-void AppListControllerDelegateAsh::CloseView() {
+void AppListControllerDelegateAsh::DismissView() {
   DCHECK(ash::Shell::HasInstance());
   if (ash::Shell::GetInstance()->GetAppListTargetVisibility())
-    ash::Shell::GetInstance()->ToggleAppList();
+    ash::Shell::GetInstance()->ToggleAppList(NULL);
 }
 
 bool AppListControllerDelegateAsh::IsAppPinned(
@@ -49,10 +49,22 @@ void AppListControllerDelegateAsh::ActivateApp(Profile* profile,
                                                const std::string& extension_id,
                                                int event_flags) {
   ChromeLauncherController::instance()->ActivateApp(extension_id, event_flags);
+  DismissView();
 }
 
 void AppListControllerDelegateAsh::LaunchApp(Profile* profile,
                                              const std::string& extension_id,
                                              int event_flags) {
   ChromeLauncherController::instance()->LaunchApp(extension_id, event_flags);
+  DismissView();
+}
+
+namespace app_list_controller {
+
+#if defined(OS_CHROMEOS)
+void ShowAppList() {
+  ash::Shell::GetInstance()->ToggleAppList(NULL);
+}
+#endif
+
 }

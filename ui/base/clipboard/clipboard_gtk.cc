@@ -108,6 +108,7 @@ GdkFilterReturn SelectionChangeObserver::OnXEvent(GdkXEvent* xevent,
 
 const char kMimeTypeBitmap[] = "image/bmp";
 const char kMimeTypeMozillaURL[] = "text/x-moz-url";
+const char kMimeTypePepperCustomData[] = "chromium/x-pepper-custom-data";
 const char kMimeTypeWebkitSmartPaste[] = "chromium/x-webkit-paste";
 
 std::string GdkAtomToString(const GdkAtom& atom) {
@@ -326,7 +327,10 @@ void Clipboard::WriteBookmark(const char* title_data, size_t title_len,
   // Write as a mozilla url (UTF16: URL, newline, title).
   string16 url = UTF8ToUTF16(std::string(url_data, url_len) + "\n");
   string16 title = UTF8ToUTF16(std::string(title_data, title_len));
-  int data_len = 2 * (title.length() + url.length());
+  if (title.length() >= std::numeric_limits<size_t>::max() / 4 ||
+      url.length() >= std::numeric_limits<size_t>::max() / 4)
+    return;
+  size_t data_len = 2 * (title.length() + url.length());
 
   char* data = new char[data_len];
   memcpy(data, url.data(), 2 * url.length());
@@ -647,6 +651,12 @@ const Clipboard::FormatType& Clipboard::GetWebKitSmartPasteFormatType() {
 // static
 const Clipboard::FormatType& Clipboard::GetWebCustomDataFormatType() {
   CR_DEFINE_STATIC_LOCAL(FormatType, type, (kMimeTypeWebCustomData));
+  return type;
+}
+
+// static
+const Clipboard::FormatType& Clipboard::GetPepperCustomDataFormatType() {
+  CR_DEFINE_STATIC_LOCAL(FormatType, type, (kMimeTypePepperCustomData));
   return type;
 }
 

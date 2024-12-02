@@ -13,7 +13,7 @@ import org.chromium.android_webview.AwContents;
 import org.chromium.base.test.util.Feature;
 import org.chromium.content.browser.LoadUrlParams;
 import org.chromium.content.browser.test.util.CallbackHelper;
-import org.chromium.android_webview.test.util.TestWebServer;
+import org.chromium.net.test.util.TestWebServer;
 
 import java.util.concurrent.TimeUnit;
 import java.util.HashMap;
@@ -24,7 +24,7 @@ import java.util.Map;
  */
 public class AndroidWebViewLoadUrlTest extends AndroidWebViewTestBase {
     @SmallTest
-    @Feature({"Android-WebView"})
+    @Feature({"AndroidWebView"})
     public void testDataUrl() throws Throwable {
         final String expectedTitle = "dataUrlTest";
         final String data =
@@ -40,7 +40,7 @@ public class AndroidWebViewLoadUrlTest extends AndroidWebViewTestBase {
     }
 
     @SmallTest
-    @Feature({"Android-WebView"})
+    @Feature({"AndroidWebView"})
     public void testDataUrlBase64() throws Throwable {
         final String expectedTitle = "dataUrlTestBase64";
         final String data = "PGh0bWw+PGhlYWQ+PHRpdGxlPmRhdGFVcmxUZXN0QmFzZTY0PC90aXRsZT48" +
@@ -52,6 +52,23 @@ public class AndroidWebViewLoadUrlTest extends AndroidWebViewTestBase {
         final AwContents awContents = testContainerView.getAwContents();
         loadDataSync(awContents, contentsClient.getOnPageFinishedHelper(), data,
                      "text/html", true);
+        assertEquals(expectedTitle, getTitleOnUiThread(awContents));
+    }
+
+    @SmallTest
+    @Feature({"AndroidWebView"})
+    public void testDataUrlCharset() throws Throwable {
+        // Note that the '£' is the important character in the following
+        // string as it's not in the US_ASCII character set.
+        final String expectedTitle = "You win £100!";
+        final String data =
+            "<html><head><title>" + expectedTitle + "</title></head><body>foo</body></html>";
+        final TestAwContentsClient contentsClient = new TestAwContentsClient();
+        final AwTestContainerView testContainerView =
+                createAwTestContainerViewOnMainSync(contentsClient);
+        final AwContents awContents = testContainerView.getAwContents();
+        loadDataSyncWithCharset(awContents, contentsClient.getOnPageFinishedHelper(), data,
+                     "text/html", false, "UTF-8");
         assertEquals(expectedTitle, getTitleOnUiThread(awContents));
     }
 
@@ -77,7 +94,7 @@ public class AndroidWebViewLoadUrlTest extends AndroidWebViewTestBase {
     }
 
     @SmallTest
-    @Feature({"Android-WebView"})
+    @Feature({"AndroidWebView"})
     public void testLoadUrlWithExtraHeaders() throws Throwable {
         final TestAwContentsClient contentsClient = new TestAwContentsClient();
         final AwTestContainerView testContainerView =

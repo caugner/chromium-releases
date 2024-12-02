@@ -5,11 +5,11 @@
 #include "gpu/command_buffer/service/texture_manager.h"
 
 #include "base/memory/scoped_ptr.h"
-#include "gpu/command_buffer/common/gl_mock.h"
 #include "gpu/command_buffer/service/feature_info.h"
 #include "gpu/command_buffer/service/gles2_cmd_decoder_mock.h"
 #include "gpu/command_buffer/service/test_helper.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/gl/gl_mock.h"
 
 using ::testing::Pointee;
 using ::testing::Return;
@@ -104,24 +104,36 @@ TEST_F(TextureManagerTest, SetParameter) {
   // Check texture got created.
   TextureManager::TextureInfo* info = manager_.GetTextureInfo(kClient1Id);
   ASSERT_TRUE(info != NULL);
-  EXPECT_TRUE(manager_.SetParameter(info, GL_TEXTURE_MIN_FILTER, GL_NEAREST));
+  EXPECT_EQ(static_cast<GLenum>(GL_NO_ERROR), manager_.SetParameter(
+      info, GL_TEXTURE_MIN_FILTER, GL_NEAREST));
   EXPECT_EQ(static_cast<GLenum>(GL_NEAREST), info->min_filter());
-  EXPECT_TRUE(manager_.SetParameter(info, GL_TEXTURE_MAG_FILTER, GL_NEAREST));
+  EXPECT_EQ(static_cast<GLenum>(GL_NO_ERROR), manager_.SetParameter(
+      info, GL_TEXTURE_MAG_FILTER, GL_NEAREST));
   EXPECT_EQ(static_cast<GLenum>(GL_NEAREST), info->mag_filter());
-  EXPECT_TRUE(manager_.SetParameter(info, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE));
+  EXPECT_EQ(static_cast<GLenum>(GL_NO_ERROR), manager_.SetParameter(
+      info, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE));
   EXPECT_EQ(static_cast<GLenum>(GL_CLAMP_TO_EDGE), info->wrap_s());
-  EXPECT_TRUE(manager_.SetParameter(info, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE));
+  EXPECT_EQ(static_cast<GLenum>(GL_NO_ERROR), manager_.SetParameter(
+      info, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE));
   EXPECT_EQ(static_cast<GLenum>(GL_CLAMP_TO_EDGE), info->wrap_t());
-  EXPECT_FALSE(manager_.SetParameter(
+  EXPECT_EQ(static_cast<GLenum>(GL_NO_ERROR), manager_.SetParameter(
+      info, GL_TEXTURE_MAX_ANISOTROPY_EXT, 1));
+  EXPECT_EQ(static_cast<GLenum>(GL_NO_ERROR), manager_.SetParameter(
+      info, GL_TEXTURE_MAX_ANISOTROPY_EXT, 2));
+  EXPECT_EQ(static_cast<GLenum>(GL_INVALID_ENUM), manager_.SetParameter(
       info, GL_TEXTURE_MIN_FILTER, GL_CLAMP_TO_EDGE));
   EXPECT_EQ(static_cast<GLenum>(GL_NEAREST), info->min_filter());
-  EXPECT_FALSE(manager_.SetParameter(
+  EXPECT_EQ(static_cast<GLenum>(GL_INVALID_ENUM), manager_.SetParameter(
       info, GL_TEXTURE_MAG_FILTER, GL_CLAMP_TO_EDGE));
   EXPECT_EQ(static_cast<GLenum>(GL_NEAREST), info->min_filter());
-  EXPECT_FALSE(manager_.SetParameter(info, GL_TEXTURE_WRAP_S, GL_NEAREST));
+  EXPECT_EQ(static_cast<GLenum>(GL_INVALID_ENUM), manager_.SetParameter(
+      info, GL_TEXTURE_WRAP_S, GL_NEAREST));
   EXPECT_EQ(static_cast<GLenum>(GL_CLAMP_TO_EDGE), info->wrap_s());
-  EXPECT_FALSE(manager_.SetParameter(info, GL_TEXTURE_WRAP_T, GL_NEAREST));
+  EXPECT_EQ(static_cast<GLenum>(GL_INVALID_ENUM), manager_.SetParameter(
+      info, GL_TEXTURE_WRAP_T, GL_NEAREST));
   EXPECT_EQ(static_cast<GLenum>(GL_CLAMP_TO_EDGE), info->wrap_t());
+  EXPECT_EQ(static_cast<GLenum>(GL_INVALID_VALUE), manager_.SetParameter(
+      info, GL_TEXTURE_MAX_ANISOTROPY_EXT, 0));
 }
 
 TEST_F(TextureManagerTest, TextureUsageExt) {
@@ -137,7 +149,7 @@ TEST_F(TextureManagerTest, TextureUsageExt) {
   // Check texture got created.
   TextureManager::TextureInfo* info = manager.GetTextureInfo(kClient1Id);
   ASSERT_TRUE(info != NULL);
-  EXPECT_TRUE(manager.SetParameter(
+  EXPECT_EQ(static_cast<GLenum>(GL_NO_ERROR), manager.SetParameter(
       info, GL_TEXTURE_USAGE_ANGLE, GL_FRAMEBUFFER_ATTACHMENT_ANGLE));
   EXPECT_EQ(static_cast<GLenum>(GL_FRAMEBUFFER_ATTACHMENT_ANGLE),
             info->usage());
@@ -822,7 +834,7 @@ TEST_F(TextureInfoTest, SafeUnsafe) {
   EXPECT_TRUE(manager_.HaveUnsafeTextures());
   EXPECT_TRUE(manager_.HaveUnclearedMips());
   EXPECT_EQ(1, info_->num_uncleared_mips());
-  manager_.SetLevelCleared(info_, GL_TEXTURE_2D, 0);
+  manager_.SetLevelCleared(info_, GL_TEXTURE_2D, 0, true);
   EXPECT_TRUE(info_->SafeToRenderFrom());
   EXPECT_FALSE(manager_.HaveUnsafeTextures());
   EXPECT_FALSE(manager_.HaveUnclearedMips());
@@ -833,7 +845,7 @@ TEST_F(TextureInfoTest, SafeUnsafe) {
   EXPECT_TRUE(manager_.HaveUnsafeTextures());
   EXPECT_TRUE(manager_.HaveUnclearedMips());
   EXPECT_EQ(1, info_->num_uncleared_mips());
-  manager_.SetLevelCleared(info_, GL_TEXTURE_2D, 1);
+  manager_.SetLevelCleared(info_, GL_TEXTURE_2D, 1, true);
   EXPECT_TRUE(info_->SafeToRenderFrom());
   EXPECT_FALSE(manager_.HaveUnsafeTextures());
   EXPECT_FALSE(manager_.HaveUnclearedMips());
@@ -846,12 +858,12 @@ TEST_F(TextureInfoTest, SafeUnsafe) {
   EXPECT_TRUE(manager_.HaveUnsafeTextures());
   EXPECT_TRUE(manager_.HaveUnclearedMips());
   EXPECT_EQ(2, info_->num_uncleared_mips());
-  manager_.SetLevelCleared(info_, GL_TEXTURE_2D, 0);
+  manager_.SetLevelCleared(info_, GL_TEXTURE_2D, 0, true);
   EXPECT_FALSE(info_->SafeToRenderFrom());
   EXPECT_TRUE(manager_.HaveUnsafeTextures());
   EXPECT_TRUE(manager_.HaveUnclearedMips());
   EXPECT_EQ(1, info_->num_uncleared_mips());
-  manager_.SetLevelCleared(info_, GL_TEXTURE_2D, 1);
+  manager_.SetLevelCleared(info_, GL_TEXTURE_2D, 1, true);
   EXPECT_TRUE(info_->SafeToRenderFrom());
   EXPECT_FALSE(manager_.HaveUnsafeTextures());
   EXPECT_FALSE(manager_.HaveUnclearedMips());
@@ -895,11 +907,11 @@ TEST_F(TextureInfoTest, SafeUnsafe) {
   EXPECT_TRUE(manager_.HaveUnsafeTextures());
   EXPECT_TRUE(manager_.HaveUnclearedMips());
   EXPECT_EQ(1, info3->num_uncleared_mips());
-  manager_.SetLevelCleared(info2, GL_TEXTURE_2D, 0);
+  manager_.SetLevelCleared(info2, GL_TEXTURE_2D, 0, true);
   EXPECT_TRUE(manager_.HaveUnsafeTextures());
   EXPECT_TRUE(manager_.HaveUnclearedMips());
   EXPECT_EQ(0, info2->num_uncleared_mips());
-  manager_.SetLevelCleared(info3, GL_TEXTURE_2D, 0);
+  manager_.SetLevelCleared(info3, GL_TEXTURE_2D, 0, true);
   EXPECT_FALSE(manager_.HaveUnsafeTextures());
   EXPECT_FALSE(manager_.HaveUnclearedMips());
   EXPECT_EQ(0, info3->num_uncleared_mips());
@@ -1017,6 +1029,121 @@ TEST_F(TextureInfoTest, GetLevelImage) {
   manager_.SetLevelInfo(info_,
       GL_TEXTURE_2D, 1, GL_RGBA, 2, 2, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, true);
   EXPECT_TRUE(info_->GetLevelImage(GL_TEXTURE_2D, 1) == NULL);
+}
+
+namespace {
+
+bool InSet(std::set<std::string>* string_set, const std::string& str) {
+  std::pair<std::set<std::string>::iterator, bool> result =
+      string_set->insert(str);
+  return !result.second;
+}
+
+}  // anonymous namespace
+
+TEST_F(TextureInfoTest, AddToSignature) {
+  manager_.SetInfoTarget(info_, GL_TEXTURE_2D);
+  manager_.SetLevelInfo(info_,
+      GL_TEXTURE_2D, 1, GL_RGBA, 2, 2, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, true);
+  std::string signature1;
+  std::string signature2;
+  manager_.AddToSignature(info_, GL_TEXTURE_2D, 1, &signature1);
+
+  std::set<std::string> string_set;
+  EXPECT_FALSE(InSet(&string_set, signature1));
+
+  // check changing 1 thing makes a different signature.
+  manager_.SetLevelInfo(info_,
+      GL_TEXTURE_2D, 1, GL_RGBA, 4, 2, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, true);
+  manager_.AddToSignature(info_, GL_TEXTURE_2D, 1, &signature2);
+  EXPECT_FALSE(InSet(&string_set, signature2));
+
+  // check putting it back makes the same signature.
+  manager_.SetLevelInfo(info_,
+      GL_TEXTURE_2D, 1, GL_RGBA, 2, 2, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, true);
+  signature2.clear();
+  manager_.AddToSignature(info_, GL_TEXTURE_2D, 1, &signature2);
+  EXPECT_EQ(signature1, signature2);
+
+  // Check setting cleared status does not change signature.
+  manager_.SetLevelInfo(info_,
+      GL_TEXTURE_2D, 1, GL_RGBA, 2, 2, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, false);
+  signature2.clear();
+  manager_.AddToSignature(info_, GL_TEXTURE_2D, 1, &signature2);
+  EXPECT_EQ(signature1, signature2);
+
+  // Check changing other settings changes signature.
+  manager_.SetLevelInfo(info_,
+      GL_TEXTURE_2D, 1, GL_RGBA, 2, 4, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, false);
+  signature2.clear();
+  manager_.AddToSignature(info_, GL_TEXTURE_2D, 1, &signature2);
+  EXPECT_FALSE(InSet(&string_set, signature2));
+
+  manager_.SetLevelInfo(info_,
+      GL_TEXTURE_2D, 1, GL_RGBA, 2, 2, 2, 0, GL_RGBA, GL_UNSIGNED_BYTE, false);
+  signature2.clear();
+  manager_.AddToSignature(info_, GL_TEXTURE_2D, 1, &signature2);
+  EXPECT_FALSE(InSet(&string_set, signature2));
+
+  manager_.SetLevelInfo(info_,
+      GL_TEXTURE_2D, 1, GL_RGBA, 2, 2, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, false);
+  signature2.clear();
+  manager_.AddToSignature(info_, GL_TEXTURE_2D, 1, &signature2);
+  EXPECT_FALSE(InSet(&string_set, signature2));
+
+  manager_.SetLevelInfo(info_,
+      GL_TEXTURE_2D, 1, GL_RGBA, 2, 2, 1, 0, GL_RGB, GL_UNSIGNED_BYTE, false);
+  signature2.clear();
+  manager_.AddToSignature(info_, GL_TEXTURE_2D, 1, &signature2);
+  EXPECT_FALSE(InSet(&string_set, signature2));
+
+  manager_.SetLevelInfo(info_,
+      GL_TEXTURE_2D, 1, GL_RGBA, 2, 2, 1, 0, GL_RGBA, GL_FLOAT,
+      false);
+  signature2.clear();
+  manager_.AddToSignature(info_, GL_TEXTURE_2D, 1, &signature2);
+  EXPECT_FALSE(InSet(&string_set, signature2));
+
+  // put it back
+  manager_.SetLevelInfo(info_,
+      GL_TEXTURE_2D, 1, GL_RGBA, 2, 2, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+      false);
+  signature2.clear();
+  manager_.AddToSignature(info_, GL_TEXTURE_2D, 1, &signature2);
+  EXPECT_EQ(signature1, signature2);
+
+  // check changing parameters changes signature.
+  manager_.SetParameter(info_, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+  signature2.clear();
+  manager_.AddToSignature(info_, GL_TEXTURE_2D, 1, &signature2);
+  EXPECT_FALSE(InSet(&string_set, signature2));
+
+  manager_.SetParameter(info_, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_LINEAR);
+  manager_.SetParameter(info_, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+  signature2.clear();
+  manager_.AddToSignature(info_, GL_TEXTURE_2D, 1, &signature2);
+  EXPECT_FALSE(InSet(&string_set, signature2));
+
+  manager_.SetParameter(info_, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  manager_.SetParameter(info_, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  signature2.clear();
+  manager_.AddToSignature(info_, GL_TEXTURE_2D, 1, &signature2);
+  EXPECT_FALSE(InSet(&string_set, signature2));
+
+  manager_.SetParameter(info_, GL_TEXTURE_WRAP_S, GL_REPEAT);
+  manager_.SetParameter(info_, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  signature2.clear();
+  manager_.AddToSignature(info_, GL_TEXTURE_2D, 1, &signature2);
+  EXPECT_FALSE(InSet(&string_set, signature2));
+
+  // Check putting it back genenerates the same signature
+  manager_.SetParameter(info_, GL_TEXTURE_WRAP_T, GL_REPEAT);
+  signature2.clear();
+  manager_.AddToSignature(info_, GL_TEXTURE_2D, 1, &signature2);
+  EXPECT_EQ(signature1, signature2);
+
+  // Check the set was acutally getting different signatures.
+  EXPECT_EQ(11u, string_set.size());
 }
 
 }  // namespace gles2

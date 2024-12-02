@@ -103,8 +103,9 @@ IN_PROC_BROWSER_TEST_F(BookmarkBrowsertest, Persist) {
 #if !defined(OS_CHROMEOS)  // No multi-profile on ChromeOS.
 
 // Sanity check that bookmarks from different profiles are separate.
-IN_PROC_BROWSER_TEST_F(BookmarkBrowsertest, MultiProfile) {
-  ScopedTempDir temp_dir;
+// DISABLED_ because it regularly times out: http://crbug.com/159002.
+IN_PROC_BROWSER_TEST_F(BookmarkBrowsertest, DISABLED_MultiProfile) {
+  base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
 
   BookmarkModel* bookmark_model1 = WaitForBookmarkModel(browser()->profile());

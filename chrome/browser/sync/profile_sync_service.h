@@ -50,6 +50,7 @@ class SyncGlobalError;
 namespace browser_sync {
 class BackendMigrator;
 class ChangeProcessor;
+class DeviceInfo;
 class DataTypeManager;
 class JsController;
 class SessionModelAssociator;
@@ -255,7 +256,13 @@ class ProfileSyncService : public ProfileSyncServiceBase,
   // Returns the session model associator associated with this type, but only if
   // the associator is running.  If it is doing anything else, it will return
   // null.
+  // TODO(zea): Figure out a better way to expose this to the UI elements that
+  // need it.
   browser_sync::SessionModelAssociator* GetSessionModelAssociator();
+
+  // Returns sync's representation of the local device info.
+  // Return value is an empty scoped_ptr if the device info is unavailable.
+  virtual scoped_ptr<browser_sync::DeviceInfo> GetLocalDeviceInfo() const;
 
   // Fills state_map with a map of current data types that are possible to
   // sync, as well as their states.
@@ -275,6 +282,8 @@ class ProfileSyncService : public ProfileSyncServiceBase,
   // SyncFrontend implementation.
   virtual void OnBackendInitialized(
       const syncer::WeakHandle<syncer::JsBackend>& js_backend,
+      const syncer::WeakHandle<syncer::DataTypeDebugInfoListener>&
+          debug_info_listener,
       bool success) OVERRIDE;
   virtual void OnSyncCycleCompleted() OVERRIDE;
   virtual void OnSyncConfigureRetry() OVERRIDE;
@@ -441,7 +450,7 @@ class ProfileSyncService : public ProfileSyncServiceBase,
   // dpending on the type's current status.
   //
   // This function is used by sync_ui_util.cc to help populate the about:sync
-  // page.  It returns a ListValue rather than a DictionaryValye in part to make
+  // page.  It returns a ListValue rather than a DictionaryValue in part to make
   // it easier to iterate over its elements when constructing that page.
   Value* GetTypeStatusMap() const;
 
@@ -560,6 +569,9 @@ class ProfileSyncService : public ProfileSyncServiceBase,
   // been cleared yet. Virtual for testing purposes.
   virtual bool waiting_for_auth() const;
 
+  // The set of currently enabled sync experiments.
+  const syncer::Experiments& current_experiments() const;
+
   // InvalidationFrontend implementation.  It is an error to have
   // registered handlers when Shutdown() is called.
   virtual void RegisterInvalidationHandler(
@@ -588,7 +600,7 @@ class ProfileSyncService : public ProfileSyncServiceBase,
   void ConfigureDataTypeManager();
 
   // Starts up the backend sync components.
-  void StartUp();
+  virtual void StartUp();
   // Shuts down the backend sync components.
   // |sync_disabled| indicates if syncing is being disabled or not.
   void ShutdownImpl(bool sync_disabled);
@@ -647,6 +659,11 @@ class ProfileSyncService : public ProfileSyncServiceBase,
   friend class SyncTest;
   friend class TestProfileSyncService;
   FRIEND_TEST_ALL_PREFIXES(ProfileSyncServiceTest, InitialState);
+
+  // Detects and attempts to recover from a previous improper datatype
+  // configuration where Keep Everything Synced and the preferred types were
+  // not correctly set.
+  void TrySyncDatatypePrefRecovery();
 
   // Starts up sync if it is not suppressed and preconditions are met.
   // Called from Initialize() and UnsuppressAndStart().
@@ -851,7 +868,7 @@ class ProfileSyncService : public ProfileSyncServiceBase,
   bool setup_in_progress_;
 
   // The set of currently enabled sync experiments.
-  syncer::Experiments current_experiments;
+  syncer::Experiments current_experiments_;
 
   // Factory the backend will use to build the SyncManager.
   syncer::SyncManagerFactory sync_manager_factory_;
@@ -865,6 +882,10 @@ class ProfileSyncService : public ProfileSyncServiceBase,
   // Dispatches invalidations to handlers.  Set in Initialize() and
   // unset in Shutdown().
   scoped_ptr<syncer::InvalidatorRegistrar> invalidator_registrar_;
+
+  // Sync's internal debug info listener. Used to record datatype configuration
+  // and association information.
+  syncer::WeakHandle<syncer::DataTypeDebugInfoListener> debug_info_listener_;
 
   DISALLOW_COPY_AND_ASSIGN(ProfileSyncService);
 };

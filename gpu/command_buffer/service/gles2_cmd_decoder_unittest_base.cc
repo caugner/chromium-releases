@@ -9,16 +9,17 @@
 #include <vector>
 
 #include "base/string_number_conversions.h"
-#include "gpu/command_buffer/common/gl_mock.h"
 #include "gpu/command_buffer/common/gles2_cmd_format.h"
 #include "gpu/command_buffer/common/gles2_cmd_utils.h"
 #include "gpu/command_buffer/service/cmd_buffer_engine.h"
 #include "gpu/command_buffer/service/context_group.h"
+#include "gpu/command_buffer/service/gles2_cmd_decoder_mock.h"
 #include "gpu/command_buffer/service/program_manager.h"
 #include "gpu/command_buffer/service/vertex_attrib_manager.h"
 #include "gpu/command_buffer/service/test_helper.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gl/gl_implementation.h"
+#include "ui/gl/gl_mock.h"
 
 using ::gfx::MockGLInterface;
 using ::testing::_;
@@ -84,6 +85,7 @@ void GLES2DecoderTestBase::InitDecoder(
     bool request_depth,
     bool request_stencil,
     bool bind_generates_resource) {
+  FramebufferManager::FramebufferInfo::ClearFramebufferCompleteComboMap();
   gl_.reset(new StrictMock<MockGLInterface>());
   ::gfx::GLInterface::SetGLInterface(gl_.get());
   group_ = ContextGroup::Ref(new ContextGroup(NULL,
@@ -96,7 +98,12 @@ void GLES2DecoderTestBase::InitDecoder(
   TestHelper::SetupContextGroupInitExpectations(gl_.get(),
       DisallowedFeatures(), extensions);
 
-  EXPECT_TRUE(group_->Initialize(DisallowedFeatures(), NULL));
+  // We initialize the ContextGroup with a MockGLES2Decoder so that
+  // we can use the ContextGroup to figure out how the real GLES2Decoder
+  // will initialize itself.
+  mock_decoder_.reset(new MockGLES2Decoder());
+  EXPECT_TRUE(
+      group_->Initialize(mock_decoder_.get(), DisallowedFeatures(), NULL));
 
   AddExpectationsForVertexAttribManager();
 
@@ -294,7 +301,7 @@ void GLES2DecoderTestBase::TearDown() {
 
   decoder_->Destroy(true);
   decoder_.reset();
-  group_->Destroy(false);
+  group_->Destroy(mock_decoder_.get(), false);
   engine_.reset();
   ::gfx::GLInterface::SetGLInterface(NULL);
   gl_.reset();
@@ -527,14 +534,14 @@ void GLES2DecoderTestBase::SetupExpectationsForFramebufferClearingMulti(
   }
 }
 
-void GLES2DecoderTestBase::SetupShaderForUniform() {
+void GLES2DecoderTestBase::SetupShaderForUniform(GLenum uniform_type) {
   static AttribInfo attribs[] = {
     { "foo", 1, GL_FLOAT, 1, },
     { "goo", 1, GL_FLOAT, 2, },
   };
-  static UniformInfo uniforms[] = {
-    { "bar", 1, GL_INT, 0, 2, -1, },
-    { "car", 4, GL_INT, 1, 1, -1, },
+  UniformInfo uniforms[] = {
+    { "bar", 1, uniform_type, 0, 2, -1, },
+    { "car", 4, uniform_type, 1, 1, -1, },
   };
   const GLuint kClientVertexShaderId = 5001;
   const GLuint kServiceVertexShaderId = 6001;

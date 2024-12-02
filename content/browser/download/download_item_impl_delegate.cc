@@ -37,13 +37,14 @@ void DownloadItemImplDelegate::DetermineDownloadTarget(
                target_path);
 }
 
-void DownloadItemImplDelegate::ReadyForDownloadCompletion(
+bool DownloadItemImplDelegate::ShouldCompleteDownload(
     DownloadItemImpl* download,
     const base::Closure& complete_callback) {
-  complete_callback.Run();
+  return true;
 }
 
-bool DownloadItemImplDelegate::ShouldOpenDownload(DownloadItemImpl* download) {
+bool DownloadItemImplDelegate::ShouldOpenDownload(
+    DownloadItemImpl* download, const ShouldOpenDownloadCallback& callback) {
   return false;
 }
 
@@ -59,24 +60,13 @@ BrowserContext* DownloadItemImplDelegate::GetBrowserContext() const {
   return NULL;
 }
 
-DownloadFileManager* DownloadItemImplDelegate::GetDownloadFileManager() {
-  return NULL;
-}
-
 void DownloadItemImplDelegate::UpdatePersistence(DownloadItemImpl* download) {}
-
-void DownloadItemImplDelegate::DownloadStopped(DownloadItemImpl* download) {}
-
-void DownloadItemImplDelegate::DownloadCompleted(DownloadItemImpl* download) {}
 
 void DownloadItemImplDelegate::DownloadOpened(DownloadItemImpl* download) {}
 
 void DownloadItemImplDelegate::DownloadRemoved(DownloadItemImpl* download) {}
 
-void DownloadItemImplDelegate::DownloadRenamedToIntermediateName(
-    DownloadItemImpl* download) {}
-
-void DownloadItemImplDelegate::DownloadRenamedToFinalName(
+void DownloadItemImplDelegate::ShowDownloadInBrowser(
     DownloadItemImpl* download) {}
 
 void DownloadItemImplDelegate::AssertStateConsistent(

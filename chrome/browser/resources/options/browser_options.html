@@ -146,7 +146,7 @@
           <span class="controlled-setting-with-label">
             <!-- TODO(estade): metric? -->
             <input id="instant-enabled-control" type="checkbox"
-                pref="instant.enabled" dialog-pref>
+                i18n-values="pref:instant_enabled" dialog-pref>
             <span>
               <!-- TODO(estade) There's a link in here which should not be
                    inside a <label>. -->
@@ -154,15 +154,15 @@
                   i18n-values=".innerHTML:instantPrefAndWarning">
               </label>
               <span id="instant-enabled-indicator"
-                  class="controlled-setting-indicator" pref="instant.enabled"
-                  dialog-pref>
+                  class="controlled-setting-indicator"
+                  i18n-values="pref:instant_enabled" dialog-pref>
               </span>
             </span>
           </span>
         </div>
       </div>
   </section>
-  <section guest-visibility="hidden">
+  <section id="sync-users-section" guest-visibility="hidden">
     <h3 i18n-content="sectionTitleUsers"></h3>
 <if expr="pp_ifdef('chromeos')">
     <include src="sync_section.html">
@@ -226,7 +226,7 @@
     </div>
   </section>
 </if>
-  <section>
+  <section id="privacy-section">
     <h3 i18n-content="advancedSectionTitlePrivacy"></h3>
     <div>
       <div class="settings-row">
@@ -459,7 +459,7 @@
     </div>
   </section>
 <if expr="not pp_ifdef('chromeos')">
-  <section>
+  <section id="network-section">
     <h3 i18n-content="advancedSectionTitleNetwork"></h3>
     <div>
       <span id="proxiesLabel" class="settings-row"></span>
@@ -471,7 +471,7 @@
     </div>
   </section>
 </if>
-  <section>
+  <section id="languages-section">
     <h3 i18n-content="advancedSectionTitleLanguages"></h3>
     <span class="settings-row" i18n-content="languageSectionLabel"></span>
     <div class="settings-row">
@@ -600,6 +600,20 @@
   <section>
     <h3 i18n-content="accessibilityTitle"></h3>
     <div class="option-control-table">
+      <p id="accessibility-explanation" class="settings-row">
+        <span i18n-content="accessibilityExplanation"></span>
+        <a target="_blank" i18n-content="learnMore"
+            i18n-values="href:accessibilityLearnMoreURL"></a>
+      </p>
+      <div class="option-name">
+        <div class="checkbox">
+          <label>
+            <input id="accessibility-should-always-show-menu"
+                pref="settings.a11y.enable_menu" type="checkbox">
+            <span i18n-content="accessibilityAlwaysShowMenu"></span>
+          </label>
+        </div>
+      </div>
       <div class="option-name">
         <div class="checkbox">
           <label>
@@ -619,12 +633,21 @@
       <div class="option-name">
         <div class="checkbox">
           <label>
-            <input id="accessibility-screen-magnifier-check" type="checkbox">
+            <input id="accessibility-screen-magnifier-check"
+                pref="settings.a11y.screen_magnifier" type="checkbox">
             <span i18n-content="accessibilityScreenMagnifier"></span>
           </label>
         </div>
       </div>
-    </div>
+      <div class="option-name" id="accessibility-tap-dragging">
+        <div class="checkbox">
+          <label>
+            <input id="accessibility-tap-dragging-check"
+                pref="settings.touchpad.enable_tap_dragging" type="checkbox">
+            <span i18n-content="accessibilityTapDragging"></span>
+          </label>
+        </div>
+      </div>
   </section>
 <if expr="pp_ifdef('chromeos')">
   <section id="factory-reset-section" hidden>

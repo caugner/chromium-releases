@@ -11,7 +11,6 @@
 #include "base/logging.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "remoting/host/chromoting_host.h"
 #include "remoting/host/ui_strings.h"
 #include "ui/base/gtk/gtk_signal.h"
 
@@ -22,8 +21,8 @@ class DisconnectWindowGtk : public DisconnectWindow {
   DisconnectWindowGtk();
   virtual ~DisconnectWindowGtk();
 
-  virtual void Show(ChromotingHost* host,
-                    const DisconnectCallback& disconnect_callback,
+  virtual bool Show(const UiStrings& ui_strings,
+                    const base::Closure& disconnect_callback,
                     const std::string& username) OVERRIDE;
   virtual void Hide() OVERRIDE;
 
@@ -37,7 +36,7 @@ class DisconnectWindowGtk : public DisconnectWindow {
 
   void CreateWindow(const UiStrings& ui_strings);
 
-  DisconnectCallback disconnect_callback_;
+  base::Closure disconnect_callback_;
   GtkWidget* disconnect_window_;
   GtkWidget* message_;
   GtkWidget* button_;
@@ -57,6 +56,7 @@ DisconnectWindowGtk::DisconnectWindowGtk()
 }
 
 DisconnectWindowGtk::~DisconnectWindowGtk() {
+  Hide();
 }
 
 void DisconnectWindowGtk::CreateWindow(const UiStrings& ui_strings) {
@@ -111,7 +111,7 @@ void DisconnectWindowGtk::CreateWindow(const UiStrings& ui_strings) {
   gtk_container_add(GTK_CONTAINER(align), button_row);
 
   button_ = gtk_button_new_with_label(
-      UTF16ToUTF8(ui_strings.disconnect_button_text_plus_shortcut).c_str());
+      UTF16ToUTF8(ui_strings.disconnect_button_text).c_str());
   gtk_box_pack_end(GTK_BOX(button_row), button_, FALSE, FALSE, 0);
 
   g_signal_connect(button_, "clicked", G_CALLBACK(OnClickedThunk), this);
@@ -129,16 +129,21 @@ void DisconnectWindowGtk::CreateWindow(const UiStrings& ui_strings) {
   gtk_widget_show_all(disconnect_window_);
 }
 
-void DisconnectWindowGtk::Show(ChromotingHost* host,
-                                 const DisconnectCallback& disconnect_callback,
-                                 const std::string& username) {
+bool DisconnectWindowGtk::Show(const UiStrings& ui_strings,
+                               const base::Closure& disconnect_callback,
+                               const std::string& username) {
+  DCHECK(disconnect_callback_.is_null());
+  DCHECK(!disconnect_callback.is_null());
+  DCHECK(!disconnect_window_);
+
   disconnect_callback_ = disconnect_callback;
-  CreateWindow(host->ui_strings());
+  CreateWindow(ui_strings);
 
   string16 text = ReplaceStringPlaceholders(
-      host->ui_strings().disconnect_message, UTF8ToUTF16(username), NULL);
+      ui_strings.disconnect_message, UTF8ToUTF16(username), NULL);
   gtk_label_set_text(GTK_LABEL(message_), UTF16ToUTF8(text).c_str());
   gtk_window_present(GTK_WINDOW(disconnect_window_));
+  return true;
 }
 
 void DisconnectWindowGtk::Hide() {
@@ -146,18 +151,16 @@ void DisconnectWindowGtk::Hide() {
     gtk_widget_destroy(disconnect_window_);
     disconnect_window_ = NULL;
   }
+
+  disconnect_callback_.Reset();
 }
 
 void DisconnectWindowGtk::OnClicked(GtkWidget* button) {
-  CHECK(!disconnect_callback_.is_null());
-
   disconnect_callback_.Run();
   Hide();
 }
 
 gboolean DisconnectWindowGtk::OnDelete(GtkWidget* window, GdkEvent* event) {
-  CHECK(!disconnect_callback_.is_null());
-
   disconnect_callback_.Run();
   Hide();
 

@@ -27,7 +27,6 @@
 #include "sync/internal_api/public/engine/model_safe_worker.h"
 #include "sync/internal_api/public/sessions/sync_session_snapshot.h"
 #include "sync/sessions/ordered_commit_set.h"
-#include "sync/sessions/session_state.h"
 #include "sync/sessions/status_controller.h"
 #include "sync/sessions/sync_session_context.h"
 #include "sync/util/extensions_activity_monitor.h"
@@ -108,29 +107,11 @@ class SyncSession {
   // Builds and sends a snapshot to the session context's listeners.
   void SendEventNotification(SyncEngineEvent::EventCause cause);
 
-  // Returns true if this session contains data that should go through the sync
-  // engine again.
-  bool HasMoreToSync() const;
-
-  // Returns true if we completely ran the session without errors.
-  //
-  // There are many errors that could prevent a sync cycle from succeeding.
-  // These include invalid local state, inability to contact the server,
-  // inability to authenticate with the server, and server errors.  What they
-  // have in common is that the we either need to take some action and then
-  // retry the sync cycle or, in the case of transient errors, retry after some
-  // backoff timer has expired.  Most importantly, the SyncScheduler should not
-  // assume that the original action that triggered the sync cycle (ie. a nudge
-  // or a notification) has been properly serviced.
-  //
-  // This function also returns false if SyncShare has not been called on this
-  // session yet, or if ResetTransientState() has been called on this session
-  // since the last call to SyncShare.
-  bool Succeeded() const;
-
-  // Returns true if we reached the server successfully and the server did not
-  // return any error codes. Returns false if no connection was attempted.
-  bool SuccessfullyReachedServer() const;
+  // Returns true if we reached the server. Note that "reaching the server"
+  // here means that from an HTTP perspective, we succeeded (HTTP 200).  The
+  // server **MAY** have returned a sync protocol error.
+  // See SERVER_RETURN_* in the SyncerError enum for values.
+  bool DidReachServer() const;
 
   // Collects all state pertaining to how and why |s| originated and unions it
   // with corresponding state in |this|, leaving |s| unchanged.  Allows |this|
@@ -139,15 +120,13 @@ class SyncSession {
   // sessions.
   void Coalesce(const SyncSession& session);
 
-  // Compares the routing_info_, workers and payload map with the passed in
-  // session. Purges types from the above 3 which are not in session. Useful
+  // Compares the routing_info_, workers and payload map with those passed in.
+  // Purges types from the above 3 which are not present in latest. Useful
   // to update the sync session when the user has disabled some types from
   // syncing.
-  void RebaseRoutingInfoWithLatest(const SyncSession& session);
-
-  // Should be called any time |this| is being re-used in a new call to
-  // SyncShare (e.g., HasMoreToSync returned true).
-  void PrepareForAnotherSyncCycle();
+  void RebaseRoutingInfoWithLatest(
+      const ModelSafeRoutingInfo& routing_info,
+      const std::vector<ModelSafeWorker*>& workers);
 
   // TODO(akalin): Split this into context() and mutable_context().
   SyncSessionContext* context() const { return context_; }
@@ -174,12 +153,6 @@ class SyncSession {
   // Returns the set of groups which have enabled types.
   const std::set<ModelSafeGroup>& GetEnabledGroups() const;
 
-  // Returns the set of enabled groups that have conflicts.
-  std::set<ModelSafeGroup> GetEnabledGroupsWithConflicts() const;
-
-  // Mark the session has having finished all the sync steps it needed.
-  void SetFinished();
-
  private:
   // Extend the encapsulation boundary to utilities for internal member
   // assignments. This way, the scope of these actions is explicit, they can't
@@ -191,6 +164,10 @@ class SyncSession {
 
   // The source for initiating this sync session.
   SyncSourceInfo source_;
+
+  // A list of sources for sessions that have been merged with this one.
+  // Currently used only for logging.
+  std::vector<SyncSourceInfo> debug_info_sources_list_;
 
   // Information about extensions activity since the last successful commit.
   ExtensionsActivityMonitor::Records extensions_activity_;
@@ -216,10 +193,6 @@ class SyncSession {
   // The set of groups with enabled types.  Computed from
   // |routing_info_|.
   std::set<ModelSafeGroup> enabled_groups_;
-
-  // Whether this session has reached its last step or not. Gets reset on each
-  // new cycle (via PrepareForAnotherSyncCycle).
-  bool finished_;
 
   DISALLOW_COPY_AND_ASSIGN(SyncSession);
 };

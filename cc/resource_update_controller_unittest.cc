@@ -2,25 +2,21 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "config.h"
-
 #include "cc/resource_update_controller.h"
 
 #include "cc/single_thread_proxy.h" // For DebugScopedSetImplThread
-#include "cc/test/fake_web_compositor_output_surface.h"
+#include "cc/test/fake_output_surface.h"
+#include "cc/test/fake_proxy.h"
 #include "cc/test/fake_web_graphics_context_3d.h"
 #include "cc/test/scheduler_test_common.h"
 #include "cc/test/tiled_layer_test_common.h"
-#include "cc/test/web_compositor_initializer.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include <public/WebThread.h>
+#include "third_party/khronos/GLES2/gl2ext.h"
 
-using namespace cc;
 using namespace WebKit;
-using namespace WebKitTests;
 using testing::Test;
 
-
+namespace cc {
 namespace {
 
 const int kFlushPeriodFull = 4;
@@ -55,6 +51,8 @@ public:
         return WebString("");
     }
 
+    virtual void getQueryObjectuivEXT(WebGLId, WGC3Denum, WGC3Duint*);
+
 private:
     ResourceUpdateControllerTest* m_test;
     bool m_supportShallowFlush;
@@ -64,9 +62,9 @@ private:
 class ResourceUpdateControllerTest : public Test {
 public:
     ResourceUpdateControllerTest()
-        : m_queue(make_scoped_ptr(new ResourceUpdateQueue))
-        , m_textureManager(PrioritizedTextureManager::create(60*1024*1024, 1024, Renderer::ContentPool))
-        , m_compositorInitializer(m_thread.get())
+        : m_proxy(scoped_ptr<Thread>(NULL))
+        , m_queue(make_scoped_ptr(new ResourceUpdateQueue))
+        , m_resourceManager(PrioritizedResourceManager::create(&m_proxy))
         , m_fullUploadCountExpected(0)
         , m_partialCountExpected(0)
         , m_totalUploadCountExpected(0)
@@ -75,14 +73,15 @@ public:
         , m_numDanglingUploads(0)
         , m_numTotalUploads(0)
         , m_numTotalFlushes(0)
+        , m_queryResultsAvailable(0)
     {
     }
 
     ~ResourceUpdateControllerTest()
     {
         DebugScopedSetImplThreadAndMainThreadBlocked
-            implThreadAndMainThreadBlocked;
-        m_textureManager->clearAllMemory(m_resourceProvider.get());
+            implThreadAndMainThreadBlocked(&m_proxy);
+        m_resourceManager->clearAllMemory(m_resourceProvider.get());
     }
 
 public:
@@ -109,23 +108,31 @@ public:
         m_numTotalUploads++;
     }
 
+    bool isQueryResultAvailable()
+    {
+        if (!m_queryResultsAvailable)
+            return false;
+
+        m_queryResultsAvailable--;
+        return true;
+    }
+
 protected:
     virtual void SetUp()
     {
-        m_context = FakeWebCompositorOutputSurface::create(scoped_ptr<WebKit::WebGraphicsContext3D>(new WebGraphicsContext3DForUploadTest(this)));
+        m_outputSurface = FakeOutputSurface::Create3d(scoped_ptr<WebKit::WebGraphicsContext3D>(new WebGraphicsContext3DForUploadTest(this)));
         m_bitmap.setConfig(SkBitmap::kARGB_8888_Config, 300, 150);
         m_bitmap.allocPixels();
 
         for (int i = 0; i < 4; i++) {
-            m_textures[i] = PrioritizedTexture::create(
-                m_textureManager.get(), IntSize(300, 150), GL_RGBA);
+            m_textures[i] = PrioritizedResource::create(
+                m_resourceManager.get(), gfx::Size(300, 150), GL_RGBA);
             m_textures[i]->setRequestPriority(
                 PriorityCalculator::visiblePriority(true));
         }
-        m_textureManager->prioritizeTextures();
+        m_resourceManager->prioritizeTextures();
 
-        DebugScopedSetImplThread implThread;
-        m_resourceProvider = ResourceProvider::create(m_context.get());
+        m_resourceProvider = ResourceProvider::create(m_outputSurface.get());
     }
 
 
@@ -134,9 +141,9 @@ protected:
         m_fullUploadCountExpected += count;
         m_totalUploadCountExpected += count;
 
-        const IntRect rect(0, 0, 300, 150);
+        const gfx::Rect rect(0, 0, 300, 150);
         const ResourceUpdate upload = ResourceUpdate::Create(
-            m_textures[textureIndex].get(), &m_bitmap, rect, rect, IntSize());
+            m_textures[textureIndex].get(), &m_bitmap, rect, rect, gfx::Vector2d());
         for (int i = 0; i < count; i++)
             m_queue->appendFullUpload(upload);
     }
@@ -151,9 +158,9 @@ protected:
         m_partialCountExpected += count;
         m_totalUploadCountExpected += count;
 
-        const IntRect rect(0, 0, 100, 100);
+        const gfx::Rect rect(0, 0, 100, 100);
         const ResourceUpdate upload = ResourceUpdate::Create(
-            m_textures[textureIndex].get(), &m_bitmap, rect, rect, IntSize());
+            m_textures[textureIndex].get(), &m_bitmap, rect, rect, gfx::Vector2d());
         for (int i = 0; i < count; i++)
             m_queue->appendPartialUpload(upload);
     }
@@ -171,26 +178,32 @@ protected:
     void updateTextures()
     {
         DebugScopedSetImplThreadAndMainThreadBlocked
-            implThreadAndMainThreadBlocked;
+            implThreadAndMainThreadBlocked(&m_proxy);
         scoped_ptr<ResourceUpdateController> updateController =
             ResourceUpdateController::create(
                 NULL,
-                Proxy::implThread(),
+                m_proxy.implThread(),
                 m_queue.Pass(),
-                m_resourceProvider.get());
+                m_resourceProvider.get(),
+                m_proxy.hasImplThread());
         updateController->finalize();
+    }
+
+    void makeQueryResultAvailable()
+    {
+        m_queryResultsAvailable++;
     }
 
 protected:
     // Classes required to interact and test the ResourceUpdateController
-    scoped_ptr<GraphicsContext> m_context;
+    FakeProxy m_proxy;
+    scoped_ptr<OutputSurface> m_outputSurface;
     scoped_ptr<ResourceProvider> m_resourceProvider;
     scoped_ptr<ResourceUpdateQueue> m_queue;
-    scoped_ptr<PrioritizedTexture> m_textures[4];
-    scoped_ptr<WebThread> m_thread;
-    WebCompositorInitializer m_compositorInitializer;
-    scoped_ptr<PrioritizedTextureManager> m_textureManager;
+    scoped_ptr<PrioritizedResource> m_textures[4];
+    scoped_ptr<PrioritizedResourceManager> m_resourceManager;
     SkBitmap m_bitmap;
+    int m_queryResultsAvailable;
 
     // Properties / expectations of this test
     int m_fullUploadCountExpected;
@@ -226,6 +239,14 @@ void WebGraphicsContext3DForUploadTest::texSubImage2D(WGC3Denum target,
                                                       const void* pixels)
 {
     m_test->onUpload();
+}
+
+void WebGraphicsContext3DForUploadTest::getQueryObjectuivEXT(
+    WebGLId,
+    WGC3Denum pname,
+    WGC3Duint* params) {
+    if (pname == GL_QUERY_RESULT_AVAILABLE_EXT)
+        *params = m_test->isQueryResultAvailable();
 }
 
 // ZERO UPLOADS TESTS
@@ -343,7 +364,7 @@ public:
 
 protected:
     FakeResourceUpdateController(cc::ResourceUpdateControllerClient* client, cc::Thread* thread, scoped_ptr<ResourceUpdateQueue> queue, ResourceProvider* resourceProvider)
-        : cc::ResourceUpdateController(client, thread, queue.Pass(), resourceProvider)
+        : cc::ResourceUpdateController(client, thread, queue.Pass(), resourceProvider, false)
         , m_updateMoreTexturesSize(0) { }
 
     base::TimeTicks m_now;
@@ -368,7 +389,7 @@ TEST_F(ResourceUpdateControllerTest, UpdateMoreTextures)
     appendPartialUploadsToUpdateQueue(0);
 
     DebugScopedSetImplThreadAndMainThreadBlocked
-        implThreadAndMainThreadBlocked;
+        implThreadAndMainThreadBlocked(&m_proxy);
     scoped_ptr<FakeResourceUpdateController> controller(FakeResourceUpdateController::create(&client, &thread, m_queue.Pass(), m_resourceProvider.get()));
 
     controller->setNow(
@@ -387,9 +408,11 @@ TEST_F(ResourceUpdateControllerTest, UpdateMoreTextures)
     // Only enough time for 1 update.
     controller->performMoreUpdates(
         controller->now() + base::TimeDelta::FromMilliseconds(120));
-    runPendingTask(&thread, controller.get());
     EXPECT_FALSE(thread.hasPendingTask());
     EXPECT_EQ(1, m_numTotalUploads);
+
+    // Complete one upload.
+    makeQueryResultAvailable();
 
     controller->setUpdateMoreTexturesTime(
         base::TimeDelta::FromMilliseconds(100));
@@ -397,7 +420,6 @@ TEST_F(ResourceUpdateControllerTest, UpdateMoreTextures)
     // Enough time for 2 updates.
     controller->performMoreUpdates(
         controller->now() + base::TimeDelta::FromMilliseconds(220));
-    runPendingTask(&thread, controller.get());
     runPendingTask(&thread, controller.get());
     EXPECT_FALSE(thread.hasPendingTask());
     EXPECT_TRUE(client.readyToFinalizeCalled());
@@ -414,7 +436,7 @@ TEST_F(ResourceUpdateControllerTest, NoMoreUpdates)
     appendPartialUploadsToUpdateQueue(0);
 
     DebugScopedSetImplThreadAndMainThreadBlocked
-        implThreadAndMainThreadBlocked;
+        implThreadAndMainThreadBlocked(&m_proxy);
     scoped_ptr<FakeResourceUpdateController> controller(FakeResourceUpdateController::create(&client, &thread, m_queue.Pass(), m_resourceProvider.get()));
 
     controller->setNow(
@@ -425,7 +447,6 @@ TEST_F(ResourceUpdateControllerTest, NoMoreUpdates)
     // Enough time for 3 updates but only 2 necessary.
     controller->performMoreUpdates(
         controller->now() + base::TimeDelta::FromMilliseconds(310));
-    runPendingTask(&thread, controller.get());
     runPendingTask(&thread, controller.get());
     EXPECT_FALSE(thread.hasPendingTask());
     EXPECT_TRUE(client.readyToFinalizeCalled());
@@ -454,7 +475,7 @@ TEST_F(ResourceUpdateControllerTest, UpdatesCompleteInFiniteTime)
     appendPartialUploadsToUpdateQueue(0);
 
     DebugScopedSetImplThreadAndMainThreadBlocked
-        implThreadAndMainThreadBlocked;
+        implThreadAndMainThreadBlocked(&m_proxy);
     scoped_ptr<FakeResourceUpdateController> controller(FakeResourceUpdateController::create(&client, &thread, m_queue.Pass(), m_resourceProvider.get()));
 
     controller->setNow(
@@ -480,4 +501,5 @@ TEST_F(ResourceUpdateControllerTest, UpdatesCompleteInFiniteTime)
     EXPECT_EQ(2, m_numTotalUploads);
 }
 
-} // namespace
+}  // namespace
+}  // namespace cc

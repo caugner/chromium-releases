@@ -30,7 +30,7 @@ const char kOnExtensionEnabled[] = "management.onEnabled";
 const char kOnExtensionDisabled[] = "management.onDisabled";
 
 const char kOnFileBrowserDiskChanged[] = "fileBrowserPrivate.onDiskChanged";
-const char kOnFileChanged[] = "fileBrowserPrivate.onFileChanged";
+const char kOnDirectoryChanged[] = "fileBrowserPrivate.onDirectoryChanged";
 const char kOnFileBrowserMountCompleted[] =
     "fileBrowserPrivate.onMountCompleted";
 const char kOnFileTransfersUpdated[] =
@@ -47,6 +47,8 @@ const char kOnInputMethodChanged[] = "inputMethodPrivate.onChanged";
 const char kOnContextMenus[] = "contextMenus";
 const char kOnContextMenuClicked[] = "contextMenus.onClicked";
 
+const char kOnDialDeviceList[] = "dial.onDeviceList";
+
 const char kOnDownloadCreated[] = "downloads.onCreated";
 const char kOnDownloadChanged[] = "downloads.onChanged";
 const char kOnDownloadErased[] = "downloads.onErased";
@@ -59,22 +61,28 @@ const char kOnOffscreenTabUpdated[] = "experimental.offscreenTabs.onUpdated";
 
 const char kOnTabCaptureStatusChanged[] = "tabCapture.onStatusChanged";
 
-const char kBluetoothOnAvailabilityChanged[] =
-    "bluetooth.onAvailabilityChanged";
+const char kBluetoothOnAdapterStateChanged[] =
+    "bluetooth.onAdapterStateChanged";
 const char kBluetoothOnDeviceDiscovered[] = "bluetooth.onDeviceDiscovered";
 const char kBluetoothOnDeviceSearchFinished[] =
     "bluetooth.onDeviceSearchFinished";
 const char kBluetoothOnDeviceSearchResult[] = "bluetooth.onDeviceSearchResult";
-const char kBluetoothOnDiscoveringChanged[] = "bluetooth.onDiscoveringChanged";
-const char kBluetoothOnPowerChanged[] = "bluetooth.onPowerChanged";
 
 const char kOnPushMessage[] = "pushMessaging.onMessage";
 
 const char kOnCpuUpdated[] = "experimental.systemInfo.cpu.onUpdated";
 const char kOnStorageAvailableCapacityChanged[] =
-     "experimental.systemInfo.storage.onAvailableCapacityChanged";
+    "experimental.systemInfo.storage.onAvailableCapacityChanged";
 const char kOnStorageAdded[] = "experimental.systemInfo.storage.onAdded";
 const char kOnStorageRemoved[] = "experimental.systemInfo.storage.onRemoved";
+
+const char kOnSystemIndicatorClicked[] = "systemIndicator.onClicked";
+
+const char kOnSyncStateChanged[] = "syncFileSystem.onSyncStateChanged";
+const char kOnFileSynced[] = "syncFileSystem.onFileSynced";
+
+const char kOnAttachEventName[] = "mediaGalleriesPrivate.onDeviceAttached";
+const char kOnDetachEventName[] = "mediaGalleriesPrivate.onDeviceDetached";
 
 }  // namespace event_names
 

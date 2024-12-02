@@ -108,7 +108,7 @@ void Broker::ConnectComplete(IPC::PlatformFileForTransit socket_handle,
     return;
   }
 
-  TrackedCallback::ClearAndRun(&current_connect_callback_, result);
+  current_connect_callback_->Run(result);
 }
 
 PPB_Broker_Proxy::PPB_Broker_Proxy(Dispatcher* dispatcher)
@@ -147,6 +147,8 @@ bool PPB_Broker_Proxy::OnMessageReceived(const IPC::Message& msg) {
 
 void PPB_Broker_Proxy::OnMsgCreate(PP_Instance instance,
                                    HostResource* result_resource) {
+  if (!dispatcher()->permissions().HasPermission(PERMISSION_PRIVATE))
+    return;
   thunk::EnterResourceCreation enter(instance);
   if (enter.succeeded()) {
     result_resource->SetHostResource(
@@ -156,6 +158,8 @@ void PPB_Broker_Proxy::OnMsgCreate(PP_Instance instance,
 }
 
 void PPB_Broker_Proxy::OnMsgConnect(const HostResource& broker) {
+  if (!dispatcher()->permissions().HasPermission(PERMISSION_PRIVATE))
+    return;
   EnterHostFromHostResourceForceCallback<PPB_Broker_API> enter(
       broker, callback_factory_,
       &PPB_Broker_Proxy::ConnectCompleteInHost, broker);

@@ -48,6 +48,7 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
 #include "net/base/transport_security_state.h"
 #include "net/http/http_server_properties.h"
@@ -189,6 +190,11 @@ FilePath OffTheRecordProfileImpl::GetPath() {
   return profile_->GetPath();
 }
 
+scoped_refptr<base::SequencedTaskRunner>
+OffTheRecordProfileImpl::GetIOTaskRunner() {
+  return profile_->GetIOTaskRunner();
+}
+
 bool OffTheRecordProfileImpl::IsOffTheRecord() const {
   return true;
 }
@@ -223,11 +229,6 @@ GAIAInfoUpdateService* OffTheRecordProfileImpl::GetGAIAInfoUpdateService() {
   return NULL;
 }
 
-policy::UserCloudPolicyManager*
-    OffTheRecordProfileImpl::GetUserCloudPolicyManager() {
-  return profile_->GetUserCloudPolicyManager();
-}
-
 policy::ManagedModePolicyProvider*
     OffTheRecordProfileImpl::GetManagedModePolicyProvider() {
   return profile_->GetManagedModePolicyProvider();
@@ -257,28 +258,9 @@ net::URLRequestContextGetter* OffTheRecordProfileImpl::GetRequestContext() {
 net::URLRequestContextGetter*
     OffTheRecordProfileImpl::GetRequestContextForRenderProcess(
         int renderer_child_id) {
-  ExtensionService* extension_service =
-      extensions::ExtensionSystem::Get(this)->extension_service();
-  if (extension_service) {
-    const extensions::Extension* extension =
-        extension_service->GetIsolatedAppForRenderer(renderer_child_id);
-    if (extension)
-      return GetRequestContextForStoragePartition(extension->id());
-  }
-
   content::RenderProcessHost* rph = content::RenderProcessHost::FromID(
       renderer_child_id);
-  if (rph && rph->IsGuest()) {
-    // For guest processes (used by the browser tag), we need to isolate the
-    // storage.
-    // TODO(nasko): Until we have proper storage partitions, create a
-    // non-persistent context using the RPH's id.
-    std::string id("guest-");
-    id.append(base::IntToString(renderer_child_id));
-    return GetRequestContextForStoragePartition(id);
-  }
-
-  return GetRequestContext();
+  return rph->GetStoragePartition()->GetURLRequestContext();
 }
 
 net::URLRequestContextGetter*
@@ -296,8 +278,9 @@ net::URLRequestContextGetter*
 
 net::URLRequestContextGetter*
 OffTheRecordProfileImpl::GetMediaRequestContextForStoragePartition(
-    const std::string& partition_id) {
-  return GetRequestContextForStoragePartition(partition_id);
+    const FilePath& partition_path,
+    bool in_memory) {
+  return GetRequestContextForStoragePartition(partition_path, in_memory);
 }
 
 net::URLRequestContextGetter*
@@ -307,8 +290,9 @@ net::URLRequestContextGetter*
 
 net::URLRequestContextGetter*
     OffTheRecordProfileImpl::GetRequestContextForStoragePartition(
-        const std::string& partition_id) {
-  return io_data_.GetIsolatedAppRequestContextGetter(partition_id);
+        const FilePath& partition_path,
+        bool in_memory) {
+  return io_data_.GetIsolatedAppRequestContextGetter(partition_path, in_memory);
 }
 
 content::ResourceContext* OffTheRecordProfileImpl::GetResourceContext() {
@@ -432,8 +416,16 @@ chrome_browser_net::Predictor* OffTheRecordProfileImpl::GetNetworkPredictor() {
   return NULL;
 }
 
-void OffTheRecordProfileImpl::ClearNetworkingHistorySince(base::Time time) {
-  // No need to do anything here, our transport security state is read-only.
+void OffTheRecordProfileImpl::ClearNetworkingHistorySince(
+    base::Time time,
+    const base::Closure& completion) {
+  // Nothing to do here, our transport security state is read-only.
+  // Still, fire the callback to indicate we have finished, otherwise the
+  // BrowsingDataRemover will never be destroyed and the dialog will never be
+  // closed. We must do this asynchronously in order to avoid reentrancy issues.
+  if (!completion.is_null()) {
+    BrowserThread::PostTask(BrowserThread::UI, FROM_HERE, completion);
+  }
 }
 
 GURL OffTheRecordProfileImpl::GetHomePage() {
@@ -480,7 +472,7 @@ class GuestSessionProfile : public OffTheRecordProfileImpl {
 Profile* Profile::CreateOffTheRecordProfile() {
   OffTheRecordProfileImpl* profile = NULL;
 #if defined(OS_CHROMEOS)
-  if (Profile::IsGuestSession())
+  if (IsGuestSession())
     profile = new GuestSessionProfile(this);
 #endif
   if (!profile)

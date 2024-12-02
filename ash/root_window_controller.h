@@ -6,33 +6,38 @@
 #define ASH_ROOT_WINDOW_CONTROLLER_H_
 
 #include "ash/ash_export.h"
+#include "ash/shelf_types.h"
 #include "ash/system/user/login_status.h"
-#include "ash/wm/shelf_types.h"
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
 
 class SkBitmap;
 
-namespace gfx {
-class Point;
-}
-
 namespace aura {
 class EventFilter;
 class RootWindow;
 class Window;
-namespace shared {
+}
+
+namespace gfx {
+class Point;
+}
+
+namespace views {
+namespace corewm {
 class InputMethodEventFilter;
 class RootWindowEventFilter;
-}  // namespace shared
-}  // namespace aura
+}
+}
 
 namespace ash {
 class Launcher;
+class SystemTray;
 class ToplevelWindowEventHandler;
 
 namespace internal {
 
+class BootSplashScreen;
 class PanelLayoutManager;
 class RootWindowLayoutManager;
 class ScreenDimmer;
@@ -58,6 +63,12 @@ class ASH_EXPORT RootWindowController {
   // RootWindowController otherwise.
   static RootWindowController* ForLauncher(aura::Window* window);
 
+  // Returns a RootWindowController of the window's root window.
+  static RootWindowController* ForWindow(aura::Window* window);
+
+  // Returns the RootWindowController of the active root window.
+  static internal::RootWindowController* ForActiveRootWindow();
+
   aura::RootWindow* root_window() { return root_window_.get(); }
 
   RootWindowLayoutManager* root_window_layout() { return root_window_layout_; }
@@ -72,9 +83,14 @@ class ASH_EXPORT RootWindowController {
 
   ShelfLayoutManager* shelf() const { return shelf_; }
 
-  StatusAreaWidget* status_area_widget() const {
+  StatusAreaWidget* status_area_widget() {
     return status_area_widget_;
   }
+
+  // Returns the system tray on this root window. Note that
+  // calling this on the root window that doesn't have a launcher will
+  // lead to a crash.
+  SystemTray* GetSystemTray();
 
   // Shows context menu at the |location_in_screen|. This uses
   // |ShellDelegate::CreateContextMenu| to define the content of the menu.
@@ -99,8 +115,8 @@ class ASH_EXPORT RootWindowController {
   // creates
   void InitForPrimaryDisplay();
 
-  // Initializes |system_background_|.  |is_first_run_after_boot| determines the
-  // background's initial content.
+  // Initializes |system_background_| and possibly also |boot_splash_screen_|.
+  // |is_first_run_after_boot| determines the background's initial color.
   void CreateSystemBackground(bool is_first_run_after_boot);
 
   // Initializes |launcher_|.  Does nothing if it's already initialized.
@@ -116,7 +132,13 @@ class ASH_EXPORT RootWindowController {
   // TODO(oshima): Investigate if we can merge this and |OnLoginStateChanged|.
   void UpdateAfterLoginStatusChange(user::LoginStatus status);
 
-  // Updates |background_| to be black after the desktop background is visible.
+  // Called when the brightness/grayscale animation from white to the login
+  // desktop background image has started.  Starts |boot_splash_screen_|'s
+  // hiding animation (if the screen is non-NULL).
+  void HandleInitialDesktopBackgroundAnimationStarted();
+
+  // Called when the login background is fully visible.  Updates |background_|
+  // to be black and drops |boot_splash_screen_|.
   void HandleDesktopBackgroundVisible();
 
   // Deletes associated objects and clears the state, but doesn't delete
@@ -142,10 +164,6 @@ class ASH_EXPORT RootWindowController {
   bool SetShelfAlignment(ShelfAlignment alignment);
   ShelfAlignment GetShelfAlignment();
 
-  // Get the shelf's auto hide status.
-  bool IsShelfAutoHideMenuHideChecked();
-  ShelfAutoHideBehavior GetToggledShelfAutoHideBehavior();
-
  private:
   // Creates each of the special window containers that holds windows of various
   // types in the shell UI.
@@ -168,6 +186,7 @@ class ASH_EXPORT RootWindowController {
   scoped_ptr<Launcher> launcher_;
 
   scoped_ptr<SystemBackgroundController> system_background_;
+  scoped_ptr<BootSplashScreen> boot_splash_screen_;
 
   scoped_ptr<ScreenDimmer> screen_dimmer_;
   scoped_ptr<WorkspaceController> workspace_controller_;

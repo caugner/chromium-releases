@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,7 +16,6 @@
 #include "chrome/browser/bookmarks/bookmark_editor.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/instant/instant_controller.h"
 #include "chrome/browser/managed_mode/managed_mode.h"
 #include "chrome/browser/profiles/avatar_menu_model.h"
 #include "chrome/browser/profiles/profile.h"
@@ -65,7 +64,6 @@
 #include "chrome/browser/ui/constrained_window_tab_helper.h"
 #include "chrome/browser/ui/fullscreen/fullscreen_controller.h"
 #include "chrome/browser/ui/omnibox/location_bar.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/tabs/dock_info.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_delegate.h"
@@ -226,18 +224,20 @@ enum {
 
 // Private(TestingAPI) init routine with testing options.
 - (id)initWithBrowser:(Browser*)browser takeOwnership:(BOOL)ownIt {
-  // Use initWithWindowNibPath:: instead of initWithWindowNibName: so we
-  // can override it in a unit test.
-  NSString* nibpath = [base::mac::FrameworkBundle()
-                        pathForResource:@"BrowserWindow"
-                                 ofType:@"nib"];
-  if ((self = [super initWithWindowNibPath:nibpath owner:self])) {
+  bool hasTabStrip = browser->SupportsWindowFeature(Browser::FEATURE_TABSTRIP);
+  if ((self = [super initTabWindowControllerWithTabStrip:hasTabStrip])) {
     DCHECK(browser);
     initializing_ = YES;
     browser_.reset(browser);
     ownsBrowser_ = ownIt;
     NSWindow* window = [self window];
     windowShim_.reset(new BrowserWindowCocoa(browser, self));
+
+    // Set different minimum sizes on tabbed windows vs non-tabbed, e.g. popups.
+    // This has to happen before -enforceMinWindowSize: is called further down.
+    NSSize minSize = [self isTabbedWindow] ?
+      NSMakeSize(400, 272) : NSMakeSize(100, 122);
+    [[self window] setMinSize:minSize];
 
     // Create the bar visibility lock set; 10 is arbitrary, but should hopefully
     // be big enough to hold all locks that'll ever be needed.
@@ -321,11 +321,11 @@ enum {
     // registering for the appropriate command state changes from the back-end.
     // Adds the toolbar to the content area.
     toolbarController_.reset([[ToolbarController alloc]
-                               initWithModel:browser->toolbar_model()
-                                    commands:browser->command_controller()->command_updater()
-                                     profile:browser->profile()
-                                     browser:browser
-                              resizeDelegate:self]);
+              initWithModel:browser->toolbar_model()
+                   commands:browser->command_controller()->command_updater()
+                    profile:browser->profile()
+                    browser:browser
+             resizeDelegate:self]);
     [toolbarController_ setHasToolbar:[self hasToolbar]
                        hasLocationBar:[self hasLocationBar]];
     [[[self window] contentView] addSubview:[toolbarController_ view]];
@@ -356,7 +356,8 @@ enum {
     // We don't want to try and show the bar before it gets placed in its parent
     // view, so this step shoudn't be inside the bookmark bar controller's
     // |-awakeFromNib|.
-    [self updateBookmarkBarVisibilityWithAnimation:NO];
+    windowShim_->BookmarkBarStateChanged(
+        BookmarkBar::DONT_ANIMATE_STATE_CHANGE);
 
     // Allow bar visibility to be changed.
     [self enableBarVisibilityUpdates];
@@ -430,15 +431,8 @@ enum {
   return self;
 }
 
-- (void)awakeFromNib {
-  // Set different minimum sizes on tabbed windows vs non-tabbed, e.g. popups.
-  NSSize minSize = [self isTabbedWindow] ?
-      NSMakeSize(400, 272) : NSMakeSize(100, 122);
-  [[self window] setMinSize:minSize];
-}
-
 - (void)dealloc {
-  chrome::CloseAllTabs(browser_.get());
+  browser_->tab_strip_model()->CloseAllTabs();
   [downloadShelfController_ exiting];
 
   // Explicitly release |presentationModeController_| here, as it may call back
@@ -917,8 +911,8 @@ enum {
   //
   // We do not adjust the window height for bookmark bar changes on the NTP.
   BOOL shouldAdjustBookmarkHeight =
-      [bookmarkBarController_ isAnimatingBetweenState:bookmarks::kHiddenState
-                                             andState:bookmarks::kShowingState];
+      [bookmarkBarController_ isAnimatingBetweenState:BookmarkBar::HIDDEN
+                                             andState:BookmarkBar::SHOW];
 
   BOOL resizeRectDirty = NO;
   if ((shouldAdjustBookmarkHeight && view == [bookmarkBarController_ view]) ||
@@ -1162,10 +1156,6 @@ enum {
   return [view convertRect:[view bounds] toView:nil];
 }
 
-- (GTMWindowSheetController*)sheetController {
-  return [tabStripController_ sheetController];
-}
-
 - (void)updateToolbarWithContents:(WebContents*)tab
                shouldRestoreState:(BOOL)shouldRestore {
   [toolbarController_ updateToolbarWithContents:tab
@@ -1235,8 +1225,8 @@ enum {
     if (!isBrowser) return;
     BrowserWindowController* dragBWC = (BrowserWindowController*)dragController;
     int index = [dragBWC->tabStripController_ modelIndexForTabView:view];
-    TabContents* contents =
-        chrome::GetTabContentsAt(dragBWC->browser_.get(), index);
+    WebContents* contents =
+        dragBWC->browser_->tab_strip_model()->GetWebContentsAt(index);
     // The tab contents may have gone away if given a window.close() while it
     // is being dragged. If so, bail, we've got nothing to drop.
     if (!contents)
@@ -1267,7 +1257,7 @@ enum {
     // Deposit it into our model at the appropriate location (it already knows
     // where it should go from tracking the drag). Doing this sets the tab's
     // delegate to be the Browser.
-    [tabStripController_ dropTabContents:contents
+    [tabStripController_ dropWebContents:contents
                                withFrame:destinationFrame
                              asPinnedTab:isPinned];
   } else {
@@ -1284,7 +1274,7 @@ enum {
 // put into a different tab strip, such as during a drop on another window.
 - (void)detachTabView:(NSView*)view {
   int index = [tabStripController_ modelIndexForTabView:view];
-  browser_->tab_strip_model()->DetachTabContentsAt(index);
+  browser_->tab_strip_model()->DetachWebContentsAt(index);
 }
 
 - (NSView*)activeTabView {
@@ -1314,7 +1304,7 @@ enum {
 
   // Fetch the tab contents for the tab being dragged.
   int index = [tabStripController_ modelIndexForTabView:tabView];
-  TabContents* contents = chrome::GetTabContentsAt(browser_.get(), index);
+  WebContents* contents = browser_->tab_strip_model()->GetWebContentsAt(index);
 
   // Set the window size. Need to do this before we detach the tab so it's
   // still in the window. We have to flip the coordinates as that's what
@@ -1343,17 +1333,20 @@ enum {
   // deleting the tab contents. This needs to come before creating the new
   // Browser because it clears the WebContents' delegate, which gets hooked
   // up during creation of the new window.
-  browser_->tab_strip_model()->DetachTabContentsAt(index);
+  browser_->tab_strip_model()->DetachWebContentsAt(index);
 
   // Create the new window with a single tab in its model, the one being
   // dragged.
   DockInfo dockInfo;
+  TabStripModelDelegate::NewStripContents item;
+  item.web_contents = contents;
+  item.add_types = TabStripModel::ADD_ACTIVE |
+                   (isPinned ? TabStripModel::ADD_PINNED
+                             : TabStripModel::ADD_NONE);
+  std::vector<TabStripModelDelegate::NewStripContents> contentses;
+  contentses.push_back(item);
   Browser* newBrowser = browser_->tab_strip_model()->delegate()->
-      CreateNewStripWithContents(contents, browserRect, dockInfo, false);
-
-  // Propagate the tab pinned state of the new tab (which is the only tab in
-  // this new window).
-  newBrowser->tab_strip_model()->SetTabPinned(0, isPinned);
+      CreateNewStripWithContents(contentses, browserRect, dockInfo, false);
 
   // Get the new controller by asking the new window for its delegate.
   BrowserWindowController* controller =
@@ -1433,11 +1426,8 @@ enum {
   return [bookmarkBarController_ isAnimationRunning];
 }
 
-- (void)updateBookmarkBarVisibilityWithAnimation:(BOOL)animate {
-  [bookmarkBarController_
-      updateAndShowNormalBar:[self shouldShowBookmarkBar]
-             showDetachedBar:[self shouldShowDetachedBookmarkBar]
-               withAnimation:animate];
+- (BookmarkBarController*)bookmarkBarController {
+  return bookmarkBarController_;
 }
 
 - (BOOL)isDownloadShelfVisible {
@@ -1512,9 +1502,9 @@ enum {
 }
 
 - (BOOL)isTabDraggable:(NSView*)tabView {
-  // TODO(avi, thakis): GTMWindowSheetController has no api to move tabsheets
-  // between windows. Until then, we have to prevent having to move a tabsheet
-  // between windows, e.g. no tearing off of tabs.
+  // TODO(avi, thakis): ConstrainedWindowSheetController has no api to move
+  // tabsheets between windows. Until then, we have to prevent having to move a
+  // tabsheet between windows, e.g. no tearing off of tabs.
   int index = [tabStripController_ modelIndexForTabView:tabView];
   WebContents* contents = chrome::GetWebContentsAt(browser_.get(), index);
   if (!contents)
@@ -1539,7 +1529,8 @@ enum {
   // call resizeView -> layoutSubviews and cause unnecessary relayout.
   // TODO(viettrungluu): perhaps update to not terminate running animations (if
   // applicable)?
-  [self updateBookmarkBarVisibilityWithAnimation:NO];
+  windowShim_->BookmarkBarStateChanged(
+      BookmarkBar::DONT_ANIMATE_STATE_CHANGE);
 
   [infoBarContainerController_ changeWebContents:contents];
 
@@ -1558,8 +1549,10 @@ enum {
   // (showing its floating bookmark bar) and normal web pages (showing no
   // bookmark bar).
   // TODO(viettrungluu): perhaps update to not terminate running animations?
-  if (change != TabStripModelObserver::TITLE_NOT_LOADING)
-    [self updateBookmarkBarVisibilityWithAnimation:NO];
+  if (change != TabStripModelObserver::TITLE_NOT_LOADING) {
+    windowShim_->BookmarkBarStateChanged(
+        BookmarkBar::DONT_ANIMATE_STATE_CHANGE);
+  }
 }
 
 - (void)onTabDetachedWithContents:(WebContents*)contents {
@@ -1679,8 +1672,7 @@ enum {
   [[[[self window] contentView] superview] addSubview:view];
 }
 
-// Documented in 10.6+, but present starting in 10.5. Called when we get a
-// three-finger swipe.
+// Called when we get a three-finger swipe.
 - (void)swipeWithEvent:(NSEvent*)event {
   CGFloat deltaX = [event deltaX];
   CGFloat deltaY = [event deltaY];
@@ -1708,12 +1700,11 @@ enum {
   }
 }
 
-// Documented in 10.6+, but present starting in 10.5. Called repeatedly during
-// a pinch gesture, with incremental change values.
+// Called repeatedly during a pinch gesture, with incremental change values.
 - (void)magnifyWithEvent:(NSEvent*)event {
   // The deltaZ difference necessary to trigger a zoom action. Derived from
   // experimentation to find a value that feels reasonable.
-  const float kZoomStepValue = 300;
+  const float kZoomStepValue = 0.6;
 
   // Find the (absolute) thresholds on either side of the current zoom factor,
   // then convert those to actual numbers to trigger a zoom in or out.
@@ -1728,7 +1719,7 @@ enum {
   float zoomOutThreshold = (currentZoomStepDelta_ <= 0) ? -nextStep : backStep;
 
   unsigned int command = 0;
-  totalMagnifyGestureAmount_ += [event deltaZ];
+  totalMagnifyGestureAmount_ += [event magnification];
   if (totalMagnifyGestureAmount_ > zoomInThreshold) {
     command = IDC_ZOOM_PLUS;
   } else if (totalMagnifyGestureAmount_ < zoomOutThreshold) {
@@ -1767,6 +1758,11 @@ enum {
   // do this.
   if ([findBarCocoaController_ isFindBarVisible])
     [self layoutSubviews];
+
+  if ([self placeBookmarkBarBelowInfoBar] &&
+      [bookmarkBarController_ shouldShowAtBottomWhenDetached]) {
+    [self layoutBottomBookmarkBarInContentFrame:[[self tabContentArea] frame]];
+  }
 }
 
 // Handle the openLearnMoreAboutCrashLink: action from SadTabController when
@@ -1831,8 +1827,8 @@ enum {
 
 // (Needed for |BookmarkBarControllerDelegate| protocol.)
 - (void)bookmarkBar:(BookmarkBarController*)controller
- didChangeFromState:(bookmarks::VisualState)oldState
-            toState:(bookmarks::VisualState)newState {
+ didChangeFromState:(BookmarkBar::State)oldState
+            toState:(BookmarkBar::State)newState {
   [toolbarController_
       setDividerOpacity:[bookmarkBarController_ toolbarDividerOpacity]];
   [self adjustToolbarAndBookmarkBarForCompression:
@@ -1841,8 +1837,8 @@ enum {
 
 // (Needed for |BookmarkBarControllerDelegate| protocol.)
 - (void)bookmarkBar:(BookmarkBarController*)controller
-willAnimateFromState:(bookmarks::VisualState)oldState
-            toState:(bookmarks::VisualState)newState {
+willAnimateFromState:(BookmarkBar::State)oldState
+            toState:(BookmarkBar::State)newState {
   [toolbarController_
       setDividerOpacity:[bookmarkBarController_ toolbarDividerOpacity]];
   [self adjustToolbarAndBookmarkBarForCompression:
@@ -1883,9 +1879,9 @@ willAnimateFromState:(bookmarks::VisualState)oldState
 }
 
 - (void)commitInstant {
-  InstantController* instant = browser_->instant_controller()->instant();
-  if (instant && instant->IsCurrent())
-    instant->CommitCurrentPreview(INSTANT_COMMIT_FOCUS_LOST);
+  if (chrome::BrowserInstantController* controller =
+          browser_->instant_controller())
+    controller->instant()->CommitIfPossible(INSTANT_COMMIT_FOCUS_LOST);
 }
 
 - (BOOL)isInstantTabShowing {
@@ -1908,7 +1904,7 @@ willAnimateFromState:(bookmarks::VisualState)oldState
 
   // Account for the bookmark bar height if it is currently in the detached
   // state on the new tab page.
-  if ([bookmarkBarController_ isInState:(bookmarks::kDetachedState)])
+  if ([bookmarkBarController_ isInState:BookmarkBar::DETACHED])
     frame.size.height += NSHeight([[bookmarkBarController_ view] bounds]);
 
   return frame;
@@ -2013,8 +2009,10 @@ willAnimateFromState:(bookmarks::VisualState)oldState
       [self setPresentationModeInternal:YES forceDropdown:YES];
       [self releaseBarVisibilityForOwner:self withAnimation:YES delay:YES];
       // Since -windowDidEnterFullScreen: won't be called in the
-      // fullscreen --> presentation mode case, manually show the exit bubble.
+      // fullscreen --> presentation mode case, manually show the exit bubble
+      // and notify the change happened with WindowFullscreenStateChanged().
       [self showFullscreenExitBubbleIfNecessary];
+      browser_->WindowFullscreenStateChanged();
     } else {
       // If not in fullscreen mode, trigger the Lion fullscreen mode machinery.
       // Presentation mode will automatically be enabled in

@@ -16,7 +16,6 @@
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/chrome_pages.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/common/password_form.h"
 #include "ui/gfx/rect.h"
@@ -65,7 +64,7 @@ void TabAutofillManagerDelegate::ShowAutofillSettings() {
 #if defined(OS_ANDROID)
   NOTIMPLEMENTED();
 #else
-  Browser* browser = browser::FindBrowserWithWebContents(web_contents_);
+  Browser* browser = chrome::FindBrowserWithWebContents(web_contents_);
   if (browser)
     chrome::ShowSettingsSubPage(browser, chrome::kAutofillSubPage);
 #endif  // #if defined(OS_ANDROID)
@@ -78,7 +77,7 @@ void TabAutofillManagerDelegate::ShowPasswordGenerationBubble(
 #if defined(OS_ANDROID)
   NOTIMPLEMENTED();
 #else
-  Browser* browser = browser::FindBrowserWithWebContents(web_contents_);
+  Browser* browser = chrome::FindBrowserWithWebContents(web_contents_);
   browser->window()->ShowPasswordGenerationBubble(bounds, form, generator);
 #endif  // #if defined(OS_ANDROID)
 }

@@ -21,6 +21,8 @@
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/extensions/window_controller.h"
 #include "chrome/browser/file_select_helper.h"
+#include "chrome/browser/intents/web_intents_util.h"
+#include "chrome/browser/media/media_internals.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/app_modal_dialogs/javascript_dialog_creator.h"
 #include "chrome/browser/ui/browser.h"
@@ -28,7 +30,6 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/prefs/prefs_tab_helper.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/view_type_utils.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -53,12 +54,7 @@
 #include "grit/generated_resources.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
-
-#if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/login/user_manager.h"
-#endif
 
 using WebKit::WebDragOperation;
 using WebKit::WebDragOperationsMask;
@@ -147,7 +143,7 @@ ExtensionHost::ExtensionHost(const Extension* extension,
       extension_host_type_(host_type),
       associated_web_contents_(NULL) {
   host_contents_.reset(WebContents::Create(
-      profile_, site_instance, MSG_ROUTING_NONE, NULL));
+      WebContents::CreateParams(profile_, site_instance))),
   content::WebContentsObserver::Observe(host_contents_.get());
   host_contents_->SetDelegate(this);
   chrome::SetViewType(host_contents_.get(), host_type);
@@ -234,7 +230,8 @@ void ExtensionHost::CreateRenderViewNow() {
   LoadInitialURL();
   if (is_background_page()) {
     DCHECK(IsRenderViewLive());
-    profile_->GetExtensionService()->DidCreateRenderViewForBackgroundPage(this);
+    extensions::ExtensionSystem::Get(profile_)->extension_service()->
+        DidCreateRenderViewForBackgroundPage(this);
   }
 }
 
@@ -250,7 +247,8 @@ const GURL& ExtensionHost::GetURL() const {
 
 void ExtensionHost::LoadInitialURL() {
   if (!is_background_page() &&
-      !profile_->GetExtensionService()->IsBackgroundPageReady(extension_)) {
+      !extensions::ExtensionSystem::Get(profile_)->extension_service()->
+          IsBackgroundPageReady(extension_)) {
     // Make sure the background page loads before any others.
     registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_BACKGROUND_PAGE_READY,
                    content::Source<Extension>(extension_));
@@ -274,7 +272,7 @@ void ExtensionHost::Observe(int type,
                             const content::NotificationDetails& details) {
   switch (type) {
     case chrome::NOTIFICATION_EXTENSION_BACKGROUND_PAGE_READY:
-      DCHECK(profile_->GetExtensionService()->
+      DCHECK(extensions::ExtensionSystem::Get(profile_)->extension_service()->
           IsBackgroundPageReady(extension_));
       LoadInitialURL();
       break;
@@ -336,7 +334,7 @@ void ExtensionHost::InsertInfobarCSS() {
 
   static const base::StringPiece css(
       ResourceBundle::GetSharedInstance().GetRawDataResource(
-      IDR_EXTENSIONS_INFOBAR_CSS, ui::SCALE_FACTOR_NONE));
+      IDR_EXTENSIONS_INFOBAR_CSS));
 
   render_view_host()->InsertCSS(string16(), css.as_string());
 }
@@ -392,7 +390,8 @@ void ExtensionHost::DocumentAvailableInMainFrame() {
 
   document_element_available_ = true;
   if (is_background_page()) {
-    profile_->GetExtensionService()->SetBackgroundPageReady(extension_);
+    extensions::ExtensionSystem::Get(profile_)->extension_service()->
+        SetBackgroundPageReady(extension_);
   } else {
     switch (extension_host_type_) {
       case chrome::VIEW_TYPE_EXTENSION_INFOBAR:
@@ -415,14 +414,6 @@ void ExtensionHost::CloseContents(WebContents* contents) {
   }
 }
 
-#if defined(OS_CHROMEOS)
-bool ExtensionHost::ShouldSuppressDialogs() {
-  // Prevent extensions from creating dialogs while user session hasn't
-  // started yet.
-  return !chromeos::UserManager::Get()->IsSessionStarted();
-}
-#endif
-
 void ExtensionHost::OnStartDownload(
     content::WebContents* source, content::DownloadItem* download) {
   // If |source| is in the context of a Browser, show the DownloadShelf on that
@@ -440,7 +431,7 @@ void ExtensionHost::WebIntentDispatch(
   scoped_ptr<content::WebIntentsDispatcher> dispatcher(intents_dispatcher);
 
   Browser* browser = view() ? view()->browser()
-      : browser::FindBrowserWithWebContents(web_contents);
+      : chrome::FindBrowserWithWebContents(web_contents);
 
   // For background scripts/pages, there will be no view(). In this case, we
   // want to treat the intent as a browser-initiated one and deliver it into the
@@ -639,6 +630,7 @@ void ExtensionHost::AddNewContents(WebContents* source,
         delegate->AddNewContents(
             associated_contents, new_contents, disposition, initial_pos,
             user_gesture, was_blocked);
+        return;
       }
     }
   }
@@ -658,9 +650,17 @@ void ExtensionHost::RequestMediaAccessPermission(
     content::WebContents* web_contents,
     const content::MediaStreamRequest* request,
     const content::MediaResponseCallback& callback) {
+  // Get the preferred default devices for the request.
+  content::MediaStreamDevices devices;
+  media::GetDefaultDevicesForProfile(
+      profile_,
+      content::IsAudioMediaType(request->audio_type),
+      content::IsVideoMediaType(request->video_type),
+      &devices);
+
   // For tab capture device, we require the tabCapture permission.
   RequestMediaAccessPermissionHelper::AuthorizeRequest(
-      request, callback, extension(), false);
+      devices, request, callback, extension(), false);
 }
 
 }  // namespace extensions

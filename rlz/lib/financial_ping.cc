@@ -46,6 +46,7 @@ class InternetHandle {
 
 #include "base/bind.h"
 #include "base/message_loop.h"
+#include "base/run_loop.h"
 #include "base/time.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/load_flags.h"
@@ -181,11 +182,6 @@ net::URLRequestContextGetter* g_context;
 
 bool FinancialPing::SetURLRequestContext(
     net::URLRequestContextGetter* context) {
-  ScopedRlzValueStoreLock lock;
-  RlzValueStore* store = lock.GetStore();
-  if (!store)
-    return false;
-
   g_context = context;
   return true;
 }
@@ -194,15 +190,18 @@ namespace {
 
 class FinancialPingUrlFetcherDelegate : public net::URLFetcherDelegate {
  public:
-  FinancialPingUrlFetcherDelegate(MessageLoop* loop) : loop_(loop) { }
+  FinancialPingUrlFetcherDelegate(const base::Closure& callback)
+      : callback_(callback) {
+  }
   virtual void OnURLFetchComplete(const net::URLFetcher* source);
+
  private:
-  MessageLoop* loop_;
+  base::Closure callback_;
 };
 
 void FinancialPingUrlFetcherDelegate::OnURLFetchComplete(
     const net::URLFetcher* source) {
-  loop_->Quit();
+  callback_.Run();
 }
 
 }  // namespace
@@ -267,8 +266,12 @@ bool FinancialPing::PingServer(const char* request, std::string* response) {
   return true;
 #else
   // Run a blocking event loop to match the win inet implementation.
-  MessageLoop loop;
-  FinancialPingUrlFetcherDelegate delegate(&loop);
+  scoped_ptr<MessageLoop> message_loop;
+  // Ensure that we have a MessageLoop.
+  if (!MessageLoop::current())
+    message_loop.reset(new MessageLoop);
+  base::RunLoop loop;
+  FinancialPingUrlFetcherDelegate delegate(loop.QuitClosure());
 
   std::string url = base::StringPrintf("http://%s:%d%s",
                                        kFinancialServer, kFinancialPort,
@@ -289,11 +292,12 @@ bool FinancialPing::PingServer(const char* request, std::string* response) {
   fetcher->SetRequestContext(g_context);
 
   const base::TimeDelta kTimeout = base::TimeDelta::FromMinutes(5);
-  loop.PostTask(
+  MessageLoop::ScopedNestableTaskAllower allow_nested(MessageLoop::current());
+  MessageLoop::current()->PostTask(
       FROM_HERE,
       base::Bind(&net::URLFetcher::Start, base::Unretained(fetcher.get())));
-  loop.PostNonNestableDelayedTask(
-      FROM_HERE, MessageLoop::QuitClosure(), kTimeout);
+  MessageLoop::current()->PostDelayedTask(
+      FROM_HERE, loop.QuitClosure(), kTimeout);
 
   loop.Run();
 

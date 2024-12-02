@@ -13,9 +13,9 @@
 #include "base/values.h"
 #include "chrome/browser/chromeos/drive/drive.pb.h"
 #include "chrome/browser/chromeos/drive/drive_file_system_interface.h"
-#include "chrome/browser/chromeos/drive/drive_files.h"
+#include "chrome/browser/chromeos/drive/drive_file_system_util.h"
 #include "chrome/browser/chromeos/drive/drive_system_service.h"
-#include "chrome/browser/google_apis/gdata_util.h"
+#include "chrome/browser/google_apis/time_util.h"
 #include "content/public/browser/browser_thread.h"
 #include "webkit/blob/shareable_file_reference.h"
 #include "webkit/fileapi/file_system_file_util_proxy.h"
@@ -36,26 +36,14 @@ namespace {
 const char kDriveRootDirectory[] = "drive";
 const char kFeedField[] = "feed";
 
-// Helper function that creates platform file on blocking IO thread pool.
-void OpenPlatformFileOnIOPool(const FilePath& local_path,
-                                int file_flags,
-                                base::PlatformFile* platform_file,
-                                base::PlatformFileError* open_error) {
-  bool created;
-  *platform_file = base::CreatePlatformFile(local_path,
-                                            file_flags,
-                                            &created,
-                                            open_error);
-}
-
-// Helper function to run reply on results of OpenPlatformFileOnIOPool() on
+// Helper function to run reply on results of base::CreatePlatformFile() on
 // IO thread.
 void OnPlatformFileOpened(
     const FileSystemOperation::OpenFileCallback& callback,
     base::ProcessHandle peer_handle,
-    base::PlatformFile* platform_file,
-    base::PlatformFileError* open_error) {
-  callback.Run(*open_error, *platform_file, peer_handle);
+    base::PlatformFileError* open_error,
+    base::PlatformFile platform_file) {
+  callback.Run(*open_error, platform_file, peer_handle);
 }
 
 // Helper function to run OpenFileCallback from
@@ -75,20 +63,19 @@ void OnGetFileByPathForOpen(
     return;
   }
 
-  base::PlatformFile* platform_file = new base::PlatformFile(
-      base::kInvalidPlatformFileValue);
   base::PlatformFileError* open_error =
       new base::PlatformFileError(base::PLATFORM_FILE_ERROR_FAILED);
-  BrowserThread::GetBlockingPool()->PostTaskAndReply(FROM_HERE,
-      base::Bind(&OpenPlatformFileOnIOPool,
+  base::PostTaskAndReplyWithResult(
+      BrowserThread::GetBlockingPool(),
+      FROM_HERE,
+      base::Bind(&base::CreatePlatformFile,
                  local_path,
                  file_flags,
-                 platform_file,
+                 static_cast<bool*>(NULL),
                  open_error),
       base::Bind(&OnPlatformFileOpened,
                  callback,
                  peer_handle,
-                 base::Owned(platform_file),
                  base::Owned(open_error)));
 }
 
@@ -132,23 +119,23 @@ void EmitDebugLogForCloseFile(const FilePath& local_path,
   DVLOG(1) << "Closed: " << local_path.AsUTF8Unsafe() << ": " << file_error;
 }
 
-void DoTruncateOnFileThread(
+base::PlatformFileError DoTruncateOnBlockingPool(
     const FilePath& local_cache_path,
-    int64 length,
-    base::PlatformFileError* result) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+    int64 length) {
+  base::PlatformFileError result = base::PLATFORM_FILE_ERROR_FAILED;
 
   base::PlatformFile file = base::CreatePlatformFile(
       local_cache_path,
       base::PLATFORM_FILE_OPEN | base::PLATFORM_FILE_WRITE,
       NULL,
-      result);
-  if (*result == base::PLATFORM_FILE_OK) {
+      &result);
+  if (result == base::PLATFORM_FILE_OK) {
     DCHECK_NE(base::kInvalidPlatformFileValue, file);
     if (!base::TruncatePlatformFile(file, length))
-      *result = base::PLATFORM_FILE_ERROR_FAILED;
+      result = base::PLATFORM_FILE_ERROR_FAILED;
     base::ClosePlatformFile(file);
   }
+  return result;
 }
 
 void DidCloseFileForTruncate(
@@ -166,7 +153,7 @@ void DidCloseFileForTruncate(
 base::FileUtilProxy::Entry DriveEntryProtoToFileUtilProxyEntry(
     const DriveEntryProto& proto) {
   base::PlatformFileInfo file_info;
-  DriveEntry::ConvertProtoToPlatformFileInfo(proto.file_info(), &file_info);
+  util::ConvertProtoToPlatformFileInfo(proto.file_info(), &file_info);
 
   base::FileUtilProxy::Entry entry;
   entry.name = proto.base_name();
@@ -371,22 +358,19 @@ void DriveFileSystemProxy::OnOpenFileForWriting(
   }
 
   // Cache file prepared for modification is available. Truncate it.
-  // File operation must be done on FILE thread, so relay the operation.
   base::PlatformFileError* result =
       new base::PlatformFileError(base::PLATFORM_FILE_ERROR_FAILED);
-  base::PlatformFile* platform_file = new base::PlatformFile(
-      base::kInvalidPlatformFileValue);
-  bool posted = BrowserThread::GetBlockingPool()->PostTaskAndReply(FROM_HERE,
-        base::Bind(&OpenPlatformFileOnIOPool,
-                   local_cache_path,
-                   file_flags,
-                   platform_file,
-                   result),
-        base::Bind(&OnPlatformFileOpened,
-                   callback,
-                   peer_handle,
-                   base::Owned(platform_file),
-                   base::Owned(result)));
+  bool posted = base::PostTaskAndReplyWithResult(
+      BrowserThread::GetBlockingPool(), FROM_HERE,
+      base::Bind(&base::CreatePlatformFile,
+                 local_cache_path,
+                 file_flags,
+                 static_cast<bool*>(NULL),
+                 result),
+      base::Bind(&OnPlatformFileOpened,
+                 callback,
+                 peer_handle,
+                 base::Owned(result)));
   DCHECK(posted);
 }
 
@@ -437,37 +421,30 @@ void DriveFileSystemProxy::OnFileOpenedForTruncate(
   }
 
   // Cache file prepared for modification is available. Truncate it.
-  // File operation must be done on FILE thread, so relay the operation.
-  base::PlatformFileError* result =
-      new base::PlatformFileError(base::PLATFORM_FILE_ERROR_FAILED);
-  bool posted = BrowserThread::GetMessageLoopProxyForThread(
-      BrowserThread::FILE)->PostTaskAndReply(
-          FROM_HERE,
-          base::Bind(&DoTruncateOnFileThread,
-                     local_cache_path,
-                     length,
-                     result),
-          base::Bind(&DriveFileSystemProxy::DidTruncate,
-                     this,
-                     virtual_path,
-                     callback,
-                     base::Owned(result)));
+  bool posted = base::PostTaskAndReplyWithResult(
+      BrowserThread::GetBlockingPool(),
+      FROM_HERE,
+      base::Bind(&DoTruncateOnBlockingPool,
+                 local_cache_path,
+                 length),
+      base::Bind(&DriveFileSystemProxy::DidTruncate,
+                 this,
+                 virtual_path,
+                 callback));
   DCHECK(posted);
 }
 
 void DriveFileSystemProxy::DidTruncate(
     const FilePath& virtual_path,
     const FileSystemOperation::StatusCallback& callback,
-    base::PlatformFileError* truncate_result) {
+    base::PlatformFileError truncate_result) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
   // Truncation finished. We must close the file no matter |truncate_result|
   // indicates an error or not.
   file_system_->CloseFile(
       virtual_path,
-      base::Bind(&DidCloseFileForTruncate,
-                 callback,
-                 base::PlatformFileError(*truncate_result)));
+      base::Bind(&DidCloseFileForTruncate, callback, truncate_result));
 }
 
 void DriveFileSystemProxy::OpenFile(
@@ -599,19 +576,15 @@ void DriveFileSystemProxy::OnGetEntryInfoByPath(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
   if (error != DRIVE_FILE_OK || !entry_proto.get()) {
-    MessageLoopProxy::current()->PostTask(FROM_HERE,
-         base::Bind(callback,
-                    base::PLATFORM_FILE_ERROR_NOT_FOUND,
-                    base::PlatformFileInfo(),
-                    FilePath(),
-                    scoped_refptr<ShareableFileReference>(NULL)));
+    callback.Run(base::PLATFORM_FILE_ERROR_NOT_FOUND,
+                 base::PlatformFileInfo(),
+                 FilePath(),
+                 scoped_refptr<ShareableFileReference>(NULL));
     return;
   }
 
   base::PlatformFileInfo file_info;
-  DriveEntry::ConvertProtoToPlatformFileInfo(
-      entry_proto->file_info(),
-      &file_info);
+  util::ConvertProtoToPlatformFileInfo(entry_proto->file_info(), &file_info);
 
   file_system_->GetFileByPath(entry_path,
                               base::Bind(&CallSnapshotFileCallback,
@@ -681,9 +654,7 @@ void DriveFileSystemProxy::OnGetMetadata(
   DCHECK(entry_proto.get());
 
   base::PlatformFileInfo file_info;
-  DriveEntry::ConvertProtoToPlatformFileInfo(
-      entry_proto->file_info(),
-      &file_info);
+  util::ConvertProtoToPlatformFileInfo(entry_proto->file_info(), &file_info);
 
   callback.Run(base::PLATFORM_FILE_OK, file_info, file_path);
 }

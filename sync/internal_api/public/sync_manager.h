@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,6 +14,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/task_runner.h"
 #include "base/threading/thread_checker.h"
+#include "sync/base/sync_export.h"
 #include "sync/internal_api/public/base/model_type.h"
 #include "sync/internal_api/public/change_record.h"
 #include "sync/internal_api/public/configure_reason.h"
@@ -32,6 +33,7 @@ class EncryptedData;
 namespace syncer {
 
 class BaseTransaction;
+class DataTypeDebugInfoListener;
 class Encryptor;
 struct Experiments;
 class ExtensionsActivityMonitor;
@@ -71,12 +73,12 @@ struct SyncCredentials {
 //
 // Unless stated otherwise, all methods of SyncManager should be called on the
 // same thread.
-class SyncManager {
+class SYNC_EXPORT SyncManager {
  public:
   // An interface the embedding application implements to be notified
   // on change events.  Note that these methods may be called on *any*
   // thread.
-  class ChangeDelegate {
+  class SYNC_EXPORT ChangeDelegate {
    public:
     // Notify the delegate that changes have been applied to the sync model.
     //
@@ -162,7 +164,7 @@ class SyncManager {
   // notifications from the SyncManager.  Register an observer via
   // SyncManager::AddObserver.  All methods are called only on the
   // sync thread.
-  class Observer {
+  class SYNC_EXPORT Observer {
    public:
     // A round-trip sync-cycle took place and the syncer has resolved any
     // conflicts that may have arisen.
@@ -254,9 +256,10 @@ class SyncManager {
     // function getChildNodeIds(id);
 
     virtual void OnInitializationComplete(
-        const WeakHandle<syncer::JsBackend>& js_backend,
+        const WeakHandle<JsBackend>& js_backend,
+        const WeakHandle<DataTypeDebugInfoListener>& debug_info_listener,
         bool success,
-        syncer::ModelTypeSet restored_types) = 0;
+        ModelTypeSet restored_types) = 0;
 
     // We are no longer permitted to communicate with the server. Sync should
     // be disabled and state cleaned up at once.  This can happen for a number
@@ -283,8 +286,6 @@ class SyncManager {
   // |sync_server_and_path| and |sync_server_port| represent the Chrome sync
   // server to use, and |use_ssl| specifies whether to communicate securely;
   // the default is false.
-  // |blocking_task_runner| is a TaskRunner to be used for tasks that
-  // may block on disk I/O.
   // |post_factory| will be owned internally and used to create
   // instances of an HttpPostProvider.
   // |model_safe_worker| ownership is given to the SyncManager.
@@ -305,7 +306,6 @@ class SyncManager {
       const std::string& sync_server_and_path,
       int sync_server_port,
       bool use_ssl,
-      const scoped_refptr<base::TaskRunner>& blocking_task_runner,
       scoped_ptr<HttpPostProviderFactory> post_factory,
       const std::vector<ModelSafeWorker*>& workers,
       ExtensionsActivityMonitor* extensions_activity_monitor,
@@ -406,6 +406,10 @@ class SyncManager {
 
   // May be called from any thread.
   virtual UserShare* GetUserShare() = 0;
+
+  // Returns the cache_guid of the currently open database.
+  // Requires that the SyncManager be initialized.
+  virtual const std::string cache_guid() = 0;
 
   // Reads the nigori node to determine if any experimental features should
   // be enabled.

@@ -51,7 +51,7 @@ cr.define('login', function() {
 
     // Whether local version of Gaia page is used.
     // @type {boolean}
-    isLocal: false,
+    isLocal_: false,
 
     // Whether offline login is allowed.
     // @type {boolean}
@@ -64,7 +64,7 @@ cr.define('login', function() {
     // Timer id of pending load.
     loadingTimer_: undefined,
 
-    /** @inheritDoc */
+    /** @override */
     decorate: function() {
       this.frame_ = $('signin-frame');
 
@@ -80,6 +80,23 @@ cr.define('login', function() {
     },
 
     /**
+     * Returns true if local version of Gaia is used.
+     * @type {boolean}
+     */
+    get isLocal() {
+      return this.isLocal_;
+    },
+
+    /**
+     * Sets whether local version of Gaia is used.
+     * @param {boolean} value Whether local version of Gaia is used.
+     */
+    set isLocal(value) {
+      this.isLocal_ = value;
+      chrome.send('updateGaiaIsLocal', [value]);
+    },
+
+    /**
      * Shows/hides loading UI.
      * @param {boolean} show True to show loading UI.
      * @private
@@ -88,6 +105,7 @@ cr.define('login', function() {
       $('gaia-loading').hidden = !show;
       this.frame_.hidden = show;
       $('signin-right').hidden = show;
+      $('enterprise-info-container').hidden = show;
     },
 
     /**
@@ -111,7 +129,7 @@ cr.define('login', function() {
     onLoadingTimeOut_: function() {
       this.loadingTimer_ = undefined;
       this.clearRetry_();
-      $('error-message').showLoadingTimeoutError();
+      chrome.send('showLoadingTimeoutError');
     },
 
     /**
@@ -156,6 +174,9 @@ cr.define('login', function() {
      *                      page.
      */
     onBeforeShow: function(data) {
+      chrome.send('loginUIStateChanged', ['gaia', true]);
+      $('login-header-bar').signinUIState = SIGNIN_UI_STATE.GAIA_SIGNIN;
+
       // Announce the name of the screen, if accessibility is on.
       $('gaia-signin-aria-label').setAttribute(
           'aria-label', localStrings.getString('signinScreenTitle'));
@@ -163,6 +184,14 @@ cr.define('login', function() {
       // Button header is always visible when sign in is presented.
       // Header is hidden once GAIA reports on successful sign in.
       Oobe.getInstance().headerHidden = false;
+    },
+
+    /**
+     * Event handler that is invoked just before the screen is hidden.
+     */
+    onBeforeHide: function() {
+      chrome.send('loginUIStateChanged', ['gaia', false]);
+      $('login-header-bar').signinUIState = SIGNIN_UI_STATE.HIDDEN;
     },
 
     /**
@@ -286,9 +315,11 @@ cr.define('login', function() {
         this.loading = true;
         // Now that we're in logged in state header should be hidden.
         Oobe.getInstance().headerHidden = true;
+        // Clear any error messages that were shown before login.
+        Oobe.clearErrors();
       } else if (msg.method == 'loginUILoaded') {
         this.loading = false;
-        $('error-message').update();
+        chrome.send('errorScreenUpdate');
         this.clearLoadingTimer_();
         // Show deferred error bubble.
         if (this.errorBubble_) {
@@ -323,7 +354,7 @@ cr.define('login', function() {
           // Show 'Cancel' button to allow user to return to the main screen
           // (e.g. this makes sense when connection is back).
           Oobe.getInstance().headerHidden = false;
-          $('login-header-bar').signinUIActive = true;
+          $('login-header-bar').signinUIState = SIGNIN_UI_STATE.GAIA_SIGNIN;
           // Do nothing, since offline version is reloaded after an error comes.
         } else {
           Oobe.showSigninUI();
@@ -414,8 +445,9 @@ cr.define('login', function() {
         // error itself.
         chrome.send('offlineLogin', [this.email]);
       } else if (!this.loading) {
-        $('bubble').showContentForElement($('login-box'), error,
-                                          cr.ui.Bubble.Attachment.LEFT);
+        $('bubble').showContentForElement($('login-box'),
+                                          cr.ui.Bubble.Attachment.LEFT,
+                                          error);
       } else {
         // Defer the bubble until the frame has been loaded.
         this.errorBubble_ = [loginAttempts, error];
@@ -437,6 +469,10 @@ cr.define('login', function() {
    */
   GaiaSigninScreen.updateAuthExtension = function(data) {
     $('gaia-signin').updateAuthExtension_(data);
+  };
+
+  GaiaSigninScreen.doReload = function() {
+    $('gaia-signin').doReload();
   };
 
   return {

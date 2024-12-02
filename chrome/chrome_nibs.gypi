@@ -15,7 +15,6 @@
       'app/nibs/BookmarkBubble.xib',
       'app/nibs/BookmarkEditor.xib',
       'app/nibs/BookmarkNameFolder.xib',
-      'app/nibs/BrowserWindow.xib',
       'app/nibs/ChromeToMobileBubble.xib',
       'app/nibs/CollectedCookies.xib',
       'app/nibs/ContentBlockedCookies.xib',
@@ -62,8 +61,6 @@
       'app/nibs/InfoBarContainer.xib',
       'app/nibs/Notification.xib',
       'app/nibs/Panel.xib',
-      'app/nibs/PreviewableContents.xib',
-      'app/nibs/TabView.xib',
     ],  # mac_untranslated_xibs
     'mac_all_xibs': [
       '<@(mac_translated_xibs)',

@@ -10,8 +10,8 @@
 
 #include "ash/launcher/launcher_button_host.h"
 #include "ash/launcher/launcher_model_observer.h"
+#include "ash/shelf_types.h"
 #include "ash/wm/gestures/shelf_gesture_handler.h"
-#include "ash/wm/shelf_types.h"
 #include "base/observer_list.h"
 #include "ui/views/animation/bounds_animator_observer.h"
 #include "ui/views/context_menu_controller.h"
@@ -59,9 +59,11 @@ class ASH_EXPORT LauncherView : public views::View,
 
   LauncherTooltipManager* tooltip_manager() { return tooltip_.get(); }
 
+  LauncherModel* model() { return model_; }
+
   void Init();
 
-  void SetAlignment(ShelfAlignment alignment);
+  void OnShelfAlignmentChanged();
 
   // Returns the ideal bounds of the specified item, or an empty rect if id
   // isn't know.
@@ -105,15 +107,6 @@ class ASH_EXPORT LauncherView : public views::View,
   struct IdealBounds {
     gfx::Rect overflow_bounds;
   };
-
-  // Used in calculating ideal bounds.
-  int primary_axis_coordinate(int x, int y) const {
-    return is_horizontal_alignment() ? x : y;
-  }
-
-  bool is_horizontal_alignment() const {
-    return alignment_ == SHELF_ALIGNMENT_BOTTOM;
-  }
 
   bool is_overflow_mode() const {
     return first_visible_index_ > 0;
@@ -174,10 +167,11 @@ class ASH_EXPORT LauncherView : public views::View,
 
   // Overridden from views::View:
   virtual gfx::Size GetPreferredSize() OVERRIDE;
-  virtual ui::EventResult OnGestureEvent(
-      const ui::GestureEvent& event) OVERRIDE;
   virtual void OnBoundsChanged(const gfx::Rect& previous_bounds) OVERRIDE;
   virtual FocusTraversable* GetPaneFocusTraversable() OVERRIDE;
+
+  // Overridden from ui::EventHandler:
+  virtual void OnGestureEvent(ui::GestureEvent* event) OVERRIDE;
 
   // Overridden from LauncherModelObserver:
   virtual void LauncherItemAdded(int model_index) OVERRIDE;
@@ -202,7 +196,6 @@ class ASH_EXPORT LauncherView : public views::View,
   virtual void MouseMovedOverButton(views::View* view) OVERRIDE;
   virtual void MouseEnteredButton(views::View* view) OVERRIDE;
   virtual void MouseExitedButton(views::View* view) OVERRIDE;
-  virtual ShelfAlignment GetShelfAlignment() const OVERRIDE;
   virtual string16 GetAccessibleName(const views::View* view) OVERRIDE;
 
   // Overridden from views::ButtonListener:
@@ -270,13 +263,14 @@ class ASH_EXPORT LauncherView : public views::View,
 
   ObserverList<LauncherIconObserver> observers_;
 
-  ShelfAlignment alignment_;
-
   // Amount content is inset on the left edge (or top edge for vertical
   // alignment).
   int leading_inset_;
 
   ShelfGestureHandler gesture_handler_;
+
+  // True when an item being inserted or removed in the model cancels a drag.
+  bool cancelling_drag_model_changed_;
 
   DISALLOW_COPY_AND_ASSIGN(LauncherView);
 };

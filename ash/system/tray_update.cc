@@ -6,8 +6,10 @@
 
 #include "ash/root_window_controller.h"
 #include "ash/shell.h"
+#include "ash/system/status_area_widget.h"
 #include "ash/system/tray/system_tray.h"
 #include "ash/system/tray/system_tray_delegate.h"
+#include "ash/system/tray/system_tray_notifier.h"
 #include "ash/system/tray/tray_constants.h"
 #include "ash/system/tray/tray_views.h"
 #include "ash/wm/shelf_layout_manager.h"
@@ -82,7 +84,7 @@ class UpdateView : public ash::internal::ActionableView {
  private:
   // Overridden from ActionableView.
   virtual bool PerformAction(const ui::Event& event) OVERRIDE {
-    ash::Shell::GetInstance()->tray_delegate()->RequestRestart();
+    ash::Shell::GetInstance()->system_tray_delegate()->RequestRestart();
     return true;
   }
 
@@ -101,13 +103,17 @@ class UpdateNagger : public ui::LayerAnimationObserver {
   explicit UpdateNagger(SystemTrayItem* owner)
       : owner_(owner) {
     RestartTimer();
-    Shell::GetInstance()->system_tray()->GetWidget()->GetNativeView()->layer()->
+    owner_->system_tray()->GetWidget()->GetNativeView()->layer()->
         GetAnimator()->AddObserver(this);
   }
 
   virtual ~UpdateNagger() {
-    Shell::GetInstance()->system_tray()->GetWidget()->GetNativeView()->layer()->
-        GetAnimator()->RemoveObserver(this);
+    internal::StatusAreaWidget* status_area =
+        Shell::GetPrimaryRootWindowController()->status_area_widget();
+    if (status_area) {
+      status_area->system_tray()->GetWidget()->GetNativeView()->layer()->
+          GetAnimator()->RemoveObserver(this);
+    }
   }
 
   void RestartTimer() {
@@ -148,19 +154,22 @@ class UpdateNagger : public ui::LayerAnimationObserver {
 
 }  // namespace tray
 
-TrayUpdate::TrayUpdate()
-    : TrayImageItem(IDR_AURA_UBER_TRAY_UPDATE),
+TrayUpdate::TrayUpdate(SystemTray* system_tray)
+    : TrayImageItem(system_tray, IDR_AURA_UBER_TRAY_UPDATE),
       severity_(UpdateObserver::UPDATE_NORMAL) {
+  Shell::GetInstance()->system_tray_notifier()->AddUpdateObserver(this);
 }
 
-TrayUpdate::~TrayUpdate() {}
+TrayUpdate::~TrayUpdate() {
+  Shell::GetInstance()->system_tray_notifier()->RemoveUpdateObserver(this);
+}
 
 bool TrayUpdate::GetInitialVisibility() {
-  return Shell::GetInstance()->tray_delegate()->SystemShouldUpgrade();
+  return Shell::GetInstance()->system_tray_delegate()->SystemShouldUpgrade();
 }
 
 views::View* TrayUpdate::CreateDefaultView(user::LoginStatus status) {
-  if (!Shell::GetInstance()->tray_delegate()->SystemShouldUpgrade())
+  if (!Shell::GetInstance()->system_tray_delegate()->SystemShouldUpgrade())
     return NULL;
   return new UpdateView(severity_);
 }

@@ -7,10 +7,8 @@
 
 #include <string>
 
-#include "ash/desktop_background/desktop_background_resources.h"
 #include "base/memory/singleton.h"
 #include "chrome/browser/chromeos/login/user.h"
-#include "chrome/browser/ui/webui/options/chromeos/set_wallpaper_options_handler.h"
 
 class PrefService;
 
@@ -64,6 +62,10 @@ class UserManager {
   // Registers user manager preferences.
   static void RegisterPrefs(PrefService* local_state);
 
+  // Indicates imminent shutdown, allowing the UserManager to remove any
+  // observers it has registered.
+  virtual void Shutdown() = 0;
+
   virtual ~UserManager();
 
   virtual UserImageManager* GetUserImageManager() = 0;
@@ -78,14 +80,21 @@ class UserManager {
   // from normal sign in flow.
   virtual void UserLoggedIn(const std::string& email, bool browser_restart) = 0;
 
-  // Indicates that user just logged on as the demo user.
-  virtual void DemoUserLoggedIn() = 0;
+  // Indicates that user just logged on as the retail mode user.
+  virtual void RetailModeUserLoggedIn() = 0;
 
   // Indicates that user just started incognito session.
   virtual void GuestUserLoggedIn() = 0;
 
-  // Indicates that a user just logged in as ephemeral.
-  virtual void EphemeralUserLoggedIn(const std::string& email) = 0;
+  // Indicates that a user just logged into a public account.
+  virtual void PublicAccountUserLoggedIn(User* user) = 0;
+
+  // Indicates that a regular user just logged in.
+  virtual void RegularUserLoggedIn(const std::string& email,
+                                   bool browser_restart) = 0;
+
+  // Indicates that a regular user just logged in as ephemeral.
+  virtual void RegularUserLoggedInAsEphemeral(const std::string& email) = 0;
 
   // Called when browser session is started i.e. after
   // browser_creator.LaunchBrowser(...) was called after user sign in.
@@ -143,29 +152,32 @@ class UserManager {
   virtual std::string GetUserDisplayEmail(
       const std::string& username) const = 0;
 
-  // Saves |type| and |index| chose by logged in user to Local State.
-  virtual void SaveLoggedInUserWallpaperProperties(User::WallpaperType type,
-                                                   int index) = 0;
-
-  // Updates custom wallpaper to selected layout and saves layout to Local
-  // State.
-  virtual void SetLoggedInUserCustomWallpaperLayout(
-      ash::WallpaperLayout layout) = 0;
-
   // Returns true if current user is an owner.
   virtual bool IsCurrentUserOwner() const = 0;
 
   // Returns true if current user is not existing one (hasn't signed in before).
   virtual bool IsCurrentUserNew() const = 0;
 
-  // Returns true if the current user is ephemeral.
-  virtual bool IsCurrentUserEphemeral() const = 0;
+  // Returns true if data stored or cached for the current user outside that
+  // user's cryptohome (wallpaper, avatar, OAuth token status, display name,
+  // display email) is ephemeral.
+  virtual bool IsCurrentUserNonCryptohomeDataEphemeral() const = 0;
+
+  // Returns true if the current user's session can be locked (i.e. the user has
+  // a password with which to unlock the session).
+  virtual bool CanCurrentUserLock() const = 0;
 
   // Returns true if user is signed in.
   virtual bool IsUserLoggedIn() const = 0;
 
+  // Returns true if we're logged in as a regular user.
+  virtual bool IsLoggedInAsRegularUser() const = 0;
+
   // Returns true if we're logged in as a demo user.
   virtual bool IsLoggedInAsDemoUser() const = 0;
+
+  // Returns true if we're logged in as a public account.
+  virtual bool IsLoggedInAsPublicAccount() const = 0;
 
   // Returns true if we're logged in as a Guest.
   virtual bool IsLoggedInAsGuest() const = 0;
@@ -178,9 +190,15 @@ class UserManager {
   // or restart after crash.
   virtual bool IsSessionStarted() const = 0;
 
-  // Returns true if the user with the given email address is to be treated as
-  // ephemeral.
-  virtual bool IsEphemeralUser(const std::string& email) const = 0;
+  // Returns true when the browser has crashed and restarted during the current
+  // user's session.
+  virtual bool HasBrowserRestarted() const = 0;
+
+  // Returns true if data stored or cached for the user with the given email
+  // address outside that user's cryptohome (wallpaper, avatar, OAuth token
+  // status, display name, display email) is to be treated as ephemeral.
+  virtual bool IsUserNonCryptohomeDataEphemeral(
+      const std::string& email) const = 0;
 
   virtual void AddObserver(Observer* obs) = 0;
   virtual void RemoveObserver(Observer* obs) = 0;

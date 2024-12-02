@@ -24,6 +24,7 @@
 #include "content/public/browser/notification_service.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/compositor/layer_animator.h"
 #include "ui/ui_controls/ui_controls.h"
 #include "ui/views/widget/widget.h"
 
@@ -133,13 +134,13 @@ class ScreenLockerTest : public CrosInProcessBrowserTest {
         cros_mock_->mock_network_library();
     EXPECT_CALL(*mock_network_library, AddUserActionObserver(_))
         .Times(AnyNumber());
-    EXPECT_CALL(*mock_network_library, LoadOncNetworks(_, _, _, _, _))
+    EXPECT_CALL(*mock_network_library, LoadOncNetworks(_, _, _, _))
         .WillRepeatedly(Return(true));
+    ui::LayerAnimator::set_disable_animations_for_test(true);
   }
 
   virtual void SetUpCommandLine(CommandLine* command_line) {
     command_line->AppendSwitchASCII(switches::kLoginProfile, "user");
-    command_line->AppendSwitch(switches::kNoFirstRun);
   }
 
   DISALLOW_COPY_AND_ASSIGN(ScreenLockerTest);

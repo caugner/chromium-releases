@@ -4,9 +4,9 @@
 
 #include "base/bind.h"
 #include "base/file_util.h"
+#include "base/files/scoped_temp_dir.h"
 #include "base/message_loop.h"
 #include "base/message_loop_proxy.h"
-#include "base/scoped_temp_dir.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
@@ -48,14 +48,14 @@ class DomStorageContextTest : public testing::Test {
   }
 
   virtual void TearDown() {
-    MessageLoop::current()->RunAllPending();
+    MessageLoop::current()->RunUntilIdle();
   }
 
   void VerifySingleOriginRemains(const GURL& origin) {
     // Use a new instance to examine the contexts of temp_dir_.
     scoped_refptr<DomStorageContext> context =
         new DomStorageContext(temp_dir_.path(), FilePath(), NULL, NULL);
-    std::vector<DomStorageContext::LocalStorageUsageInfo> infos;
+    std::vector<LocalStorageUsageInfo> infos;
     context->GetLocalStorageUsage(&infos, kDontIncludeFileInfo);
     ASSERT_EQ(1u, infos.size());
     EXPECT_EQ(origin, infos[0].origin);
@@ -63,7 +63,7 @@ class DomStorageContextTest : public testing::Test {
 
  protected:
   MessageLoop message_loop_;
-  ScopedTempDir temp_dir_;
+  base::ScopedTempDir temp_dir_;
   scoped_refptr<quota::MockSpecialStoragePolicy> storage_policy_;
   scoped_refptr<MockDomStorageTaskRunner> task_runner_;
   scoped_refptr<DomStorageContext> context_;
@@ -83,7 +83,7 @@ TEST_F(DomStorageContextTest, Basics) {
   EXPECT_TRUE(context_->GetStorageNamespace(kLocalStorageNamespaceId));
   EXPECT_FALSE(context_->GetStorageNamespace(kFirstSessionStorageNamespaceId));
   EXPECT_EQ(kFirstSessionStorageNamespaceId, context_->AllocateSessionId());
-  std::vector<DomStorageContext::LocalStorageUsageInfo> infos;
+  std::vector<LocalStorageUsageInfo> infos;
   context_->GetLocalStorageUsage(&infos, kDontIncludeFileInfo);
   EXPECT_TRUE(infos.empty());
   context_->Shutdown();
@@ -91,7 +91,7 @@ TEST_F(DomStorageContextTest, Basics) {
 
 TEST_F(DomStorageContextTest, UsageInfo) {
   // Should be empty initially
-  std::vector<DomStorageContext::LocalStorageUsageInfo> infos;
+  std::vector<LocalStorageUsageInfo> infos;
   context_->GetLocalStorageUsage(&infos, kDontIncludeFileInfo);
   EXPECT_TRUE(infos.empty());
   context_->GetLocalStorageUsage(&infos, kDoIncludeFileInfo);
@@ -104,7 +104,7 @@ TEST_F(DomStorageContextTest, UsageInfo) {
       OpenStorageArea(kOrigin)->SetItem(kKey, kValue, &old_value));
   context_->Shutdown();
   context_ = NULL;
-  MessageLoop::current()->RunAllPending();
+  MessageLoop::current()->RunUntilIdle();
 
   // Create a new context that points to the same directory, see that
   // it knows about the origin that we stored data for.
@@ -136,7 +136,7 @@ TEST_F(DomStorageContextTest, SessionOnly) {
       OpenStorageArea(kSessionOnlyOrigin)->SetItem(kKey, kValue, &old_value));
   context_->Shutdown();
   context_ = NULL;
-  MessageLoop::current()->RunAllPending();
+  MessageLoop::current()->RunUntilIdle();
 
   // Verify that the session-only origin data is gone.
   VerifySingleOriginRemains(kOrigin);
@@ -154,7 +154,7 @@ TEST_F(DomStorageContextTest, SetForceKeepSessionState) {
   context_->SetForceKeepSessionState();  // Should override clear behavior.
   context_->Shutdown();
   context_ = NULL;
-  MessageLoop::current()->RunAllPending();
+  MessageLoop::current()->RunUntilIdle();
 
   VerifySingleOriginRemains(kSessionOnlyOrigin);
 }
@@ -214,7 +214,7 @@ TEST_F(DomStorageContextTest, DeleteSessionStorage) {
   // Destroy and recreate the DomStorageContext.
   context_->Shutdown();
   context_ = NULL;
-  MessageLoop::current()->RunAllPending();
+  MessageLoop::current()->RunUntilIdle();
   context_ = new DomStorageContext(temp_dir_.path(),
                                    temp_dir_.path(),
                                    storage_policy_,
@@ -231,7 +231,7 @@ TEST_F(DomStorageContextTest, DeleteSessionStorage) {
   EXPECT_EQ(kValue, read_value.string());
   dom_namespace->CloseStorageArea(area);
 
-  DomStorageContext::SessionStorageUsageInfo info;
+  SessionStorageUsageInfo info;
   info.origin = kOrigin;
   info.persistent_namespace_id = kPersistentId;
   context_->DeleteSessionStorage(info);
@@ -239,7 +239,7 @@ TEST_F(DomStorageContextTest, DeleteSessionStorage) {
   // Destroy and recreate again.
   context_->Shutdown();
   context_ = NULL;
-  MessageLoop::current()->RunAllPending();
+  MessageLoop::current()->RunUntilIdle();
   context_ = new DomStorageContext(temp_dir_.path(),
                                    temp_dir_.path(),
                                    storage_policy_,
@@ -256,7 +256,7 @@ TEST_F(DomStorageContextTest, DeleteSessionStorage) {
   dom_namespace->CloseStorageArea(area);
   context_->Shutdown();
   context_ = NULL;
-  MessageLoop::current()->RunAllPending();
+  MessageLoop::current()->RunUntilIdle();
 }
 
 }  // namespace dom_storage

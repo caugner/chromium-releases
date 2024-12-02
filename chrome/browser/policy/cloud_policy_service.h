@@ -11,6 +11,7 @@
 #include "base/basictypes.h"
 #include "base/callback_forward.h"
 #include "base/compiler_specific.h"
+#include "base/observer_list.h"
 #include "chrome/browser/policy/cloud_policy_client.h"
 #include "chrome/browser/policy/cloud_policy_constants.h"
 #include "chrome/browser/policy/cloud_policy_store.h"
@@ -23,6 +24,19 @@ namespace policy {
 class CloudPolicyService : public CloudPolicyClient::Observer,
                            public CloudPolicyStore::Observer {
  public:
+  // Callback invoked once the policy refresh attempt has completed. Passed
+  // bool parameter is true if the refresh was successful (no error).
+  typedef base::Callback<void(bool)> RefreshPolicyCallback;
+
+  class Observer {
+   public:
+    // Invoked when CloudPolicyService has finished initializing (any initial
+    // policy load activity has completed and the CloudPolicyClient has
+    // been registered, if possible).
+    virtual void OnInitializationCompleted(CloudPolicyService* service) = 0;
+    virtual ~Observer() {}
+  };
+
   // |client| and |store| must remain valid for the object life time.
   CloudPolicyService(CloudPolicyClient* client, CloudPolicyStore* store);
   virtual ~CloudPolicyService();
@@ -33,7 +47,11 @@ class CloudPolicyService : public CloudPolicyClient::Observer,
 
   // Refreshes policy. |callback| will be invoked after the operation completes
   // or aborts because of errors.
-  void RefreshPolicy(const base::Closure& callback);
+  void RefreshPolicy(const RefreshPolicyCallback& callback);
+
+  // Adds/Removes an Observer for this object.
+  void AddObserver(Observer* observer);
+  void RemoveObserver(Observer* observer);
 
   // CloudPolicyClient::Observer:
   virtual void OnPolicyFetched(CloudPolicyClient* client) OVERRIDE;
@@ -44,9 +62,16 @@ class CloudPolicyService : public CloudPolicyClient::Observer,
   virtual void OnStoreLoaded(CloudPolicyStore* store) OVERRIDE;
   virtual void OnStoreError(CloudPolicyStore* store) OVERRIDE;
 
+  bool IsInitializationComplete() const { return initialization_complete_; }
+
  private:
-  // Invokes the refresh callbacks and clears refresh state.
-  void RefreshCompleted();
+  // Helper function that is called when initialization may be complete, and
+  // which is responsible for notifying observers.
+  void CheckInitializationCompleted();
+
+  // Invokes the refresh callbacks and clears refresh state. The |success| flag
+  // is passed through to the refresh callbacks.
+  void RefreshCompleted(bool success);
 
   // The client used to talk to the cloud.
   CloudPolicyClient* client_;
@@ -65,7 +90,15 @@ class CloudPolicyService : public CloudPolicyClient::Observer,
   } refresh_state_;
 
   // Callbacks to invoke upon policy refresh.
-  std::vector<base::Closure> refresh_callbacks_;
+  std::vector<RefreshPolicyCallback> refresh_callbacks_;
+
+  // Set to true once the service is initialized (initial policy load/refresh
+  // is complete).
+  bool initialization_complete_;
+
+  // Observers who will receive notifications when the service has finished
+  // initializing.
+  ObserverList<Observer, true> observers_;
 
   DISALLOW_COPY_AND_ASSIGN(CloudPolicyService);
 };

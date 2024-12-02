@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,6 +17,12 @@ enum InstantCommitType {
   // The commit is due to the omnibox losing focus, usually due to the user
   // clicking on the preview.
   INSTANT_COMMIT_FOCUS_LOST,
+
+  // The commit is due to the instant page navigating.
+  INSTANT_COMMIT_NAVIGATED,
+
+  // The commit is due to the user clicking on a query suggestion.
+  INSTANT_COMMIT_CLICKED_QUERY_SUGGESTION,
 };
 
 #endif  // CHROME_BROWSER_INSTANT_INSTANT_COMMIT_TYPE_H_

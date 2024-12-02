@@ -97,6 +97,12 @@ bool SetPersonalDataManagerFirstRunPref();
 // Log a metric for the "FirstRun.SearchEngineBubble" histogram.
 void LogFirstRunMetric(FirstRunBubbleMetric metric);
 
+// Allow a test to specify additional arguments for the profile import process.
+void SetExtraArgumentsForImportProcess(const CommandLine& arguments);
+
+// Get any extra arguments set with SetExtraArgumentsForImportProcess.
+const CommandLine& GetExtraArgumentsForImportProcess();
+
 // -- Platform-specific functions --
 
 // Automatically import history and home page (and search engine, if
@@ -116,6 +122,9 @@ int ImportNow(Profile* profile, const CommandLine& cmdline);
 
 // Returns the path for the master preferences file.
 FilePath MasterPrefsPath();
+
+// Set a master preferences file path that overrides platform defaults.
+void SetMasterPrefsPathForTesting(const FilePath& master_prefs);
 
 // The master preferences is a JSON file with the same entries as the
 // 'Default\Preferences' file. This function locates this file from a standard

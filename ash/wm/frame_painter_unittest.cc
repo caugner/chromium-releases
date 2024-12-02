@@ -24,6 +24,7 @@
 
 using views::Widget;
 using views::ImageButton;
+using views::ToggleImageButton;
 
 namespace {
 
@@ -127,6 +128,37 @@ TEST_F(FramePainterTest, Basics) {
   EXPECT_EQ(0u, FramePainter::instances_->size());
 }
 
+// Ensure that the immersive button is created and visible when it should be.
+TEST_F(FramePainterTest, ImmersiveButton) {
+  scoped_ptr<Widget> widget(CreateTestWidget());
+  views::NonClientFrameView* frame = widget->non_client_view()->frame_view();
+  FramePainter painter;
+  ImageButton size(NULL);
+  ImageButton close(NULL);
+  painter.Init(
+      widget.get(), NULL, &size, &close, FramePainter::SIZE_BUTTON_MAXIMIZES);
+
+  // No immersive button by default.
+  EXPECT_EQ(NULL, painter.immersive_button_);
+
+  // Add an immersive button.
+  ToggleImageButton immersive(NULL);
+  painter.AddImmersiveButton(&immersive);
+
+  // Immersive button starts invisible.
+  widget->Show();
+  EXPECT_FALSE(immersive.visible());
+
+  // Maximizing the window makes it visible.
+  widget->Maximize();
+  EXPECT_TRUE(immersive.visible());
+
+  // A point in the button is treated as client area, so button can be clicked.
+  painter.LayoutHeader(frame, false);
+  gfx::Point point = immersive.bounds().CenterPoint();
+  EXPECT_EQ(HTCLIENT, painter.NonClientHitTest(frame, point));
+}
+
 TEST_F(FramePainterTest, CreateAndDeleteSingleWindow) {
   // Ensure that creating/deleting a window works well and doesn't cause
   // crashes.  See crbug.com/155634
@@ -194,7 +226,20 @@ TEST_F(FramePainterTest, UseSoloWindowHeader) {
   EXPECT_FALSE(p1.UseSoloWindowHeader());
   EXPECT_FALSE(p2.UseSoloWindowHeader());
 
-  // Minimize the window.  Solo should be enabled.
+  // Maximize the window, then activate the first window. The second window
+  // is in its own workspace, so solo should be active for the first one.
+  w2->Maximize();
+  w1->Activate();
+  EXPECT_TRUE(p1.UseSoloWindowHeader());
+  EXPECT_FALSE(p2.UseSoloWindowHeader());
+
+  // Switch to the second window and restore it.  Solo should be disabled.
+  w2->Activate();
+  w2->Restore();
+  EXPECT_FALSE(p1.UseSoloWindowHeader());
+  EXPECT_FALSE(p2.UseSoloWindowHeader());
+
+  // Minimize the second window.  Solo should be enabled.
   w2->Minimize();
   EXPECT_TRUE(p1.UseSoloWindowHeader());
 

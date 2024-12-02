@@ -24,7 +24,6 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
@@ -181,7 +180,7 @@ IN_PROC_BROWSER_TEST_F(SessionRestoreTest, NoSessionRestoreNewWindowChromeOS) {
   ui_test_utils::NavigateToURL(browser(), url);
 
   Browser* incognito_browser = CreateIncognitoBrowser();
-  chrome::AddBlankTab(incognito_browser, true);
+  chrome::AddBlankTabAt(incognito_browser, -1, true);
   incognito_browser->window()->Show();
 
   // Close the normal browser. After this we only have the incognito window
@@ -374,7 +373,7 @@ IN_PROC_BROWSER_TEST_F(SessionRestoreTest, IncognitotoNonIncognito) {
 
   // Create a new incognito window.
   Browser* incognito_browser = CreateIncognitoBrowser();
-  chrome::AddBlankTab(incognito_browser, true);
+  chrome::AddBlankTabAt(incognito_browser, -1, true);
   incognito_browser->window()->Show();
 
   // Close the normal browser. After this we only have the incognito window
@@ -653,23 +652,6 @@ IN_PROC_BROWSER_TEST_F(SessionRestoreTest, ClosedTabStaysClosed) {
   ASSERT_EQ(url1_, chrome::GetActiveWebContents(new_browser)->GetURL());
 }
 
-// Test to verify that the print preview tab is not restored.
-IN_PROC_BROWSER_TEST_F(SessionRestoreTest, DontRestorePrintPreviewTabTest) {
-  ui_test_utils::NavigateToURL(browser(), url1_);
-
-  // Append the print preview tab.
-  ui_test_utils::NavigateToURLWithDisposition(
-      browser(), GURL(chrome::kChromeUIPrintURL), NEW_FOREGROUND_TAB,
-      ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
-
-  // Restart and make sure we have only one window with one tab and the url
-  // is url1_.
-  Browser* new_browser = QuitBrowserAndRestore(browser(), 1);
-
-  AssertOneWindowWithOneTab(new_browser);
-  ASSERT_EQ(url1_, chrome::GetActiveWebContents(new_browser)->GetURL());
-}
-
 // Creates a tabbed browser and popup and makes sure we restore both.
 IN_PROC_BROWSER_TEST_F(SessionRestoreTest, NormalAndPopup) {
   if (!browser_defaults::kRestorePopups)
@@ -895,7 +877,7 @@ IN_PROC_BROWSER_TEST_F(SessionRestoreTest, SessionStorage) {
 }
 
 IN_PROC_BROWSER_TEST_F(SessionRestoreTest, SessionStorageAfterTabReplace) {
-  // Simulate what prerendering does: create a new TabContents with the same
+  // Simulate what prerendering does: create a new WebContents with the same
   // SessionStorageNamespace as an existing tab, then replace the tab with it.
   {
     content::NavigationController* controller =
@@ -907,19 +889,16 @@ IN_PROC_BROWSER_TEST_F(SessionRestoreTest, SessionStorageAfterTabReplace) {
         controller->GetDefaultSessionStorageNamespace();
     scoped_ptr<content::WebContents> web_contents(
         content::WebContents::CreateWithSessionStorage(
-            browser()->profile(), NULL, MSG_ROUTING_NONE, NULL,
+            content::WebContents::CreateParams(browser()->profile()),
             session_storage_namespace_map));
 
     TabStripModel* tab_strip_model = browser()->tab_strip_model();
-    // We only need to create a TabContents because ReplaceTabContentsAt wants
-    // one. We don't need any of the helpers TabContents provides.
-    scoped_ptr<TabContents> old_tab_contents(
-        tab_strip_model->ReplaceTabContentsAt(
-            tab_strip_model->active_index(),
-            TabContents::Factory::CreateTabContents(web_contents.release())));
+    scoped_ptr<content::WebContents> old_web_contents(
+        tab_strip_model->ReplaceWebContentsAt(
+            tab_strip_model->active_index(), web_contents.release()));
     // Navigate with the new tab.
     ui_test_utils::NavigateToURL(browser(), url2_);
-    // old_tab_contents goes out of scope.
+    // old_web_contents goes out of scope.
   }
 
   // Check that the sessionStorage data is going to be persisted.

@@ -65,9 +65,12 @@
 // call it with the appropriate |maxY| which depends on whether or not the
 // bookmark bar is shown as the NTP bubble or not (use
 // |-placeBookmarkBarBelowInfoBar|).
-- (CGFloat)layoutBookmarkBarAtMinX:(CGFloat)minX
-                              maxY:(CGFloat)maxY
-                             width:(CGFloat)width;
+- (CGFloat)layoutTopBookmarkBarAtMinX:(CGFloat)minX
+                                 maxY:(CGFloat)maxY
+                                width:(CGFloat)width;
+
+// Lays out the bookmark at the bottom of the content area.
+- (void)layoutBottomBookmarkBarInContentFrame:(NSRect)contentFrame;
 
 // Lay out the view which draws the background for the floating bar when in
 // presentation mode, with the given frame and presentation-mode-status. Should
@@ -91,13 +94,6 @@
 // Lays out the tab content area in the given frame. If the height changes,
 // sends a message to the renderer to resize.
 - (void)layoutTabContentArea:(NSRect)frame;
-
-// Should we show the normal bookmark bar?
-- (BOOL)shouldShowBookmarkBar;
-
-// Is the current page one for which the bookmark should be shown detached *if*
-// the normal bookmark bar is not shown?
-- (BOOL)shouldShowDetachedBookmarkBar;
 
 // Sets the toolbar's height to a value appropriate for the given compression.
 // Also adjusts the bookmark bar's height by the opposite amount in order to

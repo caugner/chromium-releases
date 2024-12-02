@@ -10,6 +10,7 @@
 #include "base/logging.h"
 #include "base/string_number_conversions.h"
 #include "base/values.h"
+#include "chrome/browser/extensions/api/push_messaging/push_messaging_api_factory.h"
 #include "chrome/browser/extensions/api/push_messaging/push_messaging_invalidation_handler.h"
 #include "chrome/browser/extensions/event_names.h"
 #include "chrome/browser/extensions/event_router.h"
@@ -46,11 +47,6 @@ namespace glue = api::push_messaging;
 
 PushMessagingEventRouter::PushMessagingEventRouter(Profile* profile)
     : profile_(profile) {
-}
-
-PushMessagingEventRouter::~PushMessagingEventRouter() {}
-
-void PushMessagingEventRouter::Init() {
   ProfileSyncService* pss = ProfileSyncServiceFactory::GetForProfile(profile_);
   // This may be NULL; for example, for the ChromeOS guest user. In these cases,
   // just return without setting up anything, since it won't work anyway.
@@ -78,14 +74,7 @@ void PushMessagingEventRouter::Init() {
                  content::Source<Profile>(profile_->GetOriginalProfile()));
 }
 
-void PushMessagingEventRouter::Shutdown() {
-  // We need an explicit Shutdown() due to the dependencies among the various
-  // ProfileKeyedServices. ProfileSyncService depends on ExtensionSystem, so
-  // it is destroyed before us in the destruction phase of Profile shutdown.
-  // As a result, we need to drop any references to it in the Shutdown() phase
-  // instead.
-  handler_.reset();
-}
+PushMessagingEventRouter::~PushMessagingEventRouter() {}
 
 void PushMessagingEventRouter::SetMapperForTest(
     scoped_ptr<PushMessagingInvalidationMapper> mapper) {
@@ -107,12 +96,11 @@ void PushMessagingEventRouter::OnMessage(const std::string& extension_id,
   message.payload = payload;
 
   scoped_ptr<base::ListValue> args(glue::OnMessage::Create(message));
+  scoped_ptr<extensions::Event> event(new extensions::Event(
+      event_names::kOnPushMessage, args.Pass()));
+  event->restrict_to_profile = profile_;
   ExtensionSystem::Get(profile_)->event_router()->DispatchEventToExtension(
-      extension_id,
-      event_names::kOnPushMessage,
-      args.Pass(),
-      profile_,
-      GURL());
+      extension_id, event.Pass());
 }
 
 void PushMessagingEventRouter::Observe(
@@ -291,6 +279,26 @@ void PushMessagingGetChannelIdFunction::OnObfuscatedGaiaIdFetchFailure(
   }
 
   ReportResult(std::string(), error_text);
+}
+
+PushMessagingAPI::PushMessagingAPI(Profile* profile)
+    : push_messaging_event_router_(new PushMessagingEventRouter(profile)) {
+}
+
+PushMessagingAPI::~PushMessagingAPI() {
+}
+
+// static
+PushMessagingAPI* PushMessagingAPI::Get(Profile* profile) {
+  return PushMessagingAPIFactory::GetForProfile(profile);
+}
+
+void PushMessagingAPI::Shutdown() {
+  push_messaging_event_router_.reset();
+}
+
+PushMessagingEventRouter* PushMessagingAPI::GetEventRouterForTest() {
+  return push_messaging_event_router_.get();
 }
 
 }  // namespace extensions

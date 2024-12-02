@@ -46,6 +46,9 @@ typedef base::Callback<void(
     DownloadDangerType danger_type,
     const FilePath& intermediate_path)> DownloadTargetCallback;
 
+// Called when a download delayed by the delegate has completed.
+typedef base::Callback<void(bool)> DownloadOpenDelayedCallback;
+
 // Browser's download manager: manages all downloads and destination view.
 class CONTENT_EXPORT DownloadManagerDelegate {
  public:
@@ -82,47 +85,22 @@ class CONTENT_EXPORT DownloadManagerDelegate {
   // Allows the delegate to delay completion of the download.  This function
   // will either return true (in which case the download may complete)
   // or will call the callback passed when the download is ready for
-  // completion.  This routine should only be called once per download.
+  // completion.  This routine may be called multiple times; once it has
+  // returned true for a particular download it should continue to return
+  // true for that download.
   virtual bool ShouldCompleteDownload(
       DownloadItem* item,
       const base::Closure& complete_callback);
 
   // Allows the delegate to override opening the download. If this function
-  // returns false, the delegate needs to call
-  // DownloadItem::DelayedDownloadOpened when it's done with the item,
-  // and is responsible for opening it.  This function is called
+  // returns false, the delegate needs to call callback when it's done
+  // with the item, and is responsible for opening it.  This function is called
   // after the final rename, but before the download state is set to COMPLETED.
-  virtual bool ShouldOpenDownload(DownloadItem* item);
+  virtual bool ShouldOpenDownload(DownloadItem* item,
+                                  const DownloadOpenDelayedCallback& callback);
 
   // Returns true if we need to generate a binary hash for downloads.
   virtual bool GenerateFileHash();
-
-  // Notifies the delegate that a new download item is created. The
-  // DownloadManager waits for the delegate to add information about this
-  // download to its persistent store. When the delegate is done, it calls
-  // DownloadManager::OnDownloadItemAddedToPersistentStore.
-  virtual void AddItemToPersistentStore(DownloadItem* item) {}
-
-  // Notifies the delegate that information about the given download has change,
-  // so that it can update its persistent store.
-  // Does not update |url|, |start_time|, |total_bytes|; uses |db_handle| only
-  // to select the row in the database table to update.
-  virtual void UpdateItemInPersistentStore(DownloadItem* item) {}
-
-  // Notifies the delegate that path for the download item has changed, so that
-  // it can update its persistent store.
-  virtual void UpdatePathForItemInPersistentStore(
-      DownloadItem* item,
-      const FilePath& new_path) {}
-
-  // Notifies the delegate that it should remove the download item from its
-  // persistent store.
-  virtual void RemoveItemFromPersistentStore(DownloadItem* item) {}
-
-  // Notifies the delegate to remove downloads from the given time range.
-  virtual void RemoveItemsFromPersistentStoreBetween(
-      base::Time remove_begin,
-      base::Time remove_end) {}
 
   // Retrieve the directories to save html pages and downloads to.
   virtual void GetSaveDir(BrowserContext* browser_context,

@@ -46,30 +46,19 @@ MockDecryptor::~MockDecryptor() {}
 
 void MockDecryptor::InitializeAudioDecoder(
     scoped_ptr<AudioDecoderConfig> config,
-    const DecoderInitCB& init_cb,
-    const KeyAddedCB& key_added_cb) {
-  InitializeAudioDecoderMock(*config, init_cb, key_added_cb);
+    const DecoderInitCB& init_cb) {
+  InitializeAudioDecoderMock(*config, init_cb);
 }
 
 void MockDecryptor::InitializeVideoDecoder(
     scoped_ptr<VideoDecoderConfig> config,
-    const DecoderInitCB& init_cb,
-    const KeyAddedCB& key_added_cb) {
-  InitializeVideoDecoderMock(*config, init_cb, key_added_cb);
+    const DecoderInitCB& init_cb) {
+  InitializeVideoDecoderMock(*config, init_cb);
 }
 
 MockDecryptorClient::MockDecryptorClient() {}
 
 MockDecryptorClient::~MockDecryptorClient() {}
-
-void MockDecryptorClient::KeyMessage(const std::string& key_system,
-                                     const std::string& session_id,
-                                     scoped_array<uint8> message,
-                                     int message_length,
-                                     const std::string& default_url) {
-  KeyMessageMock(key_system, session_id, message.get(), message_length,
-                 default_url);
-}
 
 void MockDecryptorClient::NeedKey(const std::string& key_system,
                                   const std::string& session_id,

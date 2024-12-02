@@ -106,13 +106,13 @@ TabRestoreServiceDelegate* TabRestoreServiceDelegate::Create(
 TabRestoreServiceDelegate*
     TabRestoreServiceDelegate::FindDelegateForWebContents(
         const WebContents* contents) {
-  Browser* browser = browser::FindBrowserWithWebContents(contents);
+  Browser* browser = chrome::FindBrowserWithWebContents(contents);
   return browser ? browser->tab_restore_service_delegate() : NULL;
 }
 
 // static
 TabRestoreServiceDelegate* TabRestoreServiceDelegate::FindDelegateWithID(
     SessionID::id_type desired_id) {
-  Browser* browser = browser::FindBrowserWithID(desired_id);
+  Browser* browser = chrome::FindBrowserWithID(desired_id);
   return browser ? browser->tab_restore_service_delegate() : NULL;
 }

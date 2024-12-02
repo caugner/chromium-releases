@@ -13,7 +13,7 @@
 #include <shlwapi.h>
 #include "base/win/registry.h"
 #include "rlz/win/lib/rlz_lib.h"
-#elif defined(OS_MACOSX)
+#elif defined(OS_POSIX)
 #include "base/file_path.h"
 #include "rlz/lib/rlz_value_store.h"
 #endif
@@ -59,21 +59,22 @@ void UndoOverrideRegistryHives() {
 }  // namespace
 #endif  // defined(OS_WIN)
 
-
 void RlzLibTestNoMachineState::SetUp() {
 #if defined(OS_WIN)
   OverrideRegistryHives();
 #elif defined(OS_MACOSX)
   base::mac::ScopedNSAutoreleasePool pool;
+#endif  // defined(OS_WIN)
+#if defined(OS_POSIX)
   ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
   rlz_lib::testing::SetRlzStoreDirectory(temp_dir_.path());
-#endif  // defined(OS_WIN)
+#endif  // defined(OS_POSIX)
 }
 
 void RlzLibTestNoMachineState::TearDown() {
 #if defined(OS_WIN)
   UndoOverrideRegistryHives();
-#elif defined(OS_MACOSX)
+#elif defined(OS_POSIX)
   rlz_lib::testing::SetRlzStoreDirectory(FilePath());
 #endif  // defined(OS_WIN)
 }

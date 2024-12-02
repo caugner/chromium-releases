@@ -18,9 +18,9 @@ import android.text.format.Time;
 import android.widget.DatePicker;
 import android.widget.TimePicker;
 
-import org.chromium.content.app.AppResource;
 import org.chromium.content.browser.DateTimePickerDialog.OnDateTimeSetListener;
 import org.chromium.content.browser.MonthPickerDialog.OnMonthSetListener;
+import org.chromium.content.R;
 
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
@@ -29,8 +29,8 @@ import java.util.Date;
 class InputDialogContainer {
 
     interface InputActionDelegate {
-        void clearFocus();
-        void replaceText(String text);
+        void cancelDateTimeDialog();
+        void replaceDateTime(String dateTime);
     }
 
     // Default values used in Time representations of selected date/time before formatting.
@@ -64,7 +64,10 @@ class InputDialogContainer {
     private static int sTextInputTypeTime;
 
     private Context mContext;
-    private boolean mDialogCanceled;
+
+    // Prevents sending two notifications (from onClick and from onDismiss)
+    private boolean mDialogAlreadyDismissed;
+
     private AlertDialog mDialog;
     private InputActionDelegate mInputActionDelegate;
 
@@ -109,11 +112,8 @@ class InputDialogContainer {
                     time.year, time.month);
         }
 
-        assert AppResource.STRING_DATE_PICKER_DIALOG_SET != 0;
-        assert AppResource.STRING_DATE_PICKER_DIALOG_CLEAR != 0;
-
         mDialog.setButton(DialogInterface.BUTTON_POSITIVE,
-                mContext.getText(AppResource.STRING_DATE_PICKER_DIALOG_SET),
+                mContext.getText(R.string.date_picker_dialog_set),
                 (DialogInterface.OnClickListener) mDialog);
 
         mDialog.setButton(DialogInterface.BUTTON_NEGATIVE,
@@ -121,27 +121,22 @@ class InputDialogContainer {
                 new DialogInterface.OnClickListener() {
                     @Override
                     public void onClick(DialogInterface dialog, int which) {
-                        mDialogCanceled = true;
+                        mDialogAlreadyDismissed = true;
+                        mInputActionDelegate.cancelDateTimeDialog();
                     }
                 });
 
         mDialog.setButton(DialogInterface.BUTTON_NEUTRAL,
-                mContext.getText(AppResource.STRING_DATE_PICKER_DIALOG_CLEAR),
+                mContext.getText(R.string.date_picker_dialog_clear),
                 new DialogInterface.OnClickListener() {
                     @Override
                     public void onClick(DialogInterface dialog, int which) {
-                        mDialogCanceled = true;
-                        mInputActionDelegate.replaceText("");
+                        mDialogAlreadyDismissed = true;
+                        mInputActionDelegate.replaceDateTime("");
                     }
                 });
 
-        mDialog.setOnDismissListener(new OnDismissListener() {
-                    @Override
-                    public void onDismiss(DialogInterface dialog) {
-                        mInputActionDelegate.clearFocus();
-                    }
-                });
-        mDialogCanceled = false;
+        mDialogAlreadyDismissed = false;
         mDialog.show();
     }
 
@@ -203,7 +198,7 @@ class InputDialogContainer {
     private class DateListener implements OnDateSetListener {
         @Override
         public void onDateSet(DatePicker view, int year, int month, int monthDay) {
-            if (!mDialogCanceled) {
+            if (!mDialogAlreadyDismissed) {
                 setFieldDateTimeValue(year, month, monthDay, HOUR_DEFAULT, MINUTE_DEFAULT,
                         HTML_DATE_FORMAT);
             }
@@ -213,7 +208,7 @@ class InputDialogContainer {
     private class TimeListener implements OnTimeSetListener {
         @Override
         public void onTimeSet(TimePicker view, int hourOfDay, int minute) {
-            if (!mDialogCanceled) {
+            if (!mDialogAlreadyDismissed) {
                 setFieldDateTimeValue(YEAR_DEFAULT, MONTH_DEFAULT, MONTHDAY_DEFAULT,
                         hourOfDay, minute, HTML_TIME_FORMAT);
             }
@@ -231,7 +226,7 @@ class InputDialogContainer {
         public void onDateTimeSet(DatePicker dateView, TimePicker timeView,
                 int year, int month, int monthDay,
                 int hourOfDay, int minute) {
-            if (!mDialogCanceled) {
+            if (!mDialogAlreadyDismissed) {
                 setFieldDateTimeValue(year, month, monthDay, hourOfDay, minute,
                         mLocal ? HTML_DATE_TIME_LOCAL_FORMAT : HTML_DATE_TIME_FORMAT);
             }
@@ -241,7 +236,7 @@ class InputDialogContainer {
     private class MonthListener implements OnMonthSetListener {
         @Override
         public void onMonthSet(MonthPicker view, int year, int month) {
-            if (!mDialogCanceled) {
+            if (!mDialogAlreadyDismissed) {
                 setFieldDateTimeValue(year, month, MONTHDAY_DEFAULT,
                         HOUR_DEFAULT, MINUTE_DEFAULT, HTML_MONTH_FORMAT);
             }
@@ -250,12 +245,16 @@ class InputDialogContainer {
 
     private void setFieldDateTimeValue(int year, int month, int monthDay, int hourOfDay,
             int minute, String dateFormat) {
+        // Prevents more than one callback being sent to the native
+        // side when the dialog triggers multiple events.
+        mDialogAlreadyDismissed = true;
+
         Time time = new Time();
         time.year = year;
         time.month = month;
         time.monthDay = monthDay;
         time.hour = hourOfDay;
         time.minute = minute;
-        mInputActionDelegate.replaceText(time.format(dateFormat));
+        mInputActionDelegate.replaceDateTime(time.format(dateFormat));
     }
 }

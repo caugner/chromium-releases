@@ -30,11 +30,6 @@ class CoreOptionsHandler : public OptionsPageUIHandler {
   virtual void InitializePage() OVERRIDE;
   virtual void Uninitialize() OVERRIDE;
 
-  // content::NotificationObserver implementation.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
-
   // WebUIMessageHandler implementation.
   virtual void RegisterMessages() OVERRIDE;
 
@@ -68,6 +63,13 @@ class CoreOptionsHandler : public OptionsPageUIHandler {
   // Records a user metric action for the given value.
   void ProcessUserMetric(const base::Value* value,
                          const std::string& metric);
+
+  // Virtual dispatch is needed as handling of some prefs may be
+  // finessed in subclasses.  The PrefServiceBase pointer is included
+  // so that subclasses can know whether the observed pref is from the
+  // local state or not.
+  virtual void OnPreferenceChanged(PrefServiceBase* service,
+                                   const std::string& pref_name);
 
   // Notifies registered JS callbacks on change in |pref_name| preference.
   // |controlling_pref_name| controls if |pref_name| is managed by

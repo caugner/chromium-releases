@@ -8,7 +8,9 @@
 #include <string>
 
 #include "base/prefs/public/pref_change_registrar.h"
+#include "chrome/browser/extensions/event_router.h"
 #include "chrome/browser/extensions/extension_function.h"
+#include "chrome/browser/profiles/profile_keyed_service.h"
 #include "content/public/browser/notification_observer.h"
 
 class PrefService;
@@ -19,23 +21,14 @@ class Value;
 
 namespace extensions {
 
-class PreferenceEventRouter : public content::NotificationObserver {
+class PreferenceEventRouter {
  public:
   explicit PreferenceEventRouter(Profile* profile);
   virtual ~PreferenceEventRouter();
 
  private:
-  // content::NotificationObserver implementation.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
-
-  void OnPrefChanged(PrefService* pref_service, const std::string& pref_key);
-
-  // This method dispatches events to the extension message service.
-  void DispatchEvent(const std::string& extension_id,
-                     const std::string& event_name,
-                     const std::string& json_args);
+  void OnPrefChanged(PrefServiceBase* pref_service,
+                     const std::string& pref_key);
 
   PrefChangeRegistrar registrar_;
   PrefChangeRegistrar incognito_registrar_;
@@ -44,6 +37,25 @@ class PreferenceEventRouter : public content::NotificationObserver {
   Profile* profile_;
 
   DISALLOW_COPY_AND_ASSIGN(PreferenceEventRouter);
+};
+
+class PreferenceAPI : public ProfileKeyedService,
+                      public EventRouter::Observer {
+ public:
+  explicit PreferenceAPI(Profile* profile);
+  virtual ~PreferenceAPI();
+
+  // ProfileKeyedService implementation.
+  virtual void Shutdown() OVERRIDE;
+
+  // EventRouter::Observer implementation.
+  virtual void OnListenerAdded(const EventListenerInfo& details) OVERRIDE;
+
+ private:
+  Profile* profile_;
+
+  // Created lazily upon OnListenerAdded.
+  scoped_ptr<PreferenceEventRouter> preference_event_router_;
 };
 
 class PrefTransformerInterface {

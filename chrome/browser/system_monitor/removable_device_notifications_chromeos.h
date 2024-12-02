@@ -20,52 +20,54 @@
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
 #include "base/system_monitor/system_monitor.h"
+#include "chrome/browser/system_monitor/removable_storage_notifications.h"
 #include "chromeos/disks/disk_mount_manager.h"
-
-namespace chromeos {
-// TODO(kmadhusu) This forward declaration is ugly. Fix it.
-class RemovableDeviceNotificationsCros;
-}  // namespace chromeos
-
-namespace chrome {
-
-typedef class chromeos::RemovableDeviceNotificationsCros
-    RemovableDeviceNotifications;
-
-}  // namespace chrome
 
 namespace chromeos {
 
 class RemovableDeviceNotificationsCros
-    : public base::RefCountedThreadSafe<RemovableDeviceNotificationsCros>,
+    : public chrome::RemovableStorageNotifications,
+      public base::RefCountedThreadSafe<RemovableDeviceNotificationsCros>,
       public disks::DiskMountManager::Observer {
  public:
   // Should only be called by browser start up code. Use GetInstance() instead.
   RemovableDeviceNotificationsCros();
 
-  static RemovableDeviceNotificationsCros* GetInstance();
-
-  virtual void DiskChanged(disks::DiskMountManagerEventType event,
+  virtual void OnDiskEvent(disks::DiskMountManager::DiskEvent event,
                            const disks::DiskMountManager::Disk* disk) OVERRIDE;
-  virtual void DeviceChanged(disks::DiskMountManagerEventType event,
+  virtual void OnDeviceEvent(disks::DiskMountManager::DeviceEvent event,
                              const std::string& device_path) OVERRIDE;
-  virtual void MountCompleted(
-      disks::DiskMountManager::MountEvent event_type,
+  virtual void OnMountEvent(
+      disks::DiskMountManager::MountEvent event,
       MountError error_code,
       const disks::DiskMountManager::MountPointInfo& mount_info) OVERRIDE;
+  virtual void OnFormatEvent(disks::DiskMountManager::FormatEvent event,
+                             FormatError error_code,
+                             const std::string& device_path) OVERRIDE;
 
   // Finds the device that contains |path| and populates |device_info|.
   // Returns false if unable to find the device.
-  bool GetDeviceInfoForPath(
+  virtual bool GetDeviceInfoForPath(
       const FilePath& path,
-      base::SystemMonitor::RemovableStorageInfo* device_info) const;
+      base::SystemMonitor::RemovableStorageInfo* device_info) const OVERRIDE;
+
+  // Returns the storage size of the device present at |location|. If the
+  // device information is unavailable, returns zero.
+  virtual uint64 GetStorageSize(const std::string& location) const OVERRIDE;
 
  private:
+  struct StorageObjectInfo {
+    // Basic details {storage device name, location and identifier}.
+    base::SystemMonitor::RemovableStorageInfo storage_info;
+
+    // Device storage size.
+    uint64 storage_size_in_bytes;
+  };
+
   friend class base::RefCountedThreadSafe<RemovableDeviceNotificationsCros>;
 
   // Mapping of mount path to removable mass storage info.
-  typedef std::map<std::string, base::SystemMonitor::RemovableStorageInfo>
-      MountMap;
+  typedef std::map<std::string, StorageObjectInfo> MountMap;
 
   // Private to avoid code deleting the object.
   virtual ~RemovableDeviceNotificationsCros();

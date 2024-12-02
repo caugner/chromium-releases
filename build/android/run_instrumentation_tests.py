@@ -37,7 +37,7 @@ def SummarizeResults(java_results, python_results, annotation, build_type):
   """
   all_results = TestResults.FromTestResults([java_results, python_results])
   summary_string = all_results.LogFull('Instrumentation', annotation,
-                                       build_type)
+                                       build_type, [])
   num_failing = (len(all_results.failed) + len(all_results.crashed) +
                  len(all_results.unknown))
   return all_results, summary_string, num_failing
@@ -96,8 +96,11 @@ def main(argv):
   buildbot_report.PrintNamedStep(
       'Instrumentation tests: %s - %s' % (', '.join(options.annotation),
                                           options.test_apk))
-  ret = DispatchInstrumentationTests(options)
-  buildbot_report.PrintStepResultIfNeeded(options, ret)
+  ret = 1
+  try:
+    ret = DispatchInstrumentationTests(options)
+  finally:
+    buildbot_report.PrintStepResultIfNeeded(options, ret)
   return ret
 
 

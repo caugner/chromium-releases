@@ -120,9 +120,9 @@ IN_PROC_BROWSER_TEST_F(AutocompleteBrowserTest, MAYBE_Autocomplete) {
   AutocompleteController* autocomplete_controller = GetAutocompleteController();
 
   {
-    autocomplete_controller->Start(
-        ASCIIToUTF16("chrome"), string16(), true, false, true,
-        AutocompleteInput::SYNCHRONOUS_MATCHES);
+    autocomplete_controller->Start(AutocompleteInput(
+        ASCIIToUTF16("chrome"), string16::npos, string16(), true, false, true,
+        AutocompleteInput::SYNCHRONOUS_MATCHES));
 
     OmniboxView* location_entry = location_bar->GetLocationEntry();
 
@@ -257,64 +257,5 @@ IN_PROC_BROWSER_TEST_F(AutocompleteBrowserTest, FocusSearch) {
     location_entry->GetSelectionBounds(&selection_start, &selection_end);
     EXPECT_EQ(4U, std::min(selection_start, selection_end));
     EXPECT_EQ(7U, std::max(selection_start, selection_end));
-  }
-}
-
-IN_PROC_BROWSER_TEST_F(AutocompleteBrowserTest, ExtensionAppProvider) {
-  WaitForTemplateURLServiceToLoad();
-  ExtensionService* service = browser()->profile()->GetExtensionService();
-  size_t extension_count = service->extensions()->size();
-
-  FilePath test_dir;
-  ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &test_dir));
-  // Load a packaged app.
-  extensions::UnpackedInstaller::Create(service)->Load(
-      test_dir.AppendASCII("extensions").AppendASCII("packaged_app"));
-  WaitForExtensionLoad();
-  // Load a hosted app.
-  extensions::UnpackedInstaller::Create(service)->Load(
-      test_dir.AppendASCII("extensions").AppendASCII("app"));
-  WaitForExtensionLoad();
-  ASSERT_EQ(extension_count + 2U, service->extensions()->size());
-
-  // The results depend on the history backend being loaded. Make sure it is
-  // loaded so that the autocomplete results are consistent.
-  ui_test_utils::WaitForHistoryToLoad(
-      HistoryServiceFactory::GetForProfile(browser()->profile(),
-                                           Profile::EXPLICIT_ACCESS));
-
-  AutocompleteController* autocomplete_controller = GetAutocompleteController();
-
-  // Try out the packaged app.
-  {
-    autocomplete_controller->Start(
-        ASCIIToUTF16("Packaged App Test"), string16(), true, false, true,
-        AutocompleteInput::SYNCHRONOUS_MATCHES);
-
-    EXPECT_TRUE(autocomplete_controller->done());
-    const AutocompleteResult& result = autocomplete_controller->result();
-    EXPECT_GT(result.size(), 1U) << AutocompleteResultAsString(result);
-    AutocompleteMatch match = result.match_at(0);
-    EXPECT_EQ(ASCIIToUTF16("Packaged App Test"), match.contents);
-    EXPECT_EQ(AutocompleteMatch::EXTENSION_APP, match.type);
-    EXPECT_FALSE(match.deletable);
-  }
-
-  chrome::NewTab(browser());
-
-  // Try out the hosted app.
-  {
-    autocomplete_controller->Start(
-        ASCIIToUTF16("App Test"), string16(), true, false, true,
-        AutocompleteInput::SYNCHRONOUS_MATCHES);
-
-    EXPECT_TRUE(autocomplete_controller->done());
-    const AutocompleteResult& result = autocomplete_controller->result();
-    // 'App test' is also a substring of extension 'Packaged App Test'.
-    EXPECT_GT(result.size(), 2U) << AutocompleteResultAsString(result);
-    AutocompleteMatch match = result.match_at(0);
-    EXPECT_EQ(ASCIIToUTF16("App Test"), match.contents);
-    EXPECT_EQ(AutocompleteMatch::EXTENSION_APP, match.type);
-    EXPECT_FALSE(match.deletable);
   }
 }

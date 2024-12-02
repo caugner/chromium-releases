@@ -173,9 +173,12 @@ void MemoryDetails::CollectChildInfoOnIOThread() {
 
   std::vector<ProcessMemoryInformation> child_info;
 
-  // Collect the list of child processes.
+  // Collect the list of child processes. A 0 |handle| means that
+  // the process is being launched, so we skip it.
   for (BrowserChildProcessHostIterator iter; !iter.Done(); ++iter) {
     ProcessMemoryInformation info;
+    if (!iter.GetData().handle)
+      continue;
     info.pid = base::GetProcId(iter.GetData().handle);
     if (!info.pid)
       continue;
@@ -456,6 +459,13 @@ void MemoryDetails::UpdateHistograms() {
   }
   UMA_HISTOGRAM_MEMORY_KB("Memory.BackingStore",
                           RenderWidgetHost::BackingStoreMemorySize() / 1024);
+#if defined(OS_CHROMEOS)
+  // Chrome OS exposes system-wide graphics driver memory which has historically
+  // been a source of leak/bloat.
+  base::SystemMemoryInfoKB meminfo;
+  if (base::GetSystemMemoryInfo(&meminfo) && meminfo.gem_size != -1)
+    UMA_HISTOGRAM_MEMORY_MB("Memory.Graphics", meminfo.gem_size / 1024 / 1024);
+#endif
 
   UMA_HISTOGRAM_COUNTS_100("Memory.ProcessCount",
       static_cast<int>(browser.processes.size()));

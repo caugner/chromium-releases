@@ -2,83 +2,92 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "config.h"
-
 #include "cc/software_renderer.h"
 
+#include "cc/compositor_frame_metadata.h"
 #include "cc/quad_sink.h"
 #include "cc/render_pass.h"
 #include "cc/render_pass_draw_quad.h"
-#include "cc/settings.h"
-#include "cc/single_thread_proxy.h" // For DebugScopedSetImplThread
 #include "cc/solid_color_draw_quad.h"
 #include "cc/test/animation_test_common.h"
-#include "cc/test/fake_web_compositor_output_surface.h"
-#include "cc/test/fake_web_compositor_software_output_device.h"
+#include "cc/test/fake_output_surface.h"
+#include "cc/test/fake_software_output_device.h"
 #include "cc/test/geometry_test_utils.h"
 #include "cc/test/render_pass_test_common.h"
-#include "cc/test/test_common.h"
+#include "cc/test/render_pass_test_utils.h"
 #include "cc/tile_draw_quad.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-using namespace cc;
 using namespace WebKit;
-using namespace WebKitTests;
 
+namespace cc {
 namespace {
 
 class SoftwareRendererTest : public testing::Test, public RendererClient {
 public:
+    SoftwareRendererTest()
+        : m_shouldClearRootRenderPass(true)
+    {
+    }
+
     void initializeRenderer() {
-        m_outputSurface = FakeWebCompositorOutputSurface::createSoftware(scoped_ptr<WebKit::WebCompositorSoftwareOutputDevice>(new FakeWebCompositorSoftwareOutputDevice));
+        m_outputSurface = FakeOutputSurface::CreateSoftware(scoped_ptr<SoftwareOutputDevice>(new FakeSoftwareOutputDevice));
         m_resourceProvider = ResourceProvider::create(m_outputSurface.get());
         m_renderer = SoftwareRenderer::create(this, resourceProvider(), softwareDevice());
     }
 
-    WebCompositorSoftwareOutputDevice* softwareDevice() const { return m_outputSurface->softwareDevice(); }
-    FakeWebCompositorOutputSurface* outputSurface() const { return m_outputSurface.get(); }
+    SoftwareOutputDevice* softwareDevice() const { return m_outputSurface->SoftwareDevice(); }
+    FakeOutputSurface* outputSurface() const { return m_outputSurface.get(); }
     ResourceProvider* resourceProvider() const { return m_resourceProvider.get(); }
     SoftwareRenderer* renderer() const { return m_renderer.get(); }
-    void setViewportSize(IntSize viewportSize) { m_viewportSize = viewportSize; }
+    void setViewportSize(const gfx::Size& viewportSize) { m_viewportSize = viewportSize; }
+    void setShouldClearRootRenderPass(bool clearRootRenderPass) { m_shouldClearRootRenderPass = clearRootRenderPass; }
 
     // RendererClient implementation.
-    virtual const IntSize& deviceViewportSize() const OVERRIDE { return m_viewportSize; }
+    virtual const gfx::Size& deviceViewportSize() const OVERRIDE { return m_viewportSize; }
     virtual const LayerTreeSettings& settings() const OVERRIDE { return m_settings; }
-    virtual void didLoseContext() OVERRIDE { }
+    virtual void didLoseOutputSurface() OVERRIDE { }
     virtual void onSwapBuffersComplete() OVERRIDE { }
     virtual void setFullRootLayerDamage() OVERRIDE { }
     virtual void setManagedMemoryPolicy(const ManagedMemoryPolicy& policy) OVERRIDE { };
     virtual void enforceManagedMemoryPolicy(const ManagedMemoryPolicy& policy) OVERRIDE { };
+    virtual bool hasImplThread() const OVERRIDE { return false; }
+    virtual bool shouldClearRootRenderPass() const OVERRIDE { return m_shouldClearRootRenderPass; }
+    virtual CompositorFrameMetadata makeCompositorFrameMetadata() const
+        OVERRIDE { return CompositorFrameMetadata(); }
 
 protected:
-    DebugScopedSetImplThread m_alwaysImplThread;
-
-    scoped_ptr<FakeWebCompositorOutputSurface> m_outputSurface;
+    scoped_ptr<FakeOutputSurface> m_outputSurface;
     scoped_ptr<ResourceProvider> m_resourceProvider;
     scoped_ptr<SoftwareRenderer> m_renderer;
-    IntSize m_viewportSize;
+    gfx::Size m_viewportSize;
     LayerTreeSettings m_settings;
+    bool m_shouldClearRootRenderPass;
 };
 
 TEST_F(SoftwareRendererTest, solidColorQuad)
 {
-    IntSize outerSize(100, 100);
+    gfx::Size outerSize(100, 100);
     int outerPixels = outerSize.width() * outerSize.height();
-    IntSize innerSize(98, 98);
-    IntRect outerRect(IntPoint(), outerSize);
-    IntRect innerRect(IntPoint(1, 1), innerSize);
+    gfx::Size innerSize(98, 98);
+    gfx::Rect outerRect(gfx::Point(), outerSize);
+    gfx::Rect innerRect(gfx::Point(1, 1), innerSize);
     setViewportSize(outerSize);
 
     initializeRenderer();
 
-    scoped_ptr<SharedQuadState> sharedQuadState = SharedQuadState::create(WebTransformationMatrix(), outerRect, outerRect, 1.0, true);
+    scoped_ptr<SharedQuadState> sharedQuadState = SharedQuadState::Create();
+    sharedQuadState->SetAll(gfx::Transform(), outerRect, outerRect, outerRect, false, 1.0);
     RenderPass::Id rootRenderPassId = RenderPass::Id(1, 1);
-    scoped_ptr<TestRenderPass> rootRenderPass = TestRenderPass::create(rootRenderPassId, outerRect, WebTransformationMatrix());
-    scoped_ptr<DrawQuad> outerQuad = SolidColorDrawQuad::create(sharedQuadState.get(), outerRect, SK_ColorYELLOW).PassAs<DrawQuad>();
-    scoped_ptr<DrawQuad> innerQuad = SolidColorDrawQuad::create(sharedQuadState.get(), innerRect, SK_ColorCYAN).PassAs<DrawQuad>();
-    rootRenderPass->appendQuad(innerQuad.Pass());
-    rootRenderPass->appendQuad(outerQuad.Pass());
+    scoped_ptr<TestRenderPass> rootRenderPass = TestRenderPass::Create();
+    rootRenderPass->SetNew(rootRenderPassId, outerRect, gfx::Rect(), gfx::Transform());
+    scoped_ptr<SolidColorDrawQuad> outerQuad = SolidColorDrawQuad::Create();
+    outerQuad->SetNew(sharedQuadState.get(), outerRect, SK_ColorYELLOW);
+    scoped_ptr<SolidColorDrawQuad> innerQuad = SolidColorDrawQuad::Create();
+    innerQuad->SetNew(sharedQuadState.get(), innerRect, SK_ColorCYAN);
+    rootRenderPass->AppendQuad(innerQuad.PassAs<DrawQuad>());
+    rootRenderPass->AppendQuad(outerQuad.PassAs<DrawQuad>());
 
     RenderPassList list;
     RenderPassIdHashMap hashmap;
@@ -103,17 +112,17 @@ TEST_F(SoftwareRendererTest, solidColorQuad)
 
 TEST_F(SoftwareRendererTest, tileQuad)
 {
-    IntSize outerSize(100, 100);
+    gfx::Size outerSize(100, 100);
     int outerPixels = outerSize.width() * outerSize.height();
-    IntSize innerSize(98, 98);
+    gfx::Size innerSize(98, 98);
     int innerPixels = innerSize.width() * innerSize.height();
-    IntRect outerRect(IntPoint(), outerSize);
-    IntRect innerRect(IntPoint(1, 1), innerSize);
+    gfx::Rect outerRect(gfx::Point(), outerSize);
+    gfx::Rect innerRect(gfx::Point(1, 1), innerSize);
     setViewportSize(outerSize);
     initializeRenderer();
 
-    ResourceProvider::ResourceId resourceYellow = resourceProvider()->createResource(1, outerSize, GL_RGBA, ResourceProvider::TextureUsageAny);
-    ResourceProvider::ResourceId resourceCyan = resourceProvider()->createResource(1, innerSize, GL_RGBA, ResourceProvider::TextureUsageAny);
+    ResourceProvider::ResourceId resourceYellow = resourceProvider()->createResource(outerSize, GL_RGBA, ResourceProvider::TextureUsageAny);
+    ResourceProvider::ResourceId resourceCyan = resourceProvider()->createResource(innerSize, GL_RGBA, ResourceProvider::TextureUsageAny);
 
     SkColor yellow = SK_ColorYELLOW;
     SkColor cyan = SK_ColorCYAN;
@@ -124,18 +133,22 @@ TEST_F(SoftwareRendererTest, tileQuad)
     for (int i = 0; i < innerPixels; i++)
       cyanPixels[i] = cyan;
 
-    resourceProvider()->upload(resourceYellow, reinterpret_cast<uint8_t*>(yellowPixels.get()), IntRect(IntPoint(), outerSize), IntRect(IntPoint(), outerSize), IntSize());
-    resourceProvider()->upload(resourceCyan, reinterpret_cast<uint8_t*>(cyanPixels.get()), IntRect(IntPoint(), innerSize), IntRect(IntPoint(), innerSize), IntSize());
+    resourceProvider()->setPixels(resourceYellow, reinterpret_cast<uint8_t*>(yellowPixels.get()), gfx::Rect(gfx::Point(), outerSize), gfx::Rect(gfx::Point(), outerSize), gfx::Vector2d());
+    resourceProvider()->setPixels(resourceCyan, reinterpret_cast<uint8_t*>(cyanPixels.get()), gfx::Rect(gfx::Point(), innerSize), gfx::Rect(gfx::Point(), innerSize), gfx::Vector2d());
 
-    IntRect rect = IntRect(IntPoint(), deviceViewportSize());
+    gfx::Rect rect = gfx::Rect(gfx::Point(), deviceViewportSize());
 
-    scoped_ptr<SharedQuadState> sharedQuadState = SharedQuadState::create(WebTransformationMatrix(), outerRect, outerRect, 1.0, true);
+    scoped_ptr<SharedQuadState> sharedQuadState = SharedQuadState::Create();
+    sharedQuadState->SetAll(gfx::Transform(), outerRect, outerRect, outerRect, false, 1.0);
     RenderPass::Id rootRenderPassId = RenderPass::Id(1, 1);
-    scoped_ptr<TestRenderPass> rootRenderPass = TestRenderPass::create(rootRenderPassId, IntRect(IntPoint(), deviceViewportSize()), WebTransformationMatrix());
-    scoped_ptr<DrawQuad> outerQuad = TileDrawQuad::create(sharedQuadState.get(), outerRect, outerRect, resourceYellow, IntPoint(), outerSize, 0, false, false, false, false, false).PassAs<DrawQuad>();
-    scoped_ptr<DrawQuad> innerQuad = TileDrawQuad::create(sharedQuadState.get(), innerRect, innerRect, resourceCyan, IntPoint(), innerSize, 0, false, false, false, false, false).PassAs<DrawQuad>();
-    rootRenderPass->appendQuad(innerQuad.Pass());
-    rootRenderPass->appendQuad(outerQuad.Pass());
+    scoped_ptr<TestRenderPass> rootRenderPass = TestRenderPass::Create();
+    rootRenderPass->SetNew(rootRenderPassId, gfx::Rect(gfx::Point(), deviceViewportSize()), gfx::Rect(), gfx::Transform());
+    scoped_ptr<TileDrawQuad> outerQuad = TileDrawQuad::Create();
+    outerQuad->SetNew(sharedQuadState.get(), outerRect, outerRect, resourceYellow, gfx::RectF(gfx::PointF(), outerSize), outerSize, false, false, false, false, false);
+    scoped_ptr<TileDrawQuad> innerQuad = TileDrawQuad::Create();
+    innerQuad->SetNew(sharedQuadState.get(), innerRect, innerRect, resourceCyan, gfx::RectF(gfx::PointF(), innerSize), innerSize, false, false, false, false, false);
+    rootRenderPass->AppendQuad(innerQuad.PassAs<DrawQuad>());
+    rootRenderPass->AppendQuad(outerQuad.PassAs<DrawQuad>());
 
     RenderPassList list;
     RenderPassIdHashMap hashmap;
@@ -152,4 +165,59 @@ TEST_F(SoftwareRendererTest, tileQuad)
     EXPECT_EQ(SK_ColorCYAN, pixels[outerPixels - outerSize.width() - 2]);
 }
 
-} // namespace
+TEST_F(SoftwareRendererTest, shouldClearRootRenderPass)
+{
+    gfx::Rect viewportRect(gfx::Size(100, 100));
+    size_t viewportPixels = viewportRect.width() * viewportRect.height();
+    setViewportSize(viewportRect.size());
+    setShouldClearRootRenderPass(false);
+    initializeRenderer();
+
+    RenderPassList list;
+    RenderPassIdHashMap hashmap;
+    ScopedPtrVector<RenderPass> renderPasses;
+    scoped_array<SkColor> pixels(new SkColor[viewportPixels]);
+
+    // Draw a fullscreen green quad in a first frame.
+    RenderPass::Id rootClearPassId(1, 0);
+    TestRenderPass* rootClearPass = addRenderPass(renderPasses, rootClearPassId, viewportRect, gfx::Transform());
+    addQuad(rootClearPass, viewportRect, SK_ColorGREEN);
+
+    list.push_back(rootClearPass);
+    hashmap.set(rootClearPassId, renderPasses.take(0));
+
+    renderer()->decideRenderPassAllocationsForFrame(list);
+    renderer()->drawFrame(list, hashmap);
+    renderer()->getFramebufferPixels(pixels.get(), viewportRect);
+
+    EXPECT_EQ(SK_ColorGREEN, pixels[0]);
+    EXPECT_EQ(SK_ColorGREEN, pixels[viewportPixels - 1]);
+
+    renderPasses.clear();
+    hashmap.clear();
+    list.clear();
+
+    // Draw a smaller magenta rect without filling the viewport in a separate frame.
+    gfx::Rect smallerRect(20, 20, 60, 60);
+
+    RenderPass::Id rootSmallerPassId(2, 0);
+    TestRenderPass* rootSmallerPass = addRenderPass(renderPasses, rootSmallerPassId, viewportRect, gfx::Transform());
+    addQuad(rootSmallerPass, smallerRect, SK_ColorMAGENTA);
+
+    list.push_back(rootSmallerPass);
+    hashmap.set(rootSmallerPassId, renderPasses.take(0));
+
+    renderer()->decideRenderPassAllocationsForFrame(list);
+    renderer()->drawFrame(list, hashmap);
+    renderer()->getFramebufferPixels(pixels.get(), viewportRect);
+
+    // If we didn't clear, the borders should still be green.
+    EXPECT_EQ(SK_ColorGREEN, pixels[0]);
+    EXPECT_EQ(SK_ColorGREEN, pixels[viewportPixels - 1]);
+
+    EXPECT_EQ(SK_ColorMAGENTA, pixels[smallerRect.y() * viewportRect.width() + smallerRect.x()]);
+    EXPECT_EQ(SK_ColorMAGENTA, pixels[(smallerRect.bottom() - 1) * viewportRect.width() + smallerRect.right() - 1]);
+}
+
+}  // namespace
+}  // namespace cc

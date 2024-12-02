@@ -12,7 +12,6 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
@@ -240,7 +239,7 @@ CaptivePortalTabReloader* CaptivePortalTabHelper::GetTabReloaderForTest() {
 }
 
 void CaptivePortalTabHelper::OpenLoginTab() {
-  Browser* browser = browser::FindBrowserWithWebContents(web_contents_);
+  Browser* browser = chrome::FindBrowserWithWebContents(web_contents_);
 
   // If the Profile doesn't have a tabbed browser window open, do nothing.
   if (!browser)
@@ -260,13 +259,12 @@ void CaptivePortalTabHelper::OpenLoginTab() {
 
   // Otherwise, open a login tab.  Only end up here when a captive portal result
   // was received, so it's safe to assume |profile_| has a CaptivePortalService.
-  TabContents* tab_contents = chrome::AddSelectedTabWithURL(
+  content::WebContents* web_contents = chrome::AddSelectedTabWithURL(
           browser,
           CaptivePortalServiceFactory::GetForProfile(profile_)->test_url(),
           content::PAGE_TRANSITION_TYPED);
   captive_portal::CaptivePortalTabHelper* captive_portal_tab_helper =
-      captive_portal::CaptivePortalTabHelper::FromWebContents(
-          tab_contents->web_contents());
+      captive_portal::CaptivePortalTabHelper::FromWebContents(web_contents);
   captive_portal_tab_helper->SetIsLoginTab();
 }
 

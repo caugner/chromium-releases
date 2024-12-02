@@ -5,6 +5,8 @@
 #ifndef CHROME_BROWSER_SYSTEM_MONITOR_REMOVABLE_DEVICE_CONSTANTS_H_
 #define CHROME_BROWSER_SYSTEM_MONITOR_REMOVABLE_DEVICE_CONSTANTS_H_
 
+#include "base/file_path.h"
+#include "base/string16.h"
 #include "build/build_config.h"
 
 namespace chrome {
@@ -14,16 +16,15 @@ extern const char kFSUniqueIdPrefix[];
 extern const char kVendorModelSerialPrefix[];
 
 #if defined(OS_LINUX)
-// Delimiter constants used in device label to specify data storage id.
-extern const char kLeftParen[];
-extern const char kRightParen[];
-
 extern const char kVendorModelVolumeStoragePrefix[];
 #endif
 
-// Delimiter constants used in device label and unique id.
-extern const char kNonSpaceDelim[];
-extern const char kSpaceDelim[];
+#if defined(OS_WIN)
+// Windows portable device interface GUID constant.
+extern const char16 kWPDDevInterfaceGUID[];
+#endif
+
+extern const FilePath::CharType kDCIMDirectoryName[];
 
 }  // namespace chrome
 

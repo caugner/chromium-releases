@@ -79,11 +79,14 @@ class ChromeRenderMessageFilter : public content::BrowserMessageFilter {
 
 #if !defined(DISABLE_NACL)
   void OnLaunchNaCl(const GURL& manifest_url,
+                    int render_view_id,
+                    uint32 permission_bits,
                     int socket_count,
                     IPC::Message* reply_msg);
   void OnGetReadonlyPnaclFd(const std::string& filename,
                             IPC::Message* reply_msg);
   void OnNaClCreateTemporaryFile(IPC::Message* reply_msg);
+  void OnNaClErrorStatus(int render_view_id, int error_id);
 #endif
   void OnDnsPrefetch(const std::vector<std::string>& hostnames);
   void OnResourceTypeStats(const WebKit::WebCache::ResourceTypeStats& stats);

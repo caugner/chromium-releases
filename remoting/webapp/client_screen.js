@@ -52,15 +52,7 @@ remoting.hostPublicKey = '';
 remoting.supportHostsXhr_ = null;
 
 /**
- * @enum {string}
- */
-remoting.ConnectionType = {
-  It2Me: 'It2Me',
-  Me2Me: 'Me2Me'
-};
-
-/**
- * @type {remoting.ConnectionType?}
+ * @type {remoting.ClientSession.Mode?}
  */
 remoting.currentConnectionType = null;
 
@@ -69,7 +61,7 @@ remoting.currentConnectionType = null;
  * WCS loader to call it back with an access token.
  */
 remoting.connectIt2Me = function() {
-  remoting.currentConnectionType = remoting.ConnectionType.It2Me;
+  remoting.currentConnectionType = remoting.ClientSession.Mode.IT2ME;
   remoting.WcsLoader.load(connectIt2MeWithAccessToken_,
                           remoting.showErrorMessage);
 };
@@ -77,8 +69,12 @@ remoting.connectIt2Me = function() {
 /**
  * Cancel an incomplete connect operation.
  *
+ * Note that this function is not currently used. It is here for reference
+ * because we'll need to reinstate something very like it when we transition
+ * to Apps v2 where we can no longer change the URL (which is what we do in
+ * lieu of calling this function to ensure correct Reload behaviour).
+ *
  * @return {void} Nothing.
- */
 remoting.cancelConnect = function() {
   if (remoting.supportHostsXhr_) {
     remoting.supportHostsXhr_.abort();
@@ -95,6 +91,7 @@ remoting.cancelConnect = function() {
     document.getElementById('access-code-entry').value = '';
   }
 };
+*/
 
 /**
  * Toggle the scale-to-fit feature for the current client session.
@@ -135,7 +132,7 @@ remoting.disconnect = function() {
     remoting.clientSession.disconnect();
     remoting.clientSession = null;
     console.log('Disconnected.');
-    if (remoting.currentConnectionType == remoting.ConnectionType.It2Me) {
+    if (remoting.currentConnectionType == remoting.ClientSession.Mode.IT2ME) {
       remoting.setMode(remoting.AppMode.CLIENT_SESSION_FINISHED_IT2ME);
     } else {
       remoting.setMode(remoting.AppMode.CLIENT_SESSION_FINISHED_ME2ME);
@@ -171,28 +168,24 @@ remoting.sendPrintScreen = function() {
  * If WCS was successfully loaded, proceed with the connection, otherwise
  * report an error.
  *
- * @param {string?} token The OAuth2 access token, or null if an error occurred.
+ * @param {string} token The OAuth2 access token.
  * @return {void} Nothing.
  */
 function connectIt2MeWithAccessToken_(token) {
-  if (token) {
-    var accessCode = document.getElementById('access-code-entry').value;
-    remoting.accessCode = normalizeAccessCode_(accessCode);
-    // At present, only 12-digit access codes are supported, of which the first
-    // 7 characters are the supportId.
-    var kSupportIdLen = 7;
-    var kHostSecretLen = 5;
-    var kAccessCodeLen = kSupportIdLen + kHostSecretLen;
-    if (remoting.accessCode.length != kAccessCodeLen) {
-      console.error('Bad access code length');
-      showConnectError_(remoting.Error.INVALID_ACCESS_CODE);
-    } else {
-      var supportId = remoting.accessCode.substring(0, kSupportIdLen);
-      remoting.setMode(remoting.AppMode.CLIENT_CONNECTING);
-      resolveSupportId(supportId, token);
-    }
+  var accessCode = document.getElementById('access-code-entry').value;
+  remoting.accessCode = normalizeAccessCode_(accessCode);
+  // At present, only 12-digit access codes are supported, of which the first
+  // 7 characters are the supportId.
+  var kSupportIdLen = 7;
+  var kHostSecretLen = 5;
+  var kAccessCodeLen = kSupportIdLen + kHostSecretLen;
+  if (remoting.accessCode.length != kAccessCodeLen) {
+    console.error('Bad access code length');
+    showConnectError_(remoting.Error.INVALID_ACCESS_CODE);
   } else {
-    showConnectError_(remoting.Error.AUTHENTICATION_FAILED);
+    var supportId = remoting.accessCode.substring(0, kSupportIdLen);
+    remoting.setMode(remoting.AppMode.CLIENT_CONNECTING);
+    resolveSupportId(supportId, token);
   }
 }
 
@@ -232,6 +225,7 @@ function onClientStateChange_(oldState, newState) {
     if (remoting.clientSession) {
       clearPin = true;
       setConnectionInterruptedButtonsText_();
+      remoting.retryIfOffline = false;
       remoting.setMode(remoting.AppMode.IN_SESSION);
       remoting.toolbar.center();
       remoting.toolbar.preview();
@@ -244,16 +238,18 @@ function onClientStateChange_(oldState, newState) {
       remoting.clientSession.removePlugin();
       remoting.clientSession = null;
       console.log('Connection closed by host');
-      if (remoting.currentConnectionType == remoting.ConnectionType.It2Me) {
+      if (remoting.currentConnectionType == remoting.ClientSession.Mode.IT2ME) {
         remoting.setMode(remoting.AppMode.CLIENT_SESSION_FINISHED_IT2ME);
       } else {
         remoting.setMode(remoting.AppMode.CLIENT_SESSION_FINISHED_ME2ME);
       }
     } else {
-      // The transition from CONNECTING to CLOSED state may happen
-      // only with older client plugins. Current version should go the
-      // FAILED state when connection fails.
-      showConnectError_(remoting.Error.INVALID_ACCESS_CODE);
+      // A state transition from CONNECTING -> CLOSED can happen if the host
+      // closes the connection without an error message instead of accepting it.
+      // For example, it does this if it fails to activate curtain mode. Since
+      // there's no way of knowing exactly what went wrong, we rely on server-
+      // side logs in this case and show a generic error message.
+      showConnectError_(remoting.Error.UNEXPECTED);
     }
 
   } else if (newState == remoting.ClientSession.State.FAILED) {
@@ -334,21 +330,10 @@ function startSession_() {
       new remoting.ClientSession(
           remoting.hostJid, remoting.hostPublicKey,
           remoting.accessCode, 'spake2_plain', '',
-          /** @type {string} */ (remoting.oauth2.getCachedEmail()),
           remoting.ClientSession.Mode.IT2ME,
           onClientStateChange_);
-  /** @param {string?} token The auth token. */
-  var createPluginAndConnect = function(token) {
-    if (token) {
-      remoting.clientSession.createPluginAndConnect(
-          document.getElementById('session-mode'),
-          token);
-    } else {
-      showConnectError_(remoting.Error.AUTHENTICATION_FAILED);
-    }
-  };
-  remoting.oauth2.callWithToken(createPluginAndConnect,
-                                remoting.showErrorMessage);
+  remoting.clientSession.createPluginAndConnect(
+      document.getElementById('session-mode'));
 }
 
 /**
@@ -367,7 +352,7 @@ function showConnectError_(errorTag) {
     remoting.clientSession.disconnect();
     remoting.clientSession = null;
   }
-  if (remoting.currentConnectionType == remoting.ConnectionType.It2Me) {
+  if (remoting.currentConnectionType == remoting.ClientSession.Mode.IT2ME) {
     remoting.setMode(remoting.AppMode.CLIENT_CONNECT_FAILED_IT2ME);
   } else {
     remoting.setMode(remoting.AppMode.CLIENT_CONNECT_FAILED_ME2ME);
@@ -416,7 +401,7 @@ function parseServerResponse_(xhr) {
     errorMsg = remoting.Error.INVALID_ACCESS_CODE;
   } else if (xhr.status == 0) {
     errorMsg = remoting.Error.NO_RESPONSE;
-  } else if (xhr.status == 503) {
+  } else if (xhr.status == 502 || xhr.status == 503) {
     errorMsg = remoting.Error.SERVICE_UNAVAILABLE;
   } else {
     console.error('The server responded: ' + xhr.responseText);
@@ -480,7 +465,7 @@ function updateStatistics_() {
  * @return {void} Nothing.
  */
 remoting.connectMe2Me = function(hostId, retryIfOffline) {
-  remoting.currentConnectionType = remoting.ConnectionType.Me2Me;
+  remoting.currentConnectionType = remoting.ClientSession.Mode.ME2ME;
   remoting.hostId = hostId;
   remoting.retryIfOffline = retryIfOffline;
 
@@ -518,8 +503,8 @@ remoting.connectMe2MeWithPin = function() {
   remoting.hostJid = host.jabberId;
   remoting.hostPublicKey = host.publicKey;
   document.getElementById('connected-to').innerText = host.hostName;
-  document.title = chrome.i18n.getMessage('PRODUCT_NAME') + ': ' +
-      host.hostName;
+  document.title = host.hostName + ' - ' +
+      chrome.i18n.getMessage('PRODUCT_NAME');
 
   remoting.WcsLoader.load(connectMe2MeWithAccessToken_,
                           remoting.showErrorMessage);
@@ -528,26 +513,20 @@ remoting.connectMe2MeWithPin = function() {
 /**
  * Continue making the connection to a host, once WCS has initialized.
  *
- * @param {string?} token The OAuth2 access token, or null if an error occurred.
+ * @param {string} token The OAuth2 access token.
  * @return {void} Nothing.
  */
 function connectMe2MeWithAccessToken_(token) {
-  if (token) {
-    /** @type {string} */
-    var pin = document.getElementById('pin-entry').value;
+  /** @type {string} */
+  var pin = document.getElementById('pin-entry').value;
 
-    remoting.clientSession =
-        new remoting.ClientSession(
-            remoting.hostJid, remoting.hostPublicKey,
-            pin, 'spake2_hmac,spake2_plain', remoting.hostId,
-            /** @type {string} */ (remoting.oauth2.getCachedEmail()),
-            remoting.ClientSession.Mode.ME2ME, onClientStateChange_);
-    // Don't log errors for cached JIDs.
-    remoting.clientSession.logErrors(!remoting.retryIfOffline);
-    remoting.clientSession.createPluginAndConnect(
-        document.getElementById('session-mode'),
-        token);
-  } else {
-    showConnectError_(remoting.Error.AUTHENTICATION_FAILED);
-  }
+  remoting.clientSession =
+      new remoting.ClientSession(
+          remoting.hostJid, remoting.hostPublicKey,
+          pin, 'spake2_hmac,spake2_plain', remoting.hostId,
+          remoting.ClientSession.Mode.ME2ME, onClientStateChange_);
+  // Don't log errors for cached JIDs.
+  remoting.clientSession.logErrors(!remoting.retryIfOffline);
+  remoting.clientSession.createPluginAndConnect(
+      document.getElementById('session-mode'));
 }

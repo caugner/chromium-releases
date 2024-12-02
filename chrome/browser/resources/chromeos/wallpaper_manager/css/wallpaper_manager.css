@@ -123,6 +123,10 @@ body {
   width: 104px;
 }
 
+.image-picker-offline img:not([offline]) {
+  -webkit-filter: grayscale(1);
+}
+
 #wallpaper-attribute {
   -webkit-box-orient: vertical;
   display: -webkit-box;
@@ -225,7 +229,7 @@ body {
 }
 
 #butter-bar.error {
-  background-color: rgba(221, 75, 57, 0.2);
+  background-color: rgb(236, 207, 203);
   border: 1px solid rgba(221, 75, 57, 0.5);
   border-radius: 2px;
   padding: 2px 1em;

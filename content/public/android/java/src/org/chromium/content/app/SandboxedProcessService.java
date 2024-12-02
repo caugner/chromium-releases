@@ -47,6 +47,8 @@ public class SandboxedProcessService extends Service {
     // Parameters received via IPC, only accessed while holding the mSandboxMainThread monitor.
     private String mNativeLibraryName;  // Must be passed in via the bind command.
     private String[] mCommandLineParams;
+    private int mCpuCount;
+    private long mCpuFeatures;
     // Pairs IDs and file descriptors that should be registered natively.
     private ArrayList<Integer> mFileIds;
     private ArrayList<ParcelFileDescriptor> mFileFds;
@@ -69,6 +71,9 @@ public class SandboxedProcessService extends Service {
                 }
                 // We must have received the command line by now
                 assert mCommandLineParams != null;
+                mCpuCount = args.getInt(SandboxedProcessConnection.EXTRA_CPU_COUNT);
+                mCpuFeatures = args.getLong(SandboxedProcessConnection.EXTRA_CPU_FEATURES);
+                assert mCpuCount > 0;
                 mFileIds = new ArrayList<Integer>();
                 mFileFds = new ArrayList<ParcelFileDescriptor>();
                 for (int i = 0;; i++) {
@@ -102,6 +107,10 @@ public class SandboxedProcessService extends Service {
 
     @Override
     public void onCreate() {
+        Log.i(TAG, "Creating new SandboxedProcessService pid=" + Process.myPid());
+        if (sContext != null) {
+            Log.e(TAG, "SanboxedProcessService created again in process!");
+        }
         sContext = this;
         super.onCreate();
 
@@ -115,7 +124,7 @@ public class SandboxedProcessService extends Service {
                         }
                     }
                     LibraryLoader.setLibraryToLoad(mNativeLibraryName);
-                    if (!LibraryLoader.loadNow()) return;
+                    LibraryLoader.loadNow();
                     synchronized (mSandboxMainThread) {
                         while (mCommandLineParams == null) {
                             mSandboxMainThread.wait();
@@ -138,7 +147,8 @@ public class SandboxedProcessService extends Service {
                     }
                     ContentMain.initApplicationContext(sContext.getApplicationContext());
                     nativeInitSandboxedProcess(sContext.getApplicationContext(),
-                            SandboxedProcessService.this, fileIds, fileFds);
+                            SandboxedProcessService.this, fileIds, fileFds,
+                            mCpuCount, mCpuFeatures);
                     ContentMain.start();
                     nativeExitSandboxedProcess();
                 } catch (InterruptedException e) {
@@ -151,6 +161,7 @@ public class SandboxedProcessService extends Service {
 
     @Override
     public void onDestroy() {
+        Log.i(TAG, "Destroying SandboxedProcessService pid=" + Process.myPid());
         super.onDestroy();
         if (mCommandLineParams == null) {
             // This process was destroyed before it even started. Nothing more to do.
@@ -166,13 +177,9 @@ public class SandboxedProcessService extends Service {
             } catch (InterruptedException e) {
             }
         }
-
-        // This is not synchronized with the main thread in any way, but this is analogous
-        // to how desktop chrome terminates processes using SIGTERM. The mSandboxMainThread
-        // may run briefly before this is executed, but will eventually get a channel error
-        // and similarly commit suicide via SuicideOnChannelErrorFilter().
-        // TODO(tedbo): Why doesn't the activity manager SIGTERM/SIGKILL this service process?
-        nativeExitSandboxedProcess();
+        // Try to shutdown the SandboxMainThread gracefully, but it might not
+        // have chance to exit normally.
+        nativeShutdownSandboxMainThread();
     }
 
     @Override
@@ -248,10 +255,13 @@ public class SandboxedProcessService extends Service {
      * renderer.
      */
     private static native void nativeInitSandboxedProcess(Context applicationContext,
-            SandboxedProcessService service, int[] extraFileIds, int[] extraFileFds);
+            SandboxedProcessService service, int[] extraFileIds, int[] extraFileFds,
+            int cpuCount, long cpuFeatures);
 
     /**
      * Force the sandboxed process to exit.
      */
     private static native void nativeExitSandboxedProcess();
+
+    private native void nativeShutdownSandboxMainThread();
 }

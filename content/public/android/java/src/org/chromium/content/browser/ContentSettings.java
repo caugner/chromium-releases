@@ -22,6 +22,15 @@ import org.chromium.base.ThreadUtils;
  */
 @JNINamespace("content")
 public class ContentSettings {
+    // This enum corresponds to WebSettings.LayoutAlgorithm. We use our own to be
+    // able to extend it.
+    public enum LayoutAlgorithm {
+        NORMAL,
+        SINGLE_COLUMN,
+        NARROW_COLUMNS,
+        TEXT_AUTOSIZING,
+    }
+
     private static final String TAG = "ContentSettings";
 
     // This class must be created on the UI thread. Afterwards, it can be
@@ -53,7 +62,10 @@ public class ContentSettings {
     // retrieve the values. After setXXX, mEventHandler.syncSettingsLocked() needs to be called.
     //
     // TODO(mnaganov): populate with the complete set of legacy WebView settings.
+    // Note: If adding a new setting to this class, make sure to add it to the initFrom()
+    // method defined below.
 
+    private LayoutAlgorithm mLayoutAlgorithm = LayoutAlgorithm.NARROW_COLUMNS;
     private int mTextSizePercent = 100;
     private String mStandardFontFamily = "sans-serif";
     private String mFixedFontFamily = "monospace";
@@ -74,14 +86,23 @@ public class ContentSettings {
     private boolean mAllowUniversalAccessFromFileURLs = false;
     private boolean mAllowFileAccessFromFileURLs = false;
     private boolean mJavaScriptCanOpenWindowsAutomatically = false;
+    private boolean mSupportMultipleWindows = false;
     private PluginState mPluginState = PluginState.OFF;
+    private boolean mAppCacheEnabled = false;
     private boolean mDomStorageEnabled = false;
 
     // Not accessed by the native side.
-    private String mDefaultUserAgent = "";
+    private final String mDefaultUserAgent;
     private boolean mSupportZoom = true;
     private boolean mBuiltInZoomControls = false;
     private boolean mDisplayZoomControls = true;
+
+    // Protects access to settings global fields.
+    private static final Object sGlobalContentSettingsLock = new Object();
+    // For compatibility with the legacy WebView, we can only enable AppCache when the path is
+    // provided. However, we don't use the path, so we just check if we have received it from the
+    // client.
+    private static boolean sAppCachePathIsSet = false;
 
     // Class to handle messages to be processed on the UI thread.
     private class EventHandler {
@@ -108,10 +129,14 @@ public class ContentSettings {
                                     }
                                     break;
                                 case UPDATE_UA:
-                                    mContentViewCore.setAllUserAgentOverridesInHistory();
+                                    if (mContentViewCore.isAlive()) {
+                                        mContentViewCore.setAllUserAgentOverridesInHistory();
+                                    }
                                     break;
                                 case UPDATE_MULTI_TOUCH:
-                                    mContentViewCore.updateMultiTouchZoomSupport();
+                                    if (mContentViewCore.isAlive()) {
+                                        mContentViewCore.updateMultiTouchZoomSupport();
+                                    }
                                     break;
                             }
                         }
@@ -202,6 +227,7 @@ public class ContentSettings {
             // PERSONALITY_CHROME
             // Chrome has zooming enabled by default. These settings are not
             // set by the native code.
+            mDefaultUserAgent = ""; // Unused by PERSONALITY_CHROME but must be initialized.
             mBuiltInZoomControls = true;
             mDisplayZoomControls = false;
             syncFromNativeOnUiThread();
@@ -381,7 +407,7 @@ public class ContentSettings {
     public void setStandardFontFamily(String font) {
         assert mCanModifySettings;
         synchronized (mContentSettingsLock) {
-            if (!mStandardFontFamily.equals(font)) {
+            if (font != null && !mStandardFontFamily.equals(font)) {
                 mStandardFontFamily = font;
                 mEventHandler.syncSettingsLocked();
             }
@@ -405,7 +431,7 @@ public class ContentSettings {
     public void setFixedFontFamily(String font) {
         assert mCanModifySettings;
         synchronized (mContentSettingsLock) {
-            if (!mFixedFontFamily.equals(font)) {
+            if (font != null && !mFixedFontFamily.equals(font)) {
                 mFixedFontFamily = font;
                 mEventHandler.syncSettingsLocked();
             }
@@ -429,7 +455,7 @@ public class ContentSettings {
     public void setSansSerifFontFamily(String font) {
         assert mCanModifySettings;
         synchronized (mContentSettingsLock) {
-            if (!mSansSerifFontFamily.equals(font)) {
+            if (font != null && !mSansSerifFontFamily.equals(font)) {
                 mSansSerifFontFamily = font;
                 mEventHandler.syncSettingsLocked();
             }
@@ -453,7 +479,7 @@ public class ContentSettings {
     public void setSerifFontFamily(String font) {
         assert mCanModifySettings;
         synchronized (mContentSettingsLock) {
-            if (!mSerifFontFamily.equals(font)) {
+            if (font != null && !mSerifFontFamily.equals(font)) {
                 mSerifFontFamily = font;
                 mEventHandler.syncSettingsLocked();
             }
@@ -477,7 +503,7 @@ public class ContentSettings {
     public void setCursiveFontFamily(String font) {
         assert mCanModifySettings;
         synchronized (mContentSettingsLock) {
-            if (!mCursiveFontFamily.equals(font)) {
+            if (font != null && !mCursiveFontFamily.equals(font)) {
                 mCursiveFontFamily = font;
                 mEventHandler.syncSettingsLocked();
             }
@@ -501,7 +527,7 @@ public class ContentSettings {
     public void setFantasyFontFamily(String font) {
         assert mCanModifySettings;
         synchronized (mContentSettingsLock) {
-            if (!mFantasyFontFamily.equals(font)) {
+            if (font != null && !mFantasyFontFamily.equals(font)) {
                 mFantasyFontFamily = font;
                 mEventHandler.syncSettingsLocked();
             }
@@ -831,9 +857,9 @@ public class ContentSettings {
      */
     @CalledByNative
     private boolean getPluginsDisabled() {
-        synchronized (mContentSettingsLock) {
-            return mPluginState == PluginState.OFF;
-        }
+        // This should only be called from SyncToNative, which is called
+        // either from the constructor, or with mContentSettingsLock being held.
+        return mPluginState == PluginState.OFF;
     }
 
     /**
@@ -843,9 +869,9 @@ public class ContentSettings {
      */
     @CalledByNative
     private void setPluginsDisabled(boolean disabled) {
-        synchronized (mContentSettingsLock) {
-            mPluginState = disabled ? PluginState.OFF : PluginState.ON;
-        }
+        // This should only be called from SyncFromToNative, which is called
+        // either from the constructor, or with mContentSettingsLock being held.
+        mPluginState = disabled ? PluginState.OFF : PluginState.ON;
     }
 
     /**
@@ -887,6 +913,152 @@ public class ContentSettings {
     }
 
     /**
+     * Sets the underlying layout algorithm. The default is
+     * {@link LayoutAlgorithm#NARROW_COLUMNS}.
+     *
+     * @param l the layout algorithm to use, as a {@link LayoutAlgorithm} value
+     */
+    public void setLayoutAlgorithm(LayoutAlgorithm l) {
+        assert mCanModifySettings;
+        synchronized (mContentSettingsLock) {
+            if (mLayoutAlgorithm != l) {
+                mLayoutAlgorithm = l;
+                mEventHandler.syncSettingsLocked();
+            }
+        }
+    }
+
+    /**
+     * Gets the current layout algorithm.
+     *
+     * @return the layout algorithm in use, as a {@link LayoutAlgorithm} value
+     * @see #setLayoutAlgorithm
+     */
+    public LayoutAlgorithm getLayoutAlgorithm() {
+        synchronized (mContentSettingsLock) {
+            return mLayoutAlgorithm;
+        }
+    }
+
+    /**
+     * Sets whether Text Auto-sizing layout algorithm is enabled.
+     *
+     * @param enabled whether Text Auto-sizing layout algorithm is enabled
+     * @hide
+     */
+    @CalledByNative
+    private void setTextAutosizingEnabled(boolean enabled) {
+        // This should only be called from SyncFromNative, which is called
+        // either from the constructor, or with mContentSettingsLock being held.
+        mLayoutAlgorithm = enabled ?
+                LayoutAlgorithm.TEXT_AUTOSIZING : LayoutAlgorithm.NARROW_COLUMNS;
+    }
+
+    /**
+     * Gets whether Text Auto-sizing layout algorithm is enabled.
+     *
+     * @return true if Text Auto-sizing layout algorithm is enabled
+     * @hide
+     */
+    @CalledByNative
+    private boolean getTextAutosizingEnabled() {
+        return mLayoutAlgorithm == LayoutAlgorithm.TEXT_AUTOSIZING;
+    }
+
+    /**
+     * Tells the WebView whether it supports multiple windows. True means
+     * that {@link WebChromeClient#onCreateWindow(WebView, boolean,
+     * boolean, Message)} is implemented by the host application.
+     */
+    public void setSupportMultipleWindows(boolean support) {
+        assert mCanModifySettings;
+        synchronized (mContentSettingsLock) {
+            if (mSupportMultipleWindows != support) {
+                mSupportMultipleWindows = support;
+                mEventHandler.syncSettingsLocked();
+            }
+        }
+    }
+
+    /**
+     * Gets whether the WebView is supporting multiple windows.
+     *
+     * @return true if the WebView is supporting multiple windows. This means
+     *         that {@link WebChromeClient#onCreateWindow(WebView, boolean,
+     *         boolean, Message)} is implemented by the host application.
+     */
+    public boolean supportMultipleWindows() {
+        synchronized (mContentSettingsLock) {
+            return mSupportMultipleWindows;
+        }
+    }
+
+    /**
+     * Sets whether the Application Caches API should be enabled. The default
+     * is false. Note that in order for the Application Caches API to be
+     * enabled, a non-empty database path must also be supplied to
+     * {@link #setAppCachePath} (this is done for compatibility with the
+     * legacy implementation).
+     *
+     * @param flag true if the WebView should enable Application Caches
+     */
+    public void setAppCacheEnabled(boolean flag) {
+        assert mCanModifySettings;
+        synchronized (mContentSettingsLock) {
+            if (mAppCacheEnabled != flag) {
+                mAppCacheEnabled = flag;
+                mEventHandler.syncSettingsLocked();
+            }
+        }
+    }
+
+    /**
+     * Sets the path to the Application Caches files. In order for the
+     * Application Caches API to be enabled, this method must be called with a
+     * non-empty path. This method should only be called once: repeated calls
+     * are ignored.
+     *
+     * @param path a non empty-string
+     */
+    public void setAppCachePath(String path) {
+        assert mCanModifySettings;
+        boolean needToSync = false;
+        synchronized (sGlobalContentSettingsLock) {
+            // AppCachePath can only be set once.
+            if (!sAppCachePathIsSet && path != null && !path.isEmpty()) {
+                sAppCachePathIsSet = true;
+                needToSync = true;
+            }
+        }
+        // The obvious problem here is that other WebViews will not be updated,
+        // until they execute synchronization from Java to the native side.
+        // But this is the same behaviour as it was in the legacy WebView.
+        if (needToSync) {
+            synchronized (mContentSettingsLock) {
+                mEventHandler.syncSettingsLocked();
+            }
+        }
+    }
+
+    /**
+     * Gets whether Application Cache is enabled.
+     *
+     * @return true if Application Cache is enabled
+     * @hide
+     */
+    @CalledByNative
+    private boolean getAppCacheEnabled() {
+        // This should only be called from SyncToNative, which is called
+        // either from the constructor, or with mContentSettingsLock being held.
+        if (!mAppCacheEnabled) {
+            return false;
+        }
+        synchronized (sGlobalContentSettingsLock) {
+            return sAppCachePathIsSet;
+        }
+    }
+
+    /**
      * Sets whether the DOM storage API is enabled. The default value is false.
      *
      * @param flag true if the ContentView should use the DOM storage API
@@ -920,7 +1092,7 @@ public class ContentSettings {
     public void setDefaultTextEncodingName(String encoding) {
         assert mCanModifySettings;
         synchronized (mContentSettingsLock) {
-            if (!mDefaultTextEncoding.equals(encoding)) {
+            if (encoding != null && !mDefaultTextEncoding.equals(encoding)) {
                 mDefaultTextEncoding = encoding;
                 mEventHandler.syncSettingsLocked();
             }
@@ -944,6 +1116,44 @@ public class ContentSettings {
             return MAXIMUM_FONT_SIZE;
         }
         return size;
+    }
+
+    /**
+     * Sets the settings in this object to those from another
+     * ContentSettings.
+     * Required by WebView when we swap a in a new ContentViewCore
+     * to an existing AwContents (i.e. to support displaying popup
+     * windows in an already created WebView)
+     */
+    public void initFrom(ContentSettings settings) {
+        setLayoutAlgorithm(settings.getLayoutAlgorithm());
+        setTextZoom(settings.getTextZoom());
+        setStandardFontFamily(settings.getStandardFontFamily());
+        setFixedFontFamily(settings.getFixedFontFamily());
+        setSansSerifFontFamily(settings.getSansSerifFontFamily());
+        setSerifFontFamily(settings.getSerifFontFamily());
+        setCursiveFontFamily(settings.getCursiveFontFamily());
+        setFantasyFontFamily(settings.getFantasyFontFamily());
+        setDefaultTextEncodingName(settings.getDefaultTextEncodingName());
+        setUserAgentString(settings.getUserAgentString());
+        setMinimumFontSize(settings.getMinimumFontSize());
+        setMinimumLogicalFontSize(settings.getMinimumLogicalFontSize());
+        setDefaultFontSize(settings.getDefaultFontSize());
+        setDefaultFixedFontSize(settings.getDefaultFixedFontSize());
+        setLoadsImagesAutomatically(settings.getLoadsImagesAutomatically());
+        setImagesEnabled(settings.getImagesEnabled());
+        setJavaScriptEnabled(settings.getJavaScriptEnabled());
+        setAllowUniversalAccessFromFileURLs(settings.getAllowUniversalAccessFromFileURLs());
+        setAllowFileAccessFromFileURLs(settings.getAllowFileAccessFromFileURLs());
+        setJavaScriptCanOpenWindowsAutomatically(
+                settings.getJavaScriptCanOpenWindowsAutomatically());
+        setSupportMultipleWindows(settings.supportMultipleWindows());
+        setPluginState(settings.getPluginState());
+        setAppCacheEnabled(settings.mAppCacheEnabled);
+        setDomStorageEnabled(settings.getDomStorageEnabled());
+        setSupportZoom(settings.supportZoom());
+        setBuiltInZoomControls(settings.getBuiltInZoomControls());
+        setDisplayZoomControls(settings.getDisplayZoomControls());
     }
 
     /**

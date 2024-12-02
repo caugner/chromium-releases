@@ -8,6 +8,7 @@
 #include "base/prefs/public/pref_change_registrar.h"
 #include "chrome/browser/api/sync/profile_sync_service_observer.h"
 #include "chrome/browser/command_updater.h"
+#include "chrome/browser/command_updater_delegate.h"
 #include "chrome/browser/sessions/tab_restore_service_observer.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
 #include "content/public/browser/notification_observer.h"
@@ -17,7 +18,6 @@
 class Browser;
 class BrowserWindow;
 class Profile;
-class TabContents;
 
 namespace content {
 struct NativeWebKeyboardEvent;
@@ -25,7 +25,7 @@ struct NativeWebKeyboardEvent;
 
 namespace chrome {
 
-class BrowserCommandController : public CommandUpdater::CommandUpdaterDelegate,
+class BrowserCommandController : public CommandUpdaterDelegate,
                                  public content::NotificationObserver,
                                  public TabStripModelObserver,
                                  public TabRestoreServiceObserver,
@@ -76,7 +76,7 @@ class BrowserCommandController : public CommandUpdater::CommandUpdaterDelegate,
     FULLSCREEN_METRO_SNAP,
   };
 
-  // Overridden from CommandUpdater::CommandUpdaterDelegate:
+  // Overridden from CommandUpdaterDelegate:
   virtual void ExecuteCommandWithDisposition(
       int id,
       WindowOpenDisposition disposition) OVERRIDE;
@@ -87,14 +87,17 @@ class BrowserCommandController : public CommandUpdater::CommandUpdaterDelegate,
                        const content::NotificationDetails& details) OVERRIDE;
 
   // Overridden from TabStripModelObserver:
-  virtual void TabInsertedAt(TabContents* contents,
+  virtual void TabInsertedAt(content::WebContents* contents,
                              int index,
                              bool foreground) OVERRIDE;
-  virtual void TabDetachedAt(TabContents* contents, int index) OVERRIDE;
-  virtual void TabReplacedAt(TabStripModel* tab_strip_model,
-                             TabContents* old_contents,
-                             TabContents* new_contents,
+  virtual void TabDetachedAt(content::WebContents* contents,
                              int index) OVERRIDE;
+  virtual void TabReplacedAt(TabStripModel* tab_strip_model,
+                             content::WebContents* old_contents,
+                             content::WebContents* new_contents,
+                             int index) OVERRIDE;
+  virtual void TabBlockedStateChanged(content::WebContents* contents,
+                                      int index) OVERRIDE;
 
   // Overridden from TabRestoreServiceObserver:
   virtual void TabRestoreServiceChanged(TabRestoreService* service) OVERRIDE;
@@ -130,6 +133,10 @@ class BrowserCommandController : public CommandUpdater::CommandUpdaterDelegate,
   // Updates commands that affect the bookmark bar.
   void UpdateCommandsForBookmarkBar();
 
+  // Updates commands that affect file selection dialogs in aggregate,
+  // namely the save-page-as state and the open-file state.
+  void UpdateCommandsForFileSelectionDialogs();
+
   // Update commands whose state depends on the type of fullscreen mode the
   // window is in.
   void UpdateCommandsForFullscreenMode(FullScreenMode fullscreen_mode);
@@ -152,10 +159,13 @@ class BrowserCommandController : public CommandUpdater::CommandUpdaterDelegate,
   // |force| is true if the button should change its icon immediately.
   void UpdateReloadStopState(bool is_loading, bool force);
 
+  // Updates commands for find.
+  void UpdateCommandsForFind();
+
   // Add/remove observers for interstitial attachment/detachment from
   // |contents|.
-  void AddInterstitialObservers(TabContents* contents);
-  void RemoveInterstitialObservers(TabContents* contents);
+  void AddInterstitialObservers(content::WebContents* contents);
+  void RemoveInterstitialObservers(content::WebContents* contents);
 
   inline BrowserWindow* window();
   inline Profile* profile();

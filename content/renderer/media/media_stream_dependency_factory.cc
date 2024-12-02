@@ -9,7 +9,6 @@
 #include "base/synchronization/waitable_event.h"
 #include "base/utf_string_conversions.h"
 #include "content/renderer/media/media_stream_source_extra_data.h"
-#include "content/renderer/media/peer_connection_handler_jsep.h"
 #include "content/renderer/media/rtc_media_constraints.h"
 #include "content/renderer/media/rtc_peer_connection_handler.h"
 #include "content/renderer/media/rtc_video_capturer.h"
@@ -172,20 +171,6 @@ MediaStreamDependencyFactory::~MediaStreamDependencyFactory() {
   CleanupPeerConnectionFactory();
 }
 
-WebKit::WebPeerConnection00Handler*
-MediaStreamDependencyFactory::CreatePeerConnectionHandlerJsep(
-    WebKit::WebPeerConnection00HandlerClient* client) {
-  // Save histogram data so we can see how much PeerConnetion is used.
-  // The histogram counts the number of calls to the JS API
-  // webKitPeerConnection00.
-  UpdateWebRTCMethodCount(WEBKIT_PEER_CONNECTION);
-
-  if (!EnsurePeerConnectionFactory())
-    return NULL;
-
-  return new PeerConnectionHandlerJsep(client, this);
-}
-
 WebKit::WebRTCPeerConnectionHandler*
 MediaStreamDependencyFactory::CreateRTCPeerConnectionHandler(
     WebKit::WebRTCPeerConnectionHandlerClient* client) {
@@ -230,7 +215,7 @@ void MediaStreamDependencyFactory::CreateNativeMediaSources(
       NOTIMPLEMENTED();
       continue;
     }
-    const bool is_screencast = (source_data->device_info().stream_type ==
+    const bool is_screencast = (source_data->device_info().device.type ==
         content::MEDIA_TAB_VIDEO_CAPTURE);
     source_data->SetVideoSource(
         CreateVideoSource(source_data->device_info().session_id,
@@ -318,7 +303,7 @@ bool MediaStreamDependencyFactory::CreatePeerConnectionFactory() {
                                             signaling_thread_,
                                             audio_device_));
     if (factory.get())
-      pc_factory_ = factory.release();
+      pc_factory_ = factory;
     else
       audio_device_ = NULL;
   }
@@ -327,19 +312,6 @@ bool MediaStreamDependencyFactory::CreatePeerConnectionFactory() {
 
 bool MediaStreamDependencyFactory::PeerConnectionFactoryCreated() {
   return pc_factory_.get() != NULL;
-}
-
-scoped_refptr<webrtc::PeerConnectionInterface>
-MediaStreamDependencyFactory::CreatePeerConnection(
-    const std::string& config,
-    webrtc::PeerConnectionObserver* observer) {
-  scoped_refptr<P2PPortAllocatorFactory> pa_factory =
-      new talk_base::RefCountedObject<P2PPortAllocatorFactory>(
-          p2p_socket_dispatcher_.get(),
-          network_manager_,
-          socket_factory_.get(),
-          WebKit::WebFrame::frameForCurrentContext());
-  return pc_factory_->CreatePeerConnection(config, pa_factory, observer).get();
 }
 
 scoped_refptr<webrtc::PeerConnectionInterface>

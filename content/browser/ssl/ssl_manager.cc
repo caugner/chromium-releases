@@ -6,8 +6,8 @@
 
 #include "base/bind.h"
 #include "base/utf_string_conversions.h"
-#include "content/browser/renderer_host/resource_dispatcher_host_impl.h"
-#include "content/browser/renderer_host/resource_request_info_impl.h"
+#include "content/browser/loader/resource_dispatcher_host_impl.h"
+#include "content/browser/loader/resource_request_info_impl.h"
 #include "content/browser/ssl/ssl_cert_error_handler.h"
 #include "content/browser/ssl/ssl_policy.h"
 #include "content/browser/ssl/ssl_request_info.h"
@@ -110,10 +110,10 @@ void SSLManager::DidCommitProvisionalLoad(
       int ssl_security_bits;
       int ssl_connection_status;
       DeserializeSecurityInfo(details->serialized_security_info,
-                                       &ssl_cert_id,
-                                       &ssl_cert_status,
-                                       &ssl_security_bits,
-                                       &ssl_connection_status);
+                              &ssl_cert_id,
+                              &ssl_cert_status,
+                              &ssl_security_bits,
+                              &ssl_connection_status);
 
       // We may not have an entry if this is a navigation to an initial blank
       // page. Reset the SSL information and add the new data we have.

@@ -10,8 +10,8 @@
 #include "content/browser/renderer_host/render_widget_host_view_android.h"
 #include "content/browser/renderer_host/render_view_host_factory.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
+#include "content/browser/web_contents/interstitial_page_impl.h"
 #include "content/browser/web_contents/web_contents_impl.h"
-#include "content/public/browser/interstitial_page.h"
 #include "content/public/browser/web_contents_delegate.h"
 
 namespace content {
@@ -43,12 +43,19 @@ void WebContentsViewAndroid::SetContentViewCore(
       web_contents_->GetRenderWidgetHostView());
   if (rwhv)
     rwhv->SetContentViewCore(content_view_core_);
+
   if (web_contents_->ShowingInterstitialPage()) {
-    NOTIMPLEMENTED() << "not upstreamed yet";
+    rwhv = static_cast<RenderWidgetHostViewAndroid*>(
+        static_cast<InterstitialPageImpl*>(
+            web_contents_->GetInterstitialPage())->
+                GetRenderViewHost()->GetView());
+    if (rwhv)
+      rwhv->SetContentViewCore(content_view_core_);
   }
 }
 
-void WebContentsViewAndroid::CreateView(const gfx::Size& initial_size) {
+void WebContentsViewAndroid::CreateView(
+    const gfx::Size& initial_size, gfx::NativeView context) {
 }
 
 RenderWidgetHostView* WebContentsViewAndroid::CreateViewForWidget(
@@ -68,7 +75,9 @@ RenderWidgetHostView* WebContentsViewAndroid::CreateViewForWidget(
   // order to paint it. See ContentView::GetRenderWidgetHostViewAndroid for an
   // example of how this is achieved for InterstitialPages.
   RenderWidgetHostImpl* rwhi = RenderWidgetHostImpl::From(render_widget_host);
-  return new RenderWidgetHostViewAndroid(rwhi, content_view_core_);
+  RenderWidgetHostView* view = new RenderWidgetHostViewAndroid(
+      rwhi, content_view_core_);
+  return view;
 }
 
 gfx::NativeView WebContentsViewAndroid::GetNativeView() const {
@@ -183,7 +192,8 @@ void WebContentsViewAndroid::StartDragging(
     const WebDropData& drop_data,
     WebKit::WebDragOperationsMask allowed_ops,
     const gfx::ImageSkia& image,
-    const gfx::Point& image_offset) {
+    const gfx::Vector2d& image_offset,
+    const DragEventSourceInfo& event_info) {
   NOTIMPLEMENTED();
 }
 

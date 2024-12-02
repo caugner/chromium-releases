@@ -4,8 +4,9 @@
 
 #include "gpu/command_buffer/service/renderbuffer_manager.h"
 
-#include "gpu/command_buffer/common/gl_mock.h"
+#include <set>
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/gl/gl_mock.h"
 
 namespace gpu {
 namespace gles2 {
@@ -124,7 +125,7 @@ TEST_F(RenderbufferManagerTest, RenderbufferInfo) {
   EXPECT_TRUE(manager_.HaveUnclearedRenderbuffers());
   EXPECT_EQ(kWidth * kHeight * 4u * 2u, info1->EstimatedSize());
 
-  manager_.SetCleared(info1);
+  manager_.SetCleared(info1, true);
   EXPECT_TRUE(info1->cleared());
   EXPECT_FALSE(manager_.HaveUnclearedRenderbuffers());
 
@@ -156,13 +157,72 @@ TEST_F(RenderbufferManagerTest, UseDeletedRenderbufferInfo) {
   manager_.SetInfo(info1, kSamples, kFormat, kWidth, kHeight);
   // See that it still affects manager.
   EXPECT_TRUE(manager_.HaveUnclearedRenderbuffers());
-  manager_.SetCleared(info1);
+  manager_.SetCleared(info1, true);
   EXPECT_FALSE(manager_.HaveUnclearedRenderbuffers());
   // Check that the renderbuffer is deleted when the last ref is released.
   EXPECT_CALL(*gl_, DeleteRenderbuffersEXT(1, ::testing::Pointee(kService1Id)))
       .Times(1)
       .RetiresOnSaturation();
   info1 = NULL;
+}
+
+namespace {
+
+bool InSet(std::set<std::string>* string_set, const std::string& str) {
+  std::pair<std::set<std::string>::iterator, bool> result =
+      string_set->insert(str);
+  return !result.second;
+}
+
+}  // anonymous namespace
+
+TEST_F(RenderbufferManagerTest, AddToSignature) {
+  const GLuint kClient1Id = 1;
+  const GLuint kService1Id = 11;
+  manager_.CreateRenderbufferInfo(kClient1Id, kService1Id);
+  RenderbufferManager::RenderbufferInfo::Ref info1(
+      manager_.GetRenderbufferInfo(kClient1Id));
+  ASSERT_TRUE(info1 != NULL);
+  const GLsizei kSamples = 4;
+  const GLenum kFormat = GL_RGBA4;
+  const GLsizei kWidth = 128;
+  const GLsizei kHeight = 64;
+  manager_.SetInfo(info1, kSamples, kFormat, kWidth, kHeight);
+  std::string signature1;
+  std::string signature2;
+  info1->AddToSignature(&signature1);
+
+  std::set<std::string> string_set;
+  EXPECT_FALSE(InSet(&string_set, signature1));
+
+  // change things and see that the signatures change.
+  manager_.SetInfo(info1, kSamples +  1, kFormat, kWidth, kHeight);
+  info1->AddToSignature(&signature2);
+  EXPECT_FALSE(InSet(&string_set, signature2));
+
+  manager_.SetInfo(info1, kSamples, kFormat + 1, kWidth, kHeight);
+  signature2.clear();
+  info1->AddToSignature(&signature2);
+  EXPECT_FALSE(InSet(&string_set, signature2));
+
+  manager_.SetInfo(info1, kSamples, kFormat, kWidth + 1, kHeight);
+  signature2.clear();
+  info1->AddToSignature(&signature2);
+  EXPECT_FALSE(InSet(&string_set, signature2));
+
+  manager_.SetInfo(info1, kSamples, kFormat, kWidth, kHeight + 1);
+  signature2.clear();
+  info1->AddToSignature(&signature2);
+  EXPECT_FALSE(InSet(&string_set, signature2));
+
+  // put it back to the same and it should be the same.
+  manager_.SetInfo(info1, kSamples, kFormat, kWidth, kHeight);
+  signature2.clear();
+  info1->AddToSignature(&signature2);
+  EXPECT_EQ(signature1, signature2);
+
+  // Check the set was acutally getting different signatures.
+  EXPECT_EQ(5u, string_set.size());
 }
 
 }  // namespace gles2

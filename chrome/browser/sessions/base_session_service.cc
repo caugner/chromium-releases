@@ -14,7 +14,6 @@
 #include "chrome/browser/sessions/session_backend.h"
 #include "chrome/browser/sessions/session_types.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/url_constants.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/common/referrer.h"
@@ -22,17 +21,6 @@
 
 using content::BrowserThread;
 using content::NavigationEntry;
-
-// InternalGetCommandsRequest -------------------------------------------------
-
-BaseSessionService::InternalGetCommandsRequest::InternalGetCommandsRequest(
-    const CallbackType& callback)
-    : CancelableRequest<InternalGetCommandsCallback>(callback) {
-}
-
-BaseSessionService::InternalGetCommandsRequest::~InternalGetCommandsRequest() {
-  STLDeleteElements(&commands);
-}
 
 // BaseSessionService ---------------------------------------------------------
 
@@ -49,6 +37,24 @@ void WriteStringToPickle(Pickle& pickle, int* bytes_written, int max_bytes,
     pickle.WriteString(str);
   } else {
     pickle.WriteString(std::string());
+  }
+}
+
+// Helper used by ScheduleGetLastSessionCommands. It runs callback on TaskRunner
+// thread if it's not canceled.
+void RunIfNotCanceled(
+    const CancelableTaskTracker::IsCanceledCallback& is_canceled,
+    base::TaskRunner* task_runner,
+    const BaseSessionService::InternalGetCommandsCallback& callback,
+    ScopedVector<SessionCommand> commands) {
+  if (is_canceled.Run())
+    return;
+
+  if (task_runner->RunsTasksOnCurrentThread()) {
+    callback.Run(commands.Pass());
+  } else {
+    task_runner->PostTask(FROM_HERE,
+                          base::Bind(callback, base::Passed(&commands)));
   }
 }
 
@@ -257,21 +263,25 @@ bool BaseSessionService::RestoreSetWindowAppNameCommand(
 }
 
 bool BaseSessionService::ShouldTrackEntry(const GURL& url) {
-  // NOTE: Do not track print preview tab because re-opening that page will
-  // just display a non-functional print preview page.
-  return url.is_valid() && url != GURL(chrome::kChromeUIPrintURL);
+  return url.is_valid();
 }
 
-BaseSessionService::Handle BaseSessionService::ScheduleGetLastSessionCommands(
-    InternalGetCommandsRequest* request,
-    CancelableRequestConsumerBase* consumer) {
-  scoped_refptr<InternalGetCommandsRequest> request_wrapper(request);
-  AddRequest(request, consumer);
+CancelableTaskTracker::TaskId
+    BaseSessionService::ScheduleGetLastSessionCommands(
+    const InternalGetCommandsCallback& callback,
+    CancelableTaskTracker* tracker) {
+  CancelableTaskTracker::IsCanceledCallback is_canceled;
+  CancelableTaskTracker::TaskId id = tracker->NewTrackedTaskId(&is_canceled);
+
+  InternalGetCommandsCallback callback_runner =
+      base::Bind(&RunIfNotCanceled,
+                 is_canceled, base::MessageLoopProxy::current(), callback);
+
   RunTaskOnBackendThread(
       FROM_HERE,
       base::Bind(&SessionBackend::ReadLastSessionCommands, backend(),
-                 request_wrapper));
-  return request->handle();
+                 is_canceled, callback_runner));
+  return id;
 }
 
 bool BaseSessionService::RunTaskOnBackendThread(

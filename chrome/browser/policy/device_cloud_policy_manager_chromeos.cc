@@ -7,12 +7,15 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "chrome/browser/chromeos/system/statistics_provider.h"
-#include "chrome/browser/policy/cloud_policy_client.h"
+#include "chrome/browser/policy/cloud_policy_store.h"
 #include "chrome/browser/policy/device_cloud_policy_store_chromeos.h"
 #include "chrome/browser/policy/device_management_service.h"
 #include "chrome/browser/policy/enrollment_handler_chromeos.h"
 #include "chrome/browser/policy/enterprise_install_attributes.h"
+#include "chrome/browser/policy/proto/device_management_backend.pb.h"
 #include "chrome/common/pref_names.h"
+
+namespace em = enterprise_management;
 
 namespace policy {
 
@@ -49,8 +52,8 @@ const char* kMachineInfoSerialNumberKeys[] = {
 DeviceCloudPolicyManagerChromeOS::DeviceCloudPolicyManagerChromeOS(
     scoped_ptr<DeviceCloudPolicyStoreChromeOS> store,
     EnterpriseInstallAttributes* install_attributes)
-    : CloudPolicyManager(make_scoped_ptr<CloudPolicyStore>(store.get())),
-      device_store_(store.release()),  // Hack: retain |store| till here.
+    : CloudPolicyManager(store.get()),
+      device_store_(store.Pass()),
       install_attributes_(install_attributes),
       device_management_service_(NULL),
       local_state_(NULL) {}
@@ -59,27 +62,31 @@ DeviceCloudPolicyManagerChromeOS::~DeviceCloudPolicyManagerChromeOS() {}
 
 void DeviceCloudPolicyManagerChromeOS::Connect(
     PrefService* local_state,
-    DeviceManagementService* device_management_service) {
+    DeviceManagementService* device_management_service,
+    scoped_ptr<CloudPolicyClient::StatusProvider> device_status_provider) {
   CHECK(!device_management_service_);
   CHECK(device_management_service);
   CHECK(local_state);
 
   local_state_ = local_state;
   device_management_service_ = device_management_service;
+  device_status_provider_ = device_status_provider.Pass();
 
   StartIfManaged();
 }
 
 void DeviceCloudPolicyManagerChromeOS::StartEnrollment(
     const std::string& auth_token,
+    bool is_auto_enrollment,
     const AllowedDeviceModes& allowed_device_modes,
     const EnrollmentCallback& callback) {
   CHECK(device_management_service_);
-  ShutdownService();
+  core()->Disconnect();
 
   enrollment_handler_.reset(
       new EnrollmentHandlerChromeOS(
-          device_store_, install_attributes_, CreateClient(), auth_token,
+          device_store_.get(), install_attributes_, CreateClient(), auth_token,
+          install_attributes_->GetDeviceId(), is_auto_enrollment,
           allowed_device_modes,
           base::Bind(&DeviceCloudPolicyManagerChromeOS::EnrollmentCompleted,
                      base::Unretained(this), callback)));
@@ -133,7 +140,9 @@ std::string DeviceCloudPolicyManagerChromeOS::GetMachineModel() {
 scoped_ptr<CloudPolicyClient> DeviceCloudPolicyManagerChromeOS::CreateClient() {
   return make_scoped_ptr(
       new CloudPolicyClient(GetMachineID(), GetMachineModel(),
-                            USER_AFFILIATION_NONE, POLICY_SCOPE_MACHINE, NULL,
+                            USER_AFFILIATION_NONE,
+                            CloudPolicyClient::POLICY_TYPE_DEVICE,
+                            device_status_provider_.get(),
                             device_management_service_));
 }
 
@@ -141,8 +150,10 @@ void DeviceCloudPolicyManagerChromeOS::EnrollmentCompleted(
     const EnrollmentCallback& callback,
     EnrollmentStatus status) {
   if (status.status() == EnrollmentStatus::STATUS_SUCCESS) {
-    InitializeService(enrollment_handler_->ReleaseClient());
-    StartRefreshScheduler(local_state_, prefs::kDevicePolicyRefreshRate);
+    core()->Connect(enrollment_handler_->ReleaseClient());
+    core()->StartRefreshScheduler();
+    core()->TrackRefreshDelayPref(local_state_,
+                                  prefs::kDevicePolicyRefreshRate);
   } else {
     StartIfManaged();
   }
@@ -155,11 +166,13 @@ void DeviceCloudPolicyManagerChromeOS::EnrollmentCompleted(
 void DeviceCloudPolicyManagerChromeOS::StartIfManaged() {
   if (device_management_service_ &&
       local_state_ &&
-      cloud_policy_store()->is_initialized() &&
-      cloud_policy_store()->is_managed() &&
-      !cloud_policy_service()) {
-    InitializeService(CreateClient());
-    StartRefreshScheduler(local_state_, prefs::kDevicePolicyRefreshRate);
+      store()->is_initialized() &&
+      store()->is_managed() &&
+      !service()) {
+    core()->Connect(CreateClient());
+    core()->StartRefreshScheduler();
+    core()->TrackRefreshDelayPref(local_state_,
+                                  prefs::kDevicePolicyRefreshRate);
   }
 }
 

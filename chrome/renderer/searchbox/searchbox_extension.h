@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -33,11 +33,16 @@ class SearchBoxExtension {
   static bool PageSupportsInstant(WebKit::WebFrame* frame);
 
   // Extended API.
+  static void DispatchOnWindowReady(WebKit::WebFrame* frame);
   static void DispatchAutocompleteResults(WebKit::WebFrame* frame);
   static void DispatchUpOrDownKeyPress(WebKit::WebFrame* frame, int count);
+  static void DispatchKeyCaptureChange(WebKit::WebFrame* frame);
   static void DispatchFocus(WebKit::WebFrame* frame);
   static void DispatchBlur(WebKit::WebFrame* frame);
   static void DispatchContextChange(WebKit::WebFrame* frame);
+  static void DispatchThemeChange(WebKit::WebFrame* frame);
+  static void DispatchThemeAreaHeightChange(WebKit::WebFrame* frame);
+  static void DispatchMarginChange(WebKit::WebFrame* frame);
 
  private:
   DISALLOW_IMPLICIT_CONSTRUCTORS(SearchBoxExtension);

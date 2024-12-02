@@ -22,6 +22,10 @@
         'android_builder_tests',
         '../android_webview/android_webview.gyp:android_webview_apk',
         '../chrome/chrome.gyp:chromium_testshell',
+        # TODO(nyquist) This should instead by a target for sync when all of
+        # the sync-related code for Android has been upstreamed.
+        # See http://crbug.com/159203
+        '../third_party/cacheinvalidation/cacheinvalidation.gyp:cacheinvalidation_javalib',
       ],
     }, # target_name: All
     {
@@ -36,8 +40,10 @@
       'target_name': 'android_builder_tests',
       'type': 'none',
       'dependencies': [
+        '../android_webview/android_webview.gyp:android_webview_unittests',
         '../base/android/jni_generator/jni_generator.gyp:jni_generator_tests',
         '../base/base.gyp:base_unittests',
+        '../cc/cc_tests.gyp:cc_perftests_apk',
         '../cc/cc_tests.gyp:cc_unittests',
         '../chrome/chrome.gyp:unit_tests',
         '../content/content.gyp:content_shell_test_apk',
@@ -51,6 +57,7 @@
         '../third_party/WebKit/Source/WebKit/chromium/All.gyp:*',
         '../tools/android/device_stats_monitor/device_stats_monitor.gyp:device_stats_monitor',
         '../tools/android/fake_dns/fake_dns.gyp:fake_dns',
+        '../tools/android/findbugs_plugin/findbugs_plugin.gyp:findbugs_plugin_test',
         '../tools/android/forwarder2/forwarder.gyp:forwarder2',
         '../tools/android/md5sum/md5sum.gyp:md5sum',
         '../ui/ui.gyp:ui_unittests',
@@ -64,6 +71,12 @@
         ['linux_breakpad==1', {
           'dependencies': [
             '../breakpad/breakpad.gyp:breakpad_unittests',
+            # Also compile the tools needed to deal with minidumps, they are
+            # needed to run minidump tests upstream.
+            '../breakpad/breakpad.gyp:dump_syms#host',
+            '../breakpad/breakpad.gyp:symupload#host',
+            '../breakpad/breakpad.gyp:minidump_dump#host',
+            '../breakpad/breakpad.gyp:minidump_stackwalk#host'
           ],
         }],
         ['"<(gtest_target_type)"=="shared_library"', {
@@ -74,6 +87,7 @@
             # target.
             '../testing/android/native_test.gyp:native_test_apk',
             # Unit test bundles packaged as an apk.
+            '../android_webview/android_webview.gyp:android_webview_unittests_apk',
             '../base/base.gyp:base_unittests_apk',
             '../cc/cc_tests.gyp:cc_unittests_apk',
             '../chrome/chrome.gyp:unit_tests_apk',

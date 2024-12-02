@@ -14,6 +14,7 @@
 #include "chrome/browser/chromeos/drive/drive_system_service.h"
 #include "chrome/browser/chromeos/extensions/file_browser_private_api.h"
 #include "chrome/browser/google_apis/drive_service_interface.h"
+#include "chrome/browser/google_apis/gdata_wapi_parser.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
@@ -115,7 +116,7 @@ void DriveTaskExecutor::OnFileEntryFetched(
 void DriveTaskExecutor::OnAppAuthorized(
     const std::string& resource_id,
     google_apis::GDataErrorCode error,
-    scoped_ptr<base::Value> feed_data) {
+    const GURL& open_link) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
 
   // If we aborted, then this will be zero.
@@ -130,30 +131,13 @@ void DriveTaskExecutor::OnAppAuthorized(
     return;
   }
 
-  // Yay!  We've got the feed data finally, and we can get the open-with URL.
-  GURL open_with_url;
-  base::ListValue* link_list = NULL;
-  feed_data->GetAsList(&link_list);
-  for (size_t i = 0; i < link_list->GetSize(); ++i) {
-    DictionaryValue* entry = NULL;
-    link_list->GetDictionary(i, &entry);
-    std::string app_id;
-    entry->GetString("app_id", &app_id);
-    if (app_id == extension_id()) {
-      std::string href;
-      entry->GetString("href", &href);
-      open_with_url = GURL(href);
-      break;
-    }
-  }
-
-  if (open_with_url.is_empty()) {
+  if (open_link.is_empty()) {
     Done(false);
     return;
   }
 
   Browser* browser = GetBrowser();
-  chrome::AddSelectedTabWithURL(browser, open_with_url,
+  chrome::AddSelectedTabWithURL(browser, open_link,
                                 content::PAGE_TRANSITION_LINK);
   // If the current browser is not tabbed then the new tab will be created
   // in a different browser. Make sure it is visible.

@@ -15,8 +15,8 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_paths_internal.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/extensions/url_pattern.h"
 #include "content/public/browser/browser_thread.h"
+#include "extensions/common/url_pattern.h"
 #include "googleurl/src/gurl.h"
 
 namespace {
@@ -38,8 +38,8 @@ enum ValidationCacheStatus {
 const FilePath::StringType NaClIrtName() {
   FilePath::StringType irt_name;
   if (CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableNaClIPCProxy))
-    irt_name.append(FILE_PATH_LITERAL("nacl_ipc_irt_"));
+          switches::kEnableNaClSRPCProxy))
+    irt_name.append(FILE_PATH_LITERAL("nacl_irt_srpc_"));
   else
     irt_name.append(FILE_PATH_LITERAL("nacl_irt_"));
 
@@ -256,6 +256,26 @@ bool NaClBrowser::URLMatchesDebugPatterns(GURL manifest_url) {
   } else {
     return matches;
   }
+}
+
+void NaClBrowser::FireGdbDebugStubPortOpened(int port) {
+  content::BrowserThread::PostTask(
+      content::BrowserThread::IO,
+      FROM_HERE,
+      base::Bind(debug_stub_port_listener_, port));
+}
+
+bool NaClBrowser::HasGdbDebugStubPortListener() {
+  return !debug_stub_port_listener_.is_null();
+}
+
+void NaClBrowser::SetGdbDebugStubPortListener(
+    base::Callback<void(int)> listener) {
+  debug_stub_port_listener_ = listener;
+}
+
+void NaClBrowser::ClearGdbDebugStubPortListener() {
+  debug_stub_port_listener_.Reset();
 }
 
 void NaClBrowser::InitValidationCacheFilePath() {

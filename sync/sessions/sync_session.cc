@@ -77,10 +77,10 @@ SyncSession::SyncSession(SyncSessionContext* context, Delegate* delegate,
       delegate_(delegate),
       workers_(workers),
       routing_info_(routing_info),
-      enabled_groups_(ComputeEnabledGroups(routing_info_, workers_)),
-      finished_(false) {
+      enabled_groups_(ComputeEnabledGroups(routing_info_, workers_)) {
   status_controller_.reset(new StatusController(routing_info_));
   std::sort(workers_.begin(), workers_.end());
+  debug_info_sources_list_.push_back(source_);
 }
 
 SyncSession::~SyncSession() {}
@@ -93,6 +93,7 @@ void SyncSession::Coalesce(const SyncSession& session) {
 
   // When we coalesce sessions, the sync update source gets overwritten with the
   // most recent, while the type/state map gets merged.
+  debug_info_sources_list_.push_back(session.source_);
   CoalesceStates(&source_.types, session.source_.types);
   source_.updates_source = session.source_.updates_source;
 
@@ -115,76 +116,67 @@ void SyncSession::Coalesce(const SyncSession& session) {
   enabled_groups_ = ComputeEnabledGroups(routing_info_, workers_);
 }
 
-void SyncSession::RebaseRoutingInfoWithLatest(const SyncSession& session) {
+void SyncSession::RebaseRoutingInfoWithLatest(
+    const ModelSafeRoutingInfo& routing_info,
+    const std::vector<ModelSafeWorker*>& workers) {
   ModelSafeRoutingInfo temp_routing_info;
 
-  // Take the intersecion and also set the routing info(it->second) from the
+  // Take the intersection and also set the routing info(it->second) from the
   // passed in session.
   for (ModelSafeRoutingInfo::const_iterator it =
-       session.routing_info_.begin(); it != session.routing_info_.end();
+       routing_info.begin(); it != routing_info.end();
        ++it) {
     if (routing_info_.find(it->first) != routing_info_.end()) {
       temp_routing_info[it->first] = it->second;
     }
   }
-
-  // Now swap it.
   routing_info_.swap(temp_routing_info);
 
-  // Now update the payload map.
-  PurgeStaleStates(&source_.types, session.routing_info_);
+  PurgeStaleStates(&source_.types, routing_info);
 
   // Now update the workers.
   std::vector<ModelSafeWorker*> temp;
+  std::vector<ModelSafeWorker*> sorted_workers = workers;
+  std::sort(sorted_workers.begin(), sorted_workers.end());
   std::set_intersection(workers_.begin(), workers_.end(),
-                 session.workers_.begin(), session.workers_.end(),
-                 std::back_inserter(temp));
+                        sorted_workers.begin(), sorted_workers.end(),
+                        std::back_inserter(temp));
   workers_.swap(temp);
 
   // Now update enabled groups.
   enabled_groups_ = ComputeEnabledGroups(routing_info_, workers_);
 }
 
-void SyncSession::PrepareForAnotherSyncCycle() {
-  finished_ = false;
-  source_.updates_source =
-      sync_pb::GetUpdatesCallerInfo::SYNC_CYCLE_CONTINUATION;
-  status_controller_.reset(new StatusController(routing_info_));
-}
-
 SyncSessionSnapshot SyncSession::TakeSnapshot() const {
   syncable::Directory* dir = context_->directory();
 
-  bool is_share_useable = true;
-  ModelTypeSet initial_sync_ended;
   ProgressMarkerMap download_progress_markers;
   for (int i = FIRST_REAL_MODEL_TYPE; i < MODEL_TYPE_COUNT; ++i) {
     ModelType type(ModelTypeFromInt(i));
-    if (routing_info_.count(type) != 0) {
-      if (dir->initial_sync_ended_for_type(type))
-        initial_sync_ended.Put(type);
-      else
-        is_share_useable = false;
-    }
     dir->GetDownloadProgressAsString(type, &download_progress_markers[type]);
   }
 
-  return SyncSessionSnapshot(
+  std::vector<int> num_entries_by_type(MODEL_TYPE_COUNT, 0);
+  std::vector<int> num_to_delete_entries_by_type(MODEL_TYPE_COUNT, 0);
+  dir->CollectMetaHandleCounts(&num_entries_by_type,
+                               &num_to_delete_entries_by_type);
+
+  SyncSessionSnapshot snapshot(
       status_controller_->model_neutral_state(),
-      is_share_useable,
-      initial_sync_ended,
       download_progress_markers,
-      HasMoreToSync(),
       delegate_->IsSyncingCurrentlySilenced(),
       status_controller_->num_encryption_conflicts(),
       status_controller_->num_hierarchy_conflicts(),
-      status_controller_->num_simple_conflicts(),
       status_controller_->num_server_conflicts(),
       source_,
+      debug_info_sources_list_,
       context_->notifications_enabled(),
       dir->GetEntriesCount(),
       status_controller_->sync_start_time(),
-      !Succeeded());
+      num_entries_by_type,
+      num_to_delete_entries_by_type);
+
+  return snapshot;
 }
 
 void SyncSession::SendEventNotification(SyncEngineEvent::EventCause cause) {
@@ -195,59 +187,15 @@ void SyncSession::SendEventNotification(SyncEngineEvent::EventCause cause) {
   context()->NotifyListeners(event);
 }
 
-bool SyncSession::HasMoreToSync() const {
-  const StatusController* status = status_controller_.get();
-  return status->conflicts_resolved();
-}
-
 const std::set<ModelSafeGroup>& SyncSession::GetEnabledGroups() const {
   return enabled_groups_;
 }
 
-// TODO(rlarocque): Delete this function after refactoring conflict resolution.
-std::set<ModelSafeGroup> SyncSession::GetEnabledGroupsWithConflicts() const {
-  const std::set<ModelSafeGroup>& enabled_groups = GetEnabledGroups();
-  std::set<ModelSafeGroup> enabled_groups_with_conflicts;
-  for (std::set<ModelSafeGroup>::const_iterator it =
-           enabled_groups.begin(); it != enabled_groups.end(); ++it) {
-    const std::set<syncable::Id>* ids =
-        status_controller_->GetUnrestrictedSimpleConflictIds(*it);
-    if (ids && ids->size() > 0) {
-      enabled_groups_with_conflicts.insert(*it);
-    }
-  }
-  return enabled_groups_with_conflicts;
-}
-
-namespace {
-
-// Returns false iff one of the command results had an error.
-bool HadErrors(const ModelNeutralState& state) {
-  const bool get_key_error = SyncerErrorIsError(state.last_get_key_result);
-  const bool download_updates_error =
-      SyncerErrorIsError(state.last_download_updates_result);
-  const bool commit_error = SyncerErrorIsError(state.commit_result);
-  return get_key_error || download_updates_error || commit_error;
-}
-}  // namespace
-
-bool SyncSession::Succeeded() const {
-  return finished_ && !HadErrors(status_controller_->model_neutral_state());
-}
-
-bool SyncSession::SuccessfullyReachedServer() const {
+bool SyncSession::DidReachServer() const {
   const ModelNeutralState& state = status_controller_->model_neutral_state();
-  bool reached_server = state.last_get_key_result == SYNCER_OK ||
-                        state.last_download_updates_result == SYNCER_OK;
-  // It's possible that we reached the server on one attempt, then had an error
-  // on the next (or didn't perform some of the server-communicating commands).
-  // We want to verify that, for all commands attempted, we successfully spoke
-  // with the server. Therefore, we verify no errors and at least one SYNCER_OK.
-  return reached_server && !HadErrors(state);
-}
-
-void SyncSession::SetFinished() {
-  finished_ = true;
+  return state.last_get_key_result >= FIRST_SERVER_RETURN_VALUE ||
+      state.last_download_updates_result >= FIRST_SERVER_RETURN_VALUE ||
+      state.commit_result >= FIRST_SERVER_RETURN_VALUE;
 }
 
 }  // namespace sessions

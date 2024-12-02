@@ -77,9 +77,10 @@ void WindowWatcher::OnWindowAdded(aura::Window* new_window) {
     return;
 
   static int image_count = 0;
-  ash::LauncherModel* model = Launcher::ForPrimaryDisplay()->model();
+  ash::LauncherModel* model = Shell::GetInstance()->launcher_model();
   ash::LauncherItem item;
-  item.type = ash::TYPE_TABBED;
+  item.type = new_window->type() == aura::client::WINDOW_TYPE_PANEL ?
+                                    ash::TYPE_APP_PANEL : ash::TYPE_TABBED;
   id_to_window_[model->next_id()] = new_window;
 
   SkBitmap icon_bitmap;
@@ -91,7 +92,7 @@ void WindowWatcher::OnWindowAdded(aura::Window* new_window) {
                         image_count == 2 ? 255 : 0);
   image_count = (image_count + 1) % 3;
   item.image = gfx::ImageSkia(gfx::ImageSkiaRep(icon_bitmap,
-                                                ui::SCALE_FACTOR_NONE));
+                                                ui::SCALE_FACTOR_100P));
 
   model->Add(item);
 }
@@ -100,7 +101,7 @@ void WindowWatcher::OnWillRemoveWindow(aura::Window* window) {
   for (IDToWindow::iterator i = id_to_window_.begin();
        i != id_to_window_.end(); ++i) {
     if (i->second == window) {
-      ash::LauncherModel* model = Launcher::ForPrimaryDisplay()->model();
+      ash::LauncherModel* model = Shell::GetInstance()->launcher_model();
       int index = model->ItemIndexByID(i->first);
       DCHECK_NE(-1, index);
       model->RemoveItemAt(index);

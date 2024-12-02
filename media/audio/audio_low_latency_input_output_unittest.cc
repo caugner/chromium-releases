@@ -26,6 +26,7 @@
 #elif defined(OS_WIN)
 #include "base/win/scoped_com_initializer.h"
 #include "media/audio/win/audio_manager_win.h"
+#include "media/audio/win/core_audio_util_win.h"
 #elif defined(OS_ANDROID)
 #include "media/audio/android/audio_manager_android.h"
 #endif
@@ -225,7 +226,7 @@ class FullDuplexAudioSinkSource
       // Special fix for Windows in combination with Wave where the
       // pending bytes field of the audio buffer state is used to
       // report the delay.
-      if (!media::IsWASAPISupported()) {
+      if (!CoreAudioUtil::IsSupported()) {
         output_delay_bytes = buffers_state.pending_bytes;
       }
 #endif
@@ -291,6 +292,11 @@ class AudioInputStreamTraits {
         AudioManagerBase::kDefaultDeviceId));
   }
 
+  // TODO(henrika): add support for GetAudioInputHardwareBufferSize in media.
+  static int HardwareBufferSize() {
+    return static_cast<int>(media::GetAudioHardwareBufferSize());
+  }
+
   static StreamType* CreateStream(AudioManager* audio_manager,
       const AudioParameters& params) {
     return audio_manager->MakeAudioInputStream(params,
@@ -304,6 +310,10 @@ class AudioOutputStreamTraits {
 
   static int HardwareSampleRate() {
     return static_cast<int>(media::GetAudioHardwareSampleRate());
+  }
+
+  static int HardwareBufferSize() {
+    return static_cast<int>(media::GetAudioHardwareBufferSize());
   }
 
   static StreamType* CreateStream(AudioManager* audio_manager,
@@ -332,35 +342,12 @@ class StreamWrapper {
         channel_layout_(CHANNEL_LAYOUT_STEREO),
 #endif
         bits_per_sample_(16) {
-    // Use native/mixing sample rate and N*10ms frame size as default,
-    // where N is platform dependent.
+    // Use the preferred sample rate.
     sample_rate_ = StreamTraits::HardwareSampleRate();
-#if defined(OS_MACOSX)
-    // 10ms buffer size works well for 44.1, 48, 96 and 192kHz.
-    samples_per_packet_ = (sample_rate_ / 100);
-#elif defined(OS_LINUX) || defined(OS_OPENBSD)
-    // 10ms buffer size works well for 44.1, 48, 96 and 192kHz.
-    samples_per_packet_ = (sample_rate_ / 100);
-#elif defined(OS_WIN)
-    if (media::IsWASAPISupported()) {
-      // WASAPI is supported for Windows Vista and higher.
-      if (sample_rate_ == 44100) {
-        // Tests have shown that the shared mode WASAPI implementation
-        // works bests for a period size of ~10.15873 ms when the sample
-        // rate is 44.1kHz.
-        samples_per_packet_ = 448;
-      } else {
-        // 10ms buffer size works well for 48, 96 and 192kHz.
-        samples_per_packet_ = (sample_rate_ / 100);
-      }
-    } else {
-      // Low-latency Wave implementation needs 30ms buffer size to
-      // ensure glitch-free output audio.
-      samples_per_packet_ = 3 * (sample_rate_ / 100);
-    }
-#elif defined(OS_ANDROID)
-      samples_per_packet_ = (sample_rate_ / 100);
-#endif
+
+    // Use the preferred buffer size. Note that the input side uses the same
+    // size as the output side in this implementation.
+    samples_per_packet_ = StreamTraits::HardwareBufferSize();
   }
 
   virtual ~StreamWrapper() {}
@@ -469,7 +456,7 @@ TEST_F(AudioLowLatencyInputOutputTest, DISABLED_FullDuplexDelayMeasurement) {
   // All Close() operations that run on the mocked audio thread,
   // should be synchronous and not post additional close tasks to
   // mocked the audio thread. Hence, there is no need to call
-  // message_loop()->RunAllPending() after the Close() methods.
+  // message_loop()->RunUntilIdle() after the Close() methods.
   aos->Close();
   ais->Close();
 }

@@ -11,9 +11,9 @@
 #include "base/command_line.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/scoped_temp_dir.h"
 #include "base/memory/ref_counted.h"
 #include "base/path_service.h"
-#include "base/scoped_temp_dir.h"
 #include "base/string16.h"
 #include "base/stringprintf.h"
 #include "base/test/test_file_util.h"
@@ -50,7 +50,6 @@
 #include "chrome/browser/ui/omnibox/omnibox_edit_model.h"
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
 #include "chrome/browser/ui/search/search.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
@@ -79,10 +78,13 @@
 #include "content/public/common/url_constants.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/download_test_observer.h"
+#include "content/public/test/test_navigation_observer.h"
 #include "content/public/test/test_utils.h"
+#include "content/test/net/url_request_failed_job.h"
 #include "content/test/net/url_request_mock_http_job.h"
 #include "googleurl/src/gurl.h"
 #include "grit/generated_resources.h"
+#include "net/base/net_errors.h"
 #include "net/base/net_util.h"
 #include "net/http/http_stream_factory.h"
 #include "net/url_request/url_request.h"
@@ -120,45 +122,75 @@ const char kCookieOptions[] = ";expires=Wed Jan 01 3000 00:00:00 GMT";
 const FilePath::CharType kTestExtensionsDir[] = FILE_PATH_LITERAL("extensions");
 const FilePath::CharType kGoodCrxName[] = FILE_PATH_LITERAL("good.crx");
 const FilePath::CharType kAdBlockCrxName[] = FILE_PATH_LITERAL("adblock.crx");
+const FilePath::CharType kHostedAppCrxName[] =
+    FILE_PATH_LITERAL("hosted_app.crx");
 
 const char kGoodCrxId[] = "ldnnhddmnhbkjipkidpdiheffobcpfmf";
 const char kAdBlockCrxId[] = "dojnnbeimaimaojcialkkgajdnefpgcn";
+const char kHostedAppCrxId[] = "kbmnembihfiondgfjekmnmcbddelicoi";
 
 const FilePath::CharType kGoodCrxManifestName[] =
     FILE_PATH_LITERAL("good_update_manifest.xml");
 
 const char* kURLs[] = {
-  chrome::kChromeUINewTabURL,
-  chrome::kChromeUIAboutURL,
-  chrome::kChromeUICreditsURL,
-  chrome::kChromeUIPolicyURL,
-  chrome::kChromeUIVersionURL,
+  "http://aaa.com/empty.html",
+  "http://bbb.com/empty.html",
+  "http://ccc.com/empty.html",
+  "http://ddd.com/empty.html",
+  "http://eee.com/empty.html",
 };
 
 // Filters requests to the hosts in |urls| and redirects them to the test data
 // dir through URLRequestMockHTTPJobs.
-void RedirectHostsToTestDataOnIOThread(const GURL* const urls[], size_t size) {
+void RedirectHostsToTestData(const char* const urls[], size_t size) {
   // Map the given hosts to the test data dir.
   net::URLRequestFilter* filter = net::URLRequestFilter::GetInstance();
   for (size_t i = 0; i < size; ++i) {
-    const GURL* url = urls[i];
-    EXPECT_TRUE(url->is_valid());
-    filter->AddHostnameHandler(url->scheme(), url->host(),
+    const GURL url(urls[i]);
+    EXPECT_TRUE(url.is_valid());
+    filter->AddHostnameHandler(url.scheme(), url.host(),
                                URLRequestMockHTTPJob::Factory);
   }
 }
 
-// Verifies that the given |url| can be opened. This assumes that |url| points
-// at empty.html in the test data dir.
-void CheckCanOpenURL(Browser* browser, const GURL& url) {
+// Fails requests using ERR_CONNECTION_RESET.
+net::URLRequestJob* FailedJobFactory(
+    net::URLRequest* request,
+    net::NetworkDelegate* network_delegate,
+    const std::string& scheme) {
+  return new content::URLRequestFailedJob(
+      request, network_delegate, net::ERR_CONNECTION_RESET);
+}
+
+// Filters requests to the |host| such that they fail. Run on IO thread.
+void MakeRequestFailOnIO(const std::string& host) {
+  net::URLRequestFilter* filter = net::URLRequestFilter::GetInstance();
+  filter->AddHostnameHandler("http", host, &FailedJobFactory);
+  filter->AddHostnameHandler("https", host, &FailedJobFactory);
+}
+
+// Sets up the filter on IO thread such that requests to |host| fail.
+void MakeRequestFail(const std::string& host) {
+  BrowserThread::PostTaskAndReply(
+      BrowserThread::IO, FROM_HERE,
+      base::Bind(MakeRequestFailOnIO, host),
+      MessageLoop::QuitClosure());
+  content::RunMessageLoop();
+}
+
+// Verifies that the given url |spec| can be opened. This assumes that |spec|
+// points at empty.html in the test data dir.
+void CheckCanOpenURL(Browser* browser, const char* spec) {
+  GURL url(spec);
   ui_test_utils::NavigateToURL(browser, url);
   content::WebContents* contents = chrome::GetActiveWebContents(browser);
   EXPECT_EQ(url, contents->GetURL());
   EXPECT_EQ(net::FormatUrl(url, std::string()), contents->GetTitle());
 }
 
-// Verifies that access to the given |url| is blocked.
-void CheckURLIsBlocked(Browser* browser, const GURL& url) {
+// Verifies that access to the given url |spec| is blocked.
+void CheckURLIsBlocked(Browser* browser, const char* spec) {
+  GURL url(spec);
   ui_test_utils::NavigateToURL(browser, url);
   content::WebContents* contents = chrome::GetActiveWebContents(browser);
   EXPECT_EQ(url, contents->GetURL());
@@ -583,6 +615,8 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, ClearSiteDataOnExit) {
 }
 
 IN_PROC_BROWSER_TEST_F(PolicyTest, DefaultSearchProvider) {
+  MakeRequestFail("search.example");
+
   // Verifies that a default search is made using the provider configured via
   // policy. Also checks that default search can be completely disabled.
   const string16 kKeyword(ASCIIToUTF16("testsearch"));
@@ -648,22 +682,73 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, DefaultSearchProvider) {
   EXPECT_EQ(GURL(chrome::kAboutBlankURL), web_contents->GetURL());
 }
 
-IN_PROC_BROWSER_TEST_F(PolicyTest, ReplaceSearchTerms) {
-  CommandLine::ForCurrentProcess()->AppendSwitch(
-      switches::kEnableInstantExtendedAPI);
+IN_PROC_BROWSER_TEST_F(PolicyTest, ForceSafeSearch) {
+  // Makes the requests fail since all we want to check is that the redirection
+  // is done properly.
+  MakeRequestFail("google.com");
 
-  // Adding the kEnableInstantExtendedAPI is not enough since
-  // IsInstantExtendedAPIEnabled does not return true on CHANNEL_DEV.
-  if (!chrome::search::IsInstantExtendedAPIEnabled(browser()->profile()))
-    return;
+  // Verifies that requests to Google Search engine with the SafeSearch
+  // enabled set the safe=active&ssui=on parameters at the end of the query.
+  TemplateURLService* service = TemplateURLServiceFactory::GetForProfile(
+      browser()->profile());
+  ui_test_utils::WaitForTemplateURLServiceToLoad(service);
+
+  // First check that nothing happens.
+  content::TestNavigationObserver no_safesearch_observer(
+      content::NotificationService::AllSources());
+  chrome::FocusLocationBar(browser());
+  LocationBar* location_bar = browser()->window()->GetLocationBar();
+  ui_test_utils::SendToOmniboxAndSubmit(location_bar, "http://google.com/");
+  OmniboxEditModel* model = location_bar->GetLocationEntry()->model();
+  no_safesearch_observer.Wait();
+  EXPECT_TRUE(model->CurrentMatch().destination_url.is_valid());
+  content::WebContents* web_contents = chrome::GetActiveWebContents(browser());
+  GURL expected_without("http://google.com/");
+  EXPECT_EQ(expected_without, web_contents->GetURL());
+
+  PrefService* prefs = browser()->profile()->GetPrefs();
+  EXPECT_FALSE(prefs->IsManagedPreference(prefs::kForceSafeSearch));
+  EXPECT_FALSE(prefs->GetBoolean(prefs::kForceSafeSearch));
+
+  // Override the default SafeSearch setting using policies.
+  PolicyMap policies;
+  policies.Set(key::kForceSafeSearch, POLICY_LEVEL_MANDATORY,
+               POLICY_SCOPE_USER, base::Value::CreateBooleanValue(true));
+  provider_.UpdateChromePolicy(policies);
+
+  EXPECT_TRUE(prefs->IsManagedPreference(prefs::kForceSafeSearch));
+  EXPECT_TRUE(prefs->GetBoolean(prefs::kForceSafeSearch));
+
+  content::TestNavigationObserver safesearch_observer(
+      content::NotificationService::AllSources());
+
+  // Verify that searching from google.com works.
+  chrome::FocusLocationBar(browser());
+  location_bar = browser()->window()->GetLocationBar();
+  ui_test_utils::SendToOmniboxAndSubmit(location_bar, "http://google.com/");
+  safesearch_observer.Wait();
+  model = location_bar->GetLocationEntry()->model();
+  EXPECT_TRUE(model->CurrentMatch().destination_url.is_valid());
+  web_contents = chrome::GetActiveWebContents(browser());
+  std::string expected_url("http://google.com/?");
+  expected_url += std::string(chrome::kSafeSearchSafeParameter) + "&" +
+                  chrome::kSafeSearchSsuiParameter;
+  GURL expected_with_parameters(expected_url);
+  EXPECT_EQ(expected_with_parameters, web_contents->GetURL());
+}
+
+IN_PROC_BROWSER_TEST_F(PolicyTest, ReplaceSearchTerms) {
+  MakeRequestFail("search.example");
+
+  chrome::search::EnableInstantExtendedAPIForTesting();
 
   // Verifies that a default search is made using the provider configured via
   // policy. Also checks that default search can be completely disabled.
   const string16 kKeyword(ASCIIToUTF16("testsearch"));
-  const std::string kSearchURL("https://search.example/search?q={searchTerms}");
+  const std::string kSearchURL("https://www.google.com/search?q={searchTerms}");
   const std::string kAlternateURL0(
-      "https://search.example/search#q={searchTerms}");
-  const std::string kAlternateURL1("https://search.example/#q={searchTerms}");
+      "https://www.google.com/search#q={searchTerms}");
+  const std::string kAlternateURL1("https://www.google.com/#q={searchTerms}");
 
   TemplateURLService* service = TemplateURLServiceFactory::GetForProfile(
       browser()->profile());
@@ -704,16 +789,26 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, ReplaceSearchTerms) {
   chrome::FocusLocationBar(browser());
   LocationBar* location_bar = browser()->window()->GetLocationBar();
   ui_test_utils::SendToOmniboxAndSubmit(location_bar,
-      "https://search.example/#q=foobar");
+      "https://www.google.com/?espv=1#q=foobar");
   OmniboxEditModel* model = location_bar->GetLocationEntry()->model();
   EXPECT_TRUE(model->CurrentMatch().destination_url.is_valid());
   EXPECT_EQ(ASCIIToUTF16("foobar"), model->CurrentMatch().contents);
+
+  // Verify that not using espv=1 does not do search term replacement.
+  chrome::FocusLocationBar(browser());
+  location_bar = browser()->window()->GetLocationBar();
+  ui_test_utils::SendToOmniboxAndSubmit(location_bar,
+      "https://www.google.com/?q=foobar");
+  model = location_bar->GetLocationEntry()->model();
+  EXPECT_TRUE(model->CurrentMatch().destination_url.is_valid());
+  EXPECT_EQ(ASCIIToUTF16("https://www.google.com/?q=foobar"),
+            model->CurrentMatch().contents);
 
   // Verify that searching from the omnibox does search term replacement with
   // second URL pattern.
   chrome::FocusLocationBar(browser());
   ui_test_utils::SendToOmniboxAndSubmit(location_bar,
-      "https://search.example/search#q=banana");
+      "https://www.google.com/search?espv=1#q=banana");
   model = location_bar->GetLocationEntry()->model();
   EXPECT_TRUE(model->CurrentMatch().destination_url.is_valid());
   EXPECT_EQ(ASCIIToUTF16("banana"), model->CurrentMatch().contents);
@@ -722,7 +817,7 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, ReplaceSearchTerms) {
   // standard search URL pattern.
   chrome::FocusLocationBar(browser());
   ui_test_utils::SendToOmniboxAndSubmit(location_bar,
-      "https://search.example/search?q=tractor+parts");
+      "https://www.google.com/search?q=tractor+parts&espv=1");
   model = location_bar->GetLocationEntry()->model();
   EXPECT_TRUE(model->CurrentMatch().destination_url.is_valid());
   EXPECT_EQ(ASCIIToUTF16("tractor parts"), model->CurrentMatch().contents);
@@ -730,7 +825,7 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, ReplaceSearchTerms) {
   // Verify that searching from the omnibox prioritizes hash over query.
   chrome::FocusLocationBar(browser());
   ui_test_utils::SendToOmniboxAndSubmit(location_bar,
-      "https://search.example/search?q=tractor+parts#q=foobar");
+      "https://www.google.com/search?q=tractor+parts&espv=1#q=foobar");
   model = location_bar->GetLocationEntry()->model();
   EXPECT_TRUE(model->CurrentMatch().destination_url.is_valid());
   EXPECT_EQ(ASCIIToUTF16("foobar"), model->CurrentMatch().contents);
@@ -956,7 +1051,7 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, DownloadDirectory) {
   // Verifies that the download directory can be forced by policy.
 
   // Set the initial download directory.
-  ScopedTempDir initial_dir;
+  base::ScopedTempDir initial_dir;
   ASSERT_TRUE(initial_dir.CreateUniqueTempDir());
   browser()->profile()->GetPrefs()->SetFilePath(
       prefs::kDownloadDefaultDirectory, initial_dir.path());
@@ -970,7 +1065,7 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, DownloadDirectory) {
   file_util::DieFileDie(initial_dir.path().Append(file), false);
 
   // Override the download directory with the policy and verify a download.
-  ScopedTempDir forced_dir;
+  base::ScopedTempDir forced_dir;
   ASSERT_TRUE(forced_dir.CreateUniqueTempDir());
   PolicyMap policies;
   policies.Set(key::kDownloadDirectory, POLICY_LEVEL_MANDATORY,
@@ -1077,6 +1172,34 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, ExtensionInstallForcelist) {
   EXPECT_EQ(details.ptr(), service->GetExtensionById(kGoodCrxId, true));
   // The user is not allowed to uninstall force-installed extensions.
   UninstallExtension(kGoodCrxId, false);
+}
+
+IN_PROC_BROWSER_TEST_F(PolicyTest, ExtensionAllowedTypes) {
+  // Verifies that extensions are blocked if policy specifies an allowed types
+  // list and the extension's type is not on that list.
+  ExtensionService* service = extension_service();
+  ASSERT_FALSE(service->GetExtensionById(kGoodCrxId, true));
+  ASSERT_FALSE(service->GetExtensionById(kHostedAppCrxId, true));
+
+  base::ListValue allowed_types;
+  allowed_types.AppendString("hosted_app");
+  PolicyMap policies;
+  policies.Set(key::kExtensionAllowedTypes, POLICY_LEVEL_MANDATORY,
+               POLICY_SCOPE_USER, allowed_types.DeepCopy());
+  provider_.UpdateChromePolicy(policies);
+
+  // "good.crx" is blocked.
+  EXPECT_FALSE(InstallExtension(kGoodCrxName));
+  EXPECT_FALSE(service->GetExtensionById(kGoodCrxId, true));
+
+  // "hosted_app.crx" is of a whitelisted type.
+  const extensions::Extension* hosted_app = InstallExtension(kHostedAppCrxName);
+  ASSERT_TRUE(hosted_app);
+  EXPECT_EQ(kHostedAppCrxId, hosted_app->id());
+  EXPECT_EQ(hosted_app, service->GetExtensionById(kHostedAppCrxId, true));
+
+  // The user can remove the extension.
+  UninstallExtension(kHostedAppCrxId, true);
 }
 
 IN_PROC_BROWSER_TEST_F(PolicyTest, HomepageLocation) {
@@ -1249,27 +1372,24 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, TranslateEnabled) {
 IN_PROC_BROWSER_TEST_F(PolicyTest, URLBlacklist) {
   // Checks that URLs can be blacklisted, and that exceptions can be made to
   // the blacklist.
-  const GURL kAAA("http://aaa.com/empty.html");
-  const GURL kBBB("http://bbb.com/empty.html");
-  const GURL kSUB_BBB("http://sub.bbb.com/empty.html");
-  const GURL kBBB_PATH("http://bbb.com/policy/device_management");
+
   // Filter |kURLS| on IO thread, so that requests to those hosts end up
   // as URLRequestMockHTTPJobs.
-  const GURL* kURLS[] = {
-    &kAAA,
-    &kBBB,
-    &kSUB_BBB,
-    &kBBB_PATH,
+  const char* kURLS[] = {
+    "http://aaa.com/empty.html",
+    "http://bbb.com/empty.html",
+    "http://sub.bbb.com/empty.html",
+    "http://bbb.com/policy/device_management",
   };
   BrowserThread::PostTaskAndReply(
       BrowserThread::IO, FROM_HERE,
-      base::Bind(RedirectHostsToTestDataOnIOThread, kURLS, arraysize(kURLS)),
+      base::Bind(RedirectHostsToTestData, kURLS, arraysize(kURLS)),
       MessageLoop::QuitClosure());
   content::RunMessageLoop();
 
   // Verify that all the URLs can be opened without a blacklist.
   for (size_t i = 0; i < arraysize(kURLS); ++i)
-    CheckCanOpenURL(browser(), *kURLS[i]);
+    CheckCanOpenURL(browser(), kURLS[i]);
 
   // Set a blacklist.
   base::ListValue blacklist;
@@ -1280,9 +1400,9 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, URLBlacklist) {
   provider_.UpdateChromePolicy(policies);
   FlushBlacklistPolicy();
   // All bbb.com URLs are blocked.
-  CheckCanOpenURL(browser(), kAAA);
+  CheckCanOpenURL(browser(), kURLS[0]);
   for (size_t i = 1; i < arraysize(kURLS); ++i)
-    CheckURLIsBlocked(browser(), *kURLS[i]);
+    CheckURLIsBlocked(browser(), kURLS[i]);
 
   // Whitelist some sites of bbb.com.
   base::ListValue whitelist;
@@ -1292,10 +1412,10 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, URLBlacklist) {
                POLICY_SCOPE_USER, whitelist.DeepCopy());
   provider_.UpdateChromePolicy(policies);
   FlushBlacklistPolicy();
-  CheckCanOpenURL(browser(), kAAA);
-  CheckURLIsBlocked(browser(), kBBB);
-  CheckCanOpenURL(browser(), kSUB_BBB);
-  CheckCanOpenURL(browser(), kBBB_PATH);
+  CheckCanOpenURL(browser(), kURLS[0]);
+  CheckURLIsBlocked(browser(), kURLS[1]);
+  CheckCanOpenURL(browser(), kURLS[2]);
+  CheckCanOpenURL(browser(), kURLS[3]);
 }
 
 // Flaky on Linux. http://crbug.com/155459
@@ -1405,6 +1525,9 @@ class RestoreOnStartupPolicyTest
     command_line->InitFromArgv(argv);
     ASSERT_TRUE(std::equal(argv.begin(), argv.end(),
                            command_line->argv().begin()));
+
+    // Redirect the test URLs to the test data directory.
+    RedirectHostsToTestData(kURLs, arraysize(kURLs));
   }
 
   void HomepageIsNotNTP() {
@@ -1439,7 +1562,7 @@ class RestoreOnStartupPolicyTest
         base::Value::CreateBooleanValue(true));
     provider_.UpdateChromePolicy(policies);
 
-    expected_urls_.push_back(GURL(kURLs[0]));
+    expected_urls_.push_back(GURL(chrome::kChromeUINewTabURL));
   }
 
   void ListOfURLs() {
@@ -1466,7 +1589,7 @@ class RestoreOnStartupPolicyTest
         key::kRestoreOnStartup, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
         base::Value::CreateIntegerValue(SessionStartupPref::kPrefValueNewTab));
     provider_.UpdateChromePolicy(policies);
-    expected_urls_.push_back(GURL(kURLs[0]));
+    expected_urls_.push_back(GURL(chrome::kChromeUINewTabURL));
   }
 
   void Last() {
@@ -1504,8 +1627,7 @@ IN_PROC_BROWSER_TEST_P(RestoreOnStartupPolicyTest, RunTest) {
   int size = static_cast<int>(expected_urls_.size());
   EXPECT_EQ(size, model->count());
   for (int i = 0; i < size && i < model->count(); ++i) {
-    EXPECT_EQ(expected_urls_[i],
-              model->GetTabContentsAt(i)->web_contents()->GetURL());
+    EXPECT_EQ(expected_urls_[i], model->GetWebContentsAt(i)->GetURL());
   }
 }
 

@@ -16,6 +16,7 @@
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/browser/site_instance_impl.h"
 #include "content/common/accessibility_node_data.h"
+#include "content/common/drag_event_source_info.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/common/javascript_message_type.h"
@@ -33,6 +34,7 @@ struct AccessibilityHostMsg_NotificationParams;
 struct MediaPlayerAction;
 struct ViewHostMsg_CreateWindow_Params;
 struct ViewHostMsg_DidFailProvisionalLoadWithError_Params;
+struct ViewHostMsg_OpenURL_Params;
 struct ViewHostMsg_ShowPopup_Params;
 struct ViewMsg_Navigate_Params;
 struct ViewMsg_PostMessage_Params;
@@ -380,11 +382,6 @@ class CONTENT_EXPORT RenderViewHostImpl
       const NativeWebKeyboardEvent& key_event) OVERRIDE;
   virtual gfx::Rect GetRootWindowResizerRect() const OVERRIDE;
 
-#if defined(OS_ANDROID)
-  virtual void AttachLayer(WebKit::WebLayer* layer) OVERRIDE;
-  virtual void RemoveLayer(WebKit::WebLayer* layer) OVERRIDE;
-#endif
-
   // Creates a new RenderView with the given route id.
   void CreateNewWindow(
       int route_id,
@@ -419,6 +416,9 @@ class CONTENT_EXPORT RenderViewHostImpl
   const std::string& frame_tree() const {
     return frame_tree_;
   }
+
+  // Set the opener to null in the renderer process.
+  void DisownOpener();
 
   // Updates the frame tree for this RVH and sends an IPC down to the renderer
   // process to keep them in sync. For more details, see the comments on
@@ -484,10 +484,8 @@ class CONTENT_EXPORT RenderViewHostImpl
   void OnMsgDidStartProvisionalLoadForFrame(int64 frame_id,
                                             int64 parent_frame_id,
                                             bool main_frame,
-                                            const GURL& opener_url,
                                             const GURL& url);
   void OnMsgDidRedirectProvisionalLoad(int32 page_id,
-                                       const GURL& opener_url,
                                        const GURL& source_url,
                                        const GURL& target_url);
   void OnMsgDidFailProvisionalLoadWithError(
@@ -505,15 +503,14 @@ class CONTENT_EXPORT RenderViewHostImpl
   void OnMsgDidStartLoading();
   void OnMsgDidStopLoading();
   void OnMsgDidChangeLoadProgress(double load_progress);
+  void OnMsgDidDisownOpener();
   void OnMsgDocumentAvailableInMainFrame();
   void OnMsgDocumentOnLoadCompletedInMainFrame(int32 page_id);
   void OnMsgContextMenu(const ContextMenuParams& params);
   void OnMsgToggleFullscreen(bool enter_fullscreen);
-  void OnMsgOpenURL(const GURL& url,
-                    const Referrer& referrer,
-                    WindowOpenDisposition disposition,
-                    int64 source_frame_id);
+  void OnMsgOpenURL(const ViewHostMsg_OpenURL_Params& params);
   void OnMsgDidContentsPreferredSizeChange(const gfx::Size& new_size);
+  void OnDidChangeScrollOffset();
   void OnMsgDidChangeScrollbarsForMainFrame(bool has_horizontal_scrollbar,
                                             bool has_vertical_scrollbar);
   void OnMsgDidChangeScrollOffsetPinningForMainFrame(bool is_pinned_to_left,
@@ -541,7 +538,8 @@ class CONTENT_EXPORT RenderViewHostImpl
   void OnMsgStartDragging(const WebDropData& drop_data,
                           WebKit::WebDragOperationsMask operations_allowed,
                           const SkBitmap& bitmap,
-                          const gfx::Point& bitmap_offset_in_dip);
+                          const gfx::Vector2d& bitmap_offset_in_dip,
+                          const DragEventSourceInfo& event_info);
   void OnUpdateDragCursor(WebKit::WebDragOperation drag_operation);
   void OnTargetDropACK();
   void OnTakeFocus(bool reverse);
@@ -574,6 +572,7 @@ class CONTENT_EXPORT RenderViewHostImpl
   void OnDomOperationResponse(const std::string& json_string,
                               int automation_id);
   void OnFrameTreeUpdated(const std::string& frame_tree);
+  void OnGetWindowSnapshot(const int snapshot_id);
 
 #if defined(OS_MACOSX) || defined(OS_ANDROID)
   void OnMsgShowPopup(const ViewHostMsg_ShowPopup_Params& params);

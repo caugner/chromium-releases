@@ -136,6 +136,13 @@ struct HistoryURLProviderParams {
 // component of the history system.  See comments above.
 class HistoryURLProvider : public HistoryProvider {
  public:
+  // Various values used in scoring, made public so other providers
+  // can insert results in appropriate ranges relative to these.
+  static const int kScoreForBestInlineableResult;
+  static const int kScoreForUnvisitedIntranetResult;
+  static const int kScoreForWhatYouTypedResult;
+  static const int kBaseScoreForNonInlineableResult;
+
   HistoryURLProvider(AutocompleteProviderListener* listener, Profile* profile);
 
 #ifdef UNIT_TEST
@@ -147,6 +154,7 @@ class HistoryURLProvider : public HistoryProvider {
       params_(NULL),
       cull_redirects_(true),
       create_shorter_match_(true),
+      search_url_database_(true),
       languages_(languages) {}
 #endif
 
@@ -294,6 +302,16 @@ class HistoryURLProvider : public HistoryProvider {
   // if the user visited http://example.com/asdf once, we'll suggest
   // http://example.com/ even if they've never been to it.
   bool create_shorter_match_;
+
+  // Whether to query the history URL database to match.  Even if
+  // false, we still use the URL database to decide if the
+  // URL-what-you-typed was visited before or not.  If false, the only
+  // possible result that HistoryURL provider can return is
+  // URL-what-you-typed.  This variable is not part of params_ because
+  // it never changes after the HistoryURLProvider is initialized.
+  // It's used to aid the transition to get all URLs from history to
+  // be scored in the HistoryQuick provider only.
+  bool search_url_database_;
 
   // Only used by unittests; if non-empty, overrides accept-languages in the
   // profile's pref system.
