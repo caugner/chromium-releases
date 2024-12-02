@@ -32,7 +32,7 @@ class BrowserContext;
 
 namespace features {
 // Enables persistent permissions for the File System Access API.
-extern const base::Feature kFileSystemAccessPersistentPermissions;
+BASE_DECLARE_FEATURE(kFileSystemAccessPersistentPermissions);
 }  // namespace features
 
 // Chrome implementation of FileSystemAccessPermissionContext. This class
@@ -85,7 +85,7 @@ class ChromeFileSystemAccessPermissionContext
       PathType path_type,
       const base::FilePath& path,
       HandleType handle_type,
-      ui::SelectFileDialog::Type dialog_type,
+      UserAction user_action,
       content::GlobalRenderFrameHostId frame_id,
       base::OnceCallback<void(SensitiveEntryResult)> callback) override;
   void PerformAfterWriteChecks(
@@ -197,7 +197,7 @@ class ChromeFileSystemAccessPermissionContext
       const url::Origin& origin,
       const base::FilePath& path,
       HandleType handle_type,
-      ui::SelectFileDialog::Type dialog_type,
+      UserAction user_action,
       content::GlobalRenderFrameHostId frame_id,
       base::OnceCallback<void(SensitiveEntryResult)> callback,
       bool should_block);

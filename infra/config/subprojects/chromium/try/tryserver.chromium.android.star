@@ -5,7 +5,7 @@
 
 load("//lib/branches.star", "branches")
 load("//lib/builder_config.star", "builder_config")
-load("//lib/builders.star", "goma", "os")
+load("//lib/builders.star", "goma", "os", "reclient")
 load("//lib/try.star", "try_")
 load("//lib/consoles.star", "consoles")
 load("//project.star", "settings")
@@ -22,6 +22,9 @@ try_.defaults.set(
     os = os.LINUX_DEFAULT,
     pool = try_.DEFAULT_POOL,
     service_account = try_.DEFAULT_SERVICE_ACCOUNT,
+
+    # TODO(crbug.com/1362440): remove this.
+    omit_python2 = False,
 )
 
 consoles.list_view(
@@ -61,7 +64,7 @@ try_.orchestrator_builder(
     # branch_selector = branches.STANDARD_MILESTONE,
     main_list_view = "try",
     tryjob = try_.job(
-        experiment_percentage = 100,
+        experiment_percentage = 60,
     ),
 )
 
@@ -78,9 +81,6 @@ try_.builder(
         "ci/Android x64 Builder (dbg)",
         "ci/android-12l-x64-dbg-tests",
     ],
-    tryjob = try_.job(
-        experiment_percentage = 2,
-    ),
 )
 
 try_.builder(
@@ -119,10 +119,6 @@ try_.builder(
                 "validate_expectations",
             ],
         },
-    },
-    experiments = {
-        "enable_weetbix_queries": 100,
-        "weetbix.retry_weak_exonerations": 100,
     },
     tryjob = try_.job(),
     ssd = True,
@@ -255,10 +251,7 @@ try_.orchestrator_builder(
     main_list_view = "try",
     tryjob = try_.job(),
     experiments = {
-        "enable_weetbix_queries": 100,
-        "weetbix.retry_weak_exonerations": 100,
         "remove_src_checkout_experiment": 100,
-        "weetbix.enable_weetbix_exonerations": 100,
     },
     # TODO(crbug.com/1372179): Use orchestrator pool once overloaded test pools
     # are addressed
@@ -272,8 +265,34 @@ try_.compilator_builder(
     main_list_view = "try",
 )
 
-try_.builder(
-    name = "android-opus-arm-rel",
+# b/236070074: Experimental builder to test reclient migration
+try_.orchestrator_builder(
+    name = "android-nougat-x86-rel-reclient",
+    mirrors = [
+        "ci/android-nougat-x86-rel",
+    ],
+    try_settings = builder_config.try_settings(
+        rts_config = builder_config.rts_config(
+            condition = builder_config.rts_condition.QUICK_RUN_ONLY,
+        ),
+    ),
+    description_html = "Experimental shadow builder to test reclient migration. <br/>The bot is shadowing <a href=\"https://ci.chromium.org/p/chromium/builders/try/android-nougat-x86-rel\">android-nougat-x86-rel</a>.",
+    check_for_flakiness = True,
+    compilator = "android-nougat-x86-rel-reclient-compilator",
+    main_list_view = "try",
+    use_java_coverage = True,
+    coverage_test_types = ["unit", "overall"],
+    tryjob = try_.job(
+        experiment_percentage = 5,
+    ),
+)
+
+try_.compilator_builder(
+    name = "android-nougat-x86-rel-reclient-compilator",
+    check_for_flakiness = True,
+    main_list_view = "try",
+    reclient_instance = reclient.instance.DEFAULT_UNTRUSTED,
+    reclient_jobs = reclient.jobs.HIGH_JOBS_FOR_CQ,
 )
 
 try_.builder(
@@ -286,6 +305,13 @@ try_.builder(
     mirrors = [
         "ci/Android arm64 Builder (dbg)",
         "ci/Oreo Phone Tester",
+    ],
+)
+
+try_.builder(
+    name = "android-perfetto-rel",
+    mirrors = [
+        "ci/android-perfetto-rel",
     ],
 )
 
@@ -347,10 +373,11 @@ try_.orchestrator_builder(
     main_list_view = "try",
     tryjob = try_.job(),
     experiments = {
-        "enable_weetbix_queries": 100,
-        "weetbix.retry_weak_exonerations": 100,
-        "remove_src_checkout_experiment": 20,
+        "remove_src_checkout_experiment": 100,
     },
+    # TODO(crbug.com/1372179): Use orchestrator pool once overloaded test pools
+    # are addressed
+    # use_orchestrator_pool = True,
 )
 
 try_.compilator_builder(
@@ -399,30 +426,6 @@ try_.builder(
 
 try_.builder(
     name = "android-chrome-pie-x86-wpt-fyi-rel",
-)
-
-try_.builder(
-    name = "android-weblayer-10-x86-rel-tests",
-    mirrors = [
-        "ci/android-weblayer-with-aosp-webview-x86-rel",
-        "ci/android-weblayer-10-x86-rel-tests",
-    ],
-)
-
-try_.builder(
-    name = "android-weblayer-marshmallow-x86-rel-tests",
-    mirrors = [
-        "ci/android-weblayer-with-aosp-webview-x86-rel",
-        "ci/android-weblayer-marshmallow-x86-rel-tests",
-    ],
-)
-
-try_.builder(
-    name = "android-weblayer-pie-x86-rel-tests",
-    mirrors = [
-        "ci/android-weblayer-x86-rel",
-        "ci/android-weblayer-pie-x86-rel-tests",
-    ],
 )
 
 try_.builder(
@@ -513,6 +516,17 @@ try_.builder(
 )
 
 try_.builder(
+    name = "android-x64-cast",
+    branch_selector = branches.STANDARD_MILESTONE,
+    mirrors = [
+        "ci/Cast Android (dbg)",
+    ],
+    builderless = not settings.is_main,
+    main_list_view = "try",
+    tryjob = try_.job(),
+)
+
+try_.builder(
     name = "android_compile_dbg",
     branch_selector = branches.STANDARD_MILESTONE,
     mirrors = [
@@ -597,10 +611,6 @@ try_.builder(
     builderless = not settings.is_main,
     main_list_view = "try",
     tryjob = try_.job(),
-    experiments = {
-        "enable_weetbix_queries": 100,
-        "weetbix.retry_weak_exonerations": 100,
-    },
 )
 
 try_.builder(
@@ -617,21 +627,6 @@ try_.builder(
         "ci/Android arm64 Builder (dbg)",
         "ci/Android WebView N (dbg)",
     ],
-)
-
-try_.builder(
-    name = "cast_shell_android",
-    branch_selector = branches.STANDARD_MILESTONE,
-    mirrors = [
-        "ci/Cast Android (dbg)",
-    ],
-    builderless = not settings.is_main,
-    main_list_view = "try",
-    tryjob = try_.job(),
-    experiments = {
-        "enable_weetbix_queries": 100,
-        "weetbix.retry_weak_exonerations": 100,
-    },
 )
 
 try_.builder(

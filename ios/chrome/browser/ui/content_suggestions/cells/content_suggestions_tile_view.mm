@@ -20,9 +20,11 @@ namespace {
 const NSInteger kLabelNumLines = 2;
 const CGFloat kSpaceIconTitle = 10;
 const CGFloat kIconSize = 56;
+
 // Standard width of tiles.
 const CGFloat kPreferredMaxWidth = 74;
 const CGFloat kPreferredMaxWidthWide = 83;
+
 // Non-standard width of tiles. (Used only when the Content Suggestions UI
 // Module Refresh feature is enabled.)
 const CGFloat kModulePreferredMaxWidth = 74;
