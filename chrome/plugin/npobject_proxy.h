@@ -9,7 +9,8 @@
 #define CHROME_PLUGIN_NPOBJECT_PROXY_H_
 
 #include "base/ref_counted.h"
-#include "chrome/common/ipc_channel.h"
+#include "googleurl/src/gurl.h"
+#include "ipc/ipc_channel.h"
 #include "third_party/npapi/bindings/npruntime.h"
 
 class PluginChannelBase;
@@ -35,8 +36,9 @@ class NPObjectProxy : public IPC::Channel::Listener,
   // modal_dialog_event_ is must be valid for the lifetime of the NPObjectProxy.
   static NPObject* Create(PluginChannelBase* channel,
                           int route_id,
-                          void* npobject_ptr,
-                          base::WaitableEvent* modal_dialog_event);
+                          intptr_t npobject_ptr,
+                          base::WaitableEvent* modal_dialog_event,
+                          const GURL& page_url);
 
   // IPC::Message::Sender implementation:
   bool Send(IPC::Message* msg);
@@ -45,9 +47,9 @@ class NPObjectProxy : public IPC::Channel::Listener,
 
   // Returns the real NPObject's pointer (obviously only valid in the other
   // process).
-  void* npobject_ptr() { return npobject_ptr_; }
+  intptr_t npobject_ptr() { return npobject_ptr_; }
 
-  // The next 8 functions are called on NPObjects from the plugin and browser.
+  // The next 9 functions are called on NPObjects from the plugin and browser.
   static bool NPHasMethod(NPObject *obj,
                           NPIdentifier name);
   static bool NPInvoke(NPObject *obj,
@@ -72,6 +74,10 @@ class NPObjectProxy : public IPC::Channel::Listener,
   static bool NPNEnumerate(NPObject *obj,
                            NPIdentifier **value,
                            uint32_t *count);
+  static bool NPNConstruct(NPObject *npobj,
+                           const NPVariant *args,
+                           uint32_t arg_count,
+                           NPVariant *result);
 
   // The next two functions are only called on NPObjects from the browser.
   static bool NPNEvaluate(NPP npp,
@@ -96,8 +102,9 @@ class NPObjectProxy : public IPC::Channel::Listener,
  private:
   NPObjectProxy(PluginChannelBase* channel,
                 int route_id,
-                void* npobject_ptr,
-                base::WaitableEvent* modal_dialog_event);
+                intptr_t npobject_ptr,
+                base::WaitableEvent* modal_dialog_event,
+                const GURL& page_url);
 
   // IPC::Channel::Listener implementation:
   void OnMessageReceived(const IPC::Message& msg);
@@ -110,10 +117,13 @@ class NPObjectProxy : public IPC::Channel::Listener,
   static void NPPInvalidate(NPObject *obj);
   static NPClass npclass_proxy_;
 
-  int route_id_;
-  void* npobject_ptr_;
   scoped_refptr<PluginChannelBase> channel_;
+  int route_id_;
+  intptr_t npobject_ptr_;
   base::WaitableEvent* modal_dialog_event_;
+
+  // The url of the main frame hosting the plugin.
+  GURL page_url_;
 };
 
 #endif  // CHROME_PLUGIN_NPOBJECT_PROXY_H_

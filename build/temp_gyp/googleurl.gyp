@@ -13,7 +13,7 @@
   'targets': [
     {
       'target_name': 'googleurl',
-      'type': 'static_library',
+      'type': '<(library)',
       'msvs_guid': 'EF5E94AB-B646-4E5B-A058-52EF07B8351C',
       'dependencies': [
         '../../base/base.gyp:base',
@@ -70,6 +70,7 @@
         '../../googleurl/src/url_parse_unittest.cc',
         '../../googleurl/src/url_test_utils.h',
         '../../googleurl/src/url_util_unittest.cc',
+        '../../googleurl/src/gurl_test_main.cc',
       ],
     },
   ],

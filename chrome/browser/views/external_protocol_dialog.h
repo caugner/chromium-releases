@@ -5,8 +5,9 @@
 #ifndef CHROME_BROWSER_EXTERNAL_PROTOCOL_DIALOG_H__
 #define CHROME_BROWSER_EXTERNAL_PROTOCOL_DIALOG_H__
 
-#include "chrome/views/window/dialog_delegate.h"
+#include "base/time.h"
 #include "googleurl/src/gurl.h"
+#include "views/window/dialog_delegate.h"
 
 class MessageBoxView;
 class TabContents;
@@ -17,7 +18,7 @@ class ExternalProtocolDialog : public views::DialogDelegate {
   // |url| - The url of the request.
   // |command| - the command that ShellExecute will run.
   // |render_process_host_id| and |routing_id| are used by
-  // tab_util::GetWebContentsByID to aquire the tab contents associated with
+  // tab_util::GetTabContentsByID to aquire the tab contents associated with
   // this dialog.
   // NOTE: There is a race between the Time of Check and the Time Of Use for
   //       the command line. Since the caller (web page) does not have access
@@ -35,9 +36,9 @@ class ExternalProtocolDialog : public views::DialogDelegate {
   virtual ~ExternalProtocolDialog();
 
   // views::DialogDelegate Methods:
-  virtual int GetDialogButtons() const;
   virtual int GetDefaultDialogButton() const;
-  virtual std::wstring GetDialogButtonLabel(DialogButton button) const;
+  virtual std::wstring GetDialogButtonLabel(
+      MessageBoxFlags::DialogButton button) const;
   virtual std::wstring GetWindowTitle() const;
   virtual void DeleteDelegate();
   virtual bool Accept();
@@ -61,6 +62,9 @@ class ExternalProtocolDialog : public views::DialogDelegate {
 
   // URL of the external protocol request.
   GURL url_;
+
+  // The time at which this dialog was created.
+  base::Time creation_time_;
 
   DISALLOW_EVIL_CONSTRUCTORS(ExternalProtocolDialog);
 };

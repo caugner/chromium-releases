@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,6 +17,7 @@ class TestBrowserWindow : public BrowserWindow {
  public:
   explicit TestBrowserWindow(Browser* browser)
       : tab_strip_(browser->tabstrip_model()) {
+    tab_strip_.InitTabStripButtons();
   }
   ~TestBrowserWindow() {}
 
@@ -32,6 +33,8 @@ class TestBrowserWindow : public BrowserWindow {
   virtual StatusBubble* GetStatusBubble() { return NULL; }
   virtual void SelectedTabToolbarSizeChanged(bool is_animating) {}
   virtual void UpdateTitleBar() {}
+  virtual void UpdateDevTools() {}
+  virtual void FocusDevTools() {}
   virtual void UpdateLoadingAnimations(bool should_animate) {}
   virtual void SetStarredState(bool is_starred) {}
   virtual gfx::Rect GetNormalBounds() const { return gfx::Rect(); }
@@ -42,17 +45,21 @@ class TestBrowserWindow : public BrowserWindow {
     return const_cast<TestLocationBar*>(&location_bar_);
   }
   virtual void SetFocusToLocationBar() {}
-  virtual void UpdateStopGoState(bool is_loading) {}
+  virtual void UpdateStopGoState(bool is_loading, bool force) {}
   virtual void UpdateToolbar(TabContents* contents,
                              bool should_restore_state) {}
   virtual void FocusToolbar() {}
   virtual bool IsBookmarkBarVisible() const { return false; }
   virtual gfx::Rect GetRootWindowResizerRect() const { return gfx::Rect(); }
+  virtual void ConfirmAddSearchProvider(const TemplateURL* template_url,
+                                        Profile* profile) {}
   virtual void ToggleBookmarkBar() {}
-  virtual void ShowFindBar() {}
   virtual void ShowAboutChromeDialog() {}
+  virtual void ShowTaskManager() {}
   virtual void ShowBookmarkManager() {}
   virtual void ShowBookmarkBubble(const GURL& url, bool already_bookmarked) {}
+  virtual bool IsDownloadShelfVisible() const { return false; }
+  virtual DownloadShelf* GetDownloadShelf() { return NULL; }
   virtual void ShowReportBugDialog() {}
   virtual void ShowClearBrowsingDataDialog() {}
   virtual void ShowImportDialog() {}
@@ -60,10 +67,17 @@ class TestBrowserWindow : public BrowserWindow {
   virtual void ShowPasswordManager() {}
   virtual void ShowSelectProfileDialog() {}
   virtual void ShowNewProfileDialog() {}
-  virtual void ShowHTMLDialog(HtmlDialogContentsDelegate* delegate,
-                              void* parent_window) {}
-  virtual bool GetFindBarWindowInfo(gfx::Point* position,
-                                    bool* fully_visible) const { return false; }
+  virtual void ConfirmBrowserCloseWithPendingDownloads() {}
+  virtual void ShowHTMLDialog(HtmlDialogUIDelegate* delegate,
+                              gfx::NativeWindow parent_window) {}
+  virtual void UserChangedTheme() {}
+  virtual int GetExtraRenderViewHeight() const { return 0; }
+  virtual void TabContentsFocused(TabContents* tab_contents) { }
+  virtual void ShowPageInfo(Profile* profile,
+                            const GURL& url,
+                            const NavigationEntry::SSLStatus& ssl,
+                            bool show_history) { }
+
  protected:
   virtual void DestroyBrowser() {}
 

@@ -4,27 +4,31 @@
 
 #include "chrome/browser/views/bookmark_table_view.h"
 
+#include <commctrl.h>
+
+#include "app/drag_drop_types.h"
+#include "app/gfx/canvas.h"
+#include "app/gfx/font.h"
+#include "app/l10n_util.h"
+#include "app/os_exchange_data.h"
+#include "app/resource_bundle.h"
 #include "base/base_drag_source.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_table_model.h"
 #include "chrome/browser/profile.h"
-#include "chrome/common/drag_drop_types.h"
-#include "chrome/common/gfx/chrome_canvas.h"
-#include "chrome/common/gfx/chrome_font.h"
-#include "chrome/common/os_exchange_data.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/pref_service.h"
-#include "chrome/common/resource_bundle.h"
-#include "chrome/views/view_constants.h"
 #include "grit/generated_resources.h"
+#include "views/controls/table/table_view_observer.h"
+#include "views/view_constants.h"
 
 namespace {
 
 // Height of the drop indicator used when dropping between rows.
 const int kDropHighlightHeight = 2;
 
-int GetWidthOfColumn(const std::vector<views::TableColumn>& columns,
+int GetWidthOfColumn(const std::vector<TableColumn>& columns,
                      const std::vector<int> widths,
                      int column_id) {
   for (size_t i = 0; i < columns.size(); ++i) {
@@ -43,7 +47,7 @@ void BookmarkTableView::DropInfo::Scrolled() {
 
 BookmarkTableView::BookmarkTableView(Profile* profile,
                                      BookmarkTableModel* model)
-    : views::TableView(model, std::vector<views::TableColumn>(),
+    : views::TableView(model, std::vector<TableColumn>(),
                        views::ICON_AND_TEXT, false, true, true),
       profile_(profile),
       show_path_column_(false) {
@@ -60,7 +64,7 @@ bool BookmarkTableView::CanDrop(const OSExchangeData& data) {
 
   // Don't allow the user to drop an ancestor of the parent node onto the
   // parent node. This would create a cycle, which is definitely a no-no.
-  std::vector<BookmarkNode*> nodes = drag_data.GetNodes(profile_);
+  std::vector<const BookmarkNode*> nodes = drag_data.GetNodes(profile_);
   for (size_t i = 0; i < nodes.size(); ++i) {
     if (parent_node_->HasAncestor(nodes[i]))
       return false;
@@ -183,7 +187,7 @@ int BookmarkTableView::UpdateDropInfo() {
 }
 
 void BookmarkTableView::BeginDrag() {
-  std::vector<BookmarkNode*> nodes_to_drag;
+  std::vector<const BookmarkNode*> nodes_to_drag;
   for (TableView::iterator i = SelectionBegin(); i != SelectionEnd(); ++i)
     nodes_to_drag.push_back(bookmark_table_model()->GetNodeForRow(*i));
   if (nodes_to_drag.empty())
@@ -209,7 +213,7 @@ int BookmarkTableView::CalculateDropOperation(const DropPosition& position) {
       return DragDropTypes::DRAG_COPY;
 
     int real_drop_index;
-    BookmarkNode* drop_parent = GetDropParentAndIndex(position,
+    const BookmarkNode* drop_parent = GetDropParentAndIndex(position,
                                                       &real_drop_index);
     if (!bookmark_utils::IsValidDropLocation(
         profile_, drop_info_->data(), drop_parent, real_drop_index)) {
@@ -226,7 +230,7 @@ int BookmarkTableView::CalculateDropOperation(const DropPosition& position) {
 
 void BookmarkTableView::OnPerformDropImpl() {
   int drop_index;
-  BookmarkNode* drop_parent = GetDropParentAndIndex(
+  const BookmarkNode* drop_parent = GetDropParentAndIndex(
       drop_info_->position(), &drop_index);
   BookmarkModel* model = profile_->GetBookmarkModel();
   int min_selection;
@@ -242,7 +246,8 @@ void BookmarkTableView::OnPerformDropImpl() {
         static_cast<int>(drop_info_->data().elements.size());
   } else {
     // else, move.
-    std::vector<BookmarkNode*> nodes = drop_info_->data().GetNodes(profile_);
+    std::vector<const BookmarkNode*> nodes =
+        drop_info_->data().GetNodes(profile_);
     if (nodes.empty())
       return;
 
@@ -326,11 +331,11 @@ BookmarkTableView::DropPosition
   return DropPosition(row_count, false);
 }
 
-BookmarkNode* BookmarkTableView::GetDropParentAndIndex(
+const BookmarkNode* BookmarkTableView::GetDropParentAndIndex(
     const DropPosition& position,
     int* index) {
   if (position.on) {
-    BookmarkNode* parent = parent_node_->GetChild(position.index);
+    const BookmarkNode* parent = parent_node_->GetChild(position.index);
     *index = parent->GetChildCount();
     return parent;
   }
@@ -358,15 +363,14 @@ RECT BookmarkTableView::GetDropBetweenHighlightRect(int index) {
 
 void BookmarkTableView::UpdateColumns() {
   PrefService* prefs = profile_->GetPrefs();
-  views::TableColumn name_column =
-      views::TableColumn(IDS_BOOKMARK_TABLE_TITLE, views::TableColumn::LEFT,
-                         -1);
-  views::TableColumn url_column =
-      views::TableColumn(IDS_BOOKMARK_TABLE_URL, views::TableColumn::LEFT, -1);
-  views::TableColumn path_column =
-      views::TableColumn(IDS_BOOKMARK_TABLE_PATH, views::TableColumn::LEFT, -1);
+  TableColumn name_column =
+      TableColumn(IDS_BOOKMARK_TABLE_TITLE, TableColumn::LEFT, -1);
+  TableColumn url_column =
+      TableColumn(IDS_BOOKMARK_TABLE_URL, TableColumn::LEFT, -1);
+  TableColumn path_column =
+      TableColumn(IDS_BOOKMARK_TABLE_PATH, TableColumn::LEFT, -1);
 
-  std::vector<views::TableColumn> columns;
+  std::vector<TableColumn> columns;
   if (show_path_column_) {
     int name_width = -1;
     int url_width = -1;
@@ -416,9 +420,9 @@ void BookmarkTableView::PaintAltText() {
     return;
 
   HDC dc = GetDC(GetNativeControlHWND());
-  ChromeFont font = GetAltTextFont();
+  gfx::Font font = GetAltTextFont();
   gfx::Rect bounds = GetAltTextBounds();
-  ChromeCanvas canvas(bounds.width(), bounds.height(), false);
+  gfx::Canvas canvas(bounds.width(), bounds.height(), false);
   // Pad by 1 for halo.
   canvas.DrawStringWithHalo(alt_text_, font, SK_ColorDKGRAY, SK_ColorWHITE, 1,
                             1, bounds.width() - 2, bounds.height() - 2,
@@ -430,14 +434,15 @@ void BookmarkTableView::PaintAltText() {
 gfx::Rect BookmarkTableView::GetAltTextBounds() {
   static const int kXOffset = 16;
   DCHECK(GetNativeControlHWND());
-  CRect client_rect;
-  GetClientRect(GetNativeControlHWND(), client_rect);
-  ChromeFont font = GetAltTextFont();
+  RECT client_rect_rect;
+  GetClientRect(GetNativeControlHWND(), &client_rect_rect);
+  gfx::Rect client_rect(client_rect_rect);
+  gfx::Font font = GetAltTextFont();
   // Pad height by 2 for halo.
-  return gfx::Rect(kXOffset, content_offset(), client_rect.Width() - kXOffset,
+  return gfx::Rect(kXOffset, content_offset(), client_rect.width() - kXOffset,
                    std::max(kImageSize, font.height() + 2));
 }
 
-ChromeFont BookmarkTableView::GetAltTextFont() {
+gfx::Font BookmarkTableView::GetAltTextFont() {
   return ResourceBundle::GetSharedInstance().GetFont(ResourceBundle::BaseFont);
 }

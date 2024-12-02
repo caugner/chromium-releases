@@ -21,6 +21,9 @@ namespace {
 static const FilePath::CharType kBaseUrl[] =
     FILE_PATH_LITERAL("http://localhost:8000/");
 
+static const FilePath::CharType kTestDirectory[] =
+    FILE_PATH_LITERAL("dom_checker/");
+
 static const FilePath::CharType kStartFile[] =
     FILE_PATH_LITERAL("dom_checker.html");
 
@@ -144,6 +147,8 @@ class DomCheckerTest : public UITest {
         L"    JSON.stringify(automation.GetFailures()));",
         &json_wide);
 
+    // Note that we don't use ASSERT_TRUE here (and in some other places) as it
+    // doesn't work inside a function with a return type other than void.
     EXPECT_TRUE(succeeded);
     if (!succeeded)
       return false;
@@ -183,7 +188,9 @@ class DomCheckerTest : public UITest {
     GURL test_url;
     FilePath::StringType start_file(kStartFile);
     if (use_http) {
+      FilePath::StringType test_directory(kTestDirectory);
       FilePath::StringType url_string(kBaseUrl);
+      url_string.append(test_directory);
       url_string.append(start_file);
       test_url = GURL(url_string);
     } else {
@@ -192,7 +199,8 @@ class DomCheckerTest : public UITest {
       test_url = net::FilePathToFileURL(test_path);
     }
 
-    scoped_ptr<TabProxy> tab(GetActiveTab());
+    scoped_refptr<TabProxy> tab(GetActiveTab());
+    ASSERT_TRUE(tab.get());
     tab->NavigateToURL(test_url);
 
     // Wait for the test to finish.
@@ -206,8 +214,6 @@ class DomCheckerTest : public UITest {
 
   DISALLOW_COPY_AND_ASSIGN(DomCheckerTest);
 };
-
-}  // namespace
 
 TEST_F(DomCheckerTest, File) {
   if (!CommandLine::ForCurrentProcess()->HasSwitch(kRunDomCheckerTest))
@@ -226,3 +232,5 @@ TEST_F(DomCheckerTest, Http) {
   RunTest(true, &new_passes, &new_failures);
   PrintResults(new_passes, new_failures);
 }
+
+}  // namespace

@@ -7,6 +7,7 @@
 #include "base/histogram.h"
 #include "base/string_util.h"
 #include "net/base/mime_sniffer.h"
+#include "net/base/net_errors.h"
 #include "chrome/browser/renderer_host/download_throttling_resource_handler.h"
 #include "chrome/browser/renderer_host/resource_dispatcher_host.h"
 #include "chrome/common/url_constants.h"
@@ -58,8 +59,11 @@ bool BufferedResourceHandler::OnUploadProgress(int request_id,
 }
 
 bool BufferedResourceHandler::OnRequestRedirected(int request_id,
-                                                  const GURL& new_url) {
-  return real_handler_->OnRequestRedirected(request_id, new_url);
+                                                  const GURL& new_url,
+                                                  ResourceResponse* response,
+                                                  bool* defer) {
+  return real_handler_->OnRequestRedirected(
+      request_id, new_url, response, defer);
 }
 
 bool BufferedResourceHandler::OnResponseStarted(int request_id,
@@ -93,12 +97,14 @@ bool BufferedResourceHandler::OnWillRead(int request_id, net::IOBuffer** buf,
   if (finished_)
     return false;
 
-  bool ret = real_handler_->OnWillRead(request_id, buf, buf_size, min_size);
+  if (!real_handler_->OnWillRead(request_id, buf, buf_size, min_size)) {
+    return false;
+  }
   read_buffer_ = *buf;
   read_buffer_size_ = *buf_size;
   DCHECK(read_buffer_size_ >= kMaxBytesToSniff * 2);
   bytes_read_ = 0;
-  return ret;
+  return true;
 }
 
 bool BufferedResourceHandler::OnReadCompleted(int request_id, int* bytes_read) {
@@ -148,6 +154,19 @@ bool BufferedResourceHandler::DelayResponse() {
     // Ugg.  The server told us not to sniff the content but didn't give us a
     // mime type.  What's a browser to do?  Turns out, we're supposed to treat
     // the response as "text/plain".  This is the most secure option.
+    mime_type.assign("text/plain");
+    response_->response_head.mime_type.assign(mime_type);
+  }
+
+  if (mime_type == "application/rss+xml" ||
+      mime_type == "application/atom+xml") {
+    // Sad face.  The server told us that they wanted us to treat the response
+    // as RSS or Atom.  Unfortunately, we don't have a built-in feed previewer
+    // like other browsers.  We can't just render the content as XML because
+    // web sites let third parties inject arbitrary script into their RSS
+    // feeds.  That leaves us with little choice but to practically ignore the
+    // response.  In the future, when we have an RSS feed previewer, we can
+    // remove this logic.
     mime_type.assign("text/plain");
     response_->response_head.mime_type.assign(mime_type);
   }

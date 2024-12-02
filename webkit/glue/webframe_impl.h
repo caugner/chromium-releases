@@ -39,30 +39,31 @@ MSVC_PUSH_WARNING_LEVEL(0);
 #include "PlatformString.h"
 MSVC_POP_WARNING();
 
-class AltErrorPageResourceFetcher;
 class ChromePrintContext;
 class WebDataSourceImpl;
-class WebErrorImpl;
-class WebHistoryItemImpl;
 class WebPluginDelegate;
-class WebRequest;
 class WebView;
 class WebViewImpl;
 class WebTextInput;
 class WebTextInputImpl;
 
+namespace gfx {
+class BitmapPlatformDevice;
+}
+
 namespace WebCore {
 class Frame;
 class FrameView;
 class HistoryItem;
+class KURL;
 class Node;
 class Range;
 class SubstituteData;
 struct WindowFeatures;
 }
 
-namespace gfx {
-class BitmapPlatformDeviceWin;
+namespace webkit_glue {
+class AltErrorPageResourceFetcher;
 }
 
 // Implementation of WebFrame, note that this is a reference counted object.
@@ -79,56 +80,79 @@ class WebFrameImpl : public WebFrame, public base::RefCounted<WebFrameImpl> {
   void InitMainFrame(WebViewImpl* webview_impl);
 
   // WebFrame
-  virtual void LoadRequest(WebRequest* request);
-  virtual void LoadHTMLString(const std::string& html_text,
-                              const GURL& base_url);
-  virtual void LoadAlternateHTMLString(const WebRequest* request,
-                                       const std::string& html_text,
-                                       const GURL& display_url,
-                                       bool replace);
-  virtual void LoadAlternateHTMLErrorPage(const WebRequest* request,
-                                          const WebError& error,
-                                          const GURL& error_page_url,
-                                          bool replace,
-                                          const GURL& fake_url);
-  virtual void ExecuteScript(const webkit_glue::WebScriptSource& source);
+  virtual void Reload();
+  virtual void LoadRequest(const WebKit::WebURLRequest& request);
+  virtual void LoadHistoryItem(const WebKit::WebHistoryItem& item);
+  virtual void LoadData(
+      const WebKit::WebData& data,
+      const WebKit::WebString& mime_type,
+      const WebKit::WebString& text_encoding,
+      const WebKit::WebURL& base_url,
+      const WebKit::WebURL& unreachable_url = WebKit::WebURL(),
+      bool replace = false);
+  virtual void LoadHTMLString(
+      const WebKit::WebData& data,
+      const WebKit::WebURL& base_url,
+      const WebKit::WebURL& unreachable_url = WebKit::WebURL(),
+      bool replace = false);
+  virtual void LoadAlternateHTMLErrorPage(
+      const WebKit::WebURLRequest& request,
+      const WebKit::WebURLError& error,
+      const GURL& error_page_url,
+      bool replace,
+      const GURL& fake_url);
+  virtual void DispatchWillSendRequest(WebKit::WebURLRequest* request);
+  virtual void ExecuteScript(const WebKit::WebScriptSource& source);
   virtual void ExecuteScriptInNewContext(
-      const webkit_glue::WebScriptSource* sources, int num_sources);
+      const WebKit::WebScriptSource* sources, int num_sources);
+  virtual void ExecuteScriptInNewWorld(
+      const WebKit::WebScriptSource* sources, int num_sources);
   virtual bool InsertCSSStyles(const std::string& css);
-  virtual bool GetPreviousHistoryState(std::string* history_state) const;
-  virtual bool GetCurrentHistoryState(std::string* history_state) const;
-  virtual bool HasCurrentHistoryState() const;
+  virtual WebKit::WebHistoryItem GetPreviousHistoryItem() const;
+  virtual WebKit::WebHistoryItem GetCurrentHistoryItem() const;
   virtual GURL GetURL() const;
   virtual GURL GetFavIconURL() const;
   virtual GURL GetOSDDURL() const;
-  virtual scoped_refptr<class FeedList> GetFeedList() const;
-  virtual WebDataSource* GetDataSource() const;
-  virtual WebDataSource* GetProvisionalDataSource() const;
+  virtual int GetContentsPreferredWidth() const;
+  virtual WebKit::WebDataSource* GetDataSource() const;
+  virtual WebKit::WebDataSource* GetProvisionalDataSource() const;
   virtual void StopLoading();
   virtual WebFrame* GetOpener() const;
   virtual WebFrame* GetParent() const;
   virtual WebFrame* GetTop() const;
   virtual WebFrame* GetChildFrame(const std::wstring& xpath) const;
   virtual WebView* GetView() const;
+  virtual void GetForms(std::vector<WebKit::WebForm>* forms) const;
   virtual std::string GetSecurityOrigin() const;
-  virtual bool CaptureImage(scoped_ptr<skia::BitmapPlatformDevice>* image,
-                            bool scroll_to_zero);
 
   // This method calls createRuntimeObject (in KJS::Bindings::Instance), which
   // increments the refcount of the NPObject passed in.
   virtual void BindToWindowObject(const std::wstring& name, NPObject* object);
   virtual void CallJSGC();
 
-  virtual void* GetFrameImplementation() { return frame(); }
+  virtual void GrantUniversalAccess();
 
   virtual NPObject* GetWindowNPObject();
 
+#if USE(V8)
+  // Returns the V8 context for this frame, or an empty handle if there is
+  // none.
+  virtual v8::Local<v8::Context> GetScriptContext();
+#endif
+
   virtual void GetContentAsPlainText(int max_chars, std::wstring* text) const;
-  virtual bool Find(const FindInPageRequest& request,
-                    bool wrap_within_frame,
-                    gfx::Rect* selection_rect);
+  virtual bool Find(
+      int request_id,
+      const string16& search_text,
+      const WebKit::WebFindOptions& options,
+      bool wrap_within_frame,
+      WebKit::WebRect* selection_rect);
   virtual void StopFinding(bool clear_selection);
-  virtual void ScopeStringMatches(FindInPageRequest request, bool reset);
+  virtual void ScopeStringMatches(
+      int request_id,
+      const string16& search_text,
+      const WebKit::WebFindOptions& options,
+      bool reset);
   virtual void CancelPendingScopingEffort();
   virtual void ResetMatchCount();
   virtual bool Visible();
@@ -143,7 +167,9 @@ class WebFrameImpl : public WebFrame, public base::RefCounted<WebFrameImpl> {
   virtual void Undo();
   virtual void Redo();
   virtual void ClearSelection();
+  virtual bool HasSelection();
   virtual std::string GetSelection(bool as_html);
+  virtual std::string GetFullPageHtml();
 
   virtual void SetInViewSourceMode(bool enable);
 
@@ -158,21 +184,19 @@ class WebFrameImpl : public WebFrame, public base::RefCounted<WebFrameImpl> {
 
   virtual WebTextInput* GetTextInput();
 
-  virtual bool ExecuteCoreCommandByName(const std::string& name,
+  virtual bool ExecuteEditCommandByName(const std::string& name,
                                         const std::string& value);
-  virtual bool IsCoreCommandEnabled(const std::string& name);
+  virtual bool IsEditCommandEnabled(const std::string& name);
 
-  virtual void AddMessageToConsole(const std::wstring& msg,
-                                   ConsoleMessageLevel level);
+  virtual void AddMessageToConsole(const WebKit::WebConsoleMessage&);
 
   virtual void ClosePage();
 
-  virtual gfx::Size ScrollOffset() const;
+  virtual WebKit::WebSize ScrollOffset() const;
 
-  virtual bool BeginPrint(const gfx::Size& page_size_px,
-                          int* page_count);
-  virtual float PrintPage(int page, skia::PlatformCanvas* canvas);
-  virtual void EndPrint();
+  virtual int PrintBegin(const WebKit::WebSize& page_size);
+  virtual float PrintPage(int page, WebKit::WebCanvas* canvas);
+  virtual void PrintEnd();
 
   PassRefPtr<WebCore::Frame> CreateChildFrame(
       const WebCore::FrameLoadRequest&,
@@ -180,7 +204,7 @@ class WebFrameImpl : public WebFrame, public base::RefCounted<WebFrameImpl> {
 
   // WebFrameImpl
   void Layout();
-  void Paint(skia::PlatformCanvas* canvas, const gfx::Rect& rect);
+  void Paint(skia::PlatformCanvas* canvas, const WebKit::WebRect& rect);
 
   bool IsLoading();
 
@@ -202,19 +226,11 @@ class WebFrameImpl : public WebFrame, public base::RefCounted<WebFrameImpl> {
 
   static WebFrameImpl* FromFrame(WebCore::Frame* frame);
 
-  WebViewImpl* webview_impl() const {
-    return webview_impl_;
-  }
+  WebViewImpl* GetWebViewImpl() const;
 
   WebCore::FrameView* frameview() const {
     return frame_ ? frame_->view() : NULL;
   }
-
-  // Update the given datasource with currently_loading_request's info.
-  // If currently_loading_request is NULL, does nothing.
-  void CacheCurrentRequestInfo(WebDataSourceImpl* datasource);
-
-  void set_currently_loading_history_item(WebHistoryItemImpl* item);
 
   // Getters for the impls corresponding to Get(Provisional)DataSource. They
   // may return NULL if there is no corresponding data source.
@@ -263,22 +279,14 @@ class WebFrameImpl : public WebFrame, public base::RefCounted<WebFrameImpl> {
   // WebFrameLoaderClient
   void Closing();
 
-  // A helper function for loading some document, given all of its data, into
-  // this frame.  The charset may be empty if unknown, but a mime type must be
-  // specified.  TODO(darin): Add option for storing this in session history.
-  void LoadDocumentData(const WebCore::KURL& base_url,
-                        const WebCore::String& data,
-                        const WebCore::String& mime_type,
-                        const WebCore::String& charset);
-
   // See WebFrame.h for details.
   virtual void IncreaseMatchCount(int count, int request_id);
-  virtual void ReportFindInPageSelection(const gfx::Rect& selection_rect,
+  virtual void ReportFindInPageSelection(const WebKit::WebRect& selection_rect,
                                          int active_match_ordinal,
                                          int request_id);
 
   // Resource fetcher for downloading an alternate DNS error page.
-  scoped_ptr<AltErrorPageResourceFetcher> alt_error_page_fetcher_;
+  scoped_ptr<webkit_glue::AltErrorPageResourceFetcher> alt_error_page_fetcher_;
 
   // Used to check for leaks of this object.
   static int live_object_count_;
@@ -289,21 +297,9 @@ class WebFrameImpl : public WebFrame, public base::RefCounted<WebFrameImpl> {
   // asynchronously in order to scope string matches during a find operation.
   ScopedRunnableMethodFactory<WebFrameImpl> scope_matches_factory_;
 
-  // This is a weak pointer to our containing WebViewImpl.
-  WebViewImpl* webview_impl_;
-
   // This is a weak pointer to our corresponding WebCore frame.  A reference to
   // ourselves is held while frame_ is valid.  See our Closing method.
   WebCore::Frame* frame_;
-
-  // This holds the request passed to LoadRequest, for access by the
-  // WebFrameLoaderClient.  Unfortunately we have no other way to pass this
-  // information to him.  Only non-NULL during a call to LoadRequest.
-  const WebRequest* currently_loading_request_;
-
-  // Similar to currently_loading_request_, except this will be set when
-  // WebCore initiates a history navigation (probably via javascript).
-  scoped_refptr<WebHistoryItemImpl> currently_loading_history_item_;
 
   // Plugins sometimes need to be notified when loads are complete so we keep
   // a pointer back to the appropriate plugin.
@@ -374,7 +370,10 @@ class WebFrameImpl : public WebFrame, public base::RefCounted<WebFrameImpl> {
   void InvalidateArea(AreaToInvalidate area);
 
   // Add a WebKit TextMatch-highlight marker to nodes in a range.
-  void AddMarker(WebCore::Range* range);
+  void AddMarker(WebCore::Range* range, bool active_match);
+
+  // Sets the markers within a range as active or inactive.
+  void SetMarkerActive(WebCore::Range* range, bool active);
 
   // Returns the ordinal of the first match in the frame specified. This
   // function enumerates the frames, starting with the main frame and up to (but
@@ -386,7 +385,7 @@ class WebFrameImpl : public WebFrame, public base::RefCounted<WebFrameImpl> {
   // It is not necessary if the frame is invisible, for example, or if this
   // is a repeat search that already returned nothing last time the same prefix
   // was searched.
-  bool ShouldScopeMatches(FindInPageRequest request);
+  bool ShouldScopeMatches(const string16& search_text);
 
   // Only for test_shell
   int PendingFrameUnloadEventCount() const;
@@ -394,12 +393,15 @@ class WebFrameImpl : public WebFrame, public base::RefCounted<WebFrameImpl> {
   // Determines whether to invalidate the content area and scrollbar.
   void InvalidateIfNecessary();
 
-  void InternalLoadRequest(const WebRequest* request,
-                           const WebCore::SubstituteData& data,
-                           bool replace);
-
   // Clears the map of password listeners.
   void ClearPasswordListeners();
+
+  void LoadJavaScriptURL(const WebCore::KURL& url);
+
+  // Callback function for download of alternate error pages.  If the server is
+  // down or we take too long to download the page, |html| will be empty.
+  void AltErrorPageFinished(const GURL& unreachable_url,
+                            const std::string& html);
 
   // Valid between calls to BeginPrint() and EndPrint(). Containts the print
   // information. Is used by PrintPage().

@@ -35,6 +35,9 @@ namespace media {
 
 class StreamSample : public base::RefCountedThreadSafe<StreamSample> {
  public:
+  // Constant timestamp value to indicate an invalid or missing timestamp.
+  static const base::TimeDelta kInvalidTimestamp;
+
   // Returns the timestamp of this buffer in microseconds.
   base::TimeDelta GetTimestamp() const {
     return timestamp_;
@@ -45,10 +48,10 @@ class StreamSample : public base::RefCountedThreadSafe<StreamSample> {
     return duration_;
   }
 
-  // Indicates that the sample is the last one in the stream.
-  bool IsEndOfStream() const {
-    return end_of_stream_;
-  }
+  // Indicates that the sample is the last one in the stream. This method is
+  // pure virtual so implementors can decide when to declare end of stream
+  // depending on specific data.
+  virtual bool IsEndOfStream() const = 0;
 
   // Indicates that this sample is discontinuous from the previous one, for
   // example, following a seek.
@@ -66,11 +69,6 @@ class StreamSample : public base::RefCountedThreadSafe<StreamSample> {
     duration_ = duration;
   }
 
-  // Sets the value returned by IsEndOfStream().
-  void SetEndOfStream(bool end_of_stream) {
-    end_of_stream_ = end_of_stream;
-  }
-
   // Sets the value returned by IsDiscontinuous().
   void SetDiscontinuous(bool discontinuous) {
     discontinuous_ = discontinuous;
@@ -79,14 +77,12 @@ class StreamSample : public base::RefCountedThreadSafe<StreamSample> {
  protected:
   friend class base::RefCountedThreadSafe<StreamSample>;
   StreamSample()
-      : end_of_stream_(false),
-        discontinuous_(false) {
+      : discontinuous_(false) {
   }
   virtual ~StreamSample() {}
 
   base::TimeDelta timestamp_;
   base::TimeDelta duration_;
-  bool end_of_stream_;
   bool discontinuous_;
 
  private:
@@ -101,23 +97,23 @@ class Buffer : public StreamSample {
 
   // Returns the size of valid data in bytes.
   virtual size_t GetDataSize() const = 0;
+
+  // If there's no data in this buffer, it represents end of stream.
+  virtual bool IsEndOfStream() const { return GetData() == NULL; }
 };
 
 
 class WritableBuffer : public Buffer  {
  public:
-  // Returns a read-write pointer to the buffer data.  When this method is
-  // called, any pointers previously returned from this method are invalid, and
-  // any data previously written to the buffer is invalid.  The buffer size
-  // is guaranteed to be at least the size of |buffer_size|.  The size
-  // that the GetDataSize() method will return is set to |buffer_size|.
-  // If, after filling the buffer, the caller wants to set the size to a smaller
-  // value then they can call the SetDataSize() method.
-  virtual uint8* GetWritableData(size_t buffer_size) = 0;
+  // Returns a read-write pointer to the buffer data.
+  virtual uint8* GetWritableData() = 0;
 
   // Updates the size of valid data in bytes, which must be less than or equal
-  // to the |buffer_size| passed to GetWritableData().
+  // to GetBufferSize().
   virtual void SetDataSize(size_t data_size) = 0;
+
+  // Returns the size of the underlying buffer.
+  virtual size_t GetBufferSize() const = 0;
 };
 
 
@@ -136,6 +132,7 @@ struct VideoSurface {
   // http://www.fourcc.org/rgb.php
   // http://www.fourcc.org/yuv.php
   enum Format {
+    INVALID,     // Invalid format value.  Used for error reporting.
     RGB555,      // 16bpp RGB packed 5:5:5
     RGB565,      // 16bpp RGB packed 5:6:5
     RGB24,       // 24bpp RGB packed 8:8:8
@@ -143,6 +140,7 @@ struct VideoSurface {
     RGBA,        // 32bpp RGBA packed 8:8:8:8
     YV12,        // 12bpp YVU planar 1x1 Y, 2x2 VU samples
     YV16,        // 16bpp YVU planar 1x1 Y, 2x1 VU samples
+    EMPTY,       // An empty frame.
   };
 
   // Surface format.
@@ -157,8 +155,9 @@ struct VideoSurface {
   size_t planes;
 
   // Array of strides for each plane, typically greater or equal to the width
-  // of the surface divided by the horizontal sampling period.
-  size_t strides[kMaxPlanes];
+  // of the surface divided by the horizontal sampling period.  Note that
+  // strides can be negative.
+  int32 strides[kMaxPlanes];
 
   // Array of data pointers to each plane.
   uint8* data[kMaxPlanes];
@@ -175,60 +174,8 @@ class VideoFrame : public StreamSample {
   // Unlocks the underlying surface, the VideoSurface acquired from Lock is no
   // longer guaranteed to be valid.
   virtual void Unlock() = 0;
-};
 
-
-// An interface for receiving the results of an asynchronous read.  Downstream
-// filters typically implement this interface or use AssignableBuffer and
-// provide it to upstream filters as a read request.  When the upstream filter
-// has completed the read, they call SetBuffer/OnAssignment to notify the
-// downstream filter.
-//
-// TODO(scherkus): rethink the Assignable interface -- it's a bit kludgy.
-template <class BufferType>
-class Assignable
-    : public base::RefCountedThreadSafe< Assignable<BufferType> > {
- public:
-  // Assigns a buffer to the owner.
-  virtual void SetBuffer(BufferType* buffer) = 0;
-
-  // Notifies the owner that an assignment has been completed.
-  virtual void OnAssignment() = 0;
-
-  // TODO(scherkus): figure out a solution to friending a template.
-  // See http://www.comeaucomputing.com/techtalk/templates/#friendclassT for
-  // an explanation.
-  // protected:
-  // friend class base::RefCountedThreadSafe< Assignable<class T> >;
-  virtual ~Assignable() {}
-};
-
-
-// Template for easily creating Assignable buffers.  Pass in the pointer of the
-// object to receive the OnAssignment callback.
-template <class OwnerType, class BufferType>
-class AssignableBuffer : public Assignable<BufferType> {
- public:
-  explicit AssignableBuffer(OwnerType* owner)
-      : owner_(owner),
-        buffer_(NULL) {
-    DCHECK(owner_);
-  }
-
-  // AssignableBuffer<BufferType> implementation.
-  virtual void SetBuffer(BufferType* buffer) {
-    buffer_ = buffer;
-  }
-
-  virtual void OnAssignment() {
-    owner_->OnAssignment(buffer_.get());
-  }
-
- private:
-  OwnerType* owner_;
-  scoped_refptr<BufferType> buffer_;
-
-  DISALLOW_COPY_AND_ASSIGN(AssignableBuffer);
+  virtual bool IsEndOfStream() const = 0;
 };
 
 }  // namespace media

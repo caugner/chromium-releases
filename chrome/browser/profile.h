@@ -10,32 +10,47 @@
 #include <set>
 #include <string>
 
+#include "app/theme_provider.h"
 #include "base/basictypes.h"
 #include "base/file_path.h"
 #include "base/scoped_ptr.h"
 #include "base/timer.h"
+#include "chrome/browser/web_resource/web_resource_service.h"
 #ifdef CHROME_PERSONALIZATION
 #include "chrome/personalization/personalization.h"
 #endif
-#include "chrome/common/notification_observer.h"
+#include "chrome/common/notification_registrar.h"
 
+namespace net {
+class ForceTLSState;
+}
+class Blacklist;
 class BookmarkModel;
+class BrowserThemeProvider;
 class ChromeURLRequestContext;
 class DownloadManager;
+class Extension;
+class ExtensionProcessManager;
+class ExtensionMessageService;
 class ExtensionsService;
 class HistoryService;
 class NavigationController;
+class PasswordStore;
 class PrefService;
 class SessionService;
 class SpellChecker;
 class SSLHostState;
+class SQLitePersistentCookieStore;
 class TabRestoreService;
 class TemplateURLFetcher;
 class TemplateURLModel;
+class ThumbnailStore;
 class URLRequestContext;
 class UserScriptMaster;
 class VisitedLinkMaster;
+class VisitedLinkEventListener;
 class WebDataService;
+class WebKitContext;
 
 class Profile {
  public:
@@ -93,6 +108,9 @@ class Profile {
   // record, the same profile is returned.
   virtual Profile* GetOffTheRecordProfile() = 0;
 
+  // Destroys the off the record profile.
+  virtual void DestroyOffTheRecordProfile() = 0;
+
   // Return the original "recording" profile. This method returns this if the
   // profile is not off the record.
   virtual Profile* GetOriginalProfile() = 0;
@@ -111,10 +129,23 @@ class Profile {
   // that this method is called.
   virtual UserScriptMaster* GetUserScriptMaster() = 0;
 
+  // Retrieves a pointer to the ExtensionProcessManager associated with this
+  // profile.  The instance is created at startup.
+  virtual ExtensionProcessManager* GetExtensionProcessManager() = 0;
+
+  // Retrieves a pointer to the ExtensionMessageService associated with this
+  // profile.  The instance is created at startup.
+  virtual ExtensionMessageService* GetExtensionMessageService() = 0;
+
   // Retrieves a pointer to the SSLHostState associated with this profile.
   // The SSLHostState is lazily created the first time that this method is
   // called.
   virtual SSLHostState* GetSSLHostState() = 0;
+
+  // Retrieves a pointer to the ForceTLStSate associated with this profile.
+  // The ForceTLSState is lazily created the first time that this method is
+  // called.
+  virtual net::ForceTLSState* GetForceTLSState() = 0;
 
   // Retrieves a pointer to the HistoryService associated with this
   // profile.  The HistoryService is lazily created the first time
@@ -137,6 +168,9 @@ class Profile {
   // the ServiceAccessType definition above.
   virtual WebDataService* GetWebDataService(ServiceAccessType access) = 0;
 
+  // Returns the PasswordStore for this profile. This is owned by the Profile.
+  virtual PasswordStore* GetPasswordStore(ServiceAccessType access) = 0;
+
   // Retrieves a pointer to the PrefService that manages the preferences
   // for this user profile.  The PrefService is lazily created the first
   // time that this method is called.
@@ -154,6 +188,27 @@ class Profile {
   virtual DownloadManager* GetDownloadManager() = 0;
   virtual bool HasCreatedDownloadManager() const = 0;
 
+  // Init our themes system.
+  virtual void InitThemes() = 0;
+
+  // Set the theme to the specified extension.
+  virtual void SetTheme(Extension* extension) = 0;
+
+  // Set the theme to the machine's native theme.
+  virtual void SetNativeTheme() = 0;
+
+  // Clear the theme and reset it to default.
+  virtual void ClearTheme() = 0;
+
+  // Gets the theme that was last set. Returns NULL if the theme is no longer
+  // installed, if there is no installed theme, or the theme was cleared.
+  virtual Extension* GetTheme() = 0;
+
+  // Returns or creates the ThemeProvider associated with this profile
+  virtual ThemeProvider* GetThemeProvider() = 0;
+
+  virtual ThumbnailStore* GetThumbnailStore() = 0;
+
   // Returns the request context information associated with this profile.  Call
   // this only on the UI thread, since it can send notifications that should
   // happen on the UI thread.
@@ -165,6 +220,13 @@ class Profile {
   // Returns the request context for media resources asociated with this
   // profile.
   virtual URLRequestContext* GetRequestContextForMedia() = 0;
+
+  // Returns the request context used for extension-related requests.  This
+  // is only used for a separate cookie store currently.
+  virtual URLRequestContext* GetRequestContextForExtensions() = 0;
+
+  // Returns the Privacy Blaclist for this profile.
+  virtual Blacklist* GetBlacklist() = 0;
 
   // Returns the session service for this profile. This may return NULL. If
   // this profile supports a session service (it isn't off the record), and
@@ -226,6 +288,9 @@ class Profile {
   // sent to the I/O thread where it is actually used.
   virtual SpellChecker* GetSpellChecker() = 0;
 
+  // Returns the WebKitContext assigned to this profile.
+  virtual WebKitContext* GetWebKitContext() = 0;
+
   // Marks the profile as cleanly shutdown.
   //
   // NOTE: this is invoked internally on a normal shutdown, but is public so
@@ -233,6 +298,9 @@ class Profile {
   virtual void MarkAsCleanShutdown() = 0;
 
   virtual void InitExtensions() = 0;
+
+  // Start up service that gathers data from web resource feeds.
+  virtual void InitWebResources() = 0;
 
 #ifdef UNIT_TEST
   // Use with caution.  GetDefaultRequestContext may be called on any thread!
@@ -268,20 +336,34 @@ class ProfileImpl : public Profile,
   virtual FilePath GetPath();
   virtual bool IsOffTheRecord();
   virtual Profile* GetOffTheRecordProfile();
+  virtual void DestroyOffTheRecordProfile();
   virtual Profile* GetOriginalProfile();
   virtual VisitedLinkMaster* GetVisitedLinkMaster();
   virtual UserScriptMaster* GetUserScriptMaster();
   virtual SSLHostState* GetSSLHostState();
+  virtual net::ForceTLSState* GetForceTLSState();
   virtual ExtensionsService* GetExtensionsService();
+  virtual ExtensionProcessManager* GetExtensionProcessManager();
+  virtual ExtensionMessageService* GetExtensionMessageService();
   virtual HistoryService* GetHistoryService(ServiceAccessType sat);
   virtual WebDataService* GetWebDataService(ServiceAccessType sat);
+  virtual PasswordStore* GetPasswordStore(ServiceAccessType sat);
   virtual PrefService* GetPrefs();
   virtual TemplateURLModel* GetTemplateURLModel();
   virtual TemplateURLFetcher* GetTemplateURLFetcher();
   virtual DownloadManager* GetDownloadManager();
+  virtual void InitThemes();
+  virtual void SetTheme(Extension* extension);
+  virtual void SetNativeTheme();
+  virtual void ClearTheme();
+  virtual Extension* GetTheme();
+  virtual ThemeProvider* GetThemeProvider();
+  virtual ThumbnailStore* GetThumbnailStore();
   virtual bool HasCreatedDownloadManager() const;
   virtual URLRequestContext* GetRequestContext();
   virtual URLRequestContext* GetRequestContextForMedia();
+  virtual URLRequestContext* GetRequestContextForExtensions();
+  virtual Blacklist* GetBlacklist();
   virtual SessionService* GetSessionService();
   virtual void ShutdownSessionService();
   virtual bool HasSessionService() const;
@@ -297,8 +379,10 @@ class ProfileImpl : public Profile,
   virtual void ResetTabRestoreService();
   virtual void ReinitializeSpellChecker();
   virtual SpellChecker* GetSpellChecker();
+  virtual WebKitContext* GetWebKitContext();
   virtual void MarkAsCleanShutdown();
   virtual void InitExtensions();
+  virtual void InitWebResources();
 #ifdef CHROME_PERSONALIZATION
   virtual ProfilePersonalization* GetProfilePersonalization();
 #endif
@@ -315,6 +399,8 @@ class ProfileImpl : public Profile,
   void CreateWebDataService();
   FilePath GetPrefFilePath();
 
+  void CreatePasswordStore();
+
   void StopCreateSessionServiceTimer();
 
   void EnsureSessionServiceCreated() {
@@ -330,16 +416,23 @@ class ProfileImpl : public Profile,
   // spellchecker to the resource message filters.
   void InitializeSpellChecker(bool need_to_broadcast);
 
+  NotificationRegistrar registrar_;
+
   FilePath path_;
-  bool off_the_record_;
+  scoped_ptr<VisitedLinkEventListener> visited_link_event_listener_;
   scoped_ptr<VisitedLinkMaster> visited_link_master_;
   scoped_refptr<ExtensionsService> extensions_service_;
   scoped_refptr<UserScriptMaster> user_script_master_;
+  scoped_ptr<ExtensionProcessManager> extension_process_manager_;
+  scoped_refptr<ExtensionMessageService> extension_message_service_;
   scoped_ptr<SSLHostState> ssl_host_state_;
+  scoped_ptr<net::ForceTLSState> force_tls_state_;
   scoped_ptr<PrefService> prefs_;
+  scoped_refptr<ThumbnailStore> thumbnail_store_;
   scoped_ptr<TemplateURLFetcher> template_url_fetcher_;
   scoped_ptr<TemplateURLModel> template_url_model_;
   scoped_ptr<BookmarkModel> bookmark_bar_model_;
+  scoped_refptr<WebResourceService> web_resource_service_;
 
 #ifdef CHROME_PERSONALIZATION
   scoped_ptr<ProfilePersonalization> personalization_;
@@ -349,13 +442,22 @@ class ProfileImpl : public Profile,
 
   ChromeURLRequestContext* media_request_context_;
 
+  ChromeURLRequestContext* extensions_request_context_;
+
+  Blacklist* blacklist_;
+
   scoped_refptr<DownloadManager> download_manager_;
   scoped_refptr<HistoryService> history_service_;
   scoped_refptr<WebDataService> web_data_service_;
+  scoped_refptr<PasswordStore> password_store_;
   scoped_refptr<SessionService> session_service_;
+  scoped_refptr<BrowserThemeProvider> theme_provider_;
+  scoped_refptr<WebKitContext> webkit_context_;
   bool history_service_created_;
   bool created_web_data_service_;
+  bool created_password_store_;
   bool created_download_manager_;
+  bool created_theme_provider_;
   // Whether or not the last session exited cleanly. This is set only once.
   bool last_session_exited_cleanly_;
 

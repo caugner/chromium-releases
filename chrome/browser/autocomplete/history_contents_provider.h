@@ -6,8 +6,11 @@
 #define CHROME_BROWSER_AUTOCOMPLETE_HISTORY_CONTENTS_PROVIDER_H_
 
 #include "chrome/browser/autocomplete/autocomplete.h"
-#include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/history/history.h"
+
+namespace bookmark_utils {
+struct TitleMatch;
+}
 
 // HistoryContentsProvider is an AutocompleteProvider that provides results from
 // the contents (body and/or title) of previously visited pages.
@@ -79,6 +82,9 @@ class HistoryContentsProvider : public AutocompleteProvider {
 
   // Current autocomplete input type.
   AutocompleteInput::Type input_type_;
+
+  // Whether we should trim "http://" from results.
+  bool trim_http_;
 
   // Results from most recent query. These are cached so we don't have to
   // re-issue queries for "minor changes" (which don't affect this provider).

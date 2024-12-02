@@ -9,7 +9,7 @@
   'targets': [
     {
       'target_name': 'zlib',
-      'type': 'static_library',
+      'type': '<(library)',
       'msvs_guid': '8423AF0D-4B88-4EBF-94E1-E4D00D00E21C',
       'sources': [
         'contrib/minizip/ioapi.c',
@@ -18,6 +18,8 @@
         'contrib/minizip/iowin32.h',
         'contrib/minizip/unzip.c',
         'contrib/minizip/unzip.h',
+        'contrib/minizip/zip.c',
+        'contrib/minizip/zip.h',
         'adler32.c',
         'compress.c',
         'crc32.c',

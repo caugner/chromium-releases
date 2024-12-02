@@ -4,18 +4,26 @@
 
 #include "chrome/browser/views/tab_icon_view.h"
 
+#if defined(OS_WIN)
 #include <windows.h>
 #include <shellapi.h>
+#endif
 
+#include "app/gfx/canvas.h"
+#include "app/gfx/favicon_size.h"
+#include "app/resource_bundle.h"
 #include "base/file_util.h"
+#include "base/logging.h"
 #include "base/path_service.h"
 #include "chrome/app/chrome_dll_resource.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
-#include "chrome/common/gfx/chrome_canvas.h"
-#include "chrome/common/gfx/favicon_size.h"
-#include "chrome/common/gfx/icon_util.h"
-#include "chrome/common/resource_bundle.h"
+#include "chrome/common/chrome_constants.h"
+#include "grit/app_resources.h"
 #include "grit/theme_resources.h"
+
+#if defined(OS_WIN)
+#include "app/gfx/icon_util.h"
+#endif
 
 static bool g_initialized = false;
 static SkBitmap* g_default_fav_icon = NULL;
@@ -28,15 +36,21 @@ void TabIconView::InitializeIfNeeded() {
   if (!g_initialized) {
     ResourceBundle &rb = ResourceBundle::GetSharedInstance();
 
+#if defined(OS_WIN)
     // The default window icon is the application icon, not the default
     // favicon.
     std::wstring exe_path;
     PathService::Get(base::DIR_EXE, &exe_path);
-    file_util::AppendToPath(&exe_path, L"chrome.exe");
+    file_util::AppendToPath(&exe_path,
+        chrome::kBrowserProcessExecutableName);
+
     HICON app_icon = ExtractIcon(NULL, exe_path.c_str(), 0);
     g_default_fav_icon =
         IconUtil::CreateSkBitmapFromHICON(app_icon, gfx::Size(16, 16));
     DestroyIcon(app_icon);
+#else
+    NOTIMPLEMENTED();
+#endif
 
     g_throbber_frames = rb.GetBitmapNamed(IDR_THROBBER);
     g_throbber_frames_light = rb.GetBitmapNamed(IDR_THROBBER_LIGHT);
@@ -52,8 +66,8 @@ void TabIconView::InitializeIfNeeded() {
 
 TabIconView::TabIconView(TabIconViewModel* model)
     : model_(model),
-      is_light_(false),
       throbber_running_(false),
+      is_light_(false),
       throbber_frame_(0) {
   InitializeIfNeeded();
 }
@@ -83,17 +97,17 @@ void TabIconView::Update() {
   }
 }
 
-void TabIconView::PaintThrobber(ChromeCanvas* canvas) {
+void TabIconView::PaintThrobber(gfx::Canvas* canvas) {
   int image_size = g_throbber_frames->height();
   PaintIcon(canvas, is_light_ ? *g_throbber_frames_light : *g_throbber_frames,
             throbber_frame_ * image_size, 0, image_size, image_size, false);
 }
 
-void TabIconView::PaintFavIcon(ChromeCanvas* canvas, const SkBitmap& bitmap) {
+void TabIconView::PaintFavIcon(gfx::Canvas* canvas, const SkBitmap& bitmap) {
   PaintIcon(canvas, bitmap, 0, 0, bitmap.width(), bitmap.height(), true);
 }
 
-void TabIconView::PaintIcon(ChromeCanvas* canvas,
+void TabIconView::PaintIcon(gfx::Canvas* canvas,
                             const SkBitmap& bitmap,
                             int src_x,
                             int src_y,
@@ -125,7 +139,7 @@ void TabIconView::PaintIcon(ChromeCanvas* canvas,
                         dest_h, filter);
 }
 
-void TabIconView::Paint(ChromeCanvas* canvas) {
+void TabIconView::Paint(gfx::Canvas* canvas) {
   bool rendered = false;
 
   if (throbber_running_) {

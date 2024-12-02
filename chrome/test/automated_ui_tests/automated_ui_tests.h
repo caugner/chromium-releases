@@ -101,12 +101,17 @@
 //                       after each action. Useful for debugging.
 //
 
+#include "chrome/test/automated_ui_tests/automated_ui_test_base.h"
 #include "chrome/test/ui/ui_test.h"
 
-class AutomatedUITest : public UITest {
+namespace base {
+class Time;
+}
+
+class AutomatedUITest : public AutomatedUITestBase {
  protected:
   AutomatedUITest();
-  ~AutomatedUITest();
+  virtual ~AutomatedUITest();
 
   // Runs a reproduction of one set of actions, reporting whether they crash
   // or not.
@@ -125,26 +130,11 @@ class AutomatedUITest : public UITest {
   // NOTE: This list is sorted alphabetically, so that we can easily detect
   // missing actions.
 
-  // Activates back button in active window.
-  // Returns true if call to activate the accelerator is successful.
-  // XML element: <Back/>
-  bool BackButton();
-
   // Changes the encoding of the page (the encoding is selected at random
   // from a list of encodings).
   // Returns true if call to activate the accelerator is successful.
   // XML element: <ChangeEncoding/>
   bool ChangeEncoding();
-
-  // Uses accelerator to close the active tab if it isn't the only tab.
-  // Returns false if active tab is the only tab, true otherwise.
-  // XML element: <CloseTab/>
-  bool CloseActiveTab();
-
-  // Duplicates the current tab.
-  // Returns true if call to activate the accelerator is successful.
-  // XML element: <DuplicateTab/>
-  bool DuplicateTab();
 
   // Opens one of the dialogs (chosen randomly) and exercises it.
   // XML element: <Dialog/>
@@ -153,15 +143,6 @@ class AutomatedUITest : public UITest {
   // Activates "find in page" on the current page.
   // XML element: <FindInPage/>
   bool FindInPage();
-
-  // Activates forward button in active window.
-  // Returns true if call to activate the accelerator is successful.
-  // XML element: <Forward/>
-  bool ForwardButton();
-
-  // Opens and focuses an OffTheRecord browser window.
-  // XML element: <GoOffTheRecord/>
-  bool GoOffTheRecord();
 
   // Navigates to the Home page.
   // Returns true if call to activate the accelerator is successful.
@@ -173,28 +154,6 @@ class AutomatedUITest : public UITest {
   // it is dismissed.
   // XML element: <JavaScriptConsole/>
   bool JavaScriptConsole();
-
-  // Opens the JavaScriptDebugger window. While it isn't modal, it takes focus
-  // from the current browser window, so most of the test can't continue until
-  // it is dismissed.
-  // XML element: <JavaScriptDebugger/>
-  bool JavaScriptDebugger();
-
-  // Navigates the activate tab to about:blank.
-  // XML element: <Navigate/>
-  // Optional Attributes: url="|address|" will navigate to |address|
-  bool Navigate();
-
-  // Opens a new tab in the active window using an accelerator.
-  // Returns true if call to activate the accelerator is successful.
-  // XML element: <NewTab/>
-  bool NewTab();
-
-  // Opens a new browser window by calling automation()->OpenNewBrowserWindow
-  // Then activates the tab opened in the new window.
-  // Returns true if window is successfully created.
-  // XML element: <OpenWindow/>
-  bool OpenAndActivateNewBrowserWindow();
 
   // Opens the About dialog. This dialog is modal so a majority of the test
   // can't be completed until it is dismissed.
@@ -265,15 +224,6 @@ class AutomatedUITest : public UITest {
   // Simulates a page up key press on the active window.
   // XML element: <UpArrow/>
   bool PressUpArrow();
-
-  // Reload the active tab. Returns false on failure.
-  // XML element: <Reload/>
-  bool ReloadPage();
-
-  // Restores a previously closed tab.
-  // Returns true if call to activate the accelerator is successful.
-  // XML element: <RestoreTab/>
-  bool RestoreTab();
 
   // Activates the next tab on the active browser window.
   // XML element: <SelectNextTab/>
@@ -367,33 +317,7 @@ class AutomatedUITest : public UITest {
   // XML element: <Crash/>
   bool ForceCrash();
 
-  // Drags the active tab. If |drag_out| is true, |drag_right| is ignored and
-  // the tab is dragged vertically to remove it from the tabstrip. Otherwise,
-  // If |drag_right| is true, if there is a tab to the right of the active tab,
-  // the active tab is dragged to that tabs position. If |drag_right| is false,
-  // if there is a tab to the left of the active tab, the active tab is dragged
-  // to that tabs position. Returns false if the tab isn't dragged, or if an
-  // attempt to drag out doesn't create a new window (likely because it was
-  // dragged in to another window).
-  // XML element (multiple elements use this):
-  // <DragTabRight/> - Calls DragActiveTab(true, false) (attempt to drag right)
-  // <DragTabLeft/> - Calls DragActiveTab(false, false) (attempt to drag left)
-  // <DragTabOut/> - Calls DragActiveTab(false, true) (attempt to drag tab out)
-  bool DragActiveTab(bool drag_right, bool drag_out);
-
   // Utility functions --------------------------------------------------------
-
-  // Returns the WindowProxy associated with the given BrowserProxy
-  // (transferring ownership of the pointer to the caller) and brings that
-  // window to the top.
-  WindowProxy* GetAndActivateWindowForBrowser(BrowserProxy* browser);
-
-  // Runs the specified browser command in the current active browser.
-  // See browser_commands.cc for the list of commands.
-  // Returns true if the call is successful.
-  // Returns false if the active window is not a browser window or if the
-  // message to apply the accelerator fails.
-  bool RunCommand(int browser_command);
 
   // Calls SimulateOSKeyPress on the active window. Simulates a key press at
   // the OS level. |key| is the key pressed  and |flags| specifies which
@@ -454,6 +378,11 @@ class AutomatedUITest : public UITest {
   // with |update_total_crashes| set to true.
   bool DidCrash(bool update_total_crashes);
 
+  // Override the message logging in AutomatedUITestBase.
+  virtual void LogErrorMessage(const std::string &error);
+  virtual void LogWarningMessage(const std::string &warning);
+  virtual void LogInfoMessage(const std::string &info);
+
   // Overridden so that UI Test doesn't set up when the tests start.
   // We use DoAction("SetUp") to set up, because it logs it and makes
   // it easier to check for crashes when we start the browser.
@@ -473,7 +402,7 @@ class AutomatedUITest : public UITest {
   XmlWriter xml_writer_;
 
   // Time the test was started. Used to find crash dumps.
-  FILETIME test_start_time_;
+  base::Time test_start_time_;
 
   // Number of times the browser has crashed during this run.
   // Used to check for new crashes.

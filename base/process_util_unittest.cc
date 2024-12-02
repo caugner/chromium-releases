@@ -1,10 +1,14 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #define _CRT_SECURE_NO_WARNINGS
 
+#include "base/command_line.h"
+#include "base/eintr_wrapper.h"
+#include "base/file_path.h"
 #include "base/multiprocess_test.h"
+#include "base/path_service.h"
 #include "base/platform_thread.h"
 #include "base/process_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -127,6 +131,38 @@ TEST_F(ProcessUtilTest, CalcFreeMemory) {
   delete[] alloc;
   delete metrics;
 }
+
+TEST_F(ProcessUtilTest, GetAppOutput) {
+  // Let's create a decently long message.
+  std::string message;
+  for (int i = 0; i < 1025; i++) {  // 1025 so it does not end on a kilo-byte
+                                    // boundary.
+    message += "Hello!";
+  }
+
+  FilePath python_runtime;
+  ASSERT_TRUE(PathService::Get(base::DIR_SOURCE_ROOT, &python_runtime));
+  python_runtime = python_runtime.Append(FILE_PATH_LITERAL("third_party"))
+                                 .Append(FILE_PATH_LITERAL("python_24"))
+                                 .Append(FILE_PATH_LITERAL("python.exe"));
+
+  CommandLine cmd_line(python_runtime.value());
+  cmd_line.AppendLooseValue(L"-c");
+  cmd_line.AppendLooseValue(L"\"import sys; sys.stdout.write('" +
+      ASCIIToWide(message) + L"');\"");
+  std::string output;
+  ASSERT_TRUE(base::GetAppOutput(cmd_line, &output));
+  EXPECT_EQ(message, output);
+
+  // Let's make sure stderr is ignored.
+  CommandLine other_cmd_line(python_runtime.value());
+  other_cmd_line.AppendLooseValue(L"-c");
+  other_cmd_line.AppendLooseValue(
+      L"\"import sys; sys.stderr.write('Hello!');\"");
+  output.clear();
+  ASSERT_TRUE(base::GetAppOutput(other_cmd_line, &output));
+  EXPECT_EQ("", output);
+}
 #endif  // defined(OS_WIN)
 
 #if defined(OS_POSIX)
@@ -157,7 +193,7 @@ MULTIPROCESS_TEST_MAIN(ProcessUtilsLeakFDChildProcess) {
   int max_files = GetMaxFilesOpenInProcess();
   for (int i = STDERR_FILENO + 1; i < max_files; i++) {
     if (i != kChildPipe) {
-      if (close(i) != -1) {
+      if (HANDLE_EINTR(close(i)) != -1) {
         LOG(WARNING) << "Leaked FD " << i;
         num_open_files += 1;
       }
@@ -172,9 +208,10 @@ MULTIPROCESS_TEST_MAIN(ProcessUtilsLeakFDChildProcess) {
 #endif  // defined(OS_LINUX)
   num_open_files -= expected_num_open_fds;
 
-  int written = write(write_pipe, &num_open_files, sizeof(num_open_files));
+  int written = HANDLE_EINTR(write(write_pipe, &num_open_files,
+                                   sizeof(num_open_files)));
   DCHECK_EQ(static_cast<size_t>(written), sizeof(num_open_files));
-  close(write_pipe);
+  HANDLE_EINTR(close(write_pipe));
 
   return 0;
 }
@@ -199,12 +236,12 @@ TEST_F(ProcessUtilTest, FDRemapping) {
                                           fd_mapping_vec,
                                           false);
   ASSERT_NE(static_cast<ProcessHandle>(NULL), handle);
-  close(pipe_write_fd);
+  HANDLE_EINTR(close(pipe_write_fd));
 
   // Read number of open files in client process from pipe;
   int num_open_files = -1;
-  ssize_t bytes_read = read(pipe_read_fd, &num_open_files,
-                            sizeof(num_open_files));
+  ssize_t bytes_read =
+      HANDLE_EINTR(read(pipe_read_fd, &num_open_files, sizeof(num_open_files)));
   ASSERT_EQ(bytes_read, static_cast<ssize_t>(sizeof(num_open_files)));
 
   // Make sure 0 fds are leaked to the client.
@@ -212,11 +249,33 @@ TEST_F(ProcessUtilTest, FDRemapping) {
 
   EXPECT_TRUE(WaitForSingleProcess(handle, 1000));
   base::CloseProcessHandle(handle);
-  close(fds[0]);
-  close(sockets[0]);
-  close(sockets[1]);
-  close(dev_null);
+  HANDLE_EINTR(close(fds[0]));
+  HANDLE_EINTR(close(sockets[0]));
+  HANDLE_EINTR(close(sockets[1]));
+  HANDLE_EINTR(close(dev_null));
 }
+
+TEST_F(ProcessUtilTest, GetAppOutput) {
+  std::string output;
+  EXPECT_TRUE(GetAppOutput(CommandLine(L"true"), &output));
+  EXPECT_STREQ("", output.c_str());
+
+  EXPECT_FALSE(GetAppOutput(CommandLine(L"false"), &output));
+
+  std::vector<std::string> argv;
+  argv.push_back("/bin/echo");
+  argv.push_back("-n");
+  argv.push_back("foobar42");
+  EXPECT_TRUE(GetAppOutput(CommandLine(argv), &output));
+  EXPECT_STREQ("foobar42", output.c_str());
+}
+
+#if defined(OS_LINUX)
+TEST_F(ProcessUtilTest, GetParentProcessId) {
+  base::ProcessId ppid = GetParentProcessId(GetCurrentProcId());
+  EXPECT_EQ(ppid, getppid());
+}
+#endif
 
 #endif  // defined(OS_POSIX)
 

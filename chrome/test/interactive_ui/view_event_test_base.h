@@ -7,8 +7,8 @@
 
 #include "base/message_loop.h"
 #include "base/thread.h"
-#include "chrome/views/window/window_delegate.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "views/window/window_delegate.h"
 
 class Task;
 
@@ -56,11 +56,11 @@ class Size;
 class ViewEventTestBase : public views::WindowDelegate,
                           public testing::Test {
  public:
+  ViewEventTestBase();
+
   // Invoke when done either because of failure or success. Quits the message
   // loop.
-  static void Done();
-
-  ViewEventTestBase();
+  void Done();
 
   // Creates a window.
   virtual void SetUp();

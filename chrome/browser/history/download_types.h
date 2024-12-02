@@ -8,7 +8,6 @@
 #define CHROME_BROWSER_DOWNLOAD_TYPES_H_
 
 #include <string>
-#include <vector>
 
 #include "base/basictypes.h"
 #include "base/file_path.h"
@@ -48,6 +47,7 @@ struct DownloadCreateInfo {
   // DownloadItem fields
   FilePath path;
   GURL url;
+  GURL referrer_url;
   FilePath suggested_path;
   // A number that should be added to the suggested path to make it unique.
   // 0 means no number should be appended.  Not actually stored in the db.
@@ -68,6 +68,9 @@ struct DownloadCreateInfo {
   bool is_dangerous;
   // The original name for a dangerous download.
   FilePath original_name;
+  // The charset of the referring page where the download request comes from.
+  // It's used to construct a suggested filename.
+  std::string referrer_charset;
 };
 
 #endif  // CHROME_BROWSER_DOWNLOAD_TYPES_H_

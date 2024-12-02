@@ -29,22 +29,21 @@
 #include "net/base/mime_util.h"
 #include "skia/ext/bitmap_platform_device.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "webkit/glue/webdatasource.h"
 #include "webkit/glue/webframe.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/webpreferences.h"
-#include "webkit/glue/weburlrequest.h"
 #include "webkit/glue/webview.h"
-#include "webkit/glue/webwidget.h"
 #include "webkit/glue/plugins/plugin_list.h"
 #include "webkit/tools/test_shell/mac/test_shell_webview.h"
 #include "webkit/tools/test_shell/resource.h"
 #include "webkit/tools/test_shell/simple_resource_loader_bridge.h"
 #include "webkit/tools/test_shell/test_navigation_controller.h"
 
-#import "skia/include/SkBitmap.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 
 #import "mac/DumpRenderTreePasteboard.h"
+
+using WebKit::WebWidget;
 
 #define MAX_LOADSTRING 100
 
@@ -218,7 +217,7 @@ void TestShell::InitializeTestShell(bool layout_test_mode) {
 }
 
 NSButton* MakeTestButton(NSRect* rect, NSString* title, NSView* parent) {
-  NSButton* button = [[NSButton alloc] initWithFrame:*rect];
+  NSButton* button = [[[NSButton alloc] initWithFrame:*rect] autorelease];
   [button setTitle:title];
   [button setBezelStyle:NSSmallSquareBezelStyle];
   [button setAutoresizingMask:(NSViewMaxXMargin | NSViewMinYMargin)];
@@ -460,8 +459,7 @@ void TestShell::DestroyWindow(gfx::NativeWindow windowHandle) {
 
 WebWidget* TestShell::CreatePopupWidget(WebView* webview) {
   DCHECK(!m_popupHost);
-  m_popupHost = WebWidgetHost::Create(NULL, delegate_.get());
-  // ShowWindow(popupWnd(), SW_SHOW);
+  m_popupHost = WebWidgetHost::Create(webViewWnd(), popup_delegate_.get());
 
   return m_popupHost->webwidget();
 }
@@ -485,14 +483,14 @@ void TestShell::ResizeSubViews() {
   // handled by Cocoa for us
 }
 
-/* static */ void TestShell::DumpBackForwardList(std::wstring* result) {
+/* static */ void TestShell::DumpAllBackForwardLists(std::wstring* result) {
   result->clear();
   for (WindowList::iterator iter = TestShell::windowList()->begin();
        iter != TestShell::windowList()->end(); iter++) {
     NSWindow* window = *iter;
     WindowMap::iterator it = window_map_.Get().find(window);
     if (it != window_map_.Get().end())
-      webkit_glue::DumpBackForwardList(it->second->webView(), NULL, result);
+      it->second->DumpBackForwardList(result);
     else
       LOG(ERROR) << "Failed to find shell for window during dump";
   }
@@ -650,7 +648,7 @@ string16 GetLocalizedString(int message_id) {
                   res.length() / 2);
 }
 
-std::string GetDataResource(int resource_id) {
+StringPiece GetDataResource(int resource_id) {
   switch (resource_id) {
   case IDR_BROKENIMAGE: {
     // Use webkit's broken image icon (16x16)
@@ -674,7 +672,7 @@ std::string GetDataResource(int resource_id) {
     // a {{URL}} substring where the feed URL should go; see the code
     // that computes feed previews in feed_preview.cc:MakeFeedPreview.
     // This fixes issue #932714.
-    return std::string("Feed preview for {{URL}}");
+    return "Feed preview for {{URL}}";
   case IDR_TEXTAREA_RESIZER: {
     // Use webkit's text area resizer image.
     static std::string resize_corner_data;
@@ -690,11 +688,17 @@ std::string GetDataResource(int resource_id) {
     return resize_corner_data;
   }
 
+  case IDR_SEARCH_CANCEL:
+  case IDR_SEARCH_CANCEL_PRESSED:
+  case IDR_SEARCH_MAGNIFIER:
+  case IDR_SEARCH_MAGNIFIER_RESULTS:
+    return TestShell::NetResourceProvider(resource_id);
+
   default:
     break;
   }
 
-  return std::string();
+  return StringPiece();
 }
 
 bool GetPlugins(bool refresh, std::vector<WebPluginInfo>* plugins) {

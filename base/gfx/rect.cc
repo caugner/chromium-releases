@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -90,19 +90,9 @@ Rect& Rect::operator=(const GdkRectangle& r) {
 #endif
 
 void Rect::set_width(int width) {
-  if (width < 0) {
-    NOTREACHED();
-    width = 0;
-  }
-
   size_.set_width(width);
 }
 void Rect::set_height(int height) {
-  if (height < 0) {
-    NOTREACHED();
-    height = 0;
-  }
-
   size_.set_height(height);
 }
 
@@ -121,10 +111,6 @@ void Rect::Inset(int left, int top, int right, int bottom) {
 void Rect::Offset(int horizontal, int vertical) {
   set_x(x() + horizontal);
   set_y(y() + vertical);
-}
-
-bool Rect::IsEmpty() const {
-  return width() == 0 || height() == 0;
 }
 
 bool Rect::operator==(const Rect& other) const {

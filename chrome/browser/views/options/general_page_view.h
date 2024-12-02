@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,30 +8,32 @@
 #include "chrome/browser/views/options/options_page_view.h"
 #include "chrome/browser/views/shelf_item_dialog.h"
 #include "chrome/common/pref_member.h"
-#include "chrome/views/controls/combo_box.h"
-#include "chrome/views/controls/button/native_button.h"
-#include "chrome/views/view.h"
+#include "views/controls/combobox/combobox.h"
+#include "views/controls/button/button.h"
+#include "views/controls/table/table_view_observer.h"
+#include "views/view.h"
 
 namespace views {
-class CheckBox;
+class Checkbox;
 class GroupboxView;
 class Label;
+class NativeButton;
 class RadioButton;
-class TableModel;
 class TableView;
-class TextField;
+class Textfield;
 }
 class CustomHomePagesTableModel;
 class OptionsGroupView;
 class SearchEngineListModel;
+class TableModel;
 
 ///////////////////////////////////////////////////////////////////////////////
 // GeneralPageView
 
 class GeneralPageView : public OptionsPageView,
-                        public views::ComboBox::Listener,
-                        public views::NativeButton::Listener,
-                        public views::TextField::Controller,
+                        public views::Combobox::Listener,
+                        public views::ButtonListener,
+                        public views::Textfield::Controller,
                         public ShelfItemDialogDelegate,
                         public views::TableViewObserver {
  public:
@@ -39,20 +41,19 @@ class GeneralPageView : public OptionsPageView,
   virtual ~GeneralPageView();
 
  protected:
-  // views::NativeButton::Listener implementation:
-  virtual void ButtonPressed(views::NativeButton* sender);
+  // views::ButtonListener implementation:
+  virtual void ButtonPressed(views::Button* sender);
 
-  // views::ComboBox::Listener implementation:
-  virtual void ItemChanged(views::ComboBox* combo_box,
+  // views::Combobox::Listener implementation:
+  virtual void ItemChanged(views::Combobox* combobox,
                            int prev_index,
                            int new_index);
 
-  // views::TextField::Controller implementation:
-  virtual void ContentsChanged(views::TextField* sender,
-     const std::wstring& new_contents);
-  virtual void HandleKeystroke(views::TextField* sender,
-     UINT message, TCHAR key, UINT repeat_count,
-     UINT flags);
+  // views::Textfield::Controller implementation:
+  virtual void ContentsChanged(views::Textfield* sender,
+                               const std::wstring& new_contents);
+  virtual bool HandleKeystroke(views::Textfield* sender,
+                               const views::Textfield::Keystroke& key);
 
   // OptionsPageView implementation:
   virtual void InitControlLayout();
@@ -132,15 +133,15 @@ class GeneralPageView : public OptionsPageView,
   OptionsGroupView* homepage_group_;
   views::RadioButton* homepage_use_newtab_radio_;
   views::RadioButton* homepage_use_url_radio_;
-  views::TextField* homepage_use_url_textfield_;
-  views::CheckBox* homepage_show_home_button_checkbox_;
+  views::Textfield* homepage_use_url_textfield_;
+  views::Checkbox* homepage_show_home_button_checkbox_;
   BooleanPrefMember new_tab_page_is_home_page_;
   StringPrefMember homepage_;
   BooleanPrefMember show_home_button_;
 
   // Controls for the Default Search group
   OptionsGroupView* default_search_group_;
-  views::ComboBox* default_search_engine_combobox_;
+  views::Combobox* default_search_engine_combobox_;
   views::NativeButton* default_search_manage_engines_button_;
   scoped_ptr<SearchEngineListModel> default_search_engines_model_;
 
@@ -154,7 +155,7 @@ class GeneralPageView : public OptionsPageView,
   friend DefaultBrowserWorker;
   scoped_refptr<DefaultBrowserWorker> default_browser_worker_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(GeneralPageView);
+  DISALLOW_COPY_AND_ASSIGN(GeneralPageView);
 };
 
 #endif  // CHROME_BROWSER_VIEWS_OPTIONS_GENERAL_PAGE_VIEW_H_

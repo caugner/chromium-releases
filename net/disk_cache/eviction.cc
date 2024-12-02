@@ -34,6 +34,7 @@
 #include "base/time.h"
 #include "net/disk_cache/backend_impl.h"
 #include "net/disk_cache/entry_impl.h"
+#include "net/disk_cache/histogram_macros.h"
 #include "net/disk_cache/trace.h"
 
 using base::Time;
@@ -63,44 +64,55 @@ void Eviction::Init(BackendImpl* backend) {
   header_ = &backend_->data_->header;
   max_size_ = LowWaterAdjust(backend_->max_size_);
   new_eviction_ = backend->new_eviction_;
+  first_trim_ = true;
+  trimming_ = false;
+  delay_trim_ = false;
 }
 
 void Eviction::TrimCache(bool empty) {
   if (new_eviction_)
     return TrimCacheV2(empty);
 
-  Trace("*** Trim Cache ***");
-  if (backend_->disabled_)
+  if (backend_->disabled_ || trimming_)
     return;
 
+  if (!empty && backend_->IsLoaded())
+    return PostDelayedTrim();
+
+  Trace("*** Trim Cache ***");
+  trimming_ = true;
   Time start = Time::Now();
   Rankings::ScopedRankingsBlock node(rankings_);
   Rankings::ScopedRankingsBlock next(rankings_,
       rankings_->GetPrev(node.get(), Rankings::NO_USE));
-  DCHECK(next.get());
   int target_size = empty ? 0 : max_size_;
-  int deleted = 0;
   while (header_->num_bytes > target_size && next.get()) {
+    // The iterator could be invalidated within EvictEntry().
+    if (!next->HasData())
+      break;
     node.reset(next.release());
     next.reset(rankings_->GetPrev(node.get(), Rankings::NO_USE));
     if (!node->Data()->pointer || empty) {
       // This entry is not being used by anybody.
+      // Do NOT use node as an iterator after this point.
+      rankings_->TrackRankingsBlock(node.get(), false);
       if (!EvictEntry(node.get(), empty))
         continue;
 
-      if (!empty)
+      if (!empty) {
         backend_->OnEvent(Stats::TRIM_ENTRY);
-      if (++deleted == 4 && !empty) {
-#if defined(OS_WIN)
-        MessageLoop::current()->PostTask(FROM_HERE,
-            factory_.NewRunnableMethod(&Eviction::TrimCache, false));
-        break;
-#endif
+
+        if ((Time::Now() - start).InMilliseconds() > 20) {
+          MessageLoop::current()->PostTask(FROM_HERE,
+              factory_.NewRunnableMethod(&Eviction::TrimCache, false));
+          break;
+        }
       }
     }
   }
 
-  UMA_HISTOGRAM_TIMES("DiskCache.TotalTrimTime", Time::Now() - start);
+  CACHE_UMA(AGE_MS, "TotalTrimTime", backend_->GetSizeGroup(), start);
+  trimming_ = false;
   Trace("*** Trim Cache end ***");
   return;
 }
@@ -136,22 +148,44 @@ void Eviction::OnDestroyEntry(EntryImpl* entry) {
     return OnDestroyEntryV2(entry);
 }
 
+void Eviction::PostDelayedTrim() {
+  // Prevent posting multiple tasks.
+  if (delay_trim_)
+    return;
+  delay_trim_ = true;
+  MessageLoop::current()->PostDelayedTask(FROM_HERE,
+      factory_.NewRunnableMethod(&Eviction::DelayedTrim), 1000);
+}
+
+void Eviction::DelayedTrim() {
+  delay_trim_ = false;
+  TrimCache(false);
+}
+
 void Eviction::ReportTrimTimes(EntryImpl* entry) {
-  static bool first_time = true;
-  if (first_time) {
-    first_time = false;
+  if (first_trim_) {
+    first_trim_ = false;
     if (backend_->ShouldReportAgain()) {
-      std::string name(StringPrintf("DiskCache.TrimAge_%d",
-                                    header_->experiment));
-      static Histogram counter(name.c_str(), 1, 10000, 50);
-      counter.SetFlags(kUmaTargetedHistogramFlag);
-      counter.Add((Time::Now() - entry->GetLastUsed()).InHours());
+      CACHE_UMA(AGE, "TrimAge", 0, entry->GetLastUsed());
+      ReportListStats();
     }
 
-    if (header_->create_time || !header_->lru.filled) {
+    if (header_->lru.filled)
+      return;
+
+    header_->lru.filled = 1;
+
+    if (header_->create_time) {
       // This is the first entry that we have to evict, generate some noise.
-      header_->lru.filled = 1;
       backend_->FirstEviction();
+    } else {
+      // This is an old file, but we may want more reports from this user so
+      // lets save some create_time.
+      Time::Exploded old = {0};
+      old.year = 2009;
+      old.month = 3;
+      old.day_of_month = 1;
+      header_->create_time = Time::FromLocalExploded(old).ToInternalValue();
     }
   }
 }
@@ -161,16 +195,12 @@ Rankings::List Eviction::GetListForEntry(EntryImpl* entry) {
 }
 
 bool Eviction::EvictEntry(CacheRankingsBlock* node, bool empty) {
-  EntryImpl* entry;
-  bool dirty;
-  if (backend_->NewEntry(Addr(node->Data()->contents), &entry, &dirty)) {
+  EntryImpl* entry = backend_->GetEnumeratedEntry(node, true);
+  if (!entry) {
     Trace("NewEntry failed on Trim 0x%x", node->address().value());
     return false;
   }
 
-  if (node->Data()->pointer) {
-    entry = EntryImpl::Update(entry);
-  }
   ReportTrimTimes(entry);
   if (empty || !new_eviction_) {
     entry->Doom();
@@ -193,10 +223,14 @@ bool Eviction::EvictEntry(CacheRankingsBlock* node, bool empty) {
 // -----------------------------------------------------------------------
 
 void Eviction::TrimCacheV2(bool empty) {
-  Trace("*** Trim Cache ***");
-  if (backend_->disabled_)
+  if (backend_->disabled_ || trimming_)
     return;
 
+  if (!empty && backend_->IsLoaded())
+    return PostDelayedTrim();
+
+  Trace("*** Trim Cache ***");
+  trimming_ = true;
   Time start = Time::Now();
 
   const int kListsToSearch = 3;
@@ -222,8 +256,8 @@ void Eviction::TrimCacheV2(bool empty) {
     // Make sure that frequently used items are kept for a minimum time; we know
     // that this entry is not older than its current target, but it must be at
     // least older than the target for list 0 (kTargetTime).
-    if (Rankings::HIGH_USE == list &&
-        !NodeIsOldEnough(next[Rankings::HIGH_USE].get(), 0))
+    if ((Rankings::HIGH_USE == list || Rankings::LOW_USE == list) &&
+        !NodeIsOldEnough(next[list].get(), 0))
       list = 0;
   }
 
@@ -233,18 +267,22 @@ void Eviction::TrimCacheV2(bool empty) {
   Rankings::ScopedRankingsBlock node(rankings_);
 
   int target_size = empty ? 0 : max_size_;
-  int deleted = 0;
   for (; list < kListsToSearch; list++) {
     while (header_->num_bytes > target_size && next[list].get()) {
+      // The iterator could be invalidated within EvictEntry().
+      if (!next[list]->HasData())
+        break;
       node.reset(next[list].release());
       next[list].reset(rankings_->GetPrev(node.get(),
                                           static_cast<Rankings::List>(list)));
       if (!node->Data()->pointer || empty) {
         // This entry is not being used by anybody.
+        // Do NOT use node as an iterator after this point.
+        rankings_->TrackRankingsBlock(node.get(), false);
         if (!EvictEntry(node.get(), empty))
           continue;
 
-        if (++deleted == 4 && !empty) {
+        if (!empty && (Time::Now() - start).InMilliseconds() > 20) {
           MessageLoop::current()->PostTask(FROM_HERE,
               factory_.NewRunnableMethod(&Eviction::TrimCache, false));
           break;
@@ -262,8 +300,9 @@ void Eviction::TrimCacheV2(bool empty) {
         factory_.NewRunnableMethod(&Eviction::TrimDeleted, empty));
   }
 
-  UMA_HISTOGRAM_TIMES("DiskCache.TotalTrimTime", Time::Now() - start);
+  CACHE_UMA(AGE_MS, "TotalTrimTime", backend_->GetSizeGroup(), start);
   Trace("*** Trim Cache end ***");
+  trimming_ = false;
   return;
 }
 
@@ -361,7 +400,6 @@ void Eviction::TrimDeleted(bool empty) {
   Rankings::ScopedRankingsBlock node(rankings_);
   Rankings::ScopedRankingsBlock next(rankings_,
     rankings_->GetPrev(node.get(), Rankings::DELETED));
-  DCHECK(next.get());
   for (int i = 0; (i < 4 || empty) && next.get(); i++) {
     node.reset(next.release());
     next.reset(rankings_->GetPrev(node.get(), Rankings::DELETED));
@@ -372,7 +410,7 @@ void Eviction::TrimDeleted(bool empty) {
     MessageLoop::current()->PostTask(FROM_HERE,
         factory_.NewRunnableMethod(&Eviction::TrimDeleted, false));
 
-  UMA_HISTOGRAM_TIMES("DiskCache.TotalTrimDeletedTime", Time::Now() - start);
+  CACHE_UMA(AGE_MS, "TotalTrimDeletedTime", 0, start);
   Trace("*** Trim Deleted end ***");
   return;
 }
@@ -385,8 +423,11 @@ bool Eviction::RemoveDeletedNode(CacheRankingsBlock* node) {
     return false;
   }
 
+  // TODO(rvargas): figure out how to deal with corruption at this point (dirty
+  // entries that live in this list).
   if (node->Data()->pointer) {
-    entry = EntryImpl::Update(entry);
+    // We ignore the failure; we're removing the entry anyway.
+    entry->Update();
   }
   entry->entry()->Data()->state = ENTRY_DOOMED;
   entry->Doom();
@@ -415,6 +456,33 @@ int Eviction::SelectListByLenght() {
   if (header_->lru.sizes[1] > data_entries / 3)
     return 1;
   return 2;
+}
+
+void Eviction::ReportListStats() {
+  if (!new_eviction_)
+    return;
+
+  Rankings::ScopedRankingsBlock last1(rankings_,
+      rankings_->GetPrev(NULL, Rankings::NO_USE));
+  Rankings::ScopedRankingsBlock last2(rankings_,
+      rankings_->GetPrev(NULL, Rankings::LOW_USE));
+  Rankings::ScopedRankingsBlock last3(rankings_,
+      rankings_->GetPrev(NULL, Rankings::HIGH_USE));
+  Rankings::ScopedRankingsBlock last4(rankings_,
+      rankings_->GetPrev(NULL, Rankings::DELETED));
+
+  if (last1.get())
+    CACHE_UMA(AGE, "NoUseAge", header_->experiment,
+              Time::FromInternalValue(last1.get()->Data()->last_used));
+  if (last2.get())
+    CACHE_UMA(AGE, "LowUseAge", header_->experiment,
+              Time::FromInternalValue(last2.get()->Data()->last_used));
+  if (last3.get())
+    CACHE_UMA(AGE, "HighUseAge", header_->experiment,
+              Time::FromInternalValue(last3.get()->Data()->last_used));
+  if (last4.get())
+    CACHE_UMA(AGE, "DeletedAge", header_->experiment,
+              Time::FromInternalValue(last4.get()->Data()->last_used));
 }
 
 }  // namespace disk_cache

@@ -9,7 +9,7 @@
 #include "chrome/browser/bookmarks/bookmark_drag_data.h"
 #include "chrome/browser/bookmarks/bookmark_drop_info.h"
 #include "chrome/browser/bookmarks/bookmark_folder_tree_model.h"
-#include "chrome/views/controls/tree/tree_view.h"
+#include "views/controls/tree/tree_view.h"
 
 class BookmarkModel;
 class BookmarkNode;
@@ -32,7 +32,7 @@ class BookmarkFolderTreeView : public views::TreeView {
   // Returns the selected node as a BookmarkNode. This returns NULL if the
   // selected node is not of type BookmarkFolderTreeModel::BOOKMARK or
   // nothing is selected.
-  BookmarkNode* GetSelectedBookmarkNode();
+  const BookmarkNode* GetSelectedBookmarkNode();
 
  protected:
   // Overriden to start a drag.
@@ -96,7 +96,7 @@ class BookmarkFolderTreeView : public views::TreeView {
   int UpdateDropInfo();
 
   // Starts a drag operation for the specified node.
-  void BeginDrag(BookmarkNode* node);
+  void BeginDrag(const BookmarkNode* node);
 
   // Calculates the drop position.
   DropPosition CalculateDropPosition(int y, bool only_folders);
@@ -115,7 +115,7 @@ class BookmarkFolderTreeView : public views::TreeView {
   BookmarkFolderTreeModel* folder_model() const;
 
   // Converts FolderNode into a BookmarkNode.
-  BookmarkNode* TreeNodeAsBookmarkNode(FolderNode* node);
+  const BookmarkNode* TreeNodeAsBookmarkNode(FolderNode* node);
 
   // Converts the position in terms of the BookmarkFolderTreeModel to an index
   // in terms of the BookmarkModel. The returned index is the index the drop

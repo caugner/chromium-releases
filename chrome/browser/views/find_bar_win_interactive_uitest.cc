@@ -4,12 +4,12 @@
 
 
 #include "chrome/browser/view_ids.h"
-#include "chrome/views/view.h"
 #include "chrome/test/automation/browser_proxy.h"
 #include "chrome/test/automation/window_proxy.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/ui/ui_test.h"
 #include "net/url_request/url_request_unittest.h"
+#include "views/view.h"
 
 namespace {
 
@@ -56,21 +56,21 @@ TEST_F(FindInPageTest, CrashEscHandlers) {
       HTTPTestServer::CreateServer(kDocRoot, NULL);
   ASSERT_TRUE(NULL != server.get());
 
-  scoped_ptr<BrowserProxy> browser(automation()->GetLastActiveBrowserWindow());
+  scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
   ASSERT_TRUE(browser.get() != NULL);
-  scoped_ptr<WindowProxy> window(browser->GetWindow());
+  scoped_refptr<WindowProxy> window(browser->GetWindow());
   ASSERT_TRUE(window.get() != NULL);
 
   // First we navigate to our test page (tab A).
   GURL url = server->TestServerPageW(kSimplePage);
-  scoped_ptr<TabProxy> tabA(GetActiveTab());
+  scoped_refptr<TabProxy> tabA(GetActiveTab());
   EXPECT_NE(AUTOMATION_MSG_NAVIGATION_ERROR, tabA->NavigateToURL(url));
 
   EXPECT_TRUE(browser->OpenFindInPage());
 
   // Open another tab (tab B).
   EXPECT_TRUE(browser->AppendTab(url));
-  scoped_ptr<TabProxy> tabB(GetActiveTab());
+  scoped_refptr<TabProxy> tabB(GetActiveTab());
 
   EXPECT_TRUE(browser->OpenFindInPage());
 

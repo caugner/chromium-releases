@@ -4,7 +4,7 @@
 
 """
 Tool module for adding, to a construction environment, Chromium-specific
-wrappers around Hammer builders.  This gives us a central place for any
+wrappers around SCons builders.  This gives us a central place for any
 customization we need to make to the different things we build.
 """
 
@@ -13,7 +13,7 @@ import sys
 from SCons.Script import *
 
 import SCons.Node
-import _Node_MSVS as MSVS
+import SCons.Util
 
 class Null(object):
   def __new__(cls, *args, **kwargs):
@@ -29,7 +29,74 @@ class Null(object):
   def __delattr__(self, name): return self
   def __getitem__(self, name): return self
 
-class ChromeFileList(MSVS.FileList):
+class FileList(object):
+  def __init__(self, entries=None):
+    if isinstance(entries, FileList):
+      entries = entries.entries
+    self.entries = entries or []
+  def __getitem__(self, i):
+    return self.entries[i]
+  def __setitem__(self, i, item):
+    self.entries[i] = item
+  def __delitem__(self, i):
+    del self.entries[i]
+  def __add__(self, other):
+    if isinstance(other, FileList):
+      return self.__class__(self.entries + other.entries)
+    elif isinstance(other, type(self.entries)):
+      return self.__class__(self.entries + other)
+    else:
+      return self.__class__(self.entries + list(other))
+  def __radd__(self, other):
+    if isinstance(other, FileList):
+      return self.__class__(other.entries + self.entries)
+    elif isinstance(other, type(self.entries)):
+      return self.__class__(other + self.entries)
+    else:
+      return self.__class__(list(other) + self.entries)
+  def __iadd__(self, other):
+    if isinstance(other, FileList):
+      self.entries += other.entries
+    elif isinstance(other, type(self.entries)):
+      self.entries += other
+    else:
+      self.entries += list(other)
+    return self
+  def append(self, item):
+    return self.entries.append(item)
+  def extend(self, item):
+    return self.entries.extend(item)
+  def index(self, item, *args):
+    return self.entries.index(item, *args)
+  def remove(self, item):
+    return self.entries.remove(item)
+
+def FileListWalk(top, topdown=True, onerror=None):
+  """
+  """
+  try:
+    entries = top.entries
+  except AttributeError, err:
+    if onerror is not None:
+      onerror(err)
+    return
+
+  dirs, nondirs = [], []
+  for entry in entries:
+    if hasattr(entry, 'entries'):
+      dirs.append(entry)
+    else:
+      nondirs.append(entry)
+
+  if topdown:
+    yield top, dirs, nondirs
+  for entry in dirs:
+    for x in FileListWalk(entry, topdown, onerror):
+      yield x
+  if not topdown:
+    yield top, dirs, nondirs
+
+class ChromeFileList(FileList):
   def Append(self, *args):
     for element in args:
       self.append(element)
@@ -37,20 +104,23 @@ class ChromeFileList(MSVS.FileList):
     for element in args:
       self.extend(element)
   def Remove(self, *args):
-    for top, lists, nonlists in MSVS.FileListWalk(self, topdown=False):
+    for top, lists, nonlists in FileListWalk(self, topdown=False):
       for element in args:
         try:
           top.remove(element)
         except ValueError:
           pass
   def Replace(self, old, new):
-    for top, lists, nonlists in MSVS.FileListWalk(self, topdown=False):
+    for top, lists, nonlists in FileListWalk(self, topdown=False):
       try:
         i = top.index(old)
       except ValueError:
         pass
       else:
-        top[i] = new
+        if SCons.Util.is_List(new):
+          top[i:i+1] = new
+        else:
+          top[i] = new
 
 
 def FilterOut(self, **kw):
@@ -92,12 +162,16 @@ non_compilable_suffixes = {
         '.bdic',
         '.css',
         '.dat',
+        '.fragment',
+        '.gperf',
         '.h',
         '.html',
         '.hxx',
         '.idl',
         '.js',
+        '.mk',
         '.rc',
+        '.sigs',
     ]),
     'WINDOWS' : set([
         '.h',
@@ -116,39 +190,27 @@ def compilable_files(env, sources):
   if not hasattr(sources, 'entries'):
     return [x for x in sources if compilable(env, x)]
   result = []
-  for top, folders, nonfolders in MSVS.FileListWalk(sources):
+  for top, folders, nonfolders in FileListWalk(sources):
     result.extend([x for x in nonfolders if compilable(env, x)])
   return result
 
 def ChromeProgram(env, target, source, *args, **kw):
   source = compilable_files(env, source)
-  if env.get('_GYP'):
-    prog = env.Program(target, source, *args, **kw)
-    result = env.Install('$DESTINATION_ROOT', prog)
-  else:
-    result = env.ComponentProgram(target, source, *args, **kw)
+  result = env.Program('$TOP_BUILDDIR/' + str(target), source, *args, **kw)
   if env.get('INCREMENTAL'):
     env.Precious(result)
   return result
 
 def ChromeTestProgram(env, target, source, *args, **kw):
   source = compilable_files(env, source)
-  if env.get('_GYP'):
-    prog = env.Program(target, source, *args, **kw)
-    result = env.Install('$DESTINATION_ROOT', prog)
-  else:
-    result = env.ComponentTestProgram(target, source, *args, **kw)
+  result = env.Program('$TOP_BUILDDIR/' + str(target), source, *args, **kw)
   if env.get('INCREMENTAL'):
     env.Precious(*result)
   return result
 
 def ChromeLibrary(env, target, source, *args, **kw):
   source = compilable_files(env, source)
-  if env.get('_GYP'):
-    lib = env.Library(target, source, *args, **kw)
-    result = env.Install('$DESTINATION_ROOT/$BUILD_TYPE/lib', lib)
-  else:
-    result = env.ComponentLibrary(target, source, *args, **kw)
+  result = env.Library('$LIB_DIR/' + str(target), source, *args, **kw)
   return result
 
 def ChromeLoadableModule(env, target, source, *args, **kw):
@@ -163,8 +225,7 @@ def ChromeLoadableModule(env, target, source, *args, **kw):
 def ChromeStaticLibrary(env, target, source, *args, **kw):
   source = compilable_files(env, source)
   if env.get('_GYP'):
-    lib = env.StaticLibrary(target, source, *args, **kw)
-    result = env.Install('$DESTINATION_ROOT/$BUILD_TYPE/lib', lib)
+    result = env.StaticLibrary('$LIB_DIR/' + str(target), source, *args, **kw)
   else:
     kw['COMPONENT_STATIC'] = True
     result = env.ComponentLibrary(target, source, *args, **kw)
@@ -173,8 +234,7 @@ def ChromeStaticLibrary(env, target, source, *args, **kw):
 def ChromeSharedLibrary(env, target, source, *args, **kw):
   source = compilable_files(env, source)
   if env.get('_GYP'):
-    lib = env.SharedLibrary(target, source, *args, **kw)
-    result = env.Install('$DESTINATION_ROOT/$BUILD_TYPE/lib', lib)
+    result = env.SharedLibrary('$LIB_DIR/' + str(target), source, *args, **kw)
   else:
     kw['COMPONENT_STATIC'] = False
     result = [env.ComponentLibrary(target, source, *args, **kw)[0]]
@@ -189,43 +249,6 @@ def ChromeObject(env, *args, **kw):
     result = env.ComponentObject(*args, **kw)
   return result
 
-def ChromeMSVSFolder(env, *args, **kw):
-  if not env.Bit('msvs'):
-    return Null()
-  return env.MSVSFolder(*args, **kw)
-
-def ChromeMSVSProject(env, *args, **kw):
-  if not env.Bit('msvs'):
-    return Null()
-  try:
-    dest = kw['dest']
-  except KeyError:
-    dest = None
-  else:
-    del kw['dest']
-  result = env.MSVSProject(*args, **kw)
-  env.AlwaysBuild(result)
-  if dest:
-    i = env.Command(dest, result, Copy('$TARGET', '$SOURCE'))
-    Alias('msvs', i)
-  return result
-
-def ChromeMSVSSolution(env, *args, **kw):
-  if not env.Bit('msvs'):
-    return Null()
-  try:
-    dest = kw['dest']
-  except KeyError:
-    dest = None
-  else:
-    del kw['dest']
-  result = env.MSVSSolution(*args, **kw)
-  env.AlwaysBuild(result)
-  if dest:
-    i = env.Command(dest, result, Copy('$TARGET', '$SOURCE'))
-    Alias('msvs', i)
-  return result
-
 def generate(env):
   env.AddMethod(ChromeProgram)
   env.AddMethod(ChromeTestProgram)
@@ -234,19 +257,16 @@ def generate(env):
   env.AddMethod(ChromeStaticLibrary)
   env.AddMethod(ChromeSharedLibrary)
   env.AddMethod(ChromeObject)
-  env.AddMethod(ChromeMSVSFolder)
-  env.AddMethod(ChromeMSVSProject)
-  env.AddMethod(ChromeMSVSSolution)
 
   env.AddMethod(FilterOut)
 
   # Add the grit tool to the base environment because we use this a lot.
-  sys.path.append(env.Dir('$CHROME_SRC_DIR/tools/grit').abspath)
-  env.Tool('scons', toolpath=[env.Dir('$CHROME_SRC_DIR/tools/grit/grit')])
+  sys.path.append(env.Dir('$SRC_DIR/tools/grit').abspath)
+  env.Tool('scons', toolpath=[env.Dir('$SRC_DIR/tools/grit/grit')])
 
   # Add the repack python script tool that we use in multiple places.
-  sys.path.append(env.Dir('$CHROME_SRC_DIR/tools/data_pack').abspath)
-  env.Tool('scons', toolpath=[env.Dir('$CHROME_SRC_DIR/tools/data_pack/')])
+  sys.path.append(env.Dir('$SRC_DIR/tools/data_pack').abspath)
+  env.Tool('scons', toolpath=[env.Dir('$SRC_DIR/tools/data_pack/')])
 
 def exists(env):
   return True

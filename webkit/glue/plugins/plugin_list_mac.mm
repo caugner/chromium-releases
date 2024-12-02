@@ -68,10 +68,11 @@ void PluginList::LoadPluginsFromDir(const FilePath &path) {
 }
 
 bool PluginList::ShouldLoadPlugin(const WebPluginInfo& info) {
-
   // Hierarchy check
   // (we're loading plugins hierarchically from Library folders, so plugins we
   //  encounter earlier must override plugins we encounter later)
+
+  // first, test to make sure the user really wants plugins
 
   for (size_t i = 0; i < plugins_.size(); ++i) {
     if (plugins_[i].path.BaseName() == info.path.BaseName()) {

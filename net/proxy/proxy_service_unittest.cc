@@ -58,33 +58,6 @@ class MockProxyResolver : public net::ProxyResolver {
   bool fail_get_proxy_for_url;
 };
 
-class SyncProxyService {
- public:
-  SyncProxyService(net::ProxyConfigService* config_service,
-                   net::ProxyResolver* resolver)
-      : io_thread_("IO_Thread"),
-        service_(config_service, resolver) {
-    base::Thread::Options options;
-    options.message_loop_type = MessageLoop::TYPE_IO;
-    io_thread_.StartWithOptions(options);
-    sync_proxy_service_ = new net::SyncProxyServiceHelper(
-        io_thread_.message_loop(), &service_);
-  }
-
-  int ResolveProxy(const GURL& url, net::ProxyInfo* proxy_info) {
-    return sync_proxy_service_->ResolveProxy(url, proxy_info);
-  }
-
-  int ReconsiderProxyAfterError(const GURL& url, net::ProxyInfo* proxy_info) {
-    return sync_proxy_service_->ReconsiderProxyAfterError(url, proxy_info);
-  }
-
- private:
-  base::Thread io_thread_;
-  net::ProxyService service_;
-  scoped_refptr<net::SyncProxyServiceHelper> sync_proxy_service_;
-};
-
 // ResultFuture is a handle to get at the result from
 // ProxyService::ResolveProxyForURL() that ran on another thread.
 class ResultFuture : public base::RefCountedThreadSafe<ResultFuture> {
@@ -143,23 +116,53 @@ class ResultFuture : public base::RefCountedThreadSafe<ResultFuture> {
  private:
   friend class ProxyServiceWithFutures;
 
-  // Start the request. Return once ProxyService::GetProxyForURL() returns.
+  typedef int (net::ProxyService::*RequestMethod)(const GURL&, net::ProxyInfo*,
+      net::CompletionCallback*, net::ProxyService::PacRequest**);
+
   void StartResolve(const GURL& url) {
+    StartRequest(url, &net::ProxyService::ResolveProxy);
+  }
+
+  // |proxy_info| is the *previous* result (that we are reconsidering).
+  void StartReconsider(const GURL& url, const net::ProxyInfo& proxy_info) {
+    proxy_info_ = proxy_info;
+    StartRequest(url, &net::ProxyService::ReconsiderProxyAfterError);
+  }
+
+  // Start the request. Return once ProxyService::GetProxyForURL() or
+  // ProxyService::ReconsiderProxyAfterError() returns.
+  void StartRequest(const GURL& url, RequestMethod method) {
     DCHECK(MessageLoop::current() != io_message_loop_);
     io_message_loop_->PostTask(FROM_HERE, NewRunnableMethod(
-        this, &ResultFuture::DoStartResolve, url));
+        this, &ResultFuture::DoStartRequest, url, method));
+    started_.Wait();
+  }
+
+  void StartResetConfigService(
+      net::ProxyConfigService* new_proxy_config_service) {
+    DCHECK(MessageLoop::current() != io_message_loop_);
+    io_message_loop_->PostTask(FROM_HERE, NewRunnableMethod(
+        this, &ResultFuture::DoResetConfigService, new_proxy_config_service));
     started_.Wait();
   }
 
   // Called on |io_message_loop_|.
-  void DoStartResolve(const GURL& url) {
+  void DoStartRequest(const GURL& url, RequestMethod method) {
     DCHECK(MessageLoop::current() == io_message_loop_);
-    int rv = service_->ResolveProxy(url, &proxy_info_, &callback_, &request_);
+    int rv = (service_->*method)(url, &proxy_info_, &callback_, &request_);
     if (rv != net::ERR_IO_PENDING) {
       // Completed synchronously.
       OnCompletion(rv);
     }
     started_.Signal();
+  }
+
+  // Called on |io_message_loop_|.
+  void DoResetConfigService(net::ProxyConfigService* new_proxy_config_service) {
+    DCHECK(MessageLoop::current() == io_message_loop_);
+    service_->ResetConfigService(new_proxy_config_service);
+    started_.Signal();
+    OnCompletion(0);
   }
 
   // Called on |io_message_loop_|.
@@ -206,27 +209,120 @@ class ProxyServiceWithFutures {
   ProxyServiceWithFutures(net::ProxyConfigService* config_service,
                           net::ProxyResolver* resolver)
       : io_thread_("IO_Thread"),
-        service_(config_service, resolver) {
+        io_thread_state_(new IOThreadState) {
     base::Thread::Options options;
     options.message_loop_type = MessageLoop::TYPE_IO;
     io_thread_.StartWithOptions(options);
+
+    // Initialize state that lives on |io_thread_|.
+    io_thread_.message_loop()->PostTask(FROM_HERE, NewRunnableMethod(
+        io_thread_state_.get(), &IOThreadState::DoInit,
+        config_service, resolver));
+    io_thread_state_->event.Wait();
+  }
+
+  ~ProxyServiceWithFutures() {
+    // Destroy state that lives on |io_thread_|.
+    io_thread_.message_loop()->PostTask(FROM_HERE, NewRunnableMethod(
+        io_thread_state_.get(), &IOThreadState::DoDestroy));
+    io_thread_state_->event.Wait();
   }
 
   // Start the request on |io_thread_|, and return a handle that can be
   // used to access the results. The caller is responsible for freeing
   // the ResultFuture.
   void ResolveProxy(scoped_refptr<ResultFuture>* result, const GURL& url) {
-    (*result) = new ResultFuture(io_thread_.message_loop(), &service_);
+    *result = new ResultFuture(io_thread_.message_loop(),
+                               io_thread_state_->service);
     (*result)->StartResolve(url);
   }
 
+  // Same as above, but for "ReconsiderProxyAfterError()".
+  void ReconsiderProxyAfterError(scoped_refptr<ResultFuture>* result,
+                                 const GURL& url,
+                                 const net::ProxyInfo& proxy_info) {
+    *result = new ResultFuture(io_thread_.message_loop(),
+                               io_thread_state_->service);
+    (*result)->StartReconsider(url, proxy_info);
+  }
+
+  void ResetConfigService(scoped_refptr<ResultFuture>* result,
+                          net::ProxyConfigService* new_proxy_config_service) {
+    *result = new ResultFuture(io_thread_.message_loop(),
+                               io_thread_state_->service);
+    (*result)->StartResetConfigService(new_proxy_config_service);
+  }
+
   void SetProxyScriptFetcher(net::ProxyScriptFetcher* proxy_script_fetcher) {
-    service_.SetProxyScriptFetcher(proxy_script_fetcher);
+    io_thread_.message_loop()->PostTask(FROM_HERE, NewRunnableMethod(
+        io_thread_state_.get(), &IOThreadState::DoSetProxyScriptFetcher,
+        proxy_script_fetcher));
+    io_thread_state_->event.Wait();
   }
 
  private:
+  // Class that encapsulates the state living on IO thread. It needs to be
+  // ref-counted for posting tasks.
+  class IOThreadState : public base::RefCountedThreadSafe<IOThreadState> {
+   public:
+    IOThreadState() : event(false, false), service(NULL) {}
+
+    void DoInit(net::ProxyConfigService* config_service,
+                net::ProxyResolver* resolver) {
+      service = new net::ProxyService(config_service, resolver);
+      event.Signal();
+    }
+
+    void DoDestroy() {
+      delete service;
+      service = NULL;
+      event.Signal();
+    }
+
+    void DoSetProxyScriptFetcher(
+        net::ProxyScriptFetcher* proxy_script_fetcher) {
+      service->SetProxyScriptFetcher(proxy_script_fetcher);
+      event.Signal();
+    }
+
+    base::WaitableEvent event;
+    net::ProxyService* service;
+  };
+
   base::Thread io_thread_;
-  net::ProxyService service_;
+  scoped_refptr<IOThreadState> io_thread_state_;  // Lives on |io_thread_|.
+};
+
+// Wrapper around ProxyServiceWithFutures to do one request at a time.
+class SyncProxyService {
+ public:
+  SyncProxyService(net::ProxyConfigService* config_service,
+                   net::ProxyResolver* resolver)
+      : service_(config_service, resolver) {
+  }
+
+  int ResolveProxy(const GURL& url, net::ProxyInfo* proxy_info) {
+    scoped_refptr<ResultFuture> result;
+    service_.ResolveProxy(&result, url);
+    *proxy_info = result->GetProxyInfo();
+    return result->GetResultCode();
+  }
+
+  int ReconsiderProxyAfterError(const GURL& url, net::ProxyInfo* proxy_info) {
+    scoped_refptr<ResultFuture> result;
+    service_.ReconsiderProxyAfterError(&result, url, *proxy_info);
+    *proxy_info = result->GetProxyInfo();
+    return result->GetResultCode();
+  }
+
+  int ResetConfigService(net::ProxyConfigService* new_proxy_config_service) {
+    scoped_refptr<ResultFuture> result;
+    service_.ResetConfigService(&result, new_proxy_config_service);
+    return result->GetResultCode();
+  }
+
+ private:
+  ProxyServiceWithFutures service_;
 };
 
 // A ProxyResolver which can be set to block upon reaching GetProxyForURL.
@@ -619,88 +715,194 @@ TEST(ProxyServiceTest, ProxyFallback_BadConfig) {
 TEST(ProxyServiceTest, ProxyBypassList) {
   // Test what happens when a proxy bypass list is specified.
 
+  net::ProxyInfo info;
   net::ProxyConfig config;
-  config.proxy_rules = "foopy1:8080;foopy2:9090";
+  config.proxy_rules.ParseFromString("foopy1:8080;foopy2:9090");
   config.auto_detect = false;
   config.proxy_bypass_local_names = true;
 
-  SyncProxyService service(new MockProxyConfigService(config),
-                           new MockProxyResolver());
-  GURL url("http://www.google.com/");
-  // Get the proxy information.
-  net::ProxyInfo info;
-  int rv = service.ResolveProxy(url, &info);
-  EXPECT_EQ(rv, net::OK);
-  EXPECT_FALSE(info.is_direct());
+  {
+    SyncProxyService service(new MockProxyConfigService(config),
+                             new MockProxyResolver());
+    GURL url("http://www.google.com/");
+    // Get the proxy information.
+    int rv = service.ResolveProxy(url, &info);
+    EXPECT_EQ(rv, net::OK);
+    EXPECT_FALSE(info.is_direct());
+  }
 
-  SyncProxyService service1(new MockProxyConfigService(config),
-                            new MockProxyResolver());
-  GURL test_url1("local");
-  net::ProxyInfo info1;
-  rv = service1.ResolveProxy(test_url1, &info1);
-  EXPECT_EQ(rv, net::OK);
-  EXPECT_TRUE(info1.is_direct());
+  {
+    SyncProxyService service(new MockProxyConfigService(config),
+                             new MockProxyResolver());
+    GURL test_url("local");
+    int rv = service.ResolveProxy(test_url, &info);
+    EXPECT_EQ(rv, net::OK);
+    EXPECT_TRUE(info.is_direct());
+  }
 
   config.proxy_bypass.clear();
   config.proxy_bypass.push_back("*.org");
   config.proxy_bypass_local_names = true;
-  SyncProxyService service2(new MockProxyConfigService(config),
-                            new MockProxyResolver);
-  GURL test_url2("http://www.webkit.org");
-  net::ProxyInfo info2;
-  rv = service2.ResolveProxy(test_url2, &info2);
-  EXPECT_EQ(rv, net::OK);
-  EXPECT_TRUE(info2.is_direct());
+  {
+    SyncProxyService service(new MockProxyConfigService(config),
+                             new MockProxyResolver);
+    GURL test_url("http://www.webkit.org");
+    int rv = service.ResolveProxy(test_url, &info);
+    EXPECT_EQ(rv, net::OK);
+    EXPECT_TRUE(info.is_direct());
+  }
 
   config.proxy_bypass.clear();
   config.proxy_bypass.push_back("*.org");
   config.proxy_bypass.push_back("7*");
   config.proxy_bypass_local_names = true;
-  SyncProxyService service3(new MockProxyConfigService(config),
-                            new MockProxyResolver);
-  GURL test_url3("http://74.125.19.147");
-  net::ProxyInfo info3;
-  rv = service3.ResolveProxy(test_url3, &info3);
-  EXPECT_EQ(rv, net::OK);
-  EXPECT_TRUE(info3.is_direct());
+  {
+    SyncProxyService service(new MockProxyConfigService(config),
+                             new MockProxyResolver);
+    GURL test_url("http://74.125.19.147");
+    int rv = service.ResolveProxy(test_url, &info);
+    EXPECT_EQ(rv, net::OK);
+    EXPECT_TRUE(info.is_direct());
+  }
 
   config.proxy_bypass.clear();
   config.proxy_bypass.push_back("*.org");
   config.proxy_bypass_local_names = true;
-  SyncProxyService service4(new MockProxyConfigService(config),
-                            new MockProxyResolver);
-  GURL test_url4("http://www.msn.com");
-  net::ProxyInfo info4;
-  rv = service4.ResolveProxy(test_url4, &info4);
-  EXPECT_EQ(rv, net::OK);
-  EXPECT_FALSE(info4.is_direct());
+  {
+    SyncProxyService service(new MockProxyConfigService(config),
+                             new MockProxyResolver);
+    GURL test_url("http://www.msn.com");
+    int rv = service.ResolveProxy(test_url, &info);
+    EXPECT_EQ(rv, net::OK);
+    EXPECT_FALSE(info.is_direct());
+  }
 
   config.proxy_bypass.clear();
   config.proxy_bypass.push_back("*.MSN.COM");
   config.proxy_bypass_local_names = true;
-  SyncProxyService service5(new MockProxyConfigService(config),
-                            new MockProxyResolver);
-  GURL test_url5("http://www.msnbc.msn.com");
-  net::ProxyInfo info5;
-  rv = service5.ResolveProxy(test_url5, &info5);
-  EXPECT_EQ(rv, net::OK);
-  EXPECT_TRUE(info5.is_direct());
+  {
+    SyncProxyService service(new MockProxyConfigService(config),
+                             new MockProxyResolver);
+    GURL test_url("http://www.msnbc.msn.com");
+    int rv = service.ResolveProxy(test_url, &info);
+    EXPECT_EQ(rv, net::OK);
+    EXPECT_TRUE(info.is_direct());
+  }
 
   config.proxy_bypass.clear();
   config.proxy_bypass.push_back("*.msn.com");
   config.proxy_bypass_local_names = true;
-  SyncProxyService service6(new MockProxyConfigService(config),
-                            new MockProxyResolver);
-  GURL test_url6("HTTP://WWW.MSNBC.MSN.COM");
-  net::ProxyInfo info6;
-  rv = service6.ResolveProxy(test_url6, &info6);
-  EXPECT_EQ(rv, net::OK);
-  EXPECT_TRUE(info6.is_direct());
+  {
+    SyncProxyService service(new MockProxyConfigService(config),
+                             new MockProxyResolver);
+    GURL test_url("HTTP://WWW.MSNBC.MSN.COM");
+    int rv = service.ResolveProxy(test_url, &info);
+    EXPECT_EQ(rv, net::OK);
+    EXPECT_TRUE(info.is_direct());
+  }
+}
+
+TEST(ProxyServiceTest, ProxyBypassListWithPorts) {
+  // Test port specification in bypass list entries.
+  net::ProxyInfo info;
+  net::ProxyConfig config;
+  config.proxy_rules.ParseFromString("foopy1:8080;foopy2:9090");
+  config.auto_detect = false;
+  config.proxy_bypass_local_names = false;
+
+  config.proxy_bypass.clear();
+  config.proxy_bypass.push_back("*.example.com:99");
+  {
+    SyncProxyService service(new MockProxyConfigService(config),
+                             new MockProxyResolver);
+    {
+      GURL test_url("http://www.example.com:99");
+      int rv = service.ResolveProxy(test_url, &info);
+      EXPECT_EQ(rv, net::OK);
+      EXPECT_TRUE(info.is_direct());
+    }
+    {
+      GURL test_url("http://www.example.com:100");
+      int rv = service.ResolveProxy(test_url, &info);
+      EXPECT_EQ(rv, net::OK);
+      EXPECT_FALSE(info.is_direct());
+    }
+    {
+      GURL test_url("http://www.example.com");
+      int rv = service.ResolveProxy(test_url, &info);
+      EXPECT_EQ(rv, net::OK);
+      EXPECT_FALSE(info.is_direct());
+    }
+  }
+
+  config.proxy_bypass.clear();
+  config.proxy_bypass.push_back("*.example.com:80");
+  {
+    SyncProxyService service(new MockProxyConfigService(config),
+                             new MockProxyResolver);
+    GURL test_url("http://www.example.com");
+    int rv = service.ResolveProxy(test_url, &info);
+    EXPECT_EQ(rv, net::OK);
+    EXPECT_TRUE(info.is_direct());
+  }
+
+  config.proxy_bypass.clear();
+  config.proxy_bypass.push_back("*.example.com");
+  {
+    SyncProxyService service(new MockProxyConfigService(config),
+                             new MockProxyResolver);
+    GURL test_url("http://www.example.com:99");
+    int rv = service.ResolveProxy(test_url, &info);
+    EXPECT_EQ(rv, net::OK);
+    EXPECT_TRUE(info.is_direct());
+  }
+
+  // IPv6 with port.
+  config.proxy_bypass.clear();
+  config.proxy_bypass.push_back("[3ffe:2a00:100:7031::1]:99");
+  {
+    SyncProxyService service(new MockProxyConfigService(config),
+                             new MockProxyResolver);
+    {
+      GURL test_url("http://[3ffe:2a00:100:7031::1]:99/");
+      int rv = service.ResolveProxy(test_url, &info);
+      EXPECT_EQ(rv, net::OK);
+      EXPECT_TRUE(info.is_direct());
+    }
+    {
+      GURL test_url("http://[3ffe:2a00:100:7031::1]/");
+      int rv = service.ResolveProxy(test_url, &info);
+      EXPECT_EQ(rv, net::OK);
+      EXPECT_FALSE(info.is_direct());
+    }
+  }
+
+  // IPv6 without port. The bypass entry ought to work without the
+  // brackets, but the bypass matching logic in ProxyService is
+  // currently limited.
+  config.proxy_bypass.clear();
+  config.proxy_bypass.push_back("[3ffe:2a00:100:7031::1]");
+  {
+    SyncProxyService service(new MockProxyConfigService(config),
+                             new MockProxyResolver);
+    {
+      GURL test_url("http://[3ffe:2a00:100:7031::1]:99/");
+      int rv = service.ResolveProxy(test_url, &info);
+      EXPECT_EQ(rv, net::OK);
+      EXPECT_TRUE(info.is_direct());
+    }
+    {
+      GURL test_url("http://[3ffe:2a00:100:7031::1]/");
+      int rv = service.ResolveProxy(test_url, &info);
+      EXPECT_EQ(rv, net::OK);
+      EXPECT_TRUE(info.is_direct());
+    }
+  }
 }
 
 TEST(ProxyServiceTest, PerProtocolProxyTests) {
   net::ProxyConfig config;
-  config.proxy_rules = "http=foopy1:8080;https=foopy2:8080";
+  config.proxy_rules.ParseFromString("http=foopy1:8080;https=foopy2:8080");
   config.auto_detect = false;
 
   SyncProxyService service1(new MockProxyConfigService(config),
@@ -730,7 +932,7 @@ TEST(ProxyServiceTest, PerProtocolProxyTests) {
   EXPECT_FALSE(info3.is_direct());
   EXPECT_EQ("foopy2:8080", info3.proxy_server().ToURI());
 
-  config.proxy_rules = "foopy1:8080";
+  config.proxy_rules.ParseFromString("foopy1:8080");
   SyncProxyService service4(new MockProxyConfigService(config),
                             new MockProxyResolver);
   GURL test_url4("www.microsoft.com");
@@ -739,6 +941,52 @@ TEST(ProxyServiceTest, PerProtocolProxyTests) {
   EXPECT_EQ(rv, net::OK);
   EXPECT_FALSE(info4.is_direct());
   EXPECT_EQ("foopy1:8080", info4.proxy_server().ToURI());
+}
+
+// If only HTTP and a SOCKS proxy are specified, check if ftp/https queries
+// fall back to the SOCKS proxy.
+TEST(ProxyServiceTest, DefaultProxyFallbackToSOCKS) {
+  net::ProxyConfig config;
+  config.proxy_rules.ParseFromString("http=foopy1:8080;socks=foopy2:1080");
+  config.auto_detect = false;
+  EXPECT_EQ(net::ProxyConfig::ProxyRules::TYPE_PROXY_PER_SCHEME,
+            config.proxy_rules.type);
+
+  SyncProxyService service1(new MockProxyConfigService(config),
+                            new MockProxyResolver);
+  GURL test_url1("http://www.msn.com");
+  net::ProxyInfo info1;
+  int rv = service1.ResolveProxy(test_url1, &info1);
+  EXPECT_EQ(net::OK, rv);
+  EXPECT_FALSE(info1.is_direct());
+  EXPECT_EQ("foopy1:8080", info1.proxy_server().ToURI());
+
+  SyncProxyService service2(new MockProxyConfigService(config),
+                            new MockProxyResolver);
+  GURL test_url2("ftp://ftp.google.com");
+  net::ProxyInfo info2;
+  rv = service2.ResolveProxy(test_url2, &info2);
+  EXPECT_EQ(net::OK, rv);
+  EXPECT_FALSE(info2.is_direct());
+  EXPECT_EQ("socks4://foopy2:1080", info2.proxy_server().ToURI());
+
+  SyncProxyService service3(new MockProxyConfigService(config),
+                            new MockProxyResolver);
+  GURL test_url3("https://webbranch.techcu.com");
+  net::ProxyInfo info3;
+  rv = service3.ResolveProxy(test_url3, &info3);
+  EXPECT_EQ(net::OK, rv);
+  EXPECT_FALSE(info3.is_direct());
+  EXPECT_EQ("socks4://foopy2:1080", info3.proxy_server().ToURI());
+
+  SyncProxyService service4(new MockProxyConfigService(config),
+                            new MockProxyResolver);
+  GURL test_url4("www.microsoft.com");
+  net::ProxyInfo info4;
+  rv = service4.ResolveProxy(test_url4, &info4);
+  EXPECT_EQ(net::OK, rv);
+  EXPECT_FALSE(info4.is_direct());
+  EXPECT_EQ("socks4://foopy2:1080", info4.proxy_server().ToURI());
 }
 
 // Test cancellation of a queued request.
@@ -922,4 +1170,25 @@ TEST(ProxyServiceTest, CancelWhilePACFetching) {
   EXPECT_EQ(net::OK, result3->GetResultCode());
   EXPECT_EQ("pac-v1.request3:80",
             result3->GetProxyInfo().proxy_server().ToURI());
+}
+
+TEST(ProxyServiceTest, ResetProxyConfigService) {
+  net::ProxyConfig config1;
+  config1.proxy_rules.ParseFromString("foopy1:8080");
+  config1.auto_detect = false;
+  scoped_ptr<SyncProxyService> service(
+      new SyncProxyService(new MockProxyConfigService(config1),
+                           new MockProxyResolverWithoutFetch));
+
+  net::ProxyInfo info;
+  service->ResolveProxy(GURL("http://request1"), &info);
+  EXPECT_EQ("foopy1:8080", info.proxy_server().ToURI());
+
+  net::ProxyConfig config2;
+  config2.proxy_rules.ParseFromString("foopy2:8080");
+  config2.auto_detect = false;
+  int result = service->ResetConfigService(new MockProxyConfigService(config2));
+  DCHECK(result == 0);
+  service->ResolveProxy(GURL("http://request2"), &info);
+  EXPECT_EQ("foopy2:8080", info.proxy_server().ToURI());
 }

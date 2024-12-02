@@ -12,7 +12,7 @@
   'targets': [
     {
       'target_name': 'base',
-      'type': 'static_library',
+      'type': '<(library)',
       'dependencies': [
         '../third_party/icu38/icu38.gyp:icui18n',
         '../third_party/icu38/icu38.gyp:icuuc',
@@ -20,6 +20,16 @@
       'msvs_guid': '1832A374-8A74-4F9E-B536-69A699B3E165',
       'sources': [
         '../build/build_config.h',
+        'crypto/cssm_init.cc',
+        'crypto/cssm_init.h',
+        'crypto/rsa_private_key.h',
+        'crypto/rsa_private_key_win.cc',
+        'crypto/signature_creator.h',
+        'crypto/signature_creator_win.cc',
+        'crypto/signature_verifier.h',
+        'crypto/signature_verifier_mac.cc',
+        'crypto/signature_verifier_nss.cc',
+        'crypto/signature_verifier_win.cc',
         'third_party/dmg_fp/dmg_fp.h',
         'third_party/dmg_fp/dtoa.cc',
         'third_party/dmg_fp/g_fmt.cc',
@@ -34,6 +44,22 @@
         'third_party/nss/sha512.cc',
         'third_party/purify/pure.h',
         'third_party/purify/pure_api.c',
+        'third_party/xdg_mime/xdgmime.c',
+        'third_party/xdg_mime/xdgmime.h',
+        'third_party/xdg_mime/xdgmimealias.c',
+        'third_party/xdg_mime/xdgmimealias.h',
+        'third_party/xdg_mime/xdgmimecache.c',
+        'third_party/xdg_mime/xdgmimecache.h',
+        'third_party/xdg_mime/xdgmimeglob.c',
+        'third_party/xdg_mime/xdgmimeglob.h',
+        'third_party/xdg_mime/xdgmimeicon.c',
+        'third_party/xdg_mime/xdgmimeicon.h',
+        'third_party/xdg_mime/xdgmimeint.c',
+        'third_party/xdg_mime/xdgmimeint.h',
+        'third_party/xdg_mime/xdgmimemagic.c',
+        'third_party/xdg_mime/xdgmimemagic.h',
+        'third_party/xdg_mime/xdgmimeparent.c',
+        'third_party/xdg_mime/xdgmimeparent.h',
         'atomicops_internals_x86_gcc.cc',
         'at_exit.cc',
         'at_exit.h',
@@ -82,16 +108,22 @@
         'debug_util_win.cc',
         'directory_watcher.h',
         'directory_watcher_inotify.cc',
+        'directory_watcher_mac.cc',
         'directory_watcher_win.cc',
+        'dynamic_annotations.h',
+        'dynamic_annotations.cc',
         'event_recorder.cc',
         'event_recorder.h',
         'event_recorder_stubs.cc',
         'field_trial.cc',
         'field_trial.h',
+        'file_descriptor_shuffle.cc',
+        'file_descriptor_shuffle.h',
         'file_path.cc',
         'file_path.h',
         'file_util.cc',
         'file_util.h',
+        'file_util_icu.cc',
         'file_util_linux.cc',
         'file_util_mac.mm',
         'file_util_posix.cc',
@@ -103,6 +135,8 @@
         'fix_wp64.h',
         'float_util.h',
         'foundation_utils_mac.h',
+        'global_descriptors_posix.h',
+        'global_descriptors_posix.cc',
         'hash_tables.h',
         'histogram.cc',
         'histogram.h',
@@ -129,6 +163,8 @@
         'lazy_instance.cc',
         'lazy_instance.h',
         'linked_ptr.h',
+        'linux_util.cc',
+        'linux_util.h',
         'lock.cc',
         'lock.h',
         'lock_impl.h',
@@ -155,9 +191,16 @@
         'message_pump_mac.mm',
         'message_pump_win.cc',
         'message_pump_win.h',
+        'mime_util.h',
+        'mime_util_linux.cc',
+        'native_library.h',
+        'native_library_linux.cc',
+        'native_library_mac.mm',
+        'native_library_win.cc',
         'non_thread_safe.cc',
         'non_thread_safe.h',
         'nss_init.cc',
+        'nss_init.h',
         'object_watcher.cc',
         'object_watcher.h',
         'observer_list.h',
@@ -208,12 +251,14 @@
         'scoped_handle_win.h',
         'scoped_nsautorelease_pool.h',
         'scoped_nsautorelease_pool.mm',
+        'scoped_nsdisable_screen_updates.h',
         'scoped_nsobject.h',
         'scoped_ptr.h',
         'scoped_temp_dir.cc',
         'scoped_temp_dir.h',
         'scoped_variant_win.cc',
         'scoped_variant_win.h',
+        'scoped_vector.h',
         'sha2.cc',
         'sha2.h',
         'shared_memory.h',
@@ -227,6 +272,7 @@
         'stats_counters.h',
         'stats_table.cc',
         'stats_table.h',
+        'stl_util-inl.h',
         'string16.cc',
         'string16.h',
         'string_escape.cc',
@@ -282,6 +328,7 @@
         'tracked_objects.cc',
         'tracked_objects.h',
         'tuple.h',
+        'unix_domain_socket_posix.cc',
         'values.cc',
         'values.h',
         'version.cc',
@@ -303,6 +350,7 @@
         'word_iterator.h',
         'worker_pool.h',
         'worker_pool_linux.cc',
+        'worker_pool_linux.h',
         'worker_pool_mac.mm',
         'worker_pool_win.cc',
       ],
@@ -320,6 +368,53 @@
       ],
       'conditions': [
         [ 'OS == "linux"', {
+            'actions': [
+              {
+                'action_name': 'linux_version',
+                'variables': {
+                  'lastchange_path':
+                    '<(SHARED_INTERMEDIATE_DIR)/build/LASTCHANGE',
+                  'version_py_path': '../chrome/tools/build/version.py',
+                  'version_path': '../chrome/VERSION',
+                  'template_input_path': 'file_version_info_linux.h.version',
+                },
+                'conditions': [
+                  [ 'branding == "Chrome"', {
+                    'variables': {
+                       'branding_path':
+                         '../chrome/app/theme/google_chrome/BRANDING',
+                    },
+                  }, { # else branding!="Chrome"
+                    'variables': {
+                       'branding_path':
+                         '../chrome/app/theme/chromium/BRANDING',
+                    },
+                  }],
+                ],
+                'inputs': [
+                  '<(template_input_path)',
+                  '<(version_path)',
+                  '<(branding_path)',
+                  '<(lastchange_path)',
+                ],
+                'outputs': [
+                  '<(SHARED_INTERMEDIATE_DIR)/base/file_version_info_linux.h',
+                ],
+                'action': [
+                  'python',
+                  '<(version_py_path)',
+                  '-f', '<(version_path)',
+                  '-f', '<(branding_path)',
+                  '-f', '<(lastchange_path)',
+                  '<(template_input_path)',
+                  '<@(_outputs)',
+                ],
+                'message': 'Generating version information',
+              },
+            ],
+            'include_dirs': [
+              '<(SHARED_INTERMEDIATE_DIR)',
+            ],
             'sources/': [ ['exclude', '_(mac|win)\\.cc$'],
                           ['exclude', '\\.mm?$' ] ],
             'sources!': [
@@ -329,6 +424,7 @@
               'idle_timer.cc',
             ],
             'dependencies': [
+              '../build/util/build_util.gyp:lastchange',
               '../build/linux/system.gyp:gtk',
               '../build/linux/system.gyp:nss',
             ],
@@ -341,15 +437,24 @@
                 '-lrt',
               ],
             },
+            'export_dependent_settings': [
+              '../build/linux/system.gyp:gtk',
+            ],
           },
           {  # else: OS != "linux"
+            'sources/': [
+              ['exclude', '/xdg_mime/'],
+            ],
             'sources!': [
+              'crypto/signature_verifier_nss.cc',
               'atomicops_internals_x86_gcc.cc',
               'directory_watcher_inotify.cc',
               'hmac_nss.cc',
               'idle_timer_none.cc',
+              'linux_util.cc',
               'message_pump_glib.cc',
               'nss_init.cc',
+              'nss_init.h',
               'time_posix.cc',
             ],
           }
@@ -375,9 +480,16 @@
                 '$(SDKROOT)/System/Library/Frameworks/Carbon.framework',
                 '$(SDKROOT)/System/Library/Frameworks/CoreFoundation.framework',
                 '$(SDKROOT)/System/Library/Frameworks/Foundation.framework',
+                '$(SDKROOT)/System/Library/Frameworks/Security.framework',
               ],
             },
           },
+          {  # else: OS != "mac"
+            'sources!': [
+              'crypto/cssm_init.cc',
+              'crypto/cssm_init.h',
+            ],
+          }
         ],
         [ 'OS == "win"', {
             'sources/': [ ['exclude', '_(linux|mac|posix)\\.cc$'],
@@ -385,6 +497,7 @@
             'sources!': [
               'data_pack.cc',
               'event_recorder_stubs.cc',
+              'file_descriptor_shuffle.cc',
               'message_pump_libevent.cc',
               'string16.cc',
             ],
@@ -415,11 +528,13 @@
     },
     {
       'target_name': 'base_gfx',
-      'type': 'static_library',
+      'type': '<(library)',
       'msvs_guid': 'A508ADD3-CECE-4E0F-8448-2F5E454DF551',
       'sources': [
         'gfx/gdi_util.cc',
         'gfx/gdi_util.h',
+        'gfx/gtk_native_view_id_manager.cc',
+        'gfx/gtk_native_view_id_manager.h',
         'gfx/gtk_util.cc',
         'gfx/gtk_util.h',
         'gfx/jpeg_codec.cc',
@@ -427,6 +542,7 @@
         'gfx/native_theme.cc',
         'gfx/native_theme.h',
         'gfx/native_widget_types.h',
+        'gfx/native_widget_types_gtk.cc',
         'gfx/platform_canvas.h',
         'gfx/platform_canvas_linux.h',
         'gfx/platform_canvas_mac.h',
@@ -468,7 +584,9 @@
             ],
         }],
         [ 'OS != "linux"', { 'sources!': [
+            'gfx/gtk_native_view_id_manager.cc',
             'gfx/gtk_util.cc',
+            'gfx/native_widget_types_gtk.cc',
             ],
         }],
       ],
@@ -478,21 +596,27 @@
       'type': 'executable',
       'msvs_guid': '27A30967-4BBA-48D1-8522-CDE95F7B1CEC',
       'sources': [
-        'gfx/jpeg_codec_unittest.cc',
-        'gfx/native_theme_unittest.cc',
-        'gfx/png_codec_unittest.cc',
-        'gfx/rect_unittest.cc',
         'at_exit_unittest.cc',
         'atomicops_unittest.cc',
         'clipboard_unittest.cc',
         'command_line_unittest.cc',
         'condition_variable_unittest.cc',
+        'crypto/rsa_private_key_unittest.cc',
+        'crypto/signature_creator_unittest.cc',
+        'crypto/signature_verifier_unittest.cc',
         'data_pack_unittest.cc',
+        'debug_util_unittest.cc',
         'directory_watcher_unittest.cc',
         'field_trial_unittest.cc',
+        'file_descriptor_shuffle_unittest.cc',
         'file_path_unittest.cc',
         'file_util_unittest.cc',
         'file_version_info_unittest.cc',
+        'gfx/jpeg_codec_unittest.cc',
+        'gfx/native_theme_unittest.cc',
+        'gfx/png_codec_unittest.cc',
+        'gfx/rect_unittest.cc',
+        'gmock_unittest.cc',
         'histogram_unittest.cc',
         'hmac_unittest.cc',
         'idletimer_unittest.cc',
@@ -502,6 +626,7 @@
         'linked_ptr_unittest.cc',
         'mac_util_unittest.cc',
         'message_loop_unittest.cc',
+        'message_pump_glib_unittest.cc',
         'object_watcher_unittest.cc',
         'observer_list_unittest.cc',
         'path_service_unittest.cc',
@@ -530,6 +655,7 @@
         'sys_info_unittest.cc',
         'sys_string_conversions_unittest.cc',
         'system_monitor_unittest.cc',
+        'task_unittest.cc',
         'thread_collision_warner_unittest.cc',
         'thread_local_storage_unittest.cc',
         'thread_local_unittest.cc',
@@ -558,6 +684,7 @@
         'base',
         'base_gfx',
         '../skia/skia.gyp:skia',
+        '../testing/gmock.gyp:gmock',
         '../testing/gtest.gyp:gtest',
       ],
       'conditions': [
@@ -567,10 +694,16 @@
             # Linux has an implementation of idle_timer, but it's unclear
             # if we want it yet, so leave it 'unported' for now.
             'idletimer_unittest.cc',
+            'worker_pool_linux_unittest.cc',
           ],
           'dependencies': [
             '../build/linux/system.gyp:gtk',
+            '../build/linux/system.gyp:nss',
           ],
+        }, {  # OS != "linux"
+          'sources!': [
+            'message_pump_glib_unittest.cc',
+          ]
         }],
         ['OS != "mac"', {
           'sources!': [
@@ -585,11 +718,13 @@
           ],
           'sources!': [
             'data_pack_unittest.cc',
+            'file_descriptor_shuffle_unittest.cc',
           ],
         }, {  # OS != "win"
           'sources!': [
+            'crypto/rsa_private_key_unittest.cc',
+            'crypto/signature_creator_unittest.cc',
             'gfx/native_theme_unittest.cc',
-            'directory_watcher_unittest.cc',
             'object_watcher_unittest.cc',
             'pe_image_unittest.cc',
             'scoped_bstr_win_unittest.cc',
@@ -605,7 +740,7 @@
     },
     {
       'target_name': 'test_support_base',
-      'type': 'static_library',
+      'type': '<(library)',
       'dependencies': [
         'base',
         '../testing/gtest.gyp:gtest',
@@ -641,6 +776,11 @@
           'sources': [
             'debug_message.cc',
           ],
+          'msvs_settings': {
+            'VCLinkerTool': {
+              'SubSystem': '2',         # Set /SUBSYSTEM:WINDOWS
+            },
+          },
         },
       ],
     }],

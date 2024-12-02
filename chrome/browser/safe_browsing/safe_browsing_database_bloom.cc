@@ -26,13 +26,6 @@ using base::TimeDelta;
 // database is reset.
 static const int kDatabaseVersion = 6;
 
-// Don't want to create too small of a bloom filter initially while we're
-// downloading the data and then keep having to rebuild it.
-static const int kBloomFilterMinSize = 250000;
-
-// How many bits to use per item.  See the design doc for more information.
-static const int kBloomFilterSizeRatio = 13;
-
 // When we awake from a low power state, we try to avoid doing expensive disk
 // operations for a few minutes to let the system page itself in and settle
 // down.
@@ -76,36 +69,6 @@ bool SafeBrowsingDatabaseBloom::Init(const FilePath& filename,
   chunk_inserted_callback_.reset(chunk_inserted_callback);
 
   return true;
-}
-
-void SafeBrowsingDatabaseBloom::LoadBloomFilter() {
-  DCHECK(!bloom_filter_filename_.empty());
-
-  // If we're missing either of the database or filter files, we wait until the
-  // next update to generate a new filter.
-  // TODO(paulg): Investigate how often the filter file is missing and how
-  // expensive it would be to regenerate it.
-  int64 size_64;
-  if (!file_util::GetFileSize(filename_, &size_64) || size_64 == 0)
-    return;
-
-  if (!file_util::GetFileSize(bloom_filter_filename_, &size_64) ||
-      size_64 == 0) {
-    UMA_HISTOGRAM_COUNTS("SB2.FilterMissing", 1);
-    return;
-  }
-
-  // We have a bloom filter file, so use that as our filter.
-  int size = static_cast<int>(size_64);
-  char* data = new char[size];
-  CHECK(data);
-
-  Time before = Time::Now();
-  file_util::ReadFile(bloom_filter_filename_, data, size);
-  SB_DLOG(INFO) << "SafeBrowsingDatabase read bloom filter in "
-                << (Time::Now() - before).InMilliseconds() << " ms";
-
-  bloom_filter_ = new BloomFilter(data, size);
 }
 
 bool SafeBrowsingDatabaseBloom::Open() {
@@ -247,8 +210,8 @@ bool SafeBrowsingDatabaseBloom::ResetDatabase() {
     return false;
   }
 
-  bloom_filter_ =
-      new BloomFilter(kBloomFilterMinSize * kBloomFilterSizeRatio);
+  bloom_filter_ = new BloomFilter(BloomFilter::kBloomFilterMinSize *
+                                  BloomFilter::kBloomFilterSizeRatio);
   file_util::Delete(bloom_filter_filename_, false);
 
   // TODO(paulg): Fix potential infinite recursion between Open and Reset.
@@ -1065,8 +1028,13 @@ bool SafeBrowsingDatabaseBloom::WritePrefixes(
     return false;
   }
 
-  int number_of_keys = std::max(add_count_, kBloomFilterMinSize);
-  int filter_size = number_of_keys * kBloomFilterSizeRatio;
+  // Determine the size of the new bloom filter. We will cap the maximum size at
+  // 2 MB to prevent an error from consuming large amounts of memory.
+  const int default_min = BloomFilter::kBloomFilterMinSize;
+  int number_of_keys = std::max(add_count_, default_min);
+  int filter_size =
+      std::min(number_of_keys * BloomFilter::kBloomFilterSizeRatio,
+               BloomFilter::kBloomFilterMaxSize * 8);
   BloomFilter* new_filter = new BloomFilter(filter_size);
   SBPair* add = adds;
   int new_count = 0;
@@ -1357,6 +1325,7 @@ void SafeBrowsingDatabaseBloom::BuildBloomFilter() {
   UMA_HISTOGRAM_LONG_TIMES("SB2.BuildFilter", bloom_gen);
   UMA_HISTOGRAM_COUNTS("SB2.AddPrefixes", add_count_);
   UMA_HISTOGRAM_COUNTS("SB2.SubPrefixes", subs);
+  UMA_HISTOGRAM_COUNTS("SB2.FilterSize", filter->size());
   int64 size_64;
   if (file_util::GetFileSize(filename_, &size_64))
     UMA_HISTOGRAM_COUNTS("SB2.DatabaseBytes", static_cast<int>(size_64));

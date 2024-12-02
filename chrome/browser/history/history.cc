@@ -24,6 +24,7 @@
 
 #include "chrome/browser/history/history.h"
 
+#include "app/l10n_util.h"
 #include "base/file_util.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
@@ -32,6 +33,7 @@
 #include "chrome/browser/autocomplete/history_url_provider.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/browser_window.h"
 #include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/history/download_types.h"
 #include "chrome/browser/history/history_backend.h"
@@ -41,15 +43,17 @@
 #include "chrome/browser/profile.h"
 #include "chrome/browser/visitedlink_master.h"
 #include "chrome/common/chrome_constants.h"
-#include "chrome/common/l10n_util.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/thumbnail_score.h"
 #include "chrome/common/url_constants.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 
 using base::Time;
 using history::HistoryBackend;
+
+static const char* kHistoryThreadName = "Chrome_HistoryThread";
 
 // Sends messages from the backend to us on the main thread. This must be a
 // separate class from the history service so that it can hold a reference to
@@ -96,36 +100,27 @@ class HistoryService::BackendDelegate : public HistoryBackend::Delegate {
 const history::StarID HistoryService::kBookmarkBarID = 1;
 
 HistoryService::HistoryService()
-    : thread_(new ChromeThread(ChromeThread::HISTORY)),
+    : thread_(new base::Thread(kHistoryThreadName)),
       profile_(NULL),
       backend_loaded_(false) {
   // Is NULL when running generate_profile.
   if (NotificationService::current()) {
-    NotificationService::current()->AddObserver(
-        this, NotificationType::HISTORY_URLS_DELETED,
-        Source<Profile>(profile_));
+    registrar_.Add(this, NotificationType::HISTORY_URLS_DELETED,
+                   Source<Profile>(profile_));
   }
 }
 
 HistoryService::HistoryService(Profile* profile)
-    : thread_(new ChromeThread(ChromeThread::HISTORY)),
+    : thread_(new base::Thread(kHistoryThreadName)),
       profile_(profile),
       backend_loaded_(false) {
-  NotificationService::current()->AddObserver(
-      this, NotificationType::HISTORY_URLS_DELETED, Source<Profile>(profile_));
+  registrar_.Add(this, NotificationType::HISTORY_URLS_DELETED,
+                 Source<Profile>(profile_));
 }
 
 HistoryService::~HistoryService() {
   // Shutdown the backend. This does nothing if Cleanup was already invoked.
   Cleanup();
-
-  // Unregister for notifications.
-  // Is NULL when running generate_profile.
-  if (NotificationService::current()) {
-    NotificationService::current()->RemoveObserver(
-        this, NotificationType::HISTORY_URLS_DELETED,
-        Source<Profile>(profile_));
-  }
 }
 
 bool HistoryService::Init(const FilePath& history_dir,
@@ -175,7 +170,7 @@ void HistoryService::Cleanup() {
   // Delete the thread, which joins with the background thread. We defensively
   // NULL the pointer before deleting it in case somebody tries to use it
   // during shutdown, but this shouldn't happen.
-  ChromeThread* thread = thread_;
+  base::Thread* thread = thread_;
   thread_ = NULL;
   delete thread;
 }
@@ -242,10 +237,11 @@ HistoryService::Handle HistoryService::ScheduleDBTask(
 HistoryService::Handle HistoryService::QuerySegmentUsageSince(
     CancelableRequestConsumerBase* consumer,
     const Time from_time,
+    int max_result_count,
     SegmentQueryCallback* callback) {
   return Schedule(PRIORITY_UI, &HistoryBackend::QuerySegmentUsage,
                   consumer, new history::QuerySegmentUsageRequest(callback),
-                  from_time);
+                  from_time, max_result_count);
 }
 
 void HistoryService::SetOnBackendDestroyTask(Task* task) {
@@ -258,8 +254,10 @@ void HistoryService::AddPage(const GURL& url,
                              int32 page_id,
                              const GURL& referrer,
                              PageTransition::Type transition,
-                             const RedirectList& redirects) {
-  AddPage(url, Time::Now(), id_scope, page_id, referrer, transition, redirects);
+                             const history::RedirectList& redirects,
+                             bool did_replace_entry) {
+  AddPage(url, Time::Now(), id_scope, page_id, referrer, transition, redirects,
+          did_replace_entry);
 }
 
 void HistoryService::AddPage(const GURL& url,
@@ -268,15 +266,15 @@ void HistoryService::AddPage(const GURL& url,
                              int32 page_id,
                              const GURL& referrer,
                              PageTransition::Type transition,
-                             const RedirectList& redirects) {
+                             const history::RedirectList& redirects,
+                             bool did_replace_entry) {
   DCHECK(history_backend_) << "History service being called after cleanup";
 
   // Filter out unwanted URLs. We don't add auto-subframe URLs. They are a
   // large part of history (think iframes for ads) and we never display them in
   // history UI. We will still add manual subframes, which are ones the user
   // has clicked on to get.
-  if (!CanAddURL(url) || PageTransition::StripQualifier(transition) ==
-                         PageTransition::AUTO_SUBFRAME)
+  if (!CanAddURL(url))
     return;
 
   // Add link & all redirects to visited link list.
@@ -297,7 +295,8 @@ void HistoryService::AddPage(const GURL& url,
 
   scoped_refptr<history::HistoryAddPageArgs> request(
       new history::HistoryAddPageArgs(url, time, id_scope, page_id,
-                                      referrer, redirects, transition));
+                                      referrer, redirects, transition,
+                                      did_replace_entry));
   ScheduleAndForget(PRIORITY_NORMAL, &HistoryBackend::AddPage, request);
 }
 
@@ -521,12 +520,29 @@ HistoryService::Handle HistoryService::QueryRedirectsFrom(
       new history::QueryRedirectsRequest(callback), from_url);
 }
 
+HistoryService::Handle HistoryService::QueryRedirectsTo(
+    const GURL& to_url,
+    CancelableRequestConsumerBase* consumer,
+    QueryRedirectsCallback* callback) {
+  return Schedule(PRIORITY_NORMAL, &HistoryBackend::QueryRedirectsTo, consumer,
+      new history::QueryRedirectsRequest(callback), to_url);
+}
+
 HistoryService::Handle HistoryService::GetVisitCountToHost(
     const GURL& url,
     CancelableRequestConsumerBase* consumer,
     GetVisitCountToHostCallback* callback) {
   return Schedule(PRIORITY_UI, &HistoryBackend::GetVisitCountToHost, consumer,
       new history::GetVisitCountToHostRequest(callback), url);
+}
+
+HistoryService::Handle HistoryService::QueryTopURLsAndRedirects(
+    int result_count,
+    CancelableRequestConsumerBase* consumer,
+    QueryTopURLsAndRedirectsCallback* callback) {
+  return Schedule(PRIORITY_NORMAL, &HistoryBackend::QueryTopURLsAndRedirects,
+      consumer, new history::QueryTopURLsAndRedirectsRequest(callback),
+      result_count);
 }
 
 void HistoryService::Observe(NotificationType type,
@@ -577,7 +593,8 @@ bool HistoryService::CanAddURL(const GURL& url) const {
   if (url.SchemeIs(chrome::kJavaScriptScheme) ||
       url.SchemeIs(chrome::kChromeUIScheme) ||
       url.SchemeIs(chrome::kViewSourceScheme) ||
-      url.SchemeIs(chrome::kChromeInternalScheme))
+      url.SchemeIs(chrome::kChromeInternalScheme) ||
+      url.SchemeIs(chrome::kPrintScheme))
     return false;
 
   if (url.SchemeIs(chrome::kAboutScheme)) {

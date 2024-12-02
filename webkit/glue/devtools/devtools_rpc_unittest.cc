@@ -10,14 +10,14 @@
 
 namespace {
 
-#define TEST_RPC_STRUCT(METHOD0, METHOD1, METHOD2, METHOD3) \
+#define TEST_RPC_STRUCT(METHOD0, METHOD1, METHOD2, METHOD3, METHOD4) \
   METHOD0(Method0) \
   METHOD1(Method1, int) \
   METHOD2(Method2, int, String) \
   METHOD3(Method3, int, String, Value)
 DEFINE_RPC_CLASS(TestRpcClass, TEST_RPC_STRUCT)
 
-#define ANOTHER_TEST_RPC_STRUCT(METHOD0, METHOD1, METHOD2, METHOD3) \
+#define ANOTHER_TEST_RPC_STRUCT(METHOD0, METHOD1, METHOD2, METHOD3, METHOD4) \
   METHOD0(Method0)
 DEFINE_RPC_CLASS(AnotherTestRpcClass, ANOTHER_TEST_RPC_STRUCT)
 
@@ -52,21 +52,28 @@ class DevToolsRpcTests : public testing::Test {
 TEST_F(DevToolsRpcTests, TestSerialize) {
   MockTestRpcClass mock;
   mock.Method0();
-  int id = RpcTypeToNumber<TestRpcClass>::number;
-  EXPECT_EQ(StringPrintf("[%d,0]", id), mock.get_log());
+  EXPECT_EQ("TestRpcClass", mock.last_class_name());
+  EXPECT_EQ("Method0", mock.last_method_name());
+  EXPECT_EQ("[]", mock.last_msg());
   mock.Reset();
 
   mock.Method1(10);
-  EXPECT_EQ(StringPrintf("[%d,1,10]", id), mock.get_log());
+  EXPECT_EQ("TestRpcClass", mock.last_class_name());
+  EXPECT_EQ("Method1", mock.last_method_name());
+  EXPECT_EQ("[10]", mock.last_msg());
   mock.Reset();
 
   mock.Method2(20, "foo");
-  EXPECT_EQ(StringPrintf("[%d,2,20,\"foo\"]", id), mock.get_log());
+  EXPECT_EQ("TestRpcClass", mock.last_class_name());
+  EXPECT_EQ("Method2", mock.last_method_name());
+  EXPECT_EQ("[20,\"foo\"]", mock.last_msg());
   mock.Reset();
 
   StringValue value("bar");
   mock.Method3(30, "foo", value);
-  EXPECT_EQ(StringPrintf("[%d,3,30,\"foo\",\"bar\"]", id), mock.get_log());
+  EXPECT_EQ("TestRpcClass", mock.last_class_name());
+  EXPECT_EQ("Method3", mock.last_method_name());
+  EXPECT_EQ("[30,\"foo\",\"bar\"]", mock.last_msg());
   mock.Reset();
 }
 
@@ -82,7 +89,8 @@ TEST_F(DevToolsRpcTests, TestDispatch) {
   remote.Method0();
   remote.Replay();
 
-  TestRpcClassDispatch::Dispatch(&remote, local.get_log());
+  TestRpcClassDispatch::Dispatch(&remote, local.last_class_name(),
+                                 local.last_method_name(), local.last_msg());
   remote.Verify();
 
   // Call 2.
@@ -91,7 +99,8 @@ TEST_F(DevToolsRpcTests, TestDispatch) {
   remote.Reset();
   remote.Method1(10);
   remote.Replay();
-  TestRpcClassDispatch::Dispatch(&remote, local.get_log());
+  TestRpcClassDispatch::Dispatch(&remote, local.last_class_name(),
+                                 local.last_method_name(), local.last_msg());
   remote.Verify();
 
   // Call 3.
@@ -101,7 +110,8 @@ TEST_F(DevToolsRpcTests, TestDispatch) {
   remote.Method2(20, "foo");
 
   remote.Replay();
-  TestRpcClassDispatch::Dispatch(&remote, local.get_log());
+  TestRpcClassDispatch::Dispatch(&remote, local.last_class_name(),
+                                 local.last_method_name(), local.last_msg());
   remote.Verify();
 
   // Call 4.
@@ -112,19 +122,9 @@ TEST_F(DevToolsRpcTests, TestDispatch) {
   remote.Method3(30, "foo", value);
 
   remote.Replay();
-  TestRpcClassDispatch::Dispatch(&remote, local.get_log());
+  TestRpcClassDispatch::Dispatch(&remote, local.last_class_name(),
+                                 local.last_method_name(), local.last_msg());
   remote.Verify();
-}
-
-// Tests class unique id.
-TEST_F(DevToolsRpcTests, TestClassId) {
-  MockAnotherTestRpcClass mock;
-  ASSERT_TRUE(RpcTypeToNumber<TestRpcClass>::number !=
-      RpcTypeToNumber<AnotherTestRpcClass>::number);
-
-  int id = RpcTypeToNumber<AnotherTestRpcClass>::number;
-  mock.Method0();
-  ASSERT_EQ(StringPrintf("[%d,0]", id), mock.get_log());
 }
 
 }  // namespace

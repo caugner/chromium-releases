@@ -207,19 +207,34 @@ class Time {
   // times are increasing, or that two calls to Now() won't be the same.
   static Time Now();
 
+  // Returns the current time. Same as Now() except that this function always
+  // uses system time so that there are no discrepancies between the returned
+  // time and system time even on virtual environments including our test bot.
+  // For timing sensitive unittests, this function should be used.
+  static Time NowFromSystemTime();
+
   // Converts to/from time_t in UTC and a Time class.
   // TODO(brettw) this should be removed once everybody starts using the |Time|
   // class.
   static Time FromTimeT(time_t tt);
   time_t ToTimeT() const;
 
-  // Converts time to a double which is the number of seconds since epoch
+  // Converts time to/from a double which is the number of seconds since epoch
   // (Jan 1, 1970).  Webkit uses this format to represent time.
+  static Time FromDoubleT(double dt);
   double ToDoubleT() const;
+
 
 #if defined(OS_WIN)
   static Time FromFileTime(FILETIME ft);
   FILETIME ToFileTime() const;
+
+  // Monitor system power state and disable high resolution timer when we're
+  // on battery. See time_win.cc for more details.
+  static void StartSystemMonitorObserver();
+
+  // Enable high resolution timer unconditionally. Only for test code.
+  static void EnableHiResClockForTests();
 #endif
 
   // Converts an exploded structure representing either the local time or UTC

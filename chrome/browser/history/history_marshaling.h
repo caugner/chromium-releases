@@ -8,32 +8,35 @@
 #ifndef CHROME_BROWSER_HISTORY_HISTORY_MARSHALING_H__
 #define CHROME_BROWSER_HISTORY_HISTORY_MARSHALING_H__
 
+#include "base/scoped_vector.h"
 #include "chrome/browser/cancelable_request.h"
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/history/page_usage_data.h"
-#include "chrome/common/scoped_vector.h"
 
 namespace history {
 
 // Navigation -----------------------------------------------------------------
 
 // Marshalling structure for AddPage.
-class HistoryAddPageArgs : public base::RefCounted<HistoryAddPageArgs> {
+class HistoryAddPageArgs
+    : public base::RefCountedThreadSafe<HistoryAddPageArgs> {
  public:
   HistoryAddPageArgs(const GURL& arg_url,
                      base::Time arg_time,
                      const void* arg_id_scope,
                      int32 arg_page_id,
                      const GURL& arg_referrer,
-                     const HistoryService::RedirectList& arg_redirects,
-                     PageTransition::Type arg_transition)
+                     const history::RedirectList& arg_redirects,
+                     PageTransition::Type arg_transition,
+                     bool arg_did_replace_entry)
       : url(arg_url),
         time(arg_time),
         id_scope(arg_id_scope),
         page_id(arg_page_id),
         referrer(arg_referrer),
         redirects(arg_redirects),
-        transition(arg_transition) {
+        transition(arg_transition),
+        did_replace_entry(arg_did_replace_entry){
   }
 
   GURL url;
@@ -43,8 +46,9 @@ class HistoryAddPageArgs : public base::RefCounted<HistoryAddPageArgs> {
   int32 page_id;
 
   GURL referrer;
-  HistoryService::RedirectList redirects;
+  history::RedirectList redirects;
   PageTransition::Type transition;
+  bool did_replace_entry;
 
  private:
   DISALLOW_EVIL_CONSTRUCTORS(HistoryAddPageArgs);
@@ -61,11 +65,16 @@ typedef CancelableRequest1<HistoryService::QueryHistoryCallback,
     QueryHistoryRequest;
 
 typedef CancelableRequest1<HistoryService::QueryRedirectsCallback,
-                           HistoryService::RedirectList>
+                           history::RedirectList>
     QueryRedirectsRequest;
 
 typedef CancelableRequest<HistoryService::GetVisitCountToHostCallback>
     GetVisitCountToHostRequest;
+
+typedef CancelableRequest1<HistoryService::QueryTopURLsAndRedirectsCallback,
+                           Tuple2<std::vector<GURL>,
+                                  history::RedirectMap> >
+    QueryTopURLsAndRedirectsRequest;
 
 // Thumbnails -----------------------------------------------------------------
 

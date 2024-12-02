@@ -9,7 +9,6 @@
 #include "base/file_util.h"
 #include "base/histogram.h"
 #include "base/logging.h"
-#include "base/time.h"
 #include "net/base/sdch_filter.h"
 #include "net/base/sdch_manager.h"
 
@@ -26,9 +25,7 @@ SdchFilter::SdchFilter(const FilterContext& filter_context)
       dest_buffer_excess_index_(0),
       source_bytes_(0),
       output_bytes_(0),
-      possible_pass_through_(false),
-      connect_time_(filter_context.GetRequestTime()),
-      was_cached_(filter_context.IsCachedContent()) {
+      possible_pass_through_(false) {
   bool success = filter_context.GetMimeType(&mime_type_);
   DCHECK(success);
   success = filter_context.GetURL(&url_);
@@ -42,7 +39,7 @@ SdchFilter::~SdchFilter() {
   static int filter_use_count = 0;
   ++filter_use_count;
   if (META_REFRESH_RECOVERY == decoding_status_) {
-    UMA_HISTOGRAM_COUNTS("Sdch.FilterUseBeforeDisabling", filter_use_count);
+    UMA_HISTOGRAM_COUNTS("Sdch3.FilterUseBeforeDisabling", filter_use_count);
   }
 
   if (vcdiff_streaming_decoder_.get()) {
@@ -53,99 +50,47 @@ SdchFilter::~SdchFilter() {
       // Note this will "wear off" quickly enough, and is just meant to assure
       // in some rare case that the user is not stuck.
       SdchManager::BlacklistDomain(url_);
-      UMA_HISTOGRAM_COUNTS("Sdch.PartialBytesIn",
+      UMA_HISTOGRAM_COUNTS("Sdch3.PartialBytesIn",
            static_cast<int>(filter_context().GetByteReadCount()));
-      UMA_HISTOGRAM_COUNTS("Sdch.PartialVcdiffIn", source_bytes_);
-      UMA_HISTOGRAM_COUNTS("Sdch.PartialVcdiffOut", output_bytes_);
+      UMA_HISTOGRAM_COUNTS("Sdch3.PartialVcdiffIn", source_bytes_);
+      UMA_HISTOGRAM_COUNTS("Sdch3.PartialVcdiffOut", output_bytes_);
     }
   }
 
   if (!dest_buffer_excess_.empty()) {
     // Filter chaining error, or premature teardown.
     SdchManager::SdchErrorRecovery(SdchManager::UNFLUSHED_CONTENT);
-    UMA_HISTOGRAM_COUNTS("Sdch.UnflushedBytesIn",
+    UMA_HISTOGRAM_COUNTS("Sdch3.UnflushedBytesIn",
          static_cast<int>(filter_context().GetByteReadCount()));
-    UMA_HISTOGRAM_COUNTS("Sdch.UnflushedBufferSize",
+    UMA_HISTOGRAM_COUNTS("Sdch3.UnflushedBufferSize",
                          dest_buffer_excess_.size());
-    UMA_HISTOGRAM_COUNTS("Sdch.UnflushedVcdiffIn", source_bytes_);
-    UMA_HISTOGRAM_COUNTS("Sdch.UnflushedVcdiffOut", output_bytes_);
+    UMA_HISTOGRAM_COUNTS("Sdch3.UnflushedVcdiffIn", source_bytes_);
+    UMA_HISTOGRAM_COUNTS("Sdch3.UnflushedVcdiffOut", output_bytes_);
   }
 
-  if (was_cached_) {
+  if (filter_context().IsCachedContent()) {
     // Not a real error, but it is useful to have this tally.
     // TODO(jar): Remove this stat after SDCH stability is validated.
     SdchManager::SdchErrorRecovery(SdchManager::CACHE_DECODED);
     return;  // We don't need timing stats, and we aready got ratios.
   }
 
-  if (base::Time() == connect_time_ || read_times_.empty()) {
-    // Not a real error, but it is useful to have this tally.
-    // TODO(jar): Remove this stat after SDCH stability is validated.
-    SdchManager::SdchErrorRecovery(SdchManager::MISSING_TIME_STATS);
-    UMA_HISTOGRAM_COUNTS("Sdch.MissingTimeBytesIn",
-         static_cast<int>(filter_context().GetByteReadCount()));
-    UMA_HISTOGRAM_COUNTS("Sdch.MissingTimeVcdiffIn", source_bytes_);
-    return;
-  }
-
-  base::TimeDelta duration = read_times_.back() - connect_time_;
-  // We clip our logging at 10 minutes to prevent anamolous data from being
-  // considered (per suggestion from Jake Brutlag).
-  if (10 < duration.InMinutes()) {
-    SdchManager::SdchErrorRecovery(SdchManager::OVER_10_MINUTES);
-    return;
-  }
-
   switch (decoding_status_) {
     case DECODING_IN_PROGRESS: {
-      UMA_HISTOGRAM_PERCENTAGE("Sdch.Network_Decode_Ratio_a", static_cast<int>(
-          (filter_context().GetByteReadCount() * 100) / output_bytes_));
-      UMA_HISTOGRAM_CLIPPED_TIMES("Sdch.Network_Decode_Latency_F_a", duration,
-                                  base::TimeDelta::FromMilliseconds(20),
-                                  base::TimeDelta::FromMinutes(10), 100);
-      UMA_HISTOGRAM_CLIPPED_TIMES("Sdch.Network_Decode_1st_To_Last_a",
-                                  read_times_.back() - read_times_[0],
-                                  base::TimeDelta::FromMilliseconds(20),
-                                  base::TimeDelta::FromMinutes(10), 100);
-      if (read_times_.size() > 4) {
-        UMA_HISTOGRAM_CLIPPED_TIMES("Sdch.Network_Decode_3rd_To_4th_a",
-                                    read_times_[3] - read_times_[2],
-                                    base::TimeDelta::FromMilliseconds(10),
-                                    base::TimeDelta::FromSeconds(3), 100);
-        UMA_HISTOGRAM_CLIPPED_TIMES("Sdch.Network_Decode_4th_To_5th_a",
-                                    read_times_[4] - read_times_[3],
-                                    base::TimeDelta::FromMilliseconds(10),
-                                    base::TimeDelta::FromSeconds(3), 100);
-      }
-      UMA_HISTOGRAM_COUNTS_100("Sdch.Network_Decode_Packets_a",
-                               read_times_.size());
-      UMA_HISTOGRAM_COUNTS("Sdch.Network_Decode_Bytes_Processed_a",
-          static_cast<int>(filter_context().GetByteReadCount()));
-      UMA_HISTOGRAM_COUNTS("Sdch.Network_Decode_Bytes_VcdiffOut_a",
+      if (output_bytes_)
+        UMA_HISTOGRAM_PERCENTAGE("Sdch3.Network_Decode_Ratio_a",
+            static_cast<int>(
+                (filter_context().GetByteReadCount() * 100) / output_bytes_));
+      UMA_HISTOGRAM_COUNTS("Sdch3.Network_Decode_Bytes_VcdiffOut_a",
                            output_bytes_);
+      filter_context().RecordPacketStats(FilterContext::SDCH_DECODE);
+
+      // Allow latency experiments to proceed.
+      SdchManager::Global()->SetAllowLatencyExperiment(url_, true);
       return;
     }
     case PASS_THROUGH: {
-      UMA_HISTOGRAM_CLIPPED_TIMES("Sdch.Network_Pass-through_Latency_F_a",
-                                  duration,
-                                  base::TimeDelta::FromMilliseconds(20),
-                                  base::TimeDelta::FromMinutes(10), 100);
-      UMA_HISTOGRAM_CLIPPED_TIMES("Sdch.Network_Pass-through_1st_To_Last_a",
-                                  read_times_.back() - read_times_[0],
-                                  base::TimeDelta::FromMilliseconds(20),
-                                  base::TimeDelta::FromMinutes(10), 100);
-      if (read_times_.size() > 4) {
-        UMA_HISTOGRAM_CLIPPED_TIMES("Sdch.Network_Pass-through_3rd_To_4th_a",
-                                    read_times_[3] - read_times_[2],
-                                    base::TimeDelta::FromMilliseconds(10),
-                                    base::TimeDelta::FromSeconds(3), 100);
-        UMA_HISTOGRAM_CLIPPED_TIMES("Sdch.Network_Pass-through_4th_To_5th_a",
-                                    read_times_[4] - read_times_[3],
-                                    base::TimeDelta::FromMilliseconds(10),
-                                    base::TimeDelta::FromSeconds(3), 100);
-      }
-      UMA_HISTOGRAM_COUNTS_100("Sdch.Network_Pass-through_Packets_a",
-                               read_times_.size());
+      filter_context().RecordPacketStats(FilterContext::SDCH_PASSTHROUGH);
       return;
     }
     case DECODING_UNINITIALIZED: {
@@ -165,25 +110,6 @@ SdchFilter::~SdchFilter() {
       return;
     }
   }  // end of switch.
-}
-
-void SdchFilter::UpdateReadTimes() {
-  if (!next_stream_data_ || (stream_data_len_ == 0)) {
-    // Don't update when we're called to just flush out our internal buffers.
-    return;
-  }
-  const int64 bytes_read_so_far = filter_context().GetByteReadCount();
-  if (bytes_read_so_far <= 0)
-    return;
-  const size_t kTypicalPacketSize = 1430;
-  // For ByteReadCount up to 1430, we have 1 packet.  Up to 2860, 2 packets etc.
-  if (bytes_read_so_far > 100 * kTypicalPacketSize)
-    return;  // Let's not stress the array size.
-  const size_t bytes = static_cast<size_t>(bytes_read_so_far);
-  const size_t probable_packet_number = 1 + (bytes - 1) / kTypicalPacketSize;
-  base::Time now = base::Time::Now();
-  while (probable_packet_number > read_times_.size())
-    read_times_.push_back(now);
 }
 
 bool SdchFilter::InitDecoding(Filter::FilterType filter_type) {
@@ -217,42 +143,64 @@ Filter::FilterStatus SdchFilter::ReadFilteredData(char* dest_buffer,
   if (!dest_buffer || available_space <= 0)
     return FILTER_ERROR;
 
-  UpdateReadTimes();
-
   if (WAITING_FOR_DICTIONARY_SELECTION == decoding_status_) {
     FilterStatus status = InitializeDictionary();
     if (FILTER_NEED_MORE_DATA == status)
       return FILTER_NEED_MORE_DATA;
     if (FILTER_ERROR == status) {
       DCHECK(DECODING_ERROR == decoding_status_);
-      DCHECK(0 == dest_buffer_excess_index_);
+      DCHECK_EQ(0u, dest_buffer_excess_index_);
       DCHECK(dest_buffer_excess_.empty());
-      if (possible_pass_through_) {
+      // This is where we try very hard to do error recovery, and make this
+      // protocol robust in the face of proxies that do many different things.
+      // If we decide that things are looking very bad (too hard to recover),
+      // we may even issue a "meta-refresh" to reload the page without an SDCH
+      // advertisement (so that we are sure we're not hurting anything).
+      //
+      // Watch out for an error page inserted by the proxy as part of a 40x
+      // error response.  When we see such content molestation, we certainly
+      // need to fall into the meta-refresh case.
+      bool successful_response = filter_context().GetResponseCode() == 200;
+      if (filter_context().GetResponseCode() == 404) {
+        // We could be more generous, but for now, only a "NOT FOUND" code will
+        // cause a pass through.  All other codes will fall into a meta-refresh
+        // attempt.
+        SdchManager::SdchErrorRecovery(SdchManager::PASS_THROUGH_404_CODE);
+        decoding_status_ = PASS_THROUGH;
+      } else if (possible_pass_through_ && successful_response) {
+        // This is the potentially most graceful response. There really was no
+        // error. We were just overly cautious when we added a TENTATIVE_SDCH.
         // We added the sdch coding tag, and it should not have been added.
         // This can happen in server experiments, where the server decides
         // not to use sdch, even though there is a dictionary.  To be
         // conservative, we locally added the tentative sdch (fearing that a
         // proxy stripped it!) and we must now recant (pass through).
         SdchManager::SdchErrorRecovery(SdchManager::DISCARD_TENTATIVE_SDCH);
-        decoding_status_ = PASS_THROUGH;
-        dest_buffer_excess_ = dictionary_hash_;  // Send what we scanned.
-      } else if (!dictionary_hash_is_plausible_) {
+        // However.... just to be sure we don't get burned by proxies that
+        // re-compress with gzip or other system, we can sniff to see if this
+        // is compressed data etc.  For now, we do nothing, which gets us into
+        // the meta-refresh result.
+        // TODO(jar): Improve robustness by sniffing for valid text that we can
+        // actual use re: decoding_status_ = PASS_THROUGH;
+      } else if (successful_response && !dictionary_hash_is_plausible_) {
         // One of the first 9 bytes precluded consideration as a hash.
         // This can't be an SDCH payload, even though the server said it was.
         // This is a major error, as the server or proxy tagged this SDCH even
         // though it is not!
-        // The good news is that error recovery is clear...
         SdchManager::SdchErrorRecovery(SdchManager::PASSING_THROUGH_NON_SDCH);
+        // Meta-refresh won't help... we didn't advertise an SDCH dictionary!!
         decoding_status_ = PASS_THROUGH;
+      }
+
+      if (decoding_status_ == PASS_THROUGH) {
         dest_buffer_excess_ = dictionary_hash_;  // Send what we scanned.
       } else {
-        // We don't have the dictionary that was demanded.
-        // With very low probability, random garbage data looked like a
-        // dictionary specifier (8 ASCII characters followed by a null), but
-        // that is sufficiently unlikely that we ignore it.
-        if (std::string::npos == mime_type_.find_first_of("text/html")) {
+        // This is where we try to do the expensive meta-refresh.
+        if (std::string::npos == mime_type_.find("text/html")) {
+          // Since we can't do a meta-refresh (along with an exponential
+          // backoff), we'll just make sure this NEVER happens again.
           SdchManager::BlacklistDomainForever(url_);
-          if (was_cached_)
+          if (filter_context().IsCachedContent())
             SdchManager::SdchErrorRecovery(
                 SdchManager::CACHED_META_REFRESH_UNSUPPORTED);
           else
@@ -262,7 +210,7 @@ Filter::FilterStatus SdchFilter::ReadFilteredData(char* dest_buffer,
         }
         // HTML content means we can issue a meta-refresh, and get the content
         // again, perhaps without SDCH (to be safe).
-        if (was_cached_) {
+        if (filter_context().IsCachedContent()) {
           // Cached content is probably a startup tab, so we'll just get fresh
           // content and try again, without disabling sdch.
           SdchManager::SdchErrorRecovery(
@@ -286,12 +234,12 @@ Filter::FilterStatus SdchFilter::ReadFilteredData(char* dest_buffer,
   *dest_len += amount;
   dest_buffer += amount;
   available_space -= amount;
-  DCHECK(available_space >= 0);
+  DCHECK_GE(available_space, 0);
 
   if (available_space <= 0)
     return FILTER_OK;
   DCHECK(dest_buffer_excess_.empty());
-  DCHECK(0 == dest_buffer_excess_index_);
+  DCHECK_EQ(0u, dest_buffer_excess_index_);
 
   if (decoding_status_ != DECODING_IN_PROGRESS) {
     if (META_REFRESH_RECOVERY == decoding_status_) {
@@ -341,7 +289,7 @@ Filter::FilterStatus SdchFilter::ReadFilteredData(char* dest_buffer,
 Filter::FilterStatus SdchFilter::InitializeDictionary() {
   const size_t kServerIdLength = 9;  // Dictionary hash plus null from server.
   size_t bytes_needed = kServerIdLength - dictionary_hash_.size();
-  DCHECK(bytes_needed > 0);
+  DCHECK_GT(bytes_needed, 0u);
   if (!next_stream_data_)
     return FILTER_NEED_MORE_DATA;
   if (static_cast<size_t>(stream_data_len_) < bytes_needed) {
@@ -353,7 +301,7 @@ Filter::FilterStatus SdchFilter::InitializeDictionary() {
   dictionary_hash_.append(next_stream_data_, bytes_needed);
   DCHECK(kServerIdLength == dictionary_hash_.size());
   stream_data_len_ -= bytes_needed;
-  DCHECK(0 <= stream_data_len_);
+  DCHECK_LE(0, stream_data_len_);
   if (stream_data_len_ > 0)
     next_stream_data_ += bytes_needed;
   else
@@ -389,6 +337,7 @@ Filter::FilterStatus SdchFilter::InitializeDictionary() {
   }
   dictionary_ = dictionary;
   vcdiff_streaming_decoder_.reset(new open_vcdiff::VCDiffStreamingDecoder);
+  vcdiff_streaming_decoder_->SetAllowVcdTarget(false);
   vcdiff_streaming_decoder_->StartDecoding(dictionary_->text().data(),
                                            dictionary_->text().size());
   decoding_status_ = DECODING_IN_PROGRESS;

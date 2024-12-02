@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,9 @@
 #include <vsstyle.h>
 #include <vssym32.h>
 
+#include "app/gfx/canvas.h"
+#include "app/l10n_util.h"
+#include "app/resource_bundle.h"
 #include "base/file_util.h"
 #include "base/path_service.h"
 #include "base/gfx/native_theme.h"
@@ -20,33 +23,46 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/download/download_manager.h"
 #include "chrome/browser/gears_integration.h"
-#include "chrome/browser/metrics/metrics_service.h"
 #include "chrome/browser/net/dns_global.h"
+#include "chrome/browser/options_util.h"
+#include "chrome/browser/renderer_host/resource_dispatcher_host.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
+#include "chrome/browser/shell_dialogs.h"
 #include "chrome/browser/views/options/cookies_view.h"
+#include "chrome/browser/views/options/fonts_languages_window_view.h"
 #include "chrome/browser/views/options/language_combobox_model.h"
 #include "chrome/browser/views/restart_message_box.h"
-#include "chrome/browser/views/standard_layout.h"
-#include "chrome/common/filter_policy.h"
-#include "chrome/common/gfx/chrome_canvas.h"
 #include "chrome/common/pref_member.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/resource_bundle.h"
-#include "chrome/installer/util/google_update_settings.h"
-#include "chrome/views/background.h"
-#include "chrome/views/controls/button/checkbox.h"
-#include "chrome/views/controls/combo_box.h"
-#include "chrome/views/controls/scroll_view.h"
-#include "chrome/views/grid_layout.h"
-#include "chrome/views/widget/widget.h"
+#include "chrome/common/pref_service.h"
+#include "grit/app_resources.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "net/base/ssl_config_service.h"
 #include "net/base/cookie_policy.h"
+#include "skia/ext/skia_utils_win.h"
+#include "third_party/skia/include/core/SkBitmap.h"
+#include "views/background.h"
+#include "views/controls/button/checkbox.h"
+#include "views/controls/combobox/combobox.h"
+#include "views/controls/scroll_view.h"
+#include "views/controls/textfield/textfield.h"
+#include "views/grid_layout.h"
+#include "views/standard_layout.h"
+#include "views/widget/widget.h"
 
 using views::GridLayout;
 using views::ColumnSet;
+
+namespace {
+
+const int kFileIconSize = 16;
+const int kFileIconVerticalSpacing = 3;
+const int kFileIconHorizontalSpacing = 3;
+const int kFileIconTextFieldSpacing = 3;
+
+}
 
 namespace {
 
@@ -62,7 +78,7 @@ class ListBackground : public views::Background {
   }
   virtual ~ListBackground() {}
 
-  virtual void Paint(ChromeCanvas* canvas, views::View* view) const {
+  virtual void Paint(gfx::Canvas* canvas, views::View* view) const {
     HDC dc = canvas->beginPlatformPaint();
     RECT native_lb = view->GetLocalBounds(true).ToRECT();
     gfx::NativeTheme::instance()->PaintListBackground(dc, true, &native_lb);
@@ -73,7 +89,131 @@ class ListBackground : public views::Background {
   DISALLOW_COPY_AND_ASSIGN(ListBackground);
 };
 
-}  // namespace
+////////////////////////////////////////////////////////////////////////////////
+// FileDisplayArea
+
+class FileDisplayArea : public views::View {
+ public:
+  FileDisplayArea();
+  virtual ~FileDisplayArea();
+
+  void SetFile(const FilePath& file_path);
+
+  // views::View overrides:
+  virtual void Paint(gfx::Canvas* canvas);
+  virtual void Layout();
+  virtual gfx::Size GetPreferredSize();
+
+ protected:
+  // views::View overrides:
+  virtual void ViewHierarchyChanged(bool is_add,
+                                    views::View* parent,
+                                    views::View* child);
+
+ private:
+  void Init();
+
+  views::Textfield* text_field_;
+  SkColor text_field_background_color_;
+
+  gfx::Rect icon_bounds_;
+
+  bool initialized_;
+
+  static void InitClass();
+  static SkBitmap default_folder_icon_;
+
+  DISALLOW_EVIL_CONSTRUCTORS(FileDisplayArea);
+};
+
+// static
+SkBitmap FileDisplayArea::default_folder_icon_;
+
+FileDisplayArea::FileDisplayArea()
+    : text_field_(new views::Textfield),
+      text_field_background_color_(0),
+      initialized_(false) {
+  InitClass();
+}
+
+FileDisplayArea::~FileDisplayArea() {
+}
+
+void FileDisplayArea::SetFile(const FilePath& file_path) {
+  // Force file path to have LTR directionality.
+  if (l10n_util::GetTextDirection() == l10n_util::RIGHT_TO_LEFT) {
+    string16 localized_file_path;
+    l10n_util::WrapPathWithLTRFormatting(file_path, &localized_file_path);
+    text_field_->SetText(UTF16ToWide(localized_file_path));
+  } else {
+    text_field_->SetText(file_path.ToWStringHack());
+  }
+}
+
+void FileDisplayArea::Paint(gfx::Canvas* canvas) {
+  HDC dc = canvas->beginPlatformPaint();
+  RECT rect = { 0, 0, width(), height() };
+  gfx::NativeTheme::instance()->PaintTextField(
+      dc, EP_EDITTEXT, ETS_READONLY, 0, &rect,
+      skia::SkColorToCOLORREF(text_field_background_color_), true, true);
+  canvas->endPlatformPaint();
+  // Mirror left point for icon_bounds_ to draw icon in RTL locales correctly.
+  canvas->DrawBitmapInt(default_folder_icon_,
+                        MirroredLeftPointForRect(icon_bounds_),
+                        icon_bounds_.y());
+}
+
+void FileDisplayArea::Layout() {
+  icon_bounds_.SetRect(kFileIconHorizontalSpacing, kFileIconVerticalSpacing,
+                       kFileIconSize, kFileIconSize);
+  gfx::Size ps = text_field_->GetPreferredSize();
+  text_field_->SetBounds(icon_bounds_.right() + kFileIconTextFieldSpacing,
+                         (height() - ps.height()) / 2,
+                         width() - icon_bounds_.right() -
+                             kFileIconHorizontalSpacing -
+                             kFileIconTextFieldSpacing, ps.height());
+}
+
+gfx::Size FileDisplayArea::GetPreferredSize() {
+  return gfx::Size(kFileIconSize + 2 * kFileIconVerticalSpacing,
+                   kFileIconSize + 2 * kFileIconHorizontalSpacing);
+}
+
+void FileDisplayArea::ViewHierarchyChanged(bool is_add,
+                                           views::View* parent,
+                                           views::View* child) {
+  if (!initialized_ && is_add && GetWidget())
+    Init();
+}
+
+void FileDisplayArea::Init() {
+  initialized_ = true;
+  AddChildView(text_field_);
+  text_field_background_color_ =
+      gfx::NativeTheme::instance()->GetThemeColorWithDefault(
+          gfx::NativeTheme::TEXTFIELD, EP_EDITTEXT, ETS_READONLY,
+          TMT_FILLCOLOR, COLOR_3DFACE);
+  text_field_->SetReadOnly(true);
+  text_field_->RemoveBorder();
+  text_field_->SetBackgroundColor(text_field_background_color_);
+}
+
+// static
+void FileDisplayArea::InitClass() {
+  static bool initialized = false;
+  if (!initialized) {
+    // We'd prefer to use UILayoutIsRightToLeft() to perform the RTL
+    // environment check, but it's nonstatic, so, instead, we check whether the
+    // locale is RTL.
+    bool ui_is_rtl = l10n_util::GetTextDirection() == l10n_util::RIGHT_TO_LEFT;
+    ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+    default_folder_icon_ = *rb.GetBitmapNamed(ui_is_rtl ?
+                                              IDR_FOLDER_CLOSED_RTL :
+                                              IDR_FOLDER_CLOSED);
+    initialized = true;
+  }
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // AdvancedSection
 //  A convenience view for grouping advanced options together into related
@@ -98,7 +238,7 @@ class AdvancedSection : public OptionsPageView {
   // Convenience helpers for adding controls to specific layouts in an
   // aesthetically pleasing way.
   void AddWrappingCheckboxRow(views::GridLayout* layout,
-                             views::CheckBox* checkbox,
+                             views::Checkbox* checkbox,
                              int id,
                              bool related_follows);
   void AddWrappingLabelRow(views::GridLayout* layout,
@@ -144,8 +284,8 @@ AdvancedSection::AdvancedSection(Profile* profile,
       title_label_(new views::Label(title)),
       OptionsPageView(profile) {
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-  ChromeFont title_font =
-      rb.GetFont(ResourceBundle::BaseFont).DeriveFont(0, ChromeFont::BOLD);
+  gfx::Font title_font =
+      rb.GetFont(ResourceBundle::BaseFont).DeriveFont(0, gfx::Font::BOLD);
   title_label_->SetFont(title_font);
 
   SkColor title_color = gfx::NativeTheme::instance()->GetThemeColorWithDefault(
@@ -172,7 +312,7 @@ void AdvancedSection::AddWrappingColumnSet(views::GridLayout* layout, int id) {
 void AdvancedSection::AddDependentTwoColumnSet(views::GridLayout* layout,
                                                int id) {
   ColumnSet* column_set = layout->AddColumnSet(id);
-  column_set->AddPaddingColumn(0, views::CheckBox::GetTextIndent());
+  column_set->AddPaddingColumn(0, views::Checkbox::GetTextIndent());
   column_set->AddColumn(GridLayout::FILL, GridLayout::CENTER, 0,
                         GridLayout::USE_PREF, 0, 0);
   column_set->AddPaddingColumn(0, kRelatedControlHorizontalSpacing);
@@ -192,13 +332,13 @@ void AdvancedSection::AddTwoColumnSet(views::GridLayout* layout, int id) {
 
 void AdvancedSection::AddIndentedColumnSet(views::GridLayout* layout, int id) {
   ColumnSet* column_set = layout->AddColumnSet(id);
-  column_set->AddPaddingColumn(0, views::CheckBox::GetTextIndent());
+  column_set->AddPaddingColumn(0, views::Checkbox::GetTextIndent());
   column_set->AddColumn(GridLayout::FILL, GridLayout::CENTER, 1,
                         GridLayout::USE_PREF, 0, 0);
 }
 
 void AdvancedSection::AddWrappingCheckboxRow(views::GridLayout* layout,
-                                             views::CheckBox* checkbox,
+                                             views::Checkbox* checkbox,
                                              int id,
                                              bool related_follows) {
   checkbox->SetMultiLine(true);
@@ -280,16 +420,16 @@ void AdvancedSection::InitControlLayout() {
 ////////////////////////////////////////////////////////////////////////////////
 // PrivacySection
 
-class CookieBehaviorComboModel : public views::ComboBox::Model {
+class CookieBehaviorComboModel : public views::Combobox::Model {
  public:
   CookieBehaviorComboModel() {}
 
   // Return the number of items in the combo box.
-  virtual int GetItemCount(views::ComboBox* source) {
+  virtual int GetItemCount(views::Combobox* source) {
     return 3;
   }
 
-  virtual std::wstring GetItemAt(views::ComboBox* source, int index) {
+  virtual std::wstring GetItemAt(views::Combobox* source, int index) {
     const int kStringIDs[] = {
       IDS_OPTIONS_COOKIES_ACCEPT_ALL_COOKIES,
       IDS_OPTIONS_COOKIES_RESTRICT_THIRD_PARTY_COOKIES,
@@ -319,18 +459,18 @@ class CookieBehaviorComboModel : public views::ComboBox::Model {
 };
 
 class PrivacySection : public AdvancedSection,
-                       public views::NativeButton::Listener,
-                       public views::ComboBox::Listener,
+                       public views::ButtonListener,
+                       public views::Combobox::Listener,
                        public views::LinkController {
  public:
   explicit PrivacySection(Profile* profile);
   virtual ~PrivacySection() {}
 
-  // Overridden from views::NativeButton::Listener:
-  virtual void ButtonPressed(views::NativeButton* sender);
+  // Overridden from views::ButtonListener:
+  virtual void ButtonPressed(views::Button* sender);
 
-  // Overridden from views::ComboBox::Listener:
-  virtual void ItemChanged(views::ComboBox* sender,
+  // Overridden from views::Combobox::Listener:
+  virtual void ItemChanged(views::Combobox* sender,
                            int prev_index,
                            int new_index);
 
@@ -348,14 +488,14 @@ class PrivacySection : public AdvancedSection,
  private:
   // Controls for this section:
   views::Label* section_description_label_;
-  views::CheckBox* enable_link_doctor_checkbox_;
-  views::CheckBox* enable_suggest_checkbox_;
-  views::CheckBox* enable_dns_prefetching_checkbox_;
-  views::CheckBox* enable_safe_browsing_checkbox_;
-  views::CheckBox* reporting_enabled_checkbox_;
+  views::Checkbox* enable_link_doctor_checkbox_;
+  views::Checkbox* enable_suggest_checkbox_;
+  views::Checkbox* enable_dns_prefetching_checkbox_;
+  views::Checkbox* enable_safe_browsing_checkbox_;
+  views::Checkbox* reporting_enabled_checkbox_;
   views::Link* learn_more_link_;
   views::Label* cookie_behavior_label_;
-  views::ComboBox* cookie_behavior_combobox_;
+  views::Combobox* cookie_behavior_combobox_;
   views::NativeButton* show_cookies_button_;
 
   // Dummy for now. Used to populate cookies models.
@@ -389,23 +529,23 @@ PrivacySection::PrivacySection(Profile* profile)
           l10n_util::GetString(IDS_OPTIONS_ADVANCED_SECTION_TITLE_PRIVACY)) {
 }
 
-void PrivacySection::ButtonPressed(views::NativeButton* sender) {
+void PrivacySection::ButtonPressed(views::Button* sender) {
   if (sender == enable_link_doctor_checkbox_) {
-    bool enabled = enable_link_doctor_checkbox_->IsSelected();
+    bool enabled = enable_link_doctor_checkbox_->checked();
     UserMetricsRecordAction(enabled ?
                                 L"Options_LinkDoctorCheckbox_Enable" :
                                 L"Options_LinkDoctorCheckbox_Disable",
                             profile()->GetPrefs());
     alternate_error_pages_.SetValue(enabled);
   } else if (sender == enable_suggest_checkbox_) {
-    bool enabled = enable_suggest_checkbox_->IsSelected();
+    bool enabled = enable_suggest_checkbox_->checked();
     UserMetricsRecordAction(enabled ?
                                 L"Options_UseSuggestCheckbox_Enable" :
                                 L"Options_UseSuggestCheckbox_Disable",
                             profile()->GetPrefs());
     use_suggest_.SetValue(enabled);
   } else if (sender == enable_dns_prefetching_checkbox_) {
-    bool enabled = enable_dns_prefetching_checkbox_->IsSelected();
+    bool enabled = enable_dns_prefetching_checkbox_->checked();
     UserMetricsRecordAction(enabled ?
                                 L"Options_DnsPrefetchCheckbox_Enable" :
                                 L"Options_DnsPrefetchCheckbox_Disable",
@@ -413,7 +553,7 @@ void PrivacySection::ButtonPressed(views::NativeButton* sender) {
     dns_prefetch_enabled_.SetValue(enabled);
     chrome_browser_net::EnableDnsPrefetch(enabled);
   } else if (sender == enable_safe_browsing_checkbox_) {
-    bool enabled = enable_safe_browsing_checkbox_->IsSelected();
+    bool enabled = enable_safe_browsing_checkbox_->checked();
     UserMetricsRecordAction(enabled ?
                                 L"Options_SafeBrowsingCheckbox_Enable" :
                                 L"Options_SafeBrowsingCheckbox_Disable",
@@ -424,14 +564,14 @@ void PrivacySection::ButtonPressed(views::NativeButton* sender) {
     MessageLoop::current()->PostTask(FROM_HERE, NewRunnableMethod(
         safe_browsing_service, &SafeBrowsingService::OnEnable, enabled));
   } else if (sender == reporting_enabled_checkbox_) {
-    bool enabled = reporting_enabled_checkbox_->IsSelected();
+    bool enabled = reporting_enabled_checkbox_->checked();
     UserMetricsRecordAction(enabled ?
                                 L"Options_MetricsReportingCheckbox_Enable" :
                                 L"Options_MetricsReportingCheckbox_Disable",
                             profile()->GetPrefs());
     ResolveMetricsReportingEnabled();
-    if (enabled == reporting_enabled_checkbox_->IsSelected())
-      RestartMessageBox::ShowMessageBox(GetRootWindow());
+    if (enabled == reporting_enabled_checkbox_->checked())
+      RestartMessageBox::ShowMessageBox(GetWindow()->GetNativeWindow());
     enable_metrics_recording_.SetValue(enabled);
   } else if (sender == show_cookies_button_) {
     UserMetricsRecordAction(L"Options_ShowCookies", NULL);
@@ -463,7 +603,7 @@ void PrivacySection::Layout() {
   View::Layout();
 }
 
-void PrivacySection::ItemChanged(views::ComboBox* sender,
+void PrivacySection::ItemChanged(views::Combobox* sender,
                                  int prev_index,
                                  int new_index) {
   if (sender == cookie_behavior_combobox_) {
@@ -485,33 +625,37 @@ void PrivacySection::InitControlLayout() {
 
   section_description_label_ = new views::Label(
     l10n_util::GetString(IDS_OPTIONS_DISABLE_SERVICES));
-  enable_link_doctor_checkbox_ = new views::CheckBox(
+  enable_link_doctor_checkbox_ = new views::Checkbox(
       l10n_util::GetString(IDS_OPTIONS_LINKDOCTOR_PREF));
-  enable_link_doctor_checkbox_->SetListener(this);
-  enable_suggest_checkbox_ = new views::CheckBox(
+  enable_link_doctor_checkbox_->set_listener(this);
+  enable_suggest_checkbox_ = new views::Checkbox(
       l10n_util::GetString(IDS_OPTIONS_SUGGEST_PREF));
-  enable_suggest_checkbox_->SetListener(this);
-  enable_dns_prefetching_checkbox_ = new views::CheckBox(
+  enable_suggest_checkbox_->set_listener(this);
+  enable_dns_prefetching_checkbox_ = new views::Checkbox(
       l10n_util::GetString(IDS_NETWORK_DNS_PREFETCH_ENABLED_DESCRIPTION));
-  enable_dns_prefetching_checkbox_->SetListener(this);
-  enable_safe_browsing_checkbox_ = new views::CheckBox(
+  enable_dns_prefetching_checkbox_->set_listener(this);
+  enable_safe_browsing_checkbox_ = new views::Checkbox(
       l10n_util::GetString(IDS_OPTIONS_SAFEBROWSING_ENABLEPROTECTION));
-  enable_safe_browsing_checkbox_->SetListener(this);
-  reporting_enabled_checkbox_ = new views::CheckBox(
+  enable_safe_browsing_checkbox_->set_listener(this);
+  reporting_enabled_checkbox_ = new views::Checkbox(
       l10n_util::GetString(IDS_OPTIONS_ENABLE_LOGGING));
   reporting_enabled_checkbox_->SetMultiLine(true);
-  reporting_enabled_checkbox_->SetListener(this);
+  reporting_enabled_checkbox_->set_listener(this);
+#if defined(GOOGLE_CHROME_BUILD)
+  reporting_enabled_checkbox_->SetVisible(true);
+#else
+  reporting_enabled_checkbox_->SetVisible(false);
+#endif
   learn_more_link_ = new views::Link(l10n_util::GetString(IDS_LEARN_MORE));
   learn_more_link_->SetController(this);
   cookie_behavior_label_ = new views::Label(
       l10n_util::GetString(IDS_OPTIONS_COOKIES_ACCEPT_LABEL));
   allow_cookies_model_.reset(new CookieBehaviorComboModel);
-  cookie_behavior_combobox_ = new views::ComboBox(
+  cookie_behavior_combobox_ = new views::Combobox(
       allow_cookies_model_.get());
-  cookie_behavior_combobox_->SetListener(this);
+  cookie_behavior_combobox_->set_listener(this);
   show_cookies_button_ = new views::NativeButton(
-      l10n_util::GetString(IDS_OPTIONS_COOKIES_SHOWCOOKIES));
-  show_cookies_button_->SetListener(this);
+      this, l10n_util::GetString(IDS_OPTIONS_COOKIES_SHOWCOOKIES));
 
   GridLayout* layout = new GridLayout(contents_);
   contents_->SetLayoutManager(layout);
@@ -571,21 +715,21 @@ void PrivacySection::InitControlLayout() {
 
 void PrivacySection::NotifyPrefChanged(const std::wstring* pref_name) {
   if (!pref_name || *pref_name == prefs::kAlternateErrorPagesEnabled) {
-    enable_link_doctor_checkbox_->SetIsSelected(
+    enable_link_doctor_checkbox_->SetChecked(
         alternate_error_pages_.GetValue());
   }
   if (!pref_name || *pref_name == prefs::kSearchSuggestEnabled) {
-    enable_suggest_checkbox_->SetIsSelected(use_suggest_.GetValue());
+    enable_suggest_checkbox_->SetChecked(use_suggest_.GetValue());
   }
   if (!pref_name || *pref_name == prefs::kDnsPrefetchingEnabled) {
     bool enabled = dns_prefetch_enabled_.GetValue();
-    enable_dns_prefetching_checkbox_->SetIsSelected(enabled);
+    enable_dns_prefetching_checkbox_->SetChecked(enabled);
     chrome_browser_net::EnableDnsPrefetch(enabled);
   }
   if (!pref_name || *pref_name == prefs::kSafeBrowsingEnabled)
-    enable_safe_browsing_checkbox_->SetIsSelected(safe_browsing_.GetValue());
+    enable_safe_browsing_checkbox_->SetChecked(safe_browsing_.GetValue());
   if (!pref_name || *pref_name == prefs::kMetricsReportingEnabled) {
-    reporting_enabled_checkbox_->SetIsSelected(
+    reporting_enabled_checkbox_->SetChecked(
         enable_metrics_recording_.GetValue());
     ResolveMetricsReportingEnabled();
   }
@@ -597,94 +741,62 @@ void PrivacySection::NotifyPrefChanged(const std::wstring* pref_name) {
 }
 
 void PrivacySection::ResolveMetricsReportingEnabled() {
-  bool enabled = reporting_enabled_checkbox_->IsSelected();
+  bool enabled = reporting_enabled_checkbox_->checked();
 
-  GoogleUpdateSettings::SetCollectStatsConsent(enabled);
-  bool update_pref = GoogleUpdateSettings::GetCollectStatsConsent();
+  enabled = OptionsUtil::ResolveMetricsReportingEnabled(enabled);
 
-  if (enabled != update_pref) {
-    DLOG(INFO) <<
-        "GENERAL SECTION: Unable to set crash report status to " <<
-        enabled;
-  }
-
-  // Only change the pref if GoogleUpdateSettings::GetCollectStatsConsent
-  // succeeds.
-  enabled = update_pref;
-
-  MetricsService* metrics = g_browser_process->metrics_service();
-  DCHECK(metrics);
-  if (metrics) {
-    metrics->SetUserPermitsUpload(enabled);
-    if (enabled)
-      metrics->Start();
-    else
-      metrics->Stop();
-  }
-
-  reporting_enabled_checkbox_->SetIsSelected(enabled);
+  reporting_enabled_checkbox_->SetChecked(enabled);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // WebContentSection
 
 class WebContentSection : public AdvancedSection,
-                          public views::NativeButton::Listener {
+                          public views::ButtonListener {
  public:
   explicit WebContentSection(Profile* profile);
   virtual ~WebContentSection() {}
 
-  // Overridden from views::NativeButton::Listener:
-  virtual void ButtonPressed(views::NativeButton* sender);
+  // Overridden from views::ButtonListener:
+  virtual void ButtonPressed(views::Button* sender);
 
  protected:
   // OptionsPageView overrides:
   virtual void InitControlLayout();
-  virtual void NotifyPrefChanged(const std::wstring* pref_name);
 
  private:
   // Controls for this section:
-  views::CheckBox* popup_blocked_notification_checkbox_;
+  views::Label* fonts_and_languages_label_;
+  views::NativeButton* change_content_fonts_button_;
   views::Label* gears_label_;
   views::NativeButton* gears_settings_button_;
-
-  BooleanPrefMember disable_popup_blocked_notification_pref_;
 
   DISALLOW_COPY_AND_ASSIGN(WebContentSection);
 };
 
 WebContentSection::WebContentSection(Profile* profile)
-    : popup_blocked_notification_checkbox_(NULL),
+    : fonts_and_languages_label_(NULL),
+      change_content_fonts_button_(NULL),
       gears_label_(NULL),
       gears_settings_button_(NULL),
       AdvancedSection(profile,
           l10n_util::GetString(IDS_OPTIONS_ADVANCED_SECTION_TITLE_CONTENT)) {
 }
 
-void WebContentSection::ButtonPressed(views::NativeButton* sender) {
-  if (sender == popup_blocked_notification_checkbox_) {
-    bool notification_disabled =
-        popup_blocked_notification_checkbox_->IsSelected();
-    if (notification_disabled) {
-      UserMetricsRecordAction(L"Options_BlockAllPopups_Disable",
-                              profile()->GetPrefs());
-    } else {
-      UserMetricsRecordAction(L"Options_BlockAllPopups_Enable",
-                              profile()->GetPrefs());
-    }
-    disable_popup_blocked_notification_pref_.SetValue(!notification_disabled);
-  } else if (sender == gears_settings_button_) {
+void WebContentSection::ButtonPressed(views::Button* sender) {
+  if (sender == gears_settings_button_) {
     UserMetricsRecordAction(L"Options_GearsSettings", NULL);
     GearsSettingsPressed(GetAncestor(GetWidget()->GetNativeView(), GA_ROOT));
+  } else if (sender == change_content_fonts_button_) {
+    views::Window::CreateChromeWindow(
+        GetWindow()->GetNativeWindow(),
+        gfx::Rect(),
+        new FontsLanguagesWindowView(profile()))->Show();
   }
 }
 
 void WebContentSection::InitControlLayout() {
   AdvancedSection::InitControlLayout();
-
-  popup_blocked_notification_checkbox_ = new views::CheckBox(
-      l10n_util::GetString(IDS_OPTIONS_SHOWPOPUPBLOCKEDNOTIFICATION));
-  popup_blocked_notification_checkbox_->SetListener(this);
 
   if (l10n_util::GetTextDirection() == l10n_util::LEFT_TO_RIGHT) {
     gears_label_ = new views::Label(
@@ -699,89 +811,49 @@ void WebContentSection::InitControlLayout() {
     gears_label_ = new views::Label(gearssetting_group_name);
   }
   gears_settings_button_ = new views::NativeButton(
+      this,
       l10n_util::GetString(IDS_OPTIONS_GEARSSETTINGS_CONFIGUREGEARS_BUTTON));
-  gears_settings_button_->SetListener(this);
+  fonts_and_languages_label_ = new views::Label(
+      l10n_util::GetString(IDS_OPTIONS_FONTSETTINGS_INFO));
+
+  change_content_fonts_button_ = new views::NativeButton(
+      this,
+      l10n_util::GetString(IDS_OPTIONS_FONTSETTINGS_CONFIGUREFONTS_BUTTON));
 
   GridLayout* layout = new GridLayout(contents_);
   contents_->SetLayoutManager(layout);
 
-  const int col_id = 0;
-  AddWrappingColumnSet(layout, col_id);
-  const int two_col_id = 1;
-  AddTwoColumnSet(layout, two_col_id);
+  const int single_column_view_set_id = 0;
+  AddWrappingColumnSet(layout, single_column_view_set_id);
+  const int indented_column_set_id = 1;
+  AddIndentedColumnSet(layout, indented_column_set_id);
+  const int single_double_column_set = 2;
+  AddTwoColumnSet(layout, single_double_column_set);
 
-  AddWrappingCheckboxRow(layout, popup_blocked_notification_checkbox_,
-                         col_id, true);
+  // Fonts and Languages.
+  AddWrappingLabelRow(layout, fonts_and_languages_label_,
+                      single_column_view_set_id,
+                      true);
+  AddLeadingControl(layout, change_content_fonts_button_,
+                    indented_column_set_id,
+                    false);
+
+  // Gears.
   AddTwoColumnRow(layout, gears_label_, gears_settings_button_, false,
-                  two_col_id, false);
-
-  // Init member prefs so we can update the controls if prefs change.
-  disable_popup_blocked_notification_pref_.Init(prefs::kBlockPopups,
-                                                profile()->GetPrefs(), this);
-}
-
-void WebContentSection::NotifyPrefChanged(const std::wstring* pref_name) {
-  if (!pref_name || *pref_name == prefs::kBlockPopups) {
-    popup_blocked_notification_checkbox_->SetIsSelected(
-        !disable_popup_blocked_notification_pref_.GetValue());
-  }
+                  single_double_column_set, false);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // SecuritySection
 
-class MixedContentComboModel : public views::ComboBox::Model {
- public:
-  MixedContentComboModel() {}
-
-  // Return the number of items in the combo box.
-  virtual int GetItemCount(views::ComboBox* source) {
-    return 3;
-  }
-
-  virtual std::wstring GetItemAt(views::ComboBox* source, int index) {
-    const int kStringIDs[] = {
-      IDS_OPTIONS_INCLUDE_MIXED_CONTENT,
-      IDS_OPTIONS_INCLUDE_MIXED_CONTENT_IMAGE_ONLY,
-      IDS_OPTIONS_INCLUDE_NO_MIXED_CONTENT
-    };
-    if (index >= 0 && index < arraysize(kStringIDs))
-      return l10n_util::GetString(kStringIDs[index]);
-
-    NOTREACHED();
-    return L"";
-  }
-
-  static int FilterPolicyToIndex(FilterPolicy::Type policy) {
-    return policy;
-  }
-
-  static FilterPolicy::Type IndexToFilterPolicy(int index) {
-    if (FilterPolicy::ValidType(index))
-      return FilterPolicy::FromInt(index);
-
-    NOTREACHED();
-    return FilterPolicy::DONT_FILTER;
-  }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(MixedContentComboModel);
-};
-
 class SecuritySection : public AdvancedSection,
-                        public views::NativeButton::Listener,
-                        public views::ComboBox::Listener {
+                        public views::ButtonListener {
  public:
   explicit SecuritySection(Profile* profile);
   virtual ~SecuritySection() {}
 
-  // Overridden from views::NativeButton::Listener:
-  virtual void ButtonPressed(views::NativeButton* sender);
-
-  // Overridden from views::ComboBox::Listener:
-  virtual void ItemChanged(views::ComboBox* sender,
-                           int prev_index,
-                           int new_index);
+  // Overridden from views::ButtonListener:
+  virtual void ButtonPressed(views::Button* sender);
 
  protected:
   // OptionsPageView overrides:
@@ -790,46 +862,28 @@ class SecuritySection : public AdvancedSection,
 
  private:
   // Controls for this section:
-  views::Label* reset_file_handlers_label_;
-  views::NativeButton* reset_file_handlers_button_;
   views::Label* ssl_info_label_;
-  views::CheckBox* enable_ssl2_checkbox_;
-  views::CheckBox* check_for_cert_revocation_checkbox_;
-  views::Label* mixed_content_info_label_;
-  views::ComboBox* mixed_content_combobox_;
+  views::Checkbox* enable_ssl2_checkbox_;
+  views::Checkbox* check_for_cert_revocation_checkbox_;
   views::Label* manage_certificates_label_;
   views::NativeButton* manage_certificates_button_;
-
-  // The contents of the mixed content combobox.
-  scoped_ptr<MixedContentComboModel> mixed_content_model_;
-
-  StringPrefMember auto_open_files_;
-  IntegerPrefMember filter_mixed_content_;
 
   DISALLOW_COPY_AND_ASSIGN(SecuritySection);
 };
 
 SecuritySection::SecuritySection(Profile* profile)
-    : reset_file_handlers_label_(NULL),
-      reset_file_handlers_button_(NULL),
-      ssl_info_label_(NULL),
+    : ssl_info_label_(NULL),
       enable_ssl2_checkbox_(NULL),
       check_for_cert_revocation_checkbox_(NULL),
-      mixed_content_info_label_(NULL),
-      mixed_content_combobox_(NULL),
       manage_certificates_label_(NULL),
       manage_certificates_button_(NULL),
       AdvancedSection(profile,
           l10n_util::GetString(IDS_OPTIONS_ADVANCED_SECTION_TITLE_SECURITY)) {
 }
 
-void SecuritySection::ButtonPressed(views::NativeButton* sender) {
-  if (sender == reset_file_handlers_button_) {
-    profile()->GetDownloadManager()->ResetAutoOpenFiles();
-    UserMetricsRecordAction(L"Options_ResetAutoOpenFiles",
-                            profile()->GetPrefs());
-  } else if (sender == enable_ssl2_checkbox_) {
-    bool enabled = enable_ssl2_checkbox_->IsSelected();
+void SecuritySection::ButtonPressed(views::Button* sender) {
+  if (sender == enable_ssl2_checkbox_) {
+    bool enabled = enable_ssl2_checkbox_->checked();
     if (enabled) {
       UserMetricsRecordAction(L"Options_SSL2_Enable", NULL);
     } else {
@@ -837,7 +891,7 @@ void SecuritySection::ButtonPressed(views::NativeButton* sender) {
     }
     net::SSLConfigService::SetSSL2Enabled(enabled);
   } else if (sender == check_for_cert_revocation_checkbox_) {
-    bool enabled = check_for_cert_revocation_checkbox_->IsSelected();
+    bool enabled = check_for_cert_revocation_checkbox_->checked();
     if (enabled) {
       UserMetricsRecordAction(L"Options_CheckCertRevocation_Enable", NULL);
     } else {
@@ -848,57 +902,26 @@ void SecuritySection::ButtonPressed(views::NativeButton* sender) {
     UserMetricsRecordAction(L"Options_ManagerCerts", NULL);
     CRYPTUI_CERT_MGR_STRUCT cert_mgr = { 0 };
     cert_mgr.dwSize = sizeof(CRYPTUI_CERT_MGR_STRUCT);
-    cert_mgr.hwndParent = GetRootWindow();
+    cert_mgr.hwndParent = GetWindow()->GetNativeWindow();
     ::CryptUIDlgCertMgr(&cert_mgr);
-  }
-}
-
-void SecuritySection::ItemChanged(views::ComboBox* sender,
-                                  int prev_index,
-                                  int new_index) {
-  if (sender == mixed_content_combobox_) {
-    // TODO(jcampan): bug #1112812: change this to the real enum once we have
-    // piped the images only filtering.
-    FilterPolicy::Type filter_policy =
-        MixedContentComboModel::IndexToFilterPolicy(new_index);
-    const wchar_t* kUserMetrics[] = {
-      L"Options_FilterNone",
-      L"Options_FilterAllExceptImages",
-      L"Options_FilterAll"
-    };
-    DCHECK(filter_policy >= 0 && filter_policy < arraysize(kUserMetrics));
-    UserMetricsRecordAction(kUserMetrics[filter_policy], profile()->GetPrefs());
-    filter_mixed_content_.SetValue(filter_policy);
   }
 }
 
 void SecuritySection::InitControlLayout() {
   AdvancedSection::InitControlLayout();
 
-  reset_file_handlers_label_ = new views::Label(
-    l10n_util::GetString(IDS_OPTIONS_AUTOOPENFILETYPES_INFO));
-  reset_file_handlers_button_ = new views::NativeButton(
-    l10n_util::GetString(IDS_OPTIONS_AUTOOPENFILETYPES_RESETTODEFAULT));
-  reset_file_handlers_button_->SetListener(this);
   ssl_info_label_ = new views::Label(
       l10n_util::GetString(IDS_OPTIONS_SSL_GROUP_DESCRIPTION));
-  enable_ssl2_checkbox_ = new views::CheckBox(
+  enable_ssl2_checkbox_ = new views::Checkbox(
       l10n_util::GetString(IDS_OPTIONS_SSL_USESSL2));
-  enable_ssl2_checkbox_->SetListener(this);
-  check_for_cert_revocation_checkbox_ = new views::CheckBox(
+  enable_ssl2_checkbox_->set_listener(this);
+  check_for_cert_revocation_checkbox_ = new views::Checkbox(
       l10n_util::GetString(IDS_OPTIONS_SSL_CHECKREVOCATION));
-  check_for_cert_revocation_checkbox_->SetListener(this);
-  mixed_content_info_label_ = new views::Label(
-      l10n_util::GetString(IDS_OPTIONS_MIXED_CONTENT_LABEL));
-  mixed_content_model_.reset(new MixedContentComboModel);
-  mixed_content_combobox_ = new views::ComboBox(
-      mixed_content_model_.get());
-  mixed_content_combobox_->SetListener(this);
+  check_for_cert_revocation_checkbox_->set_listener(this);
   manage_certificates_label_ = new views::Label(
       l10n_util::GetString(IDS_OPTIONS_CERTIFICATES_LABEL));
   manage_certificates_button_ = new views::NativeButton(
-      l10n_util::GetString(IDS_OPTIONS_CERTIFICATES_MANAGE_BUTTON));
-  manage_certificates_button_->SetListener(this);
+      this, l10n_util::GetString(IDS_OPTIONS_CERTIFICATES_MANAGE_BUTTON));
 
   GridLayout* layout = new GridLayout(contents_);
   contents_->SetLayoutManager(layout);
@@ -914,12 +937,6 @@ void SecuritySection::InitControlLayout() {
   const int indented_view_set_id = 4;
   AddIndentedColumnSet(layout, indented_view_set_id);
 
-  // File Handlers.
-  AddWrappingLabelRow(layout, reset_file_handlers_label_,
-                      single_column_view_set_id, true);
-  AddLeadingControl(layout, reset_file_handlers_button_, indented_view_set_id,
-                    false);
-
   // SSL connection controls and Certificates.
   AddWrappingLabelRow(layout, manage_certificates_label_,
                       single_column_view_set_id, true);
@@ -931,39 +948,16 @@ void SecuritySection::InitControlLayout() {
                          indented_column_set_id, true);
   AddWrappingCheckboxRow(layout, check_for_cert_revocation_checkbox_,
                          indented_column_set_id, false);
-
-  // Mixed content controls.
-  AddWrappingLabelRow(layout, mixed_content_info_label_,
-                      single_column_view_set_id, true);
-  AddLeadingControl(layout, mixed_content_combobox_,
-                    indented_column_set_id, false);
-
-  // Init member prefs so we can update the controls if prefs change.
-  auto_open_files_.Init(prefs::kDownloadExtensionsToOpen, profile()->GetPrefs(),
-                        this);
-  filter_mixed_content_.Init(prefs::kMixedContentFiltering,
-                             profile()->GetPrefs(), this);
 }
 
 // This method is called with a null pref_name when the dialog is initialized.
 void SecuritySection::NotifyPrefChanged(const std::wstring* pref_name) {
-  if (!pref_name || *pref_name == prefs::kDownloadExtensionsToOpen) {
-    bool enabled =
-        profile()->GetDownloadManager()->HasAutoOpenFileTypesRegistered();
-    reset_file_handlers_label_->SetEnabled(enabled);
-    reset_file_handlers_button_->SetEnabled(enabled);
-  }
-  if (!pref_name || *pref_name == prefs::kMixedContentFiltering) {
-    mixed_content_combobox_->SetSelectedItem(
-        MixedContentComboModel::FilterPolicyToIndex(
-            FilterPolicy::FromInt(filter_mixed_content_.GetValue())));
-  }
   // These SSL options are system settings and stored in the OS.
   if (!pref_name) {
     net::SSLConfig config;
     if (net::SSLConfigService::GetSSLConfigNow(&config)) {
-      enable_ssl2_checkbox_->SetIsSelected(config.ssl2_enabled);
-      check_for_cert_revocation_checkbox_->SetIsSelected(
+      enable_ssl2_checkbox_->SetChecked(config.ssl2_enabled);
+      check_for_cert_revocation_checkbox_->SetChecked(
           config.rev_checking_enabled);
     } else {
       enable_ssl2_checkbox_->SetEnabled(false);
@@ -974,8 +968,6 @@ void SecuritySection::NotifyPrefChanged(const std::wstring* pref_name) {
 
 ////////////////////////////////////////////////////////////////////////////////
 // NetworkSection
-
-namespace {
 
 // A helper method that opens the Internet Options control panel dialog with
 // the Connections tab selected.
@@ -1011,16 +1003,14 @@ class OpenConnectionDialogTask : public Task {
   DISALLOW_COPY_AND_ASSIGN(OpenConnectionDialogTask);
 };
 
-}  // namespace
-
 class NetworkSection : public AdvancedSection,
-                       public views::NativeButton::Listener {
+                       public views::ButtonListener {
  public:
   explicit NetworkSection(Profile* profile);
   virtual ~NetworkSection() {}
 
-  // Overridden from views::NativeButton::Listener:
-  virtual void ButtonPressed(views::NativeButton* sender);
+  // Overridden from views::ButtonListener:
+  virtual void ButtonPressed(views::Button* sender);
 
  protected:
   // OptionsPageView overrides:
@@ -1042,7 +1032,7 @@ NetworkSection::NetworkSection(Profile* profile)
           l10n_util::GetString(IDS_OPTIONS_ADVANCED_SECTION_TITLE_NETWORK)) {
 }
 
-void NetworkSection::ButtonPressed(views::NativeButton* sender) {
+void NetworkSection::ButtonPressed(views::Button* sender) {
   if (sender == change_proxies_button_) {
     UserMetricsRecordAction(L"Options_ChangeProxies", NULL);
     base::Thread* thread = g_browser_process->file_thread();
@@ -1057,8 +1047,7 @@ void NetworkSection::InitControlLayout() {
   change_proxies_label_ = new views::Label(
       l10n_util::GetString(IDS_OPTIONS_PROXIES_LABEL));
   change_proxies_button_ = new views::NativeButton(
-      l10n_util::GetString(IDS_OPTIONS_PROXIES_CONFIGURE_BUTTON));
-  change_proxies_button_->SetListener(this);
+      this, l10n_util::GetString(IDS_OPTIONS_PROXIES_CONFIGURE_BUTTON));
 
   GridLayout* layout = new GridLayout(contents_);
   contents_->SetLayoutManager(layout);
@@ -1080,6 +1069,201 @@ void NetworkSection::InitControlLayout() {
 }
 
 void NetworkSection::NotifyPrefChanged(const std::wstring* pref_name) {
+}
+
+}  // namespace
+
+////////////////////////////////////////////////////////////////////////////////
+// DownloadSection
+
+class DownloadSection : public AdvancedSection,
+                        public views::ButtonListener,
+                        public SelectFileDialog::Listener {
+ public:
+  explicit DownloadSection(Profile* profile);
+  virtual ~DownloadSection() {
+    select_file_dialog_->ListenerDestroyed();
+  }
+
+  // Overridden from views::ButtonListener.
+  virtual void ButtonPressed(views::Button* sender);
+
+  // SelectFileDialog::Listener implementation.
+  virtual void FileSelected(const FilePath& path, int index, void* params);
+
+  // OptionsPageView implementation.
+  virtual bool CanClose() const;
+
+ protected:
+  // OptionsPageView overrides.
+  virtual void InitControlLayout();
+  virtual void NotifyPrefChanged(const std::wstring* pref_name);
+
+ private:
+  // Controls for this section.
+  views::Label* download_file_location_label_;
+  FileDisplayArea* download_default_download_location_display_;
+  views::NativeButton* download_browse_button_;
+  views::Checkbox* download_ask_for_save_location_checkbox_;
+  scoped_refptr<SelectFileDialog> select_file_dialog_;
+  views::Label* reset_file_handlers_label_;
+  views::NativeButton* reset_file_handlers_button_;
+
+  // Pref members.
+  StringPrefMember default_download_location_;
+  BooleanPrefMember ask_for_save_location_;
+
+  // Updates the directory displayed in the default download location view with
+  // the current value of the pref.
+  void UpdateDownloadDirectoryDisplay();
+
+  StringPrefMember auto_open_files_;
+
+  DISALLOW_COPY_AND_ASSIGN(DownloadSection);
+};
+
+DownloadSection::DownloadSection(Profile* profile)
+    : download_file_location_label_(NULL),
+      download_default_download_location_display_(NULL),
+      download_browse_button_(NULL),
+      download_ask_for_save_location_checkbox_(NULL),
+      ALLOW_THIS_IN_INITIALIZER_LIST(
+          select_file_dialog_(SelectFileDialog::Create(this))),
+      reset_file_handlers_label_(NULL),
+      reset_file_handlers_button_(NULL),
+      AdvancedSection(profile,
+          l10n_util::GetString(IDS_OPTIONS_DOWNLOADLOCATION_GROUP_NAME)) {
+}
+
+void DownloadSection::ButtonPressed(views::Button* sender) {
+  if (sender == download_browse_button_) {
+    const std::wstring dialog_title =
+       l10n_util::GetString(IDS_OPTIONS_DOWNLOADLOCATION_BROWSE_TITLE);
+    select_file_dialog_->SelectFile(SelectFileDialog::SELECT_FOLDER,
+                                    dialog_title,
+                                    FilePath::FromWStringHack(
+                                        profile()->GetPrefs()->GetString(
+                                        prefs::kDownloadDefaultDirectory)),
+                                    NULL, 0, std::wstring(),
+                                    GetWindow()->GetNativeWindow(),
+                                    NULL);
+  } else if (sender == download_ask_for_save_location_checkbox_) {
+    bool enabled = download_ask_for_save_location_checkbox_->checked();
+    if (enabled) {
+      UserMetricsRecordAction(L"Options_AskForSaveLocation_Enable",
+                              profile()->GetPrefs());
+    } else {
+      UserMetricsRecordAction(L"Options_AskForSaveLocation_Disable",
+                              profile()->GetPrefs());
+    }
+    ask_for_save_location_.SetValue(enabled);
+  } else if (sender == reset_file_handlers_button_) {
+    profile()->GetDownloadManager()->ResetAutoOpenFiles();
+    UserMetricsRecordAction(L"Options_ResetAutoOpenFiles",
+                            profile()->GetPrefs());
+  }
+}
+
+void DownloadSection::FileSelected(const FilePath& path,
+                                   int index, void* params) {
+  UserMetricsRecordAction(L"Options_SetDownloadDirectory",
+                          profile()->GetPrefs());
+  default_download_location_.SetValue(path.ToWStringHack());
+  // We need to call this manually here since because we're setting the value
+  // through the pref member which avoids notifying the listener that set the
+  // value.
+  UpdateDownloadDirectoryDisplay();
+}
+
+bool DownloadSection::CanClose() const {
+  return !select_file_dialog_->IsRunning(GetWindow()->GetNativeWindow());
+}
+
+void DownloadSection::InitControlLayout() {
+  AdvancedSection::InitControlLayout();
+
+  // Layout the download components.
+  download_file_location_label_ = new views::Label(
+      l10n_util::GetString(IDS_OPTIONS_DOWNLOADLOCATION_BROWSE_TITLE));
+  download_default_download_location_display_ = new FileDisplayArea;
+  download_browse_button_ = new views::NativeButton(
+      this, l10n_util::GetString(IDS_OPTIONS_DOWNLOADLOCATION_BROWSE_BUTTON));
+
+  download_ask_for_save_location_checkbox_ = new views::Checkbox(
+      l10n_util::GetString(IDS_OPTIONS_DOWNLOADLOCATION_ASKFORSAVELOCATION));
+  download_ask_for_save_location_checkbox_->set_listener(this);
+  download_ask_for_save_location_checkbox_->SetMultiLine(true);
+  reset_file_handlers_label_ = new views::Label(
+      l10n_util::GetString(IDS_OPTIONS_AUTOOPENFILETYPES_INFO));
+  reset_file_handlers_button_ = new views::NativeButton(
+      this, l10n_util::GetString(IDS_OPTIONS_AUTOOPENFILETYPES_RESETTODEFAULT));
+
+  GridLayout* layout = new GridLayout(contents_);
+  contents_->SetLayoutManager(layout);
+
+  // Download location label.
+  const int single_column_view_set_id = 0;
+  AddWrappingColumnSet(layout, single_column_view_set_id);
+  AddWrappingLabelRow(layout, download_file_location_label_,
+      single_column_view_set_id, true);
+
+  // Download location control.
+  const int double_column_view_set_id = 1;
+  ColumnSet* column_set = layout->AddColumnSet(double_column_view_set_id);
+  column_set->AddColumn(GridLayout::FILL, GridLayout::CENTER, 1,
+                        GridLayout::USE_PREF, 0, 0);
+  column_set->AddPaddingColumn(0, kRelatedControlHorizontalSpacing);
+  column_set->AddColumn(GridLayout::LEADING, GridLayout::CENTER, 0,
+                        GridLayout::USE_PREF, 0, 0);
+  column_set->AddPaddingColumn(0, kUnrelatedControlHorizontalSpacing);
+  layout->StartRow(0, double_column_view_set_id);
+  layout->AddView(download_default_download_location_display_, 1, 1,
+                  GridLayout::FILL, GridLayout::CENTER);
+  layout->AddView(download_browse_button_);
+  AddSpacing(layout, true);
+
+  // Save location checkbox layout.
+  const int indented_view_set_id = 2;
+  AddIndentedColumnSet(layout, indented_view_set_id);
+  AddWrappingCheckboxRow(layout, download_ask_for_save_location_checkbox_,
+                         indented_view_set_id, false);
+
+  // Reset file handlers layout.
+  AddWrappingLabelRow(layout, reset_file_handlers_label_,
+                      single_column_view_set_id, true);
+  AddLeadingControl(layout, reset_file_handlers_button_,
+                    indented_view_set_id,
+                    false);
+
+  // Init member prefs so we can update the controls if prefs change.
+  default_download_location_.Init(prefs::kDownloadDefaultDirectory,
+                                  profile()->GetPrefs(), this);
+  ask_for_save_location_.Init(prefs::kPromptForDownload,
+                              profile()->GetPrefs(), this);
+  auto_open_files_.Init(prefs::kDownloadExtensionsToOpen, profile()->GetPrefs(),
+                        this);
+}
+
+void DownloadSection::NotifyPrefChanged(const std::wstring* pref_name) {
+  if (!pref_name || *pref_name == prefs::kDownloadDefaultDirectory)
+    UpdateDownloadDirectoryDisplay();
+
+  if (!pref_name || *pref_name == prefs::kPromptForDownload) {
+    download_ask_for_save_location_checkbox_->SetChecked(
+        ask_for_save_location_.GetValue());
+  }
+
+  if (!pref_name || *pref_name == prefs::kDownloadExtensionsToOpen) {
+    bool enabled =
+        profile()->GetDownloadManager()->HasAutoOpenFileTypesRegistered();
+    reset_file_handlers_label_->SetEnabled(enabled);
+    reset_file_handlers_button_->SetEnabled(enabled);
+  }
+}
+
+void DownloadSection::UpdateDownloadDirectoryDisplay() {
+  download_default_download_location_display_->SetFile(
+      FilePath::FromWStringHack(default_download_location_.GetValue()));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1168,9 +1352,11 @@ void AdvancedContentsView::InitControlLayout() {
                         GridLayout::USE_PREF, 0, 0);
 
   layout->StartRow(0, single_column_view_set_id);
+  layout->AddView(new NetworkSection(profile()));
+  layout->StartRow(0, single_column_view_set_id);
   layout->AddView(new PrivacySection(profile()));
   layout->StartRow(0, single_column_view_set_id);
-  layout->AddView(new NetworkSection(profile()));
+  layout->AddView(new DownloadSection(profile()));
   layout->StartRow(0, single_column_view_set_id);
   layout->AddView(new WebContentSection(profile()));
   layout->StartRow(0, single_column_view_set_id);

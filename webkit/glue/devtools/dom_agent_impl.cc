@@ -5,6 +5,7 @@
 #include "config.h"
 
 #include "AtomicString.h"
+#include "DOMWindow.h"
 #include "Document.h"
 #include "Event.h"
 #include "EventListener.h"
@@ -14,17 +15,31 @@
 #include "markup.h"
 #include "MutationEvent.h"
 #include "Node.h"
+#include "NodeList.h"
 #include "PlatformString.h"
 #include "Text.h"
+#include "XPathResult.h"
+#include <wtf/HashSet.h>
 #include <wtf/OwnPtr.h>
+#include <wtf/RefPtr.h>
 #include <wtf/Vector.h>
 #undef LOG
 
+#include "base/string_util.h"
 #include "base/values.h"
 #include "webkit/glue/devtools/dom_agent_impl.h"
 #include "webkit/glue/glue_util.h"
 
 using namespace WebCore;
+
+const char DomAgentImpl::kExactTagNames[] = "//*[name() == '%s')]";
+const char DomAgentImpl::kPartialTagNames[] = "//*[contains(name(), '%s')]";
+const char DomAgentImpl::kStartOfTagNames[] = "//*[starts-with(name(), '%s')]";
+const char DomAgentImpl::kPartialTagNamesAndAttributeValues[] =
+    "//*[contains(name(), '%s') or contains(@*, '%s')]";
+const char DomAgentImpl::kPartialAttributeValues[] = "//*[contains(@*, '%s')]";
+const char DomAgentImpl::kPlainText[] =
+    "//text()[contains(., '%s')] | //comment()[contains(., '%s')]";
 
 // static
 PassRefPtr<DomAgentImpl::EventListenerWrapper>
@@ -46,7 +61,7 @@ void DomAgentImpl::EventListenerWrapper::handleEvent(
 DomAgentImpl::DomAgentImpl(DomAgentDelegate* delegate)
     : delegate_(delegate),
       last_node_id_(1),
-      document_element_call_id_(0) {
+      document_element_requested_(false) {
   event_listener_ = EventListenerWrapper::Create(this);
 }
 
@@ -55,7 +70,9 @@ DomAgentImpl::~DomAgentImpl() {
 }
 
 void DomAgentImpl::SetDocument(Document* doc) {
-  DiscardBindings();
+  if (doc == GetMainFrameDocument()) {
+    return;
+  }
 
   ListHashSet<RefPtr<Document> > copy = documents_;
   for (ListHashSet<RefPtr<Document> >::iterator it = copy.begin();
@@ -66,16 +83,19 @@ void DomAgentImpl::SetDocument(Document* doc) {
 
   if (doc) {
     StartListening(doc);
-    if (document_element_call_id_) {
-      GetDocumentElement(document_element_call_id_);
-      document_element_call_id_ = 0;
+    if (document_element_requested_) {
+      GetDocumentElement();
+      document_element_requested_ = false;
     }
+  } else {
+    DiscardBindings();
   }
 }
 
 void DomAgentImpl::StartListening(Document* doc) {
-  if (documents_.contains(doc))
+  if (documents_.contains(doc)) {
     return;
+  }
   doc->addEventListener(eventNames().DOMContentLoadedEvent, event_listener_,
       false);
   doc->addEventListener(eventNames().DOMNodeInsertedEvent, event_listener_,
@@ -90,6 +110,9 @@ void DomAgentImpl::StartListening(Document* doc) {
 }
 
 void DomAgentImpl::StopListening(Document* doc) {
+  if (!documents_.contains(doc)) {
+    return;
+  }
   doc->removeEventListener(eventNames().DOMContentLoadedEvent,
       event_listener_.get(), false);
   doc->removeEventListener(eventNames().DOMNodeInsertedEvent,
@@ -126,6 +149,27 @@ void DomAgentImpl::Unbind(Node* node) {
     children_requested_.remove(children_requested_.find(it->second));
     node_to_id_.remove(it);
   }
+}
+
+void DomAgentImpl::PushDocumentElementToClient() {
+  Element* doc_elem = GetMainFrameDocument()->documentElement();
+  if (!node_to_id_.contains(doc_elem)) {
+    OwnPtr<Value> value(BuildValueForNode(doc_elem, 0));
+    delegate_->SetDocumentElement(*value.get());
+  }
+}
+
+void DomAgentImpl::PushChildNodesToClient(int element_id) {
+  Node* node = GetNodeForId(element_id);
+  if (!node || (node->nodeType() != Node::ELEMENT_NODE))
+    return;
+  if (children_requested_.contains(element_id))
+    return;
+
+  Element* element = static_cast<Element*>(node);
+  OwnPtr<Value> children(BuildValueForElementChildren(element, 1));
+  children_requested_.add(element_id);
+  delegate_->SetChildNodes(element_id, *children.get());
 }
 
 void DomAgentImpl::DiscardBindings() {
@@ -173,6 +217,9 @@ void DomAgentImpl::handleEvent(Event* event, bool isWindowEvent) {
     OwnPtr<Value> attributesValue(BuildValueForElementAttributes(element));
     delegate_->AttributesUpdated(id, *attributesValue.get());
   } else if (type == eventNames().DOMNodeInsertedEvent) {
+    if (IsWhitespace(node)) {
+      return;
+    }
     Node* parent = static_cast<MutationEvent*>(event)->relatedNode();
     int parent_id = GetIdForNode(parent);
     if (!parent_id) {
@@ -184,11 +231,14 @@ void DomAgentImpl::handleEvent(Event* event, bool isWindowEvent) {
       delegate_->HasChildrenUpdated(parent_id, true);
     } else {
       // Children have been requested -> return value of a new child.
-      int prev_id = GetIdForNode(node->previousSibling());
+      int prev_id = GetIdForNode(InnerPreviousSibling(node));
       OwnPtr<Value> value(BuildValueForNode(node, 0));
       delegate_->ChildNodeInserted(parent_id, prev_id, *value.get());
     }
   } else if (type == eventNames().DOMNodeRemovedEvent) {
+    if (IsWhitespace(node)) {
+      return;
+    }
     Node* parent = static_cast<MutationEvent*>(event)->relatedNode();
     int parent_id = GetIdForNode(parent);
     if (!parent_id) {
@@ -197,40 +247,39 @@ void DomAgentImpl::handleEvent(Event* event, bool isWindowEvent) {
     }
     if (!children_requested_.contains(parent_id)) {
       // No children are mapped yet -> only notify on changes of hasChildren.
-      if (parent->childNodeCount() == 1)
+      if (InnerChildNodeCount(parent) == 1)
         delegate_->HasChildrenUpdated(parent_id, false);
     } else {
       int id = GetIdForNode(node);
       delegate_->ChildNodeRemoved(parent_id, id);
     }
   } else if (type == eventNames().DOMContentLoadedEvent) {
-    //TODO(pfeldman): handle content load event.
+    // Re-push document once it is loaded.
+    DiscardBindings();
+    PushDocumentElementToClient();
   }
 }
 
-void DomAgentImpl::GetDocumentElement(int call_id) {
-  if (documents_.size() > 0) {
-    OwnPtr<Value> value(
-        BuildValueForNode((*documents_.begin())->documentElement(), 0));
-    delegate_->GetDocumentElementResult(call_id, *value.get());
+void DomAgentImpl::GetDocumentElement() {
+  Document* main_document = GetMainFrameDocument();
+  if (main_document) {
+    PushDocumentElementToClient();
   } else {
-    document_element_call_id_ = call_id;
+    document_element_requested_ = true;
   }
 }
 
 void DomAgentImpl::GetChildNodes(int call_id, int element_id) {
-  Node* node = GetNodeForId(element_id);
-  if (!node || (node->nodeType() != Node::ELEMENT_NODE))
-    return;
-
-  Element* element = static_cast<Element*>(node);
-  OwnPtr<Value> children(BuildValueForElementChildren(element, 1));
-  children_requested_.add(element_id);
-  delegate_->GetChildNodesResult(call_id, *children.get());
+  PushChildNodesToClient(element_id);
+  delegate_->DidGetChildNodes(call_id);
 }
 
-int DomAgentImpl::GetPathToNode(Node* node_to_select) {
+int DomAgentImpl::PushNodePathToClient(Node* node_to_select) {
   ASSERT(node_to_select);  // Invalid input
+
+  // If we are sending information to the client that is currently being
+  // created. Send root node first.
+  PushDocumentElementToClient();
 
   // Return id in case the node is known.
   int result = GetIdForNode(node_to_select);
@@ -248,44 +297,155 @@ int DomAgentImpl::GetPathToNode(Node* node_to_select) {
   // element is known to the client
   ASSERT(element);
   path.append(element);
-
   for (int i = path.size() - 1; i >= 0; --i) {
-    element = path.at(i);
-    OwnPtr<Value> children(BuildValueForElementChildren(element, 1));
-    delegate_->ChildNodesUpdated(GetIdForNode(element), *children.get());
+    int node_id = GetIdForNode(path.at(i));
+    ASSERT(node_id);
+    PushChildNodesToClient(node_id);
   }
   return GetIdForNode(node_to_select);
 }
 
 void DomAgentImpl::SetAttribute(
+    int call_id,
     int element_id,
     const String& name,
     const String& value) {
   Node* node = GetNodeForId(element_id);
   if (node && (node->nodeType() == Node::ELEMENT_NODE)) {
     Element* element = static_cast<Element*>(node);
-        ExceptionCode ec = 0;
+    ExceptionCode ec = 0;
     element->setAttribute(name, value, ec);
+    delegate_->DidApplyDomChange(call_id, ec == 0);
+  } else {
+    delegate_->DidApplyDomChange(call_id, false);
   }
 }
 
-void DomAgentImpl::RemoveAttribute(int element_id, const String& name) {
+void DomAgentImpl::RemoveAttribute(
+    int call_id,
+    int element_id,
+    const String& name) {
   Node* node = GetNodeForId(element_id);
   if (node && (node->nodeType() == Node::ELEMENT_NODE)) {
     Element* element = static_cast<Element*>(node);
     ExceptionCode ec = 0;
     element->removeAttribute(name, ec);
+    delegate_->DidApplyDomChange(call_id, ec == 0);
+  } else {
+    delegate_->DidApplyDomChange(call_id, false);
   }
 }
 
-void DomAgentImpl::SetTextNodeValue(int element_id, const String& value) {
+void DomAgentImpl::SetTextNodeValue(
+    int call_id,
+    int element_id,
+    const String& value) {
   Node* node = GetNodeForId(element_id);
   if (node && (node->nodeType() == Node::TEXT_NODE)) {
     Text* text_node = static_cast<Text*>(node);
     ExceptionCode ec = 0;
     // TODO(pfeldman): Add error handling
     text_node->replaceWholeText(value, ec);
+    delegate_->DidApplyDomChange(call_id, ec == 0);
+  } else {
+    delegate_->DidApplyDomChange(call_id, false);
   }
+}
+
+void DomAgentImpl::PerformSearch(int call_id, const String& query) {
+  String tag_name_query = query;
+  String attribute_name_query = query;
+
+  bool start_tag_found = tag_name_query.startsWith("<", true);
+  bool end_tag_found = tag_name_query.endsWith(">", true);
+
+  if (start_tag_found || end_tag_found) {
+    int tag_name_query_length = tag_name_query.length();
+    int start = start_tag_found ? 1 : 0;
+    int end = end_tag_found ? tag_name_query_length - 1 : tag_name_query_length;
+    tag_name_query = tag_name_query.substring(start, end - start);
+  }
+
+  Vector<String> xpath_queries;
+  xpath_queries.append(String::format(kPlainText, query.utf8().data(),
+      query.utf8().data()));
+  if (tag_name_query.length() && start_tag_found && end_tag_found) {
+    xpath_queries.append(String::format(kExactTagNames,
+                             tag_name_query.utf8().data()));
+  } else if (tag_name_query.length() && start_tag_found) {
+    xpath_queries.append(String::format(kStartOfTagNames,
+                             tag_name_query.utf8().data()));
+  } else if (tag_name_query.length() && end_tag_found) {
+    // FIXME(pfeldman): we should have a matchEndOfTagNames search function if
+    // endTagFound is true but not startTagFound.
+    // This requires ends-with() support in XPath, WebKit only supports
+    // starts-with() and contains().
+    xpath_queries.append(String::format(kPartialTagNames,
+                             tag_name_query.utf8().data()));
+  } else if (query == "//*" || query == "*") {
+    // These queries will match every node. Matching everything isn't useful
+    // and can be slow for large pages, so limit the search functions list to
+    // plain text and attribute matching.
+    xpath_queries.append(String::format(kPartialAttributeValues,
+                             query.utf8().data()));
+  } else {
+    // TODO(pfeldman): Add more patterns.
+    xpath_queries.append(String::format(kPartialTagNamesAndAttributeValues,
+                             tag_name_query.utf8().data(),
+                             query.utf8().data()));
+  }
+
+  ExceptionCode ec = 0;
+  Vector<Document*> search_documents;
+  Document* main_document = GetMainFrameDocument();
+  search_documents.append(main_document);
+
+  // Find all frames, iframes and object elements to search their documents.
+  RefPtr<NodeList> node_list = main_document->querySelectorAll(
+      "iframe, frame, object", ec);
+  if (ec) {
+    ListValue list;
+    delegate_->DidPerformSearch(call_id, list);
+    return;
+  }
+  for (unsigned int i = 0; i < node_list->length(); ++i) {
+    Node* node = node_list->item(i);
+    if (node->isFrameOwnerElement()) {
+      const HTMLFrameOwnerElement* frame_owner =
+          static_cast<const HTMLFrameOwnerElement*>(node);
+      if (frame_owner->contentDocument()) {
+        search_documents.append(search_documents);
+      }
+    }
+  }
+
+  HashSet<int> node_ids;
+  for (Vector<Document*>::iterator it = search_documents.begin();
+       it != search_documents.end(); ++it) {
+    for (Vector<String>::iterator qit = xpath_queries.begin();
+         qit != xpath_queries.end(); ++qit) {
+      String query = *qit;
+      RefPtr<XPathResult> result = (*it)->evaluate(query, *it, NULL,
+          XPathResult::UNORDERED_NODE_ITERATOR_TYPE, 0, ec);
+      if (ec) {
+        ListValue list;
+        delegate_->DidPerformSearch(call_id, list);
+        return;
+      }
+      Node* node = result->iterateNext(ec);
+      while (node && !ec) {
+        node_ids.add(PushNodePathToClient(node));
+        node = result->iterateNext(ec);
+      }
+    }
+  }
+
+  ListValue list;
+  for (HashSet<int>::iterator it = node_ids.begin();
+       it != node_ids.end(); ++it) {
+    list.Append(Value::CreateIntegerValue(*it));
+  }
+  delegate_->DidPerformSearch(call_id, list);
 }
 
 ListValue* DomAgentImpl::BuildValueForNode(Node* node, int depth) {
@@ -331,24 +491,24 @@ ListValue* DomAgentImpl::BuildValueForNode(Node* node, int depth) {
 }
 
 ListValue* DomAgentImpl::BuildValueForElementAttributes(Element* element) {
-  OwnPtr<ListValue> attributesValue(new ListValue());
+  OwnPtr<ListValue> attributes_value(new ListValue());
   // Go through all attributes and serialize them.
-  const NamedAttrMap *attrMap = element->attributes(true);
-  if (!attrMap) {
-    return attributesValue.release();
+  const NamedNodeMap* attr_map = element->attributes(true);
+  if (!attr_map) {
+    return attributes_value.release();
   }
-  unsigned numAttrs = attrMap->length();
-  for (unsigned i = 0; i < numAttrs; i++) {
+  unsigned num_attrs = attr_map->length();
+  for (unsigned i = 0; i < num_attrs; ++i) {
     // Add attribute pair
-    const Attribute *attribute = attrMap->attributeItem(i);
+    const Attribute *attribute = attr_map->attributeItem(i);
     OwnPtr<Value> name(Value::CreateStringValue(
         webkit_glue::StringToStdWString(attribute->name().toString())));
     OwnPtr<Value> value(Value::CreateStringValue(
         webkit_glue::StringToStdWString(attribute->value())));
-    attributesValue->Append(name.release());
-    attributesValue->Append(value.release());
+    attributes_value->Append(name.release());
+    attributes_value->Append(value.release());
   }
-  return attributesValue.release();
+  return attributes_value.release();
 }
 
 ListValue* DomAgentImpl::BuildValueForElementChildren(
@@ -357,8 +517,8 @@ ListValue* DomAgentImpl::BuildValueForElementChildren(
   OwnPtr<ListValue> children(new ListValue());
   if (depth == 0) {
     // Special case the_only text child.
-    if (element->childNodeCount() == 1) {
-      Node *child = element->firstChild();
+    if (InnerChildNodeCount(element) == 1) {
+      Node *child = InnerFirstChild(element);
       if (child->nodeType() == Node::TEXT_NODE) {
         children->Append(BuildValueForNode(child, 0));
       }
@@ -369,7 +529,7 @@ ListValue* DomAgentImpl::BuildValueForElementChildren(
   }
 
   for (Node *child = InnerFirstChild(element); child != NULL;
-       child = child->nextSibling()) {
+       child = InnerNextSibling(child)) {
     children->Append(BuildValueForNode(child, depth));
   }
   return children.release();
@@ -380,19 +540,40 @@ Node* DomAgentImpl::InnerFirstChild(Node* node) {
     HTMLFrameOwnerElement* frame_owner =
         static_cast<HTMLFrameOwnerElement*>(node);
     Document* doc = frame_owner->contentDocument();
-    StartListening(doc);
-    return doc->firstChild();
-  } else {
-    return node->firstChild();
+    if (doc) {
+      StartListening(doc);
+      return doc->firstChild();
+    }
   }
+  node = node->firstChild();
+  while (IsWhitespace(node)) {
+    node = node->nextSibling();
+  }
+  return node;
+}
+
+Node* DomAgentImpl::InnerNextSibling(Node* node) {
+  do {
+    node = node->nextSibling();
+  } while (IsWhitespace(node));
+  return node;
+}
+
+Node* DomAgentImpl::InnerPreviousSibling(Node* node) {
+  do {
+    node = node->previousSibling();
+  } while (IsWhitespace(node));
+  return node;
 }
 
 int DomAgentImpl::InnerChildNodeCount(Node* node) {
-  if (node->isFrameOwnerElement()) {
-    return 1;
-  } else {
-    return node->childNodeCount();
+  int count = 0;
+  Node* child = InnerFirstChild(node);
+  while (child) {
+    count++;
+    child = InnerNextSibling(child);
   }
+  return count;
 }
 
 Element* DomAgentImpl::InnerParentElement(Node* node) {
@@ -401,4 +582,17 @@ Element* DomAgentImpl::InnerParentElement(Node* node) {
     return node->ownerDocument()->ownerElement();
   }
   return element;
+}
+
+bool DomAgentImpl::IsWhitespace(Node* node) {
+  return node != NULL && node->nodeType() == Node::TEXT_NODE &&
+      node->nodeValue().stripWhiteSpace().length() == 0;
+}
+
+Document* DomAgentImpl::GetMainFrameDocument() {
+  ListHashSet<RefPtr<WebCore::Document> >::iterator it = documents_.begin();
+  if (it != documents_.end()) {
+    return it->get();
+  }
+  return NULL;
 }

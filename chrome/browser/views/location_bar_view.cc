@@ -1,9 +1,21 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/views/location_bar_view.h"
 
+#if defined(OS_LINUX)
+#include <gtk/gtk.h>
+#endif
+
+#include "build/build_config.h"
+
+#include "app/gfx/canvas.h"
+#include "app/gfx/color_utils.h"
+#include "app/gfx/favicon_size.h"
+#include "app/l10n_util.h"
+#include "app/resource_bundle.h"
+#include "base/file_util.h"
 #include "base/path_service.h"
 #include "base/string_util.h"
 #include "chrome/app/chrome_dll_resource.h"
@@ -12,34 +24,35 @@
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/command_updater.h"
+#include "chrome/browser/extensions/extension_browser_event_router.h"
+#include "chrome/browser/extensions/extension_tabs_module.h"
+#include "chrome/browser/extensions/extensions_service.h"
+#include "chrome/browser/page_info_window.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_model.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
 #include "chrome/browser/view_ids.h"
 #include "chrome/browser/views/info_bubble.h"
-#include "chrome/browser/views/first_run_bubble.h"
-#include "chrome/browser/views/page_info_window.h"
-#include "chrome/common/l10n_util.h"
-#include "chrome/common/resource_bundle.h"
-#include "chrome/common/gfx/chrome_canvas.h"
-#include "chrome/common/win_util.h"
-#include "chrome/views/background.h"
-#include "chrome/views/border.h"
-#include "chrome/views/widget/root_view.h"
-#include "chrome/views/widget/widget.h"
+#include "chrome/common/extensions/extension.h"
+#include "chrome/common/page_action.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "skia/ext/image_operations.h"
+#include "views/focus/focus_manager.h"
+#include "views/widget/root_view.h"
+#include "views/widget/widget.h"
+#include "webkit/glue/image_decoder.h"
+
+#if defined(OS_WIN)
+#include "app/win_util.h"
+#include "chrome/browser/views/first_run_bubble.h"
+#endif
 
 using views::View;
 
+// static
 const int LocationBarView::kVertMargin = 2;
-
-const COLORREF LocationBarView::kBackgroundColorByLevel[] = {
-  RGB(255, 245, 195),  // SecurityLevel SECURE: Yellow.
-  RGB(255, 255, 255),  // SecurityLevel NORMAL: White.
-  RGB(255, 255, 255),  // SecurityLevel INSECURE: White.
-};
 
 // Padding on the right and left of the entry field.
 static const int kEntryPadding = 3;
@@ -58,21 +71,16 @@ static const int kInfoBubbleHoverDelayMs = 500;
 // The tab key image.
 static const SkBitmap* kTabButtonBitmap = NULL;
 
-// Returns the description for a keyword.
-static std::wstring GetKeywordDescription(Profile* profile,
-                                          const std::wstring& keyword) {
+// Returns the short name for a keyword.
+static std::wstring GetKeywordName(Profile* profile,
+                                   const std::wstring& keyword) {
   // Make sure the TemplateURL still exists.
   // TODO(sky): Once LocationBarView adds a listener to the TemplateURLModel
   // to track changes to the model, this should become a DCHECK.
   const TemplateURL* template_url =
       profile->GetTemplateURLModel()->GetTemplateURLForKeyword(keyword);
-  if (template_url) {
-    std::wstring keyword_description;
-    if (l10n_util::AdjustStringForLocaleDirection(template_url->short_name(),
-                                                  &keyword_description))
-      return keyword_description;
-    return template_url->short_name();
-  }
+  if (template_url)
+    return template_url->AdjustedShortNameForLocaleDirection();
   return std::wstring();
 }
 
@@ -80,7 +88,8 @@ LocationBarView::LocationBarView(Profile* profile,
                                  CommandUpdater* command_updater,
                                  ToolbarModel* model,
                                  Delegate* delegate,
-                                 bool popup_window_mode)
+                                 bool popup_window_mode,
+                                 AutocompletePopupPositioner* popup_positioner)
     : profile_(profile),
       command_updater_(command_updater),
       model_(model),
@@ -91,9 +100,9 @@ LocationBarView::LocationBarView(Profile* profile,
       keyword_hint_view_(profile),
       type_to_search_view_(l10n_util::GetString(IDS_OMNIBOX_EMPTY_TEXT)),
       security_image_view_(profile, model),
-      rss_image_view_(model),
       popup_window_mode_(popup_window_mode),
-      first_run_bubble_(this) {
+      first_run_bubble_(this),
+      popup_positioner_(popup_positioner) {
   DCHECK(profile_);
   SetID(VIEW_ID_LOCATION_BAR);
   SetFocusable(true);
@@ -105,8 +114,8 @@ LocationBarView::LocationBarView(Profile* profile,
   }
 }
 
-bool LocationBarView::IsInitialized() const {
-  return location_entry_view_ != NULL;
+LocationBarView::~LocationBarView() {
+  DeletePageActionViews();
 }
 
 void LocationBarView::Init() {
@@ -119,44 +128,56 @@ void LocationBarView::Init() {
   }
 
   // URL edit field.
+  // View container for URL edit field.
+#if defined(OS_WIN)
   views::Widget* widget = GetWidget();
   location_entry_.reset(new AutocompleteEditViewWin(font_, this, model_, this,
                                                     widget->GetNativeView(),
                                                     profile_, command_updater_,
-                                                    popup_window_mode_));
-
-  // View container for URL edit field.
-  location_entry_view_ = new views::HWNDView;
-  DCHECK(location_entry_view_) << "LocationBarView::Init - OOM!";
+                                                    popup_window_mode_,
+                                                    popup_positioner_));
+#else
+  location_entry_.reset(new AutocompleteEditViewGtk(this, model_, profile_,
+                                                    command_updater_,
+                                                    popup_positioner_));
+  location_entry_->Init();
+  // Make all the children of the widget visible. NOTE: this won't display
+  // anything, it just toggles the visible flag.
+  gtk_widget_show_all(location_entry_->widget());
+  // Hide the widget. NativeViewHostGtk will make it visible again as
+  // necessary.
+  gtk_widget_hide(location_entry_->widget());
+#endif
+  location_entry_view_ = new views::NativeViewHost;
   location_entry_view_->SetID(VIEW_ID_AUTOCOMPLETE);
   AddChildView(location_entry_view_);
-  location_entry_view_->SetAssociatedFocusView(this);
-  location_entry_view_->Attach(location_entry_->m_hWnd);
+  location_entry_view_->set_focus_view(this);
+  location_entry_view_->Attach(
+#if defined(OS_WIN)
+                               location_entry_->m_hWnd
+#else
+                               location_entry_->widget()
+#endif
+                               );
 
   AddChildView(&selected_keyword_view_);
   selected_keyword_view_.SetFont(font_);
   selected_keyword_view_.SetVisible(false);
   selected_keyword_view_.SetParentOwned(false);
 
-  DWORD sys_color = GetSysColor(COLOR_GRAYTEXT);
-  SkColor gray = SkColorSetRGB(GetRValue(sys_color), GetGValue(sys_color),
-                               GetBValue(sys_color));
+  SkColor dimmed_text = GetColor(false, DEEMPHASIZED_TEXT);
 
   AddChildView(&type_to_search_view_);
   type_to_search_view_.SetVisible(false);
   type_to_search_view_.SetFont(font_);
-  type_to_search_view_.SetColor(gray);
+  type_to_search_view_.SetColor(dimmed_text);
   type_to_search_view_.SetParentOwned(false);
 
   AddChildView(&keyword_hint_view_);
   keyword_hint_view_.SetVisible(false);
   keyword_hint_view_.SetFont(font_);
-  keyword_hint_view_.SetColor(gray);
+  keyword_hint_view_.SetColor(dimmed_text);
   keyword_hint_view_.SetParentOwned(false);
-
-  AddChildView(&rss_image_view_);
-  rss_image_view_.SetVisible(false);
-  rss_image_view_.SetParentOwned(false);
 
   AddChildView(&security_image_view_);
   security_image_view_.SetVisible(false);
@@ -177,26 +198,99 @@ void LocationBarView::Init() {
   OnChanged();
 }
 
+bool LocationBarView::IsInitialized() const {
+  return location_entry_view_ != NULL;
+}
+
+// static
+SkColor LocationBarView::GetColor(bool is_secure, ColorKind kind) {
+  enum SecurityState {
+    NOT_SECURE = 0,
+    SECURE,
+    NUM_STATES
+  };
+
+  static bool initialized = false;
+  static SkColor colors[NUM_STATES][NUM_KINDS];
+  if (!initialized) {
+#if defined(OS_WIN)
+    colors[NOT_SECURE][BACKGROUND] = color_utils::GetSysSkColor(COLOR_WINDOW);
+    colors[NOT_SECURE][TEXT] = color_utils::GetSysSkColor(COLOR_WINDOWTEXT);
+    colors[NOT_SECURE][SELECTED_TEXT] =
+        color_utils::GetSysSkColor(COLOR_HIGHLIGHTTEXT);
+#else
+    // TODO(beng): source from theme provider.
+    colors[NOT_SECURE][BACKGROUND] = SK_ColorWHITE;
+    colors[NOT_SECURE][TEXT] = SK_ColorBLACK;
+    colors[NOT_SECURE][SELECTED_TEXT] = SK_ColorWHITE;
+#endif
+    colors[SECURE][BACKGROUND] = SkColorSetRGB(255, 245, 195);
+    colors[SECURE][TEXT] = SkColorSetRGB(0, 0, 0);
+    colors[SECURE][SELECTED_TEXT] = 0;  // Unused
+    colors[NOT_SECURE][DEEMPHASIZED_TEXT] =
+        color_utils::AlphaBlend(colors[NOT_SECURE][TEXT],
+                                colors[NOT_SECURE][BACKGROUND], 128);
+    colors[SECURE][DEEMPHASIZED_TEXT] =
+        color_utils::AlphaBlend(colors[SECURE][TEXT],
+                                colors[SECURE][BACKGROUND], 128);
+    const SkColor kDarkNotSecureText = SkColorSetRGB(200, 0, 0);
+    const SkColor kLightNotSecureText = SkColorSetRGB(255, 55, 55);
+    colors[NOT_SECURE][SECURITY_TEXT] =
+        color_utils::PickMoreReadableColor(kDarkNotSecureText,
+                                           kLightNotSecureText,
+                                           colors[NOT_SECURE][BACKGROUND]);
+    colors[SECURE][SECURITY_TEXT] = SkColorSetRGB(0, 150, 20);
+#if 0  // Info bubble background color is system theme window background color
+    colors[NOT_SECURE][SECURITY_INFO_BUBBLE_TEXT] =
+        colors[NOT_SECURE][SECURITY_TEXT];
+    const SkColor kDarkSecureInfoBubbleText = SkColorSetRGB(0, 153, 51);
+    const SkColor kLightSecureInfoBubbleText = SkColorSetRGB(102, 255, 152);
+    colors[SECURE][SECURITY_INFO_BUBBLE_TEXT] =
+        color_utils::PickMoreReadableColor(kDarkSecureInfoBubbleText,
+                                           kLightSecureInfoBubbleText,
+                                           colors[NOT_SECURE][BACKGROUND]);
+#else  // Info bubble background color is white
+    colors[NOT_SECURE][SECURITY_INFO_BUBBLE_TEXT] = kDarkNotSecureText;
+    colors[SECURE][SECURITY_INFO_BUBBLE_TEXT] = SkColorSetRGB(0, 153, 51);
+#endif
+    const SkColor kDarkSchemeStrikeout = SkColorSetRGB(210, 0, 0);
+    const SkColor kLightSchemeStrikeout = SkColorSetRGB(255, 45, 45);
+    colors[NOT_SECURE][SCHEME_STRIKEOUT] =
+        color_utils::PickMoreReadableColor(kDarkSchemeStrikeout,
+                                           kLightSchemeStrikeout,
+                                           colors[NOT_SECURE][BACKGROUND]);
+    colors[SECURE][SCHEME_STRIKEOUT] = 0;  // Unused
+    initialized = true;
+  }
+
+  return colors[is_secure ? SECURE : NOT_SECURE][kind];
+}
+
 void LocationBarView::Update(const TabContents* tab_for_state_restoring) {
   SetSecurityIcon(model_->GetIcon());
-  SetRssIconVisibility(model_->GetFeedList().get());
+  RefreshPageActionViews();
   std::wstring info_text, info_tooltip;
-  SkColor text_color;
-  model_->GetInfoText(&info_text, &text_color, &info_tooltip);
-  SetInfoText(info_text, text_color, info_tooltip);
+  ToolbarModel::InfoTextType info_text_type =
+      model_->GetInfoText(&info_text, &info_tooltip);
+  SetInfoText(info_text, info_text_type, info_tooltip);
   location_entry_->Update(tab_for_state_restoring);
   Layout();
   SchedulePaint();
 }
 
-void LocationBarView::UpdateFeedIcon() {
-  SetRssIconVisibility(model_->GetFeedList().get());
+void LocationBarView::UpdatePageActions() {
+  RefreshPageActionViews();
+
   Layout();
   SchedulePaint();
 }
 
 void LocationBarView::Focus() {
+#if defined(OS_WIN)
   ::SetFocus(location_entry_->m_hWnd);
+#else
+  gtk_widget_grab_focus(location_entry_->widget());
+#endif
 }
 
 void LocationBarView::SetProfile(Profile* profile) {
@@ -219,31 +313,27 @@ void LocationBarView::Layout() {
   DoLayout(true);
 }
 
-void LocationBarView::Paint(ChromeCanvas* canvas) {
+void LocationBarView::Paint(gfx::Canvas* canvas) {
   View::Paint(canvas);
 
-  SkColor bg = SkColorSetRGB(
-      GetRValue(kBackgroundColorByLevel[model_->GetSchemeSecurityLevel()]),
-      GetGValue(kBackgroundColorByLevel[model_->GetSchemeSecurityLevel()]),
-      GetBValue(kBackgroundColorByLevel[model_->GetSchemeSecurityLevel()]));
-
   const SkBitmap* background =
-      popup_window_mode_ ? kPopupBackground : kBackground;
+      popup_window_mode_ ?
+          kPopupBackground :
+          GetThemeProvider()->GetBitmapNamed(IDR_LOCATIONBG);
+
   canvas->TileImageInt(*background, 0, 0, 0, 0, width(), height());
   int top_margin = TopMargin();
-  canvas->FillRectInt(bg, 0, top_margin, width(),
-                      std::max(height() - top_margin - kVertMargin, 0));
-}
-
-bool LocationBarView::CanProcessTabKeyEvents() {
-  // We want to receive tab key events when the hint is showing.
-  return keyword_hint_view_.IsVisible();
+  canvas->FillRectInt(
+      GetColor(model_->GetSchemeSecurityLevel() == ToolbarModel::SECURE,
+               BACKGROUND),
+      0, top_margin, width(), std::max(height() - top_margin - kVertMargin, 0));
 }
 
 void LocationBarView::VisibleBoundsInRootChanged() {
   location_entry_->ClosePopup();
 }
 
+#if defined(OS_WIN)
 bool LocationBarView::OnMousePressed(const views::MouseEvent& event) {
   UINT msg;
   if (event.IsLeftMouseButton()) {
@@ -285,6 +375,7 @@ void LocationBarView::OnMouseReleased(const views::MouseEvent& event,
   }
   OnMouseEvent(event, msg);
 }
+#endif
 
 void LocationBarView::OnAutocompleteAccept(
     const GURL& url,
@@ -341,17 +432,14 @@ void LocationBarView::DoLayout(const bool force_layout) {
   if (!location_entry_.get())
     return;
 
-  RECT formatting_rect;
-  location_entry_->GetRect(&formatting_rect);
-  RECT edit_bounds;
-  location_entry_->GetClientRect(&edit_bounds);
-
   int entry_width = width() - (kEntryPadding * 2);
 
-  gfx::Size rss_image_size;
-  if (rss_image_view_.IsVisible()) {
-    rss_image_size = rss_image_view_.GetPreferredSize();
-    entry_width -= rss_image_size.width();
+  gfx::Size page_action_size;
+  for (size_t i = 0; i < page_action_image_views_.size(); i++) {
+    if (page_action_image_views_[i]->IsVisible()) {
+      page_action_size = page_action_image_views_[i]->GetPreferredSize();
+      entry_width -= page_action_size.width() + kInnerPadding;
+    }
   }
   gfx::Size security_image_size;
   if (security_image_view_.IsVisible()) {
@@ -364,13 +452,22 @@ void LocationBarView::DoLayout(const bool force_layout) {
     entry_width -= (info_label_size.width() + kInnerPadding);
   }
 
-  const int max_edit_width = entry_width - formatting_rect.left -
-                             (edit_bounds.right - formatting_rect.right);
+#if defined(OS_WIN)
+  RECT formatting_rect;
+  location_entry_->GetRect(&formatting_rect);
+  RECT edit_bounds;
+  location_entry_->GetClientRect(&edit_bounds);
+  int max_edit_width = entry_width - formatting_rect.left -
+                       (edit_bounds.right - formatting_rect.right);
+#else
+  int max_edit_width = entry_width;
+#endif
+
   if (max_edit_width < 0)
     return;
-  const int text_width = TextDisplayWidth();
+  const int available_width = AvailableWidth(max_edit_width);
   bool needs_layout = force_layout;
-  needs_layout |= AdjustHints(text_width, max_edit_width);
+  needs_layout |= AdjustHints(available_width);
 
   if (!needs_layout)
     return;
@@ -378,37 +475,44 @@ void LocationBarView::DoLayout(const bool force_layout) {
   // TODO(sky): baseline layout.
   int location_y = TopMargin();
   int location_height = std::max(height() - location_y - kVertMargin, 0);
+
+  // First set the bounds for the label that appears to the right of the
+  // security icon.
+  int offset = width() - kEntryPadding;
   if (info_label_.IsVisible()) {
-    info_label_.SetBounds(width() - kEntryPadding - info_label_size.width(),
-                          location_y,
+    offset -= info_label_size.width();
+    info_label_.SetBounds(offset, location_y,
                           info_label_size.width(), location_height);
-  }
-  const int info_label_width = info_label_size.width() ?
-      info_label_size.width() + kInnerPadding : 0;
-  if (rss_image_view_.IsVisible()) {
-    rss_image_view_.SetBounds(width() - kEntryPadding -
-                                  info_label_width -
-                                  security_image_size.width() -
-                                  rss_image_size.width(),
-                              location_y,
-                              rss_image_size.width(),
-                              location_height);
+    offset -= kInnerPadding;
   }
   if (security_image_view_.IsVisible()) {
-    security_image_view_.SetBounds(width() - kEntryPadding - info_label_width -
-        security_image_size.width(), location_y, security_image_size.width(),
-        location_height);
+    offset -= security_image_size.width();
+    security_image_view_.SetBounds(offset, location_y,
+                                   security_image_size.width(),
+                                   location_height);
+    offset -= kInnerPadding;
+  }
+
+  for (size_t i = 0; i < page_action_image_views_.size(); i++) {
+    if (page_action_image_views_[i]->IsVisible()) {
+      page_action_size = page_action_image_views_[i]->GetPreferredSize();
+      offset -= page_action_size.width();
+      page_action_image_views_[i]->SetBounds(offset, location_y,
+                                             page_action_size.width(),
+                                             location_height);
+      offset -= kInnerPadding;
+    }
   }
   gfx::Rect location_bounds(kEntryPadding, location_y, entry_width,
                             location_height);
   if (selected_keyword_view_.IsVisible()) {
-    LayoutView(true, &selected_keyword_view_, text_width, max_edit_width,
+    LayoutView(true, &selected_keyword_view_, available_width,
                &location_bounds);
   } else if (keyword_hint_view_.IsVisible()) {
-    LayoutView(false, &keyword_hint_view_, text_width, max_edit_width,
+    LayoutView(false, &keyword_hint_view_, available_width,
                &location_bounds);
   } else if (type_to_search_view_.IsVisible()) {
-    LayoutView(false, &type_to_search_view_, text_width, max_edit_width,
+    LayoutView(false, &type_to_search_view_, available_width,
                &location_bounds);
   }
 
@@ -424,27 +528,32 @@ int LocationBarView::TopMargin() const {
   return std::min(kVertMargin, height());
 }
 
-int LocationBarView::TextDisplayWidth() {
-  POINT last_char_position =
-      location_entry_->PosFromChar(location_entry_->GetTextLength());
-  POINT scroll_position;
-  location_entry_->GetScrollPos(&scroll_position);
-  const int position_x = last_char_position.x + scroll_position.x;
-  return UILayoutIsRightToLeft() ? width() - position_x : position_x;
+int LocationBarView::AvailableWidth(int location_bar_width) {
+#if defined(OS_WIN)
+  // Use font_.GetStringWidth() instead of
+  // PosFromChar(location_entry_->GetTextLength()) because PosFromChar() is
+  // apparently buggy. In both LTR UI and RTL UI with left-to-right layout,
+  // PosFromChar(i) might return 0 when i is greater than 1.
+  return std::max(
+      location_bar_width - font_.GetStringWidth(location_entry_->GetText()), 0);
+#else
+  NOTIMPLEMENTED();
+  return location_bar_width;
+#endif
 }
 
-bool LocationBarView::UsePref(int pref_width, int text_width, int max_width) {
-  return (pref_width + kInnerPadding + text_width <= max_width);
+bool LocationBarView::UsePref(int pref_width, int available_width) {
+  return (pref_width + kInnerPadding <= available_width);
 }
 
-bool LocationBarView::NeedsResize(View* view, int text_width, int max_width) {
+bool LocationBarView::NeedsResize(View* view, int available_width) {
   gfx::Size size = view->GetPreferredSize();
-  if (!UsePref(size.width(), text_width, max_width))
+  if (!UsePref(size.width(), available_width))
     size = view->GetMinimumSize();
   return (view->width() != size.width());
 }
 
-bool LocationBarView::AdjustHints(int text_width, int max_width) {
+bool LocationBarView::AdjustHints(int available_width) {
   const std::wstring keyword(location_entry_->model()->keyword());
   const bool is_keyword_hint(location_entry_->model()->is_keyword_hint());
   const bool show_selected_keyword = !keyword.empty() && !is_keyword_hint;
@@ -455,7 +564,7 @@ bool LocationBarView::AdjustHints(int text_width, int max_width) {
   if (show_search_hint) {
     // Only show type to search if all the text fits.
     gfx::Size view_pref = type_to_search_view_.GetPreferredSize();
-    show_search_hint = UsePref(view_pref.width(), text_width, max_width);
+    show_search_hint = UsePref(view_pref.width(), available_width);
   }
 
   // NOTE: This isn't just one big || statement as ToggleVisibility MUST be
@@ -470,24 +579,25 @@ bool LocationBarView::AdjustHints(int text_width, int max_width) {
       needs_layout = true;
       selected_keyword_view_.SetKeyword(keyword);
     }
-    needs_layout |= NeedsResize(&selected_keyword_view_, text_width, max_width);
+    needs_layout |= NeedsResize(&selected_keyword_view_, available_width);
   } else if (show_keyword_hint) {
     if (keyword_hint_view_.keyword() != keyword) {
       needs_layout = true;
       keyword_hint_view_.SetKeyword(keyword);
     }
-    needs_layout |= NeedsResize(&keyword_hint_view_, text_width, max_width);
+    needs_layout |= NeedsResize(&keyword_hint_view_, available_width);
   }
 
   return needs_layout;
 }
 
-void LocationBarView::LayoutView(bool leading, views::View* view,
-                                 int text_width, int max_width,
+void LocationBarView::LayoutView(bool leading,
+                                 views::View* view,
+                                 int available_width,
                                  gfx::Rect* bounds) {
   DCHECK(view && bounds);
   gfx::Size view_size = view->GetPreferredSize();
-  if (!UsePref(view_size.width(), text_width, max_width))
+  if (!UsePref(view_size.width(), available_width))
     view_size = view->GetMinimumSize();
   if (view_size.width() + kInnerPadding < bounds->width()) {
     view->SetVisible(true);
@@ -525,18 +635,72 @@ void LocationBarView::SetSecurityIcon(ToolbarModel::Icon icon) {
   }
 }
 
-void LocationBarView::SetRssIconVisibility(FeedList* feeds) {
-  bool show_rss = feeds && feeds->list().size() > 0;
-  // TODO(finnur): Enable this when we have a good landing page to show feeds.
-  rss_image_view_.SetVisible(false);
+void LocationBarView::DeletePageActionViews() {
+  if (!page_action_image_views_.empty()) {
+    for (size_t i = 0; i < page_action_image_views_.size(); ++i)
+      RemoveChildView(page_action_image_views_[i]);
+    STLDeleteContainerPointers(page_action_image_views_.begin(),
+                               page_action_image_views_.end());
+    page_action_image_views_.clear();
+  }
+}
+
+std::vector<PageAction*> LocationBarView::GetPageActions() {
+  std::vector<PageAction*> result;
+  if (!profile_->GetExtensionsService())
+    return result;
+
+  // Query the extension system to see how many page actions we have.
+  // TODO(finnur): Sort the page icons in some meaningful way.
+  const ExtensionList* extensions =
+      profile_->GetExtensionsService()->extensions();
+  for (ExtensionList::const_iterator iter = extensions->begin();
+       iter != extensions->end(); ++iter) {
+    const PageActionMap& page_actions = (*iter)->page_actions();
+    for (PageActionMap::const_iterator i(page_actions.begin());
+         i != page_actions.end(); ++i) {
+      result.push_back(i->second);
+    }
+  }
+
+  return result;
+}
+
+void LocationBarView::RefreshPageActionViews() {
+  std::vector<PageAction*> page_actions = GetPageActions();
+
+  // On startup we sometimes haven't loaded any extensions. This makes sure
+  // we catch up when the extensions (and any page actions) load.
+  if (page_actions.size() != page_action_image_views_.size()) {
+    DeletePageActionViews();  // Delete the old views (if any).
+
+    page_action_image_views_.resize(page_actions.size());
+
+    for (size_t i = 0; i < page_actions.size(); ++i) {
+      page_action_image_views_[i] =
+          new PageActionImageView(this, profile_, page_actions[i]);
+      page_action_image_views_[i]->SetVisible(false);
+      page_action_image_views_[i]->SetParentOwned(false);
+      AddChildView(page_action_image_views_[i]);
+    }
+  }
+
+  TabContents* contents = delegate_->GetTabContents();
+  if (!page_action_image_views_.empty() && contents) {
+    GURL url = GURL(WideToUTF8(model_->GetText()));
+
+    for (size_t i = 0; i < page_action_image_views_.size(); i++)
+      page_action_image_views_[i]->UpdateVisibility(contents, url);
+  }
 }
 
 void LocationBarView::SetInfoText(const std::wstring& text,
-                                  SkColor text_color,
+                                  ToolbarModel::InfoTextType text_type,
                                   const std::wstring& tooltip_text) {
   info_label_.SetVisible(!text.empty());
   info_label_.SetText(text);
-  info_label_.SetColor(text_color);
+  if (text_type == ToolbarModel::INFO_EV_TEXT)
+    info_label_.SetColor(GetColor(true, SECURITY_TEXT));
   info_label_.SetTooltipText(tooltip_text);
 }
 
@@ -549,6 +713,7 @@ bool LocationBarView::ToggleVisibility(bool new_vis, View* view) {
   return false;
 }
 
+#if defined(OS_WIN)
 void LocationBarView::OnMouseEvent(const views::MouseEvent& event, UINT msg) {
   UINT flags = 0;
   if (event.IsControlDown())
@@ -567,12 +732,12 @@ void LocationBarView::OnMouseEvent(const views::MouseEvent& event, UINT msg) {
 
   location_entry_->HandleExternalMsg(msg, flags, screen_point.ToPOINT());
 }
+#endif
 
-bool LocationBarView::GetAccessibleRole(VARIANT* role) {
+bool LocationBarView::GetAccessibleRole(AccessibilityTypes::Role* role) {
   DCHECK(role);
 
-  role->vt = VT_I4;
-  role->lVal = ROLE_SYSTEM_GROUPING;
+  *role = AccessibilityTypes::ROLE_GROUPING;
   return true;
 }
 
@@ -616,12 +781,12 @@ LocationBarView::SelectedKeywordView::SelectedKeywordView(Profile* profile)
 LocationBarView::SelectedKeywordView::~SelectedKeywordView() {
 }
 
-void LocationBarView::SelectedKeywordView::SetFont(const ChromeFont& font) {
+void LocationBarView::SelectedKeywordView::SetFont(const gfx::Font& font) {
   full_label_.SetFont(font);
   partial_label_.SetFont(font);
 }
 
-void LocationBarView::SelectedKeywordView::Paint(ChromeCanvas* canvas) {
+void LocationBarView::SelectedKeywordView::Paint(gfx::Canvas* canvas) {
   canvas->TranslateInt(0, kBackgroundYOffset);
   background_painter_.Paint(width(), height() - kTopInset, canvas);
   canvas->TranslateInt(0, -kBackgroundYOffset);
@@ -655,10 +820,10 @@ void LocationBarView::SelectedKeywordView::SetKeyword(
   if (!profile_->GetTemplateURLModel())
     return;
 
-  const std::wstring description = GetKeywordDescription(profile_, keyword);
+  const std::wstring short_name = GetKeywordName(profile_, keyword);
   full_label_.SetText(l10n_util::GetStringF(IDS_OMNIBOX_KEYWORD_TEXT,
-                                            description));
-  const std::wstring min_string = CalculateMinString(description);
+                                            short_name));
+  const std::wstring min_string = CalculateMinString(short_name);
   if (!min_string.empty()) {
     partial_label_.SetText(
         l10n_util::GetStringF(IDS_OMNIBOX_KEYWORD_TEXT, min_string));
@@ -707,7 +872,7 @@ LocationBarView::KeywordHintView::~KeywordHintView() {
   RemoveChildView(&trailing_label_);
 }
 
-void LocationBarView::KeywordHintView::SetFont(const ChromeFont& font) {
+void LocationBarView::KeywordHintView::SetFont(const gfx::Font& font) {
   leading_label_.SetFont(font);
   trailing_label_.SetFont(font);
 }
@@ -728,7 +893,7 @@ void LocationBarView::KeywordHintView::SetKeyword(const std::wstring& keyword) {
   std::vector<size_t> content_param_offsets;
   const std::wstring keyword_hint(l10n_util::GetStringF(
       IDS_OMNIBOX_KEYWORD_HINT, std::wstring(),
-      GetKeywordDescription(profile_, keyword), &content_param_offsets));
+      GetKeywordName(profile_, keyword), &content_param_offsets));
   if (content_param_offsets.size() == 2) {
     leading_label_.SetText(keyword_hint.substr(0,
                                                content_param_offsets.front()));
@@ -739,7 +904,7 @@ void LocationBarView::KeywordHintView::SetKeyword(const std::wstring& keyword) {
   }
 }
 
-void LocationBarView::KeywordHintView::Paint(ChromeCanvas* canvas) {
+void LocationBarView::KeywordHintView::Paint(gfx::Canvas* canvas) {
   int image_x = leading_label_.IsVisible() ? leading_label_.width() : 0;
 
   // Since we paint the button image directly on the canvas (instead of using a
@@ -791,13 +956,18 @@ void LocationBarView::KeywordHintView::Layout() {
   }
 }
 
-// We don't translate accelerators for ALT + numpad digit, they are used for
-// entering special characters.
-bool LocationBarView::ShouldLookupAccelerators(const views::KeyEvent& e) {
-  if (!e.IsAltDown())
+bool LocationBarView::SkipDefaultKeyEventProcessing(const views::KeyEvent& e) {
+  if (keyword_hint_view_.IsVisible() &&
+      views::FocusManager::IsTabTraversalKeyEvent(e)) {
+    // We want to receive tab key events when the hint is showing.
     return true;
+  }
 
-  return !win_util::IsNumPadDigit(e.GetCharacter(), e.IsExtendedKey());
+#if defined(OS_WIN)
+  return location_entry_->SkipDefaultKeyEventProcessing(e);
+#else
+  return false;
+#endif
 }
 
 // ShowInfoBubbleTask-----------------------------------------------------------
@@ -813,13 +983,13 @@ class LocationBarView::ShowInfoBubbleTask : public Task {
   LocationBarView::LocationBarImageView* image_view_;
   bool cancelled_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(ShowInfoBubbleTask);
+  DISALLOW_COPY_AND_ASSIGN(ShowInfoBubbleTask);
 };
 
 LocationBarView::ShowInfoBubbleTask::ShowInfoBubbleTask(
     LocationBarView::LocationBarImageView* image_view)
-    : cancelled_(false),
-      image_view_(image_view) {
+    : image_view_(image_view),
+      cancelled_(false) {
 }
 
 void LocationBarView::ShowInfoBubbleTask::Run() {
@@ -844,7 +1014,7 @@ void LocationBarView::ShowInfoBubbleTask::Cancel() {
 
 // -----------------------------------------------------------------------------
 
-void LocationBarView::ShowFirstRunBubbleInternal() {
+void LocationBarView::ShowFirstRunBubbleInternal(bool use_OEM_bubble) {
   if (!location_entry_view_)
     return;
   if (!location_entry_view_->GetWidget()->IsActive()) {
@@ -871,16 +1041,18 @@ void LocationBarView::ShowFirstRunBubbleInternal() {
   if (UILayoutIsRightToLeft())
     bounds.set_x(location.x() - 20);
 
-  FirstRunBubble::Show(profile_,
-      location_entry_view_->GetRootView()->GetWidget()->GetNativeView(),
-      bounds);
+#if defined(OS_WIN)
+  FirstRunBubble::Show(profile_, GetWindow(), bounds, use_OEM_bubble);
+#else
+  NOTIMPLEMENTED();
+#endif
 }
 
 // LocationBarImageView---------------------------------------------------------
 
 LocationBarView::LocationBarImageView::LocationBarImageView()
-  : show_info_bubble_task_(NULL),
-    info_bubble_(NULL) {
+  : info_bubble_(NULL),
+    show_info_bubble_task_(NULL) {
 }
 
 LocationBarView::LocationBarImageView::~LocationBarImageView() {
@@ -941,8 +1113,7 @@ void LocationBarView::LocationBarImageView::ShowInfoBubbleImpl(
   label->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
   label->SizeToFit(0);
   DCHECK(info_bubble_ == NULL);
-  info_bubble_ = InfoBubble::Show(GetRootView()->GetWidget()->GetNativeView(),
-                                  bounds, label, this);
+  info_bubble_ = InfoBubble::Show(GetWindow(), bounds, label, this);
   show_info_bubble_task_ = NULL;
 }
 
@@ -984,85 +1155,232 @@ void LocationBarView::SecurityImageView::SetImageShown(Image image) {
 
 bool LocationBarView::SecurityImageView::OnMousePressed(
     const views::MouseEvent& event) {
-  NavigationEntry* nav_entry =
-      BrowserList::GetLastActive()->GetSelectedTabContents()->
-          controller()->GetActiveEntry();
+  TabContents* tab = BrowserList::GetLastActive()->GetSelectedTabContents();
+  NavigationEntry* nav_entry = tab->controller().GetActiveEntry();
   if (!nav_entry) {
     NOTREACHED();
     return true;
   }
-  PageInfoWindow::CreatePageInfo(profile_,
-                                 nav_entry,
-                                 GetRootView()->GetWidget()->GetNativeView(),
-                                 PageInfoWindow::SECURITY);
+  tab->ShowPageInfo(nav_entry->url(), nav_entry->ssl(), true);
   return true;
 }
 
 void LocationBarView::SecurityImageView::ShowInfoBubble() {
   std::wstring text;
-  SkColor text_color;
-  model_->GetIconHoverText(&text, &text_color);
-
-  ShowInfoBubbleImpl(text, text_color);
+  model_->GetIconHoverText(&text);
+  ShowInfoBubbleImpl(text, GetColor(
+      model_->GetSecurityLevel() == ToolbarModel::SECURE,
+      SECURITY_INFO_BUBBLE_TEXT));
 }
 
-// RssImageView------------------------------------------------------------
+// PageActionImageView----------------------------------------------------------
 
-// static
-SkBitmap* LocationBarView::RssImageView::rss_icon_ = NULL;
-
-LocationBarView::RssImageView::RssImageView(ToolbarModel* model)
-  : model_(model),
-    LocationBarImageView() {
-  if (!rss_icon_) {
-    ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-    rss_icon_ = rb.GetBitmapNamed(IDR_RSS_ICON);
+// The views need to load their icons asynchronously but might be deleted before
+// the images have loaded. This class stays alive while the request is in
+// progress (manages its own lifetime) and keeps track of whether the view still
+// cares about the icon loading.
+class LocationBarView::PageActionImageView::ImageLoadingTracker
+  : public base::RefCountedThreadSafe<ImageLoadingTracker> {
+ public:
+  explicit ImageLoadingTracker(PageActionImageView* view, int image_count)
+    : view_(view), image_count_(image_count) {
+    AddRef();  // We hold on to a reference to ourself to make sure we don't
+               // get deleted until we get a response from image loading (see
+               // ImageLoadingDone).
   }
-  ImageView::SetImage(rss_icon_);
+  ~ImageLoadingTracker() {}
+
+  void StopTrackingImageLoad() {
+    view_ = NULL;
+  }
+
+  void OnImageLoaded(SkBitmap* image, int index) {
+    if (image == NULL) {
+      NOTREACHED() << "Image failed to decode.";
+      image = new SkBitmap();
+    }
+    if (view_)
+      view_->OnImageLoaded(image, index);
+    delete image;
+    if (--image_count_ == 0)
+      Release();  // We are no longer needed.
+  }
+
+ private:
+
+  // The view that is waiting for the image to load.
+  PageActionImageView* view_;
+
+  // The number of images this ImageTracker should keep track of.
+  int image_count_;
+};
+
+// The LoadImageTask is for asynchronously loading the image on the file thread.
+// If the image is successfully loaded and decoded it will report back on the
+// |callback_loop| to let the caller know the image is done loading.
+class LocationBarView::PageActionImageView::LoadImageTask : public Task {
+ public:
+  // Constructor for the LoadImageTask class. |tracker| is the object that
+  // we use to communicate back to the entity that wants the image after we
+  // decode it. |path| is the path to load the image from. |index| is an
+  // identifier for the image that we pass back to the caller.
+  LoadImageTask(ImageLoadingTracker* tracker,
+                const FilePath& path,
+                int index)
+    : callback_loop_(MessageLoop::current()),
+      tracker_(tracker),
+      path_(path),
+      index_(index) {}
+
+  void ReportBack(SkBitmap* image) {
+    DCHECK(image);
+    callback_loop_->PostTask(FROM_HERE, NewRunnableMethod(tracker_,
+        &PageActionImageView::ImageLoadingTracker::OnImageLoaded,
+        image,
+        index_));
+  }
+
+  virtual void Run() {
+    // Read the file from disk.
+    std::string file_contents;
+    if (!file_util::PathExists(path_) ||
+        !file_util::ReadFileToString(path_, &file_contents)) {
+      ReportBack(NULL);
+      return;
+    }
+
+    // Decode the image using WebKit's image decoder.
+    const unsigned char* data =
+        reinterpret_cast<const unsigned char*>(file_contents.data());
+    webkit_glue::ImageDecoder decoder(gfx::Size(kFavIconSize, kFavIconSize));
+    scoped_ptr<SkBitmap> decoded(new SkBitmap());
+    *decoded = decoder.Decode(data, file_contents.length());
+    if (decoded->empty()) {
+      ReportBack(NULL);
+      return;  // Unable to decode.
+    }
+
+    if (decoded->width() != kFavIconSize || decoded->height() != kFavIconSize) {
+      // The bitmap is not the correct size, re-sample.
+      int new_width = decoded->width();
+      int new_height = decoded->height();
+      // Calculate what dimensions to use within the constraints (16x16 max).
+      calc_favicon_target_size(&new_width, &new_height);
+      *decoded = skia::ImageOperations::Resize(
+          *decoded, skia::ImageOperations::RESIZE_LANCZOS3,
+          new_width, new_height);
+    }
+
+    ReportBack(decoded.release());
+  }
+
+ private:
+  // The message loop that we need to call back on to report that we are done.
+  MessageLoop* callback_loop_;
+
+  // The object that is waiting for us to respond back.
+  ImageLoadingTracker* tracker_;
+
+  // The path to the image to load asynchronously.
+  FilePath path_;
+
+  // The index of the icon being loaded.
+  int index_;
+};
+
+LocationBarView::PageActionImageView::PageActionImageView(
+    LocationBarView* owner,
+    Profile* profile,
+    const PageAction* page_action)
+    : LocationBarImageView(),
+      owner_(owner),
+      profile_(profile),
+      page_action_(page_action),
+      current_tab_id_(-1),
+      tooltip_(page_action_->name()) {
+  Extension* extension = profile->GetExtensionsService()->GetExtensionById(
+      page_action->extension_id());
+  DCHECK(extension);
+
+  // Load the images this view needs asynchronously on the file thread. We'll
+  // get a call back into OnImageLoaded if the image loads successfully. If not,
+  // the ImageView will have no image and will not appear in the Omnibox.
+  DCHECK(!page_action->icon_paths().empty());
+  const std::vector<std::string>& icon_paths = page_action->icon_paths();
+  page_action_icons_.resize(icon_paths.size());
+  int index = 0;
+  MessageLoop* file_loop = g_browser_process->file_thread()->message_loop();
+  tracker_ = new ImageLoadingTracker(this, icon_paths.size());
+  for (std::vector<std::string>::const_iterator iter = icon_paths.begin();
+       iter != icon_paths.end(); ++iter) {
+    FilePath path = extension->GetResourcePath(*iter);
+    file_loop->PostTask(FROM_HERE, new LoadImageTask(tracker_, path, index++));
+  }
 }
 
-LocationBarView::RssImageView::~RssImageView() {
+LocationBarView::PageActionImageView::~PageActionImageView() {
+  if (tracker_)
+    tracker_->StopTrackingImageLoad();
 }
 
-bool LocationBarView::RssImageView::OnMousePressed(
+bool LocationBarView::PageActionImageView::OnMousePressed(
     const views::MouseEvent& event) {
-  NavigationEntry* entry =
-      BrowserList::GetLastActive()->GetSelectedTabContents()->
-      controller()->GetActiveEntry();
-  if (!entry) {
-    NOTREACHED();
-    return true;
-  }
-
-  // Navigate to the first item in the feed list.
-  scoped_refptr<FeedList> feeds = model_->GetFeedList();
-  DCHECK(feeds.get() && feeds->list().size() > 0);
-
-  // TODO(finnur): Make this do more than just display the XML in the browser.
-  BrowserList::GetLastActive()->OpenURL(feeds->list()[0].url, GURL(),
-                                        CURRENT_TAB, PageTransition::LINK);
+  // Our PageAction icon was clicked on, notify proper authorities.
+  ExtensionBrowserEventRouter::GetInstance()->PageActionExecuted(
+      profile_, page_action_->extension_id(), page_action_->id(),
+      current_tab_id_, current_url_.spec());
   return true;
 }
 
-void LocationBarView::RssImageView::ShowInfoBubble() {
-  // TODO(finnur): Get this string from the resources.
-  std::wstring text = L"Subscribe to this feed";
-  SkColor text_color = SK_ColorBLUE;
-  ShowInfoBubbleImpl(text, text_color);
+void LocationBarView::PageActionImageView::ShowInfoBubble() {
+#if 0  // Info bubble background color is system theme window background color
+  ShowInfoBubbleImpl(ASCIIToWide(tooltip_), GetColor(false, TEXT));
+#else  // Info bubble background color is white
+  ShowInfoBubbleImpl(ASCIIToWide(tooltip_), SK_ColorBLACK);
+#endif
 }
 
-bool LocationBarView::OverrideAccelerator(
-    const views::Accelerator& accelerator)  {
-  return location_entry_->OverrideAccelerator(accelerator);
+void LocationBarView::PageActionImageView::UpdateVisibility(
+    TabContents* contents, GURL url) {
+  // Save this off so we can pass it back to the extension when the action gets
+  // executed. See PageActionImageView::OnMousePressed.
+  current_tab_id_ = ExtensionTabUtil::GetTabId(contents);
+  current_url_ = url;
+
+  const PageActionState* state = contents->GetPageActionState(page_action_);
+  bool visible = state != NULL;
+  if (visible) {
+    // Set the tooltip.
+    if (state->title().empty())
+      tooltip_ = page_action_->name();
+    else
+      tooltip_ = state->title();
+    // Set the image.
+    int index = state->icon_index();
+    // The image index (if not within bounds) will be set to the first image.
+    if (index < 0 || index >= static_cast<int>(page_action_icons_.size()))
+      index = 0;
+    ImageView::SetImage(page_action_icons_[index]);
+  }
+  SetVisible(visible);
+}
+
+void LocationBarView::PageActionImageView::OnImageLoaded(SkBitmap* image,
+                                                         size_t index) {
+  DCHECK(index < page_action_icons_.size());
+  if (index == page_action_icons_.size() - 1)
+    tracker_ = NULL;  // The tracker object will delete itself when we return.
+  page_action_icons_[index] = *image;
+  owner_->UpdatePageActions();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // LocationBarView, LocationBar implementation:
 
-void LocationBarView::ShowFirstRunBubble() {
+void LocationBarView::ShowFirstRunBubble(bool use_OEM_bubble) {
   // We wait 30 milliseconds to open. It allows less flicker.
   Task* task = first_run_bubble_.NewRunnableMethod(
-      &LocationBarView::ShowFirstRunBubbleInternal);
+      &LocationBarView::ShowFirstRunBubbleInternal, use_OEM_bubble);
   MessageLoop::current()->PostDelayedTask(FROM_HERE, task, 30);
 }
 
@@ -1082,16 +1400,33 @@ void LocationBarView::AcceptInput() {
   location_entry_->model()->AcceptInput(CURRENT_TAB, false);
 }
 
+void LocationBarView::AcceptInputWithDisposition(WindowOpenDisposition disp) {
+  location_entry_->model()->AcceptInput(disp, false);
+}
+
 void LocationBarView::FocusLocation() {
   location_entry_->SetFocus();
   location_entry_->SelectAll(true);
 }
 
 void LocationBarView::FocusSearch() {
-  location_entry_->SetUserText(L"?");
   location_entry_->SetFocus();
+  location_entry_->SetForcedQuery();
 }
 
 void LocationBarView::SaveStateToContents(TabContents* contents) {
   location_entry_->SaveStateToTab(contents);
+}
+
+void LocationBarView::Revert() {
+  location_entry_->RevertAll();
+}
+
+int LocationBarView::PageActionVisibleCount() {
+  int result = 0;
+  for (size_t i = 0; i < page_action_image_views_.size(); i++) {
+    if (page_action_image_views_[i]->IsVisible())
+      ++result;
+  }
+  return result;
 }

@@ -5,75 +5,111 @@
 #include "config.h"
 #include "webkit/glue/webdatasource_impl.h"
 
-#include "KURL.h"
-#include "FrameLoadRequest.h"
-#include "ResourceRequest.h"
-
-#undef LOG
-#include "base/string_util.h"
+#include "webkit/api/public/WebURL.h"
+#include "webkit/api/public/WebVector.h"
 #include "webkit/glue/glue_util.h"
-#include "webkit/glue/password_form.h"
-#include "webkit/glue/webdatasource_impl.h"
-#include "webkit/glue/webframe_impl.h"
-#include "webkit/glue/weburlrequest_impl.h"
+
+using WebCore::DocumentLoader;
+using WebCore::ResourceRequest;
+using WebCore::ResourceResponse;
+using WebCore::SubstituteData;
+
+using WebKit::WebDataSource;
+using WebKit::WebNavigationType;
+using WebKit::WebString;
+using WebKit::WebURL;
+using WebKit::WebURLRequest;
+using WebKit::WebURLResponse;
+using WebKit::WebVector;
 
 // static
 PassRefPtr<WebDataSourceImpl> WebDataSourceImpl::Create(
-    const WebCore::ResourceRequest& request,
-    const WebCore::SubstituteData& data) {
+    const ResourceRequest& request,
+    const SubstituteData& data) {
   return adoptRef(new WebDataSourceImpl(request, data));
 }
 
-WebDataSourceImpl::WebDataSourceImpl(const WebCore::ResourceRequest& request,
-                                     const WebCore::SubstituteData& data)
-    : WebCore::DocumentLoader(request, data),
-      form_submit_(false) {
+WebDataSourceImpl::WebDataSourceImpl(const ResourceRequest& request,
+                                     const SubstituteData& data)
+    : DocumentLoader(request, data) {
 }
 
 WebDataSourceImpl::~WebDataSourceImpl() {
 }
 
-WebFrame* WebDataSourceImpl::GetWebFrame() {
-  return WebFrameImpl::FromFrame(frame());
+const WebURLRequest& WebDataSourceImpl::originalRequest() const {
+  original_request_.bind(DocumentLoader::originalRequest());
+  return original_request_;
 }
 
-const WebRequest& WebDataSourceImpl::GetInitialRequest() const {
-  // WebKit may change the frame load request as it sees fit, so we must sync
-  // our request object.
-  initial_request_.set_frame_load_request(
-      WebCore::FrameLoadRequest(originalRequest()));
-  return initial_request_;
-}
-
-const WebRequest& WebDataSourceImpl::GetRequest() const {
-  // WebKit may change the frame load request as it sees fit, so we must sync
-  // our request object.
-  request_.set_frame_load_request(
-      WebCore::FrameLoadRequest(request()));
+const WebURLRequest& WebDataSourceImpl::request() const {
+  request_.bind(DocumentLoader::request());
   return request_;
 }
 
-const WebResponse& WebDataSourceImpl::GetResponse() const {
-  response_.set_resource_response(response());
+const WebURLResponse& WebDataSourceImpl::response() const {
+  response_.bind(DocumentLoader::response());
   return response_;
 }
 
-void WebDataSourceImpl::SetExtraData(WebRequest::ExtraData* extra) {
-  initial_request_.SetExtraData(extra);
-  request_.SetExtraData(extra);
+bool WebDataSourceImpl::hasUnreachableURL() const {
+  return !DocumentLoader::unreachableURL().isEmpty();
 }
 
-GURL WebDataSourceImpl::GetUnreachableURL() const {
-  const WebCore::KURL& url = unreachableURL();
-  return url.isEmpty() ? GURL() : webkit_glue::KURLToGURL(url);
+WebURL WebDataSourceImpl::unreachableURL() const {
+  return webkit_glue::KURLToWebURL(DocumentLoader::unreachableURL());
 }
 
-bool WebDataSourceImpl::HasUnreachableURL() const {
-  return !unreachableURL().isEmpty();
+void WebDataSourceImpl::redirectChain(WebVector<WebURL>& result) const {
+  result.assign(redirect_chain_);
 }
 
-const std::vector<GURL>& WebDataSourceImpl::GetRedirectChain() const {
-  return redirect_chain_;
+WebString WebDataSourceImpl::pageTitle() const {
+  return webkit_glue::StringToWebString(title());
+}
+
+WebNavigationType WebDataSourceImpl::navigationType() const {
+  return NavigationTypeToWebNavigationType(triggeringAction().type());
+}
+
+double WebDataSourceImpl::triggeringEventTime() const {
+  if (!triggeringAction().event())
+    return 0.0;
+
+  // DOMTimeStamp uses units of milliseconds.
+  return triggeringAction().event()->timeStamp() / 1000.0;
+}
+
+WebDataSource::ExtraData* WebDataSourceImpl::extraData() const {
+  return extra_data_.get();
+}
+
+void WebDataSourceImpl::setExtraData(ExtraData* extra_data) {
+  extra_data_.set(extra_data);
+}
+
+WebNavigationType WebDataSourceImpl::NavigationTypeToWebNavigationType(
+    WebCore::NavigationType type) {
+  switch (type) {
+    case WebCore::NavigationTypeLinkClicked:
+      return WebKit::WebNavigationTypeLinkClicked;
+    case WebCore::NavigationTypeFormSubmitted:
+      return WebKit::WebNavigationTypeFormSubmitted;
+    case WebCore::NavigationTypeBackForward:
+      return WebKit::WebNavigationTypeBackForward;
+    case WebCore::NavigationTypeReload:
+      return WebKit::WebNavigationTypeReload;
+    case WebCore::NavigationTypeFormResubmitted:
+      return WebKit::WebNavigationTypeFormResubmitted;
+    case WebCore::NavigationTypeOther:
+    default:
+      return WebKit::WebNavigationTypeOther;
+  }
+}
+
+GURL WebDataSourceImpl::GetEndOfRedirectChain() const {
+  ASSERT(!redirect_chain_.isEmpty());
+  return redirect_chain_.last();
 }
 
 void WebDataSourceImpl::ClearRedirectChain() {
@@ -81,21 +117,5 @@ void WebDataSourceImpl::ClearRedirectChain() {
 }
 
 void WebDataSourceImpl::AppendRedirect(const GURL& url) {
-  redirect_chain_.push_back(url);
-}
-
-const SearchableFormData* WebDataSourceImpl::GetSearchableFormData() const {
-  return searchable_form_data();
-}
-
-const PasswordForm* WebDataSourceImpl::GetPasswordFormData() const {
-  return password_form_data();
-}
-
-bool WebDataSourceImpl::IsFormSubmit() const {
-  return is_form_submit();
-}
-
-string16 WebDataSourceImpl::GetPageTitle() const {
-  return webkit_glue::StringToString16(title());
+  redirect_chain_.append(url);
 }

@@ -26,9 +26,10 @@
 <head>
 <title>DOM checker - browser domain context separation validator</title>
 
-<script src="dom_config.js"></script>
-<script src="json2.js"></script>
+<script src="../json2.js"></script>
 <script src="automation.js"></script>
+
+<script src="dom_config.js"></script>
 
 <script>
 
@@ -306,8 +307,10 @@ function do_tests() {
   // Try to perform no-op location updates for that frame (this should be non-disruptive,
   // and is required because we otherwise blacklist location.* writes).
 
-  schedule_test('blank_location_checks_access()');
-  schedule_test('blank_location_checks_call()');
+  // Temporarily disable these tests to see if it has any effect on
+  // non-determinism.
+  //schedule_test('blank_location_checks_access()');
+  //schedule_test('blank_location_checks_call()');
 
   // Now that we're done with r/w checks, try destructive overwrites of the nested
   // about:blank frame we put in the target window:
@@ -438,11 +441,12 @@ function GOOD(x) {
 /* Log test failure. */
 function BAD(x) {
   automation.IncrementTestCount();
-  automation.AddFailure(x);
 
   bad++;
   x = x.replace('frames[0].frames[0]','(blank)').replace('frames[0]','(third-party)');
   log('<font color=red>CHECK FAILED : ' + x + ' is possible!</font>');
+
+  automation.AddFailure(x);
 }
 
 

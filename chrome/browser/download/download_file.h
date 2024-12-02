@@ -41,24 +41,23 @@
 #ifndef CHROME_BROWSER_DOWNLOAD_DOWNLOAD_FILE_H_
 #define CHROME_BROWSER_DOWNLOAD_DOWNLOAD_FILE_H_
 
-#include <string>
+#include <map>
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/file_path.h"
 #include "base/gfx/native_widget_types.h"
 #include "base/hash_tables.h"
 #include "base/lock.h"
 #include "base/ref_counted.h"
-#include "base/thread.h"
 #include "base/timer.h"
-#include "chrome/browser/history/download_types.h"
+#include "googleurl/src/gurl.h"
 
 namespace net {
 class IOBuffer;
 }
+struct DownloadCreateInfo;
 class DownloadManager;
-class FilePath;
-class GURL;
 class MessageLoop;
 class ResourceDispatcherHost;
 class URLRequestContext;
@@ -120,6 +119,12 @@ class DownloadFile {
 
   // OS file handle for writing
   FILE* file_;
+
+  // Source URL for the file being downloaded.
+  GURL source_url_;
+
+  // The URL where the download was initiated.
+  GURL referrer_url_;
 
   // The unique identifier for this download, assigned at creation by
   // the DownloadFileManager for its internal record keeping.
@@ -205,7 +210,8 @@ class DownloadFileManager
 
   // The download manager has provided a final name for a download. Sent from
   // the UI thread and run on the download thread.
-  void OnFinalDownloadName(int id, const FilePath& full_path);
+  void OnFinalDownloadName(int id, const FilePath& full_path,
+                           DownloadManager* download_manager);
 
   // Timer notifications.
   void UpdateInProgressDownloads();

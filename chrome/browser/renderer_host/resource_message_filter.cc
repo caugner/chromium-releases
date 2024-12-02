@@ -5,30 +5,41 @@
 #include "chrome/browser/renderer_host/resource_message_filter.h"
 
 #include "base/clipboard.h"
+#include "base/command_line.h"
 #include "base/gfx/native_widget_types.h"
 #include "base/histogram.h"
 #include "base/process_util.h"
 #include "base/thread.h"
+#include "chrome/browser/child_process_security_policy.h"
 #include "chrome/browser/chrome_plugin_browsing_context.h"
 #include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/extensions/extension_message_service.h"
+#include "chrome/browser/in_process_webkit/dom_storage_dispatcher_host.h"
 #include "chrome/browser/net/dns_global.h"
 #include "chrome/browser/plugin_service.h"
 #include "chrome/browser/profile.h"
+#include "chrome/browser/privacy_blacklist/blacklist.h"
 #include "chrome/browser/renderer_host/audio_renderer_host.h"
 #include "chrome/browser/renderer_host/browser_render_process_host.h"
+#include "chrome/browser/renderer_host/file_system_accessor.h"
 #include "chrome/browser/renderer_host/render_widget_helper.h"
 #include "chrome/browser/spellchecker.h"
 #include "chrome/browser/worker_host/worker_service.h"
+#include "chrome/common/app_cache/app_cache_dispatcher_host.h"
 #include "chrome/common/chrome_plugin_lib.h"
 #include "chrome/common/chrome_plugin_util.h"
-#include "chrome/common/clipboard_service.h"
+#include "chrome/common/chrome_switches.h"
+#include "chrome/common/histogram_synchronizer.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/pref_service.h"
 #include "chrome/common/render_messages.h"
+#include "chrome/common/url_constants.h"
 #include "net/base/cookie_monster.h"
 #include "net/base/mime_util.h"
 #include "net/base/load_flags.h"
+#include "net/http/http_cache.h"
+#include "net/http/http_transaction_factory.h"
 #include "net/url_request/url_request_context.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/webplugin.h"
@@ -86,13 +97,34 @@ class WriteClipboardTask : public Task {
   ~WriteClipboardTask() {}
 
   void Run() {
-    g_browser_process->clipboard_service()->WriteObjects(*objects_.get());
+    g_browser_process->clipboard()->WriteObjects(*objects_.get());
   }
 
  private:
   scoped_ptr<Clipboard::ObjectMap> objects_;
 };
 
+void RenderParamsFromPrintSettings(const printing::PrintSettings& settings,
+                                   ViewMsg_Print_Params* params) {
+  DCHECK(params);
+#if defined(OS_WIN)
+  params->printable_size.SetSize(
+      settings.page_setup_pixels().content_area().width(),
+      settings.page_setup_pixels().content_area().height());
+  params->dpi = settings.dpi();
+  // Currently hardcoded at 1.25. See PrintSettings' constructor.
+  params->min_shrink = settings.min_shrink;
+  // Currently hardcoded at 2.0. See PrintSettings' constructor.
+  params->max_shrink = settings.max_shrink;
+  // Currently hardcoded at 72dpi. See PrintSettings' constructor.
+  params->desired_dpi = settings.desired_dpi;
+  // Always use an invalid cookie.
+  params->document_cookie = 0;
+  params->selection_only = settings.selection_only;
+#else
+  NOTIMPLEMENTED();
+#endif
+}
 
 }  // namespace
 
@@ -114,34 +146,43 @@ ResourceMessageFilter::ResourceMessageFilter(
       ALLOW_THIS_IN_INITIALIZER_LIST(resolve_proxy_msg_helper_(this, NULL)),
       request_context_(profile->GetRequestContext()),
       media_request_context_(profile->GetRequestContextForMedia()),
+      extensions_request_context_(profile->GetRequestContextForExtensions()),
+      extensions_message_service_(profile->GetExtensionMessageService()),
       profile_(profile),
       render_widget_helper_(render_widget_helper),
-      audio_renderer_host_(audio_renderer_host) {
+      audio_renderer_host_(audio_renderer_host),
+      app_cache_dispatcher_host_(new AppCacheDispatcherHost),
+      ALLOW_THIS_IN_INITIALIZER_LIST(dom_storage_dispatcher_host_(
+          new DOMStorageDispatcherHost(this, profile->GetWebKitContext(),
+              resource_dispatcher_host->webkit_thread()))),
+      off_the_record_(profile->IsOffTheRecord()) {
   DCHECK(request_context_.get());
   DCHECK(request_context_->cookie_store());
   DCHECK(media_request_context_.get());
   DCHECK(media_request_context_->cookie_store());
   DCHECK(audio_renderer_host_.get());
+  DCHECK(app_cache_dispatcher_host_.get());
+  DCHECK(dom_storage_dispatcher_host_.get());
 }
 
 ResourceMessageFilter::~ResourceMessageFilter() {
-  WorkerService::GetInstance()->RendererShutdown(this);
+  // This function should be called on the IO thread.
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
+
+  // Let interested observers know we are being deleted.
+  NotificationService::current()->Notify(
+      NotificationType::RESOURCE_MESSAGE_FILTER_SHUTDOWN,
+      Source<ResourceMessageFilter>(this),
+      NotificationService::NoDetails());
 
   if (handle())
     base::CloseProcessHandle(handle());
-
-  // This function should be called on the IO thread.
-  DCHECK(MessageLoop::current() ==
-         ChromeThread::GetMessageLoop(ChromeThread::IO));
-  NotificationService::current()->RemoveObserver(
-      this,
-      NotificationType::SPELLCHECKER_REINITIALIZED,
-      Source<Profile>(static_cast<Profile*>(profile_)));
 }
 
 void ResourceMessageFilter::Init(int render_process_id) {
   render_process_id_ = render_process_id;
   render_widget_helper_->Init(render_process_id, resource_dispatcher_host_);
+  app_cache_dispatcher_host_->Initialize(this);
 }
 
 // Called on the IPC thread:
@@ -149,20 +190,39 @@ void ResourceMessageFilter::OnFilterAdded(IPC::Channel* channel) {
   channel_ = channel;
 
   // Add the observers to intercept.
-  NotificationService::current()->AddObserver(
-      this,
-      NotificationType::SPELLCHECKER_REINITIALIZED,
-      Source<Profile>(static_cast<Profile*>(profile_)));
+  registrar_.Add(this, NotificationType::SPELLCHECKER_REINITIALIZED,
+                 Source<Profile>(static_cast<Profile*>(profile_)));
 }
 
 // Called on the IPC thread:
 void ResourceMessageFilter::OnChannelConnected(int32 peer_pid) {
-  DCHECK(!handle());
-  set_handle(base::OpenProcessHandle(peer_pid));
-  DCHECK(handle());
+  DCHECK(!handle()) << " " << handle();
+  base::ProcessHandle peer_handle;
+  if (!base::OpenProcessHandle(peer_pid, &peer_handle)) {
+    NOTREACHED();
+  }
+  set_handle(peer_handle);
+
+  // Set the process ID if Init hasn't been called yet.  This doesn't work in
+  // single-process mode since peer_pid won't be the special fake PID we use
+  // for RenderProcessHost in that mode, so we just have to hope that Init
+  // is called first in that case.
+  if (render_process_id_ == -1)
+    render_process_id_ = peer_pid;
+
   // Hook AudioRendererHost to this object after channel is connected so it can
   // this object for sending messages.
-  audio_renderer_host_->IPCChannelConnected(this);
+  audio_renderer_host_->IPCChannelConnected(render_process_id_, handle(), this);
+
+  WorkerService::GetInstance()->Initialize(
+      resource_dispatcher_host_, ui_loop());
+}
+
+void ResourceMessageFilter::OnChannelError() {
+  NotificationService::current()->Notify(
+      NotificationType::RESOURCE_MESSAGE_FILTER_SHUTDOWN,
+      Source<ResourceMessageFilter>(this),
+      NotificationService::NoDetails());
 }
 
 // Called on the IPC thread:
@@ -181,10 +241,30 @@ void ResourceMessageFilter::OnChannelClosing() {
 bool ResourceMessageFilter::OnMessageReceived(const IPC::Message& message) {
   bool msg_is_ok = true;
   bool handled = resource_dispatcher_host_->OnMessageReceived(
-      message, this, &msg_is_ok);
+                                                message, this, &msg_is_ok) ||
+                 app_cache_dispatcher_host_->OnMessageReceived(
+                                                 message, &msg_is_ok) ||
+                 dom_storage_dispatcher_host_->OnMessageReceived(message) ||
+                 audio_renderer_host_->OnMessageReceived(message, &msg_is_ok);
+
   if (!handled) {
+    DCHECK(msg_is_ok);  // It should have been marked handled if it wasn't OK.
     handled = true;
     IPC_BEGIN_MESSAGE_MAP_EX(ResourceMessageFilter, message, msg_is_ok)
+      // On Linux we need to dispatch these messages to the UI2 thread
+      // because we cannot make X calls from the IO thread.  Mac
+      // doesn't have windowed plug-ins so we handle the messages in
+      // the UI thread.  On Windows, we intercept the messages and
+      // handle them directly.
+#if !defined(OS_MACOSX)
+      IPC_MESSAGE_HANDLER_DELAY_REPLY(ViewHostMsg_GetScreenInfo,
+                                      OnGetScreenInfo)
+      IPC_MESSAGE_HANDLER_DELAY_REPLY(ViewHostMsg_GetWindowRect,
+                                      OnGetWindowRect)
+      IPC_MESSAGE_HANDLER_DELAY_REPLY(ViewHostMsg_GetRootWindowRect,
+                                      OnGetRootWindowRect)
+#endif
+
       IPC_MESSAGE_HANDLER(ViewHostMsg_CreateWindow, OnMsgCreateWindow)
       IPC_MESSAGE_HANDLER(ViewHostMsg_CreateWidget, OnMsgCreateWidget)
       IPC_MESSAGE_HANDLER(ViewHostMsg_SetCookie, OnSetCookie)
@@ -195,7 +275,6 @@ bool ResourceMessageFilter::OnMessageReceived(const IPC::Message& message) {
 #if defined(OS_WIN)  // This hack is Windows-specific.
       IPC_MESSAGE_HANDLER(ViewHostMsg_LoadFont, OnLoadFont)
 #endif
-      IPC_MESSAGE_HANDLER(ViewHostMsg_GetScreenInfo, OnGetScreenInfo)
       IPC_MESSAGE_HANDLER(ViewHostMsg_GetPlugins, OnGetPlugins)
       IPC_MESSAGE_HANDLER(ViewHostMsg_GetPluginPath, OnGetPluginPath)
       IPC_MESSAGE_HANDLER(ViewHostMsg_DownloadUrl, OnDownloadUrl)
@@ -205,9 +284,13 @@ bool ResourceMessageFilter::OnMessageReceived(const IPC::Message& message) {
                                       OnOpenChannelToPlugin)
       IPC_MESSAGE_HANDLER(ViewHostMsg_CreateDedicatedWorker,
                           OnCreateDedicatedWorker)
+      IPC_MESSAGE_HANDLER(ViewHostMsg_CancelCreateDedicatedWorker,
+                          OnCancelCreateDedicatedWorker)
       IPC_MESSAGE_HANDLER(ViewHostMsg_ForwardToWorker,
                           OnForwardToWorker)
       IPC_MESSAGE_HANDLER_DELAY_REPLY(ViewHostMsg_SpellCheck, OnSpellCheck)
+      IPC_MESSAGE_HANDLER_DELAY_REPLY(ViewHostMsg_GetAutoCorrectWord,
+                                      OnGetAutoCorrectWord)
       IPC_MESSAGE_HANDLER(ViewHostMsg_DnsPrefetch, OnDnsPrefetch)
       IPC_MESSAGE_HANDLER(ViewHostMsg_RendererHistograms,
                           OnRendererHistograms)
@@ -217,15 +300,16 @@ bool ResourceMessageFilter::OnMessageReceived(const IPC::Message& message) {
                           OnClipboardWriteObjects)
       IPC_MESSAGE_HANDLER(ViewHostMsg_ClipboardWriteObjectsSync,
                           OnClipboardWriteObjects)
-      IPC_MESSAGE_HANDLER(ViewHostMsg_ClipboardIsFormatAvailable,
-                          OnClipboardIsFormatAvailable)
-      IPC_MESSAGE_HANDLER(ViewHostMsg_ClipboardReadText, OnClipboardReadText)
-      IPC_MESSAGE_HANDLER(ViewHostMsg_ClipboardReadAsciiText,
-                          OnClipboardReadAsciiText)
-      IPC_MESSAGE_HANDLER(ViewHostMsg_ClipboardReadHTML,
-                          OnClipboardReadHTML)
-      IPC_MESSAGE_HANDLER(ViewHostMsg_GetWindowRect, OnGetWindowRect)
-      IPC_MESSAGE_HANDLER(ViewHostMsg_GetRootWindowRect, OnGetRootWindowRect)
+
+      IPC_MESSAGE_HANDLER_DELAY_REPLY(ViewHostMsg_ClipboardIsFormatAvailable,
+                                      OnClipboardIsFormatAvailable)
+      IPC_MESSAGE_HANDLER_DELAY_REPLY(ViewHostMsg_ClipboardReadText,
+                                      OnClipboardReadText)
+      IPC_MESSAGE_HANDLER_DELAY_REPLY(ViewHostMsg_ClipboardReadAsciiText,
+                                      OnClipboardReadAsciiText)
+      IPC_MESSAGE_HANDLER_DELAY_REPLY(ViewHostMsg_ClipboardReadHTML,
+                                      OnClipboardReadHTML)
+
       IPC_MESSAGE_HANDLER(ViewHostMsg_GetMimeTypeFromExtension,
                           OnGetMimeTypeFromExtension)
       IPC_MESSAGE_HANDLER(ViewHostMsg_GetMimeTypeFromFile,
@@ -243,19 +327,23 @@ bool ResourceMessageFilter::OnMessageReceived(const IPC::Message& message) {
       IPC_MESSAGE_HANDLER_DELAY_REPLY(ViewHostMsg_ScriptedPrint,
                                       OnScriptedPrint)
 #endif
-      IPC_MESSAGE_HANDLER(ViewHostMsg_CreateAudioStream, OnCreateAudioStream)
-      IPC_MESSAGE_HANDLER(ViewHostMsg_StartAudioStream, OnStartAudioStream)
-      IPC_MESSAGE_HANDLER(ViewHostMsg_CloseAudioStream, OnCloseAudioStream)
-      IPC_MESSAGE_HANDLER(ViewHostMsg_NotifyAudioPacketReady,
-                          OnNotifyAudioPacketReady)
-      IPC_MESSAGE_HANDLER(ViewHostMsg_GetAudioVolume, OnGetAudioVolume)
-      IPC_MESSAGE_HANDLER(ViewHostMsg_SetAudioVolume, OnSetAudioVolume)
 #if defined(OS_MACOSX)
       IPC_MESSAGE_HANDLER(ViewHostMsg_AllocTransportDIB,
                           OnAllocTransportDIB)
       IPC_MESSAGE_HANDLER(ViewHostMsg_FreeTransportDIB,
                           OnFreeTransportDIB)
 #endif
+      IPC_MESSAGE_HANDLER(ViewHostMsg_OpenChannelToExtension,
+                          OnOpenChannelToExtension)
+      IPC_MESSAGE_HANDLER(ViewHostMsg_OpenChannelToTab,
+                          OnOpenChannelToTab)
+      IPC_MESSAGE_HANDLER(ViewHostMsg_CloseIdleConnections,
+                          OnCloseIdleConnections)
+      IPC_MESSAGE_HANDLER(ViewHostMsg_SetCacheMode,
+                          OnSetCacheMode)
+      IPC_MESSAGE_HANDLER_DELAY_REPLY(ViewHostMsg_GetFileSize,
+                                      OnGetFileSize)
+
       IPC_MESSAGE_UNHANDLED(
           handled = false)
     IPC_END_MESSAGE_MAP_EX()
@@ -311,15 +399,12 @@ URLRequestContext* ResourceMessageFilter::GetRequestContext(
     uint32 request_id,
     const ViewHostMsg_Resource_Request& request_data) {
   URLRequestContext* request_context = request_context_;
-  // If the request has resource type of ResourceType::MEDIA and
-  // LOAD_ENABLE_DOWNLOAD_FILE is set as a load flag, we use a request context
-  // specific to media for handling it because these resources have specific
-  // needs for caching and data passing.
-  if (request_data.resource_type == ResourceType::MEDIA &&
-      (request_data.load_flags & net::LOAD_ENABLE_DOWNLOAD_FILE)) {
+  // If the request has resource type of ResourceType::MEDIA, we use a request
+  // context specific to media for handling it because these resources have
+  // specific needs for caching.
+  if (request_data.resource_type == ResourceType::MEDIA)
     request_context = media_request_context_;
-  }
-  return request_context_;
+  return request_context;
 }
 
 void ResourceMessageFilter::OnMsgCreateWindow(
@@ -339,17 +424,35 @@ void ResourceMessageFilter::OnMsgCreateWidget(int opener_id,
 }
 
 void ResourceMessageFilter::OnSetCookie(const GURL& url,
-                                        const GURL& policy_url,
+                                        const GURL& first_party_for_cookies,
                                         const std::string& cookie) {
-  if (request_context_->cookie_policy()->CanSetCookie(url, policy_url))
-    request_context_->cookie_store()->SetCookie(url, cookie);
+  URLRequestContext* context = url.SchemeIs(chrome::kExtensionScheme) ?
+      extensions_request_context_.get() : request_context_.get();
+  if (context->cookie_policy()->CanSetCookie(url, first_party_for_cookies)) {
+    if (context->blacklist()) {
+      Blacklist::Match* match = context->blacklist()->findMatch(url);
+      if (match) {
+        if (match->attributes() & Blacklist::kDontPersistCookies) {
+          context->cookie_store()->SetCookie(url,
+              Blacklist::StripCookieExpiry(cookie));
+        } else if (!(match->attributes() & Blacklist::kDontStoreCookies)) {
+          context->cookie_store()->SetCookie(url, cookie);
+        }
+        delete match;
+      }
+    } else {
+      context->cookie_store()->SetCookie(url, cookie);
+    }
+  }
 }
 
 void ResourceMessageFilter::OnGetCookies(const GURL& url,
-                                         const GURL& policy_url,
+                                         const GURL& first_party_for_cookies,
                                          std::string* cookies) {
-  if (request_context_->cookie_policy()->CanGetCookies(url, policy_url))
-    *cookies = request_context_->cookie_store()->GetCookies(url);
+  URLRequestContext* context = url.SchemeIs(chrome::kExtensionScheme) ?
+      extensions_request_context_.get() : request_context_.get();
+  if (context->cookie_policy()->CanGetCookies(url, first_party_for_cookies))
+    *cookies = context->cookie_store()->GetCookies(url);
 }
 
 void ResourceMessageFilter::OnGetDataDir(std::wstring* data_dir) {
@@ -358,8 +461,7 @@ void ResourceMessageFilter::OnGetDataDir(std::wstring* data_dir) {
 
 void ResourceMessageFilter::OnPluginMessage(const FilePath& plugin_path,
                                             const std::vector<uint8>& data) {
-  DCHECK(MessageLoop::current() ==
-         ChromeThread::GetMessageLoop(ChromeThread::IO));
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
 
   ChromePluginLib *chrome_plugin = ChromePluginLib::Find(plugin_path);
   if (chrome_plugin) {
@@ -372,8 +474,7 @@ void ResourceMessageFilter::OnPluginMessage(const FilePath& plugin_path,
 void ResourceMessageFilter::OnPluginSyncMessage(const FilePath& plugin_path,
                                                 const std::vector<uint8>& data,
                                                 std::vector<uint8> *retval) {
-  DCHECK(MessageLoop::current() ==
-         ChromeThread::GetMessageLoop(ChromeThread::IO));
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
 
   ChromePluginLib *chrome_plugin = ChromePluginLib::Find(plugin_path);
   if (chrome_plugin) {
@@ -435,22 +536,18 @@ void ResourceMessageFilter::OnLoadFont(LOGFONT font) {
 }
 #endif
 
-void ResourceMessageFilter::OnGetScreenInfo(
-    gfx::NativeViewId window, webkit_glue::ScreenInfo* results) {
-  *results = webkit_glue::GetScreenInfoHelper(gfx::NativeViewFromId(window));
-}
-
 void ResourceMessageFilter::OnGetPlugins(bool refresh,
                                          std::vector<WebPluginInfo>* plugins) {
   plugin_service_->GetPlugins(refresh, plugins);
 }
 
 void ResourceMessageFilter::OnGetPluginPath(const GURL& url,
+                                            const GURL& policy_url,
                                             const std::string& mime_type,
                                             const std::string& clsid,
                                             FilePath* filename,
                                             std::string* url_mime_type) {
-  *filename = plugin_service_->GetPluginPath(url, mime_type, clsid,
+  *filename = plugin_service_->GetPluginPath(url, policy_url, mime_type, clsid,
                                              url_mime_type);
 }
 
@@ -464,13 +561,21 @@ void ResourceMessageFilter::OnOpenChannelToPlugin(const GURL& url,
 }
 
 void ResourceMessageFilter::OnCreateDedicatedWorker(const GURL& url,
+                                                    int render_view_route_id,
                                                     int* route_id) {
   *route_id = render_widget_helper_->GetNextRoutingID();
-  WorkerService::GetInstance()->CreateDedicatedWorker(url, this, *route_id);
+  WorkerService::GetInstance()->CreateDedicatedWorker(
+      url, render_process_id_, render_view_route_id, this, render_process_id_,
+      *route_id);
+}
+
+void ResourceMessageFilter::OnCancelCreateDedicatedWorker(int route_id) {
+  WorkerService::GetInstance()->CancelCreateDedicatedWorker(
+      render_process_id_, route_id);
 }
 
 void ResourceMessageFilter::OnForwardToWorker(const IPC::Message& message) {
-  WorkerService::GetInstance()->ForwardMessage(message);
+  WorkerService::GetInstance()->ForwardMessage(message, render_process_id_);
 }
 
 void ResourceMessageFilter::OnDownloadUrl(const IPC::Message& message,
@@ -491,39 +596,63 @@ void ResourceMessageFilter::OnClipboardWriteObjects(
   // a task to perform the write on the UI thread.
   Clipboard::ObjectMap* long_living_objects = new Clipboard::ObjectMap(objects);
 
-  // We pass the renderer handle to assist the clipboard with using shared
-  // memory objects. renderer handle is a handle to the process that would
-  // own any shared memory that might be in the object list.
 #if defined(OS_WIN)
+  // We pass the renderer handle to assist the clipboard with using shared
+  // memory objects. handle() is a handle to the process that would
+  // own any shared memory that might be in the object list. We only do this
+  // on Windows and it only applies to bitmaps. (On Linux, bitmaps
+  // are copied pixel by pixel rather than using shared memory.)
   Clipboard::DuplicateRemoteHandles(handle(), long_living_objects);
-#else
-  NOTIMPLEMENTED();  // TODO(port) implement this.
 #endif
 
   render_widget_helper_->ui_loop()->PostTask(FROM_HERE,
       new WriteClipboardTask(long_living_objects));
 }
 
+#if !defined(OS_LINUX)
+// On non-Linux platforms, clipboard actions can be performed on the IO thread.
+// On Linux, since the clipboard is linked with GTK, we either have to do this
+// with GTK on the UI thread, or with Xlib on the BACKGROUND_X11 thread. In an
+// ideal world, we would do the latter. However, for now we're going to
+// terminate these calls on the UI thread. This risks deadlock in the case of
+// plugins, but it's better than crashing which is what doing on the IO thread
+// gives us.
+//
+// See resource_message_filter_gtk.cc for the Linux implementation of these
+// functions.
+
 void ResourceMessageFilter::OnClipboardIsFormatAvailable(
-    Clipboard::FormatType format, bool* result) {
-  DCHECK(result);
-  *result = GetClipboardService()->IsFormatAvailable(format);
+    Clipboard::FormatType format, IPC::Message* reply) {
+  const bool result = GetClipboard()->IsFormatAvailable(format);
+  ViewHostMsg_ClipboardIsFormatAvailable::WriteReplyParams(reply, result);
+  Send(reply);
 }
 
-void ResourceMessageFilter::OnClipboardReadText(string16* result) {
-  GetClipboardService()->ReadText(result);
+void ResourceMessageFilter::OnClipboardReadText(IPC::Message* reply) {
+  string16 result;
+  GetClipboard()->ReadText(&result);
+  ViewHostMsg_ClipboardReadText::WriteReplyParams(reply, result);
+  Send(reply);
 }
 
-void ResourceMessageFilter::OnClipboardReadAsciiText(std::string* result) {
-  GetClipboardService()->ReadAsciiText(result);
+void ResourceMessageFilter::OnClipboardReadAsciiText(IPC::Message* reply) {
+  std::string result;
+  GetClipboard()->ReadAsciiText(&result);
+  ViewHostMsg_ClipboardReadAsciiText::WriteReplyParams(reply, result);
+  Send(reply);
 }
 
-void ResourceMessageFilter::OnClipboardReadHTML(string16* markup,
-                                                GURL* src_url) {
+void ResourceMessageFilter::OnClipboardReadHTML(IPC::Message* reply) {
   std::string src_url_str;
-  GetClipboardService()->ReadHTML(markup, &src_url_str);
-  *src_url = GURL(src_url_str);
+  string16 markup;
+  GetClipboard()->ReadHTML(&markup, &src_url_str);
+  const GURL src_url = GURL(src_url_str);
+
+  ViewHostMsg_ClipboardReadHTML::WriteReplyParams(reply, markup, src_url);
+  Send(reply);
 }
+
+#endif
 
 void ResourceMessageFilter::OnGetMimeTypeFromExtension(
     const FilePath::StringType& ext, std::string* mime_type) {
@@ -600,6 +729,7 @@ void ResourceMessageFilter::OnGetDefaultPrintSettings(IPC::Message* reply_msg) {
   printer_query->GetSettings(printing::PrinterQuery::DEFAULTS,
                              NULL,
                              0,
+                             false,
                              task);
 }
 
@@ -610,7 +740,7 @@ void ResourceMessageFilter::OnGetDefaultPrintSettingsReply(
   if (printer_query->last_status() != printing::PrintingContext::OK) {
     memset(&params, 0, sizeof(params));
   } else {
-    printer_query->settings().RenderParams(&params);
+    RenderParamsFromPrintSettings(printer_query->settings(), &params);
     params.document_cookie = printer_query->cookie();
   }
   ViewHostMsg_GetDefaultPrintSettings::WriteReplyParams(reply_msg, params);
@@ -625,14 +755,13 @@ void ResourceMessageFilter::OnGetDefaultPrintSettingsReply(
 
 #if defined(OS_WIN)
 
-void ResourceMessageFilter::OnScriptedPrint(gfx::NativeViewId host_window_id,
-                                            int cookie,
-                                            int expected_pages_count,
-                                            IPC::Message* reply_msg) {
-  HWND host_window = gfx::NativeViewFromId(host_window_id);
+void ResourceMessageFilter::OnScriptedPrint(
+    const ViewHostMsg_ScriptedPrint_Params& params,
+    IPC::Message* reply_msg) {
+  HWND host_window = gfx::NativeViewFromId(params.host_window_id);
 
   scoped_refptr<printing::PrinterQuery> printer_query;
-  print_job_manager_->PopPrinterQuery(cookie, &printer_query);
+  print_job_manager_->PopPrinterQuery(params.cookie, &printer_query);
   if (!printer_query.get()) {
     printer_query = new printing::PrinterQuery;
   }
@@ -641,6 +770,7 @@ void ResourceMessageFilter::OnScriptedPrint(gfx::NativeViewId host_window_id,
       this,
       &ResourceMessageFilter::OnScriptedPrintReply,
       printer_query,
+      params.routing_id,
       reply_msg);
   // Shows the Print... dialog box. This is asynchronous, only the IPC message
   // sender will hang until the Print dialog is dismissed.
@@ -651,21 +781,26 @@ void ResourceMessageFilter::OnScriptedPrint(gfx::NativeViewId host_window_id,
     host_window = GetAncestor(host_window, GA_ROOTOWNER);
   }
   DCHECK(host_window);
+
+  render_widget_helper_->SignalModalDialogEvent(params.routing_id);
+
   printer_query->GetSettings(printing::PrinterQuery::ASK_USER,
                              host_window,
-                             expected_pages_count,
+                             params.expected_pages_count,
+                             params.has_selection,
                              task);
 }
 
 void ResourceMessageFilter::OnScriptedPrintReply(
     scoped_refptr<printing::PrinterQuery> printer_query,
+    int routing_id,
     IPC::Message* reply_msg) {
   ViewMsg_PrintPages_Params params;
   if (printer_query->last_status() != printing::PrintingContext::OK ||
       !printer_query->settings().dpi()) {
     memset(&params, 0, sizeof(params));
   } else {
-    printer_query->settings().RenderParams(&params.params);
+    RenderParamsFromPrintSettings(printer_query->settings(), &params.params);
     params.params.document_cookie = printer_query->cookie();
     params.pages =
         printing::PageRange::GetPages(printer_query->settings().ranges);
@@ -677,17 +812,18 @@ void ResourceMessageFilter::OnScriptedPrintReply(
   } else {
     printer_query->StopWorker();
   }
+  render_widget_helper_->ResetModalDialogEvent(routing_id);
 }
 
 #endif  // OS_WIN
 
 // static
-ClipboardService* ResourceMessageFilter::GetClipboardService() {
+Clipboard* ResourceMessageFilter::GetClipboard() {
   // We have a static instance of the clipboard service for use by all message
   // filters.  This instance lives for the life of the browser processes.
-  static ClipboardService* clipboard_service = new ClipboardService();
+  static Clipboard* clipboard = new Clipboard;
 
-  return clipboard_service;
+  return clipboard;
 }
 
 // Notes about SpellCheck.
@@ -714,7 +850,21 @@ void ResourceMessageFilter::OnSpellCheck(const std::wstring& word,
   }
 
   ViewHostMsg_SpellCheck::WriteReplyParams(reply_msg, misspell_location,
-                                             misspell_length);
+                                           misspell_length);
+  Send(reply_msg);
+  return;
+}
+
+
+void ResourceMessageFilter::OnGetAutoCorrectWord(const std::wstring& word,
+                                                 IPC::Message* reply_msg) {
+  std::wstring autocorrect_word;
+  if (spellchecker_ != NULL) {
+    spellchecker_->GetAutoCorrectionWord(word, &autocorrect_word);
+  }
+
+  ViewHostMsg_GetAutoCorrectWord::WriteReplyParams(reply_msg,
+                                                   autocorrect_word);
   Send(reply_msg);
   return;
 }
@@ -734,45 +884,9 @@ void ResourceMessageFilter::OnDnsPrefetch(
 }
 
 void ResourceMessageFilter::OnRendererHistograms(
+    int sequence_number,
     const std::vector<std::string>& histograms) {
-  Histogram::DeserializeHistogramList(histograms);
-}
-
-void ResourceMessageFilter::OnCreateAudioStream(
-    const IPC::Message& msg, int stream_id,
-    const ViewHostMsg_Audio_CreateStream& params) {
-  audio_renderer_host_->CreateStream(
-      handle(), msg.routing_id(), stream_id, params.format,
-      params.channels, params.sample_rate, params.bits_per_sample,
-      params.packet_size);
-}
-
-void ResourceMessageFilter::OnNotifyAudioPacketReady(
-    const IPC::Message& msg, int stream_id, size_t packet_size) {
-  audio_renderer_host_->NotifyPacketReady(msg.routing_id(),
-                                          stream_id, packet_size);
-}
-
-void ResourceMessageFilter::OnStartAudioStream(
-    const IPC::Message& msg, int stream_id) {
-  audio_renderer_host_->Start(msg.routing_id(), stream_id);
-}
-
-void ResourceMessageFilter::OnCloseAudioStream(
-    const IPC::Message& msg, int stream_id) {
-  audio_renderer_host_->Close(msg.routing_id(), stream_id);
-}
-
-void ResourceMessageFilter::OnGetAudioVolume(
-    const IPC::Message& msg, int stream_id) {
-  audio_renderer_host_->GetVolume(msg.routing_id(), stream_id);
-}
-
-void ResourceMessageFilter::OnSetAudioVolume(
-    const IPC::Message& msg, int stream_id,
-    double left_channel, double right_channel) {
-  audio_renderer_host_->SetVolume(
-      msg.routing_id(), stream_id, left_channel, right_channel);
+  HistogramSynchronizer::DeserializeHistogramList(sequence_number, histograms);
 }
 
 #if defined(OS_MACOSX)
@@ -786,3 +900,84 @@ void ResourceMessageFilter::OnFreeTransportDIB(
   render_widget_helper_->FreeTransportDIB(dib_id);
 }
 #endif
+
+void ResourceMessageFilter::OnOpenChannelToExtension(
+    int routing_id, const std::string& extension_id,
+    const std::string& channel_name, int* port_id) {
+  if (extensions_message_service_.get()) {
+    *port_id = extensions_message_service_->
+        OpenChannelToExtension(routing_id, extension_id, channel_name, this);
+  } else {
+    *port_id = -1;
+  }
+}
+
+void ResourceMessageFilter::OnOpenChannelToTab(
+    int routing_id, int tab_id, const std::string& extension_id,
+    const std::string& channel_name, int* port_id) {
+  if (extensions_message_service_.get()) {
+    *port_id = extensions_message_service_->
+        OpenChannelToTab(routing_id, tab_id, extension_id, channel_name, this);
+  } else {
+    *port_id = -1;
+  }
+}
+
+bool ResourceMessageFilter::CheckBenchmarkingEnabled() {
+  static bool checked = false;
+  static bool result = false;
+  if (!checked) {
+    const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+    result = command_line.HasSwitch(switches::kEnableBenchmarking);
+    checked = true;
+  }
+  return result;
+}
+
+void ResourceMessageFilter::OnCloseIdleConnections() {
+  // This function is disabled unless the user has enabled
+  // benchmarking extensions.
+  if (!CheckBenchmarkingEnabled())
+    return;
+  request_context_->
+      http_transaction_factory()->GetCache()->CloseIdleConnections();
+}
+
+void ResourceMessageFilter::OnSetCacheMode(bool enabled) {
+  // This function is disabled unless the user has enabled
+  // benchmarking extensions.
+  if (!CheckBenchmarkingEnabled())
+    return;
+
+  net::HttpCache::Mode mode = enabled ?
+      net::HttpCache::NORMAL : net::HttpCache::DISABLE;
+  request_context_->http_transaction_factory()->GetCache()->set_mode(mode);
+}
+
+void ResourceMessageFilter::OnGetFileSize(const FilePath& path,
+                                          IPC::Message* reply_msg) {
+  // Increase the ref count to ensure ResourceMessageFilter won't be destroyed
+  // before GetFileSize callback is done.
+  AddRef();
+
+  // Get file size only when the child process has been granted permission to
+  // upload the file.
+  if (ChildProcessSecurityPolicy::GetInstance()->CanUploadFile(
+      render_process_id_, path)) {
+    FileSystemAccessor::RequestFileSize(
+        path,
+        reply_msg,
+        NewCallback(this, &ResourceMessageFilter::ReplyGetFileSize));
+  } else {
+    ReplyGetFileSize(-1, reply_msg);
+  }
+}
+
+void ResourceMessageFilter::ReplyGetFileSize(int64 result, void* param) {
+  IPC::Message* reply_msg = static_cast<IPC::Message*>(param);
+  ViewHostMsg_GetFileSize::WriteReplyParams(reply_msg, result);
+  Send(reply_msg);
+
+  // Getting file size callback done, decrease the ref count.
+  Release();
+}

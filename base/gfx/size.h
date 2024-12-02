@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef BASE_GFX_SIZE_H__
-#define BASE_GFX_SIZE_H__
+#ifndef BASE_GFX_SIZE_H_
+#define BASE_GFX_SIZE_H_
 
 #include "build/build_config.h"
 
@@ -23,25 +23,27 @@ namespace gfx {
 class Size {
  public:
   Size() : width_(0), height_(0) {}
-  Size(int width, int height) : width_(width), height_(height) {}
+  Size(int width, int height);
 
   ~Size() {}
 
   int width() const { return width_; }
   int height() const { return height_; }
 
+  int GetArea() const { return width_ * height_; }
+
   void SetSize(int width, int height) {
-    width_ = width;
-    height_ = height;
+    set_width(width);
+    set_height(height);
   }
 
   void Enlarge(int width, int height) {
-    width_ += width;
-    height_ += height;
+    set_width(width_ + width);
+    set_height(height_ + height);
   }
 
-  void set_width(int width) { width_ = width; }
-  void set_height(int height) { height_ = height; }
+  void set_width(int width);
+  void set_height(int height);
 
   bool operator==(const Size& s) const {
     return width_ == s.width_ && height_ == s.height_;
@@ -52,7 +54,8 @@ class Size {
   }
 
   bool IsEmpty() const {
-    return !width_ && !height_;
+    // Size doesn't allow negative dimensions, so testing for 0 is enough.
+    return (width_ == 0) || (height_ == 0);
   }
 
 #if defined(OS_WIN)
@@ -72,4 +75,4 @@ inline std::ostream& operator<<(std::ostream& out, const gfx::Size& s) {
   return out << s.width() << "x" << s.height();
 }
 
-#endif // BASE_GFX_SIZE_H__
+#endif  // BASE_GFX_SIZE_H_

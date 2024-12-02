@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -42,17 +42,10 @@ const wchar_t kRendererStartupDialog[]         = L"renderer-startup-dialog";
 // Causes the plugin process to display a dialog on launch.
 const wchar_t kPluginStartupDialog[]           = L"plugin-startup-dialog";
 
-// Causes the test shell process to display a dialog on launch.
-const wchar_t kTestShellStartupDialog[]        = L"testshell-startup-dialog";
-
 // Specifies a command that should be used to launch the plugin process.  Useful
 // for running the plugin process through purify or quantify.  Ex:
 //   --plugin-launcher="path\to\purify /Run=yes"
 const wchar_t kPluginLauncher[]                = L"plugin-launcher";
-
-// The value of this switch tells the child process which
-// IPC channel the browser expects to use to communicate with it.
-const wchar_t kProcessChannelID[]              = L"channel";
 
 // The value of this switch tells the app to listen for and broadcast
 // testing-related messages on IPC channel with the given ID.
@@ -66,14 +59,20 @@ const wchar_t kHomePage[]                      = L"homepage";
 // Causes the process to run as renderer instead of as browser.
 const wchar_t kRendererProcess[]               = L"renderer";
 
-// Path to the exe to run for the renderer subprocess
-const wchar_t kRendererPath[]                  = L"renderer-path";
+// Causes the process to run as a renderer zygote.
+const wchar_t kZygoteProcess[]                 = L"zygote";
+
+// Path to the exe to run for the renderer and plugin subprocesses.
+const wchar_t kBrowserSubprocessPath[]         = L"browser-subprocess-path";
 
 // Causes the process to run as a plugin subprocess.
 const wchar_t kPluginProcess[]                 = L"plugin";
 
 // Causes the process to run as a worker subprocess.
 const wchar_t kWorkerProcess[]                 = L"worker";
+
+// Causes the process to run as a utility subprocess.
+const wchar_t kUtilityProcess[]                = L"utility";
 
 // Runs the renderer and plugins in the same process as the browser
 const wchar_t kSingleProcess[]                 = L"single-process";
@@ -95,6 +94,9 @@ const wchar_t kInProcessPlugins[]              = L"in-process-plugins";
 
 // Runs the renderer outside the sandbox.
 const wchar_t kNoSandbox[]                     = L"no-sandbox";
+
+// Disables the alternate window station for the renderer.
+const wchar_t kDisableAltWinstation[]         = L"disable-winsta";
 
 // Runs the plugin processes inside the sandbox.
 const wchar_t kSafePlugins[]                   = L"safe-plugins";
@@ -118,6 +120,12 @@ const wchar_t kPluginDataDir[]                 = L"plugin-data-dir";
 // UserDatadir.
 const wchar_t kDiskCacheDir[]                  = L"disk-cache-dir";
 
+// Forces the maximum disk space to be used by the disk cache, in bytes.
+const wchar_t kDiskCacheSize[]                  = L"disk-cache-size";
+
+// Forces the maximum disk space to be used by the media cache, in bytes.
+const wchar_t kMediaCacheSize[]                  = L"media-cache-size";
+
 // Whether the multiple profiles feature based on the user-data-dir flag is
 // enabled or not.
 const wchar_t kEnableUserDataDirProfiles[]     = L"enable-udd-profiles";
@@ -127,10 +135,6 @@ const wchar_t kParentProfile[]                 = L"parent-profile";
 
 // Specifies that the associated value should be launched in "application" mode.
 const wchar_t kApp[]                           = L"app";
-
-// Specifies the file that should be uploaded to the provided application. This
-// switch is expected to be used with --app option.
-const wchar_t kAppUploadFile[]                 = L"upload-file";
 
 // Specifies if the dom_automation_controller_ needs to be bound in the
 // renderer. This binding happens on per-frame basis and hence can potentially
@@ -151,15 +155,6 @@ const wchar_t kJavaScriptFlags[]               = L"js-flags";
 // system during first run and cached in the preferences afterwards.  This is a
 // string value, the 2 letter code from ISO 3166-1.
 const wchar_t kCountry[]                       = L"country";
-
-// The language file that we want to try to open.  Of the form
-// language[-country] where language is the 2 letter code from ISO-639.
-const wchar_t kLang[]                          = L"lang";
-
-// Will add kDebugOnStart to every child processes. If a value is passed, it
-// will be used as a filter to determine if the child process should have the
-// kDebugOnStart flag passed on or not.
-const wchar_t kDebugChildren[]                 = L"debug-children";
 
 // Will add kWaitForDebugger to every child processes. If a value is passed, it
 // will be used as a filter to determine if the child process should have the
@@ -218,6 +213,13 @@ const wchar_t kPlaybackMode[]                  = L"playback-mode";
 // Don't record/playback events when using record & playback.
 const wchar_t kNoEvents[]                      = L"no-events";
 
+// Support a separate switch that enables the v8 playback extension.
+// The extension causes javascript calls to Date.now() and Math.random()
+// to return consistent values, such that subsequent loads of the same
+// page will result in consistent js-generated data and XHR requests.
+// Pages may still be able to generate inconsistent data from plugins.
+const wchar_t kNoJsRandomness[]              = L"no-js-randomness";
+
 // Make Windows happy by allowing it to show "Enable access to this program"
 // checkbox in Add/Remove Programs->Set Program Access and Defaults. This
 // only shows an error box because the only way to hide Chrome is by
@@ -233,11 +235,25 @@ const wchar_t kMakeDefaultBrowser[]            = L"make-default-browser";
 // affects HTTP and HTTPS requests.
 const wchar_t kProxyServer[]                   = L"proxy-server";
 
-// Enable alternate proxy autoconfig implementation, which downloads PAC
-// scripts internally and executes them using V8 (as opposed to fetching
-// and executing using WinHTTP). This cannot be used in conjunction with
-// --single-process.
-const wchar_t kV8ProxyResolver[]               = L"v8-proxy-resolver";
+// Don't use a proxy server, always make direct connections. Overrides any
+// other proxy server flags that are passed.
+const wchar_t kNoProxyServer[]                 = L"no-proxy-server";
+
+// Specify a list of hosts for whom we bypass proxy settings and use direct
+// connections. Ignored if --proxy-auto-detect or --no-proxy-server are
+// also specified.
+// TODO(robertshield): Specify host format.
+const wchar_t kProxyBypassList[]         = L"proxy-bypass-list";
+
+// Force proxy auto-detection.
+const wchar_t kProxyAutoDetect[]         = L"proxy-auto-detect";
+
+// Use the pac script at the given URL
+const wchar_t kProxyPacUrl[]             = L"proxy-pac-url";
+
+// Use WinHTTP to fetch and evaluate PAC scripts. Otherwise the default is
+// to use Chromium's network stack to fetch, and V8 to evaluate.
+const wchar_t kWinHttpProxyResolver[]          = L"winhttp-proxy-resolver";
 
 // Chrome will support prefetching of DNS information.  Until this becomes
 // the default, we'll provide a command line switch.
@@ -246,6 +262,9 @@ extern const wchar_t kDnsPrefetchDisable[]     = L"dns-prefetch-disable";
 
 // Enables support to debug printing subsystem.
 const wchar_t kDebugPrint[]                    = L"debug-print";
+
+// Prints the pages on the screen.
+const wchar_t kPrint[] = L"print";
 
 // Allow initialization of all activex controls. This is only to help website
 // developers test their controls to see if they are compatible in Chrome.
@@ -292,6 +311,11 @@ const wchar_t kEnableWatchdog[]                = L"enable-watchdog";
 // whether or not it's actually the first run.
 const wchar_t kFirstRun[]                      = L"first-run";
 
+// Bypass the First Run experience when the browser is started, regardless of
+// whether or not it's actually the first run. Overrides kFirstRun in case
+// you're for some reason tempted to pass them both.
+const wchar_t kNoFirstRun[]                    = L"no-first-run";
+
 // Enable histograming of tasks served by MessageLoop. See about:histograms/Loop
 // for results, which show frequency of messages on each thread, including APC
 // count, object signalling count, etc.
@@ -326,8 +350,16 @@ const wchar_t kDisableJava[]                   = L"disable-java";
 // Prevent plugins from running.
 const wchar_t kDisablePlugins[]                = L"disable-plugins";
 
+// Force plugins to run (for ports in progress where they are turned off by
+// default).
+const wchar_t kEnablePlugins[]                 = L"enable-plugins";
+
 // Prevent images from loading.
 const wchar_t kDisableImages[]                 = L"disable-images";
+
+// Enable remote web font support. SVG font should always work whether
+// this option is specified or not.
+const wchar_t kEnableRemoteFonts[]                 = L"enable-remote-fonts";
 
 // Use the low fragmentation heap for the CRT.
 const wchar_t kUseLowFragHeapCrt[]             = L"use-lf-heap";
@@ -339,9 +371,6 @@ const wchar_t kGearsPluginPathOverride[]       = L"gears-plugin-path";
 
 // Enable the fastback page cache.
 const wchar_t kEnableFastback[]                = L"enable-fastback";
-
-// Allow loading of the javascript debugger UI from the filesystem.
-const wchar_t kJavaScriptDebuggerPath[]        = L"javascript-debugger-path";
 
 const wchar_t kDisableP13n[]                   = L"disable-p13n";
 
@@ -358,12 +387,21 @@ const wchar_t kEnableUserScripts[]             = L"enable-user-scripts";
 // Enable extensions.
 const wchar_t kEnableExtensions[]              = L"enable-extensions";
 
+// Frequency in seconds for Extensions auto-update.
+const wchar_t kExtensionsUpdateFrequency[] = L"extensions-update-frequency";
+
 // Install the extension specified in the argument.  This is for MIME type
 // handling so that users can double-click on an extension.
 const wchar_t kInstallExtension[]              = L"install-extension";
 
 // Load an extension from the specified directory.
 const wchar_t kLoadExtension[]                 = L"load-extension";
+
+// Package an extension to a .crx installable file from a given directory.
+const wchar_t kPackExtension[]              = L"pack-extension";
+
+// Optional PEM private key is to use in signing packaged .crx.
+const wchar_t kPackExtensionKey[]           = L"pack-extension-key";
 
 // Load an NPAPI plugin from the specified path.
 const wchar_t kLoadPlugin[]                    = L"load-plugin";
@@ -378,34 +416,139 @@ const wchar_t kIncognito[]                     = L"incognito";
 // http://b/issue?id=1432077 is fixed.
 const wchar_t kEnableRendererAccessibility[] = L"enable-renderer-accessibility";
 
-// Enable HTML5 Video/Audio tag support
-const wchar_t kEnableVideo[]                   = L"enable-video";
-
 // Pass the name of the current running automated test to Chrome.
 const wchar_t kTestName[]                      = L"test-name";
 
 // On POSIX only: the contents of this flag are prepended to the renderer
-// command line. (Useful values might be "valgrind" or "gdb --args")
+// command line. Useful values might be "valgrind" or "xterm -e gdb --args".
 const wchar_t kRendererCmdPrefix[]             = L"renderer-cmd-prefix";
+
+// On POSIX only: the contents of this flag are prepended to the utility
+// process command line. Useful values might be "valgrind" or "xterm -e gdb
+// --args".
+const wchar_t kUtilityCmdPrefix[]             = L"utility-cmd-prefix";
 
 // Temparary option for new ftp implemetation.
 const wchar_t kNewFtp[]                        = L"new-ftp";
 
-// On POSIX only: use FIFO for IPC channels so that "unrelated" process
-// can connect to a channel, provided it knows its name. For debugging purposes.
-const wchar_t kIPCUseFIFO[]                    = L"ipc-use-fifo";
+// Enable Native Web Worker support
+const wchar_t kEnableNativeWebWorkers[]        = L"enable-native-web-workers";
 
-// If this flag is set open out of process developer tools window instead of
-// Console Debugger when user clicks "Debug JavaScript".
-const wchar_t kEnableOutOfProcessDevTools[]    = L"enable-oop-devtools";
+// Causes the worker process allocation to use as many processes as cores.
+const wchar_t kWebWorkerProcessPerCore[]       = L"web-worker-process-per-core";
 
-// Enable HTML5 Worker support
-const wchar_t kEnableWebWorkers[]              = L"enable-web-workers";
-
-// Enables experimental views under gtk.
-const wchar_t kViewsGtk[] = L"views-gtk";
+// Causes workers to run together in one process, depending on their domains.
+// Note this is duplicated in webworkerclient_impl.cc
+const wchar_t kWebWorkerShareProcesses[]       = L"web-worker-share-processes";
 
 // Enables the bookmark menu.
-const wchar_t kBookmarkMenu[] = L"bookmark-menu";
+const wchar_t kBookmarkMenu[]                  = L"bookmark-menu";
+
+// Enables auto spell correction.
+const wchar_t kAutoSpellCorrect[] = L"auto-spell-correct";
+
+// Enables StatsTable, logging statistics to a global named shared memory table.
+const wchar_t kEnableStatsTable[]              = L"enable-stats-table";
+// Disables the Omnibox2 popup and functionality.
+const wchar_t kDisableOmnibox2[]                = L"disable-omnibox2";
+
+// Replaces the audio IPC layer for <audio> and <video> with a mock audio
+// device, useful when using remote desktop or machines without sound cards.
+// This is temporary until we fix the underlying problem.
+//
+// TODO(scherkus): remove --disable-audio when we have a proper fallback
+// mechanism.
+const wchar_t kDisableAudio[]                  = L"disable-audio";
+
+// Replaces the buffered data source for <audio> and <video> with a simplified
+// resource loader that downloads the entire resource into memory.
+//
+// TODO(scherkus): remove --simple-data-source when our media resource loading
+// is cleaned up and playback testing completed.
+const wchar_t kSimpleDataSource[]              = L"simple-data-source";
+
+// Some field tests may rendomized in the browser, and the randomly selected
+// outcome needs to be propogated to the renderer.  For instance, this is used
+// to modify histograms recorded in the renderer, or to get the renderer to
+// also set of its state (initialize, or not initialize components) to match the
+// experiment(s).
+// The argument is a string-ized list of experiment names, and the associated
+// value that was randomly selected.  In the recent implementetaion, the
+// persistent representation generated by field_trial.cc and later decoded, is a
+// list of name and value pairs, separated by slashes. See field trial.cc for
+// current details.
+const wchar_t kForceFieldTestNameAndValue[] = L"force-fieldtest";
+
+// Allows the new tab page resource to be loaded from a local HTML file. This
+// should be a path to the HTML file that you want to use for the new tab page.
+const wchar_t kNewTabPage[] = L"new-tab-page";
+
+// Switches back to the old new tab page.
+const wchar_t kOldNewTabPage[] = L"old-new-tab-page";
+
+// Enables the backend service for web resources, used in the new tab page for
+// loading tips and recommendations from a JSON feed.
+const wchar_t kDisableWebResources[] = L"disable-web-resources";
+
+// Whether we should prevent the new tab page from showing the first run
+// notification.
+const wchar_t kDisableNewTabFirstRun[] = L"disable-new-tab-first-run";
+
+// Disables the default browser check. Useful for UI/browser tests where we want
+// to avoid having the default browser info-bar displayed.
+const wchar_t kNoDefaultBrowserCheck[] = L"no-default-browser-check";
+
+// Enables the Privacy Blacklist with the specified data file.
+// The file contains data from all imported blacklists.
+const wchar_t kPrivacyBlacklist[] = L"privacy-blacklist";
+
+// Enables the benchmarking extensions.
+const wchar_t kEnableBenchmarking[] = L"enable-benchmarking";
+
+// The prefix used when starting the zygote process. (i.e. 'gdb --args')
+const wchar_t kZygoteCmdPrefix[] = L"zygote-cmd-prefix";
+
+// Enables using ThumbnailStore instead of ThumbnailDatabase for setting and
+// getting thumbnails for the new tab page.
+const wchar_t kThumbnailStore[] = L"thumbnail-store";
+
+// Experimental. Shows a dialog asking the user to try chrome. This flag
+// is to be used only by the upgrade process.
+const wchar_t kTryChromeAgain[] = L"try-chrome-again";
+
+// The file descriptor limit is set to the value of this switch, subject to the
+// OS hard limits. Useful for testing that file descriptor exhaustion is handled
+// gracefully.
+const wchar_t kFileDescriptorLimit[] = L"file-descriptor-limit";
+
+// On Windows, converts the page to the currently-installed monitor profile.
+// This does NOT enable color management for images. The source is still assumed
+// to be sRGB.
+const wchar_t kEnableMonitorProfile[] = L"enable-monitor-profile";
+
+// Enable WebKit's XSSAuditor to mitigate reflective XSS.  The XSSAuditor is
+// still experimental.
+const wchar_t kEnableXSSAuditor[] = L"enable-xss-auditor";
+
+// A flag, generated internally by Chrome for renderer command lines (Linux
+// only). It tells the renderer to enable crash dumping since it cannot access
+// the user's home directory to find out for itself.
+const wchar_t kRendererCrashDump[] = L"renderer-crash-dumping";
+
+// Enables the new Tabstrip on Windows.
+const wchar_t kEnableTabtastic2[] = L"enable-tabtastic2";
+
+// Number of tabs to pin on startup. This is not use if session restore is
+// enabled.
+const wchar_t kPinnedTabCount[] = L"pinned-tab-count";
+
+// Enable local storage.  Still buggy.
+const wchar_t kEnableLocalStorage[] = L"enable-local-storage";
+
+// Enable session storage.  Still buggy.
+const wchar_t kEnableSessionStorage[] = L"enable-session-storage";
+
+// Disables the custom JumpList on Windows 7.
+const wchar_t kDisableCustomJumpList[] = L"disable-custom-jumplist";
 
 }  // namespace switches

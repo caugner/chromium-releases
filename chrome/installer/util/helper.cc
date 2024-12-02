@@ -16,22 +16,33 @@
 #include "chrome/installer/util/version.h"
 #include "chrome/installer/util/work_item_list.h"
 
-std::wstring installer::GetChromeInstallPath(bool system_install) {
-  std::wstring install_path;
+namespace {
+
+std::wstring GetChromeInstallBasePath(bool system_install,
+                                      const wchar_t* subpath) {
+  FilePath install_path;
   if (system_install) {
     PathService::Get(base::DIR_PROGRAM_FILES, &install_path);
   } else {
     PathService::Get(base::DIR_LOCAL_APP_DATA, &install_path);
   }
-
   if (!install_path.empty()) {
     BrowserDistribution* dist = BrowserDistribution::GetDistribution();
-    file_util::AppendToPath(&install_path, dist->GetInstallSubDir());
-    file_util::AppendToPath(&install_path,
-                            std::wstring(installer_util::kInstallBinaryDir));
+    install_path = install_path.Append(dist->GetInstallSubDir());
+    install_path = install_path.Append(subpath);
   }
+  return install_path.ToWStringHack();
+}
 
-  return install_path;
+}  // namespace
+
+std::wstring installer::GetChromeInstallPath(bool system_install) {
+  return GetChromeInstallBasePath(system_install,
+                                  installer_util::kInstallBinaryDir);
+}
+
+std::wstring installer::GetChromeUserDataPath() {
+  return GetChromeInstallBasePath(false, installer_util::kInstallUserDataDir);
 }
 
 bool installer::LaunchChrome(bool system_install) {
@@ -50,7 +61,7 @@ bool installer::LaunchChromeAndWaitForResult(bool system_install,
     return false;
   file_util::AppendToPath(&chrome_exe, installer_util::kChromeExe);
 
-  std::wstring command_line(chrome_exe);
+  std::wstring command_line(L"\"" + chrome_exe + L"\"");
   command_line.append(options);
   STARTUPINFOW si = {sizeof(si)};
   PROCESS_INFORMATION pi = {0};

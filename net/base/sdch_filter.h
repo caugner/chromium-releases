@@ -15,7 +15,6 @@
 #define NET_BASE_SDCH_FILTER_H_
 
 #include <string>
-#include <vector>
 
 #include "base/scoped_ptr.h"
 #include "net/base/filter.h"
@@ -54,10 +53,6 @@ class SdchFilter : public Filter {
     META_REFRESH_RECOVERY,  // Decoding error being handled by a meta-refresh.
     PASS_THROUGH,  // Non-sdch content being passed without alteration.
   };
-
-  // Update the read_times_ array with time estimates for the number of packets
-  // read so far.
-  void UpdateReadTimes();
 
   // Identify the suggested dictionary, and initialize underlying decompressor.
   Filter::FilterStatus InitializeDictionary();
@@ -105,12 +100,6 @@ class SdchFilter : public Filter {
   size_t source_bytes_;
   size_t output_bytes_;
 
-  // Record of packet processing times for this filter.  Used only for stats
-  // generations in histograms.  There is one time entry each time the byte
-  // count receieved exceeds the next multiple of 1430 bytes (a common
-  // per-TCP/IP-packet payload size).
-  std::vector<base::Time> read_times_;
-
   // Error recovery in content type may add an sdch filter type, in which case
   // we should gracefully perform pass through if the format is incorrect, or
   // an applicable dictionary can't be found.
@@ -119,13 +108,6 @@ class SdchFilter : public Filter {
   // The URL that is currently being filtered.
   // This is used to restrict use of a dictionary to a specific URL or path.
   GURL url_;
-
-  // To facilitate histogramming by individual filters, we store the connect
-  // time for the corresponding HTTP transaction, as well as whether this time
-  // was recalled from a cached entry.  The time is approximate, and may be
-  // bogus if the data was gotten from cache (i.e., it may be LOOOONG ago).
-  const base::Time connect_time_;
-  const bool was_cached_;
 
   // To facilitate error recovery, allow filter to know if content is text/html
   // by checking within this mime type (we may do a meta-refresh via html).

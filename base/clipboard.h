@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,10 +9,14 @@
 #include <string>
 #include <vector>
 
-#include "base/file_path.h"
 #include "base/process.h"
 #include "base/string16.h"
-#include "base/gfx/size.h"
+
+namespace gfx {
+class Size;
+}
+
+class FilePath;
 
 class Clipboard {
  public:
@@ -36,7 +40,7 @@ class Clipboard {
     CBF_FILES,
     CBF_WEBKIT,
     CBF_BITMAP,
-    CBF_SMBITMAP // bitmap from shared memory
+    CBF_SMBITMAP  // bitmap from shared memory
   };
 
   // ObjectMap is a map from ObjectType to associated data.

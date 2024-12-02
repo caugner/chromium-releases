@@ -16,29 +16,34 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/scoped_ptr.h"
+#include "chrome/browser/automation/automation_autocomplete_edit_tracker.h"
 #include "chrome/browser/automation/automation_browser_tracker.h"
+#include "chrome/browser/automation/automation_resource_message_filter.h"
 #include "chrome/browser/automation/automation_tab_tracker.h"
+#include "chrome/browser/automation/automation_window_tracker.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
-#include "chrome/common/ipc_message.h"
-#include "chrome/common/ipc_sync_channel.h"
-#include "chrome/common/notification_observer.h"
-#include "chrome/test/automation/automation_messages.h"
-#include "chrome/views/event.h"
-#include "webkit/glue/find_in_page_request.h"
-
+#include "chrome/common/notification_registrar.h"
+#include "chrome/test/automation/automation_constants.h"
+#include "ipc/ipc_message.h"
+#include "ipc/ipc_channel.h"
 #if defined(OS_WIN)
-// TODO(port): enable these.
-#include "chrome/browser/automation/automation_autocomplete_edit_tracker.h"
-#include "chrome/browser/automation/automation_constrained_window_tracker.h"
-#include "chrome/browser/automation/automation_window_tracker.h"
-enum AutomationMsg_NavigationResponseValues;
-#endif
+#include "views/event.h"
+#endif  // defined(OS_WIN)
+
+struct AutomationMsg_Find_Params;
+
+namespace IPC {
+struct Reposition_Params;
+struct ExternalTabSettings;
+}
 
 class LoginHandler;
 class NavigationControllerRestoredObserver;
 class ExternalTabContainer;
+class ExtensionPortContainer;
 struct AutocompleteMatchData;
 
 class AutomationProvider : public base::RefCounted<AutomationProvider>,
@@ -48,10 +53,12 @@ class AutomationProvider : public base::RefCounted<AutomationProvider>,
   explicit AutomationProvider(Profile* profile);
   virtual ~AutomationProvider();
 
+  Profile* profile() const { return profile_; }
+
   // Establishes a connection to an automation client, if present.
   // An AutomationProxy should be established (probably in a different process)
   // before calling this.
-  void ConnectToChannel(const std::wstring& channel_id);
+  void ConnectToChannel(const std::string& channel_id);
 
   // Sets the number of tabs that we expect; when this number of tabs has
   // loaded, an AutomationMsg_InitialLoadsComplete message is sent.
@@ -83,7 +90,6 @@ class AutomationProvider : public base::RefCounted<AutomationProvider>,
   // NOT be deleted and should be released by calling the corresponding
   // RemoveTabStripObserver method.
   NotificationObserver* AddTabStripObserver(Browser* parent,
-                                            int32 routing_id,
                                             IPC::Message* reply_message);
   void RemoveTabStripObserver(NotificationObserver* obs);
 
@@ -101,6 +107,14 @@ class AutomationProvider : public base::RefCounted<AutomationProvider>,
   // not just logins.
   void AddLoginHandler(NavigationController* tab, LoginHandler* handler);
   void RemoveLoginHandler(NavigationController* tab);
+
+  // Add an extension port container.
+  // Takes ownership of the container.
+  void AddPortContainer(ExtensionPortContainer* port);
+  // Remove and delete the port container.
+  void RemovePortContainer(ExtensionPortContainer* port);
+  // Get the port container for the given port id.
+  ExtensionPortContainer* GetPortContainer(int port_id) const;
 
   // IPC implementations
   virtual bool Send(IPC::Message* msg);
@@ -133,16 +147,23 @@ class AutomationProvider : public base::RefCounted<AutomationProvider>,
                  int handle,
                  int* response_value);
   void GetBrowserWindowCount(int* window_count);
+  void GetBrowserLocale(string16* locale);
+  void GetNormalBrowserWindowCount(int* window_count);
   void GetShowingAppModalDialog(bool* showing_dialog, int* dialog_button);
   void ClickAppModalDialogButton(int button, bool* success);
+  // Be aware that the browser window returned might be of non TYPE_NORMAL
+  // or in incognito mode.
   void GetBrowserWindow(int index, int* handle);
+  void FindNormalBrowserWindow(int* handle);
   void GetLastActiveBrowserWindow(int* handle);
   void GetActiveWindow(int* handle);
 #if defined(OS_WIN)
   // TODO(port): Replace HWND.
   void GetWindowHWND(int handle, HWND* win32_handle);
 #endif  // defined(OS_WIN)
-  void ExecuteBrowserCommand(int handle, int command, bool* success);
+  void ExecuteBrowserCommandAsync(int handle, int command, bool* success);
+  void ExecuteBrowserCommand(int handle, int command,
+                             IPC::Message* reply_message);
   void WindowGetViewBounds(int handle, int view_id, bool screen_coordinates,
                            bool* success, gfx::Rect* bounds);
 #if defined(OS_WIN)
@@ -161,6 +182,7 @@ class AutomationProvider : public base::RefCounted<AutomationProvider>,
                               int handle,
                               wchar_t key,
                               int flags);
+  void SetWindowBounds(int handle, const gfx::Rect& bounds, bool* result);
   void SetWindowVisible(int handle, bool visible, bool* result);
   void IsWindowActive(int handle, bool* success, bool* is_active);
   void ActivateWindow(int handle);
@@ -173,6 +195,7 @@ class AutomationProvider : public base::RefCounted<AutomationProvider>,
 #endif  // defined(OS_WIN)
   void GetTabProcessID(int handle, int* process_id);
   void GetTabTitle(int handle, int* title_string_size, std::wstring* title);
+  void GetTabIndex(int handle, int* tabstrip_index);
   void GetTabURL(int handle, bool* success, GURL* url);
   void HandleUnused(const IPC::Message& message, int handle);
   void NavigateToURL(int handle, const GURL& url, IPC::Message* reply_message);
@@ -192,7 +215,10 @@ class AutomationProvider : public base::RefCounted<AutomationProvider>,
                          const std::wstring& script,
                          IPC::Message* reply_message);
   void GetShelfVisibility(int handle, bool* visible);
+  void SetShelfVisibility(int handle, bool visible);
   void SetFilteredInet(const IPC::Message& message, bool enabled);
+  void GetFilteredInetHitCount(int* hit_count);
+  void SetProxyConfig(const std::string& new_proxy_config);
 
 #if defined(OS_WIN)
   // TODO(port): Replace POINT.
@@ -208,18 +234,10 @@ class AutomationProvider : public base::RefCounted<AutomationProvider>,
   // Returns the Browser if found.
   Browser* FindAndActivateTab(NavigationController* contents);
 
-  // Apply an accelerator with id (like IDC_BACK, IDC_FORWARD ...)
-  // to the Browser with given handle.
+  // Deprecated.
   void ApplyAccelerator(int handle, int id);
 
   void GetConstrainedWindowCount(int handle, int* count);
-  void GetConstrainedWindow(int handle, int index, int* cwindow_handle);
-
-  void GetConstrainedTitle(int handle, int* title,
-                           std::wstring* title_string_size);
-
-  void GetConstrainedWindowBounds(int handle, bool* exists,
-                                  gfx::Rect* rect);
 
   // This function has been deprecated, please use HandleFindRequest.
   void HandleFindInPageRequest(int handle,
@@ -232,7 +250,7 @@ class AutomationProvider : public base::RefCounted<AutomationProvider>,
   // Responds to the FindInPage request, retrieves the search query parameters,
   // launches an observer to listen for results and issues a StartFind request.
   void HandleFindRequest(int handle,
-                         const FindInPageRequest& request,
+                         const AutomationMsg_Find_Params& params,
                          IPC::Message* reply_message);
 
   // Responds to requests to open the FindInPage window.
@@ -265,40 +283,42 @@ class AutomationProvider : public base::RefCounted<AutomationProvider>,
   void GetAutocompleteEditForBrowser(int browser_handle, bool* success,
                                      int* autocomplete_edit_handle);
 
-  void OpenNewBrowserWindow(int show_command);
+  // If |show| is true, call Show() on the new window after creating it.
+  void OpenNewBrowserWindow(bool show, IPC::Message* reply_message);
 
   void ShowInterstitialPage(int tab_handle,
                             const std::string& html_text,
                             IPC::Message* reply_message);
   void HideInterstitialPage(int tab_handle, bool* success);
 
-#if defined(OS_WIN)
-  // TODO(port): Re-enable.
-  void CreateExternalTab(HWND parent, const gfx::Rect& dimensions,
-                         unsigned int style, HWND* tab_container_window,
+  void CreateExternalTab(const IPC::ExternalTabSettings& settings,
+                         gfx::NativeWindow* tab_container_window,
+                         gfx::NativeWindow* tab_window,
                          int* tab_handle);
+
   void NavigateInExternalTab(
       int handle, const GURL& url,
       AutomationMsg_NavigationResponseValues* status);
+
+// TODO(port): remove windowisms.
+#if defined(OS_WIN)
   // The container of an externally hosted tab calls this to reflect any
   // accelerator keys that it did not process. This gives the tab a chance
   // to handle the keys
   void ProcessUnhandledAccelerator(const IPC::Message& message, int handle,
                                    const MSG& msg);
+#endif
 
   void SetInitialFocus(const IPC::Message& message, int handle, bool reverse);
 
   // See comment in AutomationMsg_WaitForTabToBeRestored.
   void WaitForTabToBeRestored(int tab_handle, IPC::Message* reply_message);
 
-  // This sets the keyboard accelerators to be used by an externally
-  // hosted tab. This call is not valid on a regular tab hosted within
-  // Chrome.
-  void SetAcceleratorsForTab(int handle, HACCEL accel_table,
-                             int accel_entry_count, bool* status);
-
+// TODO(port): remove windowisms.
+#if defined(OS_WIN)
   void OnTabReposition(int tab_handle,
                        const IPC::Reposition_Params& params);
+  void OnForwardContextMenuCommandToChrome(int tab_handle, int command);
 #endif  // defined(OS_WIN)
 
   // Gets the security state for the tab associated to the specified |handle|.
@@ -328,6 +348,9 @@ class AutomationProvider : public base::RefCounted<AutomationProvider>,
 
   // Prints the current tab immediately.
   void PrintNow(int tab_handle, IPC::Message* reply_message);
+
+  // Asynchronous request for printing the current tab.
+  void PrintAsync(int tab_handle);
 
   // Save the current web page.
   void SavePage(int tab_handle,
@@ -414,10 +437,18 @@ class AutomationProvider : public base::RefCounted<AutomationProvider>,
 
   void SavePackageShouldPromptUser(bool should_prompt);
 
-  // Convert a tab handle into a WebContents. If |tab| is non-NULL a pointer
+  // Enables extension automation (for e.g. UITests).
+  void SetEnableExtensionAutomation(bool automation_enabled);
+
+  void GetWindowTitle(int handle, string16* text);
+
+  // Returns the number of blocked popups in the tab |handle|.
+  void GetBlockedPopupCount(int handle, int* count);
+
+  // Convert a tab handle into a TabContents. If |tab| is non-NULL a pointer
   // to the tab is also returned. Returns NULL in case of failure or if the tab
-  // is not of the WebContents type.
-  WebContents* GetWebContentsForHandle(int handle, NavigationController** tab);
+  // is not of the TabContents type.
+  TabContents* GetTabContentsForHandle(int handle, NavigationController** tab);
 
   ExternalTabContainer* GetExternalTabForHandle(int handle);
 
@@ -426,10 +457,17 @@ class AutomationProvider : public base::RefCounted<AutomationProvider>,
       HistoryService::Handle request_handle,
       GURL from_url,
       bool success,
-      HistoryService::RedirectList* redirects);
+      history::RedirectList* redirects);
+
+  // Determine if the message from the external host represents a browser
+  // event, and if so dispatch it.
+  bool InterceptBrowserEventMessageFromExternalHost(const std::string& message,
+                                                    const std::string& origin,
+                                                    const std::string& target);
 
   typedef ObserverList<NotificationObserver> NotificationObserverList;
   typedef std::map<NavigationController*, LoginHandler*> LoginHandlerMap;
+  typedef std::map<int, ExtensionPortContainer*> PortContainerMap;
 
   scoped_ptr<IPC::ChannelProxy> channel_;
   scoped_ptr<NotificationObserver> initial_load_observer_;
@@ -439,27 +477,20 @@ class AutomationProvider : public base::RefCounted<AutomationProvider>,
   scoped_ptr<NotificationObserver> dom_inspector_observer_;
   scoped_ptr<AutomationBrowserTracker> browser_tracker_;
   scoped_ptr<AutomationTabTracker> tab_tracker_;
-#if defined(OS_WIN)
-  // TODO(port): Enable as trackers get ported.
-  scoped_ptr<AutomationConstrainedWindowTracker> cwindow_tracker_;
   scoped_ptr<AutomationWindowTracker> window_tracker_;
   scoped_ptr<AutomationAutocompleteEditTracker> autocomplete_edit_tracker_;
-#endif
   scoped_ptr<NavigationControllerRestoredObserver> restore_tracker_;
   LoginHandlerMap login_handler_map_;
+  PortContainerMap port_containers_;
   NotificationObserverList notification_observer_list_;
+  scoped_refptr<AutomationResourceMessageFilter>
+      automation_resource_message_filter_;
 
   // Handle for an in-process redirect query. We expect only one redirect query
   // at a time (we should have only one caller, and it will block while waiting
   // for the results) so there is only one handle. When non-0, indicates a
-  // query in progress. The routing ID will be set when the query is valid so
-  // we know where to send the response.
+  // query in progress.
   HistoryService::Handle redirect_query_;
-  int redirect_query_routing_id_;
-
-  // routing id for inspect element request so that we can send back the
-  // response later
-  int inspect_element_routing_id_;
 
   // Consumer for asynchronous history queries.
   CancelableRequestConsumer consumer_;
@@ -499,6 +530,8 @@ class TestingAutomationProvider : public AutomationProvider,
                        const NotificationDetails& details);
 
   void OnRemoveProvider();  // Called via PostTask
+
+  NotificationRegistrar registrar_;
 };
 
 #endif  // CHROME_BROWSER_AUTOMATION_AUTOMATION_PROVIDER_H_

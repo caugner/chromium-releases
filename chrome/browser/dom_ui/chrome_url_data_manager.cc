@@ -4,16 +4,20 @@
 
 #include "chrome/browser/dom_ui/chrome_url_data_manager.h"
 
+#include "app/l10n_util.h"
 #include "base/file_util.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/string_util.h"
 #include "base/thread.h"
+#include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/ref_counted_util.h"
 #include "chrome/common/url_constants.h"
 #include "googleurl/src/url_util.h"
+#include "net/base/io_buffer.h"
+#include "net/base/net_errors.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_file_job.h"
 #include "net/url_request/url_request_job.h"
@@ -24,9 +28,11 @@
 #include "chrome/personalization/personalization.h"
 #endif
 
+#include "grit/locale_settings.h"
+
 // The URL scheme used for internal chrome resources.
 // TODO(glen): Choose a better location for this.
-static const char kChromeURLScheme[] = "chrome-ui";
+static const char kChromeURLScheme[] = "chrome";
 
 // The single global instance of ChromeURLDataManager.
 ChromeURLDataManager chrome_url_data_manager;
@@ -101,7 +107,7 @@ void RegisterURLRequestChromeJob() {
   if (PathService::Get(chrome::DIR_INSPECTOR, &inspector_dir)) {
     // TODO(yurys): remove "inspector" source when new developer tools support
     // all features of in-process Web Inspector and Console Debugger. For the
-    // time being we need to serve the same content from chrome-ui://inspector
+    // time being we need to serve the same content from chrome://inspector
     // for the Console Debugger and in-process Web Inspector.
     chrome_url_data_manager.AddFileSource("inspector", inspector_dir);
     chrome_url_data_manager.AddFileSource(chrome::kChromeUIDevToolsHost,
@@ -109,6 +115,8 @@ void RegisterURLRequestChromeJob() {
   }
 
   URLRequest::RegisterProtocolFactory(kChromeURLScheme,
+                                      &ChromeURLDataManager::Factory);
+  URLRequest::RegisterProtocolFactory(chrome::kPrintScheme,
                                       &ChromeURLDataManager::Factory);
 #ifdef CHROME_PERSONALIZATION
   url_util::AddStandardScheme(kPersonalizationScheme);
@@ -131,9 +139,10 @@ void ChromeURLDataManager::URLToRequest(const GURL& url,
                                         std::string* path) {
 #ifdef CHROME_PERSONALIZATION
   DCHECK(url.SchemeIs(kChromeURLScheme) ||
-         url.SchemeIs(kPersonalizationScheme));
+         url.SchemeIs(kPersonalizationScheme) ||
+         url.SchemeIs(chrome::kPrintScheme));
 #else
-  DCHECK(url.SchemeIs(kChromeURLScheme));
+  DCHECK(url.SchemeIs(kChromeURLScheme) || url.SchemeIs(chrome::kPrintScheme));
 #endif
 
   if (!url.is_valid()) {
@@ -141,15 +150,22 @@ void ChromeURLDataManager::URLToRequest(const GURL& url,
     return;
   }
 
-  // Our input looks like: chrome-ui://source_name/extra_bits?foo .
+  // Our input looks like: chrome://source_name/extra_bits?foo .
   // So the url's "host" is our source, and everything after the host is
-  // the path.
-  source_name->assign(url.host());
+  // the path. For print:url schemes, we assume its always print.
+  if (url.SchemeIs(chrome::kPrintScheme))
+    source_name->assign(chrome::kPrintScheme);
+  else
+    source_name->assign(url.host());
 
   const std::string& spec = url.possibly_invalid_spec();
   const url_parse::Parsed& parsed = url.parsed_for_possibly_invalid_spec();
   int offset = parsed.CountCharactersBefore(url_parse::Parsed::PATH, false);
-  ++offset;  // Skip the slash at the beginning of the path.
+
+  // We need to skip the slash at the beginning of the path for non print urls.
+  if (!url.SchemeIs(chrome::kPrintScheme))
+    ++offset;
+
   if (offset < static_cast<int>(spec.size()))
     path->assign(spec.substr(offset));
 }
@@ -191,6 +207,16 @@ void ChromeURLDataManager::AddFileSource(const std::string& source_name,
 void ChromeURLDataManager::RemoveFileSource(const std::string& source_name) {
   DCHECK(file_sources_.count(source_name) == 1);
   file_sources_.erase(source_name);
+}
+
+bool ChromeURLDataManager::HasPendingJob(URLRequestChromeJob* job) const {
+  for (PendingRequestMap::const_iterator i = pending_requests_.begin();
+       i != pending_requests_.end(); ++i) {
+    if (i->second == job)
+      return true;
+  }
+
+  return false;
 }
 
 bool ChromeURLDataManager::StartRequest(const GURL& url,
@@ -259,6 +285,18 @@ void ChromeURLDataManager::DataSource::SendResponse(
 }
 
 // static
+void ChromeURLDataManager::DataSource::SetFontAndTextDirection(
+    DictionaryValue* localized_strings) {
+  localized_strings->SetString(L"fontfamily",
+      l10n_util::GetString(IDS_WEB_FONT_FAMILY));
+  localized_strings->SetString(L"fontsize",
+      l10n_util::GetString(IDS_WEB_FONT_SIZE));
+
+  localized_strings->SetString(L"textdirection",
+      (l10n_util::GetTextDirection() == l10n_util::RIGHT_TO_LEFT) ?
+       L"rtl" : L"ltr");
+}
+
 URLRequestJob* ChromeURLDataManager::Factory(URLRequest* request,
                                              const std::string& scheme) {
   // Try first with a file handler
@@ -275,6 +313,7 @@ URLRequestChromeJob::URLRequestChromeJob(URLRequest* request)
     : URLRequestJob(request), data_offset_(0) {}
 
 URLRequestChromeJob::~URLRequestChromeJob() {
+  CHECK(!chrome_url_data_manager.HasPendingJob(this));
 }
 
 void URLRequestChromeJob::Start() {
@@ -302,6 +341,7 @@ void URLRequestChromeJob::DataAvailable(RefCountedBytes* bytes) {
     data_ = bytes;
     int bytes_read;
     if (pending_buf_.get()) {
+      CHECK(pending_buf_->data());
       CompleteRead(pending_buf_, pending_buf_size_, &bytes_read);
       pending_buf_ = NULL;
       NotifyReadComplete(bytes_read);
@@ -317,6 +357,7 @@ bool URLRequestChromeJob::ReadRawData(net::IOBuffer* buf, int buf_size,
   if (!data_.get()) {
     SetStatus(URLRequestStatus(URLRequestStatus::IO_PENDING, 0));
     DCHECK(!pending_buf_.get());
+    CHECK(buf->data());
     pending_buf_ = buf;
     pending_buf_size_ = buf_size;
     return false;  // Tell the caller we're still waiting for data.

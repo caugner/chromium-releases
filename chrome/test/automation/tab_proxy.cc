@@ -11,7 +11,6 @@
 #include "chrome/test/automation/automation_constants.h"
 #include "chrome/test/automation/automation_messages.h"
 #include "chrome/test/automation/automation_proxy.h"
-#include "chrome/test/automation/constrained_window_proxy.h"
 #include "googleurl/src/gurl.h"
 
 bool TabProxy::GetTabTitle(std::wstring* title) const {
@@ -30,17 +29,16 @@ bool TabProxy::GetTabTitle(std::wstring* title) const {
   return succeeded;
 }
 
-bool TabProxy::IsShelfVisible(bool* is_visible) {
+bool TabProxy::GetTabIndex(int* index) const {
   if (!is_valid())
     return false;
 
-  if (!is_visible) {
+  if (!index) {
     NOTREACHED();
     return false;
   }
 
-  return sender_->Send(new AutomationMsg_ShelfVisibility(0, handle_,
-                                                         is_visible));
+  return sender_->Send(new AutomationMsg_TabIndex(0, handle_, index));
 }
 
 int TabProxy::FindInPage(const std::wstring& search_string,
@@ -51,17 +49,17 @@ int TabProxy::FindInPage(const std::wstring& search_string,
   if (!is_valid())
     return -1;
 
-  FindInPageRequest request = {0};
-  request.search_string = WideToUTF16(search_string);
-  request.find_next = find_next;
-  // The explicit comparison to TRUE avoids a warning (C4800).
-  request.match_case = match_case == TRUE;
-  request.forward = forward == TRUE;
+  AutomationMsg_Find_Params params;
+  params.unused = 0;
+  params.search_string = WideToUTF16Hack(search_string);
+  params.find_next = find_next;
+  params.match_case = (match_case == CASE_SENSITIVE);
+  params.forward = (forward == FWD);
 
   int matches = 0;
   int ordinal2 = 0;
   bool succeeded = sender_->Send(new AutomationMsg_Find(0, handle_,
-                                                        request,
+                                                        params,
                                                         &ordinal2,
                                                         &matches));
   if (!succeeded)
@@ -325,21 +323,6 @@ bool TabProxy::GetConstrainedWindowCount(int* count) const {
       0, handle_, count));
 }
 
-ConstrainedWindowProxy* TabProxy::GetConstrainedWindow(
-    int window_index) const {
-  if (!is_valid())
-    return NULL;
-
-  int handle = 0;
-  if (sender_->Send(new AutomationMsg_ConstrainedWindow(0, handle_,
-                                                        window_index,
-                                                        &handle))) {
-    return new ConstrainedWindowProxy(sender_, tracker_, handle);
-  }
-
-  return NULL;
-}
-
 bool TabProxy::WaitForChildWindowCountToChange(int count, int* new_count,
                                                int wait_timeout) {
   int intervals = std::min(wait_timeout/automation::kSleepTime, 1);
@@ -348,6 +331,33 @@ bool TabProxy::WaitForChildWindowCountToChange(int count, int* new_count,
     bool succeeded = GetConstrainedWindowCount(new_count);
     if (!succeeded) return false;
     if (count != *new_count) return true;
+  }
+  // Constrained Window count did not change, return false.
+  return false;
+}
+
+bool TabProxy::GetBlockedPopupCount(int* count) const {
+  if (!is_valid())
+    return false;
+
+  if (!count) {
+    NOTREACHED();
+    return false;
+  }
+
+  return sender_->Send(new AutomationMsg_BlockedPopupCount(
+      0, handle_, count));
+}
+
+bool TabProxy::WaitForBlockedPopupCountToChangeTo(int target_count,
+                                                  int wait_timeout) {
+  int intervals = std::min(wait_timeout/automation::kSleepTime, 1);
+  for (int i = 0; i < intervals; ++i) {
+    PlatformThread::Sleep(automation::kSleepTime);
+    int new_count = -1;
+    bool succeeded = GetBlockedPopupCount(&new_count);
+    if (!succeeded) return false;
+    if (target_count == new_count) return true;
   }
   // Constrained Window count did not change, return false.
   return false;
@@ -441,17 +451,6 @@ bool TabProxy::Close(bool wait_until_closed) {
 
 #if defined(OS_WIN)
 // TODO(port): Remove windowsisms.
-bool TabProxy::SetAccelerators(HACCEL accel_table,
-                               int accel_table_entry_count) {
-  if (!is_valid())
-    return false;
-
-  bool succeeded = false;
-  sender_->Send(new AutomationMsg_SetAcceleratorsForTab(
-      0, handle_, accel_table, accel_table_entry_count, &succeeded));
-  return succeeded;
-}
-
 bool TabProxy::ProcessUnhandledAccelerator(const MSG& msg) {
   if (!is_valid())
     return false;
@@ -522,6 +521,13 @@ bool TabProxy::PrintNow() {
   return succeeded;
 }
 
+bool TabProxy::PrintAsync() {
+  if (!is_valid())
+    return false;
+
+  return sender_->Send(new AutomationMsg_PrintAsync(0, handle_));
+}
+
 bool TabProxy::SavePage(const std::wstring& file_name,
                         const std::wstring& dir_path,
                         SavePackage::SavePackageType type) {
@@ -535,15 +541,14 @@ bool TabProxy::SavePage(const std::wstring& file_name,
   return succeeded;
 }
 
-void TabProxy::HandleMessageFromExternalHost(AutomationHandle handle,
-                                             const std::string& message,
+void TabProxy::HandleMessageFromExternalHost(const std::string& message,
                                              const std::string& origin,
                                              const std::string& target) {
   if (!is_valid())
     return;
 
   bool succeeded =
-      sender_->Send(new AutomationMsg_HandleMessageFromExternalHost(0, handle,
+      sender_->Send(new AutomationMsg_HandleMessageFromExternalHost(0, handle_,
           message, origin, target));
   DCHECK(succeeded);
 }
@@ -609,9 +614,10 @@ bool TabProxy::OverrideEncoding(const std::wstring& encoding) {
 
 #if defined(OS_WIN)
 void TabProxy::Reposition(HWND window, HWND window_insert_after, int left,
-                          int top, int width, int height, int flags) {
+                          int top, int width, int height, int flags,
+                          HWND parent_window) {
 
-  IPC::Reposition_Params params;
+  IPC::Reposition_Params params = {0};
   params.window = window;
   params.window_insert_after = window_insert_after;
   params.left = left;
@@ -619,7 +625,31 @@ void TabProxy::Reposition(HWND window, HWND window_insert_after, int left,
   params.width = width;
   params.height = height;
   params.flags = flags;
+  params.set_parent = (::IsWindow(parent_window) ? true : false);
+  params.parent_window = parent_window;
   sender_->Send(new AutomationMsg_TabReposition(0, handle_, params));
 }
+
+void TabProxy::SendContextMenuCommand(int selected_command) {
+  sender_->Send(new AutomationMsg_ForwardContextMenuCommandToChrome(
+      0, handle_, selected_command));
+}
+
 #endif  // defined(OS_WIN)
 
+void TabProxy::AddObserver(TabProxyDelegate* observer) {
+  AutoLock lock(list_lock_);
+  observers_list_.AddObserver(observer);
+}
+
+void TabProxy::RemoveObserver(TabProxyDelegate* observer) {
+  AutoLock lock(list_lock_);
+  observers_list_.RemoveObserver(observer);
+}
+
+// Called on Channel background thread, if TabMessages filter is installed.
+void TabProxy::OnMessageReceived(const IPC::Message& message) {
+  AutoLock lock(list_lock_);
+  FOR_EACH_OBSERVER(TabProxyDelegate, observers_list_,
+                    OnMessageReceived(this, message));
+}

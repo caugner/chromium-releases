@@ -1,9 +1,9 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_RENDERER_RENDER_WIDGET_H__
-#define CHROME_RENDERER_RENDER_WIDGET_H__
+#ifndef CHROME_RENDERER_RENDER_WIDGET_H_
+#define CHROME_RENDERER_RENDER_WIDGET_H_
 
 #include <vector>
 #include "base/basictypes.h"
@@ -13,21 +13,29 @@
 #include "base/gfx/size.h"
 #include "base/ref_counted.h"
 #include "base/shared_memory.h"
-#include "chrome/common/ipc_channel.h"
 #include "chrome/renderer/render_process.h"
+#include "ipc/ipc_channel.h"
 #include "skia/ext/platform_canvas.h"
-
-#include "webkit/glue/webwidget_delegate.h"
+#include "third_party/skia/include/core/SkBitmap.h"
+#include "webkit/api/public/WebCompositionCommand.h"
+#include "webkit/api/public/WebRect.h"
+#include "webkit/api/public/WebTextDirection.h"
+#include "webkit/api/public/WebWidgetClient.h"
 #include "webkit/glue/webcursor.h"
 
 class RenderThreadBase;
+struct ViewHostMsg_ShowPopup_Params;
 struct WebPluginGeometry;
+
+namespace WebKit {
+struct WebPopupMenuInfo;
+}
 
 // RenderWidget provides a communication bridge between a WebWidget and
 // a RenderWidgetHost, the latter of which lives in a different process.
 class RenderWidget : public IPC::Channel::Listener,
                      public IPC::Message::Sender,
-                     virtual public WebWidgetDelegate,
+                     virtual public WebKit::WebWidgetClient,
                      public base::RefCounted<RenderWidget> {
  public:
   // Creates a new RenderWidget.  The opener_id is the routing ID of the
@@ -37,6 +45,10 @@ class RenderWidget : public IPC::Channel::Listener,
                               RenderThreadBase* render_thread,
                               bool activatable);
 
+  // Called after Create to configure a RenderWidget to be rendered by the host
+  // as a popup menu with the given data.
+  void ConfigureAsExternalPopupMenu(const WebKit::WebPopupMenuInfo& info);
+
   // The routing ID assigned by the RenderProcess. Will be MSG_ROUTING_NONE if
   // not yet assigned a view ID, in which case, the process MUST NOT send
   // messages with this ID to the parent.
@@ -45,16 +57,8 @@ class RenderWidget : public IPC::Channel::Listener,
   }
 
   // May return NULL when the window is closing.
-  WebWidget* webwidget() const {
+  WebKit::WebWidget* webwidget() const {
     return webwidget_;
-  }
-
-  // Implementing RefCounting required for WebWidgetDelegate
-  virtual void AddRef() {
-    base::RefCounted<RenderWidget>::AddRef();
-  }
-  virtual void Release() {
-    base::RefCounted<RenderWidget>::Release();
   }
 
   // IPC::Channel::Listener
@@ -63,23 +67,27 @@ class RenderWidget : public IPC::Channel::Listener,
   // IPC::Message::Sender
   virtual bool Send(IPC::Message* msg);
 
-  // WebWidgetDelegate
-  virtual gfx::NativeViewId GetContainingView(WebWidget* webwidget);
-  virtual void DidInvalidateRect(WebWidget* webwidget, const gfx::Rect& rect);
-  virtual void DidScrollRect(WebWidget* webwidget, int dx, int dy,
-                             const gfx::Rect& clip_rect);
-  virtual void SetCursor(WebWidget* webwidget, const WebCursor& cursor);
-  virtual void Show(WebWidget* webwidget, WindowOpenDisposition disposition);
-  virtual void CloseWidgetSoon(WebWidget* webwidget);
-  virtual void Focus(WebWidget* webwidget);
-  virtual void Blur(WebWidget* webwidget);
-  virtual void GetWindowRect(WebWidget* webwidget, gfx::Rect* rect);
-  virtual void SetWindowRect(WebWidget* webwidget, const gfx::Rect& rect);
-  virtual void GetRootWindowRect(WebWidget* webwidget, gfx::Rect* rect);
-  virtual void GetRootWindowResizerRect(WebWidget* webwidget, gfx::Rect* rect);
-  virtual void DidMove(WebWidget* webwidget, const WebPluginGeometry& move);
-  virtual void RunModal(WebWidget* webwidget) {}
-  virtual bool IsHidden() { return is_hidden_; }
+  // WebKit::WebWidgetClient
+  virtual void didInvalidateRect(const WebKit::WebRect&);
+  virtual void didScrollRect(int dx, int dy, const WebKit::WebRect& clipRect);
+  virtual void didFocus();
+  virtual void didBlur();
+  virtual void didChangeCursor(const WebKit::WebCursorInfo&);
+  virtual void closeWidgetSoon();
+  virtual void show(WebKit::WebNavigationPolicy);
+  virtual void runModal() {}
+  virtual WebKit::WebRect windowRect();
+  virtual void setWindowRect(const WebKit::WebRect&);
+  virtual WebKit::WebRect windowResizerRect();
+  virtual WebKit::WebRect rootWindowRect();
+  virtual WebKit::WebScreenInfo screenInfo();
+
+  // Called when a plugin is moved.  These events are queued up and sent with
+  // the next paint or scroll message to the host.
+  void SchedulePluginMove(const WebPluginGeometry& move);
+
+  // Invalidates entire widget rect to generate a full repaint.
+  void GenerateFullRepaint();
 
   // Close the underlying WebWidget.
   void Close();
@@ -106,10 +114,13 @@ class RenderWidget : public IPC::Channel::Listener,
 
   void DoDeferredPaint();
   void DoDeferredScroll();
+  void DoDeferredClose();
+  void DoDeferredSetWindowRect(const WebKit::WebRect& pos);
 
-  // This method is called immediately after PaintRect but before the
-  // corresponding paint or scroll message is send to the widget host.
-  virtual void DidPaint() {}
+  // Set the background of the render widget to a bitmap. The bitmap will be
+  // tiled in both directions if it isn't big enough to fill the area. This is
+  // mainly intended to be used in conjuction with WebView::SetIsTransparent().
+  virtual void SetBackground(const SkBitmap& bitmap);
 
   // RenderWidget IPC message handlers
   void OnClose();
@@ -120,14 +131,21 @@ class RenderWidget : public IPC::Channel::Listener,
   void OnWasRestored(bool needs_repainting);
   void OnPaintRectAck();
   void OnScrollRectAck();
+  void OnRequestMoveAck();
   void OnHandleInputEvent(const IPC::Message& message);
   void OnMouseCaptureLost();
   void OnSetFocus(bool enable);
   void OnImeSetInputMode(bool is_active);
-  void OnImeSetComposition(int string_type, int cursor_position,
+  void OnImeSetComposition(WebKit::WebCompositionCommand command,
+                           int cursor_position,
                            int target_start, int target_end,
-                           const std::wstring& ime_string);
+                           const string16& ime_string);
   void OnMsgRepaint(const gfx::Size& size_to_paint);
+  void OnSetTextDirection(WebKit::WebTextDirection direction);
+
+  // Override point to notify that a paint has happened. This fires after the
+  // browser side has updated the screen for a newly painted region.
+  virtual void DidPaint() {}
 
   // True if a PaintRect_ACK message is pending.
   bool paint_reply_pending() const {
@@ -156,12 +174,20 @@ class RenderWidget : public IPC::Channel::Listener,
   // the focus on our own when the browser did not focus us.
   void ClearFocus();
 
+  // Set the pending window rect.
+  // Because the real render_widget is hosted in another process, there is
+  // a time period where we may have set a new window rect which has not yet
+  // been processed by the browser.  So we maintain a pending window rect
+  // size.  If JS code sets the WindowRect, and then immediately calls
+  // GetWindowRect() we'll use this pending window rect as the size.
+  void SetPendingWindowRect(const WebKit::WebRect& r);
+
   // Routing ID that allows us to communicate to the parent browser process
   // RenderWidgetHost. When MSG_ROUTING_NONE, no messages may be sent.
   int32 routing_id_;
 
   // We are responsible for destroying this object via its Close method.
-  WebWidget* webwidget_;
+  WebKit::WebWidget* webwidget_;
 
   // Set to the ID of the view that initiated creating this view, if any. When
   // the view was initiated by the browser (the common case), this will be
@@ -184,6 +210,7 @@ class RenderWidget : public IPC::Channel::Listener,
   // We store the current cursor object so we can avoid spamming SetCursor
   // messages.
   WebCursor current_cursor_;
+
   // The size of the RenderWidget.
   gfx::Size size_;
 
@@ -258,7 +285,17 @@ class RenderWidget : public IPC::Channel::Listener,
   // Holds all the needed plugin window moves for a scroll.
   std::vector<WebPluginGeometry> plugin_window_moves_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(RenderWidget);
+  // A custom background for the widget.
+  SkBitmap background_;
+
+  // While we are waiting for the browser to update window sizes,
+  // we track the pending size temporarily.
+  int pending_window_rect_count_;
+  WebKit::WebRect pending_window_rect_;
+
+  scoped_ptr<ViewHostMsg_ShowPopup_Params> popup_params_;
+
+  DISALLOW_COPY_AND_ASSIGN(RenderWidget);
 };
 
-#endif  // CHROME_RENDERER_RENDER_WIDGET_H__
+#endif  // CHROME_RENDERER_RENDER_WIDGET_H_

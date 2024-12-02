@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 #include "base/basictypes.h"
 #include "base/logging.h"
 #include "media/audio/audio_output.h"
+#include "media/audio/audio_util.h"
 #include "media/audio/win/audio_manager_win.h"
 
 // Some general thoughts about the waveOut API which is badly documented :
@@ -30,9 +31,13 @@
 
 namespace {
 
-// We settled for a double buffering scheme. It seems to strike a good balance
+// We settled for a triple buffering scheme. It seems to strike a good balance
 // between how fast data needs to be provided versus memory usage.
-const size_t kNumBuffers = 2;
+// Double buffering is insufficient for Vista and produces stutter.
+const size_t kNumBuffers = 3;
+
+// Sixty four MB is the maximum buffer size per AudioOutputStream.
+const size_t kMaxOpenBufferSize = 1024 * 1024 * 64;
 
 // Our sound buffers are allocated once and kept in a linked list using the
 // the WAVEHDR::dwUser variable. The last buffer points to the first buffer.
@@ -51,9 +56,12 @@ PCMWaveOutAudioOutputStream::PCMWaveOutAudioOutputStream(
       waveout_(NULL),
       callback_(NULL),
       buffer_(NULL),
-      buffer_size_(0) {
+      buffer_size_(0),
+      volume_(1),
+      channels_(channels),
+      pending_bytes_(0) {
   format_.wFormatTag = WAVE_FORMAT_PCM;
-  format_.nChannels = channels;
+  format_.nChannels = channels > 2 ? 2 : channels;
   format_.nSamplesPerSec = sampling_rate;
   format_.wBitsPerSample = bits_per_sample;
   format_.cbSize = 0;
@@ -70,6 +78,8 @@ PCMWaveOutAudioOutputStream::~PCMWaveOutAudioOutputStream() {
 
 bool PCMWaveOutAudioOutputStream::Open(size_t buffer_size) {
   if (state_ != PCMA_BRAND_NEW)
+    return false;
+  if (buffer_size > kMaxOpenBufferSize)
     return false;
   // Open the device. We'll be getting callback in WaveCallback function. They
   // occur in a magic, time-critical thread that windows creates.
@@ -134,8 +144,30 @@ void PCMWaveOutAudioOutputStream::Start(AudioSourceCallback* callback) {
   state_ = PCMA_PLAYING;
   WAVEHDR* buffer = buffer_;
   for (int ix = 0; ix != kNumBuffers; ++ix) {
-    QueueNextPacket(buffer);
+    QueueNextPacket(buffer);  // Read more data.
+    pending_bytes_ += buffer->dwBufferLength;
     buffer = GetNextBuffer(buffer);
+  }
+  buffer = buffer_;
+  MMRESULT result = ::waveOutPause(waveout_);
+  if (result != MMSYSERR_NOERROR) {
+    HandleError(result);
+    return;
+  }
+  // Send the buffers to the audio driver. Note that the device is paused
+  // so we avoid entering the callback method while still here.
+  for (int ix = 0; ix != kNumBuffers; ++ix) {
+    result = ::waveOutWrite(waveout_, buffer, sizeof(WAVEHDR));
+    if (result != MMSYSERR_NOERROR) {
+      HandleError(result);
+      break;
+    }
+    buffer = GetNextBuffer(buffer);
+  }
+  result = ::waveOutRestart(waveout_);
+  if (result != MMSYSERR_NOERROR) {
+    HandleError(result);
+    return;
   }
 }
 
@@ -157,7 +189,9 @@ void PCMWaveOutAudioOutputStream::Stop() {
   if (res != MMSYSERR_NOERROR) {
     state_ = PCMA_PLAYING;
     HandleError(res);
+    return;
   }
+  state_ = PCMA_READY;
 }
 
 // We can Close in any state except that trying to close a stream that is
@@ -180,17 +214,19 @@ void PCMWaveOutAudioOutputStream::Close() {
   manager_->ReleaseStream(this);
 }
 
-// TODO(cpu): Implement SetVolume and GetVolume.
 void PCMWaveOutAudioOutputStream::SetVolume(double left_level,
-                                            double right_level) {
-  if (state_ != PCMA_READY)
+                                            double ) {
+  if (!waveout_)
     return;
+  volume_ = static_cast<float>(left_level);
 }
 
 void PCMWaveOutAudioOutputStream::GetVolume(double* left_level,
                                             double* right_level) {
-  if (state_ != PCMA_READY)
+  if (!waveout_)
     return;
+  *left_level = volume_;
+  *right_level = volume_;
 }
 
 void PCMWaveOutAudioOutputStream::HandleError(MMRESULT error) {
@@ -201,20 +237,28 @@ void PCMWaveOutAudioOutputStream::HandleError(MMRESULT error) {
 void PCMWaveOutAudioOutputStream::QueueNextPacket(WAVEHDR *buffer) {
   // Call the source which will fill our buffer with pleasant sounds and
   // return to us how many bytes were used.
-  size_t used = callback_->OnMoreData(this, buffer->lpData, buffer_size_);
-
+  // If we are down sampling to a smaller number of channels, we need to
+  // scale up the amount of pending bytes.
+  // TODO(fbarchard): Handle used 0 by queueing more.
+  int scaled_pending_bytes = pending_bytes_ * channels_ / format_.nChannels;
+  size_t used = callback_->OnMoreData(this, buffer->lpData, buffer_size_,
+                                      scaled_pending_bytes);
   if (used <= buffer_size_) {
-    buffer->dwBufferLength = used;
+    buffer->dwBufferLength = used * format_.nChannels / channels_;
+    if (channels_ > 2 && format_.nChannels == 2) {
+      media::FoldChannels(buffer->lpData, used,
+                          channels_, format_.wBitsPerSample >> 3,
+                          volume_);
+    } else {
+      media::AdjustVolume(buffer->lpData, used,
+                          format_.nChannels, format_.wBitsPerSample >> 3,
+                          volume_);
+    }
   } else {
     HandleError(0);
     return;
   }
-  // Time to queue the buffer to the audio driver. Since we are reusing
-  // the same buffers we can get away without calling waveOutPrepareHeader.
   buffer->dwFlags = WHDR_PREPARED;
-  MMRESULT result = ::waveOutWrite(waveout_, buffer, sizeof(WAVEHDR));
-  if (result != MMSYSERR_NOERROR)
-    HandleError(result);
 }
 
 // Windows call us back in this function when some events happen. Most notably
@@ -243,7 +287,21 @@ void PCMWaveOutAudioOutputStream::WaveCallback(HWAVEOUT hwo, UINT msg,
       // Not sure if ever hit this but just in case.
       return;
     }
+
+    // Before we queue the next packet, we need to adjust the number of pending
+    // bytes since the last write to hardware.
+    obj->pending_bytes_ -= buffer->dwBufferLength;
+
     obj->QueueNextPacket(buffer);
+
+    // Time to send the buffer to the audio driver. Since we are reusing
+    // the same buffers we can get away without calling waveOutPrepareHeader.
+    MMRESULT result = ::waveOutWrite(hwo, buffer, sizeof(WAVEHDR));
+    if (result != MMSYSERR_NOERROR)
+      obj->HandleError(result);
+
+    obj->pending_bytes_ += buffer->dwBufferLength;
+
   } else if (msg == WOM_CLOSE) {
     // We can be closed before calling Start, so it is possible to have a
     // null callback at this point.

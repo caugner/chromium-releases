@@ -4,9 +4,17 @@
 
 #include "chrome/browser/browser_init.h"
 
+#if defined(OS_WIN)
+#include "app/win_util.h"
+#endif
+#include "app/l10n_util.h"
+#include "app/resource_bundle.h"
 #include "base/basictypes.h"
 #include "base/command_line.h"
+#include "base/compiler_specific.h"
 #include "base/event_recorder.h"
+#include "base/file_path.h"
+#include "base/file_util.h"
 #include "base/histogram.h"
 #include "base/path_service.h"
 #include "base/string_util.h"
@@ -16,40 +24,182 @@
 #include "chrome/browser/automation/automation_provider_list.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/browser_window.h"
+#include "chrome/browser/defaults.h"
+#if defined(OS_WIN)  // TODO(port)
+#include "chrome/browser/extensions/extension_creator.h"
+#endif
 #include "chrome/browser/extensions/extensions_service.h"
+#include "chrome/browser/extensions/user_script_master.h"
+#include "chrome/browser/first_run.h"
 #include "chrome/browser/net/dns_global.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/browser/search_engines/template_url_model.h"
 #include "chrome/browser/session_startup_pref.h"
 #include "chrome/browser/sessions/session_restore.h"
+#include "chrome/browser/shell_integration.h"
 #include "chrome/browser/tab_contents/infobar_delegate.h"
 #include "chrome/browser/tab_contents/navigation_controller.h"
-#include "chrome/browser/tab_contents/web_contents.h"
-#include "chrome/browser/tab_contents/web_contents_view.h"
+#include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/tab_contents/tab_contents_view.h"
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/l10n_util.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/pref_service.h"
 #include "chrome/common/result_codes.h"
-#include "net/base/cookie_monster.h"
-#include "webkit/glue/webkit_glue.h"
-
-#if defined(OS_WIN)
-
-#include "base/win_util.h"
-#include "chrome/common/resource_bundle.h"
+#include "chrome/common/url_constants.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "grit/theme_resources.h"
+#include "webkit/glue/webkit_glue.h"
 
+#if defined(OS_WIN)
+#include "base/win_util.h"
+#endif
+
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/views/tabs/tab_overview_message_listener.h"
 #endif
 
 namespace {
+
+class SetAsDefaultBrowserTask : public Task {
+ public:
+  SetAsDefaultBrowserTask() { }
+  virtual void Run() {
+    ShellIntegration::SetAsDefaultBrowser();
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(SetAsDefaultBrowserTask);
+};
+
+// The delegate for the infobar shown when Chrome is not the default browser.
+class DefaultBrowserInfoBarDelegate : public ConfirmInfoBarDelegate {
+ public:
+  explicit DefaultBrowserInfoBarDelegate(TabContents* contents)
+      : ConfirmInfoBarDelegate(contents),
+        profile_(contents->profile()),
+        action_taken_(false),
+        should_expire_(false),
+        ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)) {
+    // We want the info-bar to stick-around for few seconds and then be hidden
+    // on the next navigation after that.
+    MessageLoop::current()->PostDelayedTask(FROM_HERE,
+        method_factory_.NewRunnableMethod(
+            &DefaultBrowserInfoBarDelegate::Expire),
+        8000);  // 8 seconds.
+  }
+
+  virtual bool ShouldExpire(
+      const NavigationController::LoadCommittedDetails& details) const {
+    return should_expire_;
+  }
+
+  // Overridden from ConfirmInfoBarDelegate:
+  virtual void InfoBarClosed() {
+    if (!action_taken_)
+      UMA_HISTOGRAM_COUNTS("DefaultBrowserWarning.Ignored", 1);
+    delete this;
+  }
+
+  virtual std::wstring GetMessageText() const {
+    return l10n_util::GetString(IDS_DEFAULT_BROWSER_INFOBAR_SHORT_TEXT);
+  }
+
+  virtual SkBitmap* GetIcon() const {
+    return ResourceBundle::GetSharedInstance().GetBitmapNamed(
+       IDR_PRODUCT_ICON_32);
+  }
+
+  virtual int GetButtons() const {
+    return BUTTON_OK | BUTTON_CANCEL | BUTTON_OK_DEFAULT;
+  }
+
+  virtual std::wstring GetButtonLabel(InfoBarButton button) const {
+    return button == BUTTON_OK ?
+        l10n_util::GetString(IDS_SET_AS_DEFAULT_INFOBAR_BUTTON_LABEL) :
+        l10n_util::GetString(IDS_DONT_ASK_AGAIN_INFOBAR_BUTTON_LABEL);
+  }
+
+  virtual bool Accept() {
+    action_taken_ = true;
+    UMA_HISTOGRAM_COUNTS("DefaultBrowserWarning.SetAsDefault", 1);
+    g_browser_process->file_thread()->message_loop()->PostTask(FROM_HERE,
+        new SetAsDefaultBrowserTask());
+    return true;
+  }
+
+  virtual bool Cancel() {
+    action_taken_ = true;
+    UMA_HISTOGRAM_COUNTS("DefaultBrowserWarning.DontSetAsDefault", 1);
+    // User clicked "Don't ask me again", remember that.
+    profile_->GetPrefs()->SetBoolean(prefs::kCheckDefaultBrowser, false);
+    return true;
+  }
+
+  void Expire() {
+    should_expire_ = true;
+  }
+
+ private:
+  // The Profile that we restore sessions from.
+  Profile* profile_;
+
+  // Whether the user clicked one of the buttons.
+  bool action_taken_;
+
+  // Whether the info-bar should be dismissed on the next navigation.
+  bool should_expire_;
+
+  // Used to delay the expiration of the info-bar.
+  ScopedRunnableMethodFactory<DefaultBrowserInfoBarDelegate> method_factory_;
+
+  DISALLOW_COPY_AND_ASSIGN(DefaultBrowserInfoBarDelegate);
+};
+
+class NotifyNotDefaultBrowserTask : public Task {
+ public:
+  NotifyNotDefaultBrowserTask() { }
+
+  virtual void Run() {
+    Browser* browser = BrowserList::GetLastActive();
+    if (!browser) {
+      // Reached during ui tests.
+      return;
+    }
+    TabContents* tab = browser->GetSelectedTabContents();
+    // Don't show the info-bar if there are already info-bars showing.
+    // In ChromeBot tests, there might be a race. This line appears to get
+    // called during shutdown and |tab| can be NULL.
+    if (!tab || tab->infobar_delegate_count() > 0)
+      return;
+    tab->AddInfoBar(new DefaultBrowserInfoBarDelegate(tab));
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(NotifyNotDefaultBrowserTask);
+};
+
+class CheckDefaultBrowserTask : public Task {
+ public:
+  explicit CheckDefaultBrowserTask(MessageLoop* ui_loop) : ui_loop_(ui_loop) {
+  }
+
+  virtual void Run() {
+    if (!ShellIntegration::IsDefaultBrowser())
+      ui_loop_->PostTask(FROM_HERE, new NotifyNotDefaultBrowserTask());
+  }
+
+ private:
+  MessageLoop* ui_loop_;
+
+  DISALLOW_COPY_AND_ASSIGN(CheckDefaultBrowserTask);
+};
 
 // A delegate for the InfoBar shown when the previous session has crashed. The
 // bar deletes itself automatically after it is closed.
@@ -67,30 +217,15 @@ class SessionCrashedInfoBarDelegate : public ConfirmInfoBarDelegate {
     delete this;
   }
   virtual std::wstring GetMessageText() const {
-#if defined(OS_WIN)
     return l10n_util::GetString(IDS_SESSION_CRASHED_VIEW_MESSAGE);
-#else
-    // TODO(port): implement session crashed info bar.
-    return L"Portme";
-#endif
   }
   virtual SkBitmap* GetIcon() const {
-#if defined(OS_WIN)
     return ResourceBundle::GetSharedInstance().GetBitmapNamed(
         IDR_INFOBAR_RESTORE_SESSION);
-#else
-    // TODO(port): implement session crashed info bar.
-    return NULL;
-#endif
   }
   virtual int GetButtons() const { return BUTTON_OK; }
   virtual std::wstring GetButtonLabel(InfoBarButton button) const {
-#if defined(OS_WIN)
     return l10n_util::GetString(IDS_SESSION_CRASHED_VIEW_RESTORE_BUTTON);
-#else
-    // TODO(port): implement session crashed info bar.
-    return L"Portme";
-#endif
   }
   virtual bool Accept() {
     // Restore the session.
@@ -110,10 +245,10 @@ void SetOverrideHomePage(const CommandLine& command_line,
                          PrefService* prefs) {
   // If homepage is specified on the command line, canonify & store it.
   if (command_line.HasSwitch(switches::kHomePage)) {
-    std::wstring browser_directory;
+    FilePath browser_directory;
     PathService::Get(base::DIR_CURRENT, &browser_directory);
     std::wstring new_homepage = URLFixerUpper::FixupRelativeFile(
-        browser_directory,
+        browser_directory.ToWStringHack(),
         command_line.GetSwitchValue(switches::kHomePage));
     prefs->transient()->SetString(prefs::kHomePage, new_homepage);
     prefs->transient()->SetBoolean(prefs::kHomePageIsNewTabPage, false);
@@ -184,9 +319,51 @@ void RecordLaunchModeHistogram(LaunchMode mode) {
   UMA_HISTOGRAM_COUNTS_100("Launch.Modes", bucket);
 }
 
-}  // namespace
-
 static bool in_startup = false;
+
+bool LaunchBrowser(const CommandLine& command_line, Profile* profile,
+                   const std::wstring& cur_dir, bool process_startup,
+                   int* return_code, BrowserInit* browser_init) {
+  in_startup = process_startup;
+  DCHECK(profile);
+
+  // Continue with the off-the-record profile from here on if --incognito
+  if (command_line.HasSwitch(switches::kIncognito))
+    profile = profile->GetOffTheRecordProfile();
+
+  BrowserInit::LaunchWithProfile lwp(cur_dir, command_line, browser_init);
+  bool launched = lwp.Launch(profile, process_startup);
+  in_startup = false;
+
+  if (!launched) {
+    LOG(ERROR) << "launch error";
+    if (return_code)
+      *return_code = ResultCodes::INVALID_CMDLINE_URL;
+    return false;
+  }
+
+#if defined(OS_CHROMEOS)
+  // Create the TabOverviewMessageListener so that it can listen for messages
+  // regardless of what window has focus.
+  TabOverviewMessageListener::instance();
+#endif
+  return true;
+}
+
+#if defined(OS_WIN)
+GURL GetWelcomePageURL() {
+  std::wstring welcome_url = l10n_util::GetString(IDS_WELCOME_PAGE_URL);
+  return GURL(welcome_url);
+}
+#else
+GURL GetWelcomePageURL() {
+  // TODO(port): implement welcome page.
+  NOTIMPLEMENTED();
+  return GURL();
+}
+#endif
+
+}  // namespace
 
 // static
 bool BrowserInit::InProcessStartup() {
@@ -199,7 +376,17 @@ BrowserInit::LaunchWithProfile::LaunchWithProfile(
     const std::wstring& cur_dir,
     const CommandLine& command_line)
         : cur_dir_(cur_dir),
-          command_line_(command_line) {
+          command_line_(command_line),
+          browser_init_(NULL) {
+}
+
+BrowserInit::LaunchWithProfile::LaunchWithProfile(
+    const std::wstring& cur_dir,
+    const CommandLine& command_line,
+    BrowserInit* browser_init)
+        : cur_dir_(cur_dir),
+          command_line_(command_line),
+          browser_init_(browser_init) {
 }
 
 bool BrowserInit::LaunchWithProfile::Launch(Profile* profile,
@@ -228,15 +415,9 @@ bool BrowserInit::LaunchWithProfile::Launch(Profile* profile,
     }
   }
 
-  if (command_line_.HasSwitch(switches::kEnableFileCookies))
-    net::CookieMonster::EnableFileScheme();
-
   if (command_line_.HasSwitch(switches::kUserAgent)) {
-#if defined(OS_WIN)
     webkit_glue::SetUserAgent(WideToUTF8(
         command_line_.GetSwitchValue(switches::kUserAgent)));
-    // TODO(port): hook this up when we bring in webkit.
-#endif
   }
 
   // Open the required browser windows and tabs.
@@ -256,14 +437,50 @@ bool BrowserInit::LaunchWithProfile::Launch(Profile* profile,
         browser = BrowserList::GetLastActive();
       OpenURLsInBrowser(browser, process_startup, urls_to_open);
     }
+#if defined(OS_LINUX) && !defined(OS_CHROMEOS) && !defined(TOOLKIT_VIEWS)
+    // TODO(port): Remove ifdef when the Linux splash page is not needed.
+    const CommandLine& parsed_command_line = *CommandLine::ForCurrentProcess();
+    // This can mess up UI tests, so only do it when UI tests aren't running.
+    if (!parsed_command_line.HasSwitch(switches::kHomePage) &&
+        GetURLsFromCommandLine(profile_).empty()) {
+      Browser* browser = BrowserList::GetLastActive();
+      if (browser) {
+        // Only show the splash page if it isn't already showing.
+        bool open_splash = true;
+        for (int i = 0; i < browser->tab_count(); ++i) {
+          if (browser->GetTabContentsAt(i)->GetURL().spec() ==
+              "about:linux-splash") {
+            open_splash = false;
+          }
+        }
+
+        if (open_splash) {
+          browser->OpenURL(GURL("about:linux-splash"), GURL(),
+                           NEW_FOREGROUND_TAB, PageTransition::START_PAGE);
+        }
+      }
+    }
+#endif
+    // Check whether we are the default browser.
+    if (!command_line_.HasSwitch(switches::kNoDefaultBrowserCheck))
+      CheckDefaultBrowser(profile);
   } else {
     RecordLaunchModeHistogram(LM_AS_WEBAPP);
   }
 
+#if defined(OS_WIN)
+  // Print the selected page if the command line switch exists. Note that the
+  // current selected tab would be the page which will be printed.
+  if (command_line_.HasSwitch(switches::kPrint)) {
+    Browser* browser = BrowserList::GetLastActive();
+    browser->Print();
+  }
+#endif
+
   // If we're recording or playing back, startup the EventRecorder now
   // unless otherwise specified.
   if (!command_line_.HasSwitch(switches::kNoEvents)) {
-    std::wstring script_path;
+    FilePath script_path;
     PathService::Get(chrome::FILE_RECORDED_SCRIPT, &script_path);
 
     bool record_mode = command_line_.HasSwitch(switches::kRecordMode);
@@ -300,6 +517,7 @@ bool BrowserInit::LaunchWithProfile::OpenStartupURLs(
         return false;
 
       if (!profile_->DidLastSessionExitCleanly() &&
+          !browser_defaults::kRestoreAfterCrash &&
           !command_line_.HasSwitch(switches::kRestoreLastSession)) {
         // The last session crashed. It's possible automatically loading the
         // page will trigger another crash, locking the user out of chrome.
@@ -314,8 +532,13 @@ bool BrowserInit::LaunchWithProfile::OpenStartupURLs(
       // When the user launches the app only open the default set of URLs if
       // we aren't going to open any URLs on the command line.
       if (urls_to_open.empty()) {
-        if (pref.urls.empty())
-          return false;  // No URLs to open.
+        if (pref.urls.empty()) {
+          // Open a New Tab page.
+          std::vector<GURL> urls;
+          urls.push_back(GURL(chrome::kChromeUINewTabURL));
+          OpenURLsInBrowser(NULL, is_process_startup, urls);
+          return true;
+        }
         OpenURLsInBrowser(NULL, is_process_startup, pref.urls);
         return true;
       }
@@ -331,22 +554,28 @@ Browser* BrowserInit::LaunchWithProfile::OpenURLsInBrowser(
     bool process_startup,
     const std::vector<GURL>& urls) {
   DCHECK(!urls.empty());
+  int pin_count = 0;
+  if (!browser) {
+    std::wstring pin_count_string =
+        command_line_.GetSwitchValue(switches::kPinnedTabCount);
+    if (!pin_count_string.empty())
+      pin_count = StringToInt(WideToUTF16Hack(pin_count_string));
+  }
   if (!browser || browser->type() != Browser::TYPE_NORMAL)
     browser = Browser::Create(profile_);
 
   for (size_t i = 0; i < urls.size(); ++i) {
     TabContents* tab = browser->AddTabWithURL(
-        urls[i], GURL(), PageTransition::START_PAGE, (i == 0), NULL);
-    if (i == 0 && process_startup)
+        urls[i], GURL(), PageTransition::START_PAGE, (i == 0), -1, false, NULL);
+    if (i < static_cast<size_t>(pin_count))
+      browser->tabstrip_model()->SetTabPinned(browser->tab_count() - 1, true);
+    if (i == 0 && process_startup && !browser_defaults::kSuppressCrashInfoBar)
       AddCrashedInfoBarIfNecessary(tab);
   }
   browser->window()->Show();
   // TODO(jcampan): http://crbug.com/8123 we should not need to set the initial
   //                focus explicitly.
-  if (browser->GetSelectedTabContents()->AsWebContents()) {
-    browser->GetSelectedTabContents()->AsWebContents()->view()->
-        SetInitialFocus();
-  }
+  browser->GetSelectedTabContents()->view()->SetInitialFocus();
 
   return browser;
 }
@@ -383,9 +612,9 @@ std::vector<GURL> BrowserInit::LaunchWithProfile::GetURLsFromCommandLine(
       }
       const TemplateURLRef* search_url = default_provider->url();
       DCHECK(search_url->SupportsReplacement());
-      urls.push_back(GURL(search_url->ReplaceSearchTerms(*default_provider,
-          value.substr(2), TemplateURLRef::NO_SUGGESTIONS_AVAILABLE,
-          std::wstring())));
+      urls.push_back(GURL(WideToUTF8(search_url->ReplaceSearchTerms(
+          *default_provider, value.substr(2),
+          TemplateURLRef::NO_SUGGESTIONS_AVAILABLE, std::wstring()))));
     } else {
       // This will create a file URL or a regular URL.
       urls.push_back(GURL(WideToUTF8(
@@ -397,32 +626,62 @@ std::vector<GURL> BrowserInit::LaunchWithProfile::GetURLsFromCommandLine(
 
 void BrowserInit::LaunchWithProfile::AddStartupURLs(
     std::vector<GURL>* startup_urls) const {
+  // If we have urls specified beforehand (i.e. from command line) use them
+  // and nothing else.
+  if (!startup_urls->empty())
+    return;
+  // If we have urls specified by the first run master preferences use them
+  // and nothing else.
+  if (browser_init_) {
+    if (!browser_init_->first_run_tabs_.empty()) {
+      std::vector<GURL>::iterator it = browser_init_->first_run_tabs_.begin();
+      while (it != browser_init_->first_run_tabs_.end()) {
+        // Replace magic names for the actual urls.
+        if (it->host() == "new_tab_page") {
+          startup_urls->push_back(GURL());
+        } else if (it->host() == "welcome_page") {
+          startup_urls->push_back(GetWelcomePageURL());
+        } else {
+          startup_urls->push_back(*it);
+        }
+        ++it;
+      }
+      browser_init_->first_run_tabs_.clear();
+      return;
+    }
+  }
+
   // Otherwise open at least the new tab page (and the welcome page, if this
   // is the first time the browser is being started), or the set of URLs
   // specified on the command line.
-  if (startup_urls->empty()) {
-    startup_urls->push_back(GURL());  // New tab page.
-    PrefService* prefs = g_browser_process->local_state();
-    if (prefs->IsPrefRegistered(prefs::kShouldShowWelcomePage) &&
-        prefs->GetBoolean(prefs::kShouldShowWelcomePage)) {
-      // Reset the preference so we don't show the welcome page next time.
-      prefs->ClearPref(prefs::kShouldShowWelcomePage);
-
-#if defined(OS_WIN)
-      // Add the welcome page.
-      std::wstring welcome_url = l10n_util::GetString(IDS_WELCOME_PAGE_URL);
-      startup_urls->push_back(GURL(welcome_url));
-#else
-      // TODO(port): implement welcome page.
-      NOTIMPLEMENTED();
-#endif
-    }
+  startup_urls->push_back(GURL());  // New tab page.
+  PrefService* prefs = g_browser_process->local_state();
+  if (prefs->IsPrefRegistered(prefs::kShouldShowWelcomePage) &&
+      prefs->GetBoolean(prefs::kShouldShowWelcomePage)) {
+    // Reset the preference so we don't show the welcome page next time.
+    prefs->ClearPref(prefs::kShouldShowWelcomePage);
+    startup_urls->push_back(GetWelcomePageURL());
   }
 }
 
-bool BrowserInit::ProcessCommandLine(
-    const CommandLine& command_line, const std::wstring& cur_dir,
-    bool process_startup, Profile* profile, int* return_code) {
+void BrowserInit::LaunchWithProfile::CheckDefaultBrowser(Profile* profile) {
+  // We do not check if we are the default browser if:
+  // - the user said "don't ask me again" on the infobar earlier.
+  // - this is the first launch after the first run flow.
+  if (!profile->GetPrefs()->GetBoolean(prefs::kCheckDefaultBrowser) ||
+      FirstRun::IsChromeFirstRun()) {
+    return;
+  }
+  g_browser_process->file_thread()->message_loop()->PostTask(FROM_HERE,
+      new CheckDefaultBrowserTask(MessageLoop::current()));
+}
+
+bool BrowserInit::ProcessCmdLineImpl(const CommandLine& command_line,
+                                     const std::wstring& cur_dir,
+                                     bool process_startup,
+                                     Profile* profile,
+                                     int* return_code,
+                                     BrowserInit* browser_init) {
   DCHECK(profile);
   if (process_startup) {
     const std::wstring popup_count_string =
@@ -451,8 +710,8 @@ bool BrowserInit::ProcessCommandLine(
 
     // Look for the testing channel ID ONLY during process startup
     if (command_line.HasSwitch(switches::kTestingChannelID)) {
-      std::wstring testing_channel_id =
-          command_line.GetSwitchValue(switches::kTestingChannelID);
+      std::string testing_channel_id = WideToASCII(
+          command_line.GetSwitchValue(switches::kTestingChannelID));
       // TODO(sanjeevr) Check if we need to make this a singleton for
       // compatibility with the old testing code
       // If there are any loose parameters, we expect each one to generate a
@@ -472,6 +731,60 @@ bool BrowserInit::ProcessCommandLine(
           profile,
           static_cast<size_t>(expected_tab_count));
     }
+
+    if (command_line.HasSwitch(switches::kPackExtension)) {
+      // Input Paths.
+      FilePath src_dir = FilePath::FromWStringHack(command_line.GetSwitchValue(
+          switches::kPackExtension));
+      FilePath private_key_path;
+      if (command_line.HasSwitch(switches::kPackExtensionKey)) {
+        private_key_path = FilePath::FromWStringHack(
+            command_line.GetSwitchValue(switches::kPackExtensionKey));
+      }
+
+      // Output Paths.
+      FilePath output(src_dir.DirName().Append(src_dir.BaseName().value()));
+      FilePath crx_path(output);
+      crx_path = crx_path.ReplaceExtension(chrome::kExtensionFileExtension);
+      FilePath output_private_key_path;
+      if (private_key_path.empty()) {
+        output_private_key_path = FilePath(output);
+        output_private_key_path =
+            output_private_key_path.ReplaceExtension(FILE_PATH_LITERAL("pem"));
+      }
+
+      // TODO(port): Creation & running is removed from mac & linux because
+      // ExtensionCreator depends on base/crypto/rsa_private_key and
+      // base/crypto/signature_creator, both of which only have windows
+      // implementations.
+#if defined(OS_WIN)
+      scoped_ptr<ExtensionCreator> creator(new ExtensionCreator());
+      if (creator->Run(src_dir, crx_path, private_key_path,
+          output_private_key_path)) {
+        std::wstring message;
+        if (private_key_path.value().empty()) {
+          message = StringPrintf(
+              L"Created the following files:\n\n"
+              L"Extension: %ls\n"
+              L"Key File: %ls\n\n"
+              L"Keep your key file in a safe place. You will need it to create "
+              L"new versions of your extension.",
+              crx_path.ToWStringHack().c_str(),
+              output_private_key_path.ToWStringHack().c_str());
+        } else {
+          message = StringPrintf(L"Created the extension:\n\n%ls",
+                                 crx_path.ToWStringHack().c_str());
+        }
+        win_util::MessageBox(NULL, message, L"Extension Packaging Success",
+                             MB_OK | MB_SETFOREGROUND);
+      } else {
+        win_util::MessageBox(NULL, UTF8ToWide(creator->error_message()),
+            L"Extension Packaging Error", MB_OK | MB_SETFOREGROUND);
+        return false;
+      }
+#endif // defined(OS_WIN)
+      return false;
+    }
   }
 
   // Allow the command line to override the persisted setting of home page.
@@ -479,8 +792,8 @@ bool BrowserInit::ProcessCommandLine(
 
   bool silent_launch = false;
   if (command_line.HasSwitch(switches::kAutomationClientChannelID)) {
-    std::wstring automation_channel_id =
-        command_line.GetSwitchValue(switches::kAutomationClientChannelID);
+    std::string automation_channel_id = WideToASCII(
+        command_line.GetSwitchValue(switches::kAutomationClientChannelID));
     // If there are any loose parameters, we expect each one to generate a
     // new tab; if there are none then we have no tabs
     size_t expected_tabs =
@@ -490,14 +803,6 @@ bool BrowserInit::ProcessCommandLine(
       silent_launch = true;
     CreateAutomationProvider<AutomationProvider>(automation_channel_id,
                                                  profile, expected_tabs);
-  }
-
-  if (command_line.HasSwitch(switches::kLoadExtension)) {
-    std::wstring path_string =
-        command_line.GetSwitchValue(switches::kLoadExtension);
-    FilePath path = FilePath::FromWStringHack(path_string);
-    profile->GetExtensionsService()->LoadExtension(path);
-    profile->GetUserScriptMaster()->AddWatchedPath(path);
   }
 
   if (command_line.HasSwitch(switches::kInstallExtension)) {
@@ -515,23 +820,13 @@ bool BrowserInit::ProcessCommandLine(
   // of an automation request), we are done here.
   if (!silent_launch) {
     return LaunchBrowser(command_line, profile, cur_dir, process_startup,
-                         return_code);
+                         return_code, browser_init);
   }
   return true;
 }
 
-bool BrowserInit::LaunchBrowser(const CommandLine& command_line,
-                                Profile* profile, const std::wstring& cur_dir,
-                                bool process_startup, int* return_code) {
-  in_startup = process_startup;
-  bool result = LaunchBrowserImpl(command_line, profile, cur_dir,
-                                  process_startup, return_code);
-  in_startup = false;
-  return result;
-}
-
 template <class AutomationProviderClass>
-void BrowserInit::CreateAutomationProvider(const std::wstring& channel_id,
+void BrowserInit::CreateAutomationProvider(const std::string& channel_id,
                                            Profile* profile,
                                            size_t expected_tabs) {
   scoped_refptr<AutomationProviderClass> automation =
@@ -543,27 +838,4 @@ void BrowserInit::CreateAutomationProvider(const std::wstring& channel_id,
       g_browser_process->InitAutomationProviderList();
   DCHECK(list);
   list->AddProvider(automation);
-}
-
-bool BrowserInit::LaunchBrowserImpl(const CommandLine& command_line,
-                                    Profile* profile,
-                                    const std::wstring& cur_dir,
-                                    bool process_startup,
-                                    int* return_code) {
-  DCHECK(profile);
-
-  // Continue with the off-the-record profile from here on if --incognito
-  if (command_line.HasSwitch(switches::kIncognito))
-    profile = profile->GetOffTheRecordProfile();
-
-  LaunchWithProfile lwp(cur_dir, command_line);
-  bool launched = lwp.Launch(profile, process_startup);
-  if (!launched) {
-    LOG(ERROR) << "launch error";
-    if (return_code != NULL)
-      *return_code = ResultCodes::INVALID_CMDLINE_URL;
-    return false;
-  }
-
-  return true;
 }

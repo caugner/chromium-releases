@@ -8,11 +8,11 @@
 
 #include "chrome/common/win_safe_util.h"
 
+#include "app/win_util.h"
 #include "base/file_path.h"
 #include "base/logging.h"
 #include "base/path_service.h"
 #include "base/string_util.h"
-#include "chrome/common/win_util.h"
 
 namespace win_util {
 
@@ -23,8 +23,7 @@ namespace win_util {
 // http://msdn2.microsoft.com/en-us/library/ms647048.aspx
 bool SaferOpenItemViaShell(HWND hwnd, const std::wstring& window_title,
                            const FilePath& full_path,
-                           const std::wstring& source_url,
-                           bool ask_for_app) {
+                           const std::wstring& source_url) {
   ATL::CComPtr<IAttachmentExecute> attachment_services;
   HRESULT hr = attachment_services.CoCreateInstance(CLSID_AttachmentServices);
   if (FAILED(hr)) {
@@ -34,7 +33,7 @@ bool SaferOpenItemViaShell(HWND hwnd, const std::wstring& window_title,
       NOTREACHED();
       return false;
     }
-    return OpenItemViaShell(full_path, ask_for_app);
+    return OpenItemViaShell(full_path);
   }
 
   // This GUID is associated with any 'don't ask me again' settings that the
@@ -92,7 +91,7 @@ bool SaferOpenItemViaShell(HWND hwnd, const std::wstring& window_title,
       return false;
     }
   }
-  return OpenItemViaShellNoZoneCheck(full_path, ask_for_app);
+  return OpenItemViaShellNoZoneCheck(full_path);
 }
 
 bool SetInternetZoneIdentifier(const FilePath& full_path) {

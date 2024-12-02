@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -6,8 +6,8 @@
 // test is intended to run within QEMU environment.
 //
 // Usage 1: reliability_test
-// Upon invocation, it visits a hard coded list of URLs. This is mainly used
-// by buildbot, to verify reliability_test itself runs ok.
+// Upon invocation, it visits a hard coded list of sample URLs. This is mainly
+// used by buildbot, to verify reliability_test itself runs ok.
 //
 // Usage 2: reliability_test --site=url --startpage=start --endpage=end [...]
 // Upon invocation, it visits a list of URLs constructed as
@@ -31,12 +31,13 @@
 // --timeout=millisecond: time out as specified in millisecond during each
 //                        page load.
 // --nopagedown: won't simulate page down key presses after page load.
-// --savedebuglog: save Chrome and v8 debug log for each page loaded.
+// --savedebuglog: save Chrome, V8, and test debug log for each page loaded.
 
 #include <fstream>
 #include <iostream>
 
 #include "base/command_line.h"
+#include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/path_service.h"
 #include "base/string_util.h"
@@ -78,9 +79,9 @@ const wchar_t kNoPageDownSwitch[] = L"nopagedown";
 const wchar_t kSaveDebugLogSwitch[] = L"savedebuglog";
 
 std::wstring server_url = L"http://urllist.com";
-const wchar_t test_url_1[] = L"http://www.google.com";
-const wchar_t test_url_2[] = L"about:crash";
-const wchar_t test_url_3[] = L"http://www.youtube.com";
+const wchar_t test_page_1[] = L"page1.html";
+const wchar_t test_page_2[] = L"page2.html";
+const wchar_t crash_url[] = L"about:crash";
 
 // These are copied from v8 definitions as we cannot include them.
 const wchar_t kV8LogFileSwitch[] = L"logfile";
@@ -132,8 +133,12 @@ class PageLoadTest : public UITest {
     show_window_ = true;
   }
 
-  void NavigateToURLLogResult(const GURL& url, std::ofstream& log_file,
+  // Accept URL as string here because the url may also act as a test id
+  // and needs to be logged in its original format even if invalid.
+  void NavigateToURLLogResult(const std::wstring& url_string,
+                              std::ofstream& log_file,
                               NavigationMetrics* metrics_output) {
+    GURL url = GURL(url_string);
     NavigationMetrics metrics = {NAVIGATION_ERROR};
     std::ofstream test_log;
 
@@ -141,16 +146,21 @@ class PageLoadTest : public UITest {
     test_log_path = L"test_log.log";
     test_log.open(test_log_path.c_str());
 
-    if (!continuous_load && !browser_existing) {
-      LaunchBrowserAndServer();
-      browser_existing = true;
-    }
-
     // Log timestamp for test start.
     base::Time time_now = base::Time::Now();
     double time_start = time_now.ToDoubleT();
     test_log << "Test Start: ";
     test_log << base::TimeFormatFriendlyDateAndTime(time_now) << std::endl;
+
+    if (!continuous_load && !browser_existing) {
+      LaunchBrowserAndServer();
+      browser_existing = true;
+    }
+
+    // Log Browser Launched time.
+    time_now = base::Time::Now();
+    test_log << "browser_launched_seconds=";
+    test_log << (time_now.ToDoubleT() - time_start) << std::endl;
 
     bool is_timeout = false;
     int result = AUTOMATION_MSG_NAVIGATION_ERROR;
@@ -158,7 +168,7 @@ class PageLoadTest : public UITest {
     // assertion when page loading fails. We log the result instead.
     {
       // TabProxy should be released before Browser is closed.
-      scoped_ptr<TabProxy> tab_proxy(GetActiveTab());
+      scoped_refptr<TabProxy> tab_proxy(GetActiveTab());
       if (tab_proxy.get()) {
         result = tab_proxy->NavigateToURLWithTimeout(url, timeout_ms,
                                                      &is_timeout);
@@ -167,18 +177,18 @@ class PageLoadTest : public UITest {
       if (!is_timeout && result == AUTOMATION_MSG_NAVIGATION_SUCCESS) {
         if (page_down) {
           // Page down twice.
-          scoped_ptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
+          scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
           if (browser.get()) {
-            scoped_ptr<WindowProxy> window(browser->GetWindow());
+            scoped_refptr<WindowProxy> window(browser->GetWindow());
             if (window.get()) {
               bool activation_timeout;
               browser->BringToFrontWithTimeout(action_max_timeout_ms(),
                                                &activation_timeout);
               if (!activation_timeout) {
                 window->SimulateOSKeyPress(VK_NEXT, 0);
-                Sleep(sleep_timeout_ms());
+                PlatformThread::Sleep(sleep_timeout_ms());
                 window->SimulateOSKeyPress(VK_NEXT, 0);
-                Sleep(sleep_timeout_ms());
+                PlatformThread::Sleep(sleep_timeout_ms());
               }
             }
           }
@@ -186,17 +196,20 @@ class PageLoadTest : public UITest {
       }
     }
 
+    // Log navigate complete time.
+    time_now = base::Time::Now();
+    test_log << "navigate_complete_seconds=";
+    test_log << (time_now.ToDoubleT() - time_start) << std::endl;
+
     if (!continuous_load) {
       CloseBrowserAndServer();
       browser_existing = false;
     }
 
-    // Log timestamp for end of test.
+    // Log end of test time.
     time_now = base::Time::Now();
-    double time_stop = time_now.ToDoubleT();
-    test_log << "Test End: ";
-    test_log << base::TimeFormatFriendlyDateAndTime(time_now) << std::endl;
-    test_log << "duration_seconds=" << (time_stop - time_start) << std::endl;
+    test_log << "total_duration_seconds=";
+    test_log << (time_now.ToDoubleT() - time_start) << std::endl;
 
     // Get navigation result and metrics, and optionally write to the log file
     // provided.  The log format is:
@@ -231,7 +244,7 @@ class PageLoadTest : public UITest {
     }
 
     if (log_file.is_open()) {
-      log_file << url.spec();
+      log_file << url_string;
       switch (metrics.result) {
         case NAVIGATION_ERROR:
           log_file << " error";
@@ -287,7 +300,7 @@ class PageLoadTest : public UITest {
       for (int i = start_page; i <= end_page; ++i) {
         std::wstring test_page_url(
             StringPrintf(L"%ls/page?id=%d", server_url.c_str(), i));
-        NavigateToURLLogResult(GURL(test_page_url), log_file, NULL);
+        NavigateToURLLogResult(test_page_url, log_file, NULL);
       }
     } else {
       // Don't run if single process mode.
@@ -299,9 +312,27 @@ class PageLoadTest : public UITest {
       // For usage 1
       NavigationMetrics metrics;
       if (timeout_ms == INFINITE)
-        timeout_ms = 30000;
+        timeout_ms = 2000;
 
-      NavigateToURLLogResult(GURL(test_url_1), log_file, &metrics);
+      // Though it would be nice to test the page down code path in usage 1,
+      // enabling page down adds several seconds to the test and does not seem
+      // worth the tradeoff. It is also potentially disruptive when running the
+      // test in the background as it will send the event to the window that
+      // has focus.
+      page_down = false;
+
+      FilePath sample_data_dir = GetSampleDataDir();
+      FilePath test_page_1 = sample_data_dir.AppendASCII("page1.html");
+      FilePath test_page_2 = sample_data_dir.AppendASCII("page2.html");
+
+      GURL test_url_1 = net::FilePathToFileURL(test_page_1);
+      GURL test_url_2 = net::FilePathToFileURL(test_page_2);
+
+      // Convert back to string so that all calls to navigate are the same.
+      const std::wstring test_url_1_string = ASCIIToWide(test_url_1.spec());
+      const std::wstring test_url_2_string = ASCIIToWide(test_url_2.spec());
+
+      NavigateToURLLogResult(test_url_1_string, log_file, &metrics);
       // Verify everything is fine
       EXPECT_EQ(NAVIGATION_SUCCESS, metrics.result);
       EXPECT_EQ(0, metrics.crash_dump_count);
@@ -314,28 +345,18 @@ class PageLoadTest : public UITest {
       EXPECT_EQ(0, metrics.plugin_crash_count);
 
       // Go to "about:crash"
-      uint32 crash_timeout_ms = timeout_ms / 2;
-      std::swap(timeout_ms, crash_timeout_ms);
-      NavigateToURLLogResult(GURL(test_url_2), log_file, &metrics);
-      std::swap(timeout_ms, crash_timeout_ms);
-      // Page load crashed and test automation timed out.
-      EXPECT_EQ(NAVIGATION_TIME_OUT, metrics.result);
+      NavigateToURLLogResult(std::wstring(crash_url), log_file, &metrics);
       // Found a crash dump
       EXPECT_EQ(1, metrics.crash_dump_count) << kFailedNoCrashService;
       // Browser did not crash, and exited cleanly.
       EXPECT_EQ(true, metrics.browser_clean_exit);
       EXPECT_EQ(1, metrics.browser_launch_count);
-      // Only starting page was loaded.
-      EXPECT_EQ(1, metrics.page_load_count);
+      // Only the renderer should have crashed.
       EXPECT_EQ(0, metrics.browser_crash_count);
-      // Renderer crashed.
       EXPECT_EQ(1, metrics.renderer_crash_count);
       EXPECT_EQ(0, metrics.plugin_crash_count);
 
-      uint32 youtube_timeout_ms = timeout_ms * 2;
-      std::swap(timeout_ms, youtube_timeout_ms);
-      NavigateToURLLogResult(GURL(test_url_3), log_file, &metrics);
-      std::swap(timeout_ms, youtube_timeout_ms);
+      NavigateToURLLogResult(test_url_2_string, log_file, &metrics);
       // The data on previous crash should be cleared and we should get
       // metrics for a successful page load.
       EXPECT_EQ(NAVIGATION_SUCCESS, metrics.result);
@@ -351,7 +372,7 @@ class PageLoadTest : public UITest {
       LaunchBrowserAndServer();
       {
         // TabProxy should be released before Browser is closed.
-        scoped_ptr<TabProxy> tab_proxy(GetActiveTab());
+        scoped_refptr<TabProxy> tab_proxy(GetActiveTab());
         if (tab_proxy.get()) {
           tab_proxy->NavigateToURL(GURL(test_url_1));
         }
@@ -386,7 +407,7 @@ class PageLoadTest : public UITest {
         break;
 
       if (start_index <= line_index) {
-        NavigateToURLLogResult(GURL(url_str), log_file, NULL);
+        NavigateToURLLogResult(ASCIIToWide(url_str), log_file, NULL);
       }
     }
 
@@ -418,22 +439,21 @@ class PageLoadTest : public UITest {
     }
   }
 
-  std::wstring ConstructSavedDebugLogPath(const std::wstring& debug_log_path,
-                                          int index) {
-    std::wstring saved_debug_log_path(debug_log_path);
+  FilePath ConstructSavedDebugLogPath(const FilePath& debug_log_path,
+                                      int index) {
     std::wstring suffix(L"_");
     suffix.append(IntToWString(index));
-    file_util::InsertBeforeExtension(&saved_debug_log_path, suffix);
-    return saved_debug_log_path;
+    return debug_log_path.InsertBeforeExtension(suffix);
   }
 
   void SaveDebugLog(const std::wstring& log_path, const std::wstring& log_id,
                     std::ofstream& log_file, int index) {
     if (!log_path.empty()) {
-      std::wstring saved_log_path =
-          ConstructSavedDebugLogPath(log_path, index);
-      if (file_util::Move(log_path, saved_log_path)) {
-        log_file << log_id << "=" << saved_log_path;
+      FilePath log_file_path(log_path);
+      FilePath saved_log_file_path =
+          ConstructSavedDebugLogPath(log_file_path, index);
+      if (file_util::Move(log_file_path, saved_log_file_path)) {
+        log_file << " " << log_id << "=" << saved_log_file_path.value();
       }
     }
   }
@@ -505,10 +525,10 @@ class PageLoadTest : public UITest {
   // that was saved by the app as it closed.  The caller takes ownership of the
   // returned PrefService object.
   PrefService* GetLocalState() {
-    FilePath local_state_path = FilePath::FromWStringHack(user_data_dir())
+    FilePath local_state_path = user_data_dir()
         .Append(chrome::kLocalStateFilename);
 
-    PrefService* local_state(new PrefService(local_state_path));
+    PrefService* local_state(new PrefService(local_state_path, NULL));
     return local_state;
   }
 
@@ -539,6 +559,14 @@ class PageLoadTest : public UITest {
 
     if (!metrics->browser_clean_exit)
       metrics->browser_crash_count++;
+  }
+
+  FilePath GetSampleDataDir() {
+    FilePath test_dir;
+    PathService::Get(chrome::DIR_TEST_DATA, &test_dir);
+    test_dir = test_dir.AppendASCII("reliability");
+    test_dir = test_dir.AppendASCII("sample_pages");
+    return test_dir;
   }
 
   // The pathname of Chrome's crash dumps directory.
@@ -577,15 +605,26 @@ TEST_F(PageLoadTest, Reliability) {
   }
 
   if (!end_url.empty()) {
-    NavigateToURLLogResult(GURL(end_url), log_file, NULL);
+    NavigateToURLLogResult(end_url, log_file, NULL);
   }
 
   log_file.close();
 }
 
+namespace {
+  void ReportHandler(const std::string& str) {
+    // Ignore report events.
+  }
+}
+
 void SetPageRange(const CommandLine& parsed_command_line) {
   // If calling into this function, we are running as a standalone program.
   stand_alone = true;
+
+  // Since we use --enable-dcheck for reliability tests, suppress the error
+  // dialog in the test process.
+  logging::SetLogReportHandler(ReportHandler);
+
   if (parsed_command_line.HasSwitch(kStartPageSwitch)) {
     ASSERT_TRUE(parsed_command_line.HasSwitch(kEndPageSwitch));
     start_page =

@@ -7,17 +7,17 @@
 
 #include "chrome/browser/views/options/options_group_view.h"
 
+#include "app/gfx/canvas.h"
+#include "app/gfx/font.h"
+#include "app/l10n_util.h"
+#include "app/resource_bundle.h"
 #include "base/gfx/native_theme.h"
-#include "chrome/browser/views/standard_layout.h"
-#include "chrome/common/gfx/chrome_font.h"
-#include "chrome/common/gfx/chrome_canvas.h"
-#include "chrome/common/l10n_util.h"
-#include "chrome/common/resource_bundle.h"
-#include "chrome/views/grid_layout.h"
-#include "chrome/views/controls/label.h"
-#include "chrome/views/controls/separator.h"
 #include "grit/locale_settings.h"
 #include "grit/generated_resources.h"
+#include "views/grid_layout.h"
+#include "views/controls/label.h"
+#include "views/controls/separator.h"
+#include "views/standard_layout.h"
 
 static const int kLeftColumnWidthChars = 20;
 static const int kOptionsGroupViewColumnSpacing = 30;
@@ -36,8 +36,8 @@ OptionsGroupView::OptionsGroupView(views::View* contents,
       show_separator_(show_separator),
       highlighted_(false) {
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-  ChromeFont title_font =
-      rb.GetFont(ResourceBundle::BaseFont).DeriveFont(0, ChromeFont::BOLD);
+  gfx::Font title_font =
+      rb.GetFont(ResourceBundle::BaseFont).DeriveFont(0, gfx::Font::BOLD);
   title_label_->SetFont(title_font);
   SkColor title_color = gfx::NativeTheme::instance()->GetThemeColorWithDefault(
       gfx::NativeTheme::BUTTON, BP_GROUPBOX, GBS_NORMAL, TMT_TEXTCOLOR,
@@ -62,7 +62,7 @@ int OptionsGroupView::GetContentsWidth() const {
 ///////////////////////////////////////////////////////////////////////////////
 // OptionsGroupView, views::View overrides:
 
-void OptionsGroupView::Paint(ChromeCanvas* canvas) {
+void OptionsGroupView::Paint(gfx::Canvas* canvas) {
   if (highlighted_) {
     COLORREF infocolor = GetSysColor(COLOR_INFOBK);
     SkColor background_color = SkColorSetRGB(GetRValue(infocolor),
@@ -92,7 +92,7 @@ void OptionsGroupView::Init() {
   SetLayoutManager(layout);
 
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-  ChromeFont font = rb.GetFont(ResourceBundle::BaseFont);
+  gfx::Font font = rb.GetFont(ResourceBundle::BaseFont);
   std::wstring left_column_chars =
       l10n_util::GetString(IDS_OPTIONS_DIALOG_LEFT_COLUMN_WIDTH_CHARS);
   int left_column_width =

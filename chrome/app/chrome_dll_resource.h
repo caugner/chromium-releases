@@ -8,8 +8,6 @@
 
 #define IDR_MAINFRAME                   101
 
-#define IDR_SAD_PLUGIN                  1000
-
 // Values around 1600 are used by installer/setup/build/
 
 #define IDD_IPC_SETTINGS                3000
@@ -31,6 +29,8 @@
 #define IDC_NPObjectNone                4014
 #define IDC_PluginHostAll               4015
 #define IDC_PluginHostNone              4016
+#define IDC_DevToolsAgent               4017
+#define IDC_DevToolsClient              4018
 
 // NOTE: Within each of the following sections, the IDs are ordered roughly by
 // how they appear in the GUI/menus (left to right, top to bottom, etc.).
@@ -88,6 +88,10 @@
 #define IDC_PRINT                       35003
 #define IDC_SAVE_PAGE                   35004
 #define IDC_ENCODING_MENU               35005
+
+// When adding a new encoding to this list, be sure to append it to the
+// EncodingMenuController::kValidEncodingIds array in
+// encoding_menu_controller.cc.
 #define IDC_ENCODING_AUTO_DETECT        35006
 #define IDC_ENCODING_UTF8               35007
 #define IDC_ENCODING_UTF16LE            35008
@@ -153,7 +157,6 @@
 #define IDC_OPEN_FILE                   40000
 #define IDC_CREATE_SHORTCUTS            40001
 #define IDC_DEVELOPER_MENU              40002
-#define IDC_DEBUGGER                    40003
 #define IDC_JS_CONSOLE                  40004
 #define IDC_TASK_MANAGER                40005
 #define IDC_SELECT_PROFILE              40006
@@ -200,7 +203,7 @@
 
 // Identifiers for platform-specific items.
 // Placed in a common file to help insure they never collide.
-#define IDC_BOOKMARK_MENU               43000  // OSX only
-#define IDC_BOOKMARK_MENUITEM_BASE      43001  // OSX only
-// Numbers 43002-43998 reserved for menu items
-#define IDC_BOOKMARK_MENUITEM_MAX       43999  // OSX only
+#define IDC_BOOKMARK_MENU               43000     // OSX only
+#define IDC_VIEW_MENU                   44000     // OSX only
+#define IDC_CONTROL_PANEL               45000     // Linux2 only
+

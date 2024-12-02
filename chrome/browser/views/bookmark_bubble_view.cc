@@ -4,26 +4,24 @@
 
 #include "chrome/browser/views/bookmark_bubble_view.h"
 
+#include "app/gfx/canvas.h"
+#include "app/l10n_util.h"
+#include "app/resource_bundle.h"
 #include "chrome/app/chrome_dll_resource.h"
+#include "chrome/browser/bookmarks/bookmark_editor.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/metrics/user_metrics.h"
 #include "chrome/browser/profile.h"
-#include "chrome/browser/views/bookmark_editor_view.h"
 #include "chrome/browser/views/info_bubble.h"
-#include "chrome/browser/views/standard_layout.h"
-#include "chrome/common/gfx/chrome_canvas.h"
-#include "chrome/common/l10n_util.h"
 #include "chrome/common/notification_service.h"
-#include "chrome/common/resource_bundle.h"
-#include "chrome/views/controls/button/button.h"
-#include "chrome/views/controls/button/checkbox.h"
-#include "chrome/views/controls/button/native_button.h"
-#include "chrome/views/controls/text_field.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "views/standard_layout.h"
+#include "views/controls/button/native_button.h"
+#include "views/controls/textfield/textfield.h"
 
-using views::ComboBox;
+using views::Combobox;
 using views::ColumnSet;
 using views::GridLayout;
 using views::Label;
@@ -49,10 +47,34 @@ static const size_t kMaxMRUFolders = 5;
 // Bubble close image.
 static SkBitmap* kCloseImage = NULL;
 
+// Declared in browser_dialogs.h so callers don't have to depend on our header.
+
+namespace browser {
+
+void ShowBookmarkBubbleView(views::Window* parent,
+                            const gfx::Rect& bounds,
+                            InfoBubbleDelegate* delegate,
+                            Profile* profile,
+                            const GURL& url,
+                            bool newly_bookmarked) {
+  BookmarkBubbleView::Show(parent, bounds, delegate, profile, url,
+                           newly_bookmarked);
+}
+
+void HideBookmarkBubbleView() {
+  BookmarkBubbleView::Hide();
+}
+
+bool IsBookmarkBubbleViewShowing() {
+  return BookmarkBubbleView::IsShowing();
+}
+
+}  // namespace browser
+
 // RecentlyUsedFoldersModel ---------------------------------------------------
 
 BookmarkBubbleView::RecentlyUsedFoldersModel::RecentlyUsedFoldersModel(
-    BookmarkModel* bb_model, BookmarkNode* node)
+    BookmarkModel* bb_model, const BookmarkNode* node)
       // Use + 2 to account for bookmark bar and other node.
       : nodes_(bookmark_utils::GetMostRecentlyModifiedGroups(
             bb_model, kMaxMRUFolders + 2)),
@@ -84,25 +106,25 @@ BookmarkBubbleView::RecentlyUsedFoldersModel::RecentlyUsedFoldersModel(
 }
 
 int BookmarkBubbleView::RecentlyUsedFoldersModel::GetItemCount(
-    ComboBox* source) {
+    Combobox* source) {
   return static_cast<int>(nodes_.size() + 1);
 }
 
 std::wstring BookmarkBubbleView::RecentlyUsedFoldersModel::GetItemAt(
-    ComboBox* source, int index) {
+    Combobox* source, int index) {
   if (index == nodes_.size())
     return l10n_util::GetString(IDS_BOOMARK_BUBBLE_CHOOSER_ANOTHER_FOLDER);
   return nodes_[index]->GetTitle();
 }
 
-BookmarkNode* BookmarkBubbleView::RecentlyUsedFoldersModel::GetNodeAt(
+const BookmarkNode* BookmarkBubbleView::RecentlyUsedFoldersModel::GetNodeAt(
     int index) {
   return nodes_[index];
 }
 
 void BookmarkBubbleView::RecentlyUsedFoldersModel::RemoveNode(
-    BookmarkNode* node) {
-  std::vector<BookmarkNode*>::iterator i =
+    const BookmarkNode* node) {
+  std::vector<const BookmarkNode*>::iterator i =
       find(nodes_.begin(), nodes_.end(), node);
   if (i != nodes_.end())
     nodes_.erase(i);
@@ -113,7 +135,7 @@ void BookmarkBubbleView::RecentlyUsedFoldersModel::RemoveNode(
 BookmarkBubbleView* BookmarkBubbleView::bubble_ = NULL;
 
 // static
-void BookmarkBubbleView::Show(HWND parent,
+void BookmarkBubbleView::Show(views::Window* parent,
                               const gfx::Rect& bounds,
                               InfoBubbleDelegate* delegate,
                               Profile* profile,
@@ -147,7 +169,7 @@ BookmarkBubbleView::~BookmarkBubbleView() {
     ApplyEdits();
   } else if (remove_bookmark_) {
     BookmarkModel* model = profile_->GetBookmarkModel();
-    BookmarkNode* node = model->GetMostRecentlyAddedNodeForURL(url_);
+    const BookmarkNode* node = model->GetMostRecentlyAddedNodeForURL(url_);
     if (node)
       model->Remove(node->GetParent(), node->GetParent()->IndexOfChild(node));
   }
@@ -160,9 +182,7 @@ void BookmarkBubbleView::DidChangeBounds(const gfx::Rect& previous,
 
 void BookmarkBubbleView::BubbleShown() {
   DCHECK(GetWidget());
-  views::FocusManager* focus_manager =
-      views::FocusManager::GetFocusManager(GetWidget()->GetNativeView());
-  focus_manager->RegisterAccelerator(
+  GetFocusManager()->RegisterAccelerator(
       views::Accelerator(VK_RETURN, false, false, false), this);
 
   title_tf_->RequestFocus();
@@ -207,15 +227,14 @@ void BookmarkBubbleView::Init() {
   remove_link_->SetController(this);
 
   edit_button_ = new NativeButton(
-      l10n_util::GetString(IDS_BOOMARK_BUBBLE_OPTIONS));
-  edit_button_->SetListener(this);
+      this, l10n_util::GetString(IDS_BOOMARK_BUBBLE_OPTIONS));
 
-  close_button_ = new NativeButton(l10n_util::GetString(IDS_CLOSE), true);
-  close_button_->SetListener(this);
+  close_button_ = new NativeButton(this, l10n_util::GetString(IDS_CLOSE));
+  close_button_->SetIsDefault(true);
 
-  parent_combobox_ = new ComboBox(&parent_model_);
+  parent_combobox_ = new Combobox(&parent_model_);
   parent_combobox_->SetSelectedItem(parent_model_.node_parent_index());
-  parent_combobox_->SetListener(this);
+  parent_combobox_->set_listener(this);
 
   Label* title_label = new Label(l10n_util::GetString(
       newly_bookmarked_ ? IDS_BOOMARK_BUBBLE_PAGE_BOOKMARKED :
@@ -264,7 +283,7 @@ void BookmarkBubbleView::Init() {
   layout->StartRow(0, 2);
   layout->AddView(
       new Label(l10n_util::GetString(IDS_BOOMARK_BUBBLE_TITLE_TEXT)));
-  title_tf_ = new views::TextField();
+  title_tf_ = new views::Textfield();
   title_tf_->SetText(GetTitle());
   layout->AddView(title_tf_);
 
@@ -283,7 +302,8 @@ void BookmarkBubbleView::Init() {
 
 std::wstring BookmarkBubbleView::GetTitle() {
   BookmarkModel* bookmark_model= profile_->GetBookmarkModel();
-  BookmarkNode* node = bookmark_model->GetMostRecentlyAddedNodeForURL(url_);
+  const BookmarkNode* node =
+      bookmark_model->GetMostRecentlyAddedNodeForURL(url_);
   if (node)
     return node->GetTitle();
   else
@@ -291,7 +311,7 @@ std::wstring BookmarkBubbleView::GetTitle() {
   return std::wstring();
 }
 
-void BookmarkBubbleView::ButtonPressed(views::NativeButton* sender) {
+void BookmarkBubbleView::ButtonPressed(views::Button* sender) {
   if (sender == edit_button_) {
     UserMetrics::RecordAction(L"BookmarkBubble_Edit", profile_);
     ShowEditor();
@@ -313,7 +333,7 @@ void BookmarkBubbleView::LinkActivated(Link* source, int event_flags) {
   Close();
 }
 
-void BookmarkBubbleView::ItemChanged(ComboBox* combo_box,
+void BookmarkBubbleView::ItemChanged(Combobox* combobox,
                                      int prev_index,
                                      int new_index) {
   if (new_index + 1 == parent_model_.GetItemCount(parent_combobox_)) {
@@ -353,7 +373,7 @@ void BookmarkBubbleView::Close() {
 }
 
 void BookmarkBubbleView::ShowEditor() {
-  BookmarkNode* node =
+  const BookmarkNode* node =
       profile_->GetBookmarkModel()->GetMostRecentlyAddedNodeForURL(url_);
 
   // Commit any edits now.
@@ -376,9 +396,10 @@ void BookmarkBubbleView::ShowEditor() {
   // the delete and all that.
   Close();
 
-  if (node)
-    BookmarkEditorView::Show(parent, profile_, NULL, node,
-                             BookmarkEditorView::SHOW_TREE, NULL);
+  if (node) {
+    BookmarkEditor::Show(parent, profile_, NULL, node,
+                         BookmarkEditor::SHOW_TREE, NULL);
+  }
 }
 
 void BookmarkBubbleView::ApplyEdits() {
@@ -386,19 +407,19 @@ void BookmarkBubbleView::ApplyEdits() {
   apply_edits_ = false;
 
   BookmarkModel* model = profile_->GetBookmarkModel();
-  BookmarkNode* node = model->GetMostRecentlyAddedNodeForURL(url_);
+  const BookmarkNode* node = model->GetMostRecentlyAddedNodeForURL(url_);
   if (node) {
-    const std::wstring new_title = title_tf_->GetText();
+    const std::wstring new_title = title_tf_->text();
     if (new_title != node->GetTitle()) {
       model->SetTitle(node, new_title);
       UserMetrics::RecordAction(L"BookmarkBubble_ChangeTitleInBubble",
                                 profile_);
     }
     // Last index means 'Choose another folder...'
-    if (parent_combobox_->GetSelectedItem() <
+    if (parent_combobox_->selected_item() <
         parent_model_.GetItemCount(parent_combobox_) - 1) {
-      BookmarkNode* new_parent =
-          parent_model_.GetNodeAt(parent_combobox_->GetSelectedItem());
+      const BookmarkNode* new_parent =
+          parent_model_.GetNodeAt(parent_combobox_->selected_item());
       if (new_parent != node->GetParent()) {
         UserMetrics::RecordAction(L"BookmarkBubble_ChangeParent", profile_);
         model->Move(node, new_parent, new_parent->GetChildCount());

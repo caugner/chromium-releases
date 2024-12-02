@@ -7,8 +7,8 @@
 
 #include "base/task.h"
 #include "base/thread.h"
-#include "chrome/browser/printing/page_number.h"
-#include "chrome/browser/printing/win_printing_context.h"
+#include "printing/page_number.h"
+#include "printing/printing_context.h"
 
 namespace printing {
 
@@ -34,7 +34,8 @@ class PrintJobWorker : public base::Thread {
   // Print... dialog box will be shown to ask the user his preference.
   void GetSettings(bool ask_user_for_settings,
                    HWND parent_window,
-                   int document_page_count);
+                   int document_page_count,
+                   bool has_selection);
 
   // Starts the printing loop. Every pages are printed as soon as the data is
   // available. Makes sure the new_document is the right one.
@@ -53,10 +54,6 @@ class PrintJobWorker : public base::Thread {
 
   // Cancels the Print... dialog box if shown, noop otherwise.
   void DismissDialog();
-
-  // Requests the missing pages in rendered_document_. Sends back a
-  // ALL_PAGES_REQUESTED notification once done.
-  void RequestMissingPages();
 
  protected:
   // Retrieves the context for testing only.

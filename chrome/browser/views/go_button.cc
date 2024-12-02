@@ -4,58 +4,48 @@
 
 #include "chrome/browser/views/go_button.h"
 
+#include "app/l10n_util.h"
+#include "base/compiler_specific.h"
+#include "base/message_loop.h"
 #include "chrome/app/chrome_dll_resource.h"
-#include "chrome/browser/command_updater.h"
+#include "chrome/browser/browser.h"
+#include "chrome/browser/profile.h"
+#include "chrome/browser/search_engines/template_url_model.h"
+#include "chrome/browser/views/event_utils.h"
 #include "chrome/browser/views/location_bar_view.h"
-#include "chrome/common/l10n_util.h"
 #include "grit/generated_resources.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 // GoButton, public:
 
-GoButton::GoButton(LocationBarView* location_bar,
-                   CommandUpdater* command_updater)
+GoButton::GoButton(LocationBarView* location_bar, Browser* browser)
     : ToggleImageButton(this),
+      button_delay_(0),
+      ALLOW_THIS_IN_INITIALIZER_LIST(stop_timer_(this)),
       location_bar_(location_bar),
-      command_updater_(command_updater),
+      browser_(browser),
       intended_mode_(MODE_GO),
-      visible_mode_(MODE_GO),
-      button_delay_(NULL),
-      stop_timer_(this) {
+      visible_mode_(MODE_GO) {
   DCHECK(location_bar_);
+  set_triggerable_event_flags(views::Event::EF_LEFT_BUTTON_DOWN |
+                           views::Event::EF_MIDDLE_BUTTON_DOWN);
 }
 
 GoButton::~GoButton() {
   stop_timer_.RevokeAll();
 }
 
-void GoButton::ChangeMode(Mode mode) {
-  stop_timer_.RevokeAll();
-
-  SetToggled(mode == MODE_STOP);
+void GoButton::ChangeMode(Mode mode, bool force) {
   intended_mode_ = mode;
-  visible_mode_ = mode;
-}
 
-void GoButton::ScheduleChangeMode(Mode mode) {
-  if (mode == MODE_STOP) {
-    // If we still have a timer running, we can't yet change to a stop sign,
-    // so we'll queue up the change for when the timer expires or for when
-    // the mouse exits the button.
-    if (!stop_timer_.empty() && state() == BS_HOT) {
-      intended_mode_ = MODE_STOP;
-    } else {
-      ChangeMode(MODE_STOP);
-    }
-  } else {
-    // If we want to change the button to a go button, but the user's mouse
-    // is hovering, don't change the mode just yet - this prevents the
-    // stop button changing to a go under the user's mouse cursor.
-    if (visible_mode_ == MODE_STOP && state() == BS_HOT) {
-      intended_mode_ = MODE_GO;
-    } else {
-      ChangeMode(MODE_GO);
-    }
+  // If the change is forced, or the user isn't hovering the icon, or it's safe
+  // to change it to the other image type, make the change immediately;
+  // otherwise we'll let it happen later.
+  if (force || (state() != BS_HOT) || ((mode == MODE_STOP) ?
+      stop_timer_.empty() : (visible_mode_ != MODE_STOP))) {
+    stop_timer_.RevokeAll();
+    SetToggled(mode == MODE_STOP);
+    visible_mode_ = mode;
   }
 }
 
@@ -64,18 +54,24 @@ void GoButton::ScheduleChangeMode(Mode mode) {
 
 void GoButton::ButtonPressed(views::Button* button) {
   if (visible_mode_ == MODE_STOP) {
-    command_updater_->ExecuteCommand(IDC_STOP);
+    browser_->Stop();
 
     // The user has clicked, so we can feel free to update the button,
     // even if the mouse is still hovering.
-    ChangeMode(MODE_GO);
+    ChangeMode(MODE_GO, true);
   } else if (visible_mode_ == MODE_GO && stop_timer_.empty()) {
     // If the go button is visible and not within the double click timer, go.
-    command_updater_->ExecuteCommand(IDC_GO);
+    browser_->Go(event_utils::DispositionFromEventFlags(mouse_event_flags()));
 
     // Figure out the system double-click time.
-    if (button_delay_ == NULL)
+    if (button_delay_ == 0) {
+#if defined(OS_WIN)
       button_delay_ = GetDoubleClickTime();
+#else
+      NOTIMPLEMENTED();
+      button_delay_ = 500;
+#endif
+    }
 
     // Stop any existing timers.
     stop_timer_.RevokeAll();
@@ -95,11 +91,7 @@ void GoButton::ButtonPressed(views::Button* button) {
 // GoButton, View overrides:
 
 void GoButton::OnMouseExited(const views::MouseEvent& e) {
-  using namespace views;
-
-  if (visible_mode_ != intended_mode_)
-    ChangeMode(intended_mode_);
-
+  ChangeMode(intended_mode_, true);
   if (state() != BS_DISABLED)
     SetState(BS_NORMAL);
 }
@@ -126,12 +118,22 @@ bool GoButton::GetTooltipText(int x, int y, std::wstring* tooltip) {
   if (l10n_util::GetTextDirection() == l10n_util::RIGHT_TO_LEFT)
     l10n_util::WrapStringWithLTRFormatting(&current_text);
 
-  // TODO(pkasting): http://b/868940 Use the right strings at the right times by
-  // asking the autocomplete system what to do.  Don't hardcode "Google" as the
-  // search provider name.
-  tooltip->assign(true ?
-      l10n_util::GetStringF(IDS_TOOLTIP_GO_SITE, current_text) :
-      l10n_util::GetStringF(IDS_TOOLTIP_GO_SEARCH, L"Google", current_text));
+  AutocompleteEditModel* edit_model = location_bar_->location_entry()->model();
+  if (edit_model->CurrentTextIsURL()) {
+    tooltip->assign(l10n_util::GetStringF(IDS_TOOLTIP_GO_SITE, current_text));
+  } else {
+    std::wstring keyword(edit_model->keyword());
+    TemplateURLModel* template_url_model =
+        location_bar_->profile()->GetTemplateURLModel();
+    const TemplateURL* provider =
+        (keyword.empty() || edit_model->is_keyword_hint()) ?
+        template_url_model->GetDefaultSearchProvider() :
+        template_url_model->GetTemplateURLForKeyword(keyword);
+    if (!provider)
+        return false;
+    tooltip->assign(l10n_util::GetStringF(IDS_TOOLTIP_GO_SEARCH,
+        provider->AdjustedShortNameForLocaleDirection(), current_text));
+  }
   return true;
 }
 
@@ -139,8 +141,6 @@ bool GoButton::GetTooltipText(int x, int y, std::wstring* tooltip) {
 // GoButton, private:
 
 void GoButton::OnButtonTimer() {
-  if (intended_mode_ != visible_mode_)
-    ChangeMode(intended_mode_);
-
   stop_timer_.RevokeAll();
+  ChangeMode(intended_mode_, true);
 }

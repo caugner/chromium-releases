@@ -9,15 +9,27 @@
 
 using webkit_glue::WebAccessibility;
 
-BrowserAccessibility::BrowserAccessibility()
-    : iaccessible_id_(-1),
-      instance_active_(true) {
+HRESULT BrowserAccessibility::Initialize(int iaccessible_id, int routing_id,
+                                         int process_id, HWND parent_hwnd) {
+  // Check input parameters. Root id is 1000, to avoid conflicts with the ids
+  // used by MSAA.
+  if (!parent_hwnd || iaccessible_id < 1000)
+    return E_INVALIDARG;
+
+  iaccessible_id_ = iaccessible_id;
+  routing_id_ = routing_id;
+  process_id_ = process_id;
+  parent_hwnd_ = parent_hwnd;
+
+  // Mark instance as active.
+  instance_active_ = true;
+  return S_OK;
 }
 
 HRESULT BrowserAccessibility::accDoDefaultAction(VARIANT var_id) {
   if (!instance_active()) {
     // Instance no longer active, fail gracefully.
-    // TODO(klink): Once we have MSAA events, change these fails for having
+    // TODO(klink): Once we have MSAA events, change these fails to having
     // BrowserAccessibilityManager firing the right event.
     return E_FAIL;
   }
@@ -46,7 +58,7 @@ STDMETHODIMP BrowserAccessibility::accHitTest(LONG x_left, LONG y_top,
   if (!child)
     return E_INVALIDARG;
 
-  if (!parent_hwnd()) {
+  if (!parent_hwnd_) {
     // Parent HWND needed for coordinate conversion.
     return E_FAIL;
   }
@@ -54,7 +66,7 @@ STDMETHODIMP BrowserAccessibility::accHitTest(LONG x_left, LONG y_top,
   // Convert coordinates to test from screen into client window coordinates, to
   // maintain sandbox functionality on renderer side.
   POINT p = {x_left, y_top};
-  ::ScreenToClient(parent_hwnd(), &p);
+  ::ScreenToClient(parent_hwnd_, &p);
 
   if (!RequestAccessibilityInfo(WebAccessibility::FUNCTION_HITTEST,
                                 EmptyVariant(), p.x, p.y)) {
@@ -93,7 +105,7 @@ STDMETHODIMP BrowserAccessibility::accLocation(LONG* x_left, LONG* y_top,
   }
 
   if (var_id.vt != VT_I4 || !x_left || !y_top || !width || !height ||
-      !parent_hwnd()) {
+      !parent_hwnd_) {
     return E_INVALIDARG;
   }
 
@@ -106,7 +118,7 @@ STDMETHODIMP BrowserAccessibility::accLocation(LONG* x_left, LONG* y_top,
 
   // Find the top left corner of the containing window in screen coords, and
   // adjust the output position by this amount.
-  ::ClientToScreen(parent_hwnd(), &top_left);
+  ::ClientToScreen(parent_hwnd_, &top_left);
 
   *x_left = response().output_long1 + top_left.x;
   *y_top  = response().output_long2 + top_left.y;
@@ -178,7 +190,7 @@ STDMETHODIMP BrowserAccessibility::get_accChild(VARIANT var_child,
     return E_INVALIDARG;
 
   // If var_child is the parent, remain with the same IDispatch.
-  if (var_child.lVal == CHILDID_SELF && iaccessible_id_ != 0)
+  if (var_child.lVal == CHILDID_SELF && iaccessible_id_ != 1000)
     return S_OK;
 
   if (!RequestAccessibilityInfo(WebAccessibility::FUNCTION_GETCHILD, var_child,
@@ -393,15 +405,15 @@ STDMETHODIMP BrowserAccessibility::get_accParent(IDispatch** disp_parent) {
     return E_FAIL;
   }
 
-  if (!disp_parent || !parent_hwnd())
+  if (!disp_parent || !parent_hwnd_)
     return E_INVALIDARG;
 
   // Root node's parent is the containing HWND's IAccessible.
-  if (iaccessible_id() == 0) {
+  if (iaccessible_id_ == 1000) {
     // For an object that has no parent (e.g. root), point the accessible parent
     // to the default implementation.
     HRESULT hr =
-        ::CreateStdAccessibleObject(parent_hwnd(), OBJID_WINDOW,
+        ::CreateStdAccessibleObject(parent_hwnd_, OBJID_WINDOW,
                                     IID_IAccessible,
                                     reinterpret_cast<void**>(disp_parent));
 
@@ -498,20 +510,15 @@ STDMETHODIMP BrowserAccessibility::get_accValue(VARIANT var_id, BSTR* value) {
   return S_OK;
 }
 
-STDMETHODIMP BrowserAccessibility::accSelect(LONG flags_select,
-                                             VARIANT var_id) {
-  return E_NOTIMPL;
-}
-
 STDMETHODIMP BrowserAccessibility::get_accHelpTopic(BSTR* help_file,
                                                     VARIANT var_id,
                                                     LONG* topic_id) {
-  if (help_file) {
+  if (help_file)
     *help_file = NULL;
-  }
-  if (topic_id) {
+
+  if (topic_id)
     *topic_id = static_cast<LONG>(-1);
-  }
+
   return E_NOTIMPL;
 }
 
@@ -522,71 +529,80 @@ STDMETHODIMP BrowserAccessibility::get_accSelection(VARIANT* selected) {
   return E_NOTIMPL;
 }
 
-STDMETHODIMP BrowserAccessibility::put_accName(VARIANT var_id, BSTR put_name) {
-  return E_NOTIMPL;
-}
-
-STDMETHODIMP BrowserAccessibility::put_accValue(VARIANT var_id, BSTR put_val) {
-  return E_NOTIMPL;
-}
-
 STDMETHODIMP BrowserAccessibility::CreateInstance(REFIID iid,
                                                   int iaccessible_id,
                                                   void** interface_ptr) {
   return BrowserAccessibilityManager::GetInstance()->
-      CreateAccessibilityInstance(iid, iaccessible_id, instance_id(),
-                                  interface_ptr);
+      CreateAccessibilityInstance(iid, iaccessible_id, routing_id_,
+                                  process_id_, parent_hwnd_, interface_ptr);
 }
 
 bool BrowserAccessibility::RequestAccessibilityInfo(int iaccessible_func_id,
                                                     VARIANT var_id, LONG input1,
                                                     LONG input2) {
-  return BrowserAccessibilityManager::GetInstance()->RequestAccessibilityInfo(
-      iaccessible_id(), instance_id(), iaccessible_func_id, var_id.lVal, input1,
-      input2);
+  // Create and populate IPC message structure, for retrieval of accessibility
+  // information from the renderer.
+  WebAccessibility::InParams in_params;
+  in_params.object_id = iaccessible_id_;
+  in_params.function_id = iaccessible_func_id;
+  in_params.child_id = var_id.lVal;
+  in_params.input_long1 = input1;
+  in_params.input_long2 = input2;
+
+  return BrowserAccessibilityManager::GetInstance()->
+      RequestAccessibilityInfo(&in_params, routing_id_, process_id_);
 }
 
 const WebAccessibility::OutParams& BrowserAccessibility::response() {
   return BrowserAccessibilityManager::GetInstance()->response();
 }
 
-HWND BrowserAccessibility::parent_hwnd() {
-  return BrowserAccessibilityManager::GetInstance()->parent_hwnd(instance_id());
-}
-
 long BrowserAccessibility::MSAARole(long browser_accessibility_role) {
   switch (browser_accessibility_role) {
-    case WebAccessibility::ROLE_PUSHBUTTON :
-      return ROLE_SYSTEM_PUSHBUTTON;
-    case WebAccessibility::ROLE_RADIOBUTTON :
-      return ROLE_SYSTEM_RADIOBUTTON;
-    case WebAccessibility::ROLE_CHECKBUTTON :
+    case WebAccessibility::ROLE_CELL:
+      return ROLE_SYSTEM_CELL;
+    case WebAccessibility::ROLE_CHECKBUTTON:
       return ROLE_SYSTEM_CHECKBUTTON;
-    case WebAccessibility::ROLE_SLIDER :
-      return ROLE_SYSTEM_SLIDER;
-    case WebAccessibility::ROLE_PAGETABLIST :
-      return ROLE_SYSTEM_PAGETABLIST;
-    case WebAccessibility::ROLE_TEXT :
-      return ROLE_SYSTEM_TEXT;
-    case WebAccessibility::ROLE_STATICTEXT :
-      return ROLE_SYSTEM_STATICTEXT;
-    case WebAccessibility::ROLE_OUTLINE :
-      return ROLE_SYSTEM_OUTLINE;
-    case WebAccessibility::ROLE_COLUMN :
+    case WebAccessibility::ROLE_COLUMN:
       return ROLE_SYSTEM_COLUMN;
-    case WebAccessibility::ROLE_ROW :
-      return ROLE_SYSTEM_ROW;
-    case WebAccessibility::ROLE_GROUPING :
-      return ROLE_SYSTEM_GROUPING;
-    case WebAccessibility::ROLE_LIST :
-      return ROLE_SYSTEM_LIST;
-    case WebAccessibility::ROLE_TABLE :
-      return ROLE_SYSTEM_TABLE;
-    case WebAccessibility::ROLE_LINK :
-      return ROLE_SYSTEM_LINK;
-    case WebAccessibility::ROLE_GRAPHIC :
+    case WebAccessibility::ROLE_COLUMNHEADER:
+      return ROLE_SYSTEM_COLUMNHEADER;
+    case WebAccessibility::ROLE_GRAPHIC:
       return ROLE_SYSTEM_GRAPHIC;
-    case WebAccessibility::ROLE_CLIENT :
+    case WebAccessibility::ROLE_GROUPING:
+      return ROLE_SYSTEM_GROUPING;
+    case WebAccessibility::ROLE_LINK:
+      return ROLE_SYSTEM_LINK;
+    case WebAccessibility::ROLE_LIST:
+    case WebAccessibility::ROLE_LISTBOX:
+      return ROLE_SYSTEM_LIST;
+    case WebAccessibility::ROLE_MENUITEM:
+      return ROLE_SYSTEM_MENUITEM;
+    case WebAccessibility::ROLE_MENUPOPUP:
+      return ROLE_SYSTEM_MENUPOPUP;
+    case WebAccessibility::ROLE_OUTLINE:
+      return ROLE_SYSTEM_OUTLINE;
+    case WebAccessibility::ROLE_PAGETABLIST:
+      return ROLE_SYSTEM_PAGETABLIST;
+    case WebAccessibility::ROLE_PROGRESSBAR:
+      return ROLE_SYSTEM_PROGRESSBAR;
+    case WebAccessibility::ROLE_PUSHBUTTON:
+      return ROLE_SYSTEM_PUSHBUTTON;
+    case WebAccessibility::ROLE_RADIOBUTTON:
+      return ROLE_SYSTEM_RADIOBUTTON;
+    case WebAccessibility::ROLE_ROW:
+      return ROLE_SYSTEM_ROW;
+    case WebAccessibility::ROLE_ROWHEADER:
+      return ROLE_SYSTEM_ROWHEADER;
+    case WebAccessibility::ROLE_SLIDER:
+      return ROLE_SYSTEM_SLIDER;
+    case WebAccessibility::ROLE_STATICTEXT:
+      return ROLE_SYSTEM_STATICTEXT;
+    case WebAccessibility::ROLE_TABLE:
+      return ROLE_SYSTEM_TABLE;
+    case WebAccessibility::ROLE_TEXT:
+      return ROLE_SYSTEM_TEXT;
+    case WebAccessibility::ROLE_CLIENT:
     default:
       // This is the default role for MSAA.
       return ROLE_SYSTEM_CLIENT;
@@ -596,48 +612,48 @@ long BrowserAccessibility::MSAARole(long browser_accessibility_role) {
 long BrowserAccessibility::MSAAState(long browser_accessibility_state) {
   long state = 0;
 
-  if ((browser_accessibility_state >> WebAccessibility::STATE_LINKED) & 1)
-      state |= STATE_SYSTEM_LINKED;
+  if ((browser_accessibility_state >> WebAccessibility::STATE_CHECKED) & 1)
+    state |= STATE_SYSTEM_CHECKED;
+
+  if ((browser_accessibility_state >> WebAccessibility::STATE_FOCUSABLE) & 1)
+    state |= STATE_SYSTEM_FOCUSABLE;
+
+  if ((browser_accessibility_state >> WebAccessibility::STATE_FOCUSED) & 1)
+    state |= STATE_SYSTEM_FOCUSED;
 
   if ((browser_accessibility_state >> WebAccessibility::STATE_HOTTRACKED) & 1)
-      state |= STATE_SYSTEM_HOTTRACKED;
-
-  if ((browser_accessibility_state >> WebAccessibility::STATE_UNAVAILABLE) & 1)
-      state |= STATE_SYSTEM_UNAVAILABLE;
-
-  if ((browser_accessibility_state >> WebAccessibility::STATE_READONLY) & 1)
-      state |= STATE_SYSTEM_READONLY;
-
-  if ((browser_accessibility_state >> WebAccessibility::STATE_OFFSCREEN) & 1)
-      state |= STATE_SYSTEM_OFFSCREEN;
-
-  if ((browser_accessibility_state >>
-       WebAccessibility::STATE_MULTISELECTABLE) & 1) {
-      state |= STATE_SYSTEM_MULTISELECTABLE;
-  }
-
-  if ((browser_accessibility_state >> WebAccessibility::STATE_PROTECTED) & 1)
-      state |= STATE_SYSTEM_PROTECTED;
+    state |= STATE_SYSTEM_HOTTRACKED;
 
   if ((browser_accessibility_state >>
        WebAccessibility::STATE_INDETERMINATE) & 1) {
-      state |= STATE_SYSTEM_INDETERMINATE;
+    state |= STATE_SYSTEM_INDETERMINATE;
   }
 
-  if ((browser_accessibility_state >> WebAccessibility::STATE_CHECKED) & 1)
-      state |= STATE_SYSTEM_CHECKED;
+  if ((browser_accessibility_state >> WebAccessibility::STATE_LINKED) & 1)
+    state |= STATE_SYSTEM_LINKED;
+
+  if ((browser_accessibility_state >>
+       WebAccessibility::STATE_MULTISELECTABLE) & 1) {
+    state |= STATE_SYSTEM_MULTISELECTABLE;
+  }
+
+  if ((browser_accessibility_state >> WebAccessibility::STATE_OFFSCREEN) & 1)
+    state |= STATE_SYSTEM_OFFSCREEN;
 
   if ((browser_accessibility_state >> WebAccessibility::STATE_PRESSED) & 1)
-      state |= STATE_SYSTEM_PRESSED;
+    state |= STATE_SYSTEM_PRESSED;
 
-  if ((browser_accessibility_state >> WebAccessibility::STATE_FOCUSED) & 1)
-      state |= STATE_SYSTEM_FOCUSED;
+  if ((browser_accessibility_state >> WebAccessibility::STATE_PROTECTED) & 1)
+    state |= STATE_SYSTEM_PROTECTED;
+
+  if ((browser_accessibility_state >> WebAccessibility::STATE_READONLY) & 1)
+    state |= STATE_SYSTEM_READONLY;
 
   if ((browser_accessibility_state >> WebAccessibility::STATE_TRAVERSED) & 1)
-      state |= STATE_SYSTEM_TRAVERSED;
+    state |= STATE_SYSTEM_TRAVERSED;
 
-  if ((browser_accessibility_state >> WebAccessibility::STATE_FOCUSABLE) & 1)
-      state |= STATE_SYSTEM_FOCUSABLE;
+  if ((browser_accessibility_state >> WebAccessibility::STATE_UNAVAILABLE) & 1)
+    state |= STATE_SYSTEM_UNAVAILABLE;
 
   return state;
 }

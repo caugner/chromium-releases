@@ -13,11 +13,11 @@
 
 #include "base/basictypes.h"
 #include "base/gfx/rect.h"
-#include "chrome/common/ipc_message_macros.h"
+#include "base/string16.h"
 #include "chrome/common/navigation_types.h"
 #include "chrome/test/automation/autocomplete_edit_proxy.h"
 #include "googleurl/src/gurl.h"
-#include "webkit/glue/find_in_page_request.h"
+#include "ipc/ipc_message_macros.h"
 
 // NOTE: All IPC messages have either a routing_id of 0 (for asynchronous
 //       messages), or one that's been assigned by the proxy (for calls
@@ -34,8 +34,13 @@
 IPC_BEGIN_MESSAGES(Automation)
 
   // This message is fired when the AutomationProvider is up and running
-  // in the app (the app is not fully up at this point).
-  IPC_MESSAGE_ROUTED0(AutomationMsg_Hello)
+  // in the app (the app is not fully up at this point). The parameter to this
+  // message is the version string of the automation provider. This parameter
+  // is defined to be the version string as returned by
+  // FileVersionInfo::file_version().
+  // The client can choose to use this version string to decide whether or not
+  // it can talk to the provider.
+  IPC_MESSAGE_ROUTED1(AutomationMsg_Hello, std::string)
 
   // This message is fired when the initial tab(s) are finished loading.
   IPC_MESSAGE_ROUTED0(AutomationMsg_InitialLoadsComplete)
@@ -227,9 +232,9 @@ IPC_BEGIN_MESSAGES(Automation)
                                             // containing the result of a
                                             // javascript execution
 
-  // Is the Download Shelf visible for the specified tab?
+  // Is the Download Shelf visible for the specified browser?
   IPC_SYNC_MESSAGE_ROUTED1_1(AutomationMsg_ShelfVisibility,
-                             int /* tab_handle */,
+                             int /* browser_handle */,
                              bool /* is_visible */)
 
   // This message requests the number of constrained windows in the tab with
@@ -238,22 +243,6 @@ IPC_BEGIN_MESSAGES(Automation)
   IPC_SYNC_MESSAGE_ROUTED1_1(AutomationMsg_ConstrainedWindowCount,
                              int /* tab_handle */,
                              int /* constrained_window_count */)
-
-  // This message requests the handle of the constrained window with the given
-  // (zero-based) index in the given tab. First parameter specifies the given
-  // tab handle, second specifies the given child_index. On error, the returned
-  // handle value is 0.
-  IPC_SYNC_MESSAGE_ROUTED2_1(AutomationMsg_ConstrainedWindow,
-                             int, /* window_handle */
-                             int, /* child_index */
-                             int) /* constrained_handle */
-
-  // This message requests the the title of the constrained window with the
-  // given handle. The return value contains the size of the title string and
-  // title string. On error, this value should be -1 and empty string. Note
-  // that the title can be empty in which case the size would be 0.
-  IPC_SYNC_MESSAGE_ROUTED1_2(AutomationMsg_ConstrainedTitle, int,
-                             int, std::wstring)
 
   // This message requests the bounds of the specified View element in
   // window coordinates.
@@ -267,6 +256,15 @@ IPC_BEGIN_MESSAGES(Automation)
   //   gfx::Rect - the bounds of the view, in window coordinates
   IPC_SYNC_MESSAGE_ROUTED3_2(AutomationMsg_WindowViewBounds, int, int,
                              bool, bool, gfx::Rect)
+
+  // This message sets the bounds of the window.
+  // Request:
+  //   int - the handle of the window to resize
+  //   gfx::Rect - the bounds of the window
+  // Response:
+  //   bool - true if the resize was successful
+  IPC_SYNC_MESSAGE_ROUTED2_1(AutomationMsg_SetWindowBounds, int, gfx::Rect,
+                             bool)
 
 #if defined(OS_WIN)
   // TODO(port): Port these messages.
@@ -299,8 +297,8 @@ IPC_BEGIN_MESSAGES(Automation)
   // (1=case sensitive, 0=case insensitive). If an error occurs, matches_found
   // will be -1.
   //
-  // NOTE: These two messages have been deprecated, please use the new messages
-  // AutomationMsg_FindRequest and AutomationMsg_FindInPageResponse2 below.
+  // NOTE: This message has been deprecated, please use the new message
+  // AutomationMsg_Find below.
   //
   IPC_SYNC_MESSAGE_ROUTED4_2(AutomationMsg_FindInPage,   // DEPRECATED.
                              int, /* tab_handle */
@@ -360,7 +358,7 @@ IPC_BEGIN_MESSAGES(Automation)
 
   // Opens a new browser window.
   IPC_SYNC_MESSAGE_ROUTED1_0(AutomationMsg_OpenNewBrowserWindow,
-                             int /* show_command*/ )
+                             bool /* show */ )
 
   // This message requests the handle (int64 app-unique identifier) of the
   // current active top window.  On error, the returned handle value is 0.
@@ -411,22 +409,15 @@ IPC_BEGIN_MESSAGES(Automation)
   //         associated for, as defined in chrome/views/event.h
   IPC_MESSAGE_ROUTED3(AutomationMsg_WindowKeyPress, int, wchar_t, int)
 
-#if defined(OS_WIN)
-  // TODO(port): Port these messages.
-  //
   // This message notifies the AutomationProvider to create a tab which is
   // hosted by an external process.
   // Request:
-  //   HWND - handle to a window acting as a parent/owner for the new tab.
-  //   gfx::Rect - initial dimensions.
-  //   style - window style to be used at the time of cration.
-  IPC_SYNC_MESSAGE_ROUTED3_2(AutomationMsg_CreateExternalTab,
-                             HWND /* owner_or_parent*/,
-                             gfx::Rect /* dimensions */,
-                             unsigned int /* style */,
-                             HWND /* The window handle is returned here */,
-                             int /* Handle to the new tab */)
-#endif  // defined(OS_WIN)
+  //   ExternalTabSettings - settings for external tab
+  IPC_SYNC_MESSAGE_ROUTED1_3(AutomationMsg_CreateExternalTab,
+                             IPC::ExternalTabSettings  /* settings*/,
+                             gfx::NativeWindow  /* Tab container window */,
+                             gfx::NativeWindow  /* Tab window */,
+                             int  /* Handle to the new tab */)
 
   // This message notifies the AutomationProvider to navigate to a specified
   // url in the external tab with given handle. The first parameter is the
@@ -443,16 +434,19 @@ IPC_BEGIN_MESSAGES(Automation)
   //         (see TabContents::InvalidateTypes)
   // Response:
   //   None expected
-  IPC_MESSAGE_ROUTED1(AutomationMsg_NavigationStateChanged, int)
+  IPC_MESSAGE_ROUTED2(AutomationMsg_NavigationStateChanged,
+                      int, // tab handle
+                      int) // TabContents::InvalidateTypes
 
   // This message is an outgoing message from Chrome to an external host.
   // It is a notification that the target URL has changed (the target URL
   // is the URL of the link that the user is hovering on)
   // Request:
+  //   -int: The tab handle
   //   -std::wstring: The new target URL
   // Response:
   //   None expected
-  IPC_MESSAGE_ROUTED1(AutomationMsg_UpdateTargetUrl, std::wstring)
+  IPC_MESSAGE_ROUTED2(AutomationMsg_UpdateTargetUrl, int, std::wstring)
 
   // This message notifies the AutomationProvider to show the specified html
   // text in an interstitial page in the tab with given handle. The first
@@ -489,30 +483,25 @@ IPC_BEGIN_MESSAGES(Automation)
                              bool)
 
   IPC_MESSAGE_ROUTED1(AutomationMsg_CloseBrowserRequestAsync, int)
+
+  // Unused.
+  // Response:
+  //   None expected
+  IPC_MESSAGE_ROUTED1(AutomationMsg_Unused, int)
+
 #if defined(OS_WIN)
   // TODO(port): Port these messages.
   //
-  // This message sets the keyboard accelarators to be used by an externally
-  // hosted tab. This call is not valid on a regular tab hosted within
-  // Chrome.
-  // Request:
-  //   - int: handle of the tab
-  //   - HACCEL: The accelerator table to be set
-  //   - int: The number of entries in the accelerator table
-  // Response:
-  //   -bool: whether the operation was successful.
-  IPC_SYNC_MESSAGE_ROUTED3_1(AutomationMsg_SetAcceleratorsForTab, int, HACCEL,
-                             int, bool)
-
   // This message is an outgoing message from Chrome to an external host.
   // It is a request to process a keyboard accelerator.
   // Request:
+  //   -int: Tab handle
   //   -MSG: The keyboard message
   // Response:
   //   None expected
   // TODO(sanjeevr): Ideally we need to add a response from the external
   // host saying whether it processed the accelerator
-  IPC_MESSAGE_ROUTED1(AutomationMsg_HandleAccelerator, MSG)
+  IPC_MESSAGE_ROUTED2(AutomationMsg_HandleAccelerator, int, MSG)
 
   // This message is sent by the container of an externally hosted tab to
   // reflect any accelerator keys that it did not process. This gives the
@@ -528,11 +517,12 @@ IPC_BEGIN_MESSAGES(Automation)
   // Sent by the external tab to the host to notify that the user has tabbed
   // out of the tab.
   // Request:
+  //   - int: Tab handle
   //   - bool: |reverse| set to true when shift-tabbing out of the tab, false
   //    otherwise.
   // Response:
   //   None expected
-  IPC_MESSAGE_ROUTED1(AutomationMsg_TabbedOut, bool)
+  IPC_MESSAGE_ROUTED2(AutomationMsg_TabbedOut, int, bool)
 
   // Sent by the external tab host to ask focus to be set to either the first
   // or last element on the page.
@@ -548,12 +538,13 @@ IPC_BEGIN_MESSAGES(Automation)
   // This message is an outgoing message from Chrome to an external host.
   // It is a request to open a url
   // Request:
+  //   -int: Tab handle
   //   -GURL: The URL to open
   //   -int: The WindowOpenDisposition that specifies where the URL should
   //         be opened (new tab, new window etc).
   // Response:
   //   None expected
-  IPC_MESSAGE_ROUTED2(AutomationMsg_OpenURL, GURL, int)
+  IPC_MESSAGE_ROUTED3(AutomationMsg_OpenURL, int, GURL, int)
 
   // This message requests the provider to wait until the specified tab has
   // finished restoring after session restore.
@@ -566,6 +557,7 @@ IPC_BEGIN_MESSAGES(Automation)
   // This message is an outgoing message from Chrome to an external host.
   // It is a notification that a navigation happened
   // Request:
+  //   -int: Tab handle
   //   -int : Indicates the type of navigation (see the NavigationType enum)
   //   -int:  If this was not a new navigation, then this value indicates the
   //          relative offset of the navigation. A positive offset means a
@@ -573,7 +565,7 @@ IPC_BEGIN_MESSAGES(Automation)
   //          and 0 means this was a redirect
   // Response:
   //   None expected
-  IPC_MESSAGE_ROUTED3(AutomationMsg_DidNavigate, int, int, GURL)
+  IPC_MESSAGE_ROUTED4(AutomationMsg_DidNavigate, int, int, int, GURL)
 
   // This message requests the different security states of the page displayed
   // in the specified tab.
@@ -652,14 +644,6 @@ IPC_BEGIN_MESSAGES(Automation)
   // exist.
   IPC_SYNC_MESSAGE_ROUTED0_1(AutomationMsg_LastActiveBrowserWindow, int)
 
-  // This message requests the bounds of a constrained window (relative to its
-  // containing TabContents). On an internal error, the boolean in the result
-  // will be set to false.
-  IPC_SYNC_MESSAGE_ROUTED1_2(AutomationMsg_ConstrainedWindowBounds,
-                             int /* tab_handle */,
-                             bool /* the requested window exists */,
-                             gfx::Rect /* constrained_window_count */)
-
   // This message notifies the AutomationProvider to save the page with given
   // handle. The first parameter is the handle to the tab resource. The second
   // parameter is the main HTML file name. The third parameter is the directory
@@ -710,12 +694,21 @@ IPC_BEGIN_MESSAGES(Automation)
 
   // This message requests the execution of a browser command in the browser
   // for which the handle is specified.
-  // The return value contains a boolean, whether the command execution was
-  // successful.
+  // The return value contains a boolean, whether the command was dispatched.
+  IPC_SYNC_MESSAGE_ROUTED2_1(AutomationMsg_WindowExecuteCommandAsync,
+                             int /* automation handle */,
+                             int /* browser command */,
+                             bool /* success flag */)
+
+  // This message requests the execution of a browser command in the browser
+  // for which the handle is specified.
+  // The return value contains a boolean, whether the command was dispatched
+  // and successful executed.
   IPC_SYNC_MESSAGE_ROUTED2_1(AutomationMsg_WindowExecuteCommand,
                              int /* automation handle */,
                              int /* browser command */,
                              bool /* success flag */)
+
 
   // This message opens the Find window within a tab corresponding to the
   // supplied tab handle.
@@ -730,19 +723,19 @@ IPC_BEGIN_MESSAGES(Automation)
                       std::string /* target */)
 
   // A message for an external host.
-  IPC_MESSAGE_ROUTED3(AutomationMsg_ForwardMessageToExternalHost,
+  IPC_MESSAGE_ROUTED4(AutomationMsg_ForwardMessageToExternalHost,
+                      int, /* handle */
                       std::string /* message */,
                       std::string /* origin */,
                       std::string /* target */)
 
   // This message starts a find within a tab corresponding to the supplied
   // tab handle. The parameter |request| specifies what to search for.
-  // If an error occurs, |matches_found| will be -1 (see response message
-  // AutomationMsg_FindInPageResponse2).
+  // If an error occurs, |matches_found| will be -1.
   //
   IPC_SYNC_MESSAGE_ROUTED2_2(AutomationMsg_Find,
-                             int, /* tab_handle */
-                             FindInPageRequest /* request */,
+                             int /* tab_handle */,
+                             AutomationMsg_Find_Params /* params */,
                              int /* active_ordinal */,
                              int /* matches_found */)
 
@@ -854,11 +847,12 @@ IPC_BEGIN_MESSAGES(Automation)
   // This message is an outgoing message from Chrome to an external host.
   // It is a notification that a navigation failed
   // Request:
+  //   -int : Tab handle
   //   -int : The status code.
   //   -GURL:  The URL we failed to navigate to.
   // Response:
   //   None expected
-  IPC_MESSAGE_ROUTED2(AutomationMsg_NavigationFailed, int, GURL)
+  IPC_MESSAGE_ROUTED3(AutomationMsg_NavigationFailed, int, int, GURL)
 
 #if defined(OS_WIN)
   // This message is an outgoing message from an automation client to Chrome.
@@ -867,5 +861,109 @@ IPC_BEGIN_MESSAGES(Automation)
                       int /* tab handle */,
                       IPC::Reposition_Params /* SetWindowPos params */)
 #endif  // defined(OS_WIN)
+
+  // Gets the title of the top level browser window.
+  IPC_SYNC_MESSAGE_ROUTED1_1(AutomationMsg_WindowTitle,
+                             int /* automation handle */,
+                             string16 /* title text */ )
+
+  // Tab load complete
+  IPC_MESSAGE_ROUTED2(AutomationMsg_TabLoaded,
+                      int,  // tab handle
+                      GURL)
+
+  // This message requests the tabstrip index of the tab with the given handle.
+  // The return value contains the index, which will be -1 on failure.
+  IPC_SYNC_MESSAGE_ROUTED1_1(AutomationMsg_TabIndex, int, int)
+
+  // This message requests the handle (int64 app-unique identifier) of
+  // a valid normal browser window, i.e. normal type and non-incognito mode.
+  // On error, the returned handle value is 0.
+  IPC_SYNC_MESSAGE_ROUTED0_1(AutomationMsg_FindNormalBrowserWindow, int)
+
+  // This message requests the number of normal browser windows, i.e. normal
+  // type and non-incognito mode that the app currently has open.  The return
+  // value is the number of windows.
+  IPC_SYNC_MESSAGE_ROUTED0_1(AutomationMsg_NormalBrowserWindowCount, int)
+
+  // Used to put the browser into "extension automation mode" for the
+  // current profile, or turn off the mode.
+  IPC_MESSAGE_ROUTED1(AutomationMsg_SetEnableExtensionAutomation,
+                      bool /* true to enable extension automation */)
+
+  // This message tells the browser to start using the new proxy configuration
+  // represented by the given JSON string. The parameters used in the JSON
+  // string are defined in automation_constants.h.
+  IPC_MESSAGE_ROUTED1(AutomationMsg_SetProxyConfig,
+                      std::string /* proxy_config_json_string */)
+
+  // Sets Download Shelf visibility for the specified browser.
+  IPC_SYNC_MESSAGE_ROUTED2_0(AutomationMsg_SetShelfVisibility,
+                             int /* browser_handle */,
+                             bool /* is_visible */)
+
+  // This message requests the number of blocked popups in a certain tab with
+  // the given handle. The return value is the number of blocked popups, or -1
+  // if this request failed.
+  IPC_SYNC_MESSAGE_ROUTED1_1(AutomationMsg_BlockedPopupCount,
+                             int /* tab_handle */,
+                             int /* blocked_popup_count */)
+
+  // This message retrieves the locale of the browser process.  On success
+  // |chrome_locale| will contain the locale as reported by ICU.  On failure
+  // |chrome_locale| is the empty string.
+  IPC_SYNC_MESSAGE_ROUTED0_1(AutomationMsg_GetBrowserLocale,
+                             string16 /* chrome_locale */)
+
+#if defined(OS_WIN)
+  IPC_MESSAGE_ROUTED5(AutomationMsg_ForwardContextMenuToExternalHost,
+                      int /* tab_handle */,
+                      HANDLE /* source menu handle */,
+                      int    /* the x coordinate for displaying the menu */,
+                      int    /* the y coordinate for displaying the menu */,
+                      int    /* align flags */)
+
+  IPC_MESSAGE_ROUTED2(AutomationMsg_ForwardContextMenuCommandToChrome,
+                      int /* tab_handle */,
+                      int /* selected_command */)
+#endif  // OS_WIN
+
+  // A URL request to be fetched via automation
+  IPC_MESSAGE_ROUTED3(AutomationMsg_RequestStart,
+                      int /* tab_handle */,
+                      int /* request_id */,
+                      IPC::AutomationURLRequest /* request */)
+
+  // Read data from a URL request to be fetched via automation
+  IPC_MESSAGE_ROUTED3(AutomationMsg_RequestRead,
+                      int /* tab_handle */,
+                      int /* request_id */,
+                      int /* bytes_to_read */)
+
+  // Response to a AutomationMsg_RequestStart message
+  IPC_MESSAGE_ROUTED3(AutomationMsg_RequestStarted,
+                      int /* tab_handle */,
+                      int /* request_id */,
+                      IPC::AutomationURLResponse /* response */)
+
+  // Data read via automation
+  IPC_MESSAGE_ROUTED3(AutomationMsg_RequestData,
+                      int /* tab_handle */,
+                      int /* request_id */,
+                      std::string /* data */)
+
+  IPC_MESSAGE_ROUTED3(AutomationMsg_RequestEnd,
+                      int /* tab_handle */,
+                      int /* request_id */,
+                      URLRequestStatus /* status */)
+
+  IPC_MESSAGE_ROUTED1(AutomationMsg_PrintAsync,
+                      int /* tab_handle */)
+
+
+  // Returns the number of times a filter was used to service an URL request.
+  // See AutomationMsg_SetFilteredInet.
+  IPC_SYNC_MESSAGE_ROUTED0_1(AutomationMsg_GetFilteredInetHitCount,
+                             int /* hit_count */)
 
 IPC_END_MESSAGES(Automation)

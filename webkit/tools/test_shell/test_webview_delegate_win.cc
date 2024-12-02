@@ -19,12 +19,12 @@
 #include "base/string_util.h"
 #include "base/trace_event.h"
 #include "net/base/net_errors.h"
-#include "webkit/glue/webdatasource.h"
+#include "webkit/api/public/WebCursorInfo.h"
+#include "webkit/api/public/WebRect.h"
 #include "webkit/glue/webdropdata.h"
-#include "webkit/glue/weberror.h"
 #include "webkit/glue/webframe.h"
 #include "webkit/glue/webpreferences.h"
-#include "webkit/glue/weburlrequest.h"
+#include "webkit/glue/webplugin.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/webview.h"
 #include "webkit/glue/plugins/plugin_list.h"
@@ -34,6 +34,10 @@
 #include "webkit/tools/test_shell/drop_delegate.h"
 #include "webkit/tools/test_shell/test_navigation_controller.h"
 #include "webkit/tools/test_shell/test_shell.h"
+
+using WebKit::WebCursorInfo;
+using WebKit::WebNavigationPolicy;
+using WebKit::WebRect;
 
 // WebViewDelegate -----------------------------------------------------------
 
@@ -47,7 +51,7 @@ WebPluginDelegate* TestWebViewDelegate::CreatePluginDelegate(
     const std::string& mime_type,
     const std::string& clsid,
     std::string* actual_mime_type) {
-  HWND hwnd = gfx::NativeViewFromId(GetContainingView(webview));
+  HWND hwnd = shell_->webViewHost()->view_handle();
   if (!hwnd)
     return NULL;
 
@@ -64,74 +68,7 @@ WebPluginDelegate* TestWebViewDelegate::CreatePluginDelegate(
     return WebPluginDelegateImpl::Create(info.path, mime_type, hwnd);
 }
 
-void TestWebViewDelegate::ShowJavaScriptAlert(const std::wstring& message) {
-  MessageBox(NULL, message.c_str(), L"JavaScript Alert", MB_OK);
-}
-
-void TestWebViewDelegate::Show(WebWidget* webwidget, WindowOpenDisposition) {
-  if (webwidget == shell_->webView()) {
-    ShowWindow(shell_->mainWnd(), SW_SHOW);
-    UpdateWindow(shell_->mainWnd());
-  } else if (webwidget == shell_->popup()) {
-    ShowWindow(shell_->popupWnd(), SW_SHOW);
-    UpdateWindow(shell_->popupWnd());
-  }
-}
-
-void TestWebViewDelegate::CloseWidgetSoon(WebWidget* webwidget) {
-  if (webwidget == shell_->webView()) {
-    PostMessage(shell_->mainWnd(), WM_CLOSE, 0, 0);
-  } else if (webwidget == shell_->popup()) {
-    shell_->ClosePopup();
-  }
-}
-
-void TestWebViewDelegate::SetCursor(WebWidget* webwidget,
-                                    const WebCursor& cursor) {
-  if (WebWidgetHost* host = GetHostForWidget(webwidget)) {
-    current_cursor_ = cursor;
-    HINSTANCE mod_handle = GetModuleHandle(NULL);
-    host->SetCursor(current_cursor_.GetCursor(mod_handle));
-  }
-}
-
-void TestWebViewDelegate::GetWindowRect(WebWidget* webwidget,
-                                        gfx::Rect* out_rect) {
-  if (WebWidgetHost* host = GetHostForWidget(webwidget)) {
-    RECT rect;
-    ::GetWindowRect(host->view_handle(), &rect);
-    *out_rect = gfx::Rect(rect);
-  }
-}
-
-void TestWebViewDelegate::SetWindowRect(WebWidget* webwidget,
-                                        const gfx::Rect& rect) {
-  if (webwidget == shell_->webView()) {
-    // ignored
-  } else if (webwidget == shell_->popup()) {
-    MoveWindow(shell_->popupWnd(),
-               rect.x(), rect.y(), rect.width(), rect.height(), FALSE);
-  }
-}
-
-void TestWebViewDelegate::GetRootWindowRect(WebWidget* webwidget,
-                                            gfx::Rect* out_rect) {
-  if (WebWidgetHost* host = GetHostForWidget(webwidget)) {
-    RECT rect;
-    HWND root_window = ::GetAncestor(host->view_handle(), GA_ROOT);
-    ::GetWindowRect(root_window, &rect);
-    *out_rect = gfx::Rect(rect);
-  }
-}
-
-void TestWebViewDelegate::GetRootWindowResizerRect(WebWidget* webwidget,
-                                                   gfx::Rect* out_rect) {
-  // Not necessary on Windows.
-  *out_rect = gfx::Rect();
-}
-
-void TestWebViewDelegate::DidMove(WebWidget* webwidget,
-                                  const WebPluginGeometry& move) {
+void TestWebViewDelegate::DidMovePlugin(const WebPluginGeometry& move) {
   HRGN hrgn = ::CreateRectRgn(move.clip_rect.x(),
                               move.clip_rect.y(),
                               move.clip_rect.right(),
@@ -141,7 +78,6 @@ void TestWebViewDelegate::DidMove(WebWidget* webwidget,
   // Note: System will own the hrgn after we call SetWindowRgn,
   // so we don't need to call DeleteObject(hrgn)
   ::SetWindowRgn(move.window, hrgn, FALSE);
-
   unsigned long flags = 0;
   if (move.visible)
     flags |= SWP_SHOWWINDOW;
@@ -157,8 +93,73 @@ void TestWebViewDelegate::DidMove(WebWidget* webwidget,
                  flags);
 }
 
-void TestWebViewDelegate::RunModal(WebWidget* webwidget) {
-  Show(webwidget, NEW_WINDOW);
+void TestWebViewDelegate::ShowJavaScriptAlert(const std::wstring& message) {
+  MessageBox(NULL, message.c_str(), L"JavaScript Alert", MB_OK);
+}
+
+void TestWebViewDelegate::show(WebNavigationPolicy) {
+  if (WebWidgetHost* host = GetWidgetHost()) {
+    HWND root = GetAncestor(host->view_handle(), GA_ROOT);
+    ShowWindow(root, SW_SHOW);
+    UpdateWindow(root);
+  }
+}
+
+void TestWebViewDelegate::closeWidgetSoon() {
+  if (this == shell_->delegate()) {
+    PostMessage(shell_->mainWnd(), WM_CLOSE, 0, 0);
+  } else if (this == shell_->popup_delegate()) {
+    shell_->ClosePopup();
+  }
+}
+
+void TestWebViewDelegate::didChangeCursor(const WebCursorInfo& cursor_info) {
+  if (WebWidgetHost* host = GetWidgetHost()) {
+    current_cursor_.InitFromCursorInfo(cursor_info);
+    HINSTANCE mod_handle = GetModuleHandle(NULL);
+    host->SetCursor(current_cursor_.GetCursor(mod_handle));
+  }
+}
+
+WebRect TestWebViewDelegate::windowRect() {
+  if (WebWidgetHost* host = GetWidgetHost()) {
+    RECT rect;
+    ::GetWindowRect(host->view_handle(), &rect);
+    return gfx::Rect(rect);
+  }
+  return WebRect();
+}
+
+void TestWebViewDelegate::setWindowRect(const WebRect& rect) {
+  if (this == shell_->delegate()) {
+    // ignored
+  } else if (this == shell_->popup_delegate()) {
+    MoveWindow(shell_->popupWnd(),
+               rect.x, rect.y, rect.width, rect.height, FALSE);
+  }
+}
+
+WebRect TestWebViewDelegate::rootWindowRect() {
+  if (WebWidgetHost* host = GetWidgetHost()) {
+    RECT rect;
+    HWND root_window = ::GetAncestor(host->view_handle(), GA_ROOT);
+    ::GetWindowRect(root_window, &rect);
+    return gfx::Rect(rect);
+  }
+  return WebRect();
+}
+
+WebRect TestWebViewDelegate::windowResizerRect() {
+  // Not necessary on Windows.
+  return WebRect();
+}
+
+void TestWebViewDelegate::runModal() {
+  WebWidgetHost* host = GetWidgetHost();
+  if (!host)
+    return;
+
+  show(WebNavigationPolicy() /*XXX NEW_WINDOW*/);
 
   WindowList* wl = TestShell::windowList();
   for (WindowList::const_iterator i = wl->begin(); i != wl->end(); ++i) {

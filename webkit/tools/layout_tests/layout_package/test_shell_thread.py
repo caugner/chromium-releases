@@ -19,28 +19,24 @@ import subprocess
 import sys
 import thread
 import threading
+import time
 
 import path_utils
 import platform_utils
 import test_failures
 
-# The per-test timeout in milliseconds, if no --time-out-ms option was given to
-# run_webkit_tests. This should correspond to the default timeout in
-# test_shell.exe.
-DEFAULT_TEST_TIMEOUT_MS = 10 * 1000
-
-def ProcessOutput(proc, filename, test_uri, test_types, test_args, target):
+def ProcessOutput(proc, test_info, test_types, test_args, target):
   """Receives the output from a test_shell process, subjects it to a number
   of tests, and returns a list of failure types the test produced.
 
   Args:
     proc: an active test_shell process
-    filename: path of the test file being run
+    test_info: Object containing the test filename, uri and timeout
     test_types: list of test types to subject the output to
     test_args: arguments to be passed to each test
     target: Debug or Release
 
-  Returns: a list of failure objects for the test being processed
+  Returns: a list of failure objects and times for the test being processed
   """
   outlines = []
   failures = []
@@ -49,6 +45,8 @@ def ProcessOutput(proc, filename, test_uri, test_types, test_args, target):
   # Some test args, such as the image hash, may be added or changed on a
   # test-by-test basis.
   local_test_args = copy.copy(test_args)
+
+  start_time = time.time()
 
   line = proc.stdout.readline()
   while line.rstrip() != "#EOF":
@@ -71,10 +69,11 @@ def ProcessOutput(proc, filename, test_uri, test_types, test_args, target):
 
     # Don't include #URL lines in our output
     if line.startswith("#URL:"):
+      test_string = test_info.uri.strip()
       url = line.rstrip()[5:]
-      if url != test_uri:
+      if url != test_string:
         logging.fatal("Test got out of sync:\n|%s|\n|%s|" %
-                      (url, test_uri))
+                      (url, test_string))
         raise AssertionError("test out of sync")
     elif line.startswith("#MD5:"):
       local_test_args.hash = line.rstrip()[5:]
@@ -86,9 +85,14 @@ def ProcessOutput(proc, filename, test_uri, test_types, test_args, target):
       outlines.append(line)
     line = proc.stdout.readline()
 
+  end_test_time = time.time()
+
   # Check the output and save the results.
+  time_for_diffs = {}
   for test_type in test_types:
-    new_failures = test_type.CompareOutput(filename, proc,
+    start_diff_time = time.time()
+    new_failures = test_type.CompareOutput(test_info.filename,
+                                           proc,
                                            ''.join(outlines),
                                            local_test_args,
                                            target)
@@ -96,72 +100,85 @@ def ProcessOutput(proc, filename, test_uri, test_types, test_args, target):
     # we don't double-report those tests.
     if not crash_or_timeout:
       failures.extend(new_failures)
+    time_for_diffs[test_type.__class__.__name__] = (
+        time.time() - start_diff_time)
 
-  return failures
+  total_time_for_all_diffs = time.time() - end_test_time
+  test_run_time = end_test_time - start_time
+  return TestStats(test_info.filename, failures, test_run_time,
+      total_time_for_all_diffs, time_for_diffs)
 
 
 def StartTestShell(command, args):
   """Returns the process for a new test_shell started in layout-tests mode."""
-  cmd = command + ['--layout-tests'] + args
+  cmd = []
+  # Hook for injecting valgrind or other runtime instrumentation,
+  # used by e.g. tools/valgrind/valgrind_tests.py.
+  wrapper = os.environ.get("BROWSER_WRAPPER", None)
+  if wrapper != None:
+    cmd += [wrapper]
+  cmd += command + ['--layout-tests'] + args
   return subprocess.Popen(cmd,
                           stdin=subprocess.PIPE,
                           stdout=subprocess.PIPE,
                           stderr=subprocess.STDOUT)
 
+class TestStats:
+  def __init__(self, filename, failures, test_run_time,
+               total_time_for_all_diffs, time_for_diffs):
+    self.filename = filename
+    self.failures = failures
+    self.test_run_time = test_run_time
+    self.total_time_for_all_diffs = total_time_for_all_diffs
+    self.time_for_diffs = time_for_diffs
 
 class SingleTestThread(threading.Thread):
   """Thread wrapper for running a single test file."""
-  def __init__(self, test_shell_command, shell_args, test_uri, filename,
-               test_types, test_args, target):
+  def __init__(self, test_shell_command, shell_args, test_info, test_types,
+      test_args, target):
     """
     Args:
-      test_uri: full file:// or http:// URI of the test file to be run
-      filename: absolute local path to the test file
+      test_info: Object containing the test filename, uri and timeout
       See TestShellThread for documentation of the remaining arguments.
     """
 
     threading.Thread.__init__(self)
     self._command = test_shell_command
     self._shell_args = shell_args
-    self._test_uri = test_uri
-    self._filename = filename
+    self._test_info = test_info
     self._test_types = test_types
     self._test_args = test_args
     self._target = target
-    self._single_test_failures = []
 
   def run(self):
-    proc = StartTestShell(self._command, self._shell_args + [self._test_uri])
-    self._single_test_failures = ProcessOutput(proc,
-                                               self._filename,
-                                               self._test_uri,
-                                               self._test_types,
-                                               self._test_args,
-                                               self._target)
+    proc = StartTestShell(self._command, self._shell_args +
+        ["--time-out-ms=" + self._test_info.timeout, self._test_info.uri])
+    self._test_stats = ProcessOutput(proc, self._test_info, self._test_types,
+        self._test_args, self._target)
 
-  def GetFailures(self):
-    return self._single_test_failures
-
+  def GetTestStats(self):
+    return self._test_stats
 
 class TestShellThread(threading.Thread):
 
-  def __init__(self, filename_queue, test_shell_command, test_types,
+  def __init__(self, filename_list_queue, test_shell_command, test_types,
                test_args, shell_args, options):
     """Initialize all the local state for this test shell thread.
 
     Args:
-      filename_queue: A thread safe Queue class that contains tuples of
-                      (filename, uri) pairs.
+      filename_list_queue: A thread safe Queue class that contains lists of
+          tuples of (filename, uri) pairs.
       test_shell_command: A list specifying the command+args for test_shell
       test_types: A list of TestType objects to run the test output against.
       test_args: A TestArguments object to pass to each TestType.
       shell_args: Any extra arguments to be passed to test_shell.exe.
       options: A property dictionary as produced by optparse. The command-line
-               options should match those expected by run_webkit_tests; they
-               are typically passed via the run_webkit_tests.TestRunner class.
+          options should match those expected by run_webkit_tests; they
+          are typically passed via the run_webkit_tests.TestRunner class.
     """
     threading.Thread.__init__(self)
-    self._filename_queue = filename_queue
+    self._filename_list_queue = filename_list_queue
+    self._filename_list = []
     self._test_shell_command = test_shell_command
     self._test_types = test_types
     self._test_args = test_args
@@ -171,23 +188,30 @@ class TestShellThread(threading.Thread):
     self._failures = {}
     self._canceled = False
     self._exception_info = None
+    self._directory_timing_stats = {}
+    self._test_stats = []
 
-    if self._options.run_singly:
-      # When we're running one test per test_shell process, we can enforce
-      # a hard timeout. test_shell uses a default of 10 seconds if no
-      # time-out-ms is given, and the test_shell watchdog uses 2.5x the
-      # test_shell's value.  We want to be larger than that.
-      if not self._options.time_out_ms:
-        self._options.time_out_ms = DEFAULT_TEST_TIMEOUT_MS
-      self._time_out_sec = int(self._options.time_out_ms) * 3.0 / 1000.0
-      logging.info("Setting Python per-test timeout to %s ms (%s sec)" %
-                   (1000 * self._time_out_sec, self._time_out_sec))
-
+    # Current directory of tests we're running.
+    self._current_dir = None
+    # Number of tests in self._current_dir.
+    self._num_tests_in_current_dir = None
+    # Time at which we started running tests from self._current_dir.
+    self._current_dir_start_time = None
 
   def GetFailures(self):
     """Returns a dictionary mapping test filename to a list of
     TestFailures."""
     return self._failures
+
+  def GetDirectoryTimingStats(self):
+    """Returns a dictionary mapping test directory to a tuple of
+    (number of tests in that directory, time to run the tests)"""
+    return self._directory_timing_stats;
+
+  def GetIndividualTestStats(self):
+    """Returns a list of (test_filename, time_to_run_test,
+    total_time_for_all_diffs, time_for_diffs) tuples."""
+    return self._test_stats
 
   def Cancel(self):
     """Set a flag telling this thread to quit."""
@@ -226,19 +250,34 @@ class TestShellThread(threading.Thread):
       if self._canceled:
         logging.info('Testing canceled')
         return
-      try:
-        filename, test_uri = self._filename_queue.get_nowait()
-      except Queue.Empty:
-        self._KillTestShell()
-        logging.debug("queue empty, quitting test shell thread")
-        return
+
+      if len(self._filename_list) is 0:
+        if self._current_dir is not None:
+          self._directory_timing_stats[self._current_dir] = \
+              (self._num_tests_in_current_dir,
+               time.time() - self._current_dir_start_time)
+
+        try:
+          self._current_dir, self._filename_list = \
+              self._filename_list_queue.get_nowait()
+        except Queue.Empty:
+          self._KillTestShell()
+          logging.debug("queue empty, quitting test shell thread")
+          return
+
+        self._num_tests_in_current_dir = len(self._filename_list)
+        self._current_dir_start_time = time.time()
+
+      test_info = self._filename_list.pop()
 
       # We have a url, run tests.
       batch_count += 1
       if self._options.run_singly:
-        failures = self._RunTestSingly(filename, test_uri)
+        failures = self._RunTestSingly(test_info)
       else:
-        failures = self._RunTest(filename, test_uri)
+        failures = self._RunTest(test_info)
+
+      filename = test_info.filename
       if failures:
         # Check and kill test shell if we need too.
         if len([1 for f in failures if f.ShouldKillTestShell()]):
@@ -253,28 +292,39 @@ class TestShellThread(threading.Thread):
         self._failures[filename] = failures
       else:
         logging.debug(path_utils.RelativeTestFilename(filename) + " passed")
+
       if batch_size > 0 and batch_count > batch_size:
         # Bounce the shell and reset count.
         self._KillTestShell()
         batch_count = 0
 
 
-  def _RunTestSingly(self, filename, test_uri):
+  def _RunTestSingly(self, test_info):
     """Run a test in a separate thread, enforcing a hard time limit.
 
     Since we can only detect the termination of a thread, not any internal
     state or progress, we can only run per-test timeouts when running test
     files singly.
+
+    Args:
+      test_info: Object containing the test filename, uri and timeout
+
+    Return:
+      A list of TestFailure objects describing the error.
     """
     worker = SingleTestThread(self._test_shell_command,
                               self._shell_args,
-                              test_uri,
-                              filename,
+                              test_info,
                               self._test_types,
                               self._test_args,
                               self._options.target)
+
     worker.start()
-    worker.join(self._time_out_sec)
+
+    # When we're running one test per test_shell process, we can enforce
+    # a hard timeout. the test_shell watchdog uses 2.5x the timeout
+    # We want to be larger than that.
+    worker.join(int(test_info.timeout) * 3.0 / 1000.0)
     if worker.isAlive():
       # If join() returned with the thread still running, the test_shell.exe is
       # completely hung and there's nothing more we can do with it.  We have
@@ -287,23 +337,38 @@ class TestShellThread(threading.Thread):
       platform_util = platform_utils.PlatformUtility('')
       platform_util.KillAllTestShells()
 
-    return worker.GetFailures()
+    try:
+      stats = worker.GetTestStats()
+      self._test_stats.append(stats)
+      failures = stats.failures
+    except AttributeError, e:
+      failures = []
+      logging.error('Cannot get results of test: %s' % test_info.filename)
 
+    return failures
 
-  def _RunTest(self, filename, test_uri):
+  def _RunTest(self, test_info):
     """Run a single test file using a shared test_shell process.
 
     Args:
-      filename: The absolute filename of the test
-      test_uri: The URI version of the filename
+      test_info: Object containing the test filename, uri and timeout
 
     Return:
       A list of TestFailure objects describing the error.
     """
     self._EnsureTestShellIsRunning()
+    # Args to test_shell is a space-separated list of "uri timeout pixel_hash"
+    # The timeout and pixel_hash are optional.  The timeout is used if this
+    # test has a custom timeout. The pixel_hash is used to avoid doing an image
+    # dump if the checksums match, so it should be set to a blank value if we
+    # are generating a new baseline. (Otherwise, an image from a previous run
+    # will be copied into the baseline.)
+    image_hash = test_info.image_hash
+    if image_hash and self._test_args.new_baseline:
+      image_hash = ""
+    self._test_shell_proc.stdin.write(("%s %s %s\n" %
+        (test_info.uri, test_info.timeout, image_hash)))
 
-    # Ok, load the test URL...
-    self._test_shell_proc.stdin.write(test_uri + "\n")
     # If the test shell is dead, the above may cause an IOError as we
     # try to write onto the broken pipe. If this is the first test for
     # this test shell process, than the test shell did not
@@ -312,10 +377,11 @@ class TestShellThread(threading.Thread):
     # try to recover here.
     self._test_shell_proc.stdin.flush()
 
-    # ...and read the response
-    return ProcessOutput(self._test_shell_proc, filename, test_uri,
-                         self._test_types, self._test_args,
-                         self._options.target)
+    stats = ProcessOutput(self._test_shell_proc, test_info, self._test_types,
+        self._test_args, self._options.target)
+
+    self._test_stats.append(stats)
+    return stats.failures
 
 
   def _EnsureTestShellIsRunning(self):
@@ -335,4 +401,7 @@ class TestShellThread(threading.Thread):
       self._test_shell_proc.stdout.close()
       if self._test_shell_proc.stderr:
         self._test_shell_proc.stderr.close()
+      if sys.platform not in ('win32', 'cygwin'):
+        # Closing stdin/stdout/stderr hangs sometimes on OS X.
+        subprocess.Popen(["kill", "-9", str(self._test_shell_proc.pid)])
       self._test_shell_proc = None

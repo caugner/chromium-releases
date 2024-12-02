@@ -53,7 +53,7 @@ class URLFetcherProtectEntry {
   // the timeout period. It returns the backoff time, in milliseconds, that
   // indicates to the sender how long should it wait before sending the request.
   // If the request is allowed to be sent immediately, the backoff time is 0.
-  int UpdateBackoff(EventType event_type);
+  int64 UpdateBackoff(EventType event_type);
 
   // Returns the max retries allowed.
   int max_retries() const {
@@ -124,9 +124,9 @@ class URLFetcherProtectManager {
 
   // Registers a new entry in this service. If the entry already exists,
   // just returns it.
-  URLFetcherProtectEntry* Register(std::string id);
+  URLFetcherProtectEntry* Register(const std::string& id);
   // Always registers the entry even when it exists.
-  URLFetcherProtectEntry* Register(std::string id,
+  URLFetcherProtectEntry* Register(const std::string& id,
                                    URLFetcherProtectEntry* entry);
 
  private:

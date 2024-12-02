@@ -86,24 +86,39 @@ class ProxyService {
   // |proxy_script_fetcher|.
   void SetProxyScriptFetcher(ProxyScriptFetcher* proxy_script_fetcher);
 
-  // Creates a proxy service using the specified settings. If |pi| is NULL then
+  // Tells this ProxyService to start using a new ProxyConfigService to
+  // retrieve its ProxyConfig from. The new ProxyConfigService will immediately
+  // be queried for new config info which will be used for all subsequent
+  // ResolveProxy calls. ProxyService takes ownership of
+  // |new_proxy_config_service|.
+  void ResetConfigService(ProxyConfigService* new_proxy_config_service);
+
+  // Creates a proxy service using the specified settings. If |pc| is NULL then
   // the system's default proxy settings will be used (on Windows this will
   // use IE's settings).
-  static ProxyService* Create(const ProxyInfo* pi);
-
-  // Creates a proxy service using the specified settings. If |pi| is NULL then
-  // the system's default proxy settings will be used. This is basically the
-  // same as Create(const ProxyInfo*), however under the hood it uses a
-  // different implementation (V8). |url_request_context| is the URL request
-  // context that will be used if a PAC script needs to be fetched.
+  // Iff |use_v8_resolver| is true, then the V8 implementation is
+  // used.
+  // |url_request_context| is only used when use_v8_resolver is true:
+  // it specifies the URL request context that will be used if a PAC
+  // script needs to be fetched.
+  // |io_loop| points to the IO thread's message loop. It is only used
+  // when pc is NULL. If both pc and io_loop are NULL, then monitoring
+  // of gconf setting changes will be disabled in
+  // ProxyConfigServiceLinux.
   // ##########################################################################
   // # See the warnings in net/proxy/proxy_resolver_v8.h describing the
   // # multi-threading model. In order for this to be safe to use, *ALL* the
   // # other V8's running in the process must use v8::Locker.
   // ##########################################################################
-  static ProxyService* CreateUsingV8Resolver(
-      const ProxyInfo* pi,
-      URLRequestContext* url_request_context);
+  static ProxyService* Create(
+      const ProxyConfig* pc,
+      bool use_v8_resolver,
+      URLRequestContext* url_request_context,
+      MessageLoop* io_loop);
+
+  // Convenience method that creates a proxy service using the
+  // specified fixed settings. |pc| must not be NULL.
+  static ProxyService* CreateFixed(const ProxyConfig& pc);
 
   // Creates a proxy service that always fails to fetch the proxy configuration,
   // so it falls back to direct connect.
@@ -112,15 +127,32 @@ class ProxyService {
  private:
   friend class PacRequest;
 
+  // Creates a config service appropriate for this platform that fetches the
+  // system proxy settings.
+  static ProxyConfigService* CreateSystemProxyConfigService(
+      MessageLoop* io_loop);
+
+  // Creates a proxy resolver appropriate for this platform that doesn't rely
+  // on V8.
+  static ProxyResolver* CreateNonV8ProxyResolver();
+
   ProxyResolver* resolver() { return resolver_.get(); }
   base::Thread* pac_thread() { return pac_thread_.get(); }
 
   // Identifies the proxy configuration.
   ProxyConfig::ID config_id() const { return config_.id(); }
 
+  // Returns true if we have called UpdateConfig() at least once.
+  bool config_has_been_initialized() const {
+    return config_.id() != ProxyConfig::INVALID_ID;
+  }
+
   // Checks to see if the proxy configuration changed, and then updates config_
   // to reference the new configuration.
   void UpdateConfig();
+
+  // Assign |config| as the current configuration.
+  void SetConfig(const ProxyConfig& config);
 
   // Tries to update the configuration if it hasn't been checked in a while.
   void UpdateConfigIfOld();
@@ -140,6 +172,11 @@ class ProxyService {
   // Completing synchronously means we don't need to query ProxyResolver.
   // (ProxyResolver runs on PAC thread.)
   int TryToCompleteSynchronously(const GURL& url, ProxyInfo* result);
+
+  // Set |result| with the proxy to use for |url|, based on |rules|.
+  void ApplyProxyRules(const GURL& url,
+                       const ProxyConfig::ProxyRules& rules,
+                       ProxyInfo* result);
 
   // Starts the PAC thread if it isn't already running.
   void InitPacThread();
@@ -169,15 +206,15 @@ class ProxyService {
   scoped_ptr<ProxyResolver> resolver_;
   scoped_ptr<base::Thread> pac_thread_;
 
-  // We store the proxy config and a counter that is incremented each time
+  // We store the proxy config and a counter (ID) that is incremented each time
   // the config changes.
   ProxyConfig config_;
 
+  // Increasing ID to give to the next ProxyConfig that we set.
+  int next_config_id_;
+
   // Indicates that the configuration is bad and should be ignored.
   bool config_is_bad_;
-
-  // false if the ProxyService has not been initialized yet.
-  bool config_has_been_updated_;
 
   // The time when the proxy configuration was last read from the system.
   base::TimeTicks config_last_update_time_;

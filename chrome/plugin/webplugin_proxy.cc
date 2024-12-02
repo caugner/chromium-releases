@@ -1,18 +1,21 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/plugin/webplugin_proxy.h"
 
-#include "base/gfx/gdi_util.h"
+#include "app/gfx/canvas.h"
+#if defined(OS_WIN)
+#include "app/win_util.h"
+#endif
 #include "base/scoped_handle.h"
 #include "base/shared_memory.h"
 #include "base/singleton.h"
 #include "base/waitable_event.h"
-#include "chrome/common/gfx/chrome_canvas.h"
+#include "build/build_config.h"
+#include "chrome/common/child_process_logging.h"
 #include "chrome/common/plugin_messages.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/common/win_util.h"
 #include "chrome/plugin/npobject_proxy.h"
 #include "chrome/plugin/npobject_util.h"
 #include "chrome/plugin/plugin_channel.h"
@@ -20,6 +23,10 @@
 #include "chrome/plugin/webplugin_delegate_stub.h"
 #include "skia/ext/platform_device.h"
 #include "webkit/glue/webplugin_delegate.h"
+
+#if defined(OS_WIN)
+#include "base/gfx/gdi_util.h"
+#endif
 
 typedef std::map<CPBrowsingContext, WebPluginProxy*> ContextMap;
 static ContextMap& GetContextMap() {
@@ -30,7 +37,7 @@ WebPluginProxy::WebPluginProxy(
     PluginChannel* channel,
     int route_id,
     WebPluginDelegate* delegate,
-    HANDLE modal_dialog_event)
+    const GURL& page_url)
     : channel_(channel),
       route_id_(route_id),
       cp_browsing_context_(0),
@@ -38,12 +45,61 @@ WebPluginProxy::WebPluginProxy(
       plugin_element_(NULL),
       delegate_(delegate),
       waiting_for_paint_(false),
-#pragma warning(suppress: 4355)  // can use this
-      runnable_method_factory_(this),
-      parent_window_(NULL) {
+      page_url_(page_url),
+      ALLOW_THIS_IN_INITIALIZER_LIST(runnable_method_factory_(this))
+{
+}
 
-  HANDLE event;
-  BOOL result = DuplicateHandle(channel->renderer_handle(),
+WebPluginProxy::~WebPluginProxy() {
+  if (cp_browsing_context_)
+    GetContextMap().erase(cp_browsing_context_);
+}
+
+bool WebPluginProxy::Send(IPC::Message* msg) {
+  return channel_->Send(msg);
+}
+
+#if defined(OS_LINUX)
+gfx::PluginWindowHandle WebPluginProxy::CreatePluginContainer() {
+  gfx::PluginWindowHandle container;
+  Send(new PluginHostMsg_CreatePluginContainer(route_id_, &container));
+  return container;
+}
+#endif
+
+void WebPluginProxy::SetWindow(gfx::PluginWindowHandle window) {
+  Send(new PluginHostMsg_SetWindow(route_id_, window));
+}
+
+void WebPluginProxy::WillDestroyWindow(gfx::PluginWindowHandle window) {
+#if defined(OS_WIN)
+  PluginThread::current()->Send(
+      new PluginProcessHostMsg_PluginWindowDestroyed(
+          window, ::GetParent(window)));
+#elif defined(OS_LINUX)
+  Send(new PluginHostMsg_DestroyPluginContainer(route_id_, window));
+#else
+  NOTIMPLEMENTED();
+#endif
+}
+
+#if defined(OS_WIN)
+void WebPluginProxy::SetWindowlessPumpEvent(HANDLE pump_messages_event) {
+  HANDLE pump_messages_event_for_renderer = NULL;
+  DuplicateHandle(GetCurrentProcess(), pump_messages_event,
+                  channel_->renderer_handle(),
+                  &pump_messages_event_for_renderer,
+                  0, FALSE, DUPLICATE_SAME_ACCESS);
+  DCHECK(pump_messages_event_for_renderer != NULL);
+  Send(new PluginHostMsg_SetWindowlessPumpEvent(
+      route_id_, pump_messages_event_for_renderer));
+}
+
+bool WebPluginProxy::SetModalDialogEvent(HANDLE modal_dialog_event) {
+  // TODO(port): figure out how this will be set in the browser process, or
+  // come up with a different mechanism.
+  HANDLE event = NULL;
+  BOOL result = DuplicateHandle(channel_->renderer_handle(),
       modal_dialog_event,
       GetCurrentProcess(),
       &event,
@@ -52,59 +108,14 @@ WebPluginProxy::WebPluginProxy(
       0);
   DCHECK(result) <<
       "Couldn't duplicate the modal dialog handle for the plugin." \
-      "handle: " << channel->renderer_handle() << ". err: " << GetLastError();
+      "handle: " << channel_->renderer_handle() << ". err: " << GetLastError();
+  if (!event)
+    return false;
+
   modal_dialog_event_.reset(new base::WaitableEvent(event));
+  return true;
 }
-
-WebPluginProxy::~WebPluginProxy() {
-  if (cp_browsing_context_)
-    GetContextMap().erase(cp_browsing_context_);
-
-  if (parent_window_) {
-    PluginThread::current()->Send(
-        new PluginProcessHostMsg_DestroyWindow(parent_window_));
-  }
-}
-
-bool WebPluginProxy::Send(IPC::Message* msg) {
-  return channel_->Send(msg);
-}
-
-void WebPluginProxy::SetWindow(HWND window, HANDLE pump_messages_event) {
-  HANDLE pump_messages_event_for_renderer = NULL;
-
-  if (pump_messages_event) {
-    DCHECK(window == NULL);
-    DuplicateHandle(GetCurrentProcess(), pump_messages_event,
-                    channel_->renderer_handle(),
-                    &pump_messages_event_for_renderer,
-                    0, FALSE, DUPLICATE_SAME_ACCESS);
-    DCHECK(pump_messages_event_for_renderer != NULL);
-  } else {
-    DCHECK (window);
-    // To make scrolling windowed plugins fast, we create the page's direct
-    // child windows in the browser process.  This way no cross process messages
-    // are sent.
-    HWND old_parent = GetParent(window);
-    IPC::SyncMessage* msg = new PluginProcessHostMsg_CreateWindow(
-        old_parent, &parent_window_);
-
-    // Need to process window messages in the meantime to avoid a deadlock if
-    // the browser paints or sends any other (synchronous) WM_ message to the
-    // plugin window.
-    msg->EnableMessagePumping();
-    PluginThread::current()->Send(msg);
-
-    SetParent(window, parent_window_);
-
-    // We want the browser process to move this window which has a message loop
-    // in its process.
-    window = parent_window_;
-  }
-
-  Send(new PluginHostMsg_SetWindow(route_id_, window,
-                                   pump_messages_event_for_renderer));
-}
+#endif
 
 void WebPluginProxy::CancelResource(int id) {
   Send(new PluginHostMsg_CancelResource(route_id_, id));
@@ -145,16 +156,15 @@ NPObject* WebPluginProxy::GetWindowScriptNPObject() {
 
   int npobject_route_id = channel_->GenerateRouteID();
   bool success = false;
-  void* npobject_ptr;
+  intptr_t npobject_ptr;
   Send(new PluginHostMsg_GetWindowScriptNPObject(
       route_id_, npobject_route_id, &success, &npobject_ptr));
   if (!success)
     return NULL;
 
-  window_npobject_ = NPObjectProxy::Create(channel_,
-                                           npobject_route_id,
-                                           npobject_ptr,
-                                           modal_dialog_event_.get());
+  window_npobject_ = NPObjectProxy::Create(
+      channel_, npobject_route_id, npobject_ptr, modal_dialog_event_.get(),
+      page_url_);
 
   return window_npobject_;
 }
@@ -165,16 +175,15 @@ NPObject* WebPluginProxy::GetPluginElement() {
 
   int npobject_route_id = channel_->GenerateRouteID();
   bool success = false;
-  void* npobject_ptr;
+  intptr_t npobject_ptr;
   Send(new PluginHostMsg_GetPluginElement(
       route_id_, npobject_route_id, &success, &npobject_ptr));
   if (!success)
     return NULL;
 
-  plugin_element_ = NPObjectProxy::Create(channel_,
-                                          npobject_route_id,
-                                          npobject_ptr,
-                                          modal_dialog_event_.get());
+  plugin_element_ = NPObjectProxy::Create(
+      channel_, npobject_route_id, npobject_ptr, modal_dialog_event_.get(),
+      page_url_);
 
   return plugin_element_;
 }
@@ -238,6 +247,12 @@ WebPluginResourceClient* WebPluginProxy::GetResourceClient(int id) {
   return iterator->second;
 }
 
+int WebPluginProxy::GetRendererProcessId() {
+  if (channel_.get())
+    return channel_->peer_pid();
+  return 0;
+}
+
 void WebPluginProxy::DidPaint() {
   // If we have an accumulated damaged rect, then check to see if we need to
   // send out another InvalidateRect message.
@@ -263,13 +278,14 @@ void WebPluginProxy::HandleURLRequest(const char *method,
                                       const char* target, unsigned int len,
                                       const char* buf, bool is_file_data,
                                       bool notify, const char* url,
-                                      void* notify_data, bool popups_allowed) {
+                                      intptr_t notify_data,
+                                      bool popups_allowed) {
   if (!url) {
     NOTREACHED();
     return;
   }
 
-  if (!target && (0 == _strcmpi(method, "GET"))) {
+  if (!target && (0 == base::strcasecmp(method, "GET"))) {
     // Please refer to https://bugzilla.mozilla.org/show_bug.cgi?id=366082
     // for more details on this.
     if (delegate_->GetQuirks() &
@@ -303,14 +319,72 @@ void WebPluginProxy::HandleURLRequest(const char *method,
   Send(new PluginHostMsg_URLRequest(route_id_, params));
 }
 
+bool WebPluginProxy::GetDragData(struct NPObject* event, bool add_data,
+                                 int32* identity, int32* event_id,
+                                 std::string* type, std::string* data) {
+  DCHECK(event);
+  NPObjectProxy* proxy = NPObjectProxy::GetProxy(event);
+  if (!proxy)  // NPObject* event should have/be a renderer proxy.
+    return false;
+
+  NPVariant_Param event_param;
+  event_param.type = NPVARIANT_PARAM_OBJECT_POINTER;
+  event_param.npobject_pointer = proxy->npobject_ptr();
+  if (!event_param.npobject_pointer)
+    return false;
+
+  std::vector<NPVariant_Param> values;
+  bool success = false;
+  Send(new PluginHostMsg_GetDragData(route_id_, event_param, add_data,
+                                     &values, &success));
+  if (!success)
+    return false;
+
+  DCHECK(values.size() == 4);
+  DCHECK(values[0].type == NPVARIANT_PARAM_INT);
+  *identity = static_cast<int32>(values[0].int_value);
+  DCHECK(values[1].type == NPVARIANT_PARAM_INT);
+  *event_id = static_cast<int32>(values[1].int_value);
+  DCHECK(values[2].type == NPVARIANT_PARAM_STRING);
+  type->swap(values[2].string_value);
+  if (add_data && (values[3].type == NPVARIANT_PARAM_STRING))
+    data->swap(values[3].string_value);
+
+  return true;
+}
+
+bool WebPluginProxy::SetDropEffect(struct NPObject* event, int effect) {
+  DCHECK(event);
+  NPObjectProxy* proxy = NPObjectProxy::GetProxy(event);
+  if (!proxy)  // NPObject* event should have/be a renderer proxy.
+    return false;
+
+  NPVariant_Param event_param;
+  event_param.type = NPVARIANT_PARAM_OBJECT_POINTER;
+  event_param.npobject_pointer = proxy->npobject_ptr();
+  if (!event_param.npobject_pointer)
+    return false;
+
+  bool success = false;
+  Send(new PluginHostMsg_SetDropEffect(route_id_, event_param, effect,
+                                       &success));
+  return success;
+}
+
 void WebPluginProxy::Paint(const gfx::Rect& rect) {
+#if defined(OS_WIN)
   if (!windowless_hdc_)
     return;
+#elif defined(OS_MACOSX)
+  if (!windowless_context_.get())
+    return;
+#endif
 
   // Clear the damaged area so that if the plugin doesn't paint there we won't
   // end up with the old values.
   gfx::Rect offset_rect = rect;
   offset_rect.Offset(delegate_->GetRect().origin());
+#if defined(OS_WIN)
   if (!background_hdc_) {
     FillRect(windowless_hdc_, &offset_rect.ToRECT(),
         static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH)));
@@ -320,24 +394,56 @@ void WebPluginProxy::Paint(const gfx::Rect& rect) {
       rect.x(), rect.y(), SRCCOPY);
   }
 
+  RECT clip_rect = rect.ToRECT();
+  HRGN clip_region = CreateRectRgnIndirect(&clip_rect);
+  SelectClipRgn(windowless_hdc_, clip_region);
+
   // Before we send the invalidate, paint so that renderer uses the updated
   // bitmap.
   delegate_->Paint(windowless_hdc_, offset_rect);
+
+  SelectClipRgn(windowless_hdc_, NULL);
+  DeleteObject(clip_region);
+#elif defined(OS_MACOSX)
+  CGContextSaveGState(windowless_context_);
+  if (!background_context_.get()) {
+    CGContextSetFillColorWithColor(windowless_context_,
+                                   CGColorGetConstantColor(kCGColorWhite));
+    CGContextFillRect(windowless_context_, rect.ToCGRect());
+  } else {
+    scoped_cftyperef<CGImageRef> image(
+        CGBitmapContextCreateImage(background_context_));
+    scoped_cftyperef<CGImageRef> sub_image(
+        CGImageCreateWithImageInRect(image, rect.ToCGRect()));
+    CGContextDrawImage(background_context_, rect.ToCGRect(), sub_image);
+  }
+  CGContextClipToRect(windowless_context_, rect.ToCGRect());
+  delegate_->Paint(windowless_context_, rect);
+  CGContextRestoreGState(windowless_context_);
+#else
+  // TODO(port): windowless painting.
+  NOTIMPLEMENTED();
+#endif
 }
 
 void WebPluginProxy::UpdateGeometry(
     const gfx::Rect& window_rect,
     const gfx::Rect& clip_rect,
-    const base::SharedMemoryHandle& windowless_buffer,
-    const base::SharedMemoryHandle& background_buffer) {
+    const TransportDIB::Handle& windowless_buffer,
+    const TransportDIB::Handle& background_buffer) {
   gfx::Rect old = delegate_->GetRect();
   gfx::Rect old_clip_rect = delegate_->GetClipRect();
 
-  bool moved = old.x() != window_rect.x() || old.y() != window_rect.y();
   delegate_->UpdateGeometry(window_rect, clip_rect);
+  bool moved = old.x() != window_rect.x() || old.y() != window_rect.y();
+#if defined(OS_MACOSX)
+  if (windowless_buffer.fd > 0) {
+#else
   if (windowless_buffer) {
+#endif
     // The plugin's rect changed, so now we have a new buffer to draw into.
-    SetWindowlessBuffer(windowless_buffer, background_buffer);
+    SetWindowlessBuffer(windowless_buffer,
+                        background_buffer);
   } else if (moved) {
     // The plugin moved, so update our world transform.
     UpdateTransform();
@@ -350,9 +456,10 @@ void WebPluginProxy::UpdateGeometry(
   }
 }
 
+#if defined(OS_WIN)
 void WebPluginProxy::SetWindowlessBuffer(
-    const base::SharedMemoryHandle& windowless_buffer,
-    const base::SharedMemoryHandle& background_buffer) {
+    const TransportDIB::Handle& windowless_buffer,
+    const TransportDIB::Handle& background_buffer) {
   // Convert the shared memory handle to a handle that works in our process,
   // and then use that to create an HDC.
   ConvertBuffer(windowless_buffer,
@@ -400,7 +507,7 @@ void WebPluginProxy::ConvertBuffer(const base::SharedMemoryHandle& buffer,
     return;
   }
 
-  skia::PlatformDeviceWin::InitializeDC(hdc->Get());
+  skia::PlatformDevice::InitializeDC(hdc->Get());
   SelectObject(hdc->Get(), bitmap->Get());
 }
 
@@ -417,6 +524,55 @@ void WebPluginProxy::UpdateTransform() {
   xf.eM22 = 1;
   SetWorldTransform(windowless_hdc_, &xf);
 }
+#elif defined(OS_MACOSX)
+void WebPluginProxy::UpdateTransform() {
+  NOTIMPLEMENTED();
+}
+
+void WebPluginProxy::SetWindowlessBuffer(
+    const TransportDIB::Handle& windowless_buffer,
+    const TransportDIB::Handle& background_buffer) {
+  // Convert the shared memory handle to a handle that works in our process,
+  // and then use that to create a CGContextRef.
+  windowless_dib_.reset(TransportDIB::Map(windowless_buffer));
+  background_dib_.reset(TransportDIB::Map(background_buffer));
+  scoped_cftyperef<CGColorSpaceRef> rgb_colorspace(
+      CGColorSpaceCreateWithName(kCGColorSpaceGenericRGB));
+  windowless_context_.reset(CGBitmapContextCreate(
+      windowless_dib_->memory(),
+      delegate_->GetRect().width(),
+      delegate_->GetRect().height(),
+      8, 4 * delegate_->GetRect().width(),
+      rgb_colorspace,
+      kCGImageAlphaPremultipliedFirst |
+      kCGBitmapByteOrder32Host));
+  CGContextTranslateCTM(windowless_context_, 0, delegate_->GetRect().height());
+  CGContextScaleCTM(windowless_context_, 1, -1);
+  if (background_dib_.get()) {
+    background_context_.reset(CGBitmapContextCreate(
+        background_dib_->memory(),
+        delegate_->GetRect().width(),
+        delegate_->GetRect().height(),
+        8, 4 * delegate_->GetRect().width(),
+        rgb_colorspace,
+        kCGImageAlphaPremultipliedFirst |
+        kCGBitmapByteOrder32Host));
+    CGContextTranslateCTM(background_context_, 0,
+                          delegate_->GetRect().height());
+    CGContextScaleCTM(background_context_, 1, -1);
+  }
+}
+#elif defined (OS_LINUX)
+void WebPluginProxy::UpdateTransform() {
+  NOTIMPLEMENTED();
+}
+
+void WebPluginProxy::SetWindowlessBuffer(
+    const TransportDIB::Handle& windowless_buffer,
+    const TransportDIB::Handle& background_buffer) {
+  NOTIMPLEMENTED();
+}
+#endif
 
 void WebPluginProxy::CancelDocumentLoad() {
   Send(new PluginHostMsg_CancelDocumentLoad(route_id_));
@@ -424,9 +580,9 @@ void WebPluginProxy::CancelDocumentLoad() {
 
 void WebPluginProxy::InitiateHTTPRangeRequest(const char* url,
                                               const char* range_info,
-                                              void* existing_stream,
+                                              intptr_t existing_stream,
                                               bool notify_needed,
-                                              HANDLE notify_data) {
+                                              intptr_t notify_data) {
 
   Send(new PluginHostMsg_InitiateHTTPRangeRequest(route_id_, url,
                                                   range_info, existing_stream,
@@ -434,6 +590,26 @@ void WebPluginProxy::InitiateHTTPRangeRequest(const char* url,
 }
 
 void WebPluginProxy::OnPaint(const gfx::Rect& damaged_rect) {
+  child_process_logging::ScopedActiveURLSetter url_setter(page_url_);
+
   Paint(damaged_rect);
   Send(new PluginHostMsg_InvalidateRect(route_id_, damaged_rect));
+}
+
+bool WebPluginProxy::IsOffTheRecord() {
+  return channel_->off_the_record();
+}
+
+void WebPluginProxy::ResourceClientDeleted(
+    WebPluginResourceClient* resource_client) {
+  ResourceClientMap::iterator index = resource_clients_.begin();
+  while (index != resource_clients_.end()) {
+    WebPluginResourceClient* client = (*index).second;
+
+    if (client == resource_client) {
+      resource_clients_.erase(index++);
+    } else {
+      index++;
+    }
+  }
 }

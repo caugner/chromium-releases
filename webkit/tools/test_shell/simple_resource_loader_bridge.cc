@@ -35,17 +35,20 @@
 #include "base/message_loop.h"
 #include "base/ref_counted.h"
 #include "base/time.h"
+#include "base/timer.h"
 #include "base/thread.h"
 #include "base/waitable_event.h"
 #include "net/base/cookie_monster.h"
 #include "net/base/io_buffer.h"
 #include "net/base/load_flags.h"
+#include "net/base/net_errors.h"
 #include "net/base/net_util.h"
 #include "net/base/upload_data.h"
 #include "net/http/http_response_headers.h"
 #include "net/proxy/proxy_service.h"
 #include "net/url_request/url_request.h"
 #include "webkit/glue/resource_loader_bridge.h"
+#include "webkit/glue/webappcachecontext.h"
 #include "webkit/tools/test_shell/test_shell_request_context.h"
 
 using webkit_glue::ResourceLoaderBridge;
@@ -95,10 +98,11 @@ bool EnsureIOThread() {
 struct RequestParams {
   std::string method;
   GURL url;
-  GURL policy_url;
+  GURL first_party_for_cookies;
   GURL referrer;
   std::string headers;
   int load_flags;
+  int app_cache_context_id;
   scoped_refptr<net::UploadData> upload;
 };
 
@@ -148,9 +152,14 @@ class RequestProxy : public URLRequest::Delegate,
   // various URLRequest callbacks.  The event hooks, defined below, trigger
   // these methods asynchronously.
 
-  void NotifyReceivedRedirect(const GURL& new_url) {
-    if (peer_)
-      peer_->OnReceivedRedirect(new_url);
+  void NotifyReceivedRedirect(const GURL& new_url,
+                              const ResourceLoaderBridge::ResponseInfo& info) {
+    if (peer_ && peer_->OnReceivedRedirect(new_url, info)) {
+      io_thread->message_loop()->PostTask(FROM_HERE, NewRunnableMethod(
+          this, &RequestProxy::AsyncFollowDeferredRedirect));
+    } else {
+      Cancel();
+    }
   }
 
   void NotifyReceivedResponse(const ResourceLoaderBridge::ResponseInfo& info,
@@ -200,7 +209,7 @@ class RequestProxy : public URLRequest::Delegate,
   void AsyncStart(RequestParams* params) {
     request_.reset(new URLRequest(params->url, this));
     request_->set_method(params->method);
-    request_->set_policy_url(params->policy_url);
+    request_->set_first_party_for_cookies(params->first_party_for_cookies);
     request_->set_referrer(params->referrer.spec());
     request_->SetExtraRequestHeaders(params->headers);
     request_->set_load_flags(params->load_flags);
@@ -227,6 +236,14 @@ class RequestProxy : public URLRequest::Delegate,
     Done();
   }
 
+  void AsyncFollowDeferredRedirect() {
+    // This can be null in cases where the request is already done.
+    if (!request_.get())
+      return;
+
+    request_->FollowDeferredRedirect();
+  }
+
   void AsyncReadData() {
     // This can be null in cases where the request is already done.
     if (!request_.get())
@@ -249,9 +266,13 @@ class RequestProxy : public URLRequest::Delegate,
   // callbacks) that run on the IO thread.  They are designed to be overridden
   // by the SyncRequestProxy subclass.
 
-  virtual void OnReceivedRedirect(const GURL& new_url) {
+  virtual void OnReceivedRedirect(
+      const GURL& new_url,
+      const ResourceLoaderBridge::ResponseInfo& info,
+      bool* defer_redirect) {
+    *defer_redirect = true;  // See AsyncFollowDeferredRedirect
     owner_loop_->PostTask(FROM_HERE, NewRunnableMethod(
-        this, &RequestProxy::NotifyReceivedRedirect, new_url));
+        this, &RequestProxy::NotifyReceivedRedirect, new_url, info));
   }
 
   virtual void OnReceivedResponse(
@@ -276,20 +297,18 @@ class RequestProxy : public URLRequest::Delegate,
   // URLRequest::Delegate implementation:
 
   virtual void OnReceivedRedirect(URLRequest* request,
-                                  const GURL& new_url) {
+                                  const GURL& new_url,
+                                  bool* defer_redirect) {
     DCHECK(request->status().is_success());
-    OnReceivedRedirect(new_url);
+    ResourceLoaderBridge::ResponseInfo info;
+    PopulateResponseInfo(request, &info);
+    OnReceivedRedirect(new_url, info, defer_redirect);
   }
 
   virtual void OnResponseStarted(URLRequest* request) {
     if (request->status().is_success()) {
       ResourceLoaderBridge::ResponseInfo info;
-      info.request_time = request->request_time();
-      info.response_time = request->response_time();
-      info.headers = request->response_headers();
-      request->GetMimeType(&info.mime_type);
-      request->GetCharset(&info.charset);
-      info.content_length = request->GetExpectedContentSize();
+      PopulateResponseInfo(request, &info);
       OnReceivedResponse(info, false);
       AsyncReadData();  // start reading
     } else {
@@ -320,6 +339,14 @@ class RequestProxy : public URLRequest::Delegate,
 
   // Called on the IO thread.
   void MaybeUpdateUploadProgress() {
+    // If a redirect is received upload is cancelled in URLRequest, we should
+    // try to stop the |upload_progress_timer_| timer and return.
+    if (!request_->has_upload()) {
+      if (upload_progress_timer_.IsRunning())
+        upload_progress_timer_.Stop();
+      return;
+    }
+
     uint64 size = request_->get_upload()->GetContentLength();
     uint64 position = request_->GetUploadProgress();
     if (position == last_upload_position_)
@@ -343,6 +370,17 @@ class RequestProxy : public URLRequest::Delegate,
       last_upload_ticks_ = base::TimeTicks::Now();
       last_upload_position_ = position;
     }
+  }
+
+  void PopulateResponseInfo(URLRequest* request,
+                            ResourceLoaderBridge::ResponseInfo* info) const {
+    info->request_time = request->request_time();
+    info->response_time = request->response_time();
+    info->headers = request->response_headers();
+    info->app_cache_id = WebAppCacheContext::kNoAppCacheId;
+    request->GetMimeType(&info->mime_type);
+    request->GetCharset(&info->charset);
+    info->content_length = request->GetExpectedContentSize();
   }
 
   scoped_ptr<URLRequest> request_;
@@ -384,7 +422,18 @@ class SyncRequestProxy : public RequestProxy {
   // --------------------------------------------------------------------------
   // Event hooks that run on the IO thread:
 
-  virtual void OnReceivedRedirect(const GURL& new_url) {
+  virtual void OnReceivedRedirect(
+      const GURL& new_url,
+      const ResourceLoaderBridge::ResponseInfo& info,
+      bool* defer_redirect) {
+    // TODO(darin): It would be much better if this could live in WebCore, but
+    // doing so requires API changes at all levels.  Similar code exists in
+    // WebCore/platform/network/cf/ResourceHandleCFNet.cpp :-(
+    if (new_url.GetOrigin() != result_->url.GetOrigin()) {
+      DLOG(WARNING) << "Cross origin redirect denied";
+      Cancel();
+      return;
+    }
     result_->url = new_url;
   }
 
@@ -416,18 +465,20 @@ class ResourceLoaderBridgeImpl : public ResourceLoaderBridge {
  public:
   ResourceLoaderBridgeImpl(const std::string& method,
                            const GURL& url,
-                           const GURL& policy_url,
+                           const GURL& first_party_for_cookies,
                            const GURL& referrer,
                            const std::string& headers,
-                           int load_flags)
+                           int load_flags,
+                           int app_cache_context_id)
       : params_(new RequestParams),
         proxy_(NULL) {
     params_->method = method;
     params_->url = url;
-    params_->policy_url = policy_url;
+    params_->first_party_for_cookies = first_party_for_cookies;
     params_->referrer = referrer;
     params_->headers = headers;
     params_->load_flags = load_flags;
+    params_->app_cache_context_id = app_cache_context_id;
   }
 
   virtual ~ResourceLoaderBridgeImpl() {
@@ -448,12 +499,19 @@ class ResourceLoaderBridgeImpl : public ResourceLoaderBridge {
     params_->upload->AppendBytes(data, data_len);
   }
 
-  virtual void AppendFileRangeToUpload(const std::wstring& file_path,
+  virtual void AppendFileRangeToUpload(const FilePath& file_path,
                                        uint64 offset, uint64 length) {
     DCHECK(params_.get());
     if (!params_->upload)
       params_->upload = new net::UploadData();
     params_->upload->AppendFileRange(file_path, offset, length);
+  }
+
+  virtual void SetUploadIdentifier(int64 identifier) {
+    DCHECK(params_.get());
+    if (!params_->upload)
+      params_->upload = new net::UploadData();
+    params_->upload->set_identifier(identifier);
   }
 
   virtual bool Start(Peer* peer) {
@@ -546,7 +604,7 @@ namespace webkit_glue {
 ResourceLoaderBridge* ResourceLoaderBridge::Create(
     const std::string& method,
     const GURL& url,
-    const GURL& policy_url,
+    const GURL& first_party_for_cookies,
     const GURL& referrer,
     const std::string& frame_origin,
     const std::string& main_frame_origin,
@@ -554,9 +612,11 @@ ResourceLoaderBridge* ResourceLoaderBridge::Create(
     int load_flags,
     int requestor_pid,
     ResourceType::Type request_type,
+    int app_cache_context_id,
     int routing_id) {
-  return new ResourceLoaderBridgeImpl(method, url, policy_url,
-                                      referrer, headers, load_flags);
+  return new ResourceLoaderBridgeImpl(method, url, first_party_for_cookies,
+                                      referrer, headers, load_flags,
+                                      app_cache_context_id);
 }
 
 // Issue the proxy resolve request on the io thread, and wait
@@ -605,8 +665,9 @@ void SimpleResourceLoaderBridge::Shutdown() {
   }
 }
 
-void SimpleResourceLoaderBridge::SetCookie(
-    const GURL& url, const GURL& policy_url, const std::string& cookie) {
+void SimpleResourceLoaderBridge::SetCookie(const GURL& url,
+                                           const GURL& first_party_for_cookies,
+                                           const std::string& cookie) {
   // Proxy to IO thread to synchronize w/ network loading.
 
   if (!EnsureIOThread()) {
@@ -620,7 +681,7 @@ void SimpleResourceLoaderBridge::SetCookie(
 }
 
 std::string SimpleResourceLoaderBridge::GetCookies(
-    const GURL& url, const GURL& policy_url) {
+    const GURL& url, const GURL& first_party_for_cookies) {
   // Proxy to IO thread to synchronize w/ network loading
 
   if (!EnsureIOThread()) {

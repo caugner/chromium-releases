@@ -77,7 +77,7 @@ class EditorClientImpl : public WebCore::EditorClient {
   virtual void handleInputMethodKeydown(WebCore::KeyboardEvent*);
 
   virtual void textFieldDidBeginEditing(WebCore::Element*);
-  virtual void textFieldDidEndEditing(WebCore::Element*);
+  virtual void textFieldDidEndEditing(WebCore::Element* element);
   virtual void textDidChangeInTextField(WebCore::Element*);
   virtual bool doTextFieldCommandFromEvent(WebCore::Element*,WebCore::KeyboardEvent*);
   virtual void textWillBeDeletedInTextField(WebCore::Element*);
@@ -92,6 +92,8 @@ class EditorClientImpl : public WebCore::EditorClient {
                                     WTF::Vector<WebCore::GrammarDetail>&,
                                     int* badGrammarLocation,
                                     int* badGrammarLength);
+  virtual WebCore::String getAutoCorrectSuggestionForMisspelledWord(
+      const WebCore::String& misspelledWord);
   virtual void updateSpellingUIWithGrammarString(const WebCore::String&,
                                                  const WebCore::GrammarDetail& detail);
   virtual void updateSpellingUIWithMisspelledWord(const WebCore::String&);
@@ -115,27 +117,47 @@ class EditorClientImpl : public WebCore::EditorClient {
   virtual std::wstring Describe(WebCore::EAffinity affinity);
   virtual std::wstring Describe(WebCore::CSSStyleDeclaration* style);
 
-  // Shows the autofill popup for |node| if it is an HTMLInputElement and it is
-  // empty.  This is called when you press the up or down arrow in a text field
-  // or when clicking an already focused text-field.
-  virtual void ShowAutofillForNode(WebCore::Node* node);
+  // Shows the form autofill popup for |node| if it is an HTMLInputElement and
+  // it is empty.  This is called when you press the up or down arrow in a
+  // text-field or when clicking an already focused text-field.
+  // Returns true if the autofill popup has been scheduled to be shown, false
+  // otherwise.
+  virtual bool ShowFormAutofillForNode(WebCore::Node* node);
+
+  // Notification that the text changed in |text_field| due to acceptance of
+  // a suggestion provided by an autofill popup.  Having a separate callback
+  // in this case is a simple way to break the cycle that would otherwise occur
+  // if textDidChangeInTextField was called.
+  virtual void OnAutofillSuggestionAccepted(
+      WebCore::HTMLInputElement* text_field);
 
  private:
   void ModifySelection(WebCore::Frame* frame,
                        WebCore::KeyboardEvent* event);
 
-  // Popups an autofill menu for |input_element| is applicable.
+  // Triggers autofill for |input_element| if applicable.  This can be form
+  // autofill (via a popup-menu) or password autofill depending on
+  // |input_element|.  If |form_autofill_only| is true, password autofill is not
+  // triggered.
   // |autofill_on_empty_value| indicates whether the autofill should be shown
   // when the text-field is empty.
-  void Autofill(WebCore::HTMLInputElement* input_element,
-                bool autofill_on_empty_value);
+  // If |requires_caret_at_end| is true, the autofill popup is only shown if the
+  // caret is located at the end of the entered text in |input_element|.
+  // Returns true if the autofill popup has been scheduled to be shown, false
+  // otherwise.
+  bool Autofill(WebCore::HTMLInputElement* input_element,
+                bool form_autofill_only,
+                bool autofill_on_empty_value,
+                bool requires_caret_at_end);
 
   // This method is invoked later by Autofill() as when Autofill() is invoked
   // (from one of the EditorClient callback) the carret position is not
   // reflecting the last text change yet and we need it to decide whether or not
   // to show the autofill popup.
   void DoAutofill(WebCore::HTMLInputElement* input_element,
+                  bool form_autofill_only,
                   bool autofill_on_empty_value,
+                  bool requires_caret_at_end,
                   bool backspace);
 
  protected:
@@ -158,7 +180,7 @@ class EditorClientImpl : public WebCore::EditorClient {
   bool ShouldSpellcheckByDefault();
 
   // Whether the last entered key was a backspace.
-  bool backspace_pressed_;
+  bool backspace_or_delete_pressed_;
 
   // This flag is set to false if spell check for this editor is manually
   // turned off. The default setting is SPELLCHECK_AUTOMATIC.

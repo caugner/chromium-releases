@@ -18,11 +18,17 @@ void ProxyList::Set(const std::string& proxy_uri_list) {
   StringTokenizer str_tok(proxy_uri_list, ";");
   while (str_tok.GetNext()) {
     ProxyServer uri = ProxyServer::FromURI(
-        str_tok.token_begin(), str_tok.token_end());
+        str_tok.token_begin(), str_tok.token_end(), ProxyServer::SCHEME_HTTP);
     // Silently discard malformed inputs.
     if (uri.is_valid())
       proxies_.push_back(uri);
   }
+}
+
+void ProxyList::SetSingleProxyServer(const ProxyServer& proxy_server) {
+  proxies_.clear();
+  if (proxy_server.is_valid())
+    proxies_.push_back(proxy_server);
 }
 
 void ProxyList::RemoveBadProxies(const ProxyRetryInfoMap& proxy_retry_info) {

@@ -13,7 +13,15 @@ class WebDevToolsAgentDelegate {
   WebDevToolsAgentDelegate() {}
   virtual ~WebDevToolsAgentDelegate() {}
 
-  virtual void SendMessageToClient(const std::string& raw_msg) = 0;
+  virtual void SendMessageToClient(const std::string& class_name,
+                                   const std::string& method_name,
+                                   const std::string& raw_msg) = 0;
+
+  // Invalidates widget which leads to the repaint.
+  virtual void ForceRepaint() = 0;
+
+  // Returns the id of the entity hosting this agent.
+  virtual int GetHostId() = 0;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(WebDevToolsAgentDelegate);

@@ -8,37 +8,34 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "chrome/common/ipc_channel.h"
-#include "webkit/glue/webworker.h"
+#include "ipc/ipc_channel.h"
+#include "webkit/api/public/WebWorker.h"
 
+class ChildThread;
 class GURL;
 class RenderView;
-
-namespace IPC {
-class Message;
-}
+struct WorkerHostMsg_PostConsoleMessageToWorkerObject_Params;
 
 // This class provides an implementation of WebWorker that the renderer provides
 // to the glue.  This class converts function calls to IPC messages that are
 // dispatched in the worker process by WebWorkerClientProxy.  It also receives
 // IPC messages from WebWorkerClientProxy which it converts to function calls to
 // WebWorkerClient.
-class WebWorkerProxy : public WebWorker,
+class WebWorkerProxy : public WebKit::WebWorker,
                        public IPC::Channel::Listener {
  public:
-  WebWorkerProxy(WebWorkerClient* client);
+  WebWorkerProxy(WebKit::WebWorkerClient* client,
+                 ChildThread* child_thread,
+                 int render_view_route_id);
   virtual ~WebWorkerProxy();
 
   // WebWorker implementation.
-  // These functions are called by WebKit (after the data types have been
-  // converted by glue code).
-  virtual void StartWorkerContext(const GURL& script_url,
-                                  const string16& user_agent,
-                                  const string16& encoding,
-                                  const string16& source_code);
-  virtual void TerminateWorkerContext();
-  virtual void PostMessageToWorkerContext(const string16& message);
-  virtual void WorkerObjectDestroyed();
+  virtual void startWorkerContext(const WebKit::WebURL& script_url,
+                                  const WebKit::WebString& user_agent,
+                                  const WebKit::WebString& source_code);
+  virtual void terminateWorkerContext();
+  virtual void postMessageToWorkerContext(const WebKit::WebString& message);
+  virtual void workerObjectDestroyed();
 
   // IPC::Channel::Listener implementation.
   void OnMessageReceived(const IPC::Message& message);
@@ -46,11 +43,23 @@ class WebWorkerProxy : public WebWorker,
  private:
   bool Send(IPC::Message* message);
 
+  void OnDedicatedWorkerCreated();
+  void OnPostConsoleMessageToWorkerObject(
+      const WorkerHostMsg_PostConsoleMessageToWorkerObject_Params& params);
+
+  void Disconnect();
+
+  // The routing id used to reach WebWorkerClientProxy in the worker process.
   int route_id_;
+
+  ChildThread* child_thread_;
+
+  // The routing id for the RenderView that created this worker.
+  int render_view_route_id_;
 
   // Used to communicate to the WebCore::Worker object in response to IPC
   // messages.
-  WebWorkerClient* client_;
+  WebKit::WebWorkerClient* client_;
 
   // Stores messages that were sent before the StartWorkerContext message.
   std::vector<IPC::Message*> queued_messages_;

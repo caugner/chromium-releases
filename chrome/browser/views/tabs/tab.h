@@ -89,10 +89,6 @@ class Tab : public TabRenderer,
   virtual bool IsSelected() const;
 
  private:
-  class ContextMenuController;
-
-  friend class ContextMenuController;
-
   // views::View overrides:
   virtual bool HasHitTestMask() const;
   virtual void GetHitTestMask(gfx::Path* mask) const;
@@ -101,9 +97,9 @@ class Tab : public TabRenderer,
   virtual void OnMouseReleased(const views::MouseEvent& event,
                                bool canceled);
   virtual bool GetTooltipText(int x, int y, std::wstring* tooltip);
-  virtual bool GetTooltipTextOrigin(int x, int y, CPoint* origin);
+  virtual bool GetTooltipTextOrigin(int x, int y, gfx::Point* origin);
   virtual std::string GetClassName() const { return kTabClassName; }
-  virtual bool GetAccessibleRole(VARIANT* role);
+  virtual bool GetAccessibleRole(AccessibilityTypes::Role* role);
   virtual bool GetAccessibleName(std::wstring* name);
 
   // views::ContextMenuController overrides:
@@ -119,9 +115,6 @@ class Tab : public TabRenderer,
   // representation. Used by GetViewForPoint for hit-testing.
   void MakePathForTab(gfx::Path* path) const;
 
-  // Invoked when the context menu closes.
-  void ContextMenuClosed();
-
   // An instance of a delegate object that can perform various actions based on
   // user gestures.
   TabDelegate* delegate_;
@@ -130,7 +123,8 @@ class Tab : public TabRenderer,
   bool closing_;
 
   // If non-null it means we're showing a menu for the tab.
-  ContextMenuController* menu_controller_;
+  class TabContextMenuContents;
+  scoped_ptr<TabContextMenuContents> context_menu_contents_;
 
   DISALLOW_COPY_AND_ASSIGN(Tab);
 };

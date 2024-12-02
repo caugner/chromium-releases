@@ -13,6 +13,7 @@
 
 #include <string>
 
+#include "base/string16.h"
 #include "base/thread.h"
 #include "chrome/test/automation/automation_handle_tracker.h"
 
@@ -33,7 +34,6 @@ class WindowProxy : public AutomationResourceProxy {
               AutomationHandleTracker* tracker,
               int handle)
     : AutomationResourceProxy(tracker, sender, handle) {}
-  virtual ~WindowProxy() {}
 
 #if defined(OS_WIN)
   // TODO(port): Use portable replacements for windowsisms.
@@ -49,6 +49,9 @@ class WindowProxy : public AutomationResourceProxy {
   // window, the top window is clicked.
   bool SimulateOSClick(const POINT& click, int flags);
 #endif  // defined(OS_WIN)
+
+  // Get the title of the top level window.
+  bool GetWindowTitle(string16* text);
 
   // Simulates a key press at the OS level. |key| is the key pressed  and
   // |flags| specifies which modifiers keys are also pressed (as defined in
@@ -79,18 +82,25 @@ class WindowProxy : public AutomationResourceProxy {
   bool GetViewBoundsWithTimeout(int view_id, gfx::Rect* bounds,
                                 bool screen_coordinates, uint32 timeout_ms,
                                 bool* is_timeout);
+
+  // Sets the position and size of the window. Returns true if setting the
+  // bounds was successful.
+  bool SetBounds(const gfx::Rect& bounds);
+
   // Gets the id of the view that currently has focus.  Returns true if the id
   // was retrieved.
   bool GetFocusedViewID(int* view_id);
 
   // Returns the browser this window corresponds to, or NULL if this window
   // is not a browser.  The caller owns the returned BrowserProxy.
-  BrowserProxy* GetBrowser();
+  scoped_refptr<BrowserProxy> GetBrowser();
 
   // Same as GetWindow except return NULL if response isn't received
   // before the specified timeout.
-  BrowserProxy* GetBrowserWithTimeout(uint32 timeout_ms, bool* is_timeout);
-
+  scoped_refptr<BrowserProxy> GetBrowserWithTimeout(uint32 timeout_ms,
+      bool* is_timeout);
+ protected:
+  virtual ~WindowProxy() {}
  private:
   DISALLOW_COPY_AND_ASSIGN(WindowProxy);
 };

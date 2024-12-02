@@ -3,15 +3,14 @@
 // found in the LICENSE file.
 
 #include "config.h"
-#include "webkit/glue/webplugin_impl.h"
 
-#include "Cursor.h"
 #include "Document.h"
 #include "DocumentLoader.h"
 #include "Event.h"
 #include "EventNames.h"
 #include "FloatPoint.h"
 #include "FormData.h"
+#include "FormState.h"
 #include "FocusController.h"
 #include "Frame.h"
 #include "FrameLoader.h"
@@ -19,6 +18,7 @@
 #include "FrameTree.h"
 #include "FrameView.h"
 #include "GraphicsContext.h"
+#include "HTMLFormElement.h"
 #include "HTMLNames.h"
 #include "HTMLPlugInElement.h"
 #include "IntRect.h"
@@ -28,7 +28,9 @@
 #include "Page.h"
 #include "PlatformContextSkia.h"
 #include "PlatformMouseEvent.h"
+#include "PlatformKeyboardEvent.h"
 #include "PlatformString.h"
+#include "PlatformWidget.h"
 #include "RenderBox.h"
 #include "ResourceHandle.h"
 #include "ResourceHandleClient.h"
@@ -45,38 +47,68 @@
 #include "base/string_util.h"
 #include "base/sys_string_conversions.h"
 #include "net/base/escape.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebKit.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebKitClient.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebString.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebURL.h"
+#include "webkit/api/public/WebCursorInfo.h"
+#include "webkit/api/public/WebData.h"
+#include "webkit/api/public/WebHTTPBody.h"
+#include "webkit/api/public/WebInputEvent.h"
+#include "webkit/api/public/WebKit.h"
+#include "webkit/api/public/WebKitClient.h"
+#include "webkit/api/public/WebString.h"
+#include "webkit/api/public/WebURL.h"
+#include "webkit/api/public/WebURLLoader.h"
+#include "webkit/api/public/WebURLLoaderClient.h"
+#include "webkit/api/public/WebURLResponse.h"
 #include "webkit/glue/chrome_client_impl.h"
+#include "webkit/glue/event_conversion.h"
 #include "webkit/glue/glue_util.h"
 #include "webkit/glue/multipart_response_delegate.h"
-#include "webkit/glue/webcursor.h"
 #include "webkit/glue/webkit_glue.h"
+#include "webkit/glue/webplugin_impl.h"
 #include "webkit/glue/plugins/plugin_host.h"
 #include "webkit/glue/plugins/plugin_instance.h"
 #include "webkit/glue/stacking_order_iterator.h"
+#include "webkit/glue/webplugin_delegate.h"
 #include "webkit/glue/webview_impl.h"
 #include "googleurl/src/gurl.h"
+
+using WebKit::WebCursorInfo;
+using WebKit::WebData;
+using WebKit::WebHTTPBody;
+using WebKit::WebInputEvent;
+using WebKit::WebKeyboardEvent;
+using WebKit::WebMouseEvent;
+using WebKit::WebString;
+using WebKit::WebURLError;
+using WebKit::WebURLLoader;
+using WebKit::WebURLLoaderClient;
+using WebKit::WebURLRequest;
+using WebKit::WebURLResponse;
+using webkit_glue::MultipartResponseDelegate;
 
 // This class handles individual multipart responses. It is instantiated when
 // we receive HTTP status code 206 in the HTTP response. This indicates
 // that the response could have multiple parts each separated by a boundary
 // specified in the response header.
-class MultiPartResponseClient : public WebCore::ResourceHandleClient {
+class MultiPartResponseClient : public WebURLLoaderClient {
  public:
   MultiPartResponseClient(WebPluginResourceClient* resource_client)
       : resource_client_(resource_client) {
     Clear();
   }
 
+  virtual void willSendRequest(
+      WebURLLoader*, WebURLRequest&, const WebURLResponse&) {}
+  virtual void didSendData(
+      WebURLLoader*, unsigned long long, unsigned long long) {}
+
   // Called when the multipart parser encounters an embedded multipart
   // response.
-  virtual void didReceiveResponse(WebCore::ResourceHandle* handle,
-                                  const WebCore::ResourceResponse& response) {
+  virtual void didReceiveResponse(
+      WebURLLoader*, const WebURLResponse& response) {
     if (!MultipartResponseDelegate::ReadContentRanges(
-            response, &byte_range_lower_bound_, &byte_range_upper_bound_)) {
+            response,
+            &byte_range_lower_bound_,
+            &byte_range_upper_bound_)) {
       NOTREACHED();
       return;
     }
@@ -85,22 +117,23 @@ class MultiPartResponseClient : public WebCore::ResourceHandleClient {
   }
 
   // Receives individual part data from a multipart response.
-  virtual void didReceiveData(WebCore::ResourceHandle* handle,
-                              const char* data, int boundary_pos,
-                              int length_received) {
-    int data_length = byte_range_upper_bound_ - byte_range_lower_bound_ + 1;
+  virtual void didReceiveData(
+      WebURLLoader*, const char* data, int data_size, long long) {
     resource_client_->DidReceiveData(
-        data, data_length, byte_range_lower_bound_);
+        data, data_size, byte_range_lower_bound_);
   }
 
+  virtual void didFinishLoading(WebURLLoader*) {}
+  virtual void didFail(WebURLLoader*, const WebURLError&) {}
+
   void Clear() {
-    resource_response_ = WebCore::ResourceResponse();
+    resource_response_.reset();
     byte_range_lower_bound_ = 0;
     byte_range_upper_bound_ = 0;
   }
 
  private:
-  WebCore::ResourceResponse resource_response_;
+  WebURLResponse resource_response_;
   // The lower bound of the byte range.
   int byte_range_lower_bound_;
   // The upper bound of the byte range.
@@ -108,6 +141,32 @@ class MultiPartResponseClient : public WebCore::ResourceHandleClient {
   // The handler for the data.
   WebPluginResourceClient* resource_client_;
 };
+
+static std::wstring GetAllHeaders(const WebCore::ResourceResponse& response) {
+  std::wstring result;
+  const WebCore::String& status = response.httpStatusText();
+  if (status.isEmpty())
+    return result;
+
+  result.append(L"HTTP ");
+  result.append(FormatNumber(response.httpStatusCode()));
+  result.append(L" ");
+  result.append(webkit_glue::StringToStdWString(status));
+  result.append(L"\n");
+
+  WebCore::HTTPHeaderMap::const_iterator it =
+      response.httpHeaderFields().begin();
+  for (; it != response.httpHeaderFields().end(); ++it) {
+    if (!it->first.isEmpty() && !it->second.isEmpty()) {
+      result.append(webkit_glue::StringToStdWString(it->first));
+      result.append(L": ");
+      result.append(webkit_glue::StringToStdWString(it->second));
+      result.append(L"\n");
+    }
+  }
+
+  return result;
+}
 
 WebPluginContainer::WebPluginContainer(WebPluginImpl* impl)
     : impl_(impl),
@@ -131,12 +190,8 @@ bool WebPluginContainer::isPluginView() const {
 
 
 void WebPluginContainer::setFrameRect(const WebCore::IntRect& rect) {
-  bool widget_dimensions_changed = (rect != frameRect());
-
-  if (widget_dimensions_changed)
-    WebCore::Widget::setFrameRect(rect);
-
-  impl_->setFrameRect(rect, widget_dimensions_changed);
+  WebCore::Widget::setFrameRect(rect);
+  impl_->setFrameRect(rect);
 }
 
 void WebPluginContainer::paint(WebCore::GraphicsContext* gc,
@@ -166,26 +221,17 @@ void WebPluginContainer::setFocus() {
 }
 
 void WebPluginContainer::show() {
-  // We don't want to force a geometry update when the plugin widget is
-  // already visible as this involves a geometry update which may lead
-  // to unnecessary window moves in the plugin process.
-  if (!impl_->visible_) {
-    impl_->show();
-    WebCore::Widget::show();
-    // This is to force an updategeometry call to the plugin process
-    // where the plugin window can be hidden or shown.
-    frameRectsChanged();
-  }
+  setSelfVisible(true);
+  impl_->UpdateVisibility();
+
+  WebCore::Widget::show();
 }
 
 void WebPluginContainer::hide() {
-  if (impl_->visible_) {
-    impl_->hide();
-    WebCore::Widget::hide();
-    // This is to force an updategeometry call to the plugin process
-    // where the plugin window can be hidden or shown.
-    frameRectsChanged();
-  }
+  setSelfVisible(false);
+  impl_->UpdateVisibility();
+
+  WebCore::Widget::hide();
 }
 
 void WebPluginContainer::handleEvent(WebCore::Event* event) {
@@ -196,7 +242,7 @@ void WebPluginContainer::frameRectsChanged() {
   WebCore::Widget::frameRectsChanged();
   // This is a hack to tickle re-positioning of the plugin in the case where
   // our parent view was scrolled.
-  impl_->setFrameRect(frameRect(), true);
+  impl_->setFrameRect(frameRect());
 }
 
 // We override this function, to make sure that geometry updates are sent
@@ -205,11 +251,14 @@ void WebPluginContainer::frameRectsChanged() {
 // webkit is ignored. This function is called when the plugin eventually
 // gets a parent.
 void WebPluginContainer::setParentVisible(bool visible) {
+  if (isParentVisible() == visible)
+    return;  // No change.
+
   WebCore::Widget::setParentVisible(visible);
-  if (visible)
-    show();
-  else
-    hide();
+  if (!isSelfVisible())
+    return;  // This widget has explicitely been marked as not visible.
+
+  impl_->UpdateVisibility();
 }
 
 // We override this function so that if the plugin is windowed, we can call
@@ -219,8 +268,7 @@ void WebPluginContainer::setParentVisible(bool visible) {
 void WebPluginContainer::setParent(WebCore::ScrollView* view) {
   WebCore::Widget::setParent(view);
   if (view) {
-    impl_->setFrameRect(frameRect(), true);
-    impl_->delegate_->FlushGeometryUpdates();
+    impl_->setFrameRect(frameRect());
   }
 }
 
@@ -234,13 +282,17 @@ void WebPluginContainer::didReceiveResponse(
     const WebCore::ResourceResponse& response) {
   set_ignore_response_error(false);
 
+  // Manual loading, so make sure that the plugin receives window geometry
+  // before data, or else plugins misbehave.
+  frameRectsChanged();
+
   HttpResponseInfo http_response_info;
   ReadHttpResponseInfo(response, &http_response_info);
 
   impl_->delegate_->DidReceiveManualResponse(
       http_response_info.url,
       base::SysWideToNativeMB(http_response_info.mime_type),
-      base::SysWideToNativeMB(impl_->GetAllHeaders(response)),
+      base::SysWideToNativeMB(GetAllHeaders(response)),
       http_response_info.expected_length,
       http_response_info.last_modified);
 }
@@ -283,7 +335,7 @@ void WebPluginContainer::ReadHttpResponseInfo(
   }
 }
 
-WebCore::Widget* WebPluginImpl::Create(const GURL& url,
+PassRefPtr<WebCore::Widget> WebPluginImpl::Create(const GURL& url,
                                        char** argn,
                                        char** argv,
                                        int argc,
@@ -305,7 +357,7 @@ WebCore::Widget* WebPluginImpl::Create(const GURL& url,
 
   WebPluginContainer* container = new WebPluginContainer(webplugin);
   webplugin->SetContainer(container);
-  return container;
+  return adoptRef(container);
 }
 
 WebPluginImpl::WebPluginImpl(WebCore::HTMLPlugInElement* element,
@@ -322,12 +374,12 @@ WebPluginImpl::WebPluginImpl(WebCore::HTMLPlugInElement* element,
       element_(element),
       webframe_(webframe),
       delegate_(delegate),
-      visible_(false),
       widget_(NULL),
       plugin_url_(plugin_url),
       load_manually_(load_manually),
       first_geometry_update_(true),
-      mime_type_(mime_type) {
+      mime_type_(mime_type),
+      ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)) {
 
   ArrayToVector(arg_count, arg_names, &arg_names_);
   ArrayToVector(arg_count, arg_values, &arg_values_);
@@ -336,8 +388,18 @@ WebPluginImpl::WebPluginImpl(WebCore::HTMLPlugInElement* element,
 WebPluginImpl::~WebPluginImpl() {
 }
 
-void WebPluginImpl::SetWindow(gfx::NativeView window,
-                              HANDLE pump_messages_event) {
+#if defined(OS_LINUX)
+gfx::PluginWindowHandle WebPluginImpl::CreatePluginContainer() {
+  WebCore::Frame* frame = element_->document()->frame();
+  WebFrameImpl* webframe = WebFrameImpl::FromFrame(frame);
+  WebViewImpl* webview = webframe->GetWebViewImpl();
+  if (!webview->delegate())
+    return 0;
+  return webview->delegate()->CreatePluginContainer();
+}
+#endif
+
+void WebPluginImpl::SetWindow(gfx::PluginWindowHandle window) {
   if (window) {
     DCHECK(!windowless_);  // Make sure not called twice.
     window_ = window;
@@ -345,6 +407,15 @@ void WebPluginImpl::SetWindow(gfx::NativeView window,
     DCHECK(!window_);  // Make sure not called twice.
     windowless_ = true;
   }
+}
+
+void WebPluginImpl::WillDestroyWindow(gfx::PluginWindowHandle window) {
+  WebCore::Frame* frame = element_->document()->frame();
+  WebFrameImpl* webframe = WebFrameImpl::FromFrame(frame);
+  WebViewImpl* webview = webframe->GetWebViewImpl();
+  if (!webview->delegate())
+    return;
+  webview->delegate()->WillDestroyPluginWindow(window);
 }
 
 bool WebPluginImpl::CompleteURL(const std::string& url_in,
@@ -364,7 +435,7 @@ bool WebPluginImpl::CompleteURL(const std::string& url_in,
 bool WebPluginImpl::ExecuteScript(const std::string& url,
                                   const std::wstring& script,
                                   bool notify_needed,
-                                  int notify_data,
+                                  intptr_t notify_data,
                                   bool popups_allowed) {
   // This could happen if the WebPluginContainer was already deleted.
   if (!frame())
@@ -403,43 +474,43 @@ bool WebPluginImpl::ExecuteScript(const std::string& url,
 void WebPluginImpl::CancelResource(int id) {
   for (size_t i = 0; i < clients_.size(); ++i) {
     if (clients_[i].id == id) {
-      if (clients_[i].handle) {
-        clients_[i].handle->cancel();
+      if (clients_[i].loader.get()) {
+        clients_[i].loader->cancel();
         RemoveClient(i);
       }
-
       return;
     }
   }
 }
 
-bool WebPluginImpl::SetPostData(WebCore::ResourceRequest* request,
+bool WebPluginImpl::SetPostData(WebURLRequest* request,
                                 const char *buf,
                                 uint32 length) {
   std::vector<std::string> names;
   std::vector<std::string> values;
   std::vector<char> body;
-#if !defined(OS_LINUX)
   bool rv = NPAPI::PluginHost::SetPostData(buf, length, &names, &values, &body);
-#else
-  // TODO(port): unstub once we have plugin support
-  bool rv = false;
-  NOTREACHED();
-#endif
 
-  for (size_t i = 0; i < names.size(); ++i)
-    request->addHTTPHeaderField(webkit_glue::StdStringToString(names[i]),
-                                webkit_glue::StdStringToString(values[i]));
+  for (size_t i = 0; i < names.size(); ++i) {
+    request->addHTTPHeaderField(webkit_glue::StdStringToWebString(names[i]),
+                                webkit_glue::StdStringToWebString(values[i]));
+  }
 
-  WebCore::String content_type = request->httpContentType();
-  if (content_type.isEmpty())
-    request->setHTTPContentType("application/x-www-form-urlencoded");
+  WebString content_type_header = WebString::fromUTF8("Content-Type");
+  const WebString& content_type =
+      request->httpHeaderField(content_type_header);
+  if (content_type.isEmpty()) {
+    request->setHTTPHeaderField(
+        content_type_header,
+        WebString::fromUTF8("application/x-www-form-urlencoded"));
+  }
 
-  RefPtr<WebCore::FormData> data = WebCore::FormData::create();
-  if (body.size())
-    data->appendData(&body.front(), body.size());
-
-  request->setHTTPBody(data.release());
+  WebHTTPBody http_body;
+  if (body.size()) {
+    http_body.initialize();
+    http_body.appendData(WebData(&body[0], body.size()));
+  }
+  request->setHTTPBody(http_body);
 
   return rv;
 }
@@ -491,8 +562,8 @@ RoutingStatus WebPluginImpl::RouteToFrame(const char *method,
   }
 
   *completeURL = webkit_glue::KURLToGURL(complete_url_kurl);
-  WebCore::ResourceRequest request(complete_url_kurl);
-  request.setHTTPMethod(method);
+  WebURLRequest request(webkit_glue::KURLToWebURL(complete_url_kurl));
+  request.setHTTPMethod(WebString::fromUTF8(method));
   if (len > 0) {
     if (!is_file_data) {
       if (!SetPostData(&request, buf, len)) {
@@ -508,18 +579,18 @@ RoutingStatus WebPluginImpl::RouteToFrame(const char *method,
       return ROUTED;
     }
   }
-  WebCore::FrameLoadRequest load_request(request);
+  WebCore::FrameLoadRequest load_request(
+      *webkit_glue::WebURLRequestToResourceRequest(&request));
   load_request.setFrameName(str_target);
   WebCore::FrameLoader *loader = frame()->loader();
   // we actually don't know whether usergesture is true or false,
   // passing true since all we can do is assume it is okay.
-  loader->loadFrameRequestWithFormAndValues(
+  loader->loadFrameRequest(
       load_request,
       false,  // lock history
       false,  // lock back forward list
       0,      // event
-      0,      // form element
-      HashMap<WebCore::String, WebCore::String>());
+      0);     // form state
 
   // load() can cause the frame to go away.
   if (webframe_) {
@@ -637,8 +708,7 @@ void WebPluginImpl::windowCutoutRects(
   }
 }
 
-void WebPluginImpl::setFrameRect(const WebCore::IntRect& rect,
-                                 bool widget_dimensions_changed) {
+void WebPluginImpl::setFrameRect(const WebCore::IntRect& rect) {
   if (!parent())
     return;
 
@@ -646,7 +716,7 @@ void WebPluginImpl::setFrameRect(const WebCore::IntRect& rect,
   // containing window.  We ask our delegate to reposition us accordingly.
   WebCore::Frame* frame = element_->document()->frame();
   WebFrameImpl* webframe = WebFrameImpl::FromFrame(frame);
-  WebViewImpl* webview = webframe->webview_impl();
+  WebViewImpl* webview = webframe->GetWebViewImpl();
   // It is valid for this function to be invoked in code paths where the
   // the webview is closed.
   if (!webview->delegate()) {
@@ -658,36 +728,49 @@ void WebPluginImpl::setFrameRect(const WebCore::IntRect& rect,
   std::vector<gfx::Rect> cutout_rects;
   CalculateBounds(rect, &window_rect, &clip_rect, &cutout_rects);
 
-  if (widget_dimensions_changed) {
-    delegate_->UpdateGeometry(
-        webkit_glue::FromIntRect(window_rect),
-        webkit_glue::FromIntRect(clip_rect));
-  }
-
   if (window_) {
-    // Let the WebViewDelegate know that the plugin window needs to be moved,
-    // so that all the HWNDs are moved together.
+    // Notify the window hosting the plugin (the WebViewDelegate) that
+    // it needs to adjust the plugin, so that all the HWNDs can be moved
+    // at the same time.
     WebPluginGeometry move;
     move.window = window_;
     move.window_rect = webkit_glue::FromIntRect(window_rect);
     move.clip_rect = webkit_glue::FromIntRect(clip_rect);
     move.cutout_rects = cutout_rects;
-    move.visible = visible_;
+    move.rects_valid = true;
+    move.visible = widget_->isVisible();
 
-    webview->delegate()->DidMove(webview, move);
+    webview->delegate()->DidMovePlugin(move);
   }
 
+  // Notify the plugin that its parameters have changed.
+  delegate_->UpdateGeometry(webkit_glue::FromIntRect(window_rect),
+                            webkit_glue::FromIntRect(clip_rect));
+
   // Initiate a download on the plugin url. This should be done for the
-  // first update geometry sequence.
+  // first update geometry sequence. We need to ensure that the plugin
+  // receives the geometry update before it starts receiving data.
   if (first_geometry_update_) {
     first_geometry_update_ = false;
     // An empty url corresponds to an EMBED tag with no src attribute.
     if (!load_manually_ && plugin_url_.is_valid()) {
-      HandleURLRequestInternal("GET", false, NULL, 0, NULL, false, false,
-                               plugin_url_.spec().c_str(), NULL, false,
-                               false);
+      // The Flash plugin hangs for a while if it receives data before
+      // receiving valid plugin geometry. By valid geometry we mean the
+      // geometry received by a call to setFrameRect in the Webkit
+      // layout code path. To workaround this issue we download the
+      // plugin source url on a timer.
+      MessageLoop::current()->PostDelayedTask(FROM_HERE,
+          method_factory_.NewRunnableMethod(
+              &WebPluginImpl::OnDownloadPluginSrcUrl),
+          0);
     }
   }
+}
+
+void WebPluginImpl::OnDownloadPluginSrcUrl() {
+  HandleURLRequestInternal("GET", false, NULL, 0, NULL, false, false,
+                           plugin_url_.spec().c_str(), NULL, false,
+                           false);
 }
 
 void WebPluginImpl::paint(WebCore::GraphicsContext* gc,
@@ -757,14 +840,6 @@ void WebPluginImpl::setFocus() {
     delegate_->SetFocus();
 }
 
-void WebPluginImpl::show() {
-  visible_ = true;
-}
-
-void WebPluginImpl::hide() {
-  visible_ = false;
-}
-
 void WebPluginImpl::handleEvent(WebCore::Event* event) {
   if (!windowless_)
     return;
@@ -781,42 +856,16 @@ void WebPluginImpl::handleEvent(WebCore::Event* event) {
 }
 
 void WebPluginImpl::handleMouseEvent(WebCore::MouseEvent* event) {
-#if defined(OS_WIN)
   DCHECK(parent()->isFrameView());
   // We cache the parent FrameView here as the plugin widget could be deleted
   // in the call to HandleEvent. See http://b/issue?id=1362948
   WebCore::FrameView* parent_view = static_cast<WebCore::FrameView*>(parent());
 
-  WebCore::IntPoint p =
-      parent_view->contentsToWindow(WebCore::IntPoint(event->pageX(),
-                                                      event->pageY()));
-  NPEvent np_event;
-  np_event.lParam = static_cast<uint32>(MAKELPARAM(p.x(), p.y()));
-  np_event.wParam = 0;
+  WebMouseEvent web_event;
+  if (!ToWebMouseEvent(*parent_view, *event, &web_event))
+    return;
 
-  if (event->ctrlKey())
-    np_event.wParam |= MK_CONTROL;
-  if (event->shiftKey())
-    np_event.wParam |= MK_SHIFT;
-
-  if ((event->type() == WebCore::eventNames().mousemoveEvent) ||
-      (event->type() == WebCore::eventNames().mouseoutEvent) ||
-      (event->type() == WebCore::eventNames().mouseoverEvent)) {
-    np_event.event = WM_MOUSEMOVE;
-    if (event->buttonDown()) {
-      switch (event->button()) {
-        case WebCore::LeftButton:
-          np_event.wParam |= MK_LBUTTON;
-          break;
-        case WebCore::MiddleButton:
-          np_event.wParam |= MK_MBUTTON;
-          break;
-        case WebCore::RightButton:
-          np_event.wParam |= MK_RBUTTON;
-          break;
-      }
-    }
-  } else if (event->type() == WebCore::eventNames().mousedownEvent) {
+  if (event->type() == WebCore::eventNames().mousedownEvent) {
     // Ensure that the frame containing the plugin has focus.
     WebCore::Frame* containing_frame = webframe_->frame();
     if (WebCore::Page* current_page = containing_frame->page()) {
@@ -824,95 +873,46 @@ void WebPluginImpl::handleMouseEvent(WebCore::MouseEvent* event) {
     }
     // Give focus to our containing HTMLPluginElement.
     containing_frame->document()->setFocusedNode(element_);
-
-    // Ideally we'd translate to WM_xBUTTONDBLCLK here if the click count were
-    // a multiple of 2.  But there seems to be no way to get at the click count
-    // or the original Windows message from the WebCore::Event.
-    switch (event->button()) {
-      case WebCore::LeftButton:
-        np_event.event = WM_LBUTTONDOWN;
-        np_event.wParam |= MK_LBUTTON;
-        break;
-      case WebCore::MiddleButton:
-        np_event.event = WM_MBUTTONDOWN;
-        np_event.wParam |= MK_MBUTTON;
-        break;
-      case WebCore::RightButton:
-        np_event.event = WM_RBUTTONDOWN;
-        np_event.wParam |= MK_RBUTTON;
-        break;
-    }
-  } else if (event->type() == WebCore::eventNames().mouseupEvent) {
-    switch (event->button()) {
-      case WebCore::LeftButton:
-        np_event.event = WM_LBUTTONUP;
-        break;
-      case WebCore::MiddleButton:
-        np_event.event = WM_MBUTTONUP;
-        break;
-      case WebCore::RightButton:
-        np_event.event = WM_RBUTTONUP;
-        break;
-    }
-  } else {
-    // Skip all other mouse events.
-    return;
   }
 
   // TODO(pkasting): http://b/1119691 This conditional seems exactly backwards,
   // but it matches Safari's code, and if I reverse it, giving focus to a
   // transparent (windowless) plugin fails.
-  WebCursor cursor;
-  if (!delegate_->HandleEvent(&np_event, &cursor))
+  WebCursorInfo cursor_info;
+  if (!delegate_->HandleInputEvent(web_event, &cursor_info))
     event->setDefaultHandled();
 
+  WebCore::Page* page = parent_view->frame()->page();
+  if (!page)
+    return;
+
   ChromeClientImpl* chrome_client =
-      static_cast<ChromeClientImpl*>(
-          parent_view->frame()->page()->chrome()->client());
+      static_cast<ChromeClientImpl*>(page->chrome()->client());
 
   // A windowless plugin can change the cursor in response to the WM_MOUSEMOVE
   // event. We need to reflect the changed cursor in the frame view as the
   // mouse is moved in the boundaries of the windowless plugin.
-  chrome_client->SetCursorForPlugin(cursor);
-
-#else
-  NOTIMPLEMENTED();
-#endif
+  chrome_client->SetCursorForPlugin(cursor_info);
 }
 
 void WebPluginImpl::handleKeyboardEvent(WebCore::KeyboardEvent* event) {
-#if defined(OS_WIN)
-  NPEvent np_event;
-  np_event.wParam = event->keyCode();
-
-  if (event->type() == WebCore::eventNames().keydownEvent) {
-    np_event.event = WM_KEYDOWN;
-    np_event.lParam = 0;
-  } else if (event->type() == WebCore::eventNames().keyupEvent) {
-    np_event.event = WM_KEYUP;
-    np_event.lParam = 0x8000;
-  } else {
-    // Skip all other keyboard events.
+  WebKeyboardEvent web_event;
+  if (!ToWebKeyboardEvent(*event, &web_event))
     return;
-  }
-
   // TODO(pkasting): http://b/1119691 See above.
-  WebCursor current_web_cursor;
-  if (!delegate_->HandleEvent(&np_event, &current_web_cursor))
+  WebCursorInfo cursor_info;
+  if (!delegate_->HandleInputEvent(web_event, &cursor_info))
     event->setDefaultHandled();
-#else
-  NOTIMPLEMENTED();
-#endif
 }
 
 NPObject* WebPluginImpl::GetPluginScriptableObject() {
   return delegate_->GetPluginScriptableObject();
 }
 
-WebPluginResourceClient* WebPluginImpl::GetClientFromHandle(
-    WebCore::ResourceHandle* handle) {
+WebPluginResourceClient* WebPluginImpl::GetClientFromLoader(
+    WebURLLoader* loader) {
   for (size_t i = 0; i < clients_.size(); ++i) {
-    if (clients_[i].handle.get() == handle)
+    if (clients_[i].loader.get() == loader)
       return clients_[i].client;
   }
 
@@ -921,54 +921,34 @@ WebPluginResourceClient* WebPluginImpl::GetClientFromHandle(
 }
 
 
-void WebPluginImpl::willSendRequest(WebCore::ResourceHandle* handle,
-                                    WebCore::ResourceRequest& request,
-                                    const WebCore::ResourceResponse&) {
-  WebPluginResourceClient* client = GetClientFromHandle(handle);
-  if (client) {
-    GURL gurl(webkit_glue::KURLToGURL(request.url()));
-    client->WillSendRequest(gurl);
-  }
+void WebPluginImpl::willSendRequest(WebURLLoader* loader,
+                                    WebURLRequest& request,
+                                    const WebURLResponse&) {
+  WebPluginResourceClient* client = GetClientFromLoader(loader);
+  if (client)
+    client->WillSendRequest(request.url());
 }
 
-std::wstring WebPluginImpl::GetAllHeaders(
-    const WebCore::ResourceResponse& response) {
-  std::wstring result;
-  const WebCore::String& status = response.httpStatusText();
-  if (status.isEmpty())
-    return result;
-
-  result.append(L"HTTP ");
-  result.append(FormatNumber(response.httpStatusCode()));
-  result.append(L" ");
-  result.append(webkit_glue::StringToStdWString(status));
-  result.append(L"\n");
-
-  WebCore::HTTPHeaderMap::const_iterator it =
-      response.httpHeaderFields().begin();
-  for (; it != response.httpHeaderFields().end(); ++it) {
-    if (!it->first.isEmpty() && !it->second.isEmpty()) {
-      result.append(webkit_glue::StringToStdWString(it->first));
-      result.append(L": ");
-      result.append(webkit_glue::StringToStdWString(it->second));
-      result.append(L"\n");
-    }
-  }
-
-  return result;
+void WebPluginImpl::didSendData(WebURLLoader* loader,
+                                unsigned long long bytes_sent,
+                                unsigned long long total_bytes_to_be_sent) {
 }
 
-void WebPluginImpl::didReceiveResponse(WebCore::ResourceHandle* handle,
-    const WebCore::ResourceResponse& response) {
+void WebPluginImpl::didReceiveResponse(WebURLLoader* loader,
+                                       const WebURLResponse& response) {
   static const int kHttpPartialResponseStatusCode = 206;
   static const int kHttpResponseSuccessStatusCode = 200;
 
-  WebPluginResourceClient* client = GetClientFromHandle(handle);
+  WebPluginResourceClient* client = GetClientFromLoader(loader);
   if (!client)
     return;
 
+  const WebCore::ResourceResponse& resource_response =
+      *webkit_glue::WebURLResponseToResourceResponse(&response);
+
   WebPluginContainer::HttpResponseInfo http_response_info;
-  WebPluginContainer::ReadHttpResponseInfo(response, &http_response_info);
+  WebPluginContainer::ReadHttpResponseInfo(resource_response,
+                                           &http_response_info);
 
   bool cancel = false;
   bool request_is_seekable = true;
@@ -986,7 +966,7 @@ void WebPluginImpl::didReceiveResponse(WebCore::ResourceHandle* handle,
       //    continue to remain valid.
       // 2. Create a new plugin instance and notify it about the response
       //    received here.
-      if (!ReinitializePluginForResponse(handle)) {
+      if (!ReinitializePluginForResponse(loader)) {
         NOTREACHED();
         return;
       }
@@ -1000,11 +980,11 @@ void WebPluginImpl::didReceiveResponse(WebCore::ResourceHandle* handle,
 
       // Create a new resource client for this request.
       for (size_t i = 0; i < clients_.size(); ++i) {
-        if (clients_[i].handle.get() == handle) {
+        if (clients_[i].loader.get() == loader) {
           WebPluginResourceClient* resource_client =
               delegate_->CreateResourceClient(clients_[i].id,
                                               plugin_url_.spec().c_str(),
-                                              NULL, false, NULL);
+                                              false, 0, NULL);
           clients_[i].client = resource_client;
           client = resource_client;
           break;
@@ -1017,13 +997,13 @@ void WebPluginImpl::didReceiveResponse(WebCore::ResourceHandle* handle,
 
   client->DidReceiveResponse(
       base::SysWideToNativeMB(http_response_info.mime_type),
-      base::SysWideToNativeMB(GetAllHeaders(response)),
+      base::SysWideToNativeMB(GetAllHeaders(resource_response)),
       http_response_info.expected_length,
       http_response_info.last_modified, request_is_seekable, &cancel);
 
   if (cancel) {
-    handle->cancel();
-    RemoveClient(handle);
+    loader->cancel();
+    RemoveClient(loader);
     return;
   }
 
@@ -1032,41 +1012,41 @@ void WebPluginImpl::didReceiveResponse(WebCore::ResourceHandle* handle,
   // fate of the HTTP requests issued via NPN_GetURLNotify. Webkit and FF
   // destroy the stream and invoke the NPP_DestroyStream function on the
   // plugin if the HTTP request fails.
-  const WebCore::String& protocol_scheme = response.url().protocol();
-  if ((protocol_scheme == "http") || (protocol_scheme == "https")) {
+  const GURL& url = response.url();
+  if (url.SchemeIs("http") || url.SchemeIs("https")) {
     if (response.httpStatusCode() < 100 || response.httpStatusCode() >= 400) {
       // The plugin instance could be in the process of deletion here.
       // Verify if the WebPluginResourceClient instance still exists before
       // use.
-      WebPluginResourceClient* resource_client = GetClientFromHandle(handle);
+      WebPluginResourceClient* resource_client = GetClientFromLoader(loader);
       if (resource_client) {
-        handle->cancel();
+        loader->cancel();
         resource_client->DidFail();
-        RemoveClient(handle);
+        RemoveClient(loader);
       }
     }
   }
 }
 
-void WebPluginImpl::didReceiveData(WebCore::ResourceHandle* handle,
+void WebPluginImpl::didReceiveData(WebURLLoader* loader,
                                    const char *buffer,
-                                   int length, int) {
-  WebPluginResourceClient* client = GetClientFromHandle(handle);
-  if (client) {
-    MultiPartResponseHandlerMap::iterator index =
-        multi_part_response_map_.find(client);
-    if (index != multi_part_response_map_.end()) {
-      MultipartResponseDelegate* multi_part_handler = (*index).second;
-      DCHECK(multi_part_handler != NULL);
-      multi_part_handler->OnReceivedData(buffer, length);
-    } else {
-      client->DidReceiveData(buffer, length, 0);
-    }
+                                   int length, long long) {
+  WebPluginResourceClient* client = GetClientFromLoader(loader);
+  if (!client)
+    return;
+  MultiPartResponseHandlerMap::iterator index =
+      multi_part_response_map_.find(client);
+  if (index != multi_part_response_map_.end()) {
+    MultipartResponseDelegate* multi_part_handler = (*index).second;
+    DCHECK(multi_part_handler != NULL);
+    multi_part_handler->OnReceivedData(buffer, length);
+  } else {
+    client->DidReceiveData(buffer, length, 0);
   }
 }
 
-void WebPluginImpl::didFinishLoading(WebCore::ResourceHandle* handle) {
-  WebPluginResourceClient* client = GetClientFromHandle(handle);
+void WebPluginImpl::didFinishLoading(WebURLLoader* loader) {
+  WebPluginResourceClient* client = GetClientFromLoader(loader);
   if (client) {
     MultiPartResponseHandlerMap::iterator index =
         multi_part_response_map_.find(client);
@@ -1080,25 +1060,25 @@ void WebPluginImpl::didFinishLoading(WebCore::ResourceHandle* handle) {
     client->DidFinishLoading();
   }
 
-  RemoveClient(handle);
+  RemoveClient(loader);
 }
 
-void WebPluginImpl::didFail(WebCore::ResourceHandle* handle,
-                            const WebCore::ResourceError&) {
-  WebPluginResourceClient* client = GetClientFromHandle(handle);
+void WebPluginImpl::didFail(WebURLLoader* loader,
+                            const WebURLError&) {
+  WebPluginResourceClient* client = GetClientFromLoader(loader);
   if (client)
     client->DidFail();
 
-  RemoveClient(handle);
+  RemoveClient(loader);
 }
 
 void WebPluginImpl::RemoveClient(size_t i) {
   clients_.erase(clients_.begin() + i);
 }
 
-void WebPluginImpl::RemoveClient(WebCore::ResourceHandle* handle) {
+void WebPluginImpl::RemoveClient(WebURLLoader* loader) {
   for (size_t i = 0; i < clients_.size(); ++i) {
-    if (clients_[i].handle.get() == handle) {
+    if (clients_[i].loader.get() == loader) {
       RemoveClient(i);
       return;
     }
@@ -1149,7 +1129,7 @@ void WebPluginImpl::HandleURLRequest(const char *method,
                                      const char* target, unsigned int len,
                                      const char* buf, bool is_file_data,
                                      bool notify, const char* url,
-                                     void* notify_data, bool popups_allowed) {
+                                     intptr_t notify_data, bool popups_allowed) {
   HandleURLRequestInternal(method, is_javascript_url, target, len, buf,
                            is_file_data, notify, url, notify_data,
                            popups_allowed, true);
@@ -1158,7 +1138,7 @@ void WebPluginImpl::HandleURLRequest(const char *method,
 void WebPluginImpl::HandleURLRequestInternal(
     const char *method, bool is_javascript_url, const char* target,
     unsigned int len, const char* buf, bool is_file_data, bool notify,
-    const char* url, void* notify_data, bool popups_allowed,
+    const char* url, intptr_t notify_data, bool popups_allowed,
     bool use_plugin_src_as_referrer) {
   // For this request, we either route the output to a frame
   // because a target has been specified, or we handle the request
@@ -1188,9 +1168,8 @@ void WebPluginImpl::HandleURLRequestInternal(
         WebCore::String(escaped_script.data(),
                                   static_cast<int>(escaped_script.length())));
 
-    ExecuteScript(original_url,
-                  webkit_glue::StringToStdWString(script), notify,
-                  reinterpret_cast<int>(notify_data), popups_allowed);
+    ExecuteScript(original_url, webkit_glue::StringToStdWString(script), notify,
+                  notify_data, popups_allowed);
   } else {
     std::string complete_url_string;
     CompleteURL(url, &complete_url_string);
@@ -1231,18 +1210,19 @@ bool WebPluginImpl::InitiateHTTPRequest(int resource_id,
     return false;
   }
 
-  WebCore::KURL kurl = webkit_glue::GURLToKURL(url);
-
   ClientInfo info;
   info.id = resource_id;
   info.client = client;
-  info.request.setURL(kurl);
+  info.request.initialize();
+  info.request.setURL(url);
   info.request.setRequestorProcessID(delegate_->GetProcessId());
-  info.request.setTargetType(WebCore::ResourceRequest::TargetIsObject);
-  info.request.setHTTPMethod(method);
+  info.request.setTargetType(WebURLRequest::TargetIsObject);
+  info.request.setHTTPMethod(WebString::fromUTF8(method));
 
-  if (range_info)
-    info.request.addHTTPHeaderField("Range", range_info);
+  if (range_info) {
+    info.request.addHTTPHeaderField(WebString::fromUTF8("Range"),
+                                    WebString::fromUTF8(range_info));
+  }
 
   WebCore::String referrer;
   // GetURL/PostURL requests initiated explicitly by plugins should specify the
@@ -1253,8 +1233,11 @@ bool WebPluginImpl::InitiateHTTPRequest(int resource_id,
     referrer = frame()->loader()->outgoingReferrer();
   }
 
-  if (!WebCore::FrameLoader::shouldHideReferrer(kurl, referrer))
-    info.request.setHTTPReferrer(referrer);
+  if (!WebCore::FrameLoader::shouldHideReferrer(webkit_glue::GURLToKURL(url),
+                                                referrer)) {
+    info.request.setHTTPHeaderField(WebString::fromUTF8("Referer"),
+                                    webkit_glue::StringToWebString(referrer));
+  }
 
   if (strcmp(method, "POST") == 0) {
     // Adds headers or form data to a request.  This must be called before
@@ -1265,13 +1248,15 @@ bool WebPluginImpl::InitiateHTTPRequest(int resource_id,
   // Sets the routing id to associate the ResourceRequest with the RenderView.
   WebCore::ResourceResponse response;
   frame()->loader()->client()->dispatchWillSendRequest(
-      NULL, 0, info.request, response);
+      NULL,
+      0,
+      *webkit_glue::WebURLRequestToMutableResourceRequest(&info.request),
+      response);
 
-  info.handle = WebCore::ResourceHandle::create(
-      info.request, this, NULL, false, false);
-  if (!info.handle) {
+  info.loader.reset(WebKit::webKitClient()->createURLLoader());
+  if (!info.loader.get())
     return false;
-  }
+  info.loader->loadAsynchronously(info.request, this);
 
   clients_.push_back(info);
   return true;
@@ -1286,9 +1271,9 @@ void WebPluginImpl::CancelDocumentLoad() {
 
 void WebPluginImpl::InitiateHTTPRangeRequest(const char* url,
                                              const char* range_info,
-                                             HANDLE existing_stream,
+                                             intptr_t existing_stream,
                                              bool notify_needed,
-                                             HANDLE notify_data) {
+                                             intptr_t notify_data) {
   int resource_id = GetNextResourceId();
   std::string complete_url_string;
   CompleteURL(url, &complete_url_string);
@@ -1302,7 +1287,7 @@ void WebPluginImpl::InitiateHTTPRangeRequest(const char* url,
 }
 
 void WebPluginImpl::HandleHttpMultipartResponse(
-    const WebCore::ResourceResponse& response,
+    const WebURLResponse& response,
     WebPluginResourceClient* client) {
   std::string multipart_boundary;
   if (!MultipartResponseDelegate::ReadMultipartBoundary(
@@ -1325,19 +1310,19 @@ void WebPluginImpl::HandleHttpMultipartResponse(
 }
 
 bool WebPluginImpl::ReinitializePluginForResponse(
-    WebCore::ResourceHandle* response_handle) {
+    WebURLLoader* loader) {
   WebFrameImpl* web_frame = WebFrameImpl::FromFrame(frame());
   if (!web_frame)
     return false;
 
-  WebViewImpl* web_view = web_frame->webview_impl();
+  WebViewImpl* web_view = web_frame->GetWebViewImpl();
   if (!web_view)
     return false;
 
   WebPluginContainer* container_widget = widget_;
 
   // Destroy the current plugin instance.
-  TearDownPluginInstance(response_handle);
+  TearDownPluginInstance(loader);
 
   widget_ = container_widget;
   webframe_ = web_frame;
@@ -1374,7 +1359,6 @@ bool WebPluginImpl::ReinitializePluginForResponse(
   // Force a geometry update to occur to ensure that the plugin becomes
   // visible.
   widget_->frameRectsChanged();
-  delegate_->FlushGeometryUpdates();
   // The plugin move sequences accumulated via DidMove are sent to the browser
   // whenever the renderer paints. Force a paint here to ensure that changes
   // to the plugin window are propagated to the browser.
@@ -1391,12 +1375,12 @@ void WebPluginImpl::ArrayToVector(int total_values, char** values,
 }
 
 void WebPluginImpl::TearDownPluginInstance(
-    WebCore::ResourceHandle* response_handle_to_ignore) {
+    WebURLLoader* loader_to_ignore) {
   // The frame maintains a list of JSObjects which are related to this
   // plugin.  Tell the frame we're gone so that it can invalidate all
   // of those sub JSObjects.
   if (frame()) {
-    ASSERT(widget_ != NULL);
+    ASSERT(widget_);
     frame()->script()->cleanupScriptObjectsForPlugin(widget_);
   }
 
@@ -1413,13 +1397,13 @@ void WebPluginImpl::TearDownPluginInstance(
   while (client_index != clients_.end()) {
     ClientInfo& client_info = *client_index;
 
-    if (response_handle_to_ignore == client_info.handle) {
+    if (loader_to_ignore == client_info.loader) {
       client_index++;
       continue;
     }
 
-    if (client_info.handle)
-      client_info.handle->cancel();
+    if (client_info.loader.get())
+      client_info.loader->cancel();
 
     WebPluginResourceClient* resource_client = client_info.client;
     client_index = clients_.erase(client_index);
@@ -1431,4 +1415,25 @@ void WebPluginImpl::TearDownPluginInstance(
   // webframe_ might not be valid anymore.
   webframe_->set_plugin_delegate(NULL);
   webframe_ = NULL;
+  method_factory_.RevokeAll();
+}
+
+void WebPluginImpl::UpdateVisibility() {
+  if (!window_)
+    return;
+
+  WebCore::Frame* frame = element_->document()->frame();
+  WebFrameImpl* webframe = WebFrameImpl::FromFrame(frame);
+  WebViewImpl* webview = webframe->GetWebViewImpl();
+  if (!webview->delegate())
+    return;
+
+  WebPluginGeometry move;
+  move.window = window_;
+  move.window_rect = gfx::Rect();
+  move.clip_rect = gfx::Rect();
+  move.rects_valid = false;
+  move.visible = widget_->isVisible();
+
+  webview->delegate()->DidMovePlugin(move);
 }

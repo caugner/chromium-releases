@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # Copyright (c) 2008 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -6,7 +5,9 @@
 """Platform-specific utility methods shared by several scripts."""
 
 import os
+import platform
 import re
+import signal
 import subprocess
 import sys
 
@@ -31,6 +32,22 @@ def GetTestListPlatformName():
   """Returns the name we use to identify the platform in the layout test
   test list files."""
   return "MAC"
+
+def _HumanReadableSystemVersionName():
+  """ Returns the name of this OS X system version, or an empty string if this
+  is an unknown OS version.
+
+  Note: Chrome doesn't support Tiger, so the minimum version returned is
+  Leopard (10.5).
+  """
+  os_version_string = platform.mac_ver()[0]  # e.g. "10.5.6"
+  release_version = int(os_version_string.split('.')[1])
+  if release_version == 5:
+    return 'leopard'
+  elif release_version == 6:
+    return 'snowleopard'
+  else:
+    return ''
 
 class PlatformUtility(object):
   def __init__(self, base_dir):
@@ -123,9 +140,13 @@ class PlatformUtility(object):
     Args:
       server_process: The subprocess object representing the running server
     """
-    subprocess.Popen(('kill', '-TERM', '%d' % server_process.pid),
-                     stdout=subprocess.PIPE,
-                     stderr=subprocess.PIPE).wait()
+    # server_process is not set when "http_server.py stop" is run manually.
+    if server_process is None:
+      # TODO(mmoss) This isn't ideal, since it could conflict with lighttpd
+      # processes not started by http_server.py, but good enough for now.
+      subprocess.call(['killall', '-u', os.getenv('USER'), '-TERM', 'lighttpd'])
+    else:
+      os.kill(server_process.pid, signal.SIGTERM)
 
   def WDiffExecutablePath(self):
     """Path to the WDiff executable, which we assume is already installed and
@@ -135,6 +156,9 @@ class PlatformUtility(object):
 
   def ImageCompareExecutablePath(self, target):
     return PathFromBase('xcodebuild', target, 'image_diff')
+
+  def LayoutTestHelperBinaryPath(self, target):
+    return PathFromBase('xcodebuild', target, 'layout_test_helper')
 
   def TestShellBinary(self):
     """The name of the binary for TestShell."""
@@ -157,5 +181,14 @@ class PlatformUtility(object):
   def PlatformDir(self):
     """Returns the most specific directory name where platform-specific
     results live.
+    """
+    platform_dir = 'chromium-mac'
+    os_name = _HumanReadableSystemVersionName()
+    if len(os_name) > 0:
+      platform_dir += "-" + os_name
+    return platform_dir
+
+  def PlatformNewResultsDir(self):
+    """Returns the directory name in which to output newly baselined tests.
     """
     return 'chromium-mac'

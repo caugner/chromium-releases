@@ -183,11 +183,11 @@
 			</File>
 		</Filter>
 		<File
-			RelativePath=".\breakpad.cc"
+			RelativePath=".\breakpad_win.cc"
 			>
 		</File>
 		<File
-			RelativePath=".\breakpad.h"
+			RelativePath=".\breakpad_win.h"
 			>
 		</File>
 		<File
@@ -220,6 +220,14 @@
 		</File>
 		<File
 			RelativePath=".\google_update_client.h"
+			>
+		</File>
+		<File
+			RelativePath=".\hard_error_handler_win.cc"
+			>
+		</File>
+		<File
+			RelativePath=".\hard_error_handler_win.h"
 			>
 		</File>
 		<File

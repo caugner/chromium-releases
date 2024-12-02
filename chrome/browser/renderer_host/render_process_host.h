@@ -6,14 +6,17 @@
 #define CHROME_BROWSER_RENDERER_HOST_RENDER_PROCESS_HOST_H_
 
 #include <set>
+#include <string>
 
 #include "base/id_map.h"
 #include "base/process.h"
 #include "base/scoped_ptr.h"
-#include "chrome/common/ipc_sync_channel.h"
 #include "chrome/common/transport_dib.h"
+#include "chrome/common/visitedlink_common.h"
+#include "ipc/ipc_sync_channel.h"
 
 class Profile;
+struct ViewMsg_ClosePage_Params;
 
 // Virtual interface that represents the browser side of the browser <->
 // renderer communication channel. There will generally be one
@@ -26,6 +29,16 @@ class RenderProcessHost : public IPC::Channel::Sender,
                           public IPC::Channel::Listener {
  public:
   typedef IDMap<RenderProcessHost>::const_iterator iterator;
+
+  // We classify renderers according to their highest privilege, and try
+  // to group pages into renderers with similar privileges.
+  // Note: it may be possible for a renderer to have multiple privileges,
+  // in which case we call it an "extension" renderer.
+  enum Type {
+    TYPE_NORMAL,     // Normal renderer, no extra privileges.
+    TYPE_DOMUI,      // Renderer with DOMUI privileges, like New Tab.
+    TYPE_EXTENSION,  // Renderer with extension privileges.
+  };
 
   RenderProcessHost(Profile* profile);
   virtual ~RenderProcessHost();
@@ -43,8 +56,16 @@ class RenderProcessHost : public IPC::Channel::Sender,
   // process.
   const base::Process& process() const { return process_; }
 
-  // May return NULL if there is no connection.
-  IPC::SyncChannel* channel() { return channel_.get(); }
+  // Returns true iff channel_ has been set to non-NULL. Use this for checking
+  // if there is connection or not.
+  bool HasConnection() { return channel_.get() != NULL; }
+
+  bool sudden_termination_allowed() const {
+    return sudden_termination_allowed_;
+  }
+  void set_sudden_termination_allowed(bool enabled) {
+    sudden_termination_allowed_ = enabled;
+  }
 
   // Used for refcounting, each holder of this object must Attach and Release
   // just like it would for a COM object. This object should be allocated on
@@ -98,8 +119,8 @@ class RenderProcessHost : public IPC::Channel::Sender,
   // ResourceDispatcherHost.  Necessary for a cross-site request, in the case
   // that the original RenderViewHost is not live and thus cannot run an
   // onunload handler.
-  virtual void CrossSiteClosePageACK(int new_render_process_host_id,
-                                     int new_request_id) = 0;
+  virtual void CrossSiteClosePageACK(
+      const ViewMsg_ClosePage_Params& params) = 0;
 
   // Called on the UI thread to wait for the next PaintRect message for the
   // specified render widget.  Returns true if successful, and the msg out-
@@ -119,11 +140,24 @@ class RenderProcessHost : public IPC::Channel::Sender,
   // Add a word in the spellchecker.
   virtual void AddWord(const std::wstring& word) = 0;
 
+  // Notify the renderer that a link was visited.
+  virtual void AddVisitedLinks(
+      const VisitedLinkCommon::Fingerprints& links) = 0;
+
+  // Clear internal visited links buffer and ask the renderer to update link
+  // coloring state for all of its links.
+  virtual void ResetVisitedLinks() = 0;
+
   // Try to shutdown the associated renderer process as fast as possible.
   // If this renderer has any RenderViews with unload handlers, then this
   // function does nothing.  The current implementation uses TerminateProcess.
   // Returns True if it was able to do fast shutdown.
   virtual bool FastShutdownIfPossible() = 0;
+
+  // Synchronously sends the message, waiting for the specified timeout. The
+  // implementor takes ownership of the given Message regardless of whether or
+  // not this method succeeds. Returns true on success.
+  virtual bool SendWithTimeout(IPC::Message* msg, int timeout_ms) = 0;
 
   // Transport DIB functions ---------------------------------------------------
 
@@ -166,14 +200,18 @@ class RenderProcessHost : public IPC::Channel::Sender,
   static bool ShouldTryToUseExistingProcessHost();
 
   // Get an existing RenderProcessHost associated with the given profile, if
-  // possible.  The renderer process is chosen randomly from the
-  // processes associated with the given profile.
-  // Returns NULL if no suitable renderer process is available.
-  static RenderProcessHost* GetExistingProcessHost(Profile* profile);
+  // possible.  The renderer process is chosen randomly from suitable renderers
+  // that share the same profile and type.
+  // Returns NULL if no suitable renderer process is available, in which case
+  // the caller is free to create a new renderer.
+  static RenderProcessHost* GetExistingProcessHost(Profile* profile, Type type);
 
  protected:
-  // Sets the process  of this object, so that others access it using FromID.
+  // Sets the process of this object, so that others access it using FromID.
   void SetProcessID(int pid);
+
+  // For testing.  Removes this host from the list of hosts.
+  void RemoveFromList();
 
   base::Process process_;
 
@@ -188,10 +226,6 @@ class RenderProcessHost : public IPC::Channel::Sender,
   // The maximum page ID we've ever seen from the renderer process.
   int32 max_page_id_;
 
-  // Indicates whether we have notified that the process has terminated. We
-  // only want to send this out once.
-  bool notified_termination_;
-
  private:
   int pid_;
 
@@ -199,6 +233,14 @@ class RenderProcessHost : public IPC::Channel::Sender,
 
   // set of listeners that expect the renderer process to close
   std::set<int> listeners_expecting_close_;
+
+  // True if the process can be shut down suddenly.  If this is true, then we're
+  // sure that all the RenderViews in the process can be shutdown suddenly.  If
+  // it's false, then specific RenderViews might still be allowed to be shutdown
+  // suddenly by checking their SuddenTerminationAllowed() flag.  This can occur
+  // if one tab has an unload event listener but another tab in the same process
+  // doesn't.
+  bool sudden_termination_allowed_;
 
   // See getter above.
   static bool run_renderer_in_process_;

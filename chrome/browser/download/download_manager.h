@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -48,17 +48,12 @@
 #include "base/observer_list.h"
 #include "base/ref_counted.h"
 #include "base/time.h"
+#include "base/timer.h"
 #include "chrome/browser/cancelable_request.h"
 #include "chrome/browser/history/download_types.h"
 #include "chrome/browser/history/history.h"
-#include "chrome/common/pref_member.h"
-
-#if defined(OS_WIN) || defined(OS_LINUX)
-// TODO(port): port this header.
 #include "chrome/browser/shell_dialogs.h"
-#elif defined(OS_MACOSX)
-#include "chrome/common/temp_scaffolding_stubs.h"
-#endif
+#include "chrome/common/pref_member.h"
 
 class DownloadFileManager;
 class DownloadItemView;
@@ -69,7 +64,7 @@ class PrefService;
 class Profile;
 class ResourceDispatcherHost;
 class URLRequestContext;
-class WebContents;
+class TabContents;
 
 namespace base {
 class Thread;
@@ -100,6 +95,9 @@ class DownloadItem {
   class Observer {
    public:
     virtual void OnDownloadUpdated(DownloadItem* download) = 0;
+
+    // Called when a downloaded file has been opened.
+    virtual void OnDownloadOpened(DownloadItem* download) = 0;
   };
 
   // Constructing from persistent store:
@@ -110,6 +108,8 @@ class DownloadItem {
                const FilePath& path,
                int path_uniquifier,
                const GURL& url,
+               const GURL& referrer_url,
+               const std::string& mime_type,
                const FilePath& original_name,
                const base::Time start_time,
                int64 download_size,
@@ -126,8 +126,11 @@ class DownloadItem {
   void AddObserver(Observer* observer);
   void RemoveObserver(Observer* observer);
 
-  // Notify our observers periodically
+  // Notifies our observers periodically.
   void UpdateObservers();
+
+  // Notifies our observers the downloaded file has been opened.
+  void NotifyObserversDownloadOpened();
 
   // Received a new chunk of data
   void Update(int64 bytes_so_far);
@@ -183,6 +186,8 @@ class DownloadItem {
   int path_uniquifier() const { return path_uniquifier_; }
   void set_path_uniquifier(int uniquifier) { path_uniquifier_ = uniquifier; }
   GURL url() const { return url_; }
+  GURL referrer_url() const { return referrer_url_; }
+  std::string mime_type() const { return mime_type_; }
   int64 total_bytes() const { return total_bytes_; }
   void set_total_bytes(int64 total_bytes) { total_bytes_ = total_bytes; }
   int64 received_bytes() const { return received_bytes_; }
@@ -202,6 +207,8 @@ class DownloadItem {
   void set_safety_state(SafetyState safety_state) {
     safety_state_ = safety_state;
   }
+  bool auto_opened() { return auto_opened_; }
+  void set_auto_opened(bool auto_opened) { auto_opened_ = auto_opened; }
   FilePath original_name() const { return original_name_; }
   void set_original_name(const FilePath& name) { original_name_ = name; }
 
@@ -229,6 +236,12 @@ class DownloadItem {
 
   // The URL from whence we came.
   GURL url_;
+
+  // The URL of the page that initiated the download.
+  GURL referrer_url_;
+
+  // The mimetype of the download
+  std::string mime_type_;
 
   // Total bytes expected
   int64 total_bytes_;
@@ -266,6 +279,11 @@ class DownloadItem {
   // Whether the download is considered potentially safe or dangerous
   // (executable files are typically considered dangerous).
   SafetyState safety_state_;
+
+  // Whether the download was auto-opened. We set this rather than using
+  // an observer as it's frequently possible for the download to be auto opened
+  // before the observer is added.
+  bool auto_opened_;
 
   // Dangerous download are given temporary names until the user approves them.
   // This stores their original name.
@@ -335,6 +353,9 @@ class DownloadManager : public base::RefCountedThreadSafe<DownloadManager>,
   void PauseDownload(int32 download_id, bool pause);
   void RemoveDownload(int64 download_handle);
 
+  // Called when the download is renamed to its final name.
+  void DownloadRenamedToFinalName(int download_id, const FilePath& full_path);
+
   // Remove downloads after remove_begin (inclusive) and before remove_end
   // (exclusive). You may pass in null Time values to do an unbounded delete
   // in either direction.
@@ -346,10 +367,15 @@ class DownloadManager : public base::RefCountedThreadSafe<DownloadManager>,
   // deleted is returned back to the caller.
   int RemoveDownloads(const base::Time remove_begin);
 
+  // Remove all downloads will delete all downloads. The number of downloads
+  // deleted is returned back to the caller.
+  int RemoveAllDownloads();
+
   // Download the object at the URL. Used in cases such as "Save Link As..."
   void DownloadUrl(const GURL& url,
                    const GURL& referrer,
-                   WebContents* web_contents);
+                   const std::string& referrer_encoding,
+                   TabContents* tab_contents);
 
   // Allow objects to observe the download creation process.
   void AddObserver(Observer* observer);
@@ -364,10 +390,18 @@ class DownloadManager : public base::RefCountedThreadSafe<DownloadManager>,
   void OnSearchComplete(HistoryService::Handle handle,
                         std::vector<int64>* results);
 
-  // Show or Open a download via the Windows shell.
+  // Display a new download in the appropriate browser UI.
+  void ShowDownloadInBrowser(const DownloadCreateInfo& info,
+                             DownloadItem* download);
+
+  // Opens a download. For Chrome extensions call
+  // ExtensionsServices::InstallExtension, for everything else call
+  // OpenDownloadInShell.
+  void OpenDownload(const DownloadItem* download,
+                    gfx::NativeView parent_window);
+
+  // Show a download via the Windows shell.
   void ShowDownloadInShell(const DownloadItem* download);
-  void OpenDownloadInShell(const DownloadItem* download,
-                           gfx::NativeView parent_window);
 
   // The number of in progress (including paused) downloads.
   int in_progress_count() const {
@@ -403,8 +437,7 @@ class DownloadManager : public base::RefCountedThreadSafe<DownloadManager>,
   bool HasAutoOpenFileTypesRegistered() const;
 
   // Overridden from SelectFileDialog::Listener:
-  // TODO(port): convert this to FilePath when SelectFileDialog gets converted.
-  virtual void FileSelected(const std::wstring& path, void* params);
+  virtual void FileSelected(const FilePath& path, int index, void* params);
   virtual void FileSelectionCanceled(void* params);
 
   // Deletes the specified path on the file thread.
@@ -420,6 +453,14 @@ class DownloadManager : public base::RefCountedThreadSafe<DownloadManager>,
                             FilePath* file_name);
 
  private:
+  // Opens a download via the Windows shell.
+  void OpenDownloadInShell(const DownloadItem* download,
+                           gfx::NativeView parent_window);
+
+  // Opens downloaded Chrome extension file (*.crx).
+  void OpenChromeExtension(const FilePath& full_path, const GURL& download_url,
+                           const GURL& referrer_url);
+
   // Shutdown the download manager.  This call is needed only after Init.
   void Shutdown();
 
@@ -443,10 +484,6 @@ class DownloadManager : public base::RefCountedThreadSafe<DownloadManager>,
   void RemoveDownloadFromHistory(DownloadItem* download);
   void RemoveDownloadsFromHistoryBetween(const base::Time remove_begin,
                                          const base::Time remove_before);
-
-  // Inform the notification service of download starts and stops.
-  void NotifyAboutDownloadStart();
-  void NotifyAboutDownloadStop();
 
   // Create an extension based on the file name and mime type.
   void GenerateExtension(const FilePath& file_name,

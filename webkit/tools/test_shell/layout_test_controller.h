@@ -80,7 +80,8 @@ class LayoutTestController : public CppBoundClass {
   void queueBackNavigation(const CppArgumentList& args, CppVariant* result);
   void queueForwardNavigation(const CppArgumentList& args, CppVariant* result);
   void queueReload(const CppArgumentList& args, CppVariant* result);
-  void queueScript(const CppArgumentList& args, CppVariant* result);
+  void queueLoadingScript(const CppArgumentList& args, CppVariant* result);
+  void queueNonLoadingScript(const CppArgumentList& args, CppVariant* result);
   void queueLoad(const CppArgumentList& args, CppVariant* result);
 
   // Although this is named "objC" to match the Mac version, it actually tests
@@ -108,6 +109,9 @@ class LayoutTestController : public CppBoundClass {
   // of taking you to the page. This is used for cases like mailto, where you
   // don't actually want to open the mail program.
   void setCustomPolicyDelegate(const CppArgumentList& args, CppVariant* result);
+
+  // Delays completion of the test until the policy delegate runs.
+  void waitForPolicyDelegate(const CppArgumentList& args, CppVariant* result);
 
   // Converts a URL starting with file:///tmp/ to the local mapping.
   void pathToLocalResource(const CppArgumentList& args, CppVariant* result);
@@ -166,6 +170,9 @@ class LayoutTestController : public CppBoundClass {
   void setCallCloseOnWebViews(const CppArgumentList& args, CppVariant* result);
   void setPrivateBrowsingEnabled(const CppArgumentList& args, CppVariant* result);
 
+  void setXSSAuditorEnabled(const CppArgumentList& args, CppVariant* result);
+  void queueScriptInIsolatedWorld(const CppArgumentList& args, CppVariant* result);
+
   // The fallback method is called when a nonexistent method is called on
   // the layout test controller object.
   // It is usefull to catch typos in the JavaScript code (a few layout tests
@@ -205,6 +212,10 @@ class LayoutTestController : public CppBoundClass {
   // Called by the webview delegate when the toplevel frame load is done.
   void LocationChangeDone();
 
+  // Called by the webview delegate when the policy delegate runs if the
+  // waitForPolicyDelegate was called.
+  void PolicyDelegateDone();
+
   // Reinitializes all static values.  The Reset() method should be called
   // before the start of each test (currently from
   // TestShell::RunFileTest).
@@ -214,7 +225,9 @@ class LayoutTestController : public CppBoundClass {
   class WorkItem {
    public:
     virtual ~WorkItem() {}
-    virtual void Run(TestShell* shell) = 0;
+
+    // Returns true if this started a load.
+    virtual bool Run(TestShell* shell) = 0;
   };
 
   // Used to clear the value of shell_ from test_shell_tests.

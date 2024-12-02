@@ -5,12 +5,19 @@
 #ifndef WEBCLIPBOARD_IMPL_H_
 #define WEBCLIPBOARD_IMPL_H_
 
-#include "third_party/WebKit/WebKit/chromium/public/WebClipboard.h"
+#include "webkit/api/public/WebClipboard.h"
+
+#include <string>
 
 namespace webkit_glue {
 
 class WebClipboardImpl : public WebKit::WebClipboard {
  public:
+  static std::string URLToMarkup(const WebKit::WebURL& url,
+      const WebKit::WebString& title);
+  static std::string URLToImageMarkup(const WebKit::WebURL& url,
+      const WebKit::WebString& title);
+
   // WebClipboard methods:
   virtual bool isFormatAvailable(WebKit::WebClipboard::Format);
   virtual WebKit::WebString readPlainText();

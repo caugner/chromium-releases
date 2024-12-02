@@ -4,9 +4,12 @@
 
 #include "net/disk_cache/backend_impl.h"
 
+#include "base/field_trial.h"
+#include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/histogram.h"
 #include "base/message_loop.h"
+#include "base/rand_util.h"
 #include "base/string_util.h"
 #include "base/sys_info.h"
 #include "base/timer.h"
@@ -19,6 +22,10 @@
 
 // Uncomment this to use the new eviction algorithm.
 // #define USE_NEW_EVICTION
+
+// This has to be defined before including histogram_macros.h from this file.
+#define NET_DISK_CACHE_BACKEND_IMPL_CC_
+#include "net/disk_cache/histogram_macros.h"
 
 using base::Time;
 using base::TimeDelta;
@@ -105,11 +112,11 @@ std::wstring GetTempCacheName(const std::wstring& path,
 
 // Moves the cache files to a new folder and creates a task to delete them.
 bool DelayedCacheCleanup(const std::wstring& full_path) {
-  std::wstring path(full_path);
-  file_util::TrimTrailingSeparator(&path);
+  FilePath current_path = FilePath::FromWStringHack(full_path);
+  current_path = current_path.StripTrailingSeparators();
 
-  std::wstring name = file_util::GetFilenameFromPath(path);
-  file_util::TrimFilename(&path);
+  std::wstring path = current_path.DirName().ToWStringHack();
+  std::wstring name = current_path.BaseName().ToWStringHack();
 
   std::wstring to_delete = GetTempCacheName(path, name);
   if (to_delete.empty()) {
@@ -131,13 +138,41 @@ bool DelayedCacheCleanup(const std::wstring& full_path) {
   return true;
 }
 
-// Sets |stored_value| for the current experiment.
-void InitExperiment(int* stored_value) {
-  if (*stored_value)
+// Sets |current_group| for the current experiment. Returns false if the files
+// should be discarded.
+bool InitExperiment(int* current_group) {
+  if (*current_group == 3 || *current_group == 4) {
+    // Discard current cache for groups 3 and 4.
+    return false;
+  }
+
+  *current_group = 9;
+
+  UMA_HISTOGRAM_CACHE_ERROR("DiskCache.Experiment", *current_group);
+
+  // Current experiment already set.
+  return true;
+}
+
+// Initializes the field trial structures to allow performance measurements
+// for the current cache configuration.
+void SetFieldTrialInfo(int experiment_group, int size_group) {
+  static bool first = true;
+  if (!first)
     return;
 
-  // Don't add more people to the experiment; send them to group 1.
-  *stored_value = 1;
+  // Field trials involve static objects so we have to do this only once.
+  first = false;
+  scoped_refptr<FieldTrial> trial1 = new FieldTrial("CacheSize", 10);
+  std::string group1 = StringPrintf("CacheSizeGroup_%d", size_group);
+  trial1->AppendGroup(group1, FieldTrial::kAllRemainingProbability);
+
+  if (experiment_group < 6 || experiment_group > 8)
+    return;
+
+  scoped_refptr<FieldTrial> trial2 = new FieldTrial("NewEviction", 10);
+  std::string group2 = StringPrintf("NewEvictionGroup_%d", experiment_group);
+  trial2->AppendGroup(group2, FieldTrial::kAllRemainingProbability);
 }
 
 }  // namespace
@@ -155,9 +190,10 @@ namespace disk_cache {
 // a sharing violation), and in that case a cache for this profile (on the
 // desired path) cannot be created.
 Backend* CreateCacheBackend(const std::wstring& full_path, bool force,
-                            int max_bytes) {
+                            int max_bytes, net::CacheType type) {
   BackendImpl* cache = new BackendImpl(full_path);
   cache->SetMaxSize(max_bytes);
+  cache->SetType(type);
   if (cache->Init())
     return cache;
 
@@ -172,12 +208,39 @@ Backend* CreateCacheBackend(const std::wstring& full_path, bool force,
   // is not there anymore... let's create a new set of files.
   cache = new BackendImpl(full_path);
   cache->SetMaxSize(max_bytes);
+  cache->SetType(type);
   if (cache->Init())
     return cache;
 
   delete cache;
   LOG(ERROR) << "Unable to create cache";
   return NULL;
+}
+
+int PreferedCacheSize(int64 available) {
+  // If there is not enough space to use kDefaultCacheSize, use 80% of the
+  // available space.
+  if (available < kDefaultCacheSize)
+    return static_cast<int32>(available * 8 / 10);
+
+  // Don't use more than 10% of the available space.
+  if (available < 10 * kDefaultCacheSize)
+    return kDefaultCacheSize;
+
+  // Use 10% of the free space until we reach 2.5 * kDefaultCacheSize.
+  if (available < static_cast<int64>(kDefaultCacheSize) * 25)
+    return static_cast<int32>(available / 10);
+
+  // After reaching our target size (2.5 * kDefaultCacheSize), attempt to use
+  // 1% of the availabe space.
+  if (available < static_cast<int64>(kDefaultCacheSize) * 100)
+    return kDefaultCacheSize * 5 / 2;
+
+  int64 one_percent = available / 100;
+  if (one_percent > kint32max)
+    return kint32max;
+
+  return static_cast<int32>(one_percent);
 }
 
 // ------------------------------------------------------------------------
@@ -189,6 +252,7 @@ bool BackendImpl::Init() {
 
 #ifdef USE_NEW_EVICTION
   new_eviction_ = true;
+  user_flags_ |= kNewEviction;
 #endif
 
   bool create_files = false;
@@ -200,6 +264,7 @@ bool BackendImpl::Init() {
   num_refs_ = num_pending_io_ = max_refs_ = 0;
 
   if (!restarted_) {
+    trace_object_ = TraceObject::GetTraceObject();
     // Create a recurrent timer of 30 secs.
     int timer_delay = unit_test_ ? 1000 : 30000;
     timer_.Start(TimeDelta::FromMilliseconds(timer_delay), this,
@@ -207,8 +272,11 @@ bool BackendImpl::Init() {
   }
 
   init_ = true;
-  if (data_)
-    InitExperiment(&data_->header.experiment);
+  if (!InitExperiment(&data_->header.experiment))
+    return false;
+
+  if (data_->header.experiment > 6 && data_->header.experiment < 9)
+    new_eviction_ = true;
 
   if (!CheckIndex()) {
     ReportError(ERR_INIT_FAILED);
@@ -240,6 +308,10 @@ bool BackendImpl::Init() {
 
   disabled_ = !rankings_.Init(this, new_eviction_);
   eviction_.Init(this);
+
+  // Setup experiment data only for the main cache.
+  if (cache_type() == net::DISK_CACHE)
+    SetFieldTrialInfo(data_->header.experiment, GetSizeGroup());
 
   return !disabled_;
 }
@@ -299,7 +371,7 @@ bool BackendImpl::OpenEntry(const std::string& key, Entry** entry) {
   DCHECK(entry);
   *entry = cache_entry;
 
-  UMA_HISTOGRAM_TIMES("DiskCache.OpenTime", Time::Now() - start);
+  CACHE_UMA(AGE_MS, "OpenTime", GetSizeGroup(), start);
   stats_.OnEvent(Stats::OPEN_HIT);
   return true;
 }
@@ -364,6 +436,9 @@ bool BackendImpl::CreateEntry(const std::string& key, Entry** entry) {
     return false;
   }
 
+  // We are not failing the operation; let's add this to the map.
+  open_entries_[entry_address.value()] = cache_entry;
+
   if (parent.get())
     parent->SetNextAddress(entry_address);
 
@@ -377,7 +452,7 @@ bool BackendImpl::CreateEntry(const std::string& key, Entry** entry) {
 
   cache_entry.swap(reinterpret_cast<EntryImpl**>(entry));
 
-  UMA_HISTOGRAM_TIMES("DiskCache.CreateTime", Time::Now() - start);
+  CACHE_UMA(AGE_MS, "CreateTime", GetSizeGroup(), start);
   stats_.OnEvent(Stats::CREATE_HIT);
   Trace("create entry hit ");
   return true;
@@ -520,8 +595,18 @@ bool BackendImpl::SetMaxSize(int max_bytes) {
   if (!max_bytes)
     return true;
 
+  // Avoid a DCHECK later on.
+  if (max_bytes >= kint32max - kint32max / 10)
+    max_bytes = kint32max - kint32max / 10 - 1;
+
+  user_flags_ |= kMaxSize;
   max_size_ = max_bytes;
   return true;
+}
+
+void BackendImpl::SetType(net::CacheType type) {
+  DCHECK(type != net::MEMORY_CACHE);
+  cache_type_ = type;
 }
 
 std::wstring BackendImpl::GetFileName(Addr address) const {
@@ -648,11 +733,26 @@ void BackendImpl::RemoveEntry(EntryImpl* entry) {
   DecreaseNumEntries();
 }
 
-void BackendImpl::CacheEntryDestroyed() {
+void BackendImpl::CacheEntryDestroyed(Addr address) {
+  EntriesMap::iterator it = open_entries_.find(address.value());
+  if (it != open_entries_.end())
+    open_entries_.erase(it);
   DecreaseNumRefs();
 }
 
-int32 BackendImpl::GetCurrentEntryId() {
+bool BackendImpl::IsOpen(CacheRankingsBlock* rankings) const {
+  DCHECK(rankings->HasData());
+  EntriesMap::const_iterator it =
+      open_entries_.find(rankings->Data()->contents);
+  if (it != open_entries_.end()) {
+    // We have this entry in memory.
+    return rankings->Data()->pointer == it->second;
+  }
+
+  return false;
+}
+
+int32 BackendImpl::GetCurrentEntryId() const {
   return data_->header.this_id;
 }
 
@@ -661,7 +761,7 @@ int BackendImpl::MaxFileSize() const {
 }
 
 void BackendImpl::ModifyStorageSize(int32 old_size, int32 new_size) {
-  if (disabled_)
+  if (disabled_ || old_size == new_size)
     return;
   if (old_size > new_size)
     SubstractStorageSize(old_size - new_size);
@@ -676,21 +776,40 @@ void BackendImpl::TooMuchStorageRequested(int32 size) {
   stats_.ModifyStorageStats(0, size);
 }
 
+bool BackendImpl::IsLoaded() const {
+  CACHE_UMA(COUNTS, "PendingIO", GetSizeGroup(), num_pending_io_);
+  return num_pending_io_ > 10;
+}
+
+std::string BackendImpl::HistogramName(const char* name, int experiment) const {
+  if (!experiment)
+    return StringPrintf("DiskCache.%d.%s", cache_type_, name);
+  return StringPrintf("DiskCache.%d.%s_%d", cache_type_, name, experiment);
+}
+
+int BackendImpl::GetSizeGroup() const {
+  if (disabled_)
+    return 0;
+
+  // We want to report times grouped by the current cache size (50 MB groups).
+  int group = data_->header.num_bytes / (50 * 1024 * 1024);
+  if (group > 6)
+    group = 6;  // Limit the number of groups, just in case.
+  return group;
+}
+
 // We want to remove biases from some histograms so we only send data once per
 // week.
 bool BackendImpl::ShouldReportAgain() {
-  static bool first_time = true;
-  static bool should_send = false;
+  if (uma_report_)
+    return uma_report_ == 2;
 
-  if (!first_time)
-    return should_send;
-
-  first_time = false;
+  uma_report_++;
   int64 last_report = stats_.GetCounter(Stats::LAST_REPORT);
   Time last_time = Time::FromInternalValue(last_report);
   if (!last_report || (Time::Now() - last_time).InDays() >= 7) {
     stats_.SetCounter(Stats::LAST_REPORT, Time::Now().ToInternalValue());
-    should_send = true;
+    uma_report_++;
     return true;
   }
   return false;
@@ -700,23 +819,29 @@ void BackendImpl::FirstEviction() {
   DCHECK(data_->header.create_time);
 
   Time create_time = Time::FromInternalValue(data_->header.create_time);
-  static Histogram counter("DiskCache.FillupAge", 1, 10000, 50);
-  counter.SetFlags(kUmaTargetedHistogramFlag);
-  counter.Add((Time::Now() - create_time).InHours());
+  CACHE_UMA(AGE, "FillupAge", 0, create_time);
 
   int64 use_hours = stats_.GetCounter(Stats::TIMER) / 120;
-  static Histogram counter2("DiskCache.FillupTime", 1, 10000, 50);
-  counter2.SetFlags(kUmaTargetedHistogramFlag);
-  counter2.Add(static_cast<int>(use_hours));
-
-  UMA_HISTOGRAM_PERCENTAGE("DiskCache.FirstHitRatio", stats_.GetHitRatio());
+  CACHE_UMA(HOURS, "FillupTime", 0, static_cast<int>(use_hours));
+  CACHE_UMA(PERCENTAGE, "FirstHitRatio", 0, stats_.GetHitRatio());
 
   int avg_size = data_->header.num_bytes / GetEntryCount();
-  UMA_HISTOGRAM_COUNTS("DiskCache.FirstEntrySize", avg_size);
+  CACHE_UMA(COUNTS, "FirstEntrySize", 0, avg_size);
 
   int large_entries_bytes = stats_.GetLargeEntriesSize();
   int large_ratio = large_entries_bytes * 100 / data_->header.num_bytes;
-  UMA_HISTOGRAM_PERCENTAGE("DiskCache.FirstLargeEntriesRatio", large_ratio);
+  CACHE_UMA(PERCENTAGE, "FirstLargeEntriesRatio", 0, large_ratio);
+
+  if (data_->header.experiment == 8) {
+    CACHE_UMA(PERCENTAGE, "FirstResurrectRatio", 8, stats_.GetResurrectRatio());
+    CACHE_UMA(PERCENTAGE, "FirstNoUseRatio", 8,
+              data_->header.lru.sizes[0] * 100 / data_->header.num_entries);
+    CACHE_UMA(PERCENTAGE, "FirstLowUseRatio", 8,
+              data_->header.lru.sizes[1] * 100 / data_->header.num_entries);
+    CACHE_UMA(PERCENTAGE, "FirstHighUseRatio", 8,
+              data_->header.lru.sizes[2] * 100 / data_->header.num_entries);
+  }
+
   stats_.ResetRatios();
 }
 
@@ -734,16 +859,14 @@ void BackendImpl::CriticalError(int error) {
   disabled_ = true;
 
   if (!num_refs_)
-    RestartCache();
+    MessageLoop::current()->PostTask(FROM_HERE,
+        factory_.NewRunnableMethod(&BackendImpl::RestartCache));
 }
 
 void BackendImpl::ReportError(int error) {
-  static LinearHistogram counter("DiskCache.Error", 0, 49, 50);
-  counter.SetFlags(kUmaTargetedHistogramFlag);
-
   // We transmit positive numbers, instead of direct error codes.
   DCHECK(error <= 0);
-  counter.Add(error * -1);
+  CACHE_UMA(CACHE_ERROR, "Error", 0, error * -1);
 }
 
 void BackendImpl::OnEvent(Stats::Counters an_event) {
@@ -752,19 +875,26 @@ void BackendImpl::OnEvent(Stats::Counters an_event) {
 
 void BackendImpl::OnStatsTimer() {
   stats_.OnEvent(Stats::TIMER);
-  int64 current = stats_.GetCounter(Stats::OPEN_ENTRIES);
   int64 time = stats_.GetCounter(Stats::TIMER);
+  int64 current = stats_.GetCounter(Stats::OPEN_ENTRIES);
 
-  current = current * (time - 1) + num_refs_;
-  current /= time;
-  stats_.SetCounter(Stats::OPEN_ENTRIES, current);
-  stats_.SetCounter(Stats::MAX_ENTRIES, max_refs_);
+  // OPEN_ENTRIES is a sampled average of the number of open entries, avoiding
+  // the bias towards 0.
+  if (num_refs_ && (current != num_refs_)) {
+    int64 diff = (num_refs_ - current) / 50;
+    if (!diff)
+      diff = num_refs_ > current ? 1 : -1;
+    current = current + diff;
+    stats_.SetCounter(Stats::OPEN_ENTRIES, current);
+    stats_.SetCounter(Stats::MAX_ENTRIES, max_refs_);
+  }
 
-  static bool first_time = true;
+  CACHE_UMA(COUNTS, "NumberOfReferences", 0, num_refs_);
+
   if (!data_)
-    first_time = false;
-  if (first_time) {
-    first_time = false;
+    first_timer_ = false;
+  if (first_timer_) {
+    first_timer_ = false;
     if (ShouldReportAgain())
       ReportStats();
   }
@@ -783,11 +913,18 @@ void BackendImpl::DecrementIoCount() {
 }
 
 void BackendImpl::SetUnitTestMode() {
+  user_flags_ |= kUnitTestMode;
   unit_test_ = true;
 }
 
 void BackendImpl::SetUpgradeMode() {
+  user_flags_ |= kUpgradeMode;
   read_only_ = true;
+}
+
+void BackendImpl::SetNewEviction() {
+  user_flags_ |= kNewEviction;
+  new_eviction_ = true;
 }
 
 void BackendImpl::ClearRefCountForTest() {
@@ -866,12 +1003,21 @@ bool BackendImpl::InitBackingStore(bool* file_created) {
 
   index_ = new MappedFile();
   data_ = reinterpret_cast<Index*>(index_->Init(index_name, 0));
+  if (!data_) {
+    LOG(ERROR) << "Unable to map Index file";
+    return false;
+  }
   return true;
 }
 
+// The maximum cache size will be either set explicitly by the caller, or
+// calculated by this code.
 void BackendImpl::AdjustMaxCacheSize(int table_len) {
   if (max_size_)
     return;
+
+  // If table_len is provided, the index file exists.
+  DCHECK(!table_len || data_->header.magic);
 
   // The user is not setting the size, let's figure it out.
   int64 available = base::SysInfo::AmountOfFreeDiskSpace(path_);
@@ -880,35 +1026,30 @@ void BackendImpl::AdjustMaxCacheSize(int table_len) {
     return;
   }
 
-  // Attempt to use 1% of the disk available for this user.
-  available /= 100;
+  if (table_len)
+    available += data_->header.num_bytes;
 
-  if (available < kDefaultCacheSize)
-    max_size_ = kDefaultCacheSize;
-  else if (available > kint32max)
-    max_size_ = kint32max;
-  else
-    max_size_ = static_cast<int32>(available);
+  max_size_ = PreferedCacheSize(available);
 
   // Let's not use more than the default size while we tune-up the performance
   // of bigger caches. TODO(rvargas): remove this limit.
-  // If we are creating the file, use 1 as the multiplier so the table size is
-  // the same for everybody.
-  int multiplier = table_len ? data_->header.experiment : 1;
-  DCHECK(multiplier > 0 && multiplier < 5);
-  max_size_ = kDefaultCacheSize * multiplier;
+  if (max_size_ > kDefaultCacheSize * 4)
+    max_size_ = kDefaultCacheSize * 4;
 
   if (!table_len)
     return;
 
   // If we already have a table, adjust the size to it.
-  // NOTE: Disabled for the experiment.
-  // int current_max_size = MaxStorageSizeForTable(table_len);
-  // if (max_size_ > current_max_size)
-  //   max_size_= current_max_size;
+  int current_max_size = MaxStorageSizeForTable(table_len);
+  if (max_size_ > current_max_size)
+    max_size_= current_max_size;
 }
 
+// We always execute this method from the message loop so that we can freely
+// release files, memory pointers etc.
 void BackendImpl::RestartCache() {
+  DCHECK(!num_refs_);
+  DCHECK(!open_entries_.size());
   PrepareForRestart();
   DelayedCacheCleanup(path_);
 
@@ -923,6 +1064,13 @@ void BackendImpl::RestartCache() {
 }
 
 void BackendImpl::PrepareForRestart() {
+  // Reset the mask_ if it was not given by the user.
+  if (!(user_flags_ & kMask))
+    mask_ = 0;
+
+  if (!(user_flags_ & kNewEviction))
+    new_eviction_ = false;
+
   data_->header.crash = 0;
   index_ = NULL;
   data_ = NULL;
@@ -930,12 +1078,19 @@ void BackendImpl::PrepareForRestart() {
   rankings_.Reset();
   init_ = false;
   restarted_ = true;
-
-  // TODO(rvargas): remove this line at the end of this experiment.
-  max_size_ = 0;
 }
 
 int BackendImpl::NewEntry(Addr address, EntryImpl** entry, bool* dirty) {
+  EntriesMap::iterator it = open_entries_.find(address.value());
+  if (it != open_entries_.end()) {
+    // Easy job. This entry is already in memory.
+    EntryImpl* this_entry = it->second;
+    this_entry->AddRef();
+    *entry = this_entry;
+    *dirty = false;
+    return 0;
+  }
+
   scoped_refptr<EntryImpl> cache_entry(new EntryImpl(this, address));
   IncreaseNumRefs();
   *entry = NULL;
@@ -965,6 +1120,10 @@ int BackendImpl::NewEntry(Addr address, EntryImpl** entry, bool* dirty) {
   if (!rankings_.SanityCheck(cache_entry->rankings(), false))
     return ERR_INVALID_LINKS;
 
+  // We only add clean entries to the map.
+  if (!*dirty)
+    open_entries_[address.value()] = cache_entry;
+
   cache_entry.swap(entry);
   return 0;
 }
@@ -972,8 +1131,8 @@ int BackendImpl::NewEntry(Addr address, EntryImpl** entry, bool* dirty) {
 EntryImpl* BackendImpl::MatchEntry(const std::string& key, uint32 hash,
                                    bool find_parent) {
   Addr address(data_->table[hash & mask_]);
-  EntryImpl* cache_entry = NULL;
-  EntryImpl* parent_entry = NULL;
+  scoped_refptr<EntryImpl> cache_entry, parent_entry;
+  EntryImpl* tmp = NULL;
   bool found = false;
 
   for (;;) {
@@ -987,7 +1146,8 @@ EntryImpl* BackendImpl::MatchEntry(const std::string& key, uint32 hash,
     }
 
     bool dirty;
-    int error = NewEntry(address, &cache_entry, &dirty);
+    int error = NewEntry(address, &tmp, &dirty);
+    cache_entry.swap(&tmp);
 
     if (error || dirty) {
       // This entry is dirty on disk (it was not properly closed): we cannot
@@ -998,7 +1158,6 @@ EntryImpl* BackendImpl::MatchEntry(const std::string& key, uint32 hash,
 
       if (parent_entry) {
         parent_entry->SetNextAddress(child);
-        parent_entry->Release();
         parent_entry = NULL;
       } else {
         data_->table[hash & mask_] = child.value();
@@ -1007,8 +1166,7 @@ EntryImpl* BackendImpl::MatchEntry(const std::string& key, uint32 hash,
       if (!error) {
         // It is important to call DestroyInvalidEntry after removing this
         // entry from the table.
-        DestroyInvalidEntry(address, cache_entry);
-        cache_entry->Release();
+        DestroyInvalidEntry(cache_entry);
         cache_entry = NULL;
       } else {
         Trace("NewEntry failed on MatchEntry 0x%x", address.value());
@@ -1020,13 +1178,13 @@ EntryImpl* BackendImpl::MatchEntry(const std::string& key, uint32 hash,
     }
 
     if (cache_entry->IsSameEntry(key, hash)) {
-      cache_entry = EntryImpl::Update(cache_entry);
+      if (!cache_entry->Update())
+        cache_entry = NULL;
       found = true;
       break;
     }
-    cache_entry = EntryImpl::Update(cache_entry);
-    if (parent_entry)
-      parent_entry->Release();
+    if (!cache_entry->Update())
+      cache_entry = NULL;
     parent_entry = cache_entry;
     cache_entry = NULL;
     if (!parent_entry)
@@ -1035,17 +1193,14 @@ EntryImpl* BackendImpl::MatchEntry(const std::string& key, uint32 hash,
     address.set_value(parent_entry->GetNextAddress());
   }
 
-  if (parent_entry && (!find_parent || !found)) {
-    parent_entry->Release();
+  if (parent_entry && (!find_parent || !found))
     parent_entry = NULL;
-  }
 
-  if (cache_entry && (find_parent || !found)) {
-    cache_entry->Release();
+  if (cache_entry && (find_parent || !found))
     cache_entry = NULL;
-  }
 
-  return find_parent ? parent_entry : cache_entry;
+  find_parent ? parent_entry.swap(&tmp) : cache_entry.swap(&tmp);
+  return tmp;
 }
 
 // This is the actual implementation for OpenNextEntry and OpenPrevEntry.
@@ -1086,7 +1241,7 @@ bool BackendImpl::OpenFollowingEntry(bool forward, void** iter,
           OpenFollowingEntryFromList(forward, iterator->list,
                                      &iterator->nodes[i], &temp);
       } else {
-        temp = GetEnumeratedEntry(iterator->nodes[i]);
+        temp = GetEnumeratedEntry(iterator->nodes[i], false);
       }
 
       entries[i].swap(&temp);  // The entry was already addref'd.
@@ -1142,7 +1297,7 @@ bool BackendImpl::OpenFollowingEntryFromList(bool forward, Rankings::List list,
   Rankings::ScopedRankingsBlock next(&rankings_, next_block);
   *from_entry = NULL;
 
-  *next_entry = GetEnumeratedEntry(next.get());
+  *next_entry = GetEnumeratedEntry(next.get(), false);
   if (!*next_entry)
     return false;
 
@@ -1150,39 +1305,29 @@ bool BackendImpl::OpenFollowingEntryFromList(bool forward, Rankings::List list,
   return true;
 }
 
-EntryImpl* BackendImpl::GetEnumeratedEntry(CacheRankingsBlock* next) {
-  if (!next)
+EntryImpl* BackendImpl::GetEnumeratedEntry(CacheRankingsBlock* next,
+                                           bool to_evict) {
+  if (!next || disabled_)
     return NULL;
 
-  scoped_refptr<EntryImpl> entry;
-  EntryImpl* temp = NULL;
-
-  if (next->Data()->pointer) {
-    entry = reinterpret_cast<EntryImpl*>(next->Data()->pointer);
-    entry.swap(&temp);
-    return temp;
-  }
-
+  EntryImpl* entry;
   bool dirty;
-  if (NewEntry(Addr(next->Data()->contents), &temp, &dirty))
+  if (NewEntry(Addr(next->Data()->contents), &entry, &dirty))
     return NULL;
-  entry.swap(&temp);
 
   if (dirty) {
-    // We cannot trust this entry. Call MatchEntry to go through the regular
-    // path and take the appropriate action.
-    std::string key = entry->GetKey();
-    uint32 hash = entry->GetHash();
-    entry = NULL;  // Release the entry.
-    temp = MatchEntry(key, hash, false);
-    if (temp)
-      temp->Release();
-
+    // We cannot trust this entry. This code also releases the reference.
+    DestroyInvalidEntryFromEnumeration(entry);
     return NULL;
   }
 
-  entry.swap(&temp);
-  return EntryImpl::Update(temp);  // Update returns an adref'd entry.
+  // There is no need to store the entry to disk if we want to delete it.
+  if (!to_evict && !entry->Update()) {
+    entry->Release();
+    return NULL;
+  }
+
+  return entry;
 }
 
 bool BackendImpl::ResurrectEntry(EntryImpl* deleted_entry, Entry** entry) {
@@ -1204,7 +1349,7 @@ bool BackendImpl::ResurrectEntry(EntryImpl* deleted_entry, Entry** entry) {
   return true;
 }
 
-void BackendImpl::DestroyInvalidEntry(Addr address, EntryImpl* entry) {
+void BackendImpl::DestroyInvalidEntry(EntryImpl* entry) {
   LOG(WARNING) << "Destroying invalid entry.";
   Trace("Destroying invalid entry 0x%p", entry);
 
@@ -1216,6 +1361,42 @@ void BackendImpl::DestroyInvalidEntry(Addr address, EntryImpl* entry) {
   if (!new_eviction_)
     DecreaseNumEntries();
   stats_.OnEvent(Stats::INVALID_ENTRY);
+}
+
+// This is kind of ugly. The entry may or may not be part of the cache index
+// table, and it may even have corrupt fields. If we just doom it, we may end up
+// deleting it twice (if all fields are right, and when looking up the parent of
+// chained entries wee see this one... and we delete it because it is dirty). If
+// we ignore it, we may leave it here forever. So we're going to attempt to
+// delete it through the provided object, without touching the index table
+// (because we cannot jus call MatchEntry()), and also attempt to delete it from
+// the table through the key: this may find a new entry (too bad), or an entry
+// that was just deleted and consider it a very corrupt entry.
+void BackendImpl::DestroyInvalidEntryFromEnumeration(EntryImpl* entry) {
+  std::string key = entry->GetKey();
+  entry->SetPointerForInvalidEntry(GetCurrentEntryId());
+  CacheAddr next_entry = entry->entry()->Data()->next;
+  if (!next_entry) {
+    DestroyInvalidEntry(entry);
+    entry->Release();
+  }
+  DoomEntry(key);
+
+  if (!next_entry)
+    return;
+
+  // We have a chained entry so instead of destroying first this entry and then
+  // anything with this key, we just called DoomEntry() first. If that call
+  // deleted everything, |entry| has invalid data. Let's see if there is
+  // something else to do. We started with just a rankings node (we come from
+  // an enumeration), so that one may still be there.
+  CacheRankingsBlock* rankings = entry->rankings();
+  rankings->Load();
+  if (rankings->Data()->contents) {
+    // We still have something. Clean this up.
+    DestroyInvalidEntry(entry);
+  }
+  entry->Release();
 }
 
 void BackendImpl::AddStorageSize(int32 bytes) {
@@ -1242,7 +1423,8 @@ void BackendImpl::DecreaseNumRefs() {
   num_refs_--;
 
   if (!num_refs_ && disabled_)
-    RestartCache();
+    MessageLoop::current()->PostTask(FROM_HERE,
+        factory_.NewRunnableMethod(&BackendImpl::RestartCache));
 }
 
 void BackendImpl::IncreaseNumEntries() {
@@ -1268,73 +1450,65 @@ void BackendImpl::LogStats() {
 }
 
 void BackendImpl::ReportStats() {
-  int experiment = data_->header.experiment;
-  std::string entries(StringPrintf("DiskCache.Entries_%d", experiment));
-  std::string size(StringPrintf("DiskCache.Size_%d", experiment));
-  std::string max_size(StringPrintf("DiskCache.MaxSize_%d", experiment));
-  UMA_HISTOGRAM_COUNTS(entries.c_str(), data_->header.num_entries);
-  UMA_HISTOGRAM_COUNTS(size.c_str(), data_->header.num_bytes / (1024 * 1024));
-  UMA_HISTOGRAM_COUNTS(max_size.c_str(), max_size_ / (1024 * 1024));
+  CACHE_UMA(COUNTS, "Entries", 0, data_->header.num_entries);
+  CACHE_UMA(COUNTS, "Size", 0, data_->header.num_bytes / (1024 * 1024));
+  CACHE_UMA(COUNTS, "MaxSize", 0, max_size_ / (1024 * 1024));
 
-  UMA_HISTOGRAM_COUNTS("DiskCache.AverageOpenEntries",
-      static_cast<int>(stats_.GetCounter(Stats::OPEN_ENTRIES)));
-  UMA_HISTOGRAM_COUNTS("DiskCache.MaxOpenEntries",
-      static_cast<int>(stats_.GetCounter(Stats::MAX_ENTRIES)));
+  CACHE_UMA(COUNTS, "AverageOpenEntries", 0,
+            static_cast<int>(stats_.GetCounter(Stats::OPEN_ENTRIES)));
+  CACHE_UMA(COUNTS, "MaxOpenEntries", 0,
+            static_cast<int>(stats_.GetCounter(Stats::MAX_ENTRIES)));
   stats_.SetCounter(Stats::MAX_ENTRIES, 0);
 
-  if (!data_->header.create_time) {
-    // This is a client running the experiment on the dev channel.
-    std::string hit_ratio(StringPrintf("DiskCache.HitRatio_%d", experiment));
-    UMA_HISTOGRAM_PERCENTAGE(hit_ratio.c_str(), stats_.GetHitRatio());
-    stats_.ResetRatios();
-
-    if (!data_->header.num_bytes)
-      return;
-
-    int large_entries_bytes = stats_.GetLargeEntriesSize();
-    int large_ratio = large_entries_bytes * 100 / data_->header.num_bytes;
-    std::string large_ratio_name(StringPrintf("DiskCache.LargeEntriesRatio_%d",
-                                              experiment));
-    UMA_HISTOGRAM_PERCENTAGE(large_ratio_name.c_str(), large_ratio);
-    return;
-  }
-
-  if (!data_->header.lru.filled)
+  if (!data_->header.create_time || !data_->header.lru.filled)
     return;
 
   // This is an up to date client that will report FirstEviction() data. After
   // that event, start reporting this:
 
   int64 total_hours = stats_.GetCounter(Stats::TIMER) / 120;
-  static Histogram counter("DiskCache.TotalTime", 1, 10000, 50);
-  counter.SetFlags(kUmaTargetedHistogramFlag);
-  counter.Add(static_cast<int>(total_hours));
+  CACHE_UMA(HOURS, "TotalTime", 0, static_cast<int>(total_hours));
 
   int64 use_hours = stats_.GetCounter(Stats::LAST_REPORT_TIMER) / 120;
+  stats_.SetCounter(Stats::LAST_REPORT_TIMER, stats_.GetCounter(Stats::TIMER));
+
+  // We may see users with no use_hours at this point if this is the first time
+  // we are running this code.
+  if (use_hours)
+    use_hours = total_hours - use_hours;
+
   if (!use_hours || !GetEntryCount() || !data_->header.num_bytes)
     return;
 
-  static Histogram counter2("DiskCache.UseTime", 1, 10000, 50);
-  counter2.SetFlags(kUmaTargetedHistogramFlag);
-  counter2.Add(static_cast<int>(use_hours));
-
-  UMA_HISTOGRAM_PERCENTAGE("DiskCache.HitRatio", stats_.GetHitRatio());
-  UMA_HISTOGRAM_PERCENTAGE("DiskCache.ResurrectRatio",
-                           stats_.GetResurrectRatio());
+  CACHE_UMA(HOURS, "UseTime", 0, static_cast<int>(use_hours));
+  CACHE_UMA(PERCENTAGE, "HitRatio", data_->header.experiment,
+            stats_.GetHitRatio());
 
   int64 trim_rate = stats_.GetCounter(Stats::TRIM_ENTRY) / use_hours;
-  UMA_HISTOGRAM_COUNTS("DiskCache.TrimRate", static_cast<int>(trim_rate));
+  CACHE_UMA(COUNTS, "TrimRate", 0, static_cast<int>(trim_rate));
 
   int avg_size = data_->header.num_bytes / GetEntryCount();
-  UMA_HISTOGRAM_COUNTS("DiskCache.EntrySize", avg_size);
+  CACHE_UMA(COUNTS, "EntrySize", data_->header.experiment, avg_size);
 
   int large_entries_bytes = stats_.GetLargeEntriesSize();
   int large_ratio = large_entries_bytes * 100 / data_->header.num_bytes;
-  UMA_HISTOGRAM_PERCENTAGE("DiskCache.LargeEntriesRatio", large_ratio);
+  CACHE_UMA(PERCENTAGE, "LargeEntriesRatio", 0, large_ratio);
+
+  if (new_eviction_) {
+    CACHE_UMA(PERCENTAGE, "ResurrectRatio", data_->header.experiment,
+              stats_.GetResurrectRatio());
+    CACHE_UMA(PERCENTAGE, "NoUseRatio", data_->header.experiment,
+              data_->header.lru.sizes[0] * 100 / data_->header.num_entries);
+    CACHE_UMA(PERCENTAGE, "LowUseRatio", data_->header.experiment,
+              data_->header.lru.sizes[1] * 100 / data_->header.num_entries);
+    CACHE_UMA(PERCENTAGE, "HighUseRatio", data_->header.experiment,
+              data_->header.lru.sizes[2] * 100 / data_->header.num_entries);
+    CACHE_UMA(PERCENTAGE, "DeletedRatio", data_->header.experiment,
+              data_->header.lru.sizes[4] * 100 / data_->header.num_entries);
+  }
 
   stats_.ResetRatios();
   stats_.SetCounter(Stats::TRIM_ENTRY, 0);
-  stats_.SetCounter(Stats::LAST_REPORT_TIMER, 0);
 }
 
 void BackendImpl::UpgradeTo2_1() {
@@ -1346,10 +1520,7 @@ void BackendImpl::UpgradeTo2_1() {
 }
 
 bool BackendImpl::CheckIndex() {
-  if (!data_) {
-    LOG(ERROR) << "Unable to map Index file";
-    return false;
-  }
+  DCHECK(data_);
 
   size_t current_size = index_->GetLength();
   if (current_size < sizeof(Index)) {
@@ -1404,14 +1575,6 @@ bool BackendImpl::CheckIndex() {
 
   if (!mask_)
     mask_ = data_->header.table_len - 1;
-
-  // TODO(rvargas): remove this. For some reason, we are receiving crashes with
-  // mask_ being bigger than the actual table length. (bug 7217).
-  if (mask_ > 0xffff) {
-    LOG(ERROR) << "Invalid cache mask";
-    ReportError(ERR_INVALID_MASK);
-    return false;
-  }
 
   return true;
 }

@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,11 +14,11 @@ namespace {
 class DirectoryWatcherImpl : public DirectoryWatcher::PlatformDelegate,
                              public base::ObjectWatcher::Delegate {
  public:
-  DirectoryWatcherImpl() : handle_(INVALID_HANDLE_VALUE) {}
+  DirectoryWatcherImpl() : delegate_(NULL), handle_(INVALID_HANDLE_VALUE) {}
   virtual ~DirectoryWatcherImpl();
 
   virtual bool Watch(const FilePath& path, DirectoryWatcher::Delegate* delegate,
-                     bool recursive);
+                     MessageLoop* backend_loop, bool recursive);
 
   // Callback from MessageLoopForIO.
   virtual void OnObjectSignaled(HANDLE object);
@@ -44,20 +44,15 @@ DirectoryWatcherImpl::~DirectoryWatcherImpl() {
 }
 
 bool DirectoryWatcherImpl::Watch(const FilePath& path,
-    DirectoryWatcher::Delegate* delegate, bool recursive) {
+                                 DirectoryWatcher::Delegate* delegate,
+                                 MessageLoop* backend_loop, bool recursive) {
   DCHECK(path_.value().empty());  // Can only watch one path.
-
-  if (!recursive) {
-    // See http://crbug.com/5072.
-    NOTIMPLEMENTED();
-    return false;
-  }
 
   handle_ = FindFirstChangeNotification(
       path.value().c_str(),
-      TRUE,  // Watch subtree.
+      recursive,
       FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_SIZE |
-      FILE_NOTIFY_CHANGE_LAST_WRITE);
+      FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_DIR_NAME);
   if (handle_ == INVALID_HANDLE_VALUE)
     return false;
 

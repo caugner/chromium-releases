@@ -34,13 +34,6 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <wtf/Platform.h>
-// The buildbot doesn't have Xlib.  Rather than revert this, I've just
-// temporarily ifdef'd it out.
-#ifdef XLIB_TEMPORARILY_DISABLED
-#if PLATFORM(UNIX)
-#include <X11/Xlib.h>
-#endif
-#endif
 #include "PluginObject.h"
 
 #ifdef WIN32
@@ -48,6 +41,10 @@
 #define NPAPI WINAPI
 #else
 #define NPAPI
+#endif
+
+#if defined(OS_LINUX)
+#include <X11/Xlib.h>
 #endif
 
 static void log(NPP instance, const char* format, ...)
@@ -90,18 +87,35 @@ static void log(NPP instance, const char* format, ...)
     browser->releaseobject(windowObject);
 }
 
-// Mach-o entry points
+// Plugin entry points
 extern "C" {
-    NPError NPAPI NP_Initialize(NPNetscapeFuncs *browserFuncs);
+    NPError NPAPI NP_Initialize(NPNetscapeFuncs *browserFuncs
+#if defined(OS_LINUX)
+                                , NPPluginFuncs *pluginFuncs
+#endif
+                                );
     NPError NPAPI NP_GetEntryPoints(NPPluginFuncs *pluginFuncs);
     void NPAPI NP_Shutdown(void);
+
+#if defined(OS_LINUX)
+    NPError NP_GetValue(NPP instance, NPPVariable variable, void *value);
+    const char* NP_GetMIMEDescription(void);
+#endif
 }
 
-// Mach-o entry points
-NPError NPAPI NP_Initialize(NPNetscapeFuncs *browserFuncs)
+// Plugin entry points
+NPError NPAPI NP_Initialize(NPNetscapeFuncs *browserFuncs
+#if defined(OS_LINUX)
+                            , NPPluginFuncs *pluginFuncs
+#endif
+)
 {
     browser = browserFuncs;
+#if defined(OS_LINUX)
+    return NP_GetEntryPoints(pluginFuncs);
+#else
     return NPERR_NO_ERROR;
+#endif
 }
 
 NPError NPAPI NP_GetEntryPoints(NPPluginFuncs *pluginFuncs)
@@ -143,6 +157,14 @@ NPError NPP_New(NPMIMEType pluginType, NPP instance, uint16 mode, int16 argc, ch
                 obj->onURLNotify = strdup(argv[i]);
             else if (strcasecmp(argn[i], "logfirstsetwindow") == 0)
                 obj->logSetWindow = TRUE;
+            else if (strcasecmp(argn[i], "logSrc") == 0) {
+                for (int i = 0; i < argc; i++) {
+                    if (strcasecmp(argn[i], "src") == 0) {
+                        log(instance, "src: %s", argv[i]);
+                        fflush(stdout);
+                    }
+                }
+            }
         }
 
         instance->pdata = obj;
@@ -310,8 +332,7 @@ int16 NPP_HandleEvent(NPP instance, void *event)
 
     fflush(stdout);
 
-#elif PLATFORM(UNIX)
-#ifdef XLIB_TEMPORARILY_DISABLED
+#elif defined(OS_LINUX)
     XEvent* evt = static_cast<XEvent*>(event);
     XButtonPressedEvent* bpress_evt = reinterpret_cast<XButtonPressedEvent*>(evt);
     XButtonReleasedEvent* brelease_evt = reinterpret_cast<XButtonReleasedEvent*>(evt);
@@ -350,9 +371,13 @@ int16 NPP_HandleEvent(NPP instance, void *event)
     }
 
     fflush(stdout);
-#endif  // XLIB_TEMPORARILY_DISABLED
-
 #else
+
+#ifdef MAC_EVENT_CODE_DISABLED_DUE_TO_ERRORS
+// This code apparently never built on Mac, but Mac was previously
+// using the Linux branch.  It doesn't quite build.
+// warning: 'GlobalToLocal' is deprecated (declared at
+// .../Frameworks/QD.framework/Headers/QuickdrawAPI.h:2181)
     EventRecord* evt = static_cast<EventRecord*>(event);
     Point pt = { evt->where.v, evt->where.h };
     switch (evt->what) {
@@ -413,6 +438,8 @@ int16 NPP_HandleEvent(NPP instance, void *event)
         default:
             log(instance, "event %d", evt->what);
     }
+#endif  // MAC_EVENT_CODE_DISABLED_DUE_TO_ERRORS
+
 #endif
 
     return 0;
@@ -429,18 +456,55 @@ void NPP_URLNotify(NPP instance, const char *url, NPReason reason, void *notifyD
 
 NPError NPP_GetValue(NPP instance, NPPVariable variable, void *value)
 {
-    if (variable == NPPVpluginScriptableNPObject) {
-        void **v = (void **)value;
-        PluginObject* obj = static_cast<PluginObject*>(instance->pdata);
-        // Return value is expected to be retained
-        browser->retainobject((NPObject *)obj);
-        *v = obj;
-        return NPERR_NO_ERROR;
+    NPError err = NPERR_NO_ERROR;
+
+    switch (variable) {
+#if defined(OS_LINUX)
+        case NPPVpluginNameString:
+            *((const char **)value) = "WebKit Test PlugIn";
+            break;
+        case NPPVpluginDescriptionString:
+            *((const char **)value) = "Simple Netscape plug-in that handles test content for WebKit";
+            break;
+        case NPPVpluginNeedsXEmbed:
+            *((NPBool *)value) = TRUE;
+            break;
+#endif
+        case NPPVpluginScriptableNPObject: {
+            void **v = (void **)value;
+            PluginObject* obj = static_cast<PluginObject*>(instance->pdata);
+            // Return value is expected to be retained
+            browser->retainobject((NPObject *)obj);
+            *v = obj;
+            break;
+        }
+        default:
+            fprintf(stderr, "Unhandled variable to NPP_GetValue\n");
+            err = NPERR_GENERIC_ERROR;
+            break;
     }
-    return NPERR_GENERIC_ERROR;
+
+    return err;
 }
 
 NPError NPP_SetValue(NPP instance, NPNVariable variable, void *value)
 {
     return NPERR_GENERIC_ERROR;
 }
+
+#if defined(OS_LINUX)
+NPError NP_GetValue(NPP instance, NPPVariable variable, void *value)
+{
+    return NPP_GetValue(instance, variable, value);
+}
+
+const char* NP_GetMIMEDescription(void) {
+    // The layout test LayoutTests/fast/js/navigator-mimeTypes-length.html
+    // asserts that the number of mimetypes handled by plugins should be
+    // greater than the number of plugins.  This isn't true if we're
+    // the only plugin and we only handle one mimetype, so specify
+    // multiple mimetypes here.
+    return "application/x-webkit-test-netscape:testnetscape:test netscape content;"
+           "application/x-webkit-test-netscape2:testnetscape2:test netscape content2";
+}
+#endif

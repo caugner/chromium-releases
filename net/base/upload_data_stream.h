@@ -10,13 +10,15 @@
 
 namespace net {
 
+class IOBuffer;
+
 class UploadDataStream {
  public:
   explicit UploadDataStream(const UploadData* data);
   ~UploadDataStream();
 
   // Returns the stream's buffer and buffer length.
-  const char* buf() const { return buf_; }
+  IOBuffer* buf() const { return buf_; }
   size_t buf_len() const { return buf_len_; }
 
   // Call to indicate that a portion of the stream's buffer was consumed.  This
@@ -38,7 +40,7 @@ class UploadDataStream {
   // once, then we memmove the remaining portion and back-fill the buffer for
   // the next "write" call.  buf_len_ indicates how much data is in the buffer.
   enum { kBufSize = 16384 };
-  char buf_[kBufSize];
+  scoped_refptr<IOBuffer> buf_;
   size_t buf_len_;
 
   // Iterator to the upload element to be written to the send buffer next.

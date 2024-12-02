@@ -6,11 +6,11 @@
 
 #include <limits>
 
+#include "app/l10n_util.h"
 #include "base/logging.h"
 #include "base/process_util.h"
 #include "base/rand_util.h"
 #include "base/string_util.h"
-#include "chrome/common/l10n_util.h"
 #include "grit/generated_resources.h"
 
 std::wstring ChildProcessInfo::GetTypeNameInEnglish(
@@ -24,6 +24,8 @@ std::wstring ChildProcessInfo::GetTypeNameInEnglish(
       return L"Plug-in";
     case WORKER_PROCESS:
       return L"Web Worker";
+    case UTILITY_PROCESS:
+      return L"Utility";
     case UNKNOWN_PROCESS:
       default:
       DCHECK(false) << "Unknown child process type!";
@@ -67,14 +69,14 @@ ChildProcessInfo::ChildProcessInfo(ProcessType type) {
 ChildProcessInfo::~ChildProcessInfo() {
 }
 
-std::wstring ChildProcessInfo::GenerateRandomChannelID(void* instance) {
+std::string ChildProcessInfo::GenerateRandomChannelID(void* instance) {
   // Note: the string must start with the current process id, this is how
   // child processes determine the pid of the parent.
   // Build the channel ID.  This is composed of a unique identifier for the
   // parent browser process, an identifier for the child instance, and a random
   // component. We use a random component so that a hacked child process can't
   // cause denial of service by causing future named pipe creation to fail.
-  return StringPrintf(L"%d.%x.%d",
+  return StringPrintf("%d.%x.%d",
                       base::GetCurrentProcId(), instance,
                       base::RandInt(0, std::numeric_limits<int>::max()));
 }

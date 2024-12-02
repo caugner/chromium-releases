@@ -1,13 +1,14 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+
+#include "chrome/browser/shell_integration.h"
 
 #include <windows.h>
 #include <shlobj.h>
 #include <shobjidl.h>
 
-#include "chrome/browser/shell_integration.h"
-
+#include "app/win_util.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/message_loop.h"
@@ -17,7 +18,6 @@
 #include "base/task.h"
 #include "base/win_util.h"
 #include "chrome/common/chrome_constants.h"
-#include "chrome/common/win_util.h"
 #include "chrome/installer/util/browser_distribution.h"
 #include "chrome/installer/util/create_reg_key_work_item.h"
 #include "chrome/installer/util/set_reg_value_work_item.h"
@@ -33,15 +33,9 @@ bool ShellIntegration::SetAsDefaultBrowser() {
     return false;
   }
 
-  ShellUtil::RegisterStatus register_status =
-      ShellUtil::AddChromeToSetAccessDefaults(chrome_exe, false);
-  if (register_status == ShellUtil::FAILURE) {
-    LOG(ERROR) << "Chrome could not be registered on the machine.";
-    return false;
-  }
-
   // From UI currently we only allow setting default browser for current user.
-  if (!ShellUtil::MakeChromeDefault(ShellUtil::CURRENT_USER, chrome_exe)) {
+  if (!ShellUtil::MakeChromeDefault(ShellUtil::CURRENT_USER,
+                                    chrome_exe, true)) {
     LOG(ERROR) << "Chrome could not be set as default browser.";
     return false;
   }
@@ -77,14 +71,22 @@ bool ShellIntegration::IsDefaultBrowser() {
     if (!SUCCEEDED(hr))
       return false;
 
+    BrowserDistribution* dist = BrowserDistribution::GetDistribution();
+    std::wstring app_name = dist->GetApplicationName();
+    std::wstring app_name_with_suffix;
+    ShellUtil::GetUserSpecificDefaultBrowserSuffix(&app_name_with_suffix);
+    app_name_with_suffix = app_name + app_name_with_suffix;
     for (int i = 0; i < _countof(kChromeProtocols); i++) {
       BOOL result = TRUE;
-      BrowserDistribution* dist = BrowserDistribution::GetDistribution();
       hr = pAAR->QueryAppIsDefault(kChromeProtocols[i].c_str(), AT_URLPROTOCOL,
-        AL_EFFECTIVE, dist->GetApplicationName().c_str(), &result);
+          AL_EFFECTIVE, app_name_with_suffix.c_str(), &result);
       if (!SUCCEEDED(hr) || (result == FALSE)) {
-        pAAR->Release();
-        return false;
+        hr = pAAR->QueryAppIsDefault(kChromeProtocols[i].c_str(),
+            AT_URLPROTOCOL, AL_EFFECTIVE, app_name.c_str(), &result);
+        if (!SUCCEEDED(hr) || (result == FALSE)) {
+          pAAR->Release();
+          return false;
+        }
       }
     }
     pAAR->Release();
@@ -110,7 +112,11 @@ bool ShellIntegration::IsDefaultBrowser() {
       std::wstring short_path;
       GetShortPathName(command_line.program().c_str(),
                        WriteInto(&short_path, MAX_PATH), MAX_PATH);
-      if (short_path != short_app_path)
+      if ((short_path.size() != short_app_path.size()) ||
+          (!std::equal(short_path.begin(),
+                       short_path.end(),
+                       short_app_path.begin(),
+                       CaseInsensitiveCompare<wchar_t>())))
         return false;
     }
   }

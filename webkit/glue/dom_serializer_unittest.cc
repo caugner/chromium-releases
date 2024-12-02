@@ -12,6 +12,7 @@ MSVC_PUSH_WARNING_LEVEL(0);
 #include "Element.h"
 #include "FrameLoader.h"
 #include "FrameView.h"
+#include "HTMLCollection.h"
 #include "HTMLHeadElement.h"
 #include "HTMLMetaElement.h"
 #include "HTMLNames.h"
@@ -28,6 +29,8 @@ MSVC_POP_WARNING();
 #include "base/string_util.h"
 #include "net/base/net_util.h"
 #include "net/url_request/url_request_context.h"
+#include "webkit/api/public/WebData.h"
+#include "webkit/api/public/WebURL.h"
 #include "webkit/glue/dom_operations.h"
 #include "webkit/glue/dom_operations_private.h"
 #include "webkit/glue/dom_serializer.h"
@@ -238,8 +241,9 @@ bool IsMetaElement(const WebCore::Node* node, WebCore::String* charset_info) {
 // If original contents have document type, the serialized contents also have
 // document type.
 TEST_F(DomSerializerTests, SerialzeHTMLDOMWithDocType) {
-  std::wstring page_file_path = data_dir_;
-  file_util::AppendToPath(&page_file_path, L"dom_serializer/youtube_1.htm");
+  FilePath page_file_path = data_dir_;
+  page_file_path = page_file_path.AppendASCII("dom_serializer");
+  page_file_path = page_file_path.AppendASCII("youtube_1.htm");
   GURL file_url = net::FilePathToFileURL(page_file_path);
   ASSERT_TRUE(file_url.SchemeIsFile());
   // Load the test file.
@@ -269,8 +273,9 @@ TEST_F(DomSerializerTests, SerialzeHTMLDOMWithDocType) {
 // If original contents do not have document type, the serialized contents
 // also do not have document type.
 TEST_F(DomSerializerTests, SerialzeHTMLDOMWithoutDocType) {
-  std::wstring page_file_path = data_dir_;
-  file_util::AppendToPath(&page_file_path, L"dom_serializer/youtube_2.htm");
+  FilePath page_file_path = data_dir_;
+  page_file_path = page_file_path.AppendASCII("dom_serializer");
+  page_file_path = page_file_path.AppendASCII("youtube_2.htm");
   GURL file_url = net::FilePathToFileURL(page_file_path);
   ASSERT_TRUE(file_url.SchemeIsFile());
   // Load the test file.
@@ -301,11 +306,12 @@ TEST_F(DomSerializerTests, SerialzeHTMLDOMWithoutDocType) {
 // finishing serialization, the serialized contents should be same
 // with original XML document.
 TEST_F(DomSerializerTests, SerialzeXMLDocWithBuiltInEntities) {
-  std::wstring page_file_path = data_dir_;
-  file_util::AppendToPath(&page_file_path, L"dom_serializer/note.xml");
+  FilePath page_file_path = data_dir_;
+  page_file_path = page_file_path.AppendASCII("dom_serializer");
+  page_file_path = page_file_path.AppendASCII("note.xml");
   // Read original contents for later comparison.
-  std::string orginal_contents;
-  ASSERT_TRUE(file_util::ReadFileToString(page_file_path, &orginal_contents));
+  std::string original_contents;
+  ASSERT_TRUE(file_util::ReadFileToString(page_file_path, &original_contents));
   // Get file URL.
   GURL file_url = net::FilePathToFileURL(page_file_path);
   ASSERT_TRUE(file_url.SchemeIsFile());
@@ -317,16 +323,17 @@ TEST_F(DomSerializerTests, SerialzeXMLDocWithBuiltInEntities) {
   ASSERT_TRUE(HasSerializedFrame(file_url));
   const std::string& serialized_contents =
       GetSerializedContentForFrame(file_url);
-  ASSERT_EQ(orginal_contents, serialized_contents);
+  ASSERT_EQ(original_contents, serialized_contents);
 }
 
 // When serializing DOM, we add MOTW declaration before html tag.
 TEST_F(DomSerializerTests, SerialzeHTMLDOMWithAddingMOTW) {
-  std::wstring page_file_path = data_dir_;
-  file_util::AppendToPath(&page_file_path, L"dom_serializer/youtube_2.htm");
+  FilePath page_file_path = data_dir_;
+  page_file_path = page_file_path.AppendASCII("dom_serializer");
+  page_file_path = page_file_path.AppendASCII("youtube_2.htm");
   // Read original contents for later comparison .
-  std::string orginal_contents;
-  ASSERT_TRUE(file_util::ReadFileToString(page_file_path, &orginal_contents));
+  std::string original_contents;
+  ASSERT_TRUE(file_util::ReadFileToString(page_file_path, &original_contents));
   // Get file URL.
   GURL file_url = net::FilePathToFileURL(page_file_path);
   ASSERT_TRUE(file_url.SchemeIsFile());
@@ -337,7 +344,7 @@ TEST_F(DomSerializerTests, SerialzeHTMLDOMWithAddingMOTW) {
   // The encoding of original contents is ISO-8859-1, so we convert the MOTW
   // declaration to ASCII and search whether original contents has it or not.
   ASSERT_TRUE(std::string::npos ==
-      orginal_contents.find(motw_declaration));
+      original_contents.find(motw_declaration));
   // Load the test file.
   LoadPageFromURL(file_url);
   // Do serialization.
@@ -355,8 +362,9 @@ TEST_F(DomSerializerTests, SerialzeHTMLDOMWithAddingMOTW) {
 // http://bugs.webkit.org/show_bug.cgi?id=16621 even the original document
 // does not have META charset declaration.
 TEST_F(DomSerializerTests, SerialzeHTMLDOMWithNoMetaCharsetInOriginalDoc) {
-  std::wstring page_file_path = data_dir_;
-  file_util::AppendToPath(&page_file_path, L"dom_serializer/youtube_1.htm");
+  FilePath page_file_path = data_dir_;
+  page_file_path = page_file_path.AppendASCII("dom_serializer");
+  page_file_path = page_file_path.AppendASCII("youtube_1.htm");
   // Get file URL.
   GURL file_url = net::FilePathToFileURL(page_file_path);
   ASSERT_TRUE(file_url.SchemeIsFile());
@@ -417,8 +425,9 @@ TEST_F(DomSerializerTests, SerialzeHTMLDOMWithNoMetaCharsetInOriginalDoc) {
 // declarations.
 TEST_F(DomSerializerTests,
        SerialzeHTMLDOMWithMultipleMetaCharsetInOriginalDoc) {
-  std::wstring page_file_path = data_dir_;
-  file_util::AppendToPath(&page_file_path, L"dom_serializer/youtube_2.htm");
+  FilePath page_file_path = data_dir_;
+  page_file_path = page_file_path.AppendASCII("dom_serializer");
+  page_file_path = page_file_path.AppendASCII("youtube_2.htm");
   // Get file URL.
   GURL file_url = net::FilePathToFileURL(page_file_path);
   ASSERT_TRUE(file_url.SchemeIsFile());
@@ -480,17 +489,19 @@ TEST_F(DomSerializerTests,
 
 // Test situation of html entities in text when serializing HTML DOM.
 TEST_F(DomSerializerTests, SerialzeHTMLDOMWithEntitiesInText) {
-  std::wstring page_file_path = data_dir_;
-  file_util::AppendToPath(&page_file_path,
-                          L"dom_serializer/htmlentities_in_text.htm");
-  // Read original contents for later comparison .
-  std::string orginal_contents;
-  ASSERT_TRUE(file_util::ReadFileToString(page_file_path, &orginal_contents));
-  // Get file URL.
+  FilePath page_file_path = data_dir_;
+  page_file_path = page_file_path.AppendASCII(
+      "dom_serializer/htmlentities_in_text.htm");
+  // Get file URL. The URL is dummy URL to identify the following loading
+  // actions. The test content is in constant:original_contents.
   GURL file_url = net::FilePathToFileURL(page_file_path);
   ASSERT_TRUE(file_url.SchemeIsFile());
-  // Load the test file.
-  LoadPageFromURL(file_url);
+  // Test contents.
+  static const char* const original_contents =
+      "<HTML><BODY>&amp;&lt;&gt;\"\'</BODY></HTML>";
+  // Load the test contents.
+  LoadContents(original_contents, file_url, "");
+
   // Get BODY's text content in DOM.
   WebFrameImpl* web_frame =
       webkit_glue::GetWebFrameImplFromWebViewForSpecificURL(
@@ -509,28 +520,48 @@ TEST_F(DomSerializerTests, SerialzeHTMLDOMWithEntitiesInText) {
   ASSERT_TRUE(HasSerializedFrame(file_url));
   const std::string& serialized_contents =
       GetSerializedContentForFrame(file_url);
+  // Compare the serialized contents with original contents to make sure
+  // they are same.
   // Because we add MOTW when serializing DOM, so before comparison, we also
   // need to add MOTW to original_contents.
-  std::string motw_declaration =
-    webkit_glue::DomSerializer::GenerateMarkOfTheWebDeclaration(file_url);
-  orginal_contents = motw_declaration + orginal_contents;
-  ASSERT_EQ(orginal_contents, serialized_contents);
+  std::string original_str =
+      webkit_glue::DomSerializer::GenerateMarkOfTheWebDeclaration(file_url);
+  original_str += original_contents;
+  // Since WebCore now inserts a new HEAD element if there is no HEAD element
+  // when creating BODY element. (Please see HTMLParser::bodyCreateErrorCheck.)
+  // We need to append the HEAD content and corresponding META content if we
+  // find WebCore-generated HEAD element.
+  if (doc->head()) {
+    WebCore::String encoding = web_frame->frame()->loader()->encoding();
+    std::string htmlTag("<HTML>");
+    std::string::size_type pos = original_str.find(htmlTag);
+    ASSERT_NE(std::string::npos, pos);
+    pos += htmlTag.length();
+    std::string head_part("<HEAD>");
+    head_part += WideToASCII(
+        webkit_glue::DomSerializer::GenerateMetaCharsetDeclaration(
+            webkit_glue::StringToStdWString(encoding)));
+    head_part += "</HEAD>";
+    original_str.insert(pos, head_part);
+  }
+  ASSERT_EQ(original_str, serialized_contents);
 }
 
 // Test situation of html entities in attribute value when serializing
 // HTML DOM.
 TEST_F(DomSerializerTests, SerialzeHTMLDOMWithEntitiesInAttributeValue) {
-  std::wstring page_file_path = data_dir_;
-  file_util::AppendToPath(&page_file_path,
-      L"dom_serializer/htmlentities_in_attribute_value.htm");
-  // Read original contents for later comparison.
-  std::string orginal_contents;
-  ASSERT_TRUE(file_util::ReadFileToString(page_file_path, &orginal_contents));
-  // Get file URL.
+  FilePath page_file_path = data_dir_;
+  page_file_path = page_file_path.AppendASCII(
+      "dom_serializer/htmlentities_in_attribute_value.htm");
+  // Get file URL. The URL is dummy URL to identify the following loading
+  // actions. The test content is in constant:original_contents.
   GURL file_url = net::FilePathToFileURL(page_file_path);
   ASSERT_TRUE(file_url.SchemeIsFile());
-  // Load the test file.
-  LoadPageFromURL(file_url);
+  // Test contents.
+  static const char* const original_contents =
+      "<HTML><BODY title=\"&amp;&lt;&gt;&quot;&#39;\"></BODY></HTML>";
+  // Load the test contents.
+  LoadContents(original_contents, file_url, "");
   // Get value of BODY's title attribute in DOM.
   WebFrameImpl* web_frame =
       webkit_glue::GetWebFrameImplFromWebViewForSpecificURL(
@@ -549,12 +580,66 @@ TEST_F(DomSerializerTests, SerialzeHTMLDOMWithEntitiesInAttributeValue) {
   ASSERT_TRUE(HasSerializedFrame(file_url));
   const std::string& serialized_contents =
       GetSerializedContentForFrame(file_url);
-  // Because we add MOTW when serializing DOM, so before comparison, we also
-  // need to add MOTW to original_contents.
-  std::string motw_declaration =
-    webkit_glue::DomSerializer::GenerateMarkOfTheWebDeclaration(file_url);
-  orginal_contents = motw_declaration + orginal_contents;
-  ASSERT_EQ(serialized_contents, orginal_contents);
+  // Compare the serialized contents with original contents to make sure
+  // they are same.
+  std::string original_str =
+      webkit_glue::DomSerializer::GenerateMarkOfTheWebDeclaration(file_url);
+  original_str += original_contents;
+  if (doc->head()) {
+    WebCore::String encoding = web_frame->frame()->loader()->encoding();
+    std::string htmlTag("<HTML>");
+    std::string::size_type pos = original_str.find(htmlTag);
+    ASSERT_NE(std::string::npos, pos);
+    pos += htmlTag.length();
+    std::string head_part("<HEAD>");
+    head_part += WideToASCII(
+        webkit_glue::DomSerializer::GenerateMetaCharsetDeclaration(
+            webkit_glue::StringToStdWString(encoding)));
+    head_part += "</HEAD>";
+    original_str.insert(pos, head_part);
+  }
+  ASSERT_EQ(original_str, serialized_contents);
+}
+
+// Test situation of non-standard HTML entities when serializing HTML DOM.
+TEST_F(DomSerializerTests, SerialzeHTMLDOMWithNonStandardEntities) {
+  // Make a test file URL and load it.
+  FilePath page_file_path = data_dir_;
+  page_file_path = page_file_path.AppendASCII("dom_serializer");
+  page_file_path = page_file_path.AppendASCII("nonstandard_htmlentities.htm");
+  GURL file_url = net::FilePathToFileURL(page_file_path);
+  LoadPageFromURL(file_url);
+
+  // Get value of BODY's title attribute in DOM.
+  WebFrameImpl* web_frame =
+      webkit_glue::GetWebFrameImplFromWebViewForSpecificURL(
+          test_shell_->webView(), file_url);
+  WebCore::Document* doc = web_frame->frame()->document();
+  ASSERT_TRUE(doc->isHTMLDocument());
+  WebCore::HTMLElement* body_ele = doc->body();
+  // Unescaped string for "&percnt;&nsup;&supl;&apos;".
+  static const UChar parsed_value[] = {
+    '%', 0x2285, 0x00b9, '\'', 0
+  };
+  const WebCore::String& value = body_ele->getAttribute(
+      WebCore::HTMLNames::titleAttr);
+  ASSERT_TRUE(value == WebCore::String(parsed_value));
+  // Check the BODY content.
+  WebCore::Node* text_node = body_ele->firstChild();
+  ASSERT_TRUE(text_node->isTextNode());
+  ASSERT_TRUE(text_node->nodeValue() == WebCore::String(parsed_value));
+
+  // Do serialization.
+  SerializeDomForURL(file_url, false);
+  // Check the serialized string.
+  ASSERT_TRUE(HasSerializedFrame(file_url));
+  const std::string& serialized_contents =
+      GetSerializedContentForFrame(file_url);
+  // Confirm that the serialized string has no non-standard HTML entities.
+  ASSERT_EQ(std::string::npos, serialized_contents.find("&percnt;"));
+  ASSERT_EQ(std::string::npos, serialized_contents.find("&nsup;"));
+  ASSERT_EQ(std::string::npos, serialized_contents.find("&supl;"));
+  ASSERT_EQ(std::string::npos, serialized_contents.find("&apos;"));
 }
 
 // Test situation of BASE tag in original document when serializing HTML DOM.
@@ -565,17 +650,16 @@ TEST_F(DomSerializerTests, SerialzeHTMLDOMWithBaseTag) {
   // There are total 2 available base tags in this test file.
   const int kTotalBaseTagCountInTestFile = 2;
 
-  FilePath page_file_path = FilePath::FromWStringHack(data_dir_).AppendASCII(
-      "dom_serializer");
+  FilePath page_file_path = data_dir_.AppendASCII("dom_serializer");
   file_util::EnsureEndsWithSeparator(&page_file_path);
 
   // Get page dir URL which is base URL of this file.
-  GURL path_dir_url = net::FilePathToFileURL(page_file_path.ToWStringHack());
+  GURL path_dir_url = net::FilePathToFileURL(page_file_path);
   // Get file path.
   page_file_path =
       page_file_path.AppendASCII("html_doc_has_base_tag.htm");
   // Get file URL.
-  GURL file_url = net::FilePathToFileURL(page_file_path.ToWStringHack());
+  GURL file_url = net::FilePathToFileURL(page_file_path);
   ASSERT_TRUE(file_url.SchemeIsFile());
   // Load the test file.
   LoadPageFromURL(file_url);
@@ -671,6 +755,67 @@ TEST_F(DomSerializerTests, SerialzeHTMLDOMWithBaseTag) {
   GURL new_base_url(
       webkit_glue::StringToStdString(doc->baseURL()));
   ASSERT_EQ(new_base_url, path_dir_url);
+}
+
+// Serializing page which has an empty HEAD tag.
+TEST_F(DomSerializerTests, SerialzeHTMLDOMWithEmptyHead) {
+  FilePath page_file_path = data_dir_;
+  page_file_path = page_file_path.AppendASCII("dom_serializer");
+  page_file_path = page_file_path.AppendASCII("empty_head.htm");
+  GURL file_url = net::FilePathToFileURL(page_file_path);
+  ASSERT_TRUE(file_url.SchemeIsFile());
+
+  // Load the test html content.
+  static const char* const empty_head_contents =
+    "<HTML><HEAD></HEAD><BODY>hello world</BODY></HTML>";
+  LoadContents(empty_head_contents, file_url, "");
+
+  // Make sure the head tag is empty.
+  WebFrameImpl* web_frame =
+      static_cast<WebFrameImpl*>(test_shell_->webView()->GetMainFrame());
+  ASSERT_TRUE(web_frame != NULL);
+  WebCore::Document* doc = web_frame->frame()->document();
+  ASSERT_TRUE(doc->isHTMLDocument());
+  WebCore::HTMLHeadElement* head_ele = doc->head();
+  ASSERT_TRUE(head_ele != NULL);
+  WTF::PassRefPtr<WebCore::HTMLCollection> children = head_ele->children();
+  ASSERT_TRUE(0 == children->length());
+
+  // Do serialization.
+  SerializeDomForURL(file_url, false);
+  // Make sure the serialized contents have META ;
+  ASSERT_TRUE(HasSerializedFrame(file_url));
+  const std::string& serialized_contents =
+      GetSerializedContentForFrame(file_url);
+
+  // Reload serialized contents and make sure there is only one META tag.
+  LoadContents(serialized_contents, file_url,
+               web_frame->frame()->loader()->encoding());
+  web_frame =
+      static_cast<WebFrameImpl*>(test_shell_->webView()->GetMainFrame());
+  ASSERT_TRUE(web_frame != NULL);
+  doc = web_frame->frame()->document();
+  ASSERT_TRUE(doc->isHTMLDocument());
+  head_ele = doc->head();
+  ASSERT_TRUE(head_ele != NULL);
+  children = head_ele->children();
+  ASSERT_TRUE(1 == children->length());
+  WebCore::Node* meta_node = head_ele->firstChild();
+  ASSERT_TRUE(meta_node != NULL);
+  // Get meta charset info.
+  WebCore::String charset_info;
+  ASSERT_TRUE(IsMetaElement(meta_node, &charset_info));
+  ASSERT_TRUE(!charset_info.isEmpty());
+  ASSERT_TRUE(charset_info == web_frame->frame()->loader()->encoding());
+
+  // Check the body's first node is text node and its contents are
+  // "hello world"
+  WebCore::HTMLElement* body_ele = doc->body();
+  ASSERT_TRUE(body_ele != NULL);
+  WebCore::Node* text_node = body_ele->firstChild();
+  ASSERT_TRUE(text_node->isTextNode());
+  const WebCore::String& text_node_contents = text_node->nodeValue();
+  ASSERT_TRUE(text_node_contents == WebCore::String("hello world"));
 }
 
 }  // namespace

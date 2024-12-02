@@ -4,34 +4,33 @@
 
 #include "chrome/browser/printing/print_view_manager.h"
 
+#include "app/l10n_util.h"
+#include "base/scoped_ptr.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/printing/print_job.h"
 #include "chrome/browser/printing/print_job_manager.h"
-#include "chrome/browser/printing/printed_document.h"
 #include "chrome/browser/printing/printer_query.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
-#include "chrome/browser/tab_contents/web_contents.h"
-#include "chrome/common/gfx/emf.h"
-#include "chrome/common/l10n_util.h"
+#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/render_messages.h"
 #include "grit/generated_resources.h"
+#include "printing/native_metafile.h"
+#include "printing/printed_document.h"
 
 using base::TimeDelta;
 
 namespace printing {
 
-PrintViewManager::PrintViewManager(WebContents& owner)
+PrintViewManager::PrintViewManager(TabContents& owner)
     : owner_(owner),
       waiting_to_print_(false),
+      printing_succeeded_(false),
       inside_inner_message_loop_(false) {
 }
 
 PrintViewManager::~PrintViewManager() {
-}
-
-void PrintViewManager::Destroy() {
   DisconnectFromCurrentPrintJob();
 }
 
@@ -49,12 +48,27 @@ bool PrintViewManager::OnRenderViewGone(RenderViewHost* render_view_host) {
 
   scoped_refptr<PrintedDocument> document(print_job_->document());
   if (document) {
-    // If IsComplete() returns false, the document isn't completely renderered.
+    // If IsComplete() returns false, the document isn't completely rendered.
     // Since our renderer is gone, there's nothing to do, cancel it. Otherwise,
     // the print job may finish without problem.
     TerminatePrintJob(!document->IsComplete());
   }
   return true;
+}
+
+std::wstring PrintViewManager::RenderSourceName() {
+  std::wstring name(UTF16ToWideHack(owner_.GetTitle()));
+  if (name.empty())
+    name = l10n_util::GetString(IDS_DEFAULT_PRINT_DOCUMENT_TITLE);
+  return name;
+}
+
+GURL PrintViewManager::RenderSourceUrl() {
+  NavigationEntry* entry = owner_.controller().GetActiveEntry();
+  if (entry)
+    return entry->display_url();
+  else
+    return GURL();
 }
 
 void PrintViewManager::DidGetPrintedPagesCount(int cookie, int number_pages) {
@@ -82,8 +96,8 @@ void PrintViewManager::DidPrintPage(
 
   PrintedDocument* document = print_job_->document();
   if (!document || params.document_cookie != document->cookie()) {
-    // Out of sync. It may happens since we are completely asynchronous. Old
-    // spurious message can happen if one of the processes is overloaded.
+    // Out of sync. It may happen since we are completely asynchronous. Old
+    // spurious messages can be received if one of the processes is overloaded.
     return;
   }
 
@@ -97,39 +111,25 @@ void PrintViewManager::DidPrintPage(
     return;
   }
 
-  base::SharedMemory shared_buf(params.emf_data_handle, true);
+  base::SharedMemory shared_buf(params.metafile_data_handle, true);
   if (!shared_buf.Map(params.data_size)) {
     NOTREACHED() << "couldn't map";
     owner_.Stop();
     return;
   }
 
-  gfx::Emf* emf = new gfx::Emf;
-  if (!emf->CreateFromData(shared_buf.memory(), params.data_size)) {
-    NOTREACHED() << "Invalid EMF header";
-    delete emf;
+  scoped_ptr<NativeMetafile> metafile(new NativeMetafile());
+  if (!metafile->CreateFromData(shared_buf.memory(), params.data_size)) {
+    NOTREACHED() << "Invalid metafile header";
     owner_.Stop();
     return;
   }
 
   // Update the rendered document. It will send notifications to the listener.
-  document->SetPage(params.page_number, emf, params.actual_shrink);
+  document->SetPage(params.page_number,
+                    metafile.release(),
+                    params.actual_shrink);
   ShouldQuitFromInnerMessageLoop();
-}
-
-std::wstring PrintViewManager::RenderSourceName() {
-  std::wstring name(UTF16ToWideHack(owner_.GetTitle()));
-  if (name.empty())
-    name = l10n_util::GetString(IDS_DEFAULT_PRINT_DOCUMENT_TITLE);
-  return name;
-}
-
-GURL PrintViewManager::RenderSourceUrl() {
-  NavigationEntry* entry = owner_.controller()->GetActiveEntry();
-  if (entry)
-    return entry->display_url();
-  else
-    return GURL();
 }
 
 void PrintViewManager::Observe(NotificationType type,
@@ -151,7 +151,6 @@ void PrintViewManager::OnNotifyPrintJobEvent(
     const JobEventDetails& event_details) {
   switch (event_details.type()) {
     case JobEventDetails::FAILED: {
-      // TODO(maruel):  bug 1123882 Show some kind of notification.
       TerminatePrintJob(true);
       break;
     }
@@ -179,6 +178,7 @@ void PrintViewManager::OnNotifyPrintJobEvent(
       // Printing is done, we don't need it anymore.
       // print_job_->is_job_pending() may still be true, depending on the order
       // of object registration.
+      printing_succeeded_ = true;
       ReleasePrintJob();
       break;
     }
@@ -205,10 +205,11 @@ bool PrintViewManager::RenderAllMissingPagesNow() {
   // Is the document already complete?
   if (print_job_->document() && print_job_->document()->IsComplete()) {
     waiting_to_print_ = false;
+    printing_succeeded_ = true;
     return true;
   }
 
-  // WebContents is either dying or a second consecutive request to print
+  // TabContents is either dying or a second consecutive request to print
   // happened before the first had time to finish. We need to render all the
   // pages in an hurry if a print_job_ is still pending. No need to wait for it
   // to actually spool the pages, only to have the renderer generate them. Run
@@ -267,10 +268,9 @@ bool PrintViewManager::CreateNewPrintJob(PrintJobWorkerOwner* job) {
 
   print_job_ = new PrintJob();
   print_job_->Initialize(job, this);
-  NotificationService::current()->AddObserver(
-      this,
-      NotificationType::PRINT_JOB_EVENT,
-      Source<PrintJob>(print_job_.get()));
+  registrar_.Add(this, NotificationType::PRINT_JOB_EVENT,
+                 Source<PrintJob>(print_job_.get()));
+  printing_succeeded_ = false;
   return true;
 }
 
@@ -292,12 +292,18 @@ void PrintViewManager::DisconnectFromCurrentPrintJob() {
   }
 }
 
+void PrintViewManager::PrintingDone(bool success) {
+  if (print_job_.get()) {
+    owner_.PrintingDone(print_job_->cookie(), success);
+  }
+}
+
 void PrintViewManager::TerminatePrintJob(bool cancel) {
   if (!print_job_.get())
     return;
 
   if (cancel) {
-    // We don't need the EMF data anymore because the printing is canceled.
+    // We don't need the metafile data anymore because the printing is canceled.
     print_job_->Cancel();
     waiting_to_print_ = false;
     inside_inner_message_loop_ = false;
@@ -306,7 +312,7 @@ void PrintViewManager::TerminatePrintJob(bool cancel) {
     DCHECK(!print_job_->document() || print_job_->document()->IsComplete() ||
            !waiting_to_print_);
 
-    // WebContents is either dying or navigating elsewhere. We need to render
+    // TabContents is either dying or navigating elsewhere. We need to render
     // all the pages in an hurry if a print job is still pending. This does the
     // trick since it runs a blocking message loop:
     print_job_->Stop();
@@ -318,11 +324,11 @@ void PrintViewManager::ReleasePrintJob() {
   DCHECK_EQ(waiting_to_print_, false);
   if (!print_job_.get())
     return;
-  NotificationService::current()->RemoveObserver(
-      this,
-      NotificationType::PRINT_JOB_EVENT,
-      Source<PrintJob>(print_job_.get()));
 
+  PrintingDone(printing_succeeded_);
+
+  registrar_.Remove(this, NotificationType::PRINT_JOB_EVENT,
+                    Source<PrintJob>(print_job_.get()));
   print_job_->DisconnectSource();
   // Don't close the worker thread.
   print_job_ = NULL;

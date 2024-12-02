@@ -15,6 +15,7 @@
 #include "base/basictypes.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
+#include "base/file_util.h"
 #include "base/message_loop.h"
 #include "base/histogram.h"
 #include "base/path_service.h"
@@ -23,46 +24,24 @@
 #include "chrome/browser/net/dns_global.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/common/ipc_channel.h"
-#include "chrome/common/ipc_message_utils.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/transport_dib.h"
 #include "chrome/renderer/render_view.h"
+#include "ipc/ipc_channel.h"
+#include "ipc/ipc_message_utils.h"
+#include "media/base/media.h"
 #include "webkit/glue/webkit_glue.h"
 
-// Attempts to load FFmpeg before engaging the sandbox.  Returns true if all
-// libraries were loaded successfully, false otherwise.
-static bool LoadFFmpeg() {
-#if defined(OS_WIN)
-  int path_keys[] = {
-    chrome::FILE_LIBAVCODEC,
-    chrome::FILE_LIBAVFORMAT,
-    chrome::FILE_LIBAVUTIL
-  };
-  HMODULE libs[arraysize(path_keys)] = {NULL};
-  for (size_t i = 0; i < arraysize(path_keys); ++i) {
-    std::wstring path;
-    if (!PathService::Get(path_keys[i], &path))
-      break;
-    libs[i] = LoadLibrary(path.c_str());
-    if (!libs[i])
-      break;
+static size_t GetMaxSharedMemorySize() {
+  static int size = 0;
+#if defined(OS_LINUX)
+  if (size == 0) {
+    std::string contents;
+    file_util::ReadFileToString(FilePath("/proc/sys/kernel/shmmax"), &contents);
+    size = strtoul(contents.c_str(), NULL, 0);
   }
-
-  // Check that we loaded all libraries successfully.
-  if (libs[arraysize(libs)-1])
-    return true;
-
-  // Free any loaded libraries if we weren't successful.
-  for (size_t i = 0; i < arraysize(libs) && libs[i] != NULL; ++i) {
-    FreeLibrary(libs[i]);
-  }
-  return false;
-#else
-  // TODO(port): Need to handle loading FFmpeg on non-Windows platforms.
-  NOTIMPLEMENTED();
-  return false;
 #endif
+  return size;
 }
 
 //-----------------------------------------------------------------------------
@@ -76,7 +55,7 @@ RenderProcess::RenderProcess()
   Init();
 }
 
-RenderProcess::RenderProcess(const std::wstring& channel_name)
+RenderProcess::RenderProcess(const std::string& channel_name)
     : ChildProcess(new RenderThread(channel_name)),
       ALLOW_THIS_IN_INITIALIZER_LIST(shared_mem_cache_cleaner_(
           base::TimeDelta::FromSeconds(5),
@@ -132,6 +111,12 @@ void RenderProcess::Init() {
       command_line.GetSwitchValue(switches::kJavaScriptFlags));
   }
 
+  // Out of process dev tools rely upon auto break behavior.
+  webkit_glue::SetJavaScriptFlags(
+      L"--debugger-auto-break"
+      // Enable lazy in-memory profiling.
+      L" --prof --prof-lazy --logfile=* --compress-log");
+
   if (command_line.HasSwitch(switches::kEnableWatchdog)) {
     // TODO(JAR): Need to implement renderer IO msgloop watchdog.
   }
@@ -140,34 +125,28 @@ void RenderProcess::Init() {
     StatisticsRecorder::set_dump_on_exit(true);
   }
 
-  if (command_line.HasSwitch(switches::kEnableVideo) && LoadFFmpeg()) {
-    webkit_glue::SetMediaPlayerAvailable(true);
-  }
+  FilePath module_path;
+  initialized_media_library_ =
+      PathService::Get(base::DIR_MODULE, &module_path) &&
+      media::InitializeMediaLibrary(module_path);
 }
 
 bool RenderProcess::InProcessPlugins() {
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+#if defined(OS_LINUX)
+  // Plugin processes require a UI message loop, and the Linux message loop
+  // implementation only allows one UI loop per process.
+  if (command_line.HasSwitch(switches::kInProcessPlugins))
+    NOTIMPLEMENTED() << ": in process plugins not supported on Linux";
+  return command_line.HasSwitch(switches::kInProcessPlugins);
+#else
   return command_line.HasSwitch(switches::kInProcessPlugins) ||
          command_line.HasSwitch(switches::kSingleProcess);
+#endif
 }
 
 // -----------------------------------------------------------------------------
 // Platform specific code for dealing with bitmap transport...
-
-// -----------------------------------------------------------------------------
-// Create a platform canvas object which renders into the given transport
-// memory.
-// -----------------------------------------------------------------------------
-static skia::PlatformCanvas* CanvasFromTransportDIB(
-    TransportDIB* dib, const gfx::Rect& rect) {
-#if defined(OS_WIN)
-  return new skia::PlatformCanvas(rect.width(), rect.height(), true,
-                                  dib->handle());
-#elif defined(OS_LINUX) || defined(OS_MACOSX)
-  return new skia::PlatformCanvas(rect.width(), rect.height(), true,
-                                  reinterpret_cast<uint8_t*>(dib->memory()));
-#endif
-}
 
 TransportDIB* RenderProcess::CreateTransportDIB(size_t size) {
 #if defined(OS_WIN) || defined(OS_LINUX)
@@ -205,8 +184,18 @@ void RenderProcess::FreeTransportDIB(TransportDIB* dib) {
 
 skia::PlatformCanvas* RenderProcess::GetDrawingCanvas(
     TransportDIB** memory, const gfx::Rect& rect) {
+  int width = rect.width();
+  int height = rect.height();
   const size_t stride = skia::PlatformCanvas::StrideForWidth(rect.width());
-  const size_t size = stride * rect.height();
+  const size_t max_size = GetMaxSharedMemorySize();
+
+  // If the requested size is too big, reduce the height. Ideally we might like
+  // to reduce the width as well to make the size reduction more "balanced", but
+  // it rarely comes up in practice.
+  if ((max_size != 0) && (height * stride > max_size))
+    height = max_size / stride;
+
+  const size_t size = height * stride;
 
   if (!GetTransportDIBFromCache(memory, size)) {
     *memory = CreateTransportDIB(size);
@@ -214,7 +203,7 @@ skia::PlatformCanvas* RenderProcess::GetDrawingCanvas(
       return false;
   }
 
-  return CanvasFromTransportDIB(*memory, rect);
+  return (*memory)->GetPlatformCanvas(width, height);
 }
 
 void RenderProcess::ReleaseTransportDIB(TransportDIB* mem) {

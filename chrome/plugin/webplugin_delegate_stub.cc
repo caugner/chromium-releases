@@ -4,20 +4,25 @@
 
 #include "chrome/plugin/webplugin_delegate_stub.h"
 
+#include "build/build_config.h"
+
 #include "base/command_line.h"
+#include "chrome/common/child_process_logging.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/gfx/emf.h"
 #include "chrome/common/plugin_messages.h"
-#include "chrome/common/win_util.h"
 #include "chrome/plugin/npobject_stub.h"
 #include "chrome/plugin/plugin_channel.h"
 #include "chrome/plugin/plugin_thread.h"
 #include "chrome/plugin/webplugin_proxy.h"
+#include "printing/native_metafile.h"
 #include "third_party/npapi/bindings/npapi.h"
 #include "third_party/npapi/bindings/npruntime.h"
 #include "skia/ext/platform_device.h"
+#include "webkit/api/public/WebCursorInfo.h"
 #include "webkit/glue/webcursor.h"
 #include "webkit/glue/webplugin_delegate.h"
+
+using WebKit::WebCursorInfo;
 
 class FinishDestructionTask : public Task {
  public:
@@ -48,6 +53,8 @@ WebPluginDelegateStub::WebPluginDelegateStub(
 }
 
 WebPluginDelegateStub::~WebPluginDelegateStub() {
+  child_process_logging::ScopedActiveURLSetter url_setter(page_url_);
+
   if (channel_->in_send()) {
     // The delegate or an npobject is in the callstack, so don't delete it
     // right away.
@@ -63,6 +70,8 @@ WebPluginDelegateStub::~WebPluginDelegateStub() {
 }
 
 void WebPluginDelegateStub::OnMessageReceived(const IPC::Message& msg) {
+  child_process_logging::ScopedActiveURLSetter url_setter(page_url_);
+
   // A plugin can execute a script to delete itself in any of its NPP methods.
   // Hold an extra reference to ourself so that if this does occur and we're
   // handling a sync message, we don't crash when attempting to send a reply.
@@ -78,7 +87,7 @@ void WebPluginDelegateStub::OnMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER(PluginMsg_DidFinishLoadWithReason,
                         OnDidFinishLoadWithReason)
     IPC_MESSAGE_HANDLER(PluginMsg_SetFocus, OnSetFocus)
-    IPC_MESSAGE_HANDLER(PluginMsg_HandleEvent, OnHandleEvent)
+    IPC_MESSAGE_HANDLER(PluginMsg_HandleInputEvent, OnHandleInputEvent)
     IPC_MESSAGE_HANDLER(PluginMsg_Paint, OnPaint)
     IPC_MESSAGE_HANDLER(PluginMsg_DidPaint, OnDidPaint)
     IPC_MESSAGE_HANDLER(PluginMsg_Print, OnPrint)
@@ -109,6 +118,9 @@ bool WebPluginDelegateStub::Send(IPC::Message* msg) {
 
 void WebPluginDelegateStub::OnInit(const PluginMsg_Init_Params& params,
                                    bool* result) {
+  page_url_ = params.page_url;
+  child_process_logging::ScopedActiveURLSetter url_setter(page_url_);
+
   *result = false;
   int argc = static_cast<int>(params.arg_names.size());
   if (argc != static_cast<int>(params.arg_values.size())) {
@@ -124,13 +136,26 @@ void WebPluginDelegateStub::OnInit(const PluginMsg_Init_Params& params,
   }
 
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
-  FilePath path =
-      FilePath(command_line.GetSwitchValue(switches::kPluginPath));
-  delegate_ = WebPluginDelegate::Create(
-      path, mime_type_, params.containing_window);
+  FilePath path = FilePath::FromWStringHack(
+      command_line.GetSwitchValue(switches::kPluginPath));
+
+
+  gfx::PluginWindowHandle parent = NULL;
+#if defined(OS_WIN)
+  parent = gfx::NativeViewFromId(params.containing_window);
+#elif defined(OS_LINUX)
+  PluginThread::current()->Send(new PluginProcessHostMsg_MapNativeViewId(
+      params.containing_window, &parent));
+#endif
+  delegate_ = WebPluginDelegate::Create(path, mime_type_, parent);
+
   if (delegate_) {
     webplugin_ = new WebPluginProxy(
-        channel_, instance_id_, delegate_, params.modal_dialog_event);
+        channel_, instance_id_, delegate_, page_url_);
+#if defined(OS_WIN)
+    if (!webplugin_->SetModalDialogEvent(params.modal_dialog_event))
+      return;
+#endif
     *result = delegate_->Initialize(
         params.url, argn, argv, argc, webplugin_, params.load_manually);
   }
@@ -197,10 +222,13 @@ void WebPluginDelegateStub::OnSetFocus() {
   delegate_->SetFocus();
 }
 
-void WebPluginDelegateStub::OnHandleEvent(const NPEvent& event,
-                                          bool* handled,
-                                          WebCursor* cursor) {
-  *handled = delegate_->HandleEvent(const_cast<NPEvent*>(&event), cursor);
+void WebPluginDelegateStub::OnHandleInputEvent(
+    const WebKit::WebInputEvent *event,
+    bool* handled,
+    WebCursor* cursor) {
+  WebCursorInfo cursor_info;
+  *handled = delegate_->HandleInputEvent(*event, &cursor_info);
+  cursor->InitFromCursorInfo(cursor_info);
 }
 
 void WebPluginDelegateStub::OnPaint(const gfx::Rect& damaged_rect) {
@@ -211,42 +239,48 @@ void WebPluginDelegateStub::OnDidPaint() {
   webplugin_->DidPaint();
 }
 
-void WebPluginDelegateStub::OnPrint(PluginMsg_PrintResponse_Params* params) {
-  gfx::Emf emf;
-  if (!emf.CreateDc(NULL, NULL)) {
+void WebPluginDelegateStub::OnPrint(base::SharedMemoryHandle* shared_memory,
+                                    size_t* size) {
+#if defined(OS_WIN)
+  printing::NativeMetafile metafile;
+  if (!metafile.CreateDc(NULL, NULL)) {
     NOTREACHED();
     return;
   }
-  HDC hdc = emf.hdc();
-  skia::PlatformDeviceWin::InitializeDC(hdc);
+  HDC hdc = metafile.hdc();
+  skia::PlatformDevice::InitializeDC(hdc);
   delegate_->Print(hdc);
-  if (!emf.CloseDc()) {
+  if (!metafile.CloseDc()) {
     NOTREACHED();
     return;
   }
 
-  size_t size = emf.GetDataSize();
-  DCHECK(size);
-  params->size = size;
+  *size = metafile.GetDataSize();
+  DCHECK(*size);
   base::SharedMemory shared_buf;
-  CreateSharedBuffer(size, &shared_buf, &params->shared_memory);
+  CreateSharedBuffer(*size, &shared_buf, shared_memory);
 
   // Retrieve a copy of the data.
-  bool success = emf.GetData(shared_buf.memory(), size);
+  bool success = metafile.GetData(shared_buf.memory(), *size);
   DCHECK(success);
+#else
+  // TODO(port): plugin printing.
+  NOTIMPLEMENTED();
+#endif
 }
 
 void WebPluginDelegateStub::OnUpdateGeometry(
     const gfx::Rect& window_rect,
     const gfx::Rect& clip_rect,
-    const base::SharedMemoryHandle& windowless_buffer,
-    const base::SharedMemoryHandle& background_buffer) {
+    const TransportDIB::Handle& windowless_buffer,
+    const TransportDIB::Handle& background_buffer) {
   webplugin_->UpdateGeometry(
-      window_rect, clip_rect, windowless_buffer, background_buffer);
+      window_rect, clip_rect,
+      windowless_buffer, background_buffer);
 }
 
 void WebPluginDelegateStub::OnGetPluginScriptableObject(int* route_id,
-                                                        void** npobject_ptr) {
+                                                        intptr_t* npobject_ptr) {
   NPObject* object = delegate_->GetPluginScriptableObject();
   if (!object) {
     *route_id = MSG_ROUTING_NONE;
@@ -254,11 +288,12 @@ void WebPluginDelegateStub::OnGetPluginScriptableObject(int* route_id,
   }
 
   *route_id = channel_->GenerateRouteID();
-  *npobject_ptr = object;
+  *npobject_ptr = reinterpret_cast<intptr_t>(object);
   // The stub will delete itself when the proxy tells it that it's released, or
   // otherwise when the channel is closed.
-  NPObjectStub* stub = new NPObjectStub(
-      object, channel_.get(), *route_id, webplugin_->modal_dialog_event());
+  new NPObjectStub(
+      object, channel_.get(), *route_id, webplugin_->modal_dialog_event(),
+      page_url_);
 
   // Release ref added by GetPluginScriptableObject (our stub holds its own).
   NPN_ReleaseObject(object);
@@ -268,7 +303,7 @@ void WebPluginDelegateStub::OnSendJavaScriptStream(const std::string& url,
                                                    const std::wstring& result,
                                                    bool success,
                                                    bool notify_needed,
-                                                   int notify_data) {
+                                                   intptr_t notify_data) {
   delegate_->SendJavaScriptStream(url, result, success, notify_needed,
                                   notify_data);
 }
@@ -313,6 +348,7 @@ void WebPluginDelegateStub::CreateSharedBuffer(
     return;
   }
 
+#if defined(OS_WIN)
   BOOL result = DuplicateHandle(GetCurrentProcess(),
                                 shared_buf->handle(),
                                 channel_->renderer_handle(),
@@ -323,6 +359,10 @@ void WebPluginDelegateStub::CreateSharedBuffer(
   // If the calling function's shared_buf is on the stack, its destructor will
   // close the shared memory buffer handle. This is fine since we already
   // duplicated the handle to the renderer process so it will stay "alive".
+#else
+  // TODO(port): this should use TransportDIB.
+  NOTIMPLEMENTED();
+#endif
 }
 
 void WebPluginDelegateStub::OnHandleURLRequestReply(
@@ -337,6 +377,6 @@ void WebPluginDelegateStub::OnHandleURLRequestReply(
 
 void WebPluginDelegateStub::OnURLRequestRouted(const std::string& url,
                                                bool notify_needed,
-                                               HANDLE notify_data) {
+                                               intptr_t notify_data) {
   delegate_->URLRequestRouted(url, notify_needed, notify_data);
 }

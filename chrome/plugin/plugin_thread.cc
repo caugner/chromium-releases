@@ -2,12 +2,20 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <windows.h>
-#include <objbase.h>
-
 #include "chrome/plugin/plugin_thread.h"
 
+#include "build/build_config.h"
+
+#if defined(OS_WIN)
+#include <windows.h>
+#include <objbase.h>
+#endif
+
 #include "base/command_line.h"
+#include "base/lazy_instance.h"
+#include "base/process_util.h"
+#include "base/thread_local.h"
+#include "chrome/common/child_process.h"
 #include "chrome/common/chrome_plugin_lib.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/notification_service.h"
@@ -15,12 +23,13 @@
 #include "chrome/common/render_messages.h"
 #include "chrome/plugin/chrome_plugin_host.h"
 #include "chrome/plugin/npobject_util.h"
-#include "chrome/plugin/plugin_process.h"
 #include "chrome/renderer/render_thread.h"
 #include "net/base/net_errors.h"
 #include "webkit/glue/plugins/plugin_lib.h"
 #include "webkit/glue/webkit_glue.h"
 
+static base::LazyInstance<base::ThreadLocalPointer<PluginThread> > lazy_tls(
+    base::LINKER_INITIALIZED);
 
 PluginThread::PluginThread()
     : ChildThread(base::Thread::Options(MessageLoop::TYPE_UI, 0)),
@@ -33,27 +42,50 @@ PluginThread::~PluginThread() {
 }
 
 PluginThread* PluginThread::current() {
-  DCHECK(IsPluginProcess());
-  return static_cast<PluginThread*>(ChildThread::current());
+  return lazy_tls.Pointer()->Get();
 }
 
 void PluginThread::OnControlMessageReceived(const IPC::Message& msg) {
   IPC_BEGIN_MESSAGE_MAP(PluginThread, msg)
     IPC_MESSAGE_HANDLER(PluginProcessMsg_CreateChannel, OnCreateChannel)
-    IPC_MESSAGE_HANDLER(PluginProcessMsg_ShutdownResponse, OnShutdownResponse)
     IPC_MESSAGE_HANDLER(PluginProcessMsg_PluginMessage, OnPluginMessage)
-    IPC_MESSAGE_HANDLER(PluginProcessMsg_BrowserShutdown, OnBrowserShutdown)
   IPC_END_MESSAGE_MAP()
 }
 
 void PluginThread::Init() {
+  lazy_tls.Pointer()->Set(this);
+#if defined(OS_LINUX)
+  {
+    // XEmbed plugins assume they are hosted in a Gtk application, so we need
+    // to initialize Gtk in the plugin process.
+    const std::vector<std::string>& args =
+        CommandLine::ForCurrentProcess()->argv();
+    int argc = args.size();
+    scoped_array<char *> argv(new char *[argc + 1]);
+    for (size_t i = 0; i < args.size(); ++i) {
+      // TODO(piman@google.com): can gtk_init modify argv? Just being safe
+      // here.
+      argv[i] = strdup(args[i].c_str());
+    }
+    argv[argc] = NULL;
+    char **argv_pointer = argv.get();
+    gtk_init(&argc, &argv_pointer);
+    for (size_t i = 0; i < args.size(); ++i) {
+      free(argv[i]);
+    }
+  }
+#endif
   ChildThread::Init();
+
   PatchNPNFunctions();
+#if defined(OS_WIN)
   CoInitialize(NULL);
+#endif
+
   notification_service_.reset(new NotificationService);
 
   // Preload the library to avoid loading, unloading then reloading
-  preloaded_plugin_module_ = NPAPI::PluginLib::LoadNativeLibrary(plugin_path_);
+  preloaded_plugin_module_ = base::LoadNativeLibrary(plugin_path_);
 
   ChromePluginLib::Create(plugin_path_, GetCPBrowserFuncsForPlugin());
 
@@ -69,56 +101,65 @@ void PluginThread::Init() {
 }
 
 void PluginThread::CleanUp() {
-  ChildThread::CleanUp();
   if (preloaded_plugin_module_) {
-    FreeLibrary(preloaded_plugin_module_);
+    base::UnloadNativeLibrary(preloaded_plugin_module_);
     preloaded_plugin_module_ = NULL;
   }
   PluginChannelBase::CleanupChannels();
   NPAPI::PluginLib::UnloadAllPlugins();
   ChromePluginLib::UnloadAllPlugins();
   notification_service_.reset();
+#if defined(OS_WIN)
   CoUninitialize();
+#endif
 
   if (webkit_glue::ShouldForcefullyTerminatePluginProcess())
-    TerminateProcess(GetCurrentProcess(), 0);
+    base::KillProcess(base::GetCurrentProcessHandle(), 0, /* wait= */ false);
+
+  // Call this last because it deletes the ResourceDispatcher, which is used
+  // in some of the above cleanup.
+  // See http://code.google.com/p/chromium/issues/detail?id=8980
+  ChildThread::CleanUp();
+  lazy_tls.Pointer()->Set(NULL);
 }
 
-void PluginThread::OnCreateChannel() {
-  std::wstring channel_name;
+void PluginThread::OnCreateChannel(
+    int process_id,
+    bool off_the_record) {
   scoped_refptr<PluginChannel> channel =
-      PluginChannel::GetPluginChannel(owner_loop());
-  if (channel.get())
-    channel_name = channel->channel_name();
+      PluginChannel::GetPluginChannel(process_id, owner_loop());
+  IPC::ChannelHandle channel_handle;
+  if (channel.get()) {
+    channel_handle.name = channel->channel_name();
+#if defined(OS_POSIX)
+    // On POSIX, pass the renderer-side FD. Also mark it as auto-close so that
+    // it gets closed after it has been sent.
+    int renderer_fd = channel->DisownRendererFd();
+    channel_handle.socket = base::FileDescriptor(renderer_fd, true);
+#endif
+    channel->set_off_the_record(off_the_record);
+  }
 
-  Send(new PluginProcessHostMsg_ChannelCreated(channel_name));
-}
-
-void PluginThread::OnShutdownResponse(bool ok_to_shutdown) {
-  if (ok_to_shutdown)
-    PluginProcess::current()->Shutdown();
-}
-
-void PluginThread::OnBrowserShutdown() {
-  PluginProcess::current()->Shutdown();
+  Send(new PluginProcessHostMsg_ChannelCreated(channel_handle));
 }
 
 void PluginThread::OnPluginMessage(const std::vector<unsigned char> &data) {
   // We Add/Release ref here to ensure that something will trigger the
   // shutdown mechanism for processes started in the absence of renderer's
   // opening a plugin channel.
-  PluginProcess::current()->AddRefProcess();
+  ChildProcess::current()->AddRefProcess();
   ChromePluginLib *chrome_plugin = ChromePluginLib::Find(plugin_path_);
   if (chrome_plugin) {
     void *data_ptr = const_cast<void*>(reinterpret_cast<const void*>(&data[0]));
     uint32 data_len = static_cast<uint32>(data.size());
     chrome_plugin->functions().on_message(data_ptr, data_len);
   }
-  PluginProcess::current()->ReleaseProcess();
+  ChildProcess::current()->ReleaseProcess();
 }
 
 namespace webkit_glue {
 
+#if defined(OS_WIN)
 bool DownloadUrl(const std::string& url, HWND caller_window) {
   PluginThread* plugin_thread = PluginThread::current();
   if (!plugin_thread) {
@@ -131,6 +172,7 @@ bool DownloadUrl(const std::string& url, HWND caller_window) {
                                            caller_window);
   return plugin_thread->Send(message);
 }
+#endif
 
 bool GetPluginFinderURL(std::string* plugin_finder_url) {
   if (!plugin_finder_url) {
@@ -149,7 +191,15 @@ bool GetPluginFinderURL(std::string* plugin_finder_url) {
 }
 
 bool IsDefaultPluginEnabled() {
+#if defined(OS_WIN)
   return true;
+#elif defined(OS_LINUX)
+  // http://code.google.com/p/chromium/issues/detail?id=10952
+  return false;
+#elif defined(OS_MACOSX)
+  NOTIMPLEMENTED();
+  return false;
+#endif
 }
 
 // Dispatch the resolve proxy resquest to the right code, depending on which

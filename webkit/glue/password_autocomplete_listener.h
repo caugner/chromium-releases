@@ -8,17 +8,13 @@
 #ifndef WEBKIT_GLUE_PASSWORD_AUTOCOMPLETE_LISTENER_H_
 #define WEBKIT_GLUE_PASSWORD_AUTOCOMPLETE_LISTENER_H_
 
-#include "config.h"
-
-#include "base/compiler_specific.h"
-
-MSVC_PUSH_WARNING_LEVEL(0);
-#include "HTMLInputElement.h"
-MSVC_POP_WARNING();
-
 #include "base/basictypes.h"
 #include "base/scoped_ptr.h"
 #include "webkit/glue/password_form_dom_manager.h"
+
+namespace WebCore {
+class HTMLInputElement;
+}
 
 namespace webkit_glue {
 
@@ -32,6 +28,9 @@ class HTMLInputDelegate {
   virtual void SetValue(const std::wstring& value);
   virtual void SetSelectionRange(size_t start, size_t end);
   virtual void OnFinishedAutocompleting();
+  virtual void RefreshAutofillPopup(
+      const std::vector<std::wstring>& suggestions,
+      int default_suggestion_index);
 
  private:
   // The underlying DOM element we're wrapping. We reference the underlying
@@ -54,7 +53,9 @@ class PasswordAutocompleteListener {
   virtual void OnBlur(WebCore::HTMLInputElement* element,
                       const std::wstring& user_input);
   virtual void OnInlineAutocompleteNeeded(WebCore::HTMLInputElement* element,
-                                          const std::wstring& user_input);
+                                          const std::wstring& user_input,
+                                          bool backspace_or_delete,
+                                          bool with_suggestion_popup);
 
  private:
   // Check if the input string resembles a potential matching login
@@ -63,6 +64,10 @@ class PasswordAutocompleteListener {
   bool TryToMatch(const std::wstring& input,
                   const std::wstring& username,
                   const std::wstring& password);
+
+  // Scan |data_| for prefix matches of |input| and add each to |suggestions|.
+  void GetSuggestions(const std::wstring& input,
+                      std::vector<std::wstring>* suggestions);
 
   // Access to password field to autocomplete on blur/username updates.
   scoped_ptr<HTMLInputDelegate> password_delegate_;

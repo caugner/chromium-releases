@@ -6,6 +6,7 @@
 
 #include "base/string_util.h"
 #include "net/base/escape.h"
+#include "net/base/io_buffer.h"
 #include "net/disk_cache/disk_cache.h"
 #include "net/http/http_cache.h"
 #include "net/http/http_response_headers.h"
@@ -88,9 +89,11 @@ static std::string FormatEntryDetails(disk_cache::Entry* entry) {
 
     int data_size = entry->GetDataSize(i);
 
-    scoped_refptr<net::IOBuffer> buffer = new net::IOBuffer(data_size);
-    if (entry->ReadData(i, 0, buffer, data_size, NULL) == data_size)
-      HexDump(buffer->data(), data_size, &result);
+    if (data_size) {
+      scoped_refptr<net::IOBuffer> buffer = new net::IOBuffer(data_size);
+      if (entry->ReadData(i, 0, buffer, data_size, NULL) == data_size)
+        HexDump(buffer->data(), data_size, &result);
+    }
 
     result.append("</pre>");
   }

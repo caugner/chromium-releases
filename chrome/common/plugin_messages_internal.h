@@ -1,10 +1,16 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/gfx/native_widget_types.h"
 #include "base/shared_memory.h"
-#include "chrome/common/ipc_message_macros.h"
+#include "build/build_config.h"
+#include "ipc/ipc_message_macros.h"
 #include "webkit/glue/webcursor.h"
+
+#if defined(OS_POSIX)
+#include "base/file_descriptor_posix.h"
+#endif
 
 //-----------------------------------------------------------------------------
 // PluginProcess messages
@@ -12,18 +18,26 @@
 IPC_BEGIN_MESSAGES(PluginProcess)
   // Tells the plugin process to create a new channel for communication with a
   // renderer.  The channel name is returned in a
-  // PluginProcessHostMsg_ChannelCreated message.
-  IPC_MESSAGE_CONTROL0(PluginProcessMsg_CreateChannel)
-
-  IPC_MESSAGE_CONTROL1(PluginProcessMsg_ShutdownResponse,
-                       bool /* ok to shutdown */)
+  // PluginProcessHostMsg_ChannelCreated message.  The renderer's process_id is
+  // passed so that the plugin process reuses an existing channel to that
+  // process if it exists.
+  IPC_MESSAGE_CONTROL2(PluginProcessMsg_CreateChannel,
+                       int /* process_id */,
+                       bool /* off_the_record */)
 
   // Allows a chrome plugin loaded in the browser process to send arbitrary
   // data to an instance of the same plugin loaded in a plugin process.
   IPC_MESSAGE_CONTROL1(PluginProcessMsg_PluginMessage,
                        std::vector<uint8> /* opaque data */)
 
-  IPC_MESSAGE_CONTROL0(PluginProcessMsg_BrowserShutdown)
+  // The following messages are used by all child processes, even though they
+  // are listed under PluginProcess.  It seems overkill to define ChildProcess.
+  // Tells the child process it should stop.
+  IPC_MESSAGE_CONTROL0(PluginProcessMsg_AskBeforeShutdown)
+
+  // Sent in response to PluginProcessHostMsg_ShutdownRequest to tell the child
+  // process that it's safe to shutdown.
+  IPC_MESSAGE_CONTROL0(PluginProcessMsg_Shutdown)
 
 IPC_END_MESSAGES(PluginProcess)
 
@@ -34,12 +48,7 @@ IPC_END_MESSAGES(PluginProcess)
 IPC_BEGIN_MESSAGES(PluginProcessHost)
   // Response to a PluginProcessMsg_CreateChannel message.
   IPC_MESSAGE_CONTROL1(PluginProcessHostMsg_ChannelCreated,
-                       std::wstring /* channel_name */)
-
-  IPC_MESSAGE_ROUTED3(PluginProcessHostMsg_DownloadUrl,
-                      std::string /* URL */,
-                      int /* process id */,
-                      HWND /* caller window */)
+                       IPC::ChannelHandle /* channel_handle */)
 
   IPC_SYNC_MESSAGE_CONTROL0_1(PluginProcessHostMsg_GetPluginFinderUrl,
                               std::string /* plugin finder URL */)
@@ -64,6 +73,13 @@ IPC_BEGIN_MESSAGES(PluginProcessHost)
                               GURL /* url */,
                               std::string /* cookies */)
 
+  // Used by the plugin process to verify that its renderer |process_id| has
+  // permission to access the given |files|.
+  IPC_SYNC_MESSAGE_CONTROL2_1(PluginProcessHostMsg_AccessFiles,
+                              int /* process_id */,
+                              std::vector<std::string> /* files */,
+                              bool /* allowed */)
+
   // Get the list of proxies to use for |url|, as a semicolon delimited list
   // of "<TYPE> <HOST>:<PORT>" | "DIRECT". See also ViewHostMsg_ResolveProxy
   // which does the same thing.
@@ -72,14 +88,32 @@ IPC_BEGIN_MESSAGES(PluginProcessHost)
                               int /* network error */,
                               std::string /* proxy list */)
 
+#if defined(OS_WIN)
   // Creates a child window of the given parent window on the UI thread.
   IPC_SYNC_MESSAGE_CONTROL1_1(PluginProcessHostMsg_CreateWindow,
                               HWND /* parent */,
                               HWND /* child */)
 
-  // Destroys the given window on the UI thread.
-  IPC_MESSAGE_CONTROL1(PluginProcessHostMsg_DestroyWindow,
-                       HWND /* window */)
+  // Destroys the given window's parent on the UI thread.
+  IPC_MESSAGE_CONTROL2(PluginProcessHostMsg_PluginWindowDestroyed,
+                       HWND /* window */,
+                       HWND /* parent */)
+
+  IPC_MESSAGE_ROUTED3(PluginProcessHostMsg_DownloadUrl,
+                      std::string /* URL */,
+                      int /* process id */,
+                      HWND /* caller window */)
+#endif
+
+#if defined(OS_LINUX)
+  // On Linux, the mapping between NativeViewId and X window ids
+  // is known only to the browser.  This message lets the plugin process
+  // ask about a NativeViewId that was provided by the renderer.
+  // It will get 0 back if it's a bogus input.
+  IPC_SYNC_MESSAGE_CONTROL1_1(PluginProcessHostMsg_MapNativeViewId,
+                             gfx::NativeViewId /* input: native view id */,
+                             gfx::PluginWindowHandle /* output: X window id */)
+#endif
 
 IPC_END_MESSAGES(PluginProcessHost)
 
@@ -117,12 +151,13 @@ IPC_BEGIN_MESSAGES(Plugin)
   // plugin knows it can send more invalidates.
   IPC_MESSAGE_ROUTED0(PluginMsg_DidPaint)
 
-  IPC_SYNC_MESSAGE_ROUTED0_1(PluginMsg_Print,
-                             PluginMsg_PrintResponse_Params /* params */)
+  IPC_SYNC_MESSAGE_ROUTED0_2(PluginMsg_Print,
+                             base::SharedMemoryHandle /* shared_memory*/,
+                             size_t /* size */)
 
   IPC_SYNC_MESSAGE_ROUTED0_2(PluginMsg_GetPluginScriptableObject,
                              int /* route_id */,
-                             void* /* npobject_ptr */)
+                             intptr_t /* npobject_ptr */)
 
   IPC_SYNC_MESSAGE_ROUTED1_0(PluginMsg_DidFinishLoadWithReason,
                              int /* reason */)
@@ -134,13 +169,13 @@ IPC_BEGIN_MESSAGES(Plugin)
   IPC_MESSAGE_ROUTED4(PluginMsg_UpdateGeometry,
                       gfx::Rect /* window_rect */,
                       gfx::Rect /* clip_rect */,
-                      base::SharedMemoryHandle /* windowless_buffer */,
-                      base::SharedMemoryHandle /* background_buffer */)
+                      TransportDIB::Handle /* windowless_buffer */,
+                      TransportDIB::Handle /* background_buffer */)
 
   IPC_SYNC_MESSAGE_ROUTED0_0(PluginMsg_SetFocus)
 
-  IPC_SYNC_MESSAGE_ROUTED1_2(PluginMsg_HandleEvent,
-                             NPEvent /* event */,
+  IPC_SYNC_MESSAGE_ROUTED1_2(PluginMsg_HandleInputEvent,
+                             IPC::WebInputEventPointer /* event */,
                              bool /* handled */,
                              WebCursor /* cursor type*/)
 
@@ -168,7 +203,7 @@ IPC_BEGIN_MESSAGES(Plugin)
                       std::wstring /* result */,
                       bool /* success */,
                       bool /* notify required */,
-                      int /* notify data */)
+                      intptr_t /* notify data */)
 
   IPC_MESSAGE_ROUTED2(PluginMsg_DidReceiveManualResponse,
                       std::string /* url */,
@@ -189,7 +224,7 @@ IPC_BEGIN_MESSAGES(Plugin)
   IPC_SYNC_MESSAGE_ROUTED3_0(PluginMsg_URLRequestRouted,
                              std::string /* url */,
                              bool /* notify_needed */,
-                             HANDLE /* notify data */)
+                             intptr_t /* notify data */)
 IPC_END_MESSAGES(Plugin)
 
 
@@ -201,13 +236,26 @@ IPC_BEGIN_MESSAGES(PluginHost)
   // Sends the plugin window information to the renderer.
   // The window parameter is a handle to the window if the plugin is a windowed
   // plugin. It is NULL for windowless plugins.
+  IPC_SYNC_MESSAGE_ROUTED1_0(PluginHostMsg_SetWindow,
+                             gfx::PluginWindowHandle /* window */)
+
+#if defined(OS_LINUX)
+  // Asks the renderer to create a plugin container (GtkSocket).
+  IPC_SYNC_MESSAGE_ROUTED0_1(PluginHostMsg_CreatePluginContainer,
+                             gfx::PluginWindowHandle /* container */)
+  // Asks the renderer to destroy a plugin container (GtkSocket).
+  IPC_SYNC_MESSAGE_ROUTED1_0(PluginHostMsg_DestroyPluginContainer,
+                             gfx::PluginWindowHandle /* container */)
+#endif
+
+#if defined(OS_WIN)
   // The modal_loop_pump_messages_event parameter is an event handle which is
   // passed in for windowless plugins and is used to indicate if messages
   // are to be pumped in sync calls to the plugin process. Currently used
   // in HandleEvent calls.
-  IPC_SYNC_MESSAGE_ROUTED2_0(PluginHostMsg_SetWindow,
-                             HWND /* window */,
+  IPC_SYNC_MESSAGE_ROUTED1_0(PluginHostMsg_SetWindowlessPumpEvent,
                              HANDLE /* modal_loop_pump_messages_event */)
+#endif
 
   IPC_MESSAGE_ROUTED1(PluginHostMsg_URLRequest,
                       PluginHostMsg_URLRequest_Params)
@@ -221,21 +269,21 @@ IPC_BEGIN_MESSAGES(PluginHost)
   IPC_SYNC_MESSAGE_ROUTED1_2(PluginHostMsg_GetWindowScriptNPObject,
                              int /* route id */,
                              bool /* success */,
-                             void* /* npobject_ptr */)
+                             intptr_t /* npobject_ptr */)
 
   IPC_SYNC_MESSAGE_ROUTED1_2(PluginHostMsg_GetPluginElement,
                              int /* route id */,
                              bool /* success */,
-                             void* /* npobject_ptr */)
+                             intptr_t /* npobject_ptr */)
 
   IPC_MESSAGE_ROUTED3(PluginHostMsg_SetCookie,
                       GURL /* url */,
-                      GURL /* policy_url */,
+                      GURL /* first_party_for_cookies */,
                       std::string /* cookie */)
 
   IPC_SYNC_MESSAGE_ROUTED2_1(PluginHostMsg_GetCookies,
                              GURL /* url */,
-                             GURL /* policy_url */,
+                             GURL /* first_party_for_cookies */,
                              std::string /* cookies */)
 
   // Asks the browser to show a modal HTML dialog.  The dialog is passed the
@@ -248,6 +296,17 @@ IPC_BEGIN_MESSAGES(PluginHost)
                               std::string /* json_arguments */,
                               std::string /* json_retval */)
 
+  IPC_SYNC_MESSAGE_ROUTED2_2(PluginHostMsg_GetDragData,
+                             NPVariant_Param /* event */,
+                             bool /* add_data */,
+                             std::vector<NPVariant_Param> /* result_values */,
+                             bool /* result_success */)
+
+  IPC_SYNC_MESSAGE_ROUTED2_1(PluginHostMsg_SetDropEffect,
+                             NPVariant_Param /* event */,
+                             int /* effect */,
+                             bool /* result_success */)
+
   IPC_MESSAGE_ROUTED1(PluginHostMsg_MissingPluginStatus,
                       int /* status */)
 
@@ -259,9 +318,9 @@ IPC_BEGIN_MESSAGES(PluginHost)
   IPC_MESSAGE_ROUTED5(PluginHostMsg_InitiateHTTPRangeRequest,
                       std::string /* url */,
                       std::string /* range_info */,
-                      HANDLE      /* existing_stream */,
+                      intptr_t    /* existing_stream */,
                       bool        /* notify_needed */,
-                      HANDLE      /* notify_data */)
+                      intptr_t    /* notify_data */)
 
 IPC_END_MESSAGES(PluginHost)
 
@@ -305,6 +364,11 @@ IPC_BEGIN_MESSAGES(NPObject)
 
   IPC_SYNC_MESSAGE_ROUTED0_2(NPObjectMsg_Enumeration,
                              std::vector<NPIdentifier_Param> /* value */,
+                             bool /* result */)
+
+  IPC_SYNC_MESSAGE_ROUTED1_2(NPObjectMsg_Construct,
+                             std::vector<NPVariant_Param> /* args */,
+                             NPVariant_Param /* result_param */,
                              bool /* result */)
 
   IPC_SYNC_MESSAGE_ROUTED2_2(NPObjectMsg_Evaluate,

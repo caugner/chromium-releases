@@ -4,15 +4,17 @@
 
 #include "chrome/browser/views/bookmark_folder_tree_view.h"
 
+#include <commctrl.h>
+
+#include "app/drag_drop_types.h"
+#include "app/os_exchange_data.h"
 #include "base/base_drag_source.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_folder_tree_model.h"
 #include "chrome/browser/profile.h"
-#include "chrome/common/drag_drop_types.h"
-#include "chrome/common/os_exchange_data.h"
-#include "chrome/views/view_constants.h"
 #include "grit/generated_resources.h"
+#include "views/view_constants.h"
 
 void BookmarkFolderTreeView::DropInfo::Scrolled() {
   view_->UpdateDropInfo();
@@ -76,8 +78,8 @@ int BookmarkFolderTreeView::OnPerformDrop(const views::DropTargetEvent& event) {
   return drop_operation;
 }
 
-BookmarkNode* BookmarkFolderTreeView::GetSelectedBookmarkNode() {
-  views::TreeModelNode* selected_node = GetSelectedNode();
+const BookmarkNode* BookmarkFolderTreeView::GetSelectedBookmarkNode() {
+  TreeModelNode* selected_node = GetSelectedNode();
   if (!selected_node)
     return NULL;
   return TreeNodeAsBookmarkNode(folder_model()->AsNode(selected_node));
@@ -111,7 +113,7 @@ int BookmarkFolderTreeView::UpdateDropInfo() {
   return drop_info_->drop_operation();
 }
 
-void BookmarkFolderTreeView::BeginDrag(BookmarkNode* node) {
+void BookmarkFolderTreeView::BeginDrag(const BookmarkNode* node) {
   BookmarkModel* model = profile_->GetBookmarkModel();
   // Only allow the drag if the user has selected a node of type bookmark and it
   // isn't the bookmark bar or other bookmarks folders.
@@ -120,7 +122,7 @@ void BookmarkFolderTreeView::BeginDrag(BookmarkNode* node) {
     return;
   }
 
-  std::vector<BookmarkNode*> nodes_to_drag;
+  std::vector<const BookmarkNode*> nodes_to_drag;
   nodes_to_drag.push_back(node);
 
   scoped_refptr<OSExchangeData> data = new OSExchangeData;
@@ -141,7 +143,7 @@ BookmarkFolderTreeView::DropPosition BookmarkFolderTreeView::
     RECT bounds;
     TreeView_GetItemRect(hwnd, item, &bounds, TRUE);
     if (y < bounds.bottom) {
-      views::TreeModelNode* model_node = GetNodeForTreeItem(item);
+      TreeModelNode* model_node = GetNodeForTreeItem(item);
       if (folder_model()->GetNodeType(model_node) !=
           BookmarkFolderTreeModel::BOOKMARK) {
         // Only allow drops on bookmark nodes.
@@ -210,7 +212,7 @@ int BookmarkFolderTreeView::CalculateDropOperation(
 }
 
 void BookmarkFolderTreeView::OnPerformDropImpl() {
-  BookmarkNode* parent_node =
+  const BookmarkNode* parent_node =
       TreeNodeAsBookmarkNode(drop_info_->position().parent);
   int drop_index = FolderIndexToBookmarkIndex(drop_info_->position());
   BookmarkModel* model = profile_->GetBookmarkModel();
@@ -224,7 +226,8 @@ void BookmarkFolderTreeView::OnPerformDropImpl() {
   }
 
   // else, move.
-  std::vector<BookmarkNode*> nodes = drop_info_->data().GetNodes(profile_);
+  std::vector<const BookmarkNode*> nodes =
+      drop_info_->data().GetNodes(profile_);
   if (nodes.empty())
     return;
 
@@ -284,13 +287,14 @@ BookmarkFolderTreeModel* BookmarkFolderTreeView::folder_model() const {
   return static_cast<BookmarkFolderTreeModel*>(model());
 }
 
-BookmarkNode* BookmarkFolderTreeView::TreeNodeAsBookmarkNode(FolderNode* node) {
+const BookmarkNode* BookmarkFolderTreeView::TreeNodeAsBookmarkNode(
+    FolderNode* node) {
   return folder_model()->TreeNodeAsBookmarkNode(node);
 }
 
 int BookmarkFolderTreeView::FolderIndexToBookmarkIndex(
     const DropPosition& position) {
-  BookmarkNode* parent_node = TreeNodeAsBookmarkNode(position.parent);
+  const BookmarkNode* parent_node = TreeNodeAsBookmarkNode(position.parent);
   if (position.on || position.index == position.parent->GetChildCount())
     return parent_node->GetChildCount();
 

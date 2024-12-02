@@ -4,15 +4,15 @@
 
 #include "chrome/browser/views/importing_progress_view.h"
 
-#include "chrome/browser/views/standard_layout.h"
-#include "chrome/common/l10n_util.h"
-#include "chrome/views/grid_layout.h"
-#include "chrome/views/controls/label.h"
-#include "chrome/views/controls/throbber.h"
-#include "chrome/views/window/window.h"
+#include "app/l10n_util.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
+#include "views/grid_layout.h"
+#include "views/controls/label.h"
+#include "views/controls/throbber.h"
+#include "views/standard_layout.h"
+#include "views/window/window.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 // ImportingProgressView, public:
@@ -182,12 +182,12 @@ void ImportingProgressView::ViewHierarchyChanged(bool is_add,
 // ImportingProgressView, views::DialogDelegate implementation:
 
 int ImportingProgressView::GetDialogButtons() const {
-  return DIALOGBUTTON_CANCEL;
+  return MessageBoxFlags::DIALOGBUTTON_CANCEL;
 }
 
 std::wstring ImportingProgressView::GetDialogButtonLabel(
-    DialogButton button) const {
-  DCHECK(button == DIALOGBUTTON_CANCEL);
+    MessageBoxFlags::DialogButton button) const {
+  DCHECK(button == MessageBoxFlags::DIALOGBUTTON_CANCEL);
   return l10n_util::GetString(IDS_IMPORT_PROGRESS_STATUS_CANCEL);
 }
 
@@ -308,7 +308,7 @@ void StartImportingWithUI(HWND parent_window,
   if (!coordinator->is_headless())
     window->Show();
 
-  coordinator->StartImportSettings(source_profile, items,
+  coordinator->StartImportSettings(source_profile, target_profile, items,
                                    new ProfileWriter(target_profile),
                                    first_run);
 }

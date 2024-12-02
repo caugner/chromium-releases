@@ -7,6 +7,7 @@
 
 #include "build/build_config.h"
 
+#include <map>
 #include <string>
 
 #include "base/process.h"
@@ -18,14 +19,15 @@
 #include "chrome/common/transport_dib.h"
 #include "chrome/browser/renderer_host/audio_renderer_host.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
-#include "chrome/common/notification_observer.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebCache.h"
+#include "chrome/common/notification_registrar.h"
+#include "webkit/api/public/WebCache.h"
 
 class CommandLine;
 class GURL;
 class RendererMainThread;
 class RenderWidgetHelper;
-class WebContents;
+class TabContents;
+class VisitedLinkUpdater;
 
 namespace gfx {
 class Size;
@@ -42,7 +44,7 @@ class Size;
 //
 // This object communicates back and forth with the RenderProcess object
 // running in the renderer process. Each RenderProcessHost and RenderProcess
-// keeps a list of RenderView (renderer) and WebContents (browser) which
+// keeps a list of RenderView (renderer) and TabContents (browser) which
 // are correlated with IDs. This way, the Views and the corresponding ViewHosts
 // communicate through the two process objects.
 class BrowserRenderProcessHost : public RenderProcessHost,
@@ -55,8 +57,7 @@ class BrowserRenderProcessHost : public RenderProcessHost,
   virtual bool Init();
   virtual int GetNextRoutingID();
   virtual void CancelResourceRequests(int render_widget_id);
-  virtual void CrossSiteClosePageACK(int new_render_process_host_id,
-                                     int new_request_id);
+  virtual void CrossSiteClosePageACK(const ViewMsg_ClosePage_Params& params);
   virtual bool WaitForPaintMsg(int render_widget_id,
                                const base::TimeDelta& max_delay,
                                IPC::Message* msg);
@@ -64,7 +65,10 @@ class BrowserRenderProcessHost : public RenderProcessHost,
   virtual void WidgetRestored();
   virtual void WidgetHidden();
   virtual void AddWord(const std::wstring& word);
+  virtual void AddVisitedLinks(const VisitedLinkCommon::Fingerprints& links);
+  virtual void ResetVisitedLinks();
   virtual bool FastShutdownIfPossible();
+  virtual bool SendWithTimeout(IPC::Message* msg, int timeout_ms);
   virtual TransportDIB* GetTransportDIB(TransportDIB::Id dib_id);
 
   // IPC::Channel::Sender via RenderProcessHost.
@@ -87,19 +91,16 @@ class BrowserRenderProcessHost : public RenderProcessHost,
                        const NotificationDetails& details);
 
  private:
+  friend class VisitRelayingRenderProcessHost;
+
   // Control message handlers.
   void OnPageContents(const GURL& url, int32 page_id,
                       const std::wstring& contents);
-  // Clipboard messages
-  void OnClipboardWriteHTML(const std::wstring& markup, const GURL& src_url);
-  void OnClipboardWriteBookmark(const std::wstring& title, const GURL& url);
-  void OnClipboardWriteBitmap(base::SharedMemoryHandle bitmap, gfx::Size size);
-  void OnClipboardIsFormatAvailable(unsigned int format, bool* result);
-  void OnClipboardReadText(string16* result);
-  void OnClipboardReadAsciiText(std::string* result);
-  void OnClipboardReadHTML(string16* markup, GURL* src_url);
-
   void OnUpdatedCacheStats(const WebKit::WebCache::UsageStats& stats);
+  void SuddenTerminationChanged(bool enabled);
+  void OnExtensionAddListener(const std::string& event_name);
+  void OnExtensionRemoveListener(const std::string& event_name);
+  void OnExtensionCloseChannel(int port_id);
 
   // Initialize support for visited links. Send the renderer process its initial
   // set of visited links.
@@ -108,6 +109,10 @@ class BrowserRenderProcessHost : public RenderProcessHost,
   // Initialize support for user scripts. Send the renderer process its initial
   // set of scripts and listen for updates to scripts.
   void InitUserScripts();
+
+  // Initialize support for extension APIs. Send the list of registered API
+  // functions to thre renderer process.
+  void InitExtensions();
 
   // Sends the renderer process a new set of user scripts.
   void SendUserScriptsUpdate(base::SharedMemory* shared_memory);
@@ -119,6 +124,8 @@ class BrowserRenderProcessHost : public RenderProcessHost,
   // Callers can reduce the RenderProcess' priority.
   // Returns true if the priority is backgrounded; false otherwise.
   void SetBackgrounded(bool boost);
+
+  NotificationRegistrar registrar_;
 
   // The count of currently visible widgets.  Since the host can be a container
   // for multiple widgets, it uses this count to determine when it should be
@@ -151,6 +158,12 @@ class BrowserRenderProcessHost : public RenderProcessHost,
 
   // Used in single-process mode.
   scoped_ptr<RendererMainThread> in_process_renderer_;
+
+  // Buffer visited links and send them to to renderer.
+  scoped_ptr<VisitedLinkUpdater> visited_link_updater_;
+
+  // True iff the renderer is a child of a zygote process.
+  bool zygote_child_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserRenderProcessHost);
 };

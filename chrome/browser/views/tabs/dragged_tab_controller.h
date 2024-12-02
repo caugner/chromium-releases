@@ -12,7 +12,7 @@
 #include "chrome/browser/tab_contents/tab_contents_delegate.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/views/tabs/tab_renderer.h"
-#include "chrome/common/notification_observer.h"
+#include "chrome/common/notification_registrar.h"
 
 namespace views {
 class MouseEvent;
@@ -20,7 +20,7 @@ class View;
 }
 class BrowserWindow;
 class DraggedTabView;
-class HWNDPhotobooth;
+class NativeViewPhotobooth;
 class SkBitmap;
 class Tab;
 class TabStrip;
@@ -68,6 +68,12 @@ class DraggedTabController : public TabContentsDelegate,
   // Returns true if the specified Tab matches the Tab being dragged.
   bool IsDragSourceTab(Tab* tab) const;
 
+
+
+  TabContents* dragged_contents() { return dragged_contents_; }
+
+
+
  private:
   class DockDisplayer;
   friend class DockDisplayer;
@@ -92,8 +98,6 @@ class DraggedTabController : public TabContentsDelegate,
                               PageTransition::Type transition);
   virtual void NavigationStateChanged(const TabContents* source,
                                       unsigned changed_flags);
-  virtual void ReplaceContents(TabContents* source,
-                               TabContents* new_contents);
   virtual void AddNewContents(TabContents* source,
                               TabContents* new_contents,
                               WindowOpenDisposition disposition,
@@ -114,8 +118,13 @@ class DraggedTabController : public TabContentsDelegate,
                        const NotificationDetails& details);
 
   // Overridden from MessageLoop::Observer:
+#if defined(OS_WIN)
   virtual void WillProcessMessage(const MSG& msg);
   virtual void DidProcessMessage(const MSG& msg);
+#else
+  virtual void WillProcessEvent(GdkEvent* event);
+  virtual void DidProcessEvent(GdkEvent* event);
+#endif
 
   // Initialize the offset used to calculate the position to create windows
   // in |GetWindowCreatePoint|.
@@ -127,11 +136,8 @@ class DraggedTabController : public TabContentsDelegate,
 
   void UpdateDockInfo(const gfx::Point& screen_point);
 
-  // Replaces the TabContents being dragged with the specified |new_contents|.
-  // This can occur if the active TabContents for the tab being dragged is
-  // replaced, e.g. if a transition from one TabContentsType to another occurs
-  // during the drag.
-  void ChangeDraggedContents(TabContents* new_contents);
+  // Sets the TabContents being dragged with the specified |new_contents|.
+  void SetDraggedContents(TabContents* new_contents);
 
   // Saves focus in the window that the drag initiated from. Focus will be
   // restored appropriately if the drag ends within this same window.
@@ -228,9 +234,10 @@ class DraggedTabController : public TabContentsDelegate,
 
   void BringWindowUnderMouseToFront();
 
-  // The TabContents being dragged. This can get replaced during the drag if
-  // the associated NavigationController is navigated to a different
-  // TabContentsType.
+  // Handles registering for notifications.
+  NotificationRegistrar registrar_;
+
+  // The TabContents being dragged.
   TabContents* dragged_contents_;
 
   // The original TabContentsDelegate of |dragged_contents_|, before it was
@@ -257,7 +264,7 @@ class DraggedTabController : public TabContentsDelegate,
 
   // The photo-booth the TabContents sits in when the Tab is detached, to
   // obtain screen shots.
-  scoped_ptr<HWNDPhotobooth> photobooth_;
+  scoped_ptr<NativeViewPhotobooth> photobooth_;
 
   // The position of the mouse (in screen coordinates) at the start of the drag
   // operation. This is used to calculate minimum elasticity before a
@@ -296,7 +303,8 @@ class DraggedTabController : public TabContentsDelegate,
 
   DockInfo dock_info_;
 
-  std::set<HWND> dock_windows_;
+  typedef std::set<gfx::NativeView> DockWindows;
+  DockWindows dock_windows_;
   std::vector<DockDisplayer*> dock_controllers_;
 
   // Timer used to bring the window under the cursor to front. If the user

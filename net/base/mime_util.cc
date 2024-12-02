@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,6 +26,7 @@ class MimeUtil : public PlatformMimeUtil {
                            std::string* mime_type) const;
 
   bool IsSupportedImageMimeType(const char* mime_type) const;
+  bool IsSupportedMediaMimeType(const char* mime_type) const;
   bool IsSupportedNonImageMimeType(const char* mime_type) const;
   bool IsSupportedJavascriptMimeType(const char* mime_type) const;
 
@@ -36,7 +37,12 @@ class MimeUtil : public PlatformMimeUtil {
   bool MatchesMimeType(const std::string &mime_type_pattern,
                        const std::string &mime_type) const;
 
-private:
+  bool AreSupportedMediaCodecs(const std::vector<std::string>& codecs) const;
+
+  void ParseCodecString(const std::string& codecs,
+                        std::vector<std::string>* codecs_out);
+
+ private:
   friend struct DefaultSingletonTraits<MimeUtil>;
   MimeUtil() {
     InitializeMimeTypeMaps();
@@ -47,10 +53,12 @@ private:
 
   typedef base::hash_set<std::string> MimeMappings;
   MimeMappings image_map_;
+  MimeMappings media_map_;
   MimeMappings non_image_map_;
   MimeMappings javascript_map_;
   MimeMappings view_source_map_;
-}; // class MimeUtil
+  MimeMappings codecs_map_;
+};  // class MimeUtil
 
 struct MimeInfo {
   const char* mime_type;
@@ -64,6 +72,11 @@ static const MimeInfo primary_mappings[] = {
   { "image/gif", "gif" },
   { "image/jpeg", "jpeg,jpg" },
   { "image/png", "png" },
+  { "video/mp4", "mp4,m4v" },
+  { "audio/x-m4a", "m4a" },
+  { "audio/mp3", "mp3" },
+  { "video/ogg", "ogv,ogm" },
+  { "audio/ogg", "ogg,oga" },
   { "application/xhtml+xml", "xhtml,xht" }
 };
 
@@ -166,14 +179,54 @@ static const char* const supported_image_types[] = {
   "image/x-xbitmap"  // xbm
 };
 
+// A list of media types: http://en.wikipedia.org/wiki/Internet_media_type
+// A comprehensive mime type list: http://plugindoc.mozdev.org/winmime.php
+static const char* const supported_media_types[] = {
+  // Ogg.
+  "video/ogg",
+  "audio/ogg",
+  "application/ogg",
+
+#if defined(GOOGLE_CHROME_BUILD)
+  // MPEG-4.
+  "video/mp4",
+  "video/x-m4v",
+  "audio/mp4",
+  "audio/x-m4a",
+
+  // MP3.
+  "audio/mp3",
+  "audio/x-mp3",
+#endif
+};
+
+// List of supported codecs when passed in with <source type="...">.
+//
+// Refer to http://wiki.whatwg.org/wiki/Video_type_parameters#Browser_Support
+// for more information.
+static const char* const supported_media_codecs[] = {
+#if defined(GOOGLE_CHROME_BUILD)
+  "avc1",
+  "mp4a",
+#endif
+  "theora",
+  "vorbis",
+};
+
 // Note: does not include javascript types list (see supported_javascript_types)
 static const char* const supported_non_image_types[] = {
   "text/html",
   "text/xml",
   "text/xsl",
   "text/plain",
+  // Many users complained about css files served for
+  // download instead of displaying in the browser:
+  // http://code.google.com/p/chromium/issues/detail?id=7192
+  // So, by including "text/css" into this list we choose Firefox
+  // behavior - css files will be displayed:
+  "text/css",
   "text/",
-  "image/svg+xml", // SVG is text-based XML, even though it has an image/ type
+  "image/svg+xml",  // SVG is text-based XML, even though it has an image/ type
   "application/xml",
   "application/xhtml+xml",
   "application/rss+xml",
@@ -217,21 +270,34 @@ void MimeUtil::InitializeMimeTypeMaps() {
   for (size_t i = 0; i < arraysize(supported_image_types); ++i)
     image_map_.insert(supported_image_types[i]);
 
-  // Initialize the supported non-image types
+  // Initialize the supported non-image types.
   for (size_t i = 0; i < arraysize(supported_non_image_types); ++i)
     non_image_map_.insert(supported_non_image_types[i]);
   for (size_t i = 0; i < arraysize(supported_javascript_types); ++i)
     non_image_map_.insert(supported_javascript_types[i]);
+  for (size_t i = 0; i < arraysize(supported_media_types); ++i)
+    non_image_map_.insert(supported_media_types[i]);
+
+  // Initialize the supported media types.
+  for (size_t i = 0; i < arraysize(supported_media_types); ++i)
+    media_map_.insert(supported_media_types[i]);
 
   for (size_t i = 0; i < arraysize(supported_javascript_types); ++i)
     javascript_map_.insert(supported_javascript_types[i]);
 
   for (size_t i = 0; i < arraysize(view_source_types); ++i)
     view_source_map_.insert(view_source_types[i]);
+
+  for (size_t i = 0; i < arraysize(supported_media_codecs); ++i)
+    codecs_map_.insert(supported_media_codecs[i]);
 }
 
 bool MimeUtil::IsSupportedImageMimeType(const char* mime_type) const {
   return image_map_.find(mime_type) != image_map_.end();
+}
+
+bool MimeUtil::IsSupportedMediaMimeType(const char* mime_type) const {
+  return media_map_.find(mime_type) != media_map_.end();
 }
 
 bool MimeUtil::IsSupportedNonImageMimeType(const char* mime_type) const {
@@ -290,6 +356,32 @@ bool MimeUtil::MatchesMimeType(const std::string &mime_type_pattern,
   return true;
 }
 
+bool MimeUtil::AreSupportedMediaCodecs(
+    const std::vector<std::string>& codecs) const {
+  for (size_t i = 0; i < codecs.size(); ++i) {
+    if (codecs_map_.find(codecs[i]) == codecs_map_.end()) {
+      return false;
+    }
+  }
+  return true;
+}
+
+void MimeUtil::ParseCodecString(const std::string& codecs,
+                                std::vector<std::string>* codecs_out) {
+  std::string no_quote_codecs;
+  TrimString(codecs, "\"", &no_quote_codecs);
+  SplitString(no_quote_codecs, ',', codecs_out);
+
+  // Truncate each string at the '.'
+  for (std::vector<std::string>::iterator it = codecs_out->begin();
+       it != codecs_out->end();
+       ++it) {
+    size_t found = it->find_first_of('.');
+    if (found != std::string::npos)
+      it->resize(found);
+  }
+}
+
 //----------------------------------------------------------------------------
 // Wrappers for the singleton
 //----------------------------------------------------------------------------
@@ -316,6 +408,10 @@ bool IsSupportedImageMimeType(const char* mime_type) {
   return GetMimeUtil()->IsSupportedImageMimeType(mime_type);
 }
 
+bool IsSupportedMediaMimeType(const char* mime_type) {
+  return GetMimeUtil()->IsSupportedMediaMimeType(mime_type);
+}
+
 bool IsSupportedNonImageMimeType(const char* mime_type) {
   return GetMimeUtil()->IsSupportedNonImageMimeType(mime_type);
 }
@@ -335,6 +431,15 @@ bool IsSupportedMimeType(const std::string& mime_type) {
 bool MatchesMimeType(const std::string &mime_type_pattern,
                      const std::string &mime_type) {
   return GetMimeUtil()->MatchesMimeType(mime_type_pattern, mime_type);
+}
+
+bool AreSupportedMediaCodecs(const std::vector<std::string>& codecs) {
+  return GetMimeUtil()->AreSupportedMediaCodecs(codecs);
+}
+
+void ParseCodecString(const std::string& codecs,
+                      std::vector<std::string>* codecs_out) {
+  GetMimeUtil()->ParseCodecString(codecs, codecs_out);
 }
 
 }  // namespace net

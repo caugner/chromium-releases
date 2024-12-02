@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,7 +25,7 @@ typedef BOOL (WINAPI* HeapSetFn)(HANDLE, HEAP_INFORMATION_CLASS, PVOID, SIZE_T);
 
 namespace base {
 
-int GetCurrentProcId() {
+ProcessId GetCurrentProcId() {
   return ::GetCurrentProcessId();
 }
 
@@ -33,8 +33,33 @@ ProcessHandle GetCurrentProcessHandle() {
   return ::GetCurrentProcess();
 }
 
-ProcessHandle OpenProcessHandle(int pid) {
-  return OpenProcess(PROCESS_DUP_HANDLE | PROCESS_TERMINATE, FALSE, pid);
+bool OpenProcessHandle(ProcessId pid, ProcessHandle* handle) {
+  // We try to limit privileges granted to the handle. If you need this
+  // for test code, consider using OpenPrivilegedProcessHandle instead of
+  // adding more privileges here.
+  ProcessHandle result = OpenProcess(PROCESS_DUP_HANDLE | PROCESS_TERMINATE,
+                                     FALSE, pid);
+
+  if (result == INVALID_HANDLE_VALUE)
+    return false;
+
+  *handle = result;
+  return true;
+}
+
+bool OpenPrivilegedProcessHandle(ProcessId pid, ProcessHandle* handle) {
+  ProcessHandle result = OpenProcess(PROCESS_DUP_HANDLE |
+                                         PROCESS_TERMINATE |
+                                         PROCESS_QUERY_INFORMATION |
+                                         PROCESS_VM_READ |
+                                         SYNCHRONIZE,
+                                     FALSE, pid);
+
+  if (result == INVALID_HANDLE_VALUE)
+    return false;
+
+  *handle = result;
+  return true;
 }
 
 void CloseProcessHandle(ProcessHandle process) {
@@ -100,7 +125,7 @@ bool GetProcIdViaNtQueryInformationProcess(ProcessHandle process, DWORD* id) {
   return true;
 }
 
-int GetProcId(ProcessHandle process) {
+ProcessId GetProcId(ProcessHandle process) {
   // Get a handle to |process| that has PROCESS_QUERY_INFORMATION rights.
   HANDLE current_process = GetCurrentProcess();
   HANDLE process_with_query_rights;
@@ -160,7 +185,7 @@ bool LaunchApp(const CommandLine& cl,
 // Attempts to kill the process identified by the given process
 // entry structure, giving it the specified exit code.
 // Returns true if this is successful, false otherwise.
-bool KillProcessById(DWORD process_id, int exit_code, bool wait) {
+bool KillProcessById(ProcessId process_id, int exit_code, bool wait) {
   HANDLE process = OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE,
                                FALSE,  // Don't inherit handle
                                process_id);
@@ -170,6 +195,79 @@ bool KillProcessById(DWORD process_id, int exit_code, bool wait) {
   bool ret = KillProcess(process, exit_code, wait);
   CloseHandle(process);
   return ret;
+}
+
+bool GetAppOutput(const CommandLine& cl, std::string* output) {
+  HANDLE out_read = NULL;
+  HANDLE out_write = NULL;
+
+  SECURITY_ATTRIBUTES sa_attr;
+  // Set the bInheritHandle flag so pipe handles are inherited.
+  sa_attr.nLength = sizeof(SECURITY_ATTRIBUTES);
+  sa_attr.bInheritHandle = TRUE;
+  sa_attr.lpSecurityDescriptor = NULL;
+
+  // Create the pipe for the child process's STDOUT.
+  if (!CreatePipe(&out_read, &out_write, &sa_attr, 0)) {
+    NOTREACHED() << "Failed to create pipe";
+    return false;
+  }
+
+  // Ensure we don't leak the handles.
+  ScopedHandle scoped_out_read(out_read);
+  ScopedHandle scoped_out_write(out_write);
+
+  // Ensure the read handle to the pipe for STDOUT is not inherited.
+  if (!SetHandleInformation(out_read, HANDLE_FLAG_INHERIT, 0)) {
+    NOTREACHED() << "Failed to disabled pipe inheritance";
+    return false;
+  }
+
+  // Now create the child process
+  PROCESS_INFORMATION proc_info = { 0 };
+  STARTUPINFO start_info = { 0 };
+
+  start_info.cb = sizeof(STARTUPINFO);
+  start_info.hStdOutput = out_write;
+  // Keep the normal stdin and stderr.
+  start_info.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+  start_info.hStdError = GetStdHandle(STD_ERROR_HANDLE);
+  start_info.dwFlags |= STARTF_USESTDHANDLES;
+
+  // Create the child process.
+  if (!CreateProcess(NULL,
+                     const_cast<wchar_t*>(cl.command_line_string().c_str()),
+                     NULL, NULL,
+                     TRUE,  // Handles are inherited.
+                     0, NULL, NULL, &start_info, &proc_info)) {
+    NOTREACHED() << "Failed to start process";
+    return false;
+  }
+
+  // We don't need the thread handle, close it now.
+  CloseHandle(proc_info.hThread);
+
+  // Close our writing end of pipe now. Otherwise later read would not be able
+  // to detect end of child's output.
+  scoped_out_write.Close();
+
+  // Read output from the child process's pipe for STDOUT
+  const int kBufferSize = 1024;
+  char buffer[kBufferSize];
+
+  for (;;) {
+    DWORD bytes_read = 0;
+    BOOL success = ReadFile(out_read, buffer, kBufferSize, &bytes_read, NULL);
+    if (!success || bytes_read == 0)
+      break;
+    output->append(buffer, bytes_read);
+  }
+
+  // Let's wait for the process to finish.
+  WaitForSingleObject(proc_info.hProcess, INFINITE);
+  CloseHandle(proc_info.hProcess);
+
+  return true;
 }
 
 bool KillProcess(ProcessHandle process, int exit_code, bool wait) {
@@ -184,8 +282,12 @@ bool KillProcess(ProcessHandle process, int exit_code, bool wait) {
   return result;
 }
 
-bool DidProcessCrash(ProcessHandle handle) {
+bool DidProcessCrash(bool* child_exited, ProcessHandle handle) {
   DWORD exitcode = 0;
+
+  if (child_exited)
+    *child_exited = true;  // On Windows it an error to call this function if
+                           // the child hasn't already exited.
   if (!::GetExitCodeProcess(handle, &exitcode)) {
     NOTREACHED();
     return false;
@@ -326,7 +428,7 @@ bool KillProcesses(const std::wstring& executable_name, int exit_code,
 }
 
 bool WaitForProcessesToExit(const std::wstring& executable_name,
-                            int wait_milliseconds,
+                            int64 wait_milliseconds,
                             const ProcessFilter* filter) {
   const ProcessEntry* entry;
   bool result = true;
@@ -335,8 +437,7 @@ bool WaitForProcessesToExit(const std::wstring& executable_name,
   NamedProcessIterator iter(executable_name, filter);
   while (entry = iter.NextProcessEntry()) {
     DWORD remaining_wait =
-      std::max(0, wait_milliseconds -
-          static_cast<int>(GetTickCount() - start_time));
+        std::max<int64>(0, wait_milliseconds - (GetTickCount() - start_time));
     HANDLE process = OpenProcess(SYNCHRONIZE,
                                  FALSE,
                                  entry->th32ProcessID);
@@ -348,18 +449,18 @@ bool WaitForProcessesToExit(const std::wstring& executable_name,
   return result;
 }
 
-bool WaitForSingleProcess(ProcessHandle handle, int wait_milliseconds) {
+bool WaitForSingleProcess(ProcessHandle handle, int64 wait_milliseconds) {
   bool retval = WaitForSingleObject(handle, wait_milliseconds) == WAIT_OBJECT_0;
   return retval;
 }
 
-bool CrashAwareSleep(ProcessHandle handle, int wait_milliseconds) {
+bool CrashAwareSleep(ProcessHandle handle, int64 wait_milliseconds) {
   bool retval = WaitForSingleObject(handle, wait_milliseconds) == WAIT_TIMEOUT;
   return retval;
 }
 
 bool CleanupProcesses(const std::wstring& executable_name,
-                      int wait_milliseconds,
+                      int64 wait_milliseconds,
                       int exit_code,
                       const ProcessFilter* filter) {
   bool exited_cleanly = WaitForProcessesToExit(executable_name,
@@ -388,7 +489,7 @@ ProcessMetrics* ProcessMetrics::CreateProcessMetrics(ProcessHandle process) {
 
 ProcessMetrics::~ProcessMetrics() { }
 
-size_t ProcessMetrics::GetPagefileUsage() {
+size_t ProcessMetrics::GetPagefileUsage() const {
   PROCESS_MEMORY_COUNTERS pmc;
   if (GetProcessMemoryInfo(process_, &pmc, sizeof(pmc))) {
     return pmc.PagefileUsage;
@@ -397,7 +498,7 @@ size_t ProcessMetrics::GetPagefileUsage() {
 }
 
 // Returns the peak space allocated for the pagefile, in bytes.
-size_t ProcessMetrics::GetPeakPagefileUsage() {
+size_t ProcessMetrics::GetPeakPagefileUsage() const {
   PROCESS_MEMORY_COUNTERS pmc;
   if (GetProcessMemoryInfo(process_, &pmc, sizeof(pmc))) {
     return pmc.PeakPagefileUsage;
@@ -406,7 +507,7 @@ size_t ProcessMetrics::GetPeakPagefileUsage() {
 }
 
 // Returns the current working set size, in bytes.
-size_t ProcessMetrics::GetWorkingSetSize() {
+size_t ProcessMetrics::GetWorkingSetSize() const {
   PROCESS_MEMORY_COUNTERS pmc;
   if (GetProcessMemoryInfo(process_, &pmc, sizeof(pmc))) {
     return pmc.WorkingSetSize;
@@ -414,7 +515,16 @@ size_t ProcessMetrics::GetWorkingSetSize() {
   return 0;
 }
 
-size_t ProcessMetrics::GetPrivateBytes() {
+// Returns the peak working set size, in bytes.
+size_t ProcessMetrics::GetPeakWorkingSetSize() const {
+  PROCESS_MEMORY_COUNTERS pmc;
+  if (GetProcessMemoryInfo(process_, &pmc, sizeof(pmc))) {
+    return pmc.PeakWorkingSetSize;
+  }
+  return 0;
+}
+
+size_t ProcessMetrics::GetPrivateBytes() const {
   // PROCESS_MEMORY_COUNTERS_EX is not supported until XP SP2.
   // GetProcessMemoryInfo() will simply fail on prior OS. So the requested
   // information is simply not available. Hence, we will return 0 on unsupported
@@ -428,34 +538,43 @@ size_t ProcessMetrics::GetPrivateBytes() {
   return 0;
 }
 
-void ProcessMetrics::GetCommittedKBytes(CommittedKBytes* usage) {
+void ProcessMetrics::GetCommittedKBytes(CommittedKBytes* usage) const {
   MEMORY_BASIC_INFORMATION mbi = {0};
   size_t committed_private = 0;
   size_t committed_mapped = 0;
   size_t committed_image = 0;
   void* base_address = NULL;
-  while (VirtualQueryEx(process_, base_address, &mbi,
-         sizeof(MEMORY_BASIC_INFORMATION)) ==
-         sizeof(MEMORY_BASIC_INFORMATION)) {
-      if (mbi.State == MEM_COMMIT) {
-        if (mbi.Type == MEM_PRIVATE) {
-          committed_private += mbi.RegionSize;
-        } else if (mbi.Type == MEM_MAPPED) {
-          committed_mapped += mbi.RegionSize;
-        } else if (mbi.Type == MEM_IMAGE) {
-          committed_image += mbi.RegionSize;
-        } else {
-          NOTREACHED();
-        }
+  while (VirtualQueryEx(process_, base_address, &mbi, sizeof(mbi)) ==
+      sizeof(mbi)) {
+    if (mbi.State == MEM_COMMIT) {
+      if (mbi.Type == MEM_PRIVATE) {
+        committed_private += mbi.RegionSize;
+      } else if (mbi.Type == MEM_MAPPED) {
+        committed_mapped += mbi.RegionSize;
+      } else if (mbi.Type == MEM_IMAGE) {
+        committed_image += mbi.RegionSize;
+      } else {
+        NOTREACHED();
       }
-      base_address = (static_cast<BYTE*>(mbi.BaseAddress)) + mbi.RegionSize;
+    }
+    void* new_base = (static_cast<BYTE*>(mbi.BaseAddress)) + mbi.RegionSize;
+    // Avoid infinite loop by weird MEMORY_BASIC_INFORMATION.
+    // If we query 64bit processes in a 32bit process, VirtualQueryEx()
+    // returns such data.
+    if (new_base <= base_address) {
+      usage->image = 0;
+      usage->mapped = 0;
+      usage->priv = 0;
+      return;
+    }
+    base_address = new_base;
   }
   usage->image = committed_image / 1024;
   usage->mapped = committed_mapped / 1024;
   usage->priv = committed_private / 1024;
 }
 
-bool ProcessMetrics::GetWorkingSetKBytes(WorkingSetKBytes* ws_usage) {
+bool ProcessMetrics::GetWorkingSetKBytes(WorkingSetKBytes* ws_usage) const {
   size_t ws_private = 0;
   size_t ws_shareable = 0;
   size_t ws_shared = 0;
@@ -574,11 +693,11 @@ int ProcessMetrics::GetCPUUsage() {
   return cpu;
 }
 
-bool ProcessMetrics::GetIOCounters(IO_COUNTERS* io_counters) {
+bool ProcessMetrics::GetIOCounters(IO_COUNTERS* io_counters) const {
   return GetProcessIoCounters(process_, io_counters) != FALSE;
 }
 
-bool ProcessMetrics::CalculateFreeMemory(FreeMBytes* free) {
+bool ProcessMetrics::CalculateFreeMemory(FreeMBytes* free) const {
   const SIZE_T kTopAdress = 0x7F000000;
   const SIZE_T kMegabyte = 1024 * 1024;
   SIZE_T accumulated = 0;

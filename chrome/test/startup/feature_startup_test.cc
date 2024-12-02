@@ -2,33 +2,22 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <windows.h>
-
 #include "base/file_util.h"
+#include "base/gfx/rect.h"
 #include "base/path_service.h"
 #include "base/perftimer.h"
 #include "base/time.h"
 #include "chrome/app/chrome_dll_resource.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/common/win_util.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/test/automation/browser_proxy.h"
+#include "chrome/test/automation/window_proxy.h"
 #include "chrome/test/ui/ui_test.h"
 #include "net/base/net_util.h"
 
 using base::TimeDelta;
 
 namespace {
-
-// Returns the directory name where the "typical" user data is that we use for
-// testing.
-std::wstring ComputeTypicalUserDataSource() {
-  std::wstring source_history_file;
-  EXPECT_TRUE(PathService::Get(chrome::DIR_TEST_DATA,
-                               &source_history_file));
-  file_util::AppendToPath(&source_history_file, L"profiles");
-  file_util::AppendToPath(&source_history_file, L"typical_history");
-  return source_history_file;
-}
 
 class NewTabUIStartupTest : public UITest {
  public:
@@ -52,9 +41,17 @@ class NewTabUIStartupTest : public UITest {
   // Run the test, by bringing up a browser and timing the new tab startup.
   // |want_warm| is true if we should output warm-disk timings, false if
   // we should report cold timings.
-  void RunStartupTest(const char* label, bool want_warm, bool important) {
+  void RunStartupTest(const char* label, bool want_warm, bool important,
+                      int profile_type) {
+    profile_type_ = profile_type;
+
     // Install the location of the test profile file.
-    set_template_user_data(ComputeTypicalUserDataSource());
+    set_template_user_data(UITest::ComputeTypicalUserDataSource(
+        profile_type).ToWStringHack());
+
+    // Disable the first run notification because it has an animation which
+    // masks any real performance regressions.
+    launch_arguments_.AppendSwitch(switches::kDisableNewTabFirstRun);
 
     TimeDelta timings[kNumCycles];
     for (int i = 0; i < kNumCycles; ++i) {
@@ -62,35 +59,37 @@ class NewTabUIStartupTest : public UITest {
 
       // Switch to the "new tab" tab, which should be any new tab after the
       // first (the first is about:blank).
-      BrowserProxy* window = automation()->GetBrowserWindow(0);
-      ASSERT_TRUE(window);
-      int old_tab_count = -1;
-      ASSERT_TRUE(window->GetTabCount(&old_tab_count));
-      ASSERT_EQ(1, old_tab_count);
+      scoped_refptr<BrowserProxy> window(automation()->GetBrowserWindow(0));
+      ASSERT_TRUE(window.get());
+
+      // We resize the window so that we hit the normal layout of the NTP and
+      // not the small layout mode.
+#if defined(OS_WIN)
+// TODO(port): SetBounds returns false when not implemented.
+// It is OK to comment out the resize since it will still be useful to test the
+// default size of the window.
+      ASSERT_TRUE(window->GetWindow().get()->SetBounds(gfx::Rect(1000, 1000)));
+#endif
+      int tab_count = -1;
+      ASSERT_TRUE(window->GetTabCount(&tab_count));
+      ASSERT_EQ(1, tab_count);
 
       // Hit ctl-t and wait for the tab to load.
       window->ApplyAccelerator(IDC_NEW_TAB);
-      int new_tab_count = -1;
-      ASSERT_TRUE(window->WaitForTabCountToChange(old_tab_count, &new_tab_count,
-                                                  5000));
-      ASSERT_EQ(2, new_tab_count);
+      ASSERT_TRUE(window->WaitForTabCountToBecome(2, 5000));
       int load_time;
       ASSERT_TRUE(automation()->WaitForInitialNewTabUILoad(&load_time));
       timings[i] = TimeDelta::FromMilliseconds(load_time);
 
       if (want_warm) {
         // Bring up a second tab, now that we've already shown one tab.
-        old_tab_count = new_tab_count;
-        new_tab_count = -1;
         window->ApplyAccelerator(IDC_NEW_TAB);
-        ASSERT_TRUE(window->WaitForTabCountToChange(old_tab_count,
-                                                    &new_tab_count, 5000));
-        ASSERT_EQ(3, new_tab_count);
+        ASSERT_TRUE(window->WaitForTabCountToBecome(3, 5000));
         ASSERT_TRUE(automation()->WaitForInitialNewTabUILoad(&load_time));
         timings[i] = TimeDelta::FromMilliseconds(load_time);
       }
 
-      delete window;
+      window = NULL;
       UITest::TearDown();
     }
 
@@ -98,14 +97,21 @@ class NewTabUIStartupTest : public UITest {
   }
 };
 
-}  // namespace
-
 // TODO(pamg): run these tests with a reference build?
-
 TEST_F(NewTabUIStartupTest, PerfCold) {
-  RunStartupTest("tab_cold", false /* not cold */, true /* important */);
+  RunStartupTest("tab_cold", false /* cold */, true /* important */,
+                 UITest::DEFAULT_THEME);
 }
 
 TEST_F(NewTabUIStartupTest, DISABLED_PerfWarm) {
-  RunStartupTest("tab_warm", true /* cold */, false /* not important */);
+  RunStartupTest("tab_warm", true /* warm */, false /* not important */,
+                 UITest::DEFAULT_THEME);
 }
+
+TEST_F(NewTabUIStartupTest, ComplexThemeCold) {
+  RunStartupTest("tab_complex_theme_cold", false /* cold */,
+                 false /* not important */,
+                 UITest::COMPLEX_THEME);
+}
+
+}  // namespace

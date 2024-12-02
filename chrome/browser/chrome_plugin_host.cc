@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 
 #include "base/basictypes.h"
 #include "base/command_line.h"
+#include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/gfx/png_encoder.h"
 #include "base/histogram.h"
@@ -19,6 +20,7 @@
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/chrome_plugin_browsing_context.h"
 #include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/dom_ui/html_dialog_ui.h"
 #include "chrome/browser/gears_integration.h"
 #include "chrome/browser/plugin_process_host.h"
 #include "chrome/browser/plugin_service.h"
@@ -33,20 +35,16 @@
 #include "chrome/common/gears_api.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/net/url_request_intercept_job.h"
+#include "chrome/common/plugin_messages.h"
 #include "chrome/common/render_messages.h"
 #include "net/base/base64.h"
 #include "net/base/cookie_monster.h"
+#include "net/base/io_buffer.h"
+#include "net/base/net_errors.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_error_job.h"
-#include "skia/include/SkBitmap.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 
-// TODO(port): Port these files.
-#if defined(OS_WIN)
-#include "chrome/browser/dom_ui/html_dialog_contents.h"
-#include "chrome/common/plugin_messages.h"
-#else
-#include "chrome/common/temp_scaffolding_stubs.h"
-#endif
 
 using base::TimeDelta;
 
@@ -191,7 +189,8 @@ class PluginRequestHandler : public PluginHelper, public URLRequest::Delegate {
   }
 
   // URLRequest::Delegate
-  virtual void OnReceivedRedirect(URLRequest* request, const GURL& new_url) {
+  virtual void OnReceivedRedirect(URLRequest* request, const GURL& new_url,
+                                  bool* defer_redirect) {
     plugin_->functions().response_funcs->received_redirect(
         cprequest_.get(), new_url.spec().c_str());
   }
@@ -282,7 +281,7 @@ PluginCommandHandler* PluginCommandHandler::instance_ = NULL;
 // This class acts as a helper to display the HTML dialog.  It is created
 // on demand on the plugin thread, and proxies calls to and from the UI thread
 // to display the UI.
-class ModelessHtmlDialogDelegate : public HtmlDialogContentsDelegate {
+class ModelessHtmlDialogDelegate : public HtmlDialogUIDelegate {
  public:
   ModelessHtmlDialogDelegate(const GURL& url,
                              int width, int height,
@@ -311,10 +310,12 @@ class ModelessHtmlDialogDelegate : public HtmlDialogContentsDelegate {
 
   // The following public methods are called from the UI thread.
 
-  // HtmlDialogContentsDelegate implementation:
+  // HtmlDialogUIDelegate implementation:
   virtual bool IsDialogModal() const { return false; }
-  virtual std::wstring GetDialogTitle() const { return L"Google Gears"; }
+  virtual std::wstring GetDialogTitle() const { return L"Gears"; }
   virtual GURL GetDialogContentURL() const { return params_.url; }
+  virtual void GetDOMMessageHandlers(
+      std::vector<DOMMessageHandler*>* handlers) const {}
   virtual void GetDialogSize(gfx::Size* size) const {
     size->set_width(params_.width);
     size->set_height(params_.height);
@@ -330,7 +331,7 @@ class ModelessHtmlDialogDelegate : public HtmlDialogContentsDelegate {
   void Show() {
     DCHECK(MessageLoop::current() == main_message_loop_);
     Browser* browser = BrowserList::GetLastActive();
-    browser->ShowHtmlDialog(this, parent_wnd_);
+    browser->BrowserShowHtmlDialog(this, parent_wnd_);
   }
 
   // Gives the JSON result string back to the plugin.
@@ -344,7 +345,7 @@ class ModelessHtmlDialogDelegate : public HtmlDialogContentsDelegate {
   }
 
   // The parameters needed to display a modal HTML dialog.
-  HtmlDialogContents::HtmlDialogParams params_;
+  HtmlDialogUI::HtmlDialogParams params_;
 
   // Message loops for sending messages between UI and IO threads.
   MessageLoop* main_message_loop_;
@@ -531,6 +532,26 @@ CPError STDCALL CPB_HandleCommand(
   return CPERR_FAILURE;
 }
 
+CPError STDCALL CPB_GetDragData(
+    CPID id, CPBrowsingContext context, struct NPObject* event, bool add_data,
+    int32* identity, int32* event_id, char** drag_type, char** drag_data) {
+  *identity = *event_id = 0;
+  NOTREACHED() << "Should not be called in the browser process.";
+  return CPERR_FAILURE;
+}
+
+CPError STDCALL CPB_SetDropEffect(
+    CPID id, CPBrowsingContext context, struct NPObject* event, int effect) {
+  NOTREACHED() << "Should not be called in the browser process.";
+  return CPERR_FAILURE;
+}
+
+CPError STDCALL CPB_AllowFileDrop(
+    CPID id, CPBrowsingContext context, const char* file_drag_data) {
+  NOTREACHED() << "Should not be called in the browser process.";
+  return CPERR_FAILURE;
+}
+
 //
 // Functions related to network interception
 //
@@ -636,8 +657,8 @@ CPError STDCALL CPR_AppendFileToUpload(CPRequest* request, const char* filepath,
   CHECK(handler);
 
   if (!length) length = kuint64max;
-  std::wstring wfilepath(UTF8ToWide(filepath));
-  handler->request()->AppendFileRangeToUpload(wfilepath, offset, length);
+  FilePath path(FilePath::FromWStringHack(UTF8ToWide(filepath)));
+  handler->request()->AppendFileRangeToUpload(path, offset, length);
   return CPERR_SUCCESS;
 }
 
@@ -772,6 +793,9 @@ CPBrowserFuncs* GetCPBrowserFuncsForBrowser() {
     browser_funcs.send_sync_message = CPB_SendSyncMessage;
     browser_funcs.plugin_thread_async_call = CPB_PluginThreadAsyncCall;
     browser_funcs.open_file_dialog = CPB_OpenFileDialog;
+    browser_funcs.get_drag_data = CPB_GetDragData;
+    browser_funcs.set_drop_effect = CPB_SetDropEffect;
+    browser_funcs.allow_file_drop = CPB_AllowFileDrop;
 
     request_funcs.size = sizeof(request_funcs);
     request_funcs.start_request = CPR_StartRequest;

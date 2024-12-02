@@ -6,11 +6,12 @@
 #define CHROME_BROWSER_PRINTING_PRINT_VIEW_MANAGER_H_
 
 #include "base/ref_counted.h"
-#include "chrome/browser/printing/printed_pages_source.h"
-#include "chrome/common/notification_observer.h"
+#include "chrome/browser/renderer_host/render_view_host_delegate.h"
+#include "chrome/common/notification_registrar.h"
+#include "printing/printed_pages_source.h"
 
 class RenderViewHost;
-class WebContents;
+class TabContents;
 struct ViewHostMsg_DidPrintPage_Params;
 
 namespace printing {
@@ -19,17 +20,14 @@ class JobEventDetails;
 class PrintJob;
 class PrintJobWorkerOwner;
 
-// Manages the print commands in relation to a WebContents. WebContents
+// Manages the print commands in relation to a TabContents. TabContents
 // delegates a few printing related commands to this instance.
 class PrintViewManager : public NotificationObserver,
-                         public PrintedPagesSource {
+                         public PrintedPagesSource,
+                         public RenderViewHostDelegate::Printing {
  public:
-  PrintViewManager(WebContents& owner);
+  PrintViewManager(TabContents& owner);
   virtual ~PrintViewManager();
-
-  // Destroys the "Print..." dialog, makes sure the pages are finished rendering
-  // and release the print job.
-  void Destroy();
 
   // Cancels the print job.
   void Stop();
@@ -38,17 +36,13 @@ class PrintViewManager : public NotificationObserver,
   // current state. Returns false if the renderer was not valuable.
   bool OnRenderViewGone(RenderViewHost* render_view_host);
 
-  // Received a notification from the renderer that the number of printed page
-  // has just been calculated..
-  void DidGetPrintedPagesCount(int cookie, int number_pages);
-
-  // Received a notification from the renderer that a printed page page is
-  // finished renderering.
-  void DidPrintPage(const ViewHostMsg_DidPrintPage_Params& params);
-
   // PrintedPagesSource implementation.
   virtual std::wstring RenderSourceName();
   virtual GURL RenderSourceUrl();
+
+  // RenderViewHostDelegate::Printing implementation.
+  virtual void DidGetPrintedPagesCount(int cookie, int number_pages);
+  virtual void DidPrintPage(const ViewHostMsg_DidPrintPage_Params& params);
 
   // NotificationObserver implementation.
   virtual void Observe(NotificationType type,
@@ -81,6 +75,9 @@ class PrintViewManager : public NotificationObserver,
   // disconnect from it.
   void DisconnectFromCurrentPrintJob();
 
+  // Notify that the printing is done.
+  void PrintingDone(bool success);
+
   // Terminates the print job. Noop if no print job has been created. If
   // |cancel| is true, cancel it instead of waiting for the job to finish. Will
   // call ReleasePrintJob().
@@ -107,6 +104,8 @@ class PrintViewManager : public NotificationObserver,
   // print_job_ is initialized.
   bool OpportunisticallyCreatePrintJob(int cookie);
 
+  NotificationRegistrar registrar_;
+
   // Manages the low-level talk to the printer.
   scoped_refptr<PrintJob> print_job_;
 
@@ -114,6 +113,9 @@ class PrintViewManager : public NotificationObserver,
   // Specifically the DEFAULT_INIT_DONE notification. Set when PrintNow() is
   // called.
   bool waiting_to_print_;
+
+  // Indication of success of the print job.
+  bool printing_succeeded_;
 
   // Running an inner message loop inside RenderAllMissingPagesNow(). This means
   // we are _blocking_ until all the necessary pages have been rendered or the
@@ -123,7 +125,7 @@ class PrintViewManager : public NotificationObserver,
   // PrintViewManager is created as an extension of WebContent specialized for
   // printing-related behavior. Still, access to the renderer is needed so a
   // back reference is kept the the "parent object".
-  WebContents& owner_;
+  TabContents& owner_;
 
   DISALLOW_COPY_AND_ASSIGN(PrintViewManager);
 };

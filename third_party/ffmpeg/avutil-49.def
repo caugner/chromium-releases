@@ -1,4 +1,0 @@
-LIBRARY avutil-49
-EXPORTS
-  av_free
-  av_malloc

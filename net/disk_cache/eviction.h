@@ -40,6 +40,8 @@ class Eviction {
   void OnDestroyEntry(EntryImpl* entry);
 
  private:
+  void PostDelayedTrim();
+  void DelayedTrim();
   void ReportTrimTimes(EntryImpl* entry);
   Rankings::List GetListForEntry(EntryImpl* entry);
   bool EvictEntry(CacheRankingsBlock* node, bool empty);
@@ -56,15 +58,19 @@ class Eviction {
   Rankings::List GetListForEntryV2(EntryImpl* entry);
   void TrimDeleted(bool empty);
   bool RemoveDeletedNode(CacheRankingsBlock* node);
-  
+
   bool NodeIsOldEnough(CacheRankingsBlock* node, int list);
   int SelectListByLenght();
+  void ReportListStats();
 
   BackendImpl* backend_;
   Rankings* rankings_;
   IndexHeader* header_;
   int max_size_;
   bool new_eviction_;
+  bool first_trim_;
+  bool trimming_;
+  bool delay_trim_;
   ScopedRunnableMethodFactory<Eviction> factory_;
 
   DISALLOW_COPY_AND_ASSIGN(Eviction);

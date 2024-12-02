@@ -9,11 +9,27 @@
 
 #include "base/basictypes.h"
 #include "base/logging.h"
-#include "skia/ext/bitmap_platform_device_linux.h"
-#include "skia/ext/platform_canvas_linux.h"
-#include "skia/ext/platform_device_linux.h"
-#include "webkit/glue/webinputevent.h"
-#include "webkit/glue/webwidget.h"
+#include "skia/ext/bitmap_platform_device.h"
+#include "skia/ext/platform_canvas.h"
+#include "skia/ext/platform_device.h"
+#include "webkit/api/public/gtk/WebInputEventFactory.h"
+#include "webkit/api/public/x11/WebScreenInfoFactory.h"
+#include "webkit/api/public/WebInputEvent.h"
+#include "webkit/api/public/WebPopupMenu.h"
+#include "webkit/api/public/WebScreenInfo.h"
+#include "webkit/api/public/WebSize.h"
+#include "webkit/tools/test_shell/test_shell.h"
+#include "webkit/tools/test_shell/test_shell_x11.h"
+
+using WebKit::WebInputEventFactory;
+using WebKit::WebKeyboardEvent;
+using WebKit::WebMouseEvent;
+using WebKit::WebMouseWheelEvent;
+using WebKit::WebPopupMenu;
+using WebKit::WebScreenInfo;
+using WebKit::WebScreenInfoFactory;
+using WebKit::WebSize;
+using WebKit::WebWidgetClient;
 
 namespace {
 
@@ -111,14 +127,14 @@ class WebWidgetHostGtkWidget {
   static void HandleSizeAllocate(GtkWidget* widget,
                                  GtkAllocation* allocation,
                                  WebWidgetHost* host) {
-    host->Resize(gfx::Size(allocation->width, allocation->height));
+    host->Resize(WebSize(allocation->width, allocation->height));
   }
 
   // Size, position, or stacking of the GdkWindow changed.
   static gboolean HandleConfigure(GtkWidget* widget,
                                   GdkEventConfigure* config,
                                   WebWidgetHost* host) {
-    host->Resize(gfx::Size(config->width, config->height));
+    host->Resize(WebSize(config->width, config->height));
     return FALSE;
   }
 
@@ -145,9 +161,8 @@ class WebWidgetHostGtkWidget {
   static gboolean HandleKeyPress(GtkWidget* widget,
                                  GdkEventKey* event,
                                  WebWidgetHost* host) {
-    WebKeyboardEvent wke(event);
-    host->webwidget()->HandleInputEvent(&wke);
-
+    host->webwidget()->handleInputEvent(
+        WebInputEventFactory::keyboardEvent(event));
     return FALSE;
   }
 
@@ -172,7 +187,10 @@ class WebWidgetHostGtkWidget {
   static gboolean HandleFocusIn(GtkWidget* widget,
                                 GdkEventFocus* focus,
                                 WebWidgetHost* host) {
-    host->webwidget()->SetFocus(true);
+    // Ignore focus calls in layout test mode so that tests don't mess with each
+    // other's focus when running in parallel.
+    if (!TestShell::layout_test_mode())
+      host->webwidget()->setFocus(true);
     return FALSE;
   }
 
@@ -180,7 +198,10 @@ class WebWidgetHostGtkWidget {
   static gboolean HandleFocusOut(GtkWidget* widget,
                                  GdkEventFocus* focus,
                                  WebWidgetHost* host) {
-    host->webwidget()->SetFocus(false);
+    // Ignore focus calls in layout test mode so that tests don't mess with each
+    // other's focus when running in parallel.
+    if (!TestShell::layout_test_mode())
+      host->webwidget()->setFocus(false);
     return FALSE;
   }
 
@@ -188,8 +209,8 @@ class WebWidgetHostGtkWidget {
   static gboolean HandleButtonPress(GtkWidget* widget,
                                     GdkEventButton* event,
                                     WebWidgetHost* host) {
-    WebMouseEvent wme(event);
-    host->webwidget()->HandleInputEvent(&wme);
+    host->webwidget()->handleInputEvent(
+        WebInputEventFactory::mouseEvent(event));
     return FALSE;
   }
 
@@ -204,8 +225,8 @@ class WebWidgetHostGtkWidget {
   static gboolean HandleMotionNotify(GtkWidget* widget,
                                      GdkEventMotion* event,
                                      WebWidgetHost* host) {
-    WebMouseEvent wme(event);
-    host->webwidget()->HandleInputEvent(&wme);
+    host->webwidget()->handleInputEvent(
+        WebInputEventFactory::mouseEvent(event));
     return FALSE;
   }
 
@@ -213,8 +234,8 @@ class WebWidgetHostGtkWidget {
   static gboolean HandleScroll(GtkWidget* widget,
                                GdkEventScroll* event,
                                WebWidgetHost* host) {
-    WebMouseWheelEvent wmwe(event);
-    host->webwidget()->HandleInputEvent(&wmwe);
+    host->webwidget()->handleInputEvent(
+        WebInputEventFactory::mouseWheelEvent(event));
     return FALSE;
   }
 
@@ -232,10 +253,10 @@ gfx::NativeView WebWidgetHost::CreateWidget(
 
 // static
 WebWidgetHost* WebWidgetHost::Create(GtkWidget* parent_view,
-                                     WebWidgetDelegate* delegate) {
+                                     WebWidgetClient* client) {
   WebWidgetHost* host = new WebWidgetHost();
   host->view_ = CreateWidget(parent_view, host);
-  host->webwidget_ = WebWidget::Create(delegate);
+  host->webwidget_ = WebPopupMenu::create(client);
   // We manage our own double buffering because we need to be able to update
   // the expose area in an ExposeEvent within the lifetime of the event handler.
   gtk_widget_set_double_buffered(GTK_WIDGET(host->view_), false);
@@ -274,14 +295,14 @@ WebWidgetHost::WebWidgetHost()
 }
 
 WebWidgetHost::~WebWidgetHost() {
-  webwidget_->Close();
+  webwidget_->close();
 }
 
 void WebWidgetHost::Resize(const gfx::Size &newsize) {
   // The pixel buffer backing us is now the wrong size
   canvas_.reset();
 
-  webwidget_->Resize(gfx::Size(newsize.width(), newsize.height()));
+  webwidget_->resize(newsize);
 }
 
 void WebWidgetHost::Paint() {
@@ -302,7 +323,7 @@ void WebWidgetHost::Paint() {
   }
 
   // This may result in more invalidation
-  webwidget_->Layout();
+  webwidget_->layout();
 
   // Paint the canvas if necessary.  Allow painting to generate extra rects the
   // first time we call it.  This is necessary because some WebCore rendering
@@ -336,15 +357,20 @@ void WebWidgetHost::Paint() {
   gdk_window_begin_paint_rect(window, &grect);
 
   // BitBlit to the gdk window.
-  skia::PlatformDeviceLinux &platdev = canvas_->getTopPlatformDevice();
-  skia::BitmapPlatformDeviceLinux* const bitdev =
-      static_cast<skia::BitmapPlatformDeviceLinux* >(&platdev);
+  cairo_t* source_surface = canvas_->beginPlatformPaint();
   cairo_t* cairo_drawable = gdk_cairo_create(window);
-  cairo_set_source_surface(cairo_drawable, bitdev->surface(), 0, 0);
+  cairo_set_source_surface(cairo_drawable, cairo_get_target(source_surface),
+                           0, 0);
   cairo_paint(cairo_drawable);
   cairo_destroy(cairo_drawable);
 
   gdk_window_end_paint(window);
+}
+
+WebScreenInfo WebWidgetHost::GetScreenInfo() {
+  Display* display = test_shell_x11::GtkWidgetGetDisplay(view_);
+  int screen_num = test_shell_x11::GtkWidgetGetScreenNum(view_);
+  return WebScreenInfoFactory::screenInfo(display, screen_num);
 }
 
 void WebWidgetHost::ResetScrollRect() {
@@ -354,7 +380,7 @@ void WebWidgetHost::ResetScrollRect() {
 
 void WebWidgetHost::PaintRect(const gfx::Rect& rect) {
   set_painting(true);
-  webwidget_->Paint(canvas_.get(), rect);
+  webwidget_->paint(canvas_.get(), rect);
   set_painting(false);
 }
 

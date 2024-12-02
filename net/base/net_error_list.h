@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -98,6 +98,16 @@ NET_ERROR(SSL_RENEGOTIATION_REQUESTED, -114)
 
 // The proxy requested authentication (for tunnel establishment).
 NET_ERROR(PROXY_AUTH_REQUESTED, -115)
+
+// During SSL renegotiation (rehandshake), the server sent a certificate with
+// an error.
+//
+// Note: this error is not in the -2xx range so that it won't be handled as a
+// certificate error.
+NET_ERROR(CERT_ERROR_IN_SSL_RENEGOTIATION, -116)
+
+// The SSL handshake failed because of a bad or missing client certificate.
+NET_ERROR(BAD_SSL_CLIENT_AUTH_CERT, -117)
 
 // Certificate error codes
 //
@@ -236,8 +246,22 @@ NET_ERROR(PAC_STATUS_NOT_OK, -326)
 // The evaluation of the PAC script failed.
 NET_ERROR(PAC_SCRIPT_FAILED, -327)
 
+// The response was 416 (Requested range not satisfiable) and the server cannot
+// satisfy the range requested.
+NET_ERROR(REQUEST_RANGE_NOT_SATISFIABLE, -328)
+
 // The cache does not have the requested entry.
 NET_ERROR(CACHE_MISS, -400)
+
+// Unable to read from the disk cache.
+NET_ERROR(CACHE_READ_FAILURE, -401)
+
+// The network transaction factory of the cache was not able to create a new
+// transaction.
+NET_ERROR(CACHE_CANNOT_CREATE_NETWORK_TRANSACTION, -402)
+
+// The operation is not supported for this entry.
+NET_ERROR(CACHE_OPERATION_NOT_SUPPORTED, -403)
 
 // The server's response was insecure (e.g. there was a cert error).
 NET_ERROR(INSECURE_RESPONSE, -501)

@@ -4,6 +4,12 @@
 
 #include "chrome/browser/bookmarks/bookmark_drag_data.h"
 
+// TODO(port): Port this file.
+#if defined(TOOLKIT_VIEWS)
+#include "app/os_exchange_data.h"
+#else
+#include "chrome/common/temp_scaffolding_stubs.h"
+#endif
 #include "base/basictypes.h"
 #include "base/pickle.h"
 #include "base/string_util.h"
@@ -11,27 +17,18 @@
 #include "chrome/browser/profile.h"
 #include "chrome/common/url_constants.h"
 
-// TODO(port): Port this file.
-#if defined(OS_WIN)
-#include "chrome/common/os_exchange_data.h"
-#else
-#include "chrome/common/temp_scaffolding_stubs.h"
-#endif
-
 #if defined(OS_WIN)
 static CLIPFORMAT clipboard_format = 0;
-#endif
 
 static void RegisterFormat() {
-#if defined(OS_WIN)
   if (clipboard_format == 0) {
     clipboard_format = RegisterClipboardFormat(L"chrome/x-bookmark-entries");
     DCHECK(clipboard_format);
   }
-#endif
 }
+#endif
 
-BookmarkDragData::Element::Element(BookmarkNode* node)
+BookmarkDragData::Element::Element(const BookmarkNode* node)
     : is_url(node->is_url()),
       url(node->GetURL()),
       title(node->GetTitle()),
@@ -44,7 +41,7 @@ void BookmarkDragData::Element::WriteToPickle(Pickle* pickle) const {
   pickle->WriteBool(is_url);
   pickle->WriteString(url.spec());
   pickle->WriteWString(title);
-  pickle->WriteInt(id_);
+  pickle->WriteInt64(id_);
   if (!is_url) {
     pickle->WriteSize(children.size());
     for (std::vector<Element>::const_iterator i = children.begin();
@@ -60,7 +57,7 @@ bool BookmarkDragData::Element::ReadFromPickle(Pickle* pickle,
   if (!pickle->ReadBool(iterator, &is_url) ||
       !pickle->ReadString(iterator, &url_spec) ||
       !pickle->ReadWString(iterator, &title) ||
-      !pickle->ReadInt(iterator, &id_)) {
+      !pickle->ReadInt64(iterator, &id_)) {
     return false;
   }
   url = GURL(url_spec);
@@ -79,15 +76,17 @@ bool BookmarkDragData::Element::ReadFromPickle(Pickle* pickle,
   return true;
 }
 
-BookmarkDragData::BookmarkDragData(BookmarkNode* node) {
+BookmarkDragData::BookmarkDragData(const BookmarkNode* node) {
   elements.push_back(Element(node));
 }
 
-BookmarkDragData::BookmarkDragData(const std::vector<BookmarkNode*>& nodes) {
+BookmarkDragData::BookmarkDragData(
+    const std::vector<const BookmarkNode*>& nodes) {
   for (size_t i = 0; i < nodes.size(); ++i)
     elements.push_back(Element(nodes[i]));
 }
 
+#if defined(OS_WIN)
 void BookmarkDragData::Write(Profile* profile, OSExchangeData* data) const {
   RegisterFormat();
 
@@ -104,19 +103,9 @@ void BookmarkDragData::Write(Profile* profile, OSExchangeData* data) const {
   }
 
   Pickle data_pickle;
-  data_pickle.WriteWString(
-      profile ? profile->GetPath().ToWStringHack() : std::wstring());
-  data_pickle.WriteSize(elements.size());
+  WriteToPickle(profile, &data_pickle);
 
-  for (size_t i = 0; i < elements.size(); ++i)
-    elements[i].WriteToPickle(&data_pickle);
-
-#if defined(OS_WIN)
   data->SetPickledData(clipboard_format, data_pickle);
-#else
-  // TODO(port): Clipboard integration.
-  NOTIMPLEMENTED();
-#endif
 }
 
 bool BookmarkDragData::Read(const OSExchangeData& data) {
@@ -126,24 +115,11 @@ bool BookmarkDragData::Read(const OSExchangeData& data) {
 
   profile_path_.clear();
 
-#if defined(OS_WIN)
   if (data.HasFormat(clipboard_format)) {
     Pickle drag_data_pickle;
     if (data.GetPickledData(clipboard_format, &drag_data_pickle)) {
-      void* data_iterator = NULL;
-      size_t element_count;
-      if (drag_data_pickle.ReadWString(&data_iterator, &profile_path_) &&
-          drag_data_pickle.ReadSize(&data_iterator, &element_count)) {
-        std::vector<Element> tmp_elements;
-        tmp_elements.resize(element_count);
-        for (size_t i = 0; i < element_count; ++i) {
-          if (!tmp_elements[i].ReadFromPickle(&drag_data_pickle,
-                                              &data_iterator)) {
-            return false;
-          }
-        }
-        elements.swap(tmp_elements);
-      }
+      if (!ReadFromPickle(&drag_data_pickle))
+        return false;
     }
   } else {
     // See if there is a URL on the clipboard.
@@ -154,22 +130,71 @@ bool BookmarkDragData::Read(const OSExchangeData& data) {
       elements.push_back(element);
     }
   }
-#else
-  // TODO(port): Clipboard integration.
-  NOTIMPLEMENTED();
-#endif
 
   return is_valid();
 }
+#elif defined(TOOLKIT_VIEWS)
+void BookmarkDragData::Write(Profile* profile, OSExchangeData* data) const {
+  NOTIMPLEMENTED();
+}
 
-std::vector<BookmarkNode*> BookmarkDragData::GetNodes(Profile* profile) const {
-  std::vector<BookmarkNode*> nodes;
+bool BookmarkDragData::Read(const OSExchangeData& data) {
+  NOTIMPLEMENTED();
+  return false;
+}
+#endif
+
+void BookmarkDragData::WriteToPickle(Profile* profile, Pickle* pickle) const {
+#if defined(WCHAR_T_IS_UTF16)
+  pickle->WriteWString(
+      profile ? profile->GetPath().ToWStringHack() : std::wstring());
+#elif defined(WCHAR_T_IS_UTF32)
+  pickle->WriteString(
+      profile ? profile->GetPath().value() : std::string());
+#else
+  NOTIMPLEMENTED() << "Impossible encoding situation!";
+#endif
+
+  pickle->WriteSize(elements.size());
+
+  for (size_t i = 0; i < elements.size(); ++i)
+    elements[i].WriteToPickle(pickle);
+}
+
+bool BookmarkDragData::ReadFromPickle(Pickle* pickle) {
+  void* data_iterator = NULL;
+  size_t element_count;
+#if defined(WCHAR_T_IS_UTF16)
+  if (pickle->ReadWString(&data_iterator, &profile_path_) &&
+#elif defined(WCHAR_T_IS_UTF32)
+  if (pickle->ReadString(&data_iterator, &profile_path_) &&
+#else
+  NOTIMPLEMENTED() << "Impossible encoding situation!";
+  if (false &&
+#endif
+      pickle->ReadSize(&data_iterator, &element_count)) {
+    std::vector<Element> tmp_elements;
+    tmp_elements.resize(element_count);
+    for (size_t i = 0; i < element_count; ++i) {
+      if (!tmp_elements[i].ReadFromPickle(pickle, &data_iterator)) {
+        return false;
+      }
+    }
+    elements.swap(tmp_elements);
+  }
+
+  return true;
+}
+
+std::vector<const BookmarkNode*> BookmarkDragData::GetNodes(
+    Profile* profile) const {
+  std::vector<const BookmarkNode*> nodes;
 
   if (!IsFromProfile(profile))
     return nodes;
 
   for (size_t i = 0; i < elements.size(); ++i) {
-    BookmarkNode* node =
+    const BookmarkNode* node =
         profile->GetBookmarkModel()->GetNodeByID(elements[i].id_);
     if (!node) {
       nodes.clear();
@@ -180,13 +205,17 @@ std::vector<BookmarkNode*> BookmarkDragData::GetNodes(Profile* profile) const {
   return nodes;
 }
 
-BookmarkNode* BookmarkDragData::GetFirstNode(Profile* profile) const {
-  std::vector<BookmarkNode*> nodes = GetNodes(profile);
+const BookmarkNode* BookmarkDragData::GetFirstNode(Profile* profile) const {
+  std::vector<const BookmarkNode*> nodes = GetNodes(profile);
   return nodes.size() == 1 ? nodes[0] : NULL;
 }
 
 bool BookmarkDragData::IsFromProfile(Profile* profile) const {
   // An empty path means the data is not associated with any profile.
   return (!profile_path_.empty() &&
+#if defined(WCHAR_T_IS_UTF16)
       profile->GetPath().ToWStringHack() == profile_path_);
+#elif defined(WCHAR_T_IS_UTF32)
+      profile->GetPath().value() == profile_path_);
+#endif
 }

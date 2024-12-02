@@ -4,6 +4,9 @@
 
 #include "base/file_util.h"
 #include "base/path_service.h"
+#include "base/scoped_ptr.h"
+#include "base/scoped_vector.h"
+#include "base/stl_util-inl.h"
 #include "base/string_util.h"
 #include "base/time.h"
 #include "chrome/browser/sessions/session_backend.h"
@@ -12,8 +15,7 @@
 #include "chrome/browser/sessions/session_types.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/common/scoped_vector.h"
-#include "chrome/common/stl_util-inl.h"
+#include "chrome/test/file_test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 class SessionServiceTest : public testing::Test {
@@ -27,6 +29,7 @@ class SessionServiceTest : public testing::Test {
     PathService::Get(base::DIR_TEMP, &path_);
     path_ = path_.Append(FILE_PATH_LITERAL("SessionTestDirs"));
     file_util::CreateDirectory(path_);
+    path_deleter_.reset(new FileAutoDeleter(path_));
     path_ = path_.AppendASCII(b);
 
     SessionService* session_service = new SessionService(path_);
@@ -38,7 +41,7 @@ class SessionServiceTest : public testing::Test {
 
   virtual void TearDown() {
     helper_.set_service(NULL);
-    file_util::Delete(path_, true);
+    path_deleter_.reset();
   }
 
   void UpdateNavigation(const SessionID& window_id,
@@ -46,7 +49,7 @@ class SessionServiceTest : public testing::Test {
                         const TabNavigation& navigation,
                         int index,
                         bool select) {
-    NavigationEntry entry(TAB_CONTENTS_UNKNOWN_TYPE);
+    NavigationEntry entry;
     entry.set_url(navigation.url());
     entry.set_referrer(navigation.referrer());
     entry.set_title(navigation.title());
@@ -68,6 +71,40 @@ class SessionServiceTest : public testing::Test {
     helper_.ReadWindows(windows);
   }
 
+  // Configures the session service with one window with one tab and a single
+  // navigation. If |pinned_state| is true or |write_always| is true, the
+  // pinned state of the tab is updated. The session service is then recreated
+  // and the pinned state of the read back tab is returned.
+  bool CreateAndWriteSessionWithOneTab(bool pinned_state, bool write_always) {
+    SessionID tab_id;
+
+    TabNavigation nav1(0, GURL("http://google.com"),
+                       GURL("http://www.referrer.com"),
+                       ASCIIToUTF16("abc"), "def",
+                       PageTransition::QUALIFIER_MASK);
+
+    helper_.PrepareTabInWindow(window_id, tab_id, 0, true);
+    UpdateNavigation(window_id, tab_id, nav1, 0, true);
+
+    if (pinned_state || write_always)
+      helper_.service()->SetPinnedState(window_id, tab_id, pinned_state);
+
+    ScopedVector<SessionWindow> windows;
+    ReadWindows(&(windows.get()));
+
+    EXPECT_EQ(1U, windows->size());
+    if (HasFatalFailure())
+      return false;
+    EXPECT_EQ(1U, windows[0]->tabs.size());
+    if (HasFatalFailure())
+      return false;
+
+    SessionTab* tab = windows[0]->tabs[0];
+    helper_.AssertTabEquals(window_id, tab_id, 0, 0, 1, *tab);
+
+    return tab->pinned;
+  }
+
   SessionService* service() { return helper_.service(); }
 
   SessionBackend* backend() { return helper_.backend(); }
@@ -78,6 +115,7 @@ class SessionServiceTest : public testing::Test {
 
   // Path used in testing.
   FilePath path_;
+  scoped_ptr<FileAutoDeleter> path_deleter_;
 
   SessionServiceTestHelper helper_;
 };
@@ -110,14 +148,13 @@ TEST_F(SessionServiceTest, Basic) {
   helper_.AssertNavigationEquals(nav1, tab->navigations[0]);
 }
 
-// Creates a navigation entry with post data, saves it, and makes sure it does
-// not get restored.
-TEST_F(SessionServiceTest, PrunePostData1) {
+// Make sure we persist post entries.
+TEST_F(SessionServiceTest, PersistPostData) {
   SessionID tab_id;
   ASSERT_NE(window_id.id(), tab_id.id());
 
   TabNavigation nav1(0, GURL("http://google.com"), GURL(),
-                     ASCIIToUTF16("abc"), "def",
+                     ASCIIToUTF16("abc"), std::string(),
                      PageTransition::QUALIFIER_MASK);
   nav1.set_type_mask(TabNavigation::HAS_POST_DATA);
 
@@ -127,38 +164,7 @@ TEST_F(SessionServiceTest, PrunePostData1) {
   ScopedVector<SessionWindow> windows;
   ReadWindows(&(windows.get()));
 
-  ASSERT_EQ(0U, windows->size());
-}
-
-// Creates two navigation entries, one with post data one without. Restores
-// and verifies we get back only the entry with no post data.
-TEST_F(SessionServiceTest, PrunePostData2) {
-  SessionID tab_id;
-  ASSERT_NE(window_id.id(), tab_id.id());
-
-  TabNavigation nav1(0, GURL("http://google.com"),
-                     GURL("http://www.referrer.com"),
-                     ASCIIToUTF16("abc"), "def",
-                     PageTransition::QUALIFIER_MASK);
-  nav1.set_type_mask(TabNavigation::HAS_POST_DATA);
-  TabNavigation nav2(0, GURL("http://google2.com"), GURL(),
-                     ASCIIToUTF16("abc"), "def",
-                     PageTransition::QUALIFIER_MASK);
-
-  helper_.PrepareTabInWindow(window_id, tab_id, 0, true);
-  UpdateNavigation(window_id, tab_id, nav1, 0, true);
-  UpdateNavigation(window_id, tab_id, nav2, 1, false);
-
-  ScopedVector<SessionWindow> windows;
-  ReadWindows(&(windows.get()));
-
-  ASSERT_EQ(1U, windows->size());
-  ASSERT_EQ(0, windows[0]->selected_tab_index);
-
-  SessionTab* tab = windows[0]->tabs[0];
-  helper_.AssertTabEquals(window_id, tab_id, 0, 0, 1, *tab);
-
-  helper_.AssertNavigationEquals(nav2, tab->navigations[0]);
+  helper_.AssertSingleWindowWithSingleTab(windows.get(), 1);
 }
 
 TEST_F(SessionServiceTest, ClosingTabStaysClosed) {
@@ -482,4 +488,19 @@ TEST_F(SessionServiceTest, PruneToEmpty) {
   ReadWindows(&(windows.get()));
 
   ASSERT_EQ(0U, windows->size());
+}
+
+// Don't set the pinned state and make sure the pinned value is false.
+TEST_F(SessionServiceTest, PinnedDefaultsToFalse) {
+  EXPECT_FALSE(CreateAndWriteSessionWithOneTab(false, false));
+}
+
+// Explicitly set the pinned state to false and make sure we get back false.
+TEST_F(SessionServiceTest, PinnedFalseWhenSetToFalse) {
+  EXPECT_FALSE(CreateAndWriteSessionWithOneTab(false, true));
+}
+
+// Explicitly set the pinned state to false and make sure we get back true.
+TEST_F(SessionServiceTest, PinnedTrue) {
+  EXPECT_TRUE(CreateAndWriteSessionWithOneTab(true, true));
 }

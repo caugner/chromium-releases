@@ -4,8 +4,7 @@
 
 // Filters are connected in a strongly typed manner, with downstream filters
 // always reading data from upstream filters.  Upstream filters have no clue
-// who is actually reading from them, and return the results via OnAssignment
-// using the AssignableInterface<SomeBufferType> interface:
+// who is actually reading from them, and return the results via callbacks.
 //
 //                         DemuxerStream(Video) <- VideoDecoder <- VideoRenderer
 // DataSource <- Demuxer <
@@ -28,13 +27,13 @@
 #include <string>
 
 #include "base/logging.h"
+#include "base/message_loop.h"
 #include "base/ref_counted.h"
 #include "base/time.h"
 #include "media/base/media_format.h"
 
 namespace media {
 
-template <class TBuffer> class Assignable;
 class Buffer;
 class Decoder;
 class DemuxerStream;
@@ -54,19 +53,64 @@ enum FilterType {
   FILTER_VIDEO_RENDERER
 };
 
+// A filter can broadcast messages to all other filters.  This identifies
+// the type of message to be broadcasted.
+enum FilterMessage {
+  kMsgDisableAudio,
+};
+
+// Used for completing asynchronous methods.
+typedef Callback0::Type FilterCallback;
 
 class MediaFilter : public base::RefCountedThreadSafe<MediaFilter> {
  public:
-  MediaFilter() : host_(NULL) {}
+  MediaFilter() : host_(NULL), message_loop_(NULL) {}
 
-  // Sets the protected member |host_|. This is the first method called by
+  // Sets the private member |host_|. This is the first method called by
   // the FilterHost after a filter is created.  The host holds a strong
-  // reference to the filter.  The refernce held by the host is guaranteed
+  // reference to the filter.  The reference held by the host is guaranteed
   // to be released before the host object is destroyed by the pipeline.
-  virtual void SetFilterHost(FilterHost* host) {
-    DCHECK(NULL == host_);
-    DCHECK(NULL != host);
+  virtual void set_host(FilterHost* host) {
+    DCHECK(host);
+    DCHECK(!host_);
     host_ = host;
+  }
+
+  virtual FilterHost* host() {
+    return host_;
+  }
+
+  // Sets the private member |message_loop_|, which is used by filters for
+  // processing asynchronous tasks and maintaining synchronized access to
+  // internal data members.  The message loop should be running and exceed the
+  // lifetime of the filter.
+  virtual void set_message_loop(MessageLoop* message_loop) {
+    DCHECK(message_loop);
+    DCHECK(!message_loop_);
+    message_loop_ = message_loop;
+  }
+
+  virtual MessageLoop* message_loop() {
+    return message_loop_;
+  }
+
+  // The pipeline has resumed playback.  Filters can continue requesting reads.
+  // Filters may implement this method if they need to respond to this call.
+  virtual void Play(FilterCallback* callback) {
+    if (callback) {
+      callback->Run();
+      delete callback;
+    }
+  }
+
+  // The pipeline has paused playback.  Filters should fulfill any existing read
+  // requests and then idle.  Filters may implement this method if they need to
+  // respond to this call.
+  virtual void Pause(FilterCallback* callback) {
+    if (callback) {
+      callback->Run();
+      delete callback;
+    }
   }
 
   // The pipeline is being stopped either as a result of an error or because
@@ -77,54 +121,74 @@ class MediaFilter : public base::RefCountedThreadSafe<MediaFilter> {
   // method if they need to respond to this call.
   virtual void SetPlaybackRate(float playback_rate) {}
 
-  // The pipeline is being seeked to the specified time.  Filters may implement
-  // this method if they need to respond to this call.
-  virtual void Seek(base::TimeDelta time) {}
+  // Carry out any actions required to seek to the given time, executing the
+  // callback upon completion.
+  virtual void Seek(base::TimeDelta time, FilterCallback* callback) {
+    scoped_ptr<FilterCallback> seek_callback(callback);
+    if (seek_callback.get()) {
+      seek_callback->Run();
+    }
+  }
+
+  // This method is called from the pipeline when a message of type |message|
+  // is broadcasted from |source|. Filters can ignore the message if they do
+  // not need to react to events raised from another filter.
+  virtual void OnReceivedMessage(FilterMessage message) {
+  }
 
  protected:
-  FilterHost* host_;
+  // Only allow scoped_refptr<> to delete filters.
   friend class base::RefCountedThreadSafe<MediaFilter>;
   virtual ~MediaFilter() {}
 
+  FilterHost* host() const { return host_; }
+  MessageLoop* message_loop() const { return message_loop_; }
+
  private:
+  FilterHost* host_;
+  MessageLoop* message_loop_;
+
   DISALLOW_COPY_AND_ASSIGN(MediaFilter);
 };
 
 
 class DataSource : public MediaFilter {
  public:
+  typedef Callback1<size_t>::Type ReadCallback;
+  static const size_t kReadError = static_cast<size_t>(-1);
+
   static const FilterType filter_type() {
     return FILTER_DATA_SOURCE;
   }
 
-  static bool IsMediaFormatSupported(const MediaFormat* media_format) {
+  static bool IsMediaFormatSupported(const MediaFormat& media_format) {
     std::string mime_type;
-    return (media_format->GetAsString(MediaFormat::kMimeType, &mime_type) &&
+    return (media_format.GetAsString(MediaFormat::kMimeType, &mime_type) &&
             mime_type == mime_type::kURL);
   }
 
-  static const size_t kReadError = static_cast<size_t>(-1);
-
-  // Initializes this filter, returns true if successful, false otherwise.
-  virtual bool Initialize(const std::string& url) = 0;
+  // Initialize a DataSource for the given URL, executing the callback upon
+  // completion.
+  virtual void Initialize(const std::string& url, FilterCallback* callback) = 0;
 
   // Returns the MediaFormat for this filter.
-  virtual const MediaFormat* GetMediaFormat() = 0;
+  virtual const MediaFormat& media_format() = 0;
 
-  // Read the given amount of bytes into data, returns the number of bytes read
-  // if successful, kReadError otherwise.
-  virtual size_t Read(uint8* data, size_t size) = 0;
-
-  // Returns true and the current file position for this file, false if the
-  // file position could not be retrieved.
-  virtual bool GetPosition(int64* position_out) = 0;
-
-  // Returns true if the file position could be set, false otherwise.
-  virtual bool SetPosition(int64 position) = 0;
+  // Reads |size| bytes from |position| into |data|. And when the read is done
+  // or failed, |read_callback| is called with the number of bytes read or
+  // kReadError in case of error.
+  // TODO(hclam): should change |size| to int! It makes the code so messy
+  // with size_t and int all over the place..
+  virtual void Read(int64 position, size_t size,
+                    uint8* data, ReadCallback* read_callback) = 0;
 
   // Returns true and the file size, false if the file size could not be
   // retrieved.
   virtual bool GetSize(int64* size_out) = 0;
+
+  // Returns true if we are performing streaming. In this case seeking is
+  // not possible.
+  virtual bool IsStreaming() = 0;
 };
 
 
@@ -134,32 +198,57 @@ class Demuxer : public MediaFilter {
     return FILTER_DEMUXER;
   }
 
-  static bool IsMediaFormatSupported(const MediaFormat* media_format) {
+  static bool IsMediaFormatSupported(const MediaFormat& media_format) {
     std::string mime_type;
-    return (media_format->GetAsString(MediaFormat::kMimeType, &mime_type) &&
+    return (media_format.GetAsString(MediaFormat::kMimeType, &mime_type) &&
             mime_type == mime_type::kApplicationOctetStream);
   }
 
-  // Initializes this filter, returns true if successful, false otherwise.
-  virtual bool Initialize(DataSource* data_source) = 0;
+  // Initialize a Demuxer with the given DataSource, executing the callback upon
+  // completion.
+  virtual void Initialize(DataSource* data_source,
+                          FilterCallback* callback) = 0;
 
   // Returns the number of streams available
   virtual size_t GetNumberOfStreams() = 0;
 
   // Returns the stream for the given index, NULL otherwise
-  virtual DemuxerStream* GetStream(int stream_id) = 0;
+  virtual scoped_refptr<DemuxerStream> GetStream(int stream_id) = 0;
 };
 
 
-class DemuxerStream {
+class DemuxerStream : public base::RefCountedThreadSafe<DemuxerStream> {
  public:
   // Returns the MediaFormat for this filter.
-  virtual const MediaFormat* GetMediaFormat() = 0;
+  virtual const MediaFormat& media_format() = 0;
 
-  // Schedules a read and takes ownership of the given buffer.
-  virtual void Read(Assignable<Buffer>* buffer) = 0;
+  // Schedules a read.  When the |read_callback| is called, the downstream
+  // filter takes ownership of the buffer by AddRef()'ing the buffer.
+  //
+  // TODO(scherkus): switch Read() callback to scoped_refptr<>.
+  virtual void Read(Callback1<Buffer*>::Type* read_callback) = 0;
+
+  // Given a class that supports the |Interface| and a related static method
+  // interface_id(), which returns a const char*, this method returns true if
+  // the class returns an interface pointer and assigns the pointer to
+  // |interface_out|.  Otherwise this method returns false.
+  template <class Interface>
+  bool QueryInterface(Interface** interface_out) {
+    void* i = QueryInterface(Interface::interface_id());
+    *interface_out = reinterpret_cast<Interface*>(i);
+    return (NULL != i);
+  };
 
  protected:
+  // Optional method that is implemented by filters that support extended
+  // interfaces.  The filter should return a pointer to the interface
+  // associated with the |interface_id| string if they support it, otherwise
+  // return NULL to indicate the interface is unknown.  The derived filter
+  // should NOT AddRef() the interface.  The DemuxerStream::QueryInterface()
+  // public template function will assign the interface to a scoped_refptr<>.
+  virtual void* QueryInterface(const char* interface_id) { return NULL; }
+
+  friend class base::RefCountedThreadSafe<DemuxerStream>;
   virtual ~DemuxerStream() {}
 };
 
@@ -174,14 +263,17 @@ class VideoDecoder : public MediaFilter {
     return mime_type::kMajorTypeVideo;
   }
 
-  // Initializes this filter, returns true if successful, false otherwise.
-  virtual bool Initialize(DemuxerStream* demuxer_stream) = 0;
+  // Initialize a VideoDecoder with the given DemuxerStream, executing the
+  // callback upon completion.
+  virtual void Initialize(DemuxerStream* stream, FilterCallback* callback) = 0;
 
   // Returns the MediaFormat for this filter.
-  virtual const MediaFormat* GetMediaFormat() = 0;
+  virtual const MediaFormat& media_format() = 0;
 
-  // Schedules a read and takes ownership of the given buffer.
-  virtual void Read(Assignable<VideoFrame>* video_frame) = 0;
+  // Schedules a read.  Decoder takes ownership of the callback.
+  //
+  // TODO(scherkus): switch Read() callback to scoped_refptr<>.
+  virtual void Read(Callback1<VideoFrame*>::Type* read_callback) = 0;
 };
 
 
@@ -195,14 +287,17 @@ class AudioDecoder : public MediaFilter {
     return mime_type::kMajorTypeAudio;
   }
 
-  // Initializes this filter, returns true if successful, false otherwise.
-  virtual bool Initialize(DemuxerStream* demuxer_stream) = 0;
+  // Initialize a AudioDecoder with the given DemuxerStream, executing the
+  // callback upon completion.
+  virtual void Initialize(DemuxerStream* stream, FilterCallback* callback) = 0;
 
   // Returns the MediaFormat for this filter.
-  virtual const MediaFormat* GetMediaFormat() = 0;
+  virtual const MediaFormat& media_format() = 0;
 
-  // Schedules a read and takes ownership of the given buffer.
-  virtual void Read(Assignable<Buffer>* buffer) = 0;
+  // Schedules a read.  Decoder takes ownership of the callback.
+  //
+  // TODO(scherkus): switch Read() callback to scoped_refptr<>.
+  virtual void Read(Callback1<Buffer*>::Type* read_callback) = 0;
 };
 
 
@@ -216,8 +311,13 @@ class VideoRenderer : public MediaFilter {
     return mime_type::kMajorTypeVideo;
   }
 
-  // Initializes this filter, returns true if successful, false otherwise.
-  virtual bool Initialize(VideoDecoder* decoder) = 0;
+  // Initialize a VideoRenderer with the given VideoDecoder, executing the
+  // callback upon completion.
+  virtual void Initialize(VideoDecoder* decoder, FilterCallback* callback) = 0;
+
+  // Returns true if this filter has received and processed an end-of-stream
+  // buffer.
+  virtual bool HasEnded() = 0;
 };
 
 
@@ -231,8 +331,13 @@ class AudioRenderer : public MediaFilter {
     return mime_type::kMajorTypeAudio;
   }
 
-  // Initializes this filter, returns true if successful, false otherwise.
-  virtual bool Initialize(AudioDecoder* decoder) = 0;
+  // Initialize a AudioRenderer with the given AudioDecoder, executing the
+  // callback upon completion.
+  virtual void Initialize(AudioDecoder* decoder, FilterCallback* callback) = 0;
+
+  // Returns true if this filter has received and processed an end-of-stream
+  // buffer.
+  virtual bool HasEnded() = 0;
 
   // Sets the output volume.
   virtual void SetVolume(float volume) = 0;

@@ -65,14 +65,23 @@ Pickle::~Pickle() {
 }
 
 Pickle& Pickle::operator=(const Pickle& other) {
-  if (header_size_ != other.header_size_ && capacity_ != kCapacityReadOnly) {
+  if (this == &other) {
+    NOTREACHED();
+    return *this;
+  }
+  if (capacity_ == kCapacityReadOnly) {
+    header_ = NULL;
+    capacity_ = 0;
+  }
+  if (header_size_ != other.header_size_) {
     free(header_);
     header_ = NULL;
     header_size_ = other.header_size_;
   }
   bool resized = Resize(other.header_size_ + other.header_->payload_size);
   CHECK(resized);  // Realloc failed.
-  memcpy(header_, other.header_, header_size_ + other.header_->payload_size);
+  memcpy(header_, other.header_,
+         other.header_size_ + other.header_->payload_size);
   variable_buffer_offset_ = other.variable_buffer_offset_;
   return *this;
 }
@@ -96,8 +105,8 @@ bool Pickle::ReadInt(void** iter, int* result) const {
   if (!IteratorHasRoomFor(*iter, sizeof(*result)))
     return false;
 
-  // TODO(jar) bug 1129285: Pickle should be cleaned up, and not dependent on
-  // alignment.
+  // TODO(jar): http://crbug.com/13108 Pickle should be cleaned up, and not
+  // dependent on alignment.
   // Next line is otherwise the same as: memcpy(result, *iter, sizeof(*result));
   *result = *reinterpret_cast<int*>(*iter);
 
@@ -113,8 +122,8 @@ bool Pickle::ReadLong(void** iter, long* result) const {
   if (!IteratorHasRoomFor(*iter, sizeof(*result)))
     return false;
 
-  // TODO(jar) bug 1129285: Pickle should be cleaned up, and not dependent on
-  // alignment.
+  // TODO(jar): http://crbug.com/13108 Pickle should be cleaned up, and not
+  // dependent on alignment.
   memcpy(result, *iter, sizeof(*result));
 
   UpdateIter(iter, sizeof(*result));
@@ -135,8 +144,8 @@ bool Pickle::ReadSize(void** iter, size_t* result) const {
   if (!IteratorHasRoomFor(*iter, sizeof(*result)))
     return false;
 
-  // TODO(jar) bug 1129285: Pickle should be cleaned up, and not dependent on
-  // alignment.
+  // TODO(jar): http://crbug.com/13108 Pickle should be cleaned up, and not
+  // dependent on alignment.
   // Next line is otherwise the same as: memcpy(result, *iter, sizeof(*result));
   *result = *reinterpret_cast<size_t*>(*iter);
 
@@ -208,6 +217,9 @@ bool Pickle::ReadWString(void** iter, std::wstring* result) const {
   int len;
   if (!ReadLength(iter, &len))
     return false;
+  // Avoid integer overflow.
+  if (len > INT_MAX / static_cast<int>(sizeof(wchar_t)))
+    return false;
   if (!IteratorHasRoomFor(*iter, len * sizeof(wchar_t)))
     return false;
 
@@ -224,7 +236,7 @@ bool Pickle::ReadString16(void** iter, string16* result) const {
   int len;
   if (!ReadLength(iter, &len))
     return false;
-  if (!IteratorHasRoomFor(*iter, len))
+  if (!IteratorHasRoomFor(*iter, len * sizeof(char16)))
     return false;
 
   char16* chars = reinterpret_cast<char16*>(*iter);
@@ -362,6 +374,7 @@ void Pickle::TrimWriteData(int new_length) {
 bool Pickle::Resize(size_t new_capacity) {
   new_capacity = AlignInt(new_capacity, kPayloadUnit);
 
+  CHECK(capacity_ != kCapacityReadOnly);
   void* p = realloc(header_, new_capacity);
   if (!p)
     return false;

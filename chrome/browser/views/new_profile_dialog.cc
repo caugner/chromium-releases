@@ -6,17 +6,27 @@
 
 #include <string>
 
+#include "app/l10n_util.h"
+#include "app/message_box_flags.h"
 #include "base/logging.h"
 #include "base/file_util.h"
 #include "chrome/browser/user_data_manager.h"
-#include "chrome/common/l10n_util.h"
-#include "chrome/views/controls/message_box_view.h"
-#include "chrome/views/controls/text_field.h"
-#include "chrome/views/view.h"
-#include "chrome/views/window/window.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
+#include "views/controls/message_box_view.h"
+#include "views/controls/textfield/textfield.h"
+#include "views/view.h"
+#include "views/window/window.h"
+
+namespace browser {
+
+// Declared in browser_dialogs.h so others don't have to depend on our header.
+void ShowNewProfileDialog() {
+  NewProfileDialog::RunDialog();
+}
+
+}  // namespace browser
 
 // static
 void NewProfileDialog::RunDialog() {
@@ -29,9 +39,9 @@ NewProfileDialog::NewProfileDialog() {
       IDS_NEW_PROFILE_DIALOG_LABEL_TEXT);
   const int kDialogWidth = views::Window::GetLocalizedContentsWidth(
       IDS_NEW_PROFILE_DIALOG_WIDTH_CHARS);
-  const int kMessageBoxFlags = MessageBoxView::kFlagHasOKButton |
-                               MessageBoxView::kFlagHasCancelButton |
-                               MessageBoxView::kFlagHasPromptField;
+  const int kMessageBoxFlags = MessageBoxFlags::kFlagHasOKButton |
+                               MessageBoxFlags::kFlagHasCancelButton |
+                               MessageBoxFlags::kFlagHasPromptField;
   message_box_view_ = new MessageBoxView(kMessageBoxFlags,
                                          message_text.c_str(),
                                          std::wstring(),
@@ -45,19 +55,15 @@ NewProfileDialog::NewProfileDialog() {
 NewProfileDialog::~NewProfileDialog() {
 }
 
-int NewProfileDialog::GetDialogButtons() const {
-  return DIALOGBUTTON_OK | DIALOGBUTTON_CANCEL;
-}
-
 views::View* NewProfileDialog::GetInitiallyFocusedView() {
-  views::TextField* text_box = message_box_view_->text_box();
+  views::Textfield* text_box = message_box_view_->text_box();
   DCHECK(text_box);
   return text_box;
 }
 
 bool NewProfileDialog::IsDialogButtonEnabled(
-    DialogButton button) const {
-  if (button == DIALOGBUTTON_OK) {
+    MessageBoxFlags::DialogButton button) const {
+  if (button == MessageBoxFlags::DIALOGBUTTON_OK) {
     std::wstring profile_name = message_box_view_->GetInputText();
     // TODO(munjal): Refactor the function ReplaceIllegalCharacters in
     // file_util to something that just checks if there are illegal chars
@@ -79,7 +85,7 @@ void NewProfileDialog::DeleteDelegate() {
   delete this;
 }
 
-void NewProfileDialog::ContentsChanged(views::TextField* sender,
+void NewProfileDialog::ContentsChanged(views::Textfield* sender,
                                        const std::wstring& new_contents) {
   GetDialogClientView()->UpdateDialogButtons();
 }

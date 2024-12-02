@@ -13,15 +13,24 @@
 
 @implementation TabWindowController
 @synthesize tabStripView = tabStripView_;
+@synthesize tabContentArea = tabContentArea_;
 
 - (void)windowDidLoad {
-  // Place the tab bar above the content box and add it to the view hierarchy
-  // as a sibling of the content view so it can overlap with the window frame.
-  NSRect tabFrame = [contentBox_ frame];
-  tabFrame.origin = NSMakePoint(0, NSMaxY(tabFrame));
-  tabFrame.size.height = NSHeight([tabStripView_ frame]);
-  [tabStripView_ setFrame:tabFrame];
-  [[[[self window] contentView] superview] addSubview:tabStripView_];
+  if ([self isNormalWindow]) {
+    // Place the tab bar above the content box and add it to the view hierarchy
+    // as a sibling of the content view so it can overlap with the window frame.
+    NSRect tabFrame = [tabContentArea_ frame];
+    tabFrame.origin = NSMakePoint(0, NSMaxY(tabFrame));
+    tabFrame.size.height = NSHeight([tabStripView_ frame]);
+    [tabStripView_ setFrame:tabFrame];
+    [[[[self window] contentView] superview] addSubview:tabStripView_];
+  } else {
+    // No tabstrip so remove the tabContentArea offset.
+    NSRect tabFrame = [tabContentArea_ frame];
+    NSRect contentFrame = [[[self window] contentView] frame];
+    tabFrame.size.height = contentFrame.size.height;
+    [tabContentArea_ setFrame:tabFrame];
+  }
 }
 
 - (void)removeOverlay {
@@ -41,11 +50,33 @@
   [self setUseOverlay:YES];
 }
 
+- (NSArray*)viewsToMoveToOverlay {
+  return [NSArray arrayWithObjects:[self tabStripView],
+            [self tabContentArea], nil];
+}
+
+// if |useOverlay| is true, we're moving views into the overlay's content
+// area. If false, we're moving out of the overlay back into the window's
+// content.
+- (void)moveViewsBetweenWindowAndOverlay:(BOOL)useOverlay {
+  NSView* moveTo = useOverlay ?
+      [overlayWindow_ contentView] : [cachedContentView_ superview];
+  NSArray* viewsToMove = [self viewsToMoveToOverlay];
+  for (NSView* view in viewsToMove)
+    [moveTo addSubview:view];
+}
+
+// If |useOverlay| is YES, creates a new overlay window and puts the tab strip
+// and the content area inside of it. This allows it to have a different opacity
+// from the title bar. If NO, returns everything to the previous state and
+// destroys the overlay window until it's needed again. The tab strip and window
+// contents are returned to the original window.
 - (void)setUseOverlay:(BOOL)useOverlay {
   [NSObject cancelPreviousPerformRequestsWithTarget:self
                                            selector:@selector(removeOverlay)
                                              object:nil];
   if (useOverlay && !overlayWindow_) {
+    DCHECK(!cachedContentView_);
     overlayWindow_ = [[NSPanel alloc] initWithContentRect:[[self window] frame]
                                                 styleMask:NSBorderlessWindowMask
                                                   backing:NSBackingStoreBuffered
@@ -53,30 +84,48 @@
     [overlayWindow_ setTitle:@"overlay"];
     [overlayWindow_ setBackgroundColor:[NSColor clearColor]];
     [overlayWindow_ setOpaque:NO];
+    [overlayWindow_ setDelegate:self];
     NSView *contentView = [overlayWindow_ contentView];
     [contentView addSubview:[self tabStripView]];
-    [contentView addSubview:contentBox_];
-    [overlayWindow_ setHasShadow:YES];
+    cachedContentView_ = [[self window] contentView];
+    [self moveViewsBetweenWindowAndOverlay:useOverlay];
     [[self window] addChildWindow:overlayWindow_ ordered:NSWindowAbove];
     [overlayWindow_ orderFront:nil];
-
-    [[self window] setHasShadow:NO];
   } else if (!useOverlay && overlayWindow_) {
-    NSResponder *responder = [overlayWindow_ firstResponder];
-    [[self window] setHasShadow:YES];
-    NSView *contentView = [[self window] contentView];
-    [contentView addSubview:contentBox_];
-    [[contentView superview] addSubview:[self tabStripView]];
-    [[self window] makeFirstResponder:responder];
+    DCHECK(cachedContentView_);
+    [[self window] setContentView:cachedContentView_];
+    [self moveViewsBetweenWindowAndOverlay:useOverlay];
+    [[self window] makeFirstResponder:cachedContentView_];
     [[self window] display];
     [[self window] removeChildWindow:overlayWindow_];
     [overlayWindow_ orderOut:nil];
     [overlayWindow_ release];
     overlayWindow_ = nil;
+    cachedContentView_ = nil;
   }
 }
 
-- (void)arrangeTabs {
+- (NSWindow*)overlayWindow {
+  return overlayWindow_;
+}
+
+- (BOOL)canReceiveFrom:(TabWindowController*)source {
+  // subclass must implement
+  NOTIMPLEMENTED();
+  return NO;
+}
+
+- (void)moveTabView:(NSView*)view
+     fromController:(TabWindowController*)dragController {
+  NOTIMPLEMENTED();
+}
+
+- (NSView *)selectedTabView {
+  NOTIMPLEMENTED();
+  return nil;
+}
+
+- (void)layoutTabs {
   // subclass must implement
   NOTIMPLEMENTED();
 }
@@ -87,7 +136,9 @@
   return NULL;
 }
 
-- (void)insertPlaceholderForTab:(TabView*)tab atLocation:(NSInteger)xLocation {
+- (void)insertPlaceholderForTab:(TabView*)tab
+                          frame:(NSRect)frame
+                  yStretchiness:(CGFloat)yStretchiness {
   // subclass must implement
   NOTIMPLEMENTED();
 }
@@ -95,6 +146,29 @@
 - (void)removePlaceholder {
   // subclass must implement
   NOTIMPLEMENTED();
+}
+
+- (void)detachTabView:(NSView*)view {
+  // subclass must implement
+  NOTIMPLEMENTED();
+}
+
+- (NSInteger)numberOfTabs {
+  // subclass must implement
+  NOTIMPLEMENTED();
+  return 0;
+}
+
+- (NSString*)selectedTabTitle {
+  // subclass must implement
+  NOTIMPLEMENTED();
+  return @"";
+}
+
+- (BOOL)isNormalWindow {
+  // subclass must implement
+  NOTIMPLEMENTED();
+  return YES;
 }
 
 @end

@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -214,6 +214,16 @@ bool InitializeLogFileHandle() {
   return true;
 }
 
+#if defined(OS_LINUX)
+int GetLoggingFileDescriptor() {
+  // No locking needed, since this is only called by the zygote server,
+  // which is single-threaded.
+  if (log_file)
+    return fileno(log_file);
+  return -1;
+}
+#endif
+
 void InitLogMutex() {
 #if defined(OS_WIN)
   if (!log_mutex) {
@@ -318,30 +328,38 @@ void DisplayDebugMessage(const std::string& str) {
     backslash[1] = 0;
   wcscat_s(prog_name, MAX_PATH, L"debug_message.exe");
 
-  // Stupid CreateProcess requires a non-const command line and may modify it.
-  // We also want to use the wide string.
-  std::wstring cmdline_string = base::SysUTF8ToWide(str);
-  wchar_t* cmdline = const_cast<wchar_t*>(cmdline_string.c_str());
+  std::wstring cmdline = base::SysUTF8ToWide(str);
+  if (cmdline.empty())
+    return;
 
   STARTUPINFO startup_info;
   memset(&startup_info, 0, sizeof(startup_info));
   startup_info.cb = sizeof(startup_info);
 
   PROCESS_INFORMATION process_info;
-  if (CreateProcessW(prog_name, cmdline, NULL, NULL, false, 0, NULL,
+  if (CreateProcessW(prog_name, &cmdline[0], NULL, NULL, false, 0, NULL,
                      NULL, &startup_info, &process_info)) {
     WaitForSingleObject(process_info.hProcess, INFINITE);
     CloseHandle(process_info.hThread);
     CloseHandle(process_info.hProcess);
   } else {
     // debug process broken, let's just do a message box
-    MessageBoxW(NULL, cmdline, L"Fatal error",
+    MessageBoxW(NULL, &cmdline[0], L"Fatal error",
                 MB_OK | MB_ICONHAND | MB_TOPMOST);
   }
 #else
   fprintf(stderr, "%s\n", str.c_str());
 #endif
 }
+
+#if defined(OS_WIN)
+LogMessage::SaveLastError::SaveLastError() : last_error_(::GetLastError()) {
+}
+
+LogMessage::SaveLastError::~SaveLastError() {
+  ::SetLastError(last_error_);
+}
+#endif  // defined(OS_WIN)
 
 LogMessage::LogMessage(const char* file, int line, LogSeverity severity,
                        int ctr)
@@ -387,14 +405,14 @@ void LogMessage::Init(const char* file, int line) {
   if (log_thread_id)
     stream_ << CurrentThreadId() << ':';
   if (log_timestamp) {
-     time_t t = time(NULL);
-#if _MSC_VER >= 1400
+    time_t t = time(NULL);
     struct tm local_time = {0};
+#if _MSC_VER >= 1400
     localtime_s(&local_time, &t);
-    struct tm* tm_time = &local_time;
 #else
-    struct tm* tm_time = localtime(&t);
+    localtime_r(&t, &local_time);
 #endif
+    struct tm* tm_time = &local_time;
     stream_ << std::setfill('0')
             << std::setw(2) << 1 + tm_time->tm_mon
             << std::setw(2) << tm_time->tm_mday
@@ -466,8 +484,12 @@ LogMessage::~LogMessage() {
       InitLogMutex();
 
 #if defined(OS_WIN)
-      DWORD r = ::WaitForSingleObject(log_mutex, INFINITE);
-      DCHECK(r != WAIT_ABANDONED);
+      ::WaitForSingleObject(log_mutex, INFINITE);
+      // WaitForSingleObject could have returned WAIT_ABANDONED. We don't
+      // abort the process here. UI tests might be crashy sometimes,
+      // and aborting the test binary only makes the problem worse.
+      // We also don't use LOG macros because that might lead to an infinite
+      // loop. For more info see http://crbug.com/18028.
 #elif defined(OS_POSIX)
       pthread_mutex_lock(&log_mutex);
 #endif
@@ -512,6 +534,13 @@ LogMessage::~LogMessage() {
     if (DebugUtil::BeingDebugged()) {
       DebugUtil::BreakDebugger();
     } else {
+#ifndef NDEBUG
+      // Dump a stack trace on a fatal.
+      StackTrace trace;
+      stream_ << "\n";  // Newline to separate from log message.
+      trace.OutputToStream(&stream_);
+#endif
+
       if (log_assert_handler) {
         // make a copy of the string for the handler out of paranoia
         log_assert_handler(std::string(stream_.str()));
@@ -526,8 +555,6 @@ LogMessage::~LogMessage() {
 #endif
         // Crash the process to generate a dump.
         DebugUtil::BreakDebugger();
-        // TODO(mmentovai): when we have breakpad support, generate a breakpad
-        // dump, but until then, do not invoke the Apple crash reporter.
       }
     }
   } else if (severity_ == LOG_ERROR_REPORT) {
@@ -548,7 +575,7 @@ void CloseLogFile() {
   log_file = NULL;
 }
 
-} // namespace logging
+}  // namespace logging
 
 std::ostream& operator<<(std::ostream& out, const wchar_t* wstr) {
   return out << base::SysWideToUTF8(std::wstring(wstr));

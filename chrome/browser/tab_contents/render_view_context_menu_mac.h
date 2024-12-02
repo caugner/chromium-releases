@@ -17,7 +17,7 @@
 
 class RenderViewContextMenuMac : public RenderViewContextMenu {
  public:
-  RenderViewContextMenuMac(WebContents* web_contents,
+  RenderViewContextMenuMac(TabContents* web_contents,
                            const ContextMenuParams& params,
                            NSView* parent_view);
   virtual ~RenderViewContextMenuMac();
@@ -27,22 +27,31 @@ class RenderViewContextMenuMac : public RenderViewContextMenu {
 
  protected:
   // RenderViewContextMenu implementation-
+  virtual void DoInit();
   virtual void AppendMenuItem(int id);
-  virtual void AppendMenuItem(int id, const std::wstring& label);
-  virtual void AppendRadioMenuItem(int id, const std::wstring& label);
-  virtual void AppendCheckboxMenuItem(int id, const std::wstring& label);
+  virtual void AppendMenuItem(int id, const string16& label);
+  virtual void AppendRadioMenuItem(int id, const string16& label);
+  virtual void AppendCheckboxMenuItem(int id, const string16& label);
   virtual void AppendSeparator();
-  virtual void StartSubMenu(int id, const std::wstring& label);
+  virtual void StartSubMenu(int id, const string16& label);
   virtual void FinishSubMenu();
 
   // Do things like remove the windows accelerators.
-  static NSString* PrepareLabelForDisplay(const std::wstring& label);
+  static NSString* PrepareLabelForDisplay(const string16& label);
 
  private:
+  // Private helper method used by the implementations of the above methods.
+  // All MenuItems are represented as NSMenuItems no matter what kind they
+  // are (Normal, Radio, Checkbox). All of the above call this method, providing
+  // a useful value for |state| based upon some specific lookup, usually based
+  // on the id.
+  void AppendMenuItemWithState(int id, const string16& label,
+                               NSCellStateValue state);
   NSMenu* menu_;
   NSMenu* insert_menu_;  // weak, where new items are inserted (usually
                          // |menu_| unless there's a submenu in progress).
   ContextMenuTarget* target_;  // obj-c target for menu actions
+  NSView* parent_view_;  // parent view
 };
 
 #endif  // CHROME_BROWSER_TAB_CONTENTS_RENDER_VIEW_CONTEXT_MENU_MAC_H_

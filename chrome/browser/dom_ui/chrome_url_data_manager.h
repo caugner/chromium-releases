@@ -11,6 +11,7 @@
 #include "base/task.h"
 #include "chrome/common/ref_counted_util.h"
 
+class DictionaryValue;
 class GURL;
 class MessageLoop;
 class URLRequest;
@@ -61,6 +62,8 @@ class ChromeURLDataManager {
     MessageLoop* message_loop() const { return message_loop_; }
     const std::string& source_name() const { return source_name_; }
 
+    static void SetFontAndTextDirection(DictionaryValue* localized_strings);
+
    private:
     // The name of this source.
     // E.g., for favicons, this could be "favicon", which results in paths for
@@ -108,6 +111,11 @@ private:
   bool StartRequest(const GURL& url, URLRequestChromeJob* job);
   // Remove a request from the list of pending requests.
   void RemoveRequest(URLRequestChromeJob* job);
+
+  // Returns true if the job exists in |pending_requests_|. False otherwise.
+  // Called by ~URLRequestChromeJob to verify that |pending_requests_| is kept
+  // up to date.
+  bool HasPendingJob(URLRequestChromeJob* job) const;
 
   // Sent by Request::SendResponse.
   void DataAvailable(RequestID request_id,

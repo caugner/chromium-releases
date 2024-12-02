@@ -26,13 +26,16 @@
 #undef LOG
 #include "base/message_loop.h"
 #include "base/string_util.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebKit.h"
+#include "webkit/api/public/WebKit.h"
 #include "webkit/glue/autofill_form.h"
+#include "webkit/glue/dom_operations.h"
 #include "webkit/glue/editor_client_impl.h"
 #include "webkit/glue/glue_util.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/webview.h"
 #include "webkit/glue/webview_impl.h"
+
+using webkit_glue::AutofillForm;
 
 // Arbitrary depth limit for the undo stack, to keep it from using
 // unbounded memory.  This is the maximum number of distinct undoable
@@ -70,7 +73,7 @@ EditorClientImpl::EditorClientImpl(WebView* web_view)
     : web_view_(static_cast<WebViewImpl*>(web_view)),
       use_editor_delegate_(false),
       in_redo_(false),
-      backspace_pressed_(false),
+      backspace_or_delete_pressed_(false),
       spell_check_this_field_status_(SPELLCHECK_AUTOMATIC),
 // Don't complain about using "this" in initializer list.
 MSVC_PUSH_DISABLE_WARNING(4355)
@@ -115,6 +118,8 @@ bool EditorClientImpl::isSelectTrailingWhitespaceEnabled() {
 }
 
 bool EditorClientImpl::ShouldSpellcheckByDefault() {
+  // Spellcheck should be enabled for all editable areas (such as textareas,
+  // contentEditable regions, and designMode docs), except text inputs.
   const WebCore::Frame* frame = web_view_->GetFocusedWebCoreFrame();
   if (!frame)
     return false;
@@ -130,12 +135,8 @@ bool EditorClientImpl::ShouldSpellcheckByDefault() {
   const WebCore::RenderObject* renderer = node->renderer();
   if (!renderer)
     return false;
-  // We should also retrieve the contenteditable attribute of this element to
-  // determine if this element needs spell-checking.
-  const WebCore::EUserModify user_modify = renderer->style()->userModify();
-  return (renderer->isTextArea() && editor->canEdit()) ||
-         user_modify == WebCore::READ_WRITE ||
-         user_modify == WebCore::READ_WRITE_PLAINTEXT_ONLY;
+
+  return (!renderer->isTextField() && editor->canEdit());
 }
 
 bool EditorClientImpl::isContinuousSpellCheckingEnabled() {
@@ -610,6 +611,23 @@ bool EditorClientImpl::handleEditingKeyboardEvent(
     return true;
   }
 
+  // Here we need to filter key events.
+  // On Gtk/Linux, it emits key events with ASCII text and ctrl on for ctrl-<x>.
+  // In Webkit, EditorClient::handleKeyboardEvent in
+  // WebKit/gtk/WebCoreSupport/EditorClientGtk.cpp drop such events.
+  // On Mac, it emits key events with ASCII text and meta on for Command-<x>.
+  // These key events should not emit text insert event.
+  // Alt key would be used to insert alternative character, so we should let
+  // through. Also note that Ctrl-Alt combination equals to AltGr key which is
+  // also used to insert alternative character.
+  // http://code.google.com/p/chromium/issues/detail?id=10846
+  // Windows sets both alt and meta are on when "Alt" key pressed.
+  // http://code.google.com/p/chromium/issues/detail?id=2215
+  // Also, we should not rely on an assumption that keyboards don't
+  // send ASCII characters when pressing a control key on Windows,
+  // which may be configured to do it so by user.
+  // See also http://en.wikipedia.org/wiki/Keyboard_Layout
+  // TODO(ukai): investigate more detail for various keyboard layout.
   if (evt->keyEvent()->text().length() == 1) {
     UChar ch = evt->keyEvent()->text()[0U];
 
@@ -617,6 +635,18 @@ bool EditorClientImpl::handleEditingKeyboardEvent(
     // unexpected behaviour
     if (ch < ' ')
       return false;
+#if !defined(OS_WIN)
+    // Don't insert ASCII character if ctrl w/o alt or meta is on.
+    // On Mac, we should ignore events when meta is on (Command-<x>).
+    if (ch < 0x80) {
+      if (evt->keyEvent()->ctrlKey() && !evt->keyEvent()->altKey())
+        return false;
+#if defined(OS_MACOSX)
+      if (evt->keyEvent()->metaKey())
+        return false;
+#endif
+    }
+#endif
   }
 
   if (!frame->editor()->canEdit())
@@ -633,7 +663,7 @@ void EditorClientImpl::handleKeyboardEvent(WebCore::KeyboardEvent* evt) {
   if (evt->keyCode() == WebCore::VKEY_DOWN ||
       evt->keyCode() == WebCore::VKEY_UP) {
     DCHECK(evt->target()->toNode());
-    ShowAutofillForNode(evt->target()->toNode());
+    ShowFormAutofillForNode(evt->target()->toNode());
   }
 
   if (handleEditingKeyboardEvent(evt))
@@ -647,7 +677,7 @@ void EditorClientImpl::handleInputMethodKeydown(WebCore::KeyboardEvent* keyEvent
 void EditorClientImpl::textFieldDidBeginEditing(WebCore::Element*) {
 }
 
-void EditorClientImpl::textFieldDidEndEditing(WebCore::Element*) {
+void EditorClientImpl::textFieldDidEndEditing(WebCore::Element* element) {
   // Notification that focus was lost.  Be careful with this, it's also sent
   // when the page is being closed.
 
@@ -656,79 +686,116 @@ void EditorClientImpl::textFieldDidEndEditing(WebCore::Element*) {
 
   // Hide any showing popup.
   web_view_->HideAutoCompletePopup();
+
+  // Notify any password-listener of the focus change.
+  WebCore::HTMLInputElement* input_element =
+      webkit_glue::ElementToHTMLInputElement(element);
+  if (!input_element)
+    return;
+
+  WebFrameImpl* webframe =
+      WebFrameImpl::FromFrame(input_element->document()->frame());
+  if (webframe->GetView() && !webframe->GetView()->GetDelegate())
+    return;  // The page is getting closed, don't fill the password.
+
+  webkit_glue::PasswordAutocompleteListener* listener =
+      webframe->GetPasswordListener(input_element);
+  if (!listener)
+    return;
+
+  std::wstring value =
+      webkit_glue::StringToStdWString(input_element->value());
+  listener->OnBlur(input_element, value);
 }
 
 void EditorClientImpl::textDidChangeInTextField(WebCore::Element* element) {
   DCHECK(element->hasLocalName(WebCore::HTMLNames::inputTag));
-  Autofill(static_cast<WebCore::HTMLInputElement*>(element), false);
+  // Note that we only show the autofill popup in this case if the caret is at
+  // the end.  This matches FireFox and Safari but not IE.
+  Autofill(static_cast<WebCore::HTMLInputElement*>(element),
+           false, false, true);
 }
 
-void EditorClientImpl::ShowAutofillForNode(WebCore::Node* node) {
-  if (node->nodeType() == WebCore::Node::ELEMENT_NODE) {
-    WebCore::Element* element = static_cast<WebCore::Element*>(node);
-    if (element->hasLocalName(WebCore::HTMLNames::inputTag)) {
-      WebCore::HTMLInputElement* input_element =
-          static_cast<WebCore::HTMLInputElement*>(element);
-      Autofill(input_element, true);
-    }
-  }
+bool EditorClientImpl::ShowFormAutofillForNode(WebCore::Node* node) {
+  WebCore::HTMLInputElement* input_element =
+      webkit_glue::NodeToHTMLInputElement(node);
+  if (input_element)
+    return Autofill(input_element, true, true, false);
+  return false;
 }
 
-void EditorClientImpl::Autofill(WebCore::HTMLInputElement* input_element,
-                                bool autofill_on_empty_value) {
+bool EditorClientImpl::Autofill(WebCore::HTMLInputElement* input_element,
+                                bool form_autofill_only,
+                                bool autofill_on_empty_value,
+                                bool requires_caret_at_end) {
   // Cancel any pending DoAutofill calls.
   autofill_factory_.RevokeAll();
 
   // Let's try to trigger autofill for that field, if applicable.
-  if (!input_element->isEnabled() || !input_element->isTextField() ||
+  if (!input_element->isEnabledFormControl() || !input_element->isTextField() ||
       input_element->isPasswordField() || !input_element->autoComplete()) {
-    return;
+    return false;
   }
 
   std::wstring name = AutofillForm::GetNameForInputElement(input_element);
   if (name.empty())  // If the field has no name, then we won't have values.
-    return;
+    return false;
 
   // Don't attempt to autofill with values that are too large.
   if (input_element->value().length() > kMaximumTextSizeForAutofill)
-    return;
+    return false;
 
-  // We post a task for doing the autofill as the caret position is not set
-  // properly at this point ( http://bugs.webkit.org/show_bug.cgi?id=16976)
-  // and we need it to determine whether or not to trigger autofill.
-  std::wstring value = webkit_glue::StringToStdWString(input_element->value());
-  MessageLoop::current()->PostTask(
-      FROM_HERE,
-      autofill_factory_.NewRunnableMethod(&EditorClientImpl::DoAutofill,
-                                          input_element,
-                                          autofill_on_empty_value,
-                                          backspace_pressed_));
+  if (!requires_caret_at_end) {
+    DoAutofill(input_element, form_autofill_only, autofill_on_empty_value,
+               false, backspace_or_delete_pressed_);
+  } else {
+    // We post a task for doing the autofill as the caret position is not set
+    // properly at this point (http://bugs.webkit.org/show_bug.cgi?id=16976) and
+    // we need it to determine whether or not to trigger autofill.
+    std::wstring value =
+        webkit_glue::StringToStdWString(input_element->value());
+    MessageLoop::current()->PostTask(
+        FROM_HERE,
+        autofill_factory_.NewRunnableMethod(&EditorClientImpl::DoAutofill,
+                                            input_element,
+                                            form_autofill_only,
+                                            autofill_on_empty_value,
+                                            true,
+                                            backspace_or_delete_pressed_));
+  }
+  return true;
 }
 
 void EditorClientImpl::DoAutofill(WebCore::HTMLInputElement* input_element,
+                                  bool form_autofill_only,
                                   bool autofill_on_empty_value,
+                                  bool requires_caret_at_end,
                                   bool backspace) {
   std::wstring value = webkit_glue::StringToStdWString(input_element->value());
 
-  // Only autofill when there is some text and the caret is at the end.
-  bool caret_at_end =
-      input_element->selectionStart() == input_element->selectionEnd() &&
-      input_element->selectionEnd() == static_cast<int>(value.length());
-  if ((!autofill_on_empty_value && value.empty()) || !caret_at_end) {
+  // Enforce autofill_on_empty_value and caret_at_end.
+  bool is_caret_at_end = requires_caret_at_end ?
+        input_element->selectionStart() == input_element->selectionEnd() &&
+        input_element->selectionEnd() == static_cast<int>(value.length()) :
+        true;  // When |requires_caret_at_end| is false, just pretend we are at
+               // the end.
+  if ((!autofill_on_empty_value && value.empty()) || !is_caret_at_end) {
     web_view_->HideAutoCompletePopup();
     return;
   }
 
   // First let's see if there is a password listener for that element.
+  // We won't trigger form autofill in that case, as having both behavior on
+  // a node would be confusing.
   WebFrameImpl* webframe =
       WebFrameImpl::FromFrame(input_element->document()->frame());
   webkit_glue::PasswordAutocompleteListener* listener =
       webframe->GetPasswordListener(input_element);
   if (listener) {
-    if (backspace)  // No autocomplete for password on backspace.
+    if (form_autofill_only)
       return;
 
-    listener->OnInlineAutocompleteNeeded(input_element, value);
+    listener->OnInlineAutocompleteNeeded(input_element, value, backspace, true);
     return;
   }
 
@@ -739,6 +806,19 @@ void EditorClientImpl::DoAutofill(WebCore::HTMLInputElement* input_element,
       reinterpret_cast<int64>(input_element));
 }
 
+void EditorClientImpl::OnAutofillSuggestionAccepted(
+    WebCore::HTMLInputElement* text_field) {
+  WebFrameImpl* webframe =
+      WebFrameImpl::FromFrame(text_field->document()->frame());
+  webkit_glue::PasswordAutocompleteListener* listener =
+      webframe->GetPasswordListener(text_field);
+  std::wstring value = webkit_glue::StringToStdWString(text_field->value());
+  // Password listeners need to autocomplete other fields that depend on the
+  // input element with autofill suggestions.
+  if (listener)
+    listener->OnInlineAutocompleteNeeded(text_field, value, false, false);
+}
+
 bool EditorClientImpl::doTextFieldCommandFromEvent(
     WebCore::Element* element,
     WebCore::KeyboardEvent* event) {
@@ -746,7 +826,8 @@ bool EditorClientImpl::doTextFieldCommandFromEvent(
   // find if backspace was pressed from textFieldDidBeginEditing and
   // textDidChangeInTextField as when these methods are called the value of the
   // input element already contains the type character.
-  backspace_pressed_ = (event->keyCode() == WebCore::VKEY_BACK);
+  backspace_or_delete_pressed_ = (event->keyCode() == WebCore::VKEY_BACK) ||
+                                 (event->keyCode() == WebCore::VKEY_DELETE);
 
   // The Mac code appears to use this method as a hook to implement special
   // keyboard commands specific to Safari's auto-fill implementation.  We
@@ -776,10 +857,12 @@ void EditorClientImpl::checkSpellingOfString(const UChar* str, int length,
   int spell_location = -1;
   int spell_length = 0;
   WebViewDelegate* d = web_view_->delegate();
+
+  // Check to see if the provided str is spelled correctly.
   if (isContinuousSpellCheckingEnabled() && d) {
     std::wstring word =
         webkit_glue::StringToStdWString(WebCore::String(str, length));
-    d->SpellCheck(word, spell_location, spell_length);
+    d->SpellCheck(word, &spell_location, &spell_length);
   } else {
     spell_location = 0;
     spell_length = 0;
@@ -791,6 +874,25 @@ void EditorClientImpl::checkSpellingOfString(const UChar* str, int length,
     *misspellingLocation = spell_location;
   if (misspellingLength)
     *misspellingLength = spell_length;
+}
+
+WebCore::String EditorClientImpl::getAutoCorrectSuggestionForMisspelledWord(
+    const WebCore::String& misspelledWord) {
+  WebViewDelegate* d = web_view_->delegate();
+  if (!(isContinuousSpellCheckingEnabled() && d))
+    return WebCore::String();
+
+  std::wstring word = webkit_glue::StringToStdWString(misspelledWord);
+
+  // Do not autocorrect words with capital letters in it except the
+  // first letter. This will remove cases changing "IMB" to "IBM".
+  for (size_t i = 1; i < word.length(); i++) {
+    if (u_isupper(static_cast<UChar32>(word[i])))
+      return WebCore::String();
+  }
+
+  std::wstring autocorrect_word = d->GetAutoCorrectWord(word);
+  return webkit_glue::StdWStringToString(autocorrect_word);
 }
 
 void EditorClientImpl::checkGrammarOfString(const UChar*, int length,

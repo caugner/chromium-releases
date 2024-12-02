@@ -14,5 +14,11 @@ FindInPageControllerTest.FindInPageFrames
 # Takes 10 minutes to run.
 IPCSyncChannelTest.ChattyServer
 
-# issue 8362
-ExtensionViewTest.Index
+# issue 9897
+ExtensionContentScriptInjectTest.Simple
+
+# issue 12661
+ExtensionsServiceTest.InstallExtension
+
+# issue 15276
+CompactLangDetTest.*

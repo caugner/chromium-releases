@@ -1,31 +1,33 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/views/first_run_customize_view.h"
 
+#include "app/l10n_util.h"
+#include "app/resource_bundle.h"
+#include "base/win_util.h"
 #include "chrome/browser/importer/importer.h"
 #include "chrome/browser/first_run.h"
 #include "chrome/browser/metrics/user_metrics.h"
-#include "chrome/browser/views/standard_layout.h"
-#include "chrome/common/l10n_util.h"
-#include "chrome/common/resource_bundle.h"
-#include "chrome/views/controls/button/checkbox.h"
-#include "chrome/views/controls/combo_box.h"
-#include "chrome/views/controls/image_view.h"
-#include "chrome/views/controls/label.h"
-#include "chrome/views/controls/throbber.h"
-#include "chrome/views/window/window.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "grit/theme_resources.h"
+#include "views/controls/button/checkbox.h"
+#include "views/controls/image_view.h"
+#include "views/controls/label.h"
+#include "views/controls/throbber.h"
+#include "views/standard_layout.h"
+#include "views/window/window.h"
 
 FirstRunCustomizeView::FirstRunCustomizeView(Profile* profile,
                                              ImporterHost* importer_host,
                                              CustomizeViewObserver* observer,
-                                             bool default_browser_checked)
-    : FirstRunViewBase(profile),
+                                             bool default_browser_checked,
+                                             int import_items,
+                                             int dont_import_items)
+    : FirstRunViewBase(profile, import_items, dont_import_items),
       main_label_(NULL),
       import_cbox_(NULL),
       import_from_combo_(NULL),
@@ -41,22 +43,22 @@ FirstRunCustomizeView::FirstRunCustomizeView(Profile* profile,
   // the customize view, so that the user selection isn't lost when you uncheck
   // and then open the Customize dialog. Therefore, we propagate the selection
   // status of the default browser here.
-  default_browser_->SetIsSelected(default_browser_checked);
+  default_browser_->SetChecked(default_browser_checked);
 }
 
 FirstRunCustomizeView::~FirstRunCustomizeView() {
 }
 
-views::CheckBox* FirstRunCustomizeView::MakeCheckBox(int label_id) {
-  views::CheckBox* cbox = new views::CheckBox(l10n_util::GetString(label_id));
-  cbox->SetListener(this);
+views::Checkbox* FirstRunCustomizeView::MakeCheckBox(int label_id) {
+  views::Checkbox* cbox = new views::Checkbox(l10n_util::GetString(label_id));
+  cbox->set_listener(this);
   AddChildView(cbox);
   return cbox;
 }
 
 void FirstRunCustomizeView::SetupControls() {
   using views::Label;
-  using views::CheckBox;
+  using views::Checkbox;
 
   main_label_ = new Label(l10n_util::GetString(IDS_FR_CUSTOMIZE_DLG_TEXT));
   main_label_->SetMultiLine(true);
@@ -65,7 +67,7 @@ void FirstRunCustomizeView::SetupControls() {
 
   import_cbox_ = MakeCheckBox(IDS_FR_CUSTOMIZE_IMPORT);
 
-  import_from_combo_ = new views::ComboBox(this);
+  import_from_combo_ = new views::Combobox(this);
   AddChildView(import_from_combo_);
 
   shortcuts_label_ =
@@ -75,10 +77,12 @@ void FirstRunCustomizeView::SetupControls() {
 
   // The two check boxes for the different shortcut creation.
   desktop_shortcut_cbox_ = MakeCheckBox(IDS_FR_CUSTOM_SHORTCUT_DESKTOP);
-  desktop_shortcut_cbox_->SetIsSelected(true);
+  desktop_shortcut_cbox_->SetChecked(true);
 
   quick_shortcut_cbox_ = MakeCheckBox(IDS_FR_CUSTOM_SHORTCUT_QUICKL);
-  quick_shortcut_cbox_->SetIsSelected(true);
+  // For windows 7 create quick launch default is not checked.
+  bool ql_default = (win_util::GetWinVersion() < win_util::WINVERSION_WIN7);
+  quick_shortcut_cbox_->SetChecked(ql_default);
 }
 
 gfx::Size FirstRunCustomizeView::GetPreferredSize() {
@@ -110,7 +114,7 @@ void FirstRunCustomizeView::Layout() {
   import_cbox_->SetBounds(kPanelHorizMargin, next_v_space,
                                pref_size.width(), pref_size.height());
 
-  import_cbox_->SetIsSelected(true);
+  import_cbox_->SetChecked(true);
 
   int x_offset = import_cbox_->x() +
                  import_cbox_->width();
@@ -153,18 +157,18 @@ void FirstRunCustomizeView::Layout() {
   AdjustDialogWidth(quick_shortcut_cbox_);
 }
 
-void FirstRunCustomizeView::ButtonPressed(views::NativeButton* sender) {
+void FirstRunCustomizeView::ButtonPressed(views::Button* sender) {
   if (import_cbox_ == sender) {
     // Disable the import combobox if the user unchecks the checkbox.
-    import_from_combo_->SetEnabled(import_cbox_->IsSelected());
+    import_from_combo_->SetEnabled(import_cbox_->checked());
   }
 }
 
-int FirstRunCustomizeView::GetItemCount(views::ComboBox* source) {
+int FirstRunCustomizeView::GetItemCount(views::Combobox* source) {
   return importer_host_->GetAvailableProfileCount();
 }
 
-std::wstring FirstRunCustomizeView::GetItemAt(views::ComboBox* source,
+std::wstring FirstRunCustomizeView::GetItemAt(views::Combobox* source,
                                               int index) {
   return importer_host_->GetSourceProfileNameAt(index);
 }
@@ -178,7 +182,7 @@ views::View* FirstRunCustomizeView::GetContentsView() {
 }
 
 bool FirstRunCustomizeView::Accept() {
-  if (!IsDialogButtonEnabled(DIALOGBUTTON_OK))
+  if (!IsDialogButtonEnabled(MessageBoxFlags::DIALOGBUTTON_OK))
     return false;
 
   DisableButtons();
@@ -187,23 +191,23 @@ bool FirstRunCustomizeView::Accept() {
   desktop_shortcut_cbox_->SetEnabled(false);
   quick_shortcut_cbox_->SetEnabled(false);
 
-  if (desktop_shortcut_cbox_->IsSelected()) {
+  if (desktop_shortcut_cbox_->checked()) {
     UserMetrics::RecordAction(L"FirstRunCustom_Do_DesktopShortcut", profile_);
     CreateDesktopShortcut();
   }
-  if (quick_shortcut_cbox_->IsSelected()) {
+  if (quick_shortcut_cbox_->checked()) {
     UserMetrics::RecordAction(L"FirstRunCustom_Do_QuickLShortcut", profile_);
     CreateQuickLaunchShortcut();
   }
-  if (!import_cbox_->IsSelected()) {
+  if (!import_cbox_->checked()) {
     UserMetrics::RecordAction(L"FirstRunCustom_No_Import", profile_);
   } else {
-    int browser_selected = import_from_combo_->GetSelectedItem();
-    FirstRun::ImportSettings(profile_, browser_selected,
-                             GetDefaultImportItems(),
-                             window()->GetNativeWindow());
+    int browser_selected = import_from_combo_->selected_item();
+    FirstRun::ImportSettings(profile_,
+        importer_host_->GetSourceProfileInfoAt(browser_selected).browser_type,
+        GetImportItems(), window()->GetNativeWindow());
   }
-  if (default_browser_->IsSelected())
+  if (default_browser_->checked())
     SetDefaultBrowser();
 
   if (customize_observer_)
@@ -212,6 +216,7 @@ bool FirstRunCustomizeView::Accept() {
   // Exit the message loop we were started with so that startup can continue.
   MessageLoop::current()->Quit();
 
+  FirstRunComplete();
   return true;
 }
 

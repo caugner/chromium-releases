@@ -12,9 +12,9 @@
 namespace chrome {
 
 extern const wchar_t kBrowserProcessExecutableName[];
+extern const wchar_t kBrowserProcessExecutablePath[];
 extern const wchar_t kBrowserAppName[];
 extern const wchar_t kMessageWindowClass[];
-extern const wchar_t kExternalTabWindowClass[];
 extern const wchar_t kCrashReportLog[];
 extern const wchar_t kTestingInterfaceDLL[];
 extern const wchar_t kNotSignedInProfile[];
@@ -29,11 +29,14 @@ extern const FilePath::CharType kCacheDirname[];
 extern const FilePath::CharType kMediaCacheDirname[];
 extern const FilePath::CharType kOffTheRecordMediaCacheDirname[];
 extern const wchar_t kChromePluginDataDirname[];
+extern const wchar_t kThemeImagesDirname[];
 extern const FilePath::CharType kCookieFilename[];
+extern const FilePath::CharType kExtensionsCookieFilename[];
 extern const FilePath::CharType kHistoryFilename[];
 extern const FilePath::CharType kLocalStateFilename[];
 extern const FilePath::CharType kPreferencesFilename[];
 extern const FilePath::CharType kSafeBrowsingFilename[];
+extern const FilePath::CharType kSingletonSocketFilename[];
 extern const FilePath::CharType kThumbnailsFilename[];
 extern const wchar_t kUserDataDirname[];
 extern const FilePath::CharType kUserScriptsDirname[];
@@ -41,10 +44,16 @@ extern const FilePath::CharType kWebDataFilename[];
 extern const FilePath::CharType kBookmarksFileName[];
 extern const FilePath::CharType kHistoryBookmarksFileName[];
 extern const FilePath::CharType kCustomDictionaryFileName[];
+extern const FilePath::CharType kLoginDataFileName[];
+extern const FilePath::CharType kJumpListIconDirname[];
 
 extern const unsigned int kMaxRendererProcessCount;
 extern const int kStatsMaxThreads;
 extern const int kStatsMaxCounters;
+
+// The maximum number of characters of the document's title that we're willing
+// to send to the browser process.
+extern const size_t kMaxTitleChars;
 
 extern const bool kRecordModeEnabled;
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,9 +6,10 @@
 #define CHROME_BROWSER_VIEWS_FIND_BAR_VIEW_H_
 
 #include "base/gfx/size.h"
+#include "base/string16.h"
 #include "chrome/browser/find_notification_details.h"
-#include "chrome/views/controls/button/button.h"
-#include "chrome/views/controls/text_field.h"
+#include "views/controls/button/button.h"
+#include "views/controls/textfield/textfield.h"
 
 class FindBarWin;
 
@@ -28,7 +29,7 @@ class View;
 ////////////////////////////////////////////////////////////////////////////////
 class FindBarView : public views::View,
                     public views::ButtonListener,
-                    public views::TextField::Controller {
+                    public views::Textfield::Controller {
  public:
   // A tag denoting which button the user pressed.
   enum ButtonTag {
@@ -41,12 +42,12 @@ class FindBarView : public views::View,
   virtual ~FindBarView();
 
   // Sets the text displayed in the text box.
-  void SetFindText(const std::wstring& find_text);
+  void SetFindText(const string16& find_text);
 
   // Updates the label inside the Find text box that shows the ordinal of the
   // active item and how many matches were found.
   void UpdateForResult(const FindNotificationDetails& result,
-                       const std::wstring& find_text);
+                       const string16& find_text);
 
   // Claims focus for the text field and selects its contents.
   void SetFocusAndSelection();
@@ -56,7 +57,7 @@ class FindBarView : public views::View,
   void animation_offset(int offset) { animation_offset_ = offset; }
 
   // Overridden from views::View:
-  virtual void Paint(ChromeCanvas* canvas);
+  virtual void Paint(gfx::Canvas* canvas);
   virtual void Layout();
   virtual gfx::Size GetPreferredSize();
   virtual void ViewHierarchyChanged(bool is_add, View* parent, View* child);
@@ -64,14 +65,11 @@ class FindBarView : public views::View,
   // Overridden from views::ButtonListener:
   virtual void ButtonPressed(views::Button* sender);
 
-  // Overridden from views::TextField::Controller:
-  virtual void ContentsChanged(views::TextField* sender,
+  // Overridden from views::Textfield::Controller:
+  virtual void ContentsChanged(views::Textfield* sender,
                                const std::wstring& new_contents);
-  virtual void HandleKeystroke(views::TextField* sender, UINT message,
-                               TCHAR key, UINT repeat_count, UINT flags);
-
-  // Set whether or not we're attempting to blend with the toolbar.
-  void set_toolbar_blend(bool toolbar_blend) { toolbar_blend_ = toolbar_blend; }
+  virtual bool HandleKeystroke(views::Textfield* sender,
+                               const views::Textfield::Keystroke& key);
 
  private:
   // Resets the background for the match count label.
@@ -86,35 +84,28 @@ class FindBarView : public views::View,
   class FocusForwarderView : public views::View {
    public:
     explicit FocusForwarderView(
-        views::TextField* view_to_focus_on_mousedown)
+        views::Textfield* view_to_focus_on_mousedown)
       : view_to_focus_on_mousedown_(view_to_focus_on_mousedown) {}
 
    private:
     virtual bool OnMousePressed(const views::MouseEvent& event);
 
-    views::TextField* view_to_focus_on_mousedown_;
+    views::Textfield* view_to_focus_on_mousedown_;
 
     DISALLOW_COPY_AND_ASSIGN(FocusForwarderView);
   };
 
   // Manages the OS-specific view for the find bar and acts as an intermediary
-  // between us and the WebContentsView.
+  // between us and the TabContentsView.
   FindBarWin* container_;
 
   // The controls in the window.
-  views::TextField* find_text_;
+  views::Textfield* find_text_;
   views::Label* match_count_text_;
   FocusForwarderView* focus_forwarder_view_;
   views::ImageButton* find_previous_button_;
   views::ImageButton* find_next_button_;
   views::ImageButton* close_button_;
-
-  // The last matchcount number we reported to the user.
-  int last_reported_matchcount_;
-
-  // Whether or not we're attempting to blend with the toolbar (this is
-  // false if the bookmarks bar is visible).
-  bool toolbar_blend_;
 
   // While animating, the controller clips the window and draws only the bottom
   // part of it. The view needs to know the pixel offset at which we are drawing

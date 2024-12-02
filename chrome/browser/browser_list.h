@@ -5,7 +5,6 @@
 #ifndef CHROME_BROWSER_BROWSER_LIST_H__
 #define CHROME_BROWSER_BROWSER_LIST_H__
 
-#include <algorithm>
 #include <vector>
 
 #include "chrome/browser/browser.h"
@@ -27,6 +26,9 @@ class BrowserList {
 
     // Called immediately before a browser is removed from the list
     virtual void OnBrowserRemoving(const Browser* browser) = 0;
+
+    // Called immediately after a browser is set active (SetLastActive)
+    virtual void OnBrowserSetLastActive(const Browser* browser) { };
   };
 
   // Adds and removes browsers from the global list. The browser object should
@@ -45,12 +47,30 @@ class BrowserList {
   // Returns the Browser object whose window was most recently active.  If the
   // most recently open Browser's window was closed, returns the first Browser
   // in the list.  If no Browsers exist, returns NULL.
+  //
+  // WARNING: this is NULL until a browser becomes active. If during startup
+  // a browser does not become active (perhaps the user launches Chrome, then
+  // clicks on another app before the first browser window appears) then this
+  // returns NULL.
   static Browser* GetLastActive();
+
+  // Identical in behavior to GetLastActive(), except that the most recently
+  // open browser owned by |profile| is returned. If none exist, returns NULL.
+  static Browser* GetLastActiveWithProfile(Profile *profile);
 
   // Find an existing browser window with the provided type. If the last active
   // has the right type, it is returned. Otherwise, the next available browser
   // is returned. Returns NULL if no such browser currently exists.
   static Browser* FindBrowserWithType(Profile* p, Browser::Type t);
+
+  // Find an existing browser window with the provided profile. If the last
+  // active has the right profile, it is returned.  Returns NULL if no such
+  // browser currently exists.
+  static Browser* FindBrowserWithProfile(Profile* p);
+
+  // Find an existing browser with the provided ID. Returns NULL if no such
+  // browser currently exists.
+  static Browser* FindBrowserWithID(SessionID::id_type desired_id);
 
   // Closes all browsers. If use_post is true the windows are closed by way of
   // posting a WM_CLOSE message, otherwise the windows are closed directly. In
@@ -99,6 +119,9 @@ class BrowserList {
   // Returns true if at least one off the record session is active.
   static bool IsOffTheRecordSessionActive();
 
+  // Called when the last browser is closed.
+  static void AllBrowsersClosed();
+
  private:
   // Helper method to remove a browser instance from a list of browsers
   static void RemoveBrowserFrom(Browser* browser, list_type* browser_list);
@@ -108,7 +131,7 @@ class BrowserList {
   static list_type last_active_browsers_;
 };
 
-class WebContents;
+class TabContents;
 
 // Iterates through all web view hosts in all browser windows. Because the
 // renderers act asynchronously, getting a host through this interface does
@@ -116,36 +139,36 @@ class WebContents;
 // browser windows or tabs while iterating may cause incorrect behavior.
 //
 // Example:
-//   for (WebContentsIterator iterator; !iterator.done(); iterator++) {
-//     WebContents* cur = *iterator;
+//   for (TabContentsIterator iterator; !iterator.done(); iterator++) {
+//     TabContents* cur = *iterator;
 //     -or-
-//     iterator->operationOnWebContents();
+//     iterator->operationOnTabContents();
 //     ...
 //   }
-class WebContentsIterator {
+class TabContentsIterator {
  public:
-  WebContentsIterator();
+  TabContentsIterator();
 
   // Returns true if we are past the last Browser.
   bool done() const {
     return cur_ == NULL;
   }
 
-  // Returns the current WebContents, valid as long as !Done()
-  WebContents* operator->() const {
+  // Returns the current TabContents, valid as long as !Done()
+  TabContents* operator->() const {
     return cur_;
   }
-  WebContents* operator*() const {
+  TabContents* operator*() const {
     return cur_;
   }
 
   // Incrementing operators, valid as long as !Done()
-  WebContents* operator++() { // ++preincrement
+  TabContents* operator++() { // ++preincrement
     Advance();
     return cur_;
   }
-  WebContents* operator++(int) { // postincrement++
-    WebContents* tmp = cur_;
+  TabContents* operator++(int) { // postincrement++
+    TabContents* tmp = cur_;
     Advance();
     return tmp;
   }
@@ -162,10 +185,10 @@ class WebContentsIterator {
   // tab index into the current Browser of the current web view
   int web_view_index_;
 
-  // Current WebContents, or NULL if we're at the end of the list. This can
+  // Current TabContents, or NULL if we're at the end of the list. This can
   // be extracted given the browser iterator and index, but it's nice to cache
   // this since the caller may access the current host many times.
-  WebContents* cur_;
+  TabContents* cur_;
 };
 
 #endif  // CHROME_BROWSER_BROWSER_LIST_H__

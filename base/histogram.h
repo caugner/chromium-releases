@@ -28,20 +28,19 @@
 // at the low end of the histogram scale, but allows the histogram to cover a
 // gigantic range with the addition of very few buckets.
 
-#ifndef BASE_HISTOGRAM_H__
-#define BASE_HISTOGRAM_H__
+#ifndef BASE_HISTOGRAM_H_
+#define BASE_HISTOGRAM_H_
 
 #include <map>
 #include <string>
 #include <vector>
 
 #include "base/lock.h"
-#include "base/pickle.h"
-#include "base/stats_counters.h"
+#include "base/time.h"
 
 //------------------------------------------------------------------------------
 // Provide easy general purpose histogram in a macro, just like stats counters.
-// The first two macros use 50 buckets.
+// The first four macros use 50 buckets.
 
 #define HISTOGRAM_TIMES(name, sample) do { \
     static Histogram counter((name), base::TimeDelta::FromMilliseconds(1), \
@@ -59,13 +58,29 @@
     counter.Add(sample); \
   } while (0)
 
+#define HISTOGRAM_COUNTS_10000(name, sample) do { \
+    static Histogram counter((name), 1, 10000, 50); \
+    counter.Add(sample); \
+  } while (0)
+
+#define HISTOGRAM_CUSTOM_COUNTS(name, sample, min, max, bucket_count) do { \
+    static Histogram counter((name), min, max, bucket_count); \
+    counter.Add(sample); \
+  } while (0)
+
 #define HISTOGRAM_PERCENTAGE(name, under_one_hundred) do { \
     static LinearHistogram counter((name), 1, 100, 101); \
     counter.Add(under_one_hundred); \
   } while (0)
 
-// For folks that need real specific times, use this, but you'll only get
-// samples that are in the range (overly large samples are discarded).
+// For folks that need real specific times, use this to select a precise range
+// of times you want plotted, and the number of buckets you want used.
+#define HISTOGRAM_CUSTOM_TIMES(name, sample, min, max, bucket_count) do { \
+    static Histogram counter((name), min, max, bucket_count); \
+    counter.AddTime(sample); \
+  } while (0)
+
+// DO NOT USE THIS.  It is being phased out, in favor of HISTOGRAM_CUSTOM_TIMES.
 #define HISTOGRAM_CLIPPED_TIMES(name, sample, min, max, bucket_count) do { \
     static Histogram counter((name), min, max, bucket_count); \
     if ((sample) < (max)) counter.AddTime(sample); \
@@ -104,8 +119,12 @@
                                                                      sample)
 #define DHISTOGRAM_PERCENTAGE(name, under_one_hundred) HISTOGRAM_PERCENTAGE(\
     name, under_one_hundred)
+#define DHISTOGRAM_CUSTOM_TIMES(name, sample, min, max, bucket_count) \
+    HISTOGRAM_CUSTOM_TIMES(name, sample, min, max, bucket_count)
 #define DHISTOGRAM_CLIPPED_TIMES(name, sample, min, max, bucket_count) \
     HISTOGRAM_CLIPPED_TIMES(name, sample, min, max, bucket_count)
+#define DHISTOGRAM_CUSTOM_COUNTS(name, sample, min, max, bucket_count) \
+  HISTOGRAM_CUSTOM_COUNTS(name, sample, min, max, bucket_count)
 
 #else  // NDEBUG
 
@@ -113,8 +132,13 @@
 #define DHISTOGRAM_COUNTS(name, sample) do {} while (0)
 #define DASSET_HISTOGRAM_COUNTS(name, sample) do {} while (0)
 #define DHISTOGRAM_PERCENTAGE(name, under_one_hundred) do {} while (0)
+#define DHISTOGRAM_CUSTOM_TIMES(name, sample, min, max, bucket_count) \
+    do {} while (0)
 #define DHISTOGRAM_CLIPPED_TIMES(name, sample, min, max, bucket_count) \
     do {} while (0)
+#define DHISTOGRAM_CUSTOM_COUNTS(name, sample, min, max, bucket_count) \
+  do {} while (0)
+
 
 #endif  // NDEBUG
 
@@ -153,6 +177,12 @@ static const int kRendererHistogramFlag = 1 << 4;
     counter.AddTime(sample); \
   } while (0)
 
+#define UMA_HISTOGRAM_CUSTOM_TIMES(name, sample, min, max, bucket_count) do { \
+    static Histogram counter((name), min, max, bucket_count); \
+    counter.SetFlags(kUmaTargetedHistogramFlag); \
+    counter.AddTime(sample); \
+  } while (0)
+
 #define UMA_HISTOGRAM_CLIPPED_TIMES(name, sample, min, max, bucket_count) do { \
     static Histogram counter((name), min, max, bucket_count); \
     counter.SetFlags(kUmaTargetedHistogramFlag); \
@@ -167,6 +197,18 @@ static const int kRendererHistogramFlag = 1 << 4;
 
 #define UMA_HISTOGRAM_COUNTS_100(name, sample) do { \
     static Histogram counter((name), 1, 100, 50); \
+    counter.SetFlags(kUmaTargetedHistogramFlag); \
+    counter.Add(sample); \
+  } while (0)
+
+#define UMA_HISTOGRAM_COUNTS_10000(name, sample) do { \
+    static Histogram counter((name), 1, 10000, 50); \
+    counter.SetFlags(kUmaTargetedHistogramFlag); \
+    counter.Add(sample); \
+  } while (0)
+
+#define UMA_HISTOGRAM_CUSTOM_COUNTS(name, sample, min, max, bucket_count) do { \
+    static Histogram counter((name), min, max, bucket_count); \
     counter.SetFlags(kUmaTargetedHistogramFlag); \
     counter.Add(sample); \
   } while (0)
@@ -191,7 +233,9 @@ static const int kRendererHistogramFlag = 1 << 4;
 
 //------------------------------------------------------------------------------
 
-class Histogram : public StatsRate {
+class Pickle;
+
+class Histogram {
  public:
   typedef int Sample;  // Used for samples (and ranges of samples).
   typedef int Count;  // Used to count samples in a bucket.
@@ -251,9 +295,11 @@ class Histogram : public StatsRate {
             base::TimeDelta maximum, size_t bucket_count);
   virtual ~Histogram();
 
-  // Hooks to override stats counter methods.  This ensures that we gather all
-  // input the stats counter sees.
-  virtual void Add(int value);
+  void Add(int value);
+  // Accept a TimeDelta to increment.
+  void AddTime(base::TimeDelta time) {
+    Add(static_cast<int>(time.InMilliseconds()));
+  }
 
   void AddSampleSet(const SampleSet& sample);
 
@@ -284,9 +330,7 @@ class Histogram : public StatsRate {
   // The following method accepts a list of pickled histograms and
   // builds a histogram and updates shadow copy of histogram data in the
   // browser process.
-  static void DeserializeHistogramList(
-      const std::vector<std::string>& histograms);
-  static bool DeserializeHistogramInfo(const std::string& state);
+  static bool DeserializeHistogramInfo(const std::string& histogram_info);
 
 
   //----------------------------------------------------------------------------
@@ -453,7 +497,7 @@ class BooleanHistogram : public LinearHistogram {
     : LinearHistogram(name, 0, 2, 3) {
   }
 
-  virtual void AddBoolean(bool value) { Add(value ? 1 : 0); }
+  void AddBoolean(bool value) { Add(value ? 1 : 0); }
 
  private:
   DISALLOW_COPY_AND_ASSIGN(BooleanHistogram);
@@ -514,6 +558,7 @@ class StatisticsRecorder {
   // Method for extracting histograms which were marked for use by UMA.
   static void GetHistograms(Histograms* output);
 
+  // Find a histogram by name.  This method is thread safe.
   static Histogram* GetHistogram(const std::string& query);
 
   static void set_dump_on_exit(bool enable) { dump_on_exit_ = enable; }
@@ -540,4 +585,4 @@ class StatisticsRecorder {
   DISALLOW_COPY_AND_ASSIGN(StatisticsRecorder);
 };
 
-#endif  // BASE_HISTOGRAM_H__
+#endif  // BASE_HISTOGRAM_H_

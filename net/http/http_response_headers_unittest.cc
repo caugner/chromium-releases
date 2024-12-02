@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -423,6 +423,26 @@ TEST(HttpResponseHeadersTest, Persist) {
       "HTTP/1.1 200 OK\n"
       "Bar: 1\n"
     },
+    // Test LWS at the end of a header.
+    { net::HttpResponseHeaders::PERSIST_ALL,
+      "HTTP/1.1 200 OK\n"
+      "Content-Length: 450   \n"
+      "Content-Encoding: gzip\n",
+
+      "HTTP/1.1 200 OK\n"
+      "Content-Length: 450\n"
+      "Content-Encoding: gzip\n"
+    },
+    // Test LWS at the end of a header.
+    { net::HttpResponseHeaders::PERSIST_RAW,
+      "HTTP/1.1 200 OK\n"
+      "Content-Length: 450   \n"
+      "Content-Encoding: gzip\n",
+
+      "HTTP/1.1 200 OK\n"
+      "Content-Length: 450\n"
+      "Content-Encoding: gzip\n"
+    },
   };
 
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(tests); ++i) {
@@ -811,6 +831,17 @@ TEST(HttpResponseHeadersTest, Update) {
       "Cache-CONTROL: max-age=10000\n"
       "Foo: 1\n"
     },
+    { "HTTP/1.1 200 OK\n"
+      "Content-Length: 450\n",
+
+      "HTTP/1/1 304 Not Modified\n"
+      "connection: keep-alive\n"
+      "Cache-control:      max-age=10001   \n",
+
+      "HTTP/1.1 200 OK\n"
+      "Cache-control: max-age=10001\n"
+      "Content-Length: 450\n"
+    },
   };
 
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(tests); ++i) {
@@ -1039,6 +1070,247 @@ TEST(HttpResponseHeadersTest, GetContentLength) {
   }
 }
 
+TEST(HttpResponseHeaders, GetContentRange) {
+  const struct {
+    const char* headers;
+    bool expected_return_value;
+    int64 expected_first_byte_position;
+    int64 expected_last_byte_position;
+    int64 expected_instance_size;
+  }  tests[] = {
+    { "HTTP/1.1 206 Partial Content",
+      false,
+      -1,
+      -1,
+      -1
+    },
+    { "HTTP/1.1 206 Partial Content\n"
+      "Content-Range:",
+      false,
+      -1,
+      -1,
+      -1
+    },
+    { "HTTP/1.1 206 Partial Content\n"
+      "Content-Range: megabytes 0-10/50",
+      false,
+      -1,
+      -1,
+      -1
+    },
+    { "HTTP/1.1 206 Partial Content\n"
+      "Content-Range: 0-10/50",
+      false,
+      -1,
+      -1,
+      -1
+    },
+    { "HTTP/1.1 206 Partial Content\n"
+      "Content-Range: Bytes 0-50/51",
+      true,
+      0,
+      50,
+      51
+    },
+    { "HTTP/1.1 206 Partial Content\n"
+      "Content-Range: bytes 0-50/51",
+      true,
+      0,
+      50,
+      51
+    },
+    { "HTTP/1.1 206 Partial Content\n"
+      "Content-Range: bytes\t0-50/51",
+      false,
+      -1,
+      -1,
+      -1
+    },
+    { "HTTP/1.1 206 Partial Content\n"
+      "Content-Range:     bytes 0-50/51",
+      true,
+      0,
+      50,
+      51
+    },
+    { "HTTP/1.1 206 Partial Content\n"
+      "Content-Range:     bytes    0    -   50  \t / \t51",
+      true,
+      0,
+      50,
+      51
+    },
+    { "HTTP/1.1 206 Partial Content\n"
+      "Content-Range: bytes 0\t-\t50\t/\t51\t",
+      true,
+      0,
+      50,
+      51
+    },
+    { "HTTP/1.1 206 Partial Content\n"
+      "Content-Range:   \tbytes\t\t\t 0\t-\t50\t/\t51\t",
+      true,
+      0,
+      50,
+      51
+    },
+    { "HTTP/1.1 206 Partial Content\n"
+      "Content-Range: \t   bytes \t  0    -   50   /   5   1",
+      false,
+      -1,
+      -1,
+      -1
+    },
+    { "HTTP/1.1 206 Partial Content\n"
+      "Content-Range: bytes 50-0/51",
+      false,
+      -1,
+      -1,
+      -1
+    },
+    { "HTTP/1.1 416 Requested range not satisfiable\n"
+      "Content-Range: bytes */*",
+      true,
+      -1,
+      -1,
+      -1
+    },
+    { "HTTP/1.1 416 Requested range not satisfiable\n"
+      "Content-Range: bytes *   /    *   ",
+      true,
+      -1,
+      -1,
+      -1
+    },
+    { "HTTP/1.1 206 Partial Content\n"
+      "Content-Range: bytes 0-50/*",
+      true,
+      0,
+      50,
+      -1
+    },
+    { "HTTP/1.1 206 Partial Content\n"
+      "Content-Range: bytes 0-50  /    * ",
+      true,
+      0,
+      50,
+      -1
+    },
+    { "HTTP/1.1 206 Partial Content\n"
+      "Content-Range: bytes 0-10000000000/10000000001",
+      true,
+      0,
+      10000000000ll,
+      10000000001ll
+    },
+    { "HTTP/1.1 206 Partial Content\n"
+      "Content-Range: bytes 0-10000000000/10000000000",
+      false,
+      -1,
+      -1,
+      -1
+    },
+    // The following header is invalid for response code of 206, this should be
+    // verified by the user.
+    { "HTTP/1.1 206 Partial Content\n"
+      "Content-Range: bytes */50",
+      true,
+      -1,
+      -1,
+      50
+    },
+    { "HTTP/1.1 206 Partial Content\n"
+      "Content-Range: bytes 0-50/10",
+      false,
+      -1,
+      -1,
+      -1
+    },
+    { "HTTP/1.1 206 Partial Content\n"
+      "Content-Range: bytes 0-50/-10",
+      false,
+      -1,
+      -1,
+      -1
+    },
+    { "HTTP/1.1 206 Partial Content\n"
+      "Content-Range: bytes 0-0/1",
+      true,
+      0,
+      0,
+      1
+    },
+    { "HTTP/1.1 206 Partial Content\n"
+      "Content-Range: bytes 0-40000000000000000000/40000000000000000001",
+      false,
+      -1,
+      -1,
+      -1
+    },
+    { "HTTP/1.1 206 Partial Content\n"
+      "Content-Range: bytes 1-/100",
+      false,
+      -1,
+      -1,
+      -1
+    },
+    { "HTTP/1.1 206 Partial Content\n"
+      "Content-Range: bytes -/100",
+      false,
+      -1,
+      -1,
+      -1
+    },
+    { "HTTP/1.1 206 Partial Content\n"
+      "Content-Range: bytes -1/100",
+      false,
+      -1,
+      -1,
+      -1
+    },
+    { "HTTP/1.1 206 Partial Content\n"
+      "Content-Range: bytes 0-40000000000000000000/40000000000000000001",
+      false,
+      -1,
+      -1,
+      -1
+    },
+    { "HTTP/1.1 206 Partial Content\n"
+      "Content-Range: bytes 0-1233/*",
+      true,
+      0,
+      1233,
+      -1
+    },
+    { "HTTP/1.1 206 Partial Content\n"
+      "Content-Range: bytes -123 - -1/100",
+      false,
+      -1,
+      -1,
+      -1
+    },
+  };
+  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(tests); ++i) {
+    string headers(tests[i].headers);
+    HeadersToRaw(&headers);
+    scoped_refptr<HttpResponseHeaders> parsed =
+        new HttpResponseHeaders(headers);
+
+    int64 first_byte_position;
+    int64 last_byte_position;
+    int64 instance_size;
+    bool return_value = parsed->GetContentRange(&first_byte_position,
+                                                &last_byte_position,
+                                                &instance_size);
+    EXPECT_EQ(tests[i].expected_return_value, return_value);
+    if (return_value) {
+      EXPECT_EQ(tests[i].expected_first_byte_position, first_byte_position);
+      EXPECT_EQ(tests[i].expected_last_byte_position, last_byte_position);
+      EXPECT_EQ(tests[i].expected_instance_size, instance_size);
+    }
+  }
+}
+
 TEST(HttpResponseHeadersTest, IsKeepAlive) {
   const struct {
     const char* headers;
@@ -1141,4 +1413,94 @@ TEST(HttpResponseHeadersTest, GetStatusBadStatusLine) {
   // The bad status line would have gotten rewritten as
   // HTTP/1.0 200 OK.
   EXPECT_EQ(std::string("OK"), parsed->GetStatusText());
+}
+
+TEST(HttpResponseHeadersTest, AddHeader) {
+  const struct {
+    const char* orig_headers;
+    const char* new_header;
+    const char* expected_headers;
+  } tests[] = {
+    { "HTTP/1.1 200 OK\n"
+      "connection: keep-alive\n"
+      "Cache-control: max-age=10000\n",
+
+      "Content-Length: 450",
+
+      "HTTP/1.1 200 OK\n"
+      "connection: keep-alive\n"
+      "Cache-control: max-age=10000\n"
+      "Content-Length: 450\n"
+    },
+    { "HTTP/1.1 200 OK\n"
+      "connection: keep-alive\n"
+      "Cache-control: max-age=10000    \n",
+
+      "Content-Length: 450  ",
+
+      "HTTP/1.1 200 OK\n"
+      "connection: keep-alive\n"
+      "Cache-control: max-age=10000\n"
+      "Content-Length: 450\n"
+    },
+  };
+
+  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(tests); ++i) {
+    string orig_headers(tests[i].orig_headers);
+    HeadersToRaw(&orig_headers);
+    scoped_refptr<HttpResponseHeaders> parsed =
+        new HttpResponseHeaders(orig_headers);
+
+    string new_header(tests[i].new_header);
+    parsed->AddHeader(new_header);
+
+    string resulting_headers;
+    parsed->GetNormalizedHeaders(&resulting_headers);
+    EXPECT_EQ(string(tests[i].expected_headers), resulting_headers);
+  }
+}
+
+TEST(HttpResponseHeadersTest, RemoveHeader) {
+  const struct {
+    const char* orig_headers;
+    const char* to_remove;
+    const char* expected_headers;
+  } tests[] = {
+    { "HTTP/1.1 200 OK\n"
+      "connection: keep-alive\n"
+      "Cache-control: max-age=10000\n"
+      "Content-Length: 450\n",
+
+      "Content-Length",
+
+      "HTTP/1.1 200 OK\n"
+      "connection: keep-alive\n"
+      "Cache-control: max-age=10000\n"
+    },
+    { "HTTP/1.1 200 OK\n"
+      "connection: keep-alive  \n"
+      "Content-Length  : 450  \n"
+      "Cache-control: max-age=10000\n",
+
+      "Content-Length",
+
+      "HTTP/1.1 200 OK\n"
+      "connection: keep-alive\n"
+      "Cache-control: max-age=10000\n"
+    },
+  };
+
+  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(tests); ++i) {
+    string orig_headers(tests[i].orig_headers);
+    HeadersToRaw(&orig_headers);
+    scoped_refptr<HttpResponseHeaders> parsed =
+        new HttpResponseHeaders(orig_headers);
+
+    string name(tests[i].to_remove);
+    parsed->RemoveHeader(name);
+
+    string resulting_headers;
+    parsed->GetNormalizedHeaders(&resulting_headers);
+    EXPECT_EQ(string(tests[i].expected_headers), resulting_headers);
+  }
 }

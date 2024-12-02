@@ -1,12 +1,8 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/window_sizer.h"
-
-#include <atlbase.h>
-#include <atlapp.h>
-#include <atlmisc.h>
 
 #include "chrome/browser/browser.h"
 #include "chrome/browser/browser_list.h"
@@ -15,97 +11,20 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/pref_service.h"
 
-// How much horizontal and vertical offset there is between newly opened
-// windows.
-static const int kWindowTilePixels = 10;
-
-///////////////////////////////////////////////////////////////////////////////
-// An implementation of WindowSizer::MonitorInfoProvider that gets the actual
-// monitor information from Windows.
-class DefaultMonitorInfoProvider : public WindowSizer::MonitorInfoProvider {
- public:
-  DefaultMonitorInfoProvider() {
-    EnumDisplayMonitors(NULL, NULL,
-                        &DefaultMonitorInfoProvider::MonitorEnumProc,
-                        reinterpret_cast<LPARAM>(&working_rects_));
-  }
-
-  // Overridden from WindowSizer::MonitorInfoProvider:
-  virtual gfx::Rect GetPrimaryMonitorWorkingRect() const {
-    return gfx::Rect(GetMonitorInfoForMonitor(MonitorFromWindow(NULL,
-        MONITOR_DEFAULTTOPRIMARY)).rcWork);
-  }
-
-  virtual gfx::Rect GetPrimaryMonitorBounds() const {
-    return gfx::Rect(GetMonitorInfoForMonitor(MonitorFromWindow(NULL,
-        MONITOR_DEFAULTTOPRIMARY)).rcMonitor);
-  }
-
-  virtual gfx::Rect GetMonitorWorkingRectMatching(
-      const gfx::Rect& match_rect) const {
-    CRect other_bounds_crect = match_rect.ToRECT();
-    MONITORINFO monitor_info = GetMonitorInfoForMonitor(MonitorFromRect(
-        &other_bounds_crect, MONITOR_DEFAULTTOPRIMARY));
-    return gfx::Rect(monitor_info.rcWork);
-  }
-
-  virtual gfx::Point GetBoundsOffsetMatching(
-      const gfx::Rect& match_rect) const {
-    CRect other_bounds_crect = match_rect.ToRECT();
-    MONITORINFO monitor_info = GetMonitorInfoForMonitor(MonitorFromRect(
-        &other_bounds_crect, MONITOR_DEFAULTTOPRIMARY));
-    return gfx::Point(monitor_info.rcWork.left - monitor_info.rcMonitor.left,
-                      monitor_info.rcWork.top - monitor_info.rcMonitor.top);
-  }
-
-  virtual int GetMonitorCount() const {
-    return static_cast<int>(working_rects_.size());
-  }
-
-  virtual gfx::Rect GetWorkingRectAt(int index) const {
-    DCHECK(index >= 0 && index < GetMonitorCount());
-    return working_rects_.at(index);
-  }
-
- private:
-  // A callback for EnumDisplayMonitors that records the work area of the
-  // current monitor in the enumeration.
-  static BOOL CALLBACK MonitorEnumProc(HMONITOR monitor,
-                                       HDC monitor_dc,
-                                       LPRECT monitor_rect,
-                                       LPARAM data) {
-    std::vector<gfx::Rect>* working_rects =
-        reinterpret_cast<std::vector<gfx::Rect>*>(data);
-    MONITORINFO info;
-    info.cbSize = sizeof(info);
-    GetMonitorInfo(monitor, &info);
-    working_rects->push_back(gfx::Rect(info.rcWork));
-    return TRUE;
-  }
-
-  static MONITORINFO GetMonitorInfoForMonitor(HMONITOR monitor) {
-    MONITORINFO monitor_info;
-    monitor_info.cbSize = sizeof(monitor_info);
-    GetMonitorInfo(monitor, &monitor_info);
-    return monitor_info;
-  }
-
-  std::vector<gfx::Rect> working_rects_;
-
-  DISALLOW_EVIL_CONSTRUCTORS(DefaultMonitorInfoProvider);
-};
-
 ///////////////////////////////////////////////////////////////////////////////
 // An implementation of WindowSizer::StateProvider that gets the last active
 // and persistent state from the browser window and the user's profile.
 class DefaultStateProvider : public WindowSizer::StateProvider {
  public:
-  explicit DefaultStateProvider(const std::wstring& app_name)
-      : app_name_(app_name) {
+  explicit DefaultStateProvider(const std::wstring& app_name, Browser* browser)
+      : app_name_(app_name),
+        browser_(browser) {
   }
 
   // Overridden from WindowSizer::StateProvider:
-  virtual bool GetPersistentState(gfx::Rect* bounds, bool* maximized) const {
+  virtual bool GetPersistentState(gfx::Rect* bounds,
+                                  bool* maximized,
+                                  gfx::Rect* work_area) const {
     DCHECK(bounds && maximized);
 
     std::wstring key(prefs::kBrowserWindowPlacement);
@@ -129,6 +48,21 @@ class DefaultStateProvider : public WindowSizer::StateProvider {
         wp_pref->GetBoolean(L"maximized", maximized);
     bounds->SetRect(left, top, std::max(0, right - left),
                     std::max(0, bottom - top));
+
+    int work_area_top = 0;
+    int work_area_left = 0;
+    int work_area_bottom = 0;
+    int work_area_right = 0;
+    if (wp_pref) {
+      wp_pref->GetInteger(L"work_area_top", &work_area_top);
+      wp_pref->GetInteger(L"work_area_left", &work_area_left);
+      wp_pref->GetInteger(L"work_area_bottom", &work_area_bottom);
+      wp_pref->GetInteger(L"work_area_right", &work_area_right);
+    }
+    work_area->SetRect(work_area_left, work_area_top,
+                      std::max(0, work_area_right - work_area_left),
+                      std::max(0, work_area_bottom - work_area_top));
+
     return has_prefs;
   }
 
@@ -137,16 +71,28 @@ class DefaultStateProvider : public WindowSizer::StateProvider {
     if (!app_name_.empty())
       return false;
 
-    BrowserList::const_reverse_iterator it = BrowserList::begin_last_active();
-    BrowserList::const_reverse_iterator end = BrowserList::end_last_active();
-    for (; it != end; ++it) {
-      Browser* last_active = *it;
-      if (last_active && last_active->type() == Browser::TYPE_NORMAL) {
-        BrowserWindow* frame = last_active->window();
-        DCHECK(frame);
-        *bounds = frame->GetNormalBounds();
-        return true;
+    // If a reference browser is set, use its window. Otherwise find last
+    // active.
+    BrowserWindow* window = NULL;
+    if (browser_) {
+      window = browser_->window();
+      DCHECK(window);
+    } else {
+      BrowserList::const_reverse_iterator it = BrowserList::begin_last_active();
+      BrowserList::const_reverse_iterator end = BrowserList::end_last_active();
+      for (; (it != end); ++it) {
+        Browser* last_active = *it;
+        if (last_active && last_active->type() == Browser::TYPE_NORMAL) {
+          window = last_active->window();
+          DCHECK(window);
+          break;
+        }
       }
+    }
+
+    if (window) {
+      *bounds = window->GetNormalBounds();
+      return true;
     }
 
     return false;
@@ -155,6 +101,8 @@ class DefaultStateProvider : public WindowSizer::StateProvider {
  private:
   std::wstring app_name_;
 
+  // If set, is used as the reference browser for GetLastActiveWindowState.
+  Browser* browser_;
   DISALLOW_EVIL_CONSTRUCTORS(DefaultStateProvider);
 };
 
@@ -177,44 +125,20 @@ WindowSizer::~WindowSizer() {
 // static
 void WindowSizer::GetBrowserWindowBounds(const std::wstring& app_name,
                                          const gfx::Rect& specified_bounds,
+                                         Browser* browser,
                                          gfx::Rect* window_bounds,
                                          bool* maximized) {
-  const WindowSizer sizer(new DefaultStateProvider(app_name),
-                          new DefaultMonitorInfoProvider);
+  const WindowSizer sizer(new DefaultStateProvider(app_name, browser),
+                          CreateDefaultMonitorInfoProvider());
   sizer.DetermineWindowBounds(specified_bounds, window_bounds, maximized);
-}
-
-gfx::Point WindowSizer::GetDefaultPopupOrigin(const gfx::Size& size) {
-  RECT area;
-  SystemParametersInfo(SPI_GETWORKAREA, 0, &area, 0);
-  gfx::Point corner(area.left, area.top);
-
-  if (Browser* b = BrowserList::GetLastActive()) {
-    RECT browser;
-    HWND window = reinterpret_cast<HWND>(b->window()->GetNativeHandle());
-    if (GetWindowRect(window, &browser)) {
-      // Limit to not overflow the work area right and bottom edges.
-      gfx::Point limit(
-          std::min(browser.left + kWindowTilePixels, area.right-size.width()),
-          std::min(browser.top + kWindowTilePixels, area.bottom-size.height())
-      );
-      // Adjust corner to now overflow the work area left and top edges, so
-      // that if a popup does not fit the title-bar is remains visible.
-      corner = gfx::Point(
-          std::max(corner.x(), limit.x()),
-          std::max(corner.y(), limit.y())
-      );
-    }
-  }
-  return corner;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 // WindowSizer, private:
 
 WindowSizer::WindowSizer(const std::wstring& app_name) {
-  Init(new DefaultStateProvider(app_name),
-       new DefaultMonitorInfoProvider);
+  Init(new DefaultStateProvider(app_name, NULL),
+       CreateDefaultMonitorInfoProvider());
 }
 
 void WindowSizer::Init(StateProvider* state_provider,
@@ -245,20 +169,20 @@ bool WindowSizer::GetLastWindowBounds(gfx::Rect* bounds) const {
     return false;
   gfx::Rect last_window_bounds = *bounds;
   bounds->Offset(kWindowTilePixels, kWindowTilePixels);
-  AdjustBoundsToBeVisibleOnMonitorContaining(last_window_bounds, bounds);
+  AdjustBoundsToBeVisibleOnMonitorContaining(last_window_bounds,
+                                             gfx::Rect(),
+                                             bounds);
   return true;
 }
 
 bool WindowSizer::GetSavedWindowBounds(gfx::Rect* bounds,
                                        bool* maximized) const {
   DCHECK(bounds && maximized);
+  gfx::Rect saved_work_area;
   if (!state_provider_ ||
-      !state_provider_->GetPersistentState(bounds, maximized))
+      !state_provider_->GetPersistentState(bounds, maximized, &saved_work_area))
     return false;
-  const gfx::Point& taskbar_offset =
-      monitor_info_provider_->GetBoundsOffsetMatching(*bounds);
-  bounds->Offset(taskbar_offset.x(), taskbar_offset.y());
-  AdjustBoundsToBeVisibleOnMonitorContaining(*bounds, bounds);
+  AdjustBoundsToBeVisibleOnMonitorContaining(*bounds, saved_work_area, bounds);
   return true;
 }
 
@@ -266,12 +190,12 @@ void WindowSizer::GetDefaultWindowBounds(gfx::Rect* default_bounds) const {
   DCHECK(default_bounds);
   DCHECK(monitor_info_provider_);
 
-  gfx::Rect work_rect = monitor_info_provider_->GetPrimaryMonitorWorkingRect();
+  gfx::Rect work_area = monitor_info_provider_->GetPrimaryMonitorWorkArea();
 
   // The default size is either some reasonably wide width, or if the work
   // area is narrower, then the work area width less some aesthetic padding.
-  int default_width = std::min(work_rect.width() - 2 * kWindowTilePixels, 1050);
-  int default_height = work_rect.height() - 2 * kWindowTilePixels;
+  int default_width = std::min(work_area.width() - 2 * kWindowTilePixels, 1050);
+  int default_height = work_area.height() - 2 * kWindowTilePixels;
 
   // For wider aspect ratio displays at higher resolutions, we might size the
   // window narrower to allow two windows to easily be placed side-by-side.
@@ -284,53 +208,63 @@ void WindowSizer::GetDefaultWindowBounds(gfx::Rect* default_bounds) const {
   // We assume 16:9/10 is a fairly standard indicator of a wide aspect ratio
   // computer display.
   if (((width_to_height * 10) >= 16) &&
-      work_rect.width() > kMinScreenWidthForWindowHalving) {
-    // Halve the work area, subtracting aesthetic padding on either side, plus
-    // some more aesthetic padding for spacing between windows.
-    default_width = (work_rect.width() / 2) - 3 * kWindowTilePixels;
+      work_area.width() > kMinScreenWidthForWindowHalving) {
+    // Halve the work area, subtracting aesthetic padding on either side.
+    // The padding is set so that two windows, side by side have
+    // kWindowTilePixels between screen edge and each other.
+    default_width = static_cast<int>(work_area.width() / 2. -
+        1.5 * kWindowTilePixels);
   }
-  default_bounds->SetRect(kWindowTilePixels + work_rect.x(),
-                          kWindowTilePixels + work_rect.y(),
+  default_bounds->SetRect(kWindowTilePixels + work_area.x(),
+                          kWindowTilePixels + work_area.y(),
                           default_width, default_height);
 }
 
 bool WindowSizer::PositionIsOffscreen(int position, Edge edge) const {
   DCHECK(monitor_info_provider_);
-
-  int monitor_count = monitor_info_provider_->GetMonitorCount();
-  for (int i = 0; i < monitor_count; ++i) {
-    gfx::Rect working_rect = monitor_info_provider_->GetWorkingRectAt(i);
+  size_t monitor_count = monitor_info_provider_->GetMonitorCount();
+  for (size_t i = 0; i < monitor_count; ++i) {
+    gfx::Rect work_area = monitor_info_provider_->GetWorkAreaAt(i);
     switch (edge) {
       case TOP:
-        if (position >= working_rect.y())
-          return true;
+        if (position >= work_area.y())
+          return false;
         break;
       case LEFT:
-        if (position >= working_rect.x())
-          return true;
+        if (position >= work_area.x())
+          return false;
         break;
       case BOTTOM:
-        if (position <= working_rect.height())
-          return true;
+        if (position <= work_area.bottom())
+          return false;
         break;
       case RIGHT:
-        if (position <= working_rect.width())
-          return true;
+        if (position <= work_area.right())
+          return false;
         break;
     }
   }
-  return false;
+  return true;
+}
+
+namespace {
+  // Minimum height of the visible part of a window.
+  static const int kMinVisibleHeight = 30;
+  // Minimum width of the visible part of a window.
+  static const int kMinVisibleWidth = 30;
 }
 
 void WindowSizer::AdjustBoundsToBeVisibleOnMonitorContaining(
-    const gfx::Rect& other_bounds, gfx::Rect* bounds) const {
+    const gfx::Rect& other_bounds,
+    const gfx::Rect& saved_work_area,
+    gfx::Rect* bounds) const {
   DCHECK(bounds);
   DCHECK(monitor_info_provider_);
 
   // Find the size of the work area of the monitor that intersects the bounds
   // of the anchor window.
   gfx::Rect work_area =
-      monitor_info_provider_->GetMonitorWorkingRectMatching(other_bounds);
+      monitor_info_provider_->GetMonitorWorkAreaMatching(other_bounds);
 
   // If height or width are 0, reset to the default size.
   gfx::Rect default_bounds;
@@ -340,35 +274,44 @@ void WindowSizer::AdjustBoundsToBeVisibleOnMonitorContaining(
   if (bounds->width() <= 0)
     bounds->set_width(default_bounds.width());
 
-  // First determine which screen edge(s) the window is offscreen on.
-  bool top_offscreen = !PositionIsOffscreen(bounds->y(), TOP);
-  bool left_offscreen = !PositionIsOffscreen(bounds->x(), LEFT);
-  bool bottom_offscreen =  !PositionIsOffscreen(bounds->bottom(), BOTTOM);
-  bool right_offscreen = !PositionIsOffscreen(bounds->right(), RIGHT);
+  // Ensure the minimum height and width.
+  bounds->set_height(std::max(kMinVisibleHeight, bounds->height()));
+  bounds->set_width(std::max(kMinVisibleWidth, bounds->width()));
 
-  // Bump the window back onto the screen in the direction that it's offscreen.
-  if (bottom_offscreen) {
-    int y = work_area.bottom() - kWindowTilePixels - bounds->height();
-    bounds->set_y(std::max(kWindowTilePixels, y));
-  }
-  if (right_offscreen) {
-    int x = work_area.right() - kWindowTilePixels - bounds->width();
-    bounds->set_x(std::max(kWindowTilePixels, x));
-  }
-  if (top_offscreen)
-    bounds->set_y(kWindowTilePixels + work_area.y());
-  if (left_offscreen)
-    bounds->set_x(kWindowTilePixels + work_area.x());
+  // Ensure that the title bar is not above the work area.
+  if (bounds->y() < work_area.y())
+    bounds->set_y(work_area.y());
 
-  // Now that we've tried to correct the x/y position to something reasonable,
-  // see if the window is still too tall or wide to fit, and resize it if need
-  // be.
-  if ((bottom_offscreen || top_offscreen) &&
-      bounds->bottom() > work_area.bottom()) {
-    bounds->set_height(work_area.height() - 2 * kWindowTilePixels);
+  // Reposition and resize the bounds if the saved_work_area is different from
+  // the current work area and the current work area doesn't completely contain
+  // the bounds.
+  if (!saved_work_area.IsEmpty() &&
+      saved_work_area != work_area &&
+      !work_area.Contains(*bounds)) {
+    bounds->set_width(std::min(bounds->width(), work_area.width()));
+    bounds->set_height(std::min(bounds->height(), work_area.height()));
+    bounds->set_x(
+        std::max(work_area.x(),
+                 std::min(bounds->x(), work_area.right() - bounds->width())));
+    bounds->set_y(
+        std::max(work_area.y(),
+                 std::min(bounds->y(), work_area.bottom() - bounds->height())));
   }
-  if ((left_offscreen || right_offscreen) &&
-      bounds->right() > work_area.right()) {
-    bounds->set_width(work_area.width() - 2 * kWindowTilePixels);
-  }
+
+#if defined(OS_MACOSX)
+  // Limit the maximum height.  On the Mac the sizer is on the
+  // bottom-right of the window, and a window cannot be moved "up"
+  // past the menubar.  If the window is too tall you'll never be able
+  // to shrink it again.  Windows does not have this limitation
+  // (e.g. can be resized from the top).
+  bounds->set_height(std::min(work_area.height(), bounds->height()));
+#endif  // defined(OS_MACOSX)
+
+  // Ensure at least kMinVisibleWidth * kMinVisibleHeight is visible.
+  const int min_y = work_area.y() + kMinVisibleHeight - bounds->height();
+  const int min_x = work_area.x() + kMinVisibleWidth - bounds->width();
+  const int max_y = work_area.bottom() - kMinVisibleHeight;
+  const int max_x = work_area.right() - kMinVisibleWidth;
+  bounds->set_y(std::max(min_y, std::min(max_y, bounds->y())));
+  bounds->set_x(std::max(min_x, std::min(max_x, bounds->x())));
 }

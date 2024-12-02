@@ -12,6 +12,9 @@
 
 #include <algorithm>
 
+#include "app/l10n_util.h"
+#include "app/win_util.h"
+#include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/registry.h"
 #include "base/string_util.h"
@@ -20,14 +23,14 @@
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/password_manager/ie7_password.h"
 #include "chrome/browser/search_engines/template_url_model.h"
-#include "chrome/common/l10n_util.h"
 #include "chrome/common/time_format.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/common/win_util.h"
 #include "googleurl/src/gurl.h"
 #include "grit/generated_resources.h"
+#include "webkit/glue/password_form.h"
 
 using base::Time;
+using webkit_glue::PasswordForm;
 
 namespace {
 
@@ -113,7 +116,7 @@ void IEImporter::ImportFavorites() {
     main_loop_->PostTask(FROM_HERE, NewRunnableMethod(writer_,
         &ProfileWriter::AddBookmarkEntry, bookmarks,
         l10n_util::GetString(IDS_BOOKMARK_GROUP_FROM_IE),
-        first_run() ? ProfileWriter::FIRST_RUN : 0));
+        import_to_bookmark_bar() ? ProfileWriter::IMPORT_TO_BOOKMARK_BAR : 0));
   }
 }
 
@@ -475,21 +478,23 @@ void IEImporter::ParseFavoritesFolder(const FavoritesInfo& info,
   std::wstring ie_folder = l10n_util::GetString(IDS_BOOKMARK_GROUP_FROM_IE);
   BookmarkVector toolbar_bookmarks;
   FilePath file;
-  std::vector<std::wstring> file_list;
+  std::vector<FilePath::StringType> file_list;
+  FilePath favorites_path(info.path);
+  // Favorites path length.  Make sure it doesn't include the trailing \.
+  size_t favorites_path_len =
+      favorites_path.StripTrailingSeparators().value().size();
   file_util::FileEnumerator file_enumerator(
-      FilePath::FromWStringHack(info.path), true,
-      file_util::FileEnumerator::FILES);
+      favorites_path, true, file_util::FileEnumerator::FILES);
   while (!(file = file_enumerator.Next()).value().empty() && !cancelled())
-    file_list.push_back(file.ToWStringHack());
+    file_list.push_back(file.value());
 
   // Keep the bookmarks in alphabetical order.
   std::sort(file_list.begin(), file_list.end());
 
-  for (std::vector<std::wstring>::iterator it = file_list.begin();
+  for (std::vector<FilePath::StringType>::iterator it = file_list.begin();
        it != file_list.end(); ++it) {
-    std::wstring filename = file_util::GetFilenameFromPath(*it);
-    std::wstring extension = file_util::GetFileExtensionFromPath(filename);
-    if (!LowerCaseEqualsASCII(extension, "url"))
+    FilePath shortcut(*it);
+    if (!LowerCaseEqualsASCII(shortcut.Extension(), ".url"))
       continue;
 
     // Skip the bookmark with invalid URL.
@@ -497,29 +502,35 @@ void IEImporter::ParseFavoritesFolder(const FavoritesInfo& info,
     if (!url.is_valid())
       continue;
 
-    // Remove the dot and the file extension, and the directory path.
-    std::wstring relative_path = it->substr(info.path.size(),
-        it->size() - filename.size() - info.path.size());
-    TrimString(relative_path, L"\\", &relative_path);
+    // Make the relative path from the Favorites folder, without the basename.
+    // ex. Suppose that the Favorites folder is C:\Users\Foo\Favorites.
+    //   C:\Users\Foo\Favorites\Foo.url -> ""
+    //   C:\Users\Foo\Favorites\Links\Bar\Baz.url -> "Links\Bar"
+    FilePath::StringType relative_string =
+        shortcut.DirName().value().substr(favorites_path_len);
+    if (relative_string.size() > 0 && FilePath::IsSeparator(relative_string[0]))
+      relative_string = relative_string.substr(1);
+    FilePath relative_path(relative_string);
 
     ProfileWriter::BookmarkEntry entry;
-    entry.title = filename.substr(0, filename.size() - (extension.size() + 1));
+    // Remove the dot, the file extension, and the directory path.
+    entry.title = shortcut.RemoveExtension().BaseName().value();
     entry.url = url;
     entry.creation_time = GetFileCreationTime(*it);
     if (!relative_path.empty())
-      file_util::PathComponents(relative_path, &entry.path);
+      relative_path.GetComponents(&entry.path);
 
     // Flatten the bookmarks in Link folder onto bookmark toolbar. Otherwise,
     // put it into "Other bookmarks".
-    if (first_run() &&
+    if (import_to_bookmark_bar() &&
         (entry.path.size() > 0 && entry.path[0] == info.links_folder)) {
       entry.in_toolbar = true;
       entry.path.erase(entry.path.begin());
       toolbar_bookmarks.push_back(entry);
     } else {
-      // After the first run, we put the bookmarks in a "Imported From IE"
+      // We put the bookmarks in a "Imported From IE"
       // folder, so that we don't mess up the "Other bookmarks".
-      if (!first_run())
+      if (!import_to_bookmark_bar())
         entry.path.insert(entry.path.begin(), ie_folder);
       bookmarks->push_back(entry);
     }

@@ -14,27 +14,33 @@
 #include <string>
 #include <vector>
 
+#include "base/observer_list.h"
 #include "chrome/browser/download/save_package.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
 #include "chrome/browser/tab_contents/security_style.h"
 #include "chrome/test/automation/automation_constants.h"
 #include "chrome/test/automation/automation_handle_tracker.h"
 
-class ConstrainedWindowProxy;
 class GURL;
 class Value;
+namespace IPC {
+class Message;
+};
 
 enum FindInPageDirection { BACK = 0, FWD = 1 };
 enum FindInPageCase { IGNORE_CASE = 0, CASE_SENSITIVE = 1 };
 
 class TabProxy : public AutomationResourceProxy {
  public:
+  class TabProxyDelegate {
+   public:
+    virtual void OnMessageReceived(TabProxy* tab, const IPC::Message& msg) {}
+  };
+
   TabProxy(AutomationMessageSender* sender,
            AutomationHandleTracker* tracker,
            int handle)
     : AutomationResourceProxy(tracker, sender, handle) {}
-
-  virtual ~TabProxy() {}
 
   // Gets the current url of the tab.
   bool GetCurrentURL(GURL* url) const;
@@ -42,13 +48,11 @@ class TabProxy : public AutomationResourceProxy {
   // Gets the title of the tab.
   bool GetTabTitle(std::wstring* title) const;
 
+  // Gets the tabstrip index of the tab.
+  bool GetTabIndex(int* index) const;
+
   // Gets the number of constrained window for this tab.
   bool GetConstrainedWindowCount(int* count) const;
-
-  // Gets the proxy object for constrained window within this tab. Ownership
-  // for the returned object is transfered to the caller. Returns NULL on
-  // failure.
-  ConstrainedWindowProxy* GetConstrainedWindow(int window_index) const;
 
   // Executes a javascript in a frame's context whose xpath is provided as the
   // first parameter and extract the values from the resulting json string.
@@ -163,11 +167,6 @@ class TabProxy : public AutomationResourceProxy {
   // auth.
   bool NeedsAuth() const;
 
-  // Fills |*is_visible| with whether the tab's download shelf is currently
-  // visible. The return value indicates success. On failure, |*is_visible| is
-  // unchanged.
-  bool IsShelfVisible(bool* is_visible);
-
   // Starts a search within the current tab. The parameter |search_string|
   // specifies what string to search for, |forward| specifies whether to search
   // in forward direction, and |match_case| specifies case sensitivity
@@ -196,6 +195,13 @@ class TabProxy : public AutomationResourceProxy {
   bool WaitForChildWindowCountToChange(int count, int* new_count,
       int wait_timeout);
 
+  // Gets the number of popups blocked from this tab.
+  bool GetBlockedPopupCount(int* count) const;
+
+  // Blocks the thread until the number of blocked popup is equal to
+  // |target_count|.
+  bool WaitForBlockedPopupCountToChangeTo(int target_count, int wait_timeout);
+
   bool GetDownloadDirectory(std::wstring* download_directory);
 
   // Shows an interstitial page.  Blocks until the interstitial page
@@ -208,11 +214,6 @@ class TabProxy : public AutomationResourceProxy {
 
 #if defined(OS_WIN)
   // TODO(port): Use something portable.
-
-  // This sets the keyboard accelerators to be used by an externally
-  // hosted tab. This call is not valid on a regular tab hosted within
-  // Chrome.
-  bool SetAccelerators(HACCEL accel_table, int accel_table_entry_count);
 
   // The container of an externally hosted tab calls this to reflect any
   // accelerator keys that it did not process. This gives the tab a chance
@@ -244,6 +245,9 @@ class TabProxy : public AutomationResourceProxy {
   // Prints the current page without user intervention.
   bool PrintNow();
 
+  // Sends off an asynchronous request for printing.
+  bool PrintAsync();
+
   // Save the current web page. |file_name| is the HTML file name, and
   // |dir_path| is the directory for saving resource files. |type| indicates
   // which type we're saving as: HTML only or the complete web page.
@@ -252,8 +256,7 @@ class TabProxy : public AutomationResourceProxy {
                 SavePackage::SavePackageType type);
 
   // Posts a message to the external tab.
-  void HandleMessageFromExternalHost(AutomationHandle handle,
-                                     const std::string& message,
+  void HandleMessageFromExternalHost(const std::string& message,
                                      const std::string& origin,
                                      const std::string& target);
 
@@ -287,11 +290,25 @@ class TabProxy : public AutomationResourceProxy {
 
 #if defined(OS_WIN)
   // Resizes the tab window.
+  // The parent_window parameter allows a parent to be specified for the window
+  // passed in.
   void Reposition(HWND window, HWND window_insert_after, int left, int top,
-                  int width, int height, int flags);
+                  int width, int height, int flags, HWND parent_window);
+
+  // Sends the selected context menu command to the chrome instance
+  void SendContextMenuCommand(int selected_command);
+
 #endif  // defined(OS_WIN)
 
+  // Calls delegates
+  void AddObserver(TabProxyDelegate* observer);
+  void RemoveObserver(TabProxyDelegate* observer);
+  void OnMessageReceived(const IPC::Message& message);
+ protected:
+  virtual ~TabProxy() {}
  private:
+  Lock list_lock_;  // Protects the observers_list_.
+  ObserverList<TabProxyDelegate> observers_list_;
   DISALLOW_COPY_AND_ASSIGN(TabProxy);
 };
 

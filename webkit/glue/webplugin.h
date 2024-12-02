@@ -9,7 +9,6 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/file_path.h"
 #include "base/gfx/rect.h"
 #include "base/gfx/native_widget_types.h"
 
@@ -24,46 +23,17 @@ class WebPluginResourceClient;
 
 struct NPObject;
 
-// Describes a mime type entry for a plugin.
-struct WebPluginMimeType {
-  // The actual mime type.
-  std::string mime_type;
-
-  // A list of all the file extensions for this mime type.
-  std::vector<std::string> file_extensions;
-
-  // Description of the mime type.
-  std::wstring description;
-};
-
-
-// Describes an available NPAPI plugin.
-struct WebPluginInfo {
-  // The name of the plugin (i.e. Flash).
-  std::wstring name;
-
-  // The path to the plugin file (DLL/bundle/library).
-  FilePath path;
-
-  // The version number of the plugin file (may be OS-specific)
-  std::wstring version;
-
-  // A description of the plugin that we get from its version info.
-  std::wstring desc;
-
-  // A list of all the mime types that this plugin supports.
-  std::vector<WebPluginMimeType> mime_types;
-};
-
-
 // Describes the new location for a plugin window.
 struct WebPluginGeometry {
-  gfx::NativeView window;
+  // On Windows, this is the plugin window in the plugin process.
+  // On X11, this is the browser process's hosting window (the GtkSocket).
+  gfx::PluginWindowHandle window;
   gfx::Rect window_rect;
   // Clip rect (include) and cutouts (excludes), relative to
   // window_rect origin.
   gfx::Rect clip_rect;
   std::vector<gfx::Rect> cutout_rects;
+  bool rects_valid;
   bool visible;
 };
 
@@ -82,16 +52,29 @@ class WebPlugin {
   WebPlugin() { }
   virtual ~WebPlugin() { }
 
+#if defined(OS_LINUX)
+  // Called by the plugin delegate to request a container for a new
+  // windowed plugin.  This handle will later get destroyed with
+  // WillDestroyWindow.
+  virtual gfx::PluginWindowHandle CreatePluginContainer() = 0;
+#endif
+
   // Called by the plugin delegate to let the WebPlugin know if the plugin is
   // windowed (i.e. handle is not NULL) or windowless (handle is NULL).  This
   // tells the WebPlugin to send mouse/keyboard events to the plugin delegate,
   // as well as the information about the HDC for paint operations.
+  virtual void SetWindow(gfx::PluginWindowHandle window) = 0;
+
+  // Called by the plugin delegate to let it know that the window is being
+  // destroyed.
+  virtual void WillDestroyWindow(gfx::PluginWindowHandle window) = 0;
+#if defined(OS_WIN)
   // The pump_messages_event is a event handle which is valid only for
   // windowless plugins and is used in NPP_HandleEvent calls to pump messages
   // if the plugin enters a modal loop.
-  virtual void SetWindow(gfx::NativeView window,
-                         HANDLE pump_messages_event) = 0;
   // Cancels a pending request.
+  virtual void SetWindowlessPumpEvent(HANDLE pump_messages_event) = 0;
+#endif
   virtual void CancelResource(int id) = 0;
   virtual void Invalidate() = 0;
   virtual void InvalidateRect(const gfx::Rect& rect) = 0;
@@ -129,7 +112,7 @@ class WebPlugin {
                                 const char* target, unsigned int len,
                                 const char* buf, bool is_file_data,
                                 bool notify, const char* url,
-                                void* notify_data, bool popups_allowed) = 0;
+                                intptr_t notify_data, bool popups_allowed) = 0;
 
   // Cancels document load.
   virtual void CancelDocumentLoad() = 0;
@@ -137,9 +120,16 @@ class WebPlugin {
   // Initiates a HTTP range request.
   virtual void InitiateHTTPRangeRequest(const char* url,
                                         const char* range_info,
-                                        void* existing_stream,
+                                        intptr_t existing_stream,
                                         bool notify_needed,
-                                        HANDLE notify_data) = 0;
+                                        intptr_t notify_data) = 0;
+
+  // Returns true iff in off the record (Incognito) mode.
+  virtual bool IsOffTheRecord() = 0;
+
+  // Called when the WebPluginResourceClient instance is deleted.
+  virtual void ResourceClientDeleted(
+      WebPluginResourceClient* resource_client) {}
 
  private:
   DISALLOW_EVIL_CONSTRUCTORS(WebPlugin);

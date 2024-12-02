@@ -5,6 +5,7 @@
 #ifndef CHROME_BROWSER_DOM_UI_DOM_UI_THUMBNAIL_SOURCE_H_
 #define CHROME_BROWSER_DOM_UI_DOM_UI_THUMBNAIL_SOURCE_H_
 
+#include <set>
 #include <string>
 
 #include "base/basictypes.h"
@@ -13,6 +14,7 @@
 #include "chrome/browser/history/history.h"
 
 class Profile;
+class ThumbnailStore;
 
 // ThumbnailSource is the gateway between network-level chrome:
 // requests for thumbnails and the history backend that serves these.

@@ -9,41 +9,42 @@
 #include <map>
 #include <vector>
 
-#include "config.h"
-#include "base/compiler_specific.h"
-#include "base/gfx/native_widget_types.h"
-
-MSVC_PUSH_WARNING_LEVEL(0);
-#include "ResourceHandle.h"
-#include "ResourceHandleClient.h"
-#include "ResourceRequest.h"
 #include "Widget.h"
-MSVC_POP_WARNING();
 
 #include "base/basictypes.h"
+#include "base/gfx/native_widget_types.h"
+#include "base/linked_ptr.h"
+#include "webkit/api/public/WebURLLoaderClient.h"
+#include "webkit/api/public/WebURLRequest.h"
 #include "webkit/glue/webframe_impl.h"
 #include "webkit/glue/webplugin.h"
-#include "webkit/glue/webplugin_delegate.h"
+
 
 class WebFrameImpl;
 class WebPluginDelegate;
 class WebPluginImpl;
-class MultipartResponseDelegate;
 
 namespace WebCore {
-  class Event;
-  class Frame;
-  class HTMLPlugInElement;
-  class IntRect;
-  class KeyboardEvent;
-  class KURL;
-  class MouseEvent;
-  class ResourceHandle;
-  class ResourceError;
-  class ResourceResponse;
-  class ScrollView;
-  class String;
-  class Widget;
+class Event;
+class Frame;
+class HTMLPlugInElement;
+class IntRect;
+class KeyboardEvent;
+class KURL;
+class MouseEvent;
+class ResourceError;
+class ResourceResponse;
+class ScrollView;
+class String;
+class Widget;
+}
+
+namespace WebKit {
+class WebURLResponse;
+}
+
+namespace webkit_glue {
+class MultipartResponseDelegate;
 }
 
 // Implements WebCore::Widget functions that WebPluginImpl needs.  This class
@@ -112,15 +113,15 @@ class WebPluginContainer : public WebCore::Widget {
 };
 
 // This is the WebKit side of the plugin implementation that forwards calls,
-// after changing out of WebCore types, to a delegate.  The delegate will
+// after changing out of WebCore types, to a delegate.  The delegate may
 // be in a different process.
 class WebPluginImpl : public WebPlugin,
-                      public WebCore::ResourceHandleClient {
+                      public WebKit::WebURLLoaderClient {
  public:
   // Creates a WebPlugin instance, as long as the delegate's initialization
   // succeeds.  If it fails, the delegate is deleted and NULL is returned.
   // Note that argn and argv are UTF8.
-  static WebCore::Widget* Create(const GURL& url,
+  static PassRefPtr<WebCore::Widget> Create(const GURL& url,
                                  char** argn,
                                  char** argv,
                                  int argc,
@@ -134,7 +135,7 @@ class WebPluginImpl : public WebPlugin,
   virtual NPObject* GetPluginScriptableObject();
 
   // Helper function for sorting post data.
-  static bool SetPostData(WebCore::ResourceRequest* request,
+  static bool SetPostData(WebKit::WebURLRequest* request,
                           const char* buf,
                           uint32 length);
 
@@ -147,7 +148,14 @@ class WebPluginImpl : public WebPlugin,
                 int arg_count, char** arg_names, char** arg_values);
 
   // WebPlugin implementation:
-  void SetWindow(gfx::NativeView window, HANDLE pump_messages_event);
+#if defined(OS_LINUX)
+  gfx::PluginWindowHandle CreatePluginContainer();
+#endif
+  void SetWindow(gfx::PluginWindowHandle window);
+  void WillDestroyWindow(gfx::PluginWindowHandle window);
+#if defined(OS_WIN)
+  void SetWindowlessPumpEvent(HANDLE pump_messages_event) { }
+#endif
 
   // Given a (maybe partial) url, completes using the base url.
   bool CompleteURL(const std::string& url_in, std::string* url_out);
@@ -158,7 +166,7 @@ class WebPluginImpl : public WebPlugin,
   // plugin as is. This avoids having to track the notification arguments
   // in the plugin process.
   bool ExecuteScript(const std::string& url, const std::wstring& script,
-                     bool notify_needed, int notify_data, bool popups_allowed);
+                     bool notify_needed, intptr_t notify_data, bool popups_allowed);
 
   // Given a download request, check if we need to route the output
   // to a frame.  Returns ROUTED if the load is done and routed to
@@ -214,8 +222,7 @@ class WebPluginImpl : public WebPlugin,
   // Called by WebPluginContainer::setFrameRect, which overrides
   // Widget setFrameRect when our window changes size or position.
   // Used to notify the plugin when the size or position changes.
-  void setFrameRect(const WebCore::IntRect& rect,
-                    bool widget_dimensions_changed);
+  void setFrameRect(const WebCore::IntRect& rect);
 
   // Called by WebPluginContainer::paint, which overrides Widget::paint so we
   // can notify the underlying widget to repaint.
@@ -225,11 +232,6 @@ class WebPluginImpl : public WebPlugin,
   // Called by WebPluginContainer::setFocus, which overrides Widget::setFocus.
   // Notifies the plugin about focus changes.
   void setFocus();
-
-  // Called by WebPluginContainer::show/hide, which overrides Widget show/hide.
-  // This allows us to control the visible state of the plugin window.
-  void show();
-  void hide();
 
   // Handle widget events.
   void handleEvent(WebCore::Event* event);
@@ -242,27 +244,28 @@ class WebPluginImpl : public WebPlugin,
   // Destroys the plugin instance.
   // The response_handle_to_ignore parameter if not NULL indicates the
   // resource handle to be left valid during plugin shutdown.
-  void TearDownPluginInstance(
-      WebCore::ResourceHandle* response_handle_to_ignore);
+  void TearDownPluginInstance(WebKit::WebURLLoader* loader_to_ignore);
 
   WebCore::ScrollView* parent() const;
 
-  // ResourceHandleClient implementation.  We implement this interface in the
+  // WebURLLoaderClient implementation.  We implement this interface in the
   // renderer process, and then use the simple WebPluginResourceClient interface
   // to relay the callbacks to the plugin.
-  void willSendRequest(WebCore::ResourceHandle* handle,
-                       WebCore::ResourceRequest& request,
-                       const WebCore::ResourceResponse&);
-
-  void didReceiveResponse(WebCore::ResourceHandle* handle,
-                          const WebCore::ResourceResponse& response);
-  void didReceiveData(WebCore::ResourceHandle* handle, const char *buffer,
-                      int length, int);
-  void didFinishLoading(WebCore::ResourceHandle* handle);
-  void didFail(WebCore::ResourceHandle* handle, const WebCore::ResourceError&);
+  virtual void willSendRequest(WebKit::WebURLLoader* loader,
+                               WebKit::WebURLRequest& request,
+                               const WebKit::WebURLResponse&);
+  virtual void didSendData(WebKit::WebURLLoader* loader,
+                           unsigned long long bytes_sent,
+                           unsigned long long total_bytes_to_be_sent);
+  virtual void didReceiveResponse(WebKit::WebURLLoader* loader,
+                                  const WebKit::WebURLResponse& response);
+  virtual void didReceiveData(WebKit::WebURLLoader* loader, const char *buffer,
+                              int length, long long total_length);
+  virtual void didFinishLoading(WebKit::WebURLLoader* loader);
+  virtual void didFail(WebKit::WebURLLoader* loader, const WebKit::WebURLError&);
 
   // Helper function
-  WebPluginResourceClient* GetClientFromHandle(WebCore::ResourceHandle* handle);
+  WebPluginResourceClient* GetClientFromLoader(WebKit::WebURLLoader* loader);
 
   // Helper function to remove the stored information about a resource
   // request given its index in m_clients.
@@ -270,10 +273,7 @@ class WebPluginImpl : public WebPlugin,
 
   // Helper function to remove the stored information about a resource
   // request given a handle.
-  void RemoveClient(WebCore::ResourceHandle* handle);
-
-  // Returns all the response headers in one string, including the status code.
-  std::wstring GetAllHeaders(const WebCore::ResourceResponse& response);
+  void RemoveClient(WebKit::WebURLLoader* loader);
 
   WebCore::Frame* frame() { return webframe_ ? webframe_->frame() : NULL; }
 
@@ -289,54 +289,66 @@ class WebPluginImpl : public WebPlugin,
                         const char* target, unsigned int len,
                         const char* buf, bool is_file_data,
                         bool notify, const char* url,
-                        void* notify_data, bool popups_allowed);
+                        intptr_t notify_data, bool popups_allowed);
 
   void CancelDocumentLoad();
 
   void InitiateHTTPRangeRequest(const char* url, const char* range_info,
-                                HANDLE existing_stream, bool notify_needed,
-                                HANDLE notify_data);
+                                intptr_t existing_stream, bool notify_needed,
+                                intptr_t notify_data);
+
+  // Ignore in-process plugins mode for this flag.
+  bool IsOffTheRecord() { return false; }
 
   // Handles HTTP multipart responses, i.e. responses received with a HTTP
   // status code of 206.
-  void HandleHttpMultipartResponse(const WebCore::ResourceResponse& response,
+  void HandleHttpMultipartResponse(const WebKit::WebURLResponse& response,
                                    WebPluginResourceClient* client);
 
   void HandleURLRequestInternal(const char *method, bool is_javascript_url,
                                 const char* target, unsigned int len,
                                 const char* buf, bool is_file_data,
                                 bool notify, const char* url,
-                                void* notify_data, bool popups_allowed,
+                                intptr_t notify_data, bool popups_allowed,
                                 bool use_plugin_src_as_referrer);
 
   // Tears down the existing plugin instance and creates a new plugin instance
-  // to handle the response identified by the response_handle parameter.
-  bool ReinitializePluginForResponse(WebCore::ResourceHandle* response_handle);
+  // to handle the response identified by the loader parameter.
+  bool ReinitializePluginForResponse(WebKit::WebURLLoader* loader);
+
+  // Notifies us that the visibility of the plugin has changed.
+  void UpdateVisibility();
 
   // Helper functions to convert an array of names/values to a vector.
   static void ArrayToVector(int total_values, char** values,
                             std::vector<std::string>* value_vector);
 
+  // Delayed task for downloading the plugin source URL.
+  void OnDownloadPluginSrcUrl();
+
   struct ClientInfo {
     int id;
     WebPluginResourceClient* client;
-    WebCore::ResourceRequest request;
-    RefPtr<WebCore::ResourceHandle> handle;
+    WebKit::WebURLRequest request;
+    linked_ptr<WebKit::WebURLLoader> loader;
   };
 
   std::vector<ClientInfo> clients_;
 
   bool windowless_;
-  gfx::NativeView window_;
+  gfx::PluginWindowHandle window_;
   WebCore::HTMLPlugInElement* element_;
   WebFrameImpl* webframe_;
 
   WebPluginDelegate* delegate_;
-  bool visible_;
 
+  // Don't use RefPtr here since doing so extends the lifetime of a plugin
+  // beyond the frame which causes crashes and videos playing after navigating
+  // away etc.
   WebPluginContainer* widget_;
 
-  typedef std::map<WebPluginResourceClient*, MultipartResponseDelegate*>
+  typedef std::map<WebPluginResourceClient*,
+                   webkit_glue::MultipartResponseDelegate*>
       MultiPartResponseHandlerMap;
   // Tracks HTTP multipart response handlers instantiated for
   // a WebPluginResourceClient instance.
@@ -359,6 +371,8 @@ class WebPluginImpl : public WebPlugin,
 
   // Holds the list of argument values passed to the plugin.
   std::vector<std::string> arg_values_;
+
+  ScopedRunnableMethodFactory<WebPluginImpl> method_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(WebPluginImpl);
 };

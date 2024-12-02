@@ -6,7 +6,9 @@
 #define BASE_PROCESS_H_
 
 #include "base/basictypes.h"
+#include "build/build_config.h"
 
+#include <sys/types.h>
 #ifdef OS_WIN
 #include <windows.h>
 #endif
@@ -15,11 +17,14 @@ namespace base {
 
 // ProcessHandle is a platform specific type which represents the underlying OS
 // handle to a process.
+// ProcessId is a number which identifies the process in the OS.
 #if defined(OS_WIN)
 typedef HANDLE ProcessHandle;
+typedef DWORD ProcessId;
 #elif defined(OS_POSIX)
 // On POSIX, our ProcessHandle will just be the PID.
-typedef int ProcessHandle;
+typedef pid_t ProcessHandle;
+typedef pid_t ProcessId;
 #endif
 
 class Process {
@@ -37,7 +42,7 @@ class Process {
   void set_handle(ProcessHandle handle) { process_ = handle; }
 
   // Get the PID for this process.
-  int32 pid() const;
+  ProcessId pid() const;
 
   // Is the this process the current process.
   bool is_current() const;

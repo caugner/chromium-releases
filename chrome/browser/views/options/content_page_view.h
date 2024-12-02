@@ -1,18 +1,18 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_BROWSER_VIEWS_OPTIONS_CONTENT_PAGE_VIEW_H__
-#define CHROME_BROWSER_VIEWS_OPTIONS_CONTENT_PAGE_VIEW_H__
+#ifndef CHROME_BROWSER_VIEWS_OPTIONS_CONTENT_PAGE_VIEW_H_
+#define CHROME_BROWSER_VIEWS_OPTIONS_CONTENT_PAGE_VIEW_H_
 
 #include "chrome/browser/views/options/options_page_view.h"
-#include "chrome/browser/shell_dialogs.h"
 #include "chrome/common/pref_member.h"
-#include "chrome/views/controls/button/native_button.h"
-#include "chrome/views/view.h"
+#include "views/controls/button/button.h"
+#include "views/view.h"
 
 namespace views {
-class CheckBox;
+class Checkbox;
+class NativeButton;
 class RadioButton;
 }
 class FileDisplayArea;
@@ -23,20 +23,13 @@ class PrefService;
 // ContentPageView
 
 class ContentPageView : public OptionsPageView,
-                        public views::NativeButton::Listener,
-                        public SelectFileDialog::Listener {
+                        public views::ButtonListener {
  public:
   explicit ContentPageView(Profile* profile);
   virtual ~ContentPageView();
 
-  // views::NativeButton::Listener implementation:
-  virtual void ButtonPressed(views::NativeButton* sender);
-
-  // SelectFileDialog::Listener implementation:
-  virtual void FileSelected(const std::wstring& path, void* params);
-
-  // OptionsPageView implementation:
-  virtual bool CanClose() const;
+  // views::ButtonListener implementation:
+  virtual void ButtonPressed(views::Button* sender);
 
  protected:
   // OptionsPageView implementation:
@@ -48,49 +41,37 @@ class ContentPageView : public OptionsPageView,
 
  private:
   // Init all the dialog controls.
-  void InitDownloadLocation();
   void InitPasswordSavingGroup();
   void InitFormAutofillGroup();
-  void InitFontsLangGroup();
-
-  // Updates the directory displayed in the default download location view with
-  // the current value of the pref.
-  void UpdateDownloadDirectoryDisplay();
-
-  // Controls for the Download Location group.
-  OptionsGroupView* download_location_group_;
-  FileDisplayArea* download_default_download_location_display_;
-  views::NativeButton* download_browse_button_;
-  views::CheckBox* download_ask_for_save_location_checkbox_;
-  scoped_refptr<SelectFileDialog> select_file_dialog_;
+  void InitBrowsingDataGroup();
+  void InitThemesGroup();
 
   // Controls for the Password Saving group
   views::NativeButton* passwords_exceptions_button_;
   OptionsGroupView* passwords_group_;
   views::RadioButton* passwords_asktosave_radio_;
   views::RadioButton* passwords_neversave_radio_;
-  views::NativeButton* passwords_show_passwords_button_;
 
   // Controls for the Form Autofill group
   OptionsGroupView* form_autofill_group_;
-  views::CheckBox* form_autofill_checkbox_;
+  views::RadioButton* form_autofill_asktosave_radio_;
+  views::RadioButton* form_autofill_neversave_radio_;
 
-  // Controls for the Popup Blocking group.
-  OptionsGroupView* popups_group_;
-  views::RadioButton* popups_show_minimized_radio_;
-  views::RadioButton* popups_block_all_radio_;
+  // Controls for the Themes group
+  OptionsGroupView* themes_group_;
+  views::NativeButton* themes_reset_button_;
+  views::NativeButton* themes_gallery_button_;
 
-  // Controls for the Fonts and Languages group.
-  OptionsGroupView* fonts_lang_group_;
-  views::Label* fonts_and_languages_label_;
-  views::NativeButton* change_content_fonts_button_;
+  // Controls for the browsing data group.
+  OptionsGroupView* browsing_data_group_;
+  views::Label* browsing_data_label_;
+  views::NativeButton* import_button_;
+  views::NativeButton* clear_data_button_;
 
-  StringPrefMember default_download_location_;
-  BooleanPrefMember ask_for_save_location_;
   BooleanPrefMember ask_to_save_passwords_;
-  BooleanPrefMember form_autofill_;
+  BooleanPrefMember ask_to_save_form_autofill_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(ContentPageView);
+  DISALLOW_COPY_AND_ASSIGN(ContentPageView);
 };
 
-#endif  // #ifndef CHROME_BROWSER_VIEWS_OPTIONS_CONTENT_PAGE_VIEW_H__
+#endif  // CHROME_BROWSER_VIEWS_OPTIONS_CONTENT_PAGE_VIEW_H_

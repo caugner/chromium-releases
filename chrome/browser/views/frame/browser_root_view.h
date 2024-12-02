@@ -5,10 +5,10 @@
 #ifndef CHROME_BROWSER_VIEWS_FRAME_BROWSER_ROOT_VIEW_H
 #define CHROME_BROWSER_VIEWS_FRAME_BROWSER_ROOT_VIEW_H
 
-#include "chrome/views/widget/root_view.h"
+#include "views/widget/root_view.h"
 
 class OSExchangeData;
-class TabStrip;
+class TabStripWrapper;
 
 // RootView implementation used by BrowserFrame. This forwards drop events to
 // the TabStrip. Visually the tabstrip extends to the top of the frame, but in
@@ -17,7 +17,13 @@ class TabStrip;
 // TabStrip.
 class BrowserRootView : public views::RootView {
  public:
-  explicit BrowserRootView(views::Widget* widget);
+  // You must call set_tabstrip before this class will accept drops.
+  BrowserRootView(views::Widget* widget);
+
+  // Sets the tabstrip associated with this window. This is used to forward
+  // drag and drop operations to, so no drops will be accepted if there is no
+  // tabstrip set.
+  void set_tabstrip(TabStripWrapper* tabstrip) { tabstrip_ = tabstrip; }
 
   virtual bool CanDrop(const OSExchangeData& data);
   virtual void OnDragEntered(const views::DropTargetEvent& event);
@@ -35,7 +41,7 @@ class BrowserRootView : public views::RootView {
       const views::DropTargetEvent& event);
 
   // The TabStrip.
-  TabStrip* tabstrip_;
+  TabStripWrapper* tabstrip_;
 
   // Is a drop allowed? This is set by CanDrop.
   bool can_drop_;

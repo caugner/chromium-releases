@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_BROWSER_URL_FIXER_UPPER_H__
-#define CHROME_BROWSER_URL_FIXER_UPPER_H__
+#ifndef CHROME_BROWSER_NET_URL_FIXER_UPPER_H_
+#define CHROME_BROWSER_NET_URL_FIXER_UPPER_H_
 
 #include <string>
 
@@ -25,7 +25,6 @@ namespace URLFixerUpper {
   std::string SegmentURL(const std::string& text, url_parse::Parsed* parts);
   // Deprecated temporary compatibility function.
   std::wstring SegmentURL(const std::wstring& text, url_parse::Parsed* parts);
-
 
   // Converts |text| to a fixed-up URL and returns it. Attempts to make
   // some "smart" adjustments to obviously-invalid input where possible.
@@ -64,4 +63,4 @@ namespace URLFixerUpper {
 
 };
 
-#endif  // #ifndef CHROME_BROWSER_URL_FIXER_UPPER_H__
+#endif  // #ifndef CHROME_BROWSER_NET_URL_FIXER_UPPER_H_

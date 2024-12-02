@@ -8,14 +8,13 @@
 #define CHROME_COMMON_RESOURCE_DISPATCHER_H__
 
 #include <deque>
-#include <queue>
 #include <string>
 
 #include "base/hash_tables.h"
 #include "base/shared_memory.h"
 #include "base/task.h"
 #include "chrome/common/filter_policy.h"
-#include "chrome/common/ipc_channel.h"
+#include "ipc/ipc_channel.h"
 #include "webkit/glue/resource_loader_bridge.h"
 
 struct ResourceResponseHead;
@@ -32,12 +31,12 @@ class ResourceDispatcher {
   // handled, else false.
   bool OnMessageReceived(const IPC::Message& message);
 
-  // creates a ResourceLoaderBridge for this type of dispatcher, this is so
+  // Creates a ResourceLoaderBridge for this type of dispatcher, this is so
   // this can be tested regardless of the ResourceLoaderBridge::Create
   // implementation.
   webkit_glue::ResourceLoaderBridge* CreateBridge(const std::string& method,
     const GURL& url,
-    const GURL& policy_url,
+    const GURL& first_party_for_cookies,
     const GURL& referrer,
     const std::string& frame_origin,
     const std::string& main_frame_origin,
@@ -46,7 +45,8 @@ class ResourceDispatcher {
     int origin_pid,
     ResourceType::Type resource_type,
     uint32 request_context /* used for plugin->browser requests */,
-    int route_id);
+    int app_cache_context_id,
+    int routing_id);
 
   // Adds a request from the pending_requests_ list, returning the new
   // requests' ID
@@ -56,6 +56,9 @@ class ResourceDispatcher {
   // Removes a request from the pending_requests_ list, returning true if the
   // request was found and removed.
   bool RemovePendingRequest(int request_id);
+
+  // Cancels a request in the pending_requests_ list.
+  void CancelPendingRequest(int routing_id, int request_id);
 
   IPC::Message::Sender* message_sender() const {
     return message_sender_;
@@ -75,7 +78,8 @@ class ResourceDispatcher {
         : peer(peer),
           resource_type(resource_type),
           filter_policy(FilterPolicy::DONT_FILTER),
-          is_deferred(false) {
+          is_deferred(false),
+          is_cancelled(false) {
     }
     ~PendingRequestInfo() { }
     webkit_glue::ResourceLoaderBridge::Peer* peer;
@@ -83,25 +87,31 @@ class ResourceDispatcher {
     FilterPolicy::Type filter_policy;
     MessageQueue deferred_message_queue;
     bool is_deferred;
+    bool is_cancelled;
   };
   typedef base::hash_map<int, PendingRequestInfo> PendingRequestList;
 
   // Message response handlers, called by the message handler for this process.
-  void OnUploadProgress(const IPC::Message& message,
-                        int request_id,
-                        int64 position,
-                        int64 size);
-  void OnDownloadProgress(const IPC::Message& message,
-                          int request_id, int64 position, int64 size);
+  void OnUploadProgress(
+      const IPC::Message& message,
+      int request_id,
+      int64 position,
+      int64 size);
   void OnReceivedResponse(int request_id, const ResourceResponseHead&);
-  void OnReceivedRedirect(int request_id, const GURL& new_url);
-  void OnReceivedData(const IPC::Message& message,
-                      int request_id,
-                      base::SharedMemoryHandle data,
-                      int data_len);
-  void OnRequestComplete(int request_id,
-                         const URLRequestStatus& status,
-                         const std::string& security_info);
+  void OnReceivedRedirect(
+      const IPC::Message& message,
+      int request_id,
+      const GURL& new_url,
+      const webkit_glue::ResourceLoaderBridge::ResponseInfo& info);
+  void OnReceivedData(
+      const IPC::Message& message,
+      int request_id,
+      base::SharedMemoryHandle data,
+      int data_len);
+  void OnRequestComplete(
+      int request_id,
+      const URLRequestStatus& status,
+      const std::string& security_info);
 
   // Dispatch the message to one of the message response handlers.
   void DispatchMessage(const IPC::Message& message);
@@ -112,6 +122,12 @@ class ResourceDispatcher {
 
   // Returns true if the message passed in is a resource related message.
   static bool IsResourceDispatcherMessage(const IPC::Message& message);
+
+  // ViewHostMsg_Resource_DataReceived is not POD, it has a shared memory
+  // handle in it that we should cleanup it up nicely. This method accepts any
+  // message and determine whether the message is
+  // ViewHostMsg_Resource_DataReceived and clean up the shared memory handle.
+  void ReleaseResourcesInDataMessage(const IPC::Message& message);
 
   IPC::Message::Sender* message_sender_;
 

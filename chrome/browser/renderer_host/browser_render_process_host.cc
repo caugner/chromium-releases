@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,8 +10,16 @@
 #include "build/build_config.h"
 
 #include <algorithm>
+#include <limits>
+#include <vector>
 
+#if defined(OS_POSIX)
+#include <utility>  // for pair<>
+#endif
+
+#include "app/app_switches.h"
 #include "base/command_line.h"
+#include "base/field_trial.h"
 #include "base/linked_ptr.h"
 #include "base/logging.h"
 #include "base/path_service.h"
@@ -23,55 +31,53 @@
 #include "base/string_util.h"
 #include "base/thread.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/child_process_security_policy.h"
+#include "chrome/browser/extensions/extension_message_service.h"
+#include "chrome/browser/extensions/extensions_service.h"
 #include "chrome/browser/extensions/user_script_master.h"
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/plugin_service.h"
 #include "chrome/browser/profile.h"
+#include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/renderer_host/render_widget_helper.h"
-#include "chrome/browser/renderer_host/renderer_security_policy.h"
+#include "chrome/browser/renderer_host/render_widget_host.h"
 #include "chrome/browser/renderer_host/resource_message_filter.h"
 #include "chrome/browser/renderer_host/web_cache_manager.h"
+#include "chrome/browser/spellchecker.h"
 #include "chrome/browser/visitedlink_master.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/child_process_info.h"
+#include "chrome/common/chrome_descriptors.h"
 #include "chrome/common/logging_chrome.h"
 #include "chrome/common/notification_service.h"
-#include "chrome/common/pref_names.h"
-#include "chrome/common/pref_service.h"
 #include "chrome/common/process_watcher.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/result_codes.h"
 #include "chrome/renderer/render_process.h"
+#include "chrome/installer/util/google_update_settings.h"
 #include "grit/generated_resources.h"
+#include "ipc/ipc_switches.h"
+
+#if defined(OS_WIN)
+#include "app/win_util.h"
+#include "chrome/browser/sandbox_policy.h"
+#elif defined(OS_LINUX)
+#include "base/linux_util.h"
+#include "chrome/browser/zygote_host_linux.h"
+#include "chrome/browser/renderer_host/render_crash_handler_host_linux.h"
+#include "chrome/browser/renderer_host/render_sandbox_host_linux.h"
+#endif
 
 using WebKit::WebCache;
 
-#if defined(OS_WIN)
-
-// TODO(port): see comment by the only usage of RenderViewHost in this file.
-#include "chrome/browser/renderer_host/render_view_host.h"
-
-#include "chrome/browser/spellchecker.h"
-
-// Once the above TODO is finished, then this block is all Windows-specific
-// files.
-#include "base/win_util.h"
-#include "chrome/common/win_util.h"
-#include "chrome/browser/sandbox_policy.h"
-#include "sandbox/src/sandbox.h"
-#elif defined(OS_POSIX)
-// TODO(port): Remove temporary scaffolding after porting the above headers.
-#include "chrome/common/temp_scaffolding_stubs.h"
-#endif
-
-#include "skia/include/SkBitmap.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 
 
 // This class creates the IO thread for the renderer when running in
 // single-process mode.  It's not used in multi-process mode.
 class RendererMainThread : public base::Thread {
  public:
-  explicit RendererMainThread(const std::wstring& channel_id)
+  explicit RendererMainThread(const std::string& channel_id)
       : base::Thread("Chrome_InProcRendererThread"),
         channel_id_(channel_id),
         render_process_(NULL) {
@@ -105,10 +111,75 @@ class RendererMainThread : public base::Thread {
   }
 
  private:
-  std::wstring channel_id_;
+  std::string channel_id_;
   // Deleted in CleanUp() on the renderer thread, so don't use a smart pointer.
   RenderProcess* render_process_;
 };
+
+
+#if defined(OS_LINUX)
+// This is defined in chrome/browser/google_update_settings_linux.cc, it's the
+// static string containing the user's unique GUID. We send this in the crash
+// report.
+namespace google_update {
+extern std::string linux_guid;
+}
+#endif
+
+// Size of the buffer after which individual link updates deemed not warranted
+// and the overall update should be used instead.
+static const unsigned kVisitedLinkBufferThreshold = 50;
+
+// This class manages buffering and sending visited link hashes (fingerprints)
+// to renderer based on widget visibility.
+// As opposed to the VisitedLinkEventListener in profile.cc, which coalesces to
+// reduce the rate of messages being send to render processes, this class
+// ensures that the updates occur only when explicitly requested. This is
+// used by BrowserRenderProcessHost to only send Add/Reset link events to the
+// renderers when their tabs are visible.
+class VisitedLinkUpdater {
+ public:
+  VisitedLinkUpdater() : threshold_reached_(false) {}
+
+  void Buffer(const VisitedLinkCommon::Fingerprints& links) {
+    if (threshold_reached_)
+      return;
+
+    if (pending_.size() + links.size() > kVisitedLinkBufferThreshold) {
+      threshold_reached_ = true;
+      // Once the threshold is reached, there's no need to store pending visited
+      // links.
+      pending_.clear();
+      return;
+    }
+
+    pending_.insert(pending_.end(), links.begin(), links.end());
+  }
+
+  void Clear() {
+    pending_.clear();
+  }
+
+  void Update(IPC::Channel::Sender* sender) {
+    if (threshold_reached_) {
+      sender->Send(new ViewMsg_VisitedLink_Reset());
+      threshold_reached_ = false;
+      return;
+    }
+
+    if (pending_.size() == 0)
+      return;
+
+    sender->Send(new ViewMsg_VisitedLink_Add(pending_));
+
+    pending_.clear();
+  }
+
+ private:
+  bool threshold_reached_;
+  VisitedLinkCommon::Fingerprints pending_;
+};
+
 
 // Used for a View_ID where the renderer has not been attached yet
 const int32 kInvalidViewID = -1;
@@ -125,17 +196,12 @@ BrowserRenderProcessHost::BrowserRenderProcessHost(Profile* profile)
       backgrounded_(true),
       ALLOW_THIS_IN_INITIALIZER_LIST(cached_dibs_cleaner_(
             base::TimeDelta::FromSeconds(5),
-            this, &BrowserRenderProcessHost::ClearTransportDIBCache)) {
+            this, &BrowserRenderProcessHost::ClearTransportDIBCache)),
+      zygote_child_(false) {
   widget_helper_ = new RenderWidgetHelper();
 
-  PrefService* prefs = profile->GetPrefs();
-  prefs->AddPrefObserver(prefs::kBlockPopups, this);
-  widget_helper_->set_block_popups(
-      profile->GetPrefs()->GetBoolean(prefs::kBlockPopups));
-
-  NotificationService::current()->AddObserver(this,
-      NotificationType::USER_SCRIPTS_LOADED,
-      NotificationService::AllSources());
+  registrar_.Add(this, NotificationType::USER_SCRIPTS_UPDATED,
+                 NotificationService::AllSources());
 
   if (run_renderer_in_process()) {
     // We need a "renderer pid", but we don't have one when there's no renderer
@@ -147,6 +213,8 @@ BrowserRenderProcessHost::BrowserRenderProcessHost(Profile* profile)
     SetProcessID(next_pid);
   }
 
+  visited_link_updater_.reset(new VisitedLinkUpdater());
+
   // Note: When we create the BrowserRenderProcessHost, it's technically
   //       backgrounded, because it has no visible listeners.  But the process
   //       doesn't actually exist yet, so we'll Background it later, after
@@ -156,7 +224,7 @@ BrowserRenderProcessHost::BrowserRenderProcessHost(Profile* profile)
 BrowserRenderProcessHost::~BrowserRenderProcessHost() {
   if (pid() >= 0) {
     WebCacheManager::GetInstance()->Remove(pid());
-    RendererSecurityPolicy::GetInstance()->Remove(pid());
+    ChildProcessSecurityPolicy::GetInstance()->Remove(pid());
   }
 
   // We may have some unsent messages at this point, but that's OK.
@@ -167,13 +235,14 @@ BrowserRenderProcessHost::~BrowserRenderProcessHost() {
     audio_renderer_host_->Destroy();
 
   if (process_.handle() && !run_renderer_in_process()) {
-    ProcessWatcher::EnsureProcessTerminated(process_.handle());
+    if (zygote_child_) {
+#if defined(OS_LINUX)
+      Singleton<ZygoteHost>()->EnsureProcessTerminated(process_.handle());
+#endif
+    } else {
+      ProcessWatcher::EnsureProcessTerminated(process_.handle());
+    }
   }
-
-  profile()->GetPrefs()->RemovePrefObserver(prefs::kBlockPopups, this);
-
-  NotificationService::current()->RemoveObserver(this,
-      NotificationType::USER_SCRIPTS_LOADED, NotificationService::AllSources());
 
   ClearTransportDIBCache();
 }
@@ -203,7 +272,7 @@ bool BrowserRenderProcessHost::Init() {
   const CommandLine& browser_command_line = *CommandLine::ForCurrentProcess();
 
   // setup IPC channel
-  const std::wstring channel_id =
+  const std::string channel_id =
       ChildProcessInfo::GenerateRandomChannelID(this);
   channel_.reset(
       new IPC::SyncChannel(channel_id, IPC::Channel::MODE_SERVER, this,
@@ -218,7 +287,7 @@ bool BrowserRenderProcessHost::Init() {
   // Build command line for renderer, we have to quote the executable name to
   // deal with spaces.
   std::wstring renderer_path =
-      browser_command_line.GetSwitchValue(switches::kRendererPath);
+      browser_command_line.GetSwitchValue(switches::kBrowserSubprocessPath);
   if (renderer_path.empty()) {
     if (!GetRendererPath(&renderer_path)) {
       // Need to reset the channel we created above or others might think the
@@ -249,6 +318,7 @@ bool BrowserRenderProcessHost::Init() {
     switches::kJavaScriptFlags,
     switches::kRecordMode,
     switches::kPlaybackMode,
+    switches::kNoJsRandomness,
     switches::kDisableBreakpad,
     switches::kFullMemoryCrashReport,
     switches::kEnableLogging,
@@ -262,10 +332,12 @@ bool BrowserRenderProcessHost::Init() {
     switches::kMessageLoopHistogrammer,
     switches::kEnableDCHECK,
     switches::kSilentDumpOnDCHECK,
-    switches::kDisablePopupBlocking,
     switches::kUseLowFragHeapCrt,
-    switches::kEnableVideo,
-    switches::kEnableWebWorkers,
+    switches::kEnableStatsTable,
+    switches::kAutoSpellCorrect,
+    switches::kDisableAudio,
+    switches::kSimpleDataSource,
+    switches::kEnableBenchmarking,
   };
 
   for (size_t i = 0; i < arraysize(switch_names); ++i) {
@@ -275,12 +347,42 @@ bool BrowserRenderProcessHost::Init() {
     }
   }
 
+  // Tell the renderer to enable extensions if there are any extensions loaded.
+  //
+  // NOTE: This is subtly different than just passing along whether
+  // --enable-extenisons is present in the browser process. For example, there
+  // is also an extensions.enabled preference, and there may be various special
+  // cases about whether to allow extensions to load.
+  //
+  // This introduces a race condition where the first renderer never gets
+  // extensions enabled, so we also set the flag if extensions_enabled(). This
+  // isn't perfect though, because of the special cases above.
+  //
+  // TODO(aa): We need to get rid of the need to pass this flag at all. It is
+  // only used in one place in the renderer.
+  if (profile()->GetExtensionsService()) {
+    if (profile()->GetExtensionsService()->extensions()->size() > 0 ||
+        profile()->GetExtensionsService()->extensions_enabled())
+      cmd_line.AppendSwitch(switches::kEnableExtensions);
+  }
+
   // Pass on the browser locale.
-  const std::wstring locale = g_browser_process->GetApplicationLocale();
-  cmd_line.AppendSwitchWithValue(switches::kLang, locale);
+  const std::string locale = g_browser_process->GetApplicationLocale();
+  cmd_line.AppendSwitchWithValue(switches::kLang, ASCIIToWide(locale));
+
+  // If we run FieldTrials, we want to pass to their state to the renderer so
+  // that it can act in accordance with each state, or record histograms
+  // relating to the FieldTrial states.
+  std::string field_trial_states;
+  FieldTrialList::StatesToString(&field_trial_states);
+  if (!field_trial_states.empty())
+    cmd_line.AppendSwitchWithValue(switches::kForceFieldTestNameAndValue,
+        ASCIIToWide(field_trial_states));
 
 #if defined(OS_POSIX)
-  if (browser_command_line.HasSwitch(switches::kRendererCmdPrefix)) {
+  const bool has_cmd_prefix =
+      browser_command_line.HasSwitch(switches::kRendererCmdPrefix);
+  if (has_cmd_prefix) {
     // launch the renderer child with some prefix (usually "gdb --args")
     const std::wstring prefix =
         browser_command_line.GetSwitchValue(switches::kRendererCmdPrefix);
@@ -288,11 +390,18 @@ bool BrowserRenderProcessHost::Init() {
   }
 #endif  // OS_POSIX
 
+#if defined(OS_LINUX)
+  if (GoogleUpdateSettings::GetCollectStatsConsent())
+    cmd_line.AppendSwitchWithValue(switches::kRendererCrashDump,
+                                   ASCIIToWide(google_update::linux_guid +
+                                               "," + base::GetLinuxDistro()));
+#endif
+
   cmd_line.AppendSwitchWithValue(switches::kProcessType,
                                  switches::kRendererProcess);
 
   cmd_line.AppendSwitchWithValue(switches::kProcessChannelID,
-                                 channel_id);
+                                 ASCIIToWide(channel_id));
 
   const std::wstring& profile_path =
       browser_command_line.GetSwitchValue(switches::kUserDataDir);
@@ -320,14 +429,45 @@ bool BrowserRenderProcessHost::Init() {
     base::ProcessHandle process = 0;
 #if defined(OS_WIN)
     process = sandbox::StartProcess(&cmd_line);
-#else
-    base::file_handle_mapping_vector fds_to_map;
-    int src_fd = -1, dest_fd = -1;
-    channel_->GetClientFileDescriptorMapping(&src_fd, &dest_fd);
-    if (src_fd > -1)
-      fds_to_map.push_back(std::pair<int, int>(src_fd, dest_fd));
-    base::LaunchApp(cmd_line.argv(), fds_to_map, false, &process);
-#endif
+#elif defined(OS_POSIX)
+#if defined(OS_LINUX)
+    if (!has_cmd_prefix) {
+      base::GlobalDescriptors::Mapping mapping;
+      const int ipcfd = channel_->GetClientFileDescriptor();
+      mapping.push_back(std::pair<uint32_t, int>(kPrimaryIPCChannel, ipcfd));
+      const int crash_signal_fd =
+          Singleton<RenderCrashHandlerHostLinux>()->GetDeathSignalSocket();
+      if (crash_signal_fd >= 0) {
+        mapping.push_back(std::pair<uint32_t, int>(kCrashDumpSignal,
+                                                   crash_signal_fd));
+      }
+      process = Singleton<ZygoteHost>()->ForkRenderer(cmd_line.argv(), mapping);
+      zygote_child_ = true;
+    } else {
+#endif  // defined(OS_LINUX)
+      // NOTE: This code is duplicated with plugin_process_host.cc, but
+      // there's not a good place to de-duplicate it.
+      base::file_handle_mapping_vector fds_to_map;
+      const int ipcfd = channel_->GetClientFileDescriptor();
+      fds_to_map.push_back(std::make_pair(ipcfd, kPrimaryIPCChannel + 3));
+#if defined(OS_LINUX)
+      const int crash_signal_fd =
+          Singleton<RenderCrashHandlerHostLinux>()->GetDeathSignalSocket();
+      if (crash_signal_fd >= 0) {
+        fds_to_map.push_back(std::make_pair(crash_signal_fd,
+                                            kCrashDumpSignal + 3));
+      }
+      const int sandbox_fd =
+          Singleton<RenderSandboxHostLinux>()->GetRendererSocket();
+      fds_to_map.push_back(std::make_pair(sandbox_fd, kSandboxIPCChannel + 3));
+#endif  // defined(OS_LINUX)
+      base::LaunchApp(cmd_line.argv(), fds_to_map, false, &process);
+      zygote_child_ = false;
+#if defined(OS_LINUX)
+    }
+#endif  // defined(OS_LINUX)
+#endif  // defined(OS_WIN)
+
     if (!process) {
       channel_.reset();
       return false;
@@ -338,13 +478,14 @@ bool BrowserRenderProcessHost::Init() {
 
   resource_message_filter->Init(pid());
   WebCacheManager::GetInstance()->Add(pid());
-  RendererSecurityPolicy::GetInstance()->Add(pid());
+  ChildProcessSecurityPolicy::GetInstance()->Add(pid());
 
-  // Now that the process is created, set it's backgrounding accordingly.
+  // Now that the process is created, set its backgrounding accordingly.
   SetBackgrounded(backgrounded_);
 
   InitVisitedLinks();
   InitUserScripts();
+  InitExtensions();
 
   if (max_page_id_ != -1)
     channel_->Send(new ViewMsg_SetNextPageID(max_page_id_ + 1));
@@ -361,10 +502,8 @@ void BrowserRenderProcessHost::CancelResourceRequests(int render_widget_id) {
 }
 
 void BrowserRenderProcessHost::CrossSiteClosePageACK(
-    int new_render_process_host_id,
-    int new_request_id) {
-  widget_helper_->CrossSiteClosePageACK(new_render_process_host_id,
-                                        new_request_id);
+    const ViewMsg_ClosePage_Params& params) {
+  widget_helper_->CrossSiteClosePageACK(params);
 }
 
 bool BrowserRenderProcessHost::WaitForPaintMsg(int render_widget_id,
@@ -379,8 +518,9 @@ void BrowserRenderProcessHost::ReceivedBadMessage(uint16 msg_type) {
 
 void BrowserRenderProcessHost::WidgetRestored() {
   // Verify we were properly backgrounded.
-  DCHECK(backgrounded_ == (visible_widgets_ == 0));
+  DCHECK_EQ(backgrounded_, (visible_widgets_ == 0));
   visible_widgets_++;
+  visited_link_updater_->Update(this);
   SetBackgrounded(false);
 }
 
@@ -389,9 +529,9 @@ void BrowserRenderProcessHost::WidgetHidden() {
   if (backgrounded_)
     return;
 
-  DCHECK(backgrounded_ == (visible_widgets_ == 0));
+  DCHECK_EQ(backgrounded_, (visible_widgets_ == 0));
   visible_widgets_--;
-  DCHECK(visible_widgets_ >= 0);
+  DCHECK_GE(visible_widgets_, 0);
   if (visible_widgets_ == 0) {
     DCHECK(!backgrounded_);
     SetBackgrounded(true);
@@ -399,17 +539,25 @@ void BrowserRenderProcessHost::WidgetHidden() {
 }
 
 void BrowserRenderProcessHost::AddWord(const std::wstring& word) {
-#if !defined(OS_WIN)
-  // TODO(port): reimplement when we get the spell checker up and running on
-  // other platforms.
-  NOTIMPLEMENTED();
-#else
   base::Thread* io_thread = g_browser_process->io_thread();
   if (profile()->GetSpellChecker()) {
     io_thread->message_loop()->PostTask(FROM_HERE, NewRunnableMethod(
         profile()->GetSpellChecker(), &SpellChecker::AddWord, word));
   }
-#endif // !defined(OS_WIN)
+}
+
+void BrowserRenderProcessHost::AddVisitedLinks(
+    const VisitedLinkCommon::Fingerprints& links) {
+  visited_link_updater_->Buffer(links);
+  if (visible_widgets_ == 0)
+    return;
+
+  visited_link_updater_->Update(this);
+}
+
+void BrowserRenderProcessHost::ResetVisitedLinks() {
+  visited_link_updater_->Clear();
+  Send(new ViewMsg_VisitedLink_Reset());
 }
 
 base::ProcessHandle BrowserRenderProcessHost::GetRendererProcessHandle() {
@@ -430,7 +578,7 @@ void BrowserRenderProcessHost::InitVisitedLinks() {
   DCHECK(r);
 
   if (base::SharedMemory::IsHandleValid(handle_for_process)) {
-    channel_->Send(new ViewMsg_VisitedLink_NewTable(handle_for_process));
+    Send(new ViewMsg_VisitedLink_NewTable(handle_for_process));
   }
 }
 
@@ -447,14 +595,25 @@ void BrowserRenderProcessHost::InitUserScripts() {
   SendUserScriptsUpdate(user_script_master->GetSharedMemory());
 }
 
+void BrowserRenderProcessHost::InitExtensions() {
+  // TODO(aa): Should only bother sending these function names if this is an
+  // extension process.
+  std::vector<std::string> function_names;
+  ExtensionFunctionDispatcher::GetAllFunctionNames(&function_names);
+  Send(new ViewMsg_Extension_SetFunctionNames(function_names));
+}
+
 void BrowserRenderProcessHost::SendUserScriptsUpdate(
     base::SharedMemory *shared_memory) {
   base::SharedMemoryHandle handle_for_process;
-  bool r = shared_memory->ShareToProcess(GetRendererProcessHandle(),
-                                         &handle_for_process);
-  DCHECK(r);
+  if (!shared_memory->ShareToProcess(GetRendererProcessHandle(),
+                                     &handle_for_process)) {
+    // This can legitimately fail if the renderer asserts at startup.
+    return;
+  }
+
   if (base::SharedMemory::IsHandleValid(handle_for_process)) {
-    channel_->Send(new ViewMsg_UserScripts_NewScripts(handle_for_process));
+    Send(new ViewMsg_UserScripts_UpdatedScripts(handle_for_process));
   }
 }
 
@@ -464,8 +623,16 @@ bool BrowserRenderProcessHost::FastShutdownIfPossible() {
   if (BrowserRenderProcessHost::run_renderer_in_process())
     return false;  // Since process mode can't do fast shutdown.
 
-#if defined(OS_WIN)
-  // Test if there's an unload listener
+  // Test if there's an unload listener.
+  // NOTE: It's possible that an onunload listener may be installed
+  // while we're shutting down, so there's a small race here.  Given that
+  // the window is small, it's unlikely that the web page has much
+  // state that will be lost by not calling its unload handlers properly.
+  if (!sudden_termination_allowed())
+    return false;
+
+  // Check for any external tab containers, since they may still be running even
+  // though this window closed.
   BrowserRenderProcessHost::listeners_iterator iter;
   // NOTE: This is a bit dangerous.  We know that for now, listeners are
   // always RenderWidgetHosts.  But in theory, they don't have to be.
@@ -475,27 +642,23 @@ bool BrowserRenderProcessHost::FastShutdownIfPossible() {
     if (!widget || !widget->IsRenderView())
       continue;
     RenderViewHost* rvh = static_cast<RenderViewHost*>(widget);
-    if (!rvh->CanTerminate()) {
-      // NOTE: It's possible that an onunload listener may be installed
-      // while we're shutting down, so there's a small race here.  Given that
-      // the window is small, it's unlikely that the web page has much
-      // state that will be lost by not calling its unload handlers properly.
+    if (rvh->delegate()->IsExternalTabContainer())
       return false;
-    }
   }
-#else
-  // TODO(port): the above is the only reason this file pulls in
-  // RenderWidgetHost and RenderViewHost.
-  // Perhaps IPC::Channel::Listener needs another method like CanTerminate()?
-  // No matter what, some abstractions are getting broken here...
-  NOTIMPLEMENTED();
-#endif
 
   // Otherwise, we're allowed to just terminate the process. Using exit code 0
   // means that UMA won't treat this as a renderer crash.
   process_.Terminate(ResultCodes::NORMAL_EXIT);
-  process_.Close();
   return true;
+}
+
+bool BrowserRenderProcessHost::SendWithTimeout(IPC::Message* msg,
+                                               int timeout_ms) {
+  if (!channel_.get()) {
+    delete msg;
+    return false;
+  }
+  return channel_->SendWithTimeout(msg, timeout_ms);
 }
 
 // This is a platform specific function for mapping a transport DIB given its id
@@ -575,6 +738,14 @@ void BrowserRenderProcessHost::OnMessageReceived(const IPC::Message& msg) {
       IPC_MESSAGE_HANDLER(ViewHostMsg_PageContents, OnPageContents)
       IPC_MESSAGE_HANDLER(ViewHostMsg_UpdatedCacheStats,
                           OnUpdatedCacheStats)
+      IPC_MESSAGE_HANDLER(ViewHostMsg_SuddenTerminationChanged,
+                          SuddenTerminationChanged);
+      IPC_MESSAGE_HANDLER(ViewHostMsg_ExtensionAddListener,
+                          OnExtensionAddListener)
+      IPC_MESSAGE_HANDLER(ViewHostMsg_ExtensionRemoveListener,
+                          OnExtensionRemoveListener)
+      IPC_MESSAGE_HANDLER(ViewHostMsg_ExtensionCloseChannel,
+                          OnExtensionCloseChannel)
       IPC_MESSAGE_UNHANDLED_ERROR()
     IPC_END_MESSAGE_MAP_EX()
 
@@ -629,7 +800,7 @@ void BrowserRenderProcessHost::OnChannelConnected(int32 peer_pid) {
       const CommandLine& cmd_line = *CommandLine::ForCurrentProcess();
       if (cmd_line.HasSwitch(switches::kRendererCmdPrefix))
         return;
-      CHECK(peer_pid == process_.pid());
+      CHECK(peer_pid == process_.pid()) << peer_pid << " " << process_.pid();
     }
   }
 }
@@ -653,23 +824,41 @@ void BrowserRenderProcessHost::OnChannelError() {
 
   DCHECK(process_.handle());
   DCHECK(channel_.get());
-  base::ProcessHandle process = process_.handle();
 
-  bool clean_shutdown = !base::DidProcessCrash(process);
+  bool child_exited;
+  bool did_crash;
+  if (zygote_child_) {
+#if defined(OS_LINUX)
+    did_crash = Singleton<ZygoteHost>()->DidProcessCrash(
+        process_.handle(), &child_exited);
+#else
+    NOTREACHED();
+    did_crash = true;
+#endif
+  } else {
+    did_crash = base::DidProcessCrash(&child_exited, process_.handle());
+  }
 
-  process_.Close();
+  NotificationService::current()->Notify(
+      NotificationType::RENDERER_PROCESS_CLOSED,
+      Source<RenderProcessHost>(this),
+      Details<bool>(&did_crash));
+
+  // POSIX: If the process crashed, then the kernel closed the socket for it
+  // and so the child has already died by the time we get here. Since
+  // DidProcessCrash called waitpid with WNOHANG, it'll reap the process.
+  // However, if DidProcessCrash didn't reap the child, we'll need to in
+  // ~BrowserRenderProcessHost via ProcessWatcher. So we can't close the handle
+  // here.
+  //
+  // This is moot on Windows where |child_exited| will always be true.
+  if (child_exited)
+    process_.Close();
+
+  WebCacheManager::GetInstance()->Remove(pid());
+  ChildProcessSecurityPolicy::GetInstance()->Remove(pid());
 
   channel_.reset();
-
-  if (!notified_termination_) {
-    // If |close_expected| is false, it means the renderer process went away
-    // before the web views expected it; count it as a crash.
-    NotificationService::current()->Notify(
-        NotificationType::RENDERER_PROCESS_TERMINATED,
-        Source<RenderProcessHost>(this),
-        Details<bool>(&clean_shutdown));
-    notified_termination_ = true;
-  }
 
   // This process should detach all the listeners, causing the object to be
   // deleted. We therefore need a stack copy of the web view list to avoid
@@ -703,6 +892,10 @@ void BrowserRenderProcessHost::OnUpdatedCacheStats(
   WebCacheManager::GetInstance()->ObserveStats(pid(), stats);
 }
 
+void BrowserRenderProcessHost::SuddenTerminationChanged(bool enabled) {
+  set_sudden_termination_allowed(enabled);
+}
+
 void BrowserRenderProcessHost::SetBackgrounded(bool backgrounded) {
   // If the process_ is NULL, the process hasn't been created yet.
   if (process_.handle()) {
@@ -716,7 +909,7 @@ void BrowserRenderProcessHost::SetBackgrounded(bool backgrounded) {
     // which causes random crashes in the browser process. Our hack for now
     // is to not invoke the SetPriorityClass API if the dll is loaded.
     should_set_backgrounded = (GetModuleHandle(L"cbstext.dll") == NULL);
-#endif // OS_WIN
+#endif  // OS_WIN
 
     if (should_set_backgrounded) {
       bool rv = process_.SetProcessBackgrounded(backgrounded);
@@ -752,18 +945,7 @@ void BrowserRenderProcessHost::Observe(NotificationType type,
                                        const NotificationSource& source,
                                        const NotificationDetails& details) {
   switch (type.value) {
-    case NotificationType::PREF_CHANGED: {
-      std::wstring* pref_name_in = Details<std::wstring>(details).ptr();
-      DCHECK(Source<PrefService>(source).ptr() == profile()->GetPrefs());
-      if (*pref_name_in == prefs::kBlockPopups) {
-        widget_helper_->set_block_popups(
-            profile()->GetPrefs()->GetBoolean(prefs::kBlockPopups));
-      } else {
-        NOTREACHED() << "unexpected pref change notification" << *pref_name_in;
-      }
-      break;
-    }
-    case NotificationType::USER_SCRIPTS_LOADED: {
+    case NotificationType::USER_SCRIPTS_UPDATED: {
       base::SharedMemory* shared_memory =
           Details<base::SharedMemory>(details).ptr();
       if (shared_memory) {
@@ -775,5 +957,27 @@ void BrowserRenderProcessHost::Observe(NotificationType type,
       NOTREACHED();
       break;
     }
+  }
+}
+
+void BrowserRenderProcessHost::OnExtensionAddListener(
+    const std::string& event_name) {
+  if (profile()->GetExtensionMessageService()) {
+    profile()->GetExtensionMessageService()->AddEventListener(event_name,
+                                                              pid());
+  }
+}
+
+void BrowserRenderProcessHost::OnExtensionRemoveListener(
+    const std::string& event_name) {
+  if (profile()->GetExtensionMessageService()) {
+    profile()->GetExtensionMessageService()->RemoveEventListener(event_name,
+                                                                 pid());
+  }
+}
+
+void BrowserRenderProcessHost::OnExtensionCloseChannel(int port_id) {
+  if (profile()->GetExtensionMessageService()) {
+    profile()->GetExtensionMessageService()->CloseChannel(port_id);
   }
 }

@@ -6,10 +6,9 @@
 
 #include "base/message_loop.h"
 #include "chrome/browser/printing/print_job.h"
-#include "chrome/browser/printing/printed_document.h"
-#include "chrome/browser/printing/printed_page.h"
-#include "chrome/common/gfx/emf.h"
 #include "chrome/common/notification_service.h"
+#include "printing/printed_document.h"
+#include "printing/printed_page.h"
 
 namespace printing {
 
@@ -50,7 +49,7 @@ class PrintJobWorker::NotificationTask : public Task {
 PrintJobWorker::PrintJobWorker(PrintJobWorkerOwner* owner)
     : Thread("Printing_Worker"),
       owner_(owner) {
-  // The object is created in the UI thread.
+  // The object is created in the IO thread.
   DCHECK_EQ(owner_->message_loop(), MessageLoop::current());
 }
 
@@ -66,7 +65,8 @@ void PrintJobWorker::SetNewOwner(PrintJobWorkerOwner* new_owner) {
 
 void PrintJobWorker::GetSettings(bool ask_user_for_settings,
                                  HWND parent_window,
-                                 int document_page_count) {
+                                 int document_page_count,
+                                 bool has_selection) {
   DCHECK_EQ(message_loop(), MessageLoop::current());
   DCHECK_EQ(page_number_, PageNumber::npos());
 
@@ -77,7 +77,8 @@ void PrintJobWorker::GetSettings(bool ask_user_for_settings,
   PrintingContext::Result result;
   if (ask_user_for_settings) {
     result = printing_context_.AskUserForSettings(parent_window,
-                                                  document_page_count);
+                                                  document_page_count,
+                                                  has_selection);
   } else {
     result = printing_context_.UseDefaultSettings();
   }
@@ -165,7 +166,11 @@ void PrintJobWorker::OnNewPage() {
     // Is the page available?
     scoped_refptr<PrintedPage> page;
     if (!document_->GetPage(page_number_.ToInt(), &page)) {
-      // The page is implictly requested.
+      // We need to wait for the page to be available.
+      MessageLoop::current()->PostDelayedTask(
+          FROM_HERE,
+          NewRunnableMethod(this, &PrintJobWorker::OnNewPage),
+          500);
       break;
     }
     // The page is there, print it.
@@ -188,21 +193,6 @@ void PrintJobWorker::Cancel() {
 
 void PrintJobWorker::DismissDialog() {
   printing_context_.DismissDialog();
-}
-
-void PrintJobWorker::RequestMissingPages() {
-  DCHECK_EQ(message_loop(), MessageLoop::current());
-  // It may arrive out of order. Don't mind about it.
-  if (page_number_ != PageNumber::npos()) {
-    // We are printing.
-    document_->RequestMissingPages();
-  }
-  NotificationTask* task = new NotificationTask();
-  task->Init(owner_,
-             JobEventDetails::ALL_PAGES_REQUESTED,
-             document_.get(),
-             NULL);
-  owner_->message_loop()->PostTask(FROM_HERE, task);
 }
 
 void PrintJobWorker::OnDocumentDone() {

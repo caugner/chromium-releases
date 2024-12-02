@@ -6,25 +6,29 @@
 
 #include "base/file_util.h"
 #include "base/path_service.h"
+#include "base/stl_util-inl.h"
 #include "base/string_util.h"
 #include "base/task.h"
+#include "base/thread.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/download/download_manager.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/renderer_host/resource_dispatcher_host.h"
 #include "chrome/browser/tab_contents/tab_util.h"
-#include "chrome/browser/tab_contents/web_contents.h"
+#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/common/stl_util-inl.h"
+#include "chrome/common/platform_util.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_util.h"
 #include "net/url_request/url_request_context.h"
 
 #if defined(OS_WIN)
-#include "chrome/common/win_util.h"
+#include "app/win_util.h"
 #include "chrome/common/win_safe_util.h"
+#elif defined(OS_MACOSX)
+#include "chrome/common/quarantine_mac.h"
 #endif
 
 // Throttle updates to the UI thread so that a fast moving download doesn't
@@ -53,6 +57,8 @@ class DownloadFileUpdateTask : public Task {
 
 DownloadFile::DownloadFile(const DownloadCreateInfo* info)
     : file_(NULL),
+      source_url_(info->url),
+      referrer_url_(info->referrer_url),
       id_(info->download_id),
       render_process_id_(info->render_process_id),
       render_view_id_(info->render_view_id),
@@ -135,8 +141,8 @@ bool DownloadFile::Open(const char* open_mode) {
   // We ignore the return value because a failure is not fatal.
   win_util::SetInternetZoneIdentifier(full_path_);
 #elif defined(OS_MACOSX)
-  // TODO(port) there should be an equivalent on Mac (there isn't on Linux).
-  NOTREACHED();
+  quarantine_mac::AddQuarantineMetadataToFile(full_path_, source_url_,
+                                              referrer_url_);
 #endif
   return true;
 }
@@ -358,7 +364,7 @@ void DownloadFileManager::UpdateInProgressDownloads() {
 
 // Notifications sent from the download thread and run on the UI thread.
 
-// Lookup the DownloadManager for this WebContents' profile and inform it of
+// Lookup the DownloadManager for this TabContents' profile and inform it of
 // a new download.
 // TODO(paulg): When implementing download restart via the Downloads tab,
 //              there will be no 'render_process_id' or 'render_view_id'.
@@ -466,7 +472,7 @@ void DownloadFileManager::RemoveDownload(int id, DownloadManager* manager) {
 // static
 DownloadManager* DownloadFileManager::DownloadManagerFromRenderIds(
     int render_process_id, int render_view_id) {
-  WebContents* contents = tab_util::GetWebContentsByID(render_process_id,
+  TabContents* contents = tab_util::GetTabContentsByID(render_process_id,
                                                        render_view_id);
   if (contents) {
     Profile* profile = contents->profile();
@@ -517,44 +523,38 @@ void DownloadFileManager::OnDownloadUrl(const GURL& url,
 
 // Actions from the UI thread and run on the download thread
 
-// Open a download, or show it in a Windows Explorer window. We run on this
+// Open a download, or show it in a file explorer window. We run on this
 // thread to avoid blocking the UI with (potentially) slow Shell operations.
 // TODO(paulg): File 'stat' operations.
 void DownloadFileManager::OnShowDownloadInShell(const FilePath& full_path) {
-#if defined(OS_WIN)
   DCHECK(MessageLoop::current() == file_loop_);
-  win_util::ShowItemInFolder(full_path.value());
-#else
-  // TODO(port) implement me.
-  NOTREACHED();
-#endif
+  platform_util::ShowItemInFolder(full_path);
 }
 
-// Launches the selected download using ShellExecute 'open' verb. If there is
-// a valid parent window, the 'safer' version will be used which can
+// Launches the selected download using ShellExecute 'open' verb. For windows,
+// if there is a valid parent window, the 'safer' version will be used which can
 // display a modal dialog asking for user consent on dangerous files.
 void DownloadFileManager::OnOpenDownloadInShell(const FilePath& full_path,
                                                 const GURL& url,
                                                 gfx::NativeView parent_window) {
-#if defined(OS_WIN)
   DCHECK(MessageLoop::current() == file_loop_);
+#if defined(OS_WIN)
   if (NULL != parent_window) {
     win_util::SaferOpenItemViaShell(parent_window, L"", full_path,
-                                    UTF8ToWide(url.spec()), true);
-  } else {
-    win_util::OpenItemViaShell(full_path, true);
+                                    UTF8ToWide(url.spec()));
+    return;
   }
-#else
-  // TODO(port) implement me.
-  NOTREACHED();
 #endif
+
+  platform_util::OpenItem(full_path);
 }
 
 // The DownloadManager in the UI thread has provided a final name for the
 // download specified by 'id'. Rename the in progress download, and remove it
 // from our table if it has been completed or cancelled already.
 void DownloadFileManager::OnFinalDownloadName(int id,
-                                              const FilePath& full_path) {
+                                              const FilePath& full_path,
+                                              DownloadManager* manager) {
   DCHECK(MessageLoop::current() == file_loop_);
   DownloadFileMap::iterator it = downloads_.find(id);
   if (it == downloads_.end())
@@ -563,7 +563,13 @@ void DownloadFileManager::OnFinalDownloadName(int id,
   file_util::CreateDirectory(full_path.DirName());
 
   DownloadFile* download = it->second;
-  if (!download->Rename(full_path)) {
+  if (download->Rename(full_path)) {
+    ui_loop_->PostTask(FROM_HERE,
+        NewRunnableMethod(manager,
+                          &DownloadManager::DownloadRenamedToFinalName,
+                          id,
+                          full_path));
+  } else {
     // Error. Between the time the UI thread generated 'full_path' to the time
     // this code runs, something happened that prevents us from renaming.
     DownloadManagerMap::iterator dmit = managers_.find(download->id());

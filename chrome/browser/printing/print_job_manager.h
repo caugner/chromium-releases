@@ -10,7 +10,7 @@
 
 #include "base/lock.h"
 #include "base/ref_counted.h"
-#include "chrome/common/notification_observer.h"
+#include "chrome/common/notification_registrar.h"
 
 namespace printing {
 
@@ -42,18 +42,6 @@ class PrintJobManager : public NotificationObserver {
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
-  // Sets a path where to dump EMF data files. This enables debug behavior where
-  // every rendered pages are dumped as-is. By default the path is empty, which
-  // disables the dumping.
-  // TODO(maruel): Remove me once printing is awesome.
-  void set_debug_dump_path(const std::wstring& debug_dump_path) {
-    debug_dump_path_ = debug_dump_path;
-  }
-
-  const std::wstring& debug_dump_path() const {
-    return debug_dump_path_;
-  }
-
  private:
   typedef std::vector<scoped_refptr<PrintJob> > PrintJobs;
   typedef std::vector<scoped_refptr<PrinterQuery> > PrinterQueries;
@@ -62,11 +50,7 @@ class PrintJobManager : public NotificationObserver {
   void OnPrintJobEvent(PrintJob* print_job,
                        const JobEventDetails& event_details);
 
-  // Processes a NOTIFY_PRINTED_DOCUMENT_UPDATED notification. When
-  // debug_dump_path_ is not empty, it is processed to detect newly rendered
-  // pages and to dump their EMF buffer.
-  void OnPrintedDocumentUpdated(const PrintedDocument& document,
-                                const PrintedPage& page);
+  NotificationRegistrar registrar_;
 
   // Used to serialize access to queued_workers_.
   Lock lock_;
@@ -75,11 +59,6 @@ class PrintJobManager : public NotificationObserver {
 
   // Current print jobs that are active.
   PrintJobs current_jobs_;
-
-  // Path where debug dump of EMF buffer are saved. Empty by default. When
-  // empty, EMF dumping is disabled.
-  // TODO(maruel): Remove me once printing is awesome.
-  std::wstring debug_dump_path_;
 
   DISALLOW_EVIL_CONSTRUCTORS(PrintJobManager);
 };

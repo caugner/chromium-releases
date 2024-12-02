@@ -19,6 +19,7 @@ class PathNotFound(Exception): pass
 # Save some paths here so we don't keep re-evaling.
 _webkit_root = None
 _layout_data_dir = None
+_layout_tests_dir = None
 # A map from platform description to directory list.
 _platform_results_dirs = {}
 
@@ -31,14 +32,14 @@ def WinPathToUnix(path):
   return path.replace('\\', '/')
 
 def WebKitRoot():
-  """Returns the full path to the directory containing webkit.sln.  Raises
-  PathNotFound if we're unable to find webkit.sln."""
+  """Returns the full path to the directory containing webkit.gyp.  Raises
+  PathNotFound if we're unable to find webkit.gyp."""
   global _webkit_root
   if _webkit_root:
     return _webkit_root
-  webkit_sln_path = google.path_utils.FindUpward(google.path_utils.ScriptDir(),
-                                                 'webkit.sln')
-  _webkit_root = os.path.dirname(webkit_sln_path)
+  webkit_gyp_path = google.path_utils.FindUpward(google.path_utils.ScriptDir(),
+                                                 'webkit.gyp')
+  _webkit_root = os.path.dirname(webkit_gyp_path)
   return _webkit_root
 
 def LayoutDataDir():
@@ -51,23 +52,46 @@ def LayoutDataDir():
                                                   'data', 'layout_tests')
   return _layout_data_dir
 
-def ChromiumPlatformResultsDir():
+def LayoutTestsDir(path = None):
+  """Returns the full path to the directory containing layout tests, based on
+  the supplied relative or absolute path to a layout tests. If the path contains
+  "LayoutTests" directory, locates this directory, assuming it's either in
+  in webkit/data/layout_tests or in third_party/WebKit."""
+
+  if path != None and path.find('LayoutTests') == -1:
+    return LayoutDataDir()
+
+  global _layout_tests_dir
+  if _layout_tests_dir:
+    return _layout_tests_dir
+
+  webkit_dir = google.path_utils.FindUpward(
+      google.path_utils.ScriptDir(), 'third_party', 'WebKit')
+
+  if os.path.exists(os.path.join(webkit_dir, 'LayoutTests')):
+    _layout_tests_dir = webkit_dir
+  else:
+    _layout_tests_dir = LayoutDataDir()
+
+  return _layout_tests_dir
+
+def ChromiumPlatformResultsEnclosingDir():
   """Returns the full path to the directory containing Chromium platform
   result directories.
   """
   # TODO(pamg): Once we move platform/chromium-* into LayoutTests/platform/,
-  # remove this and use PlatformResultsDir() for everything.
+  # remove this and use PlatformResultsEnclosingDir() for everything.
   return os.path.join(LayoutDataDir(), 'platform')
 
-def WebKitPlatformResultsDir():
+def WebKitPlatformResultsEnclosingDir():
   """Gets the full path to just above the platform results directory."""
-  return os.path.join(LayoutDataDir(), 'LayoutTests', 'platform')
+  return os.path.join(LayoutTestsDir(), 'LayoutTests', 'platform')
 
-def PlatformResultsDir(platform):
+def PlatformResultsEnclosingDir(platform):
   """Gets the path to just above the results directory for this platform."""
   if platform.startswith('chromium'):
-    return ChromiumPlatformResultsDir()
-  return WebKitPlatformResultsDir()
+    return ChromiumPlatformResultsEnclosingDir()
+  return WebKitPlatformResultsEnclosingDir()
 
 def ExpectedFilename(filename, suffix, platform):
   """Given a test name, returns an absolute path to its expected results.
@@ -155,7 +179,7 @@ def ExpectedFilename(filename, suffix, platform):
     if 'mac' not in platform_dirs:
       platform_dirs.append('mac')
 
-    platform_dirs = [os.path.join(PlatformResultsDir(x), x)
+    platform_dirs = [os.path.join(PlatformResultsEnclosingDir(x), x)
                      for x in platform_dirs]
     _platform_results_dirs[platform] = platform_dirs
 
@@ -187,10 +211,20 @@ def TestShellBinaryPath(target):
     raise PathNotFound('unable to find test_shell at %s' % full_path)
   return full_path
 
+def LayoutTestHelperBinaryPath(target):
+  """Gets the full path to the layout test helper binary for the target build
+  configuration. Raises PathNotFound if the file doesn't exist"""
+  platform_util = platform_utils.PlatformUtility('')
+  # try output directory from either Xcode or chrome.sln
+  full_path = platform_util.LayoutTestHelperBinaryPath(target)
+  if not os.path.exists(full_path):
+    raise PathNotFound('unable to find layout_test_helper at %s' % full_path)
+  return full_path
+
 def RelativeTestFilename(filename):
   """Provide the filename of the test relative to the layout data
   directory as a unix style path (a/b/c)."""
-  return WinPathToUnix(filename[len(LayoutDataDir()) + 1:])
+  return WinPathToUnix(filename[len(LayoutTestsDir(filename)) + 1:])
 
 def GetPlatformUtil():
   """Returns a singleton instance of the PlatformUtility."""
@@ -216,3 +250,6 @@ def TestListPlatformDir():
 
 def PlatformDir():
   return GetPlatformUtil().PlatformDir()
+
+def PlatformNewResultsDir():
+  return GetPlatformUtil().PlatformNewResultsDir()

@@ -1,9 +1,9 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_COMMON_JSON_VALUE_SERIALIZER_H__
-#define CHROME_COMMON_JSON_VALUE_SERIALIZER_H__
+#ifndef CHROME_COMMON_JSON_VALUE_SERIALIZER_H_
+#define CHROME_COMMON_JSON_VALUE_SERIALIZER_H_
 
 #include <string>
 
@@ -28,6 +28,7 @@ class JSONStringValueSerializer : public ValueSerializer {
   JSONStringValueSerializer(const std::string& json_string)
       : json_string_(&const_cast<std::string&>(json_string)),
         initialized_with_const_string_(true),
+        pretty_print_(false),
         allow_trailing_comma_(false) {
   }
 
@@ -58,7 +59,7 @@ class JSONStringValueSerializer : public ValueSerializer {
   // If true, deserialization will allow trailing commas.
   bool allow_trailing_comma_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(JSONStringValueSerializer);
+  DISALLOW_COPY_AND_ASSIGN(JSONStringValueSerializer);
 };
 
 class JSONFileValueSerializer : public ValueSerializer {
@@ -67,12 +68,8 @@ class JSONFileValueSerializer : public ValueSerializer {
   // deserialization or the destination of the serialization.
   // When deserializing, the file should exist, but when serializing, the
   // serializer will attempt to create the file at the specified location.
-  JSONFileValueSerializer(const FilePath& json_file_path)
+  explicit JSONFileValueSerializer(const FilePath& json_file_path)
     : json_file_path_(json_file_path) {}
-  // DEPRECATED - DO NOT USE
-  // TODO(port): remove references to this
-  JSONFileValueSerializer(const std::wstring& json_file_path)
-    : json_file_path_(FilePath::FromWStringHack(json_file_path)) {}
 
   ~JSONFileValueSerializer() {}
 
@@ -96,7 +93,7 @@ class JSONFileValueSerializer : public ValueSerializer {
  private:
   FilePath json_file_path_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(JSONFileValueSerializer);
+  DISALLOW_IMPLICIT_CONSTRUCTORS(JSONFileValueSerializer);
 };
 
-#endif  // CHROME_COMMON_JSON_VALUE_SERIALIZER_H__
+#endif  // CHROME_COMMON_JSON_VALUE_SERIALIZER_H_

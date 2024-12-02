@@ -8,14 +8,12 @@
 #include "base/basictypes.h"
 #include "base/scoped_ptr.h"
 #include "base/string_util.h"
+#include "chrome/browser/renderer_host/site_instance.h"
 #include "chrome/browser/tab_contents/security_style.h"
-#include "chrome/browser/tab_contents/site_instance.h"
-#include "chrome/browser/tab_contents/tab_contents_type.h"
 #include "chrome/common/page_transition_types.h"
 #include "googleurl/src/gurl.h"
 #include "grit/theme_resources.h"
-#include "skia/include/SkBitmap.h"
-#include "webkit/glue/feed.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 
 class NavigationController;
 
@@ -101,7 +99,7 @@ class NavigationEntry {
 
     // Raw accessors for all the content status flags. This contains a
     // combination of any of the ContentStatusFlags defined above. It is used
-    // by the UI tests for checking and for certain copying. Use the per-status
+    // by some tests for checking and for certain copying. Use the per-status
     // functions for normal usage.
     void set_content_status(int content_status) {
       content_status_ = content_status;
@@ -121,7 +119,7 @@ class NavigationEntry {
     // Copy and assignment is explicitly allowed for this class.
   };
 
-  // The type of the page an entry corresponds to.  Used by ui tests.
+  // The type of the page an entry corresponds to.  Used by tests.
   enum PageType {
     NORMAL_PAGE = 0,
     ERROR_PAGE,
@@ -174,9 +172,8 @@ class NavigationEntry {
 
   // ---------------------------------------------------------------------------
 
-  explicit NavigationEntry(TabContentsType type);
-  NavigationEntry(TabContentsType type,
-                  SiteInstance* instance,
+  NavigationEntry();
+  NavigationEntry(SiteInstance* instance,
                   int page_id,
                   const GURL& url,
                   const GURL& referrer,
@@ -196,12 +193,6 @@ class NavigationEntry {
   }
   int unique_id() const {
     return unique_id_;
-  }
-
-  // Return the TabContents type required to display this entry. Immutable
-  // because a tab can never change its type.
-  TabContentsType tab_type() const {
-    return tab_type_;
   }
 
   // The SiteInstance tells us how to share sub-processes when the tab type is
@@ -290,9 +281,8 @@ class NavigationEntry {
   // state properly when the user goes back and forward.
   //
   // WARNING: This state is saved to the file and used to restore previous
-  // states. If you write a custom TabContents and provide your own state make
-  // sure you have the ability to modify the format in the future while being
-  // able to deal with older versions.
+  // states. If the format is modified in the future, we should still be able to
+  // deal with older versions.
   void set_content_state(const std::string& state) {
     content_state_ = state;
   }
@@ -331,14 +321,6 @@ class NavigationEntry {
   // Returns true if the current tab is in view source mode. This will be false
   // if there is no navigation.
   bool IsViewSourceMode() const;
-
-  // Feed accessor.
-  void set_feedlist(scoped_refptr<FeedList> feedlist) {
-    feedlist_ = feedlist;
-  }
-  scoped_refptr<FeedList> feedlist() {
-    return feedlist_;
-  }
 
   // Tracking stuff ------------------------------------------------------------
 
@@ -399,7 +381,6 @@ class NavigationEntry {
 
   // See the accessors above for descriptions.
   int unique_id_;
-  TabContentsType tab_type_;
   scoped_refptr<SiteInstance> site_instance_;
   PageType page_type_;
   GURL url_;
@@ -410,7 +391,6 @@ class NavigationEntry {
   std::string content_state_;
   int32 page_id_;
   SSLStatus ssl_;
-  scoped_refptr<FeedList> feedlist_;
   PageTransition::Type transition_type_;
   GURL user_typed_url_;
   bool has_post_data_;

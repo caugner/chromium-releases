@@ -4,6 +4,7 @@
 
 #include "base/file_util.h"
 
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <fnmatch.h>
@@ -14,14 +15,102 @@
 #include <sys/errno.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/types.h>
 #include <time.h>
+#include <unistd.h>
 
 #include <fstream>
 
 #include "base/basictypes.h"
+#include "base/eintr_wrapper.h"
 #include "base/file_path.h"
+#include "base/lock.h"
 #include "base/logging.h"
+#include "base/scoped_ptr.h"
+#include "base/singleton.h"
 #include "base/string_util.h"
+#include "base/sys_string_conversions.h"
+#include "base/time.h"
+#include "unicode/coll.h"
+
+namespace {
+
+bool IsDirectory(const FTSENT* file) {
+  switch (file->fts_info) {
+    case FTS_D:
+    case FTS_DC:
+    case FTS_DNR:
+    case FTS_DOT:
+    case FTS_DP:
+      return true;
+    default:
+      return false;
+  }
+}
+
+class LocaleAwareComparator {
+ public:
+  LocaleAwareComparator() {
+    UErrorCode error_code = U_ZERO_ERROR;
+    // Use the default collator. The default locale should have been properly
+    // set by the time this constructor is called.
+    collator_.reset(icu::Collator::createInstance(error_code));
+    DCHECK(U_SUCCESS(error_code));
+    // Make it case-sensitive.
+    collator_->setStrength(icu::Collator::TERTIARY);
+    // Note: We do not set UCOL_NORMALIZATION_MODE attribute. In other words, we
+    // do not pay performance penalty to guarantee sort order correctness for
+    // non-FCD (http://unicode.org/notes/tn5/#FCD) file names. This should be a
+    // reasonable tradeoff because such file names should be rare and the sort
+    // order doesn't change much anyway.
+  }
+
+  // Note: A similar function is available in l10n_util.
+  // We cannot use it because base should not depend on l10n_util.
+  // TODO(yuzo): Move some of l10n_util to base.
+  int Compare(const string16& a, const string16& b) {
+    // We are not sure if Collator::compare is thread-safe.
+    // Use an AutoLock just in case.
+    AutoLock auto_lock(lock_);
+
+    UErrorCode error_code = U_ZERO_ERROR;
+    UCollationResult result = collator_->compare(
+        static_cast<const UChar*>(a.c_str()),
+        static_cast<int>(a.length()),
+        static_cast<const UChar*>(b.c_str()),
+        static_cast<int>(b.length()),
+        error_code);
+    DCHECK(U_SUCCESS(error_code));
+    return result;
+  }
+
+ private:
+  scoped_ptr<icu::Collator> collator_;
+  Lock lock_;
+  friend struct DefaultSingletonTraits<LocaleAwareComparator>;
+
+  DISALLOW_COPY_AND_ASSIGN(LocaleAwareComparator);
+};
+
+int CompareFiles(const FTSENT** a, const FTSENT** b) {
+  // Order lexicographically with directories before other files.
+  const bool a_is_dir = IsDirectory(*a);
+  const bool b_is_dir = IsDirectory(*b);
+  if (a_is_dir != b_is_dir)
+    return a_is_dir ? -1 : 1;
+
+  // On linux, the file system encoding is not defined. We assume
+  // SysNativeMBToWide takes care of it.
+  //
+  // ICU's collator can take strings in OS native encoding. But we convert the
+  // strings to UTF-16 ourselves to ensure conversion consistency.
+  // TODO(yuzo): Perhaps we should define SysNativeMBToUTF16?
+  return Singleton<LocaleAwareComparator>()->Compare(
+      WideToUTF16(base::SysNativeMBToWide((*a)->fts_name)),
+      WideToUTF16(base::SysNativeMBToWide((*b)->fts_name)));
+}
+
+}  // namespace
 
 namespace file_util {
 
@@ -49,6 +138,48 @@ bool AbsolutePath(FilePath* path) {
     return false;
   *path = FilePath(full_path);
   return true;
+}
+
+int CountFilesCreatedAfter(const FilePath& path,
+                           const base::Time& comparison_time) {
+  int file_count = 0;
+
+  DIR* dir = opendir(path.value().c_str());
+  if (dir) {
+    struct dirent ent_buf;
+    struct dirent* ent;
+    while (readdir_r(dir, &ent_buf, &ent) == 0 && ent) {
+      if ((strcmp(ent->d_name, ".") == 0) ||
+          (strcmp(ent->d_name, "..") == 0))
+        continue;
+
+      struct stat64 st;
+      int test = stat64(path.Append(ent->d_name).value().c_str(), &st);
+      if (test != 0) {
+        LOG(ERROR) << "stat64 failed: " << strerror(errno);
+        continue;
+      }
+      // Here, we use Time::TimeT(), which discards microseconds. This
+      // means that files which are newer than |comparison_time| may
+      // be considered older. If we don't discard microseconds, it
+      // introduces another issue. Suppose the following case:
+      //
+      // 1. Get |comparison_time| by Time::Now() and the value is 10.1 (secs).
+      // 2. Create a file and the current time is 10.3 (secs).
+      //
+      // As POSIX doesn't have microsecond precision for |st_ctime|,
+      // the creation time of the file created in the step 2 is 10 and
+      // the file is considered older than |comparison_time|. After
+      // all, we may have to accept either of the two issues: 1. files
+      // which are older than |comparison_time| are considered newer
+      // (current implementation) 2. files newer than
+      // |comparison_time| are considered older.
+      if (st.st_ctime >= comparison_time.ToTimeT())
+        ++file_count;
+    }
+    closedir(dir);
+  }
+  return file_count;
 }
 
 // TODO(erikkay): The Windows version of this accepts paths like "foo/bar/*"
@@ -121,6 +252,10 @@ bool Move(const FilePath& from_path, const FilePath& to_path) {
   return true;
 }
 
+bool ReplaceFile(const FilePath& from_path, const FilePath& to_path) {
+  return (rename(from_path.value().c_str(), to_path.value().c_str()) == 0);
+}
+
 bool CopyDirectory(const FilePath& from_path,
                    const FilePath& to_path,
                    bool recursive) {
@@ -167,8 +302,7 @@ bool CopyDirectory(const FilePath& from_path,
         }
 
         // Try creating the target dir, continuing on it if it exists already.
-        // Rely on the user's umask to produce correct permissions.
-        if (mkdir(target_path.value().c_str(), 0777) != 0) {
+        if (mkdir(target_path.value().c_str(), 0700) != 0) {
           if (errno != EEXIST)
             error = errno;
         }
@@ -286,6 +420,18 @@ bool GetFileCreationLocalTime(const std::string& filename,
 }
 #endif
 
+bool ReadFromFD(int fd, char* buffer, size_t bytes) {
+  size_t total_read = 0;
+  while (total_read < bytes) {
+    ssize_t bytes_read =
+        HANDLE_EINTR(read(fd, buffer + total_read, bytes - total_read));
+    if (bytes_read <= 0)
+      break;
+    total_read += bytes_read;
+  }
+  return total_read == bytes;
+}
+
 // Creates and opens a temporary file in |directory|, returning the
 // file descriptor.  |path| is set to the temporary file path.
 // Note TODO(erikkay) comment in header for BlahFileName() calls; the
@@ -311,30 +457,20 @@ bool CreateTemporaryFileName(FilePath* path) {
   return true;
 }
 
-FILE* CreateAndOpenTemporaryFile(FilePath* path) {
-  FilePath directory;
-  if (!GetTempDir(&directory))
-    return false;
-
-  int fd = CreateAndOpenFdForTemporaryFile(directory, path);
-  if (fd < 0)
-    return NULL;
-
-  FILE *fp = fdopen(fd, "a+");
-  return fp;
-}
-
 FILE* CreateAndOpenTemporaryShmemFile(FilePath* path) {
   FilePath directory;
   if (!GetShmemTempDir(&directory))
     return false;
 
-  int fd = CreateAndOpenFdForTemporaryFile(directory, path);
+  return CreateAndOpenTemporaryFileInDir(directory, path);
+}
+
+FILE* CreateAndOpenTemporaryFileInDir(const FilePath& dir, FilePath* path) {
+  int fd = CreateAndOpenFdForTemporaryFile(dir, path);
   if (fd < 0)
     return NULL;
 
-  FILE *fp = fdopen(fd, "a+");
-  return fp;
+  return fdopen(fd, "a+");
 }
 
 bool CreateTemporaryFileNameInDir(const std::wstring& dir,
@@ -376,7 +512,7 @@ bool CreateDirectory(const FilePath& full_path) {
   for (std::vector<FilePath>::reverse_iterator i = subpaths.rbegin();
        i != subpaths.rend(); ++i) {
     if (!DirectoryExists(*i)) {
-      if (mkdir(i->value().c_str(), 0777) != 0)
+      if (mkdir(i->value().c_str(), 0700) != 0)
         return false;
     }
   }
@@ -389,6 +525,16 @@ bool GetFileInfo(const FilePath& file_path, FileInfo* results) {
     return false;
   results->is_directory = S_ISDIR(file_info.st_mode);
   results->size = file_info.st_size;
+  return true;
+}
+
+bool GetInode(const FilePath& path, ino_t* inode) {
+  struct stat buffer;
+  int result = stat(path.value().c_str(), &buffer);
+  if (result < 0)
+    return false;
+
+  *inode = buffer.st_ino;
   return true;
 }
 
@@ -405,8 +551,8 @@ int ReadFile(const FilePath& filename, char* data, int size) {
   if (fd < 0)
     return -1;
 
-  int ret_value = read(fd, data, size);
-  close(fd);
+  int ret_value = HANDLE_EINTR(read(fd, data, size));
+  HANDLE_EINTR(close(fd));
   return ret_value;
 }
 
@@ -418,17 +564,17 @@ int WriteFile(const FilePath& filename, const char* data, int size) {
   // Allow for partial writes
   ssize_t bytes_written_total = 0;
   do {
-    ssize_t bytes_written_partial = write(fd,
-                                          data + bytes_written_total,
-                                          size - bytes_written_total);
+    ssize_t bytes_written_partial =
+      HANDLE_EINTR(write(fd, data + bytes_written_total,
+                         size - bytes_written_total));
     if (bytes_written_partial < 0) {
-      close(fd);
+      HANDLE_EINTR(close(fd));
       return -1;
     }
     bytes_written_total += bytes_written_partial;
   } while (bytes_written_total < size);
 
-  close(fd);
+  HANDLE_EINTR(close(fd));
   return bytes_written_total;
 }
 
@@ -459,6 +605,8 @@ FileEnumerator::FileEnumerator(const FilePath& root_path,
       file_type_(file_type),
       is_in_find_op_(false),
       fts_(NULL) {
+  // INCLUDE_DOT_DOT must not be specified if recursive.
+  DCHECK(!(recursive && (INCLUDE_DOT_DOT & file_type_)));
   pending_paths_.push(root_path);
 }
 
@@ -471,6 +619,8 @@ FileEnumerator::FileEnumerator(const FilePath& root_path,
       pattern_(root_path.value()),
       is_in_find_op_(false),
       fts_(NULL) {
+  // INCLUDE_DOT_DOT must not be specified if recursive.
+  DCHECK(!(recursive && (INCLUDE_DOT_DOT & file_type_)));
   // The Windows version of this code only matches against items in the top-most
   // directory, and we're comparing fnmatch against full paths, so this is the
   // easiest way to get the right pattern.
@@ -508,11 +658,11 @@ FilePath FileEnumerator::Next() {
     pending_paths_.pop();
 
     // Start a new find operation.
-    int ftsflags = FTS_LOGICAL;
+    int ftsflags = FTS_LOGICAL | FTS_SEEDOT;
     char top_dir[PATH_MAX];
     base::strlcpy(top_dir, root_path_.value().c_str(), arraysize(top_dir));
     char* dir_list[2] = { top_dir, NULL };
-    fts_ = fts_open(dir_list, ftsflags, NULL);
+    fts_ = fts_open(dir_list, ftsflags, CompareFiles);
     if (!fts_)
       return Next();
     is_in_find_op_ = true;
@@ -541,6 +691,9 @@ FilePath FileEnumerator::Next() {
   }
 
   FilePath cur_file(fts_ent_->fts_path);
+  if (ShouldSkip(cur_file))
+    return Next();
+
   if (fts_ent_->fts_info == FTS_D) {
     // If not recursive, then prune children.
     if (!recursive_)
@@ -548,6 +701,11 @@ FilePath FileEnumerator::Next() {
     return (file_type_ & FileEnumerator::DIRECTORIES) ? cur_file : Next();
   } else if (fts_ent_->fts_info == FTS_F) {
     return (file_type_ & FileEnumerator::FILES) ? cur_file : Next();
+  } else if (fts_ent_->fts_info == FTS_DOT) {
+    if ((file_type_ & FileEnumerator::DIRECTORIES) && IsDotDot(cur_file)) {
+      return cur_file;
+    }
+    return Next();
   }
   // TODO(erikkay) - verify that the other fts_info types aren't interesting
   return Next();
@@ -564,19 +722,25 @@ MemoryMappedFile::MemoryMappedFile()
 
 bool MemoryMappedFile::MapFileToMemory(const FilePath& file_name) {
   file_ = open(file_name.value().c_str(), O_RDONLY);
-  if (file_ == -1)
+
+  if (file_ == -1) {
+    LOG(ERROR) << "Couldn't open " << file_name.value();
     return false;
+  }
 
   struct stat file_stat;
-  if (fstat(file_, &file_stat) == -1)
+  if (fstat(file_, &file_stat) == -1) {
+    LOG(ERROR) << "Couldn't fstat " << file_name.value() << ", errno " << errno;
     return false;
+  }
   length_ = file_stat.st_size;
 
   data_ = static_cast<uint8*>(
       mmap(NULL, length_, PROT_READ, MAP_SHARED, file_, 0));
   if (data_ == MAP_FAILED)
-    data_ = NULL;
-  return data_ != NULL;
+    LOG(ERROR) << "Couldn't mmap " << file_name.value() << ", errno " << errno;
+
+  return data_ != MAP_FAILED;
 }
 
 void MemoryMappedFile::CloseHandles() {

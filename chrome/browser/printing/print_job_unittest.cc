@@ -5,8 +5,9 @@
 #include "base/message_loop.h"
 #include "chrome/browser/printing/print_job.h"
 #include "chrome/browser/printing/print_job_worker.h"
-#include "chrome/browser/printing/printed_pages_source.h"
+#include "chrome/common/notification_registrar.h"
 #include "chrome/common/notification_service.h"
+#include "printing/printed_pages_source.h"
 #include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -96,10 +97,10 @@ TEST(PrintJobTest, SimplePrint) {
   // This message loop is actually never run.
   MessageLoop current;
 
+  NotificationRegistrar registrar_;
   TestPrintNotifObserv observ;
-  NotificationService::current()->AddObserver(
-      &observ, NotificationType::ALL,
-      NotificationService::AllSources());
+  registrar_.Add(&observ, NotificationType::ALL,
+                 NotificationService::AllSources());
   volatile bool check = false;
   scoped_refptr<printing::PrintJob> job(new TestPrintJob(&check));
   EXPECT_EQ(MessageLoop::current(), job->message_loop());
@@ -109,9 +110,6 @@ TEST(PrintJobTest, SimplePrint) {
   job->Stop();
   job = NULL;
   EXPECT_TRUE(check);
-  NotificationService::current()->RemoveObserver(
-      &observ, NotificationType::ALL,
-      NotificationService::AllSources());
 }
 
 TEST(PrintJobTest, SimplePrintLateInit) {

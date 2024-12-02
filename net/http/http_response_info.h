@@ -1,11 +1,10 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef NET_HTTP_HTTP_RESPONSE_INFO_H_
 #define NET_HTTP_HTTP_RESPONSE_INFO_H_
 
-#include "base/platform_file.h"
 #include "base/time.h"
 #include "net/base/auth.h"
 #include "net/base/ssl_info.h"
@@ -14,6 +13,7 @@
 namespace net {
 
 class HttpResponseHeaders;
+class SSLCertRequestInfo;
 
 class HttpResponseInfo {
  public:
@@ -42,6 +42,12 @@ class HttpResponseInfo {
   // will contain additional information about the authentication challenge.
   scoped_refptr<AuthChallengeInfo> auth_challenge;
 
+  // The SSL client certificate request info.
+  // TODO(wtc): does this really belong in HttpResponseInfo?  I put it here
+  // because it is similar to |auth_challenge|, but unlike HTTP authentication
+  // challenge, client certificate request is not part of an HTTP response.
+  scoped_refptr<SSLCertRequestInfo> cert_request_info;
+
   // The SSL connection info (if HTTPS).
   SSLInfo ssl_info;
 
@@ -50,10 +56,6 @@ class HttpResponseInfo {
 
   // The "Vary" header data for this response.
   HttpVaryData vary_data;
-
-  // Platform specific file handle to the response data, if response data is
-  // not in a standalone file, its value is base::kInvalidPlatformFileValue.
-  base::PlatformFile response_data_file;
 };
 
 }  // namespace net

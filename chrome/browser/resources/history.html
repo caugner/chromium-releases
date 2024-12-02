@@ -1,9 +1,11 @@
 <!DOCTYPE HTML>
-<html id="t" jsvalues="dir:textdirection;">
+<html i18n-values="dir:textdirection;">
 <head>
 <meta charset="utf-8">
-<title jscontent="title"></title>
-<script type="text/javascript">
+<title i18n-content="title"></title>
+<link rel="icon" href="../../app/theme/history_favicon.png">
+<script src="local_strings.js"></script>
+<script>
 ///////////////////////////////////////////////////////////////////////////////
 // Globals:
 var RESULTS_PER_PAGE = 150;
@@ -36,45 +38,6 @@ var pageState;
 var deleteQueue = [];
 var deleteInFlight = false;
 
-///////////////////////////////////////////////////////////////////////////////
-// localStrings:
-/**
- * We get strings into the page by using JSTemplate to populate some elements
- * with localized content, then reading the content of those elements into
- * this global strings object.
- * @param {Node} node The DOM node containing all our strings.
- */
-function LocalStrings(node) {
-  this.strings_ = {};
-
-  var children = node.childNodes;
-  for (var i = 0, child; child = children[i]; i++) {
-    var id = child.id;
-    if (id) {
-      this.strings_[id] = child.innerHTML;
-    }
-  }
-}
-
-/**
- * Gets a localized string by its id.
- * @param {string} s The id of the string we want
- * @return {string} The localized string
- */
-LocalStrings.prototype.getString = function(s) {
-  return (s in this.strings_) ? this.strings_[s] : '';
-}
-
-/**
- * Returns a formatted localized string (where all %s contents are replaced
- * by the second argument).
- * @param {string} s The id of the string we want
- * @param {string} d The string to include in the formatted string
- * @return {string} The formatted string.
- */
-LocalStrings.prototype.formatString = function(s, d) {
-  return (s in this.strings_) ? this.strings_[s].replace(/\%s/, d) : '';
-}
 
 ///////////////////////////////////////////////////////////////////////////////
 // Page:
@@ -164,13 +127,14 @@ Page.prototype.getTitleDOM_ = function() {
   var link = document.createElement('a');
   link.href = this.url_;
   link.style.backgroundImage =
-      'url(chrome-ui://favicon/' + encodeURIForCSS(this.url_) + ')';
+      'url(chrome://favicon/' + encodeURIForCSS(this.url_) + ')';
   link.appendChild(document.createTextNode(this.title_));
   this.highlightNodeContent_(link);
 
   node.appendChild(link);
 
   if (this.starred_) {
+    node.className += ' starred';
     node.appendChild(createElementWithClassName('div', 'starred'));
   }
 
@@ -443,6 +407,11 @@ function HistoryView(model) {
   this.lastDisplayed_ = [];
 
   this.model_.setView(this);
+
+  var self = this;
+  window.onresize = function() {
+    self.updateEntryAnchorWidth_();
+  };
 }
 
 // HistoryView, public: -------------------------------------------------------
@@ -529,8 +498,7 @@ HistoryView.prototype.displayResults_ = function() {
               localStrings.getString('cont')));
         }
 
-        var link = createElementWithClassName('a', 'delete-day');
-        link.href = '#';
+        var link = createElementWithClassName('button', 'delete-day');
         link.time = page.time.toString();
         link.onclick = deleteDay;
         link.appendChild(
@@ -550,6 +518,7 @@ HistoryView.prototype.displayResults_ = function() {
 
   this.displaySummaryBar_();
   this.displayNavBar_();
+  this.updateEntryAnchorWidth_();
 }
 
 /**
@@ -558,7 +527,7 @@ HistoryView.prototype.displayResults_ = function() {
 HistoryView.prototype.displaySummaryBar_ = function() {
   var searchText = this.model_.getSearchText();
   if (searchText != '') {
-    this.summaryDiv_.innerHTML = localStrings.formatString('searchresultsfor',
+    this.summaryDiv_.textContent = localStrings.formatString('searchresultsfor',
         searchText);
   } else {
     this.summaryDiv_.innerHTML = localStrings.getString('history');
@@ -590,13 +559,44 @@ HistoryView.prototype.displayNavBar_ = function() {
  */
 HistoryView.prototype.createPageNavHTML_ = function(page, name) {
   var hashString = PageState.getHashString(this.model_.getSearchText(), page);
-  return '<a href="chrome-ui://history/' +
+  return '<a href="chrome://history/' +
               (hashString ? '#' + hashString : '') +
               '"' +
             'class="page-navigation"' +
             'onclick="setPage(' + page + '); return false;"' +
             '>' + name + '</a>';
 }
+
+/**
+ * Updates the CSS rule for the entry anchor.
+ * @private
+ */
+HistoryView.prototype.updateEntryAnchorWidth_ = function() {
+  // We need to have at least on .title div to be able to calculate the
+  // desired width of the anchor.
+  var titleElement = document.querySelector('.entry .title');
+  if (!titleElement)
+    return;
+
+  // Create new CSS rules and add them last to the last stylesheet.
+  if (!this.entryAnchorRule_) {
+    var styleSheets = document.styleSheets;
+    var styleSheet = styleSheets[styleSheets.length - 1];
+    var rules = styleSheet.cssRules;
+    var createRule = function(selector) {
+      styleSheet.insertRule(selector + '{}', rules.length);
+      return rules[rules.length - 1];
+    };
+    this.entryAnchorRule_ = createRule('.entry .title > a');
+    // The following rule needs to be more specific to have higher priority.
+    this.entryAnchorStarredRule_ = createRule('.entry .title.starred > a');
+  }
+
+  var anchorMaxWith = titleElement.offsetWidth;
+  this.entryAnchorRule_.style.maxWidth = anchorMaxWith + 'px';
+  // Adjust by the width of star plus its margin.
+  this.entryAnchorStarredRule_.style.maxWidth = anchorMaxWith - 23 + 'px';
+};
 
 ///////////////////////////////////////////////////////////////////////////////
 // State object:
@@ -650,7 +650,7 @@ PageState.prototype.getHashData = function() {
   for (var i = 0; i < hashSplit.length; i++) {
     var pair = hashSplit[i].split("=");
     if (pair.length > 1) {
-      result[pair[0]] = decodeURIComponent(pair[1]);
+      result[pair[0]] = decodeURIComponent(pair[1].replace(/\+/g, ' '));
     }
   }
 
@@ -667,10 +667,9 @@ PageState.prototype.getHashData = function() {
 PageState.prototype.setUIState = function(term, page) {
   // Make sure the form looks pretty.
   document.forms[0].term.value = term;
-
-  var hash = PageState.getHashString(term, page);
-  if (window.location.hash.substr(1) != hash) {
-    window.location.hash = hash;
+  var currentHash = this.getHashData();
+  if (currentHash.q != term || currentHash.p != page) {
+    window.location.hash = PageState.getHashString(term, page);
   }
 }
 
@@ -700,7 +699,7 @@ PageState.getHashString = function(term, page) {
 function load() {
   $('term').focus();
 
-  localStrings = new LocalStrings($('l10n'));
+  localStrings = new LocalStrings();
   historyModel = new HistoryModel();
   historyView = new HistoryView(historyModel);
   pageState = new PageState(historyModel, historyView);
@@ -805,26 +804,8 @@ function historyDeleted() {
   historyView.reload();
 }
 </script>
-<style type="text/css">
-body {
-  font-family:arial;
-  background-color:white;
-  color:black;
-  font-size:84%;
-  margin:10px;
-}
-.header {
-  overflow:auto;
-  clear:both;
-}
-.header .logo {
-  float:left;
-}
-.header .form {
-  float:left;
-  margin-top:22px;
-  margin-left:12px;
-}
+<link rel="stylesheet" href="dom_ui.css">
+<style>
 #results-summary {
   margin-top:12px;
   border-top:1px solid #9cc2ef;
@@ -838,12 +819,19 @@ body {
 }
 .day {
   margin-top:18px;
-  margin-left:3px;
-  width:750px;
+  padding:0px 3px;
+  display:inline-block;
 }
 .delete-day {
-  width:200px;
-  float:right;
+  display: inline;
+  -webkit-appearance: none;
+  background: none;
+  border: 0;
+  color: blue; /* -webkit-link makes it purple :'( */
+  cursor: pointer;
+  text-decoration: underline;
+  padding:0px 9px;
+  display:inline-block;
 }
 .gap {
   margin-left:18px;
@@ -865,6 +853,12 @@ table.results {
   min-width:56px;
   margin-right:5px;
   padding-top:1px;
+  white-space:nowrap;
+}
+html[dir='rtl'] .time {
+  margin-right:0px;
+  margin-left:5px;
+  float:right;
 }
 .entry .title {
   max-width:600px;
@@ -875,22 +869,31 @@ table.results {
 .results .time, .results .title {
   margin-top:18px;
 }
-.starred {
+.title > .starred {
   background:url('../../app/theme/star_small.png');
   background-repeat:no-repeat;
   display:inline-block;
   margin-left:12px;
+  margin-right:0;
   width:11px;
   height:11px;
 }
-.entry .title a {
+html[dir='rtl'] .title > .starred {
+  margin-left:0;
+  margin-right:12px;
+}
+.entry .title > a {
+  -webkit-box-sizing: border-box;
   background-repeat:no-repeat;
   background-size:16px;
   background-position:0px 1px;
   padding:1px 0px 4px 22px;
+  display:inline-block;
+  overflow:hidden;
+  text-overflow:ellipsis;
 }
-html[dir='rtl'] .entry .title a {
-  background-position:right;
+html[dir='rtl'] .entry .title > a {
+  background-position-x:right;
   padding-left:0px;
   padding-right:22px;
 }
@@ -898,17 +901,10 @@ html[dir='rtl'] .entry .title a {
   padding-top:24px;
   margin-left:18px;
 }
-.page-navigation {
-  padding:8px;
-  background-color:#ebeff9;
-  margin-right:4px;
-}
-.footer {
-  height:24px;
-}
+
 </style>
 </head>
-<body onload="load();">
+<body onload="load();" i18n-values=".style.fontFamily:fontfamily;.style.fontSize:fontsize">
 <div class="header">
   <a href="" onclick="setSearch(''); return false;">
     <img src="../../app/theme/history_section.png"
@@ -917,7 +913,7 @@ html[dir='rtl'] .entry .title a {
       onsubmit="setSearch(this.term.value); return false;"
       class="form">
     <input type="text" name="term" id="term" />
-    <input type="submit" name="submit" jsvalues="value:searchbutton" />
+    <input type="submit" name="submit" i18n-values="value:searchbutton" />
   </form>
 </div>
 <div class="main">
@@ -926,19 +922,6 @@ html[dir='rtl'] .entry .title a {
   <div id="results-pagination"></div>
 </div>
 <div class="footer">
-</div>
-<div id="l10n" style="display:none;">
-  <span id="loading" jscontent="loading">Loading...</span>
-  <span id="newest" jscontent="newest">&laquo; Newest</span>
-  <span id="newer" jscontent="newer">&#8249; Newer</span>
-  <span id="older" jscontent="older">Older &#8250;</span>
-  <span id="searchresultsfor" jscontent="searchresultsfor">Search results for '%s'</span>
-  <span id="history" jscontent="history">History</span>
-  <span id="cont" jscontent="cont">(cont.)</span>
-  <span id="noresults" jscontent="noresults">No results</span>
-  <span id="noitems" jscontent="noitems">No items</span>
-  <span id="deleteday" jscontent="deleteday">Delete history for this day</span>
-  <span id="deletedaywarning" jscontent="deletedaywarning">Are you sure you want to delete this day?</span>
 </div>
 </body>
 </html>

@@ -4,6 +4,8 @@
 
 #include "chrome/browser/process_singleton.h"
 
+#include "app/l10n_util.h"
+#include "app/win_util.h"
 #include "base/base_paths.h"
 #include "base/command_line.h"
 #include "base/process_util.h"
@@ -14,15 +16,13 @@
 #include "chrome/browser/profile_manager.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/common/l10n_util.h"
 #include "chrome/common/result_codes.h"
-#include "chrome/common/win_util.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 
 namespace {
 
-// Checks the visiblilty of the enumerated window and signals once a visible
+// Checks the visibility of the enumerated window and signals once a visible
 // window has been found.
 BOOL CALLBACK BrowserWindowEnumeration(HWND window, LPARAM param) {
   bool* result = reinterpret_cast<bool*>(param);
@@ -33,19 +33,22 @@ BOOL CALLBACK BrowserWindowEnumeration(HWND window, LPARAM param) {
 
 }  // namespace
 
+// Look for a Chrome instance that uses the same profile directory.
 ProcessSingleton::ProcessSingleton(const FilePath& user_data_dir)
-    : window_(NULL),
-      locked_(false) {
-  // Look for a Chrome instance that uses the same profile directory:
-  remote_window_ = FindWindowEx(HWND_MESSAGE,
-                                NULL,
-                                chrome::kMessageWindowClass,
+    : window_(NULL), locked_(false), foreground_window_(NULL) {
+  // FindWindoEx and Create() should be one atomic operation in order to not
+  // have a race condition.
+  remote_window_ = FindWindowEx(HWND_MESSAGE, NULL, chrome::kMessageWindowClass,
                                 user_data_dir.ToWStringHack().c_str());
+  if (!remote_window_)
+    Create();
 }
 
 ProcessSingleton::~ProcessSingleton() {
-  if (window_)
+  if (window_) {
     DestroyWindow(window_);
+    UnregisterClass(chrome::kMessageWindowClass, GetModuleHandle(NULL));
+  }
 }
 
 bool ProcessSingleton::NotifyOtherProcess() {
@@ -126,9 +129,14 @@ bool ProcessSingleton::NotifyOtherProcess() {
   return false;
 }
 
+// For windows, there is no need to call Create() since the call is made in
+// the constructor but to avoid having more platform specific code in
+// browser_main.cc we tolerate a second call which will do nothing.
 void ProcessSingleton::Create() {
-  DCHECK(!window_);
   DCHECK(!remote_window_);
+  if (window_)
+    return;
+
   HINSTANCE hinst = GetModuleHandle(NULL);
 
   WNDCLASSEX wc = {0};
@@ -136,7 +144,8 @@ void ProcessSingleton::Create() {
   wc.lpfnWndProc = ProcessSingleton::WndProcStatic;
   wc.hInstance = hinst;
   wc.lpszClassName = chrome::kMessageWindowClass;
-  RegisterClassEx(&wc);
+  ATOM clazz = RegisterClassEx(&wc);
+  DCHECK(clazz);
 
   std::wstring user_data_dir;
   PathService::Get(chrome::DIR_USER_DATA, &user_data_dir);
@@ -151,26 +160,35 @@ void ProcessSingleton::Create() {
 }
 
 LRESULT ProcessSingleton::OnCopyData(HWND hwnd, const COPYDATASTRUCT* cds) {
+  // If locked, it means we are not ready to process this message because
+  // we are probably in a first run critical phase. We must do this before
+  // doing the IsShuttingDown() check since that returns true during first run
+  // (since g_browser_process hasn't been AddRefModule()d yet).
+  if (locked_) {
+    // Attempt to place ourselves in the foreground / flash the task bar.
+    if (IsWindow(foreground_window_))
+      SetForegroundWindow(foreground_window_);
+    return TRUE;
+  }
+
   // Ignore the request if the browser process is already in shutdown path.
   if (!g_browser_process || g_browser_process->IsShuttingDown()) {
     LOG(WARNING) << "Not handling WM_COPYDATA as browser is shutting down";
     return FALSE;
   }
 
-  // If locked, it means we are not ready to process this message because
-  // we are probably in a first run critical phase.
-  if (locked_)
-    return TRUE;
-
   // We should have enough room for the shortest command (min_message_size)
-  // and also be a multiple of wchar_t bytes.
+  // and also be a multiple of wchar_t bytes. The shortest command
+  // possible is L"START\0\0" (empty current directory and command line).
   static const int min_message_size = 7;
-  if (cds->cbData < min_message_size || cds->cbData % sizeof(wchar_t) != 0) {
+  if (cds->cbData < min_message_size * sizeof(wchar_t) ||
+      cds->cbData % sizeof(wchar_t) != 0) {
     LOG(WARNING) << "Invalid WM_COPYDATA, length = " << cds->cbData;
     return TRUE;
   }
 
   // We split the string into 4 parts on NULLs.
+  DCHECK(cds->lpData);
   const std::wstring msg(static_cast<wchar_t*>(cds->lpData),
                          cds->cbData / sizeof(wchar_t));
   const std::wstring::size_type first_null = msg.find_first_of(L'\0');
@@ -237,7 +255,7 @@ LRESULT ProcessSingleton::OnCopyData(HWND hwnd, const COPYDATASTRUCT* cds) {
 }
 
 LRESULT CALLBACK ProcessSingleton::WndProc(HWND hwnd, UINT message,
-                                        WPARAM wparam, LPARAM lparam) {
+                                           WPARAM wparam, LPARAM lparam) {
   switch (message) {
     case WM_COPYDATA:
       return OnCopyData(reinterpret_cast<HWND>(wparam),
@@ -247,58 +265,4 @@ LRESULT CALLBACK ProcessSingleton::WndProc(HWND hwnd, UINT message,
   }
 
   return ::DefWindowProc(hwnd, message, wparam, lparam);
-}
-
-void ProcessSingleton::HuntForZombieChromeProcesses() {
-  // Detecting dead renderers is simple:
-  // - The process is named chrome.exe.
-  // - The process' parent doesn't exist anymore.
-  // - The process doesn't have a chrome::kMessageWindowClass window.
-  // If these conditions hold, the process is a zombie renderer or plugin.
-
-  // Retrieve the list of browser processes on start. This list is then used to
-  // detect zombie renderer process or plugin process.
-  class ZombieDetector : public base::ProcessFilter {
-   public:
-    ZombieDetector() {
-      for (HWND window = NULL;;) {
-        window = FindWindowEx(HWND_MESSAGE,
-                              window,
-                              chrome::kMessageWindowClass,
-                              NULL);
-        if (!window)
-          break;
-        DWORD process = 0;
-        GetWindowThreadProcessId(window, &process);
-        if (process)
-          browsers_.push_back(process);
-      }
-      // We are also a browser, regardless of having the window or not.
-      browsers_.push_back(::GetCurrentProcessId());
-    }
-
-    virtual bool Includes(uint32 pid, uint32 parent_pid) const {
-      // Don't kill ourself eh.
-      if (GetCurrentProcessId() == pid)
-        return false;
-
-      // Is this a browser? If so, ignore it.
-      if (std::find(browsers_.begin(), browsers_.end(), pid) != browsers_.end())
-        return false;
-
-      // Is the parent a browser? If so, ignore it.
-      if (std::find(browsers_.begin(), browsers_.end(), parent_pid)
-          != browsers_.end())
-        return false;
-
-      // The chrome process is orphan.
-      return true;
-    }
-
-   protected:
-    std::vector<uint32> browsers_;
-  };
-
-  ZombieDetector zombie_detector;
-  base::KillProcesses(L"chrome.exe", ResultCodes::HUNG, &zombie_detector);
 }

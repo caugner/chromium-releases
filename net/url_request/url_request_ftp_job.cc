@@ -9,10 +9,12 @@
 
 #include "base/message_loop.h"
 #include "base/string_util.h"
+#include "base/sys_string_conversions.h"
 #include "base/time.h"
 #include "net/base/auth.h"
 #include "net/base/escape.h"
 #include "net/base/load_flags.h"
+#include "net/base/net_errors.h"
 #include "net/base/net_util.h"
 #include "net/base/wininet_util.h"
 #include "net/url_request/url_request.h"
@@ -147,13 +149,14 @@ void URLRequestFtpJob::SendRequest() {
   int port = request_->url().has_port() ?
       request_->url().IntPort() : INTERNET_DEFAULT_FTP_PORT;
 
-  connection_handle_ = InternetConnectA(GetTheInternet(),
-                                        request_->url().host().c_str(),
-                                        port,
-                                        have_auth ? username.c_str() : NULL,
-                                        have_auth ? password.c_str() : NULL,
-                                        INTERNET_SERVICE_FTP, flags,
-                                        reinterpret_cast<DWORD_PTR>(this));
+  connection_handle_ = InternetConnectA(
+      GetTheInternet(),
+      request_->url().HostNoBrackets().c_str(),
+      port,
+      have_auth ? username.c_str() : NULL,
+      have_auth ? password.c_str() : NULL,
+      INTERNET_SERVICE_FTP, flags,
+      reinterpret_cast<DWORD_PTR>(this));
 
   if (connection_handle_) {
     OnConnect();
@@ -278,7 +281,8 @@ void URLRequestFtpJob::GetAuthChallengeInfo(
          (server_auth_->state == net::AUTH_STATE_NEED_AUTH));
   scoped_refptr<net::AuthChallengeInfo> auth_info = new net::AuthChallengeInfo;
   auth_info->is_proxy = false;
-  auth_info->host = UTF8ToWide(request_->url().host());
+  auth_info->host_and_port = ASCIIToWide(
+      net::GetHostAndPort(request_->url()));
   auth_info->scheme = L"";
   auth_info->realm = L"";
   result->swap(auth_info);
@@ -385,11 +389,21 @@ void URLRequestFtpJob::OnFindFile(DWORD last_error) {
         (static_cast<unsigned __int64>(find_data_.nFileSizeHigh) << 32) |
         find_data_.nFileSizeLow;
 
-    // We don't know the encoding, and can't assume utf8, so pass the 8bit
-    // directly to the browser for it to decide.
+    // We don't know the encoding used on an FTP server, but we
+    // use FtpFindFirstFileA, which I guess does NOT preserve
+    // the raw byte sequence because it's implemented in terms
+    // of FtpFindFirstFileW. Without the raw byte sequence, we
+    // can't apply the encoding detection or other heuristics
+    // to determine/guess the encoding. Neither can we use UTF-8
+    // used by a RFC-2640-compliant FTP server. In some cases (e.g.
+    // the default code page is an SBCS with almost all bytes assigned.
+    // In lucky cases, it's even possible with a DBCS), it's possible
+    // to recover the raw byte sequence in most cases. We can do
+    // some more here, but it's not worth the effort because  we're
+    // going to replace this class with URLRequestNewFtpJob.
     string file_entry = net::GetDirectoryListingEntry(
-        find_data_.cFileName, false, size,
-        base::Time::FromFileTime(find_data_.ftLastWriteTime));
+        base::SysNativeMBToWide(find_data_.cFileName), std::string(),
+        false, size, base::Time::FromFileTime(find_data_.ftLastWriteTime));
     WriteData(&file_entry, true);
 
     FindNextFile();
@@ -404,14 +418,20 @@ void URLRequestFtpJob::OnStartDirectoryTraversal() {
   state_ = GETTING_DIRECTORY;
 
   // Unescape the URL path and pass the raw 8bit directly to the browser.
+  //
+  // Here we can try to detect the encoding although it may not be very
+  // reliable because it's not likely to be long enough. Because this class
+  // will be replaced by URLRequestNewFtpJob and is used only on Windows,
+  // we use SysNativeMBToWide as a stopgap measure.
   string html = net::GetDirectoryListingHeader(
-      UnescapeURLComponent(request_->url().path(),
-          UnescapeRule::SPACES | UnescapeRule::URL_SPECIAL_CHARS));
+      base::SysNativeMBToWide(UnescapeURLComponent(request_->url().path(),
+          UnescapeRule::SPACES | UnescapeRule::URL_SPECIAL_CHARS)));
 
   // If this isn't top level directory (i.e. the path isn't "/",) add a link to
   // the parent directory.
   if (request_->url().path().length() > 1)
-    html.append(net::GetDirectoryListingEntry("..", false, 0, base::Time()));
+    html.append(net::GetDirectoryListingEntry(L"..", std::string(),
+          false, 0, base::Time()));
 
   WriteData(&html, true);
 

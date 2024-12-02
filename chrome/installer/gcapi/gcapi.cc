@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -162,7 +162,7 @@ bool IsChromeInstalled(HKEY root_key) {
   return false;
 }
 
-bool IsWinXPSp1OrLater(bool* is_vista_or_later) {
+bool IsWinXPSp2OrLater(bool* is_vista_or_later) {
   OSVERSIONINFOEX osviex = { sizeof(OSVERSIONINFOEX) };
   int r = ::GetVersionEx((LPOSVERSIONINFO)&osviex);
   // If this failed we're on Win9X or a pre NT4SP6 OS.
@@ -177,8 +177,8 @@ bool IsWinXPSp1OrLater(bool* is_vista_or_later) {
     return true;    // way beyond Windows XP;
   }
 
-  if (osviex.dwMinorVersion >= 1 && osviex.wServicePackMajor >= 1)
-    return true;    // Windows XP SP1 or better.
+  if (osviex.dwMinorVersion >= 1 && osviex.wServicePackMajor >= 2)
+    return true;    // Windows XP SP2 or better.
 
   return false;     // Windows 2000, WinXP no Service Pack.
 }
@@ -231,7 +231,7 @@ bool VerifyHKLMAccess(const wchar_t* sub_key) {
 bool IsRunningElevated() {
   // This method should be called only for Vista or later.
   bool is_vista_or_later = false;
-  IsWinXPSp1OrLater(&is_vista_or_later);
+  IsWinXPSp2OrLater(&is_vista_or_later);
   if (!is_vista_or_later || !VerifyAdminGroup())
     return false;
 
@@ -289,7 +289,7 @@ DLLEXPORT BOOL __stdcall GoogleChromeCompatibilityCheck(BOOL set_flag,
 
   bool is_vista_or_later = false;
   // System requirements?
-  if (!IsWinXPSp1OrLater(&is_vista_or_later))
+  if (!IsWinXPSp2OrLater(&is_vista_or_later))
     local_reasons |= GCCC_ERROR_OSNOTSUPPORTED;
 
   if (IsChromeInstalled(HKEY_LOCAL_MACHINE))
@@ -314,7 +314,7 @@ DLLEXPORT BOOL __stdcall GoogleChromeCompatibilityCheck(BOOL set_flag,
   if (reasons != NULL)
     *reasons = local_reasons;
 
-  return (*reasons == 0);
+  return (local_reasons == 0);
 }
 
 #pragma comment(linker, "/EXPORT:LaunchGoogleChrome=_LaunchGoogleChrome@0,PRIVATE")
@@ -367,8 +367,8 @@ DLLEXPORT BOOL __stdcall LaunchGoogleChrome() {
         HANDLE process_handle = ::OpenProcess(
             PROCESS_DUP_HANDLE | PROCESS_QUERY_INFORMATION, TRUE, pid);
         if (process_handle != NULL) {
-          HANDLE process_token;
-          HANDLE user_token;
+          HANDLE process_token = NULL;
+          HANDLE user_token = NULL;
           if (::OpenProcessToken(process_handle, TOKEN_DUPLICATE | TOKEN_QUERY,
                                  &process_token) &&
               ::DuplicateTokenEx(process_token,
@@ -379,8 +379,10 @@ DLLEXPORT BOOL __stdcall LaunchGoogleChrome() {
               (::ImpersonateLoggedOnUser(user_token) != 0)) {
             impersonation_success = true;
           }
-          ::CloseHandle(user_token);
-          ::CloseHandle(process_token);
+          if (user_token)
+            ::CloseHandle(user_token);
+          if (process_token)
+            ::CloseHandle(process_token);
           ::CloseHandle(process_handle);
         }
       }
@@ -407,4 +409,43 @@ DLLEXPORT BOOL __stdcall LaunchGoogleChrome() {
     ::RevertToSelf();
   ::CoUninitialize();
   return ret;
+}
+
+#pragma comment(linker, "/EXPORT:LaunchGoogleChromeWithDimensions=_LaunchGoogleChromeWithDimensions@16,PRIVATE")
+DLLEXPORT BOOL __stdcall LaunchGoogleChromeWithDimensions(int x,
+                                                          int y,
+                                                          int width,
+                                                          int height) {
+  if (!LaunchGoogleChrome())
+    return false;
+
+  HWND handle = NULL;
+  int seconds_elapsed = 0;
+
+  // Chrome may have been launched, but the window may not have appeared
+  // yet. Wait for it to appear for 10 seconds, but exit if it takes longer
+  // than that.
+  while (!handle && seconds_elapsed < 10) {
+    handle = FindWindowEx(NULL, handle, L"Chrome_WidgetWin_0", NULL);
+    if (!handle) {
+      Sleep(1000);
+      seconds_elapsed++;
+    }
+  }
+
+  if(!handle)
+    return false;
+
+  // At this point, there are several top-level Chrome windows
+  // but we only want the window that has child windows.
+
+  // This loop iterates through all of the top-level Windows named
+  // Chrome_WidgetWin_0, and looks for the first one with any children.
+  while (handle && !FindWindowEx(handle, NULL, L"Chrome_WidgetWin_0", NULL)) {
+    // Get the next top-level Chrome window.
+    handle = FindWindowEx(NULL, handle, L"Chrome_WidgetWin_0", NULL);
+  }
+
+  return (handle &&
+          SetWindowPos(handle, 0, x, y, width, height, SWP_NOZORDER));
 }

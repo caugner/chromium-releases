@@ -9,13 +9,14 @@
 
 #include "base/basictypes.h"
 #include "chrome/browser/tab_contents/navigation_controller.h"
-#include "skia/include/SkBitmap.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 #include "webkit/glue/window_open_disposition.h"
 
 class AlertInfoBarDelegate;
 class ConfirmInfoBarDelegate;
 class InfoBar;
 class LinkInfoBarDelegate;
+class ThemePreviewInfobarDelegate;
 
 // An interface implemented by objects wishing to control an InfoBar.
 // Implementing this interface is not sufficient to use an InfoBar, since it
@@ -65,6 +66,10 @@ class InfoBarDelegate {
   // platform-specific.
   virtual InfoBar* CreateInfoBar() = 0;
 
+  // Return the icon to be shown for this InfoBar. If the returned bitmap is
+  // NULL, no icon is shown.
+  virtual SkBitmap* GetIcon() const { return NULL; }
+
   // Returns a pointer to the AlertInfoBarDelegate interface, if implemented.
   virtual AlertInfoBarDelegate* AsAlertInfoBarDelegate() {
     return NULL;
@@ -77,6 +82,12 @@ class InfoBarDelegate {
 
   // Returns a pointer to the ConfirmInfoBarDelegate interface, if implemented.
   virtual ConfirmInfoBarDelegate* AsConfirmInfoBarDelegate() {
+    return NULL;
+  }
+
+  // Returns a pointer to the ThemePreviewInfobarDelegate interface, if
+  // implemented.
+  virtual ThemePreviewInfobarDelegate* AsThemePreviewInfobarDelegate() {
     return NULL;
   }
 
@@ -108,8 +119,7 @@ class AlertInfoBarDelegate : public InfoBarDelegate {
   // Returns the message string to be displayed for the InfoBar.
   virtual std::wstring GetMessageText() const = 0;
 
-  // Return the icon to be shown for this InfoBar. If the returned bitmap is
-  // NULL, no icon is shown.
+  // Overridden from InfoBarDelegate.
   virtual SkBitmap* GetIcon() const { return NULL; }
 
   // Overridden from InfoBarDelegate:
@@ -139,8 +149,7 @@ class LinkInfoBarDelegate : public InfoBarDelegate {
   // Returns the text of the link to be displayed.
   virtual std::wstring GetLinkText() const = 0;
 
-  // Returns the icon that should be shown for this InfoBar, or NULL if there is
-  // none.
+  // Overridden from InfoBarDelegate.
   virtual SkBitmap* GetIcon() const { return NULL; }
 
   // Called when the Link is clicked. The |disposition| specifies how the
@@ -170,8 +179,10 @@ class ConfirmInfoBarDelegate : public AlertInfoBarDelegate {
  public:
   enum InfoBarButton {
     BUTTON_NONE = 0,
-    BUTTON_OK,
-    BUTTON_CANCEL
+    BUTTON_OK = 1,
+    BUTTON_CANCEL = 2,
+    // Specifies that the OK button should be rendered like a default button.
+    BUTTON_OK_DEFAULT = 4
   };
 
   // Return the buttons to be shown for this InfoBar.

@@ -148,6 +148,9 @@ be available for now. -->
       <message name="IDS_BROWSER_WINDOW_TITLE_FORMAT" desc="The format for titles displayed in tabs and popup windows">
         <ph name="PAGE_TITLE">$1<ex>Google</ex></ph> - Chromium
       </message>
+      <message name="IDS_BROWSER_WINDOW_TITLE_FORMAT_NO_LOGO" desc="The format for titles displayed when the window has no distributor logo displayed">
+        <ph name="PAGE_TITLE">$1<ex>Google</ex></ph>
+      </message>
       <message name="IDS_ABOUT_VERSION_COMPANY_NAME" desc="Company name on the about pages">
         The Chromium Authors
       </message>
@@ -190,7 +193,7 @@ be available for now. -->
         Please close all Chromium windows and try again.
       </message>
       <message name="IDS_UNINSTALL_VERIFY" desc="Message to confirm user wants to uninstall">
-        Are you sure you want to uninstall Chromium? (Was it something we said?)
+        Are you sure you want to uninstall Chromium?
       </message>
       <message name="IDS_UNINSTALL_CHROME" desc="The text of the shortcut in the Start Menu for uninstalling chrome.">
         Uninstall Chromium
@@ -240,7 +243,7 @@ be available for now. -->
         Please close all Chromium windows and restart Chromium for this change to take effect.
       </message>
       <message name="IDS_OPTIONS_RESET_MESSAGE" desc="The message shown when the user presses the 'Reset Chrome options' button">
-        When you reset Chromium options any changes you've made will be reverted to the default settings. Do you want to Reset Chromium options?
+        When you reset Chromium options any changes you've made will be reverted to the default settings. Do you want to reset Chromium options?
       </message>
       <message name="IDS_CANT_WRITE_USER_DIRECTORY_SUMMARY" desc="Summary of problem displayed in dialog when we can't create a directory for this user.">
         Chromium cannot read and write to its data directory:\n\n<ph name="USER_DATA_DIRECTORY">$1<ex>C:\Documents and Settings\devint\Local Settings\Application Data\Google\Chrome</ex></ph>
@@ -285,8 +288,11 @@ be available for now. -->
       <message name="IDS_INSTALL_FAILED" desc="Error displayed if installation fails due to some unknown error.">
         Installation failed due to unspecified error. If Chromium is currently running, please close it and try again.
       </message>
+      <message name="IDS_SETUP_PATCH_FAILED" desc="Error message when setup.exe fails to patch itself.">
+        Installation failed due to unspecified error. Please download Chromium again.
+      </message>
       <message name="IDS_INSTALL_OS_NOT_SUPPORTED" desc="Error displayed if OS is not supported">
-        Chromium requires Windows Vista or Windows XP with SP1 or higher.
+        Chromium requires Windows Vista or Windows XP with SP2 or higher.
       </message>
       <message name="IDS_INSTALL_OS_ERROR" desc="Error displayed when any Windows API call fails and we do not have more specific information.">
         An operating system error occurred during installation. Please download Chromium again.
@@ -328,6 +334,40 @@ be available for now. -->
       <message name="IDS_SHORTCUT_TOOLTIP" desc="Text for the hover-on tooltip for the Chromium shortcuts.">
         Access the Internet
       </message>
+      <message name="IDS_UNINSTALL_DELETE_PROFILE" desc="Text to show user to ask whether to delete all the profile data also during uninstallation.">
+        Also delete your browsing data?
+      </message>
+      <message name="IDS_DEFAULT_BROWSER_INFOBAR_TEXT" desc="Text to show in the default browser query infobar.">
+        Hooray, you're back! But Chromium isn't your default browser.
+      </message>
+      <message name="IDS_DEFAULT_BROWSER_INFOBAR_SHORT_TEXT" desc="More compact text to show in the default browser query infobar.">
+        Chromium isn't your default browser.
+      </message>
+      <!-- Try Chrome Toast Dialog -->
+      <message name="IDS_TRY_TOAST_HEADING" desc="Top line of the try-chrome-again dialog">
+        There is a new version of Chromium available.
+      </message>
+      <message name="IDS_TRY_TOAST_TRY_OPT" desc="First option radio button on the dialog to try chrome">
+        Try it out (already installed)
+      </message>
+      <message name="IDS_TRY_TOAST_CANCEL" desc="Try chrome again dialog Cancel button">
+        Don't bug me
+      </message>
+      <message name="IDS_TRY_TOAST_WHY" desc="Text of the url link that explains why this dialog is being shown">
+        Why am I seeing this?
+      </message>
+
+      <if expr="os == 'darwin'">
+        <message name="IDS_EXIT_MAC" desc="The menu item to quit the browser in the app menu.">
+          Quit Chromium
+        </message>
+        <message name="IDS_HIDE_MAC" desc="The menu item to hide all browser windows in the app menu.">
+          Hide Chromium
+        </message>
+        <message name="IDS_HELP_MAC" desc="The menu item to show help in the Help menu.">
+          Chromium Help
+        </message>
+      </if>
     </messages>
   </release>
 </grit>

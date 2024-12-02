@@ -39,7 +39,8 @@
 // 
 // ***** END LICENSE BLOCK *****
 
-// Chromium note: this is Mozilla's revision 20597:6ecaa44f559e of this file.
+// Chromium note: this based on Mozilla's file:
+//  http://mxr.mozilla.org/mozilla/source/netwerk/dns/src/effective_tld_names.dat?raw=1
 
 // ac : http://en.wikipedia.org/wiki/.ac
 ac
@@ -684,7 +685,14 @@ za.com
 coop
 
 // cr : http://en.wikipedia.org/wiki/.cr
-*.cr
+cr
+ac.cr
+co.cr
+ed.cr
+fi.cr
+go.cr
+or.cr
+sa.cr
 
 // cu : http://en.wikipedia.org/wiki/.cu
 cu
@@ -3621,7 +3629,13 @@ com.pt
 nome.pt
 
 // pw : http://en.wikipedia.org/wiki/.pw
-*.pw
+pw
+co.pw
+ne.pw
+or.pw
+ed.pw
+go.pw
+belau.pw
 
 // py : http://www.nic.py/faq_a.html#faq_b
 *.py
@@ -4190,6 +4204,7 @@ or.ug
 !icnet.uk
 !jet.uk
 !nel.uk
+!nhs.uk
 !nls.uk
 !national-library-scotland.uk
 !parliament.uk

@@ -4,7 +4,7 @@
 
 #include "base/string_util.h"
 #include "chrome/test/ui/ui_test.h"
-#include "chrome/browser/automation/url_request_failed_dns_job.h"
+#include "chrome/browser/net/url_request_failed_dns_job.h"
 #include "net/url_request/url_request_unittest.h"
 
 class ErrorPageTest : public UITest {
@@ -20,7 +20,7 @@ TEST_F(ErrorPageTest, DNSError) {
   int i;
   std::wstring title;
   for (i = 0; i < 10; ++i) {
-    Sleep(sleep_timeout_ms());
+    PlatformThread::Sleep(sleep_timeout_ms());
     title = GetActiveTabTitle();
     if (title.find(test_host) != std::wstring::npos) {
       // Success, bail out.
@@ -49,7 +49,7 @@ TEST_F(ErrorPageTest, IFrame404) {
   int i;
   std::wstring title;
   for (i = 0; i < 10; ++i) {
-    Sleep(sleep_timeout_ms());
+    PlatformThread::Sleep(sleep_timeout_ms());
     title = GetActiveTabTitle();
     if (title == L"SUCCESS") {
       // Success, bail out.

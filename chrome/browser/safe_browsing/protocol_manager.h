@@ -16,6 +16,7 @@
 #include "base/hash_tables.h"
 #include "base/scoped_ptr.h"
 #include "base/time.h"
+#include "base/timer.h"
 #include "chrome/browser/net/url_fetcher.h"
 #include "chrome/browser/safe_browsing/chunk_range.h"
 #include "chrome/browser/safe_browsing/protocol_parser.h"
@@ -150,6 +151,10 @@ class SafeBrowsingProtocolManager : public URLFetcher::Delegate {
 
   // Helper function for update completion.
   void UpdateFinished(bool success);
+
+  // A callback that runs if we timeout waiting for a response to an update
+  // request. We use this to properly set our update state.
+  void UpdateResponseTimeout();
 
  private:
   // Main SafeBrowsing interface object.

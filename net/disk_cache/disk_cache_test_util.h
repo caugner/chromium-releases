@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,8 @@
 #include "base/file_path.h"
 #include "base/message_loop.h"
 #include "base/task.h"
+#include "base/timer.h"
+#include "net/base/test_completion_callback.h"
 
 // Re-creates a given test file inside the cache test folder.
 bool CreateCacheTestFile(const wchar_t* name);
@@ -31,13 +33,14 @@ bool DeleteFiles(const wchar_t* path, const wchar_t* search_name);
 std::string GenerateKey(bool same_length);
 
 // Returns true if the cache is not corrupt.
-bool CheckCacheIntegrity(const std::wstring& path);
+bool CheckCacheIntegrity(const std::wstring& path, bool new_eviction);
 
 // Helper class which ensures that the cache dir returned by GetCachePath exists
 // and is clear in ctor and that the directory gets deleted in dtor.
 class ScopedTestCache {
  public:
   ScopedTestCache();
+  ScopedTestCache(const std::wstring& name);  // Use a specific folder name.
   ~ScopedTestCache();
 
   FilePath path() const { return FilePath::FromWStringHack(path_); }
@@ -51,19 +54,38 @@ class ScopedTestCache {
 
 // -----------------------------------------------------------------------
 
-// Simple callback to process IO completions from the cache.
+// Simple callback to process IO completions from the cache. It allows tests
+// with multiple simultaneous IO operations.
 class CallbackTest : public CallbackRunner< Tuple1<int> >  {
  public:
-  explicit CallbackTest(int id) : id_(id), reuse_(0) {}
-  explicit CallbackTest(int id, bool reuse) : id_(id), reuse_(reuse ? 0 : 1) {}
+  explicit CallbackTest(bool reuse) : result_(-1), reuse_(reuse ? 0 : 1) {}
   ~CallbackTest() {}
 
   virtual void RunWithParams(const Tuple1<int>& params);
+  int result() const { return result_; }
 
  private:
-  int id_;
+  int result_;
   int reuse_;
   DISALLOW_COPY_AND_ASSIGN(CallbackTest);
+};
+
+// -----------------------------------------------------------------------
+
+// Simple callback to process IO completions from the cache. This object is not
+// intended to be used when multiple IO operations are in-flight at the same
+// time.
+class SimpleCallbackTest : public TestCompletionCallback  {
+ public:
+  SimpleCallbackTest() {}
+  ~SimpleCallbackTest() {}
+
+  // Returns the final result of the IO operation. If |result| is
+  // net::ERR_IO_PENDING, it waits for the callback be invoked.
+  int GetResult(int result);
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(SimpleCallbackTest);
 };
 
 // -----------------------------------------------------------------------

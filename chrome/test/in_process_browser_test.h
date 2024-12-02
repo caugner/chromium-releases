@@ -5,13 +5,14 @@
 #ifndef CHROME_TEST_IN_PROCESS_BROWSER_TEST_H_
 #define CHROME_TEST_IN_PROCESS_BROWSER_TEST_H_
 
-#include "chrome/common/notification_registrar.h"
-#include "chrome/common/notification_observer.h"
 #include "net/url_request/url_request_unittest.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 class Browser;
 class Profile;
+namespace net {
+class RuleBasedHostResolverProc;
+}
 
 // Base class for tests wanting to bring up a browser in the unit test process.
 // Writing tests with InProcessBrowserTest is slightly different than that of
@@ -36,7 +37,7 @@ class Profile;
 // InProcessBrowserTest disables the sandbox when running.
 //
 // See ui_test_utils for a handful of methods designed for use with this class.
-class InProcessBrowserTest : public testing::Test, public NotificationObserver {
+class InProcessBrowserTest : public testing::Test {
  public:
   InProcessBrowserTest();
 
@@ -51,18 +52,30 @@ class InProcessBrowserTest : public testing::Test, public NotificationObserver {
   // Restores state configured in SetUp.
   virtual void TearDown();
 
-  // Used to track when the browser_ is destroyed. Resets the |browser_| field
-  // to NULL.
-  virtual void Observe(NotificationType type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
-
  protected:
   // Returns the browser created by CreateBrowser.
   Browser* browser() const { return browser_; }
 
   // Override this rather than TestBody.
   virtual void RunTestOnMainThread() = 0;
+
+  // Override this to add command line flags specific to your test.
+  virtual void SetUpCommandLine(CommandLine* command_line) {}
+
+  // Override this to add any custom cleanup code that needs to be done on the
+  // main thread before the browser is torn down.
+  virtual void CleanUpOnMainThread() {}
+
+  // Allows subclasses to configure the host resolver procedure. By default
+  // this blocks requests to google.com as Chrome pings that on startup and we
+  // don't want to do that during testing.
+  virtual void ConfigureHostResolverProc(net::RuleBasedHostResolverProc* proc);
+
+  // Invoked when a test is not finishing in a timely manner.
+  void TimedOut();
+
+  // Sets Initial Timeout value.
+  void SetInitialTimeoutInMS(int initial_timeout);
 
   // Starts an HTTP server.
   HTTPTestServer* StartHTTPServer();
@@ -87,9 +100,6 @@ class InProcessBrowserTest : public testing::Test, public NotificationObserver {
   // Browser created from CreateBrowser.
   Browser* browser_;
 
-  // Used to track when the browser is deleted.
-  NotificationRegistrar registrar_;
-
   // HTTPServer, created when StartHTTPServer is invoked.
   scoped_refptr<HTTPTestServer> http_server_;
 
@@ -110,6 +120,9 @@ class InProcessBrowserTest : public testing::Test, public NotificationObserver {
 
   // Saved to restore the value of RenderProcessHost::run_renderer_in_process.
   bool original_single_process_;
+
+  // Initial timeout value in ms.
+  int initial_timeout_;
 
   DISALLOW_COPY_AND_ASSIGN(InProcessBrowserTest);
 };

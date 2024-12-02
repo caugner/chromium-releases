@@ -2,23 +2,52 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "chrome/browser/cocoa/nsimage_cache.h"
+#include "chrome/browser/cocoa/tab_controller.h"
 #include "chrome/browser/cocoa/tab_view.h"
-
 #include "chrome/browser/cocoa/tab_window_controller.h"
 
+
+// Constants for inset and control points for tab shape.
+static const CGFloat kInsetMultiplier = 2.0/3.0;
+static const CGFloat kControlPoint1Multiplier = 1.0/3.0;
+static const CGFloat kControlPoint2Multiplier = 3.0/8.0;
+
+static const CGFloat kToolbarTopOffset = 12;
+static const CGFloat kToolbarMaxHeight = 128;
+
 @implementation TabView
+
+@synthesize state = state_;
 
 - (id)initWithFrame:(NSRect)frame {
   self = [super initWithFrame:frame];
   if (self) {
+    [self setShowsDivider:NO];
     // TODO(alcor): register for theming, either here or the cell
     // [self gtm_registerForThemeNotifications];
   }
   return self;
 }
 
+- (void)awakeFromNib {
+  [self setShowsDivider:NO];
+  // Set up the tracking rect for the close button mouseover.  Add it
+  // to the |closeButton_| view, but we'll handle the message ourself.
+  // The mouseover is always enabled, because the close button works
+  // regardless of key/main/active status.
+  trackingArea_.reset(
+      [[NSTrackingArea alloc] initWithRect:[closeButton_ bounds]
+                                   options:NSTrackingMouseEnteredAndExited |
+                                           NSTrackingActiveAlways
+                                     owner:self
+                                  userInfo:nil]);
+  [closeButton_ addTrackingArea:trackingArea_.get()];
+}
+
 - (void)dealloc {
   // [self gtm_unregisterForThemeNotifications];
+  [closeButton_ removeTrackingArea:trackingArea_.get()];
   [super dealloc];
 }
 
@@ -29,12 +58,32 @@
   return YES;
 }
 
-// Determines which view a click in our frame actually hit. It's always this
-// view, never a child.
-// TODO(alcor): Figure out what to do with the close button. Are we using a
-// NSButton for it, or drawing it ourselves with a cell?
+- (void)mouseEntered:(NSEvent *)theEvent {
+  // We only set up one tracking area, so we know any mouseEntered:
+  // messages are for close button mouseovers.
+  [closeButton_ setImage:nsimage_cache::ImageNamed(@"close_bar_h.pdf")];
+}
+
+- (void)mouseExited:(NSEvent *)theEvent {
+  // We only set up one tracking area, so we know any mouseExited:
+  // messages are for close button mouseovers.
+  [closeButton_ setImage:nsimage_cache::ImageNamed(@"close_bar.pdf")];
+}
+
+// Determines which view a click in our frame actually hit. It's either this
+// view or our child close button.
 - (NSView *)hitTest:(NSPoint)aPoint {
-  if (NSPointInRect(aPoint, [self frame])) return self;
+  NSPoint viewPoint = [self convertPoint:aPoint fromView:[self superview]];
+  NSRect frame = [self frame];
+
+  // Reduce the width of the hit rect slightly to remove the overlap
+  // between adjacent tabs.  The drawing code in TabCell has the top
+  // corners of the tab inset by height*2/3, so we inset by half of
+  // that here.  This doesn't completely eliminate the overlap, but it
+  // works well enough.
+  NSRect hitRect = NSInsetRect(frame, frame.size.height / 3.0f, 0);
+  if (NSPointInRect(viewPoint, [closeButton_ frame])) return closeButton_;
+  if (NSPointInRect(aPoint, hitRect)) return self;
   return nil;
 }
 
@@ -43,195 +92,409 @@
 // TODO(pinkerton/alcor): This routine needs *a lot* of work to marry Cole's
 // ideas of dragging cocoa views between windows and how the Browser and
 // TabStrip models want to manage tabs.
-- (void)mouseDown:(NSEvent *)theEvent {
-  // Make sure the controller doesn't go away while we're doing this.
-  // TODO(pinkerton): cole had this, not sure why it's necessary.
-  [[controller_ retain] autorelease];
 
+static const CGFloat kTearDistance = 36.0;
+static const NSTimeInterval kTearDuration = 0.333;
+static const double kDragStartDistance = 3.0;
+
+- (void)mouseDown:(NSEvent *)theEvent {
   // Fire the action to select the tab.
   if ([[controller_ target] respondsToSelector:[controller_ action]])
     [[controller_ target] performSelector:[controller_ action]
                                withObject:self];
 
-  // TODO(pinkerton): necessary to pre-arrange the tabs here?
-
   // Resolve overlay back to original window.
-  NSWindow* sourceWindow = [self window];
-  if ([sourceWindow isKindOfClass:[NSPanel class]]) {
-    sourceWindow = [sourceWindow parentWindow];
+  sourceWindow_ = [self window];
+  if ([sourceWindow_ isKindOfClass:[NSPanel class]]) {
+    sourceWindow_ = [sourceWindow_ parentWindow];
   }
-  TabWindowController* sourceController = [sourceWindow windowController];
-  TabWindowController* draggedController = nil;
-  TabWindowController* targetController = nil;
 
-  BOOL isLastTab = NO;  // TODO(alcor)
+  sourceWindowFrame_ = [sourceWindow_ frame];
+  sourceTabFrame_ = [self frame];
+  sourceController_ = [sourceWindow_ windowController];
+  draggedController_ = nil;
+  dragWindow_ = nil;
+  dragOverlay_ = nil;
+  targetController_ = nil;
+  tabWasDragged_ = NO;
+  tearTime_ = 0.0;
+  draggingWithinTabStrip_ = YES;
 
-  NSWindow* dragWindow = nil;
-  NSWindow* dragOverlay = nil;
-  BOOL dragging = YES;
-  BOOL moved = NO;
+  // We don't want to "tear off" a tab if there's only one in the window. Treat
+  // it like we're dragging around a tab we've already detached. Note that
+  // unit tests might have |-numberOfTabs| reporting zero since the model
+  // won't be fully hooked up. We need to be prepared for that and not send
+  // them into the "magnetic" codepath.
+  isTheOnlyTab_ = [sourceController_ numberOfTabs] <= 1;
 
+  dragOrigin_ = [NSEvent mouseLocation];
+
+  // Because we move views between windows, we need to handle the event loop
+  // ourselves. Ideally we should use the standard event loop.
+  while (1) {
+    theEvent =
+    [NSApp nextEventMatchingMask:NSLeftMouseUpMask | NSLeftMouseDraggedMask
+                       untilDate:[NSDate distantFuture]
+                          inMode:NSDefaultRunLoopMode dequeue:YES];
+    NSPoint thisPoint = [NSEvent mouseLocation];
+
+    NSEventType type = [theEvent type];
+    if (type == NSLeftMouseDragged) {
+      [self mouseDragged:theEvent];
+    } else { // Mouse Up
+      [self mouseUp:theEvent];
+      break;
+    }
+  }
+}
+
+- (void)mouseDragged:(NSEvent *)theEvent {
+  // First, go through the magnetic drag cycle. We break out of this if
+  // "stretchiness" ever exceeds the a set amount.
+  tabWasDragged_ = YES;
+
+  if (isTheOnlyTab_) draggingWithinTabStrip_ = NO;
+  if (draggingWithinTabStrip_) {
+    NSRect frame = [self frame];
+    NSPoint thisPoint = [NSEvent mouseLocation];
+    CGFloat stretchiness = thisPoint.y - dragOrigin_.y;
+    stretchiness = copysign(sqrtf(fabs(stretchiness))/sqrtf(kTearDistance),
+                            stretchiness) / 2.0;
+    CGFloat offset = thisPoint.x - dragOrigin_.x;
+    if (fabsf(offset) > 100) stretchiness = 0;
+    [sourceController_ insertPlaceholderForTab:self
+                                         frame:NSOffsetRect(sourceTabFrame_,
+                                                            offset, 0)
+                                 yStretchiness:stretchiness];
+
+    CGFloat tearForce = fabs(thisPoint.y - dragOrigin_.y);
+    if (tearForce > kTearDistance) {
+      draggingWithinTabStrip_ = NO;
+      // When you finally leave the strip, we treat that as the origin.
+      dragOrigin_.x = thisPoint.x;
+    } else {
+      return;
+    }
+  }
+
+  NSPoint lastPoint =
+    [[theEvent window] convertBaseToScreen:[theEvent locationInWindow]];
+
+  // Do not start dragging until the user has "torn" the tab off by
+  // moving more than 3 pixels.
   NSDate* targetDwellDate = nil; // The date this target was first chosen
   NSMutableArray* targets = [NSMutableArray array];
 
-  NSPoint lastPoint =
-      [[theEvent window] convertBaseToScreen:[theEvent locationInWindow]];
+  NSPoint thisPoint = [NSEvent mouseLocation];
 
-  while (dragging) {
-    theEvent =
-        [NSApp nextEventMatchingMask:NSLeftMouseUpMask | NSLeftMouseDraggedMask
-                           untilDate:[NSDate distantFuture]
-                              inMode:NSDefaultRunLoopMode dequeue:YES];
-    NSPoint thisPoint = [NSEvent mouseLocation];
-
-    // Find all the windows that could be a target. It has to be of the
-    // appropriate class, and visible (obviously).
-    if (![targets count]) {
-      for (NSWindow* window in [NSApp windows]) {
-        if (window == sourceWindow && isLastTab) continue;
-        if (window == dragWindow) continue;
-        if (![window isVisible]) continue;
-        NSWindowController *controller = [window windowController];
-        if ([controller isKindOfClass:[TabWindowController class]]) {
+  // Find all the windows that could be a target. It has to be of the
+  // appropriate class, and visible (obviously).
+  if (![targets count]) {
+    for (NSWindow* window in [NSApp windows]) {
+      if (window == sourceWindow_ && isTheOnlyTab_) continue;
+      if (window == dragWindow_) continue;
+      if (![window isVisible]) continue;
+      NSWindowController *controller = [window windowController];
+      if ([controller isKindOfClass:[TabWindowController class]]) {
+        TabWindowController* realController =
+            static_cast<TabWindowController*>(controller);
+        if ([realController canReceiveFrom:sourceController_]) {
           [targets addObject:controller];
         }
       }
     }
+  }
 
-    // Iterate over possible targets checking for the one the mouse is in.
-    // The mouse can be in either the tab or window frame.
-    TabWindowController* newTarget = nil;
-    for (TabWindowController* target in targets) {
-      NSRect windowFrame = [[target window] frame];
-      if (NSPointInRect(thisPoint, windowFrame)) {
-        if (NSPointInRect(thisPoint, [[target tabStripView] frame])) {
-          newTarget = target;
-        }
-        break;
+  // Iterate over possible targets checking for the one the mouse is in.
+  // The mouse can be in either the tab or window frame.
+  TabWindowController* newTarget = nil;
+  for (TabWindowController* target in targets) {
+    NSRect windowFrame = [[target window] frame];
+    if (NSPointInRect(thisPoint, windowFrame)) {
+      NSRect tabStripFrame = [[target tabStripView] frame];
+      tabStripFrame = [[target tabStripView] convertRectToBase:tabStripFrame];
+      tabStripFrame.origin = [[target window]
+                              convertBaseToScreen:tabStripFrame.origin];
+      if (NSPointInRect(thisPoint, tabStripFrame)) {
+        newTarget = target;
       }
+      break;
+    }
+  }
+
+  // If we're now targeting a new window, re-layout the tabs in the old
+  // target and reset how long we've been hovering over this new one.
+  if (targetController_ != newTarget) {
+    targetDwellDate = [NSDate date];
+    [targetController_ removePlaceholder];
+    targetController_ = newTarget;
+    if (!newTarget) {
+      tearTime_ = [NSDate timeIntervalSinceReferenceDate];
+      tearOrigin_ = [dragWindow_ frame].origin;
+    }
+  }
+
+  // Create or identify the dragged controller.
+  if (!draggedController_) {
+    if (isTheOnlyTab_) {
+      draggedController_ = sourceController_;
+      dragWindow_ = [draggedController_ window];
+    } else {
+      // Detach from the current window and put it in a new window.
+      draggedController_ = [sourceController_ detachTabToNewWindow:self];
+      dragWindow_ = [draggedController_ window];
+      [dragWindow_ setAlphaValue:0.0];
     }
 
-    // If we're now targeting a new window, re-layout the tabs in the old
-    // target and reset how long we've been hovering over this new one.
-    if (targetController != newTarget) {
-      targetDwellDate = [NSDate date];
-      [targetController arrangeTabs];
-      targetController = newTarget;
+    // Bring the target window to the front and make sure it has a border.
+    [dragWindow_ setLevel:NSFloatingWindowLevel];
+    [dragWindow_ orderFront:nil];
+    [dragWindow_ makeMainWindow];
+    [draggedController_ showOverlay];
+    dragOverlay_ = [draggedController_ overlayWindow];
+    //if (![targets count])
+    //  [dragOverlay_ setHasShadow:NO];
+    if (!isTheOnlyTab_) {
+      tearTime_ = [NSDate timeIntervalSinceReferenceDate];
+      tearOrigin_ = sourceWindowFrame_.origin;
+    }
+  }
+
+  float tearProgress = [NSDate timeIntervalSinceReferenceDate] - tearTime_;
+  tearProgress /= kTearDuration;
+  tearProgress = sqrtf(MAX(MIN(tearProgress, 1.0), 0.0));
+
+  // Move the dragged window to the right place on the screen.
+  NSPoint origin = sourceWindowFrame_.origin;
+  origin.x += (thisPoint.x - dragOrigin_.x);
+  origin.y += (thisPoint.y - dragOrigin_.y);
+
+  if (tearProgress < 1) {
+    // If the tear animation is not complete, call back to ourself with the
+    // same event to animate even if the mouse isn't moving.
+    [NSObject cancelPreviousPerformRequestsWithTarget:self];
+    [self performSelector:@selector(mouseDragged:)
+               withObject:theEvent
+               afterDelay:1.0f/30.0f];
+
+    origin.x = (1 - tearProgress) *  tearOrigin_.x + tearProgress * origin.x;
+    origin.y = (1 - tearProgress) * tearOrigin_.y + tearProgress * origin.y;
+  }
+
+  if (targetController_)
+    origin.y = [[targetController_ window] frame].origin.y;
+  [dragWindow_ setFrameOrigin:NSMakePoint(origin.x, origin.y)];
+
+  // If we're not hovering over any window, make the window is fully
+  // opaque. Otherwise, find where the tab might be dropped and insert
+  // a placeholder so it appears like it's part of that window.
+  if (targetController_) {
+    if (![[targetController_ window] isKeyWindow]) {
+      // && ([targetDwellDate timeIntervalSinceNow] < -REQUIRED_DWELL)) {
+      [[targetController_ window] orderFront:nil];
+      [targets removeAllObjects];
+      targetDwellDate = nil;
     }
 
-    NSEventType type = [theEvent type];
-    if (type == NSLeftMouseDragged) {
-#if 0
-      // TODO(alcor): get this working...
-      moved = YES;
-      if (!draggedController) {
-        if (isLastTab) {
-          draggedController = sourceController;
-          dragWindow = [draggedController window];
-        } else {
-          // Detach from the current window.
-          // TODO(pinkerton): Create a new window, probably with
-          // Browser::CreateNewStripWithContents(), but that requires that
-          // we make some changes to return the new Browser object.
-          draggedController = [sourceController detachTabToNewWindow:self];
-          dragWindow = [draggedController window];
+    // Compute where placeholder should go and insert it into the
+    // destination tab strip.
+    NSRect dropTabFrame = [[targetController_ tabStripView] frame];
+    TabView *draggedTabView = (TabView *)[draggedController_ selectedTabView];
+    NSRect tabFrame = [draggedTabView frame];
+    tabFrame.origin = [dragWindow_ convertBaseToScreen:tabFrame.origin];
+    tabFrame.origin = [[targetController_ window]
+                        convertScreenToBase:tabFrame.origin];
+    tabFrame = [[targetController_ tabStripView]
+                convertRectFromBase:tabFrame];
+    NSPoint point =
+      [sourceWindow_ convertBaseToScreen:
+       [draggedTabView convertPointToBase:NSZeroPoint]];
+    [targetController_ insertPlaceholderForTab:self
+                                         frame:tabFrame
+                                 yStretchiness:0];
+    [targetController_ layoutTabs];
+  } else {
+    [dragWindow_ makeKeyAndOrderFront:nil];
+  }
+  BOOL chromeShouldBeVisible = targetController_ == nil;
 
-          // TODO(pinkerton): reconcile how the view moves from one window
-          // to the other with the TabStrip model wanting to create the tabs.
-          // [[sourceController tabController] removeTab:tab_];
-          // [[sourceController tabController] addTab:tab_];
-          [dragWindow setAlphaValue:0.0];
-        }
-
-        // Bring the target window to the front and make sure it has a border.
-        [[draggedController window] setLevel:NSFloatingWindowLevel];
-        [dragWindow orderFront:nil];
-        [dragWindow makeMainWindow];
-        [draggedController showOverlay];
-        dragOverlay = [draggedController overlayWindow];
-
-        if (![targets count])
-          [dragOverlay setHasShadow:NO];
-      } else {
-        NSPoint origin = [dragWindow frame].origin;
-        origin.x += thisPoint.x - lastPoint.x;
-        origin.y += thisPoint.y - lastPoint.y;
-        [dragWindow setFrameOrigin:NSMakePoint(origin.x, origin.y)];
-      }
-
-      // If we're not hovering over any window, make the window is fully
-      // opaque. Otherwise, find where the tab might be dropped and insert
-      // a placeholder so it appears like it's part of that window.
-      if (!targetContoller) {
-        [[dragWindow animator] setAlphaValue:1.0];
-      } else {
-        if (![[targetController window] isKeyWindow]) {
-          // && ([targetDwellDate timeIntervalSinceNow] < -REQUIRED_DWELL)) {
-          [[targetController window] makeKeyAndOrderFront:nil];
-          [targets removeAllObjects];
-          targetDwellDate = nil;
-        }
-
-        // Compute where placeholder should go and insert it into the
-        // destination tab strip.
-        NSRect dropTabFrame = [[targetController tabStripView] frame];
-        NSPoint point =
-            [sourceWindow convertBaseToScreen:
-                [self convertPointToBase:NSZeroPoint]];
-        int x = NSWidth([self bounds]) / 2 + point.x - dropTabFrame.origin.x;
-        [targetController insertPlaceholderForTab:tab_ atLocation:x];
-        [targetController arrangeTabs];
-
-        if (!targetController)
-          [dragWindow makeKeyAndOrderFront:nil];
-        [[dragWindow animator] setAlphaValue:targetController ? 0.0 : 0.333];
-
-        [[[draggedController overlayWindow] animator]
-            setAlphaValue:targetController ? 0.85 : 1.0];
-        // [setAlphaValue:targetController ? 0.0 : 0.6];
-      }
-#endif
-    } else if (type == NSLeftMouseUp) {
-      // Mouse up, break out of the drag event tracking loop
-      dragging = NO;
+  if (chromeIsVisible_ != chromeShouldBeVisible) {
+    [dragWindow_ setHasShadow:YES];
+    if (targetController_) {
+      [NSAnimationContext beginGrouping];
+      [[NSAnimationContext currentContext] setDuration:0.00001];
+      [[dragWindow_ animator] setAlphaValue:0.0];
+      [NSAnimationContext endGrouping];
+      [[draggedController_ overlayWindow] setHasShadow:YES];
+      [[[draggedController_ overlayWindow] animator] setAlphaValue:1.0];
+    } else {
+      [[draggedController_ overlayWindow] setAlphaValue:1.0];
+      [[draggedController_ overlayWindow] setHasShadow:NO];
+      [[dragWindow_ animator] setAlphaValue:0.5];
     }
-    lastPoint = thisPoint;
-  }  // while tracking mouse
+    chromeIsVisible_ = chromeShouldBeVisible;
+  }
+}
 
+- (void)mouseUp:(NSEvent *)theEvent {
   // The drag/click is done. If the user dragged the mouse, finalize the drag
   // and clean up.
-  if (moved) {
-    TabWindowController *dropController = targetController;
-    if (dropController) {
-      NSRect adjustedFrame = [self bounds];
-      NSRect dropTabFrame =  [[dropController tabStripView] frame];
-      adjustedFrame.origin = [self convertPointToBase:NSZeroPoint];
-      adjustedFrame.origin =
-          [sourceWindow convertBaseToScreen:adjustedFrame.origin];
-      adjustedFrame.origin.x = adjustedFrame.origin.x - dropTabFrame.origin.x;
-//    adjustedFrame.origin.y = adjustedFrame.origin.y - dropTabFrame.origin.y;
-//    adjustedFrame.size.height += adjustedFrame.origin.y;
-      adjustedFrame.origin.y = 0;
 
-      // TODO(alcor): get add tab stuff working
-      // [dropController addTab:tab_];
-
-      [self setFrame:adjustedFrame];
-      [dropController arrangeTabs];
-      [draggedController close];
-      [dropController showWindow:nil];
-    } else {
-      [[dragWindow animator] setAlphaValue:1.0];
-      [dragOverlay setHasShadow:NO];
-      [draggedController removeOverlayAfterDelay:
-      [[NSAnimationContext currentContext] duration]];
-      [dragWindow makeKeyAndOrderFront:nil];
-
-      [[draggedController window] setLevel:NSNormalWindowLevel];
-      [draggedController arrangeTabs];
+  if (draggingWithinTabStrip_) {
+    if (tabWasDragged_) {
+      // Move tab to new location.
+      TabWindowController* dropController = sourceController_;
+      [dropController moveTabView:[dropController selectedTabView]
+                   fromController:nil];
     }
-    [sourceController arrangeTabs];
+  } else if (targetController_) {
+    // Move between windows. If |targetController_| is nil, we're not dropping
+    // into any existing window.
+    NSView* draggedTabView = [draggedController_ selectedTabView];
+    [draggedController_ removeOverlay];
+    [targetController_ moveTabView:draggedTabView
+                    fromController:draggedController_];
+    [targetController_ showWindow:nil];
+  } else {
+    [dragWindow_ setAlphaValue:1.0];
+    [dragOverlay_ setHasShadow:NO];
+    [dragWindow_ setHasShadow:YES];
+    [draggedController_ removeOverlay];
+    [dragWindow_ makeKeyAndOrderFront:nil];
+
+    [[draggedController_ window] setLevel:NSNormalWindowLevel];
+    [draggedController_ removePlaceholder];
+    [draggedController_ layoutTabs];
   }
+  [sourceController_ removePlaceholder];
+}
+
+- (void)otherMouseUp:(NSEvent*)theEvent {
+  // Support middle-click-to-close.
+  if ([theEvent buttonNumber] == 2) {
+    [controller_ closeTab:self];
+  }
+}
+
+- (NSPoint)patternPhase {
+  NSPoint phase = NSZeroPoint;
+  phase.x -= [self convertRect:[self bounds] toView:nil].origin.x;
+  // offset to start pattern in upper left corner
+  phase.y += NSHeight([self bounds]) - 1;
+  return phase;
+}
+
+- (void)drawRect:(NSRect)rect {
+  [[NSGraphicsContext currentContext] saveGraphicsState];
+  rect = [self bounds];
+  BOOL active = [[self window] isKeyWindow] || [[self window] isMainWindow];
+  BOOL selected = [(NSButton *)self state];
+
+  // Inset by 0.5 in order to draw on pixels rather than on borders (which would
+  // cause blurry pixels). Decrease height by 1 in order to move away from the
+  // edge for the dark shadow.
+  rect = NSInsetRect(rect, 0.5, -0.5);
+  rect.origin.y -= 1;
+
+  NSPoint bottomLeft = NSMakePoint(NSMinX(rect), NSMinY(rect));
+  NSPoint bottomRight = NSMakePoint(NSMaxX(rect), NSMinY(rect));
+  NSPoint topRight =
+      NSMakePoint(NSMaxX(rect) - kInsetMultiplier * NSHeight(rect),
+                  NSMaxY(rect));
+  NSPoint topLeft =
+      NSMakePoint(NSMinX(rect)  + kInsetMultiplier * NSHeight(rect),
+                  NSMaxY(rect));
+
+  float baseControlPointOutset = NSHeight(rect) * kControlPoint1Multiplier;
+  float bottomControlPointInset = NSHeight(rect) * kControlPoint2Multiplier;
+
+  // Outset many of these values by 1 to cause the fill to bleed outside the
+  // clip area.
+  NSBezierPath *path = [NSBezierPath bezierPath];
+  [path moveToPoint:NSMakePoint(bottomLeft.x - 1, bottomLeft.y + 1)];
+  [path lineToPoint:NSMakePoint(bottomLeft.x - 1, bottomLeft.y)];
+  [path lineToPoint:bottomLeft];
+  [path curveToPoint:topLeft
+       controlPoint1:NSMakePoint(bottomLeft.x + baseControlPointOutset,
+                                 bottomLeft.y)
+       controlPoint2:NSMakePoint(topLeft.x - bottomControlPointInset,
+                                 topLeft.y)];
+  [path lineToPoint:topRight];
+  [path curveToPoint:bottomRight
+       controlPoint1:NSMakePoint(topRight.x + bottomControlPointInset,
+                                 topRight.y)
+       controlPoint2:NSMakePoint(bottomRight.x - baseControlPointOutset,
+                                 bottomRight.y)];
+  [path lineToPoint:NSMakePoint(bottomRight.x + 1, bottomRight.y)];
+  [path lineToPoint:NSMakePoint(bottomRight.x + 1, bottomRight.y + 1)];
+
+  if (selected) {
+    // Stroke with a translucent black.
+    [[NSColor colorWithCalibratedWhite:0.0 alpha:active ? 0.5 : 0.3] set];
+    [[NSGraphicsContext currentContext] saveGraphicsState];
+    scoped_nsobject<NSShadow> shadow([[NSShadow alloc] init]);
+    [shadow setShadowOffset:NSMakeSize(2, -1)];
+    [shadow setShadowBlurRadius:2.0];
+    [path fill];
+    [[NSGraphicsContext currentContext] restoreGraphicsState];
+  } else {
+    // Stroke with a translucent black.
+    [[NSBezierPath bezierPathWithRect:NSOffsetRect([self bounds], 0, 1)]
+        addClip];
+
+    [[NSColor colorWithCalibratedWhite:0.0 alpha:active ? 0.3 : 0.1] set];
+  }
+
+  [[NSGraphicsContext currentContext] saveGraphicsState];
+  [[NSColor colorWithCalibratedWhite:0.0 alpha:0.2] set];
+  [path setLineWidth:selected ? 2.0 : 1.0];
+  [path stroke];
+  [[NSGraphicsContext currentContext] restoreGraphicsState];
+
+  GTMTheme *theme = [[self self] gtm_theme];
+
+  if (!selected) {
+    NSColor *windowColor =
+        [theme backgroundPatternColorForStyle:GTMThemeStyleWindow
+                                        state:GTMThemeStateActiveWindow];
+    if (windowColor) {
+      NSPoint phase = [self patternPhase];
+      [windowColor set];
+      [[NSGraphicsContext currentContext] setPatternPhase:phase];
+    } else {
+      [[NSColor colorWithCalibratedWhite:0.6 alpha:1.0] set];
+    }
+    [path fill];
+  }
+
+  // Draw the background.
+  [[NSGraphicsContext currentContext] saveGraphicsState];
+  CGContextRef context =
+      (CGContextRef)([[NSGraphicsContext currentContext] graphicsPort]);
+  CGContextBeginTransparencyLayer(context, 0);
+  if (!selected)
+    CGContextSetAlpha(context, 0.5);
+  [path addClip];
+  [super drawRect:rect];
+
+  CGContextEndTransparencyLayer(context);
+  [[NSGraphicsContext currentContext] restoreGraphicsState];
+
+  // Draw the bottom border.
+  if (!selected) {
+    [path addClip];
+    NSRect borderRect, contentRect;
+    NSDivideRect(rect, &borderRect, &contentRect, 1, NSMinYEdge);
+    [[NSColor colorWithCalibratedWhite:0.0 alpha:0.4] set];
+    NSRectFillUsingOperation(borderRect, NSCompositeSourceOver);
+  }
+  [[NSGraphicsContext currentContext] restoreGraphicsState];
+}
+
+// Called when the user hits the right mouse button (or control-clicks) to
+// show a context menu.
+- (void)rightMouseDown:(NSEvent*)theEvent {
+  [NSMenu popUpContextMenu:[self menu] withEvent:theEvent forView:self];
 }
 
 @end

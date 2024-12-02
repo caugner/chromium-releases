@@ -4,16 +4,21 @@
 
 #include "chrome/browser/views/info_bubble.h"
 
-#include "base/win_util.h"
+#include "app/gfx/canvas.h"
+#include "app/gfx/path.h"
+#include "app/resource_bundle.h"
 #include "chrome/browser/browser_window.h"
 #include "chrome/browser/views/frame/browser_view.h"
-#include "chrome/common/gfx/chrome_canvas.h"
-#include "chrome/common/gfx/path.h"
-#include "chrome/common/resource_bundle.h"
-#include "chrome/common/win_util.h"
-#include "chrome/views/widget/root_view.h"
-#include "chrome/views/window/window.h"
+#include "chrome/browser/window_sizer.h"
+#include "chrome/common/notification_service.h"
+#include "chrome/common/notification_type.h"
 #include "grit/theme_resources.h"
+#include "views/widget/root_view.h"
+#include "views/window/window.h"
+
+#if defined(OS_WIN)
+#include "base/win_util.h"
+#endif
 
 using views::View;
 
@@ -66,21 +71,29 @@ static const int kMinimumAlpha = 72;
 // InfoBubble -----------------------------------------------------------------
 
 // static
-InfoBubble* InfoBubble::Show(HWND parent_hwnd,
+InfoBubble* InfoBubble::Show(views::Window* parent,
                              const gfx::Rect& position_relative_to,
                              views::View* content,
                              InfoBubbleDelegate* delegate) {
   InfoBubble* window = new InfoBubble();
-  window->Init(parent_hwnd, position_relative_to, content);
+  window->Init(parent, position_relative_to, content);
   // Set the delegate before we show, on the off chance the delegate is needed
   // during showing.
   window->delegate_ = delegate;
+#if defined(OS_WIN)
   window->ShowWindow(SW_SHOW);
+#else
+  static_cast<WidgetGtk*>(window)->Show();
+#endif
   return window;
 }
 
 InfoBubble::InfoBubble()
-    : delegate_(NULL),
+    :
+#if defined(OS_LINUX)
+      WidgetGtk(TYPE_POPUP),
+#endif
+      delegate_(NULL),
       parent_(NULL),
       content_view_(NULL),
       closed_(false) {
@@ -89,14 +102,10 @@ InfoBubble::InfoBubble()
 InfoBubble::~InfoBubble() {
 }
 
-void InfoBubble::Init(HWND parent_hwnd,
+void InfoBubble::Init(views::Window* parent,
                       const gfx::Rect& position_relative_to,
                       views::View* content) {
-  HWND owning_frame_hwnd = GetAncestor(parent_hwnd, GA_ROOTOWNER);
-  BrowserView* browser_view =
-      BrowserView::GetBrowserViewForHWND(owning_frame_hwnd);
-  DCHECK(browser_view);
-  parent_ = browser_view->frame();
+  parent_ = parent;
   parent_->DisableInactiveRendering();
 
   if (kInfoBubbleCornerTopLeft == NULL) {
@@ -109,45 +118,57 @@ void InfoBubble::Init(HWND parent_hwnd,
     kInfoBubbleCornerBottomRight = ResourceBundle::GetSharedInstance()
         .GetBitmapNamed(IDR_INFO_BUBBLE_CORNER_BOTTOM_RIGHT);
   }
+#if defined(OS_WIN)
   set_window_style(WS_POPUP | WS_CLIPCHILDREN);
   set_window_ex_style(WS_EX_LAYERED | WS_EX_TOOLWINDOW);
   // Because we're going to change the alpha value of the layered window we
   // don't want to use the offscreen buffer provided by WidgetWin.
   SetUseLayeredBuffer(false);
-  content_view_ = CreateContentView(content);
-  gfx::Rect bounds = content_view_->
-      CalculateWindowBounds(parent_hwnd, position_relative_to);
   set_initial_class_style(
       (win_util::GetWinVersion() < win_util::WINVERSION_XP) ?
       0 : CS_DROPSHADOW);
+#endif
+  content_view_ = CreateContentView(content);
+  gfx::Rect bounds =
+      content_view_->CalculateWindowBoundsAndAjust(position_relative_to);
 
-  WidgetWin::Init(parent_hwnd, bounds, true);
+#if defined(OS_WIN)
+  WidgetWin::Init(parent->GetNativeWindow(), bounds);
+#else
+  WidgetGtk::Init(GTK_WIDGET(parent->GetNativeWindow()), bounds);
+#endif
   SetContentsView(content_view_);
   // The preferred size may differ when parented. Ask for the bounds again
   // and if they differ reset the bounds.
-  gfx::Rect parented_bounds = content_view_->
-      CalculateWindowBounds(parent_hwnd, position_relative_to);
+  gfx::Rect parented_bounds =
+      content_view_->CalculateWindowBoundsAndAjust(position_relative_to);
 
   if (bounds != parented_bounds) {
+#if defined(OS_WIN)
     SetWindowPos(NULL, parented_bounds.x(), parented_bounds.y(),
                  parented_bounds.width(), parented_bounds.height(),
                  SWP_NOACTIVATE | SWP_NOREDRAW | SWP_NOZORDER);
     // Invoke ChangeSize, otherwise layered window isn't updated correctly.
     ChangeSize(0, CSize(parented_bounds.width(), parented_bounds.height()));
+#endif
   }
 
+#if defined(OS_WIN)
   // Register the Escape accelerator for closing.
-  views::FocusManager* focus_manager =
-      views::FocusManager::GetFocusManager(GetNativeView());
-  focus_manager->RegisterAccelerator(views::Accelerator(VK_ESCAPE, false,
-                                                        false, false),
-                                     this);
-
+  GetFocusManager()->RegisterAccelerator(views::Accelerator(VK_ESCAPE, false,
+                                                            false, false),
+                                         this);
   // Set initial alpha value of the layered window.
   SetLayeredWindowAttributes(GetNativeView(),
                              RGB(0xFF, 0xFF, 0xFF),
                              kMinimumAlpha,
                              LWA_ALPHA);
+#endif
+
+  NotificationService::current()->Notify(
+      NotificationType::INFO_BUBBLE_CREATED,
+      Source<InfoBubble>(this),
+      NotificationService::NoDetails());
 
   fade_animation_.reset(new SlideAnimation(this));
   fade_animation_->Show();
@@ -158,6 +179,7 @@ void InfoBubble::Close() {
 }
 
 void InfoBubble::AnimationProgressed(const Animation* animation) {
+#if defined(OS_WIN)
   int alpha = static_cast<int>(static_cast<double>
       (fade_animation_->GetCurrentValue() * (255.0 - kMinimumAlpha) +
       kMinimumAlpha));
@@ -168,10 +190,10 @@ void InfoBubble::AnimationProgressed(const Animation* animation) {
                              LWA_ALPHA);
   // Don't need to invoke paint as SetLayeredWindowAttributes handles that for
   // us.
+#endif
 }
 
 bool InfoBubble::AcceleratorPressed(const views::Accelerator& accelerator) {
-  DCHECK(accelerator.GetKeyCode() == VK_ESCAPE);
   if (!delegate_ || delegate_->CloseOnEscape()) {
     Close(true);
     return true;
@@ -179,10 +201,7 @@ bool InfoBubble::AcceleratorPressed(const views::Accelerator& accelerator) {
   return false;
 }
 
-void InfoBubble::OnSize(UINT param, const CSize& size) {
-  SetWindowRgn(content_view_->GetMask(size), TRUE);
-}
-
+#if defined(OS_WIN)
 void InfoBubble::OnActivate(UINT action, BOOL minimized, HWND window) {
   // The popup should close when it is deactivated.
   if (action == WA_INACTIVE && !closed_) {
@@ -192,6 +211,14 @@ void InfoBubble::OnActivate(UINT action, BOOL minimized, HWND window) {
     GetRootView()->GetChildViewAt(0)->RequestFocus();
   }
 }
+
+void InfoBubble::OnSize(UINT param, const CSize& size) {
+  gfx::Path path;
+  content_view_->GetMask(gfx::Size(size.cx, size.cy), &path);
+  SetWindowRgn(path.CreateHRGN(), TRUE);
+  WidgetWin::OnSize(param, size);
+}
+#endif
 
 InfoBubble::ContentView* InfoBubble::CreateContentView(View* content) {
   return new ContentView(content, this);
@@ -205,7 +232,11 @@ void InfoBubble::Close(bool closed_by_escape) {
   if (delegate_)
     delegate_->InfoBubbleClosing(this, closed_by_escape);
   closed_ = true;
+#if defined(OS_WIN)
   WidgetWin::Close();
+#else
+  WidgetGtk::Close();
+#endif
 }
 
 // ContentView ----------------------------------------------------------------
@@ -220,11 +251,12 @@ InfoBubble::ContentView::ContentView(views::View* content, InfoBubble* host)
   AddChildView(content);
 }
 
-gfx::Rect InfoBubble::ContentView::CalculateWindowBounds(
-    HWND parent_hwnd,
+gfx::Rect InfoBubble::ContentView::CalculateWindowBoundsAndAjust(
     const gfx::Rect& position_relative_to) {
-  gfx::Rect monitor_bounds = win_util::GetMonitorBoundsForRect(
-      position_relative_to);
+  scoped_ptr<WindowSizer::MonitorInfoProvider> monitor_provider(
+      WindowSizer::CreateDefaultMonitorInfoProvider());
+  gfx::Rect monitor_bounds(
+      monitor_provider->GetMonitorWorkAreaMatching(position_relative_to));
   // Calculate the bounds using TOP_LEFT (the default).
   gfx::Rect window_bounds = CalculateWindowBounds(position_relative_to);
   if (monitor_bounds.IsEmpty() || monitor_bounds.Contains(window_bounds))
@@ -269,12 +301,10 @@ void InfoBubble::ContentView::Layout() {
   content->SetBounds(x, y, content_width, content_height);
 }
 
-HRGN InfoBubble::ContentView::GetMask(const CSize &size) {
-  gfx::Path mask;
-
+void InfoBubble::ContentView::GetMask(const gfx::Size& size, gfx::Path* mask) {
   // Redefine the window visible region so that our dropshadows look right.
-  SkScalar width = SkIntToScalar(size.cx);
-  SkScalar height = SkIntToScalar(size.cy);
+  SkScalar width = SkIntToScalar(size.width());
+  SkScalar height = SkIntToScalar(size.height());
   SkScalar arrow_size = SkIntToScalar(kArrowSize);
   SkScalar arrow_x = SkIntToScalar(
       (IsLeft() ? kArrowXOffset : width - kArrowXOffset) - 1);
@@ -282,56 +312,54 @@ HRGN InfoBubble::ContentView::GetMask(const CSize &size) {
 
   if (IsTop()) {
     // Top left corner.
-    mask.moveTo(0, arrow_size + corner_size - 1);
-    mask.lineTo(corner_size - 1, arrow_size);
+    mask->moveTo(0, arrow_size + corner_size - 1);
+    mask->lineTo(corner_size - 1, arrow_size);
 
     // Draw the arrow and the notch of the arrow.
-    mask.lineTo(arrow_x - arrow_size, arrow_size);
-    mask.lineTo(arrow_x, 0);
-    mask.lineTo(arrow_x + 3, 0);
-    mask.lineTo(arrow_x + arrow_size + 3, arrow_size);
+    mask->lineTo(arrow_x - arrow_size, arrow_size);
+    mask->lineTo(arrow_x, 0);
+    mask->lineTo(arrow_x + 3, 0);
+    mask->lineTo(arrow_x + arrow_size + 3, arrow_size);
 
     // Top right corner.
-    mask.lineTo(width - corner_size + 1, arrow_size);
-    mask.lineTo(width, arrow_size + corner_size - 1);
+    mask->lineTo(width - corner_size + 1, arrow_size);
+    mask->lineTo(width, arrow_size + corner_size - 1);
 
     // Bottom right corner.
-    mask.lineTo(width, height - corner_size);
-    mask.lineTo(width - corner_size, height);
+    mask->lineTo(width, height - corner_size);
+    mask->lineTo(width - corner_size, height);
 
     // Bottom left corner.
-    mask.lineTo(corner_size, height);
-    mask.lineTo(0, height - corner_size);
+    mask->lineTo(corner_size, height);
+    mask->lineTo(0, height - corner_size);
   } else {
     // Top left corner.
-    mask.moveTo(0, corner_size - 1);
-    mask.lineTo(corner_size - 1, 0);
+    mask->moveTo(0, corner_size - 1);
+    mask->lineTo(corner_size - 1, 0);
 
     // Top right corner.
-    mask.lineTo(width - corner_size + 1, 0);
-    mask.lineTo(width, corner_size - 1);
+    mask->lineTo(width - corner_size + 1, 0);
+    mask->lineTo(width, corner_size - 1);
 
     // Bottom right corner.
-    mask.lineTo(width, height - corner_size - arrow_size);
-    mask.lineTo(width - corner_size, height - arrow_size);
+    mask->lineTo(width, height - corner_size - arrow_size);
+    mask->lineTo(width - corner_size, height - arrow_size);
 
     // Draw the arrow and the notch of the arrow.
-    mask.lineTo(arrow_x + arrow_size + 2, height - arrow_size);
-    mask.lineTo(arrow_x + 2, height);
-    mask.lineTo(arrow_x + 1, height);
-    mask.lineTo(arrow_x - arrow_size + 1, height - arrow_size);
+    mask->lineTo(arrow_x + arrow_size + 2, height - arrow_size);
+    mask->lineTo(arrow_x + 2, height);
+    mask->lineTo(arrow_x + 1, height);
+    mask->lineTo(arrow_x - arrow_size + 1, height - arrow_size);
 
     // Bottom left corner.
-    mask.lineTo(corner_size, height - arrow_size);
-    mask.lineTo(0, height - corner_size - arrow_size);
+    mask->lineTo(corner_size, height - arrow_size);
+    mask->lineTo(0, height - corner_size - arrow_size);
   }
 
-  mask.close();
-
-  return mask.CreateHRGN();
+  mask->close();
 }
 
-void InfoBubble::ContentView::Paint(ChromeCanvas* canvas) {
+void InfoBubble::ContentView::Paint(gfx::Canvas* canvas) {
   int bubble_x = 0;
   int bubble_y = 0;
   int bubble_w = width();
@@ -360,23 +388,24 @@ void InfoBubble::ContentView::Paint(ChromeCanvas* canvas) {
 
   // Draw the border.
   // Top border.
-  canvas->DrawRectInt(kBorderColor1,
+  canvas->DrawLineInt(kBorderColor1,
                       kInfoBubbleCornerWidth, bubble_y,
-                      border_w,
-                      0);
+                      kInfoBubbleCornerWidth + border_w, bubble_y);
   // Bottom border.
-  canvas->DrawRectInt(kBorderColor1,
+  canvas->DrawLineInt(kBorderColor1,
                       kInfoBubbleCornerWidth, bubble_y + bubble_h - 1,
-                      border_w, 0);
+                      kInfoBubbleCornerWidth + border_w,
+                      bubble_y + bubble_h - 1);
   // Left border.
-  canvas->DrawRectInt(kBorderColor1,
+  canvas->DrawLineInt(kBorderColor1,
                       bubble_x, bubble_y + kInfoBubbleCornerHeight,
-                      0, border_h);
+                      bubble_x, bubble_y + kInfoBubbleCornerHeight + border_h);
 
   // Right border.
-  canvas->DrawRectInt(kBorderColor1,
+  canvas->DrawLineInt(kBorderColor1,
                       width() - 1, bubble_y + kInfoBubbleCornerHeight,
-                      0, border_h);
+                      width() - 1,
+                      bubble_y + kInfoBubbleCornerHeight + border_h);
 
   // Draw the corners.
   canvas->DrawBitmapInt(*kInfoBubbleCornerTopLeft, 0, bubble_y);

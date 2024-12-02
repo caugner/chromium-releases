@@ -11,15 +11,17 @@ namespace chrome {
 
 const char kAboutScheme[] = "about";
 const char kChromeInternalScheme[] = "chrome-internal";
-const char kChromeUIScheme[] = "chrome-ui";
+const char kChromeUIScheme[] = "chrome";
 const char kDataScheme[] = "data";
 const char kExtensionScheme[] = "chrome-extension";
 const char kFileScheme[] = "file";
 const char kFtpScheme[] = "ftp";
+const char kGearsScheme[] = "gears";
 const char kHttpScheme[] = "http";
 const char kHttpsScheme[] = "https";
 const char kJavaScriptScheme[] = "javascript";
 const char kMailToScheme[] = "mailto";
+const char kPrintScheme[] = "print";
 const char kUserScriptScheme[] = "chrome-user-script";
 const char kViewCacheScheme[] = "view-cache";
 const char kViewSourceScheme[] = "view-source";
@@ -28,23 +30,25 @@ const char kStandardSchemeSeparator[] = "://";
 
 const char kAboutBlankURL[] = "about:blank";
 const char kAboutCacheURL[] = "about:cache";
+const char kAboutCrashURL[] = "about:crash";
+const char kAboutHangURL[] = "about:hang";
 const char kAboutMemoryURL[] = "about:memory";
+const char kAboutShorthangURL[] = "about:shorthang";
 
-const char kChromeUIDevToolsURL[] = "chrome-ui://devtools/";
-const char kChromeUIDownloadsURL[] = "chrome-ui://downloads/";
-const char kChromeUIExtensionsURL[] = "chrome-ui://extensions/";
-const char kChromeUIHistoryURL[] = "chrome-ui://history/";
-const char kChromeUIInspectorURL[] = "chrome-ui://inspector/";
-const char kChromeUIIPCURL[] = "chrome-ui://about/ipc";
-const char kChromeUINetworkURL[] = "chrome-ui://about/network";
-#if defined(OS_LINUX)
-// TODO(port): Remove ifdef when we think that Linux splash page is not needed.
-const char kChromeUINewTabURL[] = "about:linux-splash";
-#else
-const char kChromeUINewTabURL[] = "chrome-ui://newtab";
-#endif
+// Use an obfuscated URL to make this nondiscoverable, we only want this
+// to be used for testing.
+const char kAboutBrowserCrash[] = "about:inducebrowsercrashforrealz";
+
+const char kChromeUIDevToolsURL[] = "chrome://devtools/";
+const char kChromeUIDownloadsURL[] = "chrome://downloads/";
+const char kChromeUIExtensionsURL[] = "chrome://extensions/";
+const char kChromeUIHistoryURL[] = "chrome://history/";
+const char kChromeUIIPCURL[] = "chrome://about/ipc";
+const char kChromeUINetworkURL[] = "chrome://about/network";
+const char kChromeUINewTabURL[] = "chrome://newtab";
 
 const char kChromeUIDevToolsHost[] = "devtools";
+const char kChromeUIDialogHost[] = "dialog";
 const char kChromeUIDownloadsHost[] = "downloads";
 const char kChromeUIExtensionsHost[] = "extensions";
 const char kChromeUIFavIconPath[] = "favicon";
@@ -52,5 +56,6 @@ const char kChromeUIHistoryHost[] = "history";
 const char kChromeUIInspectorHost[] = "inspector";
 const char kChromeUINewTabHost[] = "newtab";
 const char kChromeUIThumbnailPath[] = "thumb";
+const char kChromeUIThemePath[] = "theme";
 
 }  // namespace chrome

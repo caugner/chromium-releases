@@ -15,9 +15,8 @@ class BookmarkHTMLWriterTest : public testing::Test {
  protected:
   virtual void SetUp() {
     ASSERT_TRUE(PathService::Get(base::DIR_TEMP, &path_));
-    file_util::AppendToPath(&path_, L"bookmarks.html");
+    path_ = path_.AppendASCII("bookmarks.html");
     file_util::Delete(path_, true);
-
   }
 
   virtual void TearDown() {
@@ -53,19 +52,20 @@ class BookmarkHTMLWriterTest : public testing::Test {
     EXPECT_TRUE(path_count < 3 || entry.path[3] == f3);
   }
 
-  std::wstring path_;
+  FilePath path_;
 };
 
 // Tests bookmark_html_writer by populating a BookmarkModel, writing it out by
 // way of bookmark_html_writer, then using the importer to read it back in.
 TEST_F(BookmarkHTMLWriterTest, Test) {
   // Populate the BookmarkModel. This creates the following bookmark structure:
-  // Bookmark Bar
+  // Bookmarks bar
   //   F1
   //     url1
   //     F2
   //       url2
   //   url3
+  //   url4
   // Other
   //   url1
   //   url2
@@ -79,47 +79,60 @@ TEST_F(BookmarkHTMLWriterTest, Test) {
   std::wstring url1_title = L"url 1";
   std::wstring url2_title = L"url&2";
   std::wstring url3_title = L"url\"3";
+  std::wstring url4_title = L"url\"&;";
   GURL url1("http://url1");
   GURL url2("http://url2");
   GURL url3("http://url3");
+  GURL url4("http://\"&;\"");
   BookmarkModel model(NULL);
   base::Time t1(base::Time::Now());
   base::Time t2(t1 + base::TimeDelta::FromHours(1));
   base::Time t3(t1 + base::TimeDelta::FromHours(1));
-  BookmarkNode* f1 = model.AddGroup(model.GetBookmarkBarNode(), 0, f1_title);
+  base::Time t4(t1 + base::TimeDelta::FromHours(1));
+  const BookmarkNode* f1 = model.AddGroup(
+      model.GetBookmarkBarNode(), 0, f1_title);
   model.AddURLWithCreationTime(f1, 0, url1_title, url1, t1);
-  BookmarkNode* f2 = model.AddGroup(f1, 1, f2_title);
+  const BookmarkNode* f2 = model.AddGroup(f1, 1, f2_title);
   model.AddURLWithCreationTime(f2, 0, url2_title, url2, t2);
   model.AddURLWithCreationTime(model.GetBookmarkBarNode(), 1, url3_title, url3,
                                t3);
 
   model.AddURLWithCreationTime(model.other_node(), 0, url1_title, url1, t1);
   model.AddURLWithCreationTime(model.other_node(), 1, url2_title, url2, t2);
-  BookmarkNode* f3 = model.AddGroup(model.other_node(), 2, f3_title);
-  BookmarkNode* f4 = model.AddGroup(f3, 0, f4_title);
+  const BookmarkNode* f3 = model.AddGroup(model.other_node(), 2, f3_title);
+  const BookmarkNode* f4 = model.AddGroup(f3, 0, f4_title);
   model.AddURLWithCreationTime(f4, 0, url1_title, url1, t1);
+  model.AddURLWithCreationTime(model.GetBookmarkBarNode(), 2, url4_title,
+                              url4, t4);
 
   // Write to a temp file.
-  bookmark_html_writer::WriteBookmarks(NULL, &model, path_);
+  bookmark_html_writer::WriteBookmarks(NULL, &model, path_.ToWStringHack());
 
   // Read the bookmarks back in.
   std::vector<ProfileWriter::BookmarkEntry> parsed_bookmarks;
-  Firefox2Importer::ImportBookmarksFile(path_, std::set<GURL>(), false,
-                                        L"x", NULL, &parsed_bookmarks, NULL,
-                                        NULL);
+  Firefox2Importer::ImportBookmarksFile(path_.ToWStringHack(), std::set<GURL>(),
+                                        false, L"x", NULL, &parsed_bookmarks,
+                                        NULL, NULL);
 
   // Verify we got back what we wrote.
-  ASSERT_EQ(6U, parsed_bookmarks.size());
+  ASSERT_EQ(7U, parsed_bookmarks.size());
+  // Hardcode the value of IDS_BOOKMARK_BAR_FOLDER_NAME in en-US locale
+  // because all the unit tests are run in en-US locale.
+  const wchar_t* kBookmarkBarFolderName = L"Bookmarks bar";
   AssertBookmarkEntryEquals(parsed_bookmarks[0], false, url1, url1_title, t1,
-                            L"Bookmark Bar", f1_title, std::wstring());
+                            kBookmarkBarFolderName, f1_title, std::wstring());
   AssertBookmarkEntryEquals(parsed_bookmarks[1], false, url2, url2_title, t2,
-                            L"Bookmark Bar", f1_title, f2_title);
+                            kBookmarkBarFolderName, f1_title, f2_title);
   AssertBookmarkEntryEquals(parsed_bookmarks[2], false, url3, url3_title, t3,
-                            L"Bookmark Bar", std::wstring(), std::wstring());
-  AssertBookmarkEntryEquals(parsed_bookmarks[3], false, url1, url1_title, t1,
+                            kBookmarkBarFolderName, std::wstring(),
+                            std::wstring());
+  AssertBookmarkEntryEquals(parsed_bookmarks[3], false, url4, url4_title, t4,
+                            kBookmarkBarFolderName, std::wstring(),
+                            std::wstring());
+  AssertBookmarkEntryEquals(parsed_bookmarks[4], false, url1, url1_title, t1,
                             std::wstring(), std::wstring(), std::wstring());
-  AssertBookmarkEntryEquals(parsed_bookmarks[4], false, url2, url2_title, t2,
+  AssertBookmarkEntryEquals(parsed_bookmarks[5], false, url2, url2_title, t2,
                             std::wstring(), std::wstring(), std::wstring());
-  AssertBookmarkEntryEquals(parsed_bookmarks[5], false, url1, url1_title, t1,
+  AssertBookmarkEntryEquals(parsed_bookmarks[6], false, url1, url1_title, t1,
                             f3_title, f4_title, std::wstring());
 }

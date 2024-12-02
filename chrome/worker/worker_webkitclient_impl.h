@@ -10,16 +10,19 @@
 class WorkerWebKitClientImpl : public webkit_glue::WebKitClientImpl {
  public:
   // WebKitClient methods:
+  virtual WebKit::WebClipboard* clipboard();
   virtual WebKit::WebMimeRegistry* mimeRegistry();
   virtual WebKit::WebSandboxSupport* sandboxSupport();
-  virtual uint64_t visitedLinkHash(const char* canonicalURL, size_t length);
-  virtual bool isLinkVisited(uint64_t linkHash);
+  virtual unsigned long long visitedLinkHash(const char* canonicalURL,
+                                             size_t length);
+  virtual bool isLinkVisited(unsigned long long linkHash);
   virtual void setCookies(const WebKit::WebURL& url,
                           const WebKit::WebURL& policy_url,
                           const WebKit::WebString& value);
   virtual WebKit::WebString cookies(const WebKit::WebURL& url,
                                     const WebKit::WebURL& policy_url);
   virtual void prefetchHostName(const WebKit::WebString&);
+  virtual bool getFileSize(const WebKit::WebString& path, long long& result);
   virtual WebKit::WebString defaultLocale();
 };
 
