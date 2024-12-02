@@ -49,14 +49,15 @@ const char kAboutCacheURL[] = "about:cache";
 const char kAboutCrashURL[] = "about:crash";
 const char kAboutCreditsURL[] = "about:credits";
 const char kAboutDNSURL[] = "about:dns";
+const char kAboutFlagsURL[] = "about:flags";
+const char kAboutGpuCrashURL[] = "about:gpucrash";
+const char kAboutGpuHangURL[] = "about:gpuhang";
 const char kAboutHangURL[] = "about:hang";
 const char kAboutHistogramsURL[] = "about:histograms";
-const char kAboutLabsURL[] = "about:labs";
 const char kAboutMemoryURL[] = "about:memory";
 const char kAboutNetInternalsURL[] = "about:net-internals";
 const char kAboutPluginsURL[] = "about:plugins";
 const char kAboutShorthangURL[] = "about:shorthang";
-const char kAboutSystemURL[] = "about:system";
 const char kAboutTermsURL[] = "about:terms";
 const char kAboutVaporwareURL[] = "about:vaporware";
 const char kAboutVersionURL[] = "about:version";
@@ -65,7 +66,7 @@ const char kAboutVersionURL[] = "about:version";
 // to be used for testing.
 const char kAboutBrowserCrash[] = "about:inducebrowsercrashforrealz";
 
-const char kChromeUIAboutURL[] = "chrome://options/about";
+const char kChromeUIAboutURL[] = "chrome://settings/about";
 const char kChromeUIAppLauncherURL[] = "chrome://newtab/#mode=app-launcher";
 const char kChromeUIBookmarksURL[] = "chrome://bookmarks/";
 const char kChromeUIBugReportURL[] = "chrome://bugreport/";
@@ -73,20 +74,27 @@ const char kChromeUIDevToolsURL[] = "chrome://devtools/";
 const char kChromeUIDownloadsURL[] = "chrome://downloads/";
 const char kChromeUIExtensionsURL[] = "chrome://extensions/";
 const char kChromeUIFavIconURL[] = "chrome://favicon/";
-const char kChromeUIFileBrowseURL[] = "chrome://filebrowse/";
+const char kChromeUIFlagsURL[] = "chrome://flags/";
 const char kChromeUIHistory2URL[] = "chrome://history2/";
 const char kChromeUIHistoryURL[] = "chrome://history/";
-const char kChromeUIImageBurnerURL[] = "chrome://imageburner/";
 const char kChromeUIIPCURL[] = "chrome://about/ipc";
-const char kChromeUILabsURL[] = "chrome://labs/";
-const char kChromeUIMediaplayerURL[] = "chrome://mediaplayer/";
+const char kChromeUIKeyboardURL[] = "chrome://keyboard/";
 const char kChromeUINewTabURL[] = "chrome://newtab";
-const char kChromeUIOptionsURL[] = "chrome://options/";
 const char kChromeUIPluginsURL[] = "chrome://plugins/";
 const char kChromeUIPrintURL[] = "chrome://print/";
+const char kChromeUISettingsURL[] = "chrome://settings/";
+
+#if defined(OS_CHROMEOS)
+const char kChromeUIFileBrowseURL[] = "chrome://filebrowse/";
+const char kChromeUIImageBurnerURL[] = "chrome://imageburner/";
+const char kChromeUIMediaplayerURL[] = "chrome://mediaplayer/";
+const char kChromeUIMobileSetupURL[] = "chrome://mobilesetup/";
 const char kChromeUIRegisterPageURL[] = "chrome://register/";
 const char kChromeUISlideshowURL[] = "chrome://slideshow/";
+const char kChromeUISystemInfoURL[] = "chrome://system/";
+#endif
 
+// Keep this list sorted please.
 const char kChromeUIBookmarksHost[] = "bookmarks";
 const char kChromeUIBugReportHost[] = "bugreport";
 const char kChromeUIDevToolsHost[] = "devtools";
@@ -94,29 +102,40 @@ const char kChromeUIDialogHost[] = "dialog";
 const char kChromeUIDownloadsHost[] = "downloads";
 const char kChromeUIExtensionsHost[] = "extensions";
 const char kChromeUIFavIconHost[] = "favicon";
-const char kChromeUIFileBrowseHost[] = "filebrowse";
+const char kChromeUIFlagsHost[] = "flags";
 const char kChromeUIHistoryHost[] = "history";
 const char kChromeUIHistory2Host[] = "history2";
-const char kChromeUIImageBurnerHost[] = "imageburner";
 const char kChromeUIInspectorHost[] = "inspector";
-const char kChromeUILabsHost[] = "labs";
-const char kChromeUIMediaplayerHost[] = "mediaplayer";
+const char kChromeUIKeyboardHost[] = "keyboard";
 const char kChromeUINetInternalsHost[] = "net-internals";
 const char kChromeUINewTabHost[] = "newtab";
-const char kChromeUIOptionsHost[] = "options";
 const char kChromeUIPluginsHost[] = "plugins";
 const char kChromeUIPrintHost[] = "print";
-const char kChromeUIRegisterPageHost[] = "register";
 const char kChromeUIRemotingHost[] = "remoting";
-const char kChromeUIResourcesHost[] = "resources";
-const char kChromeUISlideshowHost[] = "slideshow";
-const char kChromeUISyncResourcesHost[] = "syncresources";
 const char kChromeUIRemotingResourcesHost[] = "remotingresources";
-const char kChromeUIThemePath[] = "theme";
+const char kChromeUIResourcesHost[] = "resources";
 const char kChromeUIScreenshotPath[] = "screenshots";
+const char kChromeUISettingsHost[] = "settings";
+const char kChromeUISyncResourcesHost[] = "syncresources";
+const char kChromeUIThemePath[] = "theme";
 const char kChromeUIThumbnailPath[] = "thumb";
 
+#if defined(OS_CHROMEOS)
+const char kChromeUIFileBrowseHost[] = "filebrowse";
+const char kChromeUIImageBurnerHost[] = "imageburner";
+const char kChromeUIMediaplayerHost[] = "mediaplayer";
+const char kChromeUIMobileSetupHost[] = "mobilesetup";
+const char kChromeUIRegisterPageHost[] = "register";
+const char kChromeUISlideshowHost[] = "slideshow";
+const char kChromeUISystemInfoHost[] = "system";
+const char kChromeUIMenu[] = "menu";
+const char kChromeUIWrenchMenu[] = "wrench-menu";
+const char kChromeUINetworkMenu[] = "network-menu";
+#endif
+
 const char kAppCacheViewInternalsURL[] = "chrome://appcache-internals/";
+
+const char kBlobViewInternalsURL[] = "chrome://blob-internals/";
 
 const char kCloudPrintResourcesURL[] = "chrome://cloudprintresources/";
 const char kCloudPrintResourcesHost[] = "cloudprintresources";
@@ -127,8 +146,13 @@ const char kNetworkViewCacheURL[] = "chrome://view-http-cache/";
 // Option sub pages.
 const char kDefaultOptionsSubPage[] =  "";
 const char kBrowserOptionsSubPage[] =  "browser";
+const char kPersonalOptionsSubPage[] =  "personal";
 const char kAdvancedOptionsSubPage[] =  "advanced";
-const char kSearchEnginesOptionsSubPage[] = "searchEngines";
+const char kAutoFillSubPage[] = "autoFillOptions";
+const char kSearchEnginesOptionsSubPage[] = "editSearchEngineOverlay";
+const char kClearBrowserDataSubPage[] = "clearBrowserDataOverlay";
+const char kImportDataSubPage[] = "importDataOverlay";
+const char kContentSettingsSubPage[] = "content";
 #if defined(OS_CHROMEOS)
 const char kSystemOptionsSubPage[] = "system";
 const char kLanguageOptionsSubPage[] = "language";

@@ -4,6 +4,7 @@
 
 #include "printing/emf_win.h"
 
+#include "base/file_path.h"
 #include "base/histogram.h"
 #include "base/logging.h"
 #include "base/scoped_ptr.h"
@@ -53,6 +54,14 @@ Emf::~Emf() {
   DCHECK(!emf_ && !hdc_);
 }
 
+bool Emf::Init(const void* src_buffer, uint32 src_buffer_size) {
+  DCHECK(!emf_ && !hdc_);
+  emf_ = SetEnhMetaFileBits(src_buffer_size,
+                            reinterpret_cast<const BYTE*>(src_buffer));
+  DCHECK(emf_);
+  return emf_ != NULL;
+}
+
 bool Emf::CreateDc(HDC sibling, const RECT* rect) {
   DCHECK(!emf_ && !hdc_);
   hdc_ = CreateEnhMetaFile(sibling, NULL, rect, NULL);
@@ -60,12 +69,22 @@ bool Emf::CreateDc(HDC sibling, const RECT* rect) {
   return hdc_ != NULL;
 }
 
-bool Emf::CreateFromData(const void* buffer, uint32 size) {
+bool Emf::CreateFileBackedDc(HDC sibling, const RECT* rect,
+                             const FilePath& path) {
   DCHECK(!emf_ && !hdc_);
-  emf_ = SetEnhMetaFileBits(size, reinterpret_cast<const BYTE*>(buffer));
+  DCHECK(!path.empty());
+  hdc_ = CreateEnhMetaFile(sibling, path.value().c_str(), rect, NULL);
+  DCHECK(hdc_);
+  return hdc_ != NULL;
+}
+
+bool Emf::CreateFromFile(const FilePath& metafile_path) {
+  DCHECK(!emf_ && !hdc_);
+  emf_ = GetEnhMetaFile(metafile_path.value().c_str());
   DCHECK(emf_);
   return emf_ != NULL;
 }
+
 
 bool Emf::CloseDc() {
   DCHECK(!emf_ && hdc_);

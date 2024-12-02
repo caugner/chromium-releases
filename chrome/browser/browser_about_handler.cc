@@ -17,19 +17,21 @@
 #include "base/path_service.h"
 #include "base/platform_thread.h"
 #include "base/stats_table.h"
+#include "base/stringprintf.h"
 #include "base/string_number_conversions.h"
 #include "base/string_piece.h"
 #include "base/string_util.h"
 #include "base/thread.h"
 #include "base/tracked_objects.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/about_flags.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/dom_ui/chrome_url_data_manager.h"
 #include "chrome/browser/gpu_process_host.h"
-#include "chrome/browser/labs.h"
+#include "chrome/browser/gpu_process_host_ui_shim.h"
 #include "chrome/browser/memory_details.h"
 #include "chrome/browser/metrics/histogram_synchronizer.h"
 #include "chrome/browser/net/predictor_api.h"
@@ -55,6 +57,7 @@
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "webkit/glue/webkit_glue.h"
+#include "net/base/escape.h"
 #ifdef CHROME_V8
 #include "v8/include/v8.h"
 #endif
@@ -94,12 +97,13 @@ namespace {
 // The (alphabetized) paths used for the about pages.
 // Note: Keep these in sync with url_constants.h
 const char kAppCacheInternalsPath[] = "appcache-internals";
+const char kBlobInternalsPath[] = "blob-internals";
 const char kCreditsPath[] = "credits";
 const char kCachePath[] = "view-http-cache";
 const char kDnsPath[] = "dns";
+const char kFlagsPath[] = "flags";
 const char kGpuPath[] = "gpu";
 const char kHistogramsPath[] = "histograms";
-const char kLabsPath[] = "labs";
 const char kMemoryRedirectPath[] = "memory-redirect";
 const char kMemoryPath[] = "memory";
 const char kStatsPath[] = "stats";
@@ -121,18 +125,18 @@ const char kSandboxPath[] = "sandbox";
 #if defined(OS_CHROMEOS)
 const char kNetworkPath[] = "network";
 const char kOSCreditsPath[] = "os-credits";
-const char kSysPath[] = "system";
 #endif
 
 // Add path here to be included in about:about
 const char *kAllAboutPaths[] = {
   kAppCacheInternalsPath,
+  kBlobInternalsPath,
   kCachePath,
   kCreditsPath,
   kDnsPath,
+  kFlagsPath,
   kGpuPath,
   kHistogramsPath,
-  kLabsPath,
   kMemoryPath,
   kNetInternalsPath,
   kPluginsPath,
@@ -149,7 +153,6 @@ const char *kAllAboutPaths[] = {
 #if defined(OS_CHROMEOS)
   kNetworkPath,
   kOSCreditsPath,
-  kSysPath,
 #endif
   };
 
@@ -256,11 +259,12 @@ std::string AboutAbout() {
   html.append("<html><head><title>About Pages</title></head><body>\n");
   html.append("<h2>List of About pages</h2><ul>\n");
   for (size_t i = 0; i < arraysize(kAllAboutPaths); i++) {
-    if (kAllAboutPaths[i] == kLabsPath && !about_labs::IsEnabled())
+    if (kAllAboutPaths[i] == kFlagsPath && !about_flags::IsEnabled())
       continue;
     if (kAllAboutPaths[i] == kAppCacheInternalsPath ||
+        kAllAboutPaths[i] == kBlobInternalsPath ||
         kAllAboutPaths[i] == kCachePath ||
-        kAllAboutPaths[i] == kLabsPath ||
+        kAllAboutPaths[i] == kFlagsPath ||
         kAllAboutPaths[i] == kNetInternalsPath ||
         kAllAboutPaths[i] == kPluginsPath) {
       html.append("<li><a href='chrome://");
@@ -272,7 +276,7 @@ std::string AboutAbout() {
     html.append(kAllAboutPaths[i]);
     html.append("</a>\n");
   }
-  const char *debug[] = { "crash", "hang", "shorthang" };
+  const char *debug[] = { "crash", "hang", "shorthang", "gpucrash", "gpuhang" };
   html.append("</ul><h2>For Debug</h2>");
   html.append("</ul><p>The following pages are for debugging purposes only. "
               "Because they crash or hang the renderer, they're not linked "
@@ -311,30 +315,30 @@ class AboutDnsHandler : public base::RefCountedThreadSafe<AboutDnsHandler> {
   AboutDnsHandler(AboutSource* source, int request_id)
       : source_(source),
         request_id_(request_id) {
-    DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
+    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   }
 
   // Calls FinishOnUIThread() on completion.
   void StartOnUIThread() {
-    DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
-    ChromeThread::PostTask(
-        ChromeThread::IO, FROM_HERE,
+    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+    BrowserThread::PostTask(
+        BrowserThread::IO, FROM_HERE,
         NewRunnableMethod(this, &AboutDnsHandler::StartOnIOThread));
   }
 
   void StartOnIOThread() {
-    DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
+    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
     std::string data;
     chrome_browser_net::PredictorGetHtmlInfo(&data);
 
-    ChromeThread::PostTask(
-        ChromeThread::UI, FROM_HERE,
+    BrowserThread::PostTask(
+        BrowserThread::UI, FROM_HERE,
         NewRunnableMethod(this, &AboutDnsHandler::FinishOnUIThread, data));
   }
 
   void FinishOnUIThread(const std::string& data) {
-    DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
+    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
     source_->FinishDataRequest(data, request_id_);
   }
 
@@ -691,6 +695,9 @@ static std::string MakeSyncAuthErrorText(
     const GoogleServiceAuthError::State& state) {
   switch (state) {
     case GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS:
+    case GoogleServiceAuthError::ACCOUNT_DELETED:
+    case GoogleServiceAuthError::ACCOUNT_DISABLED:
+    case GoogleServiceAuthError::SERVICE_UNAVAILABLE:
       return "INVALID_GAIA_CREDENTIALS";
     case GoogleServiceAuthError::USER_NOT_SIGNED_UP:
       return "USER_NOT_SIGNED_UP";
@@ -715,6 +722,7 @@ std::string AboutSync() {
   } else {
     SyncManager::Status full_status(service->QueryDetailedSyncStatus());
 
+    strings.SetString("service_url", service->sync_service_url().spec());
     strings.SetString("summary",
         ProfileSyncService::BuildSyncStatusSummaryText(
             full_status.summary));
@@ -784,76 +792,92 @@ std::string AboutSync() {
       sync_html, &strings , "t" /* template root node id */);
 }
 
-#if defined(OS_CHROMEOS)
-std::string AboutSys(const std::string& query) {
-  DictionaryValue strings;
-  strings.SetString("title", l10n_util::GetStringUTF16(IDS_ABOUT_SYS_TITLE));
-  strings.SetString("description",
-                    l10n_util::GetStringUTF16(IDS_ABOUT_SYS_DESC));
-  strings.SetString("table_title",
-                    l10n_util::GetStringUTF16(IDS_ABOUT_SYS_TABLE_TITLE));
-  strings.SetString("expand_all_btn",
-                    l10n_util::GetStringUTF16(IDS_ABOUT_SYS_EXPAND_ALL));
-  strings.SetString("collapse_all_btn",
-                    l10n_util::GetStringUTF16(IDS_ABOUT_SYS_COLLAPSE_ALL));
-  strings.SetString("expand_btn",
-                    l10n_util::GetStringUTF16(IDS_ABOUT_SYS_EXPAND));
-  strings.SetString("collapse_btn",
-                    l10n_util::GetStringUTF16(IDS_ABOUT_SYS_COLLAPSE));
-  ChromeURLDataManager::DataSource::SetFontAndTextDirection(&strings);
-
-  chromeos::SyslogsLibrary* syslogs_lib =
-      chromeos::CrosLibrary::Get()->GetSyslogsLibrary();
-  scoped_ptr<chromeos::LogDictionaryType> sys_info;
-  if (syslogs_lib)
-    sys_info.reset(syslogs_lib->GetSyslogs(new FilePath()));
-  if (sys_info.get()) {
-     ListValue* details = new ListValue();
-     strings.Set("details", details);
-     chromeos::LogDictionaryType::iterator it;
-     for (it = sys_info.get()->begin(); it != sys_info.get()->end(); ++it) {
-       DictionaryValue* val = new DictionaryValue;
-       val->SetString("stat_name", it->first);
-       val->SetString("stat_value", it->second);
-       details->Append(val);
-     }
-     strings.SetString("anchor", query);
-  }
-  static const base::StringPiece sys_html(
-        ResourceBundle::GetSharedInstance().GetRawDataResource(
-        IDR_ABOUT_SYS_HTML));
-
-  return jstemplate_builder::GetTemplatesHtml(
-        sys_html, &strings , "t" /* template root node id */);
-}
-#endif
-
 std::string VersionNumberToString(uint32 value) {
   int hi = (value >> 8) & 0xff;
   int low = value & 0xff;
   return base::IntToString(hi) + "." + base::IntToString(low);
 }
 
+namespace {
+
+#if defined(OS_WIN)
+
+// Output DxDiagNode tree as HTML tables and nested HTML unordered list
+// elements.
+void DxDiagNodeToHTML(std::string* output, const DxDiagNode& node) {
+  output->append("<table>\n");
+
+  for (std::map<std::string, std::string>::const_iterator it =
+           node.values.begin();
+       it != node.values.end();
+       ++it) {
+     output->append("<tr><td><strong>");
+     output->append(EscapeForHTML(it->first));
+     output->append("</strong></td><td>");
+     output->append(EscapeForHTML(it->second));
+     output->append("</td></tr>\n");
+  }
+
+  output->append("</table>\n<ul>\n");
+
+  for (std::map<std::string, DxDiagNode>::const_iterator it =
+           node.children.begin();
+       it != node.children.end();
+       ++it) {
+     output->append("<li><strong>");
+     output->append(EscapeForHTML(it->first));
+     output->append("</strong>");
+
+     DxDiagNodeToHTML(output, it->second);
+
+     output->append("</li>\n");
+  }
+
+  output->append("</ul>\n");
+}
+
+#endif  // OS_WIN
+
+}
+
 std::string AboutGpu() {
   GPUInfo gpu_info = GpuProcessHost::Get()->gpu_info();
 
   std::string html;
-  html.append("<html><head><title>About GPU</title></head><body>\n");
-  html.append("<h2>GPU Information</h2><ul>\n");
+  if (!gpu_info.initialized()) {
+    GpuProcessHostUIShim::Get()->CollectGraphicsInfoAsynchronously();
+    // If it's not initialized yet, let the user know and reload the page
+    html.append("<html><head><title>About GPU</title></head>\n");
+    html.append("<body onload=\"setTimeout('window.location.reload(true)',");
+    html.append("2000)\">\n");
+    html.append("<h2>GPU Information</h2>\n");
+    html.append("<p>Retrieving GPU information . . .</p>\n");
+    html.append("</body></html> ");
+  } else {
+    html.append("<html><head><title>About GPU</title></head><body>\n");
+    html.append("<h2>GPU Information</h2><ul>\n");
+    html.append("<li><strong>Vendor ID:</strong> ");
+    html.append(base::StringPrintf("0x%04x", gpu_info.vendor_id()));
+    html.append("<li><strong>Device ID:</strong> ");
+    html.append(base::StringPrintf("0x%04x", gpu_info.device_id()));
+    html.append("<li><strong>Driver Version:</strong> ");
+    html.append(WideToASCII(gpu_info.driver_version()).c_str());
+    html.append("<li><strong>Pixel Shader Version:</strong> ");
+    html.append(VersionNumberToString(
+                    gpu_info.pixel_shader_version()).c_str());
+    html.append("<li><strong>Vertex Shader Version:</strong> ");
+    html.append(VersionNumberToString(
+                    gpu_info.vertex_shader_version()).c_str());
+    html.append("<li><strong>GL Version:</strong> ");
+    html.append(VersionNumberToString(gpu_info.gl_version()).c_str());
 
-  html.append("<li><strong>Vendor ID:</strong> ");
-  html.append(base::IntToString(gpu_info.vendor_id()));
-  html.append("<li><strong>Device ID:</strong> ");
-  html.append(base::IntToString(gpu_info.device_id()));
-  html.append("<li><strong>Driver Version:</strong> ");
-  html.append(WideToASCII(gpu_info.driver_version()).c_str());
-  html.append("<li><strong>Pixel Shader Version:</strong> ");
-  html.append(VersionNumberToString(gpu_info.pixel_shader_version()).c_str());
-  html.append("<li><strong>Vertex Shader Version:</strong> ");
-  html.append(VersionNumberToString(gpu_info.vertex_shader_version()).c_str());
-  html.append("<li><strong>GL Version:</strong> ");
-  html.append(VersionNumberToString(gpu_info.gl_version()).c_str());
-  html.append("</ul></body></html> ");
+#if defined(OS_WIN)
+    html.append("<li><strong>DirectX Diagnostics:</strong> ");
+    DxDiagNodeToHTML(&html, gpu_info.dx_diagnostics());
+#endif
+
+    html.append("</ul></body></html> ");
+  }
   return html;
 }
 
@@ -866,8 +890,8 @@ AboutSource::AboutSource()
   about_source = this;
 
   // Add us to the global URL handler on the IO thread.
-  ChromeThread::PostTask(
-      ChromeThread::IO, FROM_HERE,
+  BrowserThread::PostTask(
+      BrowserThread::IO, FROM_HERE,
       NewRunnableMethod(
           Singleton<ChromeURLDataManager>::get(),
           &ChromeURLDataManager::AddDataSource,
@@ -941,10 +965,6 @@ void AboutSource::StartDataRequest(const std::string& path_raw,
 #endif
   } else if (path == kSyncPath) {
     response = AboutSync();
-#if defined(OS_CHROMEOS)
-  } else if (path == kSysPath) {
-    response = AboutSys(info);
-#endif
   } else if (path == kGpuPath) {
     response = AboutGpu();
   }
@@ -1158,11 +1178,11 @@ bool WillHandleBrowserAboutURL(GURL* url, Profile* profile) {
     return true;
   }
 
-  if (about_labs::IsEnabled()) {
-    // Rewrite about:labs and about:vaporware to chrome://labs/.
-    if (LowerCaseEqualsASCII(url->spec(), chrome::kAboutLabsURL) ||
+  if (about_flags::IsEnabled()) {
+    // Rewrite about:flags and about:vaporware to chrome://flags/.
+    if (LowerCaseEqualsASCII(url->spec(), chrome::kAboutFlagsURL) ||
         LowerCaseEqualsASCII(url->spec(), chrome::kAboutVaporwareURL)) {
-      *url = GURL(chrome::kChromeUILabsURL);
+      *url = GURL(chrome::kChromeUIFlagsURL);
       return true;
     }
   }
@@ -1190,6 +1210,16 @@ bool WillHandleBrowserAboutURL(GURL* url, Profile* profile) {
     // Induce an intentional crash in the browser process.
     int* bad_pointer = NULL;
     *bad_pointer = 42;
+    return true;
+  }
+
+  // Handle URLs to wreck the gpu process.
+  if (LowerCaseEqualsASCII(url->spec(), chrome::kAboutGpuCrashURL)) {
+    GpuProcessHost::SendAboutGpuCrash();
+    return true;
+  }
+  if (LowerCaseEqualsASCII(url->spec(), chrome::kAboutGpuHangURL)) {
+    GpuProcessHost::SendAboutGpuHang();
     return true;
   }
 

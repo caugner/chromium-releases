@@ -7,6 +7,7 @@
 #include "chrome/browser/browser_window.h"
 #include "chrome/browser/extensions/browser_action_test_util.h"
 #include "chrome/browser/extensions/extension_apitest.h"
+#include "chrome/browser/extensions/extension_test_message_listener.h"
 #include "chrome/browser/extensions/extensions_service.h"
 #include "chrome/browser/extensions/user_script_master.h"
 #include "chrome/browser/profile.h"
@@ -35,10 +36,10 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, IncognitoNoScript) {
 
   // Verify the script didn't run.
   bool result = false;
-  ui_test_utils::ExecuteJavaScriptAndExtractBool(
+  ASSERT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractBool(
       tab->render_view_host(), L"",
       L"window.domAutomationController.send(document.title == 'Unmodified')",
-      &result);
+      &result));
   EXPECT_TRUE(result);
 }
 
@@ -71,11 +72,20 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, IncognitoYesScript) {
 
   // Verify the script ran.
   bool result = false;
-  ui_test_utils::ExecuteJavaScriptAndExtractBool(
+  ASSERT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractBool(
       tab->render_view_host(), L"",
       L"window.domAutomationController.send(document.title == 'modified')",
-      &result);
+      &result));
   EXPECT_TRUE(result);
+}
+
+// Tests that an extension which is enabled for incognito mode doesn't
+// accidentially create and incognito profile.
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, DontCreateIncognitoProfile) {
+  ASSERT_FALSE(browser()->profile()->HasOffTheRecordProfile());
+  ASSERT_TRUE(
+      RunExtensionTestIncognito("incognito/enumerate_tabs")) << message_;
+  ASSERT_FALSE(browser()->profile()->HasOffTheRecordProfile());
 }
 
 // Tests that the APIs in an incognito-enabled extension work properly.
@@ -97,34 +107,51 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, Incognito) {
 
 // Tests that the APIs in an incognito-enabled split-mode extension work
 // properly.
-// Hangy, http://crbug.com/53991.
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, DISABLED_IncognitoSplitMode) {
+// TODO(mpcomplete): Crashes flakily. http://crbug.com/53991
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, FLAKY_IncognitoSplitMode) {
   host_resolver()->AddRule("*", "127.0.0.1");
   ASSERT_TRUE(test_server()->Start());
 
-  // We need 2 ResultCatchers because we'll be running the same test in both
-  // regular and incognito mode.
-  ResultCatcher catcher;
-  catcher.RestrictToProfile(browser()->profile());
-  ResultCatcher catcher_incognito;
-  catcher_incognito.RestrictToProfile(
-      browser()->profile()->GetOffTheRecordProfile());
+  {
+    // We need 2 ResultCatchers because we'll be running the same test in both
+    // regular and incognito mode.
+    ResultCatcher catcher;
+    catcher.RestrictToProfile(browser()->profile());
+    ResultCatcher catcher_incognito;
+    catcher_incognito.RestrictToProfile(
+        browser()->profile()->GetOffTheRecordProfile());
 
-  // Open incognito window and navigate to test page.
-  ui_test_utils::OpenURLOffTheRecord(browser()->profile(),
-      GURL("http://www.example.com:1337/files/extensions/test_file.html"));
+    // Open incognito window and navigate to test page.
+    ui_test_utils::OpenURLOffTheRecord(browser()->profile(),
+        GURL("http://www.example.com:1337/files/extensions/test_file.html"));
 
-  ASSERT_TRUE(LoadExtensionIncognito(test_data_dir_
-      .AppendASCII("incognito").AppendASCII("split")));
+    LOG(INFO) << "DEBUG: Loading extension";
 
-  EXPECT_TRUE(catcher.GetNextResult()) << catcher.message();
-  EXPECT_TRUE(catcher_incognito.GetNextResult()) << catcher.message();
+    ASSERT_TRUE(LoadExtensionIncognito(test_data_dir_.
+        AppendASCII("incognito").AppendASCII("split")));
+
+    LOG(INFO) << "DEBUG: waiting for message";
+
+    // Wait for both extensions to be ready before telling them to proceed.
+    ExtensionTestMessageListener listener("waiting", true);
+    EXPECT_TRUE(listener.WaitUntilSatisfied());
+    ExtensionTestMessageListener listener_incognito("waiting", true);
+    EXPECT_TRUE(listener_incognito.WaitUntilSatisfied());
+    listener.Reply("go");
+    listener_incognito.Reply("go");
+
+    LOG(INFO) << "DEBUG: Get result for normal";
+    EXPECT_TRUE(catcher.GetNextResult()) << catcher.message();
+    LOG(INFO) << "DEBUG: Get result for incognito";
+    EXPECT_TRUE(catcher_incognito.GetNextResult()) << catcher.message();
+    LOG(INFO) << "DEBUG: Got results";
+  }
+  LOG(INFO) << "DEBUG: ResultCatcher destroyed.";
 }
 
 // Tests that the APIs in an incognito-disabled extension don't see incognito
 // events or callbacks.
-// Hangy, http://crbug.com/53869.
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, DISABLED_IncognitoDisabled) {
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, IncognitoDisabled) {
   host_resolver()->AddRule("*", "127.0.0.1");
   ASSERT_TRUE(test_server()->Start());
 

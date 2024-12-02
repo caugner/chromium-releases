@@ -10,6 +10,7 @@
 #include <string>
 
 #include "base/basictypes.h"
+#include "base/non_thread_safe.h"
 #include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
 #include "base/string16.h"
@@ -22,16 +23,20 @@ namespace net {
 
 class AuthChallengeInfo;
 class HttpAuthHandler;
-class HttpNetworkSession;
+class HttpAuthHandlerFactory;
+class HttpAuthCache;
 class HttpRequestHeaders;
 struct HttpRequestInfo;
 
-class HttpAuthController : public base::RefCounted<HttpAuthController> {
+class HttpAuthController : public base::RefCounted<HttpAuthController>,
+                           public NonThreadSafe {
  public:
   // The arguments are self explanatory except possibly for |auth_url|, which
   // should be both the auth target and auth path in a single url argument.
-  HttpAuthController(HttpAuth::Target target, const GURL& auth_url,
-                     scoped_refptr<HttpNetworkSession> session);
+  HttpAuthController(HttpAuth::Target target,
+                     const GURL& auth_url,
+                     HttpAuthCache* http_auth_cache,
+                     HttpAuthHandlerFactory* http_auth_handler_factory);
 
   // Generate an authentication token for |target| if necessary. The return
   // value is a net error code. |OK| will be returned both in the case that
@@ -71,15 +76,19 @@ class HttpAuthController : public base::RefCounted<HttpAuthController> {
   virtual bool IsAuthSchemeDisabled(const std::string& scheme) const;
   virtual void DisableAuthScheme(const std::string& scheme);
 
- protected:  // So that we can mock this object.
+ private:
+  // So that we can mock this object.
   friend class base::RefCounted<HttpAuthController>;
+
   virtual ~HttpAuthController();
 
- private:
   // Searches the auth cache for an entry that encompasses the request's path.
   // If such an entry is found, updates |identity_| and |handler_| with the
   // cache entry's data and returns true.
   bool SelectPreemptiveAuth(const BoundNetLog& net_log);
+
+  // Invalidates the current handler, including cache.
+  void InvalidateCurrentHandler();
 
   // Invalidates any auth cache entries after authentication has failed.
   // The identity that was rejected is |identity_|.
@@ -135,7 +144,11 @@ class HttpAuthController : public base::RefCounted<HttpAuthController> {
   // in response to an HTTP authentication challenge.
   bool default_credentials_used_;
 
-  scoped_refptr<HttpNetworkSession> session_;
+  // These two are owned by the HttpNetworkSession/IOThread, which own the
+  // objects which reference |this|.  Therefore, these raw pointers are valid
+  // for the lifetime of this object.
+  HttpAuthCache* const http_auth_cache_;
+  HttpAuthHandlerFactory* const http_auth_handler_factory_;
 
   std::set<std::string> disabled_schemes_;
 

@@ -33,7 +33,7 @@ using syncable::WriteTransaction;
 
 MockConnectionManager::MockConnectionManager(DirectoryManager* dirmgr,
                                              const string& name)
-    : ServerConnectionManager("unused", 0, false, "version", "id"),
+    : ServerConnectionManager("unused", 0, false, "version"),
       conflict_all_commits_(false),
       conflict_n_commits_(0),
       next_new_id_(10000),
@@ -105,8 +105,10 @@ bool MockConnectionManager::PostBufferToPath(const PostBufferParams* params,
 
   // Default to an ok connection.
   params->response->server_status = HttpResponse::SERVER_CONNECTION_OK;
-  response.set_store_birthday(store_birthday_);
-  if (post.has_store_birthday() && post.store_birthday() != store_birthday_) {
+  const string current_store_birthday = store_birthday();
+  response.set_store_birthday(current_store_birthday);
+  if (post.has_store_birthday() && post.store_birthday() !=
+      current_store_birthday) {
     response.set_error_code(ClientToServerResponse::NOT_MY_BIRTHDAY);
     response.set_error_message("Merry Unbirthday!");
     response.SerializeToString(params->buffer_out);
@@ -124,6 +126,8 @@ bool MockConnectionManager::PostBufferToPath(const PostBufferParams* params,
     ProcessGetUpdates(&post, &response);
   } else if (post.message_contents() == ClientToServerMessage::AUTHENTICATE) {
     ProcessAuthenticate(&post, &response, auth_token);
+  } else if (post.message_contents() == ClientToServerMessage::CLEAR_DATA) {
+    ProcessClearData(&post, &response);
   } else {
     EXPECT_TRUE(false) << "Unknown/unsupported ClientToServerMessage";
     return false;
@@ -355,6 +359,21 @@ void MockConnectionManager::ProcessGetUpdates(ClientToServerMessage* csm,
   // TODO(sync): filter results dependant on timestamp? or check limits?
   response->mutable_get_updates()->CopyFrom(updates_);
   ResetUpdates();
+}
+
+void MockConnectionManager::SetClearUserDataResponseStatus(
+  sync_pb::ClientToServerResponse::ErrorType errortype ) {
+  // Note: this is not a thread-safe set, ok for now.  NOT ok if tests
+  // run the syncer on the background thread while this method is called.
+  clear_user_data_response_errortype_ = errortype;
+}
+
+void MockConnectionManager::ProcessClearData(ClientToServerMessage* csm,
+  ClientToServerResponse* response) {
+  CHECK(csm->has_clear_user_data());
+  ASSERT_EQ(csm->message_contents(), ClientToServerMessage::CLEAR_DATA);
+  response->clear_user_data();
+  response->set_error_code(clear_user_data_response_errortype_);
 }
 
 void MockConnectionManager::ProcessAuthenticate(

@@ -59,6 +59,8 @@ void WebPreferences::Apply(WebView* web_view) const {
   WebRuntimeFeatures::enableDatabase(
       WebRuntimeFeatures::isDatabaseEnabled() || databases_enabled);
   settings->setOfflineWebApplicationCacheEnabled(application_cache_enabled);
+  settings->setCaretBrowsingEnabled(caret_browsing_enabled);
+  settings->setHyperlinkAuditingEnabled(hyperlink_auditing_enabled);
 
   // This setting affects the behavior of links in an editable region:
   // clicking the link should select it rather than navigate to it.

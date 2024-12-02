@@ -13,6 +13,7 @@
 #include "base/format_macros.h"
 #include "base/logging.h"
 #include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "base/task.h"
 #include "base/thread.h"
 #include "base/waitable_event.h"
@@ -376,7 +377,7 @@ class ProxyConfigServiceLinuxTest : public PlatformTest {
 };
 
 // Builds an identifier for each test in an array.
-#define TEST_DESC(desc) StringPrintf("at line %d <%s>", __LINE__, desc)
+#define TEST_DESC(desc) base::StringPrintf("at line %d <%s>", __LINE__, desc)
 
 TEST_F(ProxyConfigServiceLinuxTest, BasicGConfTest) {
   std::vector<std::string> empty_ignores;
@@ -581,7 +582,7 @@ TEST_F(ProxyConfigServiceLinuxTest, BasicGConfTest) {
       false,                                          // auto_detect
       GURL(),                                         // pac_url
       ProxyRulesExpectation::Single(
-          "socks4://socks.com:99",  // single proxy
+          "socks5://socks.com:99",  // single proxy
           "")                       // bypass rules
     },
 
@@ -605,8 +606,8 @@ TEST_F(ProxyConfigServiceLinuxTest, BasicGConfTest) {
   };
 
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(tests); ++i) {
-    SCOPED_TRACE(StringPrintf("Test[%" PRIuS "] %s", i,
-                              tests[i].description.c_str()));
+    SCOPED_TRACE(base::StringPrintf("Test[%" PRIuS "] %s", i,
+                                    tests[i].description.c_str()));
     MockEnvironment* env = new MockEnvironment;
     MockGConfSettingGetter* gconf_getter = new MockGConfSettingGetter;
     SynchConfigGetter sync_config_getter(
@@ -824,12 +825,12 @@ TEST_F(ProxyConfigServiceLinuxTest, BasicEnvTest) {
       false,                                   // auto_detect
       GURL(),                                  // pac_url
       ProxyRulesExpectation::Single(
-          "socks4://socks.com:888",  // single proxy
+          "socks5://socks.com:888",  // single proxy
           ""),                       // bypass rules
     },
 
     {
-      TEST_DESC("socks5"),
+      TEST_DESC("socks4"),
       { // Input.
         NULL,  // DESKTOP_SESSION
         NULL,  // HOME
@@ -838,7 +839,7 @@ TEST_F(ProxyConfigServiceLinuxTest, BasicEnvTest) {
         NULL,  // auto_proxy
         "",  // all_proxy
         NULL, NULL, NULL,  // per-proto proxies
-        "socks.com:888", "5",  // SOCKS
+        "socks.com:888", "4",  // SOCKS
         NULL,  // no_proxy
       },
 
@@ -846,7 +847,7 @@ TEST_F(ProxyConfigServiceLinuxTest, BasicEnvTest) {
       false,                                   // auto_detect
       GURL(),                                  // pac_url
       ProxyRulesExpectation::Single(
-          "socks5://socks.com:888",  // single proxy
+          "socks4://socks.com:888",  // single proxy
           ""),                       // bypass rules
     },
 
@@ -868,7 +869,7 @@ TEST_F(ProxyConfigServiceLinuxTest, BasicEnvTest) {
       false,                                   // auto_detect
       GURL(),                                  // pac_url
       ProxyRulesExpectation::Single(
-          "socks4://socks.com:1080",  // single proxy
+          "socks5://socks.com:1080",  // single proxy
           ""),                        // bypass rules
     },
 
@@ -895,8 +896,8 @@ TEST_F(ProxyConfigServiceLinuxTest, BasicEnvTest) {
   };
 
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(tests); ++i) {
-    SCOPED_TRACE(StringPrintf("Test[%" PRIuS "] %s", i,
-                              tests[i].description.c_str()));
+    SCOPED_TRACE(base::StringPrintf("Test[%" PRIuS "] %s", i,
+                                    tests[i].description.c_str()));
     MockEnvironment* env = new MockEnvironment;
     MockGConfSettingGetter* gconf_getter = new MockGConfSettingGetter;
     SynchConfigGetter sync_config_getter(
@@ -1292,8 +1293,8 @@ TEST_F(ProxyConfigServiceLinuxTest, KDEConfigParser) {
   };
 
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(tests); ++i) {
-    SCOPED_TRACE(StringPrintf("Test[%" PRIuS "] %s", i,
-                              tests[i].description.c_str()));
+    SCOPED_TRACE(base::StringPrintf("Test[%" PRIuS "] %s", i,
+                                    tests[i].description.c_str()));
     MockEnvironment* env = new MockEnvironment;
     env->values = tests[i].env_values;
     // Force the KDE getter to be used and tell it where the test is.

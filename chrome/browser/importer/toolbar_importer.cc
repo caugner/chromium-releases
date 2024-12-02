@@ -7,6 +7,7 @@
 #include <limits>
 
 #include "base/rand_util.h"
+#include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
@@ -122,11 +123,11 @@ void Toolbar5Importer::Cancel() {
 
   // If we are conducting network operations, post a message to the importer
   // thread for synchronization.
-  if (ChromeThread::CurrentlyOn(ChromeThread::UI)) {
+  if (BrowserThread::CurrentlyOn(BrowserThread::UI)) {
     EndImport();
   } else {
-    ChromeThread::PostTask(
-        ChromeThread::UI, FROM_HERE,
+    BrowserThread::PostTask(
+        BrowserThread::UI, FROM_HERE,
         NewRunnableMethod(this, &Toolbar5Importer::Cancel));
   }
 }
@@ -205,7 +206,8 @@ void Toolbar5Importer::EndImport() {
       data_fetcher_ = NULL;
     }
 
-    bridge_->NotifyEnded();
+    if (bridge_)
+      bridge_->NotifyEnded();
   }
 }
 

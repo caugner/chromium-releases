@@ -26,15 +26,16 @@
 #include "gpu/command_buffer/service/buffer_manager.h"
 #include "gpu/command_buffer/service/cmd_buffer_engine.h"
 #include "gpu/command_buffer/service/context_group.h"
+#include "gpu/command_buffer/service/feature_info.h"
 #include "gpu/command_buffer/service/framebuffer_manager.h"
 #include "gpu/command_buffer/service/gl_utils.h"
 #include "gpu/command_buffer/service/gles2_cmd_validation.h"
 #include "gpu/command_buffer/service/program_manager.h"
 #include "gpu/command_buffer/service/renderbuffer_manager.h"
 #include "gpu/command_buffer/service/shader_manager.h"
+#include "gpu/command_buffer/service/shader_translator.h"
 #include "gpu/command_buffer/service/texture_manager.h"
 #include "gpu/GLES2/gles2_command_buffer.h"
-#include "third_party/angle/include/GLSLANG/ShaderLang.h"
 
 #if !defined(GL_DEPTH24_STENCIL8)
 #define GL_DEPTH24_STENCIL8 0x88F0
@@ -113,6 +114,14 @@ const CommandInfo g_command_info[] = {
   #undef GLES2_CMD_OP
 };
 
+static bool IsAngle() {
+#if defined(OS_WIN)
+  return gfx::GetGLImplementation() == gfx::kGLImplementationEGLGLES2;
+#else
+  return false;
+#endif
+}
+
 // This class prevents any GL errors that occur when it is in scope from
 // being reported to the client.
 class ScopedGLErrorSuppressor {
@@ -161,16 +170,18 @@ class ScopedFrameBufferBinder {
   DISALLOW_COPY_AND_ASSIGN(ScopedFrameBufferBinder);
 };
 
-// Temporarily switch to a decoder's default GL context, having known default
-// state.
-class ScopedDefaultGLContext {
+// Temporarily changes a decoder's bound frame buffer to a resolved version of
+// the multisampled offscreen render buffer if and only if that buffer is
+// currently bound and is multisampled.
+class ScopedResolvedFrameBufferBinder {
  public:
-  explicit ScopedDefaultGLContext(GLES2DecoderImpl* decoder);
-  ~ScopedDefaultGLContext();
+  explicit ScopedResolvedFrameBufferBinder(GLES2DecoderImpl* decoder);
+  ~ScopedResolvedFrameBufferBinder();
 
  private:
   GLES2DecoderImpl* decoder_;
-  DISALLOW_COPY_AND_ASSIGN(ScopedDefaultGLContext);
+  bool resolve_and_bind_;
+  DISALLOW_COPY_AND_ASSIGN(ScopedResolvedFrameBufferBinder);
 };
 
 // Encapsulates an OpenGL texture.
@@ -183,7 +194,7 @@ class Texture {
   void Create();
 
   // Set the initial size and format of a render texture or resize it.
-  bool AllocateStorage(const gfx::Size& size);
+  bool AllocateStorage(const gfx::Size& size, GLenum format);
 
   // Copy the contents of the currently bound frame buffer.
   void Copy(const gfx::Size& size);
@@ -217,7 +228,7 @@ class RenderBuffer {
   void Create();
 
   // Set the initial size and format of a render buffer or resize it.
-  bool AllocateStorage(const gfx::Size& size, GLenum format);
+  bool AllocateStorage(const gfx::Size& size, GLenum format, GLsizei samples);
 
   // Destroy the render buffer. This must be explicitly called before destroying
   // this object.
@@ -269,18 +280,94 @@ class FrameBuffer {
   DISALLOW_COPY_AND_ASSIGN(FrameBuffer);
 };
 
-void FinalizeShaderTranslator(void* /* dummy */) {
-  ShFinalize();
+class ContextCreationAttribParser {
+ public:
+  ContextCreationAttribParser();
+  bool Parse(const std::vector<int32>& attribs);
+
+  // -1 if invalid or unspecified.
+  int32 alpha_size_;
+  int32 blue_size_;
+  int32 green_size_;
+  int32 red_size_;
+  int32 depth_size_;
+  int32 stencil_size_;
+  int32 samples_;
+  int32 sample_buffers_;
+};
+
+ContextCreationAttribParser::ContextCreationAttribParser()
+  : alpha_size_(-1),
+    blue_size_(-1),
+    green_size_(-1),
+    red_size_(-1),
+    depth_size_(-1),
+    stencil_size_(-1),
+    samples_(-1),
+    sample_buffers_(-1) {
 }
 
-bool InitializeShaderTranslator() {
-  static bool initialized = false;
-  if (!initialized && ShInitialize()) {
-    base::AtExitManager::RegisterCallback(&FinalizeShaderTranslator, NULL);
-    initialized = true;
+bool ContextCreationAttribParser::Parse(const std::vector<int32>& attribs) {
+  // From <EGL/egl.h>.
+  const int32 EGL_ALPHA_SIZE = 0x3021;
+  const int32 EGL_BLUE_SIZE = 0x3022;
+  const int32 EGL_GREEN_SIZE = 0x3023;
+  const int32 EGL_RED_SIZE = 0x3024;
+  const int32 EGL_DEPTH_SIZE = 0x3025;
+  const int32 EGL_STENCIL_SIZE = 0x3026;
+  const int32 EGL_SAMPLES = 0x3031;
+  const int32 EGL_SAMPLE_BUFFERS = 0x3032;
+  const int32 EGL_NONE = 0x3038;
+
+  for (size_t i = 0; i < attribs.size(); i += 2) {
+    const int32 attrib = attribs[i];
+    if (i + 1 >= attribs.size()) {
+      if (attrib == EGL_NONE)
+        return true;
+
+      DLOG(ERROR) << "Missing value after context creation attribute: "
+                  << attrib;
+      return false;
+    }
+
+    const int32 value = attribs[i+1];
+    switch (attrib) {
+      case EGL_ALPHA_SIZE:
+        alpha_size_ = value;
+        break;
+      case EGL_BLUE_SIZE:
+        blue_size_ = value;
+        break;
+      case EGL_GREEN_SIZE:
+        green_size_ = value;
+        break;
+      case EGL_RED_SIZE:
+        red_size_ = value;
+        break;
+      case EGL_DEPTH_SIZE:
+        depth_size_ = value;
+        break;
+      case EGL_STENCIL_SIZE:
+        stencil_size_ = value;
+        break;
+      case EGL_SAMPLES:
+        samples_ = value;
+        break;
+      case EGL_SAMPLE_BUFFERS:
+        sample_buffers_ = value;
+        break;
+      case EGL_NONE:
+        // Terminate list, even if more attributes.
+        return true;
+      default:
+        DLOG(ERROR) << "Invalid context creation attribute: " << attrib;
+        return false;
+    }
   }
-  return initialized;
+
+  return true;
 }
+
 // }  // anonymous namespace.
 
 GLES2Decoder::GLES2Decoder(ContextGroup* group)
@@ -540,6 +627,7 @@ class GLES2DecoderImpl : public base::SupportsWeakPtr<GLES2DecoderImpl>,
   // Overridden from GLES2Decoder.
   virtual bool Initialize(gfx::GLContext* context,
                           const gfx::Size& size,
+                          const std::vector<int32>& attribs,
                           GLES2Decoder* parent,
                           uint32 parent_client_texture_id);
   virtual void Destroy();
@@ -550,6 +638,8 @@ class GLES2DecoderImpl : public base::SupportsWeakPtr<GLES2DecoderImpl>,
   virtual gfx::GLContext* GetGLContext() { return context_.get(); }
 
   virtual void SetSwapBuffersCallback(Callback0::Type* callback);
+  virtual bool GetServiceTextureId(uint32 client_texture_id,
+                                   uint32* service_texture_id);
 
   // Restores the current state to the user's settings.
   void RestoreCurrentFramebufferBindings();
@@ -558,7 +648,7 @@ class GLES2DecoderImpl : public base::SupportsWeakPtr<GLES2DecoderImpl>,
 
  private:
   friend class ScopedGLErrorSuppressor;
-  friend class ScopedDefaultGLContext;
+  friend class ScopedResolvedFrameBufferBinder;
   friend class RenderBuffer;
   friend class FrameBuffer;
 
@@ -612,10 +702,15 @@ class GLES2DecoderImpl : public base::SupportsWeakPtr<GLES2DecoderImpl>,
     return group_->texture_manager();
   }
 
+  bool IsOffscreenBufferMultisampled() const {
+    return offscreen_target_samples_ > 1;
+  }
+
   // Creates a TextureInfo for the given texture.
   TextureManager::TextureInfo* CreateTextureInfo(
       GLuint client_id, GLuint service_id) {
-    return texture_manager()->CreateTextureInfo(client_id, service_id);
+    return texture_manager()->CreateTextureInfo(
+        feature_info_, client_id, service_id);
   }
 
   // Gets the texture info for the given texture. Returns NULL if none exists.
@@ -627,7 +722,7 @@ class GLES2DecoderImpl : public base::SupportsWeakPtr<GLES2DecoderImpl>,
 
   // Deletes the texture info for the given texture.
   void RemoveTextureInfo(GLuint client_id) {
-    texture_manager()->RemoveTextureInfo(client_id);
+    texture_manager()->RemoveTextureInfo(feature_info_, client_id);
   }
 
   // Get the size (in pixels) of the currently bound frame buffer (either FBO
@@ -1180,6 +1275,9 @@ class GLES2DecoderImpl : public base::SupportsWeakPtr<GLES2DecoderImpl>,
   // the next call to SwapBuffers.
   gfx::Size pending_offscreen_size_;
 
+  // Current width and height of the offscreen frame buffer.
+  gfx::Size offscreen_size_;
+
   // Current GL error bits.
   uint32 error_bits_;
 
@@ -1247,20 +1345,25 @@ class GLES2DecoderImpl : public base::SupportsWeakPtr<GLES2DecoderImpl>,
   // The currently bound renderbuffer
   RenderbufferManager::RenderbufferInfo::Ref bound_renderbuffer_;
 
-  bool anti_aliased_;
-
   // The offscreen frame buffer that the client renders to. With EGL, the
   // depth and stencil buffers are separate. With regular GL there is a single
   // packed depth stencil buffer in offscreen_target_depth_render_buffer_.
   // offscreen_target_stencil_render_buffer_ is unused.
   scoped_ptr<FrameBuffer> offscreen_target_frame_buffer_;
   scoped_ptr<Texture> offscreen_target_color_texture_;
+  scoped_ptr<RenderBuffer> offscreen_target_color_render_buffer_;
   scoped_ptr<RenderBuffer> offscreen_target_depth_render_buffer_;
   scoped_ptr<RenderBuffer> offscreen_target_stencil_render_buffer_;
+  GLenum offscreen_target_color_format_;
+  GLenum offscreen_target_depth_format_;
+  GLenum offscreen_target_stencil_format_;
+  GLsizei offscreen_target_samples_;
 
   GLuint copy_texture_to_parent_texture_fb_;
 
-  // The copy that is saved when SwapBuffers is called.
+  // The copy that is saved when SwapBuffers is called.  It is also
+  // used as the destination for multi-sample resolves.
+  scoped_ptr<FrameBuffer> offscreen_saved_frame_buffer_;
   scoped_ptr<Texture> offscreen_saved_color_texture_;
 
   scoped_ptr<Callback0::Type> swap_buffers_callback_;
@@ -1272,14 +1375,12 @@ class GLES2DecoderImpl : public base::SupportsWeakPtr<GLES2DecoderImpl>,
   error::Error current_decoder_error_;
 
   bool use_shader_translator_;
-  ShHandle vertex_compiler_;
-  ShHandle fragment_compiler_;
+  scoped_ptr<ShaderTranslator> vertex_translator_;
+  scoped_ptr<ShaderTranslator> fragment_translator_;
 
-  // Cached from the context group.
+  // Cached from ContextGroup
   const Validators* validators_;
-
-  // Supported extensions.
-  bool depth24_stencil8_oes_supported_;
+  FeatureInfo* feature_info_;
 
   DISALLOW_COPY_AND_ASSIGN(GLES2DecoderImpl);
 };
@@ -1333,6 +1434,40 @@ ScopedFrameBufferBinder::~ScopedFrameBufferBinder() {
   decoder_->RestoreCurrentFramebufferBindings();
 }
 
+ScopedResolvedFrameBufferBinder::ScopedResolvedFrameBufferBinder(
+    GLES2DecoderImpl* decoder) : decoder_(decoder) {
+  resolve_and_bind_ = (decoder_->offscreen_target_frame_buffer_.get() &&
+                       decoder_->IsOffscreenBufferMultisampled() &&
+                       !decoder_->bound_read_framebuffer_.get());
+  if (!resolve_and_bind_)
+    return;
+
+  ScopedGLErrorSuppressor suppressor(decoder_);
+  glBindFramebufferEXT(GL_READ_FRAMEBUFFER_EXT,
+                       decoder_->offscreen_target_frame_buffer_->id());
+  glBindFramebufferEXT(GL_DRAW_FRAMEBUFFER_EXT,
+                       decoder_->offscreen_saved_frame_buffer_->id());
+  const int width = decoder_->offscreen_size_.width();
+  const int height = decoder_->offscreen_size_.height();
+  if (IsAngle()) {
+    glBlitFramebufferANGLE(0, 0, width, height, 0, 0, width, height,
+                           GL_COLOR_BUFFER_BIT, GL_NEAREST);
+  } else {
+    glBlitFramebufferEXT(0, 0, width, height, 0, 0, width, height,
+                         GL_COLOR_BUFFER_BIT, GL_NEAREST);
+  }
+  glBindFramebufferEXT(GL_FRAMEBUFFER,
+                       decoder_->offscreen_saved_frame_buffer_->id());
+}
+
+ScopedResolvedFrameBufferBinder::~ScopedResolvedFrameBufferBinder() {
+  if (!resolve_and_bind_)
+    return;
+
+  ScopedGLErrorSuppressor suppressor(decoder_);
+  decoder_->RestoreCurrentFramebufferBindings();
+}
+
 Texture::Texture(GLES2DecoderImpl* decoder)
     : decoder_(decoder),
       id_(0) {
@@ -1351,7 +1486,7 @@ void Texture::Create() {
   glGenTextures(1, &id_);
 }
 
-bool Texture::AllocateStorage(const gfx::Size& size) {
+bool Texture::AllocateStorage(const gfx::Size& size, GLenum format) {
   DCHECK_NE(id_, 0u);
   ScopedGLErrorSuppressor suppressor(decoder_);
   ScopedTexture2DBinder binder(decoder_, id_);
@@ -1363,11 +1498,11 @@ bool Texture::AllocateStorage(const gfx::Size& size) {
 
   glTexImage2D(GL_TEXTURE_2D,
                0,  // mip level
-               GL_RGBA,
+               format,
                size.width(),
                size.height(),
                0,  // border
-               GL_RGBA,
+               format,
                GL_UNSIGNED_BYTE,
                NULL);
 
@@ -1415,13 +1550,30 @@ void RenderBuffer::Create() {
   glGenRenderbuffersEXT(1, &id_);
 }
 
-bool RenderBuffer::AllocateStorage(const gfx::Size& size, GLenum format) {
+bool RenderBuffer::AllocateStorage(const gfx::Size& size, GLenum format,
+                                   GLsizei samples) {
   ScopedGLErrorSuppressor suppressor(decoder_);
   ScopedRenderBufferBinder binder(decoder_, id_);
-  glRenderbufferStorageEXT(GL_RENDERBUFFER,
-                           format,
-                           size.width(),
-                           size.height());
+  if (samples <= 1) {
+    glRenderbufferStorageEXT(GL_RENDERBUFFER,
+                             format,
+                             size.width(),
+                             size.height());
+  } else {
+    if (IsAngle()) {
+      glRenderbufferStorageMultisampleANGLE(GL_RENDERBUFFER,
+                                            samples,
+                                            format,
+                                            size.width(),
+                                            size.height());
+    } else {
+      glRenderbufferStorageMultisampleEXT(GL_RENDERBUFFER,
+                                          samples,
+                                          format,
+                                          size.width(),
+                                          size.height());
+    }
+  }
   return glGetError() == GL_NO_ERROR;
 }
 
@@ -1523,13 +1675,14 @@ GLES2DecoderImpl::GLES2DecoderImpl(ContextGroup* group)
       clear_depth_(1.0f),
       mask_depth_(true),
       enable_scissor_test_(false),
-      anti_aliased_(false),
+      offscreen_target_color_format_(0),
+      offscreen_target_depth_format_(0),
+      offscreen_target_stencil_format_(0),
+      offscreen_target_samples_(0),
       current_decoder_error_(error::kNoError),
       use_shader_translator_(true),
-      vertex_compiler_(NULL),
-      fragment_compiler_(NULL),
-      validators_(group->validators()),
-      depth24_stencil8_oes_supported_(false) {
+      validators_(group_->feature_info()->validators()),
+      feature_info_(group_->feature_info()) {
   attrib_0_value_.v[0] = 0.0f;
   attrib_0_value_.v[1] = 0.0f;
   attrib_0_value_.v[2] = 0.0f;
@@ -1548,6 +1701,7 @@ GLES2DecoderImpl::GLES2DecoderImpl(ContextGroup* group)
 
 bool GLES2DecoderImpl::Initialize(gfx::GLContext* context,
                                   const gfx::Size& size,
+                                  const std::vector<int32>& attribs,
                                   GLES2Decoder* parent,
                                   uint32 parent_client_texture_id) {
   DCHECK(context);
@@ -1562,22 +1716,15 @@ bool GLES2DecoderImpl::Initialize(gfx::GLContext* context,
     parent_ = static_cast<GLES2DecoderImpl*>(parent)->AsWeakPtr();
 
   if (!MakeCurrent()) {
+    LOG(ERROR) << "GLES2DecoderImpl::Initialize failed because "
+               << "MakeCurrent failed.";
     Destroy();
     return false;
   }
 
   CHECK_GL_ERROR();
 
-  if (!group_->Initialize()) {
-    Destroy();
-    return false;
-  }
-
   vertex_attrib_manager_.Initialize(group_->max_vertex_attribs());
-
-  // Check supported extensions.
-  depth24_stencil8_oes_supported_ =
-      context_->HasExtension("GL_OES_packed_depth_stencil");
 
   // We have to enable vertex array 0 on OpenGL or it won't render. Note that
   // OpenGL ES 2.0 does not have this issue.
@@ -1604,21 +1751,108 @@ bool GLES2DecoderImpl::Initialize(gfx::GLContext* context,
   CHECK_GL_ERROR();
 
   if (context_->IsOffscreen()) {
+    ContextCreationAttribParser attrib_parser;
+    if (!attrib_parser.Parse(attribs))
+      return false;
+
+    if (attrib_parser.samples_ > 0 && attrib_parser.sample_buffers_ > 0 &&
+        (feature_info_->feature_flags().ext_framebuffer_multisample ||
+         context_->HasExtension("GL_ANGLE_framebuffer_multisample"))) {
+      // Per ext_framebuffer_multisample spec, need max bound on sample count.
+      GLint max_sample_count;
+      glGetIntegerv(GL_MAX_SAMPLES_EXT, &max_sample_count);
+      offscreen_target_samples_ = std::min(attrib_parser.samples_,
+                                           max_sample_count);
+    } else {
+      offscreen_target_samples_ = 1;
+    }
+
+    if (gfx::GetGLImplementation() == gfx::kGLImplementationEGLGLES2) {
+      const bool rgb8_supported =
+          context_->HasExtension("GL_OES_rgb8_rgba8");
+      // The only available default render buffer formats in GLES2 have very
+      // little precision.  Don't enable multisampling unless 8-bit render
+      // buffer formats are available--instead fall back to 8-bit textures.
+      if (rgb8_supported && offscreen_target_samples_ > 1) {
+        offscreen_target_color_format_ = attrib_parser.alpha_size_ > 0 ?
+            GL_RGBA8 : GL_RGB8;
+      } else {
+        offscreen_target_samples_ = 1;
+        offscreen_target_color_format_ = attrib_parser.alpha_size_ > 0 ?
+            GL_RGBA : GL_RGB;
+      }
+
+      // ANGLE only supports packed depth/stencil formats, so use it if it is
+      // available.
+      const bool depth24_stencil8_supported =
+          context_->HasExtension("GL_OES_packed_depth_stencil");
+      if (depth24_stencil8_supported) {
+        LOG(INFO) << "GL_OES_packed_depth_stencil supported.";
+      } else {
+        LOG(INFO) << "GL_OES_packed_depth_stencil not supported.";
+      }
+      if (attrib_parser.depth_size_ > 0 && depth24_stencil8_supported) {
+        offscreen_target_depth_format_ = GL_DEPTH24_STENCIL8;
+        offscreen_target_stencil_format_ = 0;
+      } else {
+        // It may be the case that this depth/stencil combination is not
+        // supported, but this will be checked later by CheckFramebufferStatus.
+        offscreen_target_depth_format_ = attrib_parser.depth_size_ > 0 ?
+            GL_DEPTH_COMPONENT16 : 0;
+        offscreen_target_stencil_format_ = attrib_parser.stencil_size_ > 0 ?
+            GL_STENCIL_INDEX8 : 0;
+      }
+    } else {
+      offscreen_target_color_format_ = attrib_parser.alpha_size_ > 0 ?
+          GL_RGBA : GL_RGB;
+
+      // If depth is requested at all, use the packed depth stencil format if
+      // it's available, as some desktop GL drivers don't support any non-packed
+      // formats for depth attachments.
+      const bool depth24_stencil8_supported =
+          context_->HasExtension("GL_EXT_packed_depth_stencil");
+      if (depth24_stencil8_supported) {
+        LOG(INFO) << "GL_EXT_packed_depth_stencil supported.";
+      } else {
+        LOG(INFO) << "GL_EXT_packed_depth_stencil not supported.";
+      }
+
+      if (attrib_parser.depth_size_ > 0 && depth24_stencil8_supported) {
+        offscreen_target_depth_format_ = GL_DEPTH24_STENCIL8;
+        offscreen_target_stencil_format_ = 0;
+      } else {
+        offscreen_target_depth_format_ = attrib_parser.depth_size_ > 0 ?
+            GL_DEPTH_COMPONENT : 0;
+        offscreen_target_stencil_format_ = attrib_parser.stencil_size_ > 0 ?
+            GL_STENCIL_INDEX : 0;
+      }
+    }
+
     // Create the target frame buffer. This is the one that the client renders
     // directly to.
     offscreen_target_frame_buffer_.reset(new FrameBuffer(this));
     offscreen_target_frame_buffer_->Create();
-    offscreen_target_color_texture_.reset(new Texture(this));
-    offscreen_target_color_texture_->Create();
-    offscreen_target_depth_render_buffer_.reset(
-        new RenderBuffer(this));
+    // Due to GLES2 format limitations, either the color texture (for
+    // non-multisampling) or the color render buffer (for multisampling) will be
+    // attached to the offscreen frame buffer.  The render buffer has more
+    // limited formats available to it, but the texture can't do multisampling.
+    if (IsOffscreenBufferMultisampled()) {
+      offscreen_target_color_render_buffer_.reset(new RenderBuffer(this));
+      offscreen_target_color_render_buffer_->Create();
+    } else {
+      offscreen_target_color_texture_.reset(new Texture(this));
+      offscreen_target_color_texture_->Create();
+    }
+    offscreen_target_depth_render_buffer_.reset(new RenderBuffer(this));
     offscreen_target_depth_render_buffer_->Create();
-    offscreen_target_stencil_render_buffer_.reset(
-        new RenderBuffer(this));
+    offscreen_target_stencil_render_buffer_.reset(new RenderBuffer(this));
     offscreen_target_stencil_render_buffer_->Create();
 
     // Create the saved offscreen texture. The target frame buffer is copied
     // here when SwapBuffers is called.
+    offscreen_saved_frame_buffer_.reset(new FrameBuffer(this));
+    offscreen_saved_frame_buffer_->Create();
+    //
     offscreen_saved_color_texture_.reset(new Texture(this));
     offscreen_saved_color_texture_->Create();
 
@@ -1635,7 +1869,7 @@ bool GLES2DecoderImpl::Initialize(gfx::GLContext* context,
     // of the frame buffers is okay.
     pending_offscreen_size_ = size;
     if (!UpdateOffscreenFrameBufferSize()) {
-      DLOG(ERROR) << "Could not allocate offscreen buffer storage.";
+      LOG(ERROR) << "Could not allocate offscreen buffer storage.";
       Destroy();
       return false;
     }
@@ -1650,20 +1884,17 @@ bool GLES2DecoderImpl::Initialize(gfx::GLContext* context,
   // OpenGL ES 2.0 implicitly enables the desktop GL capability
   // VERTEX_PROGRAM_POINT_SIZE and doesn't expose this enum. This fact
   // isn't well documented; it was discovered in the Khronos OpenGL ES
-  // mailing list archives.
+  // mailing list archives. It also implicitly enables the desktop GL
+  // capability GL_POINT_SPRITE to provide access to the gl_PointCoord
+  // variable in fragment shaders.
   if (gfx::GetGLImplementation() != gfx::kGLImplementationEGLGLES2) {
     glEnable(GL_VERTEX_PROGRAM_POINT_SIZE);
+    glEnable(GL_POINT_SPRITE);
   }
 
   if (use_shader_translator_) {
-    if (!InitializeShaderTranslator()) {
-      DLOG(ERROR) << "Could not initialize shader translator.";
-      Destroy();
-      return false;
-    }
-
-    TBuiltInResource resources;
-    ShInitBuiltInResource(&resources);
+    ShBuiltInResources resources;
+    ShInitBuiltInResources(&resources);
     resources.MaxVertexAttribs = group_->max_vertex_attribs();
     resources.MaxVertexUniformVectors =
         group_->max_vertex_uniform_vectors();
@@ -1675,20 +1906,17 @@ bool GLES2DecoderImpl::Initialize(gfx::GLContext* context,
     resources.MaxFragmentUniformVectors =
         group_->max_fragment_uniform_vectors();
     resources.MaxDrawBuffers = 1;
-    // TODO(alokp): Figure out if OES_standard_derivatives extension is
-    // available.
-    resources.OES_standard_derivatives = 0;
-    vertex_compiler_ = ShConstructCompiler(EShLangVertex, EShSpecGLES2,
-        &resources);
-    if (vertex_compiler_ == NULL) {
-        DLOG(ERROR) << "Could not create vertex shader translator.";
+    resources.OES_standard_derivatives =
+        feature_info_->feature_flags().oes_standard_derivatives ? 1 : 0;
+    vertex_translator_.reset(new ShaderTranslator);
+    if (!vertex_translator_->Init(SH_VERTEX_SHADER, &resources)) {
+        LOG(ERROR) << "Could not initialize vertex shader translator.";
         Destroy();
         return false;
     }
-    fragment_compiler_ = ShConstructCompiler(EShLangFragment, EShSpecGLES2,
-        &resources);
-    if (fragment_compiler_ == NULL) {
-        DLOG(ERROR) << "Could not create fragment shader translator.";
+    fragment_translator_.reset(new ShaderTranslator);
+    if (!fragment_translator_->Init(SH_FRAGMENT_SHADER, &resources)) {
+        LOG(ERROR) << "Could not initialize fragment shader translator.";
         Destroy();
         return false;
     }
@@ -1805,14 +2033,6 @@ void GLES2DecoderImpl::DeleteTexturesHelper(
   }
 }
 
-static bool IsAngle() {
-#if defined(OS_WIN)
-  return gfx::GetGLImplementation() == gfx::kGLImplementationEGLGLES2;
-#else
-  return false;
-#endif
-}
-
 // }  // anonymous namespace
 
 bool GLES2DecoderImpl::MakeCurrent() {
@@ -1837,7 +2057,7 @@ static void RebindCurrentFramebuffer(
 }
 
 void GLES2DecoderImpl::RestoreCurrentFramebufferBindings() {
-  if (!group_->extension_flags().ext_framebuffer_multisample) {
+  if (!feature_info_->feature_flags().ext_framebuffer_multisample) {
     RebindCurrentFramebuffer(
         GL_FRAMEBUFFER,
         bound_draw_framebuffer_.get(),
@@ -1872,7 +2092,7 @@ gfx::Size GLES2DecoderImpl::GetBoundReadFrameBufferSize() {
     int width = 0;
     int height = 0;
 
-    GLenum target = group_->extension_flags().ext_framebuffer_multisample ?
+    GLenum target = feature_info_->feature_flags().ext_framebuffer_multisample ?
         GL_READ_FRAMEBUFFER_EXT : GL_FRAMEBUFFER;
 
     // Assume we have to have COLOR_ATTACHMENT0. Should we check for depth and
@@ -1943,70 +2163,91 @@ gfx::Size GLES2DecoderImpl::GetBoundReadFrameBufferSize() {
     }
 
     return gfx::Size(width, height);
-  } else if (offscreen_target_color_texture_.get()) {
-    return offscreen_target_color_texture_->size();
+  } else if (offscreen_target_frame_buffer_.get()) {
+    return offscreen_size_;
   } else {
     return context_->GetSize();
   }
 }
 
 bool GLES2DecoderImpl::UpdateOffscreenFrameBufferSize() {
-  if (offscreen_target_color_texture_->size() == pending_offscreen_size_)
+  if (offscreen_size_ == pending_offscreen_size_)
     return true;
 
+  offscreen_size_ = pending_offscreen_size_;
+
   // Reallocate the offscreen target buffers.
-  if (!offscreen_target_color_texture_->AllocateStorage(
-      pending_offscreen_size_)) {
+  DCHECK(offscreen_target_color_format_);
+  if (IsOffscreenBufferMultisampled()) {
+    if (!offscreen_target_color_render_buffer_->AllocateStorage(
+        pending_offscreen_size_, offscreen_target_color_format_,
+        offscreen_target_samples_)) {
+      LOG(ERROR) << "GLES2DecoderImpl::UpdateOffscreenFrameBufferSize failed "
+                 << "to allocate storage for offscreen target color buffer.";
+      return false;
+    }
+  } else {
+    if (!offscreen_target_color_texture_->AllocateStorage(
+        pending_offscreen_size_, offscreen_target_color_format_)) {
+      LOG(ERROR) << "GLES2DecoderImpl::UpdateOffscreenFrameBufferSize failed "
+                 << "to allocate storage for offscreen target color texture.";
+      return false;
+    }
+  }
+  if (offscreen_target_depth_format_ &&
+      !offscreen_target_depth_render_buffer_->AllocateStorage(
+      pending_offscreen_size_, offscreen_target_depth_format_,
+      offscreen_target_samples_)) {
+    LOG(ERROR) << "GLES2DecoderImpl::UpdateOffscreenFrameBufferSize failed "
+               << "to allocate storage for offscreen target depth buffer.";
+    return false;
+  }
+  if (offscreen_target_stencil_format_ &&
+      !offscreen_target_stencil_render_buffer_->AllocateStorage(
+      pending_offscreen_size_, offscreen_target_stencil_format_,
+      offscreen_target_samples_)) {
+    LOG(ERROR) << "GLES2DecoderImpl::UpdateOffscreenFrameBufferSize failed "
+               << "to allocate storage for offscreen target stencil buffer.";
     return false;
   }
 
-  // GLES2 may only allow a combination of 16-bit depth buffers and / or 8-bit
-  // stencil buffer. A packed 24/8 bit depth stencil buffer is preferred.
-  // ANGLE only supports the latter, i.e. is does not support core GLES2 in
-  // this respect. So we check for packed depth stencil support.
-  if (gfx::GetGLImplementation() == gfx::kGLImplementationEGLGLES2 &&
-      !depth24_stencil8_oes_supported_) {
-    if (!offscreen_target_depth_render_buffer_->AllocateStorage(
-        pending_offscreen_size_, GL_DEPTH_COMPONENT16)) {
-      return false;
-    }
-
-    if (!offscreen_target_stencil_render_buffer_->AllocateStorage(
-        pending_offscreen_size_, GL_STENCIL_INDEX8)) {
-      return false;
-    }
-  } else {
-    if (!offscreen_target_depth_render_buffer_->AllocateStorage(
-        pending_offscreen_size_, GL_DEPTH24_STENCIL8)) {
-      return false;
-    }
-  }
-
   // Attach the offscreen target buffers to the target frame buffer.
-  offscreen_target_frame_buffer_->AttachRenderTexture(
-      offscreen_target_color_texture_.get());
-  offscreen_target_frame_buffer_->AttachRenderBuffer(
-      GL_DEPTH_ATTACHMENT,
-      offscreen_target_depth_render_buffer_.get());
-  if (gfx::GetGLImplementation() == gfx::kGLImplementationEGLGLES2 &&
-      !depth24_stencil8_oes_supported_) {
+  if (IsOffscreenBufferMultisampled()) {
     offscreen_target_frame_buffer_->AttachRenderBuffer(
-        GL_STENCIL_ATTACHMENT,
-        offscreen_target_stencil_render_buffer_.get());
+        GL_COLOR_ATTACHMENT0,
+        offscreen_target_color_render_buffer_.get());
   } else {
+    offscreen_target_frame_buffer_->AttachRenderTexture(
+        offscreen_target_color_texture_.get());
+  }
+  if (offscreen_target_depth_format_) {
+    offscreen_target_frame_buffer_->AttachRenderBuffer(
+        GL_DEPTH_ATTACHMENT,
+        offscreen_target_depth_render_buffer_.get());
+  }
+  const bool packed_depth_stencil =
+      offscreen_target_depth_format_ == GL_DEPTH24_STENCIL8;
+  if (packed_depth_stencil) {
     offscreen_target_frame_buffer_->AttachRenderBuffer(
         GL_STENCIL_ATTACHMENT,
         offscreen_target_depth_render_buffer_.get());
+  } else if (offscreen_target_stencil_format_) {
+    offscreen_target_frame_buffer_->AttachRenderBuffer(
+        GL_STENCIL_ATTACHMENT,
+        offscreen_target_stencil_render_buffer_.get());
   }
+
   if (offscreen_target_frame_buffer_->CheckStatus() !=
       GL_FRAMEBUFFER_COMPLETE) {
+      LOG(ERROR) << "GLES2DecoderImpl::UpdateOffscreenFrameBufferSize failed "
+                 << "because offscreen FBO was incomplete.";
     return false;
   }
 
   // Clear the target frame buffer.
   {
     ScopedFrameBufferBinder binder(this, offscreen_target_frame_buffer_->id());
-    glClearColor(0, 1, 0, 1);
+    glClearColor(0, 0, 0, 0);
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
     glClearStencil(0);
     glStencilMaskSeparate(GL_FRONT, GL_TRUE);
@@ -2018,10 +2259,21 @@ bool GLES2DecoderImpl::UpdateOffscreenFrameBufferSize() {
     RestoreClearState();
   }
 
-  if (parent_) {
-    // Adjust the saved offscreen color texture (only accessible to parent).
-    offscreen_saved_color_texture_->AllocateStorage(pending_offscreen_size_);
+  if (parent_ || IsOffscreenBufferMultisampled()) {
+    offscreen_saved_color_texture_->AllocateStorage(pending_offscreen_size_,
+                                                    GL_RGBA);
 
+    offscreen_saved_frame_buffer_->AttachRenderTexture(
+        offscreen_saved_color_texture_.get());
+    if (offscreen_saved_frame_buffer_->CheckStatus() !=
+        GL_FRAMEBUFFER_COMPLETE) {
+      LOG(ERROR) << "GLES2DecoderImpl::UpdateOffscreenFrameBufferSize failed "
+                 << "because offscreen saved FBO was incomplete.";
+      return false;
+    }
+  }
+
+  if (parent_) {
     // Update the info about the offscreen saved color texture in the parent.
     // The reference to the parent is a weak pointer and will become null if the
     // parent is later destroyed.
@@ -2032,6 +2284,7 @@ bool GLES2DecoderImpl::UpdateOffscreenFrameBufferSize() {
     DCHECK(info);
 
     texture_manager()->SetLevelInfo(
+        feature_info_,
         info,
         GL_TEXTURE_2D,
         0,  // level
@@ -2043,29 +2296,15 @@ bool GLES2DecoderImpl::UpdateOffscreenFrameBufferSize() {
         GL_RGBA,
         GL_UNSIGNED_BYTE);
 
-    // Attach the saved offscreen color texture to a frame buffer so we can
-    // clear it with glClear.
-    offscreen_target_frame_buffer_->AttachRenderTexture(
-        offscreen_saved_color_texture_.get());
-    if (offscreen_target_frame_buffer_->CheckStatus() !=
-        GL_FRAMEBUFFER_COMPLETE) {
-      return false;
-    }
-
     // Clear the offscreen color texture.
     {
-      ScopedFrameBufferBinder binder(this,
-                                     offscreen_target_frame_buffer_->id());
+      ScopedFrameBufferBinder binder(this, offscreen_saved_frame_buffer_->id());
       glClearColor(0, 0, 0, 0);
       glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
       glDisable(GL_SCISSOR_TEST);
       glClear(GL_COLOR_BUFFER_BIT);
       RestoreClearState();
     }
-
-    // Re-attach the offscreen render texture to the target frame buffer.
-    offscreen_target_frame_buffer_->AttachRenderTexture(
-        offscreen_target_color_texture_.get());
   }
 
   return true;
@@ -2075,16 +2314,18 @@ void GLES2DecoderImpl::SetSwapBuffersCallback(Callback0::Type* callback) {
   swap_buffers_callback_.reset(callback);
 }
 
-void GLES2DecoderImpl::Destroy() {
-  if (vertex_compiler_ != NULL) {
-    ShDestruct(vertex_compiler_);
-    vertex_compiler_ = NULL;
+bool GLES2DecoderImpl::GetServiceTextureId(uint32 client_texture_id,
+                                           uint32* service_texture_id) {
+  TextureManager::TextureInfo* texture =
+      texture_manager()->GetTextureInfo(client_texture_id);
+  if (texture) {
+    *service_texture_id = texture->service_id();
+    return true;
   }
-  if (fragment_compiler_ != NULL) {
-    ShDestruct(fragment_compiler_);
-    fragment_compiler_ = NULL;
-  }
+  return false;
+}
 
+void GLES2DecoderImpl::Destroy() {
   if (context_.get()) {
     MakeCurrent();
 
@@ -2101,7 +2342,7 @@ void GLES2DecoderImpl::Destroy() {
       GLuint service_id = offscreen_saved_color_texture_->id();
       GLuint client_id = 0;
       if (parent_->texture_manager()->GetClientId(service_id, &client_id)) {
-        parent_->texture_manager()->RemoveTextureInfo(client_id);
+        parent_->texture_manager()->RemoveTextureInfo(feature_info_, client_id);
       }
 
       glDeleteFramebuffersEXT(1, &copy_texture_to_parent_texture_fb_);
@@ -2117,6 +2358,11 @@ void GLES2DecoderImpl::Destroy() {
       offscreen_target_color_texture_.reset();
     }
 
+    if (offscreen_target_color_render_buffer_.get()) {
+      offscreen_target_color_render_buffer_->Destroy();
+      offscreen_target_color_render_buffer_.reset();
+    }
+
     if (offscreen_target_depth_render_buffer_.get()) {
       offscreen_target_depth_render_buffer_->Destroy();
       offscreen_target_depth_render_buffer_.reset();
@@ -2125,6 +2371,11 @@ void GLES2DecoderImpl::Destroy() {
     if (offscreen_target_stencil_render_buffer_.get()) {
       offscreen_target_stencil_render_buffer_->Destroy();
       offscreen_target_stencil_render_buffer_.reset();
+    }
+
+    if (offscreen_saved_frame_buffer_.get()) {
+      offscreen_saved_frame_buffer_->Destroy();
+      offscreen_saved_frame_buffer_.reset();
     }
 
     if (offscreen_saved_color_texture_.get()) {
@@ -2429,7 +2680,7 @@ void GLES2DecoderImpl::DoEnableVertexAttribArray(GLuint index) {
 
 void GLES2DecoderImpl::DoGenerateMipmap(GLenum target) {
   TextureManager::TextureInfo* info = GetTextureInfoForTarget(target);
-  if (!info || !texture_manager()->MarkMipmapsGenerated(info)) {
+  if (!info || !texture_manager()->MarkMipmapsGenerated(feature_info_, info)) {
     SetGLError(GL_INVALID_OPERATION,
                "glGenerateMipmaps: Can not generate mips for npot textures");
     return;
@@ -2610,10 +2861,7 @@ bool GLES2DecoderImpl::GetHelper(
       return true;
     default:
       *num_written = util_.GLGetNumValuesReturned(pname);
-      if (params) {
-        glGetIntegerv(pname, params);
-      }
-      return true;
+      return false;
   }
 }
 
@@ -3128,7 +3376,7 @@ void GLES2DecoderImpl::DoBlitFramebufferEXT(
     GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1,
     GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1,
     GLbitfield mask, GLenum filter) {
-  if (!group_->extension_flags().ext_framebuffer_multisample) {
+  if (!feature_info_->feature_flags().ext_framebuffer_multisample) {
     SetGLError(GL_INVALID_OPERATION,
                "glBlitFramebufferEXT: function not available");
   }
@@ -3139,7 +3387,7 @@ void GLES2DecoderImpl::DoBlitFramebufferEXT(
 void GLES2DecoderImpl::DoRenderbufferStorageMultisample(
     GLenum target, GLsizei samples, GLenum internalformat,
     GLsizei width, GLsizei height) {
-  if (!group_->extension_flags().ext_framebuffer_multisample) {
+  if (!feature_info_->feature_flags().ext_framebuffer_multisample) {
     SetGLError(GL_INVALID_OPERATION,
                "glRenderbufferStorageMultisampleEXT: function not available");
     return;
@@ -3219,7 +3467,8 @@ void GLES2DecoderImpl::DoTexParameterf(
   if (!info) {
     SetGLError(GL_INVALID_VALUE, "glTexParameterf: unknown texture");
   } else {
-    texture_manager()->SetParameter(info, pname, static_cast<GLint>(param));
+    texture_manager()->SetParameter(
+        feature_info_, info, pname, static_cast<GLint>(param));
     glTexParameterf(target, pname, param);
   }
 }
@@ -3230,7 +3479,7 @@ void GLES2DecoderImpl::DoTexParameteri(
   if (!info) {
     SetGLError(GL_INVALID_VALUE, "glTexParameteri: unknown texture");
   } else {
-    texture_manager()->SetParameter(info, pname, param);
+    texture_manager()->SetParameter(feature_info_, info, pname, param);
     glTexParameteri(target, pname, param);
   }
 }
@@ -3242,7 +3491,7 @@ void GLES2DecoderImpl::DoTexParameterfv(
     SetGLError(GL_INVALID_VALUE, "glTexParameterfv: unknown texture");
   } else {
     texture_manager()->SetParameter(
-        info, pname, *reinterpret_cast<const GLint*>(params));
+        feature_info_, info, pname, *reinterpret_cast<const GLint*>(params));
     glTexParameterfv(target, pname, params);
   }
 }
@@ -3253,7 +3502,7 @@ void GLES2DecoderImpl::DoTexParameteriv(
   if (!info) {
     SetGLError(GL_INVALID_VALUE, "glTexParameteriv: unknown texture");
   } else {
-    texture_manager()->SetParameter(info, pname, *params);
+    texture_manager()->SetParameter(feature_info_, info, pname, *params);
     glTexParameteriv(target, pname, params);
   }
 }
@@ -3424,7 +3673,7 @@ GLenum GLES2DecoderImpl::GetGLError() {
 void GLES2DecoderImpl::SetGLError(GLenum error, const char* msg) {
   if (msg) {
     last_error_ = msg;
-    DLOG(ERROR) << last_error_;
+    LOG(ERROR) << last_error_;
   }
   error_bits_ |= GLES2Util::GLErrorToErrorBit(error);
 }
@@ -3465,7 +3714,7 @@ bool GLES2DecoderImpl::SetBlackTextureForNonRenderableTextures() {
             uniform_info->type == GL_SAMPLER_2D ?
                 texture_unit.bound_texture_2d :
                 texture_unit.bound_texture_cube_map;
-        if (!texture_info || !texture_info->CanRender(texture_manager())) {
+        if (!texture_info || !texture_info->CanRender(feature_info_)) {
           textures_set = true;
           glActiveTexture(GL_TEXTURE0 + texture_unit_index);
           glBindTexture(
@@ -3497,7 +3746,7 @@ void GLES2DecoderImpl::RestoreStateForNonRenderableTextures() {
             uniform_info->type == GL_SAMPLER_2D ?
                 texture_unit.bound_texture_2d :
                 texture_unit.bound_texture_cube_map;
-        if (!texture_info || !texture_info->CanRender(texture_manager())) {
+        if (!texture_info || !texture_info->CanRender(feature_info_)) {
           glActiveTexture(GL_TEXTURE0 + texture_unit_index);
           // Get the texture info that was previously bound here.
           texture_info = texture_unit.bind_target == GL_TEXTURE_2D ?
@@ -3746,15 +3995,14 @@ void GLES2DecoderImpl::DoCompileShader(GLuint client_id) {
   // glShaderSource and then glCompileShader.
   const char* shader_src = info->source().c_str();
   if (use_shader_translator_) {
-    int dbg_options = 0;
-    ShHandle compiler = info->shader_type() == GL_VERTEX_SHADER ?
-        vertex_compiler_ : fragment_compiler_;
+    ShaderTranslator* translator = info->shader_type() == GL_VERTEX_SHADER ?
+        vertex_translator_.get() : fragment_translator_.get();
 
-    if (!ShCompile(compiler, &shader_src, 1, EShOptNone, dbg_options)) {
-      info->SetStatus(false, ShGetInfoLog(compiler));
+    if (!translator->Translate(shader_src)) {
+      info->SetStatus(false, translator->info_log());
       return;
     }
-    shader_src = ShGetObjectCode(compiler);
+    shader_src = translator->translated_shader();
   }
 
   glShaderSource(info->service_id(), 1, &shader_src, NULL);
@@ -4242,6 +4490,8 @@ error::Error GLES2DecoderImpl::HandleReadPixels(
 
   CopyRealGLErrorsToWrapper();
 
+  ScopedResolvedFrameBufferBinder binder(this);
+
   // Get the size of the current fbo or backbuffer.
   gfx::Size max_size = GetBoundReadFrameBufferSize();
 
@@ -4489,7 +4739,7 @@ error::Error GLES2DecoderImpl::HandleGetString(
       str = "OpenGL ES GLSL ES 1.0 Chromium";
       break;
     case GL_EXTENSIONS:
-      str = group_->extensions().c_str();
+      str = feature_info_->extensions().c_str();
       break;
     default:
       str = gl_str;
@@ -4604,7 +4854,8 @@ error::Error GLES2DecoderImpl::DoCompressedTexImage2D(
                "glCompressedTexImage2D: internal_format GL_INVALID_ENUM");
     return error::kNoError;
   }
-  if (!texture_manager()->ValidForTarget(target, level, width, height, 1) ||
+  if (!texture_manager()->ValidForTarget(
+        feature_info_, target, level, width, height, 1) ||
       border != 0) {
     SetGLError(GL_INVALID_VALUE,
                "glCompressedTexImage2D: dimensions out of range");
@@ -4628,6 +4879,7 @@ error::Error GLES2DecoderImpl::DoCompressedTexImage2D(
   GLenum error = glGetError();
   if (error == GL_NO_ERROR) {
     texture_manager()->SetLevelInfo(
+        feature_info_,
         info, target, level, internal_format, width, height, 1, border, 0, 0);
   }
   return error::kNoError;
@@ -4761,7 +5013,8 @@ error::Error GLES2DecoderImpl::DoTexImage2D(
     SetGLError(GL_INVALID_OPERATION, "glTexImage2D: format != internalFormat");
     return error::kNoError;
   }
-  if (!texture_manager()->ValidForTarget(target, level, width, height, 1) ||
+  if (!texture_manager()->ValidForTarget(
+        feature_info_, target, level, width, height, 1) ||
       border != 0) {
     SetGLError(GL_INVALID_VALUE, "glTexImage2D: dimensions out of range");
     return error::kNoError;
@@ -4804,7 +5057,7 @@ error::Error GLES2DecoderImpl::DoTexImage2D(
       pixels);
   GLenum error = glGetError();
   if (error == GL_NO_ERROR) {
-    texture_manager()->SetLevelInfo(info,
+    texture_manager()->SetLevelInfo(feature_info_, info,
         target, level, internal_format, width, height, 1, border, format, type);
   }
   return error::kNoError;
@@ -4910,7 +5163,8 @@ void GLES2DecoderImpl::DoCopyTexImage2D(
                "glCopyTexImage2D: unknown texture for target");
     return;
   }
-  if (!texture_manager()->ValidForTarget(target, level, width, height, 1) ||
+  if (!texture_manager()->ValidForTarget(
+        feature_info_, target, level, width, height, 1) ||
       border != 0) {
     SetGLError(GL_INVALID_VALUE, "glCopyTexImage2D: dimensions out of range");
     return;
@@ -4920,12 +5174,13 @@ void GLES2DecoderImpl::DoCopyTexImage2D(
   // internal_format.
   // TODO(gman): Type needs to match format for FBO.
   CopyRealGLErrorsToWrapper();
+  ScopedResolvedFrameBufferBinder binder(this);
   glCopyTexImage2D(target, level, internal_format, x, y, width, height, border);
   GLenum error = glGetError();
   if (error == GL_NO_ERROR) {
     texture_manager()->SetLevelInfo(
-        info,  target, level, internal_format, width, height, 1, border,
-        internal_format, GL_UNSIGNED_BYTE);
+        feature_info_, info, target, level, internal_format, width, height, 1,
+        border, internal_format, GL_UNSIGNED_BYTE);
   }
 }
 
@@ -4955,6 +5210,7 @@ void GLES2DecoderImpl::DoCopyTexSubImage2D(
   }
   // TODO(gman): Should we check that x, y, width, and height are in range
   // for current FBO?
+  ScopedResolvedFrameBufferBinder binder(this);
   glCopyTexSubImage2D(target, level, xoffset, yoffset, x, y, width, height);
 }
 
@@ -5315,33 +5571,49 @@ error::Error GLES2DecoderImpl::HandleSwapBuffers(
 
     // First check to see if a deferred offscreen render buffer resize is
     // pending.
-    if (!UpdateOffscreenFrameBufferSize())
+    if (!UpdateOffscreenFrameBufferSize()) {
+      LOG(ERROR) << "Context lost because reallocation of offscreen FBO "
+                 << "failed.";
       return error::kLostContext;
+    }
 
-    if (parent_) {
-      // Copy the target frame buffer to the saved offscreen texture.
+    if (IsOffscreenBufferMultisampled()) {
+      // For multisampled buffers, bind the resolved frame buffer so that
+      // callbacks can call ReadPixels or CopyTexImage2D.
+      ScopedResolvedFrameBufferBinder binder(this);
+      if (swap_buffers_callback_.get()) {
+        swap_buffers_callback_->Run();
+      }
+      return error::kNoError;
+    } else {
       ScopedFrameBufferBinder binder(this,
                                      offscreen_target_frame_buffer_->id());
-      offscreen_saved_color_texture_->Copy(
-          offscreen_saved_color_texture_->size());
 
-      // Ensure the side effects of the copy are visible to the parent context.
-      // There is no need to do this for ANGLE because it uses a single D3D
-      // device for all contexts.
-      if (!IsAngle())
-        glFlush();
+      if (parent_) {
+        // Copy the target frame buffer to the saved offscreen texture.
+        offscreen_saved_color_texture_->Copy(
+            offscreen_saved_color_texture_->size());
+
+        // Ensure the side effects of the copy are visible to the parent context.
+        // There is no need to do this for ANGLE because it uses a single D3D
+        // device for all contexts.
+        if (!IsAngle())
+          glFlush();
+      }
+
+      // Run the callback with |binder| in scope, so that the callback can call
+      // ReadPixels or CopyTexImage2D.
+      if (swap_buffers_callback_.get()) {
+        swap_buffers_callback_->Run();
+      }
+      return error::kNoError;
     }
   } else {
-    context_->SwapBuffers();
+    if (!context_->SwapBuffers()) {
+      LOG(ERROR) << "Context lost because SwapBuffers failed.";
+      return error::kLostContext;
+    }
   }
-
-  // TODO(kbr): when the back buffer is multisampled, then at least on Mac
-  // OS X (and probably on all platforms, for best semantics), we will need
-  // to perform the resolve step and bind the offscreen_saved_color_texture_
-  // as the color attachment before calling the swap buffers callback, which
-  // expects a normal (non-multisampled) frame buffer for glCopyTexImage2D /
-  // glReadPixels. After the callback runs, the multisampled frame buffer
-  // needs to be bound again.
 
   if (swap_buffers_callback_.get()) {
     swap_buffers_callback_->Run();

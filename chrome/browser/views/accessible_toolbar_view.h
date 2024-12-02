@@ -44,7 +44,7 @@ class AccessibleToolbarView : public views::View,
   virtual FocusTraversable* GetPaneFocusTraversable();
   virtual bool AcceleratorPressed(const views::Accelerator& accelerator);
   virtual void SetVisible(bool flag);
-  virtual bool GetAccessibleRole(AccessibilityTypes::Role* role);
+  virtual AccessibilityTypes::Role GetAccessibleRole();
 
   // Overridden from views::FocusChangeListener:
   virtual void FocusWillChange(View* focused_before,
@@ -62,6 +62,9 @@ class AccessibleToolbarView : public views::View,
 
   // Remove toolbar focus.
   virtual void RemoveToolbarFocus();
+
+  // Select all text in the location bar
+  virtual void LocationBarSelectAll();
 
   void RestoreLastFocusedView();
 

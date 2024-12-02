@@ -138,8 +138,7 @@ class RequestInfoParameters : public NetLog::EventParameters {
 
   virtual Value* ToValue() const {
     DictionaryValue* dict = new DictionaryValue();
-    dict->SetString("host", HostPortPair(info_.hostname(),
-                                         info_.port()).ToString());
+    dict->SetString("host", info_.host_port_pair().ToString());
     dict->SetInteger("address_family",
                      static_cast<int>(info_.address_family()));
     dict->SetBoolean("allow_cached_response", info_.allow_cached_response());
@@ -471,6 +470,12 @@ class HostResolverImpl::Job
     //DCHECK_EQ(origin_loop_, MessageLoop::current());
     DCHECK(error_ || results_.head());
 
+    // Ideally the following code would be part of host_resolver_proc.cc,
+    // however it isn't safe to call NetworkChangeNotifier from worker
+    // threads. So we do it here on the IO thread instead.
+    if (error_ == ERR_NAME_NOT_RESOLVED && NetworkChangeNotifier::IsOffline())
+      error_ = ERR_INTERNET_DISCONNECTED;
+
     base::TimeDelta job_duration = base::TimeTicks::Now() - start_time_;
 
     if (had_non_speculative_request_) {
@@ -760,6 +765,10 @@ class HostResolverImpl::JobPool {
     num_outstanding_jobs_ += offset;
   }
 
+  void ResetNumOutstandingJobs() {
+    num_outstanding_jobs_ = 0;
+  }
+
   // Returns true if a new job can be created for this pool.
   bool CanCreateJob() const {
     return num_outstanding_jobs_ + 1u <= max_outstanding_jobs_;
@@ -1032,6 +1041,10 @@ void HostResolverImpl::SetDefaultAddressFamily(AddressFamily address_family) {
   default_address_family_ = address_family;
 }
 
+AddressFamily HostResolverImpl::GetDefaultAddressFamily() const {
+  return default_address_family_;
+}
+
 void HostResolverImpl::ProbeIPv6Support() {
   DCHECK(CalledOnValidThread());
   DCHECK(!ipv6_probe_monitoring_);
@@ -1224,8 +1237,8 @@ void HostResolverImpl::OnIPAddressChanged() {
     additional_resolver_flags_ &= ~HOST_RESOLVER_LOOPBACK_ONLY;
   }
 #endif
-  AbortAllJobs();
-  // |this| may be deleted inside AbortAllJobs().
+  AbortAllInProgressJobs();
+  // |this| may be deleted inside AbortAllInProgressJobs().
 }
 
 void HostResolverImpl::DiscardIPv6ProbeJob() {
@@ -1349,7 +1362,9 @@ void HostResolverImpl::CancelAllJobs() {
     it->second->Cancel();
 }
 
-void HostResolverImpl::AbortAllJobs() {
+void HostResolverImpl::AbortAllInProgressJobs() {
+  for (size_t i = 0; i < arraysize(job_pools_); ++i)
+    job_pools_[i]->ResetNumOutstandingJobs();
   JobMap jobs;
   jobs.swap(jobs_);
   for (JobMap::iterator it = jobs.begin(); it != jobs.end(); ++it) {

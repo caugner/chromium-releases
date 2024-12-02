@@ -146,11 +146,40 @@ void DeleteChunksFromSet(const base::hash_set<int32>& deleted,
   }
 }
 
+// Sanity-check the header against the file's size to make sure our
+// vectors aren't gigantic.  This doubles as a cheap way to detect
+// corruption without having to checksum the entire file.
+bool FileHeaderSanityCheck(const FilePath& filename,
+                           const FileHeader& header) {
+  int64 size = 0;
+  if (!file_util::GetFileSize(filename, &size))
+    return false;
+
+  int64 expected_size = sizeof(FileHeader);
+  expected_size += header.add_chunk_count * sizeof(int32);
+  expected_size += header.sub_chunk_count * sizeof(int32);
+  expected_size += header.add_prefix_count * sizeof(SBAddPrefix);
+  expected_size += header.sub_prefix_count * sizeof(SBSubPrefix);
+  expected_size += header.add_hash_count * sizeof(SBAddFullHash);
+  expected_size += header.sub_hash_count * sizeof(SBSubFullHash);
+  expected_size += sizeof(MD5Digest);
+  if (size != expected_size)
+    return false;
+
+  return true;
+}
+
 }  // namespace
+
+// static
+void SafeBrowsingStoreFile::RecordFormatEvent(FormatEventType event_type) {
+  UMA_HISTOGRAM_ENUMERATION("SB2.FormatEvent", event_type, FORMAT_EVENT_MAX);
+}
 
 SafeBrowsingStoreFile::SafeBrowsingStoreFile()
     : chunks_written_(0),
-      file_(NULL) {
+      file_(NULL),
+      empty_(false) {
 }
 SafeBrowsingStoreFile::~SafeBrowsingStoreFile() {
   Close();
@@ -197,12 +226,54 @@ void SafeBrowsingStoreFile::Init(const FilePath& filename,
   corruption_callback_.reset(corruption_callback);
 }
 
+bool SafeBrowsingStoreFile::BeginChunk() {
+  return ClearChunkBuffers();
+}
+
+bool SafeBrowsingStoreFile::WriteAddPrefix(int32 chunk_id, SBPrefix prefix) {
+  add_prefixes_.push_back(SBAddPrefix(chunk_id, prefix));
+  return true;
+}
+
+bool SafeBrowsingStoreFile::WriteAddHash(int32 chunk_id,
+                                         base::Time receive_time,
+                                         SBFullHash full_hash) {
+  add_hashes_.push_back(SBAddFullHash(chunk_id, receive_time, full_hash));
+  return true;
+}
+
+bool SafeBrowsingStoreFile::WriteSubPrefix(int32 chunk_id,
+                                           int32 add_chunk_id,
+                                           SBPrefix prefix) {
+  sub_prefixes_.push_back(SBSubPrefix(chunk_id, add_chunk_id, prefix));
+  return true;
+}
+
+bool SafeBrowsingStoreFile::WriteSubHash(int32 chunk_id, int32 add_chunk_id,
+                                         SBFullHash full_hash) {
+  sub_hashes_.push_back(SBSubFullHash(chunk_id, add_chunk_id, full_hash));
+  return true;
+}
+
 bool SafeBrowsingStoreFile::OnCorruptDatabase() {
+  if (!corruption_seen_)
+    RecordFormatEvent(FORMAT_EVENT_FILE_CORRUPT);
+  corruption_seen_ = true;
+
   if (corruption_callback_.get())
     corruption_callback_->Run();
 
   // Return false as a convenience to callers.
   return false;
+}
+
+void SafeBrowsingStoreFile::HandleCorruptDatabase() {
+  if (!corruption_seen_)
+    RecordFormatEvent(FORMAT_EVENT_SQLITE_CORRUPT);
+  corruption_seen_ = true;
+
+  if (corruption_callback_.get())
+    corruption_callback_->Run();
 }
 
 bool SafeBrowsingStoreFile::Close() {
@@ -229,6 +300,8 @@ bool SafeBrowsingStoreFile::BeginUpdate() {
   DCHECK(sub_hashes_.empty());
   DCHECK_EQ(chunks_written_, 0);
 
+  corruption_seen_ = false;
+
   const FilePath new_filename = TemporaryFileForFilename(filename_);
   file_util::ScopedFILE new_file(file_util::OpenFile(new_filename, "wb+"));
   if (new_file.get() == NULL)
@@ -251,6 +324,12 @@ bool SafeBrowsingStoreFile::BeginUpdate() {
       return OnCorruptDatabase();
 
   if (header.magic != kFileMagic || header.version != kFileVersion) {
+    if (!strcmp(reinterpret_cast<char*>(&header.magic), "SQLite format 3")) {
+      RecordFormatEvent(FORMAT_EVENT_FOUND_SQLITE);
+    } else {
+      RecordFormatEvent(FORMAT_EVENT_FOUND_UNKNOWN);
+    }
+
     // Something about having the file open causes a problem with
     // SQLite opening it.  Perhaps PRAGMA locking_mode = EXCLUSIVE?
     file.reset();
@@ -279,24 +358,9 @@ bool SafeBrowsingStoreFile::BeginUpdate() {
     return true;
   }
 
-  // Check that the file size makes sense given the header.  This is a
-  // cheap way to protect against header corruption while deferring
-  // the checksum calculation until the end of the update.
   // TODO(shess): Under POSIX it is possible that this could size a
   // file different from the file which was opened.
-  int64 size = 0;
-  if (!file_util::GetFileSize(filename_, &size))
-    return OnCorruptDatabase();
-
-  int64 expected_size = sizeof(FileHeader);
-  expected_size += header.add_chunk_count * sizeof(int32);
-  expected_size += header.sub_chunk_count * sizeof(int32);
-  expected_size += header.add_prefix_count * sizeof(SBAddPrefix);
-  expected_size += header.sub_prefix_count * sizeof(SBSubPrefix);
-  expected_size += header.add_hash_count * sizeof(SBAddFullHash);
-  expected_size += header.sub_hash_count * sizeof(SBSubFullHash);
-  expected_size += sizeof(MD5Digest);
-  if (size != expected_size)
+  if (!FileHeaderSanityCheck(filename_, header))
     return OnCorruptDatabase();
 
   // Pull in the chunks-seen data for purposes of implementing
@@ -390,6 +454,9 @@ bool SafeBrowsingStoreFile::DoUpdate(
     if (header.magic != kFileMagic || header.version != kFileVersion)
       return OnCorruptDatabase();
 
+    if (!FileHeaderSanityCheck(filename_, header))
+      return OnCorruptDatabase();
+
     // Re-read the chunks-seen data to get to the later data in the
     // file and calculate the checksum.  No new elements should be
     // added to the sets.
@@ -429,11 +496,30 @@ bool SafeBrowsingStoreFile::DoUpdate(
   if (!FileRewind(new_file_.get()))
     return false;
 
+  // Get chunk file's size for validating counts.
+  int64 size = 0;
+  if (!file_util::GetFileSize(TemporaryFileForFilename(filename_), &size))
+    return OnCorruptDatabase();
+
   // Append the accumulated chunks onto the vectors read from |file_|.
   for (int i = 0; i < chunks_written_; ++i) {
     ChunkHeader header;
 
+    int64 ofs = ftell(new_file_.get());
+    if (ofs == -1)
+      return false;
+
     if (!ReadArray(&header, 1, new_file_.get(), NULL))
+      return false;
+
+    // As a safety measure, make sure that the header describes a sane
+    // chunk, given the remaining file size.
+    int64 expected_size = ofs + sizeof(ChunkHeader);
+    expected_size += header.add_prefix_count * sizeof(SBAddPrefix);
+    expected_size += header.sub_prefix_count * sizeof(SBSubPrefix);
+    expected_size += header.add_hash_count * sizeof(SBAddFullHash);
+    expected_size += header.sub_hash_count * sizeof(SBSubFullHash);
+    if (expected_size > size)
       return false;
 
     // TODO(shess): If the vectors were kept sorted, then this code
@@ -511,8 +597,11 @@ bool SafeBrowsingStoreFile::DoUpdate(
   if (old_store_.get()) {
     const bool deleted = old_store_->Delete();
     old_store_.reset();
-    if (!deleted)
+    if (!deleted) {
+      RecordFormatEvent(FORMAT_EVENT_SQLITE_DELETE_FAILED);
       return false;
+    }
+    RecordFormatEvent(FORMAT_EVENT_SQLITE_DELETED);
   } else {
     if (!file_util::Delete(filename_, false) &&
         file_util::PathExists(filename_))
@@ -556,4 +645,38 @@ bool SafeBrowsingStoreFile::FinishUpdate(
 bool SafeBrowsingStoreFile::CancelUpdate() {
   old_store_.reset();
   return Close();
+}
+
+void SafeBrowsingStoreFile::SetAddChunk(int32 chunk_id) {
+  add_chunks_cache_.insert(chunk_id);
+}
+
+bool SafeBrowsingStoreFile::CheckAddChunk(int32 chunk_id) {
+  return add_chunks_cache_.count(chunk_id) > 0;
+}
+
+void SafeBrowsingStoreFile::GetAddChunks(std::vector<int32>* out) {
+  out->clear();
+  out->insert(out->end(), add_chunks_cache_.begin(), add_chunks_cache_.end());
+}
+
+void SafeBrowsingStoreFile::SetSubChunk(int32 chunk_id) {
+  sub_chunks_cache_.insert(chunk_id);
+}
+
+bool SafeBrowsingStoreFile::CheckSubChunk(int32 chunk_id) {
+  return sub_chunks_cache_.count(chunk_id) > 0;
+}
+
+void SafeBrowsingStoreFile::GetSubChunks(std::vector<int32>* out) {
+  out->clear();
+  out->insert(out->end(), sub_chunks_cache_.begin(), sub_chunks_cache_.end());
+}
+
+void SafeBrowsingStoreFile::DeleteAddChunk(int32 chunk_id) {
+  add_del_cache_.insert(chunk_id);
+}
+
+void SafeBrowsingStoreFile::DeleteSubChunk(int32 chunk_id) {
+  sub_del_cache_.insert(chunk_id);
 }

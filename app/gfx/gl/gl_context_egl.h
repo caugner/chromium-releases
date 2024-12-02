@@ -9,7 +9,8 @@
 #include "gfx/size.h"
 #include "app/gfx/gl/gl_context.h"
 
-typedef void *EGLContext;
+typedef void* EGLDisplay;
+typedef void* EGLContext;
 typedef void* EGLSurface;
 
 namespace gfx {
@@ -22,9 +23,14 @@ class BaseEGLContext : public GLContext {
   virtual ~BaseEGLContext() {}
 
   // Implement GLContext.
+  virtual std::string GetExtensions();
+
+  // Get the associated EGL surface.
   virtual EGLSurface GetSurface() = 0;
 
   static bool InitializeOneOff();
+
+  static EGLDisplay GetDisplay();
 
  private:
   DISALLOW_COPY_AND_ASSIGN(BaseEGLContext);
@@ -44,9 +50,10 @@ class NativeViewEGLContext : public BaseEGLContext {
   virtual bool MakeCurrent();
   virtual bool IsCurrent();
   virtual bool IsOffscreen();
-  virtual void SwapBuffers();
+  virtual bool SwapBuffers();
   virtual gfx::Size GetSize();
   virtual void* GetHandle();
+  virtual void SetSwapInterval(int interval);
 
   // Implement BaseEGLContext.
   virtual EGLSurface GetSurface();
@@ -76,9 +83,10 @@ class SecondaryEGLContext : public BaseEGLContext {
   virtual bool MakeCurrent();
   virtual bool IsCurrent();
   virtual bool IsOffscreen();
-  virtual void SwapBuffers();
+  virtual bool SwapBuffers();
   virtual gfx::Size GetSize();
   virtual void* GetHandle();
+  virtual void SetSwapInterval(int interval);
 
   // Implement BaseEGLContext.
   virtual EGLSurface GetSurface();

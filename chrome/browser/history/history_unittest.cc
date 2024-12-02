@@ -29,12 +29,14 @@
 #include "base/file_util.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
+#include "base/scoped_temp_dir.h"
 #include "base/scoped_vector.h"
 #include "base/string_util.h"
 #include "base/task.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/download/download_item.h"
+#include "chrome/browser/history/download_create_info.h"
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/history/history_backend.h"
 #include "chrome/browser/history/history_database.h"
@@ -42,6 +44,7 @@
 #include "chrome/browser/history/in_memory_database.h"
 #include "chrome/browser/history/in_memory_history_backend.h"
 #include "chrome/browser/history/page_usage_data.h"
+#include "chrome/browser/history/top_sites.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/notification_service.h"
@@ -66,18 +69,6 @@ DISABLE_RUNNABLE_METHOD_REFCOUNT(history::HistoryTest);
 namespace history {
 
 namespace {
-
-// Compares the two data values. Used for comparing thumbnail data.
-bool DataEqual(const unsigned char* reference, size_t reference_len,
-               const std::vector<unsigned char>& data) {
-  if (reference_len != data.size())
-    return false;
-  for (size_t i = 0; i < reference_len; i++) {
-    if (data[i] != reference[i])
-      return false;
-  }
-  return true;
-}
 
 // The tracker uses RenderProcessHost pointers for scoping but never
 // dereferences them. We use ints because it's easier. This function converts
@@ -166,11 +157,9 @@ class HistoryTest : public testing::Test {
 
   // testing::Test
   virtual void SetUp() {
-    FilePath temp_dir;
-    PathService::Get(base::DIR_TEMP, &temp_dir);
-    history_dir_ = temp_dir.AppendASCII("HistoryTest");
-    file_util::Delete(history_dir_, true);
-    file_util::CreateDirectory(history_dir_);
+    ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
+    history_dir_ = temp_dir_.path().AppendASCII("HistoryTest");
+    ASSERT_TRUE(file_util::CreateDirectory(history_dir_));
   }
 
   void DeleteBackend() {
@@ -185,9 +174,6 @@ class HistoryTest : public testing::Test {
 
     if (history_service_)
       CleanupHistoryService();
-
-    // Try to clean up the database file.
-    file_util::Delete(history_dir_, true);
 
     // Make sure we don't have any event pending that could disrupt the next
     // test.
@@ -263,6 +249,8 @@ class HistoryTest : public testing::Test {
       saved_redirects_.clear();
     MessageLoop::current()->Quit();
   }
+
+  ScopedTempDir temp_dir_;
 
   MessageLoopForUI message_loop_;
 
@@ -696,7 +684,7 @@ TEST_F(HistoryTest, Segments) {
 // This just tests history system -> thumbnail database integration, the actual
 // thumbnail tests are in its own file.
 TEST_F(HistoryTest, Thumbnails) {
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kNoTopSites))
+  if (history::TopSites::IsEnabled())
     return;  // TopSitesTest replaces this.
 
   scoped_refptr<HistoryService> history(new HistoryService);
@@ -882,29 +870,6 @@ TEST(HistoryProfileTest, TypicalProfileVersion) {
 }
 
 namespace {
-
-// Use this dummy value to scope the page IDs we give history.
-static const void* kAddArgsScope = reinterpret_cast<void*>(0x12345678);
-
-// Creates a new HistoryAddPageArgs object for sending to the history database
-// with reasonable defaults and the given NULL-terminated URL string. The
-// returned object will NOT be add-ref'ed, which is the responsibility of the
-// caller.
-HistoryAddPageArgs* MakeAddArgs(const GURL& url) {
-  return new HistoryAddPageArgs(url,
-                                Time::Now(),
-                                kAddArgsScope,
-                                0,
-                                GURL(),
-                                history::RedirectList(),
-                                PageTransition::TYPED,
-                                history::SOURCE_BROWSED, false);
-}
-
-// Convenience version of the above to convert a char string.
-HistoryAddPageArgs* MakeAddArgs(const char* url) {
-  return MakeAddArgs(GURL(url));
-}
 
 // A HistoryDBTask implementation. Each time RunOnDBThread is invoked
 // invoke_count is increment. When invoked kWantInvokeCount times, true is

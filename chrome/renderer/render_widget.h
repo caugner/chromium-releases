@@ -88,6 +88,8 @@ class RenderWidget : public IPC::Channel::Listener,
     return host_window_;
   }
 
+  bool has_focus() const { return has_focus_; }
+
   // IPC::Channel::Listener
   virtual void OnMessageReceived(const IPC::Message& msg);
 
@@ -97,6 +99,7 @@ class RenderWidget : public IPC::Channel::Listener,
   // WebKit::WebWidgetClient
   virtual void didInvalidateRect(const WebKit::WebRect&);
   virtual void didScrollRect(int dx, int dy, const WebKit::WebRect& clipRect);
+  virtual void scheduleComposite();
   virtual void didFocus();
   virtual void didBlur();
   virtual void didChangeCursor(const WebKit::WebCursorInfo&);
@@ -117,9 +120,6 @@ class RenderWidget : public IPC::Channel::Listener,
   // Called when a plugin window has been destroyed, to make sure the currently
   // pending moves don't try to reference it.
   void CleanupWindowInPluginMoves(gfx::PluginWindowHandle window);
-
-  // Invalidates entire widget rect to generate a full repaint.
-  void GenerateFullRepaint();
 
   // Close the underlying WebWidget.
   virtual void Close();
@@ -199,6 +199,21 @@ class RenderWidget : public IPC::Channel::Listener,
   virtual void DidInitiatePaint() {}
   virtual void DidFlushPaint() {}
 
+  // Detects if a suitable opaque plugin covers the given paint bounds with no
+  // compositing necessary.
+  //
+  // Returns true if the paint can be handled by just blitting the plugin
+  // bitmap. In this case, the location, clipping, and ID of the backing store
+  // will be filled into the given output parameters.
+  //
+  // A return value of false means optimized painting can not be used and we
+  // should continue with the normal painting code path.
+  virtual bool GetBitmapForOptimizedPluginPaint(
+      const gfx::Rect& paint_bounds,
+      TransportDIB** dib,
+      gfx::Rect* location,
+      gfx::Rect* clip);
+
   // Sets the "hidden" state of this widget.  All accesses to is_hidden_ should
   // use this method so that we can properly inform the RenderThread of our
   // state.
@@ -224,8 +239,6 @@ class RenderWidget : public IPC::Channel::Listener,
   // Tells the renderer it does not have focus. Used to prevent us from getting
   // the focus on our own when the browser did not focus us.
   void ClearFocus();
-
-  bool has_focus() const { return has_focus_; }
 
   // Set the pending window rect.
   // Because the real render_widget is hosted in another process, there is

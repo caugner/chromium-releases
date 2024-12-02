@@ -9,6 +9,7 @@
 #include <string>
 
 #include "base/basictypes.h"
+#include "chrome/common/page_transition_types.h"
 #include "googleurl/src/gurl.h"
 
 // This class captures some of the information associated to the provisional
@@ -26,11 +27,19 @@ class ProvisionalLoadDetails {
                          bool in_page_navigation,
                          const GURL& url,
                          const std::string& security_info,
-                         bool is_filtered);
+                         bool is_filtered,
+                         long long frame_id);
   virtual ~ProvisionalLoadDetails() { }
 
   void set_error_code(int error_code) { error_code_ = error_code; }
   int error_code() const { return error_code_; }
+
+  void set_transition_type(PageTransition::Type transition_type) {
+    transition_type_ = transition_type;
+  }
+  PageTransition::Type transition_type() const {
+    return transition_type_;
+  }
 
   const GURL& url() const { return url_; }
 
@@ -48,8 +57,11 @@ class ProvisionalLoadDetails {
 
   bool is_content_filtered() const { return is_content_filtered_; }
 
+  long long frame_id() const { return frame_id_; }
+
  private:
   int error_code_;
+  PageTransition::Type transition_type_;
   GURL url_;
   bool is_main_frame_;
   bool is_in_page_navigation_;
@@ -58,6 +70,7 @@ class ProvisionalLoadDetails {
   int ssl_security_bits_;
   int ssl_connection_status_;
   bool is_content_filtered_;
+  long long frame_id_;
 
   DISALLOW_COPY_AND_ASSIGN(ProvisionalLoadDetails);
 };

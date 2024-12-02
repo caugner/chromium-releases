@@ -27,7 +27,10 @@ void GetStatusLabelsForAuthError(const AuthError& auth_error,
     string16* link_label) {
   if (link_label)
     link_label->assign(l10n_util::GetStringUTF16(IDS_SYNC_RELOGIN_LINK_LABEL));
-  if (auth_error.state() == AuthError::INVALID_GAIA_CREDENTIALS) {
+  if (auth_error.state() == AuthError::INVALID_GAIA_CREDENTIALS ||
+      auth_error.state() == AuthError::ACCOUNT_DELETED ||
+      auth_error.state() == AuthError::ACCOUNT_DISABLED ||
+      auth_error.state() == AuthError::SERVICE_UNAVAILABLE) {
     // If the user name is empty then the first login failed, otherwise the
     // credentials are out-of-date.
     if (service->GetAuthenticatedUsername().empty())
@@ -84,7 +87,7 @@ MessageType GetStatusInfo(ProfileSyncService* service,
 
     // Either show auth error information with a link to re-login, auth in prog,
     // or note that everything is OK with the last synced time.
-    if (status.authenticated) {
+    if (status.authenticated && !service->observed_passphrase_required()) {
       // Everything is peachy.
       if (status_label) {
         status_label->assign(GetSyncedStateStatusLabel(service));
@@ -96,7 +99,8 @@ MessageType GetStatusInfo(ProfileSyncService* service,
           l10n_util::GetStringUTF16(IDS_SYNC_AUTHENTICATING_LABEL));
       }
       result_type = PRE_SYNCED;
-    } else if (auth_error.state() != AuthError::NONE) {
+    } else if (auth_error.state() != AuthError::NONE ||
+               service->observed_passphrase_required()) {
       if (status_label && link_label) {
         GetStatusLabelsForAuthError(auth_error, service,
                                     status_label, link_label);
@@ -188,8 +192,8 @@ void OpenSyncMyBookmarksDialog(
   if (service->HasSyncSetupCompleted()) {
     ShowOptionsWindow(OPTIONS_PAGE_CONTENT, OPTIONS_GROUP_NONE, profile);
   } else {
-    service->EnableForUser(NULL);
-    ProfileSyncService::SyncEvent(code);
+    service->ShowLoginDialog(NULL);
+    ProfileSyncService::SyncEvent(code);  // UMA stats
   }
 }
 

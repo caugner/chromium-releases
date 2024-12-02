@@ -6,6 +6,7 @@
 #define CHROME_RENDERER_RENDER_THREAD_H_
 #pragma once
 
+#include <map>
 #include <string>
 #include <vector>
 
@@ -15,6 +16,7 @@
 #include "build/build_config.h"
 #include "chrome/common/child_thread.h"
 #include "chrome/common/css_colors.h"
+#include "chrome/common/gpu_info.h"
 #include "chrome/renderer/visitedlink_slave.h"
 #include "gfx/native_widget_types.h"
 #include "ipc/ipc_channel_proxy.h"
@@ -57,6 +59,10 @@ struct ChannelHandle;
 
 namespace WebKit {
 class WebStorageEventDispatcher;
+}
+
+namespace v8 {
+class Extension;
 }
 
 // The RenderThreadBase is the minimal interface that a RenderView/Widget
@@ -230,6 +236,13 @@ class RenderThread : public RenderThreadBase,
   // on the renderer's main thread.
   scoped_refptr<base::MessageLoopProxy> GetFileThreadMessageLoopProxy();
 
+  // This function is called for every registered V8 extension each time a new
+  // script context is created. Returns true if the given V8 extension is
+  // allowed to run on the given URL and extension group.
+  bool AllowScriptExtension(const std::string& v8_extension_name,
+                            const GURL& url,
+                            int extension_group);
+
  private:
   virtual void OnControlMessageReceived(const IPC::Message& msg);
 
@@ -238,7 +251,7 @@ class RenderThread : public RenderThreadBase,
   void OnUpdateVisitedLinks(base::SharedMemoryHandle table);
   void OnAddVisitedLinks(const VisitedLinkSlave::Fingerprints& fingerprints);
   void OnResetVisitedLinks();
-  void OnSetZoomLevelForCurrentURL(const GURL& url, int zoom_level);
+  void OnSetZoomLevelForCurrentURL(const GURL& url, double zoom_level);
   void OnSetContentSettingsForCurrentURL(
       const GURL& url, const ContentSettings& content_settings);
   void OnUpdateUserScripts(base::SharedMemoryHandle table);
@@ -250,7 +263,7 @@ class RenderThread : public RenderThreadBase,
   void OnDOMStorageEvent(const ViewMsg_DOMStorageEvent_Params& params);
   void OnExtensionSetAPIPermissions(
       const std::string& extension_id,
-      const std::vector<std::string>& permissions);
+      const std::set<std::string>& permissions);
   void OnExtensionSetHostPermissions(
       const GURL& extension_url,
       const std::vector<URLPattern>& permissions);
@@ -266,6 +279,7 @@ class RenderThread : public RenderThreadBase,
   void OnSetCacheCapacities(size_t min_dead_capacity,
                             size_t max_dead_capacity,
                             size_t capacity);
+  void OnClearCache();
   void OnGetCacheResourceStats();
 
   // Send all histograms to browser.
@@ -277,7 +291,7 @@ class RenderThread : public RenderThreadBase,
 
   void OnExtensionMessageInvoke(const std::string& function_name,
                                 const ListValue& args,
-                                bool requires_incognito_access,
+                                bool cross_incognito,
                                 const GURL& event_url);
   void OnPurgeMemory();
   void OnPurgePluginListCache(bool reload_pages);
@@ -289,7 +303,10 @@ class RenderThread : public RenderThreadBase,
   void OnSpellCheckWordAdded(const std::string& word);
   void OnSpellCheckEnableAutoSpellCorrect(bool enable);
 
-  void OnGpuChannelEstablished(const IPC::ChannelHandle& channel_handle);
+  void OnGpuChannelEstablished(const IPC::ChannelHandle& channel_handle,
+                               const GPUInfo& gpu_info);
+
+  void OnSetPhishingModel(IPC::PlatformFileForTransit model_file);
 
   void OnGetAccessibilityTree();
 
@@ -306,6 +323,10 @@ class RenderThread : public RenderThreadBase,
 
   // Schedule a call to IdleHandler with the given initial delay.
   void ScheduleIdleHandler(double initial_delay_s);
+
+  // Registers the given V8 extension with WebKit, and also tracks what pages
+  // it is allowed to run on.
+  void RegisterExtension(v8::Extension* extension, bool restrict_to_extensions);
 
   // These objects live solely on the render thread.
   scoped_ptr<ScopedRunnableMethodFactory<RenderThread> > task_factory_;
@@ -366,6 +387,11 @@ class RenderThread : public RenderThreadBase,
 
   // A lazily initiated thread on which file operations are run.
   scoped_ptr<base::Thread> file_thread_;
+
+  // Map of registered v8 extensions. The key is the extension name. The value
+  // is true if the extension should be restricted to extension-related
+  // contexts.
+  std::map<std::string, bool> v8_extensions_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderThread);
 };

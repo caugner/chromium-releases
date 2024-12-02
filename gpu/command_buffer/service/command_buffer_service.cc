@@ -28,22 +28,32 @@ CommandBufferService::~CommandBufferService() {
 
 bool CommandBufferService::Initialize(int32 size) {
   // Fail if already initialized.
-  if (ring_buffer_.get())
+  if (ring_buffer_.get()) {
+    LOG(ERROR) << "CommandBufferService::Initialize "
+               << "failed because already initialized.";
     return false;
+  }
 
-  if (size <= 0 || size > kMaxCommandBufferSize)
+  if (size <= 0 || size > kMaxCommandBufferSize) {
+    LOG(ERROR) << "CommandBufferService::Initialize "
+               << "because command buffer size was invalid.";
     return false;
+  }
 
   num_entries_ = size / sizeof(CommandBufferEntry);
 
   ring_buffer_.reset(new SharedMemory);
-  if (ring_buffer_->Create(std::wstring(), false, false, size)) {
+  if (ring_buffer_->Create(std::string(), false, false, size)) {
     if (ring_buffer_->Map(size))
       return true;
   }
 
   num_entries_ = 0;
   ring_buffer_.reset();
+
+  LOG(ERROR) << "CommandBufferService::Initialize failed because ring buffer "
+             << "could not be created or mapped ";
+
   return false;
 }
 
@@ -90,7 +100,7 @@ void CommandBufferService::SetGetOffset(int32 get_offset) {
 
 int32 CommandBufferService::CreateTransferBuffer(size_t size) {
   linked_ptr<SharedMemory> buffer(new SharedMemory);
-  if (!buffer->Create(std::wstring(), false, false, size))
+  if (!buffer->Create(std::string(), false, false, size))
     return -1;
 
   if (unused_registered_object_elements_.empty()) {

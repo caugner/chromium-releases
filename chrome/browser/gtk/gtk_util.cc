@@ -4,6 +4,7 @@
 
 #include "chrome/browser/gtk/gtk_util.h"
 
+#include <cairo/cairo.h>
 #include <gtk/gtk.h>
 #include <gdk/gdkx.h>
 
@@ -70,6 +71,13 @@ gboolean OnMouseButtonReleased(GtkWidget* widget, GdkEventButton* event,
     gtk_button_released(GTK_BUTTON(widget));
 
   return TRUE;
+}
+
+void OnLabelRealize(GtkWidget* label, gpointer pixel_width) {
+  gtk_label_set_width_chars(
+      GTK_LABEL(label),
+      gtk_util::GetCharacterWidthForPixels(label,
+                                           GPOINTER_TO_INT(pixel_width)));
 }
 
 // Ownership of |icon_list| is passed to the caller.
@@ -1064,6 +1072,60 @@ bool IsWidgetAncestryVisible(GtkWidget* widget) {
   while (parent && GTK_WIDGET_VISIBLE(parent))
     parent = parent->parent;
   return !parent;
+}
+
+void SetGtkFont(const std::string& font_name) {
+  g_object_set(gtk_settings_get_default(),
+               "gtk-font-name", font_name.c_str(), NULL);
+}
+
+void SetLabelWidth(GtkWidget* label, int pixel_width) {
+  gtk_label_set_line_wrap(GTK_LABEL(label), TRUE);
+
+  // Do the simple thing in LTR because the bug only affects right-aligned
+  // text. Also, when using the workaround, the label tries to maintain
+  // uniform line-length, which we don't really want.
+  if (gtk_widget_get_direction(label) == GTK_TEXT_DIR_LTR) {
+    gtk_widget_set_size_request(label, pixel_width, -1);
+  } else {
+    // The label has to be realized before we can adjust its width.
+    if (GTK_WIDGET_REALIZED(label)) {
+      OnLabelRealize(label, GINT_TO_POINTER(pixel_width));
+    } else {
+      g_signal_connect(label, "realize", G_CALLBACK(OnLabelRealize),
+                       GINT_TO_POINTER(pixel_width));
+    }
+  }
+}
+
+void InitLabelSizeRequestAndEllipsizeMode(GtkWidget* label) {
+  GtkRequisition size;
+  gtk_label_set_ellipsize(GTK_LABEL(label), PANGO_ELLIPSIZE_NONE);
+  gtk_widget_set_size_request(label, -1, -1);
+  gtk_widget_size_request(label, &size);
+  gtk_widget_set_size_request(label, size.width, size.height);
+  gtk_label_set_ellipsize(GTK_LABEL(label), PANGO_ELLIPSIZE_END);
+}
+
+void DrawTopDropShadowForRenderView(cairo_t* cr, const gfx::Point& origin,
+    const gfx::Rect& paint_rect) {
+  gfx::Rect shadow_rect(paint_rect.x(), origin.y(),
+                        paint_rect.width(), kInfoBarDropShadowHeight);
+
+  // Avoid this extra work if we can.
+  if (!shadow_rect.Intersects(paint_rect))
+    return;
+
+  cairo_pattern_t* shadow =
+      cairo_pattern_create_linear(0.0, shadow_rect.y(),
+                                  0.0, shadow_rect.bottom());
+  cairo_pattern_add_color_stop_rgba(shadow, 0, 0, 0, 0, 0.6);
+  cairo_pattern_add_color_stop_rgba(shadow, 1, 0, 0, 0, 0.1);
+  cairo_rectangle(cr, shadow_rect.x(), shadow_rect.y(),
+                  shadow_rect.width(), shadow_rect.height());
+  cairo_set_source(cr, shadow);
+  cairo_fill(cr);
+  cairo_pattern_destroy(shadow);
 }
 
 }  // namespace gtk_util

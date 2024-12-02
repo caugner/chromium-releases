@@ -19,6 +19,7 @@
         '../third_party/icu/icu.gyp:icuuc',
         '../third_party/zlib/zlib.gyp:zlib',
         'net_resources',
+        'ssl_false_start_blacklist_process#host',
       ],
       'sources': [
         'base/address_family.h',
@@ -35,6 +36,7 @@
         'base/cert_database.h',
         'base/cert_database_mac.cc',
         'base/cert_database_nss.cc',
+        'base/cert_database_openssl.cc',
         'base/cert_database_win.cc',
         'base/cert_status_flags.cc',
         'base/cert_status_flags.h',
@@ -48,6 +50,7 @@
         'base/cookie_monster.h',
         'base/cookie_options.h',
         'base/cookie_policy.h',
+        'base/cookie_store.cc',
         'base/cookie_store.h',
         'base/data_url.cc',
         'base/data_url.h',
@@ -96,6 +99,7 @@
         'base/keygen_handler.h',
         'base/keygen_handler_mac.cc',
         'base/keygen_handler_nss.cc',
+        'base/keygen_handler_openssl.cc',
         'base/keygen_handler_win.cc',
         'base/listen_socket.cc',
         'base/listen_socket.h',
@@ -138,6 +142,8 @@
         'base/network_config_watcher_mac.h',
         'base/nss_memio.c',
         'base/nss_memio.h',
+        'base/openssl_util.cc',
+        'base/openssl_util.h',
         'base/pem_tokenizer.cc',
         'base/pem_tokenizer.h',
         'base/platform_mime_util.h',
@@ -160,11 +166,13 @@
         'base/ssl_client_auth_cache.h',
         'base/ssl_config_service.cc',
         'base/ssl_config_service.h',
+        'base/ssl_config_service_defaults.cc',
         'base/ssl_config_service_defaults.h',
         'base/ssl_config_service_mac.cc',
         'base/ssl_config_service_mac.h',
         'base/ssl_config_service_win.cc',
         'base/ssl_config_service_win.h',
+        'base/ssl_false_start_blacklist.cc',
         'base/ssl_info.cc',
         'base/ssl_info.h',
         'base/static_cookie_policy.cc',
@@ -183,6 +191,7 @@
         'base/x509_certificate.h',
         'base/x509_certificate_mac.cc',
         'base/x509_certificate_nss.cc',
+        'base/x509_certificate_openssl.cc',
         'base/x509_certificate_win.cc',
         'base/x509_cert_types.cc',
         'base/x509_cert_types.h',
@@ -198,6 +207,25 @@
       ],
       'export_dependent_settings': [
         '../base/base.gyp:base',
+      ],
+      'actions': [
+        {
+          'action_name': 'ssl_false_start_blacklist',
+          'inputs': [
+            '<(PRODUCT_DIR)/<(EXECUTABLE_PREFIX)ssl_false_start_blacklist_process<(EXECUTABLE_SUFFIX)',
+            'base/ssl_false_start_blacklist.txt',
+          ],
+          'outputs': [
+            '<(SHARED_INTERMEDIATE_DIR)/net/base/ssl_false_start_blacklist_data.cc',
+          ],
+          'action':
+            ['<(PRODUCT_DIR)/<(EXECUTABLE_PREFIX)ssl_false_start_blacklist_process<(EXECUTABLE_SUFFIX)',
+             'base/ssl_false_start_blacklist.txt',
+              '<(SHARED_INTERMEDIATE_DIR)/net/base/ssl_false_start_blacklist_data.cc',
+            ],
+          'message': 'Generating SSL False Start blacklist',
+          'process_outputs_as_sources': 1,
+        },
       ],
       'conditions': [
         [ 'OS == "linux" or OS == "freebsd" or OS == "openbsd"', {
@@ -222,6 +250,33 @@
               'third_party/mozilla_security_manager/nsPKCS12Blob.cpp',
               'third_party/mozilla_security_manager/nsPKCS12Blob.h',
             ],
+          },
+        ],
+        [ 'use_openssl == 1 and OS == "linux"', {
+            # When building for OpenSSL, we need to exclude some NSS files.
+            # TODO(bulach): remove once we fully support OpenSSL.
+            'sources!': [
+              'base/cert_database_nss.cc',
+              'base/keygen_handler_nss.cc',
+              'base/x509_certificate_nss.cc',
+              'third_party/mozilla_security_manager/nsKeygenHandler.cpp',
+              'third_party/mozilla_security_manager/nsKeygenHandler.h',
+              'third_party/mozilla_security_manager/nsNSSCertificateDB.cpp',
+              'third_party/mozilla_security_manager/nsNSSCertificateDB.h',
+              'third_party/mozilla_security_manager/nsNSSCertTrust.cpp',
+              'third_party/mozilla_security_manager/nsNSSCertTrust.h',
+              'third_party/mozilla_security_manager/nsPKCS12Blob.cpp',
+              'third_party/mozilla_security_manager/nsPKCS12Blob.h',
+            ],
+          },
+          { # else: not using openssl.
+            'sources!': [
+              'base/cert_database_openssl.cc',
+              'base/keygen_handler_openssl.cc',
+              'base/openssl_util.cc',
+              'base/openssl_util.h',
+              'base/x509_certificate_openssl.cc',
+             ],
           },
         ],
         [ 'OS == "win"', {
@@ -287,6 +342,7 @@
         'disk_cache/errors.h',
         'disk_cache/eviction.cc',
         'disk_cache/eviction.h',
+        'disk_cache/experiments.h',
         'disk_cache/file.h',
         'disk_cache/file_block.h',
         'disk_cache/file_lock.cc',
@@ -329,6 +385,8 @@
         'ftp/ftp_directory_listing_buffer.h',
         'ftp/ftp_directory_listing_parser.cc',
         'ftp/ftp_directory_listing_parser.h',
+        'ftp/ftp_directory_listing_parser_hprc.cc',
+        'ftp/ftp_directory_listing_parser_hprc.h',
         'ftp/ftp_directory_listing_parser_ls.cc',
         'ftp/ftp_directory_listing_parser_ls.h',
         'ftp/ftp_directory_listing_parser_mlsd.cc',
@@ -354,6 +412,8 @@
         'ftp/ftp_util.h',
         'http/des.cc',
         'http/des.h',
+        'http/disk_cache_based_ssl_host_info.cc',
+        'http/disk_cache_based_ssl_host_info.h',
         'http/http_alternate_protocols.cc',
         'http/http_alternate_protocols.h',
         'http/http_atom_list.h',
@@ -400,11 +460,15 @@
         'http/http_network_layer.h',
         'http/http_network_session.cc',
         'http/http_network_session.h',
+        'http/http_network_session_peer.h',
         'http/http_network_transaction.cc',
         'http/http_network_transaction.h',
         'http/http_request_headers.cc',
         'http/http_request_headers.h',
+        'http/http_request_info.cc',
         'http/http_request_info.h',
+        'http/http_response_body_drainer.cc',
+        'http/http_response_body_drainer.h',
         'http/http_response_headers.cc',
         'http/http_response_headers.h',
         'http/http_response_info.cc',
@@ -412,8 +476,6 @@
         'http/http_stream.h',
         'http/http_stream_factory.cc',
         'http/http_stream_factory.h',
-        'http/http_stream_handle.cc',
-        'http/http_stream_handle.h',
         'http/http_stream_parser.cc',
         'http/http_stream_parser.h',
         'http/http_stream_request.cc',
@@ -428,6 +490,8 @@
         'http/http_proxy_client_socket.h',
         'http/http_proxy_client_socket_pool.cc',
         'http/http_proxy_client_socket_pool.h',
+        'http/http_proxy_utils.cc',
+        'http/http_proxy_utils.h',
         'http/http_util.cc',
         'http/http_util_icu.cc',
         'http/http_util.h',
@@ -498,6 +562,8 @@
         'socket/client_socket_pool_base.h',
         'socket/client_socket_pool_histograms.cc',
         'socket/client_socket_pool_histograms.h',
+        'socket/client_socket_pool_manager.cc',
+        'socket/client_socket_pool_manager.h',
         'socket/socket.h',
         'socket/socks5_client_socket.cc',
         'socket/socks5_client_socket.h',
@@ -514,6 +580,8 @@
         'socket/ssl_client_socket_nss.h',
         'socket/ssl_client_socket_nss_factory.cc',
         'socket/ssl_client_socket_nss_factory.h',
+        'socket/ssl_client_socket_openssl.cc',
+        'socket/ssl_client_socket_openssl.h',
         'socket/ssl_client_socket_pool.cc',
         'socket/ssl_client_socket_pool.h',
         'socket/ssl_client_socket_win.cc',
@@ -525,7 +593,6 @@
         'socket/tcp_client_socket_pool.h',
         'socket/tcp_client_socket_win.cc',
         'socket/tcp_client_socket_win.h',
-        'socket/tcp_pinger.h',
         'socket_stream/socket_stream.cc',
         'socket_stream/socket_stream.h',
         'socket_stream/socket_stream_job.cc',
@@ -541,9 +608,13 @@
         'spdy/spdy_framer.h',
         'spdy/spdy_http_stream.cc',
         'spdy/spdy_http_stream.h',
+        'spdy/spdy_http_utils.cc',
+        'spdy/spdy_http_utils.h',
         'spdy/spdy_io_buffer.cc',
         'spdy/spdy_io_buffer.h',
         'spdy/spdy_protocol.h',
+        'spdy/spdy_proxy_client_socket.cc',
+        'spdy/spdy_proxy_client_socket.h',
         'spdy/spdy_session.cc',
         'spdy/spdy_session.h',
         'spdy/spdy_session_pool.cc',
@@ -624,6 +695,24 @@
              'proxy/proxy_config_service_linux.h',
           ],
         }],
+        ['use_openssl==1 and OS == "linux"', {
+            'dependencies': [
+              '../build/linux/system.gyp:openssl',
+            ],
+            'sources!': [
+              'socket/ssl_client_socket_nss.cc',
+              'socket/ssl_client_socket_nss.h',
+              'socket/ssl_client_socket_nss_factory.cc',
+              'socket/ssl_client_socket_nss_factory.h',
+            ],
+          },
+          {  # else !use_openssl: remove the unneeded files
+            'sources!': [
+              'socket/ssl_client_socket_openssl.cc',
+              'socket/ssl_client_socket_openssl.h',
+            ],
+          },
+        ],
         [ 'OS == "linux" or OS == "freebsd" or OS == "openbsd"', {
             'dependencies': [
               '../build/linux/system.gyp:gconf',
@@ -732,6 +821,7 @@
         'base/ssl_config_service_mac_unittest.cc',
         'base/ssl_config_service_unittest.cc',
         'base/ssl_config_service_win_unittest.cc',
+        'base/ssl_false_start_blacklist_unittest.cc',
         'base/static_cookie_policy_unittest.cc',
         'base/transport_security_state_unittest.cc',
         'base/test_certificate_data.h',
@@ -752,6 +842,7 @@
         'ftp/ftp_ctrl_response_buffer_unittest.cc',
         'ftp/ftp_directory_listing_buffer_unittest.cc',
         'ftp/ftp_directory_listing_parser_ls_unittest.cc',
+        'ftp/ftp_directory_listing_parser_hprc_unittest.cc',
         'ftp/ftp_directory_listing_parser_mlsd_unittest.cc',
         'ftp/ftp_directory_listing_parser_netware_unittest.cc',
         'ftp/ftp_directory_listing_parser_vms_unittest.cc',
@@ -779,6 +870,7 @@
         'http/http_network_transaction_unittest.cc',
         'http/http_proxy_client_socket_pool_unittest.cc',
         'http/http_request_headers_unittest.cc',
+        'http/http_response_body_drainer_unittest.cc',
         'http/http_response_headers_unittest.cc',
         'http/http_transaction_unittest.cc',
         'http/http_transaction_unittest.h',
@@ -804,6 +896,7 @@
         'proxy/proxy_service_unittest.cc',
         'proxy/sync_host_resolver_bridge_unittest.cc',
         'socket/client_socket_pool_base_unittest.cc',
+        'socket/deterministic_socket_data_unittest.cc',
         'socket/socks5_client_socket_unittest.cc',
         'socket/socks_client_socket_pool_unittest.cc',
         'socket/socks_client_socket_unittest.cc',
@@ -811,17 +904,18 @@
         'socket/ssl_client_socket_pool_unittest.cc',
         'socket/tcp_client_socket_pool_unittest.cc',
         'socket/tcp_client_socket_unittest.cc',
-        'socket/tcp_pinger_unittest.cc',
         'socket_stream/socket_stream_metrics_unittest.cc',
         'socket_stream/socket_stream_unittest.cc',
         'spdy/spdy_framer_test.cc',
         'spdy/spdy_http_stream_unittest.cc',
         'spdy/spdy_network_transaction_unittest.cc',
         'spdy/spdy_protocol_test.cc',
+        'spdy/spdy_proxy_client_socket_unittest.cc',
         'spdy/spdy_session_unittest.cc',
         'spdy/spdy_stream_unittest.cc',
         'spdy/spdy_test_util.cc',
         'spdy/spdy_test_util.h',
+        'test/python_utils_unittest.cc',
         'tools/dump_cache/url_to_filename_encoder.cc',
         'tools/dump_cache/url_to_filename_encoder.h',
         'tools/dump_cache/url_to_filename_encoder_unittest.cc',
@@ -861,7 +955,7 @@
             ],
           }
         ],
-        ['OS == "linux"', {
+        [ 'OS == "linux"', {
           'conditions': [
             ['linux_use_tcmalloc==1', {
               'dependencies': [
@@ -870,6 +964,14 @@
             }],
           ],
         }],
+        [ 'use_openssl == 1 and OS == "linux"', {
+            # When building for OpenSSL, we need to exclude some NSS files.
+            # TODO(bulach): remove once we fully support OpenSSL.
+            'sources!': [
+              'base/cert_database_nss_unittest.cc',
+            ],
+          },
+        ],
         [ 'OS == "win"', {
             'sources!': [
               'http/http_auth_gssapi_posix_unittest.cc',
@@ -981,6 +1083,8 @@
         'proxy/proxy_config_service_common_unittest.h',
         'socket/socket_test_util.cc',
         'socket/socket_test_util.h',
+        'test/python_utils.cc',
+        'test/python_utils.h',
         'test/test_server.cc',
         'test/test_server_posix.cc',
         'test/test_server_win.cc',
@@ -990,7 +1094,7 @@
         ['inside_chromium_build==1', {
           'dependencies': [
             '../chrome/browser/sync/protocol/sync_proto.gyp:sync_proto',
-            '../third_party/protobuf2/protobuf.gyp:py_proto',
+            '../third_party/protobuf/protobuf.gyp:py_proto',
           ],
         }],
         ['OS == "linux" or OS == "freebsd" or OS == "openbsd"', {
@@ -1006,6 +1110,11 @@
               ],
             }],
           ],
+        }],
+        ['use_openssl == 1 and OS == "linux"', {
+            'dependencies': [
+              '../build/linux/system.gyp:openssl',
+            ]
         }],
       ],
     },
@@ -1112,6 +1221,27 @@
         'tools/hresolv/hresolv.cc',
       ],
     },
+    {
+      'target_name': 'dnssec_chain_verify',
+      'type': 'executable',
+      'dependencies': [
+        'net_base',
+      ],
+      'sources': [
+        'tools/dnssec_chain_verify/dnssec_chain_verify.cc',
+      ]
+    },
+    {
+      'target_name': 'ssl_false_start_blacklist_process',
+      'type': 'executable',
+      'toolsets': ['host'],
+      'include_dirs': [
+        '..',
+      ],
+      'sources': [
+        'base/ssl_false_start_blacklist_process.cc',
+      ],
+    },
   ],
   'conditions': [
     # ['OS=="linux"', {
@@ -1132,6 +1262,11 @@
     #         ],
     #       },
     #       'sources': [
+    #         'tools/dump_cache/url_to_filename_encoder.cc',
+    #         'tools/dump_cache/url_to_filename_encoder.h',
+    #         'tools/dump_cache/url_utilities.h',
+    #         'tools/dump_cache/url_utilities.cc',
+
     #         'tools/flip_server/balsa_enums.h',
     #         'tools/flip_server/balsa_frame.cc',
     #         'tools/flip_server/balsa_frame.h',

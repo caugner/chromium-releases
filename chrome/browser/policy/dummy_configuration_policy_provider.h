@@ -9,9 +9,14 @@
 #include "chrome/browser/policy/configuration_policy_store.h"
 #include "chrome/browser/policy/configuration_policy_provider.h"
 
+namespace policy {
+
 class DummyConfigurationPolicyProvider : public ConfigurationPolicyProvider {
  public:
-  DummyConfigurationPolicyProvider() {}
+  explicit DummyConfigurationPolicyProvider(
+      const StaticPolicyValueMap& policy_map)
+      : ConfigurationPolicyProvider(policy_map) {
+  }
   virtual ~DummyConfigurationPolicyProvider() {}
 
   virtual bool Provide(ConfigurationPolicyStore* store) {
@@ -22,5 +27,6 @@ class DummyConfigurationPolicyProvider : public ConfigurationPolicyProvider {
   DISALLOW_COPY_AND_ASSIGN(DummyConfigurationPolicyProvider);
 };
 
-#endif  // CHROME_BROWSER_POLICY_DUMMY_CONFIGURATION_POLICY_PROVIDER_H_
+}  // namespace policy
 
+#endif  // CHROME_BROWSER_POLICY_DUMMY_CONFIGURATION_POLICY_PROVIDER_H_

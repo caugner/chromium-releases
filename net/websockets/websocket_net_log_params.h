@@ -11,7 +11,9 @@
 
 #include "base/basictypes.h"
 #include "base/ref_counted.h"
+#include "base/string_split.h"
 #include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "base/values.h"
 #include "net/base/net_log.h"
 
@@ -27,7 +29,7 @@ class NetLogWebSocketHandshakeParameter : public NetLog::EventParameters {
     DictionaryValue* dict = new DictionaryValue();
     ListValue* headers = new ListValue();
     std::vector<std::string> lines;
-    SplitStringDontTrim(headers_, '\n', &lines);
+    base::SplitStringDontTrim(headers_, '\n', &lines);
     for (size_t i = 0; i < lines.size(); ++i) {
       if (lines[i] == "\r") {
         headers->Append(new StringValue(""));
@@ -36,7 +38,7 @@ class NetLogWebSocketHandshakeParameter : public NetLog::EventParameters {
         i = i + 1;
         for (; i < lines.size(); ++i) {
           for (size_t j = 0; j < lines[i].length(); ++j) {
-            key += StringPrintf("\\x%02x", lines[i][j] & 0xff);
+            key += base::StringPrintf("\\x%02x", lines[i][j] & 0xff);
           }
           key += "\\x0a";
         }

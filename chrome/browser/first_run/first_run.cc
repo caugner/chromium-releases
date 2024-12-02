@@ -22,6 +22,7 @@
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/process_singleton.h"
 #include "chrome/browser/profile_manager.h"
+#include "chrome/browser/search_engines/template_url_model.h"
 #include "chrome/browser/shell_integration.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -50,6 +51,18 @@ FilePath GetDefaultPrefFilePath(bool create_profile_dir,
 }  // namespace
 
 FirstRun::FirstRunState FirstRun::first_run_ = FIRST_RUN_UNKNOWN;
+
+FirstRun::MasterPrefs::MasterPrefs()
+    : ping_delay(0),
+      homepage_defined(false),
+      do_import_items(0),
+      dont_import_items(0),
+      run_search_engine_experiment(false),
+      randomize_search_engine_experiment(false),
+      make_chrome_default(false) {
+}
+
+FirstRun::MasterPrefs::~MasterPrefs() {}
 
 // TODO(port): Import switches need to be ported to both Mac and Linux. Not all
 // import switches here are implemented for Linux. None are implemented for Mac
@@ -346,6 +359,20 @@ bool FirstRun::SetShowWelcomePagePref() {
 }
 
 // static
+bool FirstRun::SetPersonalDataManagerFirstRunPref() {
+  PrefService* local_state = g_browser_process->local_state();
+  if (!local_state)
+    return false;
+  if (!local_state->FindPreference(
+          prefs::kAutoFillPersonalDataManagerFirstRun)) {
+    local_state->RegisterBooleanPref(
+        prefs::kAutoFillPersonalDataManagerFirstRun, false);
+    local_state->SetBoolean(prefs::kAutoFillPersonalDataManagerFirstRun, true);
+  }
+  return true;
+}
+
+// static
 bool FirstRun::SetOEMFirstRunBubblePref() {
   PrefService* local_state = g_browser_process->local_state();
   if (!local_state)
@@ -438,6 +465,10 @@ void Upgrade::RelaunchChromeBrowserWithNewCommandLineIfNeeded() {
 }
 #endif  // (defined(OS_WIN) || defined(OS_LINUX)) && !defined(OS_CHROMEOS)
 
+FirstRunImportObserver::FirstRunImportObserver()
+    : loop_running_(false), import_result_(ResultCodes::NORMAL_EXIT) {
+}
+
 int FirstRunImportObserver::import_result() const {
   return import_result_;
 }
@@ -461,8 +492,6 @@ void FirstRunImportObserver::Finish() {
     MessageLoop::current()->Quit();
 }
 
-// TODO(avi): port the relevant pieces and enable this.
-#if !defined(OS_MACOSX)
 // static
 void FirstRun::AutoImport(
     Profile* profile,
@@ -487,7 +516,15 @@ void FirstRun::AutoImport(
   bool local_state_file_exists = file_util::PathExists(local_state_path);
 
   scoped_refptr<ImporterHost> importer_host;
-  importer_host = new ImporterHost();
+  // TODO(csilv,mirandac): Out-of-process import has only been qualified on
+  // MacOS X, so we will only use it on that platform since it is required.
+  // Remove this conditional logic once oop import is qualified for
+  // Linux/Windows. http://crbug.com/22142
+#if defined(OS_MACOSX)
+  importer_host = new ExternalProcessImporterHost;
+#else
+  importer_host = new ImporterHost;
+#endif
   // Do import if there is an available profile for us to import.
   if (importer_host->GetAvailableProfileCount() > 0) {
     // Don't show the warning dialog if import fails.
@@ -528,7 +565,7 @@ void FirstRun::AutoImport(
   UserMetrics::RecordAction(UserMetricsAction("FirstRunDef_Accept"));
 
   // Launch the search engine dialog only if build is organic, and user has not
-  // already set search preferences.
+  // already set preferences.
   if (IsOrganic() && !local_state_file_exists) {
     // The home page string may be set in the preferences, but the user should
     // initially use Chrome with the NTP as home page in organic builds.
@@ -539,12 +576,87 @@ void FirstRun::AutoImport(
   if (make_chrome_default)
     ShellIntegration::SetAsDefaultBrowser();
 
-  FirstRun::SetShowFirstRunBubblePref(true);
-  // Set the first run bubble to minimal.
-  FirstRun::SetMinimalFirstRunBubblePref();
+  // Don't display the minimal bubble if there is no default search provider.
+  TemplateURLModel* search_engines_model = profile->GetTemplateURLModel();
+  if (search_engines_model &&
+      search_engines_model->GetDefaultSearchProvider()) {
+    FirstRun::SetShowFirstRunBubblePref(true);
+    // Set the first run bubble to minimal.
+    FirstRun::SetMinimalFirstRunBubblePref();
+  }
   FirstRun::SetShowWelcomePagePref();
+  FirstRun::SetPersonalDataManagerFirstRunPref();
 
   process_singleton->Unlock();
   FirstRun::CreateSentinel();
 }
-#endif  // !defined(OS_MACOSX)
+
+#if defined(OS_POSIX)
+namespace {
+
+// This class acts as an observer for the ImporterHost::Observer::ImportEnded
+// callback. When the import process is started, certain errors may cause
+// ImportEnded() to be called synchronously, but the typical case is that
+// ImportEnded() is called asynchronously. Thus we have to handle both cases.
+class ImportEndedObserver : public ImporterHost::Observer {
+ public:
+  ImportEndedObserver() : ended_(false),
+                          should_quit_message_loop_(false) {}
+  virtual ~ImportEndedObserver() {}
+
+  virtual void ImportItemStarted(importer::ImportItem item) {}
+  virtual void ImportItemEnded(importer::ImportItem item) {}
+  virtual void ImportStarted() {}
+  virtual void ImportEnded() {
+    ended_ = true;
+    if (should_quit_message_loop_)
+      MessageLoop::current()->Quit();
+  }
+
+  void set_should_quit_message_loop() {
+    should_quit_message_loop_ = true;
+  }
+
+  bool ended() {
+    return ended_;
+  }
+
+ private:
+  // Set if the import has ended.
+  bool ended_;
+
+  // Set by the client (via set_should_quit_message_loop) if, when the import
+  // ends, this class should quit the message loop.
+  bool should_quit_message_loop_;
+};
+
+}  // namespace
+
+// static
+bool FirstRun::ImportSettings(Profile* profile,
+                              scoped_refptr<ImporterHost> importer_host,
+                              int items_to_import) {
+  const ProfileInfo& source_profile = importer_host->GetSourceProfileInfoAt(0);
+
+  // Ensure that importers aren't requested to import items that they do not
+  // support.
+  items_to_import &= source_profile.services_supported;
+
+  scoped_ptr<ImportEndedObserver> observer(new ImportEndedObserver);
+  importer_host->SetObserver(observer.get());
+  importer_host->StartImportSettings(source_profile,
+                                     profile,
+                                     items_to_import,
+                                     new ProfileWriter(profile),
+                                     true);
+  // If the import process has not errored out, block on it.
+  if (!observer->ended()) {
+    observer->set_should_quit_message_loop();
+    MessageLoop::current()->Run();
+  }
+
+  // Unfortunately there's no success/fail signal in ImporterHost.
+  return true;
+}
+
+#endif  // OS_POSIX

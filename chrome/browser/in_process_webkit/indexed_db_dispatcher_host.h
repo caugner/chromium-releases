@@ -13,12 +13,16 @@
 #include "chrome/browser/in_process_webkit/webkit_context.h"
 #include "ipc/ipc_message.h"
 
+class HostContentSettingsMap;
 class IndexedDBKey;
+class Profile;
 class SerializedScriptValue;
 struct ViewHostMsg_IDBDatabaseCreateObjectStore_Params;
 struct ViewHostMsg_IDBFactoryOpen_Params;
+struct ViewHostMsg_IDBIndexOpenCursor_Params;
 struct ViewHostMsg_IDBObjectStoreCreateIndex_Params;
 struct ViewHostMsg_IDBObjectStoreOpenCursor_Params;
+struct ViewHostMsg_IDBObjectStorePut_Params;
 
 namespace WebKit {
 class WebIDBCursor;
@@ -33,8 +37,7 @@ class IndexedDBDispatcherHost
     : public base::RefCountedThreadSafe<IndexedDBDispatcherHost> {
  public:
   // Only call the constructor from the UI thread.
-  IndexedDBDispatcherHost(IPC::Message::Sender* sender,
-                          WebKitContext* webkit_context);
+  IndexedDBDispatcherHost(IPC::Message::Sender* sender, Profile* profile);
 
   // Only call from ResourceMessageFilter on the IO thread.
   void Init(int process_id, base::ProcessHandle process_handle);
@@ -61,7 +64,7 @@ class IndexedDBDispatcherHost
   int32 Add(WebKit::WebIDBDatabase* idb_database);
   int32 Add(WebKit::WebIDBIndex* idb_index);
   int32 Add(WebKit::WebIDBObjectStore* idb_object_store);
-  void Add(WebKit::WebIDBTransaction* idb_transaction);
+  int32 Add(WebKit::WebIDBTransaction* idb_transaction);
 
  private:
   friend class base::RefCountedThreadSafe<IndexedDBDispatcherHost>;
@@ -71,7 +74,6 @@ class IndexedDBDispatcherHost
   // below.
   void OnMessageReceivedWebKit(const IPC::Message& message);
   void OnIDBFactoryOpen(const ViewHostMsg_IDBFactoryOpen_Params& p);
-  void OnIDBFactoryAbortPendingTransactions(const std::vector<int32>& ids);
 
   // Helper templates.
   template <class ReturnType>
@@ -101,17 +103,20 @@ class IndexedDBDispatcherHost
     void OnVersion(int32 idb_database_id, IPC::Message* reply_msg);
     void OnObjectStores(int32 idb_database_id, IPC::Message* reply_msg);
     void OnCreateObjectStore(
-        const ViewHostMsg_IDBDatabaseCreateObjectStore_Params& params);
-    void OnObjectStore(int32 idb_database_id, const string16& name, int32 mode,
-                       IPC::Message* reply_msg);
-    void OnRemoveObjectStore(int32 idb_database_id, int32 response_id,
-                             const string16& name);
+        const ViewHostMsg_IDBDatabaseCreateObjectStore_Params& params,
+        IPC::Message* reply_msg);
+    void OnRemoveObjectStore(int32 idb_database_id,
+                             const string16& name,
+                             int32 transaction_id,
+                             IPC::Message* reply_msg);
     void OnSetVersion(int32 idb_database_id,
                       int32 response_id,
-                      const string16& version);
+                      const string16& version,
+                      IPC::Message* reply_msg);
     void OnTransaction(int32 idb_database_id,
                        const std::vector<string16>& names,
-                       int32 mode, int32 timeout, IPC::Message* reply_msg);
+                       int32 mode, int32 timeout,
+                       IPC::Message* reply_msg);
     void OnDestroyed(int32 idb_database_id);
 
     IndexedDBDispatcherHost* parent_;
@@ -127,8 +132,24 @@ class IndexedDBDispatcherHost
     void Send(IPC::Message* message);
 
     void OnName(int32 idb_index_id, IPC::Message* reply_msg);
+    void OnStoreName(int32 idb_index_id, IPC::Message* reply_msg);
     void OnKeyPath(int32 idb_index_id, IPC::Message* reply_msg);
     void OnUnique(int32 idb_index_id, IPC::Message* reply_msg);
+    void OnOpenObjectCursor(
+        const ViewHostMsg_IDBIndexOpenCursor_Params& params,
+        IPC::Message* reply_msg);
+    void OnOpenKeyCursor(const ViewHostMsg_IDBIndexOpenCursor_Params& params,
+                         IPC::Message* reply_msg);
+    void OnGetObject(int idb_index_id,
+                     int32 response_id,
+                     const IndexedDBKey& key,
+                     int32 transaction_id,
+                     IPC::Message* reply_msg);
+    void OnGetKey(int idb_index_id,
+                  int32 response_id,
+                  const IndexedDBKey& key,
+                  int32 transaction_id,
+                  IPC::Message* reply_msg);
     void OnDestroyed(int32 idb_index_id);
 
     IndexedDBDispatcherHost* parent_;
@@ -146,19 +167,31 @@ class IndexedDBDispatcherHost
     void OnName(int32 idb_object_store_id, IPC::Message* reply_msg);
     void OnKeyPath(int32 idb_object_store_id, IPC::Message* reply_msg);
     void OnIndexNames(int32 idb_object_store_id, IPC::Message* reply_msg);
-    void OnGet(int idb_object_store_id, int32 response_id,
-               const IndexedDBKey& key);
-    void OnPut(int idb_object_store_id, int32 response_id,
-               const SerializedScriptValue& value, const IndexedDBKey& key,
-               bool add_only);
-    void OnRemove(int idb_object_store_id, int32 response_id,
-                  const IndexedDBKey& key);
+    void OnGet(int idb_object_store_id,
+               int32 response_id,
+               const IndexedDBKey& key,
+               int32 transaction_id,
+               IPC::Message* reply_msg);
+    void OnPut(const ViewHostMsg_IDBObjectStorePut_Params& params,
+               IPC::Message* reply_msg);
+    void OnRemove(int idb_object_store_id,
+                  int32 response_id,
+                  const IndexedDBKey& key,
+                  int32 transaction_id,
+                  IPC::Message* reply_msg);
     void OnCreateIndex(
-        const ViewHostMsg_IDBObjectStoreCreateIndex_Params& params);
-    void OnIndex(int32 idb_object_store_id, const string16& name,
+        const ViewHostMsg_IDBObjectStoreCreateIndex_Params& params,
+        IPC::Message* reply_msg);
+    void OnIndex(int32 idb_object_store_id,
+                 const string16& name,
                  IPC::Message* reply_msg);
-    void OnRemoveIndex(int32 idb_object_store_id, int32 response_id,
-                       const string16& name);
+    void OnRemoveIndex(int32 idb_object_store_id,
+                       const string16& name,
+                       int32 transaction_id,
+                       IPC::Message* reply_msg);
+    void OnOpenCursor(
+        const ViewHostMsg_IDBObjectStoreOpenCursor_Params& params,
+        IPC::Message* reply_msg);
     void OnDestroyed(int32 idb_object_store_id);
 
     IndexedDBDispatcherHost* parent_;
@@ -173,19 +206,20 @@ class IndexedDBDispatcherHost
     bool OnMessageReceived(const IPC::Message& message, bool *msg_is_ok);
     void Send(IPC::Message* message);
 
-    void OnOpenCursor(
-        const ViewHostMsg_IDBObjectStoreOpenCursor_Params& params);
     void OnDirection(int32 idb_object_store_id, IPC::Message* reply_msg);
     void OnKey(int32 idb_object_store_id, IPC::Message* reply_msg);
     void OnValue(int32 idb_object_store_id, IPC::Message* reply_msg);
     void OnUpdate(int32 idb_object_store_id,
                   int32 response_id,
-                  const SerializedScriptValue& value);
+                  const SerializedScriptValue& value,
+                  IPC::Message* reply_msg);
     void OnContinue(int32 idb_object_store_id,
                     int32 response_id,
-                    const IndexedDBKey& key);
+                    const IndexedDBKey& key,
+                    IPC::Message* reply_msg);
     void OnRemove(int32 idb_object_store_id,
-                  int32 response_id);
+                  int32 response_id,
+                  IPC::Message* reply_msg);
     void OnDestroyed(int32 idb_cursor_id);
 
     IndexedDBDispatcherHost* parent_;
@@ -201,8 +235,12 @@ class IndexedDBDispatcherHost
     void Send(IPC::Message* message);
 
     // TODO: add the rest of the transaction methods.
-    void OnObjectStore(int32 transaction_id, const string16& name,
+    void OnAbort(int32 transaction_id);
+    void OnMode(int32 transaction_id, IPC::Message* reply_msg);
+    void OnObjectStore(int32 transaction_id,
+                       const string16& name,
                        IPC::Message* reply_msg);
+    void OnDidCompleteTaskEvents(int transaction_id);
     void OnDestroyed(int32 idb_transaction_id);
 
     IndexedDBDispatcherHost* parent_;
@@ -215,13 +253,15 @@ class IndexedDBDispatcherHost
   // Data shared between renderer processes with the same profile.
   scoped_refptr<WebKitContext> webkit_context_;
 
+  // Tells us whether the user wants to allow databases to be opened.
+  scoped_refptr<HostContentSettingsMap> host_content_settings_map_;
+
   // Only access on WebKit thread.
   scoped_ptr<DatabaseDispatcherHost> database_dispatcher_host_;
   scoped_ptr<IndexDispatcherHost> index_dispatcher_host_;
   scoped_ptr<ObjectStoreDispatcherHost> object_store_dispatcher_host_;
   scoped_ptr<CursorDispatcherHost> cursor_dispatcher_host_;
   scoped_ptr<TransactionDispatcherHost> transaction_dispatcher_host_;
-
 
   // If we get a corrupt message from a renderer, we need to kill it using this
   // handle.

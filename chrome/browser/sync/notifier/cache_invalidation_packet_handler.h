@@ -13,16 +13,17 @@
 
 #include "base/basictypes.h"
 #include "base/scoped_callback_factory.h"
+#include "base/weak_ptr.h"
 #include "talk/xmpp/jid.h"
-
-namespace buzz {
-class XmppClient;
-}  // namespace buzz
 
 namespace invalidation {
 class InvalidationClient;
 class NetworkEndpoint;
 }  // namespace invalidation
+
+namespace talk_base {
+class Task;
+}  // namespace
 
 namespace sync_notifier {
 
@@ -30,12 +31,12 @@ namespace sync_notifier {
 
 class CacheInvalidationPacketHandler {
  public:
-  // Starts routing packets from |invalidation_client| through
-  // |xmpp_client|.  |invalidation_client| must not already be routing
-  // packets through something.  Does not take ownership of
-  // |xmpp_client| or |invalidation_client|.
+  // Starts routing packets from |invalidation_client| using
+  // |base_task|.  |base_task.get()| must still be non-NULL.
+  // |invalidation_client| must not already be routing packets through
+  // something.  Does not take ownership of |invalidation_client|.
   CacheInvalidationPacketHandler(
-      buzz::XmppClient* xmpp_client,
+      base::WeakPtr<talk_base::Task> base_task,
       invalidation::InvalidationClient* invalidation_client);
 
   // Makes the invalidation client passed into the constructor not
@@ -52,7 +53,7 @@ class CacheInvalidationPacketHandler {
   base::ScopedCallbackFactory<CacheInvalidationPacketHandler>
       scoped_callback_factory_;
 
-  buzz::XmppClient* xmpp_client_;
+  base::WeakPtr<talk_base::Task> base_task_;
   invalidation::InvalidationClient* invalidation_client_;
 
   // Parameters for sent messages.

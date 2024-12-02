@@ -18,6 +18,7 @@
     <output filename="platform_locale_settings_es.pak" type="data_package" lang="es" />
     <output filename="platform_locale_settings_es-419.pak" type="data_package" lang="es-419" />
     <output filename="platform_locale_settings_et.pak" type="data_package" lang="et" />
+    <output filename="platform_locale_settings_fa.pak" type="data_package" lang="fa" />
     <output filename="platform_locale_settings_fi.pak" type="data_package" lang="fi" />
     <output filename="platform_locale_settings_fil.pak" type="data_package" lang="fil" />
     <output filename="platform_locale_settings_fr.pak" type="data_package" lang="fr" />
@@ -72,6 +73,7 @@
     <file path="platform_locale_settings/locale_settings_mac_es.xtb" lang="es" />
     <file path="platform_locale_settings/locale_settings_mac_es-419.xtb" lang="es-419" />
     <file path="platform_locale_settings/locale_settings_mac_et.xtb" lang="et" />
+    <file path="platform_locale_settings/locale_settings_mac_fa.xtb" lang="fa" />
     <file path="platform_locale_settings/locale_settings_mac_fi.xtb" lang="fi" />
     <file path="platform_locale_settings/locale_settings_mac_fil.xtb" lang="fil" />
     <file path="platform_locale_settings/locale_settings_mac_fr.xtb" lang="fr" />
@@ -112,13 +114,12 @@
   </translations>
   <release seq="1" allow_pseudo="false">
     <messages fallback_to_english="true">
-      <!-- The font used in web-style native pages (e.g. History). -->
+      <!-- The font used in DOM UI (e.g. History). -->
       <message name="IDS_WEB_FONT_FAMILY" use_name_for_id="true">
-        Helvetica
+        Helvetica, sans-serif
       </message>
 
-      <!-- The relative font size in % used in web-style native pages
-      (e.g. History).  -->
+      <!-- The relative font size in % used in DOM UI (e.g. History).  -->
       <message name="IDS_WEB_FONT_SIZE" use_name_for_id="true">
         84%
       </message>

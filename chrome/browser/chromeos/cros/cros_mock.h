@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_CHROMEOS_CROS_CROS_MOCK_H_
 
 #include "chrome/browser/chromeos/cros/cros_library.h"
+#include "chrome/browser/chromeos/cros/network_library.h"
 #include "chrome/test/in_process_browser_test.h"
 #include "cros/chromeos_input_method.h"
 
@@ -19,8 +20,8 @@ class MockNetworkLibrary;
 class MockPowerLibrary;
 class MockScreenLockLibrary;
 class MockSpeechSynthesisLibrary;
-class MockSynapticsLibrary;
 class MockSystemLibrary;
+class MockTouchpadLibrary;
 
 // Class for initializing mocks for some parts of CrosLibrary. Once you mock
 // part of CrosLibrary it will be considered as successfully loaded and
@@ -33,7 +34,7 @@ class CrosMock {
   virtual ~CrosMock();
 
   // This method sets up basic mocks that are used by status area items:
-  // LibraryLoader, Language, Network, Power, Synaptics libraries.
+  // LibraryLoader, Language, Network, Power, Touchpad libraries.
   // Add a call to this method at the beginning of your
   // SetUpInProcessBrowserTestFixture.
   void InitStatusAreaMocks();
@@ -50,7 +51,7 @@ class CrosMock {
   void InitMockPowerLibrary();
   void InitMockScreenLockLibrary();
   void InitMockSpeechSynthesisLibrary();
-  void InitMockSynapticsLibrary();
+  void InitMockTouchpadLibrary();
   void InitMockSystemLibrary();
 
   // Get mocks.
@@ -61,8 +62,8 @@ class CrosMock {
   MockPowerLibrary* mock_power_library();
   MockScreenLockLibrary* mock_screen_lock_library();
   MockSpeechSynthesisLibrary* mock_speech_synthesis_library();
-  MockSynapticsLibrary* mock_synaptics_library();
   MockSystemLibrary* mock_system_library();
+  MockTouchpadLibrary* mock_touchpad_library();
 
   // This method sets up corresponding expectations for basic mocks that
   // are used by status area items.
@@ -77,10 +78,11 @@ class CrosMock {
   void SetInputMethodLibraryStatusAreaExpectations();
   void SetNetworkLibraryStatusAreaExpectations();
   void SetPowerLibraryStatusAreaExpectations();
+  void SetPowerLibraryExpectations();
   void SetSpeechSynthesisLibraryExpectations();
   void SetSystemLibraryStatusAreaExpectations();
-  void SetSynapticsLibraryExpectations();
   void SetSystemLibraryExpectations();
+  void SetTouchpadLibraryExpectations();
 
   void TearDownMocks();
 
@@ -97,10 +99,16 @@ class CrosMock {
   MockPowerLibrary* mock_power_library_;
   MockScreenLockLibrary* mock_screen_lock_library_;
   MockSpeechSynthesisLibrary* mock_speech_synthesis_library_;
-  MockSynapticsLibrary* mock_synaptics_library_;
   MockSystemLibrary* mock_system_library_;
+  MockTouchpadLibrary* mock_touchpad_library_;
 
   ImePropertyList ime_properties_;
+  WifiNetwork wifi_network_;
+  WifiNetworkVector wifi_networks_;
+  CellularNetwork cellular_network_;
+  CellularNetworkVector cellular_networks_;
+  std::string empty_string_;
+
   DISALLOW_COPY_AND_ASSIGN(CrosMock);
 };
 

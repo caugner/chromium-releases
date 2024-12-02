@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 #include "base/message_loop.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/chromeos/cros/mock_cryptohome_library.h"
 #include "chrome/browser/chromeos/cros/mock_login_library.h"
 #include "chrome/browser/chromeos/cros/mock_network_library.h"
@@ -70,8 +70,8 @@ class LoginScreenTest : public WizardInProcessBrowserTest {
 
 static void Quit() {
   LOG(INFO) << "Posting a QuitTask to UI thread";
-    ChromeThread::PostTask(
-        ChromeThread::UI, FROM_HERE, new MessageLoop::QuitTask);
+    BrowserThread::PostTask(
+        BrowserThread::UI, FROM_HERE, new MessageLoop::QuitTask);
 }
 IN_PROC_BROWSER_TEST_F(LoginScreenTest, TestBasic) {
   ASSERT_TRUE(controller() != NULL);
@@ -85,10 +85,6 @@ IN_PROC_BROWSER_TEST_F(LoginScreenTest, TestBasic) {
 
   controller()->set_observer(mock_screen_observer.get());
   NewUserView* login = controller()->GetLoginScreen()->view();
-  // NOTE: When adding new controls check RecreateNativeControls()
-  // that |sign_in_button_| is added with correct index.
-  // See kSignInButtonFocusOrderIndex constant.
-  EXPECT_EQ(8, login->GetChildViewCount());
   login->SetUsername(kUsername);
   login->SetPassword(kPassword);
 
@@ -133,19 +129,12 @@ IN_PROC_BROWSER_TEST_F(LoginScreenTest, IncognitoLogin) {
 
   scoped_ptr<MockScreenObserver> mock_screen_observer(
       new MockScreenObserver());
-  EXPECT_CALL(*mock_screen_observer,
-              OnExit(ScreenObserver::LOGIN_GUEST_SELECTED))
-      .WillOnce(InvokeWithoutArgs(Quit));
-
   controller()->set_observer(mock_screen_observer.get());
   NewUserView* login = controller()->GetLoginScreen()->view();
 
-  bool old_state = MessageLoop::current()->NestableTasksAllowed();
-  MessageLoop::current()->SetNestableTasksAllowed(true);
   login->LinkActivated(login->browse_without_signin_link_, 0);
-  MessageLoop::current()->Run();
-  MessageLoop::current()->SetNestableTasksAllowed(old_state);
   controller()->set_observer(NULL);
+  Quit();
 }
 
 }  // namespace chromeos

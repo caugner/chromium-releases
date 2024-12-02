@@ -536,6 +536,15 @@ void View::ProcessMouseReleased(const MouseEvent& e, bool canceled) {
   // WARNING: we may have been deleted.
 }
 
+#if defined(TOUCH_UI)
+bool View::ProcessTouchEvent(const TouchEvent& e) {
+  // TODO(rjkroege): Implement a grab scheme similar to as
+  // as is found in MousePressed.
+  const bool result = OnTouchEvent(e);
+  return result;
+}
+#endif
+
 void View::AddChildView(View* v) {
   AddChildView(static_cast<int>(child_views_.size()), v);
 }
@@ -1157,20 +1166,12 @@ bool View::GetAccessibleName(std::wstring* name) {
   return true;
 }
 
-bool View::GetAccessibleRole(AccessibilityTypes::Role* role) {
-  if (accessible_role_) {
-    *role = accessible_role_;
-    return true;
-  }
-  return false;
+AccessibilityTypes::Role View::GetAccessibleRole() {
+  return AccessibilityTypes::ROLE_CLIENT;
 }
 
 void View::SetAccessibleName(const std::wstring& name) {
   accessible_name_ = name;
-}
-
-void View::SetAccessibleRole(const AccessibilityTypes::Role role) {
-  accessible_role_ = role;
 }
 
 // static
@@ -1288,6 +1289,13 @@ void View::OnMouseEntered(const MouseEvent& e) {
 
 void View::OnMouseExited(const MouseEvent& e) {
 }
+
+#if defined(TOUCH_UI)
+bool View::OnTouchEvent(const TouchEvent& event) {
+  DLOG(INFO) << "visited the OnTouchEvent";
+  return false;
+}
+#endif
 
 void View::SetMouseHandler(View *new_mouse_handler) {
   // It is valid for new_mouse_handler to be NULL

@@ -6,6 +6,8 @@
 #define CHROME_BROWSER_PRINTING_PRINT_JOB_WORKER_H__
 #pragma once
 
+#include "base/ref_counted.h"
+#include "base/scoped_ptr.h"
 #include "base/task.h"
 #include "base/thread.h"
 #include "gfx/native_widget_types.h"
@@ -60,7 +62,7 @@ class PrintJobWorker : public base::Thread {
 
  protected:
   // Retrieves the context for testing only.
-  PrintingContext& printing_context() { return printing_context_; }
+  PrintingContext* printing_context() { return printing_context_.get(); }
 
  private:
   // The shared NotificationService service can only be accessed from the UI
@@ -81,19 +83,24 @@ class PrintJobWorker : public base::Thread {
   // context.
   void OnFailure();
 
-#if defined(OS_MACOSX)
+#if defined(OS_MACOSX) || defined(USE_X11)
   // Asks the user for print settings. Must be called on the UI thread.
-  // Mac-only since Windows can display UI from non-main threads.
+  // Mac and Linux-only since Windows can display UI from non-main threads.
   void GetSettingsWithUI(gfx::NativeView parent_view,
                          int document_page_count,
                          bool has_selection);
+
+  // The callback used by PrintingContext::GetSettingsWithUI() to notify this
+  // object that the print settings are set.  This is needed in order to bounce
+  // back into the IO thread for GetSettingsDone().
+  void GetSettingsWithUIDone(PrintingContext::Result result);
 #endif
 
   // Reports settings back to owner_.
   void GetSettingsDone(PrintingContext::Result result);
 
   // Information about the printer setting.
-  PrintingContext printing_context_;
+  scoped_ptr<PrintingContext> printing_context_;
 
   // The printed document. Only has read-only access.
   scoped_refptr<PrintedDocument> document_;

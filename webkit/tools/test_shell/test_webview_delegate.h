@@ -27,6 +27,7 @@
 #include "base/scoped_ptr.h"
 #include "base/weak_ptr.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebContextMenuData.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebFileSystem.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebFrameClient.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebRect.h"
 #if defined(OS_MACOSX)
@@ -50,6 +51,9 @@ class TestShell;
 class WebWidgetHost;
 
 namespace WebKit {
+class WebDeviceOrientationClient;
+class WebSpeechInputController;
+class WebSpeechInputListener;
 class WebStorageNamespace;
 struct WebWindowFeatures;
 }
@@ -138,11 +142,15 @@ class TestWebViewDelegate : public WebKit::WebViewClient,
       const WebKit::WebAccessibilityObject& object);
   virtual WebKit::WebNotificationPresenter* notificationPresenter();
   virtual WebKit::WebGeolocationService* geolocationService();
+  virtual WebKit::WebDeviceOrientationClient* deviceOrientationClient();
+  virtual WebKit::WebSpeechInputController* speechInputController(
+      WebKit::WebSpeechInputListener*);
 
   // WebKit::WebWidgetClient
   virtual void didInvalidateRect(const WebKit::WebRect& rect);
   virtual void didScrollRect(int dx, int dy,
                              const WebKit::WebRect& clip_rect);
+  virtual void scheduleComposite();
   virtual void didFocus();
   virtual void didBlur();
   virtual void didChangeCursor(const WebKit::WebCursorInfo& cursor);
@@ -220,6 +228,11 @@ class TestWebViewDelegate : public WebKit::WebViewClient,
   virtual void didRunInsecureContent(
       WebKit::WebFrame* frame, const WebKit::WebSecurityOrigin& origin);
   virtual bool allowScript(WebKit::WebFrame* frame, bool enabled_per_settings);
+  virtual void openFileSystem(
+      WebKit::WebFrame* frame,
+      WebKit::WebFileSystem::Type type,
+      long long size,
+      WebKit::WebFileSystemCallbacks* callbacks);
 
   // webkit_glue::WebPluginPageDelegate
   virtual webkit_glue::WebPluginDelegate* CreatePluginDelegate(

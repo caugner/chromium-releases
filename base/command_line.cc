@@ -21,6 +21,7 @@
 #include "base/file_path.h"
 #include "base/logging.h"
 #include "base/singleton.h"
+#include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/sys_string_conversions.h"
 #include "base/utf_string_conversions.h"
@@ -296,7 +297,16 @@ bool CommandLine::HasSwitch(const std::wstring& switch_string) const {
 
 std::string CommandLine::GetSwitchValueASCII(
     const std::string& switch_string) const {
-  return WideToASCII(GetSwitchValue(switch_string));
+  CommandLine::StringType value = GetSwitchValueNative(switch_string);
+  if (!IsStringASCII(value)) {
+    LOG(WARNING) << "Value of --" << switch_string << " must be ASCII.";
+    return "";
+  }
+#if defined(OS_WIN)
+  return WideToASCII(value);
+#else
+  return value;
+#endif
 }
 
 FilePath CommandLine::GetSwitchValuePath(
@@ -321,35 +331,18 @@ CommandLine::StringType CommandLine::GetSwitchValueNative(
   }
 }
 
-std::wstring CommandLine::GetSwitchValue(
-    const std::string& switch_string) const {
-  // TODO(evanm): deprecate.
-  CommandLine::StringType value = GetSwitchValueNative(switch_string);
-#if defined(OS_WIN)
-  return value;
-#else
-  return base::SysNativeMBToWide(value);
-#endif
-}
-
-std::wstring CommandLine::GetSwitchValue(
-    const std::wstring& switch_string) const {
-  // TODO(evanm): deprecate.
-  return GetSwitchValue(WideToASCII(switch_string));
-}
-
 FilePath CommandLine::GetProgram() const {
-  return FilePath::FromWStringHack(program());
+#if defined(OS_WIN)
+  return FilePath(program_);
+#else
+  DCHECK_GT(argv_.size(), 0U);
+  return FilePath(argv_[0]);
+#endif
 }
 
 #if defined(OS_WIN)
 std::wstring CommandLine::program() const {
   return program_;
-}
-#else
-std::wstring CommandLine::program() const {
-  DCHECK_GT(argv_.size(), 0U);
-  return base::SysNativeMBToWide(argv_[0]);
 }
 #endif
 

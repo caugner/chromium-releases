@@ -5,6 +5,11 @@
 #ifndef WEBKIT_GLUE_PLUGINS_PEPPER_PLUGIN_DELEGATE_H_
 #define WEBKIT_GLUE_PLUGINS_PEPPER_PLUGIN_DELEGATE_H_
 
+#include <string>
+
+#include "base/callback.h"
+#include "base/platform_file.h"
+#include "base/ref_counted.h"
 #include "base/shared_memory.h"
 #include "base/sync_socket.h"
 #include "base/task.h"
@@ -13,6 +18,16 @@
 #include "third_party/ppapi/c/pp_stdint.h"
 
 class AudioMessageFilter;
+class GURL;
+
+namespace base {
+class MessageLoopProxy;
+class Time;
+}
+
+namespace fileapi {
+class FileSystemCallbackDispatcher;
+}
 
 namespace gfx {
 class Rect;
@@ -35,9 +50,13 @@ struct PP_VideoCompressedDataBuffer_Dev;
 struct PP_VideoDecoderConfig_Dev;
 struct PP_VideoUncompressedDataBuffer_Dev;
 
+class TransportDIB;
+
 namespace pepper {
 
+class FileIO;
 class PluginInstance;
+class FullscreenContainer;
 
 // Virtual interface that the browser implements to implement features for
 // Pepper plugins.
@@ -56,6 +75,8 @@ class PluginDelegate {
     // this image. This is used by NativeClient to send the image to the
     // out-of-process plugin. Returns 0 on failure.
     virtual intptr_t GetSharedMemoryHandle() const = 0;
+
+    virtual TransportDIB* GetTransportDIB() const = 0;
   };
 
   class PlatformContext3D {
@@ -76,9 +97,10 @@ class PluginDelegate {
   class PlatformAudio {
    public:
     class Client {
-     public:
+     protected:
       virtual ~Client() {}
 
+     public:
       // Called when the stream is created.
       virtual void StreamCreated(base::SharedMemoryHandle shared_memory_handle,
                                  size_t shared_memory_size,
@@ -135,17 +157,67 @@ class PluginDelegate {
                                      PlatformAudio::Client* client) = 0;
 
   // Notifies that the number of find results has changed.
-  virtual void DidChangeNumberOfFindResults(int identifier,
-                                           int total,
-                                           bool final_result) = 0;
+  virtual void NumberOfFindResultsChanged(int identifier,
+                                          int total,
+                                          bool final_result) = 0;
 
   // Notifies that the index of the currently selected item has been updated.
-  virtual void DidChangeSelectedFindResult(int identifier, int index) = 0;
+  virtual void SelectedFindResultChanged(int identifier, int index) = 0;
 
   // Runs a file chooser.
   virtual bool RunFileChooser(
       const WebKit::WebFileChooserParams& params,
       WebKit::WebFileChooserCompletion* chooser_completion) = 0;
+
+  // Sends an async IPC to open a file.
+  typedef Callback2<base::PlatformFileError, base::PlatformFile
+                    >::Type AsyncOpenFileCallback;
+  virtual bool AsyncOpenFile(const FilePath& path,
+                             int flags,
+                             AsyncOpenFileCallback* callback) = 0;
+  virtual bool MakeDirectory(
+      const FilePath& path,
+      bool recursive,
+      fileapi::FileSystemCallbackDispatcher* dispatcher) = 0;
+  virtual bool Query(const FilePath& path,
+                     fileapi::FileSystemCallbackDispatcher* dispatcher) = 0;
+  virtual bool Touch(const FilePath& path,
+                     const base::Time& last_access_time,
+                     const base::Time& last_modified_time,
+                     fileapi::FileSystemCallbackDispatcher* dispatcher) = 0;
+  virtual bool Delete(const FilePath& path,
+                      fileapi::FileSystemCallbackDispatcher* dispatcher) = 0;
+  virtual bool Rename(const FilePath& file_path,
+                      const FilePath& new_file_path,
+                      fileapi::FileSystemCallbackDispatcher* dispatcher) = 0;
+
+  // Returns a MessageLoopProxy instance associated with the message loop
+  // of the file thread in this renderer.
+  virtual scoped_refptr<base::MessageLoopProxy>
+  GetFileThreadMessageLoopProxy() = 0;
+
+  // Create a fullscreen container for a plugin instance. This effectively
+  // switches the plugin to fullscreen.
+  virtual FullscreenContainer* CreateFullscreenContainer(
+      PluginInstance* instance) = 0;
+
+  // Returns a string with the name of the default 8-bit char encoding.
+  virtual std::string GetDefaultEncoding() = 0;
+
+  // Sets the mininum and maximium zoom factors.
+  virtual void ZoomLimitsChanged(double minimum_factor,
+                                 double maximum_factor) = 0;
+
+  // Retrieves the proxy information for the given URL in PAC format. On error,
+  // this will return an empty string.
+  virtual std::string ResolveProxy(const GURL& url) = 0;
+
+  // Tell the browser when resource loading starts/ends.
+  virtual void DidStartLoading() = 0;
+  virtual void DidStopLoading() = 0;
+
+  // Sets restrictions on how the content can be used (i.e. no print/copy).
+  virtual void SetContentRestriction(int restrictions) = 0;
 };
 
 }  // namespace pepper

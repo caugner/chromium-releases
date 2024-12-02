@@ -34,8 +34,7 @@ class OpenURLsPopupObserver : public BrowserList::Observer {
 // Test that when there is a popup as the active browser any requests to
 // BrowserInit::LaunchWithProfile::OpenURLsInBrowser don't crash because
 // there's no explicit profile given.
-// Flaky, http://crbug.com/42318.
-IN_PROC_BROWSER_TEST_F(BrowserInitTest, FLAKY_OpenURLsPopup) {
+IN_PROC_BROWSER_TEST_F(BrowserInitTest, OpenURLsPopup) {
   std::vector<GURL> urls;
   urls.push_back(GURL("http://localhost"));
 
@@ -47,7 +46,8 @@ IN_PROC_BROWSER_TEST_F(BrowserInitTest, FLAKY_OpenURLsPopup) {
   OpenURLsPopupObserver observer;
   BrowserList::AddObserver(&observer);
 
-  Browser* popup = Browser::CreateForPopup(browser()->profile());
+  Browser* popup = Browser::CreateForType(Browser::TYPE_POPUP,
+                                          browser()->profile());
   ASSERT_EQ(popup->type(), Browser::TYPE_POPUP);
   ASSERT_EQ(popup, observer.added_browser_);
 
@@ -78,7 +78,7 @@ IN_PROC_BROWSER_TEST_F(BrowserInitTest, FLAKY_BlockBadURLs) {
   BrowserInit::LaunchWithProfile launch(FilePath(), cmdline);
   launch.Launch(browser()->profile(), false);
 
-  // Give the browser a chance to start first. FIXME(jschuh)
+  // TODO(jschuh): Give the browser a chance to start first.
   PlatformThread::Sleep(50);
 
   // Skip about:blank in the first tab

@@ -37,8 +37,10 @@ struct ContentSettings;
 struct ContextMenuParams;
 struct MediaPlayerAction;
 struct ThumbnailScore;
+struct ViewHostMsg_AccessibilityNotification_Params;
 struct ViewHostMsg_DidPrintPage_Params;
 struct ViewHostMsg_DomMessage_Params;
+struct ViewHostMsg_PageHasOSDD_Type;
 struct ViewHostMsg_RunFileChooser_Params;
 struct ViewHostMsg_ShowNotification_Params;
 struct ViewMsg_Navigate_Params;
@@ -99,10 +101,12 @@ class RenderViewHost : public RenderWidgetHost {
   static RenderViewHost* FromID(int render_process_id, int render_view_id);
 
   // routing_id could be a valid route id, or it could be MSG_ROUTING_NONE, in
-  // which case RenderWidgetHost will create a new one. The session storage
-  // namespace parameter allows multiple render views to share the same session
-  // storage (part of the WebStorage spec) space. Passing in NULL simply
-  // allocates a new one (which is useful for testing).
+  // which case RenderWidgetHost will create a new one.
+  //
+  // The session storage namespace parameter allows multiple render views and
+  // tab contentses to share the same session storage (part of the WebStorage
+  // spec) space. This is useful when restoring tabs, but most callers should
+  // pass in NULL which will cause a new SessionStorageNamespace to be created.
   RenderViewHost(SiteInstance* instance,
                  RenderViewHostDelegate* delegate,
                  int routing_id,
@@ -248,6 +252,11 @@ class RenderViewHost : public RenderWidgetHost {
   // Runs some javascript within the context of a frame in the page.
   void ExecuteJavascriptInWebFrame(const std::wstring& frame_xpath,
                                    const std::wstring& jscript);
+
+  // Runs some javascript within the context of a frame in the page. The result
+  // is sent back via the notification EXECUTE_JAVASCRIPT_RESULT.
+  int ExecuteJavascriptInWebFrameNotifyResult(const string16& frame_xpath,
+                                              const string16& jscript);
 
   // Insert some css into a frame in the page. |id| is optional, and specifies
   // the element id given when inserting/replacing the style element.
@@ -422,7 +431,9 @@ class RenderViewHost : public RenderWidgetHost {
   virtual bool IsRenderView() const { return true; }
   virtual void OnMessageReceived(const IPC::Message& msg);
   virtual void GotFocus();
+  virtual void LostCapture();
   virtual void ForwardMouseEvent(const WebKit::WebMouseEvent& mouse_event);
+  virtual void OnMouseActivate();
   virtual void ForwardKeyboardEvent(const NativeWebKeyboardEvent& key_event);
   virtual void ForwardEditCommand(const std::string& name,
                                   const std::string& value);
@@ -533,16 +544,18 @@ class RenderViewHost : public RenderWidgetHost {
   void OnMsgDidStartLoading();
   void OnMsgDidStopLoading();
   void OnMsgDocumentAvailableInMainFrame();
-  void OnMsgDocumentOnLoadCompletedInMainFrame();
+  void OnMsgDocumentOnLoadCompletedInMainFrame(int32 page_id);
   void OnMsgDidLoadResourceFromMemoryCache(const GURL& url,
                                            const std::string& frame_origin,
                                            const std::string& main_frame_origin,
                                            const std::string& security_info);
   void OnMsgDidDisplayInsecureContent();
   void OnMsgDidRunInsecureContent(const std::string& security_origin);
-  void OnMsgDidStartProvisionalLoadForFrame(bool main_frame,
+  void OnMsgDidStartProvisionalLoadForFrame(long long frame_id,
+                                            bool main_frame,
                                             const GURL& url);
-  void OnMsgDidFailProvisionalLoadWithError(bool main_frame,
+  void OnMsgDidFailProvisionalLoadWithError(long long frame_id,
+                                            bool main_frame,
                                             int error_code,
                                             const GURL& url,
                                             bool showing_repost_interstitial);
@@ -600,7 +613,9 @@ class RenderViewHost : public RenderWidgetHost {
                           const gfx::Point& image_offset);
   void OnUpdateDragCursor(WebKit::WebDragOperation drag_operation);
   void OnTakeFocus(bool reverse);
-  void OnMsgPageHasOSDD(int32 page_id, const GURL& doc_url, bool autodetected);
+  void OnMsgPageHasOSDD(int32 page_id,
+                        const GURL& doc_url,
+                        const ViewHostMsg_PageHasOSDD_Type& provider_type);
   void OnDidGetPrintedPagesCount(int cookie, int number_pages);
   void DidPrintPage(const ViewHostMsg_DidPrintPage_Params& params);
   void OnAddMessageToConsole(const std::wstring& message,
@@ -640,14 +655,14 @@ class RenderViewHost : public RenderWidgetHost {
   void OnQueryFormFieldAutoFill(int request_id,
                                 bool form_autofilled,
                                 const webkit_glue::FormField& field);
+  void OnDidShowAutoFillSuggestions();
   void OnRemoveAutocompleteEntry(const string16& field_name,
                                  const string16& value);
   void OnShowAutoFillDialog();
   void OnFillAutoFillFormData(int query_id,
                               const webkit_glue::FormData& form,
-                              const string16& value,
-                              const string16& label,
                               int unique_id);
+  void OnDidFillAutoFillFormData();
 
   void OnShowDesktopNotification(
       const ViewHostMsg_ShowNotification_Params& params);
@@ -656,12 +671,8 @@ class RenderViewHost : public RenderWidgetHost {
 
   void OnExtensionRequest(const ViewHostMsg_DomMessage_Params& params);
   void OnExtensionPostMessage(int port_id, const std::string& message);
-  void OnAccessibilityFocusChange(int acc_obj_id);
-  void OnAccessibilityObjectStateChange(
-      const webkit_glue::WebAccessibility& acc_obj);
-  void OnAccessibilityObjectChildrenChange(
-      const std::vector<webkit_glue::WebAccessibility>& acc_changes);
-  void OnAccessibilityTree(const webkit_glue::WebAccessibility& tree);
+  void OnAccessibilityNotifications(
+      const std::vector<ViewHostMsg_AccessibilityNotification_Params>& params);
   void OnCSSInserted();
   void OnPageContents(const GURL& url,
                       int32 page_id,
@@ -680,7 +691,15 @@ class RenderViewHost : public RenderWidgetHost {
                              const string16& display_name,
                              unsigned long estimated_size,
                              bool blocked_by_policy);
-  void OnSetDisplayingPDFContent();
+  void OnUpdateZoomLimits(int minimum_percent,
+                          int maximum_percent,
+                          bool remember);
+  void OnSetSuggestResult(int32 page_id, const std::string& result);
+  void OnDetectedPhishingSite(const GURL& phishing_url,
+                              double phishing_score,
+                              const SkBitmap& thumbnail);
+  void OnScriptEvalResponse(int id, bool result);
+  void OnUpdateContentRestrictions(int restrictions);
 
  private:
   friend class TestRenderViewHost;
@@ -755,7 +774,6 @@ class RenderViewHost : public RenderWidgetHost {
 
   // AutoFill and Autocomplete suggestions.  We accumulate these separately and
   // send them back to the renderer together.
-  int autofill_query_id_;
   std::vector<string16> autofill_values_;
   std::vector<string16> autofill_labels_;
   std::vector<string16> autofill_icons_;

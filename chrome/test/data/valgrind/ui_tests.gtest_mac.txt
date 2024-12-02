@@ -58,8 +58,10 @@ NPAPITesterBase.NPObjectProxy
 NPAPITesterBase.ScheduleTimer
 NPAPIVisiblePluginTester.SelfDeletePluginInNewStream
 NPAPIVisiblePluginTester.MultipleInstancesSyncCalls
+NPAPIVisiblePluginTester.OpenPopupWindowWithPlugin
 NPAPIVisiblePluginTester.PluginConvertPointTest
 NPAPIVisiblePluginTester.SelfDeletePluginInvokeInSynchronousPaint
+LayoutPluginTester.SelfDeletePluginGetUrl
 LayoutPluginTester.UnloadNoCrash
 
 # Possible timing related failure triggered only on mac valgrind bots.
@@ -81,3 +83,18 @@ SessionHistoryTest.LocationReplace
 # UNIMPLEMENTED reached, see http://crbug.com/51387
 OptionsUITest.LoadOptionsByURL
 AutomatedUITestBase.CloseTab
+
+# See http://crbug.com/57717
+ResourceDispatcherTest.CrossSiteFailedRequest
+
+# Valgrind dies on assertion, see http://crbug.com/58145
+AutomationProxyTest.GetTabCount
+
+# Can't load a nib under Valgrind, see http://crbug.com/58124
+ImagesTest.AnimatedGIFs
+
+# Valgrind dies on assertion, see http://crbug.com/58146
+DomStorageEmptyDatabaseTest.NonEmptyDirAfterSet
+
+# Hangs; See http://crbug.com/58569
+SearchProviderTest.TestIsSearchProviderInstalled

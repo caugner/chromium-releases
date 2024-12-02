@@ -82,14 +82,15 @@ static void ResetParamHeader(const OmxVideoDecodeEngine& dec, T* param) {
 void OmxVideoDecodeEngine::Initialize(
     MessageLoop* message_loop,
     VideoDecodeEngine::EventHandler* event_handler,
+    VideoDecodeContext* context,
     const VideoCodecConfig& config) {
   DCHECK_EQ(message_loop, MessageLoop::current());
 
   message_loop_ = message_loop;
   event_handler_ = event_handler;
 
-  width_ = config.width_;
-  height_ = config.height_;
+  width_ = config.width;
+  height_ = config.height;
 
   // TODO(wjia): Find the right way to determine the codec type.
   OmxConfigurator::MediaFormat input_format, output_format;
@@ -107,14 +108,14 @@ void OmxVideoDecodeEngine::Initialize(
 
   VideoCodecInfo info;
   // TODO(jiesun): ridiculous, we never fail initialization?
-  info.success_ = true;
-  info.provides_buffers_ = !uses_egl_image_;
-  info.stream_info_.surface_type_ =
-      uses_egl_image_ ? VideoFrame::TYPE_EGL_IMAGE
+  info.success = true;
+  info.provides_buffers = !uses_egl_image_;
+  info.stream_info.surface_type =
+      uses_egl_image_ ? VideoFrame::TYPE_GL_TEXTURE
                       : VideoFrame::TYPE_SYSTEM_MEMORY;
-  info.stream_info_.surface_format_ = GetSurfaceFormat();
-  info.stream_info_.surface_width_ = config.width_;
-  info.stream_info_.surface_height_ = config.height_;
+  info.stream_info.surface_format = GetSurfaceFormat();
+  info.stream_info.surface_width = config.width;
+  info.stream_info.surface_height = config.height;
   event_handler_->OnInitializeComplete(info);
 }
 
@@ -514,7 +515,7 @@ bool OmxVideoDecodeEngine::CreateComponent() {
     client_state_ = kClientError;
     return false;
   }
-  input_buffer_count_ = port_format.nBufferCountMin;
+  input_buffer_count_ = port_format.nBufferCountActual;
   input_buffer_size_ = port_format.nBufferSize;
 
   // 8. Obtain the information about the output port.
@@ -919,7 +920,7 @@ scoped_refptr<VideoFrame> OmxVideoDecodeEngine::CreateOmxBufferVideoFrame(
   strides[1] = strides[2] = width_ >> 1;
 
   VideoFrame::CreateFrameExternal(
-      VideoFrame::TYPE_OMXBUFFERHEAD,
+      VideoFrame::TYPE_SYSTEM_MEMORY,
       VideoFrame::YV12,
       width_, height_, 3,
       data, strides,
@@ -1121,8 +1122,7 @@ void OmxVideoDecodeEngine::ChangePort(OMX_COMMANDTYPE cmd, int port_index) {
 OMX_BUFFERHEADERTYPE* OmxVideoDecodeEngine::FindOmxBuffer(
     scoped_refptr<VideoFrame> video_frame) {
   for (size_t i = 0; i < output_frames_.size(); ++i) {
-    scoped_refptr<VideoFrame> frame = output_frames_[i].first;
-    if (video_frame->private_buffer() == frame->private_buffer())
+    if (video_frame == output_frames_[i].first)
       return output_frames_[i].second;
   }
   return NULL;

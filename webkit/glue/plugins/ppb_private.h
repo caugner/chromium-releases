@@ -5,25 +5,46 @@
 #ifndef WEBKIT_GLUE_PLUGINS_PPB_PRIVATE_H_
 #define WEBKIT_GLUE_PLUGINS_PPB_PRIVATE_H_
 
+#include "third_party/ppapi/c/dev/ppb_font_dev.h"
+#include "third_party/ppapi/c/pp_instance.h"
 #include "third_party/ppapi/c/pp_module.h"
 #include "third_party/ppapi/c/pp_var.h"
 
 #define PPB_PRIVATE_INTERFACE "PPB_Private;1"
 
+// From the public PPB_Font_Dev file.
+struct PP_FontDescription_Dev;
+
 typedef enum {
   PP_RESOURCESTRING_PDFGETPASSWORD = 0,
+  PP_RESOURCESTRING_PDFLOADING = 1
 } PP_ResourceString;
 
 typedef enum {
-  PP_PRIVATEFONTPITCH_DEFAULT = 0,
-  PP_PRIVATEFONTPITCH_FIXED = 1
-} PP_PrivateFontPitch;
-
-typedef enum {
-  PP_PRIVATEFONTFAMILY_DEFAULT = 0,
-  PP_PRIVATEFONTFAMILY_ROMAN = 1,
-  PP_PRIVATEFONTFAMILY_SCRIPT = 2
-} PP_PrivateFontFamily;
+  PP_RESOURCEIMAGE_PDF_BUTTON_FTH = 0,
+  PP_RESOURCEIMAGE_PDF_BUTTON_FTH_HOVER = 1,
+  PP_RESOURCEIMAGE_PDF_BUTTON_FTH_PRESSED = 2,
+  PP_RESOURCEIMAGE_PDF_BUTTON_FTW = 3,
+  PP_RESOURCEIMAGE_PDF_BUTTON_FTW_HOVER = 4,
+  PP_RESOURCEIMAGE_PDF_BUTTON_FTW_PRESSED = 5,
+  PP_RESOURCEIMAGE_PDF_BUTTON_ZOOMIN = 6,
+  PP_RESOURCEIMAGE_PDF_BUTTON_ZOOMIN_HOVER = 7,
+  PP_RESOURCEIMAGE_PDF_BUTTON_ZOOMIN_PRESSED = 8,
+  PP_RESOURCEIMAGE_PDF_BUTTON_ZOOMOUT = 9,
+  PP_RESOURCEIMAGE_PDF_BUTTON_ZOOMOUT_HOVER = 10,
+  PP_RESOURCEIMAGE_PDF_BUTTON_ZOOMOUT_PRESSED = 11,
+  PP_RESOURCEIMAGE_PDF_BUTTON_THUMBNAIL_0 = 12,
+  PP_RESOURCEIMAGE_PDF_BUTTON_THUMBNAIL_1 = 13,
+  PP_RESOURCEIMAGE_PDF_BUTTON_THUMBNAIL_2 = 14,
+  PP_RESOURCEIMAGE_PDF_BUTTON_THUMBNAIL_3 = 15,
+  PP_RESOURCEIMAGE_PDF_BUTTON_THUMBNAIL_4 = 16,
+  PP_RESOURCEIMAGE_PDF_BUTTON_THUMBNAIL_5 = 17,
+  PP_RESOURCEIMAGE_PDF_BUTTON_THUMBNAIL_6 = 18,
+  PP_RESOURCEIMAGE_PDF_BUTTON_THUMBNAIL_7 = 19,
+  PP_RESOURCEIMAGE_PDF_BUTTON_THUMBNAIL_8 = 20,
+  PP_RESOURCEIMAGE_PDF_BUTTON_THUMBNAIL_9 = 21,
+  PP_RESOURCEIMAGE_PDF_BUTTON_THUMBNAIL_NUM_BACKGROUND = 22,
+} PP_ResourceImage;
 
 typedef enum {
   PP_PRIVATEFONTCHARSET_ANSI = 0,
@@ -51,20 +72,29 @@ struct PP_PrivateFontFileDescription {
   const char* face;
   uint32_t weight;
   bool italic;
-  PP_PrivateFontPitch pitch;
-  PP_PrivateFontFamily family;
-  PP_PrivateFontCharset charset;
+};
+
+struct PP_PrivateFindResult {
+  int start_index;
+  int length;
 };
 
 struct PPB_Private {
   // Returns a localized string.
-  PP_Var (*GetLocalizedString)(PP_ResourceString string_id);
+  PP_Var (*GetLocalizedString)(PP_Module module, PP_ResourceString string_id);
+
+  // Returns a resource image.
+  PP_Resource (*GetResourceImage)(PP_Module module,
+                                  PP_ResourceImage image_id);
 
   // Returns a resource identifying a font file corresponding to the given font
-  // request after applying the browser-specific fallback. Linux only.
+  // request after applying the browser-specific fallback.
+  //
+  // Currently Linux-only.
   PP_Resource (*GetFontFileWithFallback)(
       PP_Module module,
-      const PP_PrivateFontFileDescription* description);
+      const PP_FontDescription_Dev* description,
+      PP_PrivateFontCharset charset);
 
   // Given a resource previously returned by GetFontFileWithFallback, returns
   // a pointer to the requested font table. Linux only.
@@ -72,6 +102,26 @@ struct PPB_Private {
                                          uint32_t table,
                                          void* output,
                                          uint32_t* output_length);
+
+  // Search the given string using ICU.  Use PPB_Core's MemFree on results when
+  // done.
+  void (*SearchString)(
+     PP_Module module,
+     const unsigned short* string,
+     const unsigned short* term,
+     bool case_sensitive,
+     PP_PrivateFindResult** results,
+     int* count);
+
+  // Since WebFrame doesn't know about Pepper requests, it'll think the page has
+  // finished loading even if there are outstanding requests by the plugin.
+  // Take this out once WebFrame knows about requests by pepper plugins.
+  void (*DidStartLoading)(PP_Instance instance);
+  void (*DidStopLoading)(PP_Instance instance);
+
+  // Sets content restriction for a full-page plugin (i.e. can't copy/print).
+  // The value is a bitfield of ContentRestriction enums.
+  void (*SetContentRestriction)(PP_Instance instance, int restrictions);
 };
 
 #endif  // WEBKIT_GLUE_PLUGINS_PPB_PRIVATE_H_

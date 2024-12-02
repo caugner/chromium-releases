@@ -13,7 +13,7 @@
 #include "net/base/host_port_pair.h"
 #include "net/http/http_network_session.h"
 #include "net/http/http_request_info.h"
-#include "net/http/http_stream_handle.h"
+#include "net/http/http_stream.h"
 #include "net/http/http_transaction_factory.h"
 #include "net/proxy/proxy_service.h"
 #include "net/url_request/url_request_context.h"
@@ -24,8 +24,8 @@ namespace chrome_browser_net {
 void Preconnect::PreconnectOnUIThread(const GURL& url,
     UrlInfo::ResolutionMotivation motivation) {
   // Prewarm connection to Search URL.
-  ChromeThread::PostTask(
-      ChromeThread::IO,
+  BrowserThread::PostTask(
+      BrowserThread::IO,
       FROM_HERE,
       NewRunnableFunction(Preconnect::PreconnectOnIOThread, url, motivation));
   return;
@@ -44,7 +44,7 @@ void Preconnect::Connect(const GURL& url) {
   URLRequestContextGetter* getter = Profile::GetDefaultRequestContext();
   if (!getter)
     return;
-  if (!ChromeThread::CurrentlyOn(ChromeThread::IO)) {
+  if (!BrowserThread::CurrentlyOn(BrowserThread::IO)) {
     LOG(DFATAL) << "This must be run only on the IO thread.";
     return;
   }
@@ -101,12 +101,17 @@ void Preconnect::Connect(const GURL& url) {
 
   proxy_info_.reset(new net::ProxyInfo());
   net::StreamFactory* stream_factory = session->http_stream_factory();
-  stream_factory->RequestStream(request_info_.get(), ssl_config_.get(),
-                                proxy_info_.get(), this, net_log_, session,
+  stream_factory->RequestStream(request_info_.get(),
+                                ssl_config_.get(),
+                                proxy_info_.get(),
+                                NULL,
+                                this,
+                                net_log_,
+                                session,
                                 &stream_request_job_);
 }
 
-void Preconnect::OnStreamReady(net::HttpStreamHandle* stream) {
+void Preconnect::OnStreamReady(net::HttpStream* stream) {
   delete stream;
   delete this;
 }

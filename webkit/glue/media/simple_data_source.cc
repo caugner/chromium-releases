@@ -122,7 +122,7 @@ bool SimpleDataSource::IsStreaming() {
 
 bool SimpleDataSource::OnReceivedRedirect(
     const GURL& new_url,
-    const webkit_glue::ResourceLoaderBridge::ResponseInfo& info,
+    const webkit_glue::ResourceResponseInfo& info,
     bool* has_new_first_party_for_cookies,
     GURL* new_first_party_for_cookies) {
   SetURL(new_url);
@@ -132,7 +132,7 @@ bool SimpleDataSource::OnReceivedRedirect(
 }
 
 void SimpleDataSource::OnReceivedResponse(
-    const webkit_glue::ResourceLoaderBridge::ResponseInfo& info,
+    const webkit_glue::ResourceResponseInfo& info,
     bool content_filtered) {
   size_ = info.content_length;
 }
@@ -142,7 +142,8 @@ void SimpleDataSource::OnReceivedData(const char* data, int len) {
 }
 
 void SimpleDataSource::OnCompletedRequest(const URLRequestStatus& status,
-                                          const std::string& security_info) {
+                                          const std::string& security_info,
+                                          const base::Time& completion_time) {
   AutoLock auto_lock(lock_);
   // It's possible this gets called after Stop(), in which case |host_| is no
   // longer valid.

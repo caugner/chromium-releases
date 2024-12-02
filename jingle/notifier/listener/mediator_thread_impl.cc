@@ -16,8 +16,6 @@
 #include "jingle/notifier/listener/subscribe_task.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/host_resolver.h"
-#include "talk/base/physicalsocketserver.h"
-#include "talk/base/thread.h"
 #include "talk/xmpp/xmppclient.h"
 #include "talk/xmpp/xmppclientsettings.h"
 
@@ -26,23 +24,30 @@ DISABLE_RUNNABLE_METHOD_REFCOUNT(notifier::MediatorThreadImpl);
 
 namespace notifier {
 
-MediatorThreadImpl::MediatorThreadImpl(bool use_chrome_async_socket,
-                                       bool try_ssltcp_first)
-    : delegate_(NULL),
+MediatorThreadImpl::MediatorThreadImpl(const NotifierOptions& notifier_options)
+    : observers_(new ObserverListThreadSafe<Observer>()),
       parent_message_loop_(MessageLoop::current()),
-      use_chrome_async_socket_(use_chrome_async_socket),
-      try_ssltcp_first_(try_ssltcp_first),
+      notifier_options_(notifier_options),
       worker_thread_("MediatorThread worker thread") {
   DCHECK(parent_message_loop_);
 }
 
 MediatorThreadImpl::~MediatorThreadImpl() {
   DCHECK_EQ(MessageLoop::current(), parent_message_loop_);
+  // If the worker thread is still around, we need to call Logout() so
+  // that all the variables living it get destroyed properly (i.e., on
+  // the worker thread).
+  if (worker_thread_.IsRunning()) {
+    Logout();
+  }
 }
 
-void MediatorThreadImpl::SetDelegate(Delegate* delegate) {
-  DCHECK_EQ(MessageLoop::current(), parent_message_loop_);
-  delegate_ = delegate;
+void MediatorThreadImpl::AddObserver(Observer* observer) {
+  observers_->AddObserver(observer);
+}
+
+void MediatorThreadImpl::RemoveObserver(Observer* observer) {
+  observers_->RemoveObserver(observer);
 }
 
 void MediatorThreadImpl::Start() {
@@ -53,44 +58,6 @@ void MediatorThreadImpl::Start() {
   // TODO(akalin): Make this function return a bool and remove this
   // CHECK().
   CHECK(worker_thread_.StartWithOptions(options));
-  if (!use_chrome_async_socket_) {
-    worker_message_loop()->PostTask(
-        FROM_HERE,
-        NewRunnableMethod(this, &MediatorThreadImpl::StartLibjingleThread));
-  }
-}
-
-void MediatorThreadImpl::StartLibjingleThread() {
-  DCHECK_EQ(MessageLoop::current(), worker_message_loop());
-  DCHECK(!use_chrome_async_socket_);
-  socket_server_.reset(new talk_base::PhysicalSocketServer());
-  libjingle_thread_.reset(new talk_base::Thread());
-  talk_base::ThreadManager::SetCurrent(libjingle_thread_.get());
-  worker_message_loop()->PostTask(
-      FROM_HERE,
-      NewRunnableMethod(this, &MediatorThreadImpl::PumpLibjingleLoop));
-}
-
-void MediatorThreadImpl::StopLibjingleThread() {
-  DCHECK_EQ(MessageLoop::current(), worker_message_loop());
-  DCHECK(!use_chrome_async_socket_);
-  talk_base::ThreadManager::SetCurrent(NULL);
-  libjingle_thread_.reset();
-  socket_server_.reset();
-}
-
-void MediatorThreadImpl::PumpLibjingleLoop() {
-  DCHECK_EQ(MessageLoop::current(), worker_message_loop());
-  DCHECK(!use_chrome_async_socket_);
-  // Pump the libjingle message loop 100ms at a time.
-  if (!libjingle_thread_.get()) {
-    // StopLibjingleThread() was called.
-    return;
-  }
-  libjingle_thread_->ProcessMessages(100);
-  worker_message_loop()->PostTask(
-      FROM_HERE,
-      NewRunnableMethod(this, &MediatorThreadImpl::PumpLibjingleLoop));
 }
 
 void MediatorThreadImpl::Login(const buzz::XmppClientSettings& settings) {
@@ -105,22 +72,10 @@ void MediatorThreadImpl::Logout() {
   worker_message_loop()->PostTask(
       FROM_HERE,
       NewRunnableMethod(this, &MediatorThreadImpl::DoDisconnect));
-  if (!use_chrome_async_socket_) {
-    worker_message_loop()->PostTask(
-        FROM_HERE,
-        NewRunnableMethod(this, &MediatorThreadImpl::StopLibjingleThread));
-  }
   // TODO(akalin): Decomp this into a separate stop method.
   worker_thread_.Stop();
-  // Process any messages the worker thread may be posted on our
-  // thread.
-  bool old_state = parent_message_loop_->NestableTasksAllowed();
-  parent_message_loop_->SetNestableTasksAllowed(true);
-  parent_message_loop_->RunAllPending();
-  parent_message_loop_->SetNestableTasksAllowed(old_state);
-  // worker_thread_ should have cleaned all this up.
+  // worker_thread_ should have cleaned this up.
   CHECK(!login_.get());
-  CHECK(!pump_.get());
 }
 
 void MediatorThreadImpl::ListenForUpdates() {
@@ -158,64 +113,54 @@ MessageLoop* MediatorThreadImpl::worker_message_loop() {
   return worker_message_loop;
 }
 
-buzz::XmppClient* MediatorThreadImpl::xmpp_client() {
-  DCHECK_EQ(MessageLoop::current(), worker_message_loop());
-  DCHECK(login_.get());
-  buzz::XmppClient* xmpp_client = login_->xmpp_client();
-  DCHECK(xmpp_client);
-  return xmpp_client;
-}
 
 void MediatorThreadImpl::DoLogin(
     const buzz::XmppClientSettings& settings) {
   DCHECK_EQ(MessageLoop::current(), worker_message_loop());
   LOG(INFO) << "P2P: Thread logging into talk network.";
 
+  base_task_.reset();
+
   // TODO(akalin): Use an existing HostResolver from somewhere (maybe
   // the IOThread one).
-  host_resolver_ =
+  host_resolver_.reset(
       net::CreateSystemHostResolver(net::HostResolver::kDefaultParallelism,
-                                    NULL);
-
-  // Start a new pump for the login.
-  login_.reset();
-  pump_.reset(new notifier::TaskPump());
+                                    NULL));
 
   notifier::ServerInformation server_list[2];
-  int server_list_count = 2;
+  int server_list_count = 0;
 
-  // The default servers know how to serve over port 443 (that's the magic).
-  server_list[0].server = net::HostPortPair("talk.google.com",
-                                            notifier::kDefaultXmppPort);
-  server_list[0].special_port_magic = true;
-  server_list[1].server = net::HostPortPair("talkx.l.google.com",
-                                            notifier::kDefaultXmppPort);
-  server_list[1].special_port_magic = true;
+  // Override the default servers with a test notification server if one was
+  // provided.
+  if(!notifier_options_.xmpp_host_port.host().empty()) {
+    server_list[0].server = notifier_options_.xmpp_host_port;
+    server_list[0].special_port_magic = false;
+    server_list_count = 1;
+  } else {
+    // The default servers know how to serve over port 443 (that's the magic).
+    server_list[0].server = net::HostPortPair("talk.google.com",
+                                              notifier::kDefaultXmppPort);
+    server_list[0].special_port_magic = true;
+    server_list[1].server = net::HostPortPair("talkx.l.google.com",
+                                              notifier::kDefaultXmppPort);
+    server_list[1].special_port_magic = true;
+    server_list_count = 2;
+  }
 
   // Autodetect proxy is on by default.
   notifier::ConnectionOptions options;
 
-  // Language is not used in the stanza so we default to |en|.
-  std::string lang = "en";
-  login_.reset(new notifier::Login(pump_.get(),
-                                   use_chrome_async_socket_,
-                                   settings,
+  login_.reset(new notifier::Login(settings,
                                    options,
-                                   lang,
                                    host_resolver_.get(),
                                    server_list,
                                    server_list_count,
-                                   // talk_base::FirewallManager* is NULL.
-                                   NULL,
-                                   try_ssltcp_first_,
-                                   // Both the proxy and a non-proxy route
-                                   // will be attempted.
-                                   false));
+                                   notifier_options_.try_ssltcp_first));
 
-  login_->SignalClientStateChange.connect(
-      this, &MediatorThreadImpl::OnClientStateChangeMessage);
-  login_->SignalLoginFailure.connect(
-      this, &MediatorThreadImpl::OnLoginFailureMessage);
+  login_->SignalConnect.connect(
+      this, &MediatorThreadImpl::OnConnect);
+  login_->SignalDisconnect.connect(
+      this, &MediatorThreadImpl::OnDisconnect);
   login_->StartConnection();
 }
 
@@ -223,18 +168,19 @@ void MediatorThreadImpl::DoDisconnect() {
   DCHECK_EQ(MessageLoop::current(), worker_message_loop());
   LOG(INFO) << "P2P: Thread logging out of talk network.";
   login_.reset();
-  // Delete the old pump while on the thread to ensure that everything is
-  // cleaned-up in a predicatable manner.
-  pump_.reset();
-
-  host_resolver_ = NULL;
+  host_resolver_.reset();
+  base_task_.reset();
 }
 
 void MediatorThreadImpl::DoSubscribeForUpdates(
     const std::vector<std::string>& subscribed_services_list) {
   DCHECK_EQ(MessageLoop::current(), worker_message_loop());
+  if (!base_task_.get()) {
+    return;
+  }
+  // Owned by |base_task_|.
   SubscribeTask* subscription =
-      new SubscribeTask(xmpp_client(), subscribed_services_list);
+      new SubscribeTask(base_task_, subscribed_services_list);
   subscription->SignalStatusUpdate.connect(
       this,
       &MediatorThreadImpl::OnSubscriptionStateChange);
@@ -243,7 +189,11 @@ void MediatorThreadImpl::DoSubscribeForUpdates(
 
 void MediatorThreadImpl::DoListenForUpdates() {
   DCHECK_EQ(MessageLoop::current(), worker_message_loop());
-  ListenTask* listener = new ListenTask(xmpp_client());
+  if (!base_task_.get()) {
+    return;
+  }
+  // Owned by |base_task_|.
+  ListenTask* listener = new ListenTask(base_task_);
   listener->SignalUpdateAvailable.connect(
       this,
       &MediatorThreadImpl::OnIncomingNotification);
@@ -253,7 +203,11 @@ void MediatorThreadImpl::DoListenForUpdates() {
 void MediatorThreadImpl::DoSendNotification(
     const OutgoingNotificationData& data) {
   DCHECK_EQ(MessageLoop::current(), worker_message_loop());
-  SendUpdateTask* task = new SendUpdateTask(xmpp_client(), data);
+  if (!base_task_.get()) {
+    return;
+  }
+  // Owned by |base_task_|.
+  SendUpdateTask* task = new SendUpdateTask(base_task_, data);
   task->SignalStatusUpdate.connect(
       this,
       &MediatorThreadImpl::OnOutgoingNotification);
@@ -263,110 +217,31 @@ void MediatorThreadImpl::DoSendNotification(
 void MediatorThreadImpl::OnIncomingNotification(
     const IncomingNotificationData& notification_data) {
   DCHECK_EQ(MessageLoop::current(), worker_message_loop());
-  parent_message_loop_->PostTask(
-      FROM_HERE,
-      NewRunnableMethod(
-          this,
-          &MediatorThreadImpl::OnIncomingNotificationOnParentThread,
-          notification_data));
-}
-
-void MediatorThreadImpl::OnIncomingNotificationOnParentThread(
-    const IncomingNotificationData& notification_data) {
-  DCHECK_EQ(MessageLoop::current(), parent_message_loop_);
-  if (delegate_) {
-    delegate_->OnIncomingNotification(notification_data);
-  }
+  observers_->Notify(&Observer::OnIncomingNotification, notification_data);
 }
 
 void MediatorThreadImpl::OnOutgoingNotification(bool success) {
   DCHECK_EQ(MessageLoop::current(), worker_message_loop());
-  parent_message_loop_->PostTask(
-      FROM_HERE,
-      NewRunnableMethod(
-          this,
-          &MediatorThreadImpl::OnOutgoingNotificationOnParentThread,
-          success));
-}
-
-void MediatorThreadImpl::OnOutgoingNotificationOnParentThread(
-    bool success) {
-  DCHECK_EQ(MessageLoop::current(), parent_message_loop_);
-  if (delegate_ && success) {
-    delegate_->OnOutgoingNotification();
+  if (success) {
+    observers_->Notify(&Observer::OnOutgoingNotification);
   }
 }
 
-void MediatorThreadImpl::OnLoginFailureMessage(
-    const notifier::LoginFailure& failure) {
+void MediatorThreadImpl::OnConnect(base::WeakPtr<talk_base::Task> base_task) {
   DCHECK_EQ(MessageLoop::current(), worker_message_loop());
-  parent_message_loop_->PostTask(
-      FROM_HERE,
-      NewRunnableMethod(
-          this,
-          &MediatorThreadImpl::OnLoginFailureMessageOnParentThread,
-          failure));
+  base_task_ = base_task;
+  observers_->Notify(&Observer::OnConnectionStateChange, true);
 }
 
-void MediatorThreadImpl::OnLoginFailureMessageOnParentThread(
-    const notifier::LoginFailure& failure) {
-  DCHECK_EQ(MessageLoop::current(), parent_message_loop_);
-  if (delegate_) {
-    delegate_->OnConnectionStateChange(false);
-  }
-}
-
-void MediatorThreadImpl::OnClientStateChangeMessage(
-    LoginConnectionState state) {
+void MediatorThreadImpl::OnDisconnect() {
   DCHECK_EQ(MessageLoop::current(), worker_message_loop());
-  parent_message_loop_->PostTask(
-      FROM_HERE,
-      NewRunnableMethod(
-          this,
-          &MediatorThreadImpl::OnClientStateChangeMessageOnParentThread,
-          state));
-}
-
-void MediatorThreadImpl::OnClientStateChangeMessageOnParentThread(
-    LoginConnectionState state) {
-  DCHECK_EQ(MessageLoop::current(), parent_message_loop_);
-  switch (state) {
-    case STATE_DISCONNECTED:
-      LOG(INFO) << "P2P: Thread trying to connect.";
-      // Maybe first time logon, maybe intermediate network disruption. Assume
-      // the server went down, and lost our subscription for updates.
-      if (delegate_) {
-        delegate_->OnConnectionStateChange(false);
-        delegate_->OnSubscriptionStateChange(false);
-      }
-      break;
-    case STATE_CONNECTED:
-      if (delegate_) {
-        delegate_->OnConnectionStateChange(true);
-      }
-      break;
-    default:
-      LOG(WARNING) << "P2P: Unknown client state change.";
-      break;
-  }
+  base_task_.reset();
+  observers_->Notify(&Observer::OnConnectionStateChange, false);
 }
 
 void MediatorThreadImpl::OnSubscriptionStateChange(bool success) {
   DCHECK_EQ(MessageLoop::current(), worker_message_loop());
-  parent_message_loop_->PostTask(
-      FROM_HERE,
-      NewRunnableMethod(
-          this,
-          &MediatorThreadImpl::OnSubscriptionStateChangeOnParentThread,
-          success));
-}
-
-void MediatorThreadImpl::OnSubscriptionStateChangeOnParentThread(
-    bool success) {
-  DCHECK_EQ(MessageLoop::current(), parent_message_loop_);
-  if (delegate_) {
-    delegate_->OnSubscriptionStateChange(success);
-  }
+  observers_->Notify(&Observer::OnSubscriptionStateChange, success);
 }
 
 }  // namespace notifier

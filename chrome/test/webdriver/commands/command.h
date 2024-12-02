@@ -9,7 +9,6 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/logging.h"
 #include "base/scoped_ptr.h"
 #include "base/values.h"
 #include "base/json/json_writer.h"
@@ -60,12 +59,22 @@ class Command {
   // false if there is no such parameter, or if it is not a string.
   bool GetStringASCIIParameter(const std::string& key, std::string* out) const;
 
+  // Returns the command parameter with the given |key| as a boolean. Returns
+  // false if there is no such parameter, or if it is not a boolean.
+  bool GetBooleanParameter(const std::string& key, bool* out) const;
+
+  // Returns the command parameter with the given |key| as a int. Returns
+  // false if there is no such parameter, or if it is not a int.
+  bool GetIntegerParameter(const std::string& key, int* out) const;
+
  private:
   const std::vector<std::string> path_segments_;
   const scoped_ptr<const DictionaryValue> parameters_;
 
   DISALLOW_COPY_AND_ASSIGN(Command);
 };
+
 }  // namespace webdriver
+
 #endif  // CHROME_TEST_WEBDRIVER_COMMANDS_COMMAND_H_
 

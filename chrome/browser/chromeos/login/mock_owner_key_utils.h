@@ -11,7 +11,7 @@
 #include "base/basictypes.h"
 #include "base/crypto/rsa_private_key.h"
 #include "base/file_path.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/chromeos/cros/login_library.h"
 #include "chrome/browser/chromeos/login/owner_key_utils.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -26,7 +26,7 @@ class MockKeyUtils : public OwnerKeyUtils {
   MockKeyUtils() {}
   MOCK_METHOD0(GenerateKeyPair, RSAPrivateKey*());
   MOCK_METHOD2(ExportPublicKeyViaDbus, bool(RSAPrivateKey* pair,
-                                            LoginLibrary::Delegate<bool>*));
+                                            LoginLibrary::Delegate*));
   MOCK_METHOD2(ExportPublicKeyToFile, bool(RSAPrivateKey* pair,
                                            const FilePath& key_file));
   MOCK_METHOD2(ImportPublicKey, bool(const FilePath& key_file,
@@ -41,23 +41,23 @@ class MockKeyUtils : public OwnerKeyUtils {
   MOCK_METHOD0(GetOwnerKeyFilePath, FilePath());
 
   // To simulate doing a LoginLibrary::SetOwnerKey call
-  static void SetOwnerKeyCallback(LoginLibrary::Delegate<bool>* callback,
+  static void SetOwnerKeyCallback(LoginLibrary::Delegate* callback,
                                   bool value) {
-    callback->Run(value);
+    callback->OnComplete(value);
   }
 
   static bool ExportPublicKeyViaDbusWin(RSAPrivateKey* key,
-                                        LoginLibrary::Delegate<bool>* d) {
-    ChromeThread::PostTask(
-        ChromeThread::UI, FROM_HERE,
+                                        LoginLibrary::Delegate* d) {
+    BrowserThread::PostTask(
+        BrowserThread::UI, FROM_HERE,
         NewRunnableFunction(&SetOwnerKeyCallback, d, true));
     return true;
   }
 
   static bool ExportPublicKeyViaDbusFail(RSAPrivateKey* key,
-                                         LoginLibrary::Delegate<bool>* d) {
-    ChromeThread::PostTask(
-        ChromeThread::UI, FROM_HERE,
+                                         LoginLibrary::Delegate* d) {
+    BrowserThread::PostTask(
+        BrowserThread::UI, FROM_HERE,
         NewRunnableFunction(&SetOwnerKeyCallback, d, false));
     return false;
   }

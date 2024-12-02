@@ -13,13 +13,13 @@
 namespace net {
 
 class BoundNetLog;
+class ClientSocketHandle;
 class HostPortPair;
 class HttpAlternateProtocols;
 class HttpAuthController;
 class HttpNetworkSession;
 class HttpResponseInfo;
 class HttpStream;
-class HttpStreamHandle;
 class ProxyInfo;
 class SSLCertRequestInfo;
 class SSLInfo;
@@ -39,7 +39,7 @@ class StreamFactory {
 
     // This is the success case.
     // |stream| is now owned by the delegate.
-    virtual void OnStreamReady(HttpStreamHandle* stream) = 0;
+    virtual void OnStreamReady(HttpStream* stream) = 0;
 
     // This is the failure to create a stream case.
     virtual void OnStreamFailed(int status) = 0;
@@ -84,6 +84,7 @@ class StreamFactory {
     virtual void Start(const HttpRequestInfo* request_info,
                        SSLConfig* ssl_config,
                        ProxyInfo* proxy_info,
+                       ClientSocketHandle* connection,
                        StreamRequestDelegate* delegate,
                        const BoundNetLog& net_log) = 0;
 
@@ -129,6 +130,7 @@ class StreamFactory {
   virtual void RequestStream(const HttpRequestInfo* info,
                              SSLConfig* ssl_config,
                              ProxyInfo* proxy_info,
+                             ClientSocketHandle* connection,
                              StreamRequestDelegate* delegate,
                              const BoundNetLog& net_log,
                              const scoped_refptr<HttpNetworkSession>& session,
@@ -148,4 +150,3 @@ class StreamFactory {
 }  // namespace net
 
 #endif  // NET_HTTP_STREAM_FACTORY_H_
-

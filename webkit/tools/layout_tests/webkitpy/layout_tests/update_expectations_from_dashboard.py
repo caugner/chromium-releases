@@ -13,9 +13,12 @@ Usage:
 3. python update_expectations_from_dashboard.py path/to/local/file
 """
 
+import copy
 import logging
 import os
 import sys
+import re
+from expectations_line import ExpectationsLine
 
 #
 # Find the WebKit python directories and add them to the PYTHONPATH
@@ -28,17 +31,16 @@ except NameError:
 this_file = os.path.abspath(f)
 base_dir = this_file[0:this_file.find('webkit'+ os.sep + 'tools')]
 webkitpy_dir = os.path.join(base_dir, 'third_party', 'WebKit', 'WebKitTools',
-                            'Scripts', 'webkitpy')
-sys.path.append(os.path.join(webkitpy_dir, 'thirdparty'))
-sys.path.append(os.path.join(webkitpy_dir, 'layout_tests'))
+                            'Scripts')
+sys.path.append(webkitpy_dir)
 
 #
 # Now import the python packages we need from WebKit
 #
-import simplejson
+import webkitpy.thirdparty.simplejson as simplejson
 
-from layout_package import test_expectations
-import port
+from webkitpy.layout_tests.layout_package import test_expectations
+import webkitpy.layout_tests.port as port
 
 def get_port():
     class Options:
@@ -310,6 +312,18 @@ class ExpectationsUpdater(test_expectations.TestExpectationsFile):
                 updates = [candidate]
         return updates
 
+    def _merge(self, expectations):
+        result = []
+        for expectation in expectations:
+            if not len(result):
+                result.append(expectation)
+            elif result[-1].can_merge(expectation):
+                result[-1].merge(expectation)
+            else:
+                result.append(expectation)
+
+        return result
+
     def update_based_on_json(self, update_json):
         """Updates the expectations based on the update_json, which is of the
         following form:
@@ -318,6 +332,7 @@ class ExpectationsUpdater(test_expectations.TestExpectationsFile):
           "WIN RELEASE": {"extra": "FAIL"}
         }}
         """
+        unused = copy.deepcopy(update_json)
         output = []
 
         comment_lines = []
@@ -349,6 +364,7 @@ class ExpectationsUpdater(test_expectations.TestExpectationsFile):
                 platform, build_type = build_info.lower().split(' ')
                 if platform in platforms and build_type in build_types:
                     has_updates_for_this_line = True
+                    del(unused[test][build_info])
 
             # If the updates for this test don't apply for the platforms /
             # build-types listed in this line, then output the line unmodified.
@@ -374,6 +390,19 @@ class ExpectationsUpdater(test_expectations.TestExpectationsFile):
                 comment_lines, test, deduped_updates)
         # Append any comment/whitespace lines at the end of test_expectations.
         output.extend(comment_lines)
+
+        new_expectations = []
+        for test in unused:
+            for build_info in unused[test]:
+                if 'missing' in unused[test][build_info]:
+                    new_expectations.append(ExpectationsLine("BUG_AUTO %s : %s = %s\n" % (build_info, test, unused[test][build_info]['missing'])))
+
+        new_expectations = self._merge(self._merge(new_expectations))
+
+        if len(new_expectations):
+            output += ["\n"]
+            output += [str(x) + "\n" for x in new_expectations]
+
         return "".join(output)
 
     def _write_updates(self, output, comment_lines, test, updates):
@@ -481,11 +510,13 @@ class ExpectationsUpdater(test_expectations.TestExpectationsFile):
         self._write_completed_lines(output, comment_lines,
                                     " ".join(line) + "\n")
 
-
 def main():
     logging.basicConfig(level=logging.INFO,
         format='%(message)s')
 
+    if len(sys.argv) != 2:
+        usage()
+        sys.exit(1)
     updates = simplejson.load(open(sys.argv[1]))
 
     port_obj = get_port()
@@ -494,6 +525,9 @@ def main():
     old_expectations = open(path_to_expectations).read()
     new_expectations = update_expectations(port_obj, old_expectations, updates)
     open(path_to_expectations, 'w').write(new_expectations)
+
+def usage():
+    print "usage: %s file_with_json_expectations_diff" % sys.argv[0]
 
 if '__main__' == __name__:
     main()

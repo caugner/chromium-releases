@@ -411,7 +411,11 @@ void WindowWin::UpdateWindowTitle() {
 
   // Update the native frame's text. We do this regardless of whether or not
   // the native frame is being used, since this also updates the taskbar, etc.
-  std::wstring window_title = window_delegate_->GetWindowTitle();
+  std::wstring window_title;
+  if (IsAccessibleWidget())
+    window_title = window_delegate_->GetAccessibleWindowTitle();
+  else
+    window_title = window_delegate_->GetWindowTitle();
   std::wstring localized_text;
   if (base::i18n::AdjustStringForLocaleDirection(window_title, &localized_text))
     window_title.assign(localized_text);
@@ -1121,8 +1125,12 @@ void WindowWin::OnSysCommand(UINT notification_code, CPoint click) {
   // Handle SC_KEYMENU, which means that the user has pressed the ALT
   // key and released it, so we should focus the menu bar.
   if ((notification_code & sc_mask) == SC_KEYMENU && click.x == 0) {
+    // Retrieve the status of shift and control keys to prevent consuming
+    // shift+alt keys, which are used by Windows to change input languages.
     Accelerator accelerator(app::KeyboardCodeForWindowsKeyCode(VK_MENU),
-                            false, false, false);
+                            !!(GetKeyState(VK_SHIFT) & 0x8000),
+                            !!(GetKeyState(VK_CONTROL) & 0x8000),
+                            false);
     GetFocusManager()->ProcessAccelerator(accelerator);
     return;
   }
@@ -1404,16 +1412,16 @@ void WindowWin::ResetWindowRegion(bool force) {
   DeleteObject(current_rgn);
 }
 
-void WindowWin::UpdateAccessibleName(std::wstring name) {
+void WindowWin::UpdateAccessibleName(std::wstring& accessible_name) {
   ScopedComPtr<IAccPropServices> pAccPropServices;
   HRESULT hr = CoCreateInstance(CLSID_AccPropServices, NULL, CLSCTX_SERVER,
-    IID_IAccPropServices, reinterpret_cast<void**>(&pAccPropServices));
+      IID_IAccPropServices, reinterpret_cast<void**>(&pAccPropServices));
   if (SUCCEEDED(hr)) {
     VARIANT var;
     var.vt = VT_BSTR;
-    var.bstrVal = SysAllocString(name.c_str());
+    var.bstrVal = SysAllocString(accessible_name.c_str());
     hr = pAccPropServices->SetHwndProp(GetNativeView(), OBJID_CLIENT,
-      CHILDID_SELF, PROPID_ACC_NAME, var);
+        CHILDID_SELF, PROPID_ACC_NAME, var);
   }
 }
 

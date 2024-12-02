@@ -113,6 +113,26 @@ class DownloadShelfContextMenuGtk : public DownloadShelfContextMenu,
     gtk_widget_queue_draw(download_item_->menu_button_);
   }
 
+  virtual GtkWidget* GetImageForCommandId(int command_id) const {
+    const char* stock = NULL;
+    switch (command_id) {
+      case SHOW_IN_FOLDER:
+      case OPEN_WHEN_COMPLETE:
+        stock = GTK_STOCK_OPEN;
+        break;
+
+      case CANCEL:
+        stock = GTK_STOCK_CANCEL;
+        break;
+
+      case ALWAYS_OPEN_TYPE:
+      case TOGGLE_PAUSE:
+        stock = NULL;
+    }
+
+    return stock ? gtk_image_new_from_stock(stock, GTK_ICON_SIZE_MENU) : NULL;
+  }
+
  private:
   // The menu we show on Popup(). We keep a pointer to it for a couple reasons:
   //  * we don't want to have to recreate the menu every time it's popped up.
@@ -503,10 +523,11 @@ void DownloadItemGtk::LoadIcon() {
 }
 
 void DownloadItemGtk::UpdateTooltip() {
-  std::wstring elided_filename = gfx::ElideFilename(
+  string16 elided_filename = gfx::ElideFilename(
       get_download()->GetFileName(),
       gfx::Font(), kTooltipMaxWidth);
-  gtk_widget_set_tooltip_text(body_.get(), WideToUTF8(elided_filename).c_str());
+  gtk_widget_set_tooltip_text(body_.get(),
+                              UTF16ToUTF8(elided_filename).c_str());
 }
 
 void DownloadItemGtk::UpdateNameLabel() {
@@ -514,7 +535,7 @@ void DownloadItemGtk::UpdateNameLabel() {
   // use gfx::Font() to draw the text. This is why we need to add so
   // much padding when we set the size request. We need to either use gfx::Font
   // or somehow extend TextElider.
-  std::wstring elided_filename = gfx::ElideFilename(
+  string16 elided_filename = gfx::ElideFilename(
       get_download()->GetFileName(),
       gfx::Font(), kTextWidth);
 
@@ -523,7 +544,7 @@ void DownloadItemGtk::UpdateNameLabel() {
   gtk_util::SetLabelColor(name_label_, theme_provider_->UseGtkTheme() ?
                                        NULL : &color);
   gtk_label_set_text(GTK_LABEL(name_label_),
-                     WideToUTF8(elided_filename).c_str());
+                     UTF16ToUTF8(elided_filename).c_str());
 }
 
 void DownloadItemGtk::UpdateStatusLabel(const std::string& status_text) {
@@ -560,16 +581,17 @@ void DownloadItemGtk::UpdateDangerWarning() {
   if (dangerous_prompt_) {
     // We create |dangerous_warning| as a wide string so we can more easily
     // calculate its length in characters.
-    std::wstring dangerous_warning;
+    string16 dangerous_warning;
     if (get_download()->is_extension_install()) {
       dangerous_warning =
-          l10n_util::GetString(IDS_PROMPT_DANGEROUS_DOWNLOAD_EXTENSION);
+          l10n_util::GetStringUTF16(IDS_PROMPT_DANGEROUS_DOWNLOAD_EXTENSION);
     } else {
-      std::wstring elided_filename = gfx::ElideFilename(
+      string16 elided_filename = gfx::ElideFilename(
           get_download()->original_name(), gfx::Font(), kTextWidth);
 
       dangerous_warning =
-          l10n_util::GetStringF(IDS_PROMPT_DANGEROUS_DOWNLOAD, elided_filename);
+          l10n_util::GetStringFUTF16(IDS_PROMPT_DANGEROUS_DOWNLOAD,
+                                     elided_filename);
     }
 
     if (theme_provider_->UseGtkTheme()) {
@@ -589,7 +611,7 @@ void DownloadItemGtk::UpdateDangerWarning() {
     }
 
     gtk_label_set_text(GTK_LABEL(dangerous_label_),
-                       WideToUTF8(dangerous_warning).c_str());
+                       UTF16ToUTF8(dangerous_warning).c_str());
 
     // Until we switch to vector graphics, force the font size.
     gtk_util::ForceFontSizePixels(dangerous_label_, kTextSize);

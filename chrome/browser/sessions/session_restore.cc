@@ -22,6 +22,7 @@
 #include "chrome/browser/tab_contents/navigation_controller.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tab_contents/tab_contents_view.h"
+#include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/notification_registrar.h"
 #include "chrome/common/notification_service.h"
@@ -550,8 +551,10 @@ class SessionRestoreImpl : public NotificationObserver {
       if (i == 0)
         add_types |= TabStripModel::ADD_SELECTED;
       int index = browser->GetIndexForInsertionDuringRestore(i);
-      browser->AddTabWithURL(urls[i], GURL(), PageTransition::START_PAGE, index,
-                             add_types, NULL, std::string(), NULL);
+      Browser::AddTabWithURLParams params(urls[i], PageTransition::START_PAGE);
+      params.index = index;
+      params.add_types = add_types;
+      browser->AddTabWithURL(&params);
     }
   }
 

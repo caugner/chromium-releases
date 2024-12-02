@@ -111,6 +111,7 @@ class InterstitialPage::InterstitialPageRVHViewDelegate
   virtual void UpdateDragCursor(WebDragOperation operation);
   virtual void GotFocus();
   virtual void TakeFocus(bool reverse);
+  virtual void LostCapture();
   virtual void Activate();
   virtual void Deactivate();
   virtual bool PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
@@ -119,6 +120,8 @@ class InterstitialPage::InterstitialPageRVHViewDelegate
   virtual void HandleMouseMove();
   virtual void HandleMouseDown();
   virtual void HandleMouseLeave();
+  virtual void HandleMouseUp();
+  virtual void HandleMouseActivate();
   virtual void OnFindReply(int request_id,
                            int number_of_matches,
                            const gfx::Rect& selection_rect,
@@ -166,20 +169,22 @@ InterstitialPage::InterstitialPage(TabContents* tab,
 
 InterstitialPage::~InterstitialPage() {
   InterstitialPageMap::iterator iter = tab_to_interstitial_page_->find(tab_);
-  DCHECK(iter != tab_to_interstitial_page_->end()) <<
-      "InterstitialPage missing from map. Please add a comment to the bug "
-      "http://crbug.com/9442 with the URL you were visiting";
+  DCHECK(iter != tab_to_interstitial_page_->end());
   if (iter != tab_to_interstitial_page_->end())
     tab_to_interstitial_page_->erase(iter);
   DCHECK(!render_view_host_);
 }
 
 void InterstitialPage::Show() {
-  // If an interstitial is already showing, close it before showing the new one.
+  // If an interstitial is already showing or about to be shown, close it before
+  // showing the new one.
   // Be careful not to take an action on the old interstitial more than once.
-  if (tab_->interstitial_page()) {
-    if (tab_->interstitial_page()->action_taken_ != NO_ACTION) {
-      tab_->interstitial_page()->Hide();
+  InterstitialPageMap::const_iterator iter =
+      tab_to_interstitial_page_->find(tab_);
+  if (iter != tab_to_interstitial_page_->end()) {
+    InterstitialPage* interstitial = iter->second;
+    if (interstitial->action_taken_ != NO_ACTION) {
+      interstitial->Hide();
     } else {
       // If we are currently showing an interstitial page for which we created
       // a transient entry and a new interstitial is shown as the result of a
@@ -187,9 +192,9 @@ void InterstitialPage::Show() {
       // been discarded and a new pending navigation entry created.
       // So we should not discard that new pending navigation entry.
       // See http://crbug.com/9791
-      if (new_navigation_ && tab_->interstitial_page()->new_navigation_)
-        tab_->interstitial_page()->should_discard_pending_nav_entry_= false;
-      tab_->interstitial_page()->DontProceed();
+      if (new_navigation_ && interstitial->new_navigation_)
+        interstitial->should_discard_pending_nav_entry_= false;
+      interstitial->DontProceed();
     }
   }
 
@@ -204,8 +209,7 @@ void InterstitialPage::Show() {
       Source<RenderWidgetHost>(tab_->render_view_host()));
 
   // Update the tab_to_interstitial_page_ map.
-  InterstitialPageMap::const_iterator iter =
-      tab_to_interstitial_page_->find(tab_);
+  iter = tab_to_interstitial_page_->find(tab_);
   DCHECK(iter == tab_to_interstitial_page_->end());
   (*tab_to_interstitial_page_)[tab_] = this;
 
@@ -398,6 +402,10 @@ void InterstitialPage::DomOperationResponse(const std::string& json_string,
     CommandReceived(json_string);
 }
 
+RendererPreferences InterstitialPage::GetRendererPrefs(Profile* profile) const {
+  return renderer_preferences_;
+}
+
 RenderViewHost* InterstitialPage::CreateRenderViewHost() {
   RenderViewHost* render_view_host = new RenderViewHost(
       SiteInstance::CreateSiteInstance(tab()->profile()),
@@ -519,7 +527,7 @@ void InterstitialPage::Disable() {
 
 void InterstitialPage::TakeActionOnResourceDispatcher(
     ResourceRequestAction action) {
-  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI)) <<
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI)) <<
       "TakeActionOnResourceDispatcher should be called on the main thread.";
 
   if (action == CANCEL || action == RESUME) {
@@ -538,8 +546,8 @@ void InterstitialPage::TakeActionOnResourceDispatcher(
   if (!rvh || !g_browser_process->resource_dispatcher_host())
     return;
 
-  ChromeThread::PostTask(
-      ChromeThread::IO, FROM_HERE,
+  BrowserThread::PostTask(
+      BrowserThread::IO, FROM_HERE,
       new ResourceRequestTask(original_child_id_, original_rvh_id_, action));
 }
 
@@ -633,6 +641,9 @@ void InterstitialPage::InterstitialPageRVHViewDelegate::TakeFocus(
     interstitial_page_->tab()->GetViewDelegate()->TakeFocus(reverse);
 }
 
+void InterstitialPage::InterstitialPageRVHViewDelegate::LostCapture() {
+}
+
 void InterstitialPage::InterstitialPageRVHViewDelegate::Activate() {
   if (interstitial_page_->tab() && interstitial_page_->tab()->GetViewDelegate())
     interstitial_page_->tab()->GetViewDelegate()->Activate();
@@ -670,6 +681,12 @@ void InterstitialPage::InterstitialPageRVHViewDelegate::HandleMouseDown() {
 void InterstitialPage::InterstitialPageRVHViewDelegate::HandleMouseLeave() {
   if (interstitial_page_->tab() && interstitial_page_->tab()->GetViewDelegate())
     interstitial_page_->tab()->GetViewDelegate()->HandleMouseLeave();
+}
+
+void InterstitialPage::InterstitialPageRVHViewDelegate::HandleMouseUp() {
+}
+
+void InterstitialPage::InterstitialPageRVHViewDelegate::HandleMouseActivate() {
 }
 
 void InterstitialPage::InterstitialPageRVHViewDelegate::OnFindReply(

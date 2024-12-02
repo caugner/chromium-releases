@@ -19,6 +19,14 @@
 #include "base/waitable_event.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+#if defined(OS_MACOSX)
+// TODO(mnissler): There are flakes on Mac (http://crbug.com/54822) at least for
+// FilePathWatcherTest.MultipleWatchersSingleFile.
+#define MAYBE(name) FLAKY_ ## name
+#else
+#define MAYBE(name) name
+#endif
+
 namespace {
 
 // The time we wait for events to happen. It should be large enough to be
@@ -97,13 +105,13 @@ class FilePathWatcherTest : public testing::Test {
   // Implementation of FilePathWatcher on Mac requires UI loop.
   FilePathWatcherTest()
       : loop_(MessageLoop::TYPE_UI),
-        ui_thread_(ChromeThread::UI, &loop_) {
+        ui_thread_(BrowserThread::UI, &loop_) {
   }
 
  protected:
   virtual void SetUp() {
     // Create a separate file thread in order to test proper thread usage.
-    file_thread_.reset(new ChromeThread(ChromeThread::FILE));
+    file_thread_.reset(new BrowserThread(BrowserThread::FILE));
     file_thread_->Start();
     temp_dir_.reset(new ScopedTempDir);
     ASSERT_TRUE(temp_dir_->CreateUniqueTempDir());
@@ -131,7 +139,7 @@ class FilePathWatcherTest : public testing::Test {
                   FilePathWatcher::Delegate* delegate) {
     base::WaitableEvent completion(false, false);
     bool result;
-    ChromeThread::PostTask(ChromeThread::FILE, FROM_HERE,
+    BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
          new SetupWatchTask(target, watcher, delegate, &result, &completion));
     completion.Wait();
     ASSERT_TRUE(result);
@@ -160,13 +168,13 @@ class FilePathWatcherTest : public testing::Test {
   }
 
   MessageLoop loop_;
-  ChromeThread ui_thread_;
-  scoped_ptr<ChromeThread> file_thread_;
+  BrowserThread ui_thread_;
+  scoped_ptr<BrowserThread> file_thread_;
   scoped_ptr<ScopedTempDir> temp_dir_;
 };
 
 // Basic test: Create the file and verify that we notice.
-TEST_F(FilePathWatcherTest, NewFile) {
+TEST_F(FilePathWatcherTest, MAYBE(NewFile)) {
   FilePathWatcher watcher;
   scoped_refptr<TestDelegate> delegate(new TestDelegate);
   SetupWatch(test_file(), &watcher, delegate.get());
@@ -176,7 +184,7 @@ TEST_F(FilePathWatcherTest, NewFile) {
 }
 
 // Verify that modifying the file is caught.
-TEST_F(FilePathWatcherTest, ModifiedFile) {
+TEST_F(FilePathWatcherTest, MAYBE(ModifiedFile)) {
   ASSERT_TRUE(WriteFile(test_file(), "content"));
 
   FilePathWatcher watcher;
@@ -189,7 +197,7 @@ TEST_F(FilePathWatcherTest, ModifiedFile) {
 }
 
 // Verify that moving the file into place is caught.
-TEST_F(FilePathWatcherTest, MovedFile) {
+TEST_F(FilePathWatcherTest, MAYBE(MovedFile)) {
   FilePath source_file(temp_dir_->path().AppendASCII("source"));
   ASSERT_TRUE(WriteFile(source_file, "content"));
 
@@ -202,7 +210,7 @@ TEST_F(FilePathWatcherTest, MovedFile) {
   EXPECT_LE(1, WaitForEvents(delegate.get()));
 }
 
-TEST_F(FilePathWatcherTest, DeletedFile) {
+TEST_F(FilePathWatcherTest, MAYBE(DeletedFile)) {
   ASSERT_TRUE(WriteFile(test_file(), "content"));
 
   FilePathWatcher watcher;
@@ -273,12 +281,12 @@ TEST_F(FilePathWatcherTest, DestroyWithPendingNotification) {
   FilePathWatcher* watcher = new FilePathWatcher;
   SetupWatch(test_file(), watcher, delegate.get());
   ASSERT_TRUE(WriteFile(test_file(), "content"));
-  ChromeThread::DeleteSoon(ChromeThread::FILE, FROM_HERE, watcher);
+  BrowserThread::DeleteSoon(BrowserThread::FILE, FROM_HERE, watcher);
   // Success if there is no crash or DCHECK when running the callback.
   WaitForEvents(delegate.get());
 }
 
-TEST_F(FilePathWatcherTest, MultipleWatchersSingleFile) {
+TEST_F(FilePathWatcherTest, MAYBE(MultipleWatchersSingleFile)) {
   FilePathWatcher watcher1, watcher2;
   scoped_refptr<TestDelegate> delegate1(new TestDelegate);
   scoped_refptr<TestDelegate> delegate2(new TestDelegate);

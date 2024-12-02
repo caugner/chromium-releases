@@ -9,13 +9,14 @@
 #include "base/logging.h"
 #include "base/sys_string_conversions.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/blocked_popup_container.h"
+#include "chrome/browser/blocked_content_container.h"
 #import "chrome/browser/cocoa/content_settings_dialog_controller.h"
 #import "chrome/browser/cocoa/hyperlink_button_cell.h"
 #import "chrome/browser/cocoa/info_bubble_view.h"
 #import "chrome/browser/cocoa/l10n_util.h"
 #include "chrome/browser/content_setting_bubble_model.h"
 #include "chrome/browser/host_content_settings_map.h"
+#include "chrome/browser/plugin_updater.h"
 #include "chrome/common/chrome_switches.h"
 #include "grit/generated_resources.h"
 #include "skia/ext/skia_utils_mac.h"
@@ -241,14 +242,13 @@ NSTextField* LabelWithFrame(NSString* text, const NSRect& frame) {
   } else {
     for (std::set<std::string>::iterator it = plugins.begin();
          it != plugins.end(); ++it) {
-      WebPluginInfo plugin;
       NSString* name;
-      if (NPAPI::PluginList::Singleton()->
-          GetPluginInfoByPath(FilePath(*it), &plugin)) {
-        name = base::SysUTF16ToNSString(plugin.name);
-      } else {
+      NPAPI::PluginList::PluginMap groups;
+      NPAPI::PluginList::Singleton()->GetPluginGroups(false, &groups);
+      if (groups.find(*it) != groups.end())
+        name = base::SysUTF16ToNSString(groups[*it]->GetGroupName());
+      else
         name = base::SysUTF8ToNSString(*it);
-      }
       [pluginArray addObject:name];
     }
     [blockedResourcesField_
@@ -436,18 +436,6 @@ NSTextField* LabelWithFrame(NSString* text, const NSRect& frame) {
   [[self window] setFrame:frame display:NO];
 }
 
-- (void)removeInfoButton {
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kEnableCookiePrompt)) {
-    // Remove info button and resize vertically.
-    int deltaY = NSHeight([infoButton_ frame]);
-    [infoButton_ removeFromSuperview];
-    NSRect frame = [[self window] frame];
-    frame.size.height -= deltaY;
-    [[self window] setFrame:frame display:NO];
-  }
-}
-
 - (void)awakeFromNib {
   [[self bubble] setBubbleType:info_bubble::kWhiteInfoBubble];
   [[self bubble] setArrowLocation:info_bubble::kTopRight];
@@ -462,8 +450,6 @@ NSTextField* LabelWithFrame(NSString* text, const NSRect& frame) {
     [self sizeToFitLoadPluginsButton];
     [self initializeBlockedPluginsList];
   }
-  if (type == CONTENT_SETTINGS_TYPE_COOKIES)
-    [self removeInfoButton];
   if (allowBlockRadioGroup_)  // not bound in cookie bubble xib
     [self initializeRadioGroup];
 

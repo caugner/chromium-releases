@@ -10,6 +10,7 @@
 #include "app/sql/transaction.h"
 #include "base/basictypes.h"
 #include "base/file_util.h"
+#include "base/histogram.h"
 #include "base/logging.h"
 #include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
@@ -34,8 +35,7 @@ class SQLitePersistentCookieStore::Backend
   }
 
   // Batch a cookie addition.
-  void AddCookie(const std::string& key,
-                 const net::CookieMonster::CanonicalCookie& cc);
+  void AddCookie(const net::CookieMonster::CanonicalCookie& cc);
 
   // Batch a cookie access time update.
   void UpdateCookieAccessTime(const net::CookieMonster::CanonicalCookie& cc);
@@ -65,24 +65,20 @@ class SQLitePersistentCookieStore::Backend
     } OperationType;
 
     PendingOperation(OperationType op,
-                     const std::string& key,
                      const net::CookieMonster::CanonicalCookie& cc)
-        : op_(op), key_(key), cc_(cc) { }
+        : op_(op), cc_(cc) { }
 
     OperationType op() const { return op_; }
-    const std::string& key() const { return key_; }
     const net::CookieMonster::CanonicalCookie& cc() const { return cc_; }
 
    private:
     OperationType op_;
-    std::string key_;  // Only used for OP_ADD
     net::CookieMonster::CanonicalCookie cc_;
   };
 
  private:
   // Batch a cookie operation (add or delete)
   void BatchOperation(PendingOperation::OperationType op,
-                      const std::string& key,
                       const net::CookieMonster::CanonicalCookie& cc);
   // Commit our pending operations to the database.
   void Commit();
@@ -100,34 +96,31 @@ class SQLitePersistentCookieStore::Backend
 };
 
 void SQLitePersistentCookieStore::Backend::AddCookie(
-    const std::string& key,
     const net::CookieMonster::CanonicalCookie& cc) {
-  BatchOperation(PendingOperation::COOKIE_ADD, key, cc);
+  BatchOperation(PendingOperation::COOKIE_ADD, cc);
 }
 
 void SQLitePersistentCookieStore::Backend::UpdateCookieAccessTime(
     const net::CookieMonster::CanonicalCookie& cc) {
-  BatchOperation(PendingOperation::COOKIE_UPDATEACCESS, std::string(), cc);
+  BatchOperation(PendingOperation::COOKIE_UPDATEACCESS, cc);
 }
 
 void SQLitePersistentCookieStore::Backend::DeleteCookie(
     const net::CookieMonster::CanonicalCookie& cc) {
-  BatchOperation(PendingOperation::COOKIE_DELETE, std::string(), cc);
+  BatchOperation(PendingOperation::COOKIE_DELETE, cc);
 }
 
 void SQLitePersistentCookieStore::Backend::BatchOperation(
     PendingOperation::OperationType op,
-    const std::string& key,
     const net::CookieMonster::CanonicalCookie& cc) {
   // Commit every 30 seconds.
   static const int kCommitIntervalMs = 30 * 1000;
   // Commit right away if we have more than 512 outstanding operations.
   static const size_t kCommitAfterBatchSize = 512;
-  DCHECK(!ChromeThread::CurrentlyOn(ChromeThread::DB));
+  DCHECK(!BrowserThread::CurrentlyOn(BrowserThread::DB));
 
   // We do a full copy of the cookie here, and hopefully just here.
-  scoped_ptr<PendingOperation> po(new PendingOperation(op, key, cc));
-  CHECK(po.get());
+  scoped_ptr<PendingOperation> po(new PendingOperation(op, cc));
 
   PendingOperationsList::size_type num_pending;
   {
@@ -138,18 +131,19 @@ void SQLitePersistentCookieStore::Backend::BatchOperation(
 
   if (num_pending == 1) {
     // We've gotten our first entry for this batch, fire off the timer.
-    ChromeThread::PostDelayedTask(
-        ChromeThread::DB, FROM_HERE,
+    BrowserThread::PostDelayedTask(
+        BrowserThread::DB, FROM_HERE,
         NewRunnableMethod(this, &Backend::Commit), kCommitIntervalMs);
   } else if (num_pending == kCommitAfterBatchSize) {
     // We've reached a big enough batch, fire off a commit now.
-    ChromeThread::PostTask(
-        ChromeThread::DB, FROM_HERE, NewRunnableMethod(this, &Backend::Commit));
+    BrowserThread::PostTask(
+        BrowserThread::DB, FROM_HERE,
+        NewRunnableMethod(this, &Backend::Commit));
   }
 }
 
 void SQLitePersistentCookieStore::Backend::Commit() {
-  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::DB));
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
   PendingOperationsList ops;
   {
     AutoLock locked(pending_lock_);
@@ -197,7 +191,7 @@ void SQLitePersistentCookieStore::Backend::Commit() {
       case PendingOperation::COOKIE_ADD:
         add_smt.Reset();
         add_smt.BindInt64(0, po->cc().CreationDate().ToInternalValue());
-        add_smt.BindString(1, po->key());
+        add_smt.BindString(1, po->cc().Domain());
         add_smt.BindString(2, po->cc().Name());
         add_smt.BindString(3, po->cc().Value());
         add_smt.BindString(4, po->cc().Path());
@@ -232,7 +226,7 @@ void SQLitePersistentCookieStore::Backend::Commit() {
     }
   }
   bool succeeded = transaction.Commit();
-  UMA_HISTOGRAM_ENUMERATION("net.CookieBackingStoreUpdateResults",
+  UMA_HISTOGRAM_ENUMERATION("Cookie.BackingStoreUpdateResults",
                             succeeded ? 0 : 1, 2);
 }
 
@@ -240,15 +234,15 @@ void SQLitePersistentCookieStore::Backend::Commit() {
 // pending commit timer that will be holding a reference on us, but if/when
 // this fires we will already have been cleaned up and it will be ignored.
 void SQLitePersistentCookieStore::Backend::Close() {
-  DCHECK(!ChromeThread::CurrentlyOn(ChromeThread::DB));
+  DCHECK(!BrowserThread::CurrentlyOn(BrowserThread::DB));
   // Must close the backend on the background thread.
-  ChromeThread::PostTask(
-      ChromeThread::DB, FROM_HERE,
+  BrowserThread::PostTask(
+      BrowserThread::DB, FROM_HERE,
       NewRunnableMethod(this, &Backend::InternalBackgroundClose));
 }
 
 void SQLitePersistentCookieStore::Backend::InternalBackgroundClose() {
-  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::DB));
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
   // Commit any pending operations
   Commit();
 
@@ -429,10 +423,9 @@ bool SQLitePersistentCookieStore::EnsureDatabaseVersion(sql::Connection* db) {
 }
 
 void SQLitePersistentCookieStore::AddCookie(
-    const std::string& key,
     const net::CookieMonster::CanonicalCookie& cc) {
   if (backend_.get())
-    backend_->AddCookie(key, cc);
+    backend_->AddCookie(cc);
 }
 
 void SQLitePersistentCookieStore::UpdateCookieAccessTime(

@@ -2,6 +2,10 @@
  * TODO(xiyuan): Remove the section overrides when options_page.css uses the
  * new style.
  */
+#inetTitle {
+  border: none;
+}
+
 #internetPage > section {
   display: block;
 }
@@ -15,9 +19,23 @@
   display: none;
 }
 
+#networkingControls {
+  text-align: center;
+}
+
 .networks {
   -webkit-margin-start: 15px;
   padding: 2px;
+}
+
+.network-password {
+  left: 0px;
+  position: relative;
+}
+
+.other-network {
+  left: 0px;
+  position: relative;
 }
 
 .network-item {
@@ -46,6 +64,15 @@
   border-color: hsl(214, 91%, 65%);
 }
 
+.network-item[connecting] {
+  background-color: hsl(214, 91%, 97%);
+  border-color: hsl(214, 91%, 85%);
+  padding-top: 5px;
+  height: 60px;
+  -webkit-box-align: start;
+  display: block;
+}
+
 .network-item-text {
   -webkit-padding-start: 30px;
   background: 0 50% no-repeat;
@@ -69,6 +96,7 @@
 .network-item > * > button {
   min-width: 100px;
   visibility: hidden;
+  margin-right: 5px;
 }
 
 .network-item:hover > * > button,
@@ -76,6 +104,59 @@
   visibility: visible;
 }
 
+.network-item[connecting] > * > button {
+  visibility: hidden;
+}
+
 .network-item-box-spacer {
   -webkit-box-flex: 1;
+}
+
+#detailsInternetPage {
+  min-width: 400px;
+  min-height: 360px;
+}
+
+.details-button {
+  float: right;
+}
+
+html[dir='rtl'] .details-button {
+  float: left;
+}
+
+#detailsInternetPage:not([connected]) > #advancedSection,
+#detailsInternetPage[connecting] > * > #detailsInternetLogin,
+#detailsInternetPage[connected] > * > #detailsInternetLogin,
+#detailsInternetPage[ethernet] .wifi-details,
+#detailsInternetPage[ethernet] .cellular-details,
+#detailsInternetPage[cellular] .wifi-details,
+#detailsInternetPage[wireless] .cellular-details,
+#detailsInternetPage[cellplanloading] .no-plan-info,
+#detailsInternetPage[cellplanloading] .plan-details-info,
+#detailsInternetPage[hascellplan] .plan-loading-info,
+#detailsInternetPage[hascellplan] .no-plan-info,
+#detailsInternetPage[nocellplan] .plan-loading-info,
+#detailsInternetPage[nocellplan] .plan-details-info,
+#detailsInternetPage:not([gsm]) .gsm-only,
+#detailsInternetPage:not([password]) .password-details,
+#detailsInternetPage[cert] .password-details,
+#detailsInternetPage[certPkcs] .password-details,
+#detailsInternetPage:not([cert]) .cert-details,
+#detailsInternetPage:not([certPkcs]) .cert-pkcs-details {
+  display: none;
+}
+
+#wirelessButtons > * > button {
+  display: block;
+}
+
+
+#wirelessButtons[wifiEnabled] > * > #enableWifi,
+#wirelessButtons:not([wifiEnabled]) > * > #disableWifi,
+#wirelessButtons[cellularEnabled] > * > #enableCellular,
+#wirelessButtons:not([cellularEnabled]) > * > #disableCellular,
+#wirelessButtons:not([cellularAvail]) > * > #disableCellular,
+#wirelessButtons:not([cellularAvail]) > * > #enableCellular {
+  display: none;
 }

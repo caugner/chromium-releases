@@ -13,6 +13,7 @@
 #include "chrome/app/chrome_dll_resource.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/profile.h"
+#include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/view_ids.h"
 #include "chrome/browser/views/dom_view.h"
 #include "chrome/browser/views/info_bubble.h"
@@ -85,6 +86,7 @@ class InfoBubbleContentsView : public views::View,
   // WARNING: this is not the TabContents of the bubble!  Use
   // GetBubbleTabContents() to get the bubble's TabContents.
   virtual TabContents* GetTabContents();
+  virtual InstantController* GetInstant() { return NULL; }
   virtual void OnInputInProgress(bool in_progress) {}
 
   // CommandUpdater::CommandUpdaterDelegate implementation:
@@ -361,10 +363,7 @@ void AppLauncher::InfoBubbleClosing(InfoBubble* info_bubble,
 
 void AppLauncher::AddTabWithURL(const GURL& url,
                                 PageTransition::Type transition) {
-  browser_->AddTabWithURL(
-      url, GURL(), transition, -1,
-      TabStripModel::ADD_SELECTED | TabStripModel::ADD_FORCE_INDEX, NULL,
-      std::string(), NULL);
+  browser_->AddSelectedTabWithURL(url, transition);
 }
 
 void AppLauncher::Resize(const gfx::Size& contents_size) {

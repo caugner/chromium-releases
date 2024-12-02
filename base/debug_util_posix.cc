@@ -49,6 +49,7 @@ const char kMangledSymbolPrefix[] = "_Z";
 const char kSymbolCharacters[] =
     "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
 
+#if !defined(USE_SYMBOLIZE)
 // Demangles C++ symbols in the given text. Example:
 //
 // "sconsbuild/Debug/base_unittests(_ZN10StackTraceC1Ev+0x20) [0x817778c]"
@@ -94,12 +95,15 @@ void DemangleSymbols(std::string* text) {
 
 #endif  // defined(__GLIBCXX__)
 }
+#endif  // !defined(USE_SYMBOLIZE)
 
 // Gets the backtrace as a vector of strings. If possible, resolve symbol
 // names and attach these. Otherwise just use raw addresses. Returns true
-// if any symbol name is resolved.
+// if any symbol name is resolved.  Returns false on error and *may* fill
+// in |error_message| if an error message is available.
 bool GetBacktraceStrings(void **trace, int size,
-                         std::vector<std::string>* trace_strings) {
+                         std::vector<std::string>* trace_strings,
+                         std::string* error_message) {
   bool symbolized = false;
 
 #if defined(USE_SYMBOLIZE)
@@ -128,6 +132,8 @@ bool GetBacktraceStrings(void **trace, int size,
     }
     symbolized = true;
   } else {
+    if (error_message)
+      *error_message = safe_strerror(errno);
     for (int i = 0; i < size; ++i) {
       trace_strings->push_back(base::StringPrintf("%p", trace[i]));
     }
@@ -280,7 +286,7 @@ void StackTrace::PrintBacktrace() {
 #endif
   fflush(stderr);
   std::vector<std::string> trace_strings;
-  GetBacktraceStrings(trace_, count_, &trace_strings);
+  GetBacktraceStrings(trace_, count_, &trace_strings, NULL);
   for (size_t i = 0; i < trace_strings.size(); ++i) {
     std::cerr << "\t" << trace_strings[i] << "\n";
   }
@@ -292,11 +298,14 @@ void StackTrace::OutputToStream(std::ostream* os) {
     return;
 #endif
   std::vector<std::string> trace_strings;
-  if (GetBacktraceStrings(trace_, count_, &trace_strings)) {
+  std::string error_message;
+  if (GetBacktraceStrings(trace_, count_, &trace_strings, &error_message)) {
     (*os) << "Backtrace:\n";
   } else {
-    (*os) << "Unable get symbols for backtrace (" << safe_strerror(errno)
-          << "). Dumping raw addresses in trace:\n";
+    if (!error_message.empty())
+      error_message = " (" + error_message + ")";
+    (*os) << "Unable to get symbols for backtrace" << error_message << ". "
+          << "Dumping raw addresses in trace:\n";
   }
 
   for (size_t i = 0; i < trace_strings.size(); ++i) {

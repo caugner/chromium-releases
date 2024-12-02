@@ -6,6 +6,7 @@
 
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
+#include "base/i18n/rtl.h"
 #include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
@@ -62,14 +63,18 @@ void SetWelcomePosition(GtkFloatingContainer* container,
                         GtkWidget* label) {
   GValue value = { 0, };
   g_value_init(&value, G_TYPE_INT);
-  g_value_set_int(&value, gtk_util::kContentAreaSpacing);
-  gtk_container_child_set_property(GTK_CONTAINER(container),
-                                   label, "x", &value);
 
   GtkRequisition req;
   gtk_widget_size_request(label, &req);
-  int y = allocation->height / 2 - req.height / 2;
 
+  int x = base::i18n::IsRTL() ?
+      allocation->width - req.width - gtk_util::kContentAreaSpacing :
+      gtk_util::kContentAreaSpacing;
+  g_value_set_int(&value, x);
+  gtk_container_child_set_property(GTK_CONTAINER(container),
+                                   label, "x", &value);
+
+  int y = allocation->height / 2 - req.height / 2;
   g_value_set_int(&value, y);
   gtk_container_child_set_property(GTK_CONTAINER(container),
                                    label, "y", &value);
@@ -81,9 +86,32 @@ void SetWelcomePosition(GtkFloatingContainer* container,
 // static
 bool FirstRunDialog::Show(Profile* profile,
                           bool randomize_search_engine_order) {
+  // Figure out which dialogs we will show.
+  // If the default search is managed via policy, we won't ask.
+  const TemplateURLModel* search_engines_model = profile->GetTemplateURLModel();
+  bool show_search_engines_dialog = search_engines_model &&
+      !search_engines_model->is_default_search_managed();
+
+#if defined(GOOGLE_CHROME_BUILD)
+  // If the metrics reporting is managed, we won't ask.
+  const PrefService::Preference* metrics_reporting_pref =
+      g_browser_process->local_state()->FindPreference(
+          prefs::kMetricsReportingEnabled);
+  bool show_reporting_dialog = !metrics_reporting_pref ||
+      !metrics_reporting_pref->IsManaged();
+#else
+  bool show_reporting_dialog = false;
+#endif
+
+  if (!show_search_engines_dialog && !show_reporting_dialog)
+    return true;  // Nothing to do
+
   int response = -1;
   // Object deletes itself.
-  new FirstRunDialog(profile, randomize_search_engine_order, response);
+  new FirstRunDialog(profile,
+                     show_reporting_dialog,
+                     show_search_engines_dialog,
+                     &response);
 
   // TODO(port): it should be sufficient to just run the dialog:
   // int response = gtk_dialog_run(GTK_DIALOG(dialog));
@@ -96,16 +124,23 @@ bool FirstRunDialog::Show(Profile* profile,
 }
 
 FirstRunDialog::FirstRunDialog(Profile* profile,
-                               bool randomize_search_engine_order,
-                               int& response)
+                               bool show_reporting_dialog,
+                               bool show_search_engines_dialog,
+                               int* response)
     : search_engine_window_(NULL),
       dialog_(NULL),
       report_crashes_(NULL),
       make_default_(NULL),
       profile_(profile),
       chosen_search_engine_(NULL),
+      show_reporting_dialog_(show_reporting_dialog),
       response_(response) {
+  if (!show_search_engines_dialog) {
+    ShowReportingDialog();
+    return;
+  }
   search_engines_model_ = profile_->GetTemplateURLModel();
+
   ShowSearchEngineWindow();
 
   search_engines_model_->AddObserver(this);
@@ -120,6 +155,7 @@ FirstRunDialog::~FirstRunDialog() {
 
 void FirstRunDialog::ShowSearchEngineWindow() {
   search_engine_window_ = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+  gtk_window_set_deletable(GTK_WINDOW(search_engine_window_), FALSE);
   gtk_window_set_title(
       GTK_WINDOW(search_engine_window_),
       l10n_util::GetStringUTF8(IDS_FIRSTRUN_DLG_TITLE).c_str());
@@ -130,7 +166,7 @@ void FirstRunDialog::ShowSearchEngineWindow() {
   gtk_container_add(GTK_CONTAINER(search_engine_window_), content_area);
 
   GdkPixbuf* pixbuf =
-      ResourceBundle::GetSharedInstance().GetPixbufNamed(
+      ResourceBundle::GetSharedInstance().GetRTLEnabledPixbufNamed(
           IDR_SEARCH_ENGINE_DIALOG_TOP);
   GtkWidget* top_image = gtk_image_new_from_pixbuf(pixbuf);
   // Right align the image.
@@ -139,6 +175,9 @@ void FirstRunDialog::ShowSearchEngineWindow() {
 
   GtkWidget* welcome_message = gtk_util::CreateBoldLabel(
       l10n_util::GetStringUTF8(IDS_FR_SEARCH_MAIN_LABEL));
+  // Force the font size to make sure the label doesn't overlap the image.
+  // 13.4px == 10pt @ 96dpi
+  gtk_util::ForceFontSizePixels(welcome_message, 13.4);
 
   GtkWidget* top_area = gtk_floating_container_new();
   gtk_container_add(GTK_CONTAINER(top_area), top_image);
@@ -165,8 +204,7 @@ void FirstRunDialog::ShowSearchEngineWindow() {
           l10n_util::GetStringUTF16(IDS_PRODUCT_NAME)).c_str());
   gtk_misc_set_alignment(GTK_MISC(explanation), 0, 0.5);
   gtk_util::SetLabelColor(explanation, &gfx::kGdkBlack);
-  gtk_label_set_line_wrap(GTK_LABEL(explanation), TRUE);
-  gtk_widget_set_size_request(explanation, kExplanationWidth, -1);
+  gtk_util::SetLabelWidth(explanation, kExplanationWidth);
   gtk_box_pack_start(GTK_BOX(bubble_area_box), explanation, FALSE, FALSE, 0);
 
   // We will fill this in after the TemplateURLModel has loaded.
@@ -183,31 +221,26 @@ void FirstRunDialog::ShowSearchEngineWindow() {
   gtk_window_present(GTK_WINDOW(search_engine_window_));
 }
 
-void FirstRunDialog::ShowDialog() {
+void FirstRunDialog::ShowReportingDialog() {
   // The purpose of the dialog is to ask the user to enable stats and crash
   // reporting. This setting may be controlled through configuration management
   // in enterprise scenarios. If that is the case, skip the dialog entirely,
   // it's not worth bothering the user for only the default browser question
   // (which is likely to be forced in enterprise deployments anyway).
-  const PrefService::Preference* metrics_reporting_pref =
-      g_browser_process->local_state()->FindPreference(
-          prefs::kMetricsReportingEnabled);
-  if (metrics_reporting_pref && metrics_reporting_pref->IsManaged()) {
+  if (!show_reporting_dialog_) {
     OnResponseDialog(NULL, GTK_RESPONSE_ACCEPT);
     return;
   }
 
-#if defined(GOOGLE_CHROME_BUILD)
   dialog_ = gtk_dialog_new_with_buttons(
       l10n_util::GetStringUTF8(IDS_FIRSTRUN_DLG_TITLE).c_str(),
       NULL,  // No parent
       (GtkDialogFlags) (GTK_DIALOG_MODAL | GTK_DIALOG_NO_SEPARATOR),
-      GTK_STOCK_QUIT,
-      GTK_RESPONSE_REJECT,
       NULL);
   gtk_util::AddButtonToDialog(dialog_,
       l10n_util::GetStringUTF8(IDS_FIRSTRUN_DLG_OK).c_str(),
       GTK_STOCK_APPLY, GTK_RESPONSE_ACCEPT);
+  gtk_window_set_deletable(GTK_WINDOW(dialog_), FALSE);
 
   gtk_window_set_resizable(GTK_WINDOW(dialog_), FALSE);
 
@@ -216,38 +249,34 @@ void FirstRunDialog::ShowDialog() {
 
   GtkWidget* content_area = GTK_DIALOG(dialog_)->vbox;
 
-  GtkWidget* check_label = gtk_label_new(
-      l10n_util::GetStringUTF8(IDS_OPTIONS_ENABLE_LOGGING).c_str());
-  gtk_label_set_line_wrap(GTK_LABEL(check_label), TRUE);
-
-  GtkWidget* learn_more_link = gtk_chrome_link_button_new(
-      l10n_util::GetStringUTF8(IDS_LEARN_MORE).c_str());
-  // Stick it in an hbox so it doesn't expand to the whole width.
-  GtkWidget* learn_more_hbox = gtk_hbox_new(FALSE, 0);
-  gtk_box_pack_start(GTK_BOX(learn_more_hbox),
-                     gtk_util::IndentWidget(learn_more_link),
-                     FALSE, FALSE, 0);
-  g_signal_connect(learn_more_link, "clicked",
-                   G_CALLBACK(OnLearnMoreLinkClickedThunk), this);
-
-  report_crashes_ = gtk_check_button_new();
-  gtk_container_add(GTK_CONTAINER(report_crashes_), check_label);
-
-  gtk_box_pack_start(GTK_BOX(content_area), report_crashes_, FALSE, FALSE, 0);
-  gtk_box_pack_start(GTK_BOX(content_area), learn_more_hbox, FALSE, FALSE, 0);
-
   make_default_ = gtk_check_button_new_with_label(
       l10n_util::GetStringUTF8(IDS_FR_CUSTOMIZE_DEFAULT_BROWSER).c_str());
   gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(make_default_), TRUE);
   gtk_box_pack_start(GTK_BOX(content_area), make_default_, FALSE, FALSE, 0);
 
+  report_crashes_ = gtk_check_button_new();
+  GtkWidget* check_label = gtk_label_new(
+      l10n_util::GetStringUTF8(IDS_OPTIONS_ENABLE_LOGGING).c_str());
+  gtk_label_set_line_wrap(GTK_LABEL(check_label), TRUE);
+  gtk_container_add(GTK_CONTAINER(report_crashes_), check_label);
+  GtkWidget* learn_more_vbox = gtk_vbox_new(FALSE, 0);
+  gtk_box_pack_start(GTK_BOX(learn_more_vbox), report_crashes_,
+                     FALSE, FALSE, 0);
+
+  GtkWidget* learn_more_link = gtk_chrome_link_button_new(
+      l10n_util::GetStringUTF8(IDS_LEARN_MORE).c_str());
+  gtk_button_set_alignment(GTK_BUTTON(learn_more_link), 0.0, 0.5);
+  gtk_box_pack_start(GTK_BOX(learn_more_vbox),
+                     gtk_util::IndentWidget(learn_more_link),
+                     FALSE, FALSE, 0);
+  g_signal_connect(learn_more_link, "clicked",
+                   G_CALLBACK(OnLearnMoreLinkClickedThunk), this);
+
+  gtk_box_pack_start(GTK_BOX(content_area), learn_more_vbox, FALSE, FALSE, 0);
+
   g_signal_connect(dialog_, "response",
                    G_CALLBACK(OnResponseDialogThunk), this);
   gtk_widget_show_all(dialog_);
-#else  // !defined(GOOGLE_CHROME_BUILD)
-  // We don't show the dialog in chromium. Pretend the user accepted.
-  OnResponseDialog(NULL, GTK_RESPONSE_ACCEPT);
-#endif  // !defined(GOOGLE_CHROME_BUILD)
 }
 
 void FirstRunDialog::OnTemplateURLModelChanged() {
@@ -341,7 +370,7 @@ void FirstRunDialog::OnSearchEngineWindowDestroy(GtkWidget* sender) {
   search_engine_window_ = NULL;
   if (chosen_search_engine_) {
     search_engines_model_->SetDefaultSearchProvider(chosen_search_engine_);
-    ShowDialog();
+    ShowReportingDialog();
   } else {
     FirstRunDone();
   }
@@ -350,28 +379,26 @@ void FirstRunDialog::OnSearchEngineWindowDestroy(GtkWidget* sender) {
 void FirstRunDialog::OnResponseDialog(GtkWidget* widget, int response) {
   if (dialog_)
     gtk_widget_hide_all(dialog_);
-  response_ = response;
+  *response_ = response;
 
-  if (response == GTK_RESPONSE_ACCEPT) {
-    // Mark that first run has ran.
-    FirstRun::CreateSentinel();
+  // Mark that first run has ran.
+  FirstRun::CreateSentinel();
 
-    // Check if user has opted into reporting.
-    if (report_crashes_ &&
-        gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(report_crashes_))) {
+  // Check if user has opted into reporting.
+  if (report_crashes_ &&
+      gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(report_crashes_))) {
 #if defined(USE_LINUX_BREAKPAD)
-      if (GoogleUpdateSettings::SetCollectStatsConsent(true))
-        InitCrashReporter();
+    if (GoogleUpdateSettings::SetCollectStatsConsent(true))
+      InitCrashReporter();
 #endif
-    } else {
-      GoogleUpdateSettings::SetCollectStatsConsent(false);
-    }
+  } else {
+    GoogleUpdateSettings::SetCollectStatsConsent(false);
+  }
 
-    // If selected set as default browser.
-    if (make_default_ &&
-        gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(make_default_))) {
-      ShellIntegration::SetAsDefaultBrowser();
-    }
+  // If selected set as default browser.
+  if (make_default_ &&
+      gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(make_default_))) {
+    ShellIntegration::SetAsDefaultBrowser();
   }
 
   FirstRunDone();

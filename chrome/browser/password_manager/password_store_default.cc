@@ -34,7 +34,7 @@ PasswordStoreDefault::~PasswordStoreDefault() {
 }
 
 void PasswordStoreDefault::ReportMetricsImpl() {
-  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::DB));
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
   login_db_->ReportMetrics();
 }
 
@@ -44,7 +44,7 @@ void PasswordStoreDefault::AddLoginImpl(const PasswordForm& form) {
     changes.push_back(PasswordStoreChange(PasswordStoreChange::ADD, form));
     NotificationService::current()->Notify(
         NotificationType::LOGINS_CHANGED,
-        NotificationService::AllSources(),
+        Source<PasswordStore>(this),
         Details<PasswordStoreChangeList>(&changes));
   }
 }
@@ -55,7 +55,7 @@ void PasswordStoreDefault::UpdateLoginImpl(const PasswordForm& form) {
     changes.push_back(PasswordStoreChange(PasswordStoreChange::UPDATE, form));
     NotificationService::current()->Notify(
         NotificationType::LOGINS_CHANGED,
-        NotificationService::AllSources(),
+        Source<PasswordStore>(this),
         Details<PasswordStoreChangeList>(&changes));
   }
 }
@@ -66,7 +66,7 @@ void PasswordStoreDefault::RemoveLoginImpl(const PasswordForm& form) {
     changes.push_back(PasswordStoreChange(PasswordStoreChange::REMOVE, form));
     NotificationService::current()->Notify(
         NotificationType::LOGINS_CHANGED,
-        NotificationService::AllSources(),
+        Source<PasswordStore>(this),
         Details<PasswordStoreChangeList>(&changes));
   }
 }
@@ -84,7 +84,7 @@ void PasswordStoreDefault::RemoveLoginsCreatedBetweenImpl(
       }
       NotificationService::current()->Notify(
           NotificationType::LOGINS_CHANGED,
-          NotificationService::AllSources(),
+          Source<PasswordStore>(this),
           Details<PasswordStoreChangeList>(&changes));
     }
   }
@@ -114,13 +114,13 @@ void PasswordStoreDefault::GetBlacklistLoginsImpl(
 
 bool PasswordStoreDefault::FillAutofillableLogins(
          std::vector<PasswordForm*>* forms) {
-  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::DB));
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
   return login_db_->GetAutofillableLogins(forms);
 }
 
 bool PasswordStoreDefault::FillBlacklistLogins(
          std::vector<PasswordForm*>* forms) {
-  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::DB));
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
   return login_db_->GetBlacklistLogins(forms);
 }
 

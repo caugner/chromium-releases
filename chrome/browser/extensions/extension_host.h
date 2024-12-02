@@ -12,7 +12,7 @@
 #include "base/perftimer.h"
 #include "base/scoped_ptr.h"
 #include "chrome/browser/extensions/extension_function_dispatcher.h"
-#include "chrome/browser/jsmessage_box_client.h"
+#include "chrome/browser/js_modal_dialog.h"
 #include "chrome/browser/renderer_host/render_view_host_delegate.h"
 #include "chrome/browser/tab_contents/render_view_host_delegate_helper.h"
 #if defined(TOOLKIT_VIEWS)
@@ -26,6 +26,7 @@
 
 class Browser;
 class Extension;
+class FileSelectHelper;
 class RenderProcessHost;
 class RenderWidgetHostView;
 class TabContents;
@@ -39,7 +40,7 @@ class ExtensionHost : public RenderViewHostDelegate,
                       public RenderViewHostDelegate::View,
                       public ExtensionFunctionDispatcher::Delegate,
                       public NotificationObserver,
-                      public JavaScriptMessageBoxClient {
+                      public JavaScriptAppModalDialogDelegate {
  public:
   class ProcessCreationQueue;
 
@@ -85,7 +86,7 @@ class ExtensionHost : public RenderViewHostDelegate,
   ViewType::Type extension_host_type() const { return extension_host_type_; }
 
   // ExtensionFunctionDispatcher::Delegate
-  virtual TabContents* associated_tab_contents() {
+  virtual TabContents* associated_tab_contents() const {
     return associated_tab_contents_;
   }
   void set_associated_tab_contents(TabContents* associated_tab_contents) {
@@ -110,11 +111,11 @@ class ExtensionHost : public RenderViewHostDelegate,
   // |size_limit| in both width and height.
   void DisableScrollbarsForSmallWindows(const gfx::Size& size_limit);
 
-  // RenderViewHostDelegate implementation.
-  virtual RenderViewHostDelegate::View* GetViewDelegate();
+  // RenderViewHostDelegate::View implementation.
   virtual const GURL& GetURL() const { return url_; }
   virtual void RenderViewCreated(RenderViewHost* render_view_host);
   virtual ViewType::Type GetRenderViewType() const;
+  virtual FileSelect* GetFileSelectDelegate();
   virtual int GetBrowserWindowID() const;
   virtual void RenderViewGone(RenderViewHost* render_view_host);
   virtual void DidNavigate(RenderViewHost* render_view_host,
@@ -122,8 +123,11 @@ class ExtensionHost : public RenderViewHostDelegate,
   virtual void DidStopLoading();
   virtual void DocumentAvailableInMainFrame(RenderViewHost* render_view_host);
   virtual void DocumentOnLoadCompletedInMainFrame(
-      RenderViewHost* render_view_host);
+      RenderViewHost* render_view_host,
+      int32 page_id);
 
+  // RenderViewHostDelegate implementation.
+  virtual RenderViewHostDelegate::View* GetViewDelegate();
   virtual WebPreferences GetWebkitPrefs();
   virtual void ProcessDOMUIMessage(const ViewHostMsg_DomMessage_Params& params);
   virtual void RunJavaScriptMessage(const std::wstring& message,
@@ -158,6 +162,7 @@ class ExtensionHost : public RenderViewHostDelegate,
   virtual void UpdateDragCursor(WebKit::WebDragOperation operation);
   virtual void GotFocus();
   virtual void TakeFocus(bool reverse);
+  virtual void LostCapture();
   virtual void Activate();
   virtual void Deactivate();
   virtual bool PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
@@ -166,6 +171,8 @@ class ExtensionHost : public RenderViewHostDelegate,
   virtual void HandleMouseMove();
   virtual void HandleMouseDown();
   virtual void HandleMouseLeave();
+  virtual void HandleMouseUp();
+  virtual void HandleMouseActivate();
   virtual void UpdatePreferredSize(const gfx::Size& new_size);
 
   // NotificationObserver
@@ -173,12 +180,12 @@ class ExtensionHost : public RenderViewHostDelegate,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
-  // JavaScriptMessageBoxClient
-  virtual gfx::NativeWindow GetMessageBoxRootWindow();
+  // Overridden from JavaScriptAppModalDialogDelegate:
   virtual void OnMessageBoxClosed(IPC::Message* reply_msg,
                                   bool success,
                                   const std::wstring& prompt);
   virtual void SetSuppressMessageBoxes(bool suppress_message_boxes) {}
+  virtual gfx::NativeWindow GetMessageBoxRootWindow();
   virtual TabContents* AsTabContents() { return NULL; }
   virtual ExtensionHost* AsExtensionHost() { return this; }
 
@@ -208,12 +215,8 @@ class ExtensionHost : public RenderViewHostDelegate,
   void CreateRenderViewNow();
 
   // ExtensionFunctionDispatcher::Delegate
-  virtual Browser* GetBrowser() const {
-    return view() ? view()->browser() : NULL;
-  }
-  virtual gfx::NativeView GetNativeViewOfHost() {
-    return view() ? view()->native_view() : NULL;
-  }
+  virtual Browser* GetBrowser() const;
+  virtual gfx::NativeView GetNativeViewOfHost();
 
   // Handles keyboard events that were not handled by HandleKeyboardEvent().
   // Platform specific implementation may override this method to handle the
@@ -267,6 +270,9 @@ class ExtensionHost : public RenderViewHostDelegate,
 
   // Used to measure how long it's been since the host was created.
   PerfTimer since_created_;
+
+  // FileSelectHelper, lazily created.
+  scoped_ptr<FileSelectHelper> file_select_helper_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionHost);
 };

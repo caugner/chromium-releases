@@ -33,6 +33,10 @@ ExtensionToolbarModel::ExtensionToolbarModel(ExtensionsService* service)
 ExtensionToolbarModel::~ExtensionToolbarModel() {
 }
 
+void ExtensionToolbarModel::DestroyingProfile() {
+  registrar_.RemoveAll();
+}
+
 void ExtensionToolbarModel::AddObserver(Observer* observer) {
   observers_.AddObserver(observer);
 }
@@ -75,6 +79,7 @@ void ExtensionToolbarModel::MoveBrowserAction(Extension* extension,
 void ExtensionToolbarModel::SetVisibleIconCount(int count) {
   visible_icon_count_ = count == static_cast<int>(size()) ? -1 : count;
   prefs_->SetInteger(prefs::kExtensionToolbarSize, visible_icon_count_);
+  prefs_->ScheduleSavePersistentPrefs();
 }
 
 void ExtensionToolbarModel::Observe(NotificationType type,

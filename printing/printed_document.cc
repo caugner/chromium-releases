@@ -10,13 +10,13 @@
 #include <vector>
 
 #include "app/text_elider.h"
+#include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/i18n/file_util_icu.h"
 #include "base/message_loop.h"
 #include "base/singleton.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "base/time.h"
 #include "base/i18n/time_formatting.h"
 #include "gfx/font.h"
 #include "printing/page_number.h"
@@ -26,12 +26,6 @@
 #include "printing/units.h"
 #include "skia/ext/platform_device.h"
 
-#if defined(OS_WIN)
-#include "app/win_util.h"
-#endif
-
-using base::Time;
-
 namespace {
 
 struct PrintDebugDumpPath {
@@ -40,7 +34,7 @@ struct PrintDebugDumpPath {
   }
 
   bool enabled;
-  std::wstring debug_dump_path;
+  FilePath debug_dump_path;
 };
 
 Singleton<PrintDebugDumpPath> g_debug_dump_info;
@@ -244,62 +238,36 @@ void PrintedDocument::PrintHeaderFooter(gfx::NativeDrawingContext context,
     }
   }
 
-  // TODO(stuartmorgan): Factor out this platform-specific part into another
-  // method that can be moved into the platform files.
-#if defined(OS_WIN)
-  // Save the state (again) for the clipping region.
-  int saved_state = SaveDC(context);
-  DCHECK_NE(saved_state, 0);
-
-  int result = IntersectClipRect(context, bounding.x(), bounding.y(),
-                                 bounding.right() + 1, bounding.bottom() + 1);
-  DCHECK(result == SIMPLEREGION || result == COMPLEXREGION);
-  TextOut(context,
-          bounding.x(), bounding.y(),
-          output.c_str(),
-          static_cast<int>(output.size()));
-  int res = RestoreDC(context, saved_state);
-  DCHECK_NE(res, 0);
-#else  // OS_WIN
-  NOTIMPLEMENTED();
-#endif  // OS_WIN
+  DrawHeaderFooter(context, output, bounding);
 }
 
 void PrintedDocument::DebugDump(const PrintedPage& page) {
   if (!g_debug_dump_info->enabled)
     return;
 
-  std::wstring filename;
+  string16 filename;
   filename += date();
-  filename += L"_";
+  filename += ASCIIToUTF16("_");
   filename += time();
-  filename += L"_";
+  filename += ASCIIToUTF16("_");
   filename += name();
-  filename += L"_";
-  filename += StringPrintf(L"%02d", page.page_number());
-  filename += L"_.emf";
+  filename += ASCIIToUTF16("_");
+  filename += ASCIIToUTF16(StringPrintf("%02d", page.page_number()));
+  filename += ASCIIToUTF16("_.emf");
 #if defined(OS_WIN)
-  file_util::ReplaceIllegalCharactersInPath(&filename, '_');
-#else
-  std::string narrow_filename = WideToUTF8(filename);
-  file_util::ReplaceIllegalCharactersInPath(&narrow_filename, '_');
-  filename = UTF8ToWide(narrow_filename);
-#endif
-  FilePath path = FilePath::FromWStringHack(
-      g_debug_dump_info->debug_dump_path);
-#if defined(OS_WIN)
-  page.native_metafile()->SaveTo(path.Append(filename).ToWStringHack());
+  page.native_metafile()->SaveTo(
+      g_debug_dump_info->debug_dump_path.Append(filename).ToWStringHack());
 #else  // OS_WIN
   NOTIMPLEMENTED();
 #endif  // OS_WIN
 }
 
-void PrintedDocument::set_debug_dump_path(const std::wstring& debug_dump_path) {
+void PrintedDocument::set_debug_dump_path(const FilePath& debug_dump_path) {
   g_debug_dump_info->enabled = !debug_dump_path.empty();
   g_debug_dump_info->debug_dump_path = debug_dump_path;
 }
 
-const std::wstring& PrintedDocument::debug_dump_path() {
+const FilePath& PrintedDocument::debug_dump_path() {
   return g_debug_dump_info->debug_dump_path;
 }
 
@@ -310,6 +278,9 @@ PrintedDocument::Mutable::Mutable(PrintedPagesSource* source)
       shrink_factor(0) {
 }
 
+PrintedDocument::Mutable::~Mutable() {
+}
+
 PrintedDocument::Immutable::Immutable(const PrintSettings& settings,
                                       PrintedPagesSource* source,
                                       int cookie)
@@ -318,18 +289,10 @@ PrintedDocument::Immutable::Immutable(const PrintSettings& settings,
       name_(source->RenderSourceName()),
       url_(source->RenderSourceUrl()),
       cookie_(cookie) {
-  // Setup the document's date.
-#if defined(OS_WIN)
-  // On Windows, use the native time formatting for printing.
-  SYSTEMTIME systemtime;
-  GetLocalTime(&systemtime);
-  date_ = win_util::FormatSystemDate(systemtime, std::wstring());
-  time_ = win_util::FormatSystemTime(systemtime, std::wstring());
-#else  // OS_WIN
-  Time now = Time::Now();
-  date_ = base::TimeFormatShortDateNumeric(now);
-  time_ = base::TimeFormatTimeOfDay(now);
-#endif  // OS_WIN
+  SetDocumentDate();
+}
+
+PrintedDocument::Immutable::~Immutable() {
 }
 
 }  // namespace printing

@@ -192,7 +192,8 @@ static void Swizzle51Layout(Format* b, uint32 filled) {
 
 }  // namespace
 
-// Not in an anonymous so that it can be a friend to AlsaPcmOutputStream.
+// Not in an anonymous namespace so that it can be a friend to
+// AlsaPcmOutputStream.
 std::ostream& operator<<(std::ostream& os,
                          AlsaPcmOutputStream::InternalState state) {
   switch (state) {
@@ -467,16 +468,20 @@ void AlsaPcmOutputStream::BufferPacket(bool* source_exhausted) {
 
   // Request more data if we have capacity.
   if (buffer_->forward_capacity() > buffer_->forward_bytes()) {
-    // Before making a request to source for data. We need to determine the
+    // Before making a request to source for data we need to determine the
     // delay (in bytes) for the requested data to be played.
-    snd_pcm_sframes_t delay = buffer_->forward_bytes() * bytes_per_frame_ /
+
+    uint32 buffer_delay = buffer_->forward_bytes() * bytes_per_frame_ /
         bytes_per_output_frame_;
+
+    uint32 hardware_delay = GetCurrentDelay() * bytes_per_frame_;
 
     scoped_refptr<media::DataBuffer> packet =
         new media::DataBuffer(packet_size_);
     size_t packet_size =
-        shared_data_.OnMoreData(this, packet->GetWritableData(),
-                                packet->GetBufferSize(), delay);
+        shared_data_.OnMoreData(
+            this, packet->GetWritableData(), packet->GetBufferSize(),
+            AudioBuffersState(buffer_delay, hardware_delay));
     CHECK(packet_size <= packet->GetBufferSize()) <<
         "Data source overran buffer.";
 
@@ -714,6 +719,33 @@ std::string AlsaPcmOutputStream::FindDeviceForChannels(uint32 channels) {
   return guessed_device;
 }
 
+snd_pcm_sframes_t AlsaPcmOutputStream::GetCurrentDelay() {
+  snd_pcm_sframes_t delay = -1;
+
+  // Don't query ALSA's delay if we have underrun since it'll be jammed at
+  // some non-zero value and potentially even negative!
+  if (wrapper_->PcmState(playback_handle_) != SND_PCM_STATE_XRUN) {
+    int error = wrapper_->PcmDelay(playback_handle_, &delay);
+    if (error < 0) {
+      // Assume a delay of zero and attempt to recover the device.
+      delay = -1;
+      error = wrapper_->PcmRecover(playback_handle_,
+                                   error,
+                                   kPcmRecoverIsSilent);
+      if (error < 0) {
+        LOG(ERROR) << "Failed querying delay: " << wrapper_->StrError(error);
+      }
+    }
+  }
+
+  // snd_pcm_delay() may not work in the beginning of the stream. In this case
+  // return delay of data we know currently is in the ALSA's buffer.
+  if (delay < 0)
+    delay = alsa_buffer_frames_ - GetAvailableFrames();
+
+  return delay;
+}
+
 snd_pcm_sframes_t AlsaPcmOutputStream::GetAvailableFrames() {
   DCHECK_EQ(message_loop_, MessageLoop::current());
 
@@ -771,12 +803,12 @@ snd_pcm_t* AlsaPcmOutputStream::AutoSelectDevice(unsigned int latency) {
 
   // For the kDefaultDevice device, we can only reliably depend on 2-channel
   // output to have the correct ordering according to Lennart.  For the channel
-  // formats that we know how to downmix from (5 channel to 6 channel), setup
+  // formats that we know how to downmix from (3 channel to 8 channel), setup
   // downmixing.
   //
   // TODO(ajwong): We need a SupportsFolding() function.
   uint32 default_channels = channels_;
-  if (default_channels >= 5 && default_channels <= 6) {
+  if (default_channels > 2 && default_channels <= 8) {
     should_downmix_ = true;
     default_channels = 2;
   }
@@ -878,13 +910,12 @@ void AlsaPcmOutputStream::SharedData::set_volume(float v) {
   volume_ = v;
 }
 
-uint32 AlsaPcmOutputStream::SharedData::OnMoreData(AudioOutputStream* stream,
-                                                   void* dest,
-                                                   uint32 max_size,
-                                                   uint32 pending_bytes) {
+uint32 AlsaPcmOutputStream::SharedData::OnMoreData(
+    AudioOutputStream* stream, uint8* dest, uint32 max_size,
+    AudioBuffersState buffers_state) {
   AutoLock l(lock_);
   if (source_callback_) {
-    return source_callback_->OnMoreData(stream, dest, max_size, pending_bytes);
+    return source_callback_->OnMoreData(stream, dest, max_size, buffers_state);
   }
 
   return 0;

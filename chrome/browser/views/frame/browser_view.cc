@@ -26,6 +26,7 @@
 #include "chrome/browser/debugger/devtools_window.h"
 #include "chrome/browser/dom_ui/bug_report_ui.h"
 #include "chrome/browser/download/download_manager.h"
+#include "chrome/browser/instant/instant_controller.h"
 #include "chrome/browser/ntp_background_util.h"
 #include "chrome/browser/page_info_window.h"
 #include "chrome/browser/prefs/pref_service.h"
@@ -33,16 +34,18 @@
 #include "chrome/browser/sessions/tab_restore_service.h"
 #include "chrome/browser/sidebar/sidebar_container.h"
 #include "chrome/browser/sidebar/sidebar_manager.h"
-#include "chrome/browser/tab_contents/match_preview.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tab_contents/tab_contents_view.h"
+#include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/themes/browser_theme_provider.h"
 #include "chrome/browser/view_ids.h"
 #include "chrome/browser/views/accessible_view_helper.h"
 #include "chrome/browser/views/bookmark_bar_view.h"
 #include "chrome/browser/views/browser_dialogs.h"
+#include "chrome/browser/views/default_search_view.h"
 #include "chrome/browser/views/download_shelf_view.h"
 #include "chrome/browser/views/frame/browser_view_layout.h"
+#include "chrome/browser/views/frame/contents_container.h"
 #include "chrome/browser/views/fullscreen_exit_bubble.h"
 #include "chrome/browser/views/status_bubble_views.h"
 #include "chrome/browser/views/tab_contents/tab_contents_container.h"
@@ -51,6 +54,7 @@
 #include "chrome/browser/views/theme_install_bubble_view.h"
 #include "chrome/browser/views/toolbar_view.h"
 #include "chrome/browser/views/update_recommended_message_box.h"
+#include "chrome/browser/views/window.h"
 #include "chrome/browser/window_sizer.h"
 #include "chrome/browser/wrench_menu_model.h"
 #include "chrome/common/chrome_switches.h"
@@ -134,75 +138,6 @@ static gfx::NativeWindow GetNormalBrowserWindowForBrowser(Browser* browser,
   return browser->window()->GetNativeHandle();
 }
 #endif  // defined(OS_CHROMEOS)
-
-// ContentsContainer is responsible for managing the TabContents views.
-// ContentsContainer has up to two children: one for the currently active
-// TabContents and one for the match preview TabContents.
-class BrowserView::ContentsContainer : public views::View {
- public:
-  ContentsContainer(BrowserView* browser_view, views::View* active)
-      : browser_view_(browser_view),
-        active_(active),
-        preview_(NULL) {
-    AddChildView(active_);
-  }
-
-  // Makes the preview view the active view and nulls out the old active view.
-  // It's assumed the caller will delete or remove the old active view
-  // separately.
-  void MakePreviewContentsActiveContents() {
-    active_ = preview_;
-    preview_ = NULL;
-    Layout();
-  }
-
-  // Sets the preview view. This does not delete the old.
-  void SetPreview(views::View* preview) {
-    if (preview == preview_)
-      return;
-
-    if (preview_)
-      RemoveChildView(preview_);
-    preview_ = preview;
-    if (preview_)
-      AddChildView(preview_);
-
-    Layout();
-  }
-
-  virtual void Layout() {
-    // The active view always gets the full bounds.
-    active_->SetBounds(0, 0, width(), height());
-
-    if (preview_) {
-      // The preview view gets the full width and is positioned beneath the
-      // bottom of the autocompleted popup.
-      int max_autocomplete_y = browser_view_->toolbar()->location_bar()->
-          location_entry()->model()->popup_model()->view()->GetMaxYCoordinate();
-      gfx::Point screen_origin;
-      views::View::ConvertPointToScreen(this, &screen_origin);
-      DCHECK_GT(max_autocomplete_y, screen_origin.y());
-      int preview_origin = max_autocomplete_y - screen_origin.y();
-      if (preview_origin < height()) {
-        preview_->SetBounds(0, preview_origin, width(),
-                            height() - preview_origin);
-      } else {
-        preview_->SetBounds(0, 0, 0, 0);
-      }
-    }
-
-    // Need to invoke views::View in case any views whose bounds didn't change
-    // still need a layout.
-    views::View::Layout();
-  }
-
- private:
-  BrowserView* browser_view_;
-  views::View* active_;
-  views::View* preview_;
-
-  DISALLOW_COPY_AND_ASSIGN(ContentsContainer);
-};
 
 ///////////////////////////////////////////////////////////////////////////////
 // BookmarkExtensionBackground, private:
@@ -970,12 +905,16 @@ void BrowserView::FocusAppMenu() {
   // Chrome doesn't have a traditional menu bar, but it has a menu button in the
   // main toolbar that plays the same role.  If the user presses a key that
   // would typically focus the menu bar, tell the toolbar to focus the menu
-  // button.  Pass it the storage id of the view where focus should be returned
-  // if the user presses escape.
+  // button.  If the user presses the key again, return focus to the previous
+  // location.
   //
   // Not used on the Mac, which has a normal menu bar.
-  SaveFocusedView();
-  toolbar_->SetToolbarFocusAndFocusAppMenu(last_focused_view_storage_id_);
+  if (toolbar_->IsAppMenuFocused()) {
+    RestoreFocus();
+  } else {
+    SaveFocusedView();
+    toolbar_->SetToolbarFocusAndFocusAppMenu(last_focused_view_storage_id_);
+  }
 }
 
 void BrowserView::RotatePaneFocus(bool forwards) {
@@ -1099,6 +1038,18 @@ void BrowserView::DisableInactiveFrame() {
 #if defined(OS_WIN)
   frame_->GetWindow()->DisableInactiveRendering();
 #endif  // No tricks are needed to get the right behavior on Linux.
+}
+
+void BrowserView::ConfirmSetDefaultSearchProvider(
+    TabContents* tab_contents,
+    TemplateURL* template_url,
+    TemplateURLModel* template_url_model) {
+#if defined(OS_WIN)
+  DefaultSearchView::Show(tab_contents, template_url, template_url_model);
+#else
+  // TODO(levin): Implement for other platforms. Right now this is behind
+  // a command line flag which is off.
+#endif
 }
 
 void BrowserView::ConfirmAddSearchProvider(const TemplateURL* template_url,
@@ -1226,8 +1177,8 @@ void BrowserView::ShowThemeInstallBubble() {
 void BrowserView::ConfirmBrowserCloseWithPendingDownloads() {
   DownloadInProgressConfirmDialogDelegate* delegate =
       new DownloadInProgressConfirmDialogDelegate(browser_.get());
-  views::Window::CreateChromeWindow(GetNativeHandle(), gfx::Rect(),
-                                    delegate)->Show();
+  browser::CreateViewsWindow(GetNativeHandle(), gfx::Rect(),
+                             delegate)->Show();
 }
 
 void BrowserView::ShowHTMLDialog(HtmlDialogUIDelegate* delegate,
@@ -1275,7 +1226,7 @@ void BrowserView::ShowPageInfo(Profile* profile,
 #endif  // defined(OS_CHROMEOS)
 
   const CommandLine* command_line(CommandLine::ForCurrentProcess());
-  if (command_line->HasSwitch(switches::kEnableNewPageInfoBubble))
+  if (!command_line->HasSwitch(switches::kDisableNewPageInfoBubble))
     browser::ShowPageInfoBubble(parent, profile, url, ssl, show_history);
   else
     browser::ShowPageInfo(parent, profile, url, ssl, show_history);
@@ -1422,6 +1373,28 @@ void BrowserView::ToggleTabStripMode() {
   frame_->TabStripDisplayModeChanged();
 }
 
+void BrowserView::ShowInstant(TabContents* preview_contents) {
+  if (!preview_container_)
+    preview_container_ = new TabContentsContainer();
+  contents_->SetPreview(preview_container_, preview_contents);
+  preview_container_->ChangeTabContents(preview_contents);
+}
+
+void BrowserView::HideInstant() {
+  if (!preview_container_)
+    return;
+
+  // The contents must be changed before SetPreview is invoked.
+  preview_container_->ChangeTabContents(NULL);
+  contents_->SetPreview(NULL, NULL);
+  delete preview_container_;
+  preview_container_ = NULL;
+}
+
+gfx::Rect BrowserView::GetInstantBounds() {
+  return contents_->GetPreviewBounds();
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // BrowserView, BrowserWindowTesting implementation:
 
@@ -1460,25 +1433,6 @@ void BrowserView::Observe(NotificationType type,
         Layout();
       }
       break;
-
-    case NotificationType::MATCH_PREVIEW_TAB_CONTENTS_CREATED:
-      if (Source<TabContents>(source).ptr() ==
-          browser_->GetSelectedTabContents()) {
-        ShowMatchPreview();
-      }
-      break;
-
-    case NotificationType::TAB_CONTENTS_DESTROYED: {
-      if (MatchPreview::IsEnabled()) {
-        TabContents* selected_contents = browser_->GetSelectedTabContents();
-        if (selected_contents &&
-            selected_contents->match_preview()->preview_contents() ==
-            Source<TabContents>(source).ptr()) {
-          HideMatchPreview();
-        }
-      }
-      break;
-    }
 
     case NotificationType::SIDEBAR_CHANGED:
       if (Details<SidebarContainer>(details)->tab_contents() ==
@@ -1530,12 +1484,9 @@ void BrowserView::TabSelectedAt(TabContents* old_contents,
 
 void BrowserView::TabReplacedAt(TabContents* old_contents,
                                 TabContents* new_contents,
-                                int index,
-                                TabStripModelObserver::TabReplaceType type) {
-  if (type != TabStripModelObserver::REPLACE_MATCH_PREVIEW ||
-      index != browser_->tabstrip_model()->selected_index()) {
+                                int index) {
+  if (index != browser_->tabstrip_model()->selected_index())
     return;
-  }
 
   // Swap the 'active' and 'preview' and delete what was the active.
   contents_->MakePreviewContentsActiveContents();
@@ -1613,6 +1564,14 @@ bool BrowserView::IsModal() const {
 
 std::wstring BrowserView::GetWindowTitle() const {
   return UTF16ToWideHack(browser_->GetWindowTitleForCurrentTab());
+}
+
+std::wstring BrowserView::GetAccessibleWindowTitle() const {
+  if (IsOffTheRecord()) {
+    return l10n_util::GetStringF(
+        IDS_ACCESSIBLE_INCOGNITO_WINDOW_TITLE_FORMAT, GetWindowTitle());
+  }
+  return GetWindowTitle();
 }
 
 views::View* BrowserView::GetInitiallyFocusedView() {
@@ -1744,7 +1703,7 @@ bool BrowserView::CanClose() const {
   if (!browser_->ShouldCloseWindow())
     return false;
 
-  if (browser_->tabstrip_model()->HasNonPhantomTabs()) {
+  if (!browser_->tabstrip_model()->empty()) {
     // Tab strip isn't empty.  Hide the frame (so it appears to have closed
     // immediately) and close all the tabs, allowing the renderers to shut
     // down. When the tab strip is empty we'll be called back again.
@@ -1814,23 +1773,24 @@ std::string BrowserView::GetClassName() const {
 void BrowserView::Layout() {
   if (ignore_layout_)
     return;
-  if (GetLayoutManager()) {
-    GetLayoutManager()->Layout(this);
-    SchedulePaint();
+  views::View::Layout();
+
+  // The status bubble position requires that all other layout finish first.
+  LayoutStatusBubble();
+
 #if defined(OS_WIN)
-    // Send the margins of the "user-perceived content area" of this
-    // browser window so AeroPeekManager can render a background-tab image in
-    // the area.
-    // TODO(pkasting) correct content inset??
-    if (aeropeek_manager_.get()) {
-      gfx::Insets insets(GetFindBarBoundingBox().y() + 1,
-                         0,
-                         0,
-                         0);
-      aeropeek_manager_->SetContentInsets(insets);
-    }
-#endif
+  // Send the margins of the "user-perceived content area" of this
+  // browser window so AeroPeekManager can render a background-tab image in
+  // the area.
+  // TODO(pkasting) correct content inset??
+  if (aeropeek_manager_.get()) {
+    gfx::Insets insets(GetFindBarBoundingBox().y() + 1,
+                       0,
+                       0,
+                       0);
+    aeropeek_manager_->SetContentInsets(insets);
   }
+#endif
 }
 
 void BrowserView::ViewHierarchyChanged(bool is_add,
@@ -1846,11 +1806,8 @@ void BrowserView::ChildPreferredSizeChanged(View* child) {
   Layout();
 }
 
-bool BrowserView::GetAccessibleRole(AccessibilityTypes::Role* role) {
-  DCHECK(role);
-
-  *role = AccessibilityTypes::ROLE_CLIENT;
-  return true;
+AccessibilityTypes::Role BrowserView::GetAccessibleRole() {
+  return AccessibilityTypes::ROLE_CLIENT;
 }
 
 void BrowserView::InfoBarSizeChanged(bool is_animating) {
@@ -1983,13 +1940,6 @@ void BrowserView::Init() {
 
   // We're now initialized and ready to process Layout requests.
   ignore_layout_ = false;
-
-  registrar_.Add(this,
-                 NotificationType::MATCH_PREVIEW_TAB_CONTENTS_CREATED,
-                 NotificationService::AllSources());
-  registrar_.Add(this,
-                 NotificationType::TAB_CONTENTS_DESTROYED,
-                 NotificationService::AllSources());
 }
 
 #if defined(OS_WIN)
@@ -2012,7 +1962,7 @@ BrowserViewLayout* BrowserView::GetBrowserViewLayout() const {
   return static_cast<BrowserViewLayout*>(GetLayoutManager());
 }
 
-void BrowserView::LayoutStatusBubble(int top) {
+void BrowserView::LayoutStatusBubble() {
   // In restored mode, the client area has a client edge between it and the
   // frame.
   int overlap = StatusBubbleViews::kShadowThickness +
@@ -2021,8 +1971,8 @@ void BrowserView::LayoutStatusBubble(int top) {
   if (UseVerticalTabs() && IsTabStripVisible())
     x += tabstrip_->bounds().right();
   int height = status_bubble_->GetPreferredSize().height();
-  gfx::Point origin(
-      -overlap, contents_container_->bounds().height() - height + overlap);
+  int contents_height = status_bubble_->base_view()->bounds().height();
+  gfx::Point origin(-overlap, contents_height - height + overlap);
   status_bubble_->SetBounds(origin.x(), origin.y(), width() / 3, height);
 }
 
@@ -2470,25 +2420,6 @@ void BrowserView::InitHangMonitor() {
                              hung_plugin_detect_freq);
   }
 #endif
-}
-
-void BrowserView::ShowMatchPreview() {
-  if (!preview_container_)
-    preview_container_ = new TabContentsContainer();
-  contents_->SetPreview(preview_container_);
-  preview_container_->ChangeTabContents(
-      browser_->GetSelectedTabContents()->match_preview()->preview_contents());
-}
-
-void BrowserView::HideMatchPreview() {
-  if (!preview_container_)
-    return;
-
-  // The contents must be changed before SetPreview is invoked.
-  preview_container_->ChangeTabContents(NULL);
-  contents_->SetPreview(NULL);
-  delete preview_container_;
-  preview_container_ = NULL;
 }
 
 void BrowserView::ProcessTabSelected(TabContents* new_contents,

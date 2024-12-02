@@ -9,6 +9,7 @@
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
 #include "net/base/test_completion_callback.h"
+#include "net/disk_cache/backend_impl.h"
 #include "net/disk_cache/disk_cache_test_base.h"
 #include "net/disk_cache/disk_cache_test_util.h"
 #include "net/disk_cache/entry_impl.h"
@@ -22,6 +23,10 @@ extern volatile bool g_cache_tests_error;
 
 // Tests that can run with different types of caches.
 class DiskCacheEntryTest : public DiskCacheTestWithCache {
+ public:
+  void InternalSyncIOBackground(disk_cache::Entry* entry);
+  void ExternalSyncIOBackground(disk_cache::Entry* entry);
+
  protected:
   void InternalSyncIO();
   void InternalAsyncIO();
@@ -33,6 +38,8 @@ class DiskCacheEntryTest : public DiskCacheTestWithCache {
   void GrowData();
   void TruncateData();
   void ZeroLengthIO();
+  void Buffering();
+  void SizeChanges();
   void ReuseEntry(int size);
   void InvalidData();
   void DoomNormalEntry();
@@ -45,15 +52,29 @@ class DiskCacheEntryTest : public DiskCacheTestWithCache {
   void PartialSparseEntry();
 };
 
-// We need to support synchronous IO even though it is not a supported operation
-// from the point of view of the disk cache's public interface, because we use
-// it internally, not just by a few tests, but as part of the implementation
-// (see sparse_control.cc, for example).
-void DiskCacheEntryTest::InternalSyncIO() {
-  disk_cache::Entry* entry = NULL;
-  ASSERT_EQ(net::OK, CreateEntry("the first key", &entry));
-  ASSERT_TRUE(NULL != entry);
+// Simple task to run part of a test from the cache thread.
+class SyncIOTask : public Task {
+ public:
+  SyncIOTask(DiskCacheEntryTest* test, disk_cache::Entry* entry)
+      : test_(test), entry_(entry) {}
 
+ protected:
+  DiskCacheEntryTest* test_;
+  disk_cache::Entry* entry_;
+};
+
+class InternalSyncIOTask : public SyncIOTask {
+ public:
+  InternalSyncIOTask(DiskCacheEntryTest* test, disk_cache::Entry* entry)
+      : SyncIOTask(test, entry) {}
+
+  virtual void Run() {
+    test_->InternalSyncIOBackground(entry_);
+  }
+};
+
+// This part of the test runs on the background thread.
+void DiskCacheEntryTest::InternalSyncIOBackground(disk_cache::Entry* entry) {
   const int kSize1 = 10;
   scoped_refptr<net::IOBuffer> buffer1 = new net::IOBuffer(kSize1);
   CacheTestFillBuffer(buffer1->data(), kSize1, false);
@@ -88,6 +109,19 @@ void DiskCacheEntryTest::InternalSyncIO() {
   // We need to delete the memory buffer on this thread.
   EXPECT_EQ(0, entry->WriteData(0, 0, NULL, 0, NULL, true));
   EXPECT_EQ(0, entry->WriteData(1, 0, NULL, 0, NULL, true));
+}
+
+// We need to support synchronous IO even though it is not a supported operation
+// from the point of view of the disk cache's public interface, because we use
+// it internally, not just by a few tests, but as part of the implementation
+// (see sparse_control.cc, for example).
+void DiskCacheEntryTest::InternalSyncIO() {
+  disk_cache::Entry* entry = NULL;
+  ASSERT_EQ(net::OK, CreateEntry("the first key", &entry));
+  ASSERT_TRUE(NULL != entry);
+
+  // The bulk of the test runs from within the task, on the cache thread.
+  RunTaskForTest(new InternalSyncIOTask(this, entry));
 
   entry->Doom();
   entry->Close();
@@ -250,10 +284,18 @@ TEST_F(DiskCacheEntryTest, MemoryOnlyInternalAsyncIO) {
   InternalAsyncIO();
 }
 
-void DiskCacheEntryTest::ExternalSyncIO() {
-  disk_cache::Entry* entry;
-  ASSERT_EQ(net::OK, CreateEntry("the first key", &entry));
+class ExternalSyncIOTask : public SyncIOTask {
+ public:
+  ExternalSyncIOTask(DiskCacheEntryTest* test, disk_cache::Entry* entry)
+      : SyncIOTask(test, entry) {}
 
+  virtual void Run() {
+    test_->ExternalSyncIOBackground(entry_);
+  }
+};
+
+// This part of the test runs on the background thread.
+void DiskCacheEntryTest::ExternalSyncIOBackground(disk_cache::Entry* entry) {
   const int kSize1 = 17000;
   const int kSize2 = 25000;
   scoped_refptr<net::IOBuffer> buffer1 = new net::IOBuffer(kSize1);
@@ -283,6 +325,14 @@ void DiskCacheEntryTest::ExternalSyncIO() {
   // We need to delete the memory buffer on this thread.
   EXPECT_EQ(0, entry->WriteData(0, 0, NULL, 0, NULL, true));
   EXPECT_EQ(0, entry->WriteData(1, 0, NULL, 0, NULL, true));
+}
+
+void DiskCacheEntryTest::ExternalSyncIO() {
+  disk_cache::Entry* entry;
+  ASSERT_EQ(net::OK, CreateEntry("the first key", &entry));
+
+  // The bulk of the test runs from within the task, on the cache thread.
+  RunTaskForTest(new ExternalSyncIOTask(this, entry));
 
   entry->Doom();
   entry->Close();
@@ -293,6 +343,13 @@ void DiskCacheEntryTest::ExternalSyncIO() {
 TEST_F(DiskCacheEntryTest, ExternalSyncIO) {
   SetDirectMode();
   InitCache();
+  ExternalSyncIO();
+}
+
+TEST_F(DiskCacheEntryTest, ExternalSyncIONoBuffer) {
+  SetDirectMode();
+  InitCache();
+  cache_impl_->SetFlags(disk_cache::kNoBuffering);
   ExternalSyncIO();
 }
 
@@ -402,6 +459,13 @@ void DiskCacheEntryTest::ExternalAsyncIO() {
 TEST_F(DiskCacheEntryTest, ExternalAsyncIO) {
   SetDirectMode();
   InitCache();
+  ExternalAsyncIO();
+}
+
+TEST_F(DiskCacheEntryTest, ExternalAsyncIONoBuffer) {
+  SetDirectMode();
+  InitCache();
+  cache_impl_->SetFlags(disk_cache::kNoBuffering);
   ExternalAsyncIO();
 }
 
@@ -615,6 +679,13 @@ TEST_F(DiskCacheEntryTest, GrowData) {
   GrowData();
 }
 
+TEST_F(DiskCacheEntryTest, GrowDataNoBuffer) {
+  SetDirectMode();
+  InitCache();
+  cache_impl_->SetFlags(disk_cache::kNoBuffering);
+  GrowData();
+}
+
 TEST_F(DiskCacheEntryTest, MemoryOnlyGrowData) {
   SetMemoryOnlyMode();
   InitCache();
@@ -635,47 +706,47 @@ void DiskCacheEntryTest::TruncateData() {
   memset(buffer2->data(), 0, kSize2);
 
   // Simple truncation:
-  EXPECT_EQ(200, entry->WriteData(0, 0, buffer1, 200, NULL, false));
+  EXPECT_EQ(200, WriteData(entry, 0, 0, buffer1, 200, false));
   EXPECT_EQ(200, entry->GetDataSize(0));
-  EXPECT_EQ(100, entry->WriteData(0, 0, buffer1, 100, NULL, false));
+  EXPECT_EQ(100, WriteData(entry, 0, 0, buffer1, 100, false));
   EXPECT_EQ(200, entry->GetDataSize(0));
-  EXPECT_EQ(100, entry->WriteData(0, 0, buffer1, 100, NULL, true));
+  EXPECT_EQ(100, WriteData(entry, 0, 0, buffer1, 100, true));
   EXPECT_EQ(100, entry->GetDataSize(0));
-  EXPECT_EQ(0, entry->WriteData(0, 50, buffer1, 0, NULL, true));
+  EXPECT_EQ(0, WriteData(entry, 0, 50, buffer1, 0, true));
   EXPECT_EQ(50, entry->GetDataSize(0));
-  EXPECT_EQ(0, entry->WriteData(0, 0, buffer1, 0, NULL, true));
+  EXPECT_EQ(0, WriteData(entry, 0, 0, buffer1, 0, true));
   EXPECT_EQ(0, entry->GetDataSize(0));
   entry->Close();
   ASSERT_EQ(net::OK, OpenEntry(key, &entry));
 
   // Go to an external file.
-  EXPECT_EQ(20000, entry->WriteData(0, 0, buffer1, 20000, NULL, true));
+  EXPECT_EQ(20000, WriteData(entry, 0, 0, buffer1, 20000, true));
   EXPECT_EQ(20000, entry->GetDataSize(0));
-  EXPECT_EQ(20000, entry->ReadData(0, 0, buffer2, 20000, NULL));
+  EXPECT_EQ(20000, ReadData(entry, 0, 0, buffer2, 20000));
   EXPECT_TRUE(!memcmp(buffer1->data(), buffer2->data(), 20000));
   memset(buffer2->data(), 0, kSize2);
 
   // External file truncation
-  EXPECT_EQ(18000, entry->WriteData(0, 0, buffer1, 18000, NULL, false));
+  EXPECT_EQ(18000, WriteData(entry, 0, 0, buffer1, 18000, false));
   EXPECT_EQ(20000, entry->GetDataSize(0));
-  EXPECT_EQ(18000, entry->WriteData(0, 0, buffer1, 18000, NULL, true));
+  EXPECT_EQ(18000, WriteData(entry, 0, 0, buffer1, 18000, true));
   EXPECT_EQ(18000, entry->GetDataSize(0));
-  EXPECT_EQ(0, entry->WriteData(0, 17500, buffer1, 0, NULL, true));
+  EXPECT_EQ(0, WriteData(entry, 0, 17500, buffer1, 0, true));
   EXPECT_EQ(17500, entry->GetDataSize(0));
 
   // And back to an internal block.
-  EXPECT_EQ(600, entry->WriteData(0, 1000, buffer1, 600, NULL, true));
+  EXPECT_EQ(600, WriteData(entry, 0, 1000, buffer1, 600, true));
   EXPECT_EQ(1600, entry->GetDataSize(0));
-  EXPECT_EQ(600, entry->ReadData(0, 1000, buffer2, 600, NULL));
+  EXPECT_EQ(600, ReadData(entry, 0, 1000, buffer2, 600));
   EXPECT_TRUE(!memcmp(buffer1->data(), buffer2->data(), 600));
-  EXPECT_EQ(1000, entry->ReadData(0, 0, buffer2, 1000, NULL));
+  EXPECT_EQ(1000, ReadData(entry, 0, 0, buffer2, 1000));
   EXPECT_TRUE(!memcmp(buffer1->data(), buffer2->data(), 1000)) <<
       "Preserves previous data";
 
   // Go from external file to zero length.
-  EXPECT_EQ(20000, entry->WriteData(0, 0, buffer1, 20000, NULL, true));
+  EXPECT_EQ(20000, WriteData(entry, 0, 0, buffer1, 20000, true));
   EXPECT_EQ(20000, entry->GetDataSize(0));
-  EXPECT_EQ(0, entry->WriteData(0, 0, buffer1, 0, NULL, true));
+  EXPECT_EQ(0, WriteData(entry, 0, 0, buffer1, 0, true));
   EXPECT_EQ(0, entry->GetDataSize(0));
 
   entry->Close();
@@ -683,6 +754,18 @@ void DiskCacheEntryTest::TruncateData() {
 
 TEST_F(DiskCacheEntryTest, TruncateData) {
   InitCache();
+  TruncateData();
+
+  // We generate asynchronous IO that is not really tracked until completion
+  // so we just wait here before running the next test.
+  MessageLoopHelper helper;
+  helper.WaitUntilCacheIoFinished(1);
+}
+
+TEST_F(DiskCacheEntryTest, TruncateDataNoBuffer) {
+  SetDirectMode();
+  InitCache();
+  cache_impl_->SetFlags(disk_cache::kNoBuffering);
   TruncateData();
 
   // We generate asynchronous IO that is not really tracked until completion
@@ -740,6 +823,13 @@ TEST_F(DiskCacheEntryTest, ZeroLengthIO) {
   ZeroLengthIO();
 }
 
+TEST_F(DiskCacheEntryTest, ZeroLengthIONoBuffer) {
+  SetDirectMode();
+  InitCache();
+  cache_impl_->SetFlags(disk_cache::kNoBuffering);
+  ZeroLengthIO();
+}
+
 TEST_F(DiskCacheEntryTest, MemoryOnlyZeroLengthIO) {
   SetMemoryOnlyMode();
   InitCache();
@@ -747,8 +837,7 @@ TEST_F(DiskCacheEntryTest, MemoryOnlyZeroLengthIO) {
 }
 
 // Tests that we handle the content correctly when buffering.
-TEST_F(DiskCacheEntryTest, Buffering) {
-  InitCache();
+void DiskCacheEntryTest::Buffering() {
   std::string key("the first key");
   disk_cache::Entry* entry;
   ASSERT_EQ(net::OK, CreateEntry(key, &entry));
@@ -814,10 +903,21 @@ TEST_F(DiskCacheEntryTest, Buffering) {
   entry->Close();
 }
 
+TEST_F(DiskCacheEntryTest, Buffering) {
+  InitCache();
+  Buffering();
+}
+
+TEST_F(DiskCacheEntryTest, BufferingNoBuffer) {
+  SetDirectMode();
+  InitCache();
+  cache_impl_->SetFlags(disk_cache::kNoBuffering);
+  Buffering();
+}
+
 // Some extra tests to make sure that buffering works properly when changing
 // the entry size.
-TEST_F(DiskCacheEntryTest, SizeChanges) {
-  InitCache();
+void DiskCacheEntryTest::SizeChanges() {
   std::string key("the first key");
   disk_cache::Entry* entry;
   ASSERT_EQ(net::OK, CreateEntry(key, &entry));
@@ -888,6 +988,18 @@ TEST_F(DiskCacheEntryTest, SizeChanges) {
   EXPECT_EQ(19000 + kSize, entry->GetDataSize(1));
 
   entry->Close();
+}
+
+TEST_F(DiskCacheEntryTest, SizeChanges) {
+  InitCache();
+  SizeChanges();
+}
+
+TEST_F(DiskCacheEntryTest, SizeChangesNoBuffer) {
+  SetDirectMode();
+  InitCache();
+  cache_impl_->SetFlags(disk_cache::kNoBuffering);
+  SizeChanges();
 }
 
 // Write more than the total cache capacity but to a single entry. |size| is the
@@ -1016,10 +1128,47 @@ TEST_F(DiskCacheEntryTest, InvalidData) {
   InvalidData();
 }
 
+TEST_F(DiskCacheEntryTest, InvalidDataNoBuffer) {
+  SetDirectMode();
+  InitCache();
+  cache_impl_->SetFlags(disk_cache::kNoBuffering);
+  InvalidData();
+}
+
 TEST_F(DiskCacheEntryTest, MemoryOnlyInvalidData) {
   SetMemoryOnlyMode();
   InitCache();
   InvalidData();
+}
+
+// Tests that the cache preserves the buffer of an IO operation.
+TEST_F(DiskCacheEntryTest, ReadWriteDestroyBuffer) {
+  InitCache();
+  std::string key("the first key");
+  disk_cache::Entry* entry;
+  ASSERT_EQ(net::OK, CreateEntry(key, &entry));
+
+  const int kSize = 200;
+  scoped_refptr<net::IOBuffer> buffer = new net::IOBuffer(kSize);
+  CacheTestFillBuffer(buffer->data(), kSize, false);
+
+  TestCompletionCallback cb;
+  EXPECT_EQ(net::ERR_IO_PENDING,
+            entry->WriteData(0, 0, buffer, kSize, &cb, false));
+
+  // Release our reference to the buffer.
+  buffer = NULL;
+  EXPECT_EQ(kSize, cb.WaitForResult());
+
+  // And now test with a Read().
+  buffer = new net::IOBuffer(kSize);
+  CacheTestFillBuffer(buffer->data(), kSize, false);
+
+  EXPECT_EQ(net::ERR_IO_PENDING, entry->ReadData(0, 0, buffer, kSize, &cb));
+  buffer = NULL;
+  EXPECT_EQ(kSize, cb.WaitForResult());
+
+  entry->Close();
 }
 
 void DiskCacheEntryTest::DoomNormalEntry() {
@@ -1279,7 +1428,7 @@ void DiskCacheEntryTest::GetAvailableRange() {
   rv = entry->GetAvailableRange(0x20F2000, kSize, &start, &cb);
   EXPECT_EQ(0x2000, cb.GetResult(rv));
   EXPECT_EQ(0x20F2000, start);
-  EXPECT_EQ(0x2000, entry->ReadSparseData(start, buf, kSize, NULL));
+  EXPECT_EQ(0x2000, ReadSparseData(entry, start, buf, kSize));
 
   // Make sure that we respect the |len| argument.
   start = 0;
@@ -1576,7 +1725,7 @@ void DiskCacheEntryTest::PartialSparseEntry() {
 
   scoped_refptr<net::IOBuffer> buf2 = new net::IOBuffer(kSize);
   memset(buf2->data(), 0, kSize);
-  EXPECT_EQ(0, entry->ReadSparseData(8000, buf2, kSize, NULL));
+  EXPECT_EQ(0, ReadSparseData(entry, 8000, buf2, kSize));
 
   EXPECT_EQ(500, ReadSparseData(entry, kSize, buf2, kSize));
   EXPECT_EQ(0, memcmp(buf2->data(), buf1->data() + kSize - 500, 500));

@@ -42,51 +42,6 @@
 #include "chrome/renderer/renderer_sandbox_support_linux.h"
 #endif
 
-template <typename T, size_t stack_capacity>
-class ResizableStackArray {
- public:
-  ResizableStackArray()
-      : cur_buffer_(stack_buffer_), cur_capacity_(stack_capacity) {
-  }
-  ~ResizableStackArray() {
-    FreeHeap();
-  }
-
-  T* get() const {
-    return cur_buffer_;
-  }
-
-  T& operator[](size_t i) {
-    return cur_buffer_[i];
-  }
-
-  size_t capacity() const {
-    return cur_capacity_;
-  }
-
-  void Resize(size_t new_size) {
-    if (new_size < cur_capacity_)
-      return;  // already big enough
-    FreeHeap();
-    cur_capacity_ = new_size;
-    cur_buffer_ = new T[new_size];
-  }
-
- private:
-  // Resets the heap buffer, if any
-  void FreeHeap() {
-    if (cur_buffer_ != stack_buffer_) {
-      delete[] cur_buffer_;
-      cur_buffer_ = stack_buffer_;
-      cur_capacity_ = stack_capacity;
-    }
-  }
-
-  T stack_buffer_[stack_capacity];
-  T* cur_buffer_;
-  size_t cur_capacity_;
-};
-
 // This definition of WriteBitmapFromPixels uses shared memory to communicate
 // across processes.
 void ScopedClipboardWriterGlue::WriteBitmapFromPixels(const void* pixels,
@@ -123,7 +78,7 @@ void ScopedClipboardWriterGlue::WriteBitmapFromPixels(const void* pixels,
 #else  // !OS_POSIX
   shared_buf_ = new base::SharedMemory;
   const bool created = shared_buf_ && shared_buf_->Create(
-      L"", false /* read write */, true /* open existing */, buf_size);
+      "", false /* read write */, true /* open existing */, buf_size);
   if (!shared_buf_ || !created || !shared_buf_->Map(buf_size)) {
     NOTREACHED();
     return;

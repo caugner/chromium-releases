@@ -15,7 +15,7 @@
 #include "base/i18n/time_formatting.h"
 #include "chrome/browser/bookmarks/bookmark_html_writer.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/importer/firefox2_importer.h"
 #include "chrome/test/testing_profile.h"
 #include "gfx/codec/png_codec.h"
@@ -143,8 +143,8 @@ class BookmarksObserver : public BookmarksExportObserver {
 // way of bookmark_html_writer, then using the importer to read it back in.
 TEST_F(BookmarkHTMLWriterTest, Test) {
   MessageLoop message_loop;
-  ChromeThread fake_ui_thread(ChromeThread::UI, &message_loop);
-  ChromeThread fake_file_thread(ChromeThread::FILE, &message_loop);
+  BrowserThread fake_ui_thread(BrowserThread::UI, &message_loop);
+  BrowserThread fake_file_thread(BrowserThread::FILE, &message_loop);
 
   TestingProfile profile;
   profile.CreateHistoryService(true, false);
@@ -186,7 +186,7 @@ TEST_F(BookmarkHTMLWriterTest, Test) {
   GURL url1_favicon("http://url1/icon.ico");
   GURL url2("http://url2");
   GURL url3("http://url3");
-  GURL url4("http://\"&;\"");
+  GURL url4("javascript:alert(\"Hello!\");");
   base::Time t1(base::Time::Now());
   base::Time t2(t1 + base::TimeDelta::FromHours(1));
   base::Time t3(t1 + base::TimeDelta::FromHours(1));

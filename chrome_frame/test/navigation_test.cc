@@ -287,6 +287,7 @@ TEST_P(FullTabNavigationTest, FLAKY_RestrictedSite) {
     return;
   }
   MockWindowObserver win_observer_mock;
+
   ScopedComPtr<IInternetSecurityManager> security_manager;
   HRESULT hr = security_manager.CreateInstance(CLSID_InternetSecurityManager);
   ASSERT_HRESULT_SUCCEEDED(hr);
@@ -294,25 +295,25 @@ TEST_P(FullTabNavigationTest, FLAKY_RestrictedSite) {
   hr = security_manager->SetZoneMapping(URLZONE_UNTRUSTED,
       GetTestUrl(L"").c_str(), SZM_CREATE);
 
-  EXPECT_CALL(ie_mock_, OnFileDownload(_, _))
-      .Times(testing::AnyNumber());
+  EXPECT_CALL(ie_mock_, OnFileDownload(_, _)).Times(testing::AnyNumber());
   server_mock_.ExpectAndServeAnyRequests(GetParam());
 
   ProtocolPatchMethod patch_method = GetPatchMethod();
 
-  const wchar_t* kDialogClass = L"#32770";
   const char* kAlertDlgCaption = "Security Alert";
 
-  EXPECT_CALL(ie_mock_, OnBeforeNavigate2(_,
-      testing::Field(&VARIANT::bstrVal,
-      testing::StrCaseEq(GetSimplePageUrl())), _, _, _, _, _))
-      .Times(1)
-      .WillOnce(WatchWindow(&win_observer_mock, kDialogClass));
+  EXPECT_CALL(ie_mock_, OnBeforeNavigate2(
+      _,
+      testing::Field(&VARIANT::bstrVal, testing::StrCaseEq(GetSimplePageUrl())),
+      _, _, _, _, _))
+    .Times(1)
+    .WillOnce(WatchWindow(&win_observer_mock, kAlertDlgCaption));
 
   if (patch_method == PATCH_METHOD_INET_PROTOCOL) {
-    EXPECT_CALL(ie_mock_, OnBeforeNavigate2(_,
-        testing::Field(&VARIANT::bstrVal,
-        testing::HasSubstr(L"res://")), _, _, _, _, _))
+    EXPECT_CALL(ie_mock_, OnBeforeNavigate2(
+        _,
+        testing::Field(&VARIANT::bstrVal, testing::HasSubstr(L"res://")),
+        _, _, _, _, _))
         .Times(testing::AtMost(1));
   }
 
@@ -320,11 +321,12 @@ TEST_P(FullTabNavigationTest, FLAKY_RestrictedSite) {
       testing::Field(&VARIANT::bstrVal, StrEq(GetSimplePageUrl()))))
       .Times(testing::AtMost(1));
 
-  EXPECT_CALL(win_observer_mock, OnWindowDetected(_, StrEq(kAlertDlgCaption)))
+  EXPECT_CALL(win_observer_mock, OnWindowOpen(_))
       .Times(1)
-      .WillOnce(testing::DoAll(
-          DoCloseWindow(),
-          CloseBrowserMock(&ie_mock_)));
+      .WillOnce(DoCloseWindow());
+  EXPECT_CALL(win_observer_mock, OnWindowClose(_))
+      .Times(1)
+      .WillOnce(CloseBrowserMock(&ie_mock_));
 
   LaunchIEAndNavigate(GetSimplePageUrl());
 
@@ -550,44 +552,64 @@ TEST_P(NavigationTransitionTest, FollowLink) {
   LaunchIEAndNavigate(GetLinkPageUrl());
 }
 
-// Basic navigation test fixture which uses the MockIEEventSink. These tests
-// are not parameterized.
-class NavigationTest : public MockIEEventSinkTest, public testing::Test {
- public:
-  NavigationTest() {}
-};
-
 // gMock matcher which tests if a url is blank.
 MATCHER(BlankUrl, "is \"\" or NULL") {
   return arg == NULL || wcslen(arg) == 0;
 }
 
-// Test navigation to a disallowed url.
-TEST_F(NavigationTest, DisallowedUrl) {
-  // If a navigation fails then IE issues a navigation to an interstitial
-  // page. Catch this to track navigation errors as the NavigateError
-  // notification does not seem to fire reliably.
-  const wchar_t disallowed_url[] = L"gcf:file:///C:/";
+// Basic navigation test fixture which uses the MockIEEventSink. These tests
+// are not parameterized.
+class NavigationTest : public MockIEEventSinkTest, public testing::Test {
+ public:
+  NavigationTest() {}
 
-  EXPECT_CALL(ie_mock_, OnBeforeNavigate2(_, testing::Field(&VARIANT::bstrVal,
-                                          StrEq(disallowed_url)),
-                                          _, _, _, _, _));
-  EXPECT_CALL(ie_mock_, OnLoad(IN_IE, BlankUrl()))
-      .Times(testing::AtMost(1));
-  EXPECT_CALL(ie_mock_, OnBeforeNavigate2(_, testing::Field(&VARIANT::bstrVal,
-                                          testing::StartsWith(L"res:")),
-                                          _, _, _, _, _));
-  EXPECT_CALL(ie_mock_, OnFileDownload(VARIANT_TRUE, _))
-      .Times(testing::AnyNumber())
-      .WillRepeatedly(testing::Return());
-  EXPECT_CALL(ie_mock_, OnNavigateComplete2(_, testing::Field(&VARIANT::bstrVal,
-                                            StrEq(disallowed_url))));
-  // Although we expect a load event for this, we should never receive a
-  // corresponding GET request.
-  EXPECT_CALL(ie_mock_, OnLoad(IN_IE, StrEq(disallowed_url)))
-      .WillOnce(CloseBrowserMock(&ie_mock_));
+  void TestDisAllowedUrl(const wchar_t* url) {
+    // If a navigation fails then IE issues a navigation to an interstitial
+    // page. Catch this to track navigation errors as the NavigateError
+    // notification does not seem to fire reliably.
+    EXPECT_CALL(ie_mock_, OnBeforeNavigate2(_, testing::Field(&VARIANT::bstrVal,
+                                            StrEq(url)),
+                                            _, _, _, _, _));
+    EXPECT_CALL(ie_mock_, OnLoad(IN_IE, BlankUrl()))
+        .Times(testing::AtMost(1));
+    EXPECT_CALL(ie_mock_, OnBeforeNavigate2(_, testing::Field(&VARIANT::bstrVal,
+                                            testing::StartsWith(L"res:")),
+                                            _, _, _, _, _));
+    EXPECT_CALL(ie_mock_, OnFileDownload(VARIANT_TRUE, _))
+        .Times(testing::AnyNumber())
+        .WillRepeatedly(testing::Return());
+    EXPECT_CALL(ie_mock_, OnNavigateComplete2(_,
+                                              testing::Field(&VARIANT::bstrVal,
+                                              StrEq(url))));
+    // Although we expect a load event for this, we should never receive a
+    // corresponding GET request.
+    EXPECT_CALL(ie_mock_, OnLoad(IN_IE, StrEq(url)))
+        .WillOnce(CloseBrowserMock(&ie_mock_));
 
-  LaunchIEAndNavigate(disallowed_url);
+    LaunchIEAndNavigate(url);
+  }
+
+};
+
+// Test navigation to a disallowed gcf: url with file scheme.
+TEST_F(NavigationTest, GcfProtocol1) {
+  // Make sure that we are not accidently enabling gcf protocol.
+  SetConfigBool(kAllowUnsafeURLs, false);
+  TestDisAllowedUrl(L"gcf:file:///C:/");
+}
+
+// Test navigation to a disallowed gcf: url with http scheme.
+TEST_F(NavigationTest, GcfProtocol2) {
+  // Make sure that we are not accidently enabling gcf protocol.
+  SetConfigBool(kAllowUnsafeURLs, false);
+  TestDisAllowedUrl(L"gcf:http://www.google.com");
+}
+
+// Test navigation to a disallowed gcf: url with https scheme.
+TEST_F(NavigationTest, GcfProtocol3) {
+  // Make sure that we are not accidently enabling gcf protocol.
+  SetConfigBool(kAllowUnsafeURLs, false);
+  TestDisAllowedUrl(L"gcf:https://www.google.com");
 }
 
 // NOTE: This test is currently disabled as we haven't finished implementing

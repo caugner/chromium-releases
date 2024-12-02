@@ -7,6 +7,8 @@
 #ifndef GPU_COMMAND_BUFFER_SERVICE_GLES2_CMD_DECODER_H_
 #define GPU_COMMAND_BUFFER_SERVICE_GLES2_CMD_DECODER_H_
 
+#include <vector>
+
 #include "base/callback.h"
 #include "build/build_config.h"
 #include "gfx/size.h"
@@ -48,14 +50,18 @@ class GLES2Decoder : public CommonDecoder {
   // Parameters:
   //  context: the GL context to render to.
   //  size: the size if the GL context is offscreen.
+  //  allowed_features: A string in the same format as
+  //      glGetString(GL_EXTENSIONS) that lists the extensions this context
+  //      should allow. Passing NULL means allow all extensions.
   //  parent: the GLES2 decoder that can access this decoder's front buffer
-  //          through a texture ID in its namespace.
+  //      through a texture ID in its namespace.
   //  parent_client_texture_id: the texture ID of the front buffer in the
-  //                            parent's namespace.
+  //      parent's namespace.
   // Returns:
   //   true if successful.
   virtual bool Initialize(gfx::GLContext* context,
                           const gfx::Size& size,
+                          const std::vector<int32>& attribs,
                           GLES2Decoder* parent,
                           uint32 parent_client_texture_id) = 0;
 
@@ -81,6 +87,13 @@ class GLES2Decoder : public CommonDecoder {
 
   // Sets a callback which is called when a SwapBuffers command is processed.
   virtual void SetSwapBuffersCallback(Callback0::Type* callback) = 0;
+
+  // Get the service texture ID corresponding to a client texture ID.
+  // If no such record is found then return false.
+  virtual bool GetServiceTextureId(uint32 client_texture_id,
+                                   uint32* service_texture_id) {
+    return false;
+  }
 
  protected:
   explicit GLES2Decoder(ContextGroup* group);

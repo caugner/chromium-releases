@@ -18,6 +18,7 @@
 #include "chrome/browser/extensions/extension_install_ui.h"
 #include "chrome/browser/extensions/extensions_service.h"
 #include "chrome/browser/extensions/extension_tabs_module.h"
+#include "chrome/browser/prefs/pref_change_registrar.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/common/extensions/extension.h"
@@ -45,8 +46,7 @@ class AsyncUninstaller : public ExtensionInstallUI::Delegate {
   ~AsyncUninstaller() {}
 
   // Overridden by ExtensionInstallUI::Delegate.
-  virtual void InstallUIProceed(bool create_shortcut) {
-    DCHECK(!create_shortcut);
+  virtual void InstallUIProceed() {
     profile_->GetExtensionsService()->
         UninstallExtension(extension_->id(), false);
   }
@@ -72,14 +72,10 @@ class DevmodeObserver : public NotificationObserver {
   DevmodeObserver(ExtensionActionContextMenu* menu,
                              PrefService* service)
       : menu_(menu), pref_service_(service) {
-    pref_service_->AddPrefObserver(prefs::kExtensionsUIDeveloperMode,
-                                   this);
+    registrar_.Init(pref_service_);
+    registrar_.Add(prefs::kExtensionsUIDeveloperMode, this);
   }
-
-  ~DevmodeObserver() {
-    pref_service_->RemovePrefObserver(prefs::kExtensionsUIDeveloperMode,
-                                      this);
-  }
+  virtual ~DevmodeObserver() {}
 
   void Observe(NotificationType type,
                const NotificationSource& source,
@@ -93,6 +89,7 @@ class DevmodeObserver : public NotificationObserver {
  private:
   ExtensionActionContextMenu* menu_;
   PrefService* pref_service_;
+  PrefChangeRegistrar registrar_;
 };
 
 }  // namespace extension_action_context_menu

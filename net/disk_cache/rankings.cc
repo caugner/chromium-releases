@@ -65,6 +65,7 @@ enum CrashLocation {
   ON_REMOVE_3, ON_REMOVE_4, ON_REMOVE_5, ON_REMOVE_6, ON_REMOVE_7, ON_REMOVE_8
 };
 
+#ifndef NDEBUG
 void TerminateSelf() {
 #if defined(OS_WIN)
   // Windows does more work on _exit() than we would like, so we force exit.
@@ -75,6 +76,7 @@ void TerminateSelf() {
   _exit(0);
 #endif
 }
+#endif  // NDEBUG
 
 // Generates a crash on debug builds, acording to the value of g_rankings_crash.
 // This used by crash_cache.exe to generate unit-test files.
@@ -175,6 +177,20 @@ void GenerateCrash(CrashLocation location) {
 }  // namespace
 
 namespace disk_cache {
+
+Rankings::Iterator::Iterator(Rankings* rankings) {
+  memset(this, 0, sizeof(Iterator));
+  my_rankings = rankings;
+}
+
+Rankings::Iterator::~Iterator() {
+  for (int i = 0; i < 3; i++)
+    ScopedRankingsBlock(my_rankings, nodes[i]);
+}
+
+Rankings::Rankings() : init_(false) {}
+
+Rankings::~Rankings() {}
 
 bool Rankings::Init(BackendImpl* backend, bool count_lists) {
   DCHECK(!init_);

@@ -138,10 +138,6 @@ class NavigationController {
 
   // ---------------------------------------------------------------------------
 
-  // The session storage namespace parameter allows multiple render views and
-  // tab contentses to share the same session storage (part of the WebStorage
-  // spec) space. Passing in NULL simply allocates a new one which is often the
-  // correct thing to do (especially in tests.
   NavigationController(TabContents* tab_contents,
                        Profile* profile,
                        SessionStorageNamespace* session_storage_namespace);
@@ -376,7 +372,13 @@ class NavigationController {
   // this:   E F *G*   (last must be active or pending)
   // result: A B *G*
   // This ignores the transient index of the source and honors that of 'this'.
-  void CopyStateFromAndPrune(const NavigationController& source);
+  // This should only be used when you are going to destroy |source| right after
+  // invoking this.
+  void CopyStateFromAndPrune(NavigationController* source);
+
+  // Removes all the entries except the active entry. If there is a new pending
+  // navigation it is preserved.
+  void PruneAllButActive();
 
   // Random data ---------------------------------------------------------------
 
@@ -392,6 +394,12 @@ class NavigationController {
   // Returns true if a reload happens when activated (SetActive(true) is
   // invoked). This is true for session/tab restore and cloned tabs.
   bool needs_reload() const { return needs_reload_; }
+
+  // Sets the max restored page ID this NavigationController has seen, if it
+  // was restored from a previous session.
+  void set_max_restored_page_id(int32 max_id) {
+    max_restored_page_id_ = max_id;
+  }
 
   // Returns the largest restored page ID seen in this navigation controller,
   // if it was restored from a previous session.  (-1 otherwise)
@@ -483,12 +491,6 @@ class NavigationController {
   void NotifyNavigationEntryCommitted(LoadCommittedDetails* details,
                                       int extra_invalidate_flags);
 
-  // Sets the max restored page ID this NavigationController has seen, if it
-  // was restored from a previous session.
-  void set_max_restored_page_id(int32 max_id) {
-    max_restored_page_id_ = max_id;
-  }
-
   // Updates the virtual URL of an entry to match a new URL, for cases where
   // the real renderer URL is derived from the virtual URL, like view-source:
   void UpdateVirtualURLToURL(NavigationEntry* entry, const GURL& new_url);
@@ -520,10 +522,6 @@ class NavigationController {
   void CreateNavigationEntriesFromTabNavigations(
       const std::vector<TabNavigation>& navigations,
       std::vector<linked_ptr<NavigationEntry> >* entries);
-
-  // Removes all the entries except the active entry. If there is a new pending
-  // navigation it is preserved.
-  void PruneAllButActive();
 
   // Inserts up to |max_index| entries from |source| into this. This does NOT
   // adjust any of the members that reference entries_

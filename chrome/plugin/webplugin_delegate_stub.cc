@@ -116,12 +116,14 @@ void WebPluginDelegateStub::OnMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER(PluginMsg_UpdateGeometrySync, OnUpdateGeometry)
     IPC_MESSAGE_HANDLER(PluginMsg_SendJavaScriptStream,
                         OnSendJavaScriptStream)
+    IPC_MESSAGE_HANDLER(PluginMsg_SetContentAreaFocus, OnSetContentAreaFocus)
 #if defined(OS_MACOSX)
     IPC_MESSAGE_HANDLER(PluginMsg_SetWindowFocus, OnSetWindowFocus)
-    IPC_MESSAGE_HANDLER(PluginMsg_SetContentAreaFocus, OnSetContentAreaFocus)
     IPC_MESSAGE_HANDLER(PluginMsg_ContainerHidden, OnContainerHidden)
     IPC_MESSAGE_HANDLER(PluginMsg_ContainerShown, OnContainerShown)
     IPC_MESSAGE_HANDLER(PluginMsg_WindowFrameChanged, OnWindowFrameChanged)
+    IPC_MESSAGE_HANDLER(PluginMsg_ImeCompositionConfirmed,
+                        OnImeCompositionConfirmed)
 #endif
     IPC_MESSAGE_HANDLER(PluginMsg_DidReceiveManualResponse,
                         OnDidReceiveManualResponse)
@@ -336,30 +338,41 @@ void WebPluginDelegateStub::OnSendJavaScriptStream(const GURL& url,
   delegate_->SendJavaScriptStream(url, result, success, notify_id);
 }
 
-#if defined(OS_MACOSX)
-void WebPluginDelegateStub::OnSetWindowFocus(bool has_focus) {
-  delegate_->SetWindowHasFocus(has_focus);
+void WebPluginDelegateStub::OnSetContentAreaFocus(bool has_focus) {
+  if (delegate_)
+    delegate_->SetContentAreaHasFocus(has_focus);
 }
 
-void WebPluginDelegateStub::OnSetContentAreaFocus(bool has_focus) {
-  delegate_->SetContentAreaHasFocus(has_focus);
+#if defined(OS_MACOSX)
+void WebPluginDelegateStub::OnSetWindowFocus(bool has_focus) {
+  if (delegate_)
+    delegate_->SetWindowHasFocus(has_focus);
 }
 
 void WebPluginDelegateStub::OnContainerHidden() {
-  delegate_->SetContainerVisibility(false);
+  if (delegate_)
+    delegate_->SetContainerVisibility(false);
 }
 
 void WebPluginDelegateStub::OnContainerShown(gfx::Rect window_frame,
                                              gfx::Rect view_frame,
                                              bool has_focus) {
-  delegate_->WindowFrameChanged(window_frame, view_frame);
-  delegate_->SetContainerVisibility(true);
-  delegate_->SetWindowHasFocus(has_focus);
+  if (delegate_) {
+    delegate_->WindowFrameChanged(window_frame, view_frame);
+    delegate_->SetContainerVisibility(true);
+    delegate_->SetWindowHasFocus(has_focus);
+  }
 }
 
 void WebPluginDelegateStub::OnWindowFrameChanged(const gfx::Rect& window_frame,
                                                  const gfx::Rect& view_frame) {
-  delegate_->WindowFrameChanged(window_frame, view_frame);
+  if (delegate_)
+    delegate_->WindowFrameChanged(window_frame, view_frame);
+}
+
+void WebPluginDelegateStub::OnImeCompositionConfirmed(const string16& text) {
+  if (delegate_)
+    delegate_->ImeCompositionConfirmed(text);
 }
 #endif  // OS_MACOSX
 
@@ -416,7 +429,7 @@ void WebPluginDelegateStub::CreateSharedBuffer(
     uint32 size,
     base::SharedMemory* shared_buf,
     base::SharedMemoryHandle* remote_handle) {
-  if (!shared_buf->Create(std::wstring(), false, false, size)) {
+  if (!shared_buf->Create(std::string(), false, false, size)) {
     NOTREACHED();
     return;
   }

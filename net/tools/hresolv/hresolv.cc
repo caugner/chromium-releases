@@ -29,6 +29,7 @@
 #include "base/file_util.h"
 #include "base/message_loop.h"
 #include "base/string_number_conversions.h"
+#include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/thread.h"
 #include "base/time.h"
@@ -133,28 +134,28 @@ std::string FormatAddrinfoDetails(const struct addrinfo& ai,
   std::string ai_addr = net::NetAddressToString(&ai);
   std::string ai_canonname;
   if (ai.ai_canonname) {
-    ai_canonname = StringPrintf("%s  ai_canonname: %s\n",
-                                indent,
-                                ai.ai_canonname);
+    ai_canonname = base::StringPrintf("%s  ai_canonname: %s\n",
+                                      indent,
+                                      ai.ai_canonname);
   }
-  return StringPrintf("%saddrinfo {\n"
-                      "%s  ai_flags: %s\n"
-                      "%s  ai_family: %s\n"
-                      "%s  ai_socktype: %s\n"
-                      "%s  ai_protocol: %s\n"
-                      "%s  ai_addrlen: %d\n"
-                      "%s  ai_addr: %s\n"
-                      "%s"
-                      "%s}\n",
-                      indent,
-                      indent, ai_flags.c_str(),
-                      indent, ai_family,
-                      indent, ai_socktype,
-                      indent, ai_protocol,
-                      indent, ai.ai_addrlen,
-                      indent, ai_addr.c_str(),
-                      ai_canonname.c_str(),
-                      indent);
+  return base::StringPrintf("%saddrinfo {\n"
+                            "%s  ai_flags: %s\n"
+                            "%s  ai_family: %s\n"
+                            "%s  ai_socktype: %s\n"
+                            "%s  ai_protocol: %s\n"
+                            "%s  ai_addrlen: %d\n"
+                            "%s  ai_addr: %s\n"
+                            "%s"
+                            "%s}\n",
+                            indent,
+                            indent, ai_flags.c_str(),
+                            indent, ai_family,
+                            indent, ai_socktype,
+                            indent, ai_protocol,
+                            indent, ai.ai_addrlen,
+                            indent, ai_addr.c_str(),
+                            ai_canonname.c_str(),
+                            indent);
 }
 
 std::string FormatAddressList(const net::AddressList& address_list,
@@ -190,7 +191,7 @@ class DelayedResolve : public base::RefCounted<DelayedResolve> {
 
   void Start() {
     net::CompletionCallback* callback = (is_async_) ? &io_callback_ : NULL;
-    net::HostResolver::RequestInfo request_info(host_, 80);
+    net::HostResolver::RequestInfo request_info(net::HostPortPair(host_, 80));
     int rv = resolver_->Resolve(request_info,
                                 &address_list_,
                                 callback,
@@ -214,7 +215,7 @@ class DelayedResolve : public base::RefCounted<DelayedResolve> {
   std::string host_;
   net::AddressList address_list_;
   bool is_async_;
-  scoped_refptr<net::HostResolver> resolver_;
+  net::HostResolver* const resolver_;
   ResolverInvoker* invoker_;
   net::CompletionCallbackImpl<DelayedResolve> io_callback_;
 };
@@ -288,7 +289,7 @@ class ResolverInvoker {
   }
 
   MessageLoop message_loop_;
-  scoped_refptr<net::HostResolver> resolver_;
+  net::HostResolver* const resolver_;
   int remaining_requests_;
 };
 
@@ -450,9 +451,8 @@ int main(int argc, char** argv) {
       base::TimeDelta::FromMilliseconds(options.cache_ttl),
       base::TimeDelta::FromSeconds(0));
 
-  scoped_refptr<net::HostResolver> host_resolver(
-      new net::HostResolverImpl(NULL, cache, 100u, NULL));
-  ResolverInvoker invoker(host_resolver.get());
+  net::HostResolverImpl host_resolver(NULL, cache, 100u, NULL);
+  ResolverInvoker invoker(&host_resolver);
   invoker.ResolveAll(hosts_and_times, options.async);
 
   CommandLine::Reset();

@@ -23,6 +23,9 @@
 #include "chrome/plugin/npobject_util.h"
 #include "chrome/plugin/plugin_channel.h"
 #include "chrome/plugin/plugin_thread.h"
+#if defined(OS_MACOSX)
+#include "chrome/plugin/webplugin_accelerated_surface_proxy_mac.h"
+#endif
 #include "gfx/blit.h"
 #include "gfx/canvas.h"
 #if defined(OS_WIN)
@@ -38,6 +41,9 @@
 
 using WebKit::WebBindings;
 using webkit_glue::WebPluginResourceClient;
+#if defined(OS_MACOSX)
+using webkit_glue::WebPluginAcceleratedSurface;
+#endif
 
 typedef std::map<CPBrowsingContext, WebPluginProxy*> ContextMap;
 static ContextMap& GetContextMap() {
@@ -91,6 +97,12 @@ WebPluginProxy::~WebPluginProxy() {
 #if defined(USE_X11)
   if (windowless_shm_pixmap_ != None)
     XFreePixmap(x11_util::GetXDisplay(), windowless_shm_pixmap_);
+#endif
+
+#if defined(OS_MACOSX)
+  // Destroy the surface early, since it may send messages during cleanup.
+  if (accelerated_surface_.get())
+    accelerated_surface_.reset();
 #endif
 }
 
@@ -636,8 +648,22 @@ void WebPluginProxy::SetDeferResourceLoading(unsigned long resource_id,
 }
 
 #if defined(OS_MACOSX)
+void WebPluginProxy::SetImeEnabled(bool enabled) {
+  IPC::Message* msg = new PluginHostMsg_SetImeEnabled(route_id_, enabled);
+  // This message can be sent during event-handling, and needs to be delivered
+  // within that context.
+  msg->set_unblock(true);
+  Send(msg);
+}
+
 void WebPluginProxy::BindFakePluginWindowHandle(bool opaque) {
   Send(new PluginHostMsg_BindFakePluginWindowHandle(route_id_, opaque));
+}
+
+WebPluginAcceleratedSurface* WebPluginProxy::GetAcceleratedSurface() {
+  if (!accelerated_surface_.get())
+    accelerated_surface_.reset(new WebPluginAcceleratedSurfaceProxy(this));
+  return accelerated_surface_.get();
 }
 
 void WebPluginProxy::AcceleratedFrameBuffersDidSwap(
@@ -645,12 +671,30 @@ void WebPluginProxy::AcceleratedFrameBuffersDidSwap(
   Send(new PluginHostMsg_AcceleratedSurfaceBuffersSwapped(route_id_, window));
 }
 
-void WebPluginProxy::SetAcceleratedSurface(gfx::PluginWindowHandle window,
-    int32 width,
-    int32 height,
+void WebPluginProxy::SetAcceleratedSurface(
+    gfx::PluginWindowHandle window,
+    const gfx::Size& size,
     uint64 accelerated_surface_identifier) {
   Send(new PluginHostMsg_AcceleratedSurfaceSetIOSurface(
-      route_id_, window, width, height, accelerated_surface_identifier));
+      route_id_, window, size.width(), size.height(),
+      accelerated_surface_identifier));
+}
+
+void WebPluginProxy::SetAcceleratedDIB(
+    gfx::PluginWindowHandle window,
+    const gfx::Size& size,
+    const TransportDIB::Handle& dib_handle) {
+  Send(new PluginHostMsg_AcceleratedSurfaceSetTransportDIB(
+      route_id_, window, size.width(), size.height(), dib_handle));
+}
+
+void WebPluginProxy::AllocSurfaceDIB(const size_t size,
+                                     TransportDIB::Handle* dib_handle) {
+  Send(new PluginHostMsg_AllocTransportDIB(route_id_, size, dib_handle));
+}
+
+void WebPluginProxy::FreeSurfaceDIB(TransportDIB::Id dib_id) {
+  Send(new PluginHostMsg_FreeTransportDIB(route_id_, dib_id));
 }
 #endif
 

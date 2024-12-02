@@ -42,6 +42,9 @@ cr.define('options', function() {
       $('profileList').onchange = function(event) {
         self.updateButtonState_();
       };
+      $('profileList').addEventListener('dblclick', function(event) {
+        self.editProfile_();
+      });
       $('addAddressButton').onclick = function(event) {
         self.showAddAddressOverlay_();
       };
@@ -56,20 +59,7 @@ cr.define('options', function() {
       };
 
       Preferences.getInstance().addEventListener('autofill.enabled',
-          cr.bind(self.updateEnabledState_, self));
-    },
-
-    /**
-     * Sets the enabled state of the button controls based on the current state
-     * of the |autoFillEnabled| checkbox.
-     * @private
-     */
-    updateEnabledState_: function() {
-      var disabled = !$('autoFillEnabled').checked;
-      $('addAddressButton').disabled = disabled;
-      $('addCreditCardButton').disabled = disabled;
-      $('autoFillEditButton').disabled = disabled;
-      $('autoFillRemoveButton').disabled = disabled;
+          this.updateButtonState_.bind(this));
     },
 
     /**
@@ -92,6 +82,8 @@ cr.define('options', function() {
      * @private
      */
     showEditAddressOverlay_: function(address) {
+      var title = localStrings.getString('editAddressTitle');
+      AutoFillEditAddressOverlay.setTitle(title);
       AutoFillEditAddressOverlay.loadAddress(address[0]);
       OptionsPage.showOverlay('autoFillEditAddressOverlay');
     },
@@ -106,6 +98,19 @@ cr.define('options', function() {
       var title = localStrings.getString('addCreditCardTitle');
       AutoFillEditCreditCardOverlay.setTitle(title);
       AutoFillEditCreditCardOverlay.clearInputFields();
+      OptionsPage.showOverlay('autoFillEditCreditCardOverlay');
+    },
+
+    /**
+     * Shows the 'Edit credit card' overlay, using the data in |credit_card| to
+     * fill the input fields. |address| is a list with one item, an associative
+     * array that contains the credit card data.
+     * @private
+     */
+    showEditCreditCardOverlay_: function(creditCard) {
+      var title = localStrings.getString('editCreditCardTitle');
+      AutoFillEditCreditCardOverlay.setTitle(title);
+      AutoFillEditCreditCardOverlay.loadCreditCard(creditCard[0]);
       OptionsPage.showOverlay('autoFillEditCreditCardOverlay');
     },
 
@@ -148,10 +153,11 @@ cr.define('options', function() {
       for (var i = 0; i < this.numAddresses; i++) {
         var address = addresses[i];
         var option = new Option(address['label']);
-        this.addressIDs[i] = address['unique_id'];
+        this.addressIDs[i] = address['uniqueID'];
         profileList.add(option, blankAddress);
       }
 
+      AutoFillEditCreditCardOverlay.setBillingAddresses(addresses);
       this.updateButtonState_();
     },
 
@@ -168,7 +174,7 @@ cr.define('options', function() {
       for (var i = 0; i < this.numCreditCards; i++) {
         var creditCard = creditCards[i];
         var option = new Option(creditCard['label']);
-        this.creditCardIDs[i] = creditCard['unique_id'];
+        this.creditCardIDs[i] = creditCard['uniqueID'];
         profileList.add(option, null);
       }
 
@@ -176,13 +182,18 @@ cr.define('options', function() {
     },
 
     /**
+     * Sets the enabled state of the AutoFill Add Address and Credit Card
+     * buttons on the current state of the |autoFillEnabled| checkbox.
      * Sets the enabled state of the AutoFill Edit and Remove buttons based on
      * the current selection in the profile list.
      * @private
      */
     updateButtonState_: function() {
+      var disabled = !$('autoFillEnabled').checked;
+      $('addAddressButton').disabled = disabled;
+      $('addCreditCardButton').disabled = disabled;
       $('autoFillRemoveButton').disabled = $('autoFillEditButton').disabled =
-          ($('profileList').selectedIndex == -1);
+          disabled || ($('profileList').selectedIndex == -1);
     },
 
     /**
@@ -196,7 +207,8 @@ cr.define('options', function() {
       if ((profileIndex = this.getAddressIndex_(idx)) != -1) {
         chrome.send('editAddress', [String(this.addressIDs[profileIndex])]);
       } else if ((profileIndex = this.getCreditCardIndex_(idx)) != -1) {
-        // TODO(jhawkins): Implement editCreditCard command.
+        chrome.send('editCreditCard',
+                    [String(this.creditCardIDs[profileIndex])]);
       }
     },
 
@@ -254,12 +266,16 @@ cr.define('options', function() {
     AutoFillOptions.getInstance().updateAddresses_(addresses);
   };
 
+  AutoFillOptions.editAddress = function(address) {
+    AutoFillOptions.getInstance().showEditAddressOverlay_(address);
+  };
+
   AutoFillOptions.updateCreditCards = function(creditCards) {
     AutoFillOptions.getInstance().updateCreditCards_(creditCards);
   };
 
-  AutoFillOptions.editAddress = function(address) {
-    AutoFillOptions.getInstance().showEditAddressOverlay_(address);
+  AutoFillOptions.editCreditCard = function(creditCard) {
+    AutoFillOptions.getInstance().showEditCreditCardOverlay_(creditCard);
   };
 
   // Export

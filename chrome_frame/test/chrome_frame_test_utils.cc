@@ -18,6 +18,7 @@
 #include "base/scoped_handle.h"
 #include "base/scoped_ptr.h"
 #include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "base/win_util.h"
 #include "chrome/common/chrome_switches.h"
@@ -27,7 +28,15 @@
 
 namespace chrome_frame_test {
 
-const int kDefaultWaitForIEToTerminateMs = 10 * 1000;
+const wchar_t kCrashServicePipeName[] = L"\\\\.\\pipe\\ChromeCrashServices";
+
+const DWORD kCrashServicePipeDesiredAccess = FILE_READ_DATA |
+                                             FILE_WRITE_DATA |
+                                             FILE_WRITE_ATTRIBUTES;
+
+const DWORD kCrashServicePipeFlagsAndAttributes = SECURITY_IDENTIFICATION |
+                                                  SECURITY_SQOS_PRESENT;
+const int kCrashServiceStartupTimeoutMs = 500;
 
 const wchar_t kIEImageName[] = L"iexplore.exe";
 const wchar_t kIEBrokerImageName[] = L"ieuser.exe";
@@ -47,12 +56,12 @@ BOOL CALLBACK CloseWindowsThreadCallback(HWND hwnd, LPARAM param) {
       DWORD results = 0;
       if (!::SendMessageTimeout(hwnd, WM_SYSCOMMAND, SC_CLOSE, 0, SMTO_BLOCK,
                                 10000, &results)) {
-        LOG(WARNING) << "Window hung: " << StringPrintf(L"%08X", hwnd);
+        LOG(WARNING) << "Window hung: " << base::StringPrintf(L"%08X", hwnd);
       }
       count++;
     } else {
       DLOG(WARNING) << "Skipping disabled window: "
-                  << StringPrintf(L"%08X", hwnd);
+                    << base::StringPrintf(L"%08X", hwnd);
     }
   }
   return TRUE;  // continue enumeration
@@ -116,8 +125,9 @@ std::wstring GetExecutableAppPath(const std::wstring& file) {
 
 std::wstring FormatCommandForApp(const std::wstring& exe_name,
                                  const std::wstring& argument) {
-  std::wstring reg_path(StringPrintf(L"Applications\\%ls\\shell\\open\\command",
-                                     exe_name.c_str()));
+  std::wstring reg_path(
+      base::StringPrintf(L"Applications\\%ls\\shell\\open\\command",
+                         exe_name.c_str()));
   RegKey key(HKEY_CLASSES_ROOT, reg_path.c_str(), KEY_READ);
 
   std::wstring command;
@@ -208,7 +218,7 @@ base::ProcessHandle LaunchIEOnVista(const std::wstring& url) {
   if (SUCCEEDED(hr)) {
     CloseHandle(pi.hThread);
   } else {
-    LOG(ERROR) << ::StringPrintf("IELaunchURL failed: 0x%08X", hr);
+    LOG(ERROR) << base::StringPrintf("IELaunchURL failed: 0x%08X", hr);
   }
   return pi.hProcess;
 }
@@ -410,6 +420,8 @@ IEVersion GetInstalledIEVersion() {
       return IE_7;
     case '8':
       return IE_8;
+    case '9':
+      return IE_9;
     default:
       break;
   }
@@ -423,7 +435,7 @@ FilePath GetProfilePathForIE() {
   // have their profiles moved into "Temporary Internet Files".
   // The code below basically retrieves the version of IE and computes
   // the profile directory accordingly.
-  if (GetInstalledIEVersion() == IE_8) {
+  if (GetInstalledIEVersion() >= IE_8) {
     profile_path = GetProfilePath(kIEProfileName);
   } else {
     profile_path = GetIETemporaryFilesFolder();
@@ -489,7 +501,63 @@ CloseIeAtEndOfScope::~CloseIeAtEndOfScope() {
   DLOG_IF(ERROR, closed != 0) << "Closed " << closed << " windows forcefully";
 }
 
+// Attempt to connect to a running crash_service instance. Success occurs if we
+// can actually connect to the service's pipe or we receive ERROR_PIPE_BUSY.
+// Waits up to |timeout_ms| for success. |timeout_ms| may be 0, meaning only try
+// once, or negative, meaning wait forever.
+bool DetectRunningCrashService(int timeout_ms) {
+  // Wait for the crash_service.exe to be ready for clients.
+  base::Time start = base::Time::Now();
+  ScopedHandle new_pipe;
+
+  while (true) {
+    new_pipe.Set(::CreateFile(kCrashServicePipeName,
+                              kCrashServicePipeDesiredAccess,
+                              0,  // dwShareMode
+                              NULL,  // lpSecurityAttributes
+                              OPEN_EXISTING,
+                              kCrashServicePipeFlagsAndAttributes,
+                              NULL));  // hTemplateFile
+
+    if (new_pipe.IsValid()) {
+      return true;
+    }
+
+    switch (::GetLastError()) {
+      case ERROR_PIPE_BUSY:
+        // OK, it exists, let's assume that clients will eventually be able to
+        // connect to it.
+        return true;
+      case ERROR_FILE_NOT_FOUND:
+        // Wait a bit longer
+        break;
+      default:
+        DLOG(WARNING) << "Unexpected error while checking crash_service.exe's "
+                      << "pipe: " << win_util::FormatLastWin32Error();
+        // Go ahead and wait in case it clears up.
+        break;
+    }
+
+    if (timeout_ms == 0) {
+      return false;
+    } else if (timeout_ms > 0) {
+      base::TimeDelta duration = base::Time::Now() - start;
+      if (duration.InMilliseconds() > timeout_ms) {
+        return false;
+      }
+    }
+
+    Sleep(10);
+  }
+}
+
 base::ProcessHandle StartCrashService() {
+  if (DetectRunningCrashService(kCrashServiceStartupTimeoutMs)) {
+    DLOG(INFO) << "crash_service.exe is already running. We will use the "
+               << "existing process and leave it running after tests complete.";
+    return NULL;
+  }
+
   FilePath exe_dir;
   if (!PathService::Get(base::DIR_EXE, &exe_dir)) {
     DCHECK(false);
@@ -498,6 +566,8 @@ base::ProcessHandle StartCrashService() {
 
   base::ProcessHandle crash_service = NULL;
 
+  DLOG(INFO) << "Starting crash_service.exe so you know if a test crashes!";
+
   FilePath crash_service_path = exe_dir.AppendASCII("crash_service.exe");
   if (!base::LaunchApp(crash_service_path.value(), false, false,
                        &crash_service)) {
@@ -505,11 +575,24 @@ base::ProcessHandle StartCrashService() {
     return NULL;
   }
 
-  DLOG(INFO) << "Started crash_service.exe so you know if a test crashes!";
-  // This sleep is to ensure that the crash service is done initializing, i.e
-  // the pipe creation, etc.
-  Sleep(500);
-  return crash_service;
+  base::Time start = base::Time::Now();
+
+  if (DetectRunningCrashService(kCrashServiceStartupTimeoutMs)) {
+    DLOG(INFO) << "crash_service.exe is ready for clients in "
+               << (base::Time::Now() - start).InMilliseconds() << "ms.";
+    return crash_service;
+  } else {
+    DLOG(ERROR) << "crash_service.exe failed to accept client connections "
+                << "within " << kCrashServiceStartupTimeoutMs << "ms. "
+                << "Terminating it now.";
+
+    // First check to see if it's even still running just to minimize the
+    // likelihood of spurious error messages from KillProcess.
+    if (WAIT_OBJECT_0 != ::WaitForSingleObject(crash_service, 0)) {
+      base::KillProcess(crash_service, 0, false);
+    }
+    return NULL;
+  }
 }
 
 }  // namespace chrome_frame_test

@@ -14,14 +14,16 @@
 #include "base/string16.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "base/version.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/debugger/devtools_manager.h"
 #include "chrome/browser/extensions/crx_installer.h"
+#include "chrome/browser/extensions/default_apps.h"
 #include "chrome/browser/extensions/extension_accessibility_api.h"
 #include "chrome/browser/extensions/extension_bookmarks_module.h"
 #include "chrome/browser/extensions/extension_browser_event_router.h"
@@ -34,6 +36,7 @@
 #include "chrome/browser/extensions/extension_management_api.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/extensions/extension_updater.h"
+#include "chrome/browser/extensions/extension_webnavigation_api.h"
 #include "chrome/browser/extensions/external_extension_provider.h"
 #include "chrome/browser/extensions/external_pref_extension_provider.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
@@ -55,6 +58,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "googleurl/src/gurl.h"
+#include "net/base/registry_controlled_domain.h"
 #include "webkit/database/database_tracker.h"
 #include "webkit/database/database_util.h"
 
@@ -67,6 +71,17 @@ using base::Time;
 namespace errors = extension_manifest_errors;
 
 namespace {
+
+#if defined(OS_LINUX)
+static const int kOmniboxIconPaddingLeft = 2;
+static const int kOmniboxIconPaddingRight = 2;
+#elif defined(OS_MACOSX)
+static const int kOmniboxIconPaddingLeft = 0;
+static const int kOmniboxIconPaddingRight = 2;
+#else
+static const int kOmniboxIconPaddingLeft = 0;
+static const int kOmniboxIconPaddingRight = 0;
+#endif
 
 bool ShouldReloadExtensionManifest(const ExtensionInfo& info) {
   // Always reload LOAD extension manifests, because they can change on disk
@@ -115,13 +130,15 @@ PendingExtensionInfo::PendingExtensionInfo(
     bool is_from_sync,
     bool install_silently,
     bool enable_on_install,
-    bool enable_incognito_on_install)
+    bool enable_incognito_on_install,
+    Extension::Location location)
     : update_url(update_url),
       expected_crx_type(expected_crx_type),
       is_from_sync(is_from_sync),
       install_silently(install_silently),
       enable_on_install(enable_on_install),
-      enable_incognito_on_install(enable_incognito_on_install) {}
+      enable_incognito_on_install(enable_incognito_on_install),
+      install_source(location) {}
 
 PendingExtensionInfo::PendingExtensionInfo()
     : update_url(),
@@ -129,62 +146,387 @@ PendingExtensionInfo::PendingExtensionInfo()
       is_from_sync(true),
       install_silently(false),
       enable_on_install(false),
-      enable_incognito_on_install(false) {}
+      enable_incognito_on_install(false),
+      install_source(Extension::INVALID) {}
 
 // ExtensionsService.
 
 const char* ExtensionsService::kInstallDirectoryName = "Extensions";
 const char* ExtensionsService::kCurrentVersionFileName = "Current Version";
 
-namespace {
+// Implements IO for the ExtensionsService.
 
-bool IsGalleryDownloadURL(const GURL& download_url) {
-  if (StartsWithASCII(download_url.spec(),
-                      extension_urls::kMiniGalleryDownloadPrefix, false))
-     return true;
+class ExtensionsServiceBackend
+    : public base::RefCountedThreadSafe<ExtensionsServiceBackend>,
+      public ExternalExtensionProvider::Visitor {
+ public:
+  // |install_directory| is a path where to look for extensions to load.
+  // |load_external_extensions| indicates whether or not backend should load
+  // external extensions listed in JSON file and Windows registry.
+  ExtensionsServiceBackend(const FilePath& install_directory,
+                           bool load_external_extensions);
 
-  if (StartsWithASCII(download_url.spec(),
-                      extension_urls::kGalleryDownloadPrefix, false))
-     return true;
+  // Loads a single extension from |path| where |path| is the top directory of
+  // a specific extension where its manifest file lives.
+  // Errors are reported through ExtensionErrorReporter. On success,
+  // OnExtensionLoaded() is called.
+  // TODO(erikkay): It might be useful to be able to load a packed extension
+  // (presumably into memory) without installing it.
+  void LoadSingleExtension(const FilePath &path,
+                           scoped_refptr<ExtensionsService> frontend);
 
-  // Allow command line gallery url to be referrer for the gallery downloads.
-  std::string command_line_gallery_url =
-      CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
-          switches::kAppsGalleryURL);
-  if (!command_line_gallery_url.empty() &&
-      StartsWithASCII(download_url.spec(),
-                      extension_urls::kGalleryDownloadPrefix, false))
-    return true;
+  // Check externally updated extensions for updates and install if necessary.
+  // Errors are reported through ExtensionErrorReporter. Succcess is not
+  // reported.
+  void CheckForExternalUpdates(std::set<std::string> ids_to_ignore,
+                               scoped_refptr<ExtensionsService> frontend);
 
+  // For the extension in |version_path| with |id|, check to see if it's an
+  // externally managed extension.  If so, tell the frontend to uninstall it.
+  void CheckExternalUninstall(scoped_refptr<ExtensionsService> frontend,
+                              const std::string& id,
+                              Extension::Location location);
+
+  // Clear all ExternalExtensionProviders.
+  void ClearProvidersForTesting();
+
+  // Sets an ExternalExtensionProvider for the service to use during testing.
+  // |location| specifies what type of provider should be added.
+  void SetProviderForTesting(Extension::Location location,
+                             ExternalExtensionProvider* test_provider);
+
+  // ExternalExtensionProvider::Visitor implementation.
+  virtual void OnExternalExtensionFileFound(const std::string& id,
+                                            const Version* version,
+                                            const FilePath& path,
+                                            Extension::Location location);
+
+  virtual void OnExternalExtensionUpdateUrlFound(const std::string& id,
+                                                 const GURL& update_url);
+
+  // Reloads the given extensions from their manifests on disk (instead of what
+  // we have cached in the prefs).
+  void ReloadExtensionManifests(
+      ExtensionPrefs::ExtensionsInfo* extensions_to_reload,
+      base::TimeTicks start_time,
+      scoped_refptr<ExtensionsService> frontend);
+
+ private:
+  friend class base::RefCountedThreadSafe<ExtensionsServiceBackend>;
+
+  virtual ~ExtensionsServiceBackend();
+
+  // Finish installing the extension in |crx_path| after it has been unpacked to
+  // |unpacked_path|.  If |expected_id| is not empty, it's verified against the
+  // extension's manifest before installation. If |silent| is true, there will
+  // be no install confirmation dialog. |from_gallery| indicates whether the
+  // crx was installed from our gallery, which results in different UI.
+  //
+  // Note: We take ownership of |extension|.
+  void OnExtensionUnpacked(const FilePath& crx_path,
+                           const FilePath& unpacked_path,
+                           Extension* extension,
+                           const std::string expected_id);
+
+  // Notify the frontend that there was an error loading an extension.
+  void ReportExtensionLoadError(const FilePath& extension_path,
+                                const std::string& error);
+
+  // Lookup an external extension by |id| by going through all registered
+  // external extension providers until we find a provider that contains an
+  // extension that matches. If |version| is not NULL, the extension version
+  // will be returned (caller is responsible for deleting that pointer).
+  // |location| can also be null, if not needed. Returns true if extension is
+  // found, false otherwise.
+  bool LookupExternalExtension(const std::string& id,
+                               Version** version,
+                               Extension::Location* location);
+
+  // This is a naked pointer which is set by each entry point.
+  // The entry point is responsible for ensuring lifetime.
+  ExtensionsService* frontend_;
+
+  // The top-level extensions directory being installed to.
+  FilePath install_directory_;
+
+  // Whether errors result in noisy alerts.
+  bool alert_on_error_;
+
+  // A map from external extension type to the external extension provider
+  // for that type.  Because a single provider may handle more than one
+  // external extension type, more than one key may map to the same object.
+  typedef std::map<Extension::Location,
+                   linked_ptr<ExternalExtensionProvider> > ProviderMap;
+  ProviderMap external_extension_providers_;
+
+  // Set to true by OnExternalExtensionUpdateUrlFound() when an external
+  // extension URL is found.  Used in CheckForExternalUpdates() to see
+  // if an update check is needed to install pending extensions.
+  bool external_extension_added_;
+
+  DISALLOW_COPY_AND_ASSIGN(ExtensionsServiceBackend);
+};
+
+ExtensionsServiceBackend::ExtensionsServiceBackend(
+    const FilePath& install_directory,
+    bool load_external_extensions)
+        : frontend_(NULL),
+          install_directory_(install_directory),
+          alert_on_error_(false),
+          external_extension_added_(false) {
+  if (!load_external_extensions)
+    return;
+
+  // TODO(aa): This ends up doing blocking IO on the UI thread because it reads
+  // pref data in the ctor and that is called on the UI thread. Would be better
+  // to re-read data each time we list external extensions, anyway.
+  external_extension_providers_[Extension::EXTERNAL_PREF] =
+      linked_ptr<ExternalExtensionProvider>(
+          new ExternalPrefExtensionProvider());
+  // EXTERNAL_PREF_DOWNLOAD and EXTERNAL_PREF extensions are handled by the
+  // same object.
+  external_extension_providers_[Extension::EXTERNAL_PREF_DOWNLOAD] =
+      external_extension_providers_[Extension::EXTERNAL_PREF];
+#if defined(OS_WIN)
+  external_extension_providers_[Extension::EXTERNAL_REGISTRY] =
+      linked_ptr<ExternalExtensionProvider>(
+          new ExternalRegistryExtensionProvider());
+#endif
+}
+
+ExtensionsServiceBackend::~ExtensionsServiceBackend() {
+}
+
+void ExtensionsServiceBackend::LoadSingleExtension(
+    const FilePath& path_in, scoped_refptr<ExtensionsService> frontend) {
+  frontend_ = frontend;
+
+  // Explicit UI loads are always noisy.
+  alert_on_error_ = true;
+
+  FilePath extension_path = path_in;
+  file_util::AbsolutePath(&extension_path);
+
+  std::string error;
+  Extension* extension = extension_file_util::LoadExtension(
+      extension_path,
+      false,  // Don't require id
+      &error);
+
+  if (!extension) {
+    ReportExtensionLoadError(extension_path, error);
+    return;
+  }
+
+  extension->set_location(Extension::LOAD);
+
+  // Report this as an installed extension so that it gets remembered in the
+  // prefs.
+  BrowserThread::PostTask(
+      BrowserThread::UI, FROM_HERE,
+      NewRunnableMethod(frontend_, &ExtensionsService::OnExtensionInstalled,
+                        extension, true));
+}
+
+void ExtensionsServiceBackend::ReportExtensionLoadError(
+    const FilePath& extension_path, const std::string &error) {
+  BrowserThread::PostTask(
+      BrowserThread::UI, FROM_HERE,
+      NewRunnableMethod(
+          frontend_,
+          &ExtensionsService::ReportExtensionLoadError, extension_path,
+          error, NotificationType::EXTENSION_INSTALL_ERROR, alert_on_error_));
+}
+
+bool ExtensionsServiceBackend::LookupExternalExtension(
+    const std::string& id, Version** version, Extension::Location* location) {
+  scoped_ptr<Version> extension_version;
+  for (ProviderMap::const_iterator i = external_extension_providers_.begin();
+       i != external_extension_providers_.end(); ++i) {
+    const ExternalExtensionProvider* provider = i->second.get();
+    extension_version.reset(provider->RegisteredVersion(id, location));
+    if (extension_version.get()) {
+      if (version)
+        *version = extension_version.release();
+      return true;
+    }
+  }
   return false;
 }
 
-}  // namespace
+// Some extensions will autoupdate themselves externally from Chrome.  These
+// are typically part of some larger client application package.  To support
+// these, the extension will register its location in the the preferences file
+// (and also, on Windows, in the registry) and this code will periodically
+// check that location for a .crx file, which it will then install locally if
+// a new version is available.
+void ExtensionsServiceBackend::CheckForExternalUpdates(
+    std::set<std::string> ids_to_ignore,
+    scoped_refptr<ExtensionsService> frontend) {
+  // Note that this installation is intentionally silent (since it didn't
+  // go through the front-end).  Extensions that are registered in this
+  // way are effectively considered 'pre-bundled', and so implicitly
+  // trusted.  In general, if something has HKLM or filesystem access,
+  // they could install an extension manually themselves anyway.
+  alert_on_error_ = false;
+  frontend_ = frontend;
+  external_extension_added_ = false;
 
-// static
+  // Ask each external extension provider to give us a call back for each
+  // extension they know about. See OnExternalExtension(File|UpdateUrl)Found.
+
+  for (ProviderMap::const_iterator i = external_extension_providers_.begin();
+       i != external_extension_providers_.end(); ++i) {
+    ExternalExtensionProvider* provider = i->second.get();
+    provider->VisitRegisteredExtension(this, ids_to_ignore);
+  }
+
+  if (external_extension_added_ && frontend->updater()) {
+    BrowserThread::PostTask(
+        BrowserThread::UI, FROM_HERE,
+            NewRunnableMethod(
+                frontend->updater(), &ExtensionUpdater::CheckNow));
+  }
+}
+
+void ExtensionsServiceBackend::CheckExternalUninstall(
+    scoped_refptr<ExtensionsService> frontend, const std::string& id,
+    Extension::Location location) {
+  // Check if the providers know about this extension.
+  ProviderMap::const_iterator i = external_extension_providers_.find(location);
+  if (i == external_extension_providers_.end()) {
+    NOTREACHED() << "CheckExternalUninstall called for non-external extension "
+                 << location;
+    return;
+  }
+
+  scoped_ptr<Version> version;
+  version.reset(i->second->RegisteredVersion(id, NULL));
+  if (version.get())
+    return;  // Yup, known extension, don't uninstall.
+
+  // This is an external extension that we don't have registered.  Uninstall.
+  BrowserThread::PostTask(
+      BrowserThread::UI, FROM_HERE,
+      NewRunnableMethod(
+          frontend.get(), &ExtensionsService::UninstallExtension, id, true));
+}
+
+void ExtensionsServiceBackend::ClearProvidersForTesting() {
+  external_extension_providers_.clear();
+}
+
+void ExtensionsServiceBackend::SetProviderForTesting(
+    Extension::Location location,
+    ExternalExtensionProvider* test_provider) {
+  DCHECK(test_provider);
+  external_extension_providers_[location] =
+      linked_ptr<ExternalExtensionProvider>(test_provider);
+}
+
+void ExtensionsServiceBackend::OnExternalExtensionFileFound(
+    const std::string& id, const Version* version, const FilePath& path,
+    Extension::Location location) {
+  DCHECK(version);
+  BrowserThread::PostTask(
+      BrowserThread::UI, FROM_HERE,
+      NewRunnableMethod(
+          frontend_, &ExtensionsService::OnExternalExtensionFileFound, id,
+          version->GetString(), path, location));
+}
+
+void ExtensionsServiceBackend::OnExternalExtensionUpdateUrlFound(
+    const std::string& id,
+    const GURL& update_url) {
+  if (frontend_->GetExtensionById(id, true)) {
+    // Already installed.  Do not change the update URL that the extension set.
+    return;
+  }
+
+  frontend_->AddPendingExtensionFromExternalUpdateUrl(id, update_url);
+  external_extension_added_ |= true;
+}
+
+void ExtensionsServiceBackend::ReloadExtensionManifests(
+    ExtensionPrefs::ExtensionsInfo* extensions_to_reload,
+    base::TimeTicks start_time,
+    scoped_refptr<ExtensionsService> frontend) {
+  frontend_ = frontend;
+
+  for (size_t i = 0; i < extensions_to_reload->size(); ++i) {
+    ExtensionInfo* info = extensions_to_reload->at(i).get();
+    if (!ShouldReloadExtensionManifest(*info))
+      continue;
+
+    // We need to reload original manifest in order to localize properly.
+    std::string error;
+    scoped_ptr<Extension> extension(extension_file_util::LoadExtension(
+        info->extension_path, false, &error));
+
+    if (extension.get())
+      extensions_to_reload->at(i)->extension_manifest.reset(
+          static_cast<DictionaryValue*>(
+              extension->manifest_value()->DeepCopy()));
+  }
+
+  // Finish installing on UI thread.
+  BrowserThread::PostTask(
+      BrowserThread::UI, FROM_HERE,
+      NewRunnableMethod(
+          frontend_,
+          &ExtensionsService::ContinueLoadAllExtensions,
+          extensions_to_reload,
+          start_time,
+          true));
+}
+
 bool ExtensionsService::IsDownloadFromGallery(const GURL& download_url,
                                               const GURL& referrer_url) {
-  if (!IsGalleryDownloadURL(download_url))
-    return false;
-
-  if (StartsWithASCII(referrer_url.spec(),
-                      extension_urls::kMiniGalleryBrowsePrefix, false))
-    return true;
-
-  if (StartsWithASCII(referrer_url.spec(),
-                      Extension::ChromeStoreURL(), false))
-    return true;
-
-  // Allow command line gallery url to be referrer for the gallery downloads.
-  std::string command_line_gallery_url =
-      CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
-          switches::kAppsGalleryURL);
-  if (!command_line_gallery_url.empty() &&
+  // Special-case the themes mini-gallery.
+  // TODO(erikkay) When that gallery goes away, remove this code.
+  if (IsDownloadFromMiniGallery(download_url) &&
       StartsWithASCII(referrer_url.spec(),
-                      command_line_gallery_url, false))
+                      extension_urls::kMiniGalleryBrowsePrefix, false)) {
     return true;
+  }
 
-  return false;
+  Extension* download_extension = GetExtensionByWebExtent(download_url);
+  Extension* referrer_extension = GetExtensionByWebExtent(referrer_url);
+  Extension* webstore_app = GetWebStoreApp();
+
+  bool referrer_valid = (referrer_extension == webstore_app);
+  bool download_valid = (download_extension == webstore_app);
+
+  // If the command-line gallery URL is set, then be a bit more lenient.
+  GURL store_url =
+      GURL(CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+           switches::kAppsGalleryURL));
+  if (!store_url.is_empty()) {
+    std::string store_tld =
+        net::RegistryControlledDomainService::GetDomainAndRegistry(store_url);
+    if (!referrer_valid) {
+      std::string referrer_tld =
+          net::RegistryControlledDomainService::GetDomainAndRegistry(
+              referrer_url);
+      // The referrer gets stripped when transitioning from https to http,
+      // or when hitting an unknown test cert and that commonly happens in
+      // testing environments.  Given this, we allow an empty referrer when
+      // the command-line flag is set.
+      // Otherwise, the TLD must match the TLD of the command-line url.
+      referrer_valid = referrer_url.is_empty() || (referrer_tld == store_tld);
+    }
+
+    if (!download_valid) {
+      std::string download_tld =
+          net::RegistryControlledDomainService::GetDomainAndRegistry(
+              GURL(download_url));
+
+      // Otherwise, the TLD must match the TLD of the command-line url.
+      download_valid = (download_tld == store_tld);
+    }
+  }
+
+  return (referrer_valid && download_valid);
 }
 
 bool ExtensionsService::IsDownloadFromMiniGallery(const GURL& download_url) {
@@ -193,18 +535,38 @@ bool ExtensionsService::IsDownloadFromMiniGallery(const GURL& download_url) {
                          false);  // case_sensitive
 }
 
+// static
+bool ExtensionsService::UninstallExtensionHelper(
+    ExtensionsService* extensions_service,
+    const std::string& extension_id) {
+  DCHECK(extensions_service);
+
+  // We can't call UninstallExtension with an invalid extension ID, so check it
+  // first.
+  if (extensions_service->GetExtensionById(extension_id, true)) {
+    extensions_service->UninstallExtension(extension_id, false);
+  } else {
+    LOG(WARNING) << "Attempted uninstallation of non-existent extension with "
+      << "extension with id: " << extension_id;
+    return false;
+  }
+
+  return true;
+}
+
 ExtensionsService::ExtensionsService(Profile* profile,
                                      const CommandLine* command_line,
-                                     PrefService* prefs,
                                      const FilePath& install_directory,
                                      bool autoupdate_enabled)
     : profile_(profile),
-      extension_prefs_(new ExtensionPrefs(prefs, install_directory)),
+      extension_prefs_(new ExtensionPrefs(profile->GetPrefs(),
+                                          install_directory)),
       install_directory_(install_directory),
       extensions_enabled_(true),
       show_extensions_prompts_(true),
       ready_(false),
-      ALLOW_THIS_IN_INITIALIZER_LIST(toolbar_model_(this)) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(toolbar_model_(this)),
+      default_apps_(profile->GetPrefs()) {
   // Figure out if extension installation should be enabled.
   if (command_line->HasSwitch(switches::kDisableExtensions)) {
     extensions_enabled_ = false;
@@ -212,12 +574,11 @@ ExtensionsService::ExtensionsService(Profile* profile,
     extensions_enabled_ = false;
   }
 
-  registrar_.Add(this, NotificationType::EXTENSION_HOST_DID_STOP_LOADING,
-                 NotificationService::AllSources());
   registrar_.Add(this, NotificationType::EXTENSION_PROCESS_TERMINATED,
                  NotificationService::AllSources());
-  prefs->AddPrefObserver(prefs::kExtensionInstallAllowList, this);
-  prefs->AddPrefObserver(prefs::kExtensionInstallDenyList, this);
+  pref_change_registrar_.Init(profile->GetPrefs());
+  pref_change_registrar_.Add(prefs::kExtensionInstallAllowList, this);
+  pref_change_registrar_.Add(prefs::kExtensionInstallDenyList, this);
 
   // Set up the ExtensionUpdater
   if (autoupdate_enabled) {
@@ -227,16 +588,23 @@ ExtensionsService::ExtensionsService(Profile* profile,
           switches::kExtensionsUpdateFrequency),
           &update_frequency);
     }
-    updater_ = new ExtensionUpdater(this, prefs, update_frequency);
+    updater_ = new ExtensionUpdater(this,
+                                    profile->GetPrefs(),
+                                    update_frequency);
   }
 
-  backend_ = new ExtensionsServiceBackend(install_directory_);
+  backend_ = new ExtensionsServiceBackend(install_directory_,
+                                          extensions_enabled_);
 
   // Use monochrome icons for Omnibox icons.
+  omnibox_popup_icon_manager_.set_monochrome(true);
   omnibox_icon_manager_.set_monochrome(true);
+  omnibox_icon_manager_.set_padding(gfx::Insets(0, kOmniboxIconPaddingLeft,
+                                                0, kOmniboxIconPaddingRight));
 }
 
 ExtensionsService::~ExtensionsService() {
+  DCHECK(!profile_);  // Profile should have told us it's going away.
   UnloadAllExtensions();
   if (updater_.get()) {
     updater_->Stop();
@@ -251,6 +619,7 @@ void ExtensionsService::InitEventRouters() {
       profile_->GetBookmarkModel());
   ExtensionCookiesEventRouter::GetInstance()->Init();
   ExtensionManagementEventRouter::GetInstance()->Init();
+  ExtensionWebNavigationEventRouter::GetInstance()->Init();
 }
 
 void ExtensionsService::Init() {
@@ -284,7 +653,7 @@ namespace {
   // TODO(akalin): Put this somewhere where both crx_installer.cc and
   // this file can use it.
   void DeleteFileHelper(const FilePath& path, bool recursive) {
-    DCHECK(ChromeThread::CurrentlyOn(ChromeThread::FILE));
+    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
     file_util::Delete(path, recursive);
   }
 }  // namespace
@@ -301,8 +670,8 @@ void ExtensionsService::UpdateExtension(const std::string& id,
                  << " because it is not installed or pending";
     // Delete extension_path since we're not creating a CrxInstaller
     // that would do it for us.
-    ChromeThread::PostTask(
-        ChromeThread::FILE, FROM_HERE,
+    BrowserThread::PostTask(
+        BrowserThread::FILE, FROM_HERE,
         NewRunnableFunction(&DeleteFileHelper, extension_path, false));
     return;
   }
@@ -318,8 +687,8 @@ void ExtensionsService::UpdateExtension(const std::string& id,
                        this,  // frontend
                        client));
   installer->set_expected_id(id);
-  if (is_pending_extension && !it->second.is_from_sync)
-    installer->set_install_source(Extension::EXTERNAL_PREF_DOWNLOAD);
+  if (is_pending_extension)
+    installer->set_install_source(it->second.install_source);
   installer->set_delete_source(true);
   installer->set_original_url(download_url);
   installer->InstallCrx(extension_path);
@@ -335,15 +704,16 @@ void ExtensionsService::AddPendingExtensionFromSync(
                 << " which already exists";
     return;
   }
-  AddPendingExtensionInternal(
-      id, update_url, expected_crx_type, true, install_silently,
-      enable_on_install, enable_incognito_on_install);
+
+  AddPendingExtensionInternal(id, update_url, expected_crx_type, true,
+                              install_silently, enable_on_install,
+                              enable_incognito_on_install,
+                              Extension::INTERNAL);
 }
 
 void ExtensionsService::AddPendingExtensionFromExternalUpdateUrl(
     const std::string& id, const GURL& update_url) {
   // Add the extension to this list of extensions to update.
-  // We do not know if the id refers to a theme, so make is_theme unknown.
   const PendingExtensionInfo::ExpectedCrxType kExpectedCrxType =
       PendingExtensionInfo::UNKNOWN;
   const bool kIsFromSync = false;
@@ -359,18 +729,41 @@ void ExtensionsService::AddPendingExtensionFromExternalUpdateUrl(
 
   AddPendingExtensionInternal(id, update_url, kExpectedCrxType, kIsFromSync,
                               kInstallSilently, kEnableOnInstall,
-                              kEnableIncognitoOnInstall);
+                              kEnableIncognitoOnInstall,
+                              Extension::EXTERNAL_PREF_DOWNLOAD);
+}
+
+void ExtensionsService::AddPendingExtensionFromDefaultAppList(
+    const std::string& id) {
+  // Add the extension to this list of extensions to update.
+  const PendingExtensionInfo::ExpectedCrxType kExpectedCrxType =
+      PendingExtensionInfo::APP;
+  const bool kIsFromSync = false;
+  const bool kInstallSilently = true;
+  const bool kEnableOnInstall = true;
+  const bool kEnableIncognitoOnInstall = true;
+
+  // This can legitimately happen if the user manually installed one of the
+  // default apps before this code ran.
+  if (GetExtensionByIdInternal(id, true, true))
+    return;
+
+  AddPendingExtensionInternal(id, GURL(), kExpectedCrxType, kIsFromSync,
+                              kInstallSilently, kEnableOnInstall,
+                              kEnableIncognitoOnInstall,
+                              Extension::INTERNAL);
 }
 
 void ExtensionsService::AddPendingExtensionInternal(
     const std::string& id, const GURL& update_url,
     PendingExtensionInfo::ExpectedCrxType expected_crx_type,
     bool is_from_sync, bool install_silently,
-    bool enable_on_install, bool enable_incognito_on_install) {
+    bool enable_on_install, bool enable_incognito_on_install,
+    Extension::Location install_source) {
   pending_extensions_[id] =
       PendingExtensionInfo(update_url, expected_crx_type, is_from_sync,
                            install_silently, enable_on_install,
-                           enable_incognito_on_install);
+                           enable_incognito_on_install, install_source);
 }
 
 void ExtensionsService::ReloadExtension(const std::string& extension_id) {
@@ -422,16 +815,14 @@ void ExtensionsService::UninstallExtension(const std::string& extension_id,
   // Callers should not send us nonexistent extensions.
   DCHECK(extension);
 
-  // Notify interested parties that we're uninstalling this extension.
-  NotificationService::current()->Notify(
-      NotificationType::EXTENSION_UNINSTALLED,
-      Source<Profile>(profile_),
-      Details<Extension>(extension));
-
   // Get hold of information we need after unloading, since the extension
   // pointer will be invalid then.
   GURL extension_url(extension->url());
   Extension::Location location(extension->location());
+  UninstalledExtensionInfo uninstalled_extension_info(*extension);
+
+  UMA_HISTOGRAM_ENUMERATION("Extensions.UninstallType",
+                            extension->GetHistogramType(), 100);
 
   // Also copy the extension identifier since the reference might have been
   // obtained via Extension::id().
@@ -449,8 +840,8 @@ void ExtensionsService::UninstallExtension(const std::string& extension_id,
 
   // Tell the backend to start deleting installed extensions on the file thread.
   if (Extension::LOAD != location) {
-    ChromeThread::PostTask(
-      ChromeThread::FILE, FROM_HERE,
+    BrowserThread::PostTask(
+      BrowserThread::FILE, FROM_HERE,
       NewRunnableFunction(
           &extension_file_util::UninstallExtension,
           install_directory_,
@@ -458,6 +849,12 @@ void ExtensionsService::UninstallExtension(const std::string& extension_id,
   }
 
   ClearExtensionData(extension_url);
+
+  // Notify interested parties that we've uninstalled this extension.
+  NotificationService::current()->Notify(
+      NotificationType::EXTENSION_UNINSTALLED,
+      Source<Profile>(profile_),
+      Details<UninstalledExtensionInfo>(&uninstalled_extension_info));
 }
 
 void ExtensionsService::ClearExtensionData(const GURL& extension_url) {
@@ -469,7 +866,6 @@ void ExtensionsService::ClearExtensionData(const GURL& extension_url) {
 void ExtensionsService::EnableExtension(const std::string& extension_id) {
   Extension* extension = GetExtensionByIdInternal(extension_id, false, true);
   if (!extension) {
-    NOTREACHED() << "Trying to enable an extension that isn't disabled.";
     return;
   }
 
@@ -512,8 +908,8 @@ void ExtensionsService::DisableExtension(const std::string& extension_id) {
 }
 
 void ExtensionsService::LoadExtension(const FilePath& extension_path) {
-  ChromeThread::PostTask(
-      ChromeThread::FILE, FROM_HERE,
+  BrowserThread::PostTask(
+      BrowserThread::FILE, FROM_HERE,
       NewRunnableMethod(
           backend_.get(),
           &ExtensionsServiceBackend::LoadSingleExtension,
@@ -527,7 +923,7 @@ void ExtensionsService::LoadComponentExtensions() {
     JSONStringValueSerializer serializer(it->manifest);
     scoped_ptr<Value> manifest(serializer.Deserialize(NULL, NULL));
     if (!manifest.get()) {
-      DLOG(ERROR) << "Failed to retrieve manifest for extension";
+      DLOG(ERROR) << "Failed to parse manifest for extension";
       continue;
     }
 
@@ -541,21 +937,6 @@ void ExtensionsService::LoadComponentExtensions() {
             &error)) {
       NOTREACHED() << error;
       return;
-    }
-
-    // In order for the --apps-gallery-url switch to work with the gallery
-    // process isolation, we must insert any provided value into the component
-    // app's launch url and web extent.
-    if (extension->id() == extension_misc::kWebStoreAppId) {
-      GURL gallery_url(CommandLine::ForCurrentProcess()
-          ->GetSwitchValueASCII(switches::kAppsGalleryURL));
-      if (gallery_url.is_valid()) {
-        extension->set_launch_web_url(gallery_url.spec());
-        URLPattern pattern(URLPattern::SCHEME_HTTP | URLPattern::SCHEME_HTTPS);
-        pattern.Parse(gallery_url.spec());
-        pattern.set_path(pattern.path() + '*');
-        extension->web_extent().AddPattern(pattern);
-      }
     }
 
     OnExtensionLoaded(extension.release(), false);  // Don't allow privilege
@@ -577,8 +958,8 @@ void ExtensionsService::LoadAllExtensions() {
   // for re-reading and localization.
   for (size_t i = 0; i < info->size(); ++i) {
     if (ShouldReloadExtensionManifest(*info->at(i))) {
-      ChromeThread::PostTask(
-        ChromeThread::FILE, FROM_HERE, NewRunnableMethod(
+      BrowserThread::PostTask(
+        BrowserThread::FILE, FROM_HERE, NewRunnableMethod(
             backend_.get(),
             &ExtensionsServiceBackend::ReloadExtensionManifests,
             info.release(),  // Callee takes ownership of the memory.
@@ -611,6 +992,9 @@ void ExtensionsService::ContinueLoadAllExtensions(
   UMA_HISTOGRAM_TIMES("Extensions.LoadAllTime",
                       base::TimeTicks::Now() - start_time);
 
+  int app_count = 0;
+  int hosted_app_count = 0;
+  int packaged_app_count = 0;
   int user_script_count = 0;
   int extension_count = 0;
   int theme_count = 0;
@@ -619,33 +1003,60 @@ void ExtensionsService::ContinueLoadAllExtensions(
   int browser_action_count = 0;
   ExtensionList::iterator ex;
   for (ex = extensions_.begin(); ex != extensions_.end(); ++ex) {
+    Extension::Location location = (*ex)->location();
+    Extension::HistogramType type = (*ex)->GetHistogramType();
+    if ((*ex)->is_app()) {
+      UMA_HISTOGRAM_ENUMERATION("Extensions.AppLocation",
+                                location, 100);
+    } else if (type == Extension::TYPE_EXTENSION) {
+      UMA_HISTOGRAM_ENUMERATION("Extensions.ExtensionLocation",
+                                location, 100);
+    }
+
     // Don't count component extensions, since they are only extensions as an
     // implementation detail.
-    if ((*ex)->location() == Extension::COMPONENT)
+    if (location == Extension::COMPONENT)
       continue;
 
     // Don't count unpacked extensions, since they're a developer-specific
     // feature.
-    if ((*ex)->location() == Extension::LOAD)
+    if (location == Extension::LOAD)
       continue;
 
-    if ((*ex)->is_theme()) {
-      theme_count++;
-    } else if ((*ex)->converted_from_user_script()) {
-      user_script_count++;
-    } else {
-      extension_count++;
+    // Using an enumeration shows us the total installed ratio across all users.
+    // Using the totals per user at each startup tells us the distribution of
+    // usage for each user (e.g. 40% of users have at least one app installed).
+    UMA_HISTOGRAM_ENUMERATION("Extensions.LoadType", type, 100);
+    switch (type) {
+      case Extension::TYPE_THEME:
+        theme_count++;
+        break;
+      case Extension::TYPE_USER_SCRIPT:
+        user_script_count++;
+        break;
+      case Extension::TYPE_HOSTED_APP:
+        app_count++;
+        hosted_app_count++;
+        break;
+      case Extension::TYPE_PACKAGED_APP:
+        app_count++;
+        packaged_app_count++;
+        break;
+      case Extension::TYPE_EXTENSION:
+      default:
+        extension_count++;
+        break;
     }
-    if (Extension::IsExternalLocation((*ex)->location())) {
+    if (Extension::IsExternalLocation(location))
       external_count++;
-    }
-    if ((*ex)->page_action() != NULL) {
+    if ((*ex)->page_action() != NULL)
       page_action_count++;
-    }
-    if ((*ex)->browser_action() != NULL) {
+    if ((*ex)->browser_action() != NULL)
       browser_action_count++;
-    }
   }
+  UMA_HISTOGRAM_COUNTS_100("Extensions.LoadApp", app_count);
+  UMA_HISTOGRAM_COUNTS_100("Extensions.LoadHostedApp", hosted_app_count);
+  UMA_HISTOGRAM_COUNTS_100("Extensions.LoadPackagedApp", packaged_app_count);
   UMA_HISTOGRAM_COUNTS_100("Extensions.LoadExtension", extension_count);
   UMA_HISTOGRAM_COUNTS_100("Extensions.LoadUserScript", user_script_count);
   UMA_HISTOGRAM_COUNTS_100("Extensions.LoadTheme", theme_count);
@@ -685,10 +1096,9 @@ void ExtensionsService::LoadInstalledExtension(const ExtensionInfo& info,
 
   OnExtensionLoaded(extension, true);
 
-  if (info.extension_location == Extension::EXTERNAL_PREF ||
-      info.extension_location == Extension::EXTERNAL_REGISTRY) {
-    ChromeThread::PostTask(
-        ChromeThread::FILE, FROM_HERE,
+  if (Extension::IsExternalLocation(info.extension_location)) {
+    BrowserThread::PostTask(
+        BrowserThread::FILE, FROM_HERE,
         NewRunnableMethod(
             backend_.get(),
             &ExtensionsServiceBackend::CheckExternalUninstall,
@@ -718,8 +1128,6 @@ void ExtensionsService::NotifyExtensionLoaded(Extension* extension) {
       GrantProtectedStorage(extension);
   }
 
-  LOG(INFO) << "Sending EXTENSION_LOADED";
-
   NotificationService::current()->Notify(
       NotificationType::EXTENSION_LOADED,
       Source<Profile>(profile_),
@@ -727,8 +1135,6 @@ void ExtensionsService::NotifyExtensionLoaded(Extension* extension) {
 }
 
 void ExtensionsService::NotifyExtensionUnloaded(Extension* extension) {
-  LOG(INFO) << "Sending EXTENSION_UNLOADED";
-
   NotificationService::current()->Notify(
       NotificationType::EXTENSION_UNLOADED,
       Source<Profile>(profile_),
@@ -780,20 +1186,26 @@ void ExtensionsService::GrantUnlimitedStorage(Extension* extension) {
     if (++unlimited_storage_map_[origin] == 1) {
       string16 origin_identifier =
           webkit_database::DatabaseUtil::GetOriginIdentifier(origin);
-      ChromeThread::PostTask(
-          ChromeThread::FILE, FROM_HERE,
+      BrowserThread::PostTask(
+          BrowserThread::FILE, FROM_HERE,
           NewRunnableMethod(
               profile_->GetDatabaseTracker(),
               &webkit_database::DatabaseTracker::SetOriginQuotaInMemory,
               origin_identifier,
               kint64max));
-      ChromeThread::PostTask(
-          ChromeThread::IO, FROM_HERE,
+      BrowserThread::PostTask(
+          BrowserThread::IO, FROM_HERE,
           NewRunnableMethod(
               profile_->GetAppCacheService(),
               &ChromeAppCacheService::SetOriginQuotaInMemory,
               origin,
               kint64max));
+      BrowserThread::PostTask(
+          BrowserThread::IO, FROM_HERE,
+          NewRunnableMethod(
+              profile_->GetFileSystemHostContext(),
+              &FileSystemHostContext::SetOriginQuotaUnlimited,
+              origin));
     }
   }
 }
@@ -811,17 +1223,23 @@ void ExtensionsService::RevokeUnlimitedStorage(Extension* extension) {
       unlimited_storage_map_.erase(origin);
       string16 origin_identifier =
           webkit_database::DatabaseUtil::GetOriginIdentifier(origin);
-      ChromeThread::PostTask(
-          ChromeThread::FILE, FROM_HERE,
+      BrowserThread::PostTask(
+          BrowserThread::FILE, FROM_HERE,
           NewRunnableMethod(
               profile_->GetDatabaseTracker(),
               &webkit_database::DatabaseTracker::ResetOriginQuotaInMemory,
               origin_identifier));
-      ChromeThread::PostTask(
-          ChromeThread::IO, FROM_HERE,
+      BrowserThread::PostTask(
+          BrowserThread::IO, FROM_HERE,
           NewRunnableMethod(
               profile_->GetAppCacheService(),
               &ChromeAppCacheService::ResetOriginQuotaInMemory,
+              origin));
+      BrowserThread::PostTask(
+          BrowserThread::IO, FROM_HERE,
+          NewRunnableMethod(
+              profile_->GetFileSystemHostContext(),
+              &FileSystemHostContext::ResetOriginQuotaUnlimited,
               origin));
     }
   }
@@ -855,12 +1273,9 @@ void ExtensionsService::UpdateExtensionBlacklist(
 }
 
 void ExtensionsService::DestroyingProfile() {
-  profile_->GetPrefs()->RemovePrefObserver(
-      prefs::kExtensionInstallAllowList, this);
-  profile_->GetPrefs()->RemovePrefObserver(
-      prefs::kExtensionInstallDenyList, this);
-
+  pref_change_registrar_.RemoveAll();
   profile_ = NULL;
+  toolbar_model_.DestroyingProfile();
 }
 
 void ExtensionsService::CheckAdminBlacklist() {
@@ -917,38 +1332,14 @@ void ExtensionsService::SetAllowFileAccess(Extension* extension, bool allow) {
       Details<Extension>(extension));
 }
 
-bool ExtensionsService::CanExecuteScriptOnHost(Extension* extension,
-                                               const GURL& url,
-                                               std::string* error) const {
-  // No extensions are allowed to execute script on the gallery because that
-  // would allow extensions to manipulate their own install pages.
-  if (url.host() == GURL(Extension::ChromeStoreURL()).host()
-      && !CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kAllowScriptingGallery)) {
-    if (error)
-      *error = errors::kCannotScriptGallery;
-    return false;
-  }
-
-  if (extension->HasHostPermission(url))
-      return true;
-
-  if (error) {
-    *error = ExtensionErrorUtils::FormatErrorMessage(errors::kCannotAccessPage,
-                                                     url.spec());
-  }
-
-  return false;
-}
-
 void ExtensionsService::CheckForExternalUpdates() {
   // This installs or updates externally provided extensions.
   // TODO(aa): Why pass this list into the provider, why not just filter it
   // later?
   std::set<std::string> killed_extensions;
   extension_prefs_->GetKilledExtensionIds(&killed_extensions);
-  ChromeThread::PostTask(
-      ChromeThread::FILE, FROM_HERE,
+  BrowserThread::PostTask(
+      BrowserThread::FILE, FROM_HERE,
       NewRunnableMethod(
           backend_.get(), &ExtensionsServiceBackend::CheckForExternalUpdates,
           killed_extensions, scoped_refptr<ExtensionsService>(this)));
@@ -1022,8 +1413,8 @@ void ExtensionsService::GarbageCollectExtensions() {
   for (size_t i = 0; i < info->size(); ++i)
     extension_paths[info->at(i)->extension_id] = info->at(i)->extension_path;
 
-  ChromeThread::PostTask(
-      ChromeThread::FILE, FROM_HERE,
+  BrowserThread::PostTask(
+      BrowserThread::FILE, FROM_HERE,
       NewRunnableFunction(
           &extension_file_util::GarbageCollectExtensions, install_directory_,
           extension_paths));
@@ -1057,6 +1448,7 @@ void ExtensionsService::OnExtensionLoaded(Extension* extension,
   if (extensions_enabled() ||
       extension->is_theme() ||
       extension->location() == Extension::LOAD ||
+      extension->location() == Extension::COMPONENT ||
       Extension::IsExternalLocation(extension->location())) {
     Extension* old = GetExtensionByIdInternal(extension->id(), true, true);
     if (old) {
@@ -1118,8 +1510,10 @@ void ExtensionsService::OnExtensionLoaded(Extension* extension,
 
   // Load the icon for omnibox-enabled extensions so it will be ready to display
   // in the URL bar.
-  if (!extension->omnibox_keyword().empty())
+  if (!extension->omnibox_keyword().empty()) {
+    omnibox_popup_icon_manager_.LoadIcon(extension);
     omnibox_icon_manager_.LoadIcon(extension);
+  }
 }
 
 void ExtensionsService::UpdateActiveExtensionsInCrashReporter() {
@@ -1150,8 +1544,11 @@ void ExtensionsService::OnExtensionInstalled(Extension* extension,
 
     // Set initial state from pending extension data.
     PendingExtensionInfo::ExpectedCrxType actual_crx_type =
-        (extension->is_theme() ? PendingExtensionInfo::THEME
-                               : PendingExtensionInfo::EXTENSION);
+        PendingExtensionInfo::EXTENSION;
+    if (extension->is_app())
+      actual_crx_type = PendingExtensionInfo::APP;
+    else if (extension->is_theme())
+      actual_crx_type = PendingExtensionInfo::THEME;
 
     if (expected_crx_type != PendingExtensionInfo::UNKNOWN &&
         expected_crx_type != actual_crx_type) {
@@ -1160,8 +1557,8 @@ void ExtensionsService::OnExtensionInstalled(Extension* extension,
           << " with is_theme = " << extension->is_theme();
       // Delete the extension directory since we're not going to
       // load it.
-      ChromeThread::PostTask(
-          ChromeThread::FILE, FROM_HERE,
+      BrowserThread::PostTask(
+          BrowserThread::FILE, FROM_HERE,
           NewRunnableFunction(&DeleteFileHelper, extension->path(), true));
       return;
     }
@@ -1210,8 +1607,8 @@ void ExtensionsService::OnExtensionInstalled(Extension* extension,
           << extension->id();
       // Delete the extension directory since we're not going to
       // load it.
-      ChromeThread::PostTask(
-          ChromeThread::FILE, FROM_HERE,
+      BrowserThread::PostTask(
+          BrowserThread::FILE, FROM_HERE,
           NewRunnableFunction(&DeleteFileHelper, extension->path(), true));
       return;
     }
@@ -1238,6 +1635,8 @@ void ExtensionsService::OnExtensionInstalled(Extension* extension,
         extension_prefs_->IsIncognitoEnabled(extension->id());
   }
 
+  UMA_HISTOGRAM_ENUMERATION("Extensions.InstallType",
+                            extension->GetHistogramType(), 100);
   extension_prefs_->OnExtensionInstalled(
       extension, initial_state, initial_enable_incognito);
 
@@ -1258,6 +1657,12 @@ void ExtensionsService::OnExtensionInstalled(Extension* extension,
         NotificationType::EXTENSION_INSTALLED,
         Source<Profile>(profile_),
         Details<Extension>(extension));
+  }
+
+  if (extension->is_app()) {
+    ExtensionIdSet installed_ids = GetAppIds();
+    installed_ids.insert(extension->id());
+    default_apps_.DidInstallApp(installed_ids);
   }
 
   // Transfer ownership of |extension| to OnExtensionLoaded.
@@ -1283,6 +1688,10 @@ Extension* ExtensionsService::GetExtensionByIdInternal(const std::string& id,
     }
   }
   return NULL;
+}
+
+Extension* ExtensionsService::GetWebStoreApp() {
+  return GetExtensionById(extension_misc::kWebStoreAppId, false);
 }
 
 Extension* ExtensionsService::GetExtensionByURL(const GURL& url) {
@@ -1323,17 +1732,22 @@ const SkBitmap& ExtensionsService::GetOmniboxIcon(
   return omnibox_icon_manager_.GetIcon(extension_id);
 }
 
+const SkBitmap& ExtensionsService::GetOmniboxPopupIcon(
+    const std::string& extension_id) {
+  return omnibox_popup_icon_manager_.GetIcon(extension_id);
+}
+
 void ExtensionsService::ClearProvidersForTesting() {
-  ChromeThread::PostTask(
-      ChromeThread::FILE, FROM_HERE,
+  BrowserThread::PostTask(
+      BrowserThread::FILE, FROM_HERE,
       NewRunnableMethod(
           backend_.get(), &ExtensionsServiceBackend::ClearProvidersForTesting));
 }
 
 void ExtensionsService::SetProviderForTesting(
     Extension::Location location, ExternalExtensionProvider* test_provider) {
-  ChromeThread::PostTask(
-      ChromeThread::FILE, FROM_HERE,
+  BrowserThread::PostTask(
+      BrowserThread::FILE, FROM_HERE,
       NewRunnableMethod(
           backend_.get(), &ExtensionsServiceBackend::SetProviderForTesting,
           location, test_provider));
@@ -1386,28 +1800,28 @@ void ExtensionsService::ReportExtensionLoadError(
 
   // TODO(port): note that this isn't guaranteed to work properly on Linux.
   std::string path_str = WideToUTF8(extension_path.ToWStringHack());
-  std::string message = StringPrintf("Could not load extension from '%s'. %s",
-                                     path_str.c_str(), error.c_str());
+  std::string message = base::StringPrintf(
+      "Could not load extension from '%s'. %s",
+      path_str.c_str(), error.c_str());
   ExtensionErrorReporter::GetInstance()->ReportError(message, be_noisy);
+}
+
+void ExtensionsService::DidCreateRenderViewForBackgroundPage(
+    ExtensionHost* host) {
+  OrphanedDevTools::iterator iter =
+      orphaned_dev_tools_.find(host->extension()->id());
+  if (iter == orphaned_dev_tools_.end())
+    return;
+
+  DevToolsManager::GetInstance()->AttachClientHost(
+      iter->second, host->render_view_host());
+  orphaned_dev_tools_.erase(iter);
 }
 
 void ExtensionsService::Observe(NotificationType type,
                                 const NotificationSource& source,
                                 const NotificationDetails& details) {
   switch (type.value) {
-    case NotificationType::EXTENSION_HOST_DID_STOP_LOADING: {
-      ExtensionHost* host = Details<ExtensionHost>(details).ptr();
-      OrphanedDevTools::iterator iter =
-          orphaned_dev_tools_.find(host->extension()->id());
-      if (iter == orphaned_dev_tools_.end())
-        return;
-
-      DevToolsManager::GetInstance()->AttachClientHost(
-          iter->second, host->render_view_host());
-      orphaned_dev_tools_.erase(iter);
-      break;
-    }
-
     case NotificationType::EXTENSION_PROCESS_TERMINATED: {
       if (profile_ != Source<Profile>(source).ptr()->GetOriginalProfile())
         break;
@@ -1450,224 +1864,17 @@ void ExtensionsService::Observe(NotificationType type,
   }
 }
 
-bool ExtensionsService::HasApps() {
-  if (!extensions_enabled_)
-    return false;
+bool ExtensionsService::HasApps() const {
+  return !GetAppIds().empty();
+}
 
+ExtensionIdSet ExtensionsService::GetAppIds() const {
+  ExtensionIdSet result;
   for (ExtensionList::const_iterator it = extensions_.begin();
        it != extensions_.end(); ++it) {
-    if ((*it)->is_app())
-      return true;
+    if ((*it)->is_app() && (*it)->location() != Extension::COMPONENT)
+      result.insert((*it)->id());
   }
 
-  return false;
-}
-
-// ExtensionsServicesBackend
-
-ExtensionsServiceBackend::ExtensionsServiceBackend(
-    const FilePath& install_directory)
-        : frontend_(NULL),
-          install_directory_(install_directory),
-          alert_on_error_(false),
-          external_extension_added_(false) {
-  // TODO(aa): This ends up doing blocking IO on the UI thread because it reads
-  // pref data in the ctor and that is called on the UI thread. Would be better
-  // to re-read data each time we list external extensions, anyway.
-  external_extension_providers_[Extension::EXTERNAL_PREF] =
-      linked_ptr<ExternalExtensionProvider>(
-          new ExternalPrefExtensionProvider());
-#if defined(OS_WIN)
-  external_extension_providers_[Extension::EXTERNAL_REGISTRY] =
-      linked_ptr<ExternalExtensionProvider>(
-          new ExternalRegistryExtensionProvider());
-#endif
-}
-
-ExtensionsServiceBackend::~ExtensionsServiceBackend() {
-}
-
-void ExtensionsServiceBackend::LoadSingleExtension(
-    const FilePath& path_in, scoped_refptr<ExtensionsService> frontend) {
-  frontend_ = frontend;
-
-  // Explicit UI loads are always noisy.
-  alert_on_error_ = true;
-
-  FilePath extension_path = path_in;
-  file_util::AbsolutePath(&extension_path);
-
-  LOG(INFO) << "Loading single extension from " <<
-      extension_path.BaseName().value();
-
-  std::string error;
-  Extension* extension = extension_file_util::LoadExtension(
-      extension_path,
-      false,  // Don't require id
-      &error);
-
-  if (!extension) {
-    ReportExtensionLoadError(extension_path, error);
-    return;
-  }
-
-  extension->set_location(Extension::LOAD);
-
-  // Report this as an installed extension so that it gets remembered in the
-  // prefs.
-  ChromeThread::PostTask(
-      ChromeThread::UI, FROM_HERE,
-      NewRunnableMethod(frontend_, &ExtensionsService::OnExtensionInstalled,
-                        extension, true));
-}
-
-void ExtensionsServiceBackend::ReportExtensionLoadError(
-    const FilePath& extension_path, const std::string &error) {
-  ChromeThread::PostTask(
-      ChromeThread::UI, FROM_HERE,
-      NewRunnableMethod(
-          frontend_,
-          &ExtensionsService::ReportExtensionLoadError, extension_path,
-          error, NotificationType::EXTENSION_INSTALL_ERROR, alert_on_error_));
-}
-
-bool ExtensionsServiceBackend::LookupExternalExtension(
-    const std::string& id, Version** version, Extension::Location* location) {
-  scoped_ptr<Version> extension_version;
-  for (ProviderMap::const_iterator i = external_extension_providers_.begin();
-       i != external_extension_providers_.end(); ++i) {
-    const ExternalExtensionProvider* provider = i->second.get();
-    extension_version.reset(provider->RegisteredVersion(id, location));
-    if (extension_version.get()) {
-      if (version)
-        *version = extension_version.release();
-      return true;
-    }
-  }
-  return false;
-}
-
-// Some extensions will autoupdate themselves externally from Chrome.  These
-// are typically part of some larger client application package.  To support
-// these, the extension will register its location in the the preferences file
-// (and also, on Windows, in the registry) and this code will periodically
-// check that location for a .crx file, which it will then install locally if
-// a new version is available.
-void ExtensionsServiceBackend::CheckForExternalUpdates(
-    std::set<std::string> ids_to_ignore,
-    scoped_refptr<ExtensionsService> frontend) {
-  // Note that this installation is intentionally silent (since it didn't
-  // go through the front-end).  Extensions that are registered in this
-  // way are effectively considered 'pre-bundled', and so implicitly
-  // trusted.  In general, if something has HKLM or filesystem access,
-  // they could install an extension manually themselves anyway.
-  alert_on_error_ = false;
-  frontend_ = frontend;
-  external_extension_added_ = false;
-
-  // Ask each external extension provider to give us a call back for each
-  // extension they know about. See OnExternalExtension(File|UpdateUrl)Found.
-
-  for (ProviderMap::const_iterator i = external_extension_providers_.begin();
-       i != external_extension_providers_.end(); ++i) {
-    ExternalExtensionProvider* provider = i->second.get();
-    provider->VisitRegisteredExtension(this, ids_to_ignore);
-  }
-
-  if (external_extension_added_ && frontend->updater()) {
-    ChromeThread::PostTask(
-        ChromeThread::UI, FROM_HERE,
-            NewRunnableMethod(
-                frontend->updater(), &ExtensionUpdater::CheckNow));
-  }
-}
-
-void ExtensionsServiceBackend::CheckExternalUninstall(
-    scoped_refptr<ExtensionsService> frontend, const std::string& id,
-    Extension::Location location) {
-  // Check if the providers know about this extension.
-  ProviderMap::const_iterator i = external_extension_providers_.find(location);
-  if (i == external_extension_providers_.end()) {
-    NOTREACHED() << "CheckExternalUninstall called for non-external extension "
-                 << location;
-    return;
-  }
-
-  scoped_ptr<Version> version;
-  version.reset(i->second->RegisteredVersion(id, NULL));
-  if (version.get())
-    return;  // Yup, known extension, don't uninstall.
-
-  // This is an external extension that we don't have registered.  Uninstall.
-  ChromeThread::PostTask(
-      ChromeThread::UI, FROM_HERE,
-      NewRunnableMethod(
-          frontend.get(), &ExtensionsService::UninstallExtension, id, true));
-}
-
-void ExtensionsServiceBackend::ClearProvidersForTesting() {
-  external_extension_providers_.clear();
-}
-
-void ExtensionsServiceBackend::SetProviderForTesting(
-    Extension::Location location,
-    ExternalExtensionProvider* test_provider) {
-  DCHECK(test_provider);
-  external_extension_providers_[location] =
-      linked_ptr<ExternalExtensionProvider>(test_provider);
-}
-
-void ExtensionsServiceBackend::OnExternalExtensionFileFound(
-    const std::string& id, const Version* version, const FilePath& path,
-    Extension::Location location) {
-  DCHECK(version);
-  ChromeThread::PostTask(
-      ChromeThread::UI, FROM_HERE,
-      NewRunnableMethod(
-          frontend_, &ExtensionsService::OnExternalExtensionFileFound, id,
-          version->GetString(), path, location));
-}
-
-void ExtensionsServiceBackend::OnExternalExtensionUpdateUrlFound(
-         const std::string& id, const GURL& update_url) {
-  if (frontend_->GetExtensionById(id, true)) {
-    // Already installed.  Do not change the update URL that the extension set.
-    return;
-  }
-
-  frontend_->AddPendingExtensionFromExternalUpdateUrl(id, update_url);
-  external_extension_added_ |= true;
-}
-
-void ExtensionsServiceBackend::ReloadExtensionManifests(
-    ExtensionPrefs::ExtensionsInfo* extensions_to_reload,
-    base::TimeTicks start_time,
-    scoped_refptr<ExtensionsService> frontend) {
-  frontend_ = frontend;
-
-  for (size_t i = 0; i < extensions_to_reload->size(); ++i) {
-    ExtensionInfo* info = extensions_to_reload->at(i).get();
-    if (!ShouldReloadExtensionManifest(*info))
-      continue;
-
-    // We need to reload original manifest in order to localize properly.
-    std::string error;
-    scoped_ptr<Extension> extension(extension_file_util::LoadExtension(
-        info->extension_path, false, &error));
-
-    if (extension.get())
-      extensions_to_reload->at(i)->extension_manifest.reset(
-          static_cast<DictionaryValue*>(
-              extension->manifest_value()->DeepCopy()));
-  }
-
-  // Finish installing on UI thread.
-  ChromeThread::PostTask(
-      ChromeThread::UI, FROM_HERE,
-      NewRunnableMethod(
-          frontend_,
-          &ExtensionsService::ContinueLoadAllExtensions,
-          extensions_to_reload,
-          start_time,
-          true));
+  return result;
 }

@@ -6,6 +6,7 @@
 #include "base/file_util.h"
 #include "base/process_util.h"
 #include "base/test/test_suite.h"
+#include "base/test/test_timeouts.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/installer/util/util_constants.h"
 #include "chrome/test/mini_installer_test/mini_installer_test_constants.h"
@@ -68,6 +69,9 @@ int main(int argc, char** argv) {
            " regardless of whether it is supported.\n");
     return 1;
   }
+
+  // Initialize the timeouts used by the test.
+  TestTimeouts::Initialize();
 
   return test_suite.Run();
 }

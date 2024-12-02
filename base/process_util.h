@@ -67,10 +67,15 @@ struct ProcessEntry {
   ProcessId ppid_;
   ProcessId gid_;
   std::string exe_file_;
+  std::vector<std::string> cmd_line_args_;
 
   ProcessId pid() const { return pid_; }
   ProcessId parent_pid() const { return ppid_; }
+  ProcessId gid() const { return gid_; }
   const char* exe_file() const { return exe_file_.c_str(); }
+  const std::vector<std::string>& cmd_line_args() const {
+    return cmd_line_args_;
+  }
 };
 
 struct IoCounters {
@@ -226,6 +231,14 @@ bool LaunchApp(const std::vector<std::string>& argv,
                const file_handle_mapping_vector& fds_to_remap,
                bool wait, ProcessHandle* process_handle);
 
+// Similar to the above two methods, but starts the child process in a process
+// group of its own, instead of allowing it to inherit the parent's process
+// group. The pgid of the child process will be the same as its pid.
+bool LaunchAppInNewProcessGroup(const std::vector<std::string>& argv,
+                                const environment_vector& environ,
+                                const file_handle_mapping_vector& fds_to_remap,
+                                bool wait, ProcessHandle* process_handle);
+
 // AlterEnvironment returns a modified environment vector, constructed from the
 // given environment and the list of changes given in |changes|. Each key in
 // the environment is matched against the first element of the pairs. In the
@@ -235,18 +248,6 @@ bool LaunchApp(const std::vector<std::string>& argv,
 // The returned array is allocated using new[] and must be freed by the caller.
 char** AlterEnvironment(const environment_vector& changes,
                         const char* const* const env);
-
-#if defined(OS_MACOSX)
-// Similar to the above, but also returns the new process's task_t if
-// |task_handle| is not NULL. If |task_handle| is not NULL, the caller is
-// responsible for calling |mach_port_deallocate()| on the returned handle.
-bool LaunchAppAndGetTask(const std::vector<std::string>& argv,
-                         const environment_vector& environ,
-                         const file_handle_mapping_vector& fds_to_remap,
-                         bool wait,
-                         task_t* task_handle,
-                         ProcessHandle* process_handle);
-#endif  // defined(OS_MACOSX)
 #endif  // defined(OS_POSIX)
 
 // Executes the application specified by cl. This function delegates to one
@@ -288,7 +289,7 @@ int GetProcessCount(const std::wstring& executable_name,
 // Attempts to kill all the processes on the current machine that were launched
 // from the given executable name, ending them with the given exit code.  If
 // filter is non-null, then only processes selected by the filter are killed.
-// Returns false if all processes were able to be killed off, false if at least
+// Returns true if all processes were able to be killed off, false if at least
 // one couldn't be killed.
 bool KillProcesses(const std::wstring& executable_name, int exit_code,
                    const ProcessFilter* filter);
@@ -298,6 +299,13 @@ bool KillProcesses(const std::wstring& executable_name, int exit_code,
 // for the process to be actually terminated before returning.
 // Returns true if this is successful, false otherwise.
 bool KillProcess(ProcessHandle process, int exit_code, bool wait);
+
+#if defined(OS_POSIX)
+// Attempts to kill the process group identified by |process_group_id|. Returns
+// true on success.
+bool KillProcessGroup(ProcessHandle process_group_id);
+#endif
+
 #if defined(OS_WIN)
 bool KillProcessById(ProcessId process_id, int exit_code, bool wait);
 #endif

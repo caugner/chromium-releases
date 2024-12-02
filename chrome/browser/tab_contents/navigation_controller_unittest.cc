@@ -741,7 +741,7 @@ TEST_F(NavigationControllerTest, Redirect) {
   EXPECT_EQ(controller().pending_entry_index(), -1);
   EXPECT_EQ(url1, controller().GetActiveEntry()->url());
 
-  ViewHostMsg_FrameNavigate_Params params = {0};
+  ViewHostMsg_FrameNavigate_Params params;
   params.page_id = 0;
   params.url = url2;
   params.transition = PageTransition::SERVER_REDIRECT;
@@ -796,7 +796,7 @@ TEST_F(NavigationControllerTest, PostThenRedirect) {
   EXPECT_EQ(controller().pending_entry_index(), -1);
   EXPECT_EQ(url1, controller().GetActiveEntry()->url());
 
-  ViewHostMsg_FrameNavigate_Params params = {0};
+  ViewHostMsg_FrameNavigate_Params params;
   params.page_id = 0;
   params.url = url2;
   params.transition = PageTransition::SERVER_REDIRECT;
@@ -841,7 +841,7 @@ TEST_F(NavigationControllerTest, ImmediateRedirect) {
   EXPECT_EQ(controller().pending_entry_index(), -1);
   EXPECT_EQ(url1, controller().GetActiveEntry()->url());
 
-  ViewHostMsg_FrameNavigate_Params params = {0};
+  ViewHostMsg_FrameNavigate_Params params;
   params.page_id = 0;
   params.url = url2;
   params.transition = PageTransition::SERVER_REDIRECT;
@@ -882,7 +882,7 @@ TEST_F(NavigationControllerTest, NewSubframe) {
       NotificationType::NAV_ENTRY_COMMITTED));
 
   const GURL url2("http://foo2");
-  ViewHostMsg_FrameNavigate_Params params = {0};
+  ViewHostMsg_FrameNavigate_Params params;
   params.page_id = 1;
   params.url = url2;
   params.transition = PageTransition::MANUAL_SUBFRAME;
@@ -917,7 +917,7 @@ TEST_F(NavigationControllerTest, SubframeOnEmptyPage) {
 
   // Navigation controller currently has no entries.
   const GURL url("http://foo2");
-  ViewHostMsg_FrameNavigate_Params params = {0};
+  ViewHostMsg_FrameNavigate_Params params;
   params.page_id = 1;
   params.url = url;
   params.transition = PageTransition::AUTO_SUBFRAME;
@@ -942,7 +942,7 @@ TEST_F(NavigationControllerTest, AutoSubframe) {
       NotificationType::NAV_ENTRY_COMMITTED));
 
   const GURL url2("http://foo2");
-  ViewHostMsg_FrameNavigate_Params params = {0};
+  ViewHostMsg_FrameNavigate_Params params;
   params.page_id = 0;
   params.url = url2;
   params.transition = PageTransition::AUTO_SUBFRAME;
@@ -972,7 +972,7 @@ TEST_F(NavigationControllerTest, BackSubframe) {
 
   // First manual subframe navigation.
   const GURL url2("http://foo2");
-  ViewHostMsg_FrameNavigate_Params params = {0};
+  ViewHostMsg_FrameNavigate_Params params;
   params.page_id = 1;
   params.url = url2;
   params.transition = PageTransition::MANUAL_SUBFRAME;
@@ -1055,7 +1055,7 @@ TEST_F(NavigationControllerTest, InPage) {
 
   // First navigation.
   const GURL url2("http://foo#a");
-  ViewHostMsg_FrameNavigate_Params params = {0};
+  ViewHostMsg_FrameNavigate_Params params;
   params.page_id = 1;
   params.url = url2;
   params.transition = PageTransition::LINK;
@@ -1135,7 +1135,7 @@ TEST_F(NavigationControllerTest, InPage_Replace) {
 
   // First navigation.
   const GURL url2("http://foo#a");
-  ViewHostMsg_FrameNavigate_Params params = {0};
+  ViewHostMsg_FrameNavigate_Params params;
   params.page_id = 0;  // Same page_id
   params.url = url2;
   params.transition = PageTransition::LINK;
@@ -1184,7 +1184,7 @@ TEST_F(NavigationControllerTest, ClientRedirectAfterInPageNavigation) {
   // Navigate within the page.
   {
     const GURL url("http://foo2/#a");
-    ViewHostMsg_FrameNavigate_Params params = {0};
+    ViewHostMsg_FrameNavigate_Params params;
     params.page_id = 1;  // Same page_id
     params.url = url;
     params.transition = PageTransition::LINK;
@@ -1207,7 +1207,7 @@ TEST_F(NavigationControllerTest, ClientRedirectAfterInPageNavigation) {
   // Perform a client redirect to a new page.
   {
     const GURL url("http://foo3/");
-    ViewHostMsg_FrameNavigate_Params params = {0};
+    ViewHostMsg_FrameNavigate_Params params;
     params.page_id = 2;  // New page_id
     params.url = url;
     params.transition = PageTransition::CLIENT_REDIRECT;
@@ -1342,7 +1342,7 @@ TEST_F(NavigationControllerTest, RestoreNavigate) {
             our_controller.GetEntryAtIndex(0)->restore_type());
 
   // Say we navigated to that entry.
-  ViewHostMsg_FrameNavigate_Params params = {0};
+  ViewHostMsg_FrameNavigate_Params params;
   params.page_id = 0;
   params.url = url;
   params.transition = PageTransition::LINK;
@@ -1608,7 +1608,7 @@ TEST_F(NavigationControllerTest, SameSubframe) {
 
   // Navigate a subframe that would normally count as in-page.
   const GURL subframe("http://www.google.com/#");
-  ViewHostMsg_FrameNavigate_Params params = {0};
+  ViewHostMsg_FrameNavigate_Params params;
   params.page_id = 0;
   params.url = subframe;
   params.transition = PageTransition::AUTO_SUBFRAME;
@@ -1633,7 +1633,7 @@ TEST_F(NavigationControllerTest, ViewSourceRedirect) {
 
   controller().LoadURL(url, GURL(), PageTransition::TYPED);
 
-  ViewHostMsg_FrameNavigate_Params params = {0};
+  ViewHostMsg_FrameNavigate_Params params;
   params.page_id = 0;
   params.url = result_url;
   params.transition = PageTransition::SERVER_REDIRECT;
@@ -1696,7 +1696,7 @@ TEST_F(NavigationControllerTest, SubframeWhilePending) {
   // Send a subframe update from the first page, as if one had just
   // automatically loaded. Auto subframes don't increment the page ID.
   const GURL url1_sub("http://foo/subframe");
-  ViewHostMsg_FrameNavigate_Params params = {0};
+  ViewHostMsg_FrameNavigate_Params params;
   params.page_id = controller().GetLastCommittedEntry()->page_id();
   params.url = url1_sub;
   params.transition = PageTransition::AUTO_SUBFRAME;
@@ -1718,6 +1718,7 @@ TEST_F(NavigationControllerTest, SubframeWhilePending) {
 
 // Tests CopyStateFromAndPrune with 2 urls in source, 1 in dest.
 TEST_F(NavigationControllerTest, CopyStateFromAndPrune) {
+  SessionID id(controller().session_id());
   const GURL url1("http://foo1");
   const GURL url2("http://foo2");
   const GURL url3("http://foo3");
@@ -1728,7 +1729,7 @@ TEST_F(NavigationControllerTest, CopyStateFromAndPrune) {
   scoped_ptr<TestTabContents> other_contents(CreateTestTabContents());
   NavigationController& other_controller = other_contents->controller();
   other_contents->NavigateAndCommit(url3);
-  other_controller.CopyStateFromAndPrune(controller());
+  other_controller.CopyStateFromAndPrune(&controller());
 
   // other_controller should now contain the 3 urls: url1, url2 and url3.
 
@@ -1740,13 +1741,16 @@ TEST_F(NavigationControllerTest, CopyStateFromAndPrune) {
   EXPECT_EQ(url2, other_controller.GetEntryAtIndex(1)->url());
   EXPECT_EQ(url3, other_controller.GetEntryAtIndex(2)->url());
 
-  // And the session id should have been copied.
-  EXPECT_EQ(controller().session_id().id(), other_controller.session_id().id());
+  // The session id of the new tab should be that of the old, and the old should
+  // be set to 0.
+  EXPECT_EQ(id.id(), other_controller.session_id().id());
+  EXPECT_EQ(0, controller().session_id().id());
 }
 
 // Test CopyStateFromAndPrune with 2 urls, the first selected and nothing in
 // the target.
 TEST_F(NavigationControllerTest, CopyStateFromAndPrune2) {
+  SessionID id(controller().session_id());
   const GURL url1("http://foo1");
   const GURL url2("http://foo2");
   const GURL url3("http://foo3");
@@ -1757,7 +1761,7 @@ TEST_F(NavigationControllerTest, CopyStateFromAndPrune2) {
 
   scoped_ptr<TestTabContents> other_contents(CreateTestTabContents());
   NavigationController& other_controller = other_contents->controller();
-  other_controller.CopyStateFromAndPrune(controller());
+  other_controller.CopyStateFromAndPrune(&controller());
 
   // other_controller should now contain the 1 url: url1.
 
@@ -1767,13 +1771,16 @@ TEST_F(NavigationControllerTest, CopyStateFromAndPrune2) {
 
   EXPECT_EQ(url1, other_controller.GetEntryAtIndex(0)->url());
 
-  // And the session id should have been copied.
-  EXPECT_EQ(controller().session_id().id(), other_controller.session_id().id());
+  // The session id of the new tab should be that of the old, and the old should
+  // be set to 0.
+  EXPECT_EQ(id.id(), other_controller.session_id().id());
+  EXPECT_EQ(0, controller().session_id().id());
 }
 
 // Test CopyStateFromAndPrune with 2 urls, the first selected and nothing in
 // the target.
 TEST_F(NavigationControllerTest, CopyStateFromAndPrune3) {
+  SessionID id(controller().session_id());
   const GURL url1("http://foo1");
   const GURL url2("http://foo2");
   const GURL url3("http://foo3");
@@ -1785,7 +1792,7 @@ TEST_F(NavigationControllerTest, CopyStateFromAndPrune3) {
   scoped_ptr<TestTabContents> other_contents(CreateTestTabContents());
   NavigationController& other_controller = other_contents->controller();
   other_controller.LoadURL(url3, GURL(), PageTransition::TYPED);
-  other_controller.CopyStateFromAndPrune(controller());
+  other_controller.CopyStateFromAndPrune(&controller());
 
   // other_controller should now contain 1 entry for url1, and a pending entry
   // for url3.
@@ -1801,8 +1808,63 @@ TEST_F(NavigationControllerTest, CopyStateFromAndPrune3) {
 
   EXPECT_EQ(url3, other_controller.pending_entry()->url());
 
-  // And the session id should have been copied.
-  EXPECT_EQ(controller().session_id().id(), other_controller.session_id().id());
+  // The session id of the new tab should be that of the old, and the old should
+  // be set to 0.
+  EXPECT_EQ(id.id(), other_controller.session_id().id());
+  EXPECT_EQ(0, controller().session_id().id());
+}
+
+// Tests that navigations initiated from the page (with the history object)
+// work as expected without navigation entries.
+TEST_F(NavigationControllerTest, HistoryNavigate) {
+  const GURL url1("http://foo1");
+  const GURL url2("http://foo2");
+  const GURL url3("http://foo3");
+
+  NavigateAndCommit(url1);
+  NavigateAndCommit(url2);
+  NavigateAndCommit(url3);
+  controller().GoBack();
+  contents()->CommitPendingNavigation();
+
+  // Casts the TabContents to a RenderViewHostDelegate::BrowserIntegration so we
+  // can call GoToEntryAtOffset which is private.
+  RenderViewHostDelegate::BrowserIntegration* rvh_delegate =
+      static_cast<RenderViewHostDelegate::BrowserIntegration*>(contents());
+
+  // Simulate the page calling history.back(), it should not create a pending
+  // entry.
+  rvh_delegate->GoToEntryAtOffset(-1);
+  EXPECT_EQ(-1, controller().pending_entry_index());
+  // The actual cross-navigation is suspended until the current RVH tells us
+  // it unloaded, simulate that.
+  contents()->ProceedWithCrossSiteNavigation();
+  // Also make sure we told the page to navigate.
+  const IPC::Message* message =
+      process()->sink().GetFirstMessageMatching(ViewMsg_Navigate::ID);
+  ASSERT_TRUE(message != NULL);
+  Tuple1<ViewMsg_Navigate_Params> nav_params;
+  ViewMsg_Navigate::Read(message, &nav_params);
+  EXPECT_EQ(url1, nav_params.a.url);
+  process()->sink().ClearMessages();
+
+  // Now test history.forward()
+  rvh_delegate->GoToEntryAtOffset(1);
+  EXPECT_EQ(-1, controller().pending_entry_index());
+  // The actual cross-navigation is suspended until the current RVH tells us
+  // it unloaded, simulate that.
+  contents()->ProceedWithCrossSiteNavigation();
+  message = process()->sink().GetFirstMessageMatching(ViewMsg_Navigate::ID);
+  ASSERT_TRUE(message != NULL);
+  ViewMsg_Navigate::Read(message, &nav_params);
+  EXPECT_EQ(url3, nav_params.a.url);
+  process()->sink().ClearMessages();
+
+  // Make sure an extravagant history.go() doesn't break.
+  rvh_delegate->GoToEntryAtOffset(120);  // Out of bounds.
+  EXPECT_EQ(-1, controller().pending_entry_index());
+  message = process()->sink().GetFirstMessageMatching(ViewMsg_Navigate::ID);
+  EXPECT_TRUE(message == NULL);
 }
 
 /* TODO(brettw) These test pass on my local machine but fail on the XP buildbot

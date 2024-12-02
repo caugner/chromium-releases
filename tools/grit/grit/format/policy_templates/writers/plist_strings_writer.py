@@ -6,12 +6,12 @@
 from grit.format.policy_templates.writers import template_writer
 
 
-def GetWriter(info, messages):
+def GetWriter(config, messages):
   '''Factory method for creating PListStringsWriter objects.
   See the constructor of TemplateWriter for description of
   arguments.
   '''
-  return PListStringsWriter(info, messages)
+  return PListStringsWriter(['mac'], config, messages)
 
 
 class PListStringsWriter(template_writer.TemplateWriter):
@@ -19,24 +19,6 @@ class PListStringsWriter(template_writer.TemplateWriter):
   These files are named Localizable.strings and they are in the
   [lang].lproj subdirectories of the manifest bundle.
   '''
-
-  def _GetLocalizedPolicyMessage(self, policy, msg_id):
-    '''Looks up localized caption or description for a policy.
-    If the policy does not have the required message, then it is
-    inherited from the group.
-
-    Args:
-      policy: The data structure of the policy.
-      msg_id: Either 'caption' or 'desc'.
-
-    Returns:
-      The corresponding message for the policy.
-    '''
-    if msg_id in policy:
-      msg = policy[msg_id]
-    else:
-      msg = self._policy_group[msg_id]
-    return msg
 
   def _AddToStringTable(self, item_name, caption, desc):
     '''Add a title and a description of an item to the string table.
@@ -61,8 +43,7 @@ class PListStringsWriter(template_writer.TemplateWriter):
       policy: The policy for which the strings will be added to the
         string table.
     '''
-    desc = self._GetLocalizedPolicyMessage(policy, 'desc')
-    caption = self._GetLocalizedPolicyMessage(policy, 'caption')
+    desc = policy['desc']
     if (policy['type'] == 'enum'):
       # Append the captions of enum items to the description string.
       item_descs = []
@@ -70,24 +51,15 @@ class PListStringsWriter(template_writer.TemplateWriter):
         item_descs.append(item['value'] + ' - ' + item['caption'])
       desc = '\n'.join(item_descs) + '\n' + desc
 
-    self._AddToStringTable(policy['name'], caption, desc)
-
-  def BeginPolicyGroup(self, group):
-    self._policy_group = group
-
-  def EndPolicyGroup(self):
-    self._policy_group = None
+    self._AddToStringTable(policy['name'], policy['label'], desc)
 
   def BeginTemplate(self):
     self._AddToStringTable(
-        self.info['app_name'],
-        self.info['app_name'],
+        self.config['app_name'],
+        self.config['app_name'],
         self.messages['IDS_POLICY_MAC_CHROME_PREFERENCES'])
 
-  def EndTemplate(self):
-    pass
-
-  def Prepare(self):
+  def Init(self):
     # A buffer for the lines of the string table being generated.
     self._out = []
 

@@ -66,7 +66,8 @@ cr.define('options', function() {
   /**
    * Show an alert overlay with the given message, button titles, and
    * callbacks.
-   * @param {string} message The message to dispaly to the user.
+   * @param {string} title The alert title to display to the user.
+   * @param {string} message The alert message to display to the user.
    * @param {string} okTitle The title of the OK button.  Can be undefined.
    * @param {string} cancelTitle The title of the cancel button.  Can be
    *     undefined.
@@ -77,15 +78,31 @@ cr.define('options', function() {
    *     presses the cancel button.  The alert window will be closed
    *     automatically.  Can be undefined.
    */
-  AlertOverlay.show = function(message, okTitle, cancelTitle, okCallback,
+  AlertOverlay.show = function(title, message, okTitle, cancelTitle, okCallback,
                                cancelCallback) {
-    $('alertOverlayMessage').textContent = message;
+    if (title != undefined) {
+      $('alertOverlayTitle').textContent = title;
+      $('alertOverlayTitle').style.display = 'block';
+    } else {
+      $('alertOverlayTitle').style.display = 'none';
+    }
+    if (message != undefined) {
+      $('alertOverlayMessage').textContent = message;
+      $('alertOverlayMessage').style.display = 'block';
+    } else {
+      $('alertOverlayMessage').style.display = 'none';
+    }
     $('alertOverlayOk').textContent =
         (okTitle != undefined ? okTitle
-                              : LocalStrings.getString('ok'));
-    $('alertOverlayCancel').textContent =
-        (cancelTitle != undefined ? cancelTitle
-                                  : LocalStrings.getString('cancel'));
+                              : localStrings.getString('ok'));
+    if (cancelTitle != '') {
+      $('alertOverlayCancel').textContent =
+          (cancelTitle != undefined ? cancelTitle
+                                    : localStrings.getString('cancel'));
+      $('alertOverlayCancel').style.display = 'inline';
+    } else {
+      $('alertOverlayCancel').style.display = 'none';
+    }
 
     AlertOverlay.getInstance().okCallback = okCallback;
     AlertOverlay.getInstance().cancelCallback = cancelCallback;

@@ -1,9 +1,29 @@
 <div class="page hidden" id="personalPage">
   <h1 i18n-content="personalPage"></h1>
 
+<if expr="pp_ifdef('chromeos')">
+  <section>
+    <h3 i18n-content="account"></h3>
+    <div>
+      <table class="option-control-table">
+        <tr><td>
+          <img id='account-picture' src='chrome://theme/IDR_LOGIN_DEFAULT_USER'>
+        </td><td>
+          <label><input id="enable-screen-lock"
+           pref="settings.enable_screen_lock" type="checkbox"><span
+           i18n-content="enable_screenlock"></span></label>
+        </td></tr>
+      </table>
+    </div>
+  </section>
+</if>
   <section>
     <h3 i18n-content="sync_section"></h3>
     <div>
+      <div id="sync-disabled-controls" class="hidden">
+        <div class="section-text" id="sync_disabled_info"
+            i18n-content="sync_disabled_info"></div>
+      </div>
       <div id="not-synced-controls" class="hidden">
         <div class="section-text" id="sync_not_setup_info"
             i18n-content="sync_not_setup_info"></div>
@@ -25,14 +45,14 @@
   <section>
     <h3 i18n-content="passwords"></h3>
     <div>
-      <label>
+      <label class="radio">
         <input id="passwords_asktosave"
             name="passwords_radio"
             pref="profile.password_manager_enabled"
             type="radio" value="true" metric="Options_PasswordManager">
         <span i18n-content="passwords_asktosave"></span>
       </label>
-      <label>
+      <label class="radio">
         <input id="passwords_neversave"
             name="passwords_radio"
             pref="profile.password_manager_enabled"
@@ -66,15 +86,15 @@
             i18n-content="themes_GTK_button"></button>
         <button id="themes_set_classic"
             i18n-content="themes_set_classic"></button>
-        <a i18n-content="themes_gallery" id="themes-gallery" href=""></a>
+        <a i18n-content="themes_gallery" id="themes-gallery" href="#"></a>
       </div>
-      <label>
+      <label class="radio">
         <input name="decorations_radio"
             pref="browser.custom_chrome_frame"
             type="radio" value="false" metric="Options_CustomFrame">
         <span i18n-content="showWindow_decorations_radio"></span>
       </label>
-      <label>
+      <label class="radio">
         <input name="decorations_radio"
             pref="browser.custom_chrome_frame"
             type="radio" value="true" metric="Options_CustomFrame">
@@ -88,7 +108,7 @@
     <h3 i18n-content="themes"></h3>
     <div>
       <button id="themes_reset" i18n-content="themes_reset"></button>
-      <a i18n-content="themes_gallery" id="themes-gallery" href=""></a>
+      <a i18n-content="themes_gallery" id="themes-gallery" href="#"></a>
     </div>
   </section>
 </if>

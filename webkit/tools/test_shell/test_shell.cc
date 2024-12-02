@@ -33,6 +33,8 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebAccessibilityObject.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebDeviceOrientationClientMock.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebSpeechInputControllerMock.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebKit.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebScriptController.h"
@@ -43,8 +45,6 @@
 #include "third_party/WebKit/WebKit/chromium/public/WebURLRequest.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebURLResponse.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebView.h"
-#include "webkit/blob/blob_storage_controller.h"
-#include "webkit/blob/blob_url_request_job.h"
 #include "webkit/glue/glue_serialize.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/webpreferences.h"
@@ -103,16 +103,6 @@ class URLRequestTestShellFileJob : public URLRequestFileJob {
   DISALLOW_COPY_AND_ASSIGN(URLRequestTestShellFileJob);
 };
 
-URLRequestJob* BlobURLRequestJobFactory(URLRequest* request,
-                                        const std::string& scheme) {
-  webkit_blob::BlobStorageController* blob_storage_controller =
-      static_cast<TestShellRequestContext*>(request->context())->
-          blob_storage_controller();
-  return new webkit_blob::BlobURLRequestJob(
-      request,
-      blob_storage_controller->GetBlobDataFromUrl(request->url()),
-      NULL);
-}
 
 }  // namespace
 
@@ -125,6 +115,8 @@ bool TestShell::allow_external_pages_ = false;
 int TestShell::file_test_timeout_ms_ = kDefaultFileTestTimeoutMillisecs;
 bool TestShell::test_is_preparing_ = false;
 bool TestShell::test_is_pending_ = false;
+bool TestShell::accelerated_2d_canvas_enabled_ = false;
+bool TestShell::accelerated_compositing_enabled_ = false;
 
 TestShell::TestShell()
     : m_mainWnd(NULL),
@@ -157,7 +149,11 @@ TestShell::TestShell()
                                &URLRequestTestShellFileJob::InspectorFactory);
     url_util::AddStandardScheme("test-shell-resource");
 
-    URLRequest::RegisterProtocolFactory("blob", &BlobURLRequestJobFactory);
+    if (!file_system_root_.CreateUniqueTempDir()) {
+      LOG(WARNING) << "Failed to create a temp dir for the filesystem."
+                      "FileSystem feature will be disabled.";
+      DCHECK(file_system_root_.path().empty());
+    }
 }
 
 TestShell::~TestShell() {
@@ -359,21 +355,15 @@ std::string TestShell::DumpImage(skia::PlatformCanvas* canvas,
   // to keep it. On Windows, the alpha channel is wrong since text/form control
   // drawing may have erased it in a few places. So on Windows we force it to
   // opaque and also don't write the alpha channel for the reference. Linux
-  // doesn't have the wrong alpha like Windows, but we ignore it anyway.
-#if defined(OS_WIN)
+  // doesn't have the wrong alpha like Windows, but we try to match Windows.
+#if defined(OS_MACOSX)
+  bool discard_transparency = false;
+#else
   bool discard_transparency = true;
   device.makeOpaque(0, 0, src_bmp.width(), src_bmp.height());
-#elif defined(OS_MACOSX)
-  bool discard_transparency = false;
-#elif defined(OS_POSIX)
-  bool discard_transparency = true;
 #endif
 
-  // Compute MD5 sum.  We should have done this before calling
-  // device.makeOpaque on Windows.  Because we do it after the call, there are
-  // some images that are the pixel identical on windows and other platforms
-  // but have different MD5 sums.  At this point, rebaselining all the windows
-  // tests is too much of a pain, so we just check in different baselines.
+  // Compute MD5 sum.
   MD5Context ctx;
   MD5Init(&ctx);
   MD5Update(&ctx, src_bmp.getPixels(), src_bmp.getSize());
@@ -457,6 +447,16 @@ void TestShell::SetAllowScriptsToCloseWindows() {
 }
 
 // static
+void TestShell::SetAccelerated2dCanvasEnabled(bool enabled) {
+  accelerated_2d_canvas_enabled_ = enabled;
+}
+
+// static
+void TestShell::SetAcceleratedCompositingEnabled(bool enabled) {
+  accelerated_compositing_enabled_ = enabled;
+}
+
+// static
 void TestShell::ResetWebPreferences() {
     DCHECK(web_prefs_);
 
@@ -518,7 +518,10 @@ void TestShell::ResetWebPreferences() {
         // LayoutTests were written with Safari Mac in mind which does not allow
         // tabbing to links by default.
         web_prefs_->tabs_to_links = false;
-
+        web_prefs_->accelerated_2d_canvas_enabled =
+            accelerated_2d_canvas_enabled_;
+        web_prefs_->accelerated_compositing_enabled =
+            accelerated_compositing_enabled_;
         // Allow those layout tests running as local files, i.e. under
         // LayoutTests/http/tests/local, to access http server.
         if (layout_test_mode_)
@@ -759,6 +762,29 @@ void TestShell::SetFocus(WebWidgetHost* host, bool enable) {
       }
     }
   }
+}
+
+WebKit::WebDeviceOrientationClientMock*
+TestShell::device_orientation_client_mock() {
+  if (!device_orientation_client_mock_.get()) {
+    device_orientation_client_mock_.reset(
+        WebKit::WebDeviceOrientationClientMock::create());
+  }
+  return device_orientation_client_mock_.get();
+}
+
+WebKit::WebSpeechInputControllerMock*
+TestShell::CreateSpeechInputControllerMock(
+    WebKit::WebSpeechInputListener* listener) {
+  DCHECK(!speech_input_controller_mock_.get());
+  speech_input_controller_mock_.reset(
+      WebKit::WebSpeechInputControllerMock::create(listener));
+  return speech_input_controller_mock_.get();
+}
+
+WebKit::WebSpeechInputControllerMock*
+TestShell::speech_input_controller_mock() {
+  return speech_input_controller_mock_.get();
 }
 
 //-----------------------------------------------------------------------------

@@ -4,6 +4,7 @@
 
 #include "chrome/browser/tab_contents/tab_contents_delegate.h"
 
+#include "chrome/browser/search_engines/template_url.h"
 #include "gfx/rect.h"
 
 void TabContentsDelegate::DetachContents(TabContents* source) {
@@ -15,6 +16,13 @@ bool TabContentsDelegate::IsPopup(const TabContents* source) const {
 
 TabContents* TabContentsDelegate::GetConstrainingContents(TabContents* source) {
   return source;
+}
+
+bool TabContentsDelegate::ShouldFocusConstrainedWindow(TabContents* source) {
+  return true;
+}
+
+void TabContentsDelegate::WillShowConstrainedWindow(TabContents* source) {
 }
 
 void TabContentsDelegate::ContentsMouseEvent(
@@ -57,6 +65,10 @@ bool TabContentsDelegate::IsExternalTabContainer() const { return false; }
 
 void TabContentsDelegate::SetFocusToLocationBar(bool select_all) {}
 
+bool TabContentsDelegate::ShouldFocusPageAfterCrash() {
+  return true;
+}
+
 void TabContentsDelegate::RenderWidgetShowing() {}
 
 ExtensionFunctionDispatcher*
@@ -68,6 +80,9 @@ TabContentsDelegate::CreateExtensionFunctionDispatcher(
 
 bool TabContentsDelegate::TakeFocus(bool reverse) {
   return false;
+}
+
+void TabContentsDelegate::LostCapture() {
 }
 
 void TabContentsDelegate::SetTabContentBlocked(
@@ -97,9 +112,17 @@ bool TabContentsDelegate::ExecuteContextMenuCommand(int command) {
   return false;
 }
 
+void TabContentsDelegate::ConfirmSetDefaultSearchProvider(
+    TabContents* tab_contents,
+    TemplateURL* template_url,
+    TemplateURLModel* template_url_model) {
+  delete template_url;
+}
+
 void TabContentsDelegate::ConfirmAddSearchProvider(
     const TemplateURL* template_url,
     Profile* profile) {
+  delete template_url;
 }
 
 void TabContentsDelegate::ShowPageInfo(Profile* profile,
@@ -116,6 +139,12 @@ bool TabContentsDelegate::PreHandleKeyboardEvent(
 
 void TabContentsDelegate::HandleKeyboardEvent(
     const NativeWebKeyboardEvent& event) {
+}
+
+void TabContentsDelegate::HandleMouseUp() {
+}
+
+void TabContentsDelegate::HandleMouseActivate() {
 }
 
 void TabContentsDelegate::ShowRepostFormWarningDialog(
@@ -162,10 +191,11 @@ bool TabContentsDelegate::ShouldEnablePreferredSizeNotifications() {
 void TabContentsDelegate::UpdatePreferredSize(const gfx::Size& pref_size) {
 }
 
-void TabContentsDelegate::ContentTypeChanged(TabContents* source) {
+void TabContentsDelegate::OnSetSuggestResult(int32 page_id,
+                                             const std::string& result) {
 }
 
-void TabContentsDelegate::CommitMatchPreview(TabContents* source) {
+void TabContentsDelegate::ContentRestrictionsChanged(TabContents* source) {
 }
 
 TabContentsDelegate::~TabContentsDelegate() {

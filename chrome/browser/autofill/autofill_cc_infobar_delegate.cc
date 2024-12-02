@@ -9,6 +9,7 @@
 #include "base/histogram.h"
 #include "chrome/browser/autofill/autofill_cc_infobar.h"
 #include "chrome/browser/autofill/autofill_manager.h"
+#include "chrome/browser/browser_list.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
@@ -23,8 +24,6 @@ AutoFillCCInfoBarDelegate::AutoFillCCInfoBarDelegate(TabContents* tab_contents,
                                                      AutoFillManager* host)
     : ConfirmInfoBarDelegate(tab_contents),
       host_(host) {
-  if (tab_contents)
-    tab_contents->AddInfoBar(this);
 }
 
 AutoFillCCInfoBarDelegate::~AutoFillCCInfoBarDelegate() {
@@ -43,9 +42,7 @@ void AutoFillCCInfoBarDelegate::InfoBarClosed() {
     host_->OnInfoBarClosed(false);
     host_ = NULL;
   }
-
-  // This will delete us.
-  ConfirmInfoBarDelegate::InfoBarClosed();
+  delete this;
 }
 
 string16 AutoFillCCInfoBarDelegate::GetMessageText() const {
@@ -96,8 +93,9 @@ string16 AutoFillCCInfoBarDelegate::GetLinkText() {
 }
 
 bool AutoFillCCInfoBarDelegate::LinkClicked(WindowOpenDisposition disposition) {
-  host_->tab_contents()->OpenURL(GURL(kAutoFillLearnMoreUrl), GURL(),
-                                 NEW_FOREGROUND_TAB, PageTransition::TYPED);
+  Browser* browser = BrowserList::GetLastActive();
+  DCHECK(browser);
+  browser->OpenAutoFillHelpTabAndActivate();
   return false;
 }
 
@@ -107,3 +105,6 @@ InfoBar* AutoFillCCInfoBarDelegate::CreateInfoBar() {
 }
 #endif  // defined(OS_WIN)
 
+InfoBarDelegate::Type AutoFillCCInfoBarDelegate::GetInfoBarType() {
+  return PAGE_ACTION_TYPE;
+}

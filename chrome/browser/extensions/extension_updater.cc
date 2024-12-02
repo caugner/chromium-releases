@@ -14,6 +14,7 @@
 #include "base/sha2.h"
 #include "base/stl_util-inl.h"
 #include "base/string_number_conversions.h"
+#include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/time.h"
 #include "base/thread.h"
@@ -181,11 +182,7 @@ void ManifestFetchesBuilder::AddPendingExtension(
   scoped_ptr<Version> version(
       Version::GetVersionFromString("0.0.0.0"));
 
-  Extension::Location location =
-      (info.is_from_sync ? Extension::INTERNAL
-                         : Extension::EXTERNAL_PREF_DOWNLOAD);
-
-  AddExtensionData(location, id, *version,
+  AddExtensionData(info.install_source, id, *version,
                    info.expected_crx_type, info.update_url);
 }
 
@@ -293,7 +290,7 @@ class ExtensionUpdaterFileHandler
                      const GURL& download_url,
                      scoped_refptr<ExtensionUpdater> updater) {
     // Make sure we're running in the right thread.
-    DCHECK(ChromeThread::CurrentlyOn(ChromeThread::FILE));
+    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
 
     FilePath path;
     if (!file_util::CreateTemporaryFile(&path)) {
@@ -310,8 +307,8 @@ class ExtensionUpdaterFileHandler
     }
 
     // The ExtensionUpdater now owns the temp file.
-    ChromeThread::PostTask(
-        ChromeThread::UI, FROM_HERE,
+    BrowserThread::PostTask(
+        BrowserThread::UI, FROM_HERE,
         NewRunnableMethod(
             updater.get(), &ExtensionUpdater::OnCRXFileWritten, extension_id,
             path, download_url));
@@ -443,9 +440,9 @@ class SafeManifestParser : public UtilityProcessHost::Client {
   // Posts a task over to the IO loop to start the parsing of xml_ in a
   // utility process.
   void Start() {
-    DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
-    ChromeThread::PostTask(
-        ChromeThread::IO, FROM_HERE,
+    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+    BrowserThread::PostTask(
+        BrowserThread::IO, FROM_HERE,
         NewRunnableMethod(
             this, &SafeManifestParser::ParseInSandbox,
             g_browser_process->resource_dispatcher_host()));
@@ -453,7 +450,7 @@ class SafeManifestParser : public UtilityProcessHost::Client {
 
   // Creates the sandboxed utility process and tells it to start parsing.
   void ParseInSandbox(ResourceDispatcherHost* rdh) {
-    DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
+    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
     // TODO(asargent) we shouldn't need to do this branch here - instead
     // UtilityProcessHost should handle it for us. (http://crbug.com/19192)
@@ -461,19 +458,19 @@ class SafeManifestParser : public UtilityProcessHost::Client {
         !CommandLine::ForCurrentProcess()->HasSwitch(switches::kSingleProcess);
     if (use_utility_process) {
       UtilityProcessHost* host = new UtilityProcessHost(
-          rdh, this, ChromeThread::UI);
+          rdh, this, BrowserThread::UI);
       host->StartUpdateManifestParse(xml_);
     } else {
       UpdateManifest manifest;
       if (manifest.Parse(xml_)) {
-        ChromeThread::PostTask(
-            ChromeThread::UI, FROM_HERE,
+        BrowserThread::PostTask(
+            BrowserThread::UI, FROM_HERE,
             NewRunnableMethod(
                 this, &SafeManifestParser::OnParseUpdateManifestSucceeded,
                 manifest.results()));
       } else {
-        ChromeThread::PostTask(
-            ChromeThread::UI, FROM_HERE,
+        BrowserThread::PostTask(
+            BrowserThread::UI, FROM_HERE,
             NewRunnableMethod(
                 this, &SafeManifestParser::OnParseUpdateManifestFailed,
                 manifest.errors()));
@@ -484,13 +481,13 @@ class SafeManifestParser : public UtilityProcessHost::Client {
   // Callback from the utility process when parsing succeeded.
   virtual void OnParseUpdateManifestSucceeded(
       const UpdateManifest::Results& results) {
-    DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
+    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
     updater_->HandleManifestResults(*fetch_data_, results);
   }
 
   // Callback from the utility process when parsing failed.
   virtual void OnParseUpdateManifestFailed(const std::string& error_message) {
-    DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
+    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
     LOG(WARNING) << "Error parsing update manifest:\n" << error_message;
   }
 
@@ -600,8 +597,8 @@ void ExtensionUpdater::OnCRXFetchComplete(const GURL& url,
     } else {
       // Successfully fetched - now write crx to a file so we can have the
       // ExtensionsService install it.
-      ChromeThread::PostTask(
-          ChromeThread::FILE, FROM_HERE,
+      BrowserThread::PostTask(
+          BrowserThread::FILE, FROM_HERE,
           NewRunnableMethod(
               file_handler_.get(), &ExtensionUpdaterFileHandler::WriteTempFile,
               current_extension_fetch_.id, data, url,
@@ -799,6 +796,10 @@ std::vector<int> ExtensionUpdater::DetermineUpdates(
 }
 
 void ExtensionUpdater::StartUpdateCheck(ManifestFetchData* fetch_data) {
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kDisableBackgroundNetworking))
+    return;
+
   std::deque<ManifestFetchData*>::const_iterator i;
   for (i = manifests_pending_.begin(); i != manifests_pending_.end(); i++) {
     if (fetch_data->full_url() == (*i)->full_url()) {

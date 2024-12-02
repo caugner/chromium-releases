@@ -22,6 +22,13 @@ extern const char kHomepageLocation[];
 extern const char kHomepageIsNewTabPage[];
 extern const char kRestoreOnStartup[];
 extern const char kURLsToRestoreOnStartup[];
+extern const char kDefaultSearchProviderEnabled[];
+extern const char kDefaultSearchProviderName[];
+extern const char kDefaultSearchProviderKeyword[];
+extern const char kDefaultSearchProviderSearchURL[];
+extern const char kDefaultSearchProviderSuggestURL[];
+extern const char kDefaultSearchProviderIconURL[];
+extern const char kDefaultSearchProviderEncodings[];
 extern const char kProxyServerMode[];
 extern const char kProxyServer[];
 extern const char kProxyPacUrl[];
@@ -32,6 +39,7 @@ extern const char kDnsPrefetchingEnabled[];
 extern const char kSafeBrowsingEnabled[];
 extern const char kMetricsReportingEnabled[];
 extern const char kPasswordManagerEnabled[];
+extern const char kPasswordManagerAllowShowPasswords[];
 extern const char kDisabledPlugins[];
 extern const char kAutoFillEnabled[];
 extern const char kApplicationLocaleValue[];
@@ -39,7 +47,15 @@ extern const char kSyncDisabled[];
 extern const char kExtensionInstallAllowList[];
 extern const char kExtensionInstallDenyList[];
 extern const char kShowHomeButton[];
+extern const char kPrintingEnabled[];
+extern const char kJavascriptEnabled[];
+extern const char kSavingBrowserHistoryDisabled[];
 
+// Chrome Frame specific policy constants
+extern const char kChromeFrameRendererSettings[];
+extern const char kRenderInChromeFrameList[];
+extern const char kRenderInHostList[];
+extern const char kChromeFrameContentTypes[];
 }  // namespace key
 
 }  // namespace policy

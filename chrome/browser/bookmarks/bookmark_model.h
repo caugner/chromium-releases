@@ -56,7 +56,7 @@ class BookmarkNode : public TreeNode<BookmarkNode> {
   explicit BookmarkNode(const GURL& url);
   // Creates a new node with the specified url and id.
   BookmarkNode(int64 id, const GURL& url);
-  virtual ~BookmarkNode() {}
+  virtual ~BookmarkNode();
 
   // Returns the URL.
   const GURL& GetURL() const { return url_; }
@@ -115,10 +115,7 @@ class BookmarkNode : public TreeNode<BookmarkNode> {
   }
 
   // Called when the favicon becomes invalid.
-  void InvalidateFavicon() {
-    loaded_favicon_ = false;
-    favicon_ = SkBitmap();
-  }
+  void InvalidateFavicon();
 
   // Resets the properties of the node from the supplied entry.
   // This is used by the bookmark model and not really useful outside of it.
@@ -237,7 +234,7 @@ class BookmarkModel : public NotificationObserver, public BookmarkService {
   void SetURL(const BookmarkNode* node, const GURL& url);
 
   // Returns true if the model finished loading.
-  virtual bool IsLoaded() { return loaded_; }
+  virtual bool IsLoaded();
 
   // Returns the set of nodes with the specified URL.
   void GetNodesByURL(const GURL& url, std::vector<const BookmarkNode*>* nodes);

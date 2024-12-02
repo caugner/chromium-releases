@@ -31,7 +31,7 @@ namespace pepper {
 namespace {
 
 PP_Resource Create(PP_Instance instance_id, bool vertical) {
-  PluginInstance* instance = PluginInstance::FromPPInstance(instance_id);
+  PluginInstance* instance = ResourceTracker::Get()->GetInstance(instance_id);
   if (!instance)
     return 0;
 
@@ -173,7 +173,7 @@ bool Scrollbar::Paint(const PP_Rect* rect, ImageData* image) {
   return true;
 }
 
-bool Scrollbar::HandleEvent(const PP_Event* event) {
+bool Scrollbar::HandleEvent(const PP_InputEvent* event) {
   scoped_ptr<WebInputEvent> web_input_event(CreateWebInputEvent(*event));
   if (!web_input_event.get())
     return false;
@@ -196,7 +196,7 @@ void Scrollbar::valueChanged(WebKit::WebScrollbar* scrollbar) {
     return;
   ScopedResourceId resource(this);
   ppp_scrollbar->ValueChanged(
-      instance()->GetPPInstance(), resource.id, scrollbar_->value());
+      instance()->pp_instance(), resource.id, scrollbar_->value());
 }
 
 void Scrollbar::invalidateScrollbarRect(WebKit::WebScrollbar* scrollbar,

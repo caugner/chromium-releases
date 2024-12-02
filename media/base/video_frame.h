@@ -17,6 +17,7 @@ class VideoFrame : public StreamSample {
   static const size_t kRGBPlane = 0;
 
   static const size_t kNumYUVPlanes = 3;
+  static const size_t kNumNV12Planes = 2;
   static const size_t kYPlane = 0;
   static const size_t kUPlane = 1;
   static const size_t kVPlane = 2;
@@ -39,16 +40,22 @@ class VideoFrame : public StreamSample {
   };
 
   enum SurfaceType {
+    // Video frame is backed by system memory. The memory can be allocated by
+    // this object or be provided externally.
     TYPE_SYSTEM_MEMORY,
-    TYPE_OMXBUFFERHEAD,
-    TYPE_EGL_IMAGE,
-    TYPE_MFBUFFER,
-    TYPE_DIRECT3DSURFACE
+
+    // Video frame is stored in GL texture(s).
+    TYPE_GL_TEXTURE,
   };
 
- public:
-  // Creates a new frame with given parameters. Buffers for the frame are
-  // allocated but not initialized.
+  // Defines a new type for GL texture so we don't include OpenGL headers.
+  typedef unsigned int GlTexture;
+
+  // Get the number of planes for a video frame format.
+  static size_t GetNumberOfPlanes(VideoFrame::Format format);
+
+  // Creates a new frame in system memory with given parameters. Buffers for
+  // the frame are allocated but not initialized.
   static void CreateFrame(Format format,
                           size_t width,
                           size_t height,
@@ -70,6 +77,13 @@ class VideoFrame : public StreamSample {
                                   base::TimeDelta duration,
                                   void* private_buffer,
                                   scoped_refptr<VideoFrame>* frame_out);
+
+  // Creates a new frame with GL textures.
+  static void CreateFrameGlTexture(Format format,
+                                   size_t width,
+                                   size_t height,
+                                   GlTexture const textures[kMaxPlanes],
+                                   scoped_refptr<VideoFrame>* frame_out);
 
   // Creates a frame with format equals to VideoFrame::EMPTY, width, height
   // timestamp and duration are all 0.
@@ -94,7 +108,11 @@ class VideoFrame : public StreamSample {
 
   // Returns pointer to the buffer for a given plane. The memory is owned by
   // VideoFrame object and must not be freed by the caller.
+  // TODO(hclam): Use union together with |gl_texture| and |d3d_texture|.
   uint8* data(size_t plane) const { return data_[plane]; }
+
+  // Returns the GL texture for a given plane.
+  GlTexture gl_texture(size_t plane) const { return gl_textures_[plane]; }
 
   void* private_buffer() const { return private_buffer_; }
 
@@ -135,6 +153,9 @@ class VideoFrame : public StreamSample {
 
   // Array of data pointers to each plane.
   uint8* data_[kMaxPlanes];
+
+  // Array fo GL textures.
+  GlTexture gl_textures_[kMaxPlanes];
 
   // True of memory referenced by |data_| is provided externally and shouldn't
   // be deleted.

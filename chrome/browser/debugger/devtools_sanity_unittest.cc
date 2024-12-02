@@ -60,8 +60,6 @@ const char kPauseWhenScriptIsRunning[] =
 const char kResourceContentLengthTestPage[] = "files/devtools/image.html";
 const char kResourceTestPage[] = "files/devtools/resource_test_page.html";
 const char kSimplePage[] = "files/devtools/simple_page.html";
-const char kSyntaxErrorTestPage[] =
-    "files/devtools/script_syntax_error.html";
 const char kCompletionOnPause[] =
     "files/devtools/completion_on_pause.html";
 const char kPageWithContentScript[] =
@@ -327,26 +325,14 @@ IN_PROC_BROWSER_TEST_F(DevToolsSanityTest,
 
 // Tests that debugger works correctly if pause event occurs when DevTools
 // frontend is being loaded.
-// Disabled. See http://code.google.com/p/chromium/issues/detail?id=53406
-IN_PROC_BROWSER_TEST_F(DevToolsSanityTest,
-                       DISABLED_TestPauseWhenLoadingDevTools) {
+IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestPauseWhenLoadingDevTools) {
   RunTest("testPauseWhenLoadingDevTools", kPauseWhenLoadingDevTools);
 }
 
 // Tests that pressing 'Pause' will pause script execution if the script
 // is already running.
-// The test fails on linux and should be related to Webkit patch
-// http://trac.webkit.org/changeset/64124/trunk.
-// Disabled. See http://code.google.com/p/chromium/issues/detail?id=53406
-IN_PROC_BROWSER_TEST_F(DevToolsSanityTest,
-                       DISABLED_TestPauseWhenScriptIsRunning) {
+IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestPauseWhenScriptIsRunning) {
   RunTest("testPauseWhenScriptIsRunning", kPauseWhenScriptIsRunning);
-}
-
-// Tests that execution continues automatically when there is a syntax error in
-// script and DevTools are open.
-IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestAutoContinueOnSyntaxError) {
-  RunTest("testAutoContinueOnSyntaxError", kSyntaxErrorTestPage);
 }
 
 // Fails after WebKit roll 66724:66804, http://crbug.com/54592
@@ -362,16 +348,6 @@ IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, MAYBE_TestCompletionOnPause) {
 // Tests that 'Pause' button works for eval.
 IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, DISABLED_TestPauseInEval) {
   RunTest("testPauseInEval", kDebuggerTestPage);
-}
-
-// Test that Storage panel can be shown.
-IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestShowStoragePanel) {
-  RunTest("testShowStoragePanel", kDebuggerTestPage);
-}
-
-// Disabled. See http://code.google.com/p/chromium/issues/detail?id=53406
-IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, DISABLED_TestMessageLoopReentrant) {
-  RunTest("testMessageLoopReentrant", kDebuggerTestPage);
 }
 
 }  // namespace

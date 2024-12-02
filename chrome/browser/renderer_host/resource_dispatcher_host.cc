@@ -10,6 +10,7 @@
 
 #include "base/logging.h"
 #include "base/command_line.h"
+#include "base/histogram.h"
 #include "base/message_loop.h"
 #include "base/scoped_ptr.h"
 #include "base/shared_memory.h"
@@ -70,6 +71,7 @@
 #include "webkit/appcache/appcache_interceptor.h"
 #include "webkit/appcache/appcache_interfaces.h"
 #include "webkit/blob/blob_storage_controller.h"
+#include "webkit/blob/deletable_file_reference.h"
 
 // TODO(oshima): Enable this for other platforms.
 #if defined(OS_CHROMEOS)
@@ -88,6 +90,7 @@
 using base::Time;
 using base::TimeDelta;
 using base::TimeTicks;
+using webkit_blob::DeletableFileReference;
 
 // ----------------------------------------------------------------------------
 
@@ -152,7 +155,7 @@ bool ShouldServiceRequest(ChildProcessInfo::ProcessType process_type,
     std::vector<net::UploadData::Element>::const_iterator iter;
     for (iter = uploads->begin(); iter != uploads->end(); ++iter) {
       if (iter->type() == net::UploadData::TYPE_FILE &&
-          !policy->CanUploadFile(child_id, iter->file_path())) {
+          !policy->CanReadFile(child_id, iter->file_path())) {
         NOTREACHED() << "Denied unauthorized upload of "
                      << iter->file_path().value();
         return false;
@@ -238,17 +241,17 @@ ResourceDispatcherHost::~ResourceDispatcherHost() {
 }
 
 void ResourceDispatcherHost::Initialize() {
-  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   webkit_thread_->Initialize();
   safe_browsing_->Initialize();
-  ChromeThread::PostTask(
-      ChromeThread::IO, FROM_HERE,
+  BrowserThread::PostTask(
+      BrowserThread::IO, FROM_HERE,
       NewRunnableFunction(&appcache::AppCacheInterceptor::EnsureRegistered));
 }
 
 void ResourceDispatcherHost::Shutdown() {
-  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
-  ChromeThread::PostTask(ChromeThread::IO, FROM_HERE, new ShutdownTask(this));
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  BrowserThread::PostTask(BrowserThread::IO, FROM_HERE, new ShutdownTask(this));
 }
 
 void ResourceDispatcherHost::SetRequestInfo(
@@ -258,7 +261,7 @@ void ResourceDispatcherHost::SetRequestInfo(
 }
 
 void ResourceDispatcherHost::OnShutdown() {
-  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   is_shutdown_ = true;
   resource_queue_.Shutdown();
   STLDeleteValues(&pending_requests_);
@@ -294,8 +297,8 @@ bool ResourceDispatcherHost::HandleExternalProtocol(int request_id,
   if (!ResourceType::IsFrame(type) || URLRequest::IsHandledURL(url))
     return false;
 
-  ChromeThread::PostTask(
-      ChromeThread::UI, FROM_HERE,
+  BrowserThread::PostTask(
+      BrowserThread::UI, FROM_HERE,
       NewRunnableFunction(
           &ExternalProtocolHandler::LaunchUrl, url, child_id, route_id));
 
@@ -320,7 +323,10 @@ bool ResourceDispatcherHost::OnMessageReceived(const IPC::Message& message,
   IPC_BEGIN_MESSAGE_MAP_EX(ResourceDispatcherHost, message, *message_was_ok)
     IPC_MESSAGE_HANDLER(ViewHostMsg_RequestResource, OnRequestResource)
     IPC_MESSAGE_HANDLER_DELAY_REPLY(ViewHostMsg_SyncLoad, OnSyncLoad)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_ReleaseDownloadedFile,
+                        OnReleaseDownloadedFile)
     IPC_MESSAGE_HANDLER(ViewHostMsg_DataReceived_ACK, OnDataReceivedACK)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_DataDownloaded_ACK, OnDataDownloadedACK)
     IPC_MESSAGE_HANDLER(ViewHostMsg_UploadProgress_ACK, OnUploadProgressACK)
     IPC_MESSAGE_HANDLER(ViewHostMsg_CancelRequest, OnCancelRequest)
     IPC_MESSAGE_HANDLER(ViewHostMsg_FollowRedirect, OnFollowRedirect)
@@ -374,7 +380,7 @@ void ResourceDispatcherHost::BeginRequest(
   }
 
   // Might need to resolve the blob references in the upload data.
-  if (request_data.upload_data) {
+  if (request_data.upload_data && context) {
     context->blob_storage_context()->controller()->
         ResolveBlobReferencesInUploadData(request_data.upload_data.get());
   }
@@ -393,8 +399,8 @@ void ResourceDispatcherHost::BeginRequest(
           route_id,
           request_id,
           status,
-          std::string()));  // No security info needed, connection was not
-                            // established.
+          std::string(),   // No security info needed, connection was not
+          base::Time()));  // established.
     }
     return;
   }
@@ -408,7 +414,11 @@ void ResourceDispatcherHost::BeginRequest(
   // Construct the event handler.
   scoped_refptr<ResourceHandler> handler;
   if (sync_result) {
-    handler = new SyncResourceHandler(receiver_, request_data.url, sync_result);
+    handler = new SyncResourceHandler(receiver_,
+                                      child_id,
+                                      request_data.url,
+                                      sync_result,
+                                      this);
   } else {
     handler = new AsyncResourceHandler(receiver_,
                                        child_id,
@@ -418,6 +428,7 @@ void ResourceDispatcherHost::BeginRequest(
                                        this);
   }
 
+  // The RedirectToFileResourceHandler depends on being next in the chain.
   if (request_data.download_to_file)
     handler = new RedirectToFileResourceHandler(handler, child_id, this);
 
@@ -446,6 +457,15 @@ void ResourceDispatcherHost::BeginRequest(
   } else if (request_data.resource_type == ResourceType::SUB_FRAME) {
     load_flags |= net::LOAD_SUB_FRAME;
   }
+  // Raw headers are sensitive, as they inclide Cookie/Set-Cookie, so only
+  // allow requesting them if requestor has ReadRawCookies permission.
+  if ((load_flags & net::LOAD_REPORT_RAW_HEADERS)
+      && !ChildProcessSecurityPolicy::GetInstance()->
+              CanReadRawCookies(child_id)) {
+    LOG(INFO) << "Denied unathorized request for raw headers";
+    load_flags &= ~net::LOAD_REPORT_RAW_HEADERS;
+  }
+
   request->set_load_flags(load_flags);
   request->set_context(context);
   request->set_priority(DetermineRequestPriority(request_data.resource_type));
@@ -512,12 +532,27 @@ void ResourceDispatcherHost::BeginRequest(
   chrome_browser_net::SetOriginProcessUniqueIDForRequest(
       request_data.origin_child_id, request);
 
+  if (request->url().SchemeIs(chrome::kBlobScheme) && context) {
+    // Hang on to a reference to ensure the blob is not released prior
+    // to the job being started.
+    webkit_blob::BlobStorageController* controller =
+        context->blob_storage_context()->controller();
+    extra_info->set_requested_blob_data(
+        controller->GetBlobDataFromUrl(request->url()));
+  }
+
   // Have the appcache associate its extra info with the request.
   appcache::AppCacheInterceptor::SetExtraRequestInfo(
       request, context ? context->appcache_service() : NULL, child_id,
       request_data.appcache_host_id, request_data.resource_type);
 
   BeginRequestInternal(request);
+}
+
+void ResourceDispatcherHost::OnReleaseDownloadedFile(int request_id) {
+  DCHECK(pending_requests_.end() ==
+         pending_requests_.find(GlobalRequestID(receiver_->id(), request_id)));
+  UnregisterDownloadedTempFile(receiver_->id(), request_id);
 }
 
 void ResourceDispatcherHost::OnDataReceivedACK(int request_id) {
@@ -545,6 +580,30 @@ void ResourceDispatcherHost::DataReceivedACK(int child_id,
     // Resume the request.
     PauseRequest(child_id, request_id, false);
   }
+}
+
+void ResourceDispatcherHost::OnDataDownloadedACK(int request_id) {
+  // TODO(michaeln): maybe throttle DataDownloaded messages
+}
+
+void ResourceDispatcherHost::RegisterDownloadedTempFile(
+    int receiver_id, int request_id, DeletableFileReference* reference) {
+  // Note: receiver_id is the child_id is the render_process_id...
+  registered_temp_files_[receiver_id][request_id] = reference;
+  ChildProcessSecurityPolicy::GetInstance()->GrantReadFile(
+      receiver_id, reference->path());
+}
+
+void ResourceDispatcherHost::UnregisterDownloadedTempFile(
+    int receiver_id, int request_id) {
+  DeletableFilesMap& map = registered_temp_files_[receiver_id];
+  DeletableFilesMap::iterator found = map.find(request_id);
+  if (found == map.end())
+    return;
+
+  ChildProcessSecurityPolicy::GetInstance()->RevokeAllPermissionsForFile(
+      receiver_id, found->second->path());
+  map.erase(found);
 }
 
 bool ResourceDispatcherHost::Send(IPC::Message* message) {
@@ -842,6 +901,7 @@ int ResourceDispatcherHost::GetOutstandingRequestsMemoryCost(
 void ResourceDispatcherHost::CancelRequestsForProcess(int child_id) {
   socket_stream_dispatcher_host_->CancelRequestsForProcess(child_id);
   CancelRequestsForRoute(child_id, -1 /* cancel all */);
+  registered_temp_files_.erase(child_id);
 }
 
 void ResourceDispatcherHost::CancelRequestsForRoute(int child_id,
@@ -1501,7 +1561,7 @@ void ResourceDispatcherHost::RemoveObserver(Observer* obs) {
 URLRequest* ResourceDispatcherHost::GetURLRequest(
     const GlobalRequestID& request_id) const {
   // This should be running in the IO loop.
-  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
   PendingRequestList::const_iterator i = pending_requests_.find(request_id);
   if (i == pending_requests_.end())
@@ -1685,7 +1745,7 @@ void ResourceDispatcherHost::UpdateLoadStates() {
 
   LoadInfoUpdateTask* task = new LoadInfoUpdateTask;
   task->info_map.swap(info_map);
-  ChromeThread::PostTask(ChromeThread::UI, FROM_HERE, task);
+  BrowserThread::PostTask(BrowserThread::UI, FROM_HERE, task);
 }
 
 // Calls the ResourceHandler to send upload progress messages to the renderer.
@@ -1793,8 +1853,9 @@ bool ResourceDispatcherHost::IsResourceDispatcherHostMessage(
     case ViewHostMsg_CancelRequest::ID:
     case ViewHostMsg_FollowRedirect::ID:
     case ViewHostMsg_ClosePage_ACK::ID:
+    case ViewHostMsg_ReleaseDownloadedFile::ID:
     case ViewHostMsg_DataReceived_ACK::ID:
-    case ViewHostMsg_DownloadProgress_ACK::ID:
+    case ViewHostMsg_DataDownloaded_ACK::ID:
     case ViewHostMsg_UploadProgress_ACK::ID:
     case ViewHostMsg_SyncLoad::ID:
       return true;

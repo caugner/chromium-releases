@@ -126,6 +126,11 @@ NSString* GetWindowTitle(ContentSettingsType settingsType) {
 
 const CGFloat kButtonBarHeight = 35.0;
 
+// The settings shown in the combobox for plug-ins;
+const ContentSetting kPluginSettings[] = { CONTENT_SETTING_ALLOW,
+                                           CONTENT_SETTING_ASK,
+                                           CONTENT_SETTING_BLOCK };
+
 // The settings shown in the combobox if showSession_ is false;
 const ContentSetting kNoSessionSettings[] = { CONTENT_SETTING_ALLOW,
                                               CONTENT_SETTING_BLOCK };
@@ -134,13 +139,6 @@ const ContentSetting kNoSessionSettings[] = { CONTENT_SETTING_ALLOW,
 const ContentSetting kSessionSettings[] = { CONTENT_SETTING_ALLOW,
                                             CONTENT_SETTING_SESSION_ONLY,
                                             CONTENT_SETTING_BLOCK };
-
-// The settings shown in the combobox if show_session_ is true, and we still
-// offer the cookie prompt mode.
-const ContentSetting kSessionAskSettings[] = { CONTENT_SETTING_ALLOW,
-                                               CONTENT_SETTING_ASK,
-                                               CONTENT_SETTING_SESSION_ONLY,
-                                               CONTENT_SETTING_BLOCK };
 
 }  // namespace
 
@@ -178,8 +176,6 @@ static ContentExceptionsWindowController*
     model_.reset(new ContentExceptionsTableModel(
         settingsMap_, otrSettingsMap_, settingsType_));
     showSession_ = settingsType_ == CONTENT_SETTINGS_TYPE_COOKIES;
-    disableCookiePrompt_ = !CommandLine::ForCurrentProcess()->HasSwitch(
-        switches::kEnableCookiePrompt);
     otrAllowed_ = otrSettingsMap != NULL;
     tableObserver_.reset(new UpdatingContentSettingsObserver(self));
     updatesEnabled_ = YES;
@@ -505,22 +501,20 @@ static ContentExceptionsWindowController*
 }
 
 - (size_t)menuItemCount {
-  if (showSession_) {
-    return disableCookiePrompt_ ?
-        arraysize(kSessionSettings) : arraysize(kSessionAskSettings);
-  } else {
-    return arraysize(kNoSessionSettings);
-  }
+  if (settingsType_ == CONTENT_SETTINGS_TYPE_PLUGINS)
+    return arraysize(kPluginSettings);
+  return showSession_ ? arraysize(kSessionSettings)
+                      : arraysize(kNoSessionSettings);
 }
 
 - (NSString*)titleForIndex:(size_t)index {
   switch ([self settingForIndex:index]) {
     case CONTENT_SETTING_ALLOW:
       return l10n_util::GetNSStringWithFixup(IDS_EXCEPTIONS_ALLOW_BUTTON);
-    case CONTENT_SETTING_BLOCK:
-      return l10n_util::GetNSStringWithFixup(IDS_EXCEPTIONS_BLOCK_BUTTON);
     case CONTENT_SETTING_ASK:
       return l10n_util::GetNSStringWithFixup(IDS_EXCEPTIONS_ASK_BUTTON);
+    case CONTENT_SETTING_BLOCK:
+      return l10n_util::GetNSStringWithFixup(IDS_EXCEPTIONS_BLOCK_BUTTON);
     case CONTENT_SETTING_SESSION_ONLY:
       return l10n_util::GetNSStringWithFixup(
           IDS_EXCEPTIONS_SESSION_ONLY_BUTTON);
@@ -531,12 +525,9 @@ static ContentExceptionsWindowController*
 }
 
 - (ContentSetting)settingForIndex:(size_t)index {
-  if (showSession_) {
-    return disableCookiePrompt_ ?
-        kSessionSettings[index] : kSessionAskSettings[index];
-  } else {
-    return kNoSessionSettings[index];
-  }
+  if (settingsType_ == CONTENT_SETTINGS_TYPE_PLUGINS)
+    return kPluginSettings[index];
+  return showSession_ ? kSessionSettings[index] : kNoSessionSettings[index];
 }
 
 - (size_t)indexForSetting:(ContentSetting)setting {

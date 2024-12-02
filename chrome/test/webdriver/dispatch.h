@@ -11,6 +11,7 @@
 
 #include "base/logging.h"
 #include "base/scoped_ptr.h"
+#include "base/string_split.h"
 #include "base/string_util.h"
 #include "chrome/test/webdriver/utility_functions.h"
 #include "chrome/test/webdriver/commands/command.h"
@@ -72,6 +73,8 @@ void Dispatch(struct mg_connection* connection,
   DispatchCommand(ptr.get(), method, &response);
   SendResponse(connection, request_info, response);
 }
+
 }  // namespace webdriver
+
 #endif  // CHROME_TEST_WEBDRIVER_DISPATCH_H_
 

@@ -57,10 +57,10 @@ bool PrintViewManager::OnRenderViewGone(RenderViewHost* render_view_host) {
   return true;
 }
 
-std::wstring PrintViewManager::RenderSourceName() {
-  std::wstring name(UTF16ToWideHack(owner_.GetTitle()));
+string16 PrintViewManager::RenderSourceName() {
+  string16 name(owner_.GetTitle());
   if (name.empty())
-    name = l10n_util::GetString(IDS_DEFAULT_PRINT_DOCUMENT_TITLE);
+    name = l10n_util::GetStringUTF16(IDS_DEFAULT_PRINT_DOCUMENT_TITLE);
   return name;
 }
 
@@ -125,7 +125,7 @@ void PrintViewManager::DidPrintPage(
   NOTIMPLEMENTED() << " this printing code doesn't quite work yet.";
 #else
   scoped_ptr<NativeMetafile> metafile(new NativeMetafile());
-  if (!metafile->CreateFromData(shared_buf.memory(), params.data_size)) {
+  if (!metafile->Init(shared_buf.memory(), params.data_size)) {
     NOTREACHED() << "Invalid metafile header";
     owner_.Stop();
     return;
@@ -342,17 +342,6 @@ void PrintViewManager::ReleasePrintJob() {
   print_job_->DisconnectSource();
   // Don't close the worker thread.
   print_job_ = NULL;
-}
-
-void PrintViewManager::PrintNowInternal() {
-  DCHECK(waiting_to_print_);
-
-  // Settings are already loaded. Go ahead. This will set
-  // print_job_->is_job_pending() to true.
-  print_job_->StartPrinting();
-
-  DCHECK(print_job_->document());
-  DCHECK(print_job_->document()->IsComplete());
 }
 
 bool PrintViewManager::RunInnerMessageLoop() {

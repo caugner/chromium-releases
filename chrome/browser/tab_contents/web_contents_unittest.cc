@@ -186,7 +186,7 @@ class TabContentsTest : public RenderViewHostTestHarness {
  public:
   TabContentsTest()
       : RenderViewHostTestHarness(),
-        ui_thread_(ChromeThread::UI, &message_loop_) {
+        ui_thread_(BrowserThread::UI, &message_loop_) {
   }
 
  private:
@@ -224,7 +224,7 @@ class TabContentsTest : public RenderViewHostTestHarness {
     profile_.reset(NULL);
   }
 
-  ChromeThread ui_thread_;
+  BrowserThread ui_thread_;
 };
 
 // Test to make sure that title updates get stripped of whitespace.
@@ -258,7 +258,7 @@ TEST_F(TabContentsTest, NTPViewSource) {
   controller().RendererDidNavigate(params, 0, &details);
   // Also check title and url.
   EXPECT_EQ(ASCIIToUTF16(kUrl), contents()->GetTitle());
-  EXPECT_EQ(true, contents()->ShouldDisplayURL());
+  EXPECT_TRUE(contents()->ShouldDisplayURL());
 }
 
 // Test simple same-SiteInstance navigation.
@@ -760,8 +760,8 @@ TEST_F(TabContentsTest, WebKitPrefs) {
   // These values have been overridden by the profile preferences.
   EXPECT_EQ("UTF-8", webkit_prefs.default_encoding);
   EXPECT_EQ(20, webkit_prefs.default_font_size);
-  EXPECT_EQ(false, webkit_prefs.text_areas_are_resizable);
-  EXPECT_EQ(true, webkit_prefs.uses_universal_detector);
+  EXPECT_FALSE(webkit_prefs.text_areas_are_resizable);
+  EXPECT_TRUE(webkit_prefs.uses_universal_detector);
 
   // These should still be the default values.
 #if defined(OS_MACOSX)
@@ -772,7 +772,7 @@ TEST_F(TabContentsTest, WebKitPrefs) {
   const wchar_t kDefaultFont[] = L"Times New Roman";
 #endif
   EXPECT_EQ(kDefaultFont, webkit_prefs.standard_font_family);
-  EXPECT_EQ(true, webkit_prefs.javascript_enabled);
+  EXPECT_TRUE(webkit_prefs.javascript_enabled);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1378,6 +1378,45 @@ TEST_F(TabContentsTest, NavigateBeforeInterstitialShows) {
   EXPECT_EQ(TestInterstitialPage::CANCELED, state);
 }
 
+// Test that a new request to show an interstitial while an interstitial is
+// pending does not cause problems. htp://crbug/29655 and htp://crbug/9442.
+TEST_F(TabContentsTest, TwoQuickInterstitials) {
+  GURL interstitial_url("http://interstitial");
+
+  // Show a first interstitial.
+  TestInterstitialPage::InterstitialState state1 =
+      TestInterstitialPage::UNDECIDED;
+  bool deleted1 = false;
+  TestInterstitialPage* interstitial1 =
+      new TestInterstitialPage(contents(), true, interstitial_url,
+                               &state1, &deleted1);
+  TestInterstitialPageStateGuard state_guard1(interstitial1);
+  interstitial1->Show();
+
+  // Show another interstitial on that same tab before the first one had time
+  // to load.
+  TestInterstitialPage::InterstitialState state2 =
+      TestInterstitialPage::UNDECIDED;
+  bool deleted2 = false;
+  TestInterstitialPage* interstitial2 =
+      new TestInterstitialPage(contents(), true, interstitial_url,
+                               &state2, &deleted2);
+  TestInterstitialPageStateGuard state_guard2(interstitial2);
+  interstitial2->Show();
+
+  // The first interstitial should have been closed and deleted.
+  EXPECT_TRUE(deleted1);
+  EXPECT_EQ(TestInterstitialPage::CANCELED, state1);
+
+  // The 2nd one should still be OK.
+  ASSERT_FALSE(deleted2);
+  EXPECT_EQ(TestInterstitialPage::UNDECIDED, state2);
+
+  // Make the interstitial navigation commit it should be showing.
+  interstitial2->TestDidNavigate(1, interstitial_url);
+  EXPECT_EQ(interstitial2, contents()->interstitial_page());
+}
+
 // Test showing an interstitial and have its renderer crash.
 TEST_F(TabContentsTest, InterstitialCrasher) {
   // Show an interstitial.
@@ -1514,7 +1553,7 @@ TEST_F(TabContentsTest, CopyStateFromAndPruneSourceInterstitial) {
   scoped_ptr<TestTabContents> other_contents(CreateTestTabContents());
   NavigationController& other_controller = other_contents->controller();
   other_contents->NavigateAndCommit(url3);
-  other_controller.CopyStateFromAndPrune(controller());
+  other_controller.CopyStateFromAndPrune(&controller());
 
   // The merged controller should only have two entries: url1 and url2.
   ASSERT_EQ(2, other_controller.entry_count());
@@ -1555,7 +1594,7 @@ TEST_F(TabContentsTest, CopyStateFromAndPruneTargetInterstitial) {
   EXPECT_TRUE(interstitial->is_showing());
   EXPECT_EQ(2, other_controller.entry_count());
 
-  other_controller.CopyStateFromAndPrune(controller());
+  other_controller.CopyStateFromAndPrune(&controller());
 
   // The merged controller should only have two entries: url1 and url2.
   ASSERT_EQ(2, other_controller.entry_count());

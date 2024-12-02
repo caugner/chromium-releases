@@ -19,7 +19,8 @@
 #include "base/task.h"
 #include "base/time.h"
 #include "base/tuple.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
+#include "chrome/browser/extensions/default_apps.h"
 #include "chrome/browser/extensions/extension_icon_manager.h"
 #include "chrome/browser/extensions/extension_menu_manager.h"
 #include "chrome/browser/extensions/extension_prefs.h"
@@ -28,6 +29,7 @@
 #include "chrome/browser/extensions/extensions_quota_service.h"
 #include "chrome/browser/extensions/external_extension_provider.h"
 #include "chrome/browser/extensions/sandboxed_extension_unpacker.h"
+#include "chrome/browser/prefs/pref_change_registrar.h"
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
 #include "chrome/common/extensions/extension.h"
@@ -50,6 +52,7 @@ struct PendingExtensionInfo {
   enum ExpectedCrxType {
     UNKNOWN,  // Sometimes we don't know the type of a pending item.  An
               // update URL from external_extensions.json is one such case.
+    APP,
     THEME,
     EXTENSION
   };
@@ -59,7 +62,8 @@ struct PendingExtensionInfo {
                        bool is_from_sync,
                        bool install_silently,
                        bool enable_on_install,
-                       bool enable_incognito_on_install);
+                       bool enable_incognito_on_install,
+                       Extension::Location install_source);
 
   PendingExtensionInfo();
 
@@ -69,6 +73,7 @@ struct PendingExtensionInfo {
   bool install_silently;
   bool enable_on_install;
   bool enable_incognito_on_install;
+  Extension::Location install_source;
 };
 
 // A PendingExtensionMap is a map from IDs of pending extensions to
@@ -97,7 +102,7 @@ class ExtensionUpdateService {
 // Manages installed and running Chromium extensions.
 class ExtensionsService
     : public base::RefCountedThreadSafe<ExtensionsService,
-                                        ChromeThread::DeleteOnUIThread>,
+                                        BrowserThread::DeleteOnUIThread>,
       public ExtensionUpdateService,
       public NotificationObserver {
  public:
@@ -128,19 +133,22 @@ class ExtensionsService
   static const char* kCurrentVersionFileName;
 
   // Determine if a given extension download should be treated as if it came
-  // from the gallery. Note that this is different from IsGalleryDownloadURL
-  // (above) in that in requires *both* that the download_url match and
-  // that the download was referred from a gallery page.
-  static bool IsDownloadFromGallery(const GURL& download_url,
-                                    const GURL& referrer_url);
+  // from the gallery. Note that this is requires *both* that the download_url
+  // match and that the download was referred from a gallery page.
+  bool IsDownloadFromGallery(const GURL& download_url,
+                             const GURL& referrer_url);
 
   // Determine if the downloaded extension came from the theme mini-gallery,
   // Used to test if we need to show the "Loading" dialog for themes.
   static bool IsDownloadFromMiniGallery(const GURL& download_url);
 
+  // Attempts to uninstall an extension from a given ExtensionService. Returns
+  // true iff the target extension exists.
+  static bool UninstallExtensionHelper(ExtensionsService* extensions_service,
+                                       const std::string& extension_id);
+
   ExtensionsService(Profile* profile,
                     const CommandLine* command_line,
-                    PrefService* prefs,
                     const FilePath& install_directory,
                     bool autoupdate_enabled);
 
@@ -165,6 +173,10 @@ class ExtensionsService
     return !(extensions_.empty() && disabled_extensions_.empty());
   }
 
+  const FilePath& install_directory() const { return install_directory_; }
+
+  DefaultApps* default_apps() { return &default_apps_; }
+
   // Whether this extension can run in an incognito window.
   bool IsIncognitoEnabled(const Extension* extension);
   void SetIsIncognitoEnabled(Extension* extension, bool enabled);
@@ -172,15 +184,6 @@ class ExtensionsService
   // Whether this extension can inject scripts into pages with file URLs.
   bool AllowFileAccess(const Extension* extension);
   void SetAllowFileAccess(Extension* extension, bool allow);
-
-  // Returns true if the extension has permission to execute script on a
-  // particular host.
-  // TODO(aa): Also use this in the renderer, for normal content script
-  // injection. Currently, that has its own copy of this code.
-  bool CanExecuteScriptOnHost(Extension* extension,
-                              const GURL& url, std::string* error) const;
-
-  const FilePath& install_directory() const { return install_directory_; }
 
   // Initialize and start all installed extensions.
   void Init();
@@ -228,6 +231,10 @@ class ExtensionsService
   void AddPendingExtensionFromExternalUpdateUrl(const std::string& id,
                                                 const GURL& update_url);
 
+  // Like the above. Always installed silently, and defaults update url
+  // from extension id.
+  void AddPendingExtensionFromDefaultAppList(const std::string& id);
+
   // Reloads the specified extension.
   void ReloadExtension(const std::string& extension_id);
 
@@ -240,8 +247,8 @@ class ExtensionsService
   void UninstallExtension(const std::string& extension_id,
                           bool external_uninstall);
 
-  // Enable or disable an extension. The extension must be in the opposite state
-  // before calling.
+  // Enable or disable an extension. No action if the extension is already
+  // enabled/disabled.
   void EnableExtension(const std::string& extension_id);
   void DisableExtension(const std::string& extension_id);
 
@@ -277,6 +284,9 @@ class ExtensionsService
   // Scan the extension directory and clean up the cruft.
   void GarbageCollectExtensions();
 
+  // The App that represents the web store.
+  Extension* GetWebStoreApp();
+
   // Lookup an extension by |url|.
   Extension* GetExtensionByURL(const GURL& url);
 
@@ -295,6 +305,10 @@ class ExtensionsService
 
   // Returns the icon to display in the omnibox for the given extension.
   const SkBitmap& GetOmniboxIcon(const std::string& extension_id);
+
+  // Returns the icon to display in the omnibox popup window for the given
+  // extension.
+  const SkBitmap& GetOmniboxPopupIcon(const std::string& extension_id);
 
   // Clear all ExternalExtensionProviders.
   void ClearProvidersForTesting();
@@ -373,13 +387,20 @@ class ExtensionsService
                                 NotificationType type,
                                 bool be_noisy);
 
+  // ExtensionHost of background page calls this method right after its render
+  // view has been created.
+  void DidCreateRenderViewForBackgroundPage(ExtensionHost* host);
+
   // NotificationObserver
   virtual void Observe(NotificationType type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
-  // Whether there are any apps installed.
-  bool HasApps();
+  // Whether there are any apps installed. Component apps are not included.
+  bool HasApps() const;
+
+  // Gets the set of loaded app ids. Component apps are not included.
+  ExtensionIdSet GetAppIds() const;
 
  private:
   virtual ~ExtensionsService();
@@ -401,7 +422,8 @@ class ExtensionsService
       const std::string& id, const GURL& update_url,
       PendingExtensionInfo::ExpectedCrxType crx_type,
       bool is_from_sync, bool install_silently,
-      bool enable_on_install, bool enable_incognito_on_install);
+      bool enable_on_install, bool enable_incognito_on_install,
+      Extension::Location install_source);
 
   // Handles sending notification that |extension| was loaded.
   void NotifyExtensionLoaded(Extension* extension);
@@ -478,12 +500,14 @@ class ExtensionsService
   OrphanedDevTools orphaned_dev_tools_;
 
   NotificationRegistrar registrar_;
+  PrefChangeRegistrar pref_change_registrar_;
 
   // Keeps track of menu items added by extensions.
   ExtensionMenuManager menu_manager_;
 
   // Keeps track of favicon-sized omnibox icons for extensions.
   ExtensionIconManager omnibox_icon_manager_;
+  ExtensionIconManager omnibox_popup_icon_manager_;
 
   // List of registered component extensions (see Extension::Location).
   typedef std::vector<ComponentExtensionInfo> RegisteredComponentExtensions;
@@ -501,6 +525,10 @@ class ExtensionsService
   typedef std::map<GURL, int> ProtectedStorageMap;
   ProtectedStorageMap protected_storage_map_;
 
+  // Manages the installation of default apps and the promotion of them in the
+  // app launcher.
+  DefaultApps default_apps_;
+
   FRIEND_TEST_ALL_PREFIXES(ExtensionsServiceTest,
                            UpdatePendingExtensionAlreadyInstalled);
   FRIEND_TEST_ALL_PREFIXES(ExtensionsServiceTest,
@@ -508,117 +536,6 @@ class ExtensionsService
   FRIEND_TEST_ALL_PREFIXES(ExtensionsServiceTest,
                            InstallAppsAndCheckStorageProtection);
   DISALLOW_COPY_AND_ASSIGN(ExtensionsService);
-};
-
-// Implements IO for the ExtensionsService.
-// TODO(aa): This can probably move into the .cc file.
-class ExtensionsServiceBackend
-    : public base::RefCountedThreadSafe<ExtensionsServiceBackend>,
-      public ExternalExtensionProvider::Visitor {
- public:
-  // |rdh| can be NULL in the case of test environment.
-  // |extension_prefs| contains a dictionary value that points to the extension
-  // preferences.
-  explicit ExtensionsServiceBackend(const FilePath& install_directory);
-
-  // Loads a single extension from |path| where |path| is the top directory of
-  // a specific extension where its manifest file lives.
-  // Errors are reported through ExtensionErrorReporter. On success,
-  // OnExtensionLoaded() is called.
-  // TODO(erikkay): It might be useful to be able to load a packed extension
-  // (presumably into memory) without installing it.
-  void LoadSingleExtension(const FilePath &path,
-                           scoped_refptr<ExtensionsService> frontend);
-
-  // Check externally updated extensions for updates and install if necessary.
-  // Errors are reported through ExtensionErrorReporter. Succcess is not
-  // reported.
-  void CheckForExternalUpdates(std::set<std::string> ids_to_ignore,
-                               scoped_refptr<ExtensionsService> frontend);
-
-  // For the extension in |version_path| with |id|, check to see if it's an
-  // externally managed extension.  If so, tell the frontend to uninstall it.
-  void CheckExternalUninstall(scoped_refptr<ExtensionsService> frontend,
-                              const std::string& id,
-                              Extension::Location location);
-
-  // Clear all ExternalExtensionProviders.
-  void ClearProvidersForTesting();
-
-  // Sets an ExternalExtensionProvider for the service to use during testing.
-  // |location| specifies what type of provider should be added.
-  void SetProviderForTesting(Extension::Location location,
-                             ExternalExtensionProvider* test_provider);
-
-  // ExternalExtensionProvider::Visitor implementation.
-  virtual void OnExternalExtensionFileFound(const std::string& id,
-                                            const Version* version,
-                                            const FilePath& path,
-                                            Extension::Location location);
-
-  virtual void OnExternalExtensionUpdateUrlFound(const std::string& id,
-                                                 const GURL& update_url);
-
-  // Reloads the given extensions from their manifests on disk (instead of what
-  // we have cached in the prefs).
-  void ReloadExtensionManifests(
-      ExtensionPrefs::ExtensionsInfo* extensions_to_reload,
-      base::TimeTicks start_time,
-      scoped_refptr<ExtensionsService> frontend);
-
- private:
-  friend class base::RefCountedThreadSafe<ExtensionsServiceBackend>;
-
-  virtual ~ExtensionsServiceBackend();
-
-  // Finish installing the extension in |crx_path| after it has been unpacked to
-  // |unpacked_path|.  If |expected_id| is not empty, it's verified against the
-  // extension's manifest before installation. If |silent| is true, there will
-  // be no install confirmation dialog. |from_gallery| indicates whether the
-  // crx was installed from our gallery, which results in different UI.
-  //
-  // Note: We take ownership of |extension|.
-  void OnExtensionUnpacked(
-      const FilePath& crx_path,
-      const FilePath& unpacked_path,
-      Extension* extension,
-      const std::string expected_id);
-
-  // Notify the frontend that there was an error loading an extension.
-  void ReportExtensionLoadError(const FilePath& extension_path,
-                                const std::string& error);
-
-  // Lookup an external extension by |id| by going through all registered
-  // external extension providers until we find a provider that contains an
-  // extension that matches. If |version| is not NULL, the extension version
-  // will be returned (caller is responsible for deleting that pointer).
-  // |location| can also be null, if not needed. Returns true if extension is
-  // found, false otherwise.
-  bool LookupExternalExtension(const std::string& id,
-                               Version** version,
-                               Extension::Location* location);
-
-  // This is a naked pointer which is set by each entry point.
-  // The entry point is responsible for ensuring lifetime.
-  ExtensionsService* frontend_;
-
-  // The top-level extensions directory being installed to.
-  FilePath install_directory_;
-
-  // Whether errors result in noisy alerts.
-  bool alert_on_error_;
-
-  // A map of all external extension providers.
-  typedef std::map<Extension::Location,
-                   linked_ptr<ExternalExtensionProvider> > ProviderMap;
-  ProviderMap external_extension_providers_;
-
-  // Set to true by OnExternalExtensionUpdateUrlFound() when an external
-  // extension URL is found.  Used in CheckForExternalUpdates() to see
-  // if an update check is needed to install pending extensions.
-  bool external_extension_added_;
-
-  DISALLOW_COPY_AND_ASSIGN(ExtensionsServiceBackend);
 };
 
 #endif  // CHROME_BROWSER_EXTENSIONS_EXTENSIONS_SERVICE_H_

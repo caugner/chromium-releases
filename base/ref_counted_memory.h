@@ -27,8 +27,8 @@ class RefCountedMemory : public base::RefCountedThreadSafe<RefCountedMemory> {
 
  protected:
   friend class base::RefCountedThreadSafe<RefCountedMemory>;
-
-  virtual ~RefCountedMemory() {}
+  RefCountedMemory();
+  virtual ~RefCountedMemory();
 };
 
 // An implementation of RefCountedMemory, where the ref counting does not
@@ -68,6 +68,10 @@ class RefCountedBytes : public RefCountedMemory {
   virtual size_t size() const;
 
   std::vector<unsigned char> data;
+
+ protected:
+  friend class base::RefCountedThreadSafe<RefCountedBytes>;
+  virtual ~RefCountedBytes();
 
  private:
   DISALLOW_COPY_AND_ASSIGN(RefCountedBytes);

@@ -112,23 +112,52 @@ TEST_P(FullTabUITest, FLAKY_CtrlN) {
   // events for New Window, but for Crl+N we don't get any
   // OnNewWindowX notifications. :(
   MockWindowObserver win_observer_mock;
-  const wchar_t* kIEFrameClass = L"IEFrame";
+
+  const char* kNewWindowTitlePattern = "*Internet Explorer*";
   EXPECT_CALL(ie_mock_, OnLoad(is_cf, StrEq(GetSimplePageUrl())))
       .WillOnce(testing::DoAll(
-          WatchWindow(&win_observer_mock, kIEFrameClass),
+          WatchWindow(&win_observer_mock, kNewWindowTitlePattern),
           SetFocusToRenderer(&ie_mock_),
           DelaySendChar(&loop_, 1000, 'n', simulate_input::CONTROL)));
 
-  // Watch for new window
-  const char* kNewWindowTitle = "Internet Explorer";
-  EXPECT_CALL(win_observer_mock,
-              OnWindowDetected(_, testing::HasSubstr(kNewWindowTitle)))
-      .WillOnce(testing::DoAll(
-          DoCloseWindow(),
-          CloseBrowserMock(&ie_mock_)));
+  // Watch for new window. It appears that the window close message cannot be
+  // reliably delivered immediately upon receipt of the window open event.
+  EXPECT_CALL(win_observer_mock, OnWindowOpen(_))
+      .WillOnce(DelayDoCloseWindow(500));
+
+  EXPECT_CALL(win_observer_mock, OnWindowClose(_))
+      .WillOnce(CloseBrowserMock(&ie_mock_));
 
   LaunchIEAndNavigate(GetSimplePageUrl());
-  // TODO(kkania): The new window does not close properly sometimes.
+}
+
+// Test that Ctrl+F opens the Find dialog.
+TEST_P(FullTabUITest, FLAKY_CtrlF) {
+  bool is_cf = GetParam().invokes_cf();
+  if (!is_cf) {
+    LOG(ERROR) << "Test not implemented for this configuration.";
+    return;
+  }
+  server_mock_.ExpectAndServeAnyRequests(CFInvocation::MetaTag());
+  MockWindowObserver win_observer_mock;
+  InSequence expect_in_sequence_for_scope;
+
+  const char* kFindDialogCaption = "Find";
+  EXPECT_CALL(ie_mock_, OnLoad(IN_CF, StrEq(GetSimplePageUrl())))
+      .WillOnce(testing::DoAll(
+          WatchWindow(&win_observer_mock, kFindDialogCaption),
+          SetFocusToRenderer(&ie_mock_),
+          DelaySendChar(&loop_, 1500, 'f', simulate_input::CONTROL)));
+
+  // Watch for find dialog. It appears that the window close message cannot be
+  // reliably delivered immediately upon receipt of the window open event.
+  EXPECT_CALL(win_observer_mock, OnWindowOpen(_))
+      .WillOnce(DelayDoCloseWindow(500));
+
+  EXPECT_CALL(win_observer_mock, OnWindowClose(_))
+      .WillOnce(CloseBrowserMock(&ie_mock_));
+
+  LaunchIEAndNavigate(GetSimplePageUrl());
 }
 
 // Test that ctrl+r does cause a refresh.
@@ -326,6 +355,42 @@ class ContextMenuTest : public MockIEEventSinkTest, public testing::Test {
     EXPECT_CALL(acc_observer_, OnAccDocLoad(_)).Times(testing::AnyNumber());
   }
 
+  // Common helper function for "Save xxx As" tests.
+  void DoSaveAsTest(const wchar_t* role, const wchar_t* menu_item_name,
+                    const wchar_t* file_ext) {
+    server_mock_.ExpectAndServeAnyRequests(CFInvocation::MetaTag());
+    MockWindowObserver win_observer_mock;
+    InSequence expect_in_sequence_for_scope;
+
+    // Open 'Save As' dialog.
+    const char* kSaveDlgCaption = "Save As";
+    EXPECT_CALL(acc_observer_, OnAccDocLoad(_))
+        .WillOnce(testing::DoAll(
+            WatchWindow(&win_observer_mock, kSaveDlgCaption),
+            AccRightClick(AccObjectMatcher(L"", role))));
+    EXPECT_CALL(acc_observer_, OnMenuPopup(_))
+        .WillOnce(AccLeftClick(AccObjectMatcher(menu_item_name)));
+
+    // Get safe download name using temporary file.
+    FilePath temp_file_path;
+    ASSERT_TRUE(file_util::CreateTemporaryFile(&temp_file_path));
+    ASSERT_TRUE(file_util::DieFileDie(temp_file_path, false));
+    temp_file_path = temp_file_path.ReplaceExtension(file_ext);
+
+    AccObjectMatcher file_name_box(L"File name:", L"editable text");
+    EXPECT_CALL(win_observer_mock, OnWindowOpen(_))
+        .WillOnce(testing::DoAll(
+            AccSendCharMessage(file_name_box, L'a'),
+            AccSetValue(file_name_box, temp_file_path.value()),
+            AccDoDefaultAction(AccObjectMatcher(L"Save", L"push button"))));
+
+    EXPECT_CALL(win_observer_mock, OnWindowClose(_))
+        .WillOnce(CloseWhenFileSaved(&ie_mock_, temp_file_path, 5000));
+
+    LaunchIEAndNavigate(GetTestUrl(L"save_as_context_menu.html"));
+    ASSERT_TRUE(file_util::DieFileDie(temp_file_path, false));
+  }
+
  protected:
   testing::NiceMock<MockAccEventObserver> acc_observer_;
 };
@@ -389,20 +454,20 @@ TEST_F(ContextMenuTest, CFPageInfo) {
   InSequence expect_in_sequence_for_scope;
 
   // View page information.
-  const wchar_t* kPageInfoWindowClass = L"Chrome_WidgetWin_0";
+  const char* kPageInfoCaption = "Security Information";
   EXPECT_CALL(acc_observer_, OnAccDocLoad(_))
       .WillOnce(testing::DoAll(
-          WatchWindow(&win_observer_mock, kPageInfoWindowClass),
+          WatchWindow(&win_observer_mock, kPageInfoCaption),
           OpenContextMenuAsync()));
   EXPECT_CALL(acc_observer_, OnMenuPopup(_))
       .WillOnce(AccLeftClick(AccObjectMatcher(L"View page info")));
 
   // Expect page info dialog to pop up. Dismiss the dialog with 'Esc' key
-  const char* kPageInfoCaption = "Security Information";
-  EXPECT_CALL(win_observer_mock, OnWindowDetected(_, StrEq(kPageInfoCaption)))
-      .WillOnce(testing::DoAll(
-          DoCloseWindow(),
-          CloseBrowserMock(&ie_mock_)));
+  EXPECT_CALL(win_observer_mock, OnWindowOpen(_))
+      .WillOnce(DoCloseWindow());
+
+  EXPECT_CALL(win_observer_mock, OnWindowClose(_))
+    .WillOnce(CloseBrowserMock(&ie_mock_));
 
   LaunchIEAndNavigate(GetSimplePageUrl());
 }
@@ -413,57 +478,31 @@ TEST_F(ContextMenuTest, CFInspector) {
   InSequence expect_in_sequence_for_scope;
 
   // Open developer tools.
-  const wchar_t* kPageInfoWindowClass = L"Chrome_WidgetWin_0";
+  // Devtools begins life with "Untitled" caption and it changes
+  // later to the 'Developer Tools - <url> form.
+  const char* kPageInfoCaptionPattern = "Untitled*";
   EXPECT_CALL(acc_observer_, OnAccDocLoad(_))
       .WillOnce(testing::DoAll(
-          WatchWindow(&win_observer_mock, kPageInfoWindowClass),
+          WatchWindow(&win_observer_mock, kPageInfoCaptionPattern),
           OpenContextMenuAsync()));
   EXPECT_CALL(acc_observer_, OnMenuPopup(_))
       .WillOnce(AccLeftClick(AccObjectMatcher(L"Inspect element")));
 
-  // Devtools begins life with "Untitled" caption and it changes
-  // later to the 'Developer Tools - <url> form.
-  const char* kPageInfoCaption = "Untitled";
-  EXPECT_CALL(win_observer_mock,
-              OnWindowDetected(_, testing::StartsWith(kPageInfoCaption)))
-      .WillOnce(testing::DoAll(
-          DelayDoCloseWindow(5000),  // wait to catch possible crash
-          DelayCloseBrowserMock(&loop_, 5500, &ie_mock_)));
+  EXPECT_CALL(win_observer_mock, OnWindowOpen(_))
+      .WillOnce(DelayDoCloseWindow(5000));  // wait to catch possible crash
+  EXPECT_CALL(win_observer_mock, OnWindowClose(_))
+      .WillOnce(CloseBrowserMock(&ie_mock_));
 
   LaunchIENavigateAndLoop(GetSimplePageUrl(),
                           kChromeFrameLongNavigationTimeoutInSeconds * 2);
 }
 
-TEST_F(ContextMenuTest, CFSaveAs) {
-  server_mock_.ExpectAndServeAnyRequests(CFInvocation::MetaTag());
-  MockWindowObserver win_observer_mock;
-  InSequence expect_in_sequence_for_scope;
+TEST_F(ContextMenuTest, CFSavePageAs) {
+  ASSERT_NO_FATAL_FAILURE(DoSaveAsTest(L"", L"Save as...", L".html"));
+}
 
-  // Open 'Save As' dialog.
-  const wchar_t* kSaveDlgClass = L"#32770";
-  EXPECT_CALL(acc_observer_, OnAccDocLoad(_))
-      .WillOnce(testing::DoAll(
-          WatchWindow(&win_observer_mock, kSaveDlgClass),
-          OpenContextMenuAsync()));
-  EXPECT_CALL(acc_observer_, OnMenuPopup(_))
-      .WillOnce(AccLeftClick(AccObjectMatcher(L"Save as...")));
-
-  // Get safe download name using temporary file.
-  FilePath temp_file_path;
-  ASSERT_TRUE(file_util::CreateTemporaryFile(&temp_file_path));
-  temp_file_path = temp_file_path.ReplaceExtension(L".htm");
-  ASSERT_TRUE(file_util::DieFileDie(temp_file_path, false));
-
-  EXPECT_CALL(win_observer_mock, OnWindowDetected(_, StrEq("Save As")))
-      .WillOnce(testing::DoAll(
-          AccSetValue(AccObjectMatcher(L"File name:", L"", L"simple*"),
-                            temp_file_path.value()),
-          AccDoDefaultAction(AccObjectMatcher(L"Save", L"push button")),
-          CloseWhenFileSaved(&ie_mock_, temp_file_path, 5000)));
-
-  LaunchIENavigateAndLoop(GetSimplePageUrl(),
-                          kChromeFrameLongNavigationTimeoutInSeconds * 2);
-  ASSERT_TRUE(file_util::DieFileDie(temp_file_path, false));
+TEST_F(ContextMenuTest, CFSaveLinkAs) {
+  ASSERT_NO_FATAL_FAILURE(DoSaveAsTest(L"link", L"Save link as...", L".zip"));
 }
 
 // This tests that the about:version page can be opened via the CF context menu.

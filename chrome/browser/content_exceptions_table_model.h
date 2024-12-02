@@ -9,6 +9,7 @@
 #include <string>
 
 #include "app/table_model.h"
+#include "base/ref_counted.h"
 #include "chrome/common/content_settings.h"
 #include "chrome/common/content_settings_types.h"
 #include "chrome/browser/host_content_settings_map.h"
@@ -18,6 +19,7 @@ class ContentExceptionsTableModel : public TableModel {
   ContentExceptionsTableModel(HostContentSettingsMap* map,
                               HostContentSettingsMap* off_the_record_map,
                               ContentSettingsType content_type);
+  virtual ~ContentExceptionsTableModel();
 
   HostContentSettingsMap* map() const { return map_; }
   HostContentSettingsMap* off_the_record_map() const {
@@ -63,8 +65,8 @@ class ContentExceptionsTableModel : public TableModel {
     return is_off_the_record ? off_the_record_entries_ : entries_;
   }
 
-  HostContentSettingsMap* map_;
-  HostContentSettingsMap* off_the_record_map_;
+  scoped_refptr<HostContentSettingsMap> map_;
+  scoped_refptr<HostContentSettingsMap> off_the_record_map_;
   ContentSettingsType content_type_;
   HostContentSettingsMap::SettingsForOneType entries_;
   HostContentSettingsMap::SettingsForOneType off_the_record_entries_;

@@ -10,21 +10,21 @@
 #include "chrome/browser/browser.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/cros/mock_cryptohome_library.h"
-#include "chrome/browser/chromeos/cros/mock_keyboard_library.h"
 #include "chrome/browser/chromeos/cros/mock_input_method_library.h"
+#include "chrome/browser/chromeos/cros/mock_keyboard_library.h"
 #include "chrome/browser/chromeos/cros/mock_library_loader.h"
 #include "chrome/browser/chromeos/cros/mock_network_library.h"
 #include "chrome/browser/chromeos/cros/mock_power_library.h"
 #include "chrome/browser/chromeos/cros/mock_screen_lock_library.h"
 #include "chrome/browser/chromeos/cros/mock_speech_synthesis_library.h"
-#include "chrome/browser/chromeos/cros/mock_synaptics_library.h"
 #include "chrome/browser/chromeos/cros/mock_system_library.h"
+#include "chrome/browser/chromeos/cros/mock_touchpad_library.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/login/wizard_screen.h"
 #include "chrome/test/in_process_browser_test.h"
 #include "chrome/test/ui_test_utils.h"
-#include "testing/gtest/include/gtest/gtest.h"
 #include "testing/gmock/include/gmock/gmock.h"
+#include "testing/gtest/include/gtest/gtest.h"
 
 namespace chromeos {
 
@@ -44,8 +44,8 @@ CrosMock::CrosMock()
       mock_power_library_(NULL),
       mock_screen_lock_library_(NULL),
       mock_speech_synthesis_library_(NULL),
-      mock_synaptics_library_(NULL),
-      mock_system_library_(NULL) {}
+      mock_system_library_(NULL),
+      mock_touchpad_library_(NULL) {}
 
 CrosMock::~CrosMock() {
 }
@@ -59,7 +59,7 @@ void CrosMock::InitStatusAreaMocks() {
   InitMockInputMethodLibrary();
   InitMockNetworkLibrary();
   InitMockPowerLibrary();
-  InitMockSynapticsLibrary();
+  InitMockTouchpadLibrary();
   InitMockSystemLibrary();
 }
 
@@ -130,12 +130,12 @@ void CrosMock::InitMockSpeechSynthesisLibrary() {
   test_api()->SetSpeechSynthesisLibrary(mock_speech_synthesis_library_, true);
 }
 
-void CrosMock::InitMockSynapticsLibrary() {
+void CrosMock::InitMockTouchpadLibrary() {
   InitMockLibraryLoader();
-  if (mock_synaptics_library_)
+  if (mock_touchpad_library_)
     return;
-  mock_synaptics_library_ = new StrictMock<MockSynapticsLibrary>();
-  test_api()->SetSynapticsLibrary(mock_synaptics_library_, true);
+  mock_touchpad_library_ = new StrictMock<MockTouchpadLibrary>();
+  test_api()->SetTouchpadLibrary(mock_touchpad_library_, true);
 }
 
 void CrosMock::InitMockSystemLibrary() {
@@ -175,12 +175,12 @@ MockSpeechSynthesisLibrary* CrosMock::mock_speech_synthesis_library() {
   return mock_speech_synthesis_library_;
 }
 
-MockSynapticsLibrary* CrosMock::mock_synaptics_library() {
-  return mock_synaptics_library_;
-}
-
 MockSystemLibrary* CrosMock::mock_system_library() {
   return mock_system_library_;
+}
+
+MockTouchpadLibrary* CrosMock::mock_touchpad_library() {
+  return mock_touchpad_library_;
 }
 
 void CrosMock::SetStatusAreaMocksExpectations() {
@@ -188,7 +188,8 @@ void CrosMock::SetStatusAreaMocksExpectations() {
   SetInputMethodLibraryStatusAreaExpectations();
   SetNetworkLibraryStatusAreaExpectations();
   SetPowerLibraryStatusAreaExpectations();
-  SetSynapticsLibraryExpectations();
+  SetPowerLibraryExpectations();
+  SetTouchpadLibraryExpectations();
   SetSystemLibraryStatusAreaExpectations();
 }
 
@@ -237,7 +238,7 @@ void CrosMock::SetKeyboardLibraryStatusAreaExpectations() {
 
 void CrosMock::SetInputMethodLibraryStatusAreaExpectations() {
   EXPECT_CALL(*mock_input_method_library_, AddObserver(_))
-      .Times(1)
+      .Times(AnyNumber())
       .RetiresOnSaturation();
   EXPECT_CALL(*mock_input_method_library_, GetActiveInputMethods())
       .Times(AnyNumber())
@@ -248,15 +249,15 @@ void CrosMock::SetInputMethodLibraryStatusAreaExpectations() {
       .WillRepeatedly(InvokeWithoutArgs(CreateFallbackInputMethodDescriptors))
       .RetiresOnSaturation();
   EXPECT_CALL(*mock_input_method_library_, current_ime_properties())
-      .Times(1)
-      .WillOnce((ReturnRef(ime_properties_)))
+      .Times(AnyNumber())
+      .WillRepeatedly((ReturnRef(ime_properties_)))
       .RetiresOnSaturation();
   EXPECT_CALL(*mock_input_method_library_, SetImeConfig(_, _, _))
       .Times(AnyNumber())
       .WillRepeatedly((Return(true)))
       .RetiresOnSaturation();
   EXPECT_CALL(*mock_input_method_library_, RemoveObserver(_))
-      .Times(1)
+      .Times(AnyNumber())
       .RetiresOnSaturation();
   EXPECT_CALL(*mock_input_method_library_, SetDeferImeStartup(_))
       .Times(AnyNumber())
@@ -270,15 +271,17 @@ void CrosMock::SetNetworkLibraryStatusAreaExpectations() {
   EXPECT_CALL(*mock_network_library_, AddObserver(_))
       .Times(1)
       .RetiresOnSaturation();
-  EXPECT_CALL(*mock_network_library_, wifi_connecting())
-      .Times(1)
+
+  // NetworkDropdownButton::NetworkChanged() calls:
+  EXPECT_CALL(*mock_network_library_, ethernet_connected())
+      .Times(2)  // also called by NetworkMenu::InitMenuItems()
       .WillRepeatedly((Return(false)))
       .RetiresOnSaturation();
   EXPECT_CALL(*mock_network_library_, wifi_connected())
       .Times(1)
       .WillRepeatedly((Return(false)))
       .RetiresOnSaturation();
-  EXPECT_CALL(*mock_network_library_, cellular_connecting())
+  EXPECT_CALL(*mock_network_library_, wifi_connecting())
       .Times(1)
       .WillRepeatedly((Return(false)))
       .RetiresOnSaturation();
@@ -286,18 +289,49 @@ void CrosMock::SetNetworkLibraryStatusAreaExpectations() {
       .Times(1)
       .WillRepeatedly((Return(false)))
       .RetiresOnSaturation();
-  EXPECT_CALL(*mock_network_library_, ethernet_connected())
+  EXPECT_CALL(*mock_network_library_, cellular_connecting())
       .Times(1)
       .WillRepeatedly((Return(false)))
       .RetiresOnSaturation();
   EXPECT_CALL(*mock_network_library_, Connected())
-      .Times(1)
+      .Times(2)  // also called by NetworkMenu::InitMenuItems()
       .WillRepeatedly((Return(false)))
       .RetiresOnSaturation();
   EXPECT_CALL(*mock_network_library_, Connecting())
       .Times(1)
       .WillRepeatedly((Return(false)))
       .RetiresOnSaturation();
+
+  // NetworkMenu::InitMenuItems() calls:
+  EXPECT_CALL(*mock_network_library_, ethernet_connecting())
+      .Times(1)
+      .WillRepeatedly((Return(false)))
+      .RetiresOnSaturation();
+  EXPECT_CALL(*mock_network_library_, wifi_networks())
+      .Times(1)
+      .WillRepeatedly((ReturnRef(wifi_networks_)))
+      .RetiresOnSaturation();
+  EXPECT_CALL(*mock_network_library_, wifi_available())
+      .Times(1)
+      .WillRepeatedly((Return(false)))
+      .RetiresOnSaturation();
+  EXPECT_CALL(*mock_network_library_, wifi_network())
+      .Times(1)
+      .WillRepeatedly((ReturnRef(wifi_network_)))
+      .RetiresOnSaturation();
+  EXPECT_CALL(*mock_network_library_, cellular_networks())
+      .Times(1)
+      .WillRepeatedly((ReturnRef(cellular_networks_)))
+      .RetiresOnSaturation();
+  EXPECT_CALL(*mock_network_library_, cellular_network())
+      .Times(1)
+      .WillRepeatedly((ReturnRef(cellular_network_)))
+      .RetiresOnSaturation();
+  EXPECT_CALL(*mock_network_library_, cellular_available())
+      .Times(1)
+      .WillRepeatedly((Return(false)))
+      .RetiresOnSaturation();
+
   EXPECT_CALL(*mock_network_library_, RemoveObserver(_))
       .Times(1)
       .RetiresOnSaturation();
@@ -336,6 +370,13 @@ void CrosMock::SetPowerLibraryStatusAreaExpectations() {
       .RetiresOnSaturation();
 }
 
+void CrosMock::SetPowerLibraryExpectations() {
+  // EnableScreenLock is currently bounded with a prefs value and thus is
+  // always called when loading
+  EXPECT_CALL(*mock_power_library_, EnableScreenLock(_))
+      .Times(AnyNumber());
+}
+
 void CrosMock::SetSpeechSynthesisLibraryExpectations() {
   EXPECT_CALL(*mock_speech_synthesis_library_, Speak(_))
       .Times(1)
@@ -363,10 +404,10 @@ void CrosMock::SetSystemLibraryStatusAreaExpectations() {
       .RetiresOnSaturation();
 }
 
-void CrosMock::SetSynapticsLibraryExpectations() {
-  EXPECT_CALL(*mock_synaptics_library_, SetBoolParameter(_, _))
+void CrosMock::SetTouchpadLibraryExpectations() {
+  EXPECT_CALL(*mock_touchpad_library_, SetSensitivity(_))
       .Times(AnyNumber());
-  EXPECT_CALL(*mock_synaptics_library_, SetRangeParameter(_, _))
+  EXPECT_CALL(*mock_touchpad_library_, SetTapToClick(_))
       .Times(AnyNumber());
 }
 
@@ -395,10 +436,10 @@ void CrosMock::TearDownMocks() {
     test_api()->SetScreenLockLibrary(NULL, false);
   if (mock_speech_synthesis_library_)
     test_api()->SetSpeechSynthesisLibrary(NULL, false);
-  if (mock_synaptics_library_)
-    test_api()->SetSynapticsLibrary(NULL, false);
   if (mock_system_library_)
     test_api()->SetSystemLibrary(NULL, false);
+  if (mock_touchpad_library_)
+    test_api()->SetTouchpadLibrary(NULL, false);
 }
 
 }  // namespace chromeos

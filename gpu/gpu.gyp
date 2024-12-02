@@ -12,17 +12,12 @@
       'type': 'static_library',
       'include_dirs': [
         '.',
-        '..',
       ],
       'all_dependent_settings': {
         'include_dirs': [
           '.',
-          '..',
         ],
       },
-      'dependencies': [
-        '../base/base.gyp:base',
-      ],
       'sources': [
         'command_buffer/common/bitfield_helpers.h',
         'command_buffer/common/buffer.h',
@@ -136,6 +131,7 @@
       'dependencies': [
         'command_buffer_common',
         '../app/app.gyp:app_base',
+        '../base/base.gyp:base',
         '../gfx/gfx.gyp:gfx',
         '../third_party/angle/src/build_angle.gyp:translator_glsl',
       ],
@@ -153,6 +149,8 @@
         'command_buffer/service/common_decoder.h',
         'command_buffer/service/context_group.h',
         'command_buffer/service/context_group.cc',
+        'command_buffer/service/feature_info.h',
+        'command_buffer/service/feature_info.cc',
         'command_buffer/service/gles2_cmd_decoder.h',
         'command_buffer/service/gles2_cmd_decoder_autogen.h',
         'command_buffer/service/gles2_cmd_decoder.cc',
@@ -176,6 +174,8 @@
         'command_buffer/service/renderbuffer_manager.cc',
         'command_buffer/service/shader_manager.h',
         'command_buffer/service/shader_manager.cc',
+        'command_buffer/service/shader_translator.h',
+        'command_buffer/service/shader_translator.cc',
         'command_buffer/service/texture_manager.h',
         'command_buffer/service/texture_manager.cc',
       ],
@@ -248,6 +248,7 @@
         'command_buffer/service/cmd_parser_test.cc',
         'command_buffer/service/cmd_parser_test.cc',
         'command_buffer/service/common_decoder_unittest.cc',
+        'command_buffer/service/feature_info_unittest.cc',
         'command_buffer/service/framebuffer_manager_unittest.cc',
         'command_buffer/service/gpu_processor_unittest.cc',
         'command_buffer/service/gles2_cmd_decoder_unittest_base.h',
@@ -261,6 +262,7 @@
         'command_buffer/service/program_manager_unittest.cc',
         'command_buffer/service/renderbuffer_manager_unittest.cc',
         'command_buffer/service/shader_manager_unittest.cc',
+        'command_buffer/service/shader_translator_unittest.cc',
         'command_buffer/service/test_helper.h',
         'command_buffer/service/test_helper.cc',
         'command_buffer/service/texture_manager_unittest.cc',
@@ -288,6 +290,9 @@
         'command_buffer_client',
         'gles2_c_lib',
         '../third_party/npapi/npapi.gyp:npapi',
+      ],
+      'include_dirs': [
+        '..',
       ],
       'all_dependent_settings': {
         'include_dirs': [

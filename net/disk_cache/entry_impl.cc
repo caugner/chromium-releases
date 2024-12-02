@@ -64,19 +64,6 @@ void SyncCallback::Discard() {
   OnFileIOComplete(0);
 }
 
-// Clears buffer before offset and after valid_len, knowing that the size of
-// buffer is kMaxBlockSize.
-void ClearInvalidData(char* buffer, int offset, int valid_len) {
-  DCHECK_GE(offset, 0);
-  DCHECK_GE(valid_len, 0);
-  DCHECK(disk_cache::kMaxBlockSize >= offset + valid_len);
-  if (offset)
-    memset(buffer, 0, offset);
-  int end = disk_cache::kMaxBlockSize - offset - valid_len;
-  if (end)
-    memset(buffer + offset + valid_len, 0, end);
-}
-
 const int kMaxBufferSize = 1024 * 1024;  // 1 MB.
 
 }  // namespace
@@ -255,6 +242,7 @@ void EntryImpl::UserBuffer::Reset() {
     grow_allowed_ = true;
     std::vector<char> tmp;
     buffer_.swap(tmp);
+    buffer_.reserve(kMaxBlockSize);
   }
   offset_ = 0;
   buffer_.clear();
@@ -303,6 +291,9 @@ EntryImpl::EntryImpl(BackendImpl* backend, Addr address, bool read_only)
 // data related to a previous cache entry because the range was not fully
 // written before).
 EntryImpl::~EntryImpl() {
+  Log("~EntryImpl in");
+  backend_->OnEntryDestroyBegin(entry_.address());
+
   // Save the sparse info to disk before deleting this entry.
   sparse_.reset();
 
@@ -312,7 +303,7 @@ EntryImpl::~EntryImpl() {
     bool ret = true;
     for (int index = 0; index < kNumStreams; index++) {
       if (user_buffers_[index].get()) {
-        if (!(ret = Flush(index)))
+        if (!(ret = Flush(index, 0)))
           LOG(ERROR) << "Failed to save user data";
       }
       if (unreported_size_[index]) {
@@ -333,7 +324,8 @@ EntryImpl::~EntryImpl() {
     }
   }
 
-  backend_->CacheEntryDestroyed(entry_.address());
+  Trace("~EntryImpl out 0x%p", reinterpret_cast<void*>(this));
+  backend_->OnEntryDestroyEnd();
 }
 
 void EntryImpl::Doom() {
@@ -528,9 +520,11 @@ int EntryImpl::ReadDataImpl(int index, int offset, net::IOBuffer* buf,
     return net::ERR_FAILED;
 
   size_t file_offset = offset;
-  if (address.is_block_file())
+  if (address.is_block_file()) {
+    DCHECK_LE(offset + buf_len, kMaxBlockSize);
     file_offset += address.start_block() * address.BlockSize() +
                    kBlockHeaderSize;
+  }
 
   SyncCallback* io_callback = NULL;
   if (callback)
@@ -578,9 +572,11 @@ int EntryImpl::WriteDataImpl(int index, int offset, net::IOBuffer* buf,
   int entry_size = entry_.Data()->data_size[index];
   bool extending = entry_size < offset + buf_len;
   truncate = truncate && entry_size > offset + buf_len;
+  Trace("To PrepareTarget 0x%x", entry_.address().value());
   if (!PrepareTarget(index, offset, buf_len, truncate))
     return net::ERR_FAILED;
 
+  Trace("From PrepareTarget 0x%x", entry_.address().value());
   if (extending || truncate)
     UpdateSize(index, entry_size, offset + buf_len);
 
@@ -597,8 +593,10 @@ int EntryImpl::WriteDataImpl(int index, int offset, net::IOBuffer* buf,
   }
 
   Addr address(entry_.Data()->data_addr[index]);
-  if (truncate && offset + buf_len == 0) {
-    DCHECK(!address.is_initialized());
+  if (offset + buf_len == 0) {
+    if (truncate) {
+      DCHECK(!address.is_initialized());
+    }
     return 0;
   }
 
@@ -608,6 +606,7 @@ int EntryImpl::WriteDataImpl(int index, int offset, net::IOBuffer* buf,
 
   size_t file_offset = offset;
   if (address.is_block_file()) {
+    DCHECK_LE(offset + buf_len, kMaxBlockSize);
     file_offset += address.start_block() * address.BlockSize() +
                    kBlockHeaderSize;
   } else if (truncate || (extending && !buf_len)) {
@@ -771,18 +770,17 @@ void EntryImpl::DeleteEntryData(bool everything) {
   for (int index = 0; index < kNumStreams; index++) {
     Addr address(entry_.Data()->data_addr[index]);
     if (address.is_initialized()) {
-      DeleteData(address, index);
       backend_->ModifyStorageSize(entry_.Data()->data_size[index] -
                                       unreported_size_[index], 0);
       entry_.Data()->data_addr[index] = 0;
       entry_.Data()->data_size[index] = 0;
+      entry_.Store();
+      DeleteData(address, index);
     }
   }
 
-  if (!everything) {
-    entry_.Store();
+  if (!everything)
     return;
-  }
 
   // Remove all traces of this entry.
   backend_->RemoveEntry(this);
@@ -939,18 +937,24 @@ bool EntryImpl::CreateBlock(int size, Addr* address) {
   return true;
 }
 
+// Note that this method may end up modifying a block file so upon return the
+// involved block will be free, and could be reused for something else. If there
+// is a crash after that point (and maybe before returning to the caller), the
+// entry will be left dirty... and at some point it will be discarded; it is
+// important that the entry doesn't keep a reference to this address, or we'll
+// end up deleting the contents of |address| once again.
 void EntryImpl::DeleteData(Addr address, int index) {
   if (!address.is_initialized())
     return;
   if (address.is_separate_file()) {
-    if (files_[index])
-      files_[index] = NULL;  // Releases the object.
-
-    int failure = DeleteCacheFile(backend_->GetFileName(address)) ? 0 : 1;
+    int failure = !DeleteCacheFile(backend_->GetFileName(address));
     CACHE_UMA(COUNTS, "DeleteFailed", 0, failure);
-    if (failure)
+    if (failure) {
       LOG(ERROR) << "Failed to delete " <<
           backend_->GetFileName(address).value() << " from the cache.";
+    }
+    if (files_[index])
+      files_[index] = NULL;  // Releases the object.
   } else {
     backend_->DeleteBlock(address, true);
   }
@@ -1008,6 +1012,9 @@ bool EntryImpl::PrepareTarget(int index, int offset, int buf_len,
   if (truncate)
     return HandleTruncation(index, offset, buf_len);
 
+  if (!offset && !buf_len)
+    return true;
+
   Addr address(entry_.Data()->data_addr[index]);
   if (address.is_initialized()) {
     if (address.is_block_file() && !MoveToLocalBuffer(index))
@@ -1038,12 +1045,12 @@ bool EntryImpl::HandleTruncation(int index, int offset, int buf_len) {
 
   if (!new_size) {
     // This is by far the most common scenario.
-    DeleteData(address, index);
     backend_->ModifyStorageSize(current_size - unreported_size_[index], 0);
     entry_.Data()->data_addr[index] = 0;
     entry_.Data()->data_size[index] = 0;
     unreported_size_[index] = 0;
     entry_.Store();
+    DeleteData(address, index);
 
     user_buffers_[index].reset();
     return true;
@@ -1072,7 +1079,7 @@ bool EntryImpl::HandleTruncation(int index, int offset, int buf_len) {
     if (offset > user_buffers_[index]->Start())
       user_buffers_[index]->Truncate(new_size);
     UpdateSize(index, current_size, new_size);
-    if (!Flush(index))
+    if (!Flush(index, 0))
       return false;
     user_buffers_[index].reset();
   }
@@ -1115,9 +1122,9 @@ bool EntryImpl::MoveToLocalBuffer(int index) {
     return false;
 
   Addr address(entry_.Data()->data_addr[index]);
-  DeleteData(address, index);
   entry_.Data()->data_addr[index] = 0;
   entry_.Store();
+  DeleteData(address, index);
 
   // If we lose this entry we'll see it as zero sized.
   int len = entry_.Data()->data_size[index];
@@ -1141,13 +1148,13 @@ bool EntryImpl::PrepareBuffer(int index, int offset, int buf_len) {
     Addr address(entry_.Data()->data_addr[index]);
     if (address.is_initialized() && address.is_separate_file()) {
       int eof = entry_.Data()->data_size[index];
-      if (eof > user_buffers_[index]->Start() && !Flush(index))
+      if (eof > user_buffers_[index]->Start() && !Flush(index, 0))
         return false;
     }
   }
 
   if (!user_buffers_[index]->PreWrite(offset, buf_len)) {
-    if (!Flush(index))
+    if (!Flush(index, offset + buf_len))
       return false;
 
     // Lets try again.
@@ -1161,30 +1168,34 @@ bool EntryImpl::PrepareBuffer(int index, int offset, int buf_len) {
   return true;
 }
 
-bool EntryImpl::Flush(int index) {
+bool EntryImpl::Flush(int index, int min_len) {
   Addr address(entry_.Data()->data_addr[index]);
   DCHECK(user_buffers_[index].get());
+  DCHECK(!address.is_initialized() || address.is_separate_file());
+
+  int size = std::max(entry_.Data()->data_size[index], min_len);
+  if (size && !address.is_initialized() && !CreateDataBlock(index, size))
+    return false;
 
   if (!entry_.Data()->data_size[index]) {
     DCHECK(!user_buffers_[index]->Size());
     return true;
   }
 
-  if (!address.is_initialized() &&
-      !CreateDataBlock(index, entry_.Data()->data_size[index]))
-    return false;
-
   address.set_value(entry_.Data()->data_addr[index]);
 
-  File* file = GetBackingFile(address, index);
   int len = user_buffers_[index]->Size();
   int offset = user_buffers_[index]->Start();
+  if (!len && !offset)
+    return true;
+
   if (address.is_block_file()) {
     DCHECK_EQ(len, entry_.Data()->data_size[index]);
     DCHECK(!offset);
     offset = address.start_block() * address.BlockSize() + kBlockHeaderSize;
   }
 
+  File* file = GetBackingFile(address, index);
   if (!file)
     return false;
 

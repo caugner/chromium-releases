@@ -22,6 +22,10 @@ class AutocompleteEditController;
 class AutocompleteEditModel;
 class AutocompleteEditView;
 
+namespace gfx {
+class Rect;
+}
+
 // TODO(pkasting): The names and contents of the classes in
 // this file are temporary.  I am in hack-and-slash mode right now.
 // http://code.google.com/p/chromium/issues/detail?id=6772
@@ -29,7 +33,6 @@ class AutocompleteEditView;
 // Embedders of an AutocompleteEdit widget must implement this class.
 class AutocompleteEditController {
  public:
-#if defined(TOOLKIT_VIEWS)
   // Sent when the autocomplete popup is about to close.
   virtual void OnAutocompleteWillClosePopup() = 0;
 
@@ -40,9 +43,13 @@ class AutocompleteEditController {
 
   // Sent prior to OnAutoCompleteAccept and before the model has been reverted.
   virtual void OnAutocompleteWillAccept() = 0;
-#else
-  // TODO: port.
-#endif
+
+  // Commits the suggested text. |typed_text| is the current text showing in the
+  // autocomplete. Returns true if the text was committed.
+  virtual bool OnCommitSuggestedText(const std::wstring& typed_text) = 0;
+
+  // Invoked when the popup is going to change its bounds to |bounds|.
+  virtual void OnPopupBoundsChanged(const gfx::Rect& bounds) = 0;
 
   // When the user presses enter or selects a line with the mouse, this
   // function will get called synchronously with the url to open and
@@ -134,10 +141,9 @@ class AutocompleteEditModel : public NotificationObserver {
   // Restores local state from the saved |state|.
   void RestoreState(const State& state);
 
-  // Returns the url and transition type for the current text. If the user has
-  // not edited the text this is the permanent url, otherwise it is the url the
-  // user would navigate to if they accept the current edit.
-  GURL CurrentURL(PageTransition::Type* transition_type);
+  // Returns the match for the current text. If the user has not edited the text
+  // this is the match corresponding to the permanent text.
+  AutocompleteMatch CurrentMatch();
 
   // Called when the user wants to export the entire current text as a URL.
   // Sets the url, and if known, the title and favicon.
@@ -308,6 +314,9 @@ class AutocompleteEditModel : public NotificationObserver {
                              bool text_differs,
                              bool just_deleted_text,
                              bool at_end_of_edit);
+
+  // Invoked when the popup is going to change its bounds to |bounds|.
+  void PopupBoundsChangedTo(const gfx::Rect& bounds);
 
  private:
   enum PasteState {

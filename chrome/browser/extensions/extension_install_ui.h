@@ -11,6 +11,7 @@
 
 #include "base/string16.h"
 #include "chrome/browser/extensions/image_loading_tracker.h"
+#include "chrome/common/extensions/url_pattern.h"
 #include "gfx/native_widget_types.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 
@@ -19,7 +20,6 @@ class MessageLoop;
 class Profile;
 class InfoBarDelegate;
 class TabContents;
-class URLPattern;
 
 // Displays all the UI around extension installation and uninstallation.
 class ExtensionInstallUI : public ImageLoadingTracker::Observer {
@@ -39,7 +39,7 @@ class ExtensionInstallUI : public ImageLoadingTracker::Observer {
    public:
     // We call this method after ConfirmInstall()/ConfirmUninstall() to signal
     // that the installation/uninstallation should continue.
-    virtual void InstallUIProceed(bool create_app_shortcut) = 0;
+    virtual void InstallUIProceed() = 0;
 
     // We call this method after ConfirmInstall()/ConfirmUninstall() to signal
     // that the installation/uninstallation should stop.
@@ -48,13 +48,6 @@ class ExtensionInstallUI : public ImageLoadingTracker::Observer {
    protected:
     virtual ~Delegate() {}
   };
-
-  // Returns the distinct hosts that should be displayed in the install UI. This
-  // discards some of the detail that is present in the manifest to make it as
-  // easy as possible to process by users. In particular we disregard the scheme
-  // and path components of URLPatterns and de-dupe the result.
-  static std::vector<std::string> GetDistinctHostsForDisplay(
-      const std::vector<URLPattern>& host_patterns);
 
   explicit ExtensionInstallUI(Profile* profile);
 

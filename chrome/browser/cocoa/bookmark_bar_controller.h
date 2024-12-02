@@ -50,6 +50,7 @@ const CGFloat kBookmarkMenuButtonMaximumWidth = 485.0;
 
 const CGFloat kBookmarkVerticalPadding = 2.0;
 const CGFloat kBookmarkHorizontalPadding = 1.0;
+const CGFloat kBookmarkSubMenuHorizontalPadding = 5.0;
 const CGFloat kBookmarkHorizontalScreenPadding = 8.0;
 
 // Our NSScrollView is supposed to be just barely big enough to fit its
@@ -61,7 +62,7 @@ const CGFloat kScrollViewContentWidthMargin = 2;
 
 // Make subfolder menus overlap their parent menu a bit to give a better
 // perception of a menuing system.
-const CGFloat kBookmarkMenuOverlap = 1.0;
+const CGFloat kBookmarkMenuOverlap = 5.0;
 
 // Delay before opening a subfolder (and closing the previous one)
 // when hovering over a folder button.
@@ -294,6 +295,9 @@ willAnimateFromState:(bookmarks::VisualState)oldState
 // presenting a new menu.)
 - (void)closeFolderAndStopTrackingMenus;
 
+// Checks if operations such as edit or delete are allowed.
+- (BOOL)canEditBookmark:(const BookmarkNode*)node;
+
 // Actions for manipulating bookmarks.
 // Open a normal bookmark or folder from a button, ...
 - (IBAction)openBookmark:(id)sender;
@@ -346,7 +350,7 @@ willAnimateFromState:(bookmarks::VisualState)oldState
 - (NSMenu*)offTheSideMenu;
 - (NSButton*)offTheSideButton;
 - (BOOL)offTheSideButtonIsHidden;
-- (NSButton*)otherBookmarksButton;
+- (BookmarkButton*)otherBookmarksButton;
 - (BookmarkBarFolderController*)folderController;
 - (id)folderTarget;
 - (int)displayedButtonCount;

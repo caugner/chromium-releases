@@ -209,10 +209,13 @@ class PageLoadTest : public UITest {
             scoped_refptr<WindowProxy> window(browser->GetWindow());
             if (window.get()) {
               if (browser->BringToFront()) {
+                // Sleep for 2 seconds between commands.
+                // This used to be settable but the flag went away.
+                int sleep_time_ms = 2000;
                 window->SimulateOSKeyPress(app::VKEY_NEXT, 0);
-                PlatformThread::Sleep(sleep_timeout_ms());
+                PlatformThread::Sleep(sleep_time_ms);
                 window->SimulateOSKeyPress(app::VKEY_NEXT, 0);
-                PlatformThread::Sleep(sleep_timeout_ms());
+                PlatformThread::Sleep(sleep_time_ms);
               }
             }
           }
@@ -355,7 +358,7 @@ class PageLoadTest : public UITest {
       // Verify everything is fine
       EXPECT_EQ(NAVIGATION_SUCCESS, metrics.result);
       EXPECT_EQ(0, metrics.crash_dump_count);
-      EXPECT_EQ(true, metrics.browser_clean_exit);
+      EXPECT_TRUE(metrics.browser_clean_exit);
       EXPECT_EQ(1, metrics.browser_launch_count);
       // Both starting page and test_url_1 are loaded.
       EXPECT_EQ(2, metrics.page_load_count);
@@ -368,7 +371,7 @@ class PageLoadTest : public UITest {
       // Found a crash dump
       EXPECT_EQ(1, metrics.crash_dump_count) << kFailedNoCrashService;
       // Browser did not crash, and exited cleanly.
-      EXPECT_EQ(true, metrics.browser_clean_exit);
+      EXPECT_TRUE(metrics.browser_clean_exit);
       EXPECT_EQ(1, metrics.browser_launch_count);
       // Only the renderer should have crashed.
       EXPECT_EQ(0, metrics.browser_crash_count);
@@ -380,7 +383,7 @@ class PageLoadTest : public UITest {
       // metrics for a successful page load.
       EXPECT_EQ(NAVIGATION_SUCCESS, metrics.result);
       EXPECT_EQ(0, metrics.crash_dump_count);
-      EXPECT_EQ(true, metrics.browser_clean_exit);
+      EXPECT_TRUE(metrics.browser_clean_exit);
       EXPECT_EQ(1, metrics.browser_launch_count);
       EXPECT_EQ(0, metrics.browser_crash_count);
       EXPECT_EQ(0, metrics.renderer_crash_count);
@@ -403,7 +406,7 @@ class PageLoadTest : public UITest {
 
       GetStabilityMetrics(&metrics);
       // This is not a clean shutdown.
-      EXPECT_EQ(false, metrics.browser_clean_exit);
+      EXPECT_FALSE(metrics.browser_clean_exit);
       EXPECT_EQ(1, metrics.browser_crash_count);
       EXPECT_EQ(0, metrics.renderer_crash_count);
       EXPECT_EQ(0, metrics.plugin_crash_count);

@@ -65,6 +65,17 @@ void CloseAllChromeProcesses() {
                          ResultCodes::HUNG, NULL);
 }
 
+// Attempts to close the Chrome Frame helper process by sending WM_CLOSE
+// messages to its window, or just killing it if that doesn't work.
+void CloseAllChromeFrameHelperProcesses() {
+  HWND window = FindWindow(installer_util::kChromeFrameHelperWndClass, NULL);
+  if (window &&
+      !SendMessageTimeout(window, WM_CLOSE, 0, 0, SMTO_BLOCK, 3000, NULL)) {
+    base::CleanupProcesses(installer_util::kChromeFrameHelperExe, 0,
+                           ResultCodes::HUNG, NULL);
+  }
+}
+
 // This method tries to figure out if current user has registered Chrome.
 // It returns true iff:
 // - Software\Clients\StartMenuInternet\Chromium\"" key has a valid value.
@@ -534,8 +545,9 @@ installer_util::InstallStatus installer_setup::UninstallChrome(
       hklm_key.Close();
     }
 
-    if (installed_version.get()) {
-      // Unregister any dll servers that we may have registered.
+    // Unregister any dll servers that we may have registered for Chrome Frame
+    // builds only.
+    if (installed_version.get() && InstallUtil::IsChromeFrameProcess()) {
       std::wstring dll_path(installer::GetChromeInstallPath(system_uninstall));
       file_util::AppendToPath(&dll_path, installed_version->GetString());
 
@@ -547,6 +559,11 @@ installer_util::InstallStatus installer_setup::UninstallChrome(
         dll_list->Do();
       }
     }
+  }
+
+  // Close any Chrome Frame helper processes that may be running.
+  if (InstallUtil::IsChromeFrameProcess()) {
+    CloseAllChromeFrameHelperProcesses();
   }
 
   if (!installed_version.get())

@@ -9,11 +9,13 @@
 #include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
 #include "base/time.h"
+#include "media/audio/audio_buffers_state.h"
 #include "media/audio/audio_io.h"
 #include "media/audio/audio_manager.h"
 #include "media/audio/simple_sources.h"
 
 class MessageLoop;
+class Task;
 
 // An AudioOutputController controls an AudioOutputStream and provides data
 // to this output stream. It has an important function that it executes
@@ -75,8 +77,7 @@ class AudioOutputController
     // |pending_bytes| is the number of bytes still on the controller.
     // |timestamp| is then time when |pending_bytes| is recorded.
     virtual void OnMoreData(AudioOutputController* controller,
-                            base::Time timestamp,
-                            uint32 pending_bytes) = 0;
+                            AudioBuffersState buffers_state) = 0;
   };
 
   // A synchronous reader interface used by AudioOutputController for
@@ -134,13 +135,14 @@ class AudioOutputController
   // has effect when the stream is paused.
   void Flush();
 
-  // Closes the audio output stream. It changes state to kClosed and returns
-  // right away. The physical resources are freed on the audio thread if
-  // neccessary.
+  // Closes the audio output stream. The state is changed and the resources
+  // are freed on the audio thread. closed_task is executed after that.
+  // Callbacks (EventHandler and SyncReader) must exist until closed_task is
+  // called.
   //
   // It is safe to call this method more than once. Calls after the first one
   // will have no effect.
-  void Close();
+  void Close(Task* closed_task);
 
   // Sets the volume of the audio output stream.
   void SetVolume(double volume);
@@ -154,8 +156,8 @@ class AudioOutputController
 
   ///////////////////////////////////////////////////////////////////////////
   // AudioSourceCallback methods.
-  virtual uint32 OnMoreData(AudioOutputStream* stream, void* dest,
-                            uint32 max_size, uint32 pending_bytes);
+  virtual uint32 OnMoreData(AudioOutputStream* stream, uint8* dest,
+                            uint32 max_size, AudioBuffersState buffers_state);
   virtual void OnClose(AudioOutputStream* stream);
   virtual void OnError(AudioOutputStream* stream, int code);
 
@@ -168,13 +170,14 @@ class AudioOutputController
   void DoPlay();
   void DoPause();
   void DoFlush();
-  void DoClose();
+  void DoClose(Task* closed_task);
   void DoSetVolume(double volume);
   void DoReportError(int code);
 
   // Helper method to submit a OnMoreData() call to the event handler.
   void SubmitOnMoreData_Locked();
 
+  // |handler_| may be called only if |state_| is not kClosed.
   EventHandler* handler_;
   AudioOutputStream* stream_;
 
@@ -186,13 +189,14 @@ class AudioOutputController
   // is not required for reading on the audio controller thread.
   State state_;
 
-  uint32 hardware_pending_bytes_;
-  base::Time last_callback_time_;
+  AudioBuffersState buffers_state_;
+
+  // The |lock_| must be acquired whenever we access |buffer_|.
   Lock lock_;
 
-  // PushSource role is to buffer and it's only used in regular latency mode.
-  PushSource push_source_;
-  uint32 buffer_capacity_;
+  media::SeekableBuffer buffer_;
+
+  bool pending_request_;
 
   // SyncReader is used only in low latency mode for synchronous reading.
   SyncReader* sync_reader_;

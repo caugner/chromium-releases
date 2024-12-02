@@ -18,6 +18,7 @@
     <output filename="app_locale_settings_es.rc" type="rc_all" lang="es" />
     <output filename="app_locale_settings_es-419.rc" type="rc_all" lang="es-419" />
     <output filename="app_locale_settings_et.rc" type="rc_all" lang="et" />
+    <output filename="app_locale_settings_fa.rc" type="rc_all" lang="fa" />
     <output filename="app_locale_settings_fi.rc" type="rc_all" lang="fi" />
     <output filename="app_locale_settings_fil.rc" type="rc_all" lang="fil" />
     <output filename="app_locale_settings_fr.rc" type="rc_all" lang="fr" />
@@ -72,6 +73,7 @@
     <output filename="app_locale_settings_es.pak" type="data_package" lang="es" />
     <output filename="app_locale_settings_es-419.pak" type="data_package" lang="es-419" />
     <output filename="app_locale_settings_et.pak" type="data_package" lang="et" />
+    <output filename="app_locale_settings_fa.pak" type="data_package" lang="fa" />
     <output filename="app_locale_settings_fi.pak" type="data_package" lang="fi" />
     <output filename="app_locale_settings_fil.pak" type="data_package" lang="fil" />
     <output filename="app_locale_settings_fr.pak" type="data_package" lang="fr" />
@@ -126,6 +128,7 @@
     <file path="app_locale_settings_es.xtb" lang="es" />
     <file path="app_locale_settings_es-419.xtb" lang="es-419" />
     <file path="app_locale_settings_et.xtb" lang="et" />
+    <file path="app_locale_settings_fa.xtb" lang="fa" />
     <file path="app_locale_settings_fi.xtb" lang="fi" />
     <file path="app_locale_settings_fil.xtb" lang="fil" />
     <file path="app_locale_settings_fr.xtb" lang="fr" />
@@ -176,29 +179,38 @@
            Linux fonts do not have the issue Windows fonts for some locales
            (Indian) have. In that case, this need to be enclosed
            by platform-dependent if-clause. -->
-      <message name="IDS_UI_FONT_FAMILY" use_name_for_id="true">
-        default
-      </message>
-      <!-- For Windows XP -->
-      <message name="IDS_UI_FONT_FAMILY_XP" use_name_for_id="true">
-        default
-      </message>
+      <if expr="os == 'win32'">
+        <message name="IDS_UI_FONT_FAMILY" use_name_for_id="true">
+          default
+        </message>
+        <!-- For Windows XP -->
+        <message name="IDS_UI_FONT_FAMILY_XP" use_name_for_id="true">
+          default
+        </message>
 
-      <!-- To get the actual UI font size for native UI components
-           (e.g. menu), the system UI font size is scaled with this value/100.
-           This should be 100 for most locales. -->
-      <message name="IDS_UI_FONT_SIZE_SCALER" use_name_for_id="true">
-        100
-      </message>
-      <!-- For Windows XP -->
-      <message name="IDS_UI_FONT_SIZE_SCALER_XP" use_name_for_id="true">
-        100
-      </message>
+        <!-- To get the actual UI font size for native UI components
+             (e.g. menu), the system UI font size is scaled with this value/100.
+             This should be 100 for most locales. -->
+        <message name="IDS_UI_FONT_SIZE_SCALER" use_name_for_id="true">
+          100
+        </message>
+        <!-- For Windows XP -->
+        <message name="IDS_UI_FONT_SIZE_SCALER_XP" use_name_for_id="true">
+          100
+        </message>
 
-      <!-- Limit minimum UI font size to 5 by default. -->
-      <message name="IDS_MINIMUM_UI_FONT_SIZE" use_name_for_id="true">
-        5
-      </message>
+        <!-- Limit minimum UI font size to 5 by default. -->
+        <message name="IDS_MINIMUM_UI_FONT_SIZE" use_name_for_id="true">
+          5
+        </message>
+      </if>
+      <!-- For Chrome OS -->
+      <if expr="pp_ifdef('chromeos')">
+        <!-- The font name like: 'Font Name, 10' -->
+        <message name="IDS_UI_FONT_FAMILY_CROS" use_name_for_id="true">
+          default
+        </message>
+      </if>
     </messages>
   </release>
 </grit>

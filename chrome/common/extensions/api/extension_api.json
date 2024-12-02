@@ -728,7 +728,8 @@
               "left": {"type": "integer", "optional": true, "description": "The offset from the left edge of the screen to move the window to in pixels."},
               "top": {"type": "integer", "optional": true, "description": "The offset from the top edge of the screen to move the window to in pixels."},
               "width": {"type": "integer", "minimum": 0, "optional": true, "description": "The width to resize the window to in pixels."},
-              "height": {"type": "integer", "minimum": 0, "optional": true, "description": "The height to resize the window to in pixels."}
+              "height": {"type": "integer", "minimum": 0, "optional": true, "description": "The height to resize the window to in pixels."},
+              "focused": {"type": "boolean", "optional": true, "description": "It true, brings the window to the front. If false, brings the next window in the z-order to the front."}
             }
           },
           {
@@ -938,7 +939,7 @@
       {
         "name": "create",
         "type": "function",
-        "description": "Creates a new tab.",
+        "description": "Creates a new tab. Note: This function can be used without requesting the 'tabs' permission in the manifest.",
         "parameters": [
           {
             "type": "object",
@@ -985,7 +986,7 @@
       {
         "name": "update",
         "type": "function",
-        "description": "Modifies the properties of a tab. Properties that are not specified in <var>updateProperties</var> are not modified.",
+        "description": "Modifies the properties of a tab. Properties that are not specified in <var>updateProperties</var> are not modified. Note: This function can be used without requesting the 'tabs' permission in the manifest.",
         "parameters": [
           {"type": "integer", "name": "tabId", "minimum": 0},
           {
@@ -3141,7 +3142,8 @@
           {"name": "brand", "type": "string"},
           {"name": "id", "type": "string"},
           {"name": "lang", "type": "string"},
-          {"name": "exclude_machine_id", "type": "boolean"}
+          {"name": "exclude_machine_id", "type": "boolean"},
+          {"name": "callback", "type": "function", "optional": true, "parameters": [{"name": "sent", "type": "boolean"}]}
         ]
       },
       {
@@ -3192,7 +3194,7 @@
               "url": {"type": "string"},
               "frameId": {"type": "integer", "description": "0 indicates the navigation happens in the tab content window; positive value indicates navigation in a subframe."},
               "transitionType": {"type": "string", "enum": ["link", "typed", "auto_bookmark", "auto_subframe", "manual_subframe", "generated", "start_page", "form_submit", "reload", "keyword", "keyword_generated"], "description": "Cause of the navigation. The same transition types as defined in the history API are used."},
-              "transitionQualifiers": {"type": "string", "enum": ["client_redirect", "server_redirect", "forward_back"], "description": "Zero or more transition qualifiers delimited by \"|\". Possible qualifiers are \"client_redirect\", \"server_redirect\", and \"forward_backward\"."},
+              "transitionQualifiers": {"type": "string", "description": "Zero or more transition qualifiers delimited by \"|\". Possible qualifiers are \"client_redirect\", \"server_redirect\", and \"forward_back\"."},
               "timeStamp": {"type": "number", "description": "The time when the navigation was committed, in milliseconds since the epoch."}
             }
           }
@@ -3429,7 +3431,15 @@
         "type": "function",
         "description": "Sends a string message to the browser process, generating a Notification that C++ test code can wait for.",
         "parameters": [
-          {"type": "string", "name": "message"}
+          {"type": "string", "name": "message"},
+          {
+            "type": "function",
+            "name": "callback",
+            "optional": true,
+            "parameters": [
+              {"type": "string", "name": "response"}
+            ]
+          }
         ]
       }
     ],
@@ -3478,11 +3488,21 @@
         }
       },
       {
+        "id": "PacScript",
+        "type": "object",
+        "description": "An object holding proxy auto-config information. Only one of the fields should be non-empty.",
+        "properties": {
+          "url": {"type": "string", "optional": true, "description": "URL of he PAC file to be used."}
+        }
+      },
+      {
         "id": "ProxyConfig",
         "type": "object",
         "description": "An object encapsulating a complete proxy configuration.",
         "properties": {
-          "rules": {"$ref": "ProxyRules", "description": "The proxy rules describing this configuration."}
+          "rules": {"$ref": "ProxyRules", "optional": true, "description": "The proxy rules describing this configuration."},
+          "autoDetect": {"type": "boolean", "optional": true, "description": "True if the proxy settings sbould be detected automatically."},
+          "pacScript": {"$ref": "PacScript", "optional": true, "description": "The proxy auto-config (PAC) script for this configuration."}
         }
       }
     ],
@@ -3904,7 +3924,7 @@
     ]
   },
   {
-    "namespace":"experimental.management",
+    "namespace":"management",
     "types": [
       {
         "id": "IconInfo",
@@ -3926,6 +3946,10 @@
           },
           "name": {
             "description": "The name of this extension or app.",
+            "type": "string"
+          },
+          "version": {
+            "description": "The <a href='manifest.html#version'>version</a> of this extension or app.",
             "type": "string"
           },
           "enabled": {
@@ -4005,29 +4029,6 @@
         ]
       },
       {
-        "name": "install",
-        "description": "(FOR INTERNAL USE ONLY)",
-        "nodoc": true,
-        "parameters": [
-          {
-            "name": "expected_id",
-            "type": "string",
-            "description": "The id we expect the crx at |url| to have."
-          },
-          {
-            "name": "url",
-            "type": "string",
-            "description": "The url to fetch the crx from."
-          },
-          {
-            "name": "callback",
-            "type": "function",
-            "optional": "true",
-            "parameters": []
-          }
-        ]
-      },
-      {
         "name": "uninstall",
         "description": "Uninstall a currently installed app or extension.",
         "parameters": [
@@ -4043,6 +4044,23 @@
             "parameters": []
           }
         ]
+      },
+      {
+        "name": "launchApp",
+        "description": "Launches an application.",
+        "parameters": [
+          {
+            "name": "id",
+            "type": "string",
+            "description": "The extension id of the application."
+          },
+          {
+            "name": "callback",
+            "type": "function",
+            "optional": "true",
+            "parameters": []
+          }          
+        ]
       }
     ],
     "events": [
@@ -4056,7 +4074,13 @@
         "name": "onUninstalled",
         "description": "Fired when an app or extension has been uninstalled.",
         "type": "function",
-        "parameters": [{"name": "info", "$ref":"ExtensionInfo"}]
+        "parameters": [
+          {
+           "name": "id", 
+           "type": "string",
+           "description": "The id of the extension or app that was uninstalled."
+          }
+        ]
       },
       {
         "name": "onEnabled",
@@ -4078,7 +4102,24 @@
     "nodoc": "true",
     "functions": [
       {
-        "name": "getSyncLogin",
+        "name": "install",
+        "description": "Installs the extension corresponding to the given id",
+        "parameters": [
+          {
+            "name": "expected_id",
+            "type": "string",
+            "description": "The id of the extension to install."
+          },
+          {
+            "name": "callback",
+            "type": "function",
+            "optional": "true",
+            "parameters": []
+          }
+        ]
+      },
+      {
+        "name": "getBrowserLogin",
         "description": "Returns the logged-in sync user login if there is one, or the empty string otherwise.",
         "parameters": [
           {
@@ -4086,7 +4127,8 @@
             "type": "function",
             "optional": "false",
             "parameters": [
-              { "name": "login", "type": "string" }
+              { "name": "login", "type": "string" },
+              { "name": "token", "type": "string", "optional": true }
             ]
           }
         ]
@@ -4111,6 +4153,32 @@
         "parameters": [
           { "name": "login", "type": "string" },
           { "name": "callback", "type": "function", "optional": "true" }
+        ]
+      },
+      {
+        "name": "promptBrowserLogin",
+        "description": "Causes the browser to bring up the browser login UI.",
+        "parameters": [
+          {
+            "name": "preferred_email",
+            "type": "string",
+            "description": "The email address to use to pre-populate the login dialog (can be an empty string)."
+          },
+          { 
+            "name": "callback", 
+            "type": "function", 
+            "optional": "true",
+            "parameters": [
+              {
+                "name": "info",
+                "type": "object",
+                "properties": {
+                  "login": { "type": "string", "optional": true },
+                  "token": { "type": "string", "optional": true }
+                }
+              }
+            ]
+          }
         ]
       }
     ]

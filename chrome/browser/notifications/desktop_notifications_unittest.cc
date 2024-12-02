@@ -68,7 +68,7 @@ int MockBalloonCollection::UppermostVerticalPosition() {
 }
 
 DesktopNotificationsTest::DesktopNotificationsTest()
-    : ui_thread_(ChromeThread::UI, &message_loop_) {
+    : ui_thread_(BrowserThread::UI, &message_loop_) {
 }
 
 DesktopNotificationsTest::~DesktopNotificationsTest() {
@@ -269,25 +269,27 @@ TEST_F(DesktopNotificationsTest, TestQueueing) {
 
   // Cancel the notifications from the start; the balloon space should
   // remain full.
-  int id;
-  for (id = 1;
-       id <= kLotsOfToasts - balloon_collection_->max_balloon_count();
-       ++id) {
-    service_->CancelDesktopNotification(process_id, route_id, id);
-    MessageLoopForUI::current()->RunAllPending();
-    expected_log.append("notification closed by script\n");
-    expected_log.append("notification displayed\n");
-    EXPECT_EQ(balloon_collection_->max_balloon_count(),
-              balloon_collection_->count());
-    EXPECT_EQ(expected_log, log_output_);
-  }
+  {
+    int id;
+    for (id = 1;
+         id <= kLotsOfToasts - balloon_collection_->max_balloon_count();
+         ++id) {
+      service_->CancelDesktopNotification(process_id, route_id, id);
+      MessageLoopForUI::current()->RunAllPending();
+      expected_log.append("notification closed by script\n");
+      expected_log.append("notification displayed\n");
+      EXPECT_EQ(balloon_collection_->max_balloon_count(),
+                balloon_collection_->count());
+      EXPECT_EQ(expected_log, log_output_);
+    }
 
-  // Now cancel the rest.  It should empty the balloon space.
-  for (; id <= kLotsOfToasts; ++id) {
-    service_->CancelDesktopNotification(process_id, route_id, id);
-    expected_log.append("notification closed by script\n");
-    MessageLoopForUI::current()->RunAllPending();
-    EXPECT_EQ(expected_log, log_output_);
+    // Now cancel the rest.  It should empty the balloon space.
+    for (; id <= kLotsOfToasts; ++id) {
+      service_->CancelDesktopNotification(process_id, route_id, id);
+      expected_log.append("notification closed by script\n");
+      MessageLoopForUI::current()->RunAllPending();
+      EXPECT_EQ(expected_log, log_output_);
+    }
   }
 
   // Verify that the balloon collection is now empty.

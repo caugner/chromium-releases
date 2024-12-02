@@ -12,6 +12,8 @@
 #include "chrome/browser/chromeos/login/screen_locker.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/login/user_view.h"
+#include "chrome/browser/chromeos/login/wizard_accessibility_helper.h"
+#include "chrome/browser/profile_manager.h"
 #include "chrome/common/notification_service.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -67,25 +69,17 @@ void ScreenLockView::Init() {
                  NotificationType::LOGIN_USER_IMAGE_CHANGED,
                  NotificationService::AllSources());
 
-  user_view_ = new UserView(this, false);
+  user_view_ = new UserView(this,
+                            false,  // is_login
+                            true);  // need_background
   views::View* main = new views::View();
-
-  static const BorderDefinition border = {
-    0 /* no padding */,
-    SK_ColorBLACK,
-    0 /* no shadow */,
-    SK_ColorBLACK,
-    5,
-    login::kBackgroundColor,
-    login::kBackgroundColor,
-  };
-
   // Use rounded rect background.
-  views::Painter* painter = CreateWizardPainter(&border);
+  views::Painter* painter =
+      CreateWizardPainter(&BorderDefinition::kUserBorder);
 
   main->set_background(
       views::Background::CreateBackgroundPainter(true, painter));
-  main->set_border(CreateWizardBorder(&border));
+  main->set_border(CreateWizardBorder(&BorderDefinition::kUserBorder));
 
   // Password field.
   password_field_ = new PasswordField();
@@ -223,4 +217,10 @@ void ScreenLockView::Observe(
   user_view_->SetImage(user->image());
 }
 
+void ScreenLockView::ViewHierarchyChanged(bool is_add,
+                                          views::View* parent,
+                                          views::View* child) {
+  if (is_add && this == child)
+    WizardAccessibilityHelper::GetInstance()->MaybeEnableAccessibility(this);
+}
 }  // namespace chromeos

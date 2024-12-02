@@ -7,9 +7,12 @@
 #pragma once
 
 #include <map>
+#include <utility>
 
 #include "base/stl_util-inl.h"
 #include "chrome/browser/policy/configuration_policy_store.h"
+
+namespace policy {
 
 // Mock ConfigurationPolicyStore implementation that records values for policy
 // settings as they get set.
@@ -23,13 +26,22 @@ class MockConfigurationPolicyStore : public ConfigurationPolicyStore {
   typedef std::map<ConfigurationPolicyStore::PolicyType, Value*> PolicyMap;
   const PolicyMap& policy_map() { return policy_map_; }
 
+  // Get a value for the given policy. Returns NULL if that key doesn't exist.
+  const Value* Get(ConfigurationPolicyStore::PolicyType type) const {
+    PolicyMap::const_iterator entry(policy_map_.find(type));
+    return entry == policy_map_.end() ? NULL : entry->second;
+  }
+
   // ConfigurationPolicyStore implementation.
   virtual void Apply(PolicyType policy, Value* value) {
-    policy_map_[policy] = value;
+    std::swap(policy_map_[policy], value);
+    delete value;
   }
 
  private:
   PolicyMap policy_map_;
 };
+
+}  // namespace policy
 
 #endif  // CHROME_BROWSER_POLICY_MOCK_CONFIGURATION_POLICY_STORE_H_

@@ -5,7 +5,10 @@
 // HttpStream is an interface for reading and writing data to an HttpStream that
 // keeps the client agnostic of the actual underlying transport layer.  This
 // provides an abstraction for both a basic http stream as well as http
-// pipelining implementations.
+// pipelining implementations.  The HttpStream subtype is expected to manage the
+// underlying transport appropriately.  For example, a non-pipelined HttpStream
+// would return the transport socket to the pool for reuse.  SPDY streams on the
+// other hand leave the transport socket management to the SpdySession.
 
 #ifndef NET_HTTP_HTTP_STREAM_H_
 #define NET_HTTP_HTTP_STREAM_H_
@@ -19,6 +22,7 @@
 namespace net {
 
 class BoundNetLog;
+class ClientSocketHandle;
 class HttpResponseInfo;
 class IOBuffer;
 class SSLCertRequestInfo;
@@ -104,6 +108,17 @@ class HttpStream {
   // connection is reused or has been connected and idle for some time.
   virtual bool IsConnectionReused() const = 0;
   virtual void SetConnectionReused() = 0;
+
+  // Detach the connection from this HttpStream. The caller is responsible
+  // for deleting the handle. After this is called, none of the other HttpStream
+  // methods should be called.
+  //
+  // The return value may be NULL. In that case, the underlying connection
+  // is either unavailable, or can be consistently rediscoverable.
+  //
+  // TODO(cbentzel): Consider ResetForAuth() approach instead.
+  // http://crbug.com/58192
+  virtual ClientSocketHandle* DetachConnection() = 0;
 
   // Get the SSLInfo associated with this stream's connection.  This should
   // only be called for streams over SSL sockets, otherwise the behavior is

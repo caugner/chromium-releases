@@ -146,6 +146,7 @@ class RenderWidgetHost : public IPC::Channel::Listener,
 
   RenderProcessHost* process() const { return process_; }
   int routing_id() const { return routing_id_; }
+  bool renderer_accessible() { return renderer_accessible_; }
 
   // Set the PaintObserver on this object. Takes ownership.
   void set_paint_observer(PaintObserver* paint_observer) {
@@ -200,7 +201,7 @@ class RenderWidgetHost : public IPC::Channel::Listener,
   // Tells the renderer it got/lost focus.
   void Focus();
   void Blur();
-  void LostCapture();
+  virtual void LostCapture();
 
   // Tells us whether the page is rendered directly via the GPU process.
   bool is_gpu_rendering_active() { return is_gpu_rendering_active_; }
@@ -242,6 +243,11 @@ class RenderWidgetHost : public IPC::Channel::Listener,
   // renderer to send another paint.
   void DonePaintingToBackingStore();
 
+  // GPU accelerated version of GetBackingStore function. This will
+  // trigger a re-composite to the view. If a resize is pending, it will
+  // block briefly waiting for an ack from the renderer.
+  void ScheduleComposite();
+
   // Returns the video layer if it exists, NULL otherwise.
   VideoLayer* video_layer() const { return video_layer_.get(); }
 
@@ -269,6 +275,8 @@ class RenderWidgetHost : public IPC::Channel::Listener,
   // Forwards the given message to the renderer. These are called by the view
   // when it has received a message.
   virtual void ForwardMouseEvent(const WebKit::WebMouseEvent& mouse_event);
+  // Called when a mouse click activates the renderer.
+  virtual void OnMouseActivate();
   void ForwardWheelEvent(const WebKit::WebMouseWheelEvent& wheel_event);
   virtual void ForwardKeyboardEvent(const NativeWebKeyboardEvent& key_event);
   virtual void ForwardEditCommand(const std::string& name,
@@ -385,8 +393,8 @@ class RenderWidgetHost : public IPC::Channel::Listener,
   // on a node with this accessibility object id.
   void AccessibilityDoDefaultAction(int acc_obj_id);
 
-  // Acknowledges a ViewHostMsg_AccessibilityObjectChildrenChange message.
-  void AccessibilityObjectChildrenChangeAck();
+  // Acknowledges a ViewHostMsg_AccessibilityNotifications message.
+  void AccessibilityNotificationsAck();
 
   // Sets the active state (i.e., control tints).
   virtual void SetActive(bool active);
@@ -399,13 +407,6 @@ class RenderWidgetHost : public IPC::Channel::Listener,
   }
 
  protected:
-  // Aid for determining when an accessibility tree request can be made. Set by
-  // TabContents to true on document load and to false on page navigation.
-  void SetDocumentLoaded(bool document_loaded);
-
-  // Requests a snapshot of an accessible DOM tree from the renderer.
-  void RequestAccessibilityTree();
-
   // Internal implementation of the public Forward*Event() methods.
   void ForwardInputEvent(const WebKit::WebInputEvent& input_event,
                          int event_size, bool is_keyboard_shortcut);
@@ -498,6 +499,7 @@ class RenderWidgetHost : public IPC::Channel::Listener,
                           WebKit::WebScreenInfo* results);
   void OnMsgGetWindowRect(gfx::NativeViewId window_id, gfx::Rect* results);
   void OnMsgGetRootWindowRect(gfx::NativeViewId window_id, gfx::Rect* results);
+  void OnMsgSetPluginImeEnabled(bool enabled, int plugin_id);
   void OnAllocateFakePluginWindowHandle(bool opaque,
                                         bool root,
                                         gfx::PluginWindowHandle* id);
@@ -549,7 +551,7 @@ class RenderWidgetHost : public IPC::Channel::Listener,
 
   // True if renderer accessibility is enabled. This should only be set when a
   // screenreader is detected as it can potentially slow down Chrome.
-  static bool renderer_accessible_;
+  bool renderer_accessible_;
 
   // The View associated with the RenderViewHost. The lifetime of this object
   // is associated with the lifetime of the Render process. If the Renderer
@@ -687,14 +689,6 @@ class RenderWidgetHost : public IPC::Channel::Listener,
   // switching back to the original tab, because the content may already be
   // changed.
   bool suppress_next_char_events_;
-
-  // Keep track of if we have a loaded document so that we can request an
-  // accessibility tree on demand when renderer accessibility is enabled.
-  bool document_loaded_;
-
-  // Keep track of if we've already requested the accessibility tree so
-  // we don't do it more than once.
-  bool requested_accessibility_tree_;
 
   // Optional video YUV layer for used for out-of-process compositing.
   scoped_ptr<VideoLayer> video_layer_;

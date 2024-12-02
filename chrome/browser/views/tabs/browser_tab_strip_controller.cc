@@ -12,6 +12,7 @@
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tab_menu_model.h"
+#include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/views/app_launcher.h"
 #include "chrome/browser/views/tabs/base_tab_strip.h"
 #include "chrome/browser/views/tabs/tab_renderer_data.h"
@@ -384,7 +385,6 @@ void BrowserTabStripController::SetTabRendererDataFromModel(
   data->show_icon = contents->ShouldDisplayFavIcon();
   data->mini = model_->IsMiniTab(model_index);
   data->blocked = model_->IsTabBlocked(model_index);
-  data->phantom = model_->IsPhantomTab(model_index);
   data->app = contents->is_app();
 }
 

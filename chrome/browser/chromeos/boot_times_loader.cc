@@ -19,7 +19,7 @@
 #include "base/thread.h"
 #include "base/time.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/chromeos/login/authentication_notification_details.h"
 #include "chrome/browser/chromeos/network_state_notifier.h"
 #include "chrome/common/chrome_switches.h"
@@ -79,8 +79,8 @@ BootTimesLoader::Handle BootTimesLoader::GetBootTimes(
       new CancelableRequest<GetBootTimesCallback>(callback));
   AddRequest(request, consumer);
 
-  ChromeThread::PostTask(
-      ChromeThread::FILE,
+  BrowserThread::PostTask(
+      BrowserThread::FILE,
       FROM_HERE,
       NewRunnableMethod(backend_.get(), &Backend::GetBootTimes, request));
   return request->handle();
@@ -167,8 +167,8 @@ void BootTimesLoader::Backend::GetBootTimes(
   FilePath log_dir(kLogPath);
   FilePath log_file = log_dir.Append(uptime_prefix + kLoginPromptReady);
   if (!file_util::PathExists(log_file)) {
-    ChromeThread::PostDelayedTask(
-        ChromeThread::FILE,
+    BrowserThread::PostDelayedTask(
+        BrowserThread::FILE,
         FROM_HERE,
         NewRunnableMethod(this, &Backend::GetBootTimes, request),
         kReadAttemptDelayMs);
@@ -230,8 +230,8 @@ static void WriteLoginTimes(
 }
 
 void BootTimesLoader::RecordStats(const std::string& name, const Stats& stats) {
-  ChromeThread::PostTask(
-      ChromeThread::FILE, FROM_HERE,
+  BrowserThread::PostTask(
+      BrowserThread::FILE, FROM_HERE,
       NewRunnableFunction(
           RecordStatsDelayed, name, stats.uptime, stats.disk));
 }
@@ -295,8 +295,8 @@ void BootTimesLoader::Observe(
       // Post chrome first render stat.
       registrar_.Remove(this, NotificationType::LOAD_START,
                         NotificationService::AllSources());
-      ChromeThread::PostTask(
-          ChromeThread::FILE, FROM_HERE,
+      BrowserThread::PostTask(
+          BrowserThread::FILE, FROM_HERE,
           NewRunnableFunction(
               WriteLoginTimes,
               login_attempt_, login_success_, chrome_first_render_));

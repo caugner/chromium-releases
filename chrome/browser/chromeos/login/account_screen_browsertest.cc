@@ -4,17 +4,17 @@
 
 #include <string>
 
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/child_process_security_policy.h"
 #include "chrome/browser/chromeos/login/account_screen.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/login/wizard_in_process_browser_test.h"
-#include "chrome/browser/chrome_thread.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/in_process_browser_test.h"
 #include "chrome/test/ui_test_utils.h"
+#include "net/test/test_server.h"
 #include "net/url_request/url_request_about_job.h"
 #include "net/url_request/url_request_filter.h"
-#include "net/test/test_server.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -41,8 +41,7 @@ class AccountScreenTest : public WizardInProcessBrowserTest {
 // A basic test. It does not care how things evolve after the URL is
 // loaded. Thus no message loop is started. Just check that initial
 // status is expected.
-// This test is flaky. See http://crbug.com/49004 .
-IN_PROC_BROWSER_TEST_F(AccountScreenTest, FLAKY_TestBasic) {
+IN_PROC_BROWSER_TEST_F(AccountScreenTest, TestBasic) {
   ASSERT_TRUE(controller());
   EXPECT_EQ(controller()->GetAccountScreen(), controller()->current_screen());
 }
@@ -62,14 +61,14 @@ static URLRequestJob* InspectorHook(URLRequest* request,
   EXPECT_STREQ("cros://inspector/?param1=value1+param2",
                request->url().spec().c_str());
   inspector_called = true;
-  ChromeThread::PostTask(ChromeThread::UI, FROM_HERE,
-                         NewRunnableFunction(QuitUIMessageLoop));
+  BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
+                          NewRunnableFunction(QuitUIMessageLoop));
 
   // Do not navigate to the given URL. Navigate to about:blank instead.
   return new URLRequestAboutJob(request);
 }
 
-IN_PROC_BROWSER_TEST_F(AccountScreenTest, FLAKY_TestSchemeInspector) {
+IN_PROC_BROWSER_TEST_F(AccountScreenTest, TestSchemeInspector) {
   ChildProcessSecurityPolicy::GetInstance()->RegisterWebSafeScheme(
       chrome::kCrosScheme);
   URLRequestFilter::GetInstance()->AddHostnameHandler(chrome::kCrosScheme,

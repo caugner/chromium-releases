@@ -19,6 +19,7 @@
 #include "base/scoped_handle_win.h"
 #include "base/scoped_ptr.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/service/cloud_print/cloud_print_consts.h"
 #include "chrome/service/service_process.h"
 #include "chrome/service/service_utility_process_host.h"
 #include "gfx/rect.h"
@@ -42,7 +43,7 @@ class DevMode {
 
   void Free() {
     if (dm_)
-      delete dm_;
+      delete [] dm_;
     dm_ = NULL;
   }
 
@@ -221,8 +222,15 @@ class PrintSystemWatcherWin
         PRINTER_INFO_2* printer_info_win =
             reinterpret_cast<PRINTER_INFO_2*>(printer_info_buffer.get());
         printer_info->printer_name = WideToUTF8(printer_info_win->pPrinterName);
-        printer_info->printer_description =
-            WideToUTF8(printer_info_win->pComment);
+        if (printer_info_win->pComment)
+          printer_info->printer_description =
+              WideToUTF8(printer_info_win->pComment);
+        if (printer_info_win->pLocation)
+          printer_info->options[kLocationTagName] =
+              WideToUTF8(printer_info_win->pLocation);
+        if (printer_info_win->pDriverName)
+          printer_info->options[kDriverNameTagName] =
+              WideToUTF8(printer_info_win->pDriverName);
         printer_info->printer_status = printer_info_win->Status;
         ret = true;
       }
@@ -403,7 +411,7 @@ class PrintSystemWin : public PrintSystem {
         std::wstring doc_name = UTF8ToWide(job_title);
         di.lpszDocName = doc_name.c_str();
         job_id_ = StartDoc(dc, &di);
-        if (SP_ERROR == job_id_)
+        if (job_id_ <= 0)
           return false;
 
         printer_dc_.Set(dc);
@@ -495,7 +503,12 @@ class PrintSystemWin : public PrintSystem {
           utility_host.release();
         }
       }
-      static const int kPageCountPerBatch = 10;
+      // Some Cairo-generated PDFs from Chrome OS result in huge metafiles.
+      // So the PageCountPerBatch is set to 1 for now.
+      // TODO(sanjeevr): Figure out a smarter way to determine the pages per
+      // batch. Filed a bug to track this at
+      // http://code.google.com/p/chromium/issues/detail?id=57350.
+      static const int kPageCountPerBatch = 1;
       int last_page_printed_;
       PlatformJobId job_id_;
       PrintSystem::JobSpooler::Delegate* delegate_;
@@ -534,6 +547,12 @@ void PrintSystemWin::EnumeratePrinters(PrinterList* printer_list) {
       if (printer_info[index].pComment)
         info.printer_description = WideToUTF8(printer_info[index].pComment);
       info.printer_status = printer_info[index].Status;
+      if (printer_info[index].pLocation)
+        info.options[kLocationTagName] =
+            WideToUTF8(printer_info[index].pLocation);
+      if (printer_info[index].pDriverName)
+        info.options[kDriverNameTagName] =
+            WideToUTF8(printer_info[index].pDriverName);
       printer_list->push_back(info);
     }
   }
