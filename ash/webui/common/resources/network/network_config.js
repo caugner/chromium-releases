@@ -1826,12 +1826,6 @@ Polymer({
         this.managedProperties_.source !== OncSource.kNone) {
       return false;
     }
-
-    // Insecure WiFi networks are always shared.
-    if (this.mojoType_ === NetworkType.kWiFi &&
-        this.securityType_ === SecurityType.kNone) {
-      return false;
-    }
     return true;
   },
 
@@ -2521,7 +2515,7 @@ Polymer({
       return true;
     }
 
-    if (!this.eapProperties_.useSystemCas) {
+    if (this.selectedServerCaHash_ !== DEFAULT_HASH) {
       // Does not use default CA server certs.
       return true;
     }
