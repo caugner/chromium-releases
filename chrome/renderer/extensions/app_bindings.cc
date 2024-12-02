@@ -12,7 +12,8 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "content/public/child/v8_value_converter.h"
-#include "content/public/renderer/render_view.h"
+#include "content/public/renderer/render_frame.h"
+#include "extensions/common/constants.h"
 #include "extensions/common/extension_messages.h"
 #include "extensions/common/extension_set.h"
 #include "extensions/common/manifest.h"
@@ -39,7 +40,8 @@ bool IsCheckoutURL(const std::string& url_spec) {
   if (checkout_url_prefix.empty())
     checkout_url_prefix = "https://checkout.google.com/";
 
-  return StartsWithASCII(url_spec, checkout_url_prefix, false);
+  return base::StartsWith(url_spec, checkout_url_prefix,
+                          base::CompareCase::INSENSITIVE_ASCII);
 }
 
 bool CheckAccessToAppDetails(WebFrame* frame, v8::Isolate* isolate) {
@@ -70,6 +72,9 @@ AppBindings::AppBindings(Dispatcher* dispatcher, ScriptContext* context)
       base::Bind(&AppBindings::GetInstallState, base::Unretained(this)));
   RouteFunction("GetRunningState",
       base::Bind(&AppBindings::GetRunningState, base::Unretained(this)));
+}
+
+AppBindings::~AppBindings() {
 }
 
 void AppBindings::GetIsInstalled(
@@ -112,7 +117,9 @@ void AppBindings::GetDetailsForFrame(
 
   WebLocalFrame* target_frame = WebLocalFrame::frameForContext(context);
   if (!target_frame) {
-    console::Error(args.GetIsolate()->GetCallingContext(),
+    ScriptContext* script_context = ScriptContextSet::GetContextByV8Context(
+        args.GetIsolate()->GetCallingContext());
+    console::Error(script_context ? script_context->GetRenderFrame() : nullptr,
                    "Could not find frame for specified object.");
     return;
   }
@@ -154,45 +161,43 @@ void AppBindings::GetInstallState(
     callback_id = args[0]->Int32Value();
   }
 
-  content::RenderView* render_view = context()->GetRenderView();
-  CHECK(render_view);
+  content::RenderFrame* render_frame = context()->GetRenderFrame();
+  CHECK(render_frame);
 
   Send(new ExtensionHostMsg_GetAppInstallState(
-      render_view->GetRoutingID(), context()->web_frame()->document().url(),
+      render_frame->GetRoutingID(), context()->web_frame()->document().url(),
       GetRoutingID(), callback_id));
 }
 
 void AppBindings::GetRunningState(
     const v8::FunctionCallbackInfo<v8::Value>& args) {
-  // To distinguish between ready_to_run and cannot_run states, we need the top
-  // level frame.
-  const WebFrame* parent_frame = context()->web_frame();
-  while (parent_frame->parent())
-    parent_frame = parent_frame->parent();
-
+  // To distinguish between ready_to_run and cannot_run states, we need the app
+  // from the top frame.
+  blink::WebSecurityOrigin top_frame_security_origin =
+      context()->web_frame()->top()->securityOrigin();
   const ExtensionSet* extensions = dispatcher_->extensions();
 
   // The app associated with the top level frame.
-  const Extension* parent_app = extensions->GetHostedAppByURL(
-      parent_frame->document().url());
+  const Extension* top_app = extensions->GetHostedAppByURL(
+      GURL(top_frame_security_origin.toString().utf8()));
 
   // The app associated with this frame.
   const Extension* this_app = extensions->GetHostedAppByURL(
       context()->web_frame()->document().url());
 
-  if (!this_app || !parent_app) {
+  if (!this_app || !top_app) {
     args.GetReturnValue().Set(v8::String::NewFromUtf8(
         context()->isolate(), extension_misc::kAppStateCannotRun));
     return;
   }
 
-  const char* state = NULL;
-  if (dispatcher_->IsExtensionActive(parent_app->id())) {
-    if (parent_app == this_app)
+  const char* state = nullptr;
+  if (dispatcher_->IsExtensionActive(top_app->id())) {
+    if (top_app == this_app)
       state = extension_misc::kAppStateRunning;
     else
       state = extension_misc::kAppStateCannotRun;
-  } else if (parent_app == this_app) {
+  } else if (top_app == this_app) {
     state = extension_misc::kAppStateReadyToRun;
   } else {
     state = extension_misc::kAppStateCannotRun;

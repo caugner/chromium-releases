@@ -4,6 +4,7 @@
 
 #include "ash/host/ash_window_tree_host_unified.h"
 #include "ash/host/root_window_transformer.h"
+#include "ash/ime/input_method_event_handler.h"
 #include "base/logging.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_event_dispatcher.h"
@@ -110,10 +111,10 @@ gfx::AcceleratedWidget AshWindowTreeHostUnified::GetAcceleratedWidget() {
   return gfx::kNullAcceleratedWidget;
 }
 
-void AshWindowTreeHostUnified::Show() {
+void AshWindowTreeHostUnified::ShowImpl() {
 }
 
-void AshWindowTreeHostUnified::Hide() {
+void AshWindowTreeHostUnified::HideImpl() {
 }
 
 gfx::Rect AshWindowTreeHostUnified::GetBounds() const {
@@ -181,8 +182,18 @@ void AshWindowTreeHostUnified::OnWindowDestroying(aura::Window* window) {
   mirroring_hosts_.erase(iter);
 }
 
-ui::EventProcessor* AshWindowTreeHostUnified::GetEventProcessor() {
-  return dispatcher();
+bool AshWindowTreeHostUnified::DispatchKeyEventPostIME(
+    const ui::KeyEvent& event) {
+  ui::KeyEvent event_copy(event);
+  input_method_handler()->SetPostIME(true);
+  ui::EventSource::DeliverEventToProcessor(&event_copy);
+  input_method_handler()->SetPostIME(false);
+  return event_copy.handled();
+}
+
+ui::EventDispatchDetails AshWindowTreeHostUnified::DeliverEventToProcessor(
+    ui::Event* event) {
+  return ui::EventSource::DeliverEventToProcessor(event);
 }
 
 }  // namespace ash

@@ -187,6 +187,9 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
     'third_party/devscripts': [
         'GPL (v2 or later)',
     ],
+    'third_party/trace-viewer/tracing/third_party/devscripts': [
+        'GPL (v2 or later)',
+    ],
     'third_party/expat/files/lib': [  # http://crbug.com/98121
         'UNKNOWN',
     ],
@@ -204,7 +207,7 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
     'third_party/freetype2': [ # http://crbug.com/177319
         'UNKNOWN',
     ],
-    'third_party/hunspell_new': [  # http://crbug.com/98134
+    'third_party/hunspell': [  # http://crbug.com/98134
         'UNKNOWN',
     ],
     'third_party/iccjpeg': [  # http://crbug.com/98137

@@ -34,7 +34,6 @@
 class ChromeHttpUserAgentSettings;
 class ChromeNetworkDelegate;
 class ChromeURLRequestContextGetter;
-class CookieSettings;
 class DevToolsNetworkController;
 class HostContentSettingsMap;
 class MediaDeviceIDSalt;
@@ -45,11 +44,16 @@ namespace chrome_browser_net {
 class ResourcePrefetchPredictorObserver;
 }
 
+namespace content_settings {
+class CookieSettings;
+}
+
 namespace data_reduction_proxy {
 class DataReductionProxyIOData;
 }
 
 namespace extensions {
+class ExtensionThrottleManager;
 class InfoMap;
 }
 
@@ -132,7 +136,8 @@ class ProfileIOData {
   // with a content::ResourceContext, and they want access to Chrome data for
   // that profile.
   extensions::InfoMap* GetExtensionInfoMap() const;
-  CookieSettings* GetCookieSettings() const;
+  extensions::ExtensionThrottleManager* GetExtensionThrottleManager() const;
+  content_settings::CookieSettings* GetCookieSettings() const;
   HostContentSettingsMap* GetHostContentSettingsMap() const;
 
   IntegerPrefMember* session_startup_pref() const {
@@ -272,7 +277,7 @@ class ProfileIOData {
 
     base::FilePath path;
     IOThread* io_thread;
-    scoped_refptr<CookieSettings> cookie_settings;
+    scoped_refptr<content_settings::CookieSettings> cookie_settings;
     scoped_refptr<HostContentSettingsMap> host_content_settings_map;
     scoped_refptr<net::SSLConfigService> ssl_config_service;
     scoped_refptr<net::CookieMonster::Delegate> cookie_monster_delegate;
@@ -384,7 +389,8 @@ class ProfileIOData {
       net::HttpNetworkSession* shared_session,
       net::HttpCache::BackendFactory* backend) const;
 
-  void SetCookieSettingsForTesting(CookieSettings* cookie_settings);
+  void SetCookieSettingsForTesting(
+      content_settings::CookieSettings* cookie_settings);
 
  private:
   class ResourceContext : public content::ResourceContext {
@@ -562,7 +568,7 @@ class ProfileIOData {
 
   mutable scoped_ptr<ResourceContext> resource_context_;
 
-  mutable scoped_refptr<CookieSettings> cookie_settings_;
+  mutable scoped_refptr<content_settings::CookieSettings> cookie_settings_;
 
   mutable scoped_refptr<HostContentSettingsMap> host_content_settings_map_;
 
@@ -575,6 +581,12 @@ class ProfileIOData {
 #if defined(ENABLE_SUPERVISED_USERS)
   mutable scoped_refptr<const SupervisedUserURLFilter>
       supervised_user_url_filter_;
+#endif
+
+#if defined(ENABLE_EXTENSIONS)
+  // Is NULL if switches::kDisableExtensionsHttpThrottling is on.
+  mutable scoped_ptr<extensions::ExtensionThrottleManager>
+      extension_throttle_manager_;
 #endif
 
   mutable scoped_ptr<DevToolsNetworkController> network_controller_;

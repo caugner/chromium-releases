@@ -10,12 +10,14 @@
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
+#include "base/prefs/pref_registry.h"
 #include "base/strings/string_split.h"
 #include "base/values.h"
 #include "components/content_settings/core/browser/content_settings_provider.h"
 #include "components/content_settings/core/browser/content_settings_rule.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/common/content_settings_pattern.h"
+#include "components/pref_registry/pref_registry_syncable.h"
 #include "url/gurl.h"
 
 namespace {
@@ -48,6 +50,8 @@ const char* kTypeNames[] = {
   "protected-media-identifier",
 #endif
   "app-banner",
+  "site-engagement",
+  "durable-storage"
 };
 static_assert(arraysize(kTypeNames) == CONTENT_SETTINGS_NUM_TYPES,
               "kTypeNames should have CONTENT_SETTINGS_NUM_TYPES elements");
@@ -60,17 +64,6 @@ namespace content_settings {
 
 std::string GetTypeName(ContentSettingsType type) {
   return std::string(kTypeNames[type]);
-}
-
-bool GetTypeFromName(const std::string& name,
-                     ContentSettingsType* return_setting) {
-  for (size_t type = 0; type < CONTENT_SETTINGS_NUM_TYPES; ++type) {
-    if (name.compare(kTypeNames[type]) == 0) {
-      *return_setting = static_cast<ContentSettingsType>(type);
-      return true;
-    }
-  }
-  return false;
 }
 
 std::string ContentSettingToString(ContentSetting setting) {
@@ -236,6 +229,18 @@ void GetRendererContentSettingRules(const HostContentSettingsMap* map,
       CONTENT_SETTINGS_TYPE_JAVASCRIPT,
       ResourceIdentifier(),
       &(rules->script_rules));
+}
+
+uint32 PrefRegistrationFlagsForType(ContentSettingsType content_type) {
+  uint32 flags = PrefRegistry::NO_REGISTRATION_FLAGS;
+
+  if (IsContentSettingsTypeSyncable(content_type))
+    flags |= user_prefs::PrefRegistrySyncable::SYNCABLE_PREF;
+
+  if (IsContentSettingsTypeLossy(content_type))
+    flags |= PrefRegistry::LOSSY_PREF;
+
+  return flags;
 }
 
 }  // namespace content_settings

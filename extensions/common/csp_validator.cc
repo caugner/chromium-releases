@@ -57,7 +57,7 @@ struct DirectiveStatus {
 bool isNonWildcardTLD(const std::string& url,
                       const std::string& scheme_and_separator,
                       bool should_check_rcd) {
-  if (!StartsWithASCII(url, scheme_and_separator, true))
+  if (!base::StartsWithASCII(url, scheme_and_separator, true))
     return false;
 
   size_t start_of_host = scheme_and_separator.length();
@@ -83,7 +83,7 @@ bool isNonWildcardTLD(const std::string& url,
     // ":123456" or ":****" as valid, but that does not matter because the
     // relaxing CSP directive will just be ignored by Blink.
     for (size_t i = start_of_port + 1; i < end_of_host; ++i) {
-      is_valid_port = IsAsciiDigit(url[i]) || url[i] == '*';
+      is_valid_port = base::IsAsciiDigit(url[i]) || url[i] == '*';
       if (!is_valid_port)
         break;
     }
@@ -128,21 +128,19 @@ void GetSecureDirectiveValues(const std::string& directive_name,
     bool is_secure_csp_token = false;
 
     // We might need to relax this whitelist over time.
-    if (source == "'self'" ||
-        source == "'none'" ||
+    if (source == "'self'" || source == "'none'" ||
         source == "http://127.0.0.1" ||
-        LowerCaseEqualsASCII(source, "blob:") ||
-        LowerCaseEqualsASCII(source, "filesystem:") ||
-        LowerCaseEqualsASCII(source, "http://localhost") ||
-        StartsWithASCII(source, "http://127.0.0.1:", true) ||
-        StartsWithASCII(source, "http://localhost:", true) ||
+        base::LowerCaseEqualsASCII(source, "blob:") ||
+        base::LowerCaseEqualsASCII(source, "filesystem:") ||
+        base::LowerCaseEqualsASCII(source, "http://localhost") ||
+        base::StartsWithASCII(source, "http://127.0.0.1:", true) ||
+        base::StartsWithASCII(source, "http://localhost:", true) ||
         isNonWildcardTLD(source, "https://", true) ||
         isNonWildcardTLD(source, "chrome://", false) ||
-        isNonWildcardTLD(source,
-                         std::string(extensions::kExtensionScheme) +
-                         url::kStandardSchemeSeparator,
+        isNonWildcardTLD(source, std::string(extensions::kExtensionScheme) +
+                                     url::kStandardSchemeSeparator,
                          false) ||
-        StartsWithASCII(source, "chrome-extension-resource:", true)) {
+        base::StartsWithASCII(source, "chrome-extension-resource:", true)) {
       is_secure_csp_token = true;
     } else if ((options & OPTIONS_ALLOW_UNSAFE_EVAL) &&
                source == "'unsafe-eval'") {
@@ -209,7 +207,7 @@ bool AllowedToHaveInsecureObjectSrc(
     base::StringTokenizer tokenizer(input, " \t\r\n");
     if (!tokenizer.GetNext())
       continue;
-    if (!LowerCaseEqualsASCII(tokenizer.token(), kPluginTypes))
+    if (!base::LowerCaseEqualsASCII(tokenizer.token(), kPluginTypes))
       continue;
     while (tokenizer.GetNext()) {
       if (!PluginTypeAllowed(tokenizer.token()))

@@ -12,7 +12,7 @@
 #include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/time/time.h"
-#include "components/invalidation/invalidation_util.h"
+#include "components/invalidation/public/invalidation_util.h"
 #include "components/sync_driver/sync_prefs.h"
 #include "components/sync_driver/sync_service_observer.h"
 #include "google/cacheinvalidation/include/types.h"
@@ -35,13 +35,10 @@ class ProfileSyncServiceAndroid : public sync_driver::SyncServiceObserver {
   void Init();
 
   // Called from Java when the user manually enables sync
-  void EnableSync(JNIEnv* env, jobject obj);
+  void RequestStart(JNIEnv* env, jobject obj);
 
   // Called from Java when the user manually disables sync
-  void DisableSync(JNIEnv* env, jobject obj);
-
-  // Called from Java when the user signs in to Chrome. Starts up sync.
-  void SignInSync(JNIEnv* env, jobject obj);
+  void RequestStop(JNIEnv* env, jobject obj);
 
   // Called from Java when the user signs out of Chrome
   void SignOutSync(JNIEnv* env, jobject obj);
@@ -52,6 +49,10 @@ class ProfileSyncServiceAndroid : public sync_driver::SyncServiceObserver {
   // Returns a string version of browser_sync::SyncBackendHost::StatusSummary
   base::android::ScopedJavaLocalRef<jstring> QuerySyncStatusSummary(
       JNIEnv* env, jobject obj);
+
+  // Retrieves all Sync data as JSON. This method is asynchronous; all data is
+  // passed to |callback| upon completion.
+  void GetAllNodes(JNIEnv* env, jobject obj, jobject callback);
 
   // Called from Java early during startup to ensure we use the correct
   // unique machine tag in session sync. Returns true if the machine tag was
@@ -170,8 +171,11 @@ class ProfileSyncServiceAndroid : public sync_driver::SyncServiceObserver {
   // Returns true if sync setup has been completed.
   jboolean HasSyncSetupCompleted(JNIEnv* env, jobject obj);
 
-  // Returns true if sync startup is currently suppressed.
-  jboolean IsStartSuppressed(JNIEnv* env, jobject obj);
+  // See ProfileSyncService::IsSyncRequested().
+  jboolean IsSyncRequested(JNIEnv* env, jobject obj);
+
+  // See ProfileSyncService::IsSyncActive().
+  jboolean IsSyncActive(JNIEnv* env, jobject obj);
 
   // Returns true if sync is configured to "sync everything".
   jboolean HasKeepEverythingSynced(JNIEnv* env, jobject obj);

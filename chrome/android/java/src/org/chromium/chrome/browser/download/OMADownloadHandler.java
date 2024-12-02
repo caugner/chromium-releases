@@ -16,10 +16,10 @@ import android.os.AsyncTask;
 import android.os.Environment;
 import android.os.ParcelFileDescriptor;
 import android.provider.Browser;
-import android.support.v4.util.LongSparseArray;
 import android.support.v7.app.AlertDialog;
 import android.text.TextUtils;
 import android.util.Log;
+import android.util.LongSparseArray;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.widget.TextView;
@@ -27,7 +27,7 @@ import android.widget.TextView;
 import org.chromium.base.ApplicationStatus;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromiumApplication;
+import org.chromium.chrome.browser.ChromeApplication;
 import org.chromium.content.browser.DownloadInfo;
 import org.xmlpull.v1.XmlPullParser;
 import org.xmlpull.v1.XmlPullParserException;
@@ -666,7 +666,7 @@ public class OMADownloadHandler {
                 urlConnection.setRequestMethod("POST");
                 String userAgent = mDownloadInfo.getUserAgent();
                 if (TextUtils.isEmpty(userAgent)) {
-                    userAgent = ChromiumApplication.getBrowserUserAgent();
+                    userAgent = ChromeApplication.getBrowserUserAgent();
                 }
                 urlConnection.setRequestProperty("User-Agent", userAgent);
                 urlConnection.setRequestProperty("cookie", mDownloadInfo.getCookie());

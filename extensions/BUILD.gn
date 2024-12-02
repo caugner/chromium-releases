@@ -59,9 +59,10 @@ grit("extensions_renderer_resources") {
   ]
 
   deps = [
-    "//device/serial:serial_mojo",
-    "//extensions/common:mojo",
-    "//extensions/common/api:mojom",
+    "//chrome/browser/media/router:mojo_bindings__generator",
+    "//device/serial:serial_mojo__generator",
+    "//extensions/common:mojo__generator",
+    "//extensions/common/api:mojom__generator",
   ]
 }
 
@@ -78,7 +79,7 @@ source_set("test_support") {
     ":extensions_resources",
     "//base",
     "//base:prefs_test_support",
-    "//components/guest_view:test_support",
+    "//components/guest_view/browser:test_support",
     "//content/public/common",
     "//content/test:test_support",
     "//extensions/browser",
@@ -120,6 +121,7 @@ repack("shell_and_test_pak") {
   deps = [
     ":extensions_resources",
     "//content:resources",
+    "//content/app/strings",
     "//content/browser/devtools:devtools_resources",
     "//content/shell:resources",
     "//extensions/shell:resources",

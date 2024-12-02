@@ -83,16 +83,10 @@ def StepRunSelLdrTests(pepperdir, sanitizer):
       deps = True
       if sanitizer == 'valgrind':
         args += ['RUN_UNDER=valgrind']
-      else:
-        args += ['CC=clang', 'CXX=clang++',
-                 'LDFLAGS=-pie -fsanitize=' + sanitizer,
-                 'CFLAGS=-fPIC -fsanitize=' + sanitizer]
-      build_projects.BuildProjectsBranch(pepperdir, 'src', clean=False,
-                                         deps=deps, config=config,
-                                         args=args + ['clean'])
-      build_projects.BuildProjectsBranch(pepperdir, 'tests', clean=False,
-                                         deps=deps, config=config,
-                                         args=args + ['clean'])
+      elif sanitizer == 'address':
+        args += ['ASAN=1']
+      elif sanitizer == 'thread':
+        args += ['TSAN=1']
 
     build_projects.BuildProjectsBranch(pepperdir, test, clean=False,
                                        deps=deps, config=config,

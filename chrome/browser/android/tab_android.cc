@@ -57,6 +57,7 @@
 #include "components/navigation_interception/intercept_navigation_delegate.h"
 #include "components/navigation_interception/navigation_params.h"
 #include "components/url_fixer/url_fixer.h"
+#include "content/public/browser/android/compositor.h"
 #include "content/public/browser/android/content_view_core.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/interstitial_page.h"
@@ -121,7 +122,7 @@ void TabAndroid::AttachTabHelpers(content::WebContents* web_contents) {
 
 TabAndroid::TabAndroid(JNIEnv* env, jobject obj)
     : weak_java_tab_(env, obj),
-      content_layer_(cc::Layer::Create()),
+      content_layer_(cc::Layer::Create(content::Compositor::LayerSettings())),
       tab_content_manager_(NULL),
       synced_tab_delegate_(new browser_sync::SyncedTabDelegateAndroid(this)) {
   Java_Tab_setNativePtr(env, obj, reinterpret_cast<intptr_t>(this));
@@ -237,7 +238,7 @@ void TabAndroid::HandlePopupNavigation(chrome::NavigateParams* params) {
                         jheaders.obj(),
                         jpost_data.obj(),
                         disposition,
-                        params->should_set_opener,
+                        params->created_with_opener,
                         params->is_renderer_initiated);
   } else {
     NOTIMPLEMENTED();
@@ -687,16 +688,6 @@ ScopedJavaLocalRef<jobject> TabAndroid::GetFavicon(JNIEnv* env,
   return bitmap;
 }
 
-SkBitmap TabAndroid::GetFaviconBitmap() {
-  JNIEnv* env = base::android::AttachCurrentThread();
-  ScopedJavaLocalRef<jobject> javaBitmap =
-      Java_Tab_getFavicon(env, weak_java_tab_.get(env).obj());
-  if (!javaBitmap.obj())
-    return SkBitmap();
-
-  return gfx::CreateSkBitmapFromJavaBitmap(gfx::JavaBitmap(javaBitmap.obj()));
-}
-
 prerender::PrerenderManager* TabAndroid::GetPrerenderManager() const {
   Profile* profile = GetProfile();
   if (!profile)
@@ -750,6 +741,13 @@ void TabAndroid::UpdateTopControlsState(JNIEnv* env,
         interstitial_view_host->GetRoutingID(), constraints_state,
         current_state, animate));
   }
+}
+
+void TabAndroid::LoadOriginalImage(JNIEnv* env, jobject obj) {
+  content::RenderFrameHost* render_frame_host =
+      web_contents()->GetFocusedFrame();
+  render_frame_host->Send(new ChromeViewMsg_RequestReloadImageForContextNode(
+      render_frame_host->GetRoutingID()));
 }
 
 void TabAndroid::SearchByImageInNewTabAsync(JNIEnv* env, jobject obj) {

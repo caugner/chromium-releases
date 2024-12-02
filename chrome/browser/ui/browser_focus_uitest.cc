@@ -55,9 +55,11 @@ using content::WebContents;
 
 namespace {
 
+#if defined(OS_POSIX)
 // The delay waited in some cases where we don't have a notifications for an
 // action we take.
 const int kActionDelayMs = 500;
+#endif
 
 const char kSimplePage[] = "/focus/page_with_focus.html";
 const char kStealFocusPage[] = "/focus/page_steals_focus.html";
@@ -197,9 +199,8 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest, MAYBE_ClickingMovesFocus) {
 #if defined(OS_POSIX)
   // It seems we have to wait a little bit for the widgets to spin up before
   // we can start clicking on them.
-  base::MessageLoop::current()->PostDelayedTask(
-      FROM_HERE,
-      base::MessageLoop::QuitClosure(),
+  base::MessageLoop::current()->task_runner()->PostDelayedTask(
+      FROM_HERE, base::MessageLoop::QuitClosure(),
       base::TimeDelta::FromMilliseconds(kActionDelayMs));
   content::RunMessageLoop();
 #endif  // defined(OS_POSIX)

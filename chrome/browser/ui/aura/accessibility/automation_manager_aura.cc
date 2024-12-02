@@ -30,10 +30,12 @@ void AutomationManagerAura::Enable(BrowserContext* context) {
   if (!current_tree_.get())
     current_tree_.reset(new AXTreeSourceAura());
   ResetSerializer();
+
   SendEvent(context, current_tree_->GetRoot(), ui::AX_EVENT_LOAD_COMPLETE);
-  if (!pending_alert_text_.empty()) {
-    HandleAlert(context, pending_alert_text_);
-    pending_alert_text_.clear();
+  if (focused_window_) {
+    views::AXAuraObjWrapper* focus =
+        views::AXAuraObjCache::GetInstance()->GetOrCreate(focused_window_);
+    SendEvent(context, focus, ui::AX_EVENT_CHILDREN_CHANGED);
   }
 }
 
@@ -47,6 +49,8 @@ void AutomationManagerAura::Disable() {
 void AutomationManagerAura::HandleEvent(BrowserContext* context,
                                         views::View* view,
                                         ui::AXEvent event_type) {
+  if (view->GetWidget())
+    focused_window_ = view->GetWidget()->GetNativeView();
   if (!enabled_)
     return;
 
@@ -78,10 +82,8 @@ void AutomationManagerAura::HandleEvent(BrowserContext* context,
 
 void AutomationManagerAura::HandleAlert(content::BrowserContext* context,
                                         const std::string& text) {
-  if (!enabled_) {
-    pending_alert_text_ = text;
+  if (!enabled_)
     return;
-  }
 
   views::AXAuraObjWrapper* obj =
       static_cast<AXRootObjWrapper*>(current_tree_->GetRoot())
@@ -109,8 +111,14 @@ void AutomationManagerAura::SetSelection(int32 id, int32 start, int32 end) {
   current_tree_->SetSelection(id, start, end);
 }
 
+void AutomationManagerAura::ShowContextMenu(int32 id) {
+  CHECK(enabled_);
+  current_tree_->ShowContextMenu(id);
+}
+
 AutomationManagerAura::AutomationManagerAura()
-    : enabled_(false), processing_events_(false) {
+    : enabled_(false), processing_events_(false), focused_window_(nullptr) {
+  views::WidgetFocusManager::GetInstance()->AddFocusChangeListener(this);
 }
 
 AutomationManagerAura::~AutomationManagerAura() {
@@ -132,10 +140,15 @@ void AutomationManagerAura::SendEvent(BrowserContext* context,
   // TODO(dtseng): Would idealy define these special desktop constants in idl.
   content::AXEventNotificationDetails detail(
       update.node_id_to_clear, update.nodes, event_type, aura_obj->GetID(),
+      std::map<int32, int>(),
       0, /* process_id */
       0 /* routing_id */);
   std::vector<content::AXEventNotificationDetails> details;
   details.push_back(detail);
   extensions::automation_util::DispatchAccessibilityEventsToAutomation(
       details, context, gfx::Vector2d());
+}
+
+void AutomationManagerAura::OnNativeFocusChanged(aura::Window* focused_now) {
+  focused_window_ = focused_now;
 }

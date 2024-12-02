@@ -60,6 +60,13 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
     return nullptr;
   }
 
+  // Cleans up state when this GuestView is being destroyed.
+  // Note that this cannot be done in the destructor since a GuestView could
+  // potentially be created and destroyed in JavaScript before getting a
+  // GuestViewBase instance. This method can be hidden by a CleanUp() method in
+  // a derived class, in which case the derived method should call this one.
+  static void CleanUp(int embedder_process_id, int view_instance_id);
+
   static GuestViewBase* FromWebContents(
       const content::WebContents* web_contents);
 
@@ -91,12 +98,6 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
   // This method is called when the initial set of frames within the page have
   // completed loading.
   virtual void GuestViewDidStopLoading() {}
-
-  // This method is called before the embedder is destroyed.
-  // |owner_web_contents_| should still be valid during this call. This
-  // allows the derived class to perform some cleanup related to the embedder
-  // web contents.
-  virtual void EmbedderWillBeDestroyed() {}
 
   // This method is called when the embedder's zoom changes.
   virtual void EmbedderZoomChanged(double old_zoom_level,
@@ -145,11 +146,6 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
   // view. By default, preferred size events are disabled, since they add a
   // small amount of overhead.
   virtual bool IsPreferredSizeModeEnabled() const;
-
-  // This method queries whether drag-and-drop is enabled for this particular
-  // view. By default, drag-and-drop is disabled. Derived classes can override
-  // this behavior to enable drag-and-drop.
-  virtual bool IsDragAndDropEnabled() const;
 
   // This method is called immediately before suspended resource loads have been
   // resumed on attachment to an embedder.

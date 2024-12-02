@@ -17,6 +17,7 @@ static_library("utility") {
   public_deps = []
   deps = [
     "//base",
+    "//components/safe_json:safe_json_parser_message_filter",
     "//components/search_engines",
     "//components/strings",
     "//components/url_fixer",
@@ -30,13 +31,11 @@ static_library("utility") {
     "//chrome/common",
   ]
 
-  if (is_android) {
-    if (use_seccomp_bpf) {
-      deps += [ "//sandbox/linux:seccomp_bpf" ]
-      defines += [ "USE_SECCOMP_BPF" ]
-    }
-  } else {
-    deps += [ "//net:net_utility_services" ]
+  if (!is_android) {
+    deps += [
+      "//chrome/common:mojo_bindings",
+      "//net:net_utility_services",
+    ]
     sources +=
         rebase_path(gypi_values.chrome_utility_importer_sources, ".", "..")
   }

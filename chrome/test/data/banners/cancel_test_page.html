@@ -7,6 +7,9 @@
       window.addEventListener('beforeinstallprompt', function(e) {
         console.log('Preventing banner from appearing');
         e.preventDefault();
+
+        // Navigate the window to trigger the banner cancellation.
+        window.location.href = "/";
       });
     </script>
   </head>

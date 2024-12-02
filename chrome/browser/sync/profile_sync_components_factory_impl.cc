@@ -39,12 +39,13 @@
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/themes/theme_syncable_service.h"
-#include "chrome/browser/webdata/web_data_service_factory.h"
+#include "chrome/browser/web_data_service_factory.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/pref_names.h"
 #include "components/autofill/core/browser/webdata/autocomplete_syncable_service.h"
 #include "components/autofill/core/browser/webdata/autofill_profile_syncable_service.h"
+#include "components/autofill/core/browser/webdata/autofill_wallet_metadata_syncable_service.h"
 #include "components/autofill/core/browser/webdata/autofill_wallet_syncable_service.h"
 #include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
 #include "components/autofill/core/common/autofill_pref_names.h"
@@ -165,6 +166,9 @@ syncer::ModelTypeSet GetDisabledTypesFromCommandLine(
 syncer::ModelTypeSet GetEnabledTypesFromCommandLine(
     const base::CommandLine& command_line) {
   syncer::ModelTypeSet enabled_types;
+  if (command_line.HasSwitch(autofill::switches::kEnableWalletMetadataSync))
+    enabled_types.Put(syncer::AUTOFILL_WALLET_METADATA);
+
   return enabled_types;
 }
 
@@ -229,11 +233,22 @@ void ProfileSyncComponentsFactoryImpl::RegisterCommonDataTypes(
         new AutofillProfileDataTypeController(this, profile_));
   }
 
-  // Autofill wallet sync is enabled by default, but behind a syncer experiment
+  // Wallet data sync is enabled by default, but behind a syncer experiment
   // enforced by the datatype controller. Register unless explicitly disabled.
-  if (!disabled_types.Has(syncer::AUTOFILL_WALLET_DATA)) {
+  bool wallet_disabled = disabled_types.Has(syncer::AUTOFILL_WALLET_DATA);
+  if (!wallet_disabled) {
     pss->RegisterDataTypeController(
-        new browser_sync::AutofillWalletDataTypeController(this, profile_));
+        new browser_sync::AutofillWalletDataTypeController(
+            this, profile_, syncer::AUTOFILL_WALLET_DATA));
+  }
+
+  // Wallet metadata sync depends on Wallet data sync and is disabled by
+  // default. Register if Wallet data is syncing and metadata sync is explicitly
+  // enabled.
+  if (!wallet_disabled && enabled_types.Has(syncer::AUTOFILL_WALLET_METADATA)) {
+    pss->RegisterDataTypeController(
+        new browser_sync::AutofillWalletDataTypeController(
+            this, profile_, syncer::AUTOFILL_WALLET_METADATA));
   }
 
   // Bookmark sync is enabled by default.  Register unless explicitly
@@ -300,6 +315,15 @@ void ProfileSyncComponentsFactoryImpl::RegisterCommonDataTypes(
         new PasswordDataTypeController(this, profile_));
   }
 
+  if (!disabled_types.Has(syncer::PRIORITY_PREFERENCES)) {
+    pss->RegisterDataTypeController(
+        new UIDataTypeController(
+            BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI),
+            base::Bind(&ChromeReportUnrecoverableError),
+            syncer::PRIORITY_PREFERENCES,
+            this));
+  }
+
   // Article sync is disabled by default.  Register only if explicitly enabled.
   if (IsEnableSyncArticlesSet()) {
     pss->RegisterDataTypeController(
@@ -352,15 +376,6 @@ void ProfileSyncComponentsFactoryImpl::RegisterDesktopDataTypes(
             BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI),
             base::Bind(&ChromeReportUnrecoverableError),
             syncer::PREFERENCES,
-            this));
-  }
-
-  if (!disabled_types.Has(syncer::PRIORITY_PREFERENCES)) {
-    pss->RegisterDataTypeController(
-        new UIDataTypeController(
-            BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI),
-            base::Bind(&ChromeReportUnrecoverableError),
-            syncer::PRIORITY_PREFERENCES,
             this));
   }
 
@@ -494,7 +509,8 @@ base::WeakPtr<syncer::SyncableService> ProfileSyncComponentsFactoryImpl::
           syncer::PRIORITY_PREFERENCES)->AsWeakPtr();
     case syncer::AUTOFILL:
     case syncer::AUTOFILL_PROFILE:
-    case syncer::AUTOFILL_WALLET_DATA: {
+    case syncer::AUTOFILL_WALLET_DATA:
+    case syncer::AUTOFILL_WALLET_METADATA: {
       if (!web_data_service_.get())
         return base::WeakPtr<syncer::SyncableService>();
       if (type == syncer::AUTOFILL) {
@@ -503,6 +519,9 @@ base::WeakPtr<syncer::SyncableService> ProfileSyncComponentsFactoryImpl::
       } else if (type == syncer::AUTOFILL_PROFILE) {
         return autofill::AutofillProfileSyncableService::FromWebDataService(
             web_data_service_.get())->AsWeakPtr();
+      } else if (type == syncer::AUTOFILL_WALLET_METADATA) {
+        return autofill::AutofillWalletMetadataSyncableService::
+            FromWebDataService(web_data_service_.get())->AsWeakPtr();
       }
       return autofill::AutofillWalletSyncableService::FromWebDataService(
           web_data_service_.get())->AsWeakPtr();
@@ -551,12 +570,14 @@ base::WeakPtr<syncer::SyncableService> ProfileSyncComponentsFactoryImpl::
     case syncer::SUPERVISED_USER_SETTINGS:
       return SupervisedUserSettingsServiceFactory::GetForProfile(profile_)->
           AsWeakPtr();
+#if !defined(OS_ANDROID) && !defined(OS_IOS)
     case syncer::SUPERVISED_USERS:
       return SupervisedUserSyncServiceFactory::GetForProfile(profile_)->
           AsWeakPtr();
     case syncer::SUPERVISED_USER_SHARED_SETTINGS:
       return SupervisedUserSharedSettingsServiceFactory::GetForBrowserContext(
           profile_)->AsWeakPtr();
+#endif
     case syncer::SUPERVISED_USER_WHITELISTS:
       return SupervisedUserServiceFactory::GetForProfile(profile_)
           ->GetWhitelistService()

@@ -15,6 +15,7 @@
 #include "components/web_modal/web_contents_modal_dialog_manager_delegate.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "extensions/browser/extension_function_dispatcher.h"
 #include "extensions/browser/extension_icon_image.h"
 #include "extensions/browser/extension_registry_observer.h"
 #include "ui/base/ui_base_types.h"  // WindowShowState
@@ -70,6 +71,8 @@ class AppWindowContents {
 
   virtual content::WebContents* GetWebContents() const = 0;
 
+  virtual extensions::WindowController* GetWindowController() const = 0;
+
  private:
   DISALLOW_COPY_AND_ASSIGN(AppWindowContents);
 };
@@ -80,6 +83,7 @@ class AppWindow : public content::WebContentsDelegate,
                   public content::WebContentsObserver,
                   public web_modal::WebContentsModalDialogManagerDelegate,
                   public IconImage::Observer,
+                  public ExtensionFunctionDispatcher::Delegate,
                   public ExtensionRegistryObserver {
  public:
   enum WindowType {
@@ -323,6 +327,9 @@ class AppWindow : public content::WebContentsDelegate,
   // may be false if the bit is silently switched off for security reasons.
   bool IsAlwaysOnTop() const;
 
+  // Restores the always-on-top property according to |cached_always_on_top_|.
+  void RestoreAlwaysOnTop();
+
   // Set whether the window should get even reserved keys (modulo platform
   // restrictions).
   void SetInterceptAllKeys(bool want_all_keys);
@@ -407,6 +414,10 @@ class AppWindow : public content::WebContentsDelegate,
   // content::WebContentsObserver implementation.
   void RenderViewCreated(content::RenderViewHost* render_view_host) override;
   void DidFirstVisuallyNonEmptyPaint() override;
+
+  // ExtensionFunctionDispatcher::Delegate implementation.
+  WindowController* GetExtensionWindowController() const override;
+  content::WebContents* GetAssociatedWebContents() const override;
 
   // ExtensionRegistryObserver implementation.
   void OnExtensionUnloaded(content::BrowserContext* browser_context,

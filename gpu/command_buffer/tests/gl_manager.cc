@@ -13,6 +13,7 @@
 #include "base/at_exit.h"
 #include "base/bind.h"
 #include "base/memory/ref_counted_memory.h"
+#include "gpu/command_buffer/client/gles2_cmd_helper.h"
 #include "gpu/command_buffer/client/gles2_implementation.h"
 #include "gpu/command_buffer/client/gles2_lib.h"
 #include "gpu/command_buffer/client/transfer_buffer.h"
@@ -47,6 +48,7 @@ size_t NumberOfPlanesForGpuMemoryBufferFormat(
     case gfx::GpuMemoryBuffer::DXT5:
     case gfx::GpuMemoryBuffer::ETC1:
     case gfx::GpuMemoryBuffer::R_8:
+    case gfx::GpuMemoryBuffer::RGBA_4444:
     case gfx::GpuMemoryBuffer::RGBA_8888:
     case gfx::GpuMemoryBuffer::RGBX_8888:
     case gfx::GpuMemoryBuffer::BGRA_8888:
@@ -66,6 +68,7 @@ size_t SubsamplingFactor(gfx::GpuMemoryBuffer::Format format, int plane) {
     case gfx::GpuMemoryBuffer::DXT5:
     case gfx::GpuMemoryBuffer::ETC1:
     case gfx::GpuMemoryBuffer::R_8:
+    case gfx::GpuMemoryBuffer::RGBA_4444:
     case gfx::GpuMemoryBuffer::RGBA_8888:
     case gfx::GpuMemoryBuffer::RGBX_8888:
     case gfx::GpuMemoryBuffer::BGRA_8888:
@@ -96,6 +99,9 @@ size_t StrideInBytes(size_t width,
       return width / 2;
     case gfx::GpuMemoryBuffer::R_8:
       return (width + 3) & ~0x3;
+    case gfx::GpuMemoryBuffer::RGBA_4444:
+      DCHECK_EQ(plane, 0);
+      return width * 2;
     case gfx::GpuMemoryBuffer::RGBA_8888:
     case gfx::GpuMemoryBuffer::BGRA_8888:
       DCHECK_EQ(plane, 0);
@@ -184,7 +190,8 @@ GLManager::Options::Options()
       virtual_manager(NULL),
       bind_generates_resource(false),
       lose_context_when_out_of_memory(false),
-      context_lost_allowed(false) {
+      context_lost_allowed(false),
+      webgl_version(0) {
 }
 
 GLManager::GLManager() : context_lost_allowed_(false) {
@@ -272,6 +279,7 @@ void GLManager::InitializeWithCommandLine(const GLManager::Options& options,
   attrib_helper.alpha_size = 8;
   attrib_helper.depth_size = 16;
   attrib_helper.stencil_size = 8;
+  attrib_helper.webgl_version = options.webgl_version;
   attrib_helper.Serialize(&attribs);
 
   DCHECK(!command_line || !context_group);
@@ -509,6 +517,11 @@ uint32 GLManager::CreateStreamTexture(uint32 texture_id) {
 
 void GLManager::SetLock(base::Lock*) {
   NOTIMPLEMENTED();
+}
+
+bool GLManager::IsGpuChannelLost() {
+  NOTIMPLEMENTED();
+  return false;
 }
 
 }  // namespace gpu

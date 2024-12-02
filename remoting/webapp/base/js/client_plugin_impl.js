@@ -21,7 +21,7 @@ remoting.ClientPluginMessage = function() {
   /** @type {string} */
   this.method = '';
 
-  /** @type {Object<string,*>} */
+  /** @type {Object<*>} */
   this.data = {};
 };
 
@@ -105,8 +105,8 @@ remoting.ClientPluginImpl = function(container,
   /** @private {remoting.CredentialsProvider} */
   this.credentials_ = null;
 
-  /** @private {string} */
-  this.keyRemappings_ = '';
+  /** @private {!Object} */
+  this.keyRemappings_ = {};
 };
 
 /**
@@ -243,7 +243,7 @@ remoting.ClientPluginImpl.prototype.handleMessageMethod_ = function(message) {
       // TODO(kelvinp): Fix the client plugin to fire capabilities and the
       // connected event in the same message.
       if (state === remoting.ClientSession.State.CONNECTED) {
-        base.debug.assert(this.hostCapabilities_ === null,
+        console.assert(this.hostCapabilities_ === null,
             'Capabilities should only be set after the session is connected');
         return;
       }
@@ -262,8 +262,8 @@ remoting.ClientPluginImpl.prototype.handleMessageMethod_ = function(message) {
       var capabilityString = base.getStringAttr(message.data, 'capabilities');
       console.log('plugin: setCapabilities: [' + capabilityString + ']');
 
-      base.debug.assert(this.hostCapabilities_ === null,
-                        'setCapabilities() should only be called once');
+      console.assert(this.hostCapabilities_ === null,
+                     'setCapabilities() should only be called once.');
       this.hostCapabilities_ = tokenize(capabilityString);
 
       handler.onConnectionStatusUpdate(
@@ -375,7 +375,8 @@ remoting.ClientPluginImpl.prototype.handleMessageMethod_ = function(message) {
     var context =
         /** @type {CanvasRenderingContext2D} */ (canvas.getContext('2d'));
     var imageData = context.getImageData(0, 0, width, height);
-    base.debug.assert(srcArrayBuffer instanceof ArrayBuffer);
+    console.assert(srcArrayBuffer instanceof ArrayBuffer,
+                   '|srcArrayBuffer| is not an ArrayBuffer.');
     var src = new Uint8Array(/** @type {ArrayBuffer} */(srcArrayBuffer));
     var dest = imageData.data;
     for (var i = 0; i < /** @type {number} */(dest.length); i += 4) {
@@ -543,49 +544,34 @@ remoting.ClientPluginImpl.prototype.releaseAllKeys = function() {
 /**
  * Sets and stores the key remapping setting for the current host.
  *
- * @param {string} remappings Comma separated list of key remappings.
+ * @param {!Object} remappings
  */
 remoting.ClientPluginImpl.prototype.setRemapKeys =
     function(remappings) {
   // Cancel any existing remappings and apply the new ones.
   this.applyRemapKeys_(this.keyRemappings_, false);
   this.applyRemapKeys_(remappings, true);
-  this.keyRemappings_ = remappings;
+  this.keyRemappings_ = /** @type {!Object} */ (base.deepCopy(remappings));
 };
 
 /**
  * Applies the configured key remappings to the session, or resets them.
  *
- * @param {string} remapKeys
+ * @param {!Object} remappings
  * @param {boolean} apply True to apply remappings, false to cancel them.
  * @private
  */
 remoting.ClientPluginImpl.prototype.applyRemapKeys_ =
-    function(remapKeys, apply) {
-  if (remapKeys == '') {
-    return;
-  }
-
-  var remappings = remapKeys.split(',');
-  for (var i = 0; i < remappings.length; ++i) {
-    var keyCodes = remappings[i].split('>');
-    if (keyCodes.length != 2) {
-      console.log('bad remapKey: ' + remappings[i]);
-      continue;
-    }
-    var fromKey = parseInt(keyCodes[0], 0);
-    var toKey = parseInt(keyCodes[1], 0);
-    if (!fromKey || !toKey) {
-      console.log('bad remapKey code: ' + remappings[i]);
-      continue;
-    }
+    function(remappings, apply) {
+  for (var i in remappings) {
+    var from = parseInt(i, 10);
+    var to = parseInt(remappings[i], 10);
     if (apply) {
-      console.log('remapKey 0x' + fromKey.toString(16) +
-                  '>0x' + toKey.toString(16));
-      this.remapKey(fromKey, toKey);
+      console.log('remapKey 0x' + from.toString(16) + '>0x' + to.toString(16));
+      this.remapKey(from, to);
     } else {
-      console.log('cancel remapKey 0x' + fromKey.toString(16));
-      this.remapKey(fromKey, fromKey);
+      console.log('cancel remapKey 0x' + from.toString(16));
+      this.remapKey(from, from);
     }
   }
 };
@@ -673,6 +659,16 @@ remoting.ClientPluginImpl.prototype.sendClipboardItem =
   this.plugin_.postMessage(JSON.stringify(
       { method: 'sendClipboardItem',
         data: { mimeType: mimeType, item: item }}));
+};
+
+/**
+ * Notifies the plugin whether to send touch events to the host.
+ *
+ * @param {boolean} enable True if touch events should be sent.
+ */
+remoting.ClientPluginImpl.prototype.enableTouchEvents = function(enable) {
+  this.plugin_.postMessage(
+      JSON.stringify({method: 'enableTouchEvents', data: {'enable': enable}}));
 };
 
 /**

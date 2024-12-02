@@ -263,9 +263,8 @@ void FinishPepperFlashUpdateRegistration(ComponentUpdateService* cus,
   pepflash.installer = new PepperFlashComponentInstaller(version);
   pepflash.version = version;
   pepflash.pk_hash.assign(kSha2Hash, &kSha2Hash[sizeof(kSha2Hash)]);
-  if (cus->RegisterComponent(pepflash) != ComponentUpdateService::Status::kOk) {
+  if (!cus->RegisterComponent(pepflash))
     NOTREACHED() << "Pepper Flash component registration failed.";
-  }
 }
 
 void StartPepperFlashUpdateRegistration(ComponentUpdateService* cus) {
@@ -291,6 +290,14 @@ void StartPepperFlashUpdateRegistration(ComponentUpdateService* cus) {
       version = Version(kNullVersion);
     }
   }
+
+#if defined(FLAPPER_AVAILABLE)
+  // If a version of Flash is bundled with Chrome, and it's a higher version
+  // than the version of the component, or the component has never been updated,
+  // then set the bundled version as the current version.
+  if (version.CompareTo(Version(FLAPPER_VERSION_STRING)) < 0)
+    version = Version(FLAPPER_VERSION_STRING);
+#endif
 
   BrowserThread::PostTask(
       BrowserThread::UI,

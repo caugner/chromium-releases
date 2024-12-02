@@ -4,13 +4,14 @@
 
 #include "components/password_manager/core/browser/test_password_store.h"
 
+#include "base/thread_task_runner_handle.h"
 #include "components/autofill/core/common/password_form.h"
 
 namespace password_manager {
 
 TestPasswordStore::TestPasswordStore()
-    : PasswordStore(base::MessageLoopProxy::current(),
-                    base::MessageLoopProxy::current()) {
+    : PasswordStore(base::ThreadTaskRunnerHandle::Get(),
+                    base::ThreadTaskRunnerHandle::Get()) {
 }
 
 TestPasswordStore::~TestPasswordStore() {
@@ -43,16 +44,6 @@ bool TestPasswordStore::FormsAreEquivalent(const autofill::PasswordForm& lhs,
       lhs.username_value == rhs.username_value &&
       lhs.password_element == rhs.password_element &&
       lhs.signon_realm == rhs.signon_realm;
-}
-
-void TestPasswordStore::GetAutofillableLoginsImpl(
-    scoped_ptr<GetLoginsRequest> request) {
-  ScopedVector<autofill::PasswordForm> results;
-  for (const auto& forms_for_realm : stored_passwords_) {
-    for (const autofill::PasswordForm& form : forms_for_realm.second)
-      results.push_back(new autofill::PasswordForm(form));
-  }
-  request->NotifyConsumerWithResults(results.Pass());
 }
 
 PasswordStoreChangeList TestPasswordStore::AddLoginImpl(
@@ -125,12 +116,12 @@ PasswordStoreChangeList TestPasswordStore::RemoveLoginsSyncedBetweenImpl(
   return changes;
 }
 
-void TestPasswordStore::GetBlacklistLoginsImpl(
-    scoped_ptr<GetLoginsRequest> request) {
-}
-
 bool TestPasswordStore::FillAutofillableLogins(
     ScopedVector<autofill::PasswordForm>* forms) {
+  for (const auto& forms_for_realm : stored_passwords_) {
+    for (const autofill::PasswordForm& form : forms_for_realm.second)
+      forms->push_back(new autofill::PasswordForm(form));
+  }
   return true;
 }
 

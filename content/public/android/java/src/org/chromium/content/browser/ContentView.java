@@ -11,16 +11,18 @@ import android.graphics.Rect;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
-import android.util.Log;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewStructure;
 import android.view.accessibility.AccessibilityNodeProvider;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
 import android.widget.FrameLayout;
 
+import org.chromium.base.Log;
 import org.chromium.base.TraceEvent;
+import org.chromium.base.VisibleForTesting;
 
 /**
  * The containing view for {@link ContentViewCore} that exists in the Android UI hierarchy and
@@ -29,7 +31,7 @@ import org.chromium.base.TraceEvent;
 public class ContentView extends FrameLayout
         implements ContentViewCore.InternalAccessDelegate, SmartClipProvider {
 
-    private static final String TAG = "ContentView";
+    private static final String TAG = "cr.ContentView";
 
     protected final ContentViewCore mContentViewCore;
 
@@ -70,6 +72,12 @@ public class ContentView extends FrameLayout
         } else {
             return super.getAccessibilityNodeProvider();
         }
+    }
+
+    // @Override[ANDROID-M] TODO(sgurun) override and also remove VisibleForTesting. crbug/512264
+    @VisibleForTesting
+    public void onProvideVirtualStructure(final ViewStructure structure) {
+        mContentViewCore.onProvideVirtualStructure(structure);
     }
 
     // Needed by ContentViewCore.InternalAccessDelegate

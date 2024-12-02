@@ -19,7 +19,6 @@ import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.chrome.browser.Tab;
 import org.chromium.chrome.browser.compositor.LayerTitleCache;
-import org.chromium.chrome.browser.compositor.bottombar.contextualsearch.ContextualSearchPanel;
 import org.chromium.chrome.browser.compositor.layouts.ChromeAnimation.Animatable;
 import org.chromium.chrome.browser.compositor.layouts.ChromeAnimation.Animation;
 import org.chromium.chrome.browser.compositor.layouts.components.LayoutTab;
@@ -636,23 +635,6 @@ public abstract class Layout implements TabContentManager.ThumbnailChangeListene
     }
 
     /**
-     * Returns whether or not the native Contextual Search layout is showing. Layouts supporting
-     * Contextual Search should override this method and return "true", indicating that
-     * the layout has already been swapped from an Android View to a native cc::Layer.
-     * @return Whether or not the Contextual Search bar is showing.
-     */
-    public boolean isContextualSearchLayoutShowing() {
-        return false;
-    }
-
-    /**
-     * @return The {@link ContextualSearchPanel} or "null" if there is none for this layout.
-     */
-    public ContextualSearchPanel getContextualSearchPanel() {
-        return null;
-    }
-
-    /**
      * @param currentOffset The current top controls offset in dp.
      * @return {@link Float#NaN} if no offset should be used, or a value in dp if the top controls
      *         offset should be overridden.
@@ -1161,10 +1143,16 @@ public abstract class Layout implements TabContentManager.ThumbnailChangeListene
         updateSceneLayer(viewport, contentViewport, layerTitleCache, tabContentManager,
                 resourceManager, fullscreenManager);
 
+        float offsetPx = fullscreenManager != null ? fullscreenManager.getControlOffset() : 0.f;
+        float dpToPx = getContext().getResources().getDisplayMetrics().density;
+        float offsetDp = offsetPx / dpToPx;
+        float offsetOverride = getTopControlsOffset(offsetDp);
+        if (!Float.isNaN(offsetOverride)) offsetDp = offsetOverride;
+
         SceneLayer content = getSceneLayer();
         for (int i = 0; i < mSceneOverlays.size(); i++) {
             SceneOverlayLayer overlayLayer = mSceneOverlays.get(i).getUpdatedSceneOverlayTree(
-                    layerTitleCache, resourceManager, fullscreenManager);
+                    layerTitleCache, resourceManager, offsetDp);
 
             overlayLayer.setContentTree(content);
             content = overlayLayer;

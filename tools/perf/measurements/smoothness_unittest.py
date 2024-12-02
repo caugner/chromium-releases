@@ -3,11 +3,11 @@
 # found in the LICENSE file.
 import sys
 
-from telemetry.core import wpr_modes
 from telemetry import decorators
 from telemetry.page import page
-from telemetry.unittest_util import options_for_unittests
-from telemetry.unittest_util import page_test_test_case
+from telemetry.testing import options_for_unittests
+from telemetry.testing import page_test_test_case
+from telemetry.util import wpr_modes
 
 from measurements import smoothness
 
@@ -82,7 +82,7 @@ class SmoothnessUnitTest(page_test_test_case.PageTestTestCase):
 
   @decorators.Disabled('chromeos')  # crbug.com/483212
   def testSmoothness(self):
-    ps = self.CreatePageSetFromFileInUnittestDataDir('scrollable_page.html')
+    ps = self.CreateStorySetFromFileInUnittestDataDir('scrollable_page.html')
     measurement = smoothness.Smoothness()
     results = self.RunMeasurement(measurement, ps, options=self._options)
     self.assertEquals(0, len(results.failures))
@@ -114,7 +114,7 @@ class SmoothnessUnitTest(page_test_test_case.PageTestTestCase):
 
   @decorators.Enabled('android')  # SurfaceFlinger is android-only
   def testSmoothnessSurfaceFlingerMetricsCalculated(self):
-    ps = self.CreatePageSetFromFileInUnittestDataDir('scrollable_page.html')
+    ps = self.CreateStorySetFromFileInUnittestDataDir('scrollable_page.html')
     measurement = smoothness.Smoothness()
     results = self.RunMeasurement(measurement, ps, options=self._options)
     self.assertEquals(0, len(results.failures))

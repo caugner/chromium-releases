@@ -123,15 +123,15 @@ void ScreenOrientationController::SetDisplayRotation(
   if (screen_rotation_animator.CanAnimate()) {
     screen_rotation_animator.Rotate(rotation, source);
   } else {
-    // TODO(bruthig): Fix the DisplayManager so that display rotations set on
-    // inactive displays are persisted.  See www.crbug.com/480703.
     Shell::GetInstance()->display_manager()->SetDisplayRotation(
         gfx::Display::InternalDisplayId(), rotation, source);
   }
 }
 
-void ScreenOrientationController::OnWindowActivated(aura::Window* gained_active,
-                                                    aura::Window* lost_active) {
+void ScreenOrientationController::OnWindowActivated(
+    aura::client::ActivationChangeObserver::ActivationReason reason,
+    aura::Window* gained_active,
+    aura::Window* lost_active) {
   ApplyLockForActiveWindow();
 }
 

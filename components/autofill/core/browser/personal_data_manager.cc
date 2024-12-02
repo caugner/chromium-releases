@@ -9,6 +9,7 @@
 #include <iterator>
 
 #include "base/command_line.h"
+#include "base/i18n/case_conversion.h"
 #include "base/i18n/timezone.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
@@ -143,16 +144,11 @@ bool IsValidFieldTypeAndValue(const std::set<ServerFieldType>& types_seen,
   return true;
 }
 
-// Returns the list of values for the given type in the profile. There may be
-// more than one (for example, the user can have more than one phone number per
-// address).
-//
 // In addition to just getting the values out of the autocomplete profile, this
 // function handles formatting of the street address into a single string.
-std::vector<base::string16> GetMultiInfoInOneLine(
-    const AutofillProfile* profile,
-    const AutofillType& type,
-    const std::string app_locale) {
+base::string16 GetInfoInOneLine(const AutofillProfile* profile,
+                                const AutofillType& type,
+                                const std::string app_locale) {
   std::vector<base::string16> results;
 
   AddressField address_field;
@@ -162,35 +158,10 @@ std::vector<base::string16> GetMultiInfoInOneLine(
     GetStreetAddressLinesAsSingleLine(
         *i18n::CreateAddressDataFromAutofillProfile(*profile, app_locale),
         &street_address_line);
-    results.push_back(base::UTF8ToUTF16(street_address_line));
-  } else {
-    profile->GetMultiInfo(type, app_locale, &results);
-  }
-  return results;
-}
-
-// Returns true if the current field contents match what's currently in the
-// form field. The current field contents must be already canonicalized. In
-// addition to doing a case-insensitive match, this will do special handling
-// for phone numbers.
-bool MatchesInput(const base::string16& profile_value,
-                  const base::string16& field_contents_canon,
-                  const AutofillType& type) {
-  base::string16 profile_value_canon =
-      AutofillProfile::CanonicalizeProfileString(profile_value);
-
-  if (profile_value_canon == field_contents_canon)
-    return true;
-
-  // Phone numbers could be split in US forms, so field value could be
-  // either prefix or suffix of the phone.
-  if (type.GetStorableType() == PHONE_HOME_NUMBER) {
-    return !field_contents_canon.empty() &&
-           profile_value_canon.find(field_contents_canon) !=
-               base::string16::npos;
+    return base::UTF8ToUTF16(street_address_line);
   }
 
-  return false;
+  return profile->GetInfo(type, app_locale);
 }
 
 // Receives the loaded profiles from the web data service and stores them in
@@ -421,7 +392,7 @@ bool PersonalDataManager::ImportFormData(
     types_seen.insert(server_field_type);
 
     if (group == CREDIT_CARD) {
-      if (LowerCaseEqualsASCII(field->form_control_type, "month")) {
+      if (base::LowerCaseEqualsASCII(field->form_control_type, "month")) {
         DCHECK_EQ(CREDIT_CARD_EXP_DATE_4_DIGIT_YEAR, server_field_type);
         local_imported_credit_card->SetInfoForMonthInputType(value);
       } else {
@@ -807,76 +778,30 @@ std::vector<Suggestion> PersonalDataManager::GetProfileSuggestions(
     const base::string16& field_contents,
     bool field_is_autofilled,
     const std::vector<ServerFieldType>& other_field_types) {
+  if (IsInAutofillSuggestionsDisabledExperiment())
+    return std::vector<Suggestion>();
+
   base::string16 field_contents_canon =
       AutofillProfile::CanonicalizeProfileString(field_contents);
 
   std::vector<AutofillProfile*> profiles = GetProfiles(true);
   std::sort(profiles.begin(), profiles.end(), RankByMfu);
 
-  if (field_is_autofilled) {
-    std::vector<Suggestion> suggestions;
-    // This field was previously autofilled. In this case, suggesting results
-    // based on prefix is useless since it will be the same thing. Instead,
-    // check for a field that may have multiple possible values (for example,
-    // multiple names for the same address) and suggest the alternates. This
-    // allows for easy correction of the data.
-    for (AutofillProfile* profile : profiles) {
-      std::vector<base::string16> values =
-          GetMultiInfoInOneLine(profile, type, app_locale_);
-
-      // Check if the contents of this field match any of the inputs.
-      bool matches_field = false;
-      for (const base::string16& value : values) {
-        if (MatchesInput(value, field_contents_canon, type)) {
-          matches_field = true;
-          break;
-        }
-      }
-
-      if (matches_field) {
-        // Field unmodified, make alternate suggestions.
-        for (size_t i = 0; i < values.size(); i++) {
-          if (values[i].empty())
-            continue;
-
-          bool is_unique = true;
-          for (size_t j = 0; j < suggestions.size(); ++j) {
-            if (values[i] == suggestions[j].value) {
-              is_unique = false;
-              break;
-            }
-          }
-          if (is_unique) {
-            suggestions.push_back(Suggestion(values[i]));
-            suggestions.back().backend_id.guid = profile->guid();
-            suggestions.back().backend_id.variant = i;
-          }
-        }
-      }
-    }
-
-    return suggestions;
-  }
-
   std::vector<Suggestion> suggestions;
   // Match based on a prefix search.
   std::vector<AutofillProfile*> matched_profiles;
   for (AutofillProfile* profile : profiles) {
-    std::vector<base::string16> values =
-        GetMultiInfoInOneLine(profile, type, app_locale_);
-    for (size_t i = 0; i < values.size(); i++) {
-      if (values[i].empty())
-        continue;
-
-      base::string16 value_canon =
-          AutofillProfile::CanonicalizeProfileString(values[i]);
-      if (StartsWith(value_canon, field_contents_canon, true)) {
-        // Prefix match, add suggestion.
-        matched_profiles.push_back(profile);
-        suggestions.push_back(Suggestion(values[i]));
-        suggestions.back().backend_id.guid = profile->guid();
-        suggestions.back().backend_id.variant = i;
-      }
+    base::string16 value = GetInfoInOneLine(profile, type, app_locale_);
+    if (value.empty())
+      continue;
+    base::string16 value_canon =
+        AutofillProfile::CanonicalizeProfileString(value);
+    if (base::StartsWith(value_canon, field_contents_canon,
+                         base::CompareCase::SENSITIVE)) {
+      // Prefix match, add suggestion.
+      matched_profiles.push_back(profile);
+      suggestions.push_back(Suggestion(value));
+      suggestions.back().backend_id = profile->guid();
     }
   }
 
@@ -927,13 +852,19 @@ std::vector<Suggestion> PersonalDataManager::GetProfileSuggestions(
 std::vector<Suggestion> PersonalDataManager::GetCreditCardSuggestions(
     const AutofillType& type,
     const base::string16& field_contents) {
+  if (IsInAutofillSuggestionsDisabledExperiment())
+    return std::vector<Suggestion>();
+
   std::list<const CreditCard*> cards_to_suggest;
+  base::string16 field_contents_lower = base::i18n::ToLower(field_contents);
   for (const CreditCard* credit_card : GetCreditCards()) {
     // The value of the stored data for this field type in the |credit_card|.
     base::string16 creditcard_field_value =
         credit_card->GetInfo(type, app_locale_);
     if (creditcard_field_value.empty())
       continue;
+    base::string16 creditcard_field_lower =
+        base::i18n::ToLower(creditcard_field_value);
 
     // For card number fields, suggest the card if:
     // - the number matches any part of the card, or
@@ -941,12 +872,14 @@ std::vector<Suggestion> PersonalDataManager::GetCreditCardSuggestions(
     // For other fields, require that the field contents match the beginning of
     // the stored data.
     if (type.GetStorableType() == CREDIT_CARD_NUMBER) {
-      if (creditcard_field_value.find(field_contents) == base::string16::npos &&
+      if (creditcard_field_lower.find(field_contents_lower) ==
+              base::string16::npos &&
           (credit_card->record_type() != CreditCard::MASKED_SERVER_CARD ||
            field_contents.size() >= 6)) {
         continue;
       }
-    } else if (!StartsWith(creditcard_field_value, field_contents, false)) {
+    } else if (!base::StartsWith(creditcard_field_lower, field_contents_lower,
+                                 base::CompareCase::SENSITIVE)) {
       continue;
     }
 
@@ -988,7 +921,7 @@ std::vector<Suggestion> PersonalDataManager::GetCreditCardSuggestions(
 
     suggestion->value = credit_card->GetInfo(type, app_locale_);
     suggestion->icon = base::UTF8ToUTF16(credit_card->type());
-    suggestion->backend_id.guid = credit_card->guid();
+    suggestion->backend_id = credit_card->guid();
 
     // If the value is the card number, the label is the expiration date.
     // Otherwise the label is the card number, or if that is empty the
@@ -1077,19 +1010,14 @@ std::string PersonalDataManager::MergeProfile(
   // If we have already saved this address, merge in any missing values.
   // Only merge with the first match.
   for (AutofillProfile* existing_profile : existing_profiles) {
-    if (!matching_profile_found &&
-        !new_profile.PrimaryValue().empty() &&
-        AutofillProfile::AreProfileStringsSimilar(
-            existing_profile->PrimaryValue(),
-            new_profile.PrimaryValue())) {
+    if (!matching_profile_found && !new_profile.PrimaryValue().empty() &&
+        existing_profile->SaveAdditionalInfo(new_profile, app_locale)) {
       // Unverified profiles should always be updated with the newer data,
       // whereas verified profiles should only ever be overwritten by verified
       // data.  If an automatically aggregated profile would overwrite a
       // verified profile, just drop it.
       matching_profile_found = true;
       guid = existing_profile->guid();
-      if (!existing_profile->IsVerified() || new_profile.IsVerified())
-        existing_profile->OverwriteWithOrAddTo(new_profile, app_locale);
     }
     merged_profiles->push_back(*existing_profile);
   }
@@ -1360,7 +1288,7 @@ std::string PersonalDataManager::MostCommonCountryCodeFromProfiles() const {
   std::vector<std::string> country_codes;
   AutofillCountry::GetAvailableCountries(&country_codes);
   for (size_t i = 0; i < profiles.size(); ++i) {
-    std::string country_code = StringToUpperASCII(base::UTF16ToASCII(
+    std::string country_code = base::StringToUpperASCII(base::UTF16ToASCII(
         profiles[i]->GetRawInfo(ADDRESS_HOME_COUNTRY)));
 
     if (std::find(country_codes.begin(), country_codes.end(), country_code) !=

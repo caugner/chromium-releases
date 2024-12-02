@@ -191,154 +191,110 @@ scoped_ptr<CreditCard> CreditCardFromStatement(const sql::Statement& s) {
 
 bool AddAutofillProfileNamesToProfile(sql::Connection* db,
                                       AutofillProfile* profile) {
+  // TODO(estade): update schema so that multiple names are not associated per
+  // unique profile guid. Please refer https://crbug.com/497934.
   sql::Statement s(db->GetUniqueStatement(
       "SELECT guid, first_name, middle_name, last_name, full_name "
       "FROM autofill_profile_names "
-      "WHERE guid=?"));
+      "WHERE guid=?"
+      "LIMIT 1"));
   s.BindString(0, profile->guid());
 
   if (!s.is_valid())
     return false;
 
-  std::vector<base::string16> first_names;
-  std::vector<base::string16> middle_names;
-  std::vector<base::string16> last_names;
-  std::vector<base::string16> full_names;
-  while (s.Step()) {
+  if (s.Step()) {
     DCHECK_EQ(profile->guid(), s.ColumnString(0));
-    first_names.push_back(s.ColumnString16(1));
-    middle_names.push_back(s.ColumnString16(2));
-    last_names.push_back(s.ColumnString16(3));
-    full_names.push_back(s.ColumnString16(4));
+    profile->SetRawInfo(NAME_FIRST, s.ColumnString16(1));
+    profile->SetRawInfo(NAME_MIDDLE, s.ColumnString16(2));
+    profile->SetRawInfo(NAME_LAST, s.ColumnString16(3));
+    profile->SetRawInfo(NAME_FULL, s.ColumnString16(4));
   }
-  if (!s.Succeeded())
-    return false;
-
-  profile->SetRawMultiInfo(NAME_FIRST, first_names);
-  profile->SetRawMultiInfo(NAME_MIDDLE, middle_names);
-  profile->SetRawMultiInfo(NAME_LAST, last_names);
-  profile->SetRawMultiInfo(NAME_FULL, full_names);
-  return true;
+  return s.Succeeded();
 }
 
 bool AddAutofillProfileEmailsToProfile(sql::Connection* db,
                                        AutofillProfile* profile) {
+  // TODO(estade): update schema so that multiple emails are not associated per
+  // unique profile guid. Please refer https://crbug.com/497934.
   sql::Statement s(db->GetUniqueStatement(
       "SELECT guid, email "
       "FROM autofill_profile_emails "
-      "WHERE guid=?"));
+      "WHERE guid=?"
+      "LIMIT 1"));
   s.BindString(0, profile->guid());
 
   if (!s.is_valid())
     return false;
 
-  std::vector<base::string16> emails;
-  while (s.Step()) {
+  if (s.Step()) {
     DCHECK_EQ(profile->guid(), s.ColumnString(0));
-    emails.push_back(s.ColumnString16(1));
+    profile->SetRawInfo(EMAIL_ADDRESS, s.ColumnString16(1));
   }
-  if (!s.Succeeded())
-    return false;
-
-  profile->SetRawMultiInfo(EMAIL_ADDRESS, emails);
-  return true;
+  return s.Succeeded();
 }
 
 bool AddAutofillProfilePhonesToProfile(sql::Connection* db,
                                        AutofillProfile* profile) {
+  // TODO(estade): update schema so that multiple phone numbers are not
+  // associated per unique profile guid. Please refer https://crbug.com/497934.
   sql::Statement s(db->GetUniqueStatement(
       "SELECT guid, number "
       "FROM autofill_profile_phones "
-      "WHERE guid=?"));
+      "WHERE guid=?"
+      "LIMIT 1"));
   s.BindString(0, profile->guid());
 
   if (!s.is_valid())
     return false;
 
-  std::vector<base::string16> numbers;
-  while (s.Step()) {
+  if (s.Step()) {
     DCHECK_EQ(profile->guid(), s.ColumnString(0));
-    numbers.push_back(s.ColumnString16(1));
+    profile->SetRawInfo(PHONE_HOME_WHOLE_NUMBER, s.ColumnString16(1));
   }
-  if (!s.Succeeded())
-    return false;
-
-  profile->SetRawMultiInfo(PHONE_HOME_WHOLE_NUMBER, numbers);
-  return true;
+  return s.Succeeded();
 }
 
 bool AddAutofillProfileNames(const AutofillProfile& profile,
                              sql::Connection* db) {
-  std::vector<base::string16> first_names;
-  profile.GetRawMultiInfo(NAME_FIRST, &first_names);
-  std::vector<base::string16> middle_names;
-  profile.GetRawMultiInfo(NAME_MIDDLE, &middle_names);
-  std::vector<base::string16> last_names;
-  profile.GetRawMultiInfo(NAME_LAST, &last_names);
-  std::vector<base::string16> full_names;
-  profile.GetRawMultiInfo(NAME_FULL, &full_names);
-  DCHECK_EQ(first_names.size(), middle_names.size());
-  DCHECK_EQ(first_names.size(), last_names.size());
-  DCHECK_EQ(first_names.size(), full_names.size());
+  // Add the new name.
+  sql::Statement s(db->GetUniqueStatement(
+      "INSERT INTO autofill_profile_names"
+      " (guid, first_name, middle_name, last_name, full_name) "
+      "VALUES (?,?,?,?,?)"));
+  s.BindString(0, profile.guid());
+  s.BindString16(1, profile.GetRawInfo(NAME_FIRST));
+  s.BindString16(2, profile.GetRawInfo(NAME_MIDDLE));
+  s.BindString16(3, profile.GetRawInfo(NAME_LAST));
+  s.BindString16(4, profile.GetRawInfo(NAME_FULL));
 
-  for (size_t i = 0; i < first_names.size(); ++i) {
-    // Add the new name.
-    sql::Statement s(db->GetUniqueStatement(
-        "INSERT INTO autofill_profile_names"
-        " (guid, first_name, middle_name, last_name, full_name) "
-        "VALUES (?,?,?,?,?)"));
-    s.BindString(0, profile.guid());
-    s.BindString16(1, first_names[i]);
-    s.BindString16(2, middle_names[i]);
-    s.BindString16(3, last_names[i]);
-    s.BindString16(4, full_names[i]);
-
-    if (!s.Run())
-      return false;
-  }
-  return true;
+  return s.Run();
 }
 
 bool AddAutofillProfileEmails(const AutofillProfile& profile,
                               sql::Connection* db) {
-  std::vector<base::string16> emails;
-  profile.GetRawMultiInfo(EMAIL_ADDRESS, &emails);
-
-  for (size_t i = 0; i < emails.size(); ++i) {
-    // Add the new email.
-    sql::Statement s(db->GetUniqueStatement(
+  // Add the new email.
+  sql::Statement s(db->GetUniqueStatement(
       "INSERT INTO autofill_profile_emails"
       " (guid, email) "
       "VALUES (?,?)"));
-    s.BindString(0, profile.guid());
-    s.BindString16(1, emails[i]);
+  s.BindString(0, profile.guid());
+  s.BindString16(1, profile.GetRawInfo(EMAIL_ADDRESS));
 
-    if (!s.Run())
-      return false;
-  }
-
-  return true;
+  return s.Run();
 }
 
 bool AddAutofillProfilePhones(const AutofillProfile& profile,
                               sql::Connection* db) {
-  std::vector<base::string16> numbers;
-  profile.GetRawMultiInfo(PHONE_HOME_WHOLE_NUMBER, &numbers);
-
-  for (size_t i = 0; i < numbers.size(); ++i) {
-    // Add the new number.
-    sql::Statement s(db->GetUniqueStatement(
+  // Add the new number.
+  sql::Statement s(db->GetUniqueStatement(
       "INSERT INTO autofill_profile_phones"
       " (guid, number) "
       "VALUES (?,?)"));
-    s.BindString(0, profile.guid());
-    s.BindString16(1, numbers[i]);
+  s.BindString(0, profile.guid());
+  s.BindString16(1, profile.GetRawInfo(PHONE_HOME_WHOLE_NUMBER));
 
-    if (!s.Run())
-      return false;
-  }
-
-  return true;
+  return s.Run();
 }
 
 bool AddAutofillProfilePieces(const AutofillProfile& profile,

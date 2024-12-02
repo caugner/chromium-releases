@@ -75,9 +75,11 @@ class BrowsingDataRemover
     REMOVE_CHANNEL_IDS = 1 << 12,
     REMOVE_CONTENT_LICENSES = 1 << 13,
     REMOVE_SERVICE_WORKERS = 1 << 14,
-#if defined(OS_ANDROID)
-    REMOVE_APP_BANNER_DATA = 1 << 15,
-#endif
+    REMOVE_SITE_USAGE_DATA = 1 << 15,
+    // REMOVE_NOCHECKS intentionally does not check if the Profile's prohibited
+    // from deleting history or downloads.
+    REMOVE_NOCHECKS = 1 << 16,
+    REMOVE_WEBRTC_IDENTITY = 1 << 17,
     // The following flag is used only in tests. In normal usage, hosted app
     // data is controlled by the REMOVE_COOKIES flag, applied to the
     // protected-web origin.
@@ -91,10 +93,9 @@ class BrowsingDataRemover
                        REMOVE_PLUGIN_DATA |
                        REMOVE_SERVICE_WORKERS |
                        REMOVE_WEBSQL |
-#if defined(OS_ANDROID)
-                       REMOVE_APP_BANNER_DATA |
-#endif
-                       REMOVE_CHANNEL_IDS,
+                       REMOVE_CHANNEL_IDS |
+                       REMOVE_SITE_USAGE_DATA |
+                       REMOVE_WEBRTC_IDENTITY,
 
     // Includes all the available remove options. Meant to be used by clients
     // that wish to wipe as much data as possible from a Profile, to make it
@@ -104,6 +105,11 @@ class BrowsingDataRemover
                  REMOVE_HISTORY |
                  REMOVE_PASSWORDS |
                  REMOVE_CONTENT_LICENSES,
+
+    // Includes all available remove options. Meant to be used when the Profile
+    // is scheduled to be deleted, and all possible data should be wiped from
+    // disk as soon as possible.
+    REMOVE_WIPE_PROFILE = REMOVE_ALL | REMOVE_NOCHECKS,
   };
 
   // When BrowsingDataRemover successfully removes data, a notification of type
@@ -114,7 +120,7 @@ class BrowsingDataRemover
     NotificationDetails(const NotificationDetails& details);
     NotificationDetails(base::Time removal_begin,
                        int removal_mask,
-                       int origin_set_mask);
+                       int origin_type_mask);
     ~NotificationDetails();
 
     // The beginning of the removal time range.
@@ -123,8 +129,9 @@ class BrowsingDataRemover
     // The removal mask (see the RemoveDataMask enum for details).
     int removal_mask;
 
-    // The origin set mask (see BrowsingDataHelper::OriginSetMask for details).
-    int origin_set_mask;
+    // The origin type mask (see BrowsingDataHelper::OriginTypeMask for
+    // details).
+    int origin_type_mask;
   };
 
   // Observer is notified when the removal is done. Done means keywords have
@@ -196,8 +203,8 @@ class BrowsingDataRemover
       const Callback& callback);
 
   // Removes the specified items related to browsing for all origins that match
-  // the provided |origin_set_mask| (see BrowsingDataHelper::OriginSetMask).
-  void Remove(int remove_mask, int origin_set_mask);
+  // the provided |origin_type_mask| (see BrowsingDataHelper::OriginTypeMask).
+  void Remove(int remove_mask, int origin_type_mask);
 
   void AddObserver(Observer* observer);
   void RemoveObserver(Observer* observer);
@@ -265,11 +272,11 @@ class BrowsingDataRemover
 
   // Removes the specified items related to browsing for a specific host. If the
   // provided |origin| is empty, data is removed for all origins. The
-  // |origin_set_mask| parameter defines the set of origins from which data
+  // |origin_type_mask| parameter defines the set of origins from which data
   // should be removed (protected, unprotected, or both).
   void RemoveImpl(int remove_mask,
                   const GURL& origin,
-                  int origin_set_mask);
+                  int origin_type_mask);
 
   // Notifies observers and deletes this object.
   void NotifyAndDelete();
@@ -323,6 +330,9 @@ class BrowsingDataRemover
   void ClearPnaclCacheOnIOThread(base::Time begin, base::Time end);
 #endif
 
+  // Callback for when passwords for the requested time range have been cleared.
+  void OnClearedPasswords();
+
   // Callback for when Cookies has been deleted. Invokes NotifyAndDeleteIfDone.
   void OnClearedCookies(int num_deleted);
 
@@ -355,6 +365,11 @@ class BrowsingDataRemover
 #if defined(ENABLE_WEBRTC)
   // Callback on UI thread when the WebRTC logs have been deleted.
   void OnClearedWebRtcLogs();
+#endif
+
+#if defined(OS_ANDROID)
+  // Callback on UI thread when the precache history has been cleared.
+  void OnClearedPrecacheHistory();
 #endif
 
   void OnClearedDomainReliabilityMonitor();
@@ -409,9 +424,13 @@ class BrowsingDataRemover
   bool waiting_for_clear_nacl_cache_;
   bool waiting_for_clear_network_predictor_;
   bool waiting_for_clear_networking_history_;
+  bool waiting_for_clear_passwords_;
   bool waiting_for_clear_platform_keys_;
   bool waiting_for_clear_plugin_data_;
   bool waiting_for_clear_pnacl_cache_;
+#if defined(OS_ANDROID)
+  bool waiting_for_clear_precache_history_;
+#endif
   bool waiting_for_clear_storage_partition_data_;
 #if defined(ENABLE_WEBRTC)
   bool waiting_for_clear_webrtc_logs_;
@@ -424,9 +443,9 @@ class BrowsingDataRemover
   GURL remove_origin_;
 
   // From which types of origins should we remove data?
-  int origin_set_mask_;
+  int origin_type_mask_;
 
-  ObserverList<Observer> observer_list_;
+  base::ObserverList<Observer> observer_list_;
 
   // Used if we need to clear history.
   base::CancelableTaskTracker history_task_tracker_;

@@ -15,13 +15,13 @@
 #include "base/mac/foundation_util.h"
 #include "base/mac/scoped_nsobject.h"
 #include "base/memory/weak_ptr.h"
-#include "base/message_loop/message_loop_proxy.h"
 #include "base/metrics/histogram.h"
 #include "base/observer_list.h"
 #include "base/sequenced_task_runner.h"
 #include "base/stl_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/task_runner_util.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/threading/thread_restrictions.h"
 #include "ios/net/cookies/cookie_creation_time_manager.h"
 #include "ios/net/cookies/cookie_store_ios_client.h"
@@ -60,7 +60,7 @@ class NotificationTrampoline {
   NotificationTrampoline();
   ~NotificationTrampoline();
 
-  ObserverList<CookieNotificationObserver> observer_list_;
+  base::ObserverList<CookieNotificationObserver> observer_list_;
 
   DISALLOW_COPY_AND_ASSIGN(NotificationTrampoline);
 
@@ -617,14 +617,12 @@ void CookieStoreIOS::OnSystemCookiePolicyChanged() {
   if (synchronization_state_ == NOT_SYNCHRONIZED)
     return;
 
-  // If the state is SYNCHRONIZING, this function will be a no-op because
-  // AddCookiesToSystemStore() will return early.
-
   NSHTTPCookieAcceptPolicy policy =
       [[NSHTTPCookieStorage sharedHTTPCookieStorage] cookieAcceptPolicy];
   if (policy == NSHTTPCookieAcceptPolicyAlways) {
     // If cookies are disabled, the system cookie store should be empty.
     DCHECK(![[[NSHTTPCookieStorage sharedHTTPCookieStorage] cookies] count]);
+    DCHECK(synchronization_state_ != SYNCHRONIZING);
     synchronization_state_ = SYNCHRONIZING;
     cookie_monster_->GetAllCookiesAsync(
         base::Bind(&CookieStoreIOS::AddCookiesToSystemStore, this));
@@ -636,6 +634,15 @@ void CookieStoreIOS::OnSystemCookiePolicyChanged() {
         [[NSHTTPCookieStorage sharedHTTPCookieStorage] cookies]);
     Flush(base::Closure());
     ClearSystemStore();
+    if (synchronization_state_ == SYNCHRONIZING) {
+      // If synchronization was in progress, abort it and leave the cookie store
+      // empty.
+      // Temporarily toggle the synchronization state so that pending tasks are
+      // redirected to cookie_monster_ and can complete normally.
+      synchronization_state_ = NOT_SYNCHRONIZED;
+      RunAllPendingTasks();
+      synchronization_state_ = SYNCHRONIZED;
+    }
   }
 }
 
@@ -681,6 +688,12 @@ void CookieStoreIOS::SetSynchronizedWithSystemStore(bool synchronized) {
     }
   }
   synchronization_state_ = synchronized ? SYNCHRONIZED : NOT_SYNCHRONIZED;
+
+  if (synchronization_state_ == NOT_SYNCHRONIZED) {
+    // If there are pending tasks, then it means that the synchronization is
+    // being canceled. All pending tasks can be sent to cookie_monster_.
+    RunAllPendingTasks();
+  }
 }
 
 bool CookieStoreIOS::SystemCookiesAllowed() {
@@ -692,10 +705,8 @@ bool CookieStoreIOS::SystemCookiesAllowed() {
 void CookieStoreIOS::AddCookiesToSystemStore(const net::CookieList& cookies) {
   DCHECK(thread_checker_.CalledOnValidThread());
   if (!SystemCookiesAllowed() || synchronization_state_ != SYNCHRONIZING) {
-    // The case where synchronization aborts while there are pending tasks is
-    // not supported.
-    // Note: it should be ok to drop the tasks here (at least if cookies are not
-    // allowed).
+    // If synchronization was aborted, the pending tasks have been processed at
+    // that time. Now is too late.
     DCHECK(tasks_pending_synchronization_.empty());
     return;
   }
@@ -721,11 +732,7 @@ void CookieStoreIOS::AddCookiesToSystemStore(const net::CookieList& cookies) {
   }
 
   synchronization_state_ = SYNCHRONIZED;
-  // Run all the pending tasks.
-  for (const auto& task : tasks_pending_synchronization_) {
-    task.Run();
-  }
-  tasks_pending_synchronization_.clear();
+  RunAllPendingTasks();
 }
 
 void CookieStoreIOS::WriteToCookieMonster(NSArray* system_cookies) {
@@ -747,6 +754,17 @@ void CookieStoreIOS::WriteToCookieMonster(NSArray* system_cookies) {
   // Update metrics.
   if (metrics_enabled_)
     UMA_HISTOGRAM_COUNTS_10000("CookieIOS.CookieWrittenCount", cookie_count);
+}
+
+void CookieStoreIOS::RunAllPendingTasks() {
+  // Executing the tasks while synchronizing would not run the tasks, but merely
+  // re-enqueue them. This function also does not support mutation of the queue
+  // during the iteration.
+  DCHECK(synchronization_state_ != SYNCHRONIZING);
+  for (const auto& task : tasks_pending_synchronization_) {
+    task.Run();
+  }
+  tasks_pending_synchronization_.clear();
 }
 
 void CookieStoreIOS::DeleteCookiesWithFilter(const CookieFilterFunction& filter,
@@ -798,7 +816,7 @@ void CookieStoreIOS::OnSystemCookiesChanged() {
 
   flush_closure_.Reset(base::Bind(&CookieStoreIOS::Flush,
                                   base::Unretained(this), base::Closure()));
-  base::MessageLoopProxy::current()->PostDelayedTask(
+  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
       FROM_HERE, flush_closure_.callback(), flush_delay_);
 }
 

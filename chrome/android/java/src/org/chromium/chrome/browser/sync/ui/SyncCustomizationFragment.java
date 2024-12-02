@@ -4,7 +4,6 @@
 
 package org.chromium.chrome.browser.sync.ui;
 
-import android.accounts.Account;
 import android.app.DialogFragment;
 import android.app.FragmentTransaction;
 import android.content.Intent;
@@ -28,7 +27,7 @@ import android.view.ViewGroup;
 
 import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.child_accounts.ChildAccountService;
+import org.chromium.chrome.browser.childaccounts.ChildAccountService;
 import org.chromium.chrome.browser.invalidation.InvalidationController;
 import org.chromium.chrome.browser.preferences.ChromeSwitchPreference;
 import org.chromium.chrome.browser.sync.ProfileSyncService;
@@ -36,7 +35,6 @@ import org.chromium.chrome.browser.sync.SyncController;
 import org.chromium.sync.AndroidSyncSettings;
 import org.chromium.sync.internal_api.pub.PassphraseType;
 import org.chromium.sync.internal_api.pub.base.ModelType;
-import org.chromium.sync.signin.AccountManagerHelper;
 
 import java.util.HashSet;
 import java.util.Set;
@@ -71,6 +69,8 @@ public class SyncCustomizationFragment extends PreferenceFragment implements
     @VisibleForTesting
     public static final String PREFERENCE_SYNC_RECENT_TABS = "sync_recent_tabs";
     @VisibleForTesting
+    public static final String PREFERENCE_SYNC_SETTINGS = "sync_settings";
+    @VisibleForTesting
     public static final String PREFERENCE_ENCRYPTION = "encryption";
     @VisibleForTesting
     public static final String PREF_SYNC_SWITCH = "sync_switch";
@@ -82,8 +82,8 @@ public class SyncCustomizationFragment extends PreferenceFragment implements
     private static final int ERROR_COLOR = Color.RED;
 
     private ChromeSwitchPreference mSyncSwitchPreference;
-    private AndroidSyncSettings mAndroidSyncSettings;
     private boolean mIsSyncInitialized;
+    private boolean mIsPassphraseRequired;
 
     @VisibleForTesting
     public static final String[] PREFS_TO_SAVE = {
@@ -93,6 +93,7 @@ public class SyncCustomizationFragment extends PreferenceFragment implements
         PREFERENCE_SYNC_OMNIBOX,
         PREFERENCE_SYNC_PASSWORDS,
         PREFERENCE_SYNC_RECENT_TABS,
+        PREFERENCE_SYNC_SETTINGS,
     };
 
     private static final String DASHBOARD_URL = "https://www.google.com/settings/chrome/sync";
@@ -103,6 +104,7 @@ public class SyncCustomizationFragment extends PreferenceFragment implements
     private CheckBoxPreference mSyncOmnibox;
     private CheckBoxPreference mSyncPasswords;
     private CheckBoxPreference mSyncRecentTabs;
+    private CheckBoxPreference mSyncSettings;
     private Preference mSyncEncryption;
     private Preference mManageSyncData;
     private CheckBoxPreference[] mAllTypes;
@@ -113,9 +115,10 @@ public class SyncCustomizationFragment extends PreferenceFragment implements
     @Override
     public View onCreateView(LayoutInflater inflater, ViewGroup container,
                              Bundle savedInstanceState) {
-        mAndroidSyncSettings = AndroidSyncSettings.get(getActivity());
         mProfileSyncService = ProfileSyncService.get(getActivity());
         mIsSyncInitialized = mProfileSyncService.isSyncInitialized();
+        mIsPassphraseRequired =
+                mIsSyncInitialized && mProfileSyncService.isPassphraseRequiredForDecryption();
 
         getActivity().setTitle(R.string.sign_in_sync);
 
@@ -127,21 +130,21 @@ public class SyncCustomizationFragment extends PreferenceFragment implements
         mSyncOmnibox = (CheckBoxPreference) findPreference(PREFERENCE_SYNC_OMNIBOX);
         mSyncPasswords = (CheckBoxPreference) findPreference(PREFERENCE_SYNC_PASSWORDS);
         mSyncRecentTabs = (CheckBoxPreference) findPreference(PREFERENCE_SYNC_RECENT_TABS);
+        mSyncSettings = (CheckBoxPreference) findPreference(PREFERENCE_SYNC_SETTINGS);
         mSyncEncryption = findPreference(PREFERENCE_ENCRYPTION);
         mSyncEncryption.setOnPreferenceClickListener(this);
         mManageSyncData = findPreference(PREFERENCE_SYNC_MANAGE_DATA);
         mManageSyncData.setOnPreferenceClickListener(this);
 
         mAllTypes = new CheckBoxPreference[]{
-            mSyncAutofill, mSyncBookmarks, mSyncOmnibox, mSyncPasswords, mSyncRecentTabs,
+            mSyncAutofill, mSyncBookmarks, mSyncOmnibox, mSyncPasswords,
+            mSyncRecentTabs, mSyncSettings
         };
 
         mSyncEverything.setOnPreferenceChangeListener(this);
         for (CheckBoxPreference type : mAllTypes) {
             type.setOnPreferenceChangeListener(this);
         }
-
-        ChildAccountService.getInstance(getActivity()).waitUntilFinished();
 
         mSyncSwitchPreference = (ChromeSwitchPreference) findPreference(PREF_SYNC_SWITCH);
         mSyncSwitchPreference.setOnPreferenceChangeListener(new OnPreferenceChangeListener() {
@@ -220,6 +223,8 @@ public class SyncCustomizationFragment extends PreferenceFragment implements
     public void onResume() {
         super.onResume();
         mIsSyncInitialized = mProfileSyncService.isSyncInitialized();
+        mIsPassphraseRequired =
+                mIsSyncInitialized && mProfileSyncService.isPassphraseRequiredForDecryption();
         // This prevents sync from actually syncing until the dialog is closed.
         mProfileSyncService.setSetupInProgress(true);
         mProfileSyncService.addSyncStateChangedListener(this);
@@ -235,7 +240,8 @@ public class SyncCustomizationFragment extends PreferenceFragment implements
         if (!getActivity().isChangingConfigurations()) {
             // Only save state if the switch and external state match. If a stop and clear comes
             // while the dialog is open, this will be false and settings won't be saved.
-            if (mSyncSwitchPreference.isChecked() && mAndroidSyncSettings.isSyncEnabled()) {
+            if (mSyncSwitchPreference.isChecked()
+                    && AndroidSyncSettings.isSyncEnabled(getActivity())) {
                 // Save the new data type state.
                 configureSyncDataTypes();
                 // Inform sync that the user has finished setting up sync at least once.
@@ -253,7 +259,7 @@ public class SyncCustomizationFragment extends PreferenceFragment implements
      * updateSyncStateFromSwitch, which uses that as its source of truth.
      */
     private void updateSyncState() {
-        boolean isSyncEnabled = mAndroidSyncSettings.isSyncEnabled();
+        boolean isSyncEnabled = AndroidSyncSettings.isSyncEnabled(getActivity());
         mSyncSwitchPreference.setChecked(isSyncEnabled);
         mSyncSwitchPreference.setEnabled(canDisableSync());
         updateSyncStateFromSwitch();
@@ -289,6 +295,9 @@ public class SyncCustomizationFragment extends PreferenceFragment implements
             closeDialogIfOpen(FRAGMENT_ENTER_PASSWORD);
             return;
         }
+        if (!mProfileSyncService.isPassphraseRequiredForDecryption()) {
+            closeDialogIfOpen(FRAGMENT_ENTER_PASSWORD);
+        }
         if (mProfileSyncService.isPassphraseRequiredForDecryption() && isAdded()) {
             mSyncEncryption.setSummary(
                     errorSummary(getString(R.string.sync_need_passphrase)));
@@ -312,8 +321,7 @@ public class SyncCustomizationFragment extends PreferenceFragment implements
         // Update the invalidation listener with the set of types we are enabling.
         InvalidationController invController =
                 InvalidationController.get(getActivity());
-        invController.setRegisteredTypes(getAccountArgument(), syncEverything,
-                mProfileSyncService.getPreferredDataTypes());
+        invController.ensureStartedAndUpdateRegisteredTypes();
     }
 
     private Set<ModelType> getSelectedModelTypes() {
@@ -323,6 +331,7 @@ public class SyncCustomizationFragment extends PreferenceFragment implements
         if (mSyncOmnibox.isChecked()) types.add(ModelType.TYPED_URL);
         if (mSyncPasswords.isChecked()) types.add(ModelType.PASSWORD);
         if (mSyncRecentTabs.isChecked()) types.add(ModelType.PROXY_TABS);
+        if (mSyncSettings.isChecked()) types.add(ModelType.PREFERENCE);
         return types;
     }
 
@@ -472,11 +481,6 @@ public class SyncCustomizationFragment extends PreferenceFragment implements
         startActivity(intent);
     }
 
-    private Account getAccountArgument() {
-        return AccountManagerHelper
-                .createAccountFromName(getArguments().getString(ARGUMENT_ACCOUNT));
-    }
-
     /**
      * Update the state of the sync everything switch.
      *
@@ -521,6 +525,9 @@ public class SyncCustomizationFragment extends PreferenceFragment implements
             mSyncPasswords.setChecked(passwordSyncConfigurable
                     && syncTypes.contains(ModelType.PASSWORD));
             mSyncRecentTabs.setChecked(syncTypes.contains(ModelType.PROXY_TABS));
+            // TODO(zea): Switch this to PREFERENCE once that datatype is
+            // supported on Android.
+            mSyncSettings.setChecked(syncTypes.contains(ModelType.PRIORITY_PREFERENCE));
         }
     }
 
@@ -533,8 +540,12 @@ public class SyncCustomizationFragment extends PreferenceFragment implements
     @Override
     public void syncStateChanged() {
         boolean wasSyncInitialized = mIsSyncInitialized;
+        boolean wasPassphraseRequired = mIsPassphraseRequired;
         mIsSyncInitialized = mProfileSyncService.isSyncInitialized();
-        if (mIsSyncInitialized != wasSyncInitialized) {
+        mIsPassphraseRequired =
+                mIsSyncInitialized && mProfileSyncService.isPassphraseRequiredForDecryption();
+        if (mIsSyncInitialized != wasSyncInitialized
+                || mIsPassphraseRequired != wasPassphraseRequired) {
             // Update all because Password syncability is also affected by the backend.
             updateSyncStateFromSwitch();
         }

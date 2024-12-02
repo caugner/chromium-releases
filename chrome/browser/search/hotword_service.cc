@@ -8,12 +8,15 @@
 
 #include "base/command_line.h"
 #include "base/i18n/case_conversion.h"
+#include "base/location.h"
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
 #include "base/metrics/sparse_histogram.h"
 #include "base/path_service.h"
 #include "base/prefs/pref_service.h"
+#include "base/single_thread_task_runner.h"
+#include "base/thread_task_runner_handle.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/api/hotword_private/hotword_private_api.h"
@@ -205,9 +208,6 @@ std::string GetCurrentLocale(Profile* profile) {
 }  // namespace
 
 namespace hotword_internal {
-// Constants for the hotword field trial.
-const char kHotwordFieldTrialName[] = "VoiceTrigger";
-const char kHotwordFieldTrialDisabledGroupName[] = "Disabled";
 // String passed to indicate the training state has changed.
 const char kHotwordTrainingEnabled[] = "hotword_training_enabled";
 // Id of the hotword notification.
@@ -373,17 +373,15 @@ HotwordService::HotwordService(Profile* profile)
     // for the hotword extension to be installed.
     base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
     if (command_line->HasSwitch(switches::kEnableExperimentalHotwordHardware)) {
-      base::MessageLoop::current()->PostDelayedTask(
-          FROM_HERE,
-          base::Bind(&HotwordService::ShowHotwordNotification,
-                     weak_factory_.GetWeakPtr()),
+      base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+          FROM_HERE, base::Bind(&HotwordService::ShowHotwordNotification,
+                                weak_factory_.GetWeakPtr()),
           base::TimeDelta::FromSeconds(5));
     } else if (!profile_->GetPrefs()->GetBoolean(
                    prefs::kHotwordAlwaysOnNotificationSeen)) {
-      base::MessageLoop::current()->PostDelayedTask(
-          FROM_HERE,
-          base::Bind(&HotwordService::ShowHotwordNotification,
-                     weak_factory_.GetWeakPtr()),
+      base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+          FROM_HERE, base::Bind(&HotwordService::ShowHotwordNotification,
+                                weak_factory_.GetWeakPtr()),
           base::TimeDelta::FromMinutes(10));
     }
   }
@@ -643,13 +641,6 @@ bool HotwordService::IsServiceAvailable() {
 
 bool HotwordService::IsHotwordAllowed() {
 #if defined(ENABLE_HOTWORDING)
-  std::string group = base::FieldTrialList::FindFullName(
-      hotword_internal::kHotwordFieldTrialName);
-  // Allow hotwording by default, and only disable if the field trial has been
-  // set.
-  if (group == hotword_internal::kHotwordFieldTrialDisabledGroupName)
-    return false;
-
   return DoesHotwordSupportLanguage(profile_);
 #else
   return false;
@@ -687,6 +678,12 @@ void HotwordService::SpeakerModelExistsComplete(bool exists) {
 
 void HotwordService::OptIntoHotwording(
     const LaunchMode& launch_mode) {
+  // If the notification is in the notification tray, remove it (since the user
+  // is manually opting in to hotwording, they do not need the promotion).
+  g_browser_process->notification_ui_manager()->CancelById(
+      hotword_internal::kHotwordNotificationId,
+      NotificationUIManager::GetProfileID(profile_));
+
   // First determine if we actually need to launch the app, or can just enable
   // the pref. If Audio History has already been enabled, and we already have
   // a speaker model, then we don't need to launch the app at all.

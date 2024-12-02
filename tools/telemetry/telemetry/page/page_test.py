@@ -2,6 +2,9 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import logging
+
+from telemetry.core import exceptions
 from telemetry.page import action_runner as action_runner_module
 from telemetry.page import test_expectations
 
@@ -121,17 +124,6 @@ class PageTest(object):
   def CustomizeBrowserOptions(self, options):
     """Override to add test-specific options to the BrowserOptions object"""
 
-  def CustomizeBrowserOptionsForSinglePage(self, page, options):
-    """Set options specific to the test and the given page.
-
-    This will be called with the current page when the browser is (re)started.
-    Changing options at this point only makes sense if the browser is being
-    restarted for each page. Note that if page has a startup_url, the browser
-    will always be restarted for each run.
-    """
-    if page.startup_url:
-      options.browser_options.startup_url = page.startup_url
-
   def WillStartBrowser(self, platform):
     """Override to manipulate the browser environment before it launches."""
 
@@ -164,7 +156,17 @@ class PageTest(object):
   def TabForPage(self, page, browser):   # pylint: disable=W0613
     """Override to select a different tab for the page.  For instance, to
     create a new tab for every page, return browser.tabs.New()."""
-    return browser.tabs[0]
+    try:
+      return browser.tabs[0]
+    # The tab may have gone away in some case, so we create a new tab and retry
+    # (See crbug.com/496280)
+    except exceptions.DevtoolsTargetCrashException as e:
+      logging.error('Tab may have crashed: %s' % str(e))
+      browser.tabs.New()
+      # See comment in shared_page_state.WillRunStory for why this waiting
+      # is needed.
+      browser.tabs[0].WaitForDocumentReadyStateToBeComplete()
+      return browser.tabs[0]
 
   def ValidateAndMeasurePage(self, page, tab, results):
     """Override to check test assertions and perform measurement.
@@ -192,13 +194,7 @@ class PageTest(object):
     """
     raise NotImplementedError
 
-  def RunPage(self, page, tab, results):
-    # Run actions.
-    action_runner = action_runner_module.ActionRunner(
-        tab, skip_waits=page.skip_waits)
-    page.RunPageInteractions(action_runner)
-    self.ValidateAndMeasurePage(page, tab, results)
-
+  # Deprecated: do not use this hook. (crbug.com/470147)
   def RunNavigateSteps(self, page, tab):
     """Navigates the tab to the page URL attribute.
 

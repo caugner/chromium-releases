@@ -19,6 +19,7 @@
 #include "ui/gfx/path.h"
 #include "ui/resources/grit/ui_resources.h"
 #include "ui/views/controls/image_view.h"
+#include "ui/views/resources/grit/views_resources.h"
 #include "ui/views/view_targeter.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/window/non_client_view.h"
@@ -149,9 +150,7 @@ void OmniboxPopupContentsView::InvalidateLine(size_t line) {
 }
 
 void OmniboxPopupContentsView::UpdatePopupAppearance() {
-  const size_t hidden_matches = model_->result().ShouldHideTopMatch() ? 1 : 0;
-  if (model_->result().size() <= hidden_matches ||
-      omnibox_view_->IsImeShowingPopup()) {
+  if (model_->result().empty() || omnibox_view_->IsImeShowingPopup()) {
     // No matches or the IME is showing a popup window which may overlap
     // the omnibox popup window.  Close any existing popup.
     if (popup_ != NULL) {
@@ -175,7 +174,11 @@ void OmniboxPopupContentsView::UpdatePopupAppearance() {
     OmniboxResultView* view = result_view_at(i);
     const AutocompleteMatch& match = GetMatchAtIndex(i);
     view->SetMatch(match);
-    view->SetVisible(i >= hidden_matches);
+    view->SetVisible(true);
+    if (match.answer && !model_->answer_bitmap().isNull()) {
+      view->SetAnswerImage(
+          gfx::ImageSkia::CreateFrom1xBitmap(model_->answer_bitmap()));
+    }
     if (match.type == AutocompleteMatchType::SEARCH_SUGGEST_TAIL) {
       max_match_contents_width_ = std::max(
           max_match_contents_width_, view->GetMatchContentsWidth());
@@ -205,7 +208,18 @@ void OmniboxPopupContentsView::UpdatePopupAppearance() {
 
     // If the popup is currently closed, we need to create it.
     popup_ = (new AutocompletePopupWidget)->AsWeakPtr();
+    // On Windows use TYPE_MENU to ensure that this window uses the software
+    // compositor which avoids the UI thread blocking issue during command
+    // buffer creation. We can revert this change once http://crbug.com/125248
+    // is fixed.
+#if defined(OS_WIN)
+    views::Widget::InitParams params(views::Widget::InitParams::TYPE_MENU);
+    // The menu style assumes a top most window. We don't want that in this
+    // case.
+    params.keep_on_top = false;
+#else
     views::Widget::InitParams params(views::Widget::InitParams::TYPE_POPUP);
+#endif
     params.opacity = views::Widget::InitParams::TRANSLUCENT_WINDOW;
     params.parent = popup_parent->GetNativeView();
     params.bounds = GetPopupBounds();
@@ -375,8 +389,7 @@ void OmniboxPopupContentsView::OnGestureEvent(ui::GestureEvent* event) {
 int OmniboxPopupContentsView::CalculatePopupHeight() {
   DCHECK_GE(static_cast<size_t>(child_count()), model_->result().size());
   int popup_height = 0;
-  for (size_t i = model_->result().ShouldHideTopMatch() ? 1 : 0;
-       i < model_->result().size(); ++i)
+  for (size_t i = 0; i < model_->result().size(); ++i)
     popup_height += child_at(i)->GetPreferredSize().height();
 
   // Add enough space on the top and bottom so it looks like there is the same
@@ -424,7 +437,7 @@ void OmniboxPopupContentsView::PaintChildren(const ui::PaintContext& context) {
   ui::ClipTransformRecorder clip_transform_recorder(context);
   clip_transform_recorder.ClipRect(contents_bounds);
   {
-    ui::PaintRecorder recorder(context);
+    ui::PaintRecorder recorder(context, size());
     SkColor background_color = result_view_at(0)->GetColor(
         OmniboxResultView::NORMAL, OmniboxResultView::BACKGROUND);
     recorder.canvas()->DrawColor(background_color);

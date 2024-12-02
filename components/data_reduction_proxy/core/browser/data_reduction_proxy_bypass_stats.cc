@@ -5,7 +5,7 @@
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_bypass_stats.h"
 
 #include "base/callback.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/metrics/sparse_histogram.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_config.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_tamper_detection.h"
@@ -20,7 +20,6 @@
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context.h"
 
-using base::MessageLoopProxy;
 using net::HostPortPair;
 using net::ProxyServer;
 using net::ProxyService;
@@ -260,13 +259,16 @@ void DataReductionProxyBypassStats::RecordBypassedBytesHistograms(
                         DataReductionProxyBypassStats::NOT_BYPASSED,
                         content_length);
 
-    // If non-empty, |proxy_server.first| is the proxy that this request used.
-    const net::ProxyServer& first =
-        data_reduction_proxy_type_info.proxy_servers.first;
-    if (first.is_valid() && !first.host_port_pair().IsEmpty()) {
+    if (data_reduction_proxy_type_info.proxy_servers.empty())
+      return;
+
+    // Obtain the proxy that this request used.
+    const net::ProxyServer& proxy =
+        data_reduction_proxy_type_info.proxy_servers.front();
+    if (proxy.is_valid() && !proxy.host_port_pair().IsEmpty()) {
       DataReductionProxyTamperDetection::DetectAndReport(
           request.response_info().headers.get(),
-          first.is_https() || first.is_quic(), content_length);
+          proxy.is_https() || proxy.is_quic(), content_length);
     }
     return;
   }
@@ -281,7 +283,7 @@ void DataReductionProxyBypassStats::RecordBypassedBytesHistograms(
   // Now that the data reduction proxy is a best effort proxy, if the effective
   // proxy configuration resolves to anything other than direct:// for a URL,
   // the data reduction proxy will not be used.
-  DCHECK(!data_reduction_proxy_type_info.proxy_servers.first.is_valid());
+  DCHECK(data_reduction_proxy_type_info.proxy_servers.empty());
   if (!request.proxy_server().IsEmpty()) {
     RecordBypassedBytes(last_bypass_type_,
                         DataReductionProxyBypassStats::PROXY_OVERRIDDEN,

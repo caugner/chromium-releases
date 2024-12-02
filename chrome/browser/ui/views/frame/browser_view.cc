@@ -9,11 +9,14 @@
 #include "base/auto_reset.h"
 #include "base/command_line.h"
 #include "base/i18n/rtl.h"
+#include "base/location.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
 #include "base/profiler/scoped_tracker.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/thread_task_runner_handle.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/app/chrome_dll_resource.h"
 #include "chrome/browser/app_mode/app_mode_utils.h"
@@ -49,7 +52,6 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window_state.h"
 #include "chrome/browser/ui/omnibox/omnibox_popup_model.h"
-#include "chrome/browser/ui/omnibox/omnibox_popup_view.h"
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
 #include "chrome/browser/ui/search/search_delegate.h"
 #include "chrome/browser/ui/search/search_model.h"
@@ -105,6 +107,7 @@
 #include "components/app_modal/app_modal_dialog.h"
 #include "components/app_modal/app_modal_dialog_queue.h"
 #include "components/app_modal/native_app_modal_dialog.h"
+#include "components/omnibox/browser/omnibox_popup_view.h"
 #include "components/signin/core/common/profile_management_switches.h"
 #include "components/translate/core/browser/language_state.h"
 #include "content/app/resources/grit/content_resources.h"
@@ -458,8 +461,8 @@ BrowserView::BrowserView()
       initialized_(false),
       in_process_fullscreen_(false),
 #if defined(OS_WIN)
-      hung_window_detector_(&hung_plugin_action_),
       ticker_(0),
+      hung_window_detector_(&hung_plugin_action_),
 #endif
       force_location_bar_focus_(false),
       activate_modal_dialog_factory_(this) {
@@ -867,14 +870,11 @@ void BrowserView::OnActiveTabChanged(content::WebContents* old_contents,
       InfoBarService::FromWebContents(new_contents));
 
   if (old_contents && PermissionBubbleManager::FromWebContents(old_contents))
-    PermissionBubbleManager::FromWebContents(old_contents)->SetView(nullptr);
+    PermissionBubbleManager::FromWebContents(old_contents)->HideBubble();
 
   if (new_contents && PermissionBubbleManager::FromWebContents(new_contents)) {
-    if (!permission_bubble_.get())
-      permission_bubble_.reset(new PermissionBubbleViewViews(browser_.get()));
-
-    PermissionBubbleManager::FromWebContents(new_contents)->SetView(
-        permission_bubble_.get());
+    PermissionBubbleManager::FromWebContents(new_contents)
+        ->DisplayPendingRequests(browser_.get());
   }
 
   UpdateUIForContents(new_contents);
@@ -1559,7 +1559,7 @@ void BrowserView::TabInsertedAt(WebContents* contents,
 
 void BrowserView::TabDetachedAt(WebContents* contents, int index) {
   if (PermissionBubbleManager::FromWebContents(contents))
-    PermissionBubbleManager::FromWebContents(contents)->SetView(nullptr);
+    PermissionBubbleManager::FromWebContents(contents)->HideBubble();
 
   // We use index here rather than comparing |contents| because by this time
   // the model has already removed |contents| from its list, so
@@ -1577,7 +1577,7 @@ void BrowserView::TabDetachedAt(WebContents* contents, int index) {
 
 void BrowserView::TabDeactivated(WebContents* contents) {
   if (PermissionBubbleManager::FromWebContents(contents))
-    PermissionBubbleManager::FromWebContents(contents)->SetView(nullptr);
+    PermissionBubbleManager::FromWebContents(contents)->HideBubble();
 
   // We do not store the focus when closing the tab to work-around bug 4633.
   // Some reports seem to show that the focus manager and/or focused view can
@@ -1642,10 +1642,9 @@ bool BrowserView::CanActivate() const {
   // has to be done in a post task, otherwise if the user clicked on a window
   // that doesn't have the modal dialog the windows keep trying to get the focus
   // from each other on Windows. http://crbug.com/141650.
-  base::MessageLoop::current()->PostTask(
-      FROM_HERE,
-      base::Bind(&BrowserView::ActivateAppModalDialog,
-                 activate_modal_dialog_factory_.GetWeakPtr()));
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::Bind(&BrowserView::ActivateAppModalDialog,
+                            activate_modal_dialog_factory_.GetWeakPtr()));
 #endif
   return false;
 }
@@ -2323,8 +2322,9 @@ void BrowserView::ProcessFullscreen(bool fullscreen,
   in_process_fullscreen_ = false;
   ToolbarSizeChanged(false);
 
-  if (permission_bubble_.get())
-    permission_bubble_->UpdateAnchorPosition();
+  WebContents* contents = browser_->tab_strip_model()->GetActiveWebContents();
+  if (contents && PermissionBubbleManager::FromWebContents(contents))
+    PermissionBubbleManager::FromWebContents(contents)->UpdateAnchorPosition();
 }
 
 bool BrowserView::ShouldUseImmersiveFullscreenForUrl(const GURL& url) const {

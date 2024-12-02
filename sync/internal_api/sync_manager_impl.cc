@@ -88,7 +88,6 @@ SyncManagerImpl::SyncManagerImpl(const std::string& name)
       change_delegate_(NULL),
       initialized_(false),
       observing_network_connectivity_changes_(false),
-      report_unrecoverable_error_function_(NULL),
       weak_ptr_factory_(this) {
   // Pre-fill |notification_info_map_|.
   for (int i = FIRST_REAL_MODEL_TYPE; i < MODEL_TYPE_COUNT; ++i) {
@@ -250,10 +249,8 @@ void SyncManagerImpl::Init(InitArgs* args) {
   allstatus_.SetHasKeystoreKey(
       !args->restored_keystore_key_for_bootstrapping.empty());
   sync_encryption_handler_.reset(new SyncEncryptionHandlerImpl(
-      &share_,
-      args->encryptor,
-      args->restored_key_for_bootstrapping,
-      args->restored_keystore_key_for_bootstrapping));
+      &share_, args->encryptor, args->restored_key_for_bootstrapping,
+      args->restored_keystore_key_for_bootstrapping, args->clear_data_option));
   sync_encryption_handler_->AddObserver(this);
   sync_encryption_handler_->AddObserver(&debug_info_event_listener_);
   sync_encryption_handler_->AddObserver(&js_sync_encryption_handler_observer_);
@@ -286,6 +283,13 @@ void SyncManagerImpl::Init(InitArgs* args) {
     NotifyInitializationFailure();
     LOG(ERROR) << "Sync manager initialization failed!";
     return;
+  }
+
+  // Now that we have opened the Directory we can restore any previously saved
+  // nigori specifics.
+  if (args->saved_nigori_state) {
+    sync_encryption_handler_->RestoreNigori(*args->saved_nigori_state);
+    args->saved_nigori_state.reset();
   }
 
   connection_manager_.reset(new SyncAPIServerConnectionManager(
@@ -403,6 +407,10 @@ void SyncManagerImpl::OnPassphraseTypeChanged(
   allstatus_.SetPassphraseType(type);
   allstatus_.SetKeystoreMigrationTime(
       sync_encryption_handler_->migration_time());
+}
+
+void SyncManagerImpl::OnLocalSetPassphraseEncryption(
+    const SyncEncryptionHandler::NigoriState& nigori_state) {
 }
 
 void SyncManagerImpl::StartSyncingNormally(

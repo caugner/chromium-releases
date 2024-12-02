@@ -6,13 +6,14 @@
 
 #include <vector>
 
+#include "base/i18n/case_conversion.h"
 #include "base/lazy_instance.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_util.h"
 #include "components/autofill/content/renderer/form_autofill_util.h"
-#include "components/autofill/core/common/form_data_predictions.h"
 #include "components/autofill/core/common/password_form.h"
+#include "components/autofill/core/common/password_form_field_prediction_map.h"
 #include "third_party/WebKit/public/platform/WebString.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
 #include "third_party/WebKit/public/web/WebFormControlElement.h"
@@ -100,8 +101,8 @@ PasswordForm::Layout SequenceToLayout(base::StringPiece layout_sequence) {
 // |element| is present and has the specified |value_in_lowercase|.
 bool HasAutocompleteAttributeValue(const WebInputElement& element,
                                    const char* value_in_lowercase) {
-  return LowerCaseEqualsASCII(element.getAttribute("autocomplete"),
-                              value_in_lowercase);
+  return base::LowerCaseEqualsASCII(element.getAttribute("autocomplete"),
+                                    value_in_lowercase);
 }
 
 // Helper to determine which password is the main (current) one, and which is
@@ -185,12 +186,13 @@ bool LocateSpecificPasswords(std::vector<WebInputElement> passwords,
   return true;
 }
 
-void FindPredictedUsernameElement(
+void FindPredictedElements(
     const WebFormElement& form,
-    const std::map<autofill::FormData, autofill::FormFieldData>&
-        form_predictions,
+    const std::map<autofill::FormData,
+                   autofill::PasswordFormFieldPredictionMap>& form_predictions,
     WebVector<WebFormControlElement>* control_elements,
-    WebInputElement* predicted_username_element) {
+    std::map<autofill::PasswordFormFieldPredictionType, WebInputElement>*
+        predicted_elements) {
   FormData form_data;
   if (!WebFormElementToFormData(form, WebFormControlElement(), EXTRACT_NONE,
                                 &form_data, nullptr)) {
@@ -215,15 +217,23 @@ void FindPredictedUsernameElement(
   std::vector<blink::WebFormControlElement> autofillable_elements =
       ExtractAutofillableElementsFromSet(*control_elements);
 
-  const autofill::FormFieldData& username_field = predictions_iterator->second;
-  for (size_t i = 0; i < autofillable_elements.size(); ++i) {
-    if (autofillable_elements[i].nameForAutofill() == username_field.name) {
-      WebInputElement* input_element =
-          toWebInputElement(&autofillable_elements[i]);
-      if (input_element) {
-        *predicted_username_element = *input_element;
+  const autofill::PasswordFormFieldPredictionMap& field_predictions =
+      predictions_iterator->second;
+  for (autofill::PasswordFormFieldPredictionMap::const_iterator prediction =
+           field_predictions.begin();
+       prediction != field_predictions.end(); ++prediction) {
+    const autofill::PasswordFormFieldPredictionType& type = prediction->first;
+    const autofill::FormFieldData& target_field = prediction->second;
+
+    for (size_t i = 0; i < autofillable_elements.size(); ++i) {
+      if (autofillable_elements[i].nameForAutofill() == target_field.name) {
+        WebInputElement* input_element =
+            toWebInputElement(&autofillable_elements[i]);
+        if (input_element) {
+          (*predicted_elements)[type] = *input_element;
+        }
+        break;
       }
-      break;
     }
   }
 }
@@ -237,7 +247,8 @@ void GetPasswordForm(
     PasswordForm* password_form,
     const std::map<const blink::WebInputElement, blink::WebString>*
         nonscript_modified_values,
-    const std::map<autofill::FormData, autofill::FormFieldData>*
+    const std::map<autofill::FormData,
+                   autofill::PasswordFormFieldPredictionMap>*
         form_predictions) {
   WebInputElement latest_input_element;
   WebInputElement username_element;
@@ -340,24 +351,25 @@ void GetPasswordForm(
   }
   password_form->layout = SequenceToLayout(layout_sequence);
 
-  WebInputElement predicted_username_element;
+  std::map<autofill::PasswordFormFieldPredictionType, WebInputElement>
+      predicted_elements;
   if (form_predictions) {
-    FindPredictedUsernameElement(form, *form_predictions, &control_elements,
-                                 &predicted_username_element);
+    FindPredictedElements(form, *form_predictions, &control_elements,
+                          &predicted_elements);
   }
   // Let server predictions override the selection of the username field. This
   // allows instant adjusting without changing Chromium code.
-  if (!predicted_username_element.isNull() &&
-      username_element != predicted_username_element) {
+  if (!predicted_elements[autofill::PREDICTION_USERNAME].isNull() &&
+      username_element != predicted_elements[autofill::PREDICTION_USERNAME]) {
     auto it =
         find(other_possible_usernames.begin(), other_possible_usernames.end(),
-             predicted_username_element.value());
+             predicted_elements[autofill::PREDICTION_USERNAME].value());
     if (it != other_possible_usernames.end())
       other_possible_usernames.erase(it);
     if (!username_element.isNull()) {
       other_possible_usernames.push_back(username_element.value());
     }
-    username_element = predicted_username_element;
+    username_element = predicted_elements[autofill::PREDICTION_USERNAME];
     password_form->was_parsed_using_autofill_predictions = true;
   }
 
@@ -369,7 +381,10 @@ void GetPasswordForm(
         nonscript_modified_values->find(username_element);
       if (username_iterator != nonscript_modified_values->end()) {
         base::string16 typed_username_value = username_iterator->second;
-        if (!StartsWith(username_value, typed_username_value, false)) {
+        if (!base::StartsWith(
+                base::i18n::ToLower(username_value),
+                base::i18n::ToLower(typed_username_value),
+                base::CompareCase::SENSITIVE)) {
           // We check that |username_value| was not obtained by autofilling
           // |typed_username_value|. In case when it was, |typed_username_value|
           // is incomplete, so we should leave autofilled value.
@@ -405,7 +420,6 @@ void GetPasswordForm(
         password_value = password_iterator->second;
     }
     password_form->password_value = password_value;
-    password_form->password_autocomplete_set = password.autoComplete();
   }
   if (!new_password.isNull()) {
     password_form->new_password_element = new_password.nameForAutofill();
@@ -420,6 +434,10 @@ void GetPasswordForm(
     UMA_HISTOGRAM_COUNTS_100(
         "PasswordManager.EmptyUsernames.TextAndPasswordFieldCount",
         layout_sequence.size());
+    // For comparison, also report the number of password fields.
+    UMA_HISTOGRAM_COUNTS_100(
+        "PasswordManager.EmptyUsernames.PasswordFieldCount",
+        std::count(layout_sequence.begin(), layout_sequence.end(), 'P'));
   }
 
   password_form->scheme = PasswordForm::SCHEME_HTML;
@@ -459,7 +477,8 @@ scoped_ptr<PasswordForm> CreatePasswordForm(
     const WebFormElement& web_form,
     const std::map<const blink::WebInputElement, blink::WebString>*
         nonscript_modified_values,
-    const std::map<autofill::FormData, autofill::FormFieldData>*
+    const std::map<autofill::FormData,
+                   autofill::PasswordFormFieldPredictionMap>*
         form_predictions) {
   if (web_form.isNull())
     return scoped_ptr<PasswordForm>();

@@ -15,11 +15,11 @@ import os
 import sys
 
 from telemetry import benchmark
-from telemetry.core import browser_finder
-from telemetry.core import browser_options
-from telemetry.core import command_line
 from telemetry.core import discover
 from telemetry import decorators
+from telemetry.internal.browser import browser_finder
+from telemetry.internal.browser import browser_options
+from telemetry.internal.util import command_line
 
 
 def PrintBenchmarkList(benchmarks, possible_browser, output_pipe=sys.stdout):
@@ -66,7 +66,6 @@ def PrintBenchmarkList(benchmarks, possible_browser, output_pipe=sys.stdout):
       'Pass --browser to list benchmarks for another browser.')
   print >> output_pipe
 
-
 def GetMostLikelyMatchedBenchmarks(all_benchmarks, input_benchmark_name):
   """ Returns the list of benchmarks whose name most likely matched with
     |input_benchmark_name|.
@@ -93,11 +92,12 @@ def GetMostLikelyMatchedBenchmarks(all_benchmarks, input_benchmark_name):
                         reverse=True)
   return ordered_list
 
-class Environment(object):
+
+class ProjectConfig(object):
   """Contains information about the benchmark runtime environment.
 
   Attributes:
-    top_level_dir: A dir that contains benchmark, page test, and/or user story
+    top_level_dir: A dir that contains benchmark, page test, and/or story
         set dirs and associated artifacts.
     benchmark_dirs: A list of dirs containing benchmarks.
     benchmark_aliases: A dict of name:alias string pairs to be matched against

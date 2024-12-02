@@ -6,6 +6,7 @@
 
 #include <algorithm>
 
+#include "base/command_line.h"
 #include "base/json/json_reader.h"
 #include "base/metrics/histogram.h"
 #include "base/prefs/scoped_user_pref_update.h"
@@ -16,6 +17,7 @@
 #include "chrome/browser/prefs/pref_service_syncable.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/session_tab_helper.h"
+#include "chrome/browser/task_management/web_contents_tags.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_iterator.h"
@@ -171,6 +173,23 @@ BrowserWindow* DevToolsToolboxDelegate::GetInspectedBrowserWindow() {
     return browser->window();
   return NULL;
 }
+
+// static
+GURL DecorateFrontendURL(const GURL& base_url) {
+  std::string frontend_url = base_url.spec();
+  std::string url_string(
+      frontend_url +
+      ((frontend_url.find("?") == std::string::npos) ? "?" : "&") +
+      "dockSide=undocked"); // TODO(dgozman): remove this support in M38.
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableDevToolsExperiments))
+    url_string += "&experiments=true";
+#if defined(DEBUG_DEVTOOLS)
+  url_string += "&debugFrontend=true";
+#endif  // defined(DEBUG_DEVTOOLS)
+  return GURL(url_string);
+}
+
 }  // namespace
 
 // DevToolsEventForwarder -----------------------------------------------------
@@ -200,7 +219,7 @@ class DevToolsEventForwarder {
 
 void DevToolsEventForwarder::SetWhitelistedShortcuts(
     const std::string& message) {
-  scoped_ptr<base::Value> parsed_message(base::JSONReader::Read(message));
+  scoped_ptr<base::Value> parsed_message = base::JSONReader::Read(message);
   base::ListValue* shortcut_list;
   if (!parsed_message->GetAsList(&shortcut_list))
       return;
@@ -698,6 +717,11 @@ DevToolsWindow::DevToolsWindow(Profile* profile,
   }
 
   event_forwarder_.reset(new DevToolsEventForwarder(this));
+
+  // Tag the DevTools main WebContents with its TaskManager specific UserData
+  // so that it shows up in the task manager.
+  task_management::WebContentsTags::CreateForDevToolsContents(
+      main_web_contents_);
 }
 
 // static
@@ -732,7 +756,7 @@ DevToolsWindow* DevToolsWindow::Create(
   scoped_ptr<WebContents> main_web_contents(
       WebContents::Create(WebContents::CreateParams(profile)));
   main_web_contents->GetController().LoadURL(
-      DevToolsUIBindings::ApplyThemeToURL(profile, url), content::Referrer(),
+      DecorateFrontendURL(url), content::Referrer(),
       ui::PAGE_TRANSITION_AUTO_TOPLEVEL, std::string());
   DevToolsUIBindings* bindings =
       DevToolsUIBindings::ForWebContents(main_web_contents.get());
@@ -756,7 +780,9 @@ GURL DevToolsWindow::GetDevToolsURL(Profile* profile,
     return base_url;
 
   std::string frontend_url(
-      base_url.is_empty() ? chrome::kChromeUIDevToolsURL : base_url.spec());
+      !remote_frontend.empty() ?
+          remote_frontend :
+          base_url.is_empty() ? chrome::kChromeUIDevToolsURL : base_url.spec());
   std::string url_string(
       frontend_url +
       ((frontend_url.find("?") == std::string::npos) ? "?" : "&"));
@@ -764,7 +790,6 @@ GURL DevToolsWindow::GetDevToolsURL(Profile* profile,
     url_string += "&isSharedWorker=true";
   if (remote_frontend.size()) {
     url_string += "&remoteFrontend=true";
-    url_string += "&remoteFrontendUrl=" + net::EscapePath(remote_frontend);
   } else {
     url_string += "&remoteBase=" + DevToolsUI::GetRemoteBaseURL().spec();
   }
@@ -860,7 +885,7 @@ void DevToolsWindow::AddNewContents(WebContents* source,
 
 void DevToolsWindow::WebContentsCreated(WebContents* source_contents,
                                         int opener_render_frame_id,
-                                        const base::string16& frame_name,
+                                        const std::string& frame_name,
                                         const GURL& target_url,
                                         WebContents* new_contents) {
   if (target_url.SchemeIs(content::kChromeDevToolsScheme) &&
@@ -869,6 +894,11 @@ void DevToolsWindow::WebContentsCreated(WebContents* source_contents,
     if (toolbox_web_contents_)
       delete toolbox_web_contents_;
     toolbox_web_contents_ = new_contents;
+
+    // Tag the DevTools toolbox WebContents with its TaskManager specific
+    // UserData so that it shows up in the task manager.
+    task_management::WebContentsTags::CreateForDevToolsContents(
+        toolbox_web_contents_);
   }
 }
 

@@ -13,9 +13,11 @@ from __future__ import print_function
 
 import argparse
 import ast
+import errno
 import json
 import os
 import pipes
+import pprint
 import shlex
 import shutil
 import sys
@@ -75,7 +77,10 @@ class MetaBuildWrapper(object):
                             help='analyze whether changes to a set of files '
                                  'will cause a set of binaries to be rebuilt.')
     AddCommonOptions(subp)
-    subp.add_argument('path', type=str, nargs=1,
+    subp.add_argument('--swarming-targets-file',
+                      help='save runtime dependencies for targets listed '
+                           'in file.')
+    subp.add_argument('path', nargs=1,
                       help='path build was generated into.')
     subp.add_argument('input_path', nargs=1,
                       help='path to a file containing the input arguments '
@@ -88,7 +93,10 @@ class MetaBuildWrapper(object):
     subp = subps.add_parser('gen',
                             help='generate a new set of build files')
     AddCommonOptions(subp)
-    subp.add_argument('path', type=str, nargs=1,
+    subp.add_argument('--swarming-targets-file',
+                      help='save runtime dependencies for targets listed '
+                           'in file.')
+    subp.add_argument('path', nargs=1,
                       help='path to generate build into')
     subp.set_defaults(func=self.CmdGen)
 
@@ -123,9 +131,9 @@ class MetaBuildWrapper(object):
   def CmdGen(self):
     vals = self.GetConfig()
     if vals['type'] == 'gn':
-      return self.RunGNGen(self.args.path[0], vals)
+      return self.RunGNGen(vals)
     if vals['type'] == 'gyp':
-      return self.RunGYPGen(self.args.path[0], vals)
+      return self.RunGYPGen(vals)
 
     raise MBErr('Unknown meta-build type "%s"' % vals['type'])
 
@@ -309,9 +317,75 @@ class MetaBuildWrapper(object):
         self.FlattenMixins(mixin_vals['mixins'], vals, visited)
     return vals
 
-  def RunGNGen(self, path, vals):
+  def RunGNGen(self, vals):
+    path = self.args.path[0]
+
     cmd = self.GNCmd('gen', path, vals['gn_args'])
+
+    swarming_targets = []
+    if self.args.swarming_targets_file:
+      # We need GN to generate the list of runtime dependencies for
+      # the compile targets listed (one per line) in the file so
+      # we can run them via swarming. We use ninja_to_gn.pyl to convert
+      # the compile targets to the matching GN labels.
+      contents = self.ReadFile(self.args.swarming_targets_file)
+      swarming_targets = contents.splitlines()
+      ninja_targets_to_labels = ast.literal_eval(self.ReadFile(os.path.join(
+          self.chromium_src_dir, 'testing', 'buildbot', 'ninja_to_gn.pyl')))
+      gn_labels = []
+      for target in swarming_targets:
+        if not target in ninja_targets_to_labels:
+          raise MBErr('test target "%s"  not found in %s' %
+                      (target, '//testing/buildbot/ninja_to_gn.pyl'))
+        gn_labels.append(ninja_targets_to_labels[target])
+
+      gn_runtime_deps_path = self.ToAbsPath(path, 'runtime_deps')
+
+      # Since GN hasn't run yet, the build directory may not even exist.
+      self.MaybeMakeDirectory(self.ToAbsPath(path))
+
+      self.WriteFile(gn_runtime_deps_path, '\n'.join(gn_labels) + '\n')
+      cmd.append('--runtime-deps-list-file=%s' % gn_runtime_deps_path)
+
     ret, _, _ = self.Run(cmd)
+
+    for target in swarming_targets:
+      if sys.platform == 'win32':
+        deps_path = self.ToAbsPath(path, target + '.exe.runtime_deps')
+      else:
+        deps_path = self.ToAbsPath(path, target + '.runtime_deps')
+      if not self.Exists(deps_path):
+          raise MBErr('did not generate %s' % deps_path)
+
+      command, extra_files = self.GetIsolateCommand(target, vals)
+
+      runtime_deps = self.ReadFile(deps_path).splitlines()
+
+      isolate_path = self.ToAbsPath(path, target + '.isolate')
+      self.WriteFile(isolate_path,
+        pprint.pformat({
+          'variables': {
+            'command': command,
+            'files': sorted(runtime_deps + extra_files),
+            'read_only': 1,
+          }
+        }) + '\n')
+
+      self.WriteJSON(
+        {
+          'args': [
+            '--isolated',
+            self.ToSrcRelPath('%s%s%s.isolated' % (path, os.sep, target)),
+            '--isolate',
+            self.ToSrcRelPath('%s%s%s.isolate' % (path, os.sep, target)),
+          ],
+          'dir': self.chromium_src_dir,
+          'version': 1,
+        },
+        isolate_path + 'd.gen.json',
+      )
+
+
     return ret
 
   def GNCmd(self, subcommand, path, gn_args=''):
@@ -331,7 +405,9 @@ class MetaBuildWrapper(object):
       cmd.append('--args=%s' % gn_args)
     return cmd
 
-  def RunGYPGen(self, path, vals):
+  def RunGYPGen(self, vals):
+    path = self.args.path[0]
+
     output_dir, gyp_config = self.ParseGYPConfigPath(path)
     if gyp_config != vals['gyp_config']:
       raise MBErr('The last component of the path (%s) must match the '
@@ -362,16 +438,81 @@ class MetaBuildWrapper(object):
       outp = json.loads(self.ReadFile(self.args.output_path[0]))
       self.Print()
       self.Print('analyze output:')
-      self.PrintJSON(inp)
+      self.PrintJSON(outp)
       self.Print()
 
     return ret
+
+  def GetIsolateCommand(self, target, vals):
+    extra_files = []
+
+    # TODO(dpranke): We should probably pull this from
+    # the test list info in //testing/buildbot/*.json,
+    # and assert that the test has can_use_on_swarming_builders: True,
+    # but we hardcode it here for now.
+    test_type = {}.get(target, 'gtest_test')
+
+    # This needs to mirror the settings in //build/config/ui.gni:
+    # use_x11 = is_linux && !use_ozone.
+    # TODO(dpranke): Figure out how to keep this in sync better.
+    use_x11 = (sys.platform == 'linux2' and
+               not 'target_os="android"' in vals['gn_args'] and
+               not 'use_ozone=true' in vals['gn_args'])
+
+    asan = 'is_asan=true' in vals['gn_args']
+    msan = 'is_msan=true' in vals['gn_args']
+    tsan = 'is_tsan=true' in vals['gn_args']
+
+    executable_suffix = '.exe' if sys.platform == 'win32' else ''
+
+    if test_type == 'gtest_test':
+      extra_files.append('../../testing/test_env.py')
+
+      if use_x11:
+        # TODO(dpranke): Figure out some way to figure out which
+        # test steps really need xvfb.
+        extra_files.append('xdisplaycheck')
+        extra_files.append('../../testing/xvfb.py')
+
+        cmdline = [
+          '../../testing/xvfb.py',
+          '.',
+          './' + str(target),
+          '--brave-new-test-launcher',
+          '--test-launcher-bot-mode',
+          '--asan=%d' % asan,
+          '--msan=%d' % msan,
+          '--tsan=%d' % tsan,
+        ]
+      else:
+        cmdline = [
+          '../../testing/test_env.py',
+          '.',
+          './' + str(target) + executable_suffix,
+          '--brave-new-test-launcher',
+          '--test-launcher-bot-mode',
+          '--asan=%d' % asan,
+          '--msan=%d' % msan,
+          '--tsan=%d' % tsan,
+        ]
+    else:
+      # TODO(dpranke): Handle script_tests and other types of swarmed tests.
+      self.WriteFailureAndRaise('unknown test type "%s" for %s' %
+                                (test_type, target), output_path=None)
+
+
+    return cmdline, extra_files
+
+  def ToAbsPath(self, build_path, *comps):
+    return os.path.join(self.chromium_src_dir,
+                        self.ToSrcRelPath(build_path),
+                        *comps)
 
   def ToSrcRelPath(self, path):
     """Returns a relative path from the top of the repo."""
     # TODO: Support normal paths in addition to source-absolute paths.
     assert(path.startswith('//'))
-    return path[2:]
+    return path[2:].replace('/', os.sep)
 
   def ParseGYPConfigPath(self, path):
     rpath = self.ToSrcRelPath(path)
@@ -400,8 +541,14 @@ class MetaBuildWrapper(object):
       cmd += ['-D', d]
     return cmd
 
-  def RunGNAnalyze(self, _vals):
-    inp = self.GetAnalyzeInput()
+  def RunGNAnalyze(self, vals):
+    # analyze runs before 'gn gen' now, so we need to run gn gen
+    # in order to ensure that we have a build directory.
+    ret = self.RunGNGen(vals)
+    if ret:
+      return ret
+
+    inp = self.ReadInputJSON(['files', 'targets'])
     if self.args.verbose:
       self.Print()
       self.Print('analyze input:')
@@ -480,7 +627,7 @@ class MetaBuildWrapper(object):
 
     return 0
 
-  def GetAnalyzeInput(self):
+  def ReadInputJSON(self, required_keys):
     path = self.args.input_path[0]
     output_path = self.args.output_path[0]
     if not self.Exists(path):
@@ -491,17 +638,17 @@ class MetaBuildWrapper(object):
     except Exception as e:
       self.WriteFailureAndRaise('Failed to read JSON input from "%s": %s' %
                                 (path, e), output_path)
-    if not 'files' in inp:
-      self.WriteFailureAndRaise('input file is missing a "files" key',
-                                output_path)
-    if not 'targets' in inp:
-      self.WriteFailureAndRaise('input file is missing a "targets" key',
-                                output_path)
+
+    for k in required_keys:
+      if not k in inp:
+        self.WriteFailureAndRaise('input file is missing a "%s" key' % k,
+                                  output_path)
 
     return inp
 
-  def WriteFailureAndRaise(self, msg, path):
-    self.WriteJSON({'error': msg}, path)
+  def WriteFailureAndRaise(self, msg, output_path):
+    if output_path:
+      self.WriteJSON({'error': msg}, output_path)
     raise MBErr(msg)
 
   def WriteJSON(self, obj, path):
@@ -551,6 +698,13 @@ class MetaBuildWrapper(object):
     # This function largely exists so it can be overridden for testing.
     return os.path.exists(path)
 
+  def MaybeMakeDirectory(self, path):
+    try:
+      os.makedirs(path)
+    except OSError, e:
+      if e.errno != errno.EEXIST:
+        raise
+
   def ReadFile(self, path):
     # This function largely exists so it can be overriden for testing.
     with open(path) as fp:
@@ -566,6 +720,8 @@ class MetaBuildWrapper(object):
 
   def WriteFile(self, path, contents):
     # This function largely exists so it can be overriden for testing.
+    if self.args.dryrun or self.args.verbose:
+      self.Print('\nWriting """\\\n%s""" to %s.\n' % (contents, path))
     with open(path, 'w') as fp:
       return fp.write(contents)
 

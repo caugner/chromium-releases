@@ -25,15 +25,14 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/sequenced_worker_pool.h"
+#include "base/threading/thread_restrictions.h"
 #include "base/trace_event/trace_event.h"
 #include "base/version.h"
-#include "chrome/browser/autocomplete/autocomplete_classifier.h"
-#include "chrome/browser/autocomplete/shortcuts_backend.h"
 #include "chrome/browser/background/background_contents_service_factory.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/content_settings/cookie_settings.h"
+#include "chrome/browser/content_settings/cookie_settings_factory.h"
 #include "chrome/browser/dom_distiller/profile_utils.h"
 #include "chrome/browser/domain_reliability/service_factory.h"
 #include "chrome/browser/download/chrome_download_manager_delegate.h"
@@ -81,14 +80,16 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/chromium_strings.h"
 #include "components/bookmarks/browser/bookmark_model.h"
+#include "components/content_settings/core/browser/cookie_settings.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/domain_reliability/monitor.h"
 #include "components/domain_reliability/service.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "components/metrics/metrics_service.h"
+#include "components/omnibox/browser/autocomplete_classifier.h"
+#include "components/omnibox/browser/shortcuts_backend.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/signin/core/browser/signin_manager.h"
-#include "components/startup_metric_utils/startup_metric_utils.h"
 #include "components/ui/zoom/zoom_event_manager.h"
 #include "components/url_fixer/url_fixer.h"
 #include "components/user_prefs/user_prefs.h"
@@ -177,12 +178,33 @@ const char kReadmeText[] =
 const char kPrefExitTypeCrashed[] = "Crashed";
 const char kPrefExitTypeSessionEnded[] = "SessionEnded";
 
+void CreateProfileReadme(const base::FilePath& profile_path) {
+  base::ThreadRestrictions::AssertIOAllowed();
+  base::FilePath readme_path = profile_path.Append(chrome::kReadmeFilename);
+  std::string product_name = l10n_util::GetStringUTF8(IDS_PRODUCT_NAME);
+  std::string readme_text = base::StringPrintf(
+      kReadmeText, product_name.c_str(), product_name.c_str());
+  if (base::WriteFile(readme_path, readme_text.data(), readme_text.size()) ==
+      -1) {
+    LOG(ERROR) << "Could not create README file.";
+  }
+}
+
 // Helper method needed because PostTask cannot currently take a Callback
 // function with non-void return type.
 void CreateDirectoryAndSignal(const base::FilePath& path,
-                              base::WaitableEvent* done_creating) {
+                              base::WaitableEvent* done_creating,
+                              bool create_readme) {
+  // If the readme exists, the profile directory must also already exist.
+  base::FilePath readme_path = path.Append(chrome::kReadmeFilename);
+  if (base::PathExists(readme_path)) {
+    done_creating->Signal();
+    return;
+  }
+
   DVLOG(1) << "Creating directory " << path.value();
-  base::CreateDirectory(path);
+  if (base::CreateDirectory(path) && create_readme)
+    CreateProfileReadme(path);
   done_creating->Signal();
 }
 
@@ -193,14 +215,16 @@ void BlockFileThreadOnDirectoryCreate(base::WaitableEvent* done_creating) {
 }
 
 // Initiates creation of profile directory on |sequenced_task_runner| and
-// ensures that FILE thread is blocked until that operation finishes.
+// ensures that FILE thread is blocked until that operation finishes. If
+// |create_readme| is true, the profile README will be created in the profile
+// directory.
 void CreateProfileDirectory(base::SequencedTaskRunner* sequenced_task_runner,
-                            const base::FilePath& path) {
+                            const base::FilePath& path,
+                            bool create_readme) {
   base::WaitableEvent* done_creating = new base::WaitableEvent(false, false);
-  sequenced_task_runner->PostTask(FROM_HERE,
-                                  base::Bind(&CreateDirectoryAndSignal,
-                                             path,
-                                             done_creating));
+  sequenced_task_runner->PostTask(
+      FROM_HERE, base::Bind(&CreateDirectoryAndSignal, path, done_creating,
+                            create_readme));
   // Block the FILE thread until directory is created on I/O pool to make sure
   // that we don't attempt any operation until that part completes.
   BrowserThread::PostTask(
@@ -215,19 +239,6 @@ base::FilePath GetCachePath(const base::FilePath& base) {
 
 base::FilePath GetMediaCachePath(const base::FilePath& base) {
   return base.Append(chrome::kMediaCacheDirname);
-}
-
-void EnsureReadmeFile(const base::FilePath& base) {
-  base::FilePath readme_path = base.Append(chrome::kReadmeFilename);
-  if (base::PathExists(readme_path))
-    return;
-  std::string product_name = l10n_util::GetStringUTF8(IDS_PRODUCT_NAME);
-  std::string readme_text = base::StringPrintf(
-      kReadmeText, product_name.c_str(), product_name.c_str());
-  if (base::WriteFile(readme_path, readme_text.data(), readme_text.size()) ==
-      -1) {
-    LOG(ERROR) << "Could not create README file.";
-  }
 }
 
 // Converts the kSessionExitedCleanly pref to the corresponding EXIT_TYPE.
@@ -283,7 +294,7 @@ Profile* Profile::CreateProfile(const base::FilePath& path,
                                           BrowserThread::GetBlockingPool());
   if (create_mode == CREATE_MODE_ASYNCHRONOUS) {
     DCHECK(delegate);
-    CreateProfileDirectory(sequenced_task_runner.get(), path);
+    CreateProfileDirectory(sequenced_task_runner.get(), path, true);
   } else if (create_mode == CREATE_MODE_SYNCHRONOUS) {
     if (!base::PathExists(path)) {
       // TODO(rogerta): http://crbug/160553 - Bad things happen if we can't
@@ -291,6 +302,8 @@ Profile* Profile::CreateProfile(const base::FilePath& path,
       // this situation.
       if (!base::CreateDirectory(path))
         return NULL;
+
+      CreateProfileReadme(path);
     }
   } else {
     NOTREACHED();
@@ -299,9 +312,6 @@ Profile* Profile::CreateProfile(const base::FilePath& path,
   return new ProfileImpl(
       path, delegate, create_mode, sequenced_task_runner.get());
 }
-
-// static
-int ProfileImpl::create_readme_delay_ms = 60000;
 
 // static
 const char* const ProfileImpl::kPrefExitTypeNormal = "Normal";
@@ -451,10 +461,6 @@ ProfileImpl::ProfileImpl(
   }
 
   {
-    // On startup, preference loading is always synchronous so a scoped timer
-    // will work here.
-    startup_metric_utils::ScopedSlowStartupUMA
-        scoped_timer("Startup.SlowStartupPreferenceLoading");
     prefs_ = chrome_prefs::CreateProfilePrefs(
         path_,
         sequenced_task_runner,
@@ -468,8 +474,6 @@ ProfileImpl::ProfileImpl(
     user_prefs::UserPrefs::Set(this, prefs_.get());
   }
 
-  startup_metric_utils::ScopedSlowStartupUMA
-      scoped_timer("Startup.SlowStartupFinalProfileInit");
   if (async_prefs) {
     // Wait for the notification that prefs has been loaded
     // (successfully or not).  Note that we can use base::Unretained
@@ -531,7 +535,7 @@ void ProfileImpl::DoFinalInit() {
   scoped_refptr<base::SequencedTaskRunner> sequenced_task_runner =
       JsonPrefStore::GetTaskRunnerForFile(base_cache_path_,
                                           BrowserThread::GetBlockingPool());
-  CreateProfileDirectory(sequenced_task_runner.get(), base_cache_path_);
+  CreateProfileDirectory(sequenced_task_runner.get(), base_cache_path_, false);
 
   // Initialize components that depend on the current value.
   UpdateProfileSupervisedUserIdCache();
@@ -607,12 +611,6 @@ void ProfileImpl::DoFinalInit() {
       PluginPrefs::GetForProfile(this).get(),
       io_data_.GetResourceContextNoInit());
 #endif
-
-  // Delay README creation to not impact startup performance.
-  BrowserThread::PostDelayedTask(
-        BrowserThread::FILE, FROM_HERE,
-        base::Bind(&EnsureReadmeFile, GetPath()),
-        base::TimeDelta::FromMilliseconds(create_readme_delay_ms));
 
   TRACE_EVENT0("browser", "ProfileImpl::SetSaveSessionStorageOnDisk");
   content::BrowserContext::GetDefaultStoragePartition(this)->
@@ -794,7 +792,7 @@ ExtensionSpecialStoragePolicy*
   if (!extension_special_storage_policy_.get()) {
     TRACE_EVENT0("browser", "ProfileImpl::GetExtensionSpecialStoragePolicy")
     extension_special_storage_policy_ = new ExtensionSpecialStoragePolicy(
-        CookieSettings::Factory::GetForProfile(this).get());
+        CookieSettingsFactory::GetForProfile(this).get());
   }
   return extension_special_storage_policy_.get();
 #else

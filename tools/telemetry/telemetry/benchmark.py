@@ -2,25 +2,17 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import logging
 import optparse
-import os
-import shutil
-import sys
-import zipfile
 
-from telemetry.core import browser_finder
-from telemetry.core import command_line
-from telemetry.core import util
+from catapult_base import cloud_storage
 from telemetry import decorators
+from telemetry.internal.results import results_options
 from telemetry.internal import story_runner
+from telemetry.internal.util import command_line
+from telemetry.internal.util import exception_formatter
 from telemetry import page
-from telemetry.page import page_set
 from telemetry.page import page_test
 from telemetry.page import test_expectations
-from telemetry.results import results_options
-from telemetry.util import cloud_storage
-from telemetry.util import exception_formatter
 from telemetry.web_perf import timeline_based_measurement
 
 Disabled = decorators.Disabled
@@ -58,7 +50,7 @@ class Benchmark(command_line.Command):
   Benchmarks default to using TBM unless you override the value of
   Benchmark.test, or override the CreatePageTest method.
 
-  New benchmarks should override CreateUserStorySet.
+  New benchmarks should override CreateStorySet.
   """
   options = {}
   test = timeline_based_measurement.TimelineBasedMeasurement
@@ -67,7 +59,7 @@ class Benchmark(command_line.Command):
     """Creates a new Benchmark.
 
     Args:
-      max_failures: The number of user story run's failures before bailing
+      max_failures: The number of story run's failures before bailing
           from executing subsequent page runs. If None, we never bail.
     """
     self._max_failures = max_failures
@@ -147,9 +139,10 @@ class Benchmark(command_line.Command):
     results.
 
     Args:
-      value: a value.Value instance.
+      value: a value.Value instance (except failure.FailureValue,
+        skip.SkipValue or trace.TraceValue which will always be added).
       is_first_result: True if |value| is the first result for its
-          corresponding user story.
+          corresponding story.
 
     Returns:
       True if |value| should be added to the test results.
@@ -184,21 +177,19 @@ class Benchmark(command_line.Command):
       pt._enabled_strings = self._enabled_strings
 
     expectations = self.CreateExpectations()
-    us = self.CreateUserStorySet(finder_options)
+    stories = self.CreateStorySet(finder_options)
     if isinstance(pt, page_test.PageTest):
-      if any(not isinstance(p, page.Page) for p in us.user_stories):
+      if any(not isinstance(p, page.Page) for p in stories.stories):
         raise Exception(
-            'PageTest must be used with UserStorySet containing only '
-            'telemetry.page.Page user stories.')
-
-    self._DownloadGeneratedProfileArchive(finder_options)
+            'PageTest must be used with StorySet containing only '
+            'telemetry.page.Page stories.')
 
     benchmark_metadata = self.GetMetadata()
     with results_options.CreateResults(
         benchmark_metadata, finder_options,
         self.ValueCanBeAddedPredicate) as results:
       try:
-        story_runner.Run(pt, us, expectations, finder_options, results,
+        story_runner.Run(pt, stories, expectations, finder_options, results,
                               max_failures=self._max_failures)
         return_code = min(254, len(results.failures))
       except Exception:
@@ -212,71 +203,6 @@ class Benchmark(command_line.Command):
 
       results.PrintSummary()
     return return_code
-
-  def _DownloadGeneratedProfileArchive(self, options):
-    """Download and extract profile directory archive if one exists."""
-    archive_name = getattr(self, 'generated_profile_archive', None)
-
-    # If attribute not specified, nothing to do.
-    if not archive_name:
-      return
-
-    # If profile dir specified on command line, nothing to do.
-    if options.browser_options.profile_dir:
-      logging.warning("Profile directory specified on command line: %s, this"
-          "overrides the benchmark's default profile directory.",
-          options.browser_options.profile_dir)
-      return
-
-    # Download profile directory from cloud storage.
-    found_browser = browser_finder.FindBrowser(options)
-    if found_browser.IsRemote():
-      return
-    test_data_dir = os.path.join(util.GetChromiumSrcDir(), 'tools', 'perf',
-        'generated_profiles',
-        found_browser.target_os)
-    generated_profile_archive_path = os.path.normpath(
-        os.path.join(test_data_dir, archive_name))
-
-    try:
-      cloud_storage.GetIfChanged(generated_profile_archive_path,
-          cloud_storage.PUBLIC_BUCKET)
-    except (cloud_storage.CredentialsError,
-            cloud_storage.PermissionError) as e:
-      if os.path.exists(generated_profile_archive_path):
-        # If the profile directory archive exists, assume the user has their
-        # own local copy simply warn.
-        logging.warning('Could not download Profile archive: %s',
-            generated_profile_archive_path)
-      else:
-        # If the archive profile directory doesn't exist, this is fatal.
-        logging.error('Can not run without required profile archive: %s. '
-                      'If you believe you have credentials, follow the '
-                      'instructions below.',
-                      generated_profile_archive_path)
-        logging.error(str(e))
-        sys.exit(-1)
-
-    # Unzip profile directory.
-    extracted_profile_dir_path = (
-        os.path.splitext(generated_profile_archive_path)[0])
-    if not os.path.isfile(generated_profile_archive_path):
-      raise Exception("Profile directory archive not downloaded: ",
-          generated_profile_archive_path)
-    with zipfile.ZipFile(generated_profile_archive_path) as f:
-      try:
-        f.extractall(os.path.dirname(generated_profile_archive_path))
-      except e:
-        # Cleanup any leftovers from unzipping.
-        if os.path.exists(extracted_profile_dir_path):
-          shutil.rmtree(extracted_profile_dir_path)
-        logging.error("Error extracting profile directory zip file: %s", e)
-        sys.exit(-1)
-
-    # Run with freshly extracted profile directory.
-    logging.info("Using profile archive directory: %s",
-        extracted_profile_dir_path)
-    options.browser_options.profile_dir = extracted_profile_dir_path
 
   def CreateTimelineBasedMeasurementOptions(self):
     """Return the TimelineBasedMeasurementOptions for this Benchmark.
@@ -315,20 +241,17 @@ class Benchmark(command_line.Command):
     self.SetupTraceRerunOptions(options, opts)
     return timeline_based_measurement.TimelineBasedMeasurement(opts)
 
-  def CreatePageSet(self, options):  # pylint: disable=unused-argument
-    """Get the page set this test will run on.
+  def CreateStorySet(self, options):
+    """Creates the instance of StorySet used to run the benchmark.
 
-    By default, it will create a page set from the this test's page_set
-    attribute. Override to generate a custom page set.
+    Can be overridden by subclasses.
     """
+    del options  # unused
+    # TODO(aiolos, nednguyen, eakufner): replace class attribute page_set with
+    # story_set.
     if not hasattr(self, 'page_set'):
       raise NotImplementedError('This test has no "page_set" attribute.')
-    if not issubclass(self.page_set, page_set.PageSet):
-      raise TypeError('"%s" is not a PageSet.' % self.page_set.__name__)
     return self.page_set()
-
-  def CreateUserStorySet(self, options):
-    return self.CreatePageSet(options)
 
   @classmethod
   def CreateExpectations(cls):

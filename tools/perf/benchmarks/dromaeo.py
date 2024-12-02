@@ -5,10 +5,12 @@
 import math
 import os
 
+from core import perf_benchmark
+
 from telemetry import benchmark
 from telemetry import page as page_module
-from telemetry.page import page_set
 from telemetry.page import page_test
+from telemetry import story
 from telemetry.value import scalar
 
 from metrics import power
@@ -94,7 +96,7 @@ class _DromaeoMeasurement(page_test.PageTest):
     for key, value in aggregated.iteritems():
       AddResult(key, math.exp(value['sum'] / value['count']))
 
-class _DromaeoBenchmark(benchmark.Benchmark):
+class _DromaeoBenchmark(perf_benchmark.PerfBenchmark):
   """A base class for Dromaeo benchmarks."""
   test = _DromaeoMeasurement
 
@@ -102,18 +104,19 @@ class _DromaeoBenchmark(benchmark.Benchmark):
   def Name(cls):
     return 'dromaeo'
 
-  def CreatePageSet(self, options):
+  def CreateStorySet(self, options):
     """Makes a PageSet for Dromaeo benchmarks."""
     # Subclasses are expected to define class members called query_param and
     # tag.
     if not hasattr(self, 'query_param') or not hasattr(self, 'tag'):
       raise NotImplementedError('query_param or tag not in Dromaeo benchmark.')
     archive_data_file = '../page_sets/data/dromaeo.%s.json' % self.tag
-    ps = page_set.PageSet(
+    ps = story.StorySet(
         archive_data_file=archive_data_file,
-        file_path=os.path.abspath(__file__), bucket=page_set.PUBLIC_BUCKET)
+        base_dir=os.path.dirname(os.path.abspath(__file__)),
+        cloud_storage_bucket=story.PUBLIC_BUCKET)
     url = 'http://dromaeo.com?%s' % self.query_param
-    ps.AddUserStory(page_module.Page(
+    ps.AddStory(page_module.Page(
         url, ps, ps.base_dir, make_javascript_deterministic=False))
     return ps
 
@@ -131,6 +134,7 @@ class DromaeoDomCoreAttr(_DromaeoBenchmark):
     return 'dromaeo.domcoreattr'
 
 
+@benchmark.Disabled('xp')  # crbug.com/501625
 class DromaeoDomCoreModify(_DromaeoBenchmark):
   """Dromaeo DOMCore modify JavaScript benchmark.
 

@@ -114,6 +114,7 @@ void WebTestBase::LoadURL(const GURL& url) {
   while ([webController_ loadPhase] != PAGE_LOADED)
     WaitForBackgroundTasks();
   webController_.get().delegate = existingDelegate;
+  [[webController_ view] layoutIfNeeded];
 }
 
 void WebTestBase::WaitForBackgroundTasks() {
@@ -150,8 +151,8 @@ void WebTestBase::WaitForCondition(ConditionBlock condition) {
 
 bool WebTestBase::MessageQueueIsEmpty() const {
   // Using this check rather than polymorphism because polymorphising
-  // ChromeWebTest would be overengineering. ChromeWebTest inherits
-  // from WebTestBase.
+  // Chrome*WebViewWebTest would be overengineering. Chrome*WebViewWebTest
+  // inherits from WebTestBase.
   return [webController_ webViewType] == web::WK_WEB_VIEW_TYPE ||
       [static_cast<CRWUIWebViewWebController*>(webController_)
           jsInvokeParameterQueue].isEmpty;

@@ -50,11 +50,11 @@ GURL GetNormalizedURL(const GURL& url) {
   // Strip leading "www." (if any).
   const std::string www("www.");
   const std::string host(url.host());
-  if (StartsWithASCII(host, www, true))
+  if (base::StartsWith(host, www, base::CompareCase::SENSITIVE))
     replacements.SetHostStr(base::StringPiece(host).substr(www.size()));
   // Strip trailing slash (if any).
   const std::string path(url.path());
-  if (EndsWith(path, "/", true))
+  if (base::EndsWith(path, "/", true))
     replacements.SetPathStr(base::StringPiece(path).substr(0, path.size() - 1));
   return url.ReplaceComponents(replacements);
 }
@@ -98,7 +98,7 @@ scoped_ptr<net::URLFetcher> CreateFetcher(
 // Checks whether the search |response| (in JSON format) contains an entry for
 // the given |url|.
 bool ResponseContainsURL(const std::string& response, const GURL& url) {
-  scoped_ptr<base::Value> value(base::JSONReader::Read(response));
+  scoped_ptr<base::Value> value = base::JSONReader::Read(response);
   const base::DictionaryValue* dict = NULL;
   if (!value || !value->GetAsDictionary(&dict)) {
     DLOG(WARNING) << "ResponseContainsURL failed to parse global dictionary";

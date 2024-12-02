@@ -44,6 +44,8 @@
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
 #include "chrome/browser/chromeos/login/existing_user_controller.h"
 #include "chrome/browser/chromeos/login/screens/base_screen.h"
+#include "chrome/browser/chromeos/login/session/user_session_manager.h"
+#include "chrome/browser/chromeos/login/session/user_session_manager_test_api.h"
 #include "chrome/browser/chromeos/login/signin_specifics.h"
 #include "chrome/browser/chromeos/login/ui/login_display_host.h"
 #include "chrome/browser/chromeos/login/ui/login_display_host_impl.h"
@@ -526,6 +528,10 @@ class DeviceLocalAccountTest : public DevicePolicyCrosBrowserTest,
         chromeos::WizardController::default_controller();
     ASSERT_TRUE(wizard_controller);
     wizard_controller->SkipToLoginForTesting(LoginScreenContext());
+
+    chromeos::test::UserSessionManagerTestApi session_manager_test_api(
+        chromeos::UserSessionManager::GetInstance());
+    session_manager_test_api.SetShouldObtainTokenHandleInTests(false);
   }
 
   void TearDownOnMainThread() override {
@@ -1279,7 +1285,7 @@ IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, ExternalData) {
   scoped_ptr<base::DictionaryValue> metadata =
       test::ConstructExternalDataReference(kExternalDataURL, kExternalData);
   std::string policy;
-  base::JSONWriter::Write(metadata.get(), &policy);
+  base::JSONWriter::Write(*metadata, &policy);
   device_local_account_policy_.payload().mutable_useravatarimage()->set_value(
       policy);
   UploadAndInstallDeviceLocalAccountPolicy();
@@ -1362,10 +1368,13 @@ IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, UserAvatarImage) {
       &image_data));
 
   std::string policy;
-  base::JSONWriter::Write(test::ConstructExternalDataReference(
-      embedded_test_server()->GetURL(std::string("/") +
-          chromeos::test::kUserAvatarImage1RelativePath).spec(),
-      image_data).get(),
+  base::JSONWriter::Write(
+      *test::ConstructExternalDataReference(
+          embedded_test_server()
+              ->GetURL(std::string("/") +
+                       chromeos::test::kUserAvatarImage1RelativePath)
+              .spec(),
+          image_data),
       &policy);
   device_local_account_policy_.payload().mutable_useravatarimage()->set_value(
       policy);
@@ -1721,7 +1730,7 @@ IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, MultipleRecommendedLocales) {
   ASSERT_TRUE(content::ExecuteScriptAndExtractString(contents_,
                                                      get_locale_list,
                                                      &json));
-  scoped_ptr<base::Value> value_ptr(base::JSONReader::Read(json));
+  scoped_ptr<base::Value> value_ptr = base::JSONReader::Read(json);
   const base::ListValue* locales = NULL;
   ASSERT_TRUE(value_ptr);
   ASSERT_TRUE(value_ptr->GetAsList(&locales));
@@ -1780,7 +1789,7 @@ IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, MultipleRecommendedLocales) {
   ASSERT_TRUE(content::ExecuteScriptAndExtractString(contents_,
                                                      get_locale_list,
                                                      &json));
-  value_ptr.reset(base::JSONReader::Read(json));
+  value_ptr.reset(base::JSONReader::DeprecatedRead(json));
   locales = NULL;
   ASSERT_TRUE(value_ptr);
   ASSERT_TRUE(value_ptr->GetAsList(&locales));
@@ -1864,7 +1873,7 @@ IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, MultipleRecommendedLocales) {
           user_id_1_.c_str()),
       &json));
   LOG(ERROR) << json;
-  value_ptr.reset(base::JSONReader::Read(json));
+  value_ptr.reset(base::JSONReader::DeprecatedRead(json));
   const base::DictionaryValue* state = NULL;
   ASSERT_TRUE(value_ptr);
   ASSERT_TRUE(value_ptr->GetAsDictionary(&state));
@@ -2279,7 +2288,7 @@ IN_PROC_BROWSER_TEST_P(TermsOfServiceDownloadTest, TermsOfServiceScreen) {
       "  observer.observe(screenElement, options);"
       "}",
       &json));
-  scoped_ptr<base::Value> value_ptr(base::JSONReader::Read(json));
+  scoped_ptr<base::Value> value_ptr = base::JSONReader::Read(json);
   const base::DictionaryValue* status = NULL;
   ASSERT_TRUE(value_ptr);
   ASSERT_TRUE(value_ptr->GetAsDictionary(&status));

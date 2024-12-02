@@ -378,7 +378,7 @@ std::string InputMethodUtil::GetLocalizedDisplayName(
   if (disp.find("__MSG_") == 0) {
     const InputMethodNameMap* map = kInputMethodNameMap;
     size_t map_size = arraysize(kInputMethodNameMap);
-    std::string name = StringToUpperASCII(disp);
+    std::string name = base::StringToUpperASCII(disp);
     const InputMethodNameMap map_key = {name.c_str(), 0};
     const InputMethodNameMap* p =
         std::lower_bound(map, map + map_size, map_key);
@@ -429,8 +429,9 @@ bool InputMethodUtil::IsValidInputMethodId(
 
 // static
 bool InputMethodUtil::IsKeyboardLayout(const std::string& input_method_id) {
-  return StartsWithASCII(input_method_id, "xkb:", false) ||
-      extension_ime_util::IsKeyboardLayoutExtension(input_method_id);
+  return base::StartsWith(input_method_id, "xkb:",
+                          base::CompareCase::INSENSITIVE_ASCII) ||
+         extension_ime_util::IsKeyboardLayoutExtension(input_method_id);
 }
 
 std::string InputMethodUtil::GetKeyboardLayoutName(
@@ -682,9 +683,11 @@ void InputMethodUtil::UpdateHardwareLayoutCache() {
   DCHECK(thread_checker_.CalledOnValidThread());
   hardware_layouts_.clear();
   hardware_login_layouts_.clear();
-  if (cached_hardware_layouts_.empty())
-    Tokenize(delegate_->GetHardwareKeyboardLayouts(), ",",
-             &cached_hardware_layouts_);
+  if (cached_hardware_layouts_.empty()) {
+    cached_hardware_layouts_ =
+        base::SplitString(delegate_->GetHardwareKeyboardLayouts(), ",",
+                          base::KEEP_WHITESPACE, base::SPLIT_WANT_NONEMPTY);
+  }
   hardware_layouts_ = cached_hardware_layouts_;
   MigrateInputMethods(&hardware_layouts_);
 

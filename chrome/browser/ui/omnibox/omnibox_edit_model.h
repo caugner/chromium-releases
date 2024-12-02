@@ -10,20 +10,20 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/string16.h"
 #include "base/time/time.h"
-#include "chrome/browser/autocomplete/autocomplete_controller_delegate.h"
 #include "chrome/browser/ui/omnibox/omnibox_controller.h"
 #include "chrome/common/instant_types.h"
-#include "chrome/common/omnibox_focus_state.h"
 #include "components/metrics/proto/omnibox_event.pb.h"
-#include "components/omnibox/autocomplete_input.h"
-#include "components/omnibox/autocomplete_match.h"
+#include "components/omnibox/browser/autocomplete_controller_delegate.h"
+#include "components/omnibox/browser/autocomplete_input.h"
+#include "components/omnibox/browser/autocomplete_match.h"
+#include "components/omnibox/common/omnibox_focus_state.h"
 #include "ui/base/window_open_disposition.h"
 #include "ui/gfx/native_widget_types.h"
 #include "url/gurl.h"
 
 class AutocompleteController;
 class AutocompleteResult;
-class OmniboxCurrentPageDelegate;
+class OmniboxClient;
 class OmniboxEditController;
 class OmniboxPopupModel;
 class OmniboxView;
@@ -445,7 +445,7 @@ class OmniboxEditModel {
 
   OmniboxEditController* controller_;
 
-  scoped_ptr<OmniboxCurrentPageDelegate> delegate_;
+  scoped_ptr<OmniboxClient> client_;
 
   OmniboxFocusState focus_state_;
 

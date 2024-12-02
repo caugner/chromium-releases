@@ -578,6 +578,10 @@ TEST_F(CastSocketTest, TestConnectAuthMessageCorrupted) {
   EXPECT_EQ(cast_channel::READY_STATE_CLOSED, socket_->ready_state());
   EXPECT_EQ(cast_channel::CHANNEL_ERROR_TRANSPORT_ERROR,
             socket_->error_state());
+
+  // Verifies that the CastSocket's resources were torn down during channel
+  // close. (see http://crbug.com/504078)
+  EXPECT_EQ(nullptr, socket_->transport());
 }
 
 // Test connection error - TCP connect fails (async)
@@ -633,6 +637,24 @@ TEST_F(CastSocketTest, TestConnectTcpTimeoutError) {
             socket_->error_state());
 }
 
+// Test connection error - TCP socket returns timeout
+TEST_F(CastSocketTest, TestConnectTcpSocketTimeoutError) {
+  CreateCastSocketSecure();
+  socket_->SetupTcp1Connect(net::SYNCHRONOUS, net::ERR_CONNECTION_TIMED_OUT);
+  EXPECT_CALL(handler_, OnConnectComplete(CHANNEL_ERROR_CONNECT_TIMEOUT));
+  EXPECT_CALL(*delegate_, OnError(CHANNEL_ERROR_CONNECT_TIMEOUT));
+  socket_->Connect(delegate_.Pass(),
+                   base::Bind(&CompleteHandler::OnConnectComplete,
+                              base::Unretained(&handler_)));
+  RunPendingTasks();
+
+  EXPECT_EQ(cast_channel::READY_STATE_CLOSED, socket_->ready_state());
+  EXPECT_EQ(cast_channel::CHANNEL_ERROR_CONNECT_TIMEOUT,
+            socket_->error_state());
+  EXPECT_EQ(net::ERR_CONNECTION_TIMED_OUT,
+            logger_->GetLastErrors(socket_->id()).net_return_value);
+}
+
 // Test connection error - SSL connect fails (async)
 TEST_F(CastSocketTest, TestConnectSslConnectErrorAsync) {
   CreateCastSocketSecure();
@@ -656,7 +678,7 @@ TEST_F(CastSocketTest, TestConnectSslConnectErrorSync) {
   CreateCastSocketSecure();
 
   socket_->SetupTcp1Connect(net::SYNCHRONOUS, net::OK);
-  socket_->SetupSsl1Connect(net::ASYNC, net::ERR_FAILED);
+  socket_->SetupSsl1Connect(net::SYNCHRONOUS, net::ERR_FAILED);
 
   EXPECT_CALL(handler_, OnConnectComplete(CHANNEL_ERROR_AUTHENTICATION_ERROR));
   socket_->Connect(delegate_.Pass(),
@@ -666,6 +688,46 @@ TEST_F(CastSocketTest, TestConnectSslConnectErrorSync) {
 
   EXPECT_EQ(cast_channel::READY_STATE_CLOSED, socket_->ready_state());
   EXPECT_EQ(cast_channel::CHANNEL_ERROR_AUTHENTICATION_ERROR,
+            socket_->error_state());
+  EXPECT_EQ(net::ERR_FAILED,
+            logger_->GetLastErrors(socket_->id()).net_return_value);
+}
+
+// Test connection error - SSL connect times out (sync)
+TEST_F(CastSocketTest, TestConnectSslConnectTimeoutSync) {
+  CreateCastSocketSecure();
+
+  socket_->SetupTcp1Connect(net::SYNCHRONOUS, net::OK);
+  socket_->SetupSsl1Connect(net::SYNCHRONOUS, net::ERR_CONNECTION_TIMED_OUT);
+
+  EXPECT_CALL(handler_, OnConnectComplete(CHANNEL_ERROR_CONNECT_TIMEOUT));
+  socket_->Connect(delegate_.Pass(),
+                   base::Bind(&CompleteHandler::OnConnectComplete,
+                              base::Unretained(&handler_)));
+  RunPendingTasks();
+
+  EXPECT_EQ(cast_channel::READY_STATE_CLOSED, socket_->ready_state());
+  EXPECT_EQ(cast_channel::CHANNEL_ERROR_CONNECT_TIMEOUT,
+            socket_->error_state());
+  EXPECT_EQ(net::ERR_CONNECTION_TIMED_OUT,
+            logger_->GetLastErrors(socket_->id()).net_return_value);
+}
+
+// Test connection error - SSL connect times out (async)
+TEST_F(CastSocketTest, TestConnectSslConnectTimeoutAsync) {
+  CreateCastSocketSecure();
+
+  socket_->SetupTcp1Connect(net::ASYNC, net::OK);
+  socket_->SetupSsl1Connect(net::ASYNC, net::ERR_CONNECTION_TIMED_OUT);
+
+  EXPECT_CALL(handler_, OnConnectComplete(CHANNEL_ERROR_CONNECT_TIMEOUT));
+  socket_->Connect(delegate_.Pass(),
+                   base::Bind(&CompleteHandler::OnConnectComplete,
+                              base::Unretained(&handler_)));
+  RunPendingTasks();
+
+  EXPECT_EQ(cast_channel::READY_STATE_CLOSED, socket_->ready_state());
+  EXPECT_EQ(cast_channel::CHANNEL_ERROR_CONNECT_TIMEOUT,
             socket_->error_state());
 }
 

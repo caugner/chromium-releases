@@ -63,22 +63,13 @@ public class SyncController implements ApplicationStateListener,
 
     private final Context mContext;
     private final ChromeSigninController mChromeSigninController;
-    private final AndroidSyncSettings mAndroidSyncSettings;
     private final ProfileSyncService mProfileSyncService;
     private final SyncNotificationController mSyncNotificationController;
-
-    /**
-     * Denotes whether some extra work that's done only when the visible browser
-     * is shown has been completed once. This is used for things that should be
-     * done once per cold-start but only when the browser is visible.
-     */
-    private boolean mFirstActivityStarted = false;
 
     private SyncController(Context context) {
         mContext = context;
         mChromeSigninController = ChromeSigninController.get(mContext);
-        mAndroidSyncSettings = AndroidSyncSettings.get(context);
-        mAndroidSyncSettings.registerObserver(this);
+        AndroidSyncSettings.registerObserver(context, this);
         mProfileSyncService = ProfileSyncService.get(mContext);
         mProfileSyncService.addSyncStateChangedListener(this);
 
@@ -134,7 +125,6 @@ public class SyncController implements ApplicationStateListener,
             public void onSigninComplete() {
                 SigninManager.get(mContext).logInSignedInUser();
                 mProfileSyncService.setSetupInProgress(false);
-                mProfileSyncService.syncSignIn();
                 start();
             }
 
@@ -149,7 +139,7 @@ public class SyncController implements ApplicationStateListener,
      * Updates sync to reflect the state of the Android sync settings.
      */
     public void updateSyncStateFromAndroid() {
-        if (mAndroidSyncSettings.isSyncEnabled()) {
+        if (AndroidSyncSettings.isSyncEnabled(mContext)) {
             start();
         } else {
             stop();
@@ -163,11 +153,11 @@ public class SyncController implements ApplicationStateListener,
      */
     public void start() {
         ThreadUtils.assertOnUiThread();
-        if (mAndroidSyncSettings.isMasterSyncEnabled()) {
+        if (AndroidSyncSettings.isMasterSyncEnabled(mContext)) {
             Log.d(TAG, "Enabling sync");
-            InvalidationController.get(mContext).start();
-            mProfileSyncService.enableSync();
-            mAndroidSyncSettings.enableChromeSync();
+            InvalidationController.get(mContext).ensureStartedAndUpdateRegisteredTypes();
+            mProfileSyncService.requestStart();
+            AndroidSyncSettings.enableChromeSync(mContext);
         }
     }
 
@@ -178,16 +168,14 @@ public class SyncController implements ApplicationStateListener,
      */
     public void stop() {
         ThreadUtils.assertOnUiThread();
-        if (mChromeSigninController.isSignedIn()) {
-            Log.d(TAG, "Disabling sync");
-            InvalidationController.get(mContext).stop();
-            mProfileSyncService.disableSync();
-            if (mAndroidSyncSettings.isMasterSyncEnabled()) {
-                // Only disable Android's Chrome sync setting if we weren't disabled
-                // by the master sync setting. This way, when master sync is enabled
-                // they will both be on and sync will start again.
-                mAndroidSyncSettings.disableChromeSync();
-            }
+        Log.d(TAG, "Disabling sync");
+        InvalidationController.get(mContext).stop();
+        mProfileSyncService.requestStop();
+        if (AndroidSyncSettings.isMasterSyncEnabled(mContext)) {
+            // Only disable Android's Chrome sync setting if we weren't disabled
+            // by the master sync setting. This way, when master sync is enabled
+            // they will both be on and sync will start again.
+            AndroidSyncSettings.disableChromeSync(mContext);
         }
     }
 
@@ -200,16 +188,13 @@ public class SyncController implements ApplicationStateListener,
     @Override
     public void syncStateChanged() {
         ThreadUtils.assertOnUiThread();
-        boolean isSyncActive = !mProfileSyncService.isStartSuppressed();
         // Make the Java state match the native state.
-        if (isSyncActive) {
-            InvalidationController.get(mContext).start();
-            mAndroidSyncSettings.enableChromeSync();
+        if (mProfileSyncService.isSyncRequested()) {
+            AndroidSyncSettings.enableChromeSync(mContext);
         } else {
-            InvalidationController.get(mContext).stop();
-            if (mAndroidSyncSettings.isMasterSyncEnabled()) {
+            if (AndroidSyncSettings.isMasterSyncEnabled(mContext)) {
                 // See comment in stop().
-                mAndroidSyncSettings.disableChromeSync();
+                AndroidSyncSettings.disableChromeSync(mContext);
             }
         }
     }
@@ -249,10 +234,7 @@ public class SyncController implements ApplicationStateListener,
                 .putBoolean(DELAY_SYNC_SETUP_PREF, delay).apply();
     }
 
-    private void onMainActivityStart() {
-        if (!mFirstActivityStarted) {
-            onFirstStart();
-        }
+    public void onMainActivityStart() {
         if (mProfileSyncService.isFirstSetupInProgress()) {
             mProfileSyncService.setSyncSetupCompleted();
             SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(mContext);
@@ -260,13 +242,5 @@ public class SyncController implements ApplicationStateListener,
                 mProfileSyncService.setSetupInProgress(false);
             }
         }
-    }
-
-    private void onFirstStart() {
-        if (mAndroidSyncSettings.isSyncEnabled()) {
-            InvalidationController controller = InvalidationController.get(mContext);
-            controller.refreshRegisteredTypes(mProfileSyncService.getPreferredDataTypes());
-        }
-        mFirstActivityStarted = true;
     }
 }

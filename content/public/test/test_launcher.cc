@@ -64,7 +64,8 @@ ContentMainParams* g_params;
 
 std::string RemoveAnyPrePrefixes(const std::string& test_name) {
   std::string result(test_name);
-  ReplaceSubstringsAfterOffset(&result, 0, kPreTestPrefix, std::string());
+  base::ReplaceSubstringsAfterOffset(
+      &result, 0, kPreTestPrefix, base::StringPiece());
   return result;
 }
 
@@ -182,12 +183,12 @@ bool WrapperTestLauncherDelegate::ShouldRunTest(
     const std::string& test_name) {
   all_test_names_.insert(test_case_name + "." + test_name);
 
-  if (StartsWithASCII(test_name, kManualTestPrefix, true) &&
+  if (base::StartsWithASCII(test_name, kManualTestPrefix, true) &&
       !base::CommandLine::ForCurrentProcess()->HasSwitch(kRunManualTestsFlag)) {
     return false;
   }
 
-  if (StartsWithASCII(test_name, kPreTestPrefix, true)) {
+  if (base::StartsWithASCII(test_name, kPreTestPrefix, true)) {
     // We will actually run PRE_ tests, but to ensure they run on the same shard
     // as dependent tests, handle all these details internally.
     return false;

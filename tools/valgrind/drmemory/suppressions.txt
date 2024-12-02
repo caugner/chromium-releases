@@ -420,7 +420,7 @@ skia.dll!HDCOffscreen::draw
 skia.dll!SkScalerContext::getImage
 skia.dll!SkGlyphCache::findImage
 skia.dll!D1G_RectClip
-skia.dll!SkDraw::drawText
+skia.dll!SkDraw::draw*
 
 HANDLE LEAK
 name=http://crbug.com/346842
@@ -571,18 +571,6 @@ name=http://crbug.com/382784
 *!media::AudioDeviceThread::Thread::Run
 *!media::AudioDeviceThread::Thread::ThreadMain
 
-HANDLE LEAK
-name=http://crbug.com/383408
-system call NtCreateEvent
-...
-*!base::internal::LockImpl::Lock
-*!mojo::system::MessagePipe::RemoveWaiter
-*!mojo::system::MessagePipeDispatcher::RemoveWaiterImplNoLock
-*!mojo::system::Dispatcher::RemoveWaiter
-*!mojo::system::Core::WaitManyInternal
-*!mojo::system::Core::WaitMany
-*!MojoWaitMany
-
 UNADDRESSABLE ACCESS
 name=IntentionalCrashPluginTest.plugin_client.cc
 npapi_test_plugin.dll!NP_Initialize
@@ -732,7 +720,7 @@ name=http://crbug.com/463261
 blink_web.dll!blink::WebFrameWidgetImpl::selectionBounds
 ...
 content.dll!content::RenderWidget::UpdateSelectionBounds
-content.dll!content::RenderWidget::willBeginCompositorFrame
+content.dll!content::RenderWidget::WillBeginCompositorFrame
 cc.dll!base::internal::InvokeHelper<>::MakeItSo
 
 UNADDRESSABLE ACCESS
@@ -773,16 +761,24 @@ scheduler.dll!scheduler::TaskQueueManager::ProcessTaskFromWorkQueue
 
 UNADDRESSABLE ACCESS
 name=http://crbug.com/484352b
-blink_web.dll!blink::WebFrameWidgetImpl::setIsAcceleratedCompositingActive
+...
 blink_web.dll!blink::WebFrameWidgetImpl::setRootGraphicsLayer
 blink_web.dll!blink::ChromeClientImpl::attachRootGraphicsLayer
-blink_web.dll!blink::DeprecatedPaintLayerCompositor::detachRootLayer
+*.dll!blink::DeprecatedPaintLayerCompositor::detachRootLayer
 
 HANDLE LEAK
 name=http://crbug.com/487500
 system call NtCreateEvent
+ntdll.dll!RtlDosPathNameToNtPathName_U_WithStatus
+ntdll.dll!RtlDosPathNameToNtPathName_U_WithStatus
+ntdll.dll!RtlIntegerToUnicodeString
+
+UNADDRESSABLE ACCESS
+name=http://crbug.com/508634
 ...
-v8.dll!v8::base::Mutex::Lock
-base.dll!base::`anonymous namespace'::WorkItemCallback
-ntdll.dll!vsnprintf
-ntdll.dll!TpCallbackIndependent
+*!blink::FocusController::focusedOrMainFrame
+*!content::RenderWidget::UpdateSelectionBounds
+*!content::RenderWidget::WillBeginCompositorFrame
+*!base::internal::InvokeHelper<>::MakeItSo
+*!base::internal::Invoker<>::Run
+*!base::debug::TaskAnnotator::RunTask

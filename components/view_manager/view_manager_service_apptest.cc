@@ -9,9 +9,9 @@
 #include "components/view_manager/public/interfaces/view_manager.mojom.h"
 #include "components/view_manager/public/interfaces/view_manager_root.mojom.h"
 #include "components/view_manager/test_change_tracker.h"
-#include "mojo/application/application_test_base_chromium.h"
 #include "mojo/application/public/cpp/application_delegate.h"
 #include "mojo/application/public/cpp/application_impl.h"
+#include "mojo/application/public/cpp/application_test_base.h"
 
 using mojo::ApplicationConnection;
 using mojo::ApplicationDelegate;
@@ -69,7 +69,7 @@ void ViewTreeResultCallback(base::RunLoop* run_loop,
 // -----------------------------------------------------------------------------
 
 // The following functions call through to the supplied ViewManagerService. They
-// block until call completes and return the result.
+// block until the call completes and return the result.
 bool CreateView(ViewManagerService* vm, Id view_id) {
   ErrorCode result = ERROR_CODE_NONE;
   base::RunLoop run_loop;
@@ -79,12 +79,38 @@ bool CreateView(ViewManagerService* vm, Id view_id) {
   return result == ERROR_CODE_NONE;
 }
 
-bool EmbedUrl(ViewManagerService* vm, const String& url, Id root_id) {
+bool EmbedUrl(mojo::ApplicationImpl* app,
+              ViewManagerService* vm,
+              const String& url,
+              Id root_id) {
   bool result = false;
   base::RunLoop run_loop;
   {
-    vm->EmbedUrl(url, root_id, nullptr, nullptr,
-                 base::Bind(&BoolResultCallback, &run_loop, &result));
+    mojo::URLRequestPtr request(mojo::URLRequest::New());
+    request->url = mojo::String::From(url);
+    ApplicationConnection* connection =
+        app->ConnectToApplication(request.Pass());
+    mojo::ViewManagerClientPtr client;
+    connection->ConnectToService(&client);
+    vm->Embed(root_id, client.Pass(),
+              base::Bind(&BoolResultCallback, &run_loop, &result));
+  }
+  run_loop.Run();
+  return result;
+}
+
+bool EmbedAllowingReembed(mojo::ApplicationImpl* app,
+                          ViewManagerService* vm,
+                          const String& url,
+                          Id root_id) {
+  bool result = false;
+  base::RunLoop run_loop;
+  {
+    mojo::URLRequestPtr request(mojo::URLRequest::New());
+    request->url = mojo::String::From(url);
+    vm->EmbedAllowingReembed(
+        root_id, request.Pass(),
+        base::Bind(&BoolResultCallback, &run_loop, &result));
   }
   run_loop.Run();
   return result;
@@ -229,7 +255,10 @@ bool HasClonedView(const std::vector<TestView>& views) {
 class ViewManagerClientImpl : public mojo::ViewManagerClient,
                               public TestChangeTracker::Delegate {
  public:
-  ViewManagerClientImpl() : binding_(this) { tracker_.set_delegate(this); }
+  explicit ViewManagerClientImpl(mojo::ApplicationImpl* app)
+      : binding_(this), app_(app) {
+    tracker_.set_delegate(this);
+  }
 
   void Bind(mojo::InterfaceRequest<mojo::ViewManagerClient> request) {
     binding_.Bind(request.Pass());
@@ -284,17 +313,25 @@ class ViewManagerClientImpl : public mojo::ViewManagerClient,
 
   // ViewManagerClient:
   void OnEmbed(ConnectionSpecificId connection_id,
-               const String& creator_url,
                ViewDataPtr root,
                mojo::ViewManagerServicePtr view_manager_service,
-               InterfaceRequest<ServiceProvider> services,
-               ServiceProviderPtr exposed_services,
                mojo::Id focused_view_id) override {
     // TODO(sky): add coverage of |focused_view_id|.
     service_ = view_manager_service.Pass();
-    tracker()->OnEmbed(connection_id, creator_url, root.Pass());
+    tracker()->OnEmbed(connection_id, root.Pass());
     if (embed_run_loop_)
       embed_run_loop_->Quit();
+  }
+  void OnEmbedForDescendant(
+      uint32_t view,
+      mojo::URLRequestPtr request,
+      const OnEmbedForDescendantCallback& callback) override {
+    tracker()->OnEmbedForDescendant(view);
+    mojo::ViewManagerClientPtr client;
+    ApplicationConnection* connection =
+        app_->ConnectToApplication(request.Pass());
+    connection->ConnectToService(&client);
+    callback.Run(client.Pass());
   }
   void OnEmbeddedAppDisconnected(Id view_id) override {
     tracker()->OnEmbeddedAppDisconnected(view_id);
@@ -302,13 +339,18 @@ class ViewManagerClientImpl : public mojo::ViewManagerClient,
   void OnViewBoundsChanged(Id view_id,
                            RectPtr old_bounds,
                            RectPtr new_bounds) override {
+    // The bounds of the root may change during startup on Android at random
+    // times. As this doesn't matter, and shouldn't impact test exepctations,
+    // it is ignored.
+    if (view_id == ViewIdToTransportId(RootViewId(0)))
+        return;
     tracker()->OnViewBoundsChanged(view_id, old_bounds.Pass(),
                                    new_bounds.Pass());
   }
   void OnViewViewportMetricsChanged(ViewportMetricsPtr old_metrics,
                                     ViewportMetricsPtr new_metrics) override {
-    tracker()->OnViewViewportMetricsChanged(old_metrics.Pass(),
-                                            new_metrics.Pass());
+    // Don't track the metrics as they are available at an indeterministic time
+    // on Android.
   }
   void OnViewHierarchyChanged(Id view,
                               Id new_parent,
@@ -355,6 +397,8 @@ class ViewManagerClientImpl : public mojo::ViewManagerClient,
   scoped_ptr<WaitState> wait_state_;
 
   mojo::Binding<ViewManagerClient> binding_;
+  mojo::ApplicationImpl* app_;
+
   DISALLOW_COPY_AND_ASSIGN(ViewManagerClientImpl);
 };
 
@@ -364,7 +408,7 @@ class ViewManagerClientImpl : public mojo::ViewManagerClient,
 class ViewManagerClientFactory
     : public mojo::InterfaceFactory<ViewManagerClient> {
  public:
-  ViewManagerClientFactory() {}
+  explicit ViewManagerClientFactory(mojo::ApplicationImpl* app) : app_(app) {}
   ~ViewManagerClientFactory() override {}
 
   // Runs a nested MessageLoop until a new instance has been created.
@@ -382,12 +426,13 @@ class ViewManagerClientFactory
   // InterfaceFactory<ViewManagerClient>:
   void Create(ApplicationConnection* connection,
               InterfaceRequest<ViewManagerClient> request) override {
-    client_impl_.reset(new ViewManagerClientImpl);
+    client_impl_.reset(new ViewManagerClientImpl(app_));
     client_impl_->Bind(request.Pass());
     if (run_loop_.get())
       run_loop_->Quit();
   }
 
+  mojo::ApplicationImpl* app_;
   scoped_ptr<ViewManagerClientImpl> client_impl_;
   scoped_ptr<base::RunLoop> run_loop_;
 
@@ -401,6 +446,11 @@ class ViewManagerServiceAppTest : public mojo::test::ApplicationTestBase,
   ~ViewManagerServiceAppTest() override {}
 
  protected:
+  enum class EmbedType {
+    ALLOW_REEMBED,
+    NO_REEMBED,
+  };
+
   // Returns the changes from the various connections.
   std::vector<Change>* changes1() { return vm_client1_->tracker()->changes(); }
   std::vector<Change>* changes2() { return vm_client2_->tracker()->changes(); }
@@ -408,19 +458,20 @@ class ViewManagerServiceAppTest : public mojo::test::ApplicationTestBase,
 
   // Various connections. |vm1()|, being the first connection, has special
   // permissions (it's treated as the window manager).
-  ViewManagerService* vm1() { return vm1_.get(); }
+  ViewManagerService* vm1() { return vm_client1_->service(); }
   ViewManagerService* vm2() { return vm_client2_->service(); }
   ViewManagerService* vm3() { return vm_client3_->service(); }
 
   void EstablishSecondConnectionWithRoot(Id root_id) {
     ASSERT_TRUE(vm_client2_.get() == nullptr);
-    vm_client2_ = EstablishConnectionViaEmbed(vm1(), root_id);
+    vm_client2_ =
+        EstablishConnectionViaEmbed(vm1(), root_id, EmbedType::NO_REEMBED);
     ASSERT_TRUE(vm_client2_.get() != nullptr);
   }
 
   void EstablishSecondConnection(bool create_initial_view) {
     if (create_initial_view)
-      ASSERT_TRUE(CreateView(vm1_.get(), BuildViewId(1, 1)));
+      ASSERT_TRUE(CreateView(vm1(), BuildViewId(1, 1)));
     ASSERT_NO_FATAL_FAILURE(
         EstablishSecondConnectionWithRoot(BuildViewId(1, 1)));
 
@@ -430,7 +481,8 @@ class ViewManagerServiceAppTest : public mojo::test::ApplicationTestBase,
 
   void EstablishThirdConnection(ViewManagerService* owner, Id root_id) {
     ASSERT_TRUE(vm_client3_.get() == nullptr);
-    vm_client3_ = EstablishConnectionViaEmbed(owner, root_id);
+    vm_client3_ =
+        EstablishConnectionViaEmbed(owner, root_id, EmbedType::NO_REEMBED);
     ASSERT_TRUE(vm_client3_.get() != nullptr);
   }
 
@@ -438,20 +490,28 @@ class ViewManagerServiceAppTest : public mojo::test::ApplicationTestBase,
   // ViewManagerService.
   scoped_ptr<ViewManagerClientImpl> EstablishConnectionViaEmbed(
       ViewManagerService* owner,
-      Id root_id) {
-    if (!EmbedUrl(owner, application_impl()->url(), root_id)) {
+      Id root_id,
+      EmbedType embed_type) {
+    if (embed_type == EmbedType::NO_REEMBED &&
+        !EmbedUrl(application_impl(), owner, application_impl()->url(),
+                  root_id)) {
+      ADD_FAILURE() << "Embed() failed";
+      return nullptr;
+    } else if (embed_type == EmbedType::ALLOW_REEMBED &&
+               !EmbedAllowingReembed(application_impl(), owner,
+                                     application_impl()->url(), root_id)) {
       ADD_FAILURE() << "Embed() failed";
       return nullptr;
     }
     scoped_ptr<ViewManagerClientImpl> client =
-        client_factory_.WaitForInstance();
+        client_factory_->WaitForInstance();
     if (!client.get()) {
       ADD_FAILURE() << "WaitForInstance failed";
       return nullptr;
     }
     client->WaitForOnEmbed();
 
-    EXPECT_EQ("OnEmbed creator=" + application_impl()->url(),
+    EXPECT_EQ("OnEmbed",
               SingleChangeToDescription(*client->tracker()->changes()));
     return client.Pass();
   }
@@ -460,12 +520,14 @@ class ViewManagerServiceAppTest : public mojo::test::ApplicationTestBase,
   ApplicationDelegate* GetApplicationDelegate() override { return this; }
   void SetUp() override {
     ApplicationTestBase::SetUp();
+    client_factory_.reset(new ViewManagerClientFactory(application_impl()));
+    mojo::URLRequestPtr request(mojo::URLRequest::New());
+    request->url = mojo::String::From("mojo:view_manager");
     ApplicationConnection* vm_connection =
-        application_impl()->ConnectToApplication("mojo:view_manager");
-    vm_connection->ConnectToService(&vm1_);
+        application_impl()->ConnectToApplication(request.Pass());
+    vm_connection->AddService(client_factory_.get());
     vm_connection->ConnectToService(&view_manager_root_);
-    vm_connection->AddService(&client_factory_);
-    vm_client1_ = client_factory_.WaitForInstance();
+    vm_client1_ = client_factory_->WaitForInstance();
     ASSERT_TRUE(vm_client1_);
     // Next we should get an embed call on the "window manager" client.
     vm_client1_->WaitForIncomingMethodCall();
@@ -480,7 +542,7 @@ class ViewManagerServiceAppTest : public mojo::test::ApplicationTestBase,
 
   // ApplicationDelegate implementation.
   bool ConfigureIncomingConnection(ApplicationConnection* connection) override {
-    connection->AddService(&client_factory_);
+    connection->AddService(client_factory_.get());
     return true;
   }
 
@@ -491,8 +553,7 @@ class ViewManagerServiceAppTest : public mojo::test::ApplicationTestBase,
   mojo::ViewManagerRootPtr view_manager_root_;
 
  private:
-  mojo::ViewManagerServicePtr vm1_;
-  ViewManagerClientFactory client_factory_;
+  scoped_ptr<ViewManagerClientFactory> client_factory_;
 
   MOJO_DISALLOW_COPY_AND_ASSIGN(ViewManagerServiceAppTest);
 };
@@ -512,6 +573,8 @@ TEST_F(ViewManagerServiceAppTest, TwoClientsGetDifferentConnectionIds) {
 TEST_F(ViewManagerServiceAppTest, ViewsRemovedWhenEmbedding) {
   // Two views 1 and 2. 2 is parented to 1.
   ASSERT_TRUE(CreateView(vm1(), BuildViewId(1, 1)));
+  ASSERT_TRUE(AddView(vm1(), BuildViewId(0, 2), BuildViewId(1, 1)));
+
   ASSERT_TRUE(CreateView(vm1(), BuildViewId(1, 2)));
   ASSERT_TRUE(AddView(vm1(), BuildViewId(1, 1), BuildViewId(1, 2)));
 
@@ -716,7 +779,7 @@ TEST_F(ViewManagerServiceAppTest, ViewHierarchyChangedViews) {
   {
     // Client 2 is now connected to the root, so it should have gotten a drawn
     // notification.
-    ASSERT_TRUE(AddView(vm1(), BuildViewId(0, 1), BuildViewId(1, 1)));
+    ASSERT_TRUE(AddView(vm1(), BuildViewId(0, 2), BuildViewId(1, 1)));
     vm_client2_->WaitForChangeCount(1u);
     EXPECT_EQ("DrawnStateChanged view=1,1 drawn=true",
               SingleChangeToDescription(*changes2()));
@@ -746,7 +809,7 @@ TEST_F(ViewManagerServiceAppTest, ViewHierarchyChangedViews) {
   // 0,1->1,1->1,2->1,11->1,111
   {
     changes2()->clear();
-    ASSERT_TRUE(AddView(vm1(), BuildViewId(0, 1), BuildViewId(1, 1)));
+    ASSERT_TRUE(AddView(vm1(), BuildViewId(0, 2), BuildViewId(1, 1)));
     vm_client2_->WaitForChangeCount(1);
     EXPECT_EQ("DrawnStateChanged view=1,1 drawn=true",
               SingleChangeToDescription(*changes2()));
@@ -763,7 +826,7 @@ TEST_F(ViewManagerServiceAppTest, ViewHierarchyChangedAddingKnownToUnknown) {
   ASSERT_TRUE(CreateView(vm2(), BuildViewId(2, 21)));
 
   // Set up the hierarchy.
-  ASSERT_TRUE(AddView(vm1(), BuildViewId(0, 1), BuildViewId(1, 1)));
+  ASSERT_TRUE(AddView(vm1(), BuildViewId(0, 2), BuildViewId(1, 1)));
   ASSERT_TRUE(AddView(vm2(), BuildViewId(1, 1), BuildViewId(2, 11)));
   ASSERT_TRUE(AddView(vm2(), BuildViewId(2, 2), BuildViewId(2, 21)));
 
@@ -814,9 +877,9 @@ TEST_F(ViewManagerServiceAppTest, ReorderView) {
   ASSERT_TRUE(AddView(vm2(), view1_id, view2_id));
   ASSERT_TRUE(AddView(vm2(), view2_id, view6_id));
   ASSERT_TRUE(AddView(vm2(), view1_id, view3_id));
-  ASSERT_TRUE(AddView(vm1(), ViewIdToTransportId(RootViewId()), view4_id));
-  ASSERT_TRUE(AddView(vm1(), ViewIdToTransportId(RootViewId()), view5_id));
-  ASSERT_TRUE(AddView(vm1(), ViewIdToTransportId(RootViewId()), view1_id));
+  ASSERT_TRUE(AddView(vm1(), ViewIdToTransportId(RootViewId(0)), view4_id));
+  ASSERT_TRUE(AddView(vm1(), ViewIdToTransportId(RootViewId(0)), view5_id));
+  ASSERT_TRUE(AddView(vm1(), ViewIdToTransportId(RootViewId(0)), view1_id));
 
   {
     changes1()->clear();
@@ -930,7 +993,7 @@ TEST_F(ViewManagerServiceAppTest, GetViewTree) {
 
   // Create 11 in first connection and make it a child of 1.
   ASSERT_TRUE(CreateView(vm1(), BuildViewId(1, 11)));
-  ASSERT_TRUE(AddView(vm1(), BuildViewId(0, 1), BuildViewId(1, 1)));
+  ASSERT_TRUE(AddView(vm1(), BuildViewId(0, 2), BuildViewId(1, 1)));
   ASSERT_TRUE(AddView(vm1(), BuildViewId(1, 1), BuildViewId(1, 11)));
 
   // Create two views in second connection, 2 and 3, both children of 1.
@@ -942,10 +1005,10 @@ TEST_F(ViewManagerServiceAppTest, GetViewTree) {
   // Verifies GetViewTree() on the root. The root connection sees all.
   {
     std::vector<TestView> views;
-    GetViewTree(vm1(), BuildViewId(0, 1), &views);
+    GetViewTree(vm1(), BuildViewId(0, 2), &views);
     ASSERT_EQ(5u, views.size());
-    EXPECT_EQ("view=0,1 parent=null", views[0].ToString());
-    EXPECT_EQ("view=1,1 parent=0,1", views[1].ToString());
+    EXPECT_EQ("view=0,2 parent=null", views[0].ToString());
+    EXPECT_EQ("view=1,1 parent=0,2", views[1].ToString());
     EXPECT_EQ("view=1,11 parent=1,1", views[2].ToString());
     EXPECT_EQ("view=2,2 parent=1,1", views[3].ToString());
     EXPECT_EQ("view=2,3 parent=1,1", views[4].ToString());
@@ -965,14 +1028,14 @@ TEST_F(ViewManagerServiceAppTest, GetViewTree) {
   // Connection 2 shouldn't be able to get the root tree.
   {
     std::vector<TestView> views;
-    GetViewTree(vm2(), BuildViewId(0, 1), &views);
+    GetViewTree(vm2(), BuildViewId(0, 2), &views);
     ASSERT_EQ(0u, views.size());
   }
 }
 
 TEST_F(ViewManagerServiceAppTest, SetViewBounds) {
   ASSERT_TRUE(CreateView(vm1(), BuildViewId(1, 1)));
-  ASSERT_TRUE(AddView(vm1(), BuildViewId(0, 1), BuildViewId(1, 1)));
+  ASSERT_TRUE(AddView(vm1(), BuildViewId(0, 2), BuildViewId(1, 1)));
 
   ASSERT_NO_FATAL_FAILURE(EstablishSecondConnection(false));
 
@@ -1002,7 +1065,7 @@ TEST_F(ViewManagerServiceAppTest, CantMoveViewsFromOtherRoot) {
 
   // Try to reparent 1 to the root. A connection is not allowed to reparent its
   // roots.
-  ASSERT_FALSE(AddView(vm2(), BuildViewId(0, 1), BuildViewId(1, 1)));
+  ASSERT_FALSE(AddView(vm2(), BuildViewId(0, 2), BuildViewId(1, 1)));
 }
 
 // Verify RemoveViewFromParent fails for views that are descendants of the
@@ -1012,8 +1075,8 @@ TEST_F(ViewManagerServiceAppTest, CantRemoveViewsInOtherRoots) {
   ASSERT_TRUE(CreateView(vm1(), BuildViewId(1, 1)));
   ASSERT_TRUE(CreateView(vm1(), BuildViewId(1, 2)));
 
-  ASSERT_TRUE(AddView(vm1(), BuildViewId(0, 1), BuildViewId(1, 1)));
-  ASSERT_TRUE(AddView(vm1(), BuildViewId(0, 1), BuildViewId(1, 2)));
+  ASSERT_TRUE(AddView(vm1(), BuildViewId(0, 2), BuildViewId(1, 1)));
+  ASSERT_TRUE(AddView(vm1(), BuildViewId(0, 2), BuildViewId(1, 2)));
 
   // Establish the second connection and give it the root 1.
   ASSERT_NO_FATAL_FAILURE(EstablishSecondConnection(false));
@@ -1034,11 +1097,11 @@ TEST_F(ViewManagerServiceAppTest, CantRemoveViewsInOtherRoots) {
   // Verify nothing was actually removed.
   {
     std::vector<TestView> views;
-    GetViewTree(vm1(), BuildViewId(0, 1), &views);
+    GetViewTree(vm1(), BuildViewId(0, 2), &views);
     ASSERT_EQ(3u, views.size());
-    EXPECT_EQ("view=0,1 parent=null", views[0].ToString());
-    EXPECT_EQ("view=1,1 parent=0,1", views[1].ToString());
-    EXPECT_EQ("view=1,2 parent=0,1", views[2].ToString());
+    EXPECT_EQ("view=0,2 parent=null", views[0].ToString());
+    EXPECT_EQ("view=1,1 parent=0,2", views[1].ToString());
+    EXPECT_EQ("view=1,2 parent=0,2", views[2].ToString());
   }
 }
 
@@ -1048,15 +1111,15 @@ TEST_F(ViewManagerServiceAppTest, CantGetViewTreeOfOtherRoots) {
   ASSERT_TRUE(CreateView(vm1(), BuildViewId(1, 1)));
   ASSERT_TRUE(CreateView(vm1(), BuildViewId(1, 2)));
 
-  ASSERT_TRUE(AddView(vm1(), BuildViewId(0, 1), BuildViewId(1, 1)));
-  ASSERT_TRUE(AddView(vm1(), BuildViewId(0, 1), BuildViewId(1, 2)));
+  ASSERT_TRUE(AddView(vm1(), BuildViewId(0, 2), BuildViewId(1, 1)));
+  ASSERT_TRUE(AddView(vm1(), BuildViewId(0, 2), BuildViewId(1, 2)));
 
   ASSERT_NO_FATAL_FAILURE(EstablishSecondConnection(false));
 
   std::vector<TestView> views;
 
   // Should get nothing for the root.
-  GetViewTree(vm2(), BuildViewId(0, 1), &views);
+  GetViewTree(vm2(), BuildViewId(0, 2), &views);
   ASSERT_TRUE(views.empty());
 
   // Should get nothing for view 2.
@@ -1115,8 +1178,8 @@ TEST_F(ViewManagerServiceAppTest, EmbedWithSameViewId2) {
     changes3()->clear();
 
     // We should get a new connection for the new embedding.
-    scoped_ptr<ViewManagerClientImpl> connection4(
-        EstablishConnectionViaEmbed(vm1(), BuildViewId(1, 1)));
+    scoped_ptr<ViewManagerClientImpl> connection4(EstablishConnectionViaEmbed(
+        vm1(), BuildViewId(1, 1), EmbedType::NO_REEMBED));
     ASSERT_TRUE(connection4.get());
     EXPECT_EQ("[view=1,1 parent=null]",
               ChangeViewDescription(*connection4->tracker()->changes()));
@@ -1157,14 +1220,14 @@ TEST_F(ViewManagerServiceAppTest, SetViewVisibility) {
   ASSERT_TRUE(CreateView(vm1(), BuildViewId(1, 1)));
   ASSERT_TRUE(CreateView(vm1(), BuildViewId(1, 2)));
 
-  ASSERT_TRUE(AddView(vm1(), BuildViewId(0, 1), BuildViewId(1, 1)));
+  ASSERT_TRUE(AddView(vm1(), BuildViewId(0, 2), BuildViewId(1, 1)));
   {
     std::vector<TestView> views;
-    GetViewTree(vm1(), BuildViewId(0, 1), &views);
+    GetViewTree(vm1(), BuildViewId(0, 2), &views);
     ASSERT_EQ(2u, views.size());
-    EXPECT_EQ("view=0,1 parent=null visible=true drawn=true",
+    EXPECT_EQ("view=0,2 parent=null visible=true drawn=true",
               views[0].ToString2());
-    EXPECT_EQ("view=1,1 parent=0,1 visible=false drawn=false",
+    EXPECT_EQ("view=1,1 parent=0,2 visible=false drawn=false",
               views[1].ToString2());
   }
 
@@ -1173,11 +1236,11 @@ TEST_F(ViewManagerServiceAppTest, SetViewVisibility) {
   ASSERT_TRUE(SetViewVisibility(vm1(), BuildViewId(1, 2), true));
   {
     std::vector<TestView> views;
-    GetViewTree(vm1(), BuildViewId(0, 1), &views);
+    GetViewTree(vm1(), BuildViewId(0, 2), &views);
     ASSERT_EQ(2u, views.size());
-    EXPECT_EQ("view=0,1 parent=null visible=true drawn=true",
+    EXPECT_EQ("view=0,2 parent=null visible=true drawn=true",
               views[0].ToString2());
-    EXPECT_EQ("view=1,1 parent=0,1 visible=true drawn=true",
+    EXPECT_EQ("view=1,1 parent=0,2 visible=true drawn=true",
               views[1].ToString2());
   }
 
@@ -1187,7 +1250,7 @@ TEST_F(ViewManagerServiceAppTest, SetViewVisibility) {
     std::vector<TestView> views;
     GetViewTree(vm1(), BuildViewId(1, 1), &views);
     ASSERT_EQ(1u, views.size());
-    EXPECT_EQ("view=1,1 parent=0,1 visible=false drawn=false",
+    EXPECT_EQ("view=1,1 parent=0,2 visible=false drawn=false",
               views[0].ToString2());
   }
 
@@ -1197,7 +1260,7 @@ TEST_F(ViewManagerServiceAppTest, SetViewVisibility) {
     std::vector<TestView> views;
     GetViewTree(vm1(), BuildViewId(1, 1), &views);
     ASSERT_EQ(2u, views.size());
-    EXPECT_EQ("view=1,1 parent=0,1 visible=false drawn=false",
+    EXPECT_EQ("view=1,1 parent=0,2 visible=false drawn=false",
               views[0].ToString2());
     EXPECT_EQ("view=1,2 parent=1,1 visible=true drawn=false",
               views[1].ToString2());
@@ -1209,7 +1272,7 @@ TEST_F(ViewManagerServiceAppTest, SetViewVisibility) {
     std::vector<TestView> views;
     GetViewTree(vm1(), BuildViewId(1, 1), &views);
     ASSERT_EQ(2u, views.size());
-    EXPECT_EQ("view=1,1 parent=0,1 visible=true drawn=true",
+    EXPECT_EQ("view=1,1 parent=0,2 visible=true drawn=true",
               views[0].ToString2());
     EXPECT_EQ("view=1,2 parent=1,1 visible=true drawn=true",
               views[1].ToString2());
@@ -1223,7 +1286,7 @@ TEST_F(ViewManagerServiceAppTest, SetViewVisibilityNotifications) {
   ASSERT_TRUE(SetViewVisibility(vm1(), BuildViewId(1, 1), true));
   ASSERT_TRUE(CreateView(vm1(), BuildViewId(1, 2)));
   ASSERT_TRUE(SetViewVisibility(vm1(), BuildViewId(1, 2), true));
-  ASSERT_TRUE(AddView(vm1(), BuildViewId(0, 1), BuildViewId(1, 1)));
+  ASSERT_TRUE(AddView(vm1(), BuildViewId(0, 2), BuildViewId(1, 1)));
   ASSERT_TRUE(AddView(vm1(), BuildViewId(1, 1), BuildViewId(1, 2)));
 
   // Establish the second connection at 1,2.
@@ -1291,7 +1354,7 @@ TEST_F(ViewManagerServiceAppTest, SetViewVisibilityNotifications) {
 
   changes2()->clear();
   // Add 1,1 back to the root, connection 2 should see drawn state changed.
-  ASSERT_TRUE(AddView(vm1(), BuildViewId(0, 1), BuildViewId(1, 1)));
+  ASSERT_TRUE(AddView(vm1(), BuildViewId(0, 2), BuildViewId(1, 1)));
   {
     vm_client2_->WaitForChangeCount(1);
     EXPECT_EQ("DrawnStateChanged view=1,2 drawn=true",
@@ -1305,12 +1368,12 @@ TEST_F(ViewManagerServiceAppTest, SetViewProperty) {
   ASSERT_NO_FATAL_FAILURE(EstablishSecondConnection(false));
   changes2()->clear();
 
-  ASSERT_TRUE(AddView(vm1(), BuildViewId(0, 1), BuildViewId(1, 1)));
+  ASSERT_TRUE(AddView(vm1(), BuildViewId(0, 2), BuildViewId(1, 1)));
   {
     std::vector<TestView> views;
-    GetViewTree(vm1(), BuildViewId(0, 1), &views);
+    GetViewTree(vm1(), BuildViewId(0, 2), &views);
     ASSERT_EQ(2u, views.size());
-    EXPECT_EQ(BuildViewId(0, 1), views[0].view_id);
+    EXPECT_EQ(BuildViewId(0, 2), views[0].view_id);
     EXPECT_EQ(BuildViewId(1, 1), views[1].view_id);
     ASSERT_EQ(0u, views[1].properties.size());
   }
@@ -1365,7 +1428,7 @@ TEST_F(ViewManagerServiceAppTest, OnEmbeddedAppDisconnected) {
 TEST_F(ViewManagerServiceAppTest, OnParentOfEmbedDisconnects) {
   // Create connection 2 and 3.
   ASSERT_NO_FATAL_FAILURE(EstablishSecondConnection(true));
-  ASSERT_TRUE(AddView(vm1(), BuildViewId(0, 1), BuildViewId(1, 1)));
+  ASSERT_TRUE(AddView(vm1(), BuildViewId(0, 2), BuildViewId(1, 1)));
   ASSERT_TRUE(CreateView(vm2(), BuildViewId(2, 2)));
   ASSERT_TRUE(AddView(vm2(), BuildViewId(1, 1), BuildViewId(2, 2)));
   ASSERT_TRUE(CreateView(vm2(), BuildViewId(2, 3)));
@@ -1398,7 +1461,7 @@ TEST_F(ViewManagerServiceAppTest, DontCleanMapOnDestroy) {
 TEST_F(ViewManagerServiceAppTest, CloneAndAnimate) {
   // Create connection 2 and 3.
   ASSERT_NO_FATAL_FAILURE(EstablishSecondConnection(true));
-  ASSERT_TRUE(AddView(vm1(), BuildViewId(0, 1), BuildViewId(1, 1)));
+  ASSERT_TRUE(AddView(vm1(), BuildViewId(0, 2), BuildViewId(1, 1)));
   ASSERT_TRUE(CreateView(vm2(), BuildViewId(2, 2)));
   ASSERT_TRUE(CreateView(vm2(), BuildViewId(2, 3)));
   ASSERT_TRUE(AddView(vm2(), BuildViewId(1, 1), BuildViewId(2, 2)));
@@ -1432,13 +1495,53 @@ TEST_F(ViewManagerServiceAppTest, CloneAndAnimate) {
 TEST_F(ViewManagerServiceAppTest, EmbedSupplyingViewManagerClient) {
   ASSERT_TRUE(CreateView(vm1(), BuildViewId(1, 1)));
 
-  ViewManagerClientImpl client2;
+  ViewManagerClientImpl client2(application_impl());
   mojo::ViewManagerClientPtr client2_ptr;
   mojo::Binding<ViewManagerClient> client2_binding(&client2, &client2_ptr);
   ASSERT_TRUE(Embed(vm1(), BuildViewId(1, 1), client2_ptr.Pass()));
   client2.WaitForOnEmbed();
-  EXPECT_EQ("OnEmbed creator=" + application_impl()->url(),
+  EXPECT_EQ("OnEmbed",
             SingleChangeToDescription(*client2.tracker()->changes()));
+}
+
+TEST_F(ViewManagerServiceAppTest, OnWillEmbed) {
+  // Create connections 2 and 3, marking 2 as an embed root.
+  ASSERT_NO_FATAL_FAILURE(EstablishSecondConnection(true));
+  ASSERT_TRUE(AddView(vm1(), BuildViewId(0, 2), BuildViewId(1, 1)));
+  ASSERT_TRUE(CreateView(vm2(), BuildViewId(2, 2)));
+  ASSERT_TRUE(AddView(vm2(), BuildViewId(1, 1), BuildViewId(2, 2)));
+  ASSERT_NO_FATAL_FAILURE(EstablishThirdConnection(vm2(), BuildViewId(2, 2)));
+  ASSERT_TRUE(CreateView(vm3(), BuildViewId(3, 3)));
+  ASSERT_TRUE(AddView(vm3(), BuildViewId(2, 2), BuildViewId(3, 3)));
+  vm2()->SetEmbedRoot();
+  // Make sure the viewmanager processed the SetEmbedRoot() call.
+  ASSERT_TRUE(WaitForAllMessages(vm2()));
+  changes2()->clear();
+
+  // Embed 4 into 3, connection 2 should get the OnWillEmbed.
+  scoped_ptr<ViewManagerClientImpl> connection4(EstablishConnectionViaEmbed(
+      vm3(), BuildViewId(3, 3), EmbedType::ALLOW_REEMBED));
+  ASSERT_TRUE(connection4.get());
+  EXPECT_EQ("OnEmbedForDescendant view=3,3",
+            SingleChangeToDescription(*changes2()));
+
+  // Mark 3 as an embed root.
+  vm3()->SetEmbedRoot();
+  // Make sure the viewmanager processed the SetEmbedRoot() call.
+  ASSERT_TRUE(WaitForAllMessages(vm3()));
+  changes2()->clear();
+  changes3()->clear();
+
+  // Embed 5 into 4. Only 3 should get the will embed.
+  ASSERT_TRUE(CreateView(connection4->service(), BuildViewId(4, 4)));
+  ASSERT_TRUE(
+      AddView(connection4->service(), BuildViewId(3, 3), BuildViewId(4, 4)));
+  scoped_ptr<ViewManagerClientImpl> connection5(EstablishConnectionViaEmbed(
+      connection4->service(), BuildViewId(4, 4), EmbedType::ALLOW_REEMBED));
+  ASSERT_TRUE(connection5.get());
+  EXPECT_EQ("OnEmbedForDescendant view=4,4",
+            SingleChangeToDescription(*changes3()));
+  ASSERT_TRUE(changes2()->empty());
 }
 
 // TODO(sky): need to better track changes to initial connection. For example,

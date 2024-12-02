@@ -10,6 +10,7 @@
 #include "chrome/browser/extensions/api/automation_internal/automation_action_adapter.h"
 #include "chrome/browser/ui/aura/accessibility/ax_tree_source_aura.h"
 #include "ui/accessibility/ax_tree_serializer.h"
+#include "ui/views/focus/widget_focus_manager.h"
 
 template <typename T>
 struct DefaultSingletonTraits;
@@ -24,7 +25,8 @@ class View;
 }  // namespace views
 
 // Manages a tree of automation nodes.
-class AutomationManagerAura : public extensions::AutomationActionAdapter {
+class AutomationManagerAura : public extensions::AutomationActionAdapter,
+                              public views::WidgetFocusChangeListener {
  public:
   // Get the single instance of this class.
   static AutomationManagerAura* GetInstance();
@@ -47,9 +49,10 @@ class AutomationManagerAura : public extensions::AutomationActionAdapter {
   void Focus(int32 id) override;
   void MakeVisible(int32 id) override;
   void SetSelection(int32 id, int32 start, int32 end) override;
+  void ShowContextMenu(int32 id) override;
 
  protected:
-  virtual ~AutomationManagerAura();
+  ~AutomationManagerAura() override;
 
  private:
   friend struct DefaultSingletonTraits<AutomationManagerAura>;
@@ -62,6 +65,9 @@ class AutomationManagerAura : public extensions::AutomationActionAdapter {
   void SendEvent(content::BrowserContext* context,
                  views::AXAuraObjWrapper* aura_obj,
                  ui::AXEvent event_type);
+
+  // views::WidgetFocusChangeListener:
+  void OnNativeFocusChanged(aura::Window* focused_now) override;
 
   // Whether automation support for views is enabled.
   bool enabled_;
@@ -76,11 +82,12 @@ class AutomationManagerAura : public extensions::AutomationActionAdapter {
   scoped_ptr<ui::AXTreeSerializer<views::AXAuraObjWrapper*>>
       current_tree_serializer_;
 
-  std::string pending_alert_text_;
-
   bool processing_events_;
 
   std::vector<std::pair<views::AXAuraObjWrapper*, ui::AXEvent>> pending_events_;
+
+  aura::Window* focused_window_;
+
   DISALLOW_COPY_AND_ASSIGN(AutomationManagerAura);
 };
 

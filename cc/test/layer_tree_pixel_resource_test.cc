@@ -139,6 +139,7 @@ void LayerTreeHostPixelResourceTest::CreateResourceAndTileTaskWorkerPool(
       host_impl->output_surface()->context_provider();
   ResourceProvider* resource_provider = host_impl->resource_provider();
   size_t max_transfer_buffer_usage_bytes = 1024u * 1024u * 60u;
+  int max_bytes_per_copy_operation = 1024 * 1024;
 
   switch (resource_pool_option_) {
     case BITMAP_TILE_TASK_WORKER_POOL:
@@ -184,7 +185,7 @@ void LayerTreeHostPixelResourceTest::CreateResourceAndTileTaskWorkerPool(
 
       *tile_task_worker_pool = OneCopyTileTaskWorkerPool::Create(
           task_runner, task_graph_runner(), context_provider, resource_provider,
-          staging_resource_pool->get());
+          staging_resource_pool->get(), max_bytes_per_copy_operation, false);
       break;
     case PIXEL_BUFFER_TILE_TASK_WORKER_POOL:
       EXPECT_TRUE(context_provider);
@@ -205,9 +206,6 @@ void LayerTreeHostPixelResourceTest::RunPixelResourceTest(
   if (!IsTestCaseSupported(test_case_))
     return;
   RunPixelTest(test_type_, content_root, file_name);
-
-  if (layer_tree_host())
-    EXPECT_TRUE(layer_tree_host()->settings().impl_side_painting);
 }
 
 ParameterizedPixelResourceTest::ParameterizedPixelResourceTest()

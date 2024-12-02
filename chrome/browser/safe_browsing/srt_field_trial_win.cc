@@ -5,6 +5,7 @@
 #include "chrome/browser/safe_browsing/srt_field_trial_win.h"
 
 #include "base/metrics/field_trial.h"
+#include "base/metrics/histogram.h"
 #include "components/variations/variations_associated_data.h"
 
 namespace {
@@ -49,6 +50,15 @@ const char* GetSRTDownloadURL() {
 std::string GetIncomingSRTSeed() {
   return variations::GetVariationParamValue(kSRTPromptTrial,
                                             kSRTPromptSeedParam);
+}
+
+void RecordSRTPromptHistogram(SRTPromptHistogramValue value) {
+  UMA_HISTOGRAM_ENUMERATION("SoftwareReporter.PromptUsage", value,
+                            SRT_PROMPT_MAX);
+}
+
+void RecordReporterStepHistogram(SwReporterUmaValue value) {
+  UMA_HISTOGRAM_ENUMERATION("SoftwareReporter.Step", value, SW_REPORTER_MAX);
 }
 
 }  // namespace safe_browsing

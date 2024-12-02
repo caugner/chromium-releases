@@ -11,10 +11,10 @@ import cloud_storage_test_base
 import page_sets
 import pixel_expectations
 
+from catapult_base import cloud_storage
 from telemetry import benchmark
-from telemetry.image_processing import image_util
 from telemetry.page import page_test
-from telemetry.util import cloud_storage
+from telemetry.util import image_util
 
 
 test_data_dir = os.path.abspath(os.path.join(
@@ -161,11 +161,11 @@ class Pixel(cloud_storage_test_base.TestBase):
         '(only used for local testing without a cloud storage account)',
         default=default_reference_image_dir)
 
-  def CreatePageSet(self, options):
-    page_set = page_sets.PixelTestsPageSet()
-    for page in page_set.pages:
+  def CreateStorySet(self, options):
+    story_set = page_sets.PixelTestsStorySet()
+    for page in story_set:
       page.script_to_evaluate_on_commit = test_harness_script
-    return page_set
+    return story_set
 
   def CreateExpectations(self):
     return pixel_expectations.PixelExpectations()

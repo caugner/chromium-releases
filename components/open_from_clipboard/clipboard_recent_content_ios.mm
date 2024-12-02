@@ -6,6 +6,7 @@
 
 #import <UIKit/UIKit.h>
 
+#include "base/ios/ios_util.h"
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/memory/singleton.h"
@@ -47,19 +48,18 @@ ClipboardRecentContent* ClipboardRecentContent::GetInstance() {
 }
 
 - (void)dealloc {
-  [[NSNotificationCenter defaultCenter]
-      removeObserver:self
-                name:UIPasteboardChangedNotification
-              object:[UIPasteboard generalPasteboard]];
-  [[NSNotificationCenter defaultCenter]
-      removeObserver:self
-                name:UIApplicationDidBecomeActiveNotification
-              object:[UIPasteboard generalPasteboard]];
+  [[NSNotificationCenter defaultCenter] removeObserver:self];
   [super dealloc];
 }
 
 - (void)pasteboardChangedNotification:(NSNotification*)notification {
-  _delegate->PasteboardChanged();
+  if (_delegate) {
+    _delegate->PasteboardChanged();
+  }
+}
+
+- (void)disconnect {
+  _delegate = nullptr;
 }
 
 @end
@@ -72,7 +72,9 @@ NSString* kPasteboardChangeCountKey = @"PasteboardChangeCount";
 // Key used to store the last date at which it was detected that the pasteboard
 // changed. It is used to evaluate the age of the pasteboard's content.
 NSString* kPasteboardChangeDateKey = @"PasteboardChangeDate";
-NSTimeInterval kMaximumAgeOfClipboardInSeconds = 6 * 60 * 60;
+// Key used to store the
+NSString* kSuppressedPasteboardEntryCountKey = @"PasteboardSupressedEntryCount";
+base::TimeDelta kMaximumAgeOfClipboard = base::TimeDelta::FromHours(3);
 // Schemes accepted by the ClipboardRecentContentIOS.
 const char* kAuthorizedSchemes[] = {
     url::kHttpScheme,
@@ -88,15 +90,28 @@ ClipboardRecentContentIOS* ClipboardRecentContentIOS::GetInstance() {
 
 bool ClipboardRecentContentIOS::GetRecentURLFromClipboard(GURL* url) const {
   DCHECK(url);
-  if (-[lastPasteboardChangeDate_ timeIntervalSinceNow] >
-      kMaximumAgeOfClipboardInSeconds) {
+  if (GetClipboardContentAge() > kMaximumAgeOfClipboard ||
+      [UIPasteboard generalPasteboard].changeCount ==
+          suppressedPasteboardEntryCount_) {
     return false;
   }
+
   if (urlFromPasteboardCache_.is_valid()) {
     *url = urlFromPasteboardCache_;
     return true;
   }
   return false;
+}
+
+base::TimeDelta ClipboardRecentContentIOS::GetClipboardContentAge() const {
+  return base::TimeDelta::FromSeconds(
+      static_cast<int64>(-[lastPasteboardChangeDate_ timeIntervalSinceNow]));
+}
+
+void ClipboardRecentContentIOS::SuppressClipboardContent() {
+  suppressedPasteboardEntryCount_ =
+      [UIPasteboard generalPasteboard].changeCount;
+  SaveToUserDefaults();
 }
 
 void ClipboardRecentContentIOS::PasteboardChanged() {
@@ -107,27 +122,59 @@ void ClipboardRecentContentIOS::PasteboardChanged() {
   }
   lastPasteboardChangeDate_.reset([[NSDate date] retain]);
   lastPasteboardChangeCount_ = [UIPasteboard generalPasteboard].changeCount;
-  SaveToUserDefaults();
+  if (lastPasteboardChangeCount_ != suppressedPasteboardEntryCount_) {
+    suppressedPasteboardEntryCount_ = NSIntegerMax;
+  }
 }
 
-ClipboardRecentContentIOS::ClipboardRecentContentIOS()
-    : ClipboardRecentContent() {
+ClipboardRecentContentIOS::ClipboardRecentContentIOS() {
+  Init(base::TimeDelta::FromMilliseconds(base::SysInfo::Uptime()));
+}
+
+ClipboardRecentContentIOS::ClipboardRecentContentIOS(base::TimeDelta uptime) {
+  Init(uptime);
+}
+
+void ClipboardRecentContentIOS::Init(base::TimeDelta uptime) {
+  lastPasteboardChangeCount_ = NSIntegerMax;
+  suppressedPasteboardEntryCount_ = NSIntegerMax;
   urlFromPasteboardCache_ = URLFromPasteboard();
   LoadFromUserDefaults();
-  // The pasteboard's changeCount is reset to zero when the device is restarted.
-  // This means that even if |changeCount| hasn't changed, the pasteboard
-  // content could have changed. In order to avoid missing pasteboard changes,
-  // the changeCount is reset if the device has restarted.
-  NSInteger changeCount = [UIPasteboard generalPasteboard].changeCount;
-  if (changeCount != lastPasteboardChangeCount_ ||
-      DeviceRestartedSincePasteboardChanged()) {
-    PasteboardChanged();
+
+  // On iOS 7 (unlike on iOS 8, despite what the documentation says), the change
+  // count is reset when the device is rebooted.
+  if (uptime < GetClipboardContentAge() &&
+      !base::ios::IsRunningOnIOS8OrLater()) {
+    if ([UIPasteboard generalPasteboard].changeCount == 0) {
+      // The user hasn't pasted anything in the clipboard since the device's
+      // reboot. |PasteboardChanged| isn't called because it would update
+      // |lastPasteboardChangeData_|, and record metrics.
+      lastPasteboardChangeCount_ = 0;
+      if (suppressedPasteboardEntryCount_ != NSIntegerMax) {
+        // If the last time Chrome was running the pasteboard was suppressed,
+        // and the user  has not copied anything since the device launched, then
+        // supress this entry.
+        suppressedPasteboardEntryCount_ = 0;
+      }
+      SaveToUserDefaults();
+    } else {
+      // The user pasted something in the clipboard since the device's reboot.
+      PasteboardChanged();
+    }
+  } else {
+    NSInteger changeCount = [UIPasteboard generalPasteboard].changeCount;
+    if (changeCount != lastPasteboardChangeCount_) {
+      PasteboardChanged();
+    }
   }
+  // Makes sure |lastPasteboardChangeCount_| was properly initialized.
+  DCHECK_NE(lastPasteboardChangeCount_, NSIntegerMax);
   notificationBridge_.reset(
       [[PasteboardNotificationListenerBridge alloc] initWithDelegate:this]);
 }
 
 ClipboardRecentContentIOS::~ClipboardRecentContentIOS() {
+  [notificationBridge_ disconnect];
 }
 
 GURL ClipboardRecentContentIOS::URLFromPasteboard() {
@@ -149,24 +196,31 @@ GURL ClipboardRecentContentIOS::URLFromPasteboard() {
 }
 
 void ClipboardRecentContentIOS::LoadFromUserDefaults() {
-  lastPasteboardChangeCount_ = [[NSUserDefaults standardUserDefaults]
-      integerForKey:kPasteboardChangeCountKey];
-  lastPasteboardChangeDate_.reset([[[NSUserDefaults standardUserDefaults]
-      objectForKey:kPasteboardChangeDateKey] retain]);
+  NSUserDefaults* defaults = [NSUserDefaults standardUserDefaults];
+
+  lastPasteboardChangeCount_ =
+      [defaults integerForKey:kPasteboardChangeCountKey];
+  lastPasteboardChangeDate_.reset(
+      [[defaults objectForKey:kPasteboardChangeDateKey] retain]);
+
+  if ([[[defaults dictionaryRepresentation] allKeys]
+          containsObject:kSuppressedPasteboardEntryCountKey]) {
+    suppressedPasteboardEntryCount_ =
+        [defaults integerForKey:kSuppressedPasteboardEntryCountKey];
+  } else {
+    suppressedPasteboardEntryCount_ = NSIntegerMax;
+  }
+
   DCHECK(!lastPasteboardChangeDate_ ||
          [lastPasteboardChangeDate_ isKindOfClass:[NSDate class]]);
 }
 
 void ClipboardRecentContentIOS::SaveToUserDefaults() {
-  [[NSUserDefaults standardUserDefaults] setInteger:lastPasteboardChangeCount_
-                                             forKey:kPasteboardChangeCountKey];
-  [[NSUserDefaults standardUserDefaults] setObject:lastPasteboardChangeDate_
-                                            forKey:kPasteboardChangeDateKey];
-}
-
-bool ClipboardRecentContentIOS::DeviceRestartedSincePasteboardChanged() {
-  int64 secondsSincePasteboardChange =
-      -static_cast<int64>([lastPasteboardChangeDate_ timeIntervalSinceNow]);
-  int64 secondsSinceLastDeviceRestart = base::SysInfo::Uptime() / 1000;
-  return secondsSincePasteboardChange > secondsSinceLastDeviceRestart;
+  NSUserDefaults* defaults = [NSUserDefaults standardUserDefaults];
+  [defaults setInteger:lastPasteboardChangeCount_
+                forKey:kPasteboardChangeCountKey];
+  [defaults setObject:lastPasteboardChangeDate_
+               forKey:kPasteboardChangeDateKey];
+  [defaults setInteger:suppressedPasteboardEntryCount_
+                forKey:kSuppressedPasteboardEntryCountKey];
 }

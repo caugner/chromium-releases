@@ -12,6 +12,7 @@ import android.content.ContentValues;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.UriMatcher;
+import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.database.MatrixCursor;
 import android.net.Uri;
@@ -27,21 +28,26 @@ import android.text.TextUtils;
 import android.util.Log;
 import android.util.LongSparseArray;
 
+import org.chromium.base.BuildInfo;
 import org.chromium.base.CalledByNative;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.CalledByNativeUnchecked;
 import org.chromium.base.annotations.SuppressFBWarnings;
+import org.chromium.base.library_loader.LibraryProcessType;
+import org.chromium.base.library_loader.ProcessInitException;
 import org.chromium.chrome.browser.bookmark.BookmarkColumns;
 import org.chromium.chrome.browser.bookmark.SearchColumns;
 import org.chromium.chrome.browser.database.SQLiteCursor;
+import org.chromium.chrome.browser.externalauth.ExternalAuthUtils;
+import org.chromium.content.app.ContentApplication;
+import org.chromium.content.browser.BrowserStartupController;
 import org.chromium.sync.AndroidSyncSettings;
 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Vector;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * This class provides access to user data stored in Chrome, such as bookmarks, most visited pages,
@@ -189,11 +195,6 @@ public class ChromeBrowserProvider extends ContentProvider {
     private long mNativeChromeBrowserProvider;
     private BookmarkNode mMobileBookmarksFolder;
 
-    /**
-     * Records whether we've received a call to one of the public ContentProvider APIs.
-     */
-    protected boolean mContentProviderApiCalled;
-
     private void ensureUriMatcherInitialized() {
         synchronized (mInitializeUriMatcherLock) {
             if (mUriMatcher != null) return;
@@ -264,6 +265,21 @@ public class ChromeBrowserProvider extends ContentProvider {
 
     @Override
     public boolean onCreate() {
+        ContentApplication.initCommandLine(getContext());
+
+        BrowserStartupController.get(getContext(), LibraryProcessType.PROCESS_BROWSER)
+                .addStartupCompletedObserver(
+                        new BrowserStartupController.StartupCallback() {
+                            @Override
+                            public void onSuccess(boolean alreadyStarted) {
+                                ensureNativeSideInitialized();
+                            }
+
+                            @Override
+                            public void onFailure() {
+                            }
+                        });
+
         // Pre-load shared preferences object, this happens on a separate thread
         PreferenceManager.getDefaultSharedPreferences(getContext());
         return true;
@@ -291,7 +307,7 @@ public class ChromeBrowserProvider extends ContentProvider {
         return sb.toString();
     }
 
-    protected String getReadWritePermissionNameForBookmarkFolders() {
+    private String getReadWritePermissionNameForBookmarkFolders() {
         return getContext().getApplicationContext().getPackageName() + ".permission."
                 + PERMISSION_READ_WRITE_BOOKMARKS;
     }
@@ -626,6 +642,7 @@ public class ChromeBrowserProvider extends ContentProvider {
         return buildContentUri(getApiAuthority(context), BOOKMARKS_PATH);
     }
 
+    @VisibleForTesting
     public static Uri getSearchesApiUri(Context context) {
         return buildContentUri(getApiAuthority(context), SEARCHES_PATH);
     }
@@ -643,12 +660,12 @@ public class ChromeBrowserProvider extends ContentProvider {
         return nativeGetEditableBookmarkFolders(mNativeChromeBrowserProvider);
     }
 
-    protected BookmarkNode getBookmarkNode(long nodeId, boolean getParent, boolean getChildren,
+    private BookmarkNode getBookmarkNode(long nodeId, boolean getParent, boolean getChildren,
             boolean getFavicons, boolean getThumbnails) {
         // Don't allow going up the hierarchy if sync is disabled and the requested node
         // is the Mobile Bookmarks folder.
         if (getParent && nodeId == getMobileBookmarksFolderId()
-                && !AndroidSyncSettings.get(getContext()).isSyncEnabled()) {
+                && !AndroidSyncSettings.isSyncEnabled(getContext())) {
             getParent = false;
         }
 
@@ -698,7 +715,7 @@ public class ChromeBrowserProvider extends ContentProvider {
         return mMobileBookmarksFolder;
     }
 
-    protected long getMobileBookmarksFolderId() {
+    private long getMobileBookmarksFolderId() {
         BookmarkNode mobileBookmarks = getMobileBookmarksFolder();
         return mobileBookmarks != null ? mobileBookmarks.id() : INVALID_BOOKMARK_ID;
     }
@@ -762,29 +779,43 @@ public class ChromeBrowserProvider extends ContentProvider {
      * ChromeBrowserProvider.
      */
     private boolean canHandleContentProviderApiCall() {
-        mContentProviderApiCalled = true;
-
         if (isInUiThread()) return false;
-        if (!ensureNativeChromeLoaded()) return false;
+        ensureUriMatcherInitialized();
+        if (mNativeChromeBrowserProvider != 0) return true;
+        synchronized (mLoadNativeLock) {
+            ThreadUtils.runOnUiThreadBlocking(new Runnable() {
+                @Override
+                @SuppressFBWarnings("DM_EXIT")
+                public void run() {
+                    if (mNativeChromeBrowserProvider != 0) return;
+                    try {
+                        ((ChromeApplication) getContext().getApplicationContext())
+                                .startBrowserProcessesAndLoadLibrariesSync(
+                                        true /*Start GoogleServicesManager*/);
+                    } catch (ProcessInitException e) {
+                        // Chrome browser runs in the background, so exit silently; but do exit,
+                        // since otherwise the next attempt to use Chrome will find a broken JNI.
+                        System.exit(-1);
+                    }
+                    ensureNativeSideInitialized();
+                }
+            });
+        }
         return true;
     }
 
     /**
-     * Read access restrictions may be set by the manifest or subclasses, but none are set
-     * by default.
      * @return Whether the caller has read access to history and bookmarks information.
      */
-    protected boolean hasReadAccess() {
-        return true;
+    private boolean hasReadAccess() {
+        return hasPermission("com.android.browser.permission.READ_HISTORY_BOOKMARKS");
     }
 
     /**
-     * Write access restrictions may be set by the manifest or subclasses, but none are set
-     * by default.
      * @return Whether the caller has write access to history and bookmarks information.
      */
-    protected boolean hasWriteAccess() {
-        return true;
+    private boolean hasWriteAccess() {
+        return hasPermission("com.android.browser.permission.WRITE_HISTORY_BOOKMARKS");
     }
 
     /**
@@ -904,6 +935,7 @@ public class ChromeBrowserProvider extends ContentProvider {
          * @return true if the two individual nodes contain the same information.
          * The existence of parent and children nodes is checked, but their contents are not.
          */
+        @VisibleForTesting
         public boolean equalContents(BookmarkNode node) {
             return node != null
                     && mId == node.mId
@@ -1158,7 +1190,7 @@ public class ChromeBrowserProvider extends ContentProvider {
     }
 
     private static String buildWhereClause(long id, String selection) {
-        StringBuffer sb = new StringBuffer();
+        StringBuilder sb = new StringBuilder();
         sb.append(BaseColumns._ID);
         sb.append(" = ");
         sb.append(id);
@@ -1182,7 +1214,7 @@ public class ChromeBrowserProvider extends ContentProvider {
      * @return a SQL where class which is inserted the bookmark condition.
      */
     private static String buildBookmarkWhereClause(String selection, boolean isBookmark) {
-        StringBuffer sb = new StringBuffer();
+        StringBuilder sb = new StringBuilder();
         sb.append(BookmarkColumns.BOOKMARK);
         sb.append(isBookmark ? " = 1 " : " = 0");
         if (!TextUtils.isEmpty(selection)) {
@@ -1264,41 +1296,13 @@ public class ChromeBrowserProvider extends ContentProvider {
     }
 
     /**
-     * Returns true if the native side of the class is initialized.
+     * Initialize native side if it hasn't been already initialized.
+     * This is called from BrowserStartupCallback during normal startup except when called
+     * through one of the public ContentProvider APIs.
      */
-    protected boolean isNativeSideInitialized() {
-        return mNativeChromeBrowserProvider != 0;
-    }
-
-    /**
-     * Make sure chrome is running. This method mustn't run on UI thread.
-     *
-     * @return Whether the native chrome process is running successfully once this has returned.
-     */
-    private boolean ensureNativeChromeLoaded() {
-        ensureUriMatcherInitialized();
-
-        synchronized (mLoadNativeLock) {
-            if (mNativeChromeBrowserProvider != 0) return true;
-
-            final AtomicBoolean retVal = new AtomicBoolean(true);
-            ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-                @Override
-                public void run() {
-                    retVal.set(ensureNativeChromeLoadedOnUIThread());
-                }
-            });
-            return retVal.get();
-        }
-    }
-
-    /**
-     * This method should only run on UI thread.
-     */
-    protected boolean ensureNativeChromeLoadedOnUIThread() {
-        if (isNativeSideInitialized()) return true;
-        mNativeChromeBrowserProvider = nativeInit();
-        return isNativeSideInitialized();
+    private void ensureNativeSideInitialized() {
+        ThreadUtils.assertOnUiThread();
+        if (mNativeChromeBrowserProvider == 0) mNativeChromeBrowserProvider = nativeInit();
     }
 
     @Override
@@ -1320,7 +1324,7 @@ public class ChromeBrowserProvider extends ContentProvider {
      * This method should only run on UI thread.
      */
     private void ensureNativeChromeDestroyedOnUIThread() {
-        if (isNativeSideInitialized()) {
+        if (mNativeChromeBrowserProvider != 0) {
             nativeDestroy(mNativeChromeBrowserProvider);
             mNativeChromeBrowserProvider = 0;
         }
@@ -1348,6 +1352,21 @@ public class ChromeBrowserProvider extends ContentProvider {
             }
         }
         getContext().getContentResolver().notifyChange(uri, null);
+    }
+
+    private boolean hasPermission(String permission) {
+        if (BuildInfo.isMncOrLater()) {
+            return getContext().checkCallingOrSelfPermission(
+                    getReadWritePermissionNameForBookmarkFolders())
+                    == PackageManager.PERMISSION_GRANTED;
+        } else {
+            boolean hasPermission = getContext().checkCallingOrSelfPermission(permission)
+                    == PackageManager.PERMISSION_GRANTED;
+            boolean isSystemOrGoogleCaller = ExternalAuthUtils.getInstance().isCallerValid(
+                    getContext(), ExternalAuthUtils.FLAG_SHOULD_BE_GOOGLE_SIGNED
+                            | ExternalAuthUtils.FLAG_SHOULD_BE_SYSTEM);
+            return hasPermission || isSystemOrGoogleCaller;
+        }
     }
 
     private native long nativeInit();

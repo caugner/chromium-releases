@@ -5,7 +5,7 @@
 #include "components/autofill/core/browser/autofill_metrics.h"
 
 #include "base/logging.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/metrics/sparse_histogram.h"
 #include "base/time/time.h"
 #include "components/autofill/core/browser/autofill_type.h"
@@ -604,6 +604,11 @@ void AutofillMetrics::LogNumberOfProfilesAtAutofillableFormSubmission(
 // static
 void AutofillMetrics::LogAddressSuggestionsCount(size_t num_suggestions) {
   UMA_HISTOGRAM_COUNTS("Autofill.AddressSuggestionsCount", num_suggestions);
+}
+
+// static
+void AutofillMetrics::LogSuggestionAcceptedIndex(int index) {
+  UMA_HISTOGRAM_SPARSE_SLOWLY("Autofill.SuggestionAcceptedIndex", index);
 }
 
 void AutofillMetrics::LogPasswordFormQueryVolume(

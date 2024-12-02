@@ -4,6 +4,7 @@
 
 package org.chromium.content.browser.accessibility;
 
+import android.annotation.SuppressLint;
 import android.content.Context;
 import android.graphics.Rect;
 import android.os.Build;
@@ -305,9 +306,9 @@ public class BrowserAccessibilityManager {
                 return previousAtGranularity(granularity, extend);
             }
             case AccessibilityNodeInfo.ACTION_SCROLL_FORWARD:
-                return nativeAdjustSlider(mNativeObj, virtualViewId, true);
+                return scrollForward(virtualViewId);
             case AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD:
-                return nativeAdjustSlider(mNativeObj, virtualViewId, false);
+                return scrollBackward(virtualViewId);
             default:
                 break;
         }
@@ -457,6 +458,22 @@ public class BrowserAccessibilityManager {
 
         mView.requestSendAccessibilityEvent(mView, selectionEvent);
         mView.requestSendAccessibilityEvent(mView, traverseEvent);
+    }
+
+    private boolean scrollForward(int virtualViewId) {
+        if (nativeIsSlider(mNativeObj, virtualViewId)) {
+            return nativeAdjustSlider(mNativeObj, virtualViewId, true);
+        } else {
+            return nativeScroll(mNativeObj, virtualViewId, ScrollDirection.FORWARD);
+        }
+    }
+
+    private boolean scrollBackward(int virtualViewId) {
+        if (nativeIsSlider(mNativeObj, virtualViewId)) {
+            return nativeAdjustSlider(mNativeObj, virtualViewId, false);
+        } else {
+            return nativeScroll(mNativeObj, virtualViewId, ScrollDirection.BACKWARD);
+        }
     }
 
     private boolean moveAccessibilityFocusToId(int newAccessibilityFocusId) {
@@ -715,8 +732,9 @@ public class BrowserAccessibilityManager {
     @CalledByNative
     protected void addAccessibilityNodeInfoActions(AccessibilityNodeInfo node,
             int virtualViewId, boolean canScrollForward, boolean canScrollBackward,
-            boolean clickable, boolean editableText, boolean enabled, boolean focusable,
-            boolean focused) {
+            boolean canScrollUp, boolean canScrollDown, boolean canScrollLeft,
+            boolean canScrollRight, boolean clickable, boolean editableText, boolean enabled,
+            boolean focusable, boolean focused) {
         node.addAction(AccessibilityNodeInfo.ACTION_NEXT_HTML_ELEMENT);
         node.addAction(AccessibilityNodeInfo.ACTION_PREVIOUS_HTML_ELEMENT);
         node.addAction(AccessibilityNodeInfo.ACTION_NEXT_AT_MOVEMENT_GRANULARITY);
@@ -734,6 +752,9 @@ public class BrowserAccessibilityManager {
         if (canScrollBackward) {
             node.addAction(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD);
         }
+
+        // TODO(dmazzoni): add custom actions for scrolling up, down,
+        // left, and right.
 
         if (focusable) {
             if (focused) {
@@ -760,6 +781,7 @@ public class BrowserAccessibilityManager {
         node.setClassName(className);
     }
 
+    @SuppressLint("NewApi")
     @CalledByNative
     private void setAccessibilityNodeInfoContentDescription(
             AccessibilityNodeInfo node, String contentDescription, boolean annotateAsLink) {
@@ -851,6 +873,12 @@ public class BrowserAccessibilityManager {
     @CalledByNative
     protected void setAccessibilityNodeInfoRangeInfo(AccessibilityNodeInfo node,
             int rangeType, float min, float max, float current) {
+        // Requires Lollipop or higher.
+    }
+
+    @CalledByNative
+    protected void setAccessibilityNodeInfoViewIdResourceName(
+            AccessibilityNodeInfo node, String viewIdResourceName) {
         // Requires Lollipop or higher.
     }
 
@@ -1002,4 +1030,8 @@ public class BrowserAccessibilityManager {
             long nativeBrowserAccessibilityManagerAndroid, int id, boolean increment);
     private native void nativeSetAccessibilityFocus(
             long nativeBrowserAccessibilityManagerAndroid, int id);
+    private native boolean nativeIsSlider(
+            long nativeBrowserAccessibilityManagerAndroid, int id);
+    private native boolean nativeScroll(
+            long nativeBrowserAccessibilityManagerAndroid, int id, int direction);
 }

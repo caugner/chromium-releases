@@ -14,6 +14,7 @@
 #include "chrome/browser/search/most_visited_iframe_source.h"
 #include "chrome/browser/search/search.h"
 #include "chrome/browser/search/suggestions/suggestions_source.h"
+#include "chrome/browser/search/thumbnail_source.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/search_engines/ui_thread_search_terms_data.h"
 #include "chrome/browser/thumbnails/thumbnail_list_source.h"
@@ -21,7 +22,6 @@
 #include "chrome/browser/ui/webui/fallback_icon_source.h"
 #include "chrome/browser/ui/webui/favicon_source.h"
 #include "chrome/browser/ui/webui/large_icon_source.h"
-#include "chrome/browser/ui/webui/ntp/thumbnail_source.h"
 #include "chrome/browser/ui/webui/theme_source.h"
 #include "chrome/common/render_messages.h"
 #include "components/favicon/core/fallback_icon_service.h"
@@ -38,7 +38,6 @@
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/color_utils.h"
 #include "ui/gfx/image/image_skia.h"
-#include "ui/gfx/sys_color_change_listener.h"
 
 #if !defined(OS_ANDROID)
 #include "chrome/browser/search/local_ntp_source.h"
@@ -338,7 +337,7 @@ void InstantService::OnThemeChanged(ThemeService* theme_service) {
                      SkColorGetB(header_color));
 
   // Invert colors if needed.
-  if (gfx::IsInvertedColorScheme()) {
+  if (color_utils::IsInvertedColorScheme()) {
     background_color = color_utils::InvertColor(background_color);
     text_color = color_utils::InvertColor(text_color);
     link_color = color_utils::InvertColor(link_color);
@@ -450,7 +449,11 @@ void InstantService::OnTemplateURLServiceChanged() {
 void InstantService::TopSitesLoaded(history::TopSites* top_sites) {
 }
 
-void InstantService::TopSitesChanged(history::TopSites* top_sites) {
+void InstantService::TopSitesChanged(history::TopSites* top_sites,
+                                     ChangeReason change_reason) {
+  // As forced urls already come from tiles, we can safely ignore those updates.
+  if (change_reason == history::TopSitesObserver::ChangeReason::FORCED_URL)
+    return;
   top_sites->GetMostVisitedURLs(
       base::Bind(&InstantService::OnMostVisitedItemsReceived,
                  weak_ptr_factory_.GetWeakPtr()),

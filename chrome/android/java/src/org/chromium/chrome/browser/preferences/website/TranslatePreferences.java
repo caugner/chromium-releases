@@ -16,11 +16,12 @@ import android.view.MenuItem;
 import android.widget.Toast;
 
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.help.HelpAndFeedback;
 import org.chromium.chrome.browser.preferences.ButtonPreference;
 import org.chromium.chrome.browser.preferences.ChromeSwitchPreference;
 import org.chromium.chrome.browser.preferences.ManagedPreferenceDelegate;
 import org.chromium.chrome.browser.preferences.PrefServiceBridge;
-import org.chromium.chrome.browser.preferences.Preferences;
+import org.chromium.chrome.browser.profiles.Profile;
 
 /**
  * Fragment to keep track of the translate preferences.
@@ -88,7 +89,9 @@ public class TranslatePreferences extends PreferenceFragment {
     public boolean onOptionsItemSelected(MenuItem item) {
         int itemId = item.getItemId();
         if (itemId == R.id.menu_id_translate_help) {
-            ((Preferences) getActivity()).showGoogleTranslateHelp();
+            HelpAndFeedback.getInstance(getActivity())
+                    .show(getActivity(), getString(R.string.help_context_translate),
+                            Profile.getLastUsedProfile(), null);
             return true;
         }
         return false;

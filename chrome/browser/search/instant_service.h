@@ -122,7 +122,8 @@ class InstantService : public KeyedService,
 
   // TopSitesObserver:
   void TopSitesLoaded(history::TopSites* top_sites) override;
-  void TopSitesChanged(history::TopSites* top_sites) override;
+  void TopSitesChanged(history::TopSites* top_sites,
+                       ChangeReason change_reason) override;
 
   // Called when a renderer process is terminated.
   void OnRendererProcessTerminated(int process_id);
@@ -161,7 +162,7 @@ class InstantService : public KeyedService,
   // text or assets properly with the omnibox.
   int omnibox_start_margin_;
 
-  ObserverList<InstantServiceObserver> observers_;
+  base::ObserverList<InstantServiceObserver> observers_;
 
   content::NotificationRegistrar registrar_;
 

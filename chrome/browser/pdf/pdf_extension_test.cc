@@ -26,10 +26,23 @@
 
 const int kNumberLoadTestParts = 10;
 
+bool GetGuestCallback(content::WebContents** guest_out,
+                      content::WebContents* guest) {
+  EXPECT_FALSE(*guest_out);
+  *guest_out = guest;
+  // Return false so that we iterate through all the guests and verify there is
+  // only one.
+  return false;
+}
+
 class PDFExtensionTest : public ExtensionApiTest,
                          public testing::WithParamInterface<int> {
  public:
   ~PDFExtensionTest() override {}
+
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    command_line->AppendSwitch(switches::kDisablePdfMaterialUI);
+  }
 
   void SetUpOnMainThread() override {
     ExtensionApiTest::SetUpOnMainThread();
@@ -63,7 +76,13 @@ class PDFExtensionTest : public ExtensionApiTest,
     extensions::ResultCatcher catcher;
 
     GURL url(embedded_test_server()->GetURL("/pdf/" + pdf_filename));
-    ui_test_utils::NavigateToURL(browser(), url);
+
+    // It should be good enough to just navigate to the URL. But loading up the
+    // BrowserPluginGuest seems to happen asynchronously as there was flakiness
+    // being seen due to the BrowserPluginGuest not being available yet (see
+    // crbug.com/498077). So instead use |LoadPdf| which ensures that the PDF is
+    // loaded before continuing.
+    ASSERT_TRUE(LoadPdf(url));
 
     content::WebContents* contents =
         browser()->tab_strip_model()->GetActiveWebContents();
@@ -72,7 +91,6 @@ class PDFExtensionTest : public ExtensionApiTest,
     content::WebContents* guest_contents =
         guest_manager->GetFullPageGuest(contents);
     ASSERT_TRUE(guest_contents);
-    EXPECT_TRUE(content::WaitForLoadStop(guest_contents));
 
     base::FilePath test_data_dir;
     PathService::Get(chrome::DIR_TEST_DATA, &test_data_dir);
@@ -147,6 +165,48 @@ class PDFExtensionTest : public ExtensionApiTest,
     // someone deleting the directory and silently making the test pass.
     ASSERT_GE(count, 1u);
   }
+
+  void TestGetSelectedTextReply(GURL url, bool expect_success) {
+    ASSERT_TRUE(LoadPdf(url));
+
+    content::WebContents* web_contents =
+        browser()->tab_strip_model()->GetActiveWebContents();
+
+    // Reach into the guest and hook into it such that it posts back a 'flush'
+    // message after every getSelectedTextReply message sent.
+    content::BrowserPluginGuestManager* guest_manager =
+        web_contents->GetBrowserContext()->GetGuestManager();
+    content::WebContents* guest_contents = nullptr;
+    ASSERT_NO_FATAL_FAILURE(guest_manager->ForEachGuest(
+        web_contents, base::Bind(&GetGuestCallback, &guest_contents)));
+    ASSERT_TRUE(guest_contents);
+    ASSERT_TRUE(content::ExecuteScript(
+        guest_contents,
+        "var oldSendScriptingMessage = "
+        "    PDFViewer.prototype.sendScriptingMessage_;"
+        "PDFViewer.prototype.sendScriptingMessage_ = function(message) {"
+        "  oldSendScriptingMessage.bind(this)(message);"
+        "  if (message.type == 'getSelectedTextReply')"
+        "    this.parentWindow_.postMessage('flush', '*');"
+        "}"));
+
+    // Add an event listener for flush messages and request the selected text.
+    // If we get a flush message without receiving getSelectedText we know that
+    // the message didn't come through.
+    bool success = false;
+    ASSERT_TRUE(content::ExecuteScriptAndExtractBool(
+        web_contents,
+        "window.addEventListener('message', function(event) {"
+        "  if (event.data == 'flush')"
+        "    window.domAutomationController.send(false);"
+        "  if (event.data.type == 'getSelectedTextReply')"
+        "    window.domAutomationController.send(true);"
+        "});"
+        "document.getElementsByTagName('embed')[0].postMessage("
+        "    {type: 'getSelectedText'});",
+        &success));
+    ASSERT_EQ(expect_success, success);
+  }
 };
 
 IN_PROC_BROWSER_TEST_P(PDFExtensionTest, Load) {
@@ -188,5 +248,82 @@ IN_PROC_BROWSER_TEST_F(PDFExtensionTest, ParamsParser) {
 }
 
 IN_PROC_BROWSER_TEST_F(PDFExtensionTest, ZoomManager) {
+  RunTestsInFile("zoom_manager_test.js", "test.pdf");
+}
+
+// Ensure that the internal PDF plugin application/x-google-chrome-pdf won't be
+// loaded if it's not loaded in the chrome extension page.
+IN_PROC_BROWSER_TEST_F(PDFExtensionTest, EnsureInternalPluginDisabled) {
+  std::string url = embedded_test_server()->GetURL("/pdf/test.pdf").spec();
+  std::string data_url =
+      "data:text/html,"
+      "<html><body>"
+      "<embed type=\"application/x-google-chrome-pdf\" src=\"" +
+      url +
+      "\">"
+      "</body></html>";
+  ui_test_utils::NavigateToURL(browser(), GURL(data_url));
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  bool plugin_loaded = false;
+  ASSERT_TRUE(content::ExecuteScriptAndExtractBool(
+      web_contents,
+      "var plugin_loaded = "
+      "    document.getElementsByTagName('embed')[0].postMessage !== undefined;"
+      "window.domAutomationController.send(plugin_loaded);",
+      &plugin_loaded));
+  ASSERT_FALSE(plugin_loaded);
+}
+
+// Ensure cross-origin replies won't work for getSelectedText.
+IN_PROC_BROWSER_TEST_F(PDFExtensionTest, EnsureCrossOriginRepliesBlocked) {
+  std::string url = embedded_test_server()->GetURL("/pdf/test.pdf").spec();
+  std::string data_url =
+      "data:text/html,"
+      "<html><body>"
+      "<embed type=\"application/pdf\" src=\"" +
+      url +
+      "\">"
+      "</body></html>";
+  TestGetSelectedTextReply(GURL(data_url), false);
+}
+
+// Ensure same-origin replies do work for getSelectedText.
+IN_PROC_BROWSER_TEST_F(PDFExtensionTest, EnsureSameOriginRepliesAllowed) {
+  TestGetSelectedTextReply(embedded_test_server()->GetURL("/pdf/test.pdf"),
+                           true);
+}
+
+class MaterialPDFExtensionTest : public PDFExtensionTest {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    command_line->AppendSwitch(switches::kEnablePdfMaterialUI);
+  }
+};
+
+IN_PROC_BROWSER_TEST_F(MaterialPDFExtensionTest, Basic) {
+  RunTestsInFile("basic_test_material.js", "test.pdf");
+}
+
+IN_PROC_BROWSER_TEST_F(MaterialPDFExtensionTest, BasicPlugin) {
+  RunTestsInFile("basic_plugin_test.js", "test.pdf");
+}
+
+IN_PROC_BROWSER_TEST_F(MaterialPDFExtensionTest, Viewport) {
+  RunTestsInFile("viewport_test.js", "test.pdf");
+}
+
+IN_PROC_BROWSER_TEST_F(MaterialPDFExtensionTest, Bookmark) {
+  RunTestsInFile("bookmarks_test.js", "test-bookmarks.pdf");
+}
+
+IN_PROC_BROWSER_TEST_F(MaterialPDFExtensionTest, Navigator) {
+  RunTestsInFile("navigator_test.js", "test.pdf");
+}
+
+IN_PROC_BROWSER_TEST_F(MaterialPDFExtensionTest, ParamsParser) {
+  RunTestsInFile("params_parser_test.js", "test.pdf");
+}
+
+IN_PROC_BROWSER_TEST_F(MaterialPDFExtensionTest, ZoomManager) {
   RunTestsInFile("zoom_manager_test.js", "test.pdf");
 }

@@ -12,7 +12,7 @@
 #include "base/bind.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/prefs/pref_registry.h"
 #include "base/prefs/pref_service.h"
 #include "base/prefs/scoped_user_pref_update.h"
@@ -93,7 +93,9 @@ const char* kContentSettingsExceptionsPrefs[] = {
 #elif defined(OS_ANDROID) || defined(OS_CHROMEOS)
     prefs::kContentSettingsProtectedMediaIdentifierPatternPairs,
 #endif
-    prefs::kContentSettingsAppBannerPatternPairs
+    prefs::kContentSettingsAppBannerPatternPairs,
+    prefs::kContentSettingsSiteEngagementPatternPairs,
+    prefs::kContentSettingsDurableStoragePatternPairs,
 };
 static_assert(arraysize(kContentSettingsExceptionsPrefs)
               == CONTENT_SETTINGS_NUM_TYPES,
@@ -121,12 +123,9 @@ void PrefProvider::RegisterProfilePrefs(
                                 false);
 
   for (int i = 0; i < CONTENT_SETTINGS_NUM_TYPES; ++i) {
-    if (IsContentSettingsTypeSyncable(ContentSettingsType(i))) {
-      registry->RegisterDictionaryPref(kContentSettingsExceptionsPrefs[i],
-          user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
-    } else {
-      registry->RegisterDictionaryPref(kContentSettingsExceptionsPrefs[i]);
-    }
+    registry->RegisterDictionaryPref(
+        kContentSettingsExceptionsPrefs[i],
+        PrefRegistrationFlagsForType(ContentSettingsType(i)));
   }
 }
 
@@ -404,8 +403,8 @@ void PrefProvider::ReadContentSettingsFromOldPref() {
     bool is_dictionary = i.value().GetAsDictionary(&settings_dictionary);
     DCHECK(is_dictionary);
 
-    for (size_t i = 0; i < CONTENT_SETTINGS_NUM_TYPES; ++i) {
-      ContentSettingsType content_type = static_cast<ContentSettingsType>(i);
+    for (size_t k = 0; k < CONTENT_SETTINGS_NUM_TYPES; ++k) {
+      ContentSettingsType content_type = static_cast<ContentSettingsType>(k);
 
       std::string res_dictionary_path;
       if (GetResourceTypeName(content_type, &res_dictionary_path)) {
@@ -435,14 +434,14 @@ void PrefProvider::ReadContentSettingsFromOldPref() {
         const base::DictionaryValue* setting = NULL;
         // TODO(xians): Handle the non-dictionary types.
         if (settings_dictionary->GetDictionaryWithoutPathExpansion(
-            GetTypeName(ContentSettingsType(i)), &setting)) {
+            GetTypeName(content_type), &setting)) {
           DCHECK(!setting->empty());
           value = setting->DeepCopy();
         }
       } else {
         int setting = CONTENT_SETTING_DEFAULT;
         if (settings_dictionary->GetIntegerWithoutPathExpansion(
-                GetTypeName(ContentSettingsType(i)), &setting)) {
+                GetTypeName(content_type), &setting)) {
           DCHECK_NE(CONTENT_SETTING_DEFAULT, setting);
           setting = FixObsoleteCookiePromptMode(content_type,
                                                 ContentSetting(setting));

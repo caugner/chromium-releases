@@ -8,6 +8,12 @@
     return true;
   }
 
+  // Send a message to our opener's opener.
+  function postToOpenerOfOpener(msg, origin) {
+    window.opener.opener.postMessage(msg, origin);
+    return true;
+  }
+
   // Send a message to a window named "foo".
   function postToFoo(msg) {
     var w = window.open("", "foo");
@@ -15,6 +21,15 @@
     return true;
   }
   
+  function openPopup(url) {
+    popup = window.open(url);
+  }
+
+  function postToPopup(msg) {
+    popup.postMessage(msg, "*");
+    return true;
+  }
+
   // Send a message to parent.
   function postToParent(msg) {
     parent.postMessage(msg, "*");
@@ -54,7 +69,7 @@
       domAutomationController.setAutomationId(0);
       domAutomationController.send("done-" + window.name);
     }
-    if (event.ports.length > 0) {
+    if (event.ports && event.ports.length > 0) {
       receivedMessagesWithPort++;
       var port = event.ports[0];
       port.start();

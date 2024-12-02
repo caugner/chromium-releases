@@ -16,6 +16,7 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
 #include "extensions/browser/api_activity_monitor.h"
+#include "extensions/browser/event_router_factory.h"
 #include "extensions/browser/extension_host.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
@@ -136,7 +137,7 @@ void EventRouter::DispatchExtensionMessage(IPC::Sender* ipc_sender,
 
 // static
 EventRouter* EventRouter::Get(content::BrowserContext* browser_context) {
-  return ExtensionSystem::Get(browser_context)->event_router();
+  return EventRouterFactory::GetForBrowserContext(browser_context);
 }
 
 // static
@@ -178,17 +179,16 @@ EventRouter::EventRouter(BrowserContext* browser_context,
       extension_prefs_(extension_prefs),
       extension_registry_observer_(this),
       listeners_(this) {
-  registrar_.Add(this, content::NOTIFICATION_RENDERER_PROCESS_TERMINATED,
-                 content::NotificationService::AllSources());
-  registrar_.Add(this, content::NOTIFICATION_RENDERER_PROCESS_CLOSED,
-                 content::NotificationService::AllSources());
   registrar_.Add(this,
                  extensions::NOTIFICATION_EXTENSION_ENABLED,
                  content::Source<BrowserContext>(browser_context_));
   extension_registry_observer_.Add(ExtensionRegistry::Get(browser_context_));
 }
 
-EventRouter::~EventRouter() {}
+EventRouter::~EventRouter() {
+  for (auto process : observed_process_set_)
+    process->RemoveObserver(this);
+}
 
 void EventRouter::AddEventListener(const std::string& event_name,
                                    content::RenderProcessHost* process,
@@ -247,6 +247,13 @@ void EventRouter::OnListenerAdded(const EventListener* listener) {
   ObserverMap::iterator observer = observers_.find(base_event_name);
   if (observer != observers_.end())
     observer->second->OnListenerAdded(details);
+
+  content::RenderProcessHost* process = listener->process();
+  if (process) {
+    bool inserted = observed_process_set_.insert(process).second;
+    if (inserted)
+      process->AddObserver(this);
+  }
 }
 
 void EventRouter::OnListenerRemoved(const EventListener* listener) {
@@ -258,6 +265,20 @@ void EventRouter::OnListenerRemoved(const EventListener* listener) {
   ObserverMap::iterator observer = observers_.find(base_event_name);
   if (observer != observers_.end())
     observer->second->OnListenerRemoved(details);
+}
+
+void EventRouter::RenderProcessExited(content::RenderProcessHost* host,
+                                      base::TerminationStatus status,
+                                      int exit_code) {
+  listeners_.RemoveListenersForProcess(host);
+  observed_process_set_.erase(host);
+  host->RemoveObserver(this);
+}
+
+void EventRouter::RenderProcessHostDestroyed(content::RenderProcessHost* host) {
+  listeners_.RemoveListenersForProcess(host);
+  observed_process_set_.erase(host);
+  host->RemoveObserver(this);
 }
 
 void EventRouter::AddLazyEventListener(const std::string& event_name,
@@ -638,8 +659,7 @@ bool EventRouter::MaybeLoadLazyBackgroundPageToDispatchEvent(
   if (!CanDispatchEventToBrowserContext(context, extension, event))
     return false;
 
-  LazyBackgroundTaskQueue* queue = ExtensionSystem::Get(
-      context)->lazy_background_task_queue();
+  LazyBackgroundTaskQueue* queue = LazyBackgroundTaskQueue::Get(context);
   if (queue->ShouldEnqueueTask(context, extension)) {
     linked_ptr<Event> dispatched_event(event);
 
@@ -738,22 +758,14 @@ void EventRouter::Observe(int type,
                           const content::NotificationSource& source,
                           const content::NotificationDetails& details) {
   switch (type) {
-    case content::NOTIFICATION_RENDERER_PROCESS_TERMINATED:
-    case content::NOTIFICATION_RENDERER_PROCESS_CLOSED: {
-      content::RenderProcessHost* renderer =
-          content::Source<content::RenderProcessHost>(source).ptr();
-      // Remove all event listeners associated with this renderer.
-      listeners_.RemoveListenersForProcess(renderer);
-      break;
-    }
     case extensions::NOTIFICATION_EXTENSION_ENABLED: {
       // If the extension has a lazy background page, make sure it gets loaded
       // to register the events the extension is interested in.
       const Extension* extension =
           content::Details<const Extension>(details).ptr();
       if (BackgroundInfo::HasLazyBackgroundPage(extension)) {
-        LazyBackgroundTaskQueue* queue = ExtensionSystem::Get(
-            browser_context_)->lazy_background_task_queue();
+        LazyBackgroundTaskQueue* queue =
+            LazyBackgroundTaskQueue::Get(browser_context_);
         queue->AddPendingTask(browser_context_, extension->id(),
                               base::Bind(&DoNothing));
       }
@@ -782,32 +794,38 @@ void EventRouter::OnExtensionUnloaded(content::BrowserContext* browser_context,
   listeners_.RemoveListenersForExtension(extension->id());
 }
 
-Event::Event(const std::string& event_name,
+Event::Event(events::HistogramValue histogram_value,
+             const std::string& event_name,
              scoped_ptr<base::ListValue> event_args)
-    : event_name(event_name),
+    : histogram_value(histogram_value),
+      event_name(event_name),
       event_args(event_args.Pass()),
       restrict_to_browser_context(NULL),
       user_gesture(EventRouter::USER_GESTURE_UNKNOWN) {
   DCHECK(this->event_args.get());
 }
 
-Event::Event(const std::string& event_name,
+Event::Event(events::HistogramValue histogram_value,
+             const std::string& event_name,
              scoped_ptr<base::ListValue> event_args,
              BrowserContext* restrict_to_browser_context)
-    : event_name(event_name),
+    : histogram_value(histogram_value),
+      event_name(event_name),
       event_args(event_args.Pass()),
       restrict_to_browser_context(restrict_to_browser_context),
       user_gesture(EventRouter::USER_GESTURE_UNKNOWN) {
   DCHECK(this->event_args.get());
 }
 
-Event::Event(const std::string& event_name,
+Event::Event(events::HistogramValue histogram_value,
+             const std::string& event_name,
              scoped_ptr<ListValue> event_args,
              BrowserContext* restrict_to_browser_context,
              const GURL& event_url,
              EventRouter::UserGestureState user_gesture,
              const EventFilteringInfo& filter_info)
-    : event_name(event_name),
+    : histogram_value(histogram_value),
+      event_name(event_name),
       event_args(event_args.Pass()),
       restrict_to_browser_context(restrict_to_browser_context),
       event_url(event_url),
@@ -819,11 +837,9 @@ Event::Event(const std::string& event_name,
 Event::~Event() {}
 
 Event* Event::DeepCopy() {
-  Event* copy = new Event(event_name,
+  Event* copy = new Event(histogram_value, event_name,
                           scoped_ptr<base::ListValue>(event_args->DeepCopy()),
-                          restrict_to_browser_context,
-                          event_url,
-                          user_gesture,
+                          restrict_to_browser_context, event_url, user_gesture,
                           filter_info);
   copy->will_dispatch_callback = will_dispatch_callback;
   return copy;

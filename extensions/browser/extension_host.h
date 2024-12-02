@@ -98,7 +98,8 @@ class ExtensionHost : public DeferredStartRenderHost,
   void OnNetworkRequestDone(uint64 request_id);
 
   // content::WebContentsObserver:
-  bool OnMessageReceived(const IPC::Message& message) override;
+  bool OnMessageReceived(const IPC::Message& message,
+                         content::RenderFrameHost* host) override;
   void RenderViewCreated(content::RenderViewHost* render_view_host) override;
   void RenderViewDeleted(content::RenderViewHost* render_view_host) override;
   void RenderViewReady() override;
@@ -151,7 +152,6 @@ class ExtensionHost : public DeferredStartRenderHost,
       DeferredStartRenderHostObserver* observer) override;
 
   // Message handlers.
-  void OnRequest(const ExtensionHostMsg_Request_Params& params);
   void OnEventAck(int event_id);
   void OnIncrementLazyKeepaliveCount();
   void OnDecrementLazyKeepaliveCount();
@@ -193,8 +193,6 @@ class ExtensionHost : public DeferredStartRenderHost,
   // Messages sent out to the renderer that have not been acknowledged yet.
   std::set<int> unacked_messages_;
 
-  ExtensionFunctionDispatcher extension_function_dispatcher_;
-
   // The type of view being hosted.
   ViewType extension_host_type_;
 
@@ -209,8 +207,8 @@ class ExtensionHost : public DeferredStartRenderHost,
   // started only once the ExtensionHost has exited the ExtensionHostQueue.
   scoped_ptr<base::ElapsedTimer> load_start_;
 
-  ObserverList<ExtensionHostObserver> observer_list_;
-  ObserverList<DeferredStartRenderHostObserver>
+  base::ObserverList<ExtensionHostObserver> observer_list_;
+  base::ObserverList<DeferredStartRenderHostObserver>
       deferred_start_render_host_observer_list_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionHost);

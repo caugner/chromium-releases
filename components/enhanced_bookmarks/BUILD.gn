@@ -14,8 +14,6 @@ source_set("enhanced_bookmarks") {
     "bookmark_image_service.h",
     "bookmark_server_cluster_service.cc",
     "bookmark_server_cluster_service.h",
-    "bookmark_server_search_service.cc",
-    "bookmark_server_search_service.h",
     "bookmark_server_service.cc",
     "bookmark_server_service.h",
     "enhanced_bookmark_model.cc",
@@ -44,6 +42,9 @@ source_set("enhanced_bookmarks") {
     "//base",
     "//components/bookmarks/browser",
     "//components/enhanced_bookmarks/proto",
+    "//components/keyed_service/core",
+    "//components/signin/core/browser",
+    "//components/sync_driver",
     "//skia",
     "//sql",
     "//ui/gfx",
@@ -63,7 +64,6 @@ if (is_android) {
     ]
     outputs = [
       "org/chromium/chrome/browser/enhanced_bookmarks/LaunchLocation.java",
-      "org/chromium/chrome/browser/enhanced_bookmarks/ViewMode.java",
     ]
   }
 }

@@ -4,6 +4,7 @@
 
 #include "chrome/browser/chrome_content_browser_client.h"
 
+#include <map>
 #include <set>
 #include <utility>
 #include <vector>
@@ -12,13 +13,15 @@
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/files/scoped_file.h"
-#include "base/i18n/icu_util.h"
 #include "base/lazy_instance.h"
 #include "base/path_service.h"
 #include "base/prefs/pref_service.h"
 #include "base/prefs/scoped_user_pref_update.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "chrome/browser/after_startup_task_utils.h"
 #include "chrome/browser/browser_about_handler.h"
@@ -30,7 +33,7 @@
 #include "chrome/browser/chrome_content_browser_client_parts.h"
 #include "chrome/browser/chrome_net_benchmarking_message_filter.h"
 #include "chrome/browser/chrome_quota_permission_context.h"
-#include "chrome/browser/content_settings/cookie_settings.h"
+#include "chrome/browser/content_settings/cookie_settings_factory.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/devtools/chrome_devtools_manager_delegate.h"
@@ -81,6 +84,7 @@
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/chrome_version_info.h"
 #include "chrome/common/env_vars.h"
 #include "chrome/common/logging_chrome.h"
 #include "chrome/common/pepper_permission_util.h"
@@ -93,6 +97,7 @@
 #include "components/cdm/browser/cdm_message_filter_android.h"
 #include "components/cloud_devices/common/cloud_devices_switches.h"
 #include "components/content_settings/core/browser/content_settings_utils.h"
+#include "components/content_settings/core/browser/cookie_settings.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/data_reduction_proxy/content/browser/data_reduction_proxy_message_filter.h"
@@ -104,6 +109,7 @@
 #include "components/signin/core/common/profile_management_switches.h"
 #include "components/translate/core/common/translate_switches.h"
 #include "components/url_fixer/url_fixer.h"
+#include "components/variations/variations_associated_data.h"
 #include "content/public/browser/browser_child_process_host.h"
 #include "content/public/browser/browser_main_parts.h"
 #include "content/public/browser/browser_ppapi_host.h"
@@ -120,10 +126,14 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/child_process_host.h"
 #include "content/public/common/content_descriptors.h"
+#include "content/public/common/sandbox_type.h"
 #include "content/public/common/service_registry.h"
 #include "content/public/common/url_utils.h"
 #include "content/public/common/web_preferences.h"
+#include "device/devices_app/public/cpp/constants.h"
+#include "device/devices_app/public/cpp/devices_app_factory.h"
 #include "gin/v8_initializer.h"
+#include "mojo/application/public/cpp/application_delegate.h"
 #include "net/base/mime_util.h"
 #include "net/cookies/canonical_cookie.h"
 #include "net/cookies/cookie_options.h"
@@ -163,6 +173,7 @@
 #include "chrome/common/descriptors_android.h"
 #include "components/crash/browser/crash_dump_manager_android.h"
 #include "components/service_tab_launcher/browser/android/service_tab_launcher.h"
+#include "ui/base/resource/resource_bundle_android.h"
 #elif defined(OS_POSIX)
 #include "chrome/browser/chrome_browser_main_posix.h"
 #endif
@@ -238,6 +249,10 @@
 
 #if defined(ENABLE_WEBRTC)
 #include "chrome/browser/media/webrtc_logging_handler_host.h"
+#endif
+
+#if defined(ENABLE_MEDIA_ROUTER)
+#include "chrome/browser/media/router/presentation_service_delegate_impl.h"
 #endif
 
 using base::FileDescriptor;
@@ -494,15 +509,17 @@ void SetApplicationLocaleOnIOThread(const std::string& locale) {
 }
 
 void HandleBlockedPopupOnUIThread(const BlockedWindowParams& params) {
-  // TODO(jochen): This code path should use RenderFrameHosts. See
-  // http://crbug.com/431769 for details.
-  RenderViewHost* render_view_host =
-      RenderViewHost::FromID(params.render_process_id(), params.opener_id());
-  if (!render_view_host)
+  RenderFrameHost* render_frame_host = RenderFrameHost::FromID(
+      params.render_process_id(), params.opener_render_frame_id());
+  if (!render_frame_host)
     return;
-  WebContents* tab = WebContents::FromRenderViewHost(render_view_host);
-  // The tab might already have navigated away.
-  if (!tab || tab->GetRenderViewHost() != render_view_host)
+  WebContents* tab = WebContents::FromRenderFrameHost(render_frame_host);
+  // The tab might already have navigated away.  We only need to do this check
+  // for main frames, since the RenderFrameHost for a subframe opener will have
+  // already been deleted if the main frame navigates away.
+  if (!tab ||
+      (!render_frame_host->GetParent() &&
+       tab->GetMainFrame() != render_frame_host))
     return;
 
   prerender::PrerenderContents* prerender_contents =
@@ -545,9 +562,8 @@ class SafeBrowsingSSLCertReporter : public SSLCertReporter {
 #if defined(OS_ANDROID)
 
 void HandleSingleTabModeBlockOnUIThread(const BlockedWindowParams& params) {
-  WebContents* web_contents =
-      tab_util::GetWebContentsByID(params.render_process_id(),
-                                   params.opener_id());
+  WebContents* web_contents = tab_util::GetWebContentsByFrameID(
+      params.render_process_id(), params.opener_render_frame_id());
   if (!web_contents)
     return;
 
@@ -603,10 +619,6 @@ namespace chrome {
 
 ChromeContentBrowserClient::ChromeContentBrowserClient()
     :
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
-      v8_natives_fd_(-1),
-      v8_snapshot_fd_(-1),
-#endif  // OS_POSIX && !OS_MACOSX
       weak_factory_(this) {
 #if defined(ENABLE_PLUGINS)
   for (size_t i = 0; i < arraysize(kPredefinedAllowedDevChannelOrigins); ++i)
@@ -865,7 +877,7 @@ void ChromeContentBrowserClient::RenderProcessWillLaunch(
     extra_parts_[i]->RenderProcessWillLaunch(host);
 
   RendererContentSettingRules rules;
-  if (host->IsIsolatedGuest()) {
+  if (host->IsForGuestsOnly()) {
 #if defined(ENABLE_EXTENSIONS)
     GetGuestViewDefaultContentSettingRules(profile->IsOffTheRecord(), &rules);
 #else
@@ -1166,6 +1178,62 @@ bool IsAutoReloadVisibleOnlyEnabled() {
   return true;
 }
 
+void MaybeAppendBlinkSettingsSwitchForFieldTrial(
+    const base::CommandLine& browser_command_line,
+    base::CommandLine* command_line) {
+  // List of field trials that modify the blink-settings command line flag. No
+  // two field trials in the list should specify the same keys, otherwise one
+  // field trial may overwrite another. See Source/core/frame/Settings.in in
+  // Blink for the list of valid keys.
+  static const char* const kBlinkSettingsFieldTrials[] = {
+    // Keys: backgroundHtmlParserOutstandingTokenLimit
+    //       backgroundHtmlParserPendingTokenLimit
+    "BackgroundHtmlParserTokenLimits",
+
+    // Keys: doHtmlPreloadScanning
+    "HtmlPreloadScanning",
+
+    // Keys: lowPriorityIframes
+    "LowPriorityIFrames",
+  };
+
+  std::vector<std::string> blink_settings;
+  for (const char* field_trial_name : kBlinkSettingsFieldTrials) {
+    // Each blink-settings field trial should include a forcing_flag group,
+    // to make sure that clients that specify the blink-settings flag on the
+    // command line are excluded from the experiment groups. To make
+    // sure we assign clients that specify this flag to the forcing_flag
+    // group, we must call GetVariationParams for each field trial first
+    // (for example, before checking HasSwitch() and returning), since
+    // GetVariationParams has the side-effect of assigning the client to
+    // a field trial group.
+    std::map<std::string, std::string> params;
+    if (variations::GetVariationParams(field_trial_name, &params)) {
+      for (const auto& param : params) {
+        blink_settings.push_back(base::StringPrintf(
+            "%s=%s", param.first.c_str(), param.second.c_str()));
+      }
+    }
+  }
+  if (blink_settings.empty()) {
+    return;
+  }
+
+  if (browser_command_line.HasSwitch(switches::kBlinkSettings) ||
+      command_line->HasSwitch(switches::kBlinkSettings)) {
+    // The field trial is configured to force users that specify the
+    // blink-settings flag into a group with no params, and we return
+    // above if no params were specified, so it's an error if we reach
+    // this point.
+    LOG(WARNING) << "Received field trial params, "
+                    "but blink-settings switch already specified.";
+    return;
+  }
+
+  command_line->AppendSwitchASCII(switches::kBlinkSettings,
+                                  JoinString(blink_settings, ','));
+}
+
 }  // namespace
 
 void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
@@ -1225,15 +1293,6 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
   command_line->AppendSwitchASCII(chromeos::switches::kHomedir,
                                   homedir.value().c_str());
 #endif
-
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
-#if defined(V8_USE_EXTERNAL_STARTUP_DATA)
-  if (process_type != switches::kZygoteProcess) {
-    command_line->AppendSwitch(::switches::kV8NativesPassedByFD);
-    command_line->AppendSwitch(::switches::kV8SnapshotPassedByFD);
-  }
-#endif  // V8_USE_EXTERNAL_STARTUP_DATA
-#endif  // OS_POSIX && !OS_MACOSX
 
   if (process_type == switches::kRendererProcess) {
     content::RenderProcessHost* process =
@@ -1338,6 +1397,9 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
       }
     }
 
+    MaybeAppendBlinkSettingsSwitchForFieldTrial(
+        browser_command_line, command_line);
+
     // Please keep this in alphabetical order.
     static const char* const kSwitchNames[] = {
       autofill::switches::kDisableFillOnAccountSelect,
@@ -1346,7 +1408,6 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
       autofill::switches::kEnableFillOnAccountSelect,
       autofill::switches::kEnableFillOnAccountSelectNoHighlighting,
       autofill::switches::kEnablePasswordGeneration,
-      autofill::switches::kEnablePasswordSaveOnInPageNavigation,
       autofill::switches::kEnableSingleClickAutofill,
       autofill::switches::kIgnoreAutocompleteOffForAutofill,
       autofill::switches::kLocalHeuristicsOnlyForPasswordGeneration,
@@ -1480,9 +1541,6 @@ bool ChromeContentBrowserClient::AllowServiceWorker(
     int render_process_id,
     int render_frame_id) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  DCHECK(scope.is_valid());
-  DCHECK(first_party_url.is_valid());
-
   ProfileIOData* io_data = ProfileIOData::FromResourceContext(context);
   bool allow = io_data->GetCookieSettings()->IsSettingCookieAllowed(
       scope, first_party_url);
@@ -1524,7 +1582,8 @@ bool ChromeContentBrowserClient::AllowSetCookie(
     net::CookieOptions* options) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   ProfileIOData* io_data = ProfileIOData::FromResourceContext(context);
-  CookieSettings* cookie_settings = io_data->GetCookieSettings();
+  content_settings::CookieSettings* cookie_settings =
+      io_data->GetCookieSettings();
   bool allow = cookie_settings->IsSettingCookieAllowed(url, first_party);
 
   BrowserThread::PostTask(
@@ -1539,7 +1598,8 @@ bool ChromeContentBrowserClient::AllowSaveLocalState(
     content::ResourceContext* context) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   ProfileIOData* io_data = ProfileIOData::FromResourceContext(context);
-  CookieSettings* cookie_settings = io_data->GetCookieSettings();
+  content_settings::CookieSettings* cookie_settings =
+      io_data->GetCookieSettings();
   ContentSetting setting = cookie_settings->GetDefaultCookieSetting(NULL);
 
   // TODO(bauerb): Should we also disallow local state if the default is BLOCK?
@@ -1556,7 +1616,8 @@ bool ChromeContentBrowserClient::AllowWorkerDatabase(
     const std::vector<std::pair<int, int> >& render_frames) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   ProfileIOData* io_data = ProfileIOData::FromResourceContext(context);
-  CookieSettings* cookie_settings = io_data->GetCookieSettings();
+  content_settings::CookieSettings* cookie_settings =
+      io_data->GetCookieSettings();
   bool allow = cookie_settings->IsSettingCookieAllowed(url, url);
 
   // Record access to database for potential display in UI.
@@ -1578,7 +1639,8 @@ void ChromeContentBrowserClient::AllowWorkerFileSystem(
     base::Callback<void(bool)> callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   ProfileIOData* io_data = ProfileIOData::FromResourceContext(context);
-  CookieSettings* cookie_settings = io_data->GetCookieSettings();
+  content_settings::CookieSettings* cookie_settings =
+      io_data->GetCookieSettings();
   bool allow = cookie_settings->IsSettingCookieAllowed(url, url);
 
 #if defined(ENABLE_EXTENSIONS)
@@ -1671,7 +1733,8 @@ bool ChromeContentBrowserClient::AllowWorkerIndexedDB(
     const std::vector<std::pair<int, int> >& render_frames) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   ProfileIOData* io_data = ProfileIOData::FromResourceContext(context);
-  CookieSettings* cookie_settings = io_data->GetCookieSettings();
+  content_settings::CookieSettings* cookie_settings =
+      io_data->GetCookieSettings();
   bool allow = cookie_settings->IsSettingCookieAllowed(url, url);
 
   // Record access to IndexedDB for potential display in UI.
@@ -1685,6 +1748,20 @@ bool ChromeContentBrowserClient::AllowWorkerIndexedDB(
 
   return allow;
 }
+
+#if defined(ENABLE_WEBRTC)
+bool ChromeContentBrowserClient::AllowWebRTCIdentityCache(
+    const GURL& url,
+    const GURL& first_party_url,
+    content::ResourceContext* context) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  ProfileIOData* io_data = ProfileIOData::FromResourceContext(context);
+  content_settings::CookieSettings* cookie_settings =
+      io_data->GetCookieSettings();
+  return cookie_settings->IsReadingCookieAllowed(url, first_party_url) &&
+         cookie_settings->IsSettingCookieAllowed(url, first_party_url);
+}
+#endif  // defined(ENABLE_WEBRTC)
 
 net::URLRequestContext*
 ChromeContentBrowserClient::OverrideRequestContextForURL(
@@ -1851,7 +1928,8 @@ bool ChromeContentBrowserClient::CanCreateWindow(
     bool opener_suppressed,
     content::ResourceContext* context,
     int render_process_id,
-    int opener_id,
+    int opener_render_view_id,
+    int opener_render_frame_id,
     bool* no_javascript_access) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
@@ -1900,7 +1978,7 @@ bool ChromeContentBrowserClient::CanCreateWindow(
                                      user_gesture,
                                      opener_suppressed,
                                      render_process_id,
-                                     opener_id);
+                                     opener_render_frame_id);
 
   if (!user_gesture &&
       !base::CommandLine::ForCurrentProcess()->HasSwitch(
@@ -1919,7 +1997,8 @@ bool ChromeContentBrowserClient::CanCreateWindow(
   }
 
 #if defined(OS_ANDROID)
-  if (SingleTabModeTabHelper::IsRegistered(render_process_id, opener_id)) {
+  if (SingleTabModeTabHelper::IsRegistered(render_process_id,
+                                           opener_render_view_id)) {
     BrowserThread::PostTask(BrowserThread::UI,
                             FROM_HERE,
                             base::Bind(&HandleSingleTabModeBlockOnUIThread,
@@ -2219,57 +2298,27 @@ void ChromeContentBrowserClient::GetAdditionalFileSystemBackends(
   }
 }
 
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
+#if defined(OS_ANDROID)
 void ChromeContentBrowserClient::GetAdditionalMappedFilesForChildProcess(
     const base::CommandLine& command_line,
     int child_process_id,
-    FileDescriptorInfo* mappings) {
-#if defined(V8_USE_EXTERNAL_STARTUP_DATA)
-  if (v8_natives_fd_.get() == -1 || v8_snapshot_fd_.get() == -1) {
-    int v8_natives_fd = -1;
-    int v8_snapshot_fd = -1;
-    if (gin::V8Initializer::OpenV8FilesForChildProcesses(&v8_natives_fd,
-                                                         &v8_snapshot_fd)) {
-      v8_natives_fd_.reset(v8_natives_fd);
-      v8_snapshot_fd_.reset(v8_snapshot_fd);
-    }
-  }
-  DCHECK(v8_natives_fd_.get() != -1 && v8_snapshot_fd_.get() != -1);
-  mappings->Share(kV8NativesDataDescriptor, v8_natives_fd_.get());
-  mappings->Share(kV8SnapshotDataDescriptor, v8_snapshot_fd_.get());
-#endif  // V8_USE_EXTERNAL_STARTUP_DATA
+    FileDescriptorInfo* mappings,
+    std::map<int, base::MemoryMappedFile::Region>* regions) {
+  int fd = ui::GetMainAndroidPackFd(
+      &(*regions)[kAndroidUIResourcesPakDescriptor]);
+  mappings->Share(kAndroidUIResourcesPakDescriptor, fd);
 
-#if defined(OS_ANDROID)
-  base::FilePath data_path;
-  PathService::Get(ui::DIR_RESOURCE_PAKS_ANDROID, &data_path);
-  DCHECK(!data_path.empty());
+  fd = ui::GetCommonResourcesPackFd(
+      &(*regions)[kAndroidChrome100PercentPakDescriptor]);
+  mappings->Share(kAndroidChrome100PercentPakDescriptor, fd);
 
-  int flags = base::File::FLAG_OPEN | base::File::FLAG_READ;
-  base::FilePath chrome_resources_pak =
-      data_path.AppendASCII("chrome_100_percent.pak");
-  base::File file(chrome_resources_pak, flags);
-  DCHECK(file.IsValid());
-  mappings->Transfer(kAndroidChrome100PercentPakDescriptor,
-                     base::ScopedFD(file.TakePlatformFile()));
-
-  const std::string locale = GetApplicationLocale();
-  base::FilePath locale_pak = ResourceBundle::GetSharedInstance().
-      GetLocaleFilePath(locale, false);
-  file.Initialize(locale_pak, flags);
-  DCHECK(file.IsValid());
-  mappings->Transfer(kAndroidLocalePakDescriptor,
-                     base::ScopedFD(file.TakePlatformFile()));
-
-  base::FilePath resources_pack_path;
-  PathService::Get(chrome::FILE_RESOURCES_PACK, &resources_pack_path);
-  file.Initialize(resources_pack_path, flags);
-  DCHECK(file.IsValid());
-  mappings->Transfer(kAndroidUIResourcesPakDescriptor,
-                     base::ScopedFD(file.TakePlatformFile()));
+  fd = ui::GetLocalePackFd(&(*regions)[kAndroidLocalePakDescriptor]);
+  mappings->Share(kAndroidLocalePakDescriptor, fd);
 
   if (breakpad::IsCrashReporterEnabled()) {
-    file = breakpad::CrashDumpManager::GetInstance()->CreateMinidumpFile(
-               child_process_id);
+    base::File file =
+        breakpad::CrashDumpManager::GetInstance()->CreateMinidumpFile(
+            child_process_id);
     if (file.IsValid()) {
       mappings->Transfer(kAndroidMinidumpDescriptor,
                          base::ScopedFD(file.TakePlatformFile()));
@@ -2282,26 +2331,70 @@ void ChromeContentBrowserClient::GetAdditionalMappedFilesForChildProcess(
   base::FilePath app_data_path;
   PathService::Get(base::DIR_ANDROID_APP_DATA, &app_data_path);
   DCHECK(!app_data_path.empty());
-
-  flags = base::File::FLAG_OPEN | base::File::FLAG_READ;
-  base::FilePath icudata_path =
-      app_data_path.AppendASCII(base::i18n::kIcuDataFileName);
-  base::File icudata_file(icudata_path, flags);
-  DCHECK(icudata_file.IsValid());
-  mappings->Transfer(kAndroidICUDataDescriptor,
-                     base::ScopedFD(icudata_file.TakePlatformFile()));
-#else
+}
+#elif defined(OS_POSIX) && !defined(OS_MACOSX)
+void ChromeContentBrowserClient::GetAdditionalMappedFilesForChildProcess(
+    const base::CommandLine& command_line,
+    int child_process_id,
+    FileDescriptorInfo* mappings) {
   int crash_signal_fd = GetCrashSignalFD(command_line);
   if (crash_signal_fd >= 0) {
     mappings->Share(kCrashDumpSignal, crash_signal_fd);
   }
-#endif  // defined(OS_ANDROID)
 }
-#endif  // defined(OS_POSIX) && !defined(OS_MACOSX)
+#endif  // defined(OS_ANDROID)
 
 #if defined(OS_WIN)
 const wchar_t* ChromeContentBrowserClient::GetResourceDllName() {
   return chrome::kBrowserResourcesDll;
+}
+
+base::string16 ChromeContentBrowserClient::GetAppContainerSidForSandboxType(
+    int sandbox_type) const {
+  base::string16 sid;
+
+#if defined(GOOGLE_CHROME_BUILD)
+  const chrome::VersionInfo::Channel channel =
+      chrome::VersionInfo::GetChannel();
+
+  // It's possible to have a SxS installation running at the same time as a
+  // non-SxS so isolate them from each other.
+  if (channel == chrome::VersionInfo::CHANNEL_CANARY) {
+    sid.assign(
+        L"S-1-15-2-3251537155-1984446955-2931258699-841473695-1938553385-"
+        L"924012150-");
+  } else {
+    sid.assign(
+        L"S-1-15-2-3251537155-1984446955-2931258699-841473695-1938553385-"
+        L"924012149-");
+  }
+#else
+  sid.assign(
+      L"S-1-15-2-3251537155-1984446955-2931258699-841473695-1938553385-"
+      L"924012148-");
+#endif
+
+  // TODO(wfh): Add support for more process types here. crbug.com/499523
+  switch (sandbox_type) {
+    case content::SANDBOX_TYPE_RENDERER:
+      return sid + L"129201922";
+    case content::SANDBOX_TYPE_UTILITY:
+      return base::string16();
+    case content::SANDBOX_TYPE_GPU:
+      return base::string16();
+    case content::SANDBOX_TYPE_PPAPI:
+      return base::string16();
+#if !defined(DISABLE_NACL)
+    case PROCESS_TYPE_NACL_LOADER:
+      return base::string16();
+    case PROCESS_TYPE_NACL_BROKER:
+      return base::string16();
+#endif
+  }
+
+  // Should never reach here.
+  CHECK(0);
+  return base::string16();
 }
 
 void ChromeContentBrowserClient::PreSpawnRenderer(
@@ -2332,13 +2425,22 @@ void ChromeContentBrowserClient::PreSpawnRenderer(
 }
 #endif
 
-void ChromeContentBrowserClient::OverrideRenderFrameMojoServices(
+void ChromeContentBrowserClient::OverrideFrameMojoShellServices(
     content::ServiceRegistry* registry,
     content::RenderFrameHost* render_frame_host) {
 #if defined(OS_CHROMEOS)
   registry->AddService(
       base::Bind(&chromeos::attestation::PlatformVerificationImpl::Create,
                  render_frame_host));
+#endif
+}
+
+void ChromeContentBrowserClient::RegisterMojoApplications(
+    StaticMojoApplicationMap* apps) {
+#if !defined(OS_ANDROID) && !defined(OS_IOS)
+  apps->insert(std::make_pair(GURL(device::kDevicesMojoAppUrl),
+                              base::Bind(&device::DevicesAppFactory::CreateApp,
+                                         base::ThreadTaskRunnerHandle::Get())));
 #endif
 }
 
@@ -2363,6 +2465,18 @@ void ChromeContentBrowserClient::OpenURL(
 #else
   NOTIMPLEMENTED();
 #endif
+}
+
+content::PresentationServiceDelegate*
+ChromeContentBrowserClient::GetPresentationServiceDelegate(
+      content::WebContents* web_contents) {
+#if defined(ENABLE_MEDIA_ROUTER)
+  if (switches::MediaRouterEnabled()) {
+    return media_router::PresentationServiceDelegateImpl::
+        GetOrCreateForWebContents(web_contents);
+  }
+#endif
+  return nullptr;
 }
 
 void ChromeContentBrowserClient::RecordURLMetric(const std::string& metric,

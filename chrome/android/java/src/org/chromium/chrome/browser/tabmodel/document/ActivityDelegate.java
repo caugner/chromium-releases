@@ -18,6 +18,7 @@ import android.text.TextUtils;
 import org.chromium.base.ApplicationStatus;
 import org.chromium.chrome.browser.Tab;
 import org.chromium.chrome.browser.UrlConstants;
+import org.chromium.chrome.browser.document.DocumentActivity;
 import org.chromium.chrome.browser.document.DocumentUtils;
 import org.chromium.chrome.browser.tabmodel.document.DocumentTabModel.Entry;
 
@@ -31,11 +32,6 @@ import java.util.List;
  */
 @TargetApi(Build.VERSION_CODES.LOLLIPOP)
 public class ActivityDelegate {
-    public static final String LEGACY_CLASS_NAME =
-            "com.google.android.apps.chrome.document.DocumentActivity";
-    public static final String LEGACY_INCOGNITO_CLASS_NAME =
-            "com.google.android.apps.chrome.document.IncognitoDocumentActivity";
-
     private final Class<?> mRegularClass;
     private final Class<?> mIncognitoClass;
 
@@ -69,8 +65,8 @@ public class ActivityDelegate {
         if (intent == null) return false;
         String desiredClassName = isIncognito ? mIncognitoClass.getName() : mRegularClass.getName();
         String desiredLegacyClassName = isIncognito
-                ? LEGACY_INCOGNITO_CLASS_NAME
-                : LEGACY_CLASS_NAME;
+                ? DocumentActivity.LEGACY_INCOGNITO_CLASS_NAME
+                : DocumentActivity.LEGACY_CLASS_NAME;
         String className = null;
         if (intent.getComponent() == null) {
             Context context = ApplicationStatus.getApplicationContext();

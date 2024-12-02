@@ -5,9 +5,12 @@
 #include "components/dom_distiller/content/distillable_page_utils.h"
 
 #include "base/bind.h"
-#include "base/message_loop/message_loop.h"
+#include "base/location.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/values.h"
+#include "components/dom_distiller/content/distiller_javascript_utils.h"
 #include "components/dom_distiller/core/distillable_page_detector.h"
 #include "components/dom_distiller/core/experiments.h"
 #include "components/dom_distiller/core/page_features.h"
@@ -37,15 +40,15 @@ void IsOpenGraphArticle(content::WebContents* web_contents,
                         base::Callback<void(bool)> callback) {
   content::RenderFrameHost* main_frame = web_contents->GetMainFrame();
   if (!main_frame) {
-    base::MessageLoop::current()->PostTask(FROM_HERE,
-                                           base::Bind(callback, false));
+    base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE,
+                                                  base::Bind(callback, false));
     return;
   }
   std::string og_article_js = ResourceBundle::GetSharedInstance()
                                   .GetRawDataResource(IDR_IS_DISTILLABLE_JS)
                                   .as_string();
-  main_frame->ExecuteJavaScript(base::UTF8ToUTF16(og_article_js),
-                                base::Bind(OnOGArticleJsResult, callback));
+  RunIsolatedJavaScript(main_frame, og_article_js,
+                        base::Bind(OnOGArticleJsResult, callback));
 }
 
 void IsDistillablePage(content::WebContents* web_contents,
@@ -53,8 +56,8 @@ void IsDistillablePage(content::WebContents* web_contents,
                        base::Callback<void(bool)> callback) {
   switch (GetDistillerHeuristicsType()) {
     case DistillerHeuristicsType::ALWAYS_TRUE:
-      base::MessageLoop::current()->PostTask(FROM_HERE,
-                                             base::Bind(callback, true));
+      base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE,
+                                                    base::Bind(callback, true));
       return;
     case DistillerHeuristicsType::OG_ARTICLE:
       IsOpenGraphArticle(web_contents, callback);
@@ -62,8 +65,8 @@ void IsDistillablePage(content::WebContents* web_contents,
     case DistillerHeuristicsType::ADABOOST_MODEL:
       // The adaboost model is only applied to non-mobile pages.
       if (is_mobile_optimized) {
-        base::MessageLoop::current()->PostTask(FROM_HERE,
-                                               base::Bind(callback, false));
+        base::ThreadTaskRunnerHandle::Get()->PostTask(
+            FROM_HERE, base::Bind(callback, false));
         return;
       }
       IsDistillablePageForDetector(
@@ -71,8 +74,8 @@ void IsDistillablePage(content::WebContents* web_contents,
       return;
     case DistillerHeuristicsType::NONE:
     default:
-      base::MessageLoop::current()->PostTask(FROM_HERE,
-                                             base::Bind(callback, false));
+      base::ThreadTaskRunnerHandle::Get()->PostTask(
+          FROM_HERE, base::Bind(callback, false));
       return;
   }
 }
@@ -82,16 +85,16 @@ void IsDistillablePageForDetector(content::WebContents* web_contents,
                                   base::Callback<void(bool)> callback) {
   content::RenderFrameHost* main_frame = web_contents->GetMainFrame();
   if (!main_frame) {
-    base::MessageLoop::current()->PostTask(FROM_HERE,
-                                           base::Bind(callback, false));
+    base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE,
+                                                  base::Bind(callback, false));
     return;
   }
   std::string extract_features_js =
       ResourceBundle::GetSharedInstance()
           .GetRawDataResource(IDR_EXTRACT_PAGE_FEATURES_JS)
           .as_string();
-  main_frame->ExecuteJavaScript(
-      base::UTF8ToUTF16(extract_features_js),
+  RunIsolatedJavaScript(
+      main_frame, extract_features_js,
       base::Bind(OnExtractFeaturesJsResult, detector, callback));
 }
 

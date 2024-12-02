@@ -151,12 +151,14 @@ class DriveWebContentsManager : public content::WebContentsObserver,
   void DidFailProvisionalLoad(content::RenderFrameHost* render_frame_host,
                               const GURL& validated_url,
                               int error_code,
-                              const base::string16& error_description) override;
+                              const base::string16& error_description,
+                              bool was_ignored_by_handler) override;
 
   void DidFailLoad(content::RenderFrameHost* render_frame_host,
                    const GURL& validated_url,
                    int error_code,
-                   const base::string16& error_description) override;
+                   const base::string16& error_description,
+                   bool was_ignored_by_handler) override;
 
   // content::WebContentsDelegate overrides:
   bool ShouldCreateWebContents(
@@ -164,7 +166,7 @@ class DriveWebContentsManager : public content::WebContentsObserver,
       int route_id,
       int main_frame_route_id,
       WindowContainerType window_container_type,
-      const base::string16& frame_name,
+      const std::string& frame_name,
       const GURL& target_url,
       const std::string& partition_id,
       content::SessionStorageNamespace* session_storage_namespace) override;
@@ -253,7 +255,8 @@ void DriveWebContentsManager::DidFailProvisionalLoad(
     content::RenderFrameHost* render_frame_host,
     const GURL& validated_url,
     int error_code,
-    const base::string16& error_description) {
+    const base::string16& error_description,
+    bool was_ignored_by_handler) {
   if (!render_frame_host->GetParent()) {
     LOG(WARNING) << "Failed to load WebContents to enable offline mode.";
     OnOfflineInit(false,
@@ -265,7 +268,8 @@ void DriveWebContentsManager::DidFailLoad(
     content::RenderFrameHost* render_frame_host,
     const GURL& validated_url,
     int error_code,
-    const base::string16& error_description) {
+    const base::string16& error_description,
+    bool was_ignored_by_handler) {
   if (!render_frame_host->GetParent()) {
     LOG(WARNING) << "Failed to load WebContents to enable offline mode.";
     OnOfflineInit(false,
@@ -278,11 +282,10 @@ bool DriveWebContentsManager::ShouldCreateWebContents(
     int route_id,
     int main_frame_route_id,
     WindowContainerType window_container_type,
-    const base::string16& frame_name,
+    const std::string& frame_name,
     const GURL& target_url,
     const std::string& partition_id,
     content::SessionStorageNamespace* session_storage_namespace) {
-
   if (window_container_type == WINDOW_CONTAINER_TYPE_NORMAL)
     return true;
 

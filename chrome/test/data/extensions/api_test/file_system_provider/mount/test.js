@@ -73,8 +73,8 @@ chrome.test.runTests([
           chrome.fileManagerPrivate.getVolumeMetadataList(function(volumeList) {
             var volumeInfo;
             volumeList.forEach(function(inVolumeInfo) {
-              if (inVolumeInfo.extensionId == chrome.runtime.id &&
-                  inVolumeInfo.fileSystemId == fileSystemId) {
+              if (inVolumeInfo.extensionId === chrome.runtime.id &&
+                  inVolumeInfo.fileSystemId === fileSystemId) {
                 volumeInfo = inVolumeInfo;
               }
             });
@@ -98,8 +98,8 @@ chrome.test.runTests([
           chrome.fileManagerPrivate.getVolumeMetadataList(function(volumeList) {
             var volumeInfo;
             volumeList.forEach(function(inVolumeInfo) {
-              if (inVolumeInfo.extensionId == chrome.runtime.id &&
-                  inVolumeInfo.fileSystemId == fileSystemId) {
+              if (inVolumeInfo.extensionId === chrome.runtime.id &&
+                  inVolumeInfo.fileSystemId === fileSystemId) {
                 volumeInfo = inVolumeInfo;
               }
             });
@@ -154,7 +154,8 @@ chrome.test.runTests([
           chrome.test.assertEq(
               chrome.runtime.getManifest().name, extensions[0].name);
           chrome.test.assertFalse(extensions[0].configurable);
-          chrome.test.assertTrue(extensions[0].multipleMounts);
+          chrome.test.assertFalse(extensions[0].watchable);
+          chrome.test.assertFalse(extensions[0].multipleMounts);
           chrome.test.assertEq('network', extensions[0].source);
         }));
 

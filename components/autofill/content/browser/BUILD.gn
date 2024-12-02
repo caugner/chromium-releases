@@ -65,7 +65,6 @@ static_library("browser") {
     "//sql",
     "//third_party/icu",
     "//third_party/libphonenumber",
-    "//third_party/libjingle",
     "//ui/base",
     "//ui/gfx",
     "//ui/gfx/geometry",
@@ -78,22 +77,6 @@ proto_library("risk_proto") {
     "risk/proto/fingerprint.proto",
   ]
   proto_out_dir = "components/autofill/content/browser/risk/proto"
-}
-
-static_library("test_support") {
-  testonly = true
-  sources = [
-    "wallet/mock_wallet_client.cc",
-    "wallet/mock_wallet_client.h",
-    "wallet/wallet_test_util.cc",
-    "wallet/wallet_test_util.h",
-  ]
-
-  deps = [
-    ":browser",
-    "//base",
-    "//testing/gmock",
-  ]
 }
 
 source_set("unit_tests") {
@@ -112,9 +95,9 @@ source_set("unit_tests") {
 
   deps = [
     ":browser",
-    ":test_support",
     "//base",
     "//components/autofill/content/common",
+    "//components/autofill/content/browser/wallet:test_support",
     "//components/autofill/core/browser",
     "//components/autofill/core/browser:test_support",
     "//components/autofill/core/common",

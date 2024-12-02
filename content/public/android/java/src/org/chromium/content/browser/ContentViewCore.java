@@ -27,7 +27,6 @@ import android.provider.Browser;
 import android.text.Editable;
 import android.text.Selection;
 import android.text.TextUtils;
-import android.util.Log;
 import android.util.Pair;
 import android.view.HapticFeedbackConstants;
 import android.view.InputDevice;
@@ -35,6 +34,7 @@ import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewStructure;
 import android.view.accessibility.AccessibilityManager;
 import android.view.accessibility.AccessibilityManager.AccessibilityStateChangeListener;
 import android.view.accessibility.AccessibilityNodeProvider;
@@ -47,6 +47,7 @@ import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.CalledByNative;
 import org.chromium.base.CommandLine;
 import org.chromium.base.JNINamespace;
+import org.chromium.base.Log;
 import org.chromium.base.ObserverList;
 import org.chromium.base.ObserverList.RewindableIterator;
 import org.chromium.base.TraceEvent;
@@ -71,6 +72,8 @@ import org.chromium.content.browser.input.SelectPopupDialog;
 import org.chromium.content.browser.input.SelectPopupDropdown;
 import org.chromium.content.browser.input.SelectPopupItem;
 import org.chromium.content.common.ContentSwitches;
+import org.chromium.content_public.browser.AccessibilitySnapshotCallback;
+import org.chromium.content_public.browser.AccessibilitySnapshotNode;
 import org.chromium.content_public.browser.GestureStateListener;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_public.browser.WebContentsObserver;
@@ -97,10 +100,11 @@ import java.util.Map.Entry;
  * being tied to the view system.
  */
 @JNINamespace("content")
-public class ContentViewCore
-        implements AccessibilityStateChangeListener, ScreenOrientationObserver {
+public class ContentViewCore implements
+        AccessibilityStateChangeListener, ScreenOrientationObserver,
+        SystemCaptioningBridge.SystemCaptioningBridgeListener {
 
-    private static final String TAG = "ContentViewCore";
+    private static final String TAG = "cr.ContentViewCore";
 
     // Used to avoid enabling zooming in / out if resulting zooming will
     // produce little visible difference.
@@ -109,6 +113,14 @@ public class ContentViewCore
     // Used to represent gestures for long press and long tap.
     private static final int IS_LONG_PRESS = 1;
     private static final int IS_LONG_TAP = 2;
+
+    /**
+     * TODO(sgurun) remove these and use public API. crbug/512264
+     */
+    private static final int TEXT_STYLE_BOLD = 1 << 0;
+    private static final int TEXT_STYLE_ITALIC = 1 << 1;
+    private static final int TEXT_STYLE_UNDERLINE = 1 << 2;
+    private static final int TEXT_STYLE_STRIKE_THRU = 1 << 3;
 
     private static final ZoomControlsDelegate NO_OP_ZOOM_CONTROLS_DELEGATE =
             new ZoomControlsDelegate() {
@@ -258,7 +270,7 @@ public class ContentViewCore
                             scaledWidth, (int) (height * scale), leftMargin, topMargin);
                 view.setLayoutParams(lp);
             } else {
-                Log.e(TAG, "Unknown layout " + containerView.getClass().getName());
+                Log.e(TAG, "Unknown layout %s", containerView.getClass().getName());
             }
         }
 
@@ -308,7 +320,7 @@ public class ContentViewCore
 
         @Override
         public void didFailLoad(boolean isProvisionalLoad, boolean isMainFrame, int errorCode,
-                String description, String failingUrl) {
+                String description, String failingUrl, boolean wasIgnoredByHandler) {
             // Navigation that fails the provisional load will have the strong binding removed
             // here. One for which the provisional load is commited will have the strong binding
             // removed in navigationEntryCommitted() below.
@@ -631,7 +643,7 @@ public class ContentViewCore
         mRenderCoordinates.setDeviceScaleFactor(deviceScaleFactor);
         mAccessibilityManager = (AccessibilityManager)
                 getContext().getSystemService(Context.ACCESSIBILITY_SERVICE);
-        mSystemCaptioningBridge = CaptioningBridgeFactory.create(this);
+        mSystemCaptioningBridge = CaptioningBridgeFactory.getSystemCaptioningBridge(mContext);
         mGestureStateListeners = new ObserverList<GestureStateListener>();
         mGestureStateListenersIterator = mGestureStateListeners.rewindableIterator();
 
@@ -741,14 +753,30 @@ public class ContentViewCore
                     }
 
                     @Override
-                    public void onDismissInput() {
-                        getContentViewClient().onImeStateChangeRequested(false);
-                    }
-
-                    @Override
                     public void onKeyboardBoundsUnchanged() {
                         assert mWebContents != null;
                         mWebContents.scrollFocusedEditableNodeIntoView();
+                    }
+
+                    @Override
+                    public boolean performContextMenuAction(int id) {
+                        assert mWebContents != null;
+                        switch (id) {
+                            case android.R.id.selectAll:
+                                mWebContents.selectAll();
+                                return true;
+                            case android.R.id.cut:
+                                mWebContents.cut();
+                                return true;
+                            case android.R.id.copy:
+                                mWebContents.copy();
+                                return true;
+                            case android.R.id.paste:
+                                mWebContents.paste();
+                                return true;
+                            default:
+                                return false;
+                        }
                     }
 
                     @Override
@@ -761,9 +789,6 @@ public class ContentViewCore
                         return new ResultReceiver(new Handler()) {
                             @Override
                             public void onReceiveResult(int resultCode, Bundle resultData) {
-                                getContentViewClient().onImeStateChangeRequested(
-                                        resultCode == InputMethodManager.RESULT_SHOWN
-                                        || resultCode == InputMethodManager.RESULT_UNCHANGED_SHOWN);
                                 if (resultCode == InputMethodManager.RESULT_SHOWN) {
                                     // If OSK is newly shown, delay the form focus until
                                     // the onSizeChanged (in order to adjust relative to the
@@ -1214,9 +1239,8 @@ public class ContentViewCore
     }
 
     public boolean isScrollInProgress() {
-        return mTouchScrollInProgress
-                || mPotentiallyActiveFlingCount > 0
-                || getContentViewClient().isExternalFlingActive();
+        return mTouchScrollInProgress || mPotentiallyActiveFlingCount > 0
+                || getContentViewClient().isExternalScrollActive();
     }
 
     @SuppressWarnings("unused")
@@ -1235,10 +1259,6 @@ public class ContentViewCore
     @CalledByNative
     private void onFlingStartEventHadNoConsumer(int vx, int vy) {
         mTouchScrollInProgress = false;
-        for (mGestureStateListenersIterator.rewind();
-                    mGestureStateListenersIterator.hasNext();) {
-            mGestureStateListenersIterator.next().onUnhandledFlingStartEvent(vx, vy);
-        }
     }
 
     @SuppressWarnings("unused")
@@ -1322,12 +1342,11 @@ public class ContentViewCore
         nativeDoubleTap(mNativeContentViewCore, timeMs, x, y);
     }
 
-    @VisibleForTesting
-    public void flingForTest(long timeMs, int x, int y, int velocityX, int velocityY) {
+    public void flingViewport(long timeMs, int velocityX, int velocityY) {
         if (mNativeContentViewCore == 0) return;
         nativeFlingCancel(mNativeContentViewCore, timeMs);
-        nativeScrollBegin(mNativeContentViewCore, timeMs, x, y, velocityX, velocityY);
-        nativeFlingStart(mNativeContentViewCore, timeMs, x, y, velocityX, velocityY);
+        nativeScrollBegin(mNativeContentViewCore, timeMs, 0, 0, velocityX, velocityY, true);
+        nativeFlingStart(mNativeContentViewCore, timeMs, 0, 0, velocityX, velocityY, true);
     }
 
     /**
@@ -1444,8 +1463,8 @@ public class ContentViewCore
                 int selectionEnd = Selection.getSelectionEnd(mEditable);
                 mInputConnection.setSelection(selectionEnd, selectionEnd);
             }
-        } else if (mImeAdapter != null) {
-            mImeAdapter.unselect();
+        } else if (mWebContents != null) {
+            mWebContents.unselect();
         }
     }
 
@@ -1488,7 +1507,7 @@ public class ContentViewCore
         ScreenOrientationListener.getInstance().addObserver(this, mContext);
         GamepadList.onAttachedToWindow(mContext);
         mAccessibilityManager.addAccessibilityStateChangeListener(this);
-        mSystemCaptioningBridge.registerBridge();
+        mSystemCaptioningBridge.addListener(this);
     }
 
     /**
@@ -1511,7 +1530,7 @@ public class ContentViewCore
         // locking and app switching.
         setTextHandlesTemporarilyHidden(true);
         hidePopupsAndPreserveSelection();
-        mSystemCaptioningBridge.unregisterBridge();
+        mSystemCaptioningBridge.removeListener(this);
     }
 
     /**
@@ -1803,34 +1822,29 @@ public class ContentViewCore
      * are overridden, so that View's mScrollX and mScrollY will be unchanged at
      * (0, 0). This is critical for drawing ContentView correctly.
      */
-    public void scrollBy(int xPix, int yPix) {
-        if (mNativeContentViewCore != 0) {
-            nativeScrollBy(mNativeContentViewCore,
-                    SystemClock.uptimeMillis(), 0, 0, xPix, yPix);
-        }
+    public void scrollBy(float dxPix, float dyPix) {
+        if (mNativeContentViewCore == 0) return;
+        if (dxPix == 0 && dyPix == 0) return;
+        long time = SystemClock.uptimeMillis();
+        // It's a very real (and valid) possibility that a fling may still
+        // be active when programatically scrolling. Cancelling the fling in
+        // such cases ensures a consistent gesture event stream.
+        if (mPotentiallyActiveFlingCount > 0) nativeFlingCancel(mNativeContentViewCore, time);
+        nativeScrollBegin(mNativeContentViewCore, time, 0, 0, -dxPix, -dyPix, false);
+        nativeScrollBy(mNativeContentViewCore, time, 0, 0, dxPix, dyPix);
+        nativeScrollEnd(mNativeContentViewCore, time);
     }
 
     /**
      * @see View#scrollTo(int, int)
      */
-    public void scrollTo(int xPix, int yPix) {
+    public void scrollTo(float xPix, float yPix) {
         if (mNativeContentViewCore == 0) return;
         final float xCurrentPix = mRenderCoordinates.getScrollXPix();
         final float yCurrentPix = mRenderCoordinates.getScrollYPix();
         final float dxPix = xPix - xCurrentPix;
         final float dyPix = yPix - yCurrentPix;
-        if (dxPix != 0 || dyPix != 0) {
-            long time = SystemClock.uptimeMillis();
-            // It's a very real (and valid) possibility that a fling may still
-            // be active when programatically scrolling. Cancelling the fling in
-            // such cases ensures a consistent gesture event stream.
-            if (mPotentiallyActiveFlingCount > 0) nativeFlingCancel(mNativeContentViewCore, time);
-            nativeScrollBegin(mNativeContentViewCore, time,
-                    xCurrentPix, yCurrentPix, -dxPix, -dyPix);
-            nativeScrollBy(mNativeContentViewCore,
-                    time, xCurrentPix, yCurrentPix, dxPix, dyPix);
-            nativeScrollEnd(mNativeContentViewCore, time);
-        }
+        scrollBy(dxPix, dyPix);
     }
 
     // NOTE: this can go away once ContentView.getScrollX() reports correct values.
@@ -2011,22 +2025,22 @@ public class ContentViewCore
             mActionHandler = new SelectActionModeCallback.ActionHandler() {
                 @Override
                 public void selectAll() {
-                    mImeAdapter.selectAll();
+                    mWebContents.selectAll();
                 }
 
                 @Override
                 public void cut() {
-                    mImeAdapter.cut();
+                    mWebContents.cut();
                 }
 
                 @Override
                 public void copy() {
-                    mImeAdapter.copy();
+                    mWebContents.copy();
                 }
 
                 @Override
                 public void paste() {
-                    mImeAdapter.paste();
+                    mWebContents.paste();
                 }
 
                 @Override
@@ -2140,7 +2154,7 @@ public class ContentViewCore
         mUnselectAllOnActionModeDismiss = true;
         if (mActionMode == null) {
             // There is no ActionMode, so remove the selection.
-            mImeAdapter.unselect();
+            clearSelection();
         } else {
             getContentViewClient().onContextualActionBarShown();
         }
@@ -2159,7 +2173,8 @@ public class ContentViewCore
      * Clears the current text selection.
      */
     public void clearSelection() {
-        mImeAdapter.unselect();
+        // This method can be called during shutdown, guard against null accordingly.
+        if (mWebContents != null) mWebContents.unselect();
     }
 
     /**
@@ -2284,14 +2299,10 @@ public class ContentViewCore
         // because ImeAdapter does so asynchronouly with a delay, and
         // by the time when ImeAdapter dismisses the input, the
         // containerView may have lost focus.
-        // We cannot trust ContentViewClient#onImeStateChangeRequested to
-        // hide the input window because it has an empty default implementation.
-        // So we need to explicitly hide the input method window here.
         if (mInputMethodManagerWrapper.isActive(mContainerView)) {
             mInputMethodManagerWrapper.hideSoftInputFromWindow(
                     mContainerView.getWindowToken(), 0, null);
         }
-        getContentViewClient().onImeStateChangeRequested(false);
     }
 
     @SuppressWarnings("unused")
@@ -2379,8 +2390,8 @@ public class ContentViewCore
             boolean isNonImeChange) {
         try {
             TraceEvent.begin("ContentViewCore.updateImeAdapter");
-            mFocusedNodeEditable = (textInputType != TextInputType.NONE);
-            if (!mFocusedNodeEditable) hidePastePopup();
+            boolean focusedNodeEditable = (textInputType != TextInputType.NONE);
+            if (!focusedNodeEditable) hidePastePopup();
 
             mImeAdapter.updateKeyboardVisibility(
                     nativeImeAdapterAndroid, textInputType, textInputFlags, showImeIfNeeded);
@@ -2391,9 +2402,19 @@ public class ContentViewCore
             }
 
             if (mActionMode != null) mActionMode.invalidate();
+
+            if (focusedNodeEditable != mFocusedNodeEditable) {
+                mFocusedNodeEditable = focusedNodeEditable;
+                getContentViewClient().onFocusedNodeEditabilityChanged(mFocusedNodeEditable);
+            }
         } finally {
             TraceEvent.end("ContentViewCore.updateImeAdapter");
         }
+    }
+
+    @CalledByNative
+    private void forceUpdateImeAdapter(long nativeImeAdapterAndroid) {
+        mImeAdapter.attach(nativeImeAdapterAndroid);
     }
 
     @SuppressWarnings("unused")
@@ -2461,8 +2482,8 @@ public class ContentViewCore
 
     @SuppressWarnings("unused")
     @CalledByNative
-    private TouchEventSynthesizer createTouchEventSynthesizer() {
-        return new TouchEventSynthesizer(this);
+    private MotionEventSynthesizer createMotionEventSynthesizer() {
+        return new MotionEventSynthesizer(this);
     }
 
     @SuppressWarnings("unused")
@@ -2591,7 +2612,7 @@ public class ContentViewCore
                 new PastePopupMenuDelegate() {
                     @Override
                     public void paste() {
-                        mImeAdapter.paste();
+                        mWebContents.paste();
                         dismissTextHandles();
                     }
                 });
@@ -2615,7 +2636,7 @@ public class ContentViewCore
     private void onRenderProcessChange() {
         attachImeAdapter();
         // Immediately sync closed caption settings to the new render process.
-        mSystemCaptioningBridge.syncToDelegate();
+        mSystemCaptioningBridge.syncToListener(this);
     }
 
     /**
@@ -2923,15 +2944,63 @@ public class ContentViewCore
         return null;
     }
 
-    /**
-     * Set closed captioning text track style settings.
-     *
-     * @param settings The TextTrackSettings object containing the new settings.
-     */
+    // @TargetApi(Build.VERSION_CODES.M) TODO(sgurun) add method document once API is public
+    // crbug/512264
+    public void onProvideVirtualStructure(final ViewStructure structure) {
+        // Do not collect accessibility tree in incognito mode
+        if (getWebContents().isIncognito()) {
+            structure.setChildCount(0);
+            return;
+        }
+
+        structure.setChildCount(1);
+        final ViewStructure viewRoot = structure.asyncNewChild(0);
+        getWebContents().requestAccessibilitySnapshot(
+                new AccessibilitySnapshotCallback() {
+                    @Override
+                    public void onAccessibilitySnapshot(AccessibilitySnapshotNode root) {
+                        viewRoot.setClassName("");
+                        if (root == null) {
+                            viewRoot.asyncCommit();
+                            return;
+                        }
+                        createVirtualStructure(viewRoot, root, 0, 0);
+                    }
+                },
+                mRenderCoordinates.getContentOffsetYPix(),
+                mRenderCoordinates.getScrollXPix());
+    }
+
+    // When creating the View structure, the left and top are relative to the parent node.
+    // The X scroll is not used, rather compensated through X-position, while the Y scroll
+    // is provided.
+    private void createVirtualStructure(ViewStructure viewNode, AccessibilitySnapshotNode node,
+            int parentX, int parentY) {
+        viewNode.setClassName(node.className);
+        viewNode.setText(node.text);
+        viewNode.setDimens(node.x - parentX - node.scrollX, node.y - parentY, 0, node.scrollY,
+                node.width, node.height);
+        viewNode.setChildCount(node.children.size());
+        if (node.hasStyle) {
+            int style = (node.bold ? TEXT_STYLE_BOLD : 0)
+                    | (node.italic ? TEXT_STYLE_ITALIC : 0)
+                    | (node.underline ? TEXT_STYLE_UNDERLINE : 0)
+                    | (node.lineThrough ? TEXT_STYLE_STRIKE_THRU : 0);
+            viewNode.setTextStyle(node.textSize, node.color, node.bgcolor, style);
+        }
+        for (int i = 0; i < node.children.size(); i++) {
+            createVirtualStructure(viewNode.asyncNewChild(i), node.children.get(i), node.x,
+                    node.y);
+        }
+        viewNode.asyncCommit();
+    }
+
     @TargetApi(Build.VERSION_CODES.KITKAT)
-    public void setTextTrackSettings(TextTrackSettings settings) {
+    @Override
+    public void onSystemCaptioningChanged(TextTrackSettings settings) {
         if (mNativeContentViewCore == 0) return;
-        nativeSetTextTrackSettings(mNativeContentViewCore, settings.getTextTrackBackgroundColor(),
+        nativeSetTextTrackSettings(mNativeContentViewCore,
+                settings.getTextTracksEnabled(), settings.getTextTrackBackgroundColor(),
                 settings.getTextTrackFontFamily(), settings.getTextTrackFontStyle(),
                 settings.getTextTrackFontVariant(), settings.getTextTrackTextColor(),
                 settings.getTextTrackTextShadow(), settings.getTextTrackTextSize());
@@ -3157,9 +3226,8 @@ public class ContentViewCore
             long nativeContentViewCoreImpl, long timeMs, float x, float y, float verticalAxis,
             float horizontalAxis);
 
-    private native void nativeScrollBegin(
-            long nativeContentViewCoreImpl, long timeMs, float x, float y, float hintX,
-            float hintY);
+    private native void nativeScrollBegin(long nativeContentViewCoreImpl, long timeMs, float x,
+            float y, float hintX, float hintY, boolean targetViewport);
 
     private native void nativeScrollEnd(long nativeContentViewCoreImpl, long timeMs);
 
@@ -3167,8 +3235,8 @@ public class ContentViewCore
             long nativeContentViewCoreImpl, long timeMs, float x, float y,
             float deltaX, float deltaY);
 
-    private native void nativeFlingStart(
-            long nativeContentViewCoreImpl, long timeMs, float x, float y, float vx, float vy);
+    private native void nativeFlingStart(long nativeContentViewCoreImpl, long timeMs, float x,
+            float y, float vx, float vy, boolean targetViewport);
 
     private native void nativeFlingCancel(long nativeContentViewCoreImpl, long timeMs);
 
@@ -3229,9 +3297,9 @@ public class ContentViewCore
             long nativeContentViewCoreImpl, boolean enabled);
 
     private native void nativeSetTextTrackSettings(long nativeContentViewCoreImpl,
-            String textTrackBackgroundColor, String textTrackFontFamily, String textTrackFontStyle,
-            String textTrackFontVariant, String textTrackTextColor, String textTrackTextShadow,
-            String textTrackTextSize);
+            boolean textTracksEnabled, String textTrackBackgroundColor, String textTrackFontFamily,
+            String textTrackFontStyle, String textTrackFontVariant, String textTrackTextColor,
+            String textTrackTextShadow, String textTrackTextSize);
 
     private native void nativeExtractSmartClipData(long nativeContentViewCoreImpl,
             int x, int y, int w, int h);

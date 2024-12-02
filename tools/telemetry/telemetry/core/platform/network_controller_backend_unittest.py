@@ -5,9 +5,9 @@
 import tempfile
 import unittest
 
-from telemetry.core import forwarders
 from telemetry.core.platform import network_controller_backend
-from telemetry.core import wpr_modes
+from telemetry.internal import forwarders
+from telemetry.util import wpr_modes
 
 
 class FakePlatformBackend(object):

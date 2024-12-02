@@ -55,7 +55,9 @@ source_set("test_support") {
 
     public_deps += [ "//third_party/WebKit/public:blink" ]
     deps += [
+      ":content_test_mojo_bindings",
       "//components/scheduler:scheduler",
+      "//components/scheduler:test_support",
       "//content/browser/speech/proto",
       "//content/public/child",
       "//content/gpu",
@@ -67,6 +69,8 @@ source_set("test_support") {
       "//cc:test_support",
       "//ipc/mojo",
       "//media",
+      "//mojo/application/public/cpp:cpp_for_chromium",
+      "//mojo/environment:chromium",
       "//ppapi/host",
       "//ppapi/proxy",
       "//ppapi/proxy:test_support",
@@ -200,6 +204,12 @@ source_set("browsertest_support") {
   }
 }
 
+mojom("content_test_mojo_bindings") {
+  sources = [
+    "../public/test/test_mojo_service.mojom",
+  ]
+}
+
 mojom("web_ui_test_mojo_bindings") {
   sources = [
     "data/web_ui_test_mojo_bindings.mojom",
@@ -219,6 +229,7 @@ if (!is_ios) {
       ":test_support",
       "//cc",
       "//cc/blink",
+      "//components/test_runner:test_runner",
       "//content/public/common",
       "//skia",
       "//v8",
@@ -227,13 +238,6 @@ if (!is_ios) {
 
     if (is_android) {
       deps += [ ":jni" ]
-    }
-
-    if (!enable_webrtc) {
-      sources -= [
-        "test_media_stream_renderer_factory.cc",
-        "test_media_stream_renderer_factory.h",
-      ]
     }
   }
 
@@ -284,7 +288,9 @@ if (!is_mac) {
       "//media/audio:test_support",
       "//media/base:test_support",
       "//media:shared_memory_support",
+      "//mojo/application/public/cpp:cpp_for_chromium",
       "//mojo/environment:chromium",
+      "//mojo/test:test_support",
       "//net:test_support",
       "//ppapi/host",
       "//ppapi/proxy",
@@ -299,6 +305,7 @@ if (!is_mac) {
       "//third_party/WebKit/public:blink",
       "//third_party/leveldatabase",
       "//third_party/mesa:osmesa",
+      "//third_party/zlib",
       "//ui/accessibility",
       "//ui/accessibility:ax_gen",
       "//ui/base",
@@ -350,7 +357,7 @@ if (!is_mac) {
       deps += [
         "//content/shell/android:content_shell_jni_headers",
         "//content/shell:content_shell_lib",
-        "//testing/android/native_test:native_test_util",
+        "//testing/android/native_test:native_test_support",
       ]
 
       use_launcher = false
@@ -371,15 +378,6 @@ if (!is_mac) {
     if (!use_aura && !is_mac) {
       sources -=
           [ "../browser/compositor/image_transport_factory_browsertest.cc" ]
-    }
-
-    if (use_aura && !is_win) {
-      sources -= [ "../browser/plugin_browsertest.cc" ]
-    }
-
-    if (!is_android && !is_ios && !is_linux) {
-      # Npapi test plugin doesn't build on Android or iOS.
-      #data_deps += [ 'copy_npapi_test_plugin' ]  TODO(GYP)
     }
 
     if (enable_webrtc) {
@@ -439,6 +437,7 @@ test("content_unittests") {
     "//device/battery",
     "//device/battery:mojo_bindings",
     "//mojo/environment:chromium",
+    "//net:extras",
     "//net:test_support",
     "//skia",
     "//sql",
@@ -587,6 +586,7 @@ test("content_unittests") {
       "../browser/web_contents/aura/overscroll_navigation_overlay_unittest.cc",
       "../browser/web_contents/aura/overscroll_window_animation_unittest.cc",
       "../browser/web_contents/aura/overscroll_window_delegate_unittest.cc",
+      "../browser/web_contents/web_contents_view_aura_unittest.cc",
     ]
   }
   if (use_aura || toolkit_views) {
@@ -622,7 +622,6 @@ test("content_unittests") {
 if (!is_mac) {  # TODO(GYP) enable on Mac once it links.
   test("content_perftests") {
     sources = [
-      "../browser/net/sqlite_persistent_cookie_store_perftest.cc",
       "../browser/renderer_host/input/input_router_impl_perftest.cc",
       "../common/cc_messages_perftest.cc",
       "../test/run_all_perftests.cc",

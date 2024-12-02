@@ -16,11 +16,10 @@
 #import "chrome/browser/ui/cocoa/extensions/browser_actions_container_view.h"
 #import "chrome/browser/ui/cocoa/extensions/browser_actions_controller.h"
 #import "chrome/browser/ui/cocoa/extensions/extension_popup_controller.h"
-#import "chrome/browser/ui/cocoa/toolbar/toolbar_controller.h"
-#import "chrome/browser/ui/cocoa/toolbar/wrench_toolbar_button_cell.h"
 #import "chrome/browser/ui/cocoa/info_bubble_window.h"
 #import "chrome/browser/ui/cocoa/themed_window.h"
 #import "chrome/browser/ui/cocoa/toolbar/toolbar_controller.h"
+#import "chrome/browser/ui/cocoa/toolbar/wrench_toolbar_button_cell.h"
 #include "chrome/browser/ui/toolbar/toolbar_action_view_controller.h"
 #include "chrome/browser/ui/toolbar/toolbar_actions_bar.h"
 #include "chrome/common/chrome_constants.h"
@@ -181,20 +180,7 @@ bool BrowserActionTestUtil::HidePopup() {
 }
 
 bool BrowserActionTestUtil::ActionButtonWantsToRun(size_t index) {
-  BrowserActionsController* controller =
-      GetController(browser_, test_helper_.get());
-  ui::ThemeProvider* themeProvider =
-      [[[controller containerView] window] themeProvider];
-  DCHECK(themeProvider);
-  NSImage* wantsToRunImage =
-      themeProvider->GetNSImageNamed(IDR_BROWSER_ACTION_R);
-  BrowserActionButton* button = [controller buttonWithIndex:index];
-  BrowserActionCell* cell =
-      base::mac::ObjCCastStrict<BrowserActionCell>([button cell]);
-  NSImage* actualImage = [cell imageForState:image_button_cell::kDefaultState
-                                        view:button];
-
-  return wantsToRunImage == actualImage;
+  return [GetButton(browser_, test_helper_.get(), index) wantsToRunForTesting];
 }
 
 bool BrowserActionTestUtil::OverflowedActionButtonWantsToRun() {

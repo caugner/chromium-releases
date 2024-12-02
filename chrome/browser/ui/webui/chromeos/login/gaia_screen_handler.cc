@@ -4,6 +4,7 @@
 
 #include "chrome/browser/ui/webui/chromeos/login/gaia_screen_handler.h"
 
+#include "ash/system/chromeos/devicetype_utils.h"
 #include "base/bind.h"
 #include "base/guid.h"
 #include "base/logging.h"
@@ -13,7 +14,6 @@
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_shutdown.h"
-#include "chrome/browser/chromeos/chromeos_utils.h"
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
 #include "chrome/browser/chromeos/language_preferences.h"
 #include "chrome/browser/chromeos/login/screens/network_error.h"
@@ -35,6 +35,7 @@
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/login/auth/user_context.h"
 #include "chromeos/settings/cros_settings_names.h"
+#include "chromeos/system/devicetype.h"
 #include "chromeos/system/version_loader.h"
 #include "components/login/localized_values_builder.h"
 #include "components/user_manager/user_manager.h"
@@ -60,6 +61,21 @@ const char kAuthIframeParentOrigin[] =
 const char kGaiaSandboxUrlSwitch[] = "gaia-sandbox-url";
 const char kEndpointGen[] = "1.0";
 
+std::string GetChromeType() {
+  switch (chromeos::GetDeviceType()) {
+    case chromeos::DeviceType::kChromebox:
+      return "chromebox";
+    case chromeos::DeviceType::kChromebase:
+      return "chromebase";
+    case chromeos::DeviceType::kChromebit:
+      return "chromebit";
+    case chromeos::DeviceType::kChromebook:
+      return "chromebook";
+    default:
+      return "chromedevice";
+  }
+}
+
 void UpdateAuthParams(base::DictionaryValue* params,
                       bool has_users,
                       bool is_enrolling_consumer_management) {
@@ -71,6 +87,10 @@ void UpdateAuthParams(base::DictionaryValue* params,
   // Account creation depends on Guest sign-in (http://crosbug.com/24570).
   params->SetBoolean("createAccount", allow_new_user && allow_guest);
   params->SetBoolean("guestSignin", allow_guest);
+
+  // nosignup flow if new users are not allowed.
+  if (!allow_new_user && StartupUtils::IsWebviewSigninEnabled())
+    params->SetString("flow", "nosignup");
 
   // Allow supervised user creation only if:
   // 1. Enterprise managed device > is allowed by policy.
@@ -217,6 +237,7 @@ void GaiaScreenHandler::LoadGaiaWithVersion(
   params.SetString("email", context.email);
   params.SetBoolean("isEnrollingConsumerManagement",
                     is_enrolling_consumer_management);
+  params.SetString("gapsCookie", context.gaps_cookie);
 
   UpdateAuthParams(&params,
                    context.has_users,
@@ -272,7 +293,7 @@ void GaiaScreenHandler::LoadGaiaWithVersion(
       params.SetString("enterpriseDomain", enterprise_domain);
 
     chrome::VersionInfo version_info;
-    params.SetString("chromeType", GetChromeDeviceTypeString());
+    params.SetString("chromeType", GetChromeType());
     params.SetString("clientId",
                      GaiaUrls::GetInstance()->oauth2_chrome_client_id());
     params.SetString("clientVersion", version_info.Version());
@@ -385,11 +406,13 @@ void GaiaScreenHandler::DeclareLocalizedValues(
                IDS_LOGIN_FATAL_ERROR_PASSWORD_VERIFICATION);
   builder->Add("fatalErrorMessageInsecureURL",
                IDS_LOGIN_FATAL_ERROR_TEXT_INSECURE_URL);
-  builder->Add("fatalErrorInstructions", IDS_LOGIN_FATAL_ERROR_INSTRUCTIONS);
   builder->Add("fatalErrorDismissButton", IDS_OK);
+  builder->Add("fatalErrorDoneButton", IDS_DONE);
+  builder->Add("fatalErrorTryAgainButton",
+               IDS_LOGIN_FATAL_ERROR_TRY_AGAIN_BUTTON);
 
   builder->AddF("offlineLoginWelcome", IDS_NEWGAIA_OFFLINE_WELCOME,
-                GetChromeDeviceType());
+                ash::GetChromeOSDeviceTypeResourceId());
   builder->Add("offlineLoginEmail", IDS_NEWGAIA_OFFLINE_EMAIL);
   builder->Add("offlineLoginPassword", IDS_NEWGAIA_OFFLINE_PASSWORD);
   builder->Add("offlineLoginInvalidEmail", IDS_NEWGAIA_OFFLINE_INVALID_EMAIL);
@@ -430,6 +453,13 @@ void GaiaScreenHandler::RegisterMessages() {
               &GaiaScreenHandler::HandleToggleWebviewSignin);
   AddCallback("toggleEasyBootstrap",
               &GaiaScreenHandler::HandleToggleEasyBootstrap);
+  AddCallback("identifierEntered", &GaiaScreenHandler::HandleIdentifierEntered);
+}
+
+void GaiaScreenHandler::HandleIdentifierEntered(
+    const std::string& account_identifier) {
+  if (!Delegate()->IsUserWhitelisted(account_identifier))
+    ShowWhitelistCheckFailedError();
 }
 
 void GaiaScreenHandler::HandleFrameLoadingCompleted(int status) {
@@ -494,7 +524,8 @@ void GaiaScreenHandler::HandleCompleteAuthentication(
     const std::string& email,
     const std::string& password,
     const std::string& auth_code,
-    bool using_saml) {
+    bool using_saml,
+    const std::string& gaps_cookie) {
   if (!Delegate())
     return;
 
@@ -511,6 +542,7 @@ void GaiaScreenHandler::HandleCompleteAuthentication(
   user_context.SetAuthFlow(using_saml
                                ? UserContext::AUTH_FLOW_GAIA_WITH_SAML
                                : UserContext::AUTH_FLOW_GAIA_WITHOUT_SAML);
+  user_context.SetGAPSCookie(gaps_cookie);
   Delegate()->CompleteLogin(user_context);
 }
 
@@ -930,6 +962,12 @@ void GaiaScreenHandler::LoadAuthExtension(bool force,
   if (Delegate()) {
     context.show_users = Delegate()->IsShowUsers();
     context.has_users = !Delegate()->GetUsers().empty();
+  }
+
+  if (!context.email.empty()) {
+    context.gaps_cookie =
+        user_manager::UserManager::Get()->GetKnownUserGAPSCookie(
+            gaia::CanonicalizeEmail(context.email));
   }
 
   populated_email_.clear();

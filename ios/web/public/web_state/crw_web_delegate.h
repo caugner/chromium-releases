@@ -11,7 +11,7 @@
 #include "base/ios/block_types.h"
 #include "ios/web/public/favicon_url.h"
 #include "ios/web/public/ssl_status.h"
-#import "ios/web/public/web_state/crw_native_content.h"
+#import "ios/web/public/web_state/ui/crw_native_content.h"
 #include "ios/web/public/web_state/web_state.h"
 #include "ui/base/page_transition_types.h"
 
@@ -188,8 +188,7 @@ typedef void (^SSLErrorCallback)(BOOL);
 // Called to ask if external URL should be opened. External URL is one that
 // cannot be presented by CRWWebController.
 - (BOOL)webController:(CRWWebController*)webController
-    shouldOpenExternalURL:(const GURL&)url;
-
+    shouldOpenExternalURL:(const GURL&)URL;
 
 // Called when |url| is deemed suitable to be opened in a matching native app.
 // Needs to return whether |url| was opened in a matching native app.

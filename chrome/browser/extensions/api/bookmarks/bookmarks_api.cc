@@ -258,8 +258,8 @@ void BookmarkEventRouter::DispatchEvent(
     scoped_ptr<base::ListValue> event_args) {
   EventRouter* event_router = EventRouter::Get(browser_context_);
   if (event_router) {
-    event_router->BroadcastEvent(
-        make_scoped_ptr(new extensions::Event(event_name, event_args.Pass())));
+    event_router->BroadcastEvent(make_scoped_ptr(new extensions::Event(
+        extensions::events::UNKNOWN, event_name, event_args.Pass())));
   }
 }
 
@@ -774,8 +774,7 @@ void BookmarksIOFunction::ShowSelectFileDialog(
   // either FileSelectionCanceled, MultiFilesSelected, or FileSelected
   AddRef();
 
-  WebContents* web_contents = dispatcher()->delegate()->
-      GetAssociatedWebContents();
+  WebContents* web_contents = GetAssociatedWebContents();
 
   select_file_dialog_ = ui::SelectFileDialog::Create(
       this, new ChromeSelectFilePolicy(web_contents));

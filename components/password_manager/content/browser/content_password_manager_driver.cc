@@ -70,10 +70,12 @@ void ContentPasswordManagerDriver::AccountCreationFormsFound(
 }
 
 void ContentPasswordManagerDriver::AutofillDataReceived(
-    const std::map<autofill::FormData, autofill::FormFieldData>& predictions) {
+    const std::map<autofill::FormData,
+                   autofill::PasswordFormFieldPredictionMap>& predictions) {
   content::RenderFrameHost* host = render_frame_host_;
-  host->Send(new AutofillMsg_AutofillUsernameDataReceived(host->GetRoutingID(),
-                                                          predictions));
+  host->Send(new AutofillMsg_AutofillUsernameAndPasswordDataReceived(
+      host->GetRoutingID(),
+      predictions));
 }
 
 void ContentPasswordManagerDriver::GeneratedPasswordAccepted(
@@ -104,6 +106,11 @@ void ContentPasswordManagerDriver::ClearPreviewedForm() {
   host->Send(new AutofillMsg_ClearPreviewedForm(host->GetRoutingID()));
 }
 
+void ContentPasswordManagerDriver::ForceSavePassword() {
+  content::RenderFrameHost* host = render_frame_host_;
+  host->Send(new AutofillMsg_FindFocusedPasswordForm(host->GetRoutingID()));
+}
+
 PasswordGenerationManager*
 ContentPasswordManagerDriver::GetPasswordGenerationManager() {
   return &password_generation_manager_;
@@ -130,6 +137,8 @@ bool ContentPasswordManagerDriver::HandleMessage(const IPC::Message& message) {
   IPC_MESSAGE_HANDLER(AutofillHostMsg_InPageNavigation, OnInPageNavigation)
   IPC_MESSAGE_HANDLER(AutofillHostMsg_PasswordNoLongerGenerated,
                       OnPasswordNoLongerGenerated)
+  IPC_MESSAGE_HANDLER(AutofillHostMsg_FocusedPasswordFormFound,
+                      OnFocusedPasswordFormFound)
   IPC_MESSAGE_FORWARD(AutofillHostMsg_ShowPasswordSuggestions,
                       &password_autofill_manager_,
                       PasswordAutofillManager::OnShowPasswordSuggestions)
@@ -155,6 +164,11 @@ void ContentPasswordManagerDriver::OnPasswordFormsRendered(
 void ContentPasswordManagerDriver::OnPasswordFormSubmitted(
     const autofill::PasswordForm& password_form) {
   GetPasswordManager()->OnPasswordFormSubmitted(this, password_form);
+}
+
+void ContentPasswordManagerDriver::OnFocusedPasswordFormFound(
+    const autofill::PasswordForm& password_form) {
+  GetPasswordManager()->OnPasswordFormForceSaveRequested(this, password_form);
 }
 
 void ContentPasswordManagerDriver::DidNavigateFrame(

@@ -16,6 +16,7 @@
 #include "extensions/browser/api/device_permissions_prompt.h"
 #include "extensions/browser/api/extensions_api_client.h"
 #include "extensions/browser/api/usb/usb_device_resource.h"
+#include "extensions/browser/api/usb/usb_guid_map.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/api/usb.h"
 #include "extensions/common/permissions/permissions_data.h"
@@ -69,6 +70,8 @@ using usb::RequestType;
 using usb::SynchronizationType;
 using usb::TransferType;
 using usb::UsageType;
+
+namespace extensions {
 
 namespace {
 
@@ -250,9 +253,9 @@ base::Value* PopulateConnectionHandle(int handle,
   return result.ToValue().release();
 }
 
-base::Value* PopulateDevice(const UsbDevice* device) {
+base::Value* PopulateDevice(const UsbDevice* device, int id) {
   Device result;
-  result.device = device->unique_id();
+  result.device = id;
   result.vendor_id = device->vendor_id();
   result.product_id = device->product_id();
   return result.ToValue().release();
@@ -380,8 +383,6 @@ void ConvertDeviceFilter(const usb::DeviceFilter& input,
 
 }  // namespace
 
-namespace extensions {
-
 UsbPermissionCheckingFunction::UsbPermissionCheckingFunction()
     : device_permissions_manager_(nullptr) {
 }
@@ -491,10 +492,10 @@ ExtensionFunction::ResponseAction UsbFindDevicesFunction::Run() {
 
   vendor_id_ = parameters->options.vendor_id;
   product_id_ = parameters->options.product_id;
-  interface_id_ = parameters->options.interface_id.get()
-                      ? *parameters->options.interface_id.get()
-                      : UsbDevicePermissionData::ANY_INTERFACE;
-  UsbDevicePermission::CheckParam param(vendor_id_, product_id_, interface_id_);
+  int interface_id = parameters->options.interface_id.get()
+                         ? *parameters->options.interface_id.get()
+                         : UsbDevicePermissionData::ANY_INTERFACE;
+  UsbDevicePermission::CheckParam param(vendor_id_, product_id_, interface_id);
   if (!extension()->permissions_data()->CheckAPIPermissionWithParam(
           APIPermission::kUsbDevice, &param)) {
     return RespondNow(Error(kErrorPermissionDenied));
@@ -521,21 +522,8 @@ void UsbFindDevicesFunction::OnGetDevicesComplete(
         device->product_id() != product_id_) {
       barrier_.Run();
     } else {
-      device->RequestUsbAccess(
-          interface_id_,
-          base::Bind(&UsbFindDevicesFunction::OnRequestAccessComplete, this,
-                     device));
+      device->Open(base::Bind(&UsbFindDevicesFunction::OnDeviceOpened, this));
     }
-  }
-}
-
-void UsbFindDevicesFunction::OnRequestAccessComplete(
-    scoped_refptr<UsbDevice> device,
-    bool success) {
-  if (success) {
-    device->Open(base::Bind(&UsbFindDevicesFunction::OnDeviceOpened, this));
-  } else {
-    barrier_.Run();
   }
 }
 
@@ -596,10 +584,12 @@ ExtensionFunction::ResponseAction UsbGetDevicesFunction::Run() {
 void UsbGetDevicesFunction::OnGetDevicesComplete(
     const std::vector<scoped_refptr<UsbDevice>>& devices) {
   scoped_ptr<base::ListValue> result(new base::ListValue());
+  UsbGuidMap* guid_map = UsbGuidMap::Get(browser_context());
   for (const scoped_refptr<UsbDevice>& device : devices) {
     if ((filters_.empty() || UsbDeviceFilter::MatchesAny(device, filters_)) &&
         HasDevicePermission(device)) {
-      result->Append(PopulateDevice(device.get()));
+      result->Append(PopulateDevice(device.get(),
+                                    guid_map->GetIdFromGuid(device->guid())));
     }
   }
 
@@ -650,8 +640,10 @@ ExtensionFunction::ResponseAction UsbGetUserSelectedDevicesFunction::Run() {
 void UsbGetUserSelectedDevicesFunction::OnDevicesChosen(
     const std::vector<scoped_refptr<UsbDevice>>& devices) {
   scoped_ptr<base::ListValue> result(new base::ListValue());
+  UsbGuidMap* guid_map = UsbGuidMap::Get(browser_context());
   for (const auto& device : devices) {
-    result->Append(PopulateDevice(device.get()));
+    result->Append(
+        PopulateDevice(device.get(), guid_map->GetIdFromGuid(device->guid())));
   }
 
   Respond(OneArgument(result.release()));
@@ -686,8 +678,13 @@ ExtensionFunction::ResponseAction UsbOpenDeviceFunction::Run() {
     return RespondNow(Error(kErrorInitService));
   }
 
-  scoped_refptr<UsbDevice> device =
-      service->GetDeviceById(parameters->device.device);
+  std::string guid;
+  if (!UsbGuidMap::Get(browser_context())
+           ->GetGuidFromId(parameters->device.device, &guid)) {
+    return RespondNow(Error(kErrorNoDevice));
+  }
+
+  scoped_refptr<UsbDevice> device = service->GetDevice(guid);
   if (!device.get()) {
     return RespondNow(Error(kErrorNoDevice));
   }
@@ -698,21 +695,8 @@ ExtensionFunction::ResponseAction UsbOpenDeviceFunction::Run() {
     return RespondNow(Error(kErrorNoDevice));
   }
 
-  device->RequestUsbAccess(
-      -1, /* any interface, unused by the permission broker */
-      base::Bind(&UsbOpenDeviceFunction::OnRequestAccessComplete, this,
-                 device));
+  device->Open(base::Bind(&UsbOpenDeviceFunction::OnDeviceOpened, this));
   return RespondLater();
-}
-
-void UsbOpenDeviceFunction::OnRequestAccessComplete(
-    scoped_refptr<UsbDevice> device,
-    bool success) {
-  if (success) {
-    device->Open(base::Bind(&UsbOpenDeviceFunction::OnDeviceOpened, this));
-  } else {
-    Respond(Error(kErrorPermissionDenied));
-  }
 }
 
 void UsbOpenDeviceFunction::OnDeviceOpened(

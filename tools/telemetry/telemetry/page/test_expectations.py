@@ -71,22 +71,29 @@ class TestExpectations(object):
     self._Expect('skip', url_pattern, conditions, bug)
 
   def _Expect(self, expectation, url_pattern, conditions=None, bug=None):
-    self.expectations.append(_Expectation(expectation, self, url_pattern,
-      conditions, bug))
+    self.expectations.append(self.CreateExpectation(expectation, url_pattern,
+                                                    conditions, bug))
 
-  def GetExpectationForPage(self, browser, page):
-    platform = browser.platform
-    gpu_info = None
+  def CreateExpectation(self, expectation, url_pattern, conditions=None,
+                        bug=None):
+    return _Expectation(expectation, self, url_pattern, conditions, bug)
 
+  # TODO(kbr): generalize TestExpectations to work with SharedState
+  # and Story. crbug.com/495870
+  def GetExpectationForPage(self, shared_page_state, page):
     for e in self.expectations:
-      matches_url = fnmatch.fnmatch(page.url, e.url_pattern)
-      matches_name = page.name and fnmatch.fnmatch(page.name, e.name_pattern)
-      if matches_url or matches_name:
-        if gpu_info == None and browser.supports_system_info:
-          gpu_info = browser.GetSystemInfo().gpu
-        if self.ModifiersApply(platform, gpu_info, e):
-          return e.expectation
+      if self.ExpectationAppliesToPage(e, shared_page_state, page):
+        return e.expectation
     return 'pass'
+
+  def ExpectationAppliesToPage(self, expectation, shared_page_state, page):
+    matches_url = fnmatch.fnmatch(page.url, expectation.url_pattern)
+    matches_name = page.name and fnmatch.fnmatch(page.name,
+                                                 expectation.name_pattern)
+    if matches_url or matches_name:
+      if self.ModifiersApply(shared_page_state, expectation):
+        return True
+    return False
 
   def _GetGpuVendorString(self, gpu_info):
     if gpu_info:
@@ -113,33 +120,38 @@ class TestExpectations(object):
 
     return 0
 
-  def ModifiersApply(self, platform, gpu_info, expectation):
+  def ModifiersApply(self, shared_page_state, expectation):
     """Determines if the conditions for an expectation apply to this system.
     Can be overridden by subclasses to support new user-defined conditions.
 
     Args:
-      platform: an instance of telemetry.core.platform.Platform which
-          is the platform the browser instance is running on during
-          the page test.
-      gpu_info: an instance of telemetry.core.GPUInfo which describes
-          the GPU configuration of the machine on which the browser is
-          running.
+      shared_page_state: an instance of telemetry.page.SharedPageState
+          which can be queried for values like the currently running
+          browser.
       expectation: a object which is guaranteed to have the property
           "user_defined_conditions" defined, which is an array of
           strings or tuples specified in the test expectations for
           which IsValidUserDefinedCondition returned true.
+
     """
+    browser = shared_page_state.browser
+    platform = browser.platform
     os_matches = (not expectation.os_conditions or
         platform.GetOSName() in expectation.os_conditions or
         platform.GetOSVersionName() in expectation.os_conditions)
 
-    gpu_vendor = self._GetGpuVendorString(gpu_info)
-    gpu_device_id = self._GetGpuDeviceId(gpu_info)
+    gpu_matches = True
 
-    gpu_matches = ((not expectation.gpu_conditions and
-        not expectation.device_id_conditions) or
-        gpu_vendor in expectation.gpu_conditions or
-        (gpu_vendor, gpu_device_id) in expectation.device_id_conditions)
+    # TODO(kbr): factor out all of the GPU-related conditions into
+    # GpuTestExpectations, including unit tests.
+    if browser.supports_system_info:
+      gpu_info = browser.GetSystemInfo().gpu
+      gpu_vendor = self._GetGpuVendorString(gpu_info)
+      gpu_device_id = self._GetGpuDeviceId(gpu_info)
+      gpu_matches = ((not expectation.gpu_conditions and
+          not expectation.device_id_conditions) or
+          gpu_vendor in expectation.gpu_conditions or
+          (gpu_vendor, gpu_device_id) in expectation.device_id_conditions)
 
     return os_matches and gpu_matches
 

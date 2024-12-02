@@ -20,7 +20,6 @@
 #include "sync/internal_api/public/sync_context_proxy.h"
 #include "sync/internal_api/public/sync_manager.h"
 #include "sync/internal_api/public/sync_manager_factory.h"
-#include "sync/internal_api/public/util/report_unrecoverable_error_function.h"
 #include "sync/internal_api/public/util/unrecoverable_error_handler.h"
 #include "sync/internal_api/public/util/weak_handle.h"
 
@@ -58,8 +57,10 @@ class SyncBackendHost : public sync_driver::BackendDataTypeConfigurer {
   // Optionally deletes the "Sync Data" folder during init in order to make
   // sure we're starting fresh.
   //
-  // |report_unrecoverable_error_function| can be NULL.  Note:
-  // |unrecoverable_error_handler| may be invoked from any thread.
+  // Note: |unrecoverable_error_handler| may be invoked from any thread.
+  //
+  // |saved_nigori_state| is optional nigori state to restore from a previous
+  // backend instance. May be null.
   virtual void Initialize(
       sync_driver::SyncFrontend* frontend,
       scoped_ptr<base::Thread> sync_thread,
@@ -69,9 +70,10 @@ class SyncBackendHost : public sync_driver::BackendDataTypeConfigurer {
       bool delete_sync_data_folder,
       scoped_ptr<syncer::SyncManagerFactory> sync_manager_factory,
       scoped_ptr<syncer::UnrecoverableErrorHandler> unrecoverable_error_handler,
-      syncer::ReportUnrecoverableErrorFunction
-          report_unrecoverable_error_function,
-      syncer::NetworkResources* network_resources) = 0;
+      const base::Closure& report_unrecoverable_error_function,
+      syncer::NetworkResources* network_resources,
+      scoped_ptr<syncer::SyncEncryptionHandler::NigoriState>
+          saved_nigori_state) = 0;
 
   // Called on the frontend's thread to update SyncCredentials.
   virtual void UpdateCredentials(
@@ -216,6 +218,9 @@ class SyncBackendHost : public sync_driver::BackendDataTypeConfigurer {
   virtual void DisableDirectoryTypeDebugInfoForwarding() = 0;
 
   virtual base::MessageLoop* GetSyncLoopForTesting() = 0;
+
+  // Triggers sync cycle to update |types|.
+  virtual void RefreshTypesForTest(syncer::ModelTypeSet types) = 0;
 
   DISALLOW_COPY_AND_ASSIGN(SyncBackendHost);
 };

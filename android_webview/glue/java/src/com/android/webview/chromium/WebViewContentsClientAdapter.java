@@ -630,7 +630,7 @@ public class WebViewContentsClientAdapter extends AwContentsClient {
         try {
             TraceEvent.begin("WebViewContentsClientAdapter.onReceivedTitle");
             if (mWebChromeClient != null) {
-                if (TRACE) Log.d(TAG, "onReceivedTitle");
+                if (TRACE) Log.d(TAG, "onReceivedTitle=\"" + title + "\"");
                 mWebChromeClient.onReceivedTitle(mWebView, title);
             }
         } finally {
@@ -1165,10 +1165,10 @@ public class WebViewContentsClientAdapter extends AwContentsClient {
                 result = mWebChromeClient.getDefaultVideoPoster();
             }
             if (result == null) {
-                // The ic_media_video_poster icon is transparent so we need to draw it on a gray
-                // background.
+                // The ic_play_circle_outline_black_48dp icon is transparent so we need to draw it
+                // on a gray background.
                 Bitmap poster = BitmapFactory.decodeResource(
-                        mContext.getResources(), R.drawable.ic_media_video_poster);
+                        mContext.getResources(), R.drawable.ic_play_circle_outline_black_48dp);
                 result = Bitmap.createBitmap(
                         poster.getWidth(), poster.getHeight(), poster.getConfig());
                 result.eraseColor(Color.GRAY);
@@ -1221,6 +1221,7 @@ public class WebViewContentsClientAdapter extends AwContentsClient {
         private static final long BITMASK_RESOURCE_VIDEO_CAPTURE = 1 << 1;
         private static final long BITMASK_RESOURCE_AUDIO_CAPTURE = 1 << 2;
         private static final long BITMASK_RESOURCE_PROTECTED_MEDIA_ID = 1 << 3;
+        private static final long BITMASK_RESOURCE_MIDI_SYSEX = 1 << 4;
 
         public static long toAwPermissionResources(String[] resources) {
             long result = 0;
@@ -1231,6 +1232,8 @@ public class WebViewContentsClientAdapter extends AwContentsClient {
                     result |= BITMASK_RESOURCE_AUDIO_CAPTURE;
                 } else if (resource.equals(PermissionRequest.RESOURCE_PROTECTED_MEDIA_ID)) {
                     result |= BITMASK_RESOURCE_PROTECTED_MEDIA_ID;
+                } else if (resource.equals(AwPermissionRequest.RESOURCE_MIDI_SYSEX)) {
+                    result |= BITMASK_RESOURCE_MIDI_SYSEX;
                 }
             }
             return result;
@@ -1246,6 +1249,9 @@ public class WebViewContentsClientAdapter extends AwContentsClient {
             }
             if ((resources & BITMASK_RESOURCE_PROTECTED_MEDIA_ID) != 0) {
                 result.add(PermissionRequest.RESOURCE_PROTECTED_MEDIA_ID);
+            }
+            if ((resources & BITMASK_RESOURCE_MIDI_SYSEX) != 0) {
+                result.add(AwPermissionRequest.RESOURCE_MIDI_SYSEX);
             }
             String[] resource_array = new String[result.size()];
             return result.toArray(resource_array);

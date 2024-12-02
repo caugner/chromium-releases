@@ -28,7 +28,7 @@ remoting.DesktopRemotingActivity = function(parentActivity) {
   /** @private */
   this.sessionFactory_ = new remoting.ClientSessionFactory(
       document.querySelector('#client-container .client-plugin-container'),
-      remoting.app_capabilities());
+      [/* No special capabilities required. */]);
 
   /** @private {remoting.ClientSession} */
   this.session_ = null;
@@ -48,19 +48,19 @@ remoting.DesktopRemotingActivity = function(parentActivity) {
 remoting.DesktopRemotingActivity.prototype.start =
     function(host, credentialsProvider, opt_suppressOfflineError) {
   var that = this;
-  this.sessionFactory_.createSession(this).then(
+  var useApiaryForLogging = host.loggingChannel === 'APIARY';
+  this.sessionFactory_.createSession(this, useApiaryForLogging).then(
     function(/** remoting.ClientSession */ session) {
       that.session_ = session;
       session.logHostOfflineErrors(!opt_suppressOfflineError);
       session.getLogger().setHostVersion(host.hostVersion);
 
-      var mode = remoting.ServerLogEntry.VALUE_MODE_UNKNOWN;
+      var Mode = remoting.ChromotingEvent.Mode;
       if (that.parentActivity_ instanceof remoting.It2MeActivity) {
-          mode = remoting.ServerLogEntry.VALUE_MODE_IT2ME;
+        session.getLogger().setLogEntryMode(Mode.IT2ME);
       } else if (that.parentActivity_ instanceof remoting.Me2MeActivity) {
-          mode = remoting.ServerLogEntry.VALUE_MODE_ME2ME;
+        session.getLogger().setLogEntryMode(Mode.ME2ME);
       }
-      session.getLogger().setLogEntryMode(mode);
 
       session.connect(host, credentialsProvider);
   }).catch(remoting.Error.handler(
@@ -93,9 +93,9 @@ remoting.DesktopRemotingActivity.prototype.onConnected =
 
   // Apply the default or previously-specified keyboard remapping.
   var remapping = connectionInfo.host().options.remapKeys;
-  if (remapping === '' && remoting.platformIsChromeOS()) {
+  if (base.isEmptyObject(remapping) && remoting.platformIsChromeOS()) {
     // Under ChromeOS, remap the right Control key to the right Win/Cmd key.
-    remapping = '0x0700e4>0x0700e7';
+    remapping = {0x0700e4: 0x0700e7};
   }
   connectionInfo.plugin().setRemapKeys(remapping);
 

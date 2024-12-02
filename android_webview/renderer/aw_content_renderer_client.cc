@@ -112,10 +112,11 @@ bool AwContentRendererClient::HandleNavigation(
 
   bool ignore_navigation = false;
   base::string16 url =  request.url().string();
+  bool has_user_gesture = request.hasUserGesture();
 
   int render_frame_id = render_frame->GetRoutingID();
   RenderThread::Get()->Send(new AwViewHostMsg_ShouldOverrideUrlLoading(
-      render_frame_id, url, &ignore_navigation));
+      render_frame_id, url, has_user_gesture, is_redirect, &ignore_navigation));
   return ignore_navigation;
 }
 
@@ -174,10 +175,10 @@ void AwContentRendererClient::GetNavigationErrorStrings(
       contents = AwResource::GetNoDomainPageContent();
     } else {
       contents = AwResource::GetLoadErrorPageContent();
-      ReplaceSubstringsAfterOffset(&contents, 0, "%e", err);
+      base::ReplaceSubstringsAfterOffset(&contents, 0, "%e", err);
     }
 
-    ReplaceSubstringsAfterOffset(&contents, 0, "%s",
+    base::ReplaceSubstringsAfterOffset(&contents, 0, "%s",
         net::EscapeForHTML(error_url.possibly_invalid_spec()));
     *error_html = contents;
   }

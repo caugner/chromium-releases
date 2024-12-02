@@ -28,7 +28,7 @@ function TestEventListener() {
    * Set of events that are expected to be triggered during the test. Each
    * object property represents one expected event.
    *
-   * @type {Object.<string, Object>}
+   * @type {Object<string, Object>}
    * @private
    */
   this.expectedEvents_ = {};
@@ -37,7 +37,7 @@ function TestEventListener() {
    * List of fileManagerPrivate.onDirectoryChanged events received before file
    * system operation was done.
    *
-   * @type {Array.<Object>}
+   * @type {Array<Object>}
    * @private
    */
   this.eventQueue_ = [];
@@ -219,7 +219,7 @@ function initTests(callback) {
     isOnDrive: false,
     /**
      * Set of entries that are being watched during the tests.
-     * @type {Object.<Entry>}
+     * @type {Object<Entry>}
      */
     entries: {},
     /**
@@ -324,7 +324,7 @@ initTests(function(testParams, errorMessage) {
   chrome.test.runTests([
     function addFileWatch() {
       chrome.fileManagerPrivate.addFileWatch(
-          testParams.entries.file.toURL(),
+          testParams.entries.file,
           chrome.test.callbackPass(function(success) {
             chrome.test.assertTrue(success);
           }));
@@ -332,7 +332,7 @@ initTests(function(testParams, errorMessage) {
 
     function addSubdirWatch() {
       chrome.fileManagerPrivate.addFileWatch(
-          testParams.entries.subdir.toURL(),
+          testParams.entries.subdir,
           chrome.test.callbackPass(function(success) {
             chrome.test.assertTrue(success);
           }));
@@ -340,7 +340,7 @@ initTests(function(testParams, errorMessage) {
 
     function addDirWatch() {
       chrome.fileManagerPrivate.addFileWatch(
-          testParams.entries.dir.toURL(),
+          testParams.entries.dir,
           chrome.test.callbackPass(function(success) {
             chrome.test.assertTrue(success);
           }));
@@ -498,7 +498,7 @@ initTests(function(testParams, errorMessage) {
 
     function removeFileWatch() {
       chrome.fileManagerPrivate.removeFileWatch(
-          testParams.entries.file.toURL(),
+          testParams.entries.file,
           chrome.test.callbackPass(function(success) {
             chrome.test.assertTrue(success);
           }));
@@ -506,7 +506,7 @@ initTests(function(testParams, errorMessage) {
 
     function removeDirWatch() {
       chrome.fileManagerPrivate.removeFileWatch(
-          testParams.entries.dir.toURL(),
+          testParams.entries.dir,
           chrome.test.callbackPass(function(success) {
             chrome.test.assertTrue(success);
           }));

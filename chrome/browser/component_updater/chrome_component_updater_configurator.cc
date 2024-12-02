@@ -10,11 +10,9 @@
 
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
+#include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/version.h"
-#if defined(OS_WIN)
-#include "base/win/win_util.h"
-#endif  // OS_WIN
 #include "build/build_config.h"
 #include "chrome/browser/component_updater/component_patcher_operation_out_of_process.h"
 #include "chrome/browser/component_updater/component_updater_url_constants.h"
@@ -25,6 +23,10 @@
 #include "content/public/browser/browser_thread.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "url/gurl.h"
+
+#if defined(OS_WIN)
+#include "base/win/win_util.h"
+#endif  // OS_WIN
 
 using update_client::Configurator;
 using update_client::OutOfProcessPatcher;
@@ -106,10 +108,8 @@ class ChromeConfigurator : public Configurator {
                      net::URLRequestContextGetter* url_request_getter);
 
   int InitialDelay() const override;
-  int NextCheckDelay() override;
+  int NextCheckDelay() const override;
   int StepDelay() const override;
-  int StepDelayMedium() override;
-  int MinimumReCheckWait() const override;
   int OnDemandDelay() const override;
   int UpdateDelay() const override;
   std::vector<GURL> UpdateUrl() const override;
@@ -119,7 +119,6 @@ class ChromeConfigurator : public Configurator {
   std::string GetLang() const override;
   std::string GetOSLongName() const override;
   std::string ExtraRequestParams() const override;
-  size_t UrlSizeLimit() const override;
   net::URLRequestContextGetter* RequestContext() const override;
   scoped_refptr<OutOfProcessPatcher> CreateOutOfProcessPatcher() const override;
   bool DeltasEnabled() const override;
@@ -154,10 +153,9 @@ ChromeConfigurator::ChromeConfigurator(
       background_downloads_enabled_(false),
       fallback_to_alt_source_url_enabled_(false) {
   // Parse comma-delimited debug flags.
-  std::vector<std::string> switch_values;
-  Tokenize(cmdline->GetSwitchValueASCII(switches::kComponentUpdater),
-           ",",
-           &switch_values);
+  std::vector<std::string> switch_values = base::SplitString(
+      cmdline->GetSwitchValueASCII(switches::kComponentUpdater),
+      ",", base::KEEP_WHITESPACE, base::SPLIT_WANT_NONEMPTY);
   fast_update_ = HasSwitchValue(switch_values, kSwitchFastUpdate);
   pings_enabled_ = !HasSwitchValue(switch_values, kSwitchDisablePings);
   deltas_enabled_ = !HasSwitchValue(switch_values, kSwitchDisableDeltaUpdates);
@@ -183,23 +181,15 @@ ChromeConfigurator::ChromeConfigurator(
 }
 
 int ChromeConfigurator::InitialDelay() const {
-  return fast_update_ ? 1 : (6 * kDelayOneMinute);
+  return fast_update_ ? 10 : (6 * kDelayOneMinute);
 }
 
-int ChromeConfigurator::NextCheckDelay() {
-  return fast_update_ ? 3 : (6 * kDelayOneHour);
-}
-
-int ChromeConfigurator::StepDelayMedium() {
-  return fast_update_ ? 3 : (15 * kDelayOneMinute);
+int ChromeConfigurator::NextCheckDelay() const {
+  return fast_update_ ? 60 : (6 * kDelayOneHour);
 }
 
 int ChromeConfigurator::StepDelay() const {
   return fast_update_ ? 1 : 1;
-}
-
-int ChromeConfigurator::MinimumReCheckWait() const {
-  return fast_update_ ? 30 : (6 * kDelayOneHour);
 }
 
 int ChromeConfigurator::OnDemandDelay() const {
@@ -207,7 +197,7 @@ int ChromeConfigurator::OnDemandDelay() const {
 }
 
 int ChromeConfigurator::UpdateDelay() const {
-  return fast_update_ ? 1 : (15 * kDelayOneMinute);
+  return fast_update_ ? 10 : (15 * kDelayOneMinute);
 }
 
 std::vector<GURL> ChromeConfigurator::UpdateUrl() const {
@@ -245,10 +235,6 @@ std::string ChromeConfigurator::GetOSLongName() const {
 
 std::string ChromeConfigurator::ExtraRequestParams() const {
   return extra_info_;
-}
-
-size_t ChromeConfigurator::UrlSizeLimit() const {
-  return 1024ul;
 }
 
 net::URLRequestContextGetter* ChromeConfigurator::RequestContext() const {

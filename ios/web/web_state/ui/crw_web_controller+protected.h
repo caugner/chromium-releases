@@ -9,9 +9,12 @@
 
 #include "base/mac/scoped_nsobject.h"
 #include "ios/web/public/referrer.h"
-#include "ios/web/public/web_state/page_scroll_state.h"
+#include "ios/web/public/web_state/page_display_state.h"
 
 @class CRWSessionController;
+namespace web {
+struct FrameInfo;
+}  // namespace web
 
 namespace web {
 // Separator between window href and name.
@@ -153,16 +156,13 @@ struct NewWindowInfo {
 // |command|. Subclasses may override to handle class-specific messages.
 - (SEL)selectorToHandleJavaScriptCommand:(const std::string&)command;
 
-// Extracts the absolute zoom scale of content displayed with |scrollState|,
-// given the differing ways in which UIWebView and WKWebView use UIScrollView's
-// zoom scale properties.  See comments in
-// |applyWebViewScrollZoomScaleFromScrollState:| implementations for details.
-- (CGFloat)absoluteZoomScaleForScrollState:
-    (const web::PageScrollState&)scrollState;
+// Sets zoom scale value for webview scroll view from |zoomState|.
+- (void)applyWebViewScrollZoomScaleFromZoomState:
+    (const web::PageZoomState&)zoomState;
 
-// Sets zoom scale value for webview scroll view from |scrollState|.
-- (void)applyWebViewScrollZoomScaleFromScrollState:
-    (const web::PageScrollState&)scrollState;
+// Used to decide whether a load that generates errors with the
+// NSURLErrorCancelled code should be cancelled.
+- (BOOL)shouldAbortLoadForCancelledError:(NSError*)cancelledError;
 
 #pragma mark - Optional methods for subclasses
 // Subclasses may overwrite methods in this section.
@@ -172,6 +172,10 @@ struct NewWindowInfo {
 // TODO(stuartmorgan): Remove once the hook points are driven from the subclass.
 - (BOOL)checkForUnexpectedURLChange;
 
+// Handles 'window.history.willChangeState' message.
+- (BOOL)handleWindowHistoryWillChangeStateMessage:
+            (base::DictionaryValue*)message
+                                          context:(NSDictionary*)context;
 // Handles 'window.history.didPushState' message.
 - (BOOL)handleWindowHistoryDidPushStateMessage:(base::DictionaryValue*)message
                                        context:(NSDictionary*)context;
@@ -292,10 +296,12 @@ struct NewWindowInfo {
 - (void)handleWebInvokeURL:(const GURL&)url request:(NSURLRequest*)request;
 
 // Returns YES if the given load request should be allowed to continue. If this
-// returns NO, the load should be cancelled.
-// |isLinkClick| should indicate whether the navigation is the result of a link
-// click (either directly, or via JS triggered by a link).
+// returns NO, the load should be cancelled. |targetFrame| contains information
+// about the frame to which navigation is targeted, can be null.
+// |isLinkClick| should indicate whether the navigation is the
+// result of a link click (either directly, or via JS triggered by a link).
 - (BOOL)shouldAllowLoadWithRequest:(NSURLRequest*)request
+                       targetFrame:(const web::FrameInfo*)targetFrame
                        isLinkClick:(BOOL)isLinkClick;
 
 // Prepares web controller and delegates for anticipated page change.

@@ -48,7 +48,10 @@ ModelNeutralMutableEntry::ModelNeutralMutableEntry(BaseWriteTransaction* trans,
                                                    CreateNewTypeRoot,
                                                    ModelType type)
     : Entry(trans), base_write_transaction_(trans) {
-  DCHECK(IsTypeWithClientGeneratedRoot(type));
+  // We allow NIGORI because we allow SyncEncryptionHandler to restore a nigori
+  // across Directory instances (see SyncEncryptionHandler::RestoreNigori).
+  if (type != NIGORI)
+    DCHECK(IsTypeWithClientGeneratedRoot(type));
   Entry same_type_root(trans, GET_TYPE_ROOT, type);
   kernel_ = NULL;
   if (same_type_root.good()) {
@@ -237,13 +240,20 @@ void ModelNeutralMutableEntry::PutServerIsDel(bool value) {
     kernel_->mark_dirty(GetDirtyIndexHelper());
   }
 
-  // Update delete journal for existence status change on server side here
-  // instead of in PutIsDel() because IS_DEL may not be updated due to
-  // early returns when processing updates. And because
-  // UpdateDeleteJournalForServerDelete() checks for SERVER_IS_DEL, it has
-  // to be called on sync thread.
-  dir()->delete_journal()->UpdateDeleteJournalForServerDelete(
-      base_write_transaction(), old_value, *kernel_);
+  if (!value || kernel_->ref(IS_UNAPPLIED_UPDATE)) {
+    // Update delete journal for existence status change on server side here
+    // instead of in PutIsDel() because IS_DEL may not be updated due to
+    // early returns when processing updates. And because
+    // UpdateDeleteJournalForServerDelete() checks for SERVER_IS_DEL, it has
+    // to be called on sync thread.
+
+    // Please note that the delete journal applies only to the deletions
+    // originating on the server side (hence the IS_UNAPPLIED_UPDATE check),
+    // but it still makes sense to remove the entry from the delete journal
+    // when it gets undeleted locally.
+    dir()->delete_journal()->UpdateDeleteJournalForServerDelete(
+        base_write_transaction(), old_value, *kernel_);
+  }
 }
 
 void ModelNeutralMutableEntry::PutServerNonUniqueName(
@@ -335,8 +345,8 @@ void ModelNeutralMutableEntry::PutServerSpecifics(
   base_write_transaction_->TrackChangesTo(kernel_);
   // TODO(ncarter): This is unfortunately heavyweight.  Can we do
   // better?
-  if (kernel_->ref(SERVER_SPECIFICS).SerializeAsString() !=
-      value.SerializeAsString()) {
+  const std::string& serialized_value = value.SerializeAsString();
+  if (serialized_value != kernel_->ref(SERVER_SPECIFICS).SerializeAsString()) {
     if (kernel_->ref(IS_UNAPPLIED_UPDATE)) {
       // Remove ourselves from unapplied_update_metahandles with our
       // old server type.
@@ -348,7 +358,13 @@ void ModelNeutralMutableEntry::PutServerSpecifics(
       DCHECK_EQ(erase_count, 1u);
     }
 
-    kernel_->put(SERVER_SPECIFICS, value);
+    // Check for potential sharing - SERVER_SPECIFICS is often
+    // copied from SPECIFICS.
+    if (serialized_value == kernel_->ref(SPECIFICS).SerializeAsString()) {
+      kernel_->copy(SPECIFICS, SERVER_SPECIFICS);
+    } else {
+      kernel_->put(SERVER_SPECIFICS, value);
+    }
     kernel_->mark_dirty(&dir()->kernel()->dirty_metahandles);
 
     if (kernel_->ref(IS_UNAPPLIED_UPDATE)) {
@@ -369,9 +385,17 @@ void ModelNeutralMutableEntry::PutBaseServerSpecifics(
   base_write_transaction_->TrackChangesTo(kernel_);
   // TODO(ncarter): This is unfortunately heavyweight.  Can we do
   // better?
-  if (kernel_->ref(BASE_SERVER_SPECIFICS).SerializeAsString()
-      != value.SerializeAsString()) {
-    kernel_->put(BASE_SERVER_SPECIFICS, value);
+  const std::string& serialized_value = value.SerializeAsString();
+  if (serialized_value !=
+      kernel_->ref(BASE_SERVER_SPECIFICS).SerializeAsString()) {
+    // Check for potential sharing - BASE_SERVER_SPECIFICS is often
+    // copied from SERVER_SPECIFICS.
+    if (serialized_value ==
+        kernel_->ref(SERVER_SPECIFICS).SerializeAsString()) {
+      kernel_->copy(SERVER_SPECIFICS, BASE_SERVER_SPECIFICS);
+    } else {
+      kernel_->put(BASE_SERVER_SPECIFICS, value);
+    }
     kernel_->mark_dirty(&dir()->kernel()->dirty_metahandles);
   }
 }
@@ -393,10 +417,17 @@ void ModelNeutralMutableEntry::PutServerAttachmentMetadata(
     const sync_pb::AttachmentMetadata& value) {
   DCHECK(kernel_);
   base_write_transaction_->TrackChangesTo(kernel_);
-
-  if (kernel_->ref(SERVER_ATTACHMENT_METADATA).SerializeAsString() !=
-      value.SerializeAsString()) {
-    kernel_->put(SERVER_ATTACHMENT_METADATA, value);
+  const std::string& serialized_value = value.SerializeAsString();
+  if (serialized_value !=
+      kernel_->ref(SERVER_ATTACHMENT_METADATA).SerializeAsString()) {
+    // Check for potential sharing - SERVER_ATTACHMENT_METADATA is often
+    // copied from ATTACHMENT_METADATA.
+    if (serialized_value ==
+        kernel_->ref(ATTACHMENT_METADATA).SerializeAsString()) {
+      kernel_->copy(ATTACHMENT_METADATA, SERVER_ATTACHMENT_METADATA);
+    } else {
+      kernel_->put(SERVER_ATTACHMENT_METADATA, value);
+    }
     kernel_->mark_dirty(&dir()->kernel()->dirty_metahandles);
   }
 }

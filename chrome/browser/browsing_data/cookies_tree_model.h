@@ -31,7 +31,6 @@
 
 class BrowsingDataChannelIDHelper;
 class BrowsingDataCookieHelper;
-class CookieSettings;
 class CookiesTreeModel;
 class CookieTreeAppCacheNode;
 class CookieTreeAppCachesNode;
@@ -55,6 +54,10 @@ class CookieTreeServiceWorkersNode;
 class CookieTreeSessionStorageNode;
 class CookieTreeSessionStoragesNode;
 class ExtensionSpecialStoragePolicy;
+
+namespace content_settings {
+class CookieSettings;
+}
 
 namespace extensions {
 class ExtensionSet;
@@ -217,7 +220,7 @@ class CookieTreeHostNode : public CookieTreeNode {
 
   // Creates an content exception for this origin of type
   // CONTENT_SETTINGS_TYPE_COOKIES.
-  void CreateContentException(CookieSettings* cookie_settings,
+  void CreateContentException(content_settings::CookieSettings* cookie_settings,
                               ContentSetting setting) const;
 
   // True if a content exception can be created for this origin.
@@ -801,7 +804,7 @@ class CookiesTreeModel : public ui::TreeNodeModel<CookieTreeNode> {
 
   // The CookiesTreeModel maintains a separate list of observers that are
   // specifically of the type CookiesTreeModel::Observer.
-  ObserverList<Observer> cookies_observer_list_;
+  base::ObserverList<Observer> cookies_observer_list_;
 
   // If true, use the CanonicalCookie::Source attribute to group cookies.
   // Otherwise, use the CanonicalCookie::Domain attribute.

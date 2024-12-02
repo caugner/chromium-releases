@@ -9,6 +9,7 @@
 
 #include "ash/ash_switches.h"
 #include "ash/display/display_controller.h"
+#include "ash/ime/input_method_event_handler.h"
 #include "ash/shell.h"
 #include "ash/shell/toplevel_window.h"
 #include "ash/test/ash_test_helper.h"
@@ -151,7 +152,7 @@ void AshTestBase::SetUp() {
       options.message_loop_type = base::MessageLoop::TYPE_IO;
       ipc_thread_->StartWithOptions(options);
       metro_viewer_host_.reset(
-          new TestMetroViewerProcessHost(ipc_thread_->message_loop_proxy()));
+          new TestMetroViewerProcessHost(ipc_thread_->task_runner()));
       CHECK(metro_viewer_host_->LaunchViewerAndWaitForConnection(
           win8::test::kDefaultTestAppUserModelId));
       aura::RemoteWindowTreeHostWin* window_tree_host =
@@ -360,6 +361,10 @@ void AshTestBase::UnblockUserSession() {
   SetUserAddingScreenRunning(false);
 }
 
+void AshTestBase::DisableIME() {
+  Shell::GetInstance()->RemovePreTargetHandler(
+      Shell::GetInstance()->display_controller()->input_method_event_handler());
+}
 
 }  // namespace test
 }  // namespace ash

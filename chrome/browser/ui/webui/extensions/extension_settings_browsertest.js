@@ -84,18 +84,22 @@ ExtensionSettingsWebUITest.prototype = {
   /** @protected */
   enableDeveloperMode: function() {
     var next = this.nextStep.bind(this);
-    extensions.ExtensionSettings.getInstance().testingDeveloperModeCallback =
-        function() {
+    document.addEventListener('devControlsVisibilityUpdated',
+                              function devCallback() {
+      // Callback should only be handled once.
+      document.removeEventListener(devCallback);
+
       chrome.developerPrivate.getProfileConfiguration(function(profileInfo) {
         assertTrue(extensionSettings.classList.contains('dev-mode'));
         assertTrue(profileInfo.inDeveloperMode);
-        next();
 
         // This event isn't thrown because transitions are disabled.
         // Ensure transition here so that any dependent code does not break.
         ensureTransitionEndEvent($('dev-controls'), 0);
+
+        next();
       });
-    };
+    });
 
     var extensionSettings = getRequiredElement('extension-settings');
     assertFalse(extensionSettings.classList.contains('dev-mode'));
@@ -119,9 +123,10 @@ ExtensionSettingsWebUITest.prototype = {
   },
 };
 
+// Flaky: http://crbug.com/505506.
 // Verify that developer mode doesn't change behavior when the number of
 // extensions changes.
-TEST_F('ExtensionSettingsWebUITest', 'testDeveloperModeNoExtensions',
+TEST_F('ExtensionSettingsWebUITest', 'DISABLED_testDeveloperModeNoExtensions',
        function() {
   this.testDeveloperMode();
 });
@@ -286,8 +291,9 @@ ErrorConsoleExtensionSettingsWebUITest.prototype = {
   },
 };
 
+// Flaky on all platforms: http://crbug.com/499884, http://crbug.com/463245.
 TEST_F('ErrorConsoleExtensionSettingsWebUITest',
-       'testErrorListButtonVisibility', function() {
+       'DISABLED_testErrorListButtonVisibility', function() {
   var testButtonVisibility = function() {
     var extensionList = $('extension-list-wrapper');
 

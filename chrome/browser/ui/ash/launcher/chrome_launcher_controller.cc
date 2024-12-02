@@ -20,6 +20,7 @@
 #include "ash/wm/window_util.h"
 #include "base/command_line.h"
 #include "base/prefs/scoped_user_pref_update.h"
+#include "base/strings/pattern.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -271,17 +272,16 @@ std::string GetSourceFromAppListSource(ash::LaunchSource source) {
 
 #if defined(OS_CHROMEOS)
 // A class to get events from ChromeOS when a user gets changed or added.
-class ChromeLauncherControllerUserSwitchObserverChromeOS
-    : public ChromeLauncherControllerUserSwitchObserver,
-      public user_manager::UserManager::UserSessionStateObserver {
+class ChromeLauncherControllerUserSwitchObserver
+    : public user_manager::UserManager::UserSessionStateObserver {
  public:
-  ChromeLauncherControllerUserSwitchObserverChromeOS(
+  ChromeLauncherControllerUserSwitchObserver(
       ChromeLauncherController* controller)
       : controller_(controller) {
     DCHECK(user_manager::UserManager::IsInitialized());
     user_manager::UserManager::Get()->AddSessionStateObserver(this);
   }
-  ~ChromeLauncherControllerUserSwitchObserverChromeOS() override {
+  ~ChromeLauncherControllerUserSwitchObserver() override {
     user_manager::UserManager::Get()->RemoveSessionStateObserver(this);
   }
 
@@ -289,7 +289,7 @@ class ChromeLauncherControllerUserSwitchObserverChromeOS
   void UserAddedToSession(const user_manager::User* added_user) override;
 
   // ChromeLauncherControllerUserSwitchObserver:
-  void OnUserProfileReadyToSwitch(Profile* profile) override;
+  void OnUserProfileReadyToSwitch(Profile* profile);
 
  private:
   // Add a user to the session.
@@ -302,10 +302,10 @@ class ChromeLauncherControllerUserSwitchObserverChromeOS
   // (fully) loaded.
   std::set<std::string> added_user_ids_waiting_for_profiles_;
 
-  DISALLOW_COPY_AND_ASSIGN(ChromeLauncherControllerUserSwitchObserverChromeOS);
+  DISALLOW_COPY_AND_ASSIGN(ChromeLauncherControllerUserSwitchObserver);
 };
 
-void ChromeLauncherControllerUserSwitchObserverChromeOS::UserAddedToSession(
+void ChromeLauncherControllerUserSwitchObserver::UserAddedToSession(
     const user_manager::User* active_user) {
   Profile* profile = multi_user_util::GetProfileFromUserID(
       active_user->email());
@@ -317,8 +317,8 @@ void ChromeLauncherControllerUserSwitchObserverChromeOS::UserAddedToSession(
     AddUser(profile);
 }
 
-void ChromeLauncherControllerUserSwitchObserverChromeOS::
-    OnUserProfileReadyToSwitch(Profile* profile) {
+void ChromeLauncherControllerUserSwitchObserver::OnUserProfileReadyToSwitch(
+    Profile* profile) {
   if (!added_user_ids_waiting_for_profiles_.empty()) {
     // Check if the profile is from a user which was on the waiting list.
     std::string user_id = multi_user_util::GetUserIDFromProfile(profile);
@@ -333,8 +333,7 @@ void ChromeLauncherControllerUserSwitchObserverChromeOS::
   }
 }
 
-void ChromeLauncherControllerUserSwitchObserverChromeOS::AddUser(
-    Profile* profile) {
+void ChromeLauncherControllerUserSwitchObserver::AddUser(Profile* profile) {
   if (chrome::MultiUserWindowManager::GetMultiProfileMode() ==
           chrome::MultiUserWindowManager::MULTI_PROFILE_MODE_SEPARATED)
     chrome::MultiUserWindowManager::GetInstance()->AddUser(profile);
@@ -378,7 +377,7 @@ ChromeLauncherController::ChromeLauncherController(Profile* profile,
   if (chrome::MultiUserWindowManager::GetMultiProfileMode() !=
           chrome::MultiUserWindowManager::MULTI_PROFILE_MODE_OFF) {
     user_switch_observer_.reset(
-        new ChromeLauncherControllerUserSwitchObserverChromeOS(this));
+        new ChromeLauncherControllerUserSwitchObserver(this));
   }
 
   // Create our v1/v2 application / browser monitors which will inform the
@@ -1351,8 +1350,8 @@ bool ChromeLauncherController::ContentCanBeHandledByGmailApp(
     // We need to extend the application matching for the gMail app beyond the
     // manifest file's specification. This is required because of the namespace
     // overlap with the offline app ("/mail/mu/").
-    if (!MatchPattern(url.path(), "/mail/mu/*") &&
-        MatchPattern(url.path(), "/mail/*") &&
+    if (!base::MatchPattern(url.path(), "/mail/mu/*") &&
+        base::MatchPattern(url.path(), "/mail/*") &&
         GetExtensionForAppID(kGmailAppId) &&
         GetExtensionForAppID(kGmailAppId)->OverlapsWithOrigin(url))
       return true;
@@ -1505,8 +1504,10 @@ bool ChromeLauncherController::ShelfBoundsChangesProbablyWithUser(
 }
 
 void ChromeLauncherController::OnUserProfileReadyToSwitch(Profile* profile) {
+#if defined(OS_CHROMEOS)
   if (user_switch_observer_.get())
     user_switch_observer_->OnUserProfileReadyToSwitch(profile);
+#endif
 }
 
 void ChromeLauncherController::LauncherItemClosed(ash::ShelfID id) {

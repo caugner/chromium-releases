@@ -15,7 +15,6 @@
 #include "base/time/time.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/metrics/chrome_metrics_service_accessor.h"
-#include "chrome/browser/prefs/proxy_prefs.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/pref_names.h"
@@ -25,6 +24,7 @@
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_service.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_settings.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_params.h"
+#include "components/proxy_config/proxy_prefs.h"
 #include "net/base/host_port_pair.h"
 #include "net/proxy/proxy_config.h"
 #include "net/proxy/proxy_list.h"
@@ -42,8 +42,8 @@ bool ContainsDataReductionProxyDefaultHostSuffix(
     const net::ProxyList& proxy_list) {
   for (const net::ProxyServer& proxy : proxy_list.GetAll()) {
     if (proxy.is_valid() && !proxy.is_direct() &&
-        EndsWith(proxy.host_port_pair().host(),
-                 kDataReductionProxyDefaultHostSuffix, true)) {
+        base::EndsWith(proxy.host_port_pair().host(),
+                       kDataReductionProxyDefaultHostSuffix, true)) {
       return true;
     }
   }
@@ -67,7 +67,8 @@ bool GetEmbeddedPacScript(const std::string& pac_url, std::string* pac_script) {
   DCHECK(pac_script);
   const std::string kPacURLPrefix =
       "data:application/x-ns-proxy-autoconfig;base64,";
-  return StartsWithASCII(pac_url, kPacURLPrefix, true) &&
+  return base::StartsWith(pac_url, kPacURLPrefix,
+                          base::CompareCase::SENSITIVE) &&
          base::Base64Decode(pac_url.substr(kPacURLPrefix.size()), pac_script);
 }
 
@@ -204,9 +205,6 @@ void DataReductionProxyChromeSettings::InitDataReductionProxySettings(
       SetCallbackToRegisterSyntheticFieldTrial(
           base::Bind(
               &ChromeMetricsServiceAccessor::RegisterSyntheticFieldTrial));
-  SetDataReductionProxyAlternativeEnabled(
-      data_reduction_proxy::DataReductionProxyParams::
-          IsIncludedInAlternativeFieldTrial());
   // TODO(bengr): Remove after M46. See http://crbug.com/445599.
   MigrateDataReductionProxyOffProxyPrefs(profile_prefs);
 }

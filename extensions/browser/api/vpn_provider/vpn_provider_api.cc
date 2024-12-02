@@ -9,6 +9,7 @@
 #include "base/bind.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/values.h"
 #include "extensions/browser/api/vpn_provider/vpn_service.h"
@@ -32,7 +33,7 @@ bool CheckIPCIDRSanity(const std::string& value, bool cidr, bool ipv6) {
   int counter = 0;
 
   for (const auto& elem : value) {
-    if (IsAsciiDigit(elem)) {
+    if (base::IsAsciiDigit(elem)) {
       counter++;
       continue;
     }
@@ -53,7 +54,7 @@ bool CheckIPCIDRSanity(const std::string& value, bool cidr, bool ipv6) {
       if (!colon)
         return false;
       colon--;
-    } else if (!hex_allowed || !IsHexDigit(elem)) {
+    } else if (!hex_allowed || !base::IsHexDigit(elem)) {
       return false;
     } else {
       counter++;
@@ -100,8 +101,10 @@ void ConvertParameters(const api_vpn::Parameters& parameters,
     return;
   }
 
-  std::vector<std::string> cidr_parts;
-  CHECK(Tokenize(parameters.address, kCIDRSeperator, &cidr_parts) == 2);
+  std::vector<std::string> cidr_parts = base::SplitString(
+      parameters.address, kCIDRSeperator, base::KEEP_WHITESPACE,
+      base::SPLIT_WANT_NONEMPTY);
+  CHECK_EQ(2u, cidr_parts.size());
 
   parameter_value->SetStringWithoutPathExpansion(
       shill::kAddressParameterThirdPartyVpn, cidr_parts[0]);

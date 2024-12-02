@@ -40,7 +40,7 @@ public class EmptyTabObserver implements TabObserver {
     public void onLoadUrl(Tab tab, LoadUrlParams params, int loadType) { }
 
     @Override
-    public void onPageLoadStarted(Tab tab) { }
+    public void onPageLoadStarted(Tab tab, String url) { }
 
     @Override
     public void onPageLoadFinished(Tab tab) { }
@@ -106,6 +106,9 @@ public class EmptyTabObserver implements TabObserver {
     @Override
     public void onDidNavigateMainFrame(Tab tab, String url, String baseUrl,
             boolean isNavigationToDifferentPage, boolean isFragmentNavigation, int statusCode) { }
+
+    @Override
+    public void didFirstVisuallyNonEmptyPaint(Tab tab) { }
 
     @Override
     public void onDidChangeThemeColor(int color) { }

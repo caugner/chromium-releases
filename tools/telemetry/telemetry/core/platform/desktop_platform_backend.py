@@ -5,8 +5,8 @@
 import os
 import subprocess
 
+from catapult_base import support_binaries
 from telemetry.core.platform import platform_backend
-from telemetry.util import support_binaries
 
 
 class DesktopPlatformBackend(platform_backend.PlatformBackend):
@@ -23,3 +23,6 @@ class DesktopPlatformBackend(platform_backend.PlatformBackend):
     assert flush_command, 'You must build clear_system_cache first'
 
     subprocess.check_call([flush_command, '--recurse', directory])
+
+  def GetDeviceTypeName(self):
+    return 'Desktop'

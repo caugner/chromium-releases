@@ -48,6 +48,13 @@ LanguageOptionsHandlerCommon::~LanguageOptionsHandlerCommon() {
 void LanguageOptionsHandlerCommon::GetLocalizedValues(
     base::DictionaryValue* localized_strings) {
   DCHECK(localized_strings);
+
+#if defined(OS_CHROMEOS)
+  const int product_id = IDS_PRODUCT_OS_NAME;
+#else
+  const int product_id = IDS_PRODUCT_NAME;
+#endif
+
   static OptionsStringResource resources[] = {
     { "addButton", IDS_OPTIONS_SETTINGS_LANGUAGES_ADD_BUTTON },
     { "languages", IDS_OPTIONS_SETTINGS_LANGUAGES_LANGUAGES },
@@ -55,13 +62,13 @@ void LanguageOptionsHandlerCommon::GetLocalizedValues(
       IDS_OPTIONS_SETTINGS_LANGUAGES_ADD_LANGUAGE_INSTRUCTIONS },
     { "cannotBeDisplayedInThisLanguage",
       IDS_OPTIONS_SETTINGS_LANGUAGES_CANNOT_BE_DISPLAYED_IN_THIS_LANGUAGE,
-      IDS_PRODUCT_NAME },
+      product_id },
     { "isDisplayedInThisLanguage",
       IDS_OPTIONS_SETTINGS_LANGUAGES_IS_DISPLAYED_IN_THIS_LANGUAGE,
-      IDS_PRODUCT_NAME },
+      product_id },
     { "displayInThisLanguage",
       IDS_OPTIONS_SETTINGS_LANGUAGES_DISPLAY_IN_THIS_LANGUAGE,
-      IDS_PRODUCT_NAME },
+      product_id },
     { "restartRequired", IDS_OPTIONS_RELAUNCH_REQUIRED },
   // OS X uses the OS native spellchecker so no need for these strings.
 #if !defined(OS_MACOSX)
@@ -125,12 +132,19 @@ void LanguageOptionsHandlerCommon::GetLocalizedValues(
   localized_strings->SetBoolean("enableSpellingAutoCorrect",
                                 enable_spelling_auto_correct);
 
+  localized_strings->SetBoolean(
+      "enableMultilingualSpellChecker",
+      chrome::spellcheck_common::IsMultilingualSpellcheckEnabled());
+
   Profile* profile = Profile::FromWebUI(web_ui());
   PrefService* prefs = profile->GetPrefs();
   std::string default_target_language =
       TranslateService::GetTargetLanguage(prefs);
   localized_strings->SetString("defaultTargetLanguage",
                                default_target_language);
+  localized_strings->SetBoolean(
+      "enableMultilingualSpellChecker",
+      chrome::spellcheck_common::IsMultilingualSpellcheckEnabled());
 
   std::vector<std::string> languages;
   translate::TranslateDownloadManager::GetSupportedLanguages(&languages);
@@ -244,7 +258,6 @@ void LanguageOptionsHandlerCommon::SpellCheckLanguageChangeCallback(
     const base::ListValue* args) {
   const std::string language_code =
       base::UTF16ToASCII(ExtractStringValue(args));
-  CHECK(!language_code.empty());
   const std::string action = base::StringPrintf(
       "LanguageOptions_SpellCheckLanguageChange_%s", language_code.c_str());
   content::RecordComputedAction(action);

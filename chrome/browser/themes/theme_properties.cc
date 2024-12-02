@@ -9,6 +9,7 @@
 #include "base/strings/string_util.h"
 #include "chrome/browser/themes/browser_theme_pack.h"
 #include "grit/theme_resources.h"
+#include "ui/base/resource/material_design/material_design_controller.h"
 #include "ui/resources/grit/ui_resources.h"
 
 namespace {
@@ -96,6 +97,23 @@ const SkColor kDefaultColorToolbarStrokeInactive = SkColorSetRGB(163, 163, 163);
 #endif
 
 // ----------------------------------------------------------------------------
+// Defaults for layout properties which are not stored in the browser theme
+// pack. The array indices here are the values of
+// ui::MaterialDesignController::Mode, see
+// ui/base/resource/material_design/material_design_controller.h
+
+// The edge graphics have some built-in spacing/shadowing, so we have to adjust
+// our spacing to make it match.
+const int kToolbarViewLeftEdgeSpacing[] = {3, 4, 8};
+const int kToolbarViewRightEdgeSpacing[] = {2, 4, 8};
+
+// Ash doesn't use a rounded content area and its top edge has an extra shadow.
+const int kToolbarViewContentShadowHeightAsh[] = {2, 0, 0};
+
+// Non-ash uses a rounded content area with no shadow in the assets.
+const int kToolbarViewContentShadowHeight[] = {0, 0, 0};
+
+// ----------------------------------------------------------------------------
 
 // Strings used in alignment properties.
 const char kAlignmentCenter[] = "center";
@@ -145,13 +163,13 @@ int ThemeProperties::StringToAlignment(const std::string& alignment) {
   int alignment_mask = 0;
   for (std::vector<std::string>::iterator component(split.begin());
        component != split.end(); ++component) {
-    if (LowerCaseEqualsASCII(*component, kAlignmentTop))
+    if (base::LowerCaseEqualsASCII(*component, kAlignmentTop))
       alignment_mask |= ALIGN_TOP;
-    else if (LowerCaseEqualsASCII(*component, kAlignmentBottom))
+    else if (base::LowerCaseEqualsASCII(*component, kAlignmentBottom))
       alignment_mask |= ALIGN_BOTTOM;
-    else if (LowerCaseEqualsASCII(*component, kAlignmentLeft))
+    else if (base::LowerCaseEqualsASCII(*component, kAlignmentLeft))
       alignment_mask |= ALIGN_LEFT;
-    else if (LowerCaseEqualsASCII(*component, kAlignmentRight))
+    else if (base::LowerCaseEqualsASCII(*component, kAlignmentRight))
       alignment_mask |= ALIGN_RIGHT;
   }
   return alignment_mask;
@@ -159,11 +177,11 @@ int ThemeProperties::StringToAlignment(const std::string& alignment) {
 
 // static
 int ThemeProperties::StringToTiling(const std::string& tiling) {
-  if (LowerCaseEqualsASCII(tiling, kTilingRepeatX))
+  if (base::LowerCaseEqualsASCII(tiling, kTilingRepeatX))
     return REPEAT_X;
-  if (LowerCaseEqualsASCII(tiling, kTilingRepeatY))
+  if (base::LowerCaseEqualsASCII(tiling, kTilingRepeatY))
     return REPEAT_Y;
-  if (LowerCaseEqualsASCII(tiling, kTilingRepeat))
+  if (base::LowerCaseEqualsASCII(tiling, kTilingRepeat))
     return REPEAT;
   // NO_REPEAT is the default choice.
   return NO_REPEAT;
@@ -299,14 +317,23 @@ SkColor ThemeProperties::GetDefaultColor(int id) {
 
 // static
 int ThemeProperties::GetDefaultDisplayProperty(int id) {
+  int mode = ui::MaterialDesignController::GetMode();
   switch (id) {
-    case NTP_BACKGROUND_ALIGNMENT:
+    case ThemeProperties::NTP_BACKGROUND_ALIGNMENT:
       return kDefaultDisplayPropertyNTPAlignment;
-    case NTP_BACKGROUND_TILING:
+    case ThemeProperties::NTP_BACKGROUND_TILING:
       return kDefaultDisplayPropertyNTPTiling;
-    case NTP_LOGO_ALTERNATE:
+    case ThemeProperties::NTP_LOGO_ALTERNATE:
       return kDefaultDisplayPropertyNTPAlternateLogo;
+    case ThemeProperties::PROPERTY_TOOLBAR_VIEW_LEFT_EDGE_SPACING:
+      return kToolbarViewLeftEdgeSpacing[mode];
+    case ThemeProperties::PROPERTY_TOOLBAR_VIEW_RIGHT_EDGE_SPACING:
+      return kToolbarViewRightEdgeSpacing[mode];
+    case ThemeProperties::PROPERTY_TOOLBAR_VIEW_CONTENT_SHADOW_HEIGHT_ASH:
+      return kToolbarViewContentShadowHeightAsh[mode];
+    case ThemeProperties::PROPERTY_TOOLBAR_VIEW_CONTENT_SHADOW_HEIGHT:
+      return kToolbarViewContentShadowHeight[mode];
+    default:
+      return -1;
   }
-
-  return -1;
 }

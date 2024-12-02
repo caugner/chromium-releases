@@ -73,21 +73,6 @@ void OAuth2TokenFetcher::StartExchangeFromAuthCode(
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   auth_code_ = auth_code;
   signin_scoped_device_id_ = signin_scoped_device_id;
-  // Delay the verification if the network is not connected or on a captive
-  // portal.
-  const NetworkState* default_network =
-      NetworkHandler::Get()->network_state_handler()->DefaultNetwork();
-  if (!default_network ||
-      default_network->connection_state() == shill::kStatePortal) {
-    // If network is offline, defer the token fetching until online.
-    VLOG(1) << "Network is offline.  Deferring OAuth2 token fetch.";
-    BrowserThread::PostDelayedTask(
-        BrowserThread::UI, FROM_HERE,
-        base::Bind(&OAuth2TokenFetcher::StartExchangeFromAuthCode, AsWeakPtr(),
-                   auth_code, signin_scoped_device_id),
-        base::TimeDelta::FromMilliseconds(kRequestRestartDelay));
-    return;
-  }
   auth_fetcher_.StartAuthCodeForOAuth2TokenExchangeWithDeviceId(
       auth_code, signin_scoped_device_id);
 }
@@ -119,10 +104,7 @@ void OAuth2TokenFetcher::RetryOnError(const GoogleServiceAuthError& error,
                                       const base::Closure& task,
                                       const base::Closure& error_handler) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  if ((error.state() == GoogleServiceAuthError::CONNECTION_FAILED ||
-       error.state() == GoogleServiceAuthError::SERVICE_UNAVAILABLE ||
-       error.state() == GoogleServiceAuthError::REQUEST_CANCELED) &&
-      retry_count_ < kMaxRequestAttemptCount) {
+  if (error.IsTransientError() && retry_count_ < kMaxRequestAttemptCount) {
     retry_count_++;
     BrowserThread::PostDelayedTask(
         BrowserThread::UI, FROM_HERE, task,

@@ -26,6 +26,7 @@
 #include "components/favicon_base/favicon_callback.h"
 #include "components/favicon_base/favicon_usage_data.h"
 #include "components/history/core/browser/delete_directive_handler.h"
+#include "components/history/core/browser/history_types.h"
 #include "components/history/core/browser/keyword_id.h"
 #include "components/history/core/browser/typed_url_syncable_service.h"
 #include "components/keyed_service/core/keyed_service.h"
@@ -38,7 +39,6 @@ class HistoryQuickProviderTest;
 class HistoryURLProvider;
 class HistoryURLProviderTest;
 class InMemoryURLIndexTest;
-class PageUsageRequest;
 class SkBitmap;
 class SyncBookmarkDataTypeControllerTest;
 class TestingProfile;
@@ -82,12 +82,15 @@ class HistoryService : public syncer::SyncableService, public KeyedService {
   // Miscellaneous commonly-used types.
   typedef std::vector<PageUsageData*> PageUsageDataList;
 
+  // Callback for value asynchronously returned by TopHosts().
+  typedef base::Callback<void(const TopHostsList&)> TopHostsCallback;
+
   // Must call Init after construction. The empty constructor provided only for
   // unit tests. When using the full constructor, |history_client| may only be
   // null during testing, while |visit_delegate| may be null if the embedder use
   // another way to track visited links.
   HistoryService();
-  HistoryService(HistoryClient* history_client,
+  HistoryService(scoped_ptr<HistoryClient> history_client,
                  scoped_ptr<VisitDelegate> visit_delegate);
   ~HistoryService() override;
 
@@ -147,6 +150,20 @@ class HistoryService : public syncer::SyncableService, public KeyedService {
 
   // KeyedService:
   void Shutdown() override;
+
+  // Computes the |num_hosts| most-visited hostnames in the past 30 days and
+  // returns a list of those hosts paired with their visit counts. The following
+  // caveats apply:
+  // 1. Hostnames are stripped of their 'www.' prefix. Visits to foo.com and
+  //    www.foo.com are summed into the resultant foo.com entry.
+  // 2. Ports and schemes are ignored. Visits to http://foo.com/ and
+  //    https://foo.com:567/ are summed into the resultant foo.com entry.
+  // 3. If the history is abnormally large and diverse, the function will give
+  //    up early and return an approximate list.
+  // 4. Only http://, https://, and ftp:// URLs are counted.
+  //
+  // Note: Virtual needed for mocking.
+  virtual void TopHosts(int num_hosts, const TopHostsCallback& callback) const;
 
   // Navigation ----------------------------------------------------------------
 
@@ -440,14 +457,20 @@ class HistoryService : public syncer::SyncableService, public KeyedService {
       scoped_ptr<HistoryDBTask> task,
       base::CancelableTaskTracker* tracker);
 
-  // This callback is invoked when favicon change for urls.
-  typedef base::Callback<void(const std::set<GURL>&)> OnFaviconChangedCallback;
+  // Callback for when favicon data changes. Contains a std::set of page URLs
+  // (e.g. http://www.google.com) for which the favicon data has changed and the
+  // icon URL (e.g. http://www.google.com/favicon.ico) for which the favicon
+  // data has changed. It is valid to call the callback with non-empty
+  // "page URLs" and no "icon URL" and vice versa.
+  typedef base::Callback<void(const std::set<GURL>&, const GURL&)>
+      OnFaviconsChangedCallback;
 
   // Add a callback to the list. The callback will remain registered until the
-  // returned Subscription is destroyed. This must occurs before HistoryService
-  // is destroyed.
-  scoped_ptr<base::CallbackList<void(const std::set<GURL>&)>::Subscription>
-  AddFaviconChangedCallback(const OnFaviconChangedCallback& callback)
+  // returned Subscription is destroyed. The Subscription must be destroyed
+  // before HistoryService is destroyed.
+  scoped_ptr<base::CallbackList<void(const std::set<GURL>&,
+                                     const GURL&)>::Subscription>
+  AddFaviconsChangedCallback(const OnFaviconsChangedCallback& callback)
       WARN_UNUSED_RESULT;
 
   // Testing -------------------------------------------------------------------
@@ -518,16 +541,11 @@ class HistoryService : public syncer::SyncableService, public KeyedService {
   friend class favicon::FaviconService;
   friend class HistoryBackend;
   friend class HistoryQueryTest;
-  friend class HistoryOperation;
   friend class ::HistoryQuickProviderTest;
   friend class HistoryServiceTest;
   friend class ::HistoryURLProvider;
   friend class ::HistoryURLProviderTest;
   friend class ::InMemoryURLIndexTest;
-  template <typename Info, typename Callback>
-  friend class DownloadRequest;
-  friend class PageUsageRequest;
-  friend class RedirectRequest;
   friend class ::SyncBookmarkDataTypeControllerTest;
   friend class ::TestingProfile;
 
@@ -762,8 +780,13 @@ class HistoryService : public syncer::SyncableService, public KeyedService {
   // specified priority. The task will have ownership taken.
   void ScheduleTask(SchedulePriority priority, const base::Closure& task);
 
-  // Invokes all callback registered by AddFaviconChangedCallback.
-  void NotifyFaviconChanged(const std::set<GURL>& changed_favicons);
+  // Called when the favicons for the given page URLs (e.g.
+  // http://www.google.com) and the given icon URL (e.g.
+  // http://www.google.com/favicon.ico) have changed. It is valid to call
+  // NotifyFaviconsChanged() with non-empty |page_urls| and an empty |icon_url|
+  // and vice versa.
+  void NotifyFaviconsChanged(const std::set<GURL>& page_urls,
+                             const GURL& icon_url);
 
   base::ThreadChecker thread_checker_;
 
@@ -785,20 +808,19 @@ class HistoryService : public syncer::SyncableService, public KeyedService {
   // TODO(mrossetti): Consider changing ownership. See http://crbug.com/138321
   scoped_ptr<InMemoryHistoryBackend> in_memory_backend_;
 
+  // The history client, may be null when testing.
+  scoped_ptr<HistoryClient> history_client_;
+
   // The history service will inform its VisitDelegate of URLs recorded and
   // removed from the history database. This may be null during testing.
   scoped_ptr<VisitDelegate> visit_delegate_;
-
-  // The history client, may be null when testing. The object should otherwise
-  // outlive |HistoryService|.
-  HistoryClient* history_client_;
 
   // Has the backend finished loading? The backend is loaded once Init has
   // completed.
   bool backend_loaded_;
 
-  ObserverList<HistoryServiceObserver> observers_;
-  base::CallbackList<void(const std::set<GURL>&)>
+  base::ObserverList<HistoryServiceObserver> observers_;
+  base::CallbackList<void(const std::set<GURL>&, const GURL&)>
       favicon_changed_callback_list_;
 
   DeleteDirectiveHandler delete_directive_handler_;

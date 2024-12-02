@@ -14,16 +14,21 @@
 #include "net/base/net_errors.h"
 #include "net/cert/cert_status_flags.h"
 #include "net/cert/cert_verifier.h"
+#include "net/cert/cert_verify_result.h"
 #include "net/cert/x509_certificate.h"
 #include "net/http/transport_security_state.h"
-#include "net/socket/client_socket_factory.h"
 #include "net/socket/client_socket_handle.h"
 #include "net/socket/ssl_client_socket.h"
-#include "net/socket/ssl_client_socket_openssl.h"
 #include "net/socket/ssl_server_socket.h"
 #include "net/ssl/ssl_config_service.h"
 #include "remoting/base/rsa_key_pair.h"
 #include "remoting/protocol/auth_util.h"
+
+#if defined(OS_NACL)
+#include "net/socket/ssl_client_socket_openssl.h"
+#else
+#include "net/socket/client_socket_factory.h"
+#endif
 
 namespace remoting {
 namespace protocol {
@@ -138,6 +143,7 @@ void SslHmacChannelAuthenticator::SecureAndAuthenticate(
     ssl_config.cert_io_enabled = false;
     ssl_config.rev_checking_enabled = false;
     ssl_config.allowed_bad_certs.push_back(cert_and_status);
+    ssl_config.require_ecdhe = false;
 
     net::HostPortPair host_and_port(kSslFakeHostName, 0);
     net::SSLClientSocketContext context;
@@ -174,7 +180,8 @@ bool SslHmacChannelAuthenticator::is_ssl_server() {
 
 void SslHmacChannelAuthenticator::OnConnected(int result) {
   if (result != net::OK) {
-    LOG(WARNING) << "Failed to establish SSL connection";
+    LOG(WARNING) << "Failed to establish SSL connection.  Error: "
+                 << net::ErrorToString(result);
     NotifyError(result);
     return;
   }

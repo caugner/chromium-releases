@@ -16,6 +16,7 @@
 #include "base/prefs/pref_service.h"
 #include "base/run_loop.h"
 #include "base/scoped_observer.h"
+#include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
@@ -48,6 +49,8 @@
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/safe_browsing/safe_browsing_util.h"
 #include "chrome/browser/safe_browsing/test_database_manager.h"
+#include "chrome/browser/task_management/providers/web_contents/web_contents_tags_manager.h"
+#include "chrome/browser/task_management/task_management_browsertest_util.h"
 #include "chrome/browser/task_manager/task_manager.h"
 #include "chrome/browser/task_manager/task_manager_browsertest_util.h"
 #include "chrome/browser/ui/browser.h"
@@ -4079,5 +4082,67 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTestWithNaCl,
   ASSERT_TRUE(display_test_result);
 }
 #endif  // !defined(DISABLE_NACL)
+
+#if defined(ENABLE_TASK_MANAGER)
+
+namespace {
+
+base::string16 GetPrerenderTitlePrefix() {
+  return l10n_util::GetStringFUTF16(IDS_TASK_MANAGER_PRERENDER_PREFIX,
+                                    base::string16());
+}
+
+const std::vector<task_management::WebContentsTag*>& GetTrackedTags() {
+  return task_management::WebContentsTagsManager::GetInstance()->
+      tracked_tags();
+}
+
+// Tests the correct recording of tags for the prerender WebContents.
+IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, TaskManagementTagsBasic) {
+  // Browser tests start with a single tab.
+  EXPECT_EQ(1U, GetTrackedTags().size());
+
+  // Start prerendering a page and make sure it's correctly tagged.
+  PrerenderTestURL("files/prerender/prerender_page.html", FINAL_STATUS_USED, 1);
+  EXPECT_EQ(2U, GetTrackedTags().size());
+
+  // Swap in the prerendered content and make sure its tag is removed.
+  NavigateToDestURL();
+  EXPECT_EQ(1U, GetTrackedTags().size());
+}
+
+// Tests that the task manager will be provided by tasks that correspond to
+// prerendered WebContents.
+IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, TaskManagementTasksProvided) {
+  task_management::MockWebContentsTaskManager task_manager;
+  // Browser tests start with a single tab.
+  EXPECT_EQ(1U, GetTrackedTags().size());
+
+  task_manager.StartObserving();
+
+  // The pre-existing tab is provided.
+  EXPECT_EQ(1U, task_manager.tasks().size());
+
+  // Start prerendering a page.
+  PrerenderTestURL("files/prerender/prerender_page.html", FINAL_STATUS_USED, 1);
+
+  EXPECT_EQ(2U, GetTrackedTags().size());
+  ASSERT_EQ(2U, task_manager.tasks().size());
+
+  const task_management::Task* task = task_manager.tasks().back();
+  EXPECT_EQ(task_management::Task::RENDERER, task->GetType());
+  const base::string16 title = task->title();
+  const base::string16 expected_prefix = GetPrerenderTitlePrefix();
+  EXPECT_TRUE(base::StartsWith(title,
+                               expected_prefix,
+                               base::CompareCase::INSENSITIVE_ASCII));
+
+  NavigateToDestURL();
+  EXPECT_EQ(1U, task_manager.tasks().size());
+}
+
+}  // namespace
+
+#endif  // defined(ENABLE_TASK_MANAGER)
 
 }  // namespace prerender
